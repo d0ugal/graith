@@ -7,13 +7,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/git"
 	"github.com/fsnotify/fsnotify"
 )
 
 // prrefwatch.go accelerates PR detection. The PR/CI watcher (prwatch.go) resolves
 // each session's PR by polling gh on a timer, so a freshly pushed branch is only
-// noticed on the next tick (up to prWatchTick plus batch-cap/negative-cache
+// noticed on the next tick (up to the base tick plus batch-cap/negative-cache
 // latency). This watcher puts a cheap fsnotify watch on each running session's
 // git refs and, when a push/commit/checkout touches them, sends the session ID to
 // the PR-watch loop's kick channel — which polls that session immediately. The
@@ -21,15 +22,10 @@ import (
 // costs latency, never awareness. See
 // docs/design/2026-07-14-pr-ref-watch-design.md.
 
-const (
-	// prRefWatchReconcileTick is how often the watcher set is reconciled against
-	// live sessions (mirrors filewatch's fileWatchReconcileTick).
-	prRefWatchReconcileTick = 2 * time.Second
-
-	// prRefWatchDebounce coalesces the burst of ref/reflog writes a single
-	// push/commit/checkout produces into one kick.
-	prRefWatchDebounce = 750 * time.Millisecond
-)
+// The reconcile cadence and per-watch debounce are now [pr_watch.advanced] config
+// knobs (ref_reconcile_interval / ref_debounce), resolved through the
+// config.PRWatchConfig accessors. The reconcile cadence is read once when the loop
+// starts; the debounce is snapshotted onto each watcher when it is created.
 
 type prRefWatchState struct {
 	mu       sync.Mutex
@@ -48,6 +44,10 @@ type prRefWatcher struct {
 	worktree  string
 	watcher   *fsnotify.Watcher
 	cancel    context.CancelFunc
+	// debounceDur snapshots pr_watch.advanced.ref_debounce at creation; a
+	// non-positive value (e.g. a bare test-constructed watcher) falls back to the
+	// config default in notePRRefChange.
+	debounceDur time.Duration
 
 	bmu      sync.Mutex
 	debounce *time.Timer
@@ -62,7 +62,9 @@ func (sm *SessionManager) RunPRRefWatchLoop(ctx context.Context) {
 		return // accelerator not wired (e.g. a bare test SessionManager)
 	}
 
-	ticker := time.NewTicker(prRefWatchReconcileTick)
+	// Reconcile cadence is read once at loop start; changing ref_reconcile_interval
+	// takes effect on the next daemon (re)start.
+	ticker := time.NewTicker(sm.Config().PRWatch.RefReconcileIntervalDuration())
 	defer ticker.Stop()
 
 	for {
@@ -174,7 +176,13 @@ func (sm *SessionManager) createPRRefWatcher(ctx context.Context, id, worktree s
 	}
 
 	wctx, cancel := context.WithCancel(ctx)
-	w := &prRefWatcher{sessionID: id, worktree: worktree, watcher: watcher, cancel: cancel}
+	w := &prRefWatcher{
+		sessionID:   id,
+		worktree:    worktree,
+		watcher:     watcher,
+		cancel:      cancel,
+		debounceDur: sm.Config().PRWatch.RefDebounceDuration(),
+	}
 
 	sm.prRefWatch.mu.Lock()
 	// A concurrent reconcile may have created one already; keep the existing.
@@ -321,7 +329,12 @@ func (sm *SessionManager) notePRRefChange(w *prRefWatcher) {
 		w.debounce.Stop()
 	}
 
-	w.debounce = time.AfterFunc(prRefWatchDebounce, func() {
+	dur := w.debounceDur
+	if dur <= 0 {
+		dur = (config.PRWatchConfig{}).RefDebounceDuration()
+	}
+
+	w.debounce = time.AfterFunc(dur, func() {
 		// Re-check canceled: the timer may fire after teardown stopped it (Stop
 		// returns false once the callback is already scheduled). Mirrors filewatch's
 		// watchFire guard — a post-teardown kick is otherwise harmless (pollKicked

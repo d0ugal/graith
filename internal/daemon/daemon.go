@@ -157,7 +157,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		orchestratorExitCh: make(chan string, 4),
 		lastInboxNotifyAt:  make(map[string]time.Time),
 		silentWarned:       make(map[string]bool),
-		prWatch:            newPRWatchState(),
+		prWatch:            newPRWatchState(cfg.PRWatch.KickChannelSize()),
 		prRefWatch:         newPRRefWatchState(),
 		triggers:           newTriggerState(),
 		tokens:             newTokenCache(),

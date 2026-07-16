@@ -205,20 +205,20 @@ func TestPRRefEligibleSessions_Excludes(t *testing.T) {
 	}
 }
 
-// TestAllowKick_Cooldown: a second kick within prKickCooldown is suppressed.
+// TestAllowKick_Cooldown: a second kick within the kick cooldown is suppressed.
 func TestAllowKick_Cooldown(t *testing.T) {
 	sm := newTestSessionManager(t)
 
-	if !sm.allowKick("braw1") {
+	if !sm.allowKick(&config.PRWatchConfig{}, "braw1") {
 		t.Fatal("first kick should be allowed")
 	}
 
-	if sm.allowKick("braw1") {
+	if sm.allowKick(&config.PRWatchConfig{}, "braw1") {
 		t.Error("second kick within cooldown should be suppressed")
 	}
 
 	// A different session is independent.
-	if !sm.allowKick("canny2") {
+	if !sm.allowKick(&config.PRWatchConfig{}, "canny2") {
 		t.Error("a different session's first kick should be allowed")
 	}
 }
@@ -413,7 +413,7 @@ func TestNotePRRefChange_CanceledSuppressesKick(t *testing.T) {
 	select {
 	case id := <-sm.prWatch.kick:
 		t.Errorf("canceled watcher should not kick, got %q", id)
-	case <-time.After(prRefWatchDebounce + 500*time.Millisecond):
+	case <-time.After((config.PRWatchConfig{}).RefDebounceDuration() + 500*time.Millisecond):
 	}
 }
 
@@ -424,11 +424,11 @@ func TestKickPRWatch_DropClearsNextPoll(t *testing.T) {
 	sm := newPRWatchSM()
 
 	// Saturate the kick channel.
-	for range prKickChanCap {
+	for range (config.PRWatchConfig{}).KickChannelSize() {
 		sm.prWatch.kick <- "filler"
 	}
 
-	// Park the session far in the future (as prNoPRNegCache would).
+	// Park the session far in the future (as the no-PR negative cache would).
 	sm.prWatch.mu.Lock()
 	sm.prWatch.nextPoll["braw1"] = time.Now().Add(time.Hour)
 	sm.prWatch.mu.Unlock()
