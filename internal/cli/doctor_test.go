@@ -382,6 +382,58 @@ func checkResults(dc *doctorContext, level string) []string {
 	return out
 }
 
+func TestRenderPurgeDiagnostic(t *testing.T) {
+	oldOut := out
+	t.Cleanup(func() { out = oldOut })
+
+	t.Run("scheduled", func(t *testing.T) {
+		var buf bytes.Buffer
+		out = output.NewWithWriter(false, &buf)
+
+		dc := newDoctorContext()
+		dc.renderPurge(&protocol.PurgeDiagnostic{
+			StartupDelay: "45s",
+			Interval:     "7m0s",
+			LastSweep:    "2026-07-16T21:00:00Z",
+			NextSweep:    "2026-07-16T21:07:00Z",
+		})
+
+		got := buf.String()
+		for _, want := range []string{
+			"Purge",
+			"Startup delay: 45s",
+			"Sweep interval: 7m0s",
+			"Last sweep: 2026-07-16T21:00:00Z",
+			"Next sweep: 2026-07-16T21:07:00Z",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("plain purge diagnostics missing %q:\n%s", want, got)
+			}
+		}
+
+		if len(dc.checks) != 0 {
+			t.Fatalf("renderPurge added structured checks %v; --json compatibility requires DiagnosticsMsg.Purge to remain the sole structured surface", dc.checks)
+		}
+	})
+
+	t.Run("not yet run", func(t *testing.T) {
+		var buf bytes.Buffer
+		out = output.NewWithWriter(false, &buf)
+
+		newDoctorContext().renderPurge(&protocol.PurgeDiagnostic{
+			StartupDelay: "30s",
+			Interval:     "10m0s",
+		})
+
+		got := buf.String()
+		for _, want := range []string{"Last sweep: not yet run", "Next sweep: after startup delay"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("pre-sweep purge diagnostics missing %q:\n%s", want, got)
+			}
+		}
+	})
+}
+
 // TestCheckApprovalsBackendFailClosed verifies gr doctor surfaces the reason an
 // unenforceable approvals backend would fail closed at session-create — the fix
 // for issue #738, where that reason was buried in daemon.log and every new

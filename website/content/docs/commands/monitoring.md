@@ -69,7 +69,7 @@ List sessions waiting for approval.
 
 ### `gr doctor` (alias: `doc`)
 
-Run health checks and diagnostics. Checks daemon status, safehouse availability, orphaned worktrees, oversized scrollback files, and stale PID files.
+Run health checks and diagnostics. Checks daemon status, safehouse availability, orphaned worktrees, oversized scrollback files, and stale PID files. The plain report also shows the soft-delete purge startup delay and interval, plus whether a sweep has run and its last/next run times. Before the first sweep it reports `not yet run` and that the next sweep follows the startup delay.
 
 By default `gr doctor` avoids walking the data dir to measure on-disk sizes — that walk can take tens of seconds on a large install (worktrees full of `node_modules` and `.git` objects), so it's opt-in. Pass `--disk` to report the size of the data dir, tmp repos, and orphaned worktrees. When it finds leftover artifacts whose size is worth knowing (orphaned worktrees, a legacy directory), the default run recommends re-running with `--disk`. In `--json` output, the `disk_measured` field indicates whether sizes were computed.
 

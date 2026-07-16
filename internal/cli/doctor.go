@@ -134,6 +134,10 @@ var doctorCmd = &cobra.Command{
 			return out.JSON(report)
 		}
 
+		if diag != nil {
+			dc.renderPurge(diag.Purge)
+		}
+
 		if dc.ok {
 			out.Printf("\nAll checks passed.\n")
 		} else {
@@ -158,6 +162,32 @@ var doctorCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+// renderPurge adds the daemon's purge cadence and sweep state to the
+// human-readable report. It deliberately does not append doctorCheck entries:
+// DiagnosticsMsg.Purge is already the stable structured representation, so
+// adding synthetic checks would change the existing --json contract (#1312).
+func (dc *doctorContext) renderPurge(purge *protocol.PurgeDiagnostic) {
+	if purge == nil {
+		return
+	}
+
+	dc.section("Purge")
+	out.Printf("  Startup delay: %s\n", purge.StartupDelay)
+	out.Printf("  Sweep interval: %s\n", purge.Interval)
+
+	if purge.LastSweep == "" {
+		out.Printf("  Last sweep: not yet run\n")
+	} else {
+		out.Printf("  Last sweep: %s\n", purge.LastSweep)
+	}
+
+	if purge.NextSweep == "" {
+		out.Printf("  Next sweep: after startup delay\n")
+	} else {
+		out.Printf("  Next sweep: %s\n", purge.NextSweep)
+	}
 }
 
 // daemonReachability classifies the outcome of trying to reach the daemon over
