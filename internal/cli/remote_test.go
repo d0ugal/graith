@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -56,6 +57,23 @@ func setOutBufForRemote(t *testing.T, jsonMode bool) *bytes.Buffer {
 	out = output.NewWithWriter(jsonMode, &buf)
 
 	return &buf
+}
+
+// TestRemotePairPortDefault verifies the `gr remote pair --port` flag defaults
+// to the centralized config.DefaultRemotePort constant rather than a duplicated
+// literal (#1235).
+func TestRemotePairPortDefault(t *testing.T) {
+	registerCommands()
+
+	flag := remotePairCmd.Flags().Lookup("port")
+	if flag == nil {
+		t.Fatal("remote pair command has no --port flag")
+	}
+
+	want := strconv.Itoa(config.DefaultRemotePort)
+	if flag.DefValue != want {
+		t.Errorf("--port default = %q, want config.DefaultRemotePort (%q)", flag.DefValue, want)
+	}
 }
 
 // TestRemoteListEmpty verifies the list command prints the pairing hint when no

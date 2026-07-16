@@ -1,4 +1,5 @@
 import SwiftUI
+import GraithProtocol
 import GraithRemoteKit
 
 /// The "Add Host" pairing sheet: drives ``PairingCoordinator`` through the
@@ -15,7 +16,7 @@ struct AddHostSheet: View {
 
     @State private var label = ""
     @State private var magicDNSName = ""
-    @State private var port = "4823"
+    @State private var port = String(GraithTransport.defaultRemotePort)
     @State private var deviceLabel = ProcessInfo.processInfo.hostName
     @State private var profile = ""
 
@@ -76,7 +77,7 @@ struct AddHostSheet: View {
                 pairingTextField("graith-ben.tailXXXX.ts.net", text: $magicDNSName)
             }
             FormField(label: "Port") {
-                pairingTextField("4823", text: $port)
+                pairingTextField(String(GraithTransport.defaultRemotePort), text: $port)
             }
             FormField(label: "This device's name (shown in gr pair list)") {
                 pairingTextField("my-mac", text: $deviceLabel)
@@ -109,7 +110,7 @@ struct AddHostSheet: View {
     }
 
     private func startPairing() {
-        let portNumber = UInt16(port) ?? 4823
+        let portNumber = UInt16(port) ?? GraithTransport.defaultRemotePort
         Task {
             await pairing.pair(
                 label: label,

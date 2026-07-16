@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -241,7 +242,7 @@ func runRemoteAttach(rh *client.RemoteHost, signer ed25519.PrivateKey, sessionAr
 
 // registerRemoteCmd registers this command on rootCmd. Called from registerCommands.
 func registerRemoteCmd() {
-	remotePairCmd.Flags().IntVar(&remotePairPort, "port", 4823, "remote daemon port")
+	remotePairCmd.Flags().IntVar(&remotePairPort, "port", config.DefaultRemotePort, "remote daemon port")
 	remotePairCmd.Flags().StringVar(&remotePairProfile, "profile", "", "remote daemon profile (if it runs a named profile)")
 	remotePairCmd.Flags().StringVar(&remotePairLabel, "label", "", "device label shown to the remote human (default: hostname)")
 

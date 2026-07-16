@@ -44,7 +44,7 @@ public struct Host: Codable, Identifiable, Hashable, Sendable {
         kind: Kind,
         socketPath: String? = nil,
         magicDNSName: String? = nil,
-        port: UInt16 = 4823,
+        port: UInt16 = GraithTransport.defaultRemotePort,
         daemonProfile: String = "",
         tlsPinSPKI: String = "",
         deviceID: String = "",
@@ -79,7 +79,7 @@ public struct Host: Codable, Identifiable, Hashable, Sendable {
         kind = try c.decodeIfPresent(Kind.self, forKey: .kind) ?? .remote
         socketPath = try c.decodeIfPresent(String.self, forKey: .socketPath)
         magicDNSName = try c.decodeIfPresent(String.self, forKey: .magicDNSName)
-        port = try c.decodeIfPresent(UInt16.self, forKey: .port) ?? 4823
+        port = try c.decodeIfPresent(UInt16.self, forKey: .port) ?? GraithTransport.defaultRemotePort
         daemonProfile = try c.decodeIfPresent(String.self, forKey: .daemonProfile) ?? ""
         tlsPinSPKI = try c.decodeIfPresent(String.self, forKey: .tlsPinSPKI) ?? ""
         deviceID = try c.decodeIfPresent(String.self, forKey: .deviceID) ?? ""

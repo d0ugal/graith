@@ -15,7 +15,7 @@ struct PairingView: View {
 
     @State private var label = ""
     @State private var magicDNSName = ""
-    @State private var port = "4823"
+    @State private var port = String(GraithTransport.defaultRemotePort)
     @State private var deviceLabel = PairingView.defaultDeviceLabel
 
     // Observe the shared pairing coordinator.

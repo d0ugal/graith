@@ -111,7 +111,7 @@ public final class PairingCoordinator: ObservableObject {
         hostID: String = UUID().uuidString,
         label: String,
         magicDNSName: String,
-        port: UInt16 = 4823,
+        port: UInt16 = GraithTransport.defaultRemotePort,
         profile: String = "",
         deviceLabel: String
     ) async {
