@@ -186,4 +186,23 @@ final class TerminalScrollControllerTests: XCTestCase {
         let thumb = TerminalScrollController.thumb(metrics: m, trackLength: 200, minThumb: 36)
         XCTAssertEqual(thumb?.length ?? 0, 36, accuracy: 0.001, "a tiny fraction still shows a grabbable thumb")
     }
+
+    func testConfigInitMapsTunablesAndKeepsRubberBandInvariant() {
+        // The config-based convenience init (#1255) threads the user-tunable
+        // scroll physics through, while the rubber-band constant stays at its
+        // platform-matching default (a documented invariant, not from config).
+        let config = TerminalGestureConfig(
+            scrollFriction: 6,
+            scrollMomentumCutoff: 40,
+            scrollSpringStiffness: 300,
+            scrollSpringDamping: 30)
+        let c = TerminalScrollController(config: config, cellHeight: 20)
+        XCTAssertEqual(c.friction, 6)
+        XCTAssertEqual(c.momentumCutoff, 40)
+        XCTAssertEqual(c.springStiffness, 300)
+        XCTAssertEqual(c.springDamping, 30)
+        XCTAssertEqual(c.cellHeight, 20)
+        XCTAssertEqual(c.rubberBandConstant, 0.55, accuracy: 0.0001,
+                       "rubber-band constant is an invariant, not sourced from config")
+    }
 }

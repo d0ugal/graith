@@ -21,7 +21,10 @@ import GraithSessionKit
 public final class BaseTerminalUIView: UIView {
     private let viewModel: TerminalAttachViewModel
     private let renderer: TerminalRenderer
-    private let accessory = KeyboardAccessoryView()
+    private let accessory: KeyboardAccessoryView
+    /// User-tunable gesture physics (issue #1255): drag thresholds, momentum /
+    /// spring feel, auto-repeat timing, and the selection long-press delay.
+    private let gestureConfig: TerminalGestureConfig
 
     private var displayLink: CADisplayLink?
 
@@ -42,7 +45,7 @@ public final class BaseTerminalUIView: UIView {
 
     /// Pure physics/state for two-finger scrollback scrolling: momentum, bounce,
     /// and the indicator thumb. UIKit glue below feeds it gestures + frame ticks.
-    private var scroll = TerminalScrollController()
+    private var scroll: TerminalScrollController
     /// Last touch point of a scroll gesture, reused as the surface position for
     /// forwarded mouse-wheel events (TUI apps) and momentum frames.
     private var lastScrollPoint: CGPoint = .zero
@@ -54,9 +57,13 @@ public final class BaseTerminalUIView: UIView {
     private let jumpToBottomButton = UIButton(type: .system)
     private var jumpButtonVisible = false
 
-    public init(viewModel: TerminalAttachViewModel, renderer: TerminalRenderer) {
+    public init(viewModel: TerminalAttachViewModel, renderer: TerminalRenderer,
+                gestureConfig: TerminalGestureConfig = TerminalGestureConfig(userDefaults: .standard)) {
         self.viewModel = viewModel
         self.renderer = renderer
+        self.gestureConfig = gestureConfig
+        self.accessory = KeyboardAccessoryView(gestureConfig: gestureConfig)
+        self.scroll = TerminalScrollController(config: gestureConfig)
         super.init(frame: .zero)
         layer.addSublayer(renderer.layer)
         backgroundColor = .black
@@ -118,6 +125,7 @@ public final class BaseTerminalUIView: UIView {
         // holds the view weakly, so the view can deallocate and its `deinit`
         // tears the link down even if the integrator never calls `stop()`.
         let link = CADisplayLink(target: DisplayLinkProxy(self), selector: #selector(DisplayLinkProxy.tick))
+        // Physical invariant: the hardware frame cadence, not a preference.
         link.preferredFramesPerSecond = 60
         link.add(to: .main, forMode: .common)
         displayLink = link
@@ -131,6 +139,8 @@ public final class BaseTerminalUIView: UIView {
     @objc fileprivate func tick() {
         if scroll.isSettling, let link = displayLink {
             // CADisplayLink's frame interval; clamp so a stall doesn't fling.
+            // Physical invariant (not tunable): the 0.05s ceiling is a stability
+            // guard against a dropped frame injecting a huge dt, not a feel knob.
             let dt = CGFloat(min(0.05, max(0, link.targetTimestamp - link.timestamp)))
             stepScrollPhysics(dt: dt)
         }
@@ -194,12 +204,15 @@ public final class BaseTerminalUIView: UIView {
         // reserved for tap-to-focus and long-press selection, matching the iOS
         // convention where one finger interacts with content and two scroll it.
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handleScroll))
+        // Physical invariant: exactly two fingers scroll (one is reserved for
+        // tap-to-focus and long-press selection) — this is the gesture's shape,
+        // not a feel knob, so it stays constant.
         pan.minimumNumberOfTouches = 2
         pan.maximumNumberOfTouches = 2
         addGestureRecognizer(pan)
 
         let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleSelection))
-        longPress.minimumPressDuration = 0.3
+        longPress.minimumPressDuration = gestureConfig.selectionLongPressDuration
         addGestureRecognizer(longPress)
     }
 

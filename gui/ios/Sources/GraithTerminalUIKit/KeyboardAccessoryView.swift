@@ -39,13 +39,14 @@ final class KeyboardAccessoryView: UIView {
     // translations are measured from the touch-down point regardless of where on
     // the key it began. A display link ticks while the finger is held so a
     // stationary hold still repeats — `.changed` alone fires only on movement.
-    private var spaceTracker = SpaceDragTracker()
+    private var spaceTracker: SpaceDragTracker
     private var spaceDragStart: CGPoint = .zero
     private var spaceDragTranslation: CGPoint = .zero
     private var spaceRepeatLink: CADisplayLink?
     private let arrowHaptics = UIImpactFeedbackGenerator(style: .light)
 
-    init() {
+    init(gestureConfig: TerminalGestureConfig = .default) {
+        self.spaceTracker = SpaceDragTracker(config: gestureConfig)
         super.init(frame: CGRect(x: 0, y: 0, width: 0, height: 44))
         autoresizingMask = .flexibleWidth
         backgroundColor = .secondarySystemBackground
@@ -138,6 +139,8 @@ final class KeyboardAccessoryView: UIView {
         key.accessibilityLabel = "Space (drag for arrow keys)"
 
         let drag = UILongPressGestureRecognizer(target: self, action: #selector(handleSpaceDrag))
+        // Physical invariant (not tunable): 0 = fire on touch-down so tap and
+        // drag share one recognizer; a non-zero delay would break the tap path.
         drag.minimumPressDuration = 0
         key.addGestureRecognizer(drag)
         return key

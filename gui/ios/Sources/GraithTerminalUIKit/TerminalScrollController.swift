@@ -69,6 +69,17 @@ public struct TerminalScrollController {
         self.rubberBandConstant = rubberBandConstant
     }
 
+    /// Build from the user-tunable `TerminalGestureConfig` (issue #1255). The
+    /// rubber-band constant is a platform-fidelity invariant, so it keeps its
+    /// `UIScrollView`-matching default and is not sourced from config.
+    public init(config: TerminalGestureConfig, cellHeight: CGFloat = 16) {
+        self.init(cellHeight: cellHeight,
+                  friction: config.scrollFriction,
+                  momentumCutoff: config.scrollMomentumCutoff,
+                  springStiffness: config.scrollSpringStiffness,
+                  springDamping: config.scrollSpringDamping)
+    }
+
     /// True while a momentum or spring animation is running and the caller should
     /// keep ticking the display link.
     public var isSettling: Bool { phase == .momentum || phase == .springing }
@@ -161,6 +172,8 @@ public struct TerminalScrollController {
             let accel = -springStiffness * overscroll - springDamping * springVelocity
             springVelocity += accel * dt
             overscroll += springVelocity * dt
+            // Physical invariant (not tunable): "close enough to rest" epsilons
+            // that end the bounce — a convergence detail, not a feel knob.
             if abs(overscroll) < 0.5, abs(springVelocity) < 8 {
                 overscroll = 0
                 springVelocity = 0
@@ -202,6 +215,9 @@ public struct TerminalScrollController {
     /// `trackLength` points, or `nil` when there is no history to scroll. Returns
     /// the thumb's `offset` from the top of the track and its `length`, both in
     /// points, clamped so a tiny viewport still shows a grabbable thumb.
+    ///
+    /// `minThumb` is a physical invariant (not user-tunable): the smallest
+    /// grabbable indicator, a touch-target floor rather than a feel knob.
     public static func thumb(metrics: ScrollMetrics,
                              trackLength: CGFloat,
                              minThumb: CGFloat = 36) -> (offset: CGFloat, length: CGFloat)? {
