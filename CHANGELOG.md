@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.68.8](https://github.com/d0ugal/graith/compare/v0.68.7...v0.68.8) (2026-07-16)
+
+
+### Features
+
+* **codex:** pass --model and typed per-session options to Codex ([#1186](https://github.com/d0ugal/graith/issues/1186)) ([3fa1f20](https://github.com/d0ugal/graith/commit/3fa1f20d6c564518f82fc719c79d4bf4c996730a))
+
+
+### Bug Fixes
+
+* **codex:** address review findings for [#1186](https://github.com/d0ugal/graith/issues/1186) ([b595d11](https://github.com/d0ugal/graith/commit/b595d11a35b63d52d5bf6e27fb3b2e934e32b484))
+* **output:** keep JSON-mode error output JSON-only ([469304c](https://github.com/d0ugal/graith/commit/469304ca0bd5450a271daa128bee462d3aa64db2))
+
+
+### Code Refactoring
+
+* **lint:** enable dupl for test files and dedup findings ([7d50642](https://github.com/d0ugal/graith/commit/7d50642370a05967e1268d027c68b09ce86131af)), closes [#1201](https://github.com/d0ugal/graith/issues/1201)
+
+
+### Dependencies
+
+* **lint:** enable 13 more golangci-lint linters and fix all findings ([095c668](https://github.com/d0ugal/graith/commit/095c6689b7eb31b771d05c517653da895b9dfa47))
+
 ## [0.68.7](https://github.com/d0ugal/graith/compare/v0.68.6...v0.68.7) (2026-07-16)
 
 
