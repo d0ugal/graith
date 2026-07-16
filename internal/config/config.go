@@ -1733,10 +1733,66 @@ type StatusBar struct {
 	Position string `toml:"position"`
 }
 
+// Messages is the [messages] block. It governs the message-log subsystem: the
+// cleanup retention (MaxAge/MaxPerStream) plus the operational limits made
+// configurable by issue #1249 — conversation paging bounds, the jail listing
+// cap, the pub/sub subscriber buffer, and the SQLite busy/operation timeout.
+//
+// SubscriberBuffer and BusyTimeout are fixed at store-open time, so a change to
+// either takes effect only on daemon restart. The conversation paging bounds
+// and the jail cap are read per-request, so they apply on reload.
 type Messages struct {
 	MaxAge       string `toml:"max_age"`
 	MaxPerStream int    `toml:"max_per_stream"`
+	// ConversationPageSize is the page size applied when a msg_conversation
+	// request supplies a non-positive limit. Values < 1 fall back to the default
+	// (MessagesConversationPageSizeDefault). Reloadable.
+	ConversationPageSize int `toml:"conversation_page_size"`
+	// ConversationMaxLimit is the hard cap on how many messages a single
+	// msg_conversation request may sort, bounding a local perf/DoS footgun. Values
+	// < 1 fall back to the default (MessagesConversationMaxLimitDefault); a value
+	// above MessagesConversationMaxLimitCeiling is rejected at load. Reloadable.
+	ConversationMaxLimit int `toml:"conversation_max_limit"`
+	// JailListLimit caps how many quarantined comments a jail listing returns
+	// (newest first), so the query can't force an unbounded allocation. Values < 1
+	// fall back to the default (MessagesJailListLimitDefault); a value above
+	// MessagesJailListLimitCeiling is rejected at load. Reloadable.
+	JailListLimit int `toml:"jail_list_limit"`
+	// SubscriberBuffer is the per-subscriber pub/sub channel capacity. A slow
+	// reader that fills its buffer drops further messages until it drains (the
+	// stored log stays authoritative), so this is a load-tuning knob for
+	// installations with bursty fan-out. Values < 1 fall back to the default
+	// (MessagesSubscriberBufferDefault); a value above
+	// MessagesSubscriberBufferCeiling is rejected at load. Restart-only.
+	SubscriberBuffer int `toml:"subscriber_buffer"`
+	// BusyTimeout is the SQLite busy_timeout for the messages database — how long
+	// a contended operation waits for the lock before erroring. It is graith's
+	// database operation deadline. Empty, unparseable, or non-positive uses the
+	// default (MessagesBusyTimeoutDefault); a value above MessagesBusyTimeoutCeiling
+	// is rejected at load. Restart-only.
+	BusyTimeout string `toml:"busy_timeout"`
 }
+
+// Messages operational-limit defaults, mirroring the fixed literals that
+// governed the message log before issue #1249 made them configurable.
+const (
+	MessagesConversationPageSizeDefault = 500
+	MessagesConversationMaxLimitDefault = 2000
+	MessagesJailListLimitDefault        = 2000
+	MessagesSubscriberBufferDefault     = 64
+	MessagesBusyTimeoutDefault          = 5 * time.Second
+)
+
+// Hard safety ceilings for the [messages] operational limits. Config may tune a
+// value up to (but not past) its ceiling; Validate rejects anything above it so
+// a typo can't request an absurd allocation, unbounded sort, or an effectively
+// infinite lock wait.
+const (
+	MessagesConversationMaxLimitCeiling = 100_000
+	MessagesJailListLimitCeiling        = 100_000
+	MessagesSubscriberBufferCeiling     = 65_536
+	MessagesBusyTimeoutCeiling          = 5 * time.Minute
+)
 
 // DefaultDeleteRetention is the soft-delete retention window used when
 // [delete] retention is unset.
@@ -1863,6 +1919,75 @@ func (m Messages) MaxAgeDuration() time.Duration {
 	return d
 }
 
+// ConversationMaxLimitOrDefault returns the hard cap on a single conversation
+// sort. A non-positive value means "use the default".
+func (m Messages) ConversationMaxLimitOrDefault() int {
+	if m.ConversationMaxLimit < 1 {
+		return MessagesConversationMaxLimitDefault
+	}
+
+	return m.ConversationMaxLimit
+}
+
+// ConversationPageSizeOrDefault returns the default conversation page size (used
+// when a request supplies a non-positive limit). A non-positive configured value
+// means "use the default"; the result is additionally clamped to the effective
+// max limit so a misconfigured page size can never exceed the hard cap.
+func (m Messages) ConversationPageSizeOrDefault() int {
+	page := m.ConversationPageSize
+	if page < 1 {
+		page = MessagesConversationPageSizeDefault
+	}
+
+	if maxLimit := m.ConversationMaxLimitOrDefault(); page > maxLimit {
+		page = maxLimit
+	}
+
+	return page
+}
+
+// ClampConversationLimit normalizes a client-supplied conversation limit: a
+// non-positive limit becomes the configured page size, and any limit above the
+// configured maximum is capped at it.
+func (m Messages) ClampConversationLimit(limit int) int {
+	if limit <= 0 {
+		return m.ConversationPageSizeOrDefault()
+	}
+
+	if maxLimit := m.ConversationMaxLimitOrDefault(); limit > maxLimit {
+		return maxLimit
+	}
+
+	return limit
+}
+
+// JailListLimitOrDefault returns the jail listing row cap. A non-positive value
+// means "use the default".
+func (m Messages) JailListLimitOrDefault() int {
+	if m.JailListLimit < 1 {
+		return MessagesJailListLimitDefault
+	}
+
+	return m.JailListLimit
+}
+
+// SubscriberBufferOrDefault returns the per-subscriber channel capacity. A
+// non-positive value means "use the default".
+func (m Messages) SubscriberBufferOrDefault() int {
+	if m.SubscriberBuffer < 1 {
+		return MessagesSubscriberBufferDefault
+	}
+
+	return m.SubscriberBuffer
+}
+
+// BusyTimeoutDuration returns the messages-database SQLite busy_timeout, or the
+// default when unset, unparseable, or non-positive (a zero/negative timeout
+// would make a contended write fail immediately instead of waiting).
+func (m Messages) BusyTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(m.BusyTimeout, MessagesBusyTimeoutDefault)
+}
+
 // Emit-events modes for the task-list subsystem.
 const (
 	TodoEmitScenario = "scenario" // emit only for scenario-scoped lists (default)
@@ -1881,7 +2006,53 @@ type TodoConfig struct {
 	EmitEvents string `toml:"emit_events"` // "scenario" (default) | "all" | "off"
 	ClaimLease string `toml:"claim_lease"` // Go duration; "" = 30m default; "0" disables
 	Retention  string `toml:"retention"`   // Go duration; "" or "0" = keep done items forever
+	// MaxTitle is the maximum todo title length in bytes. Values < 1 fall back to
+	// the default (TodoMaxTitleDefault); a value above TodoMaxTitleCeiling — the
+	// hard limit baked into the database CHECK constraint — is rejected at load.
+	// Config may only tighten below the ceiling. Reloadable.
+	MaxTitle int `toml:"max_title"`
+	// MaxNote is the maximum todo note length in bytes. Values < 1 fall back to
+	// the default (TodoMaxNoteDefault); a value above TodoMaxNoteCeiling — the
+	// hard database CHECK ceiling — is rejected at load. Reloadable.
+	MaxNote int `toml:"max_note"`
+	// ListLimit caps how many items a single List/ListAll returns, so an in-scope
+	// caller can't force an unbounded allocation or a long store-mutex hold. Values
+	// < 1 fall back to the default (TodoListLimitDefault); a value above
+	// TodoListLimitCeiling is rejected at load. Restart-only (fixed at store open).
+	ListLimit int `toml:"list_limit"`
+	// SweepInterval is how often the lease/retention sweep loop runs. Empty,
+	// unparseable, or non-positive uses the default (TodoSweepIntervalDefault); a
+	// zero cadence would busy-loop. Restart-only (the loop ticker is built once).
+	SweepInterval string `toml:"sweep_interval"`
+	// BusyTimeout is the SQLite busy_timeout for the todos database. The claim
+	// contract ("loser gets zero rows") relies on a contended writer waiting rather
+	// than erroring with SQLITE_BUSY, so this is load-bearing. Empty, unparseable,
+	// or non-positive uses the default (TodoBusyTimeoutDefault); a value above
+	// TodoBusyTimeoutCeiling is rejected at load. Restart-only.
+	BusyTimeout string `toml:"busy_timeout"`
 }
+
+// Task-list ([todo]) operational-limit defaults, mirroring the fixed literals
+// that governed the store before issue #1249 made them configurable.
+const (
+	TodoMaxTitleDefault      = 500
+	TodoMaxNoteDefault       = 2000
+	TodoListLimitDefault     = 2000
+	TodoSweepIntervalDefault = time.Minute
+	TodoBusyTimeoutDefault   = 5 * time.Second
+)
+
+// Hard safety ceilings for the [todo] operational limits. TodoMaxTitleCeiling
+// and TodoMaxNoteCeiling equal the database CHECK constraints baked into the
+// schema at creation — config may tighten below them but never past them, so a
+// configured limit can never exceed what the database will accept. The others
+// bound allocation and lock-wait time.
+const (
+	TodoMaxTitleCeiling    = 500
+	TodoMaxNoteCeiling     = 2000
+	TodoListLimitCeiling   = 100_000
+	TodoBusyTimeoutCeiling = 5 * time.Minute
+)
 
 // EmitMode resolves the emit-events mode, defaulting to "scenario".
 func (t TodoConfig) EmitMode() string {
@@ -1919,6 +2090,50 @@ func (t TodoConfig) RetentionDuration() time.Duration {
 	d, _ := ParseDurationWithDays(t.Retention)
 
 	return d
+}
+
+// MaxTitleOrDefault returns the maximum title length. A non-positive value means
+// "use the default".
+func (t TodoConfig) MaxTitleOrDefault() int {
+	if t.MaxTitle < 1 {
+		return TodoMaxTitleDefault
+	}
+
+	return t.MaxTitle
+}
+
+// MaxNoteOrDefault returns the maximum note length. A non-positive value means
+// "use the default".
+func (t TodoConfig) MaxNoteOrDefault() int {
+	if t.MaxNote < 1 {
+		return TodoMaxNoteDefault
+	}
+
+	return t.MaxNote
+}
+
+// ListLimitOrDefault returns the List/ListAll row cap. A non-positive value
+// means "use the default".
+func (t TodoConfig) ListLimitOrDefault() int {
+	if t.ListLimit < 1 {
+		return TodoListLimitDefault
+	}
+
+	return t.ListLimit
+}
+
+// SweepIntervalDuration returns the lease/retention sweep cadence, or the
+// default when unset, unparseable, or non-positive (a zero cadence would
+// busy-loop the sweep timer).
+func (t TodoConfig) SweepIntervalDuration() time.Duration {
+	return positiveDurationOrDefault(t.SweepInterval, TodoSweepIntervalDefault)
+}
+
+// BusyTimeoutDuration returns the todos-database SQLite busy_timeout, or the
+// default when unset, unparseable, or non-positive (a zero/negative timeout
+// would break the claim contract by failing a contended writer immediately).
+func (t TodoConfig) BusyTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(t.BusyTimeout, TodoBusyTimeoutDefault)
 }
 
 func ParseDurationWithDays(s string) (time.Duration, error) {
@@ -3177,6 +3392,103 @@ func ValidateIncludes(mainRepoPath string, includes []string) error {
 	return nil
 }
 
+// validateMessagesLimits checks the [messages] operational limits (issue #1249):
+// each configured cap must be positive and at or below its hard safety ceiling,
+// the conversation page size must not exceed the conversation max limit, and the
+// busy timeout must be a positive duration within its ceiling. A non-positive
+// (or, for durations, unparseable/empty) value is left to the accessor default —
+// only an explicitly-out-of-range value fails loudly.
+func (c *Config) validateMessagesLimits() []error {
+	var errs []error
+
+	m := c.Messages
+
+	for _, f := range []struct {
+		name    string
+		val     int
+		ceiling int
+	}{
+		{"messages.conversation_page_size", m.ConversationPageSize, MessagesConversationMaxLimitCeiling},
+		{"messages.conversation_max_limit", m.ConversationMaxLimit, MessagesConversationMaxLimitCeiling},
+		{"messages.jail_list_limit", m.JailListLimit, MessagesJailListLimitCeiling},
+		{"messages.subscriber_buffer", m.SubscriberBuffer, MessagesSubscriberBufferCeiling},
+	} {
+		if f.val > f.ceiling {
+			errs = append(errs, fmt.Errorf("%s %d: must be at most %d", f.name, f.val, f.ceiling))
+		}
+	}
+
+	// A page size larger than the max limit is contradictory (a page could never
+	// be served in full). Compare the effective values (unset fields resolve to
+	// their defaults) but before the accessor's own clamp-to-max, so the
+	// contradiction surfaces here instead of being silently absorbed.
+	page := m.ConversationPageSize
+	if page < 1 {
+		page = MessagesConversationPageSizeDefault
+	}
+
+	if maxLimit := m.ConversationMaxLimitOrDefault(); page > maxLimit {
+		errs = append(errs, fmt.Errorf("messages.conversation_page_size %d: must not exceed conversation_max_limit %d", page, maxLimit))
+	}
+
+	if s := strings.TrimSpace(m.BusyTimeout); s != "" {
+		if d, err := ParseDurationWithDays(s); err != nil {
+			errs = append(errs, fmt.Errorf("messages.busy_timeout %q: %w", s, err))
+		} else if d <= 0 {
+			errs = append(errs, fmt.Errorf("messages.busy_timeout %q: must be a positive duration", s))
+		} else if d > MessagesBusyTimeoutCeiling {
+			errs = append(errs, fmt.Errorf("messages.busy_timeout %q: must be at most %s", s, MessagesBusyTimeoutCeiling))
+		}
+	}
+
+	return errs
+}
+
+// validateTodoLimits checks the [todo] operational limits (issue #1249). The
+// title/note ceilings equal the database CHECK constraints, so a configured
+// value above them would be silently rejected by the database; failing at load
+// makes that misconfiguration loud. Durations must be positive and within their
+// ceiling.
+func (c *Config) validateTodoLimits() []error {
+	var errs []error
+
+	t := c.Todo
+
+	for _, f := range []struct {
+		name    string
+		val     int
+		ceiling int
+	}{
+		{"todo.max_title", t.MaxTitle, TodoMaxTitleCeiling},
+		{"todo.max_note", t.MaxNote, TodoMaxNoteCeiling},
+		{"todo.list_limit", t.ListLimit, TodoListLimitCeiling},
+	} {
+		if f.val > f.ceiling {
+			errs = append(errs, fmt.Errorf("%s %d: must be at most %d", f.name, f.val, f.ceiling))
+		}
+	}
+
+	if s := strings.TrimSpace(t.SweepInterval); s != "" {
+		if d, err := ParseDurationWithDays(s); err != nil {
+			errs = append(errs, fmt.Errorf("todo.sweep_interval %q: %w", s, err))
+		} else if d <= 0 {
+			errs = append(errs, fmt.Errorf("todo.sweep_interval %q: must be a positive duration", s))
+		}
+	}
+
+	if s := strings.TrimSpace(t.BusyTimeout); s != "" {
+		if d, err := ParseDurationWithDays(s); err != nil {
+			errs = append(errs, fmt.Errorf("todo.busy_timeout %q: %w", s, err))
+		} else if d <= 0 {
+			errs = append(errs, fmt.Errorf("todo.busy_timeout %q: must be a positive duration", s))
+		} else if d > TodoBusyTimeoutCeiling {
+			errs = append(errs, fmt.Errorf("todo.busy_timeout %q: must be at most %s", s, TodoBusyTimeoutCeiling))
+		}
+	}
+
+	return errs
+}
+
 func (c *Config) Validate() error {
 	var errs []error
 	if c.DataDir != "" && !filepath.IsAbs(c.DataDir) && !strings.HasPrefix(c.DataDir, "~/") {
@@ -3319,6 +3631,9 @@ func (c *Config) Validate() error {
 			}
 		}
 	}
+
+	errs = append(errs, c.validateMessagesLimits()...)
+	errs = append(errs, c.validateTodoLimits()...)
 
 	for _, f := range []struct {
 		name, val string

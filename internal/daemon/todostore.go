@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	_ "modernc.org/sqlite"
 )
 
@@ -32,13 +33,15 @@ func validTodoStatus(s string) bool {
 	}
 }
 
+// todoTitleHardCeiling / todoNoteHardCeiling are the length limits baked into
+// the database CHECK constraints (see initTodoSchema). They are the absolute
+// ceiling: the configurable [todo] max_title/max_note may tighten below them but
+// can never exceed what the database will accept. Kept as named constants so the
+// schema literals and the config ceiling stay in lockstep (config.TodoMaxTitleCeiling
+// / config.TodoMaxNoteCeiling mirror these).
 const (
-	todoMaxTitle = 500
-	todoMaxNote  = 2000
-	// todoListCap bounds a single List/ListAll result so an in-scope caller can't
-	// force an unbounded allocation or a long store-mutex hold (mirrors the jail
-	// list's 2000-row cap).
-	todoListCap = 2000
+	todoTitleHardCeiling = 500
+	todoNoteHardCeiling  = 2000
 )
 
 // ErrTodoNotFound is returned when a todo id does not exist.
@@ -90,10 +93,56 @@ type TodoStore struct {
 	db  *sql.DB
 	mu  sync.Mutex
 	now func() time.Time
+	// maxTitle/maxNote/listLimit are the config-resolved operational limits
+	// (issue #1249), fixed at open time. maxTitle/maxNote never exceed the
+	// database CHECK ceilings.
+	maxTitle  int
+	maxNote   int
+	listLimit int
 }
 
-// NewTodoStore opens (creating if needed) the todo database at dbPath.
-func NewTodoStore(dbPath string) (*TodoStore, error) {
+// TodoStoreSettings carries the config-derived operational limits for the todo
+// store. A zero value resolves each field to its built-in default, so tests and
+// callers that don't tune these can pass TodoStoreSettings{} (or nothing).
+type TodoStoreSettings struct {
+	BusyTimeout time.Duration
+	MaxTitle    int
+	MaxNote     int
+	ListLimit   int
+}
+
+func (s TodoStoreSettings) resolved() TodoStoreSettings {
+	if s.BusyTimeout <= 0 {
+		s.BusyTimeout = config.TodoBusyTimeoutDefault
+	}
+
+	if s.MaxTitle < 1 || s.MaxTitle > todoTitleHardCeiling {
+		s.MaxTitle = config.TodoMaxTitleDefault
+	}
+
+	if s.MaxNote < 1 || s.MaxNote > todoNoteHardCeiling {
+		s.MaxNote = config.TodoMaxNoteDefault
+	}
+
+	if s.ListLimit < 1 {
+		s.ListLimit = config.TodoListLimitDefault
+	}
+
+	return s
+}
+
+// NewTodoStore opens (creating if needed) the todo database at dbPath. An
+// optional TodoStoreSettings tunes the SQLite busy timeout and the title/note/
+// list operational limits; omit it (or pass a zero value) to use the built-in
+// defaults. Only the first settings value is used.
+func NewTodoStore(dbPath string, settings ...TodoStoreSettings) (*TodoStore, error) {
+	var st TodoStoreSettings
+	if len(settings) > 0 {
+		st = settings[0]
+	}
+
+	st = st.resolved()
+
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		return nil, fmt.Errorf("create todos db dir: %w", err)
 	}
@@ -101,7 +150,8 @@ func NewTodoStore(dbPath string) (*TodoStore, error) {
 	// The busy_timeout is load-bearing: the claim contract ("loser gets zero
 	// rows") relies on a contended writer waiting rather than erroring with
 	// SQLITE_BUSY. foreign_keys(on) makes the parent ON DELETE CASCADE fire.
-	dsn := dbPath + "?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(on)"
+	dsn := fmt.Sprintf("%s?_pragma=journal_mode(wal)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(on)",
+		dbPath, st.BusyTimeout.Milliseconds())
 
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -113,7 +163,40 @@ func NewTodoStore(dbPath string) (*TodoStore, error) {
 		return nil, err
 	}
 
-	return &TodoStore{db: db, now: time.Now}, nil
+	return &TodoStore{
+		db:        db,
+		now:       time.Now,
+		maxTitle:  st.MaxTitle,
+		maxNote:   st.MaxNote,
+		listLimit: st.ListLimit,
+	}, nil
+}
+
+// titleLimit / noteLimit / listCap return the store's effective operational
+// limits, falling back to the defaults if the store was constructed without
+// settings (e.g. a bare struct literal in a test).
+func (s *TodoStore) titleLimit() int {
+	if s.maxTitle < 1 {
+		return config.TodoMaxTitleDefault
+	}
+
+	return s.maxTitle
+}
+
+func (s *TodoStore) noteLimit() int {
+	if s.maxNote < 1 {
+		return config.TodoMaxNoteDefault
+	}
+
+	return s.maxNote
+}
+
+func (s *TodoStore) listCap() int {
+	if s.listLimit < 1 {
+		return config.TodoListLimitDefault
+	}
+
+	return s.listLimit
 }
 
 func initTodoSchema(db *sql.DB) error {
@@ -175,12 +258,12 @@ func (s *TodoStore) Add(in TodoAdd) (TodoItem, error) {
 		return TodoItem{}, errors.New("todo title must not be empty")
 	}
 
-	if len(title) > todoMaxTitle {
-		return TodoItem{}, fmt.Errorf("todo title too long (max %d)", todoMaxTitle)
+	if len(title) > s.titleLimit() {
+		return TodoItem{}, fmt.Errorf("todo title too long (max %d)", s.titleLimit())
 	}
 
-	if len(in.Note) > todoMaxNote {
-		return TodoItem{}, fmt.Errorf("todo note too long (max %d)", todoMaxNote)
+	if len(in.Note) > s.noteLimit() {
+		return TodoItem{}, fmt.Errorf("todo note too long (max %d)", s.noteLimit())
 	}
 
 	if in.Scope == "" {
@@ -336,7 +419,7 @@ func (s *TodoStore) List(scope string, f TodoFilter) ([]TodoItem, error) {
 		args = append(args, f.Tag)
 	}
 
-	query += fmt.Sprintf(" ORDER BY position ASC, id ASC LIMIT %d", todoListCap)
+	query += fmt.Sprintf(" ORDER BY position ASC, id ASC LIMIT %d", s.listCap())
 
 	return s.queryTodos(query, args...)
 }
@@ -411,7 +494,7 @@ func (s *TodoStore) ListAll(f TodoFilter) ([]TodoItem, error) {
 		args = append(args, f.Tag)
 	}
 
-	query += fmt.Sprintf(" ORDER BY scope ASC, position ASC, id ASC LIMIT %d", todoListCap)
+	query += fmt.Sprintf(" ORDER BY scope ASC, position ASC, id ASC LIMIT %d", s.listCap())
 
 	return s.queryTodos(query, args...)
 }
@@ -604,8 +687,8 @@ func (s *TodoStore) UpdateFields(id string, title, note *string, tags *[]string,
 			return TodoItem{}, errors.New("todo title must not be empty")
 		}
 
-		if len(t) > todoMaxTitle {
-			return TodoItem{}, fmt.Errorf("todo title too long (max %d)", todoMaxTitle)
+		if len(t) > s.titleLimit() {
+			return TodoItem{}, fmt.Errorf("todo title too long (max %d)", s.titleLimit())
 		}
 
 		if _, err := tx.Exec(`UPDATE todos SET title = ? WHERE id = ?`, t, id); err != nil {
@@ -614,8 +697,8 @@ func (s *TodoStore) UpdateFields(id string, title, note *string, tags *[]string,
 	}
 
 	if note != nil {
-		if len(*note) > todoMaxNote {
-			return TodoItem{}, fmt.Errorf("todo note too long (max %d)", todoMaxNote)
+		if len(*note) > s.noteLimit() {
+			return TodoItem{}, fmt.Errorf("todo note too long (max %d)", s.noteLimit())
 		}
 
 		if _, err := tx.Exec(`UPDATE todos SET note = ? WHERE id = ?`, *note, id); err != nil {

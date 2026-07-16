@@ -166,6 +166,34 @@ max_per_stream = 1000   # keep at most 1000 messages per stream
 
 Both are optional. When unset, messages are kept indefinitely.
 
+## Operational limits
+
+The `[messages]` table also exposes the message log's operational limits. Every
+key is optional and falls back to the default shown; a value above its hard
+safety ceiling is rejected at config load.
+
+```toml
+[messages]
+conversation_page_size = 500   # page size when a conversation request omits a limit (default 500)
+conversation_max_limit = 2000  # hard cap on messages a single conversation sorts (default 2000; ceiling 100000)
+jail_list_limit        = 2000  # max quarantined comments a jail listing returns (default 2000; ceiling 100000)
+subscriber_buffer      = 64    # per-subscriber pub/sub channel capacity (default 64; ceiling 65536)
+busy_timeout           = "5s"  # SQLite busy/operation timeout for the messages DB (default 5s; max 5m)
+```
+
+`conversation_page_size` must not exceed `conversation_max_limit`. The
+conversation paging bounds and the jail cap are read per request, so a change
+takes effect on the next `gr daemon reload`. `subscriber_buffer` and
+`busy_timeout` are fixed when the database is opened, so they are **restart-only**
+— change them and restart the daemon (`gr daemon restart`). `busy_timeout` is
+graith's database operation deadline: how long a contended read/write waits for
+the lock before erroring.
+
+> **Note on internal queue capacities.** `subscriber_buffer` is the one pub/sub
+> queue exposed here because a bursty fan-out is a real load-tuning case. Other
+> internal channel capacities (daemon control kicks, signal-request buffers)
+> remain code-owned — they have no load-tuning use case and are not configurable.
+
 ## Patterns
 
 See [Agent-to-agent communication]({{< relref "patterns/communication.md" >}}) for detailed messaging patterns including pub/sub broadcast, request/reply, coordination barriers, and hierarchical agent communication.
