@@ -975,6 +975,47 @@ public struct ConfigResponseMsg: Codable, Sendable {
     }
 }
 
+// MARK: - Agent catalog (#1234)
+
+/// One configured agent in the daemon's catalog. `name` is the `[agents.<name>]`
+/// key used verbatim as the `--agent` value; `command` is the launch command
+/// (informational, may be empty).
+public struct AgentCatalogEntry: Codable, Sendable, Identifiable, Hashable {
+    public var name: String
+    public var command: String?
+
+    public var id: String { name }
+
+    public init(name: String, command: String? = nil) {
+        self.name = name
+        self.command = command
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case command
+    }
+}
+
+/// `agent_catalog_response` — the daemon's effective agent catalog (sorted by
+/// name) plus the configured `default_agent`, so GUI pickers present exactly the
+/// agents the daemon has configured and preselect the right default instead of
+/// hardcoding the list. `agent_catalog` itself has no payload (EmptyMsg).
+public struct AgentCatalogResponseMsg: Codable, Sendable {
+    public var agents: [AgentCatalogEntry]
+    public var defaultAgent: String
+
+    public init(agents: [AgentCatalogEntry], defaultAgent: String) {
+        self.agents = agents
+        self.defaultAgent = defaultAgent
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case agents
+        case defaultAgent = "default_agent"
+    }
+}
+
 // MARK: - Diagnostics / health (#904)
 
 /// Aggregate fleet counts. On the Go side (`FleetSummary`) this is embedded in

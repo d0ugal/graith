@@ -73,6 +73,7 @@ public enum ControlType {
     public static let storeList = "store_list"
     public static let storeGet = "store_get"
     public static let config = "config"
+    public static let agentCatalog = "agent_catalog"
     public static let diagnostics = "diagnostics"
     public static let approvalList = "approval_list"
     public static let approvalSubscribe = "approval_subscribe"
@@ -143,6 +144,9 @@ public protocol GraithHostClient: Actor {
     /// The daemon's effective configuration + diff-vs-defaults for the read-only
     /// config viewer in Settings (#904).
     func config() async throws -> ConfigResponseMsg
+    /// The daemon's configured agent catalog + default_agent for the New Session
+    /// and Settings agent pickers (#1234), so the GUI never hardcodes the list.
+    func agentCatalog() async throws -> AgentCatalogResponseMsg
     /// The daemon's health snapshot for the diagnostics panel (#904).
     func diagnostics() async throws -> DiagnosticsMsg
 

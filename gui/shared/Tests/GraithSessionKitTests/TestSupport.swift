@@ -72,6 +72,17 @@ actor MockHostClient: GraithHostClient {
     var failList: GraithClientError?
     var failSetStatus: GraithClientError?
     var failConfig: GraithClientError?
+    var failAgentCatalog: GraithClientError?
+    /// The agent catalog returned by `agentCatalog()`; tests can override it to
+    /// assert the UI reflects a custom set / default (#1234).
+    var agentCatalogResponse = AgentCatalogResponseMsg(
+        agents: [
+            AgentCatalogEntry(name: "braw", command: "braw-cli"),
+            AgentCatalogEntry(name: "claude", command: "claude"),
+            AgentCatalogEntry(name: "codex", command: "codex"),
+        ],
+        defaultAgent: "codex"
+    )
     var failDiagnostics: GraithClientError?
     /// Records the last `migrate` call so tests can assert the model is forwarded.
     private(set) var lastMigrate: (agent: String, model: String?)?
@@ -108,6 +119,8 @@ actor MockHostClient: GraithHostClient {
     func setFailList(_ e: GraithClientError?) { failList = e }
     func setFailSetStatus(_ e: GraithClientError?) { failSetStatus = e }
     func setFailConfig(_ e: GraithClientError?) { failConfig = e }
+    func setFailAgentCatalog(_ e: GraithClientError?) { failAgentCatalog = e }
+    func setAgentCatalog(_ c: AgentCatalogResponseMsg) { agentCatalogResponse = c }
     func setFailDiagnostics(_ e: GraithClientError?) { failDiagnostics = e }
     func setGateList(_ on: Bool) { gateList = on }
     /// Release a gated `listSessions()`. Clears the gate *before* resuming so the
@@ -166,6 +179,10 @@ actor MockHostClient: GraithHostClient {
             effectiveTOML: "[sandbox]\nenabled = true\n",
             diffFromDefaults: "--- defaults\n+++ effective\n@@ -1 +1 @@\n-enabled = false\n+enabled = true\n",
             configPath: "/hame/.config/graith/config.toml", configExists: true)
+    }
+    func agentCatalog() async throws -> AgentCatalogResponseMsg {
+        if let failAgentCatalog { throw failAgentCatalog }
+        return agentCatalogResponse
     }
     func diagnostics() async throws -> DiagnosticsMsg {
         if let failDiagnostics { throw failDiagnostics }

@@ -22,6 +22,10 @@ public final class HostConnection: ObservableObject, Identifiable {
     @Published public private(set) var sessions: [SessionInfo] = []
     @Published public private(set) var approvals: [ApprovalInfo] = []
     @Published public private(set) var scenarios: [ScenarioRecord] = []
+    /// The daemon's configured agent catalog + default_agent (#1234). Nil until
+    /// the first successful fetch; the UI falls back to a built-in default list
+    /// while nil so the New Session sheet is never empty on a slow/old host.
+    @Published public private(set) var agentCatalog: AgentCatalogResponseMsg?
     @Published public private(set) var lastError: String?
 
     private let client: any GraithHostClient
@@ -66,6 +70,7 @@ public final class HostConnection: ObservableObject, Identifiable {
             try await client.connect()
             state = .connected
             await refresh()
+            await refreshAgentCatalog()
             if ownsApprovals { startApprovalSubscription() }
         } catch {
             state = .failed(Self.describe(error))
@@ -116,6 +121,17 @@ public final class HostConnection: ObservableObject, Identifiable {
         guard state == .connected else { return }
         if let fetched = try? await client.listScenarios() {
             scenarios = fetched
+        }
+    }
+
+    /// Reload this host's configured agent catalog. Best-effort like scenarios:
+    /// on failure the last-known catalog is retained (an old daemon that predates
+    /// the `agent_catalog` RPC just leaves it nil, and the UI falls back to the
+    /// built-in default list). Only runs while connected.
+    private func refreshAgentCatalog() async {
+        guard state == .connected else { return }
+        if let fetched = try? await client.agentCatalog() {
+            agentCatalog = fetched
         }
     }
 
@@ -202,6 +218,18 @@ public final class HostConnection: ObservableObject, Identifiable {
     /// Fetch the daemon's health snapshot for the diagnostics panel (#904).
     public func diagnostics() async throws -> DiagnosticsMsg {
         try await client.diagnostics()
+    }
+
+    /// Fetch the daemon's agent catalog on demand (#1234), updating the published
+    /// `agentCatalog` on success. Best-effort: on failure the last-known catalog
+    /// (possibly nil for an old daemon) is retained and returned, so the caller
+    /// can fall back to the built-in default list.
+    @discardableResult
+    public func fetchAgentCatalog() async -> AgentCatalogResponseMsg? {
+        if let fetched = try? await client.agentCatalog() {
+            agentCatalog = fetched
+        }
+        return agentCatalog
     }
 
     public func create(_ request: CreateRequest) async -> Bool {

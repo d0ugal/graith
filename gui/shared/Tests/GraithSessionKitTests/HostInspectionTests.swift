@@ -114,3 +114,62 @@ struct FleetIntrospectionTests {
         }
     }
 }
+
+// Agent catalog driven by daemon config (#1234): the New Session / Settings
+// pickers bind to the daemon's catalog + default, never a hardcoded list.
+@Suite("FleetModel agent catalog")
+struct AgentCatalogTests {
+    @MainActor @Test func catalogPopulatedOnConnectFromDaemon() async throws {
+        let (fleet, mock) = makeFleetWithRemote()
+        await mock.setAgentCatalog(AgentCatalogResponseMsg(
+            agents: [
+                AgentCatalogEntry(name: "croft", command: "croft-cli"),
+                AgentCatalogEntry(name: "strath", command: "strath-cli"),
+            ],
+            defaultAgent: "strath"))
+        await fleet.connectAll()
+
+        let catalog = fleet.agentCatalog(hostID: "ben")
+        #expect(catalog.names == ["croft", "strath"])
+        #expect(catalog.defaultAgent == "strath")
+        // A custom agent the old hardcoded list never had is offered.
+        #expect(catalog.names.contains("croft"))
+    }
+
+    @MainActor @Test func resolvedDefaultMatchesConfiguredDefault() async throws {
+        let (fleet, mock) = makeFleetWithRemote()
+        await mock.setAgentCatalog(AgentCatalogResponseMsg(
+            agents: [AgentCatalogEntry(name: "claude"), AgentCatalogEntry(name: "codex")],
+            defaultAgent: "codex"))
+        await fleet.connectAll()
+        #expect(fleet.agentCatalog(hostID: "ben").resolvedDefault == "codex")
+    }
+
+    @MainActor @Test func fallbackUsedBeforeAnyFetch() {
+        let fleet = makeEmptyFleet()
+        // No connections → the built-in fallback keeps the picker non-empty.
+        let catalog = fleet.agentCatalog(hostID: "nae-sic-host")
+        #expect(!catalog.names.isEmpty)
+        #expect(catalog.names == AgentCatalog.fallback.names)
+        #expect(catalog.resolvedDefault == "claude")
+    }
+
+    @MainActor @Test func fetchFailureFallsBackWithoutThrowing() async {
+        let (fleet, mock) = makeFleetWithRemote()
+        await fleet.connectAll()
+        await mock.setFailAgentCatalog(.daemon("old daemon: no agent_catalog"))
+        // A daemon that can't answer must not throw here — the picker degrades to
+        // the last-known catalog (the one fetched on connect), never empty.
+        let catalog = await fleet.fetchAgentCatalog(hostID: "ben")
+        #expect(!catalog.names.isEmpty)
+    }
+
+    @Test func resolvedDefaultFallsBackToFirstWhenDefaultMissing() {
+        let catalog = AgentCatalogResponseMsg(
+            agents: [AgentCatalogEntry(name: "bothy"), AgentCatalogEntry(name: "croft")],
+            defaultAgent: "gone")
+        // A misconfigured daemon whose default_agent isn't in the catalog still
+        // yields a selectable value rather than an empty picker.
+        #expect(catalog.resolvedDefault == "bothy")
+    }
+}

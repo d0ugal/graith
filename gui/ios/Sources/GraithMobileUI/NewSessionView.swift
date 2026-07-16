@@ -1,4 +1,5 @@
 import SwiftUI
+import GraithProtocol
 import GraithSessionKit
 
 /// Remote session creation. There is no local cwd on a phone, so the repo comes
@@ -9,7 +10,7 @@ struct NewSessionView: View {
 
     @State private var hostID: String = ""
     @State private var name: String = ""
-    @State private var agent: String = "claude"
+    @State private var agent: String = ""
     @State private var prompt: String = ""
     @State private var repos: [RepoEntry] = []
     @State private var selectedRepo: String = ""
@@ -23,7 +24,12 @@ struct NewSessionView: View {
     @State private var inPlace = false
     @State private var agentHooks = true
 
-    private let agents = ["claude", "codex", "cursor", "opencode"]
+    /// The selected host's agent catalog, driven by daemon config (#1234). Starts
+    /// on the built-in fallback and is replaced once the daemon responds.
+    @State private var catalog: AgentCatalogResponseMsg = AgentCatalog.fallback
+
+    /// Agent names the daemon offers for the selected host.
+    private var agents: [String] { catalog.names }
 
     var body: some View {
         NavigationStack {
@@ -96,8 +102,9 @@ struct NewSessionView: View {
             .task {
                 if hostID.isEmpty { hostID = model.connections.first?.id ?? "" }
                 await loadRepos()
+                await loadCatalog()
             }
-            .onChange(of: hostID) { _ in Task { await loadRepos() } }
+            .onChange(of: hostID) { _ in Task { await loadRepos(); await loadCatalog() } }
         }
     }
 
@@ -117,6 +124,19 @@ struct NewSessionView: View {
         guard requestedHostID == hostID else { return }
         repos = loaded
         selectedRepo = RepoPickerLogic.resolveSelection(repos: loaded, current: selectedRepo)
+    }
+
+    /// Load the selected host's agent catalog from the daemon (#1234) and seed
+    /// the agent selection. Drops a late reply for a host we've switched away
+    /// from, and (re)seeds only when the current pick isn't in the new catalog.
+    private func loadCatalog() async {
+        let requestedHostID = hostID
+        let loaded = await model.fetchAgentCatalog(hostID: requestedHostID)
+        guard requestedHostID == hostID else { return }
+        catalog = loaded
+        if agent.isEmpty || !loaded.names.contains(agent) {
+            agent = loaded.resolvedDefault
+        }
     }
 
     private func create() async {

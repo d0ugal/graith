@@ -689,7 +689,17 @@ struct SessionRow: View {
     @State private var showSnapshot = false
     @State private var showMessages = false
 
-    private let migrateAgents = ["claude", "codex", "agy", "opencode"]
+    /// The session host's agent catalog, driven by daemon config (#1234). Loaded
+    /// when the Migrate sheet is opened; starts on the built-in fallback.
+    @State private var migrateCatalog = AgentCatalog.fallback
+
+    /// Agents offered in the Migrate sheet: the daemon catalog plus the session's
+    /// current agent (so it's always shown even if the config later dropped it).
+    private var migrateAgents: [String] {
+        var names = migrateCatalog.names
+        if !session.agent.isEmpty, !names.contains(session.agent) { names.append(session.agent) }
+        return names
+    }
 
     var isSelected: Bool {
         window.selectedSessionID == session.id
@@ -1018,6 +1028,10 @@ struct SessionRow: View {
             Button("Migrate…") {
                 migrateAgent = session.agent
                 showMigrate = true
+                Task {
+                    migrateCatalog = await store.connection(ownerOf: session.id)?
+                        .fetchAgentCatalog() ?? AgentCatalog.fallback
+                }
             }
             Button("Set Status…") {
                 statusText = session.summaryText ?? ""

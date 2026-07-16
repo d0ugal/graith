@@ -794,6 +794,36 @@ type ConfigResponseMsg struct {
 	ConfigExists bool `json:"config_exists"`
 }
 
+// Agent catalog (client -> daemon: "agent_catalog"; daemon -> client:
+// "agent_catalog_response"). GUI New Session and Settings pickers use this to
+// present exactly the agents the daemon has configured and to preselect the
+// configured default_agent, instead of hardcoding a catalog that can drift from
+// the daemon (offering unconfigured agents, omitting custom ones, or defaulting
+// wrong). Works over a remote connection because the client never reads the
+// daemon host's config file itself. See issue #1234.
+
+// AgentCatalogMsg is the (empty) request for the daemon's agent catalog.
+type AgentCatalogMsg struct{}
+
+// AgentCatalogEntry describes one configured agent for GUI pickers.
+type AgentCatalogEntry struct {
+	// Name is the agent key (the `[agents.<name>]` table name), used verbatim as
+	// the `--agent` value when creating a session.
+	Name string `json:"name"`
+	// Command is the launch command configured for the agent (informational; the
+	// GUI may show it as a subtitle). Empty when unset.
+	Command string `json:"command,omitempty"`
+}
+
+// AgentCatalogResponseMsg carries the daemon's effective agent catalog and the
+// configured default agent. Agents are sorted by Name for a stable display
+// order. DefaultAgent is the configured `default_agent`; it always matches one
+// of the entries' Name when the config is valid.
+type AgentCatalogResponseMsg struct {
+	Agents       []AgentCatalogEntry `json:"agents"`
+	DefaultAgent string              `json:"default_agent"`
+}
+
 // Diagnostics types (daemon -> client, in response to "diagnostics" message)
 
 type DiagnosticsMsg struct {

@@ -123,6 +123,14 @@ public actor RealHostClient: GraithHostClient {
         }
     }
 
+    public func agentCatalog() async throws -> AgentCatalogResponseMsg {
+        do {
+            return try await inner.agentCatalog()
+        } catch {
+            throw RealClientError.map(error)
+        }
+    }
+
     public func storeGet(repo: String?, shared: Bool, key: String) async throws -> StoreGetResponseMsg {
         do {
             return try await inner.storeGet(repo: repo, shared: shared, key: key)

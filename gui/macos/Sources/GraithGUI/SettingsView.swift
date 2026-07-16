@@ -151,10 +151,20 @@ struct AppearanceSettings: View {
 // MARK: - General
 
 struct GeneralSettings: View {
+    @EnvironmentObject var store: SessionStore
     /// Default agent pre-selected in the New Session sheet.
     @AppStorage("defaultAgent") private var defaultAgent = "claude"
+    /// The local daemon's configured agent catalog (#1234), replacing the old
+    /// hardcoded list. Starts on the built-in fallback until the daemon replies.
+    @State private var catalog: AgentCatalogResponseMsg = AgentCatalog.fallback
 
-    private let agents = ["claude", "codex", "agy", "opencode"]
+    /// Selectable agents: the daemon catalog, plus the saved default if the
+    /// daemon no longer offers it, so a previously-chosen value isn't dropped.
+    private var agents: [String] {
+        var names = catalog.names
+        if !defaultAgent.isEmpty, !names.contains(defaultAgent) { names.append(defaultAgent) }
+        return names
+    }
 
     var body: some View {
         Form {
@@ -163,12 +173,13 @@ struct GeneralSettings: View {
                     ForEach(agents, id: \.self) { Text($0).tag($0) }
                 }
             } footer: {
-                Text("New sessions start with this agent selected.")
+                Text("New sessions start with this agent selected. Agents come from the daemon configuration.")
                     .font(.caption)
                     .foregroundStyle(Theme.overlay0)
             }
         }
         .formStyle(.grouped)
+        .task { catalog = await store.fetchAgentCatalog() }
     }
 }
 
