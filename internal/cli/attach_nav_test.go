@@ -1,0 +1,158 @@
+package cli
+
+import (
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/d0ugal/graith/internal/protocol"
+)
+
+// fakeClock is a deterministic now/sleep pair: sleep advances the clock by the
+// requested duration, so reconnectLoop's deadline is driven entirely by how
+// many retries it attempts — no real time passes.
+type fakeClock struct {
+	t      time.Time
+	slept  []time.Duration
+	onTick func() // invoked after each sleep, before now() is next read
+}
+
+func newFakeClock() *fakeClock {
+	return &fakeClock{t: time.Unix(1700000000, 0)}
+}
+
+func (c *fakeClock) now() time.Time { return c.t }
+
+func (c *fakeClock) sleep(d time.Duration) {
+	c.slept = append(c.slept, d)
+	c.t = c.t.Add(d)
+
+	if c.onTick != nil {
+		c.onTick()
+	}
+}
+
+func TestReconnectLoopSucceeds(t *testing.T) {
+	clock := newFakeClock()
+
+	attached := payloadEnv("attached", protocol.SessionInfo{ID: "braw"})
+	conn := &scriptedConn{responses: []scriptedResp{okResp(attached)}}
+
+	got, resp, err := reconnectLoop("braw",
+		func() (reconnectConn, error) { return conn, nil },
+		clock.now, clock.sleep, 10*time.Second, 250*time.Millisecond)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got != conn {
+		t.Error("expected the successful connection to be returned")
+	}
+
+	if resp.Type != "attached" {
+		t.Errorf("resp.Type = %q, want attached", resp.Type)
+	}
+
+	if conn.closed != 0 {
+		t.Error("a successful connection must not be closed by reconnectLoop")
+	}
+}
+
+func TestReconnectLoopRetriesThenSucceeds(t *testing.T) {
+	clock := newFakeClock()
+
+	good := &scriptedConn{responses: []scriptedResp{okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw"}))}}
+
+	// First dial fails, second returns a read error (and must be closed), third
+	// succeeds.
+	badRead := &scriptedConn{responses: []scriptedResp{errResp(errors.New("half-open"))}}
+
+	var attempt int
+
+	dial := func() (reconnectConn, error) {
+		attempt++
+		switch attempt {
+		case 1:
+			return nil, errors.New("connection refused")
+		case 2:
+			return badRead, nil
+		default:
+			return good, nil
+		}
+	}
+
+	got, _, err := reconnectLoop("braw", dial, clock.now, clock.sleep, 10*time.Second, 250*time.Millisecond)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got != good {
+		t.Error("expected the third (good) connection")
+	}
+
+	if badRead.closed != 1 {
+		t.Errorf("the read-error connection was closed %d times, want 1", badRead.closed)
+	}
+
+	if len(clock.slept) != 3 {
+		t.Errorf("slept %d times, want 3 (one per attempt)", len(clock.slept))
+	}
+}
+
+func TestReconnectLoopSessionGone(t *testing.T) {
+	clock := newFakeClock()
+
+	conn := &scriptedConn{responses: []scriptedResp{okResp(errEnv("session deleted"))}}
+
+	_, _, err := reconnectLoop("braw",
+		func() (reconnectConn, error) { return conn, nil },
+		clock.now, clock.sleep, 10*time.Second, 250*time.Millisecond)
+	if err == nil || err.Error() != "session unavailable: session deleted" {
+		t.Fatalf("err = %v, want \"session unavailable: session deleted\"", err)
+	}
+
+	if conn.closed != 1 {
+		t.Errorf("the errored connection was closed %d times, want 1", conn.closed)
+	}
+}
+
+func TestReconnectLoopTimesOut(t *testing.T) {
+	clock := newFakeClock()
+
+	// Every dial fails, so the loop only ends when now() passes the deadline.
+	dials := 0
+	dial := func() (reconnectConn, error) {
+		dials++
+		return nil, errors.New("still down")
+	}
+
+	_, _, err := reconnectLoop("braw", dial, clock.now, clock.sleep, 1*time.Second, 250*time.Millisecond)
+	if err == nil || err.Error() != "timed out after 1s" {
+		t.Fatalf("err = %v, want \"timed out after 1s\"", err)
+	}
+
+	// 1s / 250ms = 4 sleeps advance the clock to the deadline.
+	if dials != 4 {
+		t.Errorf("dialed %d times, want 4 before timeout", dials)
+	}
+}
+
+// TestReconnectLoopImmediateTimeout: a zero timeout returns before any dial.
+func TestReconnectLoopImmediateTimeout(t *testing.T) {
+	clock := newFakeClock()
+
+	dialed := false
+	dial := func() (reconnectConn, error) {
+		dialed = true
+		return nil, nil
+	}
+
+	_, _, err := reconnectLoop("braw", dial, clock.now, clock.sleep, 0, 250*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected an immediate timeout with zero budget")
+	}
+
+	if dialed {
+		t.Error("dial should not run when the deadline has already passed")
+	}
+}

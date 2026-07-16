@@ -339,14 +339,6 @@ func runBatch(cmd *cobra.Command, bf *batchFlags, verb, pastTense, gerund, contr
 	return nil
 }
 
-// batchConn is the subset of *client.Client that the batch execution loop
-// needs. It is an interface so the loop can be unit-tested without a live
-// daemon connection.
-type batchConn interface {
-	SendControl(msgType string, payload any) error
-	ReadControlResponse() (protocol.Envelope, error)
-}
-
 // batchFailure records a session whose per-session operation the daemon
 // rejected, along with the daemon's error message.
 type batchFailure struct {
@@ -376,7 +368,7 @@ type batchResults struct {
 // stream is desynced and no further sessions can be processed reliably. The
 // results gathered before that point are still returned so the caller can
 // report them.
-func executeBatch(c batchConn, matched []protocol.SessionInfo, controlType string, payload func(sessionID string) any) (batchResults, error) {
+func executeBatch(c controlConn, matched []protocol.SessionInfo, controlType string, payload func(sessionID string) any) (batchResults, error) {
 	var res batchResults
 
 	for _, s := range matched {
