@@ -7,10 +7,12 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 func Run(dir string, args ...string) (string, string, error) {
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command(tools.Git(), args...)
 	cmd.Dir = dir
 
 	var stdout, stderr bytes.Buffer
@@ -23,7 +25,7 @@ func Run(dir string, args ...string) (string, string, error) {
 }
 
 func RunContext(ctx context.Context, dir string, args ...string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := exec.CommandContext(ctx, tools.Git(), args...)
 	cmd.Dir = dir
 
 	var stdout, stderr bytes.Buffer
@@ -36,7 +38,7 @@ func RunContext(ctx context.Context, dir string, args ...string) (string, string
 }
 
 func RunContextEnv(ctx context.Context, dir string, env []string, args ...string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := exec.CommandContext(ctx, tools.Git(), args...)
 	cmd.Dir = dir
 
 	cmd.Env = append(os.Environ(), env...)
@@ -69,7 +71,7 @@ func RunOutputContext(ctx context.Context, dir string, args ...string) (string, 
 }
 
 func RunCheck(dir string, args ...string) bool {
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command(tools.Git(), args...)
 	cmd.Dir = dir
 
 	return cmd.Run() == nil

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/atomicfile"
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 // Entry represents a document in the store.
@@ -68,7 +69,7 @@ func Init(storePath string) error {
 
 // git runs git with the given args in dir.
 func git(dir string, args ...string) error {
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command(tools.Git(), args...)
 	cmd.Dir = dir
 
 	out, err := cmd.CombinedOutput()

@@ -117,3 +117,36 @@ timeout    = "5s"            # HTTP request timeout for the release check
 ```
 
 Setting `enabled = false` disables all update-check network activity: `gr list` skips it silently and `gr doctor` reports the check as disabled rather than claiming you are up to date. The check never runs for a `dev` build regardless of this setting. Point `repository` at a fork to track its releases instead. An empty `interval` or `timeout` falls back to the built-in defaults (1h and 5s); a value that is set but unparseable, or a `repository` not in `owner/repo` form, is rejected at config load.
+
+## External tool executables
+
+graith shells out to a handful of external binaries. By default each is resolved by its conventional name on `PATH` (or, for `ps` and `lsof`, its conventional absolute path). The `[tools]` block lets you override any of them — useful for Nix or custom-`PATH` installs, wrapper binaries, or an alternate shell.
+
+```toml
+[tools]
+git       = "git"             # git executable
+gh        = "gh"              # GitHub CLI executable
+shell     = "sh"              # shell for notification/trigger commands (run as `<shell> -c ...`)
+osascript = "osascript"       # macOS desktop-notification helper
+ps        = "/bin/ps"         # process-listing binary
+lsof      = "/usr/sbin/lsof"  # open-files listing binary (macOS FD sampling)
+```
+
+A value may be a **bare command name** resolved on `PATH` (`"git"`, `"hub"`) or an **absolute/relative path** to a specific binary (`"/run/current-system/sw/bin/git"`). Only fields you set are validated at config load: an explicit path must exist and be executable, and a bare name must be found on `PATH`. Fields you leave unset keep the defaults above and are resolved lazily when first used, so the macOS-only `osascript` default is never an error on Linux.
+
+Only the executable is configurable. The subcommands graith runs (`git rev-parse`, `gh api …`) and sandbox backend flags stay fixed in code — this is not a general command-substitution hook.
+
+The same resolved tools are used by the daemon, the document store, and CLI paths such as `gr store` repo discovery, so an override applies everywhere graith runs that binary.
+
+## Git operation timeouts
+
+The `[git]` block bounds the individual git operations graith runs during session lifecycle. Slower repositories, large fetches, or high-latency remotes can legitimately exceed the defaults. This is distinct from `[git_pull]`, which controls the background maintenance-pull loop.
+
+```toml
+[git]
+fetch_timeout    = "2m"   # bounds a single `git fetch` on session create/fork and the pull loop
+merge_timeout    = "2m"   # bounds a fast-forward merge in the git-pull loop
+username_timeout = "15s"  # bounds GitHub-username discovery (may invoke `gh`)
+```
+
+An unset field keeps its built-in default (2m / 2m / 15s). A value that is set but unparseable, or that is zero or negative, is rejected at config load.

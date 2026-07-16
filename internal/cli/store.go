@@ -11,6 +11,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/store"
+	"github.com/d0ugal/graith/internal/tools"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +35,7 @@ func resolveStoreRepoPath() (string, error) {
 		return config.ResolvePath(repoPath), nil
 	}
 
-	gitOut, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	gitOut, err := exec.Command(tools.Git(), "rev-parse", "--show-toplevel").Output()
 	if err != nil {
 		return "", errors.New("could not detect repo path: use --repo, --shared, or run from inside a git repository")
 	}
@@ -96,7 +97,7 @@ func resolveCurrentRepo() string {
 		return config.ResolvePath(repoPath)
 	}
 
-	gitOut, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	gitOut, err := exec.Command(tools.Git(), "rev-parse", "--show-toplevel").Output()
 	if err != nil {
 		return ""
 	}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/d0ugal/graith/internal/approvals/localmost"
+	"github.com/d0ugal/graith/internal/tools"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -55,6 +56,8 @@ type Config struct {
 	Updates          UpdatesConfig      `toml:"updates"`   // [updates] table (issue #1253)
 	Detection        DetectionConfig    `toml:"detection"` // [detection] table (issue #1241)
 	ConfigReload     ConfigReload       `toml:"config"`    // [config] table (issue #1237)
+	Tools            ToolsConfig        `toml:"tools"`     // [tools] table (issue #1238)
+	Git              GitConfig          `toml:"git"`       // [git] table (issue #1238)
 }
 
 // ConfigReloadDebounceDefault is the quiet period the config-file watcher waits
@@ -138,6 +141,85 @@ func (u UpdatesConfig) TimeoutDuration() time.Duration {
 	}
 
 	return d
+}
+
+// ToolsConfig is the [tools] block overriding the external executables graith
+// shells out to (issue #1238). Each field may be a bare command name resolved
+// on PATH ("git", "hub") or an absolute/relative path to a specific binary
+// ("/run/current-system/sw/bin/git"). An empty field keeps graith's built-in
+// default (see tools.Defaults). This unblocks Nix/custom-PATH installs, wrapper
+// binaries, and alternate shells. Only explicit overrides are validated at
+// startup; unset defaults retain plain PATH-lookup semantics.
+type ToolsConfig struct {
+	// Git is the git executable (default "git").
+	Git string `toml:"git"`
+	// GH is the GitHub CLI executable (default "gh").
+	GH string `toml:"gh"`
+	// Shell runs notification and trigger commands as `<shell> -c <cmd>`
+	// (default "sh").
+	Shell string `toml:"shell"`
+	// OSAScript is the macOS osascript executable used for desktop
+	// notifications (default "osascript").
+	OSAScript string `toml:"osascript"`
+	// PS is the process-listing executable (default "/bin/ps").
+	PS string `toml:"ps"`
+	// Lsof is the open-files listing executable (default "/usr/sbin/lsof").
+	Lsof string `toml:"lsof"`
+}
+
+// Resolved converts the config block into the tools package's Config. Empty
+// fields are left empty here; tools.Configure fills them from tools.Defaults so
+// there is a single source of default values.
+func (t ToolsConfig) Resolved() tools.Config {
+	return tools.Config{
+		Git:       t.Git,
+		GH:        t.GH,
+		Shell:     t.Shell,
+		OSAScript: t.OSAScript,
+		PS:        t.PS,
+		Lsof:      t.Lsof,
+	}
+}
+
+// Validate checks that every explicitly-set tool override resolves (an absolute
+// path exists and is executable; a bare name is found on PATH). Unset fields are
+// skipped so defaults keep PATH-lookup semantics.
+func (t ToolsConfig) Validate() error {
+	return tools.Validate(t.Resolved())
+}
+
+// GitConfig is the [git] block tuning the timeouts graith applies to the git
+// operations it runs during session lifecycle (issue #1238). Slower
+// repositories, large fetches, and high-latency remotes can legitimately exceed
+// the built-in 2m fetch / 2m merge / 15s username bounds. An empty field keeps
+// the built-in default. Note this is distinct from [git_pull], which configures
+// the background maintenance-pull loop.
+type GitConfig struct {
+	// FetchTimeout bounds a single `git fetch` (default "2m").
+	FetchTimeout string `toml:"fetch_timeout"`
+	// MergeTimeout bounds a single fast-forward merge in the git-pull loop
+	// (default "2m").
+	MergeTimeout string `toml:"merge_timeout"`
+	// UsernameTimeout bounds GitHub-username discovery, which may invoke `gh`
+	// (default "15s").
+	UsernameTimeout string `toml:"username_timeout"`
+}
+
+// FetchTimeoutDuration returns the configured git-fetch timeout, defaulting to
+// 2m when unset or unparseable (a bad value is rejected at load by Validate).
+func (g GitConfig) FetchTimeoutDuration() time.Duration {
+	return parseDurationOr(g.FetchTimeout, 2*time.Minute)
+}
+
+// MergeTimeoutDuration returns the configured merge timeout, defaulting to 2m.
+func (g GitConfig) MergeTimeoutDuration() time.Duration {
+	return parseDurationOr(g.MergeTimeout, 2*time.Minute)
+}
+
+// UsernameTimeoutDuration returns the configured username-discovery timeout,
+// defaulting to 15s.
+func (g GitConfig) UsernameTimeoutDuration() time.Duration {
+	return parseDurationOr(g.UsernameTimeout, 15*time.Second)
 }
 
 // HeadlessConfig is the [headless] block gating headless stream-json sessions
@@ -2593,6 +2675,33 @@ func (c *Config) Validate() error {
 		} else if d <= 0 {
 			errs = append(errs, fmt.Errorf("config.reload_debounce %q: must be a positive duration", s))
 		}
+	}
+
+	// [git] operation timeouts: a non-empty but unparseable or non-positive
+	// value must fail loudly rather than silently falling back to the accessor
+	// default (mirrors updates.interval). A zero/negative timeout would cancel
+	// the operation immediately.
+	for _, f := range []struct{ name, val string }{
+		{"git.fetch_timeout", c.Git.FetchTimeout},
+		{"git.merge_timeout", c.Git.MergeTimeout},
+		{"git.username_timeout", c.Git.UsernameTimeout},
+	} {
+		if strings.TrimSpace(f.val) == "" {
+			continue
+		}
+
+		if d, err := ParseDurationWithDays(f.val); err != nil {
+			errs = append(errs, fmt.Errorf("%s %q: %w", f.name, f.val, err))
+		} else if d <= 0 {
+			errs = append(errs, fmt.Errorf("%s %q: must be greater than zero", f.name, f.val))
+		}
+	}
+
+	// [tools]: validate explicit executable overrides so a bad path/name fails
+	// at startup, not at the first git/gh/notification call. Unset defaults are
+	// skipped (they keep PATH-lookup semantics).
+	if err := c.Tools.Validate(); err != nil {
+		errs = append(errs, err)
 	}
 
 	errs = append(errs, c.validateTriggers()...)

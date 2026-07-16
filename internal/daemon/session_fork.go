@@ -83,7 +83,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 
 	preUsername := cfgSnapshot.GitHubUsername
 	if preUsername == "" && sourceRepoPath != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), gitUsernameTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), sm.cfg.Git.UsernameTimeoutDuration())
 		preUsername, _ = git.DiscoverGitHubUsername(ctx, sourceRepoPath)
 
 		cancel()
@@ -347,7 +347,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		seedPrompt = transcript.BuildForkSeedPrompt(srcAgent, forkContextPath)
 	}
 
-	gitCtx, gitCancel := context.WithTimeout(context.Background(), gitFetchTimeout)
+	gitCtx, gitCancel := context.WithTimeout(context.Background(), sm.cfg.Git.FetchTimeoutDuration())
 	defer gitCancel()
 
 	if len(sourceForkIncludes) > 0 {

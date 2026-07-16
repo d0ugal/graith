@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 var ErrDaemonRunning = errors.New("daemon already running")
@@ -54,7 +56,7 @@ func IsGraithDaemon(pid int) bool {
 		return false
 	}
 
-	out, err := exec.Command("/bin/ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
+	out, err := exec.Command(tools.PS(), "-p", strconv.Itoa(pid), "-o", "comm=").Output()
 	if err != nil {
 		return false
 	}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 // pushCoalesceWindow is the window within which an identical (title+message+
@@ -437,7 +438,7 @@ func dispatchViaOsascript(title, message, priority string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), pushDispatchTimeout)
 	defer cancel()
 
-	if err := exec.CommandContext(ctx, "osascript", "-e", script).Run(); err != nil {
+	if err := exec.CommandContext(ctx, tools.OSAScript(), "-e", script).Run(); err != nil {
 		return fmt.Errorf("osascript: %w", err)
 	}
 
@@ -465,7 +466,7 @@ func dispatchCommandBackend(command, title, message, priority string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), pushDispatchTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd := exec.CommandContext(ctx, tools.Shell(), "-c", command)
 
 	cmd.Env = append(os.Environ(),
 		"GRAITH_NOTIFY_TITLE="+title,

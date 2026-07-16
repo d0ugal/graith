@@ -9,6 +9,7 @@ import (
 	"github.com/d0ugal/graith/internal/agent"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/output"
+	"github.com/d0ugal/graith/internal/tools"
 	"github.com/d0ugal/graith/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -64,6 +65,10 @@ var rootCmd = &cobra.Command{
 		if cfg.DataDir != "" {
 			paths = paths.WithDataDir(cfg.DataDir)
 		}
+
+		// Install the configured external-tool resolver so CLI-side git calls
+		// (store repo discovery) use the same executables as the daemon (#1238).
+		tools.Configure(cfg.Tools.Resolved())
 
 		if !jsonOutput && (agentMode || agent.Detected()) {
 			jsonOutput = true
