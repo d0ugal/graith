@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -60,6 +61,7 @@ type messageOverlayModel struct {
 	fetching bool // a fetch is in flight; don't stack another
 	width    int
 	height   int
+	keys     MessageKeys
 }
 
 func newMessageOverlayModel(selfID string, fetch func() ([]protocol.ConversationMessage, bool), names map[string]string) messageOverlayModel {
@@ -68,6 +70,7 @@ func newMessageOverlayModel(selfID string, fetch func() ([]protocol.Conversation
 		fetch:  fetch,
 		names:  names,
 		pinned: map[string]bool{},
+		keys:   DefaultMessageKeys(),
 	}
 }
 
@@ -303,19 +306,21 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "q", "esc", "ctrl+c":
+		s := msg.String()
+
+		switch {
+		case matchKey(m.keys.Cancel, s):
 			return m, tea.Quit
 		// Vertical: move the message cursor within the current thread. The
 		// viewport follows it (this is the scroll).
-		case "j", "down", "ctrl+n":
+		case matchKey(m.keys.Down, s):
 			if m.msgCursor < m.msgCount()-1 {
 				m.msgCursor++
 				m.lineScroll = 0
 			}
 
 			return m, nil
-		case "k", "up", "ctrl+p":
+		case matchKey(m.keys.Up, s):
 			if m.msgCursor > 0 {
 				m.msgCursor--
 				m.lineScroll = 0
@@ -323,13 +328,13 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			return m, nil
 		// Page within the focused message when it's taller than the viewport.
-		case "pgdown", "space", " ", "ctrl+d", "ctrl+f":
+		case matchKey(m.keys.PageDown, s):
 			// Clamp to the focused block's scrollable height so the stored value
 			// can't accumulate past the real maximum (which would make later pgup
 			// presses appear to do nothing until it drops back under the clamp).
 			m.lineScroll = min(m.lineScroll+m.pageStep(), m.maxLineScroll())
 			return m, nil
-		case "pgup", "ctrl+u", "ctrl+b":
+		case matchKey(m.keys.PageUp, s):
 			// Clamp to the current max before subtracting: a viewport resize can
 			// shrink maxLineScroll below a previously-valid lineScroll, and
 			// without this the first pgup(s) would subtract from the stale larger
@@ -338,7 +343,7 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lineScroll = max(0, min(m.lineScroll, m.maxLineScroll())-m.pageStep())
 			return m, nil
 		// Horizontal: switch conversation in the rail.
-		case "l", "right", "tab":
+		case matchKey(m.keys.NextConv, s):
 			if m.cursor < len(m.conversations)-1 {
 				m.cursor++
 				m.msgCursor = max(0, m.msgCountAt(m.cursor)-1)
@@ -346,7 +351,7 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			return m, nil
-		case "h", "left", "shift+tab":
+		case matchKey(m.keys.PrevConv, s):
 			if m.cursor > 0 {
 				m.cursor--
 				m.msgCursor = max(0, m.msgCountAt(m.cursor)-1)
@@ -356,25 +361,25 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		// Pin/unpin the focused message so it stays expanded even when not
 		// focused (the focused message is always expanded regardless).
-		case "enter":
+		case matchKey(m.keys.Pin, s):
 			if e := m.currentEntry(); e != nil && e.id != "" {
 				m.pinned[e.id] = !m.pinned[e.id]
 			}
 
 			return m, nil
 		// Pin-all / unpin-all in the current thread.
-		case "O":
+		case matchKey(m.keys.ExpandAll, s):
 			m.setAllPinned(true)
 			return m, nil
-		case "C":
+		case matchKey(m.keys.CollapseAll, s):
 			m.setAllPinned(false)
 			return m, nil
-		case "g", "home":
+		case matchKey(m.keys.Top, s):
 			m.msgCursor = 0
 			m.lineScroll = 0
 
 			return m, nil
-		case "G", "end":
+		case matchKey(m.keys.Bottom, s):
 			m.msgCursor = max(0, m.msgCount()-1)
 			m.lineScroll = 0
 
@@ -481,10 +486,21 @@ func (m messageOverlayModel) View() tea.View {
 	// single-column thread view so the overlay stays usable (and exitable).
 	var body, helpLine string
 	if w < 36 {
-		helpLine = help.Render("↑/↓ msg  PgDn/Up scroll  ⏎ pin  q close")
+		helpLine = help.Render(fmt.Sprintf("%s/%s msg  %s/%s scroll  %s pin  %s close",
+			primaryKey(m.keys.Up), primaryKey(m.keys.Down),
+			primaryKey(m.keys.PageDown), primaryKey(m.keys.PageUp),
+			primaryKey(m.keys.Pin), primaryKey(m.keys.Cancel)))
 		body = m.renderThread(max(1, w-1), bodyH)
 	} else {
-		helpLine = help.Render("↑/↓ message (auto-expands)  PgUp/Dn scroll long msg  ⏎ pin  O/C all  g/G first/last  ←/→ conversation  q close")
+		helpLine = help.Render(fmt.Sprintf(
+			"%s/%s message (auto-expands)  %s/%s scroll long msg  %s pin  %s/%s all  %s/%s first/last  %s/%s conversation  %s close",
+			primaryKey(m.keys.Up), primaryKey(m.keys.Down),
+			primaryKey(m.keys.PageUp), primaryKey(m.keys.PageDown),
+			primaryKey(m.keys.Pin),
+			primaryKey(m.keys.ExpandAll), primaryKey(m.keys.CollapseAll),
+			primaryKey(m.keys.Top), primaryKey(m.keys.Bottom),
+			primaryKey(m.keys.PrevConv), primaryKey(m.keys.NextConv),
+			primaryKey(m.keys.Cancel)))
 
 		railW := 26
 		if w < 70 {
@@ -741,8 +757,9 @@ func sanitizeMessageBody(s string) string {
 // read-only in v1 and refreshes every 2 seconds. fetch returns the conversation
 // and ok=false on a transient error (so the last good snapshot is kept).
 // Returns when the user closes the overlay; the caller then reattaches.
-func RunMessageOverlay(sessionID string, fetch func() ([]protocol.ConversationMessage, bool), names map[string]string) {
+func RunMessageOverlay(sessionID string, keys MessageKeys, fetch func() ([]protocol.ConversationMessage, bool), names map[string]string) {
 	m := newMessageOverlayModel(sessionID, fetch, names)
+	m.keys = keys
 	p := tea.NewProgram(m)
 	_, _ = p.Run()
 }

@@ -65,6 +65,11 @@ type Config struct {
 	Transcript       TranscriptConfig   `toml:"transcript"`       // [transcript] table (issue #1250)
 	Limits           LimitsConfig       `toml:"limits"`           // [limits] table (issue #1252)
 	Lifecycle        LifecycleConfig    `toml:"lifecycle"`        // [lifecycle] table (issue #1243)
+
+	// Warnings collects non-fatal configuration problems detected at load time
+	// (e.g. conflicting keybindings). They are surfaced to the user but do not
+	// prevent startup. Not serialised. See issue #1233.
+	Warnings []string `toml:"-"`
 }
 
 // ConfigReloadDebounceDefault is the quiet period the config-file watcher waits
@@ -2426,6 +2431,104 @@ type Keybindings struct {
 	ScrollMode          string `toml:"scroll_mode"`
 	Shell               string `toml:"shell"`
 	OrchestratorSession string `toml:"orchestrator_session"`
+	// Prefix-action commands issued from an attached session (prefix key then
+	// one of these). Previously hard-coded as m/a/r (issue #1233).
+	Messages       string `toml:"messages"`
+	Approvals      string `toml:"approvals"`
+	RestartSession string `toml:"restart_session"`
+	// Overlay holds the keys used inside the full-screen terminal overlays
+	// (dashboard, approval prompt, message viewer, scroll pager). See #1233.
+	Overlay OverlayKeybindings `toml:"overlay"`
+}
+
+// Conflicts reports keybinding collisions among the prefix-action commands —
+// the keys pressed after the prefix while attached to a session. Two commands
+// bound to the same key mean only the first (in the passthrough switch order)
+// ever fires, so the config is almost certainly a mistake. Picker/overlay keys
+// operate in a separate mode and may legitimately reuse a prefix-command key,
+// so they are not compared here. Each returned string names one collision; an
+// empty slice means no conflicts. The result feeds a warning, not an error, so
+// a misconfiguration is surfaced without refusing to start (issue #1233).
+func (k Keybindings) Conflicts() []string {
+	binds := []struct{ label, key string }{
+		{"detach", k.Detach},
+		{"session_list", k.SessionList},
+		{"shell", k.Shell},
+		{"next_session", k.NextSession},
+		{"prev_session", k.PrevSession},
+		{"last_session", k.LastSession},
+		{"new_session", k.NewSession},
+		{"fork_session", k.ForkSession},
+		{"orchestrator_session", k.OrchestratorSession},
+		{"rename_session", k.RenameSession},
+		{"scroll_mode", k.ScrollMode},
+		{"messages", k.Messages},
+		{"approvals", k.Approvals},
+		{"restart_session", k.RestartSession},
+	}
+
+	seen := map[string][]string{}
+
+	for _, b := range binds {
+		if b.key == "" {
+			continue
+		}
+
+		seen[b.key] = append(seen[b.key], b.label)
+	}
+
+	// Sort the keys so the warning order is deterministic.
+	keys := make([]string, 0, len(seen))
+	for key := range seen {
+		keys = append(keys, key)
+	}
+
+	sort.Strings(keys)
+
+	var conflicts []string
+
+	for _, key := range keys {
+		labels := seen[key]
+		if len(labels) > 1 {
+			conflicts = append(conflicts, fmt.Sprintf(
+				"keybinding %q is bound to multiple prefix commands: %s",
+				key, strings.Join(labels, ", ")))
+		}
+	}
+
+	return conflicts
+}
+
+// OverlayKeybindings configures the keys used inside the terminal TUI overlays.
+// Every value is a space-separated list of bubbletea key names (single letters,
+// "up", "down", "enter", "esc", "pgup", "ctrl+d", ...); pressing any listed key
+// triggers the action. Empty fields fall back to the built-in defaults, so a
+// partial [keybindings.overlay] table only overrides the keys it names.
+type OverlayKeybindings struct {
+	// Shared navigation, applied across the overlays.
+	Up       string `toml:"up"`
+	Down     string `toml:"down"`
+	PageUp   string `toml:"page_up"`
+	PageDown string `toml:"page_down"`
+	Top      string `toml:"top"`
+	Bottom   string `toml:"bottom"`
+	Confirm  string `toml:"confirm"`
+	Cancel   string `toml:"cancel"`
+	// Dashboard actions.
+	DashboardAttach string `toml:"dashboard_attach"`
+	DashboardStop   string `toml:"dashboard_stop"`
+	DashboardDelete string `toml:"dashboard_delete"`
+	DashboardResume string `toml:"dashboard_resume"`
+	// Approval prompt actions.
+	ApprovalAllow    string `toml:"approval_allow"`
+	ApprovalDeny     string `toml:"approval_deny"`
+	ApprovalAllowAll string `toml:"approval_allow_all"`
+	// Message viewer actions.
+	MessagePin         string `toml:"message_pin"`
+	MessageExpandAll   string `toml:"message_expand_all"`
+	MessageCollapseAll string `toml:"message_collapse_all"`
+	MessageNextConv    string `toml:"message_next_conversation"`
+	MessagePrevConv    string `toml:"message_prev_conversation"`
 }
 
 type Notifications struct {
@@ -4320,6 +4423,8 @@ func Load(path string) (*Config, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
 	}
+
+	cfg.Warnings = append(cfg.Warnings, cfg.Keybindings.Conflicts()...)
 
 	return cfg, nil
 }

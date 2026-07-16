@@ -11,26 +11,72 @@ draft: false
 
 ```toml
 [keybindings]
-prefix              = "ctrl+b"  # prefix key
-new_session         = "c"       # create a session (configurable)
-fork_session        = "f"       # fork the current session (configurable)
-next_session        = "n"       # next session (configurable)
-prev_session        = "p"       # previous session (configurable)
-last_session        = "l"       # last (most recently attached) session (configurable)
-orchestrator_session = "o"      # switch to orchestrator session (configurable)
-detach              = "d"       # detach (reserved, currently hardcoded)
-session_list        = "w"       # open the session picker overlay (reserved, currently hardcoded)
-shell               = "s"       # open a shell in the worktree (reserved, currently hardcoded)
-delete_session      = "x"       # reserved, not currently wired
-resume_session      = "R"       # reserved, not currently wired
-rename_session      = ","       # reserved, not currently wired
-search              = "/"       # reserved, not currently wired
-scroll_mode         = "["       # reserved, not currently wired
+prefix               = "ctrl+b"  # prefix key
+new_session          = "c"       # create a session
+fork_session         = "f"       # fork the current session
+delete_session       = "x"       # delete a session in the picker
+detach               = "d"       # detach without stopping the agent
+session_list         = "w"       # open the session picker overlay
+next_session         = "n"       # next session
+prev_session         = "p"       # previous session
+last_session         = "l"       # last (most recently attached) session
+resume_session       = "R"       # open the restart menu for a session in the picker
+rename_session       = ","       # rename the current session
+search               = "/"       # filter sessions in the picker
+scroll_mode          = "["       # open a scrollable pager over the session history
+shell                = "s"       # open a shell in the worktree
+orchestrator_session = "o"       # switch to the orchestrator session
+messages             = "m"       # open the message viewer for the current session
+approvals            = "a"       # open the pending-approvals prompt
+restart_session      = "r"       # restart (resume) the current session
 ```
 
-Only `prefix`, `new_session`, `fork_session`, `next_session`, `prev_session`, `last_session`, and `orchestrator_session` are currently read from config. Other keys are present in the config struct but hardcoded in passthrough or not yet wired.
+Every key above is read from config. The prefix key accepts values like
+`ctrl+b`, `ctrl+x`, or a single character; the rest are single characters pressed
+after the prefix (or, for `delete_session`/`resume_session`/`search`, inside the
+session picker). graith handles both raw control bytes and Kitty keyboard
+protocol sequences, so it works in terminals like Ghostty that use the extended
+protocol.
 
-The prefix key accepts values like `ctrl+b`, `ctrl+x`, or a single character. graith handles both raw control bytes and Kitty keyboard protocol sequences, so it works in terminals like Ghostty that use the extended protocol.
+If two prefix commands are bound to the same key, graith prints a warning at
+load time and starts anyway (only the first command in the passthrough order
+would fire).
+
+### Overlay keys
+
+The full-screen terminal overlays (dashboard, approval prompt, message viewer,
+scroll pager) read their keys from `[keybindings.overlay]`. Each value is a
+space-separated list of [Bubble Tea](https://github.com/charmbracelet/bubbletea)
+key names; pressing any listed key triggers the action. A partial table
+overrides only the keys it names.
+
+```toml
+[keybindings.overlay]
+# Shared navigation.
+up        = "k up"
+down      = "j down"
+page_up   = "pgup ctrl+u ctrl+b"
+page_down = "pgdown space ctrl+d ctrl+f"
+top       = "g home"
+bottom    = "G end"
+confirm   = "enter y"                  # confirm a prompt (e.g. delete/stop)
+cancel    = "q esc"                    # close the overlay / cancel
+# Dashboard actions.
+dashboard_attach = "enter a"
+dashboard_stop   = "s"
+dashboard_delete = "x d"
+dashboard_resume = "r"
+# Approval prompt actions.
+approval_allow     = "y enter"
+approval_deny      = "n x"
+approval_allow_all = "a"
+# Message viewer actions.
+message_pin               = "enter"
+message_expand_all        = "O"
+message_collapse_all      = "C"
+message_next_conversation = "l right tab"
+message_prev_conversation = "h left shift+tab"
+```
 
 See [Keybindings]({{< relref "/docs/keybindings.md" >}}) for the complete keybinding reference.
 

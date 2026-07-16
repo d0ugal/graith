@@ -164,6 +164,9 @@ func TestPassthroughKeysFromConfig(t *testing.T) {
 			NewSession:          "c",
 			ForkSession:         "f",
 			OrchestratorSession: "o",
+			Messages:            "m",
+			Approvals:           "a",
+			RestartSession:      "r",
 		},
 	}
 
@@ -180,9 +183,59 @@ func TestPassthroughKeysFromConfig(t *testing.T) {
 		NewSession:          'c',
 		ForkSession:         'f',
 		OrchestratorSession: 'o',
+		Messages:            'm',
+		Approvals:           'a',
+		RestartSession:      'r',
 	}
 	if keys != want {
 		t.Errorf("passthroughKeysFromConfig() = %+v, want %+v", keys, want)
+	}
+}
+
+// TestOverlayKeysFromConfigOverrideAndDefault verifies the [keybindings.overlay]
+// builders override a named key while falling back to the built-in default for
+// an unset one (issue #1233).
+func TestOverlayKeysFromConfigOverrideAndDefault(t *testing.T) {
+	oldCfg := cfg
+
+	t.Cleanup(func() { cfg = oldCfg })
+
+	cfg = &config.Config{
+		Keybindings: config.Keybindings{
+			Overlay: config.OverlayKeybindings{
+				DashboardAttach: "z",
+				ApprovalAllow:   "Y",
+				MessagePin:      "P",
+			},
+		},
+	}
+
+	dash := dashboardKeysFromConfig()
+	if len(dash.Attach) != 1 || dash.Attach[0] != "z" {
+		t.Errorf("dashboard attach = %v, want [z]", dash.Attach)
+	}
+	// Unset dashboard_stop keeps the built-in default.
+	if want := client.DefaultDashboardKeys().Stop; len(dash.Stop) != len(want) || dash.Stop[0] != want[0] {
+		t.Errorf("dashboard stop = %v, want default %v", dash.Stop, want)
+	}
+
+	appr := approvalKeysFromConfig()
+	if len(appr.Allow) != 1 || appr.Allow[0] != "Y" {
+		t.Errorf("approval allow = %v, want [Y]", appr.Allow)
+	}
+
+	msg := messageKeysFromConfig()
+	if len(msg.Pin) != 1 || msg.Pin[0] != "P" {
+		t.Errorf("message pin = %v, want [P]", msg.Pin)
+	}
+	// Unset message_next_conversation keeps the default multi-key list.
+	if want := client.DefaultMessageKeys().NextConv; len(msg.NextConv) != len(want) {
+		t.Errorf("message next-conv = %v, want default %v", msg.NextConv, want)
+	}
+
+	scroll := scrollKeysFromConfig()
+	if want := client.DefaultScrollKeys().Top; len(scroll.Top) != len(want) {
+		t.Errorf("scroll top = %v, want default %v", scroll.Top, want)
 	}
 }
 

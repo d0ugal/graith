@@ -18,7 +18,7 @@ var dashboardCmd = &cobra.Command{
 		}
 
 		for {
-			result := client.RunDashboard(sessions, func() []protocol.SessionInfo {
+			result := client.RunDashboard(sessions, dashboardKeysFromConfig(), func() []protocol.SessionInfo {
 				s, err := fetchSessions()
 				if err != nil {
 					return nil

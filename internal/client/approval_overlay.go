@@ -23,11 +23,13 @@ type approvalModel struct {
 	cursor    int
 	width     int
 	height    int
+	keys      ApprovalKeys
 }
 
 func newApprovalModel(approvals []protocol.ApprovalInfo) approvalModel {
 	return approvalModel{
 		approvals: approvals,
+		keys:      DefaultApprovalKeys(),
 	}
 }
 
@@ -44,25 +46,27 @@ func (m approvalModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "q", "esc":
+		s := msg.String()
+
+		switch {
+		case matchKey(m.keys.Cancel, s):
 			return m, tea.Quit
 
-		case "j", "down":
+		case matchKey(m.keys.Down, s):
 			if m.cursor < len(m.approvals)-1 {
 				m.cursor++
 			}
 
 			return m, nil
 
-		case "k", "up":
+		case matchKey(m.keys.Up, s):
 			if m.cursor > 0 {
 				m.cursor--
 			}
 
 			return m, nil
 
-		case "y", "enter":
+		case matchKey(m.keys.Allow, s):
 			if len(m.approvals) > 0 {
 				m.results = append(m.results, ApprovalResult{
 					RequestID: m.approvals[m.cursor].RequestID,
@@ -81,7 +85,7 @@ func (m approvalModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			return m, nil
 
-		case "n", "x":
+		case matchKey(m.keys.Deny, s):
 			if len(m.approvals) > 0 {
 				m.results = append(m.results, ApprovalResult{
 					RequestID: m.approvals[m.cursor].RequestID,
@@ -101,7 +105,7 @@ func (m approvalModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			return m, nil
 
-		case "a":
+		case matchKey(m.keys.AllowAll, s):
 			for _, a := range m.approvals {
 				m.results = append(m.results, ApprovalResult{
 					RequestID: a.RequestID,
@@ -179,7 +183,12 @@ func (m approvalModel) View() tea.View {
 	helpStyle := lipgloss.NewStyle().Foreground(colorFaint)
 
 	panelContent.WriteString("\n")
-	panelContent.WriteString(helpStyle.Render("y allow  n deny  a allow-all  q cancel"))
+	panelContent.WriteString(helpStyle.Render(fmt.Sprintf("%s allow  %s deny  %s allow-all  %s cancel",
+		keyHint(m.keys.Allow),
+		keyHint(m.keys.Deny),
+		keyHint(m.keys.AllowAll),
+		keyHint(m.keys.Cancel),
+	)))
 
 	panel := lipgloss.NewStyle().
 		Width(panelWidth).
@@ -487,12 +496,13 @@ func wrapLines(s string, maxWidth int) []string {
 // RunApprovalOverlay launches the bubbletea approval overlay listing pending
 // approvals. Returns the list of decisions made by the user. After each
 // approve/deny the overlay stays open; it auto-closes when empty.
-func RunApprovalOverlay(approvals []protocol.ApprovalInfo) []ApprovalResult {
+func RunApprovalOverlay(approvals []protocol.ApprovalInfo, keys ApprovalKeys) []ApprovalResult {
 	if len(approvals) == 0 {
 		return nil
 	}
 
 	m := newApprovalModel(approvals)
+	m.keys = keys
 	p := tea.NewProgram(m)
 
 	final, err := p.Run()
