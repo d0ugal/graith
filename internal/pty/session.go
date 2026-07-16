@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/hinshun/vt10x"
 )
 
 type Session struct {
@@ -26,7 +25,7 @@ type Session struct {
 	mu               sync.RWMutex
 	writeMu          sync.Mutex
 	writers          []io.Writer
-	screen           vt10x.Terminal
+	screen           Terminal
 	done             chan struct{}
 	readDone         chan struct{}
 	exitCode         int
@@ -117,7 +116,7 @@ func NewSession(opts SessionOpts) (*Session, error) {
 
 	s := &Session{
 		ID: opts.ID, Cmd: cmd, Ptmx: ptmx, Scrollback: sb,
-		screen:    vt10x.New(vt10x.WithSize(int(opts.Cols), int(opts.Rows))),
+		screen:    newTerminal(int(opts.Cols), int(opts.Rows)),
 		done:      make(chan struct{}),
 		readDone:  make(chan struct{}),
 		createdAt: launchedAt,
@@ -181,7 +180,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		ID:               opts.ID,
 		Ptmx:             ptmx,
 		Scrollback:       sb,
-		screen:           vt10x.New(vt10x.WithSize(cols, rows)),
+		screen:           newTerminal(cols, rows),
 		done:             make(chan struct{}),
 		readDone:         make(chan struct{}),
 		adoptedPID:       opts.PID,
@@ -661,6 +660,10 @@ func (s *Session) ForceKill() error {
 func (s *Session) Close() {
 	_ = s.Ptmx.Close()
 	<-s.readDone
+	// readDone is closed once readLoop returns, so no goroutine writes to the
+	// screen after this point; closing it stops the emulator's response-drain
+	// goroutine.
+	_ = s.screen.Close()
 	_ = s.Scrollback.Close()
 }
 
