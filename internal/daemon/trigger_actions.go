@@ -418,8 +418,9 @@ func (sm *SessionManager) actionScenario(ctx context.Context, t *config.TriggerC
 		Sessions:        inputs,
 		Triggers:        sf.Triggers,
 	}
+	lc := sm.Config().Lifecycle
 	//nolint:contextcheck // StartScenario runs its own session lifecycle, detached from the fire ctx.
-	st, err := sm.StartScenario(msg, 24, 80)
+	st, err := sm.StartScenario(msg, lc.DefaultRowsOrDefault(), lc.DefaultColsOrDefault())
 	if err != nil {
 		return "", err
 	}
@@ -558,6 +559,8 @@ func (sm *SessionManager) createTriggerSession(req createTriggerReq) (SessionSta
 		agent = sm.Config().DefaultAgent
 	}
 
+	lc := sm.Config().Lifecycle
+
 	return sm.Create(CreateOpts{
 		Name:            req.name,
 		AgentName:       agent,
@@ -572,8 +575,8 @@ func (sm *SessionManager) createTriggerSession(req createTriggerReq) (SessionSta
 		TrackerIssue:    req.trackerIssue,
 		AutoCleanup:     req.autoCleanup,
 		IdleTimeoutSecs: req.idleTimeoutSecs,
-		Rows:            24,
-		Cols:            80,
+		Rows:            lc.DefaultRowsOrDefault(),
+		Cols:            lc.DefaultColsOrDefault(),
 	})
 }
 

@@ -153,7 +153,8 @@ func (sm *SessionManager) resumeForInbox(targetID, senderID, senderName string) 
 	sm.log.Info("auto-resuming stopped session on inbox message",
 		"session", sess.Name, "id", targetID, "sender", sender)
 
-	if _, err := sm.resumeWithSummary(targetID, 24, 80, summary); err != nil {
+	lc := sm.Config().Lifecycle
+	if _, err := sm.resumeWithSummary(targetID, lc.DefaultRowsOrDefault(), lc.DefaultColsOrDefault(), summary); err != nil {
 		sm.log.Error("failed to auto-resume session for inbox",
 			"session", targetID, "err", err)
 	}

@@ -196,16 +196,19 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		"unix_sockets", opts.UnixSockets,
 		"workdir", opts.WorktreeDir)
 
+	lc := sm.Config().Lifecycle
+
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,
 		Command:    command,
 		Args:       finalArgs,
 		Dir:        scratchDir,
 		Env:        env,
-		Rows:       24,
-		Cols:       80,
+		Rows:       lc.DefaultRowsOrDefault(),
+		Cols:       lc.DefaultColsOrDefault(),
 		LogPath:    logPath,
-		MaxLogSize: 100 * 1024 * 1024,
+		MaxLogSize: lc.MaxLogBytesOrDefault(),
+		InputDelay: lc.InputDelayDuration(),
 		Logger:     sm.log,
 	})
 	if err != nil {
@@ -395,6 +398,11 @@ func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {
 	_, hasLivePTY := sm.sessions[orchID]
 	sm.mu.RUnlock()
 
+	// Default launch geometry for the orchestrator (no attaching client yet); a
+	// client resizes on attach.
+	lc := sm.Config().Lifecycle
+	defRows, defCols := lc.DefaultRowsOrDefault(), lc.DefaultColsOrDefault()
+
 	switch {
 	case orchID == "":
 		sm.log.Info("creating orchestrator session")
@@ -421,7 +429,7 @@ func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {
 		sm.mu.Unlock()
 
 		//nolint:contextcheck // session lifecycle is intentionally detached from the daemon-boot ctx: the orchestrator session must persist, so Resume uses its own bounded background timeouts rather than this transient ctx.
-		if _, err := sm.Resume(orchID, 24, 80); err != nil {
+		if _, err := sm.Resume(orchID, defRows, defCols); err != nil {
 			sm.log.Error("failed to resume orchestrator after recovery", "id", orchID, "err", err)
 		}
 
@@ -436,7 +444,7 @@ func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {
 		sm.mu.Unlock()
 
 		//nolint:contextcheck // session lifecycle is intentionally detached from the daemon-boot ctx: the orchestrator session must persist, so Resume uses its own bounded background timeouts rather than this transient ctx.
-		if _, err := sm.Resume(orchID, 24, 80); err != nil {
+		if _, err := sm.Resume(orchID, defRows, defCols); err != nil {
 			sm.log.Error("failed to resume user-stopped orchestrator on boot", "id", orchID, "err", err)
 		}
 
@@ -444,7 +452,7 @@ func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {
 		sm.log.Info("resuming orchestrator", "id", orchID, "status", orchStatus)
 
 		//nolint:contextcheck // session lifecycle is intentionally detached from the daemon-boot ctx: the orchestrator session must persist, so Resume uses its own bounded background timeouts rather than this transient ctx.
-		if _, err := sm.Resume(orchID, 24, 80); err != nil {
+		if _, err := sm.Resume(orchID, defRows, defCols); err != nil {
 			sm.log.Error("failed to resume orchestrator", "id", orchID, "err", err)
 		}
 	}
@@ -544,8 +552,10 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 		sm.mu.Unlock()
 	}
 
+	lc := sm.Config().Lifecycle
+
 	//nolint:contextcheck // session lifecycle is intentionally detached from the restart-scheduling ctx: the orchestrator session must persist, so Resume uses its own bounded background timeouts rather than this transient ctx.
-	if _, err := sm.Resume(id, 24, 80); err != nil {
+	if _, err := sm.Resume(id, lc.DefaultRowsOrDefault(), lc.DefaultColsOrDefault()); err != nil {
 		sm.log.Error("failed to auto-restart orchestrator", "id", id, "err", err)
 	} else {
 		sm.log.Info("orchestrator auto-restarted", "id", id)

@@ -108,9 +108,35 @@ interval = "1h"          # how often to pull (must be at least 1 minute)
 # a burst of `gr new` doesn't stampede, and recovers sessions that stall during
 # launch (never produce output, sit at agent_status "unknown"). See issue #1092.
 [launch]
-max_concurrent = 3       # max agent spawns in their startup window at once (< 1 => default 3)
-startup_timeout = "3m"   # kill+restart a session stuck with no output past this ("0" disables the watchdog)
-settle_timeout = "10s"   # how long a launch holds its slot waiting for first output ("0" => release right after spawn)
+max_concurrent = 3         # max agent spawns in their startup window at once (< 1 => default 3)
+startup_timeout = "3m"     # kill+restart a session stuck with no output past this ("0" disables the watchdog)
+settle_timeout = "10s"     # how long a launch holds its slot waiting for first output ("0" => release right after spawn)
+max_restarts = 3           # consecutive watchdog restarts before a stuck session is errored (< 1 => default; disable the watchdog via startup_timeout = "0")
+watchdog_interval = "15s"  # how often the startup watchdog scans for stuck sessions (next daemon start)
+slot_poll_interval = "100ms" # how often a held launch slot polls a fresh session for first output
+
+# Session-lifecycle & PTY policy: the signal-escalation waits, teardown grace,
+# adopted-PTY babysit timing, scrollback hydration, terminal-input pacing, the
+# default launch geometry, and the per-session log cap. The signal-escalation
+# ORDER (interrupt -> SIGTERM -> SIGKILL) is a code invariant; only the waits
+# between steps are tunable. Duration fields fall back to the defaults shown when
+# empty or non-positive (a zero wait would escalate instantly or busy-loop).
+# Geometry, hydration, and the log cap apply only to sessions launched or adopted
+# after the change. See issue #1243.
+[lifecycle]
+convert_settle_timeout = "5s"      # interrupt->settle wait before a converting headless session escalates to SIGTERM
+convert_kill_timeout = "3s"        # SIGTERM step before the final SIGKILL during convert
+convert_force_kill_timeout = "3s"  # final wait after SIGKILL so a wedged process can't stall the convert
+mass_exit_window = "2s"            # window over which many near-simultaneous exits are flagged as an external signal
+mass_exit_threshold = 5            # exits within mass_exit_window that trigger the OOM/jetsam warning (< 1 => default)
+process_kill_grace = "5s"          # wait after SIGTERM before SIGKILL when killing a session's process group
+adopted_timeout = "24h"            # safety deadline for the adopted-PTY babysit loop when identity can't be verified
+adopted_poll_interval = "1s"       # how often the adopted-PTY babysit loop polls for process exit
+scrollback_hydration_bytes = 131072 # bytes of scrollback tail replayed into an adopted session's screen (< 0 => default; "0" disables)
+input_delay = "50ms"               # pause between typed text and the submit carriage return (non-positive => default)
+default_cols = 80                  # default terminal columns for daemon launch paths with no client geometry (< 1 => default)
+default_rows = 24                  # default terminal rows for daemon launch paths with no client geometry (< 1 => default)
+max_log_bytes = 104857600          # per-session scrollback log cap in bytes (< 0 => default; "0" => unlimited)
 
 # Detection & status-classification policy: the timing that governs how the
 # daemon scans PTY scrollback, refreshes remote refs, and decides agent status

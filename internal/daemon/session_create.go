@@ -797,6 +797,8 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	var ptySess SessionDriver
 
+	lc := sm.Config().Lifecycle
+
 	if driverKind == DriverHeadless {
 		ptySess, err = headless.New(headless.Opts{
 			ID:               id,
@@ -805,7 +807,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			Dir:              worktreePath,
 			Env:              env,
 			LogPath:          logPath,
-			MaxLogSize:       100 * 1024 * 1024,
+			MaxLogSize:       lc.MaxLogBytesOrDefault(),
 			Prompt:           prompt,
 			Control:          true,
 			OnPermission:     sm.headlessPermissionFunc(id),
@@ -824,7 +826,8 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			Rows:       rows,
 			Cols:       cols,
 			LogPath:    logPath,
-			MaxLogSize: 100 * 1024 * 1024,
+			MaxLogSize: lc.MaxLogBytesOrDefault(),
+			InputDelay: lc.InputDelayDuration(),
 			Logger:     sm.log,
 		})
 	}

@@ -594,6 +594,10 @@ func (sm *SessionManager) SessionForToken(token string) string {
 func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 	sm.mu.Lock()
 
+	// sm.mu is held, so sm.cfg is read directly rather than via Config() (which
+	// would take the read lock and deadlock).
+	lc := sm.cfg.Lifecycle
+
 	var adoptedIDs []string
 
 	for _, us := range manifest.Sessions {
@@ -606,12 +610,17 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 		logPath := filepath.Join(sm.paths.LogDir, us.ID+".log")
 
 		ptySess, err := grpty.AdoptSession(grpty.AdoptOpts{
-			ID:         us.ID,
-			Fd:         uintptr(us.Fd),
-			PID:        us.PID,
-			LogPath:    logPath,
-			MaxLogSize: 100 * 1024 * 1024,
-			Logger:     sm.log,
+			ID:             us.ID,
+			Fd:             uintptr(us.Fd),
+			PID:            us.PID,
+			LogPath:        logPath,
+			MaxLogSize:     lc.MaxLogBytesOrDefault(),
+			DefaultRows:    lc.DefaultRowsOrDefault(),
+			DefaultCols:    lc.DefaultColsOrDefault(),
+			HydrationBytes: lc.ScrollbackHydrationBytesOrDefault(),
+			PollTimeout:    lc.AdoptedTimeoutDuration(),
+			PollInterval:   lc.AdoptedPollIntervalDuration(),
+			Logger:         sm.log,
 		})
 		if err != nil {
 			sm.log.Warn("failed to adopt session", "id", us.ID, "err", err)

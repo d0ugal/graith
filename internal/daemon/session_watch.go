@@ -208,17 +208,17 @@ func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 	sm.autoCleanupStopped(id)
 }
 
-const (
-	massExitWindow    = 2 * time.Second
-	massExitThreshold = 5
-)
-
 // recordExit tracks session exit times and logs a warning when many sessions
 // exit within a short window, which typically indicates an external signal
-// (e.g. macOS jetsam/memory pressure killing processes). Caller must hold sm.mu.
+// (e.g. macOS jetsam/memory pressure killing processes). Caller must hold sm.mu,
+// so sm.cfg is read directly rather than via Config() (which would take the read
+// lock and deadlock).
 func (sm *SessionManager) recordExit() {
+	window := sm.cfg.Lifecycle.MassExitWindowDuration()
+	threshold := sm.cfg.Lifecycle.MassExitThresholdOrDefault()
+
 	now := time.Now()
-	cutoff := now.Add(-massExitWindow)
+	cutoff := now.Add(-window)
 
 	// Prune old entries.
 	start := 0
@@ -228,10 +228,10 @@ func (sm *SessionManager) recordExit() {
 
 	sm.recentExits = append(sm.recentExits[start:], now)
 
-	if len(sm.recentExits) == massExitThreshold {
+	if len(sm.recentExits) == threshold {
 		sm.log.Warn("mass session exit detected: likely external signal (e.g. OOM killer, jetsam)",
 			"count", len(sm.recentExits),
-			"window", massExitWindow.String())
+			"window", window.String())
 	}
 }
 

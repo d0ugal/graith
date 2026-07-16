@@ -5863,19 +5863,19 @@ func TestRecordExit_MassExitDetection(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	// Record exits below threshold — no warning expected.
-	for i := 0; i < massExitThreshold-1; i++ {
+	for i := 0; i < config.MassExitThresholdDefault-1; i++ {
 		sm.recordExit()
 	}
 
-	if len(sm.recentExits) != massExitThreshold-1 {
-		t.Errorf("recentExits = %d, want %d", len(sm.recentExits), massExitThreshold-1)
+	if len(sm.recentExits) != config.MassExitThresholdDefault-1 {
+		t.Errorf("recentExits = %d, want %d", len(sm.recentExits), config.MassExitThresholdDefault-1)
 	}
 
 	// One more should hit the threshold (warning is logged, not checked here).
 	sm.recordExit()
 
-	if len(sm.recentExits) != massExitThreshold {
-		t.Errorf("recentExits = %d, want %d", len(sm.recentExits), massExitThreshold)
+	if len(sm.recentExits) != config.MassExitThresholdDefault {
+		t.Errorf("recentExits = %d, want %d", len(sm.recentExits), config.MassExitThresholdDefault)
 	}
 }
 
@@ -6662,14 +6662,14 @@ func TestLoadStateRoundTripCov2(t *testing.T) {
 func TestKillProcessGroupCov2(t *testing.T) {
 	t.Run("refuses pid <= 1", func(t *testing.T) {
 		for _, pid := range []int{-3, 0, 1} {
-			if err := killProcessGroup(pid); err == nil {
+			if err := killProcessGroup(pid, config.ProcessKillGraceDefault); err == nil {
 				t.Errorf("killProcessGroup(%d) = nil, want refusal error", pid)
 			}
 		}
 	})
 
 	t.Run("dead group returns nil", func(t *testing.T) {
-		if err := killProcessGroup(1 << 30); err != nil {
+		if err := killProcessGroup(1<<30, config.ProcessKillGraceDefault); err != nil {
 			t.Errorf("killProcessGroup(dead) = %v, want nil", err)
 		}
 	})
@@ -6677,7 +6677,7 @@ func TestKillProcessGroupCov2(t *testing.T) {
 	t.Run("terminates live group", func(t *testing.T) {
 		pid := spawnReapableSleeper(t)
 
-		if err := killProcessGroup(pid); err != nil {
+		if err := killProcessGroup(pid, config.ProcessKillGraceDefault); err != nil {
 			t.Fatalf("killProcessGroup(live) = %v, want nil", err)
 		}
 

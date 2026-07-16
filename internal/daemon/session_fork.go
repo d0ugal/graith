@@ -621,6 +621,8 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	// Pre-spawn time for native session-id capture (see Create).
 	startedAt := time.Now()
 
+	lc := sm.Config().Lifecycle
+
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,
 		Command:    command,
@@ -630,7 +632,8 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		Rows:       rows,
 		Cols:       cols,
 		LogPath:    logPath,
-		MaxLogSize: 100 * 1024 * 1024,
+		MaxLogSize: lc.MaxLogBytesOrDefault(),
+		InputDelay: lc.InputDelayDuration(),
 		Logger:     sm.log,
 	})
 	if err != nil {

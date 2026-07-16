@@ -156,12 +156,11 @@ func TestConvertGuardSaveFailureRollsBack(t *testing.T) {
 // timeout would fire, proving it settled on the interrupt rather than escalating
 // to SIGTERM/SIGKILL.
 func TestStopDriverForConvertSettlesOnInterrupt(t *testing.T) {
-	oldSettle := convertSettleTimeout
-	convertSettleTimeout = 5 * time.Second
-
-	t.Cleanup(func() { convertSettleTimeout = oldSettle })
+	const settle = 5 * time.Second
 
 	sm := convertTestManager(t)
+	sm.cfg.Lifecycle.ConvertSettleTimeout = settle.String()
+
 	driver := startConvertFake(t, sm, "bonnie", "trap 'exit 0' INT; sleep 30")
 
 	start := time.Now()
@@ -178,8 +177,8 @@ func TestStopDriverForConvertSettlesOnInterrupt(t *testing.T) {
 		t.Fatalf("stopDriverForConvert did not settle on SIGINT (would have escalated)")
 	}
 
-	if elapsed := time.Since(start); elapsed >= convertSettleTimeout {
-		t.Fatalf("settled after %v (>= settle timeout %v): it escalated instead of settling", elapsed, convertSettleTimeout)
+	if elapsed := time.Since(start); elapsed >= settle {
+		t.Fatalf("settled after %v (>= settle timeout %v): it escalated instead of settling", elapsed, settle)
 	}
 
 	if !driver.Exited() {
@@ -190,12 +189,10 @@ func TestStopDriverForConvertSettlesOnInterrupt(t *testing.T) {
 // TestStopDriverForConvertEscalates: a process ignoring SIGINT and SIGTERM is
 // eventually SIGKILLed. Timeouts are shrunk so the test is quick.
 func TestStopDriverForConvertEscalates(t *testing.T) {
-	oldSettle, oldKill := convertSettleTimeout, convertKillTimeout
-	convertSettleTimeout, convertKillTimeout = 200*time.Millisecond, 200*time.Millisecond
-
-	t.Cleanup(func() { convertSettleTimeout, convertKillTimeout = oldSettle, oldKill })
-
 	sm := convertTestManager(t)
+	sm.cfg.Lifecycle.ConvertSettleTimeout = "200ms"
+	sm.cfg.Lifecycle.ConvertKillTimeout = "200ms"
+
 	driver := startConvertFake(t, sm, "scunner", "trap '' INT TERM; sleep 30")
 
 	done := make(chan struct{})

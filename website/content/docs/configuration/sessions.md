@@ -74,16 +74,50 @@ Launching several sessions at once can overwhelm the machine: heavyweight agent 
 
 ```toml
 [launch]
-max_concurrent  = 3      # max agent spawns in their startup window at once (< 1 => default 3)
-startup_timeout = "3m"   # kill + restart a session stuck with no output past this ("0" disables the watchdog)
-settle_timeout  = "10s"  # how long a launch holds its throttle slot waiting for first output ("0" => release right after spawn)
+max_concurrent     = 3        # max agent spawns in their startup window at once (< 1 => default 3)
+startup_timeout    = "3m"     # kill + restart a session stuck with no output past this ("0" disables the watchdog)
+settle_timeout     = "10s"    # how long a launch holds its throttle slot waiting for first output ("0" => release right after spawn)
+max_restarts       = 3        # consecutive watchdog restarts before a stuck session is errored (< 1 => default)
+watchdog_interval  = "15s"    # how often the watchdog scans for stuck sessions (next daemon start)
+slot_poll_interval = "100ms"  # how often a held launch slot polls a fresh session for first output
 ```
 
-**Throttle.** A launch acquires one of `max_concurrent` slots just before spawning the agent and holds it across the risky startup window, releasing it as soon as the session produces its first output or `settle_timeout` elapses (whichever comes first). This bounds how many agents are *initialising* at once — the actual source of the stampede — so a burst starts cleanly in sequence rather than all at once. `gr new` still returns promptly; the slot is released in the background.
+**Throttle.** A launch acquires one of `max_concurrent` slots just before spawning the agent and holds it across the risky startup window, releasing it as soon as the session produces its first output or `settle_timeout` elapses (whichever comes first). This bounds how many agents are *initialising* at once — the actual source of the stampede — so a burst starts cleanly in sequence rather than all at once. `gr new` still returns promptly; the slot is released in the background. `slot_poll_interval` is how often a held slot re-checks a fresh session for its first output.
 
-**Watchdog.** A background loop looks for sessions that are running but have never produced output, sit at `agent_status: unknown`, and have been up longer than `startup_timeout`. Each is killed and restarted fresh (the restart uses a fresh `--session-id` rather than resuming a conversation that was never persisted). A per-session cap prevents restart storms for a permanently-broken session; the counter resets once the session produces output. Set `startup_timeout = "0"` to disable the watchdog entirely.
+**Watchdog.** A background loop, ticking every `watchdog_interval`, looks for sessions that are running but have never produced output, sit at `agent_status: unknown`, and have been up longer than `startup_timeout`. Each is killed and restarted fresh (the restart uses a fresh `--session-id` rather than resuming a conversation that was never persisted). `max_restarts` caps consecutive watchdog restarts for a permanently-broken session before it is marked errored; the counter resets once the session produces output. To disable the watchdog entirely set `startup_timeout = "0"` (not `max_restarts = 0`, which falls back to the default).
 
-`max_concurrent` and `startup_timeout` are re-read on config reload (`SIGHUP` / edit-and-save), so you can tune them without restarting the daemon.
+`max_concurrent`, `startup_timeout`, `settle_timeout`, `max_restarts`, and `slot_poll_interval` are re-read on config reload (`SIGHUP` / edit-and-save). `watchdog_interval` sets the scan loop's ticker at startup, so changing it requires a `gr daemon restart`.
+
+## Session lifecycle & PTY policy
+
+The `[lifecycle]` block gathers the lower-level signal-escalation waits, teardown grace, adopted-PTY babysit timing, scrollback hydration, terminal-input pacing, default launch geometry, and the per-session log cap that were previously fixed constants across the daemon and PTY layers. The **signal-escalation order** (interrupt → `SIGTERM` → `SIGKILL`) is a code invariant; only the waits between steps are tunable.
+
+```toml
+[lifecycle]
+convert_settle_timeout     = "5s"      # interrupt->settle wait before a converting headless session escalates to SIGTERM
+convert_kill_timeout       = "3s"      # SIGTERM step before the final SIGKILL during convert
+convert_force_kill_timeout = "3s"      # final wait after SIGKILL so a wedged process can't stall the convert
+mass_exit_window           = "2s"      # window over which many near-simultaneous exits are flagged as an external signal
+mass_exit_threshold        = 5         # exits within mass_exit_window that trigger the OOM/jetsam warning (< 1 => default)
+process_kill_grace         = "5s"      # wait after SIGTERM before SIGKILL when killing a session's process group
+adopted_timeout            = "24h"     # safety deadline for the adopted-PTY babysit loop when identity can't be verified
+adopted_poll_interval      = "1s"      # how often the adopted-PTY babysit loop polls for process exit
+scrollback_hydration_bytes = 131072    # bytes of scrollback tail replayed into an adopted session's screen (< 0 => default; "0" disables)
+input_delay                = "50ms"    # pause between typed text and the submit carriage return (non-positive => default)
+default_cols               = 80        # default terminal columns for daemon launch paths with no client geometry (< 1 => default)
+default_rows               = 24        # default terminal rows for daemon launch paths with no client geometry (< 1 => default)
+max_log_bytes              = 104857600 # per-session scrollback log cap in bytes (< 0 => default; "0" => unlimited)
+```
+
+**Escalation waits.** `convert_settle_timeout`, `convert_kill_timeout`, and `convert_force_kill_timeout` bound the three steps of stopping a headless process when converting it to interactive (`gr attach` on a headless session). `process_kill_grace` is how long a session's process group is given after `SIGTERM` before `SIGKILL`. (The headless control-channel interrupt round-trip is tuned separately by `[headless]` `interrupt_timeout`.)
+
+**Mass-exit detection.** When `mass_exit_threshold` sessions exit within `mass_exit_window`, the daemon logs a warning — this usually means an external signal (the OOM killer or macOS jetsam) is killing processes, not a graith bug.
+
+**Adoption & PTY.** After a daemon upgrade the daemon re-attaches to surviving agents; `adopted_timeout` and `adopted_poll_interval` tune the loop that watches an adopted process for exit, and `scrollback_hydration_bytes` is how much of the recent scrollback is replayed into the reconstructed screen. `input_delay` is the pause `gr type` inserts between the text and the Enter key so a TUI doesn't treat them as a paste.
+
+**Geometry & log cap.** `default_cols`/`default_rows` are the terminal geometry used by daemon launch paths that have no attaching client (the watchdog restart, the orchestrator, scenarios, triggers, and adoption); an attaching client immediately resizes to its real geometry. `max_log_bytes` caps the per-session scrollback log file (`"0"` means unlimited).
+
+Empty or non-positive duration values fall back to the defaults shown (a zero wait would either escalate instantly or busy-loop a poll); an out-of-range or unparseable value is rejected at config load. **Geometry, hydration, and the log cap apply only to sessions launched (or adopted) after the change** — a running session keeps the geometry and caps it started with. The escalation waits and `input_delay` are read at each use, so a config reload takes effect on the next operation.
 
 ## Detection & status classification
 

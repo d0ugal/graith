@@ -37,9 +37,18 @@ type Session struct {
 	adoptedStartTime int64
 	lastOutputAt     time.Time
 	lastUserInputAt  time.Time
-	userInputCond    *sync.Cond
-	adoptedAt        time.Time
-	createdAt        time.Time
+	// inputDelay is the pause between typed text and the submit CR in
+	// WriteInputAndSubmit. Resolved at construction (SessionOpts.InputDelay or the
+	// typeInputDelay default); immutable after, so it needs no lock.
+	inputDelay time.Duration
+	// adoptedPollTimeout / adoptedPollInterval bound the adopted-PTY babysit loop.
+	// Resolved at adoption (AdoptOpts values or the package defaults); immutable
+	// after. Unused for a freshly-launched (non-adopted) session.
+	adoptedPollTimeout  time.Duration
+	adoptedPollInterval time.Duration
+	userInputCond       *sync.Cond
+	adoptedAt           time.Time
+	createdAt           time.Time
 	// log routes this session's diagnostics to the daemon's logger. It is set
 	// once at construction and only read, so it needs no lock. Never nil (falls
 	// back to slog.Default()).
@@ -55,6 +64,10 @@ type SessionOpts struct {
 	Rows, Cols uint16
 	LogPath    string
 	MaxLogSize int64
+	// InputDelay is the pause WriteInputAndSubmit inserts between the typed text
+	// and the submit carriage return. Non-positive falls back to typeInputDelay,
+	// the built-in default (the daemon passes the [lifecycle] input_delay policy).
+	InputDelay time.Duration
 	// Logger routes this session's PTY/scrollback diagnostics to the daemon's
 	// logger. Nil falls back to slog.Default(). See the Session.log field.
 	Logger *slog.Logger
@@ -114,13 +127,19 @@ func NewSession(opts SessionOpts) (*Session, error) {
 
 	sb.SetLogger(log)
 
+	inputDelay := opts.InputDelay
+	if inputDelay <= 0 {
+		inputDelay = typeInputDelay
+	}
+
 	s := &Session{
 		ID: opts.ID, Cmd: cmd, Ptmx: ptmx, Scrollback: sb,
-		screen:    newTerminal(int(opts.Cols), int(opts.Rows)),
-		done:      make(chan struct{}),
-		readDone:  make(chan struct{}),
-		createdAt: launchedAt,
-		log:       log,
+		screen:     newTerminal(int(opts.Cols), int(opts.Rows)),
+		done:       make(chan struct{}),
+		readDone:   make(chan struct{}),
+		createdAt:  launchedAt,
+		log:        log,
+		inputDelay: inputDelay,
 	}
 	s.userInputCond = sync.NewCond(&sync.Mutex{})
 
@@ -142,6 +161,19 @@ type AdoptOpts struct {
 	PID        int
 	LogPath    string
 	MaxLogSize int64
+	// DefaultRows / DefaultCols are the geometry used when the adopted ptmx size
+	// can't be read. Non-positive falls back to the built-in 24x80 (the daemon
+	// passes the [lifecycle] default_rows/default_cols policy).
+	DefaultRows, DefaultCols uint16
+	// HydrationBytes is how much of the scrollback tail is replayed into the
+	// adopted session's virtual screen. Negative falls back to the built-in
+	// default; 0 disables hydration (the daemon passes the [lifecycle]
+	// scrollback_hydration_bytes policy).
+	HydrationBytes int
+	// PollTimeout / PollInterval bound the adopted-PTY babysit loop. Non-positive
+	// falls back to the built-in defaults (adoptedPollTimeout / one second).
+	PollTimeout  time.Duration
+	PollInterval time.Duration
 	// Logger routes this session's diagnostics to the daemon's logger. Nil
 	// falls back to slog.Default().
 	Logger *slog.Logger
@@ -165,7 +197,17 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 
 	sb.SetLogger(log)
 
-	cols, rows := 80, 24
+	defCols := opts.DefaultCols
+	if defCols == 0 {
+		defCols = 80
+	}
+
+	defRows := opts.DefaultRows
+	if defRows == 0 {
+		defRows = 24
+	}
+
+	cols, rows := int(defCols), int(defRows)
 	if ws, err := pty.GetsizeFull(ptmx); err == nil && ws.Cols > 0 && ws.Rows > 0 {
 		cols, rows = int(ws.Cols), int(ws.Rows)
 	}
@@ -176,23 +218,43 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 			"session", opts.ID, "pid", opts.PID, "error", stErr)
 	}
 
+	pollTimeout := opts.PollTimeout
+	if pollTimeout <= 0 {
+		pollTimeout = adoptedPollTimeout
+	}
+
+	pollInterval := opts.PollInterval
+	if pollInterval <= 0 {
+		pollInterval = time.Second
+	}
+
 	s := &Session{
-		ID:               opts.ID,
-		Ptmx:             ptmx,
-		Scrollback:       sb,
-		screen:           newTerminal(cols, rows),
-		done:             make(chan struct{}),
-		readDone:         make(chan struct{}),
-		adoptedPID:       opts.PID,
-		adoptedStartTime: startTime,
-		adoptedAt:        time.Now(),
-		createdAt:        time.Now(),
-		log:              log,
+		ID:                  opts.ID,
+		Ptmx:                ptmx,
+		Scrollback:          sb,
+		screen:              newTerminal(cols, rows),
+		done:                make(chan struct{}),
+		readDone:            make(chan struct{}),
+		adoptedPID:          opts.PID,
+		adoptedStartTime:    startTime,
+		adoptedAt:           time.Now(),
+		createdAt:           time.Now(),
+		log:                 log,
+		adoptedPollTimeout:  pollTimeout,
+		adoptedPollInterval: pollInterval,
 	}
 	s.userInputCond = sync.NewCond(&sync.Mutex{})
 
-	if tail, err := sb.TailBytes(128 * 1024); err == nil && len(tail) > 0 {
-		_, _ = s.screen.Write(tail)
+	// HydrationBytes < 0 means "use the built-in default"; 0 disables hydration.
+	hydrate := opts.HydrationBytes
+	if hydrate < 0 {
+		hydrate = 128 * 1024
+	}
+
+	if hydrate > 0 {
+		if tail, err := sb.TailBytes(int64(hydrate)); err == nil && len(tail) > 0 {
+			_, _ = s.screen.Write(tail)
+		}
 	}
 
 	go s.readLoop()
@@ -201,6 +263,9 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 	return s, nil
 }
 
+// adoptedPollTimeout is the built-in safety deadline for the adopted-PTY babysit
+// loop when AdoptOpts.PollTimeout is unset. The daemon overrides it via the
+// [lifecycle] adopted_timeout policy.
 const adoptedPollTimeout = 24 * time.Hour
 
 func (s *Session) adoptedWaitLoop() {
@@ -218,10 +283,20 @@ func (s *Session) adoptedWaitLoop() {
 		}
 	}()
 
-	deadlineReached := false
-	deadline := time.After(adoptedPollTimeout)
+	timeout := s.adoptedPollTimeout
+	if timeout <= 0 {
+		timeout = adoptedPollTimeout
+	}
 
-	poll := time.NewTicker(time.Second)
+	interval := s.adoptedPollInterval
+	if interval <= 0 {
+		interval = time.Second
+	}
+
+	deadlineReached := false
+	deadline := time.After(timeout)
+
+	poll := time.NewTicker(interval)
 	defer poll.Stop()
 
 	for {
@@ -425,10 +500,12 @@ func (s *Session) WriteInput(data []byte) error {
 	return s.writeInputLocked(data)
 }
 
-// typeInputDelay is the pause between writing text and the submit key in
-// WriteInputAndSubmit. TUI frameworks treat text+CR in a single read as a
-// paste (inserting a newline) rather than "type then press Enter". Separating
-// the writes lets the TUI drain the text before the CR arrives.
+// typeInputDelay is the built-in default pause between writing text and the
+// submit key in WriteInputAndSubmit, used when SessionOpts.InputDelay is unset.
+// TUI frameworks treat text+CR in a single read as a paste (inserting a newline)
+// rather than "type then press Enter". Separating the writes lets the TUI drain
+// the text before the CR arrives. The daemon overrides it via the [lifecycle]
+// input_delay policy.
 const typeInputDelay = 50 * time.Millisecond
 
 // WriteInputAndSubmit writes text followed by a carriage return, with a brief
@@ -443,7 +520,12 @@ func (s *Session) WriteInputAndSubmit(data []byte) error {
 			return err
 		}
 
-		time.Sleep(typeInputDelay)
+		delay := s.inputDelay
+		if delay <= 0 {
+			delay = typeInputDelay
+		}
+
+		time.Sleep(delay)
 	}
 
 	return s.writeInputLocked([]byte("\r"))

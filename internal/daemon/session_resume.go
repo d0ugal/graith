@@ -15,21 +15,6 @@ import (
 	"github.com/d0ugal/graith/internal/store"
 )
 
-// convertSettleTimeout bounds how long ConvertToInteractive waits for an
-// interrupted headless process to settle and exit before escalating to SIGTERM.
-// A one-shot headless agent normally winds down its current turn and exits
-// promptly on interrupt; the escalation guards against one that ignores it (a
-// wedged tool call, a signal-swallowing wrapper). Vars (not consts) so tests can
-// shrink them.
-var (
-	convertSettleTimeout = 5 * time.Second
-	// convertKillTimeout bounds the SIGTERM step before the final SIGKILL.
-	convertKillTimeout = 3 * time.Second
-	// convertForceKillTimeout bounds the final wait after SIGKILL so a process
-	// whose Done() never closes can't stall the convert forever.
-	convertForceKillTimeout = 3 * time.Second
-)
-
 // ConvertToInteractive turns a headless (one-shot stream-json) session into an
 // interactive PTY session, preserving its conversation (Claude reloads it from
 // the transcript on `--resume`), worktree, branch, graith session id, and env.
@@ -168,20 +153,24 @@ func (sm *SessionManager) ConvertToInteractive(id string, rows, cols uint16) (Se
 // the convert forever. The exit watcher still reaps and closes the driver if it
 // ever exits.
 func (sm *SessionManager) stopDriverForConvert(driver SessionDriver) {
+	// The escalation ORDER (interrupt → SIGTERM → SIGKILL) is fixed; only the
+	// waits between steps come from the [lifecycle] policy.
+	lc := sm.Config().Lifecycle
+
 	_ = driver.Interrupt(1, 0)
 
-	if waitDriverDone(driver, convertSettleTimeout) {
+	if waitDriverDone(driver, lc.ConvertSettleTimeoutDuration()) {
 		return
 	}
 
 	_ = driver.Kill()
 
-	if waitDriverDone(driver, convertKillTimeout) {
+	if waitDriverDone(driver, lc.ConvertKillTimeoutDuration()) {
 		return
 	}
 
 	_ = driver.ForceKill()
-	_ = waitDriverDone(driver, convertForceKillTimeout)
+	_ = waitDriverDone(driver, lc.ConvertForceKillTimeoutDuration())
 }
 
 // waitDriverDone reports whether driver.Done() closed within d.
@@ -841,6 +830,8 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	// Pre-spawn time for native session-id capture (see Create).
 	startedAt := time.Now()
 
+	lc := sm.Config().Lifecycle
+
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,
 		Command:    command,
@@ -850,7 +841,8 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		Rows:       rows,
 		Cols:       cols,
 		LogPath:    logPath,
-		MaxLogSize: 100 * 1024 * 1024,
+		MaxLogSize: lc.MaxLogBytesOrDefault(),
+		InputDelay: lc.InputDelayDuration(),
 		Logger:     sm.log,
 	})
 	if err != nil {

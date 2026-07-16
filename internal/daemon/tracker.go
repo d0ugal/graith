@@ -241,9 +241,11 @@ func (sm *SessionManager) actionTracker(ctx context.Context, t *config.TriggerCo
 
 	resumed := 0
 
+	lc := sm.Config().Lifecycle
+
 	for _, id := range plan.resume {
 		//nolint:contextcheck // Resume runs its own session lifecycle, detached from the fire ctx.
-		if _, rerr := sm.Resume(id, 24, 80); rerr != nil {
+		if _, rerr := sm.Resume(id, lc.DefaultRowsOrDefault(), lc.DefaultColsOrDefault()); rerr != nil {
 			sm.log.Warn("tracker: resume failed", "trigger", t.Name, "session", id, "err", rerr)
 			failures = append(failures, fmt.Sprintf("resume %s: %v", id, rerr))
 
