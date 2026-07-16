@@ -44,6 +44,10 @@ func watchRetryBackoff(retry int) time.Duration {
 	return d
 }
 
+// gitignoreFilename is the file whose changes trigger a live rebuild of a
+// binding's git ignore matcher and a reconcile of its watched directories.
+const gitignoreFilename = ".gitignore"
+
 // builtinWatchIgnores are always applied and never overridable: watching these
 // is never useful and they are prime feedback-loop / churn sources.
 var builtinWatchIgnores = []string{".git/", ".git", ".hg/", ".svn/", "*.swp", "*.swx", "4913", ".DS_Store"}
@@ -370,11 +374,75 @@ func (sm *SessionManager) handleWatchEvent(ctx context.Context, triggerName stri
 	}
 
 	rel := matcher.rel(ev.Name)
+
+	// A change to any .gitignore (added, edited, or removed) alters which paths
+	// and directories are ignored. Rebuild the git matcher and reconcile the
+	// live watch set so the edit takes effect without recreating the binding —
+	// otherwise the matcher and pruned-directory set are frozen at binding
+	// creation. Runs in this (the binding's) goroutine, so the matcher and
+	// watcher need no extra locking.
+	if filepath.Base(ev.Name) == gitignoreFilename {
+		sm.reloadIgnores(b, matcher)
+	}
+
 	if !matcher.fires(rel) {
 		return
 	}
 
 	sm.noteChange(ctx, triggerName, b, rel, debounce)
+}
+
+// reloadIgnores rebuilds the git ignore matcher from the current on-disk sources
+// and reconciles the live watch set against the new rules. Called from the
+// binding's event goroutine when a .gitignore changes.
+func (sm *SessionManager) reloadIgnores(b *watchBinding, matcher *watchMatcher) {
+	matcher.reloadGit()
+	sm.reconcileWatchDirs(b, matcher)
+
+	sm.log.Info("trigger: reloaded ignore rules", "trigger", b.triggerName, "worktree", b.worktree)
+}
+
+// reconcileWatchDirs brings the fsnotify watch set in line with matcher after an
+// ignore-rule change: directories that are now un-ignored are added
+// (idempotently) and directories that are now ignored are removed. A
+// newly-un-ignored directory is watched but not scanned for pre-existing files —
+// only subsequent events fire it — so merely un-ignoring a populated tree does
+// not synthesise a burst of changes. Runs in the binding's event goroutine.
+func (sm *SessionManager) reconcileWatchDirs(b *watchBinding, matcher *watchMatcher) {
+	desired := make(map[string]bool)
+
+	_ = filepath.WalkDir(b.worktree, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil //nolint:nilerr // skip unreadable dirs, keep walking
+		}
+
+		if !d.IsDir() {
+			return nil
+		}
+
+		rel := matcher.rel(path)
+		if rel != "." && matcher.ignoredDir(rel) {
+			return filepath.SkipDir
+		}
+
+		desired[path] = true
+		_ = b.watcher.Add(path) // idempotent; picks up newly-un-ignored subtrees
+
+		return nil
+	})
+
+	// Prune directories that are now ignored but still watched. WatchList holds
+	// only this binding's paths (each binding owns its watcher); the rel guard is
+	// belt-and-braces so a stray entry outside the worktree is never touched.
+	for _, w := range b.watcher.WatchList() {
+		if desired[w] {
+			continue
+		}
+
+		if rel, err := filepath.Rel(b.worktree, w); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			_ = b.watcher.Remove(w)
+		}
+	}
 }
 
 // scanNewDir handles a newly-created (or moved-in) directory: it registers
@@ -610,6 +678,13 @@ func newWatchMatcher(root string, w *config.WatchConfig) *watchMatcher {
 	}
 
 	return m
+}
+
+// reloadGit rebuilds the git ignore matcher (.git/info/exclude + the tree's
+// .gitignore files) from disk. Called when a .gitignore changes; the builtin,
+// user-ignore, and include matchers are config-derived and left untouched.
+func (m *watchMatcher) reloadGit() {
+	m.git = ignore.Dir(m.root)
 }
 
 func (m *watchMatcher) rel(path string) string {

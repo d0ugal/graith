@@ -641,6 +641,176 @@ func mustMkdir(t *testing.T, p string) {
 	}
 }
 
+func watchListContains(w *fsnotify.Watcher, path string) bool {
+	for _, p := range w.WatchList() {
+		if p == path {
+			return true
+		}
+	}
+
+	return false
+}
+
+// TestWatchMatcher_ReloadGit covers the live-reload primitive: rebuilding the
+// git matcher after a .gitignore is added, then removed, changes what fires.
+func TestWatchMatcher_ReloadGit(t *testing.T) {
+	root := t.TempDir()
+	m := newWatchMatcher(root, &config.WatchConfig{})
+
+	// No .gitignore yet: a *.log path fires.
+	if !m.fires("run.log") {
+		t.Fatal("expected run.log to fire before any .gitignore")
+	}
+
+	// Add a .gitignore, reload, and the same path is now ignored.
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("*.log\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m.reloadGit()
+
+	if m.fires("run.log") {
+		t.Error("reloadGit must pick up the new *.log rule")
+	}
+
+	// Remove it, reload, and it fires again.
+	if err := os.Remove(filepath.Join(root, ".gitignore")); err != nil {
+		t.Fatal(err)
+	}
+
+	m.reloadGit()
+
+	if !m.fires("run.log") {
+		t.Error("reloadGit must pick up a .gitignore removal")
+	}
+}
+
+// TestReconcileWatchDirs asserts that reconciling the watch set after an
+// ignore-rule change prunes a newly-ignored directory while leaving other
+// directories watched.
+func TestReconcileWatchDirs(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "build"))
+	mustMkdir(t, filepath.Join(root, "src"))
+
+	w := mustWatcher(t)
+	defer func() { _ = w.Close() }()
+
+	m := newWatchMatcher(root, &config.WatchConfig{})
+	if degraded := addWatchRecursive(w.Add, root, m); degraded != "" {
+		t.Fatalf("unexpected degraded: %s", degraded)
+	}
+
+	if !watchListContains(w, filepath.Join(root, "build")) {
+		t.Fatal("expected build/ watched initially")
+	}
+
+	// Ignore build/, reload the matcher, and reconcile.
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("build/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m.reloadGit()
+
+	sm := newTriggerTestSM(t)
+	b := &watchBinding{worktree: root, watcher: w, changed: make(map[string]bool)}
+	sm.reconcileWatchDirs(b, m)
+
+	if watchListContains(w, filepath.Join(root, "build")) {
+		t.Error("build/ should be pruned from the watch set after being ignored")
+	}
+
+	if !watchListContains(w, filepath.Join(root, "src")) {
+		t.Error("src should remain watched")
+	}
+
+	if !watchListContains(w, root) {
+		t.Error("the worktree root must never be pruned")
+	}
+}
+
+// TestReconcileWatchDirs_AddsUnignored asserts a directory that becomes
+// un-ignored is added back to the watch set on reconcile.
+func TestReconcileWatchDirs_AddsUnignored(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "build"))
+
+	// Start with build/ ignored, so it is not initially watched.
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("build/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	w := mustWatcher(t)
+	defer func() { _ = w.Close() }()
+
+	m := newWatchMatcher(root, &config.WatchConfig{})
+	if degraded := addWatchRecursive(w.Add, root, m); degraded != "" {
+		t.Fatalf("unexpected degraded: %s", degraded)
+	}
+
+	if watchListContains(w, filepath.Join(root, "build")) {
+		t.Fatal("build/ should not be watched while ignored")
+	}
+
+	// Un-ignore build/ and reconcile: it must now be watched.
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m.reloadGit()
+
+	sm := newTriggerTestSM(t)
+	b := &watchBinding{worktree: root, watcher: w, changed: make(map[string]bool)}
+	sm.reconcileWatchDirs(b, m)
+
+	if !watchListContains(w, filepath.Join(root, "build")) {
+		t.Error("build/ should be watched again once un-ignored")
+	}
+}
+
+// TestHandleWatchEvent_GitignoreReload asserts the end-to-end trigger: a
+// synthetic event for a .gitignore write drives a matcher reload and watch-set
+// reconcile in handleWatchEvent, pruning a directory the new rule ignores.
+func TestHandleWatchEvent_GitignoreReload(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "logs"))
+
+	w := mustWatcher(t)
+	defer func() { _ = w.Close() }()
+
+	m := newWatchMatcher(root, &config.WatchConfig{})
+	if degraded := addWatchRecursive(w.Add, root, m); degraded != "" {
+		t.Fatalf("unexpected degraded: %s", degraded)
+	}
+
+	if !watchListContains(w, filepath.Join(root, "logs")) {
+		t.Fatal("expected logs/ watched initially")
+	}
+
+	sm := newTriggerTestSM(t, config.TriggerConfig{
+		Name:   "wf",
+		Watch:  &config.WatchConfig{Role: "implementer"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "wynd"}},
+	})
+	b := &watchBinding{triggerName: "wf", worktree: root, watcher: w, changed: make(map[string]bool)}
+
+	// A new .gitignore that ignores logs/.
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("logs/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ev := fsnotify.Event{Name: filepath.Join(root, ".gitignore"), Op: fsnotify.Create}
+	sm.handleWatchEvent(context.Background(), "wf", b, m, ev, time.Second)
+
+	if !m.ignoredDir("logs") {
+		t.Error("logs/ should be ignored after the .gitignore reload")
+	}
+
+	if watchListContains(w, filepath.Join(root, "logs")) {
+		t.Error("logs/ should be pruned from the watch set after the reload")
+	}
+}
+
 func TestWatchMatcher_DotAndEmpty(t *testing.T) {
 	m := newWatchMatcher(t.TempDir(), &config.WatchConfig{})
 	if m.fires(".") || m.fires("") {

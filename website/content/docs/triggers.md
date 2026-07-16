@@ -89,7 +89,16 @@ debounce = "30s"             # quiet-window; lower for fast commands
   set, so `node_modules/` etc. don't exhaust the watcher). Matching follows Git's
   own rules — the repository `.gitignore`, nested per-directory `.gitignore`
   files, and `.git/info/exclude` are all applied, with `*`, `**`, `?`, and
-  character-class patterns behaving exactly as `git check-ignore` does.
+  character-class patterns behaving exactly as `git check-ignore` does. In a
+  linked worktree (graith's normal setup, where `.git` is a pointer file) the
+  shared `.git/info/exclude` in the common git directory is resolved and applied
+  too.
+- Editing, adding, or removing a `.gitignore` takes effect live: the watcher
+  rebuilds its ignore rules and reconciles the watched directories on the next
+  change to that file — newly-ignored directories are pruned and newly-un-ignored
+  ones are picked up, without restarting the session. (A change to
+  `.git/info/exclude` is re-read on the next `.gitignore` edit or when the binding
+  is recreated, since the `.git` directory itself is never watched.)
 - A burst of edits is coalesced by the `debounce` quiet-window into one fire.
 - If a binding can't register its watch (e.g. the OS watch limit
   `fs.inotify.max_user_watches` is exhausted) it is marked **degraded** and

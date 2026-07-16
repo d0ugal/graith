@@ -263,6 +263,104 @@ func conformanceCases() []gitConfCase {
 			files:      []string{".hidden.o", "vis.o"},
 			check:      []string{".hidden.o", "vis.o"},
 		},
+		{
+			// A leading space is a significant part of the filename: the pattern
+			// " foo" matches the file " foo" but not "foo". Guards against the
+			// matcher stripping whitespace from the path it is handed.
+			name:       "leading space in filename",
+			gitignores: map[string]string{".gitignore": " foo\n"},
+			files:      []string{" foo", "foo"},
+			check:      []string{" foo", "foo"},
+		},
+		{
+			// An escaped trailing space in a pattern ("bar\ ") is preserved by
+			// Git and must match the file "bar " (trailing space) but not "bar".
+			name:       "escaped trailing space",
+			gitignores: map[string]string{".gitignore": "bar\\ \n"},
+			files:      []string{"bar ", "bar"},
+			check:      []string{"bar ", "bar"},
+		},
+	}
+}
+
+// TestConformanceLinkedWorktree pins graith's matcher to `git check-ignore` in a
+// real linked worktree, where .git is a "gitdir:" pointer file and the shared
+// info/exclude lives in the common git directory (not under the worktree root).
+// It also confirms priority ordering: a worktree-local .gitignore negation
+// re-includes a path the shared exclude would otherwise ignore.
+func TestConformanceLinkedWorktree(t *testing.T) {
+	git := requireGit(t)
+
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+
+		cmd := exec.Command(git, args...)
+		cmd.Dir = dir
+
+		cmd.Env = append(os.Environ(),
+			"GIT_CONFIG_GLOBAL=/dev/null",
+			"GIT_CONFIG_SYSTEM=/dev/null",
+		)
+
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+
+	main := t.TempDir()
+
+	runGit(main, "init")
+	runGit(main, "config", "user.email", "graith@example.com")
+	runGit(main, "config", "user.name", "graith")
+
+	// A worktree can only be added once the repo has a commit.
+	if err := os.WriteFile(filepath.Join(main, "seed.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit(main, "add", "-A")
+	runGit(main, "commit", "-m", "seed")
+
+	// Shared exclude in the common git dir — reachable only via the worktree's
+	// commondir pointer, never under the worktree root.
+	if err := os.MkdirAll(filepath.Join(main, ".git", "info"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(main, ".git", "info", "exclude"), []byte("*.secret\ncommon-only/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The linked worktree lives in its own (pre-existing) parent dir.
+	wt := filepath.Join(t.TempDir(), "bothy")
+	runGit(main, "worktree", "add", "-q", wt)
+
+	// A worktree-local .gitignore layered on top of the shared exclude, including
+	// a negation that must win over the lower-priority exclude.
+	if err := os.WriteFile(filepath.Join(wt, ".gitignore"), []byte("local.log\n!keep.secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, f := range []string{"api.secret", "keep.secret", "app.log", "local.log", "keep.txt"} {
+		if err := os.WriteFile(filepath.Join(wt, f), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := os.MkdirAll(filepath.Join(wt, "common-only"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	m := ignore.Dir(wt)
+
+	for _, rel := range []string{"api.secret", "keep.secret", "app.log", "local.log", "keep.txt", "common-only"} {
+		want := gitIgnores(t, git, wt, rel)
+		got := m.Match(rel, isDir(wt, rel))
+
+		if got != want {
+			t.Errorf("Match(%q, isDir=%v) = %v, git check-ignore = %v",
+				rel, isDir(wt, rel), got, want)
+		}
 	}
 }
 
