@@ -283,6 +283,11 @@ func cloneSessionState(s *SessionState) SessionState {
 		copy(c.CI.FailingChecks, s.CI.FailingChecks)
 	}
 
+	// Deep-copy the Codex pointer so a snapshot handed to a caller (e.g.
+	// SessionManager.Get) can't mutate the daemon-owned live state out from under
+	// the lock — same discipline as Includes / CI.FailingChecks above (#1186).
+	c.Codex = cloneCodexOptions(s.Codex)
+
 	return c
 }
 

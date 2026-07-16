@@ -36,6 +36,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	srcAgent := sess.Agent
 	srcAgentSessionID := sess.AgentSessionID
 	srcModel := sess.Model
+	srcCodex := cloneCodexOptions(sess.Codex)
 	srcFreshStart := sess.FreshStart
 	worktreePath := sess.WorktreePath
 	repoPath := sess.RepoPath
@@ -174,6 +175,11 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	}
 	s.Agent = targetAgent
 	s.Model = targetModel
+	// Codex-only options belong to the source agent; drop them when migrating to a
+	// non-codex agent so state stays consistent with the create-time guard (#1186).
+	// (codex→codex is rejected above, so a codex target here only arises from a
+	// non-codex source whose Codex is already nil.)
+	s.Codex = codexOptsForAgent(targetAgent, s.Codex)
 
 	// The token count describes the session's CURRENT agent. Migration swaps the
 	// agent, so the source agent's usage no longer applies — clear it (and evict
@@ -232,6 +238,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		if s, ok := sm.state.Sessions[id]; ok {
 			s.Agent = srcAgent
 			s.Model = srcModel
+			s.Codex = srcCodex
 			s.AgentSessionID = srcAgentSessionID
 			s.FreshStart = srcFreshStart
 			s.Status = StatusStopped

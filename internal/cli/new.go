@@ -181,7 +181,7 @@ func registerNewCmd() {
 	newCmd.Flags().BoolVar(&newBackground, "background", false, "create without attaching")
 	newCmd.Flags().StringVarP(&newPrompt, "prompt", "p", "", "initial prompt for the agent")
 	newCmd.Flags().StringVar(&newPromptFile, "prompt-file", "", "read initial prompt from file")
-	newCmd.Flags().StringVarP(&newModel, "model", "m", "", "model for the agent to use (Codex: passed as --model; others: expands {model} in agent args)")
+	newCmd.Flags().StringVarP(&newModel, "model", "m", "", "model for the agent to use (Codex: passed as --model, see --codex-* flags; others: expands {model} in agent args)")
 	newCmd.Flags().StringVarP(&newRepo, "repo", "C", "", "path to git repo (default: cwd)")
 	newCmd.Flags().BoolVar(&newNoRepo, "no-repo", false, "create session without a git repo or worktree")
 	newCmd.Flags().StringVar(&newMirror, "mirror", "", "mirror another session's worktree (read-only)")

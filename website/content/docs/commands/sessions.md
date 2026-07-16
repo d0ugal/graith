@@ -36,7 +36,19 @@ The `--no-fetch` flag skips the `git fetch origin` step that normally runs befor
 
 ### Codex options
 
-For `--agent codex`, graith passes typed per-session options through to the Codex CLI so you don't have to override the whole agent `args` array in config. `--model` becomes `codex --model <name>`; reasoning effort and service tier ride `-c model_reasoning_effort=…` / `-c service_tier=…` config overrides; profile, web search, and approval policy map to `--profile`, `--search`, and `--ask-for-approval`. Each is passed only when set, so an unset option leaves Codex's own default untouched. They are persisted, so a resume or fork replays the same flags. The `--codex-*` flags are Codex-specific — using one with another agent is an error, and enumerated values are validated before the session starts. Example:
+For `--agent codex`, graith passes typed per-session options through to the Codex
+CLI so you don't have to override the whole agent `args` array in config.
+`--model` becomes `codex --model <name>`; reasoning effort and service tier ride
+`-c model_reasoning_effort=…` / `-c service_tier=…` config overrides; profile,
+web search, and approval policy map to `--profile`, `--search`, and
+`--ask-for-approval`. Each is passed only when set, so an unset option leaves
+Codex's own default untouched. They are persisted, so a resume or fork replays
+the same flags. The `--codex-*` flags are Codex-specific — using one with another
+agent is an error. Their *values* (e.g. the reasoning-effort or service-tier
+level) are validated by Codex itself, not by graith, since those sets are
+version- and model-dependent; an unrecognised value surfaces as a Codex startup
+error. Don't also template `{model}` into the codex `args` in config — use
+`--model` (or `-m`); doing both would pass `--model` twice. Example:
 
 ```bash
 gr new review --agent codex \

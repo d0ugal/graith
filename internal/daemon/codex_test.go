@@ -1,6 +1,9 @@
 package daemon
 
 import (
+	"log/slog"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -148,17 +151,126 @@ func TestCreateRejectsCodexOptionsForNonCodexAgent(t *testing.T) {
 	assertErrContains(t, err, "require --agent codex")
 }
 
-// TestCreateRejectsInvalidCodexOption locks that an out-of-range enumerated
-// option fails session creation with a clear message.
-func TestCreateRejectsInvalidCodexOption(t *testing.T) {
-	sm := newTestSessionManager(t)
+// TestCodexOptsForAgent locks the codex-only invariant used by fork/migrate:
+// options survive only when the target agent is codex, so a non-codex session
+// never persists an orphan codex block.
+func TestCodexOptsForAgent(t *testing.T) {
+	opts := &config.CodexOptions{Profile: "braw"}
 
-	_, err := sm.Create(CreateOpts{
-		Name:      "dreich-effort",
-		AgentName: "codex",
-		Codex:     config.CodexOptions{ReasoningEffort: "haar"},
-		Rows:      24,
-		Cols:      80,
+	if got := codexOptsForAgent("codex", opts); got != opts {
+		t.Errorf("codexOptsForAgent(codex, …) = %v, want the same options", got)
+	}
+
+	if got := codexOptsForAgent("claude", opts); got != nil {
+		t.Errorf("codexOptsForAgent(claude, …) = %v, want nil", got)
+	}
+
+	if got := codexOptsForAgent("codex", nil); got != nil {
+		t.Errorf("codexOptsForAgent(codex, nil) = %v, want nil", got)
+	}
+}
+
+// TestCloneSessionStateCopiesCodex locks that a session snapshot doesn't alias
+// the daemon-owned Codex pointer — mutating the clone must not touch the live
+// state (the same discipline as Includes / CI.FailingChecks).
+func TestCloneSessionStateCopiesCodex(t *testing.T) {
+	live := &SessionState{
+		ID:    "braw",
+		Codex: &config.CodexOptions{Profile: "canny"},
+	}
+
+	clone := cloneSessionState(live)
+	if clone.Codex == live.Codex {
+		t.Fatal("cloneSessionState aliased the Codex pointer")
+	}
+
+	clone.Codex.Profile = "thrawn"
+	if live.Codex.Profile != "canny" {
+		t.Error("mutating the clone's Codex changed the live session state")
+	}
+}
+
+// TestCodexModelPassedOnLaunchAndResume is the end-to-end regression lock for
+// #1186: a codex session created with a model must have `--model <model>`
+// appended to the launched argv — and, crucially, again on resume (restart),
+// which is exactly the path that silently dropped the model before the fix.
+func TestCodexModelPassedOnLaunchAndResume(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh not available")
+	}
+
+	repoDir := initTempGitRepo(t)
+	sm, recordPath := newCodexRecorderManager(t, repoDir)
+
+	const model = "gpt-5.1-codex"
+
+	created, err := sm.Create(CreateOpts{
+		Name: "canny", AgentName: "codex", RepoPath: repoDir, BaseBranch: "main",
+		Model: model, Rows: 24, Cols: 80,
 	})
-	assertErrContains(t, err, "invalid codex reasoning effort")
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	id := created.ID
+
+	t.Cleanup(func() { stopAndClosePTY(sm, id) })
+
+	argv := waitForRecordedArgv(t, recordPath, "--model")
+	assertContiguousPair(t, argv, "--model", model)
+
+	// Resume (restart) is where the model was dropped before the fix.
+	if err := os.Remove(recordPath); err != nil {
+		t.Fatalf("remove record before resume: %v", err)
+	}
+
+	if err := sm.Stop(id); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+
+	waitForStatus(t, sm, id, StatusStopped)
+
+	if _, err := sm.Restart(id, 24, 80); err != nil {
+		t.Fatalf("Restart() error = %v", err)
+	}
+
+	argv = waitForRecordedArgv(t, recordPath, "--model")
+	assertContiguousPair(t, argv, "--model", model)
+}
+
+// newCodexRecorderManager builds a SessionManager whose "codex" agent is a shell
+// script that records its launch argv to recordPath (mirrors newRecorderManager
+// but keyed on codex, since codexExtraArgs only fires for that agent).
+func newCodexRecorderManager(t *testing.T, repoDir string) (*SessionManager, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	recordPath := filepath.Join(dir, "argv.txt")
+
+	// Bound codex's async id-capture scan to an empty dir so it never touches the
+	// real ~/.codex.
+	t.Setenv("CODEX_HOME", t.TempDir())
+
+	script := `printf '%s\n' "$0" "$@" > "$GRAITH_ARGS_RECORD"; exec cat`
+
+	cfg := config.Default()
+	cfg.FetchOnCreate = false
+	cfg.Agents["codex"] = config.Agent{
+		Command:    "sh",
+		Args:       []string{"-c", script},
+		ResumeArgs: []string{"-c", script},
+		ForkArgs:   []string{"-c", script},
+		Env:        map[string]string{"GRAITH_ARGS_RECORD": recordPath},
+	}
+	cfg.Repos = []config.RepoConfig{{Path: repoDir}}
+
+	sm := NewSessionManager(cfg, config.Paths{
+		StateFile:  filepath.Join(dir, "state.json"),
+		DataDir:    dir,
+		LogDir:     dir,
+		RuntimeDir: dir,
+		TmpDir:     filepath.Join(dir, "tmp"),
+	}, slog.Default())
+
+	return sm, recordPath
 }
