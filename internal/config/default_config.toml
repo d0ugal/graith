@@ -276,6 +276,16 @@ max_per_hour = 12
 # quiet_hours_start = "22:00"
 # quiet_hours_end = "07:00"
 
+# Low-level notification timing. These were formerly fixed constants (issue #1245);
+# override to tune coalescing, dispatch, and inbox-notification pacing.
+[notifications.timing]
+coalesce_window = "30s"       # drop an identical push within this window ("0" disables coalescing)
+dispatch_timeout = "15s"      # per-backend dispatch timeout (osascript/notifier/command)
+inbox_idle_timeout = "10s"    # wait for an attached session's PTY to be idle this long before injecting
+inbox_max_wait = "2m"         # cap on the user-idle wait before injecting anyway
+inbox_cooldown = "30s"        # minimum interval between unread-inbox nudges to one session ("0" disables)
+inbox_detached_delay = "5s"   # settle delay before notifying a session with no attached client ("0" is immediate)
+
 [approvals]
 # enabled controls whether the PreToolUse approve-request gating hook is
 # installed. Defaults to false: the status/lifecycle hooks still run but the

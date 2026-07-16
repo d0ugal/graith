@@ -57,6 +57,15 @@ func TestEmbeddedDefaultsCarryPolicyValues(t *testing.T) {
 		if d.Notifications.MaxPerHour != DefaultNotifyMaxPerHour {
 			t.Errorf("Default().Notifications.MaxPerHour = %d, want %d", d.Notifications.MaxPerHour, DefaultNotifyMaxPerHour)
 		}
+
+		tm := d.Notifications.Timing
+		if tm.CoalesceWindow != "30s" {
+			t.Errorf("Default().Notifications.Timing.CoalesceWindow = %q, want %q", tm.CoalesceWindow, "30s")
+		}
+
+		if tm.DispatchTimeout != "15s" {
+			t.Errorf("Default().Notifications.Timing.DispatchTimeout = %q, want %q", tm.DispatchTimeout, "15s")
+		}
 	})
 
 	t.Run("config reload debounce", func(t *testing.T) {

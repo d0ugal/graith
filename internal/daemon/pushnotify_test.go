@@ -41,14 +41,14 @@ func TestEvaluatePushGate_Coalesces(t *testing.T) {
 		priority:       config.NotifyPriorityNormal,
 		now:            now,
 		coalesceAt:     now.Add(-5 * time.Second),
-		coalesceWindow: pushCoalesceWindow,
+		coalesceWindow: config.NotifyCoalesceWindowDefault,
 	}
 	if res := evaluatePushGate(in); res.deliver {
 		t.Fatal("identical notification within window should be coalesced")
 	}
 
 	// Outside the window it delivers.
-	in.coalesceAt = now.Add(-2 * pushCoalesceWindow)
+	in.coalesceAt = now.Add(-2 * config.NotifyCoalesceWindowDefault)
 	if res := evaluatePushGate(in); !res.deliver {
 		t.Fatal("identical notification outside window should deliver")
 	}
@@ -67,7 +67,7 @@ func TestEvaluatePushGate_QuietHours(t *testing.T) {
 
 	nightNormal := evaluatePushGate(pushGateInput{
 		cfg: cfg, priority: config.NotifyPriorityNormal,
-		now: time.Date(2026, 7, 11, 23, 0, 0, 0, time.UTC), coalesceWindow: pushCoalesceWindow,
+		now: time.Date(2026, 7, 11, 23, 0, 0, 0, time.UTC), coalesceWindow: config.NotifyCoalesceWindowDefault,
 	})
 	if nightNormal.deliver {
 		t.Fatal("normal notification in quiet hours should be suppressed")
@@ -76,7 +76,7 @@ func TestEvaluatePushGate_QuietHours(t *testing.T) {
 	// High priority bypasses quiet hours.
 	nightHigh := evaluatePushGate(pushGateInput{
 		cfg: cfg, priority: config.NotifyPriorityHigh,
-		now: time.Date(2026, 7, 11, 23, 0, 0, 0, time.UTC), coalesceWindow: pushCoalesceWindow,
+		now: time.Date(2026, 7, 11, 23, 0, 0, 0, time.UTC), coalesceWindow: config.NotifyCoalesceWindowDefault,
 	})
 	if !nightHigh.deliver {
 		t.Fatal("high priority should bypass quiet hours")
@@ -92,7 +92,7 @@ func TestEvaluatePushGate_RateLimit(t *testing.T) {
 	recent := []time.Time{now.Add(-10 * time.Minute), now.Add(-5 * time.Minute)}
 
 	res := evaluatePushGate(pushGateInput{
-		cfg: cfg, priority: config.NotifyPriorityNormal, now: now, recent: recent, coalesceWindow: pushCoalesceWindow,
+		cfg: cfg, priority: config.NotifyPriorityNormal, now: now, recent: recent, coalesceWindow: config.NotifyCoalesceWindowDefault,
 	})
 	if res.deliver {
 		t.Fatal("normal notification over the hourly cap should be rate limited")
@@ -100,7 +100,7 @@ func TestEvaluatePushGate_RateLimit(t *testing.T) {
 
 	// High priority bypasses the cap.
 	resHigh := evaluatePushGate(pushGateInput{
-		cfg: cfg, priority: config.NotifyPriorityHigh, now: now, recent: recent, coalesceWindow: pushCoalesceWindow,
+		cfg: cfg, priority: config.NotifyPriorityHigh, now: now, recent: recent, coalesceWindow: config.NotifyCoalesceWindowDefault,
 	})
 	if !resHigh.deliver {
 		t.Fatal("high priority should bypass the rate limit")
@@ -254,6 +254,30 @@ func TestSendPushNotification_Coalesced(t *testing.T) {
 
 	if len(fd.calls) != 1 {
 		t.Fatalf("expected exactly 1 dispatch after coalescing, got %d", len(fd.calls))
+	}
+}
+
+// TestSendPushNotification_CoalesceWindowConfigurable is the regression guard
+// for issue #1245: SendPushNotification must honour the configured
+// [notifications.timing] coalesce_window rather than a fixed constant. With the
+// window disabled ("0"), two identical immediate resends both deliver — under
+// the old hard-coded 30s window the second would have been coalesced.
+func TestSendPushNotification_CoalesceWindowConfigurable(t *testing.T) {
+	fd := &fakeDispatch{}
+	cfg := baseNotifications()
+	cfg.Timing.CoalesceWindow = "0" // disable coalescing
+	sm := newPushSM(cfg, fd.fn)
+
+	if ok, reason := sm.SendPushNotification(pushNotification{Message: "same"}); !ok {
+		t.Fatalf("first send should deliver, got suppressed: %s", reason)
+	}
+
+	if ok, reason := sm.SendPushNotification(pushNotification{Message: "same"}); !ok {
+		t.Fatalf("identical resend should deliver with coalescing disabled, got suppressed: %s", reason)
+	}
+
+	if len(fd.calls) != 2 {
+		t.Fatalf("expected 2 dispatches with coalescing disabled, got %d", len(fd.calls))
 	}
 }
 
@@ -425,7 +449,7 @@ func TestDispatchViaNotifierApp_SuccessPassesArgs(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	stub := notifierStub(t, 0, argsFile)
 
-	if err := dispatchViaNotifierApp(stub, "Braw title", "hello bothy", "high"); err != nil {
+	if err := dispatchViaNotifierApp(stub, "Braw title", "hello bothy", "high", config.NotifyDispatchTimeoutDefault); err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
 
@@ -444,7 +468,7 @@ func TestDispatchViaNotifierApp_DeniedExitCode(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	stub := notifierStub(t, notifierDeniedExitCode, argsFile)
 
-	err := dispatchViaNotifierApp(stub, "t", "m", "normal")
+	err := dispatchViaNotifierApp(stub, "t", "m", "normal", config.NotifyDispatchTimeoutDefault)
 	if !errors.Is(err, errNotifierPermissionDenied) {
 		t.Fatalf("exit %d should map to errNotifierPermissionDenied, got %v", notifierDeniedExitCode, err)
 	}
@@ -454,7 +478,7 @@ func TestDispatchViaNotifierApp_GenericFailure(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	stub := notifierStub(t, 1, argsFile)
 
-	err := dispatchViaNotifierApp(stub, "t", "m", "normal")
+	err := dispatchViaNotifierApp(stub, "t", "m", "normal", config.NotifyDispatchTimeoutDefault)
 	if err == nil {
 		t.Fatal("exit 1 should be an error")
 	}

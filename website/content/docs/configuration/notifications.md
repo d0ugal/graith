@@ -49,8 +49,9 @@ gr notify "CI failing on main after 3 retries" --priority high
 Priority levels: `low`, `normal` (default), and `high`. `high` plays a sound and
 **bypasses quiet hours and the rate limit**; `low`/`normal` are subject to both.
 Only the orchestrator session and the human may send notifications — plain agent
-sessions are rejected to prevent spam. Identical notifications within 30s are
-coalesced. Other backends (ntfy, Pushover, Slack) are planned follow-ups.
+sessions are rejected to prevent spam. Identical notifications within the
+[coalesce window](#timing) (30s by default) are coalesced. Other backends (ntfy,
+Pushover, Slack) are planned follow-ups.
 
 #### The `macos` backend
 
@@ -82,6 +83,29 @@ notify_on_complete = true
 notify_message     = "Morning briefing ready"   # templated; optional
 notify_priority    = "low"                        # low|normal|high; optional
 ```
+
+### Timing
+
+Low-level notification pacing. These were formerly fixed constants; override them
+to tune coalescing, backend dispatch, and how inbox notifications are injected
+into a session's PTY. Every key is optional — leave the table out and the
+defaults below apply.
+
+```toml
+[notifications.timing]
+coalesce_window      = "30s"   # drop an identical push within this window ("0" disables coalescing)
+dispatch_timeout     = "15s"   # per-backend dispatch timeout (osascript / helper app / command)
+inbox_idle_timeout   = "10s"   # wait for an attached session's PTY to be idle this long before injecting
+inbox_max_wait       = "2m"    # cap on the user-idle wait before injecting anyway
+inbox_cooldown       = "30s"   # minimum interval between unread-inbox nudges to one session ("0" disables)
+inbox_detached_delay = "5s"    # settle delay before notifying a session with no attached client ("0" is immediate)
+```
+
+`coalesce_window`, `inbox_cooldown`, and `inbox_detached_delay` accept `"0"` to
+disable that behaviour. `dispatch_timeout`, `inbox_idle_timeout`, and
+`inbox_max_wait` fall back to their default when set to zero or a negative value
+(they have no sensible zero). An unparseable value always falls back to the
+default.
 
 ## Approvals
 

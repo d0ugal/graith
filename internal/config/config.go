@@ -1514,6 +1514,94 @@ type Notifications struct {
 	// High-priority notifications bypass quiet hours.
 	QuietHoursStart string `toml:"quiet_hours_start"`
 	QuietHoursEnd   string `toml:"quiet_hours_end"`
+	// Timing carries the low-level coalescing, dispatch, and inbox-notification
+	// timing knobs under [notifications.timing]. Every field is optional and
+	// resolves to its documented default through the NotificationTiming accessors,
+	// so leaving the table out preserves the historical behaviour (issue #1245).
+	Timing NotificationTiming `toml:"timing"`
+}
+
+// NotificationTiming gathers the notification timing policy that was previously
+// spread as fixed constants across the daemon's push (pushnotify.go) and
+// inbox-notification (notify.go) paths (issue #1245). Every field is optional:
+// an empty or unparseable value falls back to the matching default constant,
+// preserving the historical behaviour.
+type NotificationTiming struct {
+	// CoalesceWindow is how long an identical (title+message+priority) push
+	// notification is dropped as a duplicate, coalescing rapid-fire events. Empty
+	// uses the default (NotifyCoalesceWindowDefault); "0" disables coalescing.
+	CoalesceWindow string `toml:"coalesce_window"`
+	// DispatchTimeout bounds a single backend dispatch (osascript / notifier app /
+	// command) so a hung helper can't block the caller. Empty or non-positive uses
+	// the default (NotifyDispatchTimeoutDefault).
+	DispatchTimeout string `toml:"dispatch_timeout"`
+	// InboxIdleTimeout is how long an attached session's PTY must be free of user
+	// input before an inbox notification is injected, so it doesn't land mid-type.
+	// Empty or non-positive uses the default (NotifyInboxIdleTimeoutDefault).
+	InboxIdleTimeout string `toml:"inbox_idle_timeout"`
+	// InboxMaxWait caps the total wait for user idle before an inbox notification
+	// is injected regardless. Empty or non-positive uses the default
+	// (NotifyInboxMaxWaitDefault).
+	InboxMaxWait string `toml:"inbox_max_wait"`
+	// InboxCooldown is the minimum interval between unread-inbox notifications to
+	// one session, throttling repeat nudges. Empty uses the default
+	// (NotifyInboxCooldownDefault); "0" disables the cooldown.
+	InboxCooldown string `toml:"inbox_cooldown"`
+	// InboxDetachedDelay is the settle delay before notifying a session with no
+	// attached client (no user-idle signal to wait on). Empty uses the default
+	// (NotifyInboxDetachedDelayDefault); "0" notifies immediately.
+	InboxDetachedDelay string `toml:"inbox_detached_delay"`
+}
+
+// Notification timing defaults. Each mirrors the fixed constant that governed the
+// behaviour before issue #1245 made the policy configurable.
+const (
+	NotifyCoalesceWindowDefault     = 30 * time.Second
+	NotifyDispatchTimeoutDefault    = 15 * time.Second
+	NotifyInboxIdleTimeoutDefault   = 10 * time.Second
+	NotifyInboxMaxWaitDefault       = 2 * time.Minute
+	NotifyInboxCooldownDefault      = 30 * time.Second
+	NotifyInboxDetachedDelayDefault = 5 * time.Second
+)
+
+// CoalesceWindowDuration returns the push-notification coalescing window, or the
+// default when unset or unparseable. A "0" disables coalescing.
+func (t NotificationTiming) CoalesceWindowDuration() time.Duration {
+	return durationOrDefault(t.CoalesceWindow, NotifyCoalesceWindowDefault)
+}
+
+// DispatchTimeoutDuration returns the per-backend dispatch timeout, or the
+// default when unset, unparseable, or non-positive (a zero timeout would fail
+// every dispatch instantly).
+func (t NotificationTiming) DispatchTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(t.DispatchTimeout, NotifyDispatchTimeoutDefault)
+}
+
+// InboxIdleTimeoutDuration returns the user-idle wait before an inbox
+// notification is injected, or the default when unset, unparseable, or
+// non-positive.
+func (t NotificationTiming) InboxIdleTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(t.InboxIdleTimeout, NotifyInboxIdleTimeoutDefault)
+}
+
+// InboxMaxWaitDuration returns the cap on the user-idle wait, or the default
+// when unset, unparseable, or non-positive.
+func (t NotificationTiming) InboxMaxWaitDuration() time.Duration {
+	return positiveDurationOrDefault(t.InboxMaxWait, NotifyInboxMaxWaitDefault)
+}
+
+// InboxCooldownDuration returns the minimum interval between unread-inbox
+// notifications to one session, or the default when unset or unparseable. A "0"
+// disables the cooldown.
+func (t NotificationTiming) InboxCooldownDuration() time.Duration {
+	return durationOrDefault(t.InboxCooldown, NotifyInboxCooldownDefault)
+}
+
+// InboxDetachedDelayDuration returns the settle delay before notifying a
+// detached session, or the default when unset or unparseable. A "0" notifies
+// immediately.
+func (t NotificationTiming) InboxDetachedDelayDuration() time.Duration {
+	return durationOrDefault(t.InboxDetachedDelay, NotifyInboxDetachedDelayDefault)
 }
 
 // Notification priority levels for `gr notify`.
