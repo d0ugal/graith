@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.68.7](https://github.com/d0ugal/graith/compare/v0.68.6...v0.68.7) (2026-07-16)
+
+
+### Features
+
+* **headless:** convert-to-interactive on attach ([#1137](https://github.com/d0ugal/graith/issues/1137)) ([6526df7](https://github.com/d0ugal/graith/commit/6526df790c6a44d125267aa085d97aa2f5a76bf1))
+* **headless:** interrupt + approvals over control protocol ([#1136](https://github.com/d0ugal/graith/issues/1136)) ([73f8ead](https://github.com/d0ugal/graith/commit/73f8ead6fe1931d0ac9fe6a334d98f3ad9408d4a))
+* **overlay:** highlight the whole selected picker row ([90d003e](https://github.com/d0ugal/graith/commit/90d003e135cdba047f2962708b38a10c8d842c5b))
+* **scenario:** add per-session includes and star fields ([#1046](https://github.com/d0ugal/graith/issues/1046)) ([3b57f88](https://github.com/d0ugal/graith/commit/3b57f887262873f3952687e8f799caf93523420d))
+* **triggers:** tracker-poll → session dispatch action ([#643](https://github.com/d0ugal/graith/issues/643)) ([1206e5a](https://github.com/d0ugal/graith/commit/1206e5a0996ba05fce4fcb7abec93d8c5d59732f))
+
+
+### Bug Fixes
+
+* **daemon:** inject codex hooks via -c overrides, not CODEX_HOOKS_DIR ([c35f544](https://github.com/d0ugal/graith/commit/c35f54441b42cabeb00176885940de76105b928b))
+* **daemon:** inject graith prompt into Codex sessions ([#1185](https://github.com/d0ugal/graith/issues/1185)) ([cea47bf](https://github.com/d0ugal/graith/commit/cea47bfbc53133d5d1a3c642a440d991ddb8b080))
+* **daemon:** inject MCP servers into Codex sessions ([#1184](https://github.com/d0ugal/graith/issues/1184)) ([ed1a611](https://github.com/d0ugal/graith/commit/ed1a6119cc53bfa8f08034d65615632bc5bee3e2))
+* **daemon:** skip codex mcp servers with unrepresentable names ([6b4bf47](https://github.com/d0ugal/graith/commit/6b4bf4752ba19861ddbac0aa2eccc7ea47490416))
+* **headless:** address review — fail-closed approvals, close-on-result deadlock, control-response hardening ([dcc8d90](https://github.com/d0ugal/graith/commit/dcc8d907b7b066e2796d3917dc0938b90e56f78e))
+* **headless:** address tribunal review findings on convert-on-attach ([332b6be](https://github.com/d0ugal/graith/commit/332b6bec3e42e141841d5f7f22f3abe84e220782))
+* **scenario:** address review findings for includes/star ([#1046](https://github.com/d0ugal/graith/issues/1046)) ([ac4fb00](https://github.com/d0ugal/graith/commit/ac4fb00bba254969965b79aa5fff2df0f0b5ea50))
+* **triggers:** address tracker action review findings ([0964764](https://github.com/d0ugal/graith/commit/09647641297e76cab4c492a0067da2d83f13210f))
+* update module github.com/mattn/go-isatty to v0.0.23 ([c7643d8](https://github.com/d0ugal/graith/commit/c7643d8652a0f4fd5050f25a8d08707648c35835))
+* update module modernc.org/sqlite to v1.54.0 ([7d04912](https://github.com/d0ugal/graith/commit/7d0491256fff885d17ba986bd99a12c4fe646911))
+
+
+### Code Refactoring
+
+* **daemon:** decouple MCP-config injection from lifecycle hooks ([6c78a27](https://github.com/d0ugal/graith/commit/6c78a27f7128eec3c436b67700249570f80c55b0)), closes [#1135](https://github.com/d0ugal/graith/issues/1135)
+
+
+### Tests
+
+* **daemon:** lock MCP/hook decoupling on Fork and Resume; fix comment wording ([24510eb](https://github.com/d0ugal/graith/commit/24510eb638fe23f8c885d0aa2c8226ab42253334))
+* **daemon:** validate Codex prompt value as TOML; document replace semantics ([71bb1d8](https://github.com/d0ugal/graith/commit/71bb1d8eb9ef8cdd3d4237fad7548183eefaffa7))
+* **overlay:** lock the row-highlight reset-reopen; fix helper comments ([fe79c22](https://github.com/d0ugal/graith/commit/fe79c22f4fd68d2c5956fe5d6bb3a8563b972045))
+
 ## [0.68.6](https://github.com/d0ugal/graith/compare/v0.68.5...v0.68.6) (2026-07-16)
 
 
