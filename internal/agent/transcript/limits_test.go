@@ -1,6 +1,9 @@
 package transcript
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // resetScanLimits clears the process-global scanner caps so a test starts from
 // the built-in defaults and does not leak its Configure() into sibling tests.
@@ -98,4 +101,145 @@ func TestConfiguredLineCapGovernsReader(t *testing.T) {
 	if len(turns) != 0 || dropped != 1 {
 		t.Fatalf("tiny cap: got %d turns, %d dropped; want 0 turns, 1 dropped", len(turns), dropped)
 	}
+}
+
+// TestScannerCapBelow64KiBIsEnforced is the regression for issue #1295. Every
+// transcript scanner previously got a fixed 64 KiB initial buffer, and Go treats
+// the effective maximum token size as the LARGER of the Buffer max argument and
+// the initial capacity. So a record larger than a configured sub-64-KiB cap but
+// smaller than 64 KiB slipped through unchecked — the pre-existing small-cap test
+// missed this because its record was 200 KiB (over both limits). With the fix the
+// initial buffer is capped at the configured maximum, so a ~4 KiB record (between
+// 1 KiB and 64 KiB) is rejected under a 1 KiB cap on every affected path (Claude
+// read/usage, Codex read/usage, and the Codex metadata cwd/id scans), while the
+// same record reads intact under the defaults.
+func TestScannerCapBelow64KiBIsEnforced(t *testing.T) {
+	// Padding that puts each record in the 1 KiB–64 KiB window the old fixed
+	// initial buffer let through. ASCII, so it needs no JSON escaping.
+	pad := strings.Repeat("z", 4*1024)
+
+	// assertReadCapEnforced checks that a single valid record reads as one turn
+	// under the default cap but is dropped under a 1 KiB cap, for either reader.
+	assertReadCapEnforced := func(t *testing.T, line string, read func(string) ([]Turn, int, error)) {
+		t.Helper()
+		resetScanLimits(t)
+
+		path := writeLines(t, []string{line})
+
+		turns, dropped, err := read(path)
+		if err != nil {
+			t.Fatalf("read (default cap): %v", err)
+		}
+
+		if len(turns) != 1 || dropped != 0 {
+			t.Fatalf("default cap: got %d turns, %d dropped; want 1 turn, 0 dropped", len(turns), dropped)
+		}
+
+		Configure(1024, 0)
+
+		turns, dropped, err = read(path)
+		if err != nil {
+			t.Fatalf("read (1 KiB cap): %v", err)
+		}
+
+		if len(turns) != 0 || dropped != 1 {
+			t.Fatalf("1 KiB cap: got %d turns, %d dropped; want 0 turns, 1 dropped (record between 1 KiB and 64 KiB must be rejected)", len(turns), dropped)
+		}
+	}
+
+	t.Run("claude read", func(t *testing.T) {
+		line := `{"type":"user","uuid":"u1","parentUuid":"","message":{"role":"user","content":"` + pad + `"}}`
+		assertReadCapEnforced(t, line, claudeReader{}.read)
+	})
+
+	t.Run("claude usage", func(t *testing.T) {
+		resetScanLimits(t)
+
+		// An assistant record carrying usage, padded past 1 KiB via its text block.
+		line := `{"type":"assistant","uuid":"a1","message":{"role":"assistant","id":"msg-1","usage":{"input_tokens":5,"output_tokens":7},"content":[{"type":"text","text":"` + pad + `"}]}}`
+		path := writeLines(t, []string{line})
+
+		u, err := claudeReader{}.usage(path)
+		if err != nil {
+			t.Fatalf("usage (default cap): %v", err)
+		}
+
+		if !u.Found || u.Input != 5 || u.Output != 7 {
+			t.Fatalf("default cap: usage = %+v; want found with input 5, output 7", u)
+		}
+
+		Configure(1024, 0)
+
+		u, err = claudeReader{}.usage(path)
+		if err != nil {
+			t.Fatalf("usage (1 KiB cap): %v", err)
+		}
+
+		if u.Found || u.Dropped != 1 {
+			t.Fatalf("1 KiB cap: usage = %+v; want not found, 1 dropped", u)
+		}
+	})
+
+	t.Run("codex read", func(t *testing.T) {
+		line := `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"` + pad + `"}]}}`
+		assertReadCapEnforced(t, line, codexReader{}.read)
+	})
+
+	t.Run("codex usage", func(t *testing.T) {
+		resetScanLimits(t)
+
+		// A token_count line padded past 1 KiB with a top-level field the reader
+		// ignores, leaving the payload a valid cumulative snapshot.
+		line := `{"type":"token_count","pad":"` + pad + `","payload":{"info":{"total_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":4,"total_tokens":14}}}}`
+		path := writeLines(t, []string{line})
+
+		u, err := codexReader{}.usage(path)
+		if err != nil {
+			t.Fatalf("usage (default cap): %v", err)
+		}
+
+		if !u.Found || u.Input != 10 || u.Output != 4 {
+			t.Fatalf("default cap: usage = %+v; want found with input 10, output 4", u)
+		}
+
+		Configure(1024, 0)
+
+		u, err = codexReader{}.usage(path)
+		if err != nil {
+			t.Fatalf("usage (1 KiB cap): %v", err)
+		}
+
+		if u.Found {
+			t.Fatalf("1 KiB cap: usage = %+v; want not found (oversized token_count line skipped)", u)
+		}
+	})
+
+	t.Run("codex metadata cwd and id", func(t *testing.T) {
+		resetScanLimits(t)
+
+		// session_meta padded past 1 KiB with an ignored top-level field.
+		line := `{"type":"session_meta","pad":"` + pad + `","payload":{"id":"sess-big","cwd":"/glen/bothy"}}`
+		path := writeLines(t, []string{line})
+
+		if cwd, ok := codexRolloutCwd(path); !ok || cwd != "/glen/bothy" {
+			t.Fatalf("default metadata cap: cwd = %q, %v; want /glen/bothy, true", cwd, ok)
+		}
+
+		if id, ok := CodexRolloutID(path); !ok || id != "sess-big" {
+			t.Fatalf("default metadata cap: id = %q, %v; want sess-big, true", id, ok)
+		}
+
+		// Tighten only the metadata cap; the oversized header line is now skipped,
+		// so neither field resolves (before the fix the 64 KiB initial buffer
+		// returned the line despite the 1 KiB cap).
+		Configure(0, 1024)
+
+		if cwd, ok := codexRolloutCwd(path); ok {
+			t.Fatalf("1 KiB metadata cap: cwd = %q resolved; want skipped", cwd)
+		}
+
+		if id, ok := CodexRolloutID(path); ok {
+			t.Fatalf("1 KiB metadata cap: id = %q resolved; want skipped", id)
+		}
+	})
 }

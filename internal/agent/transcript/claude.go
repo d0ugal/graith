@@ -112,7 +112,7 @@ func (claudeReader) read(path string) ([]Turn, int, error) {
 	dropped := 0
 
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), maxLineBytes())
+	sc.Buffer(newScanBuffer(maxLineBytes()))
 
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
@@ -177,7 +177,7 @@ func (claudeReader) usage(path string) (Usage, error) {
 	seen := make(map[string]claudeUsage)
 
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), maxLineBytes())
+	sc.Buffer(newScanBuffer(maxLineBytes()))
 
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())

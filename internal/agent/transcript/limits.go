@@ -60,3 +60,21 @@ func maxMetadataLineBytes() int {
 
 	return DefaultMaxMetadataLineBytes
 }
+
+// scanBufferStartCap is the initial bufio.Scanner buffer capacity used for
+// typical short lines. It matches bufio's own historical default and is only an
+// allocation hint, never a cap on its own.
+const scanBufferStartCap = 64 * 1024
+
+// newScanBuffer returns the (initial buffer, max token size) pair for a
+// bufio.Scanner whose effective per-line cap must equal limit. Go treats the
+// effective maximum token size as the LARGER of the Buffer max argument and the
+// initial buffer capacity, so a fixed 64 KiB initial capacity silently raised
+// the real limit to 64 KiB whenever a caller configured a smaller limit (a line
+// up to 64 KiB fit in the initial buffer and was returned before the resize path
+// ever consulted the max). Capping the initial capacity at limit keeps the
+// effective cap equal to the configured value while never exceeding the 64 KiB
+// start size for the common large-limit case (issue #1295).
+func newScanBuffer(limit int) ([]byte, int) {
+	return make([]byte, 0, min(scanBufferStartCap, limit)), limit
+}
