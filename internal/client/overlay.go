@@ -713,7 +713,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 func highlightSelectedRow(line string, width int) string {
 	open := selectRowOpen()
 	if open == "" {
-		// No-color profile (e.g. redirected output): nothing to highlight.
+		// Defensive: nothing to open (a renderer emitting no SGR at all).
 		return line
 	}
 
@@ -723,6 +723,10 @@ func highlightSelectedRow(line string, width int) string {
 		}
 	}
 
+	// lipgloss v2 emits the short reset "\x1b[m"; the "\x1b[0m" replace is
+	// defensive against non-lipgloss ANSI (e.g. ansi.Truncate's terminator or
+	// hand-written escapes) and must not be removed as dead. The two patterns
+	// don't overlap, so their order doesn't matter.
 	line = strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+open)
 	line = strings.ReplaceAll(line, "\x1b[m", "\x1b[m"+open)
 
@@ -730,9 +734,11 @@ func highlightSelectedRow(line string, width int) string {
 }
 
 // selectRowOpen returns the SGR sequence that opens the selected-row style
-// (bold + background), derived through lipgloss so it honours the active color
-// profile (truecolor is downsampled on limited terminals). Returns "" when the
-// profile emits no color at all.
+// (bold + background). lipgloss v2's Render always emits full-fidelity truecolor
+// here; downsampling to a limited palette (or stripping under a no-color
+// profile) happens downstream in Bubble Tea's output layer, exactly as it does
+// for every other cell in the row. The "" return is a defensive fallback for a
+// renderer that emits no SGR at all.
 func selectRowOpen() string {
 	probe := lipgloss.NewStyle().Bold(true).Background(colorSelectBg).Render("x")
 	if i := strings.IndexByte(probe, 'x'); i > 0 {

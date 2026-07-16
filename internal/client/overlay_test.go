@@ -3192,19 +3192,94 @@ func TestCompactDelegate_RenderSelectedVsUnselected(t *testing.T) {
 	// The selected row is highlighted with a full-width background so the whole
 	// line stands out, not just the "> " cursor. The background SGR must be
 	// present on the selected row and absent from the unselected one, and the
-	// highlight must span the full list width.
-	if open := selectRowOpen(); open != "" {
-		if !strings.Contains(selected, open) {
-			t.Errorf("selected row should carry the highlight background %q, got %q", open, selected)
-		}
+	// highlight must span the full list width. lipgloss v2 always emits color
+	// under `go test`, so treat an empty open as a failure rather than silently
+	// skipping the assertions (which would degrade this to the pre-change test).
+	open := selectRowOpen()
+	if open == "" {
+		t.Fatal("selectRowOpen returned empty; cannot verify the row highlight")
+	}
 
-		if strings.Contains(unselected, open) {
-			t.Errorf("unselected row should not carry the highlight background, got %q", unselected)
-		}
+	if !strings.Contains(selected, open) {
+		t.Errorf("selected row should carry the highlight background %q, got %q", open, selected)
+	}
 
-		if vis := lipgloss.Width(selected); vis != l.Width() {
-			t.Errorf("selected row highlight should span the full width %d, got visible width %d", l.Width(), vis)
-		}
+	if strings.Contains(unselected, open) {
+		t.Errorf("unselected row should not carry the highlight background, got %q", unselected)
+	}
+
+	if vis := lipgloss.Width(selected); vis != l.Width() {
+		t.Errorf("selected row highlight should span the full width %d, got visible width %d", l.Width(), vis)
+	}
+}
+
+// TestHighlightSelectedRow guards the core reset-reopen mechanism directly: a
+// picker row is built from columns that each end in a full SGR reset, which
+// would clear the background mid-row. highlightSelectedRow must re-open the
+// background after every reset so it spans the whole line. Asserting on the
+// full rendered row (as TestCompactDelegate_RenderSelectedVsUnselected does)
+// isn't enough — dropping the interior re-open still leaves one opening
+// sequence and full-width padding, so this exercises the helper in isolation
+// with both reset spellings present.
+func TestHighlightSelectedRow(t *testing.T) {
+	open := selectRowOpen()
+	if open == "" {
+		t.Fatal("selectRowOpen returned empty; cannot verify the row highlight")
+	}
+
+	// Two styled cells, each terminated by a reset: the short "\x1b[m" that
+	// lipgloss v2 emits and the long "\x1b[0m" the defensive branch handles.
+	line := "braw" + "\x1b[m" + "canny" + "\x1b[0m" + "bonnie"
+
+	const width = 20
+
+	out := highlightSelectedRow(line, width)
+
+	if !strings.HasPrefix(out, open) {
+		t.Errorf("highlighted row should open with the background %q, got %q", open, out)
+	}
+
+	if !strings.HasSuffix(out, "\x1b[0m") {
+		t.Errorf("highlighted row should end with a reset, got %q", out)
+	}
+
+	// The background must be re-opened immediately after each interior reset —
+	// this is the assertion that fails if the ReplaceAll lines are removed.
+	if !strings.Contains(out, "\x1b[m"+open) {
+		t.Errorf("background should re-open after the short reset, got %q", out)
+	}
+
+	if !strings.Contains(out, "\x1b[0m"+open) {
+		t.Errorf("background should re-open after the long reset, got %q", out)
+	}
+
+	// One opening at the start plus one after each of the two interior resets.
+	if got := strings.Count(out, open); got != 3 {
+		t.Errorf("expected the background to open 3 times (start + 2 resets), got %d in %q", got, out)
+	}
+
+	// The highlight spans the full width via right-padding.
+	if vis := lipgloss.Width(out); vis != width {
+		t.Errorf("highlighted row should span width %d, got visible width %d", width, vis)
+	}
+}
+
+// TestHighlightSelectedRow_ZeroWidth checks the width<=0 path: no padding, but
+// the row is still wrapped and terminated so styling can't leak downstream.
+func TestHighlightSelectedRow_ZeroWidth(t *testing.T) {
+	open := selectRowOpen()
+	if open == "" {
+		t.Fatal("selectRowOpen returned empty; cannot verify the row highlight")
+	}
+
+	out := highlightSelectedRow("dreich"+"\x1b[m"+"haar", 0)
+
+	if !strings.HasPrefix(out, open) || !strings.HasSuffix(out, "\x1b[0m") {
+		t.Errorf("zero-width row should still be wrapped in open/reset, got %q", out)
+	}
+
+	if !strings.Contains(out, "\x1b[m"+open) {
+		t.Errorf("zero-width row should still re-open the background after resets, got %q", out)
 	}
 }
 
