@@ -79,7 +79,7 @@ func TestConcurrentConfigReloadVsHookAndStoreReaders(t *testing.T) {
 				return
 			}
 
-			if _, _, err := sm.injectCodexHooks("sess-hook", false); err != nil {
+			if _, _, err := sm.injectCodexHooks("sess-hook", false, sm.Config().Agents["codex"]); err != nil {
 				t.Errorf("injectCodexHooks: %v", err)
 				return
 			}
