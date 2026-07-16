@@ -6,15 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/d0ugal/graith/internal/config"
 	"tailscale.com/client/local"
 	"tailscale.com/client/tailscale/apitype"
-	"tailscale.com/tsnet"
 )
 
 // RemoteListener is a tailnet-facing listener plus a way to resolve the tailnet
@@ -78,50 +75,12 @@ func identityAllowed(cfg config.RemoteConfig, id *TailnetIdentity) bool {
 	return false
 }
 
-// --- tsnet mode: embedded Tailscale node ---
-
-type tsnetListener struct {
-	srv  *tsnet.Server
-	port int
-}
-
-func newTSNetListener(cfg config.RemoteConfig, stateDir string) (*tsnetListener, error) {
-	srv := &tsnet.Server{
-		Hostname: cfg.Hostname,
-		Dir:      filepath.Join(stateDir, "tsnet"),
-	}
-
-	if cfg.AuthKeyFile != "" {
-		b, err := os.ReadFile(config.ExpandPath(cfg.AuthKeyFile))
-		if err != nil {
-			return nil, fmt.Errorf("read tsnet auth key: %w", err)
-		}
-
-		srv.AuthKey = strings.TrimSpace(string(b))
-	}
-
-	return &tsnetListener{srv: srv, port: cfg.Port}, nil
-}
-
-func (l *tsnetListener) Listen() (net.Listener, error) {
-	return l.srv.Listen("tcp", fmt.Sprintf(":%d", l.port))
-}
-
-func (l *tsnetListener) WhoIs(ctx context.Context, remoteAddr string) (*TailnetIdentity, error) {
-	lc, err := l.srv.LocalClient()
-	if err != nil {
-		return nil, err
-	}
-
-	w, err := lc.WhoIs(ctx, remoteAddr)
-	if err != nil {
-		return nil, err
-	}
-
-	return identityFromWhoIs(w), nil
-}
-
-func (l *tsnetListener) Close() error { return l.srv.Close() }
+// tsnet mode (embedded Tailscale node) lives in the build-tagged
+// remote_tsnet.go / remote_notsnet.go pair. newTSNetListener and the
+// tsnetSupported constant are declared there so the heavyweight
+// tailscale.com/tsnet dependency graph (gVisor netstack, WireGuard) can be
+// compiled out of interface-only builds with the no_tsnet build tag — see
+// docs/design/2026-07-16-tsnet-footprint.md.
 
 // --- interface mode: bind to the host tailscaled's tailnet IP ---
 

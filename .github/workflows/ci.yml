@@ -102,6 +102,24 @@ jobs:
           go-version-file: go.mod
       - run: go build -v ./cmd/graith
 
+  build-notsnet:
+    name: Build & Test (no_tsnet)
+    runs-on: ubuntu-latest
+    # The interface-only distribution variant: compiles out the embedded
+    # Tailscale node (tailscale.com/tsnet) and its gVisor/WireGuard graph via the
+    # no_tsnet build tag. Building and testing it here keeps the alternate build
+    # honest — a change that breaks the tag (or the tsnet-mode fail-closed path)
+    # goes red. See docs/design/2026-07-16-tsnet-footprint.md.
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go build -v -tags no_tsnet ./cmd/graith
+      - run: go test -race -count=1 -tags no_tsnet ./internal/daemon/... ./internal/config/...
+
   build-macos:
     name: Build (macos-latest)
     needs: changes
