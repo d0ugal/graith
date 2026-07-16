@@ -77,10 +77,21 @@ at `gr mcp-proxy <name>` so the daemon supervises the real process:
 
 - **Claude** — a generated `--mcp-config` file.
 - **Codex** — per-session `-c mcp_servers.<name>.command=…` / `.args=…`
-  config overrides. Because these are overrides (not a full config file), any
-  extra Codex per-server controls you set in `~/.codex/config.toml` — such as
-  `startup_timeout_sec`, `tool_timeout_sec`, `enabled`, enabled/disabled tools,
-  or per-tool approval mode — are preserved and merged.
+  config overrides. Because these override only `command` and `args` (not a full
+  config file), any extra Codex per-server controls you set for a matching
+  stdio server in `~/.codex/config.toml` — such as `startup_timeout_sec`,
+  `tool_timeout_sec`, `enabled`, enabled/disabled tools, or per-tool approval
+  mode — are preserved and merged. (If a same-named server in your Codex config
+  is a remote/HTTP transport, the injected stdio `command`/`args` will conflict
+  with it — pick a distinct name to avoid the clash.)
+
+  Codex identifies servers by a dotted config-key path, so a server name must be
+  a TOML bare key (`A–Z`, `a–z`, `0–9`, `_`, `-`) to be injectable. A server
+  whose name contains a `.`, space, or other special character is skipped for
+  Codex (with a daemon-log warning) rather than emitted, since an
+  un-representable name would otherwise stop Codex from starting. The
+  auto-injected `graith` server and ordinary names are always fine; the Claude
+  path has no such restriction.
 
 Agents without MCP injection support (e.g. `cursor`, `opencode`) don't receive
 these servers automatically.
