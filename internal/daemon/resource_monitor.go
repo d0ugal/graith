@@ -33,9 +33,17 @@ type ResourceSample struct {
 	RSSMB        int64     `json:"rss_mb"`
 	CPUPercent   float64   `json:"cpu_percent"`
 	OpenFDs      int       `json:"open_fds"`
+	FDsPartial   bool      `json:"fds_partial,omitempty"`
 	ProcessCount int       `json:"process_count"`
 	TopProcess   string    `json:"top_process,omitempty"`
 	ProcessIDs   []int     `json:"-"`
+}
+
+type signalRequest struct {
+	PID       int
+	Signal    syscall.Signal
+	Initiator string
+	At        time.Time
 }
 
 type processResource struct {
@@ -66,12 +74,20 @@ func (sm *SessionManager) RunResourceMonitorLoop(ctx context.Context) {
 }
 
 func (sm *SessionManager) sampleSessionResources() {
+	now := time.Now()
 	sm.mu.RLock()
 	targets := make(map[int]struct {
 		id, name string
 	}, len(sm.sessions))
 	for id, sess := range sm.sessions {
 		if pgid := sess.Pgid(); pgid > 0 && !sess.Exited() {
+			// A kick gives a newly launched session an immediate baseline, but it
+			// must not replace every established session's five-sample history
+			// during a launch burst. Per-session spacing preserves the intended
+			// 30-second time series while still sampling new IDs immediately.
+			if !sm.resourceSampleDue(id, now) {
+				continue
+			}
 			name := id
 			if state := sm.state.Sessions[id]; state != nil {
 				name = state.Name
@@ -107,9 +123,8 @@ func (sm *SessionManager) sampleSessionResources() {
 			continue
 		}
 
-		sample := ResourceSample{At: time.Now().UTC(), OpenFDs: 0, ProcessCount: len(members)}
+		sample := ResourceSample{At: now.UTC(), OpenFDs: 0, ProcessCount: len(members)}
 		var topRSS int64
-		fdsKnown := true
 		for _, proc := range members {
 			sample.RSSMB += proc.rssKB
 			sample.CPUPercent += proc.cpu
@@ -117,18 +132,17 @@ func (sm *SessionManager) sampleSessionResources() {
 			if n, ok := fdCounts[proc.pid]; ok {
 				sample.OpenFDs += n
 			} else {
-				fdsKnown = false
+				sample.FDsPartial = true
 			}
 			if proc.rssKB > topRSS {
 				topRSS, sample.TopProcess = proc.rssKB, proc.command
 			}
 		}
 		sample.RSSMB /= 1024
-		if !fdsKnown {
-			sample.OpenFDs = -1
-		}
-
 		sm.resourceMu.Lock()
+		if sm.resourceSamples == nil {
+			sm.resourceSamples = make(map[string][]ResourceSample)
+		}
 		history := append(sm.resourceSamples[target.id], sample)
 		if len(history) > resourceSampleHistory {
 			history = history[len(history)-resourceSampleHistory:]
@@ -139,8 +153,46 @@ func (sm *SessionManager) sampleSessionResources() {
 		sm.log.Debug("session resource sample", "id", target.id, "name", target.name,
 			"pgid", pgid, "rss_mb", sample.RSSMB, "cpu_percent", sample.CPUPercent,
 			"open_fds", sample.OpenFDs, "process_count", sample.ProcessCount,
-			"top_process", sample.TopProcess)
+			"fds_partial", sample.FDsPartial, "top_process", sample.TopProcess)
 	}
+}
+
+func (sm *SessionManager) resourceSampleDue(id string, now time.Time) bool {
+	sm.resourceMu.Lock()
+	defer sm.resourceMu.Unlock()
+	history := sm.resourceSamples[id]
+	return len(history) == 0 || now.Sub(history[len(history)-1].At) >= resourceSampleInterval
+}
+
+func (sm *SessionManager) discardResourceSamples(id string) {
+	sm.resourceMu.Lock()
+	delete(sm.resourceSamples, id)
+	sm.resourceMu.Unlock()
+}
+
+func (sm *SessionManager) recordSignalRequest(id string, pid int, signal syscall.Signal, initiator string) {
+	if pid <= 0 {
+		return
+	}
+	sm.resourceMu.Lock()
+	if sm.signalRequests == nil {
+		sm.signalRequests = make(map[string]signalRequest)
+	}
+	sm.signalRequests[id] = signalRequest{
+		PID: pid, Signal: signal, Initiator: initiator, At: time.Now().UTC(),
+	}
+	sm.resourceMu.Unlock()
+}
+
+func (sm *SessionManager) takeSignalRequest(id string, pid int) *signalRequest {
+	sm.resourceMu.Lock()
+	defer sm.resourceMu.Unlock()
+	request, ok := sm.signalRequests[id]
+	if !ok || request.PID != pid {
+		return nil
+	}
+	delete(sm.signalRequests, id)
+	return &request
 }
 
 func (sm *SessionManager) takeResourceSamples(id string, pid int) []ResourceSample {
@@ -175,10 +227,14 @@ type mcpCrashStatus struct {
 }
 
 // logAbnormalExitReport emits the high-density diagnostic record intended for
-// post-mortems. wait(2) reports the terminating signal but not its sender, so
-// attribution is exact for daemon-requested stops and deliberately says
-// external-or-unknown otherwise.
-func (sm *SessionManager) logAbnormalExitReport(id, name, stopReason string, sess SessionDriver) {
+// post-mortems. wait(2) reports the terminating signal but not its sender, so a
+// matching PID-bound graith request is reported as intent, never as proof of
+// provenance; without one, attribution deliberately says external-or-unknown.
+func (sm *SessionManager) logAbnormalExitReport(
+	id, name, stopReason string,
+	sess SessionDriver,
+	signalRequest *signalRequest,
+) {
 	samples := sm.takeResourceSamples(id, sess.ProcessPID())
 	if stopReason != StopReasonCrash || (sess.ExitSignal() == 0 && sess.ExitCode() == 0) {
 		return
@@ -202,7 +258,7 @@ func (sm *SessionManager) logAbnormalExitReport(id, name, stopReason string, ses
 	}
 	sm.mu.RUnlock()
 
-	category, signalSource := classifyExit(stopReason, sess.ExitCode(), sess.ExitSignal())
+	category, signalSource := classifyExit(sess.ExitCode(), sess.ExitSignal(), signalRequest)
 
 	lastOutputAge := int64(-1)
 	if last := sess.LastOutputAt(); !last.IsZero() {
@@ -246,7 +302,7 @@ func (sm *SessionManager) logAbnormalExitReport(id, name, stopReason string, ses
 		"stop_reason", stopReason, "exit_code", sess.ExitCode(),
 		"signal", signalName, "signal_source", signalSource,
 		"pid", sess.ProcessPID(), "pgid", sess.Pgid(),
-		"lifetime_ms", time.Since(sess.CreatedAt()).Milliseconds(),
+		"observed_lifetime_ms", time.Since(sess.CreatedAt()).Milliseconds(),
 		"last_output_age_ms", lastOutputAge,
 		"resource_samples", samples,
 		"sandboxed", sandboxed, "sandbox_backend", sandboxBackend,
@@ -255,12 +311,12 @@ func (sm *SessionManager) logAbnormalExitReport(id, name, stopReason string, ses
 		"unread_messages", unread, "mcp_processes", mcpStatuses)
 }
 
-func classifyExit(stopReason string, exitCode int, signal syscall.Signal) (category, signalSource string) {
+func classifyExit(exitCode int, signal syscall.Signal, request *signalRequest) (category, signalSource string) {
 	if signal != 0 {
-		if stopReason == StopReasonCrash {
-			return "signal-external-or-unknown", "external-or-unknown"
+		if request != nil && request.Signal == signal {
+			return "signal-after-graith-request", "graith-requested"
 		}
-		return "signal-internal", "graith"
+		return "signal-external-or-unknown", "external-or-unknown"
 	}
 	if exitCode != 0 {
 		return "exit-nonzero", "none"

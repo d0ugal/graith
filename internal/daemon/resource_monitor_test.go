@@ -79,6 +79,90 @@ func TestSampleSessionResourcesAggregatesProcessGroup(t *testing.T) {
 	}
 }
 
+func TestSampleSessionResourcesRetainsPartialFDCountAndCapsHistory(t *testing.T) {
+	sm, _ := newLogCapturingManager(t)
+	id := "braw-partial"
+	sess := newTestPTYSession(t, "sleep", "100")
+	t.Cleanup(func() {
+		_ = sess.Kill()
+		<-sess.Done()
+		sess.Close()
+	})
+	pgid := sess.Pgid()
+	sm.state.Sessions[id] = &SessionState{ID: id, Name: "braw", Status: StatusRunning}
+	sm.sessions[id] = sess
+
+	originalList, originalFDs := processListOutput, fdCountReader
+	t.Cleanup(func() { processListOutput, fdCountReader = originalList, originalFDs })
+	processListOutput = func() ([]byte, error) {
+		return []byte(strconv.Itoa(sess.ProcessPID()) + " " + strconv.Itoa(pgid) + " 1024 1 agent\n" +
+			"999 " + strconv.Itoa(pgid) + " 512 1 transient\n"), nil
+	}
+	fdCountReader = func(_ []int) map[int]int { return map[int]int{sess.ProcessPID(): 12} }
+
+	for range resourceSampleHistory + 2 {
+		sm.sampleSessionResources()
+		sm.resourceMu.Lock()
+		history := sm.resourceSamples[id]
+		history[len(history)-1].At = time.Now().Add(-resourceSampleInterval)
+		sm.resourceSamples[id] = history
+		sm.resourceMu.Unlock()
+	}
+	samples := sm.resourceSamples[id]
+	if len(samples) != resourceSampleHistory {
+		t.Fatalf("history length = %d, want %d", len(samples), resourceSampleHistory)
+	}
+	last := samples[len(samples)-1]
+	if last.OpenFDs != 12 || !last.FDsPartial {
+		t.Errorf("partial FD sample = %#v", last)
+	}
+}
+
+func TestCleanExitDiscardsResourceSamples(t *testing.T) {
+	sm, _ := newLogCapturingManager(t)
+	id := "braw-clean"
+	sess := newTestPTYSession(t, "true")
+	waitExit(t, sess)
+	t.Cleanup(sess.Close)
+	sm.resourceSamples[id] = []ResourceSample{{ProcessIDs: []int{sess.ProcessPID()}}}
+
+	sm.logAbnormalExitReport(id, "braw", StopReasonCrash, sess, nil)
+	if _, ok := sm.resourceSamples[id]; ok {
+		t.Error("clean exit retained resource history")
+	}
+}
+
+func TestDeletedSessionExitDiscardsResourceSamples(t *testing.T) {
+	sm, _ := newLogCapturingManager(t)
+	id := "braw-deleted"
+	sess := newTestPTYSession(t, "true")
+	waitExit(t, sess)
+	sm.resourceSamples[id] = []ResourceSample{{ProcessIDs: []int{sess.ProcessPID()}}}
+
+	// No state or live-driver entry models the hard-delete path: its watcher is
+	// stale, but unlike a replaced generation there is no new session to own the
+	// resource-history key.
+	sm.watchSession(id, sess)
+	if _, ok := sm.resourceSamples[id]; ok {
+		t.Error("deleted session retained resource history")
+	}
+}
+
+func TestSoftDeletedSessionExitDiscardsResourceSamples(t *testing.T) {
+	sm, _ := newLogCapturingManager(t)
+	id := "braw-soft-deleted"
+	sess := newTestPTYSession(t, "true")
+	waitExit(t, sess)
+	now := time.Now()
+	sm.state.Sessions[id] = &SessionState{ID: id, DeletedAt: &now}
+	sm.resourceSamples[id] = []ResourceSample{{ProcessIDs: []int{sess.ProcessPID()}}}
+
+	sm.watchSession(id, sess)
+	if _, ok := sm.resourceSamples[id]; ok {
+		t.Error("soft-deleted session retained resource history")
+	}
+}
+
 func TestResourceMonitorStopsWithContext(t *testing.T) {
 	sm, _ := newLogCapturingManager(t)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -112,6 +196,44 @@ func TestTakeResourceSamplesFiltersOldProcessGeneration(t *testing.T) {
 	}
 }
 
+func TestResourceSampleDuePreservesHistoryAcrossLaunchKicks(t *testing.T) {
+	sm, _ := newLogCapturingManager(t)
+	now := time.Now()
+	sm.resourceSamples["braw"] = []ResourceSample{{At: now.Add(-time.Second)}}
+	if sm.resourceSampleDue("braw", now) {
+		t.Fatal("recently sampled session was due during launch burst")
+	}
+	sm.resourceSamples["braw"][0].At = now.Add(-resourceSampleInterval)
+	if !sm.resourceSampleDue("braw", now) {
+		t.Fatal("session was not due after sample interval")
+	}
+	if !sm.resourceSampleDue("new", now) {
+		t.Fatal("new session did not receive immediate baseline")
+	}
+}
+
+func TestSignalRequestIsBoundToProcessGeneration(t *testing.T) {
+	sm, _ := newLogCapturingManager(t)
+	sm.recordSignalRequest("braw", 101, syscall.SIGTERM, "user-stop")
+	if got := sm.takeSignalRequest("braw", 202); got != nil {
+		t.Fatalf("replacement generation consumed request: %#v", got)
+	}
+	got := sm.takeSignalRequest("braw", 101)
+	if got == nil || got.Signal != syscall.SIGTERM || got.Initiator != "user-stop" {
+		t.Fatalf("signal request = %#v", got)
+	}
+}
+
+func TestSignalRequestSupportsNarrowManagerHarness(t *testing.T) {
+	// Some daemon unit tests intentionally construct SessionManager directly.
+	// Runtime-only diagnostic maps must initialize lazily on those paths.
+	sm := &SessionManager{}
+	sm.recordSignalRequest("braw", 101, syscall.SIGTERM, "watchdog")
+	if got := sm.takeSignalRequest("braw", 101); got == nil {
+		t.Fatal("signal request was not recorded on zero-value manager maps")
+	}
+}
+
 func TestAbnormalExitReportAttributesUnrequestedSignal(t *testing.T) {
 	sm, buf := newLogCapturingManager(t)
 	id := "dreich-crash"
@@ -127,7 +249,7 @@ func TestAbnormalExitReportAttributesUnrequestedSignal(t *testing.T) {
 		ProcessCount: 4, TopProcess: "agent", ProcessIDs: []int{sess.ProcessPID()},
 	}}
 
-	sm.logAbnormalExitReport(id, "dreich", StopReasonCrash, sess)
+	sm.logAbnormalExitReport(id, "dreich", StopReasonCrash, sess, nil)
 	rec := findRecord(logRecords(t, buf), "session abnormal exit report")
 	if rec == nil {
 		t.Fatal("no abnormal exit report")
@@ -149,8 +271,9 @@ func TestAbnormalExitReportAttributesUnrequestedSignal(t *testing.T) {
 }
 
 func TestClassifyExitAttributesDaemonSignal(t *testing.T) {
-	category, source := classifyExit(StopReasonUser, -1, syscall.SIGTERM)
-	if category != "signal-internal" || source != "graith" {
+	request := &signalRequest{Signal: syscall.SIGTERM}
+	category, source := classifyExit(-1, syscall.SIGTERM, request)
+	if category != "signal-after-graith-request" || source != "graith-requested" {
 		t.Errorf("category/source = %v/%v", category, source)
 	}
 }
@@ -171,5 +294,45 @@ func TestWatchSessionEmitsAbnormalExitReport(t *testing.T) {
 	}
 	if report := findRecord(records, "session abnormal exit report"); report == nil {
 		t.Fatal("watchSession did not emit abnormal exit report")
+	}
+}
+
+func TestWatchSessionDoesNotInferSignalRequestFromStopReason(t *testing.T) {
+	sm, buf := newLogCapturingManager(t)
+	id := "haar-hook-exit"
+	// Models a hook-derived logout reason followed by an external SIGTERM: no
+	// stopping-session request was recorded for this PID.
+	sm.state.Sessions[id] = &SessionState{
+		ID: id, Name: "haar", Status: StatusRunning, StopReason: StopReasonUser,
+	}
+	sess := newTestPTYSession(t, "sh", "-c", "kill -TERM $$")
+	waitExit(t, sess)
+	sm.sessions[id] = sess
+	sm.watchSession(id, sess)
+
+	exit := findRecord(logRecords(t, buf), "session exited")
+	if exit == nil || exit["signal_source"] != "external-or-unknown" {
+		t.Fatalf("session exited record = %#v", exit)
+	}
+}
+
+func TestWatchSessionReportsMatchingSignalRequest(t *testing.T) {
+	sm, buf := newLogCapturingManager(t)
+	id := "haar-requested-exit"
+	sm.state.Sessions[id] = &SessionState{
+		ID: id, Name: "haar", Status: StatusRunning, StopReason: StopReasonUser,
+	}
+	sess := newTestPTYSession(t, "sleep", "100")
+	sm.sessions[id] = sess
+	sm.logStopping(id, "haar", StopReasonUser, "test-stop", sess)
+	if err := sess.Kill(); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	waitExit(t, sess)
+	sm.watchSession(id, sess)
+
+	exit := findRecord(logRecords(t, buf), "session exited")
+	if exit == nil || exit["signal_source"] != "graith-requested" || exit["signal_request_initiator"] != "test-stop" {
+		t.Fatalf("session exited record = %#v", exit)
 	}
 }
