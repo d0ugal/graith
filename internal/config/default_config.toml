@@ -124,6 +124,25 @@ hook_start_window = "5s"       # SessionStart hook stays authoritative for this 
 hook_activity_window = "30s"   # tool-use hooks (prompt/pre/post) stay authoritative for this long
 hook_terminal_window = "30m"   # ready/approval hooks (Stop, idle, permission) stay authoritative for this long
 
+# Token accounting: the daemon periodically re-derives per-session token usage
+# from each supported agent's on-disk transcript (surfaced by `gr tokens`). A
+# fingerprint cache means an idle fleet does almost no work between ticks. Empty
+# or non-positive durations fall back to the defaults shown; batch_size < 1 uses
+# the default. See issue #1244.
+[token_accounting]
+poll_interval = "30s"   # how often per-session token usage is re-derived from transcripts
+startup_delay = "5s"    # first-tick delay after a daemon (re)start so `gr tokens` isn't blank ("0" polls immediately)
+batch_size = 8          # max sessions (re)parsed per tick (bounds work on a large fleet with big transcripts)
+
+# Resource monitor: the daemon periodically snapshots each live session's
+# process-group memory/CPU/open-FD usage so sustained growth is visible in an
+# abnormal-exit report. Sampling is deliberately coarse; failures never affect
+# session operation. Empty or non-positive sample_interval falls back to the
+# default; sample_history < 1 uses the default. See issue #1244.
+[resource_monitor]
+sample_interval = "30s"  # how often each session's process group is snapshotted
+sample_history = 5       # how many recent samples are retained per session
+
 # Update check: `gr list` and `gr doctor` query GitHub for a newer graith release
 # and cache the result. Disable for downstream forks, packaged/offline installs,
 # or to avoid the network call entirely. Never runs for a "dev" build.

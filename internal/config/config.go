@@ -50,15 +50,17 @@ type Config struct {
 	Remote           RemoteConfig       `toml:"remote"`
 	Input            InputConfig        `toml:"input"`
 	Agents           map[string]Agent   `toml:"agents"`
-	Triggers         []TriggerConfig    `toml:"trigger"`    // [[trigger]] array
-	TriggersRuntime  TriggersRuntime    `toml:"triggers"`   // [triggers] table (daemon-wide settings)
-	Headless         HeadlessConfig     `toml:"headless"`   // [headless] table (issue #1075)
-	Updates          UpdatesConfig      `toml:"updates"`    // [updates] table (issue #1253)
-	Detection        DetectionConfig    `toml:"detection"`  // [detection] table (issue #1241)
-	ConfigReload     ConfigReload       `toml:"config"`     // [config] table (issue #1237)
-	Tools            ToolsConfig        `toml:"tools"`      // [tools] table (issue #1238)
-	Git              GitConfig          `toml:"git"`        // [git] table (issue #1238)
-	Connection       ConnectionConfig   `toml:"connection"` // [connection] table (issue #1242)
+	Triggers         []TriggerConfig    `toml:"trigger"`          // [[trigger]] array
+	TriggersRuntime  TriggersRuntime    `toml:"triggers"`         // [triggers] table (daemon-wide settings)
+	Headless         HeadlessConfig     `toml:"headless"`         // [headless] table (issue #1075)
+	Updates          UpdatesConfig      `toml:"updates"`          // [updates] table (issue #1253)
+	Detection        DetectionConfig    `toml:"detection"`        // [detection] table (issue #1241)
+	ConfigReload     ConfigReload       `toml:"config"`           // [config] table (issue #1237)
+	Tools            ToolsConfig        `toml:"tools"`            // [tools] table (issue #1238)
+	Git              GitConfig          `toml:"git"`              // [git] table (issue #1238)
+	Connection       ConnectionConfig   `toml:"connection"`       // [connection] table (issue #1242)
+	TokenAccounting  TokenAccounting    `toml:"token_accounting"` // [token_accounting] table (issue #1244)
+	ResourceMonitor  ResourceMonitor    `toml:"resource_monitor"` // [resource_monitor] table (issue #1244)
 }
 
 // ConfigReloadDebounceDefault is the quiet period the config-file watcher waits
@@ -1028,6 +1030,97 @@ func positiveDurationOrDefault(s string, def time.Duration) time.Duration {
 	}
 
 	return d
+}
+
+// TokenAccounting is the [token_accounting] block controlling the daemon's
+// per-session token-usage loop, which periodically re-derives token totals from
+// each supported session's on-disk transcript (issue #1244). The values were
+// previously fixed constants in internal/daemon/tokens.go; every field is
+// optional and falls back to the matching default constant, preserving the
+// historical behaviour.
+type TokenAccounting struct {
+	// PollInterval is the cadence at which the loop re-derives per-session token
+	// usage from transcripts. Empty, unparseable, or non-positive uses the
+	// default (TokenPollIntervalDefault); a zero cadence would busy-loop.
+	PollInterval string `toml:"poll_interval"`
+	// StartupDelay is the short first-tick delay after a daemon (re)start so
+	// `gr tokens` isn't blank for a full interval. Empty or unparseable uses the
+	// default (TokenStartupDelayDefault); an explicit "0" polls immediately.
+	StartupDelay string `toml:"startup_delay"`
+	// BatchSize bounds how many sessions are (re)parsed per tick so a large fleet
+	// with big transcripts can't stall the loop. Values < 1 fall back to the
+	// default (TokenBatchSizeDefault).
+	BatchSize int `toml:"batch_size"`
+}
+
+// Token-accounting defaults mirror the fixed constants that governed the loop
+// before issue #1244 made the policy configurable.
+const (
+	TokenPollIntervalDefault = 30 * time.Second
+	TokenStartupDelayDefault = 5 * time.Second
+	TokenBatchSizeDefault    = 8
+)
+
+// PollIntervalDuration returns the token-poll cadence, or the default when
+// unset, unparseable, or non-positive (a zero cadence would busy-loop).
+func (t TokenAccounting) PollIntervalDuration() time.Duration {
+	return positiveDurationOrDefault(t.PollInterval, TokenPollIntervalDefault)
+}
+
+// StartupDelayDuration returns the first-tick delay, or the default when unset
+// or unparseable. An explicit "0" is honoured (poll immediately after start).
+func (t TokenAccounting) StartupDelayDuration() time.Duration {
+	return durationOrDefault(t.StartupDelay, TokenStartupDelayDefault)
+}
+
+// BatchSizeOrDefault returns the per-tick parse cap, clamped to a sensible
+// minimum. A non-positive value means "use the default".
+func (t TokenAccounting) BatchSizeOrDefault() int {
+	if t.BatchSize < 1 {
+		return TokenBatchSizeDefault
+	}
+
+	return t.BatchSize
+}
+
+// ResourceMonitor is the [resource_monitor] block controlling the daemon's
+// per-session resource-sampling loop, which snapshots each live session's
+// process-group RSS/CPU/FD usage (issue #1244). The values were previously
+// fixed constants in internal/daemon/resource_monitor.go; every field is
+// optional and falls back to the matching default constant.
+type ResourceMonitor struct {
+	// SampleInterval is the cadence at which each session's process group is
+	// snapshotted (and the per-session spacing that keeps a launch-burst kick
+	// from replacing an established session's history). Empty, unparseable, or
+	// non-positive uses the default (ResourceSampleIntervalDefault).
+	SampleInterval string `toml:"sample_interval"`
+	// SampleHistory is how many recent samples are retained per session (the
+	// window shown in an abnormal-exit report). Values < 1 fall back to the
+	// default (ResourceSampleHistoryDefault).
+	SampleHistory int `toml:"sample_history"`
+}
+
+// Resource-monitor defaults mirror the fixed constants that governed the loop
+// before issue #1244 made the policy configurable.
+const (
+	ResourceSampleIntervalDefault = 30 * time.Second
+	ResourceSampleHistoryDefault  = 5
+)
+
+// SampleIntervalDuration returns the sampling cadence, or the default when
+// unset, unparseable, or non-positive (a zero cadence would busy-loop).
+func (r ResourceMonitor) SampleIntervalDuration() time.Duration {
+	return positiveDurationOrDefault(r.SampleInterval, ResourceSampleIntervalDefault)
+}
+
+// SampleHistoryOrDefault returns the retained-sample count, clamped to a
+// sensible minimum. A non-positive value means "use the default".
+func (r ResourceMonitor) SampleHistoryOrDefault() int {
+	if r.SampleHistory < 1 {
+		return ResourceSampleHistoryDefault
+	}
+
+	return r.SampleHistory
 }
 
 type GitPullConfig struct {

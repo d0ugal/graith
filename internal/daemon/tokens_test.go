@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/agent/transcript"
+	"github.com/d0ugal/graith/internal/config"
 )
 
 // newTokenTestSM builds a SessionManager with a token cache and the given
@@ -17,6 +18,7 @@ func newTokenTestSM(sessions map[string]*SessionState) *SessionManager {
 	return &SessionManager{
 		state:  &State{Sessions: sessions},
 		tokens: newTokenCache(),
+		cfg:    &config.Config{},
 		mu:     sync.RWMutex{},
 	}
 }
@@ -166,6 +168,50 @@ func TestTokenCachePrunesPurged(t *testing.T) {
 
 	if _, ok := c.get("braw"); !ok {
 		t.Error("live session cache entry wrongly pruned")
+	}
+}
+
+// TestTokenLoopHonoursConfiguredBatchCap proves the per-tick parse cap is driven
+// by [token_accounting] batch_size, not the old hard-coded 8. With three
+// eligible sessions and a configured cap of 1, only one is parsed per tick.
+func TestTokenLoopHonoursConfiguredBatchCap(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", root)
+
+	proj := filepath.Join(root, "projects", "-glen-bothy")
+	if err := os.MkdirAll(proj, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	ids := []string{"braw", "canny", "dreich"}
+
+	sessions := make(map[string]*SessionState, len(ids))
+	for _, id := range ids {
+		if err := os.WriteFile(
+			filepath.Join(proj, "sess-"+id+".jsonl"),
+			[]byte(asstLine("msg_1", 1, 1)+"\n"), 0o600,
+		); err != nil {
+			t.Fatal(err)
+		}
+
+		sessions[id] = &SessionState{ID: id, Agent: "claude", AgentSessionID: "sess-" + id, Status: StatusRunning}
+	}
+
+	sm := newTokenTestSM(sessions)
+	sm.cfg.TokenAccounting.BatchSize = 1
+
+	sm.runTokenTick(context.Background())
+
+	populated := 0
+
+	for _, s := range sm.state.Sessions {
+		if s.Tokens != nil {
+			populated++
+		}
+	}
+
+	if populated != 1 {
+		t.Fatalf("populated %d sessions in one tick, want configured batch cap 1", populated)
 	}
 }
 
