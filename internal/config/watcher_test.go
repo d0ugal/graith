@@ -21,7 +21,7 @@ func TestWatcher(t *testing.T) {
 	got := make(chan *Config, 1)
 	w := NewWatcher(cfgPath, func(cfg *Config) {
 		got <- cfg
-	}, slog.Default())
+	}, slog.Default(), 0)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -60,7 +60,7 @@ func TestWatcherInvalidConfig(t *testing.T) {
 	called := make(chan struct{}, 1)
 	w := NewWatcher(cfgPath, func(cfg *Config) {
 		called <- struct{}{}
-	}, slog.Default())
+	}, slog.Default(), 0)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

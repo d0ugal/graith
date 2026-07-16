@@ -255,7 +255,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 		configFile = paths.ConfigFile
 	}
 
-	w := config.NewWatcher(configFile, sm.applyConfig, log)
+	w := config.NewWatcher(configFile, sm.applyConfig, log, sm.Config().ConfigReload.ReloadDebounceDuration())
 	go func() {
 		if err := w.Run(ctx); err != nil && ctx.Err() == nil {
 			log.Error("config watcher stopped", "err", err)

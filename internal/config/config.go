@@ -54,6 +54,39 @@ type Config struct {
 	Headless         HeadlessConfig     `toml:"headless"`  // [headless] table (issue #1075)
 	Updates          UpdatesConfig      `toml:"updates"`   // [updates] table (issue #1253)
 	Detection        DetectionConfig    `toml:"detection"` // [detection] table (issue #1241)
+	ConfigReload     ConfigReload       `toml:"config"`    // [config] table (issue #1237)
+}
+
+// ConfigReloadDebounceDefault is the quiet period the config-file watcher waits
+// after the last write before reloading, used when [config] reload_debounce is
+// unset. It coalesces an editor's write-truncate-write burst into one reload.
+const ConfigReloadDebounceDefault = 200 * time.Millisecond
+
+// ConfigReload is the [config] block: settings governing how graith handles its
+// own configuration file. Currently just the hot-reload debounce, moved out of a
+// bare literal in the watcher so `gr config show` reflects it (issue #1237).
+type ConfigReload struct {
+	// ReloadDebounce is the quiet period the file watcher waits after the last
+	// write before reloading. Empty, unparseable, or non-positive uses the
+	// default (ConfigReloadDebounceDefault).
+	ReloadDebounce string `toml:"reload_debounce"`
+}
+
+// ReloadDebounceDuration resolves the config-reload debounce. Empty, unparseable,
+// or non-positive falls back to the default so a typo never busy-loops the
+// watcher (Validate rejects a set-but-invalid value at load; this is the runtime
+// fail-safe).
+func (c ConfigReload) ReloadDebounceDuration() time.Duration {
+	if strings.TrimSpace(c.ReloadDebounce) == "" {
+		return ConfigReloadDebounceDefault
+	}
+
+	d, err := ParseDurationWithDays(c.ReloadDebounce)
+	if err != nil || d <= 0 {
+		return ConfigReloadDebounceDefault
+	}
+
+	return d
 }
 
 // UpdatesConfig is the [updates] block controlling the GitHub release check
@@ -2541,6 +2574,24 @@ func (c *Config) Validate() error {
 	if repo := strings.TrimSpace(c.Updates.Repository); repo != "" {
 		if owner, name, ok := strings.Cut(repo, "/"); !ok || owner == "" || name == "" || strings.Contains(name, "/") {
 			errs = append(errs, fmt.Errorf("updates.repository %q: must be in \"owner/repo\" form", c.Updates.Repository))
+		}
+	}
+
+	// [status] ttl and [config] reload_debounce: a non-empty but unparseable
+	// value must fail loudly rather than silently falling back to the accessor
+	// default (mirrors delete.retention). reload_debounce must also be positive —
+	// a zero/negative debounce would busy-loop the config watcher.
+	if s := strings.TrimSpace(c.Status.TTL); s != "" {
+		if _, err := ParseDurationWithDays(s); err != nil {
+			errs = append(errs, fmt.Errorf("status.ttl %q: %w", s, err))
+		}
+	}
+
+	if s := strings.TrimSpace(c.ConfigReload.ReloadDebounce); s != "" {
+		if d, err := ParseDurationWithDays(s); err != nil {
+			errs = append(errs, fmt.Errorf("config.reload_debounce %q: %w", s, err))
+		} else if d <= 0 {
+			errs = append(errs, fmt.Errorf("config.reload_debounce %q: must be a positive duration", s))
 		}
 	}
 

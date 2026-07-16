@@ -13,13 +13,22 @@ type Watcher struct {
 	path     string
 	onChange func(*Config)
 	log      *slog.Logger
+	debounce time.Duration
 }
 
-func NewWatcher(path string, onChange func(*Config), log *slog.Logger) *Watcher {
+// NewWatcher creates a config-file watcher. debounce is the quiet period after
+// the last write before reloading; a non-positive value falls back to
+// ConfigReloadDebounceDefault so callers can pass 0 to accept the default.
+func NewWatcher(path string, onChange func(*Config), log *slog.Logger, debounce time.Duration) *Watcher {
+	if debounce <= 0 {
+		debounce = ConfigReloadDebounceDefault
+	}
+
 	return &Watcher{
 		path:     path,
 		onChange: onChange,
 		log:      log,
+		debounce: debounce,
 	}
 }
 
@@ -63,7 +72,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 				debounce.Stop()
 			}
 
-			debounce = time.AfterFunc(200*time.Millisecond, func() {
+			debounce = time.AfterFunc(w.debounce, func() {
 				w.reload()
 			})
 
