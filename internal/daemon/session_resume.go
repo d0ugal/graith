@@ -720,8 +720,13 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		repoPaths := sm.cfg.AvailableRepoPaths()
 		notifyEnabled := sm.cfg.Notifications.Enabled
 		sm.mu.RUnlock()
-		promptArgs := sm.buildOrchestratorPrompt(sessAgent, orchCfg, repoPaths, notifyEnabled)
-		expandedArgs = append(expandedArgs, promptArgs...)
+
+		promptArgs, err := sm.buildOrchestratorPrompt(sessAgent, orchCfg, repoPaths, notifyEnabled, sm.orchestratorScratchDir())
+		if err != nil {
+			sm.log.Warn("failed to build orchestrator prompt", "session_id", id, "err", err)
+		} else {
+			expandedArgs = append(expandedArgs, promptArgs...)
+		}
 	} else if agent.PromptInjectionEnabled() {
 		promptArgs, err := sm.injectPrompt(sessAgent, sessWorktreePath)
 		if err != nil {
