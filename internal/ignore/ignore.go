@@ -13,6 +13,8 @@
 package ignore
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-git/go-billy/v5/osfs"
@@ -40,7 +42,13 @@ func (p patternMatcher) Match(rel string, isDir bool) bool {
 		return false
 	}
 
-	rel = strings.Trim(strings.TrimSpace(rel), "/")
+	// Trim only path separators, never whitespace. A leading or trailing space
+	// is a significant part of a filename in Git (and in the underlying
+	// gitignore grammar, where a trailing space is only stripped from patterns,
+	// not from the paths they are matched against). Applying TrimSpace here
+	// would make a file named "foo " match a "foo" pattern — and a " foo"
+	// pattern fail to match its " foo" file — diverging from Git.
+	rel = strings.Trim(rel, "/")
 	if rel == "" || rel == "." {
 		return false
 	}
@@ -59,18 +67,106 @@ func Lines(lines ...string) Matcher {
 // Dir builds a Matcher from the Git ignore sources rooted at dir, in Git's
 // priority order: .git/info/exclude, then the root .gitignore, then any nested
 // .gitignore files further down the tree (each scoped to its subdirectory).
-// Missing files are not an error — an empty matcher never matches. In a linked
-// worktree, where .git is a file rather than a directory, info/exclude is
-// simply absent.
+// Missing files are not an error — an empty matcher never matches.
+//
+// In a linked worktree, where .git is a "gitdir:" pointer file rather than a
+// directory, the shared info/exclude lives in the common git directory rather
+// than under the worktree root; Dir resolves it via the worktree's commondir so
+// it is honoured exactly as `git check-ignore` does inside a worktree.
 func Dir(dir string) Matcher {
-	ps, err := gitignore.ReadPatterns(osfs.New(dir), nil)
-	if err != nil {
-		// ReadPatterns is best-effort: an unreadable subtree yields whatever
-		// patterns were gathered so far rather than a hard failure.
-		ps = nil
+	// ReadPatterns is best-effort: on an error (e.g. a subtree it cannot read)
+	// it returns whatever patterns it gathered before the failure. Keep those
+	// rather than discarding them — dropping to nil would silently fail open,
+	// matching nothing at all when only part of the tree was unreadable.
+	ps, _ := gitignore.ReadPatterns(osfs.New(dir), nil)
+
+	// go-git reads .git/info/exclude relative to dir, which works only when .git
+	// is a real directory. In a linked worktree .git is a file, so resolve the
+	// shared info/exclude ourselves and prepend it at the lowest priority (Git
+	// applies info/exclude below any .gitignore). In a normal repo this returns
+	// nil, so go-git's own read is not duplicated.
+	if extra := worktreeExcludePatterns(dir); len(extra) > 0 {
+		ps = append(extra, ps...)
 	}
 
 	return patternMatcher{m: gitignore.NewMatcher(ps)}
+}
+
+// worktreeExcludePatterns returns the patterns from the shared info/exclude of a
+// linked worktree's common git directory, or nil when dir is not a linked
+// worktree — a normal repo (.git is a directory, handled by go-git directly) or
+// a non-repo directory. It is best-effort: any missing or malformed pointer
+// yields nil rather than an error.
+func worktreeExcludePatterns(dir string) []gitignore.Pattern {
+	dotGit := filepath.Join(dir, ".git")
+
+	fi, err := os.Lstat(dotGit)
+	if err != nil || fi.IsDir() {
+		return nil
+	}
+
+	gitDir := resolveGitFile(dotGit, dir)
+	if gitDir == "" {
+		return nil
+	}
+
+	commonDir := resolveCommonDir(gitDir)
+
+	data, err := os.ReadFile(filepath.Join(commonDir, "info", "exclude"))
+	if err != nil {
+		return nil
+	}
+
+	return parseLines(nil, strings.Split(string(data), "\n"))
+}
+
+// resolveGitFile reads a linked worktree's ".git" pointer file ("gitdir: <path>")
+// and returns the absolute worktree git directory, or "" if it can't be parsed.
+// A relative pointer resolves against the worktree directory.
+func resolveGitFile(gitFile, worktreeDir string) string {
+	data, err := os.ReadFile(gitFile)
+	if err != nil {
+		return ""
+	}
+
+	line := strings.TrimSpace(string(data))
+
+	const prefix = "gitdir:"
+	if !strings.HasPrefix(line, prefix) {
+		return ""
+	}
+
+	p := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	if p == "" {
+		return ""
+	}
+
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(worktreeDir, p)
+	}
+
+	return filepath.Clean(p)
+}
+
+// resolveCommonDir returns the shared common git directory for a worktree git
+// directory: the target of its "commondir" file if present (a relative path
+// resolves against gitDir), else gitDir itself.
+func resolveCommonDir(gitDir string) string {
+	data, err := os.ReadFile(filepath.Join(gitDir, "commondir"))
+	if err != nil {
+		return gitDir
+	}
+
+	c := strings.TrimSpace(string(data))
+	if c == "" {
+		return gitDir
+	}
+
+	if !filepath.IsAbs(c) {
+		c = filepath.Join(gitDir, c)
+	}
+
+	return filepath.Clean(c)
 }
 
 // parseLines turns raw gitignore lines into go-git patterns, skipping blanks
