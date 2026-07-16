@@ -104,6 +104,31 @@ hook_terminal_window = "30m"    # ready / approval hooks (Stop, idle, permission
 
 Empty or non-positive values fall back to the defaults shown above. These values are read live on each detection pass (and each hook report), so a config reload (`SIGHUP` / edit-and-save) takes effect without restarting the daemon; `scan_interval` and `fetch_interval` set the loop tickers at startup, so changing those two requires a `gr daemon restart`.
 
+## Token accounting
+
+The daemon periodically re-derives each session's token usage from its agent's on-disk transcript, surfaced by `gr tokens`. A fingerprint cache means an idle fleet does almost no work between ticks. The `[token_accounting]` block tunes the loop's cadence and how much work it does per tick.
+
+```toml
+[token_accounting]
+poll_interval = "30s"  # how often per-session token usage is re-derived from transcripts
+startup_delay = "5s"   # first-tick delay after a daemon (re)start so `gr tokens` isn't blank ("0" polls immediately)
+batch_size    = 8      # max sessions (re)parsed per tick (bounds work on a large fleet with big transcripts)
+```
+
+`batch_size` bounds how many sessions with *changed* transcripts are re-parsed in a single tick, so a large fleet with big transcripts can't stall the loop; unchanged transcripts are skipped by the fingerprint cache and don't count against it. `batch_size` is read live each tick, so a reload takes effect immediately; `poll_interval` and `startup_delay` are read once when the loop starts, so changing them requires a `gr daemon restart`. An empty or non-positive `poll_interval` falls back to the default (a zero cadence would busy-loop); `startup_delay` honours an explicit `"0"` to poll immediately; `batch_size < 1` uses the default.
+
+## Resource monitor
+
+The daemon periodically snapshots each live session's process-group memory, CPU, and open file descriptors so sustained growth is visible in the diagnostic report logged when a session exits abnormally. Sampling is deliberately coarse and its failures never affect session operation. The `[resource_monitor]` block tunes the cadence and how many samples are retained.
+
+```toml
+[resource_monitor]
+sample_interval = "30s"  # how often each session's process group is snapshotted
+sample_history  = 5      # how many recent samples are retained per session
+```
+
+`sample_interval` is also the per-session spacing that keeps a launch-burst kick from replacing an established session's history. `sample_history` is the number of recent samples kept per session (the window shown in an abnormal-exit report). Both are read live on each sampling pass; `sample_interval` also sets the loop ticker at startup, so changing it requires a `gr daemon restart` to alter the loop cadence. An empty or non-positive `sample_interval` falls back to the default; `sample_history < 1` uses the default.
+
 ## Update check
 
 `gr list` and `gr doctor` check GitHub for a newer graith release and cache the result. The `[updates]` block makes this configurable — turn it off for downstream forks, packaged or offline installs, or if you simply don't want the network call.

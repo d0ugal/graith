@@ -9,19 +9,6 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
-const (
-	// tokenPollInterval is the cadence at which RunTokenLoop re-derives per-session
-	// token usage from transcripts. A constant in v1 (no config knob); the
-	// fingerprint cache means an idle fleet does almost no work between ticks.
-	tokenPollInterval = 30 * time.Second
-	// tokenStartupDelay is the short first-tick delay so `gr tokens` isn't blank
-	// for a full interval after a daemon (re)start.
-	tokenStartupDelay = 5 * time.Second
-	// tokenBatchCap bounds how many sessions are (re)parsed per tick so a large
-	// fleet with big transcripts can't stall the loop.
-	tokenBatchCap = 8
-)
-
 // tokenCacheEntry caches the fingerprint of a session's last successful parse so
 // an unchanged transcript (same source identity + size + mtime) is skipped
 // without re-reading. The fingerprint includes the agent identity, so a
@@ -91,7 +78,13 @@ type tokenTarget struct {
 // supported session's on-disk transcript, writing runtime-only TokenStats onto
 // SessionState (never persisted, repopulated within a tick after restart).
 func (sm *SessionManager) RunTokenLoop(ctx context.Context) {
-	timer := time.NewTimer(tokenStartupDelay)
+	sm.mu.RLock()
+	tc := sm.cfg.TokenAccounting
+	sm.mu.RUnlock()
+
+	pollInterval := tc.PollIntervalDuration()
+
+	timer := time.NewTimer(tc.StartupDelayDuration())
 	defer timer.Stop()
 
 	for {
@@ -103,7 +96,7 @@ func (sm *SessionManager) RunTokenLoop(ctx context.Context) {
 
 		sm.runTokenTick(ctx)
 
-		timer.Reset(tokenPollInterval)
+		timer.Reset(pollInterval)
 	}
 }
 
@@ -111,6 +104,10 @@ func (sm *SessionManager) runTokenTick(ctx context.Context) {
 	targets, live := sm.tokenTargets()
 
 	sm.tokens.prune(live)
+
+	sm.mu.RLock()
+	batchCap := sm.cfg.TokenAccounting.BatchSizeOrDefault()
+	sm.mu.RUnlock()
 
 	parsed := 0
 
@@ -121,7 +118,7 @@ func (sm *SessionManager) runTokenTick(ctx context.Context) {
 		default:
 		}
 
-		if parsed >= tokenBatchCap {
+		if parsed >= batchCap {
 			break
 		}
 

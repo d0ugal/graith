@@ -12,13 +12,6 @@ import (
 	"github.com/d0ugal/graith/internal/tools"
 )
 
-const resourceSampleHistory = 5
-
-// resourceSampleInterval is deliberately coarse: one ps snapshot every 30
-// seconds is enough to expose sustained memory/CPU/FD growth without turning
-// observability into meaningful daemon overhead. It is a var for tests.
-var resourceSampleInterval = 30 * time.Second
-
 var processListOutput = func() ([]byte, error) {
 	cmd := exec.Command(tools.PS(), "-axo", "pid=,pgid=,rss=,%cpu=,comm=")
 	cmd.Env = append(cmd.Environ(), "LC_ALL=C")
@@ -61,7 +54,11 @@ type processResource struct {
 func (sm *SessionManager) RunResourceMonitorLoop(ctx context.Context) {
 	sm.sampleSessionResources()
 
-	ticker := time.NewTicker(resourceSampleInterval)
+	sm.mu.RLock()
+	interval := sm.cfg.ResourceMonitor.SampleIntervalDuration()
+	sm.mu.RUnlock()
+
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -81,16 +78,19 @@ func (sm *SessionManager) sampleSessionResources() {
 
 	sm.mu.RLock()
 
+	sampleInterval := sm.cfg.ResourceMonitor.SampleIntervalDuration()
+	historyCap := sm.cfg.ResourceMonitor.SampleHistoryOrDefault()
+
 	targets := make(map[int]struct {
 		id, name string
 	}, len(sm.sessions))
 	for id, sess := range sm.sessions {
 		if pgid := sess.Pgid(); pgid > 0 && !sess.Exited() {
 			// A kick gives a newly launched session an immediate baseline, but it
-			// must not replace every established session's five-sample history
-			// during a launch burst. Per-session spacing preserves the intended
-			// 30-second time series while still sampling new IDs immediately.
-			if !sm.resourceSampleDue(id, now) {
+			// must not replace every established session's sample history during a
+			// launch burst. Per-session spacing preserves the intended time series
+			// (sample_interval) while still sampling new IDs immediately.
+			if !sm.resourceSampleDue(id, now, sampleInterval) {
 				continue
 			}
 
@@ -162,8 +162,8 @@ func (sm *SessionManager) sampleSessionResources() {
 		}
 
 		history := append(sm.resourceSamples[target.id], sample)
-		if len(history) > resourceSampleHistory {
-			history = history[len(history)-resourceSampleHistory:]
+		if len(history) > historyCap {
+			history = history[len(history)-historyCap:]
 		}
 
 		sm.resourceSamples[target.id] = history
@@ -176,13 +176,13 @@ func (sm *SessionManager) sampleSessionResources() {
 	}
 }
 
-func (sm *SessionManager) resourceSampleDue(id string, now time.Time) bool {
+func (sm *SessionManager) resourceSampleDue(id string, now time.Time, interval time.Duration) bool {
 	sm.resourceMu.Lock()
 	defer sm.resourceMu.Unlock()
 
 	history := sm.resourceSamples[id]
 
-	return len(history) == 0 || now.Sub(history[len(history)-1].At) >= resourceSampleInterval
+	return len(history) == 0 || now.Sub(history[len(history)-1].At) >= interval
 }
 
 func (sm *SessionManager) discardResourceSamples(id string) {

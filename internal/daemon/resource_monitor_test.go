@@ -7,6 +7,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/d0ugal/graith/internal/config"
 )
 
 func TestParseProcessResources(t *testing.T) {
@@ -115,18 +117,18 @@ func TestSampleSessionResourcesRetainsPartialFDCountAndCapsHistory(t *testing.T)
 	}
 	fdCountReader = func(_ []int) map[int]int { return map[int]int{sess.ProcessPID(): 12} }
 
-	for range resourceSampleHistory + 2 {
+	for range config.ResourceSampleHistoryDefault + 2 {
 		sm.sampleSessionResources()
 		sm.resourceMu.Lock()
 		history := sm.resourceSamples[id]
-		history[len(history)-1].At = time.Now().Add(-resourceSampleInterval)
+		history[len(history)-1].At = time.Now().Add(-config.ResourceSampleIntervalDefault)
 		sm.resourceSamples[id] = history
 		sm.resourceMu.Unlock()
 	}
 
 	samples := sm.resourceSamples[id]
-	if len(samples) != resourceSampleHistory {
-		t.Fatalf("history length = %d, want %d", len(samples), resourceSampleHistory)
+	if len(samples) != config.ResourceSampleHistoryDefault {
+		t.Fatalf("history length = %d, want %d", len(samples), config.ResourceSampleHistoryDefault)
 	}
 
 	last := samples[len(samples)-1]
@@ -225,18 +227,82 @@ func TestResourceSampleDuePreservesHistoryAcrossLaunchKicks(t *testing.T) {
 	sm, _ := newLogCapturingManager(t)
 	now := time.Now()
 
+	interval := config.ResourceSampleIntervalDefault
+
 	sm.resourceSamples["braw"] = []ResourceSample{{At: now.Add(-time.Second)}}
-	if sm.resourceSampleDue("braw", now) {
+	if sm.resourceSampleDue("braw", now, interval) {
 		t.Fatal("recently sampled session was due during launch burst")
 	}
 
-	sm.resourceSamples["braw"][0].At = now.Add(-resourceSampleInterval)
-	if !sm.resourceSampleDue("braw", now) {
+	sm.resourceSamples["braw"][0].At = now.Add(-interval)
+	if !sm.resourceSampleDue("braw", now, interval) {
 		t.Fatal("session was not due after sample interval")
 	}
 
-	if !sm.resourceSampleDue("new", now) {
+	if !sm.resourceSampleDue("new", now, interval) {
 		t.Fatal("new session did not receive immediate baseline")
+	}
+}
+
+// TestSampleSessionResourcesHonoursConfiguredHistory proves the retained-sample
+// window is driven by [resource_monitor] sample_history, not the old hard-coded
+// 5. With a configured cap of 3, a longer run of samples is trimmed to 3.
+func TestSampleSessionResourcesHonoursConfiguredHistory(t *testing.T) {
+	sm, _ := newLogCapturingManager(t)
+
+	const wantHistory = 3
+
+	sm.cfg.ResourceMonitor.SampleHistory = wantHistory
+
+	id := "braw-history"
+	sess := newTestPTYSession(t, "sleep", "100")
+	t.Cleanup(func() {
+		_ = sess.Kill()
+		<-sess.Done()
+		sess.Close()
+	})
+
+	pgid := sess.Pgid()
+	sm.state.Sessions[id] = &SessionState{ID: id, Name: "braw", Status: StatusRunning}
+	sm.sessions[id] = sess
+
+	originalList, originalFDs := processListOutput, fdCountReader
+
+	t.Cleanup(func() { processListOutput, fdCountReader = originalList, originalFDs })
+
+	processListOutput = func() ([]byte, error) {
+		return []byte(strconv.Itoa(sess.ProcessPID()) + " " + strconv.Itoa(pgid) + " 1024 1 agent\n"), nil
+	}
+	fdCountReader = func(_ []int) map[int]int { return map[int]int{sess.ProcessPID(): 4} }
+
+	for range wantHistory + 3 {
+		sm.sampleSessionResources()
+		sm.resourceMu.Lock()
+		history := sm.resourceSamples[id]
+		history[len(history)-1].At = time.Now().Add(-config.ResourceSampleIntervalDefault)
+		sm.resourceSamples[id] = history
+		sm.resourceMu.Unlock()
+	}
+
+	if got := len(sm.resourceSamples[id]); got != wantHistory {
+		t.Fatalf("history length = %d, want configured %d", got, wantHistory)
+	}
+}
+
+// TestSampleSessionResourcesHonoursConfiguredInterval proves the per-session
+// sampling cadence is driven by [resource_monitor] sample_interval, not the old
+// hard-coded 30s: with a 1h interval, a session sampled seconds ago is not due.
+func TestSampleSessionResourcesHonoursConfiguredInterval(t *testing.T) {
+	sm, _ := newLogCapturingManager(t)
+	sm.cfg.ResourceMonitor.SampleInterval = "1h"
+
+	now := time.Now()
+	interval := sm.cfg.ResourceMonitor.SampleIntervalDuration()
+
+	// Sampled 90s ago: due under the old 30s default, not due under 1h.
+	sm.resourceSamples["braw"] = []ResourceSample{{At: now.Add(-90 * time.Second)}}
+	if sm.resourceSampleDue("braw", now, interval) {
+		t.Fatal("session sampled 90s ago was due under a 1h configured interval")
 	}
 }
 
