@@ -13,21 +13,33 @@ import (
 
 func TestDetectPromptInjection(t *testing.T) {
 	tests := []struct {
-		agentName string
-		want      promptInjectionMethod
+		name       string
+		agentName  string
+		configured string
+		want       promptInjectionMethod
 	}{
-		{"claude", promptInjectionAppendSystemPrompt},
-		{"cursor", promptInjectionCursorRules},
-		{"codex", promptInjectionDeveloperInstructions},
-		{"opencode", promptInjectionNone},
-		{"agy", promptInjectionNone},
-		{"", promptInjectionNone},
+		// Name-based fallback (no explicit prompt_injection configured).
+		{"claude-byname", "claude", "", promptInjectionAppendSystemPrompt},
+		{"cursor-byname", "cursor", "", promptInjectionCursorRules},
+		{"codex-byname", "codex", "", promptInjectionDeveloperInstructions},
+		{"opencode-byname", "opencode", "", promptInjectionNone},
+		{"agy-byname", "agy", "", promptInjectionNone},
+		{"empty-byname", "", "", promptInjectionNone},
+		// An explicit prompt_injection value wins over name-based detection, so
+		// a custom agent can declare its mechanism (#1232).
+		{"custom-append", "thrawn", config.PromptInjectionAppendSystemPrompt, promptInjectionAppendSystemPrompt},
+		{"custom-cursor", "thrawn", config.PromptInjectionCursorRules, promptInjectionCursorRules},
+		{"custom-developer", "thrawn", config.PromptInjectionDeveloperInstructions, promptInjectionDeveloperInstructions},
+		{"custom-none", "thrawn", config.PromptInjectionNone, promptInjectionNone},
+		// The override can also flip a built-in agent's method or opt it out.
+		{"claude-override-none", "claude", config.PromptInjectionNone, promptInjectionNone},
+		{"codex-override-append", "codex", config.PromptInjectionAppendSystemPrompt, promptInjectionAppendSystemPrompt},
 	}
 	for _, tt := range tests {
-		t.Run(tt.agentName, func(t *testing.T) {
-			got := detectPromptInjection(tt.agentName)
+		t.Run(tt.name, func(t *testing.T) {
+			got := detectPromptInjection(tt.agentName, tt.configured)
 			if got != tt.want {
-				t.Errorf("detectPromptInjection(%q) = %d, want %d", tt.agentName, got, tt.want)
+				t.Errorf("detectPromptInjection(%q, %q) = %d, want %d", tt.agentName, tt.configured, got, tt.want)
 			}
 		})
 	}
@@ -142,6 +154,50 @@ func TestInjectPrompt_Codex(t *testing.T) {
 
 	if decoded != sm.Config().AgentPrompt {
 		t.Error("decoded developer_instructions should equal the configured agent prompt verbatim")
+	}
+}
+
+// TestInjectPrompt_ConfigOverride is the #1232 follow-up: a custom agent (one
+// whose name matches no built-in) receives a prompt when it declares its
+// mechanism via [agents.<name>].prompt_injection, and the override also wins
+// over name-based detection for a built-in agent.
+func TestInjectPrompt_ConfigOverride(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agents = map[string]config.Agent{
+		"thrawn":   {PromptInjection: config.PromptInjectionAppendSystemPrompt},
+		"bothy":    {PromptInjection: config.PromptInjectionDeveloperInstructions},
+		"claude-x": {PromptInjection: config.PromptInjectionNone},
+	}
+	sm := &SessionManager{cfg: cfg}
+
+	// Custom agent opting into Claude-style injection.
+	args, err := sm.injectPrompt("thrawn", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(args) != 2 || args[0] != "--append-system-prompt" {
+		t.Errorf("thrawn should get --append-system-prompt, got %v", args)
+	}
+
+	// Custom agent opting into Codex-style injection.
+	args, err = sm.injectPrompt("bothy", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(args) != 2 || args[0] != "-c" || !strings.HasPrefix(args[1], "developer_instructions=") {
+		t.Errorf("bothy should get developer_instructions, got %v", args)
+	}
+
+	// Explicit "none" opts an agent out even if its name would otherwise match.
+	args, err = sm.injectPrompt("claude-x", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(args) != 0 {
+		t.Errorf("claude-x with prompt_injection=none should get no args, got %v", args)
 	}
 }
 

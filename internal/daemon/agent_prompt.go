@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/d0ugal/graith/internal/config"
 )
 
 type promptInjectionMethod int
@@ -18,7 +20,23 @@ const (
 	promptInjectionDeveloperInstructions                       // -c developer_instructions=... (Codex)
 )
 
-func detectPromptInjection(agentName string) promptInjectionMethod {
+// detectPromptInjection resolves the injection mechanism for an agent. An
+// explicit [agents.<name>].prompt_injection value wins so a custom agent can
+// declare its mechanism (or opt out with "none"); an empty configured value
+// falls back to name-based detection so the built-in claude, cursor, and codex
+// agents keep working without config. See issue #1232.
+func detectPromptInjection(agentName, configured string) promptInjectionMethod {
+	switch configured {
+	case config.PromptInjectionAppendSystemPrompt:
+		return promptInjectionAppendSystemPrompt
+	case config.PromptInjectionCursorRules:
+		return promptInjectionCursorRules
+	case config.PromptInjectionDeveloperInstructions:
+		return promptInjectionDeveloperInstructions
+	case config.PromptInjectionNone:
+		return promptInjectionNone
+	}
+
 	switch agentName {
 	case "claude":
 		return promptInjectionAppendSystemPrompt
@@ -32,22 +50,25 @@ func detectPromptInjection(agentName string) promptInjectionMethod {
 }
 
 func (sm *SessionManager) injectPrompt(agentName, worktreePath string) (extraArgs []string, err error) {
-	return promptInjectionArgs(agentName, sm.Config().AgentPrompt, worktreePath)
+	cfg := sm.Config()
+	return promptInjectionArgs(agentName, cfg.Agents[agentName].PromptInjection, cfg.AgentPrompt, worktreePath)
 }
 
 // promptInjectionArgs adapts an already-assembled prompt to the injection
-// mechanism the named agent actually supports, returning the launch args (and
+// mechanism the agent actually supports, returning the launch args (and
 // performing any side effects such as writing a Cursor rule file). It is the
 // single agent-aware seam shared by ordinary sessions (injectPrompt) and the
 // orchestrator (buildOrchestratorPrompt) so that a non-Claude agent never gets
-// launched with Claude's --append-system-prompt flag. An empty prompt or an
-// agent with no supported injection method yields no args.
-func promptInjectionArgs(agentName, prompt, worktreePath string) (extraArgs []string, err error) {
+// launched with Claude's --append-system-prompt flag. The configured argument
+// is the agent's [agents.<name>].prompt_injection override ("" for name-based
+// detection). An empty prompt or an agent with no supported injection method
+// yields no args.
+func promptInjectionArgs(agentName, configured, prompt, worktreePath string) (extraArgs []string, err error) {
 	if prompt == "" {
 		return nil, nil
 	}
 
-	method := detectPromptInjection(agentName)
+	method := detectPromptInjection(agentName, configured)
 	switch method {
 	case promptInjectionAppendSystemPrompt:
 		return []string{"--append-system-prompt", prompt}, nil

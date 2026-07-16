@@ -179,10 +179,23 @@ func TestBuildOrchestratorPrompt_AgentAdapters(t *testing.T) {
 		t.Errorf("cursor rule should contain the prompt, got %q", string(data))
 	}
 
-	// Custom/unknown agent: no supported injection method, so no args and no
-	// unsupported Claude flag.
+	// Custom/unknown agent with no configured method: no supported injection,
+	// so no args and no unsupported Claude flag.
 	if got := mustBuildOrchPrompt(t, sm, "thrawn-custom", cfg, nil, false, ""); got != nil {
 		t.Errorf("unknown agent should return nil prompt args, got %v", got)
+	}
+
+	// A custom orchestrator agent can declare its injection mechanism via
+	// [agents.<name>].prompt_injection, and buildOrchestratorPrompt honours it.
+	sm.cfg = &config.Config{
+		Agents: map[string]config.Agent{
+			"thrawn-custom": {PromptInjection: config.PromptInjectionAppendSystemPrompt},
+		},
+	}
+
+	got = mustBuildOrchPrompt(t, sm, "thrawn-custom", cfg, nil, false, "")
+	if len(got) != 2 || got[0] != "--append-system-prompt" || got[1] != "ken this" {
+		t.Errorf("configured prompt_injection should drive the orchestrator prompt, got %v", got)
 	}
 }
 

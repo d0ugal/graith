@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -1927,6 +1928,77 @@ func TestAgentPromptInjectionEnabled(t *testing.T) {
 			t.Error("explicit false should return false")
 		}
 	})
+}
+
+func TestValidPromptInjection(t *testing.T) {
+	valid := []string{
+		"", // empty = name-based fallback
+		PromptInjectionAppendSystemPrompt,
+		PromptInjectionCursorRules,
+		PromptInjectionDeveloperInstructions,
+		PromptInjectionNone,
+	}
+	for _, v := range valid {
+		if !ValidPromptInjection(v) {
+			t.Errorf("ValidPromptInjection(%q) = false, want true", v)
+		}
+	}
+
+	invalid := []string{"append", "system_prompt", "cursor", "developer", "haar", "NONE"}
+	for _, v := range invalid {
+		if ValidPromptInjection(v) {
+			t.Errorf("ValidPromptInjection(%q) = true, want false", v)
+		}
+	}
+}
+
+// TestValidateRejectsUnknownPromptInjection guards that an unknown
+// prompt_injection value fails config validation loudly rather than silently
+// becoming "no injection" — graith owns this enum (#1232).
+func TestValidateRejectsUnknownPromptInjection(t *testing.T) {
+	cfg := &Config{
+		Agents: map[string]Agent{
+			"thrawn": {Command: "thrawn", PromptInjection: "haar-nonsense"},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for unknown prompt_injection value")
+	}
+
+	if !strings.Contains(err.Error(), "prompt_injection") || !strings.Contains(err.Error(), "haar-nonsense") {
+		t.Errorf("error should name the field and bad value, got: %v", err)
+	}
+
+	// A valid value passes.
+	cfg.Agents["thrawn"] = Agent{Command: "thrawn", PromptInjection: PromptInjectionCursorRules}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("valid prompt_injection should pass validation, got: %v", err)
+	}
+}
+
+func TestLoadAgentPromptInjection(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+
+	toml := `
+[agents.thrawn]
+command = "thrawn"
+prompt_injection = "developer_instructions"
+`
+	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := cfg.Agents["thrawn"].PromptInjection; got != PromptInjectionDeveloperInstructions {
+		t.Errorf("prompt_injection = %q, want %q", got, PromptInjectionDeveloperInstructions)
+	}
 }
 
 func TestLoadAgentInjectPrompt(t *testing.T) {

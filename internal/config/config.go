@@ -1141,13 +1141,21 @@ type MCPServerConfig struct {
 }
 
 type Agent struct {
-	Command           string                     `json:"command"                       toml:"command"`
-	Args              []string                   `json:"args,omitempty"                toml:"args"`
-	ResumeArgs        []string                   `json:"resume_args,omitempty"         toml:"resume_args"`
-	ForkArgs          []string                   `json:"fork_args,omitempty"           toml:"fork_args"`
-	Env               map[string]string          `json:"env,omitempty"                 toml:"env"`
-	IdleTimeout       string                     `json:"idle_timeout,omitempty"        toml:"idle_timeout"`
-	InjectPrompt      *bool                      `json:"inject_prompt,omitempty"       toml:"inject_prompt"`
+	Command      string            `json:"command"                 toml:"command"`
+	Args         []string          `json:"args,omitempty"          toml:"args"`
+	ResumeArgs   []string          `json:"resume_args,omitempty"   toml:"resume_args"`
+	ForkArgs     []string          `json:"fork_args,omitempty"     toml:"fork_args"`
+	Env          map[string]string `json:"env,omitempty"           toml:"env"`
+	IdleTimeout  string            `json:"idle_timeout,omitempty"  toml:"idle_timeout"`
+	InjectPrompt *bool             `json:"inject_prompt,omitempty" toml:"inject_prompt"`
+	// PromptInjection selects HOW graith delivers its operating prompt to this
+	// agent (append_system_prompt / cursor_rules / developer_instructions /
+	// none). It is distinct from InjectPrompt, which is the on/off switch. An
+	// empty value falls back to name-based detection so the built-in claude,
+	// cursor, and codex agents work without explicit config; a custom agent
+	// must set this to receive a prompt at all. Validated in Config.Validate.
+	// See issue #1232.
+	PromptInjection   string                     `json:"prompt_injection,omitempty"    toml:"prompt_injection"`
 	PreTrustWorkspace *bool                      `json:"pre_trust_workspace,omitempty" toml:"pre_trust_workspace"`
 	Sandbox           SandboxConfig              `json:"sandbox"                       toml:"sandbox"`
 	MCPServers        map[string]MCPServerConfig `json:"mcp_servers,omitempty"         toml:"mcp_servers"`
@@ -1218,6 +1226,35 @@ func (a Agent) PreTrustWorkspaceEnabled() bool {
 	}
 
 	return true
+}
+
+// Valid values for [agents.<name>].prompt_injection. Each names a prompt
+// delivery mechanism graith owns: append_system_prompt is Claude's
+// --append-system-prompt flag, cursor_rules writes a .cursor/rules file,
+// developer_instructions is Codex's -c developer_instructions override, and
+// none suppresses injection. graith owns this enum (it maps to graith's own
+// launch behaviour), so an unknown value is a config error rather than a
+// silent no-op. See issue #1232.
+const (
+	PromptInjectionAppendSystemPrompt    = "append_system_prompt"
+	PromptInjectionCursorRules           = "cursor_rules"
+	PromptInjectionDeveloperInstructions = "developer_instructions"
+	PromptInjectionNone                  = "none"
+)
+
+// ValidPromptInjection reports whether s is empty (name-based fallback) or one
+// of the known prompt_injection method names.
+func ValidPromptInjection(s string) bool {
+	switch s {
+	case "",
+		PromptInjectionAppendSystemPrompt,
+		PromptInjectionCursorRules,
+		PromptInjectionDeveloperInstructions,
+		PromptInjectionNone:
+		return true
+	default:
+		return false
+	}
 }
 
 // InterruptCountValue returns how many times the interrupt byte (Ctrl-C, 0x03)
@@ -1636,6 +1673,13 @@ func (c *Config) Validate() error {
 	for agentName, agent := range c.Agents {
 		if err := agent.Sandbox.validateSignalMode("agents." + agentName + ".sandbox"); err != nil {
 			errs = append(errs, err)
+		}
+
+		if !ValidPromptInjection(agent.PromptInjection) {
+			errs = append(errs, fmt.Errorf("agents.%s.prompt_injection %q: must be one of %q, %q, %q, %q (or empty for name-based detection)",
+				agentName, agent.PromptInjection,
+				PromptInjectionAppendSystemPrompt, PromptInjectionCursorRules,
+				PromptInjectionDeveloperInstructions, PromptInjectionNone))
 		}
 	}
 
@@ -2211,6 +2255,10 @@ func mergeAgent(def, usr Agent) Agent {
 
 	if usr.InjectPrompt != nil {
 		def.InjectPrompt = usr.InjectPrompt
+	}
+
+	if usr.PromptInjection != "" {
+		def.PromptInjection = usr.PromptInjection
 	}
 
 	if usr.PreTrustWorkspace != nil {
