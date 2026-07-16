@@ -484,6 +484,51 @@ struct ClientIntegrationTests {
         await client.close()
     }
 
+    /// Regression for issue #1289: a no-override GUI log peek must send the
+    /// daemon-default sentinel (`lines = 0`) so the daemon resolves the count from
+    /// its configured `[limits] log_lines` instead of a compile-time 300. An
+    /// explicit positive override is preserved and forwarded verbatim.
+    @Test func logPeekDefersLineCountToDaemon() async throws {
+        // The shared default the GUI peeks with must be the sentinel, not a
+        // hard-coded window.
+        #expect(GraithProtocolClient.defaultLogLines == 0)
+
+        func capturedLines(request: @escaping (GraithProtocolClient) async throws -> String) async throws -> Int {
+            let (clientStream, serverStream) = InMemoryByteStream.makePair()
+            let daemon = MockDaemon(stream: serverStream)
+
+            let server = Task { () -> Int in
+                _ = try await daemon.readControl() // handshake
+                try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+                let logs = try await daemon.readControl()
+                #expect(logs.type == "logs")
+                let msg = try decodePayload(logs, as: LogsMsg.self)
+                // No scrollback bytes; just terminate the one-shot peek.
+                try await daemon.writeControl("logs_done", EmptyMsg())
+                return msg.lines
+            }
+
+            let stream = clientStream
+            let client = GraithProtocolClient(
+                transport: .unix(path: "/tmp/graith.sock"),
+                profile: "", clientID: "app", token: nil, signer: nil,
+                streamFactory: { _ in stream }
+            )
+            _ = try await request(client)
+            let lines = try await server.value
+            await client.close()
+            return lines
+        }
+
+        // No override → sentinel 0 (daemon owns the count).
+        let defaulted = try await capturedLines { try await $0.logs(sessionID: "braw") }
+        #expect(defaulted == 0)
+
+        // Explicit positive override → forwarded unchanged.
+        let overridden = try await capturedLines { try await $0.logs(sessionID: "braw", lines: 42) }
+        #expect(overridden == 42)
+    }
+
     /// MAJOR regression: two overlapping RPCs on one connection must not
     /// mis-route replies. The daemon echoes each request's type back; with the
     /// per-connection RPC mutex, each caller receives the reply to *its own*

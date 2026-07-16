@@ -703,6 +703,60 @@ func TestLogsStoppedSessionWithScrollback(t *testing.T) {
 	}
 }
 
+// TestLogsSentinelUsesConfiguredDefault is the daemon side of issue #1289: a
+// log request carrying the sentinel Lines=0 (what a no-override GUI peek now
+// sends) is resolved against the configured [limits] log_lines — a non-300 value
+// here — rather than a hard-coded count. Proves the daemon stays the source of
+// truth for the default window.
+func TestLogsSentinelUsesConfiguredDefault(t *testing.T) {
+	cfg := config.Default()
+	cfg.Limits.LogLines = 3 // custom, non-300 default
+
+	h := newTestHarnessWithConfig(t, cfg)
+
+	// Ten lines on disk; the configured default (3) must bound a sentinel request.
+	h.addStoppedSession(t, "neep-log", "neep-cap", 0, "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n")
+
+	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "neep-log", Lines: 0})
+
+	var (
+		gotData []byte
+		done    bool
+	)
+
+	for !done {
+		frame, err := h.reader.ReadFrame()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		switch frame.Channel {
+		case protocol.ChannelData:
+			gotData = append(gotData, frame.Payload...)
+		case protocol.ChannelControl:
+			env, err := protocol.DecodeControl(frame.Payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if env.Type != "logs_done" {
+				t.Fatalf("expected logs_done, got %q", env.Type)
+			}
+
+			done = true
+		}
+	}
+
+	got := strings.Count(strings.TrimRight(string(gotData), "\n"), "\n") + 1
+	if got != 3 {
+		t.Fatalf("sentinel Lines=0 returned %d lines, want configured default 3 (%q)", got, gotData)
+	}
+
+	if !strings.Contains(string(gotData), "l10") || strings.Contains(string(gotData), "l7") {
+		t.Fatalf("expected the last 3 lines (l8-l10), got %q", gotData)
+	}
+}
+
 func TestLogsStoppedSessionNoOutput(t *testing.T) {
 	h := newTestHarness(t)
 	h.addStoppedSession(t, "dreich-log", "dreich-crash", 1, "")
