@@ -1217,7 +1217,8 @@ type LifecycleConfig struct {
 	// InputDelay is the pause between writing text and the submit carriage return
 	// in WriteInputAndSubmit, so a TUI doesn't treat text+CR as a paste. Unset uses
 	// the default; an explicitly non-positive value is invalid because a zero
-	// pause would defeat the paste guard. Applies to sessions launched after the change.
+	// pause would defeat the paste guard. Successful reloads apply it immediately
+	// to live interactive sessions.
 	InputDelay string `toml:"input_delay"`
 	// DefaultCols / DefaultRows are the terminal geometry used by daemon launch
 	// paths (watchdog restart, orchestrator, scenarios, triggers, adoption) when

@@ -48,9 +48,9 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, err
 	}
 
-	preLockCfg := sm.Config()
+	cfgSnapshot := sm.Config()
 
-	agent, ok := preLockCfg.Agents[agentName]
+	agent, ok := cfgSnapshot.Agents[agentName]
 	if !ok {
 		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
 	}
@@ -103,9 +103,9 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		}
 	}
 
-	preUsername := preLockCfg.GitHubUsername
+	preUsername := cfgSnapshot.GitHubUsername
 	if preUsername == "" && preRepoRoot != "" && !inPlace {
-		ctx, cancel := context.WithTimeout(context.Background(), preLockCfg.Git.UsernameTimeoutDuration())
+		ctx, cancel := context.WithTimeout(context.Background(), cfgSnapshot.Git.UsernameTimeoutDuration())
 		preUsername, _ = git.DiscoverGitHubUsername(ctx, preRepoRoot)
 
 		cancel()
@@ -193,7 +193,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	case inPlace:
 		repoRoot = preRepoRoot
 
-		rc, ok := sm.cfg.FindRepo(repoRoot)
+		rc, ok := cfgSnapshot.FindRepo(repoRoot)
 		if !ok {
 			sm.mu.Unlock()
 			return SessionState{}, fmt.Errorf("repo root %q is not configured in [[repos]] — add it to config to use --in-place", repoRoot)
@@ -219,12 +219,12 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	default:
 		repoRoot = preRepoRoot
 
-		if !sm.cfg.RepoPathAllowed(repoPath) {
+		if !cfgSnapshot.RepoPathAllowed(repoPath) {
 			sm.mu.Unlock()
 			return SessionState{}, fmt.Errorf("repo path %q is not under any allowed_repo_paths", repoPath)
 		}
 
-		rc, _ := sm.cfg.FindRepo(repoRoot)
+		rc, _ := cfgSnapshot.FindRepo(repoRoot)
 
 		if rc.Singleton {
 			canonicalRoot := config.ResolvePath(repoRoot)
@@ -248,7 +248,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 		repoName = filepath.Base(repoRoot)
 
-		branchPrefix, _ := config.Expand(sm.cfg.BranchPrefix, config.TemplateVars{Username: preUsername})
+		branchPrefix, _ := config.Expand(cfgSnapshot.BranchPrefix, config.TemplateVars{Username: preUsername})
 		branchName = fmt.Sprintf("%s/%s-%s", branchPrefix, name, id)
 
 		sessionDir := filepath.Join(sm.paths.DataDir, "worktrees", repoName, repoHash(repoRoot), id)
@@ -270,7 +270,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			worktreePath = sessionDir
 		}
 
-		fetchOnCreate = sm.cfg.FetchOnCreate && !opts.NoFetch
+		fetchOnCreate = cfgSnapshot.FetchOnCreate && !opts.NoFetch
 	}
 
 	agentSessionID := ""
@@ -279,7 +279,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	}
 
 	// Resolve sandbox under the lock (reads config, fast).
-	sandboxed, err := sm.resolveSandbox(agentName)
+	sandboxed, err := sm.resolveSandboxFromConfig(cfgSnapshot, agentName)
 	if err != nil {
 		if noRepo {
 			_ = os.RemoveAll(worktreePath)
@@ -290,7 +290,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	}
 
 	// Fail closed if the configured approvals backend can't enforce.
-	if err := sm.validateApprovalsBackend(yolo); err != nil {
+	if err := sm.validateApprovalsBackendFromConfig(cfgSnapshot, yolo); err != nil {
 		if noRepo {
 			_ = os.RemoveAll(worktreePath)
 		}
@@ -321,12 +321,11 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	// Resolve MCP servers under the lock (reads config).
 	var mcpServers []config.MCPServerConfig
 	if mcpEnabled {
-		mcpServers = sm.resolveMCPServers(agentName)
+		mcpServers = sm.resolveMCPServersFromConfig(cfgSnapshot, agentName)
 	}
 
 	// Snapshot config values needed for Phase 2.
-	cfgSnapshot := sm.cfg
-	sandboxMerged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
+	sandboxMerged := cfgSnapshot.Sandbox.Merge(cfgSnapshot.Agents[agentName].Sandbox)
 
 	// Reserve the session with StatusCreating so concurrent operations
 	// (list, singleton checks) see it exists.
@@ -375,6 +374,9 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	// --- Phase 2: External work (no lock held) ---
 	// Git setup, hook injection, sandbox wrapping, PTY spawn.
+	if sm.launchPhase2Hook != nil {
+		sm.launchPhase2Hook("create", cfgSnapshot)
+	}
 
 	var includes []IncludedRepoState
 
@@ -638,7 +640,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	// Headless sessions skip graith's generated status/approval hooks: the typed
 	// stream is the status/approval feed.
 	if hooksEnabled && driverKind != DriverHeadless {
-		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, yolo)
+		hookArgs, hookEnv, err := sm.injectHooksFromConfig(cfgSnapshot, agentName, id, worktreePath, yolo)
 		if err != nil {
 			cleanupOnError()
 			rollbackState()
@@ -660,7 +662,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	// hooks-disabled or headless session gets MCP) is a deliberate follow-up
 	// (issue #1075).
 	if mcpEnabled && driverKind != DriverHeadless {
-		mcpArgs, err := sm.injectMCPConfig(agentName, id, mcpServers)
+		mcpArgs, err := sm.injectMCPConfigFromConfig(cfgSnapshot, agentName, id, mcpServers)
 		if err != nil {
 			cleanupOnError()
 			rollbackState()
@@ -672,7 +674,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	}
 
 	if agent.PromptInjectionEnabled() && driverKind != DriverHeadless {
-		promptArgs, err := sm.injectPrompt(agentName, worktreePath)
+		promptArgs, err := sm.injectPromptFromConfig(cfgSnapshot, agentName, worktreePath)
 		if err != nil {
 			sm.log.Warn("failed to inject prompt", "session_id", id, "err", err)
 		} else {

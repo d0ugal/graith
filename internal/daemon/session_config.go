@@ -415,7 +415,7 @@ func resumeIncludeSet(mirror bool, sessIncludes, sharedSourceIncludes []Included
 }
 
 func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
-	return sm.resolveSandboxFromConfig(sm.cfg, agentName)
+	return sm.resolveSandboxFromConfig(sm.Config(), agentName)
 }
 
 // approvalsConfigDir returns the directory holding graith's config file, used to
@@ -445,18 +445,24 @@ func (sm *SessionManager) approvalsConfigDir() string {
 // mirrors the sandbox availability check (resolveSandboxFromConfig) so a
 // misconfigured approvals backend errors loudly at create time instead of
 // silently deferring every request to the human. The default (prompt) backend
-// always enforces. Callers hold sm.mu.
+// always enforces. Lifecycle callers pass their immutable config snapshot to
+// validateApprovalsBackendFromConfig so later launch phases cannot mix reload
+// generations.
 //
 // A yolo session resolves every request through the auto backend, which always
 // enforces, so the global [approvals] backend is irrelevant to it — validating
 // (and failing on) an unavailable global backend would contradict yolo's
 // per-session override. Yolo sessions therefore skip the global check.
 func (sm *SessionManager) validateApprovalsBackend(yolo bool) error {
+	return sm.validateApprovalsBackendFromConfig(sm.Config(), yolo)
+}
+
+func (sm *SessionManager) validateApprovalsBackendFromConfig(cfg *config.Config, yolo bool) error {
 	if yolo {
 		return nil
 	}
 
-	acfg := sm.cfg.Approvals
+	acfg := cfg.Approvals
 
 	backend, _, err := acfg.ResolveBackend()
 	if err != nil {

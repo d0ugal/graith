@@ -50,8 +50,11 @@ func detectPromptInjection(agentName, configured string) promptInjectionMethod {
 }
 
 func (sm *SessionManager) injectPrompt(agentName, worktreePath string) (extraArgs []string, err error) {
-	cfg := sm.Config()
-	return promptInjectionArgs(agentName, cfg.Agents[agentName], cfg.AgentPrompt, worktreePath)
+	return sm.injectPromptFromConfig(sm.Config(), agentName, worktreePath)
+}
+
+func (sm *SessionManager) injectPromptFromConfig(cfgSnapshot *config.Config, agentName, worktreePath string) (extraArgs []string, err error) {
+	return promptInjectionArgs(agentName, cfgSnapshot.Agents[agentName], cfgSnapshot.AgentPrompt, worktreePath)
 }
 
 // promptInjectionArgs adapts an already-assembled prompt to the injection

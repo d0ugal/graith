@@ -122,6 +122,10 @@ type SessionManager struct {
 	// subsequent recovery.
 	watchAdd func(w *fsnotify.Watcher, path string) error
 
+	// launchPhase2Hook is a test seam invoked after a lifecycle operation has
+	// reserved state and released sm.mu, carrying its immutable config snapshot.
+	launchPhase2Hook func(string, *config.Config)
+
 	// pushNotify guards proactive `gr notify` push-notification gating state:
 	// a rolling window of delivered timestamps (rate limit) and a per-key map of
 	// the last delivered time (coalescing of identical rapid-fire notifications,

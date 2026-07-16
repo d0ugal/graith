@@ -124,7 +124,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		return SessionState{}, fmt.Errorf("cannot fork session %q: in-place sessions cannot be forked", source.Name)
 	}
 
-	if rc, ok := sm.cfg.FindRepo(source.RepoPath); ok && rc.Singleton {
+	if rc, ok := cfgSnapshot.FindRepo(source.RepoPath); ok && rc.Singleton {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("cannot fork session %q: repo %q has singleton = true — stop the source session first or remove the singleton constraint", source.Name, source.RepoPath)
 	}
@@ -141,7 +141,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		agentName = targetAgent
 	}
 
-	agent, ok := sm.cfg.Agents[agentName]
+	agent, ok := cfgSnapshot.Agents[agentName]
 	if !ok {
 		sm.mu.Unlock()
 
@@ -197,7 +197,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	sourceForkIncludes := make([]IncludedRepoState, len(source.Includes))
 	copy(sourceForkIncludes, source.Includes)
 
-	branchPrefix, _ := config.Expand(sm.cfg.BranchPrefix, config.TemplateVars{Username: preUsername})
+	branchPrefix, _ := config.Expand(cfgSnapshot.BranchPrefix, config.TemplateVars{Username: preUsername})
 	branchName := fmt.Sprintf("%s/%s-%s", branchPrefix, name, id)
 
 	sessionDir := filepath.Join(sm.paths.DataDir, "worktrees", repoName, repoHash(repoRoot), id)
@@ -214,24 +214,24 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		agentSessionID = newAgentSessionID()
 	}
 
-	sandboxed, err := sm.resolveSandbox(agentName)
+	sandboxed, err := sm.resolveSandboxFromConfig(cfgSnapshot, agentName)
 	if err != nil {
 		sm.mu.Unlock()
 		return SessionState{}, err
 	}
 
-	if err := sm.validateApprovalsBackend(sourceYolo); err != nil {
+	if err := sm.validateApprovalsBackendFromConfig(cfgSnapshot, sourceYolo); err != nil {
 		sm.mu.Unlock()
 		return SessionState{}, err
 	}
 
 	var mcpServers []config.MCPServerConfig
 	if sourceMCPEnabled {
-		mcpServers = sm.resolveMCPServers(agentName)
+		mcpServers = sm.resolveMCPServersFromConfig(cfgSnapshot, agentName)
 	}
 
-	sandboxMerged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
-	fetchOnCreate := sm.cfg.FetchOnCreate
+	sandboxMerged := cfgSnapshot.Sandbox.Merge(cfgSnapshot.Agents[agentName].Sandbox)
+	fetchOnCreate := cfgSnapshot.FetchOnCreate
 
 	placeholder := &SessionState{
 		ID:              id,
@@ -265,6 +265,10 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	sm.mu.Unlock()
 
 	// --- Phase 2: Git setup and PTY spawn (no lock) ---
+	if sm.launchPhase2Hook != nil {
+		sm.launchPhase2Hook("fork", cfgSnapshot)
+	}
+
 	var forkIncludes []IncludedRepoState
 
 	// Cross-agent fork: rendered source conversation + its staging dir + the
@@ -502,7 +506,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	}
 
 	if sourceAgentHooks {
-		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, sourceYolo)
+		hookArgs, hookEnv, err := sm.injectHooksFromConfig(cfgSnapshot, agentName, id, worktreePath, sourceYolo)
 		if err != nil {
 			forkCleanup()
 			rollbackState()
@@ -518,7 +522,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	}
 
 	if sourceMCPEnabled {
-		mcpArgs, err := sm.injectMCPConfig(agentName, id, mcpServers)
+		mcpArgs, err := sm.injectMCPConfigFromConfig(cfgSnapshot, agentName, id, mcpServers)
 		if err != nil {
 			forkCleanup()
 			rollbackState()
@@ -530,7 +534,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	}
 
 	if agent.PromptInjectionEnabled() {
-		promptArgs, err := sm.injectPrompt(agentName, worktreePath)
+		promptArgs, err := sm.injectPromptFromConfig(cfgSnapshot, agentName, worktreePath)
 		if err != nil {
 			sm.log.Warn("failed to inject prompt", "session_id", id, "err", err)
 		} else {

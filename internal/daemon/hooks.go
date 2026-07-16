@@ -121,6 +121,10 @@ func preToolUseMatcher() string {
 // All supported hooks are generated including PreToolUse (approve-request) and
 // SessionStart (check-inbox). Only called when agent hooks are enabled.
 func (sm *SessionManager) generateClaudeSettings(sessionID string, yolo bool) (string, error) {
+	return sm.generateClaudeSettingsFromConfig(sm.Config(), sessionID, yolo)
+}
+
+func (sm *SessionManager) generateClaudeSettingsFromConfig(cfgSnapshot *config.Config, sessionID string, yolo bool) (string, error) {
 	dir := sm.hookDir(sessionID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create hook dir: %w", err)
@@ -133,9 +137,7 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, yolo bool) (s
 	// A yolo session always installs the PreToolUse approval hook so its tool
 	// calls route through the daemon's auto-approve backend (and any future
 	// dangerous-command blocklist), even when global approval gating is off.
-	// Snapshot the config once so hook generation can't race a concurrent
-	// applyConfig (issue #1287).
-	hookEnabled := sm.Config().Approvals.HookEnabled() || yolo
+	hookEnabled := cfgSnapshot.Approvals.HookEnabled() || yolo
 
 	events := []string{
 		"SessionStart",
@@ -274,7 +276,11 @@ func (sm *SessionManager) generateMCPConfig(sessionID string, mcpServers []confi
 // typed stream is its status/approval feed) but still needs its MCP servers, so
 // the two concerns must not ride the same branch. See issue #1135.
 func (sm *SessionManager) injectClaudeHooks(sessionID string, yolo bool, agent config.Agent) (extraArgs []string, extraEnv map[string]string, err error) {
-	settingsPath, err := sm.generateClaudeSettings(sessionID, yolo)
+	return sm.injectClaudeHooksFromConfig(sm.Config(), sessionID, yolo, agent)
+}
+
+func (sm *SessionManager) injectClaudeHooksFromConfig(cfgSnapshot *config.Config, sessionID string, yolo bool, agent config.Agent) (extraArgs []string, extraEnv map[string]string, err error) {
+	settingsPath, err := sm.generateClaudeSettingsFromConfig(cfgSnapshot, sessionID, yolo)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -300,11 +306,15 @@ func (sm *SessionManager) injectClaudeHooks(sessionID string, yolo bool, agent c
 // Claude consumes a `--mcp-config` file; Codex takes per-session
 // `-c mcp_servers.<name>.…` overrides (issue #1184). Other agents get no args.
 func (sm *SessionManager) injectMCPConfig(agentName, sessionID string, mcpServers []config.MCPServerConfig) (extraArgs []string, err error) {
+	return sm.injectMCPConfigFromConfig(sm.Config(), agentName, sessionID, mcpServers)
+}
+
+func (sm *SessionManager) injectMCPConfigFromConfig(cfgSnapshot *config.Config, agentName, sessionID string, mcpServers []config.MCPServerConfig) (extraArgs []string, err error) {
 	if len(mcpServers) == 0 {
 		return nil, nil
 	}
 
-	agent := sm.Config().Agents[agentName]
+	agent := cfgSnapshot.Agents[agentName]
 
 	switch agent.MCPMechanism() {
 	case config.MCPMechanismClaudeConfig:
@@ -446,9 +456,12 @@ type codexHookEvent struct {
 // MCP-server wiring is NOT handled here — it rides the separate injectMCPConfig
 // path (issue #1135), so a headless codex session gets MCP without hooks.
 func (sm *SessionManager) injectCodexHooks(sessionID string, yolo bool, agent config.Agent) (extraArgs []string, extraEnv map[string]string, err error) {
+	return sm.injectCodexHooksFromConfig(sm.Config(), sessionID, yolo, agent)
+}
+
+func (sm *SessionManager) injectCodexHooksFromConfig(cfgSnapshot *config.Config, sessionID string, yolo bool, agent config.Agent) (extraArgs []string, extraEnv map[string]string, err error) {
 	grBin := shellQuote(resolveGrBin())
-	// Snapshot the config once so hook generation can't race applyConfig (#1287).
-	hookEnabled := sm.Config().Approvals.HookEnabled() || yolo
+	hookEnabled := cfgSnapshot.Approvals.HookEnabled() || yolo
 
 	eventTmpl := agent.HookEventArgsOrDefault()
 
@@ -573,7 +586,7 @@ func graithMCPServer() config.MCPServerConfig {
 }
 
 func (sm *SessionManager) resolveMCPServers(agentName string) []config.MCPServerConfig {
-	return sm.resolveMCPServersFromConfig(sm.cfg, agentName)
+	return sm.resolveMCPServersFromConfig(sm.Config(), agentName)
 }
 
 func (sm *SessionManager) resolveMCPServersFromConfig(cfg *config.Config, agentName string) []config.MCPServerConfig {
@@ -730,16 +743,19 @@ func (sm *SessionManager) injectCursorHooks(
 // kept separate so MCP can be injected without hooks (see issue #1135). Returns
 // nil for agents that don't support hooks.
 func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
-	cfg := sm.Config()
-	agent := cfg.Agents[agentName]
+	return sm.injectHooksFromConfig(sm.Config(), agentName, sessionID, worktreePath, yolo)
+}
+
+func (sm *SessionManager) injectHooksFromConfig(cfgSnapshot *config.Config, agentName, sessionID, worktreePath string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
+	agent := cfgSnapshot.Agents[agentName]
 
 	switch agent.HookMechanism() {
 	case config.HookMechanismClaudeSettings:
-		return sm.injectClaudeHooks(sessionID, yolo, agent)
+		return sm.injectClaudeHooksFromConfig(cfgSnapshot, sessionID, yolo, agent)
 	case config.HookMechanismCodexConfig:
-		return sm.injectCodexHooks(sessionID, yolo, agent)
+		return sm.injectCodexHooksFromConfig(cfgSnapshot, sessionID, yolo, agent)
 	case config.HookMechanismCursorProject:
-		return sm.injectCursorHooks(sessionID, worktreePath, yolo, agent, cfg.Approvals.HookEnabled())
+		return sm.injectCursorHooks(sessionID, worktreePath, yolo, agent, cfgSnapshot.Approvals.HookEnabled())
 	default:
 		sm.log.Info("agent does not support hooks, skipping", "agent", agentName, "session_id", sessionID)
 		return nil, nil, nil

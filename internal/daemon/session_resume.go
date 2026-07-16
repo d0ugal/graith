@@ -191,7 +191,7 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 }
 
 func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecycleSummary string) (SessionState, error) {
-	return sm.resumeWithSummaryAndPrompt(id, rows, cols, lifecycleSummary, "")
+	return sm.resumeWithSummaryAndPromptFromConfig(sm.Config(), id, rows, cols, lifecycleSummary, "")
 }
 
 // resumeWithSummaryAndPrompt starts (or restarts) a session's agent in its
@@ -201,28 +201,25 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 // start (uses agent.Args, not resume_args) and clears FreshStart afterwards so
 // subsequent resumes use the new agent's native resume.
 func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint16, lifecycleSummary, seedPrompt string) (SessionState, error) {
+	return sm.resumeWithSummaryAndPromptFromConfig(sm.Config(), id, rows, cols, lifecycleSummary, seedPrompt)
+}
+
+func (sm *SessionManager) resumeWithSummaryAndPromptFromConfig(cfgSnapshot *config.Config, id string, rows, cols uint16, lifecycleSummary, seedPrompt string) (SessionState, error) {
 	// --- Pre-lock: discover GitHub username ---
 	sm.mu.RLock()
 	sessSnap, snapOk := sm.state.Sessions[id]
 
-	var (
-		snapRepoPath string
-		snapAgent    string
-	)
+	var snapRepoPath string
 
 	if snapOk {
 		snapRepoPath = sessSnap.RepoPath
-		snapAgent = sessSnap.Agent
 	}
-
-	preLockCfg := sm.cfg
-	cfgUsername := preLockCfg.GitHubUsername
 
 	sm.mu.RUnlock()
 
-	preUsername := cfgUsername
+	preUsername := cfgSnapshot.GitHubUsername
 	if preUsername == "" && snapRepoPath != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), preLockCfg.Git.UsernameTimeoutDuration())
+		ctx, cancel := context.WithTimeout(context.Background(), cfgSnapshot.Git.UsernameTimeoutDuration())
 		preUsername, _ = git.DiscoverGitHubUsername(ctx, snapRepoPath)
 
 		cancel()
@@ -231,8 +228,6 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	if preUsername == "" {
 		preUsername = "user"
 	}
-
-	_ = snapAgent // used only to decide whether to discover username
 
 	// --- Phase 1: Lock, validate, prepare, mark creating ---
 	sm.mu.Lock()
@@ -283,13 +278,13 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		return SessionState{}, fmt.Errorf("session has unsafe name %q (created before validation was added): %w — use 'gr rename' to fix", sessState.Name, err)
 	}
 
-	agent, ok := sm.cfg.Agents[sessState.Agent]
+	agent, ok := cfgSnapshot.Agents[sessState.Agent]
 	if !ok {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("unknown agent %q", sessState.Agent)
 	}
 
-	sandboxed, err := sm.resolveSandbox(sessState.Agent)
+	sandboxed, err := sm.resolveSandboxFromConfig(cfgSnapshot, sessState.Agent)
 	if err != nil {
 		sm.mu.Unlock()
 		return SessionState{}, err
@@ -298,7 +293,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	// Resume re-enforces the approvals backend too, for parity with the sandbox
 	// re-check above: a config change that made the backend unenforceable must
 	// not silently resume a non-enforcing approver.
-	if err := sm.validateApprovalsBackend(sessState.Yolo); err != nil {
+	if err := sm.validateApprovalsBackendFromConfig(cfgSnapshot, sessState.Yolo); err != nil {
 		sm.mu.Unlock()
 		return SessionState{}, err
 	}
@@ -314,7 +309,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	}
 
 	if sessState.RepoPath != "" {
-		if rc, ok := sm.cfg.FindRepo(sessState.RepoPath); ok && rc.Singleton {
+		if rc, ok := cfgSnapshot.FindRepo(sessState.RepoPath); ok && rc.Singleton {
 			canonicalRoot := config.ResolvePath(sessState.RepoPath)
 			for _, s := range sm.state.Sessions {
 				if s.ID != id && config.ResolvePath(s.RepoPath) == canonicalRoot && (s.Status == StatusRunning || s.Status == StatusCreating) {
@@ -342,7 +337,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 			return SessionState{}, fmt.Errorf("in-place repo root changed: saved %q, current %q", sessState.WorktreePath, currentRoot)
 		}
 
-		rc, ok := sm.cfg.FindRepo(sessState.WorktreePath)
+		rc, ok := cfgSnapshot.FindRepo(sessState.WorktreePath)
 		if !ok {
 			sm.mu.Unlock()
 			return SessionState{}, fmt.Errorf("repo path %q is no longer configured in [[repos]] — add it back to config to resume this in-place session", sessState.WorktreePath)
@@ -364,7 +359,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	// coincide here.
 	var mcpServers []config.MCPServerConfig
 	if sessState.AgentHooks || sessState.Yolo {
-		mcpServers = sm.resolveMCPServers(sessState.Agent)
+		mcpServers = sm.resolveMCPServersFromConfig(cfgSnapshot, sessState.Agent)
 	}
 
 	// Snapshot mirror source includes under lock.
@@ -377,9 +372,9 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		}
 	}
 
-	sandboxMerged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[sessState.Agent].Sandbox)
+	sandboxMerged := cfgSnapshot.Sandbox.Merge(cfgSnapshot.Agents[sessState.Agent].Sandbox)
 	if sessState.SystemKind == SystemKindOrchestrator {
-		sandboxMerged = sm.cfg.OrchestratorSandboxMerged(sessState.Agent)
+		sandboxMerged = cfgSnapshot.OrchestratorSandboxMerged(sessState.Agent)
 	}
 	// Save previous state for rollback.
 	prevStatus := sessState.Status
@@ -502,6 +497,10 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	sm.mu.Unlock()
 
 	// --- Phase 2: Build command and spawn PTY (no lock) ---
+	if sm.launchPhase2Hook != nil {
+		sm.launchPhase2Hook("resume", cfgSnapshot)
+	}
+
 	rollbackState := func() {
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[id]; ok {
@@ -687,7 +686,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	}
 
 	if sessAgentHooks {
-		hookArgs, hookEnv, err := sm.injectHooks(sessAgent, id, sessWorktreePath, sessYolo)
+		hookArgs, hookEnv, err := sm.injectHooksFromConfig(cfgSnapshot, sessAgent, id, sessWorktreePath, sessYolo)
 		if err != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)
@@ -701,7 +700,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	}
 
 	if sessMCPEnabled {
-		mcpArgs, err := sm.injectMCPConfig(sessAgent, id, mcpServers)
+		mcpArgs, err := sm.injectMCPConfigFromConfig(cfgSnapshot, sessAgent, id, mcpServers)
 		if err != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("inject mcp config: %w", err)
@@ -711,13 +710,8 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	}
 
 	if isOrchestrator {
-		sm.mu.RLock()
-		orchCfg := sm.cfg.Orchestrator
-		repoPaths := sm.cfg.AvailableRepoPaths()
-		notifyEnabled := sm.cfg.Notifications.Enabled
-		sm.mu.RUnlock()
-
-		promptArgs, err := sm.buildOrchestratorPrompt(sessAgent, orchCfg, repoPaths, notifyEnabled, sm.orchestratorScratchDir())
+		promptArgs, err := sm.buildOrchestratorPromptFromConfig(cfgSnapshot, sessAgent, cfgSnapshot.Orchestrator,
+			cfgSnapshot.AvailableRepoPaths(), cfgSnapshot.Notifications.Enabled, sm.orchestratorScratchDir())
 		if err != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("build orchestrator prompt: %w", err)
@@ -725,7 +719,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 
 		expandedArgs = append(expandedArgs, promptArgs...)
 	} else if agent.PromptInjectionEnabled() {
-		promptArgs, err := sm.injectPrompt(sessAgent, sessWorktreePath)
+		promptArgs, err := sm.injectPromptFromConfig(cfgSnapshot, sessAgent, sessWorktreePath)
 		if err != nil {
 			sm.log.Warn("failed to inject prompt", "session_id", id, "err", err)
 		} else {
@@ -832,7 +826,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	// Pre-spawn time for native session-id capture (see Create).
 	startedAt := time.Now()
 
-	lc := sm.Config().Lifecycle
+	lc := cfgSnapshot.Lifecycle
 
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,
