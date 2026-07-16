@@ -185,6 +185,12 @@ on_approval = true  # notify when a session enters the "approval" (waiting-for-h
 # (graith's built-in localmost-compatible engine), or "auto".
 backend = ""
 timeout = "10m"  # how long to wait for an approval decision before it times out
+# Per-backend subprocess execution timeouts. These bound a single automated
+# backend invocation and must be positive, at most 60s, and strictly shorter
+# than timeout above (a backend decision runs inside the approval deadline).
+# Both default to 5s when unset — leave them commented to keep that default.
+# command_timeout   = "5s"  # bounds the "command"/"external" backend
+# localmost_timeout = "5s"  # bounds the "localmost" binary check
 
 [overlay]
 # Keys that jump straight to the Nth session in the picker (1st key → session 1, …).

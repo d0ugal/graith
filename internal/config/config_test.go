@@ -221,6 +221,65 @@ func TestApprovalTimeoutDuration(t *testing.T) {
 	}
 }
 
+func TestApprovalsBackendExecTimeoutDuration(t *testing.T) {
+	tests := []struct {
+		name         string
+		a            Approvals
+		wantCommand  time.Duration
+		wantLocalmst time.Duration
+	}{
+		{
+			name:         "defaults when unset",
+			a:            Approvals{},
+			wantCommand:  defaultBackendExecTimeout,
+			wantLocalmst: defaultBackendExecTimeout,
+		},
+		{
+			name:         "explicit values",
+			a:            Approvals{CommandTimeout: "8s", LocalmostTimeout: "12s"},
+			wantCommand:  8 * time.Second,
+			wantLocalmst: 12 * time.Second,
+		},
+		{
+			name:         "invalid falls back to default",
+			a:            Approvals{CommandTimeout: "dreich", LocalmostTimeout: "-1s"},
+			wantCommand:  defaultBackendExecTimeout,
+			wantLocalmst: defaultBackendExecTimeout,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.a.CommandTimeoutDuration(); got != tt.wantCommand {
+				t.Errorf("CommandTimeoutDuration() = %v, want %v", got, tt.wantCommand)
+			}
+
+			if got := tt.a.LocalmostTimeoutDuration(); got != tt.wantLocalmst {
+				t.Errorf("LocalmostTimeoutDuration() = %v, want %v", got, tt.wantLocalmst)
+			}
+		})
+	}
+}
+
+func TestApprovalsBackendExecTimeout(t *testing.T) {
+	if d, ok := (Approvals{CommandTimeout: "7s"}).BackendExecTimeout("command"); !ok || d != 7*time.Second {
+		t.Errorf("BackendExecTimeout(command) = %v, %v; want 7s, true", d, ok)
+	}
+
+	if d, ok := (Approvals{CommandTimeout: "7s"}).BackendExecTimeout("external"); !ok || d != 7*time.Second {
+		t.Errorf("BackendExecTimeout(external) = %v, %v; want 7s, true", d, ok)
+	}
+
+	if d, ok := (Approvals{LocalmostTimeout: "9s"}).BackendExecTimeout("localmost"); !ok || d != 9*time.Second {
+		t.Errorf("BackendExecTimeout(localmost) = %v, %v; want 9s, true", d, ok)
+	}
+
+	for _, backend := range []string{"prompt", "builtin", "auto", ""} {
+		if _, ok := (Approvals{}).BackendExecTimeout(backend); ok {
+			t.Errorf("BackendExecTimeout(%q) reported a subprocess timeout; want none", backend)
+		}
+	}
+}
+
 func TestApprovalsResolveBackend(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -331,6 +390,28 @@ func TestApprovalsValidate(t *testing.T) {
 		{"inline non-string non-table rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{42}}}, true},
 		// Empty inline array is not "inline" and does not conflict with a file.
 		{"empty inline array not a conflict", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Config: "/tmp/approvals.json", Allow: []any{}}}, false},
+
+		// Per-backend execution timeouts (#1251).
+		{"command_timeout unset ok", Approvals{Backend: "command", Command: "x"}, false},
+		{"command_timeout valid ok", Approvals{Backend: "command", Command: "x", CommandTimeout: "10s"}, false},
+		{"localmost_timeout valid ok", Approvals{Backend: "localmost", LocalmostTimeout: "10s"}, false},
+		{"command_timeout invalid duration", Approvals{Backend: "command", Command: "x", CommandTimeout: "soon"}, true},
+		{"command_timeout non-positive", Approvals{Backend: "command", Command: "x", CommandTimeout: "0s"}, true},
+		{"command_timeout negative", Approvals{Backend: "command", Command: "x", CommandTimeout: "-1s"}, true},
+		{"command_timeout over max", Approvals{Backend: "command", Command: "x", CommandTimeout: "2m"}, true},
+		{"localmost_timeout over max", Approvals{Backend: "localmost", LocalmostTimeout: "90s"}, true},
+		// A backend timeout at or above the enclosing approval timeout is incoherent.
+		{"command_timeout >= enclosing", Approvals{Backend: "command", Command: "x", Timeout: "5s", CommandTimeout: "5s"}, true},
+		{"command_timeout above enclosing", Approvals{Backend: "command", Command: "x", Timeout: "3s", CommandTimeout: "10s"}, true},
+		// Timeout fields are validated for their syntax even when the resolved
+		// backend does not use them.
+		{"localmost_timeout invalid under command backend", Approvals{Backend: "command", Command: "x", LocalmostTimeout: "soon"}, true},
+		// A deliberately tiny enclosing timeout is caught against the default 5s
+		// backend timeout even with no explicit per-backend field.
+		{"tiny enclosing vs default backend timeout", Approvals{Backend: "command", Command: "x", Timeout: "2s"}, true},
+		// A non-subprocess backend has no execution timeout, so a tiny enclosing
+		// timeout is fine on its own.
+		{"tiny enclosing ok for prompt backend", Approvals{Timeout: "1s"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -457,6 +538,44 @@ idle_timeout = "0"
 
 	if got := cfg.Agents["codex"].IdleTimeoutDuration(); got != 0 {
 		t.Errorf("codex idle timeout = %v, want 0", got)
+	}
+}
+
+// TestLoadConfigApprovalTimeouts loads a real TOML through Load() so the per-
+// backend timeout keys are exercised end-to-end, and confirms the embedded
+// default config leaves them unset so the 5s Go default still applies (guards
+// the #1228-class trap where an embedded value would defeat the Go fallback).
+func TestLoadConfigApprovalTimeouts(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[approvals]
+backend = "command"
+command = "graith-approver"
+command_timeout = "8s"
+localmost_timeout = "12s"
+`
+	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got := cfg.Approvals.CommandTimeoutDuration(); got != 8*time.Second {
+		t.Errorf("command timeout = %v, want 8s", got)
+	}
+
+	if got := cfg.Approvals.LocalmostTimeoutDuration(); got != 12*time.Second {
+		t.Errorf("localmost timeout = %v, want 12s", got)
+	}
+
+	// The embedded default config must NOT set these keys, so an out-of-the-box
+	// config still falls back to the 5s Go default.
+	if got := Default().Approvals.CommandTimeoutDuration(); got != defaultBackendExecTimeout {
+		t.Errorf("default command timeout = %v, want %v", got, defaultBackendExecTimeout)
 	}
 }
 

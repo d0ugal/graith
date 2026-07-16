@@ -836,7 +836,29 @@ type Approvals struct {
 	Timeout string           `toml:"timeout"`
 	Command string           `toml:"command"`
 	Builtin ApprovalsBuiltin `toml:"builtin"`
+
+	// CommandTimeout bounds a single external "command"/"external" backend
+	// invocation; LocalmostTimeout bounds a single "localmost" binary check.
+	// Both default to defaultBackendExecTimeout (5s) when unset (see
+	// CommandTimeoutDuration/LocalmostTimeoutDuration). Each must be positive,
+	// no larger than maxBackendExecTimeout, and strictly shorter than the
+	// enclosing human/headless approval Timeout so a hung backend cannot outlive
+	// the deadline that encloses it — a class of bug that previously caused
+	// approval-behaviour glitches (see #244). Validate enforces this hierarchy.
+	CommandTimeout   string `toml:"command_timeout"`
+	LocalmostTimeout string `toml:"localmost_timeout"`
 }
+
+// Backend execution timeout bounds. A backend's automated decision runs *inside*
+// the enclosing approval deadline (the human queue wait, or the headless
+// caller-side ctx), so the backend's own subprocess timeout must be shorter than
+// that enclosing deadline to stay coherent. defaultBackendExecTimeout preserves
+// the historical fixed 5s; maxBackendExecTimeout caps how long a single backend
+// invocation may be configured to block.
+const (
+	defaultBackendExecTimeout = 5 * time.Second
+	maxBackendExecTimeout     = 60 * time.Second
+)
 
 // ApprovalsBuiltin configures the built-in localmost-compatible engine. Rules
 // can be supplied either as a path to an external localmost-format config.json
@@ -1091,6 +1113,68 @@ func (a Approvals) Validate() error {
 		}
 	}
 
+	if err := a.validateBackendTimeouts(backend); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateBackendTimeouts checks the per-backend execution timeouts for static
+// contradictions: a syntactically invalid or non-positive value, a value beyond
+// maxBackendExecTimeout, or a value that is not strictly shorter than the
+// enclosing approval Timeout. The last check enforces the deadline hierarchy — a
+// backend decision runs inside the human/headless approval deadline, so a
+// backend timeout at or above it is incoherent and can cause the approval
+// glitches #244 tracked. Explicitly-set fields are always checked; the resolved
+// backend's effective timeout (including the 5s default) is also checked so a
+// deliberately tiny [approvals] timeout is caught against the default backend
+// bound too.
+func (a Approvals) validateBackendTimeouts(backend string) error {
+	enclosing := a.TimeoutDuration()
+
+	for _, f := range []struct{ key, raw string }{
+		{"command_timeout", a.CommandTimeout},
+		{"localmost_timeout", a.LocalmostTimeout},
+	} {
+		if strings.TrimSpace(f.raw) == "" {
+			continue
+		}
+
+		d, err := ParseDurationWithDays(f.raw)
+		if err != nil {
+			return fmt.Errorf("[approvals] %s=%q is not a valid duration: %w", f.key, f.raw, err)
+		}
+
+		if d <= 0 {
+			return fmt.Errorf("[approvals] %s=%q must be a positive duration", f.key, f.raw)
+		}
+
+		if d > maxBackendExecTimeout {
+			return fmt.Errorf(
+				"[approvals] %s=%q exceeds the maximum backend execution timeout of %s",
+				f.key, f.raw, maxBackendExecTimeout)
+		}
+
+		if d >= enclosing {
+			return fmt.Errorf(
+				"[approvals] %s=%q must be shorter than the enclosing approval timeout=%s "+
+					"so a hung backend cannot outlive the approval deadline (see #244)",
+				f.key, f.raw, enclosing)
+		}
+	}
+
+	// Also guard the resolved backend's effective timeout (which may be the 5s
+	// default when the field is unset) against a deliberately tiny enclosing
+	// timeout, so the executing hierarchy is coherent even without an explicit
+	// per-backend value.
+	if execTimeout, ok := a.BackendExecTimeout(backend); ok && execTimeout >= enclosing {
+		return fmt.Errorf(
+			"[approvals] the effective %s backend execution timeout (%s) must be shorter than "+
+				"the enclosing approval timeout=%s; raise [approvals] timeout or lower the backend timeout (see #244)",
+			backend, execTimeout, enclosing)
+	}
+
 	return nil
 }
 
@@ -1128,6 +1212,52 @@ func (a Approvals) TimeoutDuration() time.Duration {
 	}
 
 	return d
+}
+
+// CommandTimeoutDuration is the effective execution timeout for the
+// command/external backend, falling back to defaultBackendExecTimeout when
+// unset or unparseable. Validate rejects a set-but-invalid value up front, so a
+// fallback here only happens for an unset field.
+func (a Approvals) CommandTimeoutDuration() time.Duration {
+	return backendExecTimeoutOrDefault(a.CommandTimeout)
+}
+
+// LocalmostTimeoutDuration is the effective execution timeout for the localmost
+// backend, falling back to defaultBackendExecTimeout when unset or unparseable.
+func (a Approvals) LocalmostTimeoutDuration() time.Duration {
+	return backendExecTimeoutOrDefault(a.LocalmostTimeout)
+}
+
+// backendExecTimeoutOrDefault parses a per-backend execution timeout string,
+// returning defaultBackendExecTimeout for an empty, unparseable, or non-positive
+// value so a misconfigured field degrades to the historical 5s rather than to
+// an unbounded (0 => no timeout) subprocess.
+func backendExecTimeoutOrDefault(s string) time.Duration {
+	if strings.TrimSpace(s) == "" {
+		return defaultBackendExecTimeout
+	}
+
+	d, err := ParseDurationWithDays(s)
+	if err != nil || d <= 0 {
+		return defaultBackendExecTimeout
+	}
+
+	return d
+}
+
+// BackendExecTimeout returns the effective execution timeout for a resolved
+// backend name and whether that backend runs a bounded subprocess at all. Only
+// the command/external and localmost backends spawn a child process; the others
+// (prompt/builtin/auto) decide in-process and have no execution timeout.
+func (a Approvals) BackendExecTimeout(backend string) (time.Duration, bool) {
+	switch backend {
+	case "command", "external":
+		return a.CommandTimeoutDuration(), true
+	case "localmost":
+		return a.LocalmostTimeoutDuration(), true
+	default:
+		return 0, false
+	}
 }
 
 type MCPServerConfig struct {

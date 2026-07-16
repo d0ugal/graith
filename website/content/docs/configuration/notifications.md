@@ -92,6 +92,9 @@ timeout  = "10m"     # how long to wait for a human decision
 auto_pop = false     # auto-open the approval overlay when a request is queued
 command  = ""        # required for backend "command"/"external"; path override for "localmost"
 
+command_timeout   = "5s"  # bounds one "command"/"external" backend invocation
+localmost_timeout = "5s"  # bounds one "localmost" binary check
+
 [approvals.builtin]
 config   = ""        # localmost-format config.json (backend "builtin")
 ```
@@ -106,6 +109,12 @@ The approval system integrates with agent hooks. When an agent requests approval
 | `"builtin"` | graith's built-in localmost-compatible engine — configured via `[approvals.builtin] config` (a localmost-format `config.json` path) **or** inline rules (`allow`, `deny`, `allowSafeXargs`, `askNoninteractive`) |
 
 `mode` is deprecated. With no `backend` set, legacy `mode = "command"`, `mode = "external"`, and `mode = "localmost"` all resolve to `backend = "command"` (graith's JSON contract) for compatibility — `mode = "localmost"` does **not** select the native-protocol `backend = "localmost"`. Set `backend = "localmost"` explicitly to run the real localmost binary. See `ResolveBackend` in `internal/config/config.go` for the full resolution order.
+
+### Backend execution timeouts
+
+An automated backend's decision runs *inside* the enclosing approval deadline: for an interactive session that decision precedes the human-queue wait; for a headless session it is bounded by the caller-side `timeout`. The `command`/`external` and `localmost` backends spawn a subprocess to make that decision, and `command_timeout` / `localmost_timeout` bound a single such invocation.
+
+Both default to `5s` when unset. Each must be a positive duration, at most `60s`, and **strictly shorter** than the enclosing `timeout` — a backend timeout at or above the approval deadline is rejected at config load, because a hung backend that outlives its enclosing deadline is exactly the kind of mismatch that has caused approval-behaviour bugs in the past. The other backends (`prompt`, `builtin`, `auto`) decide in-process and have no execution timeout. `gr doctor` prints the effective hierarchy (`backend execution <timeout> < approval timeout <timeout>`) so a tight configuration is visible before it bites.
 
 ## Messages
 

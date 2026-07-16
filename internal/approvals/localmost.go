@@ -7,10 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-	"time"
 )
-
-const localmostExecTimeout = 5 * time.Second
 
 // localmostBackend invokes the real federicotdn/localmost binary using its
 // native Claude Code PreToolUse protocol.
@@ -83,7 +80,7 @@ func (localmostBackend) Decide(ctx context.Context, req Request, cfg Config) (De
 		return Decision{Decision: DecisionDefer}, err
 	}
 
-	cmdCtx, cancel := context.WithTimeout(ctx, localmostExecTimeout)
+	cmdCtx, cancel := context.WithTimeout(ctx, cfg.execTimeout())
 	defer cancel()
 
 	cmd := exec.CommandContext(cmdCtx, command, "check")

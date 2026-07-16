@@ -160,9 +160,9 @@ func (sm *SessionManager) SubmitHeadlessApproval(ctx context.Context, req protoc
 	sm.mu.RUnlock()
 
 	// Bound the backend decision so a hung backend can't stall the agent turn
-	// forever. Most backends self-bound (command/localmost at 5s, auto is
-	// instant), but a caller-side deadline is the backstop the interactive path
-	// gets from its own timeout/queue.
+	// forever. Most backends self-bound (command/localmost at their configured
+	// execution timeout, default 5s; auto is instant), but a caller-side deadline
+	// is the backstop the interactive path gets from its own timeout/queue.
 	tctx, cancel := context.WithTimeout(ctx, approvalsCfg.TimeoutDuration())
 	defer cancel()
 
@@ -348,6 +348,16 @@ func approvalsBackendConfig(backend string, cfg config.Approvals, configDir stri
 		Backend:       backend,
 		Command:       cfg.Command,
 		BuiltinConfig: config.ExpandPathRelative(cfg.Builtin.Config, configDir),
+	}
+
+	// Resolve the per-backend subprocess execution timeout for the backends that
+	// spawn one. config.Approvals.Validate has already checked it against the
+	// enclosing approval deadline, so the value here is coherent by construction.
+	switch backend {
+	case approvals.BackendCommand, approvals.BackendExternal:
+		acfg.ExecTimeout = cfg.CommandTimeoutDuration()
+	case approvals.BackendLocalmost:
+		acfg.ExecTimeout = cfg.LocalmostTimeoutDuration()
 	}
 
 	if cfg.Builtin.HasInline() {

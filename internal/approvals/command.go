@@ -7,11 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-	"time"
 )
-
-// commandExecTimeout bounds a single external approval command invocation.
-const commandExecTimeout = 5 * time.Second
 
 // commandBackend delegates the decision to an external command over graith's
 // own JSON approval protocol. This is graith's contract, NOT the wire format of
@@ -71,7 +67,7 @@ func (commandBackend) Decide(ctx context.Context, req Request, cfg Config) (Deci
 		return Decision{Decision: DecisionDefer}, fmt.Errorf("marshal approval input: %w", err)
 	}
 
-	cmdCtx, cancel := context.WithTimeout(ctx, commandExecTimeout)
+	cmdCtx, cancel := context.WithTimeout(ctx, cfg.execTimeout())
 	defer cancel()
 
 	cmd := exec.CommandContext(cmdCtx, command)
