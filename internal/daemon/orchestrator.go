@@ -66,7 +66,7 @@ func (sm *SessionManager) findOrchestratorID() string {
 func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState, error) {
 	cfgSnap := sm.Config()
 	orchCfg := cfgSnap.Orchestrator
-	agentName := orchCfg.AgentName()
+	agentName := orchCfg.AgentName(cfgSnap.DefaultAgent)
 
 	agent, ok := cfgSnap.Agents[agentName]
 	if !ok {

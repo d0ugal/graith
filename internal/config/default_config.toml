@@ -229,7 +229,7 @@ drag_arrow_threshold = 2
 # A special worktree-less session for coordinating other sessions (ctrl+b o).
 [orchestrator]
 enabled = false        # make an orchestrator session available
-agent = "claude"       # agent type to run as the orchestrator (defaults to claude)
+agent = ""             # agent type to run as the orchestrator (empty inherits default_agent)
 model = ""             # model override; empty uses the agent's default
 idle_timeout = "30m"   # stop the orchestrator after this long idle (no client, agent ready)
 prompt = """\
