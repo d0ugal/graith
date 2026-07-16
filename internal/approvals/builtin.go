@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -60,7 +61,7 @@ func builtinEngine(cfg Config) (*localmost.Engine, error) {
 
 	path := strings.TrimSpace(cfg.BuiltinConfig)
 	if path == "" {
-		return nil, fmt.Errorf("no builtin approvals config configured")
+		return nil, errors.New("no builtin approvals config configured")
 	}
 
 	return loadEngineCached(path)

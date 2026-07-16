@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -120,7 +121,7 @@ func (sm *SessionManager) jailDroppedComments(t prWatchTarget, slug string, d pr
 // is enforced by the caller — this is the mechanism, not the gate.
 func (sm *SessionManager) ReleaseJailed(id string) (JailedComment, error) {
 	if sm.messages == nil {
-		return JailedComment{}, fmt.Errorf("no message store")
+		return JailedComment{}, errors.New("no message store")
 	}
 
 	j, ok, err := sm.messages.MarkReleased(id)
@@ -161,12 +162,12 @@ func (sm *SessionManager) ReleaseJailed(id string) (JailedComment, error) {
 // initial listing fails (nothing could be attempted).
 func (sm *SessionManager) ReleaseJailedByAuthor(login string) ([]JailedComment, error) {
 	if sm.messages == nil {
-		return nil, fmt.Errorf("no message store")
+		return nil, errors.New("no message store")
 	}
 
 	want := strings.ToLower(strings.TrimSpace(login))
 	if want == "" {
-		return nil, fmt.Errorf("author login required")
+		return nil, errors.New("author login required")
 	}
 
 	all, err := sm.messages.UnreleasedJailed()

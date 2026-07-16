@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -77,7 +78,7 @@ func EnsureDaemon(paths config.Paths, configFile string) (net.Conn, error) {
 
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("daemon did not start in time")
+			return nil, errors.New("daemon did not start in time")
 		case <-time.After(50 * time.Millisecond):
 		}
 	}

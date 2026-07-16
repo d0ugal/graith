@@ -153,7 +153,7 @@ var doctorCmd = &cobra.Command{
 		}
 
 		if !dc.ok {
-			return fmt.Errorf("issues found")
+			return errors.New("issues found")
 		}
 
 		return nil

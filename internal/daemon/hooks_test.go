@@ -627,7 +627,11 @@ func TestCodexMCPServerArgs(t *testing.T) {
 	}
 
 	grBin := resolveGrBin()
-	cmdVal, _ := json.Marshal(grBin)
+
+	cmdVal, err := json.Marshal(grBin)
+	if err != nil {
+		t.Fatalf("marshal grBin: %v", err)
+	}
 
 	want := []string{
 		"-c", "mcp_servers.graith.command=" + string(cmdVal),

@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -42,12 +43,12 @@ func (q WhyQuery) Validate() error {
 
 	switch {
 	case fsQuery && netQuery:
-		return fmt.Errorf("provide either --path or --host, not both")
+		return errors.New("provide either --path or --host, not both")
 	case !fsQuery && !netQuery:
-		return fmt.Errorf("provide --path <p> --op <read|write|readwrite> or --host <h>")
+		return errors.New("provide --path <p> --op <read|write|readwrite> or --host <h>")
 	case fsQuery:
 		if q.Op == "" {
-			return fmt.Errorf("--op is required with --path (read, write, or readwrite)")
+			return errors.New("--op is required with --path (read, write, or readwrite)")
 		}
 
 		if _, ok := validOps[q.Op]; !ok {
@@ -195,7 +196,7 @@ func whyForProfile(command, profilePath string, q WhyQuery, run nonoRunner) (Why
 	}
 
 	if res.Status == "" {
-		return WhyResult{}, fmt.Errorf("nono why returned no decision status")
+		return WhyResult{}, errors.New("nono why returned no decision status")
 	}
 
 	return res, nil

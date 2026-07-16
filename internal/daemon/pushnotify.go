@@ -247,7 +247,7 @@ func (sm *SessionManager) newPushDispatch() func(backend, title, message, priori
 		case "command":
 			cmdStr := strings.TrimSpace(sm.Config().Notifications.Command)
 			if cmdStr == "" {
-				return fmt.Errorf("backend=\"command\" but no command configured")
+				return errors.New("backend=\"command\" but no command configured")
 			}
 
 			return dispatchCommandBackend(cmdStr, title, message, priority)

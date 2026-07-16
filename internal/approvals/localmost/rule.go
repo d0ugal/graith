@@ -1,6 +1,7 @@
 package localmost
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -55,11 +56,11 @@ func compileRule(s string) ([]term, error) {
 
 		if tm.kind == termSub {
 			if i != len(toks)-1 {
-				return nil, fmt.Errorf("@sub must be the last expression in a rule")
+				return nil, errors.New("@sub must be the last expression in a rule")
 			}
 
 			if tm.quant != quantOne {
-				return nil, fmt.Errorf("@sub does not accept a quantifier")
+				return nil, errors.New("@sub does not accept a quantifier")
 			}
 		}
 

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -40,7 +41,7 @@ func ValidateSessionName(name string) error {
 
 func validateSessionName(name string, allowReserved bool) error {
 	if name == "" {
-		return fmt.Errorf("session name must not be empty")
+		return errors.New("session name must not be empty")
 	}
 
 	if len(name) > 128 {

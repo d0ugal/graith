@@ -7,8 +7,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
@@ -22,7 +24,7 @@ import (
 func spkiPinVerifier(pin string) func([][]byte, [][]*x509.Certificate) error {
 	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 		if len(rawCerts) == 0 {
-			return fmt.Errorf("no server certificate presented")
+			return errors.New("no server certificate presented")
 		}
 
 		cert, err := x509.ParseCertificate(rawCerts[0])
@@ -66,7 +68,7 @@ func remoteTLSConfig(rh *RemoteHost) *tls.Config {
 // device. Unlike New/Connect it never touches the local daemon (no
 // EnsureDaemon, no auto-upgrade).
 func ConnectRemote(paths config.Paths, rh *RemoteHost, signer ed25519.PrivateKey, cols, rows uint16) (*Client, error) {
-	raw, err := net.DialTimeout("tcp", net.JoinHostPort(rh.Host, fmt.Sprintf("%d", rh.Port)), 10*time.Second)
+	raw, err := net.DialTimeout("tcp", net.JoinHostPort(rh.Host, strconv.Itoa(rh.Port)), 10*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", rh.Host, err)
 	}
@@ -138,7 +140,7 @@ func ConnectRemote(paths config.Paths, rh *RemoteHost, signer ed25519.PrivateKey
 // runs `gr pair approve`, then returns the minted RemoteHost credentials. No
 // token or proof-of-possession is used — this is the roleNone pairing lane.
 func PairRemote(paths config.Paths, host string, port int, profile, deviceLabel, devicePubKey string) (*RemoteHost, error) {
-	raw, err := net.DialTimeout("tcp", net.JoinHostPort(host, fmt.Sprintf("%d", port)), 10*time.Second)
+	raw, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 10*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", host, err)
 	}
@@ -156,7 +158,7 @@ func PairRemote(paths config.Paths, host string, port int, profile, deviceLabel,
 		SessionTicketsDisabled: true,
 		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 			if len(rawCerts) == 0 {
-				return fmt.Errorf("no server certificate")
+				return errors.New("no server certificate")
 			}
 
 			cert, perr := x509.ParseCertificate(rawCerts[0])
@@ -242,7 +244,7 @@ func PairRemote(paths config.Paths, host string, port int, profile, deviceLabel,
 			// cert we were served — refuse the weaker "accept whatever was
 			// presented" path so pairing always confirms the endpoint.
 			if pr.TLSPinSPKI == "" {
-				return nil, fmt.Errorf("daemon reported no TLS pin; refusing to pair (cannot confirm the endpoint)")
+				return nil, errors.New("daemon reported no TLS pin; refusing to pair (cannot confirm the endpoint)")
 			}
 
 			if pr.TLSPinSPKI != capturedPin {
@@ -285,7 +287,7 @@ func (c *Client) completeRemotePoP(signer ed25519.PrivateKey, spki string) error
 	// handshake already failed closed if the pin were empty, but make the
 	// channel-binding invariant explicit here too (mirrors the Swift client).
 	if spki == "" {
-		return fmt.Errorf("cannot complete proof-of-possession without a pinned TLS channel to bind against")
+		return errors.New("cannot complete proof-of-possession without a pinned TLS channel to bind against")
 	}
 
 	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(signer, protocol.PoPSigningInput(ch.Nonce, spki)))

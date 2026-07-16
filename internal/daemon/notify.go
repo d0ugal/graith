@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -141,9 +142,9 @@ func (sm *SessionManager) resumeForInbox(targetID, senderID, senderName string) 
 		sender = senderID
 	}
 
-	summary := fmt.Sprintf("Resumed by inbox message from %s", sender)
+	summary := "Resumed by inbox message from " + sender
 	if isSystemSender(senderID) {
-		summary = fmt.Sprintf("Resumed by automated notification from %s", sender)
+		summary = "Resumed by automated notification from " + sender
 	}
 
 	sm.log.Info("auto-resuming stopped session on inbox message",
@@ -206,7 +207,7 @@ func (sm *SessionManager) notifyUnreadInbox(sessionID string) {
 func (sm *SessionManager) InterruptSession(sessionID string) error {
 	ptySess, ok := sm.GetPTY(sessionID)
 	if !ok {
-		return fmt.Errorf("session has no live process to interrupt")
+		return errors.New("session has no live process to interrupt")
 	}
 
 	// A session deleted between GetPTY and here yields a zero-value state whose
@@ -246,9 +247,9 @@ func (sm *SessionManager) sendNotification(sessionName, status, command string) 
 
 	switch status {
 	case "approval":
-		message = fmt.Sprintf("%s needs approval", sessionName)
+		message = sessionName + " needs approval"
 	case "stopped":
-		message = fmt.Sprintf("%s has stopped", sessionName)
+		message = sessionName + " has stopped"
 	default:
 		message = fmt.Sprintf("%s: %s", sessionName, status)
 	}

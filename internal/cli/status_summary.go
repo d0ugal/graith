@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -103,14 +104,14 @@ func resolveStatusArgs(c *client.Client, args []string) (sessionID, text string,
 		}
 
 		if envID == "" {
-			return "", "", fmt.Errorf("session name required when not running inside a graith session")
+			return "", "", errors.New("session name required when not running inside a graith session")
 		}
 
 		return envID, "", nil
 	}
 
 	if len(args) == 0 {
-		return "", "", fmt.Errorf("message required")
+		return "", "", errors.New("message required")
 	}
 
 	if envID != "" {
@@ -118,7 +119,7 @@ func resolveStatusArgs(c *client.Client, args []string) (sessionID, text string,
 	}
 
 	if len(args) < 2 {
-		return "", "", fmt.Errorf("session name and message required when not running inside a graith session")
+		return "", "", errors.New("session name and message required when not running inside a graith session")
 	}
 
 	id, err := resolveSession(c, args[0])
@@ -136,7 +137,7 @@ func parseTTL(s string) (time.Duration, error) {
 	}
 
 	if d <= 0 {
-		return 0, fmt.Errorf("TTL must be positive")
+		return 0, errors.New("TTL must be positive")
 	}
 
 	return d, nil

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/d0ugal/graith/internal/client"
@@ -39,7 +40,7 @@ carried over.`,
 		}
 
 		if forkModel != "" && forkAgent == "" {
-			return fmt.Errorf("--model requires --agent (it only applies to a cross-agent fork)")
+			return errors.New("--model requires --agent (it only applies to a cross-agent fork)")
 		}
 
 		c, err := client.Connect(cfg, paths, cfgFile)

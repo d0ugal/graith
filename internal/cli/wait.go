@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -23,7 +24,7 @@ var (
 
 // errWaitTimeout is returned when a wait condition is not met before the
 // timeout. It yields a non-zero exit code, distinct from a match (exit 0).
-var errWaitTimeout = fmt.Errorf("timed out waiting for condition")
+var errWaitTimeout = errors.New("timed out waiting for condition")
 
 var waitCmd = &cobra.Command{
 	Use:   "wait <name-or-id>",
@@ -110,13 +111,13 @@ func resolveWaitMode() (mode, pattern string, err error) {
 
 	switch {
 	case n == 0:
-		return "", "", fmt.Errorf("one of --contains, --status, or --idle is required")
+		return "", "", errors.New("one of --contains, --status, or --idle is required")
 	case n > 1:
-		return "", "", fmt.Errorf("--contains, --status, and --idle are mutually exclusive")
+		return "", "", errors.New("--contains, --status, and --idle are mutually exclusive")
 	}
 
 	if waitTimeout < 0 {
-		return "", "", fmt.Errorf("--timeout must not be negative")
+		return "", "", errors.New("--timeout must not be negative")
 	}
 
 	switch mode {
@@ -155,7 +156,7 @@ func readWaitResult(c *client.Client) error {
 		frame, err := c.ReadFrame()
 		if err != nil {
 			if err == io.EOF {
-				return fmt.Errorf("connection closed before condition was met")
+				return errors.New("connection closed before condition was met")
 			}
 
 			return err

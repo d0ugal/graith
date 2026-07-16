@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -84,7 +85,7 @@ func stopChildrenRun(c *client.Client, args []string) error {
 	} else {
 		sessionID = os.Getenv("GRAITH_SESSION_ID")
 		if sessionID == "" {
-			return fmt.Errorf("--children with no session arg requires GRAITH_SESSION_ID to be set")
+			return errors.New("--children with no session arg requires GRAITH_SESSION_ID to be set")
 		}
 
 		excludeRoot = true

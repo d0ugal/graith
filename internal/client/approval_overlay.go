@@ -253,27 +253,27 @@ func formatToolSummary(toolName, toolInput string) string {
 				short = short[:47] + "..."
 			}
 
-			return fmt.Sprintf("Bash: %s", short)
+			return "Bash: " + short
 		}
 	case "Write":
 		if fp, ok := parsed["file_path"].(string); ok {
-			return fmt.Sprintf("Write: %s", shortPath(fp))
+			return "Write: " + shortPath(fp)
 		}
 	case "Edit":
 		if fp, ok := parsed["file_path"].(string); ok {
-			return fmt.Sprintf("Edit: %s", shortPath(fp))
+			return "Edit: " + shortPath(fp)
 		}
 	case "Read":
 		if fp, ok := parsed["file_path"].(string); ok {
-			return fmt.Sprintf("Read: %s", shortPath(fp))
+			return "Read: " + shortPath(fp)
 		}
 	case "Skill":
 		if skill, ok := parsed["skill"].(string); ok {
-			return fmt.Sprintf("Skill: %s", skill)
+			return "Skill: " + skill
 		}
 	case "Agent":
 		if desc, ok := parsed["description"].(string); ok {
-			return fmt.Sprintf("Agent: %s", desc)
+			return "Agent: " + desc
 		}
 	}
 

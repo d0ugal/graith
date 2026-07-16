@@ -3,7 +3,9 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -188,17 +190,17 @@ func reconcileTracker(
 func (sm *SessionManager) actionTracker(ctx context.Context, t *config.TriggerConfig, fc fireContext) (string, error) {
 	tc := t.Action.Tracker
 	if tc == nil {
-		return "", fmt.Errorf("tracker action missing [action.tracker]")
+		return "", errors.New("tracker action missing [action.tracker]")
 	}
 
 	orchestratorID := sm.orchestratorID()
 	if orchestratorID == "" {
-		return "", fmt.Errorf("no orchestrator session; cannot own spawned sessions")
+		return "", errors.New("no orchestrator session; cannot own spawned sessions")
 	}
 
 	repo := tc.RepoPath()
 	if repo == "" {
-		return "", fmt.Errorf("tracker action requires action.tracker.repo")
+		return "", errors.New("tracker action requires action.tracker.repo")
 	}
 
 	active, truncated, err := sm.fetchTrackerIssues(ctx, tc, repo)
@@ -456,7 +458,7 @@ func trackerIssueVars(triggerName string, iss issueRef) config.TriggerVars {
 		Date:        now.Format("2006-01-02"),
 		Datetime:    now.Format(time.RFC3339),
 		FireTime:    now.Format(time.RFC3339),
-		IssueNumber: fmt.Sprintf("%d", iss.number),
+		IssueNumber: strconv.Itoa(iss.number),
 		IssueTitle:  iss.title,
 		IssueBody:   iss.body,
 		IssueURL:    iss.url,
@@ -514,7 +516,7 @@ func (sm *SessionManager) fetchTrackerIssues(ctx context.Context, tc *config.Tra
 // the raw result hit the fetch limit (so the caller skips reaps that pass).
 func (sm *SessionManager) fetchGitHubIssues(ctx context.Context, tc *config.TrackerConfig, repo string) (issues []issueRef, truncated bool, err error) {
 	if !ghAvailable() {
-		return nil, false, fmt.Errorf("gh CLI not found on PATH")
+		return nil, false, errors.New("gh CLI not found on PATH")
 	}
 
 	slug, ok := repoSlug(repo)
@@ -531,7 +533,7 @@ func (sm *SessionManager) fetchGitHubIssues(ctx context.Context, tc *config.Trac
 		"--repo", slug,
 		"--state", tc.ActiveStateOr(),
 		"--json", "number,title,body,url,labels",
-		"--limit", fmt.Sprintf("%d", limit),
+		"--limit", strconv.Itoa(limit),
 	}
 
 	// gh's --label is AND (issue must have every label); the config's active_labels

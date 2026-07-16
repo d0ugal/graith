@@ -1,6 +1,7 @@
 package localmost
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -55,7 +56,7 @@ func (e *Engine) compileRules(rs []Rule) ([]compiledRule, error) {
 
 	for _, r := range rs {
 		if strings.TrimSpace(r.Rule) == "" {
-			return nil, fmt.Errorf("empty rule")
+			return nil, errors.New("empty rule")
 		}
 
 		terms, err := compileRule(r.Rule)

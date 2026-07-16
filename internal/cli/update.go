@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/d0ugal/graith/internal/client"
@@ -21,7 +22,7 @@ var updateCmd = &cobra.Command{
 		parentSet := cmd.Flags().Changed("parent")
 
 		if !nameSet && !parentSet {
-			return fmt.Errorf("at least one of --name or --parent must be specified")
+			return errors.New("at least one of --name or --parent must be specified")
 		}
 
 		c, err := client.Connect(cfg, paths, cfgFile)

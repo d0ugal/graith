@@ -13,6 +13,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -101,7 +102,7 @@ func parse(data []byte) (*Manifest, error) {
 	// source of truth, so "valid object plus garbage" must fail, not silently
 	// parse the leading object.
 	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
-		return nil, fmt.Errorf("decode capability manifest: unexpected trailing data after JSON value")
+		return nil, errors.New("decode capability manifest: unexpected trailing data after JSON value")
 	}
 
 	if err := m.Validate(); err != nil {
@@ -132,15 +133,15 @@ func (m *Manifest) Validate() error {
 	}
 
 	if len(m.Surfaces) == 0 {
-		return fmt.Errorf("manifest has no surfaces")
+		return errors.New("manifest has no surfaces")
 	}
 
 	if len(m.States) == 0 {
-		return fmt.Errorf("manifest has no states")
+		return errors.New("manifest has no states")
 	}
 
 	if len(m.Capabilities) == 0 {
-		return fmt.Errorf("manifest has no capabilities")
+		return errors.New("manifest has no capabilities")
 	}
 
 	validStates := map[string]bool{}
@@ -148,7 +149,7 @@ func (m *Manifest) Validate() error {
 
 	for _, s := range m.States {
 		if s.ID == "" {
-			return fmt.Errorf("state has empty id")
+			return errors.New("state has empty id")
 		}
 
 		if s.Symbol == "" {
@@ -183,7 +184,7 @@ func (m *Manifest) Validate() error {
 
 	for _, s := range m.Surfaces {
 		if s.ID == "" {
-			return fmt.Errorf("surface has empty id")
+			return errors.New("surface has empty id")
 		}
 
 		if s.Name == "" {
@@ -218,7 +219,7 @@ func (m *Manifest) Validate() error {
 
 	for _, c := range m.Capabilities {
 		if c.ID == "" {
-			return fmt.Errorf("capability has empty id")
+			return errors.New("capability has empty id")
 		}
 
 		if seenCap[c.ID] {
@@ -398,7 +399,7 @@ func markerBounds(doc string) (begin, end int, err error) {
 	}
 
 	if end < begin {
-		return 0, 0, fmt.Errorf("end marker appears before begin marker")
+		return 0, 0, errors.New("end marker appears before begin marker")
 	}
 
 	return begin, end, nil

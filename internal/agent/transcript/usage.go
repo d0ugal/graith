@@ -36,7 +36,7 @@ type Usage struct {
 // Total is the grand total across the exclusive categories, saturating at
 // MaxInt64 rather than wrapping to a negative (which the CLI would then render
 // as a confident "0").
-func (u Usage) Total() int64 {
+func (u *Usage) Total() int64 {
 	return addSat(u.Input, u.Output, u.CacheCreation, u.CacheRead, u.Unclassified)
 }
 

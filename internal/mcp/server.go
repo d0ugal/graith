@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -346,7 +347,7 @@ func (s *Server) publishMessage(_ context.Context, _ *gomcp.CallToolRequest, inp
 
 func (s *Server) readMessages(ctx context.Context, _ *gomcp.CallToolRequest, input ReadMessagesInput) (*gomcp.CallToolResult, ReadMessagesOutput, error) {
 	if strings.HasPrefix(input.Topic, "inbox:") {
-		return nil, ReadMessagesOutput{}, fmt.Errorf("cannot read inbox streams via read_messages — use the read_inbox tool instead")
+		return nil, ReadMessagesOutput{}, errors.New("cannot read inbox streams via read_messages — use the read_inbox tool instead")
 	}
 
 	c, err := s.connect()
@@ -416,7 +417,7 @@ func (s *Server) readMessages(ctx context.Context, _ *gomcp.CallToolRequest, inp
 
 func (s *Server) subscribe(ctx context.Context, _ *gomcp.CallToolRequest, input SubscribeInput) (*gomcp.CallToolResult, SubscribeOutput, error) {
 	if strings.HasPrefix(input.Topic, "inbox:") {
-		return nil, SubscribeOutput{}, fmt.Errorf("cannot subscribe to inbox streams — use the read_inbox tool instead")
+		return nil, SubscribeOutput{}, errors.New("cannot subscribe to inbox streams — use the read_inbox tool instead")
 	}
 
 	c, err := s.connect()

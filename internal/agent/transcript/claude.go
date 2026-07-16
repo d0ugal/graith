@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,7 +32,7 @@ func claudeConfigDir() (string, error) {
 // owns it, so we glob for it across all project directories instead.
 func locateClaude(agentSessionID string) (string, error) {
 	if agentSessionID == "" {
-		return "", fmt.Errorf("claude transcript lookup requires an agent session id")
+		return "", errors.New("claude transcript lookup requires an agent session id")
 	}
 
 	root, err := claudeConfigDir()

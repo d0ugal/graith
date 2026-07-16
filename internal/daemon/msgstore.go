@@ -541,29 +541,41 @@ func (s *MsgStore) Cleanup(maxAge time.Duration, maxPerStream int) (int64, error
 	}
 
 	if maxPerStream > 0 {
-		rows, err := s.db.Query("SELECT stream, COUNT(*) as cnt FROM messages GROUP BY stream HAVING cnt > ?", maxPerStream)
-		if err != nil {
-			return total, fmt.Errorf("cleanup by count: list streams: %w", err)
-		}
-
 		type streamCount struct {
 			name  string
 			count int64
 		}
 
-		var streams []streamCount
+		// Collect the over-quota streams in a closure so the rows handle is
+		// closed (via defer) before the DELETE queries below reuse the
+		// connection.
+		streams, err := func() ([]streamCount, error) {
+			rows, err := s.db.Query("SELECT stream, COUNT(*) as cnt FROM messages GROUP BY stream HAVING cnt > ?", maxPerStream)
+			if err != nil {
+				return nil, fmt.Errorf("cleanup by count: list streams: %w", err)
+			}
+			defer func() { _ = rows.Close() }()
 
-		for rows.Next() {
-			var sc streamCount
-			if err := rows.Scan(&sc.name, &sc.count); err != nil {
-				_ = rows.Close()
-				return total, fmt.Errorf("cleanup by count: scan: %w", err)
+			var out []streamCount
+
+			for rows.Next() {
+				var sc streamCount
+				if err := rows.Scan(&sc.name, &sc.count); err != nil {
+					return nil, fmt.Errorf("cleanup by count: scan: %w", err)
+				}
+
+				out = append(out, sc)
 			}
 
-			streams = append(streams, sc)
-		}
+			if err := rows.Err(); err != nil {
+				return nil, fmt.Errorf("cleanup by count: iterate streams: %w", err)
+			}
 
-		_ = rows.Close()
+			return out, nil
+		}()
+		if err != nil {
+			return total, err
+		}
 
 		for _, sc := range streams {
 			res, err := s.db.Exec(

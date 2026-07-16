@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -186,7 +187,7 @@ func mcpProxySession(serverName, sessionID string, stdinCh <-chan stdinChunk) er
 			}
 		case err := <-daemonDone:
 			if err == io.EOF {
-				return fmt.Errorf("daemon connection closed")
+				return errors.New("daemon connection closed")
 			}
 
 			return err
@@ -203,7 +204,12 @@ func writeJSONRPCError(w io.Writer, id any, code int, message string) {
 			"message": message,
 		},
 	}
-	data, _ := json.Marshal(resp)
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return
+	}
+
 	_, _ = w.Write(data)
 	_, _ = w.Write([]byte("\n"))
 }

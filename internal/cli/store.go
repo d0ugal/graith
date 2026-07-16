@@ -36,7 +36,7 @@ func resolveStoreRepoPath() (string, error) {
 
 	gitOut, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
 	if err != nil {
-		return "", fmt.Errorf("could not detect repo path: use --repo, --shared, or run from inside a git repository")
+		return "", errors.New("could not detect repo path: use --repo, --shared, or run from inside a git repository")
 	}
 
 	return config.ResolvePath(strings.TrimSpace(string(gitOut))), nil
@@ -53,7 +53,7 @@ func inGraithSessionWithNoRepo() bool {
 // resolveStorePath returns the store path and a display label ("shared" or the repo path).
 func resolveStorePath() (storePath string, label string, err error) {
 	if storeSharedFlag && storeRepoFlag != "" {
-		return "", "", fmt.Errorf("--shared and --repo are mutually exclusive")
+		return "", "", errors.New("--shared and --repo are mutually exclusive")
 	}
 
 	if storeSharedFlag || (storeRepoFlag == "" && inGraithSessionWithNoRepo()) {
@@ -171,7 +171,7 @@ var storePutCmd = &cobra.Command{
 			return err
 		}
 
-		return storeWrite(key, body, store.Put, fmt.Sprintf("Stored %s", key))
+		return storeWrite(key, body, store.Put, "Stored "+key)
 	},
 }
 
@@ -344,7 +344,7 @@ var storeAppendCmd = &cobra.Command{
 			return err
 		}
 
-		return storeWrite(key, line, store.Append, fmt.Sprintf("Appended to %s", key))
+		return storeWrite(key, line, store.Append, "Appended to "+key)
 	},
 }
 

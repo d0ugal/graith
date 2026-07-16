@@ -5,6 +5,7 @@ package scenariofile
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -63,11 +64,11 @@ func Parse(data []byte) (*File, error) {
 	}
 
 	if sf.Scenario.Name == "" {
-		return nil, fmt.Errorf("scenario.name is required")
+		return nil, errors.New("scenario.name is required")
 	}
 
 	if len(sf.Sessions) == 0 {
-		return nil, fmt.Errorf("at least one [[sessions]] entry is required")
+		return nil, errors.New("at least one [[sessions]] entry is required")
 	}
 
 	if err := ValidateScenarioTriggers(sf.Triggers, sf.DefinedRoles(), sf.DefinedMembers()); err != nil {
@@ -217,7 +218,7 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 	inputs := make([]protocol.ScenarioSessionInput, 0, len(sf.Sessions))
 	for _, s := range sf.Sessions {
 		if s.Name == "" {
-			return nil, fmt.Errorf("every [[sessions]] entry needs a name")
+			return nil, errors.New("every [[sessions]] entry needs a name")
 		}
 
 		if s.Repo == "" && !s.Shared {

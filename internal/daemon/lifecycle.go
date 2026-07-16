@@ -99,7 +99,7 @@ func formatSignalSummary(sig string) string {
 	case "abort trap", "aborted":
 		return "Killed by SIGABRT"
 	default:
-		return fmt.Sprintf("Killed by %s", sig)
+		return "Killed by " + sig
 	}
 }
 

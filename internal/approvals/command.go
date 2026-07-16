@@ -3,6 +3,7 @@ package approvals
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -55,7 +56,7 @@ type commandResponse struct {
 func (commandBackend) Decide(ctx context.Context, req Request, cfg Config) (Decision, error) {
 	command := strings.TrimSpace(cfg.Command)
 	if command == "" {
-		return Decision{Decision: DecisionDefer}, fmt.Errorf("no approvals command configured")
+		return Decision{Decision: DecisionDefer}, errors.New("no approvals command configured")
 	}
 
 	input := commandRequest{

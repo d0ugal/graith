@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -58,7 +59,7 @@ func resolveScenarioSourceFrom(source, dir string) ([]byte, error) {
 	}
 
 	if strings.HasPrefix(source, "store:") {
-		return nil, fmt.Errorf("store: prefix not yet implemented — use a file path or stdin (-)")
+		return nil, errors.New("store: prefix not yet implemented — use a file path or stdin (-)")
 	}
 
 	// Try as literal path first.
@@ -95,11 +96,11 @@ func parseScenarioFile(data []byte) (*scenarioFile, error) {
 	}
 
 	if sf.Scenario.Name == "" {
-		return nil, fmt.Errorf("scenario.name is required")
+		return nil, errors.New("scenario.name is required")
 	}
 
 	if len(sf.Sessions) == 0 {
-		return nil, fmt.Errorf("at least one [[sessions]] entry is required")
+		return nil, errors.New("at least one [[sessions]] entry is required")
 	}
 
 	roles := make(map[string]bool, len(sf.Sessions))
@@ -244,7 +245,7 @@ The source can be:
 
 		callerID := os.Getenv("GRAITH_SESSION_ID")
 		if callerID == "" {
-			return fmt.Errorf("GRAITH_SESSION_ID is not set — scenarios must be started from within a graith session")
+			return errors.New("GRAITH_SESSION_ID is not set — scenarios must be started from within a graith session")
 		}
 
 		c, err := client.Connect(cfg, paths, cfgFile)
@@ -344,7 +345,7 @@ func runScenarioLifecycle(controlType string, payload any, resultKey string) (na
 // no-op and yields a nil slice with no error.
 func decodeLifecycleResult(payload json.RawMessage, resultKey string) ([]string, error) {
 	if len(payload) == 0 || string(payload) == "null" {
-		return nil, fmt.Errorf("empty response payload")
+		return nil, errors.New("empty response payload")
 	}
 
 	fields := map[string]json.RawMessage{}
@@ -524,11 +525,11 @@ var scenarioAddCmd = &cobra.Command{
 		base, _ := cmd.Flags().GetString("base")
 
 		if name == "" {
-			return fmt.Errorf("--name is required")
+			return errors.New("--name is required")
 		}
 
 		if repo == "" {
-			return fmt.Errorf("--repo is required")
+			return errors.New("--repo is required")
 		}
 
 		repo = config.ExpandPath(repo)

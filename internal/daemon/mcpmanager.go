@@ -513,7 +513,7 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 		// sessions (resolveSandboxFromConfig). Without this, an enabled sandbox
 		// with no backend selected would silently fall back to safehouse at the
 		// dispatch layer instead of failing closed like sessions do (see #787).
-		avail, err := validateSandboxBackend(merged, fmt.Sprintf("MCP server %s", serverCfg.Name))
+		avail, err := validateSandboxBackend(merged, "MCP server "+serverCfg.Name)
 		if err != nil {
 			_ = stderrFile.Close()
 			return nil, err

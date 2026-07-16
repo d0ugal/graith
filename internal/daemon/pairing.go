@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -154,7 +155,7 @@ func (sm *SessionManager) expirePendingLocked(now time.Time) {
 // timeout / disconnect handling) and must unregisterPairWaiter when done.
 func (sm *SessionManager) AddPendingPairing(label, pubKey string, id TailnetIdentity, now time.Time) (string, chan pairApproval, error) {
 	if !validEd25519PubKey(pubKey) {
-		return "", nil, fmt.Errorf("invalid device public key")
+		return "", nil, errors.New("invalid device public key")
 	}
 
 	sm.mu.Lock()
@@ -180,7 +181,7 @@ func (sm *SessionManager) AddPendingPairing(label, pubKey string, id TailnetIden
 	}
 
 	if len(sm.pendingPairings) >= maxPendingPairings {
-		return "", nil, fmt.Errorf("too many pending pairing requests")
+		return "", nil, errors.New("too many pending pairing requests")
 	}
 
 	rid, err := randomHex(8)

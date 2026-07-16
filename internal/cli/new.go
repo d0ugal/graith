@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,23 +61,23 @@ var newCmd = &cobra.Command{
 		}
 
 		if newAllowConcurrent && !newInPlace {
-			return fmt.Errorf("--allow-concurrent requires --in-place")
+			return errors.New("--allow-concurrent requires --in-place")
 		}
 
 		if newInPlace && newNoRepo {
-			return fmt.Errorf("--in-place and --no-repo are mutually exclusive")
+			return errors.New("--in-place and --no-repo are mutually exclusive")
 		}
 
 		if newInPlace && newMirror != "" {
-			return fmt.Errorf("--in-place and --mirror are mutually exclusive")
+			return errors.New("--in-place and --mirror are mutually exclusive")
 		}
 
 		if newInPlace && newBase != "" {
-			return fmt.Errorf("--in-place and --base are mutually exclusive (in-place sessions don't create branches)")
+			return errors.New("--in-place and --base are mutually exclusive (in-place sessions don't create branches)")
 		}
 
 		if newPrompt != "" && newPromptFile != "" {
-			return fmt.Errorf("--prompt and --prompt-file are mutually exclusive")
+			return errors.New("--prompt and --prompt-file are mutually exclusive")
 		}
 
 		prompt := newPrompt

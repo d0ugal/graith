@@ -66,16 +66,13 @@ type claudeHookSpecificOutput struct {
 func Approval(agent, decision, reason string) string {
 	switch agent {
 	case "claude":
-		resp := claudeApprovalResponse{
+		return marshalString(claudeApprovalResponse{
 			HookSpecificOutput: claudeHookSpecificOutput{
 				HookEventName:            "PreToolUse",
 				PermissionDecision:       claudeDecision(decision),
 				PermissionDecisionReason: reason,
 			},
-		}
-		out, _ := json.Marshal(resp)
-
-		return string(out)
+		})
 	case "codex":
 		resp := codexApprovalResponse{
 			HookSpecificOutput: codexPermissionHookSpecificOutput{
@@ -89,23 +86,28 @@ func Approval(agent, decision, reason string) string {
 			}
 		}
 
-		out, _ := json.Marshal(resp)
-
-		return string(out)
+		return marshalString(resp)
 	case "cursor":
-		resp := cursorApprovalResponse{
+		return marshalString(cursorApprovalResponse{
 			Permission: cursorDecision(decision),
 			Reason:     reason,
-		}
-		out, _ := json.Marshal(resp)
-
-		return string(out)
+		})
 	default:
-		resp := approvalResponse{Decision: decision, Reason: reason}
-		out, _ := json.Marshal(resp)
-
-		return string(out)
+		return marshalString(approvalResponse{Decision: decision, Reason: reason})
 	}
+}
+
+// marshalString marshals v to a JSON string. The values passed here are fixed
+// hook-response structs and string maps that cannot fail to marshal, so a
+// (theoretically impossible) error yields an empty string rather than being
+// silently discarded.
+func marshalString(v any) string {
+	out, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+
+	return string(out)
 }
 
 // AllowAll returns a fail-open approval response for the given agent.
@@ -143,13 +145,9 @@ func InboxContext(agent, event, context string) string {
 		resp.HookSpecificOutput.HookEventName = event
 		resp.HookSpecificOutput.AdditionalContext = context
 
-		out, _ := json.Marshal(resp)
-
-		return string(out)
+		return marshalString(resp)
 	default:
-		out, _ := json.Marshal(map[string]string{"systemMessage": context})
-
-		return string(out)
+		return marshalString(map[string]string{"systemMessage": context})
 	}
 }
 

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/d0ugal/graith/internal/client"
@@ -26,7 +27,7 @@ var migrateCmd = &cobra.Command{
 	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if migrateAgent == "" {
-			return fmt.Errorf("--agent is required")
+			return errors.New("--agent is required")
 		}
 
 		c, err := client.Connect(cfg, paths, cfgFile)

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,7 +61,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	}
 
 	if targetAgent == "" {
-		return SessionState{}, fmt.Errorf("migrate requires a target agent")
+		return SessionState{}, errors.New("migrate requires a target agent")
 	}
 
 	if targetAgent == srcAgent {
@@ -252,7 +253,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 			// Both agents failed: leave the session Stopped with the original
 			// fields, retaining MigratedFrom + the rendered context for recovery.
 			return SessionState{}, fmt.Errorf(
-				"migrate to %q failed (%v) and restoring %q also failed (%v); session left stopped, rendered context at %s",
+				"migrate to %q failed (%w) and restoring %q also failed (%w); session left stopped, rendered context at %s",
 				targetAgent, startErr, srcAgent, rerr, contextPath)
 		}
 		// Original restored: drop the migration record and its context file.

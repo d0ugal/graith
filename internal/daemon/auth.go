@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -102,7 +103,7 @@ func resolveAuth(sm *SessionManager, token string, origin ConnOrigin, poppedDevi
 				return authContext{role: roleLocalHuman, origin: origin}, nil
 			}
 
-			return authContext{role: roleNone, origin: origin}, fmt.Errorf("invalid token")
+			return authContext{role: roleNone, origin: origin}, errors.New("invalid token")
 		}
 
 		// No human credential provisioned. This is only reachable for a
@@ -114,7 +115,7 @@ func resolveAuth(sm *SessionManager, token string, origin ConnOrigin, poppedDevi
 			return authContext{role: roleLocalHuman, origin: origin}, nil
 		}
 
-		return authContext{role: roleNone, origin: origin}, fmt.Errorf("invalid token")
+		return authContext{role: roleNone, origin: origin}, errors.New("invalid token")
 	}
 
 	// Remote connection: require proof-of-possession AND a client token that
@@ -184,7 +185,7 @@ func (ac authContext) checkTarget(sm *SessionManager, targetID string, rule auth
 
 	case authHumanOnly:
 		if ac.authenticated {
-			return fmt.Errorf("operation not permitted for agent sessions")
+			return errors.New("operation not permitted for agent sessions")
 		}
 
 		return nil
@@ -199,7 +200,7 @@ func (ac authContext) checkTarget(sm *SessionManager, targetID string, rule auth
 		}
 
 		if targetID != ac.sessionID {
-			return fmt.Errorf("not authorized: can only target own session")
+			return errors.New("not authorized: can only target own session")
 		}
 
 		return nil
@@ -221,10 +222,10 @@ func (ac authContext) checkTarget(sm *SessionManager, targetID string, rule auth
 			return nil
 		}
 
-		return fmt.Errorf("not authorized: target session is not self or descendant")
+		return errors.New("not authorized: target session is not self or descendant")
 	}
 
-	return fmt.Errorf("unknown auth rule")
+	return errors.New("unknown auth rule")
 }
 
 func parseInboxStream(stream string) (string, bool) {
@@ -247,7 +248,7 @@ func (ac authContext) checkScenarioOp(sm *SessionManager, scenarioName string) e
 	}
 
 	if ac.role != roleSession && ac.role != roleOrchestrator {
-		return fmt.Errorf("not authorized to manage scenarios")
+		return errors.New("not authorized to manage scenarios")
 	}
 
 	for _, sc := range sm.state.Scenarios {
@@ -277,19 +278,19 @@ func (ac authContext) checkTriggerOp(sm *SessionManager) error {
 	}
 
 	if ac.role != roleSession && ac.role != roleOrchestrator {
-		return fmt.Errorf("not authorized to manage triggers")
+		return errors.New("not authorized to manage triggers")
 	}
 
 	orchID := sm.findOrchestratorID()
 	if orchID == "" {
-		return fmt.Errorf("not authorized: no orchestrator session to authorize against")
+		return errors.New("not authorized: no orchestrator session to authorize against")
 	}
 
 	if ac.sessionID == orchID || sm.isDescendantOf(ac.sessionID, orchID) {
 		return nil
 	}
 
-	return fmt.Errorf("not authorized: only the orchestrator or its descendants can manage triggers")
+	return errors.New("not authorized: only the orchestrator or its descendants can manage triggers")
 }
 
 // checkNotifyOp authorizes a proactive push notification (`gr notify`). To stop
@@ -308,7 +309,7 @@ func (ac authContext) checkNotifyOp(sm *SessionManager) error {
 		return nil
 	}
 
-	return fmt.Errorf("not authorized: only the orchestrator or the human may send notifications")
+	return errors.New("not authorized: only the orchestrator or the human may send notifications")
 }
 
 // checkJailRelease authorizes releasing a jailed PR comment (issue #1082).
@@ -327,7 +328,7 @@ func (ac authContext) checkJailRelease(sm *SessionManager) error {
 		return nil
 	}
 
-	return fmt.Errorf("not authorized: only the orchestrator or the human may release jailed comments")
+	return errors.New("not authorized: only the orchestrator or the human may release jailed comments")
 }
 
 // isDescendantOf checks whether targetID is a transitive descendant of rootID.

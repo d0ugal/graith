@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -167,7 +168,7 @@ func StopDaemon(pidFile string) error {
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("daemon not running (no pid file)")
+			return errors.New("daemon not running (no pid file)")
 		}
 
 		return err

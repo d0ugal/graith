@@ -22,6 +22,21 @@ linters:
     - ineffassign
     - unused
     - wsl_v5
+    # Bug-finding linters (see .golangci.yml history / PR enabling these).
+    - sqlclosecheck  # SQL rows/stmts must be closed
+    - rowserrcheck  # rows.Err() must be checked after iteration
+    - errorlint  # %w wrapping + errors.As; comparison check off (see settings)
+    - errchkjson  # unchecked json.Marshal on unsafe types
+    - recvcheck  # consistent pointer/value receivers
+    - unconvert  # no unnecessary type conversions
+    - wastedassign  # no wasted assignments
+    # Zero-finding regression guards.
+    - durationcheck  # catch time.Duration multiplication mistakes
+    - nilnesserr  # nil error returned alongside non-nil err check
+    - makezero  # slice make with non-zero len then append
+    - fatcontext  # context stored in a loop / struct
+    - perfsprint  # prefer faster alternatives to fmt.Sprintf
+    - spancheck  # OTel/opencensus spans must be ended
 
   disable:
     # Failing under the shared config on this repo; temporarily disabled so the
@@ -44,7 +59,6 @@ linters:
     - nlreturn  # Not critical
     - noinlineerr  # Allow inline errors
     - paralleltest  # Not critical
-    - perfsprint  # Not critical
     - revive  # Too many false positives
     - tagliatelle  # YAML tags fine
     - testpackage  # Allow test packages
@@ -59,6 +73,17 @@ linters:
       # Flag token sequences duplicated across ≥100 tokens. Test files use
       # intentional setup boilerplate, so they are excluded below.
       threshold: 100
+    errorlint:
+      # The framed protocol reader (internal/protocol) returns a *bare* io.EOF at
+      # a clean frame boundary but a *wrapped* EOF on a truncated read, and the
+      # read loops deliberately compare `err == io.EOF` to tell a clean close
+      # apart from a truncated frame (see internal/cli/check_inbox.go and its
+      # regression test). errorlint's comparison check flags that intentional
+      # bare-EOF idiom, so it's disabled. The high-value checks stay on: errorf
+      # (%w wrapping) and asserts (errors.As over a type assertion).
+      comparison: false
+      errorf: true
+      asserts: true
     gosec:
       # Allow some security warnings
       excludes:

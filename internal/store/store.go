@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -89,47 +90,47 @@ func git(dir string, args ...string) error {
 //   - not be "store.lock"
 func ValidateKey(key string) error {
 	if key == "" {
-		return fmt.Errorf("store key must not be empty")
+		return errors.New("store key must not be empty")
 	}
 
 	if key[0] == '/' {
-		return fmt.Errorf("store key must not start with '/'")
+		return errors.New("store key must not start with '/'")
 	}
 
 	if key[0] == '-' {
-		return fmt.Errorf("store key must not start with '-'")
+		return errors.New("store key must not start with '-'")
 	}
 
 	for _, c := range key {
 		if c < 0x20 || c == 0x7f {
-			return fmt.Errorf("store key must not contain control characters")
+			return errors.New("store key must not contain control characters")
 		}
 	}
 
 	if strings.ContainsAny(key, "*?[:") {
-		return fmt.Errorf("store key must not contain glob/pathspec characters")
+		return errors.New("store key must not contain glob/pathspec characters")
 	}
 
 	if strings.Contains(key, "\\") {
-		return fmt.Errorf("store key must not contain backslashes")
+		return errors.New("store key must not contain backslashes")
 	}
 
 	for _, component := range strings.Split(key, "/") {
 		if component == ".." {
-			return fmt.Errorf("store key must not contain '..' path components")
+			return errors.New("store key must not contain '..' path components")
 		}
 
 		if strings.EqualFold(component, ".git") {
-			return fmt.Errorf("store key must not contain '.git' path components")
+			return errors.New("store key must not contain '.git' path components")
 		}
 
 		if component == "." {
-			return fmt.Errorf("store key must not contain '.' path components")
+			return errors.New("store key must not contain '.' path components")
 		}
 	}
 
 	if strings.EqualFold(key, "store.lock") {
-		return fmt.Errorf("store key must not be 'store.lock'")
+		return errors.New("store key must not be 'store.lock'")
 	}
 
 	return nil

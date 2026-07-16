@@ -323,7 +323,7 @@ func TestHandshakeCompatibleMinorVersion(t *testing.T) {
 func TestHandshakeInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "handshake", Payload: json.RawMessage(`{"bad":`)})
+	raw := []byte(`{"type":"handshake","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	h.expectType(t, "error")
@@ -408,7 +408,7 @@ func TestDeleteSessionNotFound(t *testing.T) {
 func TestDeleteInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "delete", Payload: json.RawMessage(`{bad`)})
+	raw := []byte(`{"type":"delete","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	h.expectType(t, "error")
@@ -434,7 +434,7 @@ func TestStopSessionNotFound(t *testing.T) {
 func TestStopInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "stop", Payload: json.RawMessage(`{bad`)})
+	raw := []byte(`{"type":"stop","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	h.expectType(t, "error")
@@ -474,7 +474,7 @@ func TestRenameSessionNotFound(t *testing.T) {
 func TestRenameInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "rename", Payload: json.RawMessage(`{bad`)})
+	raw := []byte(`{"type":"rename","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	h.expectType(t, "error")
@@ -483,7 +483,7 @@ func TestRenameInvalidPayload(t *testing.T) {
 func TestResumeInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "resume", Payload: json.RawMessage(`{bad`)})
+	raw := []byte(`{"type":"resume","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	h.expectType(t, "error")
@@ -500,7 +500,7 @@ func TestResumeSessionNotFound(t *testing.T) {
 func TestCreateInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "create", Payload: json.RawMessage(`{bad`)})
+	raw := []byte(`{"type":"create","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	h.expectType(t, "error")
@@ -574,7 +574,7 @@ func TestAttachNotFound(t *testing.T) {
 func TestAttachInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "attach", Payload: json.RawMessage(`{bad`)})
+	raw := []byte(`{"type":"attach","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	h.expectType(t, "error")
@@ -728,7 +728,7 @@ func TestLogsStoppedSessionNoOutput(t *testing.T) {
 func TestLogsInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "logs", Payload: json.RawMessage(`{bad`)})
+	raw := []byte(`{"type":"logs","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	h.expectType(t, "error")
@@ -794,7 +794,7 @@ func TestTypeSessionNotFound(t *testing.T) {
 func TestTypeInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "type", Payload: json.RawMessage(`{bad`)})
+	raw := []byte(`{"type":"type","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	h.expectType(t, "error")
@@ -828,7 +828,7 @@ func TestScreenPreviewNotFound(t *testing.T) {
 func TestScreenPreviewInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "screen_preview", Payload: json.RawMessage(`{bad`)})
+	raw := []byte(`{"type":"screen_preview","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	h.expectType(t, "error")
@@ -866,7 +866,7 @@ func TestScreenSnapshotNotFound(t *testing.T) {
 func TestScreenSnapshotInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "screen_snapshot", Payload: json.RawMessage(`{bad`)})
+	raw := []byte(`{"type":"screen_snapshot","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	h.expectType(t, "error")
@@ -1075,7 +1075,7 @@ func TestMsgPubInboxQuietSuppressesNotification(t *testing.T) {
 func TestMsgPubInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "msg_pub", Payload: json.RawMessage(`{bad`)})
+	raw := []byte(`{"type":"msg_pub","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	h.expectType(t, "error")
@@ -1164,7 +1164,7 @@ func TestMsgSubOnlyUnreadWithAck(t *testing.T) {
 func TestMsgSubInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "msg_sub", Payload: json.RawMessage(`{bad`)})
+	raw := []byte(`{"type":"msg_sub","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	h.expectType(t, "error")
@@ -1238,7 +1238,7 @@ func TestMsgAck(t *testing.T) {
 func TestMsgAckInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "msg_ack", Payload: json.RawMessage(`{bad`)})
+	raw := []byte(`{"type":"msg_ack","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	h.expectType(t, "error")
@@ -1268,7 +1268,7 @@ func TestMsgTopics(t *testing.T) {
 func TestMsgTopicsInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw, _ := json.Marshal(protocol.Envelope{Type: "msg_topics", Payload: json.RawMessage(`{bad`)})
+	raw := []byte(`{"type":"msg_topics","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	h.expectType(t, "error")

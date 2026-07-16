@@ -2,7 +2,7 @@ package git
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"net/url"
 	"os/exec"
 	"strings"
@@ -23,7 +23,7 @@ func DiscoverGitHubUsername(ctx context.Context, repoPath string) (string, error
 		}
 	}
 
-	return "", fmt.Errorf("cannot determine GitHub username; set github_username in config")
+	return "", errors.New("cannot determine GitHub username; set github_username in config")
 }
 
 func ghCLIUsername(ctx context.Context) (string, error) {

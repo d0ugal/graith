@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -170,7 +171,7 @@ func remotePassthroughKeysFromConfig() client.PassthroughKeys {
 
 func runRemoteAttach(rh *client.RemoteHost, signer ed25519.PrivateKey, sessionArg string) error {
 	if isInsideGraith() {
-		return fmt.Errorf("cannot attach from inside a graith session")
+		return errors.New("cannot attach from inside a graith session")
 	}
 
 	cols, rows := uint16(80), uint16(24)
