@@ -3,10 +3,34 @@ package hookoutput
 import "encoding/json"
 
 // approvalResponse is the legacy top-level decision format. It is still used by
-// agents whose hook schema expects a top-level "decision" field (codex, agy).
+// agents whose hook schema expects a top-level "decision" field (agy).
 type approvalResponse struct {
 	Decision string `json:"decision"`
 	Reason   string `json:"reason,omitempty"`
+}
+
+// codexApprovalResponse models Codex's current PermissionRequest hook-output
+// contract. Codex's PermissionRequestCommandOutputWire carries the decision
+// under hookSpecificOutput.decision.behavior ("allow" | "deny") — NOT the legacy
+// top-level "decision" field — and uses deny_unknown_fields, so a top-level
+// "decision" is rejected and the decision silently dropped, defeating the
+// approval bridge (issue #1183).
+type codexApprovalResponse struct {
+	HookSpecificOutput codexPermissionHookSpecificOutput `json:"hookSpecificOutput"`
+}
+
+// codexPermissionHookSpecificOutput carries the PermissionRequest decision.
+// Decision is a pointer so it can be omitted: when graith defers (or the
+// decision is unrecognised) no decision is sent and Codex falls back to its own
+// approval flow rather than being forced to allow or deny.
+type codexPermissionHookSpecificOutput struct {
+	HookEventName string                   `json:"hookEventName"`
+	Decision      *codexPermissionDecision `json:"decision,omitempty"`
+}
+
+type codexPermissionDecision struct {
+	Behavior string `json:"behavior"`
+	Message  string `json:"message,omitempty"`
 }
 
 type cursorApprovalResponse struct {
@@ -52,6 +76,22 @@ func Approval(agent, decision, reason string) string {
 		out, _ := json.Marshal(resp)
 
 		return string(out)
+	case "codex":
+		resp := codexApprovalResponse{
+			HookSpecificOutput: codexPermissionHookSpecificOutput{
+				HookEventName: "PermissionRequest",
+			},
+		}
+		if behavior := codexBehavior(decision); behavior != "" {
+			resp.HookSpecificOutput.Decision = &codexPermissionDecision{
+				Behavior: behavior,
+				Message:  reason,
+			}
+		}
+
+		out, _ := json.Marshal(resp)
+
+		return string(out)
 	case "cursor":
 		resp := cursorApprovalResponse{
 			Permission: cursorDecision(decision),
@@ -61,8 +101,7 @@ func Approval(agent, decision, reason string) string {
 
 		return string(out)
 	default:
-		mapped := mapDecision(agent, decision)
-		resp := approvalResponse{Decision: mapped, Reason: reason}
+		resp := approvalResponse{Decision: decision, Reason: reason}
 		out, _ := json.Marshal(resp)
 
 		return string(out)
@@ -94,7 +133,11 @@ type claudeHookOutput struct {
 // Other agents keep the systemMessage form they already consume.
 func InboxContext(agent, event, context string) string {
 	switch agent {
-	case "claude":
+	case "claude", "codex":
+		// Both Claude and current Codex deliver model-visible context through
+		// hookSpecificOutput.additionalContext; their universal systemMessage is
+		// only a user-facing banner. (Codex's *CommandOutputWire types carry
+		// additionalContext under hookSpecificOutput — issue #1183.)
 		var resp claudeHookOutput
 
 		resp.HookSpecificOutput.HookEventName = event
@@ -110,12 +153,18 @@ func InboxContext(agent, event, context string) string {
 	}
 }
 
-func mapDecision(agent, internal string) string {
-	switch agent {
-	case "codex":
-		return codexDecision(internal)
+// codexBehavior maps graith's internal decision vocabulary onto Codex's
+// PermissionRequest behavior ("allow" | "deny"). "block" and "deny" both refuse.
+// "defer"/"ask" (and anything unrecognised) return "" so the caller omits the
+// decision entirely and Codex falls back to its own approval flow.
+func codexBehavior(d string) string {
+	switch d {
+	case "allow":
+		return "allow"
+	case "block", "deny":
+		return "deny"
 	default:
-		return internal
+		return ""
 	}
 }
 
@@ -133,15 +182,6 @@ func claudeDecision(d string) string {
 	default:
 		return d
 	}
-}
-
-// Codex uses "allow" and "deny" natively; the daemon uses "block" internally.
-func codexDecision(d string) string {
-	if d == "block" {
-		return "deny"
-	}
-
-	return d
 }
 
 // Cursor uses "permission" field with "allow" and "deny" values.
