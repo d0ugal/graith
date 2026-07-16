@@ -438,9 +438,18 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		return SessionState{}, fmt.Errorf("expand fork args: %w", err)
 	}
 
-	// Replay the conditional Codex flags after the fork/args (issue #1186); no-op
-	// for other agents. Codex accepts these on its `fork` subcommand too.
-	expandedArgs = append(expandedArgs, codexExtraArgs(agentName, effectiveModel, sourceCodex)...)
+	// Replay the conditional option flags after the fork/args (issue #1186); the
+	// agent's option_args config decides which are emitted (issue #1236). Codex
+	// accepts these on its `fork` subcommand too.
+	optArgs, err := optionArgs(agent, vars, sourceCodex)
+	if err != nil {
+		forkCleanup()
+		rollbackState()
+
+		return SessionState{}, fmt.Errorf("expand agent option args: %w", err)
+	}
+
+	expandedArgs = append(expandedArgs, optArgs...)
 
 	logPath := filepath.Join(sm.paths.LogDir, id+".log")
 
@@ -537,10 +546,18 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		expandedArgs = append(expandedArgs, seedPrompt)
 	}
 
-	// Make each included repo's forked worktree visible to the agent via
-	// --add-dir (a fork re-creates the source's includes as forkIncludes).
+	// Make each included repo's forked worktree visible to the agent via its
+	// add_dir_args (a fork re-creates the source's includes as forkIncludes).
 	// Appended last, after any injected prompt (see Create for why).
-	expandedArgs = append(expandedArgs, includeAddDirArgs(agentName, forkIncludes)...)
+	addDirArgs, err := includeAddDirArgs(agent, vars, forkIncludes)
+	if err != nil {
+		forkCleanup()
+		rollbackState()
+
+		return SessionState{}, fmt.Errorf("expand add-dir args: %w", err)
+	}
+
+	expandedArgs = append(expandedArgs, addDirArgs...)
 
 	command := agent.Command
 	finalArgs := expandedArgs

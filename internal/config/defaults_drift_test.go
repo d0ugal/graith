@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -181,6 +182,57 @@ func TestEmbeddedDefaultAgentPolicies(t *testing.T) {
 	}
 }
 
+// TestEmbeddedDefaultsCarryAgentAdapters is the drift guard for issue #1236: the
+// agent-specific CLI adapters (add-dir flag, headless prefix, and the conditional
+// codex option groups) must live in the embedded default_config.toml, not as
+// hard-coded Go. Each check asserts the RAW field parsed from the embedded TOML,
+// so a default silently dropped from the file fails here.
+func TestEmbeddedDefaultsCarryAgentAdapters(t *testing.T) {
+	d := Default()
+
+	t.Run("add_dir_args on claude/codex/cursor only", func(t *testing.T) {
+		want := []string{"--add-dir", "{dir}"}
+		for _, name := range []string{"claude", "codex", "cursor"} {
+			if got := d.Agents[name].AddDirArgs; !reflect.DeepEqual(got, want) {
+				t.Errorf("agent %q: AddDirArgs = %v, want %v", name, got, want)
+			}
+		}
+
+		for _, name := range []string{"opencode", "agy"} {
+			if got := d.Agents[name].AddDirArgs; len(got) != 0 {
+				t.Errorf("agent %q: AddDirArgs = %v, want none", name, got)
+			}
+		}
+	})
+
+	t.Run("claude headless_args control channel", func(t *testing.T) {
+		want := []string{
+			"-p",
+			"--output-format", "stream-json",
+			"--input-format", "stream-json",
+			"--verbose",
+			"--permission-prompt-tool", "stdio",
+		}
+		if got := d.Agents["claude"].HeadlessArgs; !reflect.DeepEqual(got, want) {
+			t.Errorf("claude HeadlessArgs = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("codex option_args cover the #1186 adapter", func(t *testing.T) {
+		want := []AgentOptionArg{
+			{When: "model", Args: []string{"--model", "{model}"}},
+			{When: "profile", Args: []string{"--profile", "{profile}"}},
+			{When: "reasoning_effort", Args: []string{"-c", "model_reasoning_effort={reasoning_effort}"}},
+			{When: "service_tier", Args: []string{"-c", "service_tier={service_tier}"}},
+			{When: "web_search", Args: []string{"--search"}},
+			{When: "approval_policy", Args: []string{"--ask-for-approval", "{approval_policy}"}},
+		}
+		if got := d.Agents["codex"].OptionArgs; !reflect.DeepEqual(got, want) {
+			t.Errorf("codex OptionArgs = %v, want %v", got, want)
+		}
+	})
+}
+
 // TestConfigReloadDebounceDuration exercises the accessor's empty/invalid/valid
 // paths, mirroring the fail-safe pattern of the other duration accessors.
 func TestConfigReloadDebounceDuration(t *testing.T) {
@@ -279,5 +331,16 @@ inject_prompt = false
 
 	if got := claude.IdleTimeoutDuration(); got != time.Hour {
 		t.Errorf("claude idle_timeout = %v, want 1h (default preserved)", got)
+	}
+
+	// The embedded agent adapters (#1236) survive a partial override that never
+	// mentions them, so an existing config keeps the add-dir / codex-option
+	// behaviour without re-declaring it.
+	if got := claude.AddDirArgs; !reflect.DeepEqual(got, []string{"--add-dir", "{dir}"}) {
+		t.Errorf("claude add_dir_args = %v, want default preserved", got)
+	}
+
+	if got := cfg.Agents["codex"].OptionArgs; len(got) == 0 {
+		t.Error("codex option_args dropped by partial-config merge, want default preserved")
 	}
 }

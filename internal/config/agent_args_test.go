@@ -1,0 +1,249 @@
+package config
+
+import (
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/pelletier/go-toml/v2"
+)
+
+// TestAgentAddDirArgsFor covers the config-driven add-directory adapter (#1236):
+// {dir} is expanded once per directory, an agent with no add_dir_args emits
+// nothing (its CLI has no such flag), and empty directory entries are skipped.
+func TestAgentAddDirArgsFor(t *testing.T) {
+	withFlag := Agent{AddDirArgs: []string{"--add-dir", "{dir}"}}
+
+	tests := []struct {
+		name string
+		a    Agent
+		dirs []string
+		want []string
+	}{
+		{
+			name: "no add_dir_args yields nil even with dirs",
+			a:    Agent{},
+			dirs: []string{"/glen/bothy/bairn"},
+			want: nil,
+		},
+		{
+			name: "no dirs yields nil",
+			a:    withFlag,
+			dirs: nil,
+			want: nil,
+		},
+		{
+			name: "single dir expands {dir}",
+			a:    withFlag,
+			dirs: []string{"/glen/bothy/bairn"},
+			want: []string{"--add-dir", "/glen/bothy/bairn"},
+		},
+		{
+			name: "multiple dirs preserve order",
+			a:    withFlag,
+			dirs: []string{"/glen/bothy/bairn", "/glen/bothy/whin"},
+			want: []string{"--add-dir", "/glen/bothy/bairn", "--add-dir", "/glen/bothy/whin"},
+		},
+		{
+			name: "empty dir entries are skipped",
+			a:    withFlag,
+			dirs: []string{"", "/glen/bothy/bairn", ""},
+			want: []string{"--add-dir", "/glen/bothy/bairn"},
+		},
+		{
+			name: "all-empty dirs yield nil not empty slice",
+			a:    withFlag,
+			dirs: []string{"", ""},
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.a.AddDirArgsFor(TemplateVars{}, tt.dirs)
+			if err != nil {
+				t.Fatalf("AddDirArgsFor: %v", err)
+			}
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("AddDirArgsFor(%v) = %v, want %v", tt.dirs, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAgentOptionArgsFor covers the conditional option-arg adapter (#1236): a
+// group fires only when its `when` variable resolves non-empty, an empty `when`
+// fires unconditionally, a boolean (web_search) gates on "true"/"", and groups
+// preserve declaration order.
+func TestAgentOptionArgsFor(t *testing.T) {
+	agent := Agent{OptionArgs: []AgentOptionArg{
+		{When: "model", Args: []string{"--model", "{model}"}},
+		{When: "reasoning_effort", Args: []string{"-c", "model_reasoning_effort={reasoning_effort}"}},
+		{When: "web_search", Args: []string{"--search"}},
+		{When: "", Args: []string{"--always"}},
+	}}
+
+	tests := []struct {
+		name string
+		vars TemplateVars
+		want []string
+	}{
+		{
+			name: "only the unconditional group fires when nothing is set",
+			vars: TemplateVars{},
+			want: []string{"--always"},
+		},
+		{
+			name: "model gate fires and expands {model}",
+			vars: TemplateVars{Model: "gpt-5.1-codex"},
+			want: []string{"--model", "gpt-5.1-codex", "--always"},
+		},
+		{
+			name: "boolean web_search fires only when true",
+			vars: TemplateVars{WebSearch: true},
+			want: []string{"--search", "--always"},
+		},
+		{
+			name: "all gates in declaration order",
+			vars: TemplateVars{Model: "m", ReasoningEffort: "high", WebSearch: true},
+			want: []string{"--model", "m", "-c", "model_reasoning_effort=high", "--search", "--always"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := agent.OptionArgsFor(tt.vars)
+			if err != nil {
+				t.Fatalf("OptionArgsFor: %v", err)
+			}
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("OptionArgsFor(%+v) = %v, want %v", tt.vars, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAgentOptionArgsForNoGroupsIsNil(t *testing.T) {
+	got, err := (Agent{}).OptionArgsFor(TemplateVars{Model: "m"})
+	if err != nil {
+		t.Fatalf("OptionArgsFor: %v", err)
+	}
+
+	if got != nil {
+		t.Errorf("OptionArgsFor with no groups = %v, want nil", got)
+	}
+}
+
+// TestAgentOptionArgsForUnknownVarErrors ensures a group args template that
+// references an undefined variable fails loudly rather than silently emitting a
+// literal placeholder.
+func TestAgentOptionArgsForUnknownVarErrors(t *testing.T) {
+	agent := Agent{OptionArgs: []AgentOptionArg{
+		{When: "model", Args: []string{"--model", "{bogus}"}},
+	}}
+
+	_, err := agent.OptionArgsFor(TemplateVars{Model: "m"})
+	if err == nil {
+		t.Fatal("OptionArgsFor with unknown template var = nil error, want error")
+	}
+}
+
+func TestIsTemplateVar(t *testing.T) {
+	known := []string{"model", "dir", "profile", "reasoning_effort", "service_tier", "approval_policy", "web_search", "worktree_path"}
+	for _, v := range known {
+		if !IsTemplateVar(v) {
+			t.Errorf("IsTemplateVar(%q) = false, want true", v)
+		}
+	}
+
+	for _, v := range []string{"reasoning", "bogus", "", "Model"} {
+		if IsTemplateVar(v) {
+			t.Errorf("IsTemplateVar(%q) = true, want false", v)
+		}
+	}
+}
+
+// TestValidateOptionArgs covers the config-load guards for option_args (#1236):
+// a group with no args and a `when` gate naming an unknown variable are both
+// rejected.
+func TestValidateOptionArgs(t *testing.T) {
+	tests := []struct {
+		name      string
+		opt       AgentOptionArg
+		wantSubst string
+	}{
+		{
+			name:      "empty args rejected",
+			opt:       AgentOptionArg{When: "model", Args: nil},
+			wantSubst: "args must not be empty",
+		},
+		{
+			name:      "unknown when rejected",
+			opt:       AgentOptionArg{When: "reasoning", Args: []string{"-c", "x"}},
+			wantSubst: "not a known template variable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			braw := cfg.Agents["codex"]
+			braw.OptionArgs = []AgentOptionArg{tt.opt}
+			cfg.Agents["codex"] = braw
+
+			err := cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), tt.wantSubst) {
+				t.Fatalf("Validate() = %v, want error containing %q", err, tt.wantSubst)
+			}
+		})
+	}
+}
+
+// TestValidateOptionArgsEmptyWhenAllowed confirms an empty `when` (emit
+// unconditionally) passes validation.
+func TestValidateOptionArgsEmptyWhenAllowed(t *testing.T) {
+	cfg := Default()
+	braw := cfg.Agents["codex"]
+	braw.OptionArgs = []AgentOptionArg{{When: "", Args: []string{"--always"}}}
+	cfg.Agents["codex"] = braw
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() with empty when = %v, want nil", err)
+	}
+}
+
+// TestDefaultAgentArgsRoundTrip proves the new adapter fields survive a
+// marshal→unmarshal cycle — the path `gr config show`/`diff` take — so the
+// codex option_args array-of-tables and the add_dir_args/headless_args slices
+// are not silently dropped from a rendered config (#1236).
+func TestDefaultAgentArgsRoundTrip(t *testing.T) {
+	orig := Default()
+
+	blob, err := toml.Marshal(orig)
+	if err != nil {
+		t.Fatalf("marshal Default(): %v", err)
+	}
+
+	var got Config
+	if err := toml.Unmarshal(blob, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if !reflect.DeepEqual(got.Agents["claude"].AddDirArgs, orig.Agents["claude"].AddDirArgs) {
+		t.Errorf("claude add_dir_args did not round-trip: %v", got.Agents["claude"].AddDirArgs)
+	}
+
+	if !reflect.DeepEqual(got.Agents["claude"].HeadlessArgs, orig.Agents["claude"].HeadlessArgs) {
+		t.Errorf("claude headless_args did not round-trip: %v", got.Agents["claude"].HeadlessArgs)
+	}
+
+	if !reflect.DeepEqual(got.Agents["codex"].OptionArgs, orig.Agents["codex"].OptionArgs) {
+		t.Errorf("codex option_args did not round-trip: %v", got.Agents["codex"].OptionArgs)
+	}
+
+	if len(orig.Agents["codex"].OptionArgs) == 0 {
+		t.Fatal("expected the embedded codex agent to define option_args")
+	}
+}

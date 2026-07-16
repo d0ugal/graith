@@ -104,8 +104,9 @@ func resolveDriverKind(explicit bool, agent config.Agent, hc config.HeadlessConf
 	}
 }
 
-// headlessArgs builds the argv for a v1 one-shot headless launch with the
-// stdin control channel (issue #1136):
+// headlessArgs builds the argv for a v1 one-shot headless launch with the stdin
+// control channel (issue #1136). The control-channel prefix comes from the
+// agent's headless_args config (issue #1236); for Claude it is:
 //
 //	claude -p --output-format stream-json --input-format stream-json \
 //	       --verbose --permission-prompt-tool stdio <agentArgs...>
@@ -116,18 +117,16 @@ func resolveDriverKind(explicit bool, agent config.Agent, hc config.HeadlessConf
 // permission asks routed by --permission-prompt-tool stdio. The CLI still runs
 // one turn to a terminal result; graith closes stdin on that result so the
 // process exits (one-shot semantics preserved). agentArgs carries the agent's
-// own template-expanded args (e.g. --session-id <id>). These forms are pinned to
-// what was verified against claude 2.1.211 (see the headless design doc).
-func headlessArgs(agentArgs []string) []string {
-	args := []string{
-		"-p",
-		"--output-format", "stream-json",
-		"--input-format", "stream-json",
-		"--verbose",
-		"--permission-prompt-tool", "stdio",
+// own template-expanded args (e.g. --session-id <id>) and follows the prefix.
+// The Claude defaults are pinned to what was verified against claude 2.1.211
+// (see the headless design doc).
+func headlessArgs(agent config.Agent, vars config.TemplateVars, agentArgs []string) ([]string, error) {
+	prefix, err := config.ExpandSlice(agent.HeadlessArgs, vars)
+	if err != nil {
+		return nil, err
 	}
 
-	return append(args, agentArgs...)
+	return append(prefix, agentArgs...), nil
 }
 
 // Compile-time assertion that the PTY session satisfies the driver interface.

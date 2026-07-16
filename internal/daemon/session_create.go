@@ -534,15 +534,31 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		driverKind = DriverPTY
 	}
 
-	// Conditional Codex flags (model + typed options) precede the positional
-	// prompt so options come before it (issue #1186); no-op for other agents.
-	expandedArgs = append(expandedArgs, codexExtraArgs(agentName, model, codexStatePtr(codexOpts))...)
+	// Conditional option flags (model + typed Codex options) precede the
+	// positional prompt so options come before it (issue #1186); the agent's
+	// option_args config decides which are emitted (issue #1236), nil for agents
+	// that declare none.
+	optArgs, err := optionArgs(agent, vars, codexStatePtr(codexOpts))
+	if err != nil {
+		cleanupOnError()
+		rollbackState()
+
+		return SessionState{}, fmt.Errorf("expand agent option args: %w", err)
+	}
+
+	expandedArgs = append(expandedArgs, optArgs...)
 
 	if driverKind == DriverHeadless {
 		// The prompt is delivered as an initial stdin user message by the
 		// headless driver (the control-channel launch takes no positional
 		// prompt), so it is not appended to argv here.
-		expandedArgs = headlessArgs(expandedArgs)
+		expandedArgs, err = headlessArgs(agent, vars, expandedArgs)
+		if err != nil {
+			cleanupOnError()
+			rollbackState()
+
+			return SessionState{}, fmt.Errorf("expand headless args: %w", err)
+		}
 	} else if prompt != "" {
 		expandedArgs = append(expandedArgs, prompt)
 	}
@@ -674,7 +690,15 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		effectiveIncludes = sourceIncludes
 	}
 
-	expandedArgs = append(expandedArgs, includeAddDirArgs(agentName, effectiveIncludes)...)
+	addDirArgs, err := includeAddDirArgs(agent, vars, effectiveIncludes)
+	if err != nil {
+		cleanupOnError()
+		rollbackState()
+
+		return SessionState{}, fmt.Errorf("expand add-dir args: %w", err)
+	}
+
+	expandedArgs = append(expandedArgs, addDirArgs...)
 
 	command := agent.Command
 	finalArgs := expandedArgs

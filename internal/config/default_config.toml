@@ -16,6 +16,10 @@
 #   {session_id}                    - Internal graith session ID
 #   {worktree_path}                 - Absolute path to the session worktree
 #   {fork_source_agent_session_id}  - Source session's agent ID (fork only)
+#   {model}                         - Requested model (option_args only)
+#   {dir}                           - A granted directory (add_dir_args only)
+#   {profile} {reasoning_effort} {service_tier} {approval_policy} {web_search}
+#                                   - Codex option_args gates/values (issue #1236)
 
 # Agent type used by `gr new` when --agent is not given (must match an [agents.*] key).
 default_agent = "claude"
@@ -576,7 +580,8 @@ preview_bytes = 16384       # scrollback tail rendered by the overlay/screen_pre
 # Each agent needs at minimum: command, args
 # Optional: resume_args, fork_args, env, idle_timeout, sandbox, mcp_servers,
 #   validate_model, interrupt_count, interrupt_delay_ms, inject_prompt,
-#   pre_trust_workspace, headless_capable
+#   pre_trust_workspace, headless_capable, add_dir_args, headless_args,
+#   option_args (conditional [[agents.<name>.option_args]] groups)
 
 [agents.claude]
 command = "claude"                                    # binary to launch
@@ -597,6 +602,13 @@ interrupt_delay_ms = 200
 # Claude Code supports headless stream-json mode (issue #1075), so it may run as
 # a fire-and-forget headless session when [headless] experimental is enabled.
 headless_capable = true
+# Flag template graith uses to grant the agent an extra directory (each included
+# repo's co-located worktree). Expanded once per directory with {dir} bound to
+# it. Leave unset for an agent whose CLI has no such flag. (issue #1236)
+add_dir_args = ["--add-dir", "{dir}"]
+# Control-channel argv prefix prepended in headless stream-json mode; the agent's
+# own args follow. Pinned to what was verified against claude 2.1.211. (#1236)
+headless_args = ["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"]
 
 # Extra sandbox grants for this agent, merged on top of the global [sandbox]
 # config. Only take effect when the sandbox is enabled. "write" means read+write.
@@ -617,6 +629,32 @@ idle_timeout        = "1h"                       # auto-stop after this long idl
 inject_prompt       = true                       # inject agent_prompt into the session
 prompt_injection    = "developer_instructions"   # delivery mechanism: Codex's -c developer_instructions=...
 pre_trust_workspace = true                       # pre-trust the worktree so the agent skips its trust prompt
+add_dir_args        = ["--add-dir", "{dir}"]     # grant an included repo's worktree
+# Conditional launch flags for the session model and typed Codex options (issue
+# #1186), each emitted only when its `when` template variable is set — an unset
+# option leaves Codex's own default untouched. These are the config-driven
+# replacement for the former hard-coded codex adapter (issue #1236). Reasoning
+# effort and service tier have no dedicated Codex flag, so they ride
+# `-c key=value` overrides; the rest map to real flags. All are accepted on the
+# bare invocation and on the `resume`/`fork` subcommands.
+[[agents.codex.option_args]]
+when = "model"                                   # --model <session model>
+args = ["--model", "{model}"]
+[[agents.codex.option_args]]
+when = "profile"
+args = ["--profile", "{profile}"]
+[[agents.codex.option_args]]
+when = "reasoning_effort"
+args = ["-c", "model_reasoning_effort={reasoning_effort}"]
+[[agents.codex.option_args]]
+when = "service_tier"
+args = ["-c", "service_tier={service_tier}"]
+[[agents.codex.option_args]]
+when = "web_search"                              # boolean: emitted when true
+args = ["--search"]
+[[agents.codex.option_args]]
+when = "approval_policy"
+args = ["--ask-for-approval", "{approval_policy}"]
 
 [agents.codex.sandbox]
 read_dirs = ["~/.codex"]
@@ -642,6 +680,7 @@ idle_timeout        = "1h"            # auto-stop after this long idle (0 disabl
 inject_prompt       = true            # inject agent_prompt into the session
 prompt_injection    = "cursor_rules"  # delivery mechanism: writes .cursor/rules/graith.mdc
 pre_trust_workspace = true            # pre-trust the worktree so the agent skips its trust prompt
+add_dir_args        = ["--add-dir", "{dir}"]  # grant an included repo's worktree
 
 [agents.cursor.sandbox]
 read_dirs = ["~/.cursor"]
