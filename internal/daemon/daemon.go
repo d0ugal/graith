@@ -77,6 +77,7 @@ type SessionManager struct {
 	mcpManager         *MCPManager
 	startedAt          time.Time
 	orchestratorExitCh chan string
+	orchestratorKickCh chan struct{}
 	recentExits        []time.Time
 	lastInboxNotifyAt  map[string]time.Time
 	// silentWarned tracks session IDs already flagged by the silent-session
@@ -150,6 +151,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		deviceTokenIndex:   make(map[string]string),
 		connsByDevice:      make(map[string][]net.Conn),
 		orchestratorExitCh: make(chan string, 4),
+		orchestratorKickCh: make(chan struct{}, 1),
 		lastInboxNotifyAt:  make(map[string]time.Time),
 		silentWarned:       make(map[string]bool),
 		prWatch:            newPRWatchState(cfg.PRWatch.KickChannelSize()),

@@ -467,18 +467,27 @@ func handleDelete(sm *SessionManager, auth authContext, sendControl func(string,
 		return
 	}
 
-	// Three-way routing, owned by the daemon (the CLI only forwards intent via
-	// Purge):
-	//   Purge              -> hard delete (gr purge)
-	//   !Purge && ret > 0  -> soft delete (gr delete, recoverable)
-	//   !Purge && ret == 0 -> reject: gr delete never destroys, so with soft
-	//                         delete disabled there is nothing safe to do.
-	if !d.Purge && sm.Config().Delete.RetentionDuration() <= 0 {
+	// A direct orchestrator delete is a reset of a declarative system session:
+	// remove this instance immediately, then let the config reconciler create a
+	// fresh one. It intentionally bypasses soft-delete retention because keeping
+	// the old state would prevent that replacement. Batch deletion continues to
+	// skip system sessions.
+	target := sm.sessionSnapshot(d.SessionID)
+	orchestratorReset := !d.Children && target.SystemKind == SystemKindOrchestrator
+
+	// Routing is owned by the daemon (the CLI only forwards intent via Purge):
+	//   orchestratorReset   -> hard delete (fresh config-managed replacement)
+	//   Purge               -> hard delete (gr purge)
+	//   !Purge && ret > 0   -> soft delete (gr delete, recoverable)
+	//   !Purge && ret == 0  -> reject: ordinary gr delete never destroys, so
+	//                          with soft delete disabled there is nothing safe
+	//                          to do.
+	if !orchestratorReset && !d.Purge && sm.Config().Delete.RetentionDuration() <= 0 {
 		sendControl("error", protocol.ErrorMsg{Message: "soft delete is disabled (retention=0); use gr purge"})
 		return
 	}
 
-	soft := !d.Purge
+	soft := !d.Purge && !orchestratorReset
 
 	if d.Children {
 		handleDeleteChildren(sm, sendControl, d, soft)

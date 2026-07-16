@@ -124,18 +124,25 @@ Restart a stopped session. The agent process is restarted in the existing worktr
 
 ## `gr delete <name-or-id>` (alias: `rm`)
 
-Delete a session. Kills the agent process, removes the worktree, and deletes the branch. Prompts for confirmation if there are uncommitted changes or unpushed commits.
+Soft-delete a session. This stops and hides the session while retaining its
+worktree, branch, and state for the configured retention window. Recover it
+with `gr restore`, or remove it immediately with `gr purge`.
 
 | Flag | Description |
 |------|-------------|
 | `--self` | Soft-delete the current session (resolved from `GRAITH_SESSION_ID`/`GRAITH_SESSION_NAME`) |
 | `--children` | Also delete all descendant sessions |
-| `-f, --force` | Skip confirmation prompt |
+| `-f, --force` | Deprecated no-op retained for compatibility |
 | `--repo <name>` | Filter by repo name (batch mode) |
 | `--stopped` | Match stopped and errored sessions (batch mode) |
 | `--stale <duration>` | Match sessions not attached for this duration (batch mode) |
 
 `--self` targets the session it is run from, so an agent can clean itself up after its work is merged with `gr delete --self` — no need to interpolate `$GRAITH_SESSION_NAME`. It takes no positional argument and cannot be combined with `--children` or the batch filters; outside a graith session it errors. `gr purge --self` does the same for an immediate, irrecoverable purge.
+
+The config-managed orchestrator is an exception to recoverable deletion:
+`gr delete orchestrator` immediately discards its current context, then the
+daemon creates a fresh replacement when `[orchestrator] enabled = true`. Use
+`gr stop orchestrator` when it should remain stopped.
 
 ## `gr fork <source-session> <new-name>`
 

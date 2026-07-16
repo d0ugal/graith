@@ -264,6 +264,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	go sm.RunTokenLoop(ctx)
 
 	go sm.orchestratorSupervisor(ctx, sm.orchestratorExitCh)
+	go sm.RunOrchestratorReconcileLoop(ctx)
 	go sm.ensureOrchestrator(ctx)
 
 	if configFile == "" {
