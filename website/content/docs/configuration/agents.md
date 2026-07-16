@@ -36,11 +36,23 @@ fork_args      = ["--resume", "{fork_source_agent_session_id}", "--fork-session"
 env            = {}             # extra environment variables
 idle_timeout   = ""             # auto-stop after idle (default: 1h when resume_args is set, 0 otherwise)
 inject_prompt  = true           # inject agent_prompt into the session
+prompt_injection = ""           # how to inject: append_system_prompt | cursor_rules | developer_instructions | none
 validate_model = ""             # command to validate --model values
 headless_capable = false        # agent can run in headless (stream-json) mode (experimental)
 ```
 
 `headless_capable` marks whether an agent supports [headless mode]({{< relref "sessions.md#headless-sessions" >}}). Only Claude supports it in v1; a session can't be asked to go headless on an agent that isn't capable.
+
+`inject_prompt` is the on/off switch for prompt injection; `prompt_injection` selects the *mechanism*. When `prompt_injection` is empty (the default), graith picks the mechanism from the agent name — `claude` → `append_system_prompt`, `cursor` → `cursor_rules`, `codex` → `developer_instructions`, and any other name → `none`. Set it explicitly to override that mapping or, most usefully, to give a [custom agent](#custom-agents) a mechanism it would otherwise not get. The values are:
+
+| Value | Mechanism |
+|-------|-----------|
+| `append_system_prompt` | Pass the prompt via Claude's `--append-system-prompt` flag |
+| `cursor_rules` | Write the prompt to `.cursor/rules/graith.mdc` in the worktree (Cursor) |
+| `developer_instructions` | Pass the prompt as Codex's `-c developer_instructions=...` override |
+| `none` | Do not inject a prompt |
+
+An unknown value is rejected at config load. This applies to ordinary sessions and to the [orchestrator]({{< relref "/docs/orchestrator.md" >}}) alike, so a Codex, Cursor, or custom orchestrator agent gets the right mechanism instead of an unsupported Claude flag.
 
 ### Template variables
 
@@ -98,13 +110,14 @@ args        = ["--session", "{agent_session_id}", "--model", "{model}"]
 resume_args = ["--resume", "{agent_session_id}"]
 env         = { MY_CONFIG = "production" }
 idle_timeout = "2h"
+prompt_injection = "append_system_prompt"  # how to inject agent_prompt (else the prompt is skipped)
 
 [agents.my-agent.sandbox]
 read_dirs  = ["~/.my-agent"]
 write_dirs = ["~/.my-agent"]
 ```
 
-Use with `gr new my-task --agent my-agent`.
+Use with `gr new my-task --agent my-agent`. Because a custom agent's name matches none of the built-ins, set `prompt_injection` if you want it to receive `agent_prompt` — otherwise the name-based default is `none` and no prompt is injected.
 
 ## Repository configuration
 
