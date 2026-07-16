@@ -114,6 +114,8 @@ var registeredTypes = []any{
 	ForkMsg{},
 	MigrateMsg{},
 	AttachMsg{},
+	AttachConvertMsg{},
+	ConvertRequiredMsg{},
 	DeleteMsg{},
 	ListMsg{},
 	RestoreMsg{},
@@ -347,6 +349,10 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"StoreGetResponseMsg":  {SwiftRequired, "StoreGetResponseMsg"},
 
 	// --- Planned: client-relevant, not modelled in Swift yet (known gaps). ---
+	// Headless convert-on-attach (#1137) is a CLI-driven flow today; a remote GUI
+	// can't attach to a headless session yet, so these stay planned.
+	"AttachConvertMsg":       {SwiftPlanned, ""},
+	"ConvertRequiredMsg":     {SwiftPlanned, ""},
 	"DeleteResultMsg":        {SwiftPlanned, ""},
 	"RestoreResultMsg":       {SwiftPlanned, ""},
 	"UpdateMsg":              {SwiftPlanned, ""},

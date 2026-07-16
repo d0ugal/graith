@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/d0ugal/graith/internal/client"
@@ -13,6 +15,10 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
+
+// attachYes skips the convert-to-interactive confirmation prompt for headless
+// sessions (`gr attach --yes`). See runAttachByID / issue #1137.
+var attachYes bool
 
 var attachCmd = &cobra.Command{
 	Use:               "attach [name-or-id]",
@@ -32,6 +38,7 @@ var attachCmd = &cobra.Command{
 
 // registerAttachCmd registers this command on rootCmd. Called from registerCommands.
 func registerAttachCmd() {
+	attachCmd.Flags().BoolVarP(&attachYes, "yes", "y", false, "skip the convert-to-interactive confirmation when attaching to a headless session")
 	rootCmd.AddCommand(attachCmd)
 }
 
@@ -194,29 +201,112 @@ func runAttach(cmd *cobra.Command, name string) error {
 	return fmt.Errorf("session %q not found", name)
 }
 
+// attachWithConvert performs the attach handshake, transparently handling a
+// headless session that must first be converted to interactive (issue #1137).
+// The daemon answers an attach to a headless session with "convert_required"
+// (attaching would restart it as a PTY via `claude --resume`); this prompts the
+// human to confirm (unless --yes), sends "attach_convert" to perform the swap,
+// then re-attaches to the now-interactive session. It returns the attached
+// SessionInfo and attached=true on success, or attached=false when the human
+// declines the convert.
+func attachWithConvert(c *client.Client, sessionID string) (protocol.SessionInfo, bool, error) {
+	var info protocol.SessionInfo
+
+	converted := false
+
+	for {
+		_ = c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+
+		resp, err := c.ReadControlResponse()
+		if err != nil {
+			return info, false, err
+		}
+
+		switch resp.Type {
+		case "error":
+			var e protocol.ErrorMsg
+
+			_ = protocol.DecodePayload(resp, &e)
+
+			return info, false, fmt.Errorf("%s", e.Message)
+
+		case "convert_required":
+			if converted {
+				// We already converted, yet the daemon still reports headless — bail
+				// rather than loop forever.
+				return info, false, fmt.Errorf("session %q is still headless after convert", sessionID)
+			}
+
+			var cr protocol.ConvertRequiredMsg
+
+			_ = protocol.DecodePayload(resp, &cr)
+
+			if !confirmConvert(cr.Name) {
+				out.Printf("Aborted\n")
+				return info, false, nil
+			}
+
+			_ = c.SendControl("attach_convert", protocol.AttachConvertMsg{SessionID: sessionID})
+
+			convResp, err := c.ReadControlResponse()
+			if err != nil {
+				return info, false, err
+			}
+
+			if convResp.Type == "error" {
+				var e protocol.ErrorMsg
+
+				_ = protocol.DecodePayload(convResp, &e)
+
+				return info, false, fmt.Errorf("convert failed: %s", e.Message)
+			}
+
+			converted = true
+			// Loop back and attach to the now-interactive session.
+
+		default:
+			_ = protocol.DecodePayload(resp, &info)
+			return info, true, nil
+		}
+	}
+}
+
+// confirmConvert asks the human whether to convert a headless session to
+// interactive. --yes (attachYes) skips the prompt. A non-terminal stdin is
+// treated as a decline (fail-safe: don't restart a session unattended).
+func confirmConvert(name string) bool {
+	if attachYes {
+		return true
+	}
+
+	out.Printf("%q is a headless session. Attaching will restart it as an interactive session (conversation is preserved). Continue? [y/N] ", name)
+
+	reader := bufio.NewReader(os.Stdin)
+
+	answer, err := reader.ReadString('\n')
+	if err != nil {
+		return false
+	}
+
+	answer = strings.TrimSpace(strings.ToLower(answer))
+
+	return answer == "y" || answer == "yes"
+}
+
 func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[string]bool) error {
 	if isInsideGraith() {
 		return fmt.Errorf("cannot attach from inside a graith session (nested sessions are not supported)")
 	}
 
-	_ = c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
-
-	resp, err := c.ReadControlResponse()
+	info, attached, err := attachWithConvert(c, sessionID)
 	if err != nil {
 		return err
 	}
 
-	if resp.Type == "error" {
-		var e protocol.ErrorMsg
-
-		_ = protocol.DecodePayload(resp, &e)
-
-		return fmt.Errorf("%s", e.Message)
+	if !attached {
+		// Convert declined by the user — nothing to attach to.
+		return nil
 	}
-
-	var info protocol.SessionInfo
-
-	_ = protocol.DecodePayload(resp, &info)
 
 	ctx := context.Background()
 	keys := passthroughKeysFromConfig()

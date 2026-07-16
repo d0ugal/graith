@@ -119,6 +119,25 @@ type AttachMsg struct {
 	SessionID string `json:"session_id"`
 }
 
+// AttachConvertMsg requests converting a headless (one-shot stream-json) session
+// into an interactive PTY session so it can be attached to (headless phase 5,
+// issue #1137). The daemon stops the headless process, flips the session's
+// driver to PTY, and relaunches it via `claude --resume`, preserving the
+// conversation. The client sends this after the human confirms the convert
+// prompt the daemon surfaces via ConvertRequiredMsg.
+type AttachConvertMsg struct {
+	SessionID string `json:"session_id"`
+}
+
+// ConvertRequiredMsg is the daemon's reply to an attach targeting a headless
+// session: attaching converts it to interactive first, so the client must
+// confirm with the human before proceeding. The client answers with an
+// AttachConvertMsg (or aborts).
+type ConvertRequiredMsg struct {
+	SessionID string `json:"session_id"`
+	Name      string `json:"name"`
+}
+
 type DeleteMsg struct {
 	SessionID   string `json:"session_id"`
 	Children    bool   `json:"children,omitempty"`

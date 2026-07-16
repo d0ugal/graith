@@ -675,11 +675,22 @@ Anthropic ships and tests. Rejected.
    deeper). A guarded real-Claude test (`GRAITH_HEADLESS_REAL_CLAUDE=1`) exercises
    the full round-trip (prompt → `can_use_tool` → allow → tool runs → clean
    `result` → exit).
-5. **Convert-to-interactive on attach — ~4d.** Detect headless target,
-   confirmation prompt, transactional driver swap (`interrupt` → settle → close →
-   `--resume` in PTY, atomic under lock with rollback), flip `DriverKind`. New
-   handler-case row in `authmatrix.go`. Includes the real-Claude interrupted-
-   transcript integration test.
+5. **Convert-to-interactive on attach — ~4d. *(Implemented, issue #1137.)***
+   Detect headless target, confirmation prompt, transactional driver swap
+   (interrupt → settle → close → `--resume` in PTY, atomic under lock with
+   rollback), flip `DriverKind`. New handler-case row in `authmatrix.go`. Includes
+   the real-Claude interrupted-transcript integration test.
+   `SessionManager.ConvertToInteractive` performs the swap: it marks the session
+   `StatusCreating` and drops the live driver from the map (staling its exit
+   watcher) under the lock, stops the headless process outside the lock
+   (`Interrupt` → settle → SIGTERM → SIGKILL, all bounded, `StopReasonConvert`),
+   flips `DriverKind` to `"pty"`, then relaunches through the resume path. On the
+   wire, an `attach` to a headless session replies `convert_required`; the client
+   confirms (unless `gr attach -y`), sends `attach_convert`, and re-attaches on
+   `converted`. Building on #1136's control channel, `Interrupt` issues the
+   `interrupt` control request (falling back to SIGINT), so an in-flight tool call
+   is cancelled cleanly before the relaunch. The real-Claude interrupted-transcript
+   test (`TestHeadlessConvertRealClaude`) is opt-in via `GRAITH_TEST_REAL_CLAUDE=1`.
 6. **Data extraction / enrichment surface — ~3d.** Extend `StatusReportMsg` (or a
    sibling) + daemon state with the `UsageReport`/`ContextReport` fields (net-new,
    not yet in the protocol); feed the result snapshot into `gr list` / overlay;

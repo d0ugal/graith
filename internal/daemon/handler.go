@@ -539,12 +539,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					}
 				}
 
-				// Headless sessions have no interactive TUI to stream. Convert-on-
-				// attach (stop → `claude --resume` in a PTY) is a planned follow-up
-				// (issue #1075); until then, direct the user to read-only logs
-				// rather than attaching to a stream they can't drive.
+				// Headless sessions have no interactive TUI to stream. Attaching
+				// converts them to interactive (stop → `claude --resume` in a PTY),
+				// which restarts the agent, so the daemon asks the client to confirm
+				// first via convert_required; the client answers with attach_convert
+				// (issue #1137). Read-only inspection stays available via `gr logs -f`.
 				if sess, exists := sm.Get(a.SessionID); exists && sess.DriverKind == DriverHeadless {
-					sendControl("error", protocol.ErrorMsg{Message: "session is headless; interactive attach is not yet supported — use `gr logs -f " + sess.Name + "` to watch it read-only"})
+					sendControl("convert_required", protocol.ConvertRequiredMsg{SessionID: sess.ID, Name: sess.Name})
 					continue
 				}
 
@@ -621,6 +622,24 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 				ptySess.Attach(attachedDataWriter)
+
+			case "attach_convert":
+				ac, ok := decodePayload[protocol.AttachConvertMsg](msg, sendControl, "invalid attach_convert message")
+				if !ok {
+					continue
+				}
+
+				if !auth.authorizeTarget(sm, ac.SessionID, authSelfOrDescendant, sendControl) {
+					continue
+				}
+
+				//nolint:contextcheck // session lifecycle is intentionally detached from the client connection: the relaunched PTY must survive client disconnect, so ConvertToInteractive uses its own bounded background timeouts rather than the request ctx.
+				sess, err := sm.ConvertToInteractive(ac.SessionID, clientRows, clientCols)
+				if err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				} else {
+					sendControl("converted", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
+				}
 
 			case "detach":
 				if attachedSessionID != "" {

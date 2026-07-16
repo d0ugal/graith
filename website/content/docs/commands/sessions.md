@@ -43,11 +43,17 @@ When a session is created:
 
 Attach to a session. If no name is given, opens the session picker overlay.
 
-A **headless** session has no PTY to stream, so `gr attach` on one is not
-supported yet — graith directs you to `gr logs -f <name>`, which streams its
-rendered output read-only. Convert-to-interactive on attach (relaunching the
-agent in a PTY via `claude --resume <session-id>`, preserving history) is a
-planned follow-up (issue #1075).
+| Flag | Description |
+|------|-------------|
+| `-y, --yes` | Skip the convert-to-interactive confirmation when attaching to a headless session |
+
+A **headless** session has no PTY to stream, so `gr attach` on one **converts it
+to interactive**: graith stops the headless process and relaunches the session
+in a real PTY via `claude --resume <session-id>`, preserving the conversation,
+worktree, branch, and env. Because this restarts the agent (any in-flight tool
+call is cancelled, not resumed), attach prompts for confirmation first; pass
+`-y`/`--yes` to skip the prompt. To watch a headless session read-only *without*
+converting it, use `gr logs -f <name>` instead.
 
 ## `gr stop <name-or-id>`
 

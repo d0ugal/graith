@@ -2770,6 +2770,162 @@ func resolveForcedIDResume(agent, agentSessionID, worktreePath string, freshStar
 //
 // Uses two-phase locking: the GitHub username discovery happens before the lock,
 // and the PTY spawn happens after releasing the lock to avoid blocking the daemon.
+// convertSettleTimeout bounds how long ConvertToInteractive waits for a
+// SIGINT-interrupted headless process to settle and exit before escalating to
+// SIGTERM. A one-shot headless agent normally winds down its current turn and
+// exits promptly on interrupt; the escalation guards against one that ignores
+// it (a wedged tool call, a signal-swallowing wrapper). Vars (not consts) so
+// tests can shrink them.
+var (
+	convertSettleTimeout = 5 * time.Second
+	// convertKillTimeout bounds the SIGTERM step before the final SIGKILL.
+	convertKillTimeout = 3 * time.Second
+)
+
+// ConvertToInteractive turns a headless (one-shot stream-json) session into an
+// interactive PTY session, preserving its conversation (Claude reloads it from
+// the transcript on `--resume`), worktree, branch, graith session id, and env.
+// This backs `gr attach` on a headless session (headless phase 5, issue #1137):
+// a headless session has no ptmx to stream, so attach converts instead.
+//
+// The swap is transactional. Under the manager lock it validates the target and
+// marks it StatusCreating (a busy guard that locks out a concurrent
+// attach/stop/resume/convert) and removes the live driver from the sessions map
+// so its exit watcher goes stale and can't race the relaunch. It then stops the
+// headless process outside the lock (interrupt → settle → SIGTERM → SIGKILL
+// fallback), flips the persisted DriverKind to "pty", and relaunches through the
+// ordinary resume path — which already knows how to spawn `claude --resume
+// <agent_session_id>` in a real PTY. If the relaunch fails, the session is left
+// stopped-and-interactive (resumable), not wedged.
+//
+// A headless session that has already exited (StatusStopped/Errored) is
+// converted the same way, minus the process stop: DriverKind flips and the
+// resume path relaunches it interactively. Converting an already-interactive
+// session is a no-op that returns the current state.
+func (sm *SessionManager) ConvertToInteractive(id string, rows, cols uint16) (SessionState, error) {
+	sm.mu.Lock()
+
+	sessState, ok := sm.state.Sessions[id]
+	if !ok {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("session %q not found", id)
+	}
+
+	// Already interactive — nothing to convert. Idempotent so a racing second
+	// convert (or a client that retries) sees success, not an error.
+	if sessState.DriverKind != DriverHeadless {
+		result := cloneSessionState(sessState)
+		sm.mu.Unlock()
+
+		return result, nil
+	}
+
+	if sessState.IsSoftDeleted() {
+		sm.mu.Unlock()
+		return SessionState{}, errSoftDeleted(sessState.Name)
+	}
+
+	if sessState.Status == StatusDeleting || sessState.Status == StatusCreating {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("session %q is busy (%s); cannot convert", id, sessState.Status)
+	}
+
+	name := sessState.Name
+	driver := sm.sessions[id]
+	running := sessState.Status == StatusRunning && driver != nil
+
+	// Snapshot for rollback if the guard save can't be committed.
+	prevStatus := sessState.Status
+	prevStatusChangedAt := sessState.StatusChangedAt
+
+	// Mark busy under the lock. A live headless driver is removed from the map so
+	// its exit watcher (which fires when the process we're about to stop exits)
+	// sees sm.sessions[id] != sess and skips the state update — the convert owns
+	// the transition, not the watcher.
+	sessState.Status = StatusCreating
+	sessState.StatusChangedAt = time.Now()
+
+	if running {
+		delete(sm.sessions, id)
+	}
+
+	if err := sm.saveState(); err != nil {
+		sessState.Status = prevStatus
+		sessState.StatusChangedAt = prevStatusChangedAt
+
+		if running {
+			sm.sessions[id] = driver
+		}
+
+		sm.mu.Unlock()
+
+		return SessionState{}, fmt.Errorf("persist convert guard: %w", err)
+	}
+
+	sm.mu.Unlock()
+
+	// Stop the headless process outside the lock: interrupt (SIGINT) first so a
+	// mid-turn tool call is cancelled cleanly, then settle, escalating to
+	// SIGTERM/SIGKILL if it refuses to exit.
+	if running {
+		sm.logStopping(id, name, StopReasonConvert, "convert", driver)
+		sm.stopDriverForConvert(driver)
+		driver.Close()
+	}
+
+	// Commit the driver flip: the session is now a stopped PTY session the resume
+	// path can relaunch. Persist before the relaunch so a crash mid-convert leaves
+	// a resumable interactive session, not a headless one the attach guard blocks.
+	sm.mu.Lock()
+
+	sessState, ok = sm.state.Sessions[id]
+	if !ok {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("session %q was deleted during convert", id)
+	}
+
+	sessState.DriverKind = DriverPTY
+	sessState.Status = StatusStopped
+	sessState.StatusChangedAt = time.Now()
+	sessState.StopReason = StopReasonConvert
+
+	if err := sm.saveState(); err != nil {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("persist driver flip: %w", err)
+	}
+
+	sm.mu.Unlock()
+
+	// Relaunch interactively via the existing resume path (spawns a real PTY with
+	// resume_args → `claude --resume <agent_session_id>`).
+	return sm.resumeWithSummary(id, rows, cols, "Converted from headless to interactive")
+}
+
+// stopDriverForConvert stops a live headless driver for conversion: SIGINT to
+// cancel the current turn, then escalate to SIGTERM and finally SIGKILL if the
+// process ignores gentler signals, bounded so a wedged agent can't stall the
+// convert forever.
+func (sm *SessionManager) stopDriverForConvert(driver SessionDriver) {
+	_ = driver.Interrupt(1, 0)
+
+	select {
+	case <-driver.Done():
+		return
+	case <-time.After(convertSettleTimeout):
+	}
+
+	_ = driver.Kill()
+
+	select {
+	case <-driver.Done():
+		return
+	case <-time.After(convertKillTimeout):
+	}
+
+	_ = driver.ForceKill()
+	<-driver.Done()
+}
+
 func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, error) {
 	return sm.resumeWithSummary(id, rows, cols, "Resumed")
 }

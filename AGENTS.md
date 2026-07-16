@@ -138,11 +138,10 @@ of an interactive PTY, for fire-and-forget sessions no human will attach to
 status and captures the run's cost/token usage from the result envelope
 (surfacing to `gr list` is a planned follow-up). v1 is Claude-only and one-shot:
 it requires a prompt, is incompatible with the sandbox, implies `--background`,
-and cannot be resumed once it exits. Gated behind `[headless] experimental`
-(inert unless on); `[headless] default` and per-agent `[agents.<name>]
-headless_capable` are the other inputs. The headless engine lives in
-`internal/headless` and satisfies `daemon.SessionDriver`. `gr attach` on a
-headless session is refused with a pointer to `gr logs -f` (read-only).
+and cannot be resumed *as headless* once it exits. Gated behind `[headless]
+experimental` (inert unless on); `[headless] default` and per-agent
+`[agents.<name>] headless_capable` are the other inputs. The headless engine
+lives in `internal/headless` and satisfies `daemon.SessionDriver`.
 
 The launch uses the stdin control channel — `claude -p --output-format
 stream-json --input-format stream-json --verbose --permission-prompt-tool stdio`
@@ -160,10 +159,24 @@ decision core via `SubmitHeadlessApproval`, which is **non-blocking**: yolo
 auto-allows, a configured non-blocking backend (auto/external/builtin/localmost)
 decides, and anything that would queue for a human is *denied* (a headless
 session has no human to answer) — escalating once to the orchestrator inbox so
-the deny is visible. Remaining follow-ups (issue #1075):
-convert-to-interactive on attach (`claude --resume` in a PTY), cost/usage
-enrichment surfacing, and `[trigger.action] headless`. See
-`docs/design/2026-07-13-headless-stream-json-design.md`.
+the deny is visible.
+
+**Convert-to-interactive on attach** (phase 5, issue #1137):
+`gr attach` on a headless session converts it to an interactive PTY.
+`SessionManager.ConvertToInteractive` runs a transactional driver swap — under
+the lock it marks the session `StatusCreating` and removes the live driver from
+the map (so its exit watcher goes stale and can't race the relaunch), then
+outside the lock stops the headless process (`Interrupt` → settle → SIGTERM →
+SIGKILL, all bounded, `StopReasonConvert`), flips the persisted `DriverKind` to
+`"pty"`, and relaunches via the ordinary resume path (`claude --resume
+<agent_session_id>`), preserving the conversation/worktree/branch/env. A failed
+relaunch leaves the session stopped-and-interactive (resumable), never wedged.
+The wire flow: `attach` to a headless target replies `convert_required` (name),
+the client confirms (unless `gr attach -y`), sends `attach_convert` (its own
+handler case + `authmatrix` row), and re-attaches once the daemon replies
+`converted`. `gr logs -f` still watches a headless session read-only *without*
+converting it. Remaining follow-ups (issue #1075): cost/usage enrichment
+surfacing and `[trigger.action] headless`. See
 
 **Delete is soft by default** (`SessionManager.SoftDelete`): `gr delete` stops the
 agent and marks the session deleted (a `DeletedAt`/`ExpiresAt` marker on

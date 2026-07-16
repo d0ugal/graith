@@ -179,6 +179,19 @@
       "fields": []
     },
     {
+      "name": "AttachConvertMsg",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
       "name": "AttachMsg",
       "swift": "required",
       "swift_type": "AttachMsg",
@@ -380,6 +393,26 @@
             "kind": "bool"
           },
           "optional": true
+        }
+      ]
+    },
+    {
+      "name": "ConvertRequiredMsg",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
         }
       ]
     },
