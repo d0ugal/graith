@@ -861,6 +861,11 @@ type CreateOpts struct {
 	// crash between Create and a separate tag-and-save.
 	TriggerID      string
 	TriggerReactor bool
+	// TrackerIssue tags a session spawned by a tracker action with its issue key
+	// (see SessionState.TrackerIssue), applied in the same durable reservation as
+	// creation so the reconcile dedup key survives a crash between Create and a
+	// separate tag-and-save.
+	TrackerIssue string
 	// AutoCleanup marks a trigger-spawned session for soft-deletion when it
 	// stops (config.CleanupAlways / config.CleanupOnSuccess; empty disables).
 	AutoCleanup string
@@ -1201,6 +1206,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		Yolo:            yolo,
 		TriggerID:       opts.TriggerID,
 		TriggerReactor:  opts.TriggerReactor,
+		TrackerIssue:    opts.TrackerIssue,
 		AutoCleanup:     opts.AutoCleanup,
 		IdleTimeoutSecs: opts.IdleTimeoutSecs,
 		Status:          StatusCreating,

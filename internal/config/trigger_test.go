@@ -104,6 +104,19 @@ func TestValidateTriggers_Valid(t *testing.T) {
 			trig:         schedTrigger("skelf-briefing", ScheduleConfig{Cron: "0 8 * * *"}, ActionConfig{Type: ActionSession, Prompt: "brief", AutoCleanup: true, IdleTimeout: "2m"}),
 			orchestrator: true,
 		},
+		{
+			name:         "schedule tracker minimal",
+			trig:         schedTrigger("braw-tracker", ScheduleConfig{Every: "5m"}, ActionConfig{Type: ActionTracker, Prompt: "work #{issue_number}", Tracker: &TrackerConfig{Repo: "/tmp/croft"}}),
+			orchestrator: true,
+		},
+		{
+			name: "schedule tracker full knobs",
+			trig: schedTrigger("canny-tracker", ScheduleConfig{Cron: "@hourly"}, ActionConfig{Type: ActionTracker, Prompt: "{issue_title}", Tracker: &TrackerConfig{
+				Provider: "github", Repo: "/tmp/croft", ActiveState: "open", ActiveLabels: []string{"thrawn"},
+				Assignee: "@me", Grace: "10m", MaxConcurrent: 3, Reap: "delete", Limit: 25,
+			}}),
+			orchestrator: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -157,6 +170,16 @@ func TestValidateTriggers_Invalid(t *testing.T) {
 		{"zero idle_timeout", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Prompt: "hi", IdleTimeout: "0s"}), true, "idle_timeout must be at least 1s"},
 		{"sub-second idle_timeout", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Prompt: "hi", IdleTimeout: "500ms"}), true, "idle_timeout must be at least 1s"},
 		{"idle_timeout on command", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionCommand, Command: "x", Repo: "/tmp/x", IdleTimeout: "1m"}), false, "idle_timeout is only valid for a session action"},
+		{"tracker needs orchestrator", schedTrigger("scunner", ScheduleConfig{Every: "5m"}, ActionConfig{Type: ActionTracker, Tracker: &TrackerConfig{Repo: "/tmp/x"}}), false, "requires [orchestrator] enabled"},
+		{"tracker no block", schedTrigger("scunner", ScheduleConfig{Every: "5m"}, ActionConfig{Type: ActionTracker}), true, "requires an [action.tracker] block"},
+		{"tracker no repo", schedTrigger("scunner", ScheduleConfig{Every: "5m"}, ActionConfig{Type: ActionTracker, Tracker: &TrackerConfig{}}), true, "requires action.tracker.repo"},
+		{"tracker on watch source", watchTrigger("scunner", WatchConfig{Repo: "/r"}, ActionConfig{Type: ActionTracker, Tracker: &TrackerConfig{Repo: "/tmp/x"}}), true, "requires a [schedule] source"},
+		{"tracker bad provider", schedTrigger("scunner", ScheduleConfig{Every: "5m"}, ActionConfig{Type: ActionTracker, Tracker: &TrackerConfig{Repo: "/tmp/x", Provider: "jira"}}), true, "provider \"jira\" is unsupported"},
+		{"tracker bad active_state", schedTrigger("scunner", ScheduleConfig{Every: "5m"}, ActionConfig{Type: ActionTracker, Tracker: &TrackerConfig{Repo: "/tmp/x", ActiveState: "wibbly"}}), true, "active_state \"wibbly\" is invalid"},
+		{"tracker bad reap", schedTrigger("scunner", ScheduleConfig{Every: "5m"}, ActionConfig{Type: ActionTracker, Tracker: &TrackerConfig{Repo: "/tmp/x", Reap: "incinerate"}}), true, "reap \"incinerate\" is invalid"},
+		{"tracker bad grace", schedTrigger("scunner", ScheduleConfig{Every: "5m"}, ActionConfig{Type: ActionTracker, Tracker: &TrackerConfig{Repo: "/tmp/x", Grace: "soon"}}), true, "grace"},
+		{"tracker negative max_concurrent", schedTrigger("scunner", ScheduleConfig{Every: "5m"}, ActionConfig{Type: ActionTracker, Tracker: &TrackerConfig{Repo: "/tmp/x", MaxConcurrent: -1}}), true, "max_concurrent must not be negative"},
+		{"tracker negative limit", schedTrigger("scunner", ScheduleConfig{Every: "5m"}, ActionConfig{Type: ActionTracker, Tracker: &TrackerConfig{Repo: "/tmp/x", Limit: -5}}), true, "limit must not be negative"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -193,6 +216,43 @@ func TestValidateTriggers_ReservedScenarioPrefix(t *testing.T) {
 	joined := errorsString(c.validateTriggers())
 	if !strings.Contains(joined, "reserved") {
 		t.Fatalf("expected reserved-prefix error, got %s", joined)
+	}
+}
+
+func TestTrackerConfigDefaults(t *testing.T) {
+	var empty TrackerConfig
+
+	if got := empty.ProviderOr(); got != TrackerProviderGitHub {
+		t.Errorf("ProviderOr() = %q, want %q", got, TrackerProviderGitHub)
+	}
+
+	if got := empty.ActiveStateOr(); got != TrackerStateOpen {
+		t.Errorf("ActiveStateOr() = %q, want %q", got, TrackerStateOpen)
+	}
+
+	if got := empty.ReapMode(); got != TrackerReapStop {
+		t.Errorf("ReapMode() = %q, want %q", got, TrackerReapStop)
+	}
+
+	if got := empty.GraceDuration(); got != defaultTrackerGrace {
+		t.Errorf("GraceDuration() = %v, want %v", got, defaultTrackerGrace)
+	}
+
+	if got := empty.LimitOr(); got != defaultTrackerLimit {
+		t.Errorf("LimitOr() = %d, want %d", got, defaultTrackerLimit)
+	}
+
+	set := TrackerConfig{Provider: "github", ActiveState: "all", Reap: "delete", Grace: "10m", Limit: 7}
+	if got := set.GraceDuration(); got != 10*time.Minute {
+		t.Errorf("GraceDuration() = %v, want 10m", got)
+	}
+
+	if got := set.LimitOr(); got != 7 {
+		t.Errorf("LimitOr() = %d, want 7", got)
+	}
+
+	if got := set.ActiveStateOr(); got != TrackerStateAll {
+		t.Errorf("ActiveStateOr() = %q, want all", got)
 	}
 }
 

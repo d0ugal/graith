@@ -158,6 +158,12 @@ func validateScenarioTriggerRestrictions(where string, t *config.TriggerConfig, 
 		return fmt.Errorf("%s: scenario triggers cannot start scenarios", where)
 	}
 
+	// A tracker action polls an external tracker and spawns work in a repo outside
+	// the scenario's own sessions, so it has no place inside a scenario.
+	if t.Action.Type == config.ActionTracker {
+		return fmt.Errorf("%s: scenario triggers cannot use the tracker action (it operates on an external repo/tracker)", where)
+	}
+
 	// A schedule command needs an execution root repo, which would point outside
 	// the scenario. Scenario command triggers must derive their root from a bound
 	// worktree, i.e. use a [watch] source.

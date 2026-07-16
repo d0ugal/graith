@@ -1,0 +1,491 @@
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/d0ugal/graith/internal/config"
+)
+
+// tracker.go implements the `tracker` trigger action (issue #643): a scheduled
+// trigger that polls an issue tracker for active issues and reconciles live
+// sessions against them — spawning one session per active issue (seeded from the
+// issue body) and reaping the session when its issue leaves the active state.
+//
+// The tracker is the source of truth; each fire drives the live session set
+// toward it. Dedup is by the durable SessionState.TrackerIssue tag, so a restart
+// mid-reconcile never double-spawns. See
+// docs/design/2026-07-16-tracker-poll-action.md.
+
+// issueRef is one active tracker issue observed in a reconcile pass.
+type issueRef struct {
+	key    string // stable identity, e.g. "gh:owner/repo#643"
+	number int
+	title  string
+	body   string
+	url    string
+	labels []string
+}
+
+// trackerSession is one live (running or stopped, not soft-deleted) session owned
+// by a tracker trigger.
+type trackerSession struct {
+	id       string
+	issueKey string
+	running  bool
+}
+
+// trackerReconcilePlan is the reconcile decision for one tracker trigger.
+type trackerReconcilePlan struct {
+	spawn  []issueRef // active issues with no live session
+	resume []string   // session IDs: active issue whose session is stopped
+	reap   []string   // session IDs: obsolete issue past the grace window
+}
+
+// reconcileTracker computes the spawn/resume/reap plan for one tracker trigger.
+// It is a pure function so the reconcile logic is exhaustively unit-testable.
+//
+//	active        — issues currently in the active state (from the poll)
+//	existing      — this trigger's live sessions (running or stopped)
+//	obsoleteSince — per-issue first-seen-obsolete timestamps (issueKey -> time)
+//	grace         — how long an issue must stay inactive before its session is reaped
+//	maxConcurrent — cap on running tracker sessions (0 = unlimited); bounds spawn+resume
+//	now           — current time
+//
+// It returns the plan, the refreshed obsoleteSince map (rebuilt from the current
+// state, so stale entries self-prune), and the number of spawns/resumes the cap
+// suppressed (for logging).
+func reconcileTracker(
+	active []issueRef,
+	existing []trackerSession,
+	obsoleteSince map[string]time.Time,
+	grace time.Duration,
+	maxConcurrent int,
+	now time.Time,
+) (trackerReconcilePlan, map[string]time.Time, int) {
+	activeSet := make(map[string]bool, len(active))
+	for _, iss := range active {
+		activeSet[iss.key] = true
+	}
+
+	existingByKey := make(map[string]trackerSession, len(existing))
+	for _, s := range existing {
+		// If two sessions somehow share a key, the last wins for dedup; both are
+		// still considered for reap in the loop below.
+		existingByKey[s.issueKey] = s
+	}
+
+	var plan trackerReconcilePlan
+
+	newGrace := make(map[string]time.Time)
+
+	// runningRemaining counts sessions that will be running after this pass, used
+	// to enforce the concurrency cap on spawns/resumes.
+	runningRemaining := 0
+
+	for _, s := range existing {
+		if activeSet[s.issueKey] {
+			// Still active: clears any obsolete mark; counts toward the cap if running.
+			if s.running {
+				runningRemaining++
+			}
+
+			continue
+		}
+
+		// Obsolete: track since when, reap once past the grace window.
+		firstSeen, ok := obsoleteSince[s.issueKey]
+		if !ok {
+			firstSeen = now
+		}
+
+		newGrace[s.issueKey] = firstSeen
+
+		if now.Sub(firstSeen) >= grace {
+			plan.reap = append(plan.reap, s.id)
+			continue // being reaped: does not count toward the cap
+		}
+
+		// Held within grace: a running session still occupies a slot.
+		if s.running {
+			runningRemaining++
+		}
+	}
+
+	capped := 0
+
+	for _, iss := range active {
+		s, ok := existingByKey[iss.key]
+		if ok && s.running {
+			continue // already has a running session
+		}
+
+		if maxConcurrent > 0 && runningRemaining >= maxConcurrent {
+			capped++
+			continue
+		}
+
+		if ok {
+			// Stopped session for a (re-)active issue: resume it rather than spawn
+			// a duplicate — mirrors the ensure-reactor auto-resume.
+			plan.resume = append(plan.resume, s.id)
+		} else {
+			plan.spawn = append(plan.spawn, iss)
+		}
+
+		runningRemaining++
+	}
+
+	return plan, newGrace, capped
+}
+
+// actionTracker runs one reconcile pass for a tracker trigger: poll the tracker,
+// diff against this trigger's live sessions, then spawn/resume/reap to match.
+func (sm *SessionManager) actionTracker(ctx context.Context, t *config.TriggerConfig, fc fireContext) (string, error) {
+	tc := t.Action.Tracker
+	if tc == nil {
+		return "", fmt.Errorf("tracker action missing [action.tracker]")
+	}
+
+	orchestratorID := sm.orchestratorID()
+	if orchestratorID == "" {
+		return "", fmt.Errorf("no orchestrator session; cannot own spawned sessions")
+	}
+
+	repo := tc.RepoPath()
+	if repo == "" {
+		return "", fmt.Errorf("tracker action requires action.tracker.repo")
+	}
+
+	active, err := sm.fetchTrackerIssues(ctx, tc, repo)
+	if err != nil {
+		return "", err
+	}
+
+	existing := sm.trackerSessions(t.Name)
+	obsoleteSince := sm.trackerObsoleteSnapshot(t.Name)
+
+	plan, newGrace, capped := reconcileTracker(active, existing, obsoleteSince, tc.GraceDuration(), tc.MaxConcurrent, time.Now())
+	sm.setTrackerObsolete(t.Name, newGrace)
+
+	spawned := 0
+
+	for _, iss := range plan.spawn {
+		//nolint:contextcheck // spawns a PTY-backed session that outlives the fire ctx (matches actionSession).
+		if serr := sm.spawnTrackerSession(t, iss, orchestratorID, repo); serr != nil {
+			sm.log.Warn("tracker: spawn failed", "trigger", t.Name, "issue", iss.key, "err", serr)
+			continue
+		}
+
+		spawned++
+	}
+
+	resumed := 0
+
+	for _, id := range plan.resume {
+		//nolint:contextcheck // Resume runs its own session lifecycle, detached from the fire ctx.
+		if _, rerr := sm.Resume(id, 24, 80); rerr != nil {
+			sm.log.Warn("tracker: resume failed", "trigger", t.Name, "session", id, "err", rerr)
+			continue
+		}
+
+		resumed++
+	}
+
+	reaped := 0
+
+	for _, id := range plan.reap {
+		if sm.reapTrackerSession(id, tc.ReapMode()) {
+			reaped++
+		}
+	}
+
+	summary := fmt.Sprintf("active %d, spawned %d, resumed %d, reaped %d", len(active), spawned, resumed, reaped)
+	if capped > 0 {
+		summary += fmt.Sprintf(", capped %d", capped)
+	}
+
+	if t.Action.Deliver != (config.DeliverConfig{}) {
+		sm.deliver(ctx, t.Action.Deliver, fmt.Sprintf("Tracker %q: %s", t.Name, summary), repo, sm.triggerVars(t, fc))
+	}
+
+	return summary, nil
+}
+
+// spawnTrackerSession creates one session seeded from an issue, parented to the
+// orchestrator and tagged with the trigger + issue key for reconcile dedup.
+func (sm *SessionManager) spawnTrackerSession(t *config.TriggerConfig, iss issueRef, orchestratorID, repo string) error {
+	prompt, err := config.ExpandTrigger(t.Action.Prompt, trackerIssueVars(t.Name, iss))
+	if err != nil {
+		return err
+	}
+
+	_, err = sm.createTriggerSession(createTriggerReq{
+		name:         trackerSessionName(t.Name, iss.number),
+		agent:        t.Action.Agent,
+		repo:         repo,
+		prompt:       prompt,
+		model:        t.Action.Model,
+		parentID:     orchestratorID,
+		triggerName:  t.Name,
+		trackerIssue: iss.key,
+	})
+
+	return err
+}
+
+// reapTrackerSession applies the configured reap policy to an obsolete session.
+// It returns true when it changed the session's state, so a no-op (already
+// stopped under reap=stop, or reap=none) isn't counted or retried noisily.
+func (sm *SessionManager) reapTrackerSession(id, mode string) bool {
+	switch mode {
+	case config.TrackerReapNone:
+		return false
+	case config.TrackerReapDelete:
+		if _, err := sm.SoftDelete(id); err != nil {
+			sm.log.Warn("tracker: reap (delete) failed", "session", id, "err", err)
+			return false
+		}
+
+		return true
+	default: // stop
+		if !sm.sessionRunning(id) {
+			return false // already stopped: nothing to reap
+		}
+
+		if err := sm.Stop(id); err != nil {
+			sm.log.Warn("tracker: reap (stop) failed", "session", id, "err", err)
+			return false
+		}
+
+		return true
+	}
+}
+
+// sessionRunning reports whether a session exists and is currently running.
+func (sm *SessionManager) sessionRunning(id string) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	s, ok := sm.state.Sessions[id]
+
+	return ok && s.Status == StatusRunning
+}
+
+// trackerSessions returns the live (running or stopped, non-soft-deleted)
+// sessions this tracker trigger owns, keyed by their issue tag.
+func (sm *SessionManager) trackerSessions(triggerName string) []trackerSession {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	var out []trackerSession
+
+	for id, s := range sm.state.Sessions {
+		if s.TriggerID != triggerName || s.TrackerIssue == "" || s.IsSoftDeleted() {
+			continue
+		}
+
+		if s.Status != StatusRunning && s.Status != StatusStopped {
+			continue // creating / errored — not yet a reconcilable session
+		}
+
+		out = append(out, trackerSession{
+			id:       id,
+			issueKey: s.TrackerIssue,
+			running:  s.Status == StatusRunning,
+		})
+	}
+
+	return out
+}
+
+// trackerObsoleteSnapshot copies the current obsolete-since timestamps for a
+// trigger (issueKey -> time) out from under the trigger mutex.
+func (sm *SessionManager) trackerObsoleteSnapshot(triggerName string) map[string]time.Time {
+	sm.triggers.mu.Lock()
+	defer sm.triggers.mu.Unlock()
+
+	out := make(map[string]time.Time)
+	prefix := triggerName + "\x00"
+
+	for k, v := range sm.triggers.trackerObsolete {
+		if strings.HasPrefix(k, prefix) {
+			out[strings.TrimPrefix(k, prefix)] = v
+		}
+	}
+
+	return out
+}
+
+// setTrackerObsolete replaces a trigger's obsolete-since entries with the reconcile
+// pass's refreshed map (issueKey -> time), pruning any that are no longer obsolete.
+func (sm *SessionManager) setTrackerObsolete(triggerName string, m map[string]time.Time) {
+	sm.triggers.mu.Lock()
+	defer sm.triggers.mu.Unlock()
+
+	prefix := triggerName + "\x00"
+	for k := range sm.triggers.trackerObsolete {
+		if strings.HasPrefix(k, prefix) {
+			delete(sm.triggers.trackerObsolete, k)
+		}
+	}
+
+	for issueKey, ts := range m {
+		sm.triggers.trackerObsolete[trackerGraceKey(triggerName, issueKey)] = ts
+	}
+}
+
+// trackerIssueVars builds the template variables for an issue-seeded prompt.
+func trackerIssueVars(triggerName string, iss issueRef) config.TriggerVars {
+	now := time.Now()
+
+	return config.TriggerVars{
+		Name:        triggerName,
+		Date:        now.Format("2006-01-02"),
+		Datetime:    now.Format(time.RFC3339),
+		FireTime:    now.Format(time.RFC3339),
+		IssueNumber: fmt.Sprintf("%d", iss.number),
+		IssueTitle:  iss.title,
+		IssueBody:   iss.body,
+		IssueURL:    iss.url,
+		IssueLabels: strings.Join(iss.labels, ", "),
+	}
+}
+
+// trackerSessionName builds a stable, bounded session name for an issue.
+func trackerSessionName(triggerName string, number int) string {
+	base := fmt.Sprintf("%s-%d", triggerName, number)
+	if len(base) > 40 {
+		base = base[:40]
+	}
+
+	return base
+}
+
+// --- provider: GitHub Issues (v1) ---
+
+// ghIssue is the JSON shape of one `gh issue list --json ...` item.
+type ghIssue struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+	URL    string `json:"url"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+}
+
+// fetchTrackerIssues polls the configured provider for its active issues.
+func (sm *SessionManager) fetchTrackerIssues(ctx context.Context, tc *config.TrackerConfig, repo string) ([]issueRef, error) {
+	switch tc.ProviderOr() {
+	case config.TrackerProviderGitHub:
+		return sm.fetchGitHubIssues(ctx, tc, repo)
+	default:
+		return nil, fmt.Errorf("tracker provider %q is not supported", tc.ProviderOr())
+	}
+}
+
+// fetchGitHubIssues lists the repo's active issues via the `gh` CLI, reusing the
+// pr_watch reader's short-timeout, prompt-disabled runner.
+func (sm *SessionManager) fetchGitHubIssues(ctx context.Context, tc *config.TrackerConfig, repo string) ([]issueRef, error) {
+	if !ghAvailable() {
+		return nil, fmt.Errorf("gh CLI not found on PATH")
+	}
+
+	slug, ok := repoSlug(repo)
+	if !ok {
+		return nil, fmt.Errorf("no GitHub remote for %q", repo)
+	}
+
+	cctx, cancel := context.WithTimeout(ctx, ghTimeout)
+	defer cancel()
+
+	args := []string{
+		"issue", "list",
+		"--repo", slug,
+		"--state", tc.ActiveStateOr(),
+		"--json", "number,title,body,url,labels",
+		"--limit", fmt.Sprintf("%d", tc.LimitOr()),
+	}
+
+	// gh's --label is AND (issue must have every label); the config's active_labels
+	// is "has any of these", so filter client-side rather than pass --label. The
+	// assignee filter is a single value, so it maps directly.
+	if tc.Assignee != "" {
+		args = append(args, "--assignee", tc.Assignee)
+	}
+
+	out, err := ghRunner(cctx, repo, args...)
+	if err != nil {
+		return nil, fmt.Errorf("gh issue list: %w", err)
+	}
+
+	refs, err := parseGitHubIssues(out, slug)
+	if err != nil {
+		return nil, err
+	}
+
+	return filterIssuesByLabels(refs, tc.ActiveLabels), nil
+}
+
+// filterIssuesByLabels keeps issues that carry at least one of the given labels.
+// An empty label set is a no-op (all issues pass).
+func filterIssuesByLabels(refs []issueRef, labels []string) []issueRef {
+	if len(labels) == 0 {
+		return refs
+	}
+
+	want := make(map[string]bool, len(labels))
+	for _, l := range labels {
+		want[l] = true
+	}
+
+	out := make([]issueRef, 0, len(refs))
+
+	for _, r := range refs {
+		for _, l := range r.labels {
+			if want[l] {
+				out = append(out, r)
+				break
+			}
+		}
+	}
+
+	return out
+}
+
+// parseGitHubIssues decodes `gh issue list --json` output into issueRefs with a
+// stable per-issue key ("gh:<slug>#<number>").
+func parseGitHubIssues(out, slug string) ([]issueRef, error) {
+	if strings.TrimSpace(out) == "" {
+		return nil, nil
+	}
+
+	var items []ghIssue
+	if err := json.Unmarshal([]byte(out), &items); err != nil {
+		return nil, fmt.Errorf("parse gh issue list: %w", err)
+	}
+
+	refs := make([]issueRef, 0, len(items))
+
+	for _, it := range items {
+		labels := make([]string, 0, len(it.Labels))
+		for _, l := range it.Labels {
+			labels = append(labels, l.Name)
+		}
+
+		refs = append(refs, issueRef{
+			key:    fmt.Sprintf("gh:%s#%d", slug, it.Number),
+			number: it.Number,
+			title:  it.Title,
+			body:   it.Body,
+			url:    it.URL,
+			labels: labels,
+		})
+	}
+
+	return refs, nil
+}

@@ -66,7 +66,7 @@ debounce = "30s"             # quiet-window; lower for fast commands
 
 ```toml
 [trigger.action]
-type = "command"   # command | session | scenario | message
+type = "command"   # command | session | scenario | message | tracker
 ```
 
 | Type | What it does |
@@ -75,6 +75,7 @@ type = "command"   # command | session | scenario | message
 | `session` | Spawn a session, parented to the orchestrator. |
 | `scenario` | Start a named scenario from `~/.config/graith/scenarios/`. |
 | `message` | Route a fixed `body` to an inbox or topic. |
+| `tracker` | Poll an issue tracker and reconcile sessions against it — spawn one per active issue, reap it when the issue goes inactive (schedule source only). |
 
 ### Command sandboxing
 
@@ -166,6 +167,67 @@ ensure = true   # message the owned reactor if it exists (auto-resumes a stopped
 agent  = "claude"
 prompt = "Review the changes since your last look; send feedback via gr msg."
 ```
+
+### Tracker (issue-tracker sync)
+
+A `tracker` action keeps live sessions in sync with an issue tracker. On each
+scheduled poll it fetches the tracker's **active** issues and reconciles sessions
+against them: it spawns one session per active issue (seeded from the issue body)
+and reaps the session when its issue leaves the active state. The tracker is the
+source of truth — the daemon drives the live session set toward it every tick.
+It requires a `[schedule]` source and an enabled `[orchestrator]` (which owns the
+spawned sessions). GitHub Issues is the only provider in v1.
+
+```toml
+[[trigger]]
+name = "issue-sessions"
+
+[trigger.schedule]
+every = "5m"
+
+[trigger.action]
+type   = "tracker"
+agent  = "claude"
+prompt = "Work on GitHub issue #{issue_number}: {issue_title}\n\n{issue_body}\n\n{issue_url}"
+
+[trigger.action.tracker]
+provider       = "github"          # v1: github (default)
+repo           = "~/Code/graith"   # resolves the GitHub slug + is the spawn repo
+active_state   = "open"            # open | closed | all (default open)
+active_labels  = ["in-progress"]   # active iff the issue has one of these (empty = any)
+assignee       = "@me"             # optional gh assignee filter
+grace          = "10m"             # inactive this long before reaping (default 5m)
+max_concurrent = 3                 # cap on live tracker sessions (0 = unlimited)
+reap           = "stop"            # stop | delete | none (default stop)
+limit          = 50                # max issues fetched per poll (default 50)
+
+[trigger.action.deliver]
+inbox = "orchestrator"             # optional: the reconcile summary
+```
+
+The spawned session's `prompt` is templated per issue with `{issue_number}`,
+`{issue_title}`, `{issue_body}`, `{issue_url}`, and `{issue_labels}` (plus the
+usual `{name}`/`{date}`/`{datetime}`/`{fire_time}`).
+
+**Reconciliation semantics:**
+
+- **Idempotent.** Sessions are deduplicated by a durable per-issue tag, so a
+  session is never respawned while a live (running or stopped) one for the same
+  issue exists — even across a daemon restart.
+- **Grace window.** An issue must stay inactive for `grace` before its session is
+  reaped, so a brief mislabel or column bounce doesn't kill in-flight work. An
+  issue that becomes active again clears the grace clock; a stopped session for a
+  re-activated issue is resumed rather than duplicated.
+- **Reap policy.** `stop` (default) stops the agent (recover with `gr resume`);
+  `delete` soft-deletes the session (recover with `gr restore` within the
+  retention window); `none` leaves it and only reports. Starred and system
+  sessions are never reaped.
+- **Concurrency.** `max_concurrent` caps how many tracker sessions run at once, so
+  a large backlog can't spawn dozens of agents in one poll; the rest are deferred
+  to later ticks.
+
+The tracker is **read-only** — graith never writes back to it (no closing issues,
+no comments). Reaping never hard-deletes.
 
 ## Delivery
 
