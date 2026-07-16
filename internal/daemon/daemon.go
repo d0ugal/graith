@@ -1159,14 +1159,19 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	// Yolo requires the PreToolUse approval hook to function, so it forces agent
 	// hooks on regardless of the requested value — otherwise a Yolo session with
 	// hooks disabled would auto-mark itself yolo but never install the hook that
-	// routes tool calls to the auto backend. Reassigning here keeps every
-	// downstream use (MCP resolution, persisted AgentHooks, hook injection,
-	// sandbox hook-dir allowance) consistent.
-	agentHooks = agentHooks || yolo
+	// routes tool calls to the auto backend.
+	hooksEnabled := agentHooks || yolo
+
+	// MCP config injection is a decision distinct from lifecycle-hook injection
+	// (see injectMCPConfig / issue #1135). For a PTY session the two coincide, so
+	// this preserves existing behaviour, but keeping the gate separate means yolo
+	// no longer silently governs MCP availability and a headless session can be
+	// given MCP without generated hooks.
+	mcpEnabled := hooksEnabled
 
 	// Resolve MCP servers under the lock (reads config).
 	var mcpServers []config.MCPServerConfig
-	if agentHooks {
+	if mcpEnabled {
 		mcpServers = sm.resolveMCPServers(agentName)
 	}
 
@@ -1191,7 +1196,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		Mirror:          isMirror,
 		MirrorSourceID:  mirrorSourceID,
 		InPlace:         inPlace,
-		AgentHooks:      agentHooks,
+		AgentHooks:      hooksEnabled,
 		Yolo:            yolo,
 		TriggerID:       opts.TriggerID,
 		TriggerReactor:  opts.TriggerReactor,
@@ -1457,10 +1462,9 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	}
 
 	// Headless sessions skip graith's generated status/approval hooks: the typed
-	// stream is the status/approval feed. (v1 also skips MCP-config injection,
-	// which currently rides the hook path — see the design doc's Phase 0.)
-	if agentHooks && driverKind != DriverHeadless {
-		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, yolo, mcpServers)
+	// stream is the status/approval feed.
+	if hooksEnabled && driverKind != DriverHeadless {
+		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, yolo)
 		if err != nil {
 			cleanupOnError()
 			rollbackState()
@@ -1473,6 +1477,22 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		for k, v := range hookEnv {
 			env[k] = v
 		}
+	}
+
+	// MCP config is injected separately from hooks (issue #1135), so a session
+	// with hooks disabled still gets its MCP servers. Headless MCP injection is a
+	// deliberate follow-up (issue #1075); it stays PTY-only here so this remains a
+	// pure refactor of the existing behaviour.
+	if mcpEnabled && driverKind != DriverHeadless {
+		mcpArgs, err := sm.injectMCPConfig(agentName, id, mcpServers)
+		if err != nil {
+			cleanupOnError()
+			rollbackState()
+
+			return SessionState{}, fmt.Errorf("inject mcp config: %w", err)
+		}
+
+		expandedArgs = append(expandedArgs, mcpArgs...)
 	}
 
 	if agent.PromptInjectionEnabled() && driverKind != DriverHeadless {
@@ -1519,7 +1539,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			envKeys = append(envKeys, k)
 		}
 
-		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, agentHooks)
+		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, hooksEnabled || mcpEnabled)
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
@@ -1901,6 +1921,9 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	// Yolo forces agent hooks on (see Create) so a forked yolo session always
 	// installs the approval hook, even if the source had hooks disabled.
 	sourceAgentHooks := source.AgentHooks || sourceYolo
+	// MCP config injection is decided separately from hooks (see #1135). Fork is
+	// PTY-only, so the two coincide here.
+	sourceMCPEnabled := sourceAgentHooks
 	sourceForkIncludes := make([]IncludedRepoState, len(source.Includes))
 	copy(sourceForkIncludes, source.Includes)
 
@@ -1933,7 +1956,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	}
 
 	var mcpServers []config.MCPServerConfig
-	if sourceAgentHooks {
+	if sourceMCPEnabled {
 		mcpServers = sm.resolveMCPServers(agentName)
 	}
 
@@ -2191,7 +2214,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	}
 
 	if sourceAgentHooks {
-		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, sourceYolo, mcpServers)
+		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, sourceYolo)
 		if err != nil {
 			forkCleanup()
 			rollbackState()
@@ -2204,6 +2227,18 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		for k, v := range hookEnv {
 			env[k] = v
 		}
+	}
+
+	if sourceMCPEnabled {
+		mcpArgs, err := sm.injectMCPConfig(agentName, id, mcpServers)
+		if err != nil {
+			forkCleanup()
+			rollbackState()
+
+			return SessionState{}, fmt.Errorf("inject mcp config: %w", err)
+		}
+
+		expandedArgs = append(expandedArgs, mcpArgs...)
 	}
 
 	if agent.PromptInjectionEnabled() {
@@ -2248,7 +2283,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 			envKeys = append(envKeys, k)
 		}
 
-		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, sourceAgentHooks)
+		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, sourceAgentHooks || sourceMCPEnabled)
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
@@ -2889,7 +2924,9 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	}
 
 	// Resolve MCP servers under the lock. Yolo forces hooks on (see Create), so
-	// resolve MCP servers for a yolo session even if hooks were disabled.
+	// resolve MCP servers for a yolo session even if hooks were disabled. MCP is a
+	// decision distinct from hooks (see #1135); resume is PTY-only, so they
+	// coincide here.
 	var mcpServers []config.MCPServerConfig
 	if sessState.AgentHooks || sessState.Yolo {
 		mcpServers = sm.resolveMCPServers(sessState.Agent)
@@ -3012,6 +3049,9 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	// Yolo forces agent hooks on (see Create) so a resumed yolo session always
 	// re-installs the approval hook, even if hooks were disabled at create.
 	sessAgentHooks := sessState.AgentHooks || sessYolo
+	// MCP config injection is decided separately from hooks (see #1135). Resume is
+	// PTY-only, so the two coincide here.
+	sessMCPEnabled := sessAgentHooks
 	sessIncludes := make([]IncludedRepoState, len(sessState.Includes))
 	copy(sessIncludes, sessState.Includes)
 	sessInPlace := sessState.InPlace
@@ -3200,7 +3240,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	}
 
 	if sessAgentHooks {
-		hookArgs, hookEnv, err := sm.injectHooks(sessAgent, id, sessWorktreePath, sessYolo, mcpServers)
+		hookArgs, hookEnv, err := sm.injectHooks(sessAgent, id, sessWorktreePath, sessYolo)
 		if err != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)
@@ -3211,6 +3251,16 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		for k, v := range hookEnv {
 			env[k] = v
 		}
+	}
+
+	if sessMCPEnabled {
+		mcpArgs, err := sm.injectMCPConfig(sessAgent, id, mcpServers)
+		if err != nil {
+			rollbackState()
+			return SessionState{}, fmt.Errorf("inject mcp config: %w", err)
+		}
+
+		expandedArgs = append(expandedArgs, mcpArgs...)
 	}
 
 	if isOrchestrator {
@@ -3265,7 +3315,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 			envKeys = append(envKeys, k)
 		}
 
-		opts := sm.sandboxOptsFromConfig(merged, id, ptyCWD, agent.Command, envKeys, sessAgentHooks)
+		opts := sm.sandboxOptsFromConfig(merged, id, ptyCWD, agent.Command, envKeys, sessAgentHooks || sessMCPEnabled)
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
@@ -6740,13 +6790,15 @@ func (sm *SessionManager) safehouseFragmentPath(sessionID string) string {
 	return filepath.Join(sm.paths.RuntimeDir, "safehouse", sessionID+".sb")
 }
 
-func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, sessionID, worktreePath, agentCommand string, envKeys []string, agentHooks bool) sandbox.WrapOpts {
+func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, sessionID, worktreePath, agentCommand string, envKeys []string, grantHookDir bool) sandbox.WrapOpts {
 	readDirs := expandPaths(merged.ReadDirs, sm.log, "read")
 	writeDirs := expandPaths(merged.WriteDirs, sm.log, "write")
 	readFiles := expandFilePaths(merged.ReadFiles, sm.log, "read")
 	writeFiles := expandFilePaths(merged.WriteFiles, sm.log, "write")
 
-	if agentHooks {
+	// The hook dir holds both the generated settings (hooks) file and the MCP
+	// config file, so grant it read whenever either was injected (see #1135).
+	if grantHookDir {
 		hd := sm.hookDir(sessionID)
 		if _, err := os.Stat(hd); err == nil {
 			readDirs = append(readDirs, hd)

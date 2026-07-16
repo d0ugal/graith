@@ -3956,6 +3956,142 @@ func assertAddDirLayout(t *testing.T, argv []string, prompt string, worktrees []
 	}
 }
 
+// newClaudeRecorderManager sets up a SessionManager whose "claude" agent records
+// the argv it is launched with, for asserting hook/MCP arg injection end-to-end.
+func newClaudeRecorderManager(t *testing.T, repoDir string) (*SessionManager, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	recordPath := filepath.Join(dir, "argv.txt")
+
+	// $0/$@ are exactly the flags graith appends after the "-c" script string.
+	script := `printf '%s\n' "$0" "$@" > "$GRAITH_ARGS_RECORD"; exec cat`
+
+	cfg := config.Default()
+	cfg.FetchOnCreate = false
+	// Drop the default agent prompt so the recorded argv is just the injected
+	// hook/MCP flags — no --append-system-prompt noise to reason about.
+	cfg.AgentPrompt = ""
+	cfg.Agents["claude"] = config.Agent{
+		Command:    "sh",
+		Args:       []string{"-c", script},
+		ResumeArgs: []string{"-c", script},
+		ForkArgs:   []string{"-c", script},
+		Env:        map[string]string{"GRAITH_ARGS_RECORD": recordPath},
+	}
+	cfg.Repos = []config.RepoConfig{{Path: repoDir}}
+
+	sm := NewSessionManager(cfg, config.Paths{
+		StateFile:  filepath.Join(dir, "state.json"),
+		DataDir:    dir,
+		LogDir:     dir,
+		RuntimeDir: dir,
+		TmpDir:     filepath.Join(dir, "tmp"),
+	}, slog.Default())
+
+	return sm, recordPath
+}
+
+// assertArgvContains fails unless want appears as one element of argv.
+func assertArgvContains(t *testing.T, argv []string, want string) {
+	t.Helper()
+
+	for _, a := range argv {
+		if a == want {
+			return
+		}
+	}
+
+	t.Errorf("argv missing %q; got %v", want, argv)
+}
+
+// valueAfter returns the argv element immediately following flag.
+func valueAfter(t *testing.T, argv []string, flag string) string {
+	t.Helper()
+
+	for i := 0; i < len(argv)-1; i++ {
+		if argv[i] == flag {
+			return argv[i+1]
+		}
+	}
+
+	t.Fatalf("argv missing %q with a following value; got %v", flag, argv)
+
+	return ""
+}
+
+// TestClaudeSessionInjectsSettingsAndMCP is the #1135 regression at the daemon
+// level: a hooks-enabled Claude session must launch with BOTH the --settings
+// (lifecycle-hook) arg and the --mcp-config arg, now that the two are produced by
+// separate, decoupled code paths (injectHooks vs injectMCPConfig). It guards
+// against the split accidentally dropping MCP injection from the launch path.
+func TestClaudeSessionInjectsSettingsAndMCP(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	sm, recordPath := newClaudeRecorderManager(t, repoDir)
+
+	created, err := sm.Create(CreateOpts{
+		Name: "braw", AgentName: "claude", RepoPath: repoDir, BaseBranch: "main",
+		AgentHooks: true, SkipModelValidation: true, Rows: 24, Cols: 80,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	id := created.ID
+
+	t.Cleanup(func() { stopAndClosePTY(sm, id) })
+
+	argv := waitForRecordedArgv(t, recordPath, "--mcp-config")
+
+	assertArgvContains(t, argv, "--settings")
+	assertArgvContains(t, argv, "--mcp-config")
+
+	// The --mcp-config path must reference a real file carrying the auto-injected
+	// graith server — proving MCP config is generated and wired even after the
+	// split out of the hook path.
+	mcpPath := valueAfter(t, argv, "--mcp-config")
+
+	data, err := os.ReadFile(mcpPath)
+	if err != nil {
+		t.Fatalf("read mcp config %q: %v", mcpPath, err)
+	}
+
+	if !strings.Contains(string(data), "graith") {
+		t.Errorf("mcp config should contain the auto-injected graith server; got:\n%s", data)
+	}
+}
+
+// TestClaudeSessionHooksDisabledSkipsInjection verifies the other side of the
+// gate: with hooks disabled (and not yolo), a PTY Claude session gets neither
+// --settings nor --mcp-config — MCP still tracks the hook gate for PTY, so this
+// stays a pure refactor of the pre-#1135 behaviour.
+func TestClaudeSessionHooksDisabledSkipsInjection(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	sm, recordPath := newClaudeRecorderManager(t, repoDir)
+
+	created, err := sm.Create(CreateOpts{
+		Name: "thrawn", AgentName: "claude", RepoPath: repoDir, BaseBranch: "main",
+		AgentHooks: false, SkipModelValidation: true, Rows: 24, Cols: 80,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	id := created.ID
+
+	t.Cleanup(func() { stopAndClosePTY(sm, id) })
+
+	// The recorder writes argv as soon as the agent launches; "sh" is always
+	// argv[0], so wait on that to know the record is present.
+	argv := waitForRecordedArgv(t, recordPath, "sh")
+
+	for _, a := range argv {
+		if a == "--settings" || a == "--mcp-config" {
+			t.Errorf("hooks-disabled session must not inject %q; argv %v", a, argv)
+		}
+	}
+}
+
 func TestForkSingletonRejects(t *testing.T) {
 	sm := newTestSessionManager(t)
 	repoDir := initTempGitRepo(t)

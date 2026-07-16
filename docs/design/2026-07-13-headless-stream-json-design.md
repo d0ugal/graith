@@ -630,12 +630,18 @@ Anthropic ships and tests. Rejected.
 **Phasing** (each phase is a shippable PR; effort is rough dev-days). v1 is
 **Claude-only, one-shot headless**, gated behind an experimental flag:
 
-0. **Decouple MCP-config injection from lifecycle-hook injection — ~2d.** Split
-   `injectClaudeHooks` (`hooks.go:174`) so MCP `--mcp-config` generation no longer
-   rides on the `agentHooks` branch, and untangle `agentHooks = agentHooks ||
-   yolo` (`daemon.go:920`). Prerequisite: without it, a headless session that
-   skips hook generation silently loses MCP + the inbox check. Pure refactor for
-   the PTY path, proven by existing tests.
+0. **Decouple MCP-config injection from lifecycle-hook injection — ~2d.
+   ✅ Implemented (issue #1135).** Split `injectClaudeHooks` so MCP `--mcp-config`
+   generation is now `injectMCPConfig`, a path independent of the hook path, and
+   split the `agentHooks = agentHooks || yolo` reassignment into distinct
+   `hooksEnabled` / `mcpEnabled` gates at all three launch sites (Create, Fork,
+   Resume) so yolo no longer silently governs MCP availability. The sandbox
+   hook-dir read grant now follows either gate (the dir holds both the settings
+   and MCP config files). PTY behaviour is unchanged (`mcpEnabled == hooksEnabled`
+   for PTY); the split is what lets a future headless launch inject MCP without
+   generated hooks. Headless MCP injection itself stays gated off pending the
+   later phases. Prerequisite: without it, a headless session that skips hook
+   generation silently loses MCP + the inbox check.
 1. **Driver interface + PTY adapter (no behaviour change) — ~4d** (bumped from the
    first draft's optimistic 2d). Extract the capability-split `sessionDriver` /
    `interactiveDriver` / `structuredDriver` from the *full* call surface (incl.
