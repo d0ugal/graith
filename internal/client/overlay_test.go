@@ -4965,11 +4965,11 @@ func TestSortByStatusAgeOrdersByAge2(t *testing.T) {
 func TestRunApprovalOverlayEmptyReturnsNil2(t *testing.T) {
 	// The empty-input guard must return nil without ever launching a program
 	// (which would require a real terminal).
-	if got := RunApprovalOverlay(nil); got != nil {
+	if got := RunApprovalOverlay(nil, DefaultApprovalKeys()); got != nil {
 		t.Errorf("RunApprovalOverlay(nil) = %v, want nil", got)
 	}
 
-	if got := RunApprovalOverlay([]protocol.ApprovalInfo{}); got != nil {
+	if got := RunApprovalOverlay([]protocol.ApprovalInfo{}, DefaultApprovalKeys()); got != nil {
 		t.Errorf("RunApprovalOverlay(empty) = %v, want nil", got)
 	}
 }

@@ -64,10 +64,11 @@ type scrollViewModel struct {
 	ready    bool
 	width    int
 	height   int
+	keys     ScrollKeys
 }
 
 func newScrollViewModel(title, content string) scrollViewModel {
-	return scrollViewModel{title: title, content: content}
+	return scrollViewModel{title: title, content: content, keys: DefaultScrollKeys()}
 }
 
 func (m scrollViewModel) Init() tea.Cmd { return nil }
@@ -96,13 +97,15 @@ func (m scrollViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, nil
 	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "q", "esc", "ctrl+c":
+		s := msg.String()
+
+		switch {
+		case matchKey(m.keys.Cancel, s):
 			return m, tea.Quit
-		case "g", "home":
+		case matchKey(m.keys.Top, s):
 			m.viewport.GotoTop()
 			return m, nil
-		case "G", "end":
+		case matchKey(m.keys.Bottom, s):
 			m.viewport.GotoBottom()
 			return m, nil
 		}
@@ -129,7 +132,8 @@ func (m scrollViewModel) View() tea.View {
 	// terminal can't wrap them onto a second row — that would push the viewport
 	// (sized at height-2) past the bottom and clobber content.
 	header := ansi.Truncate(titleStyle.Render(m.title), m.width, "")
-	footer := ansi.Truncate(dim.Render(fmt.Sprintf("↑/↓ scroll · pgup/pgdn page · g/G top/bottom · q quit · %d%%", pct)), m.width, "")
+	footer := ansi.Truncate(dim.Render(fmt.Sprintf("↑/↓ scroll · pgup/pgdn page · %s/%s top/bottom · %s quit · %d%%",
+		primaryKey(m.keys.Top), primaryKey(m.keys.Bottom), primaryKey(m.keys.Cancel), pct)), m.width, "")
 
 	v := tea.NewView(header + "\n" + m.viewport.View() + "\n" + footer)
 	v.AltScreen = true
@@ -140,11 +144,13 @@ func (m scrollViewModel) View() tea.View {
 // RunScrollView launches a full-screen pager over the given scrollback content
 // and blocks until the user quits. An empty content shows a placeholder so the
 // pager still opens cleanly rather than flashing an empty screen.
-func RunScrollView(title, content string) {
+func RunScrollView(title, content string, keys ScrollKeys) {
 	if strings.TrimSpace(content) == "" {
 		content = "(no scrollback captured for this session)"
 	}
 
-	p := tea.NewProgram(newScrollViewModel(title, content))
+	m := newScrollViewModel(title, content)
+	m.keys = keys
+	p := tea.NewProgram(m)
 	_, _ = p.Run()
 }

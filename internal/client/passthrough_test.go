@@ -826,6 +826,9 @@ var prefixKeyOpts = PassthroughOpts{
 		OrchestratorSession: 'o',
 		RenameSession:       ',',
 		ScrollMode:          '[',
+		Messages:            'm',
+		Approvals:           'a',
+		RestartSession:      'r',
 	},
 }
 
@@ -993,10 +996,13 @@ func TestShowHelpBarReflectsConfiguredKeys(t *testing.T) {
 		ForkSession:         'F',
 		RenameSession:       'M',
 		ScrollMode:          'B',
+		Messages:            'G',
+		Approvals:           'A',
+		RestartSession:      'R',
 	})
 
 	got := buf.String()
-	for _, want := range []string{"Q detach", "Z sessions", "V shell", "O orch", "L last", "N/P next/prev", "C new", "F fork", "M rename", "B scroll"} {
+	for _, want := range []string{"Q detach", "Z sessions", "V shell", "O orch", "L last", "N/P next/prev", "C new", "F fork", "M rename", "B scroll", "G messages", "A approvals", "R restart"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("help bar missing %q; got %q", want, got)
 		}

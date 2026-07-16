@@ -17,24 +17,33 @@ Default: `ctrl+b` (configurable via `keybindings.prefix` in config).
 
 Press the prefix key to show a help bar, then press one of the following:
 
-| Key | Action | Configurable |
-|-----|--------|:---:|
-| `w` | Open the session picker overlay | no |
-| `d` | Detach (leave the agent running) | no |
-| `s` | Open a shell in the session's worktree | no |
-| `c` | Create a new session | yes |
-| `f` | Fork the current session | yes |
-| `n` | Switch to the next session | yes |
-| `p` | Switch to the previous session | yes |
-| `l` | Toggle to the last (most recently attached) session | yes |
-| `r` | Resume/restart the current session | no |
-| `a` | Open the approvals overlay | no |
-| `o` | Switch to the orchestrator session | yes |
+Every prefix-action key is configurable via the matching `keybindings.*` field
+(the defaults are shown below):
+
+| Key | Action | Config key |
+|-----|--------|-----------|
+| `w` | Open the session picker overlay | `session_list` |
+| `d` | Detach (leave the agent running) | `detach` |
+| `s` | Open a shell in the session's worktree | `shell` |
+| `c` | Create a new session | `new_session` |
+| `f` | Fork the current session | `fork_session` |
+| `n` | Switch to the next session | `next_session` |
+| `p` | Switch to the previous session | `prev_session` |
+| `l` | Toggle to the last (most recently attached) session | `last_session` |
+| `o` | Switch to the orchestrator session | `orchestrator_session` |
+| `,` | Rename the current session | `rename_session` |
+| `[` | Open the scrollback pager | `scroll_mode` |
+| `m` | Open the message viewer | `messages` |
+| `a` | Open the approvals overlay | `approvals` |
+| `r` | Restart/resume the current session | `restart_session` |
 | `ctrl+b` | Send a literal prefix byte to the agent | -- |
 
-The help bar appears at the bottom of the screen when the prefix key is pressed, showing available commands. It disappears after the next keypress.
+The help bar appears at the bottom of the screen when the prefix key is pressed,
+showing the currently-configured commands. It disappears after the next keypress.
 
-Keys marked "configurable" can be remapped in `keybindings.*` config. The others are hardcoded in passthrough. Note: several keybinding config fields (`delete_session`, `rename_session`, `search`, `scroll_mode`, `resume_session`) exist in the config struct but are not currently wired into passthrough. They are reserved for future use.
+If two prefix commands are bound to the same key, graith starts anyway but prints
+a warning at load time (only the first command in the passthrough order would
+fire), so pick distinct keys.
 
 ### Literal prefix
 
@@ -109,15 +118,37 @@ Each session row shows:
 
 The dashboard (`gr dashboard`) is a live-updating TUI similar to the session picker but designed for monitoring.
 
-| Key | Action |
-|-----|--------|
-| `j` / Down | Move cursor down |
-| `k` / Up | Move cursor up |
-| Enter / `a` | Attach to session |
-| `s` | Stop session (with confirmation) |
-| `x` / `d` | Delete session (with confirmation) |
-| `r` | Resume a stopped session |
-| `q` / `ctrl+c` | Quit |
+| Key | Action | Config key |
+|-----|--------|-----------|
+| `j` / Down | Move cursor down | `overlay.down` |
+| `k` / Up | Move cursor up | `overlay.up` |
+| Enter / `a` | Attach to session | `overlay.dashboard_attach` |
+| `s` | Stop session (with confirmation) | `overlay.dashboard_stop` |
+| `x` / `d` | Delete session (with confirmation) | `overlay.dashboard_delete` |
+| `r` | Resume a stopped session | `overlay.dashboard_resume` |
+| `q` / `ctrl+c` | Quit | `overlay.cancel` |
+
+## Message viewer, approvals, and scroll pager
+
+The message viewer (`ctrl+b m`), approvals overlay (`ctrl+b a`), and scrollback
+pager (`ctrl+b [`) share a configurable navigation vocabulary and add their own
+action keys.
+
+| Overlay | Keys | Config keys |
+|---------|------|-------------|
+| Message viewer | `j`/`k` move · `pgdn`/`pgup` scroll · `g`/`G` first/last · `h`/`l` conversation · `enter` pin · `O`/`C` expand/collapse all · `q` close | `overlay.up`/`down`, `overlay.page_down`/`page_up`, `overlay.top`/`bottom`, `overlay.message_prev_conversation`/`message_next_conversation`, `overlay.message_pin`, `overlay.message_expand_all`/`message_collapse_all`, `overlay.cancel` |
+| Approvals | `y` allow · `n`/`x` deny · `a` allow-all · `q` cancel | `overlay.approval_allow`, `overlay.approval_deny`, `overlay.approval_allow_all`, `overlay.cancel` |
+| Scroll pager | `g`/`G` top/bottom · `q` quit (up/down/page keys are handled by the pager) | `overlay.top`/`bottom`, `overlay.cancel` |
+
+## Configuring overlay keys
+
+The full-screen overlays read their keys from the `[keybindings.overlay]` config
+table. Each value is a space-separated list of [Bubble Tea](https://github.com/charmbracelet/bubbletea)
+key names (single letters, `up`, `down`, `enter`, `esc`, `pgup`, `ctrl+d`, …);
+pressing any listed key triggers the action. A partial table overrides only the
+keys it names — every other key keeps its default. See the
+[interface configuration]({{< relref "configuration/interface.md" >}}) page for
+the full list of keys and their defaults.
 
 ## Shell
 

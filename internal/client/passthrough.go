@@ -170,14 +170,16 @@ func keyLabel(b byte) string {
 }
 
 // showHelpBar renders a one-line help bar at the bottom of the screen using
-// ANSI save-cursor / restore-cursor so the agent's output isn't disturbed. The
-// prefix-action keys reflect the configured keybindings so the bar never lies
-// about a remapped key. (m/a/r have no config field yet and stay literal.)
+// ANSI save-cursor / restore-cursor so the agent's output isn't disturbed. Every
+// prefix-action key reflects the configured keybindings so the bar never lies
+// about a remapped key (issue #1233).
 func showHelpBar(w io.Writer, keys PassthroughKeys) {
 	help := fmt.Sprintf(
-		"\x1b[7m %s detach  %s sessions  m messages  a approvals  %s orch  %s last  %s/%s next/prev  %s new  %s fork  %s rename  %s scroll  %s shell  r restart \x1b[0m",
+		"\x1b[7m %s detach  %s sessions  %s messages  %s approvals  %s orch  %s last  %s/%s next/prev  %s new  %s fork  %s rename  %s scroll  %s shell  %s restart \x1b[0m",
 		keyLabel(keys.Detach),
 		keyLabel(keys.SessionList),
+		keyLabel(keys.Messages),
+		keyLabel(keys.Approvals),
 		keyLabel(keys.OrchestratorSession),
 		keyLabel(keys.LastSession),
 		keyLabel(keys.NextSession),
@@ -187,6 +189,7 @@ func showHelpBar(w io.Writer, keys PassthroughKeys) {
 		keyLabel(keys.RenameSession),
 		keyLabel(keys.ScrollMode),
 		keyLabel(keys.Shell),
+		keyLabel(keys.RestartSession),
 	)
 	_, _ = w.Write([]byte("\x1b7\x1b[999B\r\x1b[2K" + help + "\x1b8"))
 }
@@ -220,6 +223,9 @@ type PassthroughKeys struct {
 	OrchestratorSession byte
 	RenameSession       byte
 	ScrollMode          byte
+	Messages            byte
+	Approvals           byte
+	RestartSession      byte
 }
 
 type PassthroughOpts struct {
@@ -543,13 +549,13 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 					case keys.Detach:
 						setResult(ResultDetached)
 						return
-					case 'a':
+					case keys.Approvals:
 						setResult(ResultApprovalOverlay)
 						return
 					case keys.SessionList, 0:
 						setResult(ResultOverlay)
 						return
-					case 'm':
+					case keys.Messages:
 						setResult(ResultMessageOverlay)
 						return
 					case keys.Shell:
@@ -561,7 +567,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 					case keys.PrevSession:
 						setResult(ResultPrevSession)
 						return
-					case 'r':
+					case keys.RestartSession:
 						setResult(ResultRestart)
 						return
 					case keys.LastSession:

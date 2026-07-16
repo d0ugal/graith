@@ -41,12 +41,14 @@ type DashboardModel struct {
 	confirmSessionID string
 	result           *DashboardResult
 	refresh          func() []protocol.SessionInfo
+	keys             DashboardKeys
 }
 
 func NewDashboardModel(sessions []protocol.SessionInfo, refresh func() []protocol.SessionInfo) *DashboardModel {
 	return &DashboardModel{
 		sessions: sessions,
 		refresh:  refresh,
+		keys:     DefaultDashboardKeys(),
 	}
 }
 
@@ -145,81 +147,71 @@ func (m *DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch m.state {
 		case dashStateConfirmDelete:
-			switch msg.String() {
-			case "y", "Y":
-				if m.confirmSessionID != "" {
-					m.result = &DashboardResult{Action: "delete", SessionID: m.confirmSessionID}
-					return m, tea.Quit
-				}
-
-				m.state = dashStateNormal
-				m.confirmSessionID = ""
-			default:
-				m.state = dashStateNormal
-				m.confirmSessionID = ""
+			if matchKey(m.keys.Confirm, msg.String()) && m.confirmSessionID != "" {
+				m.result = &DashboardResult{Action: "delete", SessionID: m.confirmSessionID}
+				return m, tea.Quit
 			}
+
+			m.state = dashStateNormal
+			m.confirmSessionID = ""
 
 			return m, nil
 
 		case dashStateConfirmStop:
-			switch msg.String() {
-			case "y", "Y":
-				if m.confirmSessionID != "" {
-					m.result = &DashboardResult{Action: "stop", SessionID: m.confirmSessionID}
-					return m, tea.Quit
-				}
-
-				m.state = dashStateNormal
-				m.confirmSessionID = ""
-			default:
-				m.state = dashStateNormal
-				m.confirmSessionID = ""
+			if matchKey(m.keys.Confirm, msg.String()) && m.confirmSessionID != "" {
+				m.result = &DashboardResult{Action: "stop", SessionID: m.confirmSessionID}
+				return m, tea.Quit
 			}
+
+			m.state = dashStateNormal
+			m.confirmSessionID = ""
 
 			return m, nil
 
 		case dashStateNormal:
-			switch msg.String() {
-			case "q", "ctrl+c":
+			s := msg.String()
+
+			switch {
+			case matchKey(m.keys.Cancel, s):
 				return m, tea.Quit
-			case "j", "down":
+			case matchKey(m.keys.Down, s):
 				if m.cursor < len(m.sessions)-1 {
 					m.cursor++
 					m.scrollToCursor()
 				}
 
 				return m, nil
-			case "k", "up":
+			case matchKey(m.keys.Up, s):
 				if m.cursor > 0 {
 					m.cursor--
 					m.scrollToCursor()
 				}
 
 				return m, nil
-			case "enter", "a":
-				if s := m.selectedSession(); s != nil {
-					m.result = &DashboardResult{Action: "attach", SessionID: s.ID}
+			case matchKey(m.keys.Attach, s):
+				if sel := m.selectedSession(); sel != nil {
+					m.result = &DashboardResult{Action: "attach", SessionID: sel.ID}
 					return m, tea.Quit
 				}
 
 				return m, nil
-			case "s":
-				if s := m.selectedSession(); s != nil && s.Status == "running" {
+			case matchKey(m.keys.Stop, s):
+				if sel := m.selectedSession(); sel != nil && sel.Status == "running" {
 					m.state = dashStateConfirmStop
-					m.confirmSessionID = s.ID
+					m.confirmSessionID = sel.ID
 				}
 
 				return m, nil
-			case "x", "d":
-				if s := m.selectedSession(); s != nil {
+			case matchKey(m.keys.Delete, s):
+				if sel := m.selectedSession(); sel != nil {
 					m.state = dashStateConfirmDelete
-					m.confirmSessionID = s.ID
+					m.confirmSessionID = sel.ID
 				}
 
 				return m, nil
-			case "r":
-				if s := m.selectedSession(); s != nil && s.Status == "stopped" {
-					m.result = &DashboardResult{Action: "resume", SessionID: s.ID}
+			case matchKey(m.keys.Resume, s):
+				if sel := m.selectedSession(); sel != nil && sel.Status == "stopped" {
+					m.result = &DashboardResult{Action: "resume", SessionID: sel.ID}
 					return m, tea.Quit
 				}
 
@@ -339,7 +331,13 @@ func (m *DashboardModel) View() tea.View {
 
 	// Footer
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
-	b.WriteString(helpStyle.Render("  enter/a attach  s stop  x delete  r resume  q quit"))
+	b.WriteString(helpStyle.Render(fmt.Sprintf("  %s attach  %s stop  %s delete  %s resume  %s quit",
+		keyHint(m.keys.Attach),
+		keyHint(m.keys.Stop),
+		keyHint(m.keys.Delete),
+		keyHint(m.keys.Resume),
+		keyHint(m.keys.Cancel),
+	)))
 	b.WriteString("\n")
 
 	v := tea.NewView(b.String())
@@ -567,7 +565,7 @@ func (m *DashboardModel) clampCursor() {
 	}
 }
 
-func RunDashboard(sessions []protocol.SessionInfo, refresh func() []protocol.SessionInfo) *DashboardResult {
+func RunDashboard(sessions []protocol.SessionInfo, keys DashboardKeys, refresh func() []protocol.SessionInfo) *DashboardResult {
 	sortDashboardSessions(sessions)
 	m := NewDashboardModel(sessions, func() []protocol.SessionInfo {
 		s := refresh()
@@ -575,6 +573,7 @@ func RunDashboard(sessions []protocol.SessionInfo, refresh func() []protocol.Ses
 
 		return s
 	})
+	m.keys = keys
 	p := tea.NewProgram(m)
 
 	final, err := p.Run()

@@ -318,7 +318,7 @@ func (l *attachLoop) onMessageOverlay() (bool, error) {
 		names[s.ID] = s.Name
 	}
 
-	client.RunMessageOverlay(l.sessionID, conversationFetcher(l.sessionID), names)
+	client.RunMessageOverlay(l.sessionID, messageKeysFromConfig(), conversationFetcher(l.sessionID), names)
 
 	l.restoreAndAdopt(nc)
 
@@ -563,7 +563,7 @@ func (l *attachLoop) onApprovalOverlay() (bool, error) {
 		return false, nil
 	}
 
-	results := client.RunApprovalOverlay(notif.Pending)
+	results := client.RunApprovalOverlay(notif.Pending, approvalKeysFromConfig())
 	for _, r := range results {
 		_ = nc.SendControl("approval_respond", protocol.ApprovalRespondMsg{
 			RequestID: r.RequestID,
@@ -670,7 +670,7 @@ func (l *attachLoop) onRenameSession() (bool, error) {
 
 func (l *attachLoop) onScrollMode() (bool, error) {
 	scrollback := client.FetchScrollback(cfg, paths, cfgFile, l.sessionID, 2000)
-	client.RunScrollView("Scrollback — "+l.info.Name, scrollback)
+	client.RunScrollView("Scrollback — "+l.info.Name, scrollback, scrollKeysFromConfig())
 
 	nc, err := freshClient()
 	if err != nil {

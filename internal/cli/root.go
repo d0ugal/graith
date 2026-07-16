@@ -94,6 +94,15 @@ var rootCmd = &cobra.Command{
 
 		out = output.New(jsonOutput)
 
+		// Surface non-fatal config problems (e.g. conflicting keybindings)
+		// without refusing to start (issue #1233). Skip in JSON mode so the
+		// warnings can't corrupt machine-readable output.
+		if !jsonOutput {
+			for _, w := range cfg.Warnings {
+				fmt.Fprintln(os.Stderr, "warning: "+w)
+			}
+		}
+
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
