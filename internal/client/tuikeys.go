@@ -68,7 +68,7 @@ func DefaultDashboardKeys() DashboardKeys {
 		Delete:  []string{"x", "d"},
 		Resume:  []string{"r"},
 		Confirm: []string{"enter", "y"},
-		Cancel:  []string{"q", "ctrl+c"},
+		Cancel:  []string{"q", "esc", "ctrl+c"},
 	}
 }
 
@@ -90,7 +90,7 @@ func DefaultApprovalKeys() ApprovalKeys {
 		Allow:    []string{"y", "enter"},
 		Deny:     []string{"n", "x"},
 		AllowAll: []string{"a"},
-		Cancel:   []string{"q", "esc"},
+		Cancel:   []string{"q", "esc", "ctrl+c"},
 	}
 }
 

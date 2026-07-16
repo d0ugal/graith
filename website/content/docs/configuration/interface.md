@@ -48,7 +48,11 @@ The full-screen terminal overlays (dashboard, approval prompt, message viewer,
 scroll pager) read their keys from `[keybindings.overlay]`. Each value is a
 space-separated list of [Bubble Tea](https://github.com/charmbracelet/bubbletea)
 key names; pressing any listed key triggers the action. A partial table
-overrides only the keys it names.
+overrides only the keys it names, and a value you set **replaces** (it does not
+extend) the built-in aliases for that action — so list every key you want,
+including any you still rely on. For example, the shipped `cancel` default keeps
+`ctrl+c`; overriding it with `cancel = "q esc"` would drop Ctrl-C from these
+overlays.
 
 ```toml
 [keybindings.overlay]
@@ -60,7 +64,7 @@ page_down = "pgdown space ctrl+d ctrl+f"
 top       = "g home"
 bottom    = "G end"
 confirm   = "enter y"                  # confirm a prompt (e.g. delete/stop)
-cancel    = "q esc"                    # close the overlay / cancel
+cancel    = "q esc ctrl+c"             # close the overlay / cancel
 # Dashboard actions.
 dashboard_attach = "enter a"
 dashboard_stop   = "s"

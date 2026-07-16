@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -69,6 +70,72 @@ func TestKeyHintAndPrimaryKey(t *testing.T) {
 	if got := primaryKey(nil); got != "" {
 		t.Errorf("primaryKey(nil) = %q, want empty", got)
 	}
+}
+
+// TestOverlayCancelCtrlCExitsFromShippedConfig is the concrete regression for
+// #1233: building the overlay cancel binding from the shipped config
+// (config.Default(), i.e. the embedded default_config.toml) must keep Ctrl-C, so
+// it still exits the dashboard, message viewer, and scroll pager. The shipped
+// [keybindings.overlay] cancel value REPLACES — does not extend — each model's
+// in-code aliases, so a default lacking ctrl+c silently dropped it from all
+// three views even though the dashboard docs still list Ctrl-C.
+func TestOverlayCancelCtrlCExitsFromShippedConfig(t *testing.T) {
+	// The cancel binding exactly as the builders resolve it in production: the
+	// config value wins because the shipped default names it.
+	cancel := SplitKeys(config.Default().Keybindings.Overlay.Cancel)
+	if !matchKey(cancel, "ctrl+c") {
+		t.Fatalf("shipped [keybindings.overlay] cancel = %v, want it to include ctrl+c", cancel)
+	}
+
+	ctrlC := tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
+
+	assertQuit := func(t *testing.T, cmd tea.Cmd) {
+		t.Helper()
+
+		if cmd == nil {
+			t.Fatal("ctrl+c should return a quit command")
+		}
+
+		if _, ok := cmd().(tea.QuitMsg); !ok {
+			t.Fatalf("ctrl+c command did not produce a QuitMsg, got %T", cmd())
+		}
+	}
+
+	t.Run("dashboard", func(t *testing.T) {
+		m := NewDashboardModel(dashboardTestSessions(), nil)
+		keys := DefaultDashboardKeys()
+		keys.Cancel = cancel
+		m.keys = keys
+		m.width = 120
+		m.height = 40
+
+		_, cmd := m.Update(ctrlC)
+		assertQuit(t, cmd)
+	})
+
+	t.Run("message viewer", func(t *testing.T) {
+		fetch := func() ([]protocol.ConversationMessage, bool) { return nil, true }
+		m := newMessageOverlayModel("self", fetch, map[string]string{})
+		keys := DefaultMessageKeys()
+		keys.Cancel = cancel
+		m.keys = keys
+
+		_, cmd := m.Update(ctrlC)
+		assertQuit(t, cmd)
+	})
+
+	t.Run("scroll pager", func(t *testing.T) {
+		m := newScrollViewModel("braw", "line one\nline two\n")
+		keys := DefaultScrollKeys()
+		keys.Cancel = cancel
+		m.keys = keys
+
+		res, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		m = res.(scrollViewModel)
+
+		_, cmd := m.Update(ctrlC)
+		assertQuit(t, cmd)
+	})
 }
 
 // TestDashboardKeysRemapped confirms the dashboard honours a remapped attach key

@@ -239,6 +239,41 @@ func TestOverlayKeysFromConfigOverrideAndDefault(t *testing.T) {
 	}
 }
 
+// TestOverlayCancelKeepsCtrlCFromDefaultConfig is the config→builder half of the
+// #1233 regression: the overlay keys built from config.Default() (the embedded
+// default_config.toml that ships) must keep ctrl+c in the cancel binding for the
+// dashboard, message viewer, and scroll pager. A shipped default that replaced
+// the in-code aliases without ctrl+c dropped it silently.
+func TestOverlayCancelKeepsCtrlCFromDefaultConfig(t *testing.T) {
+	oldCfg := cfg
+
+	t.Cleanup(func() { cfg = oldCfg })
+
+	cfg = config.Default()
+
+	has := func(keys []string, want string) bool {
+		for _, k := range keys {
+			if k == want {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	if got := dashboardKeysFromConfig().Cancel; !has(got, "ctrl+c") {
+		t.Errorf("dashboard cancel = %v, want it to include ctrl+c", got)
+	}
+
+	if got := messageKeysFromConfig().Cancel; !has(got, "ctrl+c") {
+		t.Errorf("message cancel = %v, want it to include ctrl+c", got)
+	}
+
+	if got := scrollKeysFromConfig().Cancel; !has(got, "ctrl+c") {
+		t.Errorf("scroll cancel = %v, want it to include ctrl+c", got)
+	}
+}
+
 // TestRemotePassthroughKeysFromConfig verifies remote attach still wires
 // session_list and shell (regression for the #918 review): without them,
 // prefix+w / prefix+s forward raw bytes to the remote agent instead of hitting

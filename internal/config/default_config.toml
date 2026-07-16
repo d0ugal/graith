@@ -472,7 +472,10 @@ restart_session = "r"        # restart (resume) the current session
 # prompt, message viewer, scroll pager). Each value is a space-separated list of
 # bubbletea key names (single letters, "up", "down", "enter", "esc", "pgup",
 # "ctrl+d", ...); pressing any listed key triggers the action. A partial table
-# only overrides the keys it names — unset keys keep these defaults.
+# only overrides the keys it names — unset keys keep these defaults. A value that
+# is set REPLACES (it does not extend) the built-in aliases for that action, so
+# list every key you want, including any you still rely on: e.g. keep "ctrl+c" in
+# `cancel` below or overriding it drops Ctrl-C from these overlays.
 [keybindings.overlay]
 # Shared navigation.
 up = "k up"                              # move selection / cursor up
@@ -482,7 +485,7 @@ page_down = "pgdown space ctrl+d ctrl+f" # scroll down one page
 top = "g home"                           # jump to the first item / top
 bottom = "G end"                         # jump to the last item / bottom
 confirm = "enter y"                      # confirm a prompt (e.g. delete/stop)
-cancel = "q esc"                         # close the overlay / cancel
+cancel = "q esc ctrl+c"                  # close the overlay / cancel (ctrl+c kept: overrides replace, not extend)
 # Dashboard (gr dashboard) actions.
 dashboard_attach = "enter a"             # attach to the selected session
 dashboard_stop = "s"                     # stop the selected running session
