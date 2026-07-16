@@ -565,12 +565,14 @@ func TestWatchRetryBackoffConfigSafety(t *testing.T) {
 			for _, bad := range []string{"0s", "-1ns"} {
 				var direct TriggersRuntime
 				field.set(&direct.Advanced, bad)
+
 				if got := field.get(direct); got != field.def {
 					t.Errorf("accessor(%q) = %v, want defensive default %v", bad, got, field.def)
 				}
 
 				cfg := Default()
 				field.set(&cfg.TriggersRuntime.Advanced, bad)
+
 				err := cfg.Validate()
 				if err == nil || !strings.Contains(err.Error(), "triggers.advanced."+field.name) {
 					t.Errorf("Validate(%q) = %v, want field-specific error", bad, err)
@@ -583,6 +585,7 @@ func TestWatchRetryBackoffConfigSafety(t *testing.T) {
 		cfg := Default()
 		cfg.TriggersRuntime.Advanced.WatchRetryBaseBackoff = "2s"
 		cfg.TriggersRuntime.Advanced.WatchRetryMaxBackoff = "1s"
+
 		err := cfg.Validate()
 		if err == nil || !strings.Contains(err.Error(), "must not exceed watch_retry_max_backoff") {
 			t.Fatalf("Validate() = %v, want incoherent-bound error", err)
@@ -593,6 +596,7 @@ func TestWatchRetryBackoffConfigSafety(t *testing.T) {
 		cfg := Default()
 		cfg.TriggersRuntime.Advanced.WatchRetryBaseBackoff = "1ns"
 		cfg.TriggersRuntime.Advanced.WatchRetryMaxBackoff = "1ns"
+
 		if err := cfg.Validate(); err != nil {
 			t.Fatalf("Validate() = %v, want nil at equality boundary", err)
 		}
@@ -649,6 +653,7 @@ func TestWatchBuiltinIgnoresExplicitEmpty(t *testing.T) {
 	if cfg.TriggersRuntime.Advanced.WatchBuiltinIgnores == nil {
 		t.Fatal("explicit empty watch_builtin_ignores decoded as unset")
 	}
+
 	if got := cfg.TriggersRuntime.WatchBuiltinIgnores(); len(got) != 0 {
 		t.Fatalf("explicit empty watch_builtin_ignores resolved to %v, want empty", got)
 	}

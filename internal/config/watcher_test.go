@@ -91,12 +91,15 @@ func TestWatcherInvalidConfig(t *testing.T) {
 
 func TestWatcherReportsApplyFailureWithoutLoggingSuccess(t *testing.T) {
 	dir := t.TempDir()
+
 	cfgPath := filepath.Join(dir, "config.toml")
+
 	if err := os.WriteFile(cfgPath, []byte(`default_agent = "claude"`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	var logs bytes.Buffer
+
 	w := NewWatcher(cfgPath, func(*Config) error {
 		return errors.New("dreich runtime replacement")
 	}, slog.New(slog.NewTextHandler(&logs, nil)), time.Millisecond)
@@ -106,6 +109,7 @@ func TestWatcherReportsApplyFailureWithoutLoggingSuccess(t *testing.T) {
 	if !strings.Contains(got, "failed to apply reloaded config") || !strings.Contains(got, "dreich runtime replacement") {
 		t.Errorf("apply failure log = %q", got)
 	}
+
 	if strings.Contains(got, "config reloaded") {
 		t.Errorf("apply failure was also logged as success: %q", got)
 	}

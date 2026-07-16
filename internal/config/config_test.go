@@ -428,6 +428,7 @@ func TestApprovalsServerTimeoutIncludesBackendThenHumanPhases(t *testing.T) {
 	if got := command.BackendPhaseTimeoutDuration(); got != 5*time.Second {
 		t.Errorf("command backend phase = %v, want 5s", got)
 	}
+
 	if got := command.ServerTimeoutDuration(); got != 35*time.Second {
 		t.Errorf("command server bound = %v, want backend 5s + human 30s", got)
 	}
@@ -436,6 +437,7 @@ func TestApprovalsServerTimeoutIncludesBackendThenHumanPhases(t *testing.T) {
 	if got := prompt.BackendPhaseTimeoutDuration(); got != 0 {
 		t.Errorf("prompt backend phase = %v, want 0", got)
 	}
+
 	if got := prompt.ServerTimeoutDuration(); got != 30*time.Second {
 		t.Errorf("prompt server bound = %v, want human wait 30s", got)
 	}
@@ -1122,6 +1124,7 @@ func TestValidateOrchestratorAgent(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Load() = %v, want nil", err)
 				}
+
 				return
 			}
 
@@ -2691,6 +2694,7 @@ func TestOrchestratorRestartValidate(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				cfg := Default()
 				tt.mutate(&cfg.Orchestrator.Restart)
+
 				err := cfg.Validate()
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("Validate() = %v, want error containing %q", err, tt.wantErr)
@@ -2703,7 +2707,9 @@ func TestOrchestratorRestartValidate(t *testing.T) {
 		cfg := Default()
 		cfg.Orchestrator.Restart.InitialBackoff = "2s"
 		cfg.Orchestrator.Restart.MaxBackoff = "2s"
+
 		cfg.Orchestrator.Restart.Schedule = []string{"1s", "1s"}
+
 		if err := cfg.Validate(); err != nil {
 			t.Fatalf("Validate() = %v, want nil at equality boundaries", err)
 		}
@@ -3202,12 +3208,15 @@ func TestRemoteConfigValidation(t *testing.T) {
 		if r.MaxPendingPairings != RemoteMaxPendingPairingsDefault {
 			t.Errorf("default remote.max_pending_pairings = %d, want %d", r.MaxPendingPairings, RemoteMaxPendingPairingsDefault)
 		}
+
 		if r.PendingPairingTTL != "10m" {
 			t.Errorf("default remote.pending_pairing_ttl = %q, want 10m", r.PendingPairingTTL)
 		}
+
 		if r.PairFallbackCount != RemotePairFallbackCountDefault {
 			t.Errorf("default remote.pair_fallback_count = %d, want %d", r.PairFallbackCount, RemotePairFallbackCountDefault)
 		}
+
 		if r.PairFallbackWindow != "1m" {
 			t.Errorf("default remote.pair_fallback_window = %q, want 1m", r.PairFallbackWindow)
 		}

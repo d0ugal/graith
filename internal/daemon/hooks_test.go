@@ -31,6 +31,7 @@ func newTestSessionManagerWithDataDir(t *testing.T) *SessionManager {
 
 func injectDefaultCursorHooks(sm *SessionManager, sessionID, worktreePath string, yolo bool) ([]string, map[string]string, error) {
 	cfg := sm.Config()
+
 	return sm.injectCursorHooks(
 		sessionID,
 		worktreePath,
@@ -830,6 +831,7 @@ func TestInjectHooksCustomCursorUsesSelectedConfigAndCleansUp(t *testing.T) {
 	}
 
 	sm.cleanupHooks("bairn-custom-cursor", "thrawn", worktree)
+
 	if _, err := os.Stat(hooksPath); !os.IsNotExist(err) {
 		t.Errorf("custom cursor hooks.json still exists after cleanup: err = %v", err)
 	}

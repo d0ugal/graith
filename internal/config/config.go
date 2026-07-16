@@ -2636,17 +2636,17 @@ func (k Keybindings) Conflicts() []string {
 	}
 
 	// Sort the keys so the warning order is deterministic.
-	keys := make([]int, 0, len(seen))
+	keys := make([]byte, 0, len(seen))
 	for key := range seen {
-		keys = append(keys, int(key))
+		keys = append(keys, key)
 	}
 
-	sort.Ints(keys)
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
 
 	var conflicts []string
 
 	for _, key := range keys {
-		labels := seen[byte(key)]
+		labels := seen[key]
 		if len(labels) > 1 {
 			conflicts = append(conflicts, fmt.Sprintf(
 				"keybinding byte %q is bound to multiple prefix commands: %s (prefix and earlier actions take precedence)",
@@ -3418,6 +3418,7 @@ func (a Approvals) BackendPhaseTimeoutDuration() time.Duration {
 func (a Approvals) ServerTimeoutDuration() time.Duration {
 	backend := a.BackendPhaseTimeoutDuration()
 	human := a.TimeoutDuration()
+
 	const maxDuration = time.Duration(1<<63 - 1)
 	if human > maxDuration-backend {
 		return maxDuration
@@ -3613,6 +3614,7 @@ var addDirTemplateVars = []string{
 // conditional headless launch.
 func (a Agent) validateAdapters(name string) []error {
 	var errs []error
+
 	field := func(s string) string { return "agents." + name + "." + s }
 
 	errs = appendTemplateErrs(errs, field("args"), a.Args, sessionLaunchTemplateVars...)
@@ -3620,7 +3622,9 @@ func (a Agent) validateAdapters(name string) []error {
 	errs = appendTemplateErrs(errs, field("fork_args"), a.ForkArgs, sessionLaunchTemplateVars...)
 	errs = appendTemplateErrs(errs, field("headless_args"), a.HeadlessArgs, sessionLaunchTemplateVars...)
 	errs = appendTemplateErrs(errs, field("empty_id_resume_args"), a.EmptyIDResumeArgs, sessionLaunchTemplateVars...)
+
 	errs = appendTemplateErrs(errs, field("add_dir_args"), a.AddDirArgs, addDirTemplateVars...)
+
 	for i, opt := range a.OptionArgs {
 		errs = appendTemplateErrs(errs,
 			fmt.Sprintf("agents.%s.option_args[%d].args", name, i),
@@ -4610,13 +4614,16 @@ func (c *Config) Validate() error {
 
 	initial, initialErr := ParseDurationWithDays(rc.InitialBackoff)
 	maxBackoff, maxErr := ParseDurationWithDays(rc.MaxBackoff)
+
 	if strings.TrimSpace(rc.InitialBackoff) != "" && strings.TrimSpace(rc.MaxBackoff) != "" &&
 		initialErr == nil && maxErr == nil && initial > 0 && maxBackoff > 0 && initial > maxBackoff {
 		errs = append(errs, fmt.Errorf("orchestrator.restart.initial_backoff %q: must not exceed max_backoff %q", rc.InitialBackoff, rc.MaxBackoff))
 	}
 
 	var previous time.Duration
+
 	havePrevious := false
+
 	for i, s := range rc.Schedule {
 		d, err := ParseDurationWithDays(s)
 		if err != nil {

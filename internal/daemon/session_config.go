@@ -240,6 +240,7 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) error {
 	}
 
 	oldBuiltinIgnores := old.TriggersRuntime.WatchBuiltinIgnores()
+
 	newBuiltinIgnores := newCfg.TriggersRuntime.WatchBuiltinIgnores()
 	if !slices.Equal(oldBuiltinIgnores, newBuiltinIgnores) {
 		// Update each live matcher and its directory registrations in place. The

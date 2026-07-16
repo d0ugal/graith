@@ -342,6 +342,7 @@ func (sm *SessionManager) prepareRemoteConfig(oldCfg, newCfg config.RemoteConfig
 	}
 
 	change.topology = true
+
 	if rt.generation != nil {
 		rt.generation.stop()
 		rt.generation = nil
@@ -440,6 +441,7 @@ func (g *remoteGeneration) activate() {
 
 	go func() {
 		defer close(g.done)
+
 		g.serve()
 	}()
 }
@@ -453,6 +455,7 @@ func (g *remoteGeneration) serve() {
 			}
 
 			g.sm.log.Warn("remote accept error", "err", err)
+
 			continue
 		}
 
@@ -505,6 +508,7 @@ func (g *remoteGeneration) handle(conn net.Conn) {
 	}
 
 	g.setIdentity(conn, id)
+
 	if !g.sm.remotePolicyAllows(id) {
 		g.sm.log.Warn("remote connection rejected by live Gate 1", "addr", conn.RemoteAddr().String())
 		return
@@ -515,7 +519,9 @@ func (g *remoteGeneration) handle(conn net.Conn) {
 
 func (g *remoteGeneration) closeUnauthorized(cfg config.RemoteConfig) {
 	g.mu.Lock()
+
 	var closeConns []net.Conn
+
 	for conn, id := range g.conns {
 		if !cfg.Enabled || !identityAllowed(cfg, id) {
 			closeConns = append(closeConns, conn)
@@ -530,7 +536,9 @@ func (g *remoteGeneration) closeUnauthorized(cfg config.RemoteConfig) {
 
 func (g *remoteGeneration) closeAllConnections() {
 	g.mu.Lock()
+
 	conns := make([]net.Conn, 0, len(g.conns))
+
 	for conn := range g.conns {
 		conns = append(conns, conn)
 	}
@@ -545,7 +553,9 @@ func (g *remoteGeneration) stop() {
 	g.mu.Lock()
 	g.closed = true
 	started := g.started
+
 	conns := make([]net.Conn, 0, len(g.conns))
+
 	for conn := range g.conns {
 		conns = append(conns, conn)
 	}

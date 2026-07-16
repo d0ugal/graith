@@ -63,7 +63,11 @@ func TestConcurrentConfigReloadVsHookAndStoreReaders(t *testing.T) {
 			cfg.Lifecycle.InputDelay = delay
 			cfg.Git.FetchTimeout = "1m"
 
-			sm.applyConfig(cfg)
+			if err := sm.applyConfig(cfg); err != nil {
+				t.Errorf("apply config: %v", err)
+
+				return
+			}
 		}
 	}()
 
@@ -156,7 +160,11 @@ func TestConcurrentConfigReloadVsGitPull(t *testing.T) {
 			cfg.Git.FetchTimeout = timeout
 			cfg.Git.MergeTimeout = timeout
 
-			sm.applyConfig(cfg)
+			if err := sm.applyConfig(cfg); err != nil {
+				t.Errorf("apply config: %v", err)
+
+				return
+			}
 		}
 	}()
 

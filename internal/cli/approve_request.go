@@ -23,7 +23,7 @@ type approvalHookStdin struct {
 }
 
 type approvalControlConn interface {
-	SendControl(string, any) error
+	SendControl(controlType string, payload any) error
 	ReadControlResponse() (protocol.Envelope, error)
 }
 

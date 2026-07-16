@@ -73,6 +73,7 @@ func TestEvaluatePushGate_CoalesceReasonUsesEffectiveWindow(t *testing.T) {
 	if res.deliver {
 		t.Fatal("identical notification within window should be coalesced")
 	}
+
 	if want := "coalesced (identical notification within the last 45s)"; res.reason != want {
 		t.Fatalf("reason = %q, want %q", res.reason, want)
 	}

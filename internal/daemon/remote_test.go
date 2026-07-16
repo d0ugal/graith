@@ -127,9 +127,11 @@ func addObservedGenerationConn(t *testing.T, gen *remoteGeneration, id *TailnetI
 	t.Helper()
 
 	client, server := net.Pipe()
+
 	t.Cleanup(func() { _ = client.Close() })
 
 	conn := &observedConn{Conn: server}
+
 	gen.mu.Lock()
 	gen.conns[conn] = id
 	gen.mu.Unlock()
@@ -223,14 +225,17 @@ func TestRemoteRuntimeEnabledTransitionsCloseActiveGeneration(t *testing.T) {
 	sm := newSMWithConfig(t, cfg)
 
 	var made []*fakeRemoteListener
+
 	installRemoteRuntimeForTest(t, sm, func(context.Context, config.RemoteConfig, string) (RemoteListener, error) {
 		l := newFakeRemoteListener(t)
 		made = append(made, l)
+
 		return l, nil
 	})
 
 	enabled := config.Default()
 	enabled.Remote = enabledRemoteConfig("speir@example.com")
+
 	if err := sm.applyConfig(enabled); err != nil {
 		t.Fatalf("enable remote: %v", err)
 	}
@@ -243,6 +248,7 @@ func TestRemoteRuntimeEnabledTransitionsCloseActiveGeneration(t *testing.T) {
 
 	disabled := config.Default()
 	disabled.Remote = config.RemoteConfig{}
+
 	if err := sm.applyConfig(disabled); err != nil {
 		t.Fatalf("disable remote: %v", err)
 	}
@@ -266,6 +272,7 @@ func TestRemoteTransportReplacementClosesOldBeforePreparingNew(t *testing.T) {
 	sm := newSMWithConfig(t, cfg)
 
 	var made []*fakeRemoteListener
+
 	installRemoteRuntimeForTest(t, sm, func(context.Context, config.RemoteConfig, string) (RemoteListener, error) {
 		if len(made) == 1 && !made[0].isClosed() {
 			t.Error("replacement factory called before old listener closed")
@@ -273,6 +280,7 @@ func TestRemoteTransportReplacementClosesOldBeforePreparingNew(t *testing.T) {
 
 		l := newFakeRemoteListener(t)
 		made = append(made, l)
+
 		return l, nil
 	})
 
@@ -285,6 +293,7 @@ func TestRemoteTransportReplacementClosesOldBeforePreparingNew(t *testing.T) {
 	next := *cfg
 	next.Remote = cfg.Remote
 	next.Remote.Port = 4923
+
 	if err := sm.applyConfig(&next); err != nil {
 		t.Fatalf("replace remote: %v", err)
 	}
@@ -305,18 +314,22 @@ func TestRemoteTransportReplacementJoinsStalledWhoIs(t *testing.T) {
 
 	whoStarted := make(chan struct{})
 	whoExited := make(chan struct{})
+
 	var made []*fakeRemoteListener
+
 	installRemoteRuntimeForTest(t, sm, func(context.Context, config.RemoteConfig, string) (RemoteListener, error) {
 		l := newFakeRemoteListener(t)
 		if len(made) == 0 {
 			l.whoIs = func(ctx context.Context, _ string) (*TailnetIdentity, error) {
 				close(whoStarted)
 				defer close(whoExited)
+
 				<-ctx.Done()
 
 				return nil, ctx.Err()
 			}
 		}
+
 		made = append(made, l)
 
 		return l, nil
@@ -331,11 +344,13 @@ func TestRemoteTransportReplacementJoinsStalledWhoIs(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = conn.Close() }()
+
 	<-whoStarted
 
 	next := *cfg
 	next.Remote = cfg.Remote
 	next.Remote.Port++
+
 	if err := sm.applyConfig(&next); err != nil {
 		t.Fatal(err)
 	}
@@ -359,6 +374,7 @@ func TestRemoteReplacementFailureRejectsConfigAndStaysClosed(t *testing.T) {
 
 	first := newFakeRemoteListener(t)
 	calls := 0
+
 	installRemoteRuntimeForTest(t, sm, func(context.Context, config.RemoteConfig, string) (RemoteListener, error) {
 		calls++
 		if calls == 1 {
@@ -407,6 +423,7 @@ func TestRemoteAllowlistTightenAndExpandAffectLiveAndFutureAccess(t *testing.T) 
 	installRemoteRuntimeForTest(t, sm, func(context.Context, config.RemoteConfig, string) (RemoteListener, error) {
 		return newFakeRemoteListener(t), nil
 	})
+
 	if err := sm.startRemoteRuntime(cfg.Remote); err != nil {
 		t.Fatal(err)
 	}
@@ -418,6 +435,7 @@ func TestRemoteAllowlistTightenAndExpandAffectLiveAndFutureAccess(t *testing.T) 
 	expanded := *cfg
 	expanded.Remote = cfg.Remote
 	expanded.Remote.AllowTailnetUsers = []string{"speir@example.com", "canny@example.com"}
+
 	if err := sm.applyConfig(&expanded); err != nil {
 		t.Fatal(err)
 	}
@@ -433,6 +451,7 @@ func TestRemoteAllowlistTightenAndExpandAffectLiveAndFutureAccess(t *testing.T) 
 	tightened := expanded
 	tightened.Remote = expanded.Remote
 	tightened.Remote.AllowTailnetUsers = []string{"canny@example.com"}
+
 	if err := sm.applyConfig(&tightened); err != nil {
 		t.Fatal(err)
 	}
@@ -454,6 +473,7 @@ func TestRemoteRequirePairingChangeClosesConnections(t *testing.T) {
 	installRemoteRuntimeForTest(t, sm, func(context.Context, config.RemoteConfig, string) (RemoteListener, error) {
 		return newFakeRemoteListener(t), nil
 	})
+
 	if err := sm.startRemoteRuntime(cfg.Remote); err != nil {
 		t.Fatal(err)
 	}
@@ -462,6 +482,7 @@ func TestRemoteRequirePairingChangeClosesConnections(t *testing.T) {
 	next := *cfg
 	next.Remote = cfg.Remote
 	next.Remote.RequirePairing = false
+
 	if err := sm.applyConfig(&next); err != nil {
 		t.Fatal(err)
 	}
@@ -478,10 +499,13 @@ func TestRemoteAcceptUsesLivePolicyAfterWhoIsRace(t *testing.T) {
 
 	release := make(chan struct{})
 	whoStarted := make(chan struct{})
+
 	rl := newFakeRemoteListener(t)
 	defer func() { _ = rl.Close() }()
+
 	rl.whoIs = func(ctx context.Context, _ string) (*TailnetIdentity, error) {
 		close(whoStarted)
+
 		select {
 		case <-release:
 			return &TailnetIdentity{User: "speir@example.com", Node: "ben"}, nil
@@ -492,30 +516,38 @@ func TestRemoteAcceptUsesLivePolicyAfterWhoIsRace(t *testing.T) {
 
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
+
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+
 	gen := &remoteGeneration{
 		sm: sm, rl: rl, ctx: ctx, cancel: cancel,
 		done: make(chan struct{}), conns: make(map[net.Conn]*TailnetIdentity),
 	}
+
 	if !gen.track(server) {
 		t.Fatal("failed to track test connection")
 	}
+
 	go gen.handle(server)
+
 	<-whoStarted
 
 	tightened := *cfg
 	tightened.Remote = cfg.Remote
 	tightened.Remote.AllowTailnetUsers = []string{"canny@example.com"}
+
 	if err := sm.applyConfig(&tightened); err != nil {
 		t.Fatal(err)
 	}
+
 	close(release)
 
 	_ = client.SetReadDeadline(time.Now().Add(time.Second))
 	if _, err := client.Read(make([]byte, 1)); err == nil {
 		t.Fatal("connection accepted under stale allowlist after reload")
 	}
+
 	gen.wg.Wait()
 }
 
@@ -530,6 +562,7 @@ func TestRemotePolicyReloadRace(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+
 			for range 500 {
 				_ = sm.remotePolicyAllows(id)
 				sm.mu.RLock()
@@ -542,21 +575,26 @@ func TestRemotePolicyReloadRace(t *testing.T) {
 	for i := range 100 {
 		next := *cfg
 		next.Remote = cfg.Remote
+
 		if i%2 == 0 {
 			next.Remote.AllowTailnetUsers = []string{"canny@example.com"}
 		}
+
 		if err := sm.applyConfig(&next); err != nil {
 			t.Fatal(err)
 		}
 	}
+
 	wg.Wait()
 
 	final := *cfg
 	final.Remote = cfg.Remote
 	final.Remote.AllowTailnetUsers = []string{"canny@example.com"}
+
 	if err := sm.applyConfig(&final); err != nil {
 		t.Fatal(err)
 	}
+
 	if sm.remotePolicyAllows(id) {
 		t.Error("final tightened policy still allowed revoked identity")
 	}

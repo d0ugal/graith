@@ -2214,7 +2214,9 @@ func TestApplyConfig(t *testing.T) {
 	newCfg.DefaultAgent = "codex"
 	newCfg.Agents["newagent"] = config.Agent{Command: "newagent"}
 
-	sm.applyConfig(newCfg)
+	if err := sm.applyConfig(newCfg); err != nil {
+		t.Fatalf("apply config: %v", err)
+	}
 
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -2299,9 +2301,11 @@ func TestReloadConfigConversationMaxDerivesAndRollsBack(t *testing.T) {
 
 	sm := newTestSessionManager(t)
 	sm.configFile = path
+
 	if err := sm.ReloadConfig(); err != nil {
 		t.Fatalf("ReloadConfig() = %v", err)
 	}
+
 	if got := sm.Config().Messages.ConversationPageSize; got != 100 {
 		t.Fatalf("derived page size after reload = %d, want 100", got)
 	}
@@ -2309,9 +2313,11 @@ func TestReloadConfigConversationMaxDerivesAndRollsBack(t *testing.T) {
 	if err := os.WriteFile(path, []byte("[messages]\nconversation_page_size = 101\nconversation_max_limit = 100\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := sm.ReloadConfig(); err == nil || !strings.Contains(err.Error(), "must not exceed conversation_max_limit") {
 		t.Fatalf("contradictory reload = %v, want validation error", err)
 	}
+
 	if got := sm.Config().Messages.ConversationPageSize; got != 100 {
 		t.Errorf("failed reload replaced live page size with %d, want prior 100", got)
 	}
@@ -2319,6 +2325,7 @@ func TestReloadConfigConversationMaxDerivesAndRollsBack(t *testing.T) {
 
 func TestReloadConfigRejectsRemovedOrchestratorAgent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
+
 	withAgent := "[orchestrator]\nagent = \"bespoke\"\n\n[agents.bespoke]\ncommand = \"canny-agent\"\n"
 	if err := os.WriteFile(path, []byte(withAgent), 0o600); err != nil {
 		t.Fatal(err)
@@ -2326,6 +2333,7 @@ func TestReloadConfigRejectsRemovedOrchestratorAgent(t *testing.T) {
 
 	sm := newTestSessionManager(t)
 	sm.configFile = path
+
 	if err := sm.ReloadConfig(); err != nil {
 		t.Fatalf("initial ReloadConfig() = %v", err)
 	}
@@ -2333,9 +2341,11 @@ func TestReloadConfigRejectsRemovedOrchestratorAgent(t *testing.T) {
 	if err := os.WriteFile(path, []byte("[orchestrator]\nagent = \"bespoke\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := sm.ReloadConfig(); err == nil || !strings.Contains(err.Error(), "orchestrator.agent") || !strings.Contains(err.Error(), "bespoke") {
 		t.Fatalf("reload after agent removal = %v, want actionable validation error", err)
 	}
+
 	if _, ok := sm.Config().Agents["bespoke"]; !ok {
 		t.Error("failed reload replaced the prior config generation")
 	}
@@ -2360,10 +2370,12 @@ func TestReloadConfigRejectsUnsafeTimingPolicies(t *testing.T) {
 			sm := newTestSessionManager(t)
 			sm.configFile = path
 			before := sm.cfg
+
 			err := sm.ReloadConfig()
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("ReloadConfig() = %v, want error containing %q", err, tt.wantErr)
 			}
+
 			if sm.cfg != before {
 				t.Error("failed validation replaced the live config")
 			}
@@ -4673,7 +4685,10 @@ func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 		newCfg := *sm.cfg
 		newCfg.Messages.MaxPerStream = 0
 		newCfg.Messages.MaxAge = "1ns"
-		sm.applyConfig(&newCfg)
+
+		if err := sm.applyConfig(&newCfg); err != nil {
+			t.Fatalf("apply cleanup config: %v", err)
+		}
 
 		sm.runMessageCleanupFromConfig()
 
@@ -5896,7 +5911,12 @@ func TestConcurrentConfigReadWrite(t *testing.T) {
 			cfg.Notifications.OnStopped = true
 			cfg.Notifications.Command = "true"
 			cfg.Approvals.Timeout = "1s"
-			sm.applyConfig(cfg)
+
+			if err := sm.applyConfig(cfg); err != nil {
+				t.Errorf("apply config: %v", err)
+
+				return
+			}
 		}
 	}()
 
@@ -6976,7 +6996,9 @@ func TestApplyConfigChangesCov2(t *testing.T) {
 	newCfg.Agents["neep"] = config.Agent{Command: "sleep"}
 	delete(newCfg.Agents, "claude") // exercise the "removed" branch
 
-	sm.applyConfig(newCfg)
+	if err := sm.applyConfig(newCfg); err != nil {
+		t.Fatalf("apply config: %v", err)
+	}
 
 	if got := sm.Config().DefaultAgent; got != "codex" {
 		t.Errorf("DefaultAgent after applyConfig = %q, want codex", got)

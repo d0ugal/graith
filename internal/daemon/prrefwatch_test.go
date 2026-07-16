@@ -459,7 +459,10 @@ func TestPRRefDebounceReloadRetimesPendingEvent(t *testing.T) {
 
 			reloaded := *sm.Config()
 			reloaded.PRWatch.Advanced.RefDebounce = tt.reloaded
-			sm.applyConfig(&reloaded)
+
+			if err := sm.applyConfig(&reloaded); err != nil {
+				t.Fatalf("apply ref debounce config: %v", err)
+			}
 
 			if tt.noKickFor > 0 {
 				if id, ok := waitForKick(t, sm, tt.noKickFor); ok {

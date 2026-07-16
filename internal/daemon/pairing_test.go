@@ -308,22 +308,28 @@ func TestPendingPairingTTLIsImmutableAcrossReload(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			if want := base.Add(initialDuration); !waiter.expiresAt.Equal(want) {
 				t.Fatalf("waiter expiry = %v, want %v", waiter.expiresAt, want)
 			}
 
 			reloaded := *sm.Config()
 			reloaded.Remote.PendingPairingTTL = tt.reloadedTTL
-			sm.applyConfig(&reloaded)
+
+			if err := sm.applyConfig(&reloaded); err != nil {
+				t.Fatalf("apply pairing TTL config: %v", err)
+			}
 
 			deviceID, token, err := sm.ApprovePairing(rid, false, base.Add(tt.approveAt))
 			if !tt.wantApprove {
 				if err == nil {
 					t.Fatal("approval succeeded after the request's original deadline")
 				}
+
 				if _, paired := sm.ListPairings(); len(paired) != 0 {
 					t.Fatal("expired request persisted a paired device")
 				}
+
 				return
 			}
 
@@ -346,6 +352,7 @@ func TestPendingPairingTTLIsImmutableAcrossReload(t *testing.T) {
 func TestApprovePairingRejectsMissingWaiter(t *testing.T) {
 	sm := newPairingSM(t)
 	now := time.Now()
+
 	rid, _, err := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{}, now)
 	if err != nil {
 		t.Fatal(err)
@@ -366,6 +373,7 @@ func TestApprovePairingRejectsDisconnectedWaiterBeforeCleanup(t *testing.T) {
 	sm := newPairingSM(t)
 	now := time.Now()
 	disconnected := make(chan struct{})
+
 	rid, _, err := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{}, now, disconnected)
 	if err != nil {
 		t.Fatal(err)

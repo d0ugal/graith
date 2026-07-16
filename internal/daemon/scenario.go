@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,13 +42,17 @@ func ValidateScenarioName(name string) error {
 // after a sibling fails — or a scenario deleted mid-create — would strand the
 // starred member as an orphan and leave a partial scenario record.
 func (sm *SessionManager) unstarAndDelete(id string) error {
+	return sm.unstarAndDeleteWithContext(context.Background(), id)
+}
+
+func (sm *SessionManager) unstarAndDeleteWithContext(ctx context.Context, id string) error {
 	sm.mu.Lock()
 	if s, ok := sm.state.Sessions[id]; ok {
 		s.Starred = false
 	}
 	sm.mu.Unlock()
 
-	return sm.Delete(id)
+	return sm.deleteWithContext(ctx, id)
 }
 
 func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, cols uint16) (*ScenarioState, error) {
@@ -660,6 +665,10 @@ func (sm *SessionManager) StopScenario(name string) ([]string, error) {
 }
 
 func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
+	return sm.deleteScenarioWithContext(context.Background(), name)
+}
+
+func (sm *SessionManager) deleteScenarioWithContext(ctx context.Context, name string) ([]string, error) {
 	sm.mu.RLock()
 
 	var (
@@ -739,7 +748,7 @@ func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 			continue
 		}
 
-		if err := sm.unstarAndDelete(id); err != nil {
+		if err := sm.unstarAndDeleteWithContext(ctx, id); err != nil {
 			sm.log.Warn("failed to delete scenario session", "session", id, "err", err)
 			deleteErrors = append(deleteErrors, id)
 

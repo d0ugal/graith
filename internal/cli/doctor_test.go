@@ -384,10 +384,12 @@ func checkResults(dc *doctorContext, level string) []string {
 
 func TestRenderPurgeDiagnostic(t *testing.T) {
 	oldOut := out
+
 	t.Cleanup(func() { out = oldOut })
 
 	t.Run("scheduled", func(t *testing.T) {
 		var buf bytes.Buffer
+
 		out = output.NewWithWriter(false, &buf)
 
 		dc := newDoctorContext()
@@ -418,6 +420,7 @@ func TestRenderPurgeDiagnostic(t *testing.T) {
 
 	t.Run("not yet run", func(t *testing.T) {
 		var buf bytes.Buffer
+
 		out = output.NewWithWriter(false, &buf)
 
 		newDoctorContext().renderPurge(&protocol.PurgeDiagnostic{

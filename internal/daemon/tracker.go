@@ -258,7 +258,7 @@ func (sm *SessionManager) actionTracker(ctx context.Context, t *config.TriggerCo
 	reaped := 0
 
 	for _, id := range plan.reap {
-		if sm.reapTrackerSession(id, tc.ReapMode()) {
+		if sm.reapTrackerSession(ctx, id, tc.ReapMode()) {
 			reaped++
 		}
 	}
@@ -309,7 +309,7 @@ func (sm *SessionManager) spawnTrackerSession(t *config.TriggerConfig, iss issue
 // retried noisily. Starred and system sessions are never reaped (mirrors
 // SoftDelete's guard, extended to the stop path); reap=delete is refused when
 // soft delete is disabled so it can never become an immediate hard purge.
-func (sm *SessionManager) reapTrackerSession(id, mode string) bool {
+func (sm *SessionManager) reapTrackerSession(ctx context.Context, id, mode string) bool {
 	switch mode {
 	case config.TrackerReapNone:
 		return false
@@ -328,7 +328,7 @@ func (sm *SessionManager) reapTrackerSession(id, mode string) bool {
 			return false // starred/system: SoftDelete would error anyway
 		}
 
-		if _, err := sm.SoftDelete(id); err != nil {
+		if _, err := sm.softDeleteWithContext(ctx, id); err != nil {
 			sm.log.Warn("tracker: reap (delete) failed", "session", id, "err", err)
 			return false
 		}

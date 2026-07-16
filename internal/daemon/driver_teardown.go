@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -30,11 +31,21 @@ func (sm *SessionManager) teardownLiveDriver(ctx context.Context, driver Session
 		// bounded completion window even when the caller's shutdown context was
 		// what ended the gentler TERM phase.
 		if !waitDriverDone(driver, grace) {
-			return fmt.Errorf("driver did not finish within %s after SIGKILL (SIGTERM error: %v; SIGKILL error: %v)", grace, termErr, forceErr)
+			timeoutErr := fmt.Errorf("driver did not finish within %s after SIGKILL", grace)
+			if termErr != nil {
+				termErr = fmt.Errorf("SIGTERM: %w", termErr)
+			}
+
+			if forceErr != nil {
+				forceErr = fmt.Errorf("SIGKILL: %w", forceErr)
+			}
+
+			return errors.Join(timeoutErr, termErr, forceErr)
 		}
 	}
 
 	driver.Close()
+
 	return nil
 }
 

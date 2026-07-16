@@ -19,11 +19,12 @@ func lifecycleGenerationConfig(t *testing.T, recordPath, generation string) *con
 	cfg.AgentPrompt = generation + " prompt"
 
 	injectPrompt := true
+	recorderScript := lifecycleRecorder(t)
 	agent := config.Agent{
-		Command:      lifecycleRecorder(t),
-		Args:         []string{generation + "-base"},
-		ResumeArgs:   []string{generation + "-resume"},
-		ForkArgs:     []string{generation + "-fork"},
+		Command:      "/bin/sh",
+		Args:         []string{recorderScript, generation + "-base"},
+		ResumeArgs:   []string{recorderScript, generation + "-resume"},
+		ForkArgs:     []string{recorderScript, generation + "-fork"},
 		Env:          map[string]string{"GRAITH_RECORD": recordPath},
 		InjectPrompt: &injectPrompt,
 	}
@@ -64,8 +65,9 @@ func lifecycleRecorder(t *testing.T) string {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "record-argv.sh")
+
 	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$GRAITH_RECORD\"\nsleep 30\n"
-	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -81,7 +83,9 @@ func runPausedLifecycle(t *testing.T, sm *SessionManager, operation string, oldC
 		if got != operation {
 			return
 		}
+
 		entered <- cfgSnapshot
+
 		<-release
 	}
 
@@ -89,7 +93,9 @@ func runPausedLifecycle(t *testing.T, sm *SessionManager, operation string, oldC
 		session SessionState
 		err     error
 	}
+
 	done := make(chan result, 1)
+
 	go func() {
 		s, err := run()
 		done <- result{session: s, err: err}
@@ -99,11 +105,15 @@ func runPausedLifecycle(t *testing.T, sm *SessionManager, operation string, oldC
 		t.Fatalf("%s phase 2 snapshot = %p, want original generation %p", operation, snapshot, oldCfg)
 	}
 
-	sm.applyConfig(newCfg)
+	if err := sm.applyConfig(newCfg); err != nil {
+		t.Fatalf("apply config: %v", err)
+	}
+
 	close(release)
 
 	got := <-done
 	sm.launchPhase2Hook = nil
+
 	if got.err != nil {
 		t.Fatalf("%s after reload: %v", operation, got.err)
 	}
@@ -116,28 +126,34 @@ func assertOldLifecycleGeneration(t *testing.T, sm *SessionManager, sess Session
 
 	argv := waitForRecordedArgv(t, recordPath, "old-hook-SessionStart")
 	wants := []string{baseArg, "old-hook-SessionStart", "old-hook-trust", "old-mcp-graith"}
+
 	for _, want := range wants {
 		found := false
+
 		for _, arg := range argv {
 			if arg == want {
 				found = true
 				break
 			}
 		}
+
 		if !found {
 			t.Errorf("launch argv missing old-generation marker %q: %v", want, argv)
 		}
 	}
 
 	haveOldPrompt := false
+
 	for _, arg := range argv {
 		if strings.HasPrefix(arg, "old-prompt-") {
 			haveOldPrompt = true
 		}
+
 		if strings.HasPrefix(arg, "new-") {
 			t.Errorf("launch mixed in new-generation arg %q: %v", arg, argv)
 		}
 	}
+
 	if !haveOldPrompt {
 		t.Errorf("launch argv missing old-generation prompt adapter: %v", argv)
 	}
@@ -145,9 +161,11 @@ func assertOldLifecycleGeneration(t *testing.T, sm *SessionManager, sess Session
 	if sess.CreationCfg == nil {
 		t.Fatal("CreationCfg is nil")
 	}
+
 	if want := oldCfg.Agents["thrawn"]; !reflect.DeepEqual(sess.CreationCfg.Agent, want) {
 		t.Errorf("CreationCfg.Agent came from another generation\n got: %#v\nwant: %#v", sess.CreationCfg.Agent, want)
 	}
+
 	if want := oldCfg.Sandbox.Merge(oldCfg.Agents["thrawn"].Sandbox); !reflect.DeepEqual(sess.CreationCfg.SandboxConfig, want) {
 		t.Errorf("CreationCfg.SandboxConfig came from another generation\n got: %#v\nwant: %#v", sess.CreationCfg.SandboxConfig, want)
 	}
@@ -182,12 +200,16 @@ func TestLifecycleLaunchUsesOneConfigGenerationAcrossReload(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		t.Cleanup(func() { stopAndClosePTY(sm, created.ID) })
 		waitForRecordedArgv(t, recordPath, "old-hook-SessionStart")
+
 		if err := sm.Stop(created.ID); err != nil {
 			t.Fatal(err)
 		}
+
 		waitForStatus(t, sm, created.ID, StatusStopped)
+
 		if err := os.Remove(recordPath); err != nil {
 			t.Fatal(err)
 		}
@@ -212,8 +234,10 @@ func TestLifecycleLaunchUsesOneConfigGenerationAcrossReload(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		t.Cleanup(func() { stopAndClosePTY(sm, source.ID) })
 		waitForRecordedArgv(t, recordPath, "old-hook-SessionStart")
+
 		if err := os.Remove(recordPath); err != nil {
 			t.Fatal(err)
 		}

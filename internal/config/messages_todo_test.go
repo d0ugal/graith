@@ -292,9 +292,11 @@ func TestLoadConversationMaxDerivesPageSize(t *testing.T) {
 
 	load := func(t *testing.T, body string) (*Config, error) {
 		t.Helper()
+
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
+
 		return Load(path)
 	}
 
@@ -318,15 +320,18 @@ func TestLoadConversationMaxDerivesPageSize(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("Load() = %v, want error containing %q", err, tt.wantErr)
 				}
+
 				return
 			}
 
 			if err != nil {
 				t.Fatalf("Load() = %v", err)
 			}
+
 			if cfg.Messages.ConversationPageSize != tt.wantPage {
 				t.Errorf("raw derived page = %d, want %d", cfg.Messages.ConversationPageSize, tt.wantPage)
 			}
+
 			if got := cfg.Messages.ConversationPageSizeOrDefault(); got != tt.wantPage {
 				t.Errorf("effective derived page = %d, want %d", got, tt.wantPage)
 			}
@@ -339,6 +344,7 @@ func TestLoadConversationMaxDerivesPageSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload Load() = %v", err)
 	}
+
 	if cfg.Messages.ConversationPageSize != 75 {
 		t.Errorf("reloaded raw page = %d, want 75", cfg.Messages.ConversationPageSize)
 	}

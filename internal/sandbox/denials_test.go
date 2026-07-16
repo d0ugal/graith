@@ -317,6 +317,7 @@ func TestDenialProcessResolutionUsesReloadedToolsPS(t *testing.T) {
 	t.Cleanup(tools.Reset)
 
 	var commands []string
+
 	run := func(name string, _ []string) (string, error) {
 		commands = append(commands, name)
 
@@ -324,6 +325,7 @@ func TestDenialProcessResolutionUsesReloadedToolsPS(t *testing.T) {
 	}
 
 	tools.Configure(tools.Config{PS: "/croft/bin/ps-once"})
+
 	if _, err := processTree(100, run); err != nil {
 		t.Fatalf("processTree() error = %v", err)
 	}
@@ -332,12 +334,14 @@ func TestDenialProcessResolutionUsesReloadedToolsPS(t *testing.T) {
 	m := newSessionMatcher(100, run, clk.now)
 
 	tools.Configure(tools.Config{PS: "/bothy/bin/ps-live"})
+
 	if !m.Matches(200) {
 		t.Fatal("Matches(200) = false, want true")
 	}
 
 	tools.Configure(tools.Config{PS: "/strath/bin/ps-reloaded"})
 	clk.advance(2 * sessionMatcherTTL)
+
 	if !m.Matches(300) {
 		t.Fatal("Matches(300) = false after reload, want true")
 	}

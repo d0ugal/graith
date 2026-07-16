@@ -198,10 +198,13 @@ func (sm *SessionManager) createPRRefWatcherWithConfig(ctx context.Context, id, 
 	// holding sm.mu for this final fast insertion closes the otherwise possible
 	// gap where an old-generation watcher could appear after the reload update.
 	sm.mu.RLock()
+
 	if sm.cfg != cfgSnapshot {
 		sm.mu.RUnlock()
 		cancel()
+
 		_ = watcher.Close()
+
 		return
 	}
 
@@ -374,6 +377,7 @@ func (sm *SessionManager) armPRRefDebounceLocked(w *prRefWatcher, delay time.Dur
 		// watchFire guard — a post-teardown kick is otherwise harmless (pollKicked
 		// re-validates) but would needlessly burn the kick cooldown / a gh call.
 		w.bmu.Lock()
+
 		canceled := w.canceled || w.debounceGen != gen
 		if !canceled {
 			w.debounce = nil
@@ -421,13 +425,16 @@ func (sm *SessionManager) updateActivePRRefWatcherDebounce(cfgSnapshot *config.C
 	}
 
 	sm.prRefWatch.mu.Lock()
+
 	watchers := make([]*prRefWatcher, 0, len(sm.prRefWatch.watchers))
+
 	for _, w := range sm.prRefWatch.watchers {
 		watchers = append(watchers, w)
 	}
 	sm.prRefWatch.mu.Unlock()
 
 	dur := cfgSnapshot.PRWatch.RefDebounceDuration()
+
 	for _, w := range watchers {
 		sm.updatePRRefWatcherDebounce(cfgSnapshot, w, dur)
 	}

@@ -314,12 +314,14 @@ func TestPRWatchAdvancedDurationSafety(t *testing.T) {
 			for _, bad := range []string{"0s", "-1ns"} {
 				var direct PRWatchConfig
 				tt.set(&direct.Advanced, bad)
+
 				if got := tt.get(direct); got != tt.def {
 					t.Errorf("accessor(%q) = %v, want defensive default %v", bad, got, tt.def)
 				}
 
 				cfg := Default()
 				tt.set(&cfg.PRWatch.Advanced, bad)
+
 				err := cfg.Validate()
 				if err == nil || !strings.Contains(err.Error(), "pr_watch.advanced."+tt.name) {
 					t.Errorf("Validate(%q) = %v, want field-specific error", bad, err)
@@ -328,9 +330,11 @@ func TestPRWatchAdvancedDurationSafety(t *testing.T) {
 
 			cfg := Default()
 			tt.set(&cfg.PRWatch.Advanced, "1ns")
+
 			if err := cfg.Validate(); err != nil {
 				t.Fatalf("positive boundary rejected: %v", err)
 			}
+
 			if got := tt.get(cfg.PRWatch); got != time.Nanosecond {
 				t.Errorf("positive boundary accessor = %v, want 1ns", got)
 			}

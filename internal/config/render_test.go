@@ -63,6 +63,7 @@ func TestDiffFromDefaultsTreatsPairingSentinelsAsEffectiveDefaults(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if diff != "" {
 		t.Errorf("effective sentinels should match defaults, got diff:\n%s", diff)
 	}

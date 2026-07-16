@@ -251,30 +251,15 @@ func TestScannerCapBelow64KiBIsEnforced(t *testing.T) {
 // once, drain it, and continue with the valid record after it.
 func TestOversizedMiddleRecordsDoNotStopTranscriptReaders(t *testing.T) {
 	const capBytes = 1024
+
 	oversized := strings.Repeat("z", 2*capBytes)
 
 	t.Run("claude read", func(t *testing.T) {
-		resetScanLimits(t)
-		Configure(capBytes, 0)
-
-		path := writeLines(t, []string{
+		assertOversizedMiddleRecordRead(t, capBytes, oversized, []string{
 			`{"type":"user","uuid":"u1","parentUuid":"","message":{"role":"user","content":"before"}}`,
 			oversized,
 			`{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"after"}]}}`,
-		})
-
-		turns, dropped, err := claudeReader{}.read(path)
-		if err != nil {
-			t.Fatalf("read: %v", err)
-		}
-
-		if dropped != 1 {
-			t.Fatalf("dropped = %d, want oversized middle record counted once", dropped)
-		}
-
-		if len(turns) != 2 || turns[0].Text != "before" || turns[1].Text != "after" {
-			t.Fatalf("turns = %+v, want valid before and after turns", turns)
-		}
+		}, claudeReader{}.read)
 	})
 
 	t.Run("claude usage", func(t *testing.T) {
@@ -298,27 +283,11 @@ func TestOversizedMiddleRecordsDoNotStopTranscriptReaders(t *testing.T) {
 	})
 
 	t.Run("codex read", func(t *testing.T) {
-		resetScanLimits(t)
-		Configure(capBytes, 0)
-
-		path := writeLines(t, []string{
+		assertOversizedMiddleRecordRead(t, capBytes, oversized, []string{
 			`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"before"}]}}`,
 			oversized,
 			`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"after"}]}}`,
-		})
-
-		turns, dropped, err := codexReader{}.read(path)
-		if err != nil {
-			t.Fatalf("read: %v", err)
-		}
-
-		if dropped != 1 {
-			t.Fatalf("dropped = %d, want oversized middle record counted once", dropped)
-		}
-
-		if len(turns) != 2 || turns[0].Text != "before" || turns[1].Text != "after" {
-			t.Fatalf("turns = %+v, want valid before and after turns", turns)
-		}
+		}, codexReader{}.read)
 	})
 
 	t.Run("codex usage", func(t *testing.T) {
@@ -358,4 +327,31 @@ func TestOversizedMiddleRecordsDoNotStopTranscriptReaders(t *testing.T) {
 			t.Fatalf("id = %q, %v; want later metadata after oversized record", id, ok)
 		}
 	})
+}
+
+func assertOversizedMiddleRecordRead(
+	t *testing.T,
+	capBytes int,
+	oversized string,
+	lines []string,
+	read func(string) ([]Turn, int, error),
+) {
+	t.Helper()
+	resetScanLimits(t)
+	Configure(capBytes, 0)
+
+	path := writeLines(t, lines)
+
+	turns, dropped, err := read(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	if dropped != 1 {
+		t.Fatalf("dropped = %d, want oversized middle record counted once", dropped)
+	}
+
+	if len(turns) != 2 || turns[0].Text != "before" || turns[1].Text != "after" {
+		t.Fatalf("turns = %+v, want valid before and after turns", turns)
+	}
 }

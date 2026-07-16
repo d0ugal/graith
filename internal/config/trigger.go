@@ -554,6 +554,7 @@ func (c *Config) validateTriggers() []error {
 
 	base, baseErr := ParseDurationWithDays(advanced.WatchRetryBaseBackoff)
 	maxBackoff, maxErr := ParseDurationWithDays(advanced.WatchRetryMaxBackoff)
+
 	if strings.TrimSpace(advanced.WatchRetryBaseBackoff) != "" && strings.TrimSpace(advanced.WatchRetryMaxBackoff) != "" &&
 		baseErr == nil && maxErr == nil && base > 0 && maxBackoff > 0 && base > maxBackoff {
 		errs = append(errs, fmt.Errorf("triggers.advanced.watch_retry_base_backoff %q: must not exceed watch_retry_max_backoff %q", advanced.WatchRetryBaseBackoff, advanced.WatchRetryMaxBackoff))

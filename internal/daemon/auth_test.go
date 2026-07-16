@@ -499,6 +499,7 @@ func TestResolveAuthRequirePairingReloadForExistingDevices(t *testing.T) {
 	sm.mu.RLock()
 	auth, err := resolveAuth(sm, token, origin, deviceID)
 	sm.mu.RUnlock()
+
 	if err != nil || auth.role != roleRemoteHuman {
 		t.Fatalf("paired device with require_pairing=true = role %d, err %v; want remote human", auth.role, err)
 	}
@@ -513,9 +514,11 @@ func TestResolveAuthRequirePairingReloadForExistingDevices(t *testing.T) {
 	guest, err := resolveAuth(sm, "", origin, "")
 	pairedGuest, pairedErr := resolveAuth(sm, token, origin, deviceID)
 	sm.mu.RUnlock()
+
 	if err != nil || guest.role != roleRemoteGuest {
 		t.Errorf("WhoIs-only auth = role %d, err %v; want remote guest", guest.role, err)
 	}
+
 	if pairedErr != nil || pairedGuest.role != roleRemoteGuest {
 		t.Errorf("existing paired auth while disabled = role %d, err %v; want remote guest", pairedGuest.role, pairedErr)
 	}
@@ -527,6 +530,7 @@ func TestResolveAuthRequirePairingReloadForExistingDevices(t *testing.T) {
 	sm.mu.RLock()
 	restored, err := resolveAuth(sm, token, origin, deviceID)
 	sm.mu.RUnlock()
+
 	if err != nil || restored.role != roleRemoteHuman {
 		t.Errorf("re-enabled pairing = role %d, err %v; want restored remote human", restored.role, err)
 	}

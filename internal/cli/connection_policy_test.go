@@ -14,6 +14,7 @@ import (
 
 type deadlineRecordingConn struct {
 	net.Conn
+
 	deadline time.Time
 }
 
@@ -28,6 +29,7 @@ func preserveCLIConnectionPolicy(t *testing.T) {
 
 	oldCfg, oldPaths := cfg, paths
 	oldDial, oldNow := dialLocalDaemon, connectionNow
+
 	t.Cleanup(func() {
 		cfg, paths = oldCfg, oldPaths
 		dialLocalDaemon, connectionNow = oldDial, oldNow
@@ -38,12 +40,14 @@ func TestDoctorProbeUsesConfiguredLocalDialTimeout(t *testing.T) {
 	preserveCLIConnectionPolicy(t)
 
 	cfg = &config.Config{Connection: config.ConnectionConfig{DialTimeout: "1234ms"}}
+
 	paths.SocketPath = filepath.Join(t.TempDir(), "doctor.sock")
 	if err := os.WriteFile(paths.SocketPath, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	var captured time.Duration
+
 	dialLocalDaemon = func(network, address string, timeout time.Duration) (net.Conn, error) {
 		captured = timeout
 
@@ -74,10 +78,13 @@ func TestDaemonVersionProbeUsesConfiguredConnectionPolicy(t *testing.T) {
 	connectionNow = func() time.Time { return fixedNow }
 
 	clientConn, serverConn := net.Pipe()
+
 	t.Cleanup(func() { _ = serverConn.Close() })
 
 	recorded := &deadlineRecordingConn{Conn: clientConn}
+
 	var captured time.Duration
+
 	dialLocalDaemon = func(network, address string, timeout time.Duration) (net.Conn, error) {
 		captured = timeout
 
@@ -87,6 +94,7 @@ func TestDaemonVersionProbeUsesConfiguredConnectionPolicy(t *testing.T) {
 	go func() {
 		reader := protocol.NewFrameReader(serverConn)
 		writer := protocol.NewFrameWriter(serverConn)
+
 		if _, err := reader.ReadFrame(); err != nil {
 			return
 		}

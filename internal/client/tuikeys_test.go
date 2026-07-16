@@ -163,6 +163,7 @@ func TestDashboardEnterDeclinesDestructiveConfirmation(t *testing.T) {
 			m.keys.Confirm = confirm
 
 			updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
 			dm := updated.(*DashboardModel)
 			if dm.result != nil || cmd != nil {
 				t.Fatalf("Enter executed %s confirmation: result=%+v cmd=%v", tc.name, dm.result, cmd)

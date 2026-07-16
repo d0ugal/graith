@@ -1233,8 +1233,11 @@ func TestDisabledBindingsDoNotCaptureNUL(t *testing.T) {
 
 	go func() {
 		time.Sleep(30 * time.Millisecond)
+
 		_, _ = stdinW.Write([]byte{0x02, 0x00})
+
 		time.Sleep(30 * time.Millisecond)
+
 		_, _ = stdinW.Write([]byte{0x02, 'd'})
 	}()
 
@@ -1243,6 +1246,7 @@ func TestDisabledBindingsDoNotCaptureNUL(t *testing.T) {
 	}
 
 	timeout := time.After(time.Second)
+
 	for {
 		select {
 		case payload := <-got:

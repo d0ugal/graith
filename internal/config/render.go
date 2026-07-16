@@ -80,12 +80,15 @@ func resolveRenderedDefaults(cfg *Config) *Config {
 	if c.Remote.MaxPendingPairings == 0 {
 		c.Remote.MaxPendingPairings = RemoteMaxPendingPairingsDefault
 	}
+
 	if strings.TrimSpace(c.Remote.PendingPairingTTL) == "" {
 		c.Remote.PendingPairingTTL = "10m"
 	}
+
 	if c.Remote.PairFallbackCount == 0 {
 		c.Remote.PairFallbackCount = RemotePairFallbackCountDefault
 	}
+
 	if strings.TrimSpace(c.Remote.PairFallbackWindow) == "" {
 		c.Remote.PairFallbackWindow = "1m"
 	}

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -416,14 +417,14 @@ func TestReapTrackerSession(t *testing.T) {
 
 	t.Run("none is a no-op", func(t *testing.T) {
 		sm := newSM("24h", &SessionState{ID: "braw", Status: StatusRunning})
-		if sm.reapTrackerSession("braw", config.TrackerReapNone) {
+		if sm.reapTrackerSession(context.Background(), "braw", config.TrackerReapNone) {
 			t.Error("reap=none should never act")
 		}
 	})
 
 	t.Run("delete skipped when retention disabled", func(t *testing.T) {
 		sm := newSM("0", &SessionState{ID: "braw", TriggerID: "issues", TrackerIssue: "gh:croft#1", Status: StatusStopped})
-		if sm.reapTrackerSession("braw", config.TrackerReapDelete) {
+		if sm.reapTrackerSession(context.Background(), "braw", config.TrackerReapDelete) {
 			t.Error("reap=delete must be skipped when retention=0 (never a hard purge)")
 		}
 
@@ -434,14 +435,14 @@ func TestReapTrackerSession(t *testing.T) {
 
 	t.Run("delete refuses a starred session", func(t *testing.T) {
 		sm := newSM("24h", &SessionState{ID: "braw", TriggerID: "issues", TrackerIssue: "gh:croft#1", Status: StatusStopped, Starred: true})
-		if sm.reapTrackerSession("braw", config.TrackerReapDelete) {
+		if sm.reapTrackerSession(context.Background(), "braw", config.TrackerReapDelete) {
 			t.Error("reap=delete must not touch a starred session")
 		}
 	})
 
 	t.Run("delete soft-deletes a stopped session", func(t *testing.T) {
 		sm := newSM("24h", &SessionState{ID: "braw", TriggerID: "issues", TrackerIssue: "gh:croft#1", Status: StatusStopped})
-		if !sm.reapTrackerSession("braw", config.TrackerReapDelete) {
+		if !sm.reapTrackerSession(context.Background(), "braw", config.TrackerReapDelete) {
 			t.Fatal("reap=delete should soft-delete a stopped session")
 		}
 
@@ -452,7 +453,7 @@ func TestReapTrackerSession(t *testing.T) {
 
 	t.Run("stop is a no-op on an already-stopped session", func(t *testing.T) {
 		sm := newSM("24h", &SessionState{ID: "braw", Status: StatusStopped})
-		if sm.reapTrackerSession("braw", config.TrackerReapStop) {
+		if sm.reapTrackerSession(context.Background(), "braw", config.TrackerReapStop) {
 			t.Error("reap=stop on a stopped session should be a no-op")
 		}
 	})

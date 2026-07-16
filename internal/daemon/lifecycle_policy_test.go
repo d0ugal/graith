@@ -52,6 +52,7 @@ func (d *teardownFakeDriver) Kill() error {
 	d.kills++
 	d.killAt = time.Now()
 	d.mu.Unlock()
+
 	return nil
 }
 func (d *teardownFakeDriver) ForceKill() error {
@@ -60,9 +61,11 @@ func (d *teardownFakeDriver) ForceKill() error {
 	d.forceAt = time.Now()
 	exit := d.exitOnForce
 	d.mu.Unlock()
+
 	if exit {
 		d.doneOnce.Do(func() { close(d.done) })
 	}
+
 	return nil
 }
 func (d *teardownFakeDriver) Close() {
@@ -79,6 +82,7 @@ func (d *teardownFakeDriver) Detach() {
 func (d *teardownFakeDriver) teardownStats() (kills, forces, closes int, termToKill time.Duration) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+
 	return d.kills, d.forces, d.closes, d.forceAt.Sub(d.killAt)
 }
 
@@ -97,15 +101,18 @@ func newLiveDriverLifecycleTestManager(t *testing.T, grace time.Duration) *Sessi
 	if err := os.MkdirAll(sm.paths.LogDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	return sm
 }
 
 func assertFakeDriverEscalated(t *testing.T, driver *teardownFakeDriver, grace time.Duration) {
 	t.Helper()
+
 	kills, forces, closes, termToKill := driver.teardownStats()
 	if kills != 1 || forces != 1 || closes != 1 {
 		t.Fatalf("teardown calls TERM=%d KILL=%d Close=%d, want 1/1/1", kills, forces, closes)
 	}
+
 	if termToKill < grace*3/4 {
 		t.Fatalf("TERM→KILL delay = %v, want configured grace %v", termToKill, grace)
 	}
@@ -113,17 +120,20 @@ func assertFakeDriverEscalated(t *testing.T, driver *teardownFakeDriver, grace t
 
 func TestTeardownLiveDriverUsesConfiguredGrace(t *testing.T) {
 	const grace = 40 * time.Millisecond
+
 	sm := newLiveDriverLifecycleTestManager(t, grace)
 	driver := newTeardownFakeDriver(true)
 
 	if err := sm.teardownLiveDriver(context.Background(), driver); err != nil {
 		t.Fatalf("teardownLiveDriver: %v", err)
 	}
+
 	assertFakeDriverEscalated(t, driver, grace)
 }
 
 func TestTeardownLiveDriverBoundsPostKillCompletion(t *testing.T) {
 	const grace = 25 * time.Millisecond
+
 	sm := newLiveDriverLifecycleTestManager(t, grace)
 	driver := newTeardownFakeDriver(false)
 	start := time.Now()
@@ -132,9 +142,11 @@ func TestTeardownLiveDriverBoundsPostKillCompletion(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "after SIGKILL") {
 		t.Fatalf("teardown error = %v, want bounded post-KILL failure", err)
 	}
+
 	if elapsed := time.Since(start); elapsed < 2*grace*3/4 || elapsed > time.Second {
 		t.Fatalf("teardown elapsed = %v, want two bounded grace phases", elapsed)
 	}
+
 	kills, forces, closes, _ := driver.teardownStats()
 	if kills != 1 || forces != 1 || closes != 0 {
 		t.Fatalf("wedged teardown calls TERM=%d KILL=%d Close=%d, want 1/1/0", kills, forces, closes)
@@ -143,6 +155,7 @@ func TestTeardownLiveDriverBoundsPostKillCompletion(t *testing.T) {
 
 func TestHardDeleteUsesLiveDriverTeardownPolicy(t *testing.T) {
 	const grace = 25 * time.Millisecond
+
 	sm := newLiveDriverLifecycleTestManager(t, grace)
 	driver := newTeardownFakeDriver(true)
 	sm.state.Sessions["braw-delete"] = &SessionState{
@@ -153,11 +166,13 @@ func TestHardDeleteUsesLiveDriverTeardownPolicy(t *testing.T) {
 	if err := sm.Delete("braw-delete"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
+
 	assertFakeDriverEscalated(t, driver, grace)
 }
 
 func TestSoftDeleteUsesLiveDriverTeardownPolicy(t *testing.T) {
 	const grace = 25 * time.Millisecond
+
 	sm := newLiveDriverLifecycleTestManager(t, grace)
 	driver := newTeardownFakeDriver(true)
 	sm.state.Sessions["canny-delete"] = &SessionState{
@@ -168,11 +183,13 @@ func TestSoftDeleteUsesLiveDriverTeardownPolicy(t *testing.T) {
 	if _, err := sm.SoftDelete("canny-delete"); err != nil {
 		t.Fatalf("SoftDelete: %v", err)
 	}
+
 	assertFakeDriverEscalated(t, driver, grace)
 }
 
 func TestShutdownUsesLiveDriverTeardownPolicy(t *testing.T) {
 	const grace = 25 * time.Millisecond
+
 	sm := newLiveDriverLifecycleTestManager(t, grace)
 	driver := newTeardownFakeDriver(true)
 	sm.state.Sessions["dreich-shutdown"] = &SessionState{
@@ -186,6 +203,7 @@ func TestShutdownUsesLiveDriverTeardownPolicy(t *testing.T) {
 
 func TestRestartUsesLiveDriverTeardownPolicy(t *testing.T) {
 	const grace = 25 * time.Millisecond
+
 	sm := newLiveDriverLifecycleTestManager(t, grace)
 	driver := newTeardownFakeDriver(true)
 	sm.state.Sessions["thrawn-restart"] = &SessionState{
@@ -196,11 +214,13 @@ func TestRestartUsesLiveDriverTeardownPolicy(t *testing.T) {
 	if _, err := sm.Restart("thrawn-restart", 24, 80); err == nil {
 		t.Fatal("Restart should fail after teardown because the test agent is missing")
 	}
+
 	assertFakeDriverEscalated(t, driver, grace)
 }
 
 func TestMigrateUsesLiveDriverTeardownPolicy(t *testing.T) {
 	const grace = 25 * time.Millisecond
+
 	sm := newMigrateTestManager(t)
 	sm.cfg.Lifecycle.ProcessKillGrace = grace.String()
 	sm.cfg.Migration.HealthWindow = "50ms"
@@ -210,11 +230,14 @@ func TestMigrateUsesLiveDriverTeardownPolicy(t *testing.T) {
 	claudeRoot := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", claudeRoot)
 	t.Setenv("CODEX_HOME", t.TempDir())
+
 	const sid = "33333333-4444-5555-6666-777777777777"
+
 	projDir := filepath.Join(claudeRoot, "projects", "-migrate-live")
 	if err := os.MkdirAll(projDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(projDir, sid+".jsonl"), []byte(
 		`{"type":"user","uuid":"u1","parentUuid":"","message":{"role":"user","content":"bide in the bothy"}}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -229,6 +252,7 @@ func TestMigrateUsesLiveDriverTeardownPolicy(t *testing.T) {
 	if _, err := sm.Migrate("bothy-migrate", "codex", "", 24, 80); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
+
 	t.Cleanup(func() { stopRunnableOrchestrator(t, sm, "bothy-migrate") })
 	assertFakeDriverEscalated(t, driver, grace)
 }

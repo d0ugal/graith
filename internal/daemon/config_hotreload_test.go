@@ -39,7 +39,10 @@ func TestApplyConfigReloadsJailListLimit(t *testing.T) {
 	// Tighten: cap below the jailed count.
 	tighten := config.Default()
 	tighten.Messages.JailListLimit = 2
-	sm.applyConfig(tighten)
+
+	if err := sm.applyConfig(tighten); err != nil {
+		t.Fatalf("apply tightened config: %v", err)
+	}
 
 	if list, err := ms.ListJailed(true); err != nil {
 		t.Fatalf("ListJailed: %v", err)
@@ -50,7 +53,10 @@ func TestApplyConfigReloadsJailListLimit(t *testing.T) {
 	// Relax: cap above the jailed count restores the full listing.
 	relax := config.Default()
 	relax.Messages.JailListLimit = 50
-	sm.applyConfig(relax)
+
+	if err := sm.applyConfig(relax); err != nil {
+		t.Fatalf("apply relaxed config: %v", err)
+	}
 
 	if list, err := ms.ListJailed(true); err != nil {
 		t.Fatalf("ListJailed: %v", err)
@@ -84,7 +90,10 @@ func TestApplyConfigReloadsTodoLimits(t *testing.T) {
 	tighten := config.Default()
 	tighten.Todo.MaxTitle = 5
 	tighten.Todo.MaxNote = 5
-	sm.applyConfig(tighten)
+
+	if err := sm.applyConfig(tighten); err != nil {
+		t.Fatalf("apply tightened config: %v", err)
+	}
 
 	if _, err := ts.Add(TodoAdd{Scope: "session:ben", Title: title, CreatedBy: "braw"}); err == nil {
 		t.Fatal("expected Add to reject an over-length title after tightening max_title")
@@ -102,7 +111,10 @@ func TestApplyConfigReloadsTodoLimits(t *testing.T) {
 	relax := config.Default()
 	relax.Todo.MaxTitle = 100
 	relax.Todo.MaxNote = 100
-	sm.applyConfig(relax)
+
+	if err := sm.applyConfig(relax); err != nil {
+		t.Fatalf("apply relaxed config: %v", err)
+	}
 
 	if _, err := ts.Add(TodoAdd{Scope: "session:ben", Title: title, Note: note, CreatedBy: "braw"}); err != nil {
 		t.Fatalf("after relaxing limits, Add should succeed: %v", err)
@@ -112,7 +124,10 @@ func TestApplyConfigReloadsTodoLimits(t *testing.T) {
 	// ceiling max_title falls back to the default, never past the schema limit.
 	overCeiling := config.Default()
 	overCeiling.Todo.MaxTitle = todoTitleHardCeiling + 1000
-	sm.applyConfig(overCeiling)
+
+	if err := sm.applyConfig(overCeiling); err != nil {
+		t.Fatalf("apply above-ceiling config: %v", err)
+	}
 
 	if got := ts.titleLimit(); got != config.TodoMaxTitleDefault {
 		t.Fatalf("above-ceiling max_title resolved to %d, want default %d", got, config.TodoMaxTitleDefault)
@@ -156,7 +171,10 @@ func TestApplyConfigUpdatesLiveInputDelay(t *testing.T) {
 	// Reload with a much larger delay.
 	newCfg := config.Default()
 	newCfg.Lifecycle.InputDelay = "300ms"
-	sm.applyConfig(newCfg)
+
+	if err := sm.applyConfig(newCfg); err != nil {
+		t.Fatalf("apply input-delay config: %v", err)
+	}
 
 	start := time.Now()
 

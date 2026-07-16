@@ -323,9 +323,11 @@ func approvalPipeHandshake(t *testing.T, server net.Conn) <-chan error {
 	t.Helper()
 
 	done := make(chan error, 1)
+
 	go func() {
 		reader := protocol.NewFrameReader(server)
 		writer := protocol.NewFrameWriter(server)
+
 		if _, err := reader.ReadFrame(); err != nil {
 			done <- err
 			return
@@ -337,6 +339,7 @@ func approvalPipeHandshake(t *testing.T, server net.Conn) <-chan error {
 		if err == nil {
 			err = writer.WriteFrame(protocol.ChannelControl, resp)
 		}
+
 		done <- err
 	}()
 
@@ -351,10 +354,12 @@ func TestConnectForApprovalRetainsOperationDeadline(t *testing.T) {
 
 	clientConn, serverConn := net.Pipe()
 	defer func() { _ = serverConn.Close() }()
+
 	recorded := &deadlineRecordingConn{Conn: clientConn}
 
 	origDial := dialLocalDaemon
 	dialLocalDaemon = func(string, string, time.Duration) (net.Conn, error) { return recorded, nil }
+
 	t.Cleanup(func() { dialLocalDaemon = origDial })
 
 	daemonHandshakeTimeout = 75 * time.Millisecond
@@ -366,6 +371,7 @@ func TestConnectForApprovalRetainsOperationDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
+
 	if err := <-handshakeDone; err != nil {
 		t.Fatal(err)
 	}
@@ -374,9 +380,11 @@ func TestConnectForApprovalRetainsOperationDeadline(t *testing.T) {
 	if len(deadlines) != 2 {
 		t.Fatalf("SetDeadline calls = %d, want handshake + operation: %v", len(deadlines), deadlines)
 	}
+
 	if deadlines[0].IsZero() || deadlines[1].IsZero() {
 		t.Fatalf("deadlines must both be nonzero: %v", deadlines)
 	}
+
 	if !deadlines[1].After(deadlines[0]) {
 		t.Errorf("operation deadline %v is not after handshake deadline %v", deadlines[1], deadlines[0])
 	}
@@ -393,6 +401,7 @@ func TestConnectForApprovalStalledAfterHandshakeTimesOut(t *testing.T) {
 
 	origDial := dialLocalDaemon
 	dialLocalDaemon = func(string, string, time.Duration) (net.Conn, error) { return clientConn, nil }
+
 	t.Cleanup(func() { dialLocalDaemon = origDial })
 
 	daemonHandshakeTimeout = 200 * time.Millisecond
@@ -404,11 +413,13 @@ func TestConnectForApprovalStalledAfterHandshakeTimesOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
+
 	if err := <-handshakeDone; err != nil {
 		t.Fatal(err)
 	}
 
 	started := time.Now()
+
 	_, err = c.ReadControlResponse()
 	if err == nil {
 		t.Fatal("stalled post-handshake read returned nil error")
@@ -418,6 +429,7 @@ func TestConnectForApprovalStalledAfterHandshakeTimesOut(t *testing.T) {
 	if !errors.As(err, &netErr) || !netErr.Timeout() {
 		t.Fatalf("stalled read error = %v, want timeout", err)
 	}
+
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Errorf("stalled read took %v, retained operation deadline was not effective", elapsed)
 	}

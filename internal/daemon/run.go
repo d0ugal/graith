@@ -228,8 +228,11 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	// owns replaceable listener generations so reload can revoke live access and
 	// apply transport changes without disturbing the local Unix socket (#1316).
 	remoteCfg := sm.Config().Remote
+
 	sm.configureRemoteRuntime(ctx, paths.DataDir)
+
 	defer sm.stopRemoteRuntime()
+
 	if err := sm.startRemoteRuntime(remoteCfg); err != nil {
 		log.Error("[remote] initial control surface failed; remote access remains disabled", "err", err)
 	}

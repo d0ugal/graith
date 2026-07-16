@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"time"
@@ -453,7 +454,7 @@ type lifecycleRequest struct {
 // replies with a DeleteResultMsg carrying the soft/hard outcome and, for a soft
 // delete, the computed expiry — enough for the CLI to render "Recoverable
 // until …" vs "Deleted".
-func handleDelete(sm *SessionManager, auth authContext, sendControl func(string, any), d protocol.DeleteMsg) {
+func handleDelete(ctx context.Context, sm *SessionManager, auth authContext, sendControl func(string, any), d protocol.DeleteMsg) {
 	sm.log.Debug("control request",
 		"op", "delete", "caller", auth.describe(),
 		"target", d.SessionID, "children", d.Children, "purge", d.Purge)
@@ -504,12 +505,12 @@ func handleDelete(sm *SessionManager, auth authContext, sendControl func(string,
 	soft := !d.Purge && !orchestratorReset
 
 	if d.Children {
-		handleDeleteChildren(sm, sendControl, d, soft)
+		handleDeleteChildren(ctx, sm, sendControl, d, soft)
 		return
 	}
 
 	if soft {
-		snap, err := sm.SoftDelete(d.SessionID)
+		snap, err := sm.softDeleteWithContext(ctx, d.SessionID)
 		if err != nil {
 			sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 			return
@@ -523,7 +524,7 @@ func handleDelete(sm *SessionManager, auth authContext, sendControl func(string,
 	// Hard delete (gr purge): capture the name before the session is removed.
 	name := sm.sessionName(d.SessionID)
 
-	if err := sm.Delete(d.SessionID); err != nil {
+	if err := sm.deleteWithContext(ctx, d.SessionID); err != nil {
 		sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 		return
 	}
@@ -533,16 +534,16 @@ func handleDelete(sm *SessionManager, auth authContext, sendControl func(string,
 
 // handleDeleteChildren runs the with-children delete (soft or hard) and replies
 // with a DeleteResultMsg whose Affected list carries the per-descendant outcome.
-func handleDeleteChildren(sm *SessionManager, sendControl func(string, any), d protocol.DeleteMsg, soft bool) {
+func handleDeleteChildren(ctx context.Context, sm *SessionManager, sendControl func(string, any), d protocol.DeleteMsg, soft bool) {
 	var (
 		affected []string
 		err      error
 	)
 
 	if soft {
-		affected, err = sm.SoftDeleteWithChildren(d.SessionID, d.ExcludeRoot)
+		affected, err = sm.softDeleteWithChildrenContext(ctx, d.SessionID, d.ExcludeRoot)
 	} else {
-		affected, err = sm.DeleteWithChildren(d.SessionID, d.ExcludeRoot)
+		affected, err = sm.deleteWithChildrenContext(ctx, d.SessionID, d.ExcludeRoot)
 	}
 
 	if err != nil {

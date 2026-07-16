@@ -194,16 +194,6 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 	return sm.resumeWithSummaryAndPromptFromConfig(sm.Config(), id, rows, cols, lifecycleSummary, "")
 }
 
-// resumeWithSummaryAndPrompt starts (or restarts) a session's agent in its
-// existing worktree. When seedPrompt is non-empty it is appended as the agent's
-// positional opening prompt — used by Migrate to seed a freshly-swapped agent
-// with the rendered prior conversation. A seeded start is treated as a fresh
-// start (uses agent.Args, not resume_args) and clears FreshStart afterwards so
-// subsequent resumes use the new agent's native resume.
-func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint16, lifecycleSummary, seedPrompt string) (SessionState, error) {
-	return sm.resumeWithSummaryAndPromptFromConfig(sm.Config(), id, rows, cols, lifecycleSummary, seedPrompt)
-}
-
 func (sm *SessionManager) resumeWithSummaryAndPromptFromConfig(cfgSnapshot *config.Config, id string, rows, cols uint16, lifecycleSummary, seedPrompt string) (SessionState, error) {
 	// --- Pre-lock: discover GitHub username ---
 	sm.mu.RLock()

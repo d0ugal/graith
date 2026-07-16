@@ -21,12 +21,15 @@ func watchRetryBackoff(retry int, base, maxBackoff time.Duration) time.Duration 
 	if retry < 1 {
 		retry = 1
 	}
+
 	if base <= 0 {
 		base = time.Second
 	}
+
 	if maxBackoff <= 0 {
 		maxBackoff = base
 	}
+
 	if base > maxBackoff {
 		base = maxBackoff
 	}
@@ -40,14 +43,6 @@ func watchRetryBackoff(retry int, base, maxBackoff time.Duration) time.Duration 
 	}
 
 	return d
-}
-
-// watchRetryBackoff resolves the degraded-binding backoff for attempt using the
-// live [triggers.advanced] base/cap tuning.
-func (sm *SessionManager) watchRetryBackoff(attempt int) time.Duration {
-	tr := sm.Config().TriggersRuntime
-
-	return watchRetryBackoff(attempt, tr.WatchRetryBaseBackoffDuration(), tr.WatchRetryMaxBackoffDuration())
 }
 
 // gitignoreFilename is the file whose changes trigger a live rebuild of a
@@ -152,6 +147,7 @@ func (sm *SessionManager) reconcileBindingsWithConfig(ctx context.Context, trigg
 				if existingBuiltinFP != builtinFP {
 					sm.updateWatchBindingBuiltinIgnores(cfgSnapshot, existing, builtinIgnores, builtinFP)
 				}
+
 				continue
 			}
 
@@ -290,7 +286,9 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 
 	if !sm.publishWatchBinding(cfgSnapshot, key, b) {
 		cancel()
+
 		_ = watcher.Close()
+
 		return
 	}
 
@@ -373,6 +371,7 @@ func (sm *SessionManager) updateWatchBindingBuiltinIgnores(cfgSnapshot *config.C
 		b.bmu.Unlock()
 		return
 	}
+
 	matcher := b.matcher
 	b.bmu.Unlock()
 
@@ -389,8 +388,10 @@ func (sm *SessionManager) updateWatchBindingBuiltinIgnores(cfgSnapshot *config.C
 				delete(b.changed, path)
 			}
 		}
+
 		b.builtinFingerprint = builtinFP
 		b.bmu.Unlock()
+
 		return
 	}
 
@@ -407,7 +408,9 @@ func (sm *SessionManager) updateActiveWatchBuiltinIgnores(cfgSnapshot *config.Co
 	}
 
 	sm.triggers.mu.Lock()
+
 	bindings := make([]*watchBinding, 0, len(sm.triggers.bindings))
+
 	for _, b := range sm.triggers.bindings {
 		bindings = append(bindings, b)
 	}
@@ -415,6 +418,7 @@ func (sm *SessionManager) updateActiveWatchBuiltinIgnores(cfgSnapshot *config.Co
 
 	builtinIgnores := cfgSnapshot.TriggersRuntime.WatchBuiltinIgnores()
 	builtinFP := watchBuiltinFingerprint(builtinIgnores)
+
 	for _, b := range bindings {
 		sm.updateWatchBindingBuiltinIgnores(cfgSnapshot, b, builtinIgnores, builtinFP)
 	}
@@ -609,6 +613,7 @@ func (sm *SessionManager) noteChange(ctx context.Context, triggerName string, b 
 // overlap guard, and run the action.
 func (sm *SessionManager) watchFire(ctx context.Context, triggerName string, b *watchBinding) {
 	cfgSnapshot := sm.Config()
+
 	t := sm.triggerByNameFromConfig(triggerName, cfgSnapshot)
 	if t == nil || !t.IsWatch() || !t.TriggerEnabled() {
 		return

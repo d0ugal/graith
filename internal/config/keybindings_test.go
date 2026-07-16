@@ -49,6 +49,7 @@ func TestDefaultOverlayKeybindings(t *testing.T) {
 	if ov.Confirm != "y Y" {
 		t.Errorf("Keybindings.Overlay.confirm = %q, want y/Y without Enter so [y/N] stays safe", ov.Confirm)
 	}
+
 	for name, got := range cases {
 		if got == "" {
 			t.Errorf("Keybindings.Overlay.%s is empty; expected a default", name)
@@ -117,6 +118,7 @@ func TestKeybindingsConflicts(t *testing.T) {
 
 	t.Run("action colliding with prefix is detected", func(t *testing.T) {
 		k := Keybindings{Prefix: "d", Detach: "d"}
+
 		got := k.Conflicts()
 		if len(got) != 1 || !strings.Contains(got[0], "prefix") || !strings.Contains(got[0], "detach") {
 			t.Fatalf("Conflicts() = %v, want prefix/detach precedence collision", got)

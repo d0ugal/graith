@@ -473,7 +473,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				handleDelete(sm, auth, sendControl, d)
+				handleDelete(ctx, sm, auth, sendControl, d)
 
 			case "restore":
 				var r protocol.RestoreMsg
@@ -909,7 +909,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				handleScenarioStop(sm, auth, sendControl, msg)
 
 			case "scenario_delete":
-				handleScenarioDelete(sm, auth, sendControl, msg)
+				handleScenarioDelete(ctx, sm, auth, sendControl, msg)
 
 			case "scenario_status":
 				handleScenarioStatus(sm, sendControl, msg)

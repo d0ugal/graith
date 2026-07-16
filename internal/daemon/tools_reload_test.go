@@ -30,7 +30,10 @@ func TestApplyConfigReinstallsToolResolver(t *testing.T) {
 
 	newCfg := config.Default()
 	newCfg.Tools.Git = fakeGit
-	sm.applyConfig(newCfg)
+
+	if err := sm.applyConfig(newCfg); err != nil {
+		t.Fatalf("apply tools config: %v", err)
+	}
 
 	if got := tools.Git(); got != fakeGit {
 		t.Errorf("after reload, Git() = %q, want %q", got, fakeGit)

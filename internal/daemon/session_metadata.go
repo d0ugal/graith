@@ -528,6 +528,7 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 			if !sess.Exited() {
 				sm.logStopping(id, name, StopReasonShutdown, "shutdown", sess)
 			}
+
 			if err := sm.teardownLiveDriver(ctx, sess); err != nil {
 				sm.log.Warn("live driver did not finish during shutdown", "id", id, "err", err)
 			}
@@ -541,6 +542,7 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 	// immediately; a pathological driver whose Done never closes cannot wedge
 	// daemon shutdown here either.
 	watchersDone := make(chan struct{})
+
 	go func() {
 		sm.watchers.Wait()
 		close(watchersDone)

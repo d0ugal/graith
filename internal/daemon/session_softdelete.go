@@ -55,6 +55,10 @@ func (sm *SessionManager) fallbackExpiryLocked(s *SessionState, now time.Time) (
 // elapses. System and starred sessions are protected, matching Delete. Returns
 // a snapshot of the soft-deleted session so the caller can report the expiry.
 func (sm *SessionManager) SoftDelete(id string) (SessionState, error) {
+	return sm.softDeleteWithContext(context.Background(), id)
+}
+
+func (sm *SessionManager) softDeleteWithContext(ctx context.Context, id string) (SessionState, error) {
 	sm.mu.Lock()
 
 	sessState, ok := sm.state.Sessions[id]
@@ -156,8 +160,9 @@ func (sm *SessionManager) SoftDelete(id string) (SessionState, error) {
 			sm.logStopping(id, sm.sessionName(id), StopReasonDelete, "soft-delete", ptySess)
 		}
 
-		if err := sm.teardownLiveDriver(context.Background(), ptySess); err != nil {
+		if err := sm.teardownLiveDriver(ctx, ptySess); err != nil {
 			sm.log.Warn("live driver did not finish during soft delete", "id", id, "err", err)
+
 			killedOK = false
 		}
 	} else if orphanPID > 0 {
@@ -216,6 +221,10 @@ func softDeletableLocked(sess *SessionState) bool {
 // only re-marks, never tears down, since deferring teardown is the whole point.
 // Returns the list of session IDs that were soft-deleted.
 func (sm *SessionManager) SoftDeleteWithChildren(rootID string, excludeRoot bool) ([]string, error) {
+	return sm.softDeleteWithChildrenContext(context.Background(), rootID, excludeRoot)
+}
+
+func (sm *SessionManager) softDeleteWithChildrenContext(ctx context.Context, rootID string, excludeRoot bool) ([]string, error) {
 	sm.mu.RLock()
 	_, ok := sm.state.Sessions[rootID]
 	sm.mu.RUnlock()
@@ -244,7 +253,7 @@ func (sm *SessionManager) SoftDeleteWithChildren(rootID string, excludeRoot bool
 			return
 		}
 
-		if _, err := sm.SoftDelete(id); err != nil {
+		if _, err := sm.softDeleteWithContext(ctx, id); err != nil {
 			sm.log.Warn("soft delete of descendant failed", "id", id, "err", err)
 			return
 		}

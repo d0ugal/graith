@@ -251,11 +251,13 @@ func (sm *SessionManager) ApprovePairing(requestID string, readOnly bool, now ti
 		delete(sm.pendingPairings, requestID)
 		return "", "", fmt.Errorf("pairing request %q no longer has a live requester", requestID)
 	}
+
 	if waiter.disconnected != nil {
 		select {
 		case <-waiter.disconnected:
 			delete(sm.pairWaiters, requestID)
 			delete(sm.pendingPairings, requestID)
+
 			return "", "", fmt.Errorf("pairing request %q disconnected before approval", requestID)
 		default:
 		}
@@ -306,6 +308,7 @@ func (sm *SessionManager) ApprovePairing(requestID string, readOnly bool, now ti
 	// waiting, so the device receives its token over its open connection. The
 	// channel is buffered (cap 1), so this never blocks under the lock.
 	waiter.approval <- pairApproval{DeviceID: deviceID, Token: clientToken, Profile: sm.paths.Profile, TLSPin: sm.remoteTLSPin}
+
 	delete(sm.pairWaiters, requestID)
 
 	return deviceID, clientToken, nil

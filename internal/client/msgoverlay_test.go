@@ -639,12 +639,14 @@ func TestMsgOverlay_TickHonoursConfiguredRefreshInterval(t *testing.T) {
 	savePresentation(t)
 
 	original := scheduleMessageTick
+
 	t.Cleanup(func() { scheduleMessageTick = original })
 
 	const configured = 375 * time.Millisecond
 	ConfigurePresentation(PresentationPrefs{RefreshInterval: configured})
 
 	var captured time.Duration
+
 	scheduleMessageTick = func(d time.Duration, fn func(time.Time) tea.Msg) tea.Cmd {
 		captured = d
 
@@ -652,6 +654,7 @@ func TestMsgOverlay_TickHonoursConfiguredRefreshInterval(t *testing.T) {
 	}
 
 	cmd := newMessageOverlayModel("ben", nil, nil).tickCmd()
+
 	if captured != configured {
 		t.Fatalf("message viewer tick = %v, want configured %v", captured, configured)
 	}

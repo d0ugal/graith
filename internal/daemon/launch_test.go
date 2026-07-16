@@ -168,6 +168,7 @@ func TestLaunchThrottleResize(t *testing.T) {
 	}
 
 	acquired := make(chan launchSlot, 1)
+
 	go func() {
 		b, acquireErr := lt.acquire(context.Background())
 		if acquireErr == nil {
@@ -189,6 +190,7 @@ func TestLaunchThrottleResize(t *testing.T) {
 		if b.capacity != 2 || b.inflight > 2 {
 			t.Fatalf("post-resize slot = %+v, want live capacity 2", b)
 		}
+
 		b.release()
 	case <-time.After(time.Second):
 		t.Fatal("blocked acquire did not wake after a holder released")
@@ -203,6 +205,7 @@ func TestLaunchThrottleShrinkCreatesCapacityDebt(t *testing.T) {
 
 	for i := range held {
 		var err error
+
 		held[i], err = lt.acquire(context.Background())
 		if err != nil {
 			t.Fatalf("acquire %d: %v", i, err)
@@ -212,6 +215,7 @@ func TestLaunchThrottleShrinkCreatesCapacityDebt(t *testing.T) {
 	lt.resize(1)
 
 	acquired := make(chan launchSlot, 1)
+
 	go func() {
 		slot, err := lt.acquire(context.Background())
 		if err == nil {
@@ -223,6 +227,7 @@ func TestLaunchThrottleShrinkCreatesCapacityDebt(t *testing.T) {
 	// admit a replacement while one pre-existing holder still occupies the cap.
 	held[0].release()
 	held[1].release()
+
 	select {
 	case slot := <-acquired:
 		slot.release()
@@ -231,11 +236,13 @@ func TestLaunchThrottleShrinkCreatesCapacityDebt(t *testing.T) {
 	}
 
 	held[2].release()
+
 	select {
 	case slot := <-acquired:
 		if slot.capacity != 1 || slot.inflight != 1 {
 			t.Fatalf("post-shrink slot = %+v, want 1/1", slot)
 		}
+
 		slot.release()
 	case <-time.After(time.Second):
 		t.Fatal("acquire stayed blocked after shrink debt was repaid")
@@ -244,12 +251,14 @@ func TestLaunchThrottleShrinkCreatesCapacityDebt(t *testing.T) {
 
 func TestLaunchThrottleResizeWakesOldWaitersAgainstLiveLimit(t *testing.T) {
 	lt := newLaunchThrottle(1)
+
 	held, err := lt.acquire(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	const waiterCount = 8
+
 	acquired := make(chan launchSlot, waiterCount)
 	for range waiterCount {
 		go func() {
@@ -263,6 +272,7 @@ func TestLaunchThrottleResizeWakesOldWaitersAgainstLiveLimit(t *testing.T) {
 	// Grow while all waiters belong to the pre-resize generation. Only the two
 	// newly available slots may be admitted alongside the existing holder.
 	lt.resize(3)
+
 	first := <-acquired
 	second := <-acquired
 

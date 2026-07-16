@@ -1054,10 +1054,12 @@ func TestGateRateLimitNonPositiveWindowStillLimitsImmediateEvent(t *testing.T) {
 				Debounce: "0s", MaxNotificationsPerPR: 100,
 				Advanced: config.PRWatchAdvancedConfig{NotificationRateLimit: 1, NotificationRateWindow: bad},
 			}
+
 			cur := &prWatchCursor{failing: map[string]bool{}}
 			if reason, ok := sm.gate(cfg, "canny", cur, false); !ok {
 				t.Fatalf("first event denied: %s", reason)
 			}
+
 			if reason, ok := sm.gate(cfg, "canny", cur, false); ok || reason != "rate-limited" {
 				t.Fatalf("second immediate event = (%q, %v), want rate-limited", reason, ok)
 			}

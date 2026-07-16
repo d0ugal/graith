@@ -221,6 +221,7 @@ func TestBuildOrchestratorPrompt_InjectPromptDisabled(t *testing.T) {
 	// Codex still receives the role prompt, without the generic prompt.
 	got := mustBuildOrchPrompt(t, sm, "codex", cfg, nil, true, "")
 	joined := strings.Join(got, " ")
+
 	if !strings.Contains(joined, "ken this") || strings.Contains(joined, "generic bothy instructions") {
 		t.Errorf("disabled codex prompt = %v, want role only", got)
 	}
@@ -233,6 +234,7 @@ func TestBuildOrchestratorPrompt_InjectPromptDisabled(t *testing.T) {
 	}
 
 	rule := filepath.Join(worktree, ".cursor", "rules", "graith.mdc")
+
 	data, err := os.ReadFile(rule)
 	if err != nil {
 		t.Fatalf("read cursor orchestrator role: %v", err)
@@ -594,9 +596,11 @@ func stopRunnableOrchestrator(t *testing.T, sm *SessionManager, id string) {
 		sm.mu.RLock()
 		_, live := sm.sessions[id]
 		sm.mu.RUnlock()
+
 		if !live {
 			return
 		}
+
 		time.Sleep(5 * time.Millisecond)
 	}
 
@@ -611,6 +615,7 @@ func orchestratorLaunchPayload(t *testing.T, sm *SessionManager, id, mechanism s
 		if err != nil {
 			t.Fatalf("read cursor role file: %v", err)
 		}
+
 		return string(data)
 	}
 
@@ -637,6 +642,7 @@ func TestOrchestratorCreateResumePromptParity(t *testing.T) {
 	}
 
 	disabled := false
+
 	for _, mechanism := range []string{
 		config.PromptInjectionAppendSystemPrompt,
 		config.PromptInjectionDeveloperInstructions,
@@ -657,6 +663,7 @@ func TestOrchestratorCreateResumePromptParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("createOrchestrator: %v", err)
 			}
+
 			t.Cleanup(func() { stopRunnableOrchestrator(t, sm, created.ID) })
 
 			payload := orchestratorLaunchPayload(t, sm, created.ID, mechanism)
@@ -665,6 +672,7 @@ func TestOrchestratorCreateResumePromptParity(t *testing.T) {
 			}
 
 			stopRunnableOrchestrator(t, sm, created.ID)
+
 			if mechanism == config.PromptInjectionCursorRules {
 				cleanupCursorRule(sm.orchestratorScratchDir())
 			}
@@ -691,6 +699,7 @@ func TestCreateOrchestratorPromptFailureRollsBack(t *testing.T) {
 	if err := os.MkdirAll(sm.orchestratorScratchDir(), 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(sm.orchestratorScratchDir(), ".cursor"), []byte("thrawn"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -702,6 +711,7 @@ func TestCreateOrchestratorPromptFailureRollsBack(t *testing.T) {
 
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+
 	if len(sm.state.Sessions) != 0 || len(sm.sessions) != 0 {
 		t.Fatalf("failed create leaked state: persistent=%d live=%d", len(sm.state.Sessions), len(sm.sessions))
 	}
@@ -717,11 +727,13 @@ func TestResumeOrchestratorPromptFailureRollsBack(t *testing.T) {
 	if err := os.MkdirAll(sm.orchestratorScratchDir(), 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(sm.orchestratorScratchDir(), ".cursor"), []byte("thrawn"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	const oldToken = "canny-old-token"
+
 	sm.state.Sessions["canny-orch"] = &SessionState{
 		ID: "canny-orch", Name: OrchestratorSessionName, Agent: "cursor",
 		SystemKind: SystemKindOrchestrator, Status: StatusStopped, Token: oldToken,
@@ -735,10 +747,12 @@ func TestResumeOrchestratorPromptFailureRollsBack(t *testing.T) {
 
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+
 	sess := sm.state.Sessions["canny-orch"]
 	if sess.Status != StatusStopped || sess.Token != oldToken {
 		t.Fatalf("resume rollback state = status %q token %q", sess.Status, sess.Token)
 	}
+
 	if sm.tokenIndex[oldToken] != "canny-orch" || len(sm.sessions) != 0 {
 		t.Fatalf("resume rollback token/live state inconsistent: index=%v live=%d", sm.tokenIndex, len(sm.sessions))
 	}

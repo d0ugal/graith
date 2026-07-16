@@ -259,10 +259,12 @@ func TestMigrateOrchestratorPreservesRoleWhenGenericPromptDisabled(t *testing.T)
 	t.Setenv("CODEX_HOME", t.TempDir())
 
 	const sid = "22222222-3333-4444-5555-666666666666"
+
 	projDir := filepath.Join(claudeRoot, "projects", "-orch")
 	if err := os.MkdirAll(projDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(projDir, sid+".jsonl"), []byte(
 		`{"type":"user","uuid":"u1","parentUuid":"","message":{"role":"user","content":"mind the croft"}}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -277,12 +279,14 @@ func TestMigrateOrchestratorPreservesRoleWhenGenericPromptDisabled(t *testing.T)
 	if _, err := sm.Migrate("orch-migrate", "codex", "", 24, 80); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
+
 	t.Cleanup(func() { stopRunnableOrchestrator(t, sm, "orch-migrate") })
 
 	driver, ok := sm.GetPTY("orch-migrate")
 	if !ok {
 		t.Fatal("migrated orchestrator has no live driver")
 	}
+
 	pty, ok := driver.(*grpty.Session)
 	if !ok {
 		t.Fatalf("driver type = %T, want *pty.Session", driver)

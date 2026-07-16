@@ -136,6 +136,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 			_ = os.RemoveAll(contextDir)
 			return SessionState{}, fmt.Errorf("stop source agent: %w", err)
 		}
+
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[id]; ok && s.Status == StatusRunning {
 			ec := ptySess.ExitCode()
@@ -221,6 +222,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	if startErr != nil {
 		// Ensure the (likely dead) target process is fully stopped before restore.
 		var targetStopErr error
+
 		if p, ok := sm.GetPTY(id); ok && !p.Exited() {
 			// Record the reason on state before the kill so the "session exited"
 			// line agrees with the "stopping session" line — a successful target
@@ -253,8 +255,8 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 
 		if targetStopErr != nil {
 			return SessionState{}, fmt.Errorf(
-				"migrate to %q failed (%w) and its driver could not be stopped (%v); original %q left stopped, rendered context at %s",
-				targetAgent, startErr, targetStopErr, srcAgent, contextPath)
+				"migrate to %q failed and its driver could not be stopped; original %q left stopped, rendered context at %s: %w",
+				targetAgent, srcAgent, contextPath, errors.Join(startErr, targetStopErr))
 		}
 
 		if _, rerr := sm.resumeWithSummaryAndPromptFromConfig(cfg, id, rows, cols, "Restored after failed migrate to "+targetAgent, ""); rerr != nil {

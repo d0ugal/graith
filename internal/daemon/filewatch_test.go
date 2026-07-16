@@ -371,7 +371,8 @@ func TestReconcileBindings_HotReload(t *testing.T) {
 func TestWatchBuiltinIgnoresReloadUpdatesLiveBinding(t *testing.T) {
 	worktree := t.TempDir()
 	cacheDir := filepath.Join(worktree, "cache")
-	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+
+	if err := os.MkdirAll(cacheDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -390,6 +391,7 @@ func TestWatchBuiltinIgnoresReloadUpdatesLiveBinding(t *testing.T) {
 
 	key := bindingKey("bide", "src")
 	b := sm.triggers.bindings[key]
+
 	if b == nil || b.matcher == nil {
 		t.Fatal("expected live binding with matcher")
 	}
@@ -400,12 +402,14 @@ func TestWatchBuiltinIgnoresReloadUpdatesLiveBinding(t *testing.T) {
 				return true
 			}
 		}
+
 		return false
 	}
 
 	if watching(cacheDir) {
 		t.Fatal("initial builtin ignore should prune cache directory")
 	}
+
 	if b.matcher.fires("notes.swp") {
 		t.Fatal("initial builtin ignore should suppress *.swp")
 	}
@@ -415,17 +419,23 @@ func TestWatchBuiltinIgnoresReloadUpdatesLiveBinding(t *testing.T) {
 	// is added before event handling resumes.
 	cleared := *sm.Config()
 	cleared.TriggersRuntime.Advanced.WatchBuiltinIgnores = []string{}
-	sm.applyConfig(&cleared)
+
+	if err := sm.applyConfig(&cleared); err != nil {
+		t.Fatalf("apply cleared ignore config: %v", err)
+	}
 
 	if got := sm.triggers.bindings[key]; got != b {
 		t.Fatal("clearing builtin ignores recreated the live binding")
 	}
+
 	if !watching(cacheDir) {
 		t.Fatal("clear-to-empty did not add the formerly ignored directory to the live watcher")
 	}
+
 	if !b.matcher.fires("notes.swp") {
 		t.Fatal("clear-to-empty left the old *.swp matcher bound")
 	}
+
 	if b.matcher.fires(".git/config") {
 		t.Fatal("mandatory .git ignore must survive clear-to-empty")
 	}
@@ -433,14 +443,19 @@ func TestWatchBuiltinIgnoresReloadUpdatesLiveBinding(t *testing.T) {
 	// Adding ignores again updates the same matcher and prunes its watch set.
 	added := cleared
 	added.TriggersRuntime.Advanced.WatchBuiltinIgnores = []string{"cache/", "*.log"}
-	sm.applyConfig(&added)
+
+	if err := sm.applyConfig(&added); err != nil {
+		t.Fatalf("apply added ignore config: %v", err)
+	}
 
 	if got := sm.triggers.bindings[key]; got != b {
 		t.Fatal("adding builtin ignores recreated the live binding")
 	}
+
 	if watching(cacheDir) {
 		t.Fatal("added directory ignore was not pruned from the live watcher")
 	}
+
 	if b.matcher.fires("notes.log") {
 		t.Fatal("added *.log ignore was not applied to the live matcher")
 	}
@@ -654,11 +669,13 @@ func TestDegradedBindingInvalidConfigKeepsRetryFloor(t *testing.T) {
 	if first == nil {
 		t.Fatal("recordDegradedBinding did not create a binding")
 	}
+
 	if !first.nextRetryAt.After(t0.Add(2 * time.Second)) {
 		t.Fatalf("invalid direct config produced no positive retry floor: next=%v", first.nextRetryAt)
 	}
 
 	sm.reconcileBindings(context.Background(), sm.allTriggers(), t0.Add(2*time.Second))
+
 	if got := sm.triggers.bindings[key]; got != first || got.retryCount != 1 {
 		t.Fatalf("binding retried before defensive backoff elapsed: %+v", got)
 	}

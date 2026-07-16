@@ -17,6 +17,10 @@ import (
 // Git teardown is attempted before removing the session from state; if teardown
 // fails the session is kept for retry and the error is returned.
 func (sm *SessionManager) Delete(id string) error {
+	return sm.deleteWithContext(context.Background(), id)
+}
+
+func (sm *SessionManager) deleteWithContext(ctx context.Context, id string) error {
 	sm.mu.Lock()
 
 	sessState, ok := sm.state.Sessions[id]
@@ -175,7 +179,7 @@ func (sm *SessionManager) Delete(id string) error {
 			sm.logStopping(id, sm.sessionName(id), StopReasonDelete, "delete", ptySess)
 		}
 
-		if err := sm.teardownLiveDriver(context.Background(), ptySess); err != nil {
+		if err := sm.teardownLiveDriver(ctx, ptySess); err != nil {
 			sm.log.Warn("live driver did not finish during delete", "id", id, "err", err)
 		}
 	} else if orphanPID > 0 {
@@ -303,6 +307,10 @@ func (sm *SessionManager) reparentChildrenLocked(deletedID, newParentID string) 
 // whose teardown fails are kept for retry. Returns the list of deleted session
 // IDs and an error if any teardowns failed.
 func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]string, error) {
+	return sm.deleteWithChildrenContext(context.Background(), id, excludeRoot)
+}
+
+func (sm *SessionManager) deleteWithChildrenContext(ctx context.Context, id string, excludeRoot bool) ([]string, error) {
 	sm.mu.Lock()
 
 	sess, ok := sm.state.Sessions[id]
@@ -423,7 +431,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 				sm.logStopping(s.id, s.name, StopReasonDelete, "delete-children", s.ptySess)
 			}
 
-			if err := sm.teardownLiveDriver(context.Background(), s.ptySess); err != nil {
+			if err := sm.teardownLiveDriver(ctx, s.ptySess); err != nil {
 				sm.log.Warn("live driver did not finish during bulk delete", "id", s.id, "err", err)
 			}
 		} else if s.pid > 0 {
@@ -545,7 +553,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 					sm.logStopping(s.id, s.name, StopReasonDelete, "delete-children-sweep", s.ptySess)
 				}
 
-				if err := sm.teardownLiveDriver(context.Background(), s.ptySess); err != nil {
+				if err := sm.teardownLiveDriver(ctx, s.ptySess); err != nil {
 					sm.log.Warn("late live driver did not finish during bulk delete", "id", s.id, "err", err)
 				}
 			}

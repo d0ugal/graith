@@ -99,6 +99,7 @@ func TestFormatInboxSystemMessagePreviewTruncationIsUTF8Safe(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			limit := len(prefix) + tt.cut
+
 			got := formatInboxSystemMessage([]inboxMessage{{SenderName: "Ailsa", Body: tt.body}}, limit)
 			if !utf8.ValidString(got) {
 				t.Fatalf("preview is invalid UTF-8: %q", got)
