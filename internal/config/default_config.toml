@@ -291,6 +291,11 @@ enabled = false           # expose the remote control listener over the tailnet
 mode = "tsnet"            # transport: "tsnet" (embedded Tailscale) or "interface" (bind an existing tailnet IP)
 port = 4823               # TCP port the listener binds
 require_pairing = true    # require per-device pairing for human-level rights; false is read-only and UNSAFE
+# pair_request_rate = "5/min"     # anti-flood rate on pending pair requests ("<n>/<sec|min|hour>")
+# max_pending_pairings = 16       # cap on unapproved pair requests outstanding at once (1-1024)
+# pending_pairing_ttl  = "10m"    # how long an unapproved pair request lives (1m-24h)
+# pair_fallback_count  = 5        # rate count used when pair_request_rate is unset (1-1000)
+# pair_fallback_window = "1m"     # rate window used when pair_request_rate is unset (1s-24h)
 
 # [orchestrator.sandbox]
 # Extra filesystem access for the orchestrator only.

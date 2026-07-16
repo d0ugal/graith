@@ -117,9 +117,113 @@ type RemoteConfig struct {
 	// alone) and is restricted to read-only access — see the design doc §B.2.
 	RequirePairing bool `toml:"require_pairing"`
 	// PairRequestRate is the anti-flood limit on pending pair requests, written
-	// "<n>/<unit>" (e.g. "5/min"); units are sec, min, or hour. Empty means no
-	// configured limit here (the daemon applies its own default).
+	// "<n>/<unit>" (e.g. "5/min"); units are sec, min, or hour. Empty falls back
+	// to the pair_fallback_count/pair_fallback_window rate below.
 	PairRequestRate string `toml:"pair_request_rate"`
+	// MaxPendingPairings caps how many unapproved pair requests may be
+	// outstanding at once (anti-flood). 0 uses the default
+	// (RemoteMaxPendingPairingsDefault); values outside [1,
+	// RemoteMaxPendingPairingsMax] are a hard config error.
+	MaxPendingPairings int `toml:"max_pending_pairings"`
+	// PendingPairingTTL is how long an unapproved pair request lives before it
+	// expires and can no longer be approved. Empty uses the default
+	// (RemotePendingPairingTTLDefault); a parsed value outside
+	// [RemotePendingPairingTTLMin, RemotePendingPairingTTLMax] is a hard error.
+	PendingPairingTTL string `toml:"pending_pairing_ttl"`
+	// PairFallbackCount is the request count of the rate limit applied when
+	// pair_request_rate is unset. 0 uses the default
+	// (RemotePairFallbackCountDefault); values outside [1,
+	// RemotePairFallbackCountMax] are a hard config error.
+	PairFallbackCount int `toml:"pair_fallback_count"`
+	// PairFallbackWindow is the window of the rate limit applied when
+	// pair_request_rate is unset. Empty uses the default
+	// (RemotePairFallbackWindowDefault); a parsed value outside
+	// [RemotePairFallbackWindowMin, RemotePairFallbackWindowMax] is a hard error.
+	PairFallbackWindow string `toml:"pair_fallback_window"`
+}
+
+// Pairing policy bounds. Defaults preserve the historically-fixed values (16
+// pending, 10m TTL, 5/min fallback rate); the ceilings/floors keep an operator
+// override from disabling anti-flood protection or pinning requests forever.
+const (
+	RemoteMaxPendingPairingsDefault = 16
+	RemoteMaxPendingPairingsMax     = 1024
+	RemotePendingPairingTTLDefault  = 10 * time.Minute
+	RemotePendingPairingTTLMin      = time.Minute
+	RemotePendingPairingTTLMax      = 24 * time.Hour
+	RemotePairFallbackCountDefault  = 5
+	RemotePairFallbackCountMax      = 1000
+	RemotePairFallbackWindowDefault = time.Minute
+	RemotePairFallbackWindowMin     = time.Second
+	RemotePairFallbackWindowMax     = 24 * time.Hour
+)
+
+// MaxPendingPairingsOrDefault returns the configured pending-pairing cap,
+// applying the default when unset and clamping to the safe bounds so a caller
+// that skipped Validate can never act on an unsafe value.
+func (r RemoteConfig) MaxPendingPairingsOrDefault() int {
+	n := r.MaxPendingPairings
+	if n < 1 {
+		return RemoteMaxPendingPairingsDefault
+	}
+
+	if n > RemoteMaxPendingPairingsMax {
+		return RemoteMaxPendingPairingsMax
+	}
+
+	return n
+}
+
+// PendingPairingTTLDuration returns the configured pending-pairing TTL, applying
+// the default when unset/unparseable and clamping to the safe bounds.
+func (r RemoteConfig) PendingPairingTTLDuration() time.Duration {
+	if strings.TrimSpace(r.PendingPairingTTL) == "" {
+		return RemotePendingPairingTTLDefault
+	}
+
+	d, err := ParseDurationWithDays(r.PendingPairingTTL)
+	if err != nil {
+		return RemotePendingPairingTTLDefault
+	}
+
+	switch {
+	case d < RemotePendingPairingTTLMin:
+		return RemotePendingPairingTTLMin
+	case d > RemotePendingPairingTTLMax:
+		return RemotePendingPairingTTLMax
+	default:
+		return d
+	}
+}
+
+// PairFallbackRate returns the rate limit applied when pair_request_rate is
+// unset, applying defaults and clamping each component to its safe bounds.
+func (r RemoteConfig) PairFallbackRate() PairRate {
+	count := r.PairFallbackCount
+
+	switch {
+	case count < 1:
+		count = RemotePairFallbackCountDefault
+	case count > RemotePairFallbackCountMax:
+		count = RemotePairFallbackCountMax
+	}
+
+	per := RemotePairFallbackWindowDefault
+
+	if strings.TrimSpace(r.PairFallbackWindow) != "" {
+		if d, err := ParseDurationWithDays(r.PairFallbackWindow); err == nil {
+			switch {
+			case d < RemotePairFallbackWindowMin:
+				per = RemotePairFallbackWindowMin
+			case d > RemotePairFallbackWindowMax:
+				per = RemotePairFallbackWindowMax
+			default:
+				per = d
+			}
+		}
+	}
+
+	return PairRate{Count: count, Per: per}
 }
 
 // PairRate is a parsed pair_request_rate: Count events per Per duration.
@@ -203,6 +307,41 @@ func (r RemoteConfig) Validate() error {
 		if _, err := ParsePairRequestRate(r.PairRequestRate); err != nil {
 			return err
 		}
+	}
+
+	if r.MaxPendingPairings != 0 && (r.MaxPendingPairings < 1 || r.MaxPendingPairings > RemoteMaxPendingPairingsMax) {
+		return fmt.Errorf("[remote] max_pending_pairings %d is invalid (want 1-%d, or 0 for the default)", r.MaxPendingPairings, RemoteMaxPendingPairingsMax)
+	}
+
+	if err := validateBoundedDuration("[remote] pending_pairing_ttl", r.PendingPairingTTL, RemotePendingPairingTTLMin, RemotePendingPairingTTLMax); err != nil {
+		return err
+	}
+
+	if r.PairFallbackCount != 0 && (r.PairFallbackCount < 1 || r.PairFallbackCount > RemotePairFallbackCountMax) {
+		return fmt.Errorf("[remote] pair_fallback_count %d is invalid (want 1-%d, or 0 for the default)", r.PairFallbackCount, RemotePairFallbackCountMax)
+	}
+
+	if err := validateBoundedDuration("[remote] pair_fallback_window", r.PairFallbackWindow, RemotePairFallbackWindowMin, RemotePairFallbackWindowMax); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateBoundedDuration reports a hard error if s is set but does not parse or
+// falls outside [min, max]. An empty s is accepted (means "use the default").
+func validateBoundedDuration(field, s string, minDur, maxDur time.Duration) error {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+
+	d, err := ParseDurationWithDays(s)
+	if err != nil {
+		return fmt.Errorf("%s %q is invalid (want a duration like \"10m\")", field, s)
+	}
+
+	if d < minDur || d > maxDur {
+		return fmt.Errorf("%s %q is out of bounds (want %s-%s)", field, s, minDur, maxDur)
 	}
 
 	return nil

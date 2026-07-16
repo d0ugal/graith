@@ -79,14 +79,6 @@ func validEd25519PubKey(s string) bool {
 
 // --- pairing state operations (design §B.2) ---
 
-const (
-	maxPendingPairings = 16
-	pendingPairingTTL  = 10 * time.Minute
-	// defaultPairRate applies when [remote].pair_request_rate is unset/invalid.
-	defaultPairCount = 5
-	defaultPairPer   = time.Minute
-)
-
 // pendingPairing is an unapproved device pairing request awaiting local human
 // approval. It lives only in memory — pending requests do not survive a daemon
 // restart (a device simply re-requests).
@@ -132,14 +124,25 @@ func (sm *SessionManager) pairRate() config.PairRate {
 		return r
 	}
 
-	return config.PairRate{Count: defaultPairCount, Per: defaultPairPer}
+	return sm.cfg.Remote.PairFallbackRate()
 }
 
-// expirePendingLocked drops pending pairings older than pendingPairingTTL.
+// pendingPairingTTL is how long an unapproved pair request lives, from config.
+func (sm *SessionManager) pendingPairingTTL() time.Duration {
+	return sm.cfg.Remote.PendingPairingTTLDuration()
+}
+
+// maxPendingPairings is the outstanding pending-request cap, from config.
+func (sm *SessionManager) maxPendingPairings() int {
+	return sm.cfg.Remote.MaxPendingPairingsOrDefault()
+}
+
+// expirePendingLocked drops pending pairings older than the configured TTL.
 // Must be called with sm.mu held.
 func (sm *SessionManager) expirePendingLocked(now time.Time) {
+	ttl := sm.pendingPairingTTL()
 	for rid, p := range sm.pendingPairings {
-		if now.Sub(p.RequestedAt) > pendingPairingTTL {
+		if now.Sub(p.RequestedAt) > ttl {
 			delete(sm.pendingPairings, rid)
 		}
 	}
@@ -180,7 +183,7 @@ func (sm *SessionManager) AddPendingPairing(label, pubKey string, id TailnetIden
 		return "", nil, fmt.Errorf("pair request rate limit exceeded (%d per %s)", rate.Count, rate.Per)
 	}
 
-	if len(sm.pendingPairings) >= maxPendingPairings {
+	if len(sm.pendingPairings) >= sm.maxPendingPairings() {
 		return "", nil, errors.New("too many pending pairing requests")
 	}
 
