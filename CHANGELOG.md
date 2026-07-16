@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.69.0](https://github.com/d0ugal/graith/compare/v0.68.9...v0.69.0) (2026-07-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* **pty:** replace unmaintained vt10x with charm/x/vt behind an interface
+* **todo:** the scenario task-done primitive is removed. gr scenario task-done, the scenario_task_done control message, and the task_done wire field on ScenarioSessionInfo no longer exist; scenario progress is now derived from todo items assigned to each member. Any client relying on task_done must switch to the todo_done/todo_total fields.
+
+### Features
+
+* **attach:** read-only attach mode to observe without input ([b327cf6](https://github.com/d0ugal/graith/commit/b327cf6d92091a974d83848fe424d1b375abe38d))
+* **cron:** centralize cron parsing in internal/cronx; keep robfig over gronx ([4fb85b3](https://github.com/d0ugal/graith/commit/4fb85b3824c816a3ad923662e94a9475129723b7)), closes [#1213](https://github.com/d0ugal/graith/issues/1213)
+* **todo:** first-class shared todo list ([#591](https://github.com/d0ugal/graith/issues/591)) ([5f614af](https://github.com/d0ugal/graith/commit/5f614af95ef90e48b1a863593e94dfb3b6d85a9e))
+
+
+### Bug Fixes
+
+* **daemon:** replace unmaintained go-gitignore with Git-compatible matcher ([94f4dfc](https://github.com/d0ugal/graith/commit/94f4dfcd130d2c3ddf23d87a1595921c470d649e)), closes [#1212](https://github.com/d0ugal/graith/issues/1212)
+* **ignore:** harden gitignore for linked worktrees + live watch reloads ([05c26f5](https://github.com/d0ugal/graith/commit/05c26f53083996c879307c23eab8390669d91ef1))
+* **orchestrator:** inherit default_agent instead of hardcoding claude ([5931f33](https://github.com/d0ugal/graith/commit/5931f33952443c22db8ab323734af91f52b0ec27))
+* update module github.com/cyphar/filepath-securejoin to v0.7.0 ([8941e30](https://github.com/d0ugal/graith/commit/8941e30fa9757b49df27dd5fd9d6ea7621713d4b))
+* update module github.com/go-git/gcfg to v2 ([5eb1775](https://github.com/d0ugal/graith/commit/5eb1775af135e13dbccb53c763b13fecd5526bb8))
+
+
+### Documentation
+
+* align contributor guidance with repository behavior ([5c8be98](https://github.com/d0ugal/graith/commit/5c8be98b6894b401e49cbb359bfb1df2017f4621))
+* streamline agent instructions ([966279f](https://github.com/d0ugal/graith/commit/966279f4a7d43be898bfa622244cdeff6b737d74))
+
+
+### Code Refactoring
+
+* **cli:** decompose attach.go into focused files with tested seams ([e5a1770](https://github.com/d0ugal/graith/commit/e5a17708a6c103ed10d6dd8d16399ab0eeb246a2))
+* **daemon:** split handler.go dispatch into concern-grouped files ([e99d5f9](https://github.com/d0ugal/graith/commit/e99d5f90df5f91dfbaadba251e5219240a92e52d))
+* **daemon:** split session manager and test control loops ([a846784](https://github.com/d0ugal/graith/commit/a846784d4cd666b29e8a5786f68f215a5b7ed1fd))
+* **pty:** replace unmaintained vt10x with charm/x/vt behind an interface ([6c68d2c](https://github.com/d0ugal/graith/commit/6c68d2c723edef0bbeb9ad8b02777ce81d3f61b5)), closes [#1211](https://github.com/d0ugal/graith/issues/1211)
+
+
+### Tests
+
+* satisfy instruction budget lint ([158acd1](https://github.com/d0ugal/graith/commit/158acd183b256a769c56f853458b4a9e632f2f54))
+
+
+### Dependencies
+
+* **deps:** remove unused go-git/gcfg/v2 module entry ([241c3fe](https://github.com/d0ugal/graith/commit/241c3fe9b86d4acbd1ed660883e0c69c74e654fd)), closes [#1224](https://github.com/d0ugal/graith/issues/1224)
+
 ## [0.68.9](https://github.com/d0ugal/graith/compare/v0.68.8...v0.68.9) (2026-07-16)
 
 
