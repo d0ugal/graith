@@ -1162,11 +1162,12 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	// routes tool calls to the auto backend.
 	hooksEnabled := agentHooks || yolo
 
-	// MCP config injection is a decision distinct from lifecycle-hook injection
-	// (see injectMCPConfig / issue #1135). For a PTY session the two coincide, so
-	// this preserves existing behaviour, but keeping the gate separate means yolo
-	// no longer silently governs MCP availability and a headless session can be
-	// given MCP without generated hooks.
+	// MCP config injection is now a mechanism distinct from lifecycle-hook
+	// injection (injectMCPConfig vs injectHooks — see issue #1135). The policy
+	// gates still coincide (mcpEnabled == hooksEnabled), so PTY behaviour is
+	// unchanged and yolo still transitively governs MCP for now; the separate
+	// variable is the seam a later headless phase widens to inject MCP without
+	// generated hooks.
 	mcpEnabled := hooksEnabled
 
 	// Resolve MCP servers under the lock (reads config).
@@ -1479,10 +1480,12 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		}
 	}
 
-	// MCP config is injected separately from hooks (issue #1135), so a session
-	// with hooks disabled still gets its MCP servers. Headless MCP injection is a
-	// deliberate follow-up (issue #1075); it stays PTY-only here so this remains a
-	// pure refactor of the existing behaviour.
+	// MCP config is injected by its own block, separate from the hook block above
+	// (issue #1135). The gate (mcpEnabled) still tracks hooksEnabled for PTY, so
+	// today this fires under the same condition as the hook block — the split is a
+	// no-op for PTY. Widening mcpEnabled and dropping the headless guard (so a
+	// hooks-disabled or headless session gets MCP) is a deliberate follow-up
+	// (issue #1075).
 	if mcpEnabled && driverKind != DriverHeadless {
 		mcpArgs, err := sm.injectMCPConfig(agentName, id, mcpServers)
 		if err != nil {

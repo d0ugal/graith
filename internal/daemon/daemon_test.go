@@ -4005,6 +4005,56 @@ func assertArgvContains(t *testing.T, argv []string, want string) {
 	t.Errorf("argv missing %q; got %v", want, argv)
 }
 
+// assertArgvOrder fails unless before appears at an earlier index than after.
+func assertArgvOrder(t *testing.T, argv []string, before, after string) {
+	t.Helper()
+
+	bi, ai := -1, -1
+
+	for i, a := range argv {
+		if a == before && bi == -1 {
+			bi = i
+		}
+
+		if a == after && ai == -1 {
+			ai = i
+		}
+	}
+
+	if bi == -1 || ai == -1 {
+		t.Errorf("argv missing %q (%d) or %q (%d); got %v", before, bi, after, ai, argv)
+		return
+	}
+
+	if bi > ai {
+		t.Errorf("expected %q (index %d) before %q (index %d); argv %v", before, bi, after, ai, argv)
+	}
+}
+
+// assertSettingsAndMCP asserts the recorded argv carries both the --settings
+// (hook) arg and the --mcp-config arg, in that order, with --mcp-config pointing
+// at a config file that contains the auto-injected graith server.
+func assertSettingsAndMCP(t *testing.T, argv []string) {
+	t.Helper()
+
+	assertArgvContains(t, argv, "--settings")
+	assertArgvContains(t, argv, "--mcp-config")
+	// Order matters: the pre-refactor code emitted --settings before --mcp-config
+	// as one slice; the decoupled blocks must preserve that order.
+	assertArgvOrder(t, argv, "--settings", "--mcp-config")
+
+	mcpPath := valueAfter(t, argv, "--mcp-config")
+
+	data, err := os.ReadFile(mcpPath)
+	if err != nil {
+		t.Fatalf("read mcp config %q: %v", mcpPath, err)
+	}
+
+	if !strings.Contains(string(data), "graith") {
+		t.Errorf("mcp config should contain the auto-injected graith server; got:\n%s", data)
+	}
+}
+
 // valueAfter returns the argv element immediately following flag.
 func valueAfter(t *testing.T, argv []string, flag string) string {
 	t.Helper()
@@ -4043,22 +4093,85 @@ func TestClaudeSessionInjectsSettingsAndMCP(t *testing.T) {
 
 	argv := waitForRecordedArgv(t, recordPath, "--mcp-config")
 
-	assertArgvContains(t, argv, "--settings")
-	assertArgvContains(t, argv, "--mcp-config")
+	assertSettingsAndMCP(t, argv)
+}
 
-	// The --mcp-config path must reference a real file carrying the auto-injected
-	// graith server — proving MCP config is generated and wired even after the
-	// split out of the hook path.
-	mcpPath := valueAfter(t, argv, "--mcp-config")
+// TestForkInjectsSettingsAndMCP proves the decoupled hook/MCP injection blocks
+// both fire on the Fork launch path too (the second of three copy-pasted sites):
+// a fork of a hooks-enabled Claude session launches with both --settings and
+// --mcp-config, in order (#1135).
+func TestForkInjectsSettingsAndMCP(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	sm, recordPath := newClaudeRecorderManager(t, repoDir)
 
-	data, err := os.ReadFile(mcpPath)
+	source, err := sm.Create(CreateOpts{
+		Name: "braw", AgentName: "claude", RepoPath: repoDir, BaseBranch: "main",
+		AgentHooks: true, SkipModelValidation: true, Rows: 24, Cols: 80,
+	})
 	if err != nil {
-		t.Fatalf("read mcp config %q: %v", mcpPath, err)
+		t.Fatalf("Create() source error = %v", err)
 	}
 
-	if !strings.Contains(string(data), "graith") {
-		t.Errorf("mcp config should contain the auto-injected graith server; got:\n%s", data)
+	t.Cleanup(func() { stopAndClosePTY(sm, source.ID) })
+
+	// Wait for the source's first record, then clear it so the fork owns the next.
+	waitForRecordedArgv(t, recordPath, "--mcp-config")
+
+	if err := os.Remove(recordPath); err != nil {
+		t.Fatalf("remove record before fork: %v", err)
 	}
+
+	forked, err := sm.Fork("bairn", source.ID, 24, 80)
+	if err != nil {
+		t.Fatalf("Fork() error = %v", err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, forked.ID) })
+
+	argv := waitForRecordedArgv(t, recordPath, "--mcp-config")
+
+	assertSettingsAndMCP(t, argv)
+}
+
+// TestResumeInjectsSettingsAndMCP proves the decoupled hook/MCP injection blocks
+// both fire on the Resume (Restart) launch path — the third copy-pasted site —
+// re-adding both --settings and --mcp-config, in order, even though the flags
+// aren't carried in resume_args (#1135).
+func TestResumeInjectsSettingsAndMCP(t *testing.T) {
+	repoDir := initTempGitRepo(t)
+	sm, recordPath := newClaudeRecorderManager(t, repoDir)
+
+	created, err := sm.Create(CreateOpts{
+		Name: "canny", AgentName: "claude", RepoPath: repoDir, BaseBranch: "main",
+		AgentHooks: true, SkipModelValidation: true, Rows: 24, Cols: 80,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	id := created.ID
+
+	t.Cleanup(func() { stopAndClosePTY(sm, id) })
+
+	waitForRecordedArgv(t, recordPath, "--mcp-config")
+
+	if err := os.Remove(recordPath); err != nil {
+		t.Fatalf("remove record before resume: %v", err)
+	}
+
+	if err := sm.Stop(id); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+
+	waitForStatus(t, sm, id, StatusStopped)
+
+	if _, err := sm.Restart(id, 24, 80); err != nil {
+		t.Fatalf("Restart() error = %v", err)
+	}
+
+	argv := waitForRecordedArgv(t, recordPath, "--mcp-config")
+
+	assertSettingsAndMCP(t, argv)
 }
 
 // TestClaudeSessionHooksDisabledSkipsInjection verifies the other side of the
