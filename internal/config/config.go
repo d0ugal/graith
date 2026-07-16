@@ -2451,6 +2451,104 @@ type Agent struct {
 	// (Claude Code in v1) may run headless, so a --headless request against an
 	// unsupported agent fails closed rather than silently downgrading.
 	HeadlessCapable *bool `json:"headless_capable,omitempty" toml:"headless_capable"`
+	// AddDirArgs is the flag template graith uses to grant the agent access to an
+	// additional directory — each included repo's co-located worktree. It is
+	// expanded once per directory with {dir} bound to that path (see
+	// AddDirArgsFor). An empty AddDirArgs means the agent's CLI has no such flag,
+	// so its included worktrees are exposed only via the GRAITH_INCLUDE_*_PATH env
+	// vars; this replaces the former hard-coded agentSupportsAddDir allowlist so a
+	// custom agent can opt in from config alone (issue #1236). Built-in
+	// claude/codex/cursor set ["--add-dir", "{dir}"].
+	AddDirArgs []string `json:"add_dir_args,omitempty" toml:"add_dir_args"`
+	// HeadlessArgs is the argv prefix graith prepends when launching this agent in
+	// headless stream-json mode (issue #1075); the agent's own template-expanded
+	// args follow it. Only consulted for a headless session. Moving it here (from
+	// the former hard-coded headlessArgs) lets a custom headless_capable agent
+	// define its own control-channel flags (issue #1236). Built-in claude sets the
+	// `-p --output-format stream-json …` flags.
+	HeadlessArgs []string `json:"headless_args,omitempty" toml:"headless_args"`
+	// OptionArgs are conditional argv groups appended after the base args on every
+	// launch (create/resume/fork). Each group's Args are template-expanded and
+	// appended only when its When template variable resolves non-empty, so an
+	// unset option leaves the agent's own default untouched — e.g. codex's
+	// ["--model", "{model}"] gated on `when = "model"`. This moves the formerly
+	// hard-coded codex adapter (model / profile / reasoning-effort / service-tier
+	// / search / approval flags) into config so custom agents can define their own
+	// conditional flags (issue #1236).
+	OptionArgs []AgentOptionArg `json:"option_args,omitempty" toml:"option_args"`
+}
+
+// AgentOptionArg is one conditional argv group for an agent (see Agent.OptionArgs).
+type AgentOptionArg struct {
+	// When names the template variable that gates this group: the args are
+	// emitted only when the variable resolves to a non-empty value ("true" for a
+	// boolean such as web_search). An empty When emits the group unconditionally.
+	When string `json:"when,omitempty" toml:"when"`
+	// Args are the argv templates emitted when the gate passes. They are expanded
+	// with the same TemplateVars as the base args plus the option variables.
+	Args []string `json:"args" toml:"args"`
+}
+
+// AddDirArgsFor builds the add-directory flags granting the agent access to each
+// of dirs, expanding a.AddDirArgs once per directory with {dir} bound to it (the
+// rest of base is carried through so a template may also reference the usual
+// vars). Empty AddDirArgs — or no directories — yields nil, so an agent whose
+// CLI has no add-dir flag never has an unknown flag injected. Empty directory
+// entries are skipped defensively.
+func (a Agent) AddDirArgsFor(base TemplateVars, dirs []string) ([]string, error) {
+	if len(a.AddDirArgs) == 0 || len(dirs) == 0 {
+		return nil, nil
+	}
+
+	var out []string
+
+	for _, d := range dirs {
+		if d == "" {
+			continue
+		}
+
+		v := base
+		v.Dir = d
+
+		expanded, err := ExpandSlice(a.AddDirArgs, v)
+		if err != nil {
+			return nil, err
+		}
+
+		out = append(out, expanded...)
+	}
+
+	return out, nil
+}
+
+// OptionArgsFor expands the agent's conditional option-arg groups against vars,
+// appending each group only when its When gate resolves non-empty (an empty When
+// always emits). Returns nil when no group fires, so it is safe to append
+// unconditionally on every launch path. This is the config-driven replacement
+// for the hard-coded codex flag adapter (issue #1236).
+func (a Agent) OptionArgsFor(vars TemplateVars) ([]string, error) {
+	if len(a.OptionArgs) == 0 {
+		return nil, nil
+	}
+
+	lookup := vars.toMap()
+
+	var out []string
+
+	for _, opt := range a.OptionArgs {
+		if opt.When != "" && lookup[opt.When] == "" {
+			continue
+		}
+
+		expanded, err := ExpandSlice(opt.Args, vars)
+		if err != nil {
+			return nil, err
+		}
+
+		out = append(out, expanded...)
+	}
+
+	return out, nil
 }
 
 // CodexOptions holds typed per-session options for the Codex CLI (issue #1186).
@@ -2958,6 +3056,16 @@ func (c *Config) Validate() error {
 				agentName, agent.PromptInjection,
 				PromptInjectionAppendSystemPrompt, PromptInjectionCursorRules,
 				PromptInjectionDeveloperInstructions, PromptInjectionNone))
+		}
+
+		for i, opt := range agent.OptionArgs {
+			if len(opt.Args) == 0 {
+				errs = append(errs, fmt.Errorf("agents.%s.option_args[%d]: args must not be empty", agentName, i))
+			}
+
+			if opt.When != "" && !IsTemplateVar(opt.When) {
+				errs = append(errs, fmt.Errorf("agents.%s.option_args[%d].when %q: not a known template variable", agentName, i, opt.When))
+			}
 		}
 	}
 
@@ -3707,6 +3815,22 @@ func mergeAgent(def, usr Agent) Agent {
 
 	if usr.InterruptDelayMs != nil {
 		def.InterruptDelayMs = usr.InterruptDelayMs
+	}
+
+	if usr.HeadlessCapable != nil {
+		def.HeadlessCapable = usr.HeadlessCapable
+	}
+
+	if usr.AddDirArgs != nil {
+		def.AddDirArgs = usr.AddDirArgs
+	}
+
+	if usr.HeadlessArgs != nil {
+		def.HeadlessArgs = usr.HeadlessArgs
+	}
+
+	if usr.OptionArgs != nil {
+		def.OptionArgs = usr.OptionArgs
 	}
 
 	return def

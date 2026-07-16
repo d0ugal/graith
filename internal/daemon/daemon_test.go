@@ -3668,27 +3668,29 @@ func TestInPlaceRejectsRepoWithIncludes(t *testing.T) {
 }
 
 func TestIncludeAddDirArgs(t *testing.T) {
+	def := config.Default()
+
 	tests := []struct {
 		name     string
-		agent    string
+		agent    config.Agent
 		includes []IncludedRepoState
 		want     []string
 	}{
 		{
 			name:     "nil includes yields no args",
-			agent:    "claude",
+			agent:    def.Agents["claude"],
 			includes: nil,
 			want:     nil,
 		},
 		{
 			name:     "empty includes yields no args",
-			agent:    "claude",
+			agent:    def.Agents["claude"],
 			includes: []IncludedRepoState{},
 			want:     nil,
 		},
 		{
 			name:  "single include yields one flag pair",
-			agent: "claude",
+			agent: def.Agents["claude"],
 			includes: []IncludedRepoState{
 				{RepoName: "bairn", WorktreePath: "/glen/bothy/bairn"},
 			},
@@ -3696,7 +3698,7 @@ func TestIncludeAddDirArgs(t *testing.T) {
 		},
 		{
 			name:  "multiple includes preserve order",
-			agent: "codex",
+			agent: def.Agents["codex"],
 			includes: []IncludedRepoState{
 				{RepoName: "bairn", WorktreePath: "/glen/bothy/bairn"},
 				{RepoName: "whin", WorktreePath: "/glen/bothy/whin"},
@@ -3705,7 +3707,7 @@ func TestIncludeAddDirArgs(t *testing.T) {
 		},
 		{
 			name:  "include without a worktree path is skipped",
-			agent: "cursor",
+			agent: def.Agents["cursor"],
 			includes: []IncludedRepoState{
 				{RepoName: "haar", WorktreePath: ""},
 				{RepoName: "bairn", WorktreePath: "/glen/bothy/bairn"},
@@ -3714,15 +3716,15 @@ func TestIncludeAddDirArgs(t *testing.T) {
 		},
 		{
 			name:  "all worktree paths empty yields nil not empty slice",
-			agent: "claude",
+			agent: def.Agents["claude"],
 			includes: []IncludedRepoState{
 				{RepoName: "haar", WorktreePath: ""},
 			},
 			want: nil,
 		},
 		{
-			name:  "unsupported agent gets no flags even with includes",
-			agent: "opencode",
+			name:  "agent without add_dir_args gets no flags even with includes",
+			agent: def.Agents["opencode"],
 			includes: []IncludedRepoState{
 				{RepoName: "bairn", WorktreePath: "/glen/bothy/bairn"},
 			},
@@ -3732,9 +3734,13 @@ func TestIncludeAddDirArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := includeAddDirArgs(tt.agent, tt.includes)
+			got, err := includeAddDirArgs(tt.agent, config.TemplateVars{}, tt.includes)
+			if err != nil {
+				t.Fatalf("includeAddDirArgs: %v", err)
+			}
+
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("includeAddDirArgs(%q, ...) = %v, want %v", tt.agent, got, tt.want)
+				t.Errorf("includeAddDirArgs(...) = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -3762,17 +3768,23 @@ func TestResumeIncludeSet(t *testing.T) {
 	})
 }
 
-func TestAgentSupportsAddDir(t *testing.T) {
-	supported := []string{"claude", "codex", "cursor"}
-	for _, a := range supported {
-		if !agentSupportsAddDir(a) {
-			t.Errorf("agentSupportsAddDir(%q) = false, want true", a)
+// TestDefaultAgentsAddDirSupport locks which built-in agents graith grants
+// included-repo worktrees via add_dir_args: claude, codex, and cursor accept an
+// add-dir flag; opencode and agy do not (their CLIs would reject an unknown
+// flag). This replaces the former hard-coded agentSupportsAddDir allowlist —
+// support is now expressed in default_config.toml (issue #1236).
+func TestDefaultAgentsAddDirSupport(t *testing.T) {
+	agents := config.Default().Agents
+
+	for _, name := range []string{"claude", "codex", "cursor"} {
+		if len(agents[name].AddDirArgs) == 0 {
+			t.Errorf("default agent %q has no add_dir_args, want an add-dir flag", name)
 		}
 	}
 
-	for _, a := range []string{"opencode", "agy", "", "Claude", "gemini"} {
-		if agentSupportsAddDir(a) {
-			t.Errorf("agentSupportsAddDir(%q) = true, want false", a)
+	for _, name := range []string{"opencode", "agy"} {
+		if len(agents[name].AddDirArgs) != 0 {
+			t.Errorf("default agent %q has add_dir_args %v, want none", name, agents[name].AddDirArgs)
 		}
 	}
 }
@@ -3798,6 +3810,9 @@ func newRecorderManager(t *testing.T, repoDir string, includes []string) (*Sessi
 		ResumeArgs: []string{"-c", script},
 		ForkArgs:   []string{"-c", script},
 		Env:        map[string]string{"GRAITH_ARGS_RECORD": recordPath},
+		// Carry over the add_dir_args template so the recorder still exercises the
+		// include add-dir path (issue #1236); only the command is swapped.
+		AddDirArgs: cfg.Agents["cursor"].AddDirArgs,
 	}
 	cfg.Repos = []config.RepoConfig{{Path: repoDir, Includes: includes}}
 

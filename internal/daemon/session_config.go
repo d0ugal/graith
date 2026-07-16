@@ -222,33 +222,22 @@ func (sm *SessionManager) deriveSandboxIncludesWriteDirs(includes []IncludedRepo
 	return dirs
 }
 
-// includeAddDirArgs builds the `--add-dir <worktree>` flags that make each
-// included repo's co-located worktree visible to the agent at launch. Only the
-// agents graith knows accept the flag get it (see agentSupportsAddDir), so a
+// includeAddDirArgs builds the add-directory flags that make each included
+// repo's co-located worktree visible to the agent at launch. The flag template
+// comes from the agent's add_dir_args config (see config.Agent.AddDirArgsFor):
+// an agent whose CLI has no such flag leaves it unset and gets nothing, so a
 // repo's includes never inject an unknown flag into an agent that would reject
 // it and fail to launch. Included worktrees are still exposed via the
 // GRAITH_INCLUDE_*_PATH env vars for every agent regardless. Worktrees without a
 // path are skipped defensively; the result is nil (not an empty slice) when
 // nothing is emitted.
-func includeAddDirArgs(agentType string, includes []IncludedRepoState) []string {
-	if !agentSupportsAddDir(agentType) || len(includes) == 0 {
-		return nil
-	}
-
-	args := make([]string, 0, len(includes)*2)
+func includeAddDirArgs(agent config.Agent, vars config.TemplateVars, includes []IncludedRepoState) ([]string, error) {
+	dirs := make([]string, 0, len(includes))
 	for _, inc := range includes {
-		if inc.WorktreePath == "" {
-			continue
-		}
-
-		args = append(args, "--add-dir", inc.WorktreePath)
+		dirs = append(dirs, inc.WorktreePath)
 	}
 
-	if len(args) == 0 {
-		return nil
-	}
-
-	return args
+	return agent.AddDirArgsFor(vars, dirs)
 }
 
 // codexOptsForAgent enforces the codex-only invariant when a lifecycle op
@@ -301,50 +290,27 @@ func codexOptsFromMsg(opts *config.CodexOptions) config.CodexOptions {
 	return *opts
 }
 
-// codexExtraArgs builds the backend-aware conditional flags for the Codex CLI
-// from the session's model and typed options (issue #1186). Each flag is emitted
-// only when its value is set, so an unset option leaves Codex's own default
-// untouched — the reason these can't just live as `{model}` templates in the
-// agent args (an empty model would expand to a literal `--model ""`). Returns
-// nil for any non-codex agent, so it is safe to call unconditionally on every
-// launch path (create/resume/fork). Reasoning effort and service tier have no
-// dedicated Codex flag, so they ride `-c key=value` config overrides; the rest
-// map to real flags. All of these are accepted on the bare invocation and on the
-// `resume`/`fork` subcommands, so appending them after existing args is valid.
-func codexExtraArgs(agentType, model string, opts *config.CodexOptions) []string {
-	if agentType != "codex" {
-		return nil
-	}
-
-	var args []string
-
-	if model != "" {
-		args = append(args, "--model", model)
-	}
-
+// optionArgs builds an agent's conditional launch flags from its option_args
+// config, folding the session's model and typed Codex options (issue #1186) into
+// the template variables the groups gate on and expand. Each group is emitted
+// only when its `when` variable is set, so an unset option leaves the agent's own
+// default untouched — the reason these can't just live as `{model}` templates in
+// the base args (an empty model would expand to a literal `--model ""`). A
+// non-codex agent's opts are nil, so only its model rides through; agents with no
+// option_args yield nil, making this safe to call unconditionally on every launch
+// path (create/resume/fork). Codex's option_args are accepted on the bare
+// invocation and on the `resume`/`fork` subcommands, so appending them after the
+// existing args is valid (issue #1236).
+func optionArgs(agent config.Agent, vars config.TemplateVars, opts *config.CodexOptions) ([]string, error) {
 	if opts != nil {
-		if opts.Profile != "" {
-			args = append(args, "--profile", opts.Profile)
-		}
-
-		if opts.ReasoningEffort != "" {
-			args = append(args, "-c", "model_reasoning_effort="+opts.ReasoningEffort)
-		}
-
-		if opts.ServiceTier != "" {
-			args = append(args, "-c", "service_tier="+opts.ServiceTier)
-		}
-
-		if opts.WebSearch {
-			args = append(args, "--search")
-		}
-
-		if opts.ApprovalPolicy != "" {
-			args = append(args, "--ask-for-approval", opts.ApprovalPolicy)
-		}
+		vars.Profile = opts.Profile
+		vars.ReasoningEffort = opts.ReasoningEffort
+		vars.ServiceTier = opts.ServiceTier
+		vars.ApprovalPolicy = opts.ApprovalPolicy
+		vars.WebSearch = opts.WebSearch
 	}
 
-	return args
+	return agent.OptionArgsFor(vars)
 }
 
 // resumeIncludeSet picks the includes a resuming session should re-grant (both
@@ -359,19 +325,6 @@ func resumeIncludeSet(mirror bool, sessIncludes, sharedSourceIncludes []Included
 	}
 
 	return sessIncludes
-}
-
-// agentSupportsAddDir reports whether the named agent's CLI accepts the
-// `--add-dir <path>` flag graith uses to grant included-repo worktrees. Claude,
-// Codex, and Cursor all do; other agents (e.g. opencode, agy, or a custom
-// command) may reject an unknown flag, so they are left without it.
-func agentSupportsAddDir(agentType string) bool {
-	switch agentType {
-	case "claude", "codex", "cursor":
-		return true
-	default:
-		return false
-	}
 }
 
 func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {

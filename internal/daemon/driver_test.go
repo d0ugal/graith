@@ -131,9 +131,16 @@ func TestHeadlessCapableEnabled(t *testing.T) {
 
 func TestHeadlessArgs(t *testing.T) {
 	// The prompt is no longer positional (it is delivered as a stdin user
-	// message); the control-channel launch flags precede the agent args, which
-	// carry the session id.
-	got := headlessArgs([]string{"--session-id", "canny"})
+	// message); the control-channel launch flags (from the agent's headless_args
+	// config) precede the agent args, which carry the session id. Drive the
+	// built-in claude defaults so this stays in step with default_config.toml.
+	claude := config.Default().Agents["claude"]
+
+	got, err := headlessArgs(claude, config.TemplateVars{}, []string{"--session-id", "canny"})
+	if err != nil {
+		t.Fatalf("headlessArgs: %v", err)
+	}
+
 	want := []string{
 		"-p",
 		"--output-format", "stream-json",

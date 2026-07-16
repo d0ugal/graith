@@ -39,9 +39,17 @@ inject_prompt  = true           # inject agent_prompt into the session
 prompt_injection = ""           # how to inject: append_system_prompt | cursor_rules | developer_instructions | none
 validate_model = ""             # command to validate --model values
 headless_capable = false        # agent can run in headless (stream-json) mode (experimental)
+add_dir_args   = ["--add-dir", "{dir}"]  # flag for granting an extra directory (see Includes)
+headless_args  = []             # argv prefix prepended in headless mode (see below)
 ```
 
 `headless_capable` marks whether an agent supports [headless mode]({{< relref "sessions.md#headless-sessions" >}}). Only Claude supports it in v1; a session can't be asked to go headless on an agent that isn't capable.
+
+Every agent-specific flag graith appends is defined here, so a custom agent can adopt (or drop) each pattern from config alone rather than waiting on a graith release:
+
+- **`add_dir_args`** — the flag template graith uses to grant the agent an extra directory (each [included repo](#includes)'s co-located worktree). It is expanded once per directory with `{dir}` bound to that path. Leave it unset for an agent whose CLI has no such flag; those agents rely on the `GRAITH_INCLUDE_*_PATH` environment variables instead.
+- **`headless_args`** — the control-channel argv prefix graith prepends when launching the agent in [headless mode]({{< relref "sessions.md#headless-sessions" >}}); the agent's own args follow it. Claude's default is `["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"]`.
+- **`option_args`** — conditional flag groups appended on every launch. Each group is emitted only when its `when` template variable is set, so an unset option leaves the agent's own default untouched (see [Conditional option flags](#conditional-option-flags)).
 
 `inject_prompt` is the on/off switch for prompt injection; `prompt_injection` selects the *mechanism*. When `prompt_injection` is empty (the default), graith picks the mechanism from the agent name — `claude` → `append_system_prompt`, `cursor` → `cursor_rules`, `codex` → `developer_instructions`, and any other name → `none`. Set it explicitly to override that mapping or, most usefully, to give a [custom agent](#custom-agents) a mechanism it would otherwise not get. The values are:
 
@@ -56,7 +64,7 @@ An unknown value is rejected at config load. This applies to ordinary sessions a
 
 ### Template variables
 
-These are substituted in `args`, `resume_args`, and `fork_args`:
+These are substituted in `args`, `resume_args`, `fork_args`, and `headless_args`:
 
 | Variable | Expands to |
 |----------|-----------|
@@ -69,6 +77,28 @@ These are substituted in `args`, `resume_args`, and `fork_args`:
 | `{fork_source_agent_session_id}` | Agent session ID of the fork source (empty if not a fork) |
 
 Only `{username}` is available in `branch_prefix`.
+
+Two more variables are scoped to specific fields. `{dir}` is available only in `add_dir_args`, bound to each granted directory in turn. The Codex option values — `{profile}`, `{reasoning_effort}`, `{service_tier}`, `{approval_policy}`, and `{web_search}` (a boolean rendering as `true`/empty) — are available in `option_args`, alongside `{model}`.
+
+### Conditional option flags
+
+`option_args` moves the per-session flags that used to be hard-coded (Codex's `--model`, `--profile`, reasoning-effort, service-tier, `--search`, and `--ask-for-approval`) into config, so a custom agent can define its own. Each group lists the argv to append and a `when` template variable that gates it — the group is emitted only when that variable resolves to a non-empty value (`true` for a boolean such as `web_search`). An empty `when` emits the group unconditionally.
+
+```toml
+[[agents.codex.option_args]]
+when = "model"                     # emit only when a model is set
+args = ["--model", "{model}"]
+
+[[agents.codex.option_args]]
+when = "reasoning_effort"          # Codex has no flag for this, so ride -c
+args = ["-c", "model_reasoning_effort={reasoning_effort}"]
+
+[[agents.codex.option_args]]
+when = "web_search"                # boolean: emitted when true
+args = ["--search"]
+```
+
+This is why an unset option can't just be a `{model}` template inside `args`: an empty model would expand to a literal `--model ""`. The groups are appended after the base args on create, resume, and fork alike. A `when` that names an unknown template variable, or a group with no `args`, is rejected at config load.
 
 ### Per-agent sandbox
 
@@ -143,7 +173,7 @@ GRAITH_INCLUDE_<BASENAME>_PATH=/path/to/included/worktree
 
 The basename is uppercased, with `-` and `.` replaced by `_`. For example, `~/Code/shared-lib` becomes `GRAITH_INCLUDE_SHARED_LIB_PATH`.
 
-The daemon also passes `--add-dir <worktree>` for each included repo when launching the agent, so it can access the sibling worktrees without an extra prompt to grant them. This is applied only for agents whose CLI accepts the flag — `claude`, `codex`, and `cursor`; other agents rely on the environment variables above. The flag is re-added on resume and fork, so it survives restarts.
+The daemon also grants each included worktree to the agent via its [`add_dir_args`](#agent-definitions) flag when launching, so it can access the sibling worktrees without an extra prompt to grant them. This is applied only for agents that define `add_dir_args` — `claude`, `codex`, and `cursor` ship with `["--add-dir", "{dir}"]`; other agents rely on the environment variables above. The flags are re-added on resume and fork, so they survive restarts.
 
 #### Config path rewriting
 
@@ -177,20 +207,31 @@ command, args, and resume/fork settings.
 
 ```toml
 [agents.claude]
-command     = "claude"
-args        = ["--session-id", "{agent_session_id}"]
-resume_args = ["--resume", "{agent_session_id}"]
-fork_args   = ["--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"]
+command      = "claude"
+args         = ["--session-id", "{agent_session_id}"]
+resume_args  = ["--resume", "{agent_session_id}"]
+fork_args    = ["--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"]
+add_dir_args = ["--add-dir", "{dir}"]
+headless_args = ["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"]
 ```
 
 ### Codex
 
 ```toml
 [agents.codex]
-command     = "codex"
-args        = []
-resume_args = ["resume", "--last"]
-fork_args   = ["fork", "{fork_source_agent_session_id}"]
+command      = "codex"
+args         = []
+resume_args  = ["resume", "{agent_session_id}"]
+fork_args    = ["fork", "{fork_source_agent_session_id}"]
+add_dir_args = ["--add-dir", "{dir}"]
+
+# The model and typed Codex options (--model, --profile, reasoning effort,
+# service tier, --search, --ask-for-approval) are emitted via option_args groups
+# gated on the matching template variable. See "Conditional option flags" above.
+[[agents.codex.option_args]]
+when = "model"
+args = ["--model", "{model}"]
+# … profile, reasoning_effort, service_tier, web_search, approval_policy …
 ```
 
 ### OpenCode
@@ -210,6 +251,7 @@ command        = "agent"
 args           = []
 resume_args    = ["resume"]
 validate_model = "agent --list-models"
+add_dir_args   = ["--add-dir", "{dir}"]
 ```
 
 ### Agy

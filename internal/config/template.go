@@ -15,6 +15,21 @@ type TemplateVars struct {
 	WorktreePath             string
 	ForkSourceAgentSessionID string
 	Model                    string
+	// Dir is the directory bound to {dir} when expanding an agent's
+	// add_dir_args, once per granted worktree (see Agent.AddDirArgsFor). It is
+	// empty in every other expansion context.
+	Dir string
+	// Profile, ReasoningEffort, ServiceTier, ApprovalPolicy, and WebSearch are
+	// the Codex per-session options (issue #1186) surfaced as template variables
+	// so an agent's conditional option_args groups (Agent.OptionArgsFor) can turn
+	// them into CLI flags from config rather than hard-coded Go (issue #1236).
+	// WebSearch is a boolean; it expands to "true" when set and "" otherwise, so
+	// an option_args group can gate on it with `when = "web_search"`.
+	Profile         string
+	ReasoningEffort string
+	ServiceTier     string
+	ApprovalPolicy  string
+	WebSearch       bool
 }
 
 func (v TemplateVars) toMap() map[string]string {
@@ -26,7 +41,33 @@ func (v TemplateVars) toMap() map[string]string {
 		"worktree_path":                v.WorktreePath,
 		"fork_source_agent_session_id": v.ForkSourceAgentSessionID,
 		"model":                        v.Model,
+		"dir":                          v.Dir,
+		"profile":                      v.Profile,
+		"reasoning_effort":             v.ReasoningEffort,
+		"service_tier":                 v.ServiceTier,
+		"approval_policy":              v.ApprovalPolicy,
+		"web_search":                   boolVar(v.WebSearch),
 	}
+}
+
+// boolVar renders a boolean template variable so a conditional option-args group
+// can gate on it: "true" when set, "" (empty, i.e. "unset") otherwise.
+func boolVar(b bool) string {
+	if b {
+		return "true"
+	}
+
+	return ""
+}
+
+// IsTemplateVar reports whether name is a known template variable (one of the
+// keys TemplateVars expands). Used to validate an agent's option_args `when`
+// gate so a typo (`when = "reasoning"`) is caught at config-load time rather
+// than silently never firing.
+func IsTemplateVar(name string) bool {
+	_, ok := (TemplateVars{}).toMap()[name]
+
+	return ok
 }
 
 func Expand(s string, vars TemplateVars) (string, error) {

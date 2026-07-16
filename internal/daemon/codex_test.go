@@ -10,39 +10,46 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-// TestCodexExtraArgs locks the #1186 fix: a codex session's model (and typed
-// options) must be turned into real CLI flags. The regression is the first case
-// — before the fix, a model set on a codex session produced no `--model` flag
-// and the session silently ran on Codex's default model.
-func TestCodexExtraArgs(t *testing.T) {
+// TestOptionArgs locks the #1186 fix as re-expressed through config-driven
+// option_args (#1236): a codex session's model (and typed options) must be
+// turned into real CLI flags by the built-in [agents.codex] option_args groups.
+// The regression is the first case — before #1186 a model set on a codex session
+// produced no `--model` flag and the session silently ran on Codex's default
+// model. The default codex/claude agents are loaded from the embedded config so
+// this test also proves default_config.toml carries the right groups.
+func TestOptionArgs(t *testing.T) {
+	def := config.Default()
+	codex := def.Agents["codex"]
+	claude := def.Agents["claude"]
+
 	tests := []struct {
 		name  string
-		agent string
+		agent config.Agent
 		model string
 		opts  *config.CodexOptions
 		want  []string
 	}{
 		{
 			name:  "codex model becomes --model (regression #1186)",
-			agent: "codex",
+			agent: codex,
 			model: "gpt-5.1-codex",
 			want:  []string{"--model", "gpt-5.1-codex"},
 		},
 		{
 			name:  "codex with no model or options yields nil",
-			agent: "codex",
+			agent: codex,
 			want:  nil,
 		},
 		{
-			name:  "non-codex agent never gets flags",
-			agent: "claude",
+			name:  "non-codex agent (claude) has no option_args, so no flags",
+			agent: claude,
 			model: "opus",
 			opts:  &config.CodexOptions{Profile: "braw", WebSearch: true},
 			want:  nil,
 		},
 		{
 			name:  "all options in stable order",
-			agent: "codex",
+			agent: codex,
 			model: "gpt-5.1-codex",
 			opts: &config.CodexOptions{
 				Profile:         "braw",
@@ -62,13 +69,13 @@ func TestCodexExtraArgs(t *testing.T) {
 		},
 		{
 			name:  "options without a model omit --model",
-			agent: "codex",
+			agent: codex,
 			opts:  &config.CodexOptions{ReasoningEffort: "low"},
 			want:  []string{"-c", "model_reasoning_effort=low"},
 		},
 		{
 			name:  "web search false emits no --search",
-			agent: "codex",
+			agent: codex,
 			opts:  &config.CodexOptions{WebSearch: false, Profile: "canny"},
 			want:  []string{"--profile", "canny"},
 		},
@@ -76,9 +83,15 @@ func TestCodexExtraArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := codexExtraArgs(tt.agent, tt.model, tt.opts)
+			vars := config.TemplateVars{Model: tt.model}
+
+			got, err := optionArgs(tt.agent, vars, tt.opts)
+			if err != nil {
+				t.Fatalf("optionArgs: %v", err)
+			}
+
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("codexExtraArgs(%q, %q, %+v) = %v, want %v", tt.agent, tt.model, tt.opts, got, tt.want)
+				t.Errorf("optionArgs(model=%q, %+v) = %v, want %v", tt.model, tt.opts, got, tt.want)
 			}
 		})
 	}
@@ -240,7 +253,9 @@ func TestCodexModelPassedOnLaunchAndResume(t *testing.T) {
 
 // newCodexRecorderManager builds a SessionManager whose "codex" agent is a shell
 // script that records its launch argv to recordPath (mirrors newRecorderManager
-// but keyed on codex, since codexExtraArgs only fires for that agent).
+// but keyed on codex). The option_args groups carry over from the embedded
+// default so the model/typed-option adapter still fires (issue #1236); only the
+// launch command is swapped for the recorder script.
 func newCodexRecorderManager(t *testing.T, repoDir string) (*SessionManager, string) {
 	t.Helper()
 
@@ -261,6 +276,8 @@ func newCodexRecorderManager(t *testing.T, repoDir string) (*SessionManager, str
 		ResumeArgs: []string{"-c", script},
 		ForkArgs:   []string{"-c", script},
 		Env:        map[string]string{"GRAITH_ARGS_RECORD": recordPath},
+		OptionArgs: cfg.Agents["codex"].OptionArgs,
+		AddDirArgs: cfg.Agents["codex"].AddDirArgs,
 	}
 	cfg.Repos = []config.RepoConfig{{Path: repoDir}}
 

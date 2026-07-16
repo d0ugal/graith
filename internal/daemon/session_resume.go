@@ -577,10 +577,16 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		return SessionState{}, fmt.Errorf("expand resume args: %w", err)
 	}
 
-	// Replay the conditional Codex flags after the resume subcommand/args
-	// (issue #1186) so a resumed session keeps its model and typed options; no-op
-	// for other agents.
-	expandedArgs = append(expandedArgs, codexExtraArgs(sessAgent, sessModel, sessCodex)...)
+	// Replay the conditional option flags after the resume subcommand/args
+	// (issue #1186) so a resumed session keeps its model and typed options; the
+	// agent's option_args config decides which are emitted (issue #1236).
+	optArgs, err := optionArgs(agent, vars, sessCodex)
+	if err != nil {
+		rollbackState()
+		return SessionState{}, fmt.Errorf("expand agent option args: %w", err)
+	}
+
+	expandedArgs = append(expandedArgs, optArgs...)
 
 	logPath := filepath.Join(sm.paths.LogDir, id+".log")
 
@@ -742,10 +748,17 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		expandedArgs = append(expandedArgs, seedPrompt)
 	}
 
-	// Re-add each included worktree via --add-dir so it persists across restarts
-	// (resume_args don't carry it). Appended after every prompt — including the
-	// migration seed — so Claude's variadic --add-dir can't swallow the prompt.
-	expandedArgs = append(expandedArgs, includeAddDirArgs(sessAgent, resumeIncludes)...)
+	// Re-add each included worktree via the agent's add_dir_args so it persists
+	// across restarts (resume_args don't carry it). Appended after every prompt —
+	// including the migration seed — so Claude's variadic --add-dir can't swallow
+	// the prompt.
+	addDirArgs, err := includeAddDirArgs(agent, vars, resumeIncludes)
+	if err != nil {
+		rollbackState()
+		return SessionState{}, fmt.Errorf("expand add-dir args: %w", err)
+	}
+
+	expandedArgs = append(expandedArgs, addDirArgs...)
 
 	command := agent.Command
 	finalArgs := expandedArgs
