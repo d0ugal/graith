@@ -4,13 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/d0ugal/graith/internal/approvals"
 	"github.com/d0ugal/graith/internal/client"
@@ -248,13 +246,13 @@ func (dc *doctorContext) probeDaemon() daemonProbe {
 		return daemonProbe{reach: daemonReachNoSocket}
 	}
 
-	conn, err := net.DialTimeout("unix", paths.SocketPath, 2*time.Second)
+	conn, err := dialLocalDaemonSocket()
 	if err != nil {
 		return daemonProbe{reach: classifyDialErr(err), dialErr: err}
 	}
 	defer func() { _ = conn.Close() }()
 
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	setLocalDaemonHandshakeDeadline(conn)
 
 	reader := protocol.NewFrameReader(conn)
 	writer := protocol.NewFrameWriter(conn)

@@ -258,6 +258,8 @@ remote_pairing_timeout   = "11m"    # wait for the remote human to approve `gr p
 
 An unset field keeps its built-in default (shown above). A value that is set but unparseable, or that is zero or negative, is rejected at config load. The `remote_*` fields apply only to remote-daemon connections (see [Orchestrator & remote access]({{< relref "/docs/configuration/access.md" >}})); the others apply to the local daemon and attach recovery.
 
+`dial_timeout` governs every local Unix-socket dial, including hook/status/inbox helpers, approval helpers, `gr doctor`, and daemon restart/version probes. `handshake_timeout` governs normal local handshakes plus the doctor and daemon control probes. Two operation-specific deadlines deliberately remain separate: the hook fast path uses a short two-second post-dial handshake so an agent hook fails promptly, while an approval connection stays open for the configured approval timeout plus grace because it waits for the approval result after handshaking. Changing `handshake_timeout` does not shorten that approval-operation wait.
+
 ## Migration
 
 `gr migrate` hands a session's conversation to a different agent in place. After starting the target agent, the daemon waits `health_window` to confirm it survived startup before declaring the migration successful; if the new agent exits immediately (a bad auth/config), the migration reverts to the original agent. Raise the window to tolerate a slow agent boot, lower it to revert faster.

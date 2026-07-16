@@ -3,7 +3,6 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"time"
 
@@ -140,7 +139,7 @@ func execUpgrade(successMsg string) error {
 		for range 20 {
 			time.Sleep(250 * time.Millisecond)
 
-			conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond)
+			conn, err := dialLocalDaemonSocket()
 			if err == nil {
 				_ = conn.Close()
 				break
@@ -172,11 +171,16 @@ func execUpgrade(successMsg string) error {
 }
 
 func probeDaemonVersion() string {
-	conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond)
+	conn, err := dialLocalDaemonSocket()
 	if err != nil {
 		return ""
 	}
 	defer func() { _ = conn.Close() }()
+
+	// A stale/foreign socket that accepts but never responds must not hang the
+	// post-upgrade version check. This is the same configured local handshake
+	// policy used by normal client connections and gr doctor.
+	setLocalDaemonHandshakeDeadline(conn)
 
 	reader := protocol.NewFrameReader(conn)
 	writer := protocol.NewFrameWriter(conn)
@@ -215,7 +219,7 @@ func restartClean() error {
 	}
 
 	if _, err := os.Stat(paths.SocketPath); err == nil {
-		if conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond); err == nil {
+		if conn, err := dialLocalDaemonSocket(); err == nil {
 			_ = conn.Close()
 			return errors.New("daemon is still running, cannot restart cleanly")
 		}
