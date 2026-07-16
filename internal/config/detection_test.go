@@ -9,13 +9,36 @@ import (
 
 // TestDetectionConfig_EmbeddedDefaults asserts the embedded default config
 // reproduces exactly the timing policy that was hard-coded before issue #1241,
-// so a fresh install behaves identically. Verified through Default() (which
-// parses the embedded TOML), not just the accessor fallbacks, because the
-// embedded values — not the Go constants — are what a real daemon reads.
+// so a fresh install behaves identically. It asserts the RAW string fields
+// parsed from the embedded TOML, not just the accessor results: an accessor
+// would silently fall back to its Go constant if the embedded key were blanked,
+// masking the drift (see the "config default fallback defeated by embedded
+// TOML" trap). The accessors are then checked to confirm both agree.
 func TestDetectionConfig_EmbeddedDefaults(t *testing.T) {
 	d := Default().Detection
 
-	checks := []struct {
+	rawChecks := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"scan_interval", d.ScanInterval, "500ms"},
+		{"fetch_interval", d.FetchInterval, "5m"},
+		{"fetch_timeout", d.FetchTimeout, "30s"},
+		{"silent_threshold", d.SilentThreshold, "20s"},
+		{"adopted_grace", d.AdoptedGrace, "60s"},
+		{"recent_output_window", d.RecentOutputWindow, "3s"},
+		{"hook_start_window", d.HookStartWindow, "5s"},
+		{"hook_activity_window", d.HookActivityWindow, "30s"},
+		{"hook_terminal_window", d.HookTerminalWindow, "30m"},
+	}
+	for _, c := range rawChecks {
+		if c.got != c.want {
+			t.Errorf("embedded detection %s = %q, want %q", c.name, c.got, c.want)
+		}
+	}
+
+	durChecks := []struct {
 		name string
 		got  time.Duration
 		want time.Duration
@@ -30,8 +53,7 @@ func TestDetectionConfig_EmbeddedDefaults(t *testing.T) {
 		{"hook_activity_window", d.HookActivityWindowDuration(), 30 * time.Second},
 		{"hook_terminal_window", d.HookTerminalWindowDuration(), 30 * time.Minute},
 	}
-
-	for _, c := range checks {
+	for _, c := range durChecks {
 		if c.got != c.want {
 			t.Errorf("default detection %s = %v, want %v", c.name, c.got, c.want)
 		}
