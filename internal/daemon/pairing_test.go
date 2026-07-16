@@ -177,7 +177,7 @@ func TestAddPendingPairingCap(t *testing.T) {
 	pub := testPubKey(t)
 	now := time.Now()
 
-	for i := 0; i < maxPendingPairings; i++ {
+	for i := 0; i < config.RemoteMaxPendingPairingsDefault; i++ {
 		if _, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, now); err != nil {
 			t.Fatalf("request %d: %v", i, err)
 		}
@@ -185,6 +185,82 @@ func TestAddPendingPairingCap(t *testing.T) {
 
 	if _, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, now); err == nil {
 		t.Error("expected pending-cap to reject the extra request")
+	}
+}
+
+// TestAddPendingPairingConfigurableLimits verifies that both the pending-cap
+// and the fallback rate honour config values stricter than the old hardcoded
+// limits (16 pending, 5/min fallback): after two allowed requests, the third
+// must be rejected.
+func TestAddPendingPairingConfigurableLimits(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(r *config.RemoteConfig)
+	}{
+		{
+			name: "pending cap of 2 (below old 16)",
+			setup: func(r *config.RemoteConfig) {
+				r.PairRequestRate = "1000/min" // don't hit the rate limit
+				r.MaxPendingPairings = 2
+			},
+		},
+		{
+			name: "fallback rate of 2/min (below old 5/min)",
+			setup: func(r *config.RemoteConfig) {
+				// pair_request_rate unset, so the configured fallback applies.
+				r.PairFallbackCount = 2
+				r.PairFallbackWindow = "1m"
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sm := newPairingSM(t)
+			tt.setup(&sm.cfg.Remote)
+
+			pub := testPubKey(t)
+			now := time.Now()
+
+			for i := 0; i < 2; i++ {
+				if _, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, now); err != nil {
+					t.Fatalf("request %d: %v", i, err)
+				}
+			}
+
+			if _, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, now); err == nil {
+				t.Error("expected the configured limit to reject the 3rd request")
+			}
+		})
+	}
+}
+
+func TestExpirePendingPairingConfigurableTTL(t *testing.T) {
+	sm := newPairingSM(t)
+	sm.cfg.Remote.PairRequestRate = "1000/min"
+	sm.cfg.Remote.PendingPairingTTL = "2m" // shorter than the default 10m
+	pub := testPubKey(t)
+	base := time.Now()
+
+	rid, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Still alive just before the configured TTL.
+	if _, _, err := sm.ApprovePairing(rid, false, base.Add(90*time.Second)); err != nil {
+		t.Fatalf("pending should survive until the configured TTL: %v", err)
+	}
+
+	rid2, _, err := sm.AddPendingPairing("skelf", pub, TailnetIdentity{}, base.Add(2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Past the configured 2m TTL (well under the old 10m default), an approval
+	// must fail because the pending request has expired.
+	if _, _, err := sm.ApprovePairing(rid2, false, base.Add(5*time.Minute)); err == nil {
+		t.Error("expected ApprovePairing to reject a request expired under the configured 2m TTL")
 	}
 }
 
@@ -200,7 +276,7 @@ func TestExpirePendingPairing(t *testing.T) {
 	}
 
 	// A later request past the TTL should expire the earlier pending one.
-	if _, _, err := sm.AddPendingPairing("skelf", pub, TailnetIdentity{}, base.Add(pendingPairingTTL+time.Minute)); err != nil {
+	if _, _, err := sm.AddPendingPairing("skelf", pub, TailnetIdentity{}, base.Add(config.RemotePendingPairingTTLDefault+time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -363,7 +439,7 @@ func TestApprovePairingRejectsExpired(t *testing.T) {
 	}
 
 	// Approving after the TTL must fail (the pending is expired and cleaned up).
-	if _, _, err := sm.ApprovePairing(rid, false, base.Add(pendingPairingTTL+time.Minute)); err == nil {
+	if _, _, err := sm.ApprovePairing(rid, false, base.Add(config.RemotePendingPairingTTLDefault+time.Minute)); err == nil {
 		t.Error("expected ApprovePairing to reject an expired pending request")
 	}
 

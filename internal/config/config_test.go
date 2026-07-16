@@ -2649,6 +2649,61 @@ func TestRemoteConfigValidation(t *testing.T) {
 			remote:  RemoteConfig{Enabled: true, Mode: "tsnet", Port: 4823, AllowTailnetUsers: []string{"speir@example.com", "tag:graith"}},
 			wantErr: false,
 		},
+		{
+			name:    "in-bounds pairing policy ok",
+			remote:  RemoteConfig{Enabled: true, Mode: "tsnet", Port: 4823, MaxPendingPairings: 32, PendingPairingTTL: "5m", PairFallbackCount: 3, PairFallbackWindow: "30s"},
+			wantErr: false,
+		},
+		{
+			name:    "zero pairing policy fields use defaults, ok",
+			remote:  RemoteConfig{Enabled: true, Mode: "tsnet", Port: 4823, MaxPendingPairings: 0, PairFallbackCount: 0},
+			wantErr: false,
+		},
+		{
+			name:    "negative max_pending_pairings rejected",
+			remote:  RemoteConfig{Enabled: true, Mode: "tsnet", Port: 4823, MaxPendingPairings: -1},
+			wantErr: true,
+		},
+		{
+			name:    "over-ceiling max_pending_pairings rejected",
+			remote:  RemoteConfig{Enabled: true, Mode: "tsnet", Port: 4823, MaxPendingPairings: RemoteMaxPendingPairingsMax + 1},
+			wantErr: true,
+		},
+		{
+			name:    "unparseable pending_pairing_ttl rejected",
+			remote:  RemoteConfig{Enabled: true, Mode: "tsnet", Port: 4823, PendingPairingTTL: "haar"},
+			wantErr: true,
+		},
+		{
+			name:    "below-floor pending_pairing_ttl rejected",
+			remote:  RemoteConfig{Enabled: true, Mode: "tsnet", Port: 4823, PendingPairingTTL: "1s"},
+			wantErr: true,
+		},
+		{
+			name:    "above-ceiling pending_pairing_ttl rejected",
+			remote:  RemoteConfig{Enabled: true, Mode: "tsnet", Port: 4823, PendingPairingTTL: "48h"},
+			wantErr: true,
+		},
+		{
+			name:    "negative pair_fallback_count rejected",
+			remote:  RemoteConfig{Enabled: true, Mode: "tsnet", Port: 4823, PairFallbackCount: -5},
+			wantErr: true,
+		},
+		{
+			name:    "over-ceiling pair_fallback_count rejected",
+			remote:  RemoteConfig{Enabled: true, Mode: "tsnet", Port: 4823, PairFallbackCount: RemotePairFallbackCountMax + 1},
+			wantErr: true,
+		},
+		{
+			name:    "below-floor pair_fallback_window rejected",
+			remote:  RemoteConfig{Enabled: true, Mode: "tsnet", Port: 4823, PairFallbackWindow: "100ms"},
+			wantErr: true,
+		},
+		{
+			name:    "disabled block ignores out-of-bounds pairing policy",
+			remote:  RemoteConfig{Enabled: false, MaxPendingPairings: -9, PendingPairingTTL: "haar", PairFallbackCount: 99999},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -2659,6 +2714,59 @@ func TestRemoteConfigValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRemotePairingPolicyAccessors(t *testing.T) {
+	t.Run("max pending defaults and clamps", func(t *testing.T) {
+		cases := []struct {
+			in, want int
+		}{
+			{0, RemoteMaxPendingPairingsDefault},
+			{-3, RemoteMaxPendingPairingsDefault},
+			{32, 32},
+			{RemoteMaxPendingPairingsMax + 100, RemoteMaxPendingPairingsMax},
+		}
+		for _, c := range cases {
+			if got := (RemoteConfig{MaxPendingPairings: c.in}).MaxPendingPairingsOrDefault(); got != c.want {
+				t.Errorf("MaxPendingPairingsOrDefault(%d) = %d, want %d", c.in, got, c.want)
+			}
+		}
+	})
+
+	t.Run("ttl defaults and clamps", func(t *testing.T) {
+		cases := []struct {
+			in   string
+			want time.Duration
+		}{
+			{"", RemotePendingPairingTTLDefault},
+			{"haar", RemotePendingPairingTTLDefault},
+			{"5m", 5 * time.Minute},
+			{"1s", RemotePendingPairingTTLMin},
+			{"48h", RemotePendingPairingTTLMax},
+		}
+		for _, c := range cases {
+			if got := (RemoteConfig{PendingPairingTTL: c.in}).PendingPairingTTLDuration(); got != c.want {
+				t.Errorf("PendingPairingTTLDuration(%q) = %v, want %v", c.in, got, c.want)
+			}
+		}
+	})
+
+	t.Run("fallback rate defaults and clamps", func(t *testing.T) {
+		def := (RemoteConfig{}).PairFallbackRate()
+		if def.Count != RemotePairFallbackCountDefault || def.Per != RemotePairFallbackWindowDefault {
+			t.Errorf("default fallback = %+v, want {%d, %v}", def, RemotePairFallbackCountDefault, RemotePairFallbackWindowDefault)
+		}
+
+		set := (RemoteConfig{PairFallbackCount: 3, PairFallbackWindow: "30s"}).PairFallbackRate()
+		if set.Count != 3 || set.Per != 30*time.Second {
+			t.Errorf("configured fallback = %+v, want {3, 30s}", set)
+		}
+
+		clamped := (RemoteConfig{PairFallbackCount: RemotePairFallbackCountMax + 50, PairFallbackWindow: "100ms"}).PairFallbackRate()
+		if clamped.Count != RemotePairFallbackCountMax || clamped.Per != RemotePairFallbackWindowMin {
+			t.Errorf("clamped fallback = %+v, want {%d, %v}", clamped, RemotePairFallbackCountMax, RemotePairFallbackWindowMin)
+		}
+	})
 }
 
 func TestRemoteConfigAllowsTaggedNodes(t *testing.T) {

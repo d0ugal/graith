@@ -278,7 +278,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 							DaemonProfile: appr.Profile,
 							TLSPinSPKI:    appr.TLSPin,
 						})
-					case <-time.After(pendingPairingTTL):
+					case <-time.After(sm.pendingPairingTTL()):
 						sm.unregisterPairWaiter(rid)
 						sendControl("error", protocol.ErrorMsg{Message: "pairing request timed out"})
 					case <-connDone:
