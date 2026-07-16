@@ -445,8 +445,8 @@ shortcut_keys = "1234567890"
 # Prefix key plus a command key trigger these actions while attached.
 # NOTE: all keys below are read from config (passthrough keys via
 # cli/attach.go passthroughKeysFromConfig, picker keys via overlayKeysFromConfig).
-# The messages/approvals/restart passthrough keys (m/a/r) have no config field
-# yet and stay literal.
+# The messages/approvals/restart passthrough keys are configurable via the
+# messages/approvals/restart_session fields below (#1233); none stay literal.
 # Each command key is a single literal character (only prefix accepts "ctrl+…").
 [keybindings]
 prefix = "ctrl+b"             # the prefix key; press it, then one of the keys below
