@@ -2,7 +2,7 @@ package daemon
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -515,6 +515,7 @@ func TestReconcileOrchestratorPresenceAfterDelete(t *testing.T) {
 	}
 
 	created := 0
+
 	sm.reconcileOrchestratorPresenceWith(context.Background(), func(context.Context) (SessionState, error) {
 		created++
 		fresh := &SessionState{
@@ -523,6 +524,7 @@ func TestReconcileOrchestratorPresenceAfterDelete(t *testing.T) {
 			SystemKind: SystemKindOrchestrator,
 			Status:     StatusRunning,
 		}
+
 		sm.mu.Lock()
 		sm.state.Sessions[fresh.ID] = fresh
 		sm.mu.Unlock()
@@ -554,6 +556,7 @@ func TestReconcileOrchestratorPresenceDisabled(t *testing.T) {
 	sm.cfg.Orchestrator.Enabled = false
 
 	created := 0
+
 	sm.reconcileOrchestratorPresenceWith(context.Background(), func(context.Context) (SessionState, error) {
 		created++
 		return SessionState{}, nil
@@ -578,6 +581,7 @@ func TestDeleteKicksOrchestratorReconcileLoop(t *testing.T) {
 	defer cancel()
 
 	done := make(chan struct{})
+
 	go func() {
 		runOrchestratorReconcileLoop(ctx, sm.orchestratorKickCh, func(context.Context) {
 			sm.reconcileOrchestratorPresenceWith(ctx, func(context.Context) (SessionState, error) {
@@ -587,6 +591,7 @@ func TestDeleteKicksOrchestratorReconcileLoop(t *testing.T) {
 					SystemKind: SystemKindOrchestrator,
 					Status:     StatusRunning,
 				}
+
 				sm.mu.Lock()
 				sm.state.Sessions[fresh.ID] = fresh
 				sm.mu.Unlock()
@@ -602,6 +607,7 @@ func TestDeleteKicksOrchestratorReconcileLoop(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(time.Second)
+
 	for {
 		sm.mu.RLock()
 		got := sm.findOrchestratorID()
@@ -636,7 +642,7 @@ func TestFailedDeleteDoesNotKickOrchestratorReconcile(t *testing.T) {
 		SystemKind: SystemKindOrchestrator,
 		Status:     StatusStopped,
 	}
-	sm.saveStateFault = func() error { return fmt.Errorf("dreich disk") }
+	sm.saveStateFault = func() error { return errors.New("dreich disk") }
 
 	if err := sm.Delete("thrawn-orch"); err == nil {
 		t.Fatal("delete should fail when its state commit fails")
