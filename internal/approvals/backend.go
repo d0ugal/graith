@@ -22,7 +22,13 @@ package approvals
 import (
 	"context"
 	"fmt"
+	"time"
 )
+
+// defaultExecTimeout bounds a single backend subprocess invocation when the
+// resolved Config carries no explicit ExecTimeout. It preserves the historical
+// fixed 5s used by the command/external and localmost backends.
+const defaultExecTimeout = 5 * time.Second
 
 // Decision values that cross a backend boundary.
 const (
@@ -77,6 +83,23 @@ type Config struct {
 	// set it takes the place of BuiltinConfig; the two are mutually exclusive
 	// (config.Approvals.Validate rejects both being set).
 	BuiltinInline []byte
+
+	// ExecTimeout bounds a single subprocess invocation for the backends that
+	// spawn one (command/external and localmost). Zero means use the built-in
+	// defaultExecTimeout. The daemon resolves it from the per-backend config key
+	// (command_timeout / localmost_timeout); config.Approvals.Validate has
+	// already guaranteed it is shorter than the enclosing approval deadline.
+	ExecTimeout time.Duration
+}
+
+// execTimeout returns the effective per-invocation subprocess timeout, falling
+// back to defaultExecTimeout when the resolved Config carries no explicit value.
+func (c Config) execTimeout() time.Duration {
+	if c.ExecTimeout > 0 {
+		return c.ExecTimeout
+	}
+
+	return defaultExecTimeout
 }
 
 // Availability reports whether a backend can enforce with the given config. A

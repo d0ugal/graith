@@ -510,6 +510,53 @@ func TestApprovalsBackendConfigRelativeToConfigDir(t *testing.T) {
 	}
 }
 
+// TestApprovalsBackendConfigResolvesExecTimeout verifies the daemon plumbs the
+// per-backend execution timeout into approvals.Config for the subprocess
+// backends and leaves it zero (use built-in default) for the others (#1251).
+func TestApprovalsBackendConfigResolvesExecTimeout(t *testing.T) {
+	cfg := config.Approvals{
+		Command:          "graith-approver",
+		CommandTimeout:   "3s",
+		LocalmostTimeout: "7s",
+	}
+
+	cases := []struct {
+		backend string
+		want    time.Duration
+	}{
+		{"command", 3 * time.Second},
+		{"external", 3 * time.Second},
+		{"localmost", 7 * time.Second},
+		{"builtin", 0}, // in-process backend: no subprocess timeout
+	}
+
+	for _, c := range cases {
+		t.Run(c.backend, func(t *testing.T) {
+			acfg, err := approvalsBackendConfig(c.backend, cfg, "/etc/graith")
+			if err != nil {
+				t.Fatalf("approvalsBackendConfig: %v", err)
+			}
+
+			if acfg.ExecTimeout != c.want {
+				t.Errorf("ExecTimeout = %v, want %v", acfg.ExecTimeout, c.want)
+			}
+		})
+	}
+}
+
+// TestApprovalsBackendConfigExecTimeoutDefaults verifies an unset per-backend
+// timeout resolves to the config default (5s) for subprocess backends.
+func TestApprovalsBackendConfigExecTimeoutDefaults(t *testing.T) {
+	acfg, err := approvalsBackendConfig("command", config.Approvals{Command: "x"}, "/etc/graith")
+	if err != nil {
+		t.Fatalf("approvalsBackendConfig: %v", err)
+	}
+
+	if acfg.ExecTimeout != 5*time.Second {
+		t.Errorf("ExecTimeout = %v, want 5s default", acfg.ExecTimeout)
+	}
+}
+
 // TestApprovalsConfigDir verifies the config directory is derived from the
 // resolved config file path, and is empty when that path is unknown.
 func TestApprovalsConfigDir(t *testing.T) {

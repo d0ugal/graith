@@ -51,6 +51,11 @@
 #                      # override for backend "localmost". Receives one JSON object
 #                      # on stdin ({tool_name,tool_input,session_id,session_name})
 #                      # and prints one to stdout ({decision:allow|block|deny|defer,reason}).
+# command_timeout   = "5s"  # bounds one "command"/"external" backend invocation
+# localmost_timeout = "5s"  # bounds one "localmost" binary check
+#                      # Both default to 5s, must be positive, at most 60s, and
+#                      # strictly shorter than timeout above (the backend decision
+#                      # runs inside the enclosing approval deadline).
 # [approvals.builtin]
 # config = ""          # localmost-format config.json (backend "builtin")
 

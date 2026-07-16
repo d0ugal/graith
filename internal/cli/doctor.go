@@ -589,6 +589,15 @@ func (dc *doctorContext) checkApprovalsBackend() {
 	}
 
 	dc.passf("environment", "Approvals backend %q available", backend)
+
+	// Surface the effective deadline hierarchy so a mismatch (a backend
+	// execution timeout approaching the enclosing approval timeout) is visible
+	// rather than latent (see #1251/#244). Only the subprocess-spawning backends
+	// have an execution timeout.
+	if execTimeout, ok := cfg.Approvals.BackendExecTimeout(backend); ok {
+		dc.passf("environment", "Approvals deadlines: %s backend execution %s < approval timeout %s",
+			backend, execTimeout, cfg.Approvals.TimeoutDuration())
+	}
 }
 
 // agentInstalled reports whether an agent's command is resolvable on PATH.
