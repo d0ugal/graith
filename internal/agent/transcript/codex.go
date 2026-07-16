@@ -1,7 +1,6 @@
 package transcript
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -304,10 +303,13 @@ func codexRolloutCwd(path string) (string, bool) {
 	}
 	defer func() { _ = f.Close() }()
 
-	sc := bufio.NewScanner(f)
-	sc.Buffer(newScanBuffer(maxMetadataLineBytes()))
+	sc := newBoundedLineScanner(f, maxMetadataLineBytes())
 
-	for i := 0; sc.Scan() && i < 5; i++ { // session_meta is at the top
+	for i := 0; i < 5 && sc.Scan(); i++ { // session_meta is at the top
+		if sc.Oversized() {
+			continue
+		}
+
 		var line codexLine
 		if err := json.Unmarshal(bytes.TrimSpace(sc.Bytes()), &line); err != nil {
 			continue
@@ -333,10 +335,13 @@ func CodexRolloutID(path string) (string, bool) {
 	}
 	defer func() { _ = f.Close() }()
 
-	sc := bufio.NewScanner(f)
-	sc.Buffer(newScanBuffer(maxMetadataLineBytes()))
+	sc := newBoundedLineScanner(f, maxMetadataLineBytes())
 
-	for i := 0; sc.Scan() && i < 5; i++ {
+	for i := 0; i < 5 && sc.Scan(); i++ {
+		if sc.Oversized() {
+			continue
+		}
+
 		var line codexLine
 		if err := json.Unmarshal(bytes.TrimSpace(sc.Bytes()), &line); err != nil {
 			continue
@@ -396,10 +401,15 @@ func (codexReader) usage(path string) (Usage, error) {
 		havany bool
 	)
 
-	sc := bufio.NewScanner(f)
-	sc.Buffer(newScanBuffer(maxLineBytes()))
+	sc := newBoundedLineScanner(f, maxLineBytes())
+	dropped := 0
 
 	for sc.Scan() {
+		if sc.Oversized() {
+			dropped++
+			continue
+		}
+
 		raw := bytes.TrimSpace(sc.Bytes())
 		if len(raw) == 0 {
 			continue
@@ -423,22 +433,21 @@ func (codexReader) usage(path string) (Usage, error) {
 		havany = true
 	}
 
-	scanErr := 0
 	if err := sc.Err(); err != nil {
-		scanErr = 1
+		dropped++
 	}
 
 	if havany {
 		// Degradation reflects the FINAL (winning) snapshot's own validation
 		// plus any scan error — not a running sum over superseded snapshots,
 		// which would falsely flag a clean final total.
-		last.Dropped += scanErr
+		last.Dropped += dropped
 		last.Found = true
 
 		return last, nil
 	}
 
-	u.Dropped = scanErr
+	u.Dropped = dropped
 
 	return u, nil
 }
@@ -538,10 +547,14 @@ func (codexReader) read(path string) ([]Turn, int, error) {
 	toolIdx := make(map[string]int) // call_id -> index into turns
 	dropped := 0
 
-	sc := bufio.NewScanner(f)
-	sc.Buffer(newScanBuffer(maxLineBytes()))
+	sc := newBoundedLineScanner(f, maxLineBytes())
 
 	for sc.Scan() {
+		if sc.Oversized() {
+			dropped++
+			continue
+		}
+
 		raw := bytes.TrimSpace(sc.Bytes())
 		if len(raw) == 0 {
 			continue

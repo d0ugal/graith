@@ -243,3 +243,119 @@ func TestScannerCapBelow64KiBIsEnforced(t *testing.T) {
 		}
 	})
 }
+
+// TestOversizedMiddleRecordsDoNotStopTranscriptReaders is the round-two
+// regression for #1295. The old bufio.Scanner stopped permanently at an
+// oversized middle record, hiding every later turn and leaving Codex usage on a
+// stale cumulative snapshot. Every read/usage path must count the bad record
+// once, drain it, and continue with the valid record after it.
+func TestOversizedMiddleRecordsDoNotStopTranscriptReaders(t *testing.T) {
+	const capBytes = 1024
+	oversized := strings.Repeat("z", 2*capBytes)
+
+	t.Run("claude read", func(t *testing.T) {
+		resetScanLimits(t)
+		Configure(capBytes, 0)
+
+		path := writeLines(t, []string{
+			`{"type":"user","uuid":"u1","parentUuid":"","message":{"role":"user","content":"before"}}`,
+			oversized,
+			`{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"after"}]}}`,
+		})
+
+		turns, dropped, err := claudeReader{}.read(path)
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+
+		if dropped != 1 {
+			t.Fatalf("dropped = %d, want oversized middle record counted once", dropped)
+		}
+
+		if len(turns) != 2 || turns[0].Text != "before" || turns[1].Text != "after" {
+			t.Fatalf("turns = %+v, want valid before and after turns", turns)
+		}
+	})
+
+	t.Run("claude usage", func(t *testing.T) {
+		resetScanLimits(t)
+		Configure(capBytes, 0)
+
+		path := writeLines(t, []string{
+			claudeAsst("a1", "msg_before", 5, 7, 0, 0),
+			oversized,
+			claudeAsst("a2", "msg_after", 11, 13, 0, 0),
+		})
+
+		u, err := claudeReader{}.usage(path)
+		if err != nil {
+			t.Fatalf("usage: %v", err)
+		}
+
+		if !u.Found || u.Input != 16 || u.Output != 20 || u.Dropped != 1 {
+			t.Fatalf("usage = %+v, want both valid records and one dropped middle record", u)
+		}
+	})
+
+	t.Run("codex read", func(t *testing.T) {
+		resetScanLimits(t)
+		Configure(capBytes, 0)
+
+		path := writeLines(t, []string{
+			`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"before"}]}}`,
+			oversized,
+			`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"after"}]}}`,
+		})
+
+		turns, dropped, err := codexReader{}.read(path)
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+
+		if dropped != 1 {
+			t.Fatalf("dropped = %d, want oversized middle record counted once", dropped)
+		}
+
+		if len(turns) != 2 || turns[0].Text != "before" || turns[1].Text != "after" {
+			t.Fatalf("turns = %+v, want valid before and after turns", turns)
+		}
+	})
+
+	t.Run("codex usage", func(t *testing.T) {
+		resetScanLimits(t)
+		Configure(capBytes, 0)
+
+		mk := func(total int64) string {
+			return `{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":` +
+				`{"input_tokens":` + i64(total) + `,"cached_input_tokens":0,"output_tokens":0,"total_tokens":` + i64(total) + `}}}}`
+		}
+		path := writeLines(t, []string{mk(100), oversized, mk(900)})
+
+		u, err := codexReader{}.usage(path)
+		if err != nil {
+			t.Fatalf("usage: %v", err)
+		}
+
+		if !u.Found || u.Total() != 900 || u.Dropped != 1 {
+			t.Fatalf("usage = %+v, want later cumulative total 900 and one dropped middle record", u)
+		}
+	})
+
+	t.Run("codex metadata", func(t *testing.T) {
+		resetScanLimits(t)
+		Configure(0, capBytes)
+
+		path := writeLines(t, []string{
+			oversized,
+			`{"type":"session_meta","payload":{"id":"sess-after","cwd":"/glen/after"}}`,
+		})
+
+		if cwd, ok := codexRolloutCwd(path); !ok || cwd != "/glen/after" {
+			t.Fatalf("cwd = %q, %v; want later metadata after oversized record", cwd, ok)
+		}
+
+		if id, ok := CodexRolloutID(path); !ok || id != "sess-after" {
+			t.Fatalf("id = %q, %v; want later metadata after oversized record", id, ok)
+		}
+	})
+}

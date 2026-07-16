@@ -283,4 +283,4 @@ max_line_bytes = 16777216          # scanner buffer cap for a transcript line wh
 max_metadata_line_bytes = 4194304  # scanner buffer cap for Codex rollout metadata scans (cwd/id) (4 MiB)
 ```
 
-A zero or non-positive value falls back to the default shown; a negative value is rejected at config load. The scanner buffer caps (`max_line_bytes`, `max_metadata_line_bytes`) are applied process-wide and re-read on config reload, so a change takes effect without a daemon restart.
+A zero or non-positive value falls back to the default shown; a negative value is rejected at config load. The line caps (`max_line_bytes`, `max_metadata_line_bytes`) count bytes in each JSONL record, excluding its newline. They are applied process-wide and re-read on config reload, so a change takes effect without a daemon restart. An over-cap record is counted as dropped and drained through its newline; later valid turns, metadata, and cumulative token snapshots are still read rather than being hidden by the bad record.
