@@ -46,6 +46,7 @@ internal/
   config/                TOML config loading, defaults, XDG paths
   daemon/                Daemon: session manager, handler, state, server, messaging
   detector/              Agent type detection from running processes
+  ignore/                Git-compatible gitignore matcher (go-git-backed)
   integration/           Integration tests (spawn real daemon)
   output/                Structured output helpers
   protocol/              Wire protocol: framing, control messages, encoding

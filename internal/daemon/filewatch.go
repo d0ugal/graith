@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/ignore"
 	"github.com/fsnotify/fsnotify"
-	gitignore "github.com/sabhiram/go-gitignore"
 )
 
 const fileWatchReconcileTick = 2 * time.Second
@@ -589,26 +589,24 @@ func addWatchRecursive(add func(string) error, root string, matcher *watchMatche
 
 type watchMatcher struct {
 	root    string
-	git     *gitignore.GitIgnore
-	builtin *gitignore.GitIgnore
-	userIgn *gitignore.GitIgnore
-	include *gitignore.GitIgnore // nil unless paths set
+	git     ignore.Matcher // .git/info/exclude + .gitignore files under root
+	builtin ignore.Matcher // always-applied, non-overridable ignores
+	userIgn ignore.Matcher // config watch.ignore; nil unless set
+	include ignore.Matcher // config watch.paths; nil unless set
 }
 
 func newWatchMatcher(root string, w *config.WatchConfig) *watchMatcher {
 	m := &watchMatcher{root: root}
 
-	m.builtin = gitignore.CompileIgnoreLines(builtinWatchIgnores...)
-	if gi, err := gitignore.CompileIgnoreFile(filepath.Join(root, ".gitignore")); err == nil {
-		m.git = gi
-	}
+	m.builtin = ignore.Lines(builtinWatchIgnores...)
+	m.git = ignore.Dir(root)
 
 	if len(w.Ignore) > 0 {
-		m.userIgn = gitignore.CompileIgnoreLines(w.Ignore...)
+		m.userIgn = ignore.Lines(w.Ignore...)
 	}
 
 	if len(w.Paths) > 0 {
-		m.include = gitignore.CompileIgnoreLines(w.Paths...)
+		m.include = ignore.Lines(w.Paths...)
 	}
 
 	return m
@@ -624,20 +622,22 @@ func (m *watchMatcher) rel(path string) string {
 }
 
 // ignoredDir reports whether a directory should be pruned from the watch set.
+// The path names a directory, so directory-only patterns (a trailing "/") are
+// evaluated with isDir=true, exactly as Git would.
 func (m *watchMatcher) ignoredDir(rel string) bool {
 	if rel == "" || rel == "." {
 		return false
 	}
 
-	if m.builtin.MatchesPath(rel) || m.builtin.MatchesPath(rel+"/") {
+	if m.builtin.Match(rel, true) {
 		return true
 	}
 
-	if m.git != nil && (m.git.MatchesPath(rel) || m.git.MatchesPath(rel+"/")) {
+	if m.git.Match(rel, true) {
 		return true
 	}
 
-	if m.userIgn != nil && (m.userIgn.MatchesPath(rel) || m.userIgn.MatchesPath(rel+"/")) {
+	if m.userIgn != nil && m.userIgn.Match(rel, true) {
 		return true
 	}
 
@@ -650,19 +650,19 @@ func (m *watchMatcher) fires(rel string) bool {
 		return false
 	}
 
-	if m.builtin.MatchesPath(rel) {
+	if m.builtin.Match(rel, false) {
 		return false
 	}
 
-	if m.git != nil && m.git.MatchesPath(rel) {
+	if m.git.Match(rel, false) {
 		return false
 	}
 
-	if m.userIgn != nil && m.userIgn.MatchesPath(rel) {
+	if m.userIgn != nil && m.userIgn.Match(rel, false) {
 		return false
 	}
 
-	if m.include != nil && !m.include.MatchesPath(rel) {
+	if m.include != nil && !m.include.Match(rel, false) {
 		return false
 	}
 

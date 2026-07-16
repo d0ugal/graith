@@ -53,7 +53,10 @@ debounce = "30s"             # quiet-window; lower for fast commands
   [scenario-embedded trigger]({{< relref "scenarios.md#trigger-blocks-scenario-embedded-triggers" >}})
   uses a `role` its scenario defines and binds only inside that scenario.
 - `.gitignore` is always honoured (ignored directories are pruned from the watch
-  set, so `node_modules/` etc. don't exhaust the watcher).
+  set, so `node_modules/` etc. don't exhaust the watcher). Matching follows Git's
+  own rules — the repository `.gitignore`, nested per-directory `.gitignore`
+  files, and `.git/info/exclude` are all applied, with `*`, `**`, `?`, and
+  character-class patterns behaving exactly as `git check-ignore` does.
 - A burst of edits is coalesced by the `debounce` quiet-window into one fire.
 - If a binding can't register its watch (e.g. the OS watch limit
   `fs.inotify.max_user_watches` is exhausted) it is marked **degraded** and

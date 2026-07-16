@@ -91,6 +91,85 @@ func TestWatchMatcher_Gitignore(t *testing.T) {
 	}
 }
 
+// TestWatchMatcher_SingleStarDoesNotCrossSlash guards the migration off
+// sabhiram/go-gitignore (issue #1212), whose `*` incorrectly matched across
+// path separators. With a Git-compatible matcher, `foo/*.log` matches
+// foo/a.log but not foo/bar/b.log.
+func TestWatchMatcher_SingleStarDoesNotCrossSlash(t *testing.T) {
+	root := t.TempDir()
+	m := newWatchMatcher(root, &config.WatchConfig{Ignore: []string{"foo/*.log"}})
+
+	if m.fires("foo/a.log") {
+		t.Error("foo/*.log should match foo/a.log (should not fire)")
+	}
+
+	if !m.fires("foo/bar/b.log") {
+		t.Error("foo/*.log must NOT cross a slash to match foo/bar/b.log")
+	}
+}
+
+// TestWatchMatcher_QuestionMark guards the `?` single-char class, which the old
+// library mishandled.
+func TestWatchMatcher_QuestionMark(t *testing.T) {
+	root := t.TempDir()
+	m := newWatchMatcher(root, &config.WatchConfig{Ignore: []string{"file?.txt"}})
+
+	if m.fires("file1.txt") {
+		t.Error("file?.txt should match file1.txt (should not fire)")
+	}
+
+	if !m.fires("file12.txt") {
+		t.Error("file?.txt matches exactly one char, not file12.txt")
+	}
+
+	if !m.fires("file.txt") {
+		t.Error("file?.txt requires a char, not file.txt")
+	}
+}
+
+// TestWatchMatcher_DirOnlyPattern confirms directory-only patterns are honoured
+// via the isDir flag: `logs/` prunes the logs directory but a file named `logs`
+// is not ignored.
+func TestWatchMatcher_DirOnlyPattern(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("logs/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newWatchMatcher(root, &config.WatchConfig{})
+
+	if !m.ignoredDir("logs") {
+		t.Error("logs/ directory should be pruned")
+	}
+
+	if !m.fires("logs") {
+		t.Error("a file named logs (not a dir) should fire despite logs/ pattern")
+	}
+}
+
+// TestWatchMatcher_NestedGitignore confirms a nested .gitignore is scoped to its
+// subtree, matching Git — behaviour the root-only sabhiram reader lacked.
+func TestWatchMatcher_NestedGitignore(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "sub", ".gitignore"), []byte("*.tmp\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newWatchMatcher(root, &config.WatchConfig{})
+
+	if m.fires("sub/scratch.tmp") {
+		t.Error("nested .gitignore should ignore sub/scratch.tmp")
+	}
+
+	if !m.fires("scratch.tmp") {
+		t.Error("nested .gitignore must not apply outside its subtree")
+	}
+}
+
 func TestAddWatchRecursive(t *testing.T) {
 	root := t.TempDir()
 	mustMkdir(t, filepath.Join(root, "src"))
