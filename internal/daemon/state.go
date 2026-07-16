@@ -159,6 +159,12 @@ type SessionState struct {
 	// (mirroring the ScenarioID markers).
 	TriggerID      string `json:"trigger_id,omitempty"`
 	TriggerReactor bool   `json:"trigger_reactor,omitempty"`
+	// TrackerIssue is the stable key of the tracker issue a tracker action spawned
+	// this session for (e.g. "gh:owner/repo#643"). It is the reconcile dedup key:
+	// a tracker action never respawns a session while a live (running/stopped)
+	// one with the same TriggerID+TrackerIssue exists. Empty for every non-tracker
+	// session. See docs/design/2026-07-16-tracker-poll-action.md.
+	TrackerIssue string `json:"tracker_issue,omitempty"`
 	// AutoCleanup, when non-empty, soft-deletes this trigger-spawned session
 	// when it stops: config.CleanupAlways on any stop, config.CleanupOnSuccess
 	// only on a clean (exit 0) stop. Empty disables it. Set only on

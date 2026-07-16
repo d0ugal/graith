@@ -29,6 +29,12 @@ type triggerState struct {
 
 	// watch source: bindings keyed by bindingKey(name, sessionID)
 	bindings map[string]*watchBinding
+
+	// tracker action: when an issue's session was first seen with its issue no
+	// longer active, keyed by trackerGraceKey(name, issueKey). Drives the reap
+	// grace window. In-memory only: losing it on restart is fail-safe (re-observe
+	// → restart the grace clock → reap later, never sooner).
+	trackerObsolete map[string]time.Time
 }
 
 // watchBinding is one (watch trigger, bound source session) pair. Not persisted:
@@ -63,15 +69,22 @@ func (b *watchBinding) actionInFlight() bool {
 
 func newTriggerState() *triggerState {
 	return &triggerState{
-		cron:     make(map[string]cron.Schedule),
-		nextFire: make(map[string]time.Time),
-		inFlight: make(map[string]int),
-		rateLog:  make(map[string][]time.Time),
-		bindings: make(map[string]*watchBinding),
+		cron:            make(map[string]cron.Schedule),
+		nextFire:        make(map[string]time.Time),
+		inFlight:        make(map[string]int),
+		rateLog:         make(map[string][]time.Time),
+		bindings:        make(map[string]*watchBinding),
+		trackerObsolete: make(map[string]time.Time),
 	}
 }
 
 // bindingKey uniquely identifies a (trigger, source session) binding.
 func bindingKey(triggerName, sessionID string) string {
 	return triggerName + "\x00" + sessionID
+}
+
+// trackerGraceKey uniquely identifies a (tracker trigger, issue) pair for the
+// reap grace window.
+func trackerGraceKey(triggerName, issueKey string) string {
+	return triggerName + "\x00" + issueKey
 }

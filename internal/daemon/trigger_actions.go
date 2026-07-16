@@ -540,6 +540,7 @@ type createTriggerReq struct {
 	parentID        string
 	mirror          string
 	triggerName     string
+	trackerIssue    string
 	reactor         bool
 	autoCleanup     string
 	idleTimeoutSecs int
@@ -565,6 +566,7 @@ func (sm *SessionManager) createTriggerSession(req createTriggerReq) (SessionSta
 		AgentHooks:      true,
 		TriggerID:       req.triggerName,
 		TriggerReactor:  req.reactor,
+		TrackerIssue:    req.trackerIssue,
 		AutoCleanup:     req.autoCleanup,
 		IdleTimeoutSecs: req.idleTimeoutSecs,
 		Rows:            24,

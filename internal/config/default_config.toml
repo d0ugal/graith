@@ -453,3 +453,28 @@ write_dirs = ["~/.gemini"]
 # ensure = true
 # agent  = "claude"
 # prompt = "Review the changes since your last look; send feedback via gr msg."
+#
+# Schedule → tracker: keep sessions in sync with a GitHub issue tracker. Each
+# poll spawns a session per active issue (seeded from the issue body) and reaps
+# it when the issue leaves the active state. See
+# docs/design/2026-07-16-tracker-poll-action.md.
+# [[trigger]]
+# name = "issue-sessions"
+# [trigger.schedule]
+# every = "5m"
+# [trigger.action]
+# type   = "tracker"
+# agent  = "claude"
+# prompt = "Work on GitHub issue #{issue_number}: {issue_title}\n\n{issue_body}\n\n{issue_url}"
+# [trigger.action.tracker]
+# provider       = "github"          # v1: github (default)
+# repo           = "~/Code/graith"   # resolves the gh slug + is the spawn repo
+# active_state   = "open"            # open | closed | all (default open)
+# active_labels  = ["in-progress"]   # active iff the issue has one of these (empty = any)
+# assignee       = "@me"             # optional gh assignee filter
+# grace          = "10m"             # inactive this long before reaping (default 5m)
+# max_concurrent = 3                 # cap on live tracker sessions (0 = unlimited)
+# reap           = "stop"            # stop | delete | none (default stop)
+# limit          = 50                # max issues fetched per poll (default 50)
+# [trigger.action.deliver]
+# inbox = "orchestrator"             # optional: the reconcile summary

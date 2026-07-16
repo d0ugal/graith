@@ -398,6 +398,8 @@ func (sm *SessionManager) fireAction(ctx context.Context, t *config.TriggerConfi
 		return sm.actionSession(ctx, t, fc)
 	case config.ActionScenario:
 		return sm.actionScenario(ctx, t)
+	case config.ActionTracker:
+		return sm.actionTracker(ctx, t, fc)
 	default:
 		return "", fmt.Errorf("unknown action type %q", t.Action.Type)
 	}

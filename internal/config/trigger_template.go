@@ -16,6 +16,14 @@ type TriggerVars struct {
 	WorktreePath string // watch source: the bound session's worktree
 	ChangedFiles string // watch source: comma-separated changed paths (or "")
 	ChangeCount  string // watch source: number of changed paths
+	// Tracker action: the issue a spawned session is seeded from. Empty for every
+	// other source/action, so a non-tracker template referencing {issue_*} still
+	// errors on the unknown token.
+	IssueNumber string // e.g. "643"
+	IssueTitle  string
+	IssueBody   string
+	IssueURL    string
+	IssueLabels string // comma-separated label names (or "")
 }
 
 func (v TriggerVars) toMap() map[string]string {
@@ -28,6 +36,11 @@ func (v TriggerVars) toMap() map[string]string {
 		"worktree_path": v.WorktreePath,
 		"changed_files": v.ChangedFiles,
 		"change_count":  v.ChangeCount,
+		"issue_number":  v.IssueNumber,
+		"issue_title":   v.IssueTitle,
+		"issue_body":    v.IssueBody,
+		"issue_url":     v.IssueURL,
+		"issue_labels":  v.IssueLabels,
 	}
 }
 

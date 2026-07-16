@@ -83,6 +83,14 @@ type ActionConfig struct {
 	// scenario:
 	Scenario string `toml:"scenario"`
 
+	// tracker: keep live sessions in sync with an issue tracker. On each
+	// scheduled fire the daemon polls the tracker for active issues and
+	// reconciles sessions against them — spawning one per active issue (seeded
+	// with the templated Prompt above) and reaping the session when its issue
+	// leaves the active state. Schedule source only. See TrackerConfig and
+	// docs/design/2026-07-16-tracker-poll-action.md.
+	Tracker *TrackerConfig `toml:"tracker"`
+
 	// message:
 	Body string `toml:"body"`
 
@@ -122,6 +130,97 @@ type DeliverConfig struct {
 	Wake  bool   `toml:"wake"`  // resume a non-orchestrator stopped inbox target
 }
 
+// TrackerConfig configures a tracker action's poll + reconcile behaviour. The
+// spawned sessions' agent/model/prompt come from the enclosing ActionConfig; this
+// block is the tracker-specific part. See
+// docs/design/2026-07-16-tracker-poll-action.md.
+type TrackerConfig struct {
+	Provider      string   `toml:"provider"`       // "github" (v1); "" defaults to github
+	Repo          string   `toml:"repo"`           // resolves the tracker + is the spawn repo (required)
+	ActiveState   string   `toml:"active_state"`   // open | closed | all (default open)
+	ActiveLabels  []string `toml:"active_labels"`  // active iff the issue has one of these (empty = any state-matching issue)
+	Assignee      string   `toml:"assignee"`       // optional tracker assignee filter (e.g. "@me")
+	Grace         string   `toml:"grace"`          // inactive this long before reaping; default 5m
+	MaxConcurrent int      `toml:"max_concurrent"` // cap on live tracker sessions (0 = unlimited)
+	Reap          string   `toml:"reap"`           // stop | delete | none (default stop)
+	Limit         int      `toml:"limit"`          // max issues fetched per poll (default 50)
+}
+
+// Tracker provider values for TrackerConfig.Provider.
+const (
+	TrackerProviderGitHub = "github"
+)
+
+// Tracker active-state values for TrackerConfig.ActiveState.
+const (
+	TrackerStateOpen   = "open"
+	TrackerStateClosed = "closed"
+	TrackerStateAll    = "all"
+)
+
+// Tracker reap-policy values for TrackerConfig.Reap.
+const (
+	TrackerReapStop   = "stop"   // stop the agent (recoverable via gr resume)
+	TrackerReapDelete = "delete" // soft-delete the session (recoverable via gr restore)
+	TrackerReapNone   = "none"   // leave the session; report only
+)
+
+const (
+	defaultTrackerGrace = 5 * time.Minute
+	defaultTrackerLimit = 50
+)
+
+// ProviderOr returns the configured provider, defaulting to github.
+func (t TrackerConfig) ProviderOr() string {
+	if t.Provider == "" {
+		return TrackerProviderGitHub
+	}
+
+	return t.Provider
+}
+
+// ActiveStateOr returns the configured active state, defaulting to open.
+func (t TrackerConfig) ActiveStateOr() string {
+	if t.ActiveState == "" {
+		return TrackerStateOpen
+	}
+
+	return t.ActiveState
+}
+
+// ReapMode returns the configured reap policy, defaulting to stop.
+func (t TrackerConfig) ReapMode() string {
+	if t.Reap == "" {
+		return TrackerReapStop
+	}
+
+	return t.Reap
+}
+
+// GraceDuration returns the reap grace window, defaulting to 5m.
+func (t TrackerConfig) GraceDuration() time.Duration {
+	return parseDurationOr(t.Grace, defaultTrackerGrace)
+}
+
+// LimitOr returns the per-poll issue fetch cap, defaulting to 50.
+func (t TrackerConfig) LimitOr() int {
+	if t.Limit <= 0 {
+		return defaultTrackerLimit
+	}
+
+	return t.Limit
+}
+
+// RepoPath returns the tracker repo canonicalised the same way ActionConfig.RepoPath
+// treats a repo (see that method). Empty when unset.
+func (t TrackerConfig) RepoPath() string {
+	if t.Repo == "" {
+		return ""
+	}
+
+	return ResolvePath(t.Repo)
+}
+
 // TriggerPolicy controls missed-run / overlap / rate-limit behaviour.
 type TriggerPolicy struct {
 	CatchUp   bool   `toml:"catch_up"`   // default false: never backfill missed fires
@@ -146,6 +245,7 @@ const (
 	ActionSession  = "session"
 	ActionScenario = "scenario"
 	ActionMessage  = "message"
+	ActionTracker  = "tracker"
 )
 
 // Overlap policy values for TriggerPolicy.Overlap.
@@ -491,6 +591,8 @@ func validateActionStructure(where string, t *TriggerConfig) []error {
 		if a.Deliver.Inbox == "" && a.Deliver.Topic == "" {
 			errs = append(errs, fmt.Errorf("%s: message action requires action.deliver.inbox or action.deliver.topic", where))
 		}
+	case ActionTracker:
+		errs = append(errs, validateTrackerActionStructure(where, t)...)
 	case "":
 		errs = append(errs, fmt.Errorf("%s: action.type is required (command|session|scenario|message)", where))
 	default:
@@ -535,7 +637,11 @@ func (c *Config) validateActionConfigDeps(where string, t *TriggerConfig) []erro
 		errs = append(errs, fmt.Errorf("%s: action.repo %q is not in allowed_repo_paths", where, a.Repo))
 	}
 
-	if (a.Type == ActionSession || a.Type == ActionScenario) && !c.Orchestrator.Enabled {
+	if a.Type == ActionTracker && a.Tracker != nil && a.Tracker.Repo != "" && !c.RepoPathAllowed(a.Tracker.Repo) {
+		errs = append(errs, fmt.Errorf("%s: action.tracker.repo %q is not in allowed_repo_paths", where, a.Tracker.Repo))
+	}
+
+	if (a.Type == ActionSession || a.Type == ActionScenario || a.Type == ActionTracker) && !c.Orchestrator.Enabled {
 		errs = append(errs, fmt.Errorf("%s: %s action requires [orchestrator] enabled (it owns spawned sessions)", where, a.Type))
 	}
 
@@ -573,6 +679,65 @@ func validateCommandActionStructure(where string, t *TriggerConfig) []error {
 		}
 	} else if a.Repo != "" {
 		errs = append(errs, fmt.Errorf("%s: watch command action must not set action.repo (execution root is the bound worktree)", where))
+	}
+
+	return errs
+}
+
+// validateTrackerActionStructure checks a tracker action's shape independent of
+// any *Config. The orchestrator-required and repo-allow-list checks live in
+// validateActionConfigDeps.
+func validateTrackerActionStructure(where string, t *TriggerConfig) []error {
+	var errs []error
+
+	a := &t.Action
+
+	if !t.IsSchedule() {
+		errs = append(errs, fmt.Errorf("%s: tracker action requires a [schedule] source (it polls on a cadence)", where))
+	}
+
+	tc := a.Tracker
+	if tc == nil {
+		errs = append(errs, fmt.Errorf("%s: tracker action requires an [action.tracker] block", where))
+		return errs
+	}
+
+	if tc.Repo == "" {
+		errs = append(errs, fmt.Errorf("%s: tracker action requires action.tracker.repo", where))
+	}
+
+	switch tc.ProviderOr() {
+	case TrackerProviderGitHub:
+	default:
+		errs = append(errs, fmt.Errorf("%s: tracker action.tracker.provider %q is unsupported (want %q)", where, tc.Provider, TrackerProviderGitHub))
+	}
+
+	switch tc.ActiveStateOr() {
+	case TrackerStateOpen, TrackerStateClosed, TrackerStateAll:
+	default:
+		errs = append(errs, fmt.Errorf("%s: tracker action.tracker.active_state %q is invalid (want open|closed|all)", where, tc.ActiveState))
+	}
+
+	switch tc.ReapMode() {
+	case TrackerReapStop, TrackerReapDelete, TrackerReapNone:
+	default:
+		errs = append(errs, fmt.Errorf("%s: tracker action.tracker.reap %q is invalid (want stop|delete|none)", where, tc.Reap))
+	}
+
+	if tc.Grace != "" {
+		if d, err := ParseDurationWithDays(tc.Grace); err != nil {
+			errs = append(errs, fmt.Errorf("%s: tracker action.tracker.grace %q: %w", where, tc.Grace, err))
+		} else if d < 0 {
+			errs = append(errs, fmt.Errorf("%s: tracker action.tracker.grace must not be negative", where))
+		}
+	}
+
+	if tc.MaxConcurrent < 0 {
+		errs = append(errs, fmt.Errorf("%s: tracker action.tracker.max_concurrent must not be negative", where))
+	}
+
+	if tc.Limit < 0 {
+		errs = append(errs, fmt.Errorf("%s: tracker action.tracker.limit must not be negative", where))
 	}
 
 	return errs
