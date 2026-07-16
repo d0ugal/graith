@@ -77,11 +77,28 @@ type reconnectConn interface {
 }
 
 // reconnectDeadline / reconnectInterval bound the disconnect-recovery retry:
-// re-probe the daemon every 250ms for up to 10s before giving up.
-const (
+// re-probe the daemon every 250ms for up to 10s before giving up. They are
+// package vars, not consts, so ConfigureReconnect can install the [connection]
+// config overrides at CLI startup (issue #1242); the initial values reproduce
+// the pre-config behaviour.
+var (
 	reconnectDeadline = 10 * time.Second
 	reconnectInterval = 250 * time.Millisecond
 )
+
+// ConfigureReconnect installs the configured attach reconnect deadline and
+// re-probe interval. It is called once from the CLI pre-run after config load. A
+// non-positive value is ignored so a change can't silently disable recovery;
+// callers pass values already defaulted by the config accessors.
+func ConfigureReconnect(deadline, interval time.Duration) {
+	if deadline > 0 {
+		reconnectDeadline = deadline
+	}
+
+	if interval > 0 {
+		reconnectInterval = interval
+	}
+}
 
 // reconnectLoop retries dialing the daemon and re-attaching to sessionID until
 // it succeeds, the daemon reports the session is gone, or the timeout elapses.

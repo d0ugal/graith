@@ -156,3 +156,36 @@ func TestReconnectLoopImmediateTimeout(t *testing.T) {
 		t.Error("dial should not run when the deadline has already passed")
 	}
 }
+
+// TestConfigureReconnect installs the [connection] reconnect overrides into the
+// package vars reconnectToSession reads, and leaves the current value untouched
+// for a non-positive input so a partial config can't disable recovery.
+func TestConfigureReconnect(t *testing.T) {
+	origDeadline, origInterval := reconnectDeadline, reconnectInterval
+
+	t.Cleanup(func() {
+		reconnectDeadline = origDeadline
+		reconnectInterval = origInterval
+	})
+
+	ConfigureReconnect(30*time.Second, 400*time.Millisecond)
+
+	if reconnectDeadline != 30*time.Second {
+		t.Errorf("reconnectDeadline = %v, want 30s", reconnectDeadline)
+	}
+
+	if reconnectInterval != 400*time.Millisecond {
+		t.Errorf("reconnectInterval = %v, want 400ms", reconnectInterval)
+	}
+
+	// Non-positive values are ignored, preserving the installed values.
+	ConfigureReconnect(0, -1)
+
+	if reconnectDeadline != 30*time.Second {
+		t.Errorf("zero deadline changed reconnectDeadline to %v, want unchanged", reconnectDeadline)
+	}
+
+	if reconnectInterval != 400*time.Millisecond {
+		t.Errorf("negative interval changed reconnectInterval to %v, want unchanged", reconnectInterval)
+	}
+}

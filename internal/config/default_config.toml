@@ -159,6 +159,22 @@ fetch_timeout = "2m"      # bounds a single `git fetch` on create/fork/pull
 merge_timeout = "2m"      # bounds a fast-forward merge in the git-pull loop
 username_timeout = "15s"  # bounds GitHub-username discovery (may invoke `gh`)
 
+# Connection deadlines and retry cadence for the stateless `gr` client talking to
+# a daemon. Slow machines, high-latency links, or a remote daemon on a
+# constrained network can legitimately exceed the defaults. These are read once
+# per `gr` invocation, so a change takes effect on the next command. A value that
+# is set but unparseable, zero, or negative is rejected at config load.
+[connection]
+dial_timeout = "500ms"            # bounds a single Unix-socket dial to the local daemon
+handshake_timeout = "5s"          # bounds the local-daemon handshake exchange
+start_timeout = "5s"              # how long to wait for a freshly spawned daemon to answer
+start_poll_interval = "50ms"      # how often to re-probe the socket while the daemon starts
+reconnect_timeout = "10s"         # bounds attach disconnect-recovery before giving up
+reconnect_interval = "250ms"      # how often the attach recovery loop re-probes the daemon
+remote_dial_timeout = "10s"       # bounds the TCP dial to a paired remote daemon
+remote_handshake_timeout = "15s"  # bounds the remote handshake + proof-of-possession
+remote_pairing_timeout = "11m"    # how long to wait for the remote human to approve pairing
+
 # Soft delete: `gr delete` marks a session deleted and keeps its worktree and
 # state for the retention window so it can be recovered with `gr restore`. The
 # daemon purges soft-deleted sessions after the window elapses. `gr purge`
