@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/pelletier/go-toml/v2"
 )
 
 func newTestSessionManagerWithDataDir(t *testing.T) *SessionManager {
@@ -335,127 +336,270 @@ func TestGrBinReadDir(t *testing.T) {
 	}
 }
 
+// codexHandler mirrors a Codex hook command handler (HookHandlerConfig::Command).
+type codexHandler struct {
+	Type           string `toml:"type"`
+	Command        string `toml:"command"`
+	CommandWindows string `toml:"commandWindows"`
+	Timeout        int    `toml:"timeout"`
+	StatusMessage  string `toml:"statusMessage"`
+}
+
+// codexMatcherGroup mirrors a Codex hook matcher group (MatcherGroup).
+type codexMatcherGroup struct {
+	Matcher *string        `toml:"matcher"`
+	Hooks   []codexHandler `toml:"hooks"`
+}
+
+// parseCodexHookOverrides emulates how Codex applies `-c hooks.<Event>=<toml>`
+// overrides: each pair sets a dotted TOML key, so joining them into a single
+// document and decoding it with the same TOML dialect Codex uses reconstructs
+// the effective [hooks] table. It fails the test if the args aren't well-formed
+// (odd -c pairing, non-hooks.* key, or TOML that won't parse) — that is the
+// "real Codex contract" assertion: the generated overrides must be valid TOML
+// matching Codex's HookEventsToml matcher-group schema.
+func parseCodexHookOverrides(t *testing.T, extraArgs []string) (map[string][]codexMatcherGroup, bool) {
+	t.Helper()
+
+	var (
+		docLines []string
+		bypass   bool
+	)
+
+	for i := 0; i < len(extraArgs); i++ {
+		if extraArgs[i] == "--dangerously-bypass-hook-trust" {
+			bypass = true
+			continue
+		}
+
+		if extraArgs[i] != "-c" {
+			t.Fatalf("unexpected codex hook arg %q (want -c or --dangerously-bypass-hook-trust)", extraArgs[i])
+		}
+
+		i++
+		if i >= len(extraArgs) {
+			t.Fatal("trailing -c with no value")
+		}
+
+		kv := extraArgs[i]
+		// injectCodexHooks also emits mcp_servers.* overrides (#1184); this
+		// helper only reconstructs the [hooks] table, so skip the rest.
+		if !strings.HasPrefix(kv, "hooks.") {
+			continue
+		}
+		// Codex splits on the first '=' only; the value is parsed as TOML.
+		eq := strings.IndexByte(kv, '=')
+		if eq < 0 {
+			t.Fatalf("codex -c override %q has no '='", kv)
+		}
+
+		docLines = append(docLines, kv[:eq]+" = "+kv[eq+1:])
+	}
+
+	var doc struct {
+		Hooks map[string][]codexMatcherGroup `toml:"hooks"`
+	}
+	if err := toml.Unmarshal([]byte(strings.Join(docLines, "\n")), &doc); err != nil {
+		t.Fatalf("generated codex hook overrides are not valid TOML: %v\n%s", err, strings.Join(docLines, "\n"))
+	}
+
+	return doc.Hooks, bypass
+}
+
 func TestInjectCodexHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-codex-01"
 
-	extraArgs, extraEnv, err := sm.injectCodexHooks(sessionID, false, nil)
+	extraArgs, extraEnv, err := sm.injectCodexHooks(sessionID, false)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
 
-	if len(extraArgs) != 0 {
-		t.Errorf("extraArgs length = %d, want 0", len(extraArgs))
+	// Codex no longer reads CODEX_HOOKS_DIR (issue #1183); hooks ride in as args.
+	if extraEnv != nil {
+		t.Errorf("extraEnv = %v, want nil (CODEX_HOOKS_DIR removed)", extraEnv)
 	}
 
-	hooksDir, ok := extraEnv["CODEX_HOOKS_DIR"]
-	if !ok {
-		t.Fatal("extraEnv missing CODEX_HOOKS_DIR")
+	hooks, bypass := parseCodexHookOverrides(t, extraArgs)
+
+	if !bypass {
+		t.Error("codex hook args missing --dangerously-bypass-hook-trust")
 	}
 
-	if hooksDir == "" {
-		t.Fatal("CODEX_HOOKS_DIR is empty")
+	expectedEvents := []string{
+		"SessionStart",
+		"UserPromptSubmit",
+		"PreToolUse",
+		"PostToolUse",
+		"PermissionRequest",
+		"Stop",
 	}
 
-	info, err := os.Stat(hooksDir)
-	if err != nil {
-		t.Fatalf("codex hooks dir does not exist: %v", err)
+	if len(hooks) != len(expectedEvents) {
+		t.Errorf("hooks has %d events, want %d: %v", len(hooks), len(expectedEvents), hooks)
 	}
 
-	if !info.IsDir() {
-		t.Fatal("CODEX_HOOKS_DIR is not a directory")
-	}
-
-	expectedScripts := []string{
-		"session-start",
-		"user-prompt-submit",
-		"pre-tool-use",
-		"post-tool-use",
-		"permission-request",
-		"stop",
-	}
-
-	entries, err := os.ReadDir(hooksDir)
-	if err != nil {
-		t.Fatalf("read codex hooks dir: %v", err)
-	}
-
-	if len(entries) != len(expectedScripts) {
-		t.Errorf("codex hooks dir has %d entries, want %d", len(entries), len(expectedScripts))
-	}
-
-	for _, name := range expectedScripts {
-		path := filepath.Join(hooksDir, name)
-
-		fi, err := os.Stat(path)
-		if err != nil {
-			t.Errorf("missing codex hook script %q: %v", name, err)
+	for _, event := range expectedEvents {
+		groups, ok := hooks[event]
+		if !ok {
+			t.Errorf("missing codex hook event %q", event)
 			continue
 		}
 
-		perm := fi.Mode().Perm()
-		if perm&0o111 == 0 {
-			t.Errorf("codex hook script %q is not executable: mode = %v", name, perm)
+		if len(groups) != 1 {
+			t.Errorf("event %q has %d matcher groups, want 1", event, len(groups))
+			continue
+		}
+
+		if len(groups[0].Hooks) == 0 {
+			t.Errorf("event %q has no command handlers", event)
+			continue
+		}
+
+		for _, h := range groups[0].Hooks {
+			if h.Type != "command" {
+				t.Errorf("event %q handler type = %q, want command", event, h.Type)
+			}
+
+			if h.Command == "" {
+				t.Errorf("event %q handler has empty command", event)
+			}
 		}
 	}
 }
 
-func TestCodexHookScriptContent(t *testing.T) {
+func TestCodexHookOverrideContent(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
-	sessionID := "kirk-codex-02"
 
-	_, _, err := sm.injectCodexHooks(sessionID, false, nil)
+	extraArgs, _, err := sm.injectCodexHooks("kirk-codex-02", false)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
 
-	hooksDir := filepath.Join(sm.hookDir(sessionID), "codex-hooks")
+	hooks, _ := parseCodexHookOverrides(t, extraArgs)
 
-	events := map[string]string{
-		"session-start":      "SessionStart",
-		"user-prompt-submit": "UserPromptSubmit",
-		"pre-tool-use":       "PreToolUse",
-		"post-tool-use":      "PostToolUse",
-		"permission-request": "PermissionRequest",
-		"stop":               "Stop",
+	joined := func(event string) string {
+		var b strings.Builder
+
+		for _, g := range hooks[event] {
+			for _, h := range g.Hooks {
+				b.WriteString(h.Command)
+				b.WriteByte('\n')
+			}
+		}
+
+		return b.String()
 	}
 
-	for filename, eventName := range events {
-		path := filepath.Join(hooksDir, filename)
+	// PermissionRequest bridges to the approval backend.
+	if got := joined("PermissionRequest"); !strings.Contains(got, "approve-request") {
+		t.Errorf("PermissionRequest command = %q, want approve-request", got)
+	}
 
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Errorf("read codex hook %q: %v", filename, err)
-			continue
+	// SessionStart reports status and then checks the inbox.
+	if got := joined("SessionStart"); !strings.Contains(got, "report-status") || !strings.Contains(got, "check-inbox") {
+		t.Errorf("SessionStart commands = %q, want report-status + check-inbox", got)
+	}
+
+	// The remaining lifecycle events report status tagged with their event name.
+	for event := range map[string]struct{}{"UserPromptSubmit": {}, "PreToolUse": {}, "PostToolUse": {}, "Stop": {}} {
+		got := joined(event)
+		if !strings.Contains(got, "report-status") {
+			t.Errorf("event %q command = %q, want report-status", event, got)
 		}
 
-		content := string(data)
+		if !strings.Contains(got, "--event "+event) {
+			t.Errorf("event %q command = %q, want --event %s", event, got, event)
+		}
+	}
+}
 
-		if !strings.HasPrefix(content, "#!/bin/sh") {
-			t.Errorf("codex hook %q missing shebang", filename)
+// TestInjectCodexHooksNoHooksDirEnv is the #1183 regression test: current Codex
+// no longer reads CODEX_HOOKS_DIR, so graith must NOT rely on it. Hooks must be
+// delivered as `-c hooks.<Event>=` session-config overrides plus the trust
+// bypass, and no CODEX_HOOKS_DIR env var may be emitted. This fails against the
+// old env-var implementation and passes with the config-override fix.
+func TestInjectCodexHooksNoHooksDirEnv(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+
+	extraArgs, extraEnv, err := sm.injectCodexHooks("thrawn-codex-1183", false)
+	if err != nil {
+		t.Fatalf("injectCodexHooks() error = %v", err)
+	}
+
+	if _, ok := extraEnv["CODEX_HOOKS_DIR"]; ok {
+		t.Error("injectCodexHooks still emits CODEX_HOOKS_DIR — current Codex ignores it (issue #1183)")
+	}
+
+	var hasOverride, hasBypass bool
+
+	for i, a := range extraArgs {
+		if a == "-c" && i+1 < len(extraArgs) && strings.HasPrefix(extraArgs[i+1], "hooks.") {
+			hasOverride = true
 		}
 
-		switch filename {
-		case "permission-request":
-			if !strings.Contains(content, "approve-request") {
-				t.Errorf("codex hook %q does not contain approve-request; content = %q", filename, content)
-			}
-		case "session-start":
-			if !strings.Contains(content, "report-status") {
-				t.Errorf("codex hook %q does not contain report-status; content = %q", filename, content)
-			}
+		if a == "--dangerously-bypass-hook-trust" {
+			hasBypass = true
+		}
+	}
 
-			if !strings.Contains(content, "check-inbox") {
-				t.Errorf("codex hook %q does not contain check-inbox; content = %q", filename, content)
-			}
-		default:
-			if !strings.Contains(content, "--event "+eventName) {
-				t.Errorf("codex hook %q does not contain --event %s; content = %q", filename, eventName, content)
-			}
+	if !hasOverride {
+		t.Errorf("injectCodexHooks did not emit any -c hooks.* override: %v", extraArgs)
+	}
 
-			if !strings.Contains(content, "report-status") {
-				t.Errorf("codex hook %q does not contain report-status; content = %q", filename, content)
-			}
+	if !hasBypass {
+		t.Errorf("injectCodexHooks did not emit --dangerously-bypass-hook-trust: %v", extraArgs)
+	}
+}
+
+// TestCodexHookOverrideValue locks the exact inline-TOML the encoder emits for a
+// hooks.<Event> override so a format regression is caught, and confirms it
+// round-trips back to Codex's matcher-group schema via the shared TOML dialect.
+func TestCodexHookOverrideValue(t *testing.T) {
+	value := codexHookOverrideValue([]string{"'/bin/gr' report-status --event Stop"})
+
+	const want = `[{hooks=[{type="command",command="'/bin/gr' report-status --event Stop"}]}]`
+	if value != want {
+		t.Errorf("codexHookOverrideValue = %q, want %q", value, want)
+	}
+
+	var doc struct {
+		Hooks map[string][]codexMatcherGroup `toml:"hooks"`
+	}
+	if err := toml.Unmarshal([]byte("hooks.Stop = "+value), &doc); err != nil {
+		t.Fatalf("override value is not valid TOML: %v", err)
+	}
+
+	groups := doc.Hooks["Stop"]
+	if len(groups) != 1 || len(groups[0].Hooks) != 1 {
+		t.Fatalf("decoded shape = %+v, want one group with one handler", groups)
+	}
+
+	if groups[0].Matcher != nil {
+		t.Errorf("matcher = %v, want nil (match-all)", *groups[0].Matcher)
+	}
+
+	if h := groups[0].Hooks[0]; h.Type != "command" || h.Command != "'/bin/gr' report-status --event Stop" {
+		t.Errorf("handler = %+v, want command handler", h)
+	}
+}
+
+func TestTOMLBasicString(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{`'/usr/bin/gr' check-inbox`, `"'/usr/bin/gr' check-inbox"`},
+		{`a"b`, `"a\"b"`},
+		{`a\b`, `"a\\b"`},
+		{"a\tb", `"a\tb"`},
+		{"a\nb", `"a\nb"`},
+		{"a\x01b", `"a\u0001b"`},
+		{"a\x7fb", `"a\u007Fb"`},
+	}
+	for _, tc := range cases {
+		if got := tomlBasicString(tc.in); got != tc.want {
+			t.Errorf("tomlBasicString(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
@@ -552,70 +696,6 @@ func TestCodexMCPServerArgsSkipsUnrepresentableNames(t *testing.T) {
 	}
 }
 
-// TestInjectCodexHooksWithMCPServers is the regression test for issue #1184:
-// Codex sessions must receive daemon-managed MCP servers as `-c` overrides,
-// not silently drop them. It also confirms CODEX_HOOKS_DIR is still returned.
-func TestInjectCodexHooksWithMCPServers(t *testing.T) {
-	sm := newTestSessionManagerWithDataDir(t)
-	sessionID := "kirk-codex-mcp"
-
-	servers := []config.MCPServerConfig{
-		{Name: "graith", Command: "/usr/bin/gr", Args: []string{"mcp"}},
-		{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}},
-	}
-
-	extraArgs, extraEnv, err := sm.injectCodexHooks(sessionID, false, servers)
-	if err != nil {
-		t.Fatalf("injectCodexHooks() error = %v", err)
-	}
-
-	if _, ok := extraEnv["CODEX_HOOKS_DIR"]; !ok {
-		t.Error("extraEnv missing CODEX_HOOKS_DIR")
-	}
-
-	if len(extraArgs) != len(servers)*4 {
-		t.Fatalf("extraArgs = %v, want %d elements", extraArgs, len(servers)*4)
-	}
-
-	joined := strings.Join(extraArgs, " ")
-	for _, name := range []string{"graith", "chrome"} {
-		if !strings.Contains(joined, "mcp_servers."+name+".command=") {
-			t.Errorf("extraArgs missing command override for %q: %v", name, extraArgs)
-		}
-
-		if !strings.Contains(joined, `mcp_servers.`+name+`.args=["mcp-proxy","`+name+`"]`) {
-			t.Errorf("extraArgs missing args override for %q: %v", name, extraArgs)
-		}
-	}
-}
-
-// TestInjectHooksCodexPassesMCPServers verifies the dispatcher forwards the
-// resolved MCP servers into the Codex path (they were dropped before #1184).
-func TestInjectHooksCodexPassesMCPServers(t *testing.T) {
-	sm := newTestSessionManagerWithDataDir(t)
-
-	servers := []config.MCPServerConfig{
-		{Name: "graith", Command: "/usr/bin/gr", Args: []string{"mcp"}},
-	}
-
-	args, env, err := sm.injectHooks("codex", "kirk-codex-dispatch", "", false, servers)
-	if err != nil {
-		t.Fatalf("injectHooks(codex) error = %v", err)
-	}
-
-	if _, ok := env["CODEX_HOOKS_DIR"]; !ok {
-		t.Error("injectHooks(codex) missing CODEX_HOOKS_DIR")
-	}
-
-	if len(args) != 4 {
-		t.Fatalf("injectHooks(codex) args = %v, want 4 (one -c pair per field)", args)
-	}
-
-	if !strings.Contains(strings.Join(args, " "), "mcp_servers.graith.command=") {
-		t.Errorf("injectHooks(codex) args missing graith MCP override: %v", args)
-	}
-}
-
 func TestInjectHooksSupported(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	sm := newTestSessionManagerWithDataDir(t)
@@ -638,12 +718,21 @@ func TestInjectHooksSupported(t *testing.T) {
 		t.Fatalf("injectHooks(codex) error = %v", err)
 	}
 
-	if len(args) != 0 {
-		t.Errorf("injectHooks(codex) returned unexpected args: %v", args)
+	if len(args) == 0 {
+		t.Error("injectHooks(codex) returned no args")
 	}
 
-	if _, ok := env["CODEX_HOOKS_DIR"]; !ok {
-		t.Error("injectHooks(codex) missing CODEX_HOOKS_DIR")
+	if env != nil {
+		t.Errorf("injectHooks(codex) returned unexpected env: %v", env)
+	}
+
+	hooks, bypass := parseCodexHookOverrides(t, args)
+	if !bypass {
+		t.Error("injectHooks(codex) missing --dangerously-bypass-hook-trust")
+	}
+
+	if _, ok := hooks["SessionStart"]; !ok {
+		t.Error("injectHooks(codex) missing SessionStart hook override")
 	}
 
 	worktree := t.TempDir()
@@ -716,7 +805,7 @@ func TestShellQuote(t *testing.T) {
 	}
 }
 
-func TestCodexHookScriptsEscapeSingleQuotes(t *testing.T) {
+func TestCodexHookCommandsEscapeSingleQuotes(t *testing.T) {
 	// Create a fake gr binary in a directory whose name contains a single quote.
 	fakeDir := filepath.Join(t.TempDir(), "o'malley", "bin")
 	if err := os.MkdirAll(fakeDir, 0o750); err != nil {
@@ -739,29 +828,24 @@ func TestCodexHookScriptsEscapeSingleQuotes(t *testing.T) {
 	os.Args = []string{fakeBin, "daemon", "start"}
 
 	sm := newTestSessionManagerWithDataDir(t)
-	sessionID := "kirk-codex-quote"
 
-	_, _, err := sm.injectCodexHooks(sessionID, false, nil)
+	extraArgs, _, err := sm.injectCodexHooks("kirk-codex-quote", false)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
 
-	hooksDir := filepath.Join(sm.hookDir(sessionID), "codex-hooks")
+	// The command handlers must shell-quote the gr path so the shell Codex runs
+	// them under doesn't word-split a path with spaces or mis-handle the quote.
+	hooks, _ := parseCodexHookOverrides(t, extraArgs)
 	expectedQuoted := shellQuote(fakeBin)
 
-	scripts := []string{"permission-request", "session-start", "stop"}
-	for _, name := range scripts {
-		path := filepath.Join(hooksDir, name)
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Errorf("read codex hook %q: %v", name, err)
-			continue
-		}
-
-		content := string(data)
-		if !strings.Contains(content, expectedQuoted) {
-			t.Errorf("codex hook %q does not contain properly escaped path %q; content = %q", name, expectedQuoted, content)
+	for _, event := range []string{"PermissionRequest", "SessionStart", "Stop"} {
+		for _, g := range hooks[event] {
+			for _, h := range g.Hooks {
+				if !strings.HasPrefix(h.Command, expectedQuoted+" ") {
+					t.Errorf("event %q command %q does not start with quoted path %q", event, h.Command, expectedQuoted)
+				}
+			}
 		}
 	}
 }
@@ -909,10 +993,37 @@ func TestInjectMCPConfigNoServers(t *testing.T) {
 	}
 }
 
-// TestInjectMCPConfigNonClaude verifies only Claude gets --mcp-config args;
-// other agents get nothing even when servers are configured (matches the
-// pre-decoupling behaviour where generateMCPConfig was only reached via the
-// Claude hook path).
+// TestInjectMCPConfigCodex verifies Codex gets its MCP servers as per-session
+// `-c mcp_servers.<name>.…` overrides via injectMCPConfig (issue #1184, now on
+// the decoupled MCP path — #1135).
+func TestInjectMCPConfigCodex(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+
+	servers := []config.MCPServerConfig{
+		{Name: "graith", Command: "/usr/bin/gr", Args: []string{"mcp"}},
+		{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}},
+	}
+
+	args, err := sm.injectMCPConfig("codex", "kirk-codex-mcp", servers)
+	if err != nil {
+		t.Fatalf("injectMCPConfig(codex) error = %v", err)
+	}
+
+	joined := strings.Join(args, " ")
+	for _, name := range []string{"graith", "chrome"} {
+		if !strings.Contains(joined, "mcp_servers."+name+".command=") {
+			t.Errorf("args missing command override for %q: %v", name, args)
+		}
+
+		if !strings.Contains(joined, `mcp_servers.`+name+`.args=["mcp-proxy","`+name+`"]`) {
+			t.Errorf("args missing args override for %q: %v", name, args)
+		}
+	}
+}
+
+// TestInjectMCPConfigNonClaude verifies agents without an MCP wiring path get no
+// args even when servers are configured (Claude uses --mcp-config, Codex uses
+// -c overrides; the rest get nothing).
 func TestInjectMCPConfigNonClaude(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
@@ -920,7 +1031,7 @@ func TestInjectMCPConfigNonClaude(t *testing.T) {
 		{Name: "graith", Command: "/usr/bin/gr", Args: []string{"mcp"}},
 	}
 
-	for _, agent := range []string{"codex", "cursor", "opencode"} {
+	for _, agent := range []string{"cursor", "opencode"} {
 		args, err := sm.injectMCPConfig(agent, "haar-"+agent, servers)
 		if err != nil {
 			t.Errorf("injectMCPConfig(%q) error = %v", agent, err)
@@ -1438,20 +1549,30 @@ func TestInjectCodexHooksYoloInstallsPermissionRequest(t *testing.T) {
 	disabled := false
 	sm.cfg.Approvals.Enabled = &disabled
 
-	_, extraEnv, err := sm.injectCodexHooks("bonnie-codex-yolo", true, nil)
+	extraArgs, _, err := sm.injectCodexHooks("bonnie-codex-yolo", true)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
 
-	hooksDir := extraEnv["CODEX_HOOKS_DIR"]
+	hooks, _ := parseCodexHookOverrides(t, extraArgs)
 
-	script, err := os.ReadFile(filepath.Join(hooksDir, "permission-request"))
-	if err != nil {
-		t.Fatalf("permission-request script missing for yolo session: %v", err)
+	groups, ok := hooks["PermissionRequest"]
+	if !ok {
+		t.Fatal("PermissionRequest hook missing for yolo session")
 	}
 
-	if !strings.Contains(string(script), "approve-request") {
-		t.Error("yolo permission-request script missing approve-request command")
+	var found bool
+
+	for _, g := range groups {
+		for _, h := range g.Hooks {
+			if strings.Contains(h.Command, "approve-request") {
+				found = true
+			}
+		}
+	}
+
+	if !found {
+		t.Error("yolo PermissionRequest hook missing approve-request command")
 	}
 }
 
@@ -1483,21 +1604,21 @@ func TestInjectCodexHooksApprovalsDisabled(t *testing.T) {
 	disabled := false
 	sm.cfg.Approvals.Enabled = &disabled
 
-	_, extraEnv, err := sm.injectCodexHooks("thrawn-codex-no-approve", false, nil)
+	extraArgs, _, err := sm.injectCodexHooks("thrawn-codex-no-approve", false)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
 
-	hooksDir := extraEnv["CODEX_HOOKS_DIR"]
+	hooks, _ := parseCodexHookOverrides(t, extraArgs)
 
-	if _, err := os.Stat(filepath.Join(hooksDir, "permission-request")); !os.IsNotExist(err) {
-		t.Errorf("permission-request script present when approvals disabled, err = %v", err)
+	if _, ok := hooks["PermissionRequest"]; ok {
+		t.Error("PermissionRequest hook present when approvals disabled, want omitted")
 	}
 
-	// Other lifecycle scripts must still exist.
-	for _, name := range []string{"session-start", "user-prompt-submit", "pre-tool-use", "post-tool-use", "stop"} {
-		if _, err := os.Stat(filepath.Join(hooksDir, name)); err != nil {
-			t.Errorf("script %q missing when approvals disabled: %v", name, err)
+	// Other lifecycle hooks must still be installed.
+	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"} {
+		if _, ok := hooks[event]; !ok {
+			t.Errorf("event %q missing when approvals disabled, want present", event)
 		}
 	}
 }

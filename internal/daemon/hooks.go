@@ -282,28 +282,46 @@ func (sm *SessionManager) injectClaudeHooks(sessionID string, yolo bool) (extraA
 	return []string{"--settings", settingsPath}, nil, nil
 }
 
-// injectMCPConfig generates the MCP config file for a session and returns the
-// `--mcp-config` args to add to the agent launch. It is independent of
-// lifecycle-hook injection (injectHooks): MCP availability must not ride on
-// whether generated hooks are installed, so a headless session — which skips
-// hook generation — can still be given its MCP servers.
+// injectMCPConfig wires a session's daemon-managed MCP servers into the agent
+// launch and returns the extra args. It is independent of lifecycle-hook
+// injection (injectHooks): MCP availability must not ride on whether generated
+// hooks are installed, so a headless session — which skips hook generation — can
+// still be given its MCP servers (issue #1135).
 //
-// Only Claude consumes `--mcp-config`; other agents get no args (any MCP wiring
-// they have is handled elsewhere), matching the pre-decoupling behaviour where
-// generateMCPConfig was only ever reached via the Claude hook path.
+// Claude consumes a `--mcp-config` file; Codex takes per-session
+// `-c mcp_servers.<name>.…` overrides (issue #1184). Other agents get no args.
 func (sm *SessionManager) injectMCPConfig(agentName, sessionID string, mcpServers []config.MCPServerConfig) (extraArgs []string, err error) {
-	if len(mcpServers) == 0 || agentName != "claude" {
+	if len(mcpServers) == 0 {
 		return nil, nil
 	}
 
-	mcpConfigPath, err := sm.generateMCPConfig(sessionID, mcpServers)
-	if err != nil {
-		return nil, err
+	switch agentName {
+	case "claude":
+		mcpConfigPath, err := sm.generateMCPConfig(sessionID, mcpServers)
+		if err != nil {
+			return nil, err
+		}
+
+		sm.log.Info("injected mcp config", "session_id", sessionID, "mcp_config", mcpConfigPath, "mcp_servers", len(mcpServers))
+
+		return []string{"--mcp-config", mcpConfigPath}, nil
+	case "codex":
+		args, skipped, err := codexMCPServerArgs(mcpServers)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(skipped) > 0 {
+			sm.log.Warn("skipped codex mcp servers with names not representable as codex config keys",
+				"session_id", sessionID, "servers", skipped)
+		}
+
+		sm.log.Info("injected mcp config", "session_id", sessionID, "mcp_servers", len(mcpServers)-len(skipped))
+
+		return args, nil
+	default:
+		return nil, nil
 	}
-
-	sm.log.Info("injected mcp config", "session_id", sessionID, "mcp_config", mcpConfigPath, "mcp_servers", len(mcpServers))
-
-	return []string{"--mcp-config", mcpConfigPath}, nil
 }
 
 // codexBareKeyRe matches MCP server names that can be represented as a TOML
@@ -370,70 +388,133 @@ func codexMCPServerArgs(mcpServers []config.MCPServerConfig) (args, skipped []st
 	return args, skipped, nil
 }
 
-// injectCodexHooks generates per-event hook scripts for a Codex session and
-// returns extra args (per-session MCP server `-c` overrides) plus extra env
-// vars (including CODEX_HOOKS_DIR) to add to the agent launch.
-func (sm *SessionManager) injectCodexHooks(sessionID string, yolo bool, mcpServers []config.MCPServerConfig) (extraArgs []string, extraEnv map[string]string, err error) {
-	dir := sm.hookDir(sessionID)
-	grBin := resolveGrBin()
+// codexHookEvent describes one Codex lifecycle hook: the Codex event name and
+// the shell commands graith runs for it, in order.
+type codexHookEvent struct {
+	// event is the Codex hook event name. It must match a key the current Codex
+	// CLI recognises in its HookEventsToml schema (PascalCase, e.g. SessionStart).
+	event string
+	// commands are the shell command strings run for the event, in order.
+	commands []string
+	// approval marks the PermissionRequest hook, which bridges to the daemon's
+	// approval backend and is only installed when the approval gate (or yolo) is on.
+	approval bool
+}
 
-	events := map[string]string{
-		"session-start":      "SessionStart",
-		"user-prompt-submit": "UserPromptSubmit",
-		"pre-tool-use":       "PreToolUse",
-		"post-tool-use":      "PostToolUse",
-		"permission-request": "PermissionRequest",
-		"stop":               "Stop",
-	}
-
+// injectCodexHooks builds the Codex session-config overrides that register
+// graith's lifecycle hooks and returns them as extra launch args.
+//
+// Current Codex no longer reads a CODEX_HOOKS_DIR env var (issue #1183). It
+// discovers hooks from configuration-layer folders (hooks.json) and inline
+// [hooks] config, and accepts hooks per-invocation as trusted session config via
+// repeatable `-c hooks.<Event>=<toml>` overrides. Each override's value is
+// parsed by Codex as TOML (codex-rs/utils/cli config_override), so graith emits
+// a TOML array of matcher groups — [{hooks=[{type="command",command="..."}]}] —
+// with no matcher (match-all). `--dangerously-bypass-hook-trust` skips Codex's
+// interactive hook-trust review, safe here because graith generated and vetted
+// these hooks and no human is watching the TUI to approve them.
+//
+// MCP-server wiring is NOT handled here — it rides the separate injectMCPConfig
+// path (issue #1135), so a headless codex session gets MCP without hooks.
+func (sm *SessionManager) injectCodexHooks(sessionID string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
+	grBin := shellQuote(resolveGrBin())
 	hookEnabled := sm.cfg.Approvals.HookEnabled() || yolo
 
-	hooksDir := filepath.Join(dir, "codex-hooks")
-	if err := os.MkdirAll(hooksDir, 0o700); err != nil {
-		return nil, nil, fmt.Errorf("create codex hooks dir: %w", err)
+	events := []codexHookEvent{
+		{event: "SessionStart", commands: []string{
+			fmt.Sprintf("%s report-status --event SessionStart", grBin),
+			fmt.Sprintf("%s check-inbox", grBin),
+		}},
+		{event: "UserPromptSubmit", commands: []string{
+			fmt.Sprintf("%s report-status --event UserPromptSubmit", grBin),
+		}},
+		{event: "PreToolUse", commands: []string{
+			fmt.Sprintf("%s report-status --event PreToolUse", grBin),
+		}},
+		{event: "PostToolUse", commands: []string{
+			fmt.Sprintf("%s report-status --event PostToolUse", grBin),
+		}},
+		{event: "PermissionRequest", approval: true, commands: []string{
+			fmt.Sprintf("%s approve-request", grBin),
+		}},
+		{event: "Stop", commands: []string{
+			fmt.Sprintf("%s report-status --event Stop", grBin),
+		}},
 	}
 
-	quoted := shellQuote(grBin)
+	installed := 0
 
-	for filename, eventName := range events {
-		if filename == "permission-request" && !hookEnabled {
+	for _, e := range events {
+		if e.approval && !hookEnabled {
 			continue
 		}
 
-		var script string
+		value := codexHookOverrideValue(e.commands)
+		extraArgs = append(extraArgs, "-c", fmt.Sprintf("hooks.%s=%s", e.event, value))
+		installed++
+	}
 
-		switch filename {
-		case "permission-request":
-			script = fmt.Sprintf("#!/bin/sh\nexec %s approve-request\n", quoted)
-		case "session-start":
-			script = fmt.Sprintf("#!/bin/sh\n%s report-status --event %s\nexec %s check-inbox\n", quoted, eventName, quoted)
+	// NOTE: --dangerously-bypass-hook-trust is process-wide, not scoped to the
+	// -c overrides above: it also runs any OTHER enabled-but-untrusted hook
+	// sources in the session (a repo-local .codex/hooks.json, user config hooks,
+	// plugin hooks) without Codex's trust review. graith relies on this to run
+	// its own generated hooks unattended; the containment boundary for anything
+	// else those sources might do is the graith sandbox (see [sandbox]), the same
+	// boundary that already confines the agent itself. Codex has no way today to
+	// trust only the session-config hooks without bypassing trust globally.
+	extraArgs = append(extraArgs, "--dangerously-bypass-hook-trust")
+
+	sm.log.Info("injected codex hooks", "session_id", sessionID, "events", installed)
+
+	return extraArgs, nil, nil
+}
+
+// codexHookOverrideValue builds the inline-TOML value for a `hooks.<Event>`
+// config override: a single match-all matcher group whose command handlers run
+// the given shell commands in order. The shape mirrors Codex's HookEventsToml
+// matcher-group schema ([{hooks=[{type="command",command="..."}]}]).
+func codexHookOverrideValue(commands []string) string {
+	handlers := make([]string, len(commands))
+	for i, c := range commands {
+		handlers[i] = fmt.Sprintf(`{type="command",command=%s}`, tomlBasicString(c))
+	}
+
+	return fmt.Sprintf(`[{hooks=[%s]}]`, strings.Join(handlers, ","))
+}
+
+// tomlBasicString encodes s as a TOML basic (double-quoted) string, escaping the
+// characters TOML requires so the shell command survives being embedded in an
+// inline-TOML config-override value and parsed back out by Codex.
+func tomlBasicString(s string) string {
+	var b strings.Builder
+
+	b.WriteByte('"')
+
+	for _, r := range s {
+		switch r {
+		case '"':
+			b.WriteString(`\"`)
+		case '\\':
+			b.WriteString(`\\`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
 		default:
-			script = fmt.Sprintf("#!/bin/sh\nexec %s report-status --event %s\n", quoted, eventName)
+			// TOML basic strings forbid unescaped C0 controls and U+007F (DEL).
+			if r < 0x20 || r == 0x7f {
+				fmt.Fprintf(&b, `\u%04X`, r)
+			} else {
+				b.WriteRune(r)
+			}
 		}
-
-		path := filepath.Join(hooksDir, filename)
-		if err := os.WriteFile(path, []byte(script), 0o755); err != nil { //nolint:gosec // G306: script/binary must be executable
-			return nil, nil, fmt.Errorf("write codex hook %s: %w", filename, err)
-		}
 	}
 
-	extraEnv = map[string]string{
-		"CODEX_HOOKS_DIR": hooksDir,
-	}
+	b.WriteByte('"')
 
-	extraArgs, skipped, err := codexMCPServerArgs(mcpServers)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	if len(skipped) > 0 {
-		sm.log.Warn("skipped codex mcp servers with names not representable as codex config keys",
-			"session_id", sessionID, "servers", skipped)
-	}
-
-	sm.log.Info("injected codex hooks", "session_id", sessionID, "hooks_dir", hooksDir, "mcp_servers", len(mcpServers)-len(skipped))
-
-	return extraArgs, extraEnv, nil
+	return b.String()
 }
 
 // graithMCPServer returns the auto-injected graith MCP server config.
@@ -604,7 +685,7 @@ func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string,
 	case "claude":
 		return sm.injectClaudeHooks(sessionID, yolo)
 	case "codex":
-		return sm.injectCodexHooks(sessionID, yolo, mcpServers)
+		return sm.injectCodexHooks(sessionID, yolo)
 	case "cursor":
 		return sm.injectCursorHooks(sessionID, worktreePath, yolo)
 	default:

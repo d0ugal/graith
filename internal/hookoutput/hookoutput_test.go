@@ -21,9 +21,16 @@ func TestApproval(t *testing.T) {
 		{"claude", "haar", "", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"haar"}}`},
 		{"claude", "allow", "braw-approved", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"braw-approved"}}`},
 		{"claude", "block", "neep-forbidden", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"neep-forbidden"}}`},
-		{"codex", "allow", "", `{"decision":"allow"}`},
-		{"codex", "deny", "", `{"decision":"deny"}`},
-		{"codex", "block", "", `{"decision":"deny"}`},
+		// Codex's PermissionRequest output nests the decision under
+		// hookSpecificOutput.decision.behavior (issue #1183) — the legacy
+		// top-level {"decision":...} is rejected by Codex's deny_unknown_fields.
+		{"codex", "allow", "", `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`},
+		{"codex", "deny", "", `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny"}}}`},
+		{"codex", "block", "", `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny"}}}`},
+		{"codex", "block", "neep-forbidden", `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"neep-forbidden"}}}`},
+		// defer/unknown omit the decision so Codex runs its own approval flow.
+		{"codex", "defer", "", `{"hookSpecificOutput":{"hookEventName":"PermissionRequest"}}`},
+		{"codex", "haar", "", `{"hookSpecificOutput":{"hookEventName":"PermissionRequest"}}`},
 		{"cursor", "allow", "", `{"permission":"allow"}`},
 		{"cursor", "deny", "", `{"permission":"deny"}`},
 		{"cursor", "block", "", `{"permission":"deny"}`},
@@ -45,8 +52,9 @@ func TestAllowAll(t *testing.T) {
 		t.Errorf("AllowAll(claude) = %s, want %s", got, want)
 	}
 
-	if got := AllowAll("codex"); got != `{"decision":"allow"}` {
-		t.Errorf("AllowAll(codex) = %s, want allow", got)
+	codexWant := `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`
+	if got := AllowAll("codex"); got != codexWant {
+		t.Errorf("AllowAll(codex) = %s, want %s", got, codexWant)
 	}
 }
 
@@ -89,12 +97,45 @@ func TestInboxContextClaude(t *testing.T) {
 	}
 }
 
-// TestInboxContextOtherAgents checks non-Claude agents keep the systemMessage
-// form they already consume, so this fix doesn't regress Codex/Cursor.
+// TestInboxContextCodex verifies Codex inbox context reaches the model via
+// hookSpecificOutput.additionalContext, not a user-facing systemMessage — the
+// same requirement as Claude (#1072), since Codex's SessionStart output wire
+// carries additionalContext under hookSpecificOutput (#1183).
+func TestInboxContextCodex(t *testing.T) {
+	body := "You have 1 unread message(s). From braw: hello"
+
+	got := InboxContext("codex", "SessionStart", body)
+
+	var parsed struct {
+		SystemMessage      string `json:"systemMessage"`
+		HookSpecificOutput struct {
+			HookEventName     string `json:"hookEventName"`
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("InboxContext(codex) produced invalid JSON %q: %v", got, err)
+	}
+
+	if parsed.HookSpecificOutput.HookEventName != "SessionStart" {
+		t.Errorf("hookEventName = %q, want SessionStart", parsed.HookSpecificOutput.HookEventName)
+	}
+
+	if parsed.HookSpecificOutput.AdditionalContext != body {
+		t.Errorf("additionalContext = %q, want %q", parsed.HookSpecificOutput.AdditionalContext, body)
+	}
+
+	if parsed.SystemMessage != "" || strings.Contains(got, `"systemMessage"`) {
+		t.Errorf("output %q must not carry the body as systemMessage (never reaches the model)", got)
+	}
+}
+
+// TestInboxContextOtherAgents checks agents without a model-visible context
+// channel keep the systemMessage form they already consume.
 func TestInboxContextOtherAgents(t *testing.T) {
 	body := "unread message from canny"
 
-	for _, agent := range []string{"codex", "cursor", "agy", ""} {
+	for _, agent := range []string{"cursor", "agy", ""} {
 		got := InboxContext(agent, "SessionStart", body)
 
 		var parsed struct {
@@ -109,7 +150,7 @@ func TestInboxContextOtherAgents(t *testing.T) {
 		}
 
 		if strings.Contains(got, "hookSpecificOutput") {
-			t.Errorf("InboxContext(%q) = %q, non-Claude agents should not emit hookSpecificOutput", agent, got)
+			t.Errorf("InboxContext(%q) = %q, should not emit hookSpecificOutput", agent, got)
 		}
 	}
 }
