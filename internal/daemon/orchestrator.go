@@ -291,9 +291,19 @@ func (sm *SessionManager) rollbackOrchestratorCreate(id string) {
 // it actually supports instead of Claude's --append-system-prompt flag. For
 // Cursor the rule file is written under worktreePath (the orchestrator scratch
 // dir); an agent with no supported injection method silently gets no prompt
-// args. It returns an error only when a side-effecting injection (e.g. writing
-// the Cursor rule) fails.
+// args. When the selected agent sets inject_prompt = false it returns no args
+// and performs no side effect (issue #1292). It returns an error only when a
+// side-effecting injection (e.g. writing the Cursor rule) fails.
 func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg config.OrchestratorConfig, repoPaths []string, notifyEnabled bool, worktreePath string) ([]string, error) {
+	// Honour the selected agent's inject_prompt opt-out, exactly as the ordinary
+	// create/resume paths gate injectPrompt on PromptInjectionEnabled(). When
+	// disabled, build nothing and inject nothing — no --append-system-prompt, no
+	// Codex developer_instructions override, and no Cursor rule file side effect
+	// (skipping promptInjectionArgs avoids writing .cursor/rules). See issue #1292.
+	if !sm.Config().Agents[agentName].PromptInjectionEnabled() {
+		return nil, nil
+	}
+
 	prompt := orchCfg.Prompt
 
 	if orchCfg.PromptFile != "" {

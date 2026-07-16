@@ -201,6 +201,43 @@ func TestBuildOrchestratorPrompt_AgentAdapters(t *testing.T) {
 	}
 }
 
+// TestBuildOrchestratorPrompt_InjectPromptDisabled is the #1292 regression: when
+// the selected orchestrator agent sets inject_prompt = false, prompt injection is
+// suppressed — no Codex developer_instructions override, no Cursor rule file, no
+// Claude flag. buildOrchestratorPrompt is the single seam both the create
+// (createOrchestrator) and resume (resumeSession isOrchestrator) paths call to
+// build orchestrator prompt args, so gating it here covers both.
+func TestBuildOrchestratorPrompt_InjectPromptDisabled(t *testing.T) {
+	disabled := false
+
+	sm := newOrchTestSM(t)
+	sm.cfg = &config.Config{
+		Agents: map[string]config.Agent{
+			"codex":  {PromptInjection: config.PromptInjectionDeveloperInstructions, InjectPrompt: &disabled},
+			"cursor": {PromptInjection: config.PromptInjectionCursorRules, InjectPrompt: &disabled},
+		},
+	}
+
+	cfg := config.OrchestratorConfig{Prompt: "ken this"}
+
+	// Codex opted out: no developer_instructions override at all.
+	if got := mustBuildOrchPrompt(t, sm, "codex", cfg, nil, true, ""); got != nil {
+		t.Errorf("disabled codex orchestrator should get no prompt args, got %v", got)
+	}
+
+	// Cursor opted out: no launch args AND no rule file side effect.
+	worktree := t.TempDir()
+
+	if got := mustBuildOrchPrompt(t, sm, "cursor", cfg, nil, true, worktree); got != nil {
+		t.Errorf("disabled cursor orchestrator should get no prompt args, got %v", got)
+	}
+
+	rule := filepath.Join(worktree, ".cursor", "rules", "graith.mdc")
+	if _, err := os.Stat(rule); !os.IsNotExist(err) {
+		t.Errorf("disabled cursor orchestrator must not write %s (stat err = %v)", rule, err)
+	}
+}
+
 func TestBuildOrchestratorPrompt_RepoPaths(t *testing.T) {
 	sm := newOrchTestSM(t)
 
