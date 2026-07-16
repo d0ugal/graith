@@ -25,7 +25,7 @@ func mustWatcher(t *testing.T) *fsnotify.Watcher {
 
 func TestWatchMatcher_BuiltinAndUser(t *testing.T) {
 	root := t.TempDir()
-	m := newWatchMatcher(root, &config.WatchConfig{Ignore: []string{"docs/**"}})
+	m := newWatchMatcher(root, &config.WatchConfig{Ignore: []string{"docs/**"}}, nil)
 
 	cases := []struct {
 		path string
@@ -45,9 +45,41 @@ func TestWatchMatcher_BuiltinAndUser(t *testing.T) {
 	}
 }
 
+// TestWatchMatcher_ConfiguredBuiltinIgnores verifies a custom daemon-wide
+// builtin-ignore list (from [triggers.advanced] watch_builtin_ignores) is applied,
+// and that .git is always ignored even when the custom list omits it (issue #1248).
+func TestWatchMatcher_ConfiguredBuiltinIgnores(t *testing.T) {
+	root := t.TempDir()
+	// A custom list that deliberately drops .git and adds node_modules/.
+	m := newWatchMatcher(root, &config.WatchConfig{}, []string{"node_modules/"})
+
+	cases := []struct {
+		path string
+		want bool // fires?
+	}{
+		{"glen/handler.go", true},
+		{"node_modules/pkg/index.js", false}, // configured ignore
+		{".git/config", false},               // mandatory ignore, applied despite the custom list
+		{"editor.swp", true},                 // NOT in the custom list, so it fires now
+	}
+	for _, tc := range cases {
+		if got := m.fires(tc.path); got != tc.want {
+			t.Errorf("fires(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+
+	if !m.ignoredDir("node_modules") {
+		t.Error("node_modules/ should be pruned from the watch set")
+	}
+
+	if !m.ignoredDir(".git") {
+		t.Error(".git must always be pruned regardless of the configured list")
+	}
+}
+
 func TestWatchMatcher_IncludeGlobs(t *testing.T) {
 	root := t.TempDir()
-	m := newWatchMatcher(root, &config.WatchConfig{Paths: []string{"**/*.go"}})
+	m := newWatchMatcher(root, &config.WatchConfig{Paths: []string{"**/*.go"}}, nil)
 
 	if !m.fires("glen/a.go") {
 		t.Error("*.go should fire with include **/*.go")
@@ -68,7 +100,7 @@ func TestWatchMatcher_Gitignore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := newWatchMatcher(root, &config.WatchConfig{})
+	m := newWatchMatcher(root, &config.WatchConfig{}, nil)
 
 	if m.fires("build/out.bin") {
 		t.Error("gitignored build/ should not fire")
@@ -97,7 +129,7 @@ func TestWatchMatcher_Gitignore(t *testing.T) {
 // foo/a.log but not foo/bar/b.log.
 func TestWatchMatcher_SingleStarDoesNotCrossSlash(t *testing.T) {
 	root := t.TempDir()
-	m := newWatchMatcher(root, &config.WatchConfig{Ignore: []string{"foo/*.log"}})
+	m := newWatchMatcher(root, &config.WatchConfig{Ignore: []string{"foo/*.log"}}, nil)
 
 	if m.fires("foo/a.log") {
 		t.Error("foo/*.log should match foo/a.log (should not fire)")
@@ -112,7 +144,7 @@ func TestWatchMatcher_SingleStarDoesNotCrossSlash(t *testing.T) {
 // library mishandled.
 func TestWatchMatcher_QuestionMark(t *testing.T) {
 	root := t.TempDir()
-	m := newWatchMatcher(root, &config.WatchConfig{Ignore: []string{"file?.txt"}})
+	m := newWatchMatcher(root, &config.WatchConfig{Ignore: []string{"file?.txt"}}, nil)
 
 	if m.fires("file1.txt") {
 		t.Error("file?.txt should match file1.txt (should not fire)")
@@ -136,7 +168,7 @@ func TestWatchMatcher_DirOnlyPattern(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := newWatchMatcher(root, &config.WatchConfig{})
+	m := newWatchMatcher(root, &config.WatchConfig{}, nil)
 
 	if !m.ignoredDir("logs") {
 		t.Error("logs/ directory should be pruned")
@@ -159,7 +191,7 @@ func TestWatchMatcher_NestedGitignore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := newWatchMatcher(root, &config.WatchConfig{})
+	m := newWatchMatcher(root, &config.WatchConfig{}, nil)
 
 	if m.fires("sub/scratch.tmp") {
 		t.Error("nested .gitignore should ignore sub/scratch.tmp")
@@ -179,7 +211,7 @@ func TestAddWatchRecursive(t *testing.T) {
 	w := mustWatcher(t)
 	defer func() { _ = w.Close() }()
 
-	m := newWatchMatcher(root, &config.WatchConfig{})
+	m := newWatchMatcher(root, &config.WatchConfig{}, nil)
 	if degraded := addWatchRecursive(w.Add, root, m); degraded != "" {
 		t.Fatalf("unexpected degraded: %s", degraded)
 	}
@@ -203,7 +235,7 @@ func TestFileWatch_EndToEnd(t *testing.T) {
 	}
 
 	b := &watchBinding{triggerName: "wf", sessionID: "src", worktree: worktree, fingerprint: triggerFingerprint(&trig), watcher: w, changed: make(map[string]bool)}
-	matcher := newWatchMatcher(worktree, trig.Watch)
+	matcher := newWatchMatcher(worktree, trig.Watch, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -445,19 +477,44 @@ func TestReconcileBindings_DefersRecreateWhileInFlight(t *testing.T) {
 }
 
 func TestWatchRetryBackoff(t *testing.T) {
+	base := 5 * time.Second
+	maxBackoff := 5 * time.Minute
+
 	cases := []struct {
 		retry int
 		want  time.Duration
 	}{
-		{0, watchRetryBaseBackoff}, // clamped to 1
+		{0, base}, // clamped to 1
 		{1, 5 * time.Second},
 		{2, 10 * time.Second},
 		{3, 20 * time.Second},
 		{4, 40 * time.Second},
-		{99, watchRetryMaxBackoff}, // capped
+		{99, maxBackoff}, // capped
 	}
 	for _, tc := range cases {
-		if got := watchRetryBackoff(tc.retry); got != tc.want {
+		if got := watchRetryBackoff(tc.retry, base, maxBackoff); got != tc.want {
+			t.Errorf("watchRetryBackoff(%d) = %v, want %v", tc.retry, got, tc.want)
+		}
+	}
+}
+
+// TestWatchRetryBackoffConfigurable verifies the base/cap tuning changes the
+// degraded-binding backoff schedule.
+func TestWatchRetryBackoffConfigurable(t *testing.T) {
+	base := 1 * time.Second
+	maxBackoff := 4 * time.Second
+
+	cases := []struct {
+		retry int
+		want  time.Duration
+	}{
+		{1, 1 * time.Second},
+		{2, 2 * time.Second},
+		{3, 4 * time.Second}, // hits cap
+		{9, 4 * time.Second}, // stays capped
+	}
+	for _, tc := range cases {
+		if got := watchRetryBackoff(tc.retry, base, maxBackoff); got != tc.want {
 			t.Errorf("watchRetryBackoff(%d) = %v, want %v", tc.retry, got, tc.want)
 		}
 	}
@@ -655,7 +712,7 @@ func watchListContains(w *fsnotify.Watcher, path string) bool {
 // git matcher after a .gitignore is added, then removed, changes what fires.
 func TestWatchMatcher_ReloadGit(t *testing.T) {
 	root := t.TempDir()
-	m := newWatchMatcher(root, &config.WatchConfig{})
+	m := newWatchMatcher(root, &config.WatchConfig{}, nil)
 
 	// No .gitignore yet: a *.log path fires.
 	if !m.fires("run.log") {
@@ -696,7 +753,7 @@ func TestReconcileWatchDirs(t *testing.T) {
 	w := mustWatcher(t)
 	defer func() { _ = w.Close() }()
 
-	m := newWatchMatcher(root, &config.WatchConfig{})
+	m := newWatchMatcher(root, &config.WatchConfig{}, nil)
 	if degraded := addWatchRecursive(w.Add, root, m); degraded != "" {
 		t.Fatalf("unexpected degraded: %s", degraded)
 	}
@@ -743,7 +800,7 @@ func TestReconcileWatchDirs_AddsUnignored(t *testing.T) {
 	w := mustWatcher(t)
 	defer func() { _ = w.Close() }()
 
-	m := newWatchMatcher(root, &config.WatchConfig{})
+	m := newWatchMatcher(root, &config.WatchConfig{}, nil)
 	if degraded := addWatchRecursive(w.Add, root, m); degraded != "" {
 		t.Fatalf("unexpected degraded: %s", degraded)
 	}
@@ -778,7 +835,7 @@ func TestHandleWatchEvent_GitignoreReload(t *testing.T) {
 	w := mustWatcher(t)
 	defer func() { _ = w.Close() }()
 
-	m := newWatchMatcher(root, &config.WatchConfig{})
+	m := newWatchMatcher(root, &config.WatchConfig{}, nil)
 	if degraded := addWatchRecursive(w.Add, root, m); degraded != "" {
 		t.Fatalf("unexpected degraded: %s", degraded)
 	}
@@ -812,7 +869,7 @@ func TestHandleWatchEvent_GitignoreReload(t *testing.T) {
 }
 
 func TestWatchMatcher_DotAndEmpty(t *testing.T) {
-	m := newWatchMatcher(t.TempDir(), &config.WatchConfig{})
+	m := newWatchMatcher(t.TempDir(), &config.WatchConfig{}, nil)
 	if m.fires(".") || m.fires("") {
 		t.Error("'.' and '' should never fire")
 	}

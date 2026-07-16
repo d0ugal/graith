@@ -225,6 +225,52 @@ type TriggerPolicy struct {
 // from the [[trigger]] array).
 type TriggersRuntime struct {
 	MaxConcurrent int `toml:"max_concurrent"` // default 4
+	// Advanced holds the low-level scheduler and file-watch tuning knobs (loop
+	// cadence, run-history retention, degraded-binding backoff, the daemon-wide
+	// watch ignore list, and the command-output cap). Every field is optional and
+	// falls back to the historical default via the accessors below, so a config
+	// that omits [triggers.advanced] behaves exactly as before. Expose these only
+	// for operators who need to trade off detection latency, filesystem-watch
+	// load, and notification size — the defaults suit ordinary use.
+	Advanced TriggersAdvancedConfig `toml:"advanced"`
+}
+
+// TriggersAdvancedConfig carries the advanced tuning for the trigger scheduler and
+// the file-watch runtime. These were formerly hard-coded policy literals in the
+// daemon (internal/daemon/trigger.go, filewatch.go, trigger_actions.go); they are
+// surfaced here so an operator can tune scheduler latency, file-watch reconcile
+// cadence, degraded-binding retry backoff, the always-ignored directory set, and
+// the command-output cap without a rebuild. Every field is optional: an unset
+// (zero/empty) value resolves to the documented default through the TriggersRuntime
+// accessors, so leaving [triggers.advanced] out is a no-op.
+type TriggersAdvancedConfig struct {
+	// SchedulerTick is the trigger scheduler loop cadence. Cron granularity is one
+	// minute, so this only bounds sub-minute "every" intervals and dispatch
+	// latency. Default 1s. Applied when the scheduler loop starts.
+	SchedulerTick string `toml:"scheduler_tick"`
+	// RunHistoryMax caps how many past runs each trigger retains in its persisted
+	// history. Default 20.
+	RunHistoryMax int `toml:"run_history_max"`
+	// WatchReconcileInterval is how often file-watch bindings are reconciled
+	// against live sessions (creating, tearing down, and retrying degraded
+	// bindings). Default 2s. Applied when the file-watch loop starts.
+	WatchReconcileInterval string `toml:"watch_reconcile_interval"`
+	// WatchRetryBaseBackoff is the delay before the first retry of a degraded
+	// file-watch binding (e.g. one that hit fs.inotify.max_user_watches).
+	// Subsequent retries back off exponentially from here. Default 5s.
+	WatchRetryBaseBackoff string `toml:"watch_retry_base_backoff"`
+	// WatchRetryMaxBackoff caps the exponential degraded-binding backoff so a
+	// persistently degraded binding keeps retrying periodically. Default 5m.
+	WatchRetryMaxBackoff string `toml:"watch_retry_max_backoff"`
+	// WatchBuiltinIgnores is the daemon-wide set of directories/patterns never
+	// watched by any file-watch trigger (on top of git ignore rules and per-trigger
+	// watch.ignore). Unset uses DefaultWatchBuiltinIgnores. ".git"/".git/" are
+	// always ignored regardless of this list (a watched .git churns constantly and
+	// creates a feedback loop).
+	WatchBuiltinIgnores []string `toml:"watch_builtin_ignores"`
+	// CommandOutputCap truncates a command action's captured output to this many
+	// bytes before delivery, bounding notification size. Default 4096.
+	CommandOutputCap int `toml:"command_output_cap"`
 }
 
 // ReservedTriggerNamePrefix is reserved for the daemon's namespaced
@@ -266,6 +312,25 @@ const (
 	defaultRateLimitN    = 5
 	defaultRateLimitWin  = 30 * time.Minute
 )
+
+// Advanced trigger scheduler / file-watch tuning defaults (issue #1248). These
+// are the daemon's historical policy literals; the accessors below fall back to
+// them when [triggers.advanced] omits the key, and default_config.toml carries
+// the same values so `gr config show/diff/reset` describe the full behaviour.
+const (
+	defaultSchedulerTick    = 1 * time.Second
+	defaultRunHistoryMax    = 20
+	defaultWatchReconcile   = 2 * time.Second
+	defaultWatchRetryBase   = 5 * time.Second
+	defaultWatchRetryMax    = 5 * time.Minute
+	defaultCommandOutputCap = 4096
+)
+
+// DefaultWatchBuiltinIgnores is the daemon-wide set of directories/patterns never
+// watched by a file-watch trigger when [triggers.advanced] watch_builtin_ignores
+// is unset. Watching any of these is never useful and they are prime
+// feedback-loop / churn sources. Materialized in default_config.toml.
+var DefaultWatchBuiltinIgnores = []string{".git/", ".git", ".hg/", ".svn/", "*.swp", "*.swx", "4913", ".DS_Store"}
 
 // TriggerEnabled reports whether the trigger is enabled (nil => true).
 func (t TriggerConfig) TriggerEnabled() bool {
@@ -408,6 +473,66 @@ func (r TriggersRuntime) MaxConcurrentOr() int {
 	}
 
 	return r.MaxConcurrent
+}
+
+// The accessors below resolve the [triggers.advanced] tuning knobs, each falling
+// back to the daemon's historical default when unset (or non-positive / invalid).
+// Keeping the default here — not in the daemon — mirrors the PR-watch advanced
+// accessors and lets the embedded default_config.toml materialize the same values
+// while the Go fallback stays authoritative for an omitted key (see issue #1228).
+
+// SchedulerTickDuration is the trigger scheduler loop cadence. Default 1s.
+func (r TriggersRuntime) SchedulerTickDuration() time.Duration {
+	return parseDurationOr(r.Advanced.SchedulerTick, defaultSchedulerTick)
+}
+
+// RunHistoryMax is the per-trigger retained run-history length. Default 20.
+func (r TriggersRuntime) RunHistoryMax() int {
+	if r.Advanced.RunHistoryMax <= 0 {
+		return defaultRunHistoryMax
+	}
+
+	return r.Advanced.RunHistoryMax
+}
+
+// WatchReconcileIntervalDuration is the file-watch binding reconcile cadence.
+// Default 2s.
+func (r TriggersRuntime) WatchReconcileIntervalDuration() time.Duration {
+	return parseDurationOr(r.Advanced.WatchReconcileInterval, defaultWatchReconcile)
+}
+
+// WatchRetryBaseBackoffDuration is the first-retry delay for a degraded file-watch
+// binding. Default 5s.
+func (r TriggersRuntime) WatchRetryBaseBackoffDuration() time.Duration {
+	return parseDurationOr(r.Advanced.WatchRetryBaseBackoff, defaultWatchRetryBase)
+}
+
+// WatchRetryMaxBackoffDuration caps the exponential degraded-binding backoff.
+// Default 5m.
+func (r TriggersRuntime) WatchRetryMaxBackoffDuration() time.Duration {
+	return parseDurationOr(r.Advanced.WatchRetryMaxBackoff, defaultWatchRetryMax)
+}
+
+// WatchBuiltinIgnores returns the daemon-wide watch ignore list, defaulting to
+// DefaultWatchBuiltinIgnores when unset. The daemon additionally always ignores
+// ".git"/".git/" regardless of this list. A fresh copy is returned so callers
+// cannot mutate the shared default slice.
+func (r TriggersRuntime) WatchBuiltinIgnores() []string {
+	if len(r.Advanced.WatchBuiltinIgnores) == 0 {
+		return append([]string(nil), DefaultWatchBuiltinIgnores...)
+	}
+
+	return append([]string(nil), r.Advanced.WatchBuiltinIgnores...)
+}
+
+// CommandOutputCap is the command-action output truncation cap in bytes.
+// Default 4096.
+func (r TriggersRuntime) CommandOutputCap() int {
+	if r.Advanced.CommandOutputCap <= 0 {
+		return defaultCommandOutputCap
+	}
+
+	return r.Advanced.CommandOutputCap
 }
 
 // validateTriggers checks every [[trigger]] block. It is called from

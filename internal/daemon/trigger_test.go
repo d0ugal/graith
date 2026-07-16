@@ -75,13 +75,31 @@ func TestTriggerRuntimePersistence(t *testing.T) {
 
 func TestTriggerHistoryBounded(t *testing.T) {
 	sm := newTriggerTestSM(t)
-	for i := 0; i < triggerHistoryMax+10; i++ {
+	maxHistory := sm.Config().TriggersRuntime.RunHistoryMax()
+
+	for i := 0; i < maxHistory+10; i++ {
 		sm.recordTriggerRun("dreich", TriggerRun{Cause: causeSchedule, ScheduledAt: time.Now()})
 	}
 
 	rt := sm.getTriggerRuntime("dreich")
-	if len(rt.History) != triggerHistoryMax {
-		t.Fatalf("history len = %d, want %d", len(rt.History), triggerHistoryMax)
+	if len(rt.History) != maxHistory {
+		t.Fatalf("history len = %d, want %d", len(rt.History), maxHistory)
+	}
+}
+
+// TestTriggerHistoryBoundedConfigurable verifies [triggers.advanced] run_history_max
+// overrides the retained-history length.
+func TestTriggerHistoryBoundedConfigurable(t *testing.T) {
+	sm := newTriggerTestSM(t)
+	sm.cfg.TriggersRuntime.Advanced.RunHistoryMax = 3
+
+	for i := 0; i < 10; i++ {
+		sm.recordTriggerRun("dreich", TriggerRun{Cause: causeSchedule, ScheduledAt: time.Now()})
+	}
+
+	rt := sm.getTriggerRuntime("dreich")
+	if len(rt.History) != 3 {
+		t.Fatalf("history len = %d, want 3", len(rt.History))
 	}
 }
 
@@ -1058,18 +1076,25 @@ func TestCheckIdleSession_PerSessionOverride(t *testing.T) {
 }
 
 func TestTruncateOutput(t *testing.T) {
-	short := truncateOutput("  hi  ")
+	maxBytes := (config.TriggersRuntime{}).CommandOutputCap()
+
+	short := truncateOutput("  hi  ", maxBytes)
 	if short != "hi" {
 		t.Errorf("got %q", short)
 	}
 
-	long := make([]byte, triggerCommandOutputCap+100)
+	long := make([]byte, maxBytes+100)
 	for i := range long {
 		long[i] = 'a'
 	}
 
-	if out := truncateOutput(string(long)); len(out) <= triggerCommandOutputCap || !contains(out, "truncated") {
+	if out := truncateOutput(string(long), maxBytes); len(out) <= maxBytes || !contains(out, "truncated") {
 		t.Errorf("long output not truncated: len=%d", len(out))
+	}
+
+	// A smaller configured cap truncates sooner.
+	if out := truncateOutput(string(long), 10); len(out) != len("aaaaaaaaaa")+len("\n… (truncated)") {
+		t.Errorf("custom cap not honoured: %q", out)
 	}
 }
 

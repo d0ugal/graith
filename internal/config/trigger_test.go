@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -453,5 +454,140 @@ func TestRateLimitParsed(t *testing.T) {
 		if n != tc.wantN || w != tc.wantW {
 			t.Errorf("RateLimitParsed(%q) = (%d,%v), want (%d,%v)", tc.in, n, w, tc.wantN, tc.wantW)
 		}
+	}
+}
+
+// TestTriggersAdvancedDefaults covers the [triggers.advanced] accessor fallbacks:
+// an empty runtime resolves to the historical daemon defaults (issue #1248).
+func TestTriggersAdvancedDefaults(t *testing.T) {
+	r := TriggersRuntime{}
+
+	if got := r.SchedulerTickDuration(); got != time.Second {
+		t.Errorf("scheduler_tick = %v, want 1s", got)
+	}
+
+	if got := r.RunHistoryMax(); got != 20 {
+		t.Errorf("run_history_max = %d, want 20", got)
+	}
+
+	if got := r.WatchReconcileIntervalDuration(); got != 2*time.Second {
+		t.Errorf("watch_reconcile_interval = %v, want 2s", got)
+	}
+
+	if got := r.WatchRetryBaseBackoffDuration(); got != 5*time.Second {
+		t.Errorf("watch_retry_base_backoff = %v, want 5s", got)
+	}
+
+	if got := r.WatchRetryMaxBackoffDuration(); got != 5*time.Minute {
+		t.Errorf("watch_retry_max_backoff = %v, want 5m", got)
+	}
+
+	if got := r.CommandOutputCap(); got != 4096 {
+		t.Errorf("command_output_cap = %d, want 4096", got)
+	}
+
+	if got := r.WatchBuiltinIgnores(); !slices.Equal(got, DefaultWatchBuiltinIgnores) {
+		t.Errorf("watch_builtin_ignores = %v, want %v", got, DefaultWatchBuiltinIgnores)
+	}
+}
+
+// TestTriggersAdvancedOverrides covers explicit values overriding the defaults,
+// and rejects invalid/non-positive values back to the fallback.
+func TestTriggersAdvancedOverrides(t *testing.T) {
+	r := TriggersRuntime{Advanced: TriggersAdvancedConfig{
+		SchedulerTick:          "500ms",
+		RunHistoryMax:          5,
+		WatchReconcileInterval: "10s",
+		WatchRetryBaseBackoff:  "1s",
+		WatchRetryMaxBackoff:   "1m",
+		WatchBuiltinIgnores:    []string{"node_modules/"},
+		CommandOutputCap:       128,
+	}}
+
+	if got := r.SchedulerTickDuration(); got != 500*time.Millisecond {
+		t.Errorf("scheduler_tick = %v, want 500ms", got)
+	}
+
+	if got := r.RunHistoryMax(); got != 5 {
+		t.Errorf("run_history_max = %d, want 5", got)
+	}
+
+	if got := r.WatchReconcileIntervalDuration(); got != 10*time.Second {
+		t.Errorf("watch_reconcile_interval = %v, want 10s", got)
+	}
+
+	if got := r.WatchRetryBaseBackoffDuration(); got != time.Second {
+		t.Errorf("watch_retry_base_backoff = %v, want 1s", got)
+	}
+
+	if got := r.WatchRetryMaxBackoffDuration(); got != time.Minute {
+		t.Errorf("watch_retry_max_backoff = %v, want 1m", got)
+	}
+
+	if got := r.CommandOutputCap(); got != 128 {
+		t.Errorf("command_output_cap = %d, want 128", got)
+	}
+
+	if got := r.WatchBuiltinIgnores(); !slices.Equal(got, []string{"node_modules/"}) {
+		t.Errorf("watch_builtin_ignores = %v, want [node_modules/]", got)
+	}
+
+	// Non-positive ints and bad durations fall back to the defaults.
+	bad := TriggersRuntime{Advanced: TriggersAdvancedConfig{
+		SchedulerTick: "notaduration", RunHistoryMax: -1, CommandOutputCap: 0,
+	}}
+	if got := bad.SchedulerTickDuration(); got != time.Second {
+		t.Errorf("bad scheduler_tick = %v, want 1s fallback", got)
+	}
+
+	if got := bad.RunHistoryMax(); got != 20 {
+		t.Errorf("negative run_history_max = %d, want 20 fallback", got)
+	}
+
+	if got := bad.CommandOutputCap(); got != 4096 {
+		t.Errorf("zero command_output_cap = %d, want 4096 fallback", got)
+	}
+}
+
+// TestWatchBuiltinIgnoresCopy verifies the accessor returns a fresh slice so a
+// caller can't mutate the shared default.
+func TestWatchBuiltinIgnoresCopy(t *testing.T) {
+	got := (TriggersRuntime{}).WatchBuiltinIgnores()
+	got[0] = "mutated"
+
+	if DefaultWatchBuiltinIgnores[0] == "mutated" {
+		t.Fatal("WatchBuiltinIgnores must not alias the shared default slice")
+	}
+}
+
+// TestTriggersAdvancedEmbeddedDefaults is the drift guard (epic #1230 pattern):
+// the advanced tuning defaults must live in the embedded default_config.toml, not
+// only as Go fallback literals. It asserts the RAW fields parsed from the embedded
+// TOML (not just the accessors, which pass whether from TOML or the Go fallback).
+func TestTriggersAdvancedEmbeddedDefaults(t *testing.T) {
+	a := Default().TriggersRuntime.Advanced
+
+	strChecks := map[string]struct{ got, want string }{
+		"scheduler_tick":           {a.SchedulerTick, "1s"},
+		"watch_reconcile_interval": {a.WatchReconcileInterval, "2s"},
+		"watch_retry_base_backoff": {a.WatchRetryBaseBackoff, "5s"},
+		"watch_retry_max_backoff":  {a.WatchRetryMaxBackoff, "5m"},
+	}
+	for name, c := range strChecks {
+		if c.got != c.want {
+			t.Errorf("Default().TriggersRuntime.Advanced.%s = %q, want %q (missing from default_config.toml?)", name, c.got, c.want)
+		}
+	}
+
+	if a.RunHistoryMax != 20 {
+		t.Errorf("Default() run_history_max = %d, want 20 (missing from default_config.toml?)", a.RunHistoryMax)
+	}
+
+	if a.CommandOutputCap != 4096 {
+		t.Errorf("Default() command_output_cap = %d, want 4096 (missing from default_config.toml?)", a.CommandOutputCap)
+	}
+
+	if !slices.Equal(a.WatchBuiltinIgnores, DefaultWatchBuiltinIgnores) {
+		t.Errorf("Default() watch_builtin_ignores = %v, want %v (missing from default_config.toml?)", a.WatchBuiltinIgnores, DefaultWatchBuiltinIgnores)
 	}
 }

@@ -18,8 +18,6 @@ import (
 	"github.com/d0ugal/graith/internal/tools"
 )
 
-const triggerCommandOutputCap = 4096
-
 // actionMessage authors a fixed body and routes it via the deliver block.
 func (sm *SessionManager) actionMessage(ctx context.Context, t *config.TriggerConfig, fc fireContext) (string, error) {
 	vars := sm.triggerVars(t, fc)
@@ -123,7 +121,7 @@ func (sm *SessionManager) actionCommand(ctx context.Context, t *config.TriggerCo
 		}
 	}
 
-	body := fmt.Sprintf("$ %s\n(exit %d)\n\n%s", cmdStr, exit, truncateOutput(out.String()))
+	body := fmt.Sprintf("$ %s\n(exit %d)\n\n%s", cmdStr, exit, truncateOutput(out.String(), sm.Config().TriggersRuntime.CommandOutputCap()))
 	sm.deliver(ctx, t.Action.Deliver, body, t.Action.RepoPath(), sm.triggerVars(t, fc))
 
 	// A non-zero exit / timeout is surfaced as an error so it lands in LastError,
@@ -241,13 +239,15 @@ func triggerCommandEnv(scratch string) []string {
 	return env
 }
 
-func truncateOutput(s string) string {
+// truncateOutput trims and caps captured command output to maxBytes, appending a
+// marker when it truncates. maxBytes comes from [triggers.advanced] command_output_cap.
+func truncateOutput(s string, maxBytes int) string {
 	s = strings.TrimSpace(s)
-	if len(s) <= triggerCommandOutputCap {
+	if len(s) <= maxBytes {
 		return s
 	}
 
-	return s[:triggerCommandOutputCap] + "\n… (truncated)"
+	return s[:maxBytes] + "\n… (truncated)"
 }
 
 // actionSession spawns (or, with ensure, reuses) a session parented to the

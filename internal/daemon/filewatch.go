@@ -13,51 +13,51 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-const fileWatchReconcileTick = 2 * time.Second
-
-const (
-	// watchRetryBaseBackoff is the delay before the first retry of a degraded
-	// binding (e.g. one that hit fs.inotify.max_user_watches). Subsequent
-	// retries back off exponentially from here.
-	watchRetryBaseBackoff = 5 * time.Second
-	// watchRetryMaxBackoff caps the exponential backoff so a persistently
-	// degraded binding keeps retrying periodically — the moment the watch limit
-	// clears, the next reconcile recreates the binding without a session restart.
-	watchRetryMaxBackoff = 5 * time.Minute
-)
-
 // watchRetryBackoff returns the delay before the retry-th recreation attempt of
-// a degraded binding: 5s, 10s, 20s, 40s, … capped at watchRetryMaxBackoff.
-func watchRetryBackoff(retry int) time.Duration {
+// a degraded binding: base, 2×base, 4×base, … capped at maxBackoff. base and
+// maxBackoff come from [triggers.advanced] (watch_retry_base_backoff /
+// watch_retry_max_backoff).
+func watchRetryBackoff(retry int, base, maxBackoff time.Duration) time.Duration {
 	if retry < 1 {
 		retry = 1
 	}
 
-	d := watchRetryBaseBackoff
+	d := base
 	for i := 1; i < retry; i++ {
 		d *= 2
-		if d >= watchRetryMaxBackoff {
-			return watchRetryMaxBackoff
+		if d >= maxBackoff {
+			return maxBackoff
 		}
 	}
 
 	return d
 }
 
+// watchRetryBackoff resolves the degraded-binding backoff for attempt using the
+// live [triggers.advanced] base/cap tuning.
+func (sm *SessionManager) watchRetryBackoff(attempt int) time.Duration {
+	tr := sm.Config().TriggersRuntime
+
+	return watchRetryBackoff(attempt, tr.WatchRetryBaseBackoffDuration(), tr.WatchRetryMaxBackoffDuration())
+}
+
 // gitignoreFilename is the file whose changes trigger a live rebuild of a
 // binding's git ignore matcher and a reconcile of its watched directories.
 const gitignoreFilename = ".gitignore"
 
-// builtinWatchIgnores are always applied and never overridable: watching these
-// is never useful and they are prime feedback-loop / churn sources.
-var builtinWatchIgnores = []string{".git/", ".git", ".hg/", ".svn/", "*.swp", "*.swx", "4913", ".DS_Store"}
+// mandatoryWatchIgnores are always applied on top of the configurable
+// [triggers.advanced] watch_builtin_ignores list, and can never be un-ignored:
+// watching .git churns constantly and creates a feedback loop.
+var mandatoryWatchIgnores = []string{".git/", ".git"}
 
 // RunFileWatchLoop is the daemon-owned file-watch (#593) trigger source. It
 // reconciles bindings (watch trigger × matching live session) against live
 // fsnotify watchers each tick, and feeds debounced, filtered events into the
 // shared trigger action executor.
 func (sm *SessionManager) RunFileWatchLoop(ctx context.Context) {
-	ticker := time.NewTicker(fileWatchReconcileTick)
+	// The reconcile cadence is read once at loop start from [triggers.advanced]
+	// watch_reconcile_interval, so changing it needs a daemon restart.
+	ticker := time.NewTicker(sm.Config().TriggersRuntime.WatchReconcileIntervalDuration())
 	defer ticker.Stop()
 
 	for {
@@ -220,7 +220,7 @@ func (sm *SessionManager) sessionForBindingKey(key string) watchSession {
 // now is injected so the retry schedule is testable.
 func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerConfig, sess watchSession, now time.Time) {
 	key := bindingKey(t.Name, sess.id)
-	matcher := newWatchMatcher(sess.worktree, t.Watch)
+	matcher := newWatchMatcher(sess.worktree, t.Watch, sm.Config().TriggersRuntime.WatchBuiltinIgnores())
 
 	// Carry forward the retry count from a prior degraded binding for this key so
 	// the backoff keeps growing across repeated failures instead of resetting on
@@ -294,7 +294,7 @@ func (sm *SessionManager) recordDegradedBinding(key string, t *config.TriggerCon
 		reactorID:   sm.findReactor(t.Name, sess.id),
 		degraded:    reason,
 		retryCount:  attempt,
-		nextRetryAt: now.Add(watchRetryBackoff(attempt)),
+		nextRetryAt: now.Add(sm.watchRetryBackoff(attempt)),
 	}
 
 	sm.log.Warn("trigger: watcher degraded, will retry",
@@ -663,10 +663,19 @@ type watchMatcher struct {
 	include ignore.Matcher // config watch.paths; nil unless set
 }
 
-func newWatchMatcher(root string, w *config.WatchConfig) *watchMatcher {
+// newWatchMatcher builds a matcher for root. builtinIgnores is the daemon-wide
+// watch ignore list (from [triggers.advanced] watch_builtin_ignores); a nil list
+// uses config.DefaultWatchBuiltinIgnores. mandatoryWatchIgnores (.git) is always
+// applied on top so it can never be un-ignored.
+func newWatchMatcher(root string, w *config.WatchConfig, builtinIgnores []string) *watchMatcher {
 	m := &watchMatcher{root: root}
 
-	m.builtin = ignore.Lines(builtinWatchIgnores...)
+	if builtinIgnores == nil {
+		builtinIgnores = config.DefaultWatchBuiltinIgnores
+	}
+
+	builtin := append(append([]string(nil), mandatoryWatchIgnores...), builtinIgnores...)
+	m.builtin = ignore.Lines(builtin...)
 	m.git = ignore.Dir(root)
 
 	if len(w.Ignore) > 0 {
