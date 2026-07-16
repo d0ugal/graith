@@ -775,16 +775,20 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	if driverKind == DriverHeadless {
 		ptySess, err = headless.New(headless.Opts{
-			ID:           id,
-			Command:      command,
-			Args:         finalArgs,
-			Dir:          worktreePath,
-			Env:          env,
-			LogPath:      logPath,
-			MaxLogSize:   100 * 1024 * 1024,
-			Prompt:       prompt,
-			Control:      true,
-			OnPermission: sm.headlessPermissionFunc(id),
+			ID:               id,
+			Command:          command,
+			Args:             finalArgs,
+			Dir:              worktreePath,
+			Env:              env,
+			LogPath:          logPath,
+			MaxLogSize:       100 * 1024 * 1024,
+			Prompt:           prompt,
+			Control:          true,
+			OnPermission:     sm.headlessPermissionFunc(id),
+			MaxLineBytes:     sm.cfg.Headless.MaxLineBytesOrDefault(),
+			ControlTimeout:   sm.cfg.Headless.ControlTimeoutDuration(),
+			InterruptTimeout: sm.cfg.Headless.InterruptTimeoutDuration(),
+			PreviewBytes:     sm.cfg.Headless.PreviewBytesOrDefault(),
 		})
 	} else {
 		ptySess, err = grpty.NewSession(grpty.SessionOpts{

@@ -91,7 +91,10 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		return SessionState{}, fmt.Errorf("read source transcript: %w", err)
 	}
 
-	rendered := conv.Render(transcript.RenderOptions{})
+	rendered := conv.Render(transcript.RenderOptions{
+		MaxBytes:      sm.cfg.Transcript.MaxContextBytesOrDefault(),
+		MaxToolOutput: sm.cfg.Transcript.MaxToolOutputBytesOrDefault(),
+	})
 
 	// --- stage the rendered context in the session's tmp dir ---
 	var tmpDir string
@@ -212,7 +215,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 
 	// Post-start health check: a PTY that spawns but exits immediately (bad
 	// auth/config — the likely outage case) is not a healthy start.
-	if startErr == nil && !sm.survivedStartup(id, migrateHealthWindow) {
+	if startErr == nil && !sm.survivedStartup(id, sm.cfg.Migration.HealthWindowDuration()) {
 		startErr = fmt.Errorf("target agent %q exited immediately after start (likely auth/config failure)", targetAgent)
 	}
 
@@ -275,10 +278,6 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	// would scrape the daemon's default root instead.
 	return res, nil
 }
-
-// migrateHealthWindow is how long Migrate waits to confirm the target agent
-// survived startup before declaring the migration successful.
-const migrateHealthWindow = 1500 * time.Millisecond
 
 // survivedStartup reports whether the session's agent process is still alive
 // after a short window.

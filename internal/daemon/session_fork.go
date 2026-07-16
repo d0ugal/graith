@@ -317,7 +317,11 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 			return SessionState{}, fmt.Errorf("read source transcript: %w", err)
 		}
 
-		rendered := conv.Render(transcript.RenderOptions{Kind: transcript.RenderFork})
+		rendered := conv.Render(transcript.RenderOptions{
+			Kind:          transcript.RenderFork,
+			MaxBytes:      sm.cfg.Transcript.MaxContextBytesOrDefault(),
+			MaxToolOutput: sm.cfg.Transcript.MaxToolOutputBytesOrDefault(),
+		})
 
 		tmpDir, err := sm.repoTmpDir(repoRoot)
 		if err != nil {
