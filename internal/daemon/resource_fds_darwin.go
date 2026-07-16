@@ -20,10 +20,12 @@ func openFDCounts(pids []int) map[int]int {
 	if len(pids) == 0 {
 		return counts
 	}
+
 	parts := make([]string, len(pids))
 	for i, pid := range pids {
 		parts[i] = strconv.Itoa(pid)
 	}
+
 	out, err := lsofOutput(strings.Join(parts, ","))
 	// lsof exits 1 when any requested PID vanished, while still returning
 	// useful records for the live PIDs. Preserve that partial snapshot. Other
@@ -32,16 +34,19 @@ func openFDCounts(pids []int) map[int]int {
 	if err != nil && (!errors.As(err, &exitErr) || len(out) == 0) {
 		return counts
 	}
+
 	return parseLsofFDCounts(string(out))
 }
 
 func parseLsofFDCounts(out string) map[int]int {
 	counts := make(map[int]int)
 	current := 0
+
 	for _, line := range strings.Split(out, "\n") {
 		if len(line) < 2 {
 			continue
 		}
+
 		switch line[0] {
 		case 'p':
 			current, _ = strconv.Atoi(line[1:])
@@ -57,5 +62,6 @@ func parseLsofFDCounts(out string) map[int]int {
 			}
 		}
 	}
+
 	return counts
 }
