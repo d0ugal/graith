@@ -39,7 +39,9 @@ type Session struct {
 	lastUserInputAt  time.Time
 	// inputDelay is the pause between typed text and the submit CR in
 	// WriteInputAndSubmit. Resolved at construction (SessionOpts.InputDelay or the
-	// typeInputDelay default); immutable after, so it needs no lock.
+	// typeInputDelay default) and updateable via SetInputDelay on a config
+	// hot-reload (issue #1294). Read and written only under writeMu, so both the
+	// live update and the WriteInputAndSubmit read stay race-free.
 	inputDelay time.Duration
 	// adoptedPollTimeout / adoptedPollInterval bound the adopted-PTY babysit loop.
 	// Resolved at adoption (AdoptOpts values or the package defaults); immutable
@@ -507,6 +509,22 @@ func (s *Session) WriteInput(data []byte) error {
 // the text before the CR arrives. The daemon overrides it via the [lifecycle]
 // input_delay policy.
 const typeInputDelay = 50 * time.Millisecond
+
+// SetInputDelay updates the submit pause used by WriteInputAndSubmit so a live
+// PTY observes a reloaded [lifecycle] input_delay on its next submit, matching
+// the documented read-at-each-use contract (issue #1294). A non-positive value
+// falls back to the built-in default, preserving the per-session construction
+// default. It holds writeMu — the same lock WriteInputAndSubmit reads the delay
+// under — so the update can't race an in-flight submit.
+func (s *Session) SetInputDelay(d time.Duration) {
+	if d <= 0 {
+		d = typeInputDelay
+	}
+
+	s.writeMu.Lock()
+	s.inputDelay = d
+	s.writeMu.Unlock()
+}
 
 // WriteInputAndSubmit writes text followed by a carriage return, with a brief
 // pause between the two so that TUI frameworks treat them as separate events.

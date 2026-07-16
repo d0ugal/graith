@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
@@ -94,10 +95,13 @@ type TodoStore struct {
 	mu  sync.Mutex
 	now func() time.Time
 	// maxTitle/maxNote/listLimit are the config-resolved operational limits
-	// (issue #1249), fixed at open time. maxTitle/maxNote never exceed the
-	// database CHECK ceilings.
-	maxTitle  int
-	maxNote   int
+	// (issue #1249). maxTitle/maxNote never exceed the database CHECK ceilings.
+	// They are atomic so a config hot-reload (applyConfig → SetMaxTitle/
+	// SetMaxNote) can update them race-safely against concurrent Add/Update
+	// reads without reopening the database (issue #1291). listLimit is not
+	// hot-reloaded, so it stays a plain field read under the writer mutex.
+	maxTitle  atomic.Int64
+	maxNote   atomic.Int64
 	listLimit int
 }
 
@@ -163,32 +167,57 @@ func NewTodoStore(dbPath string, settings ...TodoStoreSettings) (*TodoStore, err
 		return nil, err
 	}
 
-	return &TodoStore{
+	s := &TodoStore{
 		db:        db,
 		now:       time.Now,
-		maxTitle:  st.MaxTitle,
-		maxNote:   st.MaxNote,
 		listLimit: st.ListLimit,
-	}, nil
+	}
+	s.maxTitle.Store(int64(st.MaxTitle))
+	s.maxNote.Store(int64(st.MaxNote))
+
+	return s, nil
+}
+
+// SetMaxTitle updates the todo title-length cap race-safely for a config
+// hot-reload. The value is clamped to the database CHECK ceiling and falls back
+// to the built-in default when out of range, so a cleared or oversized config
+// key can never let a title past what the schema accepts (issue #1291).
+func (s *TodoStore) SetMaxTitle(n int) {
+	if n < 1 || n > todoTitleHardCeiling {
+		n = config.TodoMaxTitleDefault
+	}
+
+	s.maxTitle.Store(int64(n))
+}
+
+// SetMaxNote updates the todo note-length cap race-safely for a config
+// hot-reload, clamped to the database CHECK ceiling with the same fallback rules
+// as SetMaxTitle (issue #1291).
+func (s *TodoStore) SetMaxNote(n int) {
+	if n < 1 || n > todoNoteHardCeiling {
+		n = config.TodoMaxNoteDefault
+	}
+
+	s.maxNote.Store(int64(n))
 }
 
 // titleLimit / noteLimit / listCap return the store's effective operational
 // limits, falling back to the defaults if the store was constructed without
 // settings (e.g. a bare struct literal in a test).
 func (s *TodoStore) titleLimit() int {
-	if s.maxTitle < 1 {
-		return config.TodoMaxTitleDefault
+	if v := int(s.maxTitle.Load()); v >= 1 {
+		return v
 	}
 
-	return s.maxTitle
+	return config.TodoMaxTitleDefault
 }
 
 func (s *TodoStore) noteLimit() int {
-	if s.maxNote < 1 {
-		return config.TodoMaxNoteDefault
+	if v := int(s.maxNote.Load()); v >= 1 {
+		return v
 	}
 
-	return s.maxNote
+	return config.TodoMaxNoteDefault
 }
 
 func (s *TodoStore) listCap() int {

@@ -115,7 +115,7 @@ func scanJailed(rows *sql.Rows) (JailedComment, error) {
 // the msg_conversation clamp; newest-first, so the cap drops the oldest). When
 // includeReleased is false, already-released entries are excluded.
 func (s *MsgStore) ListJailed(includeReleased bool) ([]JailedComment, error) {
-	limit := s.jailListLimit
+	limit := int(s.jailListLimit.Load())
 	if limit < 1 {
 		limit = config.MessagesJailListLimitDefault
 	}

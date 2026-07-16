@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
@@ -42,10 +43,13 @@ type MsgStore struct {
 	db   *sql.DB
 	mu   sync.Mutex
 	subs map[string][]chan Message
-	// subscriberBuffer is the capacity of each per-subscriber channel; jailListLimit
-	// bounds a jail listing. Both are resolved from config at open time (issue #1249).
+	// subscriberBuffer is the capacity of each per-subscriber channel, resolved
+	// from config at open time (issue #1249). jailListLimit bounds a jail listing
+	// and is atomic so a config hot-reload (applyConfig → SetJailListLimit) can
+	// update it race-safely while ListJailed reads it, without reopening the
+	// database (issue #1291).
 	subscriberBuffer int
-	jailListLimit    int
+	jailListLimit    atomic.Int64
 }
 
 // MsgStoreSettings carries the config-derived operational limits for the message
@@ -101,12 +105,26 @@ func NewMsgStore(dbPath string, settings ...MsgStoreSettings) (*MsgStore, error)
 		return nil, err
 	}
 
-	return &MsgStore{
+	s := &MsgStore{
 		db:               db,
 		subs:             make(map[string][]chan Message),
 		subscriberBuffer: st.SubscriberBuffer,
-		jailListLimit:    st.JailListLimit,
-	}, nil
+	}
+	s.jailListLimit.Store(int64(st.JailListLimit))
+
+	return s, nil
+}
+
+// SetJailListLimit updates the jail listing cap race-safely for a config
+// hot-reload. A non-positive value falls back to the built-in default, mirroring
+// MsgStoreSettings.resolved so a cleared config key restores the default rather
+// than disabling the clamp (issue #1291).
+func (s *MsgStore) SetJailListLimit(n int) {
+	if n < 1 {
+		n = config.MessagesJailListLimitDefault
+	}
+
+	s.jailListLimit.Store(int64(n))
 }
 
 func initSchema(db *sql.DB) error {

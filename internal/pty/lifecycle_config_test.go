@@ -58,6 +58,67 @@ func TestSessionOptsInputDelayDefault(t *testing.T) {
 	}
 }
 
+// TestSetInputDelayLiveUpdate proves SetInputDelay changes the pause the next
+// WriteInputAndSubmit observes, so a config hot-reload takes effect on a live
+// PTY without reconstructing it (issue #1294). A large delay set after
+// construction must dominate the elapsed submit time.
+func TestSetInputDelayLiveUpdate(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "test.log")
+
+	s, err := NewSession(SessionOpts{
+		ID: "thrawn", Command: "sh", Args: []string{"-c", "sleep 30"},
+		Dir: t.TempDir(), Rows: 24, Cols: 80,
+		LogPath: logPath, MaxLogSize: 1024 * 1024,
+		InputDelay: time.Millisecond, // start small
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	s.SetInputDelay(300 * time.Millisecond)
+
+	start := time.Now()
+
+	if err := s.WriteInputAndSubmit([]byte("bonnie")); err != nil {
+		t.Fatal(err)
+	}
+
+	if elapsed := time.Since(start); elapsed < 250*time.Millisecond {
+		t.Fatalf("WriteInputAndSubmit took %v after SetInputDelay(300ms), want >= ~300ms", elapsed)
+	}
+}
+
+// TestSetInputDelayNonPositiveFallsBack proves a non-positive SetInputDelay
+// value restores the built-in default rather than writing text and CR back to
+// back, preserving the per-session construction default (issue #1294).
+func TestSetInputDelayNonPositiveFallsBack(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "test.log")
+
+	s, err := NewSession(SessionOpts{
+		ID: "strath", Command: "sh", Args: []string{"-c", "sleep 30"},
+		Dir: t.TempDir(), Rows: 24, Cols: 80,
+		LogPath: logPath, MaxLogSize: 1024 * 1024,
+		InputDelay: 500 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	s.SetInputDelay(0)
+
+	if s.inputDelay != typeInputDelay {
+		t.Fatalf("inputDelay = %v after SetInputDelay(0), want typeInputDelay %v", s.inputDelay, typeInputDelay)
+	}
+
+	s.SetInputDelay(-1 * time.Second)
+
+	if s.inputDelay != typeInputDelay {
+		t.Fatalf("inputDelay = %v after SetInputDelay(-1s), want typeInputDelay %v", s.inputDelay, typeInputDelay)
+	}
+}
+
 // TestAdoptOptsHydrationDisabled proves AdoptOpts.HydrationBytes == 0 skips
 // replaying the scrollback tail into the adopted session's screen, while a
 // positive value hydrates it (issue #1243).

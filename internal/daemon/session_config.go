@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/d0ugal/graith/internal/agent/transcript"
 	"github.com/d0ugal/graith/internal/approvals"
@@ -155,6 +156,62 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 	if sm.mcpManager != nil {
 		sm.mcpManager.Reload(newCfg)
 		sm.log.Info("MCP manager config reloaded")
+	}
+
+	// Push the hot-reloadable jail/todo enforcement limits into the live stores so
+	// the next operation observes the new caps without reopening the databases
+	// (issue #1291). The setters take the stores' own atomics/mutex and clamp to
+	// the database hard ceilings, so they run outside sm.mu and can never widen a
+	// limit past what the schema accepts.
+	if sm.messages != nil {
+		if oldLimit, newLimit := old.Messages.JailListLimitOrDefault(), newCfg.Messages.JailListLimitOrDefault(); oldLimit != newLimit {
+			sm.log.Info("config changed", "key", "messages.jail_list_limit", "old", oldLimit, "new", newLimit)
+		}
+
+		sm.messages.SetJailListLimit(newCfg.Messages.JailListLimitOrDefault())
+	}
+
+	if sm.todos != nil {
+		if oldTitle, newTitle := old.Todo.MaxTitleOrDefault(), newCfg.Todo.MaxTitleOrDefault(); oldTitle != newTitle {
+			sm.log.Info("config changed", "key", "todo.max_title", "old", oldTitle, "new", newTitle)
+		}
+
+		if oldNote, newNote := old.Todo.MaxNoteOrDefault(), newCfg.Todo.MaxNoteOrDefault(); oldNote != newNote {
+			sm.log.Info("config changed", "key", "todo.max_note", "old", oldNote, "new", newNote)
+		}
+
+		sm.todos.SetMaxTitle(newCfg.Todo.MaxTitleOrDefault())
+		sm.todos.SetMaxNote(newCfg.Todo.MaxNoteOrDefault())
+	}
+
+	// Push a reloaded [lifecycle] input_delay into every live PTY so the next
+	// gr type observes it, matching the documented read-at-each-use contract
+	// (issue #1294). Snapshot the drivers under the read lock, then update them
+	// outside sm.mu: SetInputDelay briefly contends the PTY write mutex (held
+	// across the input-submit pause), and blocking on it under the
+	// session-manager lock would violate the no-slow-work-under-lock invariant.
+	// Headless drivers have no submit pause and don't implement the setter, so
+	// the type assertion simply skips them.
+	if old.Lifecycle.InputDelayDuration() != newCfg.Lifecycle.InputDelayDuration() {
+		delay := newCfg.Lifecycle.InputDelayDuration()
+
+		sm.mu.RLock()
+
+		drivers := make([]SessionDriver, 0, len(sm.sessions))
+		for _, d := range sm.sessions {
+			drivers = append(drivers, d)
+		}
+
+		sm.mu.RUnlock()
+
+		for _, d := range drivers {
+			if setter, ok := d.(interface{ SetInputDelay(d time.Duration) }); ok {
+				setter.SetInputDelay(delay)
+			}
+		}
+
+		sm.log.Info("config changed", "key", "lifecycle.input_delay",
+			"old", old.Lifecycle.InputDelayDuration(), "new", delay)
 	}
 
 	// If the PR-comment author-trust config changed, re-evaluate jailed comments
