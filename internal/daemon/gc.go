@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/git"
 )
 
@@ -13,12 +14,28 @@ import (
 // corrupt repository on disk.
 var gcHasUncommittedChanges = git.HasUncommittedChanges
 
-// gcOrphanMinAge is the minimum age a worktree/scratch directory must have
-// before GC will consider it an orphan. Directories are created early in a
+// gcOrphanMinAge is the default minimum age a worktree/scratch directory must
+// have before GC will consider it an orphan. Directories are created early in a
 // session's lifecycle (during StatusCreating, before the session is committed
 // to state), so a young directory may belong to an in-flight create that GC
-// would otherwise race and destroy.
-const gcOrphanMinAge = 5 * time.Minute
+// would otherwise race and destroy. The effective value is configurable via
+// [gc] orphan_min_age; this constant is the fallback and the value tests
+// back-date against.
+const gcOrphanMinAge = config.DefaultGCOrphanMinAge
+
+// orphanMinAge resolves the configured minimum orphan age under the
+// session-manager lock, so a `gr reload` that retunes it takes effect on the
+// next GC sweep.
+func (sm *SessionManager) orphanMinAge() time.Duration {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if sm.cfg == nil {
+		return gcOrphanMinAge
+	}
+
+	return sm.cfg.GC.OrphanMinAgeDuration()
+}
 
 // GCOrphanType classifies where an orphan directory lives.
 const (
@@ -60,17 +77,19 @@ func (sm *SessionManager) knownSessionIDs() map[string]bool {
 }
 
 // FindOrphans scans the data dir for worktree and scratch directories with no
-// matching session that are older than gcOrphanMinAge. It reads state under the
-// lock to build the known-session set, then walks the filesystem lock-free.
+// matching session that are older than the configured orphan minimum age. It
+// reads state under the lock to build the known-session set, then walks the
+// filesystem lock-free.
 func (sm *SessionManager) FindOrphans(now time.Time) []GCOrphan {
 	known := sm.knownSessionIDs()
+	minAge := sm.orphanMinAge()
 
 	var orphans []GCOrphan
 
 	// Worktrees: <DataDir>/worktrees/<repoName>/<repoHash>/<sessionID>
 	worktreesDir := filepath.Join(sm.paths.DataDir, "worktrees")
 	if repos, err := os.ReadDir(worktreesDir); err == nil {
-		orphans = append(orphans, findOrphanWorktrees(repos, worktreesDir, known, now)...)
+		orphans = append(orphans, findOrphanWorktrees(repos, worktreesDir, known, now, minAge)...)
 	}
 
 	// Scratch dirs: <DataDir>/scratch/<sessionID>
@@ -82,7 +101,7 @@ func (sm *SessionManager) FindOrphans(now time.Time) []GCOrphan {
 			}
 
 			info, err := s.Info()
-			if err != nil || now.Sub(info.ModTime()) < gcOrphanMinAge {
+			if err != nil || now.Sub(info.ModTime()) < minAge {
 				continue
 			}
 
@@ -97,7 +116,7 @@ func (sm *SessionManager) FindOrphans(now time.Time) []GCOrphan {
 	return orphans
 }
 
-func findOrphanWorktrees(repos []os.DirEntry, worktreesDir string, known map[string]bool, now time.Time) []GCOrphan {
+func findOrphanWorktrees(repos []os.DirEntry, worktreesDir string, known map[string]bool, now time.Time, minAge time.Duration) []GCOrphan {
 	var orphans []GCOrphan
 
 	for _, repo := range repos {
@@ -130,7 +149,7 @@ func findOrphanWorktrees(repos []os.DirEntry, worktreesDir string, known map[str
 				}
 
 				info, err := sess.Info()
-				if err != nil || now.Sub(info.ModTime()) < gcOrphanMinAge {
+				if err != nil || now.Sub(info.ModTime()) < minAge {
 					continue
 				}
 

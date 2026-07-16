@@ -118,6 +118,50 @@ func TestFindOrphansRespectsMinAge(t *testing.T) {
 	}
 }
 
+// TestFindOrphansHonoursConfiguredMinAge verifies the orphan age floor is read
+// from [gc] orphan_min_age, not baked in: a directory older than the default 5m
+// but younger than a widened floor is spared, while shrinking the floor makes a
+// recent directory eligible.
+func TestFindOrphansHonoursConfiguredMinAge(t *testing.T) {
+	sm := newTestSessionManager(t)
+	dataDir := sm.paths.DataDir
+
+	// A dir aged ~10 minutes: an orphan under the 5m default, but not under a
+	// widened 1h floor.
+	wt := worktreeDir(dataDir, "croft", "/Code/croft", "aged10m")
+	if err := os.MkdirAll(wt, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	tenMinAgo := time.Now().Add(-10 * time.Minute)
+	if err := os.Chtimes(wt, tenMinAgo, tenMinAgo); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	// Default 5m floor: 10-minute-old dir is an orphan.
+	if orphans := sm.FindOrphans(time.Now()); len(orphans) != 1 {
+		t.Fatalf("default floor: found %d orphans, want 1", len(orphans))
+	}
+
+	// Widen the floor past its age: now spared.
+	sm.cfg.GC.OrphanMinAge = "1h"
+	if orphans := sm.FindOrphans(time.Now()); len(orphans) != 0 {
+		t.Fatalf("widened floor: found %d orphans, want 0: %+v", len(orphans), orphans)
+	}
+
+	// Opt out of the floor entirely: even a freshly-created dir is eligible.
+	fresh := worktreeDir(dataDir, "croft", "/Code/croft", "brandnew")
+	if err := os.MkdirAll(fresh, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	sm.cfg.GC.OrphanMinAge = "0"
+
+	if orphans := sm.FindOrphans(time.Now()); len(orphans) != 2 {
+		t.Fatalf("zero floor: found %d orphans, want 2 (both dirs): %+v", len(orphans), orphans)
+	}
+}
+
 func TestRunGCDryRunRemovesNothing(t *testing.T) {
 	sm := newTestSessionManager(t)
 	dataDir := sm.paths.DataDir

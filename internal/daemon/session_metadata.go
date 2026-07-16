@@ -370,7 +370,33 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 		Scrollback:        sbDiag,
 		Messages:          msgDiag,
 		Triggers:          sm.degradedTriggerDiagnostics(),
+		Purge:             sm.purgeDiagnostic(),
 	}
+}
+
+// purgeDiagnostic reports the soft-delete purge sweep schedule for gr doctor:
+// the configured cadence plus the last/next sweep times once a sweep has run.
+func (sm *SessionManager) purgeDiagnostic() *protocol.PurgeDiagnostic {
+	sm.mu.RLock()
+	del := sm.cfg.Delete
+	sm.mu.RUnlock()
+
+	last, next := sm.purgeSweepStats()
+
+	diag := &protocol.PurgeDiagnostic{
+		StartupDelay: del.PurgeStartupDelayDuration().String(),
+		Interval:     del.PurgeIntervalDuration().String(),
+	}
+
+	if !last.IsZero() {
+		diag.LastSweep = last.Format(time.RFC3339)
+	}
+
+	if !next.IsZero() {
+		diag.NextSweep = next.Format(time.RFC3339)
+	}
+
+	return diag
 }
 
 // degradedTriggerDiagnostics reports the currently-degraded watch-trigger

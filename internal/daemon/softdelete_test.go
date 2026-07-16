@@ -346,3 +346,39 @@ func TestPurgeCandidateCannotBeRestored(t *testing.T) {
 		t.Error("Restore must refuse an expired (purge-candidate) session")
 	}
 }
+
+// TestPurgeDiagnosticReportsCadenceAndSweep verifies gr doctor surfaces the
+// configured purge cadence and, once a sweep is recorded, the last/next times.
+func TestPurgeDiagnosticReportsCadenceAndSweep(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.cfg.Delete.PurgeStartupDelay = "45s"
+	sm.cfg.Delete.PurgeInterval = "7m"
+
+	// Before any sweep runs, the cadence is reported but last/next are empty.
+	before := sm.purgeDiagnostic()
+	if before == nil {
+		t.Fatal("purgeDiagnostic() = nil, want cadence report")
+	}
+
+	if before.StartupDelay != "45s" || before.Interval != "7m0s" {
+		t.Errorf("cadence = {%q, %q}, want {45s, 7m0s}", before.StartupDelay, before.Interval)
+	}
+
+	if before.LastSweep != "" || before.NextSweep != "" {
+		t.Errorf("pre-sweep last/next = {%q, %q}, want empty", before.LastSweep, before.NextSweep)
+	}
+
+	// Record a sweep; last/next become populated.
+	ran := time.Now().Truncate(time.Second)
+	sm.recordPurgeSweep(ran, 7*time.Minute)
+
+	after := sm.purgeDiagnostic()
+	if after.LastSweep == "" {
+		t.Error("post-sweep last_sweep is empty, want a timestamp")
+	}
+
+	wantNext := ran.Add(7 * time.Minute).Format(time.RFC3339)
+	if after.NextSweep != wantNext {
+		t.Errorf("next_sweep = %q, want %q", after.NextSweep, wantNext)
+	}
+}

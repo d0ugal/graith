@@ -270,7 +270,11 @@ func (sm *SessionManager) SoftDeleteWithChildren(rootID string, excludeRoot bool
 	}
 
 	// Sweep for descendants created between collectDescendants and now, up to a
-	// bounded number of rounds. Cheap: each round only re-marks.
+	// bounded number of rounds. Cheap: each round only re-marks. The bound is a
+	// deliberate safety invariant, not a tunable: it caps a convergence loop over
+	// a live session tree so a pathological or adversarial spawn rate can never
+	// spin it unbounded. It is intentionally NOT exposed as config (see the
+	// #1230 epic's "small defensive bounds" exclusion).
 	const maxSweepRounds = 10
 	for sweep := 0; sweep < maxSweepRounds; sweep++ {
 		sm.mu.RLock()
@@ -553,22 +557,32 @@ func (sm *SessionManager) reconcileSoftDeletedOrphans() {
 	}
 }
 
-// purgeStartupDelay is how long after startup the first purge sweep runs,
-// catching windows that expired while the daemon was down without racing the
-// rest of Run's initialization.
-const purgeStartupDelay = 30 * time.Second
+// purgeStartupDelay and purgeInterval read the current [delete] cadence under
+// the session-manager lock. They are re-read on every tick (not captured once)
+// so a `gr reload` that changes the timing takes effect on the running loop's
+// next Reset — matching RunGitPullLoop's hot-reload behaviour.
+func (sm *SessionManager) purgeStartupDelay() time.Duration {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
 
-// purgeInterval is how often the daemon sweeps for expired soft-deleted
-// sessions after the first sweep. It is intentionally coarse: the retention
-// window is measured in hours, so purging a little late is harmless.
-const purgeInterval = 10 * time.Minute
+	return sm.cfg.Delete.PurgeStartupDelayDuration()
+}
+
+func (sm *SessionManager) purgeInterval() time.Duration {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	return sm.cfg.Delete.PurgeIntervalDuration()
+}
 
 // RunPurgeLoop periodically hard-deletes soft-deleted sessions whose retention
 // window has elapsed. Modeled on RunGitPullLoop: one sweep shortly after startup
 // (to catch windows that elapsed while the daemon was down), then a coarse
-// ticker. Stops cleanly on context cancel.
+// ticker whose interval is re-read from config each tick. Stops cleanly on
+// context cancel.
 func (sm *SessionManager) RunPurgeLoop(ctx context.Context) {
-	runPurgeLoop(ctx, sm.loopTimer, sm.reconcileSoftDeletedOrphans, sm.purgeExpired, time.Now)
+	runPurgeLoop(ctx, sm.loopTimer, sm.reconcileSoftDeletedOrphans, sm.purgeExpired, time.Now,
+		sm.purgeStartupDelay, sm.purgeInterval, sm.recordPurgeSweep)
 }
 
 func runPurgeLoop(
@@ -577,12 +591,15 @@ func runPurgeLoop(
 	reconcile func(),
 	purge func(time.Time),
 	now func() time.Time,
+	startupDelay func() time.Duration,
+	interval func() time.Duration,
+	recordSweep func(ranAt time.Time, nextInterval time.Duration),
 ) {
 	// Close the SoftDelete crash window first: re-kill any agent left alive on a
 	// soft-deleted session before the state is otherwise trusted.
 	reconcile()
 
-	timer := newTimer(purgeStartupDelay)
+	timer := newTimer(startupDelay())
 	defer timer.Stop()
 
 	for {
@@ -590,8 +607,33 @@ func runPurgeLoop(
 		case <-ctx.Done():
 			return
 		case <-timer.C():
-			purge(now())
-			timer.Reset(purgeInterval)
+			ranAt := now()
+			purge(ranAt)
+
+			// Re-read the interval so a hot config reload takes effect here.
+			next := interval()
+			recordSweep(ranAt, next)
+			timer.Reset(next)
 		}
 	}
+}
+
+// recordPurgeSweep records when the last purge sweep ran and when the next is
+// due, for surfacing in `gr doctor` diagnostics. nextInterval is the delay
+// until the next sweep from ranAt.
+func (sm *SessionManager) recordPurgeSweep(ranAt time.Time, nextInterval time.Duration) {
+	sm.purgeStatsMu.Lock()
+	defer sm.purgeStatsMu.Unlock()
+
+	sm.lastPurgeSweep = ranAt
+	sm.nextPurgeSweep = ranAt.Add(nextInterval)
+}
+
+// purgeSweepStats returns the last and next purge-sweep times. Zero values mean
+// no sweep has run yet (the daemon is still within its startup delay).
+func (sm *SessionManager) purgeSweepStats() (last, next time.Time) {
+	sm.purgeStatsMu.Lock()
+	defer sm.purgeStatsMu.Unlock()
+
+	return sm.lastPurgeSweep, sm.nextPurgeSweep
 }
