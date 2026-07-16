@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/d0ugal/graith/internal/agent"
+	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/tools"
@@ -69,6 +70,23 @@ var rootCmd = &cobra.Command{
 		// Install the configured external-tool resolver so CLI-side git calls
 		// (store repo discovery) use the same executables as the daemon (#1238).
 		tools.Configure(cfg.Tools.Resolved())
+
+		// Install the configured client connection deadlines and attach reconnect
+		// cadence so every dial/handshake this invocation makes honours the
+		// [connection] block (#1242).
+		client.ConfigureConnection(client.ConnectionTimeouts{
+			Dial:            cfg.Connection.DialTimeoutDuration(),
+			Handshake:       cfg.Connection.HandshakeTimeoutDuration(),
+			Start:           cfg.Connection.StartTimeoutDuration(),
+			StartPoll:       cfg.Connection.StartPollIntervalDuration(),
+			RemoteDial:      cfg.Connection.RemoteDialTimeoutDuration(),
+			RemoteHandshake: cfg.Connection.RemoteHandshakeTimeoutDuration(),
+			RemotePairing:   cfg.Connection.RemotePairingTimeoutDuration(),
+		})
+		ConfigureReconnect(
+			cfg.Connection.ReconnectTimeoutDuration(),
+			cfg.Connection.ReconnectIntervalDuration(),
+		)
 
 		if !jsonOutput && (agentMode || agent.Detected()) {
 			jsonOutput = true

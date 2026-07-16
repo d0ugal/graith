@@ -50,14 +50,15 @@ type Config struct {
 	Remote           RemoteConfig       `toml:"remote"`
 	Input            InputConfig        `toml:"input"`
 	Agents           map[string]Agent   `toml:"agents"`
-	Triggers         []TriggerConfig    `toml:"trigger"`   // [[trigger]] array
-	TriggersRuntime  TriggersRuntime    `toml:"triggers"`  // [triggers] table (daemon-wide settings)
-	Headless         HeadlessConfig     `toml:"headless"`  // [headless] table (issue #1075)
-	Updates          UpdatesConfig      `toml:"updates"`   // [updates] table (issue #1253)
-	Detection        DetectionConfig    `toml:"detection"` // [detection] table (issue #1241)
-	ConfigReload     ConfigReload       `toml:"config"`    // [config] table (issue #1237)
-	Tools            ToolsConfig        `toml:"tools"`     // [tools] table (issue #1238)
-	Git              GitConfig          `toml:"git"`       // [git] table (issue #1238)
+	Triggers         []TriggerConfig    `toml:"trigger"`    // [[trigger]] array
+	TriggersRuntime  TriggersRuntime    `toml:"triggers"`   // [triggers] table (daemon-wide settings)
+	Headless         HeadlessConfig     `toml:"headless"`   // [headless] table (issue #1075)
+	Updates          UpdatesConfig      `toml:"updates"`    // [updates] table (issue #1253)
+	Detection        DetectionConfig    `toml:"detection"`  // [detection] table (issue #1241)
+	ConfigReload     ConfigReload       `toml:"config"`     // [config] table (issue #1237)
+	Tools            ToolsConfig        `toml:"tools"`      // [tools] table (issue #1238)
+	Git              GitConfig          `toml:"git"`        // [git] table (issue #1238)
+	Connection       ConnectionConfig   `toml:"connection"` // [connection] table (issue #1242)
 }
 
 // ConfigReloadDebounceDefault is the quiet period the config-file watcher waits
@@ -220,6 +221,119 @@ func (g GitConfig) MergeTimeoutDuration() time.Duration {
 // defaulting to 15s.
 func (g GitConfig) UsernameTimeoutDuration() time.Duration {
 	return parseDurationOr(g.UsernameTimeout, 15*time.Second)
+}
+
+// ConnectionConfig is the [connection] block tuning the deadlines and retry
+// cadence the stateless `gr` client applies when talking to a daemon (issue
+// #1242). Previously these were hard-coded (local dial 500ms, handshake/start
+// 5s, startup re-probe 50ms, attach reconnect 10s/250ms, remote dial/handshake
+// 10s/15s, remote pairing wait 11m). Slow machines, high-latency links, and
+// remote daemons on constrained networks can legitimately exceed the built-in
+// bounds, so each is overridable. Every value is a duration; an empty,
+// unparseable, or non-positive entry keeps the built-in default (a bad value is
+// rejected at config load by Validate). These are read once at CLI startup and
+// installed into the client, so a change takes effect on the next `gr`
+// invocation.
+type ConnectionConfig struct {
+	// DialTimeout bounds a single Unix-socket dial to the local daemon
+	// (default "500ms").
+	DialTimeout string `toml:"dial_timeout"`
+	// HandshakeTimeout bounds the local-daemon handshake exchange, so a stale
+	// or wedged socket can't hang a command forever (default "5s").
+	HandshakeTimeout string `toml:"handshake_timeout"`
+	// StartTimeout bounds how long EnsureDaemon waits for a freshly spawned
+	// daemon to begin answering handshakes (default "5s").
+	StartTimeout string `toml:"start_timeout"`
+	// StartPollInterval is how often EnsureDaemon re-probes the socket while
+	// waiting for a spawned daemon to come up (default "50ms").
+	StartPollInterval string `toml:"start_poll_interval"`
+	// ReconnectTimeout bounds the attach disconnect-recovery retry before the
+	// client gives up reattaching (default "10s").
+	ReconnectTimeout string `toml:"reconnect_timeout"`
+	// ReconnectInterval is how often the attach recovery loop re-probes the
+	// daemon while reconnecting (default "250ms").
+	ReconnectInterval string `toml:"reconnect_interval"`
+	// RemoteDialTimeout bounds the TCP dial to a paired remote daemon
+	// (default "10s").
+	RemoteDialTimeout string `toml:"remote_dial_timeout"`
+	// RemoteHandshakeTimeout bounds the remote handshake plus
+	// proof-of-possession exchange (default "15s").
+	RemoteHandshakeTimeout string `toml:"remote_handshake_timeout"`
+	// RemotePairingTimeout bounds how long the CLI waits for the remote human to
+	// approve `gr pair`, and should sit just past the daemon's pending-pairing
+	// TTL (default "11m").
+	RemotePairingTimeout string `toml:"remote_pairing_timeout"`
+}
+
+// Connection timing defaults. Each mirrors the fixed value that governed the
+// behaviour before issue #1242 made the policy configurable.
+const (
+	ConnectionDialTimeoutDefault            = 500 * time.Millisecond
+	ConnectionHandshakeTimeoutDefault       = 5 * time.Second
+	ConnectionStartTimeoutDefault           = 5 * time.Second
+	ConnectionStartPollIntervalDefault      = 50 * time.Millisecond
+	ConnectionReconnectTimeoutDefault       = 10 * time.Second
+	ConnectionReconnectIntervalDefault      = 250 * time.Millisecond
+	ConnectionRemoteDialTimeoutDefault      = 10 * time.Second
+	ConnectionRemoteHandshakeTimeoutDefault = 15 * time.Second
+	ConnectionRemotePairingTimeoutDefault   = 11 * time.Minute
+)
+
+// DialTimeoutDuration returns the local-daemon dial timeout, or the default when
+// unset, unparseable, or non-positive (a zero/negative timeout would abort the
+// dial immediately).
+func (c ConnectionConfig) DialTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(c.DialTimeout, ConnectionDialTimeoutDefault)
+}
+
+// HandshakeTimeoutDuration returns the local-daemon handshake timeout, or the
+// default when unset, unparseable, or non-positive.
+func (c ConnectionConfig) HandshakeTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(c.HandshakeTimeout, ConnectionHandshakeTimeoutDefault)
+}
+
+// StartTimeoutDuration returns the daemon-startup wait, or the default when
+// unset, unparseable, or non-positive.
+func (c ConnectionConfig) StartTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(c.StartTimeout, ConnectionStartTimeoutDefault)
+}
+
+// StartPollIntervalDuration returns the daemon-startup re-probe interval, or the
+// default when unset, unparseable, or non-positive (a zero interval would
+// busy-loop).
+func (c ConnectionConfig) StartPollIntervalDuration() time.Duration {
+	return positiveDurationOrDefault(c.StartPollInterval, ConnectionStartPollIntervalDefault)
+}
+
+// ReconnectTimeoutDuration returns the attach reconnect deadline, or the default
+// when unset, unparseable, or non-positive.
+func (c ConnectionConfig) ReconnectTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(c.ReconnectTimeout, ConnectionReconnectTimeoutDefault)
+}
+
+// ReconnectIntervalDuration returns the attach reconnect re-probe interval, or
+// the default when unset, unparseable, or non-positive (a zero interval would
+// busy-loop).
+func (c ConnectionConfig) ReconnectIntervalDuration() time.Duration {
+	return positiveDurationOrDefault(c.ReconnectInterval, ConnectionReconnectIntervalDefault)
+}
+
+// RemoteDialTimeoutDuration returns the remote TCP dial timeout, or the default
+// when unset, unparseable, or non-positive.
+func (c ConnectionConfig) RemoteDialTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(c.RemoteDialTimeout, ConnectionRemoteDialTimeoutDefault)
+}
+
+// RemoteHandshakeTimeoutDuration returns the remote handshake/PoP timeout, or
+// the default when unset, unparseable, or non-positive.
+func (c ConnectionConfig) RemoteHandshakeTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(c.RemoteHandshakeTimeout, ConnectionRemoteHandshakeTimeoutDefault)
+}
+
+// RemotePairingTimeoutDuration returns the remote pairing-approval wait, or the
+// default when unset, unparseable, or non-positive.
+func (c ConnectionConfig) RemotePairingTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(c.RemotePairingTimeout, ConnectionRemotePairingTimeoutDefault)
 }
 
 // HeadlessConfig is the [headless] block gating headless stream-json sessions
@@ -2869,6 +2983,33 @@ func (c *Config) Validate() error {
 	// skipped (they keep PATH-lookup semantics).
 	if err := c.Tools.Validate(); err != nil {
 		errs = append(errs, err)
+	}
+
+	// [connection] deadlines/intervals: a non-empty but unparseable or
+	// non-positive value must fail loudly rather than silently falling back to
+	// the accessor default (mirrors git timeouts). A zero/negative dial or
+	// handshake timeout would abort the connection immediately; a zero poll
+	// interval would busy-loop.
+	for _, f := range []struct{ name, val string }{
+		{"connection.dial_timeout", c.Connection.DialTimeout},
+		{"connection.handshake_timeout", c.Connection.HandshakeTimeout},
+		{"connection.start_timeout", c.Connection.StartTimeout},
+		{"connection.start_poll_interval", c.Connection.StartPollInterval},
+		{"connection.reconnect_timeout", c.Connection.ReconnectTimeout},
+		{"connection.reconnect_interval", c.Connection.ReconnectInterval},
+		{"connection.remote_dial_timeout", c.Connection.RemoteDialTimeout},
+		{"connection.remote_handshake_timeout", c.Connection.RemoteHandshakeTimeout},
+		{"connection.remote_pairing_timeout", c.Connection.RemotePairingTimeout},
+	} {
+		if strings.TrimSpace(f.val) == "" {
+			continue
+		}
+
+		if d, err := ParseDurationWithDays(f.val); err != nil {
+			errs = append(errs, fmt.Errorf("%s %q: %w", f.name, f.val, err))
+		} else if d <= 0 {
+			errs = append(errs, fmt.Errorf("%s %q: must be greater than zero", f.name, f.val))
+		}
 	}
 
 	errs = append(errs, c.validateTriggers()...)

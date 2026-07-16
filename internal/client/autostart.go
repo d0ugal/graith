@@ -17,13 +17,9 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
-// Timeouts for talking to the daemon socket. These are package vars rather than
-// consts so tests can shorten the handshake timeout without waiting seconds.
-var (
-	daemonDialTimeout      = 500 * time.Millisecond
-	daemonHandshakeTimeout = 5 * time.Second
-	daemonStartTimeout     = 5 * time.Second
-)
+// Timeouts for talking to the daemon socket live in timeouts.go as package vars
+// so ConfigureConnection can install config-derived values (issue #1242) and
+// tests can shorten them without waiting real seconds.
 
 // startDaemonFn spawns a fresh daemon. It's a package var so tests can
 // substitute a stub instead of exec'ing a real daemon process.
@@ -79,7 +75,7 @@ func EnsureDaemon(paths config.Paths, configFile string) (net.Conn, error) {
 		select {
 		case <-ctx.Done():
 			return nil, errors.New("daemon did not start in time")
-		case <-time.After(50 * time.Millisecond):
+		case <-time.After(daemonStartPollInterval):
 		}
 	}
 }

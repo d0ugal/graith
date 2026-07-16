@@ -68,7 +68,7 @@ func remoteTLSConfig(rh *RemoteHost) *tls.Config {
 // device. Unlike New/Connect it never touches the local daemon (no
 // EnsureDaemon, no auto-upgrade).
 func ConnectRemote(paths config.Paths, rh *RemoteHost, signer ed25519.PrivateKey, cols, rows uint16) (*Client, error) {
-	raw, err := net.DialTimeout("tcp", net.JoinHostPort(rh.Host, strconv.Itoa(rh.Port)), 10*time.Second)
+	raw, err := net.DialTimeout("tcp", net.JoinHostPort(rh.Host, strconv.Itoa(rh.Port)), remoteDialTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", rh.Host, err)
 	}
@@ -82,7 +82,7 @@ func ConnectRemote(paths config.Paths, rh *RemoteHost, signer ed25519.PrivateKey
 	// Bound the handshake + proof-of-possession exchange so an unresponsive
 	// daemon can't hang the client forever. Cleared before the long-lived
 	// passthrough loop below.
-	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(remoteHandshakeTimeout))
 
 	c := &Client{
 		conn:   conn,
@@ -140,7 +140,7 @@ func ConnectRemote(paths config.Paths, rh *RemoteHost, signer ed25519.PrivateKey
 // runs `gr pair approve`, then returns the minted RemoteHost credentials. No
 // token or proof-of-possession is used — this is the roleNone pairing lane.
 func PairRemote(paths config.Paths, host string, port int, profile, deviceLabel, devicePubKey string) (*RemoteHost, error) {
-	raw, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 10*time.Second)
+	raw, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), remoteDialTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", host, err)
 	}
@@ -185,7 +185,7 @@ func PairRemote(paths config.Paths, host string, port int, profile, deviceLabel,
 	}
 
 	// Bound the handshake so an unresponsive daemon can't hang forever.
-	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(remoteHandshakeTimeout))
 
 	c := &Client{conn: conn, reader: protocol.NewFrameReader(conn), writer: protocol.NewFrameWriter(conn), paths: paths}
 	defer c.Close()
@@ -222,7 +222,7 @@ func PairRemote(paths config.Paths, host string, port int, profile, deviceLabel,
 
 	// Awaiting local human approval can legitimately take minutes; extend the
 	// deadline to just past the daemon's pending-pairing TTL.
-	_ = conn.SetDeadline(time.Now().Add(11 * time.Minute))
+	_ = conn.SetDeadline(time.Now().Add(remotePairingTimeout))
 
 	// Block until approved. Skip the auth_challenge that arrives first.
 	for {

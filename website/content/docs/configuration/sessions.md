@@ -150,3 +150,22 @@ username_timeout = "15s"  # bounds GitHub-username discovery (may invoke `gh`)
 ```
 
 An unset field keeps its built-in default (2m / 2m / 15s). A value that is set but unparseable, or that is zero or negative, is rejected at config load.
+
+## Connection deadlines
+
+The `[connection]` block tunes the deadlines and retry cadence the stateless `gr` client applies when talking to a daemon. Slow machines, high-latency links, or a remote daemon on a constrained network can legitimately exceed the defaults. These values are read once per `gr` invocation, so a change takes effect on the next command.
+
+```toml
+[connection]
+dial_timeout             = "500ms"  # a single Unix-socket dial to the local daemon
+handshake_timeout        = "5s"     # the local-daemon handshake exchange
+start_timeout            = "5s"     # wait for a freshly spawned daemon to answer
+start_poll_interval      = "50ms"   # re-probe cadence while the daemon starts
+reconnect_timeout        = "10s"    # attach disconnect-recovery before giving up
+reconnect_interval       = "250ms"  # re-probe cadence while reattaching
+remote_dial_timeout      = "10s"    # TCP dial to a paired remote daemon
+remote_handshake_timeout = "15s"    # remote handshake + proof-of-possession
+remote_pairing_timeout   = "11m"    # wait for the remote human to approve `gr pair`
+```
+
+An unset field keeps its built-in default (shown above). A value that is set but unparseable, or that is zero or negative, is rejected at config load. The `remote_*` fields apply only to remote-daemon connections (see [Orchestrator & remote access]({{< relref "/docs/configuration/access.md" >}})); the others apply to the local daemon and attach recovery.
