@@ -594,6 +594,140 @@ func TestNormalDataPassthrough(t *testing.T) {
 	}
 }
 
+// TestReadOnlyBlocksInput is the regression test for issue #31: in a read-only
+// attach, typed bytes must never be forwarded to the daemon, while the daemon's
+// output still streams to stdout.
+func TestReadOnlyBlocksInput(t *testing.T) {
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+
+	daemonReader := protocol.NewFrameReader(daemonConn)
+	received := make(chan []byte, 10)
+
+	go func() {
+		for {
+			frame, err := daemonReader.ReadFrame()
+			if err != nil {
+				return
+			}
+
+			if frame.Channel == protocol.ChannelData {
+				received <- append([]byte{}, frame.Payload...)
+			}
+		}
+	}()
+
+	go func() {
+		writer := protocol.NewFrameWriter(daemonConn)
+
+		_ = writer.WriteFrame(protocol.ChannelData, []byte("output"))
+	}()
+
+	stdinR, stdinW := io.Pipe()
+	stdout := &lockedWriter{}
+
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+
+		// Typed bytes must be dropped in read-only mode.
+		_, _ = stdinW.Write([]byte("please do not type this"))
+
+		time.Sleep(30 * time.Millisecond)
+
+		// The prefix key still works: ctrl+b d detaches.
+		_, _ = stdinW.Write([]byte{0x02, 'd'})
+	}()
+
+	opts := testOpts
+	opts.ReadOnly = true
+
+	ctx := context.Background()
+	result := c.runPassthroughLoop(ctx, opts, stdinR, stdout, nil)
+
+	if result != ResultDetached {
+		t.Fatalf("expected ResultDetached, got %d", result)
+	}
+
+	select {
+	case data := <-received:
+		t.Fatalf("read-only mode forwarded input to daemon: %q", data)
+	case <-time.After(200 * time.Millisecond):
+		// No data forwarded — correct.
+	}
+
+	if !bytes.Contains(stdout.Bytes(), []byte("output")) {
+		t.Fatalf("expected daemon output in stdout, got %q", stdout.String())
+	}
+}
+
+// TestReadOnlyBlocksDoublePrefixAndUnknownKey verifies that the two prefix
+// paths that would otherwise inject bytes (a doubled prefix, and an unrecognised
+// follow-up key) are also suppressed in read-only mode.
+func TestReadOnlyBlocksDoublePrefixAndUnknownKey(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		keys []byte
+	}{
+		{"double-prefix", []byte{0x02, 0x02}},
+		{"unknown-key", []byte{0x02, 'Z'}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clientConn, daemonConn := net.Pipe()
+			defer func() { _ = daemonConn.Close() }()
+
+			c := newTestClient(clientConn)
+
+			daemonReader := protocol.NewFrameReader(daemonConn)
+			received := make(chan []byte, 10)
+
+			go func() {
+				for {
+					frame, err := daemonReader.ReadFrame()
+					if err != nil {
+						return
+					}
+
+					if frame.Channel == protocol.ChannelData {
+						received <- append([]byte{}, frame.Payload...)
+					}
+				}
+			}()
+
+			stdinR, stdinW := io.Pipe()
+			stdout := &lockedWriter{}
+
+			go func() {
+				time.Sleep(30 * time.Millisecond)
+
+				_, _ = stdinW.Write(tc.keys)
+
+				time.Sleep(30 * time.Millisecond)
+
+				_, _ = stdinW.Write([]byte{0x02, 'd'})
+			}()
+
+			opts := testOpts
+			opts.ReadOnly = true
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			result := c.runPassthroughLoop(ctx, opts, stdinR, stdout, nil)
+			if result != ResultDetached {
+				t.Fatalf("expected ResultDetached, got %d", result)
+			}
+
+			select {
+			case data := <-received:
+				t.Fatalf("read-only mode forwarded input to daemon: %q", data)
+			case <-time.After(150 * time.Millisecond):
+			}
+		})
+	}
+}
+
 func TestDaemonDetachesClient(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
 	defer func() { _ = daemonConn.Close() }()

@@ -71,6 +71,7 @@ func runAttachByID(c attachConn, sessionID string, initialCollapsed map[string]b
 		Keys:      passthroughKeysFromConfig(),
 		SessionID: sessionID,
 		Info:      &l.info,
+		ReadOnly:  attachReadOnly,
 	}
 	if cfg.StatusBar.Enabled {
 		l.opts.StatusBar = &client.StatusBarCfg{
@@ -274,7 +275,7 @@ func (l *attachLoop) overlayCreate(nc attachConn, overlayResult *client.OverlayR
 // reattaches to the current session.
 func (l *attachLoop) overlaySwitch(nc attachConn, targetID string) (bool, error) {
 	restoreScreen(targetID)
-	_ = nc.SendControl("attach", protocol.AttachMsg{SessionID: targetID})
+	_ = nc.SendControl("attach", attachMsg(targetID))
 	attachResp, _ := nc.ReadControlResponse()
 
 	if attachResp.Type == "convert_required" {

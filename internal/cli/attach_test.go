@@ -397,3 +397,28 @@ func TestConfirmConvertEOFDeclines(t *testing.T) {
 		t.Fatal("confirmConvert should decline on EOF")
 	}
 }
+
+// TestAttachMsgCarriesReadOnly locks the flag→message wiring for issue #31: the
+// invocation-wide attachReadOnly flag must ride every AttachMsg so re-attaches
+// in the passthrough loop preserve the observer's read-only mode.
+func TestAttachMsgCarriesReadOnly(t *testing.T) {
+	orig := attachReadOnly
+	defer func() { attachReadOnly = orig }()
+
+	attachReadOnly = false
+
+	if msg := attachMsg("braw"); msg.ReadOnly {
+		t.Errorf("expected ReadOnly=false, got true (session %q)", msg.SessionID)
+	}
+
+	attachReadOnly = true
+
+	msg := attachMsg("canny")
+	if !msg.ReadOnly {
+		t.Error("expected ReadOnly=true when attachReadOnly is set")
+	}
+
+	if msg.SessionID != "canny" {
+		t.Errorf("expected SessionID canny, got %q", msg.SessionID)
+	}
+}

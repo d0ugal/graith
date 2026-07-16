@@ -97,6 +97,65 @@ func TestFormatStatusLineExactWidth(t *testing.T) {
 	}
 }
 
+// TestFormatReadOnlyLine covers the read-only attach indicator (issue #31): it
+// must announce READ-ONLY, name the session, and fill the terminal width.
+func TestFormatReadOnlyLine(t *testing.T) {
+	info := statusBarInfo{
+		name:   "canny-observer",
+		agent:  "claude",
+		status: "running",
+	}
+
+	line := formatReadOnlyLine(info, 80)
+
+	if !strings.Contains(line, "READ-ONLY") {
+		t.Errorf("expected READ-ONLY indicator, got %q", line)
+	}
+
+	if !strings.Contains(line, "canny-observer") {
+		t.Errorf("expected session name in line, got %q", line)
+	}
+
+	if !strings.Contains(line, "claude") {
+		t.Errorf("expected agent in line, got %q", line)
+	}
+
+	if w := lipgloss.Width(line); w != 80 {
+		t.Errorf("expected visual width 80, got %d", w)
+	}
+}
+
+// TestFormatReadOnlyLineNarrow ensures the read-only line never overflows a
+// narrow terminal.
+func TestFormatReadOnlyLineNarrow(t *testing.T) {
+	info := statusBarInfo{name: "a-very-long-session-name-that-overflows", agent: "claude"}
+
+	line := formatReadOnlyLine(info, 20)
+	if w := lipgloss.Width(line); w > 20 {
+		t.Errorf("expected width <= 20, got %d", w)
+	}
+}
+
+// TestStatusBarRenderReadOnly verifies the status bar renders the read-only
+// indicator (not the normal status line) when readOnly is set.
+func TestStatusBarRenderReadOnly(t *testing.T) {
+	sb := &statusBarState{
+		info:     statusBarInfo{name: "canny-observer", agent: "claude", status: "running"},
+		rows:     24,
+		cols:     80,
+		position: "bottom",
+		readOnly: true,
+	}
+
+	var buf bytes.Buffer
+
+	sb.render(&buf)
+
+	if !strings.Contains(buf.String(), "READ-ONLY") {
+		t.Errorf("expected read-only indicator in rendered bar, got %q", buf.String())
+	}
+}
+
 func TestStatusBarInfoFromSession(t *testing.T) {
 	session := protocol.SessionInfo{
 		Name:          "braw-session",

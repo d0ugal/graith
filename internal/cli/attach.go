@@ -13,6 +13,18 @@ import (
 // sessions (`gr attach --yes`). See runAttachByID / issue #1137.
 var attachYes bool
 
+// attachReadOnly requests a read-only attach (`gr attach --read-only`): PTY
+// output streams but keyboard input is blocked, so an observer can watch a
+// session without risk of injecting input (issue #31). It is a property of the
+// whole attach invocation, so it rides every (re)attach in the loop.
+var attachReadOnly bool
+
+// attachMsg builds an AttachMsg carrying the invocation-wide read-only flag, so
+// every (re)attach in the passthrough loop preserves the observer's mode.
+func attachMsg(sessionID string) protocol.AttachMsg {
+	return protocol.AttachMsg{SessionID: sessionID, ReadOnly: attachReadOnly}
+}
+
 var attachCmd = &cobra.Command{
 	Use:               "attach [name-or-id]",
 	Aliases:           []string{"a"},
@@ -32,6 +44,7 @@ var attachCmd = &cobra.Command{
 // registerAttachCmd registers this command on rootCmd. Called from registerCommands.
 func registerAttachCmd() {
 	attachCmd.Flags().BoolVarP(&attachYes, "yes", "y", false, "skip the convert-to-interactive confirmation when attaching to a headless session")
+	attachCmd.Flags().BoolVar(&attachReadOnly, "read-only", false, "attach read-only: stream output but block keyboard input (prefix key still works)")
 	rootCmd.AddCommand(attachCmd)
 }
 

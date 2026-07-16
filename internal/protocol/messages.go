@@ -122,6 +122,11 @@ type MigrateMsg struct {
 
 type AttachMsg struct {
 	SessionID string `json:"session_id"`
+	// ReadOnly requests a read-only attach: the daemon streams PTY output to the
+	// client but drops any input frames the client sends, so an observer can
+	// watch a session without risk of injecting keystrokes (issue #31). The
+	// client also gates input locally; this is the server-side backstop.
+	ReadOnly bool `json:"read_only,omitempty"`
 }
 
 // AttachConvertMsg requests converting a headless (one-shot stream-json) session

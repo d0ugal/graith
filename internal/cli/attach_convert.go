@@ -23,7 +23,7 @@ func attachWithConvert(c controlConn, sessionID string) (protocol.SessionInfo, b
 	converted := false
 
 	for {
-		_ = c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+		_ = c.SendControl("attach", attachMsg(sessionID))
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {

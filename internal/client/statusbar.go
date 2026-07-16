@@ -209,6 +209,40 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 	return line
 }
 
+// formatReadOnlyLine renders the persistent read-only indicator shown during a
+// read-only attach (issue #31): a bold badge followed by the session name and
+// agent/status, padded to the full terminal width so it reads as a bar.
+func formatReadOnlyLine(info statusBarInfo, cols int) string {
+	badgeBg := lipgloss.Color("#8b0000")
+
+	badgeStyle := lipgloss.NewStyle().Bold(true).Foreground(colorGold).Background(badgeBg)
+	nameStyle := lipgloss.NewStyle().Bold(true).Foreground(colorGold).Background(barBg)
+	dimStyle := lipgloss.NewStyle().Foreground(colorDim).Background(barBg)
+	fillStyle := lipgloss.NewStyle().Background(barBg)
+
+	badge := badgeStyle.Render(" 🔒 READ-ONLY ")
+
+	body := fillStyle.Render(" ") + nameStyle.Render(info.name)
+	if info.agent != "" {
+		body += dimStyle.Render(" · " + info.agent)
+	}
+
+	body += dimStyle.Render(" · input disabled")
+
+	line := badge + body
+
+	gap := cols - lipgloss.Width(line)
+	if gap > 0 {
+		line += fillStyle.Render(strings.Repeat(" ", gap))
+	}
+
+	if lipgloss.Width(line) > cols {
+		line = ansi.Truncate(line, cols, "")
+	}
+
+	return line
+}
+
 // formatPRSection renders the linked-PR token for the status bar, e.g.
 // "PR#56 ✗" (CI failing) or "PR#56 ⚠conflict", colored by the worst signal.
 func formatPRSection(info statusBarInfo, bg color.Color) string {
@@ -308,6 +342,9 @@ type statusBarState struct {
 	cols             int
 	position         string
 	pendingApprovals int
+	// readOnly renders a read-only indicator instead of the normal status line,
+	// used as the persistent indicator for a read-only attach (issue #31).
+	readOnly bool
 }
 
 func (sb *statusBarState) barRow() int {
@@ -332,9 +369,14 @@ func (sb *statusBarState) render(w io.Writer) {
 	info.pendingApprovals = sb.pendingApprovals
 	cols := sb.cols
 	row := sb.barRow()
+	readOnly := sb.readOnly
 	sb.mu.Unlock()
 
 	line := formatStatusLine(info, cols)
+	if readOnly {
+		line = formatReadOnlyLine(info, cols)
+	}
+
 	seq := fmt.Sprintf("\x1b7\x1b[%d;1H%s\x1b8", row, line)
 	_, _ = w.Write([]byte(seq))
 }
@@ -347,9 +389,13 @@ func (sb *statusBarState) setup(w io.Writer) {
 	info.pendingApprovals = sb.pendingApprovals
 	cols := sb.cols
 	row := sb.barRow()
+	readOnly := sb.readOnly
 	sb.mu.Unlock()
 
 	line := formatStatusLine(info, cols)
+	if readOnly {
+		line = formatReadOnlyLine(info, cols)
+	}
 
 	var buf []byte
 
