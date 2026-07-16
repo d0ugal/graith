@@ -39,6 +39,11 @@ type msgFetchedMsg struct {
 
 type msgTickMsg struct{}
 
+// scheduleMessageTick is a test seam around Bubble Tea's timer. Production
+// uses tea.Tick; tests replace it to observe the configured cadence without
+// sleeping.
+var scheduleMessageTick = tea.Tick
+
 type messageOverlayModel struct {
 	selfID string
 	// fetch returns the conversation messages and ok=false on a transient
@@ -79,7 +84,7 @@ func (m messageOverlayModel) Init() tea.Cmd {
 }
 
 func (m messageOverlayModel) tickCmd() tea.Cmd {
-	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+	return scheduleMessageTick(refreshInterval, func(time.Time) tea.Msg {
 		return msgTickMsg{}
 	})
 }
@@ -754,8 +759,9 @@ func sanitizeMessageBody(s string) string {
 
 // RunMessageOverlay displays the chatroom-style message viewer for sessionID,
 // showing direct messages to and from that session grouped by peer. It is
-// read-only in v1 and refreshes every 2 seconds. fetch returns the conversation
-// and ok=false on a transient error (so the last good snapshot is kept).
+// read-only in v1 and refreshes at the configured terminal.refresh_interval.
+// fetch returns the conversation and ok=false on a transient error (so the
+// last good snapshot is kept).
 // Returns when the user closes the overlay; the caller then reattaches.
 func RunMessageOverlay(sessionID string, keys MessageKeys, fetch func() ([]protocol.ConversationMessage, bool), names map[string]string) {
 	m := newMessageOverlayModel(sessionID, fetch, names)

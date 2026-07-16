@@ -635,10 +635,31 @@ func TestMsgOverlay_FetchCmdTransientError(t *testing.T) {
 	}
 }
 
-// Note: tickCmd's timer behavior is covered structurally via the msgTickMsg
-// handler tests below (TickStartsFetch / TickSkipsWhenFetching) rather than by
-// executing the real 2-second tea.Tick, which would add a wall-clock delay to
-// the suite.
+func TestMsgOverlay_TickHonoursConfiguredRefreshInterval(t *testing.T) {
+	savePresentation(t)
+
+	original := scheduleMessageTick
+	t.Cleanup(func() { scheduleMessageTick = original })
+
+	const configured = 375 * time.Millisecond
+	ConfigurePresentation(PresentationPrefs{RefreshInterval: configured})
+
+	var captured time.Duration
+	scheduleMessageTick = func(d time.Duration, fn func(time.Time) tea.Msg) tea.Cmd {
+		captured = d
+
+		return func() tea.Msg { return fn(time.Unix(1000, 0)) }
+	}
+
+	cmd := newMessageOverlayModel("ben", nil, nil).tickCmd()
+	if captured != configured {
+		t.Fatalf("message viewer tick = %v, want configured %v", captured, configured)
+	}
+
+	if _, ok := cmd().(msgTickMsg); !ok {
+		t.Fatalf("tick command produced %T, want msgTickMsg", cmd())
+	}
+}
 
 // --- Update: tick fetching guard ---
 

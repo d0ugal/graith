@@ -194,7 +194,7 @@ inbox_preview_bytes   = 1000     # unread-inbox preview injected into a session'
 # (column arithmetic, wrap widths, frame rates) are deliberately NOT configurable
 # — they must match render logic. Empty or non-positive values fall back below.
 [terminal]
-refresh_interval = "2s"   # how often the session picker/dashboard/status bar re-poll for state ("0"/non-positive => 2s)
+refresh_interval = "2s"   # how often the picker/dashboard/message viewer/status bar re-poll for state ("0"/non-positive => 2s)
 summary_width = 40        # max visible width of a `gr status` summary in the picker before truncation
 
 # Update check: `gr list` and `gr doctor` query GitHub for a newer graith release

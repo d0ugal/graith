@@ -107,13 +107,13 @@ drag_arrow_threshold = 2      # cells of drag movement per emitted arrow-key pre
 
 ```toml
 [terminal]
-refresh_interval = "2s"  # how often the picker/dashboard/status bar re-poll for state
+refresh_interval = "2s"  # how often the picker/dashboard/message viewer/status bar re-poll for state
 summary_width    = 40    # max visible width of a `gr status` summary in the picker
 ```
 
 The `[terminal]` block collects the interactive client's presentation preferences that were previously fixed.
 
-**`refresh_interval`** is the cadence at which the session picker (`ctrl+b w`), the `gr dashboard`, and an attached status bar re-poll the daemon for fresh session state. A shorter interval feels more live at the cost of more polling; a non-positive value falls back to the default (a zero cadence would busy-loop).
+**`refresh_interval`** is the cadence at which the session picker (`ctrl+b w`), the in-picker message viewer (`ctrl+b m`), the `gr dashboard`, and an attached status bar re-poll the daemon for fresh state. A shorter interval feels more live at the cost of more polling; a non-positive value falls back to the default (a zero cadence would busy-loop).
 
 **`summary_width`** is the widest a `gr status` summary may render in the picker before it is truncated with an ellipsis. It is measured in terminal display cells, not bytes or runes, so wide CJK/emoji, combining characters, and ANSI styling are truncated without splitting a character or escape sequence.
 

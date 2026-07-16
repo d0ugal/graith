@@ -12,8 +12,9 @@ import "time"
 // arithmetic, wrap widths, minimum name width, panel breakpoints) stay as
 // documented constants next to the render logic they must match.
 var (
-	// refreshInterval is the cadence at which the session picker, the dashboard,
-	// and an attached status bar re-poll the daemon for fresh session state.
+	// refreshInterval is the cadence at which the session picker, dashboard,
+	// message viewer, and an attached status bar re-poll the daemon for fresh
+	// session state.
 	refreshInterval = 2 * time.Second
 
 	// fallbackCols / fallbackRows are the terminal geometry used only when the
