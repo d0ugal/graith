@@ -337,9 +337,7 @@ func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg conf
 		prompt += orchestratorNotificationsSection()
 	}
 
-	configured := sm.Config().Agents[agentName].PromptInjection
-
-	return promptInjectionArgs(agentName, configured, prompt, worktreePath)
+	return promptInjectionArgs(agentName, sm.Config().Agents[agentName], prompt, worktreePath)
 }
 
 // orchestratorNotificationsSection tells the orchestrator it can proactively

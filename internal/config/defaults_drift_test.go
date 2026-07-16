@@ -246,6 +246,72 @@ func TestEmbeddedDefaultsCarryAgentAdapters(t *testing.T) {
 			t.Errorf("codex OptionArgs = %v, want %v", got, want)
 		}
 	})
+
+	// The remaining #1236 adapters — hook, MCP, prompt-injection, and empty-ID
+	// fallback argv spellings — must live as RAW fields in the embedded default
+	// config, not only as Go accessor fail-safes, so `gr config show` reflects the
+	// effective argv and a custom agent has a documented template to copy.
+	t.Run("claude hook/mcp/prompt adapters", func(t *testing.T) {
+		claude := d.Agents["claude"]
+
+		if got, want := claude.Hooks, (&AgentHookConfig{
+			Mechanism:    HookMechanismClaudeSettings,
+			SettingsArgs: []string{"--settings", "{path}"},
+		}); !reflect.DeepEqual(got, want) {
+			t.Errorf("claude Hooks = %+v, want %+v", got, want)
+		}
+
+		if got, want := claude.MCP, (&AgentMCPConfig{
+			Mechanism:  MCPMechanismClaudeConfig,
+			ConfigArgs: []string{"--mcp-config", "{path}"},
+		}); !reflect.DeepEqual(got, want) {
+			t.Errorf("claude MCP = %+v, want %+v", got, want)
+		}
+
+		if got, want := claude.PromptInjectionArgs, []string{"--append-system-prompt", "{prompt}"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("claude PromptInjectionArgs = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("codex hook/mcp/prompt/empty-id adapters", func(t *testing.T) {
+		codex := d.Agents["codex"]
+
+		if got, want := codex.Hooks, (&AgentHookConfig{
+			Mechanism: HookMechanismCodexConfig,
+			EventArgs: []string{"-c", "hooks.{hook_event}={hook_value}"},
+			TrustArgs: []string{"--dangerously-bypass-hook-trust"},
+		}); !reflect.DeepEqual(got, want) {
+			t.Errorf("codex Hooks = %+v, want %+v", got, want)
+		}
+
+		if got, want := codex.MCP, (&AgentMCPConfig{
+			Mechanism:  MCPMechanismCodexConfig,
+			ServerArgs: []string{"-c", "mcp_servers.{mcp_name}.command={mcp_command}", "-c", "mcp_servers.{mcp_name}.args={mcp_args}"},
+		}); !reflect.DeepEqual(got, want) {
+			t.Errorf("codex MCP = %+v, want %+v", got, want)
+		}
+
+		if got, want := codex.PromptInjectionArgs, []string{"-c", "developer_instructions={prompt}"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("codex PromptInjectionArgs = %v, want %v", got, want)
+		}
+
+		if got, want := codex.EmptyIDResumeArgs, []string{"resume", "--last"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("codex EmptyIDResumeArgs = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("cursor project-file hook mechanism, no argv", func(t *testing.T) {
+		cursor := d.Agents["cursor"]
+
+		if got, want := cursor.Hooks, (&AgentHookConfig{Mechanism: HookMechanismCursorProject}); !reflect.DeepEqual(got, want) {
+			t.Errorf("cursor Hooks = %+v, want %+v", got, want)
+		}
+
+		// Cursor injects its prompt via a rule file, so it has no MCP mechanism.
+		if cursor.MCP != nil {
+			t.Errorf("cursor MCP = %+v, want nil (no MCP mechanism)", cursor.MCP)
+		}
+	})
 }
 
 // TestConfigReloadDebounceDuration exercises the accessor's empty/invalid/valid

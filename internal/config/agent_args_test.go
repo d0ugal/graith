@@ -246,4 +246,152 @@ func TestDefaultAgentArgsRoundTrip(t *testing.T) {
 	if len(orig.Agents["codex"].OptionArgs) == 0 {
 		t.Fatal("expected the embedded codex agent to define option_args")
 	}
+
+	// The #1236 hook/MCP/prompt/empty-id adapters must also survive the render
+	// path so `gr config show`/`diff` don't silently drop them.
+	if !reflect.DeepEqual(got.Agents["claude"].Hooks, orig.Agents["claude"].Hooks) {
+		t.Errorf("claude hooks did not round-trip: %+v", got.Agents["claude"].Hooks)
+	}
+
+	if !reflect.DeepEqual(got.Agents["claude"].MCP, orig.Agents["claude"].MCP) {
+		t.Errorf("claude mcp did not round-trip: %+v", got.Agents["claude"].MCP)
+	}
+
+	if !reflect.DeepEqual(got.Agents["codex"].Hooks, orig.Agents["codex"].Hooks) {
+		t.Errorf("codex hooks did not round-trip: %+v", got.Agents["codex"].Hooks)
+	}
+
+	if !reflect.DeepEqual(got.Agents["codex"].MCP, orig.Agents["codex"].MCP) {
+		t.Errorf("codex mcp did not round-trip: %+v", got.Agents["codex"].MCP)
+	}
+
+	if !reflect.DeepEqual(got.Agents["codex"].PromptInjectionArgs, orig.Agents["codex"].PromptInjectionArgs) {
+		t.Errorf("codex prompt_injection_args did not round-trip: %v", got.Agents["codex"].PromptInjectionArgs)
+	}
+
+	if !reflect.DeepEqual(got.Agents["codex"].EmptyIDResumeArgs, orig.Agents["codex"].EmptyIDResumeArgs) {
+		t.Errorf("codex empty_id_resume_args did not round-trip: %v", got.Agents["codex"].EmptyIDResumeArgs)
+	}
+}
+
+// TestValidateAgentAdapters covers the #1236 config-load guards: unknown hook/MCP
+// mechanisms and argv templates using an unsupported placeholder are rejected.
+func TestValidateAgentAdapters(t *testing.T) {
+	tests := []struct {
+		name      string
+		mutate    func(a *Agent)
+		wantSubst string
+	}{
+		{
+			name:      "unknown hook mechanism rejected",
+			mutate:    func(a *Agent) { a.Hooks = &AgentHookConfig{Mechanism: "telepathy"} },
+			wantSubst: "hooks.mechanism",
+		},
+		{
+			name:      "unknown mcp mechanism rejected",
+			mutate:    func(a *Agent) { a.MCP = &AgentMCPConfig{Mechanism: "smoke-signal"} },
+			wantSubst: "mcp.mechanism",
+		},
+		{
+			name: "hook settings_args unsupported placeholder rejected",
+			mutate: func(a *Agent) {
+				a.Hooks = &AgentHookConfig{Mechanism: HookMechanismClaudeSettings, SettingsArgs: []string{"--settings", "{bogus}"}}
+			},
+			wantSubst: "unsupported template variable",
+		},
+		{
+			name: "codex server_args unsupported placeholder rejected",
+			mutate: func(a *Agent) {
+				a.MCP = &AgentMCPConfig{Mechanism: MCPMechanismCodexConfig, ServerArgs: []string{"-c", "mcp_servers.{model}.command={mcp_command}"}}
+			},
+			wantSubst: "unsupported template variable",
+		},
+		{
+			name:      "prompt_injection_args unsupported placeholder rejected",
+			mutate:    func(a *Agent) { a.PromptInjectionArgs = []string{"--sys", "{dir}"} },
+			wantSubst: "unsupported template variable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			braw := cfg.Agents["codex"]
+			tt.mutate(&braw)
+			cfg.Agents["codex"] = braw
+
+			err := cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), tt.wantSubst) {
+				t.Fatalf("Validate() = %v, want error containing %q", err, tt.wantSubst)
+			}
+		})
+	}
+}
+
+// TestValidateAgentAdaptersAcceptsSupportedPlaceholders confirms the built-in
+// templates (and their allowed placeholders) pass validation.
+func TestValidateAgentAdaptersAcceptsSupportedPlaceholders(t *testing.T) {
+	cfg := Default()
+	braw := cfg.Agents["codex"]
+	braw.Hooks = &AgentHookConfig{
+		Mechanism: HookMechanismCodexConfig,
+		EventArgs: []string{"-c", "hooks.{hook_event}={hook_value}"},
+		TrustArgs: []string{"--dangerously-bypass-hook-trust"},
+	}
+	braw.MCP = &AgentMCPConfig{
+		Mechanism:  MCPMechanismCodexConfig,
+		ServerArgs: []string{"-c", "mcp_servers.{mcp_name}.command={mcp_command}", "-c", "mcp_servers.{mcp_name}.args={mcp_args}"},
+	}
+	cfg.Agents["codex"] = braw
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() with supported placeholders = %v, want nil", err)
+	}
+}
+
+// TestExpandSliceWith covers the adapter-argv expander: known {tokens} are
+// substituted, a substituted value that itself contains braces is not
+// re-expanded, and an unknown token errors.
+func TestExpandSliceWith(t *testing.T) {
+	got, err := ExpandSliceWith([]string{"-c", "hooks.{event}={value}"}, map[string]string{
+		"event": "SessionStart",
+		"value": `[{hooks=[{command="{gr} report"}]}]`,
+	})
+	if err != nil {
+		t.Fatalf("ExpandSliceWith: %v", err)
+	}
+
+	want := []string{"-c", `hooks.SessionStart=[{hooks=[{command="{gr} report"}]}]`}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ExpandSliceWith = %v, want %v (a braces-bearing value must not be re-expanded)", got, want)
+	}
+
+	if _, err := ExpandSliceWith([]string{"{nope}"}, map[string]string{"event": "x"}); err == nil {
+		t.Error("ExpandSliceWith with unknown token = nil error, want error")
+	}
+
+	if got, _ := ExpandSliceWith(nil, nil); got != nil {
+		t.Errorf("ExpandSliceWith(nil) = %v, want nil", got)
+	}
+}
+
+// TestAgentAdapterAccessorsFallBack confirms an agent that selects a mechanism
+// without spelling out the argv template still gets the built-in default (the
+// #1237 fail-safe pattern), so a custom agent need only set the mechanism.
+func TestAgentAdapterAccessorsFallBack(t *testing.T) {
+	a := Agent{Hooks: &AgentHookConfig{Mechanism: HookMechanismClaudeSettings}}
+	if got, want := a.HookSettingsArgsOrDefault(), []string{"--settings", "{path}"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("HookSettingsArgsOrDefault fallback = %v, want %v", got, want)
+	}
+
+	c := Agent{MCP: &AgentMCPConfig{Mechanism: MCPMechanismCodexConfig}}
+	if got := c.MCPServerArgsOrDefault(); len(got) != 4 || got[0] != "-c" {
+		t.Errorf("MCPServerArgsOrDefault fallback = %v, want the built-in codex template", got)
+	}
+
+	// An explicit empty TrustArgs opts out; only nil falls back.
+	optOut := Agent{Hooks: &AgentHookConfig{Mechanism: HookMechanismCodexConfig, TrustArgs: []string{}}}
+	if got := optOut.HookTrustArgsOrDefault(); len(got) != 0 {
+		t.Errorf("HookTrustArgsOrDefault with explicit empty = %v, want empty (opt-out honoured)", got)
+	}
 }

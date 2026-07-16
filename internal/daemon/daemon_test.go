@@ -4019,13 +4019,16 @@ func newClaudeRecorderManager(t *testing.T, repoDir string) (*SessionManager, st
 	// Drop the default agent prompt so the recorded argv is just the injected
 	// hook/MCP flags — no --append-system-prompt noise to reason about.
 	cfg.AgentPrompt = ""
-	cfg.Agents["claude"] = config.Agent{
-		Command:    "sh",
-		Args:       []string{"-c", script},
-		ResumeArgs: []string{"-c", script},
-		ForkArgs:   []string{"-c", script},
-		Env:        map[string]string{"GRAITH_ARGS_RECORD": recordPath},
-	}
+	// Start from the default claude agent so its config-driven hook/MCP adapters
+	// (agents.claude.hooks / .mcp, issue #1236) are preserved; only swap the launch
+	// command for the argv-recording stub.
+	claude := cfg.Agents["claude"]
+	claude.Command = "sh"
+	claude.Args = []string{"-c", script}
+	claude.ResumeArgs = []string{"-c", script}
+	claude.ForkArgs = []string{"-c", script}
+	claude.Env = map[string]string{"GRAITH_ARGS_RECORD": recordPath}
+	cfg.Agents["claude"] = claude
 	cfg.Repos = []config.RepoConfig{{Path: repoDir}}
 
 	sm := NewSessionManager(cfg, config.Paths{

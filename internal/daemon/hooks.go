@@ -273,15 +273,22 @@ func (sm *SessionManager) generateMCPConfig(sessionID string, mcpServers []confi
 // generated hooks are installed. A headless session skips generated hooks (the
 // typed stream is its status/approval feed) but still needs its MCP servers, so
 // the two concerns must not ride the same branch. See issue #1135.
-func (sm *SessionManager) injectClaudeHooks(sessionID string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
+func (sm *SessionManager) injectClaudeHooks(sessionID string, yolo bool, agent config.Agent) (extraArgs []string, extraEnv map[string]string, err error) {
 	settingsPath, err := sm.generateClaudeSettings(sessionID, yolo)
 	if err != nil {
 		return nil, nil, err
 	}
 
+	// The generated settings file is dynamic; only the flag spelling comes from
+	// config (agents.<name>.hooks.settings_args, {path} bound). (issue #1236)
+	args, err := config.ExpandSliceWith(agent.HookSettingsArgsOrDefault(), map[string]string{"path": settingsPath})
+	if err != nil {
+		return nil, nil, fmt.Errorf("expand hook settings args: %w", err)
+	}
+
 	sm.log.Info("injected claude hooks", "session_id", sessionID, "settings", settingsPath)
 
-	return []string{"--settings", settingsPath}, nil, nil
+	return args, nil, nil
 }
 
 // injectMCPConfig wires a session's daemon-managed MCP servers into the agent
@@ -297,18 +304,27 @@ func (sm *SessionManager) injectMCPConfig(agentName, sessionID string, mcpServer
 		return nil, nil
 	}
 
-	switch agentName {
-	case "claude":
+	agent := sm.Config().Agents[agentName]
+
+	switch agent.MCPMechanism() {
+	case config.MCPMechanismClaudeConfig:
 		mcpConfigPath, err := sm.generateMCPConfig(sessionID, mcpServers)
 		if err != nil {
 			return nil, err
 		}
 
+		// The config file is generated dynamically; only the flag spelling comes
+		// from config (agents.<name>.mcp.config_args, {path} bound). (issue #1236)
+		args, err := config.ExpandSliceWith(agent.MCPConfigArgsOrDefault(), map[string]string{"path": mcpConfigPath})
+		if err != nil {
+			return nil, fmt.Errorf("expand mcp config args: %w", err)
+		}
+
 		sm.log.Info("injected mcp config", "session_id", sessionID, "mcp_config", mcpConfigPath, "mcp_servers", len(mcpServers))
 
-		return []string{"--mcp-config", mcpConfigPath}, nil
-	case "codex":
-		args, skipped, err := codexMCPServerArgs(mcpServers)
+		return args, nil
+	case config.MCPMechanismCodexConfig:
+		args, skipped, err := codexMCPServerArgs(mcpServers, agent.MCPServerArgsOrDefault())
 		if err != nil {
 			return nil, err
 		}
@@ -356,7 +372,7 @@ var codexBareKeyRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // Values are JSON-encoded, which is also valid TOML for a string
 // (`"…"`) and a string array (`["…","…"]`), the two value kinds Codex's
 // `-c key=value` override parser accepts here.
-func codexMCPServerArgs(mcpServers []config.MCPServerConfig) (args, skipped []string, err error) {
+func codexMCPServerArgs(mcpServers []config.MCPServerConfig, serverTmpl []string) (args, skipped []string, err error) {
 	if len(mcpServers) == 0 {
 		return nil, nil, nil
 	}
@@ -368,9 +384,12 @@ func codexMCPServerArgs(mcpServers []config.MCPServerConfig) (args, skipped []st
 		return nil, nil, fmt.Errorf("marshal mcp command: %w", err)
 	}
 
-	args = make([]string, 0, len(mcpServers)*4)
+	args = make([]string, 0, len(mcpServers)*len(serverTmpl))
 
 	for _, s := range mcpServers {
+		// Security: a name that isn't a representable Codex config key is skipped
+		// in Go, not emitted, so one ill-named server can't break the launch. This
+		// stays in code regardless of the configured argv spelling. (issue #1236)
 		if !codexBareKeyRe.MatchString(s.Name) {
 			skipped = append(skipped, s.Name)
 			continue
@@ -381,10 +400,18 @@ func codexMCPServerArgs(mcpServers []config.MCPServerConfig) (args, skipped []st
 			return nil, nil, fmt.Errorf("marshal mcp args for %q: %w", s.Name, err)
 		}
 
-		args = append(args,
-			"-c", fmt.Sprintf("mcp_servers.%s.command=%s", s.Name, cmdVal),
-			"-c", fmt.Sprintf("mcp_servers.%s.args=%s", s.Name, proxyArgs),
-		)
+		// The command/args values are Go-built and JSON-encoded (valid TOML); only
+		// the -c override spelling comes from config (agents.<name>.mcp.server_args).
+		serverArgs, err := config.ExpandSliceWith(serverTmpl, map[string]string{
+			"mcp_name":    s.Name,
+			"mcp_command": string(cmdVal),
+			"mcp_args":    string(proxyArgs),
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("expand mcp server args for %q: %w", s.Name, err)
+		}
+
+		args = append(args, serverArgs...)
 	}
 
 	return args, skipped, nil
@@ -418,10 +445,12 @@ type codexHookEvent struct {
 //
 // MCP-server wiring is NOT handled here — it rides the separate injectMCPConfig
 // path (issue #1135), so a headless codex session gets MCP without hooks.
-func (sm *SessionManager) injectCodexHooks(sessionID string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
+func (sm *SessionManager) injectCodexHooks(sessionID string, yolo bool, agent config.Agent) (extraArgs []string, extraEnv map[string]string, err error) {
 	grBin := shellQuote(resolveGrBin())
 	// Snapshot the config once so hook generation can't race applyConfig (#1287).
 	hookEnabled := sm.Config().Approvals.HookEnabled() || yolo
+
+	eventTmpl := agent.HookEventArgsOrDefault()
 
 	events := []codexHookEvent{
 		{event: "SessionStart", commands: []string{
@@ -453,19 +482,28 @@ func (sm *SessionManager) injectCodexHooks(sessionID string, yolo bool) (extraAr
 		}
 
 		value := codexHookOverrideValue(e.commands)
-		extraArgs = append(extraArgs, "-c", fmt.Sprintf("hooks.%s=%s", e.event, value))
+
+		// The hook value is Go-built inline TOML; only the -c override spelling
+		// comes from config (agents.<name>.hooks.event_args). (issue #1236)
+		evArgs, err := config.ExpandSliceWith(eventTmpl, map[string]string{"hook_event": e.event, "hook_value": value})
+		if err != nil {
+			return nil, nil, fmt.Errorf("expand hook event args: %w", err)
+		}
+
+		extraArgs = append(extraArgs, evArgs...)
 		installed++
 	}
 
-	// NOTE: --dangerously-bypass-hook-trust is process-wide, not scoped to the
-	// -c overrides above: it also runs any OTHER enabled-but-untrusted hook
-	// sources in the session (a repo-local .codex/hooks.json, user config hooks,
-	// plugin hooks) without Codex's trust review. graith relies on this to run
-	// its own generated hooks unattended; the containment boundary for anything
-	// else those sources might do is the graith sandbox (see [sandbox]), the same
-	// boundary that already confines the agent itself. Codex has no way today to
-	// trust only the session-config hooks without bypassing trust globally.
-	extraArgs = append(extraArgs, "--dangerously-bypass-hook-trust")
+	// NOTE: --dangerously-bypass-hook-trust (agents.<name>.hooks.trust_args) is
+	// process-wide, not scoped to the -c overrides above: it also runs any OTHER
+	// enabled-but-untrusted hook sources in the session (a repo-local
+	// .codex/hooks.json, user config hooks, plugin hooks) without Codex's trust
+	// review. graith relies on this to run its own generated hooks unattended; the
+	// containment boundary for anything else those sources might do is the graith
+	// sandbox (see [sandbox]), the same boundary that already confines the agent
+	// itself. Codex has no way today to trust only the session-config hooks without
+	// bypassing trust globally.
+	extraArgs = append(extraArgs, agent.HookTrustArgsOrDefault()...)
 
 	sm.log.Info("injected codex hooks", "session_id", sessionID, "events", installed)
 
@@ -688,12 +726,14 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, yolo
 // kept separate so MCP can be injected without hooks (see issue #1135). Returns
 // nil for agents that don't support hooks.
 func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
-	switch agentName {
-	case "claude":
-		return sm.injectClaudeHooks(sessionID, yolo)
-	case "codex":
-		return sm.injectCodexHooks(sessionID, yolo)
-	case "cursor":
+	agent := sm.Config().Agents[agentName]
+
+	switch agent.HookMechanism() {
+	case config.HookMechanismClaudeSettings:
+		return sm.injectClaudeHooks(sessionID, yolo, agent)
+	case config.HookMechanismCodexConfig:
+		return sm.injectCodexHooks(sessionID, yolo, agent)
+	case config.HookMechanismCursorProject:
 		return sm.injectCursorHooks(sessionID, worktreePath, yolo)
 	default:
 		sm.log.Info("agent does not support hooks, skipping", "agent", agentName, "session_id", sessionID)

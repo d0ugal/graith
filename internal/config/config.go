@@ -3401,6 +3401,233 @@ type Agent struct {
 	// / search / approval flags) into config so custom agents can define their own
 	// conditional flags (issue #1236).
 	OptionArgs []AgentOptionArg `json:"option_args,omitempty" toml:"option_args"`
+	// Hooks declares how graith wires its generated lifecycle-hook artifact into
+	// this agent's launch (issue #1236). Nil (or an empty Mechanism) means the
+	// agent has no hook support. This replaces the former hard-coded agent-name
+	// dispatch in injectHooks so a custom agent can adopt a supported mechanism
+	// from config. The dynamic artifact is still built in Go; only the capability
+	// and argv spellings live here.
+	Hooks *AgentHookConfig `json:"hooks,omitempty" toml:"hooks"`
+	// MCP declares how graith wires daemon-managed MCP servers into this agent's
+	// launch (issue #1236). Nil (or an empty Mechanism) means no MCP wiring.
+	// Server discovery, the config-key security check, and the generated
+	// file/override values stay in Go; only the capability and argv spellings are
+	// config.
+	MCP *AgentMCPConfig `json:"mcp,omitempty" toml:"mcp"`
+	// PromptInjectionArgs is the argv template graith uses to deliver the operating
+	// prompt for the append_system_prompt and developer_instructions mechanisms,
+	// with {prompt} bound to the (possibly encoded) prompt (issue #1236). Unset
+	// falls back to the built-in spelling for the selected prompt_injection
+	// mechanism, so a custom agent that only sets prompt_injection still works.
+	// The cursor_rules and none mechanisms ignore it (they write a file / do
+	// nothing). Built-in claude: ["--append-system-prompt", "{prompt}"]; codex:
+	// ["-c", "developer_instructions={prompt}"].
+	PromptInjectionArgs []string `json:"prompt_injection_args,omitempty" toml:"prompt_injection_args,omitempty"`
+	// EmptyIDResumeArgs is the fallback resume argv graith uses when resume_args
+	// template {agent_session_id} but no native session id was captured (issue
+	// #1236). Empty means start fresh. This replaces the hard-coded codex
+	// `resume --last` branch in resolveResumeArgs. Built-in codex:
+	// ["resume", "--last"].
+	EmptyIDResumeArgs []string `json:"empty_id_resume_args,omitempty" toml:"empty_id_resume_args,omitempty"`
+}
+
+// Hook-injection mechanisms an agent may declare in [agents.<name>.hooks]
+// mechanism. Each selects the Go builder for the generated hook artifact and the
+// argv spellings graith appends (issue #1236). graith owns this enum, so an
+// unknown value is a config error rather than a silent no-op.
+const (
+	// HookMechanismClaudeSettings writes a Claude settings JSON and passes
+	// SettingsArgs (default ["--settings", "{path}"]).
+	HookMechanismClaudeSettings = "claude_settings"
+	// HookMechanismCodexConfig emits EventArgs once per installed hook event plus
+	// TrustArgs (default event ["-c", "hooks.{hook_event}={hook_value}"], trust
+	// ["--dangerously-bypass-hook-trust"]).
+	HookMechanismCodexConfig = "codex_config"
+	// HookMechanismCursorProject writes .cursor/hooks.json in the worktree and
+	// passes no launch args.
+	HookMechanismCursorProject = "cursor_project"
+)
+
+// MCP-injection mechanisms an agent may declare in [agents.<name>.mcp]
+// mechanism (issue #1236).
+const (
+	// MCPMechanismClaudeConfig writes an MCP config JSON and passes ConfigArgs
+	// (default ["--mcp-config", "{path}"]).
+	MCPMechanismClaudeConfig = "claude_config"
+	// MCPMechanismCodexConfig emits ServerArgs once per representable server
+	// (default ["-c", "mcp_servers.{mcp_name}.command={mcp_command}", "-c",
+	// "mcp_servers.{mcp_name}.args={mcp_args}"]).
+	MCPMechanismCodexConfig = "codex_config"
+)
+
+// AgentHookConfig declares how graith wires its generated lifecycle-hook artifact
+// into an agent's launch (issue #1236). The artifact (a Claude settings JSON,
+// Codex inline-TOML hook overrides, a Cursor project hooks.json) is built in Go;
+// this carries only the capability (Mechanism, which selects the builder) and
+// the argv spellings graith appends.
+type AgentHookConfig struct {
+	// Mechanism selects the hook-injection strategy (one of the HookMechanism*
+	// constants). Empty means the agent has no hook support.
+	Mechanism string `json:"mechanism,omitempty" toml:"mechanism,omitempty"`
+	// SettingsArgs is the argv template for HookMechanismClaudeSettings, with
+	// {path} bound to the generated settings file.
+	SettingsArgs []string `json:"settings_args,omitempty" toml:"settings_args,omitempty"`
+	// EventArgs is the per-event argv template for HookMechanismCodexConfig,
+	// emitted once per installed hook event with {hook_event} and {hook_value}
+	// bound (the value is Go-built inline TOML).
+	EventArgs []string `json:"event_args,omitempty" toml:"event_args,omitempty"`
+	// TrustArgs are appended once after the codex_config EventArgs to bypass
+	// interactive hook-trust review.
+	TrustArgs []string `json:"trust_args,omitempty" toml:"trust_args,omitempty"`
+}
+
+// AgentMCPConfig declares how graith wires daemon-managed MCP servers into an
+// agent's launch (issue #1236).
+type AgentMCPConfig struct {
+	// Mechanism selects the MCP-injection strategy (one of the MCPMechanism*
+	// constants). Empty means no MCP wiring.
+	Mechanism string `json:"mechanism,omitempty" toml:"mechanism,omitempty"`
+	// ConfigArgs is the argv template for MCPMechanismClaudeConfig, with {path}
+	// bound to the generated MCP config file.
+	ConfigArgs []string `json:"config_args,omitempty" toml:"config_args,omitempty"`
+	// ServerArgs is the per-server argv template for MCPMechanismCodexConfig,
+	// emitted once per server whose name is a representable config key, with
+	// {mcp_name}, {mcp_command} (JSON-encoded), and {mcp_args} (JSON-encoded)
+	// bound.
+	ServerArgs []string `json:"server_args,omitempty" toml:"server_args,omitempty"`
+}
+
+// validateAdapters checks the agent's hook/MCP/prompt-injection adapter config
+// (issue #1236): mechanisms must be known enum values, and each argv template may
+// only reference the placeholders that context binds. A bad template is rejected
+// at config load rather than failing a launch.
+func (a Agent) validateAdapters(name string) []error {
+	var errs []error
+
+	if a.Hooks != nil {
+		switch a.Hooks.Mechanism {
+		case "", HookMechanismClaudeSettings, HookMechanismCodexConfig, HookMechanismCursorProject:
+		default:
+			errs = append(errs, fmt.Errorf("agents.%s.hooks.mechanism %q: must be one of %q, %q, %q (or empty)",
+				name, a.Hooks.Mechanism, HookMechanismClaudeSettings, HookMechanismCodexConfig, HookMechanismCursorProject))
+		}
+
+		errs = appendTemplateErrs(errs, "agents."+name+".hooks.settings_args", a.Hooks.SettingsArgs, "path")
+		errs = appendTemplateErrs(errs, "agents."+name+".hooks.event_args", a.Hooks.EventArgs, "hook_event", "hook_value")
+		errs = appendTemplateErrs(errs, "agents."+name+".hooks.trust_args", a.Hooks.TrustArgs)
+	}
+
+	if a.MCP != nil {
+		switch a.MCP.Mechanism {
+		case "", MCPMechanismClaudeConfig, MCPMechanismCodexConfig:
+		default:
+			errs = append(errs, fmt.Errorf("agents.%s.mcp.mechanism %q: must be one of %q, %q (or empty)",
+				name, a.MCP.Mechanism, MCPMechanismClaudeConfig, MCPMechanismCodexConfig))
+		}
+
+		errs = appendTemplateErrs(errs, "agents."+name+".mcp.config_args", a.MCP.ConfigArgs, "path")
+		errs = appendTemplateErrs(errs, "agents."+name+".mcp.server_args", a.MCP.ServerArgs, "mcp_name", "mcp_command", "mcp_args")
+	}
+
+	errs = appendTemplateErrs(errs, "agents."+name+".prompt_injection_args", a.PromptInjectionArgs, "prompt")
+
+	return errs
+}
+
+// appendTemplateErrs appends an error for each {token} in tmpl that is not in
+// allowed, keyed by the config path field. Used by validateAdapters.
+func appendTemplateErrs(errs []error, field string, tmpl []string, allowed ...string) []error {
+	if len(tmpl) == 0 {
+		return errs
+	}
+
+	ok := make(map[string]bool, len(allowed))
+	for _, a := range allowed {
+		ok[a] = true
+	}
+
+	for _, tok := range templateTokens(tmpl) {
+		if !ok[tok] {
+			errs = append(errs, fmt.Errorf("%s: unsupported template variable %q (allowed: %v)", field, tok, allowed))
+		}
+	}
+
+	return errs
+}
+
+// HookMechanism returns the agent's configured hook mechanism, or "" when hooks
+// are unset. Callers dispatch on this rather than the literal agent name.
+func (a Agent) HookMechanism() string {
+	if a.Hooks == nil {
+		return ""
+	}
+
+	return a.Hooks.Mechanism
+}
+
+// MCPMechanism returns the agent's configured MCP mechanism, or "" when unset.
+func (a Agent) MCPMechanism() string {
+	if a.MCP == nil {
+		return ""
+	}
+
+	return a.MCP.Mechanism
+}
+
+// HookSettingsArgsOrDefault returns the configured claude_settings argv template
+// or the built-in default, so a custom agent that selects the mechanism without
+// spelling out the flags still launches correctly (the #1237 fail-safe pattern).
+func (a Agent) HookSettingsArgsOrDefault() []string {
+	if a.Hooks != nil && len(a.Hooks.SettingsArgs) > 0 {
+		return a.Hooks.SettingsArgs
+	}
+
+	return []string{"--settings", "{path}"}
+}
+
+// HookEventArgsOrDefault returns the configured codex_config per-event argv
+// template or the built-in default.
+func (a Agent) HookEventArgsOrDefault() []string {
+	if a.Hooks != nil && len(a.Hooks.EventArgs) > 0 {
+		return a.Hooks.EventArgs
+	}
+
+	return []string{"-c", "hooks.{hook_event}={hook_value}"}
+}
+
+// HookTrustArgsOrDefault returns the configured codex_config trust argv or the
+// built-in default. Unlike the other accessors an explicit empty slice is
+// honoured (a custom agent may opt out of the bypass flag); only a nil/unset
+// Hooks or nil TrustArgs falls back to the default.
+func (a Agent) HookTrustArgsOrDefault() []string {
+	if a.Hooks != nil && a.Hooks.TrustArgs != nil {
+		return a.Hooks.TrustArgs
+	}
+
+	return []string{"--dangerously-bypass-hook-trust"}
+}
+
+// MCPConfigArgsOrDefault returns the configured claude_config argv template or
+// the built-in default.
+func (a Agent) MCPConfigArgsOrDefault() []string {
+	if a.MCP != nil && len(a.MCP.ConfigArgs) > 0 {
+		return a.MCP.ConfigArgs
+	}
+
+	return []string{"--mcp-config", "{path}"}
+}
+
+// MCPServerArgsOrDefault returns the configured codex_config per-server argv
+// template or the built-in default.
+func (a Agent) MCPServerArgsOrDefault() []string {
+	if a.MCP != nil && len(a.MCP.ServerArgs) > 0 {
+		return a.MCP.ServerArgs
+	}
+
+	return []string{
+		"-c", "mcp_servers.{mcp_name}.command={mcp_command}",
+		"-c", "mcp_servers.{mcp_name}.args={mcp_args}",
+	}
 }
 
 // AgentOptionArg is one conditional argv group for an agent (see Agent.OptionArgs).
@@ -4089,6 +4316,8 @@ func (c *Config) Validate() error {
 				errs = append(errs, fmt.Errorf("agents.%s.option_args[%d].when %q: not a known template variable", agentName, i, opt.When))
 			}
 		}
+
+		errs = append(errs, agent.validateAdapters(agentName)...)
 	}
 
 	// default_agent must name a configured agent. mergeAgents has already unioned
@@ -4970,6 +5199,22 @@ func mergeAgent(def, usr Agent) Agent {
 
 	if usr.OptionArgs != nil {
 		def.OptionArgs = usr.OptionArgs
+	}
+
+	if usr.Hooks != nil {
+		def.Hooks = usr.Hooks
+	}
+
+	if usr.MCP != nil {
+		def.MCP = usr.MCP
+	}
+
+	if usr.PromptInjectionArgs != nil {
+		def.PromptInjectionArgs = usr.PromptInjectionArgs
+	}
+
+	if usr.EmptyIDResumeArgs != nil {
+		def.EmptyIDResumeArgs = usr.EmptyIDResumeArgs
 	}
 
 	return def

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -141,7 +142,7 @@ func TestInjectClaudeHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-braw-03"
 
-	extraArgs, extraEnv, err := sm.injectClaudeHooks(sessionID, false)
+	extraArgs, extraEnv, err := sm.injectClaudeHooks(sessionID, false, sm.Config().Agents["claude"])
 	if err != nil {
 		t.Fatalf("injectClaudeHooks() error = %v", err)
 	}
@@ -410,7 +411,7 @@ func TestInjectCodexHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-codex-01"
 
-	extraArgs, extraEnv, err := sm.injectCodexHooks(sessionID, false)
+	extraArgs, extraEnv, err := sm.injectCodexHooks(sessionID, false, sm.Config().Agents["codex"])
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -471,7 +472,7 @@ func TestInjectCodexHooks(t *testing.T) {
 func TestCodexHookOverrideContent(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
-	extraArgs, _, err := sm.injectCodexHooks("kirk-codex-02", false)
+	extraArgs, _, err := sm.injectCodexHooks("kirk-codex-02", false, sm.Config().Agents["codex"])
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -522,7 +523,7 @@ func TestCodexHookOverrideContent(t *testing.T) {
 func TestInjectCodexHooksNoHooksDirEnv(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
-	extraArgs, extraEnv, err := sm.injectCodexHooks("thrawn-codex-1183", false)
+	extraArgs, extraEnv, err := sm.injectCodexHooks("thrawn-codex-1183", false, sm.Config().Agents["codex"])
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -608,8 +609,8 @@ func TestTOMLBasicString(t *testing.T) {
 // server pointing command/args at `gr mcp-proxy <name>`, JSON-encoded so the
 // values are valid TOML, and in stable slice order.
 func TestCodexMCPServerArgs(t *testing.T) {
-	if args, skipped, err := codexMCPServerArgs(nil); err != nil || args != nil || skipped != nil {
-		t.Fatalf("codexMCPServerArgs(nil) = (%v, %v, %v), want (nil, nil, nil)", args, skipped, err)
+	if args, skipped, err := codexMCPServerArgs(nil, (config.Agent{}).MCPServerArgsOrDefault()); err != nil || args != nil || skipped != nil {
+		t.Fatalf("codexMCPServerArgs(nil, (config.Agent{}).MCPServerArgsOrDefault()) = (%v, %v, %v), want (nil, nil, nil)", args, skipped, err)
 	}
 
 	servers := []config.MCPServerConfig{
@@ -617,7 +618,7 @@ func TestCodexMCPServerArgs(t *testing.T) {
 		{Name: "chrome-devtools", Command: "npx", Args: []string{"chrome-mcp"}, Env: map[string]string{"DISPLAY": ":0"}},
 	}
 
-	args, skipped, err := codexMCPServerArgs(servers)
+	args, skipped, err := codexMCPServerArgs(servers, (config.Agent{}).MCPServerArgsOrDefault())
 	if err != nil {
 		t.Fatalf("codexMCPServerArgs() error = %v", err)
 	}
@@ -665,7 +666,7 @@ func TestCodexMCPServerArgsSkipsUnrepresentableNames(t *testing.T) {
 		{Name: "under_score-ok", Command: "npx", Args: []string{"fine"}},
 	}
 
-	args, skipped, err := codexMCPServerArgs(servers)
+	args, skipped, err := codexMCPServerArgs(servers, (config.Agent{}).MCPServerArgsOrDefault())
 	if err != nil {
 		t.Fatalf("codexMCPServerArgs() error = %v", err)
 	}
@@ -760,6 +761,67 @@ func TestInjectHooksSupported(t *testing.T) {
 	}
 }
 
+// TestInjectHooksCustomAgentAdoptsMechanism is the #1236 opt-in: a custom agent
+// (whose name matches no built-in) adopts a supported hook mechanism and its own
+// argv spelling from config alone, with the generated file path bound to {path}.
+func TestInjectHooksCustomAgentAdoptsMechanism(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	sm.cfg.Agents["thrawn"] = config.Agent{
+		Command: "thrawn",
+		Hooks: &config.AgentHookConfig{
+			Mechanism:    config.HookMechanismClaudeSettings,
+			SettingsArgs: []string{"--config-file", "{path}"},
+		},
+	}
+
+	args, _, err := sm.injectHooks("thrawn", "bairn-thrawn", "", false)
+	if err != nil {
+		t.Fatalf("injectHooks(custom) error = %v", err)
+	}
+
+	if len(args) != 2 || args[0] != "--config-file" || !strings.HasSuffix(args[1], "settings.json") {
+		t.Errorf("custom agent hook args = %v, want [--config-file <dir>/settings.json]", args)
+	}
+}
+
+// TestInjectMCPConfigCustomAgentAdoptsMechanism is the #1236 opt-in for MCP: a
+// custom agent adopts the codex-style per-server override mechanism with its own
+// argv spelling, with the Go-built server values bound to the template.
+func TestInjectMCPConfigCustomAgentAdoptsMechanism(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	sm.cfg.Agents["thrawn"] = config.Agent{
+		Command: "thrawn",
+		MCP: &config.AgentMCPConfig{
+			Mechanism:  config.MCPMechanismCodexConfig,
+			ServerArgs: []string{"--mcp-server", "{mcp_name}"},
+		},
+	}
+
+	servers := []config.MCPServerConfig{{Name: "graith"}, {Name: "bothy"}}
+
+	args, err := sm.injectMCPConfig("thrawn", "bairn-mcp", servers)
+	if err != nil {
+		t.Fatalf("injectMCPConfig(custom) error = %v", err)
+	}
+
+	if want := []string{"--mcp-server", "graith", "--mcp-server", "bothy"}; !reflect.DeepEqual(args, want) {
+		t.Errorf("custom agent mcp args = %v, want %v", args, want)
+	}
+}
+
+// TestInjectHooksNoMechanismIsNoop confirms an agent that declares no hook
+// mechanism (custom or built-in without a hooks block) gets nothing — the
+// config-driven replacement for the former name-based default.
+func TestInjectHooksNoMechanismIsNoop(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	sm.cfg.Agents["thrawn"] = config.Agent{Command: "thrawn"}
+
+	args, env, err := sm.injectHooks("thrawn", "bairn-none", "", false)
+	if err != nil || args != nil || env != nil {
+		t.Errorf("injectHooks(no mechanism) = (%v, %v, %v), want (nil, nil, nil)", args, env, err)
+	}
+}
+
 func TestInjectHooksUnsupportedIsNoop(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
@@ -833,7 +895,7 @@ func TestCodexHookCommandsEscapeSingleQuotes(t *testing.T) {
 
 	sm := newTestSessionManagerWithDataDir(t)
 
-	extraArgs, _, err := sm.injectCodexHooks("kirk-codex-quote", false)
+	extraArgs, _, err := sm.injectCodexHooks("kirk-codex-quote", false, sm.Config().Agents["codex"])
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -923,7 +985,7 @@ func TestInjectClaudeHooksExcludesMCP(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-mcp-inject"
 
-	args, env, err := sm.injectClaudeHooks(sessionID, false)
+	args, env, err := sm.injectClaudeHooks(sessionID, false, sm.Config().Agents["claude"])
 	if err != nil {
 		t.Fatalf("injectClaudeHooks() error = %v", err)
 	}
@@ -1553,7 +1615,7 @@ func TestInjectCodexHooksYoloInstallsPermissionRequest(t *testing.T) {
 	disabled := false
 	sm.cfg.Approvals.Enabled = &disabled
 
-	extraArgs, _, err := sm.injectCodexHooks("bonnie-codex-yolo", true)
+	extraArgs, _, err := sm.injectCodexHooks("bonnie-codex-yolo", true, sm.Config().Agents["codex"])
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -1608,7 +1670,7 @@ func TestInjectCodexHooksApprovalsDisabled(t *testing.T) {
 	disabled := false
 	sm.cfg.Approvals.Enabled = &disabled
 
-	extraArgs, _, err := sm.injectCodexHooks("thrawn-codex-no-approve", false)
+	extraArgs, _, err := sm.injectCodexHooks("thrawn-codex-no-approve", false, sm.Config().Agents["codex"])
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}

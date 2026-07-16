@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -263,8 +264,9 @@ func argsNeedForkSourceID(args []string) bool {
 // empty-id guard. resume_args are used unless absent or FreshStart, in which
 // case agent.Args (a fresh start) is used. When the chosen args template
 // {agent_session_id} but no native id was captured, expanding would emit a
-// literal empty arg (e.g. `opencode --session ""`), which misbehaves — so Codex
-// falls back to its cwd-scoped `resume --last` and other agents start fresh.
+// literal empty arg (e.g. `opencode --session ""`), which misbehaves — so the
+// agent's configured empty_id_resume_args fallback is used when set (Codex's
+// cwd-scoped `resume --last`) and other agents start fresh.
 // The check inspects the RAW args before expansion (the token is gone after
 // ExpandSlice). Returns the args plus an optional log note when a fallback fired.
 func resolveResumeArgs(agent config.Agent, sessAgent, sessAgentSessionID string, freshStart bool) ([]string, string) {
@@ -274,8 +276,11 @@ func resolveResumeArgs(agent config.Agent, sessAgent, sessAgentSessionID string,
 	}
 
 	if !freshStart && sessAgentSessionID == "" && argsNeedAgentID(resumeArgs) {
-		if sessAgent == "codex" {
-			return []string{"resume", "--last"}, "no native id captured; codex resuming --last"
+		// The agent's configured empty-id fallback (agents.<name>.empty_id_resume_args,
+		// e.g. codex's cwd-scoped `resume --last`) is used when present rather than a
+		// hard-coded per-name branch (issue #1236).
+		if len(agent.EmptyIDResumeArgs) > 0 {
+			return agent.EmptyIDResumeArgs, fmt.Sprintf("no native id captured; %s falling back to %v", sessAgent, agent.EmptyIDResumeArgs)
 		}
 		// Fresh start. Guard against agent.Args *also* templating the id (e.g. a
 		// future forced agent whose force was gated off) — returning it would

@@ -51,7 +51,7 @@ func detectPromptInjection(agentName, configured string) promptInjectionMethod {
 
 func (sm *SessionManager) injectPrompt(agentName, worktreePath string) (extraArgs []string, err error) {
 	cfg := sm.Config()
-	return promptInjectionArgs(agentName, cfg.Agents[agentName].PromptInjection, cfg.AgentPrompt, worktreePath)
+	return promptInjectionArgs(agentName, cfg.Agents[agentName], cfg.AgentPrompt, worktreePath)
 }
 
 // promptInjectionArgs adapts an already-assembled prompt to the injection
@@ -63,19 +63,31 @@ func (sm *SessionManager) injectPrompt(agentName, worktreePath string) (extraArg
 // is the agent's [agents.<name>].prompt_injection override ("" for name-based
 // detection). An empty prompt or an agent with no supported injection method
 // yields no args.
-func promptInjectionArgs(agentName, configured, prompt, worktreePath string) (extraArgs []string, err error) {
+func promptInjectionArgs(agentName string, agent config.Agent, prompt, worktreePath string) (extraArgs []string, err error) {
 	if prompt == "" {
 		return nil, nil
 	}
 
-	method := detectPromptInjection(agentName, configured)
+	method := detectPromptInjection(agentName, agent.PromptInjection)
 	switch method {
 	case promptInjectionAppendSystemPrompt:
-		return []string{"--append-system-prompt", prompt}, nil
+		// The prompt is passed verbatim; only the flag spelling comes from config
+		// (agents.<name>.prompt_injection_args, {prompt} bound). (issue #1236)
+		if len(agent.PromptInjectionArgs) == 0 {
+			return []string{"--append-system-prompt", prompt}, nil
+		}
+
+		return config.ExpandSliceWith(agent.PromptInjectionArgs, map[string]string{"prompt": prompt})
 	case promptInjectionCursorRules:
 		return nil, writeCursorRule(worktreePath, prompt)
 	case promptInjectionDeveloperInstructions:
-		return codexDeveloperInstructionsArgs(prompt), nil
+		// The value is JSON-encoded in Go (a valid TOML basic string); only the -c
+		// override spelling comes from config. (issue #1236)
+		if len(agent.PromptInjectionArgs) == 0 {
+			return codexDeveloperInstructionsArgs(prompt), nil
+		}
+
+		return config.ExpandSliceWith(agent.PromptInjectionArgs, map[string]string{"prompt": codexDeveloperInstructionsValue(prompt)})
 	default:
 		return nil, nil
 	}
@@ -91,6 +103,14 @@ func promptInjectionArgs(agentName, configured, prompt, worktreePath string) (ex
 // valid TOML basic string, so Codex's TOML parse decodes it back to the exact
 // prompt.
 func codexDeveloperInstructionsArgs(prompt string) []string {
+	return []string{"-c", "developer_instructions=" + codexDeveloperInstructionsValue(prompt)}
+}
+
+// codexDeveloperInstructionsValue JSON-encodes prompt into the string value used
+// after `developer_instructions=`. A JSON-encoded string is also a valid TOML
+// basic string, so Codex's `-c key=value` TOML parse decodes it back verbatim —
+// carrying a multi-line body or one that would otherwise parse as a TOML scalar.
+func codexDeveloperInstructionsValue(prompt string) string {
 	// json.Marshal of a string never fails; the error check satisfies the
 	// linter and strconv.Quote is an unreachable, equivalent fallback.
 	encoded, err := json.Marshal(prompt)
@@ -98,7 +118,7 @@ func codexDeveloperInstructionsArgs(prompt string) []string {
 		encoded = []byte(strconv.Quote(prompt))
 	}
 
-	return []string{"-c", "developer_instructions=" + string(encoded)}
+	return string(encoded)
 }
 
 func writeCursorRule(worktreePath, prompt string) error {

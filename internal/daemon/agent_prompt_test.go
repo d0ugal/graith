@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -198,6 +199,47 @@ func TestInjectPrompt_ConfigOverride(t *testing.T) {
 
 	if len(args) != 0 {
 		t.Errorf("claude-x with prompt_injection=none should get no args, got %v", args)
+	}
+}
+
+// TestInjectPrompt_CustomArgvSpelling is the #1236 opt-in: a custom agent can
+// override the argv spelling graith uses to deliver the prompt via
+// prompt_injection_args, and {prompt} is bound to the (mechanism-appropriate)
+// value. The append mechanism binds the raw prompt; developer_instructions binds
+// the JSON-encoded value.
+func TestInjectPrompt_CustomArgvSpelling(t *testing.T) {
+	cfg := config.Default()
+	cfg.AgentPrompt = "ken this"
+	cfg.Agents = map[string]config.Agent{
+		"thrawn": {
+			PromptInjection:     config.PromptInjectionAppendSystemPrompt,
+			PromptInjectionArgs: []string{"--system", "{prompt}", "--from-graith"},
+		},
+		"bothy": {
+			PromptInjection:     config.PromptInjectionDeveloperInstructions,
+			PromptInjectionArgs: []string{"--set", "instructions={prompt}"},
+		},
+	}
+	sm := &SessionManager{cfg: cfg}
+
+	args, err := sm.injectPrompt("thrawn", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := []string{"--system", "ken this", "--from-graith"}; !reflect.DeepEqual(args, want) {
+		t.Errorf("thrawn custom prompt args = %v, want %v", args, want)
+	}
+
+	args, err = sm.injectPrompt("bothy", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// {prompt} carries the JSON-encoded value for the developer_instructions
+	// mechanism, so the custom flag receives the same encoded blob.
+	if len(args) != 2 || args[0] != "--set" || !strings.HasPrefix(args[1], `instructions="ken this"`) {
+		t.Errorf("bothy custom prompt args = %v, want [--set instructions=<json>]", args)
 	}
 }
 

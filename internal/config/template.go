@@ -103,3 +103,70 @@ func ExpandSlice(ss []string, vars TemplateVars) ([]string, error) {
 
 	return out, nil
 }
+
+// ExpandWith expands {key} tokens in s from subs, erroring on any token not in
+// subs. Unlike Expand it uses a caller-supplied variable set rather than the
+// fixed session TemplateVars: it drives the agent adapter argv templates (hook,
+// MCP, and prompt-injection spellings, issue #1236) whose dynamic values —
+// generated file paths and encoded config blobs — are built in Go and bound per
+// call. Only the original template is scanned for tokens, so a substituted value
+// that itself contains braces (an encoded prompt, JSON args) is inserted
+// verbatim and never re-expanded.
+func ExpandWith(s string, subs map[string]string) (string, error) {
+	var expandErr error
+
+	result := varPattern.ReplaceAllStringFunc(s, func(match string) string {
+		key := match[1 : len(match)-1]
+
+		val, ok := subs[key]
+		if !ok {
+			expandErr = fmt.Errorf("unknown template variable %q in %q", key, s)
+			return match
+		}
+
+		return val
+	})
+
+	return result, expandErr
+}
+
+// templateTokens returns the distinct {key} variable names referenced across
+// ss. It backs adapter-template validation (issue #1236) so a template using an
+// unsupported placeholder is rejected at config load rather than failing a
+// launch.
+func templateTokens(ss []string) []string {
+	seen := map[string]bool{}
+
+	var out []string
+
+	for _, s := range ss {
+		for _, m := range varPattern.FindAllStringSubmatch(s, -1) {
+			if key := m[1]; !seen[key] {
+				seen[key] = true
+
+				out = append(out, key)
+			}
+		}
+	}
+
+	return out
+}
+
+// ExpandSliceWith applies ExpandWith to each element of ss.
+func ExpandSliceWith(ss []string, subs map[string]string) ([]string, error) {
+	if ss == nil {
+		return nil, nil
+	}
+
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		expanded, err := ExpandWith(s, subs)
+		if err != nil {
+			return nil, err
+		}
+
+		out[i] = expanded
+	}
+
+	return out, nil
+}

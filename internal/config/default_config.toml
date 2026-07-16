@@ -686,6 +686,21 @@ add_dir_args = ["--add-dir", "{dir}"]
 # Control-channel argv prefix prepended in headless stream-json mode; the agent's
 # own args follow. Pinned to what was verified against claude 2.1.211. (#1236)
 headless_args = ["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"]
+# How graith injects the operating prompt: {prompt} is bound to the assembled
+# prompt. Delivery mechanism is chosen by prompt_injection above. (issue #1236)
+prompt_injection_args = ["--append-system-prompt", "{prompt}"]
+
+# Lifecycle-hook wiring. graith builds the settings JSON dynamically; only the
+# argv spelling lives here. mechanism selects the Go builder; settings_args wires
+# the generated file in with {path} bound. (issue #1236)
+[agents.claude.hooks]
+mechanism = "claude_settings"
+settings_args = ["--settings", "{path}"]
+
+# MCP-server wiring. graith generates the config file; {path} is bound to it.
+[agents.claude.mcp]
+mechanism = "claude_config"
+config_args = ["--mcp-config", "{path}"]
 
 # Extra sandbox grants for this agent, merged on top of the global [sandbox]
 # config. Only take effect when the sandbox is enabled. "write" means read+write.
@@ -707,6 +722,12 @@ inject_prompt       = true                       # inject agent_prompt into the 
 prompt_injection    = "developer_instructions"   # delivery mechanism: Codex's -c developer_instructions=...
 pre_trust_workspace = true                       # pre-trust the worktree so the agent skips its trust prompt
 add_dir_args        = ["--add-dir", "{dir}"]     # grant an included repo's worktree
+# Codex mints its own session id; when graith didn't capture one, resume falls
+# back to this cwd-scoped best-effort argv rather than pinning a wrong id. (#1236)
+empty_id_resume_args = ["resume", "--last"]
+# Prompt delivery: developer_instructions is injected as a -c config override.
+# {prompt} is bound to the JSON-encoded prompt (a valid TOML basic string). (#1236)
+prompt_injection_args = ["-c", "developer_instructions={prompt}"]
 # Conditional launch flags for the session model and typed Codex options (issue
 # #1186), each emitted only when its `when` template variable is set — an unset
 # option leaves Codex's own default untouched. These are the config-driven
@@ -733,6 +754,22 @@ args = ["--search"]
 when = "approval_policy"
 args = ["--ask-for-approval", "{approval_policy}"]
 
+# Lifecycle-hook wiring. Current Codex takes hooks as repeatable `-c
+# hooks.<Event>=<toml>` session-config overrides; graith builds the inline-TOML
+# value dynamically and binds it to {hook_value} per event ({hook_event}).
+# trust_args bypasses Codex's interactive hook-trust review. (issue #1236)
+[agents.codex.hooks]
+mechanism = "codex_config"
+event_args = ["-c", "hooks.{hook_event}={hook_value}"]
+trust_args = ["--dangerously-bypass-hook-trust"]
+
+# MCP-server wiring via `-c mcp_servers.<name>.…` overrides. graith JSON-encodes
+# the command and args and binds them to {mcp_command}/{mcp_args} per server
+# ({mcp_name}); server names not representable as a config key are skipped in Go.
+[agents.codex.mcp]
+mechanism = "codex_config"
+server_args = ["-c", "mcp_servers.{mcp_name}.command={mcp_command}", "-c", "mcp_servers.{mcp_name}.args={mcp_args}"]
+
 [agents.codex.sandbox]
 read_dirs = ["~/.codex"]
 write_dirs = ["~/.codex"]
@@ -758,6 +795,11 @@ inject_prompt       = true            # inject agent_prompt into the session
 prompt_injection    = "cursor_rules"  # delivery mechanism: writes .cursor/rules/graith.mdc
 pre_trust_workspace = true            # pre-trust the worktree so the agent skips its trust prompt
 add_dir_args        = ["--add-dir", "{dir}"]  # grant an included repo's worktree
+
+# Cursor reads hooks from a .cursor/hooks.json graith writes in the worktree, so
+# no launch args are appended — mechanism just selects that Go builder. (#1236)
+[agents.cursor.hooks]
+mechanism = "cursor_project"
 
 [agents.cursor.sandbox]
 read_dirs = ["~/.cursor"]

@@ -41,6 +41,8 @@ validate_model = ""             # command to validate --model values
 headless_capable = false        # agent can run in headless (stream-json) mode (experimental)
 add_dir_args   = ["--add-dir", "{dir}"]  # flag for granting an extra directory (see Includes)
 headless_args  = []             # argv prefix prepended in headless mode (see below)
+prompt_injection_args = ["--append-system-prompt", "{prompt}"]  # how the prompt is delivered (see below)
+empty_id_resume_args  = []      # resume fallback when no native id was captured (see below)
 ```
 
 `headless_capable` marks whether an agent supports [headless mode]({{< relref "sessions.md#headless-sessions" >}}). Only Claude supports it in v1; a session can't be asked to go headless on an agent that isn't capable.
@@ -50,6 +52,11 @@ Every agent-specific flag graith appends is defined here, so a custom agent can 
 - **`add_dir_args`** — the flag template graith uses to grant the agent an extra directory (each [included repo](#includes)'s co-located worktree). It is expanded once per directory with `{dir}` bound to that path. Leave it unset for an agent whose CLI has no such flag; those agents rely on the `GRAITH_INCLUDE_*_PATH` environment variables instead.
 - **`headless_args`** — the control-channel argv prefix graith prepends when launching the agent in [headless mode]({{< relref "sessions.md#headless-sessions" >}}); the agent's own args follow it. Claude's default is `["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"]`.
 - **`option_args`** — conditional flag groups appended on every launch. Each group is emitted only when its `when` template variable is set, so an unset option leaves the agent's own default untouched (see [Conditional option flags](#conditional-option-flags)).
+- **`prompt_injection_args`** — the argv template graith uses to deliver the operating prompt, with `{prompt}` bound to it, for the `append_system_prompt` and `developer_instructions` mechanisms (see below). Unset falls back to the built-in spelling for the selected mechanism.
+- **`empty_id_resume_args`** — the fallback resume argv used when `resume_args` templates `{agent_session_id}` but graith never captured a native session id. Codex's default is `["resume", "--last"]` (cwd-scoped, best-effort); unset means start fresh.
+- **`[agents.<name>.hooks]`** and **`[agents.<name>.mcp]`** — how graith wires its generated lifecycle hooks and daemon-managed MCP servers into the launch (see [Hook and MCP adapters](#hook-and-mcp-adapters)).
+
+Dynamic values — the generated settings/MCP files, the encoded prompt, the Codex hook TOML — are still built by graith; only the capability declaration and argv spelling live in config, and the security checks (e.g. skipping an MCP server whose name isn't a valid Codex config key) stay in graith.
 
 `inject_prompt` is the on/off switch for prompt injection; `prompt_injection` selects the *mechanism*. When `prompt_injection` is empty (the default), graith picks the mechanism from the agent name — `claude` → `append_system_prompt`, `cursor` → `cursor_rules`, `codex` → `developer_instructions`, and any other name → `none`. Set it explicitly to override that mapping or, most usefully, to give a [custom agent](#custom-agents) a mechanism it would otherwise not get. The values are:
 
@@ -80,6 +87,8 @@ Only `{username}` is available in `branch_prefix`.
 
 Two more variables are scoped to specific fields. `{dir}` is available only in `add_dir_args`, bound to each granted directory in turn. The Codex option values — `{profile}`, `{reasoning_effort}`, `{service_tier}`, `{approval_policy}`, and `{web_search}` (a boolean rendering as `true`/empty) — are available in `option_args`, alongside `{model}`.
 
+The adapter templates each bind their own values: `{prompt}` in `prompt_injection_args`; `{path}` in `hooks.settings_args` and `mcp.config_args`; `{hook_event}`/`{hook_value}` in `hooks.event_args`; and `{mcp_name}`/`{mcp_command}`/`{mcp_args}` in `mcp.server_args`. A template that references any other variable is rejected at config load.
+
 ### Conditional option flags
 
 `option_args` moves the per-session flags that used to be hard-coded (Codex's `--model`, `--profile`, reasoning-effort, service-tier, `--search`, and `--ask-for-approval`) into config, so a custom agent can define its own. Each group lists the argv to append and a `when` template variable that gates it — the group is emitted only when that variable resolves to a non-empty value (`true` for a boolean such as `web_search`). An empty `when` emits the group unconditionally.
@@ -99,6 +108,39 @@ args = ["--search"]
 ```
 
 This is why an unset option can't just be a `{model}` template inside `args`: an empty model would expand to a literal `--model ""`. The groups are appended after the base args on create, resume, and fork alike. A `when` that names an unknown template variable, or a group with no `args`, is rejected at config load.
+
+### Hook and MCP adapters
+
+graith injects its lifecycle hooks (status reporting, inbox checks, approval bridging) and daemon-managed MCP servers by generating an artifact and wiring it into the launch. The `mechanism` selects the strategy graith uses to build that artifact; the argv templates carry the flag spelling. Both are per-agent so a custom agent can adopt a supported mechanism from config alone, and a built-in agent's exact flags are visible rather than hidden in code.
+
+```toml
+# Claude: a settings file passed with --settings, and an MCP config file.
+[agents.claude.hooks]
+mechanism     = "claude_settings"
+settings_args = ["--settings", "{path}"]
+
+[agents.claude.mcp]
+mechanism   = "claude_config"
+config_args = ["--mcp-config", "{path}"]
+
+# Codex: hooks as repeatable -c overrides plus a trust-bypass flag, and MCP as
+# per-server -c overrides.
+[agents.codex.hooks]
+mechanism  = "codex_config"
+event_args = ["-c", "hooks.{hook_event}={hook_value}"]
+trust_args = ["--dangerously-bypass-hook-trust"]
+
+[agents.codex.mcp]
+mechanism   = "codex_config"
+server_args = ["-c", "mcp_servers.{mcp_name}.command={mcp_command}", "-c", "mcp_servers.{mcp_name}.args={mcp_args}"]
+
+# Cursor: reads hooks from a .cursor/hooks.json graith writes in the worktree,
+# so there is no launch flag — the mechanism only selects that builder.
+[agents.cursor.hooks]
+mechanism = "cursor_project"
+```
+
+The hook mechanisms are `claude_settings` (write a settings JSON, pass `settings_args` with `{path}` bound), `codex_config` (emit `event_args` once per hook event with `{hook_event}`/`{hook_value}` bound, then `trust_args`), and `cursor_project` (write `.cursor/hooks.json`, no args). The MCP mechanisms are `claude_config` (write an MCP config JSON, pass `config_args` with `{path}` bound) and `codex_config` (emit `server_args` once per server with `{mcp_name}`, `{mcp_command}`, and `{mcp_args}` bound). An agent with no `[agents.<name>.hooks]`/`[agents.<name>.mcp]` block gets no hooks/MCP wiring. An unknown mechanism is rejected at config load.
 
 ### Per-agent sandbox
 

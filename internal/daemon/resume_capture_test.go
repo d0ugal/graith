@@ -13,7 +13,7 @@ import (
 )
 
 func TestResolveResumeArgs(t *testing.T) {
-	codex := config.Agent{Args: nil, ResumeArgs: []string{"resume", "{agent_session_id}"}}
+	codex := config.Agent{Args: nil, ResumeArgs: []string{"resume", "{agent_session_id}"}, EmptyIDResumeArgs: []string{"resume", "--last"}}
 	opencode := config.Agent{Args: nil, ResumeArgs: []string{"--session", "{agent_session_id}"}}
 	claude := config.Agent{
 		Args:       []string{"--session-id", "{agent_session_id}"},
