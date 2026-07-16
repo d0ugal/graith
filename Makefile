@@ -1,6 +1,6 @@
 GOLANGCI_LINT_VERSION := v2.12.2
 
-.PHONY: build test lint lint-only lint-darwin fmt clean notifier
+.PHONY: build test lint lint-only lint-darwin fmt clean notifier demo demo-clean
 
 build:
 	go build -v -ldflags="-s -w" -o gr ./cmd/graith
@@ -32,3 +32,22 @@ fmt:
 clean:
 	rm -f gr
 	rm -rf macos/build
+
+# Record the demo GIF (demo/graith.gif) with VHS. Runs unsandboxed on your own
+# machine: it stands up an isolated `demo` profile with a mix of running/stopped
+# real agent sessions (demo/setup.sh), records the tape, then tears it down.
+# Requires VHS: `brew install vhs` (or `go install github.com/charmbracelet/vhs@latest`).
+# Putting the repo root first on PATH makes the tape use the freshly-built ./gr.
+# If VHS fails mid-run, clean up with `make demo-clean`.
+demo: build
+	@command -v vhs >/dev/null 2>&1 || { \
+		echo "vhs not found. Install with: brew install vhs"; \
+		echo "                    or: go install github.com/charmbracelet/vhs@latest"; \
+		exit 1; }
+	./demo/setup.sh
+	PATH="$(CURDIR):$$PATH" GRAITH_PROFILE=demo vhs demo/demo.tape
+	./demo/teardown.sh
+
+# Tear down the isolated demo environment (safe to run any time).
+demo-clean:
+	./demo/teardown.sh

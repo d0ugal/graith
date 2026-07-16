@@ -151,6 +151,38 @@ When no profile is set, graith uses the base app name `graith` for all paths.
 
 The daemon propagates `GRAITH_PROFILE` to child sessions via environment variables, so sessions created under a profile stay within that profile.
 
+## Demo recording
+
+The demo GIF (`demo/graith.gif`, embedded in the repo README) is recorded with
+[VHS](https://github.com/charmbracelet/vhs), a declarative terminal recorder.
+It's a dev-only dependency — install it once:
+
+```bash
+brew install vhs
+# or:
+go install github.com/charmbracelet/vhs@latest
+```
+
+Re-record from the repo root:
+
+```bash
+make demo         # build gr, set up an isolated demo env, record, tear down
+make demo-clean   # tear down the demo env if a run is interrupted
+```
+
+`make demo` runs against a dedicated `GRAITH_PROFILE=demo` instance, fully
+isolated from your real sessions and config. It uses your real local agents
+(`claude`/`codex`) under your real sandbox configuration — both copied from your
+default config — and the tape attaches and types real prompts, so the demo is
+the genuine article (it spends a little API token budget). The whole setup lives
+in `demo/`; see
+[`demo/README.md`](https://github.com/d0ugal/graith/blob/main/demo/README.md)
+for the tape format and how to tweak the recording.
+
+Recording must run **locally and unsandboxed**: VHS needs a real TTY, the daemon
+binds a unix socket, and sessions create git worktrees — so this is not a CI
+step.
+
 ## Project layout
 
 All packages are under `internal/` -- there is no public Go API.
