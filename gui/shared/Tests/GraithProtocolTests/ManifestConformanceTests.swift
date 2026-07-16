@@ -158,6 +158,11 @@ private let swiftDecoders: [String: DecodeProbe] = [
     "TriggerListMsg": probe(EmptyMsg.self),
     "PairListMsg": probe(EmptyMsg.self),
     "ConfigMsg": probe(EmptyMsg.self),
+    "AgentCatalogMsg": probe(EmptyMsg.self),
+
+    // Agent catalog (#1234).
+    "AgentCatalogEntry": probe(AgentCatalogEntry.self),
+    "AgentCatalogResponseMsg": probe(AgentCatalogResponseMsg.self),
 
     // Config viewer + diagnostics panel (#904).
     "ConfigResponseMsg": probe(ConfigResponseMsg.self),

@@ -81,8 +81,9 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	// worktree paths, token-*presence*, never token values). config's secret
 	// env-map values are redacted before they cross the wire (config.RedactSecrets),
 	// so neither serves a guest a secret the human/guest split would need to guard.
-	"config":      remoteHumanRW, // effective config (env secrets redacted) + diff (GUI config viewer, #904)
-	"diagnostics": remoteHumanRW, // health/doctor payload for the GUI diagnostics panel (#904)
+	"config":        remoteHumanRW, // effective config (env secrets redacted) + diff (GUI config viewer, #904)
+	"agent_catalog": remoteHumanRW, // configured agent names + default_agent (GUI agent pickers, #1234)
+	"diagnostics":   remoteHumanRW, // health/doctor payload for the GUI diagnostics panel (#904)
 
 	"wait":               remoteHumanRW, // targets arbitrary sessions
 	"repo_list":          remoteHumanRW, // only useful for create, which guests can't do

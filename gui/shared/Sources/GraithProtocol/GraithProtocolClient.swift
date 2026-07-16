@@ -187,6 +187,14 @@ public actor GraithProtocolClient {
         return try decodePayload(reply, as: ConfigResponseMsg.self)
     }
 
+    /// `agent_catalog` — the daemon's configured agent catalog + default_agent
+    /// for the GUI agent pickers (#1234).
+    public func agentCatalog() async throws -> AgentCatalogResponseMsg {
+        let conn = try await controlConnection()
+        let reply = try await conn.request("agent_catalog", payload: EmptyMsg())
+        return try decodePayload(reply, as: AgentCatalogResponseMsg.self)
+    }
+
     /// `diagnostics` — the daemon's health snapshot for the diagnostics panel
     /// (the `gr doctor` equivalent, #904).
     public func diagnostics() async throws -> DiagnosticsMsg {

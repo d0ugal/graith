@@ -594,6 +594,24 @@ open class FleetModel: ObservableObject {
         return try await conn.config()
     }
 
+    /// The configured agent catalog + default_agent for a host's New Session /
+    /// Settings pickers (#1234). Returns the daemon's catalog once fetched, or
+    /// the built-in fallback while it's still nil (connecting / old daemon), so
+    /// the picker is never empty. Defaults to the local daemon.
+    public func agentCatalog(hostID: String = "local") -> AgentCatalogResponseMsg {
+        connections.first(where: { $0.id == hostID })?.agentCatalog ?? AgentCatalog.fallback
+    }
+
+    /// Fetch a host's agent catalog on demand for the New Session / Settings
+    /// pickers (#1234), refreshing the cached value. Non-throwing: an offline or
+    /// old daemon yields the built-in fallback so the picker is never empty.
+    public func fetchAgentCatalog(hostID: String = "local") async -> AgentCatalogResponseMsg {
+        guard let conn = connections.first(where: { $0.id == hostID }) else {
+            return AgentCatalog.fallback
+        }
+        return await conn.fetchAgentCatalog() ?? AgentCatalog.fallback
+    }
+
     /// Fetch a host's health snapshot for the diagnostics panel. Defaults to the
     /// local daemon.
     public func diagnostics(hostID: String = "local") async throws -> DiagnosticsMsg {

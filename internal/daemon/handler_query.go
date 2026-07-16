@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
@@ -79,6 +80,34 @@ func handleConfig(sm *SessionManager, send func(string, any)) {
 		DiffFromDefaults: diff,
 		ConfigPath:       configPath,
 		ConfigExists:     configFileExists(statErr),
+	})
+}
+
+// handleAgentCatalog returns the daemon's configured agent catalog (agent names
+// plus launch command, sorted by name) and the configured default_agent. GUI
+// clients use this to populate their agent pickers instead of hardcoding the
+// list, so custom agents appear and the right default is preselected (#1234).
+func handleAgentCatalog(sm *SessionManager, send func(string, any)) {
+	cfg := sm.Config()
+
+	names := make([]string, 0, len(cfg.Agents))
+	for name := range cfg.Agents {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	entries := make([]protocol.AgentCatalogEntry, 0, len(names))
+	for _, name := range names {
+		entries = append(entries, protocol.AgentCatalogEntry{
+			Name:    name,
+			Command: cfg.Agents[name].Command,
+		})
+	}
+
+	send("agent_catalog_response", protocol.AgentCatalogResponseMsg{
+		Agents:       entries,
+		DefaultAgent: cfg.DefaultAgent,
 	})
 }
 

@@ -735,6 +735,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			case "config":
 				handleConfig(sm, sendControl)
 
+			case "agent_catalog":
+				handleAgentCatalog(sm, sendControl)
+
 			case "gc":
 				handleGC(sm, sendControl, msg)
 

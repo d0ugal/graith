@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import GraithProtocol
+import GraithSessionKit
 
 struct NewSessionSheet: View {
     @EnvironmentObject var store: SessionStore
@@ -10,7 +11,7 @@ struct NewSessionSheet: View {
     @AppStorage("defaultAgent") private var defaultAgent = "claude"
     @State private var name = ""
     @State private var repoPath = ""
-    @State private var agent = "claude"
+    @State private var agent = ""
     @State private var model = ""
     @State private var prompt = ""
     @State private var isCreating = false
@@ -28,8 +29,12 @@ struct NewSessionSheet: View {
     /// change; the free-text field remains for paths the daemon didn't list.
     @State private var repos: [RepoEntry] = []
     @State private var loadingRepos = false
+    /// The selected host's agent catalog, driven by daemon config (#1234). Starts
+    /// on the built-in fallback and is replaced once the daemon responds.
+    @State private var catalog: AgentCatalogResponseMsg = AgentCatalog.fallback
 
-    let agents = ["claude", "codex", "agy", "opencode"]
+    /// Agent names the daemon offers for the selected host.
+    private var agents: [String] { catalog.names }
 
     /// Repo names that appear more than once (same basename, different path), so
     /// the picker knows to spell out the full path for those entries.
@@ -214,8 +219,8 @@ struct NewSessionSheet: View {
         }
         .frame(width: 480, height: 560)
         .background(Theme.mantle)
-        .onAppear { agent = defaultAgent }
         .task(id: selectedHostID) { await loadRepos() }
+        .task(id: selectedHostID) { await loadCatalog() }
     }
 
     /// Collapsible "Advanced" group exposing the less-common `gr new` options.
@@ -308,6 +313,24 @@ struct NewSessionSheet: View {
         guard requestedHostID == selectedHostID else { return }
         repos = loaded
         loadingRepos = false
+    }
+
+    /// Load the selected host's agent catalog from the daemon (#1234) and seed
+    /// the agent selection. Mirrors `loadRepos`: a slow reply for one host must
+    /// not clobber another after a quick host switch, so the requested host is
+    /// snapshotted and a stale reply dropped. The selection is (re)seeded only
+    /// when the current pick isn't offered by the new catalog, preserving a
+    /// deliberate user choice.
+    private func loadCatalog() async {
+        let requestedHostID = selectedHostID
+        let loaded = await store.fetchAgentCatalog(hostID: requestedHostID)
+        guard requestedHostID == selectedHostID else { return }
+        catalog = loaded
+        if agent.isEmpty || !loaded.names.contains(agent) {
+            // Honour the user's saved default when the daemon offers it; otherwise
+            // fall back to the daemon's configured default_agent.
+            agent = loaded.names.contains(defaultAgent) ? defaultAgent : loaded.resolvedDefault
+        }
     }
 
     func createSession() {

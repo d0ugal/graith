@@ -122,6 +122,19 @@ public actor MockHostClient: GraithHostClient {
         )
     }
 
+    public func agentCatalog() async throws -> AgentCatalogResponseMsg {
+        try check(ControlType.agentCatalog)
+        return AgentCatalogResponseMsg(
+            agents: [
+                AgentCatalogEntry(name: "claude", command: "claude"),
+                AgentCatalogEntry(name: "codex", command: "codex"),
+                AgentCatalogEntry(name: "cursor", command: "cursor-agent"),
+                AgentCatalogEntry(name: "opencode", command: "opencode"),
+            ],
+            defaultAgent: "claude"
+        )
+    }
+
     public func diagnostics() async throws -> DiagnosticsMsg {
         try check(ControlType.diagnostics)
         let diags = sessions.map { s in
