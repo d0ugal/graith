@@ -635,12 +635,13 @@ Anthropic ships and tests. Rejected.
    generation is now `injectMCPConfig`, a path independent of the hook path, and
    split the `agentHooks = agentHooks || yolo` reassignment into distinct
    `hooksEnabled` / `mcpEnabled` gates at all three launch sites (Create, Fork,
-   Resume) so yolo no longer silently governs MCP availability. The sandbox
-   hook-dir read grant now follows either gate (the dir holds both the settings
-   and MCP config files). PTY behaviour is unchanged (`mcpEnabled == hooksEnabled`
-   for PTY); the split is what lets a future headless launch inject MCP without
-   generated hooks. Headless MCP injection itself stays gated off pending the
-   later phases. Prerequisite: without it, a headless session that skips hook
+   Resume). The two injection *mechanisms* are now independent; the *policy
+   gates* still coincide (`mcpEnabled == hooksEnabled`), so PTY behaviour is
+   unchanged and yolo still transitively governs MCP for now — the separate
+   variable is the seam a later phase widens so yolo/hooks no longer gate MCP.
+   The sandbox hook-dir read grant now follows either gate (the dir holds both
+   the settings and MCP config files). Headless MCP injection itself stays gated
+   off pending the later phases. Prerequisite: without it, a headless session that skips hook
    generation silently loses MCP + the inbox check.
 1. **Driver interface + PTY adapter (no behaviour change) — ~4d** (bumped from the
    first draft's optimistic 2d). Extract the capability-split `sessionDriver` /
