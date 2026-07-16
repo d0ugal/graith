@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.68.6](https://github.com/d0ugal/graith/compare/v0.68.5...v0.68.6) (2026-07-16)
+
+
+### Dependencies
+
+* **deps:** update actions/setup-go action to v7 ([46c9735](https://github.com/d0ugal/graith/commit/46c973561c193b97bb50623cdf1068e0f63c4a58))
+
 ## [0.68.5](https://github.com/d0ugal/graith/compare/v0.68.4...v0.68.5) (2026-07-15)
 
 
