@@ -153,14 +153,13 @@ func TestLaunchThrottleAcquireContextCancel(t *testing.T) {
 func TestLaunchThrottleResize(t *testing.T) {
 	lt := newLaunchThrottle(1)
 
-	// Hold the only slot against the old (cap-1) channel.
+	// Hold the only slot, then grow to two. The existing holder continues to
+	// count, so exactly one additional acquire may proceed.
 	old, err := lt.acquire(context.Background())
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
 
-	// Grow to 2: a fresh channel is swapped in, so two new acquires succeed
-	// even while the old slot is still held.
 	lt.resize(2)
 
 	a, err := lt.acquire(context.Background())
@@ -168,19 +167,120 @@ func TestLaunchThrottleResize(t *testing.T) {
 		t.Fatalf("acquire after resize: %v", err)
 	}
 
-	b, err := lt.acquire(context.Background())
-	if err != nil {
-		t.Fatalf("second acquire after resize: %v", err)
+	acquired := make(chan launchSlot, 1)
+	go func() {
+		b, acquireErr := lt.acquire(context.Background())
+		if acquireErr == nil {
+			acquired <- b
+		}
+	}()
+
+	select {
+	case b := <-acquired:
+		b.release()
+		t.Fatal("growth forgot the existing holder and admitted above capacity")
+	case <-time.After(100 * time.Millisecond):
 	}
 
-	if b.capacity != 2 {
-		t.Fatalf("post-resize capacity = %d, want 2", b.capacity)
-	}
-
-	// Releasing the old slot against the old channel must not panic.
 	old.release()
+
+	select {
+	case b := <-acquired:
+		if b.capacity != 2 || b.inflight > 2 {
+			t.Fatalf("post-resize slot = %+v, want live capacity 2", b)
+		}
+		b.release()
+	case <-time.After(time.Second):
+		t.Fatal("blocked acquire did not wake after a holder released")
+	}
+
 	a.release()
-	b.release()
+}
+
+func TestLaunchThrottleShrinkCreatesCapacityDebt(t *testing.T) {
+	lt := newLaunchThrottle(3)
+	held := make([]launchSlot, 3)
+
+	for i := range held {
+		var err error
+		held[i], err = lt.acquire(context.Background())
+		if err != nil {
+			t.Fatalf("acquire %d: %v", i, err)
+		}
+	}
+
+	lt.resize(1)
+
+	acquired := make(chan launchSlot, 1)
+	go func() {
+		slot, err := lt.acquire(context.Background())
+		if err == nil {
+			acquired <- slot
+		}
+	}()
+
+	// Releasing down to the new limit only repays the shrink debt; it must not
+	// admit a replacement while one pre-existing holder still occupies the cap.
+	held[0].release()
+	held[1].release()
+	select {
+	case slot := <-acquired:
+		slot.release()
+		t.Fatal("shrink admitted before occupancy fell below the new limit")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	held[2].release()
+	select {
+	case slot := <-acquired:
+		if slot.capacity != 1 || slot.inflight != 1 {
+			t.Fatalf("post-shrink slot = %+v, want 1/1", slot)
+		}
+		slot.release()
+	case <-time.After(time.Second):
+		t.Fatal("acquire stayed blocked after shrink debt was repaid")
+	}
+}
+
+func TestLaunchThrottleResizeWakesOldWaitersAgainstLiveLimit(t *testing.T) {
+	lt := newLaunchThrottle(1)
+	held, err := lt.acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const waiterCount = 8
+	acquired := make(chan launchSlot, waiterCount)
+	for range waiterCount {
+		go func() {
+			slot, acquireErr := lt.acquire(context.Background())
+			if acquireErr == nil {
+				acquired <- slot
+			}
+		}()
+	}
+
+	// Grow while all waiters belong to the pre-resize generation. Only the two
+	// newly available slots may be admitted alongside the existing holder.
+	lt.resize(3)
+	first := <-acquired
+	second := <-acquired
+
+	select {
+	case extra := <-acquired:
+		extra.release()
+		t.Fatal("old waiter acquired against obsolete capacity after resize")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	held.release()
+	first.release()
+	second.release()
+
+	for i := 0; i < waiterCount-2; i++ {
+		slot := <-acquired
+		slot.release()
+	}
 }
 
 // --- releaseLaunchSlotWhenSettled tests ---
@@ -298,7 +398,7 @@ func slotFree(lt *launchThrottle) bool {
 	lt.mu.Lock()
 	defer lt.mu.Unlock()
 
-	return len(lt.sem) == 0
+	return lt.inflight == 0
 }
 
 func waitSlotFree(t *testing.T, lt *launchThrottle, within time.Duration) {
