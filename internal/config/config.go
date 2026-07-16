@@ -180,6 +180,49 @@ type ToolsConfig struct {
 	Lsof string `toml:"lsof"`
 }
 
+// normalizeToolPath resolves a single configured tool value to a stable form
+// (issue #1293). A bare command name (no path separator) keeps PATH-lookup
+// semantics and is returned unchanged; a value that names a path — relative or
+// absolute, or one starting with ~/ — is expanded and, when relative, resolved
+// against baseDir (the directory holding config.toml) so the SAME absolute path
+// is used both for startup validation and for every execution site. Without
+// this a relative path like "./bin/git-wrapper" validated against the daemon cwd
+// would later be re-evaluated against a git command's exec.Cmd.Dir and fail.
+func normalizeToolPath(val, baseDir string) string {
+	if val == "" {
+		return ""
+	}
+
+	// Bare command name: resolved on PATH, must not be rewritten into a path.
+	if !hasToolPathSeparator(val) && !strings.HasPrefix(val, "~/") {
+		return val
+	}
+
+	return ExpandPathRelative(val, baseDir)
+}
+
+// hasToolPathSeparator reports whether val contains a path separator, matching
+// the tools package's own bare-name-vs-path test so normalization and validation
+// agree on which values are paths.
+func hasToolPathSeparator(val string) bool {
+	return strings.ContainsRune(val, '/') || strings.ContainsRune(val, os.PathSeparator)
+}
+
+// NormalizeRelative returns a copy of t with every path-valued tool resolved to
+// a stable absolute path against baseDir (issue #1293). Bare names and already
+// absolute paths are preserved. Load calls this once so Validate and Resolved
+// (hence tools.Configure) observe the identical resolved path.
+func (t ToolsConfig) NormalizeRelative(baseDir string) ToolsConfig {
+	t.Git = normalizeToolPath(t.Git, baseDir)
+	t.GH = normalizeToolPath(t.GH, baseDir)
+	t.Shell = normalizeToolPath(t.Shell, baseDir)
+	t.OSAScript = normalizeToolPath(t.OSAScript, baseDir)
+	t.PS = normalizeToolPath(t.PS, baseDir)
+	t.Lsof = normalizeToolPath(t.Lsof, baseDir)
+
+	return t
+}
+
 // Resolved converts the config block into the tools package's Config. Empty
 // fields are left empty here; tools.Configure fills them from tools.Defaults so
 // there is a single source of default values.
@@ -4488,6 +4531,16 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg.Agents = mergeAgents(defaultAgents, cfg.Agents)
+
+	// Resolve relative [tools] paths against the directory holding config.toml so
+	// validation and every execution site use the identical absolute path (issue
+	// #1293). Do this before Validate so a normalized path is what gets checked.
+	configDir := filepath.Dir(path)
+	if abs, err := filepath.Abs(configDir); err == nil {
+		configDir = abs
+	}
+
+	cfg.Tools = cfg.Tools.NormalizeRelative(configDir)
 
 	applyPRWatchCommentCompat(cfg, data)
 

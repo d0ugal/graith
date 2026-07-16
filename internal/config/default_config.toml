@@ -210,9 +210,13 @@ timeout = "5s"              # HTTP request timeout for the release check
 # lsof, their conventional absolute path). Override any of them to support
 # Nix/custom-PATH installs, wrapper binaries, or alternate shells. A value may
 # be a bare command name resolved on PATH ("git", "hub") or an absolute/relative
-# path to a specific binary. Only values you set here are validated at startup
-# (an explicit path must exist and be executable; a bare name must be on PATH);
-# unset entries keep the defaults shown below and are looked up when first used.
+# path to a specific binary. A RELATIVE path (e.g. "./bin/git-wrapper") is
+# resolved against the directory containing this config file — not the process
+# working directory — so it points at the same binary regardless of which
+# repo/worktree a command later runs in. A leading ~/ is expanded to your home
+# directory. Only values you set here are validated at startup (an explicit path
+# must exist and be executable; a bare name must be on PATH); unset entries keep
+# the defaults shown below and are looked up when first used.
 # [tools]
 # git       = "git"            # git executable
 # gh        = "gh"             # GitHub CLI executable

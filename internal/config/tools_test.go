@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -131,6 +132,90 @@ git = "`+gitBin+`"
 
 	if cfg.Tools.Git != gitBin {
 		t.Errorf("Tools.Git = %q, want %q", cfg.Tools.Git, gitBin)
+	}
+}
+
+// TestNormalizeRelativeToolPaths covers the resolution rules for #1293: a bare
+// name keeps PATH-lookup semantics, an absolute path is untouched, a relative
+// path resolves against the config dir, and a leading ~/ expands.
+func TestNormalizeRelativeToolPaths(t *testing.T) {
+	base := "/glen/bothy"
+
+	home, _ := os.UserHomeDir()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"bare name kept for PATH lookup", "git", "git"},
+		{"bare name with dash kept", "git-wrapper", "git-wrapper"},
+		{"absolute path untouched", "/usr/local/bin/git", "/usr/local/bin/git"},
+		{"dot-relative resolves against config dir", "./bin/git-wrapper", filepath.Join(base, "bin/git-wrapper")},
+		{"plain relative path resolves against config dir", "bin/git-wrapper", filepath.Join(base, "bin/git-wrapper")},
+		{"parent-relative resolves and cleans", "../tools/git", "/glen/tools/git"},
+		{"empty stays empty", "", ""},
+		{"tilde expands to home", "~/bin/git", filepath.Join(home, "bin/git")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeToolPath(tt.in, base); got != tt.want {
+				t.Errorf("normalizeToolPath(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRelativeToolWrapperExecutesAfterCmdDirChange is the #1293 regression: a
+// relative wrapper path passes startup validation AND still executes when a
+// later git command sets exec.Cmd.Dir to an unrelated worktree. Before the fix
+// the relative path was validated against one directory and re-evaluated by Go
+// against exec.Cmd.Dir, so the first git operation failed with "no such file".
+func TestRelativeToolWrapperExecutesAfterCmdDirChange(t *testing.T) {
+	configDir := t.TempDir()
+
+	binDir := filepath.Join(configDir, "bin")
+	if err := os.MkdirAll(binDir, 0o750); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+
+	wrapper := filepath.Join(binDir, "git-wrapper")
+	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\necho braw-wrapper-ran\n"), 0o755); err != nil { //nolint:gosec // G306: stub must be executable
+		t.Fatalf("write wrapper: %v", err)
+	}
+
+	cfgPath := filepath.Join(configDir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("[tools]\ngit = \"./bin/git-wrapper\"\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load (validation should accept the relative wrapper): %v", err)
+	}
+
+	// The stored path is the absolute wrapper, so validation and execution agree.
+	if cfg.Tools.Git != wrapper {
+		t.Fatalf("Tools.Git = %q, want normalized absolute %q", cfg.Tools.Git, wrapper)
+	}
+
+	tools.Configure(cfg.Tools.Resolved())
+	t.Cleanup(tools.Reset)
+
+	// Run the resolved git with Dir pointed at a DIFFERENT directory, the exact
+	// condition (internal/git sets Cmd.Dir to a worktree) that broke a relative
+	// executable path before the fix.
+	cmd := exec.Command(tools.Git())
+	cmd.Dir = t.TempDir()
+
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("running relative wrapper with changed Cmd.Dir: %v", err)
+	}
+
+	if !strings.Contains(string(out), "braw-wrapper-ran") {
+		t.Errorf("wrapper output = %q, want it to contain the sentinel", out)
 	}
 }
 
