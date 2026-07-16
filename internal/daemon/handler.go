@@ -466,6 +466,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					BaseBranch:          c.Base,
 					Prompt:              c.Prompt,
 					Model:               c.Model,
+					Codex:               codexOptsFromMsg(c.Codex),
 					ParentID:            c.ParentID,
 					NoRepo:              c.NoRepo,
 					Mirror:              c.Mirror,

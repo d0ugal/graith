@@ -830,13 +830,16 @@ type CreateOpts struct {
 	// returns (e.g. scenario reservation, where a placeholder ID would
 	// otherwise differ from the final session ID) supply it here. When empty,
 	// Create generates the ID as before.
-	ID                  string
-	Name                string
-	AgentName           string
-	RepoPath            string
-	BaseBranch          string
-	Prompt              string
-	Model               string
+	ID         string
+	Name       string
+	AgentName  string
+	RepoPath   string
+	BaseBranch string
+	Prompt     string
+	Model      string
+	// Codex carries typed per-session Codex CLI options (issue #1186). Ignored
+	// (and rejected if non-zero) for non-codex agents.
+	Codex               config.CodexOptions
 	ParentID            string
 	NoRepo              bool
 	Mirror              string
@@ -926,6 +929,17 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		if err := validateModel(agent, model); err != nil {
 			return SessionState{}, err
 		}
+	}
+
+	// Typed Codex options are codex-only; reject rather than silently drop them
+	// against another agent (issue #1186).
+	codexOpts := opts.Codex
+	if !codexOpts.IsZero() && agentName != "codex" {
+		return SessionState{}, fmt.Errorf("codex options require --agent codex (got %q)", agentName)
+	}
+
+	if err := config.ValidateCodexOptions(codexOpts); err != nil {
+		return SessionState{}, err
 	}
 
 	// Early validation that doesn't require the lock.
@@ -1201,6 +1215,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		Agent:           agentName,
 		AgentSessionID:  agentSessionID,
 		Model:           model,
+		Codex:           codexStatePtr(codexOpts),
 		Mirror:          isMirror,
 		MirrorSourceID:  mirrorSourceID,
 		InPlace:         inPlace,
@@ -1391,6 +1406,10 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 		driverKind = DriverPTY
 	}
+
+	// Conditional Codex flags (model + typed options) precede the positional
+	// prompt so options come before it (issue #1186); no-op for other agents.
+	expandedArgs = append(expandedArgs, codexExtraArgs(agentName, model, codexStatePtr(codexOpts))...)
 
 	if driverKind == DriverHeadless {
 		// The prompt is delivered as an initial stdin user message by the
@@ -1933,6 +1952,10 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		effectiveModel = targetModel
 	}
 
+	// A fork replays the source's typed Codex options (issue #1186). A cross-agent
+	// fork into codex from a non-codex source simply has none to inherit (nil).
+	sourceCodex := cloneCodexOptions(source.Codex)
+
 	sourceAgentSessionID := source.AgentSessionID
 	sourceYolo := source.Yolo
 	// Yolo forces agent hooks on (see Create) so a forked yolo session always
@@ -1992,6 +2015,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		Agent:           agentName,
 		AgentSessionID:  agentSessionID,
 		Model:           effectiveModel,
+		Codex:           sourceCodex,
 		AgentHooks:      sourceAgentHooks,
 		Yolo:            sourceYolo,
 		Status:          StatusCreating,
@@ -2179,6 +2203,10 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 
 		return SessionState{}, fmt.Errorf("expand fork args: %w", err)
 	}
+
+	// Replay the conditional Codex flags after the fork/args (issue #1186); no-op
+	// for other agents. Codex accepts these on its `fork` subcommand too.
+	expandedArgs = append(expandedArgs, codexExtraArgs(agentName, effectiveModel, sourceCodex)...)
 
 	logPath := filepath.Join(sm.paths.LogDir, id+".log")
 
@@ -3062,6 +3090,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	sessWorktreePath := sessState.WorktreePath
 	sessAgentSessionID := sessState.AgentSessionID
 	sessModel := sessState.Model
+	sessCodex := cloneCodexOptions(sessState.Codex)
 	sessYolo := sessState.Yolo
 	// Yolo forces agent hooks on (see Create) so a resumed yolo session always
 	// re-installs the approval hook, even if hooks were disabled at create.
@@ -3147,6 +3176,11 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		rollbackState()
 		return SessionState{}, fmt.Errorf("expand resume args: %w", err)
 	}
+
+	// Replay the conditional Codex flags after the resume subcommand/args
+	// (issue #1186) so a resumed session keeps its model and typed options; no-op
+	// for other agents.
+	expandedArgs = append(expandedArgs, codexExtraArgs(sessAgent, sessModel, sessCodex)...)
 
 	logPath := filepath.Join(sm.paths.LogDir, id+".log")
 
@@ -6616,6 +6650,87 @@ func includeAddDirArgs(agentType string, includes []IncludedRepoState) []string 
 
 	if len(args) == 0 {
 		return nil
+	}
+
+	return args
+}
+
+// cloneCodexOptions returns an independent copy of opts (or nil), so a fork's or
+// resume's persisted options don't alias the source session's struct.
+func cloneCodexOptions(opts *config.CodexOptions) *config.CodexOptions {
+	if opts == nil {
+		return nil
+	}
+
+	o := *opts
+
+	return &o
+}
+
+// codexStatePtr returns a heap copy of opts for persisting on SessionState, or
+// nil when nothing is set so a non-codex (or option-less) session stores no
+// `codex` block.
+func codexStatePtr(opts config.CodexOptions) *config.CodexOptions {
+	if opts.IsZero() {
+		return nil
+	}
+
+	o := opts
+
+	return &o
+}
+
+// codexOptsFromMsg flattens the wire pointer to a value for CreateOpts, treating
+// nil as "no options set".
+func codexOptsFromMsg(opts *config.CodexOptions) config.CodexOptions {
+	if opts == nil {
+		return config.CodexOptions{}
+	}
+
+	return *opts
+}
+
+// codexExtraArgs builds the backend-aware conditional flags for the Codex CLI
+// from the session's model and typed options (issue #1186). Each flag is emitted
+// only when its value is set, so an unset option leaves Codex's own default
+// untouched — the reason these can't just live as `{model}` templates in the
+// agent args (an empty model would expand to a literal `--model ""`). Returns
+// nil for any non-codex agent, so it is safe to call unconditionally on every
+// launch path (create/resume/fork). Reasoning effort and service tier have no
+// dedicated Codex flag, so they ride `-c key=value` config overrides; the rest
+// map to real flags. All of these are accepted on the bare invocation and on the
+// `resume`/`fork` subcommands, so appending them after existing args is valid.
+func codexExtraArgs(agentType, model string, opts *config.CodexOptions) []string {
+	if agentType != "codex" {
+		return nil
+	}
+
+	var args []string
+
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+
+	if opts != nil {
+		if opts.Profile != "" {
+			args = append(args, "--profile", opts.Profile)
+		}
+
+		if opts.ReasoningEffort != "" {
+			args = append(args, "-c", "model_reasoning_effort="+opts.ReasoningEffort)
+		}
+
+		if opts.ServiceTier != "" {
+			args = append(args, "-c", "service_tier="+opts.ServiceTier)
+		}
+
+		if opts.WebSearch {
+			args = append(args, "--search")
+		}
+
+		if opts.ApprovalPolicy != "" {
+			args = append(args, "--ask-for-approval", opts.ApprovalPolicy)
+		}
 	}
 
 	return args

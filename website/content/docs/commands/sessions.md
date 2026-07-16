@@ -23,11 +23,28 @@ Create a new agent session.
 | `--background` | Create without attaching |
 | `-p, --prompt <text>` | Initial prompt for the agent |
 | `--prompt-file <path>` | Read initial prompt from file |
-| `-m, --model <name>` | Model for the agent (expands `{model}` in agent args) |
+| `-m, --model <name>` | Model for the agent (Codex: passed as `--model`; other agents: expands `{model}` in agent args) |
+| `--codex-profile <name>` | Codex only: config profile to layer on top (`codex --profile`) |
+| `--codex-reasoning-effort <level>` | Codex only: reasoning effort — `minimal`, `low`, `medium`, `high`, `xhigh` |
+| `--codex-service-tier <tier>` | Codex only: service tier — `auto`, `default`, `flex`, `priority` |
+| `--codex-web-search` | Codex only: enable live web search (`codex --search`) |
+| `--codex-approval-policy <policy>` | Codex only: approval policy — `untrusted`, `on-request`, `never` |
 | `--headless` | Run the agent headless (stream-json) instead of an interactive PTY, for fire-and-forget sessions (experimental; Claude only) |
 | `--no-fetch` | Skip `git fetch origin` and create the worktree from local repo state |
 
 The `--no-fetch` flag skips the `git fetch origin` step that normally runs before the worktree is created, overriding `fetch_on_create` for that one session. Use it when SSH auth is unavailable (e.g. a biometric/Secretive agent that can't sign non-interactively) or when you're offline — the worktree is then created from whatever the local repo already has.
+
+### Codex options
+
+For `--agent codex`, graith passes typed per-session options through to the Codex CLI so you don't have to override the whole agent `args` array in config. `--model` becomes `codex --model <name>`; reasoning effort and service tier ride `-c model_reasoning_effort=…` / `-c service_tier=…` config overrides; profile, web search, and approval policy map to `--profile`, `--search`, and `--ask-for-approval`. Each is passed only when set, so an unset option leaves Codex's own default untouched. They are persisted, so a resume or fork replays the same flags. The `--codex-*` flags are Codex-specific — using one with another agent is an error, and enumerated values are validated before the session starts. Example:
+
+```bash
+gr new review --agent codex \
+  --model gpt-5.1-codex \
+  --codex-reasoning-effort high \
+  --codex-web-search \
+  --codex-approval-policy never
+```
 
 The `--headless` flag runs the agent in Claude Code's stream-json mode rather than an interactive terminal — suited to fire-and-forget sessions no human will attach to (tribunal judges, trigger briefings). graith parses the typed event stream, so `gr logs -f` shows rendered output and the run's cost/token usage is captured from the result envelope. It is **experimental** and inert unless `[headless] experimental = true` is set in config; it is Claude-only in v1, requires a prompt (`-p`), runs one-shot (one prompt, run to completion, exit), and is **incompatible with the sandbox** in v1 (a `--headless` request with the sandbox enabled is an error). Asking for `--headless` on an agent that can't do it is an error, not a silent downgrade to PTY. Because a headless session can't be attached, `--headless` implies `--background`. See [Configuration → Headless sessions]({{< relref "/docs/configuration/sessions.md#headless-sessions" >}}) and [Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}}).
 

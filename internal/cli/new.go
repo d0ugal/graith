@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
@@ -27,6 +28,12 @@ var (
 	newYolo                bool
 	newHeadless            bool
 	newNoFetch             bool
+
+	newCodexProfile        string
+	newCodexReasoning      string
+	newCodexServiceTier    string
+	newCodexWebSearch      bool
+	newCodexApprovalPolicy string
 )
 
 var newCmd = &cobra.Command{
@@ -83,6 +90,21 @@ var newCmd = &cobra.Command{
 			prompt = string(data)
 		}
 
+		// Typed Codex options (issue #1186). Sent only when at least one is set;
+		// the daemon rejects them against a non-codex agent.
+		codexOpts := config.CodexOptions{
+			Profile:         newCodexProfile,
+			ReasoningEffort: newCodexReasoning,
+			ServiceTier:     newCodexServiceTier,
+			WebSearch:       newCodexWebSearch,
+			ApprovalPolicy:  newCodexApprovalPolicy,
+		}
+
+		var codexPtr *config.CodexOptions
+		if !codexOpts.IsZero() {
+			codexPtr = &codexOpts
+		}
+
 		c, err := client.Connect(cfg, paths, cfgFile)
 		if err != nil {
 			return err
@@ -106,6 +128,7 @@ var newCmd = &cobra.Command{
 			Yolo:                newYolo,
 			Headless:            newHeadless,
 			NoFetch:             newNoFetch,
+			Codex:               codexPtr,
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -158,7 +181,7 @@ func registerNewCmd() {
 	newCmd.Flags().BoolVar(&newBackground, "background", false, "create without attaching")
 	newCmd.Flags().StringVarP(&newPrompt, "prompt", "p", "", "initial prompt for the agent")
 	newCmd.Flags().StringVar(&newPromptFile, "prompt-file", "", "read initial prompt from file")
-	newCmd.Flags().StringVarP(&newModel, "model", "m", "", "model for the agent to use (expands {model} in agent args)")
+	newCmd.Flags().StringVarP(&newModel, "model", "m", "", "model for the agent to use (Codex: passed as --model; others: expands {model} in agent args)")
 	newCmd.Flags().StringVarP(&newRepo, "repo", "C", "", "path to git repo (default: cwd)")
 	newCmd.Flags().BoolVar(&newNoRepo, "no-repo", false, "create session without a git repo or worktree")
 	newCmd.Flags().StringVar(&newMirror, "mirror", "", "mirror another session's worktree (read-only)")
@@ -168,6 +191,11 @@ func registerNewCmd() {
 	newCmd.Flags().BoolVar(&newYolo, "yolo", false, "auto-approve all tool requests for this session (no approval prompts)")
 	newCmd.Flags().BoolVar(&newHeadless, "headless", false, "run as a headless stream-json session instead of an interactive PTY (experimental; Claude only)")
 	newCmd.Flags().BoolVar(&newNoFetch, "no-fetch", false, "skip git fetch origin and create the worktree from local repo state (use when SSH auth is unavailable or offline)")
+	newCmd.Flags().StringVar(&newCodexProfile, "codex-profile", "", "Codex config profile to layer on top (codex --profile)")
+	newCmd.Flags().StringVar(&newCodexReasoning, "codex-reasoning-effort", "", "Codex model reasoning effort: minimal, low, medium, high, xhigh")
+	newCmd.Flags().StringVar(&newCodexServiceTier, "codex-service-tier", "", "Codex service tier: auto, default, flex, priority")
+	newCmd.Flags().BoolVar(&newCodexWebSearch, "codex-web-search", false, "enable Codex live web search (codex --search)")
+	newCmd.Flags().StringVar(&newCodexApprovalPolicy, "codex-approval-policy", "", "Codex approval policy: untrusted, on-request, never")
 	_ = newCmd.RegisterFlagCompletionFunc("agent", completeAgentNames)
 	_ = newCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	_ = newCmd.RegisterFlagCompletionFunc("base", completeBranchNames)
