@@ -58,7 +58,7 @@ Every agent-specific flag graith appends is defined here, so a custom agent can 
 
 Dynamic values — the generated settings/MCP files, the encoded prompt, the Codex hook TOML — are still built by graith; only the capability declaration and argv spelling live in config, and the security checks (e.g. skipping an MCP server whose name isn't a valid Codex config key) stay in graith.
 
-`inject_prompt` is the on/off switch for prompt injection; `prompt_injection` selects the *mechanism*. When `prompt_injection` is empty (the default), graith picks the mechanism from the agent name — `claude` → `append_system_prompt`, `cursor` → `cursor_rules`, `codex` → `developer_instructions`, and any other name → `none`. Set it explicitly to override that mapping or, most usefully, to give a [custom agent](#custom-agents) a mechanism it would otherwise not get. The values are:
+`inject_prompt` is the on/off switch for the generic top-level `agent_prompt`; `prompt_injection` selects the *delivery mechanism*. The separate orchestrator role prompt is always delivered through that mechanism when the agent is used as the orchestrator, even when `inject_prompt = false`. When `prompt_injection` is empty (the default), graith picks the mechanism from the agent name — `claude` → `append_system_prompt`, `cursor` → `cursor_rules`, `codex` → `developer_instructions`, and any other name → `none`. Set it explicitly to override that mapping or, most usefully, to give a [custom agent](#custom-agents) a mechanism it would otherwise not get. The values are:
 
 | Value | Mechanism |
 |-------|-----------|

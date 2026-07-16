@@ -201,17 +201,15 @@ func TestBuildOrchestratorPrompt_AgentAdapters(t *testing.T) {
 	}
 }
 
-// TestBuildOrchestratorPrompt_InjectPromptDisabled is the #1292 regression: when
-// the selected orchestrator agent sets inject_prompt = false, prompt injection is
-// suppressed — no Codex developer_instructions override, no Cursor rule file, no
-// Claude flag. buildOrchestratorPrompt is the single seam both the create
-// (createOrchestrator) and resume (resumeSession isOrchestrator) paths call to
-// build orchestrator prompt args, so gating it here covers both.
+// TestBuildOrchestratorPrompt_InjectPromptDisabled is the corrected #1292
+// contract: inject_prompt suppresses only the generic agent_prompt. The separate
+// orchestrator role prompt must still be delivered through the selected adapter.
 func TestBuildOrchestratorPrompt_InjectPromptDisabled(t *testing.T) {
 	disabled := false
 
 	sm := newOrchTestSM(t)
 	sm.cfg = &config.Config{
+		AgentPrompt: "generic bothy instructions",
 		Agents: map[string]config.Agent{
 			"codex":  {PromptInjection: config.PromptInjectionDeveloperInstructions, InjectPrompt: &disabled},
 			"cursor": {PromptInjection: config.PromptInjectionCursorRules, InjectPrompt: &disabled},
@@ -220,21 +218,38 @@ func TestBuildOrchestratorPrompt_InjectPromptDisabled(t *testing.T) {
 
 	cfg := config.OrchestratorConfig{Prompt: "ken this"}
 
-	// Codex opted out: no developer_instructions override at all.
-	if got := mustBuildOrchPrompt(t, sm, "codex", cfg, nil, true, ""); got != nil {
-		t.Errorf("disabled codex orchestrator should get no prompt args, got %v", got)
+	// Codex still receives the role prompt, without the generic prompt.
+	got := mustBuildOrchPrompt(t, sm, "codex", cfg, nil, true, "")
+	joined := strings.Join(got, " ")
+	if !strings.Contains(joined, "ken this") || strings.Contains(joined, "generic bothy instructions") {
+		t.Errorf("disabled codex prompt = %v, want role only", got)
 	}
 
-	// Cursor opted out: no launch args AND no rule file side effect.
+	// Cursor likewise receives a role rule file, without the generic prompt.
 	worktree := t.TempDir()
 
 	if got := mustBuildOrchPrompt(t, sm, "cursor", cfg, nil, true, worktree); got != nil {
-		t.Errorf("disabled cursor orchestrator should get no prompt args, got %v", got)
+		t.Errorf("cursor rules should return no launch args, got %v", got)
 	}
 
 	rule := filepath.Join(worktree, ".cursor", "rules", "graith.mdc")
-	if _, err := os.Stat(rule); !os.IsNotExist(err) {
-		t.Errorf("disabled cursor orchestrator must not write %s (stat err = %v)", rule, err)
+	data, err := os.ReadFile(rule)
+	if err != nil {
+		t.Fatalf("read cursor orchestrator role: %v", err)
+	}
+
+	if body := string(data); !strings.Contains(body, "ken this") || strings.Contains(body, "generic bothy instructions") {
+		t.Errorf("disabled cursor prompt = %q, want role only", body)
+	}
+}
+
+func TestBuildOrchestratorPrompt_IncludesGenericPromptWhenEnabled(t *testing.T) {
+	sm := newOrchTestSM(t)
+	sm.cfg.AgentPrompt = "generic croft instructions"
+
+	got := mustBuildOrchPrompt(t, sm, "claude", config.OrchestratorConfig{Prompt: "orchestrator role"}, nil, false, "")
+	if len(got) != 2 || got[1] != "generic croft instructions\n\norchestrator role" {
+		t.Fatalf("combined prompt args = %v", got)
 	}
 }
 
@@ -523,6 +538,209 @@ func TestCreateOrchestratorRequiresSandbox_Cov2(t *testing.T) {
 
 	if id := sm.findOrchestratorID(); id != "" {
 		t.Fatalf("createOrchestrator must not persist a session when sandbox is unavailable, got %q", id)
+	}
+}
+
+func newRunnableOrchestratorTestManager(t *testing.T, agentName string, agent config.Agent) *SessionManager {
+	t.Helper()
+
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.AgentPrompt = "generic bothy prompt"
+	cfg.Agents[agentName] = agent
+	cfg.Orchestrator.Enabled = true
+	cfg.Orchestrator.Agent = agentName
+	cfg.Orchestrator.Prompt = "orchestrator croft role"
+	// The test sandbox resolver below supplies the enforcement decision. Keep the
+	// merged config disabled so sandbox.Wrap executes the harmless fake agent
+	// directly on every CI platform.
+	cfg.Sandbox.Enabled = false
+
+	sm := NewSessionManager(cfg, config.Paths{
+		DataDir:    dir,
+		LogDir:     filepath.Join(dir, "logs"),
+		RuntimeDir: filepath.Join(dir, "runtime"),
+		StateFile:  filepath.Join(dir, "state.json"),
+	}, quietLogger())
+	sm.resolveSandboxTest = func(*config.Config, string) (bool, error) { return true, nil }
+	sm.sandboxWrapTest = func(command string, args []string) (string, []string, error) {
+		return command, args, nil
+	}
+
+	if err := os.MkdirAll(sm.paths.LogDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	return sm
+}
+
+func stopRunnableOrchestrator(t *testing.T, sm *SessionManager, id string) {
+	t.Helper()
+
+	driver, ok := sm.GetPTY(id)
+	if !ok {
+		return
+	}
+
+	_ = driver.ForceKill()
+	select {
+	case <-driver.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatalf("orchestrator %s did not stop", id)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		sm.mu.RLock()
+		_, live := sm.sessions[id]
+		sm.mu.RUnlock()
+		if !live {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	t.Fatalf("orchestrator %s exit watcher did not retire the driver", id)
+}
+
+func orchestratorLaunchPayload(t *testing.T, sm *SessionManager, id, mechanism string) string {
+	t.Helper()
+
+	if mechanism == config.PromptInjectionCursorRules {
+		data, err := os.ReadFile(filepath.Join(sm.orchestratorScratchDir(), ".cursor", "rules", "graith.mdc"))
+		if err != nil {
+			t.Fatalf("read cursor role file: %v", err)
+		}
+		return string(data)
+	}
+
+	driver, ok := sm.GetPTY(id)
+	if !ok {
+		t.Fatalf("orchestrator %s has no live driver", id)
+	}
+
+	pty, ok := driver.(*grpty.Session)
+	if !ok {
+		t.Fatalf("driver type = %T, want *pty.Session", driver)
+	}
+
+	return strings.Join(pty.Cmd.Args, " ")
+}
+
+// Create and resume must deliver the required role prompt through every
+// supported configured adapter even when inject_prompt disables only the
+// generic agent_prompt (#1292). Removing the Cursor rule between generations
+// proves resume performs its own injection rather than reusing create's file.
+func TestOrchestratorCreateResumePromptParity(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh unavailable")
+	}
+
+	disabled := false
+	for _, mechanism := range []string{
+		config.PromptInjectionAppendSystemPrompt,
+		config.PromptInjectionDeveloperInstructions,
+		config.PromptInjectionCursorRules,
+	} {
+		t.Run(mechanism, func(t *testing.T) {
+			agentName := "canny-" + mechanism
+			agent := config.Agent{
+				Command:         "/bin/sh",
+				Args:            []string{"-c", "sleep 30"},
+				ResumeArgs:      []string{"-c", "sleep 30"},
+				PromptInjection: mechanism,
+				InjectPrompt:    &disabled,
+			}
+			sm := newRunnableOrchestratorTestManager(t, agentName, agent)
+
+			created, err := sm.createOrchestrator(context.Background())
+			if err != nil {
+				t.Fatalf("createOrchestrator: %v", err)
+			}
+			t.Cleanup(func() { stopRunnableOrchestrator(t, sm, created.ID) })
+
+			payload := orchestratorLaunchPayload(t, sm, created.ID, mechanism)
+			if !strings.Contains(payload, "orchestrator croft role") || strings.Contains(payload, "generic bothy prompt") {
+				t.Fatalf("create payload = %q, want role without generic prompt", payload)
+			}
+
+			stopRunnableOrchestrator(t, sm, created.ID)
+			if mechanism == config.PromptInjectionCursorRules {
+				cleanupCursorRule(sm.orchestratorScratchDir())
+			}
+
+			if _, err := sm.Resume(created.ID, 24, 80); err != nil {
+				t.Fatalf("Resume: %v", err)
+			}
+
+			payload = orchestratorLaunchPayload(t, sm, created.ID, mechanism)
+			if !strings.Contains(payload, "orchestrator croft role") || strings.Contains(payload, "generic bothy prompt") {
+				t.Fatalf("resume payload = %q, want role without generic prompt", payload)
+			}
+		})
+	}
+}
+
+func TestCreateOrchestratorPromptFailureRollsBack(t *testing.T) {
+	disabled := false
+	sm := newRunnableOrchestratorTestManager(t, "cursor", config.Agent{
+		Command: "/bin/sh", Args: []string{"-c", "sleep 30"},
+		PromptInjection: config.PromptInjectionCursorRules, InjectPrompt: &disabled,
+	})
+
+	if err := os.MkdirAll(sm.orchestratorScratchDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sm.orchestratorScratchDir(), ".cursor"), []byte("thrawn"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := sm.createOrchestrator(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "build orchestrator prompt") {
+		t.Fatalf("create error = %v, want prompt construction failure", err)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if len(sm.state.Sessions) != 0 || len(sm.sessions) != 0 {
+		t.Fatalf("failed create leaked state: persistent=%d live=%d", len(sm.state.Sessions), len(sm.sessions))
+	}
+}
+
+func TestResumeOrchestratorPromptFailureRollsBack(t *testing.T) {
+	disabled := false
+	sm := newRunnableOrchestratorTestManager(t, "cursor", config.Agent{
+		Command: "/bin/sh", Args: []string{"-c", "sleep 30"}, ResumeArgs: []string{"-c", "sleep 30"},
+		PromptInjection: config.PromptInjectionCursorRules, InjectPrompt: &disabled,
+	})
+
+	if err := os.MkdirAll(sm.orchestratorScratchDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sm.orchestratorScratchDir(), ".cursor"), []byte("thrawn"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	const oldToken = "canny-old-token"
+	sm.state.Sessions["canny-orch"] = &SessionState{
+		ID: "canny-orch", Name: OrchestratorSessionName, Agent: "cursor",
+		SystemKind: SystemKindOrchestrator, Status: StatusStopped, Token: oldToken,
+	}
+	sm.rebuildTokenIndex()
+
+	_, err := sm.Resume("canny-orch", 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "build orchestrator prompt") {
+		t.Fatalf("resume error = %v, want prompt construction failure", err)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	sess := sm.state.Sessions["canny-orch"]
+	if sess.Status != StatusStopped || sess.Token != oldToken {
+		t.Fatalf("resume rollback state = status %q token %q", sess.Status, sess.Token)
+	}
+	if sm.tokenIndex[oldToken] != "canny-orch" || len(sm.sessions) != 0 {
+		t.Fatalf("resume rollback token/live state inconsistent: index=%v live=%d", sm.tokenIndex, len(sm.sessions))
 	}
 }
 

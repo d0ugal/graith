@@ -96,6 +96,13 @@ type SessionManager struct {
 	signalRequests  map[string]signalRequest
 	newLoopTicker   func(time.Duration) loopTicker // injectable clock boundary for background-loop tests
 	newLoopTimer    func(time.Duration) loopTimer  // injectable resettable clock boundary for purge tests
+	// resolveSandboxTest overrides sandbox availability in lifecycle tests that
+	// need to reach post-validation orchestration paths without depending on an
+	// OS-specific sandbox binary. Nil in production.
+	resolveSandboxTest func(*config.Config, string) (bool, error)
+	// sandboxWrapTest bypasses the OS-specific wrapper after the resolver seam
+	// above in lifecycle tests. Nil in production.
+	sandboxWrapTest func(string, []string) (string, []string, error)
 
 	// purgeStatsMu guards the last/next purge-sweep timestamps surfaced in
 	// diagnostics. It is separate from sm.mu so recording a sweep never contends

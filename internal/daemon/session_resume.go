@@ -11,7 +11,6 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/git"
 	grpty "github.com/d0ugal/graith/internal/pty"
-	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/store"
 )
 
@@ -720,10 +719,11 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 
 		promptArgs, err := sm.buildOrchestratorPrompt(sessAgent, orchCfg, repoPaths, notifyEnabled, sm.orchestratorScratchDir())
 		if err != nil {
-			sm.log.Warn("failed to build orchestrator prompt", "session_id", id, "err", err)
-		} else {
-			expandedArgs = append(expandedArgs, promptArgs...)
+			rollbackState()
+			return SessionState{}, fmt.Errorf("build orchestrator prompt: %w", err)
 		}
+
+		expandedArgs = append(expandedArgs, promptArgs...)
 	} else if agent.PromptInjectionEnabled() {
 		promptArgs, err := sm.injectPrompt(sessAgent, sessWorktreePath)
 		if err != nil {
@@ -810,7 +810,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 
 		var wrapErr error
 
-		command, finalArgs, wrapErr = sandbox.Wrap(agent.Command, expandedArgs, opts)
+		command, finalArgs, wrapErr = sm.wrapSessionCommand(agent.Command, expandedArgs, opts)
 		if wrapErr != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("sandbox wrap: %w", wrapErr)

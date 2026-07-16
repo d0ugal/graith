@@ -4,10 +4,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
 // shAgent is a fake agent whose command stays alive and ignores extra
@@ -26,10 +28,11 @@ func newMigrateTestManager(t *testing.T) *SessionManager {
 	cfg.Agents["codex"] = shAgent()
 
 	return NewSessionManager(cfg, config.Paths{
-		StateFile: filepath.Join(tmpDir, "state.json"),
-		DataDir:   tmpDir,
-		LogDir:    tmpDir,
-		TmpDir:    filepath.Join(tmpDir, "tmp"),
+		StateFile:  filepath.Join(tmpDir, "state.json"),
+		DataDir:    tmpDir,
+		LogDir:     tmpDir,
+		TmpDir:     filepath.Join(tmpDir, "tmp"),
+		RuntimeDir: filepath.Join(tmpDir, "runtime"),
 	}, slog.Default())
 }
 
@@ -225,5 +228,68 @@ func TestMigrateRestoresOnTargetFailure(t *testing.T) {
 
 	if _, statErr := os.Stat(filepath.Join(tmpDir, "migrate-m2")); statErr == nil {
 		t.Error("migration context dir should be removed after successful restore")
+	}
+}
+
+// An orchestrator migration relaunches through resumeWithSummaryAndPrompt. The
+// generic agent_prompt opt-out must survive the agent swap without suppressing
+// the separate orchestrator role prompt (#1292).
+func TestMigrateOrchestratorPreservesRoleWhenGenericPromptDisabled(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh not available")
+	}
+
+	sm := newMigrateTestManager(t)
+	disabled := false
+	target := shAgent()
+	target.PromptInjection = config.PromptInjectionDeveloperInstructions
+	target.InjectPrompt = &disabled
+	sm.cfg.Agents["codex"] = target
+	sm.cfg.AgentPrompt = "generic bothy prompt"
+	sm.cfg.Orchestrator.Prompt = "orchestrator croft role"
+	sm.cfg.Migration.HealthWindow = "100ms"
+	sm.resolveSandboxTest = func(*config.Config, string) (bool, error) { return true, nil }
+	sm.sandboxWrapTest = func(command string, args []string) (string, []string, error) {
+		return command, args, nil
+	}
+
+	repo := initTempGitRepo(t)
+	claudeRoot := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claudeRoot)
+	t.Setenv("CODEX_HOME", t.TempDir())
+
+	const sid = "22222222-3333-4444-5555-666666666666"
+	projDir := filepath.Join(claudeRoot, "projects", "-orch")
+	if err := os.MkdirAll(projDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projDir, sid+".jsonl"), []byte(
+		`{"type":"user","uuid":"u1","parentUuid":"","message":{"role":"user","content":"mind the croft"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.state.Sessions["orch-migrate"] = &SessionState{
+		ID: "orch-migrate", Name: OrchestratorSessionName, Agent: "claude",
+		AgentSessionID: sid, Status: StatusStopped, SystemKind: SystemKindOrchestrator,
+		WorktreePath: repo, RepoPath: repo, CreatedAt: time.Now(),
+	}
+
+	if _, err := sm.Migrate("orch-migrate", "codex", "", 24, 80); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	t.Cleanup(func() { stopRunnableOrchestrator(t, sm, "orch-migrate") })
+
+	driver, ok := sm.GetPTY("orch-migrate")
+	if !ok {
+		t.Fatal("migrated orchestrator has no live driver")
+	}
+	pty, ok := driver.(*grpty.Session)
+	if !ok {
+		t.Fatalf("driver type = %T, want *pty.Session", driver)
+	}
+
+	payload := strings.Join(pty.Cmd.Args, " ")
+	if !strings.Contains(payload, "orchestrator croft role") || strings.Contains(payload, "generic bothy prompt") {
+		t.Fatalf("migration payload = %q, want role without generic prompt", payload)
 	}
 }

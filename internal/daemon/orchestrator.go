@@ -11,7 +11,6 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	grpty "github.com/d0ugal/graith/internal/pty"
-	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/store"
 )
 
@@ -185,7 +184,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
 	opts.WriteDirs = append(opts.WriteDirs, scratchDir)
 
-	command, finalArgs, wrapErr := sandbox.Wrap(agent.Command, expandedArgs, opts)
+	command, finalArgs, wrapErr := sm.wrapSessionCommand(agent.Command, expandedArgs, opts)
 	if wrapErr != nil {
 		sm.rollbackOrchestratorCreate(id)
 		return SessionState{}, fmt.Errorf("sandbox wrap: %w", wrapErr)
@@ -291,19 +290,11 @@ func (sm *SessionManager) rollbackOrchestratorCreate(id string) {
 // it actually supports instead of Claude's --append-system-prompt flag. For
 // Cursor the rule file is written under worktreePath (the orchestrator scratch
 // dir); an agent with no supported injection method silently gets no prompt
-// args. When the selected agent sets inject_prompt = false it returns no args
-// and performs no side effect (issue #1292). It returns an error only when a
+// args. agents.<name>.inject_prompt controls only the generic top-level
+// agent_prompt: when it is false, this still delivers the orchestrator-specific
+// role/repository/notification prompt. It returns an error only when a
 // side-effecting injection (e.g. writing the Cursor rule) fails.
 func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg config.OrchestratorConfig, repoPaths []string, notifyEnabled bool, worktreePath string) ([]string, error) {
-	// Honour the selected agent's inject_prompt opt-out, exactly as the ordinary
-	// create/resume paths gate injectPrompt on PromptInjectionEnabled(). When
-	// disabled, build nothing and inject nothing — no --append-system-prompt, no
-	// Codex developer_instructions override, and no Cursor rule file side effect
-	// (skipping promptInjectionArgs avoids writing .cursor/rules). See issue #1292.
-	if !sm.Config().Agents[agentName].PromptInjectionEnabled() {
-		return nil, nil
-	}
-
 	prompt := orchCfg.Prompt
 
 	if orchCfg.PromptFile != "" {
@@ -337,7 +328,21 @@ func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg conf
 		prompt += orchestratorNotificationsSection()
 	}
 
-	return promptInjectionArgs(agentName, sm.Config().Agents[agentName], prompt, worktreePath)
+	// The generic operating prompt and the orchestrator role prompt have separate
+	// configuration contracts. inject_prompt opts this agent out of agent_prompt,
+	// but must never silently remove the role context that tells a privileged
+	// orchestrator what it is and which repos/capabilities it owns (#1292).
+	cfg := sm.Config()
+	agent := cfg.Agents[agentName]
+	if agent.PromptInjectionEnabled() && cfg.AgentPrompt != "" {
+		if prompt == "" {
+			prompt = cfg.AgentPrompt
+		} else {
+			prompt = cfg.AgentPrompt + "\n\n" + prompt
+		}
+	}
+
+	return promptInjectionArgs(agentName, agent, prompt, worktreePath)
 }
 
 // orchestratorNotificationsSection tells the orchestrator it can proactively

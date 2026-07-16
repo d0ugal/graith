@@ -80,7 +80,7 @@ For reproducible, multi-repo session fleets, use [scenarios](scenarios.md) — t
 
 ## Default prompt
 
-The built-in orchestrator prompt teaches the agent about its capabilities, constraints, and the graith control plane. Override with a custom `prompt` or `prompt_file` in config.
+The built-in orchestrator prompt teaches the agent about its capabilities, constraints, available repositories, notifications, and the graith control plane. Override the role text with a custom `prompt` or extend it with `prompt_file` in config. This role prompt is separate from the generic top-level `agent_prompt`: setting `agents.<name>.inject_prompt = false` suppresses only `agent_prompt` and still gives an agent selected as the orchestrator its required role context. The agent's `prompt_injection` setting chooses how both prompts are delivered.
 
 ## Workflow example
 

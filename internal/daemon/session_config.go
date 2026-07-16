@@ -464,6 +464,10 @@ func (sm *SessionManager) validateApprovalsBackend(yolo bool) error {
 }
 
 func (sm *SessionManager) resolveSandboxFromConfig(cfg *config.Config, agentName string) (bool, error) {
+	if sm.resolveSandboxTest != nil {
+		return sm.resolveSandboxTest(cfg, agentName)
+	}
+
 	merged := cfg.Sandbox.Merge(cfg.Agents[agentName].Sandbox)
 	if !merged.Enabled {
 		return false, nil
@@ -479,6 +483,14 @@ func (sm *SessionManager) resolveSandboxFromConfig(cfg *config.Config, agentName
 	}
 
 	return true, nil
+}
+
+func (sm *SessionManager) wrapSessionCommand(command string, args []string, opts sandbox.WrapOpts) (string, []string, error) {
+	if sm.sandboxWrapTest != nil {
+		return sm.sandboxWrapTest(command, args)
+	}
+
+	return sandbox.Wrap(command, args, opts)
 }
 
 // validateSandboxBackend enforces the explicit-backend rule and availability
