@@ -45,6 +45,7 @@ Unlike ordinary sessions, this is an immediate reset rather than a recoverable
 soft delete. When `[orchestrator] enabled = true`, the daemon recreates a fresh
 orchestrator within a few seconds, using the currently configured agent, model,
 and prompt. Use `gr stop orchestrator` when you want it to remain stopped.
+To remove it permanently with `gr purge`, disable it in config first.
 
 ## Capabilities
 

@@ -134,6 +134,44 @@ func TestHandleDeleteOrchestratorWorksWhenRetentionZero(t *testing.T) {
 	}
 }
 
+func TestHandleDeleteDisabledOrchestratorRemainsRecoverable(t *testing.T) {
+	cfg := config.Default()
+	cfg.Orchestrator.Enabled = false
+	h := newTestHarnessWithConfig(t, cfg)
+	h.addStoppedSession(t, "dreich-orch", OrchestratorSessionName, 0, "")
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["dreich-orch"].SystemKind = SystemKindOrchestrator
+	h.sm.mu.Unlock()
+
+	r := softDeleteViaHandler(t, h, "dreich-orch")
+	if !r.Soft {
+		t.Error("disabled orchestrator should use recoverable soft-delete semantics")
+	}
+
+	if s, ok := h.sm.Get("dreich-orch"); !ok || !s.IsSoftDeleted() {
+		t.Error("disabled orchestrator should remain in recoverable deleted state")
+	}
+}
+
+func TestHandlePurgeEnabledOrchestratorRejected(t *testing.T) {
+	cfg := config.Default()
+	cfg.Orchestrator.Enabled = true
+	h := newTestHarnessWithConfig(t, cfg)
+	h.addStoppedSession(t, "bide-orch", OrchestratorSessionName, 0, "")
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["bide-orch"].SystemKind = SystemKindOrchestrator
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "delete", protocol.DeleteMsg{SessionID: "bide-orch", Purge: true})
+	h.expectError(t, "use gr delete orchestrator to reset it")
+
+	if _, ok := h.sm.Get("bide-orch"); !ok {
+		t.Error("rejected purge must leave the enabled orchestrator intact")
+	}
+}
+
 func TestHandleRestore(t *testing.T) {
 	h := newTestHarness(t)
 	h.addStoppedSession(t, "bide-id", "bide", 0, "")

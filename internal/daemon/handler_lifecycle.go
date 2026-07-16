@@ -473,7 +473,21 @@ func handleDelete(sm *SessionManager, auth authContext, sendControl func(string,
 	// the old state would prevent that replacement. Batch deletion continues to
 	// skip system sessions.
 	target := sm.sessionSnapshot(d.SessionID)
-	orchestratorReset := !d.Children && target.SystemKind == SystemKindOrchestrator
+	directOrchestrator := !d.Children && target.SystemKind == SystemKindOrchestrator
+	orchestratorEnabled := sm.Config().Orchestrator.Enabled
+
+	// Purge promises permanent removal, which conflicts with an enabled
+	// declarative orchestrator: Delete would correctly kick reconciliation and
+	// recreate it. Keep the destructive verb truthful by requiring config to be
+	// disabled first; gr delete is the explicit reset operation.
+	if d.Purge && directOrchestrator && orchestratorEnabled {
+		sendControl("error", protocol.ErrorMsg{Message: "orchestrator is enabled in config.toml; use gr delete orchestrator to reset it, or disable it before purging"})
+		return
+	}
+
+	// A disabled leftover has no replacement to unblock, so it retains ordinary
+	// soft-delete semantics and remains recoverable within the retention window.
+	orchestratorReset := directOrchestrator && orchestratorEnabled
 
 	// Routing is owned by the daemon (the CLI only forwards intent via Purge):
 	//   orchestratorReset   -> hard delete (fresh config-managed replacement)
