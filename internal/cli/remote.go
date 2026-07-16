@@ -175,7 +175,7 @@ func runRemoteAttach(rh *client.RemoteHost, signer ed25519.PrivateKey, sessionAr
 		return errors.New("cannot attach from inside a graith session")
 	}
 
-	cols, rows := uint16(80), uint16(24)
+	cols, rows := client.FallbackGeometry()
 	if w, h, gerr := term.GetSize(int(os.Stdout.Fd())); gerr == nil {
 		cols, rows = uint16(w), uint16(h) //nolint:gosec // G115: terminal dims are small non-negative ints
 	}

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import GraithSessionKit
 
 enum SessionUserActivity {
     static let activityType = "com.graith.session"
@@ -27,7 +28,9 @@ struct ContentView: View {
     /// gets its own instance so multiple windows can show different sessions.
     @StateObject private var window = WindowState()
 
-    @State private var sidebarWidth: CGFloat = Theme.sidebarWidth
+    /// Sidebar width, seeded from and persisted to the shared presentation
+    /// preference so a resize survives a relaunch (issue #1254).
+    @State private var sidebarWidth: CGFloat = PresentationPreferences(userDefaults: .standard).sidebarWidth
     /// Proportion of the terminal area given to the primary (left) pane (0..1).
     @State private var splitFraction: CGFloat = 0.5
 
@@ -62,6 +65,12 @@ struct ContentView: View {
         }
         .onChange(of: window.isSplit) { _, value in
             restoredIsSplit = value
+        }
+        .onChange(of: sidebarWidth) { _, width in
+            UserDefaults.standard.set(
+                Double(PresentationPreferences.clampSidebarWidth(width)),
+                forKey: PresentationPreferences.Key.sidebarWidth
+            )
         }
         .onAppear { restoreWindowState() }
         .onOpenURL { url in handleURL(url) }

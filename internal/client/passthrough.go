@@ -267,7 +267,7 @@ func (c *Client) RunPassthrough(ctx context.Context, opts PassthroughOpts) Passt
 	// Read-only mode always shows a status bar as its persistent indicator, even
 	// when the status bar is otherwise disabled (issue #31).
 	if (opts.StatusBar != nil || opts.ReadOnly) && opts.Info != nil {
-		w, h := 80, 24
+		w, h := int(fallbackCols), int(fallbackRows)
 		if tw, th, err := term.GetSize(fd); err == nil {
 			w, h = tw, th
 		}
@@ -286,8 +286,8 @@ func (c *Client) RunPassthrough(ctx context.Context, opts PassthroughOpts) Passt
 			readOnly:  opts.ReadOnly,
 		}
 		_ = c.SendControl("resize", protocol.ResizeMsg{
-			Cols: uint16(w),
-			Rows: uint16(h - 1),
+			Cols: uint16(w),     //nolint:gosec // G115: w is a terminal width (term.GetSize) or the small configured fallback
+			Rows: uint16(h - 1), //nolint:gosec // G115: h is a terminal height (term.GetSize) or the small configured fallback
 		})
 	}
 
@@ -427,7 +427,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 		ticker   *time.Ticker
 	)
 	if sb != nil {
-		ticker = time.NewTicker(2 * time.Second)
+		ticker = time.NewTicker(refreshInterval)
 		tickerCh = ticker.C
 	}
 

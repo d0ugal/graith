@@ -53,7 +53,7 @@ func NewDashboardModel(sessions []protocol.SessionInfo, refresh func() []protoco
 }
 
 func tickCmd() tea.Cmd {
-	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }

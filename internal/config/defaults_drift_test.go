@@ -136,6 +136,21 @@ func TestEmbeddedDefaultsCarryPolicyValues(t *testing.T) {
 			t.Errorf("Default().ConfigReload.ReloadDebounceDuration() = %v, want %v", got, ConfigReloadDebounceDefault)
 		}
 	})
+
+	t.Run("terminal presentation", func(t *testing.T) {
+		term := d.Terminal
+		if term.RefreshInterval != "2s" {
+			t.Errorf("Default().Terminal.RefreshInterval = %q, want %q", term.RefreshInterval, "2s")
+		}
+
+		if term.SummaryWidth != TerminalSummaryWidth {
+			t.Errorf("Default().Terminal.SummaryWidth = %d, want %d", term.SummaryWidth, TerminalSummaryWidth)
+		}
+
+		if got := term.RefreshIntervalDuration(); got != TerminalRefreshIntervalDefault {
+			t.Errorf("Default().Terminal.RefreshIntervalDuration() = %v, want %v", got, TerminalRefreshIntervalDefault)
+		}
+	})
 }
 
 // TestEmbeddedDefaultAgentPolicies guards that the built-in agents carry their

@@ -260,7 +260,10 @@ final class SessionStore: FleetModel {
     }
 
     @Published var renderer: RendererType = .ghosttyCoreText
-    @Published var fontSize: CGFloat = Theme.defaultFontSize
+    /// Terminal font size, seeded from the persisted presentation preference so
+    /// a resize survives a relaunch (issue #1254), and re-persisted by the
+    /// font-size commands below.
+    @Published var fontSize: CGFloat = PresentationPreferences(userDefaults: .standard).terminalFontSize
 
     enum SessionStoreError: LocalizedError {
         case hostUnavailable
@@ -283,7 +286,8 @@ final class SessionStore: FleetModel {
             factory: RealHostClientFactory(clientID: "graith-macos"),
             pairing: pairing,
             poll: true,
-            subscribeApprovals: false
+            subscribeApprovals: false,
+            pollInterval: PresentationPreferences(userDefaults: .standard).fleetPollInterval
         )
     }
 
@@ -388,36 +392,32 @@ final class SessionStore: FleetModel {
     // MARK: - Font size (macOS terminal presentation)
 
     func increaseFontSize() {
-        let newSize = min(fontSize + 1, Theme.maxFontSize)
-        if newSize != fontSize {
-            fontSize = newSize
-            NotificationCenter.default.post(name: .terminalFontSizeChanged, object: fontSize)
-        }
+        applyFontSize(fontSize + 1)
     }
 
     func decreaseFontSize() {
-        let newSize = max(fontSize - 1, Theme.minFontSize)
-        if newSize != fontSize {
-            fontSize = newSize
-            NotificationCenter.default.post(name: .terminalFontSizeChanged, object: fontSize)
-        }
+        applyFontSize(fontSize - 1)
     }
 
     func resetFontSize() {
-        if fontSize != Theme.defaultFontSize {
-            fontSize = Theme.defaultFontSize
-            NotificationCenter.default.post(name: .terminalFontSizeChanged, object: fontSize)
-        }
+        applyFontSize(Theme.defaultFontSize)
     }
 
     /// Set an absolute font size (used by the Settings pane), clamped to the
     /// supported range. Routes through the same `.terminalFontSizeChanged`
     /// notification the ⌘=/⌘- commands use, so live terminals pick it up.
     func setFontSize(_ size: CGFloat) {
-        let clamped = min(max(size, Theme.minFontSize), Theme.maxFontSize)
-        if clamped != fontSize {
-            fontSize = clamped
-            NotificationCenter.default.post(name: .terminalFontSizeChanged, object: fontSize)
-        }
+        applyFontSize(size)
+    }
+
+    /// Clamp, apply, persist, and broadcast a new font size. Persisting to the
+    /// shared PresentationPreferences key means the choice survives a relaunch
+    /// (issue #1254).
+    private func applyFontSize(_ size: CGFloat) {
+        let clamped = PresentationPreferences.clampFontSize(size)
+        guard clamped != fontSize else { return }
+        fontSize = clamped
+        UserDefaults.standard.set(Double(clamped), forKey: PresentationPreferences.Key.terminalFontSize)
+        NotificationCenter.default.post(name: .terminalFontSizeChanged, object: fontSize)
     }
 }

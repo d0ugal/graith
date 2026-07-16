@@ -65,6 +65,7 @@ type Config struct {
 	Transcript       TranscriptConfig   `toml:"transcript"`       // [transcript] table (issue #1250)
 	Limits           LimitsConfig       `toml:"limits"`           // [limits] table (issue #1252)
 	Lifecycle        LifecycleConfig    `toml:"lifecycle"`        // [lifecycle] table (issue #1243)
+	Terminal         TerminalConfig     `toml:"terminal"`         // [terminal] table (issue #1254)
 
 	// Warnings collects non-fatal configuration problems detected at load time
 	// (e.g. conflicting keybindings). They are surfaced to the user but do not
@@ -1638,6 +1639,53 @@ func (l LimitsConfig) InboxPreviewBytesOrDefault() int {
 	}
 
 	return l.InboxPreviewBytes
+}
+
+// TerminalConfig is the [terminal] block: user-tunable interactive-TUI
+// presentation preferences that were previously fixed literals in the client
+// (issue #1254) — how often the picker/dashboard/status bar refresh, and how
+// wide a `gr status` summary may grow in the picker before truncation.
+//
+// Session-lifecycle presentation (the fallback terminal geometry and the
+// per-session scrollback cap) is deliberately NOT here: it lives in the
+// [lifecycle] block (issue #1243, default_cols/default_rows/max_log_bytes),
+// which owns the daemon's PTY seed. Layout invariants (the picker's column
+// arithmetic, wrap widths, the minimum name column, and the GUI's frame rate)
+// are also excluded — they must match render logic and stay as documented
+// constants. Every field is optional and falls back to its default constant.
+type TerminalConfig struct {
+	// RefreshInterval is the cadence at which the session picker, the dashboard,
+	// and an attached status bar re-poll the daemon for fresh session state.
+	// Empty, unparseable, or non-positive uses the default
+	// (TerminalRefreshIntervalDefault); a zero cadence would busy-loop.
+	RefreshInterval string `toml:"refresh_interval"`
+	// SummaryWidth is the maximum visible width (in cells) of a `gr status`
+	// summary shown against a session in the picker before it is truncated with
+	// an ellipsis. Values < 1 fall back to the default (TerminalSummaryWidth).
+	SummaryWidth int `toml:"summary_width"`
+}
+
+// Terminal presentation defaults mirror the fixed literals that governed the
+// behaviour before issue #1254 made the policy configurable.
+const (
+	TerminalRefreshIntervalDefault = 2 * time.Second
+	TerminalSummaryWidth           = 40
+)
+
+// RefreshIntervalDuration returns the TUI refresh cadence, or the default when
+// unset, unparseable, or non-positive (a zero cadence would busy-loop).
+func (t TerminalConfig) RefreshIntervalDuration() time.Duration {
+	return positiveDurationOrDefault(t.RefreshInterval, TerminalRefreshIntervalDefault)
+}
+
+// SummaryWidthValue returns the picker summary truncation width, or the default
+// when the configured value is non-positive.
+func (t TerminalConfig) SummaryWidthValue() int {
+	if t.SummaryWidth < 1 {
+		return TerminalSummaryWidth
+	}
+
+	return t.SummaryWidth
 }
 
 type GitPullConfig struct {
@@ -4174,6 +4222,20 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("config.reload_debounce %q: %w", s, err))
 		} else if d <= 0 {
 			errs = append(errs, fmt.Errorf("config.reload_debounce %q: must be a positive duration", s))
+		}
+	}
+
+	// [terminal] refresh_interval: a non-empty but unparseable value must fail
+	// loudly rather than silently falling back to the accessor default, and it
+	// must be positive — a zero/negative cadence would busy-loop the refresh
+	// tick. The integer summary_width field self-clamps in its accessor (a
+	// non-positive value simply means "use the default"), so it needs no
+	// load-time rejection.
+	if s := strings.TrimSpace(c.Terminal.RefreshInterval); s != "" {
+		if d, err := ParseDurationWithDays(s); err != nil {
+			errs = append(errs, fmt.Errorf("terminal.refresh_interval %q: %w", s, err))
+		} else if d <= 0 {
+			errs = append(errs, fmt.Errorf("terminal.refresh_interval %q: must be a positive duration", s))
 		}
 	}
 
