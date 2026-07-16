@@ -1151,6 +1151,31 @@ func TestIdleTracking(t *testing.T) {
 	})
 }
 
+// recordHookReport seeds a running session named sessionID, delivers msg
+// (with its SessionID set), and returns the recorded hook report, failing if
+// none was recorded.
+func recordHookReport(t *testing.T, sessionID string, msg protocol.StatusReportMsg) hookReport {
+	t.Helper()
+
+	sm := newTestSessionManager(t)
+	sm.state.Sessions[sessionID] = &SessionState{
+		ID: sessionID, Name: sessionID, Status: StatusRunning,
+	}
+
+	msg.SessionID = sessionID
+	sm.HandleHookReport(msg)
+
+	sm.mu.RLock()
+	report, ok := sm.hookReports[sessionID]
+	sm.mu.RUnlock()
+
+	if !ok {
+		t.Fatalf("hookReport not found for %s", sessionID)
+	}
+
+	return report
+}
+
 func TestHandleHookReport(t *testing.T) {
 	t.Run("active event", func(t *testing.T) {
 		sm := newTestSessionManager(t)
@@ -1219,23 +1244,9 @@ func TestHandleHookReport(t *testing.T) {
 	// PermissionRequest is Codex's approval hook and must keep mapping to
 	// approval (it carries no subtype).
 	t.Run("PermissionRequest maps to approval", func(t *testing.T) {
-		sm := newTestSessionManager(t)
-		sm.state.Sessions["speir"] = &SessionState{
-			ID: "speir", Name: "speir", Status: StatusRunning,
-		}
-
-		sm.HandleHookReport(protocol.StatusReportMsg{
-			SessionID: "speir",
-			Event:     "PermissionRequest",
+		report := recordHookReport(t, "speir", protocol.StatusReportMsg{
+			Event: "PermissionRequest",
 		})
-
-		sm.mu.RLock()
-		report, ok := sm.hookReports["speir"]
-		sm.mu.RUnlock()
-
-		if !ok {
-			t.Fatal("hookReport not found for speir")
-		}
 
 		if report.Status != "approval" {
 			t.Errorf("Status = %q, want %q", report.Status, "approval")
@@ -1243,23 +1254,9 @@ func TestHandleHookReport(t *testing.T) {
 	})
 
 	t.Run("ready event", func(t *testing.T) {
-		sm := newTestSessionManager(t)
-		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "braw", Status: StatusRunning,
-		}
-
-		sm.HandleHookReport(protocol.StatusReportMsg{
-			SessionID: "sess1",
-			Event:     "Stop",
+		report := recordHookReport(t, "sess1", protocol.StatusReportMsg{
+			Event: "Stop",
 		})
-
-		sm.mu.RLock()
-		report, ok := sm.hookReports["sess1"]
-		sm.mu.RUnlock()
-
-		if !ok {
-			t.Fatal("hookReport not found for sess1")
-		}
 
 		if report.Status != "ready" {
 			t.Errorf("Status = %q, want %q", report.Status, "ready")

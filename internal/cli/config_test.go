@@ -212,7 +212,12 @@ func TestConfigResetCovWritesWhenAbsent(t *testing.T) {
 	}
 }
 
-func TestConfigResetCovRefusesOverwriteNonInteractive(t *testing.T) {
+// assertConfigCmdRefusesOverwrite verifies cmd refuses to clobber an existing
+// config in non-interactive mode, points the user at --force, and leaves the
+// original file untouched. configReset and configInit share this behaviour.
+func assertConfigCmdRefusesOverwrite(t *testing.T, cmd *cobra.Command) {
+	t.Helper()
+
 	dir := t.TempDir()
 	target := filepath.Join(dir, "config.toml")
 
@@ -228,7 +233,7 @@ func TestConfigResetCovRefusesOverwriteNonInteractive(t *testing.T) {
 
 		// go test's stdin is not a terminal, so the command must refuse and
 		// direct the user to --force rather than blocking on a prompt.
-		err := configResetCmd.RunE(configResetCmd, nil)
+		err := cmd.RunE(cmd, nil)
 		if err == nil {
 			t.Fatal("expected error refusing to overwrite in non-interactive mode")
 		}
@@ -245,7 +250,11 @@ func TestConfigResetCovRefusesOverwriteNonInteractive(t *testing.T) {
 	}
 }
 
-func TestConfigResetCovForceOverwrites(t *testing.T) {
+// assertConfigCmdForceOverwrites verifies cmd with --force replaces an invalid
+// config with a parseable one carrying the built-in defaults.
+func assertConfigCmdForceOverwrites(t *testing.T, cmd *cobra.Command) {
+	t.Helper()
+
 	dir := t.TempDir()
 	target := filepath.Join(dir, "config.toml")
 
@@ -259,20 +268,28 @@ func TestConfigResetCovForceOverwrites(t *testing.T) {
 
 		defer func() { configForceReset = prev }()
 
-		if err := configResetCmd.RunE(configResetCmd, nil); err != nil {
-			t.Fatalf("force reset: %v", err)
+		if err := cmd.RunE(cmd, nil); err != nil {
+			t.Fatalf("force overwrite: %v", err)
 		}
 	})
 
 	// The result must now parse as a valid config with defaults.
 	cfg, err := config.LoadOrDefault(target)
 	if err != nil {
-		t.Fatalf("reset produced unparseable config: %v", err)
+		t.Fatalf("overwrite produced unparseable config: %v", err)
 	}
 
 	if cfg.DefaultAgent != "claude" {
 		t.Errorf("DefaultAgent = %q, want claude", cfg.DefaultAgent)
 	}
+}
+
+func TestConfigResetCovRefusesOverwriteNonInteractive(t *testing.T) {
+	assertConfigCmdRefusesOverwrite(t, configResetCmd)
+}
+
+func TestConfigResetCovForceOverwrites(t *testing.T) {
+	assertConfigCmdForceOverwrites(t, configResetCmd)
 }
 
 func TestConfigResetCovUsesPathsWhenCfgFileEmpty(t *testing.T) {
@@ -418,65 +435,11 @@ func TestConfigInitWritesWhenAbsent(t *testing.T) {
 }
 
 func TestConfigInitRefusesOverwriteNonInteractive(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "config.toml")
-
-	if err := os.WriteFile(target, []byte("default_agent = \"canny\"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	withConfigGlobals(t, target, config.Paths{ConfigFile: target}, func() {
-		prev := configForceReset
-		configForceReset = false
-
-		defer func() { configForceReset = prev }()
-
-		// go test's stdin is not a terminal, so init must refuse and point the
-		// user at --force rather than clobbering an existing config.
-		err := configInitCmd.RunE(configInitCmd, nil)
-		if err == nil {
-			t.Fatal("expected error refusing to overwrite in non-interactive mode")
-		}
-
-		if !strings.Contains(err.Error(), "--force") {
-			t.Errorf("error should direct the user to --force, got %q", err)
-		}
-	})
-
-	// The existing config must be untouched.
-	data, _ := os.ReadFile(target)
-	if string(data) != "default_agent = \"canny\"\n" {
-		t.Errorf("existing config was modified: %q", data)
-	}
+	assertConfigCmdRefusesOverwrite(t, configInitCmd)
 }
 
 func TestConfigInitForceOverwrites(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "config.toml")
-
-	if err := os.WriteFile(target, []byte("thrawn nonsense"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	withConfigGlobals(t, target, config.Paths{ConfigFile: target}, func() {
-		prev := configForceReset
-		configForceReset = true
-
-		defer func() { configForceReset = prev }()
-
-		if err := configInitCmd.RunE(configInitCmd, nil); err != nil {
-			t.Fatalf("force init: %v", err)
-		}
-	})
-
-	cfg, err := config.LoadOrDefault(target)
-	if err != nil {
-		t.Fatalf("init produced unparseable config: %v", err)
-	}
-
-	if cfg.DefaultAgent != "claude" {
-		t.Errorf("DefaultAgent = %q, want claude", cfg.DefaultAgent)
-	}
+	assertConfigCmdForceOverwrites(t, configInitCmd)
 }
 
 func TestConfigInitErrorsWhenDirUncreatable(t *testing.T) {

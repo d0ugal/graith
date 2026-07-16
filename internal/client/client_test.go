@@ -75,33 +75,48 @@ func TestSendControl(t *testing.T) {
 	}
 }
 
+// transferFrame runs write concurrently with read, returning the frame read
+// and failing if either side errors. It models one frame crossing the client
+// ↔ server connection in either direction.
+func transferFrame(t *testing.T, write func() error, read func() (protocol.Frame, error)) protocol.Frame {
+	t.Helper()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- write() }()
+
+	frame, err := read()
+	if err != nil {
+		t.Fatalf("read frame: %v", err)
+	}
+
+	if writeErr := <-errCh; writeErr != nil {
+		t.Fatalf("write frame: %v", writeErr)
+	}
+
+	return frame
+}
+
+// assertFrame checks a received frame carries the expected channel and payload.
+func assertFrame(t *testing.T, frame protocol.Frame, wantChannel byte, wantPayload []byte) {
+	t.Helper()
+
+	if frame.Channel != wantChannel {
+		t.Errorf("channel = %d, want %d", frame.Channel, wantChannel)
+	}
+
+	if string(frame.Payload) != string(wantPayload) {
+		t.Errorf("payload = %q, want %q", frame.Payload, wantPayload)
+	}
+}
+
 func TestSendData(t *testing.T) {
 	c, serverConn := setupTestClient(t)
 	serverReader := protocol.NewFrameReader(serverConn)
 
 	payload := []byte("hello, raw data\x00\x01\x02")
 
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- c.SendData(payload)
-	}()
-
-	frame, err := serverReader.ReadFrame()
-	if err != nil {
-		t.Fatalf("server ReadFrame: %v", err)
-	}
-
-	if sendErr := <-errCh; sendErr != nil {
-		t.Fatalf("SendData: %v", sendErr)
-	}
-
-	if frame.Channel != protocol.ChannelData {
-		t.Errorf("channel = %d, want %d (ChannelData)", frame.Channel, protocol.ChannelData)
-	}
-
-	if string(frame.Payload) != string(payload) {
-		t.Errorf("payload = %q, want %q", frame.Payload, payload)
-	}
+	frame := transferFrame(t, func() error { return c.SendData(payload) }, serverReader.ReadFrame)
+	assertFrame(t, frame, protocol.ChannelData, payload)
 }
 
 func TestReadFrame(t *testing.T) {
@@ -110,27 +125,8 @@ func TestReadFrame(t *testing.T) {
 
 	want := []byte("frame-from-server")
 
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- serverWriter.WriteFrame(protocol.ChannelData, want)
-	}()
-
-	frame, err := c.ReadFrame()
-	if err != nil {
-		t.Fatalf("ReadFrame: %v", err)
-	}
-
-	if writeErr := <-errCh; writeErr != nil {
-		t.Fatalf("server WriteFrame: %v", writeErr)
-	}
-
-	if frame.Channel != protocol.ChannelData {
-		t.Errorf("channel = %d, want %d", frame.Channel, protocol.ChannelData)
-	}
-
-	if string(frame.Payload) != string(want) {
-		t.Errorf("payload = %q, want %q", frame.Payload, want)
-	}
+	frame := transferFrame(t, func() error { return serverWriter.WriteFrame(protocol.ChannelData, want) }, c.ReadFrame)
+	assertFrame(t, frame, protocol.ChannelData, want)
 }
 
 func TestReadControlResponse(t *testing.T) {
@@ -450,25 +446,8 @@ func TestSendFrame_WritesGivenChannel(t *testing.T) {
 
 	payload := []byte("braw-frame")
 
-	errCh := make(chan error, 1)
-	go func() { errCh <- c.SendFrame(protocol.ChannelControl, payload) }()
-
-	frame, err := serverReader.ReadFrame()
-	if err != nil {
-		t.Fatalf("server ReadFrame: %v", err)
-	}
-
-	if sendErr := <-errCh; sendErr != nil {
-		t.Fatalf("SendFrame: %v", sendErr)
-	}
-
-	if frame.Channel != protocol.ChannelControl {
-		t.Errorf("channel = %d, want %d", frame.Channel, protocol.ChannelControl)
-	}
-
-	if string(frame.Payload) != string(payload) {
-		t.Errorf("payload = %q, want %q", frame.Payload, payload)
-	}
+	frame := transferFrame(t, func() error { return c.SendFrame(protocol.ChannelControl, payload) }, serverReader.ReadFrame)
+	assertFrame(t, frame, protocol.ChannelControl, payload)
 }
 
 func TestSendControl_IncludesTokenWhenSet(t *testing.T) {

