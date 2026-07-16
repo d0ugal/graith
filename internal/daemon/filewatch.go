@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
@@ -500,6 +501,31 @@ func (sm *SessionManager) watchFire(ctx context.Context, triggerName string, b *
 	sm.fireWatch(ctx, t, fc)
 }
 
+// stopWatcherResources shuts down a file watcher's goroutine and fsnotify
+// handle, then marks it canceled and stops any pending debounce under bmu.
+// Shared by the trigger file-watch and PR-ref-watch teardown paths — cancel and
+// watcher are read by the caller before the lock (matching the original code),
+// while canceled/debounce are touched under bmu (both are goroutine-mutated).
+func stopWatcherResources(cancel func(), watcher *fsnotify.Watcher, bmu *sync.Mutex, canceled *bool, debounce **time.Timer) {
+	if cancel != nil {
+		cancel()
+	}
+
+	if watcher != nil {
+		_ = watcher.Close()
+	}
+
+	bmu.Lock()
+
+	*canceled = true
+
+	if *debounce != nil {
+		(*debounce).Stop()
+	}
+
+	bmu.Unlock()
+}
+
 func (sm *SessionManager) teardownBinding(key string) {
 	sm.triggers.mu.Lock()
 	b := sm.triggers.bindings[key]
@@ -510,21 +536,7 @@ func (sm *SessionManager) teardownBinding(key string) {
 		return
 	}
 
-	if b.cancel != nil {
-		b.cancel()
-	}
-
-	if b.watcher != nil {
-		_ = b.watcher.Close()
-	}
-
-	b.bmu.Lock()
-
-	b.canceled = true
-	if b.debounce != nil {
-		b.debounce.Stop()
-	}
-	b.bmu.Unlock()
+	stopWatcherResources(b.cancel, b.watcher, &b.bmu, &b.canceled, &b.debounce)
 }
 
 func (sm *SessionManager) teardownAllBindings() {

@@ -6,7 +6,6 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
@@ -27,7 +26,7 @@ var triggerListCmd = &cobra.Command{
 	Short: "List configured triggers",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resp, err := triggerRequest("trigger_list", protocol.TriggerListMsg{})
+		resp, err := cliRequest("trigger_list", protocol.TriggerListMsg{})
 		if err != nil {
 			return err
 		}
@@ -51,7 +50,7 @@ var triggerStatusCmd = &cobra.Command{
 	Short: "Show detail for one trigger",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resp, err := triggerRequest("trigger_status", protocol.TriggerStatusMsg{Name: args[0]})
+		resp, err := cliRequest("trigger_status", protocol.TriggerStatusMsg{Name: args[0]})
 		if err != nil {
 			return err
 		}
@@ -75,7 +74,7 @@ var triggerRunCmd = &cobra.Command{
 	Short: "Fire a schedule trigger once, now (respects overlap)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if _, err := triggerRequest("trigger_run", protocol.TriggerRunMsg{Name: args[0]}); err != nil {
+		if _, err := cliRequest("trigger_run", protocol.TriggerRunMsg{Name: args[0]}); err != nil {
 			return err
 		}
 
@@ -90,7 +89,7 @@ var triggerPauseCmd = &cobra.Command{
 	Short: "Pause a trigger (persists across restart)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if _, err := triggerRequest("trigger_pause", protocol.TriggerPauseMsg{Name: args[0], Pause: true}); err != nil {
+		if _, err := cliRequest("trigger_pause", protocol.TriggerPauseMsg{Name: args[0], Pause: true}); err != nil {
 			return err
 		}
 
@@ -105,7 +104,7 @@ var triggerResumeCmd = &cobra.Command{
 	Short: "Resume a paused trigger",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if _, err := triggerRequest("trigger_pause", protocol.TriggerPauseMsg{Name: args[0], Pause: false}); err != nil {
+		if _, err := cliRequest("trigger_pause", protocol.TriggerPauseMsg{Name: args[0], Pause: false}); err != nil {
 			return err
 		}
 
@@ -190,33 +189,6 @@ func renderTriggerStatus(w io.Writer, t protocol.TriggerRecord) {
 	if t.LastError != "" {
 		_, _ = fmt.Fprintf(w, "Last error: %s\n", t.LastError)
 	}
-}
-
-// triggerRequest sends a control message and returns the reply, surfacing daemon
-// errors as Go errors.
-func triggerRequest(msgType string, payload any) (protocol.Envelope, error) {
-	c, err := client.Connect(cfg, paths, cfgFile)
-	if err != nil {
-		return protocol.Envelope{}, err
-	}
-	defer c.Close()
-
-	_ = c.SendControl(msgType, payload)
-
-	resp, err := c.ReadControlResponse()
-	if err != nil {
-		return protocol.Envelope{}, err
-	}
-
-	if resp.Type == "error" {
-		var e protocol.ErrorMsg
-
-		_ = protocol.DecodePayload(resp, &e)
-
-		return protocol.Envelope{}, fmt.Errorf("%s", e.Message)
-	}
-
-	return resp, nil
 }
 
 func registerTriggerCmd() {

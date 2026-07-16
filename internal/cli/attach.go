@@ -306,6 +306,34 @@ func confirmConvert(name string) bool {
 	return answer == "y" || answer == "yes"
 }
 
+// reattachAfterOverlayFailure reports a failed create/fork initiated from the
+// overlay, then opens a fresh client, reattaches to the original session, and
+// updates opts. It returns the reattached client to assign to c. verb is
+// "Create" or "Fork". Shared by the overlay create/fork error-recovery paths.
+func reattachAfterOverlayFailure(nc *client.Client, sessionID, verb string, resp protocol.Envelope, opts *client.PassthroughOpts, info *protocol.SessionInfo) (*client.Client, error) {
+	var e protocol.ErrorMsg
+
+	_ = protocol.DecodePayload(resp, &e)
+	out.Printf("%s failed: %s\n", verb, e.Message)
+
+	nc2, err := freshClient()
+	if err != nil {
+		nc.Close()
+		return nil, err
+	}
+
+	nc.Close()
+	restoreScreen(sessionID)
+	_ = nc2.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+	attachResp, _ := nc2.ReadControlResponse()
+	_ = protocol.DecodePayload(attachResp, info)
+
+	opts.SessionID = sessionID
+	opts.Info = info
+
+	return nc2, nil
+}
+
 func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[string]bool) error {
 	if isInsideGraith() {
 		return fmt.Errorf("cannot attach from inside a graith session (nested sessions are not supported)")
@@ -428,25 +456,11 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 				}
 
 				if createResp.Type == "error" {
-					var e protocol.ErrorMsg
-
-					_ = protocol.DecodePayload(createResp, &e)
-					out.Printf("Create failed: %s\n", e.Message)
-
-					nc2, err := freshClient()
+					nc2, err := reattachAfterOverlayFailure(nc, sessionID, "Create", createResp, &opts, &info)
 					if err != nil {
-						nc.Close()
 						return err
 					}
 
-					nc.Close()
-					restoreScreen(sessionID)
-					_ = nc2.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
-					attachResp, _ := nc2.ReadControlResponse()
-					_ = protocol.DecodePayload(attachResp, &info)
-
-					opts.SessionID = sessionID
-					opts.Info = &info
 					c = nc2
 
 					continue
@@ -753,25 +767,11 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			}
 
 			if createResp.Type == "error" {
-				var e protocol.ErrorMsg
-
-				_ = protocol.DecodePayload(createResp, &e)
-				out.Printf("Create failed: %s\n", e.Message)
-
-				nc2, err := freshClient()
+				nc2, err := reattachAfterOverlayFailure(nc, sessionID, "Create", createResp, &opts, &info)
 				if err != nil {
-					nc.Close()
 					return err
 				}
 
-				nc.Close()
-				restoreScreen(sessionID)
-				_ = nc2.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
-				attachResp, _ := nc2.ReadControlResponse()
-				_ = protocol.DecodePayload(attachResp, &info)
-
-				opts.SessionID = sessionID
-				opts.Info = &info
 				c = nc2
 
 				continue
@@ -830,25 +830,11 @@ func runAttachByID(c *client.Client, sessionID string, initialCollapsed map[stri
 			}
 
 			if createResp.Type == "error" {
-				var e protocol.ErrorMsg
-
-				_ = protocol.DecodePayload(createResp, &e)
-				out.Printf("Fork failed: %s\n", e.Message)
-
-				nc2, err := freshClient()
+				nc2, err := reattachAfterOverlayFailure(nc, sessionID, "Fork", createResp, &opts, &info)
 				if err != nil {
-					nc.Close()
 					return err
 				}
 
-				nc.Close()
-				restoreScreen(sessionID)
-				_ = nc2.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
-				attachResp, _ := nc2.ReadControlResponse()
-				_ = protocol.DecodePayload(attachResp, &info)
-
-				opts.SessionID = sessionID
-				opts.Info = &info
 				c = nc2
 
 				continue

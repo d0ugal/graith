@@ -222,40 +222,7 @@ var msgSubCmd = &cobra.Command{
 			}()
 		}
 
-		for {
-			frame, err := c.ReadFrame()
-			if err != nil {
-				if err == io.EOF {
-					return nil
-				}
-
-				return err
-			}
-
-			if frame.Channel != protocol.ChannelControl {
-				continue
-			}
-
-			msg, _ := protocol.DecodeControl(frame.Payload)
-			switch msg.Type {
-			case "msg_message":
-				if jsonOutput {
-					fmt.Println(string(msg.Payload))
-				} else {
-					printMessage(msg.Payload)
-				}
-			case "msg_done":
-				return nil
-			case "msg_following":
-				// streaming mode active, keep reading
-			case "error":
-				var e protocol.ErrorMsg
-
-				_ = protocol.DecodePayload(msg, &e)
-
-				return fmt.Errorf("%s", e.Message)
-			}
-		}
+		return readMessageStream(c)
 	},
 }
 
@@ -880,6 +847,46 @@ func msgSendParentRun(args []string) error {
 	out.Printf("Sent to parent session\n")
 
 	return nil
+}
+
+// readMessageStream drains control frames from a msg_inbox/msg_sub stream,
+// printing each message and returning when the stream is done, EOF, or an
+// error envelope arrives. Shared by `gr msg sub` and `gr msg inbox`.
+func readMessageStream(c *client.Client) error {
+	for {
+		frame, err := c.ReadFrame()
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+
+			return err
+		}
+
+		if frame.Channel != protocol.ChannelControl {
+			continue
+		}
+
+		msg, _ := protocol.DecodeControl(frame.Payload)
+		switch msg.Type {
+		case "msg_message":
+			if jsonOutput {
+				fmt.Println(string(msg.Payload))
+			} else {
+				printMessage(msg.Payload)
+			}
+		case "msg_done":
+			return nil
+		case "msg_following":
+			// streaming mode active, keep reading
+		case "error":
+			var e protocol.ErrorMsg
+
+			_ = protocol.DecodePayload(msg, &e)
+
+			return fmt.Errorf("%s", e.Message)
+		}
+	}
 }
 
 func printMessage(payload json.RawMessage) {
