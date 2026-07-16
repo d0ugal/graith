@@ -932,14 +932,11 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	}
 
 	// Typed Codex options are codex-only; reject rather than silently drop them
-	// against another agent (issue #1186).
+	// against another agent (issue #1186). Their *values* are validated by Codex
+	// itself (version/model-dependent enums), not here.
 	codexOpts := opts.Codex
 	if !codexOpts.IsZero() && agentName != "codex" {
 		return SessionState{}, fmt.Errorf("codex options require --agent codex (got %q)", agentName)
-	}
-
-	if err := config.ValidateCodexOptions(codexOpts); err != nil {
-		return SessionState{}, err
 	}
 
 	// Early validation that doesn't require the lock.
@@ -1952,9 +1949,10 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		effectiveModel = targetModel
 	}
 
-	// A fork replays the source's typed Codex options (issue #1186). A cross-agent
-	// fork into codex from a non-codex source simply has none to inherit (nil).
-	sourceCodex := cloneCodexOptions(source.Codex)
+	// A same-agent codex fork replays the source's typed Codex options (issue
+	// #1186); a cross-agent fork to another agent drops them (codexOptsForAgent),
+	// so a non-codex target never persists an orphan codex block.
+	sourceCodex := codexOptsForAgent(agentName, cloneCodexOptions(source.Codex))
 
 	sourceAgentSessionID := source.AgentSessionID
 	sourceYolo := source.Yolo
@@ -6653,6 +6651,21 @@ func includeAddDirArgs(agentType string, includes []IncludedRepoState) []string 
 	}
 
 	return args
+}
+
+// codexOptsForAgent enforces the codex-only invariant when a lifecycle op
+// changes a session's agent: it returns opts unchanged for a codex target and
+// nil otherwise, so codex-only options never persist on a non-codex session
+// (a cross-agent fork or a migrate away from codex). The create path enforces
+// the same rule up front with an explicit error; fork/migrate silently drop
+// them because the options belonged to the source agent, not a user choice for
+// the new one. Keeps state consistent with what Create would accept (#1186).
+func codexOptsForAgent(agentType string, opts *config.CodexOptions) *config.CodexOptions {
+	if agentType != "codex" {
+		return nil
+	}
+
+	return opts
 }
 
 // cloneCodexOptions returns an independent copy of opts (or nil), so a fork's or

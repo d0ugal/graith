@@ -1122,32 +1122,15 @@ func (o CodexOptions) IsZero() bool {
 	return o == CodexOptions{}
 }
 
-// Allowed values for the enumerated Codex options. Codex itself validates the
-// underlying config, but graith checks here so a typo fails session creation
-// with a clear message instead of a confusing Codex startup error.
-var (
-	codexReasoningEfforts = map[string]bool{"minimal": true, "low": true, "medium": true, "high": true, "xhigh": true}
-	codexServiceTiers     = map[string]bool{"auto": true, "default": true, "flex": true, "priority": true}
-	codexApprovalPolicies = map[string]bool{"untrusted": true, "on-request": true, "never": true}
-)
-
-// ValidateCodexOptions rejects out-of-range enumerated values. Empty strings are
-// always valid (the option is simply not passed).
-func ValidateCodexOptions(o CodexOptions) error {
-	if o.ReasoningEffort != "" && !codexReasoningEfforts[o.ReasoningEffort] {
-		return fmt.Errorf("invalid codex reasoning effort %q (want one of: minimal, low, medium, high, xhigh)", o.ReasoningEffort)
-	}
-
-	if o.ServiceTier != "" && !codexServiceTiers[o.ServiceTier] {
-		return fmt.Errorf("invalid codex service tier %q (want one of: auto, default, flex, priority)", o.ServiceTier)
-	}
-
-	if o.ApprovalPolicy != "" && !codexApprovalPolicies[o.ApprovalPolicy] {
-		return fmt.Errorf("invalid codex approval policy %q (want one of: untrusted, on-request, never)", o.ApprovalPolicy)
-	}
-
-	return nil
-}
+// Note: graith deliberately does NOT validate the *values* of these options
+// (reasoning effort, service tier, approval policy). Codex owns those enums and
+// they are version- and model-dependent — e.g. reasoning effort has grown to
+// include `none`/`max`/`ultra` and service tier accepts a legacy `fast` alias
+// across Codex releases. A closed graith allowlist would both reject values
+// Codex accepts and admit ones it rejects (`auto`), so it is worse than nothing:
+// Codex is the source of truth and reports a clear startup error for a bad value.
+// graith only enforces its own invariant — that these are codex-only (see the
+// guard in SessionManager.Create).
 
 // HeadlessCapableEnabled reports whether this agent may run in headless
 // stream-json mode. Defaults to false when unset.
