@@ -586,6 +586,23 @@ func testGestureConfig() {
           "scroll controller takes config friction; rubber-band stays invariant")
     let tracker = SpaceDragTracker(config: cfg)
     check(tracker.activationThreshold == 30, "space tracker takes config activation threshold")
+
+    // Settle-critical zero/non-finite values normalize before reaching the
+    // controller, and even direct state-machine use reaches idle in bounded time.
+    let unsafe = TerminalGestureConfig(
+        scrollFriction: 0,
+        scrollMomentumCutoff: .nan,
+        scrollSpringStiffness: -.infinity,
+        scrollSpringDamping: 0)
+    check(unsafe.scrollFriction > 0 && unsafe.scrollMomentumCutoff.isFinite &&
+          unsafe.scrollSpringStiffness.isFinite && unsafe.scrollSpringDamping > 0,
+          "invalid settle-critical physics normalize to finite positive values")
+    var settling = TerminalScrollController(config: unsafe)
+    settling.beginDrag()
+    settling.endDrag(velocityY: -1200)
+    for _ in 0..<600 where settling.isSettling { _ = settling.tick(dt: 1.0 / 60.0) }
+    check(!settling.isSettling && settling.phase == .idle,
+          "normalized invalid momentum converges to idle within ten seconds")
 }
 
 // MARK: - Entry point

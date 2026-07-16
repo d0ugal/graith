@@ -53,26 +53,37 @@ struct TerminalGestureConfigTests {
         #expect(c.spaceDirectionHysteresis == TerminalGestureConfig.default.spaceDirectionHysteresis)
     }
 
-    @Test func aPresentZeroIsHonouredNotTreatedAsAbsent() {
-        // object(forKey:) distinguishes "set to 0" from "missing"; a deliberate
-        // 0 friction (no decay) must survive, clamped only by its own >= 0 floor.
+    @Test func aPresentZeroIsNormalizedNotTreatedAsAbsent() {
+        // object(forKey:) distinguishes "set to 0" from "missing". Settle-
+        // critical zeroes use their positive stability floors, not the default.
         let defaults = scratchDefaults("gesture.zero.dreich")
         defaults.set(0.0, forKey: TerminalGestureConfig.Key.scrollFriction)
-        #expect(TerminalGestureConfig(userDefaults: defaults).scrollFriction == 0)
+        defaults.set(0.0, forKey: TerminalGestureConfig.Key.scrollMomentumCutoff)
+        defaults.set(0.0, forKey: TerminalGestureConfig.Key.scrollSpringStiffness)
+        defaults.set(0.0, forKey: TerminalGestureConfig.Key.scrollSpringDamping)
+        let c = TerminalGestureConfig(userDefaults: defaults)
+        #expect(c.scrollFriction == 1)
+        #expect(c.scrollMomentumCutoff == 1)
+        #expect(c.scrollSpringStiffness == 30)
+        #expect(c.scrollSpringDamping == 4)
     }
 
     @Test func outOfRangeOverridesAreClamped() {
         let defaults = scratchDefaults("gesture.clamp.thrawn")
         defaults.set(-5.0, forKey: TerminalGestureConfig.Key.scrollFriction)
+        defaults.set(-2.0, forKey: TerminalGestureConfig.Key.scrollMomentumCutoff)
         defaults.set(-100.0, forKey: TerminalGestureConfig.Key.scrollSpringStiffness)
+        defaults.set(-10.0, forKey: TerminalGestureConfig.Key.scrollSpringDamping)
         defaults.set(0.0, forKey: TerminalGestureConfig.Key.spaceActivationThreshold)
         defaults.set(0.0, forKey: TerminalGestureConfig.Key.spaceRepeatInterval)
         defaults.set(0.5, forKey: TerminalGestureConfig.Key.spaceDirectionHysteresis)
         defaults.set(-1.0, forKey: TerminalGestureConfig.Key.selectionLongPressDuration)
 
         let c = TerminalGestureConfig(userDefaults: defaults)
-        #expect(c.scrollFriction == 0)                 // max(0, -5)
-        #expect(c.scrollSpringStiffness == 0)          // max(0, -100)
+        #expect(c.scrollFriction == 1)
+        #expect(c.scrollMomentumCutoff == 1)
+        #expect(c.scrollSpringStiffness == 30)
+        #expect(c.scrollSpringDamping == 4)
         #expect(c.spaceActivationThreshold == 1)       // max(1, 0)
         #expect(c.spaceRepeatInterval == 0.001)        // max(0.001, 0)
         #expect(c.spaceDirectionHysteresis == 1)       // max(1, 0.5)
@@ -83,5 +94,31 @@ struct TerminalGestureConfigTests {
         let c = TerminalGestureConfig(spaceActivationThreshold: -3, spaceDirectionHysteresis: 0)
         #expect(c.spaceActivationThreshold == 1)
         #expect(c.spaceDirectionHysteresis == 1)
+    }
+
+    @Test func nonFiniteOverridesFallBackToShippedValues() {
+        let defaults = scratchDefaults("gesture.nonfinite.bothy")
+        defaults.set(Double.nan, forKey: TerminalGestureConfig.Key.scrollFriction)
+        defaults.set(Double.infinity, forKey: TerminalGestureConfig.Key.scrollMomentumCutoff)
+        defaults.set(-Double.infinity, forKey: TerminalGestureConfig.Key.scrollSpringStiffness)
+        defaults.set(Double.nan, forKey: TerminalGestureConfig.Key.scrollSpringDamping)
+
+        let c = TerminalGestureConfig(userDefaults: defaults)
+        #expect(c.scrollFriction == TerminalGestureConfig.default.scrollFriction)
+        #expect(c.scrollMomentumCutoff == TerminalGestureConfig.default.scrollMomentumCutoff)
+        #expect(c.scrollSpringStiffness == TerminalGestureConfig.default.scrollSpringStiffness)
+        #expect(c.scrollSpringDamping == TerminalGestureConfig.default.scrollSpringDamping)
+    }
+
+    @Test func extremeFinitePhysicsValuesUseStableCeilings() {
+        let c = TerminalGestureConfig(
+            scrollFriction: .greatestFiniteMagnitude,
+            scrollMomentumCutoff: .greatestFiniteMagnitude,
+            scrollSpringStiffness: .greatestFiniteMagnitude,
+            scrollSpringDamping: .greatestFiniteMagnitude)
+        #expect(c.scrollFriction == 60)
+        #expect(c.scrollMomentumCutoff == 10_000)
+        #expect(c.scrollSpringStiffness == 400)
+        #expect(c.scrollSpringDamping == 29)
     }
 }

@@ -153,6 +153,64 @@ final class TerminalScrollControllerTests: XCTestCase {
         XCTAssertEqual(c.drag(translationDelta: -3), 3, "3pt / 1pt cell ⇒ 3 rows")
     }
 
+    func testDirectInitNormalizesInvalidPhysics() {
+        let c = TerminalScrollController(
+            friction: 0,
+            momentumCutoff: -.infinity,
+            springStiffness: .nan,
+            springDamping: -1)
+        XCTAssertEqual(c.friction, 1)
+        XCTAssertEqual(c.momentumCutoff, TerminalGestureConfig.default.scrollMomentumCutoff)
+        XCTAssertEqual(c.springStiffness, TerminalGestureConfig.default.scrollSpringStiffness)
+        XCTAssertEqual(c.springDamping, 4)
+    }
+
+    func testInvalidPhysicsOverridesConvergeWithinBound() {
+        let invalidValues: [(String, CGFloat)] = [
+            ("zero", 0),
+            ("negative", -10),
+            ("nan", .nan),
+            ("positive infinity", .infinity),
+            ("negative infinity", -.infinity),
+        ]
+
+        for (name, value) in invalidValues {
+            let config = TerminalGestureConfig(
+                scrollFriction: value,
+                scrollMomentumCutoff: value,
+                scrollSpringStiffness: value,
+                scrollSpringDamping: value)
+
+            var momentum = TerminalScrollController(config: config)
+            momentum.beginDrag()
+            momentum.endDrag(velocityY: -1200)
+            for _ in 0..<600 where momentum.isSettling {
+                _ = momentum.tick(dt: 1.0 / 60.0)
+            }
+            XCTAssertFalse(momentum.isSettling, "\(name) physics left momentum settling")
+            XCTAssertEqual(momentum.phase, .idle, "\(name) physics did not reach idle from momentum")
+
+            var spring = TerminalScrollController(config: config)
+            spring.beginDrag()
+            spring.absorbOverscroll(rows: 6)
+            spring.endDrag(velocityY: 0)
+            for _ in 0..<600 where spring.isSettling {
+                _ = spring.tick(dt: 1.0 / 60.0)
+            }
+            XCTAssertFalse(spring.isSettling, "\(name) physics left spring settling")
+            XCTAssertEqual(spring.phase, .idle, "\(name) physics did not reach idle from spring")
+        }
+    }
+
+    func testNonFiniteTickFailsSafeToIdle() {
+        var c = makeController()
+        c.beginDrag()
+        c.endDrag(velocityY: -1200)
+        _ = c.tick(dt: .nan)
+        XCTAssertEqual(c.phase, .idle)
+        XCTAssertFalse(c.isSettling)
+    }
+
     // MARK: - Indicator thumb
 
     func testThumbNilWithoutHistory() {
