@@ -119,6 +119,41 @@ func checkWritePermission(repo string) error {
 	return nil
 }
 
+// storeWrite is the shared body for `put` and `append`: resolve the store,
+// enforce write permission, init, run the write, and report. writeFn is
+// store.Put or store.Append; successMsg is the already-formatted confirmation.
+func storeWrite(key, body string, writeFn func(storePath, key, body string) error, successMsg string) error {
+	storePath, label, err := resolveStorePath()
+	if err != nil {
+		return err
+	}
+
+	if !storeSharedFlag {
+		if err := checkWritePermission(label); err != nil {
+			return err
+		}
+	}
+
+	if err := store.Init(storePath); err != nil {
+		return err
+	}
+
+	if err := writeFn(storePath, key, body); err != nil {
+		return err
+	}
+
+	if jsonOutput {
+		return out.JSON(struct {
+			Key  string `json:"key"`
+			Repo string `json:"repo"`
+		}{key, label})
+	}
+
+	out.Printf("%s\n", successMsg)
+
+	return nil
+}
+
 // --- gr store put ---
 
 var storePutFile string
@@ -136,35 +171,7 @@ var storePutCmd = &cobra.Command{
 			return err
 		}
 
-		storePath, label, err := resolveStorePath()
-		if err != nil {
-			return err
-		}
-
-		if !storeSharedFlag {
-			if err := checkWritePermission(label); err != nil {
-				return err
-			}
-		}
-
-		if err := store.Init(storePath); err != nil {
-			return err
-		}
-
-		if err := store.Put(storePath, key, body); err != nil {
-			return err
-		}
-
-		if jsonOutput {
-			return out.JSON(struct {
-				Key  string `json:"key"`
-				Repo string `json:"repo"`
-			}{key, label})
-		}
-
-		out.Printf("Stored %s\n", key)
-
-		return nil
+		return storeWrite(key, body, store.Put, fmt.Sprintf("Stored %s", key))
 	},
 }
 
@@ -337,35 +344,7 @@ var storeAppendCmd = &cobra.Command{
 			return err
 		}
 
-		storePath, label, err := resolveStorePath()
-		if err != nil {
-			return err
-		}
-
-		if !storeSharedFlag {
-			if err := checkWritePermission(label); err != nil {
-				return err
-			}
-		}
-
-		if err := store.Init(storePath); err != nil {
-			return err
-		}
-
-		if err := store.Append(storePath, key, line); err != nil {
-			return err
-		}
-
-		if jsonOutput {
-			return out.JSON(struct {
-				Key  string `json:"key"`
-				Repo string `json:"repo"`
-			}{key, label})
-		}
-
-		out.Printf("Appended to %s\n", key)
-
-		return nil
+		return storeWrite(key, line, store.Append, fmt.Sprintf("Appended to %s", key))
 	},
 }
 

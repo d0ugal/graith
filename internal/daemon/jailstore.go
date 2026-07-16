@@ -141,24 +141,10 @@ func (s *MsgStore) ListJailed(includeReleased bool) ([]JailedComment, error) {
 	return out, rows.Err()
 }
 
-// GetJailed returns a single quarantined comment by jail ID.
+// GetJailed returns a single quarantined comment by jail ID. Reads don't take
+// the mutex here (mirrors ListJailed), so it shares getJailedLocked's body.
 func (s *MsgStore) GetJailed(id string) (JailedComment, bool, error) {
-	rows, err := s.db.Query(`SELECT `+jailCols+` FROM jailed_comments WHERE id = ?`, id)
-	if err != nil {
-		return JailedComment{}, false, fmt.Errorf("get jailed: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	if !rows.Next() {
-		return JailedComment{}, false, rows.Err()
-	}
-
-	j, err := scanJailed(rows)
-	if err != nil {
-		return JailedComment{}, false, fmt.Errorf("scan jailed: %w", err)
-	}
-
-	return j, true, nil
+	return s.getJailedLocked(id)
 }
 
 // MarkReleased stamps a jailed comment as released. It returns ok=false if the

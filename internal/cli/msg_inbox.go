@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -50,39 +48,6 @@ var msgInboxCmd = &cobra.Command{
 			}()
 		}
 
-		for {
-			frame, err := c.ReadFrame()
-			if err != nil {
-				if err == io.EOF {
-					return nil
-				}
-
-				return err
-			}
-
-			if frame.Channel != protocol.ChannelControl {
-				continue
-			}
-
-			msg, _ := protocol.DecodeControl(frame.Payload)
-			switch msg.Type {
-			case "msg_message":
-				if jsonOutput {
-					fmt.Println(string(msg.Payload))
-				} else {
-					printMessage(msg.Payload)
-				}
-			case "msg_done":
-				return nil
-			case "msg_following":
-				// streaming mode active, keep reading
-			case "error":
-				var e protocol.ErrorMsg
-
-				_ = protocol.DecodePayload(msg, &e)
-
-				return fmt.Errorf("%s", e.Message)
-			}
-		}
+		return readMessageStream(c)
 	},
 }

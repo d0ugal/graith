@@ -9,7 +9,6 @@ import (
 	"syscall"
 	"text/tabwriter"
 
-	"github.com/d0ugal/graith/internal/client"
 	graithmcp "github.com/d0ugal/graith/internal/mcp"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
@@ -47,7 +46,7 @@ var mcpListCmd = &cobra.Command{
 	Short: "List daemon-managed MCP servers and their status",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resp, err := mcpRequest("mcp_list", protocol.MCPListMsg{})
+		resp, err := cliRequest("mcp_list", protocol.MCPListMsg{})
 		if err != nil {
 			return err
 		}
@@ -74,7 +73,7 @@ var mcpRestartCmd = &cobra.Command{
 		"current config.",
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resp, err := mcpRequest("mcp_restart", protocol.MCPRestartMsg{Name: args[0]})
+		resp, err := cliRequest("mcp_restart", protocol.MCPRestartMsg{Name: args[0]})
 		if err != nil {
 			return err
 		}
@@ -102,7 +101,7 @@ var mcpLogsCmd = &cobra.Command{
 	Short: "Show captured stderr for a daemon-managed MCP server",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resp, err := mcpRequest("mcp_logs", protocol.MCPLogsMsg{Name: args[0], Lines: mcpLogsLines})
+		resp, err := cliRequest("mcp_logs", protocol.MCPLogsMsg{Name: args[0], Lines: mcpLogsLines})
 		if err != nil {
 			return err
 		}
@@ -182,33 +181,6 @@ func renderMCPLogs(w io.Writer, resp protocol.MCPLogsResponse) {
 
 		_, _ = fmt.Fprint(w, f.Content)
 	}
-}
-
-// mcpRequest sends a control message and returns the reply, surfacing daemon
-// errors as Go errors.
-func mcpRequest(msgType string, payload any) (protocol.Envelope, error) {
-	c, err := client.Connect(cfg, paths, cfgFile)
-	if err != nil {
-		return protocol.Envelope{}, err
-	}
-	defer c.Close()
-
-	_ = c.SendControl(msgType, payload)
-
-	resp, err := c.ReadControlResponse()
-	if err != nil {
-		return protocol.Envelope{}, err
-	}
-
-	if resp.Type == "error" {
-		var e protocol.ErrorMsg
-
-		_ = protocol.DecodePayload(resp, &e)
-
-		return protocol.Envelope{}, fmt.Errorf("%s", e.Message)
-	}
-
-	return resp, nil
 }
 
 // registerMCPCmd registers this command on rootCmd. Called from registerCommands.

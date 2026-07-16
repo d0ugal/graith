@@ -366,21 +366,7 @@ func (sm *SessionManager) teardownPRRefWatcher(id string) {
 		return
 	}
 
-	if w.cancel != nil {
-		w.cancel()
-	}
-
-	if w.watcher != nil {
-		_ = w.watcher.Close()
-	}
-
-	w.bmu.Lock()
-	w.canceled = true
-
-	if w.debounce != nil {
-		w.debounce.Stop()
-	}
-	w.bmu.Unlock()
+	stopWatcherResources(w.cancel, w.watcher, &w.bmu, &w.canceled, &w.debounce)
 }
 
 func (sm *SessionManager) teardownAllPRRefWatchers() {
