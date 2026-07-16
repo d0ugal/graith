@@ -738,7 +738,7 @@ func TestLogsDefaultLines(t *testing.T) {
 	h := newTestHarness(t)
 	h.addPTYSession(t, "neep-log", "neep-default")
 
-	// Lines=0 should default to 300 internally
+	// Lines=0 should fall back to the configured [limits] log_lines default
 	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "neep-log", Lines: 0})
 
 	h.expectType(t, "logs_done")

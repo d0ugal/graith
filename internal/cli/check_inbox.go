@@ -71,22 +71,24 @@ var checkInboxCmd = &cobra.Command{
 		// context must go through hookSpecificOutput.additionalContext to reach
 		// the model; a top-level systemMessage is user-facing only (issue #1072).
 		agent := os.Getenv("GRAITH_AGENT_TYPE")
-		fmt.Println(hookoutput.InboxContext(agent, "SessionStart", formatInboxSystemMessage(messages)))
+		fmt.Println(hookoutput.InboxContext(agent, "SessionStart", formatInboxSystemMessage(messages, cfg.Limits.InboxPreviewBytesOrDefault())))
 
 		return nil
 	},
 }
 
 // formatInboxSystemMessage builds the SessionStart-hook context body announcing
-// unread inbox messages, with a truncated preview.
+// unread inbox messages, with a preview truncated to previewBytes bytes (a
+// value < 1 uses the config default).
 //
 // The recommended read command is `gr msg inbox --all` (NOT `--ack`): the hook
 // itself already acknowledged these messages when it fetched them with
 // Ack: true (see the msg_inbox request above), so they are no longer unread by
 // the time the agent acts on this hint. `gr msg inbox --ack` reads unread-only
 // and would return nothing; `--all` shows the full history, which is the only
-// way to recover content dropped by the 1000-byte preview truncation.
-func formatInboxSystemMessage(messages []inboxMessage) string {
+// way to recover content dropped by the preview truncation ([limits]
+// inbox_preview_bytes, issue #1252).
+func formatInboxSystemMessage(messages []inboxMessage, previewBytes int) string {
 	var preview strings.Builder
 
 	for _, m := range messages {
@@ -102,9 +104,13 @@ func formatInboxSystemMessage(messages []inboxMessage) string {
 		}
 	}
 
+	if previewBytes < 1 {
+		previewBytes = config.LimitsInboxPreviewBytesDefault
+	}
+
 	previewStr := preview.String()
-	if len(previewStr) > 1000 {
-		previewStr = previewStr[:1000] + "..."
+	if len(previewStr) > previewBytes {
+		previewStr = previewStr[:previewBytes] + "..."
 	}
 
 	return fmt.Sprintf(

@@ -41,6 +41,7 @@ type MCPManager struct {
 	extraSvrs []config.MCPServerConfig          // auto-injected servers (e.g. graith)
 	logDir    string
 	globalSbx config.SandboxConfig
+	limits    config.LimitsConfig // output/log display caps (issue #1252)
 	log       *slog.Logger
 }
 
@@ -69,6 +70,7 @@ func NewMCPManager(cfg *config.Config, extraServers []config.MCPServerConfig, lo
 		extraSvrs: extraServers,
 		logDir:    logDir,
 		globalSbx: cfg.Sandbox,
+		limits:    cfg.Limits,
 		log:       log,
 	}
 }
@@ -180,6 +182,7 @@ func (m *MCPManager) Reload(cfg *config.Config) {
 
 	m.servers = newServers
 	m.globalSbx = cfg.Sandbox
+	m.limits = cfg.Limits
 	m.mu.Unlock()
 
 	for proxyID, proc := range killed {
@@ -326,6 +329,7 @@ func (m *MCPManager) Restart(name string) (int, error) {
 func (m *MCPManager) LogFiles(name string, lines int) ([]protocol.MCPLogFile, error) {
 	m.mu.Lock()
 	_, ok := m.servers[name]
+	limits := m.limits
 	m.mu.Unlock()
 
 	if !ok {
@@ -333,8 +337,10 @@ func (m *MCPManager) LogFiles(name string, lines int) ([]protocol.MCPLogFile, er
 	}
 
 	if lines <= 0 {
-		lines = 300
+		lines = limits.LogLinesOrDefault()
 	}
+
+	maxRead := int64(limits.MCPLogReadBytesOrDefault())
 
 	mcpLogDir := filepath.Join(m.logDir, "mcp")
 
@@ -376,7 +382,7 @@ func (m *MCPManager) LogFiles(name string, lines int) ([]protocol.MCPLogFile, er
 
 		path := filepath.Join(mcpLogDir, base)
 
-		content, rerr := tailFile(path, lines)
+		content, rerr := tailFile(path, lines, maxRead)
 		if rerr != nil {
 			return nil, fmt.Errorf("read MCP log %s: %w", base, rerr)
 		}
@@ -394,8 +400,10 @@ func (m *MCPManager) LogFiles(name string, lines int) ([]protocol.MCPLogFile, er
 }
 
 // tailFile returns the last n lines of the file at path. To bound memory it
-// reads at most the final 1 MiB of the file before splitting into lines.
-func tailFile(path string, n int) (string, error) {
+// reads at most the final maxRead bytes of the file before splitting into
+// lines; a maxRead <= 0 falls back to the config default so a caller can't
+// accidentally read the whole file (issue #1252).
+func tailFile(path string, n int, maxRead int64) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -407,7 +415,9 @@ func tailFile(path string, n int) (string, error) {
 		return "", err
 	}
 
-	const maxRead = 1 << 20 // 1 MiB
+	if maxRead <= 0 {
+		maxRead = config.LimitsMCPLogReadBytesDefault
+	}
 
 	size := info.Size()
 	start := int64(0)

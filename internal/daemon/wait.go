@@ -10,13 +10,10 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
 )
-
-// waitScrollbackLines bounds how much existing scrollback is scanned for an
-// already-present match before a contains wait starts following live output.
-const waitScrollbackLines = 500
 
 // handleWait blocks until the session named by w satisfies its condition, then
 // sends one of "wait_matched", "wait_timeout", or "error". It returns true when
@@ -196,6 +193,9 @@ func (sm *SessionManager) handleWaitContains(
 		return false
 	}
 
+	limits := sm.Config().Limits
+	scanLines := limits.WaitScanLinesOrDefault()
+
 	ptySess, ok := sm.GetPTY(w.SessionID)
 	if !ok {
 		// No live PTY: the session cannot produce new output. Scan any
@@ -207,7 +207,7 @@ func (sm *SessionManager) handleWaitContains(
 			return false
 		}
 
-		if tail, terr := grpty.TailFile(sm.scrollbackLogPath(w.SessionID), waitScrollbackLines); terr == nil {
+		if tail, terr := grpty.TailFile(sm.scrollbackLogPath(w.SessionID), scanLines); terr == nil {
 			if line, matched := scanForMatch(re, tail); matched {
 				sendControl("wait_matched", protocol.WaitMatchedMsg{MatchedLine: line})
 				return false
@@ -222,7 +222,7 @@ func (sm *SessionManager) handleWaitContains(
 	}
 
 	matchCh := make(chan string, 1)
-	mw := &matchWriter{re: re, matchCh: matchCh}
+	mw := &matchWriter{re: re, matchCh: matchCh, maxBuf: limits.WaitBufferBytesOrDefault()}
 
 	// Attach the live matcher BEFORE scanning existing scrollback. Output
 	// produced in the gap between a scrollback snapshot and attaching is
@@ -235,7 +235,7 @@ func (sm *SessionManager) handleWaitContains(
 	defer ptySess.DetachWriter(mw)
 
 	// Catch a pattern already visible in scrollback before following.
-	if tail, terr := ptySess.ScrollbackFile().Tail(waitScrollbackLines); terr == nil {
+	if tail, terr := ptySess.ScrollbackFile().Tail(scanLines); terr == nil {
 		if line, matched := scanForMatch(re, tail); matched {
 			sendControl("wait_matched", protocol.WaitMatchedMsg{MatchedLine: line})
 			return false
@@ -295,15 +295,15 @@ func scanForMatch(re *regexp.Regexp, data []byte) (string, bool) {
 type matchWriter struct {
 	re      *regexp.Regexp
 	matchCh chan string
+	// maxBuf bounds the retained partial line so a long stream without a newline
+	// cannot grow the buffer without limit. A value <= 0 uses the config default
+	// (config.LimitsWaitBufferBytesDefault) so a zero-valued matchWriter stays safe.
+	maxBuf int
 
 	mu   sync.Mutex
 	buf  []byte
 	done bool
 }
-
-// matchWriterMaxBuf bounds the retained partial line so a long stream without a
-// newline cannot grow the buffer without limit.
-const matchWriterMaxBuf = 64 * 1024
 
 func (m *matchWriter) Write(p []byte) (int, error) {
 	m.mu.Lock()
@@ -357,8 +357,13 @@ func (m *matchWriter) Write(p []byte) (int, error) {
 		m.buf = m.buf[start:]
 	}
 
-	if len(m.buf) > matchWriterMaxBuf {
-		m.buf = m.buf[len(m.buf)-matchWriterMaxBuf:]
+	maxBuf := m.maxBuf
+	if maxBuf <= 0 {
+		maxBuf = config.LimitsWaitBufferBytesDefault
+	}
+
+	if len(m.buf) > maxBuf {
+		m.buf = m.buf[len(m.buf)-maxBuf:]
 	}
 
 	return len(p), nil

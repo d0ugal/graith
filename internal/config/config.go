@@ -63,6 +63,7 @@ type Config struct {
 	ResourceMonitor  ResourceMonitor    `toml:"resource_monitor"` // [resource_monitor] table (issue #1244)
 	Migration        MigrationConfig    `toml:"migration"`        // [migration] table (issue #1250)
 	Transcript       TranscriptConfig   `toml:"transcript"`       // [transcript] table (issue #1250)
+	Limits           LimitsConfig       `toml:"limits"`           // [limits] table (issue #1252)
 }
 
 // ConfigReloadDebounceDefault is the quiet period the config-file watcher waits
@@ -1262,6 +1263,129 @@ func (r ResourceMonitor) SampleHistoryOrDefault() int {
 	}
 
 	return r.SampleHistory
+}
+
+// LimitsConfig is the [limits] block gathering the user-visible output, log,
+// wait, and display truncation caps that were previously duplicated as
+// unrelated Go constants and literals across the daemon, CLI, and MCP manager
+// (issue #1252). Unifying them means changing one place updates every surface.
+// Every field is optional: a value < 1 falls back to the matching default
+// constant, preserving the historical behaviour. Units are stated in each field
+// name (lines, bytes, runes) so a single number is unambiguous.
+type LimitsConfig struct {
+	// LogLines is the default number of trailing output lines shown when a
+	// `lines`/`-n` count is not given: `gr logs`, `gr mcp logs`, the scrollback
+	// replayed to a client on attach, and the MCP log reader all share it. Values
+	// < 1 fall back to the default (LimitsLogLinesDefault).
+	LogLines int `toml:"log_lines"`
+	// WaitScanLines bounds how much existing scrollback `gr wait --contains`
+	// scans for an already-present match before it starts following live output.
+	// Values < 1 fall back to the default (LimitsWaitScanLinesDefault).
+	WaitScanLines int `toml:"wait_scan_lines"`
+	// WaitBufferBytes bounds the retained partial line in the live `gr wait`
+	// matcher so a long stream without a newline can't grow the buffer without
+	// limit. Values < 1 fall back to the default (LimitsWaitBufferBytesDefault).
+	WaitBufferBytes int `toml:"wait_buffer_bytes"`
+	// MCPLogReadBytes bounds how many trailing bytes of an MCP server log file
+	// are read before splitting into lines, keeping a huge log from being loaded
+	// whole. Values < 1 fall back to the default (LimitsMCPLogReadBytesDefault).
+	MCPLogReadBytes int `toml:"mcp_log_read_bytes"`
+	// ApprovalDisplayBytes caps the tool input shown in the approval overlay and
+	// broadcast to attached clients (the full input is still what backends
+	// evaluate). Values < 1 fall back to the default
+	// (LimitsApprovalDisplayBytesDefault).
+	ApprovalDisplayBytes int `toml:"approval_display_bytes"`
+	// LastMessageRunes bounds the agent's final Stop message the status hook
+	// forwards to the daemon, so a large final output never becomes an unbounded
+	// control frame. Counted in runes (never splits a multi-byte character).
+	// Values < 1 fall back to the default (LimitsLastMessageRunesDefault).
+	LastMessageRunes int `toml:"last_message_runes"`
+	// InboxPreviewBytes bounds the unread-inbox preview injected into a session's
+	// SessionStart hook context. Values < 1 fall back to the default
+	// (LimitsInboxPreviewBytesDefault).
+	InboxPreviewBytes int `toml:"inbox_preview_bytes"`
+}
+
+// Limits defaults mirror the fixed constants and literals that governed each
+// surface before issue #1252 unified them.
+const (
+	LimitsLogLinesDefault             = 300
+	LimitsWaitScanLinesDefault        = 500
+	LimitsWaitBufferBytesDefault      = 64 * 1024
+	LimitsMCPLogReadBytesDefault      = 1 << 20 // 1 MiB
+	LimitsApprovalDisplayBytesDefault = 500
+	LimitsLastMessageRunesDefault     = 2000
+	LimitsInboxPreviewBytesDefault    = 1000
+)
+
+// LogLinesOrDefault returns the default log-tail line count, clamped to a
+// sensible minimum. A value < 1 means "use the default".
+func (l LimitsConfig) LogLinesOrDefault() int {
+	if l.LogLines < 1 {
+		return LimitsLogLinesDefault
+	}
+
+	return l.LogLines
+}
+
+// WaitScanLinesOrDefault returns the `gr wait` scrollback-scan line count,
+// clamped to a sensible minimum. A value < 1 means "use the default".
+func (l LimitsConfig) WaitScanLinesOrDefault() int {
+	if l.WaitScanLines < 1 {
+		return LimitsWaitScanLinesDefault
+	}
+
+	return l.WaitScanLines
+}
+
+// WaitBufferBytesOrDefault returns the `gr wait` matcher partial-line cap,
+// clamped to a sensible minimum. A value < 1 means "use the default".
+func (l LimitsConfig) WaitBufferBytesOrDefault() int {
+	if l.WaitBufferBytes < 1 {
+		return LimitsWaitBufferBytesDefault
+	}
+
+	return l.WaitBufferBytes
+}
+
+// MCPLogReadBytesOrDefault returns the MCP log read cap, clamped to a sensible
+// minimum. A value < 1 means "use the default".
+func (l LimitsConfig) MCPLogReadBytesOrDefault() int {
+	if l.MCPLogReadBytes < 1 {
+		return LimitsMCPLogReadBytesDefault
+	}
+
+	return l.MCPLogReadBytes
+}
+
+// ApprovalDisplayBytesOrDefault returns the approval-overlay display cap,
+// clamped to a sensible minimum. A value < 1 means "use the default".
+func (l LimitsConfig) ApprovalDisplayBytesOrDefault() int {
+	if l.ApprovalDisplayBytes < 1 {
+		return LimitsApprovalDisplayBytesDefault
+	}
+
+	return l.ApprovalDisplayBytes
+}
+
+// LastMessageRunesOrDefault returns the hook last-message rune cap, clamped to
+// a sensible minimum. A value < 1 means "use the default".
+func (l LimitsConfig) LastMessageRunesOrDefault() int {
+	if l.LastMessageRunes < 1 {
+		return LimitsLastMessageRunesDefault
+	}
+
+	return l.LastMessageRunes
+}
+
+// InboxPreviewBytesOrDefault returns the inbox-preview byte cap, clamped to a
+// sensible minimum. A value < 1 means "use the default".
+func (l LimitsConfig) InboxPreviewBytesOrDefault() int {
+	if l.InboxPreviewBytes < 1 {
+		return LimitsInboxPreviewBytesDefault
+	}
+
+	return l.InboxPreviewBytes
 }
 
 type GitPullConfig struct {

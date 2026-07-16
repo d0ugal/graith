@@ -344,7 +344,7 @@ final class SessionStore: FleetModel {
 
     /// Fetch the tail of a session's scrollback as plain text (a non-attaching
     /// peek). Routes strictly to the session's owning host client.
-    func fetchLogs(_ session: Session, lines: Int = 500) async throws -> String {
+    func fetchLogs(_ session: Session, lines: Int = GraithProtocolClient.defaultLogLines) async throws -> String {
         guard let client = ownerClient(for: session.id) else { throw SessionStoreError.hostUnavailable }
         return try await client.logs(sessionID: session.id, lines: lines)
     }

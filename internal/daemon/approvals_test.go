@@ -19,10 +19,11 @@ import (
 // keeping the result valid UTF-8.
 func TestTruncateForDisplayRuneBoundary(t *testing.T) {
 	// "ü" is two bytes (0xC3 0xBC). Pad with ASCII so a "ü" straddles the
-	// approvalDisplayLimit byte offset, forcing a mid-rune cut.
-	s := strings.Repeat("a", approvalDisplayLimit-1) + "üüüü"
+	// display-limit byte offset, forcing a mid-rune cut.
+	limit := config.LimitsApprovalDisplayBytesDefault
+	s := strings.Repeat("a", limit-1) + "üüüü"
 
-	got := truncateForDisplay(s)
+	got := truncateForDisplay(s, limit)
 
 	if !strings.HasSuffix(got, "...") {
 		t.Fatalf("expected truncation ellipsis, got %q", got)
@@ -34,8 +35,30 @@ func TestTruncateForDisplayRuneBoundary(t *testing.T) {
 	}
 
 	// A short string is returned unchanged.
-	if short := "echo ünïcödé"; truncateForDisplay(short) != short {
-		t.Fatalf("short string altered: got %q, want %q", truncateForDisplay(short), short)
+	if short := "echo ünïcödé"; truncateForDisplay(short, limit) != short {
+		t.Fatalf("short string altered: got %q, want %q", truncateForDisplay(short, limit), short)
+	}
+}
+
+// TestTruncateForDisplayConfigurableLimit guards issue #1252: the display cap is
+// now a parameter, and a value < 1 falls back to the config default.
+func TestTruncateForDisplayConfigurableLimit(t *testing.T) {
+	// A custom small limit is honoured (cut is limit bytes plus the ellipsis).
+	if got := truncateForDisplay("abcdefghij", 4); got != "abcd..." {
+		t.Errorf("truncateForDisplay(_, 4) = %q, want %q", got, "abcd...")
+	}
+
+	// A non-positive limit falls back to the config default: a string within the
+	// default is returned unchanged.
+	within := strings.Repeat("a", config.LimitsApprovalDisplayBytesDefault)
+	if got := truncateForDisplay(within, 0); got != within {
+		t.Errorf("limit=0 should use the default and not truncate a %d-byte string", len(within))
+	}
+
+	// Just over the default is truncated.
+	over := strings.Repeat("a", config.LimitsApprovalDisplayBytesDefault+10)
+	if got := truncateForDisplay(over, -1); !strings.HasSuffix(got, "...") {
+		t.Errorf("limit<1 with an over-length string should truncate; got no ellipsis (len %d)", len(got))
 	}
 }
 

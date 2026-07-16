@@ -87,5 +87,5 @@ var logsCmd = &cobra.Command{
 func registerLogsCmd() {
 	rootCmd.AddCommand(logsCmd)
 	logsCmd.Flags().BoolVarP(&logsFollow, "follow", "f", false, "follow output (like tail -f)")
-	logsCmd.Flags().IntVarP(&logsLines, "lines", "n", 300, "number of lines to show")
+	logsCmd.Flags().IntVarP(&logsLines, "lines", "n", 0, "number of lines to show (0 = server default, [limits] log_lines)")
 }

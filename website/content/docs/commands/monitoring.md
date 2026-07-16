@@ -53,7 +53,7 @@ Show session output without attaching.
 | Flag | Description |
 |------|-------------|
 | `-f, --follow` | Follow output (like `tail -f`) |
-| `-n, --lines <num>` | Number of lines to show (default: 300) |
+| `-n, --lines <num>` | Number of lines to show (`0`, the default, uses the server's `[limits]` `log_lines`, normally 300) |
 
 ### `gr info`
 

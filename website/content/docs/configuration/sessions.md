@@ -135,6 +135,23 @@ sample_history  = 5      # how many recent samples are retained per session
 
 `sample_interval` is also the per-session spacing that keeps a launch-burst kick from replacing an established session's history. `sample_history` is the number of recent samples kept per session (the window shown in an abnormal-exit report). Both are read live on each sampling pass; `sample_interval` also sets the loop ticker at startup, so changing it requires a `gr daemon restart` to alter the loop cadence. An empty or non-positive `sample_interval` falls back to the default; `sample_history < 1` uses the default.
 
+## Output & display limits
+
+graith truncates output in several user-visible places so a huge log, a runaway tool input, or a long final message never floods a view or an inbox nudge. These caps were formerly scattered as unrelated constants across the daemon and CLI; the `[limits]` block gathers them so one change updates every surface. Each value is a plain count and the unit is in the key name (lines, bytes, runes); a value less than 1 falls back to the default shown.
+
+```toml
+[limits]
+log_lines              = 300      # default trailing lines for `gr logs`, `gr mcp logs`, attach replay, and MCP log reads (when no -n)
+wait_scan_lines        = 500      # scrollback lines `gr wait --contains` scans for an already-present match
+wait_buffer_bytes      = 65536    # partial-line buffer cap in the live `gr wait` matcher (64 KiB)
+mcp_log_read_bytes     = 1048576  # max trailing bytes read from an MCP log file before splitting into lines (1 MiB)
+approval_display_bytes = 500      # tool input shown in the approval overlay (backends still evaluate the full input)
+last_message_runes     = 2000     # agent's final Stop message the status hook forwards (counted in runes)
+inbox_preview_bytes    = 1000     # unread-inbox preview injected into a session's SessionStart hook context
+```
+
+`log_lines` is the shared default used whenever a `--lines`/`-n` count is omitted: `gr logs` and `gr mcp logs` now send `0` by default, so the daemon applies this value. Because the daemon owns the resolution, the graphical clients' log peeks pick up the same server-side default too. `wait_scan_lines` and `wait_buffer_bytes` bound how much history `gr wait --contains` scans and how much unterminated output the live matcher retains. `approval_display_bytes`, `last_message_runes`, and `inbox_preview_bytes` cap what is *shown* — the untruncated values are still evaluated (approval backends) or recoverable (`gr msg inbox --all` shows the full message body). The byte caps are counted in bytes but never split a multi-byte character mid-rune, and `last_message_runes` is counted in whole runes.
+
 ## Update check
 
 `gr list` and `gr doctor` check GitHub for a newer graith release and cache the result. The `[updates]` block makes this configurable — turn it off for downstream forks, packaged or offline installs, or if you simply don't want the network call.
