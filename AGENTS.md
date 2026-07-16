@@ -939,6 +939,8 @@ agent_hooks = false
 | `task` | no | — | Task/prompt sent to the agent on start |
 | `agent_hooks` | no | `true` | Enable agent hooks (check-inbox, etc.) |
 | `shared` | no | `false` | Reuse an existing running session by name |
+| `includes` | no | — | Extra worktrees to attach, merged with (and deduped against) the repo's `[[repos]]` includes (`~` expanded) |
+| `star` | no | `false` | Create the session starred (protected from a manual `gr delete`; `shared` only shields from scenario stop/delete) |
 
 Unknown fields are rejected — typos in field names produce a parse error.
 

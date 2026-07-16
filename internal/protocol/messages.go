@@ -859,6 +859,11 @@ type ScenarioSessionInput struct {
 	Task       string `json:"task,omitempty"`
 	AgentHooks bool   `json:"agent_hooks,omitempty"`
 	Shared     bool   `json:"shared,omitempty"`
+	// Includes attaches extra worktrees to the session in addition to those
+	// inherited from repo config (issue #1046).
+	Includes []string `json:"includes,omitempty"`
+	// Star creates the session starred (protected from manual `gr delete`).
+	Star bool `json:"star,omitempty"`
 }
 
 type ScenarioStopMsg struct {

@@ -38,6 +38,12 @@ type Session struct {
 	Task       string `toml:"task"`
 	AgentHooks *bool  `toml:"agent_hooks"`
 	Shared     bool   `toml:"shared"`
+	// Includes attaches extra worktrees to the session, in addition to any
+	// inherited from the repo's [[repos]] config. See issue #1046.
+	Includes []string `toml:"includes"`
+	// Star creates the session starred so it is protected from an accidental
+	// manual `gr delete` (shared = true only shields from scenario stop/delete).
+	Star bool `toml:"star"`
 }
 
 // Parse decodes and validates a scenario TOML document. Unknown fields are
@@ -222,6 +228,8 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 			Task:       s.Task,
 			AgentHooks: s.AgentHooks == nil || *s.AgentHooks,
 			Shared:     s.Shared,
+			Includes:   s.Includes,
+			Star:       s.Star,
 		})
 	}
 

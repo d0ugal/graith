@@ -498,6 +498,62 @@ func TestBuildSessionInputsCov2(t *testing.T) {
 	}
 }
 
+// TestBuildSessionInputsIncludesAndStar verifies the includes/star fields are
+// mapped through, and that include paths are ~-expanded like repo (issue #1046).
+func TestBuildSessionInputsIncludesAndStar(t *testing.T) {
+	sf := &scenarioFile{
+		Version:  1,
+		Scenario: scenarioFileMeta{Name: "strath"},
+		Sessions: []scenarioFileSession{
+			{
+				Name:     "ben",
+				Repo:     "~/Code/croft",
+				Includes: []string{"~/Code/bothy", "/tmp/glen"},
+				Star:     true,
+			},
+			{
+				Name: "canny",
+				Repo: "/tmp/whin",
+			},
+		},
+	}
+
+	got, err := buildSessionInputs(sf)
+	if err != nil {
+		t.Fatalf("buildSessionInputs: %v", err)
+	}
+
+	s0 := got[0]
+	if !s0.Star {
+		t.Error("session[0].Star should be true")
+	}
+
+	if len(s0.Includes) != 2 {
+		t.Fatalf("session[0].Includes = %v, want 2", s0.Includes)
+	}
+
+	if want := config.ExpandPath("~/Code/bothy"); s0.Includes[0] != want {
+		t.Errorf("session[0].Includes[0] = %q, want expanded %q", s0.Includes[0], want)
+	}
+
+	if !strings.HasPrefix(s0.Includes[0], "/") {
+		t.Errorf("expected include ~ expanded to absolute path, got %q", s0.Includes[0])
+	}
+
+	if s0.Includes[1] != "/tmp/glen" {
+		t.Errorf("session[0].Includes[1] = %q, want /tmp/glen", s0.Includes[1])
+	}
+
+	// Defaults for a session with no includes/star.
+	if got[1].Star {
+		t.Error("session[1].Star should default false")
+	}
+
+	if len(got[1].Includes) != 0 {
+		t.Errorf("session[1].Includes = %v, want none", got[1].Includes)
+	}
+}
+
 // TestBuildSessionInputsCov2MissingName verifies a session without a name is
 // rejected with an index-qualified error.
 func TestBuildSessionInputsCov2MissingName(t *testing.T) {

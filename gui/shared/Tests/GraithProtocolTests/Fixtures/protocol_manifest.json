@@ -2616,6 +2616,23 @@
             "kind": "bool"
           },
           "optional": true
+        },
+        {
+          "name": "includes",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "star",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
         }
       ]
     },
