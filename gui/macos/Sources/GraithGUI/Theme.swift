@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import GraithDesign
+import GraithSessionKit
 
 /// macOS façade over the shared `GraithDesign` language (gui/shared): the SwiftUI
 /// palette + semantic tokens come from the shared module (one source of truth
@@ -37,9 +38,12 @@ enum Theme {
     static let terminalBg = NSColor(red: 0x1e/255.0, green: 0x1e/255.0, blue: 0x2e/255.0, alpha: 1)
     static let terminalFg = NSColor(red: 0xcd/255.0, green: 0xd6/255.0, blue: 0xf4/255.0, alpha: 1)
     static let terminalCursor = NSColor(red: 0xf5/255.0, green: 0xe0/255.0, blue: 0xdc/255.0, alpha: 1)
-    static let defaultFontSize: CGFloat = 13
-    static let minFontSize: CGFloat = 8
-    static let maxFontSize: CGFloat = 32
+    // Terminal font sizing — the tunable default and its clamp bounds now come
+    // from the shared PresentationPreferences (issue #1254) so macOS, iOS, and a
+    // future settings screen agree on one range instead of re-deriving it.
+    static let defaultFontSize: CGFloat = PresentationPreferences.default.terminalFontSize
+    static let minFontSize: CGFloat = PresentationPreferences.minFontSize
+    static let maxFontSize: CGFloat = PresentationPreferences.maxFontSize
     static let terminalFont = NSFont.monospacedSystemFont(ofSize: defaultFontSize, weight: .regular)
 
     static func terminalFont(ofSize size: CGFloat) -> NSFont {

@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import UIKit
 import MetalKit
+import GraithSessionKit
 import GraithTerminalCore
 import GraithTerminalUIKit
 
@@ -22,7 +23,7 @@ public final class GhosttyMetalRenderer: NSObject, TerminalRenderer {
     // Placeholder until layout(bounds:scale:) supplies the view's real scale.
     private var scale: CGFloat = 2
 
-    public init(state: GhosttyTerminalState, fontSize: CGFloat = 13) {
+    public init(state: GhosttyTerminalState, fontSize: CGFloat = PresentationPreferences.default.terminalFontSize) {
         self.state = state
         guard let dev = MTLCreateSystemDefaultDevice() else {
             fatalError("graith: Metal is not available on this device")

@@ -216,6 +216,9 @@ func (cw columnWidths) totalWidth() int {
 	// "  N ★▸● " (9) + treeIndent + name, then "  " + width for every TUI column
 	// (sourced from the shared registry so a new ShowTUI column extends the
 	// panel automatically rather than being silently truncated), + margin(4).
+	// These constants are layout invariants, not user preferences: they must
+	// match the per-row render arithmetic in compactDelegate.Render exactly, so
+	// they are deliberately excluded from the [terminal] config block (#1254).
 	width := 9 + cw.treeIndent + cw.name + 4
 	for _, c := range tuiColumns() {
 		width += 2 + cw.col(c.Key)
@@ -418,6 +421,9 @@ func displayLastOutput(s protocol.SessionInfo) string {
 	return ""
 }
 
+// maxSummaryWidth is the default cap on the picker's Summary cell, used when the
+// [terminal] summary_width preference is unset. The live value is summaryWidth
+// (see presentation.go), which ConfigurePresentation may override from config.
 const maxSummaryWidth = 40
 
 func displaySummary(s protocol.SessionInfo) string {
@@ -426,8 +432,8 @@ func displaySummary(s protocol.SessionInfo) string {
 		return ""
 	}
 
-	if lipgloss.Width(text) > maxSummaryWidth {
-		text = text[:maxSummaryWidth-1] + "…"
+	if lipgloss.Width(text) > summaryWidth {
+		text = text[:summaryWidth-1] + "…"
 	}
 
 	return text
@@ -1277,7 +1283,7 @@ func (m *overlayModel) Init() tea.Cmd {
 }
 
 func (m *overlayModel) refreshTickCmd() tea.Cmd {
-	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+	return tea.Tick(refreshInterval, func(time.Time) tea.Msg {
 		return refreshTickMsg{}
 	})
 }

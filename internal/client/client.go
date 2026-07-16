@@ -423,7 +423,7 @@ func BuildHandshake(paths config.Paths, cols, rows uint16, cwd string) protocol.
 func (c *Client) Handshake() error {
 	cwd, _ := os.Getwd()
 
-	cols, rows := uint16(80), uint16(24)
+	cols, rows := fallbackCols, fallbackRows
 	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
 		cols, rows = uint16(w), uint16(h) //nolint:gosec // G115: terminal dimensions from term.GetSize are small non-negative ints
 	}

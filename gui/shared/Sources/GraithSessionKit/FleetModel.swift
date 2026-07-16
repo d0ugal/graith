@@ -53,14 +53,19 @@ open class FleetModel: ObservableObject {
     private var connectionObservers: [AnyCancellable] = []
     private var registryObserver: AnyCancellable?
     private var pollTimer: Timer?
+    /// The poll cadence used by `startPolling`, from the [terminal]-equivalent
+    /// presentation preferences (issue #1254). Defaults to the historical 2s.
+    private let pollInterval: TimeInterval
 
     /// - Parameters:
     ///   - identity: the device ed25519 identity, or nil if it could not be
     ///     created (remote connections + pairing are then unavailable).
     ///   - reachability: the tailnet probe (iOS); nil on platforms that only
     ///     talk to a local daemon.
-    ///   - poll: when true, refresh every connection on a 2s timer (the macOS
+    ///   - poll: when true, refresh every connection on a timer (the macOS
     ///     desktop behaviour). iOS refreshes on connect/foreground instead.
+    ///   - pollInterval: seconds between automatic refreshes when `poll` is on.
+    ///     Defaults to the shared presentation default (2s).
     public init(
         registry: HostRegistry,
         identity: DeviceIdentity?,
@@ -68,7 +73,8 @@ open class FleetModel: ObservableObject {
         factory: HostClientFactory,
         pairing: PairingCoordinator,
         poll: Bool = false,
-        subscribeApprovals: Bool = true
+        subscribeApprovals: Bool = true,
+        pollInterval: TimeInterval = PresentationPreferences.default.fleetPollInterval
     ) {
         self.registry = registry
         self.identity = identity
@@ -76,6 +82,7 @@ open class FleetModel: ObservableObject {
         self.factory = factory
         self.pairing = pairing
         self.subscribeApprovals = subscribeApprovals
+        self.pollInterval = max(0.1, pollInterval)
         rebuildConnections()
         // Rebuild + reconnect when the *membership* changes (a pairing completes
         // or a host is removed). Gated on the set of host ids — a display-only
@@ -632,7 +639,7 @@ open class FleetModel: ObservableObject {
 
     public func startPolling() {
         pollTimer?.invalidate()
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        pollTimer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
     }

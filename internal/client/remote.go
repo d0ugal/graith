@@ -190,7 +190,7 @@ func PairRemote(paths config.Paths, host string, port int, profile, deviceLabel,
 	c := &Client{conn: conn, reader: protocol.NewFrameReader(conn), writer: protocol.NewFrameWriter(conn), paths: paths}
 	defer c.Close()
 
-	hs := BuildHandshake(paths, 80, 24, "")
+	hs := BuildHandshake(paths, fallbackCols, fallbackRows, "")
 	hs.Profile = profile
 
 	if err := c.SendControl("handshake", hs); err != nil {

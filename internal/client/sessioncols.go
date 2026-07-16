@@ -91,7 +91,7 @@ func SessionColumns() []SessionColumn {
 			CLIColor: func(s protocol.SessionInfo) color.Color { return AgentStatusColor(s.AgentStatus) },
 		},
 		{
-			Key: "summary", Header: "Summary", ShowTUI: true, MinWidth: 7, MaxWidth: maxSummaryWidth,
+			Key: "summary", Header: "Summary", ShowTUI: true, MinWidth: 7, MaxWidth: summaryWidth,
 			TUIValue: displaySummary,
 			TUIStyle: summaryStyle,
 		},

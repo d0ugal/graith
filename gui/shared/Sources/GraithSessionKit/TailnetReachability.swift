@@ -56,7 +56,7 @@ public final class TailnetReachability: ObservableObject {
     /// Probe a single host:port to confirm the tailnet is routable. Updates
     /// `state` to `.onTailnet` on success, `.notOnTailnet` on failure (when a
     /// network path exists). A short timeout keeps this cheap to call.
-    public func probe(host: String, port: UInt16, timeout: TimeInterval = 3) async {
+    public func probe(host: String, port: UInt16, timeout: TimeInterval = PresentationPreferences.default.reachabilityProbeTimeout) async {
         guard hasNetworkPath else {
             state = .offline
             return

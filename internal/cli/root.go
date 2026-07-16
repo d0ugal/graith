@@ -88,6 +88,19 @@ var rootCmd = &cobra.Command{
 			cfg.Connection.ReconnectIntervalDuration(),
 		)
 
+		// Install the configured terminal/TUI presentation preferences so the
+		// picker, dashboard, status bar, and handshake honour them. The refresh
+		// cadence and summary width come from [terminal] (#1254); the fallback
+		// geometry used when the client's real terminal size can't be probed
+		// shares the daemon's [lifecycle] default_cols/default_rows (#1243) so
+		// there is a single source of truth for default geometry.
+		client.ConfigurePresentation(client.PresentationPrefs{
+			RefreshInterval: cfg.Terminal.RefreshIntervalDuration(),
+			DefaultCols:     int(cfg.Lifecycle.DefaultColsOrDefault()),
+			DefaultRows:     int(cfg.Lifecycle.DefaultRowsOrDefault()),
+			SummaryWidth:    cfg.Terminal.SummaryWidthValue(),
+		})
+
 		if !jsonOutput && (agentMode || agent.Detected()) {
 			jsonOutput = true
 		}
