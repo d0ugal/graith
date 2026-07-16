@@ -165,6 +165,14 @@ Validation rules:
 
 ## Default agent configurations
 
+Every built-in agent also sets the shared lifecycle and prompt-delivery policy
+defaults explicitly, so they show up in `gr config show`: `idle_timeout = "1h"`,
+`inject_prompt = true`, and `pre_trust_workspace = true`. Each also sets
+`prompt_injection` to its native mechanism — `append_system_prompt` (Claude),
+`developer_instructions` (Codex), `cursor_rules` (Cursor), and `none` (OpenCode,
+Agy). The blocks below omit these shared keys and show only the per-agent
+command, args, and resume/fork settings.
+
 ### Claude
 
 ```toml

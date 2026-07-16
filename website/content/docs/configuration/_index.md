@@ -17,7 +17,18 @@ gr config diff     # show changes from defaults
 gr config reset    # write built-in defaults to config file
 ```
 
-The daemon reloads config on `gr daemon reload` without restarting.
+The daemon reloads config on `gr daemon reload` without restarting. It also
+watches `config.toml` and reloads in place after you save it:
+
+```toml
+[config]
+reload_debounce = "200ms"  # quiet period after the last write before reloading
+```
+
+`reload_debounce` coalesces an editor's write-truncate-write burst into a single
+reload. It is read when the daemon starts, so a change to `reload_debounce`
+itself only takes effect after a `gr daemon restart` (every other setting
+re-reads on reload).
 
 > **Full default config.** The complete, annotated set of defaults lives in
 > [`internal/config/default_config.toml`](https://github.com/d0ugal/graith/blob/main/internal/config/default_config.toml)
