@@ -555,12 +555,31 @@ write_dirs = ["~/.gemini"]
 
 # ── Triggers ────────────────────────────────────────────────────────────────
 # Daemon-fired automation: a trigger is (source) → (action). Exactly one source
-# ([trigger.schedule] or [trigger.watch]) per [[trigger]]. Commented out by
-# default. See docs/design/2026-07-11-triggers-design.md.
+# ([trigger.schedule] or [trigger.watch]) per [[trigger]]. The [[trigger]]
+# definitions below are commented out by default; the [triggers.advanced] tuning
+# table is active so `gr config show/diff/reset` describe the full effective
+# behaviour. See docs/design/2026-07-11-triggers-design.md.
 #
 # Daemon-wide cap on concurrently-running trigger actions:
 # [triggers]
 # max_concurrent = 4
+
+# Advanced scheduler + file-watch tuning. These are the low-level policy defaults
+# the daemon applies; they are stated here (not only in code) so config inspection
+# describes the full behaviour. Tune them to trade off dispatch latency, file-watch
+# reconcile load, degraded-binding recovery, and notification size. The loop-lifetime
+# knobs (scheduler_tick, watch_reconcile_interval) take effect on the next daemon
+# (re)start; the rest apply on the next fire.
+[triggers.advanced]
+scheduler_tick           = "1s"     # trigger scheduler loop cadence (cron granularity is 1 minute)
+run_history_max          = 20       # per-trigger runs retained in persisted history
+watch_reconcile_interval = "2s"     # how often file-watch bindings are reconciled against live sessions
+watch_retry_base_backoff = "5s"     # first-retry delay for a degraded file-watch binding (then exponential)
+watch_retry_max_backoff  = "5m"     # cap on the degraded-binding retry backoff
+command_output_cap       = 4096     # bytes of a command action's captured output kept (rest truncated)
+# watch_builtin_ignores: daemon-wide dirs/patterns never watched (".git" is always
+# ignored regardless). Unset uses the default below.
+watch_builtin_ignores    = [".git/", ".git", ".hg/", ".svn/", "*.swp", "*.swx", "4913", ".DS_Store"]
 #
 # Schedule → session: a daily PR report.
 # [[trigger]]

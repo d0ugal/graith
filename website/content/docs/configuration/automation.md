@@ -141,6 +141,34 @@ MCP-server config), `session`, `scenario`, `message`. Delivery routes to
 `skip`), `rate_limit` (default `5/30m`). See [Triggers]({{< relref "/docs/triggers.md" >}}) for the full
 reference.
 
+### Advanced scheduler and file-watch tuning
+
+The `[triggers.advanced]` table exposes the low-level policy knobs that pace the
+trigger scheduler and the file-watch runtime. Every key is optional and falls
+back to the default shown, so omitting the table keeps the built-in behaviour.
+Tune these only to trade off dispatch latency, file-watch reconcile load,
+degraded-binding recovery, and notification size.
+
+```toml
+[triggers.advanced]
+scheduler_tick           = "1s"     # trigger scheduler loop cadence (cron granularity is 1 minute)
+run_history_max          = 20       # per-trigger runs retained in persisted history
+watch_reconcile_interval = "2s"     # how often file-watch bindings are reconciled against live sessions
+watch_retry_base_backoff = "5s"     # first-retry delay for a degraded file-watch binding (then exponential)
+watch_retry_max_backoff  = "5m"     # cap on the degraded-binding retry backoff
+command_output_cap       = 4096     # bytes of a command action's captured output kept (rest truncated)
+watch_builtin_ignores    = [".git/", ".git", ".hg/", ".svn/", "*.swp", "*.swx", "4913", ".DS_Store"]
+```
+
+`watch_builtin_ignores` is the daemon-wide set of directories/patterns never
+watched by any file-watch trigger (on top of git ignore rules and per-trigger
+`watch.ignore`). `.git` is always ignored regardless of this list, because a
+watched `.git` churns constantly and creates a feedback loop.
+
+The loop-lifetime knobs — `scheduler_tick` and `watch_reconcile_interval` — are
+read when the daemon starts, so changing them takes effect on the next daemon
+restart; the rest apply on the next fire.
+
 ### Headless session actions (planned)
 
 Letting a `session`-type action spawn its session in [headless mode]({{< relref "sessions.md#headless-sessions" >}})

@@ -16,8 +16,6 @@ import (
 	"github.com/d0ugal/graith/internal/store"
 )
 
-const triggerTick = 1 * time.Second // coarse; cron granularity is 1 minute
-
 // fireCause labels a run in the history.
 const (
 	causeSchedule = "schedule"
@@ -26,12 +24,13 @@ const (
 	causeFile     = "file"
 )
 
-const triggerHistoryMax = 20
-
 // RunTriggerLoop is the daemon-owned schedule (#592) trigger loop. Modeled on
-// RunPRWatchLoop: config-gated, off the request path, independent mutex.
+// RunPRWatchLoop: config-gated, off the request path, independent mutex. The
+// scheduler tick (coarse; cron granularity is 1 minute) is read once at loop
+// start from [triggers.advanced] scheduler_tick, so changing it needs a daemon
+// restart.
 func (sm *SessionManager) RunTriggerLoop(ctx context.Context) {
-	ticker := time.NewTicker(triggerTick)
+	ticker := time.NewTicker(sm.Config().TriggersRuntime.SchedulerTickDuration())
 	defer ticker.Stop()
 
 	for {
@@ -493,12 +492,14 @@ func (sm *SessionManager) recordTriggerError(name, msg string) {
 }
 
 func (sm *SessionManager) recordTriggerRun(name string, run TriggerRun) {
+	maxHistory := sm.Config().TriggersRuntime.RunHistoryMax()
+
 	_ = sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) {
 		r.RunCount++
 
 		r.History = append(r.History, run)
-		if len(r.History) > triggerHistoryMax {
-			r.History = r.History[len(r.History)-triggerHistoryMax:]
+		if len(r.History) > maxHistory {
+			r.History = r.History[len(r.History)-maxHistory:]
 		}
 	})
 }
