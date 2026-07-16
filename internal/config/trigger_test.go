@@ -180,6 +180,7 @@ func TestValidateTriggers_Invalid(t *testing.T) {
 		{"tracker bad grace", schedTrigger("scunner", ScheduleConfig{Every: "5m"}, ActionConfig{Type: ActionTracker, Tracker: &TrackerConfig{Repo: "/tmp/x", Grace: "soon"}}), true, "grace"},
 		{"tracker negative max_concurrent", schedTrigger("scunner", ScheduleConfig{Every: "5m"}, ActionConfig{Type: ActionTracker, Tracker: &TrackerConfig{Repo: "/tmp/x", MaxConcurrent: -1}}), true, "max_concurrent must not be negative"},
 		{"tracker negative limit", schedTrigger("scunner", ScheduleConfig{Every: "5m"}, ActionConfig{Type: ActionTracker, Tracker: &TrackerConfig{Repo: "/tmp/x", Limit: -5}}), true, "limit must not be negative"},
+		{"tracker overlap allow", TriggerConfig{Name: "scunner", Schedule: &ScheduleConfig{Every: "5m"}, Action: ActionConfig{Type: ActionTracker, Tracker: &TrackerConfig{Repo: "/tmp/x"}}, Policy: TriggerPolicy{Overlap: "allow"}}, true, "requires policy.overlap = skip"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -216,6 +217,23 @@ func TestValidateTriggers_ReservedScenarioPrefix(t *testing.T) {
 	joined := errorsString(c.validateTriggers())
 	if !strings.Contains(joined, "reserved") {
 		t.Fatalf("expected reserved-prefix error, got %s", joined)
+	}
+}
+
+func TestValidateTriggers_TrackerReapDeleteNeedsRetention(t *testing.T) {
+	trig := schedTrigger("dreich-tracker", ScheduleConfig{Every: "5m"},
+		ActionConfig{Type: ActionTracker, Tracker: &TrackerConfig{Repo: "/tmp/croft", Reap: "delete"}})
+
+	// retention disabled → reap = delete would become a hard purge → rejected.
+	off := &Config{Orchestrator: OrchestratorConfig{Enabled: true}, Delete: Delete{Retention: "0"}, Triggers: []TriggerConfig{trig}}
+	if joined := errorsString(off.validateTriggers()); !strings.Contains(joined, "requires [delete] retention > 0") {
+		t.Fatalf("expected retention error, got: %s", joined)
+	}
+
+	// retention enabled → allowed.
+	on := &Config{Orchestrator: OrchestratorConfig{Enabled: true}, Delete: Delete{Retention: "24h"}, Triggers: []TriggerConfig{trig}}
+	if errs := on.validateTriggers(); len(errs) != 0 {
+		t.Fatalf("expected valid with retention, got %v", errs)
 	}
 }
 

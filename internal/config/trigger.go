@@ -48,7 +48,7 @@ type WatchConfig struct {
 
 // ActionConfig is the shared action vocabulary. Type selects the verb.
 type ActionConfig struct {
-	Type string `toml:"type"` // command | session | scenario | message
+	Type string `toml:"type"` // command | session | scenario | message | tracker
 
 	// command:
 	Command  string `toml:"command"`
@@ -594,7 +594,7 @@ func validateActionStructure(where string, t *TriggerConfig) []error {
 	case ActionTracker:
 		errs = append(errs, validateTrackerActionStructure(where, t)...)
 	case "":
-		errs = append(errs, fmt.Errorf("%s: action.type is required (command|session|scenario|message)", where))
+		errs = append(errs, fmt.Errorf("%s: action.type is required (command|session|scenario|message|tracker)", where))
 	default:
 		errs = append(errs, fmt.Errorf("%s: unknown action.type %q", where, a.Type))
 	}
@@ -637,8 +637,17 @@ func (c *Config) validateActionConfigDeps(where string, t *TriggerConfig) []erro
 		errs = append(errs, fmt.Errorf("%s: action.repo %q is not in allowed_repo_paths", where, a.Repo))
 	}
 
-	if a.Type == ActionTracker && a.Tracker != nil && a.Tracker.Repo != "" && !c.RepoPathAllowed(a.Tracker.Repo) {
-		errs = append(errs, fmt.Errorf("%s: action.tracker.repo %q is not in allowed_repo_paths", where, a.Tracker.Repo))
+	if a.Type == ActionTracker && a.Tracker != nil {
+		if a.Tracker.Repo != "" && !c.RepoPathAllowed(a.Tracker.Repo) {
+			errs = append(errs, fmt.Errorf("%s: action.tracker.repo %q is not in allowed_repo_paths", where, a.Tracker.Repo))
+		}
+
+		// reap = "delete" is a SOFT delete, recoverable within the retention window.
+		// With retention disabled it would become an immediate hard purge, violating
+		// "reaping never destroys". Require soft delete to be enabled.
+		if a.Tracker.ReapMode() == TrackerReapDelete && c.Delete.RetentionDuration() <= 0 {
+			errs = append(errs, fmt.Errorf("%s: tracker action.tracker.reap = delete requires [delete] retention > 0 (a soft delete must be recoverable)", where))
+		}
 	}
 
 	if (a.Type == ActionSession || a.Type == ActionScenario || a.Type == ActionTracker) && !c.Orchestrator.Enabled {
@@ -694,6 +703,13 @@ func validateTrackerActionStructure(where string, t *TriggerConfig) []error {
 
 	if !t.IsSchedule() {
 		errs = append(errs, fmt.Errorf("%s: tracker action requires a [schedule] source (it polls on a cadence)", where))
+	}
+
+	// A tracker reconcile reads the live session set, then spawns/reaps. Concurrent
+	// passes could double-spawn or reap on a stale snapshot, so it must serialise
+	// — reject overlap = allow (the default skip is required).
+	if t.Policy.OverlapMode() == OverlapAllow {
+		errs = append(errs, fmt.Errorf("%s: tracker action requires policy.overlap = skip (concurrent reconciles could double-spawn or reap a stale view)", where))
 	}
 
 	tc := a.Tracker

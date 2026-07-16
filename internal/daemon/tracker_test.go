@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -23,12 +24,21 @@ func TestReconcileTracker(t *testing.T) {
 	grace := 10 * time.Minute
 
 	issue := func(key string) issueRef { return issueRef{key: key, number: 1} }
+	running := func(id, key string) trackerSession {
+		return trackerSession{id: id, issueKey: key, status: StatusRunning}
+	}
+	stopped := func(id, key string) trackerSession {
+		return trackerSession{id: id, issueKey: key, status: StatusStopped}
+	}
+
+	// stop reconcile (the default reap mode) with the fixed clock.
+	stop := func(active []issueRef, existing []trackerSession, obsolete map[string]time.Time, maxc int) (trackerReconcilePlan, map[string]time.Time, int) {
+		return reconcileTracker(active, existing, obsolete, grace, maxc, config.TrackerReapStop, now)
+	}
 
 	t.Run("spawn a newly active issue", func(t *testing.T) {
-		active := []issueRef{issue("gh:croft#1"), issue("gh:croft#2")}
-		existing := []trackerSession{{id: "braw", issueKey: "gh:croft#1", running: true}}
-
-		plan, _, capped := reconcileTracker(active, existing, nil, grace, 0, now)
+		plan, _, capped := stop([]issueRef{issue("gh:croft#1"), issue("gh:croft#2")},
+			[]trackerSession{running("braw", "gh:croft#1")}, nil, 0)
 
 		if len(plan.spawn) != 1 || plan.spawn[0].key != "gh:croft#2" {
 			t.Fatalf("expected spawn of #2, got %+v", plan.spawn)
@@ -40,20 +50,14 @@ func TestReconcileTracker(t *testing.T) {
 	})
 
 	t.Run("no respawn while a running session exists", func(t *testing.T) {
-		active := []issueRef{issue("gh:croft#1")}
-		existing := []trackerSession{{id: "braw", issueKey: "gh:croft#1", running: true}}
-
-		plan, _, _ := reconcileTracker(active, existing, nil, grace, 0, now)
+		plan, _, _ := stop([]issueRef{issue("gh:croft#1")}, []trackerSession{running("braw", "gh:croft#1")}, nil, 0)
 		if len(plan.spawn) != 0 || len(plan.resume) != 0 {
 			t.Fatalf("expected no spawn/resume, got %+v %+v", plan.spawn, plan.resume)
 		}
 	})
 
 	t.Run("resume a stopped session for a re-active issue", func(t *testing.T) {
-		active := []issueRef{issue("gh:croft#1")}
-		existing := []trackerSession{{id: "braw", issueKey: "gh:croft#1", running: false}}
-
-		plan, _, _ := reconcileTracker(active, existing, nil, grace, 0, now)
+		plan, _, _ := stop([]issueRef{issue("gh:croft#1")}, []trackerSession{stopped("braw", "gh:croft#1")}, nil, 0)
 		if len(plan.resume) != 1 || plan.resume[0] != "braw" {
 			t.Fatalf("expected resume of braw, got %+v", plan.resume)
 		}
@@ -63,12 +67,37 @@ func TestReconcileTracker(t *testing.T) {
 		}
 	})
 
+	t.Run("a cleanly-completed session is not resumed for a still-active issue", func(t *testing.T) {
+		done := trackerSession{id: "braw", issueKey: "gh:croft#1", status: StatusStopped, completedCleanly: true}
+
+		plan, _, _ := stop([]issueRef{issue("gh:croft#1")}, []trackerSession{done}, nil, 0)
+		if len(plan.resume) != 0 || len(plan.spawn) != 0 {
+			t.Fatalf("expected no resume/spawn for a completed session, got %+v %+v", plan.resume, plan.spawn)
+		}
+	})
+
+	t.Run("a creating session dedups (no double spawn)", func(t *testing.T) {
+		creating := trackerSession{id: "braw", issueKey: "gh:croft#1", status: StatusCreating}
+
+		plan, _, _ := stop([]issueRef{issue("gh:croft#1")}, []trackerSession{creating}, nil, 0)
+		if len(plan.spawn) != 0 || len(plan.resume) != 0 {
+			t.Fatalf("a creating session must dedup, got spawn %+v resume %+v", plan.spawn, plan.resume)
+		}
+	})
+
+	t.Run("an errored session is resumed (restart mid-create recovery)", func(t *testing.T) {
+		errored := trackerSession{id: "braw", issueKey: "gh:croft#1", status: StatusErrored}
+
+		plan, _, _ := stop([]issueRef{issue("gh:croft#1")}, []trackerSession{errored}, nil, 0)
+		if len(plan.resume) != 1 || len(plan.spawn) != 0 {
+			t.Fatalf("expected resume of errored session (no double spawn), got %+v %+v", plan.resume, plan.spawn)
+		}
+	})
+
 	t.Run("obsolete issue within grace is held", func(t *testing.T) {
-		active := []issueRef{}
-		existing := []trackerSession{{id: "dreich", issueKey: "gh:croft#9", running: true}}
 		obsolete := map[string]time.Time{"gh:croft#9": now.Add(-5 * time.Minute)}
 
-		plan, newGrace, _ := reconcileTracker(active, existing, obsolete, grace, 0, now)
+		plan, newGrace, _ := stop(nil, []trackerSession{running("dreich", "gh:croft#9")}, obsolete, 0)
 		if len(plan.reap) != 0 {
 			t.Fatalf("expected no reap within grace, got %+v", plan.reap)
 		}
@@ -79,21 +108,16 @@ func TestReconcileTracker(t *testing.T) {
 	})
 
 	t.Run("obsolete issue past grace is reaped", func(t *testing.T) {
-		active := []issueRef{}
-		existing := []trackerSession{{id: "dreich", issueKey: "gh:croft#9", running: true}}
 		obsolete := map[string]time.Time{"gh:croft#9": now.Add(-11 * time.Minute)}
 
-		plan, _, _ := reconcileTracker(active, existing, obsolete, grace, 0, now)
+		plan, _, _ := stop(nil, []trackerSession{running("dreich", "gh:croft#9")}, obsolete, 0)
 		if len(plan.reap) != 1 || plan.reap[0] != "dreich" {
 			t.Fatalf("expected reap of dreich, got %+v", plan.reap)
 		}
 	})
 
 	t.Run("newly obsolete issue starts the grace clock, not reaped", func(t *testing.T) {
-		active := []issueRef{}
-		existing := []trackerSession{{id: "dreich", issueKey: "gh:croft#9", running: true}}
-
-		plan, newGrace, _ := reconcileTracker(active, existing, nil, grace, 0, now)
+		plan, newGrace, _ := stop(nil, []trackerSession{running("dreich", "gh:croft#9")}, nil, 0)
 		if len(plan.reap) != 0 {
 			t.Fatalf("expected no reap on first observation, got %+v", plan.reap)
 		}
@@ -104,11 +128,9 @@ func TestReconcileTracker(t *testing.T) {
 	})
 
 	t.Run("re-active issue clears its grace mark", func(t *testing.T) {
-		active := []issueRef{issue("gh:croft#9")}
-		existing := []trackerSession{{id: "dreich", issueKey: "gh:croft#9", running: true}}
 		obsolete := map[string]time.Time{"gh:croft#9": now.Add(-5 * time.Minute)}
 
-		plan, newGrace, _ := reconcileTracker(active, existing, obsolete, grace, 0, now)
+		plan, newGrace, _ := stop([]issueRef{issue("gh:croft#9")}, []trackerSession{running("dreich", "gh:croft#9")}, obsolete, 0)
 		if len(plan.reap) != 0 {
 			t.Fatalf("expected no reap for re-active issue, got %+v", plan.reap)
 		}
@@ -118,11 +140,45 @@ func TestReconcileTracker(t *testing.T) {
 		}
 	})
 
+	t.Run("reap=stop on an already-stopped obsolete session is a no-op", func(t *testing.T) {
+		obsolete := map[string]time.Time{"gh:croft#9": now.Add(-11 * time.Minute)}
+
+		plan, _, _ := stop(nil, []trackerSession{stopped("napping", "gh:croft#9")}, obsolete, 0)
+		if len(plan.reap) != 0 {
+			t.Fatalf("stop mode must not re-reap an already-stopped session, got %+v", plan.reap)
+		}
+	})
+
+	t.Run("reap=delete reaps a stopped obsolete session", func(t *testing.T) {
+		obsolete := map[string]time.Time{"gh:croft#9": now.Add(-11 * time.Minute)}
+
+		plan, _, _ := reconcileTracker(nil, []trackerSession{stopped("napping", "gh:croft#9")}, obsolete, grace, 0, config.TrackerReapDelete, now)
+		if len(plan.reap) != 1 || plan.reap[0] != "napping" {
+			t.Fatalf("delete mode should reap a stopped obsolete session, got %+v", plan.reap)
+		}
+	})
+
+	t.Run("reap=none never reaps and keeps the slot occupied", func(t *testing.T) {
+		obsolete := map[string]time.Time{"gh:croft#1": now.Add(-11 * time.Minute)}
+		// One past-grace obsolete running session under reap=none + a new active
+		// issue, cap 1. The obsolete session is NOT reaped and still occupies the
+		// only slot, so the new issue must be capped (not spawned over the cap).
+		plan, _, capped := reconcileTracker([]issueRef{issue("gh:croft#2")},
+			[]trackerSession{running("keep", "gh:croft#1")}, obsolete, grace, 1, config.TrackerReapNone, now)
+
+		if len(plan.reap) != 0 {
+			t.Fatalf("reap=none must never reap, got %+v", plan.reap)
+		}
+
+		if len(plan.spawn) != 0 || capped != 1 {
+			t.Fatalf("reap=none must keep the obsolete session's slot (expected 0 spawn, 1 capped), got spawn %+v capped=%d", plan.spawn, capped)
+		}
+	})
+
 	t.Run("max_concurrent caps spawns", func(t *testing.T) {
 		active := []issueRef{issue("gh:croft#1"), issue("gh:croft#2"), issue("gh:croft#3")}
-		existing := []trackerSession{{id: "braw", issueKey: "gh:croft#1", running: true}}
 
-		plan, _, capped := reconcileTracker(active, existing, nil, grace, 2, now)
+		plan, _, capped := stop(active, []trackerSession{running("braw", "gh:croft#1")}, nil, 2)
 		if len(plan.spawn) != 1 {
 			t.Fatalf("expected 1 spawn under cap 2 (1 running), got %+v", plan.spawn)
 		}
@@ -133,11 +189,9 @@ func TestReconcileTracker(t *testing.T) {
 	})
 
 	t.Run("reaping a running session frees a cap slot for a spawn", func(t *testing.T) {
-		active := []issueRef{issue("gh:croft#2")}
-		existing := []trackerSession{{id: "old", issueKey: "gh:croft#1", running: true}}
 		obsolete := map[string]time.Time{"gh:croft#1": now.Add(-11 * time.Minute)}
 
-		plan, _, capped := reconcileTracker(active, existing, obsolete, grace, 1, now)
+		plan, _, capped := stop([]issueRef{issue("gh:croft#2")}, []trackerSession{running("old", "gh:croft#1")}, obsolete, 1)
 		if !sortedContains(plan.reap, "old") {
 			t.Fatalf("expected reap of old, got %+v", plan.reap)
 		}
@@ -148,12 +202,10 @@ func TestReconcileTracker(t *testing.T) {
 	})
 
 	t.Run("stopped obsolete session held within grace does not occupy a cap slot", func(t *testing.T) {
-		// A stopped, held-obsolete session (running=false) must not block a new spawn.
-		active := []issueRef{issue("gh:croft#2")}
-		existing := []trackerSession{{id: "napping", issueKey: "gh:croft#1", running: false}}
+		// A stopped, held-obsolete session must not block a new spawn.
 		obsolete := map[string]time.Time{"gh:croft#1": now.Add(-1 * time.Minute)}
 
-		plan, _, capped := reconcileTracker(active, existing, obsolete, grace, 1, now)
+		plan, _, capped := stop([]issueRef{issue("gh:croft#2")}, []trackerSession{stopped("napping", "gh:croft#1")}, obsolete, 1)
 		if len(plan.spawn) != 1 || capped != 0 {
 			t.Fatalf("expected 1 spawn under cap 1 (stopped session doesn't count), got %+v capped=%d", plan.spawn, capped)
 		}
@@ -245,14 +297,20 @@ func TestTrackerSessionsFilter(t *testing.T) {
 	sm := newTriggerTestSM(t)
 
 	deletedAt := time.Now()
+	exit0 := 0
+	exit1 := 1
 	sm.state.Sessions = map[string]*SessionState{
 		// Owned, running.
 		"braw": {ID: "braw", TriggerID: "issues", TrackerIssue: "gh:croft#1", Status: StatusRunning},
-		// Owned, stopped.
-		"bide": {ID: "bide", TriggerID: "issues", TrackerIssue: "gh:croft#2", Status: StatusStopped},
+		// Owned, stopped by user (not a clean completion).
+		"bide": {ID: "bide", TriggerID: "issues", TrackerIssue: "gh:croft#2", Status: StatusStopped, StopReason: StopReasonUser},
+		// Owned, self-exited cleanly (completed).
+		"done": {ID: "done", TriggerID: "issues", TrackerIssue: "gh:croft#6", Status: StatusStopped, StopReason: StopReasonCrash, ExitCode: &exit0},
+		// Owned, self-exited non-zero (crashed — not completed).
+		"crash": {ID: "crash", TriggerID: "issues", TrackerIssue: "gh:croft#7", Status: StatusStopped, StopReason: StopReasonCrash, ExitCode: &exit1},
 		// Owned but soft-deleted — excluded.
 		"gone": {ID: "gone", TriggerID: "issues", TrackerIssue: "gh:croft#3", Status: StatusStopped, DeletedAt: &deletedAt},
-		// Owned but still creating — excluded.
+		// Owned, creating — INCLUDED (dedup reservation).
 		"new": {ID: "new", TriggerID: "issues", TrackerIssue: "gh:croft#4", Status: StatusCreating},
 		// Different trigger — excluded.
 		"other": {ID: "other", TriggerID: "elsewhere", TrackerIssue: "gh:croft#5", Status: StatusRunning},
@@ -261,8 +319,8 @@ func TestTrackerSessionsFilter(t *testing.T) {
 	}
 
 	got := sm.trackerSessions("issues")
-	if len(got) != 2 {
-		t.Fatalf("expected 2 tracker sessions, got %d: %+v", len(got), got)
+	if len(got) != 5 {
+		t.Fatalf("expected 5 tracker sessions, got %d: %+v", len(got), got)
 	}
 
 	byKey := map[string]trackerSession{}
@@ -270,12 +328,24 @@ func TestTrackerSessionsFilter(t *testing.T) {
 		byKey[s.issueKey] = s
 	}
 
-	if s, ok := byKey["gh:croft#1"]; !ok || !s.running {
+	if s := byKey["gh:croft#1"]; !s.running() {
 		t.Errorf("expected running braw, got %+v", s)
 	}
 
-	if s, ok := byKey["gh:croft#2"]; !ok || s.running {
-		t.Errorf("expected stopped bide, got %+v", s)
+	if s := byKey["gh:croft#2"]; s.running() || s.completedCleanly {
+		t.Errorf("expected user-stopped bide (not completed), got %+v", s)
+	}
+
+	if s := byKey["gh:croft#6"]; !s.completedCleanly {
+		t.Errorf("expected completedCleanly for done, got %+v", s)
+	}
+
+	if s := byKey["gh:croft#7"]; s.completedCleanly {
+		t.Errorf("a non-zero self-exit is not a clean completion, got %+v", s)
+	}
+
+	if s := byKey["gh:croft#4"]; !s.creating() {
+		t.Errorf("expected creating new, got %+v", s)
 	}
 }
 
@@ -315,8 +385,103 @@ func TestTrackerSessionName(t *testing.T) {
 		t.Errorf("name = %q, want issues-643", got)
 	}
 
-	long := trackerSessionName("a-very-long-trigger-name-that-exceeds-the-limit", 1)
-	if len(long) != 40 {
-		t.Errorf("long name len = %d, want 40", len(long))
+	// A long trigger name truncates the PREFIX, never the numeric suffix, so two
+	// different issues can't collapse to the same session name.
+	long := "a-very-long-trigger-name-that-exceeds-the-limit"
+
+	n5 := trackerSessionName(long, 5)
+	n12 := trackerSessionName(long, 12)
+
+	if len(n5) > 40 || len(n12) > 40 {
+		t.Errorf("names exceed 40: %q (%d), %q (%d)", n5, len(n5), n12, len(n12))
+	}
+
+	if !strings.HasSuffix(n5, "-5") || !strings.HasSuffix(n12, "-12") {
+		t.Errorf("numeric suffix dropped: %q, %q", n5, n12)
+	}
+
+	if n5 == n12 {
+		t.Errorf("different issues produced identical names: %q", n5)
+	}
+}
+
+func TestReapTrackerSession(t *testing.T) {
+	newSM := func(retention string, s *SessionState) *SessionManager {
+		sm := newTriggerTestSM(t)
+		sm.cfg.Delete.Retention = retention
+		sm.state.Sessions = map[string]*SessionState{s.ID: s}
+
+		return sm
+	}
+
+	t.Run("none is a no-op", func(t *testing.T) {
+		sm := newSM("24h", &SessionState{ID: "braw", Status: StatusRunning})
+		if sm.reapTrackerSession("braw", config.TrackerReapNone) {
+			t.Error("reap=none should never act")
+		}
+	})
+
+	t.Run("delete skipped when retention disabled", func(t *testing.T) {
+		sm := newSM("0", &SessionState{ID: "braw", TriggerID: "issues", TrackerIssue: "gh:croft#1", Status: StatusStopped})
+		if sm.reapTrackerSession("braw", config.TrackerReapDelete) {
+			t.Error("reap=delete must be skipped when retention=0 (never a hard purge)")
+		}
+
+		if sm.state.Sessions["braw"].IsSoftDeleted() {
+			t.Error("session must not be soft-deleted with retention=0")
+		}
+	})
+
+	t.Run("delete refuses a starred session", func(t *testing.T) {
+		sm := newSM("24h", &SessionState{ID: "braw", TriggerID: "issues", TrackerIssue: "gh:croft#1", Status: StatusStopped, Starred: true})
+		if sm.reapTrackerSession("braw", config.TrackerReapDelete) {
+			t.Error("reap=delete must not touch a starred session")
+		}
+	})
+
+	t.Run("delete soft-deletes a stopped session", func(t *testing.T) {
+		sm := newSM("24h", &SessionState{ID: "braw", TriggerID: "issues", TrackerIssue: "gh:croft#1", Status: StatusStopped})
+		if !sm.reapTrackerSession("braw", config.TrackerReapDelete) {
+			t.Fatal("reap=delete should soft-delete a stopped session")
+		}
+
+		if !sm.state.Sessions["braw"].IsSoftDeleted() {
+			t.Error("session should be soft-deleted")
+		}
+	})
+
+	t.Run("stop is a no-op on an already-stopped session", func(t *testing.T) {
+		sm := newSM("24h", &SessionState{ID: "braw", Status: StatusStopped})
+		if sm.reapTrackerSession("braw", config.TrackerReapStop) {
+			t.Error("reap=stop on a stopped session should be a no-op")
+		}
+	})
+}
+
+func TestReapStopEligible(t *testing.T) {
+	sm := newTriggerTestSM(t)
+	sm.state.Sessions = map[string]*SessionState{
+		"run":     {ID: "run", Status: StatusRunning},
+		"stopped": {ID: "stopped", Status: StatusStopped},
+		"starred": {ID: "starred", Status: StatusRunning, Starred: true},
+		"system":  {ID: "system", Status: StatusRunning, SystemKind: "orchestrator"},
+	}
+
+	if !sm.reapStopEligible("run") {
+		t.Error("a plain running session should be stop-eligible")
+	}
+
+	for _, id := range []string{"stopped", "starred", "system", "missing"} {
+		if sm.reapStopEligible(id) {
+			t.Errorf("%s should not be stop-eligible", id)
+		}
+	}
+
+	if !sm.reapProtected("starred") || !sm.reapProtected("system") {
+		t.Error("starred/system should be reap-protected")
+	}
+
+	if sm.reapProtected("run") {
+		t.Error("a plain session should not be reap-protected")
 	}
 }

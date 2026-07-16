@@ -16,9 +16,10 @@ type TriggerVars struct {
 	WorktreePath string // watch source: the bound session's worktree
 	ChangedFiles string // watch source: comma-separated changed paths (or "")
 	ChangeCount  string // watch source: number of changed paths
-	// Tracker action: the issue a spawned session is seeded from. Empty for every
-	// other source/action, so a non-tracker template referencing {issue_*} still
-	// errors on the unknown token.
+	// Tracker action: the issue a spawned session is seeded from. These are known
+	// template tokens (they live in this shared struct), so they expand to the
+	// empty string — not an error — outside a tracker prompt; a genuinely unknown
+	// token still errors.
 	IssueNumber string // e.g. "643"
 	IssueTitle  string
 	IssueBody   string
