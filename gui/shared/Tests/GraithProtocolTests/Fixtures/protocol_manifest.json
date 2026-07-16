@@ -732,6 +732,14 @@
             }
           },
           "optional": true
+        },
+        {
+          "name": "purge",
+          "type": {
+            "kind": "object",
+            "ref": "PurgeDiagnostic"
+          },
+          "optional": true
         }
       ]
     },
@@ -2194,6 +2202,40 @@
             "kind": "string"
           },
           "optional": false
+        }
+      ]
+    },
+    {
+      "name": "PurgeDiagnostic",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "startup_delay",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "interval",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "last_sweep",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "next_sweep",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
         }
       ]
     },

@@ -101,6 +101,13 @@ type SessionManager struct {
 	newLoopTicker   func(time.Duration) loopTicker // injectable clock boundary for background-loop tests
 	newLoopTimer    func(time.Duration) loopTimer  // injectable resettable clock boundary for purge tests
 
+	// purgeStatsMu guards the last/next purge-sweep timestamps surfaced in
+	// diagnostics. It is separate from sm.mu so recording a sweep never contends
+	// with session mutations.
+	purgeStatsMu   sync.Mutex
+	lastPurgeSweep time.Time
+	nextPurgeSweep time.Time
+
 	// restartStuck is the startup watchdog's recovery action; nil in production
 	// (falls back to Restart). Tests override it to observe watchdog decisions
 	// without driving a full session respawn.

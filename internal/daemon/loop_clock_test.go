@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/d0ugal/graith/internal/config"
 )
 
 type manualLoopTicker struct {
@@ -80,8 +82,16 @@ func TestRunPurgeLoopReconcilesThenResetsAfterSweep(t *testing.T) {
 	reconciled := make(chan struct{}, 1)
 	purged := make(chan time.Time, 1)
 	timerCreated := make(chan time.Duration, 1)
+	swept := make(chan time.Time, 1)
 	done := make(chan struct{})
 	wantNow := time.Unix(1234, 567)
+
+	// Non-default cadence, exercised through the injected providers to prove the
+	// loop uses the configured values rather than baked-in constants.
+	const (
+		wantStartup  = 2 * time.Second
+		wantInterval = 90 * time.Second
+	)
 
 	go func() {
 		runPurgeLoop(ctx, func(d time.Duration) loopTimer {
@@ -91,6 +101,9 @@ func TestRunPurgeLoopReconcilesThenResetsAfterSweep(t *testing.T) {
 			func() { reconciled <- struct{}{} },
 			func(now time.Time) { purged <- now },
 			func() time.Time { return wantNow },
+			func() time.Duration { return wantStartup },
+			func() time.Duration { return wantInterval },
+			func(ranAt time.Time, _ time.Duration) { swept <- ranAt },
 		)
 		close(done)
 	}()
@@ -101,8 +114,8 @@ func TestRunPurgeLoopReconcilesThenResetsAfterSweep(t *testing.T) {
 		t.Fatal("startup reconciliation was not run")
 	}
 
-	if got := <-timerCreated; got != purgeStartupDelay {
-		t.Fatalf("startup delay = %v, want %v", got, purgeStartupDelay)
+	if got := <-timerCreated; got != wantStartup {
+		t.Fatalf("startup delay = %v, want %v", got, wantStartup)
 	}
 
 	timer.c <- time.Unix(999, 0)
@@ -117,9 +130,18 @@ func TestRunPurgeLoopReconcilesThenResetsAfterSweep(t *testing.T) {
 	}
 
 	select {
+	case got := <-swept:
+		if !got.Equal(wantNow) {
+			t.Fatalf("recorded sweep time = %v, want %v", got, wantNow)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("purge sweep was not recorded")
+	}
+
+	select {
 	case got := <-timer.resets:
-		if got != purgeInterval {
-			t.Fatalf("timer reset = %v, want %v", got, purgeInterval)
+		if got != wantInterval {
+			t.Fatalf("timer reset = %v, want %v", got, wantInterval)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("purge timer was not reset")
@@ -231,8 +253,8 @@ func TestPublicLoopsUseInjectedClocksAndStop(t *testing.T) {
 			sm.RunPurgeLoop(ctx)
 		}()
 
-		if got := <-createdWith; got != purgeStartupDelay {
-			t.Fatalf("startup delay = %v, want %v", got, purgeStartupDelay)
+		if got := <-createdWith; got != config.DefaultPurgeStartupDelay {
+			t.Fatalf("startup delay = %v, want %v", got, config.DefaultPurgeStartupDelay)
 		}
 
 		cancel()

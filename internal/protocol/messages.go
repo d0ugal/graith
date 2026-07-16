@@ -812,6 +812,18 @@ type DiagnosticsMsg struct {
 	// inotify watch limit was exhausted). Healthy bindings are omitted; the slice
 	// is empty when nothing is degraded.
 	Triggers []TriggerDiagnostic `json:"triggers,omitempty"`
+	// Purge reports the soft-delete purge sweep schedule (last/next run and the
+	// configured cadence). Nil until the first sweep timing is known.
+	Purge *PurgeDiagnostic `json:"purge,omitempty"`
+}
+
+// PurgeDiagnostic reports the soft-delete purge sweep schedule for gr doctor.
+// LastSweep is empty before the first sweep runs (during the startup delay).
+type PurgeDiagnostic struct {
+	StartupDelay string `json:"startup_delay"`
+	Interval     string `json:"interval"`
+	LastSweep    string `json:"last_sweep,omitempty"`
+	NextSweep    string `json:"next_sweep,omitempty"`
 }
 
 // TriggerDiagnostic reports a degraded watch-trigger binding for gr doctor.

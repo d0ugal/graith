@@ -32,10 +32,23 @@ A headless session drives Claude Code over its stdin control protocol, giving gr
 
 ```toml
 [delete]
-retention = "24h"  # how long soft-deleted sessions are kept before purge
+retention = "24h"            # how long soft-deleted sessions are kept before purge
+purge_startup_delay = "30s"  # delay before the first purge sweep after the daemon starts
+purge_interval = "10m"       # how often the purge sweep runs thereafter
 ```
 
 `gr delete` is a soft delete: it stops the agent and hides the session but keeps its worktree, branch, and state for this window, so `gr restore` can bring it back. A background loop hard-deletes sessions once their retention expires. Setting `retention = "0"` disables soft delete, so `gr delete` refuses and directs the user to `gr purge`; it never silently becomes destructive. `gr purge` is the only immediate, destructive verb.
+
+`purge_startup_delay` and `purge_interval` tune only the sweep cadence, not whether a session is recoverable: a session's recovery deadline is frozen when it is deleted (`retention` at delete time), so no timing value can turn soft delete into an immediate hard delete. The cadence is deliberately coarse because the retention window is measured in hours. Both must be positive durations; a `gr reload` retunes the running purge timer on its next tick. `gr doctor` reports the effective cadence and the last/next sweep times.
+
+## Orphan garbage collection
+
+```toml
+[gc]
+orphan_min_age = "5m"  # minimum age before an orphaned worktree/scratch dir is GC-eligible
+```
+
+`gr gc` reclaims worktree and scratch directories left behind by sessions that are no longer in state. `orphan_min_age` is the minimum age a directory must reach before GC will remove it, so a directory belonging to an in-flight `gr new` (created before the session is committed to state) is never destroyed. Setting `orphan_min_age = "0"` opts out of the age floor and makes directories eligible immediately — only safe when no sessions are being created concurrently.
 
 ## Git pull
 

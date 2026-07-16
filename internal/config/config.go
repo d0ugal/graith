@@ -35,6 +35,7 @@ type Config struct {
 	Notifications    Notifications      `toml:"notifications"`
 	Messages         Messages           `toml:"messages"`
 	Delete           Delete             `toml:"delete"`
+	GC               GCConfig           `toml:"gc"`
 	Todo             TodoConfig         `toml:"todo"`
 	Sandbox          SandboxConfig      `toml:"sandbox"`
 	Approvals        Approvals          `toml:"approvals"`
@@ -806,14 +807,34 @@ type Messages struct {
 // [delete] retention is unset.
 const DefaultDeleteRetention = 24 * time.Hour
 
+// Purge-loop scheduling defaults, used when the matching [delete] key is unset.
+// The window they sweep is measured in hours, so the cadence is deliberately
+// coarse: purging a little late is harmless, and only the frozen ExpiresAt (not
+// this timing) decides whether a session is recoverable.
+const (
+	// DefaultPurgeStartupDelay is how long after startup the first purge sweep
+	// runs, catching windows that expired while the daemon was down without
+	// racing the rest of daemon initialisation.
+	DefaultPurgeStartupDelay = 30 * time.Second
+	// DefaultPurgeInterval is how often the purge sweep runs after the first.
+	DefaultPurgeInterval = 10 * time.Minute
+)
+
 // Delete configures the soft-delete behaviour of `gr delete`. When retention
 // is a positive duration, `gr delete` marks a session deleted and keeps its
 // worktree/state for the window; the daemon purges it after the window
 // elapses. A retention of "0" disables soft delete: `gr delete` is then
 // rejected (with a message pointing at `gr purge`), since delete must never
 // destroy — `gr purge` remains the way to hard-delete immediately.
+//
+// PurgeStartupDelay and PurgeInterval tune ONLY the sweep cadence, never
+// whether a session is recoverable: a session is purged only once its frozen
+// ExpiresAt (DeletedAt + retention) has passed, so no timing value can turn
+// soft delete into an immediate hard delete.
 type Delete struct {
-	Retention string `toml:"retention"`
+	Retention         string `toml:"retention"`
+	PurgeStartupDelay string `toml:"purge_startup_delay"`
+	PurgeInterval     string `toml:"purge_interval"`
 }
 
 // RetentionDuration resolves the configured soft-delete retention window. An
@@ -828,6 +849,70 @@ func (d Delete) RetentionDuration() time.Duration {
 	parsed, err := ParseDurationWithDays(d.Retention)
 	if err != nil {
 		return DefaultDeleteRetention
+	}
+
+	return parsed
+}
+
+// PurgeStartupDelayDuration resolves the delay before the first purge sweep.
+// Unset, unparseable, or non-positive values fall back to the default so a typo
+// never silently changes startup behaviour (Validate rejects a bad value at
+// load; this is the runtime fail-safe).
+func (d Delete) PurgeStartupDelayDuration() time.Duration {
+	if d.PurgeStartupDelay == "" {
+		return DefaultPurgeStartupDelay
+	}
+
+	parsed, err := ParseDurationWithDays(d.PurgeStartupDelay)
+	if err != nil || parsed <= 0 {
+		return DefaultPurgeStartupDelay
+	}
+
+	return parsed
+}
+
+// PurgeIntervalDuration resolves the steady-state interval between purge
+// sweeps. Unset, unparseable, or non-positive values fall back to the default.
+func (d Delete) PurgeIntervalDuration() time.Duration {
+	if d.PurgeInterval == "" {
+		return DefaultPurgeInterval
+	}
+
+	parsed, err := ParseDurationWithDays(d.PurgeInterval)
+	if err != nil || parsed <= 0 {
+		return DefaultPurgeInterval
+	}
+
+	return parsed
+}
+
+// DefaultGCOrphanMinAge is the minimum age an orphaned worktree/scratch
+// directory must have before GC will remove it, used when [gc] orphan_min_age
+// is unset. Directories are created early in a session's lifecycle (during
+// StatusCreating, before the session is committed to state), so a young
+// directory may belong to an in-flight create that GC would otherwise race and
+// destroy — the floor is a safety margin, not a cosmetic delay.
+const DefaultGCOrphanMinAge = 5 * time.Minute
+
+// GCConfig is the [gc] block. It tunes orphan garbage collection — the sweep
+// (via `gr gc`) that reclaims worktree and scratch directories left behind by
+// sessions no longer in state.
+type GCConfig struct {
+	OrphanMinAge string `toml:"orphan_min_age"`
+}
+
+// OrphanMinAgeDuration resolves the orphan minimum age. Unset or unparseable
+// falls back to the default; a negative value also falls back (a bad value must
+// not widen GC to newly-created directories). "0" is honoured: an operator who
+// explicitly opts out of the age floor gets immediate GC eligibility.
+func (g GCConfig) OrphanMinAgeDuration() time.Duration {
+	if g.OrphanMinAge == "" {
+		return DefaultGCOrphanMinAge
+	}
+
+	parsed, err := ParseDurationWithDays(g.OrphanMinAge)
+	if err != nil || parsed < 0 {
+		return DefaultGCOrphanMinAge
 	}
 
 	return parsed
@@ -1988,6 +2073,35 @@ func (c *Config) Validate() error {
 	if strings.TrimSpace(c.Delete.Retention) != "" {
 		if _, err := ParseDurationWithDays(c.Delete.Retention); err != nil {
 			errs = append(errs, fmt.Errorf("delete.retention %q: %w", c.Delete.Retention, err))
+		}
+	}
+
+	// Purge-loop cadence: reject an unparseable value (fail loudly rather than
+	// silently using the default) and a non-positive one (a zero/negative delay
+	// or interval would busy-spin the timer or defeat the coarse cadence).
+	if s := strings.TrimSpace(c.Delete.PurgeStartupDelay); s != "" {
+		if d, err := ParseDurationWithDays(s); err != nil {
+			errs = append(errs, fmt.Errorf("delete.purge_startup_delay %q: %w", s, err))
+		} else if d <= 0 {
+			errs = append(errs, fmt.Errorf("delete.purge_startup_delay %q: must be a positive duration", s))
+		}
+	}
+
+	if s := strings.TrimSpace(c.Delete.PurgeInterval); s != "" {
+		if d, err := ParseDurationWithDays(s); err != nil {
+			errs = append(errs, fmt.Errorf("delete.purge_interval %q: %w", s, err))
+		} else if d <= 0 {
+			errs = append(errs, fmt.Errorf("delete.purge_interval %q: must be a positive duration", s))
+		}
+	}
+
+	// [gc] orphan_min_age: reject an unparseable or negative value. "0" is
+	// allowed (explicit opt-out of the age floor).
+	if s := strings.TrimSpace(c.GC.OrphanMinAge); s != "" {
+		if d, err := ParseDurationWithDays(s); err != nil {
+			errs = append(errs, fmt.Errorf("gc.orphan_min_age %q: %w", s, err))
+		} else if d < 0 {
+			errs = append(errs, fmt.Errorf("gc.orphan_min_age %q: must not be negative", s))
 		}
 	}
 
