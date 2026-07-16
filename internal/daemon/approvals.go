@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"net"
 	"time"
-	"unicode/utf8"
 
 	"github.com/d0ugal/graith/internal/approvals"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/headless"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/textutil"
 )
 
 type pendingApproval struct {
@@ -468,10 +468,5 @@ func truncateForDisplay(s string, limit int) string {
 		return s
 	}
 
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-
-	return s[:cut] + "..."
+	return textutil.TruncateUTF8Bytes(s, limit, "...")
 }

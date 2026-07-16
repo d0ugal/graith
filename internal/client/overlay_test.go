@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
@@ -4350,6 +4351,39 @@ func TestDisplaySummary_Truncates(t *testing.T) {
 
 	if !strings.HasSuffix(got, "…") {
 		t.Errorf("truncated summary should end with ellipsis, got %q", got)
+	}
+}
+
+func TestDisplaySummary_TruncatesByVisibleCells(t *testing.T) {
+	savePresentation(t)
+	ConfigurePresentation(PresentationPrefs{SummaryWidth: 5})
+
+	tests := []struct {
+		name string
+		text string
+	}{
+		{"accented", "éééééé"},
+		{"combining", strings.Repeat("e\u0301", 6)},
+		{"CJK", "编辑编辑编辑"},
+		{"emoji", "🙂🙂🙂🙂"},
+		{"ANSI decorated", "\x1b[31m编辑编辑编辑\x1b[0m"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := displaySummary(protocol.SessionInfo{SummaryText: tt.text})
+			if !utf8.ValidString(got) {
+				t.Fatalf("displaySummary returned invalid UTF-8: %q", got)
+			}
+
+			if width := ansi.StringWidth(got); width > 5 {
+				t.Errorf("displaySummary visible width = %d, want <= 5: %q", width, got)
+			}
+
+			if !strings.HasSuffix(ansi.Strip(got), "…") {
+				t.Errorf("displaySummary missing ellipsis: %q", got)
+			}
+		})
 	}
 }
 

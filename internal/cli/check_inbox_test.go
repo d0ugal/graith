@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/d0ugal/graith/internal/protocol"
 )
@@ -78,6 +79,41 @@ func TestFormatInboxSystemMessagePreviewTruncation(t *testing.T) {
 
 	if len(def) <= len(small) {
 		t.Errorf("default cap (%d) should retain more than the small cap (%d)", len(def), len(small))
+	}
+}
+
+func TestFormatInboxSystemMessagePreviewTruncationIsUTF8Safe(t *testing.T) {
+	const prefix = "From Ailsa: "
+
+	tests := []struct {
+		name string
+		body string
+		cut  int
+	}{
+		{"accented", "éclair and more", 1},
+		{"emoji", "🙂 braw news", 3},
+		{"combining", "e\u0301lan has news", 2},
+		{"CJK", "编辑完成", 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			limit := len(prefix) + tt.cut
+			got := formatInboxSystemMessage([]inboxMessage{{SenderName: "Ailsa", Body: tt.body}}, limit)
+			if !utf8.ValidString(got) {
+				t.Fatalf("preview is invalid UTF-8: %q", got)
+			}
+
+			_, preview, ok := strings.Cut(got, "\n\n")
+			if !ok || !strings.HasSuffix(preview, "...") {
+				t.Fatalf("truncated preview missing ellipsis: %q", got)
+			}
+
+			retained := strings.TrimSuffix(preview, "...")
+			if len(retained) > limit {
+				t.Errorf("retained preview uses %d bytes, want at most configured %d", len(retained), limit)
+			}
+		})
 	}
 }
 

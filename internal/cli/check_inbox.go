@@ -13,6 +13,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/hookoutput"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/textutil"
 	"github.com/spf13/cobra"
 )
 
@@ -110,7 +111,7 @@ func formatInboxSystemMessage(messages []inboxMessage, previewBytes int) string 
 
 	previewStr := preview.String()
 	if len(previewStr) > previewBytes {
-		previewStr = previewStr[:previewBytes] + "..."
+		previewStr = textutil.TruncateUTF8Bytes(previewStr, previewBytes, "...")
 	}
 
 	return fmt.Sprintf(

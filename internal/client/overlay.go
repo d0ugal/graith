@@ -432,8 +432,8 @@ func displaySummary(s protocol.SessionInfo) string {
 		return ""
 	}
 
-	if lipgloss.Width(text) > summaryWidth {
-		text = text[:summaryWidth-1] + "…"
+	if ansi.StringWidth(text) > summaryWidth {
+		text = ansi.Truncate(text, summaryWidth, "…")
 	}
 
 	return text
