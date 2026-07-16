@@ -549,6 +549,21 @@ func TestReconcileOrchestratorPresenceAfterDelete(t *testing.T) {
 	}
 }
 
+func TestReconcileOrchestratorPresenceDisabled(t *testing.T) {
+	sm := newOrchTestSM(t)
+	sm.cfg.Orchestrator.Enabled = false
+
+	created := 0
+	sm.reconcileOrchestratorPresenceWith(context.Background(), func(context.Context) (SessionState, error) {
+		created++
+		return SessionState{}, nil
+	})
+
+	if created != 0 {
+		t.Fatalf("disabled orchestrator triggered %d creates, want 0", created)
+	}
+}
+
 func TestDeleteKicksOrchestratorReconcileLoop(t *testing.T) {
 	sm := newOrchTestSM(t)
 	sm.cfg.Orchestrator.Enabled = true

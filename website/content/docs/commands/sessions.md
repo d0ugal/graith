@@ -142,7 +142,8 @@ with `gr restore`, or remove it immediately with `gr purge`.
 The config-managed orchestrator is an exception to recoverable deletion:
 `gr delete orchestrator` immediately discards its current context, then the
 daemon creates a fresh replacement when `[orchestrator] enabled = true`. Use
-`gr stop orchestrator` when it should remain stopped.
+`gr stop orchestrator` when it should remain stopped. To purge it permanently,
+disable it in config first.
 
 ## `gr fork <source-session> <new-name>`
 

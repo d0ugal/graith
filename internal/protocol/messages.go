@@ -176,8 +176,10 @@ type RestoreMsg struct {
 
 // DeleteResultMsg is the daemon's response to a delete. Unlike the bare
 // {session_id} the shared lifecycle handler emits, it carries whether the
-// session was soft-deleted or hard-purged and, for a soft delete, the computed
-// expiry — so the CLI can render "Recoverable until …" vs "Deleted".
+// session was soft-deleted or removed immediately and, for a soft delete, the
+// computed expiry — so the CLI can render "Recoverable until …" vs "Deleted".
+// Immediate removal normally means a purge; a direct delete of an enabled,
+// config-managed orchestrator is instead a reset followed by recreation.
 //
 // For a single delete the top-level fields describe that session. For a
 // --children delete the top-level SessionID/Soft describe the *request* (the
