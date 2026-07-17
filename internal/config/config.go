@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -995,8 +996,13 @@ func (r OrchestratorRestartConfig) DelayForLevel(level int) time.Duration {
 	initial := positiveDurationOrDefault(r.InitialBackoff, OrchestratorInitialBackoffDefault)
 	maxDelay := positiveDurationOrDefault(r.MaxBackoff, OrchestratorMaxBackoffDefault)
 
+	// A finite value <= 1 falls back to the default; so does any non-finite
+	// value (NaN/±Inf), which Validate rejects at load but which a directly
+	// constructed config could still carry. This keeps the loop below operating
+	// on a finite multiplier > 1 so the delay stays positive, monotonic, and
+	// capped rather than collapsing through time.Duration(NaN) (#1303).
 	mult := r.Multiplier
-	if mult <= 1 {
+	if math.IsNaN(mult) || math.IsInf(mult, 0) || mult <= 1 {
 		mult = OrchestratorMultiplierDefault
 	}
 
@@ -1008,7 +1014,7 @@ func (r OrchestratorRestartConfig) DelayForLevel(level int) time.Duration {
 		}
 	}
 
-	if d := time.Duration(delay); d < maxDelay {
+	if d := time.Duration(delay); d > 0 && d < maxDelay {
 		return d
 	}
 
@@ -4889,6 +4895,16 @@ func (c *Config) Validate() error {
 		{"orchestrator.restart.stable_reset", rc.StableReset},
 	} {
 		validatePositiveDurationField(&errs, f.name, f.val)
+	}
+
+	// The geometric multiplier must be a finite number. A NaN slips past the
+	// DelayForLevel guards (every NaN comparison is false), so the delay never
+	// caps and time.Duration(NaN) collapses the retry to the supervisor safety
+	// floor rather than the configured backoff; ±Inf is equally meaningless.
+	// A finite value <= 1 remains legal — it documents-fall-back to the default
+	// multiplier (#1303).
+	if math.IsNaN(rc.Multiplier) || math.IsInf(rc.Multiplier, 0) {
+		errs = append(errs, fmt.Errorf("orchestrator.restart.multiplier %v: must be a finite number", rc.Multiplier))
 	}
 
 	initial, initialErr := ParseDurationWithDays(rc.InitialBackoff)
