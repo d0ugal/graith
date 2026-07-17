@@ -495,7 +495,7 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 				prevTTL = time.Duration(s.SummaryTTL) * time.Second
 			}
 
-			s.StopReason = StopReasonShutdown
+			sm.setStopReasonLocked(id, s, StopReasonShutdown)
 			text := formatStopSummary(StopReasonShutdown, nil, "", prevSummary, prevSetAt, prevTTL)
 			applyLifecycleSummaryLocked(s, text)
 		}

@@ -27,22 +27,117 @@ import (
 // freshly published cfg paired with stale limits.
 var reloadLimitsPublishedHook func()
 
+// orchestratorDisableSnapshotHook runs after applyConfig snapshots the current
+// orchestrator generation and releases sm.mu. It is a test-only seam for
+// deterministic reserve/act/commit interleavings.
+var orchestratorDisableSnapshotHook func()
+
+type orchestratorRuntimeSnapshot struct {
+	id              string
+	status          SessionStatus
+	statusChangedAt time.Time
+	pid             int
+	pidStartTime    int64
+	hasDriver       bool
+}
+
+func (s orchestratorRuntimeSnapshot) live() bool {
+	return s.hasDriver || s.pid > 0
+}
+
 // ReloadConfig loads the config from disk and swaps it in, logging what changed.
 func (sm *SessionManager) ReloadConfig() error {
+	// Serialize the read as well as the apply. Otherwise an older disk snapshot
+	// can finish after and overwrite a newer reload generation.
+	sm.configReloadMu.Lock()
+	defer sm.configReloadMu.Unlock()
+
 	cfg, err := config.LoadOrDefault(sm.configFile)
 	if err != nil {
 		return err
 	}
 
-	sm.mu.RLock()
-	oldDataDir := sm.cfg.DataDir
-	sm.mu.RUnlock()
+	return sm.applyConfigLocked(cfg)
+}
 
-	if cfg.DataDir != oldDataDir {
-		return fmt.Errorf("data_dir changed from %q to %q: run 'gr daemon restart' to apply", oldDataDir, cfg.DataDir)
+// applyWatchedConfig deliberately re-reads the file while holding the manager's
+// reload mutex. The watcher's candidate was loaded before entering that mutex
+// and may already be stale behind a concurrent manual reload.
+func (sm *SessionManager) applyWatchedConfig(_ *config.Config) error {
+	return sm.ReloadConfig()
+}
+
+// orchestratorRuntimeSnapshotLocked returns the state used to reserve an
+// orchestrator disable transition. Callers must hold sm.mu for reading.
+func (sm *SessionManager) orchestratorRuntimeSnapshotLocked() orchestratorRuntimeSnapshot {
+	id := sm.findOrchestratorID()
+	if id == "" {
+		return orchestratorRuntimeSnapshot{}
 	}
 
-	return sm.applyConfig(cfg)
+	s := sm.state.Sessions[id]
+
+	return orchestratorRuntimeSnapshot{
+		id:              id,
+		status:          s.Status,
+		statusChangedAt: s.StatusChangedAt,
+		pid:             s.PID,
+		pidStartTime:    s.PIDStartTime,
+		hasDriver:       sm.sessions[id] != nil,
+	}
+}
+
+func (sm *SessionManager) orchestratorStoppedSince(id string) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	current := sm.orchestratorRuntimeSnapshotLocked()
+	if current.id == "" {
+		return true
+	}
+
+	return current.id == id && !current.live() &&
+		(current.status == StatusStopped || current.status == StatusErrored)
+}
+
+// sameOrchestratorDisableGeneration validates the reserve/act/commit boundary.
+// A completed stop or deletion is safe; a newly created/resumed generation is
+// not, even if the prior generation was signaled successfully.
+func sameOrchestratorDisableGeneration(before, after orchestratorRuntimeSnapshot) bool {
+	if before.id == "" {
+		return after.id == ""
+	}
+
+	if after.id == "" {
+		return true
+	}
+
+	if after.id != before.id || after.status == StatusCreating || after.status == StatusDeleting {
+		return false
+	}
+
+	if !after.live() {
+		return after.status == StatusStopped || after.status == StatusErrored
+	}
+
+	if !before.live() {
+		return false
+	}
+
+	return after.status == before.status &&
+		after.statusChangedAt.Equal(before.statusChangedAt) &&
+		after.pid == before.pid &&
+		after.pidStartTime == before.pidStartTime &&
+		after.hasDriver == before.hasDriver
+}
+
+func (sm *SessionManager) orchestratorDisableError(id string, err error) error {
+	sm.log.Error("config change failed",
+		"key", "orchestrator.enabled",
+		"session_id", id,
+		"err", err)
+
+	return fmt.Errorf("orchestrator.enabled: session %q: %w", id, err)
 }
 
 func (sm *SessionManager) applyConfig(newCfg *config.Config) error {
@@ -52,50 +147,66 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) error {
 	sm.configReloadMu.Lock()
 	defer sm.configReloadMu.Unlock()
 
+	return sm.applyConfigLocked(newCfg)
+}
+
+// applyConfigLocked applies one config generation. The caller must hold
+// configReloadMu, including while loading that generation from disk.
+func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 	sm.mu.RLock()
 	old := sm.cfg
+	oldDataDir := old.DataDir
+	transitioningOrchestratorOff := old.Orchestrator.Enabled && !newCfg.Orchestrator.Enabled
+	orchestrator := sm.orchestratorRuntimeSnapshotLocked()
+	sm.mu.RUnlock()
 
-	var (
-		orchID     string
-		orchStatus SessionStatus
-	)
-
-	if old.Orchestrator.Enabled && !newCfg.Orchestrator.Enabled {
-		orchID = sm.findOrchestratorID()
-		if orchID != "" {
-			orchStatus = sm.state.Sessions[orchID].Status
-		}
+	if newCfg.DataDir != oldDataDir {
+		return fmt.Errorf("data_dir changed from %q to %q: run 'gr daemon restart' to apply", oldDataDir, newCfg.DataDir)
 	}
 
-	sm.mu.RUnlock()
+	if transitioningOrchestratorOff && orchestratorDisableSnapshotHook != nil {
+		orchestratorDisableSnapshotHook()
+	}
 
 	// Stop the live orchestrator before publishing enabled=false. If signaling
 	// fails, the old config remains authoritative and a later reload can retry.
-	if orchID != "" && orchStatus == StatusRunning {
-		if err := sm.stopWithReason(orchID, StopReasonUser, "orchestrator-disabled"); err != nil {
-			sm.log.Error("config change failed",
-				"key", "orchestrator.enabled",
-				"session_id", orchID,
-				"err", err)
-
-			return fmt.Errorf("orchestrator.enabled: stop session %q: %w", orchID, err)
+	if transitioningOrchestratorOff && orchestrator.id != "" && orchestrator.live() {
+		if err := sm.stopWithReason(orchestrator.id, StopReasonUser, "orchestrator-disabled"); err != nil {
+			// An exit watcher may have completed between the driver's failed signal
+			// and this check. In that case the desired runtime state was reached and
+			// the disable can still commit.
+			if !sm.orchestratorStoppedSince(orchestrator.id) {
+				return sm.orchestratorDisableError(orchestrator.id, fmt.Errorf("stop session: %w", err))
+			}
 		}
 	}
 
-	// A creating orchestrator has reserved its state but does not yet expose a
-	// driver that can be stopped safely. Retain enabled=true and let the next
-	// reload retry once creation has settled.
-	if orchID != "" && orchStatus == StatusCreating {
-		err := fmt.Errorf("session is being created; retry reload")
-		sm.log.Error("config change failed",
-			"key", "orchestrator.enabled",
-			"session_id", orchID,
-			"err", err)
-
-		return fmt.Errorf("orchestrator.enabled: stop session %q: %w", orchID, err)
+	if transitioningOrchestratorOff && orchestrator.id != "" && !orchestrator.live() {
+		switch orchestrator.status {
+		case StatusCreating:
+			return sm.orchestratorDisableError(orchestrator.id, errors.New("session is being created; retry reload"))
+		case StatusDeleting:
+			return sm.orchestratorDisableError(orchestrator.id, errors.New("session is being deleted; retry reload"))
+		case StatusRunning:
+			return sm.orchestratorDisableError(orchestrator.id, errors.New("session is marked running without a live process; retry reload after recovery"))
+		}
 	}
 
 	sm.mu.Lock()
+	if transitioningOrchestratorOff {
+		current := sm.orchestratorRuntimeSnapshotLocked()
+		if !sameOrchestratorDisableGeneration(orchestrator, current) {
+			sm.mu.Unlock()
+
+			id := current.id
+			if id == "" {
+				id = orchestrator.id
+			}
+
+			return sm.orchestratorDisableError(id, errors.New("session lifecycle changed during reload; retry reload"))
+		}
+	}
+
 	sm.cfg = newCfg
 	// Resize the launch throttle under the same lock that publishes the config so
 	// the two can't diverge if two reloads (fsnotify + SIGHUP) interleave — the

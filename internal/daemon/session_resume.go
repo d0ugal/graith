@@ -130,7 +130,7 @@ func (sm *SessionManager) ConvertToInteractive(id string, rows, cols uint16) (Se
 	sessState.DriverKind = DriverPTY
 	sessState.Status = StatusStopped
 	sessState.StatusChangedAt = time.Now()
-	sessState.StopReason = StopReasonConvert
+	sm.setStopReasonLocked(id, sessState, StopReasonConvert)
 
 	if err := sm.saveState(); err != nil {
 		sm.mu.Unlock()
@@ -244,6 +244,11 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	if !ok {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session %q not found", id)
+	}
+
+	if sessState.SystemKind == SystemKindOrchestrator && !sm.cfg.Orchestrator.Enabled {
+		sm.mu.Unlock()
+		return SessionState{}, errors.New("orchestrator is disabled in config")
 	}
 
 	// A headless session is one-shot (issue #1075): it ran its prompt to a
@@ -891,7 +896,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 
 	sessState.AgentStatus = ""
 	sessState.IdleSince = nil
-	sessState.StopReason = ""
+	sm.setStopReasonLocked(id, sessState, "")
 	// Runtime signals belong to the previous agent generation; a resume/restart
 	// starts clean and hooks re-establish the picture as they fire (issue #1073):
 	// context-pressure + sub-agents, plus any pending SessionEnd reason (and its

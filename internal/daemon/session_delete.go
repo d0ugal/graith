@@ -1276,7 +1276,7 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 				if err != nil {
 					sess.Status = StatusErrored
 					sess.StatusChangedAt = time.Now()
-					sess.StopReason = StopReasonCrash
+					sm.setStopReasonLocked(c.id, sess, StopReasonCrash)
 					applyLifecycleSummaryLocked(sess,
 						fmt.Sprintf("Orphaned process (PID %d) — kill failed: %v", c.pid, err))
 				} else {
@@ -1284,7 +1284,7 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 					sess.StatusChangedAt = time.Now()
 					sess.PID = 0
 					sess.PIDStartTime = 0
-					sess.StopReason = StopReasonCrash
+					sm.setStopReasonLocked(c.id, sess, StopReasonCrash)
 					applyLifecycleSummaryLocked(sess,
 						"Orphaned by daemon crash — killed")
 				}
@@ -1299,7 +1299,7 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 
 				sess.Status = StatusErrored
 				sess.StatusChangedAt = time.Now()
-				sess.StopReason = StopReasonCrash
+				sm.setStopReasonLocked(c.id, sess, StopReasonCrash)
 				applyLifecycleSummaryLocked(sess, fmt.Sprintf(
 					"Orphaned process (PID %d) — identity unverified, manual cleanup needed",
 					c.pid))
