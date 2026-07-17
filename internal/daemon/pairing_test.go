@@ -19,13 +19,17 @@ func newPairingSM(t *testing.T) *SessionManager {
 	t.Helper()
 
 	cfg := config.Default()
+	cfg.Remote.Enabled = true
+	cfg.Remote.AllowTailnetUsers = []string{"speir@example.com"}
 	paths := config.Paths{StateFile: filepath.Join(t.TempDir(), "state.json")}
 
 	sm := NewSessionManager(cfg, paths, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	// A real remote listener sets this at startup; proof-of-possession binds to
 	// it (issue #886), so the handler-level tests need a non-empty pin to sign
 	// against.
+	sm.mu.Lock()
 	sm.remoteTLSPin = "bide-spki-pin"
+	sm.mu.Unlock()
 
 	return sm
 }

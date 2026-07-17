@@ -98,7 +98,9 @@ func loadOrCreateRemoteTLS(certPath, keyPath, hostname string, now time.Time) (t
 
 	if cerr == nil && kerr == nil {
 		if cert, perr := tls.X509KeyPair(certPEM, keyPEM); perr == nil {
-			// A complete prior generation exists; keep serving it.
+			// A complete prior generation exists. Reissue its leaf with the same
+			// private key when the configured certificate name changed; this
+			// reconciles hostname reloads without changing the SPKI clients pin.
 			leaf, lerr := x509.ParseCertificate(cert.Certificate[0])
 			if lerr != nil {
 				return tls.Certificate{}, "", fmt.Errorf("parse tls cert: %w", lerr)
@@ -107,6 +109,28 @@ func loadOrCreateRemoteTLS(certPath, keyPath, hostname string, now time.Time) (t
 			pin, perr := computeSPKIPin(leaf.PublicKey)
 			if perr != nil {
 				return tls.Certificate{}, "", perr
+			}
+
+			if !remoteCertHostnameMatches(leaf, hostname) {
+				key, ok := cert.PrivateKey.(*ecdsa.PrivateKey)
+				if !ok {
+					return tls.Certificate{}, "", fmt.Errorf("remote tls key has unexpected type %T", cert.PrivateKey)
+				}
+
+				der, rerr := selfSignedCert(key, hostname, now)
+				if rerr != nil {
+					return tls.Certificate{}, "", rerr
+				}
+
+				certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+				if rerr := writeTLSFile(certPath, certPEM); rerr != nil {
+					return tls.Certificate{}, "", fmt.Errorf("write reissued cert: %w", rerr)
+				}
+
+				cert, rerr = tls.X509KeyPair(certPEM, keyPEM)
+				if rerr != nil {
+					return tls.Certificate{}, "", fmt.Errorf("load reissued keypair: %w", rerr)
+				}
 			}
 
 			return cert, pin, nil
@@ -120,6 +144,14 @@ func loadOrCreateRemoteTLS(certPath, keyPath, hostname string, now time.Time) (t
 	}
 
 	return generateRemoteTLS(certPath, keyPath, hostname, now)
+}
+
+func remoteCertHostnameMatches(cert *x509.Certificate, hostname string) bool {
+	if hostname == "" {
+		return len(cert.DNSNames) == 0
+	}
+
+	return len(cert.DNSNames) == 1 && cert.DNSNames[0] == hostname
 }
 
 // generateRemoteTLS mints a fresh ECDSA P-256 key and self-signed certificate

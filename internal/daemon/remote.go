@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -87,8 +86,9 @@ type tsnetListener struct {
 
 func newTSNetListener(cfg config.RemoteConfig, stateDir string) (*tsnetListener, error) {
 	srv := &tsnet.Server{
-		Hostname: cfg.Hostname,
-		Dir:      filepath.Join(stateDir, "tsnet"),
+		Hostname:      cfg.Hostname,
+		Dir:           filepath.Join(stateDir, "tsnet"),
+		AdvertiseTags: append([]string(nil), cfg.Tags...),
 	}
 
 	if cfg.AuthKeyFile != "" {
@@ -182,51 +182,70 @@ func newRemoteListener(ctx context.Context, cfg config.RemoteConfig, stateDir st
 	}
 }
 
-// serveRemote runs the tailnet-facing listener alongside the Unix socket. Each
-// accepted connection is TLS-wrapped, its tailnet identity resolved (Gate 1),
-// and — if permitted — dispatched to HandleConnection with a remote ConnOrigin.
-// It returns when ctx is cancelled.
-func (sm *SessionManager) serveRemote(ctx context.Context, rl RemoteListener, cfg config.RemoteConfig, cert tls.Certificate) error {
-	raw, err := rl.Listen()
-	if err != nil {
-		return fmt.Errorf("remote listen: %w", err)
+// remoteOriginAllowed applies the live Gate 1 policy to a remote connection.
+// Production origins must also belong to the currently-active listener
+// generation. The handler calls this before every frame, not just at accept,
+// so disablement and allowlist removal revoke already-authenticated clients.
+func (sm *SessionManager) remoteOriginAllowed(origin ConnOrigin) bool {
+	if !origin.Remote {
+		return true
 	}
 
-	sm.log.Info("[remote] listening", "addr", raw.Addr().String())
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
 
-	ln := tls.NewListener(raw, remoteTLSConfig(cert))
-
-	go func() {
-		<-ctx.Done()
-
-		_ = ln.Close()
-		_ = rl.Close()
-	}()
-
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil
-			}
-
-			sm.log.Warn("remote accept error", "err", err)
-
-			continue
-		}
-
-		go sm.handleRemoteConn(ctx, conn, rl, cfg)
-	}
+	return sm.remoteOriginAllowedLocked(origin)
 }
 
-func (sm *SessionManager) handleRemoteConn(ctx context.Context, conn net.Conn, rl RemoteListener, cfg config.RemoteConfig) {
-	id, err := rl.WhoIs(ctx, conn.RemoteAddr().String())
-	if err != nil || !identityAllowed(cfg, id) {
-		sm.log.Warn("remote connection rejected by Gate 1", "addr", conn.RemoteAddr().String(), "err", err)
-		_ = conn.Close()
-
-		return
+// remoteOriginAllowedLocked is remoteOriginAllowed for callers already holding
+// sm.mu at least for reading.
+func (sm *SessionManager) remoteOriginAllowedLocked(origin ConnOrigin) bool {
+	if sm.cfg == nil || !sm.cfg.Remote.Enabled || !identityAllowed(sm.cfg.Remote, origin.Identity) {
+		return false
 	}
 
-	HandleConnection(ctx, conn, ConnOrigin{Remote: true, Identity: id}, sm, sm.log)
+	return origin.RemoteGeneration == 0 || origin.RemoteGeneration == sm.remoteGeneration
+}
+
+// remoteDataAllowed re-resolves the proven device against live config before
+// accepting an attached input frame. Data frames carry no token, so the
+// connection's PoP-verified device ID is the credential at this boundary.
+func (sm *SessionManager) remoteDataAllowed(origin ConnOrigin, deviceID string) bool {
+	if !origin.Remote {
+		return true
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if !sm.remoteOriginAllowedLocked(origin) || deviceID == "" {
+		return false
+	}
+
+	d := sm.state.PairedDevices[deviceID]
+	if d == nil || !identityMatchesDevice(origin.Identity, d) {
+		return false
+	}
+
+	return remoteDeviceRole(sm.cfg.Remote, d) == roleRemoteHuman
+}
+
+// remoteDeviceRole applies the live require_pairing authority ceiling while
+// preserving the device's approval-time ReadOnly restriction. Disabling
+// pairing downgrades every device immediately; re-enabling it never elevates a
+// device that was originally approved read-only.
+func remoteDeviceRole(cfg config.RemoteConfig, d *PairedDevice) authRole {
+	if d.ReadOnly || !cfg.RequirePairing {
+		return roleRemoteGuest
+	}
+
+	return roleRemoteHuman
+}
+
+// RemoteTLSPin returns the active remote generation's SPKI pin.
+func (sm *SessionManager) RemoteTLSPin() string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	return sm.remoteTLSPin
 }

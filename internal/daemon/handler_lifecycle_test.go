@@ -200,6 +200,7 @@ func TestTypeUsesConfiguredIdleWaitSnapshotAfterReload(t *testing.T) {
 
 	reloaded := *sm.Config()
 	reloaded.Notifications.Timing.InboxIdleTimeout = "43ms"
+
 	reloaded.Notifications.Timing.InboxMaxWait = "109ms"
 	_ = sm.applyConfig(&reloaded)
 

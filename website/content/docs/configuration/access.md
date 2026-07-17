@@ -76,4 +76,38 @@ Access is gated in two layers: a WhoIs **allowlist** (`allow_tailnet_users` — 
 
 > **Warning:** `require_pairing = false` is **UNSAFE** — it trusts the tailnet identity alone with no per-device proof, so it is restricted to **read-only** access. Leave pairing on for any device that should control sessions.
 
+### Hot reload and revocation
+
+The whole remote access surface hot-reloads. Changing `enabled`, `mode`,
+`hostname`, `port`, `auth_key_file` (including its contents), `tags`, or the
+remote TLS certificate/key closes the listener and all remote connections
+before graith starts the replacement. A hostname change reissues the
+self-signed certificate with the existing key, so its certificate name changes
+but its SPKI pin remains stable. Replacing the TLS key changes the pin; clients
+that pinned the old key must pair again.
+
+Policy-only edits do not restart the listener. `allow_tailnet_users` is checked
+against the live config on every remote frame, and removing an identity closes
+its existing connections immediately. Adding an identity admits its future
+connections as soon as the reload succeeds. `enabled = false` likewise closes
+the listener and every connection immediately.
+
+Listener replacement is deliberately fail-closed. Graith closes the old
+generation before binding the new one. If the new port cannot bind, an auth-key
+file cannot be read, TLS setup fails, or another transport step fails, the
+reload returns an error, the previous config remains visible through
+daemon-backed config introspection, and remote access stays closed. (`gr config
+show` reads the edited file directly, so it can still display the rejected
+candidate.) Correct the setting and reload again (or run `gr daemon restart`);
+the local Unix socket remains available.
+
+`require_pairing` is also a live authority ceiling for devices that are already
+connected. Changing it from `true` to `false` immediately downgrades every
+paired device to the read-only guest role, including devices previously allowed
+to control sessions. Changing it back to `true` restores control only for
+devices originally approved for full access. A device approved as read-only
+while `require_pairing = false` stays read-only and must be paired again before
+it can receive full access. This prevents a reload from silently elevating a
+device.
+
 The orchestrator can also be given extra filesystem access scoped to itself via `[orchestrator.sandbox]` (`read_dirs`/`write_dirs`), layered on top of the global and per-agent sandbox config. See [Authentication & remote access]({{< relref "/docs/auth.md" >}}) for the full authorization model, token lifecycle, and pairing flow.

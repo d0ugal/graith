@@ -29,7 +29,11 @@ After rebuilding `gr`, run `gr daemon restart` to pick up the new daemon binary.
 
 ### `gr daemon reload`
 
-Reload configuration without restarting the daemon.
+Reload configuration without restarting the daemon. Invalid settings or a
+runtime apply failure return an error and leave the previous config generation
+visible. Remote transport replacement closes the old listener first and stays
+closed if the replacement fails; correct the setting and reload again through
+the local socket. See [remote hot reload]({{< relref "/docs/configuration/access.md#hot-reload-and-revocation" >}}).
 
 ## Other commands
 

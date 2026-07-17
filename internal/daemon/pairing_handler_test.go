@@ -32,7 +32,11 @@ func newRemoteConn(t *testing.T, sm *SessionManager, identity TailnetIdentity) *
 	go func() {
 		defer close(done)
 
-		HandleConnection(ctx, server, ConnOrigin{Remote: true, Identity: &identity}, sm, sm.log)
+		HandleConnection(ctx, server, ConnOrigin{
+			Remote:       true,
+			Identity:     &identity,
+			RemoteTLSPin: sm.RemoteTLSPin(),
+		}, sm, sm.log)
 	}()
 
 	t.Cleanup(func() {
@@ -89,6 +93,19 @@ func (rc *remoteConn) read(t *testing.T) protocol.Envelope {
 			}
 
 			return env
+		}
+	}
+}
+
+func (rc *remoteConn) readResult() (protocol.Envelope, error) {
+	for {
+		frame, err := rc.reader.ReadFrame()
+		if err != nil {
+			return protocol.Envelope{}, err
+		}
+
+		if frame.Channel == protocol.ChannelControl {
+			return protocol.DecodeControl(frame.Payload)
 		}
 	}
 }
@@ -203,7 +220,7 @@ func TestProofOfPossessionUnlocksRemoteHuman(t *testing.T) {
 
 	// Sign the challenge (bound to the daemon's TLS pin, issue #886) and present
 	// proof.
-	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, protocol.PoPSigningInput(ch.Nonce, sm.remoteTLSPin)))
+	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, protocol.PoPSigningInput(ch.Nonce, sm.RemoteTLSPin())))
 	rc.send(t, "auth_proof", protocol.AuthProofMsg{Signature: sig}, token)
 
 	if env := rc.read(t); env.Type != "auth_ok" {
@@ -215,6 +232,40 @@ func TestProofOfPossessionUnlocksRemoteHuman(t *testing.T) {
 
 	if env := rc.read(t); env.Type != "session_list" {
 		t.Fatalf("list after PoP: expected session_list, got %q", env.Type)
+	}
+}
+
+func TestProofOfPossessionUsesConnectionTLSGeneration(t *testing.T) {
+	sm := newPairingSM(t)
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
+
+	rid, _, _, err := sm.AddPendingPairing("bairn", base64.StdEncoding.EncodeToString(pub), id, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, token, err := sm.ApprovePairing(rid, false, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	connectionPin := sm.RemoteTLSPin()
+	rc := newRemoteConn(t, sm, id)
+	ch := rc.handshake(t, sm)
+
+	// Simulate publication of a different TLS generation after this connection
+	// was accepted. PoP must remain bound to the cert actually terminating this
+	// connection, never the mutable daemon-global pin.
+	sm.mu.Lock()
+	sm.remoteTLSPin = "canny-new-generation-pin"
+	sm.mu.Unlock()
+
+	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, protocol.PoPSigningInput(ch.Nonce, connectionPin)))
+	rc.send(t, "auth_proof", protocol.AuthProofMsg{Signature: sig}, token)
+
+	if env := rc.read(t); env.Type != "auth_ok" {
+		t.Fatalf("proof bound to connection generation = %q, want auth_ok", env.Type)
 	}
 }
 
@@ -441,7 +492,7 @@ func TestRemoteGuestReadOnlyEndToEnd(t *testing.T) {
 	rc := newRemoteConn(t, sm, id)
 	ch := rc.handshake(t, sm)
 
-	rc.send(t, "auth_proof", protocol.AuthProofMsg{Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(priv, protocol.PoPSigningInput(ch.Nonce, sm.remoteTLSPin)))}, token)
+	rc.send(t, "auth_proof", protocol.AuthProofMsg{Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(priv, protocol.PoPSigningInput(ch.Nonce, sm.RemoteTLSPin())))}, token)
 
 	if env := rc.read(t); env.Type != "auth_ok" {
 		t.Fatalf("expected auth_ok, got %q", env.Type)
@@ -482,7 +533,7 @@ func TestRevokeDropsLiveRemoteConnection(t *testing.T) {
 	rc := newRemoteConn(t, sm, id)
 	ch := rc.handshake(t, sm)
 
-	rc.send(t, "auth_proof", protocol.AuthProofMsg{Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(priv, protocol.PoPSigningInput(ch.Nonce, sm.remoteTLSPin)))}, token)
+	rc.send(t, "auth_proof", protocol.AuthProofMsg{Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(priv, protocol.PoPSigningInput(ch.Nonce, sm.RemoteTLSPin())))}, token)
 
 	if env := rc.read(t); env.Type != "auth_ok" {
 		t.Fatalf("expected auth_ok, got %q", env.Type)
@@ -496,4 +547,82 @@ func TestRevokeDropsLiveRemoteConnection(t *testing.T) {
 	if _, err := rc.reader.ReadFrame(); err == nil {
 		t.Error("expected the revoked connection to be force-closed (read should error)")
 	}
+}
+
+// TestRemoteAllowlistReloadRevokesAuthenticatedConnection is the #1316
+// regression for the startup allowlist snapshot. A connection that already
+// completed WhoIs and PoP must lose access on its very next message.
+func TestRemoteAllowlistReloadRevokesAuthenticatedConnection(t *testing.T) {
+	sm := newPairingSM(t)
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
+
+	rid, _, _, err := sm.AddPendingPairing("bairn", base64.StdEncoding.EncodeToString(pub), id, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, token, err := sm.ApprovePairing(rid, false, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rc := newRemoteConn(t, sm, id)
+	ch := rc.handshake(t, sm)
+	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, protocol.PoPSigningInput(ch.Nonce, sm.RemoteTLSPin())))
+	rc.send(t, "auth_proof", protocol.AuthProofMsg{Signature: sig}, token)
+
+	if env := rc.read(t); env.Type != "auth_ok" {
+		t.Fatalf("expected auth_ok, got %q", env.Type)
+	}
+
+	tightened := *sm.Config()
+	tightened.Remote = cloneRemoteConfig(sm.Config().Remote)
+
+	tightened.Remote.AllowTailnetUsers = []string{"canny@example.com"}
+	if err := sm.applyConfig(&tightened); err != nil {
+		t.Fatal(err)
+	}
+
+	rc.send(t, "list", struct{}{}, token)
+
+	env, err := rc.readResult()
+	if err != nil {
+		// A proactive/runtime close is also a valid immediate revocation.
+		return
+	}
+
+	if env.Type != "error" {
+		t.Fatalf("message after allowlist removal = %q, want error or closed connection", env.Type)
+	}
+}
+
+func TestRemoteAllowlistReloadExpansionAppliesToFutureConnections(t *testing.T) {
+	sm := newPairingSM(t)
+	denied := *sm.Config()
+	denied.Remote = cloneRemoteConfig(sm.Config().Remote)
+
+	denied.Remote.AllowTailnetUsers = []string{"canny@example.com"}
+	if err := sm.applyConfig(&denied); err != nil {
+		t.Fatal(err)
+	}
+
+	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
+	rcDenied := newRemoteConn(t, sm, id)
+	rcDenied.send(t, "handshake", protocol.HandshakeMsg{Version: protocol.Version, Profile: sm.paths.Profile}, "")
+
+	if env := rcDenied.read(t); env.Type != "error" {
+		t.Fatalf("future connection before expansion = %q, want error", env.Type)
+	}
+
+	expanded := denied
+	expanded.Remote = cloneRemoteConfig(denied.Remote)
+
+	expanded.Remote.AllowTailnetUsers = []string{"speir@example.com"}
+	if err := sm.applyConfig(&expanded); err != nil {
+		t.Fatal(err)
+	}
+
+	rcAllowed := newRemoteConn(t, sm, id)
+	rcAllowed.handshake(t, sm)
 }

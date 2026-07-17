@@ -130,6 +130,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			return // deferred cleanup handles attach/device/subscriber teardown
 		}
 
+		// Re-apply the live remote boundary to every frame, including attached
+		// input. A connection that passed WhoIs and PoP under an older config or
+		// listener generation must not retain authority after disablement,
+		// allowlist removal, or transport replacement.
+		if origin.Remote && !sm.remoteOriginAllowed(origin) {
+			sendControl("error", protocol.ErrorMsg{Message: "remote access revoked by current configuration"})
+
+			return
+		}
+
 		switch frame.Channel {
 		case protocol.ChannelControl:
 			msg, err := protocol.DecodeControl(frame.Payload)
@@ -233,7 +243,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				dev := sm.DeviceForToken(msg.Token)
 				sm.mu.RUnlock()
 
-				if dev == nil || challengeNonce == "" || !verifyPoP(dev.PubKey, challengeNonce, sm.remoteTLSPin, ap.Signature) ||
+				if dev == nil || challengeNonce == "" || !verifyPoP(dev.PubKey, challengeNonce, origin.RemoteTLSPin, ap.Signature) ||
 					(origin.Remote && !identityMatchesDevice(origin.Identity, dev)) {
 					sendControl("error", protocol.ErrorMsg{Message: "proof of possession failed"})
 					continue
@@ -970,6 +980,12 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			}
 
 		case protocol.ChannelData:
+			if origin.Remote && !sm.remoteDataAllowed(origin, poppedDeviceID) {
+				sendControl("error", protocol.ErrorMsg{Message: "not authorized to send remote input"})
+
+				continue
+			}
+
 			// Read-only attaches never inject input — drop the frame outright so a
 			// read-only observer cannot mutate the session even if a client fails to
 			// gate input locally (issue #31).

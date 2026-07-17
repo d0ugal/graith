@@ -101,6 +101,36 @@ func TestLoadOrCreateRemoteTLS(t *testing.T) {
 	}
 }
 
+func TestLoadOrCreateRemoteTLSReissuesHostnameWithStablePin(t *testing.T) {
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "remote.crt")
+	keyPath := filepath.Join(dir, "remote.key")
+	now := time.Now()
+
+	_, firstPin, err := loadOrCreateRemoteTLS(certPath, keyPath, "ben", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reissued, secondPin, err := loadOrCreateRemoteTLS(certPath, keyPath, "canny", now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if firstPin != secondPin {
+		t.Fatalf("SPKI pin changed on hostname reload: %q != %q", firstPin, secondPin)
+	}
+
+	leaf, err := x509.ParseCertificate(reissued.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(leaf.DNSNames) != 1 || leaf.DNSNames[0] != "canny" {
+		t.Fatalf("reissued DNS names = %v, want [canny]", leaf.DNSNames)
+	}
+}
+
 func TestLoadOrCreateRemoteTLSInitialWriteFailureRecoversNextStart(t *testing.T) {
 	for _, failName := range []string{"remote.key", "remote.crt"} {
 		t.Run(failName, func(t *testing.T) {

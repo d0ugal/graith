@@ -24,4 +24,13 @@ type ConnOrigin struct {
 	Remote bool
 	// Identity is the WhoIs result for remote connections; nil for local.
 	Identity *TailnetIdentity
+	// RemoteGeneration identifies the listener generation that accepted this
+	// connection. Production remote connections must match the daemon's active
+	// generation on every frame. Zero is reserved for injected handler tests and
+	// embedders that do not own a remote runtime controller.
+	RemoteGeneration uint64
+	// RemoteTLSPin is the SPKI pin of the TLS listener that accepted this
+	// connection. Proof-of-possession binds to this immutable per-connection
+	// value so a concurrent listener replacement cannot mix TLS generations.
+	RemoteTLSPin string
 }
