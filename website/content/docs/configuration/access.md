@@ -12,7 +12,7 @@ draft: false
 ```toml
 [orchestrator]
 enabled      = false    # enable the orchestrator session
-agent        = ""       # agent to run as orchestrator; empty inherits default_agent
+agent        = ""       # agent to run as orchestrator; empty inherits default_agent. A set value must name a configured agent (built-in or [agents.*]) or config load fails.
 model        = ""       # optional model override
 idle_timeout = "30m"    # auto-stop if idle
 prompt       = "..."    # orchestrator-specific system prompt

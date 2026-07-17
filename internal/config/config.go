@@ -4280,6 +4280,20 @@ func (c *Config) Validate() error {
 		))
 	}
 
+	// [orchestrator] agent: an explicit agent must name a configured agent
+	// (built-in or user-defined). By the time Validate runs in Load the built-in
+	// and user agents are already merged into c.Agents, so this checks the final
+	// resolved map — the same guarantee session-create relies on. An empty value
+	// is left alone: the orchestrator inherits default_agent (or "claude") at
+	// runtime via AgentName. Without this, a typo'd agent passes load and reload
+	// and only fails when the daemon first tries to create the orchestrator
+	// session, long after startup (#1305).
+	if name := c.Orchestrator.Agent; name != "" {
+		if _, ok := c.Agents[name]; !ok {
+			errs = append(errs, fmt.Errorf("orchestrator.agent %q: not a configured agent (define it under [agents.%s] or use a built-in agent)", name, name))
+		}
+	}
+
 	// [orchestrator.restart]: every configured duration must be a positive value
 	// so a crash-looping orchestrator can never be rescheduled with a zero or
 	// negative delay (a restart storm) or kept at the shortest retry by a
