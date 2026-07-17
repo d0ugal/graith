@@ -79,11 +79,12 @@ type prWatchState struct {
 }
 
 // newPRWatchState builds the watch bookkeeping. kickChanCap sizes the buffered
-// kick channel (config knob, default via config when <= 0).
+// kick channel and is resolved through the config accessor so direct callers
+// cannot bypass its safe allocation bound.
 func newPRWatchState(kickChanCap int) *prWatchState {
-	if kickChanCap <= 0 {
-		kickChanCap = (config.PRWatchConfig{}).KickChannelSize()
-	}
+	kickChanCap = (config.PRWatchConfig{Advanced: config.PRWatchAdvancedConfig{
+		KickChannelSize: kickChanCap,
+	}}).KickChannelSize()
 
 	return &prWatchState{
 		cursors:    make(map[string]*prWatchCursor),

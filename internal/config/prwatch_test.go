@@ -263,6 +263,35 @@ func TestPRWatchAdvancedParsing(t *testing.T) {
 	}
 }
 
+func TestPRWatchKickChannelSizeSafety(t *testing.T) {
+	t.Run("maximum accepted", func(t *testing.T) {
+		cfg := Default()
+		cfg.PRWatch.Advanced.KickChannelSize = PRWatchKickChannelSizeMax
+
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("Validate() rejected exact maximum: %v", err)
+		}
+
+		if got := cfg.PRWatch.KickChannelSize(); got != PRWatchKickChannelSizeMax {
+			t.Errorf("KickChannelSize() = %d, want maximum %d", got, PRWatchKickChannelSizeMax)
+		}
+	})
+
+	t.Run("maximum plus one rejected and capped", func(t *testing.T) {
+		cfg := Default()
+		cfg.PRWatch.Advanced.KickChannelSize = PRWatchKickChannelSizeMax + 1
+
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), "pr_watch.advanced.kick_channel_size") {
+			t.Fatalf("Validate() = %v, want field-specific maximum error", err)
+		}
+
+		if got := cfg.PRWatch.KickChannelSize(); got != PRWatchKickChannelSizeMax {
+			t.Errorf("defensive KickChannelSize() = %d, want cap %d", got, PRWatchKickChannelSizeMax)
+		}
+	})
+}
+
 // TestPRWatchTickerCadencesRejectNonPositive proves the two advanced cadences
 // that feed time.NewTicker fall back to their defaults for "0", "0s", and
 // negative durations, so a valid-parsing but non-positive config can never make

@@ -1918,6 +1918,16 @@ type PRWatchAdvancedConfig struct {
 	GHTimeout string `toml:"gh_timeout"`
 }
 
+const (
+	// PRWatchKickChannelSizeDefault absorbs a modest burst of git-ref events;
+	// timer polling remains the fallback when the best-effort channel is full.
+	PRWatchKickChannelSizeDefault = 64
+	// PRWatchKickChannelSizeMax bounds startup allocation for the channel. A
+	// 4096-entry buffer is ample for large fleets while keeping the allocation
+	// small and predictable even when configuration is untrusted.
+	PRWatchKickChannelSizeMax = 4096
+)
+
 // DefaultTrustedAssociations is the trusted author_association set used when
 // pr_watch.trusted_author_associations is unset. It is the "has write access to,
 // or is a member of the org that owns, the repo" tier; CONTRIBUTOR is excluded
@@ -2095,10 +2105,16 @@ func (p PRWatchConfig) KickCooldownDuration() time.Duration {
 	return positiveDurationOrDefault(p.Advanced.KickCooldown, 3*time.Second)
 }
 
-// KickChannelSize is the buffered kick-channel capacity. Default 64.
+// KickChannelSize is the buffered kick-channel capacity. Default 64, maximum
+// 4096. Directly constructed configs above the maximum are defensively capped;
+// loaded configs reject them during validation.
 func (p PRWatchConfig) KickChannelSize() int {
 	if p.Advanced.KickChannelSize <= 0 {
-		return 64
+		return PRWatchKickChannelSizeDefault
+	}
+
+	if p.Advanced.KickChannelSize > PRWatchKickChannelSizeMax {
+		return PRWatchKickChannelSizeMax
 	}
 
 	return p.Advanced.KickChannelSize
@@ -5017,6 +5033,14 @@ func (c *Config) Validate() error {
 		{"pr_watch.advanced.gh_timeout", c.PRWatch.Advanced.GHTimeout},
 	} {
 		validatePositiveDurationField(&errs, f.name, f.val)
+	}
+
+	if size := c.PRWatch.Advanced.KickChannelSize; size > PRWatchKickChannelSizeMax {
+		errs = append(errs, fmt.Errorf(
+			"pr_watch.advanced.kick_channel_size %d: must be at most %d",
+			size,
+			PRWatchKickChannelSizeMax,
+		))
 	}
 
 	// [orchestrator.restart]: every configured duration must be positive. In

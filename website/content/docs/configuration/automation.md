@@ -46,7 +46,7 @@ untrusted_author_prompt_rate   = 5        # max untrusted-author trust prompts t
 untrusted_author_prompt_window = "30m"    # rolling window for untrusted_author_prompt_rate
 max_prompted_authors           = 5000     # cap on the persisted set of already-surfaced untrusted authors
 kick_cooldown                  = "3s"     # min interval between git-ref-triggered polls of one session
-kick_channel_size              = 64       # buffered kick-channel capacity (a full channel drops the kick)
+kick_channel_size              = 64       # buffered kick-channel capacity (maximum 4096; a full channel drops the kick)
 kicked_no_pr_backoff           = "20s"    # short re-poll delay after a kicked poll finds no PR yet
 ref_reconcile_interval         = "2s"     # how often the git-ref watcher set is reconciled against sessions
 ref_debounce                   = "750ms"  # coalesce a burst of ref writes from one push/commit into one kick
@@ -58,6 +58,10 @@ The loop-lifetime knobs — `base_tick`, `kick_channel_size`, and
 takes effect on the next daemon restart. Reloading `ref_debounce` retimes
 existing ref watchers (including a pending debounce) immediately; the remaining
 settings are read on the next poll.
+
+`kick_channel_size` must not exceed `4096`; larger values are rejected before
+the daemon starts so a typo cannot request an unsafe channel allocation. Kicks
+remain best-effort at any capacity, with ordinary timer polling as the fallback.
 
 ### Near-instant detection
 
