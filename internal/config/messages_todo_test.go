@@ -155,6 +155,24 @@ func TestValidateMessagesLimits(t *testing.T) {
 		{"busy_timeout above ceiling", func(c *Config) {
 			c.Messages.BusyTimeout = "10m"
 		}, "at most"},
+		{"max_age empty passes", func(c *Config) {
+			c.Messages.MaxAge = ""
+		}, ""},
+		{"max_age explicit zero passes", func(c *Config) {
+			c.Messages.MaxAge = "0"
+		}, ""},
+		{"max_age valid day syntax passes", func(c *Config) {
+			c.Messages.MaxAge = "30d"
+		}, ""},
+		{"max_age whitespace-padded passes", func(c *Config) {
+			c.Messages.MaxAge = "12h "
+		}, ""},
+		{"max_age unparseable rejected", func(c *Config) {
+			c.Messages.MaxAge = "30x"
+		}, "messages.max_age"},
+		{"max_age negative rejected", func(c *Config) {
+			c.Messages.MaxAge = "-5m"
+		}, "messages.max_age"},
 	}
 
 	for _, c := range cases {

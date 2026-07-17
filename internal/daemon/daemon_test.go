@@ -2310,6 +2310,67 @@ func TestReloadConfigInvalidFile(t *testing.T) {
 	}
 }
 
+// TestReloadConfigRejectsInvalidMaxAge is the reload regression for issue #1321:
+// a non-empty invalid or negative messages.max_age must fail reload validation,
+// and the previous effective generation must be retained rather than swapped in
+// (a rejected reload never disables age-based cleanup).
+func TestReloadConfigRejectsInvalidMaxAge(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		value   string
+		wantErr string
+	}{
+		{"unparseable", "30x", "messages.max_age"},
+		{"negative", "-1h", "messages.max_age"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgPath := filepath.Join(dir, "config.toml")
+
+			// Start from a valid bounded-retention generation.
+			if err := os.WriteFile(cfgPath, []byte("[messages]\nmax_age = \"30d\"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			sm := newTestSessionManager(t)
+			sm.configFile = cfgPath
+
+			if err := sm.ReloadConfig(); err != nil {
+				t.Fatalf("initial ReloadConfig() error = %v", err)
+			}
+
+			sm.mu.RLock()
+			before := sm.cfg.Messages.MaxAge
+			sm.mu.RUnlock()
+
+			if before != "30d" {
+				t.Fatalf("setup: MaxAge = %q, want 30d", before)
+			}
+
+			// Rewrite with the bad value and reload; it must be rejected.
+			if err := os.WriteFile(cfgPath, []byte("[messages]\nmax_age = \""+tt.value+"\"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			err := sm.ReloadConfig()
+			assertErrContains(t, err, tt.wantErr)
+
+			// The previous generation must survive the failed reload.
+			sm.mu.RLock()
+			after := sm.cfg.Messages.MaxAge
+			sm.mu.RUnlock()
+
+			if after != "30d" {
+				t.Fatalf("after rejected reload MaxAge = %q, want retained 30d", after)
+			}
+
+			if got := sm.cfg.Messages.MaxAgeDuration(); got != 30*24*time.Hour {
+				t.Fatalf("after rejected reload MaxAgeDuration() = %v, want 720h", got)
+			}
+		})
+	}
+}
+
 func TestToSessionInfoMirror(t *testing.T) {
 	sess := SessionState{
 		ID:           "abc123",
@@ -4620,6 +4681,42 @@ func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 
 		if len(msgs) != 0 {
 			t.Fatalf("expected 0 messages after config change, got %d", len(msgs))
+		}
+	})
+
+	// Cleanup-path regression for issue #1321: a directly-constructed config that
+	// bypasses load validation and carries a garbage max_age must not delete
+	// everything. MaxAgeDuration falls back to 0 (retain forever), so cleanup is a
+	// no-op rather than selecting a negative — future-cutoff — window.
+	t.Run("invalid max_age retains messages", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+
+		ms, err := NewMsgStore(filepath.Join(t.TempDir(), "msg.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = ms.Close() }()
+
+		sm.SetMsgStore(ms)
+
+		if _, err := ms.Publish(PublishOpts{Stream: "blether", SenderID: "s1", SenderName: "agent", Body: "keep me"}); err != nil {
+			t.Fatal(err)
+		}
+
+		newCfg := *sm.cfg
+		newCfg.Messages.MaxPerStream = 0
+		newCfg.Messages.MaxAge = "30x" // unparseable; never reaches a validated config
+		sm.applyConfig(&newCfg)
+
+		sm.runMessageCleanupFromConfig()
+
+		msgs, err := ms.Read("blether", "", false, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(msgs) != 1 {
+			t.Fatalf("expected 1 message retained with invalid max_age, got %d", len(msgs))
 		}
 	})
 }

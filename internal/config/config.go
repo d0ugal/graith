@@ -2064,6 +2064,12 @@ type StatusBar struct {
 // either takes effect only on daemon restart. The conversation paging bounds
 // and the jail cap are read per-request, so they apply on reload.
 type Messages struct {
+	// MaxAge is the message-retention window: messages older than this are swept
+	// by the cleanup loop. An empty value or an explicit "0" is the documented
+	// "retain forever" sentinel (no age-based cleanup). A non-empty value is
+	// validated at load: an unparseable or negative duration is rejected so a typo
+	// cannot silently turn a bounded-retention deployment into keep-forever
+	// (issue #1321). Reloadable.
 	MaxAge       string `toml:"max_age"`
 	MaxPerStream int    `toml:"max_per_stream"`
 	// ConversationPageSize is the page size applied when a msg_conversation
@@ -2231,12 +2237,22 @@ func (g GCConfig) OrphanMinAgeDuration() time.Duration {
 	return parsed
 }
 
+// MaxAgeDuration returns the message-retention window. An empty value or an
+// explicit zero is the documented "retain forever" sentinel (returns 0, which
+// runMessageCleanupFromConfig treats as no age-based cleanup). Load/reload
+// validation rejects a non-empty unparseable or negative value; this accessor
+// keeps a defensive fallback to 0 (retain forever) for directly-constructed
+// configs so a garbage value can never turn into a negative window that would
+// otherwise select a future cutoff and delete everything.
 func (m Messages) MaxAgeDuration() time.Duration {
-	if m.MaxAge == "" {
+	if strings.TrimSpace(m.MaxAge) == "" {
 		return 0
 	}
 
-	d, _ := ParseDurationWithDays(m.MaxAge)
+	d, err := ParseDurationWithDays(m.MaxAge)
+	if err != nil || d < 0 {
+		return 0
+	}
 
 	return d
 }
@@ -2460,6 +2476,13 @@ func (t TodoConfig) BusyTimeoutDuration() time.Duration {
 
 func ParseDurationWithDays(s string) (time.Duration, error) {
 	var total time.Duration
+
+	// Trim once here — the shared parser is the single normalization point, so a
+	// whitespace-padded value such as "12h " parses identically wherever it is
+	// read. Without this, validation (which pre-trims) accepts the value while a
+	// direct accessor parses the untrimmed string, fails, and silently falls back
+	// to its zero/default (e.g. messages.max_age → 0 = retain forever) (#1321).
+	s = strings.TrimSpace(s)
 
 	if i := strings.Index(s, "d"); i > 0 {
 		var days int
@@ -3940,6 +3963,19 @@ func (c *Config) validateMessagesLimits() []error {
 	} {
 		if f.val > f.ceiling {
 			errs = append(errs, fmt.Errorf("%s %d: must be at most %d", f.name, f.val, f.ceiling))
+		}
+	}
+
+	// max_age retention (issue #1321): empty or an explicit zero is the intended
+	// "retain forever" sentinel and is accepted; a non-empty unparseable or
+	// negative value would silently disable age-based cleanup (MaxAgeDuration
+	// falls back to 0) and let messages and jailed comments accumulate forever,
+	// so it must fail loudly at load and reload.
+	if s := strings.TrimSpace(m.MaxAge); s != "" {
+		if d, err := ParseDurationWithDays(s); err != nil {
+			errs = append(errs, fmt.Errorf("messages.max_age %q: %w", s, err))
+		} else if d < 0 {
+			errs = append(errs, fmt.Errorf("messages.max_age %q: must not be negative (use \"\" or \"0\" to retain forever)", s))
 		}
 	}
 
