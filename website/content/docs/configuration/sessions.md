@@ -216,6 +216,8 @@ lsof      = "/usr/sbin/lsof"  # open-files listing binary (macOS FD sampling)
 
 A value may be a **bare command name** resolved on `PATH` (`"git"`, `"hub"`) or an **absolute/relative path** to a specific binary (`"/run/current-system/sw/bin/git"`). Only fields you set are validated at config load: an explicit path must exist and be executable, and a bare name must be found on `PATH`. Fields you leave unset keep the defaults above and are resolved lazily when first used, so the macOS-only `osascript` default is never an error on Linux.
 
+A **relative** path (for example `"./bin/git-wrapper"`) is resolved against the directory containing your `config.toml`, not against graith's working directory. graith runs these tools with the working directory set to a session's repository or worktree, so a relative path is normalized to an absolute one once at load; the same normalized path is used both to validate the override and to run it, so a wrapper that validates always executes from the same location.
+
 Only the executable is configurable. The subcommands graith runs (`git rev-parse`, `gh api …`) and sandbox backend flags stay fixed in code — this is not a general command-substitution hook.
 
 The same resolved tools are used by the daemon, the document store, and CLI paths such as `gr store` repo discovery, so an override applies everywhere graith runs that binary.

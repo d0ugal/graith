@@ -56,7 +56,7 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 	// sm.cfg, so they need no explicit re-apply). The resolver is process-global,
 	// so this runs outside sm.mu.
 	if old.Tools != newCfg.Tools {
-		tools.Configure(newCfg.Tools.Resolved())
+		tools.Configure(newCfg.Tools.Resolved(newCfg.SourceDir))
 		sm.log.Info("config changed", "key", "tools")
 	}
 
