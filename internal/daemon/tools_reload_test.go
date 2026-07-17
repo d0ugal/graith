@@ -29,7 +29,6 @@ func TestApplyConfigReinstallsToolResolver(t *testing.T) {
 	}
 
 	newCfg := config.Default()
-
 	newCfg.Tools.Git = fakeGit
 	_ = sm.applyConfig(newCfg)
 

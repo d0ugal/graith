@@ -324,9 +324,28 @@ func handlePairApprove(sm *SessionManager, auth authContext, send func(string, a
 		return
 	}
 
-	readOnly := !sm.Config().Remote.RequirePairing
+	// Keep approval and its returned SPKI pin on one applied remote generation.
+	// A replacement invalidates the pin before closing the old listener, so an
+	// uncoordinated approval could otherwise persist a device and return an empty
+	// pin while the replacement was in flight. Production serving daemons always
+	// install sm.remote; the nil case preserves direct/embedder test use.
+	sm.configReloadMu.Lock()
+
+	remoteCfg := sm.Config().Remote
+
+	tlsPin := sm.RemoteTLSPin()
+	if sm.remote != nil && tlsPin == "" {
+		sm.configReloadMu.Unlock()
+		send("error", protocol.ErrorMsg{Message: "remote listener is unavailable; retry pairing after reload completes"})
+
+		return
+	}
+
+	readOnly := !remoteCfg.RequirePairing
 
 	deviceID, token, err := sm.ApprovePairing(pa.RequestID, readOnly, time.Now())
+	sm.configReloadMu.Unlock()
+
 	if err != nil {
 		send("error", protocol.ErrorMsg{Message: err.Error()})
 
@@ -334,7 +353,7 @@ func handlePairApprove(sm *SessionManager, auth authContext, send func(string, a
 	}
 
 	log.Info("device paired", "device", deviceID, "read_only", readOnly)
-	send("pair_approved", protocol.PairResponseMsg{DeviceID: deviceID, ClientToken: token, DaemonProfile: sm.paths.Profile, TLSPinSPKI: sm.RemoteTLSPin()})
+	send("pair_approved", protocol.PairResponseMsg{DeviceID: deviceID, ClientToken: token, DaemonProfile: sm.paths.Profile, TLSPinSPKI: tlsPin})
 }
 
 // handlePairList lists pending and paired devices (local human only).

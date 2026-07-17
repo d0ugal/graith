@@ -2,7 +2,7 @@
 title: "Design Doc: Transactional Remote Runtime Reload"
 authors: Dougal Matthews
 created: 2026-07-17
-status: Accepted
+status: Implemented
 reviewers: (none yet)
 informed: (TBD)
 issue: https://github.com/d0ugal/graith/issues/1316
@@ -91,6 +91,12 @@ change reissues the self-signed certificate with the existing key, updating its
 name while preserving the SPKI pin. The tsnet server receives the configured
 advertised tags.
 
+An active tsnet generation has already consumed its auth key. If the unchanged
+auth-key path later becomes unreadable, policy-only and unrelated reloads keep
+that generation so revocation cannot be blocked by a spent credential. Any
+change that actually requires a new listener still reads the key strictly and
+fails closed if it is unavailable.
+
 Allowlist and pairing-policy edits do not need a listener replacement. The new
 policy is published atomically; the runtime then proactively closes connections
 whose resolved identity is no longer allowed. Independently, the handler checks
@@ -109,6 +115,11 @@ role. Switching it back to true restores full authority only for devices whose
 persisted record was originally approved for full access. Devices approved while
 pairing was disabled remain read-only and must be re-paired for full authority.
 This avoids turning a reload into an implicit privilege grant.
+
+Local pairing approval is serialized with generation replacement. It either
+returns the active generation's non-empty TLS pin or rejects the approval while
+remote access is fail-closed; it never persists a device against an invalidated
+generation.
 
 The config watcher callback returns an error. It logs success only after the
 runtime and config transaction succeeds; errors retain the previous published
