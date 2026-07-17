@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"context"
+
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -34,7 +36,7 @@ func handleScenarioStart(sm *SessionManager, auth authContext, send func(string,
 // handleScenarioStop stops all non-shared sessions in a scenario.
 //
 //nolint:dupl // shares the decode→log→authorize→call→respond shape with handleScenarioDelete but targets a distinct message/method; merging would obscure both.
-func handleScenarioStop(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
+func handleScenarioStop(ctx context.Context, sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
 	s, ok := decodePayload[protocol.ScenarioStopMsg](msg, send, "invalid scenario_stop message")
 	if !ok {
 		return
@@ -47,7 +49,7 @@ func handleScenarioStop(sm *SessionManager, auth authContext, send func(string, 
 		return
 	}
 
-	stopped, err := sm.StopScenario(s.Name)
+	stopped, err := sm.StopScenarioContext(ctx, s.Name)
 	if err != nil {
 		send("error", protocol.ErrorMsg{Message: err.Error()})
 	} else {
@@ -61,7 +63,7 @@ func handleScenarioStop(sm *SessionManager, auth authContext, send func(string, 
 // handleScenarioDelete deletes a scenario and all its owned sessions/worktrees.
 //
 //nolint:dupl // shares the decode→log→authorize→call→respond shape with handleScenarioStop but targets a distinct message/method; merging would obscure both.
-func handleScenarioDelete(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
+func handleScenarioDelete(ctx context.Context, sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
 	s, ok := decodePayload[protocol.ScenarioDeleteMsg](msg, send, "invalid scenario_delete message")
 	if !ok {
 		return
@@ -74,7 +76,7 @@ func handleScenarioDelete(sm *SessionManager, auth authContext, send func(string
 		return
 	}
 
-	deleted, err := sm.DeleteScenario(s.Name)
+	deleted, err := sm.DeleteScenarioContext(ctx, s.Name)
 	if err != nil {
 		send("error", protocol.ErrorMsg{Message: err.Error()})
 	} else {

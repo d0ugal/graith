@@ -246,6 +246,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	go sm.RunPRWatchLoop(ctx)
 	go sm.RunPurgeLoop(ctx)
 	go sm.RunTodoSweepLoop(ctx)
+	go sm.RunScenarioPolicyLoop(ctx)
 	go sm.RunTriggerLoop(ctx)
 	go sm.RunFileWatchLoop(ctx)
 	go sm.RunGCXTriggerLoop(ctx)

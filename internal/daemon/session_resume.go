@@ -192,7 +192,17 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 }
 
 func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecycleSummary string) (SessionState, error) {
-	return sm.resumeWithSummaryAndPrompt(id, rows, cols, lifecycleSummary, "")
+	return sm.resumeWithSummaryContext(context.Background(), id, rows, cols, lifecycleSummary)
+}
+
+func (sm *SessionManager) resumeWithSummaryContext(ctx context.Context, id string, rows, cols uint16, lifecycleSummary string) (SessionState, error) {
+	unlock, err := sm.lockSessionLaunchContext(ctx, id)
+	if err != nil {
+		return SessionState{}, err
+	}
+	defer unlock()
+
+	return sm.resumeWithSummaryAndPromptLocked(ctx, id, rows, cols, lifecycleSummary, "")
 }
 
 // resumeWithSummaryAndPrompt starts (or restarts) a session's agent in its
@@ -202,6 +212,13 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 // start (uses agent.Args, not resume_args) and clears FreshStart afterwards so
 // subsequent resumes use the new agent's native resume.
 func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint16, lifecycleSummary, seedPrompt string) (SessionState, error) {
+	unlock := sm.lockSessionLaunch(id)
+	defer unlock()
+
+	return sm.resumeWithSummaryAndPromptLocked(context.Background(), id, rows, cols, lifecycleSummary, seedPrompt)
+}
+
+func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, id string, rows, cols uint16, lifecycleSummary, seedPrompt string) (SessionState, error) {
 	// --- Pre-lock: discover GitHub username ---
 	sm.mu.RLock()
 	sessSnap, snapOk := sm.state.Sessions[id]
@@ -225,8 +242,8 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 
 	preUsername := cfgUsername
 	if preUsername == "" && snapRepoPath != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), usernameTimeout)
-		preUsername, _ = git.DiscoverGitHubUsername(ctx, snapRepoPath)
+		discoveryCtx, cancel := context.WithTimeout(ctx, usernameTimeout)
+		preUsername, _ = git.DiscoverGitHubUsername(discoveryCtx, snapRepoPath)
 
 		cancel()
 	}
@@ -405,6 +422,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	prevToken := sessState.Token
 	prevAgentSessionID := sessState.AgentSessionID
 	prevFreshStart := sessState.FreshStart
+	prevLaunchGeneration := sessState.LaunchGeneration
 
 	// For a forced-id agent (Claude), the resume command is decided by whether a
 	// conversation exists on disk for the captured id (see resolveForcedIDResume):
@@ -532,6 +550,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 			// rollback meaning "this attempt changed nothing".
 			s.AgentSessionID = prevAgentSessionID
 			s.FreshStart = prevFreshStart
+			s.LaunchGeneration = prevLaunchGeneration
 
 			delete(sm.tokenIndex, newToken)
 
@@ -836,10 +855,17 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	}
 
 	// Throttle concurrent launches (#1092); see Create for the slot lifecycle.
-	slot, err := sm.acquireLaunchSlot(context.Background(), id, sessName)
+	slot, err := sm.acquireLaunchSlot(ctx, id, sessName)
 	if err != nil {
 		rollbackState()
 		return SessionState{}, fmt.Errorf("acquire launch slot: %w", err)
+	}
+
+	if err := ctx.Err(); err != nil {
+		slot.release()
+		rollbackState()
+
+		return SessionState{}, fmt.Errorf("resume cancelled before process launch: %w", err)
 	}
 
 	// Pre-spawn time for native session-id capture (see Create).
@@ -885,6 +911,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	sessState = sm.state.Sessions[id]
 	sessState.Status = StatusRunning
 	sessState.StatusChangedAt = time.Now()
+	sessState.LaunchGeneration++
 	sessState.ExitCode = nil
 	sessState.ExitSignal = ""
 
@@ -960,6 +987,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		// Roll back the forced-id fresh fallback (minted id + FreshStart).
 		sessState.AgentSessionID = prevAgentSessionID
 		sessState.FreshStart = prevFreshStart
+		sessState.LaunchGeneration = prevLaunchGeneration
 
 		delete(sm.tokenIndex, newToken)
 

@@ -328,6 +328,130 @@ required = true
 	}
 }
 
+func TestParseScenarioFileRuntimePolicy(t *testing.T) {
+	data := []byte(`
+version = 1
+
+[scenario]
+name = "strath"
+
+[scenario.policy]
+completion = "quorum"
+quorum = 2
+on_exhausted = "fail"
+
+[[sessions]]
+name = "braw"
+repo = "/tmp/croft"
+task = "review"
+
+[sessions.policy]
+timeout = "30s"
+retries = 2
+
+[[sessions]]
+name = "canny"
+repo = "/tmp/bothy"
+task = "review"
+
+[sessions.policy]
+required = false
+timeout = "1m"
+`)
+
+	sf, err := parseScenarioFile(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if sf.Scenario.Policy == nil || sf.Scenario.Policy.Quorum != 2 || sf.Scenario.Policy.OnExhausted != "fail" {
+		t.Fatalf("scenario policy = %+v", sf.Scenario.Policy)
+	}
+
+	inputs, err := buildSessionInputs(sf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if inputs[0].Policy == nil || inputs[0].Policy.Timeout != "30s" || inputs[0].Policy.Retries != 2 {
+		t.Fatalf("required input policy = %+v", inputs[0].Policy)
+	}
+
+	if inputs[1].Policy == nil || inputs[1].Policy.Required == nil || *inputs[1].Policy.Required {
+		t.Fatalf("optional input policy = %+v", inputs[1].Policy)
+	}
+}
+
+func TestParseScenarioFileRejectsRuntimePolicy(t *testing.T) {
+	data := []byte(`
+version = 1
+[scenario]
+name = "strath"
+[scenario.policy]
+completion = "quorum"
+quorum = 3
+[[sessions]]
+name = "braw"
+repo = "/tmp/croft"
+`)
+
+	_, err := parseScenarioFile(data)
+	if err == nil || !strings.Contains(err.Error(), "exceeds member count") {
+		t.Fatalf("error = %v, want excessive quorum", err)
+	}
+}
+
+func TestParseScenarioFileRejectsPolicyWithoutResultContract(t *testing.T) {
+	data := []byte(`
+version = 1
+[scenario]
+name = "strath"
+[scenario.policy]
+completion = "all"
+[[sessions]]
+name = "braw"
+repo = "/tmp/croft"
+`)
+
+	_, err := parseScenarioFile(data)
+	if err == nil || !strings.Contains(err.Error(), "non-empty task") {
+		t.Fatalf("error = %v, want missing result contract", err)
+	}
+}
+
+func TestFormatScenarioPolicyStatus(t *testing.T) {
+	policy := &protocol.ScenarioPolicyInfo{
+		Completion: "quorum", Quorum: 2, OnExhausted: "fail", Paused: true,
+		Successful: 1, RequiredSuccessful: 1, RequiredTotal: 1,
+	}
+	if got := formatScenarioPolicySummary(policy); got != "quorum 2; 1 successful; required 1/1; on exhausted fail; paused" {
+		t.Fatalf("summary = %q", got)
+	}
+
+	if got := formatScenarioPolicyProgress(policy); got != "1/2 quorum; required 1/1" {
+		t.Fatalf("progress = %q", got)
+	}
+
+	required, attempt, deadline, result := formatScenarioMemberPolicy(&protocol.ScenarioMemberPolicyInfo{
+		Required: true, Attempt: 2, MaxAttempts: 3, Deadline: "2026-07-17T18:30:00Z",
+		ExhaustionReason: "attempt 2 timed out",
+	})
+
+	if required != "yes" || attempt != "2/3" || deadline != "2026-07-17T18:30:00Z" || result != "attempt 2 timed out" {
+		t.Fatalf("member status = %q %q %q %q", required, attempt, deadline, result)
+	}
+}
+
+func TestScenarioPolicyColumnsAppendToLegacyHumanOutput(t *testing.T) {
+	if !strings.HasPrefix(scenarioStatusTableHeader, "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tPROGRESS\tWAITING ON\tMIRROR\tRESULTS\tSHARED\t") {
+		t.Fatalf("status header moved legacy columns: %q", scenarioStatusTableHeader)
+	}
+
+	if !strings.HasPrefix(scenarioListTableHeader, "  NAME\tID\tSTATUS\tSESSIONS\tGOAL\t") {
+		t.Fatalf("list header moved legacy columns: %q", scenarioListTableHeader)
+	}
+}
+
 func TestParseScenarioFileErrors(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -22,6 +22,31 @@ var scenarioResultFormats = map[string]bool{
 	"json":     true,
 }
 
+// scenarioMemberContractProgress evaluates the durable completion contract for
+// one member. A member is tracked when it has assigned todo work or at least
+// one required declared result; success requires both sides to be complete.
+func scenarioMemberContractProgress(member ScenarioSession, progress [2]int) (tracked, complete bool) {
+	requiredResultsAvailable := true
+	requiredResults := 0
+
+	for _, result := range member.Results {
+		if !result.Required {
+			continue
+		}
+
+		requiredResults++
+
+		if result.Status != ScenarioResultAvailable {
+			requiredResultsAvailable = false
+		}
+	}
+
+	tracked = progress[1] > 0 || requiredResults > 0
+	todosComplete := progress[1] == 0 || progress[0] == progress[1]
+
+	return tracked, tracked && todosComplete && requiredResultsAvailable
+}
+
 // validateScenarioResultDeclarations validates every declaration before
 // scenario start performs repo/filesystem work. Synthetic unique IDs exercise
 // the same rendering and collision rules used for the final reserved IDs.

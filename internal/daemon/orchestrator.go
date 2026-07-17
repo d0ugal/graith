@@ -680,6 +680,9 @@ const (
 	StopReasonUser     = "user"
 	StopReasonShutdown = "shutdown"
 	StopReasonWatchdog = "watchdog"
+	// StopReasonScenarioTimeout attributes the stop half of an automatic
+	// scenario retry to its durable member deadline.
+	StopReasonScenarioTimeout = "scenario-timeout"
 	// StopReasonDelete labels a daemon-initiated kill that is part of a
 	// delete/purge teardown. It is used only for the "stopping session" audit
 	// line (issue #1104); a deleted session is removed from state, so its exit

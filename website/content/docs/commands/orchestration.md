@@ -33,11 +33,27 @@ disambiguate a shared member that participates in multiple scenarios.
 
 ### `gr scenario list`
 
-List all scenarios with their aggregate status.
+List all scenarios with aggregate status and quorum/required progress when a
+runtime policy is configured.
 
 ### `gr scenario stop <name>`
 
 Stop all running sessions in a scenario.
+
+For policy scenarios this suspends automatic actions without moving immutable
+deadlines. `gr scenario resume <name>` resumes members, unsuspends actions, and
+immediately reconciles elapsed deadlines.
+
+### `gr scenario add <name>`
+
+Add a member from the orchestrator. Alongside `--name`, `--repo`, `--agent`,
+`--model`, `--role`, `--task`, and `--base`, policy members accept:
+
+| Flag | Description |
+|------|-------------|
+| `--optional` | Do not require this member for completion |
+| `--timeout <duration>` | Immutable attempt timeout (minimum `1s`) |
+| `--retries <n>` | Additional timeout retries (`0`–`10`; requires timeout) |
 
 ### `gr scenario delete <name>`
 

@@ -1109,6 +1109,12 @@ func (s *TodoStore) ReopenStale(lease time.Duration) (int, error) {
 // because its cascade would otherwise delete protected work. Referenced chains
 // drain safely over later sweeps after their outgoing edges disappear.
 func (s *TodoStore) SweepDone(maxAge time.Duration) (int, error) {
+	return s.SweepDoneExceptScopes(maxAge, nil)
+}
+
+// SweepDoneExceptScopes is SweepDone with a set of scopes whose completed
+// items must remain available to a higher-level durable observer.
+func (s *TodoStore) SweepDoneExceptScopes(maxAge time.Duration, protectedScopes []string) (int, error) {
 	if maxAge <= 0 {
 		return 0, nil
 	}
@@ -1118,16 +1124,26 @@ func (s *TodoStore) SweepDone(maxAge time.Duration) (int, error) {
 
 	cutoff := s.now().Add(-maxAge).UTC().Format(time.RFC3339Nano)
 
-	res, err := s.db.Exec(
-		`DELETE FROM todos WHERE status = ? AND updated_at < ?
+	query := `DELETE FROM todos WHERE status = ? AND updated_at < ?
 		 AND id NOT IN (SELECT parent_id FROM todos WHERE parent_id IS NOT NULL AND status <> ?)
 		 AND id NOT IN (SELECT dependency_id FROM todo_dependencies)
 		 AND NOT EXISTS (
 			SELECT 1 FROM todos child
 			JOIN todo_dependencies dependency ON dependency.dependency_id = child.id
 			WHERE child.parent_id = todos.id
-		 )`,
-		TodoStatusDone, cutoff, TodoStatusDone)
+		 )`
+	args := []any{TodoStatusDone, cutoff, TodoStatusDone}
+
+	if len(protectedScopes) > 0 {
+		//nolint:gosec // only a counted sequence of SQL placeholders is generated; scope values remain bound arguments.
+		query += ` AND scope NOT IN (` + strings.TrimRight(strings.Repeat("?,", len(protectedScopes)), ",") + `)`
+
+		for _, scope := range protectedScopes {
+			args = append(args, scope)
+		}
+	}
+
+	res, err := s.db.Exec(query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("sweep done todos: %w", err)
 	}

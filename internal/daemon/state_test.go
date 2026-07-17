@@ -414,6 +414,68 @@ func TestMigrateV19ToV20ScenarioMirror(t *testing.T) {
 	}
 }
 
+func TestMigrateV18ThroughV21LaunchGenerationAndLegacyScenario(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	data := []byte(`{"version":18,"sessions":{"braw1":{"id":"braw1","name":"braw","status":"stopped"}},"scenarios":{"sc-strath":{"id":"sc-strath","name":"strath","session_ids":["braw1"],"sessions":[{"name":"braw"}]}}}`)
+	if err := writeFileAtomic(path, data); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := loaded.Sessions["braw1"].LaunchGeneration; got != 1 {
+		t.Errorf("LaunchGeneration = %d, want 1", got)
+	}
+
+	if loaded.Scenarios["sc-strath"].Policy != nil {
+		t.Fatal("legacy scenario unexpectedly opted into runtime policy")
+	}
+}
+
+func TestMigrateV19ToV20PreservesCompletionResultsAndLifecycle(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	data := []byte(`{
+		"version":19,
+		"sessions":{"braw1":{"id":"braw1","name":"braw","status":"stopped","launch_generation":7}},
+		"scenarios":{"sc-strath":{
+			"id":"sc-strath","name":"strath","session_ids":["braw1"],
+			"sessions":[{"name":"braw","results":[{"name":"review","format":"markdown","destination":"scenarios/sc-strath/results/review.md","required":true,"status":"available"}]}],
+			"lifecycle":{"cleanup":"on_success","delay":"5m"},
+			"completion":{"complete":true,"epoch":2,"actions":[{"name":"notify","state":"succeeded","attempt":1}]}
+		}}
+	}`)
+	if err := writeFileAtomic(path, data); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if loaded.Version != CurrentStateVersion || loaded.Sessions["braw1"].LaunchGeneration != 7 {
+		t.Fatalf("migrated state version/generation = %d/%d", loaded.Version, loaded.Sessions["braw1"].LaunchGeneration)
+	}
+
+	scenario := loaded.Scenarios["sc-strath"]
+	if scenario.Policy != nil || scenario.Lifecycle.Cleanup != "on_success" || scenario.Lifecycle.Delay != "5m" {
+		t.Fatalf("legacy scenario policy/lifecycle = %+v / %+v", scenario.Policy, scenario.Lifecycle)
+	}
+
+	if !scenario.Completion.Complete || scenario.Completion.Epoch != 2 || len(scenario.Completion.Actions) != 1 {
+		t.Fatalf("completion state changed during migration: %+v", scenario.Completion)
+	}
+
+	if got := scenario.Sessions[0].Results[0]; got.Status != ScenarioResultAvailable || !got.Required {
+		t.Fatalf("result contract changed during migration: %+v", got)
+	}
+}
+
 // TestLoadStatePromptedAuthorsRoundTrip asserts a populated prompted-authors set
 // survives a save/load cycle.
 func TestLoadStatePromptedAuthorsRoundTrip(t *testing.T) {

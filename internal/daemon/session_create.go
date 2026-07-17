@@ -515,7 +515,11 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, fmt.Errorf("expand agent args: %w", err)
 	}
 
-	driverKind, err := resolveDriverKind(opts.Headless, agent, cfgSnapshot.Headless, sandboxed)
+	driverKind := DriverPTY
+	if !opts.ForcePTY {
+		driverKind, err = resolveDriverKind(opts.Headless, agent, cfgSnapshot.Headless, sandboxed)
+	}
+
 	if err != nil {
 		cleanupOnError()
 		rollbackState()
@@ -878,6 +882,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	sessState.DriverKind = driverKind
 	sessState.Status = StatusRunning
 	sessState.StatusChangedAt = time.Now()
+	sessState.LaunchGeneration = 1
 
 	if opts.Starred {
 		sessState.Starred = true

@@ -149,11 +149,20 @@ version = 1
 name = "integration-tests"
 goal = "Build and test the integration between API and worker services"
 
+[scenario.policy]
+completion = "quorum"
+quorum = 2
+on_exhausted = "fail"
+
 [[sessions]]
 name = "api"
 repo = "~/Code/api"
 role = "API developer"
 task = "Add the batch processing endpoint with OpenTelemetry tracing"
+
+[sessions.policy]
+timeout = "45m"
+retries = 1
 
 [[sessions]]
 name = "worker"
@@ -161,12 +170,20 @@ repo = "~/Code/worker"
 role = "Worker developer"
 task = "Add the batch consumer with retry logic and dead-letter queue"
 
+[sessions.policy]
+timeout = "45m"
+retries = 1
+
 [[sessions]]
 name = "integration"
 repo = "~/Code/integration-tests"
 agent = "codex"
 role = "Test engineer"
 task = "Write integration tests for the batch processing pipeline"
+
+[sessions.policy]
+required = false
+timeout = "1h"
 ```
 
 From the orchestrator:

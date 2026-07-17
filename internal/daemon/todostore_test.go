@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -629,6 +630,36 @@ func TestTodoSweepDone(t *testing.T) {
 
 	if got, _ := s.SweepDone(0); got != 0 {
 		t.Errorf("disabled sweep removed %d", got)
+	}
+}
+
+func TestTodoSweepDoneProtectsActivePolicyScope(t *testing.T) {
+	s := newTestTodoStore(t)
+	base := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return base }
+
+	protected := mustAdd(t, s, "scenario:croft", "review croft")
+	unprotected := mustAdd(t, s, "scenario:bothy", "review bothy")
+	claimAndDone(t, s, protected.ID, "braw")
+	claimAndDone(t, s, unprotected.ID, "canny")
+
+	s.now = func() time.Time { return base.Add(48 * time.Hour) }
+
+	n, err := s.SweepDoneExceptScopes(24*time.Hour, []string{"scenario:croft"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if n != 1 {
+		t.Fatalf("swept %d items, want only the unprotected contract", n)
+	}
+
+	if _, err := s.Get(protected.ID); err != nil {
+		t.Fatalf("active-policy contract disappeared: %v", err)
+	}
+
+	if _, err := s.Get(unprotected.ID); !errors.Is(err, ErrTodoNotFound) {
+		t.Fatalf("unprotected contract survived: %v", err)
 	}
 }
 

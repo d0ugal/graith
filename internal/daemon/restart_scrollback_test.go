@@ -138,6 +138,10 @@ func TestRestartCapturesScrollback(t *testing.T) {
 		t.Fatalf("restarted status = %q, want %q", restarted.Status, StatusRunning)
 	}
 
+	if created.LaunchGeneration != 1 || restarted.LaunchGeneration != 2 {
+		t.Fatalf("launch generations create/restart = %d/%d, want 1/2", created.LaunchGeneration, restarted.LaunchGeneration)
+	}
+
 	// The live PTY's scrollback must capture output produced after restart.
 	waitForScrollback(t, sm, id, "RESUME-OUTPUT")
 
