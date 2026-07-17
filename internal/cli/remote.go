@@ -33,19 +33,11 @@ var remotePairCmd = &cobra.Command{
 	RunE: func(_ *cobra.Command, args []string) error {
 		host := args[0]
 
-		store, err := client.LoadRemoteHostStore(client.RemoteHostsPath(paths.DataDir))
+		// Establish or reload the canonical device key under the cross-process
+		// store lock. EnsureRemoteDeviceKey durably saves and releases that lock
+		// before the human/network pairing wait below begins (issue #1330).
+		_, pubB64, err := client.EnsureRemoteDeviceKey(client.RemoteHostsPath(paths.DataDir))
 		if err != nil {
-			return err
-		}
-
-		_, pubB64, err := store.EnsureDeviceKey()
-		if err != nil {
-			return err
-		}
-
-		// Persist the device key up front so an interrupted pairing (which can
-		// block for a while awaiting local approval) doesn't lose it.
-		if err := store.Save(); err != nil {
 			return err
 		}
 
@@ -61,9 +53,10 @@ var remotePairCmd = &cobra.Command{
 			return err
 		}
 
-		store.Put(rh)
-
-		if err := store.Save(); err != nil {
+		// Reload/mutate/save the paired host under the store lock so a concurrent
+		// pairing that landed during the wait above is merged, not clobbered, and
+		// the exact prior credential is restored on a save failure (issue #1330).
+		if err := client.PersistRemoteHost(client.RemoteHostsPath(paths.DataDir), rh); err != nil {
 			return err
 		}
 
