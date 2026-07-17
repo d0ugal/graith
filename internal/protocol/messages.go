@@ -1167,24 +1167,72 @@ type TodoResponse struct {
 
 // PairRequestMsg is sent by a client to request pairing with the daemon. The
 // client supplies a human-readable device label and its device public key.
+//
+// ReceiptAck is the receipt-protocol capability bit (issue #1299): a client that
+// sets it promises to answer the pair_response with a pair_ack, so the daemon can
+// commit the durable device only after acknowledged delivery. The daemon rejects
+// a pair_request without it, so a legacy client can never accept and store a
+// credential the daemon would then roll back.
 type PairRequestMsg struct {
 	DeviceLabel  string `json:"device_label"`
 	DevicePubKey string `json:"device_pub_key"`
+	ReceiptAck   bool   `json:"receipt_ack,omitempty"`
 }
 
 // PairResponseMsg is the daemon's response to a completed pairing. It returns
 // the assigned device ID, a client bearer token, the daemon profile to use, and
 // the TLS pin (SPKI) for certificate pinning.
+//
+// Under the receipt protocol (issue #1299) this is delivery, not commitment: the
+// device is not yet durably paired when this arrives. The client validates the
+// pin, replies pair_ack, and waits for pair_committed before treating the pairing
+// as complete.
 type PairResponseMsg struct {
+	RequestID     string `json:"request_id"`
 	DeviceID      string `json:"device_id"`
 	ClientToken   string `json:"client_token"`
 	DaemonProfile string `json:"daemon_profile"`
 	TLSPinSPKI    string `json:"tls_pin_spki"`
 }
 
+// PairAckMsg is the client's acknowledgement that it received, decoded,
+// TLS-pin-validated, and durably stored the pair_response credential (issue
+// #1299). It is sent on the same pairing connection; the daemon persists the
+// durable paired device only after this ack, closing the post-delivery TOCTOU
+// where a durable device could be stranded without its one-time token ever
+// reaching a live requester. Both RequestID and DeviceID are required and are
+// validated against the staged transaction (the connection itself is also
+// authoritative), so an ack for a different device cannot commit it.
+type PairAckMsg struct {
+	RequestID string `json:"request_id"`
+	DeviceID  string `json:"device_id"`
+}
+
+// PairCommittedMsg confirms that the daemon durably persisted the paired device
+// after the client's pair_ack (issue #1299). The client stores its credential
+// BEFORE acking; pair_committed is the daemon-side confirmation that both ends
+// are now durable. A client that has stored and acked but never sees this cannot
+// assume the daemon rolled back.
+type PairCommittedMsg struct {
+	RequestID string `json:"request_id"`
+	DeviceID  string `json:"device_id"`
+}
+
 // PairApproveMsg approves a pending pairing request by its request ID.
 type PairApproveMsg struct {
 	RequestID string `json:"request_id"`
+}
+
+// PairApprovalPendingMsg is a staged reply the daemon sends to the local
+// approving operator immediately, before it blocks awaiting the device's receipt
+// ack (issue #1299). It carries the daemon's TLS pin so `gr pair approve` can
+// print it right away: a device (e.g. the GUI) that withholds its pair_ack until
+// the human compares that pin would otherwise deadlock against an approval that
+// only prints the pin after commit. The final pair_approved/error follows once
+// the device acknowledges and the daemon commits.
+type PairApprovalPendingMsg struct {
+	RequestID  string `json:"request_id"`
+	TLSPinSPKI string `json:"tls_pin_spki"`
 }
 
 // PairListMsg requests the list of pending and paired devices.

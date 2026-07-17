@@ -116,9 +116,11 @@ func (rc *remoteConn) handshake(t *testing.T, sm *SessionManager) protocol.AuthC
 	return ch
 }
 
-// TestPairRequestDeliversTokenOnApproval covers the blocking pair_request flow:
-// a new remote device requests pairing, a local human approves it, and the
-// device receives the minted token over its held-open connection.
+// TestPairRequestDeliversTokenOnApproval covers the full receipt-protocol flow
+// (issue #1299): a new remote device requests pairing (advertising receipt
+// capability), a local human approves it, the device receives the minted token
+// over its held-open connection, acknowledges receipt with pair_ack, and only
+// then does the daemon durably commit the device and confirm with pair_committed.
 func TestPairRequestDeliversTokenOnApproval(t *testing.T) {
 	sm := newPairingSM(t)
 	pub, _, _ := ed25519.GenerateKey(nil)
@@ -127,10 +129,9 @@ func TestPairRequestDeliversTokenOnApproval(t *testing.T) {
 	rc := newRemoteConn(t, sm, TailnetIdentity{User: "speir@example.com", Node: "ben"})
 	rc.handshake(t, sm) // consumes handshake_ok + auth_challenge
 
-	rc.send(t, "pair_request", protocol.PairRequestMsg{DeviceLabel: "bairn", DevicePubKey: pubB64}, "")
+	rc.send(t, "pair_request", protocol.PairRequestMsg{DeviceLabel: "bairn", DevicePubKey: pubB64, ReceiptAck: true}, "")
 
-	// The handler is now blocked awaiting approval. Find the pending request and
-	// approve it locally, which delivers the credentials to the blocked conn.
+	// Find the pending request.
 	var rid string
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -148,10 +149,120 @@ func TestPairRequestDeliversTokenOnApproval(t *testing.T) {
 		t.Fatal("pending pairing never appeared")
 	}
 
-	wantDevice, wantToken, err := sm.ApprovePairing(rid, false, time.Now())
-	if err != nil {
+	// ApprovePairing blocks until the client acknowledges receipt, so run it in
+	// the background and complete the receipt handshake over the wire.
+	type result struct {
+		device string
+		token  string
+		err    error
+	}
+
+	done := make(chan result, 1)
+
+	go func() {
+		d, tok, err := sm.ApprovePairing(rid, false, time.Now())
+		done <- result{d, tok, err}
+	}()
+
+	// The device receives the credential over its held-open connection.
+	env := rc.read(t)
+	if env.Type != "pair_response" {
+		t.Fatalf("expected pair_response, got %q", env.Type)
+	}
+
+	var pr protocol.PairResponseMsg
+	if err := protocol.DecodePayload(env, &pr); err != nil {
 		t.Fatal(err)
 	}
+
+	if pr.RequestID != rid {
+		t.Errorf("pair_response request_id = %q, want %q", pr.RequestID, rid)
+	}
+
+	if pr.ClientToken == "" {
+		t.Error("pair_response carried an empty client token")
+	}
+
+	// The device is NOT durably committed yet — the daemon awaits the ack.
+	if d := sm.DeviceForToken(pr.ClientToken); d != nil {
+		t.Error("device was committed before the client acknowledged receipt")
+	}
+
+	// The local approve (ApprovePairing) must NOT have returned yet: it responds
+	// only after commit, which requires the ack we have not sent (issue #1299).
+	select {
+	case res := <-done:
+		t.Fatalf("ApprovePairing returned before the client acknowledged receipt: %+v", res)
+	default:
+	}
+
+	// Acknowledge receipt; the daemon then commits and confirms with pair_committed.
+	rc.send(t, "pair_ack", protocol.PairAckMsg{RequestID: pr.RequestID, DeviceID: pr.DeviceID}, "")
+
+	env = rc.read(t)
+	if env.Type != "pair_committed" {
+		t.Fatalf("expected pair_committed, got %q", env.Type)
+	}
+
+	var pc protocol.PairCommittedMsg
+	if err := protocol.DecodePayload(env, &pc); err != nil {
+		t.Fatal(err)
+	}
+
+	if pc.RequestID != rid || pc.DeviceID != pr.DeviceID {
+		t.Errorf("pair_committed = %+v, want request %q device %q", pc, rid, pr.DeviceID)
+	}
+
+	res := <-done
+	if res.err != nil {
+		t.Fatalf("ApprovePairing: %v", res.err)
+	}
+
+	if pr.DeviceID != res.device || pr.ClientToken != res.token {
+		t.Errorf("pair_response = {%s,%s}, want {%s,%s}", pr.DeviceID, pr.ClientToken, res.device, res.token)
+	}
+
+	// Durably committed only after the ack.
+	if d := sm.DeviceForToken(res.token); d == nil || d.ID != res.device {
+		t.Fatal("device not durably committed after pair_ack")
+	}
+}
+
+// TestPairAckWrongDeviceRejected guards that the daemon binds the acknowledged
+// device_id to the exact device it approved (issue #1299): a pair_ack carrying
+// the right request_id but a wrong device_id must not commit the device.
+func TestPairAckWrongDeviceRejected(t *testing.T) {
+	sm := newPairingSM(t)
+	pub, _, _ := ed25519.GenerateKey(nil)
+	pubB64 := base64.StdEncoding.EncodeToString(pub)
+
+	rc := newRemoteConn(t, sm, TailnetIdentity{User: "speir@example.com", Node: "ben"})
+	rc.handshake(t, sm)
+
+	rc.send(t, "pair_request", protocol.PairRequestMsg{DeviceLabel: "bairn", DevicePubKey: pubB64, ReceiptAck: true}, "")
+
+	var rid string
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if pending, _ := sm.ListPairings(); len(pending) == 1 {
+			rid = pending[0].RequestID
+			break
+		}
+
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if rid == "" {
+		t.Fatal("pending pairing never appeared")
+	}
+
+	done := make(chan error, 1)
+
+	go func() {
+		_, _, err := sm.ApprovePairing(rid, false, time.Now())
+		done <- err
+	}()
 
 	env := rc.read(t)
 	if env.Type != "pair_response" {
@@ -163,12 +274,105 @@ func TestPairRequestDeliversTokenOnApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if pr.DeviceID != wantDevice || pr.ClientToken != wantToken {
-		t.Errorf("pair_response = {%s,%s}, want {%s,%s}", pr.DeviceID, pr.ClientToken, wantDevice, wantToken)
+	// Correct request_id, wrong device_id.
+	rc.send(t, "pair_ack", protocol.PairAckMsg{RequestID: pr.RequestID, DeviceID: "wrong-device"}, "")
+
+	if err := <-done; err == nil {
+		t.Fatal("ApprovePairing must fail when the ack names a different device")
 	}
 
-	if pr.ClientToken == "" {
-		t.Error("pair_response carried an empty client token")
+	if _, paired := sm.ListPairings(); len(paired) != 0 {
+		t.Fatalf("device committed despite a wrong-device ack: %d paired", len(paired))
+	}
+}
+
+// TestPairAckRejectedBeforeResponse guards the ACK-routing gap (issue #1299): a
+// client cannot preload the receipt channel by sending a pair_ack with an empty
+// or wrong request_id after pair_request but before pair_response — the daemon
+// only discloses the request_id in pair_response, so a valid ack is impossible
+// until the credential has actually been delivered.
+func TestPairAckRejectedBeforeResponse(t *testing.T) {
+	sm := newPairingSM(t)
+	pub, _, _ := ed25519.GenerateKey(nil)
+	pubB64 := base64.StdEncoding.EncodeToString(pub)
+
+	rc := newRemoteConn(t, sm, TailnetIdentity{User: "speir@example.com", Node: "ben"})
+	rc.handshake(t, sm)
+
+	rc.send(t, "pair_request", protocol.PairRequestMsg{DeviceLabel: "bairn", DevicePubKey: pubB64, ReceiptAck: true}, "")
+
+	// An empty request_id is rejected: it must not preload the receipt channel.
+	rc.send(t, "pair_ack", protocol.PairAckMsg{}, "")
+	if env := rc.read(t); env.Type != "error" {
+		t.Fatalf("empty-request_id pair_ack before pair_response: expected error, got %q", env.Type)
+	}
+
+	// A guessed/wrong request_id is likewise rejected.
+	rc.send(t, "pair_ack", protocol.PairAckMsg{RequestID: "guessed-rid"}, "")
+	if env := rc.read(t); env.Type != "error" {
+		t.Fatalf("wrong-request_id pair_ack before pair_response: expected error, got %q", env.Type)
+	}
+
+	// The pending request is still awaiting approval — no premature commit.
+	if _, paired := sm.ListPairings(); len(paired) != 0 {
+		t.Fatalf("a device was committed from a preloaded ack: %d paired", len(paired))
+	}
+}
+
+// TestSecondPairRequestRejectedOnOneConnection guards the second ACK-routing gap
+// (issue #1299): a second pair_request on the same connection must be rejected
+// rather than overwriting the first request's receipt-routing state, which would
+// leave the first delivery goroutine unable to ever be acknowledged.
+func TestSecondPairRequestRejectedOnOneConnection(t *testing.T) {
+	sm := newPairingSM(t)
+	pub, _, _ := ed25519.GenerateKey(nil)
+	pubB64 := base64.StdEncoding.EncodeToString(pub)
+
+	rc := newRemoteConn(t, sm, TailnetIdentity{User: "speir@example.com", Node: "ben"})
+	rc.handshake(t, sm)
+
+	rc.send(t, "pair_request", protocol.PairRequestMsg{DeviceLabel: "bairn", DevicePubKey: pubB64, ReceiptAck: true}, "")
+
+	// Wait for the first request to register so the second is unambiguously a
+	// duplicate on the same connection.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if pending, _ := sm.ListPairings(); len(pending) == 1 {
+			break
+		}
+
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	rc.send(t, "pair_request", protocol.PairRequestMsg{DeviceLabel: "skelf", DevicePubKey: pubB64, ReceiptAck: true}, "")
+	if env := rc.read(t); env.Type != "error" {
+		t.Fatalf("second pair_request on one connection: expected error, got %q", env.Type)
+	}
+
+	// Only the first request exists.
+	if pending, _ := sm.ListPairings(); len(pending) != 1 {
+		t.Fatalf("expected exactly one pending pairing, got %d", len(pending))
+	}
+}
+
+// TestPairRequestRejectsLegacyClient guards that a client that does not advertise
+// the receipt capability is rejected up front (issue #1299), so it can never
+// accept and store a credential the daemon would later roll back.
+func TestPairRequestRejectsLegacyClient(t *testing.T) {
+	sm := newPairingSM(t)
+	pub, _, _ := ed25519.GenerateKey(nil)
+
+	rc := newRemoteConn(t, sm, TailnetIdentity{User: "speir@example.com", Node: "ben"})
+	rc.handshake(t, sm)
+
+	// No ReceiptAck: the legacy shape.
+	rc.send(t, "pair_request", protocol.PairRequestMsg{DeviceLabel: "bairn", DevicePubKey: base64.StdEncoding.EncodeToString(pub)}, "")
+	if env := rc.read(t); env.Type != "error" {
+		t.Fatalf("legacy pair_request without receipt_ack: expected error, got %q", env.Type)
+	}
+
+	if pending, _ := sm.ListPairings(); len(pending) != 0 {
+		t.Fatalf("a legacy pair_request should register no pending pairing, got %d", len(pending))
 	}
 }
 
@@ -181,12 +385,12 @@ func TestProofOfPossessionUnlocksRemoteHuman(t *testing.T) {
 	pubB64 := base64.StdEncoding.EncodeToString(pub)
 	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
 
-	rid, _, err := sm.AddPendingPairing("bairn", pubB64, id, time.Now())
+	rid, waiter, err := sm.AddPendingPairing("bairn", pubB64, id, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, token, err := sm.ApprovePairing(rid, false, time.Now())
+	_, token, err := approveWithReceipt(t, sm, waiter, rid, false, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -428,12 +632,12 @@ func TestRemoteGuestReadOnlyEndToEnd(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
 
-	rid, _, err := sm.AddPendingPairing("bairn", base64.StdEncoding.EncodeToString(pub), id, time.Now())
+	rid, waiter, err := sm.AddPendingPairing("bairn", base64.StdEncoding.EncodeToString(pub), id, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, token, err := sm.ApprovePairing(rid, true, time.Now()) // readOnly → guest
+	_, token, err := approveWithReceipt(t, sm, waiter, rid, true, time.Now()) // readOnly → guest
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,12 +673,12 @@ func TestRevokeDropsLiveRemoteConnection(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
 
-	rid, _, err := sm.AddPendingPairing("bairn", base64.StdEncoding.EncodeToString(pub), id, time.Now())
+	rid, waiter, err := sm.AddPendingPairing("bairn", base64.StdEncoding.EncodeToString(pub), id, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	deviceID, token, err := sm.ApprovePairing(rid, false, time.Now())
+	deviceID, token, err := approveWithReceipt(t, sm, waiter, rid, false, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

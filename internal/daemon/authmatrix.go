@@ -45,6 +45,7 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	// handler cases are added with the listener work; their policy is fixed here.
 	"handshake":    remotePreAuth,
 	"pair_request": remotePreAuth,
+	"pair_ack":     remotePreAuth, // receipt ack on the still-unpaired pairing lane (issue #1299)
 	"auth_proof":   remotePreAuth,
 
 	// Read-only / observational — the guest subset (design §B.4). Kept tight:

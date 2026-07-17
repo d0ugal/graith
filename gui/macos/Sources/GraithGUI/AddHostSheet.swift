@@ -177,13 +177,13 @@ struct AddHostSheet: View {
             .clipShape(RoundedRectangle(cornerRadius: 6))
 
             HStack(spacing: 12) {
-                Button("Reject") { pairing.rejectPairing() }
+                Button("Reject") { Task { await pairing.rejectPairing() } }
                     .buttonStyle(.plain)
                     .foregroundStyle(Theme.red)
                     .padding(.horizontal, 16).padding(.vertical, 8)
                     .background(Theme.surface0)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
-                Button("Confirm & Trust") { pairing.confirmPairing() }
+                Button("Confirm & Trust") { Task { await pairing.confirmPairing() } }
                     .buttonStyle(.plain)
                     .foregroundStyle(Theme.base)
                     .padding(.horizontal, 16).padding(.vertical, 8)

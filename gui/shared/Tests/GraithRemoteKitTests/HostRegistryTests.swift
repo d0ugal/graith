@@ -82,6 +82,75 @@ struct HostRegistryTests {
         #expect((try? store.string(for: "host.ghost.clientToken")) == nil)
     }
 
+    @Test func failedRepairOfExistingHostLeavesPriorStateExactlyIntact() throws {
+        // Re-pairing an existing paired host whose durable write then fails must
+        // leave the token, pin, device ID, profile, paired flag, and on-disk JSON
+        // exactly as they were before the attempt (issue #1299).
+        let store = InMemorySecretStore()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("graith-repair-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("hosts.json")
+        let local = Host.local(socketPath: "/tmp/bothy/graith.sock")
+        let registry = HostRegistry(keychain: store, localHost: local, storeURL: url)
+
+        registry.upsert(Host(id: "ben", label: "ben", kind: .remote, magicDNSName: "ben.tail.ts.net"))
+        let first = makePairResponse(requestID: "req-1", deviceID: "dev-1", clientToken: "tok-1",
+                                     daemonProfile: "profile-1", tlsPinSPKI: "cGluMQ==")
+        try registry.completePairing(hostID: "ben", response: first)
+
+        let priorJSON = try Data(contentsOf: url)
+
+        // Make the store directory unwritable so the second durable write fails at
+        // temp-file creation, before the existing hosts.json is touched.
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path) }
+
+        let repair = makePairResponse(requestID: "req-2", deviceID: "dev-2", clientToken: "tok-2",
+                                      daemonProfile: "profile-2", tlsPinSPKI: "cGluMg==")
+        #expect(throws: (any Error).self) {
+            try registry.completePairing(hostID: "ben", response: repair)
+        }
+
+        // In-memory metadata is exactly the prior pairing.
+        let host = try #require(registry.host(id: "ben"))
+        #expect(host.isPaired == true)
+        #expect(host.tlsPinSPKI == "cGluMQ==")
+        #expect(host.deviceID == "dev-1")
+        #expect(host.daemonProfile == "profile-1")
+        // The secret is the prior token, not the failed repair's.
+        #expect((try? store.string(for: "host.ben.clientToken")) == "tok-1")
+        // On-disk JSON is byte-for-byte the prior pairing.
+        #expect(try Data(contentsOf: url) == priorJSON)
+    }
+
+    @Test func failedExistingHostRepairRestoresSecretWhenSetThrows() throws {
+        // A SecretStore.set that applies its side effect then throws must still be
+        // rolled back to the exact prior token and metadata (issue #1299).
+        let store = ThrowOnceOnSetStore()
+        let (registry, _) = makeRegistry(store: store)
+
+        registry.upsert(Host(id: "ben", label: "ben", kind: .remote, magicDNSName: "ben.tail.ts.net"))
+        let first = makePairResponse(requestID: "req-1", deviceID: "dev-1", clientToken: "tok-1",
+                                     daemonProfile: "profile-1", tlsPinSPKI: "cGluMQ==")
+        try registry.completePairing(hostID: "ben", response: first)
+
+        store.armSetFailure()
+        let repair = makePairResponse(requestID: "req-2", deviceID: "dev-2", clientToken: "tok-2",
+                                      daemonProfile: "profile-2", tlsPinSPKI: "cGluMg==")
+        #expect(throws: (any Error).self) {
+            try registry.completePairing(hostID: "ben", response: repair)
+        }
+
+        // The prior token and metadata survive the partial-then-failed set.
+        #expect((try? store.string(for: "host.ben.clientToken")) == "tok-1")
+        let host = try #require(registry.host(id: "ben"))
+        #expect(host.tlsPinSPKI == "cGluMQ==")
+        #expect(host.deviceID == "dev-1")
+        #expect(host.daemonProfile == "profile-1")
+        #expect(host.isPaired == true)
+    }
+
     @Test func removeWipesToken() {
         let store = InMemorySecretStore()
         let (registry, _) = makeRegistry(store: store)

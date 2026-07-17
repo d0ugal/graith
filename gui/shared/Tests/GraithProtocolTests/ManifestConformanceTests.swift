@@ -194,6 +194,8 @@ private let swiftDecoders: [String: DecodeProbe] = [
     // Pairing + proof-of-possession.
     "PairRequestMsg": probe(PairRequestMsg.self),
     "PairResponseMsg": probe(PairResponseMsg.self),
+    "PairAckMsg": probe(PairAckMsg.self),
+    "PairCommittedMsg": probe(PairCommittedMsg.self),
     "PairApproveMsg": probe(PairApproveMsg.self),
     "PairListResponseMsg": probe(PairListResponseMsg.self),
     "PairPending": probe(PairPending.self),

@@ -326,7 +326,19 @@ func handlePairApprove(sm *SessionManager, auth authContext, send func(string, a
 
 	readOnly := !sm.Config().Remote.RequirePairing
 
-	deviceID, token, err := sm.ApprovePairing(pa.RequestID, readOnly, time.Now())
+	// Stage a "pending" reply carrying the TLS pin as soon as the approval
+	// transaction has passed its guards and handed the credential to the live
+	// requester, but before it blocks awaiting the device's receipt ack (issue
+	// #1299). This lets the operator compare the pin immediately: a device (e.g.
+	// the GUI) that withholds its pair_ack until the human confirms the pin would
+	// otherwise deadlock against an approval that only prints the pin after commit.
+	// It is invoked from inside ApprovePairing so an unknown/expired/disconnected
+	// request returns an error first, never a premature pin.
+	staged := func(tlsPin string) {
+		send("pair_approval_pending", protocol.PairApprovalPendingMsg{RequestID: pa.RequestID, TLSPinSPKI: tlsPin})
+	}
+
+	deviceID, token, err := sm.ApprovePairing(pa.RequestID, readOnly, time.Now(), staged)
 	if err != nil {
 		send("error", protocol.ErrorMsg{Message: err.Error()})
 
@@ -334,7 +346,7 @@ func handlePairApprove(sm *SessionManager, auth authContext, send func(string, a
 	}
 
 	log.Info("device paired", "device", deviceID, "read_only", readOnly)
-	send("pair_approved", protocol.PairResponseMsg{DeviceID: deviceID, ClientToken: token, DaemonProfile: sm.paths.Profile, TLSPinSPKI: sm.RemoteTLSPin()})
+	send("pair_approved", protocol.PairResponseMsg{RequestID: pa.RequestID, DeviceID: deviceID, ClientToken: token, DaemonProfile: sm.paths.Profile, TLSPinSPKI: sm.RemoteTLSPin()})
 }
 
 // handlePairList lists pending and paired devices (local human only).

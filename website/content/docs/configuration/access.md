@@ -89,4 +89,20 @@ A device enrolled while pairing was off remains read-only after pairing is
 re-enabled and must be paired again to gain read/write rights. Remote session
 tokens keep their normal session-scoped authorization.
 
+### Pairing completes only after the device confirms receipt
+
+Pairing is a two-way commit: the daemon persists a paired device **only after the
+requesting device acknowledges it received its one-time credential**. Approving a
+request with `gr pair approve <id>` prints the daemon's TLS SPKI pin right away
+and then waits for the device to confirm and store its credential before
+reporting `Device paired`. This means an interrupted pairing never leaves a
+durable device on the daemon that the requester never received a working token
+for (and vice versa — the requesting client stores its credential before
+acknowledging, so a crash mid-handshake cannot strand it either).
+
+The pairing client and the daemon must both understand this receipt handshake.
+A current `gr` (or GUI) still pairs with an older daemon that predates it, and a
+current daemon safely rejects an older client that cannot acknowledge receipt —
+so mixed-version fleets during an upgrade keep working.
+
 The orchestrator can also be given extra filesystem access scoped to itself via `[orchestrator.sandbox]` (`read_dirs`/`write_dirs`), layered on top of the global and per-agent sandbox config. See [Authentication & remote access]({{< relref "/docs/auth.md" >}}) for the full authorization model, token lifecycle, and pairing flow.

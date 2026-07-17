@@ -299,7 +299,7 @@ public final class NWByteStream: ByteStream, PinCapturingByteStream, @unchecked 
                     let trust = sec_trust_copy_ref(trustRef).takeRetainedValue()
                     if let pin = TLSPinning.leafSPKIBase64(trust) {
                         captureBox.set(pin)
-                        complete(true) // TOFU accept; binding confirmed in pairRequest
+                        complete(true) // TOFU accept; binding confirmed in beginPairing
                     } else {
                         complete(false) // can't extract SPKI → fail closed
                     }

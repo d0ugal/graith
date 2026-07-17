@@ -57,6 +57,24 @@ struct ControlAndMessageTests {
         #expect(object["repo_path"] as? String == "/croft")
     }
 
+    // Cross-version decode guards (issue #1299): the receipt fields must tolerate
+    // absence so a legacy daemon / required-fields-only probe still decodes.
+    @Test func pairRequestDecodesWithoutReceiptAck() throws {
+        let json = #"{"device_label":"ben","device_pub_key":"cHVi"}"#
+        let msg = try JSONDecoder().decode(PairRequestMsg.self, from: Data(json.utf8))
+        #expect(msg.receiptAck == false)
+        #expect(msg.deviceLabel == "ben")
+    }
+
+    @Test func pairResponseDecodesWithoutRequestID() throws {
+        // A legacy (pre-receipt) daemon omits request_id.
+        let json = #"{"device_id":"d","client_token":"t","daemon_profile":"","tls_pin_spki":"cGlu"}"#
+        let msg = try JSONDecoder().decode(PairResponseMsg.self, from: Data(json.utf8))
+        #expect(msg.requestID == "")
+        #expect(msg.deviceID == "d")
+        #expect(msg.clientToken == "t")
+    }
+
     @Test func sessionInfoIgnoresRetiredFieldsKeepsPRCI() throws {
         // cost_usd/context_percent are NOT on the wire model; a payload
         // carrying them must still decode (extra keys ignored). PR/CI decode.

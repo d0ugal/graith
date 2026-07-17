@@ -114,11 +114,11 @@ struct PairingView: View {
                 }
             }
             HStack {
-                Button(role: .destructive) { pairing.rejectPairing() } label: {
+                Button(role: .destructive) { Task { await pairing.rejectPairing() } } label: {
                     Text("Doesn't match")
                 }
                 Spacer()
-                Button { pairing.confirmPairing() } label: {
+                Button { Task { await pairing.confirmPairing() } } label: {
                     Text("Confirm & trust")
                 }
                 .buttonStyle(.borderedProminent)

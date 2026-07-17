@@ -408,8 +408,12 @@ struct ClientIntegrationTests {
             // Awaiting the local human's approval takes time — delay the reply.
             try await Task.sleep(nanoseconds: 40_000_000)
             try await daemon.writeControl("pair_response", PairResponseMsg(
-                deviceID: "dev-braw-1", clientToken: "tok-braw",
+                requestID: "req-braw", deviceID: "dev-braw-1", clientToken: "tok-braw",
                 daemonProfile: "", tlsPinSPKI: pin))
+            // Receipt protocol (issue #1299): read the client's pair_ack and confirm.
+            let ack = try await daemon.readControl()
+            #expect(ack.type == "pair_ack")
+            try await daemon.writeControl("pair_committed", PairCommittedMsg(requestID: "req-braw", deviceID: "dev-braw-1"))
         }
 
         let stream = clientStream
@@ -418,9 +422,11 @@ struct ClientIntegrationTests {
             profile: "", clientID: "app", token: nil, signer: signer,
             streamFactory: { _ in stream }
         )
-        let resp = try await client.pairRequest(deviceLabel: "bonnie-phone")
+        let (resp, conn) = try await client.beginPairing(deviceLabel: "bonnie-phone")
         #expect(resp.clientToken == "tok-braw")
         #expect(resp.deviceID == "dev-braw-1")
+        // Acknowledge + await the daemon's durable commit.
+        try await client.ackPairing(on: conn, response: resp)
         _ = await server.result
         await client.close()
     }
@@ -439,7 +445,7 @@ struct ClientIntegrationTests {
             _ = try await daemon.readControl()
             // Daemon reports a pin that does NOT match the presented cert.
             try await daemon.writeControl("pair_response", PairResponseMsg(
-                deviceID: "d", clientToken: "t", daemonProfile: "", tlsPinSPKI: "reported-scunner=="))
+                requestID: "req", deviceID: "d", clientToken: "t", daemonProfile: "", tlsPinSPKI: "reported-scunner=="))
         }
 
         let stream = clientStream
@@ -449,7 +455,7 @@ struct ClientIntegrationTests {
             streamFactory: { _ in stream }
         )
         await #expect(throws: ControlError.self) {
-            _ = try await client.pairRequest(deviceLabel: "dreich-phone")
+            _ = try await client.beginPairing(deviceLabel: "dreich-phone")
         }
         _ = await server.result
         await client.close()
@@ -468,7 +474,7 @@ struct ClientIntegrationTests {
             try await daemon.writeControl("auth_challenge", AuthChallengeMsg(nonce: "haar"))
             _ = try await daemon.readControl()
             try await daemon.writeControl("pair_response", PairResponseMsg(
-                deviceID: "d", clientToken: "t", daemonProfile: "", tlsPinSPKI: ""))
+                requestID: "req", deviceID: "d", clientToken: "t", daemonProfile: "", tlsPinSPKI: ""))
         }
 
         let stream = clientStream
@@ -478,7 +484,7 @@ struct ClientIntegrationTests {
             streamFactory: { _ in stream }
         )
         await #expect(throws: ControlError.self) {
-            _ = try await client.pairRequest(deviceLabel: "fash-phone")
+            _ = try await client.beginPairing(deviceLabel: "fash-phone")
         }
         _ = await server.result
         await client.close()

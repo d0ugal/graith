@@ -239,8 +239,10 @@ func TestSaveErrorsWhenDirIsAFile2(t *testing.T) {
 		t.Fatal("Save should error when the parent path is a file")
 	}
 
-	if !strings.Contains(err.Error(), "data dir") {
-		t.Errorf("expected a data-dir error, got %v", err)
+	// atomicfile surfaces the directory-creation failure; the exact wording is
+	// "create dir" but any dir error is acceptable here.
+	if !strings.Contains(err.Error(), "dir") {
+		t.Errorf("expected a directory error, got %v", err)
 	}
 }
 

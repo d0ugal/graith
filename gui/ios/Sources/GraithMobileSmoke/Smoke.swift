@@ -111,7 +111,7 @@ func testPairing() async throws {
     check(ok.spkiFingerprint != nil, "SPKI fingerprint surfaced for TOFU")
     check(registry.host(id: "brae")?.isPaired != true, "not marked paired before confirmation")
     // Confirming persists trust.
-    ok.confirmPairing()
+    await ok.confirmPairing()
     if case .paired = ok.phase { check(true, "confirming reaches .paired") }
     else { check(false, "confirming reaches .paired") }
     // Device ID is recorded per host on the entry, not on the shared identity (F4).

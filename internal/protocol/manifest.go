@@ -237,7 +237,10 @@ var registeredTypes = []any{
 	TodoResponse{},
 	PairRequestMsg{},
 	PairResponseMsg{},
+	PairAckMsg{},
+	PairCommittedMsg{},
 	PairApproveMsg{},
+	PairApprovalPendingMsg{},
 	PairListMsg{},
 	PairListResponseMsg{},
 	PairPending{},
@@ -344,15 +347,21 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"ApprovalSubscribeMsg":    {SwiftRequired, "ApprovalSubscribeMsg"},
 
 	// Pairing + proof-of-possession.
-	"PairRequestMsg":      {SwiftRequired, "PairRequestMsg"},
-	"PairResponseMsg":     {SwiftRequired, "PairResponseMsg"},
-	"PairApproveMsg":      {SwiftRequired, "PairApproveMsg"},
-	"PairListResponseMsg": {SwiftRequired, "PairListResponseMsg"},
-	"PairPending":         {SwiftRequired, "PairPending"},
-	"PairedDeviceInfo":    {SwiftRequired, "PairedDeviceInfo"},
-	"PairRevokeMsg":       {SwiftRequired, "PairRevokeMsg"},
-	"AuthChallengeMsg":    {SwiftRequired, "AuthChallengeMsg"},
-	"AuthProofMsg":        {SwiftRequired, "AuthProofMsg"},
+	"PairRequestMsg":   {SwiftRequired, "PairRequestMsg"},
+	"PairResponseMsg":  {SwiftRequired, "PairResponseMsg"},
+	"PairAckMsg":       {SwiftRequired, "PairAckMsg"},
+	"PairCommittedMsg": {SwiftRequired, "PairCommittedMsg"},
+	"PairApproveMsg":   {SwiftRequired, "PairApproveMsg"},
+	// PairApprovalPendingMsg is the staged reply to the local `gr pair approve`
+	// operator (issue #1299). Approval is a local-CLI human action, so the GUI
+	// does not model it yet.
+	"PairApprovalPendingMsg": {SwiftPlanned, ""},
+	"PairListResponseMsg":    {SwiftRequired, "PairListResponseMsg"},
+	"PairPending":            {SwiftRequired, "PairPending"},
+	"PairedDeviceInfo":       {SwiftRequired, "PairedDeviceInfo"},
+	"PairRevokeMsg":          {SwiftRequired, "PairRevokeMsg"},
+	"AuthChallengeMsg":       {SwiftRequired, "AuthChallengeMsg"},
+	"AuthProofMsg":           {SwiftRequired, "AuthProofMsg"},
 
 	// Remote-create repo picker.
 	"RepoListMsg":         {SwiftRequired, "RepoListMsg"},

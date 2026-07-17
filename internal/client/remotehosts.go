@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/d0ugal/graith/internal/atomicfile"
 )
 
 // RemoteHost is a paired remote graith daemon reachable over the tailnet
@@ -70,31 +72,23 @@ func LoadRemoteHostStore(path string) (*RemoteHostStore, error) {
 // Save writes the store atomically (temp file + rename) with 0600 perms, so a
 // crash mid-write can't corrupt the credential store or lose the device key,
 // and an existing file with looser perms is replaced by a 0600 one.
+// remoteHostsWrite is the durable write primitive Save uses. It is a package var
+// so tests can inject a post-rename failure (data already on disk, call errors).
+var remoteHostsWrite = atomicfile.Write
+
 func (s *RemoteHostStore) Save() error {
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return fmt.Errorf("create data dir: %w", err)
-	}
-
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-
-	// os.WriteFile only applies the mode on create; enforce 0600 explicitly in
-	// case the temp file pre-existed with looser perms.
-	if err := os.Chmod(tmp, 0o600); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-
-	if err := os.Rename(tmp, s.path); err != nil {
-		_ = os.Remove(tmp)
-		return err
+	// Use the crash-safe primitive: temp write + fsync + atomic rename + dir
+	// fsync. The receipt protocol treats a successful Save as the durable
+	// pre-pair_ack barrier (issue #1299), so an unsynced rename is not enough —
+	// a crash after rename but before the entry is flushed could otherwise lose
+	// the credential the daemon is about to commit against.
+	if err := remoteHostsWrite(s.path, data, 0o600); err != nil {
+		return fmt.Errorf("write remote hosts: %w", err)
 	}
 
 	return nil

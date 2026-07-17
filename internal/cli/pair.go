@@ -85,29 +85,61 @@ var pairApproveCmd = &cobra.Command{
 
 		_ = c.SendControl("pair_approve", protocol.PairApproveMsg{RequestID: args[0]})
 
-		resp, err := c.ReadControlResponse()
+		return runPairApproveLoop(c.ReadControlResponse, out.Printf)
+	},
+}
+
+// runPairApproveLoop reads the pair-approve reply sequence and prints operator
+// output. Extracted from the command so its cross-version display logic is unit
+// testable. read yields the next control reply; printf prints a line.
+//
+// A current daemon replies in two stages (issue #1299): pair_approval_pending
+// (carrying the TLS pin, so the operator can confirm it immediately while the
+// device decides), then the final pair_approved once the device acknowledges and
+// the daemon commits. A legacy (pre-receipt) daemon sends only the final
+// pair_approved (with the pin) — so the pin is printed there too when the staged
+// frame never arrived, or the operator would have nothing to compare.
+func runPairApproveLoop(read func() (protocol.Envelope, error), printf func(string, ...any)) error {
+	pinPrinted := false
+
+	for {
+		resp, err := read()
 		if err != nil {
 			return err
 		}
 
-		if resp.Type == "error" {
+		switch resp.Type {
+		case "pair_approval_pending":
+			var pp protocol.PairApprovalPendingMsg
+			if err := protocol.DecodePayload(resp, &pp); err != nil {
+				return err
+			}
+
+			if pp.TLSPinSPKI != "" {
+				printf("TLS SPKI pin: %s\n", pp.TLSPinSPKI)
+				pinPrinted = true
+			}
+
+			printf("Waiting for the device to confirm and store its credentials…\n")
+		case "pair_approved":
+			var pr protocol.PairResponseMsg
+			if err := protocol.DecodePayload(resp, &pr); err != nil {
+				return err
+			}
+
+			if !pinPrinted && pr.TLSPinSPKI != "" {
+				printf("TLS SPKI pin: %s\n", pr.TLSPinSPKI)
+			}
+
+			printf("Device paired: %s\n", pr.DeviceID)
+
+			return nil
+		case "error":
 			return controlError(resp)
+		default:
+			return fmt.Errorf("unexpected reply during pair approve: %s", resp.Type)
 		}
-
-		var pr protocol.PairResponseMsg
-		if err := protocol.DecodePayload(resp, &pr); err != nil {
-			return err
-		}
-
-		out.Printf("Device paired: %s\n", pr.DeviceID)
-		out.Printf("The device received its credentials over its pairing connection.\n")
-
-		if pr.TLSPinSPKI != "" {
-			out.Printf("TLS SPKI pin: %s\n", pr.TLSPinSPKI)
-		}
-
-		return nil
-	},
+	}
 }
 
 var pairRevokeCmd = &cobra.Command{

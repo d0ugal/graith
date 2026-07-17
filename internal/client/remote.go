@@ -214,20 +214,60 @@ func PairRemote(paths config.Paths, host string, port int, profile, deviceLabel,
 		return nil, fmt.Errorf("unexpected handshake response: %s", resp.Type)
 	}
 
-	// The daemon issues an auth_challenge to every remote connection; as an
-	// unpaired device we ignore it and proceed on the pairing lane.
-	if err := c.SendControl("pair_request", protocol.PairRequestMsg{DeviceLabel: deviceLabel, DevicePubKey: devicePubKey}); err != nil {
-		return nil, err
-	}
-
 	// Awaiting local human approval can legitimately take minutes; extend the
 	// deadline to just past the daemon's pending-pairing TTL.
 	_ = conn.SetDeadline(time.Now().Add(remotePairingTimeout))
 
-	// Block until approved. Skip the auth_challenge that arrives first.
+	return c.completePairing(host, port, deviceLabel, devicePubKey, capturedPin)
+}
+
+// completePairing runs the receipt-protocol pairing exchange (issue #1299) on an
+// already-handshaked connection: pair_request (advertising receipt capability) →
+// pair_response (validate the daemon's TLS pin) → durably store the credential →
+// pair_ack → pair_committed (validate it refers to this exact request/device).
+// capturedPin is the SPKI pin observed on the TLS handshake.
+//
+// The credential is stored BEFORE the ack, so a crash between the ack and the
+// caller's later save cannot leave the daemon paired with no client credential.
+// It therefore returns without error only on a confirmed commit, but on a
+// post-ack failure it deliberately RETAINS the stored credential (the daemon may
+// already be durable) and surfaces the error — commit-unknown, not rolled back.
+func (c *Client) completePairing(host string, port int, deviceLabel, devicePubKey, capturedPin string) (*RemoteHost, error) {
+	// The daemon issues an auth_challenge to every remote connection; as an
+	// unpaired device we ignore it and proceed on the pairing lane. ReceiptAck
+	// advertises that this client will acknowledge pair_response with pair_ack and
+	// wait for pair_committed; the daemon rejects a pair_request without it.
+	if err := c.SendControl("pair_request", protocol.PairRequestMsg{DeviceLabel: deviceLabel, DevicePubKey: devicePubKey, ReceiptAck: true}); err != nil {
+		return nil, err
+	}
+
+	// pending holds the validated credentials between pair_response (delivery) and
+	// pair_committed (durable commit).
+	var (
+		pending          *RemoteHost
+		pendingRequestID string
+		pendingDeviceID  string
+		stored           bool
+	)
+
+	// commitUnknown wraps any failure that happens AFTER the credential was stored
+	// and the ack was (attempted to be) sent. At that point no outcome proves the
+	// daemon did not commit, so the on-disk credential is deliberately retained and
+	// the outcome is surfaced as commit-status-unknown — the user must not assume a
+	// rollback and blindly re-pair (issue #1299).
+	commitUnknown := func(err error) error {
+		return fmt.Errorf("pairing commit status unknown (credential retained; do not assume it rolled back): %w", err)
+	}
+
+	// Block until the pairing completes. The sequence is: auth_challenge (ignored)
+	// → pair_response → durably store the credential → pair_ack → pair_committed.
 	for {
 		env, rerr := c.ReadControlResponse()
 		if rerr != nil {
+			if stored {
+				return nil, commitUnknown(rerr)
+			}
+
 			return nil, rerr
 		}
 
@@ -235,9 +275,21 @@ func PairRemote(paths config.Paths, host string, port int, profile, deviceLabel,
 		case "auth_challenge":
 			continue // pairing lane ignores PoP
 		case "pair_response":
+			// A second pair_response after we've already staged one is anomalous —
+			// refuse rather than re-acking or overwriting a pending credential.
+			if pending != nil {
+				return nil, errors.New("daemon sent a second pair_response")
+			}
+
 			var pr protocol.PairResponseMsg
 			if derr := protocol.DecodePayload(env, &pr); derr != nil {
 				return nil, derr
+			}
+
+			// device + token are always required; request_id is absent from a
+			// legacy (pre-receipt) daemon's response (handled below).
+			if pr.DeviceID == "" || pr.ClientToken == "" {
+				return nil, errors.New("daemon sent an incomplete pair_response (missing device/token)")
 			}
 
 			// Require the daemon to report its pin and confirm it matches the
@@ -251,17 +303,122 @@ func PairRemote(paths config.Paths, host string, port int, profile, deviceLabel,
 				return nil, fmt.Errorf("TLS pin mismatch: daemon reported %s but presented %s (possible MITM)", pr.TLSPinSPKI, capturedPin)
 			}
 
-			return &RemoteHost{Host: host, Port: port, Token: pr.ClientToken, TLSPin: capturedPin, Profile: pr.DaemonProfile}, nil
+			host := &RemoteHost{Host: host, Port: port, Token: pr.ClientToken, TLSPin: capturedPin, Profile: pr.DaemonProfile}
+
+			// Cross-version: a legacy (pre-receipt) daemon ignores receipt_ack,
+			// already committed the device durably during `gr pair approve`, and omits
+			// request_id. It understands neither pair_ack nor pair_committed — so
+			// store the credential and complete WITHOUT acking, rather than discarding
+			// the one-time token and stranding the device (issue #1299).
+			if pr.RequestID == "" {
+				if err := c.persistPairedHost(host); err != nil {
+					return nil, fmt.Errorf("persist paired host (legacy daemon): %w", err)
+				}
+
+				return host, nil
+			}
+
+			pending = host
+			pendingRequestID = pr.RequestID
+			pendingDeviceID = pr.DeviceID
+
+			// Durably store the credential BEFORE acking, so a crash or disconnect
+			// between pair_ack and the caller's later Save cannot leave the daemon
+			// paired with no client-side credential (issue #1299). The caller's
+			// subsequent Put/Save of the same host is harmless.
+			if err := c.persistPairedHost(pending); err != nil {
+				return nil, fmt.Errorf("persist paired host before acknowledging receipt: %w", err)
+			}
+
+			stored = true
+
+			// Acknowledge receipt so the daemon durably commits the device. The send
+			// itself is post-store: even a send error is ambiguous (bytes may have
+			// reached the daemon), so it is commit-unknown, not a rollback.
+			if err := c.SendControl("pair_ack", protocol.PairAckMsg{RequestID: pr.RequestID, DeviceID: pr.DeviceID}); err != nil {
+				return nil, commitUnknown(fmt.Errorf("acknowledge pairing receipt: %w", err))
+			}
+		case "pair_committed":
+			if pending == nil {
+				return nil, errors.New("daemon reported pairing committed before delivering credentials")
+			}
+
+			var pc protocol.PairCommittedMsg
+			if derr := protocol.DecodePayload(env, &pc); derr != nil {
+				return nil, commitUnknown(fmt.Errorf("malformed pair_committed: %w", derr))
+			}
+
+			// Confirm the commit refers to the credential we actually received, so a
+			// stale or mismatched commit frame can't complete the pairing. The
+			// already-stored credential is deliberately retained (the daemon may have
+			// committed the real device) — surface it as commit-unknown.
+			if pc.RequestID != pendingRequestID || pc.DeviceID != pendingDeviceID {
+				return nil, commitUnknown(fmt.Errorf("pair_committed mismatch: got request %q device %q, expected request %q device %q",
+					pc.RequestID, pc.DeviceID, pendingRequestID, pendingDeviceID))
+			}
+
+			return pending, nil
 		case "error":
 			var e protocol.ErrorMsg
 
 			_ = protocol.DecodePayload(env, &e)
 
+			// A daemon error AFTER we stored + acked is ambiguous (it may be a
+			// post-rename state-save failure that already landed the device on disk),
+			// so it is commit-unknown/retain; before store it is an ordinary failure.
+			if stored {
+				return nil, commitUnknown(fmt.Errorf("daemon error after ack: %s", e.Message))
+			}
+
 			return nil, fmt.Errorf("pairing failed: %s", e.Message)
 		default:
+			if stored {
+				return nil, commitUnknown(fmt.Errorf("unexpected reply after ack: %s", env.Type))
+			}
+
 			return nil, fmt.Errorf("unexpected reply during pairing: %s", env.Type)
 		}
 	}
+}
+
+// persistPairedHost durably writes the paired host to the client's remote-hosts
+// store before the receipt is acknowledged (issue #1299). It is transactional: a
+// failed write (e.g. a post-rename dir-fsync error that already landed the new,
+// not-yet-committable token on disk) must not destroy a previously-working
+// credential — so it snapshots the exact prior entry and, on any Save error,
+// durably restores it (surfacing a combined error if the restore also fails).
+func (c *Client) persistPairedHost(rh *RemoteHost) error {
+	store, err := LoadRemoteHostStore(RemoteHostsPath(c.paths.DataDir))
+	if err != nil {
+		return err
+	}
+
+	// Snapshot the exact prior entry by value, so restoring it can't be disturbed
+	// by the Put below.
+	prior, hadPrior := store.Get(rh.Host)
+
+	var priorCopy RemoteHost
+	if hadPrior {
+		priorCopy = *prior
+	}
+
+	store.Put(rh)
+
+	if saveErr := store.Save(); saveErr != nil {
+		if hadPrior {
+			store.Put(&priorCopy)
+		} else {
+			delete(store.Hosts, rh.Host)
+		}
+
+		if rbErr := store.Save(); rbErr != nil {
+			return fmt.Errorf("persist paired host before ack: %w; rollback also failed: %v", saveErr, rbErr)
+		}
+
+		return fmt.Errorf("persist paired host before ack: %w", saveErr)
+	}
+
+	return nil
 }
 
 // completeRemotePoP answers the daemon's auth_challenge with a signed auth_proof

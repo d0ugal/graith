@@ -76,6 +76,14 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 		// challengeNonce is the per-connection PoP nonce issued after a remote
 		// handshake; the client must sign it in auth_proof. Single-use.
 		challengeNonce string
+		// pairReceiptCh and pairRequestID bind this connection's in-flight pairing
+		// receipt (issue #1299): the pair_request delivery goroutine waits on
+		// pairReceiptCh, and the pair_ack handler case forwards the acknowledged
+		// device_id after matching the request_id. They are set when a pair_request
+		// is queued and are connection-scoped, so an ack is authoritatively tied to
+		// the requesting connection; the goroutine additionally binds the device_id.
+		pairReceiptCh chan string
+		pairRequestID string
 		// attachedAuth records the role that authorized the current attach. Data
 		// frames carry no token, so the live remote-policy backstop uses this to
 		// re-check write authority after a pairing-policy reload.
@@ -108,14 +116,22 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 		sm.RemoveApprovalSubscriber(conn)
 	}()
 
-	sendControl := func(msgType string, payload any) {
+	// sendControlErr encodes and writes a control frame, returning the write
+	// error. It is the delivery-confirming variant used by the pairing receipt
+	// protocol (issue #1299), where whether the frame reached the wire decides
+	// whether a durable device is committed.
+	sendControlErr := func(msgType string, payload any) error {
 		data, err := protocol.EncodeControl(msgType, payload)
 		if err != nil {
 			log.Error("encode control", "err", err)
-			return
+			return err
 		}
 
-		_ = writer.WriteFrame(protocol.ChannelControl, data)
+		return writer.WriteFrame(protocol.ChannelControl, data)
+	}
+
+	sendControl := func(msgType string, payload any) {
+		_ = sendControlErr(msgType, payload)
 	}
 
 	for {
@@ -269,6 +285,23 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
+				// One pairing per connection. A second pair_request would overwrite the
+				// receipt-routing state while the first delivery goroutine still waits
+				// on its captured channel, leaving the first request unacknowledgeable.
+				if pairReceiptCh != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "a pairing request is already in flight on this connection"})
+					continue
+				}
+
+				// Require the receipt-protocol capability bit (issue #1299). A legacy
+				// client that cannot acknowledge receipt is rejected up front, so it
+				// can never accept and store a credential the daemon would then roll
+				// back for lack of an ack.
+				if !pr.ReceiptAck {
+					sendControl("error", protocol.ErrorMsg{Message: "this daemon requires a pairing client that acknowledges credential receipt; upgrade the client (gr) to pair"})
+					continue
+				}
+
 				var identity TailnetIdentity
 				if origin.Identity != nil {
 					identity = *origin.Identity
@@ -280,6 +313,14 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
+				// Register the receipt-routing state for this connection BEFORE any
+				// pair_response can be delivered, so a fast pair_ack cannot race ahead
+				// of the staged transaction. Buffered (cap 1) so the ack never blocks
+				// the read loop.
+				receiptCh := make(chan string, 1)
+				pairReceiptCh = receiptCh
+				pairRequestID = rid
+
 				log.Info("pairing requested", "request_id", rid, "label", pr.DeviceLabel, "tailnet_user", identity.User)
 
 				go func() {
@@ -288,12 +329,50 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 					select {
 					case appr := <-waiter.approval:
-						sendControl("pair_response", protocol.PairResponseMsg{
+						// Deliver the credential and report whether the frame was
+						// actually written. ApprovePairing waits for this before it
+						// stages the operator's pin, so a request whose requester
+						// already vanished cannot emit a premature "pending".
+						werr := sendControlErr("pair_response", protocol.PairResponseMsg{
+							RequestID:     appr.RequestID,
 							DeviceID:      appr.DeviceID,
 							ClientToken:   appr.Token,
 							DaemonProfile: appr.Profile,
 							TLSPinSPKI:    appr.TLSPin,
 						})
+						appr.delivered <- werr
+
+						if werr != nil {
+							<-appr.committed // drain so ApprovePairing's send never leaks
+
+							return
+						}
+
+						// Await the client's pair_ack (routed here via receiptCh, which
+						// carries the acknowledged device_id), bounded by the request's
+						// immutable deadline or disconnect. Bind the ack to this exact
+						// device so an ack for a different device cannot commit it.
+						select {
+						case ackDeviceID := <-receiptCh:
+							if ackDeviceID != appr.DeviceID {
+								appr.receipt <- fmt.Errorf("pair_ack device_id %q does not match the approved device %q", ackDeviceID, appr.DeviceID)
+							} else {
+								appr.receipt <- nil
+							}
+						case <-timer.C:
+							appr.receipt <- fmt.Errorf("no pair_ack before deadline")
+						case <-connDone:
+							appr.receipt <- fmt.Errorf("requester disconnected before pair_ack")
+						}
+
+						// Learn whether the durable commit succeeded and tell the
+						// requester. A pair_committed write failure here does not undo
+						// the commit: receipt was already acknowledged.
+						if commitErr := <-appr.committed; commitErr == nil {
+							sendControl("pair_committed", protocol.PairCommittedMsg{RequestID: appr.RequestID, DeviceID: appr.DeviceID})
+						} else {
+							sendControl("error", protocol.ErrorMsg{Message: "pairing not committed: " + commitErr.Error()})
+						}
 					case <-timer.C:
 						sm.unregisterPairWaiter(rid)
 						sendControl("error", protocol.ErrorMsg{Message: "pairing request timed out"})
@@ -301,6 +380,33 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 						sm.unregisterPairWaiter(rid)
 					}
 				}()
+
+			case "pair_ack":
+				// The requester acknowledges receipt of pair_response (issue #1299).
+				// Route it to this connection's staged pairing transaction; the
+				// delivery goroutine is waiting on pairReceiptCh. Bind strictly to
+				// this connection and request so a stray ack cannot commit a device.
+				pa, ok := decodePayload[protocol.PairAckMsg](msg, sendControl, "invalid pair_ack")
+				if !ok {
+					continue
+				}
+
+				// Require a non-empty request_id that exactly matches this
+				// connection's in-flight pairing. An empty or mismatched id is
+				// rejected, so a client cannot preload the receipt channel with a
+				// bare pair_ack before it has actually received pair_response (which
+				// is the only place the request_id is disclosed).
+				if pairReceiptCh == nil || pa.RequestID == "" || pa.RequestID != pairRequestID {
+					sendControl("error", protocol.ErrorMsg{Message: "no matching pending pairing to acknowledge on this connection"})
+					continue
+				}
+
+				// Forward the acknowledged device_id; the delivery goroutine binds it
+				// to the exact device it approved before committing.
+				select {
+				case pairReceiptCh <- pa.DeviceID:
+				default: // already signalled; a duplicate ack is a no-op
+				}
 
 			case "pair_approve":
 				handlePairApprove(sm, auth, sendControl, msg, log)

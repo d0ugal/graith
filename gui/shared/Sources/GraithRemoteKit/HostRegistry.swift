@@ -9,10 +9,14 @@ import GraithProtocol
 /// The local host is always present and never removable. Only remote hosts are
 /// persisted to disk (the local host is re-seeded from the app at launch, so a
 /// changed socket path is never stale).
-public enum HostRegistryError: Error, Equatable {
+public enum HostRegistryError: Error {
     /// `completePairing` was called for a host that is not in the registry
     /// (its placeholder was removed before the pairing was confirmed).
     case unknownHost(String)
+    /// A durable pairing write failed AND the rollback to the prior state was not
+    /// fully clean. Carries the original write error plus any rollback errors, so
+    /// the caller does not silently believe a clean rollback occurred (issue #1299).
+    case pairingRollbackIncomplete(write: Error, rollback: [Error])
 }
 
 @MainActor
@@ -109,12 +113,50 @@ public final class HostRegistry: ObservableObject {
         guard let idx = hosts.firstIndex(where: { $0.id == hostID }) else {
             throw HostRegistryError.unknownHost(hostID)
         }
-        try keychain.set(response.clientToken, for: Self.tokenAccount(hostID))
-        hosts[idx].isPaired = true
-        hosts[idx].daemonProfile = response.daemonProfile
-        hosts[idx].tlsPinSPKI = response.tlsPinSPKI
-        hosts[idx].deviceID = response.deviceID
-        persist()
+        // Snapshot BOTH the metadata and the prior secret (or its absence) before
+        // any mutation, so a durable-write failure restores the exact prior state.
+        // The metadata write MUST succeed durably before we can honour the receipt
+        // protocol's pre-ACK store (issue #1299); on failure we roll back to the
+        // previous credential rather than deleting it — a re-pair of an existing
+        // host must not lose its working token. Invariant: token-present =>
+        // pin-present-&-durable.
+        let previousHost = hosts[idx]
+        // `try` (not `try?`): a snapshot READ failure must abort before we overwrite
+        // anything, so we never destroy a token we could not first capture. This is
+        // the only mutation-free step, so a failure here needs no rollback.
+        let previousToken = try keychain.string(for: Self.tokenAccount(hostID))
+
+        do {
+            // The secret write is inside the transaction: a set that fails after a
+            // partial side effect must still be rolled back to the exact prior state.
+            try keychain.set(response.clientToken, for: Self.tokenAccount(hostID))
+            hosts[idx].isPaired = true
+            hosts[idx].daemonProfile = response.daemonProfile
+            hosts[idx].tlsPinSPKI = response.tlsPinSPKI
+            hosts[idx].deviceID = response.deviceID
+            try persistThrowing()
+        } catch {
+            // Restore the exact prior in-memory metadata, secret, AND durable file.
+            hosts[idx] = previousHost
+            var rollbackErrors: [Error] = []
+            do {
+                if let previousToken {
+                    try keychain.set(previousToken, for: Self.tokenAccount(hostID))
+                } else {
+                    try keychain.remove(Self.tokenAccount(hostID))
+                }
+            } catch { rollbackErrors.append(error) }
+            do {
+                // Re-persist the restored old metadata so the on-disk JSON matches
+                // the rolled-back memory (the failed write may have left a partial).
+                try persistThrowing()
+            } catch { rollbackErrors.append(error) }
+
+            if rollbackErrors.isEmpty {
+                throw error // clean rollback; surface the original write failure
+            }
+            throw HostRegistryError.pairingRollbackIncomplete(write: error, rollback: rollbackErrors)
+        }
     }
 
     /// Update the last-seen timestamp for a host (display only).
@@ -145,18 +187,26 @@ public final class HostRegistry: ObservableObject {
         hosts = [localHost].compactMap { $0 } + remotes
     }
 
-    private func persist() {
+    /// persistThrowing writes the remote-host metadata durably, surfacing any I/O
+    /// error. Completion (pairing) uses this so the receipt ACK is only released
+    /// once the metadata is on disk (issue #1299); display-only mutations use the
+    /// swallowing `persist()` below.
+    private func persistThrowing() throws {
         // Only remote hosts are persisted — the local host is re-seeded at launch.
         let remotes = hosts.filter { $0.kind == .remote }
+        try FileManager.default.createDirectory(
+            at: storeURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let data = try encoder.encode(remotes)
+        try data.write(to: storeURL, options: .atomic)
+    }
+
+    private func persist() {
         do {
-            try FileManager.default.createDirectory(
-                at: storeURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            let data = try encoder.encode(remotes)
-            try data.write(to: storeURL, options: .atomic)
+            try persistThrowing()
         } catch {
-            // Non-fatal: the registry stays in memory for this session.
+            // Non-fatal for display-only mutations: the registry stays in memory.
             NSLog("HostRegistry persist failed: \(error)")
         }
     }

@@ -2048,12 +2048,74 @@
       ]
     },
     {
+      "name": "PairAckMsg",
+      "swift": "required",
+      "swift_type": "PairAckMsg",
+      "fields": [
+        {
+          "name": "request_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "device_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "PairApprovalPendingMsg",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "request_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "tls_pin_spki",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
       "name": "PairApproveMsg",
       "swift": "required",
       "swift_type": "PairApproveMsg",
       "fields": [
         {
           "name": "request_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "PairCommittedMsg",
+      "swift": "required",
+      "swift_type": "PairCommittedMsg",
+      "fields": [
+        {
+          "name": "request_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "device_id",
           "type": {
             "kind": "string"
           },
@@ -2156,6 +2218,13 @@
             "kind": "string"
           },
           "optional": false
+        },
+        {
+          "name": "receipt_ack",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
         }
       ]
     },
@@ -2164,6 +2233,13 @@
       "swift": "required",
       "swift_type": "PairResponseMsg",
       "fields": [
+        {
+          "name": "request_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
         {
           "name": "device_id",
           "type": {

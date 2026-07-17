@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -245,13 +244,13 @@ func TestExpirePendingPairingConfigurableTTL(t *testing.T) {
 	pub := testPubKey(t)
 	base := time.Now()
 
-	rid, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, base)
+	rid, waiter, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, base)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Still alive just before the configured TTL.
-	if _, _, err := sm.ApprovePairing(rid, false, base.Add(90*time.Second)); err != nil {
+	if _, _, err := approveWithReceipt(t, sm, waiter, rid, false, base.Add(90*time.Second)); err != nil {
 		t.Fatalf("pending should survive until the configured TTL: %v", err)
 	}
 
@@ -320,10 +319,16 @@ func TestPendingPairingTTLIsImmutableAcrossReload(t *testing.T) {
 				t.Fatalf("apply pairing TTL config: %v", err)
 			}
 
-			deviceID, token, err := sm.ApprovePairing(rid, false, base.Add(tt.approveAt))
 			if !tt.wantApprove {
+				// Past the original deadline: approval must fail before any delivery,
+				// so no receipt driving is needed.
+				deviceID, _, err := sm.ApprovePairing(rid, false, base.Add(tt.approveAt))
 				if err == nil {
 					t.Fatal("approval succeeded after the request's original deadline")
+				}
+
+				if deviceID != "" {
+					t.Fatal("expired approval returned a device")
 				}
 
 				if _, paired := sm.ListPairings(); len(paired) != 0 {
@@ -333,17 +338,19 @@ func TestPendingPairingTTLIsImmutableAcrossReload(t *testing.T) {
 				return
 			}
 
+			deviceID, token, err := approveWithReceipt(t, sm, waiter, rid, false, base.Add(tt.approveAt))
 			if err != nil {
 				t.Fatalf("approval before the original deadline: %v", err)
 			}
 
-			select {
-			case delivered := <-waiter.approval:
-				if delivered.DeviceID != deviceID || delivered.Token != token || token == "" {
-					t.Fatalf("delivered credentials = %+v, want device=%q token=%q", delivered, deviceID, token)
-				}
-			default:
-				t.Fatal("approved device was persisted without delivering its one-time token")
+			// The committed device resolves by its one-time token: delivery and
+			// durable commit both happened before the original deadline.
+			if token == "" {
+				t.Fatal("committed pairing returned an empty token")
+			}
+
+			if d := sm.DeviceForToken(token); d == nil || d.ID != deviceID {
+				t.Fatal("approved device was committed but does not resolve by its one-time token")
 			}
 		})
 	}
@@ -423,12 +430,12 @@ func TestApprovePairingAndResolveToken(t *testing.T) {
 	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
 	now := time.Now()
 
-	rid, _, err := sm.AddPendingPairing("bairn", pub, id, now)
+	rid, waiter, err := sm.AddPendingPairing("bairn", pub, id, now)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	deviceID, token, err := sm.ApprovePairing(rid, false, now)
+	deviceID, token, err := approveWithReceipt(t, sm, waiter, rid, false, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,9 +481,9 @@ func TestApprovePairingAndResolveToken(t *testing.T) {
 func TestApprovePairingReadOnly(t *testing.T) {
 	sm := newPairingSM(t)
 	now := time.Now()
-	rid, _, _ := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{}, now)
+	rid, waiter, _ := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{}, now)
 
-	_, token, err := sm.ApprovePairing(rid, true, now)
+	_, token, err := approveWithReceipt(t, sm, waiter, rid, true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,9 +496,9 @@ func TestApprovePairingReadOnly(t *testing.T) {
 func TestRevokeDeviceClosesLiveConnections(t *testing.T) {
 	sm := newPairingSM(t)
 	now := time.Now()
-	rid, _, _ := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{}, now)
+	rid, waiter, _ := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{}, now)
 
-	deviceID, token, err := sm.ApprovePairing(rid, false, now)
+	deviceID, token, err := approveWithReceipt(t, sm, waiter, rid, false, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -574,40 +581,6 @@ func TestApprovePairingRejectsExpired(t *testing.T) {
 
 	if pending, _ := sm.ListPairings(); len(pending) != 0 {
 		t.Errorf("expired pending should be gone, got %d", len(pending))
-	}
-}
-
-func TestApprovePairingSaveFailurePreservesPending(t *testing.T) {
-	sm := newPairingSM(t)
-	now := time.Now()
-
-	rid, _, err := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{User: "u", Node: "ben"}, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Force saveState to fail: point StateFile under a regular file so the write
-	// hits ENOTDIR.
-	blocker := filepath.Join(t.TempDir(), "blocker")
-	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	sm.paths.StateFile = filepath.Join(blocker, "state.json")
-
-	if _, _, err := sm.ApprovePairing(rid, false, now); err == nil {
-		t.Fatal("expected ApprovePairing to fail when saveState fails")
-	}
-
-	// The pending request must be restored so the device need not re-pair, and no
-	// half-approved device should linger.
-	pending, paired := sm.ListPairings()
-	if len(pending) != 1 || pending[0].RequestID != rid {
-		t.Errorf("pending not preserved on save failure: %+v", pending)
-	}
-
-	if len(paired) != 0 {
-		t.Errorf("no device should be persisted on save failure, got %d", len(paired))
 	}
 }
 

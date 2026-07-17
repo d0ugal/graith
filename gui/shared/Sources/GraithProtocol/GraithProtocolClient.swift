@@ -518,50 +518,115 @@ public actor GraithProtocolClient {
 
     // MARK: - Pairing (design §B.2)
 
-    /// Send a `pair_request` and await the `pair_response`.
+    /// Begin pairing: open a fresh (token-less) remote connection, send
+    /// `pair_request` (advertising receipt capability), and await + validate the
+    /// `pair_response`. The daemon surfaces a pending pairing to the local human;
+    /// this resolves once that human runs `gr pair approve` (or the daemon errors).
     ///
-    /// This opens a fresh (token-less) remote connection. The daemon surfaces a
-    /// pending pairing to the local human; this call resolves once that human
-    /// runs `gr pair approve` (or the daemon errors). On success the returned
-    /// token is adopted for subsequent connections.
-    ///
-    /// > Note: The daemon's `pair_request` handler is landing under Phase 1
-    /// > Task 6; the blocking-until-approved semantics assumed here must be
-    /// > reconciled once it lands (tracked in `gui/NEEDS-MAC-VALIDATION.md`).
-    public func pairRequest(deviceLabel: String) async throws -> PairResponseMsg {
+    /// The returned connection is left OPEN and delivery is NOT yet acknowledged:
+    /// under the receipt protocol (issue #1299) the caller must durably store the
+    /// credential and then call ``ackPairing(on:response:)`` to commit it, or
+    /// close the connection to abandon (which lets the daemon's uncommitted grant
+    /// expire). This keeps the connection alive across the human's TOFU
+    /// fingerprint confirmation without weakening the commit gate.
+    public func beginPairing(deviceLabel: String) async throws -> (response: PairResponseMsg, connection: GraithConnection) {
         guard let signer else {
             throw ControlError.malformed("pairing requires a DeviceKeySigner")
         }
         let conn = try await newConnection()
-        defer { Task { await conn.close() } }
         let pubKey = try signer.publicKeyBase64()
 
-        // The daemon issues an `auth_challenge` after `handshake_ok` on *every*
-        // remote connection. The token-less pairing lane skips proof-of-possession
-        // (a brand-new device has no daemon record yet), so that challenge is left
-        // buffered on the connection. Send `pair_request`, then consume replies
-        // until `pair_response` or `error`, skipping the `auth_challenge` — exactly
-        // as the Go client does (internal/client/remote.go). Awaiting local human
-        // approval can take minutes; that is bounded by the transport's own
-        // deadline, not here.
-        try await conn.send(control: "pair_request",
-                            payload: PairRequestMsg(deviceLabel: deviceLabel, devicePubKey: pubKey))
-        while true {
-            let reply = try await conn.nextControlReply()
-            switch reply.type {
-            case "auth_challenge":
-                continue // pairing lane ignores PoP
-            case "pair_response":
-                let resp = try decodePayload(reply, as: PairResponseMsg.self)
-                try await bindTOFUPin(reported: resp.tlsPinSPKI, on: conn)
-                token = resp.clientToken
-                return resp
-            case "error":
-                let e = try decodePayload(reply, as: ErrorMsg.self)
-                throw ControlError.daemon(e.message)
-            default:
-                throw ControlError.unexpectedReply(reply.type)
+        do {
+            // The daemon issues an `auth_challenge` after `handshake_ok` on *every*
+            // remote connection. The token-less pairing lane skips proof-of-possession
+            // (a brand-new device has no daemon record yet), so that challenge is left
+            // buffered on the connection. Send `pair_request`, then consume replies
+            // until `pair_response` or `error`, skipping the `auth_challenge`.
+            try await conn.send(control: "pair_request",
+                                payload: PairRequestMsg(deviceLabel: deviceLabel, devicePubKey: pubKey, receiptAck: true))
+            while true {
+                let reply = try await conn.nextControlReply()
+                switch reply.type {
+                case "auth_challenge":
+                    continue // pairing lane ignores PoP
+                case "pair_response":
+                    let resp = try decodePayload(reply, as: PairResponseMsg.self)
+                    // device + token are always required. request_id is absent from a
+                    // legacy (pre-receipt) daemon's response — that path is handled by
+                    // the session, which skips the ack (the old daemon already
+                    // committed and understands no receipt handshake).
+                    guard !resp.deviceID.isEmpty, !resp.clientToken.isEmpty else {
+                        throw ControlError.malformed("daemon sent an incomplete pair_response")
+                    }
+                    try await bindTOFUPin(reported: resp.tlsPinSPKI, on: conn)
+                    return (resp, conn)
+                case "error":
+                    let e = try decodePayload(reply, as: ErrorMsg.self)
+                    throw ControlError.daemon(e.message)
+                default:
+                    throw ControlError.unexpectedReply(reply.type)
+                }
             }
+        } catch {
+            await conn.close()
+            throw error
+        }
+    }
+
+    /// Acknowledge a delivered `pair_response` and await the daemon's
+    /// `pair_committed` on the same connection (issue #1299). Call ONLY after the
+    /// credential has been durably stored client-side. Closes `conn` before
+    /// returning (success or terminal error).
+    ///
+    /// Throws ``PairingError`` on any non-confirmation. Once the ack is on the
+    /// wire no outcome proves the daemon did not commit, so every failure is
+    /// commit-unknown (`.commitMismatch` / `.commitUnknown`) and the caller MUST
+    /// retain the stored credential — there is deliberately no "safe to discard"
+    /// path here.
+    public func ackPairing(on conn: GraithConnection, response: PairResponseMsg) async throws {
+        do {
+            try await conn.send(control: "pair_ack",
+                                payload: PairAckMsg(requestID: response.requestID, deviceID: response.deviceID))
+        } catch {
+            // A send error is ambiguous: the bytes may already have reached the
+            // daemon, which could then commit. Treat it as commit-unknown (retain),
+            // never a clean rollback.
+            await conn.close()
+            throw PairingError.commitUnknown(error)
+        }
+
+        // From here the ack is on the wire. The ONLY outcome that confirms the
+        // commit is a matching pair_committed; every other outcome — a daemon
+        // `error` reply (which may be an atomic-write failure that already landed
+        // the device on disk), a dropped connection, a malformed reply, or an
+        // unexpected frame — is commit-unknown, so the caller retains its
+        // durably-stored credential (issue #1299).
+        do {
+            while true {
+                let reply = try await conn.nextControlReply()
+                switch reply.type {
+                case "pair_committed":
+                    let pc = try decodePayload(reply, as: PairCommittedMsg.self)
+                    guard pc.requestID == response.requestID, pc.deviceID == response.deviceID else {
+                        throw PairingError.commitMismatch
+                    }
+                    await conn.close()
+                    return
+                case "error":
+                    let e = try decodePayload(reply, as: ErrorMsg.self)
+                    throw PairingError.commitUnknown(ControlError.daemon(e.message))
+                default:
+                    throw PairingError.commitUnknown(ControlError.unexpectedReply(reply.type))
+                }
+            }
+        } catch let err as PairingError {
+            await conn.close()
+            throw err
+        } catch {
+            // A read/transport/decode failure after the ack leaves the commit
+            // status unknown. Surface it so the caller retains its stored credential.
+            await conn.close()
+            throw PairingError.commitUnknown(error)
         }
     }
 

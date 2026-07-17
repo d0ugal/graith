@@ -91,15 +91,36 @@ type pendingPairing struct {
 	ExpiresAt   time.Time
 }
 
-// pairApproval is delivered to a blocked pair_request connection when its
-// pending request is approved locally, carrying the minted credentials so the
-// device receives its client token over the connection it is already holding
-// open (design §B.2 step 3).
+// pairApproval is handed to a blocked pair_request connection's delivery
+// goroutine when its pending request is approved locally, carrying the minted
+// credentials so the device receives its client token over the connection it is
+// already holding open (design §B.2 step 3).
+//
+// It also carries the receipt handshake channels for the #1299 commit protocol:
+// the delivery goroutine delivers pair_response, awaits the client's pair_ack,
+// and reports the outcome on receipt; ApprovePairing then durably commits (or
+// not) and reports the commit outcome on committed, which the goroutine uses to
+// emit pair_committed. Both channels are buffered (cap 1) so neither side blocks.
 type pairApproval struct {
-	DeviceID string
-	Token    string
-	Profile  string
-	TLSPin   string
+	RequestID string
+	DeviceID  string
+	Token     string
+	Profile   string
+	TLSPin    string
+
+	// delivered: delivery goroutine → ApprovePairing. nil once pair_response has
+	// actually been written to the live requester; non-nil on a write failure. It
+	// is never sent if the goroutine exited (timeout/disconnect) before reading the
+	// approval — the buffered approval handoff alone does NOT prove delivery, so
+	// ApprovePairing must confirm this before staging the local pin (issue #1299).
+	delivered chan error
+	// receipt: delivery goroutine → ApprovePairing. nil once the live requester
+	// acknowledged receipt of pair_response; non-nil on requester disconnect or
+	// receipt timeout.
+	receipt chan error
+	// committed: ApprovePairing → delivery goroutine. nil once the durable device
+	// is persisted; non-nil when the transaction was abandoned (no device saved).
+	committed chan error
 }
 
 // pairWaiter binds the credential delivery channel to the same immutable
@@ -226,13 +247,31 @@ func (sm *SessionManager) AddPendingPairing(label, pubKey string, id TailnetIden
 	return rid, waiter, nil
 }
 
-// ApprovePairing approves a pending pairing, minting and persisting a new paired
-// device. readOnly marks a device paired while require_pairing=false (maps to
-// roleRemoteGuest). It returns the device ID and the one-time client token (only
-// returned here; only its HMAC is stored). now is passed for testability.
-func (sm *SessionManager) ApprovePairing(requestID string, readOnly bool, now time.Time) (deviceID, clientToken string, err error) {
+// ApprovePairing approves a pending pairing and durably commits a new paired
+// device, but only after the live requester acknowledges receipt of its one-time
+// credential (issue #1299). readOnly marks a device paired while
+// require_pairing=false (maps to roleRemoteGuest). It returns the device ID and
+// the one-time client token (only returned here; only its HMAC is stored). now is
+// passed for testability.
+//
+// The commit is a transaction: credentials are minted and staged in memory under
+// sm.mu, delivered to the waiting pair_request goroutine, and durably persisted
+// only after that goroutine reports the requester acknowledged receipt. The wait
+// for the ack and durable save runs OFF sm.mu (the session-manager lock is never
+// held across the receipt round-trip). On disconnect, send failure, or receipt
+// timeout, nothing is persisted. A saveState failure rolls back the in-memory
+// device and token index, but is NOT proof nothing reached disk (atomicfile can
+// fail after the rename) — see the save-failure branch: the durable outcome is
+// commit-unknown, which is why the client retains its credential.
+//
+// staged, if provided, is invoked exactly once with the daemon TLS pin AFTER all
+// guards pass and the credential has been handed to the live waiter, but BEFORE
+// the receipt wait. The local approve handler uses it to emit a staged
+// "pending" reply carrying the pin, so an invalid/expired/disconnected request
+// (which returns before staged runs) yields only an error, never a misleading
+// pin + "waiting" (issue #1299).
+func (sm *SessionManager) ApprovePairing(requestID string, readOnly bool, now time.Time, staged ...func(tlsPin string)) (deviceID, clientToken string, err error) {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
 
 	// Enforce the pending TTL here too, not only opportunistically on add, so an
 	// expired request can never be approved.
@@ -240,47 +279,49 @@ func (sm *SessionManager) ApprovePairing(requestID string, readOnly bool, now ti
 
 	p, ok := sm.pendingPairings[requestID]
 	if !ok {
+		sm.mu.Unlock()
 		return "", "", fmt.Errorf("no pending pairing with id %q (unknown or expired)", requestID)
 	}
 
 	waiter, ok := sm.pairWaiters[requestID]
 	if !ok {
-		// Pairing credentials are one-time delivery material. Refuse to persist a
-		// device after its requesting connection has gone away: there would be no
-		// live recipient for the unhashed token and the device would be stranded.
+		// Pairing credentials are one-time delivery material. Refuse to proceed
+		// after the requesting connection has gone away: there would be no live
+		// recipient for the unhashed token.
 		delete(sm.pendingPairings, requestID)
+		sm.mu.Unlock()
+
 		return "", "", fmt.Errorf("pairing request %q no longer has a live requester", requestID)
 	}
 
-	if waiter.disconnected != nil {
-		select {
-		case <-waiter.disconnected:
-			delete(sm.pairWaiters, requestID)
-			delete(sm.pendingPairings, requestID)
+	if disconnectedNow(waiter.disconnected) {
+		delete(sm.pairWaiters, requestID)
+		delete(sm.pendingPairings, requestID)
+		sm.mu.Unlock()
 
-			return "", "", fmt.Errorf("pairing request %q disconnected before approval", requestID)
-		default:
-		}
+		return "", "", fmt.Errorf("pairing request %q disconnected before approval", requestID)
 	}
 
 	key, err := sm.state.EnsurePairingHMACKey()
 	if err != nil {
+		sm.mu.Unlock()
 		return "", "", err
 	}
 
 	deviceID, err = randomHex(8)
 	if err != nil {
+		sm.mu.Unlock()
 		return "", "", err
 	}
 
 	clientToken, err = generateToken()
 	if err != nil {
+		sm.mu.Unlock()
 		return "", "", err
 	}
 
 	hash := hmacToken(key, clientToken)
-
-	sm.state.PairedDevices[deviceID] = &PairedDevice{
+	device := &PairedDevice{
 		ID:          deviceID,
 		Label:       p.DeviceLabel,
 		PubKey:      p.PubKey,
@@ -290,28 +331,170 @@ func (sm *SessionManager) ApprovePairing(requestID string, readOnly bool, now ti
 		ReadOnly:    readOnly,
 		CreatedAt:   now,
 	}
-	sm.deviceTokenIndex[hash] = deviceID
+
+	// The credential is now minted. Remove the request and its waiter so this is a
+	// strict one-shot (a concurrent approval finds nothing), but do NOT persist the
+	// device yet — that waits on acknowledged delivery below.
 	delete(sm.pendingPairings, requestID)
+	delete(sm.pairWaiters, requestID)
+	tlsPin := sm.remoteTLSPin
+	profile := sm.paths.Profile
+	sm.mu.Unlock()
 
-	if err := sm.saveState(); err != nil {
-		// Roll back all in-memory mutations so state stays consistent — including
-		// restoring the pending request, so a transient save failure doesn't force
-		// the device to start a fresh pairing.
-		delete(sm.state.PairedDevices, deviceID)
-		delete(sm.deviceTokenIndex, hash)
-		sm.pendingPairings[requestID] = p
+	// Hand the credential to the blocked pair_request goroutine and wait — OFF the
+	// session-manager lock — for it to deliver pair_response and report whether the
+	// live requester acknowledged receipt.
+	approval := pairApproval{
+		RequestID: requestID,
+		DeviceID:  deviceID,
+		Token:     clientToken,
+		Profile:   profile,
+		TLSPin:    tlsPin,
+		delivered: make(chan error, 1),
+		receipt:   make(chan error, 1),
+		committed: make(chan error, 1),
+	}
+	waiter.approval <- approval
 
-		return "", "", err
+	// The buffered handoff above does NOT prove pair_response reached a live
+	// requester: the delivery goroutine may already have exited on timeout/
+	// disconnect. Wait for it to confirm the frame was actually written before
+	// doing anything the operator would read as success (issue #1299).
+	if deliveredErr := awaitPairingDelivered(approval.delivered, waiter, now); deliveredErr != nil {
+		// pair_response was never written to a live requester. Unblock the
+		// goroutine's committed-drain (harmless if it already exited) and persist
+		// nothing — no staged pin is emitted.
+		approval.committed <- deliveredErr
+
+		return "", "", fmt.Errorf("pairing request %q credential was not delivered to a live requester: %w", requestID, deliveredErr)
 	}
 
-	// Hand the credentials to a blocked pair_request connection, if one is
-	// waiting, so the device receives its token over its open connection. The
-	// channel is buffered (cap 1), so this never blocks under the lock.
-	waiter.approval <- pairApproval{DeviceID: deviceID, Token: clientToken, Profile: sm.paths.Profile, TLSPin: sm.remoteTLSPin}
+	// Delivery is confirmed. Only now signal the staged "pending" reply, so an
+	// unknown/expired/disconnected/undelivered request never emits a premature pin
+	// (issue #1299).
+	for _, cb := range staged {
+		if cb != nil {
+			cb(tlsPin)
+		}
+	}
 
-	delete(sm.pairWaiters, requestID)
+	receiptErr := awaitPairingReceipt(approval.receipt, waiter, now)
+	if receiptErr != nil {
+		// The requester never acknowledged receipt (disconnect, send failure, or
+		// the request's immutable deadline passed). Persist nothing and tell the
+		// delivery goroutine the transaction was abandoned.
+		approval.committed <- receiptErr
+
+		return "", "", fmt.Errorf("pairing request %q credential was not delivered to a live requester: %w", requestID, receiptErr)
+	}
+
+	// Receipt acknowledged: durably commit the device now.
+	sm.mu.Lock()
+	sm.state.PairedDevices[deviceID] = device
+	sm.deviceTokenIndex[hash] = deviceID
+	saveErr := sm.saveState()
+	if saveErr != nil {
+		// Roll the in-memory index back so this running daemon doesn't serve a
+		// device it can't be sure it persisted. Note this does NOT prove nothing
+		// reached disk: atomicfile can rename the new state into place and only
+		// then fail fsyncing the directory, so the paired device may be present on
+		// disk and reappear after a restart. The durable outcome is therefore
+		// commit-unknown — which is exactly why the client retains its credential
+		// (issue #1299).
+		delete(sm.state.PairedDevices, deviceID)
+		delete(sm.deviceTokenIndex, hash)
+	}
+	sm.mu.Unlock()
+
+	// Report the commit outcome so the goroutine emits pair_committed (or an error)
+	// to the requester. A later pair_committed write failure does NOT roll the
+	// device back: receipt was already acknowledged and the device is durable.
+	approval.committed <- saveErr
+	if saveErr != nil {
+		if sm.log != nil {
+			sm.log.Error("pairing state save failed; in-memory index rolled back, durable outcome unknown until reload", "device", deviceID, "request_id", requestID, "err", saveErr)
+		}
+
+		return "", "", saveErr
+	}
 
 	return deviceID, clientToken, nil
+}
+
+// awaitPairingDelivered blocks (off sm.mu) until the delivery goroutine reports
+// that pair_response was actually written to the requester, the requester
+// disconnects, or the request's immutable deadline passes. It returns nil only
+// on confirmed delivery. This is what closes the buffered-handoff race: the
+// goroutine may have exited on timeout/disconnect before ever reading the
+// approval, in which case `delivered` never arrives and the disconnect/timeout
+// paths govern (issue #1299).
+func awaitPairingDelivered(delivered <-chan error, waiter *pairWaiter, now time.Time) error {
+	timer := time.NewTimer(waiter.expiresAt.Sub(now))
+	defer timer.Stop()
+
+	select {
+	case err := <-delivered:
+		return err
+	case <-waiter.disconnected:
+		select {
+		case err := <-delivered:
+			return err
+		default:
+			return fmt.Errorf("requester disconnected before pair_response was delivered")
+		}
+	case <-timer.C:
+		select {
+		case err := <-delivered:
+			return err
+		default:
+			return fmt.Errorf("pair_response delivery timed out")
+		}
+	}
+}
+
+// awaitPairingReceipt blocks (off sm.mu) until the delivery goroutine reports the
+// requester acknowledged receipt, the requester disconnects, or the request's
+// immutable deadline passes. It returns nil only on an acknowledged receipt.
+func awaitPairingReceipt(receipt <-chan error, waiter *pairWaiter, now time.Time) error {
+	timer := time.NewTimer(waiter.expiresAt.Sub(now))
+	defer timer.Stop()
+
+	// A nil disconnected channel (a waiter created without a connDone signal)
+	// blocks forever in its select case, so the receipt/timeout paths govern.
+	select {
+	case err := <-receipt:
+		return err
+	case <-waiter.disconnected:
+		// Prefer an ack that already completed before the disconnect was observed.
+		select {
+		case err := <-receipt:
+			return err
+		default:
+			return fmt.Errorf("requester disconnected before acknowledging receipt")
+		}
+	case <-timer.C:
+		select {
+		case err := <-receipt:
+			return err
+		default:
+			return fmt.Errorf("receipt acknowledgement timed out")
+		}
+	}
+}
+
+// disconnectedNow reports whether ch (a connDone-style channel) is already
+// closed. A nil channel is treated as still-connected.
+func disconnectedNow(ch <-chan struct{}) bool {
+	if ch == nil {
+		return false
+	}
+
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
 }
 
 // DeviceForToken resolves a client token to its paired device, or nil. Must be

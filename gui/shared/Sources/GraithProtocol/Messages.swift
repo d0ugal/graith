@@ -556,30 +556,94 @@ public struct PairRequestMsg: Codable, Sendable {
     public var deviceLabel: String
     /// base64-std of the raw 32-byte ed25519 public key.
     public var devicePubKey: String
-    public init(deviceLabel: String, devicePubKey: String) {
+    /// Receipt-protocol capability bit (issue #1299): true means this client will
+    /// acknowledge `pair_response` with `pair_ack` and wait for `pair_committed`
+    /// before treating the pairing as complete. The daemon rejects a request
+    /// without it. Defaults to true — every current client speaks the protocol.
+    public var receiptAck: Bool
+    public init(deviceLabel: String, devicePubKey: String, receiptAck: Bool = true) {
         self.deviceLabel = deviceLabel
         self.devicePubKey = devicePubKey
+        self.receiptAck = receiptAck
     }
     enum CodingKeys: String, CodingKey {
         case deviceLabel = "device_label"
         case devicePubKey = "device_pub_key"
+        case receiptAck = "receipt_ack"
+    }
+    // receipt_ack is json-omitempty on the Go side (manifest-optional), so decode
+    // it defensively — a missing key means false. Keeps the required-fields-only
+    // conformance probe decoding cleanly.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        deviceLabel = try c.decode(String.self, forKey: .deviceLabel)
+        devicePubKey = try c.decode(String.self, forKey: .devicePubKey)
+        receiptAck = try c.decodeIfPresent(Bool.self, forKey: .receiptAck) ?? false
     }
 }
 
 public struct PairResponseMsg: Codable, Sendable {
+    /// The daemon's grant id for this pairing; echoed back in `pair_ack` and
+    /// confirmed in `pair_committed` (issue #1299).
+    public var requestID: String
     public var deviceID: String
     public var clientToken: String
     public var daemonProfile: String
     public var tlsPinSPKI: String
-    public init(deviceID: String, clientToken: String, daemonProfile: String, tlsPinSPKI: String) {
-        self.deviceID = deviceID; self.clientToken = clientToken
+    public init(requestID: String = "", deviceID: String, clientToken: String, daemonProfile: String, tlsPinSPKI: String) {
+        self.requestID = requestID; self.deviceID = deviceID; self.clientToken = clientToken
         self.daemonProfile = daemonProfile; self.tlsPinSPKI = tlsPinSPKI
     }
     enum CodingKeys: String, CodingKey {
+        case requestID = "request_id"
         case deviceID = "device_id"
         case clientToken = "client_token"
         case daemonProfile = "daemon_profile"
         case tlsPinSPKI = "tls_pin_spki"
+    }
+    // Backward-compatible decoding: a legacy (pre-receipt) daemon omits
+    // request_id. Default it to "" so new clients can still complete a legacy
+    // pairing (the session then skips the receipt handshake) — issue #1299.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        requestID = try c.decodeIfPresent(String.self, forKey: .requestID) ?? ""
+        deviceID = try c.decode(String.self, forKey: .deviceID)
+        clientToken = try c.decode(String.self, forKey: .clientToken)
+        daemonProfile = try c.decodeIfPresent(String.self, forKey: .daemonProfile) ?? ""
+        tlsPinSPKI = try c.decode(String.self, forKey: .tlsPinSPKI)
+    }
+}
+
+/// Client → daemon: acknowledges that the `pair_response` credential was
+/// received, decoded, TLS-pin-validated, and durably stored (issue #1299). The
+/// daemon commits the durable paired device only after this ack; it validates
+/// both ids against the staged grant on the same connection.
+public struct PairAckMsg: Codable, Sendable {
+    public var requestID: String
+    public var deviceID: String
+    public init(requestID: String, deviceID: String) {
+        self.requestID = requestID
+        self.deviceID = deviceID
+    }
+    enum CodingKeys: String, CodingKey {
+        case requestID = "request_id"
+        case deviceID = "device_id"
+    }
+}
+
+/// Daemon → client: confirms the paired device was durably persisted after the
+/// client's `pair_ack` (issue #1299). Only on receiving a matching one should a
+/// client treat the pairing as fully committed.
+public struct PairCommittedMsg: Codable, Sendable {
+    public var requestID: String
+    public var deviceID: String
+    public init(requestID: String, deviceID: String) {
+        self.requestID = requestID
+        self.deviceID = deviceID
+    }
+    enum CodingKeys: String, CodingKey {
+        case requestID = "request_id"
+        case deviceID = "device_id"
     }
 }
 

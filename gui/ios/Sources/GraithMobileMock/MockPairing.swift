@@ -12,23 +12,34 @@ public struct MockPairing: GraithPairing {
         self.failure = failure
     }
 
-    public func requestPairing(
+    public func beginPairing(
         transport: GraithTransport,
         deviceLabel: String,
         profile: String,
         signer: DeviceKeySigner
-    ) async throws -> PairResponse {
+    ) async throws -> PairingSession {
         // Prove we can exercise the signer's key material.
         _ = try signer.publicKeyRaw()
         try await Task.sleep(for: approvalDelay)
         if let failure { throw failure }
-        return PairResponse(
+        let response = PairResponse(
+            requestID: "req-\(UUID().uuidString)",
             deviceID: "dev-bairn-001",
             clientToken: "tok-\(UUID().uuidString)",
             daemonProfile: "default",
             tlsPinSPKI: Data("bide-spki-pin-bytes".utf8).base64EncodedString()
         )
+        return MockPairingSession(response: response)
     }
+}
+
+/// A mock ``PairingSession`` whose receipt handshake trivially succeeds — the
+/// coordinator can exercise persist → ack → committed without a daemon.
+public struct MockPairingSession: PairingSession {
+    public let response: PairResponse
+    public init(response: PairResponse) { self.response = response }
+    public func ackAndAwaitCommit() async throws {}
+    public func abandon() async {}
 }
 
 /// A pure in-memory `DeviceKeySigner` for tests that don't need the Keychain.

@@ -47,6 +47,22 @@ public enum ControlError: Error {
     case tlsPinMismatch(String)
 }
 
+/// PairingError describes the post-ack outcomes of the receipt protocol (issue
+/// #1299). Once pair_ack is on the wire, NO outcome short of a matching
+/// pair_committed proves the daemon did not commit: a daemon `error` reply can be
+/// an atomic-state-write failure that already renamed the paired device onto disk
+/// before a directory-fsync error, and a dropped/garbled reply is equally
+/// ambiguous. So every post-ack failure is commit-unknown and the caller MUST
+/// retain the credential it durably stored before acking — deleting it would
+/// strand a device the daemon may have (or become, after restart) paired.
+///   - commitMismatch: pair_committed named a different request/device — retain.
+///   - commitUnknown: any other post-ack failure (daemon error, drop, malformed,
+///     unexpected frame, ambiguous send) — retain.
+public enum PairingError: Error {
+    case commitMismatch
+    case commitUnknown(Error)
+}
+
 private let jsonEncoder: JSONEncoder = {
     let e = JSONEncoder()
     // Match Go's compact marshalling; key order is irrelevant to the daemon.

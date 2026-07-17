@@ -409,7 +409,7 @@ struct MockFactory: HostClientFactory {
 
 /// A no-op pairing backend so `PairingCoordinator` can be constructed in tests.
 struct StubPairing: GraithPairing {
-    func requestPairing(transport: GraithTransport, deviceLabel: String, profile: String, signer: DeviceKeySigner) async throws -> PairResponseMsg {
+    func beginPairing(transport: GraithTransport, deviceLabel: String, profile: String, signer: DeviceKeySigner) async throws -> PairingSession {
         throw ControlError.daemon("stub")
     }
 }
