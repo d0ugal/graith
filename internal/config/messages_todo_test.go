@@ -131,10 +131,15 @@ func TestValidateMessagesLimits(t *testing.T) {
 		{"conversation_max_limit above ceiling", func(c *Config) {
 			c.Messages.ConversationMaxLimit = MessagesConversationMaxLimitCeiling + 1
 		}, "conversation_max_limit"},
-		{"page size above max", func(c *Config) {
+		// Struct-level Validate no longer flags a page size above the max: it
+		// cannot tell an inherited default from an explicit override, and the
+		// accessor clamps the page size to the max at runtime. The explicit-override
+		// contradiction is enforced raw-data-aware at load (issue #1314); see
+		// TestLoadConversationPageSizeOverride.
+		{"page size above max is clamped, not rejected", func(c *Config) {
 			c.Messages.ConversationPageSize = 3000
 			c.Messages.ConversationMaxLimit = 2000
-		}, "must not exceed conversation_max_limit"},
+		}, ""},
 		{"jail_list_limit above ceiling", func(c *Config) {
 			c.Messages.JailListLimit = MessagesJailListLimitCeiling + 1
 		}, "jail_list_limit"},
@@ -284,5 +289,99 @@ sweep_interval = "15s"
 	// Untouched [todo] limits keep their defaults.
 	if got := cfg.Todo.MaxNoteOrDefault(); got != TodoMaxNoteDefault {
 		t.Errorf("todo max note = %d, want %d (default preserved)", got, TodoMaxNoteDefault)
+	}
+}
+
+// TestLoadConversationMaxLimitAloneClamps is the issue #1314 acceptance case: a
+// config that lowers only conversation_max_limit below the embedded default page
+// size (500) must load, and the effective page size must be clamped to the new
+// max rather than rejected. The inherited page size is never an explicit override.
+func TestLoadConversationMaxLimitAloneClamps(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+
+	// conversation_max_limit is deliberately the ONLY key the file sets.
+	toml := "[messages]\nconversation_max_limit = 100\n"
+	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() = %v, want nil (lowering the max alone must load)", err)
+	}
+
+	if got := cfg.Messages.ConversationMaxLimitOrDefault(); got != 100 {
+		t.Errorf("max limit = %d, want 100", got)
+	}
+
+	if got := cfg.Messages.ConversationPageSizeOrDefault(); got > 100 {
+		t.Errorf("effective page size = %d, want <= 100 (clamped to the max)", got)
+	}
+}
+
+// TestLoadConversationPageSizeOverride confirms the raw-data-aware contradiction
+// policy (issue #1314): an explicit conversation_page_size larger than the max
+// still fails loudly at load — including when it equals the embedded default,
+// which a value comparison could not distinguish — while an in-range explicit
+// override loads.
+func TestLoadConversationPageSizeOverride(t *testing.T) {
+	cases := []struct {
+		name    string
+		toml    string
+		wantErr string
+	}{
+		{
+			name:    "explicit page above explicit max fails",
+			toml:    "[messages]\nconversation_page_size = 600\nconversation_max_limit = 100\n",
+			wantErr: "must not exceed conversation_max_limit",
+		},
+		{
+			// The explicit page size equals the embedded default (500); only the
+			// raw key — not a value heuristic — proves it was set on purpose.
+			name:    "explicit default-valued page above lowered max fails",
+			toml:    "[messages]\nconversation_page_size = 500\nconversation_max_limit = 100\n",
+			wantErr: "must not exceed conversation_max_limit",
+		},
+		{
+			name:    "explicit page within max loads",
+			toml:    "[messages]\nconversation_page_size = 80\nconversation_max_limit = 100\n",
+			wantErr: "",
+		},
+		{
+			// A non-positive explicit page means "use the default", which the
+			// accessor clamps to the max — never a contradiction.
+			name:    "explicit non-positive page with lowered max loads",
+			toml:    "[messages]\nconversation_page_size = 0\nconversation_max_limit = 100\n",
+			wantErr: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgPath := filepath.Join(dir, "config.toml")
+
+			if err := os.WriteFile(cfgPath, []byte(tc.toml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := Load(cfgPath)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Load() = %v, want nil", err)
+				}
+
+				return
+			}
+
+			if err == nil {
+				t.Fatalf("Load() = nil, want error containing %q", tc.wantErr)
+			}
+
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("Load() = %v, want error containing %q", err, tc.wantErr)
+			}
+		})
 	}
 }
