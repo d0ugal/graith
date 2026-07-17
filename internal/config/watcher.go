@@ -11,15 +11,17 @@ import (
 
 type Watcher struct {
 	path     string
-	onChange func(*Config)
+	onChange func(*Config) error
 	log      *slog.Logger
 	debounce time.Duration
 }
 
 // NewWatcher creates a config-file watcher. debounce is the quiet period after
 // the last write before reloading; a non-positive value falls back to
-// ConfigReloadDebounceDefault so callers can pass 0 to accept the default.
-func NewWatcher(path string, onChange func(*Config), log *slog.Logger, debounce time.Duration) *Watcher {
+// ConfigReloadDebounceDefault so callers can pass 0 to accept the default. An
+// onChange error rejects the loaded generation and is logged as a reload
+// failure rather than as a successful config reload.
+func NewWatcher(path string, onChange func(*Config) error, log *slog.Logger, debounce time.Duration) *Watcher {
 	if debounce <= 0 {
 		debounce = ConfigReloadDebounceDefault
 	}
@@ -93,6 +95,10 @@ func (w *Watcher) reload() {
 		return
 	}
 
+	if err := w.onChange(cfg); err != nil {
+		w.log.Error("failed to apply reloaded config", "path", w.path, "err", err)
+		return
+	}
+
 	w.log.Info("config reloaded", "path", w.path)
-	w.onChange(cfg)
 }

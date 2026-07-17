@@ -1,13 +1,40 @@
 package config
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestWatcherDoesNotReportReloadWhenApplyFails(t *testing.T) {
+	configFile := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configFile, []byte("default_agent = \"canny\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var logBuf bytes.Buffer
+	wantErr := errors.New("orchestrator stop failed")
+	w := NewWatcher(configFile, func(*Config) error {
+		return wantErr
+	}, slog.New(slog.NewTextHandler(&logBuf, nil)), 0)
+
+	w.reload()
+
+	logText := logBuf.String()
+	if !strings.Contains(logText, "failed to apply reloaded config") || !strings.Contains(logText, wantErr.Error()) {
+		t.Fatalf("apply failure log = %q, want callback error", logText)
+	}
+
+	if strings.Contains(logText, "config reloaded") {
+		t.Fatalf("failed callback was reported as a successful reload: %q", logText)
+	}
+}
 
 func TestWatcher(t *testing.T) {
 	dir := t.TempDir()
@@ -19,8 +46,9 @@ func TestWatcher(t *testing.T) {
 	}
 
 	got := make(chan *Config, 1)
-	w := NewWatcher(cfgPath, func(cfg *Config) {
+	w := NewWatcher(cfgPath, func(cfg *Config) error {
 		got <- cfg
+		return nil
 	}, slog.Default(), 0)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -58,8 +86,9 @@ func TestWatcherInvalidConfig(t *testing.T) {
 	}
 
 	called := make(chan struct{}, 1)
-	w := NewWatcher(cfgPath, func(cfg *Config) {
+	w := NewWatcher(cfgPath, func(cfg *Config) error {
 		called <- struct{}{}
+		return nil
 	}, slog.Default(), 0)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -99,8 +128,9 @@ func TestWatcherConversationMaxLimitReloadAndRollback(t *testing.T) {
 	}
 
 	got := make(chan *Config, 1)
-	w := NewWatcher(cfgPath, func(cfg *Config) {
+	w := NewWatcher(cfgPath, func(cfg *Config) error {
 		got <- cfg
+		return nil
 	}, slog.Default(), 0)
 
 	ctx, cancel := context.WithCancel(context.Background())

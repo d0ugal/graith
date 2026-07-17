@@ -21,6 +21,13 @@ prompt_file  = ""       # or read from file
 
 See [Orchestrator]({{< relref "/docs/orchestrator.md" >}}) for details.
 
+Disabling a running orchestrator takes effect only after the daemon successfully
+signals its session to stop. If signaling fails, the reload is rejected and
+`orchestrator.enabled` remains true so the config and live process cannot
+silently diverge. `gr daemon reload` returns a field- and session-specific error;
+an edit-triggered reload records the same failure in the daemon log. Fix the
+process or driver problem, then retry the reload.
+
 ### Restart policy
 
 When the orchestrator exits unexpectedly (a crash or startup-watchdog kill — never a user, idle, or shutdown stop) the daemon auto-restarts it with a backoff that grows after each failure and resets once a run stays up long enough. Tune it with `[orchestrator.restart]`:

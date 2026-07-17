@@ -42,14 +42,60 @@ func (sm *SessionManager) ReloadConfig() error {
 		return fmt.Errorf("data_dir changed from %q to %q: run 'gr daemon restart' to apply", oldDataDir, cfg.DataDir)
 	}
 
-	sm.applyConfig(cfg)
-
-	return nil
+	return sm.applyConfig(cfg)
 }
 
-func (sm *SessionManager) applyConfig(newCfg *config.Config) {
-	sm.mu.Lock()
+func (sm *SessionManager) applyConfig(newCfg *config.Config) error {
+	// Applying a config can include process signaling. Serialize whole
+	// applications without holding sm.mu across that slow boundary so a newer
+	// reload cannot publish over (or be overwritten by) a failed transition.
+	sm.configReloadMu.Lock()
+	defer sm.configReloadMu.Unlock()
+
+	sm.mu.RLock()
 	old := sm.cfg
+
+	var (
+		orchID     string
+		orchStatus SessionStatus
+	)
+
+	if old.Orchestrator.Enabled && !newCfg.Orchestrator.Enabled {
+		orchID = sm.findOrchestratorID()
+		if orchID != "" {
+			orchStatus = sm.state.Sessions[orchID].Status
+		}
+	}
+
+	sm.mu.RUnlock()
+
+	// Stop the live orchestrator before publishing enabled=false. If signaling
+	// fails, the old config remains authoritative and a later reload can retry.
+	if orchID != "" && orchStatus == StatusRunning {
+		if err := sm.stopWithReason(orchID, StopReasonUser, "orchestrator-disabled"); err != nil {
+			sm.log.Error("config change failed",
+				"key", "orchestrator.enabled",
+				"session_id", orchID,
+				"err", err)
+
+			return fmt.Errorf("orchestrator.enabled: stop session %q: %w", orchID, err)
+		}
+	}
+
+	// A creating orchestrator has reserved its state but does not yet expose a
+	// driver that can be stopped safely. Retain enabled=true and let the next
+	// reload retry once creation has settled.
+	if orchID != "" && orchStatus == StatusCreating {
+		err := fmt.Errorf("session is being created; retry reload")
+		sm.log.Error("config change failed",
+			"key", "orchestrator.enabled",
+			"session_id", orchID,
+			"err", err)
+
+		return fmt.Errorf("orchestrator.enabled: stop session %q: %w", orchID, err)
+	}
+
+	sm.mu.Lock()
 	sm.cfg = newCfg
 	// Resize the launch throttle under the same lock that publishes the config so
 	// the two can't diverge if two reloads (fsnotify + SIGHUP) interleave — the
@@ -232,17 +278,10 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 
 		if newCfg.Orchestrator.Enabled {
 			go sm.ensureOrchestrator(context.Background())
-		} else {
-			if orchID := func() string {
-				sm.mu.RLock()
-				defer sm.mu.RUnlock()
-
-				return sm.findOrchestratorID()
-			}(); orchID != "" {
-				_ = sm.stopWithReason(orchID, StopReasonUser, "orchestrator-disabled")
-			}
 		}
 	}
+
+	return nil
 }
 
 // applyLiveInputDelay pushes a reloaded [lifecycle] input_delay to every live
