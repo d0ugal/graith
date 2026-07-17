@@ -7,6 +7,18 @@ import (
 	"time"
 )
 
+// shutdownBudget is the Run wrapper's outer deadline for whole-daemon shutdown,
+// derived from the effective per-driver kill grace rather than a fixed wrapper
+// (issue #1243). A driver teardown spends up to one grace on the SIGTERM→SIGKILL
+// wait and another bounding post-SIGKILL completion (teardownLiveDriver), and
+// StopAll then waits one further grace for exit watchers — three configured grace
+// windows in total. Deriving the budget from the grace means a configured
+// process_kill_grace above the old fixed 10s wrapper is honored to its SIGKILL
+// transition instead of being cut off early.
+func (sm *SessionManager) shutdownBudget() time.Duration {
+	return 3 * sm.Config().Lifecycle.ProcessKillGraceDuration()
+}
+
 // teardownLiveDriver applies the shared bounded lifecycle policy for removing a
 // live session driver: SIGTERM, the configured process_kill_grace, SIGKILL, and
 // one final grace-bounded completion wait. It closes driver handles only after

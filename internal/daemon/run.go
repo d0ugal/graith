@@ -274,7 +274,10 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 		cancel()
 		sm.stopRemoteRuntime()
 
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// Derive the outer budget from the effective lifecycle policy so a
+		// configured process_kill_grace above 10s owns termination and is not cut
+		// off by a fixed wrapper before the SIGKILL transition (issue #1243).
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), sm.shutdownBudget())
 		sm.StopAll(shutdownCtx)
 		shutdownCancel()
 		srv.Shutdown()

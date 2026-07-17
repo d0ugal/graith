@@ -201,6 +201,53 @@ func TestShutdownUsesLiveDriverTeardownPolicy(t *testing.T) {
 	assertFakeDriverEscalated(t, driver, grace)
 }
 
+// TestShutdownBudgetHonoursGraceAboveWrapperDefault guards the issue #1243
+// round-3 fix: the whole-daemon shutdown budget must be derived from the
+// configured lifecycle grace so a process_kill_grace above the old fixed 10s
+// wrapper reaches its SIGKILL transition instead of being cancelled early. The
+// budget must exceed both the grace (else the SIGTERM→SIGKILL wait is cut) and
+// the old 10s cap.
+func TestShutdownBudgetHonoursGraceAboveWrapperDefault(t *testing.T) {
+	const grace = 30 * time.Second // above the old fixed 10s shutdown wrapper
+
+	sm := newLiveDriverLifecycleTestManager(t, grace)
+
+	budget := sm.shutdownBudget()
+	if budget <= grace {
+		t.Fatalf("shutdown budget %v <= grace %v: the TERM→SIGKILL wait would be cut short", budget, grace)
+	}
+
+	if budget <= 10*time.Second {
+		t.Fatalf("shutdown budget %v is not derived from the grace (still near the old 10s cap)", budget)
+	}
+
+	// Two teardown windows plus the exit-watcher window.
+	if want := 3 * grace; budget != want {
+		t.Fatalf("shutdown budget = %v, want %v", budget, want)
+	}
+}
+
+// TestShutdownReachesSIGKILLWithinDerivedBudget drives StopAll with a context
+// built exactly as the daemon wrapper does (from shutdownBudget) against a
+// TERM-ignoring driver, and asserts the derived budget is wide enough for the
+// full SIGTERM→grace→SIGKILL escalation rather than cutting it off.
+func TestShutdownReachesSIGKILLWithinDerivedBudget(t *testing.T) {
+	const grace = 40 * time.Millisecond
+
+	sm := newLiveDriverLifecycleTestManager(t, grace)
+	driver := newTeardownFakeDriver(true) // ignores TERM; exits only on SIGKILL
+	sm.state.Sessions["strath-shutdown"] = &SessionState{
+		ID: "strath-shutdown", Name: "strath-shutdown", Status: StatusRunning,
+	}
+	sm.sessions["strath-shutdown"] = driver
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), sm.shutdownBudget())
+	defer cancel()
+
+	sm.StopAll(shutdownCtx)
+	assertFakeDriverEscalated(t, driver, grace)
+}
+
 func TestRestartUsesLiveDriverTeardownPolicy(t *testing.T) {
 	const grace = 25 * time.Millisecond
 
