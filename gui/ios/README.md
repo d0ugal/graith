@@ -17,7 +17,7 @@ is a thin consumer: it keeps only genuinely UIKit-specific code.
 | Module | Owns | Depends on |
 |--------|------|-----------|
 | `GraithMobileApp` | `@main` SwiftUI App; composition root (builds the real `FleetModel`) | shared + the below |
-| `GraithMobileUI` | SwiftUI shell: host→repo→session sidebar, create picker, approval prompt, pairing, session detail | `GraithSessionKit`, `GraithRemoteKit` (shared) |
+| `GraithMobileUI` | SwiftUI shell: host→repo→session sidebar, create picker, pairing, session detail | `GraithSessionKit`, `GraithRemoteKit` (shared) |
 | `GraithTerminalUIKit` | `BaseTerminalUIView` (`UIKeyInput`/`UITextInput`), on-screen key accessory row | `GraithSessionKit` (shared) |
 | `GraithMobileRealTerminal` | libghostty `TerminalCoreDriving` adapter + Metal renderer (iOS) | `GraithSessionKit`, `GraithTerminalCore` |
 | `GraithMobileMock` | In-memory mock `GraithHostClient` + `TerminalCoreDriving` for previews/tests | `GraithSessionKit`, `GraithRemoteKit` |

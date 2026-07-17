@@ -73,7 +73,7 @@ jobs:
           fi
 
       # macOS app logic suites: window-state, session-store attach ownership,
-      # sidebar badge styling, approvals queue, repo-picker ordering. Host XCTest
+      # sidebar badge styling, repo-picker ordering. Host XCTest
       # (AppKit/SwiftUI types are opaque, but the pure view-model logic is not).
       - name: macOS app logic tests
         run: |
