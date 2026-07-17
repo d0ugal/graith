@@ -293,6 +293,78 @@ repo = "/tmp/croft"
 	}
 }
 
+func TestParseAndBuildScenarioRepoValidation(t *testing.T) {
+	tests := []struct {
+		name       string
+		sessions   string
+		wantErr    string
+		wantShared bool
+		wantMirror string
+	}{
+		{
+			name: "repo-less shared member",
+			sessions: `[[sessions]]
+name = "braw"
+shared = true`,
+			wantShared: true,
+		},
+		{
+			name: "repo-less mirrored member",
+			sessions: `[[sessions]]
+name = "croft"
+repo = "/tmp/croft"
+
+[[sessions]]
+name = "canny"
+mirror = "croft"`,
+			wantMirror: "croft",
+		},
+		{
+			name: "repo-less ordinary member",
+			sessions: `[[sessions]]
+name = "dreich"`,
+			wantErr: "repo is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := []byte("version = 1\n[scenario]\nname = \"strath\"\n" + tt.sessions)
+
+			sf, err := parseScenarioFile(data)
+			if err != nil {
+				t.Fatalf("parseScenarioFile: %v", err)
+			}
+
+			inputs, err := buildSessionInputs(sf)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("buildSessionInputs error = %v, want substring %q", err, tt.wantErr)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("buildSessionInputs: %v", err)
+			}
+
+			got := inputs[len(inputs)-1]
+			if got.Repo != "" {
+				t.Errorf("derived repo input = %q, want empty", got.Repo)
+			}
+
+			if got.Shared != tt.wantShared {
+				t.Errorf("shared = %t, want %t", got.Shared, tt.wantShared)
+			}
+
+			if got.Mirror != tt.wantMirror {
+				t.Errorf("mirror = %q, want %q", got.Mirror, tt.wantMirror)
+			}
+		})
+	}
+}
+
 func TestParseAndBuildScenarioResults(t *testing.T) {
 	data := []byte(`
 version = 1
