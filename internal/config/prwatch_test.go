@@ -263,6 +263,36 @@ func TestPRWatchAdvancedParsing(t *testing.T) {
 	}
 }
 
+// TestPRWatchTickerCadenceNonPositiveSafety proves the two [pr_watch.advanced]
+// cadences that feed time.NewTicker (base_tick, ref_reconcile_interval) fall back
+// to their documented defaults for "0", "0s", and negative values, so a
+// validly-parsed config can never construct a non-positive ticker (issue #1285).
+func TestPRWatchTickerCadenceNonPositiveSafety(t *testing.T) {
+	for _, bad := range []string{"0", "0s", "-1s", "-500ms"} {
+		p := PRWatchConfig{Advanced: PRWatchAdvancedConfig{
+			BaseTick:             bad,
+			RefReconcileInterval: bad,
+		}}
+
+		if got := p.BaseTickDuration(); got != 15*time.Second {
+			t.Errorf("BaseTickDuration(%q) = %v, want default 15s", bad, got)
+		}
+
+		if got := p.RefReconcileIntervalDuration(); got != 2*time.Second {
+			t.Errorf("RefReconcileIntervalDuration(%q) = %v, want default 2s", bad, got)
+		}
+
+		// The values fed to time.NewTicker must be strictly positive.
+		if got := p.BaseTickDuration(); got <= 0 {
+			t.Errorf("BaseTickDuration(%q) = %v, must be > 0 for time.NewTicker", bad, got)
+		}
+
+		if got := p.RefReconcileIntervalDuration(); got <= 0 {
+			t.Errorf("RefReconcileIntervalDuration(%q) = %v, must be > 0 for time.NewTicker", bad, got)
+		}
+	}
+}
+
 // TestPRWatchKickChannelSizeSafety proves the buffered kick-channel capacity is
 // bounded: the exact maximum is accepted, one past it is rejected by validation,
 // and the accessor defensively caps an over-limit value so a config that skips

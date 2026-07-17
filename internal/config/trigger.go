@@ -481,9 +481,12 @@ func (r TriggersRuntime) MaxConcurrentOr() int {
 // accessors and lets the embedded default_config.toml materialize the same values
 // while the Go fallback stays authoritative for an omitted key (see issue #1228).
 
-// SchedulerTickDuration is the trigger scheduler loop cadence. Default 1s.
+// SchedulerTickDuration is the trigger scheduler loop cadence. Default 1s; an
+// unset, unparseable, or non-positive value uses the default (the scheduler
+// feeds this straight to time.NewTicker, which panics on a non-positive
+// interval).
 func (r TriggersRuntime) SchedulerTickDuration() time.Duration {
-	return parseDurationOr(r.Advanced.SchedulerTick, defaultSchedulerTick)
+	return positiveDurationOrDefault(r.Advanced.SchedulerTick, defaultSchedulerTick)
 }
 
 // RunHistoryMax is the per-trigger retained run-history length. Default 20.
@@ -496,9 +499,11 @@ func (r TriggersRuntime) RunHistoryMax() int {
 }
 
 // WatchReconcileIntervalDuration is the file-watch binding reconcile cadence.
-// Default 2s.
+// Default 2s; an unset, unparseable, or non-positive value uses the default (the
+// file watcher feeds this straight to time.NewTicker, which panics on a
+// non-positive interval).
 func (r TriggersRuntime) WatchReconcileIntervalDuration() time.Duration {
-	return parseDurationOr(r.Advanced.WatchReconcileInterval, defaultWatchReconcile)
+	return positiveDurationOrDefault(r.Advanced.WatchReconcileInterval, defaultWatchReconcile)
 }
 
 // WatchRetryBaseBackoffDuration is the first-retry delay for a degraded file-watch
