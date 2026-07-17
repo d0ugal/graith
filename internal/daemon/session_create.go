@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
@@ -61,12 +62,16 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		}
 	}
 
-	// Typed Codex options are codex-only; reject rather than silently drop them
-	// against another agent (issue #1186). Their *values* are validated by Codex
+	// Typed options (profile, reasoning effort, service tier, web search, approval
+	// policy) are accepted only when the selected agent's option_args declare a
+	// matching group — the capability comes from the agent definition, not a literal
+	// "codex" name, so a custom alias that declares those groups accepts them too
+	// (issue #1236). An option the agent can't consume is rejected rather than
+	// silently dropped (issue #1186). Their *values* are validated by the agent CLI
 	// itself (version/model-dependent enums), not here.
 	codexOpts := opts.Codex
-	if !codexOpts.IsZero() && agentName != "codex" {
-		return SessionState{}, fmt.Errorf("codex options require --agent codex (got %q)", agentName)
+	if bad := agent.UnsupportedOptionVars(codexOpts); len(bad) > 0 {
+		return SessionState{}, fmt.Errorf("agent %q does not support option(s) %s: no matching option_args group", agentName, strings.Join(bad, ", "))
 	}
 
 	// Early validation that doesn't require the lock.

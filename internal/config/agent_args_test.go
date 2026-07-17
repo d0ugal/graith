@@ -168,8 +168,9 @@ func TestIsTemplateVar(t *testing.T) {
 }
 
 // TestValidateOptionArgs covers the config-load guards for option_args (#1236):
-// a group with no args and a `when` gate naming an unknown variable are both
-// rejected.
+// a group with no args, a `when` gate naming an unknown variable, and a `when`
+// gate on `dir` (a valid template variable that is never bound at the option_args
+// expansion site, so the group would silently never fire) are all rejected.
 func TestValidateOptionArgs(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -184,7 +185,12 @@ func TestValidateOptionArgs(t *testing.T) {
 		{
 			name:      "unknown when rejected",
 			opt:       AgentOptionArg{When: "reasoning", Args: []string{"-c", "x"}},
-			wantSubst: "not a known template variable",
+			wantSubst: "not a variable bound when option_args expand",
+		},
+		{
+			name:      "when dir rejected (never bound at option_args expansion)",
+			opt:       AgentOptionArg{When: "dir", Args: []string{"--flag"}},
+			wantSubst: "not a variable bound when option_args expand",
 		},
 	}
 
@@ -509,5 +515,77 @@ func TestAgentAdapterAccessorsFallBack(t *testing.T) {
 	optOut := Agent{Hooks: &AgentHookConfig{Mechanism: HookMechanismCodexConfig, TrustArgs: []string{}}}
 	if got := optOut.HookTrustArgsOrDefault(); len(got) != 0 {
 		t.Errorf("HookTrustArgsOrDefault with explicit empty = %v, want empty (opt-out honoured)", got)
+	}
+}
+
+// TestConsumesOptionVar covers the capability check that lets a custom alias
+// consume typed options (#1236): an agent consumes a typed-option variable when
+// any option_args group gates on it (When) or expands it ({var}); an agent with
+// no matching group does not.
+func TestConsumesOptionVar(t *testing.T) {
+	agent := Agent{OptionArgs: []AgentOptionArg{
+		{When: "reasoning_effort", Args: []string{"-c", "model_reasoning_effort={reasoning_effort}"}},
+		{Args: []string{"--profile", "{profile}"}}, // expands profile without gating on it
+	}}
+
+	for _, v := range []string{"reasoning_effort", "profile"} {
+		if !agent.ConsumesOptionVar(v) {
+			t.Errorf("ConsumesOptionVar(%q) = false, want true", v)
+		}
+	}
+
+	for _, v := range []string{"service_tier", "web_search", "approval_policy"} {
+		if agent.ConsumesOptionVar(v) {
+			t.Errorf("ConsumesOptionVar(%q) = true, want false", v)
+		}
+	}
+
+	if (Agent{}).ConsumesOptionVar("profile") {
+		t.Error("an agent with no option_args consumes nothing")
+	}
+}
+
+// TestCodexOptionsSetVars locks the set-option enumeration used to validate typed
+// options against an agent's capability (#1236).
+func TestCodexOptionsSetVars(t *testing.T) {
+	got := CodexOptions{
+		Profile:         "braw",
+		ReasoningEffort: "high",
+		ServiceTier:     "flex",
+		WebSearch:       true,
+		ApprovalPolicy:  "never",
+	}.SetVars()
+
+	want := []string{"profile", "reasoning_effort", "service_tier", "web_search", "approval_policy"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("SetVars() = %v, want %v", got, want)
+	}
+
+	if got := (CodexOptions{}).SetVars(); got != nil {
+		t.Errorf("SetVars() on zero options = %v, want nil", got)
+	}
+}
+
+// TestUnsupportedOptionVars covers the reject/keep decision (#1236): the codex
+// agent (declaring every typed-option group) supports all of them; a plain claude
+// agent (no option_args) supports none; a partial alias supports only what it
+// declares.
+func TestUnsupportedOptionVars(t *testing.T) {
+	def := Default()
+	opts := CodexOptions{Profile: "braw", ReasoningEffort: "high"}
+
+	if got := def.Agents["codex"].UnsupportedOptionVars(opts); len(got) != 0 {
+		t.Errorf("codex UnsupportedOptionVars = %v, want none", got)
+	}
+
+	if got := def.Agents["claude"].UnsupportedOptionVars(opts); !reflect.DeepEqual(got, []string{"profile", "reasoning_effort"}) {
+		t.Errorf("claude UnsupportedOptionVars = %v, want [profile reasoning_effort]", got)
+	}
+
+	alias := Agent{OptionArgs: []AgentOptionArg{
+		{When: "reasoning_effort", Args: []string{"-c", "x={reasoning_effort}"}},
+	}}
+	if got := alias.UnsupportedOptionVars(opts); !reflect.DeepEqual(got, []string{"profile"}) {
+		t.Errorf("alias UnsupportedOptionVars = %v, want [profile]", got)
 	}
 }

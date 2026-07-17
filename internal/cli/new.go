@@ -91,8 +91,10 @@ var newCmd = &cobra.Command{
 			prompt = string(data)
 		}
 
-		// Typed Codex options (issue #1186). Sent only when at least one is set;
-		// the daemon rejects them against a non-codex agent.
+		// Typed options (issue #1186/#1236). Sent only when at least one is set. The
+		// daemon accepts them for built-in Codex or any agent whose option_args
+		// declare the matching variables, and rejects an option no agent group can
+		// consume (naming the offending variable).
 		codexOpts := config.CodexOptions{
 			Profile:         newCodexProfile,
 			ReasoningEffort: newCodexReasoning,

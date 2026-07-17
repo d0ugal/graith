@@ -181,11 +181,11 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	}
 	s.Agent = targetAgent
 	s.Model = targetModel
-	// Codex-only options belong to the source agent; drop them when migrating to a
-	// non-codex agent so state stays consistent with the create-time guard (#1186).
-	// (codex→codex is rejected above, so a codex target here only arises from a
-	// non-codex source whose Codex is already nil.)
-	s.Codex = codexOptsForAgent(targetAgent, s.Codex)
+	// Typed options belong to the source agent; keep only those the target agent's
+	// option_args can consume and drop the rest, so state stays consistent with the
+	// create-time guard (#1186) and a custom alias that declares matching groups
+	// inherits them (#1236).
+	s.Codex = optionsForAgent(targetCfg, s.Codex)
 
 	// The token count describes the session's CURRENT agent. Migration swaps the
 	// agent, so the source agent's usage no longer applies — clear it (and evict

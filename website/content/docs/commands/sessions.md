@@ -24,11 +24,11 @@ Create a new agent session.
 | `-p, --prompt <text>` | Initial prompt for the agent |
 | `--prompt-file <path>` | Read initial prompt from file |
 | `-m, --model <name>` | Model value supplied to the selected agent's configured `option_args` / `{model}` templates |
-| `--codex-profile <name>` | Codex only: config profile to layer on top (`codex --profile`) |
-| `--codex-reasoning-effort <level>` | Codex only: reasoning effort — `minimal`, `low`, `medium`, `high`, `xhigh` |
-| `--codex-service-tier <tier>` | Codex only: service tier — `auto`, `default`, `flex`, `priority` |
-| `--codex-web-search` | Codex only: enable live web search (`codex --search`) |
-| `--codex-approval-policy <policy>` | Codex only: approval policy — `untrusted`, `on-request`, `never` |
+| `--codex-profile <name>` | Config profile to layer on top (`codex --profile`); needs an agent whose `option_args` consume `{profile}` |
+| `--codex-reasoning-effort <level>` | Reasoning effort — `minimal`, `low`, `medium`, `high`, `xhigh`; needs an agent that consumes `{reasoning_effort}` |
+| `--codex-service-tier <tier>` | Service tier — `auto`, `default`, `flex`, `priority`; needs an agent that consumes `{service_tier}` |
+| `--codex-web-search` | Enable live web search (`codex --search`); needs an agent that consumes `{web_search}` |
+| `--codex-approval-policy <policy>` | Approval policy — `untrusted`, `on-request`, `never`; needs an agent that consumes `{approval_policy}` |
 | `--headless` | Run the agent headless (stream-json) instead of an interactive PTY, for fire-and-forget sessions (experimental; Claude only) |
 | `--no-fetch` | Skip `git fetch origin` and create the worktree from local repo state |
 
@@ -43,12 +43,17 @@ overrides, and profile, web search, and approval policy to `--profile`,
 `--search`, and `--ask-for-approval`. Those spellings are configuration, not a
 second hard-coded argv path; inspect them with `gr config show` and override the
 groups if a compatible wrapper needs different flags. Each group is emitted only
-when its value is set, and the values are replayed on resume/fork. The
-`--codex-*` CLI inputs remain Codex-specific — using one with another agent is an
-error. Their values are validated by Codex itself because supported sets are
-version- and model-dependent. Don't also template `{model}` into Codex's base
-`args` while the model `option_args` group is enabled, or it will be passed
-twice. Example:
+when its value is set, and the values are replayed on resume, fork, and migrate.
+
+The `--codex-*` CLI inputs are not tied to the literal `codex` agent name: they
+work with built-in Codex or with any agent (a custom alias or wrapper) whose
+`option_args` declare the matching variable (`{profile}`, `{reasoning_effort}`,
+`{service_tier}`, `{web_search}`, `{approval_policy}`). Passing one to an agent
+whose `option_args` don't consume it is an error that names the unsupported
+option, so a value is never silently dropped. Their values themselves are
+validated by the agent CLI because supported sets are version- and
+model-dependent. Don't also template `{model}` into the base `args` while the
+model `option_args` group is enabled, or it will be passed twice. Example:
 
 ```bash
 gr new review --agent codex \

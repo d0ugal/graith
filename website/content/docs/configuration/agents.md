@@ -122,7 +122,9 @@ when = "web_search"                # boolean: emitted when true
 args = ["--search"]
 ```
 
-This is why an unset option can't just be a `{model}` template inside `args`: an empty model would expand to a literal `--model ""`. The groups are appended after the base args on create, resume, and fork alike. A `when` that names an unknown template variable, or a group with no `args`, is rejected at config load.
+This is why an unset option can't just be a `{model}` template inside `args`: an empty model would expand to a literal `--model ""`. The groups are appended after the base args on create, resume, fork, and migrate alike. A group with no `args` is rejected at config load, as is a `when` that names a variable not bound when `option_args` expand — including `{dir}`, which is only bound for `add_dir_args`; gating on it would silently never fire, so it is a load error rather than a dead group.
+
+An agent's `option_args` also declare which typed session options it accepts: the `--codex-*` create flags (profile, reasoning effort, service tier, web search, approval policy) are accepted for any agent whose groups consume the matching variable — not just built-in Codex — and rejected (naming the option) for one that doesn't.
 
 ### Hook and MCP adapters
 

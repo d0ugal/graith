@@ -3814,6 +3814,22 @@ var addDirTemplateVars = []string{
 	"worktree_path", "fork_source_agent_session_id", "model", "dir",
 }
 
+// isOptionArgVar reports whether name is one of the variables actually bound when
+// an agent's option_args groups are expanded (create/resume/fork). It backs the
+// option_args `when` gate validation: a gate on a variable that is never bound at
+// that site — notably `dir`, which is only bound per-included-directory for
+// add_dir_args — would silently never fire, so it is rejected at config load
+// rather than becoming a dead group (issue #1236).
+func isOptionArgVar(name string) bool {
+	for _, v := range optionArgTemplateVars {
+		if v == name {
+			return true
+		}
+	}
+
+	return false
+}
+
 // validateAdapters checks every agent launch-template context (issue #1236):
 // mechanisms must be known enum values, and argv fields may only reference the
 // placeholders actually bound at their expansion site. A bad template is
@@ -4121,6 +4137,74 @@ type CodexOptions struct {
 // IsZero reports whether no Codex option is set.
 func (o CodexOptions) IsZero() bool {
 	return o == CodexOptions{}
+}
+
+// SetVars returns the template-variable names for the typed options that are set
+// on o (e.g. "profile", "reasoning_effort"). The names match TemplateVars /
+// optionArgTemplateVars, so an agent's option_args capability can be checked
+// against them with Agent.ConsumesOptionVar (issue #1236).
+func (o CodexOptions) SetVars() []string {
+	var out []string
+
+	if o.Profile != "" {
+		out = append(out, "profile")
+	}
+
+	if o.ReasoningEffort != "" {
+		out = append(out, "reasoning_effort")
+	}
+
+	if o.ServiceTier != "" {
+		out = append(out, "service_tier")
+	}
+
+	if o.WebSearch {
+		out = append(out, "web_search")
+	}
+
+	if o.ApprovalPolicy != "" {
+		out = append(out, "approval_policy")
+	}
+
+	return out
+}
+
+// ConsumesOptionVar reports whether any of the agent's option_args groups gate on
+// (When) or expand ({var}) the named typed-option template variable. This is how
+// graith decides — from the agent definition rather than a literal "codex" name —
+// whether an agent can consume a typed option (profile, reasoning effort, service
+// tier, web search, approval policy), so a custom alias that declares the matching
+// option_args accepts them too (issue #1236).
+func (a Agent) ConsumesOptionVar(name string) bool {
+	for _, opt := range a.OptionArgs {
+		if opt.When == name {
+			return true
+		}
+
+		for _, tok := range templateTokens(opt.Args) {
+			if tok == name {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// UnsupportedOptionVars returns the set typed options on opts that this agent's
+// option_args cannot consume, in SetVars order. Empty means every set option is
+// representable, so the agent may accept them; a non-empty result is the reason a
+// lifecycle op must reject (create) or drop (fork/migrate) them (issue #1236).
+func (a Agent) UnsupportedOptionVars(opts CodexOptions) []string {
+	var bad []string
+
+	for _, v := range opts.SetVars() {
+		if !a.ConsumesOptionVar(v) {
+			bad = append(bad, v)
+		}
+	}
+
+	return bad
 }
 
 // Note: graith deliberately does NOT validate the *values* of these options
@@ -4732,8 +4816,9 @@ func (c *Config) Validate() error {
 				errs = append(errs, fmt.Errorf("agents.%s.option_args[%d]: args must not be empty", agentName, i))
 			}
 
-			if opt.When != "" && !IsTemplateVar(opt.When) {
-				errs = append(errs, fmt.Errorf("agents.%s.option_args[%d].when %q: not a known template variable", agentName, i, opt.When))
+			if opt.When != "" && !isOptionArgVar(opt.When) {
+				errs = append(errs, fmt.Errorf("agents.%s.option_args[%d].when %q: not a variable bound when option_args expand (allowed: %s)",
+					agentName, i, opt.When, strings.Join(optionArgTemplateVars, ", ")))
 			}
 		}
 

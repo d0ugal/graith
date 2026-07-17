@@ -149,8 +149,9 @@ func TestCodexOptsFromMsg(t *testing.T) {
 	}
 }
 
-// TestCreateRejectsCodexOptionsForNonCodexAgent locks the guard that Codex-only
-// options can't be silently dropped against another agent.
+// TestCreateRejectsCodexOptionsForNonCodexAgent locks the guard that a typed
+// option can't be silently dropped against an agent whose option_args don't
+// declare it — claude declares none, so a profile is rejected (issue #1236).
 func TestCreateRejectsCodexOptionsForNonCodexAgent(t *testing.T) {
 	sm := newTestSessionManager(t)
 
@@ -161,25 +162,42 @@ func TestCreateRejectsCodexOptionsForNonCodexAgent(t *testing.T) {
 		Rows:      24,
 		Cols:      80,
 	})
-	assertErrContains(t, err, "require --agent codex")
+	assertErrContains(t, err, "does not support option")
+	// The error must name the unsupported variable so a value is never silently
+	// dropped (issue #1236).
+	assertErrContains(t, err, "profile")
 }
 
-// TestCodexOptsForAgent locks the codex-only invariant used by fork/migrate:
-// options survive only when the target agent is codex, so a non-codex session
-// never persists an orphan codex block.
-func TestCodexOptsForAgent(t *testing.T) {
+// TestOptionsForAgent locks the capability-driven filter used by fork/migrate:
+// an option survives only when the target agent's option_args declare it, so a
+// non-codex target never persists an orphan option block while a codex (or a
+// custom alias that declares the same groups) keeps them.
+func TestOptionsForAgent(t *testing.T) {
+	codex := config.Default().Agents["codex"]
+	claude := config.Default().Agents["claude"]
 	opts := &config.CodexOptions{Profile: "braw"}
 
-	if got := codexOptsForAgent("codex", opts); got != opts {
-		t.Errorf("codexOptsForAgent(codex, …) = %v, want the same options", got)
+	if got := optionsForAgent(codex, opts); got == nil || got.Profile != "braw" {
+		t.Errorf("optionsForAgent(codex, …) = %v, want profile preserved", got)
 	}
 
-	if got := codexOptsForAgent("claude", opts); got != nil {
-		t.Errorf("codexOptsForAgent(claude, …) = %v, want nil", got)
+	if got := optionsForAgent(claude, opts); got != nil {
+		t.Errorf("optionsForAgent(claude, …) = %v, want nil (claude declares no option_args)", got)
 	}
 
-	if got := codexOptsForAgent("codex", nil); got != nil {
-		t.Errorf("codexOptsForAgent(codex, nil) = %v, want nil", got)
+	if got := optionsForAgent(codex, nil); got != nil {
+		t.Errorf("optionsForAgent(codex, nil) = %v, want nil", got)
+	}
+
+	// A custom alias that declares only the reasoning_effort group keeps that
+	// option and drops the profile it can't consume.
+	alias := config.Agent{OptionArgs: []config.AgentOptionArg{
+		{When: "reasoning_effort", Args: []string{"-c", "model_reasoning_effort={reasoning_effort}"}},
+	}}
+
+	got := optionsForAgent(alias, &config.CodexOptions{Profile: "braw", ReasoningEffort: "high"})
+	if got == nil || got.ReasoningEffort != "high" || got.Profile != "" {
+		t.Errorf("optionsForAgent(alias, …) = %v, want only reasoning_effort kept", got)
 	}
 }
 
@@ -259,6 +277,16 @@ func TestCodexModelPassedOnLaunchAndResume(t *testing.T) {
 func newCodexRecorderManager(t *testing.T, repoDir string) (*SessionManager, string) {
 	t.Helper()
 
+	return newAliasRecorderManager(t, repoDir, "codex")
+}
+
+// newAliasRecorderManager builds a SessionManager whose agent named agentName is
+// a recorder script that carries codex's typed-option option_args groups. When
+// agentName is not "codex" this proves a custom alias — not the literal name —
+// consumes the declared typed options (issue #1236).
+func newAliasRecorderManager(t *testing.T, repoDir, agentName string) (*SessionManager, string) {
+	t.Helper()
+
 	dir := t.TempDir()
 	recordPath := filepath.Join(dir, "argv.txt")
 
@@ -270,7 +298,7 @@ func newCodexRecorderManager(t *testing.T, repoDir string) (*SessionManager, str
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
-	cfg.Agents["codex"] = config.Agent{
+	cfg.Agents[agentName] = config.Agent{
 		Command:    "sh",
 		Args:       []string{"-c", script},
 		ResumeArgs: []string{"-c", script},
@@ -290,4 +318,73 @@ func newCodexRecorderManager(t *testing.T, repoDir string) (*SessionManager, str
 	}, slog.Default())
 
 	return sm, recordPath
+}
+
+// TestCustomAliasTypedOptionsAcrossLifecycle is the end-to-end regression for
+// issue #1236: a custom agent alias (not named "codex") that declares the typed
+// option_args groups must have its profile/reasoning-effort options accepted at
+// create and turned into real flags on create, resume, AND fork — the paths where
+// a name-based guard would otherwise reject or silently drop them.
+func TestCustomAliasTypedOptionsAcrossLifecycle(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh not available")
+	}
+
+	repoDir := initTempGitRepo(t)
+	sm, recordPath := newAliasRecorderManager(t, repoDir, "wrapx")
+
+	created, err := sm.Create(CreateOpts{
+		Name: "canny", AgentName: "wrapx", RepoPath: repoDir, BaseBranch: "main",
+		Model: "gpt-5.1-codex",
+		Codex: config.CodexOptions{Profile: "braw", ReasoningEffort: "high"},
+		Rows:  24, Cols: 80,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	id := created.ID
+
+	t.Cleanup(func() { stopAndClosePTY(sm, id) })
+
+	assertAliasOptions := func() {
+		t.Helper()
+
+		argv := waitForRecordedArgv(t, recordPath, "--profile")
+		assertContiguousPair(t, argv, "--profile", "braw")
+		assertContiguousPair(t, argv, "-c", "model_reasoning_effort=high")
+	}
+
+	assertAliasOptions()
+
+	// Resume (restart) must replay the persisted typed options.
+	if err := os.Remove(recordPath); err != nil {
+		t.Fatalf("remove record before resume: %v", err)
+	}
+
+	if err := sm.Stop(id); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+
+	waitForStatus(t, sm, id, StatusStopped)
+
+	if _, err := sm.Restart(id, 24, 80); err != nil {
+		t.Fatalf("Restart() error = %v", err)
+	}
+
+	assertAliasOptions()
+
+	// A same-agent fork must carry the source's typed options through.
+	if err := os.Remove(recordPath); err != nil {
+		t.Fatalf("remove record before fork: %v", err)
+	}
+
+	forked, err := sm.Fork("bairn", id, 24, 80)
+	if err != nil {
+		t.Fatalf("Fork() error = %v", err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, forked.ID) })
+
+	assertAliasOptions()
 }

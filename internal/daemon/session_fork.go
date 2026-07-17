@@ -182,10 +182,11 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		effectiveModel = targetModel
 	}
 
-	// A same-agent codex fork replays the source's typed Codex options (issue
-	// #1186); a cross-agent fork to another agent drops them (codexOptsForAgent),
-	// so a non-codex target never persists an orphan codex block.
-	sourceCodex := codexOptsForAgent(agentName, cloneCodexOptions(source.Codex))
+	// A same-agent fork replays the source's typed options (issue #1186); a
+	// cross-agent fork keeps only the options the target agent's option_args can
+	// consume (optionsForAgent) and drops the rest, so no unrepresentable option
+	// persists on the new agent (issue #1236).
+	sourceCodex := optionsForAgent(cfgSnapshot.Agents[agentName], cloneCodexOptions(source.Codex))
 
 	sourceAgentSessionID := source.AgentSessionID
 	sourceYolo := source.Yolo

@@ -371,19 +371,47 @@ func includeAddDirArgs(agent config.Agent, vars config.TemplateVars, includes []
 	return agent.AddDirArgsFor(vars, dirs)
 }
 
-// codexOptsForAgent enforces the codex-only invariant when a lifecycle op
-// changes a session's agent: it returns opts unchanged for a codex target and
-// nil otherwise, so codex-only options never persist on a non-codex session
-// (a cross-agent fork or a migrate away from codex). The create path enforces
-// the same rule up front with an explicit error; fork/migrate silently drop
-// them because the options belonged to the source agent, not a user choice for
-// the new one. Keeps state consistent with what Create would accept (#1186).
-func codexOptsForAgent(agentType string, opts *config.CodexOptions) *config.CodexOptions {
-	if agentType != "codex" {
+// optionsForAgent filters a source session's typed options to the ones the
+// target agent can actually consume when a lifecycle op changes agents (a
+// cross-agent fork or a migrate). An option the target's option_args don't
+// declare is dropped, so no unrepresentable option persists on the new agent
+// (a non-codex fork/migrate drops every codex option; a codex→codex op keeps
+// them all). The create path rejects unsupported options with an explicit error
+// instead; fork/migrate drop silently because the options belonged to the source
+// agent, not a user choice for the new one. Capability comes from the agent
+// definition, not a literal name, so a custom alias inherits them (#1186/#1236).
+func optionsForAgent(agent config.Agent, opts *config.CodexOptions) *config.CodexOptions {
+	if opts == nil {
 		return nil
 	}
 
-	return opts
+	filtered := *opts
+
+	if !agent.ConsumesOptionVar("profile") {
+		filtered.Profile = ""
+	}
+
+	if !agent.ConsumesOptionVar("reasoning_effort") {
+		filtered.ReasoningEffort = ""
+	}
+
+	if !agent.ConsumesOptionVar("service_tier") {
+		filtered.ServiceTier = ""
+	}
+
+	if !agent.ConsumesOptionVar("web_search") {
+		filtered.WebSearch = false
+	}
+
+	if !agent.ConsumesOptionVar("approval_policy") {
+		filtered.ApprovalPolicy = ""
+	}
+
+	if filtered.IsZero() {
+		return nil
+	}
+
+	return &filtered
 }
 
 // cloneCodexOptions returns an independent copy of opts (or nil), so a fork's or
