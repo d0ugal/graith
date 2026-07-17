@@ -38,10 +38,16 @@ func setup(t *testing.T, mutators ...func(*config.Config)) *testEnv {
 func setupWithState(t *testing.T, initialState *daemon.State, mutators ...func(*config.Config)) *testEnv {
 	t.Helper()
 
-	return setupAt(t, t.TempDir(), mutators...)
+	return setupAtWithState(t, t.TempDir(), initialState, mutators...)
 }
 
 func setupAt(t *testing.T, tmpDir string, mutators ...func(*config.Config)) *testEnv {
+	t.Helper()
+
+	return setupAtWithState(t, tmpDir, nil, mutators...)
+}
+
+func setupAtWithState(t *testing.T, tmpDir string, initialState *daemon.State, mutators ...func(*config.Config)) *testEnv {
 	t.Helper()
 	testutil.IsolateGit(t)
 
