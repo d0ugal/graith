@@ -1061,8 +1061,8 @@ type ScenarioSessionInfo struct {
 	// items assigned to it (issue #591). They replace the former one-bit
 	// `task_done`. Required results form the other side of the member completion
 	// contract; TodoTotal == 0 means there is no todo work to gate.
-	TodoDone  int                  `json:"todo_done,omitempty"`
-	TodoTotal int                  `json:"todo_total,omitempty"`
+	TodoDone  int `json:"todo_done,omitempty"`
+	TodoTotal int `json:"todo_total,omitempty"`
 	// BlockedBy names scenario members whose seeded assigned tasks are not yet
 	// done, when this member's seeded task is dependency-blocked.
 	BlockedBy []string             `json:"blocked_by,omitempty"`
