@@ -6,11 +6,13 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-// TestScrollbackFetchLinesResolvesFromLimits proves attach scroll mode requests
-// the configured [limits] log_lines count instead of the old hard-coded 2,000,
-// and that unset/invalid values delegate to the daemon default by sending 0
-// rather than the client duplicating the default literal (issue #1320).
-func TestScrollbackFetchLinesResolvesFromLimits(t *testing.T) {
+// TestScrollbackFetchLinesAlwaysDelegates proves attach scroll mode always sends
+// the daemon-default sentinel (0) rather than the client's config snapshot.
+// Attach is a long-lived process, so a positive cfg.Limits.LogLines captured at
+// connect time would be re-sent on every scroll entry / reconnect and bypass a
+// daemon hot reload of log_lines. Sending 0 keeps the daemon's *current* default
+// authoritative on every reconnect (issue #1320 round-4).
+func TestScrollbackFetchLinesAlwaysDelegates(t *testing.T) {
 	oldCfg := cfg
 
 	t.Cleanup(func() { cfg = oldCfg })
@@ -18,37 +20,28 @@ func TestScrollbackFetchLinesResolvesFromLimits(t *testing.T) {
 	tests := []struct {
 		name string
 		cfg  *config.Config
-		want int
 	}{
 		{
-			// Non-default regression: a raised limit must be requested verbatim.
-			name: "custom raised value requested verbatim",
+			// The bug: a positive snapshot must NOT be re-sent; the daemon's
+			// hot-reloaded default must win, so 0 is sent.
+			name: "raised snapshot still delegates",
 			cfg:  &config.Config{Limits: config.LimitsConfig{LogLines: 4321}},
-			want: 4321,
 		},
 		{
-			// A lowered limit (memory/privacy) is honoured too, no longer stuck at 2000.
-			name: "custom lowered value requested verbatim",
+			name: "lowered snapshot still delegates",
 			cfg:  &config.Config{Limits: config.LimitsConfig{LogLines: 50}},
-			want: 50,
 		},
 		{
-			// Unset: send 0 so the daemon applies LogLinesOrDefault (delegation).
-			name: "unset delegates to daemon default",
+			name: "unset delegates",
 			cfg:  &config.Config{Limits: config.LimitsConfig{LogLines: 0}},
-			want: 0,
 		},
 		{
-			// Defensive: an invalid negative value must not be sent as a negative
-			// line count; it collapses to 0 so the daemon applies its default.
-			name: "negative value collapses to delegation",
+			name: "negative snapshot still delegates",
 			cfg:  &config.Config{Limits: config.LimitsConfig{LogLines: -17}},
-			want: 0,
 		},
 		{
-			name: "nil config delegates to daemon default",
+			name: "nil config delegates",
 			cfg:  nil,
-			want: 0,
 		},
 	}
 
@@ -56,30 +49,33 @@ func TestScrollbackFetchLinesResolvesFromLimits(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg = tc.cfg
 
-			if got := scrollbackFetchLines(); got != tc.want {
-				t.Fatalf("scrollbackFetchLines() = %d, want %d", got, tc.want)
+			if got := scrollbackFetchLines(); got != 0 {
+				t.Fatalf("scrollbackFetchLines() = %d, want 0 (daemon-default sentinel on every reconnect)", got)
 			}
 		})
 	}
 }
 
 // TestScrollbackFetchLinesMatchesDaemonDelegation proves the client's delegation
-// sentinel (0) resolves, on the daemon side, to the same LogLinesOrDefault value
-// the configured count would use — so the client never duplicates the default.
+// sentinel (0) resolves, on the daemon side, to the daemon's current
+// LogLinesOrDefault — so a hot-reloaded log_lines takes effect and the client
+// never duplicates the default literal.
 func TestScrollbackFetchLinesMatchesDaemonDelegation(t *testing.T) {
 	oldCfg := cfg
 
 	t.Cleanup(func() { cfg = oldCfg })
 
-	cfg = &config.Config{Limits: config.LimitsConfig{LogLines: 0}}
+	// Even with a stale positive client snapshot, the sentinel is sent...
+	cfg = &config.Config{Limits: config.LimitsConfig{LogLines: 999}}
 
 	if got := scrollbackFetchLines(); got != 0 {
 		t.Fatalf("scrollbackFetchLines() = %d, want 0 (delegation sentinel)", got)
 	}
 
-	// The daemon's logs handler treats a <= 0 count as LogLinesOrDefault, so the
-	// effective scroll-mode fetch equals the shared default rather than 2,000.
-	if got := cfg.Limits.LogLinesOrDefault(); got != config.LimitsLogLinesDefault {
+	// ...and the daemon (whose config generation is authoritative) maps a <= 0
+	// count onto its own current default rather than 2,000 or the client value.
+	daemonCfg := &config.Config{Limits: config.LimitsConfig{LogLines: 0}}
+	if got := daemonCfg.Limits.LogLinesOrDefault(); got != config.LimitsLogLinesDefault {
 		t.Fatalf("LogLinesOrDefault() = %d, want %d", got, config.LimitsLogLinesDefault)
 	}
 }
