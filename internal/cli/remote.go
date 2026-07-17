@@ -31,46 +31,58 @@ var remotePairCmd = &cobra.Command{
 	Short: "Pair this device with a remote daemon (approve with `gr pair approve` on the host)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(_ *cobra.Command, args []string) error {
-		host := args[0]
-
-		store, err := client.LoadRemoteHostStore(client.RemoteHostsPath(paths.DataDir))
-		if err != nil {
-			return err
-		}
-
-		_, pubB64, err := store.EnsureDeviceKey()
-		if err != nil {
-			return err
-		}
-
-		// Persist the device key up front so an interrupted pairing (which can
-		// block for a while awaiting local approval) doesn't lose it.
-		if err := store.Save(); err != nil {
-			return err
-		}
-
-		label := remotePairLabel
-		if label == "" {
-			label, _ = os.Hostname()
-		}
-
-		out.Printf("Requesting pairing with %s:%d as %q — approve on the remote host: gr pair approve <id>\n", host, remotePairPort, label)
-
-		rh, err := client.PairRemote(paths, host, remotePairPort, remotePairProfile, label, pubB64)
-		if err != nil {
-			return err
-		}
-
-		store.Put(rh)
-
-		if err := store.Save(); err != nil {
-			return err
-		}
-
-		out.Printf("Paired with %s (profile %q, TLS pin %s)\n", rh.Host, rh.Profile, rh.TLSPin)
-
-		return nil
+		return runRemotePair(paths, args[0], remotePairPort, remotePairProfile, remotePairLabel, client.PairRemote, out.Printf)
 	},
+}
+
+// pairRemoteFn is the network pairing step, injectable so runRemotePair can be
+// driven deterministically in tests without a live daemon.
+type pairRemoteFn func(paths config.Paths, host string, port int, profile, deviceLabel, devicePubKey string) (*client.RemoteHost, error)
+
+// runRemotePair drives `gr remote pair`: it ensures + durably persists the device
+// key, runs the pairing exchange, and reports the result.
+//
+// The pairing exchange (PairRemote → completePairing → persistPairedHost) already
+// durably persists the paired host to a *freshly loaded* store BEFORE the receipt
+// ack, and that save is the single authoritative one (issue #1299). The `store`
+// loaded here is only used to mint/persist the device key up front; it is a stale
+// snapshot from before the (potentially minutes-long) pairing round-trip. Re-Put +
+// Save of that stale store after success would rewrite the whole file from
+// pre-pairing state — clobbering any concurrent host update made during pairing and
+// possibly surfacing a spurious post-success failure even though the credential and
+// the daemon's commit are already durable. So there is deliberately no follow-up
+// write of the outer store.
+func runRemotePair(paths config.Paths, host string, port int, profile, label string, pair pairRemoteFn, printf func(string, ...any)) error {
+	store, err := client.LoadRemoteHostStore(client.RemoteHostsPath(paths.DataDir))
+	if err != nil {
+		return err
+	}
+
+	_, pubB64, err := store.EnsureDeviceKey()
+	if err != nil {
+		return err
+	}
+
+	// Persist the device key up front so an interrupted pairing (which can
+	// block for a while awaiting local approval) doesn't lose it.
+	if err := store.Save(); err != nil {
+		return err
+	}
+
+	if label == "" {
+		label, _ = os.Hostname()
+	}
+
+	printf("Requesting pairing with %s:%d as %q — approve on the remote host: gr pair approve <id>\n", host, port, label)
+
+	rh, err := pair(paths, host, port, profile, label, pubB64)
+	if err != nil {
+		return err
+	}
+
+	printf("Paired with %s (profile %q, TLS pin %s)\n", rh.Host, rh.Profile, rh.TLSPin)
+
+	return nil
 }
 
 var remoteListCmd = &cobra.Command{

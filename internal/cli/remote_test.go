@@ -209,3 +209,72 @@ func TestRemoteHostsPathLayout(t *testing.T) {
 		t.Errorf("RemoteHostsPath = %q, want %q", got, want)
 	}
 }
+
+// TestRunRemotePairKeepsConcurrentHostUpdate proves the receipt-critical save
+// inside the pairing exchange is authoritative: a concurrent second-host update
+// landing between that durable pre-ACK save and the command's return must not be
+// clobbered, and no spurious post-success failure may be surfaced (issue #1299).
+//
+// It exercises the exact stale-outer-store race: runRemotePair loads a store to
+// mint the device key, then the pairing step (a) durably persists the paired host
+// to a freshly loaded store — the single authoritative save — and (b) simulates
+// another process durably adding a different host during the round-trip. The old
+// code re-Put + Saved the stale outer snapshot after success, which rewrote the
+// file from pre-pairing state and dropped the concurrent host.
+func TestRunRemotePairKeepsConcurrentHostUpdate(t *testing.T) {
+	dir := t.TempDir()
+	paths := config.Paths{DataDir: dir}
+
+	pair := func(p config.Paths, host string, port int, profile, _, _ string) (*client.RemoteHost, error) {
+		// (a) The authoritative receipt-critical save persistPairedHost performs:
+		// load a FRESH store (so the up-front device key survives) and durably
+		// commit the paired host before the ack.
+		s, err := client.LoadRemoteHostStore(client.RemoteHostsPath(p.DataDir))
+		if err != nil {
+			return nil, err
+		}
+
+		rh := &client.RemoteHost{Host: host, Port: port, Token: "tok-braw", TLSPin: "cGlu", Profile: profile}
+		s.Put(rh)
+
+		if err := s.Save(); err != nil {
+			return nil, err
+		}
+
+		// (b) A concurrent update from another process adds a *different* host
+		// after the authoritative save but before the command returns.
+		other, err := client.LoadRemoteHostStore(client.RemoteHostsPath(p.DataDir))
+		if err != nil {
+			return nil, err
+		}
+
+		other.Put(&client.RemoteHost{Host: "canny.tail.ts.net", Port: 7420, Token: "tok-canny", TLSPin: "cGlu2"})
+
+		if err := other.Save(); err != nil {
+			return nil, err
+		}
+
+		return rh, nil
+	}
+
+	if err := runRemotePair(paths, "ben.tail.ts.net", 7420, "", "bothy", pair, func(string, ...any) {}); err != nil {
+		t.Fatalf("runRemotePair returned a spurious post-success failure: %v", err)
+	}
+
+	final, err := client.LoadRemoteHostStore(client.RemoteHostsPath(dir))
+	if err != nil {
+		t.Fatalf("reload store: %v", err)
+	}
+
+	if _, ok := final.Get("ben.tail.ts.net"); !ok {
+		t.Errorf("paired host ben.tail.ts.net missing after pairing")
+	}
+
+	if _, ok := final.Get("canny.tail.ts.net"); !ok {
+		t.Errorf("concurrent host canny.tail.ts.net was clobbered by a stale outer save")
+	}
+
+	if final.DeviceKey == "" {
+		t.Errorf("device key lost after pairing")
+	}
+}
