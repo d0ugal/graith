@@ -476,7 +476,9 @@ those results are available. Optional results never block completion. The
 scenario as a whole is complete once every member with tracked todos or
 required results is complete. `gr scenario status` renders per-member
 `done/total`, **WAITING ON** names, and result state from those durable records;
-JSON uses `blocked_by` for dependencies.
+JSON uses `blocked_by` for dependencies. Completion actions and lifecycle
+cleanup use this same gate, so neither starts while a required result is
+pending, invalid, or failed.
 
 The original member-to-seed identity is durable. Reassigning a seeded item
 changes current responsibility and progress accounting, but later

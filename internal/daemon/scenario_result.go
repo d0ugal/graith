@@ -255,20 +255,25 @@ func validateScenarioResultBody(result ScenarioResultState, body string) error {
 
 func (sm *SessionManager) updateScenarioResult(ref scenarioResultRef, update ScenarioResultState) (protocol.ScenarioResultInfo, error) {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
 
 	scenario := sm.state.Scenarios[ref.scenarioID]
 	if scenario == nil || ref.memberIndex >= len(scenario.Sessions) || ref.memberIndex >= len(scenario.SessionIDs) {
+		sm.mu.Unlock()
+
 		return protocol.ScenarioResultInfo{}, errors.New("scenario was deleted during result publication")
 	}
 
 	member := &scenario.Sessions[ref.memberIndex]
 	if scenario.SessionIDs[ref.memberIndex] == "" || ref.resultIndex >= len(member.Results) {
+		sm.mu.Unlock()
+
 		return protocol.ScenarioResultInfo{}, errors.New("result declaration changed during publication")
 	}
 
 	current := &member.Results[ref.resultIndex]
 	if current.Name != ref.result.Name || current.Destination != ref.result.Destination {
+		sm.mu.Unlock()
+
 		return protocol.ScenarioResultInfo{}, errors.New("result declaration changed during publication")
 	}
 
@@ -277,10 +282,17 @@ func (sm *SessionManager) updateScenarioResult(ref scenarioResultRef, update Sce
 	*current = update
 	if err := sm.saveState(); err != nil {
 		*current = previous
+		sm.mu.Unlock()
+
 		return protocol.ScenarioResultInfo{}, fmt.Errorf("persist result metadata: %w", err)
 	}
 
-	return scenarioResultInfo(*current), nil
+	info := scenarioResultInfo(*current)
+	sm.mu.Unlock()
+
+	sm.hintScenarioCompletion("scenario:" + ref.scenarioID)
+
+	return info, nil
 }
 
 func (sm *SessionManager) recordScenarioResultFailure(ref scenarioResultRef, status ScenarioResultStatus, publicationErr error) error {
