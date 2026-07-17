@@ -115,8 +115,11 @@ func TestHandlePairApproveStagesPendingBeforeCommit(t *testing.T) {
 		}
 
 		appr.delivered <- nil // delivery confirmed → staged pin fires
-		<-ackGate             // hold before acknowledging
+
+		<-ackGate // hold before acknowledging
+
 		appr.receipt <- nil
+
 		<-appr.committed
 	}()
 
@@ -180,6 +183,7 @@ func approveReplies(t *testing.T, sm *SessionManager, requestID string, driveWai
 
 	send := func(msgType string, _ any) {
 		mu.Lock()
+
 		sent = append(sent, msgType)
 		mu.Unlock()
 	}
@@ -297,6 +301,7 @@ func TestApprovePairingNoStagedPinWhenDeliveryFails(t *testing.T) {
 		}
 
 		appr.delivered <- errSimulatedNoReceipt
+
 		<-appr.committed
 	}()
 
@@ -369,9 +374,12 @@ func TestApprovePairingRollsBackOnDisconnectBeforeAck(t *testing.T) {
 
 		// pair_response was delivered; then the requester vanishes before acking.
 		appr.delivered <- nil
+
 		close(began)
 		<-disconnected
+
 		appr.receipt <- errSimulatedNoReceipt
+
 		<-appr.committed
 	}()
 
@@ -385,6 +393,7 @@ func TestApprovePairingRollsBackOnDisconnectBeforeAck(t *testing.T) {
 
 	go func() {
 		deviceID, token, apErr = sm.ApprovePairing(rid, false, now)
+
 		close(done)
 	}()
 
@@ -439,6 +448,7 @@ func TestApprovePairingRollsBackOnReceiptTimeout(t *testing.T) {
 		}
 
 		appr.delivered <- nil
+
 		<-appr.committed // eventually receives the abandon outcome
 	}()
 

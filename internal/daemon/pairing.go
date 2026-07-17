@@ -392,6 +392,7 @@ func (sm *SessionManager) ApprovePairing(requestID string, readOnly bool, now ti
 	sm.mu.Lock()
 	sm.state.PairedDevices[deviceID] = device
 	sm.deviceTokenIndex[hash] = deviceID
+
 	saveErr := sm.saveState()
 	if saveErr != nil {
 		// Roll the in-memory index back so this running daemon doesn't serve a
@@ -410,6 +411,7 @@ func (sm *SessionManager) ApprovePairing(requestID string, readOnly bool, now ti
 	// to the requester. A later pair_committed write failure does NOT roll the
 	// device back: receipt was already acknowledged and the device is durable.
 	approval.committed <- saveErr
+
 	if saveErr != nil {
 		if sm.log != nil {
 			sm.log.Error("pairing state save failed; in-memory index rolled back, durable outcome unknown until reload", "device", deviceID, "request_id", requestID, "err", saveErr)
@@ -440,14 +442,14 @@ func awaitPairingDelivered(delivered <-chan error, waiter *pairWaiter, now time.
 		case err := <-delivered:
 			return err
 		default:
-			return fmt.Errorf("requester disconnected before pair_response was delivered")
+			return errors.New("requester disconnected before pair_response was delivered")
 		}
 	case <-timer.C:
 		select {
 		case err := <-delivered:
 			return err
 		default:
-			return fmt.Errorf("pair_response delivery timed out")
+			return errors.New("pair_response delivery timed out")
 		}
 	}
 }
@@ -470,14 +472,14 @@ func awaitPairingReceipt(receipt <-chan error, waiter *pairWaiter, now time.Time
 		case err := <-receipt:
 			return err
 		default:
-			return fmt.Errorf("requester disconnected before acknowledging receipt")
+			return errors.New("requester disconnected before acknowledging receipt")
 		}
 	case <-timer.C:
 		select {
 		case err := <-receipt:
 			return err
 		default:
-			return fmt.Errorf("receipt acknowledgement timed out")
+			return errors.New("receipt acknowledgement timed out")
 		}
 	}
 }

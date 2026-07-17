@@ -431,6 +431,49 @@ struct ClientIntegrationTests {
         await client.close()
     }
 
+    /// Cross-version over the real protocol path (issue #1299): a legacy daemon
+    /// omits request_id and sends no pair_committed. The client must complete
+    /// WITHOUT sending a pair_ack (an old daemon can't handle it) — proven by the
+    /// daemon observing the connection close rather than another control frame.
+    @Test func legacyDaemonPairingSendsNoAck() async throws {
+        let pin = "bide-spki-pin=="
+        let (clientStream, serverStream) = InMemoryByteStream.makePair(clientSimulatedPin: pin)
+        let daemon = MockDaemon(stream: serverStream)
+        let signer = TestSigner(deviceID: "")
+
+        let server = Task {
+            _ = try await daemon.readControl() // handshake
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("auth_challenge", AuthChallengeMsg(nonce: "haar"))
+            let pair = try await daemon.readControl()
+            #expect(pair.type == "pair_request")
+            // Legacy response: no request_id, and no pair_committed follow-up.
+            try await daemon.writeControl("pair_response", PairResponseMsg(
+                deviceID: "dev-legacy", clientToken: "tok-legacy", daemonProfile: "", tlsPinSPKI: pin))
+            // The client must send NOTHING more: the next read should fail (the
+            // client closed the connection), not surface a pair_ack.
+            do {
+                let extra = try await daemon.readControl()
+                Issue.record("legacy pairing must not send a follow-up frame, got \(extra.type)")
+            } catch {
+                // Expected: connection closed with no pair_ack.
+            }
+        }
+
+        let stream = clientStream
+        let client = GraithProtocolClient(
+            transport: .remote(host: "ben", port: 4823, tlsPinSPKI: nil),
+            profile: "", clientID: "app", token: nil, signer: signer,
+            streamFactory: { _ in stream }
+        )
+        let (resp, conn) = try await client.beginPairing(deviceLabel: "legacy-phone")
+        #expect(resp.requestID == "", "legacy daemon omits request_id")
+        // ackPairing no-ops for a legacy response (no ack sent) and closes.
+        try await client.ackPairing(on: conn, response: resp)
+        _ = await server.result
+        await client.close()
+    }
+
     /// Pairing binds TOFU: if the pin the daemon reports differs from the SPKI of
     /// the cert actually presented on the handshake, pairing is refused (MITM).
     @Test func pairingRejectsPinMismatch() async throws {

@@ -459,6 +459,7 @@ func TestPersistPairedHostRollsBackOnSaveFailure(t *testing.T) {
 	seed.DeviceKey = "device-key-x"
 	seed.Put(&RemoteHost{Host: "ben", Port: 1, Token: "tok-1", TLSPin: "pin-1", Profile: "prof-1"})
 	seed.Put(&RemoteHost{Host: "other", Port: 2, Token: "tok-other", TLSPin: "pin-other", Profile: "prof-other"})
+
 	if err := seed.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -477,6 +478,7 @@ func TestPersistPairedHostRollsBackOnSaveFailure(t *testing.T) {
 	remoteHostsWrite = func(path string, data []byte, perm os.FileMode) error {
 		calls++
 		_ = os.WriteFile(path, data, perm) // the data lands even though we error
+
 		if calls == 1 {
 			return errors.New("simulated post-rename fsync failure")
 		}
@@ -621,6 +623,7 @@ func TestCompletePairingLegacyDaemonResponse(t *testing.T) {
 
 	// Close our side so the daemon's ReadFrame returns; assert no pair_ack was sent.
 	_ = clientConn.Close()
+
 	if <-ackSeen {
 		t.Fatal("client must not send pair_ack to a legacy daemon")
 	}

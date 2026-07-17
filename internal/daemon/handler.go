@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -360,9 +361,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 								appr.receipt <- nil
 							}
 						case <-timer.C:
-							appr.receipt <- fmt.Errorf("no pair_ack before deadline")
+							appr.receipt <- errors.New("no pair_ack before deadline")
 						case <-connDone:
-							appr.receipt <- fmt.Errorf("requester disconnected before pair_ack")
+							appr.receipt <- errors.New("requester disconnected before pair_ack")
 						}
 
 						// Learn whether the durable commit succeeded and tell the

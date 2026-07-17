@@ -412,7 +412,7 @@ func (c *Client) persistPairedHost(rh *RemoteHost) error {
 		}
 
 		if rbErr := store.Save(); rbErr != nil {
-			return fmt.Errorf("persist paired host before ack: %w; rollback also failed: %v", saveErr, rbErr)
+			return fmt.Errorf("persist paired host before ack: %w; rollback also failed: %w", saveErr, rbErr)
 		}
 
 		return fmt.Errorf("persist paired host before ack: %w", saveErr)

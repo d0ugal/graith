@@ -584,6 +584,15 @@ public actor GraithProtocolClient {
     /// retain the stored credential — there is deliberately no "safe to discard"
     /// path here.
     public func ackPairing(on conn: GraithConnection, response: PairResponseMsg) async throws {
+        // Cross-version: a legacy (pre-receipt) daemon omits request_id — it already
+        // committed the device during `gr pair approve` and understands neither
+        // pair_ack nor pair_committed. Complete without sending anything, so an old
+        // daemon is never sent a frame it can't handle (issue #1299).
+        if response.requestID.isEmpty {
+            await conn.close()
+            return
+        }
+
         do {
             try await conn.send(control: "pair_ack",
                                 payload: PairAckMsg(requestID: response.requestID, deviceID: response.deviceID))

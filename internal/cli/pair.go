@@ -117,6 +117,7 @@ func runPairApproveLoop(read func() (protocol.Envelope, error), printf func(stri
 
 			if pp.TLSPinSPKI != "" {
 				printf("TLS SPKI pin: %s\n", pp.TLSPinSPKI)
+
 				pinPrinted = true
 			}
 

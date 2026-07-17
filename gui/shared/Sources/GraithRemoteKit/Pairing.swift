@@ -87,17 +87,9 @@ final class RealPairingSession: PairingSession {
     }
 
     func ackAndAwaitCommit() async throws {
-        // Cross-version: a legacy (pre-receipt) daemon omits request_id — it already
-        // committed the device during `gr pair approve` and understands neither
-        // pair_ack nor pair_committed. Completing without acking avoids stranding the
-        // device (issue #1299). The credential has already been durably stored by
-        // the coordinator before this call.
-        if response.requestID.isEmpty {
-            await connection.close()
-            await client.close()
-            return
-        }
-
+        // ackPairing itself no-ops for a legacy (empty request_id) response — the
+        // old daemon already committed and understands no receipt handshake (issue
+        // #1299) — so this calls it uniformly.
         do {
             try await client.ackPairing(on: connection, response: response)
             await client.close()

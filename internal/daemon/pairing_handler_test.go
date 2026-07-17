@@ -303,12 +303,14 @@ func TestPairAckRejectedBeforeResponse(t *testing.T) {
 
 	// An empty request_id is rejected: it must not preload the receipt channel.
 	rc.send(t, "pair_ack", protocol.PairAckMsg{}, "")
+
 	if env := rc.read(t); env.Type != "error" {
 		t.Fatalf("empty-request_id pair_ack before pair_response: expected error, got %q", env.Type)
 	}
 
 	// A guessed/wrong request_id is likewise rejected.
 	rc.send(t, "pair_ack", protocol.PairAckMsg{RequestID: "guessed-rid"}, "")
+
 	if env := rc.read(t); env.Type != "error" {
 		t.Fatalf("wrong-request_id pair_ack before pair_response: expected error, got %q", env.Type)
 	}
@@ -345,6 +347,7 @@ func TestSecondPairRequestRejectedOnOneConnection(t *testing.T) {
 	}
 
 	rc.send(t, "pair_request", protocol.PairRequestMsg{DeviceLabel: "skelf", DevicePubKey: pubB64, ReceiptAck: true}, "")
+
 	if env := rc.read(t); env.Type != "error" {
 		t.Fatalf("second pair_request on one connection: expected error, got %q", env.Type)
 	}
@@ -367,6 +370,7 @@ func TestPairRequestRejectsLegacyClient(t *testing.T) {
 
 	// No ReceiptAck: the legacy shape.
 	rc.send(t, "pair_request", protocol.PairRequestMsg{DeviceLabel: "bairn", DevicePubKey: base64.StdEncoding.EncodeToString(pub)}, "")
+
 	if env := rc.read(t); env.Type != "error" {
 		t.Fatalf("legacy pair_request without receipt_ack: expected error, got %q", env.Type)
 	}
