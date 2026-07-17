@@ -35,6 +35,7 @@ type scenarioFileMeta struct {
 type scenarioFileSession struct {
 	Name       string               `toml:"name"`
 	Repo       string               `toml:"repo"`
+	Mirror     string               `toml:"mirror"`
 	Agent      string               `toml:"agent"`
 	Model      string               `toml:"model"`
 	Base       string               `toml:"base"`
@@ -117,6 +118,18 @@ func parseScenarioFile(data []byte) (*scenarioFile, error) {
 		return nil, err
 	}
 
+	mirrorMembers := make([]scenariofile.MirrorMember, len(sf.Sessions))
+	for i, s := range sf.Sessions {
+		mirrorMembers[i] = scenariofile.MirrorMember{
+			Name: s.Name, Mirror: s.Mirror, Repo: s.Repo, Base: s.Base,
+			Shared: s.Shared, Includes: len(s.Includes),
+		}
+	}
+
+	if _, err := scenariofile.ValidateMirrorMembers(mirrorMembers); err != nil {
+		return nil, err
+	}
+
 	roles := make(map[string]bool, len(sf.Sessions))
 	members := make(map[string]bool, len(sf.Sessions))
 	ownedMembers := make(map[string]bool, len(sf.Sessions))
@@ -145,17 +158,24 @@ func parseScenarioFile(data []byte) (*scenarioFile, error) {
 }
 
 func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, error) {
-	sessions := make([]protocol.ScenarioSessionInput, len(sf.Sessions))
+	var (
+		sessions      = make([]protocol.ScenarioSessionInput, len(sf.Sessions))
+		mirrorMembers = make([]scenariofile.MirrorMember, len(sf.Sessions))
+	)
+
 	for i, s := range sf.Sessions {
 		if s.Name == "" {
 			return nil, fmt.Errorf("session %d: name is required", i)
 		}
 
-		if s.Repo == "" {
+		if s.Repo == "" && !s.Shared && s.Mirror == "" {
 			return nil, fmt.Errorf("session %q: repo is required", s.Name)
 		}
 
-		repo := config.ExpandPath(s.Repo)
+		repo := ""
+		if s.Repo != "" {
+			repo = config.ExpandPath(s.Repo)
+		}
 
 		var includes []string
 		if len(s.Includes) > 0 {
@@ -175,6 +195,7 @@ func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, erro
 		sessions[i] = protocol.ScenarioSessionInput{
 			Name:       s.Name,
 			Repo:       repo,
+			Mirror:     s.Mirror,
 			Agent:      s.Agent,
 			Model:      s.Model,
 			Base:       s.Base,
@@ -187,6 +208,14 @@ func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, erro
 			Star:       s.Star,
 			Results:    results,
 		}
+		mirrorMembers[i] = scenariofile.MirrorMember{
+			Name: s.Name, Mirror: s.Mirror, Repo: s.Repo, Base: s.Base,
+			Shared: s.Shared, Includes: len(s.Includes),
+		}
+	}
+
+	if _, err := scenariofile.ValidateMirrorMembers(mirrorMembers); err != nil {
+		return nil, err
 	}
 
 	if err := scenariofile.ValidateSessionDependencies(sessions); err != nil {
@@ -495,7 +524,7 @@ var scenarioStatusCmd = &cobra.Command{
 		out.Printf("Goal: %s\n\n", sc.Goal)
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		_, _ = fmt.Fprintf(tw, "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tPROGRESS\tWAITING ON\tRESULTS\tSHARED\n")
+		_, _ = fmt.Fprintf(tw, "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tPROGRESS\tWAITING ON\tMIRROR\tRESULTS\tSHARED\n")
 
 		for _, s := range sc.Sessions {
 			// Progress is derived from the member's assigned todo items (issue
@@ -510,9 +539,9 @@ var scenarioStatusCmd = &cobra.Command{
 				shared = "yes"
 			}
 
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				s.Name, s.SessionID, s.Status, s.Agent, s.Role, progress,
-				strings.Join(s.BlockedBy, ","), formatScenarioResultStatus(s.Results), shared)
+				strings.Join(s.BlockedBy, ","), s.Mirror, formatScenarioResultStatus(s.Results), shared)
 		}
 
 		_ = tw.Flush()

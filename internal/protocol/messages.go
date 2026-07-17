@@ -942,13 +942,17 @@ type ScenarioStartMsg struct {
 }
 
 type ScenarioSessionInput struct {
-	Name  string `json:"name"`
-	Repo  string `json:"repo"`
-	Agent string `json:"agent,omitempty"`
-	Model string `json:"model,omitempty"`
-	Base  string `json:"base,omitempty"`
-	Role  string `json:"role,omitempty"`
-	Task  string `json:"task,omitempty"`
+	Name string `json:"name"`
+	Repo string `json:"repo"`
+	// Mirror names another member in this scenario whose session worktree this
+	// member must view read-only. It is a scenario-local reference, not a daemon
+	// session selector or filesystem path.
+	Mirror string `json:"mirror,omitempty"`
+	Agent  string `json:"agent,omitempty"`
+	Model  string `json:"model,omitempty"`
+	Base   string `json:"base,omitempty"`
+	Role   string `json:"role,omitempty"`
+	Task   string `json:"task,omitempty"`
 	// DependsOn names scenario members whose seeded assigned todo items must be
 	// done before this member's seeded task becomes claimable (issue #641).
 	DependsOn  []string `json:"depends_on,omitempty"`
@@ -1055,6 +1059,7 @@ type ScenarioCleanupInfo struct {
 type ScenarioSessionInfo struct {
 	Name      string `json:"name"`
 	SessionID string `json:"session_id"`
+	Mirror    string `json:"mirror,omitempty"`
 	Role      string `json:"role,omitempty"`
 	Task      string `json:"task,omitempty"`
 	// TodoDone / TodoTotal report the member's progress derived from the todo

@@ -126,7 +126,7 @@ func TestBuildScenarioRecord(t *testing.T) {
 		Goal:       "kirk-goal",
 		SessionIDs: []string{"braw-s1", "bonnie-s2"},
 		Sessions: []ScenarioSession{
-			{Name: "braw-forge", Role: "braw-forge dev", Repo: "croft-forge", Agent: "claude"},
+			{Name: "braw-forge", Mirror: "bonnie-loom", Role: "braw-forge dev", Repo: "croft-forge", Agent: "claude"},
 			{Name: "bonnie-loom", Role: "bonnie-loom dev", Repo: "croft-loom", Agent: "claude"},
 		},
 	}
@@ -144,6 +144,10 @@ func TestBuildScenarioRecord(t *testing.T) {
 
 	if record.Sessions[0].Status != "running" {
 		t.Errorf("session[0].Status = %q, want %q", record.Sessions[0].Status, "running")
+	}
+
+	if record.Sessions[0].Mirror != "bonnie-loom" {
+		t.Errorf("session[0].Mirror = %q, want bonnie-loom", record.Sessions[0].Mirror)
 	}
 
 	if record.Sessions[1].Status != "stopped" {
@@ -340,6 +344,36 @@ func TestStartScenarioValidation(t *testing.T) {
 			},
 			wantErr: "unsupported format",
 		},
+		{
+			name: "missing mirror target",
+			msg: protocol.ScenarioStartMsg{
+				CallerSessionID: "ben-orch", Name: "strath-neep",
+				Sessions: []protocol.ScenarioSessionInput{{Name: "reader", Mirror: "outsider"}},
+			},
+			wantErr: "not a member of this scenario",
+		},
+		{
+			name: "cyclic mirror targets",
+			msg: protocol.ScenarioStartMsg{
+				CallerSessionID: "ben-orch", Name: "strath-neep",
+				Sessions: []protocol.ScenarioSessionInput{
+					{Name: "reader-a", Mirror: "reader-b"},
+					{Name: "reader-b", Mirror: "reader-a"},
+				},
+			},
+			wantErr: "cyclic mirror references",
+		},
+		{
+			name: "mirror repo conflict",
+			msg: protocol.ScenarioStartMsg{
+				CallerSessionID: "ben-orch", Name: "strath-neep",
+				Sessions: []protocol.ScenarioSessionInput{
+					{Name: "subject", Repo: "/glen"},
+					{Name: "reader", Repo: "/glen", Mirror: "subject"},
+				},
+			},
+			wantErr: "mirror and repo",
+		},
 	}
 
 	for _, tt := range tests {
@@ -366,7 +400,7 @@ func TestBuildManifest(t *testing.T) {
 		Sessions: []protocol.ScenarioSessionInput{
 			{Name: "braw-forge", Repo: "/hame/glen/croft-forge", Role: "Braw forge dev", Task: "Build braw API",
 				Results: []protocol.ScenarioResultSpec{{Name: "review", Format: "markdown", Store: "{session_name}/review.md", Required: true}}},
-			{Name: "bonnie-loom", Repo: "/hame/glen/croft-loom", Role: "Bonnie loom dev", Task: "Build bonnie UI",
+			{Name: "bonnie-loom", Mirror: "braw-forge", Role: "Bonnie loom dev", Task: "Build bonnie UI",
 				Results: []protocol.ScenarioResultSpec{{Name: "facts", Format: "json", Store: "{session_name}/facts.json", Required: true}}},
 		},
 	}
@@ -409,6 +443,10 @@ func TestBuildManifest(t *testing.T) {
 
 	if len(m.Siblings[0].Results) != 1 || m.Siblings[0].Results[0].Destination != "scenarios/sc-glen/results/bonnie-loom/facts.json" {
 		t.Fatalf("sibling results = %+v", m.Siblings[0].Results)
+	}
+
+	if m.Siblings[0].Mirror != "braw-forge" {
+		t.Errorf("sibling.mirror = %q, want braw-forge", m.Siblings[0].Mirror)
 	}
 
 	if m.Orchestrator.SessionID != "ben-1" {
@@ -533,6 +571,13 @@ func TestAddToScenarioValidation(t *testing.T) {
 	}, 24, 80)
 	if err == nil {
 		t.Fatal("expected error for empty repo")
+	}
+
+	_, err = sm.AddToScenario("strath-neep", protocol.ScenarioSessionInput{
+		Name: "canny-reader", Mirror: "braw-source",
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "does not support mirror") {
+		t.Fatalf("error = %v, want scenario-add mirror rejection", err)
 	}
 }
 
@@ -1041,6 +1086,83 @@ func TestStartScenarioCovSharedSessionNotRunning(t *testing.T) {
 	}
 }
 
+func TestStartScenarioMirrorRequiresSandboxBeforeReservation(t *testing.T) {
+	sm := startScenarioOrchestrator(t)
+	repo := initTempGitRepo(t)
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw-source"] = &SessionState{
+		ID: "braw-source", Name: "subject", Status: StatusRunning,
+		RepoPath: repo, WorktreePath: repo,
+	}
+	sm.mu.Unlock()
+
+	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: "ben-orch", Name: "strath-readers",
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "subject", Repo: repo, Shared: true},
+			{Name: "reader", Mirror: "subject"},
+		},
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "mirror requires sandbox") {
+		t.Fatalf("error = %v, want preflight sandbox requirement", err)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if len(sm.state.Scenarios) != 0 {
+		t.Errorf("sandbox preflight reserved scenario state: %+v", sm.state.Scenarios)
+	}
+}
+
+func TestStartScenarioRejectsAmbiguousSharedSource(t *testing.T) {
+	sm := startScenarioOrchestrator(t)
+	repo := initTempGitRepo(t)
+
+	sm.mu.Lock()
+	sm.state.Sessions["source-a"] = &SessionState{ID: "source-a", Name: "subject", Status: StatusRunning, RepoPath: repo, WorktreePath: repo}
+	sm.state.Sessions["source-b"] = &SessionState{ID: "source-b", Name: "subject", Status: StatusRunning, RepoPath: repo, WorktreePath: repo}
+	sm.mu.Unlock()
+
+	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: "ben-orch", Name: "strath-ambiguous",
+		Sessions: []protocol.ScenarioSessionInput{{Name: "subject", Repo: repo, Shared: true}},
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("error = %v, want ambiguous shared source", err)
+	}
+}
+
+func TestStartScenarioRejectsSharedMirrorSourceWithoutWorktree(t *testing.T) {
+	sm := startScenarioOrchestrator(t)
+	sm.sandboxResolver = func(string) (bool, error) { return true, nil }
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw-source"] = &SessionState{
+		ID: "braw-source", Name: "subject", Status: StatusRunning,
+	}
+	sm.mu.Unlock()
+
+	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: "ben-orch", Name: "strath-no-worktree",
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "subject", Shared: true},
+			{Name: "reader", Mirror: "subject"},
+		},
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "has no worktree") {
+		t.Fatalf("error = %v, want incompatible source-worktree rejection", err)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if len(sm.state.Scenarios) != 0 {
+		t.Errorf("worktree preflight reserved scenario state: %+v", sm.state.Scenarios)
+	}
+}
+
 // --- persistManifest / republishManifests (store side effects) ---
 
 func TestPersistManifestCovWritesStore(t *testing.T) {
@@ -1417,6 +1539,275 @@ func newScenarioOrchestrator(t *testing.T) (*SessionManager, string) {
 	})
 
 	return sm, orchID
+}
+
+// newMirroredScenarioOrchestrator uses the real safehouse command-line adapter
+// with a tiny exec-through backend stub. That keeps this lifecycle test
+// portable while still driving scenario members through Create's mirror
+// branch, sandbox option construction, scratch setup, PTY start, resume, and
+// deletion. Backend-specific read-only enforcement remains covered in the
+// sandbox package's safehouse and nono enforcement tests.
+func newMirroredScenarioOrchestrator(t *testing.T) (*SessionManager, string) {
+	t.Helper()
+
+	backend := filepath.Join(t.TempDir(), "safehouse-stub")
+	if err := os.WriteFile(backend, []byte("#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = \"--\" ]; then\n    shift\n    exec \"$@\"\n  fi\n  shift\ndone\nexit 64\n"), 0o755); err != nil { //nolint:gosec // G306: test backend stub must be executable
+		t.Fatal(err)
+	}
+
+	cfg := config.Default()
+	cfg.FetchOnCreate = false
+	cfg.DefaultAgent = "sleeper"
+	cfg.Agents["sleeper"] = config.Agent{Command: "sleep", Args: []string{"60"}}
+	cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "safehouse", Command: backend}
+
+	sm := newSMWithConfig(t, cfg)
+	sm.sandboxResolver = func(string) (bool, error) { return true, nil }
+
+	msgStore, err := NewMsgStore(filepath.Join(t.TempDir(), "messages.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = msgStore.Close() })
+	sm.SetMsgStore(msgStore)
+
+	const orchID = "ben-orch"
+
+	sm.mu.Lock()
+	sm.state.Sessions[orchID] = &SessionState{
+		ID: orchID, Name: OrchestratorSessionName,
+		SystemKind: SystemKindOrchestrator, Status: StatusRunning,
+	}
+	sm.mu.Unlock()
+
+	t.Cleanup(func() {
+		sm.mu.RLock()
+
+		ids := make([]string, 0, len(sm.sessions))
+		for id := range sm.sessions {
+			ids = append(ids, id)
+		}
+
+		sm.mu.RUnlock()
+
+		for _, id := range ids {
+			stopAndClosePTY(sm, id)
+		}
+	})
+
+	return sm, orchID
+}
+
+func TestStartScenarioMirrorsSharedSourceLifecycle(t *testing.T) {
+	sm, orchID := newMirroredScenarioOrchestrator(t)
+
+	repo := initScenarioGitRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, "dreich-uncommitted.txt"), []byte("visible before commit\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	worktreesBefore := gitOut(t, repo, "worktree", "list", "--porcelain")
+
+	const sourceID = "braw-source"
+
+	sm.mu.Lock()
+	sm.state.Sessions[sourceID] = &SessionState{
+		ID: sourceID, Name: "subject", Status: StatusRunning,
+		RepoPath: repo, RepoName: filepath.Base(repo), WorktreePath: repo, BaseBranch: "main",
+	}
+	sm.mu.Unlock()
+
+	scenario, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: orchID, Name: "strath-readers", Goal: "inspect the subject",
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "subject", Repo: repo, Shared: true},
+			{Name: "reader-a", Mirror: "subject", Role: "auditor"},
+			{Name: "reader-b", Mirror: "subject", Role: "investigator"},
+			{Name: "reader-c", Mirror: "reader-a", Role: "second opinion"},
+		},
+	}, 24, 80)
+	if err != nil {
+		t.Fatalf("StartScenario: %v", err)
+	}
+
+	if len(scenario.SessionIDs) != 4 || scenario.SessionIDs[0] != sourceID {
+		t.Fatalf("session IDs = %v, want shared source plus three readers", scenario.SessionIDs)
+	}
+
+	for i, wantSource := range []string{sourceID, sourceID, scenario.SessionIDs[1]} {
+		id := scenario.SessionIDs[i+1]
+
+		sm.mu.RLock()
+		reader := sm.state.Sessions[id]
+		sm.mu.RUnlock()
+
+		if reader == nil || !reader.Mirror || reader.MirrorSourceID != wantSource {
+			t.Fatalf("reader %d state = %+v, want mirror source %q", i, reader, wantSource)
+		}
+
+		if reader.WorktreePath != repo || reader.Branch != "" {
+			t.Errorf("reader %d worktree/branch = %q/%q, want source path and no branch", i, reader.WorktreePath, reader.Branch)
+		}
+
+		body, readErr := os.ReadFile(filepath.Join(reader.WorktreePath, "dreich-uncommitted.txt"))
+		if readErr != nil || string(body) != "visible before commit\n" {
+			t.Errorf("reader %d cannot see source's uncommitted file: body=%q err=%v", i, body, readErr)
+		}
+	}
+
+	if got := gitOut(t, repo, "worktree", "list", "--porcelain"); got != worktreesBefore {
+		t.Errorf("mirrored members created Git worktrees:\nbefore:\n%s\nafter:\n%s", worktreesBefore, got)
+	}
+
+	record, err := sm.ScenarioStatus("strath-readers")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if record.Sessions[1].Mirror != "subject" || record.Sessions[3].Mirror != "reader-a" {
+		t.Errorf("status mirror relationships = %+v", record.Sessions)
+	}
+
+	msgs, err := sm.messages.Read("inbox:"+scenario.SessionIDs[1], scenario.SessionIDs[1], false, "")
+	if err != nil || len(msgs) != 1 {
+		t.Fatalf("reader manifest messages = %d, err=%v", len(msgs), err)
+	}
+
+	var manifest scenarioManifest
+	if err := json.Unmarshal([]byte(msgs[0].Body), &manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	if manifest.You.Mirror != "subject" || manifest.Siblings[2].Mirror != "reader-a" {
+		t.Errorf("manifest mirror relationships = %+v", manifest)
+	}
+
+	persisted, err := LoadState(sm.paths.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if persisted.Scenarios[scenario.ID].Sessions[1].Mirror != "subject" ||
+		!persisted.Sessions[scenario.SessionIDs[1]].Mirror {
+		t.Error("mirror relationships did not survive state reload")
+	}
+
+	stopped, err := sm.StopScenario("strath-readers")
+	if err != nil || len(stopped) != 3 {
+		t.Fatalf("StopScenario = %v, err=%v, want three readers", stopped, err)
+	}
+
+	sm.mu.RLock()
+	sourceStatus := sm.state.Sessions[sourceID].Status
+	sm.mu.RUnlock()
+
+	if sourceStatus != StatusRunning {
+		t.Error("shared source must survive scenario stop")
+	}
+
+	resumed, err := sm.ResumeScenario("strath-readers", 24, 80)
+	if err != nil || len(resumed) != 3 {
+		t.Fatalf("ResumeScenario = %v, err=%v, want three readers", resumed, err)
+	}
+
+	deleted, err := sm.DeleteScenario("strath-readers")
+	if err != nil || len(deleted) != 3 {
+		t.Fatalf("DeleteScenario = %v, err=%v, want three readers", deleted, err)
+	}
+
+	sm.mu.RLock()
+	_, sourceExists := sm.state.Sessions[sourceID]
+	sm.mu.RUnlock()
+
+	if !sourceExists {
+		t.Error("shared source must survive scenario delete")
+	}
+}
+
+func TestStartScenarioMirrorsScenarioOwnedSource(t *testing.T) {
+	sm, orchID := newMirroredScenarioOrchestrator(t)
+	repo := initScenarioGitRepo(t)
+
+	scenario, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: orchID, Name: "strath-owned-source",
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "subject", Repo: repo},
+			{Name: "reader", Mirror: "subject"},
+		},
+	}, 24, 80)
+	if err != nil {
+		t.Fatalf("StartScenario: %v", err)
+	}
+
+	if len(scenario.SessionIDs) != 2 {
+		t.Fatalf("session IDs = %v, want owned source and reader", scenario.SessionIDs)
+	}
+
+	var (
+		source, sourceOK = sm.Get(scenario.SessionIDs[0])
+		reader, readerOK = sm.Get(scenario.SessionIDs[1])
+	)
+
+	if !sourceOK || !readerOK {
+		t.Fatalf("source/reader missing after start: source=%t reader=%t", sourceOK, readerOK)
+	}
+
+	if !reader.Mirror || reader.MirrorSourceID != source.ID || reader.WorktreePath != source.WorktreePath {
+		t.Fatalf("reader = %+v, want mirror of scenario-owned source %+v", reader, source)
+	}
+
+	deleted, err := sm.DeleteScenario("strath-owned-source")
+	if err != nil || len(deleted) != 2 {
+		t.Fatalf("DeleteScenario = %v, err=%v, want source and reader", deleted, err)
+	}
+}
+
+func TestStartScenarioMirrorFailureRollsBackReaders(t *testing.T) {
+	sm, orchID := newMirroredScenarioOrchestrator(t)
+	repo := initScenarioGitRepo(t)
+
+	badAgent := config.Agent{Command: "sleep", Args: []string{"60"}}
+	badAgent.Sandbox.Command = filepath.Join(t.TempDir(), "missing-safehouse")
+
+	sm.mu.Lock()
+	sm.cfg.Agents["broken"] = badAgent
+	sm.state.Sessions["braw-source"] = &SessionState{
+		ID: "braw-source", Name: "subject", Status: StatusRunning,
+		RepoPath: repo, RepoName: filepath.Base(repo), WorktreePath: repo,
+	}
+	sm.mu.Unlock()
+
+	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: orchID, Name: "strath-rollback",
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "subject", Repo: repo, Shared: true},
+			{Name: "reader-good", Mirror: "subject"},
+			{Name: "reader-bad", Mirror: "subject", Agent: "broken"},
+		},
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "failed to create") {
+		t.Fatalf("error = %v, want mirrored-member creation failure", err)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if _, ok := sm.state.Sessions["braw-source"]; !ok {
+		t.Error("rollback removed shared source")
+	}
+
+	for _, session := range sm.state.Sessions {
+		if strings.HasPrefix(session.Name, "reader-") {
+			t.Errorf("rollback left mirrored member %+v", session)
+		}
+	}
+
+	for _, sc := range sm.state.Scenarios {
+		if sc.Name == "strath-rollback" {
+			t.Errorf("rollback left scenario %+v", sc)
+		}
+	}
 }
 
 // TestStartScenarioStarredAndIncludes drives StartScenario through real session

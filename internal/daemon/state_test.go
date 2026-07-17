@@ -388,6 +388,32 @@ func TestMigrateV17ToV18DriverKind(t *testing.T) {
 	}
 }
 
+func TestMigrateV19ToV20ScenarioMirror(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	data := []byte(`{"version":19,"sessions":{},"scenarios":{"sc-braw":{
+		"id":"sc-braw","name":"strath-readers","session_ids":["subject","reader"],
+		"sessions":[{"name":"subject","shared":true},{"name":"reader","mirror":"subject"}]
+	}}}`)
+
+	if err := writeFileAtomic(path, data); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if loaded.Version != CurrentStateVersion {
+		t.Errorf("version = %d, want %d", loaded.Version, CurrentStateVersion)
+	}
+
+	if got := loaded.Scenarios["sc-braw"].Sessions[1].Mirror; got != "subject" {
+		t.Errorf("mirror = %q, want subject after migration", got)
+	}
+}
+
 // TestLoadStatePromptedAuthorsRoundTrip asserts a populated prompted-authors set
 // survives a save/load cycle.
 func TestLoadStatePromptedAuthorsRoundTrip(t *testing.T) {

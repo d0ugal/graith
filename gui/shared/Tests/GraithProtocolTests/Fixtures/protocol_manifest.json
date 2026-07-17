@@ -2946,6 +2946,13 @@
           "optional": false
         },
         {
+          "name": "mirror",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
           "name": "role",
           "type": {
             "kind": "string"
@@ -3048,6 +3055,13 @@
             "kind": "string"
           },
           "optional": false
+        },
+        {
+          "name": "mirror",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
         },
         {
           "name": "agent",

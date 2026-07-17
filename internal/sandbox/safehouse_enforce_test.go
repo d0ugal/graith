@@ -115,7 +115,27 @@ func TestSafehouseEnforcesFilesystemBoundary(t *testing.T) {
 		t.Errorf("reading granted read-only file %s failed under safehouse: %v", readable, err)
 	}
 
-	// 3. WRITE-DIR write must be ALLOWED, and the file must actually appear.
+	// 3. READ-ONLY write must be DENIED. This is the safehouse half of the
+	// mirror guarantee: a scenario/CLI mirror adds the source as ReadDirs and
+	// uses WorktreeDir for its writable scratch.
+	blocked := filepath.Join(readOnly, "tamper.txt")
+	if err := run("sh", "-c", "echo thrawn > "+blocked); err == nil {
+		t.Errorf("writing into granted read-only dir %s succeeded under safehouse", readOnly)
+	}
+	if _, err := os.Stat(blocked); err == nil {
+		t.Errorf("file %s was written into the read-only source", blocked)
+	}
+
+	// 4. The worktree (mirror scratch) and an explicit WRITE-DIR must both be
+	// writable, and the files must actually appear.
+	scratchTarget := filepath.Join(worktree, "scratch.txt")
+	if err := run("sh", "-c", "echo canny > "+scratchTarget); err != nil {
+		t.Errorf("writing into worktree/scratch %s failed under safehouse: %v", scratchTarget, err)
+	}
+	if _, err := os.Stat(scratchTarget); err != nil {
+		t.Errorf("expected %s to be written inside worktree/scratch: %v", scratchTarget, err)
+	}
+
 	target := filepath.Join(writeDir, "wrote.txt")
 	if err := run("sh", "-c", "echo dinnae > "+target); err != nil {
 		t.Errorf("writing into granted write dir %s failed under safehouse: %v", target, err)

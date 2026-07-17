@@ -160,6 +160,85 @@ destination = "dreich.md"
 	}
 }
 
+func TestParse_MirroredMember(t *testing.T) {
+	data := []byte(`
+version = 1
+[scenario]
+name = "strath-readers"
+[[sessions]]
+name = "subject"
+shared = true
+[[sessions]]
+name = "reader"
+mirror = "subject"
+agent = "codex"
+role = "auditor"
+`)
+
+	sf, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	inputs, err := SessionInputs(sf)
+	if err != nil {
+		t.Fatalf("SessionInputs: %v", err)
+	}
+
+	if got := inputs[1].Mirror; got != "subject" {
+		t.Errorf("mirror = %q, want subject", got)
+	}
+
+	if inputs[1].Repo != "" {
+		t.Errorf("mirrored member repo = %q, want derived/empty input", inputs[1].Repo)
+	}
+}
+
+func TestValidateMirrorMembers_DepthsAndChains(t *testing.T) {
+	depths, err := ValidateMirrorMembers([]MirrorMember{
+		{Name: "subject", Repo: "/croft"},
+		{Name: "reader-a", Mirror: "subject"},
+		{Name: "reader-b", Mirror: "subject"},
+		{Name: "reader-c", Mirror: "reader-a"},
+	})
+	if err != nil {
+		t.Fatalf("ValidateMirrorMembers: %v", err)
+	}
+
+	want := []int{0, 1, 1, 2}
+	for i := range want {
+		if depths[i] != want[i] {
+			t.Errorf("depths[%d] = %d, want %d (all depths: %v)", i, depths[i], want[i], depths)
+		}
+	}
+}
+
+func TestValidateMirrorMembers_RejectsInvalidTopology(t *testing.T) {
+	tests := []struct {
+		name    string
+		members []MirrorMember
+		want    string
+	}{
+		{"missing target", []MirrorMember{{Name: "reader", Mirror: "outsider"}}, "not a member"},
+		{"self cycle", []MirrorMember{{Name: "reader", Mirror: "reader"}}, "cyclic"},
+		{"multi cycle", []MirrorMember{{Name: "reader-a", Mirror: "reader-b"}, {Name: "reader-b", Mirror: "reader-a"}}, "cyclic"},
+		{"ambiguous name", []MirrorMember{{Name: "subject"}, {Name: "subject"}, {Name: "reader", Mirror: "subject"}}, "ambiguous"},
+		{"shared mirror", []MirrorMember{{Name: "subject"}, {Name: "reader", Mirror: "subject", Shared: true}}, "mutually exclusive"},
+		{"repo conflict", []MirrorMember{{Name: "subject"}, {Name: "reader", Mirror: "subject", Repo: "/croft"}}, "mirror and repo"},
+		{"base conflict", []MirrorMember{{Name: "subject"}, {Name: "reader", Mirror: "subject", Base: "main"}}, "mirror and base"},
+		{"includes conflict", []MirrorMember{{Name: "subject"}, {Name: "reader", Mirror: "subject", Includes: 1}}, "mirror and includes"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := ValidateMirrorMembers(test.members)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want substring %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestParse_Invalid(t *testing.T) {
 	cases := []struct {
 		name string

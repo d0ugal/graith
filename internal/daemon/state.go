@@ -19,7 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 19
+const CurrentStateVersion = 20
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -365,6 +365,7 @@ type ScenarioCleanupState struct {
 
 type ScenarioSession struct {
 	Name    string                `json:"name"`
+	Mirror  string                `json:"mirror,omitempty"`
 	Role    string                `json:"role"`
 	Task    string                `json:"task"`
 	Repo    string                `json:"repo"`
@@ -584,6 +585,7 @@ var migrations = map[int]func(*State) error{
 	16: migrateV16ToV17,
 	17: migrateV17ToV18,
 	18: migrateV18ToV19,
+	19: migrateV19ToV20,
 }
 
 func generateToken() (string, error) {
@@ -794,6 +796,13 @@ func migrateV17ToV18(state *State) error {
 // completion edge; startup reconciliation derives their current state and, if
 // complete, creates their first durable epoch.
 func migrateV18ToV19(_ *State) error { return nil }
+
+// migrateV19ToV20 is a no-op: v20 adds the optional mirror relationship to
+// scenario members. Existing scenarios have no mirrored members, so the zero
+// value preserves their topology and lifecycle behavior.
+func migrateV19ToV20(_ *State) error {
+	return nil
+}
 
 // writeFileAtomic writes state to disk crash-safely (temp + fsync + rename +
 // dir fsync). It delegates to the shared atomicfile helper so every state

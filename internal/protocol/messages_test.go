@@ -398,3 +398,30 @@ func TestRepoListResponseRoundTrip(t *testing.T) {
 		t.Errorf("repo[1] = %+v", got.Repos[1])
 	}
 }
+
+func TestScenarioMirrorRoundTrip(t *testing.T) {
+	want := ScenarioStatusResponse{Scenario: ScenarioRecord{
+		ID: "sc-braw", Name: "strath-readers", Sessions: []ScenarioSessionInfo{
+			{Name: "reader", SessionID: "canny-reader", Mirror: "subject", Status: "running"},
+		},
+	}}
+
+	data, err := EncodeControl("scenario_status", want)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msg, err := DecodeControl(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got ScenarioStatusResponse
+	if err := DecodePayload(msg, &got); err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Scenario.Sessions[0].Mirror != "subject" {
+		t.Errorf("mirror = %q, want subject", got.Scenario.Sessions[0].Mirror)
+	}
+}

@@ -28,6 +28,7 @@ type testEnv struct {
 	socket string
 	tmpDir string
 	repo   string
+	config string
 	conns  []net.Conn
 }
 
@@ -53,6 +54,7 @@ func setupWithState(t *testing.T, initialState *daemon.State, mutators ...func(*
 	socketPath := filepath.Join(socketDir, "gr.sock")
 	paths := config.Paths{
 		SocketPath: socketPath,
+		ConfigFile: filepath.Join(tmpDir, "config.toml"),
 		StateFile:  filepath.Join(tmpDir, "state.json"),
 		LogDir:     filepath.Join(tmpDir, "logs"),
 		DataDir:    filepath.Join(tmpDir, "data"),
@@ -78,6 +80,15 @@ func setupWithState(t *testing.T, initialState *daemon.State, mutators ...func(*
 
 	for _, m := range mutators {
 		m(cfg)
+	}
+
+	configData, err := config.EffectiveTOML(cfg)
+	if err != nil {
+		t.Fatalf("render test config: %v", err)
+	}
+
+	if err := os.WriteFile(paths.ConfigFile, configData, 0o600); err != nil {
+		t.Fatalf("write test config: %v", err)
 	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -130,7 +141,7 @@ func setupWithState(t *testing.T, initialState *daemon.State, mutators ...func(*
 	go sm.RunTriggerLoop(ctx)
 	go sm.RunFileWatchLoop(ctx)
 
-	return &testEnv{sm: sm, srv: srv, cancel: cancel, socket: socketPath, tmpDir: tmpDir, repo: repo}
+	return &testEnv{sm: sm, srv: srv, cancel: cancel, socket: socketPath, tmpDir: tmpDir, repo: repo, config: paths.ConfigFile}
 }
 
 func (e *testEnv) teardown() {
@@ -1252,6 +1263,144 @@ func TestUnknownAgent(t *testing.T) {
 	resp := readControl(t, r)
 	if resp.Type != "error" {
 		t.Fatalf("expected error for unknown agent, got %s", resp.Type)
+	}
+}
+
+func TestScenarioMirrorSharedSourceLifecycle(t *testing.T) {
+	backend := filepath.Join(t.TempDir(), "safehouse-stub")
+	if err := os.WriteFile(backend, []byte("#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = \"--\" ]; then\n    shift\n    exec \"$@\"\n  fi\n  shift\ndone\nexit 64\n"), 0o755); err != nil { //nolint:gosec // G306: test backend stub must be executable
+		t.Fatal(err)
+	}
+
+	env := setup(t, func(cfg *config.Config) {
+		cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "safehouse", Command: backend}
+	})
+	defer env.teardown()
+
+	// Enable the declarative orchestrator through the public config-reload path,
+	// then authenticate the scenario_start request with its real session token.
+	next := *env.sm.Config()
+	next.Orchestrator.Enabled = true
+	next.Orchestrator.Agent = "echo"
+
+	data, err := config.EffectiveTOML(&next)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(env.config, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := env.sm.ReloadConfig(); err != nil {
+		t.Fatalf("ReloadConfig: %v", err)
+	}
+
+	var orchestrator daemon.SessionState
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, session := range env.sm.List() {
+			if session.SystemKind == daemon.SystemKindOrchestrator && session.Status == daemon.StatusRunning {
+				orchestrator = session
+				break
+			}
+		}
+
+		if orchestrator.ID != "" {
+			break
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if orchestrator.ID == "" || orchestrator.Token == "" {
+		t.Fatal("orchestrator did not start after config reload")
+	}
+
+	r, w := env.connect(t)
+	handshake(t, r, w)
+	sendControl(t, w, "create", protocol.CreateMsg{
+		Name: "subject", Agent: "echo", RepoPath: env.repo, Base: "main",
+	})
+
+	created := readControl(t, r)
+	if created.Type == "error" {
+		var msg protocol.ErrorMsg
+
+		_ = protocol.DecodePayload(created, &msg)
+		t.Fatalf("create subject: %s", msg.Message)
+	}
+
+	var subject protocol.SessionInfo
+
+	_ = protocol.DecodePayload(created, &subject)
+	if err := os.WriteFile(filepath.Join(subject.WorktreePath, "dreich-uncommitted.txt"), []byte("shared view\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sendControlWithToken(t, w, "scenario_start", protocol.ScenarioStartMsg{
+		Name: "strath-readers",
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "subject", Repo: env.repo, Agent: "echo", Shared: true},
+			{Name: "reader", Mirror: "subject", Agent: "echo", Role: "auditor"},
+		},
+	}, orchestrator.Token)
+
+	started := readControl(t, r)
+	if started.Type == "error" {
+		var msg protocol.ErrorMsg
+
+		_ = protocol.DecodePayload(started, &msg)
+		t.Fatalf("scenario_start: %s", msg.Message)
+	}
+
+	var record protocol.ScenarioRecord
+
+	_ = protocol.DecodePayload(started, &record)
+	if len(record.Sessions) != 2 || record.Sessions[1].Mirror != "subject" {
+		t.Fatalf("scenario record = %+v, want mirrored reader", record)
+	}
+
+	reader, ok := env.sm.Get(record.Sessions[1].SessionID)
+	if !ok || !reader.Mirror || reader.MirrorSourceID != subject.ID || reader.WorktreePath != subject.WorktreePath {
+		t.Fatalf("reader state = %+v, want exact subject mirror", reader)
+	}
+
+	if body, readErr := os.ReadFile(filepath.Join(reader.WorktreePath, "dreich-uncommitted.txt")); readErr != nil || string(body) != "shared view\n" {
+		t.Fatalf("reader does not see uncommitted source file: body=%q err=%v", body, readErr)
+	}
+
+	sendControl(t, w, "scenario_status", protocol.ScenarioStatusMsg{Name: "strath-readers"})
+
+	var status protocol.ScenarioStatusResponse
+
+	_ = protocol.DecodePayload(readControl(t, r), &status)
+	if status.Scenario.Sessions[1].Mirror != "subject" {
+		t.Errorf("status lost mirror relationship: %+v", status.Scenario.Sessions)
+	}
+
+	operations := []struct {
+		msgType string
+		payload any
+	}{
+		{"scenario_stop", protocol.ScenarioStopMsg{Name: "strath-readers"}},
+		{"scenario_resume", protocol.ScenarioResumeMsg{Name: "strath-readers"}},
+		{"scenario_delete", protocol.ScenarioDeleteMsg{Name: "strath-readers"}},
+	}
+	for _, operation := range operations {
+		sendControl(t, w, operation.msgType, operation.payload)
+
+		if response := readControl(t, r); response.Type == "error" {
+			var msg protocol.ErrorMsg
+
+			_ = protocol.DecodePayload(response, &msg)
+			t.Fatalf("%s: %s", operation.msgType, msg.Message)
+		}
+	}
+
+	if _, ok := env.sm.Get(subject.ID); !ok {
+		t.Error("scenario delete removed shared source")
 	}
 }
 

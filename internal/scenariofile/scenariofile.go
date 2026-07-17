@@ -33,6 +33,7 @@ type Meta struct {
 type Session struct {
 	Name       string   `toml:"name"`
 	Repo       string   `toml:"repo"`
+	Mirror     string   `toml:"mirror"`
 	Agent      string   `toml:"agent"`
 	Model      string   `toml:"model"`
 	Base       string   `toml:"base"`
@@ -58,6 +59,108 @@ type Result struct {
 	Format   string `toml:"format"`
 	Store    string `toml:"store"`
 	Required bool   `toml:"required"`
+}
+
+// MirrorMember is the structural subset of a scenario member needed to
+// validate scenario-local mirror references. Keeping this independent of the
+// CLI and protocol representations lets every scenario entry point enforce the
+// same rules before it performs filesystem or daemon mutations.
+type MirrorMember struct {
+	Name     string
+	Mirror   string
+	Repo     string
+	Base     string
+	Shared   bool
+	Includes int
+}
+
+// ValidateMirrorMembers checks mirror field compatibility and returns each
+// member's dependency depth (roots are zero, a mirror of a root is one, and so
+// on). The daemon uses the depths as creation waves so every source exists
+// before its readers start. References are names within this slice only.
+func ValidateMirrorMembers(members []MirrorMember) ([]int, error) {
+	indexes := make(map[string]int, len(members))
+
+	for i, member := range members {
+		if previous, ok := indexes[member.Name]; ok {
+			return nil, fmt.Errorf("duplicate session name %q at indexes %d and %d makes mirror references ambiguous", member.Name, previous, i)
+		}
+
+		indexes[member.Name] = i
+	}
+
+	targets := make([]int, len(members))
+	for i := range targets {
+		targets[i] = -1
+	}
+
+	for i, member := range members {
+		if member.Mirror == "" {
+			continue
+		}
+
+		switch {
+		case member.Shared:
+			return nil, fmt.Errorf("session %q: mirror and shared are mutually exclusive", member.Name)
+		case member.Repo != "":
+			return nil, fmt.Errorf("session %q: mirror and repo are mutually exclusive (repo is derived from the mirror target)", member.Name)
+		case member.Base != "":
+			return nil, fmt.Errorf("session %q: mirror and base are mutually exclusive (base is derived from the mirror target)", member.Name)
+		case member.Includes > 0:
+			return nil, fmt.Errorf("session %q: mirror and includes are mutually exclusive (includes are inherited from the mirror target)", member.Name)
+		}
+
+		target, ok := indexes[member.Mirror]
+		if !ok {
+			return nil, fmt.Errorf("session %q: mirror target %q is not a member of this scenario", member.Name, member.Mirror)
+		}
+
+		if target == i {
+			return nil, fmt.Errorf("session %q: mirror reference is cyclic (a member cannot mirror itself)", member.Name)
+		}
+
+		targets[i] = target
+	}
+
+	var (
+		depths   = make([]int, len(members))
+		visiting = make([]bool, len(members))
+		visited  = make([]bool, len(members))
+		visit    func(int) (int, error)
+	)
+
+	visit = func(index int) (int, error) {
+		if visited[index] {
+			return depths[index], nil
+		}
+
+		if visiting[index] {
+			return 0, fmt.Errorf("session %q: cyclic mirror references are not allowed", members[index].Name)
+		}
+
+		visiting[index] = true
+		if target := targets[index]; target >= 0 {
+			depth, err := visit(target)
+			if err != nil {
+				return 0, err
+			}
+
+			depths[index] = depth + 1
+		}
+
+		visiting[index] = false
+		visited[index] = true
+
+		return depths[index], nil
+	}
+
+	for i := range members {
+		if _, err := visit(i); err != nil {
+			return nil, err
+		}
+	}
+
+	return depths, nil
 }
 
 // Parse decodes and validates a scenario TOML document. Unknown fields are
@@ -94,6 +197,18 @@ func Parse(data []byte) (*File, error) {
 	}
 
 	if err := ValidateSessionDependencies(depInputs); err != nil {
+		return nil, err
+	}
+
+	members := make([]MirrorMember, len(sf.Sessions))
+	for i, s := range sf.Sessions {
+		members[i] = MirrorMember{
+			Name: s.Name, Mirror: s.Mirror, Repo: s.Repo, Base: s.Base,
+			Shared: s.Shared, Includes: len(s.Includes),
+		}
+	}
+
+	if _, err := ValidateMirrorMembers(members); err != nil {
 		return nil, err
 	}
 
@@ -283,8 +398,8 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 			return nil, errors.New("every [[sessions]] entry needs a name")
 		}
 
-		if s.Repo == "" && !s.Shared {
-			return nil, fmt.Errorf("session %q: repo is required (unless shared)", s.Name)
+		if s.Repo == "" && !s.Shared && s.Mirror == "" {
+			return nil, fmt.Errorf("session %q: repo is required (unless shared or mirrored)", s.Name)
 		}
 
 		results := make([]protocol.ScenarioResultSpec, len(s.Results))
@@ -297,6 +412,7 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 		inputs = append(inputs, protocol.ScenarioSessionInput{
 			Name:       s.Name,
 			Repo:       s.Repo,
+			Mirror:     s.Mirror,
 			Agent:      s.Agent,
 			Model:      s.Model,
 			Base:       s.Base,

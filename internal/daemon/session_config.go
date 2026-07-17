@@ -616,6 +616,35 @@ func resumeIncludeSet(mirror bool, sessIncludes, sharedSourceIncludes []Included
 	return sessIncludes
 }
 
+// mirrorSourceIncludesLocked returns the effective include set visible from a
+// mirror source. A mirror can itself be mirrored, but mirror SessionState rows
+// deliberately persist no Includes of their own because they create no Git
+// worktrees. Follow that runtime source chain to the first ordinary session so
+// a mirror-of-a-mirror receives the same included worktrees as its target.
+//
+// Callers must hold sm.mu. Corrupt or stale chains fall back to the last
+// reachable member's includes; the source worktree itself is validated by the
+// normal Create/Resume paths.
+func (sm *SessionManager) mirrorSourceIncludesLocked(source *SessionState) []IncludedRepoState {
+	visited := make(map[string]bool)
+
+	for source.Mirror && source.MirrorSourceID != "" && !visited[source.ID] {
+		visited[source.ID] = true
+
+		next, ok := sm.state.Sessions[source.MirrorSourceID]
+		if !ok {
+			break
+		}
+
+		source = next
+	}
+
+	includes := make([]IncludedRepoState, len(source.Includes))
+	copy(includes, source.Includes)
+
+	return includes
+}
+
 func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
 	return sm.resolveSandboxFromConfig(sm.cfg, agentName)
 }
