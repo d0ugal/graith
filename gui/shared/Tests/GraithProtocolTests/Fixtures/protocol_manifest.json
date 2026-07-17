@@ -1104,6 +1104,13 @@
             "kind": "string"
           },
           "optional": false
+        },
+        {
+          "name": "daemon_instance_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
         }
       ]
     },
