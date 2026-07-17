@@ -117,6 +117,11 @@ and hand-assembles an ad-hoc-signed `.app`; `simctl` installs + launches it
 
 ## Connecting over Tailscale
 
+On macOS, the built-in **This Mac** host connects directly over the local Unix
+socket. The app reads the daemon-written `human.token` from the active profile's
+data directory, just like a human running the CLI, so the local host never
+requires device pairing. The steps below apply only to additional remote hosts.
+
 The apps (and `gr remote`) reach a daemon over the tailnet. There is **no
 account/password** — trust is Tailscale identity (WhoIs) plus a one-time device
 pairing. Off by default; enabling it is fail-closed.

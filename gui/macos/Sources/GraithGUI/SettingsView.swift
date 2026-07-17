@@ -82,6 +82,12 @@ struct LocalDaemonSettings: View {
                         .textSelection(.enabled)
                         .lineLimit(2)
                 }
+                LabeledContent("Human token") {
+                    Text(resolution.humanTokenPath)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineLimit(2)
+                }
             } header: {
                 Text("Effective paths")
             } footer: {

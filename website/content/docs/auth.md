@@ -52,6 +52,12 @@ The `gr` CLI handles this transparently:
 - **Inside a session**, `GRAITH_TOKEN` is sent and takes precedence — the caller is that session.
 - **Outside a session** (the human at a terminal), `gr` reads `human.token` automatically and sends it — the caller is the human.
 
+The macOS app uses the same local-human credential for its built-in **This
+Mac** connection. It resolves `human.token` alongside the active profile's data
+directory and connects over the local Unix socket automatically; local access
+does not use device pairing. Pairing in the app applies only when **Add Host**
+connects to another daemon over the tailnet.
+
 This closes the token-stripping gap: a sandboxed agent that unsets `GRAITH_TOKEN` can no longer masquerade as the human, because it cannot read `human.token` (the data dir is outside its sandbox). The security boundary is the sandbox — an *unsandboxed* agent can read either credential, so keep the sandbox on (and `gr doctor` warns when it is off).
 
 ## Token lifecycle

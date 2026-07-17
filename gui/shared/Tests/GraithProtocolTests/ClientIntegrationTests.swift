@@ -64,18 +64,20 @@ struct ClientIntegrationTests {
         await conn.close()
     }
 
-    /// The high-level client, driven through its injectable stream factory.
-    /// Local transport sends NO auth_challenge.
-    @Test func protocolClientListLocal() async throws {
+    /// The high-level local client presents the daemon-written human token on
+    /// both handshake and RPC envelopes. Local transport sends NO auth_challenge.
+    @Test func protocolClientListLocalPresentsHumanToken() async throws {
         let (clientStream, serverStream) = InMemoryByteStream.makePair()
         let daemon = MockDaemon(stream: serverStream)
 
         let server = Task {
             let hs = try await daemon.readControl()
             #expect(hs.type == "handshake")
+            #expect(hs.token == "human-canny")
             try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
             let listReq = try await daemon.readControl()
             #expect(listReq.type == "list")
+            #expect(listReq.token == "human-canny")
             try await daemon.writeControl("session_list", SessionListMsg(sessions: [
                 makeSession(id: "canny", name: "canny"),
                 makeSession(id: "dreich", name: "dreich"),
@@ -85,7 +87,7 @@ struct ClientIntegrationTests {
         let stream = clientStream
         let client = GraithProtocolClient(
             transport: .unix(path: "/tmp/graith.sock"),
-            profile: "", clientID: "app", token: nil, signer: nil,
+            profile: "", clientID: "app", token: "human-canny", signer: nil,
             streamFactory: { _ in stream }
         )
         let sessions = try await client.list()

@@ -7,11 +7,15 @@ import GraithRemoteKit
 /// `RealHostClient`. Drop-in replacement for `MockClientFactory`.
 public struct RealHostClientFactory: HostClientFactory {
     private let clientID: String
+    private let localHumanToken: String?
 
-    /// - Parameter clientID: identifier carried in the handshake (logging only).
-    ///   Defaults to a platform-neutral value; each app may pass its own.
-    public init(clientID: String = "graith-app") {
+    /// - Parameters:
+    ///   - clientID: identifier carried in the handshake (logging only).
+    ///   - localHumanToken: daemon-written credential for the local Unix-socket
+    ///     connection. Remote clients continue to use paired credentials.
+    public init(clientID: String = "graith-app", localHumanToken: String? = nil) {
         self.clientID = clientID
+        self.localHumanToken = localHumanToken
     }
 
     public func makeClient(
@@ -35,15 +39,16 @@ public struct RealHostClientFactory: HostClientFactory {
     }
 
     public func makeLocalClient(transport: GraithTransport, profile: String) -> any GraithHostClient {
-        // Tokenless, no PoP signer: the desktop app connects to its own daemon
-        // over the 0700 Unix socket as the local human. We deliberately do NOT
-        // forward GRAITH_TOKEN — that per-session token would make the daemon
-        // treat the app as the launching agent.
+        // Local human token, no PoP signer: this is the same transparent local
+        // authentication the CLI uses outside a session. The composition root
+        // reads human.token directly rather than forwarding GRAITH_TOKEN, whose
+        // per-session value would make the desktop app act as its launching
+        // agent instead of as the human operator.
         let inner = GraithProtocolClient(
             transport: transport,
             profile: profile,
             clientID: clientID,
-            token: nil,
+            token: localHumanToken,
             signer: nil
         )
         return RealHostClient(inner: inner)
