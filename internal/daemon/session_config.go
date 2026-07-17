@@ -265,19 +265,36 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) error {
 	}
 
 	if old.Orchestrator.Enabled != newCfg.Orchestrator.Enabled {
-		sm.log.Info("config changed", "key", "orchestrator.enabled", "old", old.Orchestrator.Enabled, "new", newCfg.Orchestrator.Enabled)
-
 		if newCfg.Orchestrator.Enabled {
+			sm.log.Info("config changed", "key", "orchestrator.enabled", "old", false, "new", true)
 			go sm.ensureOrchestrator(context.Background())
-		} else {
-			if orchID := func() string {
-				sm.mu.RLock()
-				defer sm.mu.RUnlock()
+		} else if orchID := func() string {
+			sm.mu.RLock()
+			defer sm.mu.RUnlock()
 
-				return sm.findOrchestratorID()
-			}(); orchID != "" {
-				_ = sm.stopWithReason(orchID, StopReasonUser, "orchestrator-disabled")
+			return sm.findOrchestratorID()
+		}(); orchID != "" {
+			// Do not discard the stop result: if signalling the orchestrator fails
+			// the session can keep running, so the published "disabled" config would
+			// diverge from the live runtime (issue #1324). Roll the orchestrator flag
+			// back to enabled — coherent with the still-running session — surface the
+			// error to a manual reload, and let a later reload retry the stop.
+			if stopErr := sm.stopWithReason(orchID, StopReasonUser, "orchestrator-disabled"); stopErr != nil {
+				sm.mu.Lock()
+				reverted := *sm.cfg
+				reverted.Orchestrator.Enabled = old.Orchestrator.Enabled
+				sm.cfg = &reverted
+				sm.mu.Unlock()
+
+				sm.log.Error("orchestrator disable failed; left marked enabled for retry",
+					"key", "orchestrator.enabled", "session", orchID, "err", stopErr)
+
+				return fmt.Errorf("disable orchestrator: session %q did not stop: %w", orchID, stopErr)
 			}
+
+			sm.log.Info("config changed", "key", "orchestrator.enabled", "old", true, "new", false)
+		} else {
+			sm.log.Info("config changed", "key", "orchestrator.enabled", "old", true, "new", false)
 		}
 	}
 

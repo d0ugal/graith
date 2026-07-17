@@ -31,6 +31,7 @@ func (sm *SessionManager) stopWithReason(id, reason, initiator string) error {
 	}
 
 	name := sessState.Name
+	prevReason := sessState.StopReason
 	sessState.StopReason = reason
 	_ = sm.saveState()
 	sm.mu.Unlock()
@@ -40,6 +41,18 @@ func (sm *SessionManager) stopWithReason(id, reason, initiator string) error {
 		sm.logStopping(id, name, reason, initiator, ptySess)
 
 		if err := ptySess.Kill(); err != nil {
+			// The stop did not take effect. Restore the previous stop reason so a
+			// still-running session is not durably mislabelled (e.g. as user-stopped):
+			// otherwise, if it later exits on its own, the supervisor would suppress a
+			// restart from the stale reason even though the session was never stopped
+			// (issue #1324). Keeps config and session lifecycle state coherent for retry.
+			sm.mu.Lock()
+			if s, ok := sm.state.Sessions[id]; ok {
+				s.StopReason = prevReason
+				_ = sm.saveState()
+			}
+			sm.mu.Unlock()
+
 			return fmt.Errorf("send SIGTERM: %w", err)
 		}
 
