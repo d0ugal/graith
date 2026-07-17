@@ -71,8 +71,11 @@ var checkInboxCmd = &cobra.Command{
 		// check-inbox only fires from the SessionStart hook. For Claude Code the
 		// context must go through hookSpecificOutput.additionalContext to reach
 		// the model; a top-level systemMessage is user-facing only (issue #1072).
-		agent := os.Getenv("GRAITH_AGENT_TYPE")
-		fmt.Println(hookoutput.InboxContext(agent, "SessionStart", formatInboxSystemMessage(messages, cfg.Limits.InboxPreviewBytesOrDefault())))
+		// The dialect is selected from the agent's configured hook mechanism, not
+		// the literal GRAITH_AGENT_TYPE, so a custom alias emits the right shape
+		// (issue #1236).
+		dialect := hookOutputDialect(os.Getenv("GRAITH_AGENT_TYPE"))
+		fmt.Println(hookoutput.InboxContext(dialect, "SessionStart", formatInboxSystemMessage(messages, cfg.Limits.InboxPreviewBytesOrDefault())))
 
 		return nil
 	},

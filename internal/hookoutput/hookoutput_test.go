@@ -154,3 +154,25 @@ func TestInboxContextOtherAgents(t *testing.T) {
 		}
 	}
 }
+
+// TestDialectForHookMechanism locks the mechanism→dialect mapping (issue #1236):
+// the hook-output schema is chosen from the agent's configured hook mechanism, so
+// a custom alias installing a known mechanism emits the right dialect. An empty or
+// unknown mechanism falls back to the generic dialect ("").
+func TestDialectForHookMechanism(t *testing.T) {
+	tests := []struct {
+		mechanism string
+		want      string
+	}{
+		{"claude_settings", DialectClaude},
+		{"codex_config", DialectCodex},
+		{"cursor_project", DialectCursor},
+		{"", ""},
+		{"something_else", ""},
+	}
+	for _, tt := range tests {
+		if got := DialectForHookMechanism(tt.mechanism); got != tt.want {
+			t.Errorf("DialectForHookMechanism(%q) = %q, want %q", tt.mechanism, got, tt.want)
+		}
+	}
+}

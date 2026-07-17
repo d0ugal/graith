@@ -60,12 +60,42 @@ type claudeHookSpecificOutput struct {
 	UpdatedInput             json.RawMessage `json:"updatedInput,omitempty"`
 }
 
-// Approval returns JSON for a hook approval decision formatted for the given agent.
-// The decision parameter uses graith's internal values ("allow", "block", "deny",
-// "defer"). Each agent maps these to its own hook schema vocabulary.
-func Approval(agent, decision, reason string) string {
-	switch agent {
-	case "claude":
+// Hook-output dialect names. A dialect selects the JSON schema a hook emits; it
+// is derived from the agent's configured hook mechanism (DialectForHookMechanism)
+// rather than the literal agent name, so a custom Claude/Codex/Cursor alias emits
+// the correct approval/inbox payload for the mechanism it installed (issue #1236).
+const (
+	DialectClaude = "claude"
+	DialectCodex  = "codex"
+	DialectCursor = "cursor"
+)
+
+// DialectForHookMechanism maps an agent's configured hook mechanism (config's
+// HookMechanism* constants) to the hook-output dialect that mechanism speaks.
+// An empty or unknown mechanism yields "" — the generic top-level {"decision":…}
+// form — so an agent with no recognised hook wiring still produces valid output.
+// The mechanism strings are duplicated here as literals to keep hookoutput free
+// of a config dependency; config.Validate is the source of truth for the set.
+func DialectForHookMechanism(mechanism string) string {
+	switch mechanism {
+	case "claude_settings":
+		return DialectClaude
+	case "codex_config":
+		return DialectCodex
+	case "cursor_project":
+		return DialectCursor
+	default:
+		return ""
+	}
+}
+
+// Approval returns JSON for a hook approval decision formatted for the given
+// dialect. The decision parameter uses graith's internal values ("allow",
+// "block", "deny", "defer"). Each dialect maps these to its own hook schema
+// vocabulary; an unknown dialect uses the generic top-level "decision" form.
+func Approval(dialect, decision, reason string) string {
+	switch dialect {
+	case DialectClaude:
 		return marshalString(claudeApprovalResponse{
 			HookSpecificOutput: claudeHookSpecificOutput{
 				HookEventName:            "PreToolUse",
@@ -73,7 +103,7 @@ func Approval(agent, decision, reason string) string {
 				PermissionDecisionReason: reason,
 			},
 		})
-	case "codex":
+	case DialectCodex:
 		resp := codexApprovalResponse{
 			HookSpecificOutput: codexPermissionHookSpecificOutput{
 				HookEventName: "PermissionRequest",
@@ -87,7 +117,7 @@ func Approval(agent, decision, reason string) string {
 		}
 
 		return marshalString(resp)
-	case "cursor":
+	case DialectCursor:
 		return marshalString(cursorApprovalResponse{
 			Permission: cursorDecision(decision),
 			Reason:     reason,
@@ -110,9 +140,9 @@ func marshalString(v any) string {
 	return string(out)
 }
 
-// AllowAll returns a fail-open approval response for the given agent.
-func AllowAll(agent string) string {
-	return Approval(agent, "allow", "")
+// AllowAll returns a fail-open approval response for the given dialect.
+func AllowAll(dialect string) string {
+	return Approval(dialect, "allow", "")
 }
 
 // claudeHookOutput is Claude Code's hook stdout envelope for injecting model
@@ -129,13 +159,16 @@ type claudeHookOutput struct {
 }
 
 // InboxContext returns the hook stdout JSON that surfaces unread inbox messages
-// to an agent at a lifecycle event (e.g. "SessionStart"). For Claude Code the
-// context must be delivered via hookSpecificOutput.additionalContext so it
-// actually reaches the model — a plain systemMessage is shown to the human only.
-// Other agents keep the systemMessage form they already consume.
-func InboxContext(agent, event, context string) string {
-	switch agent {
-	case "claude", "codex":
+// to an agent at a lifecycle event (e.g. "SessionStart"). For the Claude and
+// Codex dialects the context must be delivered via
+// hookSpecificOutput.additionalContext so it actually reaches the model — a
+// plain systemMessage is shown to the human only. Other dialects keep the
+// systemMessage form they already consume. The dialect is derived from the
+// agent's hook mechanism (DialectForHookMechanism), so a custom alias emits the
+// right shape (issue #1236).
+func InboxContext(dialect, event, context string) string {
+	switch dialect {
+	case DialectClaude, DialectCodex:
 		// Both Claude and current Codex deliver model-visible context through
 		// hookSpecificOutput.additionalContext; their universal systemMessage is
 		// only a user-facing banner. (Codex's *CommandOutputWire types carry

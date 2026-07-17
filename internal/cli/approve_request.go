@@ -37,7 +37,11 @@ var approveRequestCmd = &cobra.Command{
 			return nil
 		}
 
-		agent := os.Getenv("GRAITH_AGENT_TYPE")
+		// The hook-output dialect is selected from the agent's configured hook
+		// mechanism, not the literal GRAITH_AGENT_TYPE, so a custom Claude/Codex/
+		// Cursor alias emits the approval JSON its installed hook expects
+		// (issue #1236).
+		agent := hookOutputDialect(os.Getenv("GRAITH_AGENT_TYPE"))
 
 		// Read the full hook payload from stdin BEFORE connecting. Approvals
 		// backends may need to evaluate the whole command, so we must not
