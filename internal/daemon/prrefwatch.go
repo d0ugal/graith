@@ -540,19 +540,24 @@ func (sm *SessionManager) handlePRRefEvent(repo *prRefRepoWatcher, ev fsnotify.E
 
 	if ev.Op&fsnotify.Create != 0 {
 		if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
-			dirs := existingPRRefDirs(nil, []string{ev.Name})
+			// The common-dir top-level watch exists for files such as HEAD and
+			// packed-refs. Do not recursively adopt unrelated directories created
+			// there (especially worktrees/): linked gitdirs are per-session state.
+			if !common || isCommonPRRefTree(repo.commonDir, ev.Name) {
+				dirs := existingPRRefDirs(nil, []string{ev.Name})
 
-			repo.mu.Lock()
-			if common {
-				repo.addDirsLocked("", dirs, true)
-			} else {
-				for _, id := range localIDs {
-					if repo.sessions[id] != nil {
-						repo.addDirsLocked(id, dirs, false)
+				repo.mu.Lock()
+				if common {
+					repo.addDirsLocked("", dirs, true)
+				} else {
+					for _, id := range localIDs {
+						if repo.sessions[id] != nil {
+							repo.addDirsLocked(id, dirs, false)
+						}
 					}
 				}
+				repo.mu.Unlock()
 			}
-			repo.mu.Unlock()
 		}
 	}
 
@@ -572,6 +577,11 @@ func (repo *prRefRepoWatcher) eventOwnershipLocked(name string) *prRefWatchDir {
 func sameOrChildPath(parent, path string) bool {
 	rel, err := filepath.Rel(parent, path)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func isCommonPRRefTree(commonDir, path string) bool {
+	return sameOrChildPath(filepath.Join(commonDir, "refs"), path) ||
+		sameOrChildPath(filepath.Join(commonDir, "logs"), path)
 }
 
 func (repo *prRefRepoWatcher) recipientsLocked(ownership *prRefWatchDir) []*prRefWatcher {

@@ -702,9 +702,9 @@ func (sm *SessionManager) watchFire(ctx context.Context, triggerName string, b *
 
 // stopWatcherResources shuts down a file watcher's goroutine and fsnotify
 // handle, then marks it canceled and stops any pending debounce under bmu.
-// Shared by the trigger file-watch and PR-ref-watch teardown paths — cancel and
-// watcher are read by the caller before the lock (matching the original code),
-// while canceled/debounce are touched under bmu (both are goroutine-mutated).
+// cancel and watcher are read by the caller before the lock (matching the
+// original code), while canceled/debounce are touched under bmu (both are
+// goroutine-mutated).
 func stopWatcherResources(cancel func(), watcher *fsnotify.Watcher, bmu *sync.Mutex, canceled *bool, debounce **time.Timer) {
 	if cancel != nil {
 		cancel()
