@@ -60,6 +60,8 @@ require_pairing     = true           # require per-device pairing for human-leve
 
 Pairing policy limits keep the historically-fixed values as defaults and are clamped to safe bounds: a value of `0`/empty means "use the default", and an out-of-bounds value in an enabled block is a hard config-load error. `pair_request_rate` is the primary anti-flood knob; when it is unset the `pair_fallback_count`/`pair_fallback_window` rate applies.
 
+`pending_pairing_ttl` is frozen when a pairing request is created: each request keeps the expiry deadline computed from the TTL that was in effect at that moment. A hot config reload therefore affects only pair requests made after the reload — requests already in flight retain their original expiry, so the waiting device and the daemon never disagree about when a request lapses.
+
 Access is gated in two layers: a WhoIs **allowlist** (`allow_tailnet_users` — who on the tailnet may connect at all) and per-device **pairing** (`require_pairing` — each device proves possession of a paired key before it gets human-level rights).
 
 > **Warning:** `require_pairing = false` is **UNSAFE** — it trusts the tailnet identity alone with no per-device proof, so it is restricted to **read-only** access. Leave pairing on for any device that should control sessions.
