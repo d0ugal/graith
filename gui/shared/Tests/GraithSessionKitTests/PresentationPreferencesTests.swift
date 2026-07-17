@@ -78,4 +78,85 @@ struct PresentationPreferencesTests {
         #expect(PresentationPreferences.clampSidebarWidth(10000) == PresentationPreferences.maxSidebarWidth)
         #expect(PresentationPreferences.clampSidebarWidth(300) == 300)
     }
+
+    // MARK: - Non-finite input (#1323)
+    //
+    // IEEE NaN/±∞ slips through nested min/max clamps (`min(max(.nan, lo), hi)`
+    // is `.nan`; `max(0.1, .infinity)` is `.infinity`), so without explicit
+    // normalization a malformed persisted preference could feed non-finite
+    // geometry into the UI and persist across launches. Every presentation value
+    // must recover to the product default before range clamping.
+
+    /// The non-finite doubles the clamps must survive, labelled for diagnostics.
+    private static let nonFiniteCases: [(label: String, value: Double)] = [
+        ("NaN", .nan),
+        ("+Inf", .infinity),
+        ("-Inf", -.infinity),
+    ]
+
+    @Test func directInitializerNormalizesNonFinite() {
+        for c in Self.nonFiniteCases {
+            let p = PresentationPreferences(
+                fleetPollInterval: c.value,
+                reachabilityProbeTimeout: c.value,
+                terminalFontSize: CGFloat(c.value),
+                sidebarWidth: CGFloat(c.value)
+            )
+            #expect(p.fleetPollInterval.isFinite, "fleetPollInterval finite for \(c.label)")
+            #expect(p.reachabilityProbeTimeout.isFinite, "reachabilityProbeTimeout finite for \(c.label)")
+            #expect(p.terminalFontSize.isFinite, "terminalFontSize finite for \(c.label)")
+            #expect(p.sidebarWidth.isFinite, "sidebarWidth finite for \(c.label)")
+            // Recovery target is the product default (not a bound), then clamp.
+            #expect(p.fleetPollInterval == PresentationPreferences.default.fleetPollInterval, "\(c.label)")
+            #expect(p.reachabilityProbeTimeout == PresentationPreferences.default.reachabilityProbeTimeout, "\(c.label)")
+            #expect(p.terminalFontSize == PresentationPreferences.default.terminalFontSize, "\(c.label)")
+            #expect(p.sidebarWidth == PresentationPreferences.default.sidebarWidth, "\(c.label)")
+        }
+    }
+
+    @Test func clampHelpersNormalizeNonFinite() {
+        for c in Self.nonFiniteCases {
+            let font = PresentationPreferences.clampFontSize(CGFloat(c.value))
+            let width = PresentationPreferences.clampSidebarWidth(CGFloat(c.value))
+            #expect(font.isFinite, "clampFontSize finite for \(c.label)")
+            #expect(width.isFinite, "clampSidebarWidth finite for \(c.label)")
+            #expect(font == PresentationPreferences.default.terminalFontSize, "clampFontSize \(c.label)")
+            #expect(width == PresentationPreferences.default.sidebarWidth, "clampSidebarWidth \(c.label)")
+        }
+    }
+
+    @Test func nonFiniteUserDefaultsRoundTripsToDefault() {
+        for c in Self.nonFiniteCases {
+            let defaults = scratchDefaults("presentation.nonfinite.\(c.label).bothy")
+            defaults.set(c.value, forKey: PresentationPreferences.Key.fleetPollInterval)
+            defaults.set(c.value, forKey: PresentationPreferences.Key.reachabilityProbeTimeout)
+            defaults.set(c.value, forKey: PresentationPreferences.Key.terminalFontSize)
+            defaults.set(c.value, forKey: PresentationPreferences.Key.sidebarWidth)
+
+            let p = PresentationPreferences(userDefaults: defaults)
+            #expect(p == .default, "non-finite override recovers to default for \(c.label)")
+
+            // A recovered value re-persists as finite, so the next launch is clean.
+            p.write(to: defaults)
+            #expect(PresentationPreferences(userDefaults: defaults) == .default, "\(c.label) re-read")
+        }
+    }
+
+    @Test func finiteMinMaxUnchangedByNormalization() {
+        // Finite extremes still clamp to the bounds exactly as before — the
+        // normalization must not disturb ordinary in-range behavior.
+        #expect(PresentationPreferences.clampFontSize(PresentationPreferences.minFontSize)
+                == PresentationPreferences.minFontSize)
+        #expect(PresentationPreferences.clampFontSize(PresentationPreferences.maxFontSize)
+                == PresentationPreferences.maxFontSize)
+        #expect(PresentationPreferences.clampSidebarWidth(PresentationPreferences.minSidebarWidth)
+                == PresentationPreferences.minSidebarWidth)
+        #expect(PresentationPreferences.clampSidebarWidth(PresentationPreferences.maxSidebarWidth)
+                == PresentationPreferences.maxSidebarWidth)
+        // A finite +∞-adjacent large magnitude clamps to max, not to the default.
+        #expect(PresentationPreferences.clampFontSize(.greatestFiniteMagnitude)
+                == PresentationPreferences.maxFontSize)
+        #expect(PresentationPreferences.clampSidebarWidth(-.greatestFiniteMagnitude)
+                == PresentationPreferences.minSidebarWidth)
+    }
 }
