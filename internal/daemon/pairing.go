@@ -395,15 +395,18 @@ func (sm *SessionManager) ApprovePairing(requestID string, readOnly bool, now ti
 
 	saveErr := sm.saveState()
 	if saveErr != nil {
-		// Roll the in-memory index back so this running daemon doesn't serve a
-		// device it can't be sure it persisted. Note this does NOT prove nothing
-		// reached disk: atomicfile can rename the new state into place and only
-		// then fail fsyncing the directory, so the paired device may be present on
-		// disk and reappear after a restart. The durable outcome is therefore
-		// commit-unknown — which is exactly why the client retains its credential
-		// (issue #1299).
-		delete(sm.state.PairedDevices, deviceID)
-		delete(sm.deviceTokenIndex, hash)
+		// An atomic write may report a directory-fsync error after its rename has
+		// already published the new state. Reconcile that commit-unknown outcome
+		// against disk before rolling back the live index: otherwise this process
+		// reports "invalid token" to the client's recovery probe even though a
+		// restart will reload and authorize the exact same grant. Keep the live
+		// grant only when disk contains the exact staged device under the same HMAC
+		// key; every pre-publication or mismatched outcome still rolls back.
+		persisted, loadErr := LoadState(sm.paths.StateFile)
+		if loadErr != nil || !pairingGrantPersisted(persisted, key, device) {
+			delete(sm.state.PairedDevices, deviceID)
+			delete(sm.deviceTokenIndex, hash)
+		}
 	}
 	sm.mu.Unlock()
 
@@ -421,6 +424,31 @@ func (sm *SessionManager) ApprovePairing(requestID string, readOnly bool, now ti
 	}
 
 	return deviceID, clientToken, nil
+}
+
+// pairingGrantPersisted reports whether an on-disk state contains the exact
+// pairing grant staged by ApprovePairing. It deliberately compares every
+// persisted device field and the HMAC key: a partial, stale, or unrelated state
+// must not make the running daemon authorize a credential after a failed save.
+func pairingGrantPersisted(state *State, hmacKey string, want *PairedDevice) bool {
+	if state == nil || state.PairingHMACKey != hmacKey || want == nil {
+		return false
+	}
+
+	got, ok := state.PairedDevices[want.ID]
+	if !ok || got == nil {
+		return false
+	}
+
+	return got.ID == want.ID &&
+		got.Label == want.Label &&
+		got.PubKey == want.PubKey &&
+		got.TailnetUser == want.TailnetUser &&
+		got.TailnetNode == want.TailnetNode &&
+		got.TokenHash == want.TokenHash &&
+		got.ReadOnly == want.ReadOnly &&
+		got.CreatedAt.Equal(want.CreatedAt) &&
+		got.LastSeenAt.Equal(want.LastSeenAt)
 }
 
 // awaitPairingDelivered blocks (off sm.mu) until the delivery goroutine reports

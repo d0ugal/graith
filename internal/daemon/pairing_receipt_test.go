@@ -1,6 +1,9 @@
 package daemon
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -504,5 +507,86 @@ func TestApprovePairingSaveFailureRollsBackInMemory(t *testing.T) {
 
 	if idxLen != 0 {
 		t.Fatalf("token index left committed on save failure: %d entries", idxLen)
+	}
+}
+
+// TestApprovePairingPostRenameFailureReconcilesLiveAndRestartedState covers the
+// commit-unknown recovery gap from issue #1299. A directory fsync can fail after
+// atomic rename publishes the new state. The approval still returns an error,
+// so the client retains its candidate credential, but both the live daemon and
+// a restarted daemon must authenticate that exact credential. If the live
+// token index were unconditionally rolled back, the first probe would return
+// "invalid token" and destroy the only credential before restart resurrected
+// the authorized device.
+func TestApprovePairingPostRenameFailureReconcilesLiveAndRestartedState(t *testing.T) {
+	sm := newPairingSM(t)
+	now := time.Now()
+	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
+
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rid, waiter, err := sm.AddPendingPairing("bairn", base64.StdEncoding.EncodeToString(pub), id, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Publish the state exactly as atomicfile.Write does at rename, then model
+	// its final parent-directory fsync returning an error.
+	postRenameErr := errors.New("injected post-rename directory fsync failure")
+	sm.saveStateWriter = func(path string, state *State) error {
+		if err := SaveState(path, state); err != nil {
+			return err
+		}
+
+		return postRenameErr
+	}
+
+	approvalCh := make(chan pairApproval, 1)
+
+	go func() {
+		appr := <-waiter.approval
+
+		approvalCh <- appr
+
+		appr.delivered <- nil
+
+		appr.receipt <- nil
+
+		<-appr.committed
+	}()
+
+	_, _, err = sm.ApprovePairing(rid, false, now)
+	if !errors.Is(err, postRenameErr) {
+		t.Fatalf("ApprovePairing error = %v, want post-rename failure", err)
+	}
+
+	appr := <-approvalCh
+	assertPairingCredentialAuthenticates(t, sm, id, priv, appr.Token)
+
+	// A fresh manager must reach the same answer from the renamed state file.
+	restarted := NewSessionManager(sm.cfg, sm.paths, sm.log)
+
+	restarted.remoteTLSPin = sm.remoteTLSPin
+
+	if err := restarted.LoadState(); err != nil {
+		t.Fatalf("restart LoadState: %v", err)
+	}
+
+	assertPairingCredentialAuthenticates(t, restarted, id, priv, appr.Token)
+}
+
+func assertPairingCredentialAuthenticates(t *testing.T, sm *SessionManager, id TailnetIdentity, priv ed25519.PrivateKey, token string) {
+	t.Helper()
+
+	rc := newRemoteConn(t, sm, id)
+	challenge := rc.handshake(t, sm)
+	signature := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, protocol.PoPSigningInput(challenge.Nonce, sm.remoteTLSPin)))
+	rc.send(t, "auth_proof", protocol.AuthProofMsg{Signature: signature}, token)
+
+	if env := rc.read(t); env.Type != "auth_ok" {
+		t.Fatalf("recovery probe = %q, want auth_ok", env.Type)
 	}
 }

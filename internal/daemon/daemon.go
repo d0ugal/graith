@@ -70,6 +70,7 @@ type SessionManager struct {
 	tokenIndex        map[string]string              // token → session ID (reverse lookup)
 	humanToken        string                         // local human credential, loaded at startup
 	saveStateFault    func() error                   // test-only saveState fault injection; nil in production
+	saveStateWriter   func(string, *State) error     // test-only state writer override; nil uses SaveState
 	pendingPairings   map[string]*pendingPairing     // requestID → pending device pairing (in-memory; not persisted)
 	pairWaiters       map[string]*pairWaiter         // requestID → waiter for a blocked pair_request connection
 	approvalSubs      map[net.Conn]func(string, any) // conn → sendControl for approval subscribers (no attach)
@@ -754,6 +755,10 @@ func (sm *SessionManager) saveState() error {
 		if err := sm.saveStateFault(); err != nil {
 			return err
 		}
+	}
+
+	if sm.saveStateWriter != nil {
+		return sm.saveStateWriter(sm.paths.StateFile, sm.state)
 	}
 
 	return SaveState(sm.paths.StateFile, sm.state)
