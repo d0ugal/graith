@@ -111,11 +111,20 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, triggers []conf
 		sm.teardownBinding(key)
 	}
 
-	// Create newly desired bindings; recreate any whose definition changed; and
-	// retry degraded ones whose backoff has elapsed. A degraded binding (e.g. one
-	// that hit the inotify watch limit) stays in the map so its status surfaces,
-	// but is recreated once its nextRetryAt passes — so it recovers on its own
-	// when the limit clears, without a source-session restart (issue #1029).
+	// The daemon-wide watch-ignore policy is not part of a per-trigger definition,
+	// so a reload of triggers.advanced.watch_builtin_ignores would otherwise leave
+	// live matchers stale. Fold its resolved fingerprint into binding
+	// reconciliation so a change (adding OR removing ignores, including clearing to
+	// []) recreates each affected binding with the new matcher (issue #1309).
+	builtinIgnores := sm.Config().TriggersRuntime.WatchBuiltinIgnores()
+	builtinFP := watchBuiltinFingerprint(builtinIgnores)
+
+	// Create newly desired bindings; recreate any whose definition or daemon-wide
+	// ignore policy changed; and retry degraded ones whose backoff has elapsed. A
+	// degraded binding (e.g. one that hit the inotify watch limit) stays in the map
+	// so its status surfaces, but is recreated once its nextRetryAt passes — so it
+	// recovers on its own when the limit clears, without a source-session restart
+	// (issue #1029).
 	for key, t := range desired {
 		fp := triggerFingerprint(t)
 
@@ -124,14 +133,19 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, triggers []conf
 		retryDue := exists && existing.degraded != "" && !existing.nextRetryAt.IsZero() && !now.Before(existing.nextRetryAt)
 		sm.triggers.mu.Unlock()
 
+		var carry map[string]bool
+
 		if exists && !retryDue {
+			defChanged := existing.fingerprint != fp
+
 			// A same-named watch trigger whose fire-affecting definition
-			// (paths/ignore/debounce/action/policy) changed leaves the binding
-			// key matching, so a plain existence check would keep the stale
-			// matcher and debounce. Tear it down and recreate on fingerprint
-			// change (mirrors reconcileSchedules' fingerprint reset). A healthy or
-			// backoff-waiting binding whose definition is unchanged stays put.
-			if existing.fingerprint == fp {
+			// (paths/ignore/debounce/action/policy) changed, or whose daemon-wide
+			// ignore policy changed, leaves the binding key matching, so a plain
+			// existence check would keep the stale matcher and debounce. Tear it
+			// down and recreate on fingerprint change (mirrors reconcileSchedules'
+			// fingerprint reset). A healthy or backoff-waiting binding whose
+			// definition and policy are both unchanged stays put.
+			if !defChanged && existing.builtinFingerprint == builtinFP {
 				continue
 			}
 
@@ -146,7 +160,22 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, triggers []conf
 				continue
 			}
 
+			// Tear down first (cancels the goroutine and marks the binding canceled
+			// under bmu), THEN drain. Draining before teardown would race the event
+			// goroutine, which could note a change between the drain and the
+			// teardown and lose it; canceling first makes noteChange a no-op so the
+			// drain sees the final set (issue #1309).
 			sm.teardownBinding(key)
+
+			// A pure ignore-policy change keeps the same action, so changes
+			// coalesced under the old policy are still valid to fire once the new
+			// matcher admits them — carry them across the recreate so a debounce
+			// that has not yet fired is not stranded. A definition change may swap
+			// the action, so its pending changes must not fire the new action (see
+			// watchFire's generation guard); leave them behind.
+			if !defChanged {
+				carry = drainBindingChanges(existing)
+			}
 		}
 
 		sess := sm.sessionForBindingKey(key)
@@ -154,8 +183,26 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, triggers []conf
 			continue
 		}
 
-		sm.createBinding(ctx, t, sess, now)
+		sm.createBinding(ctx, t, sess, now, builtinIgnores, builtinFP, carry)
 	}
+}
+
+// drainBindingChanges snapshots and clears a binding's coalesced change set under
+// its lock. Called after teardownBinding has marked the binding canceled (so
+// noteChange no longer mutates the map), it captures the final pending set to
+// carry across a recreate.
+func drainBindingChanges(b *watchBinding) map[string]bool {
+	b.bmu.Lock()
+	defer b.bmu.Unlock()
+
+	if len(b.changed) == 0 {
+		return nil
+	}
+
+	out := b.changed
+	b.changed = make(map[string]bool)
+
+	return out
 }
 
 type watchSession struct {
@@ -218,18 +265,32 @@ func (sm *SessionManager) sessionForBindingKey(key string) watchSession {
 // exhausted) the binding is recorded as degraded with a backoff-scheduled retry
 // rather than running; the reconcile loop recreates it once nextRetryAt passes.
 // now is injected so the retry schedule is testable.
-func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerConfig, sess watchSession, now time.Time) {
+func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerConfig, sess watchSession, now time.Time, builtinIgnores []string, builtinFP string, carry map[string]bool) {
 	key := bindingKey(t.Name, sess.id)
-	matcher := newWatchMatcher(sess.worktree, t.Watch, sm.Config().TriggersRuntime.WatchBuiltinIgnores())
+	matcher := newWatchMatcher(sess.worktree, t.Watch, builtinIgnores)
 
 	// Carry forward the retry count from a prior degraded binding for this key so
 	// the backoff keeps growing across repeated failures instead of resetting on
-	// each retry attempt.
+	// each retry attempt. Also absorb any changes stashed on a prior degraded
+	// binding (a healthy recreate has already been torn down and drained into
+	// carry, so this only fires on the degraded-recovery path) so pending changes
+	// survive the whole degrade→retry→recover cycle rather than being lost when
+	// the recreate that degraded had already drained them (issue #1309).
 	sm.triggers.mu.Lock()
 
 	prevRetries := 0
 	if prev, ok := sm.triggers.bindings[key]; ok {
 		prevRetries = prev.retryCount
+
+		if len(prev.changed) > 0 {
+			if carry == nil {
+				carry = make(map[string]bool, len(prev.changed))
+			}
+
+			for p := range prev.changed {
+				carry[p] = true
+			}
+		}
 	}
 	sm.triggers.mu.Unlock()
 
@@ -238,14 +299,20 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 	// doesn't busy-loop on every reconcile tick.
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		sm.recordDegradedBinding(key, t, sess, "fsnotify.NewWatcher failed: "+err.Error(), prevRetries+1, now)
+		sm.recordDegradedBinding(key, t, sess, "fsnotify.NewWatcher failed: "+err.Error(), prevRetries+1, now, builtinFP, carry)
 		return
 	}
 
+	// A newly-un-ignored directory that the fresh policy now wants watched but that
+	// fails to register (e.g. the inotify watch limit) must route the binding
+	// through the degraded/backoff retry path rather than stamping success — a
+	// recreate for an ignore-policy change re-walks the whole tree here, so an
+	// add-failure on a previously-pruned directory is surfaced exactly like any
+	// other creation-time degradation (issue #1309, building on #1029).
 	if degraded := addWatchRecursive(sm.watchAddFunc(watcher), sess.worktree, matcher); degraded != "" {
 		_ = watcher.Close()
 
-		sm.recordDegradedBinding(key, t, sess, degraded, prevRetries+1, now)
+		sm.recordDegradedBinding(key, t, sess, degraded, prevRetries+1, now, builtinFP, carry)
 
 		return
 	}
@@ -253,13 +320,14 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 	bctx, cancel := context.WithCancel(ctx)
 
 	b := &watchBinding{
-		triggerName: t.Name,
-		sessionID:   sess.id,
-		worktree:    sess.worktree,
-		fingerprint: triggerFingerprint(t),
-		watcher:     watcher,
-		changed:     make(map[string]bool),
-		cancel:      cancel,
+		triggerName:        t.Name,
+		sessionID:          sess.id,
+		worktree:           sess.worktree,
+		fingerprint:        triggerFingerprint(t),
+		builtinFingerprint: builtinFP,
+		watcher:            watcher,
+		changed:            make(map[string]bool),
+		cancel:             cancel,
 		// Re-adopt an existing reactor (tagged TriggerID/TriggerReactor) so
 		// ensure-reviewer reuse survives a daemon restart or binding recreation
 		// instead of spawning a duplicate.
@@ -272,15 +340,45 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 
 	go sm.runBinding(bctx, t.Name, b, matcher)
 
+	// Re-note any changes carried across an ignore-policy recreate that the new
+	// matcher still admits, (re)arming the debounce so they fire rather than being
+	// stranded; changes the new policy now suppresses are dropped (issue #1309).
+	sm.recarryChanges(bctx, t.Name, b, matcher, carry)
+
 	sm.log.Info("trigger: watching", "trigger", t.Name, "session", sess.name, "worktree", sess.worktree)
+}
+
+// recarryChanges re-notes changes carried across a binding recreate, filtered by
+// the new matcher, so a debounce that was pending under the old policy is not
+// lost. Called after the new binding is published and its goroutine started, so
+// the debounce callback observes the live binding.
+func (sm *SessionManager) recarryChanges(ctx context.Context, triggerName string, b *watchBinding, matcher *watchMatcher, carry map[string]bool) {
+	if len(carry) == 0 {
+		return
+	}
+
+	debounce := sm.bindingDebounce(triggerName)
+
+	for rel := range carry {
+		if matcher.fires(rel) {
+			sm.noteChange(ctx, triggerName, b, rel, debounce)
+		}
+	}
 }
 
 // recordDegradedBinding stores (replacing any prior one) a degraded binding for
 // key with a backoff-scheduled retry. It holds no live watcher or goroutine — a
 // prior degraded binding already closed its watcher and never started one, and a
 // prior healthy binding for this key is only ever recreated after teardown — so
-// the reconcile loop simply recreates this entry once nextRetryAt passes.
-func (sm *SessionManager) recordDegradedBinding(key string, t *config.TriggerConfig, sess watchSession, reason string, attempt int, now time.Time) {
+// the reconcile loop simply recreates this entry once nextRetryAt passes. Any
+// carried pending changes are stashed on the degraded binding so a later recovery
+// recreate can re-note the still-valid ones instead of losing them (issue #1309).
+func (sm *SessionManager) recordDegradedBinding(key string, t *config.TriggerConfig, sess watchSession, reason string, attempt int, now time.Time, builtinFP string, carry map[string]bool) {
+	changed := carry
+	if changed == nil {
+		changed = make(map[string]bool)
+	}
+
 	b := &watchBinding{
 		triggerName: t.Name,
 		sessionID:   sess.id,
@@ -290,7 +388,12 @@ func (sm *SessionManager) recordDegradedBinding(key string, t *config.TriggerCon
 		// definition-changed path — otherwise an empty fingerprint would read as
 		// "definition changed" and recreate immediately, bypassing the backoff.
 		fingerprint: triggerFingerprint(t),
-		changed:     make(map[string]bool),
+		// Stamp the ignore-policy fingerprint too, so a degraded binding is
+		// retried on its backoff rather than treated as a policy change (which
+		// would recreate immediately and bypass the backoff).
+		builtinFingerprint: builtinFP,
+		// Stash carried changes here; the recovery createBinding absorbs them.
+		changed:     changed,
 		reactorID:   sm.findReactor(t.Name, sess.id),
 		degraded:    reason,
 		retryCount:  attempt,
@@ -479,6 +582,14 @@ func (sm *SessionManager) noteChange(ctx context.Context, triggerName string, b 
 	b.bmu.Lock()
 	defer b.bmu.Unlock()
 
+	// Once the binding is torn down (canceled set under bmu), drop the change: on
+	// a recreate, reconcile tears down before draining b.changed, so a change
+	// noted between the drain and teardown would otherwise be lost silently. bmu
+	// serialises this with teardown and with drainBindingChanges (issue #1309).
+	if b.canceled {
+		return
+	}
+
 	b.changed[rel] = true
 	if b.debounce != nil {
 		b.debounce.Stop()
@@ -508,6 +619,16 @@ func (sm *SessionManager) watchFire(ctx context.Context, triggerName string, b *
 	// over. This also stops the stale binding starting a fresh serialised
 	// action, so its inFlight guard can only clear (see reconcileBindings).
 	if triggerFingerprint(t) != b.fingerprint {
+		return
+	}
+	// Likewise for the daemon-wide ignore policy: a reload of
+	// watch_builtin_ignores may have landed (config published) before reconcile
+	// recreated this binding, so the old matcher could have collected paths the
+	// new policy now suppresses. Don't consume or fire — leave b.changed intact so
+	// the recreate carries the still-valid paths and drops the suppressed ones,
+	// re-arming the debounce (issue #1309). b.builtinFingerprint is set once at
+	// creation and never mutated, so it needs no lock.
+	if watchBuiltinFingerprint(sm.Config().TriggersRuntime.WatchBuiltinIgnores()) != b.builtinFingerprint {
 		return
 	}
 

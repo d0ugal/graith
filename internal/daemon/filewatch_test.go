@@ -5,12 +5,42 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/fsnotify/fsnotify"
 )
+
+// setWatchBuiltinIgnores swaps the daemon-wide watch-ignore policy the way a
+// config reload does — a fresh *config.Config published under sm.mu — rather than
+// mutating the shared struct in place (which would race a running binding
+// goroutine). A nil argument restores the "omitted key" (defaults) case.
+func setWatchBuiltinIgnores(sm *SessionManager, ignores []string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	newCfg := *sm.cfg
+	newCfg.TriggersRuntime.Advanced.WatchBuiltinIgnores = ignores
+	sm.cfg = &newCfg
+}
+
+// bindingWatches reports whether the binding's live fsnotify watcher currently
+// registers path.
+func bindingWatches(b *watchBinding, path string) bool {
+	if b == nil || b.watcher == nil {
+		return false
+	}
+
+	for _, w := range b.watcher.WatchList() {
+		if filepath.Clean(w) == filepath.Clean(path) {
+			return true
+		}
+	}
+
+	return false
+}
 
 func mustWatcher(t *testing.T) *fsnotify.Watcher {
 	t.Helper()
@@ -234,7 +264,7 @@ func TestFileWatch_EndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b := &watchBinding{triggerName: "wf", sessionID: "src", worktree: worktree, fingerprint: triggerFingerprint(&trig), watcher: w, changed: make(map[string]bool)}
+	b := &watchBinding{triggerName: "wf", sessionID: "src", worktree: worktree, fingerprint: triggerFingerprint(&trig), builtinFingerprint: watchBuiltinFingerprint(sm.cfg.TriggersRuntime.WatchBuiltinIgnores()), watcher: w, changed: make(map[string]bool)}
 	matcher := newWatchMatcher(worktree, trig.Watch, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -378,11 +408,12 @@ func TestWatchFire_StaleGenerationDoesNotFire(t *testing.T) {
 	// A binding stamped with a fingerprint that does NOT match the live config
 	// stands in for a stale generation mid-reload.
 	b := &watchBinding{
-		triggerName: "thrawn",
-		sessionID:   "src",
-		worktree:    worktree,
-		fingerprint: "stalegeneration",
-		changed:     map[string]bool{"main.go": true},
+		triggerName:        "thrawn",
+		sessionID:          "src",
+		worktree:           worktree,
+		fingerprint:        "stalegeneration",
+		builtinFingerprint: watchBuiltinFingerprint(sm.cfg.TriggersRuntime.WatchBuiltinIgnores()),
+		changed:            map[string]bool{"main.go": true},
 	}
 
 	sm.watchFire(context.Background(), "thrawn", b)
@@ -474,6 +505,395 @@ func TestReconcileBindings_DefersRecreateWhileInFlight(t *testing.T) {
 	}
 
 	sm.teardownAllBindings()
+}
+
+// TestWatchBuiltinIgnoresReloadRecreatesLiveBinding is the #1309 regression for a
+// stale live matcher: changing triggers.advanced.watch_builtin_ignores must
+// reconcile existing bindings (recreating them with the new matcher and watch
+// set) for BOTH additions and removals, including clearing the list to [], while
+// the mandatory .git ignore always survives. Before the fix the list was
+// snapshotted at binding creation and absent from the fingerprint, so a reload
+// left running bindings watching (or pruning) the wrong directories.
+func TestWatchBuiltinIgnoresReloadRecreatesLiveBinding(t *testing.T) {
+	worktree := t.TempDir()
+	cacheDir := filepath.Join(worktree, "cache")
+	gitDir := filepath.Join(worktree, ".git")
+
+	for _, d := range []string{cacheDir, gitDir} {
+		if err := os.MkdirAll(d, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	trig := config.TriggerConfig{
+		Name:   "bide",
+		Watch:  &config.WatchConfig{Role: "implementer", Debounce: "50ms"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "blether"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	setWatchBuiltinIgnores(sm, []string{"cache/"})
+	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "canny", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
+
+	ctx := context.Background()
+	key := bindingKey("bide", "src")
+
+	t.Cleanup(sm.teardownAllBindings)
+
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
+
+	first := sm.triggers.bindings[key]
+	if first == nil {
+		t.Fatal("expected binding after first reconcile")
+	}
+
+	if bindingWatches(first, cacheDir) {
+		t.Fatal("cache/ should be pruned under the initial builtin ignore")
+	}
+
+	// Clear the policy to [] — only the mandatory .git ignore remains. The binding
+	// is recreated with the new matcher and the formerly-pruned cache/ is watched.
+	setWatchBuiltinIgnores(sm, []string{})
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
+
+	cleared := sm.triggers.bindings[key]
+	if cleared == first {
+		t.Fatal("clearing builtin ignores did not recreate the binding")
+	}
+
+	if !bindingWatches(cleared, cacheDir) {
+		t.Fatal("clear-to-[] did not add the formerly-ignored cache/ to the live watcher")
+	}
+
+	if bindingWatches(cleared, gitDir) {
+		t.Fatal("mandatory .git ignore must survive clear-to-[]")
+	}
+
+	// Re-add cache/ to the policy — the binding is recreated and cache/ pruned.
+	setWatchBuiltinIgnores(sm, []string{"cache/"})
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
+
+	readded := sm.triggers.bindings[key]
+	if readded == cleared {
+		t.Fatal("re-adding a builtin ignore did not recreate the binding")
+	}
+
+	if bindingWatches(readded, cacheDir) {
+		t.Fatal("re-added cache/ ignore was not pruned from the live watcher")
+	}
+
+	// An unchanged policy keeps the same binding (no churn per reconcile tick).
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
+
+	if got := sm.triggers.bindings[key]; got != readded {
+		t.Fatal("unchanged policy recreated the binding")
+	}
+}
+
+// TestWatchBuiltinIgnoresReloadCarriesPendingChanges covers the #1309
+// publish→timer→update window: when a reload recreates a binding, changes the new
+// policy still admits must be carried across and re-armed rather than stranded,
+// while changes the new policy now suppresses are dropped. Without the carry a
+// debounce that had not yet fired would silently lose its coalesced changes.
+func TestWatchBuiltinIgnoresReloadCarriesPendingChanges(t *testing.T) {
+	worktree := t.TempDir()
+	trig := config.TriggerConfig{
+		Name: "thrawn",
+		// A long debounce keeps the re-armed timer pending for a deterministic
+		// inspection (teardown stops it); the fire path itself is unchanged.
+		Watch:  &config.WatchConfig{Role: "implementer", Debounce: "10s"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "fash"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	setWatchBuiltinIgnores(sm, []string{"*.log"})
+	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "ben", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
+
+	ctx := context.Background()
+	key := bindingKey("thrawn", "src")
+
+	t.Cleanup(sm.teardownAllBindings)
+
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
+
+	first := sm.triggers.bindings[key]
+	if first == nil {
+		t.Fatal("expected binding after first reconcile")
+	}
+
+	// Two changes coalesced under the old policy (neither ignored yet), timer
+	// pending. drop.tmp fired legitimately under the old policy; keep.go always fires.
+	first.bmu.Lock()
+	first.changed = map[string]bool{"keep.go": true, "drop.tmp": true}
+	first.bmu.Unlock()
+
+	// A reload adds *.tmp to the ignore policy and recreates the binding.
+	setWatchBuiltinIgnores(sm, []string{"*.log", "*.tmp"})
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
+
+	second := sm.triggers.bindings[key]
+	if second == first {
+		t.Fatal("ignore-policy change did not recreate the binding")
+	}
+
+	second.bmu.Lock()
+	_, keep := second.changed["keep.go"]
+	_, drop := second.changed["drop.tmp"]
+	armed := second.debounce != nil
+	second.bmu.Unlock()
+
+	if !keep {
+		t.Fatal("carried change keep.go was stranded across the reload")
+	}
+
+	if drop {
+		t.Fatal("change now suppressed by the new policy (drop.tmp) survived the reload")
+	}
+
+	if !armed {
+		t.Fatal("carried change did not re-arm the debounce (would strand it)")
+	}
+}
+
+// TestWatchBuiltinIgnoresReloadAddFailureDegrades is the #1309 regression for
+// stamping success on a failed watch add: when a reload un-ignores a directory,
+// the recreate walk tries to register it; an fsnotify add failure there must
+// route the binding through the degraded/backoff retry path (recovering on its
+// own once the limit clears), not silently mark it healthy.
+func TestWatchBuiltinIgnoresReloadAddFailureDegrades(t *testing.T) {
+	worktree := t.TempDir()
+
+	cacheDir := filepath.Join(worktree, "cache")
+	if err := os.MkdirAll(cacheDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	trig := config.TriggerConfig{
+		Name:   "dreich",
+		Watch:  &config.WatchConfig{Role: "implementer", Debounce: "50ms"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "blether"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	setWatchBuiltinIgnores(sm, []string{"cache/"})
+	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "ben", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
+
+	ctx := context.Background()
+	key := bindingKey("dreich", "src")
+
+	t.Cleanup(sm.teardownAllBindings)
+
+	// Healthy under the initial policy: cache/ is pruned, so its add is never tried.
+	t0 := time.Now()
+	sm.reconcileBindings(ctx, sm.allTriggers(), t0)
+
+	if b := sm.triggers.bindings[key]; b == nil || b.degraded != "" {
+		t.Fatalf("expected healthy binding, got %+v", b)
+	}
+
+	// Clearing the policy un-ignores cache/, so the recreate walk now tries to add
+	// it — inject a failure only for that directory.
+	sm.watchAdd = func(_ *fsnotify.Watcher, path string) error {
+		if strings.Contains(path, "cache") {
+			return errors.New("no space left on device")
+		}
+
+		return nil
+	}
+	setWatchBuiltinIgnores(sm, []string{})
+	sm.reconcileBindings(ctx, sm.allTriggers(), t0)
+
+	degraded := sm.triggers.bindings[key]
+	if degraded == nil || degraded.degraded == "" {
+		t.Fatalf("newly-unignored dir add-failure did not degrade the binding, got %+v", degraded)
+	}
+
+	if degraded.retryCount != 1 || degraded.nextRetryAt.IsZero() {
+		t.Fatalf("expected backoff scheduled, got count=%d next=%v", degraded.retryCount, degraded.nextRetryAt)
+	}
+
+	if degraded.watcher != nil {
+		t.Fatal("degraded binding must not retain a live watcher")
+	}
+
+	// The add limit clears → the next reconcile after the backoff recovers a
+	// healthy binding watching the now-unignored cache/, with no session restart.
+	sm.watchAdd = nil
+	sm.reconcileBindings(ctx, sm.allTriggers(), degraded.nextRetryAt.Add(time.Millisecond))
+
+	healthy := sm.triggers.bindings[key]
+	if healthy == nil || healthy.degraded != "" || healthy.watcher == nil {
+		t.Fatalf("expected recovered healthy binding, got %+v", healthy)
+	}
+
+	if !bindingWatches(healthy, cacheDir) {
+		t.Fatal("recovered binding should watch the now-unignored cache/")
+	}
+}
+
+// TestWatchBuiltinIgnoresPublishThenFireHoldsThenReconcile is the #1309
+// publish→timer→update regression: a debounce firing after the new policy is
+// published but BEFORE reconcile recreates the binding must NOT consume or fire
+// the old-policy change set (which may include paths the new policy suppresses).
+// The changes are held until reconcile recreates, which then re-arms the
+// still-valid paths and drops the newly-suppressed ones.
+func TestWatchBuiltinIgnoresPublishThenFireHoldsThenReconcile(t *testing.T) {
+	worktree := t.TempDir()
+	trig := config.TriggerConfig{
+		Name: "thrawn",
+		// Long debounce so the reconcile-rearmed timer stays pending for a
+		// deterministic inspection (teardown stops it).
+		Watch:  &config.WatchConfig{Role: "implementer", Debounce: "10s"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "fash"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	ms := withMsgStore(t, sm)
+	setWatchBuiltinIgnores(sm, []string{"*.log"})
+	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "ben", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
+
+	ctx := context.Background()
+	key := bindingKey("thrawn", "src")
+
+	t.Cleanup(sm.teardownAllBindings)
+
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
+
+	first := sm.triggers.bindings[key]
+	if first == nil {
+		t.Fatal("expected binding after first reconcile")
+	}
+
+	// Two changes coalesced under the old policy; both would fire under it.
+	first.bmu.Lock()
+	first.changed = map[string]bool{"keep.go": true, "drop.tmp": true}
+	first.bmu.Unlock()
+
+	// Publish the new policy (adds *.tmp) but do NOT reconcile yet, then fire the
+	// debounce directly — this is the publish→timer window.
+	setWatchBuiltinIgnores(sm, []string{"*.log", "*.tmp"})
+	sm.watchFire(ctx, "thrawn", first)
+
+	// The stale-policy fire must not have consumed the change set...
+	first.bmu.Lock()
+	held := len(first.changed)
+	first.bmu.Unlock()
+
+	if held != 2 {
+		t.Fatalf("watchFire consumed changes in the publish→reconcile window (%d left, want 2)", held)
+	}
+
+	// ...nor fired the action.
+	if msgs, _ := ms.Read("fash", "reader", false, ""); len(msgs) != 0 {
+		t.Fatalf("stale-policy watchFire fired the action (%d messages)", len(msgs))
+	}
+
+	// Reconcile now recreates the binding, carrying keep.go (still admitted) and
+	// dropping drop.tmp (now suppressed), re-arming the debounce.
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
+
+	second := sm.triggers.bindings[key]
+	if second == first {
+		t.Fatal("reconcile did not recreate the binding for the published policy")
+	}
+
+	second.bmu.Lock()
+	_, keep := second.changed["keep.go"]
+	_, drop := second.changed["drop.tmp"]
+	armed := second.debounce != nil
+	second.bmu.Unlock()
+
+	if !keep {
+		t.Fatal("still-valid change keep.go was stranded across the publish→reconcile window")
+	}
+
+	if drop {
+		t.Fatal("newly-suppressed change drop.tmp survived the reconcile")
+	}
+
+	if !armed {
+		t.Fatal("carried change did not re-arm the debounce")
+	}
+}
+
+// TestWatchBuiltinIgnoresDegradeRecoveryPreservesChanges covers the combined
+// #1309 path: a reload recreate that degrades (watcher add fails) must not lose
+// the pending changes it drained — they are stashed on the degraded binding and
+// re-noted when the backoff recovers a healthy binding.
+func TestWatchBuiltinIgnoresDegradeRecoveryPreservesChanges(t *testing.T) {
+	worktree := t.TempDir()
+
+	cacheDir := filepath.Join(worktree, "cache")
+	if err := os.MkdirAll(cacheDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	trig := config.TriggerConfig{
+		Name:   "dreich",
+		Watch:  &config.WatchConfig{Role: "implementer", Debounce: "10s"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "blether"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	setWatchBuiltinIgnores(sm, []string{"cache/"})
+	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "ben", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
+
+	ctx := context.Background()
+	key := bindingKey("dreich", "src")
+
+	t.Cleanup(sm.teardownAllBindings)
+
+	t0 := time.Now()
+	sm.reconcileBindings(ctx, sm.allTriggers(), t0)
+
+	first := sm.triggers.bindings[key]
+	if first == nil || first.degraded != "" {
+		t.Fatalf("expected healthy binding, got %+v", first)
+	}
+
+	// A change is pending when the reload lands.
+	first.bmu.Lock()
+	first.changed = map[string]bool{"keep.go": true}
+	first.bmu.Unlock()
+
+	// Clearing the policy un-ignores cache/; the recreate walk tries to add it and
+	// fails, degrading the binding — but the drained keep.go must be stashed.
+	sm.watchAdd = func(_ *fsnotify.Watcher, path string) error {
+		if strings.Contains(path, "cache") {
+			return errors.New("no space left on device")
+		}
+
+		return nil
+	}
+	setWatchBuiltinIgnores(sm, []string{})
+	sm.reconcileBindings(ctx, sm.allTriggers(), t0)
+
+	degraded := sm.triggers.bindings[key]
+	if degraded == nil || degraded.degraded == "" {
+		t.Fatalf("expected degraded binding, got %+v", degraded)
+	}
+
+	if _, ok := degraded.changed["keep.go"]; !ok {
+		t.Fatal("degraded binding lost the drained pending change")
+	}
+
+	// The add limit clears → recovery recreates a healthy binding that re-notes the
+	// preserved change and re-arms the debounce.
+	sm.watchAdd = nil
+	sm.reconcileBindings(ctx, sm.allTriggers(), degraded.nextRetryAt.Add(time.Millisecond))
+
+	healthy := sm.triggers.bindings[key]
+	if healthy == nil || healthy.degraded != "" || healthy.watcher == nil {
+		t.Fatalf("expected recovered healthy binding, got %+v", healthy)
+	}
+
+	healthy.bmu.Lock()
+	_, keep := healthy.changed["keep.go"]
+	armed := healthy.debounce != nil
+	healthy.bmu.Unlock()
+
+	if !keep {
+		t.Fatal("recovered binding lost the pending change carried through the degrade→retry cycle")
+	}
+
+	if !armed {
+		t.Fatal("recovered binding did not re-arm the debounce for the preserved change")
+	}
 }
 
 func TestWatchRetryBackoff(t *testing.T) {
@@ -624,7 +1044,8 @@ func TestRecordDegradedBinding_Recovers(t *testing.T) {
 	sess := watchSession{id: "src", name: "ben", worktree: worktree}
 
 	t0 := time.Now()
-	sm.recordDegradedBinding(key, &sm.cfg.Triggers[0], sess, "fsnotify.NewWatcher failed: too many open files", 1, t0)
+	builtinFP := watchBuiltinFingerprint(sm.cfg.TriggersRuntime.WatchBuiltinIgnores())
+	sm.recordDegradedBinding(key, &sm.cfg.Triggers[0], sess, "fsnotify.NewWatcher failed: too many open files", 1, t0, builtinFP, nil)
 
 	b := sm.triggers.bindings[key]
 	if b == nil || b.degraded == "" || b.watcher != nil || b.cancel != nil {
