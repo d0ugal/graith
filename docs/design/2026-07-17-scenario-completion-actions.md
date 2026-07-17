@@ -109,7 +109,7 @@ Each action transitions `pending -> running -> succeeded|failed`, with each
 transition saved atomically. A daemon restart resumes pending work. A non-session
 action left running is marked as an interrupted failure instead of replayed,
 which avoids duplicate external effects. A completion-spawned session carries
-the scenario/epoch/action key in its durable creation reservation; after restart
+the scenario/epoch/action/attempt key in its durable creation reservation; after restart
 the daemon can adopt it and finish the action when that session reaches a clean
 terminal state. `gr trigger run scenario:<id>:<name>` explicitly retries a failed
 action in the current complete epoch.

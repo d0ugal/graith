@@ -258,9 +258,22 @@ func truncateOutput(s string, maxBytes int) string {
 // orchestrator. For a watch source with ensure=true this is the ensure-reviewer
 // behaviour with per-binding reservation.
 func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerConfig, fc fireContext) (string, error) {
-	_ = ctx // reserved; spawned sessions run their own lifecycle detached from the fire ctx
-
 	orchestratorID := sm.orchestratorID()
+	if fc.scenarioID != "" {
+		sm.mu.RLock()
+
+		scenario := sm.state.Scenarios[fc.scenarioID]
+		if scenario != nil {
+			orchestratorID = scenario.OrchestratorID
+		}
+
+		sm.mu.RUnlock()
+
+		if scenario == nil {
+			return "", errors.New("completion scenario no longer exists")
+		}
+	}
+
 	if orchestratorID == "" {
 		return "", errors.New("no orchestrator session; cannot own spawned session")
 	}
@@ -319,6 +332,10 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 
 	name := triggerReactorName(t.Name, suffix)
 
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
 	//nolint:contextcheck // Create spawns a PTY-backed session that outlives the fire ctx (matches scenario start).
 	sess, err := sm.createTriggerSession(createTriggerReq{
 		name:                 name,
@@ -335,6 +352,7 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 		completionScenarioID: fc.scenarioID,
 		completionEpoch:      fc.completionEpoch,
 		completionAction:     fc.completionAction,
+		completionAttempt:    fc.completionAttempt,
 	})
 	if err != nil {
 		return "", err
@@ -568,6 +586,7 @@ type createTriggerReq struct {
 	completionScenarioID string
 	completionEpoch      int
 	completionAction     string
+	completionAttempt    int
 }
 
 // createTriggerSession creates a session via sm.Create, tagging it with the
@@ -598,6 +617,7 @@ func (sm *SessionManager) createTriggerSession(req createTriggerReq) (SessionSta
 		CompletionScenarioID: req.completionScenarioID,
 		CompletionEpoch:      req.completionEpoch,
 		CompletionAction:     req.completionAction,
+		CompletionAttempt:    req.completionAttempt,
 		Rows:                 lc.DefaultRowsOrDefault(),
 		Cols:                 lc.DefaultColsOrDefault(),
 	})

@@ -53,8 +53,8 @@ func (r *scenarioCompletionRuntime) hasCleanup(key string) bool {
 	return r.cleanups[key]
 }
 
-func completionActionKey(scenarioID string, epoch int, action string) string {
-	return fmt.Sprintf("%s\x00%d\x00%s", scenarioID, epoch, action)
+func completionActionKey(scenarioID string, epoch int, action string, attempt int) string {
+	return fmt.Sprintf("%s\x00%d\x00%s\x00%d", scenarioID, epoch, action, attempt)
 }
 
 func (r *scenarioCompletionRuntime) setCancel(key string, cancel context.CancelFunc) {
@@ -66,6 +66,15 @@ func (r *scenarioCompletionRuntime) setCancel(key string, cancel context.CancelF
 func (r *scenarioCompletionRuntime) clearCancel(key string) {
 	r.mu.Lock()
 	delete(r.cancels, key)
+	r.mu.Unlock()
+}
+
+func (r *scenarioCompletionRuntime) moveCancel(from, to string) {
+	r.mu.Lock()
+	if cancel, ok := r.cancels[from]; ok {
+		delete(r.cancels, from)
+		r.cancels[to] = cancel
+	}
 	r.mu.Unlock()
 }
 
@@ -165,6 +174,17 @@ func (sm *SessionManager) processScenarioCompletions(ctx context.Context, onlyID
 		sm.recoverScenarioCleanup(id)
 		sm.dispatchPendingCompletionActions(ctx, id)
 		sm.dispatchDueScenarioCleanup(ctx, id)
+	}
+}
+
+// saveScenarioCompletionState is for asynchronous transitions that cannot
+// return a persistence error to a caller. The in-memory transition remains
+// authoritative for this daemon lifetime; logging makes a durability failure
+// visible, while restart recovery safely reclassifies or replays idempotent
+// work from the last state that reached disk.
+func (sm *SessionManager) saveScenarioCompletionState(operation string) {
+	if err := sm.saveState(); err != nil {
+		sm.log.Error("scenario completion state save failed", "operation", operation, "err", err)
 	}
 }
 
@@ -313,14 +333,15 @@ func (sm *SessionManager) completionTriggerLocked(sc *ScenarioState, bare string
 	return nil
 }
 
-func (sm *SessionManager) completionFireContextLocked(sc *ScenarioState, trigger *config.TriggerConfig) (fireContext, error) {
+func (sm *SessionManager) completionFireContextLocked(sc *ScenarioState, trigger *config.TriggerConfig, attempt int) (fireContext, error) {
 	fc := fireContext{
-		cause:            causeScenarioComplete,
-		now:              time.Now().UTC(),
-		scenarioID:       sc.ID,
-		scenarioName:     sc.Name,
-		completionEpoch:  sc.Completion.Epoch,
-		completionAction: strings.TrimPrefix(trigger.Name, scenarioTriggerName(sc.ID, "")),
+		cause:             causeScenarioComplete,
+		now:               time.Now().UTC(),
+		scenarioID:        sc.ID,
+		scenarioName:      sc.Name,
+		completionEpoch:   sc.Completion.Epoch,
+		completionAction:  strings.TrimPrefix(trigger.Name, scenarioTriggerName(sc.ID, "")),
+		completionAttempt: attempt,
 	}
 
 	member := trigger.Completion.Session
@@ -380,20 +401,50 @@ func (sm *SessionManager) dispatchPendingCompletionActions(ctx context.Context, 
 			return
 		}
 
-		if !sm.claimCompletionAction(scenarioID, epoch, name) {
+		actionCtx, cancel := context.WithCancel(ctx)
+		key := completionActionKey(scenarioID, epoch, name, 0)
+
+		// Register cancellation before the durable claim. Manual stop/delete or a
+		// reopen can then never miss a claimed action in the small dispatch window.
+		sm.completion.setCancel(key, cancel)
+
+		attempt, claimed := sm.claimCompletionAction(scenarioID, epoch, name)
+		if !claimed {
+			cancel()
+			sm.completion.clearCancel(key)
 			sm.releaseSlot()
+
 			continue
 		}
 
-		actionCtx, cancel := context.WithCancel(ctx)
-		key := completionActionKey(scenarioID, epoch, name)
+		attemptKey := completionActionKey(scenarioID, epoch, name, attempt)
+		sm.completion.moveCancel(key, attemptKey)
 
-		sm.completion.setCancel(key, cancel)
-		go sm.runCompletionAction(actionCtx, cancel, scenarioID, epoch, name)
+		go sm.runCompletionAction(actionCtx, cancel, scenarioID, epoch, name, attempt)
 	}
 }
 
-func (sm *SessionManager) claimCompletionAction(scenarioID string, epoch int, name string) bool {
+func completionActionRunning(sc *ScenarioState, name string, attempt int) bool {
+	for i := range sc.Completion.Actions {
+		a := &sc.Completion.Actions[i]
+		if a.Name == name && a.Attempt == attempt && a.State == CompletionActionRunning {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (sm *SessionManager) completionActionIsRunning(scenarioID string, epoch int, name string, attempt int) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	sc := sm.state.Scenarios[scenarioID]
+
+	return sc != nil && sc.Completion.Epoch == epoch && completionActionRunning(sc, name, attempt)
+}
+
+func (sm *SessionManager) claimCompletionAction(scenarioID string, epoch int, name string) (int, bool) {
 	now := time.Now().UTC()
 
 	sm.mu.Lock()
@@ -401,7 +452,7 @@ func (sm *SessionManager) claimCompletionAction(scenarioID string, epoch int, na
 
 	sc := sm.state.Scenarios[scenarioID]
 	if sc == nil || !sc.Completion.Complete || sc.Completion.Epoch != epoch {
-		return false
+		return 0, false
 	}
 
 	for i := range sc.Completion.Actions {
@@ -420,19 +471,19 @@ func (sm *SessionManager) claimCompletionAction(scenarioID string, epoch int, na
 		a.SessionID = ""
 		if err := sm.saveState(); err != nil {
 			a.State = CompletionActionPending
-			return false
+			return 0, false
 		}
 
-		return true
+		return a.Attempt, true
 	}
 
-	return false
+	return 0, false
 }
 
-func (sm *SessionManager) runCompletionAction(ctx context.Context, cancel context.CancelFunc, scenarioID string, epoch int, name string) {
+func (sm *SessionManager) runCompletionAction(ctx context.Context, cancel context.CancelFunc, scenarioID string, epoch int, name string, attempt int) {
 	defer sm.releaseSlot()
 
-	key := completionActionKey(scenarioID, epoch, name)
+	key := completionActionKey(scenarioID, epoch, name, attempt)
 
 	defer func() {
 		cancel()
@@ -442,7 +493,7 @@ func (sm *SessionManager) runCompletionAction(ctx context.Context, cancel contex
 	sm.mu.RLock()
 
 	sc := sm.state.Scenarios[scenarioID]
-	if sc == nil || sc.Completion.Epoch != epoch {
+	if sc == nil || sc.Completion.Epoch != epoch || !completionActionRunning(sc, name, attempt) {
 		sm.mu.RUnlock()
 		return
 	}
@@ -450,47 +501,57 @@ func (sm *SessionManager) runCompletionAction(ctx context.Context, cancel contex
 	trigger := sm.completionTriggerLocked(sc, name)
 	if trigger == nil {
 		sm.mu.RUnlock()
-		sm.finishCompletionAction(scenarioID, epoch, name, "", errors.New("completion trigger definition is missing"))
+		sm.finishCompletionAction(scenarioID, epoch, name, attempt, "", errors.New("completion trigger definition is missing"))
 
 		return
 	}
 
-	fc, err := sm.completionFireContextLocked(sc, trigger)
+	fc, err := sm.completionFireContextLocked(sc, trigger, attempt)
 	sm.mu.RUnlock()
 
 	if err != nil {
-		sm.finishCompletionAction(scenarioID, epoch, name, "", err)
+		sm.finishCompletionAction(scenarioID, epoch, name, attempt, "", err)
 		return
 	}
 
 	result, actionErr := sm.fireAction(ctx, trigger, fc)
 	if ctx.Err() != nil {
 		// Daemon shutdown is not a user cancellation. Leave running state for
-		// restart recovery rather than inventing a terminal result.
+		// restart recovery rather than inventing a terminal result. A manual
+		// cancellation has already made the action terminal; if a detached
+		// session crossed the create window, stop it now so it is not orphaned.
+		if trigger.Action.Type == config.ActionSession && !sm.completionActionIsRunning(scenarioID, epoch, name, attempt) {
+			if sessionID := sm.findCompletionActionSession(scenarioID, epoch, name, attempt); sessionID != "" {
+				sm.setCompletionActionSession(scenarioID, epoch, name, attempt, sessionID)
+				_ = sm.stopWithReason(sessionID, StopReasonUser, "scenario-completion-cancel")
+			}
+		}
+
 		return
 	}
 
 	if trigger.Action.Type == config.ActionSession && actionErr == nil {
-		sessionID := sm.findCompletionActionSession(scenarioID, epoch, name)
+		sessionID := sm.findCompletionActionSession(scenarioID, epoch, name, attempt)
 		if sessionID == "" {
 			actionErr = errors.New("spawned completion session could not be found")
 		} else {
-			sm.setCompletionActionSession(scenarioID, epoch, name, sessionID)
+			sm.setCompletionActionSession(scenarioID, epoch, name, attempt, sessionID)
 			// Session actions remain running. The periodic reconciler observes the
 			// terminal session state, including after a daemon restart.
 			return
 		}
 	}
 
-	sm.finishCompletionAction(scenarioID, epoch, name, result, actionErr)
+	sm.finishCompletionAction(scenarioID, epoch, name, attempt, result, actionErr)
 }
 
-func (sm *SessionManager) findCompletionActionSession(scenarioID string, epoch int, action string) string {
+func (sm *SessionManager) findCompletionActionSession(scenarioID string, epoch int, action string, attempt int) string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
 	for id, s := range sm.state.Sessions {
-		if s.CompletionScenarioID == scenarioID && s.CompletionEpoch == epoch && s.CompletionAction == action {
+		if s.CompletionScenarioID == scenarioID && s.CompletionEpoch == epoch &&
+			s.CompletionAction == action && s.CompletionAttempt == attempt {
 			return id
 		}
 	}
@@ -498,15 +559,16 @@ func (sm *SessionManager) findCompletionActionSession(scenarioID string, epoch i
 	return ""
 }
 
-func (sm *SessionManager) setCompletionActionSession(scenarioID string, epoch int, action, sessionID string) {
+func (sm *SessionManager) setCompletionActionSession(scenarioID string, epoch int, action string, attempt int, sessionID string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	if sc := sm.state.Scenarios[scenarioID]; sc != nil && sc.Completion.Epoch == epoch {
 		for i := range sc.Completion.Actions {
-			if sc.Completion.Actions[i].Name == action && sc.Completion.Actions[i].State == CompletionActionRunning {
+			if sc.Completion.Actions[i].Name == action && sc.Completion.Actions[i].Attempt == attempt {
 				sc.Completion.Actions[i].SessionID = sessionID
-				_ = sm.saveState()
+
+				sm.saveScenarioCompletionState("record action session")
 
 				return
 			}
@@ -521,6 +583,7 @@ func (sm *SessionManager) recoverOrFinishCompletionSessions(scenarioID string) {
 	type runningAction struct {
 		epoch     int
 		name      string
+		attempt   int
 		sessionID string
 		typeName  string
 	}
@@ -545,16 +608,16 @@ func (sm *SessionManager) recoverOrFinishCompletionSessions(scenarioID string) {
 			typeName = t.Action.Type
 		}
 
-		running = append(running, runningAction{sc.Completion.Epoch, a.Name, a.SessionID, typeName})
+		running = append(running, runningAction{sc.Completion.Epoch, a.Name, a.Attempt, a.SessionID, typeName})
 	}
 
 	sm.mu.RUnlock()
 
 	for _, a := range running {
-		key := completionActionKey(scenarioID, a.epoch, a.name)
+		key := completionActionKey(scenarioID, a.epoch, a.name, a.attempt)
 		if a.typeName != config.ActionSession {
 			if !sm.completion.hasCancel(key) {
-				sm.finishCompletionAction(scenarioID, a.epoch, a.name, "", errors.New("action interrupted by daemon restart; retry explicitly"))
+				sm.finishCompletionAction(scenarioID, a.epoch, a.name, a.attempt, "", errors.New("action interrupted by daemon restart; retry explicitly"))
 			}
 
 			continue
@@ -562,14 +625,19 @@ func (sm *SessionManager) recoverOrFinishCompletionSessions(scenarioID string) {
 
 		id := a.sessionID
 		if id == "" {
-			id = sm.findCompletionActionSession(scenarioID, a.epoch, a.name)
+			id = sm.findCompletionActionSession(scenarioID, a.epoch, a.name, a.attempt)
 			if id != "" {
-				sm.setCompletionActionSession(scenarioID, a.epoch, a.name, id)
+				sm.setCompletionActionSession(scenarioID, a.epoch, a.name, a.attempt, id)
 			}
 		}
 
 		if id == "" {
-			sm.finishCompletionAction(scenarioID, a.epoch, a.name, "", errors.New("action interrupted before its session was durably created; retry explicitly"))
+			if sm.completion.hasCancel(key) {
+				continue
+			}
+
+			sm.finishCompletionAction(scenarioID, a.epoch, a.name, a.attempt, "", errors.New("action interrupted before its session was durably created; retry explicitly"))
+
 			continue
 		}
 
@@ -593,7 +661,7 @@ func (sm *SessionManager) recoverOrFinishCompletionSessions(scenarioID string) {
 		sm.mu.RUnlock()
 
 		if status == StatusStopped && shouldAutoCleanup(config.CleanupOnSuccess, stopReason, exitCode) {
-			sm.finishCompletionAction(scenarioID, a.epoch, a.name, "session "+id+" exited 0", nil)
+			sm.finishCompletionAction(scenarioID, a.epoch, a.name, a.attempt, "session "+id+" exited 0", nil)
 		} else if status == StatusStopped && stopReason == StopReasonShutdown {
 			lc := sm.Config().Lifecycle
 
@@ -601,12 +669,12 @@ func (sm *SessionManager) recoverOrFinishCompletionSessions(scenarioID string) {
 				sm.log.Warn("scenario completion session resume after restart failed", "session", id, "err", err)
 			}
 		} else {
-			sm.finishCompletionAction(scenarioID, a.epoch, a.name, "", fmt.Errorf("session %s stopped without successful completion (status=%s reason=%s exit=%d)", id, status, stopReason, exitCode))
+			sm.finishCompletionAction(scenarioID, a.epoch, a.name, a.attempt, "", fmt.Errorf("session %s stopped without successful completion (status=%s reason=%s exit=%d)", id, status, stopReason, exitCode))
 		}
 	}
 }
 
-func (sm *SessionManager) finishCompletionAction(scenarioID string, epoch int, name, result string, actionErr error) {
+func (sm *SessionManager) finishCompletionAction(scenarioID string, epoch int, name string, attempt int, result string, actionErr error) {
 	now := time.Now().UTC()
 	state := CompletionActionSucceeded
 	errText := ""
@@ -622,13 +690,14 @@ func (sm *SessionManager) finishCompletionAction(scenarioID string, epoch int, n
 	if sc := sm.state.Scenarios[scenarioID]; sc != nil && sc.Completion.Epoch == epoch {
 		for i := range sc.Completion.Actions {
 			a := &sc.Completion.Actions[i]
-			if a.Name == name && a.State == CompletionActionRunning {
+			if a.Name == name && a.Attempt == attempt && a.State == CompletionActionRunning {
 				a.State = state
 				a.Result = result
 				a.Error = errText
 				a.FinishedAt = &now
 				sm.evaluateScenarioCleanupLocked(sc, now)
-				_ = sm.saveState()
+				sm.saveScenarioCompletionState("finish action")
+
 				updated = true
 
 				break
@@ -744,7 +813,8 @@ func (sm *SessionManager) recoverScenarioCleanup(scenarioID string) {
 	sc.Completion.Cleanup.State = ScenarioCleanupScheduled
 	sc.Completion.Cleanup.ScheduledAt = &now
 	sc.Completion.Cleanup.Error = ""
-	_ = sm.saveState()
+
+	sm.saveScenarioCompletionState("requeue interrupted cleanup")
 }
 
 func (sm *SessionManager) runScenarioCleanup(ctx context.Context, scenarioID string, epoch int) {
@@ -835,7 +905,7 @@ func (sm *SessionManager) finishScenarioCleanup(scenarioID string, epoch int, re
 		c.Error = ""
 	}
 
-	_ = sm.saveState()
+	sm.saveScenarioCompletionState("finish cleanup")
 }
 
 func (sm *SessionManager) retryScenarioCompletionAction(fullName string) error {
@@ -873,6 +943,15 @@ func (sm *SessionManager) retryScenarioCompletionAction(fullName string) error {
 
 		if a.State != CompletionActionFailed {
 			return fmt.Errorf("completion action %q is %s, not failed", bare, a.State)
+		}
+
+		if c := sc.Completion.Cleanup; c != nil {
+			switch c.State {
+			case ScenarioCleanupRunning:
+				return errors.New("scenario cleanup is already running; the action cannot be retried safely")
+			case ScenarioCleanupSucceeded:
+				return errors.New("scenario cleanup already succeeded; the action cannot be retried")
+			}
 		}
 
 		a.State = CompletionActionPending
@@ -931,7 +1010,7 @@ func (sm *SessionManager) cancelScenarioCompletion(scenarioID, reason string) {
 			c.FinishedAt = &now
 		}
 
-		_ = sm.saveState()
+		sm.saveScenarioCompletionState("cancel action and cleanup")
 	}
 	sm.mu.Unlock()
 

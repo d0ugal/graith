@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -299,6 +301,174 @@ func TestScenarioCompletionRestartTransitions(t *testing.T) {
 	})
 }
 
+func TestScenarioCompletionSessionCreateWindowStaysRunning(t *testing.T) {
+	trigger := config.TriggerConfig{
+		Name: "synthesise", Completion: &config.CompletionConfig{Session: "ben"},
+		Action: config.ActionConfig{Type: config.ActionSession, Prompt: "summarise the croft"},
+	}
+
+	sm, _ := newScenarioCompletionTestSM(t, trigger, config.ScenarioLifecycleConfig{Cleanup: config.ScenarioCleanupOnSuccess})
+	if err := sm.reconcileScenarioCompletion("sc-braw"); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.mu.Lock()
+	a := &sm.state.Scenarios["sc-braw"].Completion.Actions[0]
+	a.State = CompletionActionRunning
+	a.Attempt = 1
+
+	if err := sm.saveState(); err != nil {
+		t.Fatal(err)
+	}
+	sm.mu.Unlock()
+
+	key := completionActionKey("sc-braw", 1, "synthesise", 1)
+	_, cancel := context.WithCancel(t.Context())
+	sm.completion.setCancel(key, cancel)
+	t.Cleanup(cancel)
+
+	// A fast second reconcile can observe running before Create has durably
+	// inserted the tagged session. The live dispatch marker distinguishes that
+	// window from a daemon restart and must prevent a false failure.
+	sm.recoverOrFinishCompletionSessions("sc-braw")
+
+	sm.mu.RLock()
+	got := sm.state.Scenarios["sc-braw"].Completion.Actions[0].State
+	sm.mu.RUnlock()
+
+	if got != CompletionActionRunning {
+		t.Fatalf("live create-window action = %q, want running", got)
+	}
+
+	// With no live dispatch marker, the same durable state is a real restart
+	// interruption and remains diagnosable rather than silently replayed.
+	sm.completion.clearCancel(key)
+	sm.recoverOrFinishCompletionSessions("sc-braw")
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	a = &sm.state.Scenarios["sc-braw"].Completion.Actions[0]
+	if a.State != CompletionActionFailed || !strings.Contains(a.Error, "durably created") {
+		t.Fatalf("restart create-window action = %+v", a)
+	}
+}
+
+func TestScenarioCompletionAttemptIsolation(t *testing.T) {
+	trigger := config.TriggerConfig{
+		Name: "synthesise", Completion: &config.CompletionConfig{Session: "ben"},
+		Action: config.ActionConfig{Type: config.ActionSession, Prompt: "summarise the croft"},
+	}
+
+	sm, _ := newScenarioCompletionTestSM(t, trigger, config.ScenarioLifecycleConfig{Cleanup: config.ScenarioCleanupOnSuccess})
+	if err := sm.reconcileScenarioCompletion("sc-braw"); err != nil {
+		t.Fatal(err)
+	}
+
+	exit0 := 0
+
+	sm.mu.Lock()
+	a := &sm.state.Scenarios["sc-braw"].Completion.Actions[0]
+	a.State = CompletionActionRunning
+	a.Attempt = 2
+	sm.state.Sessions["stale-attempt"] = &SessionState{
+		ID: "stale-attempt", Status: StatusStopped, StopReason: StopReasonCrash, ExitCode: &exit0,
+		CompletionScenarioID: "sc-braw", CompletionEpoch: 1, CompletionAction: "synthesise", CompletionAttempt: 1,
+	}
+	sm.state.Sessions["current-attempt"] = &SessionState{
+		ID: "current-attempt", Status: StatusStopped, StopReason: StopReasonCrash, ExitCode: &exit0,
+		CompletionScenarioID: "sc-braw", CompletionEpoch: 1, CompletionAction: "synthesise", CompletionAttempt: 2,
+	}
+	sm.mu.Unlock()
+
+	// A late completion from attempt one must not mutate attempt two.
+	sm.finishCompletionAction("sc-braw", 1, "synthesise", 1, "stale", nil)
+	sm.recoverOrFinishCompletionSessions("sc-braw")
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	a = &sm.state.Scenarios["sc-braw"].Completion.Actions[0]
+	if a.State != CompletionActionSucceeded || a.SessionID != "current-attempt" || a.Result == "stale" {
+		t.Fatalf("isolated retry attempt = %+v", a)
+	}
+}
+
+func TestScenarioCompletionCancelledClaimDoesNotExecute(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "ran")
+	trigger := completionCommandTrigger("archive")
+	trigger.Action.Command = fmt.Sprintf("touch %q", marker)
+
+	sm, _ := newScenarioCompletionTestSM(t, trigger, config.ScenarioLifecycleConfig{Cleanup: config.ScenarioCleanupAlways})
+	if err := sm.reconcileScenarioCompletion("sc-braw"); err != nil {
+		t.Fatal(err)
+	}
+
+	attempt, claimed := sm.claimCompletionAction("sc-braw", 1, "archive")
+	if !claimed {
+		t.Fatal("completion action was not claimed")
+	}
+
+	sm.cancelScenarioCompletion("sc-braw", "cancelled while dispatching")
+	sm.runCompletionAction(context.Background(), func() {}, "sc-braw", 1, "archive", attempt)
+
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("cancelled action executed: stat err=%v", err)
+	}
+}
+
+func TestScenarioCompletionRetryCleanupGuards(t *testing.T) {
+	for _, cleanupState := range []string{ScenarioCleanupRunning, ScenarioCleanupSucceeded} {
+		t.Run(cleanupState, func(t *testing.T) {
+			sm, _ := newScenarioCompletionTestSM(t, completionCommandTrigger("archive"), config.ScenarioLifecycleConfig{Cleanup: config.ScenarioCleanupAlways})
+			if err := sm.reconcileScenarioCompletion("sc-braw"); err != nil {
+				t.Fatal(err)
+			}
+
+			sm.mu.Lock()
+			sc := sm.state.Scenarios["sc-braw"]
+			sc.Completion.Actions[0].State = CompletionActionFailed
+			sc.Completion.Cleanup.State = cleanupState
+			sm.mu.Unlock()
+
+			if err := sm.retryScenarioCompletionAction("scenario:sc-braw:archive"); err == nil {
+				t.Fatalf("retry succeeded with cleanup %s", cleanupState)
+			}
+
+			sm.mu.RLock()
+			defer sm.mu.RUnlock()
+
+			if sc.Completion.Actions[0].State != CompletionActionFailed || sc.Completion.Cleanup.State != cleanupState {
+				t.Fatalf("rejected retry mutated state: action=%s cleanup=%s", sc.Completion.Actions[0].State, sc.Completion.Cleanup.State)
+			}
+		})
+	}
+
+	t.Run("scheduled cleanup returns to pending", func(t *testing.T) {
+		sm, _ := newScenarioCompletionTestSM(t, completionCommandTrigger("archive"), config.ScenarioLifecycleConfig{Cleanup: config.ScenarioCleanupAlways})
+		if err := sm.reconcileScenarioCompletion("sc-braw"); err != nil {
+			t.Fatal(err)
+		}
+
+		sm.mu.Lock()
+		sc := sm.state.Scenarios["sc-braw"]
+		sc.Completion.Actions[0].State = CompletionActionFailed
+		sc.Completion.Cleanup.State = ScenarioCleanupScheduled
+		sm.mu.Unlock()
+
+		if err := sm.retryScenarioCompletionAction("scenario:sc-braw:archive"); err != nil {
+			t.Fatal(err)
+		}
+
+		sm.mu.RLock()
+		defer sm.mu.RUnlock()
+
+		if sc.Completion.Actions[0].State != CompletionActionPending || sc.Completion.Cleanup.State != ScenarioCleanupPending {
+			t.Fatalf("scheduled retry state: action=%s cleanup=%s", sc.Completion.Actions[0].State, sc.Completion.Cleanup.State)
+		}
+	})
+}
+
 func TestScenarioCompletionEveryDurableTransitionReloads(t *testing.T) {
 	states := []struct {
 		name    string
@@ -482,5 +652,31 @@ func TestScenarioCompletionScopedInboxChoosesScenarioMember(t *testing.T) {
 	outside, err := store.Read("inbox:outside", "outside", false, "")
 	if err != nil || len(outside) != 0 {
 		t.Fatalf("outside inbox received scoped delivery: %v, err=%v", outside, err)
+	}
+
+	// A stale scenario index must not route to a session that has since moved to
+	// another scenario.
+	sm.mu.Lock()
+	sm.state.Sessions["inside"].ScenarioID = "sc-croft"
+	sm.mu.Unlock()
+
+	if err := sm.deliverInboxScoped(t.Context(), "ben", "dreich", false, "sc-braw"); err == nil {
+		t.Fatal("scoped delivery accepted a member now owned by another scenario")
+	}
+
+	// Shared members intentionally have no ScenarioID but remain valid scoped
+	// delivery targets while present in the scenario's explicit member index.
+	sm.mu.Lock()
+	sm.state.Sessions["inside"].ScenarioID = ""
+	sm.state.Scenarios["sc-braw"].Sessions[0].Shared = true
+	sm.mu.Unlock()
+
+	if err := sm.deliverInboxScoped(t.Context(), "ben", "thrawn", false, "sc-braw"); err != nil {
+		t.Fatal(err)
+	}
+
+	inside, err = store.Read("inbox:inside", "inside", false, "")
+	if err != nil || len(inside) != 2 {
+		t.Fatalf("shared scenario inbox messages = %v, err=%v", inside, err)
 	}
 }

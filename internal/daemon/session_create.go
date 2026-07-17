@@ -354,6 +354,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		CompletionScenarioID: opts.CompletionScenarioID,
 		CompletionEpoch:      opts.CompletionEpoch,
 		CompletionAction:     opts.CompletionAction,
+		CompletionAttempt:    opts.CompletionAttempt,
 		AutoCleanup:          opts.AutoCleanup,
 		IdleTimeoutSecs:      opts.IdleTimeoutSecs,
 		Status:               StatusCreating,

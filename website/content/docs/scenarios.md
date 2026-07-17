@@ -187,6 +187,10 @@ instead of being replayed; retry it explicitly with its namespaced name:
 gr trigger run scenario:<scenario-id>:<trigger-name>
 ```
 
+Retrying during a delayed cleanup window returns cleanup to `pending`. A retry
+is refused once cleanup is already running or has succeeded, because member
+teardown may already be underway.
+
 Reopening an assigned todo creates a not-complete transition and cancels pending
 work and cleanup for that epoch. A later recompletion creates a new epoch.
 Manual `gr scenario stop` likewise cancels pending/running completion work
@@ -282,6 +286,10 @@ Aggregate status is `complete` when every member with tracked todo work has
 finished it and no member is errored. Otherwise it is derived from session
 states: `running` (all running), `stopped` (all stopped), `errored` (any
 errored), or `partial` (mixed).
+
+At least one member must have tracked todo work before a completion edge can
+occur. Members with no assigned todos do not block members that do have tracked
+work from completing the scenario.
 
 ### `gr scenario stop <name>`
 

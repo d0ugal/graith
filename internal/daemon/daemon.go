@@ -954,6 +954,7 @@ type CreateOpts struct {
 	CompletionScenarioID string
 	CompletionEpoch      int
 	CompletionAction     string
+	CompletionAttempt    int
 	// AutoCleanup marks a trigger-spawned session for soft-deletion when it
 	// stops (config.CleanupAlways / config.CleanupOnSuccess; empty disables).
 	AutoCleanup string
