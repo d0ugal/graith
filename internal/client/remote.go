@@ -397,43 +397,11 @@ func (c *Client) completePairing(host string, port int, deviceLabel, devicePubKe
 }
 
 // persistPairedHost durably writes the paired host to the client's remote-hosts
-// store before the receipt is acknowledged (issue #1299). It is transactional: a
-// failed write (e.g. a post-rename dir-fsync error that already landed the new,
-// not-yet-committable token on disk) must not destroy a previously-working
-// credential — so it snapshots the exact prior entry and, on any Save error,
-// durably restores it (surfacing a combined error if the restore also fails).
+// store before the receipt is acknowledged (issue #1299). PersistRemoteHost
+// performs the reload/mutate/save and exact-prior rollback under the
+// cross-process store lock (issue #1330).
 func (c *Client) persistPairedHost(rh *RemoteHost) error {
-	store, err := LoadRemoteHostStore(RemoteHostsPath(c.paths.DataDir))
-	if err != nil {
-		return err
-	}
-
-	// Snapshot the exact prior entry by value, so restoring it can't be disturbed
-	// by the Put below.
-	prior, hadPrior := store.Get(rh.Host)
-
-	var priorCopy RemoteHost
-	if hadPrior {
-		priorCopy = *prior
-	}
-
-	store.Put(rh)
-
-	if saveErr := store.Save(); saveErr != nil {
-		if hadPrior {
-			store.Put(&priorCopy)
-		} else {
-			delete(store.Hosts, rh.Host)
-		}
-
-		if rbErr := store.Save(); rbErr != nil {
-			return fmt.Errorf("persist paired host before ack: %w; rollback also failed: %w", saveErr, rbErr)
-		}
-
-		return fmt.Errorf("persist paired host before ack: %w", saveErr)
-	}
-
-	return nil
+	return PersistRemoteHost(RemoteHostsPath(c.paths.DataDir), rh)
 }
 
 // completeRemotePoP answers the daemon's auth_challenge with a signed auth_proof

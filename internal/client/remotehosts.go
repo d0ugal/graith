@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/d0ugal/graith/internal/atomicfile"
 )
@@ -42,12 +43,56 @@ func RemoteHostsPath(dataDir string) string {
 	return filepath.Join(dataDir, "remote-hosts.json")
 }
 
+// remoteHostsLockPath is a stable sibling of remote-hosts.json. The data file
+// itself is atomically replaced on every save, so locking that inode would let a
+// second process open the replacement and bypass the first process's lock.
+func remoteHostsLockPath(path string) string {
+	return path + ".lock"
+}
+
+// withRemoteHostStoreLock serializes one load/mutate/save transaction across
+// CLI processes. The callback receives a store loaded only after the advisory
+// lock is acquired, so it always merges against the latest published host map
+// and canonical device identity. Callers must keep human and network waits
+// outside the callback.
+func withRemoteHostStoreLock(path string, fn func(*RemoteHostStore) error) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil { //nolint:gosec // G703: path is the config-managed graith data file.
+		return fmt.Errorf("create remote-hosts directory: %w", err)
+	}
+
+	lockFile, err := os.OpenFile(remoteHostsLockPath(path), os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // G703: path is the config-managed graith data file.
+	if err != nil {
+		return fmt.Errorf("open remote-hosts lock: %w", err)
+	}
+	defer func() { _ = lockFile.Close() }()
+
+	for {
+		err = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX)
+		if !errors.Is(err, syscall.EINTR) {
+			break
+		}
+	}
+
+	if err != nil {
+		return fmt.Errorf("acquire remote-hosts lock: %w", err)
+	}
+
+	defer func() { _ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) }()
+
+	store, err := LoadRemoteHostStore(path)
+	if err != nil {
+		return err
+	}
+
+	return fn(store)
+}
+
 // LoadRemoteHostStore loads the store, returning an empty one if the file does
 // not exist.
 func LoadRemoteHostStore(path string) (*RemoteHostStore, error) {
 	s := &RemoteHostStore{Hosts: map[string]*RemoteHost{}, path: path}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G703: callers supply the config-managed graith data file.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return s, nil
@@ -92,6 +137,74 @@ func (s *RemoteHostStore) Save() error {
 	}
 
 	return nil
+}
+
+// EnsureRemoteDeviceKey establishes or reloads the one canonical device key
+// while holding the cross-process store lock, then durably republishes the
+// latest store before returning it. The lock is released before the caller
+// begins the potentially long human/network pairing wait.
+func EnsureRemoteDeviceKey(path string) (ed25519.PrivateKey, string, error) {
+	var (
+		priv ed25519.PrivateKey
+		pub  string
+	)
+
+	err := withRemoteHostStoreLock(path, func(store *RemoteHostStore) error {
+		var err error
+
+		priv, pub, err = store.EnsureDeviceKey()
+		if err != nil {
+			return err
+		}
+
+		return store.Save()
+	})
+	if err != nil {
+		return nil, "", err
+	}
+
+	return priv, pub, nil
+}
+
+// PersistRemoteHost reloads and durably updates one paired host while holding
+// the cross-process store lock. On any save error it restores the exact prior
+// entry before releasing the lock; this includes post-rename errors where the
+// new, not-yet-acknowledged credential may already be visible on disk. Because
+// the transaction starts from the latest store, unrelated hosts and the
+// canonical device key survive both the update and rollback.
+func PersistRemoteHost(path string, host *RemoteHost) error {
+	if host == nil {
+		return errors.New("persist remote host: nil host")
+	}
+
+	return withRemoteHostStoreLock(path, func(store *RemoteHostStore) error {
+		prior, hadPrior := store.Get(host.Host)
+
+		var priorCopy *RemoteHost
+
+		if prior != nil {
+			priorValue := *prior
+			priorCopy = &priorValue
+		}
+
+		store.Put(host)
+
+		if saveErr := store.Save(); saveErr != nil {
+			if hadPrior {
+				store.Hosts[host.Host] = priorCopy
+			} else {
+				delete(store.Hosts, host.Host)
+			}
+
+			if rollbackErr := store.Save(); rollbackErr != nil {
+				return fmt.Errorf("persist paired host before ack: %w; rollback also failed: %w", saveErr, rollbackErr)
+			}
+
+			return fmt.Errorf("persist paired host before ack: %w", saveErr)
+		}
+
+		return nil
+	})
 }
 
 // EnsureDeviceKey returns this device's ed25519 private key and base64 public

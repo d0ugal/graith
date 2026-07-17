@@ -478,7 +478,7 @@ func TestPersistPairedHostRollsBackOnSaveFailure(t *testing.T) {
 	calls := 0
 	remoteHostsWrite = func(path string, data []byte, perm os.FileMode) error {
 		calls++
-		_ = os.WriteFile(path, data, perm) // the data lands even though we error
+		_ = os.WriteFile(path, data, perm) //nolint:gosec // G703: test-controlled remote-host store path; data intentionally lands before the injected error.
 
 		if calls == 1 {
 			return errors.New("simulated post-rename fsync failure")

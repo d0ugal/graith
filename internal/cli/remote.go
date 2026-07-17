@@ -42,30 +42,17 @@ type pairRemoteFn func(paths config.Paths, host string, port int, profile, devic
 // runRemotePair drives `gr remote pair`: it ensures + durably persists the device
 // key, runs the pairing exchange, and reports the result.
 //
-// The pairing exchange (PairRemote → completePairing → persistPairedHost) already
-// durably persists the paired host to a *freshly loaded* store BEFORE the receipt
-// ack, and that save is the single authoritative one (issue #1299). The `store`
-// loaded here is only used to mint/persist the device key up front; it is a stale
-// snapshot from before the (potentially minutes-long) pairing round-trip. Re-Put +
-// Save of that stale store after success would rewrite the whole file from
-// pre-pairing state — clobbering any concurrent host update made during pairing and
-// possibly surfacing a spurious post-success failure even though the credential and
-// the daemon's commit are already durable. So there is deliberately no follow-up
-// write of the outer store.
+// Device-key establishment and the receipt-critical paired-host save are two
+// separate, cross-process-locked transactions. The lock is deliberately absent
+// from the potentially minutes-long PairRemote wait. completePairing persists the
+// host against a freshly loaded store before its receipt ACK, so there is no
+// follow-up save from a stale pre-wait snapshot (issues #1299 and #1330).
 func runRemotePair(paths config.Paths, host string, port int, profile, label string, pair pairRemoteFn, printf func(string, ...any)) error {
-	store, err := client.LoadRemoteHostStore(client.RemoteHostsPath(paths.DataDir))
+	// Establish or reload the canonical identity under the cross-process store
+	// lock. EnsureRemoteDeviceKey durably saves and releases that lock before the
+	// human/network wait in pair begins (issue #1330).
+	_, pubB64, err := client.EnsureRemoteDeviceKey(client.RemoteHostsPath(paths.DataDir))
 	if err != nil {
-		return err
-	}
-
-	_, pubB64, err := store.EnsureDeviceKey()
-	if err != nil {
-		return err
-	}
-
-	// Persist the device key up front so an interrupted pairing (which can
-	// block for a while awaiting local approval) doesn't lose it.
-	if err := store.Save(); err != nil {
 		return err
 	}
 

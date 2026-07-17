@@ -3,11 +3,13 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
@@ -213,7 +215,10 @@ func TestRemoteHostsPathLayout(t *testing.T) {
 // TestRunRemotePairKeepsConcurrentHostUpdate proves the receipt-critical save
 // inside the pairing exchange is authoritative: a concurrent second-host update
 // landing between that durable pre-ACK save and the command's return must not be
-// clobbered, and no spurious post-success failure may be surfaced (issue #1299).
+// clobbered, and no spurious post-success failure may be surfaced (issues #1299
+// and #1330). Each callback-side update acquires the store lock independently,
+// which also proves runRemotePair released its key-establishment lock before the
+// potentially long human/network pairing wait.
 //
 // It exercises the exact stale-outer-store race: runRemotePair loads a store to
 // mint the device key, then the pairing step (a) durably persists the paired host
@@ -226,31 +231,15 @@ func TestRunRemotePairKeepsConcurrentHostUpdate(t *testing.T) {
 	paths := config.Paths{DataDir: dir}
 
 	pair := func(p config.Paths, host string, port int, profile, _, _ string) (*client.RemoteHost, error) {
-		// (a) The authoritative receipt-critical save persistPairedHost performs:
-		// load a FRESH store (so the up-front device key survives) and durably
-		// commit the paired host before the ack.
-		s, err := client.LoadRemoteHostStore(client.RemoteHostsPath(p.DataDir))
-		if err != nil {
-			return nil, err
-		}
-
 		rh := &client.RemoteHost{Host: host, Port: port, Token: "tok-braw", TLSPin: "cGlu", Profile: profile}
-		s.Put(rh)
-
-		if err := s.Save(); err != nil {
+		if err := persistRemoteHostWithoutOuterLock(t, client.RemoteHostsPath(p.DataDir), rh); err != nil {
 			return nil, err
 		}
 
-		// (b) A concurrent update from another process adds a *different* host
-		// after the authoritative save but before the command returns.
-		other, err := client.LoadRemoteHostStore(client.RemoteHostsPath(p.DataDir))
-		if err != nil {
-			return nil, err
-		}
-
-		other.Put(&client.RemoteHost{Host: "canny.tail.ts.net", Port: 7420, Token: "tok-canny", TLSPin: "cGlu2"})
-
-		if err := other.Save(); err != nil {
+		// A concurrent independent transaction adds a different host after the
+		// authoritative pre-ACK save but before the command returns.
+		other := &client.RemoteHost{Host: "canny.tail.ts.net", Port: 7420, Token: "tok-canny", TLSPin: "cGlu2"}
+		if err := persistRemoteHostWithoutOuterLock(t, client.RemoteHostsPath(p.DataDir), other); err != nil {
 			return nil, err
 		}
 
@@ -276,5 +265,19 @@ func TestRunRemotePairKeepsConcurrentHostUpdate(t *testing.T) {
 
 	if final.DeviceKey == "" {
 		t.Errorf("device key lost after pairing")
+	}
+}
+
+func persistRemoteHostWithoutOuterLock(t *testing.T, path string, host *client.RemoteHost) error {
+	t.Helper()
+
+	done := make(chan error, 1)
+	go func() { done <- client.PersistRemoteHost(path, host) }()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(2 * time.Second):
+		return errors.New("remote-host lock remained held across pairing network wait")
 	}
 }
