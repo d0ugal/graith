@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/store"
 )
@@ -1288,7 +1289,12 @@ func initScenarioGitRepo(t *testing.T) string {
 	gitRun(t, "", "init", "--initial-branch=main", dir)
 	gitRun(t, dir, "commit", "--allow-empty", "-m", "initial")
 
-	return dir
+	root, err := git.RepoRootPath(dir)
+	if err != nil {
+		t.Fatalf("resolve scenario repo root: %v", err)
+	}
+
+	return root
 }
 
 // TestStartScenarioSharedSuccess_Cov2 drives StartScenario all the way through
