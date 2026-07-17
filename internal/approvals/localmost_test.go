@@ -86,14 +86,36 @@ func TestLocalmostReconstructsEnvelopeWithoutPayload(t *testing.T) {
 }
 
 func TestLocalmostAvailability(t *testing.T) {
-	if av := (localmostBackend{}).Availability(Config{Command: "definitely-not-a-real-binary-xyz"}); av.CanEnforce {
-		t.Error("localmost backend should fail closed when the binary is absent")
-	}
+	t.Run("default command absent from PATH", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
 
-	script := fakeLocalmost(t, "allow", "")
-	if av := (localmostBackend{}).Availability(Config{Command: script}); !av.CanEnforce {
-		t.Error("localmost backend should be available when the binary exists")
-	}
+		if av := (localmostBackend{}).Availability(Config{}); av.CanEnforce {
+			t.Error("localmost backend should fail closed when the default binary is absent")
+		}
+	})
+
+	t.Run("default command found on PATH", func(t *testing.T) {
+		script := fakeLocalmost(t, "allow", "")
+		t.Setenv("PATH", filepath.Dir(script))
+
+		if av := (localmostBackend{}).Availability(Config{}); !av.CanEnforce {
+			t.Error("localmost backend should discover the default binary on PATH")
+		}
+	})
+
+	t.Run("configured command absent", func(t *testing.T) {
+		missing := filepath.Join(t.TempDir(), "localmost")
+		if av := (localmostBackend{}).Availability(Config{Command: missing}); av.CanEnforce {
+			t.Error("localmost backend should fail closed when the configured binary is absent")
+		}
+	})
+
+	t.Run("configured command exists", func(t *testing.T) {
+		script := fakeLocalmost(t, "allow", "")
+		if av := (localmostBackend{}).Availability(Config{Command: script}); !av.CanEnforce {
+			t.Error("localmost backend should be available when the configured binary exists")
+		}
+	})
 }
 
 func TestLocalmostFailsClosedOnError(t *testing.T) {
