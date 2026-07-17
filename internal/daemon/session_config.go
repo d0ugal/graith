@@ -19,6 +19,14 @@ import (
 	"github.com/d0ugal/graith/internal/tools"
 )
 
+// reloadLimitsPublishedHook, if non-nil, is invoked by applyConfig while it
+// still holds sm.mu, immediately after the config pointer and the live store
+// limits have both been updated. Test-only seam (nil in production) used to
+// assert deterministically that the store limits are applied within the same
+// lock hold that publishes the config (issue #1291), so no reload can leave a
+// freshly published cfg paired with stale limits.
+var reloadLimitsPublishedHook func()
+
 // ReloadConfig loads the config from disk and swaps it in, logging what changed.
 func (sm *SessionManager) ReloadConfig() error {
 	cfg, err := config.LoadOrDefault(sm.configFile)
@@ -49,6 +57,28 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 	// throttle's own mutex, so the sm.mu -> launch.mu order introduces no cycle.
 	if sm.launch != nil {
 		sm.launch.resize(newCfg.Launch.MaxConcurrentOrDefault())
+	}
+	// Apply the hot-reloadable store limits — the jail listing cap and the todo
+	// title/note length limits (issue #1291) — under the SAME lock that publishes
+	// the config, for the same reason as the launch throttle above: two reloads
+	// interleaving (fsnotify + SIGHUP) must not leave the published cfg from one
+	// generation with live limits from another. Doing the publish and these
+	// updates as one locked unit makes their completion order impossible to
+	// diverge. The setters are cheap atomic stores — no I/O, no lock — so holding
+	// sm.mu across them introduces neither a slow-path stall nor a lock cycle.
+	// Guarded because tests drive applyConfig without live stores; in production
+	// both are set before the config watcher starts.
+	if sm.messages != nil {
+		sm.messages.SetJailListLimit(newCfg.Messages.JailListLimitOrDefault())
+	}
+
+	if sm.todos != nil {
+		sm.todos.SetMaxTitle(newCfg.Todo.MaxTitleOrDefault())
+		sm.todos.SetMaxNote(newCfg.Todo.MaxNoteOrDefault())
+	}
+
+	if reloadLimitsPublishedHook != nil {
+		reloadLimitsPublishedHook()
 	}
 	sm.mu.Unlock()
 
@@ -162,6 +192,21 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 
 	if fmt.Sprint(old.Sandbox.Features) != fmt.Sprint(newCfg.Sandbox.Features) {
 		sm.log.Info("config changed", "key", "sandbox.features", "old", old.Sandbox.Features, "new", newCfg.Sandbox.Features)
+	}
+
+	// The store limits themselves were already applied atomically with the cfg
+	// swap above (issue #1291); here we only log the changes for observability,
+	// which is safe to do outside sm.mu.
+	if oldLimit, newLimit := old.Messages.JailListLimitOrDefault(), newCfg.Messages.JailListLimitOrDefault(); oldLimit != newLimit {
+		sm.log.Info("config changed", "key", "messages.jail_list_limit", "old", oldLimit, "new", newLimit)
+	}
+
+	if oldLimit, newLimit := old.Todo.MaxTitleOrDefault(), newCfg.Todo.MaxTitleOrDefault(); oldLimit != newLimit {
+		sm.log.Info("config changed", "key", "todo.max_title", "old", oldLimit, "new", newLimit)
+	}
+
+	if oldLimit, newLimit := old.Todo.MaxNoteOrDefault(), newCfg.Todo.MaxNoteOrDefault(); oldLimit != newLimit {
+		sm.log.Info("config changed", "key", "todo.max_note", "old", oldLimit, "new", newLimit)
 	}
 
 	if sm.mcpManager != nil {
