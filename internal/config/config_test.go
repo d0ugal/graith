@@ -2587,6 +2587,123 @@ agent = "cursor"
 	})
 }
 
+// TestOrchestratorAgentValidation is a regression test for #1305: an explicit
+// [orchestrator] agent that names no configured agent used to pass load and
+// reload and only fail when the daemon first tried to create the orchestrator
+// session. Load must now reject the typo up front, while an empty value (the
+// default_agent fallback) and a valid built-in or custom agent still load.
+func TestOrchestratorAgentValidation(t *testing.T) {
+	write := func(t *testing.T, body string) string {
+		t.Helper()
+		dir := t.TempDir()
+
+		cfgPath := filepath.Join(dir, "config.toml")
+		if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		return cfgPath
+	}
+
+	t.Run("built-in agent loads", func(t *testing.T) {
+		cfg, err := Load(write(t, `
+[orchestrator]
+enabled = true
+agent = "codex"
+`))
+		if err != nil {
+			t.Fatalf("Load: unexpected error: %v", err)
+		}
+
+		if cfg.Orchestrator.Agent != "codex" {
+			t.Errorf("Orchestrator.Agent = %q, want codex", cfg.Orchestrator.Agent)
+		}
+	})
+
+	t.Run("custom user agent loads", func(t *testing.T) {
+		cfg, err := Load(write(t, `
+[orchestrator]
+enabled = true
+agent = "thrawn"
+[agents.thrawn]
+command = "thrawn"
+`))
+		if err != nil {
+			t.Fatalf("Load: unexpected error: %v", err)
+		}
+
+		if cfg.Orchestrator.Agent != "thrawn" {
+			t.Errorf("Orchestrator.Agent = %q, want thrawn", cfg.Orchestrator.Agent)
+		}
+	})
+
+	t.Run("empty agent falls back without error", func(t *testing.T) {
+		cfg, err := Load(write(t, `
+default_agent = "codex"
+[orchestrator]
+enabled = true
+`))
+		if err != nil {
+			t.Fatalf("Load: unexpected error: %v", err)
+		}
+
+		if cfg.Orchestrator.Agent != "" {
+			t.Errorf("Orchestrator.Agent = %q, want empty", cfg.Orchestrator.Agent)
+		}
+
+		if got := cfg.Orchestrator.AgentName(cfg.DefaultAgent); got != "codex" {
+			t.Errorf("orchestrator AgentName = %q, want codex", got)
+		}
+	})
+
+	t.Run("typo is rejected at load", func(t *testing.T) {
+		_, err := Load(write(t, `
+[orchestrator]
+enabled = true
+agent = "claudee"
+`))
+		if err == nil {
+			t.Fatal("Load: expected error for unknown orchestrator agent, got nil")
+		}
+
+		if !strings.Contains(err.Error(), "orchestrator.agent") || !strings.Contains(err.Error(), "claudee") {
+			t.Errorf("error %q must name the field and value", err)
+		}
+	})
+
+	t.Run("removing the custom agent on reload is rejected", func(t *testing.T) {
+		// A config that defines a custom agent and points the orchestrator at it
+		// loads. Reload (which is just another Load) after that agent is removed
+		// must reject the now-dangling reference rather than accept it and blow up
+		// only when the daemon recreates the orchestrator.
+		body := `
+[orchestrator]
+enabled = true
+agent = "thrawn"
+[agents.thrawn]
+command = "thrawn"
+`
+		if _, err := Load(write(t, body)); err != nil {
+			t.Fatalf("Load with custom agent defined: unexpected error: %v", err)
+		}
+
+		reloaded := `
+[orchestrator]
+enabled = true
+agent = "thrawn"
+`
+
+		_, err := Load(write(t, reloaded))
+		if err == nil {
+			t.Fatal("reload after removing custom agent: expected error, got nil")
+		}
+
+		if !strings.Contains(err.Error(), "orchestrator.agent") || !strings.Contains(err.Error(), "thrawn") {
+			t.Errorf("error %q must name the field and value", err)
+		}
+	})
+}
+
 func TestOrchestratorSandboxIgnoresDangerousKeys(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
