@@ -1390,6 +1390,7 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 				Store: result.StoreTemplate, Required: result.Required,
 			}
 		}
+
 		sessions[i] = protocol.ScenarioSessionInput{
 			Name: ss.Name, Repo: ss.Repo, Role: ss.Role, Task: ss.Task,
 			Agent: ss.Agent, Model: ss.Model, Results: results,
