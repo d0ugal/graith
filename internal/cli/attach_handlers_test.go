@@ -2,9 +2,12 @@ package cli
 
 import (
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -122,6 +125,61 @@ func TestSwitchTo(t *testing.T) {
 
 	if len(*restored) != 1 || (*restored)[0] != "new" {
 		t.Errorf("restoreScreen calls = %v, want [new] (repaint the target)", *restored)
+	}
+}
+
+// TestOnScrollModeUsesDaemonDefaultOnEveryReconnect is the CLI-side regression
+// for issue #1320. Scroll mode must send the zero sentinel on every fetch so a
+// long-lived attach process does not pin either the historical 2,000-line
+// literal or a client-side snapshot of [limits].log_lines across daemon reloads.
+func TestOnScrollModeUsesDaemonDefaultOnEveryReconnect(t *testing.T) {
+	fake := &scriptedConn{responses: []scriptedResp{
+		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw"})),
+		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw"})),
+	}}
+	withLoopSeams(t, fake)
+
+	origCfg := cfg
+	origFetch := fetchScrollback
+	origView := runScrollView
+
+	t.Cleanup(func() {
+		cfg = origCfg
+		fetchScrollback = origFetch
+		runScrollView = origView
+	})
+
+	cfg = config.Default()
+	requested := make([]int, 0, 2)
+	effective := make([]int, 0, 2)
+	fetchScrollback = func(c *config.Config, _ config.Paths, _ string, sessionID string, lines int) string {
+		if sessionID != "braw" {
+			t.Errorf("sessionID = %q, want braw", sessionID)
+		}
+
+		requested = append(requested, lines)
+		effective = append(effective, c.Limits.LogLinesOrDefault())
+
+		return "canny history"
+	}
+	runScrollView = func(_ string, _ string, _ client.ScrollKeys) {}
+
+	l := newLoop("braw", "")
+
+	for _, logLines := range []int{17, 29} {
+		cfg.Limits.LogLines = logLines
+
+		if done, err := l.onScrollMode(); done || err != nil {
+			t.Fatalf("onScrollMode() = (%v, %v), want (false, nil)", done, err)
+		}
+	}
+
+	if want := []int{0, 0}; !reflect.DeepEqual(requested, want) {
+		t.Errorf("requested lines = %v, want daemon-default sentinels %v", requested, want)
+	}
+
+	if want := []int{17, 29}; !reflect.DeepEqual(effective, want) {
+		t.Errorf("test config limits = %v, want non-default reload sequence %v", effective, want)
 	}
 }
 
