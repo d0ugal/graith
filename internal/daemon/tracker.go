@@ -11,7 +11,6 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/git"
-	"github.com/d0ugal/graith/internal/tools"
 )
 
 // tracker.go implements the `tracker` trigger action (issue #643): a scheduled
@@ -32,6 +31,14 @@ type issueRef struct {
 	body   string
 	url    string
 	labels []string
+}
+
+// trackerTools pins the external-tool generation used by one tracker fetch.
+// The action captures it together with its config snapshot so repository
+// resolution and issue listing cannot observe a later tools reload.
+type trackerTools struct {
+	git git.Runner
+	gh  string
 }
 
 // trackerSession is one non-soft-deleted session owned by a tracker trigger. It
@@ -205,14 +212,16 @@ func (sm *SessionManager) actionTracker(ctx context.Context, t *config.TriggerCo
 		return "", errors.New("tracker action requires action.tracker.repo")
 	}
 
-	// One config snapshot owns this reconciliation pass so the fetch timeout and
-	// the resume geometry below can never diverge if a reload lands mid-pass.
-	cfg := sm.Config()
+	// One config+tools generation owns this reconciliation pass. In particular,
+	// the fetch timeout, git remote resolution, and gh issue list must not split
+	// across a reload between the action boundary and provider fetch (#1287).
+	cfg, gitRunner, ghBin := sm.configWithTools()
+	toolset := trackerTools{git: gitRunner, gh: ghBin}
 
 	// Reuse the PR-watch reader's effective gh timeout deliberately: the tracker
 	// shares the same `gh` command path, so raising pr_watch.advanced.gh_timeout
 	// for a slow GitHub host must lengthen tracker reconciliation too (issue #1318).
-	active, truncated, err := sm.fetchTrackerIssues(ctx, tc, repo, cfg.PRWatch.GHTimeoutDuration())
+	active, truncated, err := sm.fetchTrackerIssues(ctx, tc, repo, cfg.PRWatch.GHTimeoutDuration(), toolset)
 	if err != nil {
 		return "", err
 	}
@@ -515,10 +524,10 @@ type ghIssue struct {
 // fetchTrackerIssues polls the configured provider for its active issues. The
 // truncated flag reports that the provider hit the fetch limit — the caller must
 // not infer inactivity (reap) from a capped, incomplete read.
-func (sm *SessionManager) fetchTrackerIssues(ctx context.Context, tc *config.TrackerConfig, repo string, ghTimeout time.Duration) (issues []issueRef, truncated bool, err error) {
+func (sm *SessionManager) fetchTrackerIssues(ctx context.Context, tc *config.TrackerConfig, repo string, ghTimeout time.Duration, toolset trackerTools) (issues []issueRef, truncated bool, err error) {
 	switch tc.ProviderOr() {
 	case config.TrackerProviderGitHub:
-		return sm.fetchGitHubIssues(ctx, tc, repo, ghTimeout)
+		return sm.fetchGitHubIssues(ctx, tc, repo, ghTimeout, toolset)
 	default:
 		return nil, false, fmt.Errorf("tracker provider %q is not supported", tc.ProviderOr())
 	}
@@ -528,17 +537,12 @@ func (sm *SessionManager) fetchTrackerIssues(ctx context.Context, tc *config.Tra
 // pr_watch reader's prompt-disabled runner and its effective configured timeout
 // (ghTimeout, from pr_watch.advanced.gh_timeout — issue #1318). truncated is true
 // when the raw result hit the fetch limit (so the caller skips reaps that pass).
-func (sm *SessionManager) fetchGitHubIssues(ctx context.Context, tc *config.TrackerConfig, repo string, ghTimeout time.Duration) (issues []issueRef, truncated bool, err error) {
-	// Pin one gh+git tool generation for the whole resolution (availability check,
-	// slug resolution, and the gh issue list) so a reload can't split it across
-	// binaries (#1287).
-	toolSnap := tools.Snapshot()
-
-	if !ghAvailableFor(toolSnap.GH) {
+func (sm *SessionManager) fetchGitHubIssues(ctx context.Context, tc *config.TrackerConfig, repo string, ghTimeout time.Duration, toolset trackerTools) (issues []issueRef, truncated bool, err error) {
+	if !ghAvailableFor(toolset.gh) {
 		return nil, false, errors.New("gh CLI not found on PATH")
 	}
 
-	slug, ok := repoSlugWith(git.NewRunnerWith(toolSnap.Git), repo)
+	slug, ok := repoSlugWith(toolset.git, repo)
 	if !ok {
 		return nil, false, fmt.Errorf("no GitHub remote for %q", repo)
 	}
@@ -562,7 +566,7 @@ func (sm *SessionManager) fetchGitHubIssues(ctx context.Context, tc *config.Trac
 		args = append(args, "--assignee", tc.Assignee)
 	}
 
-	out, err := ghRunner(cctx, toolSnap.GH, repo, args...)
+	out, err := ghRunner(cctx, toolset.gh, repo, args...)
 	if err != nil {
 		return nil, false, fmt.Errorf("gh issue list: %w", err)
 	}

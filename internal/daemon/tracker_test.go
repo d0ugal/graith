@@ -2,11 +2,16 @@ package daemon
 
 import (
 	"context"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/git"
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 // sessionIDs pulls the ids out of a plan slice for stable comparison.
@@ -270,6 +275,7 @@ func TestFetchGitHubIssuesUsesConfiguredTimeout(t *testing.T) {
 
 	sm := newOrchTestSM(t)
 	tc := &config.TrackerConfig{Repo: repo}
+	toolset := trackerTools{git: git.NewRunner(), gh: "gh"}
 
 	// Mirror actionTracker's exact wiring: the effective timeout comes from the
 	// current config snapshot each pass.
@@ -277,7 +283,7 @@ func TestFetchGitHubIssuesUsesConfiguredTimeout(t *testing.T) {
 		cfg := config.Default()
 		cfg.PRWatch.Advanced.GHTimeout = ghTimeout
 
-		if _, _, err := sm.fetchTrackerIssues(context.Background(), tc, repo, cfg.PRWatch.GHTimeoutDuration()); err != nil {
+		if _, _, err := sm.fetchTrackerIssues(context.Background(), tc, repo, cfg.PRWatch.GHTimeoutDuration(), toolset); err != nil {
 			t.Fatalf("fetchTrackerIssues: %v", err)
 		}
 
@@ -293,6 +299,162 @@ func TestFetchGitHubIssuesUsesConfiguredTimeout(t *testing.T) {
 	// A subsequent pass with a reloaded, shorter timeout is honoured too.
 	if got := fetchWith("12s"); got < 11*time.Second || got > 12*time.Second {
 		t.Fatalf("reloaded deadline = %v, want ~12s", got)
+	}
+}
+
+// TestActionTrackerPinsConfigAndToolsAcrossReload is the #1287 blocked-fetch
+// regression. A tracker pass captures its config, git, and gh generation at the
+// action boundary. While generation A is blocked in its issue fetch, a reload
+// publishes generation B. The in-flight pass must remain wholly on A (including
+// its timeout), and the next pass must observe B wholesale.
+func TestActionTrackerPinsConfigAndToolsAcrossReload(t *testing.T) {
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not found on PATH")
+	}
+
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "remote", "add", "origin", "https://github.com/d0ugal/croft.git")
+
+	binDir := t.TempDir()
+	gitLog := filepath.Join(binDir, "git-calls.log")
+	gitA := writePullGitWrapper(t, binDir, "gitA", "A", realGit, gitLog, "")
+	gitB := writePullGitWrapper(t, binDir, "gitB", "B", realGit, gitLog, "")
+
+	trigger := config.TriggerConfig{
+		Name: "croft-tracker",
+		Action: config.ActionConfig{
+			Type:    config.ActionTracker,
+			Tracker: &config.TrackerConfig{Repo: repo},
+		},
+	}
+
+	sm := newTriggerTestSM(t, trigger)
+	sm.state.Sessions["braw-orchestrator"] = &SessionState{
+		ID:         "braw-orchestrator",
+		SystemKind: SystemKindOrchestrator,
+	}
+
+	cfgA := config.Default()
+	cfgA.Orchestrator.Enabled = true
+	cfgA.Tools.Git = gitA
+	cfgA.Tools.GH = "gh-A"
+	cfgA.PRWatch.Advanced.GHTimeout = "41s"
+	sm.cfg = cfgA
+
+	tools.Configure(cfgA.Tools.Resolved())
+	t.Cleanup(tools.Reset)
+
+	origLookPath, origRunner := ghLookPath, ghRunner
+
+	t.Cleanup(func() { ghLookPath = origLookPath; ghRunner = origRunner })
+
+	ghLookPath = func(string) bool { return true }
+
+	type ghCall struct {
+		binary  string
+		timeout time.Duration
+	}
+
+	var (
+		callsMu     sync.Mutex
+		releaseOnce sync.Once
+		calls       []ghCall
+		entered     = make(chan struct{}, 1)
+		release     = make(chan struct{})
+	)
+
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+
+	t.Cleanup(unblock)
+
+	ghRunner = func(ctx context.Context, ghBin, _ string, _ ...string) (string, error) {
+		var timeout time.Duration
+		if deadline, ok := ctx.Deadline(); ok {
+			timeout = time.Until(deadline)
+		}
+
+		callsMu.Lock()
+
+		calls = append(calls, ghCall{binary: ghBin, timeout: timeout})
+		callNo := len(calls)
+		callsMu.Unlock()
+
+		if callNo == 1 {
+			entered <- struct{}{}
+
+			<-release
+		}
+
+		return "[]", nil
+	}
+
+	firstDone := make(chan error, 1)
+
+	go func() {
+		_, actionErr := sm.actionTracker(context.Background(), &trigger, fireContext{})
+		firstDone <- actionErr
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(15 * time.Second):
+		t.Fatal("generation-A tracker fetch did not block")
+	}
+
+	cfgB := *cfgA
+	cfgB.Tools.Git = gitB
+	cfgB.Tools.GH = "gh-B"
+	cfgB.PRWatch.Advanced.GHTimeout = "13s"
+
+	if err := sm.applyConfig(&cfgB); err != nil {
+		t.Fatalf("reload generation B: %v", err)
+	}
+
+	unblock()
+
+	select {
+	case err := <-firstDone:
+		if err != nil {
+			t.Fatalf("generation-A tracker pass: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("generation-A tracker pass did not finish after release")
+	}
+
+	if _, err := sm.actionTracker(context.Background(), &trigger, fireContext{}); err != nil {
+		t.Fatalf("generation-B tracker pass: %v", err)
+	}
+
+	callsMu.Lock()
+
+	gotCalls := append([]ghCall(nil), calls...)
+	callsMu.Unlock()
+
+	if len(gotCalls) != 2 {
+		t.Fatalf("gh calls = %+v, want one call per tracker pass", gotCalls)
+	}
+
+	if got := gotCalls[0]; got.binary != "gh-A" || got.timeout < 39*time.Second || got.timeout > 41*time.Second {
+		t.Errorf("first pass gh generation = %+v, want gh-A with ~41s timeout", got)
+	}
+
+	if got := gotCalls[1]; got.binary != "gh-B" || got.timeout < 11*time.Second || got.timeout > 13*time.Second {
+		t.Errorf("second pass gh generation = %+v, want gh-B with ~13s timeout", got)
+	}
+
+	gitCalls := readNonEmptyLines(t, gitLog)
+	if len(gitCalls) != 2 {
+		t.Fatalf("git calls = %v, want one remote resolution per tracker pass", gitCalls)
+	}
+
+	if !strings.HasPrefix(gitCalls[0], "A ") {
+		t.Errorf("first pass git call = %q, want generation A", gitCalls[0])
+	}
+
+	if !strings.HasPrefix(gitCalls[1], "B ") {
+		t.Errorf("second pass git call = %q, want generation B", gitCalls[1])
 	}
 }
 
