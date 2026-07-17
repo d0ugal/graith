@@ -164,7 +164,11 @@ max_age        = "7d"   # prune messages older than 7 days
 max_per_stream = 1000   # keep at most 1000 messages per stream
 ```
 
-Both are optional. When unset, messages are kept indefinitely.
+Both are optional. When unset, messages are kept indefinitely. An empty
+`max_age`, or an explicit `"0"`, is the documented "retain forever" sentinel; a
+non-empty value that does not parse, or a negative duration, is rejected at
+config load and reload (a typo must not silently disable age-based cleanup and
+let messages and jailed comments grow without bound).
 
 ## Operational limits
 

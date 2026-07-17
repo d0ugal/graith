@@ -291,7 +291,7 @@ orphan_min_age = "5m"        # minimum age before an orphaned worktree/scratch d
 # is rejected. subscriber_buffer and busy_timeout are fixed at daemon start
 # (restart-only); the paging bounds and jail cap are read per-request (reloadable).
 [messages]
-# max_age = "30d"          # delete messages older than this ("" or "0" keeps them forever)
+# max_age = "30d"          # delete messages older than this ("" or "0" keeps them forever; a non-empty invalid or negative value is rejected at load)
 # max_per_stream = 5000    # keep at most this many messages per stream (0 keeps all)
 conversation_page_size = 500   # page size when a conversation request omits a limit (< 1 => 500; <= max limit)
 conversation_max_limit = 2000  # hard cap on messages a single conversation sorts (< 1 => 2000; ceiling 100000)

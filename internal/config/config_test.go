@@ -471,18 +471,33 @@ func TestParseDurationWithDays(t *testing.T) {
 	}
 }
 
+// TestMessagesMaxAgeDuration covers the retention accessor's defensive semantics
+// (issue #1321), kept separate from the load/reload rejection in
+// TestValidateMessagesLimits. Empty and an explicit zero are the documented
+// "retain forever" sentinel; an unparseable or negative value falls back to 0
+// (retain forever) for directly-constructed configs so a garbage value can never
+// select a negative — future-cutoff — window that would delete everything.
 func TestMessagesMaxAgeDuration(t *testing.T) {
-	m := Messages{MaxAge: "30d", MaxPerStream: 1000}
-	got := m.MaxAgeDuration()
-
-	want := 30 * 24 * time.Hour
-	if got != want {
-		t.Errorf("MaxAgeDuration() = %v, want %v", got, want)
+	cases := []struct {
+		name string
+		in   string
+		want time.Duration
+	}{
+		{"empty retains forever", "", 0},
+		{"explicit zero retains forever", "0", 0},
+		{"explicit zero seconds retains forever", "0s", 0},
+		{"valid day syntax", "30d", 30 * 24 * time.Hour},
+		{"valid go duration", "12h", 12 * time.Hour},
+		{"unparseable falls back to retain forever", "30x", 0},
+		{"negative falls back to retain forever", "-5m", 0},
 	}
 
-	empty := Messages{}
-	if empty.MaxAgeDuration() != 0 {
-		t.Errorf("empty MaxAgeDuration() = %v, want 0", empty.MaxAgeDuration())
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := (Messages{MaxAge: c.in}).MaxAgeDuration(); got != c.want {
+				t.Errorf("MaxAgeDuration(%q) = %v, want %v", c.in, got, c.want)
+			}
+		})
 	}
 }
 
