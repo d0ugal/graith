@@ -168,10 +168,13 @@ func TestCursorHooksFirstPublicationRacePreservesReplacement(t *testing.T) {
 func TestCursorHooksRepublicationRacePreservesReplacement(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
+		point   cursorHooksRacePoint
 		inPlace bool
 	}{
-		{name: "worktree"},
-		{name: "in-place worktree", inPlace: true},
+		{name: "worktree replaced before claim", point: cursorHooksBeforeClaim},
+		{name: "worktree recreated after claim", point: cursorHooksAfterClaim},
+		{name: "in-place worktree replaced before claim", point: cursorHooksBeforeClaim, inPlace: true},
+		{name: "in-place worktree recreated after claim", point: cursorHooksAfterClaim, inPlace: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
@@ -193,7 +196,7 @@ func TestCursorHooksRepublicationRacePreservesReplacement(t *testing.T) {
 			}
 
 			userContent := []byte(`{"version":1,"hooks":{"stop":[{"command":"thrawn republish replacement"}]}}`)
-			fired := installCursorHooksRace(t, cursorHooksBeforeClaim, func() {
+			fired := installCursorHooksRace(t, tc.point, func() {
 				replaceCursorHooks(t, hooksPath, userContent)
 			})
 
@@ -217,6 +220,55 @@ func TestCursorHooksRepublicationRacePreservesReplacement(t *testing.T) {
 
 			if got := readCursorHooks(t, hooksPath); string(got) != string(userContent) {
 				t.Fatalf("cleanup changed concurrent user replacement: got %q", got)
+			}
+		})
+	}
+}
+
+func TestCursorHooksSuccessfulRepublication(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		hardLinkFallback bool
+	}{
+		{name: "hard link"},
+		{name: "exclusive-create fallback", hardLinkFallback: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			sm := newTestSessionManagerWithDataDir(t)
+			approvalsDisabled := false
+			sm.cfg.Approvals.Enabled = &approvalsDisabled
+			worktree := t.TempDir()
+			sessionID := "successful-republish"
+
+			if tc.hardLinkFallback {
+				original := linkCursorHooksFile
+				linkCursorHooksFile = func(_, _ string) error { return errors.ErrUnsupported }
+
+				t.Cleanup(func() { linkCursorHooksFile = original })
+			}
+
+			if _, _, err := sm.injectCursorHooks(sessionID, worktree, false); err != nil {
+				t.Fatalf("first injectCursorHooks(): %v", err)
+			}
+
+			before := readCursorHooks(t, testCursorHooksPath(worktree))
+			if strings.Contains(string(before), "preToolUse") {
+				t.Fatal("first publication unexpectedly contains preToolUse")
+			}
+
+			if _, _, err := sm.injectCursorHooks(sessionID, worktree, true); err != nil {
+				t.Fatalf("re-injectCursorHooks(): %v", err)
+			}
+
+			after := readCursorHooks(t, testCursorHooksPath(worktree))
+			if !strings.Contains(string(after), "preToolUse") {
+				t.Fatal("republication did not install preToolUse")
+			}
+
+			marker := readCursorHooks(t, sm.cursorHooksOwnershipPath(sessionID))
+			if string(marker) != sha256Hex(after) {
+				t.Fatalf("ownership marker = %q, want hash of republished file", marker)
 			}
 		})
 	}

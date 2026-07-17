@@ -744,6 +744,12 @@ var cursorHooksRaceHook func(cursorHooksRacePoint)
 
 var errCursorHooksRaced = errors.New("cursor hooks.json was concurrently replaced; refusing to overwrite user content")
 
+// linkCursorHooksFile is the preferred no-replace publication primitive. Some
+// writable filesystems do not support hard links; publishCursorFileNoReplace
+// falls back to O_EXCL creation while preserving the same no-overwrite rule.
+// It is a package var so tests can deterministically exercise that fallback.
+var linkCursorHooksFile = os.Link
+
 // stageCursorHooks creates a fully written, synced file next to hooksPath. The
 // staged inode can then be linked into place with no-replace semantics.
 func stageCursorHooks(hooksPath string, data []byte) (path string, err error) {
@@ -816,6 +822,48 @@ func syncCursorHooksDir(path string) error {
 	return err
 }
 
+// publishCursorFileNoReplace places data at hooksPath only when the pathname is
+// absent. A hard link publishes the already-synced stage atomically. On a
+// filesystem without hard-link support, O_EXCL still makes creation conditional
+// on absence; failures after creation leave a markerless graith file in place
+// rather than removing by pathname and risking a concurrent replacement.
+func publishCursorFileNoReplace(stage, hooksPath string, data []byte) error {
+	linkErr := linkCursorHooksFile(stage, hooksPath)
+	if linkErr == nil || errors.Is(linkErr, os.ErrExist) {
+		return linkErr
+	}
+
+	f, createErr := os.OpenFile(hooksPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if createErr != nil {
+		return fmt.Errorf("link cursor hooks: %w (exclusive-create fallback failed: %w)", linkErr, createErr)
+	}
+
+	fail := func(verb string, cause error) error {
+		_ = f.Close()
+
+		return fmt.Errorf("link cursor hooks: %w (%s fallback failed: %w)", linkErr, verb, cause)
+	}
+
+	n, writeErr := f.Write(data)
+	if writeErr != nil {
+		return fail("write", writeErr)
+	}
+
+	if n != len(data) {
+		return fail("write", fmt.Errorf("short write (%d of %d bytes)", n, len(data)))
+	}
+
+	if err := f.Sync(); err != nil {
+		return fail("sync", err)
+	}
+
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("link cursor hooks: %w (close fallback failed: %w)", linkErr, err)
+	}
+
+	return nil
+}
+
 // publishCursorHooks publishes data without ever overwriting hooksPath. A first
 // publish uses an exclusive hard link. A replacement first moves the current
 // pathname aside and verifies the moved object before linking the staged file,
@@ -830,12 +878,12 @@ func (sm *SessionManager) publishCursorHooks(hooksPath string, data []byte, expe
 	if expectedHash == "" {
 		runCursorHooksRaceHook(cursorHooksBeforeCreate)
 
-		if err := os.Link(stage, hooksPath); err != nil {
+		if err := publishCursorFileNoReplace(stage, hooksPath, data); err != nil {
 			if errors.Is(err, os.ErrExist) {
 				return errCursorHooksRaced
 			}
 
-			return fmt.Errorf("link cursor hooks: %w", err)
+			return err
 		}
 
 		if err := syncCursorHooksDir(filepath.Dir(hooksPath)); err != nil {
@@ -869,7 +917,7 @@ func (sm *SessionManager) publishCursorHooks(hooksPath string, data []byte, expe
 
 	runCursorHooksRaceHook(cursorHooksAfterClaim)
 
-	if err := os.Link(stage, hooksPath); err != nil {
+	if err := publishCursorFileNoReplace(stage, hooksPath, data); err != nil {
 		if errors.Is(err, os.ErrExist) {
 			// The claimed file is the old graith-owned artifact. A newcomer at the
 			// public path is left untouched; the old private link can be discarded.
@@ -882,7 +930,7 @@ func (sm *SessionManager) publishCursorHooks(hooksPath string, data []byte, expe
 			return fmt.Errorf("link cursor hooks: %w (restore failed: %w)", err, restoreErr)
 		}
 
-		return fmt.Errorf("link cursor hooks: %w", err)
+		return err
 	}
 
 	_ = removeCursorClaim(claimed)
