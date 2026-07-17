@@ -51,8 +51,10 @@ type hookReport struct {
 // SessionManager orchestrates PTY sessions, state persistence, and git worktrees.
 type SessionManager struct {
 	mu                sync.RWMutex
+	configReloadMu    sync.Mutex
 	state             *State
 	sessions          map[string]SessionDriver
+	stopAttempts      map[string]*stopAttempt
 	attachedClients   map[string]*attachedClient
 	hookReports       map[string]hookReport
 	pendingApprovals  map[string]*pendingApproval
@@ -159,6 +161,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 	sm := &SessionManager{
 		state:              NewState(),
 		sessions:           make(map[string]SessionDriver),
+		stopAttempts:       make(map[string]*stopAttempt),
 		attachedClients:    make(map[string]*attachedClient),
 		hookReports:        make(map[string]hookReport),
 		pendingApprovals:   make(map[string]*pendingApproval),

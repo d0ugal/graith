@@ -1,9 +1,18 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
+
+// stopAttempt identifies one optimistic StopReason write. Stop calls may signal
+// the same driver concurrently, so reason text cannot establish ownership: two
+// callers may choose the same reason. Pointer identity lets a failed caller
+// restore its previous reason only when no newer stop has replaced its write.
+type stopAttempt struct {
+	previousReason string
+}
 
 // Stop sends SIGTERM to a session's process without removing the session or worktree.
 func (sm *SessionManager) Stop(id string) error {
@@ -30,6 +39,12 @@ func (sm *SessionManager) stopWithReason(id, reason, initiator string) error {
 	}
 
 	name := sessState.Name
+	attempt := &stopAttempt{previousReason: sessState.StopReason}
+	if sm.stopAttempts == nil {
+		sm.stopAttempts = make(map[string]*stopAttempt)
+	}
+
+	sm.stopAttempts[id] = attempt
 	sessState.StopReason = reason
 	_ = sm.saveState()
 	sm.mu.Unlock()
@@ -39,7 +54,13 @@ func (sm *SessionManager) stopWithReason(id, reason, initiator string) error {
 		sm.logStopping(id, name, reason, initiator, ptySess)
 
 		if err := ptySess.Kill(); err != nil {
-			return fmt.Errorf("send SIGTERM: %w", err)
+			rollbackErr := sm.finishStopAttempt(id, attempt, true)
+
+			return errors.Join(fmt.Errorf("send SIGTERM: %w", err), rollbackErr)
+		}
+
+		if err := sm.finishStopAttempt(id, attempt, false); err != nil {
+			return err
 		}
 
 		return nil
@@ -79,7 +100,41 @@ func (sm *SessionManager) stopWithReason(id, reason, initiator string) error {
 	}
 	sm.mu.Unlock()
 
-	return err
+	rollbackErr := sm.finishStopAttempt(id, attempt, err != nil)
+
+	if err != nil {
+		return errors.Join(err, rollbackErr)
+	}
+
+	return rollbackErr
+}
+
+// finishStopAttempt commits or rolls back an optimistic StopReason mutation.
+// A rollback is conditional on this exact attempt still owning the mutation;
+// a newer caller's reason must survive even if this caller fails later.
+func (sm *SessionManager) finishStopAttempt(id string, attempt *stopAttempt, rollback bool) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if sm.stopAttempts[id] != attempt {
+		return nil
+	}
+
+	delete(sm.stopAttempts, id)
+
+	if !rollback {
+		return nil
+	}
+
+	if s, ok := sm.state.Sessions[id]; ok {
+		s.StopReason = attempt.previousReason
+
+		if err := sm.saveState(); err != nil {
+			return fmt.Errorf("persist stop reason rollback: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func filterExcludeRoot(ids []string, rootID string) []string {
