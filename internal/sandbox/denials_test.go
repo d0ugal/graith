@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 func TestParseDenialLine(t *testing.T) {
@@ -280,12 +282,15 @@ func TestParsePSPairs(t *testing.T) {
 	}
 }
 
-func TestProcessTree(t *testing.T) {
-	t.Parallel()
+func TestProcessTreeUsesConfiguredPS(t *testing.T) {
+	t.Cleanup(tools.Reset)
+
+	wantCommand := "/strath/bin/braw-ps"
+	tools.Configure(tools.Config{PS: wantCommand})
 
 	run := func(name string, args []string) (string, error) {
-		if name != psCommand {
-			t.Errorf("run command = %q, want %q", name, psCommand)
+		if name != wantCommand {
+			t.Errorf("run command = %q, want configured %q", name, wantCommand)
 		}
 
 		if !containsArg(args, "-axo") {
@@ -501,6 +506,45 @@ func TestSessionMatcher(t *testing.T) {
 
 	if calls != 2 {
 		t.Fatalf("confirmed Matches(300) ran ps %d times, want 2 (served from matched cache)", calls)
+	}
+}
+
+func TestSessionMatcherUsesReloadedPS(t *testing.T) {
+	t.Cleanup(tools.Reset)
+
+	clk := &fakeClock{t: time.Unix(1000, 0)}
+	firstCommand := "/strath/bin/braw-ps"
+	secondCommand := "/strath/bin/canny-ps"
+
+	tools.Configure(tools.Config{PS: firstCommand})
+
+	var commands []string
+
+	run := func(name string, _ []string) (string, error) {
+		commands = append(commands, name)
+
+		if len(commands) == 1 {
+			return "100 1\n200 100\n", nil
+		}
+
+		return "100 1\n200 100\n300 200\n", nil
+	}
+
+	m := newSessionMatcher(100, run, clk.now)
+	if !m.Matches(200) {
+		t.Fatal("Matches(200) = false, want true from initial process tree")
+	}
+
+	tools.Configure(tools.Config{PS: secondCommand})
+	clk.advance(2 * sessionMatcherTTL)
+
+	if !m.Matches(300) {
+		t.Fatal("Matches(300) = false, want true from reloaded process tree")
+	}
+
+	wantCommands := []string{firstCommand, secondCommand}
+	if !reflect.DeepEqual(commands, wantCommands) {
+		t.Fatalf("ps commands = %v, want configured paths %v", commands, wantCommands)
 	}
 }
 

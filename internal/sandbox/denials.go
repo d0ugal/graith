@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 // The safehouse backend (macOS Seatbelt / sandbox-exec) has no policy oracle
@@ -28,10 +30,6 @@ import (
 // logCommand is the macOS unified-logging binary. It is a var so tests can
 // point it at a stub instead of the real /usr/bin/log.
 var logCommand = "/usr/bin/log"
-
-// psCommand is the process-listing binary used to resolve a session's process
-// tree. A var for the same test seam reason as logCommand.
-var psCommand = "/bin/ps"
 
 // denialPredicate selects Seatbelt sandbox-deny records in the unified log. A
 // denial's eventMessage looks like:
@@ -418,7 +416,7 @@ func ProcessTree(root int) (map[int]bool, error) {
 }
 
 func processTree(root int, run outputRunner) (map[int]bool, error) {
-	out, err := run(psCommand, []string{"-axo", "pid=,ppid="})
+	out, err := run(tools.PS(), []string{"-axo", "pid=,ppid="})
 	if err != nil {
 		return nil, fmt.Errorf("ps: %w", err)
 	}
@@ -525,7 +523,7 @@ func (m *SessionMatcher) refresh() {
 		return
 	}
 
-	out, err := m.run(psCommand, []string{"-axo", "pid=,ppid="})
+	out, err := m.run(tools.PS(), []string{"-axo", "pid=,ppid="})
 	if err != nil {
 		return
 	}
