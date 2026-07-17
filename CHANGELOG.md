@@ -1,5 +1,112 @@
 # Changelog
 
+## [0.69.1](https://github.com/d0ugal/graith/compare/v0.69.0...v0.69.1) (2026-07-17)
+
+
+### Features
+
+* **config:** add per-agent prompt_injection method override ([e7a1374](https://github.com/d0ugal/graith/commit/e7a1374ddc5f6b08302b829308b04be0926fe705)), closes [#1232](https://github.com/d0ugal/graith/issues/1232)
+* **config:** expose detection/status timing policy in [detection] ([a00230a](https://github.com/d0ugal/graith/commit/a00230aba1832a37882e0546eaee2770851e50a8)), closes [#1241](https://github.com/d0ugal/graith/issues/1241)
+* **config:** make client connection deadlines configurable ([ed83c60](https://github.com/d0ugal/graith/commit/ed83c60396d007b8695a202bfafa87c0adf92ee1))
+* **config:** make external tools and git timeouts configurable ([2acbe3c](https://github.com/d0ugal/graith/commit/2acbe3c8558b4a803ed7ca450ed347a438e7564b))
+* **config:** make headless, migration, and transcript limits configurable ([e534406](https://github.com/d0ugal/graith/commit/e53440629f0df65f29fdce0057ad9462a99f5d4f))
+* **config:** make launch, shutdown, conversion, and PTY lifecycle policy configurable ([691a851](https://github.com/d0ugal/graith/commit/691a851a3169252a479bc8023d769e21667522ad)), closes [#1243](https://github.com/d0ugal/graith/issues/1243)
+* **config:** make messaging, jail, todo, and SQLite limits configurable ([de17d72](https://github.com/d0ugal/graith/commit/de17d723681cb5aa60e678bd744f94377847da84)), closes [#1249](https://github.com/d0ugal/graith/issues/1249)
+* **config:** make terminal, TUI, and GUI presentation preferences configurable ([0f3d6cb](https://github.com/d0ugal/graith/commit/0f3d6cbe2eda12ec69eb2e66394d2a6bc961b88e)), closes [#1254](https://github.com/d0ugal/graith/issues/1254)
+* **config:** make token accounting and resource-monitor sampling configurable ([de7f318](https://github.com/d0ugal/graith/commit/de7f318098997f2badfa2603b59a8560995b82e7)), closes [#1244](https://github.com/d0ugal/graith/issues/1244)
+* **config:** move agent CLI argument adapters into [agents.*] ([d6190b1](https://github.com/d0ugal/graith/commit/d6190b12b6d620fc5c6fd6c80d993caea5740299)), closes [#1236](https://github.com/d0ugal/graith/issues/1236)
+* **config:** move scattered defaults into embedded default_config.toml ([6566e0d](https://github.com/d0ugal/graith/commit/6566e0de2fa4444f334038c9679d142265a53751)), closes [#1237](https://github.com/d0ugal/graith/issues/1237)
+* **config:** unify output, log, wait, and display limits under [limits] ([eb64d43](https://github.com/d0ugal/graith/commit/eb64d4348d792205a29df9c0d152d2f8cd9eb7c8))
+* **delete:** make purge and GC sweep timing configurable ([22a20d0](https://github.com/d0ugal/graith/commit/22a20d0661ca4fb93f02981ca51002336b7837b5)), closes [#1247](https://github.com/d0ugal/graith/issues/1247)
+* **gui:** drive agent catalog and default from daemon config ([df2733f](https://github.com/d0ugal/graith/commit/df2733fc62a96c7f3dc9269f0c107c62d673e355))
+* **ios:** make terminal gesture physics configurable ([#1255](https://github.com/d0ugal/graith/issues/1255)) ([8014a6b](https://github.com/d0ugal/graith/commit/8014a6b4be5fb708fff6e22764f07c279b6ee809))
+* **keybindings:** make attached-session and overlay keys configurable ([e82b37a](https://github.com/d0ugal/graith/commit/e82b37a4817c802e99ed9d503adf79e783a0fbba))
+* **messaging:** allow no-reply messages ([307e469](https://github.com/d0ugal/graith/commit/307e469eec1248b7896b6dcc27af28e54022ee7e))
+* **notifications:** make coalesce, dispatch, and inbox timing configurable ([e270267](https://github.com/d0ugal/graith/commit/e27026714d3ded88f06aa78af7ea2929e4f28312)), closes [#1245](https://github.com/d0ugal/graith/issues/1245)
+* **orchestrator:** make restart backoff and stability window configurable ([ca2d8ef](https://github.com/d0ugal/graith/commit/ca2d8efa7d418664f678f179636617f10ee1a546)), closes [#1239](https://github.com/d0ugal/graith/issues/1239)
+* **pairing:** make remote pairing limits, TTL, and fallback rate configurable ([c73570b](https://github.com/d0ugal/graith/commit/c73570b0e016fa7784d59cca0179cb11680d7c40)), closes [#1246](https://github.com/d0ugal/graith/issues/1246)
+* **pr_watch:** expose advanced watcher tuning under [pr_watch.advanced] ([b09e05e](https://github.com/d0ugal/graith/commit/b09e05ef215cc5565f042816704215f82f3ab85d)), closes [#1240](https://github.com/d0ugal/graith/issues/1240)
+* **protocol:** add daemon boot instance ID to handshake ([#1319](https://github.com/d0ugal/graith/issues/1319)) ([8e01b08](https://github.com/d0ugal/graith/commit/8e01b08d9df1afd832fc0dc7ad0c40471515c12c))
+* **triggers:** expose scheduler and file-watch tuning under [triggers.advanced] ([4414c88](https://github.com/d0ugal/graith/commit/4414c88e69427f5598217f1cb2755605f436d98d)), closes [#1248](https://github.com/d0ugal/graith/issues/1248)
+* **updates:** make the release update check configurable ([b35ffb2](https://github.com/d0ugal/graith/commit/b35ffb235f92f632f930a09c0d717f0e963134d9)), closes [#1253](https://github.com/d0ugal/graith/issues/1253)
+
+
+### Bug Fixes
+
+* allow resetting the orchestrator session ([1d46991](https://github.com/d0ugal/graith/commit/1d46991eda06eb74a394e1451c9899c357d46ad5))
+* **approvals:** make backend execution timeouts configurable and coherent ([637e100](https://github.com/d0ugal/graith/commit/637e100bc5d54252b8cce0fe27f25c5bf282898f)), closes [#1251](https://github.com/d0ugal/graith/issues/1251)
+* **atomicfile:** detect short writes and harden TLS test seam ([9f96a05](https://github.com/d0ugal/graith/commit/9f96a05c94282d27ec356ce0018b73fd26cbe625))
+* **attach:** cap reconnect sleep to remaining aggregate timeout ([4357186](https://github.com/d0ugal/graith/commit/43571862d520189f12f999f5eec2645249bf0b71)), closes [#1242](https://github.com/d0ugal/graith/issues/1242)
+* **client:** honor connection.dial_timeout in hook and approval fast paths ([c1201aa](https://github.com/d0ugal/graith/commit/c1201aabd0fd463b40a281a617d39cd2a02f32c5)), closes [#1286](https://github.com/d0ugal/graith/issues/1286)
+* **client:** honor terminal.refresh_interval in the message viewer ([ac41070](https://github.com/d0ugal/graith/commit/ac41070bd4d32165c3625bd54d2c505e3739d7cb)), closes [#1315](https://github.com/d0ugal/graith/issues/1315)
+* **cli:** honor log history in attach scroll mode ([9cf6ddd](https://github.com/d0ugal/graith/commit/9cf6ddd01c35ea01a66037b923a7f9d972d927dd))
+* **cli:** render purge schedule in doctor ([1f92e70](https://github.com/d0ugal/graith/commit/1f92e7016a7f8b40160182062ac21cb25a24936a))
+* **config:** clamp inherited page size when lowering conversation_max_limit ([#1314](https://github.com/d0ugal/graith/issues/1314)) ([01501a8](https://github.com/d0ugal/graith/commit/01501a8090d1f1465c7ded46f316dd9f429f5483))
+* **config:** derive rendered pairing durations ([66cb13e](https://github.com/d0ugal/graith/commit/66cb13ec33295ab24a5e6d4edab3fa8f39623a8d))
+* **config:** fall back to defaults for non-positive advanced cadences ([8c15d44](https://github.com/d0ugal/graith/commit/8c15d441cc142b888d4fcc0719eab9d001d8d286)), closes [#1285](https://github.com/d0ugal/graith/issues/1285)
+* **config:** redact nested agent MCP env secrets ([#1329](https://github.com/d0ugal/graith/issues/1329)) ([1ef79cf](https://github.com/d0ugal/graith/commit/1ef79cf9536d39a7d367f33b6958539f7711c4d6))
+* **config:** reject invalid messages.max_age instead of silently retaining forever ([8fb1dda](https://github.com/d0ugal/graith/commit/8fb1ddabe31d8d8f9c2346efc4e6a6e847332819)), closes [#1321](https://github.com/d0ugal/graith/issues/1321)
+* **config:** reject non-positive/non-finite orchestrator restart policy ([7e092b4](https://github.com/d0ugal/graith/commit/7e092b41131c79f17fa4da59ebf3a5368548f266)), closes [#1303](https://github.com/d0ugal/graith/issues/1303)
+* **config:** reject sub-millisecond SQLite busy timeouts that collapse to zero ([e2d219e](https://github.com/d0ugal/graith/commit/e2d219e86ecc37539c2a834565eb8d8b06ea7090)), closes [#1322](https://github.com/d0ugal/graith/issues/1322)
+* **config:** render accessor-backed defaults ([867257c](https://github.com/d0ugal/graith/commit/867257c7915b8eb8749630ddfefcfd91da1ca832))
+* **config:** resolve relative [tools] paths against config.toml dir ([88679b5](https://github.com/d0ugal/graith/commit/88679b592d696c043ef5ad7fbb0a79718db3ee9d)), closes [#1293](https://github.com/d0ugal/graith/issues/1293)
+* **daemon:** harden degraded watch retry bounds ([fcb7b32](https://github.com/d0ugal/graith/commit/fcb7b3212552029b6893b6103526234e0e158dd0)), closes [#1310](https://github.com/d0ugal/graith/issues/1310)
+* **daemon:** hot-reload jail and todo enforcement limits ([a8a99fd](https://github.com/d0ugal/graith/commit/a8a99fde982e1032319a6a51563aa82b58e62628)), closes [#1291](https://github.com/d0ugal/graith/issues/1291)
+* **daemon:** make remote TLS certificate persistence crash-safe ([#1327](https://github.com/d0ugal/graith/issues/1327)) ([efd9090](https://github.com/d0ugal/graith/commit/efd9090696e92e937ed5cbd0cfb269e8e3e99404))
+* **daemon:** reload watch_builtin_ignores into live bindings and honor [] ([f2672d4](https://github.com/d0ugal/graith/commit/f2672d47415ff23cc41dd8e4c423ba9817ad0476)), closes [#1309](https://github.com/d0ugal/graith/issues/1309)
+* **daemon:** snapshot config for lifecycle/background timeout reads ([06a25ad](https://github.com/d0ugal/graith/commit/06a25ad4eb54cb4ff811ccbc72244806381dba15)), closes [#1287](https://github.com/d0ugal/graith/issues/1287)
+* **delete:** never orphan a live process or discard teardown failures ([#1326](https://github.com/d0ugal/graith/issues/1326)) ([3ae8a33](https://github.com/d0ugal/graith/commit/3ae8a330c7c593a107ac5eccded946bdff1d73f5))
+* **gui:** normalize non-finite presentation preferences before clamping ([cfb572b](https://github.com/d0ugal/graith/commit/cfb572bccb7f3dafa44ec5c663ebd5b593e40e2a)), closes [#1323](https://github.com/d0ugal/graith/issues/1323)
+* **gui:** send daemon-default sentinel for no-override log peeks ([95dea95](https://github.com/d0ugal/graith/commit/95dea951f502411b618ee71068dcb29658752a11)), closes [#1289](https://github.com/d0ugal/graith/issues/1289)
+* **lifecycle:** apply reloaded input_delay to live PTYs ([491e50c](https://github.com/d0ugal/graith/commit/491e50ce60890487a737b58514fa5d533c1a827d)), closes [#1294](https://github.com/d0ugal/graith/issues/1294)
+* **notifications:** report configured coalesce window ([ffb84fa](https://github.com/d0ugal/graith/commit/ffb84fa9d34298b911bc6f16f63c395feea96d27))
+* **orchestrator:** fail closed when resume prompt injection fails ([7ba3819](https://github.com/d0ugal/graith/commit/7ba38191d7da5cd1518d18fcc99c666d8dc3b2de)), closes [#1306](https://github.com/d0ugal/graith/issues/1306)
+* **orchestrator:** honour per-agent inject_prompt opt-out ([02ad142](https://github.com/d0ugal/graith/commit/02ad1426ee9aafaa398541c540b23a766759b290)), closes [#1292](https://github.com/d0ugal/graith/issues/1292)
+* **orchestrator:** route prompt through agent-aware adapter ([5121950](https://github.com/d0ugal/graith/commit/51219508e659d89b11885f6d3330bc836af5000e)), closes [#1232](https://github.com/d0ugal/graith/issues/1232)
+* **orchestrator:** validate orchestrator.agent against configured agents ([bfe0ea8](https://github.com/d0ugal/graith/commit/bfe0ea85055322fff1987fabbac8b29f847ab107)), closes [#1305](https://github.com/d0ugal/graith/issues/1305)
+* **output:** keep inbox and summary truncation UTF-8-safe ([1f9e939](https://github.com/d0ugal/graith/commit/1f9e93929aa4c31b6f90f327b408d737e85b5659)), closes [#1313](https://github.com/d0ugal/graith/issues/1313)
+* **pairing:** freeze one immutable expiry deadline per pending request ([9b9513f](https://github.com/d0ugal/graith/commit/9b9513f566eea4e2d02c09df7e854b14097fb045)), closes [#1299](https://github.com/d0ugal/graith/issues/1299)
+* **pr_watch:** preserve non-positive debounce fallback ([f64a54f](https://github.com/d0ugal/graith/commit/f64a54fec2c3207536f73d8e672a55956a8264dd))
+* **pr_watch:** reject non-positive anti-flood rate windows ([a111114](https://github.com/d0ugal/graith/commit/a11111490b2786020a3d308d4d920d3bff7437c0)), closes [#1304](https://github.com/d0ugal/graith/issues/1304)
+* **pr_watch:** reload ref debounce for existing watchers ([71a5f28](https://github.com/d0ugal/graith/commit/71a5f28ec971f9563e01d65dd71744f9da10caf7))
+* **pr-watch:** bound kick channel allocation ([#1240](https://github.com/d0ugal/graith/issues/1240)) ([90658f7](https://github.com/d0ugal/graith/commit/90658f786e9fd488c42d5198a26e8091384dadc4))
+* preserve orchestrator delete semantics ([7654d35](https://github.com/d0ugal/graith/commit/7654d3546f58a57e4a83519657575be5e4d68682))
+* **remote:** serialize remote host mutations ([#1330](https://github.com/d0ugal/graith/issues/1330)) ([8a98211](https://github.com/d0ugal/graith/commit/8a982110f4a9373f894cc9e0787e1c8e115069fd))
+* **sandbox:** honor configured ps for denial matching ([37e6c8f](https://github.com/d0ugal/graith/commit/37e6c8f3fecbed3e19abed8c3d0c20ae3e0b1b53))
+* **tracker:** honour configured gh_timeout on issue-list poll ([0fe8a4a](https://github.com/d0ugal/graith/commit/0fe8a4ae8f7fe8587971fe568762bb1bee6b842b)), closes [#1318](https://github.com/d0ugal/graith/issues/1318)
+* **transcript:** enforce sub-64KiB scanner caps and continue past oversized records ([1b111ac](https://github.com/d0ugal/graith/commit/1b111ac990b37e466e932e00abeacd9647fcaccf)), closes [#1295](https://github.com/d0ugal/graith/issues/1295)
+* **type:** honour configured idle waits ([81bc578](https://github.com/d0ugal/graith/commit/81bc578e2ac75b8fd3369a5bcbb1f289f11fcf83)), closes [#1317](https://github.com/d0ugal/graith/issues/1317)
+* **updates:** scope the update-check cache to the configured repository ([883b211](https://github.com/d0ugal/graith/commit/883b21189415c059bf98f3239f4b8534dc2c3450)), closes [#1290](https://github.com/d0ugal/graith/issues/1290)
+* **upgrade:** honor connection start policy in restart/upgrade readiness ([#1319](https://github.com/d0ugal/graith/issues/1319)) ([7706a77](https://github.com/d0ugal/graith/commit/7706a775586a17f44b3b84fa9386ef07123ffed9))
+
+
+### Documentation
+
+* **access:** note pending_pairing_ttl is frozen per request ([d5d8bf8](https://github.com/d0ugal/graith/commit/d5d8bf8bd59ebe9583f3f6d20a207eddadbc137c)), closes [#1299](https://github.com/d0ugal/graith/issues/1299)
+* **demo:** add VHS demo recording setup and GIF ([b99e01f](https://github.com/d0ugal/graith/commit/b99e01fffb9e519bbda1cbcb1b2ff950ad08b7a2))
+* **protocol:** clarify pre-sweep purge state ([ea89361](https://github.com/d0ugal/graith/commit/ea893615c8ebe7897741ce0e4c3cc554418ec20a))
+
+
+### Code Refactoring
+
+* **config:** retire config.sample.toml in favour of embedded default ([f5687f8](https://github.com/d0ugal/graith/commit/f5687f8d5060947db9e26ae86b189865769eddca))
+* **remote:** centralize the default remote port (4823) ([56cced6](https://github.com/d0ugal/graith/commit/56cced6836f344bf6dac6147feb6edaacccc721e)), closes [#1235](https://github.com/d0ugal/graith/issues/1235)
+
+
+### Tests
+
+* **approvals:** isolate localmost availability from PATH ([93a1db1](https://github.com/d0ugal/graith/commit/93a1db19d34e14cd4bb4efd867036b9715054ab0))
+* **cli:** satisfy doctor test layout lint ([9f2acac](https://github.com/d0ugal/graith/commit/9f2acac778f57e6c938a3de4ae58c4289d2708ca))
+* **config:** assert raw embedded detection fields, not just accessors ([d52e28b](https://github.com/d0ugal/graith/commit/d52e28b59a59f501575239500a38d5d97630fc25))
+* **messaging:** preserve default resume hints ([d8a4ef2](https://github.com/d0ugal/graith/commit/d8a4ef2dd9456d47d3542fa60c98de52c73a5de9))
+* **pairing:** check AddPendingPairing error in single-value fixtures ([364cd13](https://github.com/d0ugal/graith/commit/364cd1379f94536beb69879643f327e0b9ab4da6)), closes [#1299](https://github.com/d0ugal/graith/issues/1299)
+* satisfy orchestrator lint checks ([8b27198](https://github.com/d0ugal/graith/commit/8b27198994809dce51fdb2e52399d72b4436aa0a))
+
+
+### Dependencies
+
+* **deps:** update github/codeql-action action to v4.37.1 ([9e2c8a2](https://github.com/d0ugal/graith/commit/9e2c8a2b21ceaf416e1b6191ef913eb247872dbe))
+
 ## [0.69.0](https://github.com/d0ugal/graith/compare/v0.68.9...v0.69.0) (2026-07-16)
 
 
