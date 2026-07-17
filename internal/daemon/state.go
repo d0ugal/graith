@@ -169,13 +169,14 @@ type SessionState struct {
 	// one with the same TriggerID+TrackerIssue exists. Empty for every non-tracker
 	// session. See docs/design/2026-07-16-tracker-poll-action.md.
 	TrackerIssue string `json:"tracker_issue,omitempty"`
-	// CompletionScenarioID/Epoch/Action identify a session spawned as a durable
+	// CompletionScenarioID/Epoch/Action/Attempt identify a session spawned as a durable
 	// scenario-completion action. They let a restarted daemon adopt the action
 	// instead of spawning a duplicate. They do not make the session a scenario
 	// member or a lifecycle-cleanup target.
 	CompletionScenarioID string `json:"completion_scenario_id,omitempty"`
 	CompletionEpoch      int    `json:"completion_epoch,omitempty"`
 	CompletionAction     string `json:"completion_action,omitempty"`
+	CompletionAttempt    int    `json:"completion_attempt,omitempty"`
 	// AutoCleanup, when non-empty, soft-deletes this trigger-spawned session
 	// when it stops: config.CleanupAlways on any stop, config.CleanupOnSuccess
 	// only on a clean (exit 0) stop. Empty disables it. Set only on

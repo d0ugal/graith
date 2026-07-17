@@ -385,18 +385,19 @@ func (sm *SessionManager) fireSchedule(ctx context.Context, name, cause string) 
 // fireContext carries per-fire data (source session, changed files) to the
 // action executor and template expander.
 type fireContext struct {
-	cause            string
-	now              time.Time
-	sessionID        string   // watch: the bound source session
-	sessionName      string   // watch
-	worktree         string   // watch
-	changedFiles     []string // watch
-	scenarioID       string   // completion: owning scenario
-	scenarioName     string   // completion
-	completionEpoch  int      // completion
-	completionAction string   // completion trigger bare name
-	gcxEvent         *gcxEvent
-	reactorSuffix    string // source-specific stable suffix for spawned session names
+	cause             string
+	now               time.Time
+	sessionID         string   // watch: the bound source session
+	sessionName       string   // watch
+	worktree          string   // watch
+	changedFiles      []string // watch
+	scenarioID        string   // completion: owning scenario
+	scenarioName      string   // completion
+	completionEpoch   int      // completion
+	completionAction  string   // completion trigger bare name
+	completionAttempt int      // completion action attempt
+	gcxEvent          *gcxEvent
+	reactorSuffix     string // source-specific stable suffix for spawned session names
 }
 
 // fireAction dispatches to the per-type executor and returns a result summary.
@@ -756,7 +757,13 @@ func (sm *SessionManager) deliverInboxScoped(ctx context.Context, target, body s
 		if sc := sm.state.Scenarios[scenarioID]; sc != nil {
 			for i, sid := range sc.SessionIDs {
 				if i < len(sc.Sessions) && sc.Sessions[i].Name == target {
+					s := sm.state.Sessions[sid]
+					if s == nil || (!sc.Sessions[i].Shared && s.ScenarioID != scenarioID) {
+						continue
+					}
+
 					id = sid
+
 					break
 				}
 			}
