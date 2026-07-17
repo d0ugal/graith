@@ -735,6 +735,55 @@ public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
     public var isTodoComplete: Bool { todoTotal > 0 && todoDone == todoTotal }
 }
 
+public struct ScenarioCompletionActionInfo: Codable, Sendable, Identifiable, Hashable {
+    public var name: String
+    public var state: String
+    public var attempt: Int?
+    public var startedAt: String?
+    public var finishedAt: String?
+    public var result: String?
+    public var error: String?
+    public var sessionID: String?
+
+    public var id: String { name }
+
+    public init(name: String, state: String, attempt: Int? = nil, startedAt: String? = nil,
+                finishedAt: String? = nil, result: String? = nil, error: String? = nil,
+                sessionID: String? = nil) {
+        self.name = name; self.state = state; self.attempt = attempt
+        self.startedAt = startedAt; self.finishedAt = finishedAt
+        self.result = result; self.error = error; self.sessionID = sessionID
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, state, attempt, result, error
+        case startedAt = "started_at"
+        case finishedAt = "finished_at"
+        case sessionID = "session_id"
+    }
+}
+
+public struct ScenarioCleanupInfo: Codable, Sendable, Hashable {
+    public var policy: String
+    public var state: String
+    public var scheduledAt: String?
+    public var finishedAt: String?
+    public var result: String?
+    public var error: String?
+
+    public init(policy: String, state: String, scheduledAt: String? = nil,
+                finishedAt: String? = nil, result: String? = nil, error: String? = nil) {
+        self.policy = policy; self.state = state; self.scheduledAt = scheduledAt
+        self.finishedAt = finishedAt; self.result = result; self.error = error
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case policy, state, result, error
+        case scheduledAt = "scheduled_at"
+        case finishedAt = "finished_at"
+    }
+}
+
 /// A running scenario and its member sessions (`gr scenario list` / `status`).
 public struct ScenarioRecord: Codable, Sendable, Identifiable, Hashable {
     public var id: String
@@ -745,13 +794,20 @@ public struct ScenarioRecord: Codable, Sendable, Identifiable, Hashable {
     public var sessionIDs: [String]
     public var sessions: [ScenarioSessionInfo]
     public var createdAt: String
+	public var completionEpoch: Int?
+	public var completionActions: [ScenarioCompletionActionInfo]?
+	public var cleanup: ScenarioCleanupInfo?
 
     public init(id: String, name: String, orchestratorID: String, goal: String,
                 status: String, sessionIDs: [String], sessions: [ScenarioSessionInfo],
-                createdAt: String) {
+                createdAt: String, completionEpoch: Int? = nil,
+                completionActions: [ScenarioCompletionActionInfo]? = nil,
+                cleanup: ScenarioCleanupInfo? = nil) {
         self.id = id; self.name = name; self.orchestratorID = orchestratorID; self.goal = goal
         self.status = status; self.sessionIDs = sessionIDs; self.sessions = sessions
         self.createdAt = createdAt
+		self.completionEpoch = completionEpoch; self.completionActions = completionActions
+		self.cleanup = cleanup
     }
 
     enum CodingKeys: String, CodingKey {
@@ -761,6 +817,9 @@ public struct ScenarioRecord: Codable, Sendable, Identifiable, Hashable {
         case sessionIDs = "session_ids"
         case sessions
         case createdAt = "created_at"
+		case completionEpoch = "completion_epoch"
+		case completionActions = "completion_actions"
+		case cleanup
     }
 }
 

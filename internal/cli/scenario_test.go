@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 	toml "github.com/pelletier/go-toml/v2"
@@ -551,6 +552,36 @@ func TestBuildSessionInputsIncludesAndStar(t *testing.T) {
 
 	if len(got[1].Includes) != 0 {
 		t.Errorf("session[1].Includes = %v, want none", got[1].Includes)
+	}
+}
+
+func TestParseScenarioFileCompletionLifecycle(t *testing.T) {
+	sf, err := parseScenarioFile([]byte(`
+version = 1
+[scenario]
+name = "braw"
+[scenario.lifecycle]
+cleanup = "on_success"
+delay = "10m"
+[[sessions]]
+name = "ben"
+repo = "/tmp/croft"
+[[trigger]]
+name = "archive"
+[trigger.completion]
+session = "ben"
+[trigger.action]
+type = "command"
+command = "true"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if sf.Scenario.Lifecycle.CleanupMode() != config.ScenarioCleanupOnSuccess ||
+		sf.Scenario.Lifecycle.DelayDuration() != 10*time.Minute ||
+		len(sf.Triggers) != 1 || !sf.Triggers[0].IsCompletion() {
+		t.Fatalf("parsed scenario = %+v", sf)
 	}
 }
 

@@ -27,7 +27,9 @@ func (sm *SessionManager) actionMessage(ctx context.Context, t *config.TriggerCo
 		return "", err
 	}
 	// message actions have no repo; store keys must be shared: (validated).
-	sm.deliver(ctx, t.Action.Deliver, body, "", vars)
+	if err := sm.deliverScoped(ctx, t.Action.Deliver, body, "", vars, fc.scenarioID); err != nil {
+		return "delivery failed", err
+	}
 
 	return "published", nil
 }
@@ -41,7 +43,7 @@ func (sm *SessionManager) actionCommand(ctx context.Context, t *config.TriggerCo
 	execRoot := t.Action.RepoPath()
 	readOnlyRoot := false
 
-	if t.IsWatch() {
+	if t.IsWatch() || t.IsCompletion() {
 		execRoot = fc.worktree
 		readOnlyRoot = true
 	}
@@ -122,7 +124,9 @@ func (sm *SessionManager) actionCommand(ctx context.Context, t *config.TriggerCo
 	}
 
 	body := fmt.Sprintf("$ %s\n(exit %d)\n\n%s", cmdStr, exit, truncateOutput(out.String(), sm.Config().TriggersRuntime.CommandOutputCap()))
-	sm.deliver(ctx, t.Action.Deliver, body, t.Action.RepoPath(), sm.triggerVars(t, fc))
+	if err := sm.deliverScoped(ctx, t.Action.Deliver, body, t.Action.RepoPath(), sm.triggerVars(t, fc), fc.scenarioID); err != nil {
+		return fmt.Sprintf("exit %d; delivery failed", exit), err
+	}
 
 	// A non-zero exit / timeout is surfaced as an error so it lands in LastError,
 	// even though the captured output is still delivered.
@@ -302,7 +306,7 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 	repo := t.Action.RepoPath()
 
 	mirror := ""
-	if t.IsWatch() {
+	if t.IsWatch() || t.IsCompletion() {
 		// The reactor mirrors the bound session's worktree read-only.
 		mirror = fc.sessionID
 		repo = "" // mirror sessions don't create their own repo worktree
@@ -317,17 +321,20 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 
 	//nolint:contextcheck // Create spawns a PTY-backed session that outlives the fire ctx (matches scenario start).
 	sess, err := sm.createTriggerSession(createTriggerReq{
-		name:            name,
-		agent:           agent,
-		repo:            repo,
-		prompt:          prompt,
-		model:           model,
-		parentID:        orchestratorID,
-		mirror:          mirror,
-		triggerName:     t.Name,
-		reactor:         t.Action.Ensure && t.IsWatch(),
-		autoCleanup:     cleanup,
-		idleTimeoutSecs: idleSeconds(idle),
+		name:                 name,
+		agent:                agent,
+		repo:                 repo,
+		prompt:               prompt,
+		model:                model,
+		parentID:             orchestratorID,
+		mirror:               mirror,
+		triggerName:          t.Name,
+		reactor:              t.Action.Ensure && t.IsWatch(),
+		autoCleanup:          cleanup,
+		idleTimeoutSecs:      idleSeconds(idle),
+		completionScenarioID: fc.scenarioID,
+		completionEpoch:      fc.completionEpoch,
+		completionAction:     fc.completionAction,
 	})
 	if err != nil {
 		return "", err
@@ -422,6 +429,7 @@ func (sm *SessionManager) actionScenario(ctx context.Context, t *config.TriggerC
 		Goal:            sf.Scenario.Goal,
 		Sessions:        inputs,
 		Triggers:        sf.Triggers,
+		Lifecycle:       sf.Scenario.Lifecycle,
 	}
 	lc := sm.Config().Lifecycle
 	//nolint:contextcheck // StartScenario runs its own session lifecycle, detached from the fire ctx.
@@ -484,6 +492,10 @@ func (sm *SessionManager) sessionDeliveryInstruction(d config.DeliverConfig, var
 
 	b.WriteString("\n\nWhen you finish, deliver your result:")
 
+	if d.Required {
+		b.WriteString(" Every delivery below is required: do not exit until each succeeds, and exit non-zero if any delivery fails.")
+	}
+
 	if d.Inbox != "" {
 		target, err := config.ExpandTrigger(d.Inbox, vars)
 		if err != nil {
@@ -541,18 +553,21 @@ func (sm *SessionManager) setBindingReactor(triggerName, sessionID, reactorID st
 }
 
 type createTriggerReq struct {
-	name            string
-	agent           string
-	repo            string
-	prompt          string
-	model           string
-	parentID        string
-	mirror          string
-	triggerName     string
-	trackerIssue    string
-	reactor         bool
-	autoCleanup     string
-	idleTimeoutSecs int
+	name                 string
+	agent                string
+	repo                 string
+	prompt               string
+	model                string
+	parentID             string
+	mirror               string
+	triggerName          string
+	trackerIssue         string
+	reactor              bool
+	autoCleanup          string
+	idleTimeoutSecs      int
+	completionScenarioID string
+	completionEpoch      int
+	completionAction     string
 }
 
 // createTriggerSession creates a session via sm.Create, tagging it with the
@@ -567,21 +582,24 @@ func (sm *SessionManager) createTriggerSession(req createTriggerReq) (SessionSta
 	lc := sm.Config().Lifecycle
 
 	return sm.Create(CreateOpts{
-		Name:            req.name,
-		AgentName:       agent,
-		RepoPath:        req.repo,
-		Prompt:          req.prompt,
-		Model:           req.model,
-		ParentID:        req.parentID,
-		Mirror:          req.mirror,
-		AgentHooks:      true,
-		TriggerID:       req.triggerName,
-		TriggerReactor:  req.reactor,
-		TrackerIssue:    req.trackerIssue,
-		AutoCleanup:     req.autoCleanup,
-		IdleTimeoutSecs: req.idleTimeoutSecs,
-		Rows:            lc.DefaultRowsOrDefault(),
-		Cols:            lc.DefaultColsOrDefault(),
+		Name:                 req.name,
+		AgentName:            agent,
+		RepoPath:             req.repo,
+		Prompt:               req.prompt,
+		Model:                req.model,
+		ParentID:             req.parentID,
+		Mirror:               req.mirror,
+		AgentHooks:           true,
+		TriggerID:            req.triggerName,
+		TriggerReactor:       req.reactor,
+		TrackerIssue:         req.trackerIssue,
+		AutoCleanup:          req.autoCleanup,
+		IdleTimeoutSecs:      req.idleTimeoutSecs,
+		CompletionScenarioID: req.completionScenarioID,
+		CompletionEpoch:      req.completionEpoch,
+		CompletionAction:     req.completionAction,
+		Rows:                 lc.DefaultRowsOrDefault(),
+		Cols:                 lc.DefaultColsOrDefault(),
 	})
 }
 

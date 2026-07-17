@@ -8,14 +8,17 @@ import "fmt"
 // must not silently accept agent-arg names. Like Expand, ExpandTrigger errors on
 // an unknown {token}.
 type TriggerVars struct {
-	Name         string // trigger name
-	Date         string // e.g. 2026-07-11
-	Datetime     string // RFC3339
-	FireTime     string // scheduled/observed fire instant (RFC3339)
-	SessionName  string // watch source: the bound session
-	WorktreePath string // watch source: the bound session's worktree
-	ChangedFiles string // watch source: comma-separated changed paths (or "")
-	ChangeCount  string // watch source: number of changed paths
+	Name            string // trigger name
+	Date            string // e.g. 2026-07-11
+	Datetime        string // RFC3339
+	FireTime        string // scheduled/observed fire instant (RFC3339)
+	SessionName     string // watch source: the bound session
+	WorktreePath    string // watch source: the bound session's worktree
+	ChangedFiles    string // watch source: comma-separated changed paths (or "")
+	ChangeCount     string // watch source: number of changed paths
+	ScenarioID      string // completion source: owning scenario ID
+	ScenarioName    string // completion source: owning scenario name
+	CompletionEpoch string // completion source: monotonically increasing epoch
 	// Tracker action: the issue a spawned session is seeded from. These are known
 	// template tokens (they live in this shared struct), so they expand to the
 	// empty string — not an error — outside a tracker prompt; a genuinely unknown
@@ -47,6 +50,9 @@ func (v TriggerVars) toMap() map[string]string {
 		"worktree_path":      v.WorktreePath,
 		"changed_files":      v.ChangedFiles,
 		"change_count":       v.ChangeCount,
+		"scenario_id":        v.ScenarioID,
+		"scenario_name":      v.ScenarioName,
+		"completion_epoch":   v.CompletionEpoch,
 		"issue_number":       v.IssueNumber,
 		"issue_title":        v.IssueTitle,
 		"issue_body":         v.IssueBody,

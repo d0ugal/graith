@@ -96,6 +96,46 @@ func TestAllTriggers_ScenarioActiveAndInactive(t *testing.T) {
 	}
 }
 
+func TestAllTriggers_CompletionRemainsAddressableWhenStopped(t *testing.T) {
+	sm := newTriggerTestSM(t)
+	completion := config.TriggerConfig{
+		Name:       "archive",
+		Completion: &config.CompletionConfig{Session: "ben"},
+		Action: config.ActionConfig{
+			Type: config.ActionMessage,
+			Body: "archive the strath",
+			Deliver: config.DeliverConfig{
+				Topic: "reports",
+			},
+		},
+	}
+	addActiveScenario(t, sm, "sc-1", "s1", "implementer", completion)
+
+	sm.mu.Lock()
+	sm.state.Sessions["s1"].Status = StatusStopped
+	sm.mu.Unlock()
+
+	full := scenarioTriggerName("sc-1", "archive")
+	if got := sm.triggerByName(full); got == nil || !got.IsCompletion() {
+		t.Fatalf("stopped scenario completion trigger = %+v", got)
+	} else if record := sm.triggerRecord(got); record.Source != "completion" {
+		t.Fatalf("completion trigger source = %q", record.Source)
+	}
+
+	found := false
+
+	for _, trigger := range sm.allTriggers() {
+		if trigger.Name == full {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Fatal("completion trigger disappeared after scenario member stopped")
+	}
+}
+
 func TestAllTriggers_SharedOnlyMemberIsInactive(t *testing.T) {
 	sm := newTriggerTestSM(t)
 

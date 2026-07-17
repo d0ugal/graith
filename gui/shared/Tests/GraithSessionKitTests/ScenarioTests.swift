@@ -51,6 +51,22 @@ struct ScenarioDecodingTests {
         #expect(member.shared == true)
     }
 
+    @Test func decodesCompletionAndCleanupState() throws {
+        let json = """
+        {"scenarios":[{"id":"sc-a","name":"n","orchestrator_id":"o","goal":"g",
+        "status":"complete","session_ids":[],"sessions":[],"created_at":"",
+        "completion_epoch":2,
+        "completion_actions":[{"name":"archive","state":"failed","attempt":1,"error":"delivery failed"}],
+        "cleanup":{"policy":"on_success","state":"failed","error":"blocked by failed completion action"}}]}
+        """
+        let response = try JSONDecoder().decode(ScenarioListResponse.self, from: Data(json.utf8))
+        let scenario = response.scenarios[0]
+        #expect(scenario.completionEpoch == 2)
+        #expect(scenario.completionActions?.first?.state == "failed")
+        #expect(scenario.cleanup?.policy == "on_success")
+        #expect(scenario.cleanup?.state == "failed")
+    }
+
     @Test func decodesWithOptionalMemberFieldsOmitted() throws {
         // Only the two required member fields present — the omitempty ones must
         // decode to nil, not fail.

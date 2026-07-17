@@ -210,6 +210,8 @@ var registeredTypes = []any{
 	ScenarioListMsg{},
 	ScenarioRecord{},
 	ScenarioSessionInfo{},
+	ScenarioCompletionActionInfo{},
+	ScenarioCleanupInfo{},
 	ScenarioStatusResponse{},
 	ScenarioListResponse{},
 	TriggerListMsg{},
@@ -412,12 +414,14 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	// (stop/resume/delete) consolidate onto Swift's ScenarioNameMsg, like the
 	// SessionIDMsg pattern. start/task-done/add stay planned — they are
 	// orchestrator-session-scoped, not human-client operations.
-	"ScenarioStopMsg":      {SwiftRequired, "ScenarioNameMsg"},
-	"ScenarioResumeMsg":    {SwiftRequired, "ScenarioNameMsg"},
-	"ScenarioDeleteMsg":    {SwiftRequired, "ScenarioNameMsg"},
-	"ScenarioRecord":       {SwiftRequired, "ScenarioRecord"},
-	"ScenarioSessionInfo":  {SwiftRequired, "ScenarioSessionInfo"},
-	"ScenarioListResponse": {SwiftRequired, "ScenarioListResponse"},
+	"ScenarioStopMsg":              {SwiftRequired, "ScenarioNameMsg"},
+	"ScenarioResumeMsg":            {SwiftRequired, "ScenarioNameMsg"},
+	"ScenarioDeleteMsg":            {SwiftRequired, "ScenarioNameMsg"},
+	"ScenarioRecord":               {SwiftRequired, "ScenarioRecord"},
+	"ScenarioSessionInfo":          {SwiftRequired, "ScenarioSessionInfo"},
+	"ScenarioCompletionActionInfo": {SwiftRequired, "ScenarioCompletionActionInfo"},
+	"ScenarioCleanupInfo":          {SwiftRequired, "ScenarioCleanupInfo"},
+	"ScenarioListResponse":         {SwiftRequired, "ScenarioListResponse"},
 
 	"ScenarioStartMsg":       {SwiftPlanned, ""},
 	"ScenarioSessionInput":   {SwiftPlanned, ""},

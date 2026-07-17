@@ -314,7 +314,7 @@ func TestDeliverStorePath(t *testing.T) {
 func TestDeliverStore(t *testing.T) {
 	sm := newTriggerTestSM(t)
 	vars := config.TriggerVars{Date: "2026-07-11"}
-	sm.deliver(t.Context(), config.DeliverConfig{Store: "shared:reports/{date}.md"}, "hello", "", vars)
+	_ = sm.deliver(t.Context(), config.DeliverConfig{Store: "shared:reports/{date}.md"}, "hello", "", vars)
 
 	got, err := store.Get(store.SharedStorePath(sm.paths.DataDir), "reports/2026-07-11.md")
 	if err != nil {
@@ -750,7 +750,7 @@ func TestDeliverInbox(t *testing.T) {
 	ms := withMsgStore(t, sm)
 	sm.state.Sessions["s1"] = &SessionState{ID: "s1", Name: "ben", Status: StatusStopped}
 
-	sm.deliverInbox(t.Context(), "ben", "wheesht", false) // bare publish, no wake
+	_ = sm.deliverInbox(t.Context(), "ben", "wheesht", false) // bare publish, no wake
 
 	msgs, err := ms.Read("inbox:s1", "reader", false, "")
 	if err != nil {
@@ -764,7 +764,7 @@ func TestDeliverInbox(t *testing.T) {
 	// Soft-deleted target is never delivered to.
 	now := time.Now()
 	sm.state.Sessions["s2"] = &SessionState{ID: "s2", Name: "gone", Status: StatusStopped, DeletedAt: &now}
-	sm.deliverInbox(t.Context(), "gone", "x", true)
+	_ = sm.deliverInbox(t.Context(), "gone", "x", true)
 
 	if m, _ := ms.Read("inbox:s2", "r", false, ""); len(m) != 0 {
 		t.Errorf("soft-deleted got %d messages", len(m))

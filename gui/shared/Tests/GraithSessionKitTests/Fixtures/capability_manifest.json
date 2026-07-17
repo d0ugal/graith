@@ -157,6 +157,11 @@
       "macos": "supported"
     },
     {
+      "id": "scenarios.completion-automation",
+      "ios": "planned",
+      "macos": "planned"
+    },
+    {
       "id": "todo.manage",
       "ios": "planned",
       "macos": "planned"

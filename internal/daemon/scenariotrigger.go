@@ -39,12 +39,11 @@ func parseScenarioTriggerName(name string) (scenarioID, bare string, ok bool) {
 
 // allTriggers returns every active trigger definition: the config-origin
 // [[trigger]] blocks (with their bare names) followed by the scenario-embedded
-// triggers of each currently-active scenario (with namespaced names). A
-// scenario's triggers are only included while it has at least one running,
-// non-shared member — so a rolled-back or fully-stopped scenario contributes
-// none, and a resumed one contributes them again (the reconcile loops rebind
-// automatically). The returned slice is a fresh copy; namespaced names are
-// applied to copies so the stored ScenarioState.Triggers are never mutated.
+// triggers (with namespaced names). Schedule/watch triggers are included only
+// while their scenario has at least one running, non-shared member; completion
+// triggers remain included while the scenario record exists so terminal state
+// and retries survive cleanup. The returned slice is a fresh copy; namespaced
+// names are applied to copies so stored definitions are never mutated.
 func (sm *SessionManager) allTriggers() []config.TriggerConfig {
 	cfg := sm.Config()
 
@@ -55,11 +54,15 @@ func (sm *SessionManager) allTriggers() []config.TriggerConfig {
 	out = append(out, cfg.Triggers...)
 
 	for _, sc := range sm.state.Scenarios {
-		if len(sc.Triggers) == 0 || !sm.scenarioActiveLocked(sc) {
+		if len(sc.Triggers) == 0 {
 			continue
 		}
 
 		for _, t := range sc.Triggers {
+			if !t.IsCompletion() && !sm.scenarioActiveLocked(sc) {
+				continue
+			}
+
 			t.Name = scenarioTriggerName(sc.ID, t.Name)
 			out = append(out, t)
 		}
@@ -88,19 +91,24 @@ func (sm *SessionManager) scenarioActiveLocked(sc *ScenarioState) bool {
 
 // scenarioTriggerByName resolves a namespaced scenario trigger to its (copied)
 // definition with the namespaced name applied, or nil if the scenario is gone,
-// inactive, or has no such trigger. Caller must NOT hold sm.mu.
+// has no such trigger, or is inactive for a non-completion source. Caller must
+// NOT hold sm.mu.
 func (sm *SessionManager) scenarioTriggerByName(scenarioID, bare, full string) *config.TriggerConfig {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
 	sc := sm.state.Scenarios[scenarioID]
-	if sc == nil || !sm.scenarioActiveLocked(sc) {
+	if sc == nil {
 		return nil
 	}
 
 	for i := range sc.Triggers {
 		if sc.Triggers[i].Name == bare {
 			t := sc.Triggers[i]
+			if !t.IsCompletion() && !sm.scenarioActiveLocked(sc) {
+				return nil
+			}
+
 			t.Name = full
 
 			return &t

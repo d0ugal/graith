@@ -9,17 +9,19 @@ import (
 )
 
 // TriggerConfig is one [[trigger]] block. A trigger is (source) -> (action):
-// exactly one of Schedule (#592), Watch (#593), or GCX is the source, and Action is
+// exactly one of Schedule (#592), Watch (#593), GCX, or Completion is the
+// source, and Action is
 // what runs. Everything below the source line is shared between the source
 // kinds. See docs/design/2026-07-11-triggers-design.md.
 type TriggerConfig struct {
-	Name     string          `toml:"name"`
-	Enabled  *bool           `toml:"enabled"`  // nil => default true; explicit false disables
-	Schedule *ScheduleConfig `toml:"schedule"` // time-driven source
-	Watch    *WatchConfig    `toml:"watch"`    // file-event source
-	GCX      *GCXConfig      `toml:"gcx"`      // Grafana Cloud event source
-	Action   ActionConfig    `toml:"action"`
-	Policy   TriggerPolicy   `toml:"policy"`
+	Name       string            `toml:"name"`
+	Enabled    *bool             `toml:"enabled"`    // nil => default true; explicit false disables
+	Schedule   *ScheduleConfig   `toml:"schedule"`   // time-driven source
+	Watch      *WatchConfig      `toml:"watch"`      // file-event source
+	GCX        *GCXConfig        `toml:"gcx"`        // Grafana Cloud event source
+	Completion *CompletionConfig `toml:"completion"` // scenario todo-completion edge
+	Action     ActionConfig      `toml:"action"`
+	Policy     TriggerPolicy     `toml:"policy"`
 }
 
 // ScheduleConfig is the time-driven source. Exactly one of Cron/Every is set.
@@ -107,6 +109,16 @@ func (g GCXConfig) StatesOr() []string {
 	return append([]string(nil), g.States...)
 }
 
+// CompletionConfig is the todo-derived scenario-completion source. It is only
+// valid on a scenario-embedded trigger. Session optionally names the scenario
+// member whose worktree supplies execution/mirror context; command and session
+// actions require it. Event defaults to "complete" when omitted (the only v1
+// event).
+type CompletionConfig struct {
+	Event   string `toml:"event"`
+	Session string `toml:"session"`
+}
+
 // ActionConfig is the shared action vocabulary. Type selects the verb.
 type ActionConfig struct {
 	Type string `toml:"type"` // command | session | scenario | message | tracker
@@ -185,10 +197,11 @@ func (a ActionConfig) RepoPath() string {
 
 // DeliverConfig routes action output. All fields are templated at fire time.
 type DeliverConfig struct {
-	Inbox string `toml:"inbox"` // session name, "orchestrator", or a template like "{session_name}"
-	Topic string `toml:"topic"` // pub/sub topic
-	Store string `toml:"store"` // store key (prefix "shared:" for the shared store)
-	Wake  bool   `toml:"wake"`  // resume a non-orchestrator stopped inbox target
+	Inbox    string `toml:"inbox"`    // session name, "orchestrator", or a template like "{session_name}"
+	Topic    string `toml:"topic"`    // pub/sub topic
+	Store    string `toml:"store"`    // store key (prefix "shared:" for the shared store)
+	Wake     bool   `toml:"wake"`     // resume a non-orchestrator stopped inbox target
+	Required bool   `toml:"required"` // delivery failure fails a completion action and gates on_success cleanup
 }
 
 // TrackerConfig configures a tracker action's poll + reconcile behaviour. The
@@ -406,10 +419,11 @@ func (t TriggerConfig) TriggerEnabled() bool {
 	return t.Enabled == nil || *t.Enabled
 }
 
-// IsSchedule / IsWatch / IsGCX report the source kind.
-func (t TriggerConfig) IsSchedule() bool { return t.Schedule != nil }
-func (t TriggerConfig) IsWatch() bool    { return t.Watch != nil }
-func (t TriggerConfig) IsGCX() bool      { return t.GCX != nil }
+// IsSchedule, IsWatch, IsGCX, and IsCompletion report the source kind.
+func (t TriggerConfig) IsSchedule() bool   { return t.Schedule != nil }
+func (t TriggerConfig) IsWatch() bool      { return t.Watch != nil }
+func (t TriggerConfig) IsGCX() bool        { return t.GCX != nil }
+func (t TriggerConfig) IsCompletion() bool { return t.Completion != nil }
 
 // DebounceDuration returns the watch debounce, defaulting to 30s.
 func (w WatchConfig) DebounceDuration() time.Duration {
@@ -648,6 +662,10 @@ func (c *Config) validateTriggers() []error {
 		seen[t.Name] = true
 
 		errs = append(errs, ValidateTriggerStructure(where, t)...)
+		if t.IsCompletion() {
+			errs = append(errs, fmt.Errorf("%s: [completion] source is only valid in a scenario file", where))
+		}
+
 		errs = append(errs, c.validateActionConfigDeps(where, t)...)
 	}
 
@@ -666,7 +684,7 @@ func ValidateTriggerStructure(where string, t *TriggerConfig) []error {
 	// Exactly one source.
 	sourceCount := 0
 
-	for _, set := range []bool{t.Schedule != nil, t.Watch != nil, t.GCX != nil} {
+	for _, set := range []bool{t.Schedule != nil, t.Watch != nil, t.GCX != nil, t.Completion != nil} {
 		if set {
 			sourceCount++
 		}
@@ -674,15 +692,22 @@ func ValidateTriggerStructure(where string, t *TriggerConfig) []error {
 
 	switch {
 	case sourceCount == 0:
-		errs = append(errs, fmt.Errorf("%s: exactly one of [schedule], [watch], or [gcx] is required (neither set)", where))
+		errs = append(errs, fmt.Errorf("%s: exactly one of [schedule], [watch], [gcx], or [completion] is required (none set)", where))
 	case sourceCount > 1:
-		errs = append(errs, fmt.Errorf("%s: exactly one of [schedule], [watch], or [gcx] is required (both set)", where))
+		detail := fmt.Sprintf("%d set", sourceCount)
+		if sourceCount == 2 {
+			detail = "both set"
+		}
+
+		errs = append(errs, fmt.Errorf("%s: exactly one of [schedule], [watch], [gcx], or [completion] is required (%s)", where, detail))
 	case t.Schedule != nil:
 		errs = append(errs, validateSchedule(where, t.Schedule)...)
 	case t.Watch != nil:
 		errs = append(errs, validateWatch(where, t.Watch)...)
 	case t.GCX != nil:
 		errs = append(errs, validateGCX(where, t.GCX)...)
+	case t.Completion != nil:
+		errs = append(errs, validateCompletion(where, t.Completion)...)
 	}
 
 	if t.IsGCX() && t.Policy.OverlapMode() == OverlapAllow {
@@ -693,6 +718,14 @@ func ValidateTriggerStructure(where string, t *TriggerConfig) []error {
 	errs = append(errs, validatePolicy(where, &t.Policy)...)
 
 	return errs
+}
+
+func validateCompletion(where string, c *CompletionConfig) []error {
+	if c.Event != "" && c.Event != "complete" {
+		return []error{fmt.Errorf("%s: [completion] event %q is invalid (want complete)", where, c.Event)}
+	}
+
+	return nil
 }
 
 func validateSchedule(where string, s *ScheduleConfig) []error {
@@ -850,6 +883,9 @@ func validateActionStructure(where string, t *TriggerConfig) []error {
 	var errs []error
 
 	a := &t.Action
+	if a.Deliver.Required && a.Deliver.Inbox == "" && a.Deliver.Topic == "" && a.Deliver.Store == "" {
+		errs = append(errs, fmt.Errorf("%s: action.deliver.required needs at least one inbox, topic, or store route", where))
+	}
 
 	switch a.Type {
 	case ActionCommand:
@@ -987,14 +1023,14 @@ func validateCommandActionStructure(where string, t *TriggerConfig) []error {
 			errs = append(errs, fmt.Errorf("%s: action.timeout must be > 0", where))
 		}
 	}
-	// Execution root: non-watch commands require repo; watch commands derive it
-	// from the bound session's worktree and must not set repo.
-	if !t.IsWatch() {
+	// Execution root: schedule/GCX commands require repo; watch/completion
+	// commands derive it from a bound session's worktree and must not set repo.
+	if !t.IsWatch() && !t.IsCompletion() {
 		if a.Repo == "" {
-			errs = append(errs, fmt.Errorf("%s: non-watch command action requires action.repo", where))
+			errs = append(errs, fmt.Errorf("%s: schedule/GCX command action requires action.repo", where))
 		}
 	} else if a.Repo != "" {
-		errs = append(errs, fmt.Errorf("%s: watch command action must not set action.repo (execution root is the bound worktree)", where))
+		errs = append(errs, fmt.Errorf("%s: event command action must not set action.repo (execution root is the bound worktree)", where))
 	}
 
 	return errs
