@@ -317,9 +317,15 @@ func (sm *SessionManager) notePRRefChange(w *prRefWatcher) {
 	// reload completed before this ref change therefore applies immediately to an
 	// existing watcher, while a timer already armed under the previous generation
 	// is left intact so its pending event cannot be dropped.
-	dur := (config.PRWatchConfig{}).RefDebounceDuration()
+	defaultDur := (config.PRWatchConfig{}).RefDebounceDuration()
+	dur := defaultDur
 	if cfg := sm.Config(); cfg != nil {
 		dur = cfg.PRWatch.RefDebounceDuration()
+	}
+	if dur <= 0 {
+		// Preserve the existing runtime fallback for explicitly non-positive
+		// values; hot reload must not change their effective behavior.
+		dur = defaultDur
 	}
 
 	w.bmu.Lock()
