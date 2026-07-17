@@ -37,29 +37,31 @@ func Init(storePath string) error {
 		// Only initialise a new repository, but always refresh the local settings.
 		// In particular, internal store commits must never inherit a developer's
 		// global commit.gpgsign=true and contact their SSH/GPG agent.
+		g := newGitRunner(storePath)
+
 		if _, err := os.Stat(filepath.Join(storePath, ".git")); err != nil {
 			if !os.IsNotExist(err) {
 				return fmt.Errorf("inspect git repository: %w", err)
 			}
 
-			if err := git(storePath, "init", "--quiet"); err != nil {
+			if err := g.run("init", "--quiet"); err != nil {
 				return fmt.Errorf("git init: %w", err)
 			}
 		}
 
-		if err := git(storePath, "config", "user.name", "graith"); err != nil {
+		if err := g.run("config", "user.name", "graith"); err != nil {
 			return fmt.Errorf("git config user.name: %w", err)
 		}
 
-		if err := git(storePath, "config", "user.email", "graith@localhost"); err != nil {
+		if err := g.run("config", "user.email", "graith@localhost"); err != nil {
 			return fmt.Errorf("git config user.email: %w", err)
 		}
 
-		if err := git(storePath, "config", "core.autocrlf", "false"); err != nil {
+		if err := g.run("config", "core.autocrlf", "false"); err != nil {
 			return fmt.Errorf("git config core.autocrlf: %w", err)
 		}
 
-		if err := git(storePath, "config", "commit.gpgsign", "false"); err != nil {
+		if err := g.run("config", "commit.gpgsign", "false"); err != nil {
 			return fmt.Errorf("git config commit.gpgsign: %w", err)
 		}
 
@@ -67,10 +69,30 @@ func Init(storePath string) error {
 	})
 }
 
-// git runs git with the given args in dir.
-func git(dir string, args ...string) error {
-	cmd := exec.Command(tools.Git(), args...)
-	cmd.Dir = dir
+// gitRunner pins the git executable for the lifetime of a single multi-step
+// store operation. Each store write runs several git subprocesses (add → diff →
+// commit); resolving tools.Git() independently for each one let a config reload
+// that swaps the executable land between subcommands, running e.g. `add`
+// through wrapper A and `commit` through wrapper B — a within-operation
+// generation split. Snapshotting the executable once (newGitRunner) and
+// threading it through every subprocess keeps the whole operation on one
+// generation, and a subsequent operation picks up the new one wholesale (#1287).
+type gitRunner struct {
+	bin string
+	dir string
+}
+
+// newGitRunner resolves the git executable once, capturing the current tools
+// generation for the operation about to run.
+func newGitRunner(dir string) gitRunner {
+	return gitRunner{bin: tools.Git(), dir: dir}
+}
+
+// run executes git with the given args using the pinned executable, returning
+// combined output on failure.
+func (g gitRunner) run(args ...string) error {
+	cmd := exec.Command(g.bin, args...)
+	cmd.Dir = g.dir
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -241,16 +263,18 @@ func Put(storePath, key, body string) error {
 			return fmt.Errorf("write file: %w", err)
 		}
 
-		if err := git(storePath, "add", "--", key); err != nil {
+		g := newGitRunner(storePath)
+
+		if err := g.run("add", "--", key); err != nil {
 			return fmt.Errorf("git add: %w", err)
 		}
 
-		if git(storePath, "diff", "--quiet", "--cached", "--", key) == nil {
+		if g.run("diff", "--quiet", "--cached", "--", key) == nil {
 			return nil
 		}
 
 		msg := CommitMessage("update", key)
-		if err := git(storePath, "commit", "--no-gpg-sign", "-m", msg, "--", key); err != nil {
+		if err := g.run("commit", "--no-gpg-sign", "-m", msg, "--", key); err != nil {
 			return fmt.Errorf("git commit: %w", err)
 		}
 
@@ -289,16 +313,18 @@ func Append(storePath, key, line string) error {
 			return fmt.Errorf("append to file: %w", err)
 		}
 
-		if err := git(storePath, "add", "--", key); err != nil {
+		g := newGitRunner(storePath)
+
+		if err := g.run("add", "--", key); err != nil {
 			return fmt.Errorf("git add: %w", err)
 		}
 
-		if git(storePath, "diff", "--quiet", "--cached", "--", key) == nil {
+		if g.run("diff", "--quiet", "--cached", "--", key) == nil {
 			return nil
 		}
 
 		msg := CommitMessage("append", key)
-		if err := git(storePath, "commit", "--no-gpg-sign", "-m", msg, "--", key); err != nil {
+		if err := g.run("commit", "--no-gpg-sign", "-m", msg, "--", key); err != nil {
 			return fmt.Errorf("git commit: %w", err)
 		}
 
@@ -396,12 +422,14 @@ func Remove(storePath, key string) error {
 			return fmt.Errorf("document %q not found", key)
 		}
 
-		if err := git(storePath, "rm", "--", key); err != nil {
+		g := newGitRunner(storePath)
+
+		if err := g.run("rm", "--", key); err != nil {
 			return fmt.Errorf("git rm: %w", err)
 		}
 
 		msg := CommitMessage("remove", key)
-		if err := git(storePath, "commit", "--no-gpg-sign", "-m", msg, "--", key); err != nil {
+		if err := g.run("commit", "--no-gpg-sign", "-m", msg, "--", key); err != nil {
 			return fmt.Errorf("git commit: %w", err)
 		}
 

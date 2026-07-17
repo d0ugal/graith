@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/store"
 	"github.com/d0ugal/graith/internal/testutil"
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 func TestValidateKey(t *testing.T) {
@@ -347,6 +349,130 @@ func newTestStore(t *testing.T) string {
 	}
 
 	return dir
+}
+
+// TestPutPinsToolGenerationAcrossReload is the #1287 blocking-wrapper A/B
+// regression: a multi-step store write (add → diff → commit) must run every
+// subprocess against a single resolved git generation. It configures wrapper A,
+// starts a Put whose `add` blocks, reloads the tools registry to wrapper B
+// between subcommands, then releases the block. The in-flight operation must
+// stay entirely on A, and the next operation must run entirely on B — never a
+// within-operation split.
+func TestPutPinsToolGenerationAcrossReload(t *testing.T) {
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not found on PATH")
+	}
+
+	dir := newTestStore(t) // Init runs against the real git before we swap wrappers.
+	t.Cleanup(tools.Reset)
+
+	binDir := t.TempDir()
+	logPath := filepath.Join(binDir, "calls.log")
+	releasePath := filepath.Join(binDir, "release")
+
+	// Wrapper A blocks on its `add` subcommand until the release file appears;
+	// wrapper B never blocks so the follow-up operation completes promptly.
+	wrapperA := writeGitWrapper(t, binDir, "gitA", "A", realGit, logPath, releasePath)
+	wrapperB := writeGitWrapper(t, binDir, "gitB", "B", realGit, logPath, "")
+
+	tools.Configure(tools.Config{Git: wrapperA})
+
+	putErr := make(chan error, 1)
+
+	go func() { putErr <- store.Put(dir, "loch/api.md", "first generation") }()
+
+	// Wait until A's blocking add has begun, proving the operation snapshotted A.
+	waitForLogLine(t, logPath, "A add")
+
+	// An accepted reload swaps the executable while the operation is mid-flight.
+	tools.Configure(tools.Config{Git: wrapperB})
+
+	// Release the blocked add; the remaining subcommands must still run on A.
+	if err := os.WriteFile(releasePath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-putErr:
+		if err != nil {
+			t.Fatalf("first Put: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("first Put did not complete after release")
+	}
+
+	// The next operation resolves the new generation wholesale.
+	if err := store.Put(dir, "loch/api.md", "second generation"); err != nil {
+		t.Fatalf("second Put: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+
+	wantA := []string{"A add", "A diff", "A commit"}
+	wantB := []string{"B add", "B diff", "B commit"}
+
+	if len(lines) != len(wantA)+len(wantB) {
+		t.Fatalf("git subcommand log = %q, want %d entries", lines, len(wantA)+len(wantB))
+	}
+
+	for i, want := range wantA {
+		if lines[i] != want {
+			t.Errorf("operation 1 subcommand %d = %q, want %q (must stay on generation A across the reload)", i, lines[i], want)
+		}
+	}
+
+	for i, want := range wantB {
+		if got := lines[len(wantA)+i]; got != want {
+			t.Errorf("operation 2 subcommand %d = %q, want %q (must run entirely on generation B)", i, got, want)
+		}
+	}
+}
+
+// writeGitWrapper writes an executable shell wrapper that tags each invocation
+// with tag, appends "<tag> <subcommand>" to logPath, optionally blocks on its
+// `add` subcommand until releasePath exists, then execs the real git so the
+// store operation still succeeds.
+func writeGitWrapper(t *testing.T, dir, name, tag, realGit, logPath, releasePath string) string {
+	t.Helper()
+
+	var block string
+	if releasePath != "" {
+		block = "if [ \"$1\" = add ]; then\n  while [ ! -e '" + releasePath + "' ]; do sleep 0.02; done\nfi\n"
+	}
+
+	script := "#!/bin/sh\n" +
+		"printf '" + tag + " %s\\n' \"$1\" >> '" + logPath + "'\n" +
+		block +
+		"exec '" + realGit + "' \"$@\"\n"
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	return path
+}
+
+// waitForLogLine blocks until logPath contains want, or fails after a timeout.
+func waitForLogLine(t *testing.T, logPath, want string) {
+	t.Helper()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile(logPath); err == nil && strings.Contains(string(data), want) {
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("log %q did not contain %q in time", logPath, want)
 }
 
 func TestPutGet(t *testing.T) {

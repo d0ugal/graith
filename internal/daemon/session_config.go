@@ -54,7 +54,21 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) error {
 		return err
 	}
 
+	toolsChanged := old.Tools != newCfg.Tools
+
 	sm.mu.Lock()
+	// Re-install the process-global external-tool resolver under the SAME lock
+	// that publishes the config, and before the pointer swap, so a reader can
+	// never observe the new config generation paired with the old executable set.
+	// Previously tools.Configure ran well after the swap (past remoteChange.commit),
+	// leaving a window where a new-generation operation resolved the old git
+	// binary; combined with per-subcommand resolution this could split a single
+	// multi-step git operation across two executables. tools.Configure is a
+	// lock-free atomic store, so holding sm.mu across it adds no slow work (#1287).
+	if toolsChanged {
+		tools.Configure(newCfg.Tools.Resolved())
+	}
+
 	sm.cfg = newCfg
 	remoteChange.publishLocked(sm)
 	// Resize the launch throttle under the same lock that publishes the config so
@@ -68,12 +82,7 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) error {
 
 	remoteChange.commit(sm, newCfg.Remote)
 
-	// Re-install the external-tool resolver so a changed [tools] block takes
-	// effect on reload without a daemon restart (git timeouts are read live from
-	// sm.cfg, so they need no explicit re-apply). The resolver is process-global,
-	// so this runs outside sm.mu.
-	if old.Tools != newCfg.Tools {
-		tools.Configure(newCfg.Tools.Resolved())
+	if toolsChanged {
 		sm.log.Info("config changed", "key", "tools")
 	}
 
