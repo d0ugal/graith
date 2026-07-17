@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
@@ -42,10 +43,14 @@ type MsgStore struct {
 	db   *sql.DB
 	mu   sync.Mutex
 	subs map[string][]chan Message
-	// subscriberBuffer is the capacity of each per-subscriber channel; jailListLimit
-	// bounds a jail listing. Both are resolved from config at open time (issue #1249).
+	// subscriberBuffer is the capacity of each per-subscriber channel, fixed from
+	// config at open time (restart-only, issue #1249). jailListLimit bounds a jail
+	// listing; it is documented as hot-reloadable, so it is held in an atomic and
+	// updated live by SetJailListLimit on config reload without reopening the
+	// database (issue #1291). ListJailed reads it lock-free, so the atomic is what
+	// makes a concurrent reload race-safe.
 	subscriberBuffer int
-	jailListLimit    int
+	jailListLimit    atomic.Int64
 }
 
 // MsgStoreSettings carries the config-derived operational limits for the message
@@ -128,12 +133,28 @@ func NewMsgStore(dbPath string, settings ...MsgStoreSettings) (*MsgStore, error)
 		return nil, err
 	}
 
-	return &MsgStore{
+	store := &MsgStore{
 		db:               db,
 		subs:             make(map[string][]chan Message),
 		subscriberBuffer: st.SubscriberBuffer,
-		jailListLimit:    st.JailListLimit,
-	}, nil
+	}
+	store.jailListLimit.Store(int64(st.JailListLimit))
+
+	return store, nil
+}
+
+// SetJailListLimit updates the jail listing cap live on config reload (issue
+// #1291) without reopening the database. A non-positive value resolves to the
+// default, mirroring MsgStoreSettings.resolved so a reload matches open-time
+// semantics; a value above the ceiling is already rejected at config load, but
+// is clamped to the default here too so a direct caller can't exceed the cap.
+// Safe to call concurrently with ListJailed (the field is atomic).
+func (s *MsgStore) SetJailListLimit(limit int) {
+	if limit < 1 || limit > config.MessagesJailListLimitCeiling {
+		limit = config.MessagesJailListLimitDefault
+	}
+
+	s.jailListLimit.Store(int64(limit))
 }
 
 func initSchema(db *sql.DB) error {
