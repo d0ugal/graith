@@ -411,7 +411,11 @@ func TestApprovePairingAndResolveToken(t *testing.T) {
 func TestApprovePairingReadOnly(t *testing.T) {
 	sm := newPairingSM(t)
 	now := time.Now()
-	rid, _, _, _ := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{}, now)
+
+	rid, _, _, err := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	_, token, err := sm.ApprovePairing(rid, true, now)
 	if err != nil {
@@ -426,7 +430,11 @@ func TestApprovePairingReadOnly(t *testing.T) {
 func TestRevokeDeviceClosesLiveConnections(t *testing.T) {
 	sm := newPairingSM(t)
 	now := time.Now()
-	rid, _, _, _ := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{}, now)
+
+	rid, _, _, err := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	deviceID, token, err := sm.ApprovePairing(rid, false, now)
 	if err != nil {

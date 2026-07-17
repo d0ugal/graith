@@ -458,7 +458,12 @@ func TestResolveAuth_RemoteGuestReadOnly(t *testing.T) {
 	sm := newPairingSM(t)
 	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
 	now := time.Now()
-	rid, _, _, _ := sm.AddPendingPairing("bairn", testPubKey(t), id, now)
+
+	rid, _, _, err := sm.AddPendingPairing("bairn", testPubKey(t), id, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	deviceID, token, _ := sm.ApprovePairing(rid, true, now) // readOnly
 
 	origin := ConnOrigin{Remote: true, Identity: &TailnetIdentity{User: "speir@example.com", Node: "ben"}}
@@ -481,7 +486,12 @@ func TestResolveAuth_RemoteIdentityMismatchIsRoleNone(t *testing.T) {
 	sm := newPairingSM(t)
 	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
 	now := time.Now()
-	rid, _, _, _ := sm.AddPendingPairing("bairn", testPubKey(t), id, now)
+
+	rid, _, _, err := sm.AddPendingPairing("bairn", testPubKey(t), id, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	deviceID, token, _ := sm.ApprovePairing(rid, false, now)
 
 	// Same token + PoP, but the connection now comes from a different node.
@@ -501,7 +511,12 @@ func TestResolveAuth_RemoteWrongPoPDeviceIsRoleNone(t *testing.T) {
 	sm := newPairingSM(t)
 	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
 	now := time.Now()
-	rid, _, _, _ := sm.AddPendingPairing("bairn", testPubKey(t), id, now)
+
+	rid, _, _, err := sm.AddPendingPairing("bairn", testPubKey(t), id, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	_, token, _ := sm.ApprovePairing(rid, false, now)
 
 	origin := ConnOrigin{Remote: true, Identity: &TailnetIdentity{User: "speir@example.com", Node: "ben"}}
