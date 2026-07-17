@@ -15,6 +15,26 @@ import (
 	"github.com/d0ugal/graith/internal/store"
 )
 
+// orchestratorRestartFallbackDelay is the positive delay substituted only when a
+// computed restart delay is non-positive. Config validation rejects non-positive
+// policies and DelayForLevel never returns one, so this is a defence-in-depth
+// fallback for directly-constructed or future config paths — never a floor on
+// valid backoffs (#1303).
+const orchestratorRestartFallbackDelay = time.Second
+
+// clampRestartDelay guarantees the supervisor never sleeps for a non-positive
+// interval, which would spin the restart loop into a storm. A valid positive
+// delay — including a sub-second one the policy legitimately allows — is
+// returned unchanged; only a zero or negative delay (which validation and
+// DelayForLevel already prevent) falls back to a safe positive value (#1303).
+func clampRestartDelay(d time.Duration) time.Duration {
+	if d <= 0 {
+		return orchestratorRestartFallbackDelay
+	}
+
+	return d
+}
+
 func (sm *SessionManager) orchestratorScratchDir() string {
 	return filepath.Join(sm.paths.DataDir, "orchestrator", "scratch")
 }
@@ -568,7 +588,7 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 		backoffLevel = 0
 	}
 
-	delay := restartCfg.DelayForLevel(backoffLevel)
+	delay := clampRestartDelay(restartCfg.DelayForLevel(backoffLevel))
 
 	sm.mu.Lock()
 	if s, ok := sm.state.Sessions[id]; ok {

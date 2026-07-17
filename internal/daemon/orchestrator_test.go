@@ -377,6 +377,36 @@ func TestHandleOrchestratorExit_BackoffScheduling_Cov(t *testing.T) {
 	}
 }
 
+// TestClampRestartDelay pins the supervisor's defensive fallback (#1303): a zero
+// or negative computed delay must never reach the scheduling sleep, or a
+// crash-looping orchestrator would restart with no gap. Crucially, every valid
+// positive delay — including a sub-second one the policy legitimately allows — is
+// returned unchanged, so the fallback can never silently rewrite a valid backoff.
+func TestClampRestartDelay(t *testing.T) {
+	cases := []struct {
+		name string
+		in   time.Duration
+		want time.Duration
+	}{
+		{"negative falls back to positive", -5 * time.Second, orchestratorRestartFallbackDelay},
+		{"zero falls back to positive", 0, orchestratorRestartFallbackDelay},
+		{"sub-second positive is unchanged", 100 * time.Millisecond, 100 * time.Millisecond},
+		{"one nanosecond is unchanged", time.Nanosecond, time.Nanosecond},
+		{"multi-second positive is unchanged", 300 * time.Second, 300 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := clampRestartDelay(tc.in); got != tc.want {
+				t.Errorf("clampRestartDelay(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	if orchestratorRestartFallbackDelay <= 0 {
+		t.Fatalf("orchestratorRestartFallbackDelay must be positive, got %v", orchestratorRestartFallbackDelay)
+	}
+}
+
 // TestHandleOrchestratorExit_RestartConfig is a regression test for the restart
 // policy being configurable (#1239): a custom stable_reset window and a custom
 // fresh-start threshold must drive the backoff/reset behaviour instead of the
