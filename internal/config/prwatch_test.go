@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -260,6 +261,39 @@ func TestPRWatchAdvancedParsing(t *testing.T) {
 	if got := pw.RefDebounceDuration(); got != 750*time.Millisecond {
 		t.Errorf("RefDebounceDuration (unset) = %v, want 750ms", got)
 	}
+}
+
+// TestPRWatchKickChannelSizeSafety proves the buffered kick-channel capacity is
+// bounded: the exact maximum is accepted, one past it is rejected by validation,
+// and the accessor defensively caps an over-limit value so a config that skips
+// validation still cannot request an unsafe make(chan, capacity) allocation.
+func TestPRWatchKickChannelSizeSafety(t *testing.T) {
+	t.Run("maximum accepted", func(t *testing.T) {
+		cfg := Default()
+		cfg.PRWatch.Advanced.KickChannelSize = PRWatchKickChannelSizeMax
+
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("Validate() rejected exact maximum: %v", err)
+		}
+
+		if got := cfg.PRWatch.KickChannelSize(); got != PRWatchKickChannelSizeMax {
+			t.Errorf("KickChannelSize() = %d, want maximum %d", got, PRWatchKickChannelSizeMax)
+		}
+	})
+
+	t.Run("maximum plus one rejected and capped", func(t *testing.T) {
+		cfg := Default()
+		cfg.PRWatch.Advanced.KickChannelSize = PRWatchKickChannelSizeMax + 1
+
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), "pr_watch.advanced.kick_channel_size") {
+			t.Fatalf("Validate() = %v, want field-specific maximum error", err)
+		}
+
+		if got := cfg.PRWatch.KickChannelSize(); got != PRWatchKickChannelSizeMax {
+			t.Errorf("defensive KickChannelSize() = %d, want cap %d", got, PRWatchKickChannelSizeMax)
+		}
+	})
 }
 
 // TestTrustedAssociationSet covers the author-trust association accessor: the
