@@ -407,6 +407,14 @@ func (sm *SessionManager) validateApprovalsBackend(yolo bool) error {
 }
 
 func (sm *SessionManager) resolveSandboxFromConfig(cfg *config.Config, agentName string) (bool, error) {
+	// Test-only seam so orchestrator create/resume rollback tests can drive the
+	// post-sandbox launch path deterministically on any platform, rather than
+	// depending on a real (darwin-only safehouse / Linux nono) backend. nil in
+	// production, where the real availability check below always runs.
+	if sm.sandboxResolver != nil {
+		return sm.sandboxResolver(agentName)
+	}
+
 	merged := cfg.Sandbox.Merge(cfg.Agents[agentName].Sandbox)
 	if !merged.Enabled {
 		return false, nil

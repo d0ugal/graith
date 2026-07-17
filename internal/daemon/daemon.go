@@ -60,6 +60,7 @@ type SessionManager struct {
 	tokenIndex        map[string]string              // token → session ID (reverse lookup)
 	humanToken        string                         // local human credential, loaded at startup
 	saveStateFault    func() error                   // test-only saveState fault injection; nil in production
+	sandboxResolver   func(string) (bool, error)     // test-only sandbox-availability override; nil in production
 	pendingPairings   map[string]*pendingPairing     // requestID → pending device pairing (in-memory; not persisted)
 	pairWaiters       map[string]chan pairApproval   // requestID → waiter for a blocked pair_request connection
 	approvalSubs      map[net.Conn]func(string, any) // conn → sendControl for approval subscribers (no attach)
