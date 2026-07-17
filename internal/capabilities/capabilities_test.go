@@ -292,6 +292,7 @@ func TestMatrixMarkdownMultipleNotes(t *testing.T) {
 
 func TestMatrixMarkdownIncludesPlatformDecision(t *testing.T) {
 	const decision = "docs/design/2026-07-17-braw.md#platform-support"
+
 	raw := surfacesJSON + statesJSON + `"capabilities":[` +
 		`{"id":"a","category":"c","name":"With note","cli":"supported","ios":"supported","macos":"supported","platform_decision":"` + decision + `","notes":"canny reason."},` +
 		`{"id":"b","category":"c","name":"Decision only","cli":"supported","ios":"supported","macos":"supported","platform_decision":"` + decision + `"}]}`
@@ -325,6 +326,7 @@ func TestPlatformDecisionReferencesResolve(t *testing.T) {
 		if c.PlatformDecision == "" || seen[c.PlatformDecision] {
 			continue
 		}
+
 		seen[c.PlatformDecision] = true
 
 		doc, _, ok := strings.Cut(c.PlatformDecision, "#")
