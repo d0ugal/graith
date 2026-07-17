@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.69.2](https://github.com/d0ugal/graith/compare/v0.69.1...v0.69.2) (2026-07-17)
+
+
+### Features
+
+* add scenario runtime policies ([ed5780e](https://github.com/d0ugal/graith/commit/ed5780e78497d3c0235093f743a7e686d5800579))
+* **gui:** scope native capabilities by design ([6b200f3](https://github.com/d0ugal/graith/commit/6b200f309f71761a59729d3fd260cf0f254ce56b))
+* **scenario:** add declared result contracts ([fe062ec](https://github.com/d0ugal/graith/commit/fe062ecd1fdc45bc1a5684979f4705a23af82ecf))
+* **scenarios:** run completion actions before cleanup ([ed78b72](https://github.com/d0ugal/graith/commit/ed78b7253732f2e9923ea25f0d74b8de4ec8533d))
+* **scenarios:** support mirrored members ([f8b6020](https://github.com/d0ugal/graith/commit/f8b6020bdb60dd1d49f12a665b59deffb0007039))
+* **todo:** add dependency graph cascade unblocking ([5006872](https://github.com/d0ugal/graith/commit/5006872d9ef3c7e756db08db2a5b611f99a04568))
+* **triggers:** add gcx OnCall event source ([e70411a](https://github.com/d0ugal/graith/commit/e70411a784e0aee9271d7a12521fb505c6b771fe))
+
+
+### Bug Fixes
+
+* **capabilities:** satisfy lint spacing ([3c8e54f](https://github.com/d0ugal/graith/commit/3c8e54fada02a9b8be58e992e86da7fad34d15be))
+* **daemon:** harden reload lifecycle ownership ([1de32d2](https://github.com/d0ugal/graith/commit/1de32d29b1852c9c692704dd628e6fe4a28ddc9c))
+* **daemon:** keep late worktree watches local ([36d4ef1](https://github.com/d0ugal/graith/commit/36d4ef15165a557d11f08c7e4302295a6fd9e8bd))
+* **daemon:** make Cursor hook ownership race-safe ([dddd9ed](https://github.com/d0ugal/graith/commit/dddd9edeb9a2f2a84a12b25a39483e15f86143fd))
+* **daemon:** make orchestrator disable reload coherent ([1eac799](https://github.com/d0ugal/graith/commit/1eac79906b130bbd245d8855bc032582af76bba7))
+* **daemon:** satisfy reload lint checks ([e2fb736](https://github.com/d0ugal/graith/commit/e2fb7365a206b10ea55778a8b7b76ef48246ff33))
+* **daemon:** share PR ref watchers across worktrees ([cd3ffee](https://github.com/d0ugal/graith/commit/cd3ffeeaff4685c455bbc363740bdc319e5b0eaa))
+* **daemon:** support linkless Cursor hook filesystems ([35d6a7e](https://github.com/d0ugal/graith/commit/35d6a7e7f5f31e630d45f745b698565b2c083a07))
+* **gui:** address platform scope review ([fbf6f9c](https://github.com/d0ugal/graith/commit/fbf6f9cf5ed614bd6af08ba11a0bba7b0d0a9efc))
+* **macos:** authenticate local UI without pairing ([9c225e4](https://github.com/d0ugal/graith/commit/9c225e4852e1edfe5ecd518b94455cba0d395216))
+* **macos:** refresh local credential on reconnect ([dd0f6e9](https://github.com/d0ugal/graith/commit/dd0f6e9ee253685edbebf75ff4de31b26801b9dc))
+* **remote:** avoid logging auth key paths ([845b76a](https://github.com/d0ugal/graith/commit/845b76a65221ca43c4ef673783380aeca1048352))
+* **remote:** hot-reload listener authorization ([4b6159b](https://github.com/d0ugal/graith/commit/4b6159bfd7b71c63ce26aa239ceb7aa5ca4131e0))
+* **remote:** preserve reloads with consumed auth key ([650ec8e](https://github.com/d0ugal/graith/commit/650ec8e4f5fcb795e19a780e83141d5c94abcbf0))
+* **scenario:** gate completion actions on required results ([73a325e](https://github.com/d0ugal/graith/commit/73a325e189a0899be6b9d6f4ffcb2eafa22aac79))
+* **scenario:** harden result status and completion ([07d0296](https://github.com/d0ugal/graith/commit/07d0296bf0328ee34de627319eeb91cef5a6e2d0))
+* **scenario:** satisfy manifest reconstruction lint ([0a0187a](https://github.com/d0ugal/graith/commit/0a0187a9d3292ce114ab5cd44de565ae2ca0a048))
+* **scenarios:** isolate completion action attempts ([957132c](https://github.com/d0ugal/graith/commit/957132cd7fdb82b38f18154dd4bc6b11ad054bed))
+* **todo:** harden dependency lifecycle edge cases ([1bc34df](https://github.com/d0ugal/graith/commit/1bc34dffb8f82b187b15aad031148170652363c4))
+* **triggers:** harden gcx event delivery ([049f6ff](https://github.com/d0ugal/graith/commit/049f6ff104b9d2a78efc968855125b2942935438))
+
+
+### Documentation
+
+* mark scenario member mirrors implemented ([764e85e](https://github.com/d0ugal/graith/commit/764e85e7ea36d0ad8d09c2a57dfe9565a680977b))
+* streamline README ([707c32d](https://github.com/d0ugal/graith/commit/707c32d065753762d690a4c280241d1ad80c9885))
+
+
+### Tests
+
+* **daemon:** canonicalize scenario repo fixtures ([6a5f230](https://github.com/d0ugal/graith/commit/6a5f23017e8cae80aaa9fc9991498ff930da60f2))
+* **daemon:** model shared scenario repo ([e12c778](https://github.com/d0ugal/graith/commit/e12c778c4c52afe172851a53869512f914c792cd))
+* **integration:** bootstrap orchestrator synchronously ([23b79ae](https://github.com/d0ugal/graith/commit/23b79ae13b1f24def71f3b05a187f1f586436251))
+* **integration:** isolate sandbox binary fixture ([a3ab8ff](https://github.com/d0ugal/graith/commit/a3ab8ffeb2754d9aa14506fe7846177b909f25b6))
+* **integration:** preserve seeded setup state ([e5161fa](https://github.com/d0ugal/graith/commit/e5161fa01576cd4aa8f1de53ce0445c3cbc338d7))
+* **integration:** use portable mirror sandbox fixture ([6622bf4](https://github.com/d0ugal/graith/commit/6622bf463c9e4dc44251b9aea1080d3114589e99))
+* **sandbox:** place safehouse read-only fixture outside temp ([c02116b](https://github.com/d0ugal/graith/commit/c02116bdbc3473c062c2a45454c6d9161676cb14))
+
 ## [0.69.1](https://github.com/d0ugal/graith/compare/v0.69.0...v0.69.1) (2026-07-17)
 
 
