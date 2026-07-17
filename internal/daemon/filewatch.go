@@ -22,8 +22,18 @@ func watchRetryBackoff(retry int, base, maxBackoff time.Duration) time.Duration 
 		retry = 1
 	}
 
+	if base >= maxBackoff {
+		return maxBackoff
+	}
+
 	d := base
 	for i := 1; i < retry; i++ {
+		// Check before doubling so a very large duration cannot overflow before
+		// reaching its cap.
+		if d > maxBackoff/2 {
+			return maxBackoff
+		}
+
 		d *= 2
 		if d >= maxBackoff {
 			return maxBackoff
