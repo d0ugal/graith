@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -123,6 +124,7 @@ func (sm *SessionManager) reconcileGCXBindings(triggers []config.TriggerConfig, 
 
 	var removed []string
 
+	sm.triggers.gcxCommit.Lock()
 	sm.triggers.mu.Lock()
 	for name := range sm.triggers.gcxBindings {
 		if !live[name] {
@@ -143,6 +145,7 @@ func (sm *SessionManager) reconcileGCXBindings(triggers []config.TriggerConfig, 
 			r.LastGCXPollAt = nil
 		})
 	}
+	sm.triggers.gcxCommit.Unlock()
 }
 
 func (sm *SessionManager) dueGCXPolls(now time.Time) []string {
@@ -237,6 +240,32 @@ func (sm *SessionManager) pollGCXTrigger(ctx context.Context, name string, runne
 		return
 	}
 
+	// Reserve only the events that can actually dispatch in this poll. IDs
+	// deferred by the rolling rate limit or daemon-wide concurrency cap remain
+	// absent from the durable cursor so a later complete poll can retry them.
+	reservedFires := 0
+	fired := 0
+	haveSlot := false
+
+	if len(newEvents) > 0 {
+		n, window := t.Policy.RateLimitParsed()
+		reservedFires = sm.reserveRateSlots(t.Name, n, window, now, len(newEvents))
+
+		for _, event := range newEvents[reservedFires:] {
+			delete(seen, event.ID)
+		}
+
+		if reservedFires < len(newEvents) {
+			sm.log.Info("trigger: gcx events deferred by rate limit", "trigger", name, "deferred", len(newEvents)-reservedFires)
+		}
+
+		newEvents = newEvents[:reservedFires]
+	}
+
+	defer func() {
+		sm.releaseRateSlots(t.Name, reservedFires-fired)
+	}()
+
 	// A slow alert query can straddle a shift handoff. Re-check only when an
 	// action would actually fire, keeping empty polls cheap while making the gate
 	// decision as close to dispatch as practical.
@@ -253,6 +282,25 @@ func (sm *SessionManager) pollGCXTrigger(ctx context.Context, name string, runne
 			sm.updateGCXGate(name, fingerprint, false)
 			return
 		}
+	}
+
+	if len(newEvents) > 0 {
+		haveSlot = sm.acquireSlot()
+		if !haveSlot {
+			for _, event := range newEvents {
+				delete(seen, event.ID)
+			}
+
+			sm.releaseRateSlots(t.Name, reservedFires)
+			reservedFires = 0
+			newEvents = nil
+
+			sm.log.Info("trigger: gcx events deferred by max_concurrent", "trigger", name)
+		}
+	}
+
+	if haveSlot {
+		defer sm.releaseSlot()
 	}
 
 	committed, err := sm.commitGCXSnapshot(name, fingerprint, seen, now)
@@ -281,7 +329,9 @@ func (sm *SessionManager) pollGCXTrigger(ctx context.Context, name string, runne
 			return
 		}
 
-		sm.fireGCXEvent(ctx, currentTrigger, event)
+		sm.fireReservedGCXEvent(ctx, currentTrigger, event)
+
+		fired++
 	}
 }
 
@@ -368,6 +418,18 @@ func (sm *SessionManager) planGCXSnapshot(name, fingerprint string, events []gcx
 // any action is dispatched. It deliberately mirrors dueSchedules' at-most-once
 // ordering: a failed save suppresses dispatch; a later crash may miss, not repeat.
 func (sm *SessionManager) commitGCXSnapshot(name, fingerprint string, seen map[string]time.Time, now time.Time) (bool, error) {
+	sm.triggers.gcxCommit.Lock()
+	defer sm.triggers.gcxCommit.Unlock()
+
+	sm.triggers.mu.Lock()
+	binding := sm.triggers.gcxBindings[name]
+	active := binding != nil && binding.fingerprint == fingerprint
+	sm.triggers.mu.Unlock()
+
+	if !active {
+		return false, nil
+	}
+
 	current := sm.triggerByName(name)
 	if current == nil || !current.IsGCX() || triggerFingerprint(current) != fingerprint {
 		return false, nil
@@ -392,21 +454,11 @@ func (sm *SessionManager) commitGCXSnapshot(name, fingerprint string, seen map[s
 	return true, nil
 }
 
-func (sm *SessionManager) fireGCXEvent(ctx context.Context, t *config.TriggerConfig, event gcxEvent) {
-	n, window := t.Policy.RateLimitParsed()
-	if sm.rateLimited(t.Name, n, window, time.Now()) {
-		sm.log.Info("trigger: gcx event rate-limited", "trigger", t.Name, "event_id", event.ID)
-		return
-	}
-
-	if !sm.acquireSlot() {
-		sm.log.Info("trigger: max_concurrent reached, skipping gcx event", "trigger", t.Name, "event_id", event.ID)
-		return
-	}
-	defer sm.releaseSlot()
-
+// fireReservedGCXEvent dispatches an event after the poll has reserved both a
+// rolling rate-limit entry and one daemon-wide action slot.
+func (sm *SessionManager) fireReservedGCXEvent(ctx context.Context, t *config.TriggerConfig, event gcxEvent) {
 	now := time.Now()
-	fc := fireContext{cause: causeGCX, now: now, gcxEvent: &event, reactorSuffix: event.ID}
+	fc := fireContext{cause: causeGCX, now: now, gcxEvent: &event, reactorSuffix: gcxReactorSuffix(event.ID)}
 	result, err := sm.fireAction(ctx, t, fc)
 	sm.recordTriggerRun(t.Name, TriggerRun{ScheduledAt: now, Cause: causeGCX, Result: result})
 
@@ -416,6 +468,12 @@ func (sm *SessionManager) fireGCXEvent(ctx context.Context, t *config.TriggerCon
 	}
 
 	sm.notifyOnComplete(t, fc, err)
+}
+
+func gcxReactorSuffix(eventID string) string {
+	sum := sha256.Sum256([]byte(eventID))
+
+	return fmt.Sprintf("gcx-%x", sum[:6])
 }
 
 func pollGCXOnCall(ctx context.Context, cfg *config.GCXConfig, runner gcxRunner) (bool, error) {

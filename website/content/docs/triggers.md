@@ -164,6 +164,8 @@ records the current alert set without firing it. That prevents alerts handled by
 the previous person from becoming a handoff burst. Team and integration filters
 are strongly recommended so schedule membership closely matches the route that
 would page the user; polling cannot prove that a personal notification was sent.
+`max_age` must be at least as long as `every`; shorter retention could make a
+long-lived group appear new again between polls.
 
 #### Cursor and restart behavior
 
@@ -183,6 +185,12 @@ before an action completes can miss that action, but restarting cannot duplicate
 it. With the default policy, alerts that appeared while the daemon was stopped
 are intentionally baselined rather than replayed.
 
+Rate-limited events and events blocked by the daemon-wide `max_concurrent` cap
+are left out of the cursor and retried by later complete polls while they still
+match `states` and `max_age`. A gate error deliberately fails closed and forces
+the next successful poll to baseline, because graith cannot prove that a shift
+handoff did not occur while the gate was unreadable.
+
 A result containing `limit` items is assumed incomplete. Graith does not advance
 or prime the cursor, because doing so could silently miss groups beyond the cap;
 narrow `team_ids`/`integration_ids` or raise `limit` (maximum 100). Poll errors
@@ -194,6 +202,7 @@ Available gcx event template variables are `{gcx_event_id}`,
 annotations are deliberately unavailable because alert text is external,
 potentially attacker-controlled input. An agent may fetch the group by ID, but
 its prompt should explicitly treat fetched content as untrusted.
+`{gcx_started_at}` is an RFC3339 timestamp.
 
 ## Actions
 
