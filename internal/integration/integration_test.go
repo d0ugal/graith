@@ -1288,6 +1288,21 @@ func TestScenarioMirrorSharedSourceLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// resolveGrBin derives its lookup name from os.Args[0]. Give it a stable
+	// executable outside /tmp: nono deliberately rejects read-only grants under
+	// default-writable prefixes, including Go's temporary test-binary directory.
+	binDir := filepath.Join(root, "bin")
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	grBin := filepath.Join(binDir, filepath.Base(os.Args[0]))
+	if err := os.WriteFile(grBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil { //nolint:gosec // G306: test binary stub must be executable
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
 	env := setupAt(t, root, func(cfg *config.Config) {
 		cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "nono", Command: backend}
 		cfg.Orchestrator.Enabled = true
