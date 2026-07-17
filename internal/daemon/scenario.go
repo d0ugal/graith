@@ -79,8 +79,14 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		return nil, errors.New("only the orchestrator session can start scenarios")
 	}
 
-	// Validate session definitions.
-	seenNames := make(map[string]bool, len(msg.Sessions))
+	// Validate session definitions and build the scenario-local mirror graph.
+	// Mirror values are member names only; they never reach Create as an
+	// unscoped name or path.
+	var (
+		seenNames     = make(map[string]bool, len(msg.Sessions))
+		mirrorMembers = make([]scenariofile.MirrorMember, len(msg.Sessions))
+	)
+
 	for i, s := range msg.Sessions {
 		if s.Name == "" {
 			return nil, fmt.Errorf("session %d: name is required", i)
@@ -96,8 +102,30 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 		seenNames[s.Name] = true
 
-		if s.Repo == "" {
+		if s.Repo == "" && !s.Shared && s.Mirror == "" {
 			return nil, fmt.Errorf("session %q: repo is required", s.Name)
+		}
+
+		mirrorMembers[i] = scenariofile.MirrorMember{
+			Name: s.Name, Mirror: s.Mirror, Repo: s.Repo, Base: s.Base,
+			Shared: s.Shared, Includes: len(s.Includes),
+		}
+	}
+
+	mirrorDepths, err := scenariofile.ValidateMirrorMembers(mirrorMembers)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		memberIndexes  = make(map[string]int, len(msg.Sessions))
+		maxMirrorDepth int
+	)
+
+	for i, s := range msg.Sessions {
+		memberIndexes[s.Name] = i
+		if mirrorDepths[i] > maxMirrorDepth {
+			maxMirrorDepth = mirrorDepths[i]
 		}
 	}
 
@@ -141,17 +169,13 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		return nil, err
 	}
 
-	// Preflight: validate repos exist and are git repos.
-	for _, s := range msg.Sessions {
-		if !git.IsInsideGitRepo(s.Repo) {
-			return nil, fmt.Errorf("session %q: repo %q is not a git repository", s.Name, s.Repo)
-		}
-	}
-
 	cfg := sm.Config()
+	repoRoots := make([]string, len(msg.Sessions))
 
-	// Validate agents and repos against config.
-	for _, s := range msg.Sessions {
+	// Validate agents, sandbox enforcement, and explicitly supplied repos before
+	// reserving anything. Mirrored members have no repo path to validate: their
+	// effective repo/worktree is derived from the target during reservation.
+	for i, s := range msg.Sessions {
 		agentName := s.Agent
 		if agentName == "" {
 			agentName = cfg.DefaultAgent
@@ -161,9 +185,35 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 			return nil, fmt.Errorf("session %q: unknown agent %q", s.Name, agentName)
 		}
 
-		if !cfg.RepoPathAllowed(s.Repo) {
+		if s.Mirror != "" {
+			sandboxed, sandboxErr := sm.resolveSandboxFromConfig(cfg, agentName)
+			if sandboxErr != nil {
+				return nil, fmt.Errorf("session %q: mirror sandbox unavailable: %w", s.Name, sandboxErr)
+			}
+
+			if !sandboxed {
+				return nil, fmt.Errorf("session %q: mirror requires sandbox to be enabled so the source worktree is read-only", s.Name)
+			}
+		}
+
+		if s.Repo == "" {
+			continue
+		}
+
+		if !git.IsInsideGitRepo(s.Repo) {
+			return nil, fmt.Errorf("session %q: repo %q is not a git repository", s.Name, s.Repo)
+		}
+
+		repoRoot, repoErr := git.RepoRootPath(s.Repo)
+		if repoErr != nil {
+			return nil, fmt.Errorf("session %q: resolve repo root: %w", s.Name, repoErr)
+		}
+
+		if !cfg.RepoPathAllowed(repoRoot) {
 			return nil, fmt.Errorf("session %q: repo %q is not under any allowed_repo_paths", s.Name, s.Repo)
 		}
+
+		repoRoots[i] = repoRoot
 	}
 
 	// --- Reserve phase: lock, validate no collisions, create scenario + placeholders ---
@@ -204,6 +254,77 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	sessionIDs := make([]string, len(msg.Sessions))
 	sharedReused := make([]bool, len(msg.Sessions))
 	seenResultDestinations := make(map[string]string)
+	sharedWorktrees := make([]string, len(msg.Sessions))
+
+	// Resolve shared members authoritatively while holding the state lock. A
+	// mirror reference never searches global daemon state itself; it resolves to
+	// one of these scenario member indexes, and that member owns the only allowed
+	// global binding. Count candidates instead of taking map iteration order so a
+	// corrupted/legacy ambiguous name fails closed.
+	for i, s := range msg.Sessions {
+		if !s.Shared {
+			continue
+		}
+
+		var candidates []*SessionState
+
+		for _, existing := range sm.state.Sessions {
+			if existing.IsSoftDeleted() || existing.Name != s.Name || existing.Status != StatusRunning {
+				continue
+			}
+
+			candidates = append(candidates, existing)
+		}
+
+		switch len(candidates) {
+		case 0:
+			sm.mu.Unlock()
+			return nil, fmt.Errorf("shared session %q: no running session with that name exists", s.Name)
+		case 1:
+			// Continue below.
+		default:
+			sm.mu.Unlock()
+			return nil, fmt.Errorf("shared session %q is ambiguous: %d running sessions have that name", s.Name, len(candidates))
+		}
+
+		source := candidates[0]
+		// RepoRootPath returns the canonical Git top-level path for an explicit
+		// repo, and SessionState.RepoPath stores that same value. Compare the
+		// already-resolved snapshots directly: ResolvePath would perform
+		// EvalSymlinks filesystem I/O while the manager lock is held.
+		if repoRoots[i] != "" && filepath.Clean(repoRoots[i]) != filepath.Clean(source.RepoPath) {
+			sm.mu.Unlock()
+			return nil, fmt.Errorf("shared session %q: configured repo %q does not match running session repo %q", s.Name, repoRoots[i], source.RepoPath)
+		}
+
+		sessionIDs[i] = source.ID
+		sharedReused[i] = true
+		sharedWorktrees[i] = source.WorktreePath
+		repoRoots[i] = source.RepoPath
+	}
+
+	// Fill effective repos for mirrors in dependency order, then reject a shared
+	// root that cannot supply a worktree before any scenario-owned member starts.
+	for depth := 1; depth <= maxMirrorDepth; depth++ {
+		for i, s := range msg.Sessions {
+			if mirrorDepths[i] != depth {
+				continue
+			}
+
+			target := memberIndexes[s.Mirror]
+			repoRoots[i] = repoRoots[target]
+
+			root := target
+			for msg.Sessions[root].Mirror != "" {
+				root = memberIndexes[msg.Sessions[root].Mirror]
+			}
+
+			if msg.Sessions[root].Shared && sharedWorktrees[root] == "" {
+				sm.mu.Unlock()
+				return nil, fmt.Errorf("session %q: mirror target %q has no worktree to mirror", s.Name, msg.Sessions[root].Name)
+			}
+		}
+	}
 
 	for i, s := range msg.Sessions {
 		agentName := s.Agent
@@ -211,55 +332,34 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 			agentName = cfg.DefaultAgent
 		}
 
-		repoRoot, err := git.RepoRootPath(s.Repo)
-		if err != nil {
-			sm.mu.Unlock()
-			return nil, fmt.Errorf("session %q: resolve repo root: %w", s.Name, err)
+		repoName := ""
+		if repoRoots[i] != "" {
+			repoName = filepath.Base(repoRoots[i])
 		}
 
 		scenarioSessions[i] = ScenarioSession{
-			Name:   s.Name,
-			Role:   s.Role,
-			Task:   s.Task,
-			Repo:   filepath.Base(repoRoot),
-			Agent:  agentName,
-			Model:  s.Model,
-			Shared: s.Shared,
+			Name: s.Name, Mirror: s.Mirror, Role: s.Role, Task: s.Task,
+			Repo: repoName, Agent: agentName, Model: s.Model, Shared: s.Shared,
 		}
 
-		// Shared sessions must reuse an existing running session.
 		if s.Shared {
-			for existID, existing := range sm.state.Sessions {
-				if existing.Name == s.Name && existing.Status == StatusRunning {
-					sessionIDs[i] = existID
-					sharedReused[i] = true
-
-					break
-				}
-			}
-
-			if sharedReused[i] {
-				results, compileErr := compileScenarioResults(
-					scenarioID, msg.Name, sessionIDs[i], s.Name, s.Results, seenResultDestinations,
-				)
-				if compileErr != nil {
-					for previousIndex, previousID := range sessionIDs[:i] {
-						if !sharedReused[previousIndex] {
-							delete(sm.state.Sessions, previousID)
-						}
+			results, compileErr := compileScenarioResults(
+				scenarioID, msg.Name, sessionIDs[i], s.Name, s.Results, seenResultDestinations,
+			)
+			if compileErr != nil {
+				for previousIndex, previousID := range sessionIDs[:i] {
+					if !sharedReused[previousIndex] {
+						delete(sm.state.Sessions, previousID)
 					}
-					sm.mu.Unlock()
-
-					return nil, fmt.Errorf("session %q: %w", s.Name, compileErr)
 				}
+				sm.mu.Unlock()
 
-				scenarioSessions[i].Results = results
-
-				continue
+				return nil, fmt.Errorf("session %q: %w", s.Name, compileErr)
 			}
-			sm.mu.Unlock()
 
-			return nil, fmt.Errorf("shared session %q: no running session with that name exists", s.Name)
+			scenarioSessions[i].Results = results
+
+			continue
 		}
 
 		id := sm.uniqueSessionIDLocked()
@@ -285,8 +385,8 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 			ID:              id,
 			ParentID:        msg.CallerSessionID,
 			Name:            s.Name,
-			RepoPath:        repoRoot,
-			RepoName:        filepath.Base(repoRoot),
+			RepoPath:        repoRoots[i],
+			RepoName:        repoName,
 			Agent:           agentName,
 			Model:           s.Model,
 			AgentHooks:      s.AgentHooks,
@@ -328,7 +428,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 	sm.mu.Unlock()
 
-	// --- Start phase: create each session concurrently ---
+	// --- Start phase: create dependency waves concurrently ---
 	// Remove all placeholders first, then hand each reserved ID back to Create
 	// (via CreateOpts.ID) so the created session keeps the ID we reserved and
 	// ScenarioState.SessionIDs stays valid without a rewrite. The delete is
@@ -338,21 +438,13 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	// free, so a concurrent Create using the same ID would win and this
 	// scenario's Create would fail and roll back — the same window that existed
 	// before IDs were made stable. Shared-reused sessions already have real IDs
-	// and don't need creation.
-	repoRoots := make([]string, len(msg.Sessions))
+	// and don't need creation. Mirror dependency depths then ensure every source
+	// wave is running before its readers are handed to the normal Create path.
 
 	sm.mu.Lock()
 	for i, id := range sessionIDs {
 		if sharedReused[i] {
-			if p, ok := sm.state.Sessions[id]; ok {
-				repoRoots[i] = p.RepoPath
-			}
-
 			continue
-		}
-
-		if p, ok := sm.state.Sessions[id]; ok {
-			repoRoots[i] = p.RepoPath
 		}
 
 		delete(sm.state.Sessions, id)
@@ -367,86 +459,97 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		err   error
 	}
 
-	results := make([]createResult, len(msg.Sessions))
-
-	var wg sync.WaitGroup
-
-	for i, s := range msg.Sessions {
-		if sharedReused[i] {
-			continue
-		}
-
-		wg.Add(1)
-		go func(idx int, s protocol.ScenarioSessionInput) {
-			defer wg.Done()
-
-			agentName := s.Agent
-			if agentName == "" {
-				agentName = cfg.DefaultAgent
-			}
-
-			scenarioEnv := map[string]string{
-				"GRAITH_SCENARIO":      scenarioID,
-				"GRAITH_SCENARIO_NAME": msg.Name,
-			}
-			if s.Role != "" {
-				scenarioEnv["GRAITH_SCENARIO_ROLE"] = s.Role
-			}
-
-			if msg.Goal != "" {
-				scenarioEnv["GRAITH_SCENARIO_GOAL"] = msg.Goal
-			}
-
-			sess, err := sm.Create(CreateOpts{
-				ID:         sessionIDs[idx],
-				Name:       s.Name,
-				AgentName:  agentName,
-				RepoPath:   repoRoots[idx],
-				BaseBranch: s.Base,
-				Prompt:     s.Task,
-				Model:      s.Model,
-				ParentID:   msg.CallerSessionID,
-				AgentHooks: s.AgentHooks,
-				Includes:   s.Includes,
-				Starred:    s.Star,
-				Rows:       rows,
-				Cols:       cols,
-				EnvExtra:   []map[string]string{scenarioEnv},
-			})
-			results[idx] = createResult{index: idx, sess: sess, err: err}
-		}(i, s)
-	}
-
-	wg.Wait()
-
 	var (
 		startedIDs  []string
 		startErrors []string
 	)
 
-	for i, r := range results {
-		if sharedReused[i] {
-			continue
+	for depth := 0; depth <= maxMirrorDepth; depth++ {
+		var (
+			results = make([]createResult, len(msg.Sessions))
+			wg      sync.WaitGroup
+		)
+
+		for i, s := range msg.Sessions {
+			if sharedReused[i] || mirrorDepths[i] != depth {
+				continue
+			}
+
+			wg.Add(1)
+			go func(idx int, s protocol.ScenarioSessionInput) {
+				defer wg.Done()
+
+				agentName := s.Agent
+				if agentName == "" {
+					agentName = cfg.DefaultAgent
+				}
+
+				scenarioEnv := map[string]string{
+					"GRAITH_SCENARIO":      scenarioID,
+					"GRAITH_SCENARIO_NAME": msg.Name,
+				}
+				if s.Role != "" {
+					scenarioEnv["GRAITH_SCENARIO_ROLE"] = s.Role
+				}
+
+				if msg.Goal != "" {
+					scenarioEnv["GRAITH_SCENARIO_GOAL"] = msg.Goal
+				}
+
+				mirrorSourceID := ""
+				if s.Mirror != "" {
+					mirrorSourceID = sessionIDs[memberIndexes[s.Mirror]]
+				}
+
+				sess, createErr := sm.Create(CreateOpts{
+					ID: sessionIDs[idx], Name: s.Name, AgentName: agentName,
+					RepoPath: repoRoots[idx], Mirror: mirrorSourceID,
+					BaseBranch: s.Base, Prompt: s.Task, Model: s.Model,
+					ParentID: msg.CallerSessionID, AgentHooks: s.AgentHooks,
+					Includes: s.Includes, Starred: s.Star, Rows: rows, Cols: cols,
+					EnvExtra: []map[string]string{scenarioEnv},
+				})
+				results[idx] = createResult{index: idx, sess: sess, err: createErr}
+			}(i, s)
 		}
 
-		if r.err != nil {
-			startErrors = append(startErrors, fmt.Sprintf("session %q: %v", msg.Sessions[i].Name, r.err))
-			continue
+		wg.Wait()
+
+		var waveStarted []createResult
+
+		for i, result := range results {
+			if sharedReused[i] || mirrorDepths[i] != depth {
+				continue
+			}
+
+			if result.err != nil {
+				startErrors = append(startErrors, fmt.Sprintf("session %q: %v", msg.Sessions[i].Name, result.err))
+				continue
+			}
+
+			startedIDs = append(startedIDs, result.sess.ID)
+			sessionIDs[i] = result.sess.ID
+			waveStarted = append(waveStarted, result)
 		}
 
-		startedIDs = append(startedIDs, r.sess.ID)
-		sessionIDs[i] = r.sess.ID
+		if len(waveStarted) > 0 {
+			sm.mu.Lock()
+			for _, result := range waveStarted {
+				if created, ok := sm.state.Sessions[result.sess.ID]; ok {
+					created.ScenarioID = scenarioID
+					created.ScenarioName = msg.Name
+					created.ScenarioRole = msg.Sessions[result.index].Role
+					created.ScenarioGoal = msg.Goal
+				}
+			}
 
-		sm.mu.Lock()
-		if created, ok := sm.state.Sessions[r.sess.ID]; ok {
-			created.ScenarioID = scenarioID
-			created.ScenarioName = msg.Name
-			created.ScenarioRole = msg.Sessions[i].Role
-			created.ScenarioGoal = msg.Goal
+			_ = sm.saveState()
+			sm.mu.Unlock()
 		}
 
-		_ = sm.saveState()
-		sm.mu.Unlock()
+		if len(startErrors) > 0 {
+			break
+		}
 	}
 
 	if len(startErrors) > 0 {
@@ -459,14 +562,20 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		_ = sm.saveState()
 		sm.mu.Unlock()
 
-		// Rollback: stop and delete all already-started sessions.
+		// Rollback: stop every started member before deleting any of them. A
+		// source may have readers in a later dependency wave; stopping the whole
+		// set first ensures no live reader observes its source worktree being
+		// removed. Delete in reverse creation order so mirrors go before roots.
 		var rollbackErrors []string
 
 		for _, id := range startedIDs {
 			if err := sm.Stop(id); err != nil {
 				sm.log.Warn("scenario rollback: stop failed", "session", id, "err", err)
 			}
+		}
 
+		for i := len(startedIDs) - 1; i >= 0; i-- {
+			id := startedIDs[i]
 			if err := sm.unstarAndDelete(id); err != nil {
 				sm.log.Warn("scenario rollback: delete failed", "session", id, "err", err)
 				rollbackErrors = append(rollbackErrors, id)
@@ -577,6 +686,7 @@ type scenarioManifest struct {
 type scenarioManifestSelf struct {
 	Name      string                   `json:"name"`
 	SessionID string                   `json:"session_id"`
+	Mirror    string                   `json:"mirror,omitempty"`
 	Role      string                   `json:"role"`
 	Task      string                   `json:"task"`
 	Results   []scenarioManifestResult `json:"results,omitempty"`
@@ -585,6 +695,7 @@ type scenarioManifestSelf struct {
 type scenarioManifestSibling struct {
 	Name      string                   `json:"name"`
 	SessionID string                   `json:"session_id"`
+	Mirror    string                   `json:"mirror,omitempty"`
 	Role      string                   `json:"role"`
 	Repo      string                   `json:"repo"`
 	Results   []scenarioManifestResult `json:"results,omitempty"`
@@ -620,6 +731,7 @@ func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.Scenario
 		siblings = append(siblings, scenarioManifestSibling{
 			Name:      s.Name,
 			SessionID: sessionIDs[j],
+			Mirror:    s.Mirror,
 			Role:      s.Role,
 			Repo:      repo,
 			Results:   sm.manifestScenarioResults(scenarioID, msg.Name, sessionIDs[j], s),
@@ -634,6 +746,7 @@ func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.Scenario
 		You: scenarioManifestSelf{
 			Name:      self.Name,
 			SessionID: sessionIDs[selfIndex],
+			Mirror:    self.Mirror,
 			Role:      self.Role,
 			Task:      self.Task,
 			Results:   sm.manifestScenarioResults(scenarioID, msg.Name, sessionIDs[selfIndex], self),
@@ -994,6 +1107,10 @@ func (sm *SessionManager) ResumeScenario(name string, rows, cols uint16) ([]stri
 func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSessionInput, rows, cols uint16) (*SessionState, error) {
 	if err := ValidateSessionName(input.Name); err != nil {
 		return nil, err
+	}
+
+	if input.Mirror != "" {
+		return nil, errors.New("scenario add does not support mirror references; declare mirrored members in the scenario file so the full topology can be preflighted atomically")
 	}
 
 	if input.Repo == "" {
@@ -1392,8 +1509,8 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 		}
 
 		sessions[i] = protocol.ScenarioSessionInput{
-			Name: ss.Name, Repo: ss.Repo, Role: ss.Role, Task: ss.Task,
-			Agent: ss.Agent, Model: ss.Model, Results: results,
+			Name: ss.Name, Repo: ss.Repo, Mirror: ss.Mirror, Role: ss.Role,
+			Task: ss.Task, Agent: ss.Agent, Model: ss.Model, Results: results,
 		}
 	}
 
@@ -1476,13 +1593,8 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 
 	for i, ss := range sc.Sessions {
 		sessions[i] = protocol.ScenarioSessionInfo{
-			Name:   ss.Name,
-			Role:   ss.Role,
-			Task:   ss.Task,
-			Repo:   ss.Repo,
-			Agent:  ss.Agent,
-			Model:  ss.Model,
-			Shared: ss.Shared,
+			Name: ss.Name, Mirror: ss.Mirror, Role: ss.Role, Task: ss.Task,
+			Repo: ss.Repo, Agent: ss.Agent, Model: ss.Model, Shared: ss.Shared,
 		}
 
 		requiredResultsAvailable := true

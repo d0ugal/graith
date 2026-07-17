@@ -101,7 +101,8 @@ turns retention `0` into a purge.
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `name` | yes | — | Session name (must be unique across all sessions) |
-| `repo` | yes | — | Repository path (`~` is expanded) |
+| `repo` | yes, except shared/mirrored | — | Repository path (`~` is expanded); derived for `shared` members when omitted and always derived for mirrored members |
+| `mirror` | no | — | Name of another member in this scenario whose exact worktree is mounted read-only |
 | `agent` | no | config default | Agent type (`claude`, `codex`, `cursor`, etc.) |
 | `model` | no | agent default | Model override (fills `{model}` in agent args) |
 | `base` | no | repo default | Base branch for the worktree |
@@ -148,6 +149,51 @@ accepts repeatable `--depends-on <existing-member>` flags for the same behavior.
 session instead of creating a new one. The named session must already be
 running. Shared sessions participate in the scenario (receive manifests, appear
 in status) but are never stopped or deleted by scenario lifecycle operations.
+
+**Mirrored sessions:** Set `mirror` to another `[[sessions]]` member's `name` to
+create a normal scenario-owned worker over that member's exact worktree. The
+worker sees committed and uncommitted files, but the sandbox denies writes to
+the source worktree and provides the usual writable `GRAITH_TMPDIR` scratch
+space. Several members may mirror one source without creating Git worktrees or
+branches.
+
+`mirror` is a scenario-local member reference, never a session ID or filesystem
+path. A mirrored member must not also set `shared`, `repo`, `base`, or
+`includes`: the repository, base, worktree, and included worktrees are derived
+from its target. The target may itself be mirrored, but references must be
+acyclic. Missing targets, duplicate/ambiguous names, cycles, sources without a
+worktree, and unavailable sandbox enforcement fail preflight before any member
+starts. Agent, model, role, task, hooks, and `star` still configure the mirrored
+worker itself.
+
+This generic multi-reader scenario attaches two independent readers to an
+existing source session named `subject`:
+
+```toml
+version = 1
+
+[scenario]
+name = "read-the-subject"
+goal = "Inspect the same work in progress from independent perspectives"
+
+[[sessions]]
+name = "subject"
+shared = true
+
+[[sessions]]
+name = "audit-reader"
+mirror = "subject"
+agent = "claude"
+role = "Security and correctness auditor"
+task = "Audit the subject worktree without modifying it."
+
+[[sessions]]
+name = "test-reader"
+mirror = "subject"
+agent = "codex"
+role = "Test analyst"
+task = "Identify missing tests in the subject worktree without modifying it."
+```
 
 **Extra worktrees:** `includes` attaches additional repo worktrees to the
 session (the same mechanism as the repo-level `includes` config), so an agent
@@ -388,7 +434,7 @@ gr scenario delete tracing-pipeline
 1. The CLI parses the TOML file (with strict field validation) and sends a `scenario_start` control message to the daemon
 2. The daemon validates all inputs: scenario name uniqueness, session name uniqueness, repo paths, agent configs
 3. **Reserve phase:** placeholders are created atomically under the state lock
-4. **Start phase:** each session is created using the normal `Create` flow, with scenario environment variables injected
+4. **Start phase:** independent members are created concurrently using the normal `Create` flow; mirror dependency waves follow after their sources are running, using the same read-only sandbox primitive as `gr new --mirror`
 5. **Manifest phase:** after all sessions start, the daemon publishes a manifest to each session's inbox and persists it to the shared store
 6. If any session fails to create, already-started sessions are rolled back (stopped and deleted)
 
@@ -447,6 +493,10 @@ The manifest gives each agent awareness of:
 - **`you`** — its own identity, role, task, and declared result destinations
 - **`siblings`** — the other sessions in the scenario, with their roles, repos, and result destinations
 - **`orchestrator`** — the parent session that started the scenario
+
+For mirrored members, both `you` and sibling entries also include `mirror` with
+the referenced member name, so the declared read-only relationship survives
+manifest persistence and republishing.
 
 ## Coordination
 

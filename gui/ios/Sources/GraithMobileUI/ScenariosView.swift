@@ -53,6 +53,9 @@ private struct ScenarioMemberRow: View {
                     if member.shared == true {
                         Text("shared").font(.caption2).foregroundStyle(.secondary)
                     }
+                    if let mirror = member.mirror, !mirror.isEmpty {
+                        Text("mirrors \(mirror)").font(.caption2).foregroundStyle(.blue)
+                    }
                 }
                 if let role = member.role, !role.isEmpty {
                     Text(role).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
@@ -142,7 +145,12 @@ private struct ScenarioCard: View {
                 HStack(spacing: 8) {
                     Circle().fill(scenarioStatusColor(member.status)).frame(width: 8, height: 8)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(member.name).font(.callout)
+                        HStack(spacing: 4) {
+                            Text(member.name).font(.callout)
+                            if let mirror = member.mirror, !mirror.isEmpty {
+                                Text("mirrors \(mirror)").font(.caption2).foregroundStyle(.blue)
+                            }
+                        }
                         if let role = member.role, !role.isEmpty {
                             Text(role).font(.caption2).foregroundStyle(.secondary)
                         }

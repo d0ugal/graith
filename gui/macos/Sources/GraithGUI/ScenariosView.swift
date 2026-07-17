@@ -132,6 +132,12 @@ private struct ScenarioMemberRow: View {
                             .background(Theme.surface0)
                             .clipShape(RoundedRectangle(cornerRadius: 3))
                     }
+                    if let mirror = member.mirror, !mirror.isEmpty {
+                        Text("mirrors \(mirror)")
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundStyle(Theme.blue)
+                            .lineLimit(1)
+                    }
                 }
                 if let role = member.role, !role.isEmpty {
                     Text(role)
@@ -275,6 +281,11 @@ private struct ScenarioCard: View {
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(Theme.subtext1)
                         .frame(width: 90, alignment: .leading)
+                    Text(member.mirror.map { "mirrors \($0)" } ?? "")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(Theme.blue)
+                        .frame(width: 110, alignment: .leading)
+                        .lineLimit(1)
                     Text(member.role ?? "")
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(Theme.overlay0)

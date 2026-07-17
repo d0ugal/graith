@@ -3898,6 +3898,31 @@ func TestResumeIncludeSet(t *testing.T) {
 	})
 }
 
+func TestMirrorSourceIncludesLockedFollowsMirrorChain(t *testing.T) {
+	sm := newTestSessionManager(t)
+	want := []IncludedRepoState{{RepoName: "croft", WorktreePath: "/glen/croft"}}
+
+	sm.mu.Lock()
+	sm.state.Sessions["subject"] = &SessionState{ID: "subject", Includes: want}
+	sm.state.Sessions["reader-a"] = &SessionState{
+		ID: "reader-a", Mirror: true, MirrorSourceID: "subject",
+	}
+	sm.state.Sessions["reader-b"] = &SessionState{
+		ID: "reader-b", Mirror: true, MirrorSourceID: "reader-a",
+	}
+	got := sm.mirrorSourceIncludesLocked(sm.state.Sessions["reader-b"])
+	sm.mu.Unlock()
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mirror source includes = %+v, want %+v", got, want)
+	}
+
+	got[0].RepoName = "changed"
+	if sm.state.Sessions["subject"].Includes[0].RepoName != "croft" {
+		t.Fatal("mirror source includes aliases persisted source state")
+	}
+}
+
 // TestDefaultAgentsAddDirSupport locks which built-in agents graith grants
 // included-repo worktrees via add_dir_args: claude, codex, and cursor accept an
 // add-dir flag; opencode and agy do not (their CLIs would reject an unknown

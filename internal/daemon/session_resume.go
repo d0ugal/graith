@@ -380,8 +380,7 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 
 	if sessState.Mirror {
 		if source, ok := sm.state.Sessions[sessState.MirrorSourceID]; ok {
-			sharedSourceIncludes = make([]IncludedRepoState, len(source.Includes))
-			copy(sharedSourceIncludes, source.Includes)
+			sharedSourceIncludes = sm.mirrorSourceIncludesLocked(source)
 		}
 	}
 

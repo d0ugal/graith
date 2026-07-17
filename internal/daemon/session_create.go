@@ -182,8 +182,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		baseBranch = source.BaseBranch
 		isMirror = true
 		mirrorSourceID = source.ID
-		sourceIncludes = make([]IncludedRepoState, len(source.Includes))
-		copy(sourceIncludes, source.Includes)
+		sourceIncludes = sm.mirrorSourceIncludesLocked(source)
 	case noRepo:
 		worktreePath = filepath.Join(sm.paths.DataDir, "scratch", id)
 		if err := os.MkdirAll(worktreePath, 0o700); err != nil {

@@ -139,6 +139,11 @@ Supported `[[sessions]]` fields: `name` (required), `repo` (required),
 `allow_concurrent`, `skip_model_validation`) are explicitly unsupported in v1
 — the parser rejects unknown fields.
 
+> **Later extension:** scenario member mirrors were added without changing the
+> file format version. See
+> [Scenario Member Mirrors](2026-07-17-scenario-member-mirrors.md) for the
+> scoped field rules, dependency preflight, and lifecycle design.
+
 Validation rules:
 - `version` must be `1` (forward compatibility)
 - `scenario.name` is required, must match `[a-z0-9][a-z0-9-]*`

@@ -727,6 +727,7 @@ public struct ScenarioResultInfo: Codable, Sendable, Identifiable, Hashable {
 public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
     public var name: String
     public var sessionID: String
+    public var mirror: String?
     public var role: String?
     public var task: String?
     public var todoDone: Int
@@ -741,11 +742,11 @@ public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
 
     public var id: String { sessionID }
 
-    public init(name: String, sessionID: String, role: String? = nil, task: String? = nil,
+    public init(name: String, sessionID: String, mirror: String? = nil, role: String? = nil, task: String? = nil,
                 todoDone: Int = 0, todoTotal: Int = 0, blockedBy: [String] = [], repo: String? = nil, agent: String? = nil,
                 model: String? = nil, status: String? = nil, shared: Bool? = nil,
                 results: [ScenarioResultInfo] = []) {
-        self.name = name; self.sessionID = sessionID; self.role = role; self.task = task
+        self.name = name; self.sessionID = sessionID; self.mirror = mirror; self.role = role; self.task = task
         self.todoDone = todoDone; self.todoTotal = todoTotal
         self.blockedBy = blockedBy
         self.repo = repo; self.agent = agent; self.model = model
@@ -756,7 +757,7 @@ public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case name
         case sessionID = "session_id"
-        case role, task
+        case mirror, role, task
         case todoDone = "todo_done"
         case todoTotal = "todo_total"
         case blockedBy = "blocked_by"
@@ -767,6 +768,7 @@ public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         name = try c.decode(String.self, forKey: .name)
         sessionID = try c.decode(String.self, forKey: .sessionID)
+        mirror = try c.decodeIfPresent(String.self, forKey: .mirror)
         role = try c.decodeIfPresent(String.self, forKey: .role)
         task = try c.decodeIfPresent(String.self, forKey: .task)
         todoDone = try c.decodeIfPresent(Int.self, forKey: .todoDone) ?? 0

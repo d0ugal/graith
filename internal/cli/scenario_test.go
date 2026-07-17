@@ -643,6 +643,34 @@ func TestBuildSessionInputsDependencies(t *testing.T) {
 	}
 }
 
+func TestBuildSessionInputsMirror(t *testing.T) {
+	sf := &scenarioFile{Sessions: []scenarioFileSession{
+		{Name: "subject", Repo: "/tmp/croft", Shared: true},
+		{Name: "reader", Mirror: "subject", Agent: "codex"},
+	}}
+
+	got, err := buildSessionInputs(sf)
+	if err != nil {
+		t.Fatalf("buildSessionInputs: %v", err)
+	}
+
+	if got[1].Mirror != "subject" || got[1].Repo != "" {
+		t.Errorf("mirrored input = %+v, want mirror subject and derived repo", got[1])
+	}
+}
+
+func TestBuildSessionInputsMirrorRejectsConflictingRepo(t *testing.T) {
+	sf := &scenarioFile{Sessions: []scenarioFileSession{
+		{Name: "subject", Repo: "/tmp/croft"},
+		{Name: "reader", Repo: "/tmp/other", Mirror: "subject"},
+	}}
+
+	_, err := buildSessionInputs(sf)
+	if err == nil || !strings.Contains(err.Error(), "mirror and repo") {
+		t.Fatalf("error = %v, want mirror/repo conflict", err)
+	}
+}
+
 // TestBuildSessionInputsCov2MissingName verifies a session without a name is
 // rejected with an index-qualified error.
 func TestBuildSessionInputsCov2MissingName(t *testing.T) {
