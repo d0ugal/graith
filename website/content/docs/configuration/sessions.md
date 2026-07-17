@@ -181,7 +181,7 @@ graith truncates output in several user-visible places so a huge log, a runaway 
 
 ```toml
 [limits]
-log_lines              = 300      # default trailing lines for `gr logs`, `gr mcp logs`, attach replay, and MCP log reads (when no -n)
+log_lines              = 300      # default trailing lines for `gr logs`, `gr mcp logs`, attach replay, attach scroll mode, and MCP log reads (when no -n)
 wait_scan_lines        = 500      # scrollback lines `gr wait --contains` scans for an already-present match
 wait_buffer_bytes      = 65536    # partial-line buffer cap in the live `gr wait` matcher (64 KiB)
 mcp_log_read_bytes     = 1048576  # max trailing bytes read from an MCP log file before splitting into lines (1 MiB)
@@ -190,7 +190,7 @@ last_message_runes     = 2000     # agent's final Stop message the status hook f
 inbox_preview_bytes    = 1000     # unread-inbox preview injected into a session's SessionStart hook context
 ```
 
-`log_lines` is the shared default used whenever a `--lines`/`-n` count is omitted: `gr logs` and `gr mcp logs` now send `0` by default, so the daemon applies this value. Because the daemon owns the resolution, the graphical clients' log peeks pick up the same server-side default too. `wait_scan_lines` and `wait_buffer_bytes` bound how much history `gr wait --contains` scans and how much unterminated output the live matcher retains. `approval_display_bytes`, `last_message_runes`, and `inbox_preview_bytes` cap what is *shown* — the untruncated values are still evaluated (approval backends) or recoverable (`gr msg inbox --all` shows the full message body). The byte caps apply to retained content; a truncation marker is appended outside that budget. The retained prefix backs up to a UTF-8 rune boundary rather than splitting a multi-byte character, while `last_message_runes` is counted in whole runes.
+`log_lines` is the shared default used whenever a `--lines`/`-n` count is omitted: `gr logs` and `gr mcp logs` now send `0` by default, so the daemon applies this value. Attach scroll mode (`ctrl+b` then the scroll key) is an attach replay surface, so it shares the same default rather than a fixed history size — set `log_lines` to raise or lower how much scrollback the scroll pager fetches. Because the daemon owns the resolution, the graphical clients' log peeks pick up the same server-side default too. `wait_scan_lines` and `wait_buffer_bytes` bound how much history `gr wait --contains` scans and how much unterminated output the live matcher retains. `approval_display_bytes`, `last_message_runes`, and `inbox_preview_bytes` cap what is *shown* — the untruncated values are still evaluated (approval backends) or recoverable (`gr msg inbox --all` shows the full message body). The byte caps apply to retained content; a truncation marker is appended outside that budget. The retained prefix backs up to a UTF-8 rune boundary rather than splitting a multi-byte character, while `last_message_runes` is counted in whole runes.
 
 ## Update check
 

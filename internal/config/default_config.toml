@@ -179,7 +179,7 @@ sample_history = 5       # how many recent samples are retained per session
 # MCP manager (issue #1252). Each value is a plain count; the unit is in the key
 # name (lines, bytes, runes). A value < 1 falls back to the default shown.
 [limits]
-log_lines             = 300      # default trailing lines for `gr logs`, `gr mcp logs`, attach replay, MCP log reads (when no -n)
+log_lines             = 300      # default trailing lines for `gr logs`, `gr mcp logs`, attach replay, attach scroll mode, MCP log reads (when no -n)
 wait_scan_lines       = 500      # scrollback lines `gr wait --contains` scans for an already-present match
 wait_buffer_bytes     = 65536    # partial-line buffer cap in the live `gr wait` matcher (64 KiB)
 mcp_log_read_bytes    = 1048576  # max trailing bytes read from an MCP log file before splitting into lines (1 MiB)

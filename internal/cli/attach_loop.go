@@ -668,8 +668,23 @@ func (l *attachLoop) onRenameSession() (bool, error) {
 	return false, nil
 }
 
+// scrollbackFetchLines resolves how many trailing lines attach scroll mode
+// requests. Scroll mode is an attach replay surface, so it shares the [limits]
+// log_lines policy with `gr logs` and the on-attach scrollback replay (issue
+// #1320) instead of a hard-coded 2,000 that ignored the effective config. A
+// positive configured value is requested explicitly; a zero/unset/invalid value
+// is sent as 0 so the daemon applies its own LogLinesOrDefault default rather
+// than the client duplicating the literal (daemon-side default delegation).
+func scrollbackFetchLines() int {
+	if cfg == nil || cfg.Limits.LogLines < 1 {
+		return 0
+	}
+
+	return cfg.Limits.LogLines
+}
+
 func (l *attachLoop) onScrollMode() (bool, error) {
-	scrollback := client.FetchScrollback(cfg, paths, cfgFile, l.sessionID, 2000)
+	scrollback := client.FetchScrollback(cfg, paths, cfgFile, l.sessionID, scrollbackFetchLines())
 	client.RunScrollView("Scrollback — "+l.info.Name, scrollback, scrollKeysFromConfig())
 
 	nc, err := freshClient()

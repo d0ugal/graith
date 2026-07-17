@@ -1579,8 +1579,9 @@ func (r ResourceMonitor) SampleHistoryOrDefault() int {
 type LimitsConfig struct {
 	// LogLines is the default number of trailing output lines shown when a
 	// `lines`/`-n` count is not given: `gr logs`, `gr mcp logs`, the scrollback
-	// replayed to a client on attach, and the MCP log reader all share it. Values
-	// < 1 fall back to the default (LimitsLogLinesDefault).
+	// replayed to a client on attach, attach scroll mode (ctrl+b scroll), and the
+	// MCP log reader all share it. Values < 1 fall back to the default
+	// (LimitsLogLinesDefault).
 	LogLines int `toml:"log_lines"`
 	// WaitScanLines bounds how much existing scrollback `gr wait --contains`
 	// scans for an already-present match before it starts following live output.
