@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/daemon"
@@ -132,37 +131,36 @@ func execUpgrade(successMsg string) error {
 	_ = c.SendControl("upgrade", upgradeMsg())
 
 	resp, err := c.ReadControlResponse()
-	if err != nil {
-		// Connection dropped — expected, the daemon exec'd itself
-		c.Close()
+	c.Close()
 
-		for range 20 {
-			time.Sleep(250 * time.Millisecond)
+	// A decodable "error" reply means the daemon refused the upgrade outright;
+	// surface it. Otherwise the connection either dropped (the daemon exec'd
+	// itself) or we got "upgrading" — both mean the replacement daemon is coming
+	// up, so fall through to the readiness wait.
+	if err == nil && resp.Type == "error" {
+		var e protocol.ErrorMsg
 
-			conn, err := dialLocalDaemonSocket()
-			if err == nil {
-				_ = conn.Close()
-				break
-			}
-		}
-	} else {
-		c.Close()
+		_ = protocol.DecodePayload(resp, &e)
 
-		if resp.Type == "error" {
-			var e protocol.ErrorMsg
-
-			_ = protocol.DecodePayload(resp, &e)
-
-			return fmt.Errorf("%s", e.Message)
-		}
-		// Got "upgrading" — give the daemon a moment to exec.
-		time.Sleep(500 * time.Millisecond)
+		return fmt.Errorf("%s", e.Message)
 	}
 
-	// Verify the daemon is running our version. Old daemons that don't
-	// understand ExecPath will exec back into the old binary.
-	if v := probeDaemonVersion(); v != "" && v != version.Version {
-		return fmt.Errorf("daemon exec'd into %s instead of %s", v, version.Version)
+	// Wait for the replacement daemon to report our version. exec preserves the
+	// inherited listening socket, so a bare dial can't distinguish the old daemon
+	// from the new one — the version probe is the real readiness signal. Bound
+	// the wait by the effective [connection] start policy (start_timeout /
+	// start_poll_interval) instead of a fixed 20×250ms retry count (issue #1319).
+	// The probe's own dial and handshake deadlines stay distinct from this budget.
+	if v, ready := waitForLocalDaemonVersion(version.Version); !ready {
+		// Old daemons that don't understand ExecPath exec back into the old binary;
+		// report that concrete mismatch. An empty probe means the replacement never
+		// became reachable within the budget — a failure, not a silent success, so
+		// the caller falls back to a clean restart.
+		if v != "" {
+			return fmt.Errorf("daemon exec'd into %s instead of %s", v, version.Version)
+		}
+
+		return fmt.Errorf("daemon did not report version %s within the start budget", version.Version)
 	}
 
 	out.Printf("%s\n", successMsg)
@@ -210,13 +208,14 @@ func restartClean() error {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 	}
 
-	for range 20 {
-		if _, err := os.Stat(paths.SocketPath); os.IsNotExist(err) {
-			break
-		}
+	// Wait for the stopped daemon's socket to disappear, bounded by the effective
+	// [connection] start policy rather than a fixed 20×100ms retry count (issue
+	// #1319).
+	pollLocalDaemon(func() bool {
+		_, err := os.Stat(paths.SocketPath)
 
-		time.Sleep(100 * time.Millisecond)
-	}
+		return os.IsNotExist(err)
+	})
 
 	if _, err := os.Stat(paths.SocketPath); err == nil {
 		if conn, err := dialLocalDaemonSocket(); err == nil {

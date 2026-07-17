@@ -244,8 +244,8 @@ username_timeout = "15s"  # bounds GitHub-username discovery (may invoke `gh`)
 [connection]
 dial_timeout = "500ms"            # bounds a single Unix-socket dial to the local daemon
 handshake_timeout = "5s"          # bounds the local-daemon handshake exchange
-start_timeout = "5s"              # how long to wait for a freshly spawned daemon to answer
-start_poll_interval = "50ms"      # how often to re-probe the socket while the daemon starts
+start_timeout = "5s"              # budget for daemon readiness/lifecycle waits (autostart, restart/upgrade, socket teardown)
+start_poll_interval = "50ms"      # how often those waits re-probe the socket/version
 reconnect_timeout = "10s"         # bounds attach disconnect-recovery before giving up
 reconnect_interval = "250ms"      # how often the attach recovery loop re-probes the daemon
 remote_dial_timeout = "10s"       # bounds the TCP dial to a paired remote daemon

@@ -201,17 +201,54 @@ func requestUpgrade(c *Client) bool {
 	return true
 }
 
-func waitForDaemon(sockPath string) bool {
-	for range 20 {
-		time.Sleep(250 * time.Millisecond)
+// pollDaemonReady polls ready at daemonStartPollInterval until it returns true
+// or the daemonStartTimeout budget elapses, checking once before the first sleep
+// so an already-ready daemon returns immediately. It shares the effective
+// [connection] start policy (start_timeout / start_poll_interval) with
+// EnsureDaemon so post-exec readiness and stop/socket-disappearance lifecycle
+// waits honour a configured startup allowance instead of a fixed retry count
+// (issue #1319). Any dial or handshake performed inside ready keeps its own
+// distinct deadline (daemonDialTimeout / daemonHandshakeTimeout), separate from
+// this aggregate startup budget.
+func pollDaemonReady(ready func() bool) bool {
+	deadline := time.Now().Add(daemonStartTimeout)
 
-		if conn, err := net.DialTimeout("unix", sockPath, daemonDialTimeout); err == nil {
-			_ = conn.Close()
+	for {
+		if ready() {
 			return true
 		}
-	}
 
-	return false
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false
+		}
+
+		// Cap the sleep to the remaining budget so a poll interval larger than the
+		// start timeout can't overshoot the aggregate deadline (#1319 review).
+		sleep := daemonStartPollInterval
+		if sleep > remaining {
+			sleep = remaining
+		}
+
+		time.Sleep(sleep)
+	}
+}
+
+// waitForDaemon waits for a daemon to accept a socket dial again after an exec
+// upgrade, bounded by the effective start policy rather than a fixed 20×250ms
+// retry count. The dial keeps its distinct daemonDialTimeout deadline and routes
+// through the dialLocalDaemon seam so tests can observe the wait deterministically.
+func waitForDaemon(sockPath string) bool {
+	return pollDaemonReady(func() bool {
+		conn, err := dialLocalDaemon("unix", sockPath, daemonDialTimeout)
+		if err != nil {
+			return false
+		}
+
+		_ = conn.Close()
+
+		return true
+	})
 }
 
 func stopDaemonByPID(pidFile string) bool {
@@ -230,25 +267,25 @@ func stopDaemonByPID(pidFile string) bool {
 	}
 
 	_ = syscall.Kill(pid, syscall.SIGTERM)
-	for range 50 {
-		if syscall.Kill(pid, 0) != nil {
-			return true
-		}
 
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	return false
+	// Wait for the process to actually exit, bounded by the same effective start
+	// policy as the other lifecycle waits rather than a fixed 50×100ms retry
+	// count (issue #1319).
+	return pollDaemonReady(func() bool {
+		return syscall.Kill(pid, 0) != nil
+	})
 }
 
+// waitForSocketGone waits for a stopped daemon's socket to disappear, bounded by
+// the effective start policy rather than a fixed 20×100ms retry count (issue
+// #1319). It is best-effort: it returns once the socket is gone or the budget
+// elapses.
 func waitForSocketGone(sockPath string) {
-	for range 20 {
-		if _, err := os.Stat(sockPath); os.IsNotExist(err) {
-			return
-		}
+	_ = pollDaemonReady(func() bool {
+		_, err := os.Stat(sockPath)
 
-		time.Sleep(100 * time.Millisecond)
-	}
+		return os.IsNotExist(err)
+	})
 }
 
 // ConnectFast is a fast-path connect for hooks. It dials the daemon socket
