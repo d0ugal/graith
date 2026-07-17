@@ -49,6 +49,10 @@ func watchTrigger(name string, watch WatchConfig, action ActionConfig) TriggerCo
 	return TriggerConfig{Name: name, Watch: &watch, Action: action}
 }
 
+func gcxTrigger(name string, gcx GCXConfig, action ActionConfig) TriggerConfig {
+	return TriggerConfig{Name: name, GCX: &gcx, Action: action}
+}
+
 func validateOne(t TriggerConfig, orchestrator bool) []error {
 	c := &Config{Orchestrator: OrchestratorConfig{Enabled: orchestrator}, Triggers: []TriggerConfig{t}}
 	return c.validateTriggers()
@@ -111,6 +115,13 @@ func TestValidateTriggers_Valid(t *testing.T) {
 			orchestrator: true,
 		},
 		{
+			name: "gcx alert message",
+			trig: gcxTrigger("canny-oncall", GCXConfig{
+				Context: "croft", OnCallUserID: "U-BRAW", ScheduleIDs: []string{"S-BRAW"},
+				TeamIDs: []string{"T-BRAW"}, States: []string{"firing"},
+			}, ActionConfig{Type: ActionMessage, Body: "{gcx_event_id}", Deliver: DeliverConfig{Topic: "blether"}}),
+		},
+		{
 			name: "schedule tracker full knobs",
 			trig: schedTrigger("canny-tracker", ScheduleConfig{Cron: "@hourly"}, ActionConfig{Type: ActionTracker, Prompt: "{issue_title}", Tracker: &TrackerConfig{
 				Provider: "github", Repo: "/tmp/croft", ActiveState: "open", ActiveLabels: []string{"thrawn"},
@@ -138,6 +149,7 @@ func TestValidateTriggers_Invalid(t *testing.T) {
 		{"no name", schedTrigger("", ScheduleConfig{Cron: "0 9 * * *"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "blether"}}), false, "name is required"},
 		{"no source", TriggerConfig{Name: "haar", Action: ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}}, false, "exactly one of"},
 		{"both sources", TriggerConfig{Name: "haar", Schedule: &ScheduleConfig{Cron: "@daily"}, Watch: &WatchConfig{Repo: "/r"}, Action: ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}}, false, "both set"},
+		{"gcx plus schedule", TriggerConfig{Name: "haar", Schedule: &ScheduleConfig{Cron: "@daily"}, GCX: &GCXConfig{Context: "croft"}, Action: ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}}, false, "both set"},
 		{"cron and every", schedTrigger("fash", ScheduleConfig{Cron: "@daily", Every: "5m"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "exactly one of cron or every"},
 		{"neither cron nor every", schedTrigger("fash", ScheduleConfig{}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "neither set"},
 		{"timezone with every", schedTrigger("fash", ScheduleConfig{Every: "5m", Timezone: "Europe/London"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "timezone is only valid with cron"},
@@ -163,6 +175,18 @@ func TestValidateTriggers_Invalid(t *testing.T) {
 		{"seconds field rejected", schedTrigger("fash", ScheduleConfig{Cron: "0 0 9 * * *"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "must have exactly 5 fields"},
 		{"bad timezone", schedTrigger("fash", ScheduleConfig{Cron: "@daily", Timezone: "Europe/Londn"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "timezone"},
 		{"zero debounce", watchTrigger("haar", WatchConfig{Repo: "/r", Debounce: "0s"}, ActionConfig{Type: ActionCommand, Command: "x"}), false, "debounce must be > 0"},
+		{"gcx missing context", gcxTrigger("haar", GCXConfig{}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "context is required"},
+		{"gcx bad event", gcxTrigger("haar", GCXConfig{Context: "croft", Event: "incident"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "v1 supports"},
+		{"gcx user without schedules", gcxTrigger("haar", GCXConfig{Context: "croft", OnCallUserID: "U-BRAW"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "must be set together"},
+		{"gcx schedules without user", gcxTrigger("haar", GCXConfig{Context: "croft", ScheduleIDs: []string{"S-BRAW"}}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "must be set together"},
+		{"gcx zero cadence", gcxTrigger("haar", GCXConfig{Context: "croft", Every: "0s"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "every must be > 0"},
+		{"gcx bad state", gcxTrigger("haar", GCXConfig{Context: "croft", States: []string{"wheesht"}}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "state \"wheesht\" is invalid"},
+		{"gcx duplicate state", gcxTrigger("haar", GCXConfig{Context: "croft", States: []string{"firing", "firing"}}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "is duplicated"},
+		{"gcx limit too high", gcxTrigger("haar", GCXConfig{Context: "croft", Limit: 101}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "must not exceed 100"},
+		{"gcx empty schedule ID", gcxTrigger("haar", GCXConfig{Context: "croft", OnCallUserID: "U-BRAW", ScheduleIDs: []string{""}}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "must not contain an empty ID"},
+		{"gcx duplicate team ID", gcxTrigger("haar", GCXConfig{Context: "croft", TeamIDs: []string{"T-BRAW", "T-BRAW"}}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "contains duplicate ID"},
+		{"gcx overlap allow", TriggerConfig{Name: "haar", GCX: &GCXConfig{Context: "croft"}, Action: ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}, Policy: TriggerPolicy{Overlap: OverlapAllow}}, false, "requires policy.overlap = skip"},
+		{"gcx command no repo", gcxTrigger("haar", GCXConfig{Context: "croft"}, ActionConfig{Type: ActionCommand, Command: "true"}), false, "requires action.repo"},
 		{"zero timeout", schedTrigger("haar", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionCommand, Command: "x", Repo: "/tmp/x", Timeout: "0s"}), false, "timeout must be > 0"},
 		{"bad rate_limit", TriggerConfig{Name: "rl", Schedule: &ScheduleConfig{Cron: "@daily"}, Action: ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}, Policy: TriggerPolicy{RateLimit: "0/1h"}}, false, "rate_limit"},
 		{"auto_cleanup bad string", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Prompt: "hi", AutoCleanup: "sometimes"}), true, "auto_cleanup \"sometimes\" is invalid"},
@@ -327,6 +351,15 @@ func TestTriggerHelpers(t *testing.T) {
 	if got := (TriggersRuntime{}).MaxConcurrentOr(); got != 4 {
 		t.Errorf("default max_concurrent = %d, want 4", got)
 	}
+
+	gcx := GCXConfig{}
+	if gcx.EventOr() != GCXEventOnCallAlertGroup || gcx.EveryDuration() != time.Minute || gcx.TimeoutDuration() != 30*time.Second || gcx.MaxAgeDuration() != 24*time.Hour || gcx.LimitOr() != 100 {
+		t.Errorf("unexpected gcx defaults: event=%q every=%v timeout=%v max_age=%v limit=%d", gcx.EventOr(), gcx.EveryDuration(), gcx.TimeoutDuration(), gcx.MaxAgeDuration(), gcx.LimitOr())
+	}
+
+	if got := gcx.StatesOr(); len(got) != 1 || got[0] != "firing" {
+		t.Errorf("default gcx states = %v, want [firing]", got)
+	}
 }
 
 func TestAutoCleanupMode(t *testing.T) {
@@ -396,6 +429,48 @@ func TestAutoCleanupDecodes(t *testing.T) {
 				t.Fatalf("mode = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestGCXTriggerDecodes(t *testing.T) {
+	var cfg Config
+
+	err := toml.Unmarshal([]byte(`
+[[trigger]]
+name = "canny-oncall"
+[trigger.gcx]
+event = "oncall_alert_group"
+context = "croft"
+every = "2m"
+timeout = "20s"
+oncall_user_id = "U-BRAW"
+schedule_ids = ["S-BRAW"]
+team_ids = ["T-BRAW"]
+integration_ids = ["I-BRAW"]
+states = ["firing"]
+max_age = "12h"
+limit = 25
+[trigger.action]
+type = "message"
+body = "{gcx_event_id}"
+[trigger.action.deliver]
+topic = "blether"
+`), &cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if errs := cfg.validateTriggers(); len(errs) != 0 {
+		t.Fatalf("decoded trigger invalid: %v", errs)
+	}
+
+	if len(cfg.Triggers) != 1 || cfg.Triggers[0].GCX == nil {
+		t.Fatalf("decoded triggers = %+v", cfg.Triggers)
+	}
+
+	gcx := cfg.Triggers[0].GCX
+	if gcx.Context != "croft" || gcx.Every != "2m" || gcx.Limit != 25 || !slices.Equal(gcx.ScheduleIDs, []string{"S-BRAW"}) {
+		t.Fatalf("decoded gcx = %+v", gcx)
 	}
 }
 

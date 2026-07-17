@@ -80,6 +80,7 @@ func TestEffectiveTOMLMaterializesRuntimeDefaults(t *testing.T) {
 	}{
 		{"git", renderedTools.Git, tools.Git()},
 		{"gh", renderedTools.GH, tools.GH()},
+		{"gcx", renderedTools.GCX, tools.GCX()},
 		{"shell", renderedTools.Shell, tools.Shell()},
 		{"osascript", renderedTools.OSAScript, tools.OSAScript()},
 		{"ps", renderedTools.PS, tools.PS()},
@@ -110,6 +111,7 @@ func TestDiffFromDefaultsIgnoresExplicitRuntimeDefaults(t *testing.T) {
 	cfg.Tools = ToolsConfig{
 		Git:       toolDefaults.Git,
 		GH:        toolDefaults.GH,
+		GCX:       toolDefaults.GCX,
 		Shell:     toolDefaults.Shell,
 		OSAScript: toolDefaults.OSAScript,
 		PS:        toolDefaults.PS,

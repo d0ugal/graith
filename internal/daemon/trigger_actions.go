@@ -308,7 +308,12 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 		repo = "" // mirror sessions don't create their own repo worktree
 	}
 
-	name := triggerReactorName(t.Name, fc.sessionName)
+	suffix := fc.sessionName
+	if fc.reactorSuffix != "" {
+		suffix = fc.reactorSuffix
+	}
+
+	name := triggerReactorName(t.Name, suffix)
 
 	//nolint:contextcheck // Create spawns a PTY-backed session that outlives the fire ctx (matches scenario start).
 	sess, err := sm.createTriggerSession(createTriggerReq{

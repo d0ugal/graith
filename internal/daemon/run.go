@@ -261,6 +261,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	go sm.RunTodoSweepLoop(ctx)
 	go sm.RunTriggerLoop(ctx)
 	go sm.RunFileWatchLoop(ctx)
+	go sm.RunGCXTriggerLoop(ctx)
 	go sm.RunTokenLoop(ctx)
 
 	go sm.orchestratorSupervisor(ctx, sm.orchestratorExitCh)

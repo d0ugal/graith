@@ -115,6 +115,7 @@ func resolveRenderedDefaults(cfg *Config) *Config {
 	toolDefaults := tools.Defaults()
 	fillToolDefault(&c.Tools.Git, toolDefaults.Git)
 	fillToolDefault(&c.Tools.GH, toolDefaults.GH)
+	fillToolDefault(&c.Tools.GCX, toolDefaults.GCX)
 	fillToolDefault(&c.Tools.Shell, toolDefaults.Shell)
 	fillToolDefault(&c.Tools.OSAScript, toolDefaults.OSAScript)
 	fillToolDefault(&c.Tools.PS, toolDefaults.PS)

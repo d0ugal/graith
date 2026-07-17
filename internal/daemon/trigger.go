@@ -22,6 +22,7 @@ const (
 	causeCatchUp  = "catch_up"
 	causeManual   = "manual"
 	causeFile     = "file"
+	causeGCX      = "gcx"
 )
 
 // RunTriggerLoop is the daemon-owned schedule (#592) trigger loop. Modeled on
@@ -382,12 +383,14 @@ func (sm *SessionManager) fireSchedule(ctx context.Context, name, cause string) 
 // fireContext carries per-fire data (source session, changed files) to the
 // action executor and template expander.
 type fireContext struct {
-	cause        string
-	now          time.Time
-	sessionID    string   // watch: the bound source session
-	sessionName  string   // watch
-	worktree     string   // watch
-	changedFiles []string // watch
+	cause         string
+	now           time.Time
+	sessionID     string   // watch: the bound source session
+	sessionName   string   // watch
+	worktree      string   // watch
+	changedFiles  []string // watch
+	gcxEvent      *gcxEvent
+	reactorSuffix string // source-specific stable suffix for spawned session names
 }
 
 // fireAction dispatches to the per-type executor and returns a result summary.
@@ -413,7 +416,7 @@ func (sm *SessionManager) fireAction(ctx context.Context, t *config.TriggerConfi
 func (sm *SessionManager) triggerVars(t *config.TriggerConfig, fc fireContext) config.TriggerVars {
 	changed := strings.Join(fc.changedFiles, ", ")
 
-	return config.TriggerVars{
+	vars := config.TriggerVars{
 		Name:         t.Name,
 		Date:         fc.now.Format("2006-01-02"),
 		Datetime:     fc.now.Format(time.RFC3339),
@@ -423,6 +426,18 @@ func (sm *SessionManager) triggerVars(t *config.TriggerConfig, fc fireContext) c
 		ChangedFiles: changed,
 		ChangeCount:  strconv.Itoa(len(fc.changedFiles)),
 	}
+
+	if fc.gcxEvent != nil {
+		vars.GCXEventID = fc.gcxEvent.ID
+		vars.GCXEventKind = fc.gcxEvent.Kind
+		vars.GCXEventState = fc.gcxEvent.State
+		vars.GCXEventURL = fc.gcxEvent.URL
+		vars.GCXTeamID = fc.gcxEvent.TeamID
+		vars.GCXIntegrationID = fc.gcxEvent.IntegrationID
+		vars.GCXStartedAt = fc.gcxEvent.StartedAt
+	}
+
+	return vars
 }
 
 // --- run-state persistence (under sm.mu) ---
@@ -437,6 +452,12 @@ func (sm *SessionManager) getTriggerRuntime(name string) *TriggerRuntimeState {
 	}
 
 	cp := *rt
+	if rt.GCXSeen != nil {
+		cp.GCXSeen = make(map[string]time.Time, len(rt.GCXSeen))
+		for id, observedAt := range rt.GCXSeen {
+			cp.GCXSeen[id] = observedAt
+		}
+	}
 
 	return &cp
 }
@@ -529,9 +550,10 @@ func triggerFingerprint(t *config.TriggerConfig) string {
 	payload := struct {
 		Schedule *config.ScheduleConfig
 		Watch    *config.WatchConfig
+		GCX      *config.GCXConfig `json:"GCX,omitempty"`
 		Action   config.ActionConfig
 		Policy   config.TriggerPolicy
-	}{t.Schedule, t.Watch, t.Action, t.Policy}
+	}{t.Schedule, t.Watch, t.GCX, t.Action, t.Policy}
 
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -705,7 +727,7 @@ func (sm *SessionManager) triggerRecord(t *config.TriggerConfig) protocol.Trigge
 			rec.NextFire = nf.Format(time.RFC3339)
 		}
 		sm.triggers.mu.Unlock()
-	} else {
+	} else if t.IsWatch() {
 		rec.Source = "watch"
 		if t.Watch.Repo != "" {
 			rec.WatchScope = "repo:" + t.Watch.Repo
@@ -726,6 +748,24 @@ func (sm *SessionManager) triggerRecord(t *config.TriggerConfig) protocol.Trigge
 					}
 				}
 			}
+		}
+		sm.triggers.mu.Unlock()
+	} else if t.IsGCX() {
+		rec.Source = "gcx"
+
+		cadence := t.GCX.Every
+		if cadence == "" {
+			cadence = "1m"
+		}
+
+		rec.GCXScope = t.GCX.EventOr() + " every " + cadence
+		if len(t.GCX.ScheduleIDs) > 0 {
+			rec.GCXScope += fmt.Sprintf("; on-call gate across %d schedule(s)", len(t.GCX.ScheduleIDs))
+		}
+
+		sm.triggers.mu.Lock()
+		if binding := sm.triggers.gcxBindings[t.Name]; binding != nil && !binding.nextPoll.IsZero() {
+			rec.NextPoll = binding.nextPoll.Format(time.RFC3339)
 		}
 		sm.triggers.mu.Unlock()
 	}
@@ -782,6 +822,10 @@ func (sm *SessionManager) TriggerRunNow(ctx context.Context, name string) error 
 
 	if t.IsWatch() {
 		return fmt.Errorf("trigger %q is a watch trigger; it fires on file changes, not on demand", name)
+	}
+
+	if t.IsGCX() {
+		return fmt.Errorf("trigger %q is a gcx event trigger; it fires on newly observed external events, not on demand", name)
 	}
 
 	// Respect overlap: reserve through the same guard the scheduled path uses so a

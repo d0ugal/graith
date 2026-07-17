@@ -25,23 +25,40 @@ type TriggerVars struct {
 	IssueBody   string
 	IssueURL    string
 	IssueLabels string // comma-separated label names (or "")
+	// GCX source: stable, structured event metadata. Raw alert title, labels,
+	// annotations, and subject are deliberately excluded because external alert
+	// text is untrusted input to an autonomous agent.
+	GCXEventID       string
+	GCXEventKind     string
+	GCXEventState    string
+	GCXEventURL      string
+	GCXTeamID        string
+	GCXIntegrationID string
+	GCXStartedAt     string
 }
 
 func (v TriggerVars) toMap() map[string]string {
 	return map[string]string{
-		"name":          v.Name,
-		"date":          v.Date,
-		"datetime":      v.Datetime,
-		"fire_time":     v.FireTime,
-		"session_name":  v.SessionName,
-		"worktree_path": v.WorktreePath,
-		"changed_files": v.ChangedFiles,
-		"change_count":  v.ChangeCount,
-		"issue_number":  v.IssueNumber,
-		"issue_title":   v.IssueTitle,
-		"issue_body":    v.IssueBody,
-		"issue_url":     v.IssueURL,
-		"issue_labels":  v.IssueLabels,
+		"name":               v.Name,
+		"date":               v.Date,
+		"datetime":           v.Datetime,
+		"fire_time":          v.FireTime,
+		"session_name":       v.SessionName,
+		"worktree_path":      v.WorktreePath,
+		"changed_files":      v.ChangedFiles,
+		"change_count":       v.ChangeCount,
+		"issue_number":       v.IssueNumber,
+		"issue_title":        v.IssueTitle,
+		"issue_body":         v.IssueBody,
+		"issue_url":          v.IssueURL,
+		"issue_labels":       v.IssueLabels,
+		"gcx_event_id":       v.GCXEventID,
+		"gcx_event_kind":     v.GCXEventKind,
+		"gcx_event_state":    v.GCXEventState,
+		"gcx_event_url":      v.GCXEventURL,
+		"gcx_team_id":        v.GCXTeamID,
+		"gcx_integration_id": v.GCXIntegrationID,
+		"gcx_started_at":     v.GCXStartedAt,
 	}
 }
 
