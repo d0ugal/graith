@@ -680,6 +680,7 @@ func TestMessaging(t *testing.T) {
 	if err := protocol.DecodePayload(msg1, &firstMessage); err != nil {
 		t.Fatalf("decode first message: %v", err)
 	}
+
 	if !firstMessage.NoReply {
 		t.Error("no_reply did not survive integration publish/read round trip")
 	}
@@ -693,6 +694,7 @@ func TestMessaging(t *testing.T) {
 	if err := protocol.DecodePayload(msg2, &secondMessage); err != nil {
 		t.Fatalf("decode second message: %v", err)
 	}
+
 	if secondMessage.NoReply {
 		t.Error("default message unexpectedly became no-reply")
 	}
