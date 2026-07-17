@@ -91,7 +91,12 @@ func TestConfigHandlerDiffReflectsCustomisation(t *testing.T) {
 func TestConfigHandlerRedactsEnvSecrets(t *testing.T) {
 	h := newTestHarness(t)
 
-	const envVal = "braw-fixture-val-42"
+	const (
+		envVal       = "braw-fixture-val-42"
+		nestedEnvVal = "dreich-nested-val-73"
+	)
+
+	h.addAuthenticatedSession(t, "canny-id", "canny", "tok-canny")
 
 	h.sm.mu.Lock()
 
@@ -107,11 +112,17 @@ func TestConfigHandlerRedactsEnvSecrets(t *testing.T) {
 
 	agent := h.sm.cfg.Agents["claude"]
 	agent.Env = map[string]string{"ANTHROPIC_API_KEY": envVal}
+	agent.MCPServers = map[string]config.MCPServerConfig{
+		"croft": {
+			Command: "npx",
+			Env:     map[string]string{"CROFT_TOKEN": nestedEnvVal},
+		},
+	}
 	h.sm.cfg.Agents["claude"] = agent
 
 	h.sm.mu.Unlock()
 
-	h.sendControl(t, "config", struct{}{})
+	h.sendControlWithToken(t, "config", struct{}{}, "tok-canny")
 	env := h.expectType(t, "config_response")
 
 	var resp protocol.ConfigResponseMsg
@@ -127,13 +138,33 @@ func TestConfigHandlerRedactsEnvSecrets(t *testing.T) {
 		t.Errorf("diff leaked an env value:\n%s", resp.DiffFromDefaults)
 	}
 
+	if strings.Contains(resp.EffectiveTOML, nestedEnvVal) {
+		t.Errorf("effective TOML leaked a nested MCP env value:\n%s", resp.EffectiveTOML)
+	}
+
+	if strings.Contains(resp.DiffFromDefaults, nestedEnvVal) {
+		t.Errorf("diff leaked a nested MCP env value:\n%s", resp.DiffFromDefaults)
+	}
+
 	// The key is still visible (only the value is masked) so the shape is useful.
 	if !strings.Contains(resp.EffectiveTOML, "GITHUB_TOKEN") || !strings.Contains(resp.EffectiveTOML, config.RedactedMask) {
 		t.Errorf("expected redacted env key with %q mask:\n%s", config.RedactedMask, resp.EffectiveTOML)
 	}
 
+	if !strings.Contains(resp.EffectiveTOML, "CROFT_TOKEN") {
+		t.Errorf("expected nested MCP env key to remain visible:\n%s", resp.EffectiveTOML)
+	}
+
+	if !strings.Contains(resp.DiffFromDefaults, "CROFT_TOKEN") || !strings.Contains(resp.DiffFromDefaults, config.RedactedMask) {
+		t.Errorf("expected redacted nested MCP env key with %q mask in diff:\n%s", config.RedactedMask, resp.DiffFromDefaults)
+	}
+
 	// The live config must not have been mutated by redaction.
 	if got := h.sm.Config().MCPServers[0].Env["GITHUB_TOKEN"]; got != envVal {
 		t.Errorf("live config env was mutated by redaction: got %q, want %q", got, envVal)
+	}
+
+	if got := h.sm.Config().Agents["claude"].MCPServers["croft"].Env["CROFT_TOKEN"]; got != nestedEnvVal {
+		t.Errorf("live nested MCP env was mutated by redaction: got %q, want %q", got, nestedEnvVal)
 	}
 }
