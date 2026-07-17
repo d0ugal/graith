@@ -1,8 +1,14 @@
 package daemon
 
 import (
+	"bytes"
+	"encoding/json"
+	"log/slog"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -117,6 +123,145 @@ func TestCoverSoftDeleteWithChildren(t *testing.T) {
 }
 
 // --- type -----------------------------------------------------------------
+
+type typeWaitCall struct {
+	idleTimeout time.Duration
+	maxWait     time.Duration
+}
+
+type typeWaitDriver struct {
+	SessionDriver
+
+	waitResult bool
+	waitCalls  []typeWaitCall
+	writes     [][]byte
+	pokes      int
+}
+
+func (d *typeWaitDriver) WaitForUserIdle(idleTimeout, maxWait time.Duration) bool {
+	d.waitCalls = append(d.waitCalls, typeWaitCall{idleTimeout: idleTimeout, maxWait: maxWait})
+
+	return d.waitResult
+}
+
+func (d *typeWaitDriver) WriteInput(data []byte) error {
+	d.writes = append(d.writes, append([]byte(nil), data...))
+
+	return nil
+}
+
+func (d *typeWaitDriver) WriteInputAndSubmit(data []byte) error {
+	d.writes = append(d.writes, append([]byte(nil), data...))
+
+	return nil
+}
+
+func (d *typeWaitDriver) Poke() {
+	d.pokes++
+}
+
+func typeEnvelope(t *testing.T, sessionID, input string) protocol.Envelope {
+	t.Helper()
+
+	payload, err := json.Marshal(protocol.TypeMsg{SessionID: sessionID, Input: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return protocol.Envelope{Type: "type", Payload: payload}
+}
+
+func newTypeWaitManager(t *testing.T, cfg *config.Config, driver SessionDriver, log *slog.Logger) *SessionManager {
+	t.Helper()
+
+	sm := NewSessionManager(cfg, config.Paths{}, log)
+	sm.mu.Lock()
+	sm.state.Sessions["braw-id"] = &SessionState{ID: "braw-id", Name: "braw", Status: StatusRunning}
+	sm.sessions["braw-id"] = driver
+	sm.attachedClients["braw-id"] = &attachedClient{}
+	sm.mu.Unlock()
+
+	return sm
+}
+
+func TestTypeUsesConfiguredIdleWaitSnapshotAfterReload(t *testing.T) {
+	cfg := config.Default()
+	cfg.Notifications.Timing.InboxIdleTimeout = "37ms"
+	cfg.Notifications.Timing.InboxMaxWait = "91ms"
+
+	driver := &typeWaitDriver{waitResult: true}
+	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	sm := newTypeWaitManager(t, cfg, driver, log)
+	msg := typeEnvelope(t, "braw-id", "help")
+	send := func(string, any) {}
+	auth := authContext{role: roleLocalHuman}
+
+	handleType(sm, auth, send, msg, log)
+
+	reloaded := *sm.Config()
+	reloaded.Notifications.Timing.InboxIdleTimeout = "43ms"
+	reloaded.Notifications.Timing.InboxMaxWait = "109ms"
+	sm.applyConfig(&reloaded)
+
+	handleType(sm, auth, send, msg, log)
+
+	want := []typeWaitCall{
+		{idleTimeout: 37 * time.Millisecond, maxWait: 91 * time.Millisecond},
+		{idleTimeout: 43 * time.Millisecond, maxWait: 109 * time.Millisecond},
+	}
+	if len(driver.waitCalls) != len(want) {
+		t.Fatalf("WaitForUserIdle calls = %d, want %d", len(driver.waitCalls), len(want))
+	}
+
+	for i := range want {
+		if driver.waitCalls[i] != want[i] {
+			t.Errorf("WaitForUserIdle call %d = %+v, want %+v", i, driver.waitCalls[i], want[i])
+		}
+	}
+}
+
+func TestTypeMaxWaitWarnsAndStillInjects(t *testing.T) {
+	cfg := config.Default()
+	cfg.Notifications.Timing.InboxIdleTimeout = "31ms"
+	cfg.Notifications.Timing.InboxMaxWait = "79ms"
+
+	var logs bytes.Buffer
+
+	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	driver := &typeWaitDriver{waitResult: false}
+	sm := newTypeWaitManager(t, cfg, driver, log)
+
+	var sent []string
+
+	handleType(sm, authContext{role: roleLocalHuman}, func(msgType string, _ any) {
+		sent = append(sent, msgType)
+	}, typeEnvelope(t, "braw-id", "canny"), log)
+
+	if len(driver.waitCalls) != 1 {
+		t.Fatalf("WaitForUserIdle calls = %d, want 1", len(driver.waitCalls))
+	}
+
+	wantWait := typeWaitCall{idleTimeout: 31 * time.Millisecond, maxWait: 79 * time.Millisecond}
+	if driver.waitCalls[0] != wantWait {
+		t.Errorf("WaitForUserIdle call = %+v, want %+v", driver.waitCalls[0], wantWait)
+	}
+
+	if len(driver.writes) != 1 || string(driver.writes[0]) != "canny" {
+		t.Fatalf("injected writes = %q, want [canny]", driver.writes)
+	}
+
+	if driver.pokes != 1 {
+		t.Errorf("Poke calls = %d, want 1", driver.pokes)
+	}
+
+	if len(sent) != 1 || sent[0] != "typed" {
+		t.Errorf("responses = %v, want [typed]", sent)
+	}
+
+	if got := logs.String(); !strings.Contains(got, "max wait expired") || !strings.Contains(got, "braw-id") {
+		t.Errorf("warning missing max-wait context:\n%s", got)
+	}
+}
 
 // TestCoverTypeSessionNotFound verifies gr type to a session with no live PTY
 // errors.

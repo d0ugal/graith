@@ -2728,7 +2728,7 @@ type Notifications struct {
 	// High-priority notifications bypass quiet hours.
 	QuietHoursStart string `toml:"quiet_hours_start"`
 	QuietHoursEnd   string `toml:"quiet_hours_end"`
-	// Timing carries the low-level coalescing, dispatch, and inbox-notification
+	// Timing carries the low-level coalescing, dispatch, and PTY-injection
 	// timing knobs under [notifications.timing]. Every field is optional and
 	// resolves to its documented default through the NotificationTiming accessors,
 	// so leaving the table out preserves the historical behaviour (issue #1245).
@@ -2750,12 +2750,13 @@ type NotificationTiming struct {
 	// the default (NotifyDispatchTimeoutDefault).
 	DispatchTimeout string `toml:"dispatch_timeout"`
 	// InboxIdleTimeout is how long an attached session's PTY must be free of user
-	// input before an inbox notification is injected, so it doesn't land mid-type.
-	// Empty or non-positive uses the default (NotifyInboxIdleTimeoutDefault).
+	// input before an inbox notification or `gr type` input is injected, so it
+	// doesn't land mid-type. Empty or non-positive uses the default
+	// (NotifyInboxIdleTimeoutDefault).
 	InboxIdleTimeout string `toml:"inbox_idle_timeout"`
 	// InboxMaxWait caps the total wait for user idle before an inbox notification
-	// is injected regardless. Empty or non-positive uses the default
-	// (NotifyInboxMaxWaitDefault).
+	// or `gr type` input is injected regardless. Empty or non-positive uses the
+	// default (NotifyInboxMaxWaitDefault).
 	InboxMaxWait string `toml:"inbox_max_wait"`
 	// InboxCooldown is the minimum interval between unread-inbox notifications to
 	// one session, throttling repeat nudges. Empty uses the default
@@ -2792,14 +2793,15 @@ func (t NotificationTiming) DispatchTimeoutDuration() time.Duration {
 }
 
 // InboxIdleTimeoutDuration returns the user-idle wait before an inbox
-// notification is injected, or the default when unset, unparseable, or
-// non-positive.
+// notification or `gr type` input is injected, or the default when unset,
+// unparseable, or non-positive.
 func (t NotificationTiming) InboxIdleTimeoutDuration() time.Duration {
 	return positiveDurationOrDefault(t.InboxIdleTimeout, NotifyInboxIdleTimeoutDefault)
 }
 
-// InboxMaxWaitDuration returns the cap on the user-idle wait, or the default
-// when unset, unparseable, or non-positive.
+// InboxMaxWaitDuration returns the cap on the shared inbox-notification and
+// `gr type` user-idle wait, or the default when unset, unparseable, or
+// non-positive.
 func (t NotificationTiming) InboxMaxWaitDuration() time.Duration {
 	return positiveDurationOrDefault(t.InboxMaxWait, NotifyInboxMaxWaitDefault)
 }
