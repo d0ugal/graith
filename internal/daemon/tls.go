@@ -12,10 +12,22 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"os"
 	"time"
+
+	"github.com/d0ugal/graith/internal/atomicfile"
 )
+
+// writeTLSFile persists one file of the remote TLS generation. It is a package
+// var wrapping the crash-safe atomicfile primitive so a reader always observes a
+// complete file (never a truncated one), and so tests can inject a write/rename/
+// fsync failure at a chosen generation step (issue #1327). The 0o600 perm keeps
+// the private key owner-only.
+var writeTLSFile = func(path string, data []byte) error {
+	return atomicfile.Write(path, data, 0o600)
+}
 
 // This file provides the TLS primitives for the interface-mode remote listener
 // (design §A.3): a persistent self-signed certificate and an SPKI pin. The pin
@@ -69,21 +81,27 @@ func selfSignedCert(key *ecdsa.PrivateKey, hostname string, now time.Time) ([]by
 }
 
 // loadOrCreateRemoteTLS loads the interface-mode TLS certificate and key from
-// certPath/keyPath, generating and persisting a fresh self-signed pair (keyed
-// on a new ECDSA P-256 key) if either is missing. It returns the TLS
-// certificate and its SPKI pin. Regenerating the certificate from the same
-// persisted key yields the same pin. now is passed for deterministic tests.
+// certPath/keyPath, generating and persisting a fresh self-signed pair (keyed on
+// a new ECDSA P-256 key) when there is no usable prior generation. It returns
+// the TLS certificate and its SPKI pin. Regenerating the certificate from the
+// same persisted key yields the same pin. now is passed for deterministic tests.
+//
+// Crash safety (issue #1327): the certificate and key are treated as one
+// recoverable generation. Both files are published with atomicfile (temp + fsync
+// + rename), so a reader observes a complete file, never a truncated one. When
+// the on-disk pair is missing, unreadable, or a half-written/mismatched
+// generation, a fresh pair is regenerated on this start rather than stranding
+// the remote listener in tls.X509KeyPair on every start.
 func loadOrCreateRemoteTLS(certPath, keyPath, hostname string, now time.Time) (tls.Certificate, string, error) {
-	if certPEM, err := os.ReadFile(certPath); err == nil {
-		if keyPEM, kerr := os.ReadFile(keyPath); kerr == nil {
-			cert, cerr := tls.X509KeyPair(certPEM, keyPEM)
-			if cerr != nil {
-				return tls.Certificate{}, "", fmt.Errorf("load tls keypair: %w", cerr)
-			}
+	certPEM, cerr := os.ReadFile(certPath)
+	keyPEM, kerr := os.ReadFile(keyPath)
 
-			leaf, perr := x509.ParseCertificate(cert.Certificate[0])
-			if perr != nil {
-				return tls.Certificate{}, "", fmt.Errorf("parse tls cert: %w", perr)
+	if cerr == nil && kerr == nil {
+		if cert, perr := tls.X509KeyPair(certPEM, keyPEM); perr == nil {
+			// A complete prior generation exists; keep serving it.
+			leaf, lerr := x509.ParseCertificate(cert.Certificate[0])
+			if lerr != nil {
+				return tls.Certificate{}, "", fmt.Errorf("parse tls cert: %w", lerr)
 			}
 
 			pin, perr := computeSPKIPin(leaf.PublicKey)
@@ -92,10 +110,26 @@ func loadOrCreateRemoteTLS(certPath, keyPath, hostname string, now time.Time) (t
 			}
 
 			return cert, pin, nil
+		} else {
+			// Both files present but they do not form a usable pair: an
+			// interrupted publication predating atomic writes, or externally
+			// corrupted material. There is no good pair to preserve, so fall
+			// through and regenerate a fresh generation on this start.
+			slog.Warn("remote TLS material on disk is not a usable pair; regenerating", "err", perr, "cert", certPath, "key", keyPath)
 		}
 	}
 
-	// Generate a fresh key + self-signed cert and persist both.
+	return generateRemoteTLS(certPath, keyPath, hostname, now)
+}
+
+// generateRemoteTLS mints a fresh ECDSA P-256 key and self-signed certificate
+// and publishes both crash-safely. The private key is written first, then the
+// certificate: if publication is interrupted between the two atomic renames, the
+// next start sees a certificate-less key, treats the generation as incomplete
+// (X509KeyPair or the missing-cert read fails), and regenerates — never loading
+// a mismatched pair (issue #1327). Because this path is reached only when no
+// usable prior generation exists, overwriting any leftover file is safe.
+func generateRemoteTLS(certPath, keyPath, hostname string, now time.Time) (tls.Certificate, string, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return tls.Certificate{}, "", fmt.Errorf("generate key: %w", err)
@@ -114,12 +148,12 @@ func loadOrCreateRemoteTLS(certPath, keyPath, hostname string, now time.Time) (t
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 
-	if err := os.WriteFile(certPath, certPEM, 0o600); err != nil {
-		return tls.Certificate{}, "", fmt.Errorf("write cert: %w", err)
+	if err := writeTLSFile(keyPath, keyPEM); err != nil {
+		return tls.Certificate{}, "", fmt.Errorf("write key: %w", err)
 	}
 
-	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
-		return tls.Certificate{}, "", fmt.Errorf("write key: %w", err)
+	if err := writeTLSFile(certPath, certPEM); err != nil {
+		return tls.Certificate{}, "", fmt.Errorf("write cert: %w", err)
 	}
 
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
