@@ -31,15 +31,16 @@ type Meta struct {
 
 // Session is one [[sessions]] entry.
 type Session struct {
-	Name       string `toml:"name"`
-	Repo       string `toml:"repo"`
-	Agent      string `toml:"agent"`
-	Model      string `toml:"model"`
-	Base       string `toml:"base"`
-	Role       string `toml:"role"`
-	Task       string `toml:"task"`
-	AgentHooks *bool  `toml:"agent_hooks"`
-	Shared     bool   `toml:"shared"`
+	Name       string   `toml:"name"`
+	Repo       string   `toml:"repo"`
+	Agent      string   `toml:"agent"`
+	Model      string   `toml:"model"`
+	Base       string   `toml:"base"`
+	Role       string   `toml:"role"`
+	Task       string   `toml:"task"`
+	DependsOn  []string `toml:"depends_on"`
+	AgentHooks *bool    `toml:"agent_hooks"`
+	Shared     bool     `toml:"shared"`
 	// Includes attaches extra worktrees to the session, in addition to any
 	// inherited from the repo's [[repos]] config. See issue #1046.
 	Includes []string `toml:"includes"`
@@ -73,6 +74,15 @@ func Parse(data []byte) (*File, error) {
 	}
 
 	if err := config.ValidateScenarioLifecycle(sf.Scenario.Lifecycle); err != nil {
+		return nil, err
+	}
+
+	depInputs := make([]protocol.ScenarioSessionInput, len(sf.Sessions))
+	for i, s := range sf.Sessions {
+		depInputs[i] = protocol.ScenarioSessionInput{Name: s.Name, Task: s.Task, DependsOn: s.DependsOn}
+	}
+
+	if err := ValidateSessionDependencies(depInputs); err != nil {
 		return nil, err
 	}
 
@@ -274,6 +284,7 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 			Base:       s.Base,
 			Role:       s.Role,
 			Task:       s.Task,
+			DependsOn:  append([]string(nil), s.DependsOn...),
 			AgentHooks: s.AgentHooks == nil || *s.AgentHooks,
 			Shared:     s.Shared,
 			Includes:   s.Includes,
@@ -281,5 +292,90 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 		})
 	}
 
+	if err := ValidateSessionDependencies(inputs); err != nil {
+		return nil, err
+	}
+
 	return inputs, nil
+}
+
+// ValidateSessionDependencies validates the member-name DAG carried by a
+// scenario definition. Both the CLI parser and daemon call it so a client
+// cannot bypass unknown-member, missing-task, or cycle checks.
+func ValidateSessionDependencies(sessions []protocol.ScenarioSessionInput) error {
+	byName := make(map[string]protocol.ScenarioSessionInput, len(sessions))
+	for _, s := range sessions {
+		if s.Name != "" {
+			byName[s.Name] = s
+		}
+	}
+
+	for _, s := range sessions {
+		if len(s.DependsOn) == 0 {
+			continue
+		}
+
+		if strings.TrimSpace(s.Task) == "" {
+			return fmt.Errorf("session %q: depends_on requires a task", s.Name)
+		}
+
+		seen := make(map[string]bool, len(s.DependsOn))
+		for _, depName := range s.DependsOn {
+			if depName == s.Name {
+				return fmt.Errorf("session %q: depends_on cannot reference itself", s.Name)
+			}
+
+			if seen[depName] {
+				return fmt.Errorf("session %q: duplicate depends_on member %q", s.Name, depName)
+			}
+
+			seen[depName] = true
+
+			dep, ok := byName[depName]
+			if !ok {
+				return fmt.Errorf("session %q: depends_on member %q is not defined", s.Name, depName)
+			}
+
+			if strings.TrimSpace(dep.Task) == "" {
+				return fmt.Errorf("session %q: depends_on member %q has no task to track", s.Name, depName)
+			}
+		}
+	}
+
+	const (
+		visiting = iota + 1
+		visited
+	)
+
+	state := make(map[string]int, len(sessions))
+
+	var visit func(string) error
+
+	visit = func(name string) error {
+		switch state[name] {
+		case visiting:
+			return fmt.Errorf("scenario task dependencies contain a cycle at %q", name)
+		case visited:
+			return nil
+		}
+
+		state[name] = visiting
+		for _, dep := range byName[name].DependsOn {
+			if err := visit(dep); err != nil {
+				return err
+			}
+		}
+
+		state[name] = visited
+
+		return nil
+	}
+
+	for name := range byName {
+		if err := visit(name); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

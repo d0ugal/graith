@@ -258,7 +258,8 @@ func (sm *SessionManager) TodoAddOp(ac authContext, m protocol.TodoAddMsg) (prot
 
 	item, err := sm.todos.Add(TodoAdd{
 		Scope: scope, Title: m.Title, Note: m.Note, Tags: m.Tags,
-		ParentID: m.ParentID, Assignee: m.Assignee, CreatedBy: createdBy,
+		ParentID: m.ParentID, Assignee: m.Assignee, DependsOn: m.DependsOn,
+		CreatedBy: createdBy,
 	})
 	if err != nil {
 		return protocol.TodoItemInfo{}, err
@@ -338,6 +339,17 @@ func (sm *SessionManager) TodoClaimOp(ac authContext, m protocol.TodoClaimMsg) (
 		}
 
 		if !ok {
+			latest, getErr := sm.todos.Get(m.ID)
+			if getErr != nil {
+				return protocol.TodoClaimResponse{}, getErr
+			}
+
+			if len(latest.BlockedBy) > 0 && latest.Owner == "" {
+				return protocol.TodoClaimResponse{}, fmt.Errorf(
+					"todo %q is blocked by unfinished dependencies: %s",
+					m.ID, strings.Join(latest.BlockedBy, ", "))
+			}
+
 			return protocol.TodoClaimResponse{Claimed: false}, nil
 		}
 
@@ -381,23 +393,22 @@ func (sm *SessionManager) TodoTransitionOp(ac authContext, m protocol.TodoTransi
 		return protocol.TodoItemInfo{}, errors.New("only the owner, the scope's override authority, or the human may transition this item")
 	}
 
-	// Apply the guarded transition FIRST; only persist the block note once the
-	// transition succeeds, so a rejected transition never leaves a half-written
-	// note (the note-then-transition order could persist a note against an
-	// unchanged status).
-	updated, err := sm.todos.Transition(m.ID, m.Status, ac.sessionID, acc.override)
+	result, err := sm.todos.TransitionCascade(m.ID, m.Status, m.Note, ac.sessionID, acc.override)
 	if err != nil {
 		return protocol.TodoItemInfo{}, err
 	}
 
-	if m.Note != "" && m.Status == TodoStatusBlocked {
-		note := m.Note
-		if updated, err = sm.todos.UpdateFields(m.ID, nil, &note, nil, nil); err != nil {
-			return protocol.TodoItemInfo{}, err
-		}
-	}
+	updated := result.Item
 
 	sm.emitTodoEvent(updated.Scope, m.Status, updated)
+
+	for _, item := range result.Unblocked {
+		sm.emitTodoEvent(item.Scope, "unblocked", item)
+	}
+
+	for _, item := range result.DependencyBlocked {
+		sm.emitTodoEvent(item.Scope, "dependency-blocked", item)
+	}
 
 	return todoItemToWire(updated), nil
 }
@@ -418,12 +429,19 @@ func (sm *SessionManager) TodoUpdateOp(ac authContext, m protocol.TodoUpdateMsg)
 		return protocol.TodoItemInfo{}, errors.New("only the owner, the scope's override authority, or the human may edit this item")
 	}
 
-	updated, err := sm.todos.UpdateFields(m.ID, m.Title, m.Note, m.Tags, m.Position)
+	updated, err := sm.todos.UpdateFields(m.ID, m.Title, m.Note, m.Tags, m.Position, m.DependsOn)
 	if err != nil {
 		return protocol.TodoItemInfo{}, err
 	}
 
-	sm.emitTodoEvent(updated.Scope, "updated", updated)
+	event := "updated"
+	if item.Status != updated.Status && len(updated.BlockedBy) > 0 {
+		event = "dependency-blocked"
+	} else if item.Status != updated.Status && updated.Status == TodoStatusTodo {
+		event = "unblocked"
+	}
+
+	sm.emitTodoEvent(updated.Scope, event, updated)
 
 	return todoItemToWire(updated), nil
 }
@@ -530,13 +548,14 @@ func (sm *SessionManager) emitTodoEvent(scope, event string, item TodoItem) {
 	}
 
 	payload, err := json.Marshal(struct {
-		Event    string `json:"event"`
-		ID       string `json:"id"`
-		Scope    string `json:"scope"`
-		Status   string `json:"status"`
-		Owner    string `json:"owner,omitempty"`
-		Revision int64  `json:"revision"`
-	}{event, item.ID, scope, item.Status, item.Owner, item.Revision})
+		Event     string   `json:"event"`
+		ID        string   `json:"id"`
+		Scope     string   `json:"scope"`
+		Status    string   `json:"status"`
+		Owner     string   `json:"owner,omitempty"`
+		BlockedBy []string `json:"blocked_by,omitempty"`
+		Revision  int64    `json:"revision"`
+	}{event, item.ID, scope, item.Status, item.Owner, item.BlockedBy, item.Revision})
 	if err != nil {
 		return
 	}
@@ -602,7 +621,8 @@ func todoItemToWire(it TodoItem) protocol.TodoItemInfo {
 	return protocol.TodoItemInfo{
 		ID: it.ID, Title: it.Title, Status: it.Status, Scope: it.Scope,
 		Owner: it.Owner, Assignee: it.Assignee, ParentID: it.ParentID, Note: it.Note,
-		Tags: it.Tags, CreatedBy: it.CreatedBy, CreatedAt: it.CreatedAt,
+		Tags: it.Tags, DependsOn: it.DependsOn, BlockedBy: it.BlockedBy,
+		CreatedBy: it.CreatedBy, CreatedAt: it.CreatedAt,
 		UpdatedAt: it.UpdatedAt, Revision: it.Revision, Position: it.Position,
 	}
 }
@@ -647,6 +667,10 @@ func renderTodoExport(scope, format string, items []TodoItem) (body, key string)
 
 		if len(it.Tags) > 0 {
 			fmt.Fprintf(&b, ", tags %s", strings.Join(it.Tags, ","))
+		}
+
+		if len(it.BlockedBy) > 0 {
+			fmt.Fprintf(&b, ", blocked by %s", strings.Join(it.BlockedBy, ","))
 		}
 
 		b.WriteString(")_\n")

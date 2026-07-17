@@ -1,11 +1,13 @@
 package scenariofile
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 func TestParse_Valid(t *testing.T) {
@@ -369,5 +371,90 @@ func TestValidateScenarioTriggers_AllowedInboxTargets(t *testing.T) {
 
 	if err := ValidateScenarioTriggers([]config.TriggerConfig{deliver("stranger")}, roles, members); err == nil {
 		t.Error("inbox to a non-member should be rejected")
+	}
+}
+
+func TestParseSessionDependencies(t *testing.T) {
+	data := []byte(`
+version = 1
+[scenario]
+name = "strath"
+[[sessions]]
+name = "braw"
+repo = "/croft"
+task = "build the brig"
+[[sessions]]
+name = "canny"
+repo = "/bothy"
+task = "inspect the brig"
+depends_on = ["braw"]
+`)
+
+	sf, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	inputs, err := SessionInputs(sf)
+	if err != nil {
+		t.Fatalf("SessionInputs: %v", err)
+	}
+
+	if len(inputs[1].DependsOn) != 1 || inputs[1].DependsOn[0] != "braw" {
+		t.Fatalf("depends_on mapping = %v", inputs[1].DependsOn)
+	}
+}
+
+func TestParseRejectsInvalidSessionDependencies(t *testing.T) {
+	base := `
+version = 1
+[scenario]
+name = "strath"
+[[sessions]]
+name = "braw"
+repo = "/croft"
+task = "braw work"
+%s
+[[sessions]]
+name = "canny"
+repo = "/bothy"
+task = "canny work"
+%s
+`
+
+	cases := []struct {
+		name, first, second, want string
+	}{
+		{"unknown", "", `depends_on = ["haar"]`, "not defined"},
+		{"self", `depends_on = ["braw"]`, "", "cannot reference itself"},
+		{"duplicate", "", `depends_on = ["braw", "braw"]`, "duplicate"},
+		{"cycle", `depends_on = ["canny"]`, `depends_on = ["braw"]`, "cycle"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte(fmt.Sprintf(base, tc.first, tc.second)))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestValidateSessionDependenciesRequiresTrackedTasks(t *testing.T) {
+	err := ValidateSessionDependencies([]protocol.ScenarioSessionInput{
+		{Name: "braw", Task: ""},
+		{Name: "canny", Task: "inspect", DependsOn: []string{"braw"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "has no task") {
+		t.Fatalf("missing dependency task: %v", err)
+	}
+
+	err = ValidateSessionDependencies([]protocol.ScenarioSessionInput{
+		{Name: "braw", Task: "build"},
+		{Name: "canny", DependsOn: []string{"braw"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires a task") {
+		t.Fatalf("missing dependent task: %v", err)
 	}
 }

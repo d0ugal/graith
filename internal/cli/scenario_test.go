@@ -585,6 +585,26 @@ command = "true"
 	}
 }
 
+func TestBuildSessionInputsDependencies(t *testing.T) {
+	sf := &scenarioFile{
+		Version:  1,
+		Scenario: scenarioFileMeta{Name: "strath"},
+		Sessions: []scenarioFileSession{
+			{Name: "braw", Repo: "/tmp/croft", Task: "build"},
+			{Name: "canny", Repo: "/tmp/bothy", Task: "inspect", DependsOn: []string{"braw"}},
+		},
+	}
+
+	inputs, err := buildSessionInputs(sf)
+	if err != nil {
+		t.Fatalf("buildSessionInputs: %v", err)
+	}
+
+	if len(inputs[1].DependsOn) != 1 || inputs[1].DependsOn[0] != "braw" {
+		t.Fatalf("depends_on = %v", inputs[1].DependsOn)
+	}
+}
+
 // TestBuildSessionInputsCov2MissingName verifies a session without a name is
 // rejected with an index-qualified error.
 func TestBuildSessionInputsCov2MissingName(t *testing.T) {

@@ -75,6 +75,7 @@ Add an item to your subtree's list (or a scenario's).
 | `--tag <tag>` | Add a tag (repeatable) |
 | `--parent <id>` | Make it a sub-item of another item (one level) |
 | `--note <text>` | An optional one-line note |
+| `--depends-on <id>` | Require a todo to be done first (repeatable) |
 | `--scenario <name>` | Add to a scenario's shared list |
 | `--session <id>` | Anchor to a specific session subtree instead of the auto-anchor |
 
@@ -106,9 +107,15 @@ Mark a claimed item blocked, with a note.
 
 Return an item to `todo` and clear its owner.
 
+### `gr todo deps <id> [dependency-id...]`
+
+Replace an item's dependency set. Omit dependency IDs to clear it. Dependencies
+must exist in the same scope and the resulting graph must be acyclic.
+
 ### `gr todo rm <id>`
 
-Remove an item (and any sub-items).
+Remove an item (and any sub-items). Removal is rejected while another retained
+item depends on it.
 
 ### `gr todo export <scope>`
 

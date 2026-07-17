@@ -60,6 +60,8 @@ type TodoItem struct {
 	ParentID  string   `json:"parent_id,omitempty"`
 	Note      string   `json:"note,omitempty"`
 	Tags      []string `json:"tags,omitempty"`
+	DependsOn []string `json:"depends_on,omitempty"`
+	BlockedBy []string `json:"blocked_by,omitempty"`
 	CreatedBy string   `json:"created_by"`
 	CreatedAt string   `json:"created_at"`
 	UpdatedAt string   `json:"updated_at"`
@@ -75,7 +77,17 @@ type TodoAdd struct {
 	Tags      []string
 	ParentID  string
 	Assignee  string
+	DependsOn []string
 	CreatedBy string
+}
+
+// TodoBatchAdd is one keyed item in an atomic graph insertion. DependsOnKeys
+// names other entries in the same batch; TodoAdd.DependsOn may additionally
+// reference existing todo IDs. Scenario seeding uses member names as keys.
+type TodoBatchAdd struct {
+	Key           string
+	Item          TodoAdd
+	DependsOnKeys []string
 }
 
 // TodoFilter narrows a List query. Empty fields are ignored.
@@ -273,6 +285,15 @@ func initTodoSchema(db *sql.DB) error {
 			PRIMARY KEY (todo_id, tag)
 		);
 		CREATE INDEX IF NOT EXISTS idx_todo_tags_tag ON todo_tags(tag);
+
+		CREATE TABLE IF NOT EXISTS todo_dependencies (
+			todo_id       TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+			dependency_id TEXT NOT NULL REFERENCES todos(id) ON DELETE RESTRICT,
+			PRIMARY KEY (todo_id, dependency_id),
+			CHECK (todo_id <> dependency_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_todo_dependencies_dependency
+			ON todo_dependencies(dependency_id, todo_id);
 	`)
 	if err != nil {
 		return fmt.Errorf("init todos schema: %w", err)
@@ -298,21 +319,9 @@ func (s *TodoStore) nowStr() string {
 // (one-level only, same scope), assigns a position after the current maximum in
 // the scope, and returns the created item.
 func (s *TodoStore) Add(in TodoAdd) (TodoItem, error) {
-	title := strings.TrimSpace(in.Title)
-	if title == "" {
-		return TodoItem{}, errors.New("todo title must not be empty")
-	}
-
-	if len(title) > s.titleLimit() {
-		return TodoItem{}, fmt.Errorf("todo title too long (max %d)", s.titleLimit())
-	}
-
-	if len(in.Note) > s.noteLimit() {
-		return TodoItem{}, fmt.Errorf("todo note too long (max %d)", s.noteLimit())
-	}
-
-	if in.Scope == "" {
-		return TodoItem{}, errors.New("todo scope must not be empty")
+	title, err := s.validateAddInput(in)
+	if err != nil {
+		return TodoItem{}, err
 	}
 
 	s.mu.Lock()
@@ -384,11 +393,41 @@ func (s *TodoStore) Add(in TodoAdd) (TodoItem, error) {
 		}
 	}
 
+	if err := replaceTodoDependencies(tx, item.ID, item.Scope, in.DependsOn); err != nil {
+		return TodoItem{}, err
+	}
+
+	item, err = s.getLocked(tx, item.ID)
+	if err != nil {
+		return TodoItem{}, err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return TodoItem{}, fmt.Errorf("commit: %w", err)
 	}
 
 	return item, nil
+}
+
+func (s *TodoStore) validateAddInput(in TodoAdd) (string, error) {
+	title := strings.TrimSpace(in.Title)
+	if title == "" {
+		return "", errors.New("todo title must not be empty")
+	}
+
+	if len(title) > s.titleLimit() {
+		return "", fmt.Errorf("todo title too long (max %d)", s.titleLimit())
+	}
+
+	if len(in.Note) > s.noteLimit() {
+		return "", fmt.Errorf("todo note too long (max %d)", s.noteLimit())
+	}
+
+	if in.Scope == "" {
+		return "", errors.New("todo scope must not be empty")
+	}
+
+	return title, nil
 }
 
 // Get returns the item with the given id.
@@ -432,6 +471,10 @@ func (s *TodoStore) getLocked(q rowQuerier, id string) (TodoItem, error) {
 
 	it.Tags = tags
 
+	if err := hydrateTodoDependencies(q, &it); err != nil {
+		return TodoItem{}, err
+	}
+
 	return it, nil
 }
 
@@ -447,9 +490,7 @@ func (s *TodoStore) List(scope string, f TodoFilter) ([]TodoItem, error) {
 	args := []any{scope}
 
 	if f.Status != "" {
-		query += " AND status = ?"
-
-		args = append(args, f.Status)
+		query, args = appendTodoStatusFilter(query, args, f.Status)
 	}
 
 	if f.Owner != "" {
@@ -505,6 +546,10 @@ func (s *TodoStore) queryTodos(query string, args ...any) ([]TodoItem, error) {
 		}
 
 		out[i].Tags = tags
+
+		if err := hydrateTodoDependencies(s.db, &out[i]); err != nil {
+			return nil, err
+		}
 	}
 
 	return out, nil
@@ -522,9 +567,7 @@ func (s *TodoStore) ListAll(f TodoFilter) ([]TodoItem, error) {
 	var args []any
 
 	if f.Status != "" {
-		query += " AND status = ?"
-
-		args = append(args, f.Status)
+		query, args = appendTodoStatusFilter(query, args, f.Status)
 	}
 
 	if f.Owner != "" {
@@ -558,8 +601,13 @@ func (s *TodoStore) Claim(id, owner string) (TodoItem, bool, error) {
 
 	res, err := s.db.Exec(
 		`UPDATE todos SET status = ?, owner = ?, revision = revision + 1, updated_at = ?
-		 WHERE id = ? AND status = ? AND owner = ''`,
-		TodoStatusInProgress, owner, s.nowStr(), id, TodoStatusTodo,
+		 WHERE id = ? AND status = ? AND owner = ''
+		 AND NOT EXISTS (
+			SELECT 1 FROM todo_dependencies d
+			JOIN todos dependency ON dependency.id = d.dependency_id
+			WHERE d.todo_id = todos.id AND dependency.status <> ?
+		 )`,
+		TodoStatusInProgress, owner, s.nowStr(), id, TodoStatusTodo, TodoStatusDone,
 	)
 	if err != nil {
 		return TodoItem{}, false, fmt.Errorf("claim todo: %w", err)
@@ -599,8 +647,13 @@ func (s *TodoStore) ClaimNext(scope, owner string) (TodoItem, bool, error) {
 
 		err := s.db.QueryRow(
 			`SELECT id FROM todos WHERE scope = ? AND status = ? AND owner = ''
+			 AND NOT EXISTS (
+				SELECT 1 FROM todo_dependencies d
+				JOIN todos dependency ON dependency.id = d.dependency_id
+				WHERE d.todo_id = todos.id AND dependency.status <> ?
+			 )
 			 ORDER BY position ASC, id ASC LIMIT 1`,
-			scope, TodoStatusTodo,
+			scope, TodoStatusTodo, TodoStatusDone,
 		).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return TodoItem{}, false, nil
@@ -612,8 +665,13 @@ func (s *TodoStore) ClaimNext(scope, owner string) (TodoItem, bool, error) {
 
 		res, err := s.db.Exec(
 			`UPDATE todos SET status = ?, owner = ?, revision = revision + 1, updated_at = ?
-			 WHERE id = ? AND status = ? AND owner = ''`,
-			TodoStatusInProgress, owner, s.nowStr(), id, TodoStatusTodo,
+			 WHERE id = ? AND status = ? AND owner = ''
+			 AND NOT EXISTS (
+				SELECT 1 FROM todo_dependencies d
+				JOIN todos dependency ON dependency.id = d.dependency_id
+				WHERE d.todo_id = todos.id AND dependency.status <> ?
+			 )`,
+			TodoStatusInProgress, owner, s.nowStr(), id, TodoStatusTodo, TodoStatusDone,
 		)
 		if err != nil {
 			return TodoItem{}, false, fmt.Errorf("claim next todo: %w", err)
@@ -641,19 +699,41 @@ func (s *TodoStore) ClaimNext(scope, owner string) (TodoItem, bool, error) {
 // them to transition an item they do not own). The conditional WHERE enforces
 // the pre-state so an out-of-order or unauthorized transition affects no rows.
 func (s *TodoStore) Transition(id, newStatus, actor string, override bool) (TodoItem, error) {
+	result, err := s.TransitionCascade(id, newStatus, "", actor, override)
+	return result.Item, err
+}
+
+// TransitionCascade applies a guarded status mutation and any direct
+// dependency-readiness changes in one transaction. A block note is persisted
+// by the same transaction, so note failure cannot leave a half-transition.
+func (s *TodoStore) TransitionCascade(id, newStatus, note, actor string, override bool) (TodoTransitionResult, error) {
 	if !validTodoStatus(newStatus) {
-		return TodoItem{}, fmt.Errorf("invalid status %q", newStatus)
+		return TodoTransitionResult{}, fmt.Errorf("invalid status %q", newStatus)
+	}
+
+	if len(note) > s.noteLimit() {
+		return TodoTransitionResult{}, fmt.Errorf("todo note too long (max %d)", s.noteLimit())
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	tx, err := s.db.Begin()
+	if err != nil {
+		return TodoTransitionResult{}, fmt.Errorf("begin transition: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	now := s.nowStr()
 
-	var (
-		res sql.Result
-		err error
-	)
+	var previousStatus string
+	if err := tx.QueryRow(`SELECT status FROM todos WHERE id = ?`, id).Scan(&previousStatus); errors.Is(err, sql.ErrNoRows) {
+		return TodoTransitionResult{}, ErrTodoNotFound
+	} else if err != nil {
+		return TodoTransitionResult{}, fmt.Errorf("read todo pre-state: %w", err)
+	}
+
+	var res sql.Result
 
 	// ownerClause restricts a non-override actor to the item's owner.
 	ownerClause := ""
@@ -669,50 +749,83 @@ func (s *TodoStore) Transition(id, newStatus, actor string, override bool) (Todo
 		// Done may be reached from in-progress OR blocked (a resolved blocker is
 		// completed directly, without a reopen/re-claim round-trip).
 		args := append([]any{newStatus, now, id, TodoStatusInProgress, TodoStatusBlocked}, ownerArgs...)
-		res, err = s.db.Exec(
+		res, err = tx.Exec(
 			`UPDATE todos SET status = ?, revision = revision + 1, updated_at = ?
 			 WHERE id = ? AND status IN (?, ?)`+ownerClause, args...)
 	case TodoStatusBlocked:
 		// Blocking applies to an in-progress item.
-		args := append([]any{newStatus, now, id, TodoStatusInProgress}, ownerArgs...)
-		res, err = s.db.Exec(
-			`UPDATE todos SET status = ?, revision = revision + 1, updated_at = ?
+		args := append([]any{newStatus, note, note, now, id, TodoStatusInProgress}, ownerArgs...)
+		res, err = tx.Exec(
+			`UPDATE todos SET status = ?, note = CASE WHEN ? <> '' THEN ? ELSE note END,
+			 revision = revision + 1, updated_at = ?
 			 WHERE id = ? AND status = ?`+ownerClause, args...)
 	case TodoStatusTodo:
 		// Reopen: clear the owner. Any non-todo state may be reopened.
 		args := append([]any{TodoStatusTodo, now, id, TodoStatusTodo}, ownerArgs...)
-		res, err = s.db.Exec(
+		res, err = tx.Exec(
 			`UPDATE todos SET status = ?, owner = '', revision = revision + 1, updated_at = ?
 			 WHERE id = ? AND status <> ?`+ownerClause, args...)
 	case TodoStatusInProgress:
-		return TodoItem{}, errors.New("use Claim to move an item to in-progress")
+		return TodoTransitionResult{}, errors.New("use Claim to move an item to in-progress")
 	}
 
 	if err != nil {
-		return TodoItem{}, fmt.Errorf("transition todo: %w", err)
+		return TodoTransitionResult{}, fmt.Errorf("transition todo: %w", err)
 	}
 
 	n, err := res.RowsAffected()
 	if err != nil {
-		return TodoItem{}, fmt.Errorf("transition rows affected: %w", err)
+		return TodoTransitionResult{}, fmt.Errorf("transition rows affected: %w", err)
 	}
 
 	if n == 0 {
-		// Either the item is gone, in the wrong pre-state, or the actor is not
-		// authorized. Disambiguate not-found for a clearer error.
-		if _, gerr := s.getLocked(s.db, id); errors.Is(gerr, ErrTodoNotFound) {
-			return TodoItem{}, ErrTodoNotFound
-		}
-
-		return TodoItem{}, fmt.Errorf("todo %q cannot move to %q from its current state (or not permitted)", id, newStatus)
+		return TodoTransitionResult{}, fmt.Errorf("todo %q cannot move to %q from its current state (or not permitted)", id, newStatus)
 	}
 
-	return s.getLocked(s.db, id)
+	var unblockedIDs, blockedIDs []string
+	if newStatus == TodoStatusDone {
+		unblockedIDs, err = directDependentsChangingReadiness(tx, id, true)
+	} else if newStatus == TodoStatusTodo && previousStatus == TodoStatusDone {
+		blockedIDs, err = directDependentsChangingReadiness(tx, id, false)
+	}
+
+	if err != nil {
+		return TodoTransitionResult{}, err
+	}
+
+	if err := touchTodoIDs(tx, unblockedIDs, now); err != nil {
+		return TodoTransitionResult{}, err
+	}
+
+	if err := touchTodoIDs(tx, blockedIDs, now); err != nil {
+		return TodoTransitionResult{}, err
+	}
+
+	item, err := s.getLocked(tx, id)
+	if err != nil {
+		return TodoTransitionResult{}, err
+	}
+
+	unblocked, err := s.loadTodoIDs(tx, unblockedIDs)
+	if err != nil {
+		return TodoTransitionResult{}, err
+	}
+
+	blocked, err := s.loadTodoIDs(tx, blockedIDs)
+	if err != nil {
+		return TodoTransitionResult{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return TodoTransitionResult{}, fmt.Errorf("commit transition: %w", err)
+	}
+
+	return TodoTransitionResult{Item: item, Unblocked: unblocked, DependencyBlocked: blocked}, nil
 }
 
 // UpdateFields edits mutable presentation fields. It never touches status,
 // scope, or owner. A nil pointer leaves that field unchanged.
-func (s *TodoStore) UpdateFields(id string, title, note *string, tags *[]string, position *int64) (TodoItem, error) {
+func (s *TodoStore) UpdateFields(id string, title, note *string, tags *[]string, position *int64, dependsOn *[]string) (TodoItem, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -722,7 +835,8 @@ func (s *TodoStore) UpdateFields(id string, title, note *string, tags *[]string,
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := s.getLocked(tx, id); err != nil {
+	current, err := s.getLocked(tx, id)
+	if err != nil {
 		return TodoItem{}, err
 	}
 
@@ -766,6 +880,12 @@ func (s *TodoStore) UpdateFields(id string, title, note *string, tags *[]string,
 			if _, err := tx.Exec(`INSERT OR IGNORE INTO todo_tags (todo_id, tag) VALUES (?, ?)`, id, tag); err != nil {
 				return TodoItem{}, fmt.Errorf("insert tag: %w", err)
 			}
+		}
+	}
+
+	if dependsOn != nil {
+		if err := replaceTodoDependencies(tx, id, current.Scope, *dependsOn); err != nil {
+			return TodoItem{}, err
 		}
 	}
 
@@ -814,7 +934,49 @@ func (s *TodoStore) Remove(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	res, err := s.db.Exec(`DELETE FROM todos WHERE id = ?`, id)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin remove: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Parent removal also deletes its one-level sub-items. Reject only edges
+	// from outside that deletion set; internal edges disappear with their
+	// dependent rows and are removed explicitly before the parent cascade so
+	// the dependency foreign key's immediate RESTRICT check is satisfied.
+	var dependentID, dependencyID string
+
+	err = tx.QueryRow(`
+		WITH RECURSIVE deletion_set(id) AS (
+			SELECT id FROM todos WHERE id = ?
+			UNION ALL
+			SELECT child.id FROM todos child JOIN deletion_set parent ON child.parent_id = parent.id
+		)
+		SELECT d.todo_id, d.dependency_id
+		FROM todo_dependencies d
+		WHERE d.dependency_id IN (SELECT id FROM deletion_set)
+		AND d.todo_id NOT IN (SELECT id FROM deletion_set)
+		ORDER BY d.todo_id LIMIT 1`, id).Scan(&dependentID, &dependencyID)
+	if err == nil {
+		return fmt.Errorf("cannot remove todo %q: todo %q depends on %q", id, dependentID, dependencyID)
+	}
+
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("check todo dependents: %w", err)
+	}
+
+	if _, err := tx.Exec(`
+		WITH RECURSIVE deletion_set(id) AS (
+			SELECT id FROM todos WHERE id = ?
+			UNION ALL
+			SELECT child.id FROM todos child JOIN deletion_set parent ON child.parent_id = parent.id
+		)
+		DELETE FROM todo_dependencies
+		WHERE dependency_id IN (SELECT id FROM deletion_set)`, id); err != nil {
+		return fmt.Errorf("remove internal todo dependencies: %w", err)
+	}
+
+	res, err := tx.Exec(`DELETE FROM todos WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("remove todo: %w", err)
 	}
@@ -826,6 +988,10 @@ func (s *TodoStore) Remove(id string) error {
 
 	if n == 0 {
 		return ErrTodoNotFound
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit remove: %w", err)
 	}
 
 	return nil
@@ -922,7 +1088,8 @@ func (s *TodoStore) SweepDone(maxAge time.Duration) (int, error) {
 
 	res, err := s.db.Exec(
 		`DELETE FROM todos WHERE status = ? AND updated_at < ?
-		 AND id NOT IN (SELECT parent_id FROM todos WHERE parent_id IS NOT NULL AND status <> ?)`,
+		 AND id NOT IN (SELECT parent_id FROM todos WHERE parent_id IS NOT NULL AND status <> ?)
+		 AND id NOT IN (SELECT dependency_id FROM todo_dependencies)`,
 		TodoStatusDone, cutoff, TodoStatusDone)
 	if err != nil {
 		return 0, fmt.Errorf("sweep done todos: %w", err)

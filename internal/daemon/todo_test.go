@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/d0ugal/graith/internal/protocol"
@@ -548,5 +550,72 @@ func TestTodoOpScopeBoundaryNotCrossed(t *testing.T) {
 	items := listForSession(t, sm, child)
 	if len(items) != 0 {
 		t.Errorf("child's own list should be empty, got %d items", len(items))
+	}
+}
+
+func TestTodoOpCascadeEmitsUnblockedEvent(t *testing.T) {
+	sm := newTodoSM(t)
+	sm.messages = testStore(t)
+
+	putTodoSession(sm, "orch", "", SystemKindOrchestrator)
+	putTodoSession(sm, "braw", "", "")
+	sm.mu.Lock()
+	sm.state.Scenarios["sc-strath"] = &ScenarioState{
+		ID: "sc-strath", Name: "strath", OrchestratorID: "orch", SessionIDs: []string{"braw"},
+	}
+	sm.mu.Unlock()
+
+	member := authContext{role: roleSession, sessionID: "braw", authenticated: true}
+	scope := protocol.TodoScope{Scenario: "strath"}
+
+	dependency, err := sm.TodoAddOp(member, protocol.TodoAddMsg{Scope: scope, Title: "build the brig"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dependent, err := sm.TodoAddOp(member, protocol.TodoAddMsg{
+		Scope: scope, Title: "inspect the brig", DependsOn: []string{dependency.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if dependent.Status != TodoStatusBlocked || len(dependent.BlockedBy) != 1 {
+		t.Fatalf("dependent = %+v", dependent)
+	}
+
+	if _, err := sm.TodoClaimOp(member, protocol.TodoClaimMsg{ID: dependent.ID}); err == nil || !strings.Contains(err.Error(), dependency.ID) {
+		t.Fatalf("blocked claim should name dependency, got %v", err)
+	}
+
+	if _, err := sm.TodoClaimOp(member, protocol.TodoClaimMsg{ID: dependency.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := sm.TodoTransitionOp(member, protocol.TodoTransitionMsg{ID: dependency.ID, Status: TodoStatusDone}); err != nil {
+		t.Fatal(err)
+	}
+
+	messages, err := sm.messages.Read("todo:scenario:sc-strath", "", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	found := false
+
+	for _, message := range messages {
+		var event struct {
+			Event  string `json:"event"`
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		}
+		if json.Unmarshal([]byte(message.Body), &event) == nil &&
+			event.Event == "unblocked" && event.ID == dependent.ID && event.Status == TodoStatusTodo {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Fatalf("unblocked event for %s not found in %+v", dependent.ID, messages)
 	}
 }

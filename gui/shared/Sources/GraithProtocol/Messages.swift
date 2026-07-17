@@ -689,6 +689,7 @@ public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
     public var task: String?
     public var todoDone: Int
     public var todoTotal: Int
+    public var blockedBy: [String]
     public var repo: String?
     public var agent: String?
     public var model: String?
@@ -698,10 +699,11 @@ public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
     public var id: String { sessionID }
 
     public init(name: String, sessionID: String, role: String? = nil, task: String? = nil,
-                todoDone: Int = 0, todoTotal: Int = 0, repo: String? = nil, agent: String? = nil,
+                todoDone: Int = 0, todoTotal: Int = 0, blockedBy: [String] = [], repo: String? = nil, agent: String? = nil,
                 model: String? = nil, status: String? = nil, shared: Bool? = nil) {
         self.name = name; self.sessionID = sessionID; self.role = role; self.task = task
         self.todoDone = todoDone; self.todoTotal = todoTotal
+        self.blockedBy = blockedBy
         self.repo = repo; self.agent = agent; self.model = model
         self.status = status; self.shared = shared
     }
@@ -712,6 +714,7 @@ public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
         case role, task
         case todoDone = "todo_done"
         case todoTotal = "todo_total"
+        case blockedBy = "blocked_by"
         case repo, agent, model, status, shared
     }
 
@@ -723,6 +726,7 @@ public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
         task = try c.decodeIfPresent(String.self, forKey: .task)
         todoDone = try c.decodeIfPresent(Int.self, forKey: .todoDone) ?? 0
         todoTotal = try c.decodeIfPresent(Int.self, forKey: .todoTotal) ?? 0
+        blockedBy = try c.decodeIfPresent([String].self, forKey: .blockedBy) ?? []
         repo = try c.decodeIfPresent(String.self, forKey: .repo)
         agent = try c.decodeIfPresent(String.self, forKey: .agent)
         model = try c.decodeIfPresent(String.self, forKey: .model)

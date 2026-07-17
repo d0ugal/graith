@@ -40,6 +40,7 @@ type scenarioFileSession struct {
 	Base       string   `toml:"base"`
 	Role       string   `toml:"role"`
 	Task       string   `toml:"task"`
+	DependsOn  []string `toml:"depends_on"`
 	AgentHooks *bool    `toml:"agent_hooks"`
 	Shared     bool     `toml:"shared"`
 	Includes   []string `toml:"includes"`
@@ -164,11 +165,16 @@ func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, erro
 			Base:       s.Base,
 			Role:       s.Role,
 			Task:       s.Task,
+			DependsOn:  append([]string(nil), s.DependsOn...),
 			AgentHooks: s.AgentHooks == nil || *s.AgentHooks,
 			Shared:     s.Shared,
 			Includes:   includes,
 			Star:       s.Star,
 		}
+	}
+
+	if err := scenariofile.ValidateSessionDependencies(sessions); err != nil {
+		return nil, err
 	}
 
 	return sessions, nil
@@ -463,7 +469,7 @@ var scenarioStatusCmd = &cobra.Command{
 		out.Printf("Goal: %s\n\n", sc.Goal)
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		_, _ = fmt.Fprintf(tw, "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tPROGRESS\tSHARED\n")
+		_, _ = fmt.Fprintf(tw, "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tPROGRESS\tWAITING ON\tSHARED\n")
 
 		for _, s := range sc.Sessions {
 			// Progress is derived from the member's assigned todo items (issue
@@ -478,7 +484,8 @@ var scenarioStatusCmd = &cobra.Command{
 				shared = "yes"
 			}
 
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, s.SessionID, s.Status, s.Agent, s.Role, progress, shared)
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				s.Name, s.SessionID, s.Status, s.Agent, s.Role, progress, strings.Join(s.BlockedBy, ","), shared)
 		}
 
 		_ = tw.Flush()
@@ -531,6 +538,7 @@ var scenarioAddCmd = &cobra.Command{
 		model, _ := cmd.Flags().GetString("model")
 		role, _ := cmd.Flags().GetString("role")
 		task, _ := cmd.Flags().GetString("task")
+		dependsOn, _ := cmd.Flags().GetStringArray("depends-on")
 		base, _ := cmd.Flags().GetString("base")
 
 		if name == "" {
@@ -559,6 +567,7 @@ var scenarioAddCmd = &cobra.Command{
 				Base:       base,
 				Role:       role,
 				Task:       task,
+				DependsOn:  dependsOn,
 				AgentHooks: true,
 			},
 		})
@@ -687,6 +696,7 @@ func registerScenarioCmd() {
 	scenarioAddCmd.Flags().String("model", "", "Model override")
 	scenarioAddCmd.Flags().String("role", "", "Session role")
 	scenarioAddCmd.Flags().String("task", "", "Task/prompt")
+	scenarioAddCmd.Flags().StringArray("depends-on", nil, "Member whose seeded task must finish first (repeatable)")
 	scenarioAddCmd.Flags().String("base", "", "Base branch")
 
 	rootCmd.AddCommand(scenarioCmd)

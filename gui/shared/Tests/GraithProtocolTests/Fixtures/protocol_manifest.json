@@ -2822,6 +2822,16 @@
           "optional": true
         },
         {
+          "name": "blocked_by",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
+        },
+        {
           "name": "repo",
           "type": {
             "kind": "string"
@@ -2908,6 +2918,16 @@
           "name": "task",
           "type": {
             "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "depends_on",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
           },
           "optional": true
         },
@@ -4015,6 +4035,16 @@
             "kind": "string"
           },
           "optional": true
+        },
+        {
+          "name": "depends_on",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
         }
       ]
     },
@@ -4176,6 +4206,26 @@
         },
         {
           "name": "tags",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "depends_on",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "blocked_by",
           "type": {
             "kind": "array",
             "elem": {
@@ -4386,6 +4436,16 @@
           "name": "position",
           "type": {
             "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "depends_on",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
           },
           "optional": true
         }

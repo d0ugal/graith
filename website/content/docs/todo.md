@@ -33,6 +33,8 @@ Each item has:
 | `parent_id` | An optional parent item — one level of sub-items |
 | `tags` | Free-form labels for filtering |
 | `note` | An optional one-line note (e.g. why an item is blocked) |
+| `depends_on` | Todo IDs that must all be done before the item is claimable |
+| `blocked_by` | The currently unfinished subset of `depends_on` |
 
 Statuses move through a small state machine:
 
@@ -51,6 +53,11 @@ graph LR
 again (from `in-progress`, `blocked`, or `done`); a `blocked` item can be
 completed directly once its blocker clears. Sub-items are one level deep (a sub-item can't itself have children),
 share their parent's scope, and are removed with their parent.
+
+Dependency waiting is also shown as `blocked`, but it is ownerless and carries
+`blocked_by` instead of relying on a manual note. Internally it remains an
+unclaimed todo whose readiness is derived from the graph, so it cannot be
+claimed until every dependency is done and cannot drift after a daemon restart.
 
 ## Scoping
 
@@ -76,6 +83,9 @@ The local human (`gr` from the shell) is in every scope.
 gr todo add "Wire the claim CAS" --tag backend --tag p1
 gr todo add "Write the regression test" --parent td-abc123   # a sub-item
 gr todo add "Draft the release notes" --scenario strath      # a scenario list
+gr todo add "Publish" --depends-on td-api --depends-on td-ui # wait for both
+gr todo deps td-publish td-api td-ui       # replace its dependency set
+gr todo deps td-publish                    # clear its dependency set
 
 # List (grouped by status)
 gr todo list                          # my subtree's items
@@ -108,6 +118,38 @@ Agents can also drive the same operations over
 `todo_update`, `todo_done`, `todo_block`, `todo_reopen`), so an agent can plan
 durably and drain a shared backlog without dropping to the shell.
 
+## Dependencies
+
+Dependencies form a directed acyclic graph inside one scope. Adding or replacing
+edges rejects missing IDs, self-dependencies, cycles, and cross-scope references
+without changing the previous item or graph. Duplicate IDs are folded into one
+edge. `gr todo list` includes a **WHY BLOCKED** column; JSON returns the full
+`depends_on` list and current `blocked_by` subset.
+
+Completing a dependency and making its newly-ready direct dependents claimable
+happen in one todo-database transaction. When the final unfinished dependency
+completes, each dependent's revision is bumped and an `unblocked` event is sent
+on `todo:<scope>`. Multiple agents completing the final dependencies
+concurrently still produce one readiness transition.
+
+The less-obvious lifecycle cases are deliberate:
+
+- Reopening a done dependency re-blocks unclaimed direct dependents. Work that
+  is already `in-progress`, manually `blocked`, or `done` is not unwound.
+- A manually blocked dependency remains unfinished, so its downstream work
+  waits until the dependency is completed. There is no implicit skip or failure
+  propagation.
+- Removing a todo that another item depends on is rejected. Clear or replace
+  the dependent edge first. Retention also keeps referenced done items.
+- Reclaimed work returns ownerless. If its own dependencies are unfinished, it
+  is shown as dependency-blocked instead of returning to the claimable pool.
+
+All todo rows, dependency edges, cascade revisions, and block notes involved in
+one mutation commit or roll back together. Event delivery uses the separate
+message database and remains best-effort: a publish failure is logged without
+rolling back committed todo state, and consumers reconcile from the item
+revision.
+
 ## Claiming
 
 Claiming is the correctness centrepiece: it is a single **atomic compare-and-set**
@@ -136,7 +178,8 @@ An agent can claim an item and then stop or crash before finishing, leaving it
 `in-progress` under a dead session. Two defences return it to the pool:
 
 - **On stop.** When a session stops or is soft-deleted, its `in-progress` items
-  auto-reopen (`owner` cleared, back to `todo`) so a sibling can pick them up.
+  auto-reopen (`owner` cleared). A ready item returns to `todo`; one with an
+  unfinished dependency returns to dependency-blocked.
 - **Claim lease.** An `in-progress` item that sees no progress for
   `[todo] claim_lease` is reopened automatically (see [configuration](#configuration)).
 
@@ -149,7 +192,7 @@ react without polling. On each mutation the daemon publishes a compact JSON even
 to the topic `todo:<scope>` (from the `graith:system` sender):
 
 ```json
-{"event":"claimed","id":"td-abc","scope":"scenario:strath","owner":"def456","status":"in-progress"}
+{"event":"unblocked","id":"td-abc","scope":"scenario:strath","status":"todo","revision":4}
 ```
 
 A session can react to work going `blocked` without polling:
@@ -177,15 +220,19 @@ per-session boolean (this **replaces** the old `gr scenario task-done`):
 
 - **Seeding.** At scenario start, each member with a `task` gets **one assigned
   todo item** in the scenario's scope (`assignee` = that member, title = the task).
-  A member breaks its task down by adding sub-items.
+  A member breaks its task down by adding sub-items. A session entry's
+  `depends_on = ["member-name"]` references are resolved to these seeded items;
+  all seed items and edges are inserted atomically.
 - **`assignee` vs `owner`.** `assignee` is *who is responsible*; `owner` is *who is
   currently working it* (set by the claim). They usually coincide, but an
   orchestrator can assign work a member hasn't claimed yet.
 - **Completion is derived, not declared.** A member is complete when it has at
   least one assigned item and every assigned item is `done`. A member with **no**
   assigned items reports "no tracked work" (`—`), neither pending nor complete.
-  `gr scenario status` renders per-member `done/total` from real item state, and
-  the scenario is complete once every member with tracked work is.
+  `gr scenario status` renders per-member `done/total` from real item state and
+  names unfinished upstream members in **WAITING ON**. Its JSON response carries
+  the same names in `blocked_by`. The scenario is complete once every member
+  with tracked work is.
 
 So the gesture a member used to make with `gr scenario task-done` is now
 `gr todo done <its-task-item>` — the same "I finished my task" signal, backed by a

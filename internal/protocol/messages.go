@@ -942,15 +942,18 @@ type ScenarioStartMsg struct {
 }
 
 type ScenarioSessionInput struct {
-	Name       string `json:"name"`
-	Repo       string `json:"repo"`
-	Agent      string `json:"agent,omitempty"`
-	Model      string `json:"model,omitempty"`
-	Base       string `json:"base,omitempty"`
-	Role       string `json:"role,omitempty"`
-	Task       string `json:"task,omitempty"`
-	AgentHooks bool   `json:"agent_hooks,omitempty"`
-	Shared     bool   `json:"shared,omitempty"`
+	Name  string `json:"name"`
+	Repo  string `json:"repo"`
+	Agent string `json:"agent,omitempty"`
+	Model string `json:"model,omitempty"`
+	Base  string `json:"base,omitempty"`
+	Role  string `json:"role,omitempty"`
+	Task  string `json:"task,omitempty"`
+	// DependsOn names scenario members whose seeded assigned todo items must be
+	// done before this member's seeded task becomes claimable (issue #641).
+	DependsOn  []string `json:"depends_on,omitempty"`
+	AgentHooks bool     `json:"agent_hooks,omitempty"`
+	Shared     bool     `json:"shared,omitempty"`
 	// Includes attaches extra worktrees to the session in addition to those
 	// inherited from repo config (issue #1046).
 	Includes []string `json:"includes,omitempty"`
@@ -1019,13 +1022,16 @@ type ScenarioSessionInfo struct {
 	// items assigned to it (issue #591). They replace the former one-bit
 	// `task_done`: a member is complete when TodoTotal > 0 and TodoDone ==
 	// TodoTotal; TodoTotal == 0 means "no tracked work".
-	TodoDone  int    `json:"todo_done,omitempty"`
-	TodoTotal int    `json:"todo_total,omitempty"`
-	Repo      string `json:"repo,omitempty"`
-	Agent     string `json:"agent,omitempty"`
-	Model     string `json:"model,omitempty"`
-	Status    string `json:"status,omitempty"`
-	Shared    bool   `json:"shared,omitempty"`
+	TodoDone  int `json:"todo_done,omitempty"`
+	TodoTotal int `json:"todo_total,omitempty"`
+	// BlockedBy names scenario members whose seeded assigned tasks are not yet
+	// done, when this member's seeded task is dependency-blocked.
+	BlockedBy []string `json:"blocked_by,omitempty"`
+	Repo      string   `json:"repo,omitempty"`
+	Agent     string   `json:"agent,omitempty"`
+	Model     string   `json:"model,omitempty"`
+	Status    string   `json:"status,omitempty"`
+	Shared    bool     `json:"shared,omitempty"`
 }
 
 type ScenarioStatusResponse struct {
@@ -1099,15 +1105,20 @@ type ScenarioAddMsg struct {
 
 // TodoItemInfo is the wire representation of a todo item.
 type TodoItemInfo struct {
-	ID        string   `json:"id"`
-	Title     string   `json:"title"`
-	Status    string   `json:"status"`
-	Scope     string   `json:"scope"`
-	Owner     string   `json:"owner,omitempty"`
-	Assignee  string   `json:"assignee,omitempty"`
-	ParentID  string   `json:"parent_id,omitempty"`
-	Note      string   `json:"note,omitempty"`
-	Tags      []string `json:"tags,omitempty"`
+	ID       string   `json:"id"`
+	Title    string   `json:"title"`
+	Status   string   `json:"status"`
+	Scope    string   `json:"scope"`
+	Owner    string   `json:"owner,omitempty"`
+	Assignee string   `json:"assignee,omitempty"`
+	ParentID string   `json:"parent_id,omitempty"`
+	Note     string   `json:"note,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
+	// DependsOn is the complete declared dependency set. BlockedBy is the
+	// currently-unsatisfied subset; a stored todo with a non-empty BlockedBy is
+	// exposed with status "blocked" and cannot be claimed.
+	DependsOn []string `json:"depends_on,omitempty"`
+	BlockedBy []string `json:"blocked_by,omitempty"`
 	CreatedBy string   `json:"created_by,omitempty"`
 	CreatedAt string   `json:"created_at,omitempty"`
 	UpdatedAt string   `json:"updated_at,omitempty"`
@@ -1127,12 +1138,13 @@ type TodoScope struct {
 
 // TodoAddMsg creates an item.
 type TodoAddMsg struct {
-	Scope    TodoScope `json:"scope"`
-	Title    string    `json:"title"`
-	Tags     []string  `json:"tags,omitempty"`
-	ParentID string    `json:"parent_id,omitempty"`
-	Note     string    `json:"note,omitempty"`
-	Assignee string    `json:"assignee,omitempty"`
+	Scope     TodoScope `json:"scope"`
+	Title     string    `json:"title"`
+	Tags      []string  `json:"tags,omitempty"`
+	ParentID  string    `json:"parent_id,omitempty"`
+	Note      string    `json:"note,omitempty"`
+	Assignee  string    `json:"assignee,omitempty"`
+	DependsOn []string  `json:"depends_on,omitempty"`
 }
 
 // TodoListMsg queries items.
@@ -1169,6 +1181,9 @@ type TodoUpdateMsg struct {
 	Note     *string   `json:"note,omitempty"`
 	Tags     *[]string `json:"tags,omitempty"`
 	Position *int64    `json:"position,omitempty"`
+	// DependsOn replaces the complete dependency set when non-nil. A non-nil
+	// empty slice clears all dependencies.
+	DependsOn *[]string `json:"depends_on,omitempty"`
 }
 
 // TodoTransitionMsg performs a guarded status change (done / blocked / todo).

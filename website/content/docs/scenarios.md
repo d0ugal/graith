@@ -44,6 +44,13 @@ model = "gemini-3.1-pro"
 role = "Frontend developer"
 task = "Add trace export UI and correlation ID headers"
 agent_hooks = false
+
+[[sessions]]
+name = "synthesis"
+repo = "~/Code/my-backend"
+role = "Integrator"
+task = "Combine the backend and frontend work"
+depends_on = ["backend", "frontend"]
 ```
 
 ### Top-level fields
@@ -88,12 +95,19 @@ turns retention `0` into a purge.
 | `base` | no | repo default | Base branch for the worktree |
 | `role` | no | — | Human-readable role description |
 | `task` | no | — | Task/prompt sent to the agent on start |
+| `depends_on` | no | — | Member names whose seeded tasks must all finish before this seeded task is claimable |
 | `agent_hooks` | no | `true` | Enable agent hooks (check-inbox, etc.) |
 | `shared` | no | `false` | Reuse an existing running session by name |
 | `includes` | no | — | Extra worktrees to attach, in addition to any inherited from the repo's `[[repos]]` config (`~` expanded; deduplicated against repo-config includes) |
 | `star` | no | `false` | Create the session already starred, protecting it from an accidental manual `gr delete` |
 
 Unknown fields are rejected — typos produce a parse error rather than being silently ignored.
+
+`depends_on` references names in the same file. Both the dependent and every
+referenced member must have a non-empty `task`; unknown names, duplicates,
+self-dependencies, and cycles are rejected before sessions start. The daemon
+resolves names to the members' seeded assigned todo IDs. `gr scenario add`
+accepts repeatable `--depends-on <existing-member>` flags for the same behavior.
 
 **Shared sessions:** Set `shared = true` to reference an existing running
 session instead of creating a new one. The named session must already be
@@ -384,9 +398,11 @@ gr msg inbox --all --ack
 Per-member progress is tracked through the [todo list]({{< relref "todo.md" >}}),
 not a per-session boolean. At start, each member with a `task` is seeded **one
 assigned todo item** in the scenario's shared scope; a member breaks its task down
-by adding sub-items. A member is *complete* once every item assigned to it is
+by adding sub-items. A member with `depends_on` starts with that seeded item
+blocked until every named member's seeded item is done. A member is *complete* once every item assigned to it is
 `done`, and the scenario as a whole is complete once every member with tracked work
-is. `gr scenario status` renders per-member `done/total` from that real item state.
+is. `gr scenario status` renders per-member `done/total` and **WAITING ON** names
+from that real item state; JSON uses `blocked_by`.
 
 So instead of flipping a single flag, a member signals it has finished by marking
 its task item done:

@@ -278,6 +278,45 @@ func TestCoverTodoClaimRoundTrip(t *testing.T) {
 	h.expectType(t, "todo_claim")
 }
 
+func TestCoverTodoDependencyCascadeRoundTrip(t *testing.T) {
+	h := newTestHarness(t)
+	h.sm.todos = newTestTodoStore(t)
+	h.addAuthenticatedSession(t, "braw-id", "bonnie", "tok-braw")
+
+	dependencyID := addTodoViaHandler(t, h, "tok-braw", "raise the brig")
+	h.sendControlWithToken(t, "todo_add", protocol.TodoAddMsg{
+		Title: "inspect the brig", DependsOn: []string{dependencyID},
+	}, "tok-braw")
+
+	var added protocol.TodoResponse
+	if err := protocol.DecodePayload(h.expectType(t, "todo"), &added); err != nil {
+		t.Fatal(err)
+	}
+
+	if added.Item.Status != TodoStatusBlocked || len(added.Item.BlockedBy) != 1 {
+		t.Fatalf("dependent add response = %+v", added.Item)
+	}
+
+	h.sendControlWithToken(t, "todo_claim", protocol.TodoClaimMsg{ID: added.Item.ID}, "tok-braw")
+	h.expectError(t, "blocked by unfinished dependencies")
+
+	h.sendControlWithToken(t, "todo_claim", protocol.TodoClaimMsg{ID: dependencyID}, "tok-braw")
+	h.expectType(t, "todo_claim")
+	h.sendControlWithToken(t, "todo_transition", protocol.TodoTransitionMsg{ID: dependencyID, Status: TodoStatusDone}, "tok-braw")
+	h.expectType(t, "todo")
+
+	h.sendControlWithToken(t, "todo_claim", protocol.TodoClaimMsg{ID: added.Item.ID}, "tok-braw")
+
+	var claim protocol.TodoClaimResponse
+	if err := protocol.DecodePayload(h.expectType(t, "todo_claim"), &claim); err != nil {
+		t.Fatal(err)
+	}
+
+	if !claim.Claimed || claim.Item.Status != TodoStatusInProgress {
+		t.Fatalf("claim after cascade = %+v", claim)
+	}
+}
+
 // TestCoverTodoExportInvalidPayload verifies a malformed todo_export is rejected.
 func TestCoverTodoExportInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)

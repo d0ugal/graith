@@ -1478,3 +1478,81 @@ func TestScenarioCompleteDerivedFromTodos(t *testing.T) {
 		t.Errorf("scenario status: got %q, want complete", rec.Status)
 	}
 }
+
+func TestSeedScenarioTodosResolvesMemberDependencies(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.todos = newTestTodoStore(t)
+
+	inputs := []protocol.ScenarioSessionInput{
+		{Name: "braw", Task: "build the brig"},
+		{Name: "canny", Task: "inspect the brig", DependsOn: []string{"braw"}},
+		{Name: "dreich"}, // compatibility: no task means no seeded item
+	}
+	if err := sm.seedScenarioTodos("sc-strath", []string{"braw-id", "canny-id", "dreich-id"}, inputs); err != nil {
+		t.Fatalf("seedScenarioTodos: %v", err)
+	}
+
+	items, err := sm.todos.List("scenario:sc-strath", TodoFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(items) != 2 {
+		t.Fatalf("seeded items = %+v", items)
+	}
+
+	byTitle := make(map[string]TodoItem, len(items))
+	for _, item := range items {
+		byTitle[item.Title] = item
+	}
+
+	upstream := byTitle["build the brig"]
+
+	downstream := byTitle["inspect the brig"]
+	if upstream.Assignee != "braw-id" || downstream.Assignee != "canny-id" {
+		t.Fatalf("assignees: upstream=%q downstream=%q", upstream.Assignee, downstream.Assignee)
+	}
+
+	if downstream.Status != TodoStatusBlocked || len(downstream.DependsOn) != 1 || downstream.DependsOn[0] != upstream.ID {
+		t.Fatalf("resolved downstream = %+v", downstream)
+	}
+
+	sm.mu.Lock()
+
+	sm.state.Scenarios["sc-strath"] = &ScenarioState{
+		ID: "sc-strath", Name: "strath", SessionIDs: []string{"braw-id", "canny-id", "dreich-id"},
+		Sessions: []ScenarioSession{{Name: "braw", Task: "build the brig"}, {Name: "canny", Task: "inspect the brig"}, {Name: "dreich"}},
+	}
+	for _, id := range []string{"braw-id", "canny-id", "dreich-id"} {
+		sm.state.Sessions[id] = &SessionState{ID: id, Status: StatusRunning}
+	}
+
+	record := sm.buildScenarioRecord(sm.state.Scenarios["sc-strath"])
+	sm.mu.Unlock()
+
+	if len(record.Sessions[1].BlockedBy) != 1 || record.Sessions[1].BlockedBy[0] != "braw" {
+		t.Fatalf("scenario status waiting reason = %v", record.Sessions[1].BlockedBy)
+	}
+}
+
+func TestSeedScenarioTodosCycleIsAtomic(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.todos = newTestTodoStore(t)
+
+	err := sm.seedScenarioTodos("sc-thrawn", []string{"braw-id", "canny-id"}, []protocol.ScenarioSessionInput{
+		{Name: "braw", Task: "first", DependsOn: []string{"canny"}},
+		{Name: "canny", Task: "second", DependsOn: []string{"braw"}},
+	})
+	if err == nil {
+		t.Fatal("expected cyclic seed failure")
+	}
+
+	items, listErr := sm.todos.List("scenario:sc-thrawn", TodoFilter{})
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+
+	if len(items) != 0 {
+		t.Fatalf("cyclic seed left partial items: %+v", items)
+	}
+}

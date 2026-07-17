@@ -12,6 +12,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
+	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/testutil"
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -698,6 +699,15 @@ func TestTodoDoneMissing(t *testing.T) {
 	_, _, err := env.srv.todoDone(ctx, &gomcp.CallToolRequest{}, TodoDoneInput{ID: "thrawn-missing"})
 	if err == nil {
 		t.Fatal("expected error transitioning a nonexistent item")
+	}
+}
+
+func TestTodoItemToOutputIncludesDependencyExplanation(t *testing.T) {
+	out := todoItemToOutput(protocol.TodoItemInfo{
+		ID: "td-braw", Status: "blocked", DependsOn: []string{"td-canny", "td-dreich"}, BlockedBy: []string{"td-dreich"},
+	})
+	if len(out.DependsOn) != 2 || len(out.BlockedBy) != 1 || out.BlockedBy[0] != "td-dreich" {
+		t.Fatalf("dependency output = %+v", out)
 	}
 }
 

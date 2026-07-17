@@ -133,6 +133,10 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		return nil, err
 	}
 
+	if err := scenariofile.ValidateSessionDependencies(msg.Sessions); err != nil {
+		return nil, err
+	}
+
 	// Preflight: validate repos exist and are git repos.
 	for _, s := range msg.Sessions {
 		if !git.IsInsideGitRepo(s.Repo) {
@@ -462,18 +466,36 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	}
 
 	scenario.SessionIDs = sessionIDs
-	// Activate scenario-embedded triggers only now that the two-phase start has
-	// succeeded — a rolled-back scenario never reaches here, so its triggers are
-	// discarded with it (no orphaned watchers). The reconcile loops pick them up
-	// on the next tick and bind to the scenario's running sessions.
-	scenario.Triggers = msg.Triggers
 	_ = sm.saveState()
 	sm.mu.Unlock()
 
-	// Seed one assigned todo item per member from its task (issue #591): this
-	// replaces the old task-done boolean — a member marks progress by completing
-	// its assigned items, and `gr scenario status` derives completion from them.
-	sm.seedScenarioTodos(scenarioID, sessionIDs, scenarioSessions)
+	// Seed all assigned task items and their member-name dependency graph in one
+	// store transaction. A seed failure creates no rows and rolls back the
+	// newly-created scenario members, preserving scenario start's all-or-none
+	// contract.
+	if err := sm.seedScenarioTodos(scenarioID, sessionIDs, msg.Sessions); err != nil {
+		rollbackErrors := sm.rollbackScenarioAfterSeedFailure(scenarioID, sessionIDs, sharedReused)
+		if len(rollbackErrors) > 0 {
+			return nil, fmt.Errorf("seed scenario todos: %w (rollback failed for: %s)", err, strings.Join(rollbackErrors, ", "))
+		}
+
+		return nil, fmt.Errorf("seed scenario todos: %w", err)
+	}
+
+	// Activate scenario-embedded triggers only after the todo graph commits. A
+	// scenario rolled back for seed failure therefore never exposes watchers.
+	sm.mu.Lock()
+
+	scenario = sm.state.Scenarios[scenarioID]
+
+	if scenario == nil {
+		sm.mu.Unlock()
+		return nil, fmt.Errorf("scenario %q was deleted during todo seeding", msg.Name)
+	}
+
+	scenario.Triggers = msg.Triggers
+	_ = sm.saveState()
+	sm.mu.Unlock()
 
 	// --- Manifest phase: build and publish manifest to each session's inbox ---
 	repos := make([]string, len(scenarioSessions))
@@ -916,7 +938,10 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 
 	sm.mu.Lock()
 
-	var scenarioID, orchestratorID, goal string
+	var (
+		scenarioID, orchestratorID, goal string
+		dependencyAssignees              []string
+	)
 
 	found := false
 
@@ -926,6 +951,52 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 			orchestratorID = sc.OrchestratorID
 			goal = sc.Goal
 			found = true
+
+			if len(input.DependsOn) > 0 && strings.TrimSpace(input.Task) == "" {
+				sm.mu.Unlock()
+				return nil, fmt.Errorf("session %q: depends_on requires a task", input.Name)
+			}
+
+			seenDependencies := make(map[string]bool, len(input.DependsOn))
+			for _, dependencyName := range input.DependsOn {
+				if dependencyName == input.Name {
+					sm.mu.Unlock()
+					return nil, fmt.Errorf("session %q: depends_on cannot reference itself", input.Name)
+				}
+
+				if seenDependencies[dependencyName] {
+					sm.mu.Unlock()
+					return nil, fmt.Errorf("session %q: duplicate depends_on member %q", input.Name, dependencyName)
+				}
+
+				seenDependencies[dependencyName] = true
+
+				dependencyAssignee := ""
+
+				for i, member := range sc.Sessions {
+					if member.Name != dependencyName {
+						continue
+					}
+
+					if strings.TrimSpace(member.Task) == "" {
+						sm.mu.Unlock()
+						return nil, fmt.Errorf("session %q: depends_on member %q has no task to track", input.Name, dependencyName)
+					}
+
+					if i < len(sc.SessionIDs) {
+						dependencyAssignee = sc.SessionIDs[i]
+					}
+
+					break
+				}
+
+				if dependencyAssignee == "" {
+					sm.mu.Unlock()
+					return nil, fmt.Errorf("session %q: depends_on member %q is not defined", input.Name, dependencyName)
+				}
+
+				dependencyAssignees = append(dependencyAssignees, dependencyAssignee)
+			}
 
 			break
 		}
@@ -948,6 +1019,27 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		}
 	}
 	sm.mu.Unlock()
+
+	dependencyTodoIDs := make([]string, 0, len(dependencyAssignees))
+	if len(dependencyAssignees) > 0 {
+		if sm.todos == nil {
+			return nil, errors.New("todo store is required for scenario task dependencies")
+		}
+
+		seedIDs, err := sm.todos.ScenarioSeedItemIDs("scenario:" + scenarioID)
+		if err != nil {
+			return nil, err
+		}
+
+		for i, assignee := range dependencyAssignees {
+			id := seedIDs[assignee]
+			if id == "" {
+				return nil, fmt.Errorf("depends_on member %q has no seeded assigned todo item", input.DependsOn[i])
+			}
+
+			dependencyTodoIDs = append(dependencyTodoIDs, id)
+		}
+	}
 
 	scenarioEnv := map[string]string{
 		"GRAITH_SCENARIO":      scenarioID,
@@ -1016,27 +1108,100 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 	_ = sm.saveState()
 	sm.mu.Unlock()
 
-	// Seed the added member's task as an assigned todo (issue #591).
-	sm.seedScenarioTodos(scenarioID, []string{sess.ID}, []ScenarioSession{{Name: input.Name, Task: input.Task}})
+	if err := sm.seedAddedScenarioTodo(scenarioID, sess.ID, input, dependencyTodoIDs); err != nil {
+		rollbackErr := sm.rollbackAddedScenarioMember(scenarioID, sess.ID)
+		if rollbackErr != nil {
+			return nil, errors.Join(
+				fmt.Errorf("seed scenario todo: %w", err),
+				fmt.Errorf("rollback scenario member: %w", rollbackErr),
+			)
+		}
+
+		return nil, fmt.Errorf("seed scenario todo: %w", err)
+	}
 
 	sm.republishManifests(scenarioID)
 
 	return &sess, nil
 }
 
-// seedScenarioTodos creates one assigned todo item per member with a non-empty
-// task, in the scenario scope. This is how a scenario member's work is tracked
-// now that task-done is gone: completion is derived from these assigned items.
-func (sm *SessionManager) seedScenarioTodos(scenarioID string, sessionIDs []string, sessions []ScenarioSession) {
+func (sm *SessionManager) seedAddedScenarioTodo(scenarioID, sessionID string, input protocol.ScenarioSessionInput, dependencyIDs []string) error {
+	task := strings.TrimSpace(input.Task)
+	if task == "" {
+		return nil
+	}
+
 	if sm.todos == nil {
-		return
+		return nil
 	}
 
 	scope := "scenario:" + scenarioID
 
+	item, err := sm.todos.Add(TodoAdd{
+		Scope: scope, Title: task, Assignee: sessionID, DependsOn: dependencyIDs, CreatedBy: scope,
+	})
+	if err != nil {
+		return err
+	}
+
+	sm.emitTodoEvent(scope, "added", item)
+
+	return nil
+}
+
+func (sm *SessionManager) rollbackAddedScenarioMember(scenarioID, sessionID string) error {
+	if err := sm.Stop(sessionID); err != nil {
+		sm.log.Warn("scenario add todo rollback: stop failed", "session", sessionID, "err", err)
+	}
+
+	if err := sm.unstarAndDelete(sessionID); err != nil {
+		return fmt.Errorf("delete session %s: %w", sessionID, err)
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if scenario := sm.state.Scenarios[scenarioID]; scenario != nil {
+		for i, id := range scenario.SessionIDs {
+			if id != sessionID {
+				continue
+			}
+
+			scenario.SessionIDs = append(scenario.SessionIDs[:i], scenario.SessionIDs[i+1:]...)
+			if i < len(scenario.Sessions) {
+				scenario.Sessions = append(scenario.Sessions[:i], scenario.Sessions[i+1:]...)
+			}
+
+			break
+		}
+	}
+
+	if err := sm.saveState(); err != nil {
+		return fmt.Errorf("persist scenario add rollback: %w", err)
+	}
+
+	return nil
+}
+
+// seedScenarioTodos atomically creates one assigned todo item per member with a
+// non-empty task and resolves member-name dependencies between those items.
+func (sm *SessionManager) seedScenarioTodos(scenarioID string, sessionIDs []string, sessions []protocol.ScenarioSessionInput) error {
+	if sm.todos == nil {
+		for _, session := range sessions {
+			if len(session.DependsOn) > 0 {
+				return errors.New("todo store is required for scenario task dependencies")
+			}
+		}
+
+		return nil
+	}
+
+	scope := "scenario:" + scenarioID
+	entries := make([]TodoBatchAdd, 0, len(sessions))
+
 	for i, ss := range sessions {
 		if i >= len(sessionIDs) {
-			break
+			return fmt.Errorf("scenario task %q has no session id", ss.Name)
 		}
 
 		task := strings.TrimSpace(ss.Task)
@@ -1044,12 +1209,56 @@ func (sm *SessionManager) seedScenarioTodos(scenarioID string, sessionIDs []stri
 			continue
 		}
 
-		if _, err := sm.todos.Add(TodoAdd{
-			Scope: scope, Title: task, Assignee: sessionIDs[i], CreatedBy: scope,
-		}); err != nil {
-			sm.log.Error("failed to seed scenario todo", "scenario", scenarioID, "member", ss.Name, "err", err)
+		entries = append(entries, TodoBatchAdd{
+			Key:           ss.Name,
+			Item:          TodoAdd{Scope: scope, Title: task, Assignee: sessionIDs[i], CreatedBy: scope},
+			DependsOnKeys: append([]string(nil), ss.DependsOn...),
+		})
+	}
+
+	items, err := sm.todos.AddBatch(entries)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		item := items[entry.Key]
+		sm.emitTodoEvent(scope, "added", item)
+	}
+
+	return nil
+}
+
+// rollbackScenarioAfterSeedFailure tears down only members created for this
+// scenario (shared members are left running) and removes the scenario record
+// once cleanup succeeds. It mirrors the earlier create rollback path.
+func (sm *SessionManager) rollbackScenarioAfterSeedFailure(scenarioID string, sessionIDs []string, shared []bool) []string {
+	var failed []string
+
+	for i, id := range sessionIDs {
+		if i < len(shared) && shared[i] {
+			continue
+		}
+
+		if err := sm.Stop(id); err != nil {
+			sm.log.Warn("scenario todo rollback: stop failed", "session", id, "err", err)
+		}
+
+		if err := sm.unstarAndDelete(id); err != nil {
+			sm.log.Warn("scenario todo rollback: delete failed", "session", id, "err", err)
+			failed = append(failed, id)
 		}
 	}
+
+	sm.mu.Lock()
+	if len(failed) == 0 {
+		delete(sm.state.Scenarios, scenarioID)
+	}
+
+	_ = sm.saveState()
+	sm.mu.Unlock()
+
+	return failed
 }
 
 func (sm *SessionManager) republishManifests(scenarioID string) {
@@ -1134,9 +1343,24 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 
 	// Per-member progress is derived from the todo items assigned to each member
 	// (issue #591), keyed by session ID — this replaces the old TaskDone bool.
-	var progress map[string][2]int
+	var (
+		progress  map[string][2]int
+		seedItems map[string]TodoItem
+	)
+
 	if sm.todos != nil {
-		progress, _ = sm.todos.AssigneeProgress("scenario:" + sc.ID)
+		scope := "scenario:" + sc.ID
+		progress, _ = sm.todos.AssigneeProgress(scope)
+		seedItems, _ = sm.todos.ScenarioSeedItems(scope)
+	}
+
+	seedMemberNames := make(map[string]string, len(seedItems))
+	for i, id := range sc.SessionIDs {
+		if i < len(sc.Sessions) {
+			if seed, ok := seedItems[id]; ok {
+				seedMemberNames[seed.ID] = sc.Sessions[i].Name
+			}
+		}
 	}
 
 	var running, stopped, errored, tracked, completeMembers int
@@ -1156,6 +1380,17 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 			if p, ok := progress[sc.SessionIDs[i]]; ok {
 				sessions[i].TodoDone = p[0]
 				sessions[i].TodoTotal = p[1]
+			}
+
+			if seed, ok := seedItems[sc.SessionIDs[i]]; ok {
+				for _, dependencyID := range seed.BlockedBy {
+					name := seedMemberNames[dependencyID]
+					if name == "" {
+						name = dependencyID
+					}
+
+					sessions[i].BlockedBy = append(sessions[i].BlockedBy, name)
+				}
 			}
 
 			// A member with tracked work is complete when all assigned items are
