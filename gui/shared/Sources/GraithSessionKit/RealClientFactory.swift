@@ -7,13 +7,17 @@ import GraithRemoteKit
 /// `RealHostClient`. Drop-in replacement for `MockClientFactory`.
 public struct RealHostClientFactory: HostClientFactory {
     private let clientID: String
-    private let localHumanToken: String?
+    private let localHumanToken: @Sendable () -> String?
 
     /// - Parameters:
     ///   - clientID: identifier carried in the handshake (logging only).
-    ///   - localHumanToken: daemon-written credential for the local Unix-socket
-    ///     connection. Remote clients continue to use paired credentials.
-    public init(clientID: String = "graith-app", localHumanToken: String? = nil) {
+    ///   - localHumanToken: late-bound lookup for the daemon-written credential
+    ///     used by local Unix-socket connections. Remote clients continue to
+    ///     use paired credentials.
+    public init(
+        clientID: String = "graith-app",
+        localHumanToken: @escaping @Sendable () -> String? = { nil }
+    ) {
         self.clientID = clientID
         self.localHumanToken = localHumanToken
     }
@@ -41,15 +45,16 @@ public struct RealHostClientFactory: HostClientFactory {
     public func makeLocalClient(transport: GraithTransport, profile: String) -> any GraithHostClient {
         // Local human token, no PoP signer: this is the same transparent local
         // authentication the CLI uses outside a session. The composition root
-        // reads human.token directly rather than forwarding GRAITH_TOKEN, whose
-        // per-session value would make the desktop app act as its launching
-        // agent instead of as the human operator.
+        // reads human.token for each new connection rather than forwarding
+        // GRAITH_TOKEN, whose per-session value would make the desktop app act
+        // as its launching agent instead of as the human operator.
         let inner = GraithProtocolClient(
             transport: transport,
             profile: profile,
             clientID: clientID,
-            token: localHumanToken,
-            signer: nil
+            token: nil,
+            signer: nil,
+            tokenProvider: localHumanToken
         )
         return RealHostClient(inner: inner)
     }

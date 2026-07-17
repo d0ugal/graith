@@ -306,7 +306,7 @@ final class SessionStore: FleetModel {
         registry: HostRegistry,
         identity: DeviceIdentity?,
         pairing: PairingCoordinator,
-        localHumanToken: String? = nil
+        localHumanToken: @escaping @Sendable () -> String? = { nil }
     ) {
         super.init(
             registry: registry,
