@@ -274,6 +274,11 @@ usual `{name}`/`{date}`/`{datetime}`/`{fire_time}`).
 The tracker is **read-only** — graith never writes back to it (no closing issues,
 no comments). Reaping never hard-deletes.
 
+The per-poll `gh issue list` call reuses the PR-watch reader's configured
+per-command timeout, [`pr_watch.advanced.gh_timeout`]({{< relref
+"/docs/configuration/automation.md" >}}) (default `5s`); raising it there also
+gives the tracker poll more time, and the change applies on the next poll.
+
 **Security — issue text is fed to an autonomous agent.** The issue title and body
 are expanded verbatim into the spawned agent's prompt. On a public repo, anyone
 who can open or edit an issue can therefore inject instructions into an agent
