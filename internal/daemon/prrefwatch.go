@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,11 +16,11 @@ import (
 // prrefwatch.go accelerates PR detection. The PR/CI watcher (prwatch.go) resolves
 // each session's PR by polling gh on a timer, so a freshly pushed branch is only
 // noticed on the next tick (up to the base tick plus batch-cap/negative-cache
-// latency). This watcher puts a cheap fsnotify watch on each running session's
-// git refs and, when a push/commit/checkout touches them, sends the session ID to
-// the PR-watch loop's kick channel — which polls that session immediately. The
-// GitHub poll stays the always-on fallback, so a degraded or missing watch only
-// costs latency, never awareness. See
+// latency). This accelerator shares one fsnotify backend per repository and,
+// when a push/commit/checkout touches its refs, sends the affected session IDs
+// to the PR-watch loop's kick channel for immediate polls. The GitHub poll stays
+// the always-on fallback, so a degraded or missing watch only costs latency,
+// never awareness. See
 // docs/design/2026-07-14-pr-ref-watch-design.md.
 
 // The reconcile cadence and per-watch debounce are now [pr_watch.advanced] config
@@ -28,31 +29,68 @@ import (
 // starts; the debounce is read whenever a watcher arms its timer.
 
 type prRefWatchState struct {
-	mu       sync.Mutex
-	watchers map[string]*prRefWatcher // session ID -> watcher
+	mu           sync.Mutex
+	watchers     map[string]*prRefWatcher     // session ID -> debounce/local ownership
+	repositories map[string]*prRefRepoWatcher // canonical common git dir -> shared watcher
 }
 
 func newPRRefWatchState() *prRefWatchState {
-	return &prRefWatchState{watchers: make(map[string]*prRefWatcher)}
+	return &prRefWatchState{
+		watchers:     make(map[string]*prRefWatcher),
+		repositories: make(map[string]*prRefRepoWatcher),
+	}
 }
 
-// prRefWatcher is one session's git-refs watch: an fsnotify watcher over the
-// ref-bearing git directories, a cancel for its event goroutine, and a per-watch
-// debounce timer.
+// prRefWatcher is one session's membership in a repository watcher. Only the
+// linked-worktree gitdir paths and debounce belong to the session; the expensive
+// common refs/logs tree belongs to repo.
 type prRefWatcher struct {
 	sessionID string
 	worktree  string
-	watcher   *fsnotify.Watcher
-	cancel    context.CancelFunc
+	repo      *prRefRepoWatcher
+	localDirs []string
 
 	bmu      sync.Mutex
 	debounce *time.Timer
 	canceled bool
 }
 
-// RunPRRefWatchLoop reconciles per-session git-refs watchers against live
-// sessions each tick. Started from RunPRWatchLoop and sharing its lifecycle + gh
-// gate; the loop's own poll is the fallback if this degrades.
+// prRefRepoWatcher owns the sole fsnotify backend for a canonical Git common
+// directory. This is important on kqueue (macOS/BSD): every watched path and
+// directory entry consumes a real descriptor, so recursively adding the same
+// refs/logs tree to one backend per worktree multiplies descriptor use.
+type prRefRepoWatcher struct {
+	commonDir string
+	watcher   *fsnotify.Watcher
+	ctx       context.Context
+	cancel    context.CancelFunc
+	closeOnce sync.Once
+
+	mu       sync.Mutex
+	closed   bool
+	sessions map[string]*prRefWatcher
+	dirs     map[string]*prRefWatchDir
+}
+
+// prRefWatchDir records why a directory is registered. Common directories fan
+// events out to every repository session; local directories target only their
+// owning linked worktree(s). A map is used for local owners so teardown remains
+// correct if two sessions ever point at the same worktree.
+type prRefWatchDir struct {
+	common   bool
+	sessions map[string]struct{}
+}
+
+type gitRefWatchPaths struct {
+	gitDir     string
+	commonDir  string
+	localDirs  []string
+	commonDirs []string
+}
+
+// RunPRRefWatchLoop reconciles session memberships in shared repository watchers
+// each tick. Started from RunPRWatchLoop and sharing its lifecycle + gh gate; the
+// loop's own poll is the fallback if this degrades.
 func (sm *SessionManager) RunPRRefWatchLoop(ctx context.Context) {
 	if sm.prRefWatch == nil {
 		return // accelerator not wired (e.g. a bare test SessionManager)
@@ -80,9 +118,9 @@ func (sm *SessionManager) RunPRRefWatchLoop(ctx context.Context) {
 	}
 }
 
-// reconcilePRRefWatchers creates a watcher for each newly-eligible session and
-// tears down watchers whose session is gone/stopped/soft-deleted. Locks are
-// released before create/teardown (which lock) to avoid re-entrancy.
+// reconcilePRRefWatchers joins newly eligible sessions to their repository's
+// watcher and tears down memberships whose session is gone/stopped/deleted.
+// Locks are released before create/teardown (which lock) to avoid re-entrancy.
 func (sm *SessionManager) reconcilePRRefWatchers(ctx context.Context) {
 	desired := sm.prRefEligibleSessions()
 
@@ -90,8 +128,9 @@ func (sm *SessionManager) reconcilePRRefWatchers(ctx context.Context) {
 
 	var toRemove []string
 
-	for id := range sm.prRefWatch.watchers {
-		if _, ok := desired[id]; !ok {
+	for id, watcher := range sm.prRefWatch.watchers {
+		worktree, ok := desired[id]
+		if !ok || watcher.worktree != worktree {
 			toRemove = append(toRemove, id)
 		}
 	}
@@ -139,77 +178,152 @@ func (sm *SessionManager) prRefEligibleSessions() map[string]string {
 	return out
 }
 
-// createPRRefWatcher resolves a worktree's ref directories, registers fsnotify
-// watches, and starts the event goroutine. Fail-open: if the git dirs can't be
-// resolved or no watch can be added, no watcher is created and the poll covers
-// the session.
+// createPRRefWatcher resolves a worktree's ref directories and joins it to the
+// single watcher for its canonical common Git directory. Fail-open: if the dirs
+// cannot be resolved or the repository watch cannot be established, the normal
+// poll continues to cover the session.
 func (sm *SessionManager) createPRRefWatcher(ctx context.Context, id, worktree string) {
-	dirs := gitRefWatchDirs(worktree)
-	if len(dirs) == 0 {
+	paths := resolveGitRefWatchPaths(worktree)
+	if paths == nil {
 		return
 	}
 
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		if sm.log != nil {
-			sm.log.Warn("pr-watch: fsnotify unavailable for ref watch", "session", id, "err", err)
-		}
-
-		return
-	}
-
-	added := 0
-
-	for _, d := range dirs {
-		if aerr := watcher.Add(d); aerr == nil {
-			added++
-		}
-	}
-
-	if added == 0 {
-		_ = watcher.Close()
-		return
-	}
-
-	wctx, cancel := context.WithCancel(ctx)
 	w := &prRefWatcher{
 		sessionID: id,
 		worktree:  worktree,
-		watcher:   watcher,
-		cancel:    cancel,
+		localDirs: paths.localDirs,
 	}
 
+	// Avoid allocating another kqueue/inotify instance when the repository is
+	// already live. A racing creator is handled by the second lookup below.
 	sm.prRefWatch.mu.Lock()
-	// A concurrent reconcile may have created one already; keep the existing.
 	if _, exists := sm.prRefWatch.watchers[id]; exists {
 		sm.prRefWatch.mu.Unlock()
-		cancel()
+		return
+	}
 
-		_ = watcher.Close()
+	repo := sm.prRefWatch.repositories[paths.commonDir]
+	sm.prRefWatch.mu.Unlock()
+
+	var candidate *prRefRepoWatcher
+	if repo == nil {
+		candidate = sm.newPRRefRepoWatcher(ctx, id, paths)
+		if candidate == nil {
+			return
+		}
+	}
+
+	var startRepo, discardCandidate bool
+
+	sm.prRefWatch.mu.Lock()
+	if _, exists := sm.prRefWatch.watchers[id]; exists {
+		sm.prRefWatch.mu.Unlock()
+
+		if candidate != nil {
+			candidate.stop()
+		}
 
 		return
 	}
+
+	if current := sm.prRefWatch.repositories[paths.commonDir]; current != nil {
+		repo = current
+		discardCandidate = candidate != nil
+	} else {
+		// candidate can only be nil if the last repository membership raced this
+		// creator and removed the repository after the first lookup. Retry with a
+		// fresh backend rather than attaching to a closing watcher.
+		if candidate == nil {
+			sm.prRefWatch.mu.Unlock()
+			sm.createPRRefWatcher(ctx, id, worktree)
+
+			return
+		}
+
+		repo = candidate
+		sm.prRefWatch.repositories[paths.commonDir] = repo
+		startRepo = true
+	}
+
+	w.repo = repo
+	repo.mu.Lock()
+	localAdded, localFailed := repo.addDirsLocked(id, paths.localDirs, false)
+	repo.sessions[id] = w
+	repo.mu.Unlock()
 
 	sm.prRefWatch.watchers[id] = w
 	sm.prRefWatch.mu.Unlock()
 
-	go sm.runPRRefWatcher(wctx, w)
+	if discardCandidate {
+		candidate.stop()
+	}
+
+	if startRepo {
+		go sm.runPRRefRepoWatcher(repo)
+	}
 
 	if sm.log != nil {
-		sm.log.Debug("pr-watch: ref watch started", "session", id, "dirs", added)
+		sm.log.Debug("pr-watch: ref watch joined", "session", id, "repository", paths.commonDir,
+			"shared", !startRepo, "local_dirs_added", localAdded)
+
+		if localFailed > 0 {
+			sm.log.Warn("pr-watch: some worktree-local ref watches unavailable; polling remains active",
+				"session", id, "repository", paths.commonDir, "failed_dirs", localFailed)
+		}
 	}
 }
 
-// gitRefWatchDirs returns the directories to watch for a worktree's ref changes:
-// the per-worktree gitdir (HEAD/ORIG_HEAD) and its logs (worktree reflog), plus
-// the common dir (packed-refs/HEAD) and its refs + logs subtrees (heads, remotes,
-// tags, and reflogs — a push updates the remote-tracking ref + its reflog). The
-// object store is deliberately excluded — it is high-churn and irrelevant to PR
-// resolution. refs/ and logs/ subtrees are walked so nested branch namespaces
-// (e.g. refs/heads/user/feature) are covered; new nested dirs are added on the
-// fly in the event handler. Returns nil (fail-open) when the git dirs can't be
-// resolved.
-func gitRefWatchDirs(worktree string) []string {
+func (sm *SessionManager) newPRRefRepoWatcher(
+	ctx context.Context,
+	sessionID string,
+	paths *gitRefWatchPaths,
+) *prRefRepoWatcher {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		if sm.log != nil {
+			sm.log.Warn("pr-watch: fsnotify unavailable for ref watch", "session", sessionID, "err", err)
+		}
+
+		return nil
+	}
+
+	wctx, cancel := context.WithCancel(ctx)
+	repo := &prRefRepoWatcher{
+		commonDir: paths.commonDir,
+		watcher:   watcher,
+		ctx:       wctx,
+		cancel:    cancel,
+		sessions:  make(map[string]*prRefWatcher),
+		dirs:      make(map[string]*prRefWatchDir),
+	}
+
+	repo.mu.Lock()
+	added, failed := repo.addDirsLocked("", paths.commonDirs, true)
+	repo.mu.Unlock()
+
+	if added == 0 {
+		repo.stop()
+		return nil
+	}
+
+	if sm.log != nil {
+		sm.log.Debug("pr-watch: shared repository ref watch started", "repository", paths.commonDir,
+			"registered_dirs", added)
+
+		if failed > 0 {
+			sm.log.Warn("pr-watch: some shared ref watches unavailable; polling remains active",
+				"repository", paths.commonDir, "registered_dirs", added, "failed_dirs", failed)
+		}
+	}
+
+	return repo
+}
+
+// resolveGitRefWatchPaths splits a worktree's watches into the expensive common
+// refs/logs tree and its small linked-worktree gitdir. The split is the resource
+// boundary: commonDirs are registered once per canonical repository, while
+// localDirs are ref-counted per session. The object store is always excluded.
+func resolveGitRefWatchPaths(worktree string) *gitRefWatchPaths {
 	if worktree == "" {
 		return nil
 	}
@@ -228,9 +342,44 @@ func gitRefWatchDirs(worktree string) []string {
 		commonDir = filepath.Join(worktree, commonDir)
 	}
 
-	gitDir = filepath.Clean(gitDir)
-	commonDir = filepath.Clean(commonDir)
+	gitDir = canonicalGitPath(gitDir)
+	commonDir = canonicalGitPath(commonDir)
 
+	paths := &gitRefWatchPaths{gitDir: gitDir, commonDir: commonDir}
+	paths.commonDirs = existingPRRefDirs(
+		[]string{commonDir},
+		[]string{filepath.Join(commonDir, "refs"), filepath.Join(commonDir, "logs")},
+	)
+
+	// For the primary worktree gitDir == commonDir, and the common registration
+	// already covers HEAD and logs. Linked worktrees keep those paths local.
+	if gitDir != commonDir {
+		paths.localDirs = existingPRRefDirs(
+			[]string{gitDir},
+			[]string{filepath.Join(gitDir, "logs")},
+		)
+	}
+
+	if len(paths.commonDirs) == 0 {
+		return nil
+	}
+
+	return paths
+}
+
+func canonicalGitPath(path string) string {
+	path = filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(resolved)
+	}
+
+	return path
+}
+
+// existingPRRefDirs returns unique existing roots and recursively walks the
+// supplied trees. Unreadable/missing subtrees degrade to polling instead of
+// making repository watch setup fail.
+func existingPRRefDirs(roots, trees []string) []string {
 	seen := map[string]bool{}
 
 	var dirs []string
@@ -260,55 +409,189 @@ func gitRefWatchDirs(worktree string) []string {
 		})
 	}
 
-	addDir(gitDir)                            // HEAD, ORIG_HEAD (worktree-local)
-	addTree(filepath.Join(gitDir, "logs"))    // worktree reflog (commit/checkout)
-	addDir(commonDir)                         // packed-refs, HEAD
-	addTree(filepath.Join(commonDir, "refs")) // heads/remotes/tags (nested)
-	addTree(filepath.Join(commonDir, "logs")) // reflogs incl. push
+	for _, root := range roots {
+		addDir(root)
+	}
+
+	for _, tree := range trees {
+		addTree(tree)
+	}
 
 	return dirs
 }
 
-// runPRRefWatcher is the per-watch event loop: any ref/log write, create, rename,
-// or remove arms the debounce; on quiet it kicks an immediate poll.
-func (sm *SessionManager) runPRRefWatcher(ctx context.Context, w *prRefWatcher) {
+// gitRefWatchDirs retains the flattened view used by path-set tests.
+func gitRefWatchDirs(worktree string) []string {
+	paths := resolveGitRefWatchPaths(worktree)
+	if paths == nil {
+		return nil
+	}
+
+	dirs := make([]string, 0, len(paths.commonDirs)+len(paths.localDirs))
+	dirs = append(dirs, paths.localDirs...)
+	dirs = append(dirs, paths.commonDirs...)
+
+	return dirs
+}
+
+// addDirsLocked registers new directories and merges their ownership. The
+// caller holds repo.mu. Existing registrations are reused and therefore do not
+// call fsnotify.Add again.
+func (repo *prRefRepoWatcher) addDirsLocked(
+	sessionID string,
+	dirs []string,
+	common bool,
+) (added, failed int) {
+	if repo.closed {
+		return 0, len(dirs)
+	}
+
+	for _, dir := range dirs {
+		if ownership := repo.dirs[dir]; ownership != nil {
+			ownership.common = ownership.common || common
+			if sessionID != "" {
+				ownership.sessions[sessionID] = struct{}{}
+			}
+
+			continue
+		}
+
+		if err := repo.watcher.Add(dir); err != nil {
+			failed++
+			continue
+		}
+
+		ownership := &prRefWatchDir{
+			common:   common,
+			sessions: make(map[string]struct{}),
+		}
+		if sessionID != "" {
+			ownership.sessions[sessionID] = struct{}{}
+		}
+
+		repo.dirs[dir] = ownership
+		added++
+	}
+
+	return added, failed
+}
+
+// runPRRefRepoWatcher is the one event loop per common Git directory.
+func (sm *SessionManager) runPRRefRepoWatcher(repo *prRefRepoWatcher) {
 	for {
 		select {
-		case <-ctx.Done():
+		case <-repo.ctx.Done():
 			return
-		case ev, ok := <-w.watcher.Events:
+		case ev, ok := <-repo.watcher.Events:
 			if !ok {
 				return
 			}
 
-			sm.handlePRRefEvent(w, ev)
-		case err, ok := <-w.watcher.Errors:
+			sm.handlePRRefEvent(repo, ev)
+		case err, ok := <-repo.watcher.Errors:
 			if !ok {
 				return
 			}
 
 			if sm.log != nil {
-				sm.log.Debug("pr-watch: ref watcher error", "session", w.sessionID, "err", err)
+				sm.log.Debug("pr-watch: ref watcher error", "repository", repo.commonDir, "err", err)
 			}
 		}
 	}
 }
 
-// handlePRRefEvent filters and debounces one fsnotify event. A new directory
-// under a watched tree (e.g. a nested branch namespace) is added to the watch so
-// later writes inside it are seen; the create itself already counts as a change.
-func (sm *SessionManager) handlePRRefEvent(w *prRefWatcher, ev fsnotify.Event) {
+// handlePRRefEvent fans common changes out to every repository session and
+// targets worktree-local changes to their owner. Newly created directory trees
+// inherit their parent's ownership so nested branch namespaces stay reactive.
+func (sm *SessionManager) handlePRRefEvent(repo *prRefRepoWatcher, ev fsnotify.Event) {
 	if ev.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename|fsnotify.Remove) == 0 {
 		return // Chmod-only noise
 	}
 
+	repo.mu.Lock()
+
+	ownership := repo.eventOwnershipLocked(ev.Name)
+	if ownership == nil {
+		repo.mu.Unlock()
+		return
+	}
+
+	recipients := repo.recipientsLocked(ownership)
+	common := ownership.common
+
+	localIDs := make([]string, 0, len(ownership.sessions))
+	for id := range ownership.sessions {
+		localIDs = append(localIDs, id)
+	}
+
+	removedWatchedDir := repo.dirs[ev.Name] != nil
+	repo.mu.Unlock()
+
+	if removedWatchedDir && ev.Op&(fsnotify.Rename|fsnotify.Remove) != 0 {
+		repo.mu.Lock()
+		for dir := range repo.dirs {
+			if sameOrChildPath(ev.Name, dir) {
+				delete(repo.dirs, dir)
+				_ = repo.watcher.Remove(dir)
+			}
+		}
+		repo.mu.Unlock()
+	}
+
 	if ev.Op&fsnotify.Create != 0 {
 		if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
-			_ = w.watcher.Add(ev.Name)
+			dirs := existingPRRefDirs(nil, []string{ev.Name})
+
+			repo.mu.Lock()
+			if common {
+				repo.addDirsLocked("", dirs, true)
+			} else {
+				for _, id := range localIDs {
+					if repo.sessions[id] != nil {
+						repo.addDirsLocked(id, dirs, false)
+					}
+				}
+			}
+			repo.mu.Unlock()
 		}
 	}
 
-	sm.notePRRefChange(w)
+	for _, watcher := range recipients {
+		sm.notePRRefChange(watcher)
+	}
+}
+
+func (repo *prRefRepoWatcher) eventOwnershipLocked(name string) *prRefWatchDir {
+	if ownership := repo.dirs[filepath.Dir(name)]; ownership != nil {
+		return ownership
+	}
+
+	return repo.dirs[name]
+}
+
+func sameOrChildPath(parent, path string) bool {
+	rel, err := filepath.Rel(parent, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func (repo *prRefRepoWatcher) recipientsLocked(ownership *prRefWatchDir) []*prRefWatcher {
+	if ownership.common {
+		out := make([]*prRefWatcher, 0, len(repo.sessions))
+		for _, watcher := range repo.sessions {
+			out = append(out, watcher)
+		}
+
+		return out
+	}
+
+	out := make([]*prRefWatcher, 0, len(ownership.sessions))
+	for id := range ownership.sessions {
+		if watcher := repo.sessions[id]; watcher != nil {
+			out = append(out, watcher)
+		}
+	}
+
+	return out
 }
 
 // notePRRefChange (re)arms the debounce timer that fires a single kick.
@@ -378,15 +661,49 @@ func (sm *SessionManager) kickPRWatch(id string) {
 
 func (sm *SessionManager) teardownPRRefWatcher(id string) {
 	sm.prRefWatch.mu.Lock()
-	w := sm.prRefWatch.watchers[id]
-	delete(sm.prRefWatch.watchers, id)
-	sm.prRefWatch.mu.Unlock()
 
+	w := sm.prRefWatch.watchers[id]
 	if w == nil {
+		sm.prRefWatch.mu.Unlock()
 		return
 	}
 
-	stopWatcherResources(w.cancel, w.watcher, &w.bmu, &w.canceled, &w.debounce)
+	// Mark the debounce canceled before removing repository membership. An event
+	// handler that already snapshotted this session then cannot arm a late kick.
+	w.bmu.Lock()
+
+	w.canceled = true
+	if w.debounce != nil {
+		w.debounce.Stop()
+	}
+	w.bmu.Unlock()
+
+	delete(sm.prRefWatch.watchers, id)
+
+	repo := w.repo
+	repo.mu.Lock()
+	delete(repo.sessions, id)
+
+	for dir, ownership := range repo.dirs {
+		delete(ownership.sessions, id)
+
+		if !ownership.common && len(ownership.sessions) == 0 {
+			delete(repo.dirs, dir)
+			_ = repo.watcher.Remove(dir)
+		}
+	}
+
+	lastSession := len(repo.sessions) == 0
+	if lastSession {
+		repo.closed = true
+		delete(sm.prRefWatch.repositories, repo.commonDir)
+	}
+	repo.mu.Unlock()
+	sm.prRefWatch.mu.Unlock()
+
+	if lastSession {
+		repo.stop()
+	}
 }
 
 func (sm *SessionManager) teardownAllPRRefWatchers() {
@@ -401,4 +718,15 @@ func (sm *SessionManager) teardownAllPRRefWatchers() {
 	for _, id := range ids {
 		sm.teardownPRRefWatcher(id)
 	}
+}
+
+func (repo *prRefRepoWatcher) stop() {
+	repo.closeOnce.Do(func() {
+		repo.mu.Lock()
+		repo.closed = true
+		repo.mu.Unlock()
+
+		repo.cancel()
+		_ = repo.watcher.Close()
+	})
 }

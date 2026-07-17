@@ -94,6 +94,33 @@ func TestGitRefWatchDirs_LinkedWorktree(t *testing.T) {
 	if !haveCommonRefs {
 		t.Errorf("expected common refs dir %q in watch set, got %v", commonRefs, dirs)
 	}
+
+	paths := resolveGitRefWatchPaths(wt)
+	if paths == nil {
+		t.Fatal("expected classified ref paths for a linked worktree")
+	}
+
+	if paths.gitDir == paths.commonDir {
+		t.Fatalf("linked gitdir %q must differ from common dir %q", paths.gitDir, paths.commonDir)
+	}
+
+	if !pathListContains(paths.localDirs, paths.gitDir) {
+		t.Errorf("linked gitdir should be worktree-local, got %v", paths.localDirs)
+	}
+
+	if !pathListContains(paths.commonDirs, commonRefs) {
+		t.Errorf("common refs should be repository-owned, got %v", paths.commonDirs)
+	}
+}
+
+func pathListContains(paths []string, want string) bool {
+	for _, path := range paths {
+		if path == want {
+			return true
+		}
+	}
+
+	return false
 }
 
 // TestGitRefWatchDirs_FailOpen: a non-git path resolves to no dirs (no panic),
@@ -178,6 +205,132 @@ func TestReconcilePRRefWatchers_CreateAndTeardown(t *testing.T) {
 
 	if stillThere {
 		t.Error("reconcile should tear down the watcher once the session stops")
+	}
+}
+
+// TestReconcilePRRefWatchers_SharesCommonRepository is the regression for
+// #1402. fsnotify's kqueue backend opens descriptors for every watched path and
+// directory entry, so the recursive common tree must have exactly one backend
+// regardless of how many linked worktrees are active. Local gitdirs remain
+// separately owned and are released with their session.
+func TestReconcilePRRefWatchers_SharesCommonRepository(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	repo := t.TempDir() + "/croft"
+	initGitRepoOnBranch(t, repo)
+
+	wt := t.TempDir() + "/bothy"
+	gitRun(t, repo, "worktree", "add", wt, "-b", "bide")
+
+	sm.state.Sessions["braw1"] = &SessionState{
+		ID: "braw1", Name: "braw", RepoPath: repo, WorktreePath: repo,
+		Branch: "main", Status: StatusRunning,
+	}
+	sm.state.Sessions["canny2"] = &SessionState{
+		ID: "canny2", Name: "canny", RepoPath: repo, WorktreePath: wt,
+		Branch: "bide", Status: StatusRunning,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer sm.teardownAllPRRefWatchers()
+
+	sm.reconcilePRRefWatchers(ctx)
+
+	sm.prRefWatch.mu.Lock()
+	first := sm.prRefWatch.watchers["braw1"]
+	second := sm.prRefWatch.watchers["canny2"]
+	repositoryCount := len(sm.prRefWatch.repositories)
+	sm.prRefWatch.mu.Unlock()
+
+	if first == nil || second == nil {
+		t.Fatalf("expected both session memberships, got first=%v second=%v", first != nil, second != nil)
+	}
+
+	if first.repo != second.repo {
+		t.Fatal("worktrees sharing a common Git dir must share one fsnotify backend")
+	}
+
+	if repositoryCount != 1 {
+		t.Fatalf("repository watcher count = %d, want 1", repositoryCount)
+	}
+
+	mainPaths := resolveGitRefWatchPaths(repo)
+	linkedPaths := resolveGitRefWatchPaths(wt)
+
+	wantDirs := make(map[string]bool)
+	for _, dir := range mainPaths.commonDirs {
+		wantDirs[dir] = true
+	}
+
+	for _, dir := range linkedPaths.localDirs {
+		wantDirs[dir] = true
+	}
+
+	first.repo.mu.Lock()
+	watchList := first.repo.watcher.WatchList()
+	memberCount := len(first.repo.sessions)
+	first.repo.mu.Unlock()
+
+	if memberCount != 2 {
+		t.Fatalf("shared repository member count = %d, want 2", memberCount)
+	}
+
+	if len(watchList) != len(wantDirs) {
+		t.Fatalf("registered dir count = %d, want %d unique common+local dirs\ngot: %v\nwant: %v",
+			len(watchList), len(wantDirs), watchList, wantDirs)
+	}
+
+	for _, dir := range watchList {
+		if !wantDirs[dir] {
+			t.Errorf("unexpected registered dir %q", dir)
+		}
+	}
+
+	// Soft-delete one worktree. Its local paths and membership disappear, while
+	// the shared common watcher remains for the other running session.
+	now := time.Now()
+	sm.state.Sessions["canny2"].DeletedAt = &now
+	sm.reconcilePRRefWatchers(ctx)
+
+	sm.prRefWatch.mu.Lock()
+	_, linkedStillWatched := sm.prRefWatch.watchers["canny2"]
+	repositoryCount = len(sm.prRefWatch.repositories)
+	sm.prRefWatch.mu.Unlock()
+
+	if linkedStillWatched {
+		t.Error("soft-deleted worktree should release its watcher membership")
+	}
+
+	if repositoryCount != 1 {
+		t.Fatalf("shared watcher should remain for the live worktree, got %d repositories", repositoryCount)
+	}
+
+	first.repo.mu.Lock()
+	localStillRegistered := false
+
+	for _, dir := range linkedPaths.localDirs {
+		if first.repo.dirs[dir] != nil {
+			localStillRegistered = true
+		}
+	}
+	first.repo.mu.Unlock()
+
+	if localStillRegistered {
+		t.Error("soft-deleted worktree should release all local Git directory watches")
+	}
+
+	// Stopping the last session closes and removes the repository backend.
+	sm.state.Sessions["braw1"].Status = StatusStopped
+	sm.reconcilePRRefWatchers(ctx)
+
+	sm.prRefWatch.mu.Lock()
+	repositoryCount = len(sm.prRefWatch.repositories)
+	sessionCount := len(sm.prRefWatch.watchers)
+	sm.prRefWatch.mu.Unlock()
+
+	if repositoryCount != 0 || sessionCount != 0 {
+		t.Errorf("last teardown left repositories=%d sessions=%d, want zero", repositoryCount, sessionCount)
 	}
 }
 
@@ -318,14 +471,32 @@ func TestTeardownAllPRRefWatchers(t *testing.T) {
 	defer cancel()
 
 	sm.createPRRefWatcher(ctx, "braw1", repo)
+
+	sm.prRefWatch.mu.Lock()
+	watcher := sm.prRefWatch.watchers["braw1"]
+	sm.prRefWatch.mu.Unlock()
+
+	if watcher == nil {
+		t.Fatal("expected watcher before teardown")
+	}
+
 	sm.teardownAllPRRefWatchers()
 
 	sm.prRefWatch.mu.Lock()
 	n := len(sm.prRefWatch.watchers)
+	repositories := len(sm.prRefWatch.repositories)
 	sm.prRefWatch.mu.Unlock()
 
-	if n != 0 {
-		t.Errorf("expected all watchers torn down, got %d", n)
+	if n != 0 || repositories != 0 {
+		t.Errorf("expected all watchers torn down, got sessions=%d repositories=%d", n, repositories)
+	}
+
+	watcher.repo.mu.Lock()
+	closed := watcher.repo.closed
+	watcher.repo.mu.Unlock()
+
+	if !closed {
+		t.Error("feature disable/shutdown teardown should close the repository backend")
 	}
 }
 
@@ -372,6 +543,85 @@ func TestPRRefWatch_PushKicks(t *testing.T) {
 
 	if id, ok := waitForKick(t, sm, 5*time.Second); !ok || id != "braw1" {
 		t.Fatalf("expected a kick after a push, got id=%q ok=%v", id, ok)
+	}
+}
+
+// TestPRRefWatch_CommonPushKicksAllWorktrees proves that a single shared common
+// watcher preserves the old fan-out behavior for remote-tracking refs/reflogs.
+func TestPRRefWatch_CommonPushKicksAllWorktrees(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	remote := t.TempDir() + "/remote.git"
+	gitRun(t, "", "init", "--bare", remote)
+
+	repo := t.TempDir() + "/croft"
+	initGitRepoOnBranch(t, repo)
+	gitRun(t, repo, "remote", "add", "origin", remote)
+
+	wt := t.TempDir() + "/bothy"
+	gitRun(t, repo, "worktree", "add", wt, "-b", "bide")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer sm.teardownAllPRRefWatchers()
+
+	sm.createPRRefWatcher(ctx, "braw1", repo)
+	sm.createPRRefWatcher(ctx, "canny2", wt)
+
+	gitRun(t, repo, "push", "-u", "origin", "main")
+
+	got := make(map[string]bool)
+	deadline := time.After(5 * time.Second)
+
+	for len(got) < 2 {
+		select {
+		case id := <-sm.prWatch.kick:
+			got[id] = true
+		case <-deadline:
+			t.Fatalf("expected common ref change to kick both worktrees, got %v", got)
+		}
+	}
+
+	if !got["braw1"] || !got["canny2"] {
+		t.Fatalf("common ref fan-out = %v, want both sessions", got)
+	}
+}
+
+// TestPRRefWatch_LinkedHEADKicksOwner proves the small per-worktree watch still
+// reacts to linked HEAD changes without turning them into repository-wide work.
+func TestPRRefWatch_LinkedHEADKicksOwner(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	repo := t.TempDir() + "/croft"
+	initGitRepoOnBranch(t, repo)
+
+	wt := t.TempDir() + "/bothy"
+	gitRun(t, repo, "worktree", "add", wt, "-b", "bide")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer sm.teardownAllPRRefWatchers()
+
+	sm.createPRRefWatcher(ctx, "braw1", repo)
+	sm.createPRRefWatcher(ctx, "canny2", wt)
+
+	paths := resolveGitRefWatchPaths(wt)
+	if paths == nil || len(paths.localDirs) == 0 {
+		t.Fatal("expected linked-worktree-local watch paths")
+	}
+
+	// symbolic-ref writes only this linked worktree's HEAD. Pointing it at an
+	// existing branch avoids a common refs/reflogs event that would fan out.
+	gitRun(t, wt, "symbolic-ref", "HEAD", "refs/heads/main")
+
+	if id, ok := waitForKick(t, sm, 5*time.Second); !ok || id != "canny2" {
+		t.Fatalf("expected linked HEAD to kick its owner, got id=%q ok=%v", id, ok)
+	}
+
+	select {
+	case id := <-sm.prWatch.kick:
+		t.Fatalf("linked HEAD should not fan out, got extra kick for %q", id)
+	case <-time.After(300 * time.Millisecond):
 	}
 }
 
