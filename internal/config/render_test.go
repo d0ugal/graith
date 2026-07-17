@@ -3,6 +3,10 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/d0ugal/graith/internal/tools"
+	"github.com/pelletier/go-toml/v2"
 )
 
 func TestEffectiveTOMLRendersConfig(t *testing.T) {
@@ -17,6 +21,105 @@ func TestEffectiveTOMLRendersConfig(t *testing.T) {
 
 	if !strings.Contains(string(data), "[sandbox]") {
 		t.Errorf("expected a [sandbox] table in rendered defaults:\n%s", data)
+	}
+}
+
+func TestEffectiveTOMLMaterializesRuntimeDefaults(t *testing.T) {
+	cfg := Default()
+	tools.Configure(cfg.Tools.Resolved(cfg.SourceDir))
+	t.Cleanup(tools.Reset)
+
+	data, err := EffectiveTOML(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var rendered Config
+	if err := toml.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("rendered TOML does not parse: %v", err)
+	}
+
+	if got, want := rendered.Remote.MaxPendingPairings, cfg.Remote.MaxPendingPairingsOrDefault(); got != want {
+		t.Errorf("remote.max_pending_pairings = %d, runtime accessor = %d", got, want)
+	}
+
+	fallback := cfg.Remote.PairFallbackRate()
+	if got := rendered.Remote.PairFallbackCount; got != fallback.Count {
+		t.Errorf("remote.pair_fallback_count = %d, runtime accessor = %d", got, fallback.Count)
+	}
+
+	for _, check := range []struct {
+		name string
+		raw  string
+		want time.Duration
+	}{
+		{"remote.pending_pairing_ttl", rendered.Remote.PendingPairingTTL, cfg.Remote.PendingPairingTTLDuration()},
+		{"remote.pair_fallback_window", rendered.Remote.PairFallbackWindow, fallback.Per},
+		{"approvals.command_timeout", rendered.Approvals.CommandTimeout, cfg.Approvals.CommandTimeoutDuration()},
+		{"approvals.localmost_timeout", rendered.Approvals.LocalmostTimeout, cfg.Approvals.LocalmostTimeoutDuration()},
+	} {
+		got, err := ParseDurationWithDays(check.raw)
+		if err != nil {
+			t.Errorf("%s raw rendered value %q is not a duration: %v", check.name, check.raw, err)
+			continue
+		}
+
+		if got != check.want {
+			t.Errorf("%s = %v, runtime accessor = %v", check.name, got, check.want)
+		}
+	}
+
+	renderedTools := rendered.Tools.Resolved(rendered.SourceDir)
+	for _, check := range []struct {
+		name, got, want string
+	}{
+		{"git", renderedTools.Git, tools.Git()},
+		{"gh", renderedTools.GH, tools.GH()},
+		{"shell", renderedTools.Shell, tools.Shell()},
+		{"osascript", renderedTools.OSAScript, tools.OSAScript()},
+		{"ps", renderedTools.PS, tools.PS()},
+		{"lsof", renderedTools.Lsof, tools.Lsof()},
+	} {
+		if check.got != check.want {
+			t.Errorf("tools.%s = %q, runtime accessor = %q", check.name, check.got, check.want)
+		}
+	}
+
+	if cfg.Remote.MaxPendingPairings != 0 || cfg.Remote.PendingPairingTTL != "" ||
+		cfg.Remote.PairFallbackCount != 0 || cfg.Remote.PairFallbackWindow != "" ||
+		cfg.Tools != (ToolsConfig{}) || cfg.Approvals.CommandTimeout != "" ||
+		cfg.Approvals.LocalmostTimeout != "" {
+		t.Fatal("EffectiveTOML mutated its input config")
+	}
+}
+
+func TestDiffFromDefaultsIgnoresExplicitRuntimeDefaults(t *testing.T) {
+	cfg := Default()
+	cfg.Remote.MaxPendingPairings = cfg.Remote.MaxPendingPairingsOrDefault()
+	cfg.Remote.PendingPairingTTL = "10m"
+	fallback := cfg.Remote.PairFallbackRate()
+	cfg.Remote.PairFallbackCount = fallback.Count
+	cfg.Remote.PairFallbackWindow = "1m"
+
+	toolDefaults := tools.Defaults()
+	cfg.Tools = ToolsConfig{
+		Git:       toolDefaults.Git,
+		GH:        toolDefaults.GH,
+		Shell:     toolDefaults.Shell,
+		OSAScript: toolDefaults.OSAScript,
+		PS:        toolDefaults.PS,
+		Lsof:      toolDefaults.Lsof,
+	}
+	cfg.Approvals.CommandTimeout = cfg.Approvals.CommandTimeoutDuration().String()
+	cfg.Approvals.LocalmostTimeout = cfg.Approvals.LocalmostTimeoutDuration().String()
+
+	diff, err := DiffFromDefaults(cfg, "effective")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if diff != "" {
+		t.Errorf("explicit runtime defaults should not produce a diff:\n%s", diff)
 	}
 }
 

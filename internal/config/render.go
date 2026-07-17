@@ -2,8 +2,10 @@ package config
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/aymanbagabas/go-udiff"
+	"github.com/d0ugal/graith/internal/tools"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -76,7 +78,7 @@ func maskValues(m map[string]string) map[string]string {
 // (built-in defaults overlaid with the user's file). This is what `gr config
 // show` prints and what the GUI's config viewer displays.
 func EffectiveTOML(cfg *Config) ([]byte, error) {
-	data, err := toml.Marshal(cfg)
+	data, err := toml.Marshal(resolveRenderedDefaults(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("marshal config: %w", err)
 	}
@@ -84,19 +86,72 @@ func EffectiveTOML(cfg *Config) ([]byte, error) {
 	return data, nil
 }
 
-// DiffFromDefaults returns a unified diff (built-in defaults → cfg) of the two
-// TOML renderings. toLabel names the "to" side in the diff header (e.g. the
-// config file path, or "effective"). An empty return means cfg is byte-for-byte
-// identical to the built-in defaults.
-func DiffFromDefaults(cfg *Config, toLabel string) (string, error) {
-	defaultBytes, err := toml.Marshal(Default())
-	if err != nil {
-		return "", fmt.Errorf("marshal defaults: %w", err)
+// resolveRenderedDefaults materializes accessor-backed sentinel defaults on a
+// copy so effective output describes the values runtime callers actually use.
+// The defensive accessor fallbacks remain authoritative for runtime behavior;
+// this function only makes their defaults visible to config show/diff and the
+// GUI config viewer.
+func resolveRenderedDefaults(cfg *Config) *Config {
+	c := *cfg
+
+	if c.Remote.MaxPendingPairings == 0 {
+		c.Remote.MaxPendingPairings = c.Remote.MaxPendingPairingsOrDefault()
 	}
 
-	cfgBytes, err := toml.Marshal(cfg)
+	if strings.TrimSpace(c.Remote.PendingPairingTTL) == "" {
+		c.Remote.PendingPairingTTL = "10m"
+	}
+
+	fallback := c.Remote.PairFallbackRate()
+	if c.Remote.PairFallbackCount == 0 {
+		c.Remote.PairFallbackCount = fallback.Count
+	}
+
+	if strings.TrimSpace(c.Remote.PairFallbackWindow) == "" {
+		c.Remote.PairFallbackWindow = "1m"
+	}
+
+	toolDefaults := tools.Defaults()
+	fillToolDefault(&c.Tools.Git, toolDefaults.Git)
+	fillToolDefault(&c.Tools.GH, toolDefaults.GH)
+	fillToolDefault(&c.Tools.Shell, toolDefaults.Shell)
+	fillToolDefault(&c.Tools.OSAScript, toolDefaults.OSAScript)
+	fillToolDefault(&c.Tools.PS, toolDefaults.PS)
+	fillToolDefault(&c.Tools.Lsof, toolDefaults.Lsof)
+
+	if strings.TrimSpace(c.Approvals.CommandTimeout) == "" {
+		c.Approvals.CommandTimeout = c.Approvals.CommandTimeoutDuration().String()
+	}
+
+	if strings.TrimSpace(c.Approvals.LocalmostTimeout) == "" {
+		c.Approvals.LocalmostTimeout = c.Approvals.LocalmostTimeoutDuration().String()
+	}
+
+	return &c
+}
+
+// fillToolDefault mirrors tools' empty-string merge semantics. Whitespace is
+// not treated as unset because runtime resolution preserves it and validation
+// rejects it as an invalid explicit executable.
+func fillToolDefault(field *string, fallback string) {
+	if *field == "" {
+		*field = fallback
+	}
+}
+
+// DiffFromDefaults returns a unified diff (built-in defaults → cfg) of the two
+// TOML renderings. toLabel names the "to" side in the diff header (e.g. the
+// config file path, or "effective"). An empty return means cfg's effective
+// rendering is byte-for-byte identical to the built-in defaults' rendering.
+func DiffFromDefaults(cfg *Config, toLabel string) (string, error) {
+	defaultBytes, err := EffectiveTOML(Default())
 	if err != nil {
-		return "", fmt.Errorf("marshal config: %w", err)
+		return "", fmt.Errorf("render defaults: %w", err)
+	}
+
+	cfgBytes, err := EffectiveTOML(cfg)
+	if err != nil {
+		return "", fmt.Errorf("render config: %w", err)
 	}
 
 	return udiff.Unified("defaults", toLabel, string(defaultBytes), string(cfgBytes)), nil

@@ -8,6 +8,7 @@ import (
 
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/tools"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 )
@@ -354,6 +355,28 @@ func TestConfigShowCovMissingFileUsesDefaults(t *testing.T) {
 	// Missing file -> defaults, so the default agent must be printed.
 	if !strings.Contains(got, "claude") {
 		t.Errorf("show output for missing file should contain default agent 'claude':\n%s", got)
+	}
+
+	var rendered config.Config
+	if err := toml.Unmarshal([]byte(got), &rendered); err != nil {
+		t.Fatalf("config show output is not valid TOML: %v", err)
+	}
+
+	if remote := rendered.Remote; remote.MaxPendingPairings != config.RemoteMaxPendingPairingsDefault ||
+		remote.PendingPairingTTL != "10m" ||
+		remote.PairFallbackCount != config.RemotePairFallbackCountDefault ||
+		remote.PairFallbackWindow != "1m" {
+		t.Errorf("config show pairing policy = %+v, want materialized runtime defaults", remote)
+	}
+
+	toolDefaults := tools.Defaults()
+	if got := rendered.Tools.Resolved(""); got != toolDefaults {
+		t.Errorf("config show tools = %+v, want runtime defaults %+v", got, toolDefaults)
+	}
+
+	if rendered.Approvals.CommandTimeout != "5s" || rendered.Approvals.LocalmostTimeout != "5s" {
+		t.Errorf("config show approval timeouts = {%q, %q}, want {5s, 5s}",
+			rendered.Approvals.CommandTimeout, rendered.Approvals.LocalmostTimeout)
 	}
 }
 
