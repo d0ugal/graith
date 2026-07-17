@@ -278,9 +278,7 @@ func (r *remoteRuntime) matches(cfg config.RemoteConfig, stateDir string) bool {
 	authKey, err := remoteFileFingerprint(config.ExpandPath(cfg.AuthKeyFile))
 	if err != nil {
 		r.sm.log.Warn("remote auth key unavailable; retaining active listener generation",
-			"path", config.ExpandPath(cfg.AuthKeyFile),
 			"generation", r.generation,
-			"err", err,
 		)
 
 		return true
