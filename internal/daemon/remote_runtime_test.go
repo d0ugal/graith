@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -282,7 +283,12 @@ func TestRemoteRuntimeReloadRetainsConsumedAuthKeyUntilReplacement(t *testing.T)
 	initial := remoteRuntimeTestConfig(true)
 	initial.Remote.AuthKeyFile = authKey
 	sm := newRemoteRuntimeTestSM(t, initial, factory)
+
+	var logs bytes.Buffer
+
+	sm.log = slog.New(slog.NewTextHandler(&logs, nil))
 	applyRemoteTestConfig(t, sm, initial)
+	logs.Reset()
 
 	sm.mu.RLock()
 	initialGeneration := sm.remoteGeneration
@@ -299,6 +305,10 @@ func TestRemoteRuntimeReloadRetainsConsumedAuthKeyUntilReplacement(t *testing.T)
 	changed.BranchPrefix = "canny/"
 	changed.Remote.AllowTailnetUsers = []string{"canny@example.com"}
 	applyRemoteTestConfig(t, sm, &changed)
+
+	if logText := logs.String(); !strings.Contains(logText, "remote auth key unavailable") || strings.Contains(logText, authKey) {
+		t.Fatalf("auth-key warning leaked its path or was absent: %q", logText)
+	}
 
 	sm.mu.RLock()
 	appliedGeneration := sm.remoteGeneration
