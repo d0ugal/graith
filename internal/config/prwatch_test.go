@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 func TestPRWatchDefaults(t *testing.T) {
@@ -44,6 +46,56 @@ func TestPRWatchDefaults(t *testing.T) {
 
 	if !pw.NotifyCIRecovery {
 		t.Error("notify_ci_recovery should default true")
+	}
+}
+
+// TestPRWatchDocumentationDefaultsMatchEmbedded keeps the documented top-level
+// timing example in lockstep with the embedded defaults. These values directly
+// control polling load and notification anti-flood behavior, and the docs state
+// that the example shows the defaults.
+func TestPRWatchDocumentationDefaultsMatchEmbedded(t *testing.T) {
+	path := filepath.Join("..", "..", "website", "content", "docs", "configuration", "automation.md")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+
+	const fence = "```toml\n[pr_watch]\n"
+
+	doc := string(data)
+
+	start := strings.Index(doc, fence)
+	if start < 0 {
+		t.Fatalf("%s: missing top-level [pr_watch] TOML example", path)
+	}
+
+	start += len("```toml\n")
+
+	end := strings.Index(doc[start:], "\n```")
+	if end < 0 {
+		t.Fatalf("%s: unterminated top-level [pr_watch] TOML example", path)
+	}
+
+	var documented Config
+	if err := toml.Unmarshal([]byte(doc[start:start+end]), &documented); err != nil {
+		t.Fatalf("parse documented [pr_watch] example: %v", err)
+	}
+
+	want := Default().PRWatch
+	checks := []struct {
+		name, got, want string
+	}{
+		{"poll_pending", documented.PRWatch.PollPending, want.PollPending},
+		{"poll_terminal", documented.PRWatch.PollTerminal, want.PollTerminal},
+		{"poll_merged", documented.PRWatch.PollMerged, want.PollMerged},
+		{"debounce", documented.PRWatch.Debounce, want.Debounce},
+	}
+
+	for _, check := range checks {
+		if check.got != check.want {
+			t.Errorf("documented pr_watch.%s = %q, embedded default = %q", check.name, check.got, check.want)
+		}
 	}
 }
 
