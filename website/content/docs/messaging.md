@@ -181,9 +181,11 @@ subscriber_buffer      = 64    # per-subscriber pub/sub channel capacity (defaul
 busy_timeout           = "5s"  # SQLite busy/operation timeout for the messages DB (default 5s; max 5m)
 ```
 
-`conversation_page_size` must not exceed `conversation_max_limit`. The
-conversation paging bounds and the jail cap are read per request, so a change
-takes effect on the next `gr daemon reload`. `subscriber_buffer` and
+Lowering `conversation_max_limit` on its own is always safe: the effective page
+size is clamped down to the new maximum. Only an *explicit* `conversation_page_size`
+larger than `conversation_max_limit` is rejected at load, as a contradiction of
+intent. The conversation paging bounds and the jail cap are read per request, so a
+change takes effect on the next `gr daemon reload`. `subscriber_buffer` and
 `busy_timeout` are fixed when the database is opened, so they are **restart-only**
 — change them and restart the daemon (`gr daemon restart`). `busy_timeout` is
 graith's database operation deadline: how long a contended read/write waits for

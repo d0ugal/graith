@@ -3907,10 +3907,17 @@ func ValidateIncludes(mainRepoPath string, includes []string) error {
 
 // validateMessagesLimits checks the [messages] operational limits (issue #1249):
 // each configured cap must be positive and at or below its hard safety ceiling,
-// the conversation page size must not exceed the conversation max limit, and the
-// busy timeout must be a positive duration within its ceiling. A non-positive
-// (or, for durations, unparseable/empty) value is left to the accessor default —
-// only an explicitly-out-of-range value fails loudly.
+// and the busy timeout must be a positive duration within its ceiling. A
+// non-positive (or, for durations, unparseable/empty) value is left to the
+// accessor default — only an explicitly-out-of-range value fails loudly.
+//
+// The conversation_page_size vs conversation_max_limit contradiction is NOT
+// checked here: this operates on the merged struct, where an unset page size is
+// indistinguishable from an explicit one (both resolve to the embedded default).
+// Lowering conversation_max_limit alone must not reject a config — the inherited
+// page size is silently clamped to the max by the accessor — so the contradiction
+// is checked raw-data-aware at load instead (validateConversationPageSizeOverride,
+// issue #1314).
 func (c *Config) validateMessagesLimits() []error {
 	var errs []error
 
@@ -3931,19 +3938,6 @@ func (c *Config) validateMessagesLimits() []error {
 		}
 	}
 
-	// A page size larger than the max limit is contradictory (a page could never
-	// be served in full). Compare the effective values (unset fields resolve to
-	// their defaults) but before the accessor's own clamp-to-max, so the
-	// contradiction surfaces here instead of being silently absorbed.
-	page := m.ConversationPageSize
-	if page < 1 {
-		page = MessagesConversationPageSizeDefault
-	}
-
-	if maxLimit := m.ConversationMaxLimitOrDefault(); page > maxLimit {
-		errs = append(errs, fmt.Errorf("messages.conversation_page_size %d: must not exceed conversation_max_limit %d", page, maxLimit))
-	}
-
 	if s := strings.TrimSpace(m.BusyTimeout); s != "" {
 		if d, err := ParseDurationWithDays(s); err != nil {
 			errs = append(errs, fmt.Errorf("messages.busy_timeout %q: %w", s, err))
@@ -3955,6 +3949,39 @@ func (c *Config) validateMessagesLimits() []error {
 	}
 
 	return errs
+}
+
+// validateConversationPageSizeOverride rejects a config that *explicitly* sets
+// messages.conversation_page_size to a value larger than the effective
+// conversation_max_limit — a genuine contradiction of intent (a page could never
+// be served in full).
+//
+// It is raw-data-aware on purpose (issue #1314). Load starts from the embedded
+// defaults, so after unmarshal an unset page size is indistinguishable from an
+// explicit one: both hold MessagesConversationPageSizeDefault (500). A struct-only
+// check therefore rejected a config that lowered conversation_max_limit alone,
+// even though the user never touched the page size and the accessor already clamps
+// the inherited page size down to the max (ConversationPageSizeOrDefault). Gating
+// on the raw key means lowering the max alone loads and clamps, while an explicit
+// oversized page-size override still fails loudly — even when it equals the
+// default, which a value comparison could not detect.
+func validateConversationPageSizeOverride(cfg *Config, data []byte) error {
+	if !tomlHasKey(data, "messages", "conversation_page_size") {
+		return nil
+	}
+
+	page := cfg.Messages.ConversationPageSize
+	if page < 1 {
+		// An explicit non-positive page size means "use the default", which the
+		// accessor clamps to the max — never contradictory.
+		return nil
+	}
+
+	if maxLimit := cfg.Messages.ConversationMaxLimitOrDefault(); page > maxLimit {
+		return fmt.Errorf("messages.conversation_page_size %d: must not exceed conversation_max_limit %d", page, maxLimit)
+	}
+
+	return nil
 }
 
 // validateTodoLimits checks the [todo] operational limits (issue #1249). The
@@ -4504,6 +4531,14 @@ func Load(path string) (*Config, error) {
 	// a fail-open for an approvals deny-list. Reject unknown keys in that subtree
 	// specifically (scoped, so the rest of the config keeps its leniency).
 	if err := checkApprovalsBuiltinKeys(data); err != nil {
+		return nil, fmt.Errorf("config validation: %w", err)
+	}
+
+	// Raw-data-aware: only an explicit page-size override that contradicts the
+	// (possibly lowered) max fails; lowering the max alone is clamped, not
+	// rejected (issue #1314). Must see the raw file, so it runs here rather than
+	// in the struct-only Validate.
+	if err := validateConversationPageSizeOverride(cfg, data); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
 	}
 
