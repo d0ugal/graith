@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -37,10 +38,14 @@ type Session struct {
 	adoptedStartTime int64
 	lastOutputAt     time.Time
 	lastUserInputAt  time.Time
-	// inputDelay is the pause between typed text and the submit CR in
-	// WriteInputAndSubmit. Resolved at construction (SessionOpts.InputDelay or the
-	// typeInputDelay default); immutable after, so it needs no lock.
-	inputDelay time.Duration
+	// inputDelay is the pause (in nanoseconds) between typed text and the submit
+	// CR in WriteInputAndSubmit. Seeded at construction from SessionOpts.InputDelay
+	// (or the typeInputDelay default) and updated live by SetInputDelay when the
+	// [lifecycle] input_delay policy is reloaded (issue #1294). Stored atomically
+	// so a reload never races an in-flight input write: WriteInputAndSubmit reads
+	// it once, without the writeMu, and a concurrent SetInputDelay simply takes
+	// effect on the next submit.
+	inputDelay atomic.Int64
 	// adoptedPollTimeout / adoptedPollInterval bound the adopted-PTY babysit loop.
 	// Resolved at adoption (AdoptOpts values or the package defaults); immutable
 	// after. Unused for a freshly-launched (non-adopted) session.
@@ -134,13 +139,13 @@ func NewSession(opts SessionOpts) (*Session, error) {
 
 	s := &Session{
 		ID: opts.ID, Cmd: cmd, Ptmx: ptmx, Scrollback: sb,
-		screen:     newTerminal(int(opts.Cols), int(opts.Rows)),
-		done:       make(chan struct{}),
-		readDone:   make(chan struct{}),
-		createdAt:  launchedAt,
-		log:        log,
-		inputDelay: inputDelay,
+		screen:    newTerminal(int(opts.Cols), int(opts.Rows)),
+		done:      make(chan struct{}),
+		readDone:  make(chan struct{}),
+		createdAt: launchedAt,
+		log:       log,
 	}
+	s.inputDelay.Store(int64(inputDelay))
 	s.userInputCond = sync.NewCond(&sync.Mutex{})
 
 	// The inherited scrollback size distinguishes a fresh log from one reopened
@@ -520,7 +525,7 @@ func (s *Session) WriteInputAndSubmit(data []byte) error {
 			return err
 		}
 
-		delay := s.inputDelay
+		delay := time.Duration(s.inputDelay.Load())
 		if delay <= 0 {
 			delay = typeInputDelay
 		}
@@ -529,6 +534,22 @@ func (s *Session) WriteInputAndSubmit(data []byte) error {
 	}
 
 	return s.writeInputLocked([]byte("\r"))
+}
+
+// SetInputDelay updates the pause WriteInputAndSubmit inserts between the typed
+// text and the submit carriage return, so a reloaded [lifecycle] input_delay
+// policy takes effect on a live session's next type operation without a restart
+// (issue #1294). A non-positive delay restores the built-in typeInputDelay
+// default, mirroring construction. The store is atomic and takes no lock, so it
+// never blocks on (or races) an in-flight WriteInputAndSubmit: a write already
+// past its Load runs to completion with the value it read, and the next submit
+// observes the new delay.
+func (s *Session) SetInputDelay(delay time.Duration) {
+	if delay <= 0 {
+		delay = typeInputDelay
+	}
+
+	s.inputDelay.Store(int64(delay))
 }
 
 // interruptByte is the ETX control code (Ctrl-C), which TUI agents treat as an

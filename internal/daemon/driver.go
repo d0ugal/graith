@@ -63,6 +63,16 @@ type SessionDriver interface { //nolint:interfacebloat // deliberately the full 
 	ScrollbackFile() *grpty.Scrollback
 }
 
+// inputDelaySetter is the optional capability a driver exposes when its
+// type-then-submit pause honours the live [lifecycle] input_delay policy. Only
+// the PTY driver implements it; a config reload updates every live PTY's delay
+// through this interface (issue #1294) and skips drivers that don't (e.g. the
+// headless stream-json driver, which has no interactive submit pause). Kept off
+// the core SessionDriver surface so a non-PTY driver need not no-op it.
+type inputDelaySetter interface {
+	SetInputDelay(delay time.Duration)
+}
+
 // Driver-kind identifiers persisted on SessionState.DriverKind (issue #1075).
 const (
 	DriverPTY      = "pty"

@@ -2255,6 +2255,57 @@ func TestApplyConfig(t *testing.T) {
 	}
 }
 
+// TestApplyConfigUpdatesLiveInputDelay is the #1294 regression: a reloaded
+// [lifecycle] input_delay must reach a session's live PTY so the next `gr type`
+// uses the new type-then-submit pause, rather than the construction-time value
+// surviving until restart/resume. It drives the real applyConfig reload path and
+// observes the change on the next WriteInputAndSubmit. Before the fix the session
+// keeps its tiny 1ms delay and the submit returns fast, failing the assertion.
+func TestApplyConfigUpdatesLiveInputDelay(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	// A live session launched with a tiny submit delay.
+	sess, err := grpty.NewSession(grpty.SessionOpts{
+		ID: "braw", Command: "sh", Args: []string{"-c", "sleep 30"},
+		Dir: t.TempDir(), Rows: 24, Cols: 80,
+		LogPath:    filepath.Join(t.TempDir(), "pty.log"),
+		MaxLogSize: 1024 * 1024,
+		InputDelay: time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		if !sess.Exited() {
+			_ = sess.Kill()
+		}
+
+		sess.Close()
+	})
+
+	sm.mu.Lock()
+	sm.sessions["braw"] = sess
+	sm.mu.Unlock()
+
+	// Reload with a much larger input_delay through the real apply path.
+	newCfg := config.Default()
+	newCfg.Lifecycle.InputDelay = "300ms"
+
+	sm.applyConfig(newCfg)
+
+	// The next submit on the live session must be dominated by the new delay.
+	start := time.Now()
+
+	if err := sess.WriteInputAndSubmit([]byte("bonnie")); err != nil {
+		t.Fatal(err)
+	}
+
+	if elapsed := time.Since(start); elapsed < 250*time.Millisecond {
+		t.Fatalf("submit after input_delay reload took %v, want >= ~300ms (live PTY not updated)", elapsed)
+	}
+}
+
 func TestReloadConfig(t *testing.T) {
 	dir := t.TempDir()
 
