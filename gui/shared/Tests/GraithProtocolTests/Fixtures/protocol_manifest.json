@@ -440,6 +440,13 @@
           "optional": true
         },
         {
+          "name": "no_reply",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
           "name": "created_at",
           "type": {
             "kind": "string"
@@ -1878,6 +1885,13 @@
           "name": "reply_to",
           "type": {
             "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "no_reply",
+          "type": {
+            "kind": "bool"
           },
           "optional": true
         },

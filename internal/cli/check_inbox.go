@@ -100,6 +100,8 @@ func formatInboxSystemMessage(messages []inboxMessage, previewBytes int) string 
 
 		if m.System {
 			fmt.Fprintf(&preview, "System notice: %s\n", m.Body)
+		} else if m.NoReply {
+			fmt.Fprintf(&preview, "From %s (No reply expected): %s\n", sender, m.Body)
 		} else {
 			fmt.Fprintf(&preview, "From %s: %s\n", sender, m.Body)
 		}
@@ -202,6 +204,7 @@ type inboxMessage struct {
 	Body       string `json:"body"`
 	CreatedAt  string `json:"created_at"`
 	System     bool   `json:"system"`
+	NoReply    bool   `json:"no_reply"`
 }
 
 // registerCheckInboxCmd registers this command on rootCmd. Called from registerCommands.

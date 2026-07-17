@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -161,10 +162,53 @@ func TestNotifyFromDaemon_PublishesSystemNotification(t *testing.T) {
 		t.Errorf("SenderName = %q, want %q", m.SenderName, systemSenderName)
 	}
 
+	if m.NoReply {
+		t.Error("NoReply = true, want false — system identity is a distinct non-replyable semantic")
+	}
+
 	// The sender must not look like an addressable session name (issue #887):
 	// a real session ID never carries the "graith:" prefix.
 	if m.SenderID == "graith" {
 		t.Errorf("SenderID = %q — must be distinct from the ambiguous bare 'graith'", m.SenderID)
+	}
+}
+
+// TestNotifyUnreadInboxNoReplyHint covers the notification function invoked
+// after auto-resume. A one-message unread inbox must retain the same explicit
+// no-reply hint as delivery to an already-running recipient.
+func TestNotifyUnreadInboxNoReplyHint(t *testing.T) {
+	h := newTestHarness(t)
+	h.addPTYSession(t, "canny-resumed", "canny-session")
+	h.sm.cfg.Notifications.Timing.InboxDetachedDelay = "0"
+
+	_, err := h.sm.messages.Publish(PublishOpts{
+		Stream: "inbox:canny-resumed", SenderID: "morag-sender", SenderName: "Morag",
+		Body: "one-way briefing", NoReply: true,
+	})
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	h.sm.notifyUnreadInbox("canny-resumed")
+	time.Sleep(200 * time.Millisecond)
+
+	ptySess, ok := h.sm.GetPTY("canny-resumed")
+	if !ok {
+		t.Fatal("resumed PTY session not found")
+	}
+
+	tail, err := ptySess.ScrollbackFile().Tail(500)
+	if err != nil {
+		t.Fatalf("scrollback tail: %v", err)
+	}
+
+	scrollback := string(tail)
+	if !strings.Contains(scrollback, "No reply expected") {
+		t.Errorf("post-resume hint missing no-reply wording; got:\n%s", scrollback)
+	}
+
+	if strings.Contains(scrollback, "Reply: gr msg send") {
+		t.Errorf("post-resume hint should not offer a reply command; got:\n%s", scrollback)
 	}
 }
 

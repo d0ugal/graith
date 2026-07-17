@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -36,6 +37,41 @@ func TestEncodeDecodeControl(t *testing.T) {
 
 	if got.Cwd != "/home/user/croft" {
 		t.Errorf("Cwd = %q", got.Cwd)
+	}
+}
+
+func TestMsgPubNoReplyRoundTrip(t *testing.T) {
+	want := MsgPubMsg{
+		Stream: "updates", Body: "morning briefing complete",
+		SenderID: "braw-sender", SenderName: "Braw", NoReply: true,
+	}
+
+	data, err := EncodeControl("msg_pub", want)
+	if err != nil {
+		t.Fatalf("EncodeControl: %v", err)
+	}
+
+	env, err := DecodeControl(data)
+	if err != nil {
+		t.Fatalf("DecodeControl: %v", err)
+	}
+
+	var got MsgPubMsg
+	if err := DecodePayload(env, &got); err != nil {
+		t.Fatalf("DecodePayload: %v", err)
+	}
+
+	if !got.NoReply {
+		t.Errorf("NoReply = false, want true")
+	}
+
+	defaultData, err := EncodeControl("msg_pub", MsgPubMsg{Stream: "updates", Body: "replyable"})
+	if err != nil {
+		t.Fatalf("EncodeControl default: %v", err)
+	}
+
+	if strings.Contains(string(defaultData), "no_reply") {
+		t.Errorf("default no_reply should be omitted for backward compatibility: %s", defaultData)
 	}
 }
 

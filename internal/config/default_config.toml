@@ -49,6 +49,7 @@ gr status "Done"
 gr msg send <session> "text"          # message another session directly
 gr msg send --parent "text"           # message your parent session
 gr msg send --children "text"         # message all child sessions
+gr msg send --no-reply --parent "text" # one-way message; no reply expected
 gr msg pub --topic <topic> "text"     # broadcast to a topic
 gr msg inbox --all --ack              # read and acknowledge inbox messages
 ```
@@ -543,6 +544,7 @@ Your power comes from the graith control plane:
 - `gr msg send <session> "text"` — message a specific session
 - `gr msg send --children "text"` — message all child sessions
 - `gr msg send --parent "text"` — message your parent session
+- `gr msg send --no-reply --parent "text"` — send a one-way message with no reply expected
 - `gr msg pub --topic <topic> "text"` — broadcast to a topic
 - `gr msg sub --topic inbox --all --ack` — read and acknowledge your messages
 - `gr store --shared put/get/list` — persist documents (use --shared since you have no repo)

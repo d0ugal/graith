@@ -58,6 +58,25 @@ func TestFormatInboxSystemMessageRecommendsAll(t *testing.T) {
 	}
 }
 
+// The SessionStart hook is the recipient hint used after an inbox message
+// auto-resumes a stopped session. It must state the sender's expectation without
+// encouraging an acknowledgement.
+func TestFormatInboxSystemMessageNoReplyExpected(t *testing.T) {
+	msg := formatInboxSystemMessage([]inboxMessage{{
+		SenderName: "Morag",
+		Body:       "morning briefing complete",
+		NoReply:    true,
+	}}, 0)
+
+	if !strings.Contains(msg, "From Morag (No reply expected): morning briefing complete") {
+		t.Errorf("auto-resume inbox context missing no-reply expectation; got:\n%s", msg)
+	}
+
+	if strings.Contains(msg, "Reply: gr msg send") {
+		t.Errorf("auto-resume inbox context should not suggest a reply; got:\n%s", msg)
+	}
+}
+
 // TestFormatInboxSystemMessagePreviewTruncation guards issue #1252: the preview
 // is bounded by the configurable byte cap, and a value < 1 falls back to the
 // config default.

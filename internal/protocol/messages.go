@@ -336,6 +336,7 @@ type MsgPubMsg struct {
 	SenderName string `json:"sender_name,omitempty"`
 	ThreadID   string `json:"thread_id,omitempty"`
 	ReplyTo    string `json:"reply_to,omitempty"`
+	NoReply    bool   `json:"no_reply,omitempty"`
 	Quiet      bool   `json:"quiet,omitempty"`
 }
 
@@ -386,6 +387,7 @@ type ConversationMessage struct {
 	Body       string `json:"body"`
 	ThreadID   string `json:"thread_id,omitempty"`
 	ReplyTo    string `json:"reply_to,omitempty"`
+	NoReply    bool   `json:"no_reply,omitempty"`
 	CreatedAt  string `json:"created_at"`
 	// System marks an automated daemon-authored notification rather than a
 	// session/human message. See issue #887.

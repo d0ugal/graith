@@ -29,6 +29,7 @@ var (
 	msgPubFile     string
 	msgPubThreadID string
 	msgPubReplyTo  string
+	msgPubNoReply  bool
 )
 
 var msgPubCmd = &cobra.Command{
@@ -60,6 +61,7 @@ var msgPubCmd = &cobra.Command{
 			SenderName: senderName,
 			ThreadID:   msgPubThreadID,
 			ReplyTo:    msgPubReplyTo,
+			NoReply:    msgPubNoReply,
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -91,6 +93,7 @@ var (
 	msgSendFile     string
 	msgSendThreadID string
 	msgSendReplyTo  string
+	msgSendNoReply  bool
 	msgSendQuiet    bool
 	msgSendChildren bool
 	msgSendParent   bool
@@ -149,6 +152,7 @@ var msgSendCmd = &cobra.Command{
 			SenderName: senderName,
 			ThreadID:   msgSendThreadID,
 			ReplyTo:    msgSendReplyTo,
+			NoReply:    msgSendNoReply,
 			Quiet:      msgSendQuiet,
 		})
 
@@ -588,12 +592,14 @@ func registerMsgCmd() {
 	msgPubCmd.Flags().StringVarP(&msgPubFile, "file", "f", "", "read body from file")
 	msgPubCmd.Flags().StringVar(&msgPubThreadID, "thread", "", "thread ID to continue")
 	msgPubCmd.Flags().StringVar(&msgPubReplyTo, "reply-to", "", "stream for replies")
+	msgPubCmd.Flags().BoolVar(&msgPubNoReply, "no-reply", false, "declare that no reply is expected")
 	_ = msgPubCmd.RegisterFlagCompletionFunc("topic", completeTopicNames)
 
 	msgCmd.AddCommand(msgSendCmd)
 	msgSendCmd.Flags().StringVarP(&msgSendFile, "file", "f", "", "read body from file")
 	msgSendCmd.Flags().StringVar(&msgSendThreadID, "thread", "", "thread ID to continue")
 	msgSendCmd.Flags().StringVar(&msgSendReplyTo, "reply-to", "", "stream for replies")
+	msgSendCmd.Flags().BoolVar(&msgSendNoReply, "no-reply", false, "declare that no reply is expected")
 	msgSendCmd.Flags().BoolVarP(&msgSendQuiet, "quiet", "q", false, "don't type a notification into the session")
 	msgSendCmd.Flags().BoolVar(&msgSendChildren, "children", false, "send to all descendant sessions")
 	msgSendCmd.Flags().BoolVar(&msgSendParent, "parent", false, "send to parent session")
@@ -764,6 +770,7 @@ func msgSendChildrenRun(args []string) error {
 			SenderName: senderName,
 			ThreadID:   msgSendThreadID,
 			ReplyTo:    msgSendReplyTo,
+			NoReply:    msgSendNoReply,
 			Quiet:      msgSendQuiet,
 		})
 
@@ -825,6 +832,7 @@ func msgSendParentRun(args []string) error {
 		SenderName: senderName,
 		ThreadID:   msgSendThreadID,
 		ReplyTo:    msgSendReplyTo,
+		NoReply:    msgSendNoReply,
 		Quiet:      msgSendQuiet,
 	})
 
@@ -900,6 +908,7 @@ func printMessage(payload json.RawMessage) {
 		CreatedAt  string `json:"created_at"`
 		ThreadID   string `json:"thread_id"`
 		System     bool   `json:"system"`
+		NoReply    bool   `json:"no_reply"`
 	}
 
 	_ = json.Unmarshal(payload, &m)
@@ -920,5 +929,10 @@ func printMessage(payload json.RawMessage) {
 		threadInfo = fmt.Sprintf(" [thread:%s]", m.ThreadID[:min(12, len(m.ThreadID))])
 	}
 
-	fmt.Printf("[%s] #%d %s%s:\n%s\n\n", m.CreatedAt, m.Seq, sender, threadInfo, m.Body)
+	replyInfo := ""
+	if m.NoReply {
+		replyInfo = " [No reply expected]"
+	}
+
+	fmt.Printf("[%s] #%d %s%s%s:\n%s\n\n", m.CreatedAt, m.Seq, sender, threadInfo, replyInfo, m.Body)
 }

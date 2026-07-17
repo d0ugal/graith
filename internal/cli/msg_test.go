@@ -209,6 +209,16 @@ func TestMsgPubCovRequiresTopic(t *testing.T) {
 	}
 }
 
+func TestMsgCommandsExposeNoReplyFlag(t *testing.T) {
+	if msgPubCmd.Flags().Lookup("no-reply") == nil {
+		t.Error("msg pub is missing --no-reply")
+	}
+
+	if msgSendCmd.Flags().Lookup("no-reply") == nil {
+		t.Error("msg send is missing --no-reply")
+	}
+}
+
 func TestMsgSubCovRequiresTopic(t *testing.T) {
 	prev := msgSubStream
 	msgSubStream = ""
@@ -340,6 +350,20 @@ func TestPrintMessageCovSystemNotification(t *testing.T) {
 
 	if !strings.Contains(got, "automated notification") {
 		t.Errorf("system messages must be marked as automated: %q", got)
+	}
+}
+
+func TestPrintMessageNoReplyExpected(t *testing.T) {
+	payload := mustJSON(t, map[string]any{
+		"sender_name": "Morag",
+		"body":        "one-way update",
+		"created_at":  "2026-07-17T10:00:00Z",
+		"no_reply":    true,
+	})
+
+	got := captureMsgStdout(t, func() { printMessage(payload) })
+	if !strings.Contains(got, "No reply expected") {
+		t.Errorf("human message output missing no-reply expectation: %q", got)
 	}
 }
 

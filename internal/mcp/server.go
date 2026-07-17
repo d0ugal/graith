@@ -165,6 +165,7 @@ type PublishMessageInput struct {
 	Sender   string `json:"sender,omitempty"    jsonschema:"Sender name for attribution"`
 	ThreadID string `json:"thread_id,omitempty" jsonschema:"Thread ID for threaded conversations"`
 	ReplyTo  string `json:"reply_to,omitempty"  jsonschema:"Topic where replies should be sent"`
+	NoReply  bool   `json:"no_reply,omitempty"  jsonschema:"Declare that no reply is expected"`
 }
 
 type PublishMessageOutput struct {
@@ -172,6 +173,7 @@ type PublishMessageOutput struct {
 	Seq       int64  `json:"seq"`
 	Stream    string `json:"stream"`
 	CreatedAt string `json:"created_at"`
+	NoReply   bool   `json:"no_reply,omitempty"`
 }
 
 type ReadMessagesInput struct {
@@ -191,6 +193,7 @@ type MessageOutput struct {
 	Body       string `json:"body"`
 	ThreadID   string `json:"thread_id,omitempty"`
 	ReplyTo    string `json:"reply_to,omitempty"`
+	NoReply    bool   `json:"no_reply,omitempty"`
 	CreatedAt  string `json:"created_at"`
 	// System marks an automated daemon-authored notification (e.g. PR/CI
 	// notices) rather than a session/human message. It is not a replyable
@@ -421,6 +424,7 @@ func (s *Server) publishMessage(_ context.Context, _ *gomcp.CallToolRequest, inp
 		SenderName: senderName,
 		ThreadID:   input.ThreadID,
 		ReplyTo:    input.ReplyTo,
+		NoReply:    input.NoReply,
 	}); err != nil {
 		return nil, PublishMessageOutput{}, fmt.Errorf("send publish: %w", err)
 	}

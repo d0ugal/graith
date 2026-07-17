@@ -22,6 +22,7 @@ struct MessagingTests {
             #expect(pub.stream == "inbox:braw")
             #expect(pub.body == "wire up the bonnie feature")
             #expect(pub.senderName == "human")
+            #expect(pub.noReply == nil)
             try await daemon.writeControl("msg_published", ConversationMessage(
                 id: "msg_01", seq: 7, stream: "inbox:braw", senderID: "",
                 senderName: "human", body: "wire up the bonnie feature",
@@ -167,7 +168,7 @@ struct MessagingTests {
         let json = """
         {"id":"msg_ab","seq":3,"stream":"inbox:braw","sender_id":"canny",\
         "sender_name":"canny","body":"speir about the loch","created_at":"2026-07-14T00:00:00Z",\
-        "system":true}
+        "no_reply":true,"system":true}
         """
         let msg = try JSONDecoder().decode(ConversationMessage.self, from: Data(json.utf8))
         #expect(msg.id == "msg_ab")
@@ -176,6 +177,7 @@ struct MessagingTests {
         #expect(msg.system == true)
         #expect(msg.threadID == nil)
         #expect(msg.replyTo == nil)
+        #expect(msg.noReply == true)
 
         // Minimal payload (only the required fields) still decodes.
         let minimal = """
@@ -184,5 +186,19 @@ struct MessagingTests {
         let m = try JSONDecoder().decode(ConversationMessage.self, from: Data(minimal.utf8))
         #expect(m.senderName == nil)
         #expect(m.system == nil)
+        #expect(m.noReply == nil)
+    }
+
+    @Test func msgPubNoReplyRoundTrips() throws {
+        let original = MsgPubMsg(
+            stream: "updates", body: "morning briefing complete", noReply: true)
+        let data = try JSONEncoder().encode(original)
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(json["no_reply"] as? Bool == true)
+
+        let decoded = try JSONDecoder().decode(MsgPubMsg.self, from: data)
+        #expect(decoded.noReply == true)
+        #expect(decoded.quiet == nil)
+        #expect(decoded.replyTo == nil)
     }
 }

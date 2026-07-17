@@ -651,7 +651,7 @@ func TestMessaging(t *testing.T) {
 	handshake(t, r, w)
 
 	sendControl(t, w, "msg_pub", protocol.MsgPubMsg{
-		Stream: "blether", Body: "hello from test", SenderName: "test",
+		Stream: "blether", Body: "hello from test", SenderName: "test", NoReply: true,
 	})
 
 	pubResp := readControl(t, r)
@@ -676,9 +676,25 @@ func TestMessaging(t *testing.T) {
 		t.Fatalf("expected msg_message, got %s", msg1.Type)
 	}
 
+	var firstMessage daemon.Message
+	if err := protocol.DecodePayload(msg1, &firstMessage); err != nil {
+		t.Fatalf("decode first message: %v", err)
+	}
+	if !firstMessage.NoReply {
+		t.Error("no_reply did not survive integration publish/read round trip")
+	}
+
 	msg2 := readControl(t, r)
 	if msg2.Type != "msg_message" {
 		t.Fatalf("expected msg_message, got %s", msg2.Type)
+	}
+
+	var secondMessage daemon.Message
+	if err := protocol.DecodePayload(msg2, &secondMessage); err != nil {
+		t.Fatalf("decode second message: %v", err)
+	}
+	if secondMessage.NoReply {
+		t.Error("default message unexpectedly became no-reply")
 	}
 
 	done := readControl(t, r)

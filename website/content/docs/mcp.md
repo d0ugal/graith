@@ -28,6 +28,10 @@ This starts an MCP server over stdin/stdout using the stdio transport. It is des
 | `read_messages` | Read messages from a topic |
 | `subscribe` | Wait for the next message on a topic |
 
+`publish_message` accepts `no_reply: true` for a one-way message. This metadata
+is stored and returned by message reads; it is distinct from `reply_to`, which
+only identifies a reply stream.
+
 ## Configuration example
 
 Add graith as an MCP server in Claude Code's settings:
