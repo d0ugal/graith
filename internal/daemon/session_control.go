@@ -8,10 +8,14 @@ import (
 
 // stopAttempt identifies one optimistic StopReason write. Stop calls may signal
 // the same driver concurrently, so reason text cannot establish ownership: two
-// callers may choose the same reason. Pointer identity lets a failed caller
-// restore its previous reason only when no newer stop has replaced its write.
+// callers may choose the same reason. The linked pointer identities let
+// out-of-order failures unwind to the latest pending/successful write (or the
+// original baseline).
 type stopAttempt struct {
 	previousReason string
+	previous       *stopAttempt
+	completed      bool
+	failed         bool
 }
 
 // Stop sends SIGTERM to a session's process without removing the session or worktree.
@@ -33,20 +37,39 @@ func (sm *SessionManager) stopWithReason(id, reason, initiator string) error {
 		return fmt.Errorf("session %q not found", id)
 	}
 
-	if status != StatusRunning {
+	hasLiveProcess := sm.sessions[id] != nil || sessState.PID > 0
+	if status != StatusRunning && !(status == StatusErrored && hasLiveProcess) {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q is not running", id)
 	}
 
 	name := sessState.Name
-	attempt := &stopAttempt{previousReason: sessState.StopReason}
+	attempt := &stopAttempt{
+		previousReason: sessState.StopReason,
+		previous:       sm.stopAttempts[id],
+	}
 	if sm.stopAttempts == nil {
 		sm.stopAttempts = make(map[string]*stopAttempt)
 	}
 
 	sm.stopAttempts[id] = attempt
 	sessState.StopReason = reason
-	_ = sm.saveState()
+	if err := sm.saveState(); err != nil {
+		if attempt.previous == nil {
+			delete(sm.stopAttempts, id)
+		} else {
+			sm.stopAttempts[id] = attempt.previous
+		}
+
+		sessState.StopReason = attempt.previousReason
+		rollbackErr := sm.saveState()
+		sm.mu.Unlock()
+
+		return errors.Join(
+			fmt.Errorf("persist stop reason: %w", err),
+			wrapStopReasonRollbackError(rollbackErr),
+		)
+	}
 	sm.mu.Unlock()
 
 	ptySess, ok := sm.GetPTY(id)
@@ -116,18 +139,40 @@ func (sm *SessionManager) finishStopAttempt(id string, attempt *stopAttempt, rol
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
+	attempt.completed = true
+	attempt.failed = rollback
+
 	if sm.stopAttempts[id] != attempt {
 		return nil
 	}
 
-	delete(sm.stopAttempts, id)
-
 	if !rollback {
+		delete(sm.stopAttempts, id)
 		return nil
 	}
 
+	previous := attempt.previous
+	reason := attempt.previousReason
+
+	// Failed attempts are optimistic writes, not committed stop reasons. Walk
+	// past any earlier failures that completed out of order until reaching the
+	// newest pending/successful attempt or the baseline reason.
+	for previous != nil && previous.completed && previous.failed {
+		reason = previous.previousReason
+		previous = previous.previous
+	}
+
+	if previous != nil && !previous.completed {
+		sm.stopAttempts[id] = previous
+	} else {
+		// A completed successful predecessor is now the committed baseline; no
+		// older pending failure may roll it back. With no predecessor, the
+		// pre-attempt reason is the baseline.
+		delete(sm.stopAttempts, id)
+	}
+
 	if s, ok := sm.state.Sessions[id]; ok {
-		s.StopReason = attempt.previousReason
+		s.StopReason = reason
 
 		if err := sm.saveState(); err != nil {
 			return fmt.Errorf("persist stop reason rollback: %w", err)
@@ -135,6 +180,21 @@ func (sm *SessionManager) finishStopAttempt(id string, attempt *stopAttempt, rol
 	}
 
 	return nil
+}
+
+func wrapStopReasonRollbackError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	return fmt.Errorf("persist stop reason rollback: %w", err)
+}
+
+// setStopReasonLocked records a non-stopWithReason lifecycle writer and
+// invalidates any older optimistic stop attempts. Callers must hold sm.mu.
+func (sm *SessionManager) setStopReasonLocked(id string, s *SessionState, reason string) {
+	delete(sm.stopAttempts, id)
+	s.StopReason = reason
 }
 
 func filterExcludeRoot(ids []string, rootID string) []string {
@@ -189,7 +249,7 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 			continue
 		}
 
-		sess.StopReason = StopReasonUser
+		sm.setStopReasonLocked(id, sess, StopReasonUser)
 		name := sess.Name
 		pid := sess.PID
 		startTime := sess.PIDStartTime
@@ -286,7 +346,7 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 			progress = true
 
 			late = append(late, sid)
-			sess.StopReason = StopReasonUser
+			sm.setStopReasonLocked(sid, sess, StopReasonUser)
 		}
 
 		if !progress {
@@ -358,7 +418,7 @@ func (sm *SessionManager) restartWithReason(id string, rows, cols uint16, stopRe
 	if hasPTY && !ptySess.Exited() {
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[id]; ok {
-			s.StopReason = stopReason
+			sm.setStopReasonLocked(id, s, stopReason)
 		}
 		sm.mu.Unlock()
 
@@ -414,7 +474,7 @@ func (sm *SessionManager) restartWithReason(id string, rows, cols uint16, stopRe
 					s.StatusChangedAt = time.Now()
 					s.PID = 0
 					s.PIDStartTime = 0
-					s.StopReason = StopReasonUser
+					sm.setStopReasonLocked(id, s, StopReasonUser)
 					applyLifecycleSummaryLocked(s, "Orphaned process killed for restart")
 
 					_ = sm.saveState()
@@ -423,7 +483,7 @@ func (sm *SessionManager) restartWithReason(id string, rows, cols uint16, stopRe
 					s.StatusChangedAt = time.Now()
 					s.PID = 0
 					s.PIDStartTime = 0
-					s.StopReason = StopReasonUser
+					sm.setStopReasonLocked(id, s, StopReasonUser)
 					applyLifecycleSummaryLocked(s, "Process already exited")
 
 					_ = sm.saveState()

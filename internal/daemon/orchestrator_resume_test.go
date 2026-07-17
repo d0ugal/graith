@@ -40,6 +40,7 @@ func newOrchPromptTestSM(t *testing.T, agentName string) (*SessionManager, strin
 
 	dir := t.TempDir()
 	cfg := config.Default()
+	cfg.Orchestrator.Enabled = true
 	cfg.Orchestrator.Prompt = "ken this"
 	cfg.Orchestrator.Agent = agentName
 	cfg.DefaultAgent = agentName

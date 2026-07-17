@@ -27,6 +27,9 @@ signals its session to stop. If signaling fails, the reload is rejected and
 silently diverge. `gr daemon reload` returns a field- and session-specific error;
 an edit-triggered reload records the same failure in the daemon log. Fix the
 process or driver problem, then retry the reload.
+The daemon retains the entire previous config generation on this failure, so
+other edits saved alongside the disable take effect only after a successful
+retry.
 
 ### Restart policy
 

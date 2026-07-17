@@ -125,7 +125,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	if ptySess, hasPTY := sm.GetPTY(id); hasPTY && !ptySess.Exited() {
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[id]; ok {
-			s.StopReason = StopReasonUser
+			sm.setStopReasonLocked(id, s, StopReasonUser)
 		}
 		sm.mu.Unlock()
 
@@ -228,7 +228,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 			// crash while the stop line says user (issue #1104).
 			sm.mu.Lock()
 			if s, ok := sm.state.Sessions[id]; ok {
-				s.StopReason = StopReasonUser
+				sm.setStopReasonLocked(id, s, StopReasonUser)
 			}
 			sm.mu.Unlock()
 

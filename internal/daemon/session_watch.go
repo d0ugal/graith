@@ -85,9 +85,9 @@ func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 				// otherwise fall back to crash (a hard crash never emits SessionEnd,
 				// and clear/resume/other leave no clean-exit reason).
 				if mapped, ok := mapSessionEndReason(s.SessionEndReason); ok && s.SessionEndReasonGen == exitingGen {
-					s.StopReason = mapped
+					sm.setStopReasonLocked(id, s, mapped)
 				} else {
-					s.StopReason = StopReasonCrash
+					sm.setStopReasonLocked(id, s, StopReasonCrash)
 				}
 			}
 

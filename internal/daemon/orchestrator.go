@@ -114,6 +114,11 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 
 	sm.mu.Lock()
 
+	if !sm.cfg.Orchestrator.Enabled {
+		sm.mu.Unlock()
+		return SessionState{}, errors.New("orchestrator is disabled in config")
+	}
+
 	if existing := sm.findOrchestratorID(); existing != "" {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("orchestrator session already exists: %s", existing)
@@ -446,7 +451,7 @@ func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {
 		if s := sm.state.Sessions[orchID]; s != nil {
 			s.Status = StatusStopped
 			s.StatusChangedAt = time.Now()
-			s.StopReason = StopReasonCrash
+			sm.setStopReasonLocked(orchID, s, StopReasonCrash)
 			s.PID = 0
 			s.PIDStartTime = 0
 		}
@@ -463,7 +468,7 @@ func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {
 		sm.log.Info("orchestrator stopped by user, clearing stop reason on boot", "id", orchID)
 		sm.mu.Lock()
 		if s := sm.state.Sessions[orchID]; s != nil {
-			s.StopReason = ""
+			sm.setStopReasonLocked(orchID, s, "")
 		}
 
 		_ = sm.saveState()

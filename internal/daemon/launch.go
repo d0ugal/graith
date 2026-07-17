@@ -341,7 +341,7 @@ func (sm *SessionManager) recoverStuckLaunch(st stuckSession, timeout time.Durat
 	// (which would take the read lock and deadlock).
 	giveUp := s.StuckRestarts >= sm.cfg.Launch.MaxRestartsOrDefault()
 	if giveUp {
-		s.StopReason = StopReasonWatchdog
+		sm.setStopReasonLocked(st.id, s, StopReasonWatchdog)
 		s.Status = StatusErrored
 		s.StatusChangedAt = time.Now()
 		applyLifecycleSummaryLocked(s, "Stuck on launch and exceeded watchdog restart budget")
