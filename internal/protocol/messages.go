@@ -853,7 +853,9 @@ type DiagnosticsMsg struct {
 	// is empty when nothing is degraded.
 	Triggers []TriggerDiagnostic `json:"triggers,omitempty"`
 	// Purge reports the soft-delete purge sweep schedule (last/next run and the
-	// configured cadence). Nil until the first sweep timing is known.
+	// configured cadence). Current daemons populate cadence before the first
+	// sweep; LastSweep and NextSweep are empty until it runs. Purge is nil when
+	// an older daemon omits these diagnostics.
 	Purge *PurgeDiagnostic `json:"purge,omitempty"`
 }
 
