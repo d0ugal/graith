@@ -720,12 +720,19 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 		notifyEnabled := sm.cfg.Notifications.Enabled
 		sm.mu.RUnlock()
 
+		// Fail closed, matching createOrchestrator (see orchestrator.go): a
+		// resumed orchestrator must never launch without its role prompt, which
+		// carries the authority, scope, and coordination instructions that
+		// distinguish it from an ordinary agent. On failure roll back to the
+		// prior stopped/resumable state and surface the error rather than
+		// silently relaunching an under-privileged orchestrator (issue #1306).
 		promptArgs, err := sm.buildOrchestratorPrompt(sessAgent, orchCfg, repoPaths, notifyEnabled, sm.orchestratorScratchDir())
 		if err != nil {
-			sm.log.Warn("failed to build orchestrator prompt", "session_id", id, "err", err)
-		} else {
-			expandedArgs = append(expandedArgs, promptArgs...)
+			rollbackState()
+			return SessionState{}, fmt.Errorf("build orchestrator prompt: %w", err)
 		}
+
+		expandedArgs = append(expandedArgs, promptArgs...)
 	} else if agent.PromptInjectionEnabled() {
 		promptArgs, err := sm.injectPrompt(sessAgent, sessWorktreePath)
 		if err != nil {

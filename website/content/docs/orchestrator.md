@@ -82,6 +82,8 @@ For reproducible, multi-repo session fleets, use [scenarios](scenarios.md) — t
 
 The built-in orchestrator prompt teaches the agent about its capabilities, constraints, and the graith control plane. Override with a custom `prompt` or `prompt_file` in config.
 
+Prompt injection fails closed on both create and resume: if the configured prompt cannot be assembled or injected (for example a Cursor rules file that cannot be written), the orchestrator is not started and the operation returns an error, rather than launching a privileged orchestrator without its role prompt.
+
 ## Workflow example
 
 ```
