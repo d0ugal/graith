@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/d0ugal/graith/internal/tools"
@@ -99,7 +100,7 @@ func resolveRenderedDefaults(cfg *Config) *Config {
 	}
 
 	if strings.TrimSpace(c.Remote.PendingPairingTTL) == "" {
-		c.Remote.PendingPairingTTL = "10m"
+		c.Remote.PendingPairingTTL = canonicalDuration(c.Remote.PendingPairingTTLDuration())
 	}
 
 	fallback := c.Remote.PairFallbackRate()
@@ -108,7 +109,7 @@ func resolveRenderedDefaults(cfg *Config) *Config {
 	}
 
 	if strings.TrimSpace(c.Remote.PairFallbackWindow) == "" {
-		c.Remote.PairFallbackWindow = "1m"
+		c.Remote.PairFallbackWindow = canonicalDuration(fallback.Per)
 	}
 
 	toolDefaults := tools.Defaults()
@@ -128,6 +129,21 @@ func resolveRenderedDefaults(cfg *Config) *Config {
 	}
 
 	return &c
+}
+
+// canonicalDuration omits trailing zero components from time.Duration's
+// spelling so whole-minute and whole-hour defaults remain concise in TOML.
+func canonicalDuration(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+
+	return s
 }
 
 // fillToolDefault mirrors tools' empty-string merge semantics. Whitespace is
