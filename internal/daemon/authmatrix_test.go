@@ -113,6 +113,7 @@ func TestRemoteAllowed(t *testing.T) {
 		// Session-originated: a human must NOT be able to impersonate a session.
 		{"human cannot approval_request", roleRemoteHuman, "approval_request", false},
 		{"human cannot status_report", roleRemoteHuman, "status_report", false},
+		{"human cannot publish scenario result", roleRemoteHuman, "scenario_result_publish", false},
 		{"human can read DMs", roleRemoteHuman, "msg_conversation", true},
 		{"human can wait", roleRemoteHuman, "wait", true},
 
@@ -120,6 +121,7 @@ func TestRemoteAllowed(t *testing.T) {
 		{"session can attach", roleSession, "attach", true},
 		{"session can approval_request", roleSession, "approval_request", true},
 		{"session can status_report", roleSession, "status_report", true},
+		{"session can publish own scenario result", roleSession, "scenario_result_publish", true},
 		{"session cannot upgrade", roleSession, "upgrade", false},
 		{"session cannot reload", roleSession, "reload", false},
 

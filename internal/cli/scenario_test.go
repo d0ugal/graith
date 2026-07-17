@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/output"
+	"github.com/d0ugal/graith/internal/protocol"
 	toml "github.com/pelletier/go-toml/v2"
 )
 
@@ -287,6 +290,41 @@ repo = "/tmp/croft"
 
 	if sf.Scenario.Goal != "do things" {
 		t.Errorf("goal = %q", sf.Scenario.Goal)
+	}
+}
+
+func TestParseAndBuildScenarioResults(t *testing.T) {
+	data := []byte(`
+version = 1
+[scenario]
+name = "kirk"
+[[sessions]]
+name = "canny"
+repo = "/tmp/croft"
+[[sessions.results]]
+name = "review"
+format = "markdown"
+store = "{session_name}/review.md"
+required = true
+`)
+
+	sf, err := parseScenarioFile(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	inputs, err := buildSessionInputs(sf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(inputs[0].Results) != 1 {
+		t.Fatalf("results = %+v", inputs[0].Results)
+	}
+
+	result := inputs[0].Results[0]
+	if result.Name != "review" || result.Format != "markdown" || !result.Required {
+		t.Fatalf("result = %+v", result)
 	}
 }
 
@@ -756,5 +794,165 @@ repo = "/tmp/croft"
 
 	if got[0].Name != "clachan" || got[0].Goal != "gather the glen" {
 		t.Errorf("unexpected scenario: %+v", got[0])
+	}
+}
+
+type fakeScenarioResultClient struct {
+	response protocol.Envelope
+	sendErr  error
+	readErr  error
+	msgType  string
+	payload  protocol.ScenarioResultPublishMsg
+	closed   bool
+}
+
+func (f *fakeScenarioResultClient) SendControl(msgType string, payload any) error {
+	f.msgType = msgType
+	if publish, ok := payload.(protocol.ScenarioResultPublishMsg); ok {
+		f.payload = publish
+	}
+
+	return f.sendErr
+}
+
+func (f *fakeScenarioResultClient) ReadControlResponse() (protocol.Envelope, error) {
+	return f.response, f.readErr
+}
+
+func (f *fakeScenarioResultClient) Close() { f.closed = true }
+
+func scenarioResultEnvelope(t *testing.T, msgType string, payload any) protocol.Envelope {
+	t.Helper()
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal %s response: %v", msgType, err)
+	}
+
+	return protocol.Envelope{Type: msgType, Payload: raw}
+}
+
+func withScenarioResultCommandTest(t *testing.T, fake *fakeScenarioResultClient, jsonMode bool) *bytes.Buffer {
+	t.Helper()
+
+	origConnect := scenarioResultConnect
+	origOut := out
+	origJSON := jsonOutput
+	origFile := scenarioResultFile
+	origScenario := scenarioResultScenario
+
+	var buf bytes.Buffer
+
+	scenarioResultConnect = func() (scenarioResultControlClient, error) { return fake, nil }
+	jsonOutput = jsonMode
+	out = output.NewWithWriter(jsonMode, &buf)
+	scenarioResultFile = ""
+	scenarioResultScenario = ""
+
+	t.Cleanup(func() {
+		scenarioResultConnect = origConnect
+		out = origOut
+		jsonOutput = origJSON
+		scenarioResultFile = origFile
+		scenarioResultScenario = origScenario
+	})
+
+	return &buf
+}
+
+func TestScenarioResultPutCommandPublishesAuthenticatedShape(t *testing.T) {
+	fake := &fakeScenarioResultClient{response: scenarioResultEnvelope(t, "scenario_result_published", protocol.ScenarioResultPublishResponse{
+		Scenario: "braw-fanout", Member: "canny",
+		Result: protocol.ScenarioResultInfo{
+			Name: "review", Format: "markdown", Destination: "scenarios/sc-braw/results/canny/review.md",
+			Required: true, Status: "available", SizeBytes: 13,
+		},
+	})}
+	buf := withScenarioResultCommandTest(t, fake, false)
+	t.Setenv("GRAITH_SCENARIO_NAME", "braw-fanout")
+
+	if err := scenarioResultPutCmd.RunE(scenarioResultPutCmd, []string{"review", "# Braw review"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	if fake.msgType != "scenario_result_publish" {
+		t.Fatalf("message type = %q", fake.msgType)
+	}
+
+	if fake.payload.Scenario != "braw-fanout" || fake.payload.Name != "review" || fake.payload.Body != "# Braw review" {
+		t.Fatalf("payload = %+v", fake.payload)
+	}
+
+	if !fake.closed {
+		t.Error("client was not closed")
+	}
+
+	if got := buf.String(); !strings.Contains(got, "Published markdown result") || !strings.Contains(got, fake.responsePayloadDestination(t)) {
+		t.Fatalf("output = %q", got)
+	}
+}
+
+func (f *fakeScenarioResultClient) responsePayloadDestination(t *testing.T) string {
+	t.Helper()
+
+	var response protocol.ScenarioResultPublishResponse
+	if err := protocol.DecodePayload(f.response, &response); err != nil {
+		t.Fatalf("decode fake response: %v", err)
+	}
+
+	return response.Result.Destination
+}
+
+func TestScenarioResultPutCommandErrors(t *testing.T) {
+	t.Run("daemon rejection", func(t *testing.T) {
+		fake := &fakeScenarioResultClient{response: scenarioResultEnvelope(t, "error", protocol.ErrorMsg{Message: "result is not valid JSON"})}
+		withScenarioResultCommandTest(t, fake, false)
+
+		err := scenarioResultPutCmd.RunE(scenarioResultPutCmd, []string{"facts", "{"})
+		if err == nil || !strings.Contains(err.Error(), "not valid JSON") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+
+	t.Run("send failure", func(t *testing.T) {
+		fake := &fakeScenarioResultClient{sendErr: errors.New("dreich send")}
+		withScenarioResultCommandTest(t, fake, false)
+
+		err := scenarioResultPutCmd.RunE(scenarioResultPutCmd, []string{"review", "braw"})
+		if err == nil || !strings.Contains(err.Error(), "dreich send") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+
+	t.Run("oversized", func(t *testing.T) {
+		fake := &fakeScenarioResultClient{}
+		withScenarioResultCommandTest(t, fake, false)
+
+		err := scenarioResultPutCmd.RunE(scenarioResultPutCmd, []string{
+			"review", strings.Repeat("x", protocol.MaxScenarioResultBodyBytes+1),
+		})
+		if err == nil || !strings.Contains(err.Error(), "too large") {
+			t.Fatalf("error = %v", err)
+		}
+
+		if fake.msgType != "" {
+			t.Fatal("oversized body should be rejected before connecting")
+		}
+	})
+}
+
+func TestFormatScenarioResultStatus(t *testing.T) {
+	if got := formatScenarioResultStatus(nil); got != "—" {
+		t.Fatalf("empty status = %q", got)
+	}
+
+	got := formatScenarioResultStatus([]protocol.ScenarioResultInfo{
+		{Name: "notes", Status: "pending"},
+		{Name: "review", Status: "available"},
+		{Name: "facts", Status: "invalid"},
+		{Name: "archive", Status: "failed"},
+	})
+	if got != "notes=pending,review=available,facts=invalid,archive=failed" {
+		t.Fatalf("status = %q", got)
 	}
 }

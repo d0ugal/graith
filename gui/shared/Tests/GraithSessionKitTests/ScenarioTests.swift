@@ -33,7 +33,9 @@ struct ScenarioDecodingTests {
         {"scenarios":[{"id":"sc-abc","name":"strath","orchestrator_id":"orch0001",
         "goal":"g","status":"running","session_ids":["s1"],
         "sessions":[{"name":"braw","session_id":"s1","role":"Backend","task":"t",
-        "todo_done":3,"todo_total":3,"blocked_by":["canny"],"repo":"croft","agent":"claude","model":"opus","status":"running","shared":true}],
+        "todo_done":3,"todo_total":3,"blocked_by":["canny"],"repo":"croft","agent":"claude","model":"opus","status":"running","shared":true,
+        "results":[{"name":"review","format":"markdown","destination":"scenarios/sc-abc/results/braw/review.md",
+        "required":true,"status":"available","size_bytes":42,"published_at":"2026-07-17T10:00:00Z"}]}],
         "created_at":"2026-07-14T09:00:00Z"}]}
         """
         let resp = try JSONDecoder().decode(ScenarioListResponse.self, from: Data(json.utf8))
@@ -50,6 +52,10 @@ struct ScenarioDecodingTests {
         #expect(member.blockedBy == ["canny"])
         #expect(member.isTodoComplete)
         #expect(member.shared == true)
+        #expect(member.results.count == 1)
+        #expect(member.results[0].name == "review")
+        #expect(member.results[0].required)
+        #expect(member.results[0].status == "available")
     }
 
     @Test func decodesCompletionAndCleanupState() throws {
@@ -84,6 +90,7 @@ struct ScenarioDecodingTests {
         #expect(member.blockedBy.isEmpty)
         #expect(!member.isTodoComplete)
         #expect(member.shared == nil)
+        #expect(member.results.isEmpty)
     }
 }
 

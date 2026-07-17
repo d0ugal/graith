@@ -148,3 +148,22 @@ func handleScenarioAdd(sm *SessionManager, auth authContext, send func(string, a
 func handleScenarioList(sm *SessionManager, send func(string, any)) {
 	send("scenario_list", protocol.ScenarioListResponse{Scenarios: sm.ListScenarios()})
 }
+
+// handleScenarioResultPublish publishes only the authenticated session's own
+// declared result. PublishScenarioResult performs the narrower membership and
+// declaration checks and persists invalid/failed attempts before returning an
+// error response.
+func handleScenarioResultPublish(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
+	publish, ok := decodePayload[protocol.ScenarioResultPublishMsg](msg, send, "invalid scenario_result_publish message")
+	if !ok {
+		return
+	}
+
+	result, err := sm.PublishScenarioResult(auth, publish)
+	if err != nil {
+		send("error", protocol.ErrorMsg{Message: err.Error()})
+		return
+	}
+
+	send("scenario_result_published", result)
+}

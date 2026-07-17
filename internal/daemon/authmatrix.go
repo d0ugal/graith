@@ -59,6 +59,9 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	// Session-originated (a session acting on itself); not humans/guests.
 	"approval_request": remoteSessionOnly,
 	"status_report":    remoteSessionOnly,
+	// Result publication derives the member from the authenticated session; a
+	// remote human must not gain a path that can claim a member's success.
+	"scenario_result_publish": remoteSessionOnly,
 
 	// Mutating / operator actions (paired human + sessions; not guests).
 	"msg_conversation": remoteHumanRW,  // reads private DMs — human, not guest

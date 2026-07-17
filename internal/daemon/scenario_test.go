@@ -328,6 +328,18 @@ func TestStartScenarioValidation(t *testing.T) {
 			},
 			wantErr: "duplicate session name",
 		},
+		{
+			name: "invalid result before repo preflight",
+			msg: protocol.ScenarioStartMsg{
+				CallerSessionID: "ben-orch",
+				Name:            "strath-neep",
+				Sessions: []protocol.ScenarioSessionInput{{
+					Name: "braw-a", Repo: "/glen",
+					Results: []protocol.ScenarioResultSpec{{Name: "review", Format: "yaml", Store: "review.yaml"}},
+				}},
+			},
+			wantErr: "unsupported format",
+		},
 	}
 
 	for _, tt := range tests {
@@ -352,8 +364,10 @@ func TestBuildManifest(t *testing.T) {
 		Name:            "strath-kirk",
 		Goal:            "Build braw things",
 		Sessions: []protocol.ScenarioSessionInput{
-			{Name: "braw-forge", Repo: "/hame/glen/croft-forge", Role: "Braw forge dev", Task: "Build braw API"},
-			{Name: "bonnie-loom", Repo: "/hame/glen/croft-loom", Role: "Bonnie loom dev", Task: "Build bonnie UI"},
+			{Name: "braw-forge", Repo: "/hame/glen/croft-forge", Role: "Braw forge dev", Task: "Build braw API",
+				Results: []protocol.ScenarioResultSpec{{Name: "review", Format: "markdown", Store: "{session_name}/review.md", Required: true}}},
+			{Name: "bonnie-loom", Repo: "/hame/glen/croft-loom", Role: "Bonnie loom dev", Task: "Build bonnie UI",
+				Results: []protocol.ScenarioResultSpec{{Name: "facts", Format: "json", Store: "{session_name}/facts.json", Required: true}}},
 		},
 	}
 	sessionIDs := []string{"braw-s1", "bonnie-s2"}
@@ -387,6 +401,14 @@ func TestBuildManifest(t *testing.T) {
 
 	if m.Siblings[0].Repo != "croft-loom" {
 		t.Errorf("sibling.repo = %q, want %q", m.Siblings[0].Repo, "croft-loom")
+	}
+
+	if len(m.You.Results) != 1 || m.You.Results[0].Destination != "scenarios/sc-glen/results/braw-forge/review.md" {
+		t.Fatalf("self results = %+v", m.You.Results)
+	}
+
+	if len(m.Siblings[0].Results) != 1 || m.Siblings[0].Results[0].Destination != "scenarios/sc-glen/results/bonnie-loom/facts.json" {
+		t.Fatalf("sibling results = %+v", m.Siblings[0].Results)
 	}
 
 	if m.Orchestrator.SessionID != "ben-1" {

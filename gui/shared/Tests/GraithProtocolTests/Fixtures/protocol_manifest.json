@@ -2761,6 +2761,158 @@
       ]
     },
     {
+      "name": "ScenarioResultInfo",
+      "swift": "required",
+      "swift_type": "ScenarioResultInfo",
+      "fields": [
+        {
+          "name": "name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "format",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "destination",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "required",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "status",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "size_bytes",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "published_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "error",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "ScenarioResultPublishMsg",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "scenario",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "ScenarioResultPublishResponse",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "scenario",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "member",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "result",
+          "type": {
+            "kind": "object",
+            "ref": "ScenarioResultInfo"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "ScenarioResultSpec",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "format",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "store",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "required",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
       "name": "ScenarioResumeMsg",
       "swift": "required",
       "swift_type": "ScenarioNameMsg",
@@ -2865,6 +3017,17 @@
             "kind": "bool"
           },
           "optional": true
+        },
+        {
+          "name": "results",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "ScenarioResultInfo"
+            }
+          },
+          "optional": true
         }
       ]
     },
@@ -2959,6 +3122,17 @@
           "name": "star",
           "type": {
             "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "results",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "ScenarioResultSpec"
+            }
           },
           "optional": true
         }

@@ -46,7 +46,18 @@ type Session struct {
 	Includes []string `toml:"includes"`
 	// Star creates the session starred so it is protected from an accidental
 	// manual `gr delete` (shared = true only shields from scenario stop/delete).
-	Star bool `toml:"star"`
+	Star    bool     `toml:"star"`
+	Results []Result `toml:"results"`
+}
+
+// Result is one [[sessions.results]] declaration. Store is relative to the
+// scenario's shared-store result directory and may contain supported template
+// placeholders; the daemon validates and resolves it authoritatively.
+type Result struct {
+	Name     string `toml:"name"`
+	Format   string `toml:"format"`
+	Store    string `toml:"store"`
+	Required bool   `toml:"required"`
 }
 
 // Parse decodes and validates a scenario TOML document. Unknown fields are
@@ -276,6 +287,13 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 			return nil, fmt.Errorf("session %q: repo is required (unless shared)", s.Name)
 		}
 
+		results := make([]protocol.ScenarioResultSpec, len(s.Results))
+		for i, result := range s.Results {
+			results[i] = protocol.ScenarioResultSpec{
+				Name: result.Name, Format: result.Format, Store: result.Store, Required: result.Required,
+			}
+		}
+
 		inputs = append(inputs, protocol.ScenarioSessionInput{
 			Name:       s.Name,
 			Repo:       s.Repo,
@@ -289,6 +307,7 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 			Shared:     s.Shared,
 			Includes:   s.Includes,
 			Star:       s.Star,
+			Results:    results,
 		})
 	}
 

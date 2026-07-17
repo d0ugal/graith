@@ -18,7 +18,7 @@ import (
 // exceeds the cap is silently dropped by WriteFrame, leaving the GUI's RPC
 // hanging forever. We reserve headroom for the JSON envelope + escaping and
 // fail with an explicit error instead.
-const maxStoreResponseBytes = protocol.MaxPayload - 64*1024
+const maxStoreResponseBytes = protocol.MaxStoreDocumentBytes
 
 // This file backs the GUI document-store browser (issue #902): read-only
 // listing and fetching over the control protocol, mirroring the semantics of

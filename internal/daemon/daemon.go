@@ -50,8 +50,12 @@ type hookReport struct {
 
 // SessionManager orchestrates PTY sessions, state persistence, and git worktrees.
 type SessionManager struct {
-	mu                sync.RWMutex
-	configReloadMu    sync.Mutex
+	mu             sync.RWMutex
+	configReloadMu sync.Mutex
+	// scenarioResultMu serializes store-write + state-commit publication. Store
+	// I/O never holds mu, while the separate lock prevents two publications from
+	// leaving artifact content and metadata describing different attempts.
+	scenarioResultMu  sync.Mutex
 	state             *State
 	sessions          map[string]SessionDriver
 	stopAttempts      map[string]*stopAttempt

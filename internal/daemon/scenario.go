@@ -101,6 +101,10 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		}
 	}
 
+	if err := validateScenarioResultDeclarations(msg.Name, msg.Sessions); err != nil {
+		return nil, err
+	}
+
 	// Validate scenario-embedded triggers against the roles this scenario defines
 	// (issue #1027). Done authoritatively here — before any filesystem work — so a
 	// client can't bypass the CLI's check. They are only associated with the
@@ -199,6 +203,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	scenarioSessions := make([]ScenarioSession, len(msg.Sessions))
 	sessionIDs := make([]string, len(msg.Sessions))
 	sharedReused := make([]bool, len(msg.Sessions))
+	seenResultDestinations := make(map[string]string)
 
 	for i, s := range msg.Sessions {
 		agentName := s.Agent
@@ -234,6 +239,22 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 			}
 
 			if sharedReused[i] {
+				results, compileErr := compileScenarioResults(
+					scenarioID, msg.Name, sessionIDs[i], s.Name, s.Results, seenResultDestinations,
+				)
+				if compileErr != nil {
+					for previousIndex, previousID := range sessionIDs[:i] {
+						if !sharedReused[previousIndex] {
+							delete(sm.state.Sessions, previousID)
+						}
+					}
+					sm.mu.Unlock()
+
+					return nil, fmt.Errorf("session %q: %w", s.Name, compileErr)
+				}
+
+				scenarioSessions[i].Results = results
+
 				continue
 			}
 			sm.mu.Unlock()
@@ -243,6 +264,22 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 		id := sm.uniqueSessionIDLocked()
 		sessionIDs[i] = id
+
+		results, compileErr := compileScenarioResults(
+			scenarioID, msg.Name, id, s.Name, s.Results, seenResultDestinations,
+		)
+		if compileErr != nil {
+			for previousIndex, previousID := range sessionIDs[:i] {
+				if !sharedReused[previousIndex] {
+					delete(sm.state.Sessions, previousID)
+				}
+			}
+			sm.mu.Unlock()
+
+			return nil, fmt.Errorf("session %q: %w", s.Name, compileErr)
+		}
+
+		scenarioSessions[i].Results = results
 
 		sm.state.Sessions[id] = &SessionState{
 			ID:              id,
@@ -538,17 +575,26 @@ type scenarioManifest struct {
 }
 
 type scenarioManifestSelf struct {
-	Name      string `json:"name"`
-	SessionID string `json:"session_id"`
-	Role      string `json:"role"`
-	Task      string `json:"task"`
+	Name      string                   `json:"name"`
+	SessionID string                   `json:"session_id"`
+	Role      string                   `json:"role"`
+	Task      string                   `json:"task"`
+	Results   []scenarioManifestResult `json:"results,omitempty"`
 }
 
 type scenarioManifestSibling struct {
-	Name      string `json:"name"`
-	SessionID string `json:"session_id"`
-	Role      string `json:"role"`
-	Repo      string `json:"repo"`
+	Name      string                   `json:"name"`
+	SessionID string                   `json:"session_id"`
+	Role      string                   `json:"role"`
+	Repo      string                   `json:"repo"`
+	Results   []scenarioManifestResult `json:"results,omitempty"`
+}
+
+type scenarioManifestResult struct {
+	Name        string `json:"name"`
+	Format      string `json:"format"`
+	Destination string `json:"destination"`
+	Required    bool   `json:"required,omitempty"`
 }
 
 type scenarioManifestOrch struct {
@@ -576,6 +622,7 @@ func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.Scenario
 			SessionID: sessionIDs[j],
 			Role:      s.Role,
 			Repo:      repo,
+			Results:   manifestScenarioResults(scenarioID, msg.Name, sessionIDs[j], s),
 		})
 	}
 
@@ -589,6 +636,7 @@ func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.Scenario
 			SessionID: sessionIDs[selfIndex],
 			Role:      self.Role,
 			Task:      self.Task,
+			Results:   manifestScenarioResults(scenarioID, msg.Name, sessionIDs[selfIndex], self),
 		},
 		Siblings: siblings,
 		Orchestrator: scenarioManifestOrch{
@@ -596,6 +644,28 @@ func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.Scenario
 			Name:      "orchestrator",
 		},
 	}
+}
+
+func manifestScenarioResults(scenarioID, scenarioName, sessionID string, session protocol.ScenarioSessionInput) []scenarioManifestResult {
+	if len(session.Results) == 0 {
+		return nil
+	}
+
+	results := make([]scenarioManifestResult, 0, len(session.Results))
+	for _, spec := range session.Results {
+		destination, err := renderScenarioResultDestination(
+			scenarioID, scenarioName, sessionID, session.Name, spec.Name, spec.Store,
+		)
+		if err != nil {
+			continue
+		}
+
+		results = append(results, scenarioManifestResult{
+			Name: spec.Name, Format: spec.Format, Destination: destination, Required: spec.Required,
+		})
+	}
+
+	return results
 }
 
 func (sm *SessionManager) persistManifest(scenarioID string, msg protocol.ScenarioStartMsg, repos []string, sessionIDs []string) {
@@ -920,6 +990,10 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		return nil, errors.New("repo is required")
 	}
 
+	if err := validateScenarioResultDeclarations(name, []protocol.ScenarioSessionInput{input}); err != nil {
+		return nil, err
+	}
+
 	cfg := sm.Config()
 
 	agentName := input.Agent
@@ -1089,6 +1163,29 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		return nil, fmt.Errorf("scenario %q was deleted during session creation", name)
 	}
 
+	seenResultDestinations := make(map[string]string)
+
+	for _, member := range scenario.Sessions {
+		for _, result := range member.Results {
+			seenResultDestinations[result.Destination] = fmt.Sprintf("session %q result %q", member.Name, result.Name)
+		}
+	}
+
+	results, compileErr := compileScenarioResults(
+		scenarioID, name, sess.ID, input.Name, input.Results, seenResultDestinations,
+	)
+	if compileErr != nil {
+		sm.mu.Unlock()
+
+		if stopErr := sm.Stop(sess.ID); stopErr != nil {
+			sm.log.Warn("failed to stop session after result declaration collision", "session", sess.ID, "err", stopErr)
+		}
+
+		_ = sm.unstarAndDelete(sess.ID)
+
+		return nil, fmt.Errorf("session %q: %w", input.Name, compileErr)
+	}
+
 	if created, ok := sm.state.Sessions[sess.ID]; ok {
 		created.ScenarioID = scenarioID
 		created.ScenarioName = name
@@ -1098,12 +1195,9 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 
 	scenario.SessionIDs = append(scenario.SessionIDs, sess.ID)
 	scenario.Sessions = append(scenario.Sessions, ScenarioSession{
-		Name:  input.Name,
-		Role:  input.Role,
-		Task:  input.Task,
-		Repo:  filepath.Base(repoRoot),
-		Agent: agentName,
-		Model: input.Model,
+		Name: input.Name, Role: input.Role, Task: input.Task,
+		Repo: filepath.Base(repoRoot), Agent: agentName, Model: input.Model,
+		Results: results,
 	})
 	_ = sm.saveState()
 	sm.mu.Unlock()
@@ -1278,13 +1372,17 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 	sessions := make([]protocol.ScenarioSessionInput, len(scenario.Sessions))
 	for i, ss := range scenario.Sessions {
 		repos[i] = ss.Repo
+
+		results := make([]protocol.ScenarioResultSpec, len(ss.Results))
+		for j, result := range ss.Results {
+			results[j] = protocol.ScenarioResultSpec{
+				Name: result.Name, Format: result.Format,
+				Store: result.StoreTemplate, Required: result.Required,
+			}
+		}
 		sessions[i] = protocol.ScenarioSessionInput{
-			Name:  ss.Name,
-			Repo:  ss.Repo,
-			Role:  ss.Role,
-			Task:  ss.Task,
-			Agent: ss.Agent,
-			Model: ss.Model,
+			Name: ss.Name, Repo: ss.Repo, Role: ss.Role, Task: ss.Task,
+			Agent: ss.Agent, Model: ss.Model, Results: results,
 		}
 	}
 
@@ -1375,6 +1473,24 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 			Model:  ss.Model,
 			Shared: ss.Shared,
 		}
+
+		requiredResultsAvailable := true
+		requiredResults := 0
+
+		if len(ss.Results) > 0 {
+			sessions[i].Results = make([]protocol.ScenarioResultInfo, len(ss.Results))
+			for resultIndex, result := range ss.Results {
+				sessions[i].Results[resultIndex] = scenarioResultInfo(result)
+				if result.Required {
+					requiredResults++
+
+					if result.Status != ScenarioResultAvailable {
+						requiredResultsAvailable = false
+					}
+				}
+			}
+		}
+
 		if i < len(sc.SessionIDs) {
 			sessions[i].SessionID = sc.SessionIDs[i]
 			if p, ok := progress[sc.SessionIDs[i]]; ok {
@@ -1393,12 +1509,14 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 				}
 			}
 
-			// A member with tracked work is complete when all assigned items are
-			// done — this is the todo-derived replacement for the old task-done.
-			if sessions[i].TodoTotal > 0 {
+			// A member with tracked todos or required results is complete only when
+			// both sides of its contract are complete. Optional results never enter
+			// this predicate.
+			if sessions[i].TodoTotal > 0 || requiredResults > 0 {
 				tracked++
 
-				if sessions[i].TodoDone == sessions[i].TodoTotal {
+				todosComplete := sessions[i].TodoTotal == 0 || sessions[i].TodoDone == sessions[i].TodoTotal
+				if todosComplete && requiredResultsAvailable {
 					completeMembers++
 				}
 			}
@@ -1422,10 +1540,8 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 	var status string
 
 	switch {
-	// Completion is derived from the todo work: when every member that has
-	// tracked work has finished it (and nothing errored), the scenario is
-	// complete regardless of process state — the work, not the process, defines
-	// done. This is the semantic replacement for `gr scenario task-done`.
+	// Completion is derived from tracked todos plus required result contracts.
+	// Optional results do not block it.
 	case errored == 0 && tracked > 0 && completeMembers == tracked:
 		status = "complete"
 	case running == total:

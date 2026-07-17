@@ -162,6 +162,11 @@
       "macos": "planned"
     },
     {
+      "id": "scenarios.results",
+      "ios": "planned",
+      "macos": "planned"
+    },
+    {
       "id": "todo.manage",
       "ios": "planned",
       "macos": "planned"

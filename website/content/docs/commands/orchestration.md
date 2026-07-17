@@ -22,7 +22,14 @@ cat tracing.toml | gr scenario start -
 
 ### `gr scenario status <name>`
 
-Show the status of each session in a scenario.
+Show each session's lifecycle, todo progress, and declared result status. JSON
+output includes resolved shared-store destinations and validation errors.
+
+### `gr scenario result put <name> [body]`
+
+Publish the authenticated member's declared text, Markdown, or JSON result. Use
+`--file <path>` or standard input for file content, and `--scenario <name>` to
+disambiguate a shared member that participates in multiple scenarios.
 
 ### `gr scenario list`
 

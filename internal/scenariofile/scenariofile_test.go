@@ -103,6 +103,63 @@ repo = "~/Code/whin"
 	}
 }
 
+func TestParseScenarioResults(t *testing.T) {
+	data := []byte(`
+version = 1
+[scenario]
+name = "strath"
+[[sessions]]
+name = "canny"
+repo = "~/Code/croft"
+[[sessions.results]]
+name = "review"
+format = "markdown"
+store = "{session_name}/review.md"
+required = true
+[[sessions.results]]
+name = "facts"
+format = "json"
+store = "{session_name}/facts.json"
+`)
+
+	sf, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	if len(sf.Sessions[0].Results) != 2 || !sf.Sessions[0].Results[0].Required {
+		t.Fatalf("parsed results = %+v", sf.Sessions[0].Results)
+	}
+
+	inputs, err := SessionInputs(sf)
+	if err != nil {
+		t.Fatalf("SessionInputs: %v", err)
+	}
+
+	if len(inputs[0].Results) != 2 || inputs[0].Results[1].Format != "json" {
+		t.Fatalf("wire results = %+v", inputs[0].Results)
+	}
+}
+
+func TestParseScenarioResultRejectsUnknownField(t *testing.T) {
+	_, err := Parse([]byte(`
+version = 1
+[scenario]
+name = "strath"
+[[sessions]]
+name = "canny"
+repo = "~/Code/croft"
+[[sessions.results]]
+name = "review"
+format = "markdown"
+store = "review.md"
+destination = "dreich.md"
+`))
+	if err == nil || !strings.Contains(err.Error(), "strict mode") {
+		t.Fatalf("unknown result field error = %v", err)
+	}
+}
+
 func TestParse_Invalid(t *testing.T) {
 	cases := []struct {
 		name string
