@@ -41,7 +41,7 @@ kick_channel_size              = 64       # buffered kick-channel capacity (maxi
 kicked_no_pr_backoff           = "20s"    # short re-poll delay after a kicked poll finds no PR yet
 ref_reconcile_interval         = "2s"     # how often the git-ref watcher set is reconciled against sessions
 ref_debounce                   = "750ms"  # coalesce a burst of ref writes from one push/commit into one kick
-gh_timeout                     = "5s"     # per-command timeout for the daemon's gh invocations
+gh_timeout                     = "5s"     # per-command timeout for the daemon's gh invocations (PR watch + tracker poll)
 ```
 
 The loop-lifetime knobs — `base_tick`, `kick_channel_size`, and `ref_reconcile_interval` — are read when the daemon starts, so changing them takes effect on the next daemon restart; the rest apply on the next poll.

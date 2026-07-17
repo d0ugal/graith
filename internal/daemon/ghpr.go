@@ -22,9 +22,9 @@ import (
 
 // ghTimeout is the default per-command timeout for the daemon's gh invocations.
 // The pr_watch reader threads a configurable timeout (pr_watch.advanced.gh_timeout)
-// through resolvePR/fetchChecks/fetchComments; this constant is the fallback when
-// a caller passes a non-positive value, and is used directly by the issue tracker
-// (tracker.go), which deliberately reuses the pr_watch reader's short timeout.
+// through resolvePR/fetchChecks/fetchComments, and the issue tracker (tracker.go)
+// deliberately reuses that same configured timeout; this constant is the fallback
+// when a caller passes a non-positive value.
 const ghTimeout = 5 * time.Second
 
 // ghTimeoutOr resolves a caller-supplied timeout, falling back to ghTimeout when
@@ -97,8 +97,9 @@ var ghRunner = func(ctx context.Context, dir string, args ...string) (string, er
 	return strings.TrimSpace(string(out)), err
 }
 
-// ghAvailable reports whether the gh binary is on PATH.
-func ghAvailable() bool {
+// ghAvailable reports whether the gh binary is on PATH. It is a package var so
+// tests can stub the PATH probe without a real gh install.
+var ghAvailable = func() bool {
 	_, err := exec.LookPath(tools.GH())
 	return err == nil
 }

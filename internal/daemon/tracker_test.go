@@ -1,12 +1,141 @@
 package daemon
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 )
+
+// trackerGHRepo builds a git repo with a GitHub origin remote so repoSlug
+// resolves it, and stubs ghAvailable/ghRunner. capture is invoked with the
+// deadline observed on the gh command's context for each fetch. It restores the
+// stubs on cleanup.
+func trackerGHRepo(t *testing.T, capture func(deadline time.Time, ok bool)) string {
+	t.Helper()
+
+	tmp := t.TempDir()
+	repo := tmp + "/croft"
+
+	gitRun(t, "", "init", "--initial-branch=main", repo)
+	gitRun(t, repo, "remote", "add", "origin", "git@github.com:croft/loch.git")
+
+	origAvail, origRunner := ghAvailable, ghRunner
+
+	t.Cleanup(func() { ghAvailable, ghRunner = origAvail, origRunner })
+
+	ghAvailable = func() bool { return true }
+	ghRunner = func(ctx context.Context, _ string, _ ...string) (string, error) {
+		dl, ok := ctx.Deadline()
+		capture(dl, ok)
+
+		return "[]", nil // empty active set: reconcile is a no-op
+	}
+
+	return repo
+}
+
+// TestFetchGitHubIssuesObservesConfiguredTimeout proves the tracker fetch honours
+// the caller-supplied gh timeout (pr_watch.advanced.gh_timeout) rather than the
+// fixed 5s constant, and falls back to the default only for a non-positive value.
+// Regression for #1318.
+func TestFetchGitHubIssuesObservesConfiguredTimeout(t *testing.T) {
+	var deadline time.Time
+
+	var haveDeadline bool
+
+	repo := trackerGHRepo(t, func(dl time.Time, ok bool) { deadline, haveDeadline = dl, ok })
+	sm := newSMWithConfig(t, config.Default())
+	tc := &config.TrackerConfig{Provider: config.TrackerProviderGitHub, Repo: repo}
+
+	cases := []struct {
+		name    string
+		timeout time.Duration
+		wantMin time.Duration // observed budget must exceed this
+		wantMax time.Duration // ...and stay below this
+	}{
+		// A distinctly non-default 30s budget must reach the gh command's context.
+		{"non-default 30s", 30 * time.Second, 20 * time.Second, 40 * time.Second},
+		// A non-positive value falls back to the 5s default.
+		{"fallback on zero", 0, 3 * time.Second, 8 * time.Second},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			before := time.Now()
+
+			if _, _, err := sm.fetchGitHubIssues(context.Background(), tc, repo, tt.timeout); err != nil {
+				t.Fatalf("fetchGitHubIssues: %v", err)
+			}
+
+			if !haveDeadline {
+				t.Fatal("gh command ran without a deadline")
+			}
+
+			budget := deadline.Sub(before)
+			if budget < tt.wantMin || budget > tt.wantMax {
+				t.Errorf("observed gh budget = %v, want between %v and %v", budget, tt.wantMin, tt.wantMax)
+			}
+		})
+	}
+}
+
+// TestActionTrackerReloadsGHTimeout proves a full reconcile pass threads the
+// current config's gh timeout, so a live change to pr_watch.advanced.gh_timeout
+// takes effect on the next poll. Regression for #1318.
+func TestActionTrackerReloadsGHTimeout(t *testing.T) {
+	var deadline time.Time
+
+	repo := trackerGHRepo(t, func(dl time.Time, _ bool) { deadline = dl })
+
+	withTimeout := func(d string) *config.Config {
+		cfg := config.Default()
+		cfg.PRWatch.Advanced.GHTimeout = d
+
+		return cfg
+	}
+
+	sm := newSMWithConfig(t, withTimeout("7s"))
+	// An enabled orchestrator owns the (would-be) spawned sessions; without it
+	// actionTracker refuses to run.
+	sm.state.Sessions["orch"] = &SessionState{Name: "orch", SystemKind: SystemKindOrchestrator}
+
+	trig := &config.TriggerConfig{
+		Name: "issue-sessions",
+		Action: config.ActionConfig{
+			Type:    "tracker",
+			Agent:   "claude",
+			Tracker: &config.TrackerConfig{Provider: config.TrackerProviderGitHub, Repo: repo},
+		},
+	}
+
+	assertBudget := func(want time.Duration) {
+		t.Helper()
+
+		before := time.Now()
+
+		if _, err := sm.actionTracker(context.Background(), trig, fireContext{}); err != nil {
+			t.Fatalf("actionTracker: %v", err)
+		}
+
+		budget := deadline.Sub(before)
+		lo, hi := want-2*time.Second, want+3*time.Second
+
+		if budget < lo || budget > hi {
+			t.Errorf("gh budget = %v, want ~%v", budget, want)
+		}
+	}
+
+	assertBudget(7 * time.Second)
+
+	// Live reload through the real reload path (locks sm.mu, publishes coherently);
+	// the next pass must observe the larger timeout.
+	sm.applyConfig(withTimeout("42s"))
+
+	assertBudget(42 * time.Second)
+}
 
 // sessionIDs pulls the ids out of a plan slice for stable comparison.
 func sortedContains(ids []string, want string) bool {
