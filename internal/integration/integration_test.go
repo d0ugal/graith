@@ -1281,6 +1281,7 @@ func TestScenarioMirrorSharedSourceLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
 	backend := filepath.Join(root, "nono-stub")
