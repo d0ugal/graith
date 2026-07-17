@@ -126,6 +126,69 @@ func TestKeybindingsConflicts(t *testing.T) {
 	})
 }
 
+// TestParsePrefixBytePreservesPrintableLiterals covers the round-3 regression
+// (issue #1233): parsePrefixByte must normalize only the ctrl+letter control
+// syntax and keep an exactly-one-byte printable literal byte-for-byte. Applying
+// TrimSpace/ToLower to the whole value silently rewrote "A" to "a" and collapsed
+// the valid literal " " (0x20) to empty, which restored the ctrl+b default.
+func TestParsePrefixBytePreservesPrintableLiterals(t *testing.T) {
+	cases := []struct {
+		name   string
+		raw    string
+		want   byte
+		wantOK bool
+	}{
+		{"empty keeps ctrl+b default", "", 0x02, true},
+		{"lowercase literal", "a", 'a', true},
+		{"uppercase literal preserved", "A", 'A', true},
+		{"space literal preserved", " ", 0x20, true},
+		{"ctrl+letter lowercase", "ctrl+b", 0x02, true},
+		{"ctrl+letter uppercase normalized", "CTRL+B", 0x02, true},
+		{"ctrl+a", "ctrl+a", 0x01, true},
+		{"digit literal", "5", '5', true},
+		{"multi-char rejected", "ab", 0, false},
+		{"control byte rejected", "\x1b", 0, false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, ok := parsePrefixByte(c.raw)
+			if ok != c.wantOK {
+				t.Fatalf("parsePrefixByte(%q) ok = %v, want %v", c.raw, ok, c.wantOK)
+			}
+
+			if ok && got != c.want {
+				t.Errorf("parsePrefixByte(%q) = %#x, want %#x", c.raw, got, c.want)
+			}
+		})
+	}
+}
+
+// TestConflictReportsRuntimeWinner asserts the collision warning names the action
+// that actually executes. Approvals precedes Messages in the runtime switch
+// (client/passthrough.go), so a shared byte must report approvals — not messages,
+// which the pre-round-3 passthroughActions() order wrongly named (issue #1233).
+func TestConflictReportsRuntimeWinner(t *testing.T) {
+	k := Keybindings{Approvals: "x", Messages: "x"}
+
+	got := k.Conflicts()
+	if len(got) != 1 {
+		t.Fatalf("Conflicts() = %v, want exactly one collision", got)
+	}
+
+	if !strings.Contains(got[0], "approvals takes precedence") {
+		t.Errorf("collision %q should report approvals as the runtime winner", got[0])
+	}
+
+	// The prefix always wins over any action sharing its byte.
+	kp := Keybindings{Prefix: "x", Approvals: "x", Messages: "x"}
+
+	gotP := kp.Conflicts()
+	if len(gotP) != 1 || !strings.Contains(gotP[0], "prefix takes precedence") {
+		t.Fatalf("Conflicts() = %v, want prefix as winner", gotP)
+	}
+}
+
 func TestPassthroughKeybindingShapeValidation(t *testing.T) {
 	valid := []Keybindings{
 		{Prefix: "ctrl+b", Messages: "m"},

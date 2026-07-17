@@ -43,10 +43,15 @@ showing the currently-configured commands. It disappears after the next keypress
 
 Each prefix-action field accepts exactly one printable ASCII byte, or an empty
 value to disable that action. Multi-character, multibyte, control, and NUL
-values are rejected at config load. If two commands resolve to the same byte,
-or an action collides with a single-byte prefix, graith starts anyway but prints
-an actionable warning. Prefix handling and then the first command in
-passthrough order take precedence, so pick distinct keys.
+values are rejected at config load. A single-byte action value is taken
+literally and case-sensitively (`A` is not `a`, and a single space `" "` is a
+valid binding). `keybindings.prefix` additionally accepts the `ctrl+<letter>`
+syntax (case-insensitive, e.g. `ctrl+b`); a one-byte value there is likewise a
+literal. If two commands resolve to the same byte, or an action collides with a
+single-byte prefix, graith starts anyway but prints an actionable warning naming
+the command that actually wins. The prefix always wins over an action sharing
+its byte; otherwise the earliest command in passthrough order wins, so pick
+distinct keys.
 
 ### Literal prefix
 
