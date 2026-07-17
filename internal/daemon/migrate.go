@@ -92,8 +92,8 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	}
 
 	rendered := conv.Render(transcript.RenderOptions{
-		MaxBytes:      sm.cfg.Transcript.MaxContextBytesOrDefault(),
-		MaxToolOutput: sm.cfg.Transcript.MaxToolOutputBytesOrDefault(),
+		MaxBytes:      cfg.Transcript.MaxContextBytesOrDefault(),
+		MaxToolOutput: cfg.Transcript.MaxToolOutputBytesOrDefault(),
 	})
 
 	// --- stage the rendered context in the session's tmp dir ---
@@ -215,7 +215,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 
 	// Post-start health check: a PTY that spawns but exits immediately (bad
 	// auth/config — the likely outage case) is not a healthy start.
-	if startErr == nil && !sm.survivedStartup(id, sm.cfg.Migration.HealthWindowDuration()) {
+	if startErr == nil && !sm.survivedStartup(id, cfg.Migration.HealthWindowDuration()) {
 		startErr = fmt.Errorf("target agent %q exited immediately after start (likely auth/config failure)", targetAgent)
 	}
 

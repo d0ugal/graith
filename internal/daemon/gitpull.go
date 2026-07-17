@@ -85,7 +85,7 @@ func (sm *SessionManager) runGitPullTick(ctx context.Context) {
 			return
 		}
 
-		pulled, err := sm.pullIfClean(ctx, repo)
+		pulled, err := sm.pullIfCleanWith(ctx, repo, cfg.Git)
 		switch {
 		case err != nil:
 			sm.log.Warn("git-pull: error", "repo", repo, "err", err)
@@ -101,7 +101,21 @@ func (sm *SessionManager) runGitPullTick(ctx context.Context) {
 	sm.log.Info("git-pull: cycle complete", "updated", updated, "skipped", skipped, "errors", errored)
 }
 
+// pullIfClean takes its own coherent [git] config snapshot and delegates to
+// pullIfCleanWith. Background callers that already hold a per-tick config
+// snapshot (runGitPullTick) call pullIfCleanWith directly so every repo in a
+// single cycle uses one config generation; this wrapper exists for callers
+// (tests) that operate on a single repo without a captured snapshot.
 func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (bool, error) {
+	return sm.pullIfCleanWith(ctx, repoPath, sm.Config().Git)
+}
+
+// pullIfCleanWith fetches and fast-forward-merges repoPath's upstream using the
+// fetch/merge timeouts from the supplied [git] config. Threading gitCfg (rather
+// than reading sm.cfg here) keeps the whole operation on one config generation:
+// a concurrent hot reload swapping sm.cfg cannot race these reads or split a
+// single pull across two generations (issue #1287, regression from 2acbe3c).
+func (sm *SessionManager) pullIfCleanWith(ctx context.Context, repoPath string, gitCfg config.GitConfig) (bool, error) {
 	isBare, err := git.RunOutputContext(ctx, repoPath, "rev-parse", "--is-bare-repository")
 	if err != nil {
 		return false, fmt.Errorf("checking bare: %w", err)
@@ -175,7 +189,7 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, fmt.Errorf("capturing old HEAD: %w", err)
 	}
 
-	fetchCtx, fetchCancel := context.WithTimeout(ctx, sm.cfg.Git.FetchTimeoutDuration())
+	fetchCtx, fetchCancel := context.WithTimeout(ctx, gitCfg.FetchTimeoutDuration())
 	defer fetchCancel()
 
 	_, fetchStderr, err := git.RunContextEnv(fetchCtx, repoPath, gitNoPromptEnv, "-c", "core.hooksPath=/dev/null", "fetch", "--", remote)
@@ -244,7 +258,7 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, nil
 	}
 
-	mergeCtx, mergeCancel := context.WithTimeout(ctx, sm.cfg.Git.MergeTimeoutDuration())
+	mergeCtx, mergeCancel := context.WithTimeout(ctx, gitCfg.MergeTimeoutDuration())
 	defer mergeCancel()
 
 	_, stderr, err := git.RunContextEnv(mergeCtx, repoPath, gitNoPromptEnv, "-c", "core.hooksPath=/dev/null", "merge", "--ff-only", "--quiet", "--", mergeTarget)
