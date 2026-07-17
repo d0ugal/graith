@@ -146,6 +146,7 @@ func TestStopReasonRollbackUnwindsConcurrentFailures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sm := newTestSessionManager(t)
 			driver := newControlledStopDriver(2)
+
 			const id = "stop-dreich"
 
 			putSession(sm, &SessionState{
@@ -160,13 +161,17 @@ func TestStopReasonRollbackUnwindsConcurrentFailures(t *testing.T) {
 
 			results := map[int]chan error{1: make(chan error, 1), 2: make(chan error, 1)}
 			go func() { results[1] <- sm.stopWithReason(id, StopReasonIdle, "idle-loop") }()
+
 			awaitStopCall(t, driver, 1)
+
 			go func() { results[2] <- sm.stopWithReason(id, StopReasonUser, "user-stop") }()
+
 			awaitStopCall(t, driver, 2)
 
 			for _, call := range tc.completion {
 				wantErr := errors.New("controlled stop failure")
 				driver.release(call, wantErr)
+
 				if err := awaitStopResult(t, results[call]); !errors.Is(err, wantErr) {
 					t.Fatalf("stop %d error = %v, want %v", call, err, wantErr)
 				}
@@ -175,6 +180,7 @@ func TestStopReasonRollbackUnwindsConcurrentFailures(t *testing.T) {
 			sm.mu.RLock()
 			got := sm.state.Sessions[id].StopReason
 			sm.mu.RUnlock()
+
 			if got != StopReasonShutdown {
 				t.Fatalf("final StopReason = %q, want baseline %q", got, StopReasonShutdown)
 			}
@@ -204,21 +210,26 @@ func TestStopReasonRollbackDoesNotEraseBulkStopReason(t *testing.T) {
 	go func() {
 		idleResult <- sm.stopWithReason("child-bairn", StopReasonIdle, "idle-loop")
 	}()
+
 	awaitStopCall(t, driver, 1)
 
 	bulkResult := make(chan error, 1)
+
 	go func() {
 		_, err := sm.StopWithChildren("root-bothy", true)
 		bulkResult <- err
 	}()
+
 	awaitStopCall(t, driver, 2)
 	driver.release(2, nil)
+
 	if err := awaitStopResult(t, bulkResult); err != nil {
 		t.Fatalf("bulk stop failed: %v", err)
 	}
 
 	wantIdleErr := errors.New("idle stop failed")
 	driver.release(1, wantIdleErr)
+
 	if err := awaitStopResult(t, idleResult); !errors.Is(err, wantIdleErr) {
 		t.Fatalf("idle stop error = %v, want %v", err, wantIdleErr)
 	}
@@ -226,6 +237,7 @@ func TestStopReasonRollbackDoesNotEraseBulkStopReason(t *testing.T) {
 	sm.mu.RLock()
 	got := sm.state.Sessions["child-bairn"].StopReason
 	sm.mu.RUnlock()
+
 	if got != StopReasonUser {
 		t.Fatalf("final StopReason = %q, want bulk user reason %q", got, StopReasonUser)
 	}
@@ -234,6 +246,7 @@ func TestStopReasonRollbackDoesNotEraseBulkStopReason(t *testing.T) {
 func TestStopWithReasonPersistenceFailureDoesNotSignal(t *testing.T) {
 	sm := newTestSessionManager(t)
 	driver := newControlledStopDriver(1)
+
 	const id = "stop-croft"
 
 	putSession(sm, &SessionState{
@@ -243,6 +256,7 @@ func TestStopWithReasonPersistenceFailureDoesNotSignal(t *testing.T) {
 		StopReason: StopReasonShutdown,
 	})
 	sm.mu.Lock()
+
 	sm.sessions[id] = driver
 	if err := sm.saveState(); err != nil {
 		sm.mu.Unlock()
@@ -280,6 +294,7 @@ func TestStopWithReasonPersistenceFailureDoesNotSignal(t *testing.T) {
 	gotReason := sm.state.Sessions[id].StopReason
 	_, pending := sm.stopAttempts[id]
 	sm.mu.RUnlock()
+
 	if gotReason != StopReasonShutdown || pending {
 		t.Fatalf("in-memory rollback = reason %q pending %v, want %q/false", gotReason, pending, StopReasonShutdown)
 	}
@@ -288,6 +303,7 @@ func TestStopWithReasonPersistenceFailureDoesNotSignal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if got := persisted.Sessions[id].StopReason; got != StopReasonShutdown {
 		t.Fatalf("persisted StopReason = %q, want %q", got, StopReasonShutdown)
 	}
@@ -302,6 +318,7 @@ func TestReloadConfigOrchestratorDisableFailureAndRetry(t *testing.T) {
 	sm.cfg.Orchestrator.Enabled = true
 
 	driver := newControlledStopDriver(2)
+
 	putSession(sm, &SessionState{
 		ID:         "orch-canny",
 		Name:       OrchestratorSessionName,
@@ -319,10 +336,12 @@ func TestReloadConfigOrchestratorDisableFailureAndRetry(t *testing.T) {
 	}
 
 	sm.configFile = configFile
+
 	firstResult := make(chan error, 1)
 	go func() { firstResult <- sm.ReloadConfig() }()
 
 	awaitStopCall(t, driver, 1)
+
 	wantErr := errors.New("canny driver refused SIGTERM")
 	driver.release(1, wantErr)
 
@@ -416,6 +435,7 @@ func TestReloadConfigRejectsOrchestratorGenerationCreatedAfterSnapshot(t *testin
 		close(entered)
 		<-release
 	}
+
 	t.Cleanup(func() { orchestratorDisableSnapshotHook = nil })
 
 	result := make(chan error, 1)
@@ -438,6 +458,7 @@ func TestReloadConfigRejectsOrchestratorGenerationCreatedAfterSnapshot(t *testin
 	err := awaitStopResult(t, result)
 	assertErrContains(t, err, "orchestrator.enabled")
 	assertErrContains(t, err, "orch-strath")
+
 	if !sm.Config().Orchestrator.Enabled {
 		t.Error("disable was published over a newly reserved orchestrator generation")
 	}
@@ -463,6 +484,7 @@ func TestReloadConfigRetriesErroredOrchestratorOrphan(t *testing.T) {
 	if err := os.WriteFile(configFile, []byte("[orchestrator]\nenabled = false\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	sm.configFile = configFile
 
 	for attempt := 1; attempt <= 2; attempt++ {
@@ -470,6 +492,7 @@ func TestReloadConfigRetriesErroredOrchestratorOrphan(t *testing.T) {
 		assertErrContains(t, err, "orchestrator.enabled")
 		assertErrContains(t, err, "orch-blether")
 		assertErrContains(t, err, "no process identity recorded")
+
 		if !sm.Config().Orchestrator.Enabled {
 			t.Fatalf("attempt %d published disable despite live orphan", attempt)
 		}
@@ -478,6 +501,7 @@ func TestReloadConfigRetriesErroredOrchestratorOrphan(t *testing.T) {
 		status := sm.state.Sessions["orch-blether"].Status
 		gotPID := sm.state.Sessions["orch-blether"].PID
 		sm.mu.RUnlock()
+
 		if status != StatusErrored || gotPID != pid {
 			t.Fatalf("attempt %d state = status %q PID %d, want errored/%d", attempt, status, gotPID, pid)
 		}
@@ -486,17 +510,21 @@ func TestReloadConfigRetriesErroredOrchestratorOrphan(t *testing.T) {
 
 func TestWatchedConfigReReadsLatestGeneration(t *testing.T) {
 	sm := newTestSessionManager(t)
+
 	configFile := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configFile, []byte("default_agent = \"codex\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	sm.configFile = configFile
 
 	stale := config.Default()
+
 	stale.DefaultAgent = "claude"
 	if err := sm.applyWatchedConfig(stale); err != nil {
 		t.Fatal(err)
 	}
+
 	if got := sm.Config().DefaultAgent; got != "codex" {
 		t.Fatalf("DefaultAgent = %q, want latest on-disk generation %q", got, "codex")
 	}
@@ -509,6 +537,7 @@ func TestDisabledOrchestratorCannotReserveCreateOrResume(t *testing.T) {
 
 		_, err := sm.createOrchestrator(context.Background())
 		assertErrContains(t, err, "orchestrator is disabled")
+
 		if id := sm.findOrchestratorID(); id != "" {
 			t.Fatalf("disabled create reserved orchestrator %q", id)
 		}

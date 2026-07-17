@@ -132,7 +132,7 @@ func TestActionTrackerReloadsGHTimeout(t *testing.T) {
 
 	// Live reload through the real reload path (locks sm.mu, publishes coherently);
 	// the next pass must observe the larger timeout.
-	sm.applyConfig(withTimeout("42s"))
+	_ = sm.applyConfig(withTimeout("42s"))
 
 	assertBudget(42 * time.Second)
 }

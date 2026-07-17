@@ -72,9 +72,9 @@ func hammerApplyConfig(sm *SessionManager, a, b *config.Config) (stop func()) {
 
 		for i := 0; !done.Load(); i++ {
 			if i%2 == 0 {
-				sm.applyConfig(a)
+				_ = sm.applyConfig(a)
 			} else {
-				sm.applyConfig(b)
+				_ = sm.applyConfig(b)
 			}
 		}
 	}()

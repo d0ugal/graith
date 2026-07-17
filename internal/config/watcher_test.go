@@ -19,6 +19,7 @@ func TestWatcherDoesNotReportReloadWhenApplyFails(t *testing.T) {
 	}
 
 	var logBuf bytes.Buffer
+
 	wantErr := errors.New("orchestrator stop failed")
 	w := NewWatcher(configFile, func(*Config) error {
 		return wantErr

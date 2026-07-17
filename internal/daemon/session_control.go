@@ -38,12 +38,13 @@ func (sm *SessionManager) stopWithReason(id, reason, initiator string) error {
 	}
 
 	hasLiveProcess := sm.sessions[id] != nil || sessState.PID > 0
-	if status != StatusRunning && !(status == StatusErrored && hasLiveProcess) {
+	if status != StatusRunning && (status != StatusErrored || !hasLiveProcess) {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q is not running", id)
 	}
 
 	name := sessState.Name
+
 	attempt := &stopAttempt{
 		previousReason: sessState.StopReason,
 		previous:       sm.stopAttempts[id],
@@ -54,6 +55,7 @@ func (sm *SessionManager) stopWithReason(id, reason, initiator string) error {
 
 	sm.stopAttempts[id] = attempt
 	sessState.StopReason = reason
+
 	if err := sm.saveState(); err != nil {
 		if attempt.previous == nil {
 			delete(sm.stopAttempts, id)
@@ -194,6 +196,7 @@ func wrapStopReasonRollbackError(err error) error {
 // invalidates any older optimistic stop attempts. Callers must hold sm.mu.
 func (sm *SessionManager) setStopReasonLocked(id string, s *SessionState, reason string) {
 	delete(sm.stopAttempts, id)
+
 	s.StopReason = reason
 }
 
