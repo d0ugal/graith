@@ -11,7 +11,12 @@ const (
 	ChannelData    = byte(0x01)
 	ChannelMCP     = byte(0x02)
 	MaxPayload     = 4 * 1024 * 1024
-	headerSize     = 5
+	// MaxStoreDocumentBytes leaves room for the JSON control envelope and
+	// escaping below MaxPayload. Store reads and scenario result publication use
+	// the same limit so every accepted result remains consumable via store_get.
+	MaxStoreDocumentBytes      = MaxPayload - 64*1024
+	MaxScenarioResultBodyBytes = MaxStoreDocumentBytes
+	headerSize                 = 5
 )
 
 type Frame struct {

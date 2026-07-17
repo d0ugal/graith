@@ -17,6 +17,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/store"
 	"github.com/d0ugal/graith/internal/testutil"
 )
 
@@ -31,6 +32,10 @@ type testEnv struct {
 }
 
 func setup(t *testing.T, mutators ...func(*config.Config)) *testEnv {
+	return setupWithState(t, nil, mutators...)
+}
+
+func setupWithState(t *testing.T, initialState *daemon.State, mutators ...func(*config.Config)) *testEnv {
 	t.Helper()
 	testutil.IsolateGit(t)
 	tmpDir := t.TempDir()
@@ -78,6 +83,15 @@ func setup(t *testing.T, mutators ...func(*config.Config)) *testEnv {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	sm := daemon.NewSessionManager(cfg, paths, log)
+	if initialState != nil {
+		if err := daemon.SaveState(paths.StateFile, initialState); err != nil {
+			t.Fatalf("seed state: %v", err)
+		}
+
+		if err := sm.LoadState(); err != nil {
+			t.Fatalf("load seeded state: %v", err)
+		}
+	}
 
 	// Mirror what daemon.Run does at startup: provision the local human
 	// credential and remember it so the harness authenticates as the human
@@ -158,6 +172,19 @@ func sendControl(t *testing.T, w *protocol.FrameWriter, msgType string, payload 
 	t.Helper()
 
 	data, err := protocol.EncodeControlWithToken(msgType, payload, integHumanToken)
+	if err != nil {
+		t.Fatalf("encode %s: %v", msgType, err)
+	}
+
+	if err := w.WriteFrame(protocol.ChannelControl, data); err != nil {
+		t.Fatalf("write %s: %v", msgType, err)
+	}
+}
+
+func sendControlWithToken(t *testing.T, w *protocol.FrameWriter, msgType string, payload any, token string) {
+	t.Helper()
+
+	data, err := protocol.EncodeControlWithToken(msgType, payload, token)
 	if err != nil {
 		t.Fatalf("encode %s: %v", msgType, err)
 	}
@@ -263,6 +290,98 @@ func TestCreateAndList(t *testing.T) {
 
 	if list.Sessions[0].Name != "braw" {
 		t.Errorf("list name = %q, want %q", list.Sessions[0].Name, "braw")
+	}
+}
+
+func TestScenarioResultPublicationAuthorizationStoreAndStatus(t *testing.T) {
+	const (
+		workerID    = "canny-worker-id"
+		workerToken = "tok-canny-worker"
+		peerID      = "dreich-peer-id"
+		peerToken   = "tok-dreich-peer" //nolint:gosec // Test-only authentication fixture.
+	)
+
+	state := daemon.NewState()
+	state.Sessions[workerID] = &daemon.SessionState{
+		ID: workerID, Name: "canny-worker", Status: daemon.StatusStopped,
+		Token: workerToken, CreatedAt: time.Now().UTC(),
+	}
+	state.Sessions[peerID] = &daemon.SessionState{
+		ID: peerID, Name: "dreich-peer", Status: daemon.StatusStopped,
+		Token: peerToken, CreatedAt: time.Now().UTC(),
+	}
+	state.Scenarios["sc-braw"] = &daemon.ScenarioState{
+		ID: "sc-braw", Name: "braw-fanout", CreatedAt: time.Now().UTC(),
+		SessionIDs: []string{workerID, peerID},
+		Sessions: []daemon.ScenarioSession{
+			{Name: "canny-worker", Results: []daemon.ScenarioResultState{{
+				Name: "review", Format: "markdown", StoreTemplate: "{session_name}/review.md",
+				Destination: "scenarios/sc-braw/results/canny-worker/review.md",
+				Required:    true, Status: daemon.ScenarioResultPending,
+			}}},
+			{Name: "dreich-peer"},
+		},
+	}
+
+	env := setupWithState(t, state)
+	defer env.teardown()
+
+	r, w := env.connect(t)
+	handshake(t, r, w)
+
+	// A peer has a valid session identity but no target-member field exists; the
+	// daemon resolves its own empty declaration set and rejects the forgery.
+	sendControlWithToken(t, w, "scenario_result_publish", protocol.ScenarioResultPublishMsg{
+		Scenario: "braw-fanout", Name: "review", Body: "peer forgery",
+	}, peerToken)
+
+	peerResp := readControl(t, r)
+	if peerResp.Type != "error" {
+		t.Fatalf("peer response = %s, want error", peerResp.Type)
+	}
+
+	sendControlWithToken(t, w, "scenario_result_publish", protocol.ScenarioResultPublishMsg{
+		Scenario: "braw-fanout", Name: "review", Body: "# Canny review",
+	}, workerToken)
+
+	publishResp := readControl(t, r)
+	if publishResp.Type != "scenario_result_published" {
+		t.Fatalf("publish response = %s", publishResp.Type)
+	}
+
+	var published protocol.ScenarioResultPublishResponse
+	if err := protocol.DecodePayload(publishResp, &published); err != nil {
+		t.Fatal(err)
+	}
+
+	if published.Result.Status != "available" || published.Member != "canny-worker" {
+		t.Fatalf("published = %+v", published)
+	}
+
+	body, err := store.Get(store.SharedStorePath(filepath.Join(env.tmpDir, "data")), published.Result.Destination)
+	if err != nil {
+		t.Fatalf("get result: %v", err)
+	}
+
+	if body != "# Canny review" {
+		t.Fatalf("stored body = %q", body)
+	}
+
+	sendControl(t, w, "scenario_status", protocol.ScenarioStatusMsg{Name: "braw-fanout"})
+
+	statusResp := readControl(t, r)
+	if statusResp.Type != "scenario_status" {
+		t.Fatalf("status response = %s", statusResp.Type)
+	}
+
+	var status protocol.ScenarioStatusResponse
+	if err := protocol.DecodePayload(statusResp, &status); err != nil {
+		t.Fatal(err)
+	}
+
+	result := status.Scenario.Sessions[0].Results[0]
+	if result.Status != "available" || result.Destination != published.Result.Destination {
+		t.Fatalf("status result = %+v", result)
 	}
 }
 

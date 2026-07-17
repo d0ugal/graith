@@ -364,13 +364,37 @@ type ScenarioCleanupState struct {
 }
 
 type ScenarioSession struct {
-	Name   string `json:"name"`
-	Role   string `json:"role"`
-	Task   string `json:"task"`
-	Repo   string `json:"repo"`
-	Agent  string `json:"agent"`
-	Model  string `json:"model,omitempty"`
-	Shared bool   `json:"shared,omitempty"`
+	Name    string                `json:"name"`
+	Role    string                `json:"role"`
+	Task    string                `json:"task"`
+	Repo    string                `json:"repo"`
+	Agent   string                `json:"agent"`
+	Model   string                `json:"model,omitempty"`
+	Shared  bool                  `json:"shared,omitempty"`
+	Results []ScenarioResultState `json:"results,omitempty"`
+}
+
+type ScenarioResultStatus string
+
+const (
+	ScenarioResultPending   ScenarioResultStatus = "pending"
+	ScenarioResultAvailable ScenarioResultStatus = "available"
+	ScenarioResultInvalid   ScenarioResultStatus = "invalid"
+	ScenarioResultFailed    ScenarioResultStatus = "failed"
+)
+
+// ScenarioResultState is the durable declaration and publication metadata for
+// one member result. Content stays in the shared document store.
+type ScenarioResultState struct {
+	Name          string               `json:"name"`
+	Format        string               `json:"format"`
+	StoreTemplate string               `json:"store_template"`
+	Destination   string               `json:"destination"`
+	Required      bool                 `json:"required,omitempty"`
+	Status        ScenarioResultStatus `json:"status"`
+	SizeBytes     int                  `json:"size_bytes,omitempty"`
+	PublishedAt   time.Time            `json:"published_at,omitempty"`
+	Error         string               `json:"error,omitempty"`
 }
 
 type State struct {

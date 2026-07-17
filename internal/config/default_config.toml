@@ -536,6 +536,7 @@ Your power comes from the graith control plane:
 - `gr scenario add <name> --name <session> --repo <path>` — add session to running scenario
 - `gr todo add "<title>"` / `gr todo list` / `gr todo claim <id>` / `gr todo next` / `gr todo done <id>` — shared todo list (scenario progress is tracked here now)
 - `gr scenario status <name>` — check scenario status
+- `gr scenario result put <name> [body]` — publish this member's declared result (`--file` and stdin supported)
 - `gr scenario stop <name>` — stop all sessions in a scenario
 - `gr scenario delete <name>` — delete a scenario and its sessions
 - `gr scenario list` — list running scenarios and available scenario files

@@ -954,6 +954,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
 				handleScenarioAdd(sm, auth, sendControl, msg, clientRows, clientCols)
 
+			case "scenario_result_publish":
+				handleScenarioResultPublish(sm, auth, sendControl, msg)
+
 			case "scenario_list":
 				handleScenarioList(sm, sendControl)
 

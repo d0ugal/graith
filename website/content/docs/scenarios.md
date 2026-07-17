@@ -36,6 +36,12 @@ model = "claude-opus-4-8"
 role = "Backend engineer"
 task = "Add tracing ingest endpoint and propagation middleware"
 
+[[sessions.results]]
+name = "implementation-notes"
+format = "markdown"
+store = "{session_name}/implementation.md"
+required = true
+
 [[sessions]]
 name = "frontend"
 repo = "~/Code/my-frontend"
@@ -44,6 +50,12 @@ model = "gemini-3.1-pro"
 role = "Frontend developer"
 task = "Add trace export UI and correlation ID headers"
 agent_hooks = false
+
+[[sessions.results]]
+name = "changed-components"
+format = "json"
+store = "{session_name}/components.json"
+required = true
 
 [[sessions]]
 name = "synthesis"
@@ -100,6 +112,29 @@ turns retention `0` into a purge.
 | `shared` | no | `false` | Reuse an existing running session by name |
 | `includes` | no | — | Extra worktrees to attach, in addition to any inherited from the repo's `[[repos]]` config (`~` expanded; deduplicated against repo-config includes) |
 | `star` | no | `false` | Create the session already starred, protecting it from an accidental manual `gr delete` |
+
+### `[[sessions.results]]` entries
+
+Each member may declare named artifacts that it publishes into the shared
+document store. A declaration is nested under its owning `[[sessions]]` entry:
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `name` | yes | — | Stable member-local name: 1–64 lowercase letters, numbers, or hyphens, starting with a letter |
+| `format` | yes | — | `text`, `markdown`, or `json` |
+| `store` | yes | — | Relative destination template beneath the scenario's result directory |
+| `required` | no | `false` | Whether this result must be available before the member can count as complete |
+
+`store` templates may use `{scenario_id}`, `{scenario_name}`, `{session_id}`,
+`{session_name}`, and `{result_name}`. The daemon resolves them beneath
+`scenarios/<scenario-id>/results/` in the shared store and rejects invalid keys
+or collisions at scenario start. Exact resolved keys appear in every member's
+scenario manifest and in `gr scenario status --json`.
+
+Result bodies must be non-empty. JSON results must contain syntactically valid
+JSON; JSON Schema validation is not performed. Publication travels through the
+bounded control protocol and reserves framing overhead below its 4 MiB ceiling,
+so accepted artifacts remain readable through the store API.
 
 Unknown fields are rejected — typos produce a parse error rather than being silently ignored.
 
@@ -282,11 +317,38 @@ Show the status of each session in a scenario.
 gr scenario status tracing-pipeline
 ```
 
-Output includes session names, IDs, status, agent, role, and each member's
-`done/total` task progress — derived from its assigned
-[todo items]({{< relref "todo.md#in-scenarios" >}}) — followed by the current
-completion epoch, completion-action states, and lifecycle-cleanup deadline or
-failure (see below).
+Output includes session names, IDs, status, agent, role, each member's
+`done/total` task progress, and compact `name=status` result summaries. JSON
+status includes each result's format, required flag, resolved destination,
+size, publication time, error, and one of these states:
+
+- `pending` — no successful publication has occurred
+- `available` — validated content is stored at the declared destination
+- `invalid` — the latest body was empty, oversized, or malformed for its format
+- `failed` — validation passed but the store operation failed
+
+Task progress is derived from assigned
+[todo items]({{< relref "todo.md#in-scenarios" >}}). Status then shows the
+current completion epoch, completion-action states, and lifecycle-cleanup
+deadline or failure (see below).
+
+### `gr scenario result put <name> [body]`
+
+Publish the authenticated member's own declared result. The body may be an
+argument, a file, or standard input:
+
+```bash
+gr scenario result put implementation-notes --file ./implementation.md
+jq '{components: $ARGS.positional}' --args api worker | \
+  gr scenario result put changed-components
+```
+
+The daemon derives the member from `GRAITH_TOKEN`; the request cannot select a
+different member or destination. Use `--scenario <name>` only when a shared
+session belongs to multiple scenarios; ordinary members default to
+`GRAITH_SCENARIO_NAME`. A peer, local/remote human, misnamed result, or wrong
+scenario receives an explicit error. Direct `gr store put` remains available,
+but writing the same key does not mark a declared result successful.
 
 ### `gr scenario list`
 
@@ -296,14 +358,14 @@ List all scenarios with their aggregate status.
 gr scenario list
 ```
 
-Aggregate status is `complete` when every member with tracked todo work has
-finished it and no member is errored. Otherwise it is derived from session
-states: `running` (all running), `stopped` (all stopped), `errored` (any
-errored), or `partial` (mixed).
+Aggregate status is `complete` when every member with tracked todos or required
+results has satisfied both and no member is errored. Otherwise it reflects
+session lifecycle: `running` (all running), `stopped` (all stopped), `errored`
+(any errored), or `partial` (mixed).
 
-At least one member must have tracked todo work before a completion edge can
-occur. Members with no assigned todos do not block members that do have tracked
-work from completing the scenario.
+At least one member must have tracked todo work or a required result before a
+completion edge can occur. Members with neither do not block members that do
+have tracked work from completing the scenario.
 
 ### `gr scenario stop <name>`
 
@@ -355,7 +417,15 @@ Each session receives a JSON manifest in its inbox describing the full scenario 
     "name": "backend",
     "session_id": "def456",
     "role": "Backend engineer",
-    "task": "Add tracing ingest endpoint"
+    "task": "Add tracing ingest endpoint",
+    "results": [
+      {
+        "name": "implementation-notes",
+        "format": "markdown",
+        "destination": "scenarios/sc-abc123/results/backend/implementation.md",
+        "required": true
+      }
+    ]
   },
   "siblings": [
     {
@@ -374,8 +444,8 @@ Each session receives a JSON manifest in its inbox describing the full scenario 
 
 The manifest gives each agent awareness of:
 
-- **`you`** — its own identity, role, and task
-- **`siblings`** — the other sessions in the scenario, with their roles and repos
+- **`you`** — its own identity, role, task, and declared result destinations
+- **`siblings`** — the other sessions in the scenario, with their roles, repos, and result destinations
 - **`orchestrator`** — the parent session that started the scenario
 
 ## Coordination
@@ -399,10 +469,14 @@ Per-member progress is tracked through the [todo list]({{< relref "todo.md" >}})
 not a per-session boolean. At start, each member with a `task` is seeded **one
 assigned todo item** in the scenario's shared scope; a member breaks its task down
 by adding sub-items. A member with `depends_on` starts with that seeded item
-blocked until every named member's seeded item is done. A member is *complete* once every item assigned to it is
-`done`, and the scenario as a whole is complete once every member with tracked work
-is. `gr scenario status` renders per-member `done/total` and **WAITING ON** names
-from that real item state; JSON uses `blocked_by`.
+blocked until every named member's seeded item is done. A member is *complete*
+once every item assigned to it is `done` **and every required declared result is
+`available`**. A member with required results but no todos is complete once
+those results are available. Optional results never block completion. The
+scenario as a whole is complete once every member with tracked todos or
+required results is complete. `gr scenario status` renders per-member
+`done/total`, **WAITING ON** names, and result state from those durable records;
+JSON uses `blocked_by` for dependencies.
 
 The original member-to-seed identity is durable. Reassigning a seeded item
 changes current responsibility and progress accounting, but later
@@ -419,6 +493,57 @@ gr todo list --scenario tracing-pipeline   # see the shared backlog
 
 See [Todo list — in scenarios]({{< relref "todo.md#in-scenarios" >}}) for the full
 model.
+
+## Fan-out / fan-in results
+
+A generic fan-out scenario can give several workers the same result name while
+using member-specific destinations, then let a later synthesizer consume them:
+
+```toml
+[[sessions]]
+name = "research-api"
+repo = "~/Code/graith"
+task = "Research the API surface and publish your findings."
+[[sessions.results]]
+name = "findings"
+format = "markdown"
+store = "{session_name}/findings.md"
+required = true
+
+[[sessions]]
+name = "research-data"
+repo = "~/Code/graith"
+task = "Collect structured compatibility facts and publish them."
+[[sessions.results]]
+name = "facts"
+format = "json"
+store = "{session_name}/facts.json"
+required = true
+
+[[sessions]]
+name = "synthesizer"
+repo = "~/Code/graith"
+task = "Wait for required sibling results, read their manifest destinations, and synthesize the recommendation."
+[[sessions.results]]
+name = "recommendation"
+format = "markdown"
+store = "{session_name}/recommendation.md"
+required = true
+```
+
+Each worker publishes with `gr scenario result put`. The synthesizer (or
+orchestrator) waits until status reports the inputs `available`, then reads the
+exact destinations from its inbox manifest or JSON status:
+
+```bash
+gr scenario status research-swarm --json
+gr store get --shared scenarios/sc-abc123/results/research-api/findings.md
+gr store get --shared scenarios/sc-abc123/results/research-data/facts.json
+```
+
+Those keys include the stable scenario ID and declared member destinations, so
+two runs of the same scenario name cannot overwrite or consume each other's
+results.
 
 ## In the GUI
 
@@ -444,4 +569,6 @@ orchestrator *session*, which the GUI (a human client) is not.
 - **Orchestrator only:** Only the orchestrator session (`system_kind: orchestrator`) can start scenarios
 - **Unique names:** Scenario names must be unique across all scenarios. Session names must not collide with any existing session
 - **Atomic creation:** All sessions are created or none are — partial failures trigger rollback
-- **No live removal:** The orchestrator can add sessions with `gr scenario add`, but cannot remove individual live members. Delete and recreate the scenario to remove members
+- **Add-only topology:** `gr scenario add` can append a session, but sessions and
+  result declarations cannot be edited or removed in place. Delete and recreate
+  the scenario for those changes

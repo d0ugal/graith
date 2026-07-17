@@ -958,7 +958,46 @@ type ScenarioSessionInput struct {
 	// inherited from repo config (issue #1046).
 	Includes []string `json:"includes,omitempty"`
 	// Star creates the session starred (protected from manual `gr delete`).
-	Star bool `json:"star,omitempty"`
+	Star    bool                 `json:"star,omitempty"`
+	Results []ScenarioResultSpec `json:"results,omitempty"`
+}
+
+// ScenarioResultSpec declares one named result a scenario member may publish.
+// Store is a scenario-relative destination template resolved by the daemon.
+type ScenarioResultSpec struct {
+	Name     string `json:"name"`
+	Format   string `json:"format"`
+	Store    string `json:"store"`
+	Required bool   `json:"required,omitempty"`
+}
+
+// ScenarioResultInfo is the durable status of one declared result. The result
+// body lives in the shared document store at Destination; only metadata is
+// carried in scenario state and status responses.
+type ScenarioResultInfo struct {
+	Name        string `json:"name"`
+	Format      string `json:"format"`
+	Destination string `json:"destination"`
+	Required    bool   `json:"required,omitempty"`
+	Status      string `json:"status"`
+	SizeBytes   int    `json:"size_bytes,omitempty"`
+	PublishedAt string `json:"published_at,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
+// ScenarioResultPublishMsg publishes the authenticated caller's own declared
+// result. It deliberately has no member/session or destination field, so a peer
+// cannot select another member's contract or redirect its successful artifact.
+type ScenarioResultPublishMsg struct {
+	Scenario string `json:"scenario,omitempty"`
+	Name     string `json:"name"`
+	Body     string `json:"body"`
+}
+
+type ScenarioResultPublishResponse struct {
+	Scenario string             `json:"scenario"`
+	Member   string             `json:"member"`
+	Result   ScenarioResultInfo `json:"result"`
 }
 
 type ScenarioStopMsg struct {
@@ -1020,18 +1059,19 @@ type ScenarioSessionInfo struct {
 	Task      string `json:"task,omitempty"`
 	// TodoDone / TodoTotal report the member's progress derived from the todo
 	// items assigned to it (issue #591). They replace the former one-bit
-	// `task_done`: a member is complete when TodoTotal > 0 and TodoDone ==
-	// TodoTotal; TodoTotal == 0 means "no tracked work".
-	TodoDone  int `json:"todo_done,omitempty"`
-	TodoTotal int `json:"todo_total,omitempty"`
+	// `task_done`. Required results form the other side of the member completion
+	// contract; TodoTotal == 0 means there is no todo work to gate.
+	TodoDone  int                  `json:"todo_done,omitempty"`
+	TodoTotal int                  `json:"todo_total,omitempty"`
 	// BlockedBy names scenario members whose seeded assigned tasks are not yet
 	// done, when this member's seeded task is dependency-blocked.
-	BlockedBy []string `json:"blocked_by,omitempty"`
-	Repo      string   `json:"repo,omitempty"`
-	Agent     string   `json:"agent,omitempty"`
-	Model     string   `json:"model,omitempty"`
-	Status    string   `json:"status,omitempty"`
-	Shared    bool     `json:"shared,omitempty"`
+	BlockedBy []string             `json:"blocked_by,omitempty"`
+	Repo      string               `json:"repo,omitempty"`
+	Agent     string               `json:"agent,omitempty"`
+	Model     string               `json:"model,omitempty"`
+	Status    string               `json:"status,omitempty"`
+	Shared    bool                 `json:"shared,omitempty"`
+	Results   []ScenarioResultInfo `json:"results,omitempty"`
 }
 
 type ScenarioStatusResponse struct {

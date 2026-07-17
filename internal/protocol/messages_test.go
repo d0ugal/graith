@@ -75,6 +75,60 @@ func TestMsgPubNoReplyRoundTrip(t *testing.T) {
 	}
 }
 
+func TestScenarioResultPublishRoundTrip(t *testing.T) {
+	want := ScenarioResultPublishMsg{
+		Scenario: "braw-fanout", Name: "review", Body: "# Canny review",
+	}
+
+	data, err := EncodeControl("scenario_result_publish", want)
+	if err != nil {
+		t.Fatalf("EncodeControl: %v", err)
+	}
+
+	env, err := DecodeControl(data)
+	if err != nil {
+		t.Fatalf("DecodeControl: %v", err)
+	}
+
+	var got ScenarioResultPublishMsg
+	if err := DecodePayload(env, &got); err != nil {
+		t.Fatalf("DecodePayload: %v", err)
+	}
+
+	if got != want {
+		t.Fatalf("publish = %+v, want %+v", got, want)
+	}
+
+	response := ScenarioResultPublishResponse{
+		Scenario: "braw-fanout",
+		Member:   "canny",
+		Result: ScenarioResultInfo{
+			Name: "review", Format: "markdown", Required: true,
+			Destination: "scenarios/sc-braw/results/canny/review.md",
+			Status:      "available", SizeBytes: 14,
+		},
+	}
+
+	data, err = EncodeControl("scenario_result_published", response)
+	if err != nil {
+		t.Fatalf("EncodeControl response: %v", err)
+	}
+
+	env, err = DecodeControl(data)
+	if err != nil {
+		t.Fatalf("DecodeControl response: %v", err)
+	}
+
+	var responseGot ScenarioResultPublishResponse
+	if err := DecodePayload(env, &responseGot); err != nil {
+		t.Fatalf("DecodePayload response: %v", err)
+	}
+
+	if responseGot.Result.Status != "available" || responseGot.Result.Destination != response.Result.Destination {
+		t.Fatalf("response = %+v", responseGot)
+	}
+}
+
 func TestVersionCompatible(t *testing.T) {
 	tests := []struct {
 		name    string

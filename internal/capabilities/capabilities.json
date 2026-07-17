@@ -211,6 +211,13 @@
       "notes": "Scenario TOML can run durable trigger actions once per todo-derived completion epoch and opt into delayed recoverable cleanup. The CLI reports action and cleanup state; GUI presentation is planned."
     },
     {
+      "id": "scenarios.results",
+      "category": "Scenarios",
+      "name": "Declare and publish scenario results",
+      "cli": "supported", "ios": "planned", "macos": "planned",
+      "notes": "The CLI declares text, Markdown, and JSON result contracts in scenario TOML, authenticates member self-publication, and reports durable result status; GUI publication and result-detail presentation are planned."
+    },
+    {
       "id": "todo.manage",
       "category": "Todo list",
       "name": "Todo list",

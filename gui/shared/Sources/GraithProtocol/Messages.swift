@@ -678,6 +678,48 @@ public struct ScenarioNameMsg: Codable, Sendable {
     public init(name: String) { self.name = name }
 }
 
+/// Durable status for one declared scenario result. The body is stored in the
+/// shared document store at `destination`; scenario status carries metadata.
+public struct ScenarioResultInfo: Codable, Sendable, Identifiable, Hashable {
+    public var name: String
+    public var format: String
+    public var destination: String
+    public var required: Bool
+    public var status: String
+    public var sizeBytes: Int
+    public var publishedAt: String?
+    public var error: String?
+
+    public var id: String { name }
+
+    public init(name: String, format: String, destination: String,
+                required: Bool = false, status: String,
+                sizeBytes: Int = 0, publishedAt: String? = nil, error: String? = nil) {
+        self.name = name; self.format = format; self.destination = destination
+        self.required = required; self.status = status; self.sizeBytes = sizeBytes
+        self.publishedAt = publishedAt; self.error = error
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, format, destination, required, status
+        case sizeBytes = "size_bytes"
+        case publishedAt = "published_at"
+        case error
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        format = try c.decode(String.self, forKey: .format)
+        destination = try c.decode(String.self, forKey: .destination)
+        required = try c.decodeIfPresent(Bool.self, forKey: .required) ?? false
+        status = try c.decode(String.self, forKey: .status)
+        sizeBytes = try c.decodeIfPresent(Int.self, forKey: .sizeBytes) ?? 0
+        publishedAt = try c.decodeIfPresent(String.self, forKey: .publishedAt)
+        error = try c.decodeIfPresent(String.self, forKey: .error)
+    }
+}
+
 /// One member session of a scenario, as reported in a `ScenarioRecord`. Only
 /// `name` and `session_id` are always present; the rest are `omitempty` on the
 /// wire and therefore optional here (the conformance guard requires Swift's
@@ -695,17 +737,20 @@ public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
     public var model: String?
     public var status: String?
     public var shared: Bool?
+    public var results: [ScenarioResultInfo]
 
     public var id: String { sessionID }
 
     public init(name: String, sessionID: String, role: String? = nil, task: String? = nil,
                 todoDone: Int = 0, todoTotal: Int = 0, blockedBy: [String] = [], repo: String? = nil, agent: String? = nil,
-                model: String? = nil, status: String? = nil, shared: Bool? = nil) {
+                model: String? = nil, status: String? = nil, shared: Bool? = nil,
+                results: [ScenarioResultInfo] = []) {
         self.name = name; self.sessionID = sessionID; self.role = role; self.task = task
         self.todoDone = todoDone; self.todoTotal = todoTotal
         self.blockedBy = blockedBy
         self.repo = repo; self.agent = agent; self.model = model
         self.status = status; self.shared = shared
+        self.results = results
     }
 
     enum CodingKeys: String, CodingKey {
@@ -715,7 +760,7 @@ public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
         case todoDone = "todo_done"
         case todoTotal = "todo_total"
         case blockedBy = "blocked_by"
-        case repo, agent, model, status, shared
+        case repo, agent, model, status, shared, results
     }
 
     public init(from decoder: Decoder) throws {
@@ -732,6 +777,7 @@ public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
         model = try c.decodeIfPresent(String.self, forKey: .model)
         status = try c.decodeIfPresent(String.self, forKey: .status)
         shared = try c.decodeIfPresent(Bool.self, forKey: .shared)
+        results = try c.decodeIfPresent([ScenarioResultInfo].self, forKey: .results) ?? []
     }
 
     /// A member is complete when it has tracked todo work and all of it is done.

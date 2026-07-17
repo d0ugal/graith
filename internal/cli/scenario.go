@@ -33,18 +33,26 @@ type scenarioFileMeta struct {
 }
 
 type scenarioFileSession struct {
-	Name       string   `toml:"name"`
-	Repo       string   `toml:"repo"`
-	Agent      string   `toml:"agent"`
-	Model      string   `toml:"model"`
-	Base       string   `toml:"base"`
-	Role       string   `toml:"role"`
-	Task       string   `toml:"task"`
-	DependsOn  []string `toml:"depends_on"`
-	AgentHooks *bool    `toml:"agent_hooks"`
-	Shared     bool     `toml:"shared"`
-	Includes   []string `toml:"includes"`
-	Star       bool     `toml:"star"`
+	Name       string               `toml:"name"`
+	Repo       string               `toml:"repo"`
+	Agent      string               `toml:"agent"`
+	Model      string               `toml:"model"`
+	Base       string               `toml:"base"`
+	Role       string               `toml:"role"`
+	Task       string               `toml:"task"`
+	DependsOn  []string             `toml:"depends_on"`
+	AgentHooks *bool                `toml:"agent_hooks"`
+	Shared     bool                 `toml:"shared"`
+	Includes   []string             `toml:"includes"`
+	Star       bool                 `toml:"star"`
+	Results    []scenarioFileResult `toml:"results"`
+}
+
+type scenarioFileResult struct {
+	Name     string `toml:"name"`
+	Format   string `toml:"format"`
+	Store    string `toml:"store"`
+	Required bool   `toml:"required"`
 }
 
 func scenariosDir() string {
@@ -157,6 +165,13 @@ func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, erro
 			}
 		}
 
+		results := make([]protocol.ScenarioResultSpec, len(s.Results))
+		for j, result := range s.Results {
+			results[j] = protocol.ScenarioResultSpec{
+				Name: result.Name, Format: result.Format, Store: result.Store, Required: result.Required,
+			}
+		}
+
 		sessions[i] = protocol.ScenarioSessionInput{
 			Name:       s.Name,
 			Repo:       repo,
@@ -170,6 +185,7 @@ func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, erro
 			Shared:     s.Shared,
 			Includes:   includes,
 			Star:       s.Star,
+			Results:    results,
 		}
 	}
 
@@ -184,6 +200,16 @@ type availableScenario struct {
 	Name string `json:"name"`
 	Goal string `json:"goal"`
 	File string `json:"file"`
+}
+
+type scenarioResultControlClient interface {
+	SendControl(msgType string, payload any) error
+	ReadControlResponse() (protocol.Envelope, error)
+	Close()
+}
+
+var scenarioResultConnect = func() (scenarioResultControlClient, error) {
+	return client.Connect(cfg, paths, cfgFile)
 }
 
 func listAvailableScenarios() []availableScenario {
@@ -469,7 +495,7 @@ var scenarioStatusCmd = &cobra.Command{
 		out.Printf("Goal: %s\n\n", sc.Goal)
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		_, _ = fmt.Fprintf(tw, "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tPROGRESS\tWAITING ON\tSHARED\n")
+		_, _ = fmt.Fprintf(tw, "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tPROGRESS\tWAITING ON\tRESULTS\tSHARED\n")
 
 		for _, s := range sc.Sessions {
 			// Progress is derived from the member's assigned todo items (issue
@@ -484,8 +510,9 @@ var scenarioStatusCmd = &cobra.Command{
 				shared = "yes"
 			}
 
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				s.Name, s.SessionID, s.Status, s.Agent, s.Role, progress, strings.Join(s.BlockedBy, ","), shared)
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				s.Name, s.SessionID, s.Status, s.Agent, s.Role, progress,
+				strings.Join(s.BlockedBy, ","), formatScenarioResultStatus(s.Results), shared)
 		}
 
 		_ = tw.Flush()
@@ -522,6 +549,101 @@ var scenarioStatusCmd = &cobra.Command{
 				out.Printf("\n")
 			}
 		}
+
+		return nil
+	},
+}
+
+func formatScenarioResultStatus(results []protocol.ScenarioResultInfo) string {
+	if len(results) == 0 {
+		return "—"
+	}
+
+	parts := make([]string, len(results))
+	for i, result := range results {
+		parts[i] = result.Name + "=" + result.Status
+	}
+
+	return strings.Join(parts, ",")
+}
+
+var (
+	scenarioResultFile     string
+	scenarioResultScenario string
+)
+
+var scenarioResultCmd = &cobra.Command{
+	Use:   "result",
+	Short: "Publish declared scenario results",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
+}
+
+var scenarioResultPutCmd = &cobra.Command{
+	Use:   "put <name> [body]",
+	Short: "Publish this member's declared result",
+	Args:  cobra.RangeArgs(1, 2),
+	RunE: func(_ *cobra.Command, args []string) error {
+		body, err := resolveBody(args[1:], scenarioResultFile)
+		if err != nil {
+			return err
+		}
+
+		if len(body) > protocol.MaxScenarioResultBodyBytes {
+			return fmt.Errorf("result is too large: %d bytes (max %d)", len(body), protocol.MaxScenarioResultBodyBytes)
+		}
+
+		scenarioName := scenarioResultScenario
+		if scenarioName == "" {
+			scenarioName = os.Getenv("GRAITH_SCENARIO_NAME")
+		}
+
+		c, err := scenarioResultConnect()
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+
+		if err := c.SendControl("scenario_result_publish", protocol.ScenarioResultPublishMsg{
+			Scenario: scenarioName,
+			Name:     args[0],
+			Body:     body,
+		}); err != nil {
+			return err
+		}
+
+		resp, err := c.ReadControlResponse()
+		if err != nil {
+			return err
+		}
+
+		if resp.Type == "error" {
+			var responseErr protocol.ErrorMsg
+			if err := protocol.DecodePayload(resp, &responseErr); err != nil {
+				return fmt.Errorf("decode scenario result error: %w", err)
+			}
+
+			return errors.New(responseErr.Message)
+		}
+
+		if resp.Type != "scenario_result_published" {
+			return fmt.Errorf("unexpected scenario result response: %s", resp.Type)
+		}
+
+		var published protocol.ScenarioResultPublishResponse
+		if err := protocol.DecodePayload(resp, &published); err != nil {
+			return fmt.Errorf("decode scenario result response: %w", err)
+		}
+
+		if jsonOutput {
+			return out.JSON(published)
+		}
+
+		out.Printf("Published %s result %q for %s in scenario %q (%d bytes)\n",
+			published.Result.Format, published.Result.Name, published.Member,
+			published.Scenario, published.Result.SizeBytes)
+		out.Printf("Store: %s\n", published.Result.Destination)
 
 		return nil
 	},
@@ -689,6 +811,8 @@ func registerScenarioCmd() {
 	scenarioCmd.AddCommand(scenarioStatusCmd)
 	scenarioCmd.AddCommand(scenarioAddCmd)
 	scenarioCmd.AddCommand(scenarioListCmd)
+	scenarioCmd.AddCommand(scenarioResultCmd)
+	scenarioResultCmd.AddCommand(scenarioResultPutCmd)
 
 	scenarioAddCmd.Flags().String("name", "", "Session name (required)")
 	scenarioAddCmd.Flags().String("repo", "", "Repository path (required)")
@@ -698,6 +822,8 @@ func registerScenarioCmd() {
 	scenarioAddCmd.Flags().String("task", "", "Task/prompt")
 	scenarioAddCmd.Flags().StringArray("depends-on", nil, "Member whose seeded task must finish first (repeatable)")
 	scenarioAddCmd.Flags().String("base", "", "Base branch")
+	scenarioResultPutCmd.Flags().StringVar(&scenarioResultFile, "file", "", "Read result body from file")
+	scenarioResultPutCmd.Flags().StringVar(&scenarioResultScenario, "scenario", "", "Scenario name (defaults to GRAITH_SCENARIO_NAME)")
 
 	rootCmd.AddCommand(scenarioCmd)
 }

@@ -204,6 +204,10 @@ var registeredTypes = []any{
 	StatusResponseMsg{},
 	ScenarioStartMsg{},
 	ScenarioSessionInput{},
+	ScenarioResultSpec{},
+	ScenarioResultInfo{},
+	ScenarioResultPublishMsg{},
+	ScenarioResultPublishResponse{},
 	ScenarioStopMsg{},
 	ScenarioDeleteMsg{},
 	ScenarioStatusMsg{},
@@ -421,13 +425,17 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"ScenarioSessionInfo":          {SwiftRequired, "ScenarioSessionInfo"},
 	"ScenarioCompletionActionInfo": {SwiftRequired, "ScenarioCompletionActionInfo"},
 	"ScenarioCleanupInfo":          {SwiftRequired, "ScenarioCleanupInfo"},
+	"ScenarioResultInfo":           {SwiftRequired, "ScenarioResultInfo"},
 	"ScenarioListResponse":         {SwiftRequired, "ScenarioListResponse"},
 
-	"ScenarioStartMsg":       {SwiftPlanned, ""},
-	"ScenarioSessionInput":   {SwiftPlanned, ""},
-	"ScenarioStatusMsg":      {SwiftPlanned, ""},
-	"ScenarioStatusResponse": {SwiftPlanned, ""},
-	"ScenarioAddMsg":         {SwiftPlanned, ""},
+	"ScenarioStartMsg":              {SwiftPlanned, ""},
+	"ScenarioSessionInput":          {SwiftPlanned, ""},
+	"ScenarioResultSpec":            {SwiftPlanned, ""},
+	"ScenarioResultPublishMsg":      {SwiftPlanned, ""},
+	"ScenarioResultPublishResponse": {SwiftPlanned, ""},
+	"ScenarioStatusMsg":             {SwiftPlanned, ""},
+	"ScenarioStatusResponse":        {SwiftPlanned, ""},
+	"ScenarioAddMsg":                {SwiftPlanned, ""},
 
 	// Task-list wire types (issue #591). Planned on the GUI (Phase 6 follow-up); the CLI/MCP
 	// front doors ship first, so these are not yet modelled in Messages.swift.

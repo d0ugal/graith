@@ -215,6 +215,7 @@ private let swiftDecoders: [String: DecodeProbe] = [
     "ScenarioSessionInfo": probe(ScenarioSessionInfo.self),
     "ScenarioCompletionActionInfo": probe(ScenarioCompletionActionInfo.self),
     "ScenarioCleanupInfo": probe(ScenarioCleanupInfo.self),
+    "ScenarioResultInfo": probe(ScenarioResultInfo.self),
     "ScenarioListResponse": probe(ScenarioListResponse.self),
 
     // Document store browser (#902).
