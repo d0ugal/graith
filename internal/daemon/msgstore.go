@@ -60,6 +60,12 @@ type MsgStoreSettings struct {
 func (s MsgStoreSettings) resolved() MsgStoreSettings {
 	if s.BusyTimeout <= 0 {
 		s.BusyTimeout = config.MessagesBusyTimeoutDefault
+	} else if s.BusyTimeout < config.SQLiteBusyTimeoutResolution {
+		// SQLite's busy_timeout pragma has millisecond resolution; a positive
+		// sub-millisecond value would render as busy_timeout(0) and disable lock
+		// waiting. Config rejects such values, but floor here so no direct caller
+		// can produce a zero DSN. See #1322.
+		s.BusyTimeout = config.SQLiteBusyTimeoutResolution
 	}
 
 	if s.SubscriberBuffer < 1 {
@@ -71,6 +77,27 @@ func (s MsgStoreSettings) resolved() MsgStoreSettings {
 	}
 
 	return s
+}
+
+// sqliteBusyTimeoutMillis renders a busy_timeout duration as the whole
+// milliseconds SQLite's pragma accepts. SQLite has millisecond resolution, so
+// any positive duration below 1ms is floored to 1 rather than truncated to 0 —
+// busy_timeout(0) disables lock waiting entirely, which the messages/todo stores
+// must never do for a caller that asked for a positive wait. See #1322.
+func sqliteBusyTimeoutMillis(d time.Duration) int64 {
+	ms := d.Milliseconds()
+	if d > 0 && ms < 1 {
+		return 1
+	}
+
+	return ms
+}
+
+// msgStoreDSN builds the sqlite DSN for the message database. It is a pure
+// helper so the busy_timeout rendering can be tested at its boundaries.
+func msgStoreDSN(dbPath string, busyTimeout time.Duration) string {
+	return fmt.Sprintf("%s?_pragma=journal_mode(wal)&_pragma=busy_timeout(%d)",
+		dbPath, sqliteBusyTimeoutMillis(busyTimeout))
 }
 
 // NewMsgStore opens (creating if needed) the message database at dbPath. An
@@ -89,7 +116,7 @@ func NewMsgStore(dbPath string, settings ...MsgStoreSettings) (*MsgStore, error)
 		return nil, fmt.Errorf("create messages db dir: %w", err)
 	}
 
-	dsn := fmt.Sprintf("%s?_pragma=journal_mode(wal)&_pragma=busy_timeout(%d)", dbPath, st.BusyTimeout.Milliseconds())
+	dsn := msgStoreDSN(dbPath, st.BusyTimeout)
 
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
