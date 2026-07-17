@@ -374,7 +374,7 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 	}
 }
 
-// purgeDiagnostic reports the soft-delete purge sweep schedule for gr doctor:
+// purgeDiagnostic builds the soft-delete purge schedule consumed by gr doctor:
 // the configured cadence plus the last/next sweep times once a sweep has run.
 func (sm *SessionManager) purgeDiagnostic() *protocol.PurgeDiagnostic {
 	sm.mu.RLock()

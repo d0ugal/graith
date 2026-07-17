@@ -347,14 +347,15 @@ func TestPurgeCandidateCannotBeRestored(t *testing.T) {
 	}
 }
 
-// TestPurgeDiagnosticReportsCadenceAndSweep verifies gr doctor surfaces the
-// configured purge cadence and, once a sweep is recorded, the last/next times.
+// TestPurgeDiagnosticReportsCadenceAndSweep verifies the daemon supplies gr
+// doctor with the configured cadence and, once recorded, last/next sweep times.
 func TestPurgeDiagnosticReportsCadenceAndSweep(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.cfg.Delete.PurgeStartupDelay = "45s"
 	sm.cfg.Delete.PurgeInterval = "7m"
 
-	// Before any sweep runs, the cadence is reported but last/next are empty.
+	// Before any sweep runs, last/next stay empty so clients can render the
+	// explicit not-yet-run state while preserving the existing JSON shape.
 	before := sm.purgeDiagnostic()
 	if before == nil {
 		t.Fatal("purgeDiagnostic() = nil, want cadence report")

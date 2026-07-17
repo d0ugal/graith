@@ -71,6 +71,8 @@ List sessions waiting for approval.
 
 Run health checks and diagnostics. Checks daemon status, safehouse availability, orphaned worktrees, oversized scrollback files, and stale PID files.
 
+When the daemon is reachable, plain output includes a **Purge** section with the effective startup delay and sweep interval, plus the last and next sweep times. Before the daemon's first sweep, the section says `Last sweep: not yet run` and `Next sweep: awaiting first sweep`. The same values remain available under `diagnostics.purge` in `--json` output.
+
 By default `gr doctor` avoids walking the data dir to measure on-disk sizes — that walk can take tens of seconds on a large install (worktrees full of `node_modules` and `.git` objects), so it's opt-in. Pass `--disk` to report the size of the data dir, tmp repos, and orphaned worktrees. When it finds leftover artifacts whose size is worth knowing (orphaned worktrees, a legacy directory), the default run recommends re-running with `--disk`. In `--json` output, the `disk_measured` field indicates whether sizes were computed.
 
 | Flag | Description |
