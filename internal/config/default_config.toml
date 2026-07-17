@@ -430,7 +430,7 @@ inbox_detached_delay = "5s"   # settle delay before notifying a session with no 
 # "localmost" (the real localmost binary over its native protocol), "builtin"
 # (graith's built-in localmost-compatible engine), or "auto".
 backend = ""
-timeout = "10m"  # how long to wait for an approval decision before it times out
+timeout = "10m"  # how long to wait for an approval decision before it times out ("" => 10m; must be a positive duration)
 # Per-backend subprocess execution timeouts. These bound a single automated
 # backend invocation and must be positive, at most 60s, and strictly shorter
 # than timeout above (a backend decision runs inside the approval deadline).

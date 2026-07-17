@@ -112,7 +112,7 @@ default.
 ```toml
 [approvals]
 backend  = ""        # who decides (see below); default "" = always prompt the human
-timeout  = "10m"     # how long to wait for a human decision
+timeout  = "10m"     # how long to wait for a human decision (unset => 10m; must be a positive duration)
 auto_pop = false     # auto-open the approval overlay when a request is queued
 command  = ""        # required for backend "command"/"external"; path override for "localmost"
 
@@ -137,6 +137,8 @@ The approval system integrates with agent hooks. When an agent requests approval
 ### Backend execution timeouts
 
 For an interactive session, an automated backend runs first and may then defer to the human queue. The worst-case server bound is therefore **backend execution + human wait**: `command_timeout` or `localmost_timeout`, followed by up to `timeout`. For a headless session the backend is instead enclosed by the caller-side `timeout`. The `command`/`external` and `localmost` backends spawn a subprocess to make their decision; the other backends decide in-process.
+
+The human `timeout` is optional and uses the `10m` default when unset. It composes into the server/client operation budget, so it must be a positive duration — a non-empty value that does not parse, or a zero or negative duration, is rejected at config load and reload (a zero or negative human wait would collapse the approval deadline hierarchy).
 
 Both backend timeouts default to `5s` when unset. Each must be a positive duration, at most `60s`, and **strictly shorter** than the human `timeout` — a backend timeout at or above that main policy is rejected at config load, because mismatched approval deadlines have caused approval-behaviour bugs in the past. `gr doctor` prints the complete effective hierarchy: backend execution + human wait = server bound < hook operation deadline.
 

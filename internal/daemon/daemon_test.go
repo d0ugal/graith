@@ -2310,6 +2310,28 @@ func TestReloadConfigInvalidFile(t *testing.T) {
 	}
 }
 
+func TestReloadConfigRejectsInvalidApprovalTimeout(t *testing.T) {
+	// The human approvals.timeout composes into the client/server operation
+	// budget (ServerTimeoutDuration), so a rejected reload of a non-positive
+	// value must not replace the live, accepted config (#1251).
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[approvals]\ntimeout = \"0s\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm := newTestSessionManager(t)
+	sm.configFile = path
+	before := sm.cfg
+
+	err := sm.ReloadConfig()
+	if err == nil || !strings.Contains(err.Error(), "approvals] timeout") {
+		t.Fatalf("ReloadConfig() = %v, want error naming approvals timeout", err)
+	}
+
+	if sm.cfg != before {
+		t.Error("rejected approvals-timeout reload replaced the live config")
+	}
+}
 func TestToSessionInfoMirror(t *testing.T) {
 	sess := SessionState{
 		ID:           "abc123",
