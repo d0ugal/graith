@@ -39,10 +39,15 @@ public struct HandshakeMsg: Codable, Sendable {
 public struct HandshakeOkMsg: Codable, Sendable {
     public var version: String
     public var daemonVersion: String
+    // Optional: a per-process daemon boot nonce used by the CLI's upgrade
+    // readiness wait (issue #1319). GUI clients don't need it, so it's optional
+    // and simply ignored when absent.
+    public var daemonInstanceID: String?
 
     enum CodingKeys: String, CodingKey {
         case version
         case daemonVersion = "daemon_version"
+        case daemonInstanceID = "daemon_instance_id"
     }
 }
 

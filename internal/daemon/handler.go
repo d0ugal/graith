@@ -205,7 +205,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				clientCols = h.TerminalSize[0]
 				clientRows = h.TerminalSize[1]
 
-				sendControl("handshake_ok", protocol.HandshakeOkMsg{Version: protocol.Version, DaemonVersion: version.Version})
+				sendControl("handshake_ok", protocol.HandshakeOkMsg{Version: protocol.Version, DaemonVersion: version.Version, DaemonInstanceID: sm.InstanceID()})
 				log.Info("client connected", "client_id", h.ClientID, "cwd", h.Cwd)
 
 				// On a remote connection, issue a proof-of-possession challenge.
@@ -248,7 +248,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				challengeNonce = "" // single-use
 
 				sm.RegisterDeviceConn(dev.ID, conn)
-				sendControl("auth_ok", protocol.HandshakeOkMsg{Version: protocol.Version, DaemonVersion: version.Version})
+				sendControl("auth_ok", protocol.HandshakeOkMsg{Version: protocol.Version, DaemonVersion: version.Version, DaemonInstanceID: sm.InstanceID()})
 
 			case "pair_request":
 				// A device requests pairing. Queue it for local human approval;
