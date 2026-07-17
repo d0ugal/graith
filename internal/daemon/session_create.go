@@ -940,6 +940,11 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		"pid", result.PID, "pgid", ptySess.Pgid(), "sandboxed", sandboxed,
 		"scrollback_path", logPath)
 
+	// A reload can land between the config snapshot this launch used and the
+	// insertion above, so reconcile the live input delay to the published
+	// generation now that the driver is in sm.sessions (issue #1294).
+	sm.reconcileLaunchedInputDelay(ptySess)
+
 	sm.startWatcher(id, ptySess)
 
 	// Best-effort native session-id capture for self-minting agents (Codex):

@@ -310,6 +310,38 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) error {
 	return nil
 }
 
+// reconcileLaunchedInputDelay binds a freshly launched or adopted driver to the
+// currently-published [lifecycle] input_delay generation once it is discoverable
+// in sm.sessions (issue #1294). A launch snapshots input_delay before inserting
+// its driver, so a config reload that lands in that window would push the new
+// delay to every live session except this one — leaving the completed launch on
+// the stale value. Adopted PTYs never carried a configured delay at all and fell
+// back to the pty default. Running this after insertion/adoption closes both
+// gaps.
+//
+// It holds configApplyMu — the same lock applyConfig holds across its own
+// input-delay push — so the reconcile and a concurrent reload are serialized and
+// cannot lose an update to each other: whichever runs second observes the other's
+// effect (either this reads the reloaded cfg, or applyConfig's push reaches the
+// now-inserted driver). SetInputDelay contends only the PTY write mutex, so this
+// never blocks under sm.mu. Non-PTY (headless) drivers have no submit pause and
+// don't implement the setter, so they are skipped.
+func (sm *SessionManager) reconcileLaunchedInputDelay(driver SessionDriver) {
+	setter, ok := driver.(interface{ SetInputDelay(d time.Duration) })
+	if !ok {
+		return
+	}
+
+	sm.configApplyMu.Lock()
+	defer sm.configApplyMu.Unlock()
+
+	sm.mu.RLock()
+	delay := sm.cfg.Lifecycle.InputDelayDuration()
+	sm.mu.RUnlock()
+
+	setter.SetInputDelay(delay)
+}
+
 func (sm *SessionManager) teardownIncludes(mainRepoPath, mainWorktreePath, mainBranch string, includes []IncludedRepoState) error {
 	var errs []error
 

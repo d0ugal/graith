@@ -263,6 +263,11 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	result := cloneSessionState(sess)
 	sm.mu.Unlock()
 
+	// A reload can land between the snapshot above and this insertion, so
+	// reconcile the live input delay against the currently-published config
+	// generation now that the driver is discoverable in sm.sessions (issue #1294).
+	sm.reconcileLaunchedInputDelay(ptySess)
+
 	go sm.watchSession(id, ptySess)
 
 	sm.log.Info("orchestrator session created",

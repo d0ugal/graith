@@ -736,6 +736,11 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		"pid", result.PID, "pgid", ptySess.Pgid(), "sandboxed", sandboxed,
 		"scrollback_path", logPath)
 
+	// Reconcile the live input delay to the published config generation in case a
+	// reload landed between this fork's config snapshot and the insertion above
+	// (issue #1294).
+	sm.reconcileLaunchedInputDelay(ptySess)
+
 	sm.startWatcher(id, ptySess)
 
 	// Capture the forked child's native id for self-minting agents (Codex): the

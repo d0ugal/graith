@@ -198,3 +198,64 @@ func TestAdoptOptsHydration(t *testing.T) {
 		}
 	})
 }
+
+// TestAdoptOptsInputDelay proves an adopted session honours AdoptOpts.InputDelay
+// instead of silently reverting to the built-in typeInputDelay default, so a
+// configured [lifecycle] input_delay survives a daemon upgrade (issue #1294).
+func TestAdoptOptsInputDelay(t *testing.T) {
+	adopt := func(t *testing.T, delay time.Duration) *Session {
+		t.Helper()
+
+		logPath := filepath.Join(t.TempDir(), "scrollback.log")
+
+		cmd := exec.Command("sleep", "30")
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		s, err := AdoptSession(AdoptOpts{
+			ID: "bothy", Fd: r.Fd(), PID: cmd.Process.Pid, LogPath: logPath,
+			MaxLogSize: 1024 * 1024, HydrationBytes: 0,
+			PollInterval: 10 * time.Millisecond, InputDelay: delay,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Cleanup(func() {
+			_ = w.Close()
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+
+			select {
+			case <-s.Done():
+			case <-time.After(5 * time.Second):
+				t.Fatal("adopted session did not exit after teardown")
+			}
+
+			s.Close()
+			_ = r.Close()
+		})
+
+		return s
+	}
+
+	t.Run("configured delay is honoured", func(t *testing.T) {
+		s := adopt(t, 175*time.Millisecond)
+		if got := s.InputDelay(); got != 175*time.Millisecond {
+			t.Errorf("adopted InputDelay = %v, want the configured 175ms", got)
+		}
+	})
+
+	t.Run("non-positive falls back to the package default", func(t *testing.T) {
+		s := adopt(t, 0)
+		if got := s.InputDelay(); got != typeInputDelay {
+			t.Errorf("adopted InputDelay = %v, want the %v default", got, typeInputDelay)
+		}
+	})
+}

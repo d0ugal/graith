@@ -38,10 +38,11 @@ type Session struct {
 	lastOutputAt     time.Time
 	lastUserInputAt  time.Time
 	// inputDelay is the pause between typed text and the submit CR in
-	// WriteInputAndSubmit. Resolved at construction (SessionOpts.InputDelay or the
-	// typeInputDelay default) and updateable via SetInputDelay on a config
-	// hot-reload (issue #1294). Read and written only under writeMu, so both the
-	// live update and the WriteInputAndSubmit read stay race-free.
+	// WriteInputAndSubmit. Resolved at construction or adoption (SessionOpts /
+	// AdoptOpts InputDelay, or the typeInputDelay default) and updateable via
+	// SetInputDelay on a config hot-reload (issue #1294). Read and written only
+	// under writeMu, so both the live update and the WriteInputAndSubmit read stay
+	// race-free.
 	inputDelay time.Duration
 	// adoptedPollTimeout / adoptedPollInterval bound the adopted-PTY babysit loop.
 	// Resolved at adoption (AdoptOpts values or the package defaults); immutable
@@ -176,6 +177,12 @@ type AdoptOpts struct {
 	// falls back to the built-in defaults (adoptedPollTimeout / one second).
 	PollTimeout  time.Duration
 	PollInterval time.Duration
+	// InputDelay is the pause WriteInputAndSubmit inserts between the typed text
+	// and the submit carriage return. Non-positive falls back to typeInputDelay,
+	// matching NewSession, so an adopted session honours the configured
+	// [lifecycle] input_delay instead of silently reverting to the package
+	// default across a daemon upgrade (issue #1294).
+	InputDelay time.Duration
 	// Logger routes this session's diagnostics to the daemon's logger. Nil
 	// falls back to slog.Default().
 	Logger *slog.Logger
@@ -230,6 +237,11 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		pollInterval = time.Second
 	}
 
+	inputDelay := opts.InputDelay
+	if inputDelay <= 0 {
+		inputDelay = typeInputDelay
+	}
+
 	s := &Session{
 		ID:                  opts.ID,
 		Ptmx:                ptmx,
@@ -242,6 +254,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		adoptedAt:           time.Now(),
 		createdAt:           time.Now(),
 		log:                 log,
+		inputDelay:          inputDelay,
 		adoptedPollTimeout:  pollTimeout,
 		adoptedPollInterval: pollInterval,
 	}
@@ -524,6 +537,15 @@ func (s *Session) SetInputDelay(d time.Duration) {
 	s.writeMu.Lock()
 	s.inputDelay = d
 	s.writeMu.Unlock()
+}
+
+// InputDelay returns the submit pause WriteInputAndSubmit currently uses. It
+// reads under writeMu so it never races a concurrent SetInputDelay or submit.
+func (s *Session) InputDelay() time.Duration {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	return s.inputDelay
 }
 
 // WriteInputAndSubmit writes text followed by a carriage return, with a brief

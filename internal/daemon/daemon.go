@@ -620,7 +620,10 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 	// would take the read lock and deadlock).
 	lc := sm.cfg.Lifecycle
 
-	var adoptedIDs []string
+	var (
+		adoptedIDs     []string
+		adoptedDrivers []SessionDriver
+	)
 
 	for _, us := range manifest.Sessions {
 		sessState, ok := sm.state.Sessions[us.ID]
@@ -642,6 +645,7 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 			HydrationBytes: lc.ScrollbackHydrationBytesOrDefault(),
 			PollTimeout:    lc.AdoptedTimeoutDuration(),
 			PollInterval:   lc.AdoptedPollIntervalDuration(),
+			InputDelay:     lc.InputDelayDuration(),
 			Logger:         sm.log,
 		})
 		if err != nil {
@@ -661,11 +665,22 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 		sm.sessions[us.ID] = ptySess
 		sm.startWatcher(us.ID, ptySess)
 		adoptedIDs = append(adoptedIDs, us.ID)
+		adoptedDrivers = append(adoptedDrivers, ptySess)
+
 		sm.log.Info("adopted session", "id", us.ID, "pid", us.PID)
 	}
 
 	err := sm.saveState()
 	sm.mu.Unlock()
+
+	// Reconcile each adopted driver to the published input_delay generation now
+	// that it is discoverable in sm.sessions, closing the same reload-race window
+	// the launch paths guard (issue #1294). AdoptSession already seeded the
+	// configured delay above; this pins it to the current generation if a reload
+	// slipped in.
+	for _, d := range adoptedDrivers {
+		sm.reconcileLaunchedInputDelay(d)
+	}
 
 	for _, id := range adoptedIDs {
 		go sm.notifyUnreadInbox(id)

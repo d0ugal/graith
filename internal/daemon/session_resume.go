@@ -987,6 +987,11 @@ func (sm *SessionManager) resumeWithSummaryAndPromptFromConfig(cfgSnapshot *conf
 		"pid", result.PID, "pgid", ptySess.Pgid(), "sandboxed", sandboxed,
 		"scrollback_path", logPath)
 
+	// Reconcile the live input delay to the published config generation in case a
+	// reload landed between this resume's config snapshot and the insertion above
+	// (issue #1294).
+	sm.reconcileLaunchedInputDelay(ptySess)
+
 	sm.startWatcher(id, ptySess)
 	go sm.notifyUnreadInbox(id)
 

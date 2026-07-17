@@ -117,7 +117,7 @@ max_log_bytes              = 104857600 # per-session scrollback log cap in bytes
 
 **Geometry & log cap.** `default_cols`/`default_rows` are the terminal geometry used by daemon launch paths that have no attaching client (the watchdog restart, the orchestrator, scenarios, triggers, and adoption); an attaching client immediately resizes to its real geometry. `max_log_bytes` caps the per-session scrollback log file (`"0"` means unlimited).
 
-An empty/unset duration uses the default shown. Any duration that is explicitly unparseable, zero, or negative is rejected at config load. **Geometry, hydration, and the log cap apply only to sessions launched (or adopted) after the change** — a running session keeps the geometry and caps it started with. The escalation waits and `input_delay` are read at each use, so a config reload takes effect on the next operation.
+An empty/unset duration uses the default shown. Any duration that is explicitly unparseable, zero, or negative is rejected at config load. **Geometry, hydration, and the log cap apply only to sessions launched (or adopted) after the change** — a running session keeps the geometry and caps it started with. The escalation waits and `input_delay` are read at each use, so a config reload takes effect on the next operation — including on sessions re-attached across a daemon upgrade, which inherit the configured `input_delay` rather than the built-in default.
 
 ## Detection & status classification
 
