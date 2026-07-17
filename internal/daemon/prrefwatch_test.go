@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -394,6 +395,69 @@ func TestNotePRRefChange_DebounceCoalesces(t *testing.T) {
 	case extra := <-sm.prWatch.kick:
 		t.Errorf("expected exactly one kick, got a second for %q", extra)
 	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// TestPRRefWatch_ReloadDebounceAppliesToExistingWatcher is the regression for
+// issue #1308: reloading ref_debounce must affect a watcher that already exists,
+// without replacing it or dropping a ref change whose timer is already armed.
+func TestPRRefWatch_ReloadDebounceAppliesToExistingWatcher(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("[pr_watch.advanced]\nref_debounce = \"500ms\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadOrDefault(cfgPath)
+	if err != nil {
+		t.Fatalf("load initial config: %v", err)
+	}
+
+	sm := newSMWithConfig(t, cfg)
+	sm.configFile = cfgPath
+
+	repo := t.TempDir() + "/croft"
+	initGitRepoOnBranch(t, repo)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sm.createPRRefWatcher(ctx, "braw1", repo)
+	defer sm.teardownPRRefWatcher("braw1")
+
+	sm.prRefWatch.mu.Lock()
+	existing := sm.prRefWatch.watchers["braw1"]
+	sm.prRefWatch.mu.Unlock()
+	if existing == nil {
+		t.Fatal("expected an existing ref watcher")
+	}
+
+	// Arm a ref change before reload. Reload must leave this pending event intact.
+	sm.notePRRefChange(existing)
+
+	if err := os.WriteFile(cfgPath, []byte("[pr_watch.advanced]\nref_debounce = \"10ms\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := sm.ReloadConfig(); err != nil {
+		t.Fatalf("ReloadConfig() error = %v", err)
+	}
+
+	sm.prRefWatch.mu.Lock()
+	afterReload := sm.prRefWatch.watchers["braw1"]
+	sm.prRefWatch.mu.Unlock()
+	if afterReload != existing {
+		t.Fatal("reload should retain the existing ref watcher")
+	}
+
+	if id, ok := waitForKick(t, sm, 2*time.Second); !ok || id != "braw1" {
+		t.Fatalf("pending ref change was dropped during reload: id=%q ok=%v", id, ok)
+	}
+
+	// A ref change armed after reload must use the new 10ms duration, not the
+	// 500ms duration captured when the watcher was created.
+	sm.notePRRefChange(existing)
+	if id, ok := waitForKick(t, sm, 200*time.Millisecond); !ok || id != "braw1" {
+		t.Fatalf("reloaded debounce did not affect existing watcher: id=%q ok=%v", id, ok)
 	}
 }
 

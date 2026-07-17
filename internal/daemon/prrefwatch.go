@@ -25,7 +25,7 @@ import (
 // The reconcile cadence and per-watch debounce are now [pr_watch.advanced] config
 // knobs (ref_reconcile_interval / ref_debounce), resolved through the
 // config.PRWatchConfig accessors. The reconcile cadence is read once when the loop
-// starts; the debounce is snapshotted onto each watcher when it is created.
+// starts; the debounce is read whenever a watcher arms its timer.
 
 type prRefWatchState struct {
 	mu       sync.Mutex
@@ -44,10 +44,6 @@ type prRefWatcher struct {
 	worktree  string
 	watcher   *fsnotify.Watcher
 	cancel    context.CancelFunc
-	// debounceDur snapshots pr_watch.advanced.ref_debounce at creation; a
-	// non-positive value (e.g. a bare test-constructed watcher) falls back to the
-	// config default in notePRRefChange.
-	debounceDur time.Duration
 
 	bmu      sync.Mutex
 	debounce *time.Timer
@@ -177,11 +173,10 @@ func (sm *SessionManager) createPRRefWatcher(ctx context.Context, id, worktree s
 
 	wctx, cancel := context.WithCancel(ctx)
 	w := &prRefWatcher{
-		sessionID:   id,
-		worktree:    worktree,
-		watcher:     watcher,
-		cancel:      cancel,
-		debounceDur: sm.Config().PRWatch.RefDebounceDuration(),
+		sessionID: id,
+		worktree:  worktree,
+		watcher:   watcher,
+		cancel:    cancel,
 	}
 
 	sm.prRefWatch.mu.Lock()
@@ -318,6 +313,15 @@ func (sm *SessionManager) handlePRRefEvent(w *prRefWatcher, ev fsnotify.Event) {
 
 // notePRRefChange (re)arms the debounce timer that fires a single kick.
 func (sm *SessionManager) notePRRefChange(w *prRefWatcher) {
+	// Snapshot the effective config before taking the per-watcher timer lock. A
+	// reload completed before this ref change therefore applies immediately to an
+	// existing watcher, while a timer already armed under the previous generation
+	// is left intact so its pending event cannot be dropped.
+	dur := (config.PRWatchConfig{}).RefDebounceDuration()
+	if cfg := sm.Config(); cfg != nil {
+		dur = cfg.PRWatch.RefDebounceDuration()
+	}
+
 	w.bmu.Lock()
 	defer w.bmu.Unlock()
 
@@ -327,11 +331,6 @@ func (sm *SessionManager) notePRRefChange(w *prRefWatcher) {
 
 	if w.debounce != nil {
 		w.debounce.Stop()
-	}
-
-	dur := w.debounceDur
-	if dur <= 0 {
-		dur = (config.PRWatchConfig{}).RefDebounceDuration()
 	}
 
 	w.debounce = time.AfterFunc(dur, func() {
