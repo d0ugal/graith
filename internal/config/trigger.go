@@ -264,9 +264,10 @@ type TriggersAdvancedConfig struct {
 	WatchRetryMaxBackoff string `toml:"watch_retry_max_backoff"`
 	// WatchBuiltinIgnores is the daemon-wide set of directories/patterns never
 	// watched by any file-watch trigger (on top of git ignore rules and per-trigger
-	// watch.ignore). Unset uses DefaultWatchBuiltinIgnores. ".git"/".git/" are
-	// always ignored regardless of this list (a watched .git churns constantly and
-	// creates a feedback loop).
+	// watch.ignore). Omitting the key uses DefaultWatchBuiltinIgnores; an explicit
+	// empty list ([]) keeps only the mandatory ignores. ".git"/".git/" are always
+	// ignored regardless of this list (a watched .git churns constantly and creates
+	// a feedback loop).
 	WatchBuiltinIgnores []string `toml:"watch_builtin_ignores"`
 	// CommandOutputCap truncates a command action's captured output to this many
 	// bytes before delivery, bounding notification size. Default 4096.
@@ -518,16 +519,19 @@ func (r TriggersRuntime) WatchRetryMaxBackoffDuration() time.Duration {
 	return parseDurationOr(r.Advanced.WatchRetryMaxBackoff, defaultWatchRetryMax)
 }
 
-// WatchBuiltinIgnores returns the daemon-wide watch ignore list, defaulting to
-// DefaultWatchBuiltinIgnores when unset. The daemon additionally always ignores
+// WatchBuiltinIgnores returns the daemon-wide watch ignore list. An omitted key
+// (nil) resolves to DefaultWatchBuiltinIgnores; an explicit empty list ([]) is
+// honored as "only the mandatory ignores", so a nil slice and a present-empty
+// slice are NOT conflated (issue #1309). The daemon additionally always ignores
 // ".git"/".git/" regardless of this list. A fresh copy is returned so callers
-// cannot mutate the shared default slice.
+// cannot mutate the shared default slice, and a present-empty list is returned
+// as a non-nil slice so consumers can distinguish it from an omitted policy.
 func (r TriggersRuntime) WatchBuiltinIgnores() []string {
-	if len(r.Advanced.WatchBuiltinIgnores) == 0 {
+	if r.Advanced.WatchBuiltinIgnores == nil {
 		return append([]string(nil), DefaultWatchBuiltinIgnores...)
 	}
 
-	return append([]string(nil), r.Advanced.WatchBuiltinIgnores...)
+	return append([]string{}, r.Advanced.WatchBuiltinIgnores...)
 }
 
 // CommandOutputCap is the command-action output truncation cap in bytes.

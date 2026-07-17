@@ -590,6 +590,38 @@ func TestWatchBuiltinIgnoresCopy(t *testing.T) {
 	}
 }
 
+// TestWatchBuiltinIgnoresExplicitEmpty is the #1309 regression for the
+// nil-versus-present-empty conflation: an explicit `watch_builtin_ignores = []`
+// must resolve to "only the mandatory ignores" (an empty list), while an omitted
+// key still resolves to the full default list. Before the fix the accessor tested
+// len == 0, so `[]` was indistinguishable from unset and restored the defaults.
+func TestWatchBuiltinIgnoresExplicitEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[triggers.advanced]\nwatch_builtin_ignores = []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// An explicit [] must decode to a present (non-nil) empty slice so the accessor
+	// can tell it apart from an omitted key.
+	if cfg.TriggersRuntime.Advanced.WatchBuiltinIgnores == nil {
+		t.Fatal("explicit empty watch_builtin_ignores decoded as unset (nil)")
+	}
+
+	if got := cfg.TriggersRuntime.WatchBuiltinIgnores(); len(got) != 0 {
+		t.Fatalf("explicit empty watch_builtin_ignores resolved to %v, want empty", got)
+	}
+
+	// An omitted key still yields the defaults (a zero runtime has a nil field).
+	if got := (TriggersRuntime{}).WatchBuiltinIgnores(); !slices.Equal(got, DefaultWatchBuiltinIgnores) {
+		t.Fatalf("unset watch_builtin_ignores = %v, want defaults %v", got, DefaultWatchBuiltinIgnores)
+	}
+}
+
 // TestTriggersAdvancedEmbeddedDefaults is the drift guard (epic #1230 pattern):
 // the advanced tuning defaults must live in the embedded default_config.toml, not
 // only as Go fallback literals. It asserts the RAW fields parsed from the embedded

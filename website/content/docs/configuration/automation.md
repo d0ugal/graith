@@ -169,13 +169,20 @@ watch_builtin_ignores    = [".git/", ".git", ".hg/", ".svn/", "*.swp", "*.swx", 
 `watch_builtin_ignores` is the daemon-wide set of directories/patterns never
 watched by any file-watch trigger (on top of git ignore rules and per-trigger
 `watch.ignore`). `.git` is always ignored regardless of this list, because a
-watched `.git` churns constantly and creates a feedback loop.
+watched `.git` churns constantly and creates a feedback loop. Omitting the key
+uses the defaults shown above; set `watch_builtin_ignores = []` to keep only that
+mandatory `.git` protection and drop every optional built-in ignore.
+
+Reloading `watch_builtin_ignores` (adding, removing, or clearing to `[]`) is
+applied to already-running file-watch bindings on the next reconcile: each
+affected binding is rebuilt with the new matcher and its watched directory set
+reconciled, so the change does not wait for a source-session restart.
 
 The loop-lifetime knobs — `scheduler_tick` and `watch_reconcile_interval` — are
 read when the daemon starts, so changing them takes effect on the next daemon
-restart; the rest apply on the next fire. Both pace daemon loop timers, so a
-`"0"`, `"0s"`, negative, or unparseable value falls back to the default shown
-rather than being applied.
+restart; the other settings apply on the next reconcile or fire. Both cadence
+knobs pace daemon loop timers, so a `"0"`, `"0s"`, negative, or unparseable value
+falls back to the default shown rather than being applied.
 
 ### Headless session actions (planned)
 

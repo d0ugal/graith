@@ -546,6 +546,27 @@ func triggerFingerprint(t *config.TriggerConfig) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// watchBuiltinFingerprint hashes the resolved daemon-wide watch-ignore policy
+// (triggers.advanced.watch_builtin_ignores). It is kept alongside a watch
+// binding's per-trigger definition fingerprint so a reload of the daemon-wide
+// list reconciles live bindings (recreating them with the new matcher), even
+// though the list is not part of the per-trigger definition. Keeping it separate
+// from triggerFingerprint leaves schedule triggers untouched by a watch-only
+// policy change. A nil and a present-empty list hash differently, preserving the
+// "only mandatory ignores" semantics of an explicit [] (issue #1309).
+func watchBuiltinFingerprint(ignores []string) string {
+	b, err := json.Marshal(ignores)
+	if err != nil {
+		// json.Marshal of a []string is unreachable-fallible; hash a sentinel
+		// rather than collapse every policy to the same empty fingerprint.
+		b = []byte("watch-builtin-ignores")
+	}
+
+	sum := sha256.Sum256(b)
+
+	return hex.EncodeToString(sum[:8])
+}
+
 // rateLimited reports whether the key has exceeded its rolling rate limit, and
 // records the fire if not. Caller must NOT hold ts.mu.
 func (sm *SessionManager) rateLimited(key string, n int, window time.Duration, now time.Time) bool {
