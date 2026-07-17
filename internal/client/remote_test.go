@@ -657,6 +657,7 @@ func stalledTLSListener(t *testing.T) (host string, port int) {
 			}
 
 			mu.Lock()
+
 			conns = append(conns, c)
 			mu.Unlock()
 		}
@@ -664,6 +665,7 @@ func stalledTLSListener(t *testing.T) (host string, port int) {
 
 	t.Cleanup(func() {
 		_ = ln.Close()
+
 		close(done)
 
 		mu.Lock()

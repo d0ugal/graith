@@ -121,9 +121,9 @@ var daemonReloadCmd = &cobra.Command{
 // *client.Client) so the deadline installation and readiness handoff can be
 // tested against a scripted connection without a live daemon.
 type upgradeExchangeConn interface {
-	SetDeadline(time.Time) error
+	SetDeadline(deadline time.Time) error
 	Handshake() error
-	SendControl(string, any) error
+	SendControl(messageType string, payload any) error
 	ReadControlResponse() (protocol.Envelope, error)
 	Close()
 }
