@@ -161,7 +161,7 @@ startup_delay = "5s"   # first-tick delay after a daemon (re)start so `gr tokens
 batch_size    = 8      # max sessions (re)parsed per tick (bounds work on a large fleet with big transcripts)
 ```
 
-`batch_size` bounds how many sessions with *changed* transcripts are re-parsed in a single tick, so a large fleet with big transcripts can't stall the loop; unchanged transcripts are skipped by the fingerprint cache and don't count against it. `batch_size` is read live each tick, so a reload takes effect immediately; `poll_interval` and `startup_delay` are read once when the loop starts, so changing them requires a `gr daemon restart`. An empty or non-positive `poll_interval` falls back to the default (a zero cadence would busy-loop); `startup_delay` honours an explicit `"0"` to poll immediately; `batch_size < 1` uses the default.
+`batch_size` bounds how many sessions with *changed* transcripts are re-parsed in a single tick, so a large fleet with big transcripts can't stall the loop; unchanged transcripts are skipped by the fingerprint cache and don't count against it. `batch_size` and `poll_interval` are re-read live each tick, so a reload retimes the loop on its next cycle without a daemon restart; `startup_delay` only affects the first tick after start, so a change to it takes effect on the next `gr daemon restart`. An empty or non-positive `poll_interval` falls back to the default (a zero cadence would busy-loop); `startup_delay` honours an explicit `"0"` to poll immediately; `batch_size < 1` uses the default.
 
 ## Resource monitor
 
@@ -173,7 +173,7 @@ sample_interval = "30s"  # how often each session's process group is snapshotted
 sample_history  = 5      # how many recent samples are retained per session
 ```
 
-`sample_interval` is also the per-session spacing that keeps a launch-burst kick from replacing an established session's history. `sample_history` is the number of recent samples kept per session (the window shown in an abnormal-exit report). Both are read live on each sampling pass; `sample_interval` also sets the loop ticker at startup, so changing it requires a `gr daemon restart` to alter the loop cadence. An empty or non-positive `sample_interval` falls back to the default; `sample_history < 1` uses the default.
+`sample_interval` is also the per-session spacing that keeps a launch-burst kick from replacing an established session's history. `sample_history` is the number of recent samples kept per session (the window shown in an abnormal-exit report). Both are read live on each sampling pass, and `sample_interval` is re-read after each scheduled sample, so a reload retimes the loop on its next cycle without a daemon restart. An empty or non-positive `sample_interval` falls back to the default; `sample_history < 1` uses the default.
 
 ## Output & display limits
 

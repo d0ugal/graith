@@ -365,3 +365,157 @@ func assertLoopStopped(t *testing.T, done <-chan struct{}, stopped ...<-chan str
 		}
 	}
 }
+
+// mutableInterval is a goroutine-safe duration source standing in for a config
+// generation that a reload swaps out mid-loop.
+type mutableInterval struct {
+	mu sync.Mutex
+	d  time.Duration
+}
+
+func (m *mutableInterval) get() time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.d
+}
+
+func (m *mutableInterval) set(d time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.d = d
+}
+
+// TestRunTokenLoopRetimesCadenceOnReload is the #1244 regression for the token
+// loop: the poll cadence must be re-read from config after every tick so an
+// accepted reload that tightens (or relaxes) poll_interval retimes the loop
+// without a daemon restart, rather than latching the cadence at loop start.
+func TestRunTokenLoopRetimesCadenceOnReload(t *testing.T) {
+	timer := newManualLoopTimer()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	ticked := make(chan struct{}, 1)
+	createdWith := make(chan time.Duration, 1)
+	poll := &mutableInterval{d: 30 * time.Second}
+	done := make(chan struct{})
+
+	go func() {
+		runTokenLoop(ctx,
+			func(d time.Duration) loopTimer {
+				createdWith <- d
+
+				return timer
+			},
+			func() time.Duration { return 2 * time.Second },
+			poll.get,
+			func() { ticked <- struct{}{} },
+		)
+		close(done)
+	}()
+
+	if got := <-createdWith; got != 2*time.Second {
+		t.Fatalf("startup delay = %v, want 2s", got)
+	}
+
+	// First tick resets with the original cadence.
+	timer.c <- time.Unix(1, 0)
+	<-ticked
+
+	if got := <-timer.resets; got != 30*time.Second {
+		t.Fatalf("first reset = %v, want 30s", got)
+	}
+
+	// A reload tightens the cadence between ticks.
+	poll.set(5 * time.Second)
+
+	// The next tick must observe the new generation.
+	timer.c <- time.Unix(2, 0)
+	<-ticked
+
+	if got := <-timer.resets; got != 5*time.Second {
+		t.Fatalf("second reset = %v, want 5s (reload cadence not observed)", got)
+	}
+
+	// A reload can also relax the cadence.
+	poll.set(90 * time.Second)
+
+	timer.c <- time.Unix(3, 0)
+	<-ticked
+
+	if got := <-timer.resets; got != 90*time.Second {
+		t.Fatalf("third reset = %v, want 90s", got)
+	}
+
+	cancel()
+	assertLoopStopped(t, done, timer.stopped)
+}
+
+// TestRunResourceMonitorLoopRetimesCadenceOnReload is the #1244 regression for
+// the resource-monitor loop: it samples immediately, then re-reads the sample
+// cadence after each scheduled sample so a reload retimes it. A kick forces an
+// immediate one-off sample without disturbing the scheduled cadence.
+func TestRunResourceMonitorLoopRetimesCadenceOnReload(t *testing.T) {
+	timer := newManualLoopTimer()
+	kick := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	sampled := make(chan struct{}, 1)
+	createdWith := make(chan time.Duration, 1)
+	interval := &mutableInterval{d: 30 * time.Second}
+	done := make(chan struct{})
+
+	go func() {
+		runResourceMonitorLoop(ctx,
+			func(d time.Duration) loopTimer {
+				createdWith <- d
+
+				return timer
+			},
+			interval.get,
+			func() { sampled <- struct{}{} },
+			kick,
+		)
+		close(done)
+	}()
+
+	// Immediate startup sample, then the timer is created with the current cadence.
+	<-sampled
+
+	if got := <-createdWith; got != 30*time.Second {
+		t.Fatalf("initial timer cadence = %v, want 30s", got)
+	}
+
+	// A kick samples immediately but must NOT reset the scheduled timer.
+	kick <- struct{}{}
+	<-sampled
+
+	select {
+	case got := <-timer.resets:
+		t.Fatalf("kick unexpectedly reset the cadence timer to %v", got)
+	default:
+	}
+
+	// A scheduled tick samples and resets with the current cadence.
+	timer.c <- time.Unix(1, 0)
+	<-sampled
+
+	if got := <-timer.resets; got != 30*time.Second {
+		t.Fatalf("first scheduled reset = %v, want 30s", got)
+	}
+
+	// A reload tightens the cadence; the next scheduled sample observes it.
+	interval.set(5 * time.Second)
+
+	timer.c <- time.Unix(2, 0)
+	<-sampled
+
+	if got := <-timer.resets; got != 5*time.Second {
+		t.Fatalf("second scheduled reset = %v, want 5s (reload cadence not observed)", got)
+	}
+
+	cancel()
+	assertLoopStopped(t, done, timer.stopped)
+}

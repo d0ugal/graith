@@ -52,23 +52,37 @@ type processResource struct {
 // RunResourceMonitorLoop periodically snapshots every live session. Sampling
 // failures are debug-only and never affect session operation.
 func (sm *SessionManager) RunResourceMonitorLoop(ctx context.Context) {
-	sm.sampleSessionResources()
+	runResourceMonitorLoop(ctx, sm.loopTimer, sm.resourceSampleInterval, sm.sampleSessionResources, sm.resourceKick)
+}
 
-	sm.mu.RLock()
-	interval := sm.cfg.ResourceMonitor.SampleIntervalDuration()
-	sm.mu.RUnlock()
+// resourceSampleInterval reads the live config generation so an accepted reload
+// retimes sampling without a daemon restart (#1244). Config() takes
+// sm.mu.RLock, so it must never be called while holding sm.mu.
+func (sm *SessionManager) resourceSampleInterval() time.Duration {
+	return sm.Config().ResourceMonitor.SampleIntervalDuration()
+}
 
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+// runResourceMonitorLoop is the resource-monitor loop extracted for
+// deterministic clock injection. It uses a resettable timer (rather than a
+// fixed ticker) so the sample cadence is re-read from interval() after every
+// scheduled sample and a config reload takes effect on the next cycle. The kick
+// channel still forces an immediate one-off sample of a newly launched session
+// without disturbing the scheduled cadence.
+func runResourceMonitorLoop(ctx context.Context, newTimer func(time.Duration) loopTimer, interval func() time.Duration, sample func(), kick <-chan struct{}) {
+	sample()
+
+	timer := newTimer(interval())
+	defer timer.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-sm.resourceKick:
-			sm.sampleSessionResources()
-		case <-ticker.C:
-			sm.sampleSessionResources()
+		case <-kick:
+			sample()
+		case <-timer.C():
+			sample()
+			timer.Reset(interval())
 		}
 	}
 }

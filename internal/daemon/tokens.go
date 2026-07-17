@@ -83,25 +83,38 @@ type tokenTarget struct {
 // supported session's on-disk transcript, writing runtime-only TokenStats onto
 // SessionState (never persisted, repopulated within a tick after restart).
 func (sm *SessionManager) RunTokenLoop(ctx context.Context) {
-	sm.mu.RLock()
-	tc := sm.cfg.TokenAccounting
-	sm.mu.RUnlock()
+	runTokenLoop(ctx, sm.loopTimer, sm.tokenStartupDelay, sm.tokenPollInterval, func() { sm.runTokenTick(ctx) })
+}
 
-	pollInterval := tc.PollIntervalDuration()
+// tokenStartupDelay / tokenPollInterval read the live config generation so an
+// accepted reload retimes the loop without a daemon restart (#1244). Config()
+// takes sm.mu.RLock, so these must never be called while holding sm.mu.
+func (sm *SessionManager) tokenStartupDelay() time.Duration {
+	return sm.Config().TokenAccounting.StartupDelayDuration()
+}
 
-	timer := time.NewTimer(tc.StartupDelayDuration())
+func (sm *SessionManager) tokenPollInterval() time.Duration {
+	return sm.Config().TokenAccounting.PollIntervalDuration()
+}
+
+// runTokenLoop is the token loop extracted for deterministic clock injection.
+// The poll cadence is re-read from interval() after every tick and applied via
+// timer.Reset, so a config reload that tightens or relaxes poll_interval takes
+// effect on the next cycle rather than latching at loop start.
+func runTokenLoop(ctx context.Context, newTimer func(time.Duration) loopTimer, startupDelay, interval func() time.Duration, tick func()) {
+	timer := newTimer(startupDelay())
 	defer timer.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-timer.C:
+		case <-timer.C():
 		}
 
-		sm.runTokenTick(ctx)
+		tick()
 
-		timer.Reset(pollInterval)
+		timer.Reset(interval())
 	}
 }
 
