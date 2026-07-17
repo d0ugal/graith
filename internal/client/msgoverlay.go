@@ -62,15 +62,21 @@ type messageOverlayModel struct {
 	width    int
 	height   int
 	keys     MessageKeys
+	// refresh is the daemon re-poll cadence, snapshotted from the shared
+	// configurable refreshInterval (issue #1315) when the overlay opens so the
+	// message viewer tracks terminal.refresh_interval like the picker,
+	// dashboard, and status bar rather than a private hard-coded cadence.
+	refresh time.Duration
 }
 
 func newMessageOverlayModel(selfID string, fetch func() ([]protocol.ConversationMessage, bool), names map[string]string) messageOverlayModel {
 	return messageOverlayModel{
-		selfID: selfID,
-		fetch:  fetch,
-		names:  names,
-		pinned: map[string]bool{},
-		keys:   DefaultMessageKeys(),
+		selfID:  selfID,
+		fetch:   fetch,
+		names:   names,
+		pinned:  map[string]bool{},
+		keys:    DefaultMessageKeys(),
+		refresh: refreshInterval,
 	}
 }
 
@@ -78,8 +84,21 @@ func (m messageOverlayModel) Init() tea.Cmd {
 	return tea.Batch(m.fetchCmd(), m.tickCmd())
 }
 
+// tickFn constructs the recurring refresh timer. It is a package var (defaulting
+// to tea.Tick) purely so tests can capture the interval tickCmd schedules
+// without a real sleep; production always uses tea.Tick.
+var tickFn = tea.Tick
+
 func (m messageOverlayModel) tickCmd() tea.Cmd {
-	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+	// Use the configured shared cadence; fall back to the package default if a
+	// model was built without the constructor (e.g. a bare struct literal in a
+	// test) so a zero can't turn tea.Tick into a busy loop.
+	interval := m.refresh
+	if interval <= 0 {
+		interval = refreshInterval
+	}
+
+	return tickFn(interval, func(time.Time) tea.Msg {
 		return msgTickMsg{}
 	})
 }
@@ -754,8 +773,10 @@ func sanitizeMessageBody(s string) string {
 
 // RunMessageOverlay displays the chatroom-style message viewer for sessionID,
 // showing direct messages to and from that session grouped by peer. It is
-// read-only in v1 and refreshes every 2 seconds. fetch returns the conversation
-// and ok=false on a transient error (so the last good snapshot is kept).
+// read-only in v1 and re-polls the daemon at the configured shared refresh
+// interval (terminal.refresh_interval), matching the picker, dashboard, and
+// status bar. fetch returns the conversation and ok=false on a transient error
+// (so the last good snapshot is kept).
 // Returns when the user closes the overlay; the caller then reattaches.
 func RunMessageOverlay(sessionID string, keys MessageKeys, fetch func() ([]protocol.ConversationMessage, bool), names map[string]string) {
 	m := newMessageOverlayModel(sessionID, fetch, names)
