@@ -123,6 +123,38 @@ func pathListContains(paths []string, want string) bool {
 	return false
 }
 
+func TestPRRefWatchPathClassification(t *testing.T) {
+	commonDir := filepath.Join(string(filepath.Separator), "croft", ".git")
+
+	tests := []struct {
+		name        string
+		parent      string
+		path        string
+		wantChild   bool
+		wantRefTree bool
+	}{
+		{name: "same", parent: commonDir, path: commonDir, wantChild: true},
+		{name: "child", parent: commonDir, path: filepath.Join(commonDir, "refs", "heads"), wantChild: true, wantRefTree: true},
+		{name: "sibling prefix", parent: filepath.Join(commonDir, "refs"), path: filepath.Join(commonDir, "refs-old"), wantChild: false},
+		{name: "parent", parent: filepath.Join(commonDir, "refs"), path: commonDir, wantChild: false},
+		{name: "unrelated", parent: commonDir, path: filepath.Join(string(filepath.Separator), "bothy"), wantChild: false},
+		{name: "common reflog tree", parent: commonDir, path: filepath.Join(commonDir, "logs", "refs"), wantChild: true, wantRefTree: true},
+		{name: "linked worktrees metadata", parent: commonDir, path: filepath.Join(commonDir, "worktrees", "bide"), wantChild: true, wantRefTree: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sameOrChildPath(tt.parent, tt.path); got != tt.wantChild {
+				t.Errorf("sameOrChildPath(%q, %q) = %v, want %v", tt.parent, tt.path, got, tt.wantChild)
+			}
+
+			if got := isCommonPRRefTree(commonDir, tt.path); got != tt.wantRefTree {
+				t.Errorf("isCommonPRRefTree(%q, %q) = %v, want %v", commonDir, tt.path, got, tt.wantRefTree)
+			}
+		})
+	}
+}
+
 // TestGitRefWatchDirs_FailOpen: a non-git path resolves to no dirs (no panic),
 // so createPRRefWatcher fails open to the poll fallback.
 func TestGitRefWatchDirs_FailOpen(t *testing.T) {
@@ -331,6 +363,96 @@ func TestReconcilePRRefWatchers_SharesCommonRepository(t *testing.T) {
 
 	if repositoryCount != 0 || sessionCount != 0 {
 		t.Errorf("last teardown left repositories=%d sessions=%d, want zero", repositoryCount, sessionCount)
+	}
+}
+
+// TestPRRefWatch_LateLinkedWorktreeStaysLocal covers a linked worktree created
+// after the shared common watcher is already running. The common-dir top-level
+// watch sees .git/worktrees appear, but must not recursively claim that tree:
+// kqueue would otherwise retain its full contents as shared descriptor state.
+func TestPRRefWatch_LateLinkedWorktreeStaysLocal(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	repo := t.TempDir() + "/croft"
+	initGitRepoOnBranch(t, repo)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer sm.teardownAllPRRefWatchers()
+
+	sm.createPRRefWatcher(ctx, "braw1", repo)
+
+	wt := t.TempDir() + "/bothy"
+	gitRun(t, repo, "worktree", "add", wt, "-b", "bide")
+
+	// Waiting for the coalesced common event ensures the running watcher has
+	// processed the new .git/worktrees directory before ownership is inspected.
+	if id, ok := waitForKick(t, sm, 5*time.Second); !ok || id != "braw1" {
+		t.Fatalf("expected worktree creation to kick the existing session, got id=%q ok=%v", id, ok)
+	}
+
+	sm.createPRRefWatcher(ctx, "canny2", wt)
+
+	sm.prRefWatch.mu.Lock()
+	primary := sm.prRefWatch.watchers["braw1"]
+	linked := sm.prRefWatch.watchers["canny2"]
+	sm.prRefWatch.mu.Unlock()
+
+	if primary == nil || linked == nil || primary.repo != linked.repo {
+		t.Fatalf("expected shared repository membership, got primary=%v linked=%v", primary != nil, linked != nil)
+	}
+
+	paths := resolveGitRefWatchPaths(wt)
+	if paths == nil || len(paths.localDirs) == 0 {
+		t.Fatal("expected linked-worktree-local watch paths")
+	}
+
+	worktreesDir := filepath.Join(paths.commonDir, "worktrees")
+
+	primary.repo.mu.Lock()
+	_, worktreesRegistered := primary.repo.dirs[worktreesDir]
+
+	for _, dir := range paths.localDirs {
+		ownership := primary.repo.dirs[dir]
+		if ownership == nil {
+			primary.repo.mu.Unlock()
+			t.Fatalf("linked local dir %q is not registered", dir)
+		}
+
+		if ownership.common {
+			primary.repo.mu.Unlock()
+			t.Fatalf("linked local dir %q was incorrectly registered as common", dir)
+		}
+
+		if _, ok := ownership.sessions["canny2"]; !ok {
+			primary.repo.mu.Unlock()
+			t.Fatalf("linked local dir %q is not owned by canny2", dir)
+		}
+	}
+	primary.repo.mu.Unlock()
+
+	if worktreesRegistered {
+		t.Fatalf("common watcher must not recursively register %q", worktreesDir)
+	}
+
+	// Remove the session that originally created the backend. The repository
+	// watcher must stay alive for the linked session and keep targeting its HEAD.
+	sm.teardownPRRefWatcher("braw1")
+
+	sm.prRefWatch.mu.Lock()
+	repositoryCount := len(sm.prRefWatch.repositories)
+	_, primaryStillPresent := sm.prRefWatch.watchers["braw1"]
+	linked = sm.prRefWatch.watchers["canny2"]
+	sm.prRefWatch.mu.Unlock()
+
+	if repositoryCount != 1 || primaryStillPresent || linked == nil {
+		t.Fatalf("primary teardown left repositories=%d primary=%v linked=%v", repositoryCount, primaryStillPresent, linked != nil)
+	}
+
+	gitRun(t, wt, "symbolic-ref", "HEAD", "refs/heads/main")
+
+	if id, ok := waitForKick(t, sm, 5*time.Second); !ok || id != "canny2" {
+		t.Fatalf("expected linked HEAD to kick its surviving owner, got id=%q ok=%v", id, ok)
 	}
 }
 
