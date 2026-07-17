@@ -181,7 +181,7 @@ func TestProofOfPossessionUnlocksRemoteHuman(t *testing.T) {
 	pubB64 := base64.StdEncoding.EncodeToString(pub)
 	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
 
-	rid, _, err := sm.AddPendingPairing("bairn", pubB64, id, time.Now())
+	rid, _, _, err := sm.AddPendingPairing("bairn", pubB64, id, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +428,7 @@ func TestRemoteGuestReadOnlyEndToEnd(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
 
-	rid, _, err := sm.AddPendingPairing("bairn", base64.StdEncoding.EncodeToString(pub), id, time.Now())
+	rid, _, _, err := sm.AddPendingPairing("bairn", base64.StdEncoding.EncodeToString(pub), id, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,7 +469,7 @@ func TestRevokeDropsLiveRemoteConnection(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
 
-	rid, _, err := sm.AddPendingPairing("bairn", base64.StdEncoding.EncodeToString(pub), id, time.Now())
+	rid, _, _, err := sm.AddPendingPairing("bairn", base64.StdEncoding.EncodeToString(pub), id, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

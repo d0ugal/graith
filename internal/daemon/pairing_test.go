@@ -145,20 +145,20 @@ func TestAddPendingPairingRateLimit(t *testing.T) {
 	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
 	now := time.Now()
 
-	if _, _, err := sm.AddPendingPairing("bairn", pub, id, now); err != nil {
+	if _, _, _, err := sm.AddPendingPairing("bairn", pub, id, now); err != nil {
 		t.Fatalf("1st request: %v", err)
 	}
 
-	if _, _, err := sm.AddPendingPairing("skelf", pub, id, now); err != nil {
+	if _, _, _, err := sm.AddPendingPairing("skelf", pub, id, now); err != nil {
 		t.Fatalf("2nd request: %v", err)
 	}
 
-	if _, _, err := sm.AddPendingPairing("whin", pub, id, now); err == nil {
+	if _, _, _, err := sm.AddPendingPairing("whin", pub, id, now); err == nil {
 		t.Error("3rd request should be rate-limited")
 	}
 
 	// After the window passes, requests are allowed again.
-	if _, _, err := sm.AddPendingPairing("whin", pub, id, now.Add(2*time.Minute)); err != nil {
+	if _, _, _, err := sm.AddPendingPairing("whin", pub, id, now.Add(2*time.Minute)); err != nil {
 		t.Errorf("request after window: %v", err)
 	}
 }
@@ -166,7 +166,7 @@ func TestAddPendingPairingRateLimit(t *testing.T) {
 func TestAddPendingPairingRejectsInvalidPubKey(t *testing.T) {
 	sm := newPairingSM(t)
 
-	if _, _, err := sm.AddPendingPairing("dreich", "not-a-key", TailnetIdentity{}, time.Now()); err == nil {
+	if _, _, _, err := sm.AddPendingPairing("dreich", "not-a-key", TailnetIdentity{}, time.Now()); err == nil {
 		t.Error("expected invalid public key to be rejected")
 	}
 }
@@ -178,12 +178,12 @@ func TestAddPendingPairingCap(t *testing.T) {
 	now := time.Now()
 
 	for i := 0; i < config.RemoteMaxPendingPairingsDefault; i++ {
-		if _, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, now); err != nil {
+		if _, _, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, now); err != nil {
 			t.Fatalf("request %d: %v", i, err)
 		}
 	}
 
-	if _, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, now); err == nil {
+	if _, _, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, now); err == nil {
 		t.Error("expected pending-cap to reject the extra request")
 	}
 }
@@ -223,12 +223,12 @@ func TestAddPendingPairingConfigurableLimits(t *testing.T) {
 			now := time.Now()
 
 			for i := 0; i < 2; i++ {
-				if _, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, now); err != nil {
+				if _, _, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, now); err != nil {
 					t.Fatalf("request %d: %v", i, err)
 				}
 			}
 
-			if _, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, now); err == nil {
+			if _, _, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, now); err == nil {
 				t.Error("expected the configured limit to reject the 3rd request")
 			}
 		})
@@ -242,7 +242,7 @@ func TestExpirePendingPairingConfigurableTTL(t *testing.T) {
 	pub := testPubKey(t)
 	base := time.Now()
 
-	rid, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, base)
+	rid, _, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestExpirePendingPairingConfigurableTTL(t *testing.T) {
 		t.Fatalf("pending should survive until the configured TTL: %v", err)
 	}
 
-	rid2, _, err := sm.AddPendingPairing("skelf", pub, TailnetIdentity{}, base.Add(2*time.Minute))
+	rid2, _, _, err := sm.AddPendingPairing("skelf", pub, TailnetIdentity{}, base.Add(2*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,19 +264,85 @@ func TestExpirePendingPairingConfigurableTTL(t *testing.T) {
 	}
 }
 
+// TestPendingPairingDeadlineSurvivesTTLShorten asserts that a config reload
+// which SHORTENS the pending-pairing TTL does not retime an already-registered
+// request. The deadline is frozen at creation, so an approval within that
+// original (longer) deadline still succeeds even though the elapsed time now
+// exceeds the new, shorter live TTL. On the pre-fix code — where expiry was
+// compared against the live TTL — this approval was wrongly rejected as expired,
+// while the remote waiter kept blocking on the old, longer timer (#1299).
+func TestPendingPairingDeadlineSurvivesTTLShorten(t *testing.T) {
+	sm := newPairingSM(t)
+	sm.cfg.Remote.PairRequestRate = "1000/min"
+	sm.cfg.Remote.PendingPairingTTL = "10m"
+	pub := testPubKey(t)
+	base := time.Now()
+
+	rid, _, expiresAt, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := base.Add(10 * time.Minute); !expiresAt.Equal(want) {
+		t.Fatalf("returned deadline = %v, want frozen at the creation-time TTL %v", expiresAt, want)
+	}
+
+	// A reload shortens the TTL to 2m while the request is in flight.
+	sm.cfg.Remote.PendingPairingTTL = "2m"
+
+	// 5m elapsed: past the new 2m TTL but within the frozen 10m deadline.
+	if _, _, err := sm.ApprovePairing(rid, false, base.Add(5*time.Minute)); err != nil {
+		t.Fatalf("approval within the frozen deadline must survive a TTL shorten: %v", err)
+	}
+}
+
+// TestPendingPairingDeadlineSurvivesTTLLengthen asserts the opposite reload:
+// LENGTHENING the TTL must not keep an already-expired request approvable. The
+// request expires at its frozen (shorter) deadline, so an approval past that
+// deadline is rejected and NO paired device or token is persisted. This is the
+// exact deadline-mismatch strand this slice closes: on the pre-fix code the live
+// (longer) TTL kept the request approvable after its waiter had already timed
+// out, minting a durable device whose one-time token could never be delivered
+// (#1299). It does not address the later delivery-ACK TOCTOU.
+func TestPendingPairingDeadlineSurvivesTTLLengthen(t *testing.T) {
+	sm := newPairingSM(t)
+	sm.cfg.Remote.PairRequestRate = "1000/min"
+	sm.cfg.Remote.PendingPairingTTL = "2m"
+	pub := testPubKey(t)
+	base := time.Now()
+
+	rid, _, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A reload lengthens the TTL to 10m while the request is in flight.
+	sm.cfg.Remote.PendingPairingTTL = "10m"
+
+	// 5m elapsed: within the new 10m TTL but past the frozen 2m deadline.
+	if _, _, err := sm.ApprovePairing(rid, false, base.Add(5*time.Minute)); err == nil {
+		t.Fatal("approval past the frozen deadline must be rejected even after a TTL lengthen")
+	}
+
+	// Nothing may be persisted: no stranded device, no minted token.
+	if _, paired := sm.ListPairings(); len(paired) != 0 {
+		t.Errorf("paired = %d, want 0 (an expired request must not strand a device)", len(paired))
+	}
+}
+
 func TestExpirePendingPairing(t *testing.T) {
 	sm := newPairingSM(t)
 	sm.cfg.Remote.PairRequestRate = "1000/min"
 	pub := testPubKey(t)
 	base := time.Now()
 
-	rid, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, base)
+	rid, _, _, err := sm.AddPendingPairing("bairn", pub, TailnetIdentity{}, base)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// A later request past the TTL should expire the earlier pending one.
-	if _, _, err := sm.AddPendingPairing("skelf", pub, TailnetIdentity{}, base.Add(config.RemotePendingPairingTTLDefault+time.Minute)); err != nil {
+	if _, _, _, err := sm.AddPendingPairing("skelf", pub, TailnetIdentity{}, base.Add(config.RemotePendingPairingTTLDefault+time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -294,7 +360,7 @@ func TestApprovePairingAndResolveToken(t *testing.T) {
 	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
 	now := time.Now()
 
-	rid, _, err := sm.AddPendingPairing("bairn", pub, id, now)
+	rid, _, _, err := sm.AddPendingPairing("bairn", pub, id, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +411,7 @@ func TestApprovePairingAndResolveToken(t *testing.T) {
 func TestApprovePairingReadOnly(t *testing.T) {
 	sm := newPairingSM(t)
 	now := time.Now()
-	rid, _, _ := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{}, now)
+	rid, _, _, _ := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{}, now)
 
 	_, token, err := sm.ApprovePairing(rid, true, now)
 	if err != nil {
@@ -360,7 +426,7 @@ func TestApprovePairingReadOnly(t *testing.T) {
 func TestRevokeDeviceClosesLiveConnections(t *testing.T) {
 	sm := newPairingSM(t)
 	now := time.Now()
-	rid, _, _ := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{}, now)
+	rid, _, _, _ := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{}, now)
 
 	deviceID, token, err := sm.ApprovePairing(rid, false, now)
 	if err != nil {
@@ -433,7 +499,7 @@ func TestApprovePairingRejectsExpired(t *testing.T) {
 	sm.cfg.Remote.PairRequestRate = "1000/min"
 	base := time.Now()
 
-	rid, _, err := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{User: "u", Node: "ben"}, base)
+	rid, _, _, err := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{User: "u", Node: "ben"}, base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +518,7 @@ func TestApprovePairingSaveFailurePreservesPending(t *testing.T) {
 	sm := newPairingSM(t)
 	now := time.Now()
 
-	rid, _, err := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{User: "u", Node: "ben"}, now)
+	rid, _, _, err := sm.AddPendingPairing("bairn", testPubKey(t), TailnetIdentity{User: "u", Node: "ben"}, now)
 	if err != nil {
 		t.Fatal(err)
 	}

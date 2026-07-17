@@ -88,6 +88,12 @@ type pendingPairing struct {
 	PubKey      string
 	Identity    TailnetIdentity
 	RequestedAt time.Time
+	// ExpiresAt is the request's single immutable expiry deadline, computed once
+	// at creation from the TTL that was live then. Waiter timeout, opportunistic
+	// cleanup, and approval all consult this stored value, so a later config
+	// reload cannot retime an in-flight request and split those three views of
+	// when it expires (#1299).
+	ExpiresAt time.Time
 }
 
 // pairApproval is delivered to a blocked pair_request connection when its
@@ -137,12 +143,13 @@ func (sm *SessionManager) maxPendingPairings() int {
 	return sm.cfg.Remote.MaxPendingPairingsOrDefault()
 }
 
-// expirePendingLocked drops pending pairings older than the configured TTL.
+// expirePendingLocked drops pending pairings whose immutable deadline has
+// passed. It consults each request's stored ExpiresAt rather than the live TTL,
+// so a config reload cannot change when an already-registered request expires.
 // Must be called with sm.mu held.
 func (sm *SessionManager) expirePendingLocked(now time.Time) {
-	ttl := sm.pendingPairingTTL()
 	for rid, p := range sm.pendingPairings {
-		if now.Sub(p.RequestedAt) > ttl {
+		if !now.Before(p.ExpiresAt) {
 			delete(sm.pendingPairings, rid)
 		}
 	}
@@ -156,9 +163,12 @@ func (sm *SessionManager) expirePendingLocked(now time.Time) {
 // the same lock that creates the pending entry, so an approval can never race
 // ahead of the waiter and drop the delivery. The caller reads it (with its own
 // timeout / disconnect handling) and must unregisterPairWaiter when done.
-func (sm *SessionManager) AddPendingPairing(label, pubKey string, id TailnetIdentity, now time.Time) (string, chan pairApproval, error) {
+// The returned deadline is the request's immutable expiry: the caller must time
+// its waiter out against this exact value (not the live TTL) so the waiter,
+// cleanup, and approval never disagree about when the request expires (#1299).
+func (sm *SessionManager) AddPendingPairing(label, pubKey string, id TailnetIdentity, now time.Time) (string, chan pairApproval, time.Time, error) {
 	if !validEd25519PubKey(pubKey) {
-		return "", nil, errors.New("invalid device public key")
+		return "", nil, time.Time{}, errors.New("invalid device public key")
 	}
 
 	sm.mu.Lock()
@@ -180,17 +190,21 @@ func (sm *SessionManager) AddPendingPairing(label, pubKey string, id TailnetIden
 	sm.pairReqTimes = kept
 
 	if len(sm.pairReqTimes) >= rate.Count {
-		return "", nil, fmt.Errorf("pair request rate limit exceeded (%d per %s)", rate.Count, rate.Per)
+		return "", nil, time.Time{}, fmt.Errorf("pair request rate limit exceeded (%d per %s)", rate.Count, rate.Per)
 	}
 
 	if len(sm.pendingPairings) >= sm.maxPendingPairings() {
-		return "", nil, errors.New("too many pending pairing requests")
+		return "", nil, time.Time{}, errors.New("too many pending pairing requests")
 	}
 
 	rid, err := randomHex(8)
 	if err != nil {
-		return "", nil, err
+		return "", nil, time.Time{}, err
 	}
+
+	// Freeze the expiry once, from the TTL that is live now. A later reload
+	// changes sm.pendingPairingTTL() but must not move this request's deadline.
+	expiresAt := now.Add(sm.pendingPairingTTL())
 
 	sm.pendingPairings[rid] = &pendingPairing{
 		RequestID:   rid,
@@ -198,6 +212,7 @@ func (sm *SessionManager) AddPendingPairing(label, pubKey string, id TailnetIden
 		PubKey:      pubKey,
 		Identity:    id,
 		RequestedAt: now,
+		ExpiresAt:   expiresAt,
 	}
 	sm.pairReqTimes = append(sm.pairReqTimes, now)
 
@@ -206,7 +221,7 @@ func (sm *SessionManager) AddPendingPairing(label, pubKey string, id TailnetIden
 	waiter := make(chan pairApproval, 1)
 	sm.pairWaiters[rid] = waiter
 
-	return rid, waiter, nil
+	return rid, waiter, expiresAt, nil
 }
 
 // ApprovePairing approves a pending pairing, minting and persisting a new paired

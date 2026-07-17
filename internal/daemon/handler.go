@@ -265,7 +265,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					identity = *origin.Identity
 				}
 
-				rid, waitCh, err := sm.AddPendingPairing(pr.DeviceLabel, pr.DevicePubKey, identity, time.Now())
+				rid, waitCh, expiresAt, err := sm.AddPendingPairing(pr.DeviceLabel, pr.DevicePubKey, identity, time.Now())
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 					continue
@@ -274,6 +274,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				log.Info("pairing requested", "request_id", rid, "label", pr.DeviceLabel, "tailnet_user", identity.User)
 
 				go func() {
+					// Time the waiter out against the request's immutable deadline,
+					// not the live TTL. A reload that changes pendingPairingTTL() must
+					// not leave this waiter and the approval/cleanup paths disagreeing
+					// about when the request expires (#1299).
+					timer := time.NewTimer(time.Until(expiresAt))
+					defer timer.Stop()
+
 					select {
 					case appr := <-waitCh:
 						sendControl("pair_response", protocol.PairResponseMsg{
@@ -282,7 +289,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 							DaemonProfile: appr.Profile,
 							TLSPinSPKI:    appr.TLSPin,
 						})
-					case <-time.After(sm.pendingPairingTTL()):
+					case <-timer.C:
 						sm.unregisterPairWaiter(rid)
 						sendControl("error", protocol.ErrorMsg{Message: "pairing request timed out"})
 					case <-connDone:
