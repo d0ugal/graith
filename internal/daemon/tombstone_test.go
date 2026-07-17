@@ -37,7 +37,9 @@ func TestWriteRemoveTombstoneRoundTrip(t *testing.T) {
 		t.Errorf("round-trip mismatch: %+v", got)
 	}
 
-	sm.removeTombstone("braw1")
+	if err := sm.removeTombstone("braw1"); err != nil {
+		t.Fatalf("removeTombstone: %v", err)
+	}
 
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("tombstone still present after remove (err=%v)", err)
