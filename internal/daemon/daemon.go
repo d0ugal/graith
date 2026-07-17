@@ -104,6 +104,18 @@ type SessionManager struct {
 	lastPurgeSweep time.Time
 	nextPurgeSweep time.Time
 
+	// writeTombstoneFault injects a failure AFTER the tombstone file is durably
+	// written, simulating a post-rename parent-dir fsync error where the marker
+	// exists on disk yet the write reports failure; nil in production. Tests use
+	// it to exercise the fail-closed cleanup of an already-landed marker (#1326).
+	writeTombstoneFault func(id string) error
+
+	// tombstoneDirSyncFault injects a parent-directory fsync failure during
+	// removeTombstone, simulating an unlink that is not yet durable; nil in
+	// production. Tests use it to prove the removal error is propagated on
+	// abort/retry paths (issue #1326).
+	tombstoneDirSyncFault func() error
+
 	// restartStuck is the startup watchdog's recovery action; nil in production
 	// (falls back to Restart). Tests override it to observe watchdog decisions
 	// without driving a full session respawn.
