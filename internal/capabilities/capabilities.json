@@ -218,6 +218,13 @@
       "notes": "The CLI declares text, Markdown, and JSON result contracts in scenario TOML, authenticates member self-publication, and reports durable result status; GUI publication and result-detail presentation are planned."
     },
     {
+      "id": "scenarios.runtime-policy",
+      "category": "Scenarios",
+      "name": "Scenario timeout, retry & quorum policy",
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "notes": "Scenario runtime policies are CLI/daemon-only; iOS and macOS do not model or surface policy state."
+    },
+    {
       "id": "todo.manage",
       "category": "Todo list",
       "name": "Todo list",

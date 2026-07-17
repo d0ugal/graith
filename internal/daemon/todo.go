@@ -43,13 +43,31 @@ func (sm *SessionManager) RunTodoSweepLoop(ctx context.Context) {
 				sm.log.Info("reclaimed stale todo claims", "count", n)
 			}
 
-			if n, err := sm.todos.SweepDone(cfg.Todo.RetentionDuration()); err != nil {
+			if n, err := sm.todos.SweepDoneExceptScopes(cfg.Todo.RetentionDuration(), sm.activeScenarioPolicyTodoScopes()); err != nil {
 				sm.log.Error("todo retention sweep failed", "err", err)
 			} else if n > 0 {
 				sm.log.Info("swept aged-out done todos", "count", n)
 			}
 		}
 	}
+}
+
+// activeScenarioPolicyTodoScopes pins completion contracts until the policy
+// loop has observed and durably recorded a terminal outcome. Paused scenarios
+// stay protected because their immutable deadlines and contracts still apply.
+func (sm *SessionManager) activeScenarioPolicyTodoScopes() []string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	scopes := make([]string, 0)
+
+	for id, scenario := range sm.state.Scenarios {
+		if scenario.Policy != nil && scenario.Policy.Active && scenario.Policy.Outcome == "" {
+			scopes = append(scopes, "scenario:"+id)
+		}
+	}
+
+	return scopes
 }
 
 // reopenTodosForSession reopens todo items claimed by a session that has just

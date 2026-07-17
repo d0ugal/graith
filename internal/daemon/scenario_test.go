@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/scenariofile"
 	"github.com/d0ugal/graith/internal/store"
 )
 
@@ -241,6 +243,19 @@ func TestStartScenarioRequiresOrchestrator(t *testing.T) {
 
 	if got := err.Error(); got != "only the orchestrator session can start scenarios" {
 		t.Errorf("error = %q, want orchestrator-only message", got)
+	}
+}
+
+func TestStartScenarioRejectsImpossiblePolicyBeforeCallerLookup(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		Name:     "strath-policy",
+		Policy:   &protocol.ScenarioPolicyInput{Completion: "quorum", Quorum: 2},
+		Sessions: []protocol.ScenarioSessionInput{{Name: "braw", Repo: "/tmp/croft"}},
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "exceeds member count") {
+		t.Fatalf("error = %v, want authoritative policy preflight rejection", err)
 	}
 }
 
@@ -582,6 +597,33 @@ func TestAddToScenarioValidation(t *testing.T) {
 	}
 }
 
+func TestAddToScenarioRejectsSharedMember(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	_, err := sm.AddToScenario("strath-neep", protocol.ScenarioSessionInput{
+		Name: "braw", Repo: "/tmp/croft", Shared: true,
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "cannot add shared") {
+		t.Fatalf("error = %v, want shared-add rejection", err)
+	}
+}
+
+func TestAddToScenarioRejectsPausedPolicy(t *testing.T) {
+	sm := newTestSessionManager(t)
+	repo := initTempGitRepo(t)
+	sm.state.Scenarios["sc-paused"] = &ScenarioState{
+		ID: "sc-paused", Name: "strath-paused",
+		Policy: &ScenarioPolicyState{Completion: scenariofile.CompletionAll, OnExhausted: scenariofile.OnExhaustedWait, Active: true, Paused: true},
+	}
+
+	_, err := sm.AddToScenario("strath-paused", protocol.ScenarioSessionInput{
+		Name: "braw", Repo: repo, Task: "review the croft",
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "paused") {
+		t.Fatalf("error = %v, want paused scenario rejection", err)
+	}
+}
+
 func TestMigrateV10ToV11(t *testing.T) {
 	state := &State{
 		Version:  10,
@@ -755,7 +797,8 @@ func TestDeleteScenarioCovKeepsRecordOnTeardownFailure(t *testing.T) {
 		ID:         "sc-strath",
 		Name:       "strath-thrawn",
 		SessionIDs: []string{"thrawn-del"},
-		Sessions:   []ScenarioSession{{Name: "thrawn-del"}},
+		Sessions:   []ScenarioSession{{Name: "thrawn-del", Policy: &ScenarioMemberPolicyState{Required: true, Attempt: 1}}},
+		Policy:     &ScenarioPolicyState{Completion: scenariofile.CompletionAll, OnExhausted: scenariofile.OnExhaustedFail, Active: true},
 	}
 	sm.mu.Unlock()
 
@@ -773,6 +816,10 @@ func TestDeleteScenarioCovKeepsRecordOnTeardownFailure(t *testing.T) {
 
 	if _, ok := sm.state.Scenarios["sc-strath"]; !ok {
 		t.Error("scenario record should be kept when a session failed to delete")
+	}
+
+	if !sm.state.Scenarios["sc-strath"].Policy.Paused {
+		t.Error("partially deleted scenario policy should remain durably paused")
 	}
 
 	// The failed session must survive so cleanup can be retried, with its
@@ -2004,6 +2051,35 @@ func TestAddToScenarioSeedFailureRestoresMembership(t *testing.T) {
 	}
 }
 
+func TestAddToScenarioRejectsPolicyOptInWithoutLegacyContract(t *testing.T) {
+	sm := startScenarioOrchestrator(t)
+	sm.todos = newTestTodoStore(t)
+	repo := initScenarioGitRepo(t)
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw-old"] = &SessionState{
+		ID: "braw-old", Name: "braw-old", Status: StatusStopped, RepoPath: repo,
+	}
+	sm.state.Scenarios["sc-croft-old"] = &ScenarioState{
+		ID: "sc-croft-old", Name: "croft-old", OrchestratorID: "ben-orch",
+		SessionIDs: []string{"braw-old"},
+		Sessions:   []ScenarioSession{{Name: "braw-old", Task: "review old croft"}},
+	}
+	sm.mu.Unlock()
+
+	_, err := sm.AddToScenario("croft-old", protocol.ScenarioSessionInput{
+		Name: "canny-new", Repo: repo, Task: "review new croft",
+		Policy: &protocol.ScenarioMemberPolicyInput{Required: boolPtr(true)},
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "no durable seeded todo contract") {
+		t.Fatalf("error = %v, want legacy contract verification failure", err)
+	}
+
+	if sm.state.Scenarios["sc-croft-old"].Policy != nil || sm.state.Sessions["canny-new"] != nil {
+		t.Fatal("failed policy opt-in mutated legacy scenario")
+	}
+}
+
 func TestAddToScenarioDependencyUsesOriginalSeedIdentity(t *testing.T) {
 	sm, orchID := newScenarioOrchestrator(t)
 	sm.todos = newTestTodoStore(t)
@@ -2045,6 +2121,178 @@ func TestAddToScenarioDependencyUsesOriginalSeedIdentity(t *testing.T) {
 	dependent := seeds[created.ID]
 	if len(dependent.DependsOn) != 1 || dependent.DependsOn[0] != upstream.ID {
 		t.Fatalf("added dependent seed = %+v", dependent)
+	}
+}
+
+func TestStartScenarioPolicyActivationSaveFailureRollsBackContracts(t *testing.T) {
+	sm := startScenarioOrchestrator(t)
+	sm.todos = newTestTodoStore(t)
+	repo := initScenarioGitRepo(t)
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw-live"] = &SessionState{
+		ID: "braw-live", Name: "braw-live", Status: StatusRunning, RepoPath: repo,
+	}
+	sm.mu.Unlock()
+
+	sm.saveStateFault = func() error {
+		for _, scenario := range sm.state.Scenarios {
+			if scenario.Name == "strath-rollback" && scenario.Policy != nil && scenario.Policy.Active {
+				return errors.New("dreich disk")
+			}
+		}
+
+		return nil
+	}
+
+	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: "ben-orch",
+		Name:            "strath-rollback",
+		Policy:          &protocol.ScenarioPolicyInput{},
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "braw-live", Repo: repo, Task: "review the croft", Shared: true},
+		},
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "persist scenario activation") {
+		t.Fatalf("error = %v, want activation persistence failure", err)
+	}
+
+	for _, sc := range sm.state.Scenarios {
+		if sc.Name == "strath-rollback" {
+			t.Fatalf("scenario survived activation rollback: %+v", sc)
+		}
+	}
+
+	items, listErr := sm.todos.ListAll(TodoFilter{})
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+
+	if len(items) != 0 {
+		t.Fatalf("seeded result contracts survived rollback: %+v", items)
+	}
+}
+
+func TestStartScenarioPolicyTodoWriteFailureRollsBack(t *testing.T) {
+	sm := startScenarioOrchestrator(t)
+	sm.todos = newTestTodoStore(t)
+	repo := initScenarioGitRepo(t)
+
+	sm.mu.Lock()
+	sm.state.Sessions["canny-live"] = &SessionState{
+		ID: "canny-live", Name: "canny-live", Status: StatusRunning, RepoPath: repo,
+	}
+	sm.mu.Unlock()
+
+	if err := sm.todos.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: "ben-orch",
+		Name:            "strath-contract",
+		Policy:          &protocol.ScenarioPolicyInput{},
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "canny-live", Repo: repo, Task: "inspect the bothy", Shared: true},
+		},
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "seed scenario todos") {
+		t.Fatalf("error = %v, want result-contract write failure", err)
+	}
+
+	for _, sc := range sm.state.Scenarios {
+		if sc.Name == "strath-contract" {
+			t.Fatalf("scenario survived contract rollback: %+v", sc)
+		}
+	}
+}
+
+func TestAddToScenarioCommitSaveFailureRollsBackPolicyAndContract(t *testing.T) {
+	sm, orchID := newScenarioOrchestrator(t)
+	sm.todos = newTestTodoStore(t)
+	repo := initScenarioGitRepo(t)
+
+	sm.mu.Lock()
+	sm.cfg.Agents["sleeper"] = config.Agent{Command: "sh", Args: []string{"-c", "sleep 60", "--"}}
+	sm.state.Sessions["braw-old"] = &SessionState{ID: "braw-old", Name: "braw-old", Status: StatusStopped}
+	sm.state.Scenarios["sc-add"] = &ScenarioState{
+		ID: "sc-add", Name: "strath-add", OrchestratorID: orchID,
+		SessionIDs: []string{"braw-old"},
+		Sessions:   []ScenarioSession{{Name: "braw-old", Task: "review the old croft"}},
+	}
+	sm.mu.Unlock()
+
+	if _, err := sm.todos.Add(TodoAdd{
+		Scope: "scenario:sc-add", Title: "review the old croft", Assignee: "braw-old", CreatedBy: "scenario:sc-add",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.saveStateFault = func() error {
+		if sc := sm.state.Scenarios["sc-add"]; sc != nil && len(sc.Sessions) == 2 {
+			return errors.New("dreich disk")
+		}
+
+		return nil
+	}
+
+	_, err := sm.AddToScenario("strath-add", protocol.ScenarioSessionInput{
+		Name: "canny-new", Repo: repo, Task: "review the new croft",
+		Policy: &protocol.ScenarioMemberPolicyInput{Timeout: "1m"},
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "persist scenario member addition") {
+		t.Fatalf("error = %v, want commit failure", err)
+	}
+
+	sc := sm.state.Scenarios["sc-add"]
+	if sc.Policy != nil || len(sc.SessionIDs) != 1 || len(sc.Sessions) != 1 {
+		t.Fatalf("scenario rollback = %+v", sc)
+	}
+
+	for _, sess := range sm.state.Sessions {
+		if sess.Name == "canny-new" {
+			t.Fatalf("added session survived rollback: %+v", sess)
+		}
+	}
+
+	items, listErr := sm.todos.ListAll(TodoFilter{})
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+
+	if len(items) != 1 || items[0].Assignee != "braw-old" || items[0].Title != "review the old croft" {
+		t.Fatalf("todo rollback removed the legacy contract or retained the added contract: %+v", items)
+	}
+}
+
+func TestScenarioRetryPolicyForcesPTYUnderHeadlessDefault(t *testing.T) {
+	sm, orchID := newScenarioOrchestrator(t)
+	sm.todos = newTestTodoStore(t)
+	repo := initScenarioGitRepo(t)
+	capable := true
+
+	sm.mu.Lock()
+	sm.cfg.Headless.Experimental = true
+	sm.cfg.Headless.Default = true
+	sm.cfg.Agents["sleeper"] = config.Agent{
+		Command: "sh", Args: []string{"-c", "sleep 60", "--"}, HeadlessCapable: &capable,
+	}
+	sm.mu.Unlock()
+
+	sc, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: orchID,
+		Name:            "strath-pty",
+		Policy:          &protocol.ScenarioPolicyInput{},
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "braw-pty", Repo: repo, Task: "review the croft", Policy: &protocol.ScenarioMemberPolicyInput{Timeout: "1m", Retries: 1}},
+		},
+	}, 24, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := sm.state.Sessions[sc.SessionIDs[0]].DriverKind; got != DriverPTY {
+		t.Fatalf("retryable scenario driver = %q, want %q", got, DriverPTY)
 	}
 }
 
@@ -2103,7 +2351,7 @@ func TestSeedScenarioTodosResolvesMemberDependencies(t *testing.T) {
 		{Name: "canny", Task: "inspect the brig", DependsOn: []string{"braw"}},
 		{Name: "dreich"}, // compatibility: no task means no seeded item
 	}
-	if err := sm.seedScenarioTodos("sc-strath", []string{"braw-id", "canny-id", "dreich-id"}, inputs); err != nil {
+	if _, err := sm.seedScenarioTodos("sc-strath", []string{"braw-id", "canny-id", "dreich-id"}, inputs); err != nil {
 		t.Fatalf("seedScenarioTodos: %v", err)
 	}
 
@@ -2158,7 +2406,7 @@ func TestSeedScenarioTodosCycleIsAtomic(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.todos = newTestTodoStore(t)
 
-	err := sm.seedScenarioTodos("sc-thrawn", []string{"braw-id", "canny-id"}, []protocol.ScenarioSessionInput{
+	_, err := sm.seedScenarioTodos("sc-thrawn", []string{"braw-id", "canny-id"}, []protocol.ScenarioSessionInput{
 		{Name: "braw", Task: "first", DependsOn: []string{"canny"}},
 		{Name: "canny", Task: "second", DependsOn: []string{"braw"}},
 	})

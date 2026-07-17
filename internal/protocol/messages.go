@@ -931,6 +931,7 @@ type ScenarioStartMsg struct {
 	Name            string                 `json:"name"`
 	Goal            string                 `json:"goal"`
 	Sessions        []ScenarioSessionInput `json:"sessions"`
+	Policy          *ScenarioPolicyInput   `json:"policy,omitempty"`
 	// Triggers are the scenario-embedded [[trigger]] blocks parsed from the
 	// scenario TOML. They are carried on the start message (rather than re-read
 	// from disk at fire time, since the file may change) and associated with the
@@ -939,6 +940,18 @@ type ScenarioStartMsg struct {
 	// lifecycle".
 	Triggers  []config.TriggerConfig         `json:"triggers,omitempty"`
 	Lifecycle config.ScenarioLifecycleConfig `json:"lifecycle,omitempty"`
+}
+
+type ScenarioPolicyInput struct {
+	Completion  string `json:"completion,omitempty"`
+	Quorum      int    `json:"quorum,omitempty"`
+	OnExhausted string `json:"on_exhausted,omitempty"`
+}
+
+type ScenarioMemberPolicyInput struct {
+	Required *bool  `json:"required,omitempty"`
+	Timeout  string `json:"timeout,omitempty"`
+	Retries  int    `json:"retries,omitempty"`
 }
 
 type ScenarioSessionInput struct {
@@ -964,6 +977,9 @@ type ScenarioSessionInput struct {
 	// Star creates the session starred (protected from manual `gr delete`).
 	Star    bool                 `json:"star,omitempty"`
 	Results []ScenarioResultSpec `json:"results,omitempty"`
+	// Policy opts this member into required/optional membership, an immutable
+	// attempt timeout, and bounded automatic retries.
+	Policy *ScenarioMemberPolicyInput `json:"policy,omitempty"`
 }
 
 // ScenarioResultSpec declares one named result a scenario member may publish.
@@ -1030,6 +1046,7 @@ type ScenarioRecord struct {
 	CompletionEpoch   int                            `json:"completion_epoch,omitempty"`
 	CompletionActions []ScenarioCompletionActionInfo `json:"completion_actions,omitempty"`
 	Cleanup           *ScenarioCleanupInfo           `json:"cleanup,omitempty"`
+	Policy            *ScenarioPolicyInfo            `json:"policy,omitempty"`
 }
 
 // ScenarioCompletionActionInfo exposes the durable state of one embedded
@@ -1056,6 +1073,32 @@ type ScenarioCleanupInfo struct {
 	Error       string `json:"error,omitempty"`
 }
 
+type ScenarioPolicyInfo struct {
+	Completion         string `json:"completion"`
+	Quorum             int    `json:"quorum,omitempty"`
+	OnExhausted        string `json:"on_exhausted"`
+	Active             bool   `json:"active"`
+	Paused             bool   `json:"paused,omitempty"`
+	Successful         int    `json:"successful"`
+	RequiredSuccessful int    `json:"required_successful"`
+	RequiredTotal      int    `json:"required_total"`
+	Outcome            string `json:"outcome,omitempty"`
+	OutcomeReason      string `json:"outcome_reason,omitempty"`
+	OutcomeAt          string `json:"outcome_at,omitempty"`
+}
+
+type ScenarioMemberPolicyInfo struct {
+	Required         bool   `json:"required"`
+	Attempt          int    `json:"attempt"`
+	MaxAttempts      int    `json:"max_attempts"`
+	AttemptStartedAt string `json:"attempt_started_at,omitempty"`
+	Deadline         string `json:"deadline,omitempty"`
+	RetryPending     bool   `json:"retry_pending,omitempty"`
+	SucceededAt      string `json:"succeeded_at,omitempty"`
+	ExhaustedAt      string `json:"exhausted_at,omitempty"`
+	ExhaustionReason string `json:"exhaustion_reason,omitempty"`
+}
+
 type ScenarioSessionInfo struct {
 	Name      string `json:"name"`
 	SessionID string `json:"session_id"`
@@ -1070,13 +1113,14 @@ type ScenarioSessionInfo struct {
 	TodoTotal int `json:"todo_total,omitempty"`
 	// BlockedBy names scenario members whose seeded assigned tasks are not yet
 	// done, when this member's seeded task is dependency-blocked.
-	BlockedBy []string             `json:"blocked_by,omitempty"`
-	Repo      string               `json:"repo,omitempty"`
-	Agent     string               `json:"agent,omitempty"`
-	Model     string               `json:"model,omitempty"`
-	Status    string               `json:"status,omitempty"`
-	Shared    bool                 `json:"shared,omitempty"`
-	Results   []ScenarioResultInfo `json:"results,omitempty"`
+	BlockedBy []string                  `json:"blocked_by,omitempty"`
+	Repo      string                    `json:"repo,omitempty"`
+	Agent     string                    `json:"agent,omitempty"`
+	Model     string                    `json:"model,omitempty"`
+	Status    string                    `json:"status,omitempty"`
+	Shared    bool                      `json:"shared,omitempty"`
+	Results   []ScenarioResultInfo      `json:"results,omitempty"`
+	Policy    *ScenarioMemberPolicyInfo `json:"policy,omitempty"`
 }
 
 type ScenarioStatusResponse struct {

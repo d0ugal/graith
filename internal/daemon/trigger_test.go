@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -441,6 +442,57 @@ func TestActionScenario_MissingFile(t *testing.T) {
 	sm.paths.ConfigFile = filepath.Join(t.TempDir(), "config.toml")
 	if _, err := sm.actionScenario(t.Context(), &trig); err == nil {
 		t.Error("expected error for missing scenario file")
+	}
+}
+
+func TestActionScenario_ParsesRuntimePolicy(t *testing.T) {
+	sm := startScenarioOrchestrator(t)
+	sm.todos = newTestTodoStore(t)
+	repo := initScenarioGitRepo(t)
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw-live"] = &SessionState{
+		ID: "braw-live", Name: "braw-live", Status: StatusRunning, RepoPath: repo,
+	}
+	sm.mu.Unlock()
+
+	configDir := t.TempDir()
+	sm.paths.ConfigFile = filepath.Join(configDir, "config.toml")
+	scenarioDir := filepath.Join(configDir, "scenarios")
+
+	if err := os.MkdirAll(scenarioDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	document := fmt.Sprintf(`version = 1
+[scenario]
+name = "trigger-croft"
+[scenario.policy]
+completion = "all"
+on_exhausted = "fail"
+
+[[sessions]]
+name = "braw-live"
+repo = %q
+task = "review the croft"
+shared = true
+`, repo)
+	if err := os.WriteFile(filepath.Join(scenarioDir, "croft.toml"), []byte(document), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	trigger := config.TriggerConfig{Action: config.ActionConfig{Type: config.ActionScenario, Scenario: "croft"}}
+	if _, err := sm.actionScenario(t.Context(), &trigger); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := sm.ScenarioStatus("trigger-croft")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if status.Policy == nil || status.Policy.Completion != "all" || status.Policy.OnExhausted != "fail" {
+		t.Fatalf("trigger-started policy = %+v", status.Policy)
 	}
 }
 

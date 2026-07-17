@@ -210,6 +210,17 @@ func (sm *SessionManager) authoritativeScenarioComplete(id string) (bool, error)
 		return false, nil
 	}
 
+	// Runtime-policy completion is authoritative for policy scenarios: quorum
+	// may complete before every member contract, while a failed policy must never
+	// dispatch completion actions. The policy loop persists this outcome first.
+	if sc.Policy != nil {
+		complete := sc.Policy.Outcome == scenarioOutcomeComplete
+
+		sm.mu.RUnlock()
+
+		return complete, nil
+	}
+
 	type completionMember struct {
 		id                       string
 		requiredResults          int

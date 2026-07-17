@@ -19,7 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 20
+const CurrentStateVersion = 21
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -144,20 +144,24 @@ type SessionState struct {
 	// (#1092). It caps restart storms for a permanently-broken session and is
 	// reset to 0 once the session produces output. Runtime-recovery state, but
 	// persisted so the cap survives a daemon restart mid-storm.
-	StuckRestarts  int             `json:"stuck_restarts,omitempty"`
-	LastStartedAt  time.Time       `json:"last_started_at,omitempty"`
-	SummaryText    string          `json:"summary_text,omitempty"`
-	SummarySetAt   *time.Time      `json:"summary_set_at,omitempty"`
-	SummaryTTL     int             `json:"summary_ttl,omitempty"`
-	LastOutputAt   *time.Time      `json:"last_output_at,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
-	LastAttachedAt *time.Time      `json:"last_attached_at,omitempty"`
-	CreationCfg    *CreationConfig `json:"creation_config,omitempty"`
-	Token          string          `json:"token,omitempty"`
-	ScenarioID     string          `json:"scenario_id,omitempty"`
-	ScenarioName   string          `json:"scenario_name,omitempty"`
-	ScenarioRole   string          `json:"scenario_role,omitempty"`
-	ScenarioGoal   string          `json:"scenario_goal,omitempty"`
+	StuckRestarts int       `json:"stuck_restarts,omitempty"`
+	LastStartedAt time.Time `json:"last_started_at,omitempty"`
+	// LaunchGeneration advances after every successfully committed process
+	// launch. Scenario retry recovery uses it to distinguish a completed restart
+	// from a pending action after daemon restart.
+	LaunchGeneration uint64          `json:"launch_generation,omitempty"`
+	SummaryText      string          `json:"summary_text,omitempty"`
+	SummarySetAt     *time.Time      `json:"summary_set_at,omitempty"`
+	SummaryTTL       int             `json:"summary_ttl,omitempty"`
+	LastOutputAt     *time.Time      `json:"last_output_at,omitempty"`
+	CreatedAt        time.Time       `json:"created_at"`
+	LastAttachedAt   *time.Time      `json:"last_attached_at,omitempty"`
+	CreationCfg      *CreationConfig `json:"creation_config,omitempty"`
+	Token            string          `json:"token,omitempty"`
+	ScenarioID       string          `json:"scenario_id,omitempty"`
+	ScenarioName     string          `json:"scenario_name,omitempty"`
+	ScenarioRole     string          `json:"scenario_role,omitempty"`
+	ScenarioGoal     string          `json:"scenario_goal,omitempty"`
 	// TriggerID / TriggerReactor mark a session spawned by a trigger's
 	// ensure/session action, so the trigger can find and reuse it idempotently
 	// (mirroring the ScenarioID markers).
@@ -317,6 +321,7 @@ type ScenarioState struct {
 	Triggers   []config.TriggerConfig         `json:"triggers,omitempty"`
 	Lifecycle  config.ScenarioLifecycleConfig `json:"lifecycle,omitempty"`
 	Completion ScenarioCompletionState        `json:"completion,omitempty"`
+	Policy     *ScenarioPolicyState           `json:"policy,omitempty"`
 }
 
 const (
@@ -364,15 +369,16 @@ type ScenarioCleanupState struct {
 }
 
 type ScenarioSession struct {
-	Name    string                `json:"name"`
-	Mirror  string                `json:"mirror,omitempty"`
-	Role    string                `json:"role"`
-	Task    string                `json:"task"`
-	Repo    string                `json:"repo"`
-	Agent   string                `json:"agent"`
-	Model   string                `json:"model,omitempty"`
-	Shared  bool                  `json:"shared,omitempty"`
-	Results []ScenarioResultState `json:"results,omitempty"`
+	Name    string                     `json:"name"`
+	Mirror  string                     `json:"mirror,omitempty"`
+	Role    string                     `json:"role"`
+	Task    string                     `json:"task"`
+	Repo    string                     `json:"repo"`
+	Agent   string                     `json:"agent"`
+	Model   string                     `json:"model,omitempty"`
+	Shared  bool                       `json:"shared,omitempty"`
+	Results []ScenarioResultState      `json:"results,omitempty"`
+	Policy  *ScenarioMemberPolicyState `json:"policy,omitempty"`
 }
 
 type ScenarioResultStatus string
@@ -396,6 +402,32 @@ type ScenarioResultState struct {
 	SizeBytes     int                  `json:"size_bytes,omitempty"`
 	PublishedAt   time.Time            `json:"published_at,omitempty"`
 	Error         string               `json:"error,omitempty"`
+}
+
+type ScenarioPolicyState struct {
+	Completion    string     `json:"completion"`
+	Quorum        int        `json:"quorum,omitempty"`
+	OnExhausted   string     `json:"on_exhausted"`
+	Active        bool       `json:"active"`
+	Paused        bool       `json:"paused,omitempty"`
+	Outcome       string     `json:"outcome,omitempty"`
+	OutcomeReason string     `json:"outcome_reason,omitempty"`
+	OutcomeAt     *time.Time `json:"outcome_at,omitempty"`
+}
+
+type ScenarioMemberPolicyState struct {
+	Required            bool       `json:"required"`
+	TimeoutNanos        int64      `json:"timeout_nanos,omitempty"`
+	Retries             int        `json:"retries,omitempty"`
+	Attempt             int        `json:"attempt,omitempty"`
+	AttemptStartedAt    *time.Time `json:"attempt_started_at,omitempty"`
+	Deadline            *time.Time `json:"deadline,omitempty"`
+	RetryPending        bool       `json:"retry_pending,omitempty"`
+	RetryDispatched     bool       `json:"retry_dispatched,omitempty"`
+	RetryFromGeneration uint64     `json:"retry_from_generation,omitempty"`
+	SucceededAt         *time.Time `json:"succeeded_at,omitempty"`
+	ExhaustedAt         *time.Time `json:"exhausted_at,omitempty"`
+	ExhaustionReason    string     `json:"exhaustion_reason,omitempty"`
 }
 
 type State struct {
@@ -586,6 +618,7 @@ var migrations = map[int]func(*State) error{
 	17: migrateV17ToV18,
 	18: migrateV18ToV19,
 	19: migrateV19ToV20,
+	20: migrateV20ToV21,
 }
 
 func generateToken() (string, error) {
@@ -801,6 +834,19 @@ func migrateV18ToV19(_ *State) error { return nil }
 // scenario members. Existing scenarios have no mirrored members, so the zero
 // value preserves their topology and lifecycle behavior.
 func migrateV19ToV20(_ *State) error {
+	return nil
+}
+
+// migrateV20ToV21 adds durable launch generations and opt-in scenario policy
+// state. Existing scenarios deliberately retain Policy=nil, preserving their
+// legacy indefinite/manual lifecycle and todo-derived status calculation.
+func migrateV20ToV21(state *State) error {
+	for _, s := range state.Sessions {
+		if s.LaunchGeneration == 0 {
+			s.LaunchGeneration = 1
+		}
+	}
+
 	return nil
 }
 

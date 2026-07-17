@@ -68,6 +68,8 @@ func formatStopSummary(reason string, exitCode *int, exitSignal string, prev str
 		base = "Stopped after idle"
 	case StopReasonShutdown:
 		base = "Stopped by shutdown"
+	case StopReasonScenarioTimeout:
+		base = "Restarted after scenario timeout"
 	case StopReasonCrash:
 		switch {
 		case exitCode != nil && *exitCode == 0:

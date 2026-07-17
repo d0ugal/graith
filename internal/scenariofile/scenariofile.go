@@ -27,6 +27,7 @@ type Meta struct {
 	Name      string                         `toml:"name"`
 	Goal      string                         `toml:"goal"`
 	Lifecycle config.ScenarioLifecycleConfig `toml:"lifecycle"`
+	Policy    *PolicyConfig                  `toml:"policy"`
 }
 
 // Session is one [[sessions]] entry.
@@ -47,8 +48,9 @@ type Session struct {
 	Includes []string `toml:"includes"`
 	// Star creates the session starred so it is protected from an accidental
 	// manual `gr delete` (shared = true only shields from scenario stop/delete).
-	Star    bool     `toml:"star"`
-	Results []Result `toml:"results"`
+	Star    bool                `toml:"star"`
+	Results []Result            `toml:"results"`
+	Policy  *MemberPolicyConfig `toml:"policy"`
 }
 
 // Result is one [[sessions.results]] declaration. Store is relative to the
@@ -216,7 +218,34 @@ func Parse(data []byte) (*File, error) {
 		return nil, err
 	}
 
+	policyMembers := make([]PolicyMember, len(sf.Sessions))
+	for i, session := range sf.Sessions {
+		policyMembers[i] = PolicyMember{
+			Name: session.Name, Task: session.Task, Shared: session.Shared,
+			HasRequiredResult: sessionHasRequiredResult(session), Policy: session.Policy,
+		}
+	}
+
+	policy, err := NormalizePolicy(sf.Scenario.Policy, policyMembers)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := ValidatePolicyContracts(policy, policyMembers, config.TodoMaxTitleCeiling); err != nil {
+		return nil, err
+	}
+
 	return &sf, nil
+}
+
+func sessionHasRequiredResult(session Session) bool {
+	for _, result := range session.Results {
+		if result.Required {
+			return true
+		}
+	}
+
+	return false
 }
 
 // DefinedOwnedMembers returns the non-shared members that can safely supply a
@@ -424,6 +453,7 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 			Includes:   s.Includes,
 			Star:       s.Star,
 			Results:    results,
+			Policy:     MemberPolicyInput(s.Policy),
 		})
 	}
 
@@ -432,6 +462,28 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 	}
 
 	return inputs, nil
+}
+
+// PolicyInput maps a parsed scenario policy into the wire shape.
+func PolicyInput(policy *PolicyConfig) *protocol.ScenarioPolicyInput {
+	if policy == nil {
+		return nil
+	}
+
+	return &protocol.ScenarioPolicyInput{
+		Completion: policy.Completion, Quorum: policy.Quorum, OnExhausted: policy.OnExhausted,
+	}
+}
+
+// MemberPolicyInput maps a parsed member policy into the wire shape.
+func MemberPolicyInput(policy *MemberPolicyConfig) *protocol.ScenarioMemberPolicyInput {
+	if policy == nil {
+		return nil
+	}
+
+	return &protocol.ScenarioMemberPolicyInput{
+		Required: policy.Required, Timeout: policy.Timeout, Retries: policy.Retries,
+	}
 }
 
 // ValidateSessionDependencies validates the member-name DAG carried by a

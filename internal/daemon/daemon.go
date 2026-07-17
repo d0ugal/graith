@@ -99,19 +99,45 @@ type SessionManager struct {
 	// diagnostic (running with a live PTY but zero output past the threshold),
 	// so the Warn fires once per PTY lifetime rather than every detection tick.
 	// Cleared when a session (re)spawns a PTY so a restart can warn afresh.
-	silentWarned    map[string]bool
-	prWatch         *prWatchState
-	prRefWatch      *prRefWatchState
-	triggers        *triggerState
-	completion      *scenarioCompletionRuntime
-	tokens          *tokenCache
-	launch          *launchThrottle
-	resourceMu      sync.Mutex
-	resourceSamples map[string][]ResourceSample
-	resourceKick    chan struct{}
-	signalRequests  map[string]signalRequest
-	newLoopTicker   func(time.Duration) loopTicker // injectable clock boundary for background-loop tests
-	newLoopTimer    func(time.Duration) loopTimer  // injectable resettable clock boundary for purge tests
+	silentWarned map[string]bool
+	prWatch      *prWatchState
+	prRefWatch   *prRefWatchState
+	triggers     *triggerState
+	completion   *scenarioCompletionRuntime
+	tokens       *tokenCache
+	launch       *launchThrottle
+	// sessionLaunchLocks serialize resume/restart decisions per session. They
+	// close the compare-to-launch race between an automatic scenario retry and
+	// a direct user/watchdog launch without coupling unrelated sessions.
+	sessionLaunchLocksMu sync.Mutex
+	sessionLaunchLocks   map[string]*lifecycleGate
+	// scenarioPolicyPlanMu serializes durable retry claims. Process lifecycle
+	// work happens after it is released so a slow member cannot stall policy
+	// planning or operator commands for unrelated scenarios.
+	scenarioPolicyPlanMu sync.Mutex
+	// scenarioPolicyLocks are per-scenario lifecycle gates. The registry is
+	// append-only for the daemon lifetime: retaining a tiny mutex per observed
+	// scenario avoids deleting a lock while another goroutine is waiting on it.
+	scenarioPolicyLocksMu sync.Mutex
+	scenarioPolicyLocks   map[string]*lifecycleGate
+	// scenarioPolicyInFlight contains retry dispatches currently executing in
+	// this daemon. RetryDispatched is durable; this runtime companion lets a
+	// concurrent planner distinguish live work from a dispatch interrupted by a
+	// daemon restart.
+	scenarioPolicyInFlightMu sync.Mutex
+	scenarioPolicyInFlight   map[scenarioRetryAction]bool
+	// scenarioPolicyNow and scenarioRestart are deterministic test seams for
+	// the policy scheduler. Production falls back to time.Now and Restart.
+	scenarioPolicyNow   func() time.Time
+	scenarioRestart     func(id string, rows, cols uint16) error
+	scenarioResume      func(id string, rows, cols uint16) error
+	scenarioPolicyDirty map[string]bool // guarded by mu; retries result persistence without replaying actions
+	resourceMu          sync.Mutex
+	resourceSamples     map[string][]ResourceSample
+	resourceKick        chan struct{}
+	signalRequests      map[string]signalRequest
+	newLoopTicker       func(time.Duration) loopTicker // injectable clock boundary for background-loop tests
+	newLoopTimer        func(time.Duration) loopTimer  // injectable resettable clock boundary for purge tests
 
 	// purgeStatsMu guards the last/next purge-sweep timestamps surfaced in
 	// diagnostics. It is separate from sm.mu so recording a sweep never contends
@@ -545,6 +571,7 @@ func (sm *SessionManager) LoadState() error {
 	}
 
 	state.Reconcile()
+	recoverInterruptedScenarioStarts(state, time.Now().UTC())
 	sm.state = state
 	sm.rebuildTokenIndex()
 	sm.rebuildDeviceTokenIndex()
@@ -935,6 +962,10 @@ type CreateOpts struct {
 	// headless_capable and [headless] experimental is enabled; otherwise Create
 	// fails closed rather than silently downgrading. See resolveDriverKind.
 	Headless bool
+	// ForcePTY disables the soft global headless default for lifecycle owners
+	// that require resumability, such as bounded scenario retries. It is an
+	// internal option and must not be combined with Headless.
+	ForcePTY bool
 	// NoFetch skips the `git fetch origin` that normally runs before the
 	// worktree is created (issue #1012), so a session can be created from local
 	// repo state when SSH auth is unavailable (Secretive/biometric, offline).

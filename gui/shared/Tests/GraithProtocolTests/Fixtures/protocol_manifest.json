@@ -2665,6 +2665,212 @@
       ]
     },
     {
+      "name": "ScenarioMemberPolicyInfo",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "required",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": false
+        },
+        {
+          "name": "attempt",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "max_attempts",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "attempt_started_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "deadline",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "retry_pending",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "succeeded_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "exhausted_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "exhaustion_reason",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "ScenarioMemberPolicyInput",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "required",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "timeout",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "retries",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "ScenarioPolicyInfo",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "completion",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "quorum",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "on_exhausted",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "active",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": false
+        },
+        {
+          "name": "paused",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "successful",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "required_successful",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "required_total",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "outcome",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "outcome_reason",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "outcome_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "ScenarioPolicyInput",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "completion",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "quorum",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "on_exhausted",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
       "name": "ScenarioRecord",
       "swift": "required",
       "swift_type": "ScenarioRecord",
@@ -2755,6 +2961,14 @@
           "type": {
             "kind": "object",
             "ref": "ScenarioCleanupInfo"
+          },
+          "optional": true
+        },
+        {
+          "name": "policy",
+          "type": {
+            "kind": "object",
+            "ref": "ScenarioPolicyInfo"
           },
           "optional": true
         }
@@ -3035,6 +3249,14 @@
             }
           },
           "optional": true
+        },
+        {
+          "name": "policy",
+          "type": {
+            "kind": "object",
+            "ref": "ScenarioMemberPolicyInfo"
+          },
+          "optional": true
         }
       ]
     },
@@ -3149,6 +3371,14 @@
             }
           },
           "optional": true
+        },
+        {
+          "name": "policy",
+          "type": {
+            "kind": "object",
+            "ref": "ScenarioMemberPolicyInput"
+          },
+          "optional": true
         }
       ]
     },
@@ -3187,6 +3417,14 @@
             }
           },
           "optional": false
+        },
+        {
+          "name": "policy",
+          "type": {
+            "kind": "object",
+            "ref": "ScenarioPolicyInput"
+          },
+          "optional": true
         },
         {
           "name": "triggers",

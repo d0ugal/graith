@@ -28,6 +28,11 @@ version = 1
 name = "tracing-pipeline"
 goal = "Build end-to-end distributed tracing across backend and frontend"
 
+[scenario.policy]
+completion = "quorum"
+quorum = 2
+on_exhausted = "fail"
+
 [[sessions]]
 name = "backend"
 repo = "~/Code/my-backend"
@@ -41,6 +46,11 @@ name = "implementation-notes"
 format = "markdown"
 store = "{session_name}/implementation.md"
 required = true
+
+[sessions.policy]
+required = true
+timeout = "30m"
+retries = 2
 
 [[sessions]]
 name = "frontend"
@@ -56,6 +66,11 @@ name = "changed-components"
 format = "json"
 store = "{session_name}/components.json"
 required = true
+
+[sessions.policy]
+required = false
+timeout = "45m"
+retries = 1
 
 [[sessions]]
 name = "synthesis"
@@ -96,6 +111,18 @@ soft-deletes owned members, preserving their state and worktrees for
 never touches shared members or unrelated trigger-spawned sessions, and never
 turns retention `0` into a purge.
 
+### `[scenario.policy]` section
+
+The optional policy block turns on daemon-managed runtime completion and
+failure handling. Omitting this block and every member policy preserves the
+legacy indefinite/manual behaviour.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `completion` | `"all"` | `"all"` requires every required member; `"quorum"` also requires `quorum` successful members |
+| `quorum` | — | Positive success threshold for quorum mode; cannot exceed the member count or be lower than the required-member count |
+| `on_exhausted` | `"wait"` | `"fail"` terminally fails when a required member exhausts or exhaustion makes quorum unreachable; `"wait"` leaves it for manual recovery |
+
 ### `[[sessions]]` entries
 
 | Field | Required | Default | Description |
@@ -107,7 +134,7 @@ turns retention `0` into a purge.
 | `model` | no | agent default | Model override (fills `{model}` in agent args) |
 | `base` | no | repo default | Base branch for the worktree |
 | `role` | no | — | Human-readable role description |
-| `task` | no | — | Task/prompt sent to the agent on start |
+| `task` | no | — | Task/prompt sent to the agent on start; a runtime-policy member needs this or a required result contract |
 | `depends_on` | no | — | Member names whose seeded tasks must all finish before this seeded task is claimable |
 | `agent_hooks` | no | `true` | Enable agent hooks (check-inbox, etc.) |
 | `shared` | no | `false` | Reuse an existing running session by name |
@@ -136,6 +163,19 @@ Result bodies must be non-empty. JSON results must contain syntactically valid
 JSON; JSON Schema validation is not performed. Publication travels through the
 bounded control protocol and reserves framing overhead below its 4 MiB ceiling,
 so accepted artifacts remain readable through the store API.
+
+### `[sessions.policy]` section
+
+Put this block after the `[[sessions]]` entry it belongs to.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `required` | `true` | Required members always gate completion; optional successes still count toward quorum |
+| `timeout` | — | Immutable wall-clock timeout for each attempt (Go duration, minimum `1s`) |
+| `retries` | `0` | Additional automatic attempts after timeout (`0`–`10`; requires `timeout`) |
+
+Shared members may be required or optional, but cannot have timeout or retry
+actions because the scenario does not own their process.
 
 Unknown fields are rejected — typos produce a parse error rather than being silently ignored.
 
@@ -396,6 +436,11 @@ session belongs to multiple scenarios; ordinary members default to
 scenario receives an explicit error. Direct `gr store put` remains available,
 but writing the same key does not mark a declared result successful.
 
+When a runtime policy is configured, the status table also shows
+required/optional membership, attempt budget, immutable deadline, and any
+exhaustion reason. The scenario header shows successful and required counts,
+plus quorum when configured.
+
 ### `gr scenario list`
 
 List all scenarios with their aggregate status.
@@ -413,6 +458,9 @@ At least one member must have tracked todo work or a required result before a
 completion edge can occur. Members with neither do not block members that do
 have tracked work from completing the scenario.
 
+Policy scenarios additionally report `retrying`, `exhausted`, terminal
+`complete`, or terminal `failed`, and list renders quorum progress.
+
 ### `gr scenario stop <name>`
 
 Stop all running sessions in a scenario.
@@ -420,6 +468,24 @@ Stop all running sessions in a scenario.
 ```bash
 gr scenario stop tracing-pipeline
 ```
+
+Stopping a policy scenario suspends automatic actions, but wall-clock deadlines
+continue to elapse. `gr scenario resume` unsuspends it and immediately reconciles
+overdue members; stopping does not grant a fresh timeout window.
+
+### `gr scenario add <name>`
+
+Add a member from the orchestrator. Runtime policy flags are `--optional`,
+`--timeout <duration>`, and `--retries <0-10>`. Adding to a terminal policy
+scenario or a paused policy scenario is rejected; resume it first.
+
+Adding any runtime-policy flag to a legacy scenario opts the whole scenario into
+policy completion semantics. Existing members become required with no timeout;
+the new member uses the supplied policy. Before opting in, the daemon verifies
+that every existing task member still has its original durable seeded todo; the
+add is rejected without changing the scenario if that contract cannot be
+proved. `scenario add` always creates a new scenario-owned session and does not
+accept shared members.
 
 ### `gr scenario delete <name>`
 
@@ -535,6 +601,10 @@ changes current responsibility and progress accounting, but later
 `gr scenario add --depends-on <member>` commands still resolve the named
 member's original seed.
 
+Without a runtime policy, every tracked member must complete. With a policy,
+required and quorum rules decide which successful members complete the
+scenario.
+
 So instead of flipping a single flag, a member signals it has finished by marking
 its task item done:
 
@@ -597,6 +667,52 @@ Those keys include the stable scenario ID and declared member destinations, so
 two runs of the same scenario name cannot overwrite or consume each other's
 results.
 
+## Runtime policy semantics
+
+An initial attempt starts only after atomic scenario startup has committed. An
+added member starts when its add commits. A retry attempt starts when the daemon
+durably claims its one retry path, before it waits for a launch slot; the frozen
+deadline therefore includes launch queue time. Daemon downtime, process stops,
+and user activity all consume wall-clock time. Output, messages, hooks, todo
+claims, and other activity never extend a deadline.
+
+Success is contract-based: a member must have at least one assigned todo or
+required declared result; every assigned todo must be `done`, and every required
+result must be `available`. Exiting zero, crashing, or entering `stopped` is not
+success. Completion already observed when a deadline is sampled wins; after a
+timeout claim is durable, later completion belongs to the newly claimed attempt.
+Completed and outstanding todo and result state survive retry.
+Policy start/add validates that each member has at least one completion contract
+and commits todo contracts before policy activation.
+
+A retry uses the ordinary restart/resume path. It keeps the graith session ID,
+agent conversation, worktree, branch, and todo assignee identity; stopping the
+old process reopens any in-progress todo ownership so work is not stranded. It
+also uses the normal launch concurrency control. Attempts and deadlines are
+stored in daemon state, and a durable launch generation prevents a daemon
+restart from repeating a retry that already launched successfully.
+Retryable members use a PTY even when the soft global headless default is on,
+because the one-shot headless driver cannot resume the same conversation.
+
+A second durable dispatch marker is written immediately before process work.
+After daemon restart an undispatched claim continues; a dispatched attempt with
+neither an advanced launch generation nor a durable outcome is exhausted as
+interrupted, rather than risking a duplicate restart of the same attempt.
+
+Daemon cancellation reaches retries waiting on scenario serialization or a
+launch slot and is checked again immediately before spawning. A daemon restart
+that finds a scenario reserve record whose atomic startup never reached policy
+activation marks that scenario as a visible terminal startup failure; it does
+not retry a partial fleet. Completed policy todo contracts are exempt from todo
+retention until the daemon has observed and durably recorded the policy outcome.
+
+Quorum completion is terminal but non-destructive: graith records the outcome
+without stopping or deleting remaining workers. Required members must all
+succeed even if enough optional members have reached the numerical quorum.
+Optional exhaustion does not fail the scenario by itself. With
+`on_exhausted = "fail"`, it does fail once the successful and still-eligible
+members together can no longer reach the configured quorum.
+
 ## In the GUI
 
 The macOS and iOS apps surface running scenarios through the shared session
@@ -624,3 +740,5 @@ orchestrator *session*, which the GUI (a human client) is not.
 - **Add-only topology:** `gr scenario add` can append a session, but sessions and
   result declarations cannot be edited or removed in place. Delete and recreate
   the scenario for those changes
+- **Bounded policy:** Retries are finite (`0`–`10`); provider/model replacement and failover are not part of runtime policy
+- **Live additions:** The orchestrator can add sessions, but cannot add to a terminal policy scenario; member removal still requires delete/recreate

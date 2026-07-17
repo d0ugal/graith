@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -399,6 +400,21 @@ func (sm *SessionManager) Restart(id string, rows, cols uint16) (SessionState, e
 // restartWithReason is Restart with an explicit stop attribution so a watchdog
 // recovery isn't logged as an authenticated user restart (issue #1104).
 func (sm *SessionManager) restartWithReason(id string, rows, cols uint16, stopReason, initiator string) (SessionState, error) {
+	return sm.restartWithReasonMode(id, rows, cols, stopReason, initiator, false)
+}
+
+func (sm *SessionManager) restartWithReasonMode(id string, rows, cols uint16, stopReason, initiator string, bounded bool) (SessionState, error) {
+	unlock := sm.lockSessionLaunch(id)
+	defer unlock()
+
+	return sm.restartWithReasonModeLocked(id, rows, cols, stopReason, initiator, bounded)
+}
+
+func (sm *SessionManager) restartWithReasonModeLocked(id string, rows, cols uint16, stopReason, initiator string, bounded bool) (SessionState, error) {
+	return sm.restartWithReasonModeContextLocked(context.Background(), id, rows, cols, stopReason, initiator, bounded)
+}
+
+func (sm *SessionManager) restartWithReasonModeContextLocked(ctx context.Context, id string, rows, cols uint16, stopReason, initiator string, bounded bool) (SessionState, error) {
 	sm.mu.RLock()
 
 	softDeleted := false
@@ -427,11 +443,17 @@ func (sm *SessionManager) restartWithReason(id string, rows, cols uint16, stopRe
 
 		sm.logStopping(id, sm.sessionName(id), stopReason, initiator, ptySess)
 
-		if err := ptySess.Kill(); err != nil {
-			return SessionState{}, fmt.Errorf("stop session: %w", err)
-		}
+		if bounded {
+			if err := sm.teardownLiveDriver(ptySess); err != nil {
+				return SessionState{}, fmt.Errorf("stop session for bounded restart: %w", err)
+			}
+		} else {
+			if err := ptySess.Kill(); err != nil {
+				return SessionState{}, fmt.Errorf("stop session: %w", err)
+			}
 
-		<-ptySess.Done()
+			<-ptySess.Done()
+		}
 
 		// Close the old PTY so its Ptmx fd and scrollback file handle are
 		// released promptly at restart time. The stale watcher for this PTY also
@@ -508,7 +530,11 @@ func (sm *SessionManager) restartWithReason(id string, rows, cols uint16, stopRe
 		}
 	}
 
-	return sm.resumeWithSummary(id, rows, cols, "Restarted")
+	if err := ctx.Err(); err != nil {
+		return SessionState{}, fmt.Errorf("restart cancelled before resume: %w", err)
+	}
+
+	return sm.resumeWithSummaryAndPromptLocked(ctx, id, rows, cols, "Restarted", "")
 }
 
 func (sm *SessionManager) RestartWithChildren(rootID string, excludeRoot bool, rows, cols uint16) ([]string, error) {

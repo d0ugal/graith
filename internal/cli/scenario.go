@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,46 +14,17 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/scenariofile"
-	toml "github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 )
 
-type scenarioFile struct {
-	Version  int                    `toml:"version"`
-	Scenario scenarioFileMeta       `toml:"scenario"`
-	Sessions []scenarioFileSession  `toml:"sessions"`
-	Triggers []config.TriggerConfig `toml:"trigger"`
-}
+type scenarioFile = scenariofile.File
+type scenarioFileMeta = scenariofile.Meta
+type scenarioFileSession = scenariofile.Session
 
-type scenarioFileMeta struct {
-	Name      string                         `toml:"name"`
-	Goal      string                         `toml:"goal"`
-	Lifecycle config.ScenarioLifecycleConfig `toml:"lifecycle"`
-}
-
-type scenarioFileSession struct {
-	Name       string               `toml:"name"`
-	Repo       string               `toml:"repo"`
-	Mirror     string               `toml:"mirror"`
-	Agent      string               `toml:"agent"`
-	Model      string               `toml:"model"`
-	Base       string               `toml:"base"`
-	Role       string               `toml:"role"`
-	Task       string               `toml:"task"`
-	DependsOn  []string             `toml:"depends_on"`
-	AgentHooks *bool                `toml:"agent_hooks"`
-	Shared     bool                 `toml:"shared"`
-	Includes   []string             `toml:"includes"`
-	Star       bool                 `toml:"star"`
-	Results    []scenarioFileResult `toml:"results"`
-}
-
-type scenarioFileResult struct {
-	Name     string `toml:"name"`
-	Format   string `toml:"format"`
-	Store    string `toml:"store"`
-	Required bool   `toml:"required"`
-}
+const (
+	scenarioStatusTableHeader = "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tPROGRESS\tWAITING ON\tMIRROR\tRESULTS\tSHARED\tREQUIRED\tATTEMPT\tDEADLINE\tPOLICY RESULT\n"
+	scenarioListTableHeader   = "  NAME\tID\tSTATUS\tSESSIONS\tGOAL\tPOLICY PROGRESS\n"
+)
 
 func scenariosDir() string {
 	return filepath.Join(filepath.Dir(paths.ConfigFile), "scenarios")
@@ -93,68 +63,29 @@ func resolveScenarioSourceFrom(source, dir string) ([]byte, error) {
 }
 
 func parseScenarioFile(data []byte) (*scenarioFile, error) {
-	var sf scenarioFile
-
-	dec := toml.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-
-	if err := dec.Decode(&sf); err != nil {
-		return nil, fmt.Errorf("parse scenario TOML: %w", err)
-	}
-
-	if sf.Version != 1 {
-		return nil, fmt.Errorf("unsupported scenario version %d (expected 1)", sf.Version)
-	}
-
-	if sf.Scenario.Name == "" {
-		return nil, errors.New("scenario.name is required")
-	}
-
-	if len(sf.Sessions) == 0 {
-		return nil, errors.New("at least one [[sessions]] entry is required")
-	}
-
-	if err := config.ValidateScenarioLifecycle(sf.Scenario.Lifecycle); err != nil {
+	sf, err := scenariofile.Parse(data)
+	if err != nil {
 		return nil, err
 	}
 
-	mirrorMembers := make([]scenariofile.MirrorMember, len(sf.Sessions))
-	for i, s := range sf.Sessions {
-		mirrorMembers[i] = scenariofile.MirrorMember{
-			Name: s.Name, Mirror: s.Mirror, Repo: s.Repo, Base: s.Base,
-			Shared: s.Shared, Includes: len(s.Includes),
+	// The interactive CLI has historically required repo even for a shared
+	// member; retain that stricter UX while using the canonical wire schema and
+	// policy parser shared with daemon-triggered scenarios.
+	for _, session := range sf.Sessions {
+		if session.Repo == "" {
+			return nil, fmt.Errorf("session %q: repo is required", session.Name)
 		}
 	}
 
-	if _, err := scenariofile.ValidateMirrorMembers(mirrorMembers); err != nil {
-		return nil, err
-	}
+	return sf, nil
+}
 
-	roles := make(map[string]bool, len(sf.Sessions))
-	members := make(map[string]bool, len(sf.Sessions))
-	ownedMembers := make(map[string]bool, len(sf.Sessions))
+func scenarioPolicyInput(policy *scenariofile.PolicyConfig) *protocol.ScenarioPolicyInput {
+	return scenariofile.PolicyInput(policy)
+}
 
-	for _, s := range sf.Sessions {
-		// Shared members can't be watch-bound (they keep their own scenario
-		// identity), so their role is not selectable; they remain valid delivery
-		// targets by name.
-		if s.Role != "" && !s.Shared {
-			roles[s.Role] = true
-		}
-
-		if s.Name != "" {
-			members[s.Name] = true
-			if !s.Shared {
-				ownedMembers[s.Name] = true
-			}
-		}
-	}
-
-	if err := scenariofile.ValidateScenarioTriggers(sf.Triggers, roles, members, ownedMembers); err != nil {
-		return nil, err
-	}
-
-	return &sf, nil
+func scenarioMemberPolicyInput(policy *scenariofile.MemberPolicyConfig) *protocol.ScenarioMemberPolicyInput {
+	return scenariofile.MemberPolicyInput(policy)
 }
 
 func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, error) {
@@ -207,6 +138,7 @@ func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, erro
 			Includes:   includes,
 			Star:       s.Star,
 			Results:    results,
+			Policy:     scenarioMemberPolicyInput(s.Policy),
 		}
 		mirrorMembers[i] = scenariofile.MirrorMember{
 			Name: s.Name, Mirror: s.Mirror, Repo: s.Repo, Base: s.Base,
@@ -329,6 +261,7 @@ The source can be:
 			Name:            sf.Scenario.Name,
 			Goal:            sf.Scenario.Goal,
 			Sessions:        sessions,
+			Policy:          scenarioPolicyInput(sf.Scenario.Policy),
 			Triggers:        sf.Triggers,
 			Lifecycle:       sf.Scenario.Lifecycle,
 		})
@@ -521,10 +454,20 @@ var scenarioStatusCmd = &cobra.Command{
 
 		sc := statusResp.Scenario
 		out.Printf("Scenario: %s (%s) — %s\n", sc.Name, sc.ID, sc.Status)
-		out.Printf("Goal: %s\n\n", sc.Goal)
+		out.Printf("Goal: %s\n", sc.Goal)
+
+		if sc.Policy != nil {
+			out.Printf("Policy: %s\n", formatScenarioPolicySummary(sc.Policy))
+
+			if sc.Policy.OutcomeReason != "" {
+				out.Printf("Outcome: %s\n", sc.Policy.OutcomeReason)
+			}
+		}
+
+		out.Printf("\n")
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		_, _ = fmt.Fprintf(tw, "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tPROGRESS\tWAITING ON\tMIRROR\tRESULTS\tSHARED\n")
+		_, _ = fmt.Fprint(tw, scenarioStatusTableHeader)
 
 		for _, s := range sc.Sessions {
 			// Progress is derived from the member's assigned todo items (issue
@@ -539,9 +482,12 @@ var scenarioStatusCmd = &cobra.Command{
 				shared = "yes"
 			}
 
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			required, attempt, deadline, policyResult := formatScenarioMemberPolicy(s.Policy)
+
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				s.Name, s.SessionID, s.Status, s.Agent, s.Role, progress,
-				strings.Join(s.BlockedBy, ","), s.Mirror, formatScenarioResultStatus(s.Results), shared)
+				strings.Join(s.BlockedBy, ","), s.Mirror, formatScenarioResultStatus(s.Results), shared,
+				required, attempt, deadline, policyResult)
 		}
 
 		_ = tw.Flush()
@@ -691,6 +637,9 @@ var scenarioAddCmd = &cobra.Command{
 		task, _ := cmd.Flags().GetString("task")
 		dependsOn, _ := cmd.Flags().GetStringArray("depends-on")
 		base, _ := cmd.Flags().GetString("base")
+		optional, _ := cmd.Flags().GetBool("optional")
+		timeout, _ := cmd.Flags().GetString("timeout")
+		retries, _ := cmd.Flags().GetInt("retries")
 
 		if name == "" {
 			return errors.New("--name is required")
@@ -701,6 +650,16 @@ var scenarioAddCmd = &cobra.Command{
 		}
 
 		repo = config.ExpandPath(repo)
+
+		var memberPolicy *protocol.ScenarioMemberPolicyInput
+		if optional || cmd.Flags().Changed("timeout") || cmd.Flags().Changed("retries") {
+			memberPolicy = &protocol.ScenarioMemberPolicyInput{Timeout: timeout, Retries: retries}
+
+			if optional {
+				required := false
+				memberPolicy.Required = &required
+			}
+		}
 
 		c, err := client.Connect(cfg, paths, cfgFile)
 		if err != nil {
@@ -720,6 +679,7 @@ var scenarioAddCmd = &cobra.Command{
 				Task:       task,
 				DependsOn:  dependsOn,
 				AgentHooks: true,
+				Policy:     memberPolicy,
 			},
 		})
 
@@ -794,7 +754,7 @@ var scenarioListCmd = &cobra.Command{
 			out.Printf("RUNNING SCENARIOS\n")
 
 			tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-			_, _ = fmt.Fprintf(tw, "  NAME\tID\tSTATUS\tSESSIONS\tGOAL\n")
+			_, _ = fmt.Fprint(tw, scenarioListTableHeader)
 
 			for _, sc := range listResp.Scenarios {
 				goal := sc.Goal
@@ -802,7 +762,9 @@ var scenarioListCmd = &cobra.Command{
 					goal = goal[:57] + "..."
 				}
 
-				_, _ = fmt.Fprintf(tw, "  %s\t%s\t%s\t%d\t%s\n", sc.Name, sc.ID, sc.Status, len(sc.Sessions), goal)
+				policyProgress := formatScenarioPolicyProgress(sc.Policy)
+
+				_, _ = fmt.Fprintf(tw, "  %s\t%s\t%s\t%d\t%s\t%s\n", sc.Name, sc.ID, sc.Status, len(sc.Sessions), goal, policyProgress)
 			}
 
 			_ = tw.Flush()
@@ -831,6 +793,68 @@ var scenarioListCmd = &cobra.Command{
 	},
 }
 
+func formatScenarioPolicySummary(policy *protocol.ScenarioPolicyInfo) string {
+	if policy == nil {
+		return ""
+	}
+
+	threshold := fmt.Sprintf("all required (%d)", policy.RequiredTotal)
+	if policy.Completion == scenariofile.CompletionQuorum {
+		threshold = fmt.Sprintf("quorum %d", policy.Quorum)
+	}
+
+	summary := fmt.Sprintf("%s; %d successful; required %d/%d; on exhausted %s",
+		threshold, policy.Successful, policy.RequiredSuccessful, policy.RequiredTotal, policy.OnExhausted)
+	if policy.Paused {
+		summary += "; paused"
+	}
+
+	return summary
+}
+
+func formatScenarioPolicyProgress(policy *protocol.ScenarioPolicyInfo) string {
+	if policy == nil {
+		return "—"
+	}
+
+	if policy.Completion == scenariofile.CompletionQuorum {
+		return fmt.Sprintf("%d/%d quorum; required %d/%d", policy.Successful, policy.Quorum, policy.RequiredSuccessful, policy.RequiredTotal)
+	}
+
+	return fmt.Sprintf("required %d/%d", policy.RequiredSuccessful, policy.RequiredTotal)
+}
+
+func formatScenarioMemberPolicy(policy *protocol.ScenarioMemberPolicyInfo) (required, attempt, deadline, result string) {
+	if policy == nil {
+		return "—", "—", "—", "—"
+	}
+
+	required = "no"
+	if policy.Required {
+		required = "yes"
+	}
+
+	attempt = fmt.Sprintf("%d/%d", policy.Attempt, policy.MaxAttempts)
+
+	deadline = policy.Deadline
+	if deadline == "" {
+		deadline = "—"
+	}
+
+	switch {
+	case policy.SucceededAt != "":
+		result = "succeeded"
+	case policy.ExhaustionReason != "":
+		result = policy.ExhaustionReason
+	case policy.RetryPending:
+		result = "retry pending"
+	default:
+		result = "pending"
+	}
+
+	return required, attempt, deadline, result
+}
+
 // registerScenarioCmd registers this command on rootCmd. Called from registerCommands.
 func registerScenarioCmd() {
 	scenarioCmd.AddCommand(scenarioStartCmd)
@@ -853,6 +877,9 @@ func registerScenarioCmd() {
 	scenarioAddCmd.Flags().String("base", "", "Base branch")
 	scenarioResultPutCmd.Flags().StringVar(&scenarioResultFile, "file", "", "Read result body from file")
 	scenarioResultPutCmd.Flags().StringVar(&scenarioResultScenario, "scenario", "", "Scenario name (defaults to GRAITH_SCENARIO_NAME)")
+	scenarioAddCmd.Flags().Bool("optional", false, "Do not require this member for scenario completion")
+	scenarioAddCmd.Flags().String("timeout", "", "Immutable per-attempt timeout (for example 30m)")
+	scenarioAddCmd.Flags().Int("retries", 0, "Automatic retries after timeout (0-10; requires --timeout)")
 
 	rootCmd.AddCommand(scenarioCmd)
 }

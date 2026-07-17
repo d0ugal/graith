@@ -446,6 +446,7 @@ func (sm *SessionManager) actionScenario(ctx context.Context, t *config.TriggerC
 		Name:            sf.Scenario.Name,
 		Goal:            sf.Scenario.Goal,
 		Sessions:        inputs,
+		Policy:          scenariofile.PolicyInput(sf.Scenario.Policy),
 		Triggers:        sf.Triggers,
 		Lifecycle:       sf.Scenario.Lifecycle,
 	}

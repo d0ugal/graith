@@ -108,10 +108,12 @@ state instead).
 | Start / stop / resume / inspect scenarios <sup>1</sup> | ✅ | ✅ | ✅ |
 | Completion actions and lifecycle cleanup <sup>2</sup> | ✅ | 🚧 | 🚧 |
 | Declare and publish scenario results <sup>3</sup> | ✅ | 🚧 | 🚧 |
+| Scenario timeout, retry & quorum policy <sup>4</sup> | ✅ | — | — |
 
 <sup>1</sup> Start / stop / resume / inspect scenarios: The CLI can start scenario members that mirror another member's worktree read-only. The GUIs list scenarios, including each member's mirror relationship, role/task, and todo-derived progress; group scenario members in the sidebar; and run the human-authorized stop/resume/delete actions. `start`/`add` stay CLI-only (they are orchestrator-session-scoped, not human-client operations).
 <sup>2</sup> Completion actions and lifecycle cleanup: Scenario TOML can run durable trigger actions once per todo-derived completion epoch and opt into delayed recoverable cleanup. The CLI reports action and cleanup state; GUI presentation is planned.
 <sup>3</sup> Declare and publish scenario results: The CLI declares text, Markdown, and JSON result contracts in scenario TOML, authenticates member self-publication, and reports durable result status; GUI publication and result-detail presentation are planned.
+<sup>4</sup> Scenario timeout, retry & quorum policy: Scenario runtime policies are CLI/daemon-only; iOS and macOS do not model or surface policy state.
 
 ### Todo list
 

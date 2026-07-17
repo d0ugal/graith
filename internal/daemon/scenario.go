@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,6 +59,19 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 	if len(msg.Sessions) == 0 {
 		return nil, errors.New("scenario must define at least one session")
+	}
+
+	normalizedPolicy, err := normalizeProtocolScenarioPolicy(msg, sm.scenarioTodoTitleLimit())
+	if err != nil {
+		return nil, err
+	}
+
+	if normalizedPolicy != nil && sm.todos == nil {
+		for _, member := range msg.Sessions {
+			if strings.TrimSpace(member.Task) != "" {
+				return nil, errors.New("todo store is required for scenario runtime-policy task contracts")
+			}
+		}
 	}
 
 	// Validate caller is orchestrator (snapshot under lock).
@@ -216,6 +230,14 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		repoRoots[i] = repoRoot
 	}
 
+	// Serialize every lifecycle operation that can discover this scenario after
+	// its reserve record becomes visible. Generating the stable ID before the
+	// reserve means stop/delete/add will wait for start to commit or roll back.
+	scenarioID := "sc-" + generateID()
+	unlockScenario := sm.lockScenarioPolicy(scenarioID)
+
+	defer unlockScenario()
+
 	// --- Reserve phase: lock, validate no collisions, create scenario + placeholders ---
 	sm.mu.Lock()
 
@@ -247,7 +269,6 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		}
 	}
 
-	scenarioID := "sc-" + generateID()
 	now := time.Now().UTC()
 
 	scenarioSessions := make([]ScenarioSession, len(msg.Sessions))
@@ -341,6 +362,9 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 			Name: s.Name, Mirror: s.Mirror, Role: s.Role, Task: s.Task,
 			Repo: repoName, Agent: agentName, Model: s.Model, Shared: s.Shared,
 		}
+		if normalizedPolicy != nil {
+			scenarioSessions[i].Policy = newScenarioMemberPolicyState(normalizedPolicy.Members[i])
+		}
 
 		if s.Shared {
 			results, compileErr := compileScenarioResults(
@@ -409,6 +433,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		Sessions:       scenarioSessions,
 		CreatedAt:      now,
 		Lifecycle:      msg.Lifecycle,
+		Policy:         newScenarioPolicyState(normalizedPolicy),
 	}
 	sm.state.Scenarios[scenarioID] = scenario
 
@@ -506,7 +531,9 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 					RepoPath: repoRoots[idx], Mirror: mirrorSourceID,
 					BaseBranch: s.Base, Prompt: s.Task, Model: s.Model,
 					ParentID: msg.CallerSessionID, AgentHooks: s.AgentHooks,
-					Includes: s.Includes, Starred: s.Star, Rows: rows, Cols: cols,
+					Includes: s.Includes, Starred: s.Star,
+					ForcePTY: normalizedPolicy != nil && normalizedPolicy.Members[idx].Retries > 0,
+					Rows:     rows, Cols: cols,
 					EnvExtra: []map[string]string{scenarioEnv},
 				})
 				results[idx] = createResult{index: idx, sess: sess, err: createErr}
@@ -619,7 +646,8 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	// store transaction. A seed failure creates no rows and rolls back the
 	// newly-created scenario members, preserving scenario start's all-or-none
 	// contract.
-	if err := sm.seedScenarioTodos(scenarioID, sessionIDs, msg.Sessions); err != nil {
+	seededTodoIDs, err := sm.seedScenarioTodos(scenarioID, sessionIDs, msg.Sessions)
+	if err != nil {
 		rollbackErrors := sm.rollbackScenarioAfterSeedFailure(scenarioID, sessionIDs, sharedReused)
 		if len(rollbackErrors) > 0 {
 			return nil, fmt.Errorf("seed scenario todos: %w (rollback failed for: %s)", err, strings.Join(rollbackErrors, ", "))
@@ -636,11 +664,32 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 	if scenario == nil {
 		sm.mu.Unlock()
+		sm.removeScenarioTodos(seededTodoIDs)
+
 		return nil, fmt.Errorf("scenario %q was deleted during todo seeding", msg.Name)
 	}
 
 	scenario.Triggers = msg.Triggers
-	_ = sm.saveState()
+	activateScenarioPolicy(scenario, sm.scenarioPolicyTime())
+
+	if err := sm.saveState(); err != nil {
+		delete(sm.state.Scenarios, scenarioID)
+		_ = sm.saveState()
+		sm.mu.Unlock()
+		sm.removeScenarioTodos(seededTodoIDs)
+
+		for _, id := range startedIDs {
+			if stopErr := sm.stopWithReason(id, StopReasonUser, "scenario-rollback"); stopErr != nil {
+				sm.log.Warn("scenario activation rollback: stop failed", "session", id, "err", stopErr)
+			}
+
+			if deleteErr := sm.unstarAndDelete(id); deleteErr != nil {
+				sm.log.Warn("scenario activation rollback: delete failed", "session", id, "err", deleteErr)
+			}
+		}
+
+		return nil, fmt.Errorf("persist scenario activation: %w", err)
+	}
 	sm.mu.Unlock()
 
 	// --- Manifest phase: build and publish manifest to each session's inbox ---
@@ -815,7 +864,22 @@ func (sm *SessionManager) persistManifest(scenarioID string, msg protocol.Scenar
 }
 
 func (sm *SessionManager) StopScenario(name string) ([]string, error) {
-	sm.mu.RLock()
+	return sm.StopScenarioContext(context.Background(), name)
+}
+
+func (sm *SessionManager) StopScenarioContext(ctx context.Context, name string) ([]string, error) {
+	resolvedID, ok := sm.scenarioIDByName(name)
+	if !ok {
+		return nil, fmt.Errorf("scenario %q not found", name)
+	}
+
+	unlock, err := sm.lockScenarioPolicyContext(ctx, resolvedID)
+	if err != nil {
+		return nil, fmt.Errorf("wait for scenario lifecycle: %w", err)
+	}
+	defer unlock()
+
+	sm.mu.Lock()
 
 	var (
 		sessionIDs []string
@@ -824,11 +888,23 @@ func (sm *SessionManager) StopScenario(name string) ([]string, error) {
 	)
 
 	for id, sc := range sm.state.Scenarios {
-		if sc.Name == name {
+		if id == resolvedID && sc.Name == name {
 			sessionIDs = make([]string, len(sc.SessionIDs))
 			copy(sessionIDs, sc.SessionIDs)
 
 			scenarioID = id
+
+			if sc.Policy != nil {
+				wasPaused := sc.Policy.Paused
+
+				sc.Policy.Paused = true
+				if err := sm.saveState(); err != nil {
+					sc.Policy.Paused = wasPaused
+					sm.mu.Unlock()
+
+					return nil, fmt.Errorf("persist scenario policy suspension: %w", err)
+				}
+			}
 
 			sharedSet = make(map[int]bool, len(sc.Sessions))
 			for i, ss := range sc.Sessions {
@@ -841,7 +917,7 @@ func (sm *SessionManager) StopScenario(name string) ([]string, error) {
 		}
 	}
 
-	sm.mu.RUnlock()
+	sm.mu.Unlock()
 
 	if sessionIDs == nil {
 		return nil, fmt.Errorf("scenario %q not found", name)
@@ -887,7 +963,22 @@ func (sm *SessionManager) StopScenario(name string) ([]string, error) {
 }
 
 func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
-	sm.mu.RLock()
+	return sm.DeleteScenarioContext(context.Background(), name)
+}
+
+func (sm *SessionManager) DeleteScenarioContext(ctx context.Context, name string) ([]string, error) {
+	resolvedID, ok := sm.scenarioIDByName(name)
+	if !ok {
+		return nil, fmt.Errorf("scenario %q not found", name)
+	}
+
+	unlock, err := sm.lockScenarioPolicyContext(ctx, resolvedID)
+	if err != nil {
+		return nil, fmt.Errorf("wait for scenario lifecycle: %w", err)
+	}
+	defer unlock()
+
+	sm.mu.Lock()
 
 	var (
 		sessionIDs []string
@@ -896,11 +987,21 @@ func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 	)
 
 	for id, sc := range sm.state.Scenarios {
-		if sc.Name == name {
+		if id == resolvedID && sc.Name == name {
 			sessionIDs = make([]string, len(sc.SessionIDs))
 			copy(sessionIDs, sc.SessionIDs)
 
 			scenarioID = id
+
+			if sc.Policy != nil && !sc.Policy.Paused {
+				sc.Policy.Paused = true
+				if err := sm.saveState(); err != nil {
+					sc.Policy.Paused = false
+					sm.mu.Unlock()
+
+					return nil, fmt.Errorf("persist scenario policy suspension before delete: %w", err)
+				}
+			}
 
 			sharedSet = make(map[int]bool, len(sc.Sessions))
 			for i, ss := range sc.Sessions {
@@ -913,7 +1014,7 @@ func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 		}
 	}
 
-	sm.mu.RUnlock()
+	sm.mu.Unlock()
 
 	if sessionIDs == nil {
 		return nil, fmt.Errorf("scenario %q not found", name)
@@ -982,12 +1083,26 @@ func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 	recordRemoved := len(deleteErrors) == 0
 
 	sm.mu.Lock()
+	removedScenario := sm.state.Scenarios[scenarioID]
+
+	wasDirty := sm.scenarioPolicyDirty[scenarioID]
 	if recordRemoved {
 		delete(sm.state.Scenarios, scenarioID)
+		delete(sm.scenarioPolicyDirty, scenarioID)
 	}
 
-	_ = sm.saveState()
+	persistErr := sm.saveState()
+	if persistErr != nil && recordRemoved {
+		sm.state.Scenarios[scenarioID] = removedScenario
+		if wasDirty {
+			sm.scenarioPolicyDirty[scenarioID] = true
+		}
+	}
 	sm.mu.Unlock()
+
+	if persistErr != nil {
+		return deleted, fmt.Errorf("persist scenario deletion: %w", persistErr)
+	}
 
 	// Drop the scenario's trigger bindings and persisted runtime once its record
 	// is gone, so scenario churn can't leak trigger state.
@@ -1035,12 +1150,20 @@ func (sm *SessionManager) ListScenarios() []protocol.ScenarioRecord {
 }
 
 func (sm *SessionManager) ResumeScenario(name string, rows, cols uint16) ([]string, error) {
+	resolvedID, ok := sm.scenarioIDByName(name)
+	if !ok {
+		return nil, fmt.Errorf("scenario %q not found", name)
+	}
+
+	unlock := sm.lockScenarioPolicy(resolvedID)
+	defer func() { unlock() }()
+
 	sm.mu.RLock()
 
 	var scenario *ScenarioState
 
-	for _, sc := range sm.state.Scenarios {
-		if sc.Name == name {
+	for id, sc := range sm.state.Scenarios {
+		if id == resolvedID && sc.Name == name {
 			scenario = sc
 			break
 		}
@@ -1089,17 +1212,58 @@ func (sm *SessionManager) ResumeScenario(name string, rows, cols uint16) ([]stri
 			continue
 		}
 
-		if _, err := sm.Resume(id, rows, cols); err != nil {
-			sm.log.Warn("failed to resume scenario session", "session", id, "err", err)
+		var resumeErr error
+		if sm.scenarioResume != nil {
+			resumeErr = sm.scenarioResume(id, rows, cols)
+		} else {
+			_, resumeErr = sm.Resume(id, rows, cols)
+		}
+
+		if resumeErr != nil {
+			sm.log.Warn("failed to resume scenario session", "session", id, "err", resumeErr)
 			continue
 		}
 
 		resumed = append(resumed, id)
 	}
 
+	sm.mu.Lock()
+	if current := sm.state.Scenarios[scenarioID]; current != nil && current.Policy != nil {
+		wasPaused := current.Policy.Paused
+
+		current.Policy.Paused = false
+		if err := sm.saveState(); err != nil {
+			current.Policy.Paused = wasPaused
+			sm.mu.Unlock()
+
+			var rollbackErrors []string
+
+			for _, id := range resumed {
+				if stopErr := sm.stopWithReason(id, StopReasonUser, "scenario-resume-rollback"); stopErr != nil {
+					rollbackErrors = append(rollbackErrors, fmt.Sprintf("%s: %v", id, stopErr))
+				}
+			}
+
+			if len(rollbackErrors) > 0 {
+				return nil, fmt.Errorf("persist scenario policy resume: %w (rollback failed: %s)", err, strings.Join(rollbackErrors, "; "))
+			}
+
+			return nil, fmt.Errorf("persist scenario policy resume: %w", err)
+		}
+	}
+	sm.mu.Unlock()
+
 	if len(resumed) > 0 {
 		sm.republishManifests(scenarioID)
 	}
+
+	// Deadlines are immutable wall-clock instants: manual stop and daemon
+	// downtime do not extend them. Reconcile immediately after unsuspending so
+	// an elapsed deadline is not delayed until the next scheduler tick.
+	unlock()
+	unlock = func() {}
+
+	sm.reconcileScenarioPoliciesFor(context.Background(), sm.scenarioPolicyTime(), scenarioID)
 
 	return resumed, nil
 }
@@ -1121,6 +1285,10 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		return nil, err
 	}
 
+	if input.Shared {
+		return nil, errors.New("scenario add cannot add shared sessions")
+	}
+
 	cfg := sm.Config()
 
 	agentName := input.Agent
@@ -1137,17 +1305,61 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		return nil, fmt.Errorf("resolve repo root: %w", err)
 	}
 
+	resolvedID, ok := sm.scenarioIDByName(name)
+	if !ok {
+		return nil, fmt.Errorf("scenario %q not found", name)
+	}
+
+	unlock := sm.lockScenarioPolicy(resolvedID)
+	defer unlock()
+
 	sm.mu.Lock()
 
 	var (
 		scenarioID, orchestratorID, goal string
 		dependencyAssignees              []string
+		legacyPolicyContracts            []struct{ sessionID, memberName string }
+		policyEnabled                    bool
 	)
 
 	found := false
 
 	for id, sc := range sm.state.Scenarios {
-		if sc.Name == name {
+		if id == resolvedID && sc.Name == name {
+			if sc.Policy != nil && sc.Policy.Outcome != "" {
+				sm.mu.Unlock()
+				return nil, fmt.Errorf("scenario %q is already %s", name, sc.Policy.Outcome)
+			}
+
+			if sc.Policy != nil && sc.Policy.Paused {
+				sm.mu.Unlock()
+				return nil, fmt.Errorf("scenario %q is paused; resume it before adding a member", name)
+			}
+
+			normalized, policyErr := normalizeScenarioAddPolicy(sc, input, sm.scenarioTodoTitleLimit())
+			if policyErr != nil {
+				sm.mu.Unlock()
+				return nil, policyErr
+			}
+
+			policyEnabled = normalized != nil
+			if sc.Policy == nil && normalized != nil {
+				for memberIndex, member := range sc.Sessions {
+					if strings.TrimSpace(member.Task) == "" {
+						continue
+					}
+
+					if memberIndex >= len(sc.SessionIDs) || sc.SessionIDs[memberIndex] == "" {
+						sm.mu.Unlock()
+						return nil, fmt.Errorf("cannot enable runtime policy: existing member %q has no session identity", member.Name)
+					}
+
+					legacyPolicyContracts = append(legacyPolicyContracts, struct{ sessionID, memberName string }{
+						sessionID: sc.SessionIDs[memberIndex], memberName: member.Name,
+					})
+				}
+			}
+
 			scenarioID = id
 			orchestratorID = sc.OrchestratorID
 			goal = sc.Goal
@@ -1221,6 +1433,27 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 	}
 	sm.mu.Unlock()
 
+	if policyEnabled && strings.TrimSpace(input.Task) != "" && sm.todos == nil {
+		return nil, errors.New("todo store is required for scenario runtime-policy task contracts")
+	}
+
+	if len(legacyPolicyContracts) > 0 {
+		if sm.todos == nil {
+			return nil, errors.New("cannot enable runtime policy: todo store is required to verify existing member contracts")
+		}
+
+		seedIDs, seedErr := sm.todos.ScenarioSeedItemIDs("scenario:" + scenarioID)
+		if seedErr != nil {
+			return nil, fmt.Errorf("verify existing scenario contracts: %w", seedErr)
+		}
+
+		for _, contract := range legacyPolicyContracts {
+			if seedIDs[contract.sessionID] == "" {
+				return nil, fmt.Errorf("cannot enable runtime policy: existing member %q has no durable seeded todo contract", contract.memberName)
+			}
+		}
+	}
+
 	dependencyTodoIDs := make([]string, 0, len(dependencyAssignees))
 	if len(dependencyAssignees) > 0 {
 		if sm.todos == nil {
@@ -1267,6 +1500,7 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		AgentHooks: agentHooks,
 		Includes:   input.Includes,
 		Starred:    input.Star,
+		ForcePTY:   policyEnabled && input.Policy != nil && input.Policy.Retries > 0,
 		Rows:       rows,
 		Cols:       cols,
 		EnvExtra:   []map[string]string{scenarioEnv},
@@ -1275,11 +1509,33 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 
+	seededTodoID, seedErr := sm.seedAddedScenarioTodo(scenarioID, sess.ID, input, dependencyTodoIDs)
+	seededTodoIDs := []string(nil)
+
+	if seededTodoID != "" {
+		seededTodoIDs = append(seededTodoIDs, seededTodoID)
+	}
+
+	if seedErr != nil {
+		sm.removeScenarioTodos(seededTodoIDs)
+
+		if stopErr := sm.Stop(sess.ID); stopErr != nil {
+			sm.log.Warn("failed to stop session after result-contract seed failed", "session", sess.ID, "err", stopErr)
+		}
+
+		if deleteErr := sm.unstarAndDelete(sess.ID); deleteErr != nil {
+			sm.log.Warn("failed to delete session after result-contract seed failed", "session", sess.ID, "err", deleteErr)
+		}
+
+		return nil, fmt.Errorf("seed scenario todo: %w", seedErr)
+	}
+
 	sm.mu.Lock()
 
 	scenario, stillExists := sm.state.Scenarios[scenarioID]
 	if !stillExists {
 		sm.mu.Unlock()
+		sm.removeScenarioTodos(seededTodoIDs)
 
 		if stopErr := sm.Stop(sess.ID); stopErr != nil {
 			sm.log.Warn("failed to stop orphaned session after scenario deletion", "session", sess.ID, "err", stopErr)
@@ -1303,6 +1559,7 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 	)
 	if compileErr != nil {
 		sm.mu.Unlock()
+		sm.removeScenarioTodos(seededTodoIDs)
 
 		if stopErr := sm.Stop(sess.ID); stopErr != nil {
 			sm.log.Warn("failed to stop session after result declaration collision", "session", sess.ID, "err", stopErr)
@@ -1313,6 +1570,22 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		return nil, fmt.Errorf("session %q: %w", input.Name, compileErr)
 	}
 
+	beforePolicy, beforeMemberPolicies := cloneScenarioPolicyRuntime(scenario)
+
+	memberPolicy, policyErr := applyScenarioAddPolicy(scenario, input, sm.scenarioPolicyTime(), sm.scenarioTodoTitleLimit())
+	if policyErr != nil {
+		sm.mu.Unlock()
+		sm.removeScenarioTodos(seededTodoIDs)
+
+		if stopErr := sm.Stop(sess.ID); stopErr != nil {
+			sm.log.Warn("failed to stop session after scenario policy changed during add", "session", sess.ID, "err", stopErr)
+		}
+
+		_ = sm.unstarAndDelete(sess.ID)
+
+		return nil, policyErr
+	}
+
 	if created, ok := sm.state.Sessions[sess.ID]; ok {
 		created.ScenarioID = scenarioID
 		created.ScenarioName = name
@@ -1321,39 +1594,51 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 	}
 
 	scenario.SessionIDs = append(scenario.SessionIDs, sess.ID)
+
 	scenario.Sessions = append(scenario.Sessions, ScenarioSession{
 		Name: input.Name, Role: input.Role, Task: input.Task,
 		Repo: filepath.Base(repoRoot), Agent: agentName, Model: input.Model,
-		Results: results,
+		Results: results, Policy: memberPolicy,
 	})
-	_ = sm.saveState()
-	sm.mu.Unlock()
+	if err := sm.saveState(); err != nil {
+		scenario.SessionIDs = scenario.SessionIDs[:len(scenario.SessionIDs)-1]
+		scenario.Sessions = scenario.Sessions[:len(scenario.Sessions)-1]
+		restoreScenarioPolicyRuntime(scenario, beforePolicy, beforeMemberPolicies)
 
-	if err := sm.seedAddedScenarioTodo(scenarioID, sess.ID, input, dependencyTodoIDs); err != nil {
-		rollbackErr := sm.rollbackAddedScenarioMember(scenarioID, sess.ID)
-		if rollbackErr != nil {
-			return nil, errors.Join(
-				fmt.Errorf("seed scenario todo: %w", err),
-				fmt.Errorf("rollback scenario member: %w", rollbackErr),
-			)
+		if created, ok := sm.state.Sessions[sess.ID]; ok {
+			created.ScenarioID = ""
+			created.ScenarioName = ""
+			created.ScenarioRole = ""
+			created.ScenarioGoal = ""
+		}
+		sm.mu.Unlock()
+		sm.removeScenarioTodos(seededTodoIDs)
+
+		if stopErr := sm.Stop(sess.ID); stopErr != nil {
+			sm.log.Warn("failed to stop session after scenario add commit failed", "session", sess.ID, "err", stopErr)
 		}
 
-		return nil, fmt.Errorf("seed scenario todo: %w", err)
+		if deleteErr := sm.unstarAndDelete(sess.ID); deleteErr != nil {
+			sm.log.Warn("failed to delete session after scenario add commit failed", "session", sess.ID, "err", deleteErr)
+		}
+
+		return nil, fmt.Errorf("persist scenario member addition: %w", err)
 	}
+	sm.mu.Unlock()
 
 	sm.republishManifests(scenarioID)
 
 	return &sess, nil
 }
 
-func (sm *SessionManager) seedAddedScenarioTodo(scenarioID, sessionID string, input protocol.ScenarioSessionInput, dependencyIDs []string) error {
+func (sm *SessionManager) seedAddedScenarioTodo(scenarioID, sessionID string, input protocol.ScenarioSessionInput, dependencyIDs []string) (string, error) {
 	task := strings.TrimSpace(input.Task)
 	if task == "" {
-		return nil
+		return "", nil
 	}
 
 	if sm.todos == nil {
-		return nil
+		return "", nil
 	}
 
 	scope := "scenario:" + scenarioID
@@ -1362,59 +1647,25 @@ func (sm *SessionManager) seedAddedScenarioTodo(scenarioID, sessionID string, in
 		Scope: scope, Title: task, Assignee: sessionID, DependsOn: dependencyIDs, CreatedBy: scope,
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	sm.emitTodoEvent(scope, "added", item)
 
-	return nil
-}
-
-func (sm *SessionManager) rollbackAddedScenarioMember(scenarioID, sessionID string) error {
-	if err := sm.Stop(sessionID); err != nil {
-		sm.log.Warn("scenario add todo rollback: stop failed", "session", sessionID, "err", err)
-	}
-
-	if err := sm.unstarAndDelete(sessionID); err != nil {
-		return fmt.Errorf("delete session %s: %w", sessionID, err)
-	}
-
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	if scenario := sm.state.Scenarios[scenarioID]; scenario != nil {
-		for i, id := range scenario.SessionIDs {
-			if id != sessionID {
-				continue
-			}
-
-			scenario.SessionIDs = append(scenario.SessionIDs[:i], scenario.SessionIDs[i+1:]...)
-			if i < len(scenario.Sessions) {
-				scenario.Sessions = append(scenario.Sessions[:i], scenario.Sessions[i+1:]...)
-			}
-
-			break
-		}
-	}
-
-	if err := sm.saveState(); err != nil {
-		return fmt.Errorf("persist scenario add rollback: %w", err)
-	}
-
-	return nil
+	return item.ID, nil
 }
 
 // seedScenarioTodos atomically creates one assigned todo item per member with a
 // non-empty task and resolves member-name dependencies between those items.
-func (sm *SessionManager) seedScenarioTodos(scenarioID string, sessionIDs []string, sessions []protocol.ScenarioSessionInput) error {
+func (sm *SessionManager) seedScenarioTodos(scenarioID string, sessionIDs []string, sessions []protocol.ScenarioSessionInput) ([]string, error) {
 	if sm.todos == nil {
 		for _, session := range sessions {
 			if len(session.DependsOn) > 0 {
-				return errors.New("todo store is required for scenario task dependencies")
+				return nil, errors.New("todo store is required for scenario task dependencies")
 			}
 		}
 
-		return nil
+		return nil, nil
 	}
 
 	scope := "scenario:" + scenarioID
@@ -1422,7 +1673,7 @@ func (sm *SessionManager) seedScenarioTodos(scenarioID string, sessionIDs []stri
 
 	for i, ss := range sessions {
 		if i >= len(sessionIDs) {
-			return fmt.Errorf("scenario task %q has no session id", ss.Name)
+			return nil, fmt.Errorf("scenario task %q has no session id", ss.Name)
 		}
 
 		task := strings.TrimSpace(ss.Task)
@@ -1439,15 +1690,17 @@ func (sm *SessionManager) seedScenarioTodos(scenarioID string, sessionIDs []stri
 
 	items, err := sm.todos.AddBatch(entries)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
+	seeded := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		item := items[entry.Key]
+		seeded = append(seeded, item.ID)
 		sm.emitTodoEvent(scope, "added", item)
 	}
 
-	return nil
+	return seeded, nil
 }
 
 // rollbackScenarioAfterSeedFailure tears down only members created for this
@@ -1480,6 +1733,26 @@ func (sm *SessionManager) rollbackScenarioAfterSeedFailure(scenarioID string, se
 	sm.mu.Unlock()
 
 	return failed
+}
+
+func (sm *SessionManager) removeScenarioTodos(ids []string) {
+	if sm.todos == nil {
+		return
+	}
+
+	for _, id := range ids {
+		if err := sm.todos.Remove(id); err != nil && !errors.Is(err, ErrTodoNotFound) {
+			sm.log.Warn("failed to remove scenario todo during rollback", "todo", id, "err", err)
+		}
+	}
+}
+
+func (sm *SessionManager) scenarioTodoTitleLimit() int {
+	if sm.todos == nil {
+		return config.TodoMaxTitleDefault
+	}
+
+	return sm.todos.titleLimit()
 }
 
 func (sm *SessionManager) republishManifests(scenarioID string) {
@@ -1589,7 +1862,11 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 		}
 	}
 
-	var running, stopped, errored, tracked, completeMembers int
+	var (
+		running, stopped, errored, tracked, completeMembers int
+		successful, requiredSuccessful, requiredTotal       int
+		retryPending, requiredExhausted                     bool
+	)
 
 	for i, ss := range sc.Sessions {
 		sessions[i] = protocol.ScenarioSessionInfo{
@@ -1597,20 +1874,10 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 			Repo: ss.Repo, Agent: ss.Agent, Model: ss.Model, Shared: ss.Shared,
 		}
 
-		requiredResultsAvailable := true
-		requiredResults := 0
-
 		if len(ss.Results) > 0 {
 			sessions[i].Results = make([]protocol.ScenarioResultInfo, len(ss.Results))
 			for resultIndex, result := range ss.Results {
 				sessions[i].Results[resultIndex] = scenarioResultInfo(result)
-				if result.Required {
-					requiredResults++
-
-					if result.Status != ScenarioResultAvailable {
-						requiredResultsAvailable = false
-					}
-				}
 			}
 		}
 
@@ -1632,14 +1899,13 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 				}
 			}
 
-			// A member with tracked todos or required results is complete only when
-			// both sides of its contract are complete. Optional results never enter
-			// this predicate.
-			if sessions[i].TodoTotal > 0 || requiredResults > 0 {
+			memberTracked, memberComplete := scenarioMemberContractProgress(
+				ss, [2]int{sessions[i].TodoDone, sessions[i].TodoTotal},
+			)
+			if memberTracked {
 				tracked++
 
-				todosComplete := sessions[i].TodoTotal == 0 || sessions[i].TodoDone == sessions[i].TodoTotal
-				if todosComplete && requiredResultsAvailable {
+				if memberComplete {
 					completeMembers++
 				}
 			}
@@ -1656,6 +1922,36 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 				}
 			}
 		}
+
+		if ss.Policy != nil {
+			memberPolicy := ss.Policy
+			sessions[i].Policy = &protocol.ScenarioMemberPolicyInfo{
+				Required:         memberPolicy.Required,
+				Attempt:          memberPolicy.Attempt,
+				MaxAttempts:      memberPolicy.Retries + 1,
+				AttemptStartedAt: formatScenarioPolicyTime(memberPolicy.AttemptStartedAt),
+				Deadline:         formatScenarioPolicyTime(memberPolicy.Deadline),
+				RetryPending:     memberPolicy.RetryPending,
+				SucceededAt:      formatScenarioPolicyTime(memberPolicy.SucceededAt),
+				ExhaustedAt:      formatScenarioPolicyTime(memberPolicy.ExhaustedAt),
+				ExhaustionReason: memberPolicy.ExhaustionReason,
+			}
+
+			if memberPolicy.Required {
+				requiredTotal++
+			}
+
+			if memberPolicy.SucceededAt != nil {
+				successful++
+
+				if memberPolicy.Required {
+					requiredSuccessful++
+				}
+			}
+
+			retryPending = retryPending || memberPolicy.RetryPending
+			requiredExhausted = requiredExhausted || (memberPolicy.Required && memberPolicy.ExhaustedAt != nil)
+		}
 	}
 
 	total := len(sc.SessionIDs)
@@ -1663,9 +1959,16 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 	var status string
 
 	switch {
+	case sc.Policy != nil && sc.Policy.Outcome != "":
+		status = sc.Policy.Outcome
+	case sc.Policy != nil && retryPending:
+		status = "retrying"
+	case sc.Policy != nil && requiredExhausted:
+		status = "exhausted"
 	// Completion is derived from tracked todos plus required result contracts.
-	// Optional results do not block it.
-	case errored == 0 && tracked > 0 && completeMembers == tracked:
+	// Optional results do not block it. Policy scenarios become complete only
+	// through their durable policy outcome.
+	case sc.Policy == nil && errored == 0 && tracked > 0 && completeMembers == tracked:
 		status = "complete"
 	case running == total:
 		status = "running"
@@ -1677,7 +1980,7 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 		status = "partial"
 	}
 
-	return &protocol.ScenarioRecord{
+	record := &protocol.ScenarioRecord{
 		ID:                sc.ID,
 		Name:              sc.Name,
 		OrchestratorID:    sc.OrchestratorID,
@@ -1690,6 +1993,31 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 		CompletionActions: scenarioCompletionActionsToWire(sc.Completion.Actions),
 		Cleanup:           scenarioCleanupToWire(sc.Completion.Cleanup),
 	}
+	if sc.Policy != nil {
+		record.Policy = &protocol.ScenarioPolicyInfo{
+			Completion:         sc.Policy.Completion,
+			Quorum:             sc.Policy.Quorum,
+			OnExhausted:        sc.Policy.OnExhausted,
+			Active:             sc.Policy.Active,
+			Paused:             sc.Policy.Paused,
+			Successful:         successful,
+			RequiredSuccessful: requiredSuccessful,
+			RequiredTotal:      requiredTotal,
+			Outcome:            sc.Policy.Outcome,
+			OutcomeReason:      sc.Policy.OutcomeReason,
+			OutcomeAt:          formatScenarioPolicyTime(sc.Policy.OutcomeAt),
+		}
+	}
+
+	return record
+}
+
+func formatScenarioPolicyTime(t *time.Time) string {
+	if t == nil || t.IsZero() {
+		return ""
+	}
+
+	return t.UTC().Format(time.RFC3339Nano)
 }
 
 func scenarioCompletionActionsToWire(actions []ScenarioCompletionActionState) []protocol.ScenarioCompletionActionInfo {
