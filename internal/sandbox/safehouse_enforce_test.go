@@ -46,14 +46,14 @@ func mustEnforceSafehouse(t *testing.T) {
 func TestSafehouseEnforcesFilesystemBoundary(t *testing.T) {
 	mustEnforceSafehouse(t)
 
-	// Granted fixtures live under t.TempDir(): a read-write worktree, a granted
-	// read-only dir, and a granted write dir.
+	// The read-write worktree and explicit write dir can live under t.TempDir().
+	// The read-only source cannot: safehouse deliberately grants the system temp
+	// tree read-write so sandboxed tools can function.
 	root := t.TempDir()
 	worktree := filepath.Join(root, "bothy")
-	readOnly := filepath.Join(root, "glen")
 	writeDir := filepath.Join(root, "croft")
 
-	for _, d := range []string{worktree, readOnly, writeDir} {
+	for _, d := range []string{worktree, writeDir} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -68,11 +68,16 @@ func TestSafehouseEnforcesFilesystemBoundary(t *testing.T) {
 		t.Fatalf("resolve home: %v", err)
 	}
 
+	readOnly, err := os.MkdirTemp(home, "graith-readonly-*")
+	if err != nil {
+		t.Fatalf("create read-only dir under home: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(readOnly) })
+
 	secretDir, err := os.MkdirTemp(home, "graith-noaccess-*")
 	if err != nil {
 		t.Fatalf("create no-access dir under home: %v", err)
 	}
-
 	t.Cleanup(func() { _ = os.RemoveAll(secretDir) })
 
 	secret := filepath.Join(secretDir, "id_rsa")
