@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/scenariofile"
@@ -106,6 +107,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	// scenario once the two-phase start below succeeds.
 	definedRoles := make(map[string]bool, len(msg.Sessions))
 	definedMembers := make(map[string]bool, len(msg.Sessions))
+	definedOwnedMembers := make(map[string]bool, len(msg.Sessions))
 
 	for _, s := range msg.Sessions {
 		// Shared members keep their original scenario identity, so a watch trigger
@@ -117,10 +119,17 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 		if s.Name != "" {
 			definedMembers[s.Name] = true
+			if !s.Shared {
+				definedOwnedMembers[s.Name] = true
+			}
 		}
 	}
 
-	if err := scenariofile.ValidateScenarioTriggers(msg.Triggers, definedRoles, definedMembers); err != nil {
+	if err := scenariofile.ValidateScenarioTriggers(msg.Triggers, definedRoles, definedMembers, definedOwnedMembers); err != nil {
+		return nil, err
+	}
+
+	if err := config.ValidateScenarioLifecycle(msg.Lifecycle); err != nil {
 		return nil, err
 	}
 
@@ -258,6 +267,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		SessionIDs:     sessionIDs,
 		Sessions:       scenarioSessions,
 		CreatedAt:      now,
+		Lifecycle:      msg.Lifecycle,
 	}
 	sm.state.Scenarios[scenarioID] = scenario
 
@@ -622,6 +632,8 @@ func (sm *SessionManager) StopScenario(name string) ([]string, error) {
 		return nil, fmt.Errorf("scenario %q not found", name)
 	}
 
+	sm.cancelScenarioCompletion(scenarioID, "cancelled by manual scenario stop")
+
 	// Tear down any scenario-embedded trigger watchers up front — the sessions
 	// they bind to are about to stop. The definitions stay on ScenarioState so a
 	// later resume rebinds them.
@@ -691,6 +703,8 @@ func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 	if sessionIDs == nil {
 		return nil, fmt.Errorf("scenario %q not found", name)
 	}
+
+	sm.cancelScenarioCompletion(scenarioID, "cancelled by manual scenario delete")
 
 	// Tear down the scenario's trigger watchers up front (as StopScenario does),
 	// so a live binding on a still-running member can't fire mid-teardown while
@@ -1190,13 +1204,56 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 	}
 
 	return &protocol.ScenarioRecord{
-		ID:             sc.ID,
-		Name:           sc.Name,
-		OrchestratorID: sc.OrchestratorID,
-		Goal:           sc.Goal,
-		Status:         status,
-		SessionIDs:     sc.SessionIDs,
-		Sessions:       sessions,
-		CreatedAt:      sc.CreatedAt.Format(time.RFC3339),
+		ID:                sc.ID,
+		Name:              sc.Name,
+		OrchestratorID:    sc.OrchestratorID,
+		Goal:              sc.Goal,
+		Status:            status,
+		SessionIDs:        sc.SessionIDs,
+		Sessions:          sessions,
+		CreatedAt:         sc.CreatedAt.Format(time.RFC3339),
+		CompletionEpoch:   sc.Completion.Epoch,
+		CompletionActions: scenarioCompletionActionsToWire(sc.Completion.Actions),
+		Cleanup:           scenarioCleanupToWire(sc.Completion.Cleanup),
 	}
+}
+
+func scenarioCompletionActionsToWire(actions []ScenarioCompletionActionState) []protocol.ScenarioCompletionActionInfo {
+	out := make([]protocol.ScenarioCompletionActionInfo, 0, len(actions))
+	for _, action := range actions {
+		info := protocol.ScenarioCompletionActionInfo{
+			Name: action.Name, State: action.State, Attempt: action.Attempt,
+			Result: action.Result, Error: action.Error, SessionID: action.SessionID,
+		}
+		if action.StartedAt != nil {
+			info.StartedAt = action.StartedAt.Format(time.RFC3339)
+		}
+
+		if action.FinishedAt != nil {
+			info.FinishedAt = action.FinishedAt.Format(time.RFC3339)
+		}
+
+		out = append(out, info)
+	}
+
+	return out
+}
+
+func scenarioCleanupToWire(cleanup *ScenarioCleanupState) *protocol.ScenarioCleanupInfo {
+	if cleanup == nil {
+		return nil
+	}
+
+	info := &protocol.ScenarioCleanupInfo{
+		Policy: cleanup.Policy, State: cleanup.State, Result: cleanup.Result, Error: cleanup.Error,
+	}
+	if cleanup.ScheduledAt != nil {
+		info.ScheduledAt = cleanup.ScheduledAt.Format(time.RFC3339)
+	}
+
+	if cleanup.FinishedAt != nil {
+		info.FinishedAt = cleanup.FinishedAt.Format(time.RFC3339)
+	}
+
+	return info
 }

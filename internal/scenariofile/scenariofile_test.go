@@ -3,6 +3,7 @@ package scenariofile
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 )
@@ -172,6 +173,85 @@ prompt = "Review the changes since your last look."
 	}
 }
 
+func TestParse_CompletionTriggerAndLifecycle(t *testing.T) {
+	data := []byte(`
+version = 1
+[scenario]
+name = "strath"
+goal = "finish"
+[scenario.lifecycle]
+cleanup = "on_success"
+delay = "30m"
+[[sessions]]
+name = "ben"
+repo = "/r"
+role = "reporter"
+[[trigger]]
+name = "archive"
+[trigger.completion]
+event = "complete"
+session = "ben"
+[trigger.action]
+type = "command"
+command = "./archive"
+[trigger.action.deliver]
+store = "shared:reports/{completion_epoch}.md"
+required = true
+`)
+
+	sf, err := Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if sf.Scenario.Lifecycle.CleanupMode() != config.ScenarioCleanupOnSuccess ||
+		sf.Scenario.Lifecycle.DelayDuration() != 30*time.Minute {
+		t.Fatalf("lifecycle = %+v", sf.Scenario.Lifecycle)
+	}
+
+	if len(sf.Triggers) != 1 || !sf.Triggers[0].IsCompletion() || sf.Triggers[0].Completion.Session != "ben" {
+		t.Fatalf("completion trigger = %+v", sf.Triggers)
+	}
+}
+
+func TestParse_CompletionTriggerScopeRejected(t *testing.T) {
+	base := `
+version = 1
+[scenario]
+name = "strath"
+[[sessions]]
+name = "ben"
+repo = "/r"
+[[sessions]]
+name = "shared-ben"
+repo = "/r"
+shared = true
+`
+
+	for _, tc := range []struct {
+		name, session, action, want string
+	}{
+		{"missing command context", "", "command", "requires completion.session"},
+		{"shared context", "shared-ben", "command", "not a non-shared session"},
+		{"unknown context", "canny", "session", "not a non-shared session"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			extra := "command = \"true\"\n"
+			if tc.action == "session" {
+				extra = "prompt = \"report\"\n"
+			}
+
+			data := base + "[[trigger]]\nname=\"finish\"\n[trigger.completion]\nsession=\"" + tc.session + "\"\n" +
+				"[trigger.action]\ntype=\"" + tc.action + "\"\n" + extra
+
+			_, err := Parse([]byte(data))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
 func TestParse_EmbeddedTriggerInvalid(t *testing.T) {
 	base := `
 version = 1
@@ -205,7 +285,7 @@ role = "implementer"
 		{
 			name: "schedule command rejected",
 			trig: "[[trigger]]\nname=\"t\"\n[trigger.schedule]\nevery=\"1h\"\n[trigger.action]\ntype=\"command\"\ncommand=\"go test ./...\"\nrepo=\"/r\"\n",
-			want: "require a [watch] source",
+			want: "require a [watch] or [completion] source",
 		},
 		{
 			name: "session action external repo rejected",
@@ -231,7 +311,7 @@ role = "implementer"
 		{
 			name: "no source rejected",
 			trig: "[[trigger]]\nname=\"t\"\n[trigger.action]\ntype=\"message\"\nbody=\"x\"\n[trigger.action.deliver]\ntopic=\"blether\"\n",
-			want: "exactly one of [schedule], [watch], or [gcx]",
+			want: "exactly one of [schedule], [watch], [gcx], or [completion]",
 		},
 		{
 			name: "gcx source rejected",

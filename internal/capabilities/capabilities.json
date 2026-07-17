@@ -204,6 +204,13 @@
       "notes": "The GUIs list scenarios, show per-session role/task and todo-derived progress (per-member completion is derived from assigned todo items), group scenario members in the sidebar, and run the human-authorized stop/resume/delete actions; `start`/`add` stay CLI-only (they are orchestrator-session-scoped, not human-client operations)."
     },
     {
+      "id": "scenarios.completion-automation",
+      "category": "Scenarios",
+      "name": "Completion actions and lifecycle cleanup",
+      "cli": "supported", "ios": "planned", "macos": "planned",
+      "notes": "Scenario TOML can run durable trigger actions once per todo-derived completion epoch and opt into delayed recoverable cleanup. The CLI reports action and cleanup state; GUI presentation is planned."
+    },
+    {
       "id": "todo.manage",
       "category": "Todo list",
       "name": "Todo list",

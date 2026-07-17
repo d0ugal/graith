@@ -19,7 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 18
+const CurrentStateVersion = 19
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -169,6 +169,13 @@ type SessionState struct {
 	// one with the same TriggerID+TrackerIssue exists. Empty for every non-tracker
 	// session. See docs/design/2026-07-16-tracker-poll-action.md.
 	TrackerIssue string `json:"tracker_issue,omitempty"`
+	// CompletionScenarioID/Epoch/Action identify a session spawned as a durable
+	// scenario-completion action. They let a restarted daemon adopt the action
+	// instead of spawning a duplicate. They do not make the session a scenario
+	// member or a lifecycle-cleanup target.
+	CompletionScenarioID string `json:"completion_scenario_id,omitempty"`
+	CompletionEpoch      int    `json:"completion_epoch,omitempty"`
+	CompletionAction     string `json:"completion_action,omitempty"`
 	// AutoCleanup, when non-empty, soft-deletes this trigger-spawned session
 	// when it stops: config.CleanupAlways on any stop, config.CleanupOnSuccess
 	// only on a clean (exit 0) stop. Empty disables it. Set only on
@@ -302,10 +309,57 @@ type ScenarioState struct {
 	SourceFileHash string            `json:"source_file_hash,omitempty"`
 	// Triggers are the scenario-embedded [[trigger]] blocks (issue #1027). They
 	// are set only once the two-phase start succeeds, so a rolled-back scenario
-	// never activates them. Enumerated (namespaced scenario:<id>:<name>) by
-	// SessionManager.allTriggers while the scenario has a running member, so they
-	// survive a daemon restart with the scenario without re-reading the TOML.
-	Triggers []config.TriggerConfig `json:"triggers,omitempty"`
+	// never activates them. SessionManager.allTriggers enumerates namespaced
+	// schedule/watch definitions while a member runs and completion definitions
+	// while the record exists. Persistence lets them survive a daemon restart
+	// without re-reading the TOML.
+	Triggers   []config.TriggerConfig         `json:"triggers,omitempty"`
+	Lifecycle  config.ScenarioLifecycleConfig `json:"lifecycle,omitempty"`
+	Completion ScenarioCompletionState        `json:"completion,omitempty"`
+}
+
+const (
+	CompletionActionPending   = "pending"
+	CompletionActionRunning   = "running"
+	CompletionActionSucceeded = "succeeded"
+	CompletionActionFailed    = "failed"
+
+	ScenarioCleanupPending   = "pending"
+	ScenarioCleanupScheduled = "scheduled"
+	ScenarioCleanupRunning   = "running"
+	ScenarioCleanupSucceeded = "succeeded"
+	ScenarioCleanupFailed    = "failed"
+	ScenarioCleanupCancelled = "cancelled"
+)
+
+// ScenarioCompletionState is the durable current completion epoch. Complete is
+// the last authoritative todo-derived value observed by the reconciler.
+type ScenarioCompletionState struct {
+	Complete       bool                            `json:"complete,omitempty"`
+	Epoch          int                             `json:"epoch,omitempty"`
+	TransitionedAt *time.Time                      `json:"transitioned_at,omitempty"`
+	Actions        []ScenarioCompletionActionState `json:"actions,omitempty"`
+	Cleanup        *ScenarioCleanupState           `json:"cleanup,omitempty"`
+}
+
+type ScenarioCompletionActionState struct {
+	Name       string     `json:"name"`
+	State      string     `json:"state"`
+	Attempt    int        `json:"attempt,omitempty"`
+	StartedAt  *time.Time `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	Result     string     `json:"result,omitempty"`
+	Error      string     `json:"error,omitempty"`
+	SessionID  string     `json:"session_id,omitempty"`
+}
+
+type ScenarioCleanupState struct {
+	Policy      string     `json:"policy"`
+	State       string     `json:"state"`
+	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
+	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	Result      string     `json:"result,omitempty"`
+	Error       string     `json:"error,omitempty"`
 }
 
 type ScenarioSession struct {
@@ -366,7 +420,7 @@ type TriggerRuntimeState struct {
 type TriggerRun struct {
 	ScheduledAt     time.Time `json:"scheduled_at"`
 	SourceSessionID string    `json:"source_session_id,omitempty"`
-	Cause           string    `json:"cause"`  // schedule | catch_up | manual | file | gcx
+	Cause           string    `json:"cause"`  // schedule | catch_up | manual | file | gcx | scenario_complete
 	Result          string    `json:"result"` // per action type
 }
 
@@ -504,6 +558,7 @@ var migrations = map[int]func(*State) error{
 	15: migrateV15ToV16,
 	16: migrateV16ToV17,
 	17: migrateV17ToV18,
+	18: migrateV18ToV19,
 }
 
 func generateToken() (string, error) {
@@ -709,6 +764,11 @@ func migrateV17ToV18(state *State) error {
 
 	return nil
 }
+
+// migrateV18ToV19 is additive. Existing scenarios start with no observed
+// completion edge; startup reconciliation derives their current state and, if
+// complete, creates their first durable epoch.
+func migrateV18ToV19(_ *State) error { return nil }
 
 // writeFileAtomic writes state to disk crash-safely (temp + fsync + rename +
 // dir fsync). It delegates to the shared atomicfile helper so every state

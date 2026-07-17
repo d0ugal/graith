@@ -2515,6 +2515,118 @@
       ]
     },
     {
+      "name": "ScenarioCleanupInfo",
+      "swift": "required",
+      "swift_type": "ScenarioCleanupInfo",
+      "fields": [
+        {
+          "name": "policy",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "state",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "scheduled_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "finished_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "result",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "error",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "ScenarioCompletionActionInfo",
+      "swift": "required",
+      "swift_type": "ScenarioCompletionActionInfo",
+      "fields": [
+        {
+          "name": "name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "state",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "attempt",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "started_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "finished_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "result",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "error",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
       "name": "ScenarioDeleteMsg",
       "swift": "required",
       "swift_type": "ScenarioNameMsg",
@@ -2619,6 +2731,32 @@
             "kind": "string"
           },
           "optional": false
+        },
+        {
+          "name": "completion_epoch",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "completion_actions",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "ScenarioCompletionActionInfo"
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "cleanup",
+          "type": {
+            "kind": "object",
+            "ref": "ScenarioCleanupInfo"
+          },
+          "optional": true
         }
       ]
     },
@@ -2850,6 +2988,14 @@
               "kind": "object",
               "ref": "TriggerConfig"
             }
+          },
+          "optional": true
+        },
+        {
+          "name": "lifecycle",
+          "type": {
+            "kind": "object",
+            "ref": "ScenarioLifecycleConfig"
           },
           "optional": true
         }

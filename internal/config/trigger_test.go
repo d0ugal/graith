@@ -225,6 +225,50 @@ func TestValidateTriggers_Invalid(t *testing.T) {
 	}
 }
 
+func TestValidateTriggers_GlobalCompletionRejected(t *testing.T) {
+	cfg := Default()
+	cfg.Triggers = []TriggerConfig{{
+		Name: "braw-complete", Completion: &CompletionConfig{Event: "complete", Session: "ben"},
+		Action: ActionConfig{Type: ActionMessage, Body: "done", Deliver: DeliverConfig{Topic: "braw"}},
+	}}
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "only valid in a scenario file") {
+		t.Fatalf("expected global completion rejection, got %v", err)
+	}
+}
+
+func TestValidateScenarioLifecycle(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		cfg     ScenarioLifecycleConfig
+		wantErr bool
+	}{
+		{"default off", ScenarioLifecycleConfig{}, false},
+		{"on success delayed", ScenarioLifecycleConfig{Cleanup: ScenarioCleanupOnSuccess, Delay: "30m"}, false},
+		{"always", ScenarioLifecycleConfig{Cleanup: ScenarioCleanupAlways}, false},
+		{"bad mode", ScenarioLifecycleConfig{Cleanup: "purge"}, true},
+		{"delay while off", ScenarioLifecycleConfig{Delay: "1m"}, true},
+		{"negative delay", ScenarioLifecycleConfig{Cleanup: ScenarioCleanupAlways, Delay: "-1m"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateScenarioLifecycle(tc.cfg)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ValidateScenarioLifecycle(%+v) = %v, wantErr=%v", tc.cfg, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateRequiredDeliveryNeedsRoute(t *testing.T) {
+	trig := schedTrigger("braw", ScheduleConfig{Cron: "@daily"}, ActionConfig{
+		Type: ActionSession, Prompt: "report", Deliver: DeliverConfig{Required: true},
+	})
+	if errs := validateOne(trig, true); len(errs) == 0 || !strings.Contains(errs[0].Error(), "needs at least one") {
+		t.Fatalf("expected required-delivery route error, got %v", errs)
+	}
+}
+
 func TestValidateTriggers_DuplicateNames(t *testing.T) {
 	c := &Config{Triggers: []TriggerConfig{
 		schedTrigger("bide", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}),

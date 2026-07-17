@@ -937,7 +937,8 @@ type ScenarioStartMsg struct {
 	// scenario once its two-phase start succeeds. See issue #1027 and
 	// docs/design/2026-07-11-triggers-design.md §"Scenario-embedded trigger
 	// lifecycle".
-	Triggers []config.TriggerConfig `json:"triggers,omitempty"`
+	Triggers  []config.TriggerConfig         `json:"triggers,omitempty"`
+	Lifecycle config.ScenarioLifecycleConfig `json:"lifecycle,omitempty"`
 }
 
 type ScenarioSessionInput struct {
@@ -972,14 +973,41 @@ type ScenarioStatusMsg struct {
 type ScenarioListMsg struct{}
 
 type ScenarioRecord struct {
-	ID             string                `json:"id"`
-	Name           string                `json:"name"`
-	OrchestratorID string                `json:"orchestrator_id"`
-	Goal           string                `json:"goal"`
-	Status         string                `json:"status"`
-	SessionIDs     []string              `json:"session_ids"`
-	Sessions       []ScenarioSessionInfo `json:"sessions"`
-	CreatedAt      string                `json:"created_at"`
+	ID                string                         `json:"id"`
+	Name              string                         `json:"name"`
+	OrchestratorID    string                         `json:"orchestrator_id"`
+	Goal              string                         `json:"goal"`
+	Status            string                         `json:"status"`
+	SessionIDs        []string                       `json:"session_ids"`
+	Sessions          []ScenarioSessionInfo          `json:"sessions"`
+	CreatedAt         string                         `json:"created_at"`
+	CompletionEpoch   int                            `json:"completion_epoch,omitempty"`
+	CompletionActions []ScenarioCompletionActionInfo `json:"completion_actions,omitempty"`
+	Cleanup           *ScenarioCleanupInfo           `json:"cleanup,omitempty"`
+}
+
+// ScenarioCompletionActionInfo exposes the durable state of one embedded
+// completion trigger for the current epoch.
+type ScenarioCompletionActionInfo struct {
+	Name       string `json:"name"`
+	State      string `json:"state"` // pending | running | succeeded | failed
+	Attempt    int    `json:"attempt,omitempty"`
+	StartedAt  string `json:"started_at,omitempty"`
+	FinishedAt string `json:"finished_at,omitempty"`
+	Result     string `json:"result,omitempty"`
+	Error      string `json:"error,omitempty"`
+	SessionID  string `json:"session_id,omitempty"`
+}
+
+// ScenarioCleanupInfo exposes the configured cleanup policy and its durable
+// gate/deadline/result for the current completion epoch.
+type ScenarioCleanupInfo struct {
+	Policy      string `json:"policy"`
+	State       string `json:"state"` // pending | scheduled | running | succeeded | failed | cancelled
+	ScheduledAt string `json:"scheduled_at,omitempty"`
+	FinishedAt  string `json:"finished_at,omitempty"`
+	Result      string `json:"result,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 type ScenarioSessionInfo struct {
@@ -1028,7 +1056,7 @@ type TriggerPauseMsg struct {
 // TriggerRecord is the per-trigger info returned to the client.
 type TriggerRecord struct {
 	Name       string `json:"name"`
-	Source     string `json:"source"` // schedule | watch | gcx
+	Source     string `json:"source"` // schedule | watch | gcx | completion
 	Action     string `json:"action"` // command | session | scenario | message | tracker
 	Enabled    bool   `json:"enabled"`
 	Paused     bool   `json:"paused,omitempty"`

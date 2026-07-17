@@ -99,6 +99,7 @@ type SessionManager struct {
 	prWatch         *prWatchState
 	prRefWatch      *prRefWatchState
 	triggers        *triggerState
+	completion      *scenarioCompletionRuntime
 	tokens          *tokenCache
 	launch          *launchThrottle
 	resourceMu      sync.Mutex
@@ -181,6 +182,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		prWatch:            newPRWatchState(cfg.PRWatch.KickChannelSize()),
 		prRefWatch:         newPRRefWatchState(),
 		triggers:           newTriggerState(),
+		completion:         newScenarioCompletionRuntime(),
 		tokens:             newTokenCache(),
 		launch:             newLaunchThrottle(cfg.Launch.MaxConcurrentOrDefault()),
 		resourceSamples:    make(map[string][]ResourceSample),
@@ -947,6 +949,11 @@ type CreateOpts struct {
 	// creation so the reconcile dedup key survives a crash between Create and a
 	// separate tag-and-save.
 	TrackerIssue string
+	// Completion* tags a session spawned by a scenario completion action so a
+	// daemon restart can adopt it without making it an owned scenario member.
+	CompletionScenarioID string
+	CompletionEpoch      int
+	CompletionAction     string
 	// AutoCleanup marks a trigger-spawned session for soft-deletion when it
 	// stops (config.CleanupAlways / config.CleanupOnSuccess; empty disables).
 	AutoCleanup string

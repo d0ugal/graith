@@ -24,8 +24,9 @@ type File struct {
 
 // Meta is the [scenario] block.
 type Meta struct {
-	Name string `toml:"name"`
-	Goal string `toml:"goal"`
+	Name      string                         `toml:"name"`
+	Goal      string                         `toml:"goal"`
+	Lifecycle config.ScenarioLifecycleConfig `toml:"lifecycle"`
 }
 
 // Session is one [[sessions]] entry.
@@ -71,11 +72,28 @@ func Parse(data []byte) (*File, error) {
 		return nil, errors.New("at least one [[sessions]] entry is required")
 	}
 
-	if err := ValidateScenarioTriggers(sf.Triggers, sf.DefinedRoles(), sf.DefinedMembers()); err != nil {
+	if err := config.ValidateScenarioLifecycle(sf.Scenario.Lifecycle); err != nil {
+		return nil, err
+	}
+
+	if err := ValidateScenarioTriggers(sf.Triggers, sf.DefinedRoles(), sf.DefinedMembers(), sf.DefinedOwnedMembers()); err != nil {
 		return nil, err
 	}
 
 	return &sf, nil
+}
+
+// DefinedOwnedMembers returns the non-shared members that can safely supply a
+// completion trigger's execution/mirror context.
+func (sf *File) DefinedOwnedMembers() map[string]bool {
+	members := make(map[string]bool, len(sf.Sessions))
+	for _, s := range sf.Sessions {
+		if s.Name != "" && !s.Shared {
+			members[s.Name] = true
+		}
+	}
+
+	return members
 }
 
 // DefinedRoles returns the set of non-empty roles the scenario's own
@@ -116,7 +134,12 @@ func (sf *File) DefinedMembers() map[string]bool {
 // execution repo, and its delivery inbox may only name a scenario member (or
 // "orchestrator"/a template) — never a session outside the scenario. See issue
 // #1027. Returns the first error found.
-func ValidateScenarioTriggers(triggers []config.TriggerConfig, roles, members map[string]bool) error {
+func ValidateScenarioTriggers(triggers []config.TriggerConfig, roles, members map[string]bool, ownedMembersOpt ...map[string]bool) error {
+	ownedMembers := members
+	if len(ownedMembersOpt) > 0 {
+		ownedMembers = ownedMembersOpt[0]
+	}
+
 	seen := make(map[string]bool, len(triggers))
 
 	for i := range triggers {
@@ -141,7 +164,7 @@ func ValidateScenarioTriggers(triggers []config.TriggerConfig, roles, members ma
 			return fmt.Errorf("%w", errs[0])
 		}
 
-		if err := validateScenarioTriggerRestrictions(where, t, roles, members); err != nil {
+		if err := validateScenarioTriggerRestrictions(where, t, roles, members, ownedMembers); err != nil {
 			return err
 		}
 	}
@@ -152,7 +175,7 @@ func ValidateScenarioTriggers(triggers []config.TriggerConfig, roles, members ma
 // validateScenarioTriggerRestrictions enforces the scenario-scope limits on a
 // structurally-valid trigger: role-only watch selection against defined roles,
 // no external repo, and no delivery to a session outside the scenario.
-func validateScenarioTriggerRestrictions(where string, t *config.TriggerConfig, roles, members map[string]bool) error {
+func validateScenarioTriggerRestrictions(where string, t *config.TriggerConfig, roles, members, ownedMembers map[string]bool) error {
 	// gcx is a daemon-global external integration whose credentials, cursor, and
 	// on-call gate outlive any one scenario. Scenario triggers are scoped to their
 	// member sessions, so they cannot own this source.
@@ -174,9 +197,20 @@ func validateScenarioTriggerRestrictions(where string, t *config.TriggerConfig, 
 
 	// A schedule command needs an execution root repo, which would point outside
 	// the scenario. Scenario command triggers must derive their root from a bound
-	// worktree, i.e. use a [watch] source.
+	// worktree, i.e. use a [watch] or [completion] source.
 	if t.Action.Type == config.ActionCommand && t.IsSchedule() {
-		return fmt.Errorf("%s: scenario command triggers require a [watch] source (a schedule command names a repo outside the scenario)", where)
+		return fmt.Errorf("%s: scenario command triggers require a [watch] or [completion] source (a schedule command names a repo outside the scenario)", where)
+	}
+
+	if t.IsCompletion() {
+		member := t.Completion.Session
+		if (t.Action.Type == config.ActionCommand || t.Action.Type == config.ActionSession) && member == "" {
+			return fmt.Errorf("%s: completion %s action requires completion.session", where, t.Action.Type)
+		}
+
+		if member != "" && !ownedMembers[member] {
+			return fmt.Errorf("%s: completion.session %q is not a non-shared session in this scenario", where, member)
+		}
 	}
 
 	// No action may name an external execution repo. Watch actions derive their

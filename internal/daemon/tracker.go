@@ -275,7 +275,7 @@ func (sm *SessionManager) actionTracker(ctx context.Context, t *config.TriggerCo
 	}
 
 	if t.Action.Deliver != (config.DeliverConfig{}) {
-		sm.deliver(ctx, t.Action.Deliver, fmt.Sprintf("Tracker %q: %s", t.Name, summary), repo, sm.triggerVars(t, fc))
+		_ = sm.deliver(ctx, t.Action.Deliver, fmt.Sprintf("Tracker %q: %s", t.Name, summary), repo, sm.triggerVars(t, fc))
 	}
 
 	// Surface per-item failures so the run is recorded as errored (LastError,

@@ -149,6 +149,12 @@ MCP-server config), `session`, `scenario`, `message`, `tracker`. Delivery routes
 `skip`), `rate_limit` (default `5/30m`). See [Triggers]({{< relref "/docs/triggers.md" >}}) for the full
 reference.
 
+Scenario files may additionally use `[trigger.completion]` and
+`[scenario.lifecycle]` for todo-derived final actions and opt-in delayed soft
+cleanup. Completion is deliberately rejected in global `config.toml` because it
+must be bound to one persisted scenario. See
+[Scenarios — completion examples]({{< relref "/docs/scenarios.md#completion-examples" >}}).
+
 ### Advanced scheduler and file-watch tuning
 
 The `[triggers.advanced]` table exposes the low-level policy knobs that pace the

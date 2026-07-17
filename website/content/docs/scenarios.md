@@ -59,6 +59,24 @@ agent_hooks = false
 | `name` | yes | Scenario name (lowercase alphanumeric + hyphens, max 128 chars) |
 | `goal` | no | Overall goal — injected as `GRAITH_SCENARIO_GOAL` env var |
 
+### `[scenario.lifecycle]` section
+
+Lifecycle cleanup is disabled by default. To clean up after final actions:
+
+```toml
+[scenario.lifecycle]
+cleanup = "on_success" # off (default) | on_success | always
+delay = "30m"          # optional; default 0
+```
+
+`on_success` schedules cleanup only after every completion action succeeds;
+`always` waits until every action is terminal but also cleans up after failures.
+The delay begins only after that gate is satisfied. Cleanup stops and
+soft-deletes owned members, preserving their state and worktrees for
+`gr restore` during the configured retention window. It never unstars sessions,
+never touches shared members or unrelated trigger-spawned sessions, and never
+turns retention `0` into a purge.
+
 ### `[[sessions]]` entries
 
 | Field | Required | Default | Description |
@@ -103,7 +121,8 @@ TOML and they activate with the scenario. This is how a scenario wires in a
 continuous reviewer — a watch trigger that spawns (or reuses) a reviewer session
 whenever an implementer's files change. See [Triggers]({{< relref "triggers.md" >}})
 for the full trigger vocabulary; scenario-embedded triggers use the same
-`[trigger.schedule]`/`[trigger.watch]` sources and `[trigger.action]` verbs, with
+`[trigger.schedule]`/`[trigger.watch]` sources, the scenario-only
+`[trigger.completion]` source, and `[trigger.action]` verbs, with
 these extra restrictions:
 
 - **Watch triggers select by `role` only** — never `repo` — and the role must be
@@ -111,11 +130,16 @@ these extra restrictions:
   only to sessions **within its own scenario**, so two running instances of the
   same scenario file never cross-fire.
 - **No external references.** A scenario trigger cannot start another scenario
-  (`type = "scenario"`), and a `command` action must use a `[trigger.watch]`
-  source (a schedule `command` would name a repo outside the scenario).
+  (`type = "scenario"`), and a `command` action must use a `[trigger.watch]` or
+  `[trigger.completion]` source (a schedule `command` would name a repo outside
+  the scenario).
 - **No `[trigger.gcx]` source.** A gcx cursor, authentication context, and
   on-call gate are daemon-global and can outlive a scenario, so gcx triggers
   belong in the main `config.toml`.
+- **Completion context stays inside the scenario.** A completion `command` or
+  `session` names a non-shared member with `completion.session`; literal inbox
+  delivery resolves against this scenario's members, even if another session
+  elsewhere has the same name.
 
 ```toml
 version = 1
@@ -152,6 +176,63 @@ stop` tears down their watchers; `gr scenario resume` and `gr scenario add`
 rebind them to the scenario's running sessions; `gr scenario delete` removes them
 entirely. They appear in `gr trigger list` alongside config-origin triggers.
 
+Completion actions are an exception to the running-member activation rule: they
+remain addressable while their scenario record exists, including after members
+stop. `gr scenario status` shows the current epoch and each action as `pending`,
+`running`, `succeeded`, or `failed`, plus scheduled/running/completed cleanup.
+An interrupted non-session action becomes a diagnosable failure after restart
+instead of being replayed; retry it explicitly with its namespaced name:
+
+```bash
+gr trigger run scenario:<scenario-id>:<trigger-name>
+```
+
+Reopening an assigned todo creates a not-complete transition and cancels pending
+work and cleanup for that epoch. A later recompletion creates a new epoch.
+Manual `gr scenario stop` likewise cancels pending/running completion work
+before stopping members; manual delete cancels it before explicit teardown.
+
+### Completion examples
+
+Archive a deterministic report, require the store write, and retain the working
+sessions for an hour so a human can inspect the result:
+
+```toml
+[scenario.lifecycle]
+cleanup = "on_success"
+delay = "1h"
+
+[[trigger]]
+name = "archive-report"
+[trigger.completion]
+session = "reporter"
+[trigger.action]
+type = "command"
+command = "./scripts/render-report"
+[trigger.action.deliver]
+store = "shared:reports/{scenario_name}/epoch-{completion_epoch}.md"
+inbox = "orchestrator"
+required = true
+```
+
+For agent-led synthesis, use the ordinary session action. The completion action
+remains `running` until the synthesizer exits, so cleanup cannot race its result:
+
+```toml
+[[trigger]]
+name = "synthesise"
+[trigger.completion]
+session = "implementer"
+[trigger.action]
+type = "session"
+agent = "claude"
+prompt = "Synthesize the completed work into a release report, deliver it, then exit."
+[trigger.action.deliver]
+store = "shared:reports/{scenario_name}-final.md"
+topic = "scenario-reports"
+required = true
+```
+
 Note that a session/reactor a trigger *spawns* (e.g. an `ensure = true`
 reviewer) is parented to the **orchestrator**, not owned by the scenario — like
 any [session action]({{< relref "triggers.md" >}}) reactor. `gr scenario delete`
@@ -185,7 +266,9 @@ gr scenario status tracing-pipeline
 
 Output includes session names, IDs, status, agent, role, and each member's
 `done/total` task progress — derived from its assigned
-[todo items]({{< relref "todo.md#in-scenarios" >}}) (see below).
+[todo items]({{< relref "todo.md#in-scenarios" >}}) — followed by the current
+completion epoch, completion-action states, and lifecycle-cleanup deadline or
+failure (see below).
 
 ### `gr scenario list`
 
@@ -195,7 +278,10 @@ List all scenarios with their aggregate status.
 gr scenario list
 ```
 
-Aggregate status is derived from session states: `running` (all running), `stopped` (all stopped), `errored` (any errored), or `partial` (mixed).
+Aggregate status is `complete` when every member with tracked todo work has
+finished it and no member is errored. Otherwise it is derived from session
+states: `running` (all running), `stopped` (all stopped), `errored` (any
+errored), or `partial` (mixed).
 
 ### `gr scenario stop <name>`
 

@@ -512,6 +512,8 @@ func (sm *SessionManager) TodoExportOp(ac authContext, m protocol.TodoExportMsg)
 // to the [todo] emit_events mode. Best-effort: a publish failure is logged, not
 // fatal, and the table remains the source of truth.
 func (sm *SessionManager) emitTodoEvent(scope, event string, item TodoItem) {
+	sm.hintScenarioCompletion(scope)
+
 	if sm.messages == nil {
 		return
 	}

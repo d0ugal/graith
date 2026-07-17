@@ -1,22 +1,23 @@
 ---
 weight: 1350
 title: "Triggers"
-description: "Daemon-fired automation on schedules, file changes, and Grafana Cloud events."
+description: "Daemon-fired automation on schedules, file changes, Grafana Cloud events, and scenario completion."
 icon: "bolt"
 toc: true
 draft: false
 ---
 
 Triggers let the daemon run actions **on its own** — on a time schedule, when
-files change in a session worktree, or when a Grafana Cloud event appears — so
-automation survives terminal close and needs no attached orchestrator. A
-trigger is `(source) → (action)`.
+files change in a session worktree, when a Grafana Cloud event appears, or when
+a scenario completes — so automation survives terminal close and needs no
+attached orchestrator. A trigger is `(source) → (action)`.
 
 Triggers are defined as `[[trigger]]` blocks — in `config.toml` for global
 automation, or inside a scenario TOML for
 [scenario-embedded triggers]({{< relref "scenarios.md#trigger-blocks-scenario-embedded-triggers" >}})
 that activate with the scenario. Each block has exactly one **source**
-(`[trigger.schedule]`, `[trigger.watch]`, or `[trigger.gcx]`) and one **action**
+(`[trigger.schedule]`, `[trigger.watch]`, `[trigger.gcx]`, or the scenario-only
+`[trigger.completion]`) and one **action**
 (`[trigger.action]`).
 
 ## Sources
@@ -204,6 +205,27 @@ potentially attacker-controlled input. An agent may fetch the group by ID, but
 its prompt should explicitly treat fetched content as untrusted.
 `{gcx_started_at}` is an RFC3339 timestamp.
 
+### Completion (scenario todo edge)
+
+Completion is available only to a trigger embedded in a scenario file:
+
+```toml
+[trigger.completion]
+event = "complete"       # optional in v1; complete is the only event
+session = "reporter"     # non-shared member used as worktree/mirror context
+```
+
+The daemon treats todo mutation events as hints, rereads the authoritative
+scenario todo state, and fires once when the scenario transitions from not
+complete to complete. If any assigned item is reopened, the scenario reopens;
+finishing it again creates the next monotonically increasing completion epoch.
+Duplicate todo events do not duplicate actions. Epoch and action state survive
+a daemon restart.
+
+`session` is required for `command` and `session` actions. A command runs
+read-only in that member's worktree; a spawned session mirrors the same worktree
+read-only. The member must be non-shared and belong to the scenario.
+
 ## Actions
 
 ```toml
@@ -213,7 +235,7 @@ type = "command"   # command | session | scenario | message | tracker
 
 | Type | What it does |
 |------|--------------|
-| `command` | Run a command (schedule/gcx: in `repo`; watch: in the bound worktree), capture output, deliver it. Sandboxed by default. |
+| `command` | Run a command (schedule/gcx: in `repo`; watch/completion: in the bound worktree), capture output, deliver it. Sandboxed by default. |
 | `session` | Spawn a session, parented to the orchestrator. |
 | `scenario` | Start a named scenario from `~/.config/graith/scenarios/`. |
 | `message` | Route a fixed `body` to an inbox or topic. |
@@ -390,6 +412,8 @@ author-trust gate for issues is a possible follow-up.
 `[trigger.action.deliver]` routes action output. Fields are templated at fire
 time (`{name}`, `{date}`, `{datetime}`, `{fire_time}`, and for watch triggers
 `{session_name}`, `{worktree_path}`, `{changed_files}`, `{change_count}`).
+Completion triggers also provide `{scenario_id}`, `{scenario_name}`, and
+`{completion_epoch}`.
 
 ```toml
 [trigger.action.deliver]
@@ -397,10 +421,18 @@ inbox = "orchestrator"          # a session name, "orchestrator", or {session_na
 topic = "ci-reports"            # a pub/sub topic
 store = "reports/{date}.md"     # a store doc (prefix "shared:" for the shared store)
 wake  = false                   # resume a stopped non-orchestrator inbox target
+required = false                # fail the action if any route fails
 ```
 
 `inbox` auto-resumes the orchestrator (or any target with `wake = true`), and
 never wakes a soft-deleted session.
+
+Delivery remains best-effort by default for backward compatibility. Set
+`required = true` when lifecycle cleanup must wait for a durable result. Command
+and message routes complete synchronously; a completion `session` action stays
+running until its spawned agent exits cleanly, and its prompt requires delivery
+before exit. A failed required route makes the action `failed` and blocks
+`on_success` cleanup.
 
 ## Policy
 
@@ -425,7 +457,7 @@ Triggers are defined in config; `gr trigger` observes and controls them:
 ```bash
 gr trigger list                 # all triggers: source, action, cadence/scope, state
 gr trigger status <name>        # next fire/poll, last result/error, live bindings
-gr trigger run <name>           # fire a schedule trigger once now (respects overlap)
+gr trigger run <name>           # fire a schedule now, or retry a failed completion action
 gr trigger pause <name>         # pause (persists across restart)
 gr trigger resume <name>
 ```

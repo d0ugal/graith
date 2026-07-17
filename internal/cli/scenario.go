@@ -27,8 +27,9 @@ type scenarioFile struct {
 }
 
 type scenarioFileMeta struct {
-	Name string `toml:"name"`
-	Goal string `toml:"goal"`
+	Name      string                         `toml:"name"`
+	Goal      string                         `toml:"goal"`
+	Lifecycle config.ScenarioLifecycleConfig `toml:"lifecycle"`
 }
 
 type scenarioFileSession struct {
@@ -103,8 +104,13 @@ func parseScenarioFile(data []byte) (*scenarioFile, error) {
 		return nil, errors.New("at least one [[sessions]] entry is required")
 	}
 
+	if err := config.ValidateScenarioLifecycle(sf.Scenario.Lifecycle); err != nil {
+		return nil, err
+	}
+
 	roles := make(map[string]bool, len(sf.Sessions))
 	members := make(map[string]bool, len(sf.Sessions))
+	ownedMembers := make(map[string]bool, len(sf.Sessions))
 
 	for _, s := range sf.Sessions {
 		// Shared members can't be watch-bound (they keep their own scenario
@@ -116,10 +122,13 @@ func parseScenarioFile(data []byte) (*scenarioFile, error) {
 
 		if s.Name != "" {
 			members[s.Name] = true
+			if !s.Shared {
+				ownedMembers[s.Name] = true
+			}
 		}
 	}
 
-	if err := scenariofile.ValidateScenarioTriggers(sf.Triggers, roles, members); err != nil {
+	if err := scenariofile.ValidateScenarioTriggers(sf.Triggers, roles, members, ownedMembers); err != nil {
 		return nil, err
 	}
 
@@ -260,6 +269,7 @@ The source can be:
 			Goal:            sf.Scenario.Goal,
 			Sessions:        sessions,
 			Triggers:        sf.Triggers,
+			Lifecycle:       sf.Scenario.Lifecycle,
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -472,6 +482,39 @@ var scenarioStatusCmd = &cobra.Command{
 		}
 
 		_ = tw.Flush()
+
+		if sc.CompletionEpoch > 0 {
+			out.Printf("\nCompletion epoch: %d\n", sc.CompletionEpoch)
+
+			for _, action := range sc.CompletionActions {
+				detail := action.Result
+				if action.Error != "" {
+					detail = action.Error
+				}
+
+				out.Printf("  %s: %s", action.Name, action.State)
+
+				if detail != "" {
+					out.Printf(" — %s", detail)
+				}
+
+				out.Printf("\n")
+			}
+
+			if sc.Cleanup != nil {
+				out.Printf("Cleanup: %s (%s)", sc.Cleanup.State, sc.Cleanup.Policy)
+
+				if sc.Cleanup.ScheduledAt != "" {
+					out.Printf(" at %s", sc.Cleanup.ScheduledAt)
+				}
+
+				if sc.Cleanup.Error != "" {
+					out.Printf(" — %s", sc.Cleanup.Error)
+				}
+
+				out.Printf("\n")
+			}
+		}
 
 		return nil
 	},

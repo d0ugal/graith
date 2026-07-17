@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -18,11 +19,12 @@ import (
 
 // fireCause labels a run in the history.
 const (
-	causeSchedule = "schedule"
-	causeCatchUp  = "catch_up"
-	causeManual   = "manual"
-	causeFile     = "file"
-	causeGCX      = "gcx"
+	causeSchedule         = "schedule"
+	causeCatchUp          = "catch_up"
+	causeManual           = "manual"
+	causeFile             = "file"
+	causeGCX              = "gcx"
+	causeScenarioComplete = "scenario_complete"
 )
 
 // RunTriggerLoop is the daemon-owned schedule (#592) trigger loop. Modeled on
@@ -383,14 +385,18 @@ func (sm *SessionManager) fireSchedule(ctx context.Context, name, cause string) 
 // fireContext carries per-fire data (source session, changed files) to the
 // action executor and template expander.
 type fireContext struct {
-	cause         string
-	now           time.Time
-	sessionID     string   // watch: the bound source session
-	sessionName   string   // watch
-	worktree      string   // watch
-	changedFiles  []string // watch
-	gcxEvent      *gcxEvent
-	reactorSuffix string // source-specific stable suffix for spawned session names
+	cause            string
+	now              time.Time
+	sessionID        string   // watch: the bound source session
+	sessionName      string   // watch
+	worktree         string   // watch
+	changedFiles     []string // watch
+	scenarioID       string   // completion: owning scenario
+	scenarioName     string   // completion
+	completionEpoch  int      // completion
+	completionAction string   // completion trigger bare name
+	gcxEvent         *gcxEvent
+	reactorSuffix    string // source-specific stable suffix for spawned session names
 }
 
 // fireAction dispatches to the per-type executor and returns a result summary.
@@ -417,14 +423,17 @@ func (sm *SessionManager) triggerVars(t *config.TriggerConfig, fc fireContext) c
 	changed := strings.Join(fc.changedFiles, ", ")
 
 	vars := config.TriggerVars{
-		Name:         t.Name,
-		Date:         fc.now.Format("2006-01-02"),
-		Datetime:     fc.now.Format(time.RFC3339),
-		FireTime:     fc.now.Format(time.RFC3339),
-		SessionName:  fc.sessionName,
-		WorktreePath: fc.worktree,
-		ChangedFiles: changed,
-		ChangeCount:  strconv.Itoa(len(fc.changedFiles)),
+		Name:            t.Name,
+		Date:            fc.now.Format("2006-01-02"),
+		Datetime:        fc.now.Format(time.RFC3339),
+		FireTime:        fc.now.Format(time.RFC3339),
+		SessionName:     fc.sessionName,
+		WorktreePath:    fc.worktree,
+		ChangedFiles:    changed,
+		ChangeCount:     strconv.Itoa(len(fc.changedFiles)),
+		ScenarioID:      fc.scenarioID,
+		ScenarioName:    fc.scenarioName,
+		CompletionEpoch: strconv.Itoa(fc.completionEpoch),
 	}
 
 	if fc.gcxEvent != nil {
@@ -548,12 +557,13 @@ func (sm *SessionManager) triggerByName(name string) *config.TriggerConfig {
 // triggerFingerprint is a canonical hash of the fire-affecting definition.
 func triggerFingerprint(t *config.TriggerConfig) string {
 	payload := struct {
-		Schedule *config.ScheduleConfig
-		Watch    *config.WatchConfig
-		GCX      *config.GCXConfig `json:"GCX,omitempty"`
-		Action   config.ActionConfig
-		Policy   config.TriggerPolicy
-	}{t.Schedule, t.Watch, t.GCX, t.Action, t.Policy}
+		Schedule   *config.ScheduleConfig
+		Watch      *config.WatchConfig
+		GCX        *config.GCXConfig        `json:"GCX,omitempty"`
+		Completion *config.CompletionConfig `json:"Completion,omitempty"`
+		Action     config.ActionConfig
+		Policy     config.TriggerPolicy
+	}{t.Schedule, t.Watch, t.GCX, t.Completion, t.Action, t.Policy}
 
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -664,20 +674,36 @@ func (sm *SessionManager) deliverStorePath(key, repo string) (dir, cleanKey stri
 }
 
 // deliver routes body per the deliver block. repo scopes a repo-store key.
-func (sm *SessionManager) deliver(ctx context.Context, d config.DeliverConfig, body, repo string, vars config.TriggerVars) {
+func (sm *SessionManager) deliver(ctx context.Context, d config.DeliverConfig, body, repo string, vars config.TriggerVars) error {
+	return sm.deliverScoped(ctx, d, body, repo, vars, "")
+}
+
+func (sm *SessionManager) deliverScoped(ctx context.Context, d config.DeliverConfig, body, repo string, vars config.TriggerVars, scenarioID string) error {
+	var deliveryErrors []error
+
 	if d.Inbox != "" {
 		target, err := config.ExpandTrigger(d.Inbox, vars)
 		if err == nil {
-			sm.deliverInbox(ctx, target, body, d.Wake)
+			err = sm.deliverInboxScoped(ctx, target, body, d.Wake, scenarioID)
+		}
+
+		if err != nil {
+			deliveryErrors = append(deliveryErrors, fmt.Errorf("inbox delivery: %w", err))
 		}
 	}
 
 	if d.Topic != "" {
 		topic, err := config.ExpandTrigger(d.Topic, vars)
-		if err == nil && sm.messages != nil {
-			if _, perr := sm.messages.Publish(PublishOpts{Stream: topic, SenderID: systemSenderID, SenderName: systemSenderName, Body: body}); perr != nil {
-				sm.log.Warn("trigger: topic publish failed", "topic", topic, "err", perr)
-			}
+		if err == nil && sm.messages == nil {
+			err = errors.New("message store unavailable")
+		}
+
+		if err == nil {
+			_, err = sm.messages.Publish(PublishOpts{Stream: topic, SenderID: systemSenderID, SenderName: systemSenderName, Body: body})
+		}
+
+		if err != nil {
+			deliveryErrors = append(deliveryErrors, fmt.Errorf("topic delivery: %w", err))
 		}
 	}
 
@@ -685,18 +711,34 @@ func (sm *SessionManager) deliver(ctx context.Context, d config.DeliverConfig, b
 		key, err := config.ExpandTrigger(d.Store, vars)
 		if err == nil {
 			dir, cleanKey := sm.deliverStorePath(key, repo)
-			if ierr := store.Init(dir); ierr == nil {
-				if perr := store.Put(dir, cleanKey, body); perr != nil {
-					sm.log.Warn("trigger: store put failed", "key", cleanKey, "err", perr)
-				}
+			if err = store.Init(dir); err == nil {
+				err = store.Put(dir, cleanKey, body)
 			}
 		}
+
+		if err != nil {
+			deliveryErrors = append(deliveryErrors, fmt.Errorf("store delivery: %w", err))
+		}
 	}
+
+	for _, err := range deliveryErrors {
+		sm.log.Warn("trigger: delivery failed", "err", err)
+	}
+
+	if d.Required && len(deliveryErrors) > 0 {
+		return errors.Join(deliveryErrors...)
+	}
+
+	return nil
 }
 
 // deliverInbox delivers to a session inbox, resolving "orchestrator", gating
 // resume by wake, and never waking a soft-deleted session.
-func (sm *SessionManager) deliverInbox(ctx context.Context, target, body string, wake bool) {
+func (sm *SessionManager) deliverInbox(ctx context.Context, target, body string, wake bool) error {
+	return sm.deliverInboxScoped(ctx, target, body, wake, "")
+}
+
+func (sm *SessionManager) deliverInboxScoped(ctx context.Context, target, body string, wake bool, scenarioID string) error {
 	_ = ctx // reserved for future cancellation; notifyFromDaemon detaches by design
 
 	sm.mu.RLock()
@@ -704,8 +746,21 @@ func (sm *SessionManager) deliverInbox(ctx context.Context, target, body string,
 	var id string
 
 	orchestrator := target == "orchestrator"
-	if orchestrator {
+	if orchestrator && scenarioID != "" {
+		if sc := sm.state.Scenarios[scenarioID]; sc != nil {
+			id = sc.OrchestratorID
+		}
+	} else if orchestrator {
 		id = sm.findOrchestratorID()
+	} else if scenarioID != "" {
+		if sc := sm.state.Scenarios[scenarioID]; sc != nil {
+			for i, sid := range sc.SessionIDs {
+				if i < len(sc.Sessions) && sc.Sessions[i].Name == target {
+					id = sid
+					break
+				}
+			}
+		}
 	} else {
 		for sid, s := range sm.state.Sessions {
 			if s.Name == target {
@@ -722,20 +777,30 @@ func (sm *SessionManager) deliverInbox(ctx context.Context, target, body string,
 
 	sm.mu.RUnlock()
 
-	if id == "" || softDeleted || sm.messages == nil {
-		return
+	if id == "" {
+		return fmt.Errorf("target %q not found", target)
+	}
+
+	if softDeleted {
+		return fmt.Errorf("target %q is soft-deleted", target)
+	}
+
+	if sm.messages == nil {
+		return errors.New("message store unavailable")
 	}
 
 	// notifyFromDaemon publishes AND auto-resumes; a bare Publish does not.
 	if orchestrator || wake {
 		//nolint:contextcheck // notifyFromDaemon detaches its auto-resume; it must outlive this call.
-		_ = sm.notifyFromDaemon(id, body)
-		return
+		return sm.notifyFromDaemon(id, body)
 	}
 
 	if _, err := sm.messages.Publish(PublishOpts{Stream: "inbox:" + id, SenderID: systemSenderID, SenderName: systemSenderName, Body: body}); err != nil {
 		sm.log.Warn("trigger: inbox publish failed", "session", id, "err", err)
+		return err
 	}
+
+	return nil
 }
 
 // --- status / control API (used by handler & CLI) ---
@@ -802,6 +867,8 @@ func (sm *SessionManager) triggerRecord(t *config.TriggerConfig) protocol.Trigge
 			rec.NextPoll = binding.nextPoll.Format(time.RFC3339)
 		}
 		sm.triggers.mu.Unlock()
+	} else if t.IsCompletion() {
+		rec.Source = "completion"
 	}
 
 	if rt != nil {
@@ -860,6 +927,10 @@ func (sm *SessionManager) TriggerRunNow(ctx context.Context, name string) error 
 
 	if t.IsGCX() {
 		return fmt.Errorf("trigger %q is a gcx event trigger; it fires on newly observed external events, not on demand", name)
+	}
+
+	if t.IsCompletion() {
+		return sm.retryScenarioCompletionAction(name)
 	}
 
 	// Respect overlap: reserve through the same guard the scheduled path uses so a
