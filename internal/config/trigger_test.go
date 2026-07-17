@@ -549,6 +549,41 @@ func TestTriggersAdvancedOverrides(t *testing.T) {
 	}
 }
 
+// TestTriggersAdvancedWatchRetryBounds verifies degraded-watch retry delays
+// remain positive and coherent even when callers construct a config directly.
+func TestTriggersAdvancedWatchRetryBounds(t *testing.T) {
+	tests := []struct {
+		name     string
+		base     string
+		max      string
+		wantBase time.Duration
+		wantMax  time.Duration
+	}{
+		{name: "zero base", base: "0s", wantBase: 5 * time.Second, wantMax: 5 * time.Minute},
+		{name: "negative base", base: "-1s", wantBase: 5 * time.Second, wantMax: 5 * time.Minute},
+		{name: "zero max", max: "0s", wantBase: 5 * time.Second, wantMax: 5 * time.Minute},
+		{name: "negative max", max: "-1s", wantBase: 5 * time.Second, wantMax: 5 * time.Minute},
+		{name: "base above max", base: "10s", max: "1s", wantBase: time.Second, wantMax: time.Second},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := TriggersRuntime{Advanced: TriggersAdvancedConfig{
+				WatchRetryBaseBackoff: tc.base,
+				WatchRetryMaxBackoff:  tc.max,
+			}}
+
+			if got := r.WatchRetryBaseBackoffDuration(); got != tc.wantBase {
+				t.Errorf("WatchRetryBaseBackoffDuration() = %v, want %v", got, tc.wantBase)
+			}
+
+			if got := r.WatchRetryMaxBackoffDuration(); got != tc.wantMax {
+				t.Errorf("WatchRetryMaxBackoffDuration() = %v, want %v", got, tc.wantMax)
+			}
+		})
+	}
+}
+
 // TestTriggersTickerCadenceNonPositiveSafety proves the two [triggers.advanced]
 // cadences that feed time.NewTicker (scheduler_tick, watch_reconcile_interval)
 // fall back to their documented defaults for "0", "0s", and negative values, so a

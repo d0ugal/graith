@@ -940,6 +940,60 @@ func TestWatchRetryBackoffConfigurable(t *testing.T) {
 	}
 }
 
+// TestWatchRetryBackoffCapsFirstAttempt verifies maxBackoff is an actual cap
+// even when an incoherent directly-constructed config supplies base > max.
+func TestWatchRetryBackoffCapsFirstAttempt(t *testing.T) {
+	base := 10 * time.Second
+	maxBackoff := time.Second
+
+	for _, retry := range []int{0, 1, 2, 9} {
+		if got := watchRetryBackoff(retry, base, maxBackoff); got != maxBackoff {
+			t.Errorf("watchRetryBackoff(%d) = %v, want cap %v", retry, got, maxBackoff)
+		}
+	}
+}
+
+// TestReconcileBindings_InvalidRetryBoundsDoNotThrash is the #1310 regression:
+// parseable non-positive tuning must not make a degraded watcher retry on every
+// reconcile tick while the watch limit remains exhausted.
+func TestReconcileBindings_InvalidRetryBoundsDoNotThrash(t *testing.T) {
+	worktree := t.TempDir()
+	trig := config.TriggerConfig{
+		Name:   "dreich",
+		Watch:  &config.WatchConfig{Role: "implementer"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "braw", Deliver: config.DeliverConfig{Topic: "blether"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	sm.cfg.TriggersRuntime.Advanced.WatchRetryBaseBackoff = "0s"
+	sm.cfg.TriggersRuntime.Advanced.WatchRetryMaxBackoff = "-1s"
+	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "ben", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
+	sm.watchAdd = func(_ *fsnotify.Watcher, _ string) error {
+		return errors.New("no space left on device")
+	}
+
+	ctx := context.Background()
+	key := bindingKey("dreich", "src")
+	t0 := time.Now()
+	sm.reconcileBindings(ctx, sm.allTriggers(), t0)
+
+	interval := sm.Config().TriggersRuntime.WatchReconcileIntervalDuration()
+	sm.reconcileBindings(ctx, sm.allTriggers(), t0.Add(interval))
+	sm.reconcileBindings(ctx, sm.allTriggers(), t0.Add(2*interval))
+
+	b := sm.triggers.bindings[key]
+	if b == nil || b.degraded == "" {
+		t.Fatalf("expected degraded binding, got %+v", b)
+	}
+
+	if b.retryCount != 1 {
+		t.Fatalf("degraded binding retried on reconcile ticks: retryCount=%d, want 1", b.retryCount)
+	}
+
+	if want := t0.Add(5 * time.Second); !b.nextRetryAt.Equal(want) {
+		t.Fatalf("nextRetryAt = %v, want positive default backoff ending at %v", b.nextRetryAt, want)
+	}
+}
+
 // TestReconcileBindings_DegradedRecovers is the #1029 regression: a binding that
 // degrades (watch limit exhausted) must retry on a backoff and recover on its
 // own once the limit clears — without the source session restarting.

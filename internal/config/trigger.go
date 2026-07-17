@@ -508,15 +508,24 @@ func (r TriggersRuntime) WatchReconcileIntervalDuration() time.Duration {
 }
 
 // WatchRetryBaseBackoffDuration is the first-retry delay for a degraded file-watch
-// binding. Default 5s.
+// binding. An unset, unparseable, or non-positive value uses the 5s default. The
+// resolved delay is capped by WatchRetryMaxBackoffDuration so the effective
+// bounds remain coherent when a directly-constructed config sets base > max.
 func (r TriggersRuntime) WatchRetryBaseBackoffDuration() time.Duration {
-	return parseDurationOr(r.Advanced.WatchRetryBaseBackoff, defaultWatchRetryBase)
+	base := positiveDurationOrDefault(r.Advanced.WatchRetryBaseBackoff, defaultWatchRetryBase)
+	maxBackoff := r.WatchRetryMaxBackoffDuration()
+
+	if base > maxBackoff {
+		return maxBackoff
+	}
+
+	return base
 }
 
 // WatchRetryMaxBackoffDuration caps the exponential degraded-binding backoff.
-// Default 5m.
+// An unset, unparseable, or non-positive value uses the 5m default.
 func (r TriggersRuntime) WatchRetryMaxBackoffDuration() time.Duration {
-	return parseDurationOr(r.Advanced.WatchRetryMaxBackoff, defaultWatchRetryMax)
+	return positiveDurationOrDefault(r.Advanced.WatchRetryMaxBackoff, defaultWatchRetryMax)
 }
 
 // WatchBuiltinIgnores returns the daemon-wide watch ignore list. An omitted key

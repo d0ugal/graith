@@ -168,6 +168,10 @@ command_output_cap       = 4096     # bytes of a command action's captured outpu
 watch_builtin_ignores    = [".git/", ".git", ".hg/", ".svn/", "*.swp", "*.swx", "4913", ".DS_Store"]
 ```
 
+An empty, invalid, or non-positive `watch_retry_base_backoff` or
+`watch_retry_max_backoff` uses its default above. If the resolved base is
+greater than the resolved maximum, the maximum also caps the first retry.
+
 `watch_builtin_ignores` is the daemon-wide set of directories/patterns never
 watched by any file-watch trigger (on top of git ignore rules and per-trigger
 `watch.ignore`). `.git` is always ignored regardless of this list, because a
