@@ -2568,6 +2568,13 @@ func (t TodoConfig) BusyTimeoutDuration() time.Duration {
 func ParseDurationWithDays(s string) (time.Duration, error) {
 	var total time.Duration
 
+	// Trim once here — the shared parser is the single normalization point, so a
+	// whitespace-padded value such as "12h " parses identically wherever it is
+	// read. Without this, validation (which pre-trims) accepts the value while a
+	// direct accessor parses the untrimmed string, fails, and silently falls back
+	// to its zero/default (e.g. messages.max_age → 0 = retain forever) (#1321).
+	s = strings.TrimSpace(s)
+
 	if i := strings.Index(s, "d"); i > 0 {
 		var days int
 		if _, err := fmt.Sscanf(s[:i+1], "%dd", &days); err == nil {
