@@ -252,6 +252,8 @@ remote_pairing_timeout   = "11m"    # wait for the remote human to approve `gr p
 
 An unset field keeps its built-in default (shown above). A value that is set but unparseable, or that is zero or negative, is rejected at config load. The `remote_*` fields apply only to remote-daemon connections (see [Orchestrator & remote access]({{< relref "/docs/configuration/access.md" >}})); the others apply to the local daemon and attach recovery.
 
+`start_timeout` and `start_poll_interval` set the aggregate budget and re-probe cadence for every daemon readiness and lifecycle wait — auto-starting a daemon, waiting for a `gr daemon restart` exec upgrade to bring up the new daemon, and waiting for a stopped daemon's socket to disappear — rather than fixed retry counts. Dial and handshake policies remain distinct inside those waits, but each probe uses the smaller of its own `dial_timeout`/`handshake_timeout` and the aggregate time remaining, so a socket that accepts and then stalls cannot overrun `start_timeout`. Upgrade readiness is also generation-aware: the daemon returns a per-process boot nonce, and a restart/upgrade is only reported ready once a *new* daemon generation answers with the wanted version — an inherited old listener or a same-version rebuild that keeps the pre-upgrade nonce falls back to a clean restart instead of a false success.
+
 ## Migration
 
 `gr migrate` hands a session's conversation to a different agent in place. After starting the target agent, the daemon waits `health_window` to confirm it survived startup before declaring the migration successful; if the new agent exits immediately (a bad auth/config), the migration reverts to the original agent. Raise the window to tolerate a slow agent boot, lower it to revert faster.

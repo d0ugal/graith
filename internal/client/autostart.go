@@ -1,7 +1,6 @@
 package client
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -42,7 +41,7 @@ var startDaemonFn = startDaemon
 func EnsureDaemon(paths config.Paths, configFile string) (net.Conn, error) {
 	sockPath := paths.SocketPath
 	// Present the caller's credential (session token or human token) in the
-	// probe, matching the real handshake and the other probes (probeDaemonVersion,
+	// probe, matching the real handshake and the other probes (probeDaemonIdentity,
 	// doctor). A current daemon exempts the handshake from its fail-closed auth
 	// gate (PR #1066), so the token is not needed to reach one — but a pre-#1066
 	// daemon still auth-gates the handshake, so presenting it keeps the probe
@@ -53,7 +52,7 @@ func EnsureDaemon(paths config.Paths, configFile string) (net.Conn, error) {
 	token := resolveClientToken(paths)
 
 	if daemonResponds(sockPath, token, paths.Profile) {
-		if conn, err := net.DialTimeout("unix", sockPath, daemonDialTimeout); err == nil {
+		if conn, err := dialLocalDaemon("unix", sockPath, daemonDialTimeout); err == nil {
 			return conn, nil
 		}
 	}
@@ -62,22 +61,31 @@ func EnsureDaemon(paths config.Paths, configFile string) (net.Conn, error) {
 		return nil, fmt.Errorf("start daemon: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), daemonStartTimeout)
-	defer cancel()
+	// Wait for the freshly spawned daemon, bounded by the effective [connection]
+	// start policy. Each probe's dial and handshake is capped at the remaining
+	// aggregate budget so a socket that accepts but never handshakes can't overrun
+	// start_timeout on the first probe (issue #1319).
+	var readyConn net.Conn
 
-	for {
-		if daemonResponds(sockPath, token, paths.Profile) {
-			if conn, err := net.DialTimeout("unix", sockPath, daemonDialTimeout); err == nil {
-				return conn, nil
-			}
+	ready := pollDaemonReady(func(deadline time.Time) bool {
+		if !daemonRespondsUntil(sockPath, token, paths.Profile, deadline) {
+			return false
 		}
 
-		select {
-		case <-ctx.Done():
-			return nil, errors.New("daemon did not start in time")
-		case <-time.After(daemonStartPollInterval):
+		conn, err := dialLocalDaemonBefore("unix", sockPath, daemonDialTimeout, deadline)
+		if err != nil {
+			return false
 		}
+
+		readyConn = conn
+
+		return true
+	})
+	if !ready {
+		return nil, errors.New("daemon did not start in time")
 	}
+
+	return readyConn, nil
 }
 
 // daemonResponds reports whether a live graith daemon is listening on sockPath.
@@ -100,13 +108,47 @@ func EnsureDaemon(paths config.Paths, configFile string) (net.Conn, error) {
 // what keeps a tokenless probe from misreading a live, auth-gating daemon as
 // dead and triggering a doomed autostart.
 func daemonResponds(sockPath, token, profile string) bool {
-	conn, err := net.DialTimeout("unix", sockPath, daemonDialTimeout)
+	return daemonRespondsWithDeadline(sockPath, token, profile, time.Time{})
+}
+
+// daemonRespondsUntil is daemonResponds with each dial and handshake capped at
+// the remaining aggregate startup budget (issue #1319).
+func daemonRespondsUntil(sockPath, token, profile string, aggregateDeadline time.Time) bool {
+	return daemonRespondsWithDeadline(sockPath, token, profile, aggregateDeadline)
+}
+
+func daemonRespondsWithDeadline(sockPath, token, profile string, aggregateDeadline time.Time) bool {
+	var (
+		conn net.Conn
+		err  error
+	)
+
+	if aggregateDeadline.IsZero() {
+		conn, err = dialLocalDaemon("unix", sockPath, daemonDialTimeout)
+	} else {
+		conn, err = dialLocalDaemonBefore("unix", sockPath, daemonDialTimeout, aggregateDeadline)
+	}
+
 	if err != nil {
 		return false
 	}
+
 	defer func() { _ = conn.Close() }()
 
-	_ = conn.SetDeadline(time.Now().Add(daemonHandshakeTimeout))
+	handshakeDeadline := time.Now().Add(daemonHandshakeTimeout)
+
+	if !aggregateDeadline.IsZero() {
+		var ok bool
+
+		handshakeDeadline, ok = localOperationDeadline(aggregateDeadline, daemonHandshakeTimeout)
+		if !ok {
+			return false
+		}
+	}
+
+	if err := conn.SetDeadline(handshakeDeadline); err != nil {
+		return false
+	}
 
 	reader := protocol.NewFrameReader(conn)
 	writer := protocol.NewFrameWriter(conn)

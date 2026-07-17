@@ -117,10 +117,39 @@ var daemonReloadCmd = &cobra.Command{
 	},
 }
 
+// upgradeExchangeConn is the connection surface execUpgrade drives for the
+// handshake + upgrade round-trip. It is an interface (satisfied by
+// *client.Client) so the deadline installation and readiness handoff can be
+// tested against a scripted connection without a live daemon.
+type upgradeExchangeConn interface {
+	SetDeadline(deadline time.Time) error
+	Handshake() error
+	SendControl(messageType string, payload any) error
+	ReadControlResponse() (protocol.Envelope, error)
+	Close()
+}
+
+// dialUpgradeClient opens the daemon connection execUpgrade drives. A package
+// var so tests can substitute a scripted connection.
+var dialUpgradeClient = func() (upgradeExchangeConn, error) {
+	return client.New(cfg, paths, cfgFile)
+}
+
 func execUpgrade(successMsg string) error {
-	c, err := client.New(cfg, paths, cfgFile)
+	c, err := dialUpgradeClient()
 	if err != nil {
 		return fmt.Errorf("connect to daemon: %w", err)
+	}
+
+	// client.New leaves the connection deadline-free, so the raw handshake and
+	// reads below would hang forever against a stale/foreign daemon that accepts
+	// but never replies. Bound the whole handshake + upgrade exchange with the
+	// configured local handshake deadline — distinct from the post-exec startup
+	// budget the readiness wait uses (issue #1242). A connection that can't accept
+	// the deadline can't be safely bounded, so fail rather than proceed unbounded.
+	if err := c.SetDeadline(connectionNow().Add(localDaemonHandshakeTimeout())); err != nil {
+		c.Close()
+		return fmt.Errorf("set upgrade handshake deadline: %w", err)
 	}
 
 	if err := c.Handshake(); err != nil {
@@ -128,42 +157,76 @@ func execUpgrade(successMsg string) error {
 		return err
 	}
 
-	_, _ = c.ReadControlResponse()
-
-	_ = c.SendControl("upgrade", upgradeMsg())
-
-	resp, err := c.ReadControlResponse()
+	// Capture the daemon's pre-upgrade instance ID from its handshake_ok so
+	// readiness below can prove the NEW generation is serving rather than the
+	// inherited listener (issue #1319). This capture MUST succeed: if the read
+	// fails, the reply isn't handshake_ok, or it doesn't decode, we cannot
+	// establish the pre-upgrade generation — and a silently-empty priorInstanceID
+	// would let the unchanged old daemon (any non-empty instance ID) satisfy the
+	// "id != prior" readiness check and be falsely accepted as the replacement.
+	// Fail the exchange instead. A successfully decoded (possibly legacy)
+	// handshake_ok with a genuinely absent instance ID may keep "" for backward
+	// compatibility.
+	hsResp, err := c.ReadControlResponse()
 	if err != nil {
-		// Connection dropped — expected, the daemon exec'd itself
 		c.Close()
-
-		for range 20 {
-			time.Sleep(250 * time.Millisecond)
-
-			conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond)
-			if err == nil {
-				_ = conn.Close()
-				break
-			}
-		}
-	} else {
-		c.Close()
-
-		if resp.Type == "error" {
-			var e protocol.ErrorMsg
-
-			_ = protocol.DecodePayload(resp, &e)
-
-			return fmt.Errorf("%s", e.Message)
-		}
-		// Got "upgrading" — give the daemon a moment to exec.
-		time.Sleep(500 * time.Millisecond)
+		return fmt.Errorf("read daemon handshake before upgrade: %w", err)
 	}
 
-	// Verify the daemon is running our version. Old daemons that don't
-	// understand ExecPath will exec back into the old binary.
-	if v := probeDaemonVersion(); v != "" && v != version.Version {
-		return fmt.Errorf("daemon exec'd into %s instead of %s", v, version.Version)
+	if hsResp.Type != "handshake_ok" {
+		c.Close()
+		return fmt.Errorf("unexpected pre-upgrade handshake response %q", hsResp.Type)
+	}
+
+	var hsOk protocol.HandshakeOkMsg
+	if err := protocol.DecodePayload(hsResp, &hsOk); err != nil {
+		c.Close()
+		return fmt.Errorf("decode daemon handshake before upgrade: %w", err)
+	}
+
+	priorInstanceID := hsOk.DaemonInstanceID
+
+	// Propagate a send failure rather than waiting for the readiness of an upgrade
+	// that was never requested.
+	if err := c.SendControl("upgrade", upgradeMsg()); err != nil {
+		c.Close()
+		return fmt.Errorf("send upgrade request: %w", err)
+	}
+
+	resp, err := c.ReadControlResponse()
+	c.Close()
+
+	// A decodable "error" reply means the daemon refused the upgrade outright;
+	// surface it. Otherwise the connection either dropped (the daemon exec'd
+	// itself) or we got "upgrading" — both mean the replacement daemon is coming
+	// up, so fall through to the readiness wait.
+	if err == nil && resp.Type == "error" {
+		var e protocol.ErrorMsg
+
+		_ = protocol.DecodePayload(resp, &e)
+
+		return fmt.Errorf("%s", e.Message)
+	}
+
+	// Wait for the NEW daemon generation to report our version AND a different
+	// boot instance ID. exec preserves the inherited listening socket and a
+	// same-version rebuild keeps the version string, so neither a bare dial nor a
+	// version match distinguishes the old daemon from the new one — only a
+	// changed instance ID proves the replacement is serving (issue #1319). Bound
+	// the wait by the effective [connection] start policy (start_timeout /
+	// start_poll_interval) instead of a fixed 20×250ms retry count. The probe's
+	// own dial and handshake deadlines stay distinct from this budget.
+	if v, ready := waitForNewLocalDaemonGeneration(version.Version, priorInstanceID); !ready {
+		// Old daemons that don't understand ExecPath exec back into the old binary;
+		// report that concrete mismatch. Otherwise the replacement never presented a
+		// new generation within the budget (an inherited/old listener kept answering,
+		// or it never became reachable) — a failure, not a silent success, so the
+		// caller falls back to a clean restart.
+		if v != "" && v != version.Version {
+			return fmt.Errorf("daemon exec'd into %s instead of %s", v, version.Version)
+		}
+
+		return fmt.Errorf("daemon did not present a new %s generation within the start budget", version.Version)
 	}
 
 	out.Printf("%s\n", successMsg)
@@ -171,12 +234,40 @@ func execUpgrade(successMsg string) error {
 	return nil
 }
 
-func probeDaemonVersion() string {
-	conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond)
-	if err != nil {
-		return ""
+func probeDaemonIdentity() (daemonVersion, instanceID string) {
+	return probeDaemonIdentityWithDeadline(time.Time{})
+}
+
+func probeDaemonIdentityUntil(aggregateDeadline time.Time) (daemonVersion, instanceID string) {
+	return probeDaemonIdentityWithDeadline(aggregateDeadline)
+}
+
+func probeDaemonIdentityWithDeadline(aggregateDeadline time.Time) (daemonVersion, instanceID string) {
+	var (
+		conn net.Conn
+		err  error
+	)
+
+	if aggregateDeadline.IsZero() {
+		conn, err = dialLocalDaemonSocket()
+	} else {
+		conn, err = dialLocalDaemonSocketUntil(aggregateDeadline)
 	}
+
+	if err != nil {
+		return "", ""
+	}
+
 	defer func() { _ = conn.Close() }()
+
+	// A stale/foreign socket that accepts but never responds must not hang the
+	// post-upgrade version check. This is the same configured local handshake
+	// policy used by normal client connections and gr doctor.
+	if aggregateDeadline.IsZero() {
+		setLocalDaemonHandshakeDeadline(conn)
+	} else if !setLocalDaemonHandshakeDeadlineUntil(conn, aggregateDeadline) {
+		return "", ""
+	}
 
 	reader := protocol.NewFrameReader(conn)
 	writer := protocol.NewFrameWriter(conn)
@@ -188,17 +279,17 @@ func probeDaemonVersion() string {
 
 	frame, err := reader.ReadFrame()
 	if err != nil || frame.Channel != protocol.ChannelControl {
-		return ""
+		return "", ""
 	}
 
 	env, _ := protocol.DecodeControl(frame.Payload)
 
 	var hsOk protocol.HandshakeOkMsg
 	if err := protocol.DecodePayload(env, &hsOk); err != nil {
-		return ""
+		return "", ""
 	}
 
-	return hsOk.DaemonVersion
+	return hsOk.DaemonVersion, hsOk.DaemonInstanceID
 }
 
 func restartClean() error {
@@ -206,16 +297,17 @@ func restartClean() error {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 	}
 
-	for range 20 {
-		if _, err := os.Stat(paths.SocketPath); os.IsNotExist(err) {
-			break
-		}
+	// Wait for the stopped daemon's socket to disappear, bounded by the effective
+	// [connection] start policy rather than a fixed 20×100ms retry count (issue
+	// #1319).
+	pollLocalDaemon(func(time.Time) bool {
+		_, err := os.Stat(paths.SocketPath)
 
-		time.Sleep(100 * time.Millisecond)
-	}
+		return os.IsNotExist(err)
+	})
 
 	if _, err := os.Stat(paths.SocketPath); err == nil {
-		if conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond); err == nil {
+		if conn, err := dialLocalDaemonSocket(); err == nil {
 			_ = conn.Close()
 			return errors.New("daemon is still running, cannot restart cleanly")
 		}
