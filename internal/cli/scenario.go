@@ -63,21 +63,7 @@ func resolveScenarioSourceFrom(source, dir string) ([]byte, error) {
 }
 
 func parseScenarioFile(data []byte) (*scenarioFile, error) {
-	sf, err := scenariofile.Parse(data)
-	if err != nil {
-		return nil, err
-	}
-
-	// The interactive CLI has historically required repo even for a shared
-	// member; retain that stricter UX while using the canonical wire schema and
-	// policy parser shared with daemon-triggered scenarios.
-	for _, session := range sf.Sessions {
-		if session.Repo == "" {
-			return nil, fmt.Errorf("session %q: repo is required", session.Name)
-		}
-	}
-
-	return sf, nil
+	return scenariofile.Parse(data)
 }
 
 func scenarioPolicyInput(policy *scenariofile.PolicyConfig) *protocol.ScenarioPolicyInput {
