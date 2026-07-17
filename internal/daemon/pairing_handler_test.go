@@ -771,3 +771,105 @@ func TestLiveRemotePolicyAlsoGatesDataFrames(t *testing.T) {
 		t.Fatalf("post-revocation data frame = %q, want error", env.Type)
 	}
 }
+
+// authProofErrorMessage decodes the error reason from an auth_proof rejection.
+func authProofErrorMessage(t *testing.T, env protocol.Envelope) string {
+	t.Helper()
+
+	if env.Type != "error" {
+		t.Fatalf("expected error, got %q", env.Type)
+	}
+
+	var e protocol.ErrorMsg
+	if err := protocol.DecodePayload(env, &e); err != nil {
+		t.Fatal(err)
+	}
+
+	return e.Message
+}
+
+// TestAuthProofUnknownTokenReturnsInvalidToken proves an auth_proof whose token
+// resolves to no device is reported as the canonical "invalid token" — distinct
+// from a proof failure — so a remote recovery classifier can safely discard a
+// device the daemon reports unknown (revoked/never paired) (issue #1299).
+func TestAuthProofUnknownTokenReturnsInvalidToken(t *testing.T) {
+	sm := newPairingSM(t)
+
+	rc := newRemoteConn(t, sm, TailnetIdentity{User: "speir@example.com", Node: "ben"})
+	rc.handshake(t, sm)
+
+	// A token that resolves to no paired device.
+	rc.send(t, "auth_proof", protocol.AuthProofMsg{Signature: "irrelevant"}, "no-such-token")
+
+	if msg := authProofErrorMessage(t, rc.read(t)); msg != "invalid token" {
+		t.Fatalf("unknown-token auth_proof error = %q, want %q", msg, "invalid token")
+	}
+}
+
+// TestAuthProofBadSignatureReturnsProofFailed proves that for a KNOWN device a
+// bad signature stays the ambiguous "proof of possession failed" — it must NOT
+// be reported as invalid token, because the device is still committed and a
+// recovery classifier must retain it (issue #1299).
+func TestAuthProofBadSignatureReturnsProofFailed(t *testing.T) {
+	sm := newPairingSM(t)
+	pub, _, _ := ed25519.GenerateKey(nil)
+	pubB64 := base64.StdEncoding.EncodeToString(pub)
+	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
+
+	rid, waiter, err := sm.AddPendingPairing("bairn", pubB64, id, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, token, err := approveWithReceipt(t, sm, waiter, rid, false, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rc := newRemoteConn(t, sm, id)
+	rc.handshake(t, sm)
+
+	// A well-formed but wrong signature (base64 of the wrong bytes).
+	badSig := base64.StdEncoding.EncodeToString(make([]byte, ed25519.SignatureSize))
+	rc.send(t, "auth_proof", protocol.AuthProofMsg{Signature: badSig}, token)
+
+	if msg := authProofErrorMessage(t, rc.read(t)); msg != "proof of possession failed" {
+		t.Fatalf("bad-signature auth_proof error = %q, want %q", msg, "proof of possession failed")
+	}
+}
+
+// TestAuthProofIdentityMismatchReturnsProofFailed proves that a valid signature
+// from a KNOWN device presented over a connection whose tailnet identity no
+// longer matches the device stays "proof of possession failed" — a committed
+// device with a changed identity, which must not be discarded as invalid token
+// (issue #1299).
+func TestAuthProofIdentityMismatchReturnsProofFailed(t *testing.T) {
+	sm := newPairingSM(t)
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	pubB64 := base64.StdEncoding.EncodeToString(pub)
+
+	pairedID := TailnetIdentity{User: "speir@example.com", Node: "ben"}
+
+	rid, waiter, err := sm.AddPendingPairing("bairn", pubB64, pairedID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, token, err := approveWithReceipt(t, sm, waiter, rid, false, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Connect as the same (allowed) tailnet USER but a different NODE than the
+	// device was paired under: it clears the remote-access allowlist but fails the
+	// per-device identity binding.
+	rc := newRemoteConn(t, sm, TailnetIdentity{User: "speir@example.com", Node: "strath"})
+	ch := rc.handshake(t, sm)
+
+	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, protocol.PoPSigningInput(ch.Nonce, sm.remoteTLSPin)))
+	rc.send(t, "auth_proof", protocol.AuthProofMsg{Signature: sig}, token)
+
+	if msg := authProofErrorMessage(t, rc.read(t)); msg != "proof of possession failed" {
+		t.Fatalf("identity-mismatch auth_proof error = %q, want %q", msg, "proof of possession failed")
+	}
+}

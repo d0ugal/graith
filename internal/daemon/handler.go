@@ -279,7 +279,23 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				remoteTLSPin := sm.remoteTLSPin
 				sm.mu.RUnlock()
 
-				if dev == nil || challengeNonce == "" || !verifyPoP(dev.PubKey, challengeNonce, remoteTLSPin, ap.Signature) ||
+				// An unresolvable token means there is no such paired device — the
+				// canonical "invalid token" case, distinct from a proof failure. A
+				// remote recovery classifier can safely discard a device whose token
+				// the daemon reports unknown (it was revoked/never paired), whereas a
+				// generic "proof of possession failed" is ambiguous: it can mean a
+				// still-committed device whose key or tailnet identity changed, which
+				// must NOT be discarded. Keep the two outcomes separate (issue #1299).
+				if dev == nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid token"})
+					continue
+				}
+
+				// Device exists, but the proof itself is unacceptable: no challenge was
+				// issued/consumed, the signature doesn't verify against the device key
+				// bound to this daemon's TLS pin, or the connection's tailnet identity
+				// no longer matches the device. All remain "proof of possession failed".
+				if challengeNonce == "" || !verifyPoP(dev.PubKey, challengeNonce, remoteTLSPin, ap.Signature) ||
 					(origin.Remote && !identityMatchesDevice(origin.Identity, dev)) {
 					sendControl("error", protocol.ErrorMsg{Message: "proof of possession failed"})
 					continue
