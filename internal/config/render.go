@@ -6,6 +6,8 @@ import (
 
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 // RedactedMask is the placeholder substituted for secret-bearing values when
@@ -93,7 +95,38 @@ func resolveRenderedDefaults(cfg *Config) *Config {
 		c.Remote.PairFallbackWindow = "1m"
 	}
 
+	// [tools]: unset executables render empty even though runtime resolution
+	// (tools.merge over tools.Defaults) substitutes git/gh/sh/osascript/ps/lsof.
+	// Materialize the same defaults so `config show` reflects what actually runs
+	// (issue #1311). A value that IS set is kept verbatim.
+	td := tools.Defaults()
+	fillToolDefault(&c.Tools.Git, td.Git)
+	fillToolDefault(&c.Tools.GH, td.GH)
+	fillToolDefault(&c.Tools.Shell, td.Shell)
+	fillToolDefault(&c.Tools.OSAScript, td.OSAScript)
+	fillToolDefault(&c.Tools.PS, td.PS)
+	fillToolDefault(&c.Tools.Lsof, td.Lsof)
+
+	// [approvals]: the per-backend execution timeouts render empty while runtime
+	// resolution (backendExecTimeoutOrDefault) substitutes defaultBackendExecTimeout
+	// (5s). Render that default so the effective timeout is visible (issue #1311).
+	if strings.TrimSpace(c.Approvals.CommandTimeout) == "" {
+		c.Approvals.CommandTimeout = defaultBackendExecTimeout.String()
+	}
+
+	if strings.TrimSpace(c.Approvals.LocalmostTimeout) == "" {
+		c.Approvals.LocalmostTimeout = defaultBackendExecTimeout.String()
+	}
+
 	return &c
+}
+
+// fillToolDefault sets *field to def when the configured value is empty,
+// mirroring tools.merge so the rendered [tools] block matches the resolver.
+func fillToolDefault(field *string, def string) {
+	if strings.TrimSpace(*field) == "" {
+		*field = def
+	}
 }
 
 // DiffFromDefaults returns a unified diff (built-in defaults → cfg) of the two

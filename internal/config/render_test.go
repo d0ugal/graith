@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 func TestEffectiveTOMLRendersConfig(t *testing.T) {
@@ -49,6 +51,76 @@ func TestEffectiveTOMLResolvesPairingDefaults(t *testing.T) {
 	if cfg.Remote.MaxPendingPairings != 0 || cfg.Remote.PendingPairingTTL != "" ||
 		cfg.Remote.PairFallbackCount != 0 || cfg.Remote.PairFallbackWindow != "" {
 		t.Fatal("EffectiveTOML mutated its input")
+	}
+}
+
+// TestEffectiveTOMLRendersToolAndApprovalDefaults is the #1311 render-vs-accessor
+// regression: a fresh config leaves [tools] executables and the approval backend
+// timeouts empty, but runtime resolution supplies git/gh/sh/... and 5s. The
+// rendered "effective" config must therefore materialize exactly what the runtime
+// accessors return, so config show / the GUI viewer reflect what actually runs.
+func TestEffectiveTOMLRendersToolAndApprovalDefaults(t *testing.T) {
+	cfg := Default()
+
+	// The daemon Configures the process resolver from the same config at startup;
+	// pin it here so the assertions compare render output against the live runtime
+	// accessors rather than re-deriving the defaults independently.
+	tools.Configure(cfg.Tools.Resolved())
+	t.Cleanup(tools.Reset)
+
+	data, err := EffectiveTOML(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var rendered Config
+	if err := toml.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("rendered TOML does not parse: %v", err)
+	}
+
+	toolChecks := []struct {
+		name     string
+		rendered string
+		accessor string
+	}{
+		{"git", rendered.Tools.Git, tools.Git()},
+		{"gh", rendered.Tools.GH, tools.GH()},
+		{"shell", rendered.Tools.Shell, tools.Shell()},
+		{"osascript", rendered.Tools.OSAScript, tools.OSAScript()},
+		{"ps", rendered.Tools.PS, tools.PS()},
+		{"lsof", rendered.Tools.Lsof, tools.Lsof()},
+	}
+	for _, c := range toolChecks {
+		if c.rendered == "" {
+			t.Errorf("tools.%s rendered empty; effective output must show the runtime default", c.name)
+		}
+
+		if c.rendered != c.accessor {
+			t.Errorf("tools.%s rendered %q, runtime accessor returns %q", c.name, c.rendered, c.accessor)
+		}
+	}
+
+	// The approval backend timeouts must round-trip to the same duration the
+	// runtime accessors resolve (5s), not the empty-string zero.
+	if got, want := rendered.Approvals.CommandTimeoutDuration(), cfg.Approvals.CommandTimeoutDuration(); got != want {
+		t.Errorf("rendered approvals.command_timeout = %v, runtime accessor = %v", got, want)
+	}
+
+	if rendered.Approvals.CommandTimeout == "" {
+		t.Error("approvals.command_timeout rendered empty; effective output must show the 5s default")
+	}
+
+	if got, want := rendered.Approvals.LocalmostTimeoutDuration(), cfg.Approvals.LocalmostTimeoutDuration(); got != want {
+		t.Errorf("rendered approvals.localmost_timeout = %v, runtime accessor = %v", got, want)
+	}
+
+	if rendered.Approvals.LocalmostTimeout == "" {
+		t.Error("approvals.localmost_timeout rendered empty; effective output must show the 5s default")
+	}
+
+	// EffectiveTOML must not mutate its input.
+	if cfg.Tools.Git != "" || cfg.Approvals.CommandTimeout != "" || cfg.Approvals.LocalmostTimeout != "" {
+		t.Fatal("EffectiveTOML mutated its input config")
 	}
 }
 
