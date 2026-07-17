@@ -121,6 +121,43 @@ func TestCreateEntrypointPinsToolGenerationAcrossReload(t *testing.T) {
 	}
 }
 
+// TestFetchRemotesUsesPinnedGeneration is the #1287 detection/fetch regression:
+// fetchRemotes must resolve the git executable from the tools generation
+// captured under the same lock as the fetch timeout, so the whole pass runs one
+// coherent (config, tools) generation rather than pairing the old timeout with a
+// freshly-resolved binary per repo.
+func TestFetchRemotesUsesPinnedGeneration(t *testing.T) {
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not found on PATH")
+	}
+
+	_, cloneDir := setupTestRepo(t)
+
+	binDir := t.TempDir()
+	logPath := filepath.Join(binDir, "calls.log")
+	wrapperA := writePullGitWrapper(t, binDir, "gitA", "A", realGit, logPath, "")
+
+	t.Cleanup(tools.Reset)
+	tools.Configure(tools.Config{Git: wrapperA})
+
+	sm := newTestSM(t)
+	sm.state.Sessions["s"] = &SessionState{ID: "s", Status: StatusRunning, WorktreePath: cloneDir}
+
+	sm.fetchRemotes(context.Background())
+
+	lines := filterLinesContaining(readNonEmptyLines(t, logPath), "fetch")
+	if len(lines) == 0 {
+		t.Fatal("fetchRemotes made no fetch git call")
+	}
+
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "A ") {
+			t.Fatalf("fetchRemotes ran a git call on the wrong generation: %q", line)
+		}
+	}
+}
+
 // filterLinesContaining returns the lines that contain sub.
 func filterLinesContaining(lines []string, sub string) []string {
 	var out []string

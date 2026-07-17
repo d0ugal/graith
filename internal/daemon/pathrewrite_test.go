@@ -6,6 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/d0ugal/graith/internal/git"
+	"github.com/d0ugal/graith/internal/testutil"
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 func needles(subs []pathSubstitution) []string {
@@ -234,6 +238,56 @@ func TestRewritePathsInContentEmptyRewrites(t *testing.T) {
 	}
 }
 
+// TestRewriteIncludeConfigPathsUsesPinnedRunner is the #1287 create/fork
+// path-rewrite regression: the post-worktree config rewrite must run its
+// `git update-index --skip-worktree` on the SAME pinned Runner the lifecycle
+// captured, not a fresh package-global git resolution — otherwise a reload
+// between SetupSession and the rewrite would split the operation.
+func TestRewriteIncludeConfigPathsUsesPinnedRunner(t *testing.T) {
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not found on PATH")
+	}
+
+	testutil.IsolateGit(t)
+
+	wt := t.TempDir()
+	gitRun(t, wt, "init", "-b", "main")
+
+	overridePath := filepath.Join(wt, "docker-compose.override.yml")
+	if err := os.WriteFile(overridePath, []byte("services:\n  gr:\n    volumes:\n      - ~/Code/grafana:/app\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	gitRun(t, wt, "add", "docker-compose.override.yml")
+	gitRun(t, wt, "commit", "-m", "add override")
+
+	binDir := t.TempDir()
+	logPath := filepath.Join(binDir, "calls.log")
+	wrapperA := writePullGitWrapper(t, binDir, "gitA", "A", realGit, logPath, "")
+
+	t.Cleanup(tools.Reset)
+	tools.Configure(tools.Config{Git: wrapperA})
+
+	sm := newTestSM(t)
+	subs := []pathSubstitution{{needle: "~/Code/grafana", worktree: "/data/wt/grafana"}}
+
+	// Pass a Runner pinned to wrapper A, as the lifecycle does. markSkipWorktree
+	// must run on it.
+	sm.rewriteIncludeConfigPaths(git.NewRunner(), []string{wt}, subs)
+
+	lines := filterLinesContaining(readNonEmptyLines(t, logPath), "update-index")
+	if len(lines) == 0 {
+		t.Fatal("skip-worktree git call was not made (rewrite did not run its update-index)")
+	}
+
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "A ") {
+			t.Fatalf("skip-worktree ran on the wrong generation: %q (must use the pinned Runner)", line)
+		}
+	}
+}
+
 func TestRewriteIncludeConfigPaths(t *testing.T) {
 	mainWt := t.TempDir()
 	incWt := t.TempDir()
@@ -265,7 +319,7 @@ func TestRewriteIncludeConfigPaths(t *testing.T) {
 	}
 
 	sm := newTestSM(t)
-	sm.rewriteIncludeConfigPaths([]string{mainWt, incWt}, subs)
+	sm.rewriteIncludeConfigPaths(git.NewRunner(), []string{mainWt, incWt}, subs)
 
 	got, err := os.ReadFile(overridePath)
 	if err != nil {
@@ -295,7 +349,7 @@ func TestRewriteIncludeConfigPathsPreservesMode(t *testing.T) {
 	}
 
 	sm := newTestSM(t)
-	sm.rewriteIncludeConfigPaths(
+	sm.rewriteIncludeConfigPaths(git.NewRunner(),
 		[]string{wt},
 		[]pathSubstitution{{needle: "~/Code/grafana", worktree: "/wt/grafana"}},
 	)
@@ -335,7 +389,7 @@ func TestRewriteIncludeConfigPathsSkipsSymlink(t *testing.T) {
 	}
 
 	sm := newTestSM(t)
-	sm.rewriteIncludeConfigPaths(
+	sm.rewriteIncludeConfigPaths(git.NewRunner(),
 		[]string{wt},
 		[]pathSubstitution{{needle: "~/Code/grafana", worktree: "/wt/grafana"}},
 	)
@@ -360,11 +414,11 @@ func TestRewriteIncludeConfigPathsNoOpCases(t *testing.T) {
 	sm := newTestSM(t)
 
 	// No rewrites: returns immediately, no panic on a nil root.
-	sm.rewriteIncludeConfigPaths(nil, nil)
+	sm.rewriteIncludeConfigPaths(git.NewRunner(), nil, nil)
 
 	// Missing files in a real dir: no error, nothing created.
 	wt := t.TempDir()
-	sm.rewriteIncludeConfigPaths(
+	sm.rewriteIncludeConfigPaths(git.NewRunner(),
 		[]string{wt, ""},
 		[]pathSubstitution{{needle: "~/Code/x", worktree: "/wt/x"}},
 	)
@@ -408,7 +462,7 @@ func TestRewriteIncludeConfigPathsSkipWorktree(t *testing.T) {
 	runGit("commit", "-q", "-m", "add override")
 
 	sm := newTestSM(t)
-	sm.rewriteIncludeConfigPaths(
+	sm.rewriteIncludeConfigPaths(git.NewRunner(),
 		[]string{repo},
 		[]pathSubstitution{{needle: "~/Code/grafana", worktree: "/data/wt/grafana"}},
 	)

@@ -11,8 +11,12 @@ import (
 
 // gcHasUncommittedChanges indirects the dirty-worktree check so tests can
 // simulate a git failure (an undeterminable dirty state) without constructing a
-// corrupt repository on disk.
-var gcHasUncommittedChanges = git.HasUncommittedChanges
+// corrupt repository on disk. It runs on the caller-pinned Runner so the
+// is-a-repo probe and the dirty check in one classify use one git generation
+// (#1287).
+var gcHasUncommittedChanges = func(r git.Runner, dir string) (bool, error) {
+	return r.HasUncommittedChanges(dir)
+}
 
 // gcOrphanMinAge is the default minimum age a worktree/scratch directory must
 // have before GC will consider it an orphan. Directories are created early in a
@@ -177,10 +181,14 @@ func findOrphanWorktrees(repos []os.DirEntry, worktreesDir string, known map[str
 func classifyWorktreeOrphan(sessDir, id string) GCOrphan {
 	o := GCOrphan{Type: GCOrphanWorktree, Path: sessDir, ID: id}
 
-	if git.IsInsideGitRepo(sessDir) {
+	// One pinned Runner so the is-a-repo probe and the dirty check run on the
+	// same git generation (#1287).
+	r := git.NewRunner()
+
+	if r.IsInsideGitRepo(sessDir) {
 		o.IsGitWorktree = true
 
-		dirty, err := gcHasUncommittedChanges(sessDir)
+		dirty, err := gcHasUncommittedChanges(r, sessDir)
 		if err != nil || dirty {
 			o.HasDirtyFiles = true
 		}
@@ -227,9 +235,13 @@ func (sm *SessionManager) RunGC(force bool, now time.Time) []GCOrphan {
 			continue
 		}
 
+		// One pinned Runner for this orphan's whole removal op (root resolution →
+		// remove → prune) so a reload can't split it across git binaries (#1287).
+		r := git.NewRunner()
+
 		var repoRoot string
 		if o.IsGitWorktree {
-			repoRoot, _ = git.RepoRootFromWorktree(o.Path)
+			repoRoot, _ = r.RepoRootFromWorktree(o.Path)
 		}
 
 		if err := os.RemoveAll(o.Path); err != nil {
@@ -244,7 +256,7 @@ func (sm *SessionManager) RunGC(force bool, now time.Time) []GCOrphan {
 		// Prune the now-stale worktree admin entry from the owning repo so git
 		// stops listing a worktree whose directory is gone.
 		if repoRoot != "" {
-			_ = git.PruneWorktrees(repoRoot)
+			_ = r.PruneWorktrees(repoRoot)
 		}
 	}
 

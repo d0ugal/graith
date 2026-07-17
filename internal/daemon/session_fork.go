@@ -399,7 +399,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		// Same post-create hook as Create: a forked includes session gets fresh
 		// worktrees, so its config files still hold the source paths and must be
 		// rewritten too (#1033).
-		sm.applyIncludePathRewrites(repoRoot, worktreePath, forkIncludes)
+		sm.applyIncludePathRewrites(gitRunner, repoRoot, worktreePath, forkIncludes)
 	} else {
 		if err := gitRunner.SetupSession(gitCtx, repoRoot, worktreePath, branchName, baseBranch, fetchOnCreate); err != nil {
 			rollbackState()

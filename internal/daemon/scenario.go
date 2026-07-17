@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/scenariofile"
 	"github.com/d0ugal/graith/internal/store"
@@ -129,14 +128,17 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		return nil, err
 	}
 
+	// Capture the config and git executable as one coherent generation for the
+	// whole scenario start, then use the pinned Runner for the preflight repo
+	// checks and every repo-root resolution below (#1287).
+	cfg, gitRunner, _ := sm.configWithTools()
+
 	// Preflight: validate repos exist and are git repos.
 	for _, s := range msg.Sessions {
-		if !git.IsInsideGitRepo(s.Repo) {
+		if !gitRunner.IsInsideGitRepo(s.Repo) {
 			return nil, fmt.Errorf("session %q: repo %q is not a git repository", s.Name, s.Repo)
 		}
 	}
-
-	cfg := sm.Config()
 
 	// Validate agents and repos against config.
 	for _, s := range msg.Sessions {
@@ -198,7 +200,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 			agentName = cfg.DefaultAgent
 		}
 
-		repoRoot, err := git.RepoRootPath(s.Repo)
+		repoRoot, err := gitRunner.RepoRootPath(s.Repo)
 		if err != nil {
 			sm.mu.Unlock()
 			return nil, fmt.Errorf("session %q: resolve repo root: %w", s.Name, err)
@@ -893,7 +895,7 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		return nil, errors.New("repo is required")
 	}
 
-	cfg := sm.Config()
+	cfg, gitRunner, _ := sm.configWithTools()
 
 	agentName := input.Agent
 	if agentName == "" {
@@ -904,7 +906,7 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		return nil, fmt.Errorf("unknown agent %q", agentName)
 	}
 
-	repoRoot, err := git.RepoRootPath(input.Repo)
+	repoRoot, err := gitRunner.RepoRootPath(input.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("resolve repo root: %w", err)
 	}

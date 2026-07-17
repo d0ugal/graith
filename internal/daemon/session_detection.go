@@ -6,6 +6,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/detector"
 	"github.com/d0ugal/graith/internal/git"
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 // RunDetectionLoop periodically scans PTY scrollback to detect low-risk agent
@@ -53,6 +54,10 @@ func (sm *SessionManager) fetchRemotes(ctx context.Context) {
 	sm.mu.RLock()
 
 	fetchPerRepoTimeout := sm.cfg.Detection.FetchTimeoutDuration()
+	// Capture the git executable under the SAME lock as the fetch timeout so the
+	// whole pass runs on one coherent (config, tools) generation — a reload can't
+	// pair the old timeout with a new binary (#1287).
+	toolSnap := tools.Snapshot()
 
 	seen := make(map[string]struct{})
 
@@ -85,14 +90,14 @@ func (sm *SessionManager) fetchRemotes(ctx context.Context) {
 
 	sm.mu.RUnlock()
 
+	// One Runner pinned to the captured generation for the whole fetch pass.
+	r := git.NewRunnerWith(toolSnap.Git)
+
 	for _, dir := range dirs {
 		if ctx.Err() != nil {
 			return
 		}
 
-		// Pin one Runner per repo so the remote check and the fetch run against
-		// the same git executable across a possible mid-loop [tools] reload (#1287).
-		r := git.NewRunner()
 		if !r.HasRemote(dir, "origin") {
 			continue
 		}
@@ -175,6 +180,9 @@ func (sm *SessionManager) detectAgentStatuses() {
 	sm.mu.RLock()
 
 	det := sm.cfg.Detection
+	// Capture the git executable under the SAME lock as the detection config so
+	// the whole pass runs on one coherent (config, tools) generation (#1287).
+	toolSnap := tools.Snapshot()
 
 	type target struct {
 		id           string
@@ -208,6 +216,9 @@ func (sm *SessionManager) detectAgentStatuses() {
 	}
 
 	sm.mu.RUnlock()
+
+	// One Runner pinned to the captured generation for the whole detection pass.
+	r := git.NewRunnerWith(toolSnap.Git)
 
 	var toAutoStop []string
 
@@ -249,12 +260,6 @@ func (sm *SessionManager) detectAgentStatuses() {
 		)
 
 		if !t.mirror {
-			// Pin one Runner for this target's whole status computation (dirty +
-			// unpushed, across the main worktree and every include) so a mid-scan
-			// [tools] reload can't run some checks on a different git executable
-			// (#1287).
-			r := git.NewRunner()
-
 			if t.worktreePath != "" && t.repoPath != "" {
 				if d, err := r.HasUncommittedChanges(t.worktreePath); err == nil {
 					dirty = d

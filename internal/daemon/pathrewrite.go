@@ -196,7 +196,7 @@ func rewritePathsInContent(content string, subs []pathSubstitution) (string, boo
 // destroy the link. When a *tracked* file is rewritten it is marked
 // skip-worktree so the session-specific path can't be committed accidentally
 // and the worktree doesn't start dirty.
-func (sm *SessionManager) rewriteIncludeConfigPaths(worktreeRoots []string, subs []pathSubstitution) {
+func (sm *SessionManager) rewriteIncludeConfigPaths(r git.Runner, worktreeRoots []string, subs []pathSubstitution) {
 	if len(subs) == 0 {
 		return
 	}
@@ -243,7 +243,7 @@ func (sm *SessionManager) rewriteIncludeConfigPaths(worktreeRoots []string, subs
 				continue
 			}
 
-			sm.markSkipWorktree(root, name)
+			sm.markSkipWorktree(r, root, name)
 			sm.log.Info("rewrote include config paths", "path", path)
 		}
 	}
@@ -254,8 +254,8 @@ func (sm *SessionManager) rewriteIncludeConfigPaths(worktreeRoots []string, subs
 // staged by a blanket `git add`. Best-effort: for an untracked (gitignored)
 // file the command fails and is ignored — such a file can't be committed by
 // accident anyway.
-func (sm *SessionManager) markSkipWorktree(worktreeRoot, relPath string) {
-	if !git.RunCheck(worktreeRoot, "update-index", "--skip-worktree", "--", relPath) {
+func (sm *SessionManager) markSkipWorktree(r git.Runner, worktreeRoot, relPath string) {
+	if !r.RunCheck(worktreeRoot, "update-index", "--skip-worktree", "--", relPath) {
 		sm.log.Debug("skip-worktree not applied (file likely untracked)", "root", worktreeRoot, "file", relPath)
 	}
 }
@@ -264,7 +264,7 @@ func (sm *SessionManager) markSkipWorktree(worktreeRoot, relPath string) {
 // and fork: it derives the source→worktree substitutions for the main repo plus
 // every included repo and rewrites the known config files present in any of the
 // session's worktrees. A no-op when there are no includes.
-func (sm *SessionManager) applyIncludePathRewrites(mainRepoPath, mainWorktreePath string, includes []IncludedRepoState) {
+func (sm *SessionManager) applyIncludePathRewrites(r git.Runner, mainRepoPath, mainWorktreePath string, includes []IncludedRepoState) {
 	if len(includes) == 0 {
 		return
 	}
@@ -279,5 +279,5 @@ func (sm *SessionManager) applyIncludePathRewrites(mainRepoPath, mainWorktreePat
 		roots = append(roots, inc.WorktreePath)
 	}
 
-	sm.rewriteIncludeConfigPaths(roots, subs)
+	sm.rewriteIncludeConfigPaths(r, roots, subs)
 }

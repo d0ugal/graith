@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/testutil"
 )
 
@@ -231,7 +232,7 @@ func TestRunGCSkipsUndeterminableWorktree(t *testing.T) {
 	// Simulate `git status` failing for this worktree (corrupt index, broken
 	// gitlink, transient error) — the dirty state is undeterminable.
 	orig := gcHasUncommittedChanges
-	gcHasUncommittedChanges = func(string) (bool, error) {
+	gcHasUncommittedChanges = func(git.Runner, string) (bool, error) {
 		return false, errors.New("simulated git failure")
 	}
 

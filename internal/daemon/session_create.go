@@ -502,7 +502,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		// GRAITH_INCLUDE_*_PATH env vars) sees the session's code, not the main
 		// checkout (#1033). Config files present in the worktrees are rewritten;
 		// best-effort and never fatal.
-		sm.applyIncludePathRewrites(repoRoot, worktreePath, includes)
+		sm.applyIncludePathRewrites(gitRunner, repoRoot, worktreePath, includes)
 	}
 
 	// Build template vars, env, args, hooks, sandbox — all fast, no lock needed.
