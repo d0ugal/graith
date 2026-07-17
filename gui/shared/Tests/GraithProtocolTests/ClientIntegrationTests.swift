@@ -515,6 +515,72 @@ struct ClientIntegrationTests {
         await conn.close()
     }
 
+    /// A no-argument log peek must send the daemon-default sentinel (`lines: 0`)
+    /// so the daemon resolves the configured `[limits] log_lines` instead of the
+    /// GUI imposing a compile-time count that bypasses it (issue #1289).
+    @Test func logsDefaultSendsDaemonSentinel() async throws {
+        let (clientStream, serverStream) = InMemoryByteStream.makePair()
+        let daemon = MockDaemon(stream: serverStream)
+
+        let server = Task {
+            _ = try await daemon.readControl() // handshake
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+
+            let logsReq = try await daemon.readControl()
+            #expect(logsReq.type == "logs")
+            let msg = try decodePayload(logsReq, as: LogsMsg.self)
+            #expect(msg.sessionID == "bothy")
+            #expect(msg.lines == 0)
+            #expect(msg.follow == false)
+
+            try await daemon.writeData(Data("dreich output\n".utf8))
+            try await daemon.writeControl("logs_done", EmptyMsg())
+        }
+
+        let stream = clientStream
+        let client = GraithProtocolClient(
+            transport: .unix(path: "/tmp/graith.sock"),
+            profile: "", clientID: "app", token: nil, signer: nil,
+            streamFactory: { _ in stream }
+        )
+        let text = try await client.logs(sessionID: "bothy")
+        #expect(text == "dreich output\n")
+
+        _ = await server.result
+        await client.close()
+    }
+
+    /// An explicit positive `lines` count is preserved verbatim — the sentinel
+    /// default must not clobber a caller's real override (issue #1289).
+    @Test func logsExplicitLineCountPreserved() async throws {
+        let (clientStream, serverStream) = InMemoryByteStream.makePair()
+        let daemon = MockDaemon(stream: serverStream)
+
+        let server = Task {
+            _ = try await daemon.readControl() // handshake
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+
+            let logsReq = try await daemon.readControl()
+            #expect(logsReq.type == "logs")
+            #expect(try decodePayload(logsReq, as: LogsMsg.self).lines == 42)
+
+            try await daemon.writeData(Data("canny\n".utf8))
+            try await daemon.writeControl("logs_done", EmptyMsg())
+        }
+
+        let stream = clientStream
+        let client = GraithProtocolClient(
+            transport: .unix(path: "/tmp/graith.sock"),
+            profile: "", clientID: "app", token: nil, signer: nil,
+            streamFactory: { _ in stream }
+        )
+        let text = try await client.logs(sessionID: "bothy", lines: 42)
+        #expect(text == "canny\n")
+
+        _ = await server.result
+        await client.close()
+    }
+
 /// Build a minimal valid ``SessionInfo`` for fixtures.
 func makeSession(id: String, name: String) -> SessionInfo {
     let json = """

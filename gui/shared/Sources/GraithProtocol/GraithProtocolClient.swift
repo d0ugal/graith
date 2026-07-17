@@ -57,13 +57,14 @@ public struct AttachSession: Sendable {
 /// The same client serves the local macOS daemon (`.unix`) and remote tailnet
 /// daemons (`.remote` + TLS); only the ``GraithTransport`` differs.
 public actor GraithProtocolClient {
-    /// Default number of scrollback lines a one-shot log peek requests. Kept as a
-    /// single shared constant so every GUI log peek (the shared client and the
-    /// macOS peek sheet) agrees on one value instead of drifting apart; it
-    /// mirrors the daemon's `[limits] log_lines` default (issue #1252). Passing
-    /// 0 to the daemon would defer to its configured limit, but the GUI can't
-    /// read that config yet, so this compile-time default stands in.
-    public static let defaultLogLines = 300
+    /// Line count a no-argument log peek requests. `0` is the daemon-default
+    /// sentinel: the daemon resolves it to the configured `[limits] log_lines`
+    /// (handler.go), keeping that config the single source of truth. Sending a
+    /// positive compile-time constant here would bypass it, so every GUI log
+    /// peek (the shared client and the macOS peek sheet) defaults to `0` and
+    /// lets the daemon decide (issues #1252, #1289). Callers that pass an
+    /// explicit positive `lines` still override it.
+    public static let defaultLogLines = 0
 
     public let transport: GraithTransport
 

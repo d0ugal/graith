@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -742,6 +743,70 @@ func TestLogsDefaultLines(t *testing.T) {
 	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "neep-log", Lines: 0})
 
 	h.expectType(t, "logs_done")
+}
+
+// TestLogsDefaultUsesConfiguredLimit proves the daemon-default sentinel
+// (Lines=0) resolves to the *configured* [limits] log_lines rather than a
+// hard-coded 300 or the whole file. A GUI log peek sends 0 (issue #1289), so a
+// non-300 configured value must be honored: with 20 lines on disk and
+// log_lines=5, a peek must return exactly the last 5 lines. If the sentinel
+// were ignored (falling back to the 300 default), all 20 lines would stream.
+func TestLogsDefaultUsesConfiguredLimit(t *testing.T) {
+	cfg := config.Default()
+	cfg.Limits.LogLines = 5
+
+	h := newTestHarnessWithConfig(t, cfg)
+
+	var scrollback strings.Builder
+	for i := 1; i <= 20; i++ {
+		fmt.Fprintf(&scrollback, "line %02d\n", i)
+	}
+
+	h.addStoppedSession(t, "strath-log", "strath-still", 0, scrollback.String())
+
+	// No line count → daemon-default sentinel, exercising the GUI's no-override peek.
+	h.sendControl(t, "logs", protocol.LogsMsg{SessionID: "strath-log", Lines: 0})
+
+	var (
+		gotData []byte
+		done    bool
+	)
+
+	for !done {
+		frame, err := h.reader.ReadFrame()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		switch frame.Channel {
+		case protocol.ChannelData:
+			gotData = append(gotData, frame.Payload...)
+		case protocol.ChannelControl:
+			env, err := protocol.DecodeControl(frame.Payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if env.Type != "logs_done" {
+				t.Fatalf("expected logs_done, got %q", env.Type)
+			}
+
+			done = true
+		}
+	}
+
+	lines := strings.Split(strings.TrimRight(string(gotData), "\n"), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("expected exactly 5 lines (configured log_lines), got %d: %q", len(lines), gotData)
+	}
+
+	if !strings.Contains(string(gotData), "line 20") || !strings.Contains(string(gotData), "line 16") {
+		t.Fatalf("expected the last 5 lines (16-20), got %q", gotData)
+	}
+
+	if strings.Contains(string(gotData), "line 15") {
+		t.Fatalf("configured log_lines=5 not honored; older lines leaked: %q", gotData)
+	}
 }
 
 func TestLogsFollowThenDetach(t *testing.T) {
