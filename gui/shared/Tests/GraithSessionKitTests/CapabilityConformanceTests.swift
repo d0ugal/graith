@@ -67,6 +67,22 @@ private struct CapabilityEntry: Decodable {
     }
 }
 
+private enum GUIParityIssue: Equatable {
+    case missingPlatformDecision
+    case targetedDivergence
+}
+
+private func guiParityIssue(for capability: CapabilityEntry) -> GUIParityIssue? {
+    let iosTargeted = capability.ios != "n/a"
+    let macOSTargeted = capability.macos != "n/a"
+
+    if !iosTargeted || !macOSTargeted {
+        return (capability.platformDecision ?? "").isEmpty ? .missingPlatformDecision : nil
+    }
+
+    return capability.ios == capability.macos ? nil : .targetedDivergence
+}
+
 private enum CapabilityFixtureError: Error, CustomStringConvertible {
     case missing
     var description: String {
@@ -209,23 +225,48 @@ struct CapabilityConformanceTests {
     @Test func guiParityHolds() throws {
         let manifest = try loadCapabilityManifest()
         for c in manifest.capabilities {
-            let iosTargeted = c.ios != "n/a"
-            let macOSTargeted = c.macos != "n/a"
-
-            if !iosTargeted || !macOSTargeted {
-                #expect(
-                    !(c.platformDecision ?? "").isEmpty,
-                    "capability `\(c.id)` excludes a GUI surface but has no platform_decision — link the feature design's ## Platform support section"
-                )
-            }
-
-            if iosTargeted && macOSTargeted {
-                #expect(
-                    c.ios == c.macos,
-                    "capability `\(c.id)` targets both GUIs but diverges (iOS=\(c.ios), macOS=\(c.macos)) — targeted surfaces must stay at parity"
-                )
+            switch guiParityIssue(for: c) {
+            case .missingPlatformDecision:
+                Issue.record("capability `\(c.id)` excludes a GUI surface but has no platform_decision — link the feature design's ## Platform support section")
+            case .targetedDivergence:
+                Issue.record("capability `\(c.id)` targets both GUIs but diverges (iOS=\(c.ios), macOS=\(c.macos)) — targeted surfaces must stay at parity")
+            case nil:
+                break
             }
         }
+    }
+
+    @Test func excludedGUIWithPlatformDecisionPassesParity() {
+        let capability = CapabilityEntry(
+            id: "braw",
+            ios: "n/a",
+            macos: "supported",
+            platformDecision: "docs/design/braw.md#platform-support"
+        )
+
+        #expect(guiParityIssue(for: capability) == nil)
+    }
+
+    @Test func excludedGUIWithoutPlatformDecisionFailsParity() {
+        let capability = CapabilityEntry(
+            id: "canny",
+            ios: "n/a",
+            macos: "supported",
+            platformDecision: nil
+        )
+
+        #expect(guiParityIssue(for: capability) == .missingPlatformDecision)
+    }
+
+    @Test func divergentTargetedGUIsFailParity() {
+        let capability = CapabilityEntry(
+            id: "dreich",
+            ios: "planned",
+            macos: "supported",
+            platformDecision: "docs/design/dreich.md#platform-support"
+        )
+
+        #expect(guiParityIssue(for: capability) == .targetedDivergence)
     }
 
     /// Sanity: the fixture loads and carries the manifest version the check

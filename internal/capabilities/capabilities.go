@@ -300,7 +300,7 @@ func validatePlatformDecision(ref string) error {
 	}
 
 	doc, anchor, ok := strings.Cut(ref, "#")
-	if !ok || anchor != platformDecisionAnchor || strings.Contains(anchor, "#") {
+	if !ok || anchor != platformDecisionAnchor {
 		return fmt.Errorf("platform_decision %q must end in #%s", ref, platformDecisionAnchor)
 	}
 
