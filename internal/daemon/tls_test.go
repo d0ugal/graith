@@ -110,6 +110,11 @@ func TestLoadOrCreateRemoteTLSInitialWriteFailureRecoversNextStart(t *testing.T)
 			now := time.Now()
 
 			restore := writeTLSFile
+
+			// Restore the seam even if an assertion below calls Fatal, so a
+			// failure here cannot leak the injected writer into later tests.
+			t.Cleanup(func() { writeTLSFile = restore })
+
 			writeTLSFile = func(path string, data []byte) error {
 				if filepath.Base(path) == failName {
 					return errors.New("injected tls write failure")
