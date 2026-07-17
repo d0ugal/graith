@@ -287,17 +287,20 @@ var todoDependenciesCmd = &cobra.Command{
 	Short: "Replace an item's dependency set (omit IDs to clear it)",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(_ *cobra.Command, args []string) error {
-		dependencies := append([]string(nil), args[1:]...)
-
-		resp, err := todoRoundTrip("todo_update", protocol.TodoUpdateMsg{
-			ID: args[0], DependsOn: &dependencies,
-		})
+		resp, err := todoRoundTrip("todo_update", todoDependenciesUpdate(args))
 		if err != nil {
 			return err
 		}
 
 		return printTodoItem(resp, "Updated")
 	},
+}
+
+func todoDependenciesUpdate(args []string) protocol.TodoUpdateMsg {
+	dependencies := make([]string, len(args)-1)
+	copy(dependencies, args[1:])
+
+	return protocol.TodoUpdateMsg{ID: args[0], DependsOn: &dependencies}
 }
 
 var todoExportCmd = &cobra.Command{

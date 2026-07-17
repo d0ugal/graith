@@ -140,7 +140,8 @@ The less-obvious lifecycle cases are deliberate:
   waits until the dependency is completed. There is no implicit skip or failure
   propagation.
 - Removing a todo that another item depends on is rejected. Clear or replace
-  the dependent edge first. Retention also keeps referenced done items.
+  the dependent edge first. Retention also keeps referenced done items and
+  parents whose sub-items are still referenced.
 - Reclaimed work returns ownerless. If its own dependencies are unfinished, it
   is shown as dependency-blocked instead of returning to the claimable pool.
 
@@ -226,6 +227,9 @@ per-session boolean (this **replaces** the old `gr scenario task-done`):
 - **`assignee` vs `owner`.** `assignee` is *who is responsible*; `owner` is *who is
   currently working it* (set by the claim). They usually coincide, but an
   orchestrator can assign work a member hasn't claimed yet.
+- **Seed identity is stable.** Reassigning a scenario's seeded item changes
+  current responsibility, but member-name dependencies continue to resolve the
+  original member's seed.
 - **Completion is derived, not declared.** A member is complete when it has at
   least one assigned item and every assigned item is `done`. A member with **no**
   assigned items reports "no tracked work" (`—`), neither pending nor complete.

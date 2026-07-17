@@ -566,6 +566,7 @@ func TestTodoOpCascadeEmitsUnblockedEvent(t *testing.T) {
 	sm.mu.Unlock()
 
 	member := authContext{role: roleSession, sessionID: "braw", authenticated: true}
+	orchestrator := authContext{role: roleSession, sessionID: "orch", authenticated: true}
 	scope := protocol.TodoScope{Scenario: "strath"}
 
 	dependency, err := sm.TodoAddOp(member, protocol.TodoAddMsg{Scope: scope, Title: "build the brig"})
@@ -617,5 +618,61 @@ func TestTodoOpCascadeEmitsUnblockedEvent(t *testing.T) {
 
 	if !found {
 		t.Fatalf("unblocked event for %s not found in %+v", dependent.ID, messages)
+	}
+
+	if _, err := sm.TodoClaimOp(member, protocol.TodoClaimMsg{ID: dependent.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := sm.TodoTransitionOp(member, protocol.TodoTransitionMsg{ID: dependency.ID, Status: TodoStatusTodo}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := sm.TodoTransitionOp(member, protocol.TodoTransitionMsg{ID: dependent.ID, Status: TodoStatusTodo}); err != nil {
+		t.Fatal(err)
+	}
+
+	editable, err := sm.TodoAddOp(member, protocol.TodoAddMsg{Scope: scope, Title: "paint the brig"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deps := []string{dependency.ID}
+	if _, err := sm.TodoUpdateOp(orchestrator, protocol.TodoUpdateMsg{ID: editable.ID, DependsOn: &deps}); err != nil {
+		t.Fatal(err)
+	}
+
+	emptyDeps := []string{}
+	if _, err := sm.TodoUpdateOp(orchestrator, protocol.TodoUpdateMsg{ID: editable.ID, DependsOn: &emptyDeps}); err != nil {
+		t.Fatal(err)
+	}
+
+	messages, err = sm.messages.Read("todo:scenario:sc-strath", "", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantEvents := map[string]bool{
+		"dependency-blocked:" + dependent.ID: false,
+		"dependency-blocked:" + editable.ID:  false,
+		"unblocked:" + editable.ID:           false,
+	}
+	for _, message := range messages {
+		var event struct {
+			Event string `json:"event"`
+			ID    string `json:"id"`
+		}
+		if json.Unmarshal([]byte(message.Body), &event) == nil {
+			key := event.Event + ":" + event.ID
+			if _, ok := wantEvents[key]; ok {
+				wantEvents[key] = true
+			}
+		}
+	}
+
+	for event, seen := range wantEvents {
+		if !seen {
+			t.Errorf("event %s not found in %+v", event, messages)
+		}
 	}
 }

@@ -962,6 +962,109 @@ func TestTodoDependencyRemovalAllowsEdgesInsideParentDeletionSet(t *testing.T) {
 	}
 }
 
+func TestTodoDependencyRetentionSkipsParentOfReferencedChild(t *testing.T) {
+	s := newTestTodoStore(t)
+	base := time.Date(2026, 7, 17, 9, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return base }
+
+	parent := mustAdd(t, s, "session:croft", "raise frame")
+
+	child, err := s.Add(TodoAdd{
+		Scope: parent.Scope, Title: "fit roof", ParentID: parent.ID, CreatedBy: "mason",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claimAndDone(t, s, child.ID, "mason")
+	claimAndDone(t, s, parent.ID, "mason")
+
+	if _, err := s.Add(TodoAdd{
+		Scope: parent.Scope, Title: "inspect roof", DependsOn: []string{child.ID}, CreatedBy: "inspector",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	unrelated := mustAdd(t, s, parent.Scope, "clear yard")
+	claimAndDone(t, s, unrelated.ID, "mason")
+
+	s.now = func() time.Time { return base.Add(48 * time.Hour) }
+
+	n, err := s.SweepDone(24 * time.Hour)
+	if err != nil {
+		t.Fatalf("sweep with referenced child: %v", err)
+	}
+
+	if n != 1 {
+		t.Fatalf("swept %d items, want unrelated item only", n)
+	}
+
+	for _, id := range []string{parent.ID, child.ID} {
+		if _, err := s.Get(id); err != nil {
+			t.Fatalf("protected tree item %s disappeared: %v", id, err)
+		}
+	}
+
+	if _, err := s.Get(unrelated.ID); err != ErrTodoNotFound {
+		t.Fatalf("unrelated aged item survived: %v", err)
+	}
+}
+
+func TestScenarioSeedIdentitySurvivesAssigneeChanges(t *testing.T) {
+	s := newTestTodoStore(t)
+	scope := "scenario:strath"
+
+	braw, err := s.Add(TodoAdd{Scope: scope, Title: "build", Assignee: "braw-id", CreatedBy: scope})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.Add(TodoAdd{Scope: scope, Title: "inspect", Assignee: "canny-id", CreatedBy: scope}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.Assign(braw.ID, "canny-id"); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := s.ScenarioSeedItems(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(items) != 2 || items["braw-id"].ID != braw.ID || items["braw-id"].Assignee != "canny-id" {
+		t.Fatalf("stable seed mapping = %+v", items)
+	}
+}
+
+func TestTodoDependencyUpdateReportsTransactionalReadiness(t *testing.T) {
+	s := newTestTodoStore(t)
+	dependency := mustAdd(t, s, "session:glen", "lay stones")
+	dependent := mustAdd(t, s, dependency.Scope, "inspect wall")
+
+	deps := []string{dependency.ID}
+
+	blocked, err := s.UpdateFieldsCascade(dependent.ID, nil, nil, nil, nil, &deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !blocked.DependencyBlocked || blocked.Unblocked || blocked.Item.Status != TodoStatusBlocked {
+		t.Fatalf("blocked update result = %+v", blocked)
+	}
+
+	emptyDeps := []string{}
+
+	ready, err := s.UpdateFieldsCascade(dependent.ID, nil, nil, nil, nil, &emptyDeps)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !ready.Unblocked || ready.DependencyBlocked || ready.Item.Status != TodoStatusTodo {
+		t.Fatalf("unblocked update result = %+v", ready)
+	}
+}
+
 func TestTodoDependencyGraphPersistsAcrossRestart(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "todos.sqlite")
 
@@ -1017,6 +1120,8 @@ func TestTodoDependencySchemaMigrationPreservesExistingItems(t *testing.T) {
 		CREATE TABLE todo_tags (todo_id TEXT NOT NULL, tag TEXT NOT NULL, PRIMARY KEY (todo_id, tag));
 		INSERT INTO todos (id, title, status, scope, created_by, created_at, updated_at)
 		VALUES ('td-auld', 'auld task', 'todo', 'session:croft', 'braw', '2026-07-17T09:00:00Z', '2026-07-17T09:00:00Z');
+		INSERT INTO todos (id, title, status, scope, assignee, created_by, created_at, updated_at)
+		VALUES ('td-seed', 'seed task', 'todo', 'scenario:strath', 'braw-id', 'scenario:strath', '2026-07-17T09:00:00Z', '2026-07-17T09:00:00Z');
 	`)
 	if err != nil {
 		_ = db.Close()
@@ -1037,6 +1142,15 @@ func TestTodoDependencySchemaMigrationPreservesExistingItems(t *testing.T) {
 	old, err := s.Get("td-auld")
 	if err != nil || old.Status != TodoStatusTodo || len(old.DependsOn) != 0 {
 		t.Fatalf("old item after migration = %+v err=%v", old, err)
+	}
+
+	seeds, err := s.ScenarioSeedItems("scenario:strath")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if seeds["braw-id"].ID != "td-seed" {
+		t.Fatalf("migrated seed identity = %+v", seeds)
 	}
 
 	dependency := mustAdd(t, s, old.Scope, "new dependency")

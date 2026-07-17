@@ -93,6 +93,11 @@ removes its outgoing edges, while deleting an item that is still required is
 restricted. The pair is the primary key, and reverse lookup is indexed for the
 completion cascade.
 
+Scenario seeds also record an immutable `(scope, original_assignee) -> todo_id`
+association in `todo_scenario_seeds`. The ordinary `assignee` field remains
+mutable responsibility metadata, while dependency authoring by member name
+continues to resolve the original seed identity after reassignment.
+
 Dependency blocking is an effective state derived from the graph rather than a
 second stored blocker flag:
 
@@ -228,9 +233,11 @@ completion requirements.
 
 ### Implementation Notes
 
-Opening an older todo database creates the join table and indexes with `CREATE
-TABLE IF NOT EXISTS`; existing rows require no backfill and remain ready because
-they have no edges. The protocol additions are optional fields on registered,
+Opening an older todo database creates the dependency and scenario-seed tables
+and indexes with `CREATE TABLE IF NOT EXISTS`. Existing rows require no edge
+backfill and remain ready because they have no dependencies; legacy scenario
+seeds are indexed from their current assignee as the best available original
+identity. The protocol additions are optional fields on registered,
 Swift-planned structs, preserving older clients' behavior.
 
 ### Testing

@@ -1305,7 +1305,7 @@ func newScenarioOrchestrator(t *testing.T) (*SessionManager, string) {
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
 	cfg.DefaultAgent = "sleeper"
-	cfg.Agents["sleeper"] = config.Agent{Command: "sleep", Args: []string{"60"}}
+	cfg.Agents["sleeper"] = config.Agent{Command: "sh", Args: []string{"-c", "exec sleep 60"}}
 
 	sm := newSMWithConfig(t, cfg)
 
@@ -1433,6 +1433,149 @@ func TestStartScenarioRollbackDeletesStarredMember(t *testing.T) {
 	}
 }
 
+func TestStartScenarioSeedFailureRollsBackCreatedMembers(t *testing.T) {
+	sm, orchID := newScenarioOrchestrator(t)
+	sm.todos = newTestTodoStore(t)
+	sm.todos.SetMaxTitle(12)
+
+	repo := initScenarioGitRepo(t)
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw-shared"] = &SessionState{
+		ID: "braw-shared", Name: "braw-shared", Status: StatusRunning,
+	}
+	sm.mu.Unlock()
+
+	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: orchID,
+		Name:            "strath-seed-fail",
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "braw-shared", Repo: repo, Task: "cut stone", Shared: true},
+			{Name: "dreich-mason", Repo: repo, Task: "raise a very long stone wall", Star: true},
+		},
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "title too long") {
+		t.Fatalf("seed failure = %v", err)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if sm.state.Sessions["braw-shared"] == nil {
+		t.Fatal("shared member was removed during seed rollback")
+	}
+
+	for _, scenario := range sm.state.Scenarios {
+		if scenario.Name == "strath-seed-fail" {
+			t.Fatalf("failed scenario survived rollback: %+v", scenario)
+		}
+	}
+
+	for _, session := range sm.state.Sessions {
+		if session.Name == "dreich-mason" {
+			t.Fatalf("created member survived rollback: %+v", session)
+		}
+	}
+
+	items, listErr := sm.todos.ListAll(TodoFilter{})
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+
+	if len(items) != 0 {
+		t.Fatalf("seed failure left todo rows: %+v", items)
+	}
+}
+
+func TestAddToScenarioSeedFailureRestoresMembership(t *testing.T) {
+	sm, orchID := newScenarioOrchestrator(t)
+	sm.todos = newTestTodoStore(t)
+	sm.todos.SetMaxTitle(12)
+
+	repo := initScenarioGitRepo(t)
+
+	sm.mu.Lock()
+	sm.state.Scenarios["sc-add-fail"] = &ScenarioState{
+		ID: "sc-add-fail", Name: "strath-add-fail", OrchestratorID: orchID,
+	}
+	sm.mu.Unlock()
+
+	_, err := sm.AddToScenario("strath-add-fail", protocol.ScenarioSessionInput{
+		Name: "dreich-mason", Repo: repo, Task: "raise a very long stone wall", Star: true,
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "title too long") {
+		t.Fatalf("seed failure = %v", err)
+	}
+
+	sm.mu.RLock()
+
+	scenario := sm.state.Scenarios["sc-add-fail"]
+	if len(scenario.SessionIDs) != 0 || len(scenario.Sessions) != 0 {
+		t.Fatalf("scenario membership survived rollback: %+v", scenario)
+	}
+
+	for _, session := range sm.state.Sessions {
+		if session.Name == "dreich-mason" {
+			t.Fatalf("created member survived rollback: %+v", session)
+		}
+	}
+
+	sm.mu.RUnlock()
+
+	items, listErr := sm.todos.List("scenario:sc-add-fail", TodoFilter{})
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+
+	if len(items) != 0 {
+		t.Fatalf("seed failure left todo rows: %+v", items)
+	}
+}
+
+func TestAddToScenarioDependencyUsesOriginalSeedIdentity(t *testing.T) {
+	sm, orchID := newScenarioOrchestrator(t)
+	sm.todos = newTestTodoStore(t)
+	repo := initScenarioGitRepo(t)
+	scope := "scenario:sc-stable-seed"
+
+	sm.mu.Lock()
+	sm.state.Scenarios["sc-stable-seed"] = &ScenarioState{
+		ID: "sc-stable-seed", Name: "strath-stable-seed", OrchestratorID: orchID,
+		SessionIDs: []string{"braw-id"},
+		Sessions:   []ScenarioSession{{Name: "braw", Task: "build", Repo: filepath.Base(repo)}},
+	}
+	sm.state.Sessions["braw-id"] = &SessionState{ID: "braw-id", Name: "braw", Status: StatusRunning}
+	sm.mu.Unlock()
+
+	upstream, err := sm.todos.Add(TodoAdd{
+		Scope: scope, Title: "build", Assignee: "braw-id", CreatedBy: scope,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := sm.todos.Assign(upstream.ID, "canny-owner"); err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := sm.AddToScenario("strath-stable-seed", protocol.ScenarioSessionInput{
+		Name: "canny", Repo: repo, Task: "inspect", DependsOn: []string{"braw"},
+	}, 24, 80)
+	if err != nil {
+		t.Fatalf("add dependent after seed reassignment: %v", err)
+	}
+
+	seeds, err := sm.todos.ScenarioSeedItems(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dependent := seeds[created.ID]
+	if len(dependent.DependsOn) != 1 || dependent.DependsOn[0] != upstream.ID {
+		t.Fatalf("added dependent seed = %+v", dependent)
+	}
+}
+
 // TestScenarioCompleteDerivedFromTodos verifies the scenario reports "complete"
 // once every member with tracked work has finished its assigned items — the
 // derived replacement for the removed task-done completion.
@@ -1515,6 +1658,10 @@ func TestSeedScenarioTodosResolvesMemberDependencies(t *testing.T) {
 
 	if downstream.Status != TodoStatusBlocked || len(downstream.DependsOn) != 1 || downstream.DependsOn[0] != upstream.ID {
 		t.Fatalf("resolved downstream = %+v", downstream)
+	}
+
+	if _, err := sm.todos.Assign(upstream.ID, "canny-id"); err != nil {
+		t.Fatalf("reassign upstream seed: %v", err)
 	}
 
 	sm.mu.Lock()

@@ -400,7 +400,12 @@ func (sm *SessionManager) TodoTransitionOp(ac authContext, m protocol.TodoTransi
 
 	updated := result.Item
 
-	sm.emitTodoEvent(updated.Scope, m.Status, updated)
+	event := m.Status
+	if m.Status == TodoStatusTodo && len(updated.BlockedBy) > 0 {
+		event = "dependency-blocked"
+	}
+
+	sm.emitTodoEvent(updated.Scope, event, updated)
 
 	for _, item := range result.Unblocked {
 		sm.emitTodoEvent(item.Scope, "unblocked", item)
@@ -429,15 +434,17 @@ func (sm *SessionManager) TodoUpdateOp(ac authContext, m protocol.TodoUpdateMsg)
 		return protocol.TodoItemInfo{}, errors.New("only the owner, the scope's override authority, or the human may edit this item")
 	}
 
-	updated, err := sm.todos.UpdateFields(m.ID, m.Title, m.Note, m.Tags, m.Position, m.DependsOn)
+	result, err := sm.todos.UpdateFieldsCascade(m.ID, m.Title, m.Note, m.Tags, m.Position, m.DependsOn)
 	if err != nil {
 		return protocol.TodoItemInfo{}, err
 	}
 
+	updated := result.Item
+
 	event := "updated"
-	if item.Status != updated.Status && len(updated.BlockedBy) > 0 {
+	if result.DependencyBlocked {
 		event = "dependency-blocked"
-	} else if item.Status != updated.Status && updated.Status == TodoStatusTodo {
+	} else if result.Unblocked {
 		event = "unblocked"
 	}
 

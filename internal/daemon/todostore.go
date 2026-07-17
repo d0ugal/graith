@@ -294,6 +294,20 @@ func initTodoSchema(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_todo_dependencies_dependency
 			ON todo_dependencies(dependency_id, todo_id);
+
+		CREATE TABLE IF NOT EXISTS todo_scenario_seeds (
+			todo_id            TEXT PRIMARY KEY REFERENCES todos(id) ON DELETE CASCADE,
+			scope              TEXT NOT NULL,
+			original_assignee  TEXT NOT NULL,
+			UNIQUE (scope, original_assignee)
+		);
+		CREATE INDEX IF NOT EXISTS idx_todo_scenario_seeds_scope
+			ON todo_scenario_seeds(scope, original_assignee);
+
+		INSERT OR IGNORE INTO todo_scenario_seeds (todo_id, scope, original_assignee)
+		SELECT id, scope, assignee FROM todos
+		WHERE created_by = scope AND parent_id IS NULL AND assignee <> ''
+		ORDER BY scope, position, id;
 	`)
 	if err != nil {
 		return fmt.Errorf("init todos schema: %w", err)
@@ -385,6 +399,10 @@ func (s *TodoStore) Add(in TodoAdd) (TodoItem, error) {
 		nullStr(item.ParentID), item.Note, item.CreatedBy, item.CreatedAt, item.UpdatedAt, item.Position,
 	); err != nil {
 		return TodoItem{}, fmt.Errorf("insert todo: %w", err)
+	}
+
+	if err := recordScenarioSeed(tx, item); err != nil {
+		return TodoItem{}, err
 	}
 
 	for _, tag := range item.Tags {
@@ -826,83 +844,97 @@ func (s *TodoStore) TransitionCascade(id, newStatus, note, actor string, overrid
 // UpdateFields edits mutable presentation fields. It never touches status,
 // scope, or owner. A nil pointer leaves that field unchanged.
 func (s *TodoStore) UpdateFields(id string, title, note *string, tags *[]string, position *int64, dependsOn *[]string) (TodoItem, error) {
+	result, err := s.UpdateFieldsCascade(id, title, note, tags, position, dependsOn)
+
+	return result.Item, err
+}
+
+// UpdateFieldsCascade edits mutable fields and reports dependency-readiness
+// changes derived from pre/post snapshots in the same transaction.
+func (s *TodoStore) UpdateFieldsCascade(id string, title, note *string, tags *[]string, position *int64, dependsOn *[]string) (TodoUpdateResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return TodoItem{}, fmt.Errorf("begin tx: %w", err)
+		return TodoUpdateResult{}, fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	current, err := s.getLocked(tx, id)
 	if err != nil {
-		return TodoItem{}, err
+		return TodoUpdateResult{}, err
 	}
 
 	if title != nil {
 		t := strings.TrimSpace(*title)
 		if t == "" {
-			return TodoItem{}, errors.New("todo title must not be empty")
+			return TodoUpdateResult{}, errors.New("todo title must not be empty")
 		}
 
 		if len(t) > s.titleLimit() {
-			return TodoItem{}, fmt.Errorf("todo title too long (max %d)", s.titleLimit())
+			return TodoUpdateResult{}, fmt.Errorf("todo title too long (max %d)", s.titleLimit())
 		}
 
 		if _, err := tx.Exec(`UPDATE todos SET title = ? WHERE id = ?`, t, id); err != nil {
-			return TodoItem{}, fmt.Errorf("update title: %w", err)
+			return TodoUpdateResult{}, fmt.Errorf("update title: %w", err)
 		}
 	}
 
 	if note != nil {
 		if len(*note) > s.noteLimit() {
-			return TodoItem{}, fmt.Errorf("todo note too long (max %d)", s.noteLimit())
+			return TodoUpdateResult{}, fmt.Errorf("todo note too long (max %d)", s.noteLimit())
 		}
 
 		if _, err := tx.Exec(`UPDATE todos SET note = ? WHERE id = ?`, *note, id); err != nil {
-			return TodoItem{}, fmt.Errorf("update note: %w", err)
+			return TodoUpdateResult{}, fmt.Errorf("update note: %w", err)
 		}
 	}
 
 	if position != nil {
 		if _, err := tx.Exec(`UPDATE todos SET position = ? WHERE id = ?`, *position, id); err != nil {
-			return TodoItem{}, fmt.Errorf("update position: %w", err)
+			return TodoUpdateResult{}, fmt.Errorf("update position: %w", err)
 		}
 	}
 
 	if tags != nil {
 		if _, err := tx.Exec(`DELETE FROM todo_tags WHERE todo_id = ?`, id); err != nil {
-			return TodoItem{}, fmt.Errorf("clear tags: %w", err)
+			return TodoUpdateResult{}, fmt.Errorf("clear tags: %w", err)
 		}
 
 		for _, tag := range normalizeTags(*tags) {
 			if _, err := tx.Exec(`INSERT OR IGNORE INTO todo_tags (todo_id, tag) VALUES (?, ?)`, id, tag); err != nil {
-				return TodoItem{}, fmt.Errorf("insert tag: %w", err)
+				return TodoUpdateResult{}, fmt.Errorf("insert tag: %w", err)
 			}
 		}
 	}
 
 	if dependsOn != nil {
 		if err := replaceTodoDependencies(tx, id, current.Scope, *dependsOn); err != nil {
-			return TodoItem{}, err
+			return TodoUpdateResult{}, err
 		}
 	}
 
 	if _, err := tx.Exec(`UPDATE todos SET revision = revision + 1, updated_at = ? WHERE id = ?`, s.nowStr(), id); err != nil {
-		return TodoItem{}, fmt.Errorf("bump revision: %w", err)
+		return TodoUpdateResult{}, fmt.Errorf("bump revision: %w", err)
 	}
 
 	it, err := s.getLocked(tx, id)
 	if err != nil {
-		return TodoItem{}, err
+		return TodoUpdateResult{}, err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return TodoItem{}, fmt.Errorf("commit: %w", err)
+		return TodoUpdateResult{}, fmt.Errorf("commit: %w", err)
 	}
 
-	return it, nil
+	result := TodoUpdateResult{Item: it}
+	if current.Status != it.Status {
+		result.DependencyBlocked = it.Status == TodoStatusBlocked && len(it.BlockedBy) > 0
+		result.Unblocked = it.Status == TodoStatusTodo && len(current.BlockedBy) > 0
+	}
+
+	return result, nil
 }
 
 // Assign sets or clears the assignee (responsible member) of an item.
@@ -1073,9 +1105,9 @@ func (s *TodoStore) ReopenStale(lease time.Duration) (int, error) {
 }
 
 // SweepDone deletes done items older than maxAge. maxAge <= 0 disables it. A
-// done parent with an unfinished child is NOT swept — deleting it would cascade
-// away the child's live work; it becomes eligible once its descendants are done
-// (and themselves aged out).
+// done parent is retained while a child is unfinished or dependency-referenced,
+// because its cascade would otherwise delete protected work. Referenced chains
+// drain safely over later sweeps after their outgoing edges disappear.
 func (s *TodoStore) SweepDone(maxAge time.Duration) (int, error) {
 	if maxAge <= 0 {
 		return 0, nil
@@ -1089,7 +1121,12 @@ func (s *TodoStore) SweepDone(maxAge time.Duration) (int, error) {
 	res, err := s.db.Exec(
 		`DELETE FROM todos WHERE status = ? AND updated_at < ?
 		 AND id NOT IN (SELECT parent_id FROM todos WHERE parent_id IS NOT NULL AND status <> ?)
-		 AND id NOT IN (SELECT dependency_id FROM todo_dependencies)`,
+		 AND id NOT IN (SELECT dependency_id FROM todo_dependencies)
+		 AND NOT EXISTS (
+			SELECT 1 FROM todos child
+			JOIN todo_dependencies dependency ON dependency.dependency_id = child.id
+			WHERE child.parent_id = todos.id
+		 )`,
 		TodoStatusDone, cutoff, TodoStatusDone)
 	if err != nil {
 		return 0, fmt.Errorf("sweep done todos: %w", err)
