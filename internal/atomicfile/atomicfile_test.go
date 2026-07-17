@@ -2,6 +2,7 @@ package atomicfile
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -194,5 +195,51 @@ func TestWriteFailsCleanlyOnInjectedFailureForNewFile(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestWriteDetectsShortWrite proves a short write (fewer bytes than requested
+// returned with a nil error) is reported as io.ErrShortWrite rather than being
+// mistaken for a successful publication — #1327 explicitly covers short writes.
+// The prior file must survive intact and no temp file may be stranded.
+func TestWriteDetectsShortWrite(t *testing.T) {
+	origWrite := writeTemp
+
+	t.Cleanup(func() { writeTemp = origWrite })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "strath.txt")
+
+	if err := Write(path, []byte("auld and durable"), 0o600); err != nil {
+		t.Fatalf("seed Write: %v", err)
+	}
+
+	// Report one byte short with a nil error, the classic silent short write.
+	writeTemp = func(_ *os.File, data []byte) (int, error) {
+		return len(data) - 1, nil
+	}
+
+	if err := Write(path, []byte("new but truncated"), 0o600); !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("short write should return io.ErrShortWrite, got %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	if string(got) != "auld and durable" {
+		t.Errorf("prior file corrupted by a short write: got %q", got)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".tmp-") {
+			t.Errorf("stranded temp file %s", e.Name())
+		}
 	}
 }

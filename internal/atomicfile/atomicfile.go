@@ -7,6 +7,7 @@ package atomicfile
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -58,8 +59,16 @@ func Write(path string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("%s: %w", verb, cause)
 	}
 
-	if _, err := writeTemp(tmp, data); err != nil {
+	// A short write (fewer bytes than requested with a nil error) must not be
+	// mistaken for success: it would leave a truncated file that later fails to
+	// parse. Treat it as a failure so the prior file is preserved (#1327).
+	n, err := writeTemp(tmp, data)
+	if err != nil {
 		return cleanup(err, "write temp")
+	}
+
+	if n != len(data) {
+		return cleanup(io.ErrShortWrite, "write temp")
 	}
 
 	if err := tmp.Chmod(perm); err != nil {
