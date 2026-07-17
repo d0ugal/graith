@@ -82,7 +82,7 @@ func TestSubmitApprovalTimeoutBlocksBeforeContextCancel(t *testing.T) {
 		t.Errorf("expected block on timeout, got %q", decision.Decision)
 	}
 
-	if decision.Reason != "approval request timed out" {
+	if decision.Reason != "human approval wait timed out after 100ms" {
 		t.Errorf("unexpected reason: %q", decision.Reason)
 	}
 

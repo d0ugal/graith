@@ -590,13 +590,16 @@ func (dc *doctorContext) checkApprovalsBackend() {
 
 	dc.passf("environment", "Approvals backend %q available", backend)
 
-	// Surface the effective deadline hierarchy so a mismatch (a backend
-	// execution timeout approaching the enclosing approval timeout) is visible
-	// rather than latent (see #1251/#244). Only the subprocess-spawning backends
-	// have an execution timeout.
+	// Surface the complete deadline hierarchy. Backend execution precedes (and
+	// can defer into) the human wait, so the two are additive; the hook socket's
+	// operation deadline then adds response grace beyond that server bound.
 	if execTimeout, ok := cfg.Approvals.BackendExecTimeout(backend); ok {
-		dc.passf("environment", "Approvals deadlines: %s backend execution %s < approval timeout %s",
-			backend, execTimeout, cfg.Approvals.TimeoutDuration())
+		dc.passf("environment", "Approvals deadlines: %s backend execution %s + human wait %s = server bound %s < hook operation %s",
+			backend, execTimeout, cfg.Approvals.TimeoutDuration(), cfg.Approvals.ServerTimeoutDuration(),
+			client.ApprovalOperationTimeout(cfg.Approvals.ServerTimeoutDuration()))
+	} else {
+		dc.passf("environment", "Approvals deadlines: human wait/server bound %s < hook operation %s",
+			cfg.Approvals.ServerTimeoutDuration(), client.ApprovalOperationTimeout(cfg.Approvals.ServerTimeoutDuration()))
 	}
 }
 

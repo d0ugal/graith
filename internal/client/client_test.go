@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -193,7 +194,7 @@ func TestReadControlResponseWithDataFrame(t *testing.T) {
 	}
 }
 
-func TestApprovalDeadline(t *testing.T) {
+func TestApprovalOperationTimeout(t *testing.T) {
 	tests := []struct {
 		name    string
 		timeout time.Duration
@@ -207,9 +208,9 @@ func TestApprovalDeadline(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := approvalDeadline(tt.timeout)
+			got := ApprovalOperationTimeout(tt.timeout)
 			if got != tt.want {
-				t.Errorf("approvalDeadline(%v) = %v, want %v", tt.timeout, got, tt.want)
+				t.Errorf("ApprovalOperationTimeout(%v) = %v, want %v", tt.timeout, got, tt.want)
 			}
 		})
 	}
@@ -296,36 +297,129 @@ func TestConnectFastClearsDeadline(t *testing.T) {
 	}
 }
 
-func TestConnectForApprovalClearsDeadline(t *testing.T) {
-	socketPath, serverReady := startMockDaemon(t)
+type deadlineRecordingConn struct {
+	net.Conn
 
-	c, err := ConnectForApproval(config.Paths{SocketPath: socketPath}, 5*time.Minute)
-	if err != nil {
-		t.Fatalf("ConnectForApproval: %v", err)
-	}
-	defer c.Close()
+	mu        sync.Mutex
+	deadlines []time.Time
+}
 
-	serverConn := <-serverReady
-	defer func() { _ = serverConn.Close() }()
+func (c *deadlineRecordingConn) SetDeadline(deadline time.Time) error {
+	c.mu.Lock()
+	c.deadlines = append(c.deadlines, deadline)
+	c.mu.Unlock()
 
-	// Same check: send after the ConnectFast deadline (2s) would have fired.
-	// ConnectForApproval uses a longer deadline, but if it wasn't cleared,
-	// the connection would still have a fixed expiry.
+	return c.Conn.SetDeadline(deadline)
+}
+
+func (c *deadlineRecordingConn) recordedDeadlines() []time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return append([]time.Time(nil), c.deadlines...)
+}
+
+func approvalPipeHandshake(t *testing.T, server net.Conn) <-chan error {
+	t.Helper()
+
+	done := make(chan error, 1)
 	go func() {
-		time.Sleep(2500 * time.Millisecond)
+		reader := protocol.NewFrameReader(server)
+		writer := protocol.NewFrameWriter(server)
+		if _, err := reader.ReadFrame(); err != nil {
+			done <- err
+			return
+		}
 
-		resp, _ := protocol.EncodeControl("ping", struct{}{})
-		serverWriter := protocol.NewFrameWriter(serverConn)
-		_ = serverWriter.WriteFrame(protocol.ChannelControl, resp)
+		resp, err := protocol.EncodeControl("handshake_ok", protocol.HandshakeOkMsg{
+			Version: protocol.Version, DaemonVersion: "dev",
+		})
+		if err == nil {
+			err = writer.WriteFrame(protocol.ChannelControl, resp)
+		}
+		done <- err
 	}()
 
-	env, err := c.ReadControlResponse()
+	return done
+}
+
+// TestConnectForApprovalRetainsOperationDeadline records every SetDeadline
+// call and proves the handshake deadline is replaced by a later, nonzero
+// backend+human operation deadline rather than cleared after handshake (#1251).
+func TestConnectForApprovalRetainsOperationDeadline(t *testing.T) {
+	saveConnectionTimeouts(t)
+
+	clientConn, serverConn := net.Pipe()
+	defer func() { _ = serverConn.Close() }()
+	recorded := &deadlineRecordingConn{Conn: clientConn}
+
+	origDial := dialLocalDaemon
+	dialLocalDaemon = func(string, string, time.Duration) (net.Conn, error) { return recorded, nil }
+	t.Cleanup(func() { dialLocalDaemon = origDial })
+
+	daemonHandshakeTimeout = 75 * time.Millisecond
+	approvalResponseGrace = 200 * time.Millisecond
+	handshakeDone := approvalPipeHandshake(t, serverConn)
+
+	c, err := ConnectForApproval(config.Paths{}, 150*time.Millisecond)
 	if err != nil {
-		t.Fatalf("ReadControlResponse after deadline window: %v (deadline was not cleared)", err)
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := <-handshakeDone; err != nil {
+		t.Fatal(err)
 	}
 
-	if env.Type != "ping" {
-		t.Errorf("expected ping, got %s", env.Type)
+	deadlines := recorded.recordedDeadlines()
+	if len(deadlines) != 2 {
+		t.Fatalf("SetDeadline calls = %d, want handshake + operation: %v", len(deadlines), deadlines)
+	}
+	if deadlines[0].IsZero() || deadlines[1].IsZero() {
+		t.Fatalf("deadlines must both be nonzero: %v", deadlines)
+	}
+	if !deadlines[1].After(deadlines[0]) {
+		t.Errorf("operation deadline %v is not after handshake deadline %v", deadlines[1], deadlines[0])
+	}
+}
+
+// TestConnectForApprovalStalledAfterHandshakeTimesOut is the regression for a
+// daemon that answers handshake_ok and then never starts/responds to the
+// approval operation. The retained deadline must break the read (#1251/#244).
+func TestConnectForApprovalStalledAfterHandshakeTimesOut(t *testing.T) {
+	saveConnectionTimeouts(t)
+
+	clientConn, serverConn := net.Pipe()
+	defer func() { _ = serverConn.Close() }()
+
+	origDial := dialLocalDaemon
+	dialLocalDaemon = func(string, string, time.Duration) (net.Conn, error) { return clientConn, nil }
+	t.Cleanup(func() { dialLocalDaemon = origDial })
+
+	daemonHandshakeTimeout = 200 * time.Millisecond
+	approvalResponseGrace = 20 * time.Millisecond
+	handshakeDone := approvalPipeHandshake(t, serverConn)
+
+	c, err := ConnectForApproval(config.Paths{}, 20*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := <-handshakeDone; err != nil {
+		t.Fatal(err)
+	}
+
+	started := time.Now()
+	_, err = c.ReadControlResponse()
+	if err == nil {
+		t.Fatal("stalled post-handshake read returned nil error")
+	}
+
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() {
+		t.Fatalf("stalled read error = %v, want timeout", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Errorf("stalled read took %v, retained operation deadline was not effective", elapsed)
 	}
 }
 

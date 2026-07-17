@@ -567,6 +567,38 @@ func TestCheckApprovalsBackendAvailable(t *testing.T) {
 	}
 }
 
+func TestCheckApprovalsDeadlineHierarchyIsVisible(t *testing.T) {
+	oldCfg, oldOut := cfg, out
+
+	t.Cleanup(func() {
+		cfg, out = oldCfg, oldOut
+	})
+
+	out = output.NewWithWriter(false, io.Discard)
+	cfg = &config.Config{}
+	cfg.Approvals = config.Approvals{
+		Backend:        "command",
+		Command:        "canny-approver",
+		Timeout:        "30s",
+		CommandTimeout: "5s",
+	}
+
+	dc := newDoctorContext()
+	dc.checkApprovalsBackend()
+	passed := strings.Join(checkResults(dc, "ok"), "\n")
+
+	for _, want := range []string{
+		"backend execution 5s",
+		"human wait 30s",
+		"server bound 35s",
+		"hook operation 1m35s",
+	} {
+		if !strings.Contains(passed, want) {
+			t.Errorf("doctor deadline hierarchy %q missing %q", passed, want)
+		}
+	}
+}
+
 // TestCheckApprovalsBackendInlineRules verifies the builtin backend with only
 // inline [approvals.builtin] rules (no external config file) is reported as
 // enforceable. doctor must render inline rules the same way the daemon does at

@@ -4,8 +4,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 
 	"github.com/d0ugal/graith/internal/client"
@@ -18,6 +20,11 @@ import (
 type approvalHookStdin struct {
 	ToolName  string          `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input"`
+}
+
+type approvalControlConn interface {
+	SendControl(string, any) error
+	ReadControlResponse() (protocol.Envelope, error)
 }
 
 var approveRequestCmd = &cobra.Command{
@@ -58,42 +65,71 @@ var approveRequestCmd = &cobra.Command{
 
 		hookPaths, err := config.ResolvePaths()
 		if err != nil {
-			fmt.Println(hookoutput.AllowAll(agent))
+			fmt.Println(approvalFailure(agent, "resolve daemon path", err))
 			return nil
 		}
 
-		c, err := client.ConnectForApproval(hookPaths, cfg.Approvals.TimeoutDuration())
+		c, err := client.ConnectForApproval(hookPaths, cfg.Approvals.ServerTimeoutDuration())
 		if err != nil {
-			fmt.Println(hookoutput.AllowAll(agent))
+			fmt.Println(approvalFailure(agent, "connect", err))
 			return nil
 		}
 		defer c.Close()
 
-		_ = c.SendControl("approval_request", protocol.ApprovalRequestMsg{
+		fmt.Println(submitApprovalRequest(c, agent, protocol.ApprovalRequestMsg{
 			RequestID:   requestID,
 			SessionID:   sessionID,
 			ToolName:    toolName,
 			ToolInput:   toolInput,
 			HookPayload: string(raw),
-		})
-
-		resp, err := c.ReadControlResponse()
-		if err != nil {
-			fmt.Println(hookoutput.AllowAll(agent))
-			return nil
-		}
-
-		if resp.Type == "approval_decision" {
-			var decision protocol.ApprovalDecisionMsg
-
-			_ = protocol.DecodePayload(resp, &decision)
-			fmt.Println(hookoutput.Approval(agent, decision.Decision, decision.Reason))
-		} else {
-			fmt.Println(hookoutput.AllowAll(agent))
-		}
+		}))
 
 		return nil
 	},
+}
+
+func submitApprovalRequest(c approvalControlConn, agent string, req protocol.ApprovalRequestMsg) string {
+	if err := c.SendControl("approval_request", req); err != nil {
+		return approvalFailure(agent, "send request", err)
+	}
+
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return approvalFailure(agent, "wait for response", err)
+	}
+
+	if resp.Type == "error" {
+		var msg protocol.ErrorMsg
+		if err := protocol.DecodePayload(resp, &msg); err == nil && msg.Message != "" {
+			return approvalFailure(agent, "daemon response", errors.New(msg.Message))
+		}
+	}
+
+	if resp.Type != "approval_decision" {
+		return approvalFailure(agent, "wait for response", fmt.Errorf("unexpected response %q", resp.Type))
+	}
+
+	var decision protocol.ApprovalDecisionMsg
+	if err := protocol.DecodePayload(resp, &decision); err != nil {
+		return approvalFailure(agent, "decode response", err)
+	}
+
+	return hookoutput.Approval(agent, decision.Decision, decision.Reason)
+}
+
+// approvalFailure preserves the documented fail-open hook edge while making
+// the failure visible in the agent's hook result. In particular a socket
+// deadline is reported as the approval-operation deadline, not silently mapped
+// to an empty-reason allow.
+func approvalFailure(agent, phase string, err error) string {
+	reason := fmt.Sprintf("graith approval %s failed: %v; request allowed by fail-open hook policy", phase, err)
+
+	var netErr net.Error
+	if errors.Is(err, os.ErrDeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
+		reason = fmt.Sprintf("graith approval operation timed out while attempting to %s; request allowed by fail-open hook policy", phase)
+	}
+
+	return hookoutput.Approval(agent, "allow", reason)
 }
 
 func generateApprovalID() string {

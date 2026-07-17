@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -88,6 +89,10 @@ func (localmostBackend) Decide(ctx context.Context, req Request, cfg Config) (De
 
 	out, err := cmd.Output()
 	if err != nil {
+		if errors.Is(cmdCtx.Err(), context.DeadlineExceeded) {
+			return Decision{Decision: DecisionDefer}, fmt.Errorf("localmost backend execution deadline (%s) expired: %w", cfg.execTimeout(), cmdCtx.Err())
+		}
+
 		return Decision{Decision: DecisionDefer}, fmt.Errorf("localmost check failed: %w", err)
 	}
 

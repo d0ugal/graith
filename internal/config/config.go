@@ -2884,18 +2884,19 @@ type Approvals struct {
 	// Both default to defaultBackendExecTimeout (5s) when unset (see
 	// CommandTimeoutDuration/LocalmostTimeoutDuration). Each must be positive,
 	// no larger than maxBackendExecTimeout, and strictly shorter than the
-	// enclosing human/headless approval Timeout so a hung backend cannot outlive
-	// the deadline that encloses it — a class of bug that previously caused
-	// approval-behaviour glitches (see #244). Validate enforces this hierarchy.
+	// configured human/headless approval Timeout. Keeping the subprocess phase
+	// shorter than that policy prevents a backend from dominating an approval
+	// operation — a class of bug that previously caused approval-behaviour
+	// glitches (see #244). Validate enforces this hierarchy.
 	CommandTimeout   string `toml:"command_timeout"`
 	LocalmostTimeout string `toml:"localmost_timeout"`
 }
 
-// Backend execution timeout bounds. A backend's automated decision runs *inside*
-// the enclosing approval deadline (the human queue wait, or the headless
-// caller-side ctx), so the backend's own subprocess timeout must be shorter than
-// that enclosing deadline to stay coherent. defaultBackendExecTimeout preserves
-// the historical fixed 5s; maxBackendExecTimeout caps how long a single backend
+// Backend execution timeout bounds. For interactive approvals, a subprocess may
+// run before a separate human queue wait; for headless approvals, the caller's
+// context remains the outer bound. The subprocess timeout must be shorter than
+// the configured approval policy. defaultBackendExecTimeout preserves the
+// historical fixed 5s; maxBackendExecTimeout caps how long a single backend
 // invocation may be configured to block.
 const (
 	defaultBackendExecTimeout = 5 * time.Second
@@ -3165,13 +3166,12 @@ func (a Approvals) Validate() error {
 // validateBackendTimeouts checks the per-backend execution timeouts for static
 // contradictions: a syntactically invalid or non-positive value, a value beyond
 // maxBackendExecTimeout, or a value that is not strictly shorter than the
-// enclosing approval Timeout. The last check enforces the deadline hierarchy — a
-// backend decision runs inside the human/headless approval deadline, so a
-// backend timeout at or above it is incoherent and can cause the approval
-// glitches #244 tracked. Explicitly-set fields are always checked; the resolved
-// backend's effective timeout (including the 5s default) is also checked so a
-// deliberately tiny [approvals] timeout is caught against the default backend
-// bound too.
+// configured approval Timeout. The last check enforces the deadline hierarchy:
+// a backend timeout at or above the main policy is incoherent and can cause the
+// approval glitches #244 tracked. Explicitly-set fields are always checked; the
+// resolved backend's effective timeout (including the 5s default) is also checked
+// so a deliberately tiny [approvals] timeout is caught against the default
+// backend bound too.
 func (a Approvals) validateBackendTimeouts(backend string) error {
 	enclosing := a.TimeoutDuration()
 
@@ -3200,8 +3200,8 @@ func (a Approvals) validateBackendTimeouts(backend string) error {
 
 		if d >= enclosing {
 			return fmt.Errorf(
-				"[approvals] %s=%q must be shorter than the enclosing approval timeout=%s "+
-					"so a hung backend cannot outlive the approval deadline (see #244)",
+				"[approvals] %s=%q must be shorter than the configured approval timeout=%s "+
+					"so backend execution cannot dominate the approval policy (see #244)",
 				f.key, f.raw, enclosing)
 		}
 	}
@@ -3213,7 +3213,7 @@ func (a Approvals) validateBackendTimeouts(backend string) error {
 	if execTimeout, ok := a.BackendExecTimeout(backend); ok && execTimeout >= enclosing {
 		return fmt.Errorf(
 			"[approvals] the effective %s backend execution timeout (%s) must be shorter than "+
-				"the enclosing approval timeout=%s; raise [approvals] timeout or lower the backend timeout (see #244)",
+				"the configured approval timeout=%s; raise [approvals] timeout or lower the backend timeout (see #244)",
 			backend, execTimeout, enclosing)
 	}
 
@@ -3300,6 +3300,36 @@ func (a Approvals) BackendExecTimeout(backend string) (time.Duration, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// BackendPhaseTimeoutDuration returns the maximum subprocess phase included in
+// one interactive approval request. A command/localmost backend may consume its
+// full execution timeout and then defer to the human queue, so this phase is
+// additive with TimeoutDuration rather than hidden inside it. In-process
+// backends have no separately-configured execution phase.
+func (a Approvals) BackendPhaseTimeoutDuration() time.Duration {
+	backend, _, err := a.ResolveBackend()
+	if err != nil {
+		return 0 // Validate rejects this before a serving config is published.
+	}
+
+	timeout, _ := a.BackendExecTimeout(backend)
+
+	return timeout
+}
+
+// ServerTimeoutDuration is the worst-case server-side bound for one interactive
+// approval: automated backend execution followed by the full human wait. The
+// hook connection adds its own response-delivery grace beyond this bound.
+func (a Approvals) ServerTimeoutDuration() time.Duration {
+	backend := a.BackendPhaseTimeoutDuration()
+	human := a.TimeoutDuration()
+	const maxDuration = time.Duration(1<<63 - 1)
+	if human > maxDuration-backend {
+		return maxDuration
+	}
+
+	return backend + human
 }
 
 type MCPServerConfig struct {

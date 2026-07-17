@@ -252,6 +252,9 @@ remote_pairing_timeout   = "11m"    # wait for the remote human to approve `gr p
 
 An unset field keeps its built-in default (shown above). A value that is set but unparseable, or that is zero or negative, is rejected at config load. The `remote_*` fields apply only to remote-daemon connections (see [Orchestrator & remote access]({{< relref "/docs/configuration/access.md" >}})); the others apply to the local daemon and attach recovery.
 
+Approval hooks keep three phases separate: `dial_timeout` bounds the Unix-socket dial, `handshake_timeout` bounds the handshake, and a successful handshake installs an approval-operation deadline equal to the configured backend-execution bound plus the full human approval wait plus one minute of response-delivery grace. Changing `handshake_timeout` does not shorten that operation wait. See [Notifications & approvals]({{< relref "notifications.md#backend-execution-timeouts" >}}) for the full hierarchy and timeout policy.
+
+
 ## Migration
 
 `gr migrate` hands a session's conversation to a different agent in place. After starting the target agent, the daemon waits `health_window` to confirm it survived startup before declaring the migration successful; if the new agent exits immediately (a bad auth/config), the migration reverts to the original agent. Raise the window to tolerate a slow agent boot, lower it to revert faster.
@@ -261,7 +264,7 @@ An unset field keeps its built-in default (shown above). A value that is set but
 health_window = "1.5s"  # startup-health confirmation window for the migrated-to agent
 ```
 
-An empty, unparseable, or non-positive value falls back to the default (1.5s); a set-but-unparseable or non-positive value is rejected at config load.
+An unset value uses the default (1.5s); a value that is set but unparseable, zero, or negative is rejected at config load.
 
 ## Transcript reading
 

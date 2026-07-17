@@ -19,6 +19,11 @@ var (
 	remoteDialTimeout      = 10 * time.Second
 	remoteHandshakeTimeout = 15 * time.Second
 	remotePairingTimeout   = 11 * time.Minute
+
+	// approvalResponseGrace is added after the daemon's complete server-side
+	// approval bound (backend execution + human wait). It is a variable only so
+	// stalled-connection tests can exercise expiry without sleeping a minute.
+	approvalResponseGrace = time.Minute
 )
 
 // ConnectionTimeouts carries the client-side connection deadlines resolved from
