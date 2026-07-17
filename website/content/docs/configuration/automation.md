@@ -18,8 +18,17 @@ notify_ci_failures       = true   # notify on a CI transition to failing
 notify_pr_comments       = true   # notify on new PR conversation comments
 notify_review_comments   = true   # notify on new inline review comments
 poll_pending             = "1m"   # poll interval while checks are still running
+poll_terminal            = "5m"   # poll interval once all checks are terminal but the PR is still open
+poll_merged              = "15m"  # sweep interval for merged/closed PRs
 debounce                 = "2m"   # minimum cooldown between notifications to a session
 ```
+
+`poll_pending`, `poll_terminal`, `poll_merged`, and `debounce` are optional and
+fall back to the defaults shown. Each must be a positive duration: none has a
+zero-disable contract, so an invalid, zero, or negative value is rejected at
+config load and reload (a non-positive poll interval would build an invalid
+ticker, and a non-positive `debounce` would remove the per-session anti-flood
+cooldown).
 
 ### Advanced watcher tuning
 

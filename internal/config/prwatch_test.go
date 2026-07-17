@@ -288,6 +288,63 @@ func TestPRWatchTickerCadencesRejectNonPositive(t *testing.T) {
 	}
 }
 
+// TestPRWatchTopLevelDurationSafety covers the top-level [pr_watch] poll cadences
+// and the anti-flood debounce (issue #1304). Directly-constructed bad configs
+// resolve to positive defaults (defensive accessor fallback); loaded configs
+// reject the same unsafe values with a field-specific error, and the positive 1ns
+// boundary is accepted. None of these fields has a zero-disable contract, so a
+// non-positive value must fail closed rather than build a non-positive ticker or
+// silently drop the per-session cooldown.
+func TestPRWatchTopLevelDurationSafety(t *testing.T) {
+	tests := []struct {
+		name string
+		set  func(*PRWatchConfig, string)
+		get  func(PRWatchConfig) time.Duration
+		def  time.Duration
+	}{
+		{"poll_pending", func(p *PRWatchConfig, v string) { p.PollPending = v }, PRWatchConfig.PollPendingDuration, 30 * time.Second},
+		{"poll_terminal", func(p *PRWatchConfig, v string) { p.PollTerminal = v }, PRWatchConfig.PollTerminalDuration, 5 * time.Minute},
+		{"poll_merged", func(p *PRWatchConfig, v string) { p.PollMerged = v }, PRWatchConfig.PollMergedDuration, 15 * time.Minute},
+		{"debounce", func(p *PRWatchConfig, v string) { p.Debounce = v }, PRWatchConfig.DebounceDuration, 2 * time.Minute},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, bad := range []string{"0s", "-1ns", "haar"} {
+				var direct PRWatchConfig
+				tt.set(&direct, bad)
+
+				if got := tt.get(direct); got != tt.def {
+					t.Errorf("accessor(%q) = %v, want defensive default %v", bad, got, tt.def)
+				}
+
+				if tt.get(direct) <= 0 {
+					t.Errorf("accessor(%q) resolved non-positive; a ticker/debounce would be invalid", bad)
+				}
+
+				cfg := Default()
+				tt.set(&cfg.PRWatch, bad)
+
+				err := cfg.Validate()
+				if err == nil || !strings.Contains(err.Error(), "pr_watch."+tt.name) {
+					t.Errorf("Validate(%q) = %v, want field-specific pr_watch.%s error", bad, err, tt.name)
+				}
+			}
+
+			cfg := Default()
+			tt.set(&cfg.PRWatch, "1ns")
+
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("positive 1ns boundary rejected: %v", err)
+			}
+
+			if got := tt.get(cfg.PRWatch); got != time.Nanosecond {
+				t.Errorf("positive boundary accessor = %v, want 1ns", got)
+			}
+		})
+	}
+}
+
 // TestPRWatchAdvancedDurationSafety covers every advanced duration accessor and
 // its load-time boundary validation. Directly-constructed bad configs resolve to
 // positive defaults; loaded configs reject the same unsafe values.

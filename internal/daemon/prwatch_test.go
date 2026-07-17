@@ -83,7 +83,7 @@ func TestDiffAndBuild_MergeConflictTransition(t *testing.T) {
 func TestDiffAndBuild_ConflictNotMaskedByExhaustedCap(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
-	cfg.Debounce = "0s"           // drive multiple polls within the test's instant
+	cfg.Debounce = "1ns"          // drive multiple polls within the test's instant
 	cfg.MaxNotificationsPerPR = 1 // one informational notice exhausts the cap
 	t1 := prWatchTarget{id: "thrawn", branch: "thrawn"}
 
@@ -130,7 +130,7 @@ func TestDiffAndBuild_ConflictNotMaskedByExhaustedCap(t *testing.T) {
 func TestDiffAndBuild_PrimeDirectiveNotRepeatedWhileDegraded(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
-	cfg.Debounce = "0s" // drive multiple polls within the test's instant
+	cfg.Debounce = "1ns" // drive multiple polls within the test's instant
 	t1 := prWatchTarget{id: "haar", branch: "haar"}
 
 	d := prData{
@@ -167,7 +167,7 @@ func TestDiffAndBuild_PrimeDirectiveNotRepeatedWhileDegraded(t *testing.T) {
 func TestDiffAndBuild_PersistentConflictAcrossPushSuppressed(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
-	cfg.Debounce = "0s" // this test fires two conflict notices; don't debounce them
+	cfg.Debounce = "1ns" // this test fires two conflict notices; don't debounce them
 	t1 := prWatchTarget{id: "bide", branch: "bide"}
 
 	// Prime mergeable, then transition to CONFLICTING (notifies once).
@@ -220,7 +220,7 @@ func TestDiffAndBuild_PrimeConflictNotMaskedByCIFailure(t *testing.T) {
 	// masked — it re-fires from the steady-state path on the next poll.
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
-	cfg.Debounce = "0s" // so the deferred conflict isn't debounced within the test's instant
+	cfg.Debounce = "1ns" // so the deferred conflict isn't debounced within the test's instant
 	t1 := prWatchTarget{id: "bothy", branch: "bothy"}
 
 	out := sm.diffAndBuild(cfg, t1, "croft/loch", prData{
@@ -300,7 +300,7 @@ func TestDiffAndBuild_PrimeMechanicalNoticesDedupWhileCommentsDegraded(t *testin
 	// rather than re-firing on every poll.
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
-	cfg.Debounce = "0s" // so a deferred/second notice isn't debounced within the test
+	cfg.Debounce = "1ns" // so a deferred/second notice isn't debounced within the test
 	t1 := prWatchTarget{id: "dreich", branch: "dreich"}
 
 	d := prData{
@@ -338,7 +338,7 @@ func TestDiffAndBuild_PrimeCIReFailsAfterRecoveryWhileCommentsDegraded(t *testin
 	// silently deduped and a stopped agent is stranded on a red build.
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
-	cfg.Debounce = "0s"
+	cfg.Debounce = "1ns"
 	t1 := prWatchTarget{id: "fash", branch: "fash"}
 
 	failing := prData{
@@ -391,7 +391,7 @@ func TestDiffAndBuild_CITransitionAndDedup(t *testing.T) {
 func TestDiffAndBuild_FirstFailureWhilePendingThenCompletion(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
-	cfg.Debounce = "0s" // this test fires two CI directives; don't debounce within the test's instant
+	cfg.Debounce = "1ns" // this test fires two CI directives; don't debounce within the test's instant
 	t1 := prWatchTarget{id: "thrawn", branch: "thrawn"}
 
 	// Prime: passing.
@@ -452,7 +452,7 @@ func TestDiffAndBuild_FirstFailureWhilePendingThenCompletion(t *testing.T) {
 func TestDiffAndBuild_FailureAllDoneNoCompletion(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
-	cfg.Debounce = "0s"
+	cfg.Debounce = "1ns"
 	t1 := prWatchTarget{id: "dreich", branch: "dreich"}
 
 	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 2, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
@@ -486,7 +486,7 @@ func TestDiffAndBuild_FailureAllDoneNoCompletion(t *testing.T) {
 func TestDiffAndBuild_GreenFinishCompletion(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
-	cfg.Debounce = "0s"
+	cfg.Debounce = "1ns"
 	cfg.NotifyCIRecovery = true // even with recovery on, the completion subsumes it
 	t1 := prWatchTarget{id: "bonnie", branch: "bonnie"}
 
@@ -530,7 +530,7 @@ func TestDiffAndBuild_GreenFinishCompletion(t *testing.T) {
 func TestDiffAndBuild_GreenFinishCompletionRecoveryOff(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
-	cfg.Debounce = "0s"
+	cfg.Debounce = "1ns"
 	cfg.NotifyCIRecovery = false // recovery notices disabled entirely
 	t1 := prWatchTarget{id: "canny", branch: "canny"}
 
@@ -555,7 +555,7 @@ func TestDiffAndBuild_GreenFinishCompletionRecoveryOff(t *testing.T) {
 func TestDiffAndBuild_UnarmedGreenUsesRecovery(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
-	cfg.Debounce = "0s"
+	cfg.Debounce = "1ns"
 	cfg.NotifyCIRecovery = true
 	t1 := prWatchTarget{id: "dreich", branch: "dreich"}
 
@@ -590,7 +590,7 @@ func TestDiffAndBuild_UnarmedGreenUsesRecovery(t *testing.T) {
 func TestDiffAndBuild_CompletionFiresWhileCommentsDegraded(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
-	cfg.Debounce = "0s"
+	cfg.Debounce = "1ns"
 	t1 := prWatchTarget{id: "haar", branch: "haar"}
 
 	// Poll 1: unprimed (CommentsOK false), first failure while checks still run.
@@ -636,7 +636,7 @@ func TestDiffAndBuild_CompletionFiresWhileCommentsDegraded(t *testing.T) {
 func TestDiffAndBuild_GreenCompletionWhileCommentsDegraded(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
-	cfg.Debounce = "0s"
+	cfg.Debounce = "1ns"
 	t1 := prWatchTarget{id: "haar", branch: "haar"}
 
 	// Poll 1: unprimed, early failure while pending → arms the follow-up.
@@ -769,7 +769,7 @@ func TestDiffAndBuild_GreenCompletionRetriesAfterGatedReject(t *testing.T) {
 func TestDiffAndBuild_NewSHAClearsPendingCompletion(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
-	cfg.Debounce = "0s"
+	cfg.Debounce = "1ns"
 	t1 := prWatchTarget{id: "auld", branch: "auld"}
 
 	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 60, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
@@ -798,7 +798,7 @@ func TestDiffAndBuild_NewSHAClearsPendingCompletion(t *testing.T) {
 func TestDiffAndBuild_NewFailureAsPendingDrainsSingleNotice(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := allOnConfig()
-	cfg.Debounce = "0s"
+	cfg.Debounce = "1ns"
 	t1 := prWatchTarget{id: "canny", branch: "canny"}
 
 	sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 70, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
@@ -931,7 +931,7 @@ func TestDiffAndBuild_CommentGatesIndependent(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sm := newPRWatchSM()
-			cfg := &config.PRWatchConfig{Enabled: true, NotifyReviewComments: tc.reviewOn, NotifyPRComments: tc.prOn, Debounce: "0s"}
+			cfg := &config.PRWatchConfig{Enabled: true, NotifyReviewComments: tc.reviewOn, NotifyPRComments: tc.prOn, Debounce: "1ns"}
 			t1 := prWatchTarget{id: tc.id, branch: tc.id}
 			sm.diffAndBuild(cfg, t1, "croft/loch", prData{Number: 1, State: "open", HeadRefOid: "sha1", CIState: "passing", CommentsOK: true})
 
@@ -1010,7 +1010,7 @@ func TestCIFailureBodyIsDirective(t *testing.T) {
 
 func TestGateRateLimit(t *testing.T) {
 	sm := newPRWatchSM()
-	cfg := &config.PRWatchConfig{Enabled: true, Debounce: "0s", MaxNotificationsPerPR: 100}
+	cfg := &config.PRWatchConfig{Enabled: true, Debounce: "1ns", MaxNotificationsPerPR: 100}
 	cur := &prWatchCursor{failing: map[string]bool{}}
 	allowed := 0
 
@@ -1030,7 +1030,7 @@ func TestGateRateLimit(t *testing.T) {
 func TestGateRateLimit_Configured(t *testing.T) {
 	sm := newPRWatchSM()
 	cfg := &config.PRWatchConfig{
-		Enabled: true, Debounce: "0s", MaxNotificationsPerPR: 100,
+		Enabled: true, Debounce: "1ns", MaxNotificationsPerPR: 100,
 		Advanced: config.PRWatchAdvancedConfig{NotificationRateLimit: 2, NotificationRateWindow: "30m"},
 	}
 	cur := &prWatchCursor{failing: map[string]bool{}}
@@ -1052,7 +1052,7 @@ func TestGateRateLimitNonPositiveWindowStillLimitsImmediateEvent(t *testing.T) {
 		t.Run(bad, func(t *testing.T) {
 			sm := newPRWatchSM()
 			cfg := &config.PRWatchConfig{
-				Debounce: "0s", MaxNotificationsPerPR: 100,
+				Debounce: "1ns", MaxNotificationsPerPR: 100,
 				Advanced: config.PRWatchAdvancedConfig{NotificationRateLimit: 1, NotificationRateWindow: bad},
 			}
 
@@ -1193,7 +1193,7 @@ func TestPrunePRWatchState(t *testing.T) {
 
 func TestGatePerSHACap(t *testing.T) {
 	sm := newPRWatchSM()
-	cfg := &config.PRWatchConfig{Enabled: true, Debounce: "0s", MaxNotificationsPerPR: 2}
+	cfg := &config.PRWatchConfig{Enabled: true, Debounce: "1ns", MaxNotificationsPerPR: 2}
 	cur := &prWatchCursor{failing: map[string]bool{}}
 	allowed := 0
 
@@ -1213,7 +1213,7 @@ func TestGatePerSHACap(t *testing.T) {
 // informational notices remain capped. Regression test for issue #771.
 func TestGateDirectiveBypassesCap(t *testing.T) {
 	sm := newPRWatchSM()
-	cfg := &config.PRWatchConfig{Enabled: true, Debounce: "0s", MaxNotificationsPerPR: 1}
+	cfg := &config.PRWatchConfig{Enabled: true, Debounce: "1ns", MaxNotificationsPerPR: 1}
 	cur := &prWatchCursor{failing: map[string]bool{}}
 
 	// Exhaust the cap with one informational notice.

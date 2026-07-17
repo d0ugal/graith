@@ -1972,24 +1972,33 @@ func parseDurationOr(s string, fallback time.Duration) time.Duration {
 	return d
 }
 
-// PollPendingDuration is the poll interval while a PR has pending/in-progress checks.
+// PollPendingDuration is the poll interval while a PR has pending/in-progress
+// checks. Load/reload validation rejects a non-positive value; the accessor
+// falls back to the default on a zero, negative, or unparseable value so a
+// directly-constructed config can never build a non-positive ticker (issue
+// #1304).
 func (p PRWatchConfig) PollPendingDuration() time.Duration {
-	return parseDurationOr(p.PollPending, 30*time.Second)
+	return positiveDurationOrDefault(p.PollPending, 30*time.Second)
 }
 
-// PollTerminalDuration is the poll interval once all checks are terminal (PR still open).
+// PollTerminalDuration is the poll interval once all checks are terminal (PR
+// still open). Non-positive values fall back to the default (see
+// PollPendingDuration).
 func (p PRWatchConfig) PollTerminalDuration() time.Duration {
-	return parseDurationOr(p.PollTerminal, 5*time.Minute)
+	return positiveDurationOrDefault(p.PollTerminal, 5*time.Minute)
 }
 
-// PollMergedDuration is the sweep interval for merged/closed PRs.
+// PollMergedDuration is the sweep interval for merged/closed PRs. Non-positive
+// values fall back to the default (see PollPendingDuration).
 func (p PRWatchConfig) PollMergedDuration() time.Duration {
-	return parseDurationOr(p.PollMerged, 15*time.Minute)
+	return positiveDurationOrDefault(p.PollMerged, 15*time.Minute)
 }
 
 // DebounceDuration is the minimum cooldown between notifications to one session.
+// Non-positive values fall back to the default (see PollPendingDuration); a
+// zero/negative debounce would disable the anti-flood cooldown.
 func (p PRWatchConfig) DebounceDuration() time.Duration {
-	return parseDurationOr(p.Debounce, 2*time.Minute)
+	return positiveDurationOrDefault(p.Debounce, 2*time.Minute)
 }
 
 // MaxNotifications returns the per-head-SHA notification cap, defaulting to 10.
@@ -4687,21 +4696,19 @@ func (c *Config) Validate() error {
 	errs = append(errs, c.validateMessagesLimits()...)
 	errs = append(errs, c.validateTodoLimits()...)
 
-	for _, f := range []struct {
-		name, val string
-	}{
+	// Top-level PR-watch durations pace polling loops and the per-session
+	// anti-flood debounce. None has a documented zero-disable contract, so a
+	// non-positive value would build a non-positive ticker or disable the
+	// debounce; reject unparseable and non-positive values on load/reload and
+	// keep the accessor fallbacks only as a defence for directly-constructed
+	// configs (issue #1304).
+	for _, f := range []struct{ name, val string }{
 		{"pr_watch.poll_pending", c.PRWatch.PollPending},
 		{"pr_watch.poll_terminal", c.PRWatch.PollTerminal},
 		{"pr_watch.poll_merged", c.PRWatch.PollMerged},
 		{"pr_watch.debounce", c.PRWatch.Debounce},
 	} {
-		if f.val == "" {
-			continue
-		}
-
-		if _, err := ParseDurationWithDays(f.val); err != nil {
-			errs = append(errs, fmt.Errorf("%s %q: %w", f.name, f.val, err))
-		}
+		validatePositiveDurationField(&errs, f.name, f.val)
 	}
 
 	// Advanced PR-watch durations all pace polling, anti-flood windows, command

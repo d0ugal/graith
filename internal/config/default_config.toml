@@ -344,11 +344,11 @@ notify_pr_comments = true        # notify on new PR conversation (issue-style) c
 notify_review_decisions = true   # notify on approved / changes-requested review decisions
 notify_pr_lifecycle = true       # notify when the PR is merged or closed
 notify_ci_recovery = true        # notify when CI goes green again after having failed
-poll_pending = "30s"             # poll interval while checks are pending/in-progress
-poll_terminal = "5m"             # poll interval once all checks are terminal but the PR is still open
-poll_merged = "15m"              # sweep interval for merged/closed PRs
+poll_pending = "30s"             # poll interval while checks are pending/in-progress (must be a positive duration)
+poll_terminal = "5m"             # poll interval once all checks are terminal but the PR is still open (must be a positive duration)
+poll_merged = "15m"              # sweep interval for merged/closed PRs (must be a positive duration)
 max_notifications_per_pr = 10    # cap on informational notices per PR head SHA (CI-failure/conflict directives bypass it)
-debounce = "2m"                  # minimum cooldown between notifications to one session
+debounce = "2m"                  # minimum cooldown between notifications to one session (must be a positive duration)
 # Author-trust gate for PR comments (prompt-injection defence). A comment is
 # only delivered if its author is trusted: either its login is in
 # comment_author_allowlist, or its GitHub author_association is in
