@@ -95,6 +95,8 @@ func (dc *doctorContext) section(name string) {
 	out.Printf("\n%s\n", name)
 }
 
+var doctorDaemonProbe = (*doctorContext).probeDaemon
+
 var doctorCmd = &cobra.Command{
 	Use:     "doctor",
 	Aliases: []string{"doc"},
@@ -110,7 +112,7 @@ var doctorCmd = &cobra.Command{
 		// sandboxed session that can't reach the socket is diagnosed as
 		// "cannot verify" in a single place rather than producing a cascade of
 		// false failures across sections (issue #945).
-		probe := dc.probeDaemon()
+		probe := doctorDaemonProbe(dc)
 		report.DaemonVersion = probe.daemonVersion
 
 		dc.checkVersion(probe)
@@ -123,6 +125,7 @@ var doctorCmd = &cobra.Command{
 
 			dc.checkSessions(diag)
 			dc.checkStorage(diag)
+			dc.renderPurgeDiagnostic(diag)
 			dc.checkTriggers(diag)
 		}
 
@@ -1126,6 +1129,34 @@ func (dc *doctorContext) checkTriggers(diag *protocol.DiagnosticsMsg) {
 	}
 
 	dc.hintf("If this persists, raise fs.inotify.max_user_watches (Linux) or reduce the watched tree with [trigger.watch] ignore/paths")
+}
+
+// renderPurgeDiagnostic writes the human-readable view of diagnostics.purge.
+// It deliberately does not register doctor checks: JSON output already carries
+// this data under diagnostics.purge, and its top-level checks array must remain
+// stable when the plain output gains this informational section.
+func (dc *doctorContext) renderPurgeDiagnostic(diag *protocol.DiagnosticsMsg) {
+	if diag.Purge == nil {
+		return
+	}
+
+	purge := diag.Purge
+
+	dc.section("Purge")
+	out.Printf("  Startup delay: %s\n", purge.StartupDelay)
+	out.Printf("  Interval: %s\n", purge.Interval)
+
+	if purge.LastSweep == "" {
+		out.Printf("  Last sweep: not yet run\n")
+	} else {
+		out.Printf("  Last sweep: %s\n", purge.LastSweep)
+	}
+
+	if purge.NextSweep == "" {
+		out.Printf("  Next sweep: awaiting first sweep\n")
+	} else {
+		out.Printf("  Next sweep: %s\n", purge.NextSweep)
+	}
 }
 
 func (dc *doctorContext) checkTmpDir() {

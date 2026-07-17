@@ -15,6 +15,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/version"
 )
 
 // writeStubExecutable creates an executable file in dir and returns its base
@@ -380,6 +381,150 @@ func checkResults(dc *doctorContext, level string) []string {
 	}
 
 	return out
+}
+
+func TestRenderPurgeDiagnostic(t *testing.T) {
+	oldOut := out
+
+	t.Cleanup(func() { out = oldOut })
+
+	tests := []struct {
+		name  string
+		purge protocol.PurgeDiagnostic
+		want  []string
+	}{
+		{
+			name: "before first sweep",
+			purge: protocol.PurgeDiagnostic{
+				StartupDelay: "45s",
+				Interval:     "7m0s",
+			},
+			want: []string{
+				"Purge",
+				"Startup delay: 45s",
+				"Interval: 7m0s",
+				"Last sweep: not yet run",
+				"Next sweep: awaiting first sweep",
+			},
+		},
+		{
+			name: "after a sweep",
+			purge: protocol.PurgeDiagnostic{
+				StartupDelay: "45s",
+				Interval:     "7m0s",
+				LastSweep:    "2026-07-17T08:00:00Z",
+				NextSweep:    "2026-07-17T08:07:00Z",
+			},
+			want: []string{
+				"Purge",
+				"Startup delay: 45s",
+				"Interval: 7m0s",
+				"Last sweep: 2026-07-17T08:00:00Z",
+				"Next sweep: 2026-07-17T08:07:00Z",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			out = output.NewWithWriter(false, &buf)
+
+			dc := newDoctorContext()
+			dc.renderPurgeDiagnostic(&protocol.DiagnosticsMsg{Purge: &tt.purge})
+
+			rendered := buf.String()
+			for _, want := range tt.want {
+				if !strings.Contains(rendered, want) {
+					t.Errorf("expected doctor output to contain %q, got:\n%s", want, rendered)
+				}
+			}
+
+			// diagnostics.purge already carries this data in JSON. Plain rendering
+			// must not add duplicate entries to the stable top-level checks array.
+			if len(dc.checks) != 0 {
+				t.Errorf("purge renderer added %d check(s), want none: %+v", len(dc.checks), dc.checks)
+			}
+		})
+	}
+}
+
+// TestDoctorPlainOutputRendersPurgeDiagnostic is the command-level regression
+// for issue #1312: the daemon payload already contained purge timing, but the
+// plain doctor dispatch omitted it entirely.
+func TestDoctorPlainOutputRendersPurgeDiagnostic(t *testing.T) {
+	oldCfg, oldCfgFile, oldPaths := cfg, cfgFile, paths
+	oldOut, oldJSON := out, jsonOutput
+	oldAutofix, oldDisk := doctorAutofix, doctorDisk
+	oldProbe, oldGCFetch := doctorDaemonProbe, daemonGCFetch
+
+	t.Cleanup(func() {
+		cfg, cfgFile, paths = oldCfg, oldCfgFile, oldPaths
+		out, jsonOutput = oldOut, oldJSON
+		doctorAutofix, doctorDisk = oldAutofix, oldDisk
+		doctorDaemonProbe = oldProbe
+		daemonGCFetch = oldGCFetch
+	})
+
+	dataDir := t.TempDir()
+	paths = config.Paths{
+		DataDir:        dataDir,
+		SocketPath:     filepath.Join(dataDir, "d.sock"),
+		PIDFile:        filepath.Join(dataDir, "d.pid"),
+		StateFile:      filepath.Join(dataDir, "state.json"),
+		HumanTokenFile: filepath.Join(dataDir, "human.token"),
+		LogDir:         filepath.Join(dataDir, "logs"),
+		DaemonLog:      filepath.Join(dataDir, "daemon.log"),
+		MessagesDB:     filepath.Join(dataDir, "messages.sqlite"),
+		TmpDir:         filepath.Join(dataDir, "tmp"),
+	}
+	if err := os.WriteFile(paths.HumanTokenFile, []byte("canny-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgFile = filepath.Join(dataDir, "canny.toml")
+	cfg = &config.Config{AgentPrompt: config.DefaultAgentPrompt()}
+	cfg.Updates.Enabled = false
+	doctorAutofix, doctorDisk, jsonOutput = false, false, false
+	daemonGCFetch = func(bool) ([]protocol.GCOrphanInfo, error) { return nil, nil }
+
+	var buf bytes.Buffer
+	out = output.NewWithWriter(false, &buf)
+
+	doctorDaemonProbe = func(*doctorContext) daemonProbe {
+		return daemonProbe{
+			reach:         daemonReachOK,
+			daemonVersion: version.Version,
+			diag: &protocol.DiagnosticsMsg{
+				DaemonPID:     777,
+				DaemonVersion: version.Version,
+				DaemonUptime:  "3m",
+				Purge: &protocol.PurgeDiagnostic{
+					StartupDelay: "45s",
+					Interval:     "7m0s",
+					LastSweep:    "2026-07-17T08:00:00Z",
+					NextSweep:    "2026-07-17T08:07:00Z",
+				},
+			},
+		}
+	}
+
+	if err := doctorCmd.RunE(doctorCmd, nil); err != nil {
+		t.Fatalf("doctor command failed: %v\n%s", err, buf.String())
+	}
+
+	rendered := buf.String()
+	for _, want := range []string{
+		"Purge",
+		"Startup delay: 45s",
+		"Interval: 7m0s",
+		"Last sweep: 2026-07-17T08:00:00Z",
+		"Next sweep: 2026-07-17T08:07:00Z",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("expected doctor output to contain %q, got:\n%s", want, rendered)
+		}
+	}
 }
 
 // TestCheckApprovalsBackendFailClosed verifies gr doctor surfaces the reason an
