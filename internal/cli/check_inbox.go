@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
@@ -108,15 +109,37 @@ func formatInboxSystemMessage(messages []inboxMessage, previewBytes int) string 
 		previewBytes = config.LimitsInboxPreviewBytesDefault
 	}
 
-	previewStr := preview.String()
-	if len(previewStr) > previewBytes {
-		previewStr = previewStr[:previewBytes] + "..."
-	}
+	previewStr := truncatePreviewBytes(preview.String(), previewBytes)
 
 	return fmt.Sprintf(
 		"You have %d unread message(s) in your graith inbox. Read with: gr msg inbox --all\n\n%s",
 		len(messages), previewStr,
 	)
+}
+
+// truncatePreviewBytes clips s to at most budget bytes, then appends an
+// ellipsis. inbox_preview_bytes is a byte budget (it bounds the size of the
+// context injected into the SessionStart hook), not a display width, so this
+// stays byte-oriented rather than cell-width aware — deliberately distinct from
+// the picker summary's cell-width truncation. The cut is backed up to a UTF-8
+// rune boundary so a multi-byte rune is never split, keeping the output valid
+// UTF-8 (issue #1313; the documented "never split a multi-byte character
+// mid-rune" guarantee). Returns s unchanged when it already fits or the budget
+// is non-positive.
+func truncatePreviewBytes(s string, budget int) string {
+	if budget < 1 || len(s) <= budget {
+		return s
+	}
+
+	// s[cut] is the first byte that would be dropped; back up while it is a
+	// UTF-8 continuation byte (0x80–0xBF) so the kept prefix ends on a rune
+	// boundary.
+	cut := budget
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+
+	return s[:cut] + "..."
 }
 
 // readInboxMessages reads control frames from fr until it sees msg_done, an

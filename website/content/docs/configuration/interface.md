@@ -111,7 +111,7 @@ The `[terminal]` block collects the interactive client's presentation preference
 
 **`refresh_interval`** is the cadence at which the session picker (`ctrl+b w`), the `gr dashboard`, an attached status bar, and the in-picker message viewer (`m`) re-poll the daemon for fresh session state. A shorter interval feels more live at the cost of more polling; a non-positive value falls back to the default (a zero cadence would busy-loop).
 
-**`summary_width`** is the widest a `gr status` summary may render in the picker before it is truncated with an ellipsis.
+**`summary_width`** is the widest a `gr status` summary may render in the picker before it is truncated with an ellipsis. It is a **display-cell** budget, not a byte or rune count: wide characters (CJK, emoji) count as two cells, zero-width and combining marks count as none, and ANSI styling is ignored when measuring. Truncation never splits a multi-byte character, so the rendered summary is always valid UTF-8. (This differs from the `[limits]` byte caps such as `inbox_preview_bytes`, which are measured in bytes.)
 
 The fallback terminal geometry (used when graith can't read the real terminal size, e.g. piped output) and the per-session scrollback cap are session-lifecycle settings — see [`[lifecycle]`]({{< relref "/docs/configuration/sessions.md" >}}) (`default_cols`, `default_rows`, `max_log_bytes`). The client's not-a-TTY fallback geometry follows the same `[lifecycle]` defaults, so there is a single source of truth.
 

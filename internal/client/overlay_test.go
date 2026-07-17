@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
@@ -4350,6 +4351,55 @@ func TestDisplaySummary_Truncates(t *testing.T) {
 
 	if !strings.HasSuffix(got, "…") {
 		t.Errorf("truncated summary should end with ellipsis, got %q", got)
+	}
+}
+
+// TestDisplaySummary_UTF8Safe is the regression test for issue #1313: the old
+// code measured display width with lipgloss.Width but truncated with a byte
+// slice (text[:summaryWidth-1]), so a summary containing wide/combining/emoji or
+// ANSI-decorated text would be cut mid-rune, producing invalid UTF-8 / mojibake.
+// Truncation must be cell-width aware and always yield valid UTF-8.
+func TestDisplaySummary_UTF8Safe(t *testing.T) {
+	cases := map[string]string{
+		"emoji":     strings.Repeat("🎉", 80),
+		"accented":  strings.Repeat("café ", 40),
+		"combining": strings.Repeat("é", 80),
+		"cjk":       strings.Repeat("世界", 80),
+		"ansi":      "\x1b[31m" + strings.Repeat("hello ", 40) + "\x1b[0m",
+	}
+
+	for name, text := range cases {
+		got := displaySummary(protocol.SessionInfo{SummaryText: text})
+
+		if !utf8.ValidString(got) {
+			t.Errorf("%s: displaySummary produced invalid UTF-8: %q", name, got)
+		}
+
+		// The visible cell width (ANSI escapes excluded) must never exceed the
+		// configured budget — the whole point of a cell-width-aware truncation.
+		if w := ansi.StringWidth(got); w > summaryWidth {
+			t.Errorf("%s: rendered width = %d cells, want <= %d; got %q", name, w, summaryWidth, got)
+		}
+	}
+}
+
+// TestDisplaySummary_CJKWidth confirms wide runes are measured in cells, not
+// bytes: 40 CJK runes render as 80 cells, so displaySummary must truncate them
+// to fit summaryWidth cells and append the ellipsis (issue #1313). The old byte
+// slice would have kept far too much content (and split a rune).
+func TestDisplaySummary_CJKWidth(t *testing.T) {
+	got := displaySummary(protocol.SessionInfo{SummaryText: strings.Repeat("世", maxSummaryWidth)})
+
+	if w := ansi.StringWidth(got); w > maxSummaryWidth {
+		t.Errorf("CJK summary width = %d cells, want <= %d", w, maxSummaryWidth)
+	}
+
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("wide-rune summary should be truncated with an ellipsis, got %q", got)
+	}
+
+	if !utf8.ValidString(got) {
+		t.Errorf("CJK summary produced invalid UTF-8: %q", got)
 	}
 }
 

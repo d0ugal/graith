@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/d0ugal/graith/internal/protocol"
 )
@@ -78,6 +79,64 @@ func TestFormatInboxSystemMessagePreviewTruncation(t *testing.T) {
 
 	if len(def) <= len(small) {
 		t.Errorf("default cap (%d) should retain more than the small cap (%d)", len(def), len(small))
+	}
+}
+
+// TestFormatInboxSystemMessagePreviewUTF8Safe is the regression test for issue
+// #1313: the old byte slice (previewStr[:previewBytes]) cut mid-rune and emitted
+// invalid UTF-8 / mojibake. Truncation must respect the configured byte budget
+// while backing the cut up to a rune boundary, so the injected context is always
+// valid UTF-8 regardless of where the budget lands inside a multi-byte rune.
+func TestFormatInboxSystemMessagePreviewUTF8Safe(t *testing.T) {
+	// Each of these bodies is padded so the "From …: " prefix plus body runs
+	// well past every candidate budget, forcing truncation.
+	bodies := map[string]string{
+		"emoji":     strings.Repeat("🎉", 200), // 4 bytes per rune
+		"accented":  strings.Repeat("café ", 200),
+		"combining": strings.Repeat("é", 200), // e + combining acute
+		"cjk":       strings.Repeat("世界", 200), // 3 bytes per rune
+	}
+
+	for name, body := range bodies {
+		for budget := 10; budget <= 40; budget++ {
+			msg := formatInboxSystemMessage([]inboxMessage{{SenderName: "Ailsa", Body: body}}, budget)
+			if !utf8.ValidString(msg) {
+				t.Fatalf("%s budget=%d: message is not valid UTF-8: %q", name, budget, msg)
+			}
+		}
+	}
+}
+
+// TestTruncatePreviewBytesRuneBoundary asserts the exact byte-budget and
+// rune-boundary contract: the kept prefix never exceeds the budget, always ends
+// on a rune boundary, and the ellipsis is appended (issue #1313).
+func TestTruncatePreviewBytesRuneBoundary(t *testing.T) {
+	// "世" is 3 bytes; with a budget of 4 the second rune cannot fit, so the cut
+	// must back up from byte 4 to byte 3 (one whole rune kept), never to byte 4
+	// which would split "界".
+	got := truncatePreviewBytes("世界", 4)
+	if got != "世..." {
+		t.Fatalf("truncatePreviewBytes(世界, 4) = %q, want %q", got, "世...")
+	}
+
+	if !utf8.ValidString(got) {
+		t.Fatalf("result is not valid UTF-8: %q", got)
+	}
+
+	// A budget that lands exactly on a rune boundary keeps whole runes only.
+	if got := truncatePreviewBytes("世界世", 6); got != "世界..." {
+		t.Fatalf("truncatePreviewBytes(世界世, 6) = %q, want %q", got, "世界...")
+	}
+
+	// Content that fits within the budget is returned unchanged (no ellipsis).
+	if got := truncatePreviewBytes("café", 10); got != "café" {
+		t.Fatalf("truncatePreviewBytes(café, 10) = %q, want unchanged", got)
+	}
+
+	// A budget landing between the two bytes of an accented rune backs up to
+	// drop the whole rune rather than emitting a lone continuation byte.
+	if got := truncatePreviewBytes("é", 1); !utf8.ValidString(got) || strings.ContainsRune(got, '�') {
+		t.Fatalf("truncatePreviewBytes(é, 1) = %q, must not split the rune", got)
 	}
 }
 
