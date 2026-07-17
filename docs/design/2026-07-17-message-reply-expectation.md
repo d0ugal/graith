@@ -3,7 +3,7 @@ title: "Design Doc: Message Reply Expectation"
 authors: OpenAI Codex
 created: 2026-07-17
 status: Implemented
-reviewers: (pending implementation review)
+reviewers: Implementation review complete
 informed: Graith maintainers and messaging clients
 issue: https://github.com/d0ugal/graith/issues/1374
 ---

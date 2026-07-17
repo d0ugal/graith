@@ -212,6 +212,81 @@ func TestNotifyUnreadInboxNoReplyHint(t *testing.T) {
 	}
 }
 
+func TestNotifyUnreadInboxDefaultHintRemainsGeneric(t *testing.T) {
+	h := newTestHarness(t)
+	h.addPTYSession(t, "dreich-resumed", "dreich-session")
+	h.sm.cfg.Notifications.Timing.InboxDetachedDelay = "0"
+
+	_, err := h.sm.messages.Publish(PublishOpts{
+		Stream: "inbox:dreich-resumed", SenderID: "muckle-sender", SenderName: "Muckle",
+		Body: "ordinary briefing",
+	})
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	h.sm.notifyUnreadInbox("dreich-resumed")
+	time.Sleep(200 * time.Millisecond)
+
+	ptySess, ok := h.sm.GetPTY("dreich-resumed")
+	if !ok {
+		t.Fatal("resumed PTY session not found")
+	}
+
+	tail, err := ptySess.ScrollbackFile().Tail(500)
+	if err != nil {
+		t.Fatalf("scrollback tail: %v", err)
+	}
+
+	scrollback := string(tail)
+	if !strings.Contains(scrollback, "You have 1 unread inbox message(s). Read: gr msg inbox --ack") {
+		t.Errorf("default post-resume hint changed; got:\n%s", scrollback)
+	}
+
+	if strings.Contains(scrollback, "No reply expected") || strings.Contains(scrollback, "Reply: gr msg send") {
+		t.Errorf("generic post-resume hint should not add reply metadata; got:\n%s", scrollback)
+	}
+}
+
+func TestInboxResumeSummary(t *testing.T) {
+	tests := []struct {
+		name       string
+		senderID   string
+		senderName string
+		noReply    bool
+		want       string
+	}{
+		{
+			name:       "default message",
+			senderID:   "braw-sender",
+			senderName: "Braw",
+			want:       "Resumed by inbox message from Braw",
+		},
+		{
+			name:       "no-reply message",
+			senderID:   "canny-sender",
+			senderName: "Canny",
+			noReply:    true,
+			want:       "Resumed by inbox message from Canny (no reply expected)",
+		},
+		{
+			name:       "system notification",
+			senderID:   systemSenderID,
+			senderName: systemSenderName,
+			noReply:    true,
+			want:       "Resumed by automated notification from " + systemSenderName,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := inboxResumeSummary(tt.senderID, tt.senderName, tt.noReply); got != tt.want {
+				t.Errorf("inboxResumeSummary() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestOnAgentStatusChange_PublishesToMessageStore(t *testing.T) {
 	dir := t.TempDir()
 

@@ -140,6 +140,24 @@ func inboxNotificationHint(senderID, senderName string, noReply bool) string {
 	return fmt.Sprintf("New message from %s. Read: gr msg inbox --ack | Reply: gr msg send %s \"<reply>\"", sender, sender)
 }
 
+func inboxResumeSummary(senderID, senderName string, noReply bool) string {
+	sender := senderName
+	if sender == "" {
+		sender = senderID
+	}
+
+	if isSystemSender(senderID) {
+		return "Resumed by automated notification from " + sender
+	}
+
+	summary := "Resumed by inbox message from " + sender
+	if noReply {
+		summary += " (no reply expected)"
+	}
+
+	return summary
+}
+
 // resumeForInbox auto-resumes a stopped session when an inbox message arrives.
 // The resume flow calls notifyUnreadInbox which handles the PTY notification.
 func (sm *SessionManager) resumeForInbox(targetID, senderID, senderName string, noReply bool) {
@@ -153,12 +171,7 @@ func (sm *SessionManager) resumeForInbox(targetID, senderID, senderName string, 
 		sender = senderID
 	}
 
-	summary := "Resumed by inbox message from " + sender
-	if isSystemSender(senderID) {
-		summary = "Resumed by automated notification from " + sender
-	} else if noReply {
-		summary += " (no reply expected)"
-	}
+	summary := inboxResumeSummary(senderID, senderName, noReply)
 
 	sm.log.Info("auto-resuming stopped session on inbox message",
 		"session", sess.Name, "id", targetID, "sender", sender)
@@ -209,8 +222,11 @@ func (sm *SessionManager) notifyUnreadInbox(sessionID string) {
 
 	hint := fmt.Sprintf("You have %d unread inbox message(s). Read: gr msg inbox --ack", count)
 	if count == 1 {
+		// Preserve the historical generic resume hint for ordinary messages. The
+		// extra read is only needed to surface an explicit no-reply expectation.
+		// If unread state changes between these queries, keep the generic hint.
 		messages, err := sm.messages.Read("inbox:"+sessionID, sessionID, true, "")
-		if err == nil && len(messages) == 1 {
+		if err == nil && len(messages) == 1 && messages[0].NoReply {
 			m := messages[0]
 			hint = inboxNotificationHint(m.SenderID, m.SenderName, m.NoReply)
 		}
