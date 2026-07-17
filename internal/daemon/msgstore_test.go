@@ -293,7 +293,7 @@ func TestReopenDB(t *testing.T) {
 		t.Fatalf("NewMsgStore: %v", err)
 	}
 
-	_, _ = s1.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "bide-msg"})
+	_, _ = s1.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "bide-msg", NoReply: true})
 	_ = s1.Close()
 
 	s2, err := NewMsgStore(dbPath)
@@ -313,6 +313,10 @@ func TestReopenDB(t *testing.T) {
 
 	if msgs[0].Body != "bide-msg" {
 		t.Errorf("body = %q", msgs[0].Body)
+	}
+
+	if !msgs[0].NoReply {
+		t.Error("NoReply = false after reopen, want true")
 	}
 
 	m, _ := s2.Publish(PublishOpts{Stream: "blether", SenderID: "braw1", SenderName: "neep", Body: "efter reopen"})
@@ -431,7 +435,7 @@ func TestReadEmptyStreamUnread(t *testing.T) {
 func TestPublishStoresAllFields(t *testing.T) {
 	s := testStore(t)
 
-	msg, err := s.Publish(PublishOpts{Stream: "blether", SenderID: "braw-sender", SenderName: "Bonnie Alpha", Body: "kirk-task", ThreadID: "kirk-42", ReplyTo: "inbox:braw-sender"})
+	msg, err := s.Publish(PublishOpts{Stream: "blether", SenderID: "braw-sender", SenderName: "Bonnie Alpha", Body: "kirk-task", ThreadID: "kirk-42", ReplyTo: "inbox:braw-sender", NoReply: true})
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -452,6 +456,10 @@ func TestPublishStoresAllFields(t *testing.T) {
 		t.Errorf("ReplyTo = %q", msg.ReplyTo)
 	}
 
+	if !msg.NoReply {
+		t.Error("NoReply = false, want true")
+	}
+
 	msgs, _ := s.Read("blether", "", false, "")
 
 	m := msgs[0]
@@ -461,6 +469,10 @@ func TestPublishStoresAllFields(t *testing.T) {
 
 	if m.ThreadID != "kirk-42" || m.ReplyTo != "inbox:braw-sender" {
 		t.Errorf("thread/reply fields not persisted: %+v", m)
+	}
+
+	if !m.NoReply {
+		t.Errorf("no_reply not persisted: %+v", m)
 	}
 
 	if m.CreatedAt == "" {
@@ -484,6 +496,10 @@ func TestPublishEmptyThreadAndReplyStoreAsEmpty(t *testing.T) {
 
 	if msgs[0].ReplyTo != "" {
 		t.Errorf("ReplyTo = %q, want empty", msgs[0].ReplyTo)
+	}
+
+	if msgs[0].NoReply {
+		t.Error("NoReply = true, want false by default")
 	}
 }
 
@@ -1097,6 +1113,70 @@ func TestCleanupAfterUpgradePreservesHWM(t *testing.T) {
 
 	if unread[0].Body != "post-upgrade" {
 		t.Errorf("body = %q, want post-upgrade", unread[0].Body)
+	}
+}
+
+func TestNoReplySchemaMigrationPreservesExistingMessages(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "messages.sqlite")
+
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatalf("open pre-upgrade database: %v", err)
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE messages (
+			id TEXT PRIMARY KEY, seq INTEGER NOT NULL, stream TEXT NOT NULL,
+			sender_id TEXT NOT NULL, sender_name TEXT NOT NULL DEFAULT '',
+			body TEXT NOT NULL, thread_id TEXT, reply_to TEXT, created_at TEXT NOT NULL
+		);
+		INSERT INTO messages (id, seq, stream, sender_id, sender_name, body, created_at)
+		VALUES ('msg_auld', 1, 'blether', 'braw-sender', 'Braw', 'auld report', '2026-07-17T08:00:00Z');
+	`)
+	if err != nil {
+		_ = db.Close()
+
+		t.Fatalf("create pre-upgrade schema: %v", err)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("close pre-upgrade database: %v", err)
+	}
+
+	store, err := NewMsgStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewMsgStore migration: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	messages, err := store.Read("blether", "", false, "")
+	if err != nil {
+		t.Fatalf("read migrated message: %v", err)
+	}
+
+	if len(messages) != 1 {
+		t.Fatalf("got %d migrated messages, want 1", len(messages))
+	}
+
+	if messages[0].NoReply {
+		t.Error("pre-upgrade message became no-reply; absence must preserve replyable behavior")
+	}
+
+	if _, err := store.Publish(PublishOpts{
+		Stream: "blether", SenderID: "canny-sender", SenderName: "Canny",
+		Body: "new report", NoReply: true,
+	}); err != nil {
+		t.Fatalf("publish no-reply message after migration: %v", err)
+	}
+
+	messages, err = store.Read("blether", "", false, "")
+	if err != nil {
+		t.Fatalf("read after migration publish: %v", err)
+	}
+
+	if len(messages) != 2 || !messages[1].NoReply {
+		t.Fatalf("no-reply message not preserved after migration: %+v", messages)
 	}
 }
 

@@ -60,7 +60,7 @@ func handleMsgPub(sm *SessionManager, auth authContext, send func(string, any), 
 		return
 	}
 
-	published, err := sm.messages.Publish(PublishOpts{Stream: m.Stream, SenderID: m.SenderID, SenderName: m.SenderName, Body: m.Body, ThreadID: m.ThreadID, ReplyTo: m.ReplyTo})
+	published, err := sm.messages.Publish(PublishOpts{Stream: m.Stream, SenderID: m.SenderID, SenderName: m.SenderName, Body: m.Body, ThreadID: m.ThreadID, ReplyTo: m.ReplyTo, NoReply: m.NoReply})
 	if err != nil {
 		send("error", protocol.ErrorMsg{Message: err.Error()})
 
@@ -71,7 +71,7 @@ func handleMsgPub(sm *SessionManager, auth authContext, send func(string, any), 
 
 	if !m.Quiet {
 		if targetID, isInbox := parseInboxStream(m.Stream); isInbox {
-			go sm.notifyInbox(targetID, m.SenderID, m.SenderName)
+			go sm.notifyInbox(targetID, m.SenderID, m.SenderName, m.NoReply)
 		}
 	}
 }
@@ -167,6 +167,7 @@ func handleMsgConversation(sm *SessionManager, auth authContext, send func(strin
 			Body:       cm.Body,
 			ThreadID:   cm.ThreadID,
 			ReplyTo:    cm.ReplyTo,
+			NoReply:    cm.NoReply,
 			CreatedAt:  cm.CreatedAt,
 			System:     cm.System,
 		}

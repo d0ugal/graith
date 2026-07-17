@@ -24,6 +24,7 @@ type Message struct {
 	Body       string `json:"body"`
 	ThreadID   string `json:"thread_id,omitempty"`
 	ReplyTo    string `json:"reply_to,omitempty"`
+	NoReply    bool   `json:"no_reply,omitempty"`
 	CreatedAt  string `json:"created_at"`
 	// System marks a daemon-authored automated notification (PR/CI notices,
 	// etc.) as distinct from an LLM/session/human message. It is derived from
@@ -168,6 +169,7 @@ func initSchema(db *sql.DB) error {
 			body        TEXT NOT NULL,
 			thread_id   TEXT,
 			reply_to    TEXT,
+			no_reply    INTEGER NOT NULL DEFAULT 0,
 			created_at  TEXT NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS idx_messages_stream_seq ON messages(stream, seq);
@@ -231,7 +233,68 @@ func initSchema(db *sql.DB) error {
 		return fmt.Errorf("init messages schema: %w", err)
 	}
 
+	if err := ensureMessageNoReplyColumn(db); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// ensureMessageNoReplyColumn upgrades message databases created before issue
+// #1374. SQLite's CREATE TABLE IF NOT EXISTS does not add columns to an existing
+// table, so inspect the live shape and add the backward-compatible false default
+// explicitly. Existing messages therefore retain the historical replyable
+// behavior.
+func ensureMessageNoReplyColumn(db *sql.DB) error {
+	found, err := messageNoReplyColumnExists(db)
+	if err != nil {
+		return err
+	}
+
+	if found {
+		return nil
+	}
+
+	if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN no_reply INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("add messages no_reply column: %w", err)
+	}
+
+	return nil
+}
+
+func messageNoReplyColumnExists(db *sql.DB) (bool, error) {
+	rows, err := db.Query(`PRAGMA table_info(messages)`)
+	if err != nil {
+		return false, fmt.Errorf("inspect messages schema: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	found := false
+
+	for rows.Next() {
+		var (
+			cid          int
+			name         string
+			columnType   string
+			notNull      int
+			defaultValue sql.NullString
+			primaryKey   int
+		)
+
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return false, fmt.Errorf("scan messages schema: %w", err)
+		}
+
+		if name == "no_reply" {
+			found = true
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("inspect messages schema rows: %w", err)
+	}
+
+	return found, nil
 }
 
 func generateMsgID() string {
@@ -259,6 +322,8 @@ type PublishOpts struct {
 	ThreadID string
 	// ReplyTo is the stream this message replies to (optional).
 	ReplyTo string
+	// NoReply declares that the sender does not expect a reply.
+	NoReply bool
 }
 
 func (s *MsgStore) Publish(opts PublishOpts) (Message, error) {
@@ -268,6 +333,7 @@ func (s *MsgStore) Publish(opts PublishOpts) (Message, error) {
 	body := opts.Body
 	threadID := opts.ThreadID
 	replyTo := opts.ReplyTo
+	noReply := opts.NoReply
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -308,15 +374,16 @@ func (s *MsgStore) Publish(opts PublishOpts) (Message, error) {
 		Body:       body,
 		ThreadID:   threadID,
 		ReplyTo:    replyTo,
+		NoReply:    noReply,
 		CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
 		System:     isSystemSender(senderID),
 	}
 
 	_, err = tx.Exec(
-		`INSERT INTO messages (id, seq, stream, sender_id, sender_name, body, thread_id, reply_to, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO messages (id, seq, stream, sender_id, sender_name, body, thread_id, reply_to, no_reply, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		msg.ID, msg.Seq, msg.Stream, msg.SenderID, msg.SenderName, msg.Body,
-		nullStr(msg.ThreadID), nullStr(msg.ReplyTo), msg.CreatedAt,
+		nullStr(msg.ThreadID), nullStr(msg.ReplyTo), msg.NoReply, msg.CreatedAt,
 	)
 	if err != nil {
 		return Message{}, fmt.Errorf("insert message: %w", err)
@@ -344,7 +411,7 @@ func (s *MsgStore) Publish(opts PublishOpts) (Message, error) {
 func (s *MsgStore) Read(stream, subscriber string, onlyUnread bool, threadID string) ([]Message, error) {
 	var args []any
 
-	q := "SELECT id, seq, stream, sender_id, sender_name, body, COALESCE(thread_id, ''), COALESCE(reply_to, ''), created_at FROM messages WHERE stream = ?"
+	q := "SELECT id, seq, stream, sender_id, sender_name, body, COALESCE(thread_id, ''), COALESCE(reply_to, ''), no_reply, created_at FROM messages WHERE stream = ?"
 
 	args = append(args, stream)
 
@@ -375,7 +442,7 @@ func (s *MsgStore) Read(stream, subscriber string, onlyUnread bool, threadID str
 
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.Seq, &m.Stream, &m.SenderID, &m.SenderName, &m.Body, &m.ThreadID, &m.ReplyTo, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Seq, &m.Stream, &m.SenderID, &m.SenderName, &m.Body, &m.ThreadID, &m.ReplyTo, &m.NoReply, &m.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 
@@ -405,11 +472,12 @@ func (s *MsgStore) Conversation(self string, limit int) ([]Message, error) {
 	// could match both branches (it cannot here, because the outbound branch
 	// excludes self's own inbox). GLOB is case-sensitive so it can use the
 	// stream index, unlike LIKE which SQLite treats case-insensitively.
-	const cols = `id, seq, stream, sender_id, sender_name, body, thread_id, reply_to, created_at`
+	const cols = `id, seq, stream, sender_id, sender_name, body, thread_id, reply_to, no_reply, created_at`
 
 	inner := `
 		SELECT id, seq, stream, sender_id, sender_name, body,
-		       COALESCE(thread_id, '') AS thread_id, COALESCE(reply_to, '') AS reply_to, created_at
+		       COALESCE(thread_id, '') AS thread_id, COALESCE(reply_to, '') AS reply_to,
+		       no_reply, created_at
 		FROM messages
 		WHERE stream = ?
 		   OR (sender_id = ? AND stream GLOB 'inbox:*' AND stream <> ?)`
@@ -440,7 +508,7 @@ func (s *MsgStore) Conversation(self string, limit int) ([]Message, error) {
 
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.Seq, &m.Stream, &m.SenderID, &m.SenderName, &m.Body, &m.ThreadID, &m.ReplyTo, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Seq, &m.Stream, &m.SenderID, &m.SenderName, &m.Body, &m.ThreadID, &m.ReplyTo, &m.NoReply, &m.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan conversation message: %w", err)
 		}
 

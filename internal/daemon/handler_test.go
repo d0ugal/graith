@@ -1168,6 +1168,10 @@ func TestMsgPubInboxNotifiesTarget(t *testing.T) {
 		t.Errorf("notification should reference gr msg inbox command; got:\n%s", scrollback)
 	}
 
+	if !strings.Contains(scrollback, `Reply: gr msg send Ailsa "<reply>"`) {
+		t.Errorf("default session notification should offer a reply path; got:\n%s", scrollback)
+	}
+
 	// The hint must not carry the noisy --all flag: a fresh notification wants
 	// unread-only, not a dump of the whole (already-read) inbox history.
 	if strings.Contains(scrollback, "--all") {
@@ -1183,7 +1187,7 @@ func TestNotifyInboxSystemSenderOmitsReplyPath(t *testing.T) {
 	h := newTestHarness(t)
 	h.addPTYSession(t, "kirk-target", "kirk-session")
 
-	h.sm.notifyInbox("kirk-target", systemSenderID, systemSenderName)
+	h.sm.notifyInbox("kirk-target", systemSenderID, systemSenderName, false)
 
 	// The PTY write lands in scrollback via the async read loop.
 	time.Sleep(200 * time.Millisecond)
@@ -1215,6 +1219,51 @@ func TestNotifyInboxSystemSenderOmitsReplyPath(t *testing.T) {
 	}
 }
 
+func TestMsgPubInboxNoReplyOmitsReplyPath(t *testing.T) {
+	h := newTestHarness(t)
+	h.addPTYSession(t, "canny-target", "canny-session")
+
+	h.sendControl(t, "msg_pub", protocol.MsgPubMsg{
+		Stream:     "inbox:canny-target",
+		SenderID:   "glen-sender",
+		SenderName: "Morag",
+		Body:       "morning briefing complete",
+		NoReply:    true,
+	})
+
+	env := h.expectType(t, "msg_published")
+
+	var published Message
+	if err := protocol.DecodePayload(env, &published); err != nil {
+		t.Fatalf("decode msg_published: %v", err)
+	}
+
+	if !published.NoReply {
+		t.Error("published no_reply = false, want true")
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	ptySess, ok := h.sm.GetPTY("canny-target")
+	if !ok {
+		t.Fatal("target PTY session not found")
+	}
+
+	tail, err := ptySess.ScrollbackFile().Tail(500)
+	if err != nil {
+		t.Fatalf("scrollback tail: %v", err)
+	}
+
+	scrollback := string(tail)
+	if !strings.Contains(scrollback, "No reply expected") {
+		t.Errorf("no-reply notification missing expectation; got:\n%s", scrollback)
+	}
+
+	if strings.Contains(scrollback, "Reply: gr msg send") {
+		t.Errorf("no-reply notification should not offer a reply path; got:\n%s", scrollback)
+	}
+}
+
 func TestMsgPubInboxQuietSuppressesNotification(t *testing.T) {
 	h := newTestHarness(t)
 	h.addPTYSession(t, "wheesht1", "wheesht-session")
@@ -1224,10 +1273,20 @@ func TestMsgPubInboxQuietSuppressesNotification(t *testing.T) {
 		SenderID:   "sender",
 		SenderName: "Hamish",
 		Body:       "wheesht message",
+		NoReply:    true,
 		Quiet:      true,
 	})
 
-	h.expectType(t, "msg_published")
+	env := h.expectType(t, "msg_published")
+
+	var published Message
+	if err := protocol.DecodePayload(env, &published); err != nil {
+		t.Fatalf("decode msg_published: %v", err)
+	}
+
+	if !published.NoReply {
+		t.Error("quiet message should retain no_reply metadata")
+	}
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -2391,7 +2450,7 @@ func TestResumeForInbox_SkipsNonStoppedSession(t *testing.T) {
 	h := newTestHarness(t)
 	h.addPTYSession(t, "braw-running", "braw-session")
 
-	h.sm.notifyInbox("braw-running", "sender", "Sender")
+	h.sm.notifyInbox("braw-running", "sender", "Sender", false)
 
 	sess, ok := h.sm.Get("braw-running")
 	if !ok {
@@ -2407,7 +2466,7 @@ func TestResumeForInbox_SkipsMissingSession(t *testing.T) {
 	h := newTestHarness(t)
 
 	// Should not panic when session doesn't exist
-	h.sm.resumeForInbox("nonexistent", "sender", "Sender")
+	h.sm.resumeForInbox("nonexistent", "sender", "Sender", false)
 }
 
 func TestResumeForInbox_AttemptsResumeForStoppedSession(t *testing.T) {
@@ -2422,7 +2481,7 @@ func TestResumeForInbox_AttemptsResumeForStoppedSession(t *testing.T) {
 	}
 	h.sm.mu.Unlock()
 
-	h.sm.resumeForInbox("bide-stopped", "sender", "Sender")
+	h.sm.resumeForInbox("bide-stopped", "sender", "Sender", false)
 
 	sess, ok := h.sm.Get("bide-stopped")
 	if !ok {
@@ -3283,7 +3342,7 @@ func TestCoverMsgConversation(t *testing.T) {
 	h.sm.mu.Unlock()
 
 	// A message in the session's inbox should appear in its conversation.
-	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "inbox:blether-sess", SenderID: "glen-sender", SenderName: "Glen", Body: "haud on"})
+	_, _ = h.sm.messages.Publish(PublishOpts{Stream: "inbox:blether-sess", SenderID: "glen-sender", SenderName: "Glen", Body: "haud on", NoReply: true})
 
 	h.sendControl(t, "msg_conversation", protocol.MsgConversationMsg{SessionID: "blether-sess"})
 
@@ -3294,7 +3353,11 @@ func TestCoverMsgConversation(t *testing.T) {
 	_ = protocol.DecodePayload(env, &resp)
 
 	if len(resp.Messages) == 0 {
-		t.Error("expected at least one conversation message")
+		t.Fatal("expected at least one conversation message")
+	}
+
+	if !resp.Messages[0].NoReply {
+		t.Error("conversation response dropped no_reply metadata")
 	}
 }
 

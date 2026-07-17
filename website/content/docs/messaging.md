@@ -27,6 +27,7 @@ graith includes a SQLite-backed messaging system that enables communication betw
 ```bash
 gr msg pub --topic code-review "Found a race condition in handler.go:245"
 gr msg pub --topic build-results --file ./test-output.txt
+gr msg pub --topic updates --no-reply "Morning report is ready"
 ```
 
 Any session can publish to any topic. The sender is auto-detected from `GRAITH_SESSION_ID` and `GRAITH_SESSION_NAME`. When run outside a graith session, `sender_name` is empty and `sender_id` is set to `pid:<pid>` (the process ID).
@@ -37,9 +38,21 @@ Any session can publish to any topic. The sender is auto-detected from `GRAITH_S
 gr msg send fix-auth-bug "the tests are green now, rebase on main"
 gr msg send fix-auth-bug --file ./review-notes.md
 gr msg send fix-auth-bug --quiet "silent context update"
+gr msg send --no-reply --parent "Morning briefing complete"
 ```
 
 `send` writes to the target session's inbox stream (`inbox:<session-id>`) and types a notification into the session's PTY by default. Use `--quiet` to skip the PTY notification (the message is still delivered to the inbox).
+
+Use `--no-reply` for a one-way message. The message is delivered and resumes a
+stopped recipient normally, but recipient hints say **No reply expected** and do
+not suggest a reply command. The choice is stored with the message and appears
+as `"no_reply": true` in JSON output. It can also be used with topic publishes.
+
+`--no-reply`, `--reply-to`, and `--quiet` are independent. `--no-reply`
+describes whether a response is expected; `--reply-to` only supplies a route if
+someone does respond; `--quiet` suppresses the immediate PTY notification.
+Daemon-authored system notices have a separate automated identity and continue
+to omit reply suggestions without relying on `no_reply`.
 
 ### Tree messaging
 
@@ -133,9 +146,13 @@ In JSON output (`--json` or agent mode), messages have this structure:
   "sender_name": "fix-auth-bug",
   "thread_id": "",
   "reply_to": "",
+  "no_reply": true,
   "created_at": "2026-06-17T10:30:00Z"
 }
 ```
+
+`no_reply` is omitted when false, preserving the historical default that an
+ordinary session message is replyable.
 
 ## From the GUI
 

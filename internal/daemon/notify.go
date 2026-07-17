@@ -88,7 +88,7 @@ func (sm *SessionManager) notifyFromDaemon(sessionID, body string) error {
 		sm.log.Error("failed to publish daemon notification", "session", sessionID, "err", err)
 		return err
 	}
-	go sm.notifyInbox(sessionID, systemSenderID, systemSenderName)
+	go sm.notifyInbox(sessionID, systemSenderID, systemSenderName, false)
 
 	return nil
 }
@@ -98,27 +98,14 @@ func (sm *SessionManager) notifyFromDaemon(sessionID, body string) error {
 // auto-resumed first — the resume flow's notifyUnreadInbox handles the
 // notification in that case. This runs daemon-side so it bypasses the
 // per-session auth check on the "type" command.
-func (sm *SessionManager) notifyInbox(targetID, senderID, senderName string) {
+func (sm *SessionManager) notifyInbox(targetID, senderID, senderName string, noReply bool) {
 	ptySess, ok := sm.GetPTY(targetID)
 	if !ok {
-		sm.resumeForInbox(targetID, senderID, senderName)
+		sm.resumeForInbox(targetID, senderID, senderName, noReply)
 		return
 	}
 
-	sender := senderName
-	if sender == "" {
-		sender = senderID
-	}
-
-	// System notifications (PR/CI notices, etc.) are automated and not backed by
-	// an addressable session, so don't suggest a reply path that would fail with
-	// "no session named ..." — issue #887.
-	var hint string
-	if isSystemSender(senderID) {
-		hint = "System notice. Read: gr msg inbox --ack"
-	} else {
-		hint = fmt.Sprintf("New message from %s. Read: gr msg inbox --ack | Reply: gr msg send %s \"<reply>\"", sender, sender)
-	}
+	hint := inboxNotificationHint(senderID, senderName, noReply)
 
 	if sm.HasAttachedClient(targetID) {
 		timing := sm.Config().Notifications.Timing
@@ -132,9 +119,30 @@ func (sm *SessionManager) notifyInbox(targetID, senderID, senderName string) {
 	ptySess.Poke()
 }
 
+// inboxNotificationHint renders the immediate PTY hint for one inbox message.
+// System identity and explicit reply expectation are independent reasons to
+// omit the reply command: the former has no addressable sender, while the latter
+// records an ordinary sender's intent.
+func inboxNotificationHint(senderID, senderName string, noReply bool) string {
+	sender := senderName
+	if sender == "" {
+		sender = senderID
+	}
+
+	if isSystemSender(senderID) {
+		return "System notice. Read: gr msg inbox --ack"
+	}
+
+	if noReply {
+		return fmt.Sprintf("New message from %s. Read: gr msg inbox --ack | No reply expected", sender)
+	}
+
+	return fmt.Sprintf("New message from %s. Read: gr msg inbox --ack | Reply: gr msg send %s \"<reply>\"", sender, sender)
+}
+
 // resumeForInbox auto-resumes a stopped session when an inbox message arrives.
 // The resume flow calls notifyUnreadInbox which handles the PTY notification.
-func (sm *SessionManager) resumeForInbox(targetID, senderID, senderName string) {
+func (sm *SessionManager) resumeForInbox(targetID, senderID, senderName string, noReply bool) {
 	sess, ok := sm.Get(targetID)
 	if !ok || sess.Status != StatusStopped {
 		return
@@ -148,6 +156,8 @@ func (sm *SessionManager) resumeForInbox(targetID, senderID, senderName string) 
 	summary := "Resumed by inbox message from " + sender
 	if isSystemSender(senderID) {
 		summary = "Resumed by automated notification from " + sender
+	} else if noReply {
+		summary += " (no reply expected)"
 	}
 
 	sm.log.Info("auto-resuming stopped session on inbox message",
@@ -198,6 +208,14 @@ func (sm *SessionManager) notifyUnreadInbox(sessionID string) {
 	}
 
 	hint := fmt.Sprintf("You have %d unread inbox message(s). Read: gr msg inbox --ack", count)
+	if count == 1 {
+		messages, err := sm.messages.Read("inbox:"+sessionID, sessionID, true, "")
+		if err == nil && len(messages) == 1 {
+			m := messages[0]
+			hint = inboxNotificationHint(m.SenderID, m.SenderName, m.NoReply)
+		}
+	}
+
 	if err := ptySess.WriteInputAndSubmit([]byte(hint)); err != nil {
 		sm.log.Debug("unread inbox notification write failed", "session", sessionID, "err", err)
 	}

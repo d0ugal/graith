@@ -21,6 +21,7 @@ Publish a message to a stream.
 | `-f, --file <path>` | Read body from file |
 | `--thread <id>` | Thread ID to continue |
 | `--reply-to <stream>` | Stream for replies |
+| `--no-reply` | Declare that no reply is expected |
 
 ### `gr msg send <session> [body]`
 
@@ -31,6 +32,7 @@ Send a message to a session's inbox. By default, also types a notification into 
 | `-f, --file <path>` | Read body from file |
 | `--thread <id>` | Thread ID to continue |
 | `--reply-to <stream>` | Stream for replies |
+| `--no-reply` | Declare that no reply is expected |
 | `-q, --quiet` | Don't type a notification into the session |
 | `--children` | Send to all descendant sessions |
 | `--parent` | Send to the parent session |

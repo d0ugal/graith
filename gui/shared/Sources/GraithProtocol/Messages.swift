@@ -841,18 +841,21 @@ public struct MsgPubMsg: Codable, Sendable {
     public var senderName: String?
     public var threadID: String?
     public var replyTo: String?
+    /// When true, the sender does not expect a reply.
+    public var noReply: Bool?
     /// When true, don't type a notification into the target session.
     public var quiet: Bool?
 
     public init(stream: String, body: String, senderID: String? = nil,
                 senderName: String? = nil, threadID: String? = nil,
-                replyTo: String? = nil, quiet: Bool? = nil) {
+                replyTo: String? = nil, noReply: Bool? = nil, quiet: Bool? = nil) {
         self.stream = stream
         self.body = body
         self.senderID = senderID
         self.senderName = senderName
         self.threadID = threadID
         self.replyTo = replyTo
+        self.noReply = noReply
         self.quiet = quiet
     }
 
@@ -863,6 +866,7 @@ public struct MsgPubMsg: Codable, Sendable {
         case senderName = "sender_name"
         case threadID = "thread_id"
         case replyTo = "reply_to"
+        case noReply = "no_reply"
         case quiet
     }
 }
@@ -896,6 +900,8 @@ public struct ConversationMessage: Codable, Sendable, Identifiable, Hashable {
     public var body: String
     public var threadID: String?
     public var replyTo: String?
+    /// When true, the sender does not expect a reply.
+    public var noReply: Bool?
     public var createdAt: String
     /// Marks an automated daemon-authored notification (PR/CI notices) rather
     /// than a session/human message (issue #887).
@@ -903,7 +909,8 @@ public struct ConversationMessage: Codable, Sendable, Identifiable, Hashable {
 
     public init(id: String, seq: Int64, stream: String, senderID: String,
                 senderName: String? = nil, body: String, threadID: String? = nil,
-                replyTo: String? = nil, createdAt: String, system: Bool? = nil) {
+                replyTo: String? = nil, noReply: Bool? = nil,
+                createdAt: String, system: Bool? = nil) {
         self.id = id
         self.seq = seq
         self.stream = stream
@@ -912,6 +919,7 @@ public struct ConversationMessage: Codable, Sendable, Identifiable, Hashable {
         self.body = body
         self.threadID = threadID
         self.replyTo = replyTo
+        self.noReply = noReply
         self.createdAt = createdAt
         self.system = system
     }
@@ -925,6 +933,7 @@ public struct ConversationMessage: Codable, Sendable, Identifiable, Hashable {
         case body
         case threadID = "thread_id"
         case replyTo = "reply_to"
+        case noReply = "no_reply"
         case createdAt = "created_at"
         case system
     }

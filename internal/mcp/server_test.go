@@ -712,6 +712,7 @@ func TestPublishMessageWithThread(t *testing.T) {
 		Body:     "thread starter",
 		ThreadID: "thread-1",
 		ReplyTo:  "reply-topic",
+		NoReply:  true,
 	})
 	if err != nil {
 		t.Fatalf("publish threaded: %v", err)
@@ -719,6 +720,10 @@ func TestPublishMessageWithThread(t *testing.T) {
 
 	if pub.ID == "" {
 		t.Error("expected non-empty message ID")
+	}
+
+	if !pub.NoReply {
+		t.Error("publish output dropped no_reply")
 	}
 
 	_, msgs, err := env.srv.readMessages(ctx, &gomcp.CallToolRequest{}, ReadMessagesInput{
@@ -736,5 +741,9 @@ func TestPublishMessageWithThread(t *testing.T) {
 
 	if msgs.Messages[0].ThreadID != "thread-1" {
 		t.Errorf("thread_id = %q, want %q", msgs.Messages[0].ThreadID, "thread-1")
+	}
+
+	if !msgs.Messages[0].NoReply {
+		t.Error("message read dropped no_reply")
 	}
 }
