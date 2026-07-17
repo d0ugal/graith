@@ -246,6 +246,25 @@ func TestNewSessionManager(t *testing.T) {
 	}
 }
 
+func TestNewSessionManagerPRWatchKickChannelBoundary(t *testing.T) {
+	cfg := config.Default()
+	cfg.PRWatch.Advanced.KickChannelSize = config.PRWatchKickChannelSizeMax
+
+	sm := newSMWithConfig(t, cfg)
+	if got := cap(sm.prWatch.kick); got != config.PRWatchKickChannelSizeMax {
+		t.Errorf("kick channel capacity = %d, want accepted maximum %d", got, config.PRWatchKickChannelSizeMax)
+	}
+
+	// NewSessionManager is normally called with a validated loaded config, but
+	// direct construction must remain safe even when a caller skips validation.
+	cfg.PRWatch.Advanced.KickChannelSize = config.PRWatchKickChannelSizeMax + 1
+	sm = newSMWithConfig(t, cfg)
+
+	if got := cap(sm.prWatch.kick); got != config.PRWatchKickChannelSizeMax {
+		t.Errorf("defensive kick channel capacity = %d, want cap %d", got, config.PRWatchKickChannelSizeMax)
+	}
+}
+
 func TestRename(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		sm := newTestSessionManager(t)
