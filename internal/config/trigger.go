@@ -765,6 +765,11 @@ func validateGCX(where string, g *GCXConfig) []error {
 		errs = append(errs, fmt.Errorf("%s: [gcx] event %q is invalid (v1 supports %q)", where, g.Event, GCXEventOnCallAlertGroup))
 	}
 
+	durations := map[string]time.Duration{
+		"every": defaultGCXEvery, "timeout": defaultGCXTimeout, "max_age": defaultGCXMaxAge,
+	}
+	durationValid := map[string]bool{"every": true, "timeout": true, "max_age": true}
+
 	for _, field := range []struct{ name, raw string }{
 		{"every", g.Every}, {"timeout", g.Timeout}, {"max_age", g.MaxAge},
 	} {
@@ -774,10 +779,18 @@ func validateGCX(where string, g *GCXConfig) []error {
 
 		d, err := ParseDurationWithDays(field.raw)
 		if err != nil {
+			durationValid[field.name] = false
 			errs = append(errs, fmt.Errorf("%s: [gcx] %s %q: %w", where, field.name, field.raw, err))
 		} else if d <= 0 {
+			durationValid[field.name] = false
 			errs = append(errs, fmt.Errorf("%s: [gcx] %s must be > 0", where, field.name))
+		} else {
+			durations[field.name] = d
 		}
+	}
+
+	if durationValid["every"] && durationValid["max_age"] && durations["max_age"] < durations["every"] {
+		errs = append(errs, fmt.Errorf("%s: [gcx] max_age must be greater than or equal to every (otherwise active events can re-fire after cursor pruning)", where))
 	}
 
 	userSet := strings.TrimSpace(g.OnCallUserID) != ""

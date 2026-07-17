@@ -114,8 +114,10 @@ groups and marks the next on-call read for priming.
 
 For a normal read, the daemon computes IDs absent from the persisted seen map,
 updates last-observed times for the complete snapshot, prunes IDs not observed
-within `max_age`, and saves the whole cursor **before** invoking actions. If the
-save fails, nothing is dispatched. A crash after the save but before action
+within `max_age`, and saves the cursor **before** invoking actions. New IDs that
+cannot dispatch because of the rate limit or daemon-wide concurrency cap are
+excluded from that commit and retried by later complete polls. If the save
+fails, nothing is dispatched. A crash after the save but before action
 completion can miss an action but cannot duplicate it, matching the schedule
 source's existing at-most-once policy.
 
@@ -170,6 +172,8 @@ daemon neither primes nor advances the cursor, and records a trigger error that
 tells the operator to narrow filters or raise the limit. All gcx subprocesses
 have a timeout and inherit the gcx configuration environment; stdout alone is
 decoded as JSON, while bounded stderr is included in errors.
+`max_age` must be greater than or equal to `every` so cursor pruning cannot make
+a continuously returned event look new between polls.
 
 ### Proposal 2: Scheduled stateful helper
 

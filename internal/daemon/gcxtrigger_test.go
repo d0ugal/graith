@@ -372,6 +372,108 @@ func TestGCXTriggerReaddedDefinitionPrimes(t *testing.T) {
 	}
 }
 
+func TestCommitGCXSnapshotRequiresLiveBinding(t *testing.T) {
+	trig := gcxTestTrigger(false)
+	sm := newTriggerTestSM(t, trig)
+	sm.reconcileGCXBindings(sm.allTriggers(), time.Now())
+
+	fingerprint := triggerFingerprint(&trig)
+	sm.cfg.Triggers = nil
+	sm.reconcileGCXBindings(nil, time.Now())
+
+	// Simulate the narrow remove/re-add window before reconcile creates a fresh
+	// binding. An old in-flight poll must not restore the cleared cursor merely
+	// because the same definition is visible in config again.
+	sm.cfg.Triggers = []config.TriggerConfig{trig}
+
+	committed, err := sm.commitGCXSnapshot(trig.Name, fingerprint, map[string]time.Time{"AG-BRAW": time.Now()}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if committed {
+		t.Fatal("cursor committed without a live gcx binding")
+	}
+
+	if rt := sm.getTriggerRuntime(trig.Name); rt.LastGCXPollAt != nil || len(rt.GCXSeen) != 0 {
+		t.Fatalf("retired binding restored cursor: %+v", rt)
+	}
+}
+
+func TestGCXTriggerDefersEventsAtCapacity(t *testing.T) {
+	t.Run("rate limit", func(t *testing.T) {
+		trig := gcxTestTrigger(false)
+		trig.Policy.RateLimit = "1/1h"
+		sm := newTriggerTestSM(t, trig)
+		withMsgStore(t, sm)
+		sm.reconcileGCXBindings(sm.allTriggers(), time.Now())
+
+		sm.pollGCXTrigger(t.Context(), trig.Name, (&fakeGCX{alerts: [][]byte{gcxAlertsJSON(t, "AG-BRAW")}}).run)
+		sm.pollGCXTrigger(t.Context(), trig.Name, (&fakeGCX{alerts: [][]byte{gcxAlertsJSON(t, "AG-BRAW", "AG-CANNY", "AG-DREICH")}}).run)
+
+		rt := sm.getTriggerRuntime(trig.Name)
+		if rt.RunCount != 1 || len(rt.GCXSeen) != 2 {
+			t.Fatalf("first capacity-limited poll = %+v", rt)
+		}
+
+		if _, seen := rt.GCXSeen["AG-DREICH"]; seen {
+			t.Fatal("rate-limited event was advanced in the cursor")
+		}
+
+		sm.triggers.mu.Lock()
+		delete(sm.triggers.rateLog, trig.Name)
+		sm.triggers.mu.Unlock()
+
+		sm.pollGCXTrigger(t.Context(), trig.Name, (&fakeGCX{alerts: [][]byte{gcxAlertsJSON(t, "AG-BRAW", "AG-CANNY", "AG-DREICH")}}).run)
+
+		rt = sm.getTriggerRuntime(trig.Name)
+		if rt.RunCount != 2 || len(rt.GCXSeen) != 3 {
+			t.Fatalf("deferred event was not retried: %+v", rt)
+		}
+	})
+
+	t.Run("global concurrency", func(t *testing.T) {
+		trig := gcxTestTrigger(false)
+		sm := newTriggerTestSM(t, trig)
+		withMsgStore(t, sm)
+		sm.reconcileGCXBindings(sm.allTriggers(), time.Now())
+		sm.pollGCXTrigger(t.Context(), trig.Name, (&fakeGCX{alerts: [][]byte{gcxAlertsJSON(t, "AG-BRAW")}}).run)
+
+		sm.triggers.mu.Lock()
+		sm.triggers.running = sm.Config().TriggersRuntime.MaxConcurrentOr()
+		sm.triggers.mu.Unlock()
+
+		sm.pollGCXTrigger(t.Context(), trig.Name, (&fakeGCX{alerts: [][]byte{gcxAlertsJSON(t, "AG-BRAW", "AG-CANNY")}}).run)
+
+		if rt := sm.getTriggerRuntime(trig.Name); rt.RunCount != 0 || len(rt.GCXSeen) != 1 {
+			t.Fatalf("capacity-blocked event advanced: %+v", rt)
+		}
+
+		sm.triggers.mu.Lock()
+		sm.triggers.running = 0
+		sm.triggers.mu.Unlock()
+
+		sm.pollGCXTrigger(t.Context(), trig.Name, (&fakeGCX{alerts: [][]byte{gcxAlertsJSON(t, "AG-BRAW", "AG-CANNY")}}).run)
+
+		if rt := sm.getTriggerRuntime(trig.Name); rt.RunCount != 1 || len(rt.GCXSeen) != 2 {
+			t.Fatalf("capacity-deferred event was not retried: %+v", rt)
+		}
+	})
+}
+
+func TestGCXReactorSuffixDoesNotExposeExternalID(t *testing.T) {
+	unsafeID := "AG ../dreich:~^"
+	got := gcxReactorSuffix(unsafeID)
+
+	if strings.Contains(got, unsafeID) || strings.ContainsAny(got, " /:~^") {
+		t.Fatalf("unsafe reactor suffix %q", got)
+	}
+
+	if got == gcxReactorSuffix("AG-CANNY") {
+		t.Fatal("different event IDs produced the same test suffix")
+	}
+}
+
 func TestGCXGateErrorForcesNextPrime(t *testing.T) {
 	trig := gcxTestTrigger(true)
 	sm := newTriggerTestSM(t, trig)

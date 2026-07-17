@@ -14,6 +14,10 @@ import (
 // State.TriggerRuntime; everything here is derived and rebuilt on start/reload.
 type triggerState struct {
 	mu sync.Mutex
+	// gcxCommit serializes durable gcx cursor commits with binding removal. It
+	// prevents an in-flight poll from restoring a cursor after the source was
+	// intentionally disabled or removed.
+	gcxCommit sync.Mutex
 
 	// schedule source (keyed by trigger name)
 	cron     map[string]cronx.Schedule // parsed cron schedule (cron triggers only)

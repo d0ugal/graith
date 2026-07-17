@@ -589,9 +589,9 @@ func watchBuiltinFingerprint(ignores []string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// rateLimited reports whether the key has exceeded its rolling rate limit, and
-// records the fire if not. Caller must NOT hold ts.mu.
-func (sm *SessionManager) rateLimited(key string, n int, window time.Duration, now time.Time) bool {
+// reserveRateSlots reserves up to wanted entries in a key's rolling rate
+// window. Caller must NOT hold ts.mu.
+func (sm *SessionManager) reserveRateSlots(key string, n int, window time.Duration, now time.Time, wanted int) int {
 	sm.triggers.mu.Lock()
 	defer sm.triggers.mu.Unlock()
 
@@ -605,14 +605,48 @@ func (sm *SessionManager) rateLimited(key string, n int, window time.Duration, n
 		}
 	}
 
-	if len(recent) >= n {
+	available := n - len(recent)
+	if available <= 0 || wanted <= 0 {
 		sm.triggers.rateLog[key] = recent
-		return true
+		return 0
 	}
 
-	sm.triggers.rateLog[key] = append(recent, now)
+	reserved := min(available, wanted)
+	for range reserved {
+		recent = append(recent, now)
+	}
 
-	return false
+	sm.triggers.rateLog[key] = recent
+
+	return reserved
+}
+
+// releaseRateSlots rolls back the most recent reservations for key. GCX uses
+// this before dispatch when a cursor commit or capacity reservation fails; its
+// per-source poll serialization guarantees no same-key reservation interleaves.
+func (sm *SessionManager) releaseRateSlots(key string, count int) {
+	if count <= 0 {
+		return
+	}
+
+	sm.triggers.mu.Lock()
+	defer sm.triggers.mu.Unlock()
+
+	entries := sm.triggers.rateLog[key]
+	count = min(count, len(entries))
+	entries = entries[:len(entries)-count]
+
+	if len(entries) == 0 {
+		delete(sm.triggers.rateLog, key)
+	} else {
+		sm.triggers.rateLog[key] = entries
+	}
+}
+
+// rateLimited reports whether the key has exceeded its rolling rate limit, and
+// records the fire if not. Caller must NOT hold ts.mu.
+func (sm *SessionManager) rateLimited(key string, n int, window time.Duration, now time.Time) bool {
+	return sm.reserveRateSlots(key, n, window, now, 1) == 0
 }
 
 // deliverStorePath resolves the store dir + key for a deliver.store value. A
