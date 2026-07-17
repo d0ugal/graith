@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/d0ugal/graith/internal/atomicfile"
 	"github.com/d0ugal/graith/internal/config"
 )
 
@@ -628,6 +631,23 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, yolo
 	}
 
 	hooksPath := filepath.Join(cursorDir, "hooks.json")
+	existing, statErr := os.ReadFile(hooksPath)
+
+	var existingHash string
+	if statErr == nil {
+		existingHash = sha256Hex(existing)
+
+		recorded, markerErr := os.ReadFile(sm.cursorHooksOwnershipPath(sessionID))
+		if markerErr != nil {
+			return nil, nil, fmt.Errorf("refusing to overwrite %s: not owned by this graith session; move it aside to use Cursor hooks: %w", hooksPath, markerErr)
+		}
+
+		if !strings.EqualFold(strings.TrimSpace(string(recorded)), existingHash) {
+			return nil, nil, fmt.Errorf("refusing to overwrite %s: it was modified since graith wrote it; move it aside to re-enable Cursor hooks", hooksPath)
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return nil, nil, fmt.Errorf("read existing cursor hooks: %w", statErr)
+	}
 
 	quoted := shellQuote(resolveGrBin())
 
@@ -667,13 +687,326 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, yolo
 		return nil, nil, fmt.Errorf("marshal cursor hooks: %w", err)
 	}
 
-	if err := os.WriteFile(hooksPath, data, 0o600); err != nil {
-		return nil, nil, fmt.Errorf("write cursor hooks: %w", err)
+	if statErr == nil && existingHash == sha256Hex(data) {
+		return nil, nil, nil
+	}
+
+	if err := sm.publishCursorHooks(hooksPath, data, existingHash); err != nil {
+		return nil, nil, fmt.Errorf("publish cursor hooks: %w", err)
+	}
+
+	// Record ownership only after the target has been published. If this write
+	// fails, cleanup has no matching marker and therefore preserves the target;
+	// it can leak a graith-generated file, but can never turn a failed publish
+	// into authority to remove user content.
+	if err := sm.recordCursorHooksOwnership(sessionID, data); err != nil {
+		return nil, nil, fmt.Errorf("record cursor hooks ownership: %w", err)
 	}
 
 	sm.log.Info("injected cursor hooks", "session_id", sessionID, "hooks_path", hooksPath)
 
 	return nil, nil, nil
+}
+
+// cursorHooksOwnershipPath is the marker graith writes when it generates a
+// Cursor hooks.json for a session. It lives in graith's per-session data dir,
+// outside the user's worktree, and contains the SHA-256 of the exact bytes
+// graith published.
+func (sm *SessionManager) cursorHooksOwnershipPath(sessionID string) string {
+	return filepath.Join(sm.hookDir(sessionID), "cursor_hooks_owned")
+}
+
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+
+	return hex.EncodeToString(sum[:])
+}
+
+func (sm *SessionManager) recordCursorHooksOwnership(sessionID string, data []byte) error {
+	if err := atomicfile.Write(sm.cursorHooksOwnershipPath(sessionID), []byte(sha256Hex(data)), 0o600); err != nil {
+		return fmt.Errorf("write cursor hooks ownership marker: %w", err)
+	}
+
+	return nil
+}
+
+type cursorHooksRacePoint uint8
+
+const (
+	cursorHooksBeforeCreate cursorHooksRacePoint = iota
+	cursorHooksBeforeClaim
+	cursorHooksAfterClaim
+)
+
+// cursorHooksRaceHook is a deterministic test seam at the pathname boundaries
+// guarded below. Production leaves it nil.
+var cursorHooksRaceHook func(cursorHooksRacePoint)
+
+var errCursorHooksRaced = errors.New("cursor hooks.json was concurrently replaced; refusing to overwrite user content")
+
+// stageCursorHooks creates a fully written, synced file next to hooksPath. The
+// staged inode can then be linked into place with no-replace semantics.
+func stageCursorHooks(hooksPath string, data []byte) (path string, err error) {
+	f, err := os.CreateTemp(filepath.Dir(hooksPath), "hooks.json.graith-stage-*")
+	if err != nil {
+		return "", fmt.Errorf("create cursor hooks stage: %w", err)
+	}
+
+	path = f.Name()
+
+	defer func() {
+		if err != nil {
+			_ = f.Close()
+			_ = os.Remove(path)
+		}
+	}()
+
+	if err = f.Chmod(0o600); err != nil {
+		return "", fmt.Errorf("chmod cursor hooks stage: %w", err)
+	}
+
+	n, writeErr := f.Write(data)
+	if writeErr != nil {
+		return "", fmt.Errorf("write cursor hooks stage: %w", writeErr)
+	}
+
+	if n != len(data) {
+		return "", fmt.Errorf("write cursor hooks stage: short write (%d of %d bytes)", n, len(data))
+	}
+
+	if err = f.Sync(); err != nil {
+		return "", fmt.Errorf("sync cursor hooks stage: %w", err)
+	}
+
+	if err = f.Close(); err != nil {
+		return "", fmt.Errorf("close cursor hooks stage: %w", err)
+	}
+
+	return path, nil
+}
+
+// reserveCursorQuarantine creates a private, uniquely named directory next to
+// hooks.json and returns a nonexistent child pathname inside it. Renaming the
+// public path to that child never relies on platform-specific replacement
+// semantics and cannot overwrite a pre-existing user file or stale sidecar.
+func reserveCursorQuarantine(dir, kind string) (string, error) {
+	quarantineDir, err := os.MkdirTemp(dir, "hooks.json.graith-"+kind+"-*")
+	if err != nil {
+		return "", fmt.Errorf("reserve cursor %s quarantine: %w", kind, err)
+	}
+
+	return filepath.Join(quarantineDir, "hooks.json"), nil
+}
+
+func runCursorHooksRaceHook(point cursorHooksRacePoint) {
+	if cursorHooksRaceHook != nil {
+		cursorHooksRaceHook(point)
+	}
+}
+
+func syncCursorHooksDir(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+
+	err = dir.Sync()
+	_ = dir.Close()
+
+	return err
+}
+
+// publishCursorHooks publishes data without ever overwriting hooksPath. A first
+// publish uses an exclusive hard link. A replacement first moves the current
+// pathname aside and verifies the moved object before linking the staged file,
+// so the hash check and pathname mutation apply to the same file object.
+func (sm *SessionManager) publishCursorHooks(hooksPath string, data []byte, expectedHash string) error {
+	stage, err := stageCursorHooks(hooksPath, data)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(stage) }()
+
+	if expectedHash == "" {
+		runCursorHooksRaceHook(cursorHooksBeforeCreate)
+
+		if err := os.Link(stage, hooksPath); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				return errCursorHooksRaced
+			}
+
+			return fmt.Errorf("link cursor hooks: %w", err)
+		}
+
+		if err := syncCursorHooksDir(filepath.Dir(hooksPath)); err != nil {
+			return fmt.Errorf("sync published cursor hooks: %w", err)
+		}
+
+		return nil
+	}
+
+	claimed, err := claimCursorHooks(hooksPath)
+	if err != nil {
+		return err
+	}
+
+	claimedData, err := readClaimedCursorHooks(claimed)
+	if err != nil {
+		if restoreErr := restoreCursorClaim(claimed, hooksPath); restoreErr != nil {
+			return fmt.Errorf("verify claimed cursor hooks: %w (restore failed: %w)", err, restoreErr)
+		}
+
+		return fmt.Errorf("verify claimed cursor hooks: %w", err)
+	}
+
+	if !strings.EqualFold(sha256Hex(claimedData), expectedHash) {
+		if restoreErr := restoreCursorClaim(claimed, hooksPath); restoreErr != nil {
+			return fmt.Errorf("%w (restore failed: %w)", errCursorHooksRaced, restoreErr)
+		}
+
+		return errCursorHooksRaced
+	}
+
+	runCursorHooksRaceHook(cursorHooksAfterClaim)
+
+	if err := os.Link(stage, hooksPath); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			// The claimed file is the old graith-owned artifact. A newcomer at the
+			// public path is left untouched; the old private link can be discarded.
+			_ = removeCursorClaim(claimed)
+
+			return errCursorHooksRaced
+		}
+
+		if restoreErr := restoreCursorClaim(claimed, hooksPath); restoreErr != nil {
+			return fmt.Errorf("link cursor hooks: %w (restore failed: %w)", err, restoreErr)
+		}
+
+		return fmt.Errorf("link cursor hooks: %w", err)
+	}
+
+	_ = removeCursorClaim(claimed)
+
+	if err := syncCursorHooksDir(filepath.Dir(hooksPath)); err != nil {
+		return fmt.Errorf("sync published cursor hooks: %w", err)
+	}
+
+	return nil
+}
+
+// claimCursorHooks atomically moves the current pathname into a uniquely
+// reserved quarantine. The moved object is then stable for verification.
+func claimCursorHooks(hooksPath string) (string, error) {
+	quarantine, err := reserveCursorQuarantine(filepath.Dir(hooksPath), "claim")
+	if err != nil {
+		return "", err
+	}
+
+	runCursorHooksRaceHook(cursorHooksBeforeClaim)
+
+	if err := os.Rename(hooksPath, quarantine); err != nil {
+		// Remove only the directory graith created, and only if it is still empty.
+		// If another process somehow populated the unpredictable child path, its
+		// content is preserved.
+		_ = os.Remove(filepath.Dir(quarantine))
+
+		if errors.Is(err, os.ErrNotExist) {
+			return "", errCursorHooksRaced
+		}
+
+		return "", fmt.Errorf("claim cursor hooks: %w", err)
+	}
+
+	return quarantine, nil
+}
+
+func readClaimedCursorHooks(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("claimed cursor hooks is not a regular file")
+	}
+
+	return os.ReadFile(path)
+}
+
+// restoreCursorClaim restores a quarantined file without overwriting anything
+// that appeared at hooksPath meanwhile. If the public path is occupied, the
+// quarantined file stays at its unique sidecar path so both files are preserved.
+func restoreCursorClaim(quarantine, hooksPath string) error {
+	if err := os.Link(quarantine, hooksPath); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("cursor hooks path is occupied; claimed content preserved at %s", quarantine)
+		}
+
+		return fmt.Errorf("restore cursor hooks from %s: %w", quarantine, err)
+	}
+
+	if err := os.Remove(quarantine); err != nil {
+		return fmt.Errorf("remove restored cursor hooks sidecar: %w", err)
+	}
+
+	_ = os.Remove(filepath.Dir(quarantine))
+
+	return nil
+}
+
+func removeCursorClaim(quarantine string) error {
+	err := os.Remove(quarantine)
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		_ = os.Remove(filepath.Dir(quarantine))
+	}
+
+	return err
+}
+
+// removeGeneratedCursorHooks removes only the exact regular file object whose
+// bytes match this session's ownership marker. Markerless, unreadable, modified,
+// or concurrently replaced files are preserved.
+func (sm *SessionManager) removeGeneratedCursorHooks(sessionID, worktreePath string) {
+	if worktreePath == "" {
+		return
+	}
+
+	recorded, err := os.ReadFile(sm.cursorHooksOwnershipPath(sessionID))
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			sm.log.Warn("cursor hooks ownership marker unreadable; leaving hooks in place", "session_id", sessionID, "err", err)
+		}
+
+		return
+	}
+
+	hooksPath := filepath.Join(worktreePath, ".cursor", "hooks.json")
+
+	claimed, err := claimCursorHooks(hooksPath)
+	if err != nil {
+		if !errors.Is(err, errCursorHooksRaced) {
+			sm.log.Warn("failed to claim cursor hooks for cleanup", "session_id", sessionID, "err", err)
+		}
+
+		return
+	}
+
+	runCursorHooksRaceHook(cursorHooksAfterClaim)
+
+	claimedData, err := readClaimedCursorHooks(claimed)
+	if err != nil || !strings.EqualFold(strings.TrimSpace(string(recorded)), sha256Hex(claimedData)) {
+		if restoreErr := restoreCursorClaim(claimed, hooksPath); restoreErr != nil {
+			sm.log.Warn("cursor hooks ownership changed during cleanup; content preserved in quarantine", "session_id", sessionID, "err", restoreErr)
+		} else {
+			sm.log.Info("leaving modified cursor hooks in place", "session_id", sessionID, "path", hooksPath)
+		}
+
+		return
+	}
+
+	if err := removeCursorClaim(claimed); err != nil && !errors.Is(err, os.ErrNotExist) {
+		sm.log.Warn("failed to remove cursor hooks", "session_id", sessionID, "err", err)
+	}
 }
 
 // injectHooks dispatches lifecycle-hook injection to the agent-specific
@@ -694,18 +1027,17 @@ func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string,
 	}
 }
 
-// cleanupHooks removes generated hook files for a session.
-// For cursor sessions, also removes .cursor/hooks.json and the graith rule
-// from the worktree since they're not in the data dir.
+// cleanupHooks removes generated hook files for a session. For Cursor sessions,
+// it removes .cursor/hooks.json only after proving ownership of the exact file
+// object at the pathname, then removes the graith rule from the worktree.
 func (sm *SessionManager) cleanupHooks(sessionID, agentName, worktreePath string) {
+	if agentName == "cursor" {
+		sm.removeGeneratedCursorHooks(sessionID, worktreePath)
+	}
+
 	dir := sm.hookDir(sessionID)
 	if err := os.RemoveAll(dir); err != nil {
 		sm.log.Warn("failed to cleanup hooks", "session_id", sessionID, "err", err)
-	}
-
-	if agentName == "cursor" && worktreePath != "" {
-		hooksPath := filepath.Join(worktreePath, ".cursor", "hooks.json")
-		_ = os.Remove(hooksPath)
 	}
 
 	cleanupCursorRule(worktreePath)

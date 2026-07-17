@@ -254,6 +254,14 @@ validate_model = "agent --list-models"
 add_dir_args   = ["--add-dir", "{dir}"]
 ```
 
+When lifecycle hooks are enabled, graith publishes `.cursor/hooks.json` in the
+worktree and records an ownership marker in its per-session data. An existing
+file that graith does not own causes the session launch to fail instead of being
+overwritten; move that file aside before retrying. Cleanup removes only the
+unchanged file object graith published, so a file you edit or replace is
+preserved. This protection applies equally to ordinary and `--in-place`
+sessions.
+
 ### Agy
 
 ```toml
