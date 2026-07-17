@@ -44,7 +44,7 @@ ref_debounce                   = "750ms"  # coalesce a burst of ref writes from 
 gh_timeout                     = "5s"     # per-command timeout for the daemon's gh invocations (PR watch + tracker poll)
 ```
 
-The loop-lifetime knobs — `base_tick`, `kick_channel_size`, and `ref_reconcile_interval` — are read when the daemon starts, so changing them takes effect on the next daemon restart; the rest apply on the next poll.
+The loop-lifetime knobs — `base_tick`, `kick_channel_size`, and `ref_reconcile_interval` — are read when the daemon starts, so changing them takes effect on the next daemon restart. Other policy settings are read live when their corresponding work occurs. In particular, `ref_debounce` is read whenever an existing git-ref watcher arms or re-arms its timer. A timer already pending during a reload keeps the duration it was armed with and still fires, so the policy change does not discard the pending ref event.
 
 The cadence knobs `base_tick` and `ref_reconcile_interval` pace daemon loop timers, so a `"0"`, `"0s"`, negative, or unparseable value falls back to the default shown rather than being applied.
 
