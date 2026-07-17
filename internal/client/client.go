@@ -112,16 +112,18 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 		if hsOk.DaemonVersion != "" && hsOk.DaemonVersion != version.Version && version.IsNewer(version.Version, hsOk.DaemonVersion) {
 			fmt.Fprintf(os.Stderr, "Daemon version mismatch (daemon=%s, cli=%s), upgrading daemon...\n", hsOk.DaemonVersion, version.Version)
 
+			// Capture the daemon's pre-upgrade instance ID so readiness can prove
+			// the NEW generation is serving, not the inherited listener (#1319).
+			priorInstanceID := hsOk.DaemonInstanceID
+
 			if requestUpgrade(c) {
 				c.Close()
 
-				if waitForDaemon(paths.SocketPath) {
-					if v := probeDaemonVersion(paths.SocketPath, paths); v == version.Version {
-						return connect(cfg, paths, configFile, false)
-					}
-
-					fmt.Fprintf(os.Stderr, "Exec upgrade did not produce correct version, falling back to clean restart...\n")
+				if waitForNewDaemonGeneration(paths.SocketPath, paths, version.Version, priorInstanceID) {
+					return connect(cfg, paths, configFile, false)
 				}
+
+				fmt.Fprintf(os.Stderr, "Exec upgrade did not produce a new daemon generation, falling back to clean restart...\n")
 			} else {
 				c.Close()
 			}
@@ -142,16 +144,29 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 	return c, nil
 }
 
-func probeDaemonVersion(sockPath string, paths config.Paths) string {
-	conn, err := net.DialTimeout("unix", sockPath, daemonDialTimeout)
+// probeDaemonIdentity handshakes the daemon at sockPath and returns its reported
+// version and per-process instance ID. Empty strings mean the daemon was
+// unreachable, didn't reply, or (for the instance ID) predates that field. The
+// dial and handshake use their own policies, each capped at the remaining
+// aggregate readiness budget so a stalled socket can't overrun it (#1319).
+func probeDaemonIdentity(sockPath string, paths config.Paths, aggregateDeadline time.Time) (daemonVersion, instanceID string) {
+	conn, err := dialLocalDaemonBefore("unix", sockPath, daemonDialTimeout, aggregateDeadline)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	defer func() { _ = conn.Close() }()
 
 	// Bound the handshake so a stale/foreign socket that accepts but never
-	// replies can't hang the auto-upgrade version probe forever (issue #260).
-	_ = conn.SetDeadline(time.Now().Add(daemonHandshakeTimeout))
+	// replies can't hang the auto-upgrade version probe forever (issue #260),
+	// capped at the remaining startup budget (issue #1319).
+	handshakeDeadline, ok := localOperationDeadline(aggregateDeadline, daemonHandshakeTimeout)
+	if !ok {
+		return "", ""
+	}
+
+	if err := conn.SetDeadline(handshakeDeadline); err != nil {
+		return "", ""
+	}
 
 	reader := protocol.NewFrameReader(conn)
 	writer := protocol.NewFrameWriter(conn)
@@ -172,17 +187,32 @@ func probeDaemonVersion(sockPath string, paths config.Paths) string {
 
 	frame, err := reader.ReadFrame()
 	if err != nil || frame.Channel != protocol.ChannelControl {
-		return ""
+		return "", ""
 	}
 
 	env, _ := protocol.DecodeControl(frame.Payload)
 
 	var hsOk protocol.HandshakeOkMsg
 	if err := protocol.DecodePayload(env, &hsOk); err != nil {
-		return ""
+		return "", ""
 	}
 
-	return hsOk.DaemonVersion
+	return hsOk.DaemonVersion, hsOk.DaemonInstanceID
+}
+
+// waitForNewDaemonGeneration polls until the daemon reports the wanted version
+// AND a boot instance ID different from priorInstanceID (the one observed before
+// the upgrade was requested). An exec upgrade preserves the inherited listening
+// socket and can keep the same version string (a same-version rebuild), so a
+// bare dial — or even a version match — cannot distinguish the old daemon from
+// the new one; only a changed instance ID proves the replacement generation is
+// actually serving (issue #1319). Bounded by the effective start policy.
+func waitForNewDaemonGeneration(sockPath string, paths config.Paths, wantVersion, priorInstanceID string) bool {
+	return pollDaemonReady(func(deadline time.Time) bool {
+		v, id := probeDaemonIdentity(sockPath, paths, deadline)
+
+		return v == wantVersion && id != "" && id != priorInstanceID
+	})
 }
 
 func requestUpgrade(c *Client) bool {
@@ -201,17 +231,42 @@ func requestUpgrade(c *Client) bool {
 	return true
 }
 
-func waitForDaemon(sockPath string) bool {
-	for range 20 {
-		time.Sleep(250 * time.Millisecond)
+// pollDaemonReady polls ready at daemonStartPollInterval until it returns true
+// or the daemonStartTimeout budget elapses, checking once before the first sleep
+// so an already-ready daemon returns immediately. It shares the effective
+// [connection] start policy (start_timeout / start_poll_interval) with
+// EnsureDaemon so post-exec readiness and stop/socket-disappearance lifecycle
+// waits honour a configured startup allowance instead of a fixed retry count
+// (issue #1319). The absolute aggregate deadline is passed into ready so each
+// dial and handshake can cap its distinct operation policy at the remaining
+// startup budget.
+func pollDaemonReady(ready func(deadline time.Time) bool) bool {
+	deadline := time.Now().Add(daemonStartTimeout)
 
-		if conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond); err == nil {
-			_ = conn.Close()
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false
+		}
+
+		if ready(deadline) {
 			return true
 		}
-	}
 
-	return false
+		remaining = time.Until(deadline)
+		if remaining <= 0 {
+			return false
+		}
+
+		// Cap the sleep to the remaining budget so a poll interval larger than the
+		// start timeout can't overshoot the aggregate deadline (#1319 review).
+		sleep := daemonStartPollInterval
+		if sleep > remaining {
+			sleep = remaining
+		}
+
+		time.Sleep(sleep)
+	}
 }
 
 func stopDaemonByPID(pidFile string) bool {
@@ -230,25 +285,25 @@ func stopDaemonByPID(pidFile string) bool {
 	}
 
 	_ = syscall.Kill(pid, syscall.SIGTERM)
-	for range 50 {
-		if syscall.Kill(pid, 0) != nil {
-			return true
-		}
 
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	return false
+	// Wait for the process to actually exit, bounded by the same effective start
+	// policy as the other lifecycle waits rather than a fixed 50×100ms retry
+	// count (issue #1319).
+	return pollDaemonReady(func(time.Time) bool {
+		return syscall.Kill(pid, 0) != nil
+	})
 }
 
+// waitForSocketGone waits for a stopped daemon's socket to disappear, bounded by
+// the effective start policy rather than a fixed 20×100ms retry count (issue
+// #1319). It is best-effort: it returns once the socket is gone or the budget
+// elapses.
 func waitForSocketGone(sockPath string) {
-	for range 20 {
-		if _, err := os.Stat(sockPath); os.IsNotExist(err) {
-			return
-		}
+	_ = pollDaemonReady(func(time.Time) bool {
+		_, err := os.Stat(sockPath)
 
-		time.Sleep(100 * time.Millisecond)
-	}
+		return os.IsNotExist(err)
+	})
 }
 
 // ConnectFast is a fast-path connect for hooks. It dials the daemon socket
@@ -476,6 +531,13 @@ func (c *Client) ReadFrame() (protocol.Frame, error) {
 // indefinitely.
 func (c *Client) SetReadDeadline(t time.Time) error {
 	return c.conn.SetReadDeadline(t)
+}
+
+// SetDeadline sets the read/write deadline on the underlying connection. A zero
+// time clears it. The CLI exec-upgrade path uses this to bound its raw handshake
+// + upgrade exchange (issue #1319).
+func (c *Client) SetDeadline(t time.Time) error {
+	return c.conn.SetDeadline(t)
 }
 
 func (c *Client) ReadControlResponse() (protocol.Envelope, error) {

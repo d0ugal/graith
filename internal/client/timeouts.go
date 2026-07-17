@@ -1,6 +1,51 @@
 package client
 
-import "time"
+import (
+	"context"
+	"net"
+	"time"
+)
+
+// dialLocalDaemon dials the local daemon Unix socket. It is a package var (not a
+// direct net.DialTimeout call) so tests can observe the timeout the readiness
+// paths pass and drive the generation-aware upgrade probes against a scripted
+// connection (issue #1319).
+var dialLocalDaemon = net.DialTimeout
+
+// localOperationDeadline caps one dial/handshake policy at an aggregate
+// readiness deadline. The policies remain distinct, but neither operation may
+// outlive the remaining startup budget, so a socket that accepts and then stalls
+// can't overrun start_timeout (issue #1319).
+func localOperationDeadline(aggregate time.Time, operationTimeout time.Duration) (time.Time, bool) {
+	now := time.Now()
+	if !aggregate.After(now) {
+		return time.Time{}, false
+	}
+
+	operation := now.Add(operationTimeout)
+	if aggregate.Before(operation) {
+		return aggregate, true
+	}
+
+	return operation, true
+}
+
+// dialLocalDaemonBefore dials with the smaller of operationTimeout and the time
+// remaining until the aggregate deadline, so a readiness dial never outlives the
+// startup budget (issue #1319).
+func dialLocalDaemonBefore(network, address string, operationTimeout time.Duration, aggregate time.Time) (net.Conn, error) {
+	deadline, ok := localOperationDeadline(aggregate, operationTimeout)
+	if !ok {
+		return nil, context.DeadlineExceeded
+	}
+
+	timeout := time.Until(deadline)
+	if timeout <= 0 {
+		return nil, context.DeadlineExceeded
+	}
+
+	return dialLocalDaemon(network, address, timeout)
+}
 
 // Connection deadlines and retry cadence for talking to a daemon (issue #1242).
 // These are package vars rather than consts so ConfigureConnection can install
@@ -9,7 +54,7 @@ import "time"
 // was hard-coded before the [connection] config block existed.
 var (
 	// Local daemon (Unix socket): used by EnsureDaemon, daemonResponds,
-	// probeDaemonVersion, and the connect handshake in client.go.
+	// probeDaemonIdentity, and the connect handshake in client.go.
 	daemonDialTimeout       = 500 * time.Millisecond
 	daemonHandshakeTimeout  = 5 * time.Second
 	daemonStartTimeout      = 5 * time.Second

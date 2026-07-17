@@ -253,8 +253,9 @@ type ConnectionConfig struct {
 	// HandshakeTimeout bounds the local-daemon handshake exchange, so a stale
 	// or wedged socket can't hang a command forever (default "5s").
 	HandshakeTimeout string `toml:"handshake_timeout"`
-	// StartTimeout bounds how long EnsureDaemon waits for a freshly spawned
-	// daemon to begin answering handshakes (default "5s").
+	// StartTimeout is the aggregate bound while EnsureDaemon waits for a freshly
+	// spawned daemon to begin answering handshakes (default "5s"). Individual
+	// dial/handshake policies are capped at the time remaining.
 	StartTimeout string `toml:"start_timeout"`
 	// StartPollInterval is how often EnsureDaemon re-probes the socket while
 	// waiting for a spawned daemon to come up (default "50ms").

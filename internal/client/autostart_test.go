@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -506,6 +507,70 @@ func TestEnsureDaemonStartsFreshWhenSocketStale(t *testing.T) {
 	// daemon's Listen, which unlinks before binding.
 	if _, statErr := os.Stat(sockPath); statErr != nil {
 		t.Fatalf("expected EnsureDaemon to leave the socket file untouched, stat err = %v", statErr)
+	}
+}
+
+// A started daemon socket may accept the readiness connection and then never
+// answer the handshake. The aggregate start_timeout must cap that first probe,
+// even when the independent dial/handshake policies are much longer (#1319).
+func TestEnsureDaemonStartBudgetCapsStalledHandshake(t *testing.T) {
+	shortenHandshakeTimeout(t, 5*time.Second)
+	shortenStartTimeout(t, 60*time.Millisecond)
+	shortenStartPollInterval(t, 5*time.Millisecond)
+
+	origDial := dialLocalDaemon
+
+	t.Cleanup(func() { dialLocalDaemon = origDial })
+
+	var (
+		started              bool
+		readinessDialTimeout time.Duration
+	)
+
+	dialLocalDaemon = func(_, _ string, timeout time.Duration) (net.Conn, error) {
+		if !started {
+			return nil, errors.New("dreich: not started")
+		}
+
+		readinessDialTimeout = timeout
+		clientConn, serverConn := net.Pipe()
+
+		go func() {
+			defer func() { _ = serverConn.Close() }()
+
+			reader := protocol.NewFrameReader(serverConn)
+			_, _ = reader.ReadFrame() // accept and drain the probe handshake
+			_, _ = reader.ReadFrame() // stay silent until the client deadline closes
+		}()
+
+		return clientConn, nil
+	}
+
+	stubStartDaemon(t, func(string) error {
+		started = true
+		return nil
+	})
+
+	start := time.Now()
+
+	conn, err := EnsureDaemon(config.Paths{SocketPath: "/bothy/stalled.sock"}, "")
+	if conn != nil {
+		_ = conn.Close()
+
+		t.Fatal("EnsureDaemon returned a connection for a daemon that never handshook")
+	}
+
+	if err == nil {
+		t.Fatal("EnsureDaemon should time out when the accepted readiness socket never handshakes")
+	}
+
+	elapsed := time.Since(start)
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("EnsureDaemon took %v, want the stalled handshake capped by the 60ms aggregate start budget", elapsed)
+	}
+
+	if readinessDialTimeout <= 0 || readinessDialTimeout > 60*time.Millisecond {
+		t.Fatalf("readiness dial timeout = %v, want it capped by the remaining 60ms start budget", readinessDialTimeout)
 	}
 }
 
