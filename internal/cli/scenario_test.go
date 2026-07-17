@@ -332,19 +332,19 @@ name = "dreich"`,
 			data := []byte("version = 1\n[scenario]\nname = \"strath\"\n" + tt.sessions)
 
 			sf, err := parseScenarioFile(data)
-			if err != nil {
-				t.Fatalf("parseScenarioFile: %v", err)
-			}
-
-			inputs, err := buildSessionInputs(sf)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("buildSessionInputs error = %v, want substring %q", err, tt.wantErr)
+					t.Fatalf("parseScenarioFile error = %v, want substring %q", err, tt.wantErr)
 				}
 
 				return
 			}
 
+			if err != nil {
+				t.Fatalf("parseScenarioFile: %v", err)
+			}
+
+			inputs, err := buildSessionInputs(sf)
 			if err != nil {
 				t.Fatalf("buildSessionInputs: %v", err)
 			}
