@@ -135,14 +135,13 @@ func TestCommandBackendAvailability(t *testing.T) {
 	}
 }
 
-// TestBackendsFailClosedWhenUnconfigured checks that the localmost and builtin
-// backends refuse to enforce with empty config (no binary / no config file),
-// so misconfiguration is loud at session-create rather than silently ignored.
-func TestBackendsFailClosedWhenUnconfigured(t *testing.T) {
-	for _, name := range []string{BackendLocalmost, BackendBuiltin} {
-		be, _ := BackendByName(name)
-		if av := be.Availability(Config{}); av.CanEnforce {
-			t.Errorf("%s backend must fail closed when unconfigured", name)
-		}
+// TestBuiltinBackendFailsClosedWhenUnconfigured checks that the builtin
+// backend refuses to enforce without a rules file or inline rules. Localmost's
+// empty config intentionally discovers its default executable on PATH and is
+// covered with a controlled PATH in localmost_test.go.
+func TestBuiltinBackendFailsClosedWhenUnconfigured(t *testing.T) {
+	be, _ := BackendByName(BackendBuiltin)
+	if av := be.Availability(Config{}); av.CanEnforce {
+		t.Error("builtin backend must fail closed when unconfigured")
 	}
 }
