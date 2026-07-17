@@ -257,6 +257,27 @@ func TestSendPushNotification_Coalesced(t *testing.T) {
 	}
 }
 
+func TestSendPushNotification_CoalesceReasonUsesConfiguredWindow(t *testing.T) {
+	fd := &fakeDispatch{}
+	cfg := baseNotifications()
+	cfg.Timing.CoalesceWindow = "45s"
+	sm := newPushSM(cfg, fd.fn)
+
+	if ok, reason := sm.SendPushNotification(pushNotification{Message: "braw"}); !ok {
+		t.Fatalf("first send should deliver, got suppressed: %s", reason)
+	}
+
+	ok, reason := sm.SendPushNotification(pushNotification{Message: "braw"})
+	if ok {
+		t.Fatal("identical immediate resend should be coalesced")
+	}
+
+	const want = "coalesced (identical notification within the last 45s)"
+	if reason != want {
+		t.Fatalf("coalescing reason = %q, want %q", reason, want)
+	}
+}
+
 // TestSendPushNotification_CoalesceWindowConfigurable is the regression guard
 // for issue #1245: SendPushNotification must honour the configured
 // [notifications.timing] coalesce_window rather than a fixed constant. With the
