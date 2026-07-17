@@ -147,9 +147,30 @@ func TestValidateMessagesLimits(t *testing.T) {
 		{"busy_timeout non-positive", func(c *Config) {
 			c.Messages.BusyTimeout = "0"
 		}, "positive duration"},
+		{"busy_timeout sub-millisecond", func(c *Config) {
+			c.Messages.BusyTimeout = "500us"
+		}, "at least 1ms"},
+		{"busy_timeout 1ms boundary passes", func(c *Config) {
+			c.Messages.BusyTimeout = "1ms"
+		}, ""},
 		{"busy_timeout above ceiling", func(c *Config) {
 			c.Messages.BusyTimeout = "10m"
 		}, "at most"},
+		{"max_age empty passes", func(c *Config) {
+			c.Messages.MaxAge = ""
+		}, ""},
+		{"max_age explicit zero passes", func(c *Config) {
+			c.Messages.MaxAge = "0"
+		}, ""},
+		{"max_age valid day syntax passes", func(c *Config) {
+			c.Messages.MaxAge = "30d"
+		}, ""},
+		{"max_age unparseable rejected", func(c *Config) {
+			c.Messages.MaxAge = "30x"
+		}, "messages.max_age"},
+		{"max_age negative rejected", func(c *Config) {
+			c.Messages.MaxAge = "-5m"
+		}, "messages.max_age"},
 	}
 
 	for _, c := range cases {
@@ -202,6 +223,12 @@ func TestValidateTodoLimits(t *testing.T) {
 		{"sweep_interval non-positive", func(c *Config) {
 			c.Todo.SweepInterval = "0"
 		}, "positive duration"},
+		{"busy_timeout sub-millisecond", func(c *Config) {
+			c.Todo.BusyTimeout = "500us"
+		}, "at least 1ms"},
+		{"busy_timeout 1ms boundary passes", func(c *Config) {
+			c.Todo.BusyTimeout = "1ms"
+		}, ""},
 		{"busy_timeout above ceiling", func(c *Config) {
 			c.Todo.BusyTimeout = "10m"
 		}, "at most"},

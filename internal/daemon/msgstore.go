@@ -77,6 +77,29 @@ func (s MsgStoreSettings) resolved() MsgStoreSettings {
 	return s
 }
 
+// sqliteBusyTimeoutMillis converts a busy-timeout duration to the millisecond
+// value SQLite's busy_timeout pragma expects, flooring any positive duration to
+// at least 1ms. SQLite's pragma has millisecond resolution, so a sub-millisecond
+// value would otherwise render busy_timeout(0) and disable lock waiting entirely
+// (issue #1322). Config validation already rejects sub-millisecond values at
+// load; this is the defensive floor for directly-constructed stores. A
+// non-positive duration is left untouched (callers resolve those to a default
+// before this point).
+func sqliteBusyTimeoutMillis(d time.Duration) int64 {
+	ms := d.Milliseconds()
+	if d > 0 && ms < 1 {
+		return 1
+	}
+
+	return ms
+}
+
+// msgStoreDSN builds the SQLite DSN for the message store. Extracted so the
+// resolved busy_timeout pragma can be asserted directly in tests.
+func msgStoreDSN(dbPath string, st MsgStoreSettings) string {
+	return fmt.Sprintf("%s?_pragma=journal_mode(wal)&_pragma=busy_timeout(%d)", dbPath, sqliteBusyTimeoutMillis(st.BusyTimeout))
+}
+
 // NewMsgStore opens (creating if needed) the message database at dbPath. An
 // optional MsgStoreSettings tunes the SQLite busy timeout, the per-subscriber
 // channel buffer, and the jail listing cap; omit it (or pass a zero value) to
@@ -93,7 +116,7 @@ func NewMsgStore(dbPath string, settings ...MsgStoreSettings) (*MsgStore, error)
 		return nil, fmt.Errorf("create messages db dir: %w", err)
 	}
 
-	dsn := fmt.Sprintf("%s?_pragma=journal_mode(wal)&_pragma=busy_timeout(%d)", dbPath, st.BusyTimeout.Milliseconds())
+	dsn := msgStoreDSN(dbPath, st)
 
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {

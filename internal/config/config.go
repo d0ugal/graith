@@ -2158,9 +2158,15 @@ type Messages struct {
 	SubscriberBuffer int `toml:"subscriber_buffer"`
 	// BusyTimeout is the SQLite busy_timeout for the messages database — how long
 	// a contended operation waits for the lock before erroring. It is graith's
-	// database operation deadline. Empty, unparseable, or non-positive uses the
-	// default (MessagesBusyTimeoutDefault); a value above MessagesBusyTimeoutCeiling
-	// is rejected at load. Restart-only.
+	// database operation deadline. Empty uses the default
+	// (MessagesBusyTimeoutDefault). A non-empty value is validated at load: it
+	// must parse, be at least 1ms (SQLite's pragma has millisecond resolution, so
+	// a smaller value would render busy_timeout(0) and disable lock waiting —
+	// issue #1322), and be at or below MessagesBusyTimeoutCeiling; an invalid,
+	// zero, negative, sub-millisecond, or over-ceiling value is rejected. For a
+	// directly-constructed config the accessor defaults only a non-positive or
+	// invalid value, while the store's DSN renderer floors a positive
+	// sub-millisecond value to 1ms. Restart-only.
 	BusyTimeout string `toml:"busy_timeout"`
 }
 
@@ -2300,12 +2306,22 @@ func (g GCConfig) OrphanMinAgeDuration() time.Duration {
 	return parsed
 }
 
+// MaxAgeDuration returns the message-retention window. An empty value or an
+// explicit zero is the documented "retain forever" sentinel (returns 0, which
+// runMessageCleanupFromConfig treats as no age-based cleanup). Load/reload
+// validation rejects a non-empty unparseable or negative value; this accessor
+// keeps a defensive fallback to 0 (retain forever) for directly-constructed
+// configs so a garbage value can never turn into a negative window that would
+// otherwise select a future cutoff.
 func (m Messages) MaxAgeDuration() time.Duration {
-	if m.MaxAge == "" {
+	if strings.TrimSpace(m.MaxAge) == "" {
 		return 0
 	}
 
-	d, _ := ParseDurationWithDays(m.MaxAge)
+	d, err := ParseDurationWithDays(m.MaxAge)
+	if err != nil || d < 0 {
+		return 0
+	}
 
 	return d
 }
@@ -2374,7 +2390,11 @@ func (m Messages) SubscriberBufferOrDefault() int {
 
 // BusyTimeoutDuration returns the messages-database SQLite busy_timeout, or the
 // default when unset, unparseable, or non-positive (a zero/negative timeout
-// would make a contended write fail immediately instead of waiting).
+// would make a contended write fail immediately instead of waiting). Load
+// validation rejects those cases for a file-backed config; this defensive
+// fallback covers directly-constructed configs. A positive sub-millisecond value
+// is returned as-is here and floored to 1ms when the store renders the pragma
+// (issue #1322).
 func (m Messages) BusyTimeoutDuration() time.Duration {
 	return positiveDurationOrDefault(m.BusyTimeout, MessagesBusyTimeoutDefault)
 }
@@ -2417,9 +2437,14 @@ type TodoConfig struct {
 	SweepInterval string `toml:"sweep_interval"`
 	// BusyTimeout is the SQLite busy_timeout for the todos database. The claim
 	// contract ("loser gets zero rows") relies on a contended writer waiting rather
-	// than erroring with SQLITE_BUSY, so this is load-bearing. Empty, unparseable,
-	// or non-positive uses the default (TodoBusyTimeoutDefault); a value above
-	// TodoBusyTimeoutCeiling is rejected at load. Restart-only.
+	// than erroring with SQLITE_BUSY, so this is load-bearing. Empty uses the
+	// default (TodoBusyTimeoutDefault). A non-empty value is validated at load: it
+	// must parse, be at least 1ms (a sub-millisecond value would render
+	// busy_timeout(0) and disable lock waiting — issue #1322), and be at or below
+	// TodoBusyTimeoutCeiling; an invalid, zero, negative, sub-millisecond, or
+	// over-ceiling value is rejected. For a directly-constructed config the
+	// accessor defaults only a non-positive or invalid value, while the store's
+	// DSN renderer floors a positive sub-millisecond value to 1ms. Restart-only.
 	BusyTimeout string `toml:"busy_timeout"`
 }
 
@@ -2523,6 +2548,10 @@ func (t TodoConfig) SweepIntervalDuration() time.Duration {
 // BusyTimeoutDuration returns the todos-database SQLite busy_timeout, or the
 // default when unset, unparseable, or non-positive (a zero/negative timeout
 // would break the claim contract by failing a contended writer immediately).
+// Load validation rejects those cases for a file-backed config; this defensive
+// fallback covers directly-constructed configs. A positive sub-millisecond value
+// is returned as-is here and floored to 1ms when the store renders the pragma
+// (issue #1322).
 func (t TodoConfig) BusyTimeoutDuration() time.Duration {
 	return positiveDurationOrDefault(t.BusyTimeout, TodoBusyTimeoutDefault)
 }
@@ -4372,11 +4401,29 @@ func (c *Config) validateMessagesLimits() []error {
 		errs = append(errs, fmt.Errorf("messages.conversation_page_size %d: must not exceed conversation_max_limit %d", page, maxLimit))
 	}
 
+	// max_age retention (issue #1321): empty or an explicit zero is the intended
+	// "retain forever" sentinel and is accepted; a non-empty unparseable or
+	// negative value would silently disable age-based cleanup (MaxAgeDuration
+	// falls back to 0) and let messages and jailed comments accumulate forever,
+	// so it must fail loudly at load and reload.
+	if s := strings.TrimSpace(m.MaxAge); s != "" {
+		if d, err := ParseDurationWithDays(s); err != nil {
+			errs = append(errs, fmt.Errorf("messages.max_age %q: %w", s, err))
+		} else if d < 0 {
+			errs = append(errs, fmt.Errorf("messages.max_age %q: must not be negative (use \"\" or \"0\" to retain forever)", s))
+		}
+	}
+
 	if s := strings.TrimSpace(m.BusyTimeout); s != "" {
 		if d, err := ParseDurationWithDays(s); err != nil {
 			errs = append(errs, fmt.Errorf("messages.busy_timeout %q: %w", s, err))
 		} else if d <= 0 {
 			errs = append(errs, fmt.Errorf("messages.busy_timeout %q: must be a positive duration", s))
+		} else if d < time.Millisecond {
+			// SQLite's busy_timeout pragma has millisecond resolution, so a
+			// sub-millisecond value renders busy_timeout(0) and disables lock
+			// waiting entirely (issue #1322).
+			errs = append(errs, fmt.Errorf("messages.busy_timeout %q: must be at least %s (SQLite busy_timeout has millisecond resolution)", s, time.Millisecond))
 		} else if d > MessagesBusyTimeoutCeiling {
 			errs = append(errs, fmt.Errorf("messages.busy_timeout %q: must be at most %s", s, MessagesBusyTimeoutCeiling))
 		}
@@ -4422,6 +4469,11 @@ func (c *Config) validateTodoLimits() []error {
 			errs = append(errs, fmt.Errorf("todo.busy_timeout %q: %w", s, err))
 		} else if d <= 0 {
 			errs = append(errs, fmt.Errorf("todo.busy_timeout %q: must be a positive duration", s))
+		} else if d < time.Millisecond {
+			// A sub-millisecond value renders busy_timeout(0) and disables lock
+			// waiting, undermining the documented concurrent-claim contract
+			// (issue #1322).
+			errs = append(errs, fmt.Errorf("todo.busy_timeout %q: must be at least %s (SQLite busy_timeout has millisecond resolution)", s, time.Millisecond))
 		} else if d > TodoBusyTimeoutCeiling {
 			errs = append(errs, fmt.Errorf("todo.busy_timeout %q: must be at most %s", s, TodoBusyTimeoutCeiling))
 		}

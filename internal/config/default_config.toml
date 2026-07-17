@@ -297,13 +297,13 @@ orphan_min_age = "5m"        # minimum age before an orphaned worktree/scratch d
 # subscriber_buffer and busy_timeout are fixed at daemon start (restart-only);
 # the paging bounds and jail cap are read per-request (reloadable).
 [messages]
-# max_age = "30d"          # delete messages older than this ("" or "0" keeps them forever)
+# max_age = "30d"          # delete messages older than this ("" or "0" keeps them forever; a non-empty invalid or negative value is rejected at load)
 # max_per_stream = 5000    # keep at most this many messages per stream (0 keeps all)
 conversation_page_size = 500   # page size when a request omits a limit (< 1 => default, clamped to max limit)
 conversation_max_limit = 2000  # hard cap on messages a single conversation sorts (< 1 => 2000; ceiling 100000)
 jail_list_limit = 2000         # max quarantined comments a jail listing returns (< 1 => 2000; ceiling 100000)
 subscriber_buffer = 64         # per-subscriber pub/sub channel capacity (< 1 => 64; ceiling 65536)
-busy_timeout = "5s"            # SQLite busy_timeout for the messages DB ("" or non-positive => 5s; max 5m)
+busy_timeout = "5s"            # SQLite busy_timeout for the messages DB ("" => 5s; explicit value must be 1ms–5m; invalid/zero/negative rejected at load)
 
 # First-class shared todo list (`gr todo`). emit_events controls task-event
 # emission, claim_lease reopens an in-progress item whose owner has gone quiet,
@@ -321,7 +321,7 @@ max_title     = 500       # max todo title length in bytes (<= 500 hard DB ceili
 max_note      = 2000      # max todo note length in bytes (<= 2000 hard DB ceiling; < 1 => default 2000)
 list_limit    = 2000      # max items a single list returns (< 1 => default 2000; hard ceiling 100000)
 sweep_interval = "1m"     # how often the lease/retention sweep runs ("" or non-positive => 1m)
-busy_timeout  = "5s"      # SQLite busy_timeout for the todos DB ("" or non-positive => 5s; max 5m)
+busy_timeout  = "5s"      # SQLite busy_timeout for the todos DB ("" => 5s; explicit value must be 1ms–5m; invalid/zero/negative rejected at load)
 
 # PR & CI awareness loop: resolves eligible worktree sessions' GitHub PRs via the
 # gh CLI, polls their checks/reviews, and notifies the owning session's inbox on

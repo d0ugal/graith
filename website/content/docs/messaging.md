@@ -164,7 +164,11 @@ max_age        = "7d"   # prune messages older than 7 days
 max_per_stream = 1000   # keep at most 1000 messages per stream
 ```
 
-Both are optional. When unset, messages are kept indefinitely.
+Both are optional. When unset, messages are kept indefinitely. An empty
+`max_age`, or an explicit `"0"`, is the documented "retain forever" sentinel; a
+non-empty value that does not parse, or a negative duration, is rejected at
+config load and reload (a typo must not silently disable age-based cleanup and
+let messages and jailed comments grow without bound).
 
 ## Operational limits
 
@@ -178,7 +182,7 @@ conversation_page_size = 500   # page size when a conversation request omits a l
 conversation_max_limit = 2000  # hard cap on messages a single conversation sorts (default 2000; ceiling 100000)
 jail_list_limit        = 2000  # max quarantined comments a jail listing returns (default 2000; ceiling 100000)
 subscriber_buffer      = 64    # per-subscriber pub/sub channel capacity (default 64; ceiling 65536)
-busy_timeout           = "5s"  # SQLite busy/operation timeout for the messages DB (default 5s; max 5m)
+busy_timeout           = "5s"  # SQLite busy/operation timeout for the messages DB (unset => 5s; min 1ms, max 5m)
 ```
 
 An explicitly configured `conversation_page_size` must not exceed
@@ -189,7 +193,11 @@ change takes effect on the next `gr daemon reload`. `subscriber_buffer` and
 `busy_timeout` are fixed when the database is opened, so they are **restart-only**
 — change them and restart the daemon (`gr daemon restart`). `busy_timeout` is
 graith's database operation deadline: how long a contended read/write waits for
-the lock before erroring.
+the lock before erroring. When unset it uses the 5s default; a non-empty value
+must parse, be at least 1ms (SQLite's `busy_timeout` pragma has millisecond
+resolution, so a sub-millisecond value would collapse to zero and disable lock
+waiting), and be at most 5m — an invalid, zero, negative, sub-millisecond, or
+over-ceiling value is rejected at load and reload.
 
 > **Note on internal queue capacities.** `subscriber_buffer` is the one pub/sub
 > queue exposed here because a bursty fan-out is a real load-tuning case. Other
