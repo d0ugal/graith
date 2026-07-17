@@ -82,6 +82,21 @@ if ! profile_owned_by "$owner"; then
 	exit 1
 fi
 
+# Ownership is proven BEFORE any destructive work above — an unowned/mismatched
+# present target already failed closed. Re-establish the ephemeral runtime marker
+# now, before the `gr` calls below: the daemon (re)creates
+# $XDG_RUNTIME_DIR/graith-demo when `gr list` runs, WITHOUT our ownership marker,
+# so a rebooted-and-rerun teardown that started with an absent (reconstructible)
+# runtime dir would otherwise re-check ownership after purging and refuse on the
+# now-markerless dir. Writing the marker here — durable config/data already prove
+# ownership, and any present runtime target was already confirmed ours — keeps
+# the pre-deletion re-check honest instead of stranding a half-torn-down profile
+# (#1298 round-4).
+if [ -n "$RUNTIME_DIR" ]; then
+	mkdir -p "$RUNTIME_DIR"
+	printf '%s\n' "$owner" > "$RUNTIME_DIR/$OWNER_FILE"
+fi
+
 # Owned. Purge every demo session — live AND soft-deleted — so their worktrees
 # and branches are removed cleanly (not just orphaned when the data dir goes).
 # -y/-f skip confirmations; `while read` (not mapfile) works on macOS bash 3.2.

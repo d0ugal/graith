@@ -32,7 +32,11 @@ unsandboxed; if no agent/sandbox config is found at all it falls back to
 unsandboxed `claude`/`codex`. Safety guardrails: the fixed `demo` profile's
 config, data, and runtime directories carry matching per-run ownership markers.
 The harness refuses setup and teardown if any target is pre-existing, unmarked,
-or mismatched, and it never contacts an unowned `demo` daemon.
+or mismatched, and it never contacts an unowned `demo` daemon. The runtime
+directory is ephemeral: after a reboot it is reconstructed from the durable
+config/data markers rather than refused, and teardown re-establishes its marker
+before any destructive work so a daemon that recreates the (markerless) runtime
+dir mid-teardown can't leave the profile half-removed.
 
 ## Re-recording
 
