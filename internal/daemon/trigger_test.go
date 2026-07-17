@@ -2,9 +2,13 @@ package daemon
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +52,35 @@ func TestTriggerFingerprint(t *testing.T) {
 	d.Name = "renamed"
 	if triggerFingerprint(&a) != triggerFingerprint(&d) {
 		t.Error("rename should not change fingerprint")
+	}
+}
+
+func TestTriggerFingerprintPreservesLegacySources(t *testing.T) {
+	tests := []config.TriggerConfig{
+		{Schedule: &config.ScheduleConfig{Every: "10m"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "braw"}},
+		{Watch: &config.WatchConfig{Repo: "/tmp/croft", Paths: []string{"**/*.go"}}, Action: config.ActionConfig{Type: config.ActionSession, Prompt: "canny"}},
+	}
+
+	for i := range tests {
+		trigger := &tests[i]
+		legacyPayload := struct {
+			Schedule *config.ScheduleConfig
+			Watch    *config.WatchConfig
+			Action   config.ActionConfig
+			Policy   config.TriggerPolicy
+		}{trigger.Schedule, trigger.Watch, trigger.Action, trigger.Policy}
+
+		encoded, err := json.Marshal(legacyPayload)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		sum := sha256.Sum256(encoded)
+		legacy := hex.EncodeToString(sum[:8])
+
+		if got := triggerFingerprint(trigger); got != legacy {
+			t.Errorf("source %d fingerprint changed across gcx upgrade: got %q, legacy %q", i, got, legacy)
+		}
 	}
 }
 
@@ -247,6 +280,18 @@ func TestTriggerRunNow_WatchRejected(t *testing.T) {
 	}
 }
 
+func TestTriggerRunNow_GCXRejected(t *testing.T) {
+	trig := config.TriggerConfig{
+		Name: "oncall", GCX: &config.GCXConfig{Context: "croft"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "t"}},
+	}
+
+	sm := newTriggerTestSM(t, trig)
+	if err := sm.TriggerRunNow(t.Context(), "oncall"); err == nil || !strings.Contains(err.Error(), "gcx event trigger") {
+		t.Fatalf("expected gcx manual-run rejection, got %v", err)
+	}
+}
+
 func TestDeliverStorePath(t *testing.T) {
 	sm := newTriggerTestSM(t)
 
@@ -303,10 +348,11 @@ func TestRateLimited(t *testing.T) {
 func TestTriggerListAndStatus(t *testing.T) {
 	sched := config.TriggerConfig{Name: "braw", Schedule: &config.ScheduleConfig{Cron: "0 9 * * *"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "t"}}}
 	watch := config.TriggerConfig{Name: "canny", Watch: &config.WatchConfig{Role: "implementer"}, Action: config.ActionConfig{Type: config.ActionSession, Ensure: true}}
-	sm := newTriggerTestSM(t, sched, watch)
+	gcx := config.TriggerConfig{Name: "dreich", GCX: &config.GCXConfig{Context: "croft", Every: "2m"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "t"}}}
+	sm := newTriggerTestSM(t, sched, watch, gcx)
 
 	list := sm.TriggerList()
-	if len(list) != 2 {
+	if len(list) != 3 {
 		t.Fatalf("list = %d", len(list))
 	}
 
@@ -322,6 +368,11 @@ func TestTriggerListAndStatus(t *testing.T) {
 	wrec, _ := sm.TriggerStatus("canny")
 	if wrec.Source != "watch" || wrec.WatchScope != "role:implementer" {
 		t.Errorf("canny record = %+v", wrec)
+	}
+
+	grec, _ := sm.TriggerStatus("dreich")
+	if grec.Source != "gcx" || !strings.Contains(grec.GCXScope, "oncall_alert_group every 2m") {
+		t.Errorf("dreich record = %+v", grec)
 	}
 
 	if _, err := sm.TriggerStatus("ghost"); err == nil {

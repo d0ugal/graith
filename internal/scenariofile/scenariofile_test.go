@@ -231,7 +231,12 @@ role = "implementer"
 		{
 			name: "no source rejected",
 			trig: "[[trigger]]\nname=\"t\"\n[trigger.action]\ntype=\"message\"\nbody=\"x\"\n[trigger.action.deliver]\ntopic=\"blether\"\n",
-			want: "exactly one of [schedule] or [watch]",
+			want: "exactly one of [schedule], [watch], or [gcx]",
+		},
+		{
+			name: "gcx source rejected",
+			trig: "[[trigger]]\nname=\"t\"\n[trigger.gcx]\ncontext=\"croft\"\n[trigger.action]\ntype=\"message\"\nbody=\"x\"\n[trigger.action.deliver]\ntopic=\"blether\"\n",
+			want: "cannot use a [gcx] source",
 		},
 	}
 

@@ -4452,7 +4452,21 @@
           "optional": true
         },
         {
+          "name": "gcx_scope",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
           "name": "next_fire",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "next_poll",
           "type": {
             "kind": "string"
           },

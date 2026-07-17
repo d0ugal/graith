@@ -355,13 +355,18 @@ type TriggerRuntimeState struct {
 	LastError           string       `json:"last_error,omitempty"`
 	RunCount            int          `json:"run_count,omitempty"`
 	History             []TriggerRun `json:"history,omitempty"`
+	// GCXSeen stores the bounded event cursor for a gcx source, keyed by stable
+	// event ID with the last complete-snapshot observation time. It is committed
+	// before dispatch so a daemon restart cannot duplicate an event.
+	GCXSeen       map[string]time.Time `json:"gcx_seen,omitempty"`
+	LastGCXPollAt *time.Time           `json:"last_gcx_poll_at,omitempty"`
 }
 
 // TriggerRun is one entry in a trigger's bounded run history.
 type TriggerRun struct {
 	ScheduledAt     time.Time `json:"scheduled_at"`
 	SourceSessionID string    `json:"source_session_id,omitempty"`
-	Cause           string    `json:"cause"`  // schedule | catch_up | manual | file
+	Cause           string    `json:"cause"`  // schedule | catch_up | manual | file | gcx
 	Result          string    `json:"result"` // per action type
 }
 

@@ -13,6 +13,7 @@ func TestExpandTrigger(t *testing.T) {
 		WorktreePath: "/tmp/bothy",
 		ChangedFiles: "glen/a.go, glen/b.go",
 		ChangeCount:  "2",
+		GCXEventID:   "AG-BRAW",
 	}
 
 	cases := []struct {
@@ -23,6 +24,7 @@ func TestExpandTrigger(t *testing.T) {
 		{"{change_count} files in {session_name}", "2 files in braw"},
 		{"at {worktree_path}: {changed_files}", "at /tmp/bothy: glen/a.go, glen/b.go"},
 		{"no tokens here", "no tokens here"},
+		{"alert {gcx_event_id}", "alert AG-BRAW"},
 	}
 	for _, tc := range cases {
 		got, err := ExpandTrigger(tc.in, vars)

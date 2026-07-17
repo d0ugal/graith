@@ -9,14 +9,15 @@ import (
 )
 
 // TriggerConfig is one [[trigger]] block. A trigger is (source) -> (action):
-// exactly one of Schedule (#592) or Watch (#593) is the source, and Action is
-// what runs. Everything below the source line is shared between the two source
+// exactly one of Schedule (#592), Watch (#593), or GCX is the source, and Action is
+// what runs. Everything below the source line is shared between the source
 // kinds. See docs/design/2026-07-11-triggers-design.md.
 type TriggerConfig struct {
 	Name     string          `toml:"name"`
 	Enabled  *bool           `toml:"enabled"`  // nil => default true; explicit false disables
 	Schedule *ScheduleConfig `toml:"schedule"` // time-driven source
 	Watch    *WatchConfig    `toml:"watch"`    // file-event source
+	GCX      *GCXConfig      `toml:"gcx"`      // Grafana Cloud event source
 	Action   ActionConfig    `toml:"action"`
 	Policy   TriggerPolicy   `toml:"policy"`
 }
@@ -37,6 +38,73 @@ type WatchConfig struct {
 	Paths    []string `toml:"paths"`    // optional include globs (worktree-relative)
 	Ignore   []string `toml:"ignore"`   // extra ignore globs (added to built-ins + .gitignore)
 	Debounce string   `toml:"debounce"` // quiet-window; default 30s
+}
+
+// GCXConfig is the Grafana Cloud event source. V1 polls OnCall alert groups
+// through an existing gcx context and can gate delivery on a pinned human being
+// currently present in one of the selected OnCall schedules.
+type GCXConfig struct {
+	Event          string   `toml:"event"`           // oncall_alert_group (v1; default)
+	Context        string   `toml:"context"`         // gcx context (required; credentials remain owned by gcx)
+	Every          string   `toml:"every"`           // poll cadence; default 1m
+	Timeout        string   `toml:"timeout"`         // timeout for each gcx invocation; default 30s
+	OnCallUserID   string   `toml:"oncall_user_id"`  // stable human user PK; paired with ScheduleIDs
+	ScheduleIDs    []string `toml:"schedule_ids"`    // schedules used for the current-on-call gate
+	TeamIDs        []string `toml:"team_ids"`        // optional alert-group team filters
+	IntegrationIDs []string `toml:"integration_ids"` // optional alert-group integration filters
+	States         []string `toml:"states"`          // firing|acknowledged|resolved|silenced; default firing
+	MaxAge         string   `toml:"max_age"`         // alert lookback and seen-ID retention; default 24h
+	Limit          int      `toml:"limit"`           // result cap; reaching it fails closed; default 100
+}
+
+const (
+	GCXEventOnCallAlertGroup = "oncall_alert_group"
+	defaultGCXEvery          = time.Minute
+	defaultGCXTimeout        = 30 * time.Second
+	defaultGCXMaxAge         = 24 * time.Hour
+	defaultGCXLimit          = 100
+)
+
+// EventOr returns the selected event kind, defaulting to the only v1 kind.
+func (g GCXConfig) EventOr() string {
+	if g.Event == "" {
+		return GCXEventOnCallAlertGroup
+	}
+
+	return g.Event
+}
+
+// EveryDuration returns the poll cadence, defaulting to 1m.
+func (g GCXConfig) EveryDuration() time.Duration {
+	return parseDurationOr(g.Every, defaultGCXEvery)
+}
+
+// TimeoutDuration returns the per-gcx-command timeout, defaulting to 30s.
+func (g GCXConfig) TimeoutDuration() time.Duration {
+	return parseDurationOr(g.Timeout, defaultGCXTimeout)
+}
+
+// MaxAgeDuration returns the alert lookback/cursor retention, defaulting to 24h.
+func (g GCXConfig) MaxAgeDuration() time.Duration {
+	return parseDurationOr(g.MaxAge, defaultGCXMaxAge)
+}
+
+// LimitOr returns the alert-group result cap, defaulting to 100.
+func (g GCXConfig) LimitOr() int {
+	if g.Limit <= 0 {
+		return defaultGCXLimit
+	}
+
+	return g.Limit
+}
+
+// StatesOr returns a fresh copy of the configured states, defaulting to firing.
+func (g GCXConfig) StatesOr() []string {
+	if len(g.States) == 0 {
+		return []string{"firing"}
+	}
+
+	return append([]string(nil), g.States...)
 }
 
 // ActionConfig is the shared action vocabulary. Type selects the verb.
@@ -338,9 +406,10 @@ func (t TriggerConfig) TriggerEnabled() bool {
 	return t.Enabled == nil || *t.Enabled
 }
 
-// IsSchedule / IsWatch report the source kind.
+// IsSchedule / IsWatch / IsGCX report the source kind.
 func (t TriggerConfig) IsSchedule() bool { return t.Schedule != nil }
 func (t TriggerConfig) IsWatch() bool    { return t.Watch != nil }
+func (t TriggerConfig) IsGCX() bool      { return t.GCX != nil }
 
 // DebounceDuration returns the watch debounce, defaulting to 30s.
 func (w WatchConfig) DebounceDuration() time.Duration {
@@ -595,15 +664,29 @@ func ValidateTriggerStructure(where string, t *TriggerConfig) []error {
 	var errs []error
 
 	// Exactly one source.
+	sourceCount := 0
+
+	for _, set := range []bool{t.Schedule != nil, t.Watch != nil, t.GCX != nil} {
+		if set {
+			sourceCount++
+		}
+	}
+
 	switch {
-	case t.Schedule == nil && t.Watch == nil:
-		errs = append(errs, fmt.Errorf("%s: exactly one of [schedule] or [watch] is required (neither set)", where))
-	case t.Schedule != nil && t.Watch != nil:
-		errs = append(errs, fmt.Errorf("%s: exactly one of [schedule] or [watch] is required (both set)", where))
+	case sourceCount == 0:
+		errs = append(errs, fmt.Errorf("%s: exactly one of [schedule], [watch], or [gcx] is required (neither set)", where))
+	case sourceCount > 1:
+		errs = append(errs, fmt.Errorf("%s: exactly one of [schedule], [watch], or [gcx] is required (both set)", where))
 	case t.Schedule != nil:
 		errs = append(errs, validateSchedule(where, t.Schedule)...)
 	case t.Watch != nil:
 		errs = append(errs, validateWatch(where, t.Watch)...)
+	case t.GCX != nil:
+		errs = append(errs, validateGCX(where, t.GCX)...)
+	}
+
+	if t.IsGCX() && t.Policy.OverlapMode() == OverlapAllow {
+		errs = append(errs, fmt.Errorf("%s: gcx source requires policy.overlap = skip (polls and cursor updates must be serialised)", where))
 	}
 
 	errs = append(errs, validateActionStructure(where, t)...)
@@ -666,6 +749,81 @@ func validateWatch(where string, w *WatchConfig) []error {
 		} else if d <= 0 {
 			errs = append(errs, fmt.Errorf("%s: [watch] debounce must be > 0", where))
 		}
+	}
+
+	return errs
+}
+
+func validateGCX(where string, g *GCXConfig) []error {
+	var errs []error
+
+	if strings.TrimSpace(g.Context) == "" {
+		errs = append(errs, fmt.Errorf("%s: [gcx] context is required", where))
+	}
+
+	if g.EventOr() != GCXEventOnCallAlertGroup {
+		errs = append(errs, fmt.Errorf("%s: [gcx] event %q is invalid (v1 supports %q)", where, g.Event, GCXEventOnCallAlertGroup))
+	}
+
+	for _, field := range []struct{ name, raw string }{
+		{"every", g.Every}, {"timeout", g.Timeout}, {"max_age", g.MaxAge},
+	} {
+		if field.raw == "" {
+			continue
+		}
+
+		d, err := ParseDurationWithDays(field.raw)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: [gcx] %s %q: %w", where, field.name, field.raw, err))
+		} else if d <= 0 {
+			errs = append(errs, fmt.Errorf("%s: [gcx] %s must be > 0", where, field.name))
+		}
+	}
+
+	userSet := strings.TrimSpace(g.OnCallUserID) != ""
+	if g.OnCallUserID != "" && !userSet {
+		errs = append(errs, fmt.Errorf("%s: [gcx] oncall_user_id must not be whitespace", where))
+	}
+
+	if userSet != (len(g.ScheduleIDs) > 0) {
+		errs = append(errs, fmt.Errorf("%s: [gcx] oncall_user_id and schedule_ids must be set together", where))
+	}
+
+	for _, field := range []struct {
+		name string
+		ids  []string
+	}{
+		{"schedule_ids", g.ScheduleIDs}, {"team_ids", g.TeamIDs}, {"integration_ids", g.IntegrationIDs},
+	} {
+		seen := make(map[string]bool, len(field.ids))
+		for _, id := range field.ids {
+			if strings.TrimSpace(id) == "" {
+				errs = append(errs, fmt.Errorf("%s: [gcx] %s must not contain an empty ID", where, field.name))
+			} else if seen[id] {
+				errs = append(errs, fmt.Errorf("%s: [gcx] %s contains duplicate ID %q", where, field.name, id))
+			}
+
+			seen[id] = true
+		}
+	}
+
+	validStates := map[string]bool{"firing": true, "acknowledged": true, "resolved": true, "silenced": true}
+	seenStates := make(map[string]bool, len(g.States))
+
+	for _, state := range g.States {
+		if !validStates[state] {
+			errs = append(errs, fmt.Errorf("%s: [gcx] state %q is invalid (want firing|acknowledged|resolved|silenced)", where, state))
+		} else if seenStates[state] {
+			errs = append(errs, fmt.Errorf("%s: [gcx] state %q is duplicated", where, state))
+		}
+
+		seenStates[state] = true
+	}
+
+	if g.Limit < 0 {
+		errs = append(errs, fmt.Errorf("%s: [gcx] limit must not be negative", where))
+	} else if g.Limit > 100 {
+		errs = append(errs, fmt.Errorf("%s: [gcx] limit must not exceed 100", where))
 	}
 
 	return errs
@@ -769,7 +927,7 @@ func (c *Config) validateActionConfigDeps(where string, t *TriggerConfig) []erro
 
 	a := &t.Action
 
-	if a.Type == ActionCommand && t.IsSchedule() && a.Repo != "" && !c.RepoPathAllowed(a.Repo) {
+	if a.Type == ActionCommand && !t.IsWatch() && a.Repo != "" && !c.RepoPathAllowed(a.Repo) {
 		errs = append(errs, fmt.Errorf("%s: action.repo %q is not in allowed_repo_paths", where, a.Repo))
 	}
 
@@ -816,11 +974,11 @@ func validateCommandActionStructure(where string, t *TriggerConfig) []error {
 			errs = append(errs, fmt.Errorf("%s: action.timeout must be > 0", where))
 		}
 	}
-	// Execution root: schedule commands require repo; watch commands derive it
+	// Execution root: non-watch commands require repo; watch commands derive it
 	// from the bound session's worktree and must not set repo.
-	if t.IsSchedule() {
+	if !t.IsWatch() {
 		if a.Repo == "" {
-			errs = append(errs, fmt.Errorf("%s: schedule command action requires action.repo", where))
+			errs = append(errs, fmt.Errorf("%s: non-watch command action requires action.repo", where))
 		}
 	} else if a.Repo != "" {
 		errs = append(errs, fmt.Errorf("%s: watch command action must not set action.repo (execution root is the bound worktree)", where))

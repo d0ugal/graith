@@ -1028,13 +1028,15 @@ type TriggerPauseMsg struct {
 // TriggerRecord is the per-trigger info returned to the client.
 type TriggerRecord struct {
 	Name       string `json:"name"`
-	Source     string `json:"source"` // schedule | watch
-	Action     string `json:"action"` // command | session | scenario | message
+	Source     string `json:"source"` // schedule | watch | gcx
+	Action     string `json:"action"` // command | session | scenario | message | tracker
 	Enabled    bool   `json:"enabled"`
 	Paused     bool   `json:"paused,omitempty"`
 	Schedule   string `json:"schedule,omitempty"`    // cron/every summary (schedule)
 	WatchScope string `json:"watch_scope,omitempty"` // repo/role summary (watch)
+	GCXScope   string `json:"gcx_scope,omitempty"`   // event/cadence/gate summary (gcx)
 	NextFire   string `json:"next_fire,omitempty"`   // schedule
+	NextPoll   string `json:"next_poll,omitempty"`   // gcx
 	LastRun    string `json:"last_run,omitempty"`    // RFC3339 or ""
 	LastResult string `json:"last_result,omitempty"` // most recent run result
 	LastError  string `json:"last_error,omitempty"`

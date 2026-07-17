@@ -176,6 +176,9 @@ type ToolsConfig struct {
 	Git string `toml:"git"`
 	// GH is the GitHub CLI executable (default "gh").
 	GH string `toml:"gh"`
+	// GCX is the Grafana Cloud CLI executable used by gcx trigger sources
+	// (default "gcx").
+	GCX string `toml:"gcx"`
 	// Shell runs notification and trigger commands as `<shell> -c <cmd>`
 	// (default "sh").
 	Shell string `toml:"shell"`
@@ -198,6 +201,7 @@ func (t ToolsConfig) Resolved(baseDir string) tools.Config {
 	return tools.Config{
 		Git:       resolveToolPath(baseDir, t.Git),
 		GH:        resolveToolPath(baseDir, t.GH),
+		GCX:       resolveToolPath(baseDir, t.GCX),
 		Shell:     resolveToolPath(baseDir, t.Shell),
 		OSAScript: resolveToolPath(baseDir, t.OSAScript),
 		PS:        resolveToolPath(baseDir, t.PS),

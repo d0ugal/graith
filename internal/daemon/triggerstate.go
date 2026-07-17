@@ -30,6 +30,11 @@ type triggerState struct {
 	// watch source: bindings keyed by bindingKey(name, sessionID)
 	bindings map[string]*watchBinding
 
+	// gcx source: one poll binding per trigger definition. The durable seen-ID
+	// cursor lives in TriggerRuntimeState; these process-local fields deliberately
+	// reset on daemon start so catch_up=false can prime the current snapshot.
+	gcxBindings map[string]*gcxBinding
+
 	// tracker action: when an issue's session was first seen with its issue no
 	// longer active, keyed by trackerGraceKey(name, issueKey). Drives the reap
 	// grace window. In-memory only: losing it on restart is fail-safe (re-observe
@@ -58,6 +63,15 @@ type watchBinding struct {
 	cancel             func()          // stops the binding's event goroutine
 }
 
+type gcxBinding struct {
+	fingerprint string
+	nextPoll    time.Time
+	inFlight    bool
+	prime       bool
+	onCallKnown bool
+	onCall      bool
+}
+
 // actionInFlight reports whether a serialised action (command or
 // ensure-reviewer) is currently executing for this binding. Reconcile consults
 // it to avoid recreating a binding out from under an in-flight reserve→create.
@@ -75,6 +89,7 @@ func newTriggerState() *triggerState {
 		inFlight:        make(map[string]int),
 		rateLog:         make(map[string][]time.Time),
 		bindings:        make(map[string]*watchBinding),
+		gcxBindings:     make(map[string]*gcxBinding),
 		trackerObsolete: make(map[string]time.Time),
 	}
 }

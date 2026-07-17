@@ -109,8 +109,8 @@ Two trust knobs, fail-closed:
 ## Triggers
 
 Daemon-fired automation: a trigger is `(source) → (action)`. Define them as
-`[[trigger]]` blocks (each with exactly one `[trigger.schedule]` or
-`[trigger.watch]` source and one `[trigger.action]`), plus an optional
+`[[trigger]]` blocks (each with exactly one `[trigger.schedule]`,
+`[trigger.watch]`, or `[trigger.gcx]` source and one `[trigger.action]`), plus an optional
 `[triggers]` table for daemon-wide settings.
 
 ```toml
@@ -144,7 +144,7 @@ prompt = "Review the changes since your last look; send feedback via gr msg."
 ```
 
 Actions: `command` (sandboxed by default; `sandbox`/`sandbox_config` mirror
-MCP-server config), `session`, `scenario`, `message`. Delivery routes to
+MCP-server config), `session`, `scenario`, `message`, `tracker`. Delivery routes to
 `inbox`/`topic`/`store`. Policy: `catch_up` (default false), `overlap` (default
 `skip`), `rate_limit` (default `5/30m`). See [Triggers]({{< relref "/docs/triggers.md" >}}) for the full
 reference.

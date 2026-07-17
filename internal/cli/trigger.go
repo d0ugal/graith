@@ -142,8 +142,11 @@ func renderTriggerList(w io.Writer, triggers []protocol.TriggerRecord) {
 
 	for _, t := range triggers {
 		when := t.Schedule
-		if t.Source == "watch" {
+		switch t.Source {
+		case "watch":
 			when = t.WatchScope
+		case "gcx":
+			when = t.GCXScope
 		}
 
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\n",
@@ -157,13 +160,14 @@ func renderTriggerList(w io.Writer, triggers []protocol.TriggerRecord) {
 func renderTriggerStatus(w io.Writer, t protocol.TriggerRecord) {
 	_, _ = fmt.Fprintf(w, "Trigger: %s (%s → %s)\n", t.Name, t.Source, t.Action)
 
-	if t.Source == "schedule" {
+	switch t.Source {
+	case "schedule":
 		_, _ = fmt.Fprintf(w, "Schedule: %s\n", t.Schedule)
 
 		if t.NextFire != "" {
 			_, _ = fmt.Fprintf(w, "Next fire: %s\n", t.NextFire)
 		}
-	} else {
+	case "watch":
 		_, _ = fmt.Fprintf(w, "Watch: %s (%d live binding(s))\n", t.WatchScope, t.Bindings)
 
 		if t.Degraded != "" {
@@ -172,6 +176,11 @@ func renderTriggerStatus(w io.Writer, t protocol.TriggerRecord) {
 			if t.DegradedRetryAt != "" {
 				_, _ = fmt.Fprintf(w, "Next retry: %s (after %d attempt(s); recovers automatically when the watch limit clears)\n", t.DegradedRetryAt, t.DegradedRetryCount)
 			}
+		}
+	case "gcx":
+		_, _ = fmt.Fprintf(w, "GCX: %s\n", t.GCXScope)
+		if t.NextPoll != "" {
+			_, _ = fmt.Fprintf(w, "Next poll: %s\n", t.NextPoll)
 		}
 	}
 

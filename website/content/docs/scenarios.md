@@ -113,6 +113,9 @@ these extra restrictions:
 - **No external references.** A scenario trigger cannot start another scenario
   (`type = "scenario"`), and a `command` action must use a `[trigger.watch]`
   source (a schedule `command` would name a repo outside the scenario).
+- **No `[trigger.gcx]` source.** A gcx cursor, authentication context, and
+  on-call gate are daemon-global and can outlive a scenario, so gcx triggers
+  belong in the main `config.toml`.
 
 ```toml
 version = 1

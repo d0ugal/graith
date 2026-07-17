@@ -1,5 +1,5 @@
 // Package tools resolves the external executables graith shells out to: git,
-// gh, the notification shell, osascript, ps, and lsof. Historically these names
+// gh, gcx, the notification shell, osascript, ps, and lsof. Historically these names
 // and paths were hard-coded ("git", "gh", "sh", "osascript", "/bin/ps",
 // "/usr/sbin/lsof"), which broke Nix/custom-PATH installs, wrapper binaries, and
 // alternate shells (issue #1238).
@@ -31,6 +31,7 @@ import (
 type Config struct {
 	Git       string
 	GH        string
+	GCX       string
 	Shell     string
 	OSAScript string
 	PS        string
@@ -43,6 +44,7 @@ func Defaults() Config {
 	return Config{
 		Git:       "git",
 		GH:        "gh",
+		GCX:       "gcx",
 		Shell:     "sh",
 		OSAScript: "osascript",
 		PS:        "/bin/ps",
@@ -61,6 +63,10 @@ func merge(c Config) Config {
 
 	if c.GH == "" {
 		c.GH = d.GH
+	}
+
+	if c.GCX == "" {
+		c.GCX = d.GCX
 	}
 
 	if c.Shell == "" {
@@ -116,6 +122,9 @@ func Git() string { return get().Git }
 // GH returns the configured GitHub CLI executable.
 func GH() string { return get().GH }
 
+// GCX returns the configured Grafana Cloud CLI executable.
+func GCX() string { return get().GCX }
+
 // Shell returns the configured shell used to run notification and trigger
 // commands (invoked as `<shell> -c <command>`).
 func Shell() string { return get().Shell }
@@ -143,6 +152,7 @@ func Validate(c Config) error {
 	for _, f := range []struct{ key, val string }{
 		{"git", c.Git},
 		{"gh", c.GH},
+		{"gcx", c.GCX},
 		{"shell", c.Shell},
 		{"osascript", c.OSAScript},
 		{"ps", c.PS},

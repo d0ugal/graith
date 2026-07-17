@@ -25,6 +25,7 @@ func TestDefaultsPreservesHistoricalNames(t *testing.T) {
 	cases := map[string]string{
 		"git":       d.Git,
 		"gh":        d.GH,
+		"gcx":       d.GCX,
 		"sh":        d.Shell,
 		"osascript": d.OSAScript,
 	}
@@ -57,6 +58,10 @@ func TestConfigureFillsEmptyFieldsWithDefaults(t *testing.T) {
 		t.Errorf("GH() = %q, want default gh", got)
 	}
 
+	if got := GCX(); got != "gcx" {
+		t.Errorf("GCX() = %q, want default gcx", got)
+	}
+
 	if got := Shell(); got != "sh" {
 		t.Errorf("Shell() = %q, want default sh", got)
 	}
@@ -67,7 +72,7 @@ func TestConfigureFillsEmptyFieldsWithDefaults(t *testing.T) {
 }
 
 func TestResetRestoresDefaults(t *testing.T) {
-	Configure(Config{Git: "custom-git", GH: "custom-gh"})
+	Configure(Config{Git: "custom-git", GH: "custom-gh", GCX: "custom-gcx"})
 	Reset()
 
 	if got := Git(); got != "git" {
@@ -76,6 +81,10 @@ func TestResetRestoresDefaults(t *testing.T) {
 
 	if got := GH(); got != "gh" {
 		t.Errorf("after Reset, GH() = %q, want gh", got)
+	}
+
+	if got := GCX(); got != "gcx" {
+		t.Errorf("after Reset, GCX() = %q, want gcx", got)
 	}
 }
 

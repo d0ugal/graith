@@ -153,6 +153,13 @@ func ValidateScenarioTriggers(triggers []config.TriggerConfig, roles, members ma
 // structurally-valid trigger: role-only watch selection against defined roles,
 // no external repo, and no delivery to a session outside the scenario.
 func validateScenarioTriggerRestrictions(where string, t *config.TriggerConfig, roles, members map[string]bool) error {
+	// gcx is a daemon-global external integration whose credentials, cursor, and
+	// on-call gate outlive any one scenario. Scenario triggers are scoped to their
+	// member sessions, so they cannot own this source.
+	if t.IsGCX() {
+		return fmt.Errorf("%s: scenario triggers cannot use a [gcx] source (it is a daemon-global external integration)", where)
+	}
+
 	// A scenario must not spawn another scenario (that would name a scenario
 	// outside its own membership).
 	if t.Action.Type == config.ActionScenario {

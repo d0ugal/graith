@@ -106,13 +106,14 @@ func TestToolsResolvedCopiesFields(t *testing.T) {
 	tc := ToolsConfig{
 		Git:       "g",
 		GH:        "h",
+		GCX:       "x",
 		Shell:     "s",
 		OSAScript: "o",
 		PS:        "p",
 		Lsof:      "l",
 	}
 
-	want := tools.Config{Git: "g", GH: "h", Shell: "s", OSAScript: "o", PS: "p", Lsof: "l"}
+	want := tools.Config{Git: "g", GH: "h", GCX: "x", Shell: "s", OSAScript: "o", PS: "p", Lsof: "l"}
 	if got := tc.Resolved(""); got != want {
 		t.Errorf("Resolved() = %+v, want %+v", got, want)
 	}
