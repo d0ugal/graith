@@ -266,10 +266,159 @@ func TestCheckForUpdate_NoCache(t *testing.T) {
 	Version = "v999.0.0"
 	dir := t.TempDir()
 
-	// With no cache and a version newer than any release, result should be nil
-	// (whether the fetch succeeds or fails, there's no newer version)
+	// A version newer than any release yields no result; the fetch is stubbed so
+	// the test never touches the network.
+	stubFetch(t, func(string, time.Duration) (string, error) { return "v1.0.0", nil })
+
 	result := CheckForUpdate(dir, UpdateSettings{})
 	if result != nil {
 		t.Errorf("expected nil result for version newer than any release, got %+v", result)
+	}
+}
+
+// stubFetch replaces the release lookup seam for the duration of a test so no
+// network access occurs, restoring the original on cleanup.
+func stubFetch(t *testing.T, fn func(string, time.Duration) (string, error)) {
+	t.Helper()
+
+	orig := fetchLatest
+	fetchLatest = fn
+
+	t.Cleanup(func() { fetchLatest = orig })
+}
+
+// TestCheckForUpdate_CacheScopedToRepository is the #1290 regression: a fresh
+// cache seeded for repository A must not be reported when the configured
+// repository is B. Instead the check refetches from B and caches B's result.
+func TestCheckForUpdate_CacheScopedToRepository(t *testing.T) {
+	origVersion := Version
+	defer func() { Version = origVersion }()
+
+	Version = "v0.2.0"
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "update-check.json")
+
+	// Repository A's fresh cache advertises a newer release that must be ignored
+	// once we switch to repository B.
+	seed := &UpdateCache{
+		LatestVersion: "v9.9.9",
+		CheckedAt:     time.Now(),
+		Repository:    "braw/repo-a",
+	}
+
+	data, err := json.Marshal(seed)
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+
+	if err := os.WriteFile(cachePath, data, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	var fetched string
+
+	stubFetch(t, func(repository string, _ time.Duration) (string, error) {
+		fetched = repository
+		return "v0.3.0", nil
+	})
+
+	result := CheckForUpdate(dir, UpdateSettings{Repository: "canny/repo-b"})
+	if result == nil {
+		t.Fatal("expected repository B to be fetched, not repository A's cache")
+	}
+
+	if result.LatestVersion == "v9.9.9" {
+		t.Fatalf("repository A's cached release %q was reused for repository B", result.LatestVersion)
+	}
+
+	if result.LatestVersion != "v0.3.0" {
+		t.Errorf("LatestVersion = %q, want v0.3.0", result.LatestVersion)
+	}
+
+	if fetched != "canny/repo-b" {
+		t.Errorf("fetched repository = %q, want canny/repo-b", fetched)
+	}
+
+	// The refreshed cache must now be scoped to repository B.
+	got, err := readUpdateCache(cachePath)
+	if err != nil {
+		t.Fatalf("read refreshed cache: %v", err)
+	}
+
+	if got.Repository != "canny/repo-b" {
+		t.Errorf("refreshed cache repository = %q, want canny/repo-b", got.Repository)
+	}
+}
+
+// TestCheckForUpdate_LegacyCacheReusedForDefaultRepository documents the
+// conservative compatibility behaviour: a legacy entry (no repository field) is
+// treated as DefaultRepository, so it is reused when the effective repository is
+// the default and no fetch occurs.
+func TestCheckForUpdate_LegacyCacheReusedForDefaultRepository(t *testing.T) {
+	origVersion := Version
+	defer func() { Version = origVersion }()
+
+	Version = "v0.2.0"
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "update-check.json")
+
+	// Legacy on-disk shape: latest_version + checked_at, no repository field.
+	if err := os.WriteFile(cachePath, []byte(`{"latest_version":"v0.3.0","checked_at":"`+
+		time.Now().Format(time.RFC3339Nano)+`"}`), 0o600); err != nil {
+		t.Fatalf("write legacy cache: %v", err)
+	}
+
+	stubFetch(t, func(string, time.Duration) (string, error) {
+		t.Fatal("legacy cache for the default repository must not trigger a fetch")
+		return "", nil
+	})
+
+	result := CheckForUpdate(dir, UpdateSettings{})
+	if result == nil {
+		t.Fatal("expected the legacy default-repository cache to be reused")
+	}
+
+	if result.LatestVersion != "v0.3.0" {
+		t.Errorf("LatestVersion = %q, want v0.3.0", result.LatestVersion)
+	}
+}
+
+// TestCheckForUpdate_LegacyCacheRefreshedForConfiguredRepository proves the
+// other half of the compatibility rule: a legacy entry (implicitly the default
+// repository) is discarded when a non-default repository is configured, forcing
+// a refresh rather than reusing the default repository's release.
+func TestCheckForUpdate_LegacyCacheRefreshedForConfiguredRepository(t *testing.T) {
+	origVersion := Version
+	defer func() { Version = origVersion }()
+
+	Version = "v0.2.0"
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "update-check.json")
+
+	if err := os.WriteFile(cachePath, []byte(`{"latest_version":"v9.9.9","checked_at":"`+
+		time.Now().Format(time.RFC3339Nano)+`"}`), 0o600); err != nil {
+		t.Fatalf("write legacy cache: %v", err)
+	}
+
+	fetched := false
+
+	stubFetch(t, func(repository string, _ time.Duration) (string, error) {
+		fetched = true
+
+		if repository != "canny/repo-b" {
+			t.Errorf("fetched repository = %q, want canny/repo-b", repository)
+		}
+
+		return "v0.3.0", nil
+	})
+
+	result := CheckForUpdate(dir, UpdateSettings{Repository: "canny/repo-b"})
+
+	if !fetched {
+		t.Fatal("configured non-default repository must force a refresh of a legacy cache")
+	}
+
+	if result == nil || result.LatestVersion != "v0.3.0" {
+		t.Fatalf("expected the freshly fetched v0.3.0, got %+v", result)
 	}
 }

@@ -42,11 +42,32 @@ type UpdateSettings struct {
 type UpdateCache struct {
 	LatestVersion string    `json:"latest_version"`
 	CheckedAt     time.Time `json:"checked_at"`
+	// Repository records the "owner/repo" the cached release came from so a
+	// fresh entry is never reused for a different repository. It was added after
+	// the repository became configurable; a legacy entry without this field is
+	// treated as DefaultRepository (see effectiveRepository).
+	Repository string `json:"repository,omitempty"`
 }
 
 type UpdateResult struct {
 	LatestVersion  string
 	CurrentVersion string
+}
+
+// fetchLatest is the release lookup seam. Tests replace it to avoid network
+// access; production uses fetchLatestVersion.
+var fetchLatest = fetchLatestVersion
+
+// effectiveRepository resolves a possibly-empty configured or cached repository
+// to the concrete "owner/repo" actually queried. An empty value (unset config
+// or a legacy cache file predating the field) maps to DefaultRepository, which
+// is the only repository older builds ever wrote.
+func effectiveRepository(repository string) string {
+	if repository == "" {
+		return DefaultRepository
+	}
+
+	return repository
 }
 
 func CheckForUpdate(cacheDir string, settings UpdateSettings) *UpdateResult {
@@ -64,14 +85,19 @@ func CheckForUpdate(cacheDir string, settings UpdateSettings) *UpdateResult {
 	}
 
 	cachePath := filepath.Join(cacheDir, "update-check.json")
+	repository := effectiveRepository(settings.Repository)
 
 	if info, err := readUpdateCache(cachePath); err == nil {
-		if time.Since(info.CheckedAt) < interval {
+		// A fresh entry is only reusable when it came from the repository we are
+		// configured to check. A repository change (or a legacy entry whose
+		// implicit DefaultRepository differs from a now-configured one) forces a
+		// refresh so the previous repository's release is never reported.
+		if time.Since(info.CheckedAt) < interval && effectiveRepository(info.Repository) == repository {
 			return buildResult(info.LatestVersion)
 		}
 	}
 
-	latest, err := fetchLatestVersion(settings.Repository, settings.Timeout)
+	latest, err := fetchLatest(settings.Repository, settings.Timeout)
 	if err != nil {
 		return nil
 	}
@@ -79,6 +105,7 @@ func CheckForUpdate(cacheDir string, settings UpdateSettings) *UpdateResult {
 	writeUpdateCache(cachePath, &UpdateCache{
 		LatestVersion: latest,
 		CheckedAt:     time.Now(),
+		Repository:    repository,
 	})
 
 	return buildResult(latest)
