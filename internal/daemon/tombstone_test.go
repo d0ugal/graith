@@ -37,7 +37,9 @@ func TestWriteRemoveTombstoneRoundTrip(t *testing.T) {
 		t.Errorf("round-trip mismatch: %+v", got)
 	}
 
-	sm.removeTombstone("braw1")
+	if err := sm.removeTombstone("braw1"); err != nil {
+		t.Fatalf("removeTombstone: %v", err)
+	}
 
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("tombstone still present after remove (err=%v)", err)
@@ -237,5 +239,116 @@ func TestTeardownArtifactsInPlaceIsNoop(t *testing.T) {
 
 	if _, err := os.Stat(repo); err != nil {
 		t.Errorf("in-place teardown removed the repo: %v", err)
+	}
+}
+
+// TestResumeTombstonesRetainsWhenOrphanUnkillable is the regression for the
+// delete-resume half of issue #1326: if a leftover tombstone's process is alive
+// but cannot be verifiably killed, startup must NOT tear down its worktree or
+// drop its state/tombstone — that would orphan a live agent from its worktree.
+// Everything is retained for a later retry.
+func TestResumeTombstonesRetainsWhenOrphanUnkillable(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	pid := spawnReapableSleeper(t)
+
+	worktree := filepath.Join(sm.paths.DataDir, "worktrees", "croft", "hash", "thrawn1")
+	if err := os.MkdirAll(worktree, 0o700); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+
+	sm.state.Sessions["thrawn1"] = &SessionState{
+		ID: "thrawn1", Name: "thrawn", WorktreePath: worktree, Status: StatusStopped,
+	}
+
+	// A deliberately wrong recorded start time makes killVerifiedProcess refuse to
+	// signal the (still-alive) process — an identity mismatch, so the reap "fails".
+	if err := sm.writeTombstone(tombstone{
+		teardownSpec: teardownSpec{ID: "thrawn1", WorktreePath: worktree},
+		Name:         "thrawn",
+		PID:          pid,
+		PIDStartTime: 1,
+		CreatedAt:    time.Now(),
+	}); err != nil {
+		t.Fatalf("writeTombstone: %v", err)
+	}
+
+	sm.resumeTombstones()
+
+	if !isProcessAlive(pid) {
+		t.Error("process was signalled despite an unverifiable identity")
+	}
+
+	if _, err := os.Stat(worktree); err != nil {
+		t.Errorf("worktree torn down while its process may still be alive: %v", err)
+	}
+
+	if _, err := os.Stat(sm.tombstonePath("thrawn1")); err != nil {
+		t.Errorf("tombstone dropped despite an un-reaped live process: %v", err)
+	}
+
+	if _, ok := sm.state.Sessions["thrawn1"]; !ok {
+		t.Error("session removed from state despite an un-reaped live process")
+	}
+}
+
+// TestRemoveTombstoneReturnsErrorOnUnlinkFailure proves tombstone removal is not
+// silently best-effort on the paths that rely on it: an unlink failure is
+// returned (not swallowed) and the marker survives, so a caller establishing a
+// kept-for-retry/aborted state can refuse to report a cleanly restored state
+// while the marker is still armed (issue #1326).
+func TestRemoveTombstoneReturnsErrorOnUnlinkFailure(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	if err := sm.writeTombstone(tombstone{
+		teardownSpec: teardownSpec{ID: "braw1"},
+		Name:         "braw",
+		CreatedAt:    time.Now(),
+	}); err != nil {
+		t.Fatalf("writeTombstone: %v", err)
+	}
+
+	// A read-only tombstone directory makes the unlink fail (no write permission on
+	// the parent), standing in for an I/O failure during removal.
+	dir := sm.tombstoneDir()
+	if err := os.Chmod(dir, 0o500); err != nil { //nolint:gosec // G302: a directory needs its exec bit; read-only here to induce an unlink failure
+		t.Fatalf("chmod tombstone dir: %v", err)
+	}
+
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // G302: restoring normal directory permissions
+
+	if err := sm.removeTombstone("braw1"); err == nil {
+		t.Fatal("removeTombstone returned nil despite an unlink failure")
+	}
+
+	if err := os.Chmod(dir, 0o700); err != nil { //nolint:gosec // G302: restoring normal directory permissions
+		t.Fatalf("restore tombstone dir perms: %v", err)
+	}
+
+	if _, err := os.Stat(sm.tombstonePath("braw1")); err != nil {
+		t.Errorf("marker vanished despite the reported removal failure: %v", err)
+	}
+}
+
+// TestRemoveTombstoneReturnsErrorOnDirSyncFailure proves the durable-removal
+// contract via the dir-fsync branch: even when the unlink succeeds, a parent-
+// directory fsync failure (the unlink is not yet durable) is propagated so
+// abort/retry callers don't report a cleanly restored state while the marker may
+// still resurrect on a crash (issue #1326).
+func TestRemoveTombstoneReturnsErrorOnDirSyncFailure(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	if err := sm.writeTombstone(tombstone{
+		teardownSpec: teardownSpec{ID: "braw1"},
+		Name:         "braw",
+		CreatedAt:    time.Now(),
+	}); err != nil {
+		t.Fatalf("writeTombstone: %v", err)
+	}
+
+	sm.tombstoneDirSyncFault = func() error { return errBoom }
+
+	if err := sm.removeTombstone("braw1"); err == nil {
+		t.Fatal("removeTombstone returned nil despite a parent-dir fsync failure")
 	}
 }

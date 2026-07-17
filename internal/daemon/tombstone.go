@@ -88,15 +88,73 @@ func (sm *SessionManager) writeTombstone(t tombstone) error {
 		return fmt.Errorf("marshal tombstone: %w", err)
 	}
 
-	return atomicfile.Write(sm.tombstonePath(t.ID), data, 0o600)
+	if err := atomicfile.Write(sm.tombstonePath(t.ID), data, 0o600); err != nil {
+		return err
+	}
+
+	// Test seam: simulate a post-rename dir-fsync failure — the marker is already
+	// on disk but the write is reported as failed, so callers must fail closed and
+	// clean up the landed marker (issue #1326).
+	if sm.writeTombstoneFault != nil {
+		return sm.writeTombstoneFault(t.ID)
+	}
+
+	return nil
 }
 
-// removeTombstone clears a tombstone once its session's teardown resolves
-// (either completed or reverted for retry).
-func (sm *SessionManager) removeTombstone(id string) {
-	if err := os.Remove(sm.tombstonePath(id)); err != nil && !os.IsNotExist(err) {
+// removeTombstone durably clears a tombstone once its session's teardown resolves
+// (either completed or reverted for retry). The unlink is followed by a parent-
+// directory fsync: without it a crash could resurrect a "removed" marker and, on
+// an abort/retry path, resume a delete against a session whose state and driver
+// were restored (issue #1326). A missing tombstone is success (idempotent). The
+// error is returned so callers that rely on removal to establish a kept-for-retry
+// or aborted state can propagate it instead of silently reporting a clean state.
+func (sm *SessionManager) removeTombstone(id string) error {
+	if err := os.Remove(sm.tombstonePath(id)); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+
 		sm.log.Warn("failed to remove tombstone", "id", id, "err", err)
+
+		return err
 	}
+
+	if err := sm.fsyncTombstoneDir(); err != nil {
+		sm.log.Warn("failed to fsync tombstone dir after removal", "id", id, "err", err)
+
+		return err
+	}
+
+	return nil
+}
+
+// fsyncTombstoneDir makes a preceding unlink durable, honouring the test fault
+// seam so the dir-fsync-failure branch can be exercised deterministically.
+func (sm *SessionManager) fsyncTombstoneDir() error {
+	if sm.tombstoneDirSyncFault != nil {
+		return sm.tombstoneDirSyncFault()
+	}
+
+	return syncTombstoneDir(sm.tombstoneDir())
+}
+
+// syncTombstoneDir fsyncs the tombstone directory so an unlink is durable. A
+// non-existent directory is treated as success (nothing to make durable).
+func syncTombstoneDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+
+		return err
+	}
+
+	err = d.Sync()
+	_ = d.Close()
+
+	return err
 }
 
 // resumeTombstones finishes any deletions that were interrupted mid-flight. It
@@ -140,11 +198,16 @@ func (sm *SessionManager) resumeTombstones() {
 		sm.log.Info("resuming interrupted delete", "id", t.ID, "name", t.Name)
 
 		// Reap a leftover orphan process (verified by start time) before removing
-		// the worktree it may still be running in.
+		// the worktree it may still be running in. If it is alive but cannot be
+		// verifiably killed, do NOT tear down its worktree or drop its state/marker:
+		// that would orphan a live agent from its worktree. Retain everything so a
+		// later startup (or gr gc) retries the reap (issue #1326).
 		if t.PID > 0 {
 			if _, err := sm.killVerifiedProcess(t.PID, t.PIDStartTime); err != nil {
-				sm.log.Warn("could not reap orphan during delete-resume",
+				sm.log.Warn("could not reap orphan during delete-resume; retaining tombstone and worktree for retry",
 					"id", t.ID, "pid", t.PID, "err", err)
+
+				continue
 			}
 		}
 

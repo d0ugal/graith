@@ -833,11 +833,27 @@ func (s *State) Reconcile() {
 		}
 
 		if sess.Status == StatusDeleting {
-			slog.Info("session stuck in deleting, reverting to stopped", "id", id)
+			// An interrupted delete (crash before the recovery tombstone was written)
+			// reverts the session. If its process is still alive it must be handed to
+			// the orphan sweep like any other crash-orphan rather than silently left
+			// recorded-but-unreaped — cleanupOrphanedProcesses only considers running
+			// sessions, so route it there by keeping it running for the sweep. A dead
+			// or PID-less session just reverts to stopped (issue #1326).
+			if sess.PID > 0 && isProcessAlive(sess.PID) {
+				slog.Info("session interrupted mid-delete with a live process, handing to orphan sweep", "id", id, "pid", sess.PID)
 
-			sess.Status = StatusStopped
-			sess.StatusChangedAt = time.Now()
-			applyLifecycleSummaryLocked(sess, "Delete interrupted by restart")
+				sess.Status = StatusRunning
+				sess.StatusChangedAt = time.Now()
+				applyLifecycleSummaryLocked(sess, "Delete interrupted by restart")
+			} else {
+				slog.Info("session stuck in deleting, reverting to stopped", "id", id)
+
+				sess.Status = StatusStopped
+				sess.StatusChangedAt = time.Now()
+				sess.PID = 0
+				sess.PIDStartTime = 0
+				applyLifecycleSummaryLocked(sess, "Delete interrupted by restart")
+			}
 		}
 	}
 }
