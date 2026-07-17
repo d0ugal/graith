@@ -402,6 +402,95 @@ func TestConnectForApprovalRejectsIncompatibleVersion(t *testing.T) {
 	}
 }
 
+// captureDialTimeout replaces the dialLocalDaemon seam with a stub that records
+// the timeout passed to it and answers with a scripted handshake_ok over an
+// in-memory pipe. It returns a pointer to the captured timeout. The exchange is
+// synchronous (net.Pipe), so the fast paths complete without sleeping on real
+// network timing. Restored on cleanup.
+func captureDialTimeout(t *testing.T) *time.Duration {
+	t.Helper()
+
+	orig := dialLocalDaemon
+
+	t.Cleanup(func() { dialLocalDaemon = orig })
+
+	var captured time.Duration
+
+	dialLocalDaemon = func(_, _ string, timeout time.Duration) (net.Conn, error) {
+		captured = timeout
+
+		clientConn, serverConn := net.Pipe()
+
+		go func() {
+			defer func() { _ = serverConn.Close() }()
+
+			reader := protocol.NewFrameReader(serverConn)
+			writer := protocol.NewFrameWriter(serverConn)
+
+			if _, err := reader.ReadFrame(); err != nil {
+				return
+			}
+
+			resp, _ := protocol.EncodeControl("handshake_ok", protocol.HandshakeOkMsg{
+				Version:       protocol.Version,
+				DaemonVersion: "dev",
+			})
+			_ = writer.WriteFrame(protocol.ChannelControl, resp)
+		}()
+
+		return clientConn, nil
+	}
+
+	return &captured
+}
+
+// TestConnectFastUsesConfiguredDialTimeout proves the hook fast path dials with
+// the configured [connection].dial_timeout rather than a hard-coded literal. It
+// installs a deliberately non-default duration, so restoring the old 500ms
+// literal would fail this test. See issue #1286.
+func TestConnectFastUsesConfiguredDialTimeout(t *testing.T) {
+	saveConnectionTimeouts(t)
+
+	const braw = 321 * time.Millisecond
+
+	daemonDialTimeout = braw
+
+	captured := captureDialTimeout(t)
+
+	c, err := ConnectFast(config.Paths{SocketPath: "/bothy/fast.sock"})
+	if err != nil {
+		t.Fatalf("ConnectFast: %v", err)
+	}
+	defer c.Close()
+
+	if *captured != braw {
+		t.Errorf("ConnectFast dial timeout = %v, want the configured %v", *captured, braw)
+	}
+}
+
+// TestConnectForApprovalUsesConfiguredDialTimeout proves the approval fast path
+// dials with the configured [connection].dial_timeout. The long approval
+// deadline stays independent of the dial timeout. See issue #1286.
+func TestConnectForApprovalUsesConfiguredDialTimeout(t *testing.T) {
+	saveConnectionTimeouts(t)
+
+	const canny = 274 * time.Millisecond
+
+	daemonDialTimeout = canny
+
+	captured := captureDialTimeout(t)
+
+	c, err := ConnectForApproval(config.Paths{SocketPath: "/bothy/approval.sock"}, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("ConnectForApproval: %v", err)
+	}
+	defer c.Close()
+
+	if *captured != canny {
+		t.Errorf("ConnectForApproval dial timeout = %v, want the configured %v", *captured, canny)
+	}
+}
+
 func TestClose(t *testing.T) {
 	c, serverConn := setupTestClient(t)
 

@@ -307,9 +307,11 @@ func waitForSocketGone(sockPath string) {
 }
 
 // ConnectFast is a fast-path connect for hooks. It dials the daemon socket
-// directly with a short timeout and does NOT auto-start the daemon.
+// directly with the configured local dial timeout ([connection].dial_timeout,
+// installed via ConfigureConnection) and does NOT auto-start the daemon. The
+// short handshake deadline set below stays independent of the dial timeout.
 func ConnectFast(paths config.Paths) (*Client, error) {
-	conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond)
+	conn, err := dialLocalDaemon("unix", paths.SocketPath, daemonDialTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("daemon not reachable: %w", err)
 	}
@@ -367,11 +369,13 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 }
 
 // ConnectForApproval is like ConnectFast but with a long deadline suitable
-// for blocking on approval responses. The socket deadline is set to
+// for blocking on approval responses. The dial uses the configured local dial
+// timeout ([connection].dial_timeout), while the socket deadline is set to
 // approvalTimeout plus a one-minute grace period (minimum one minute total)
-// so the connection outlives the daemon's approval timer.
+// so the connection outlives the daemon's approval timer. The approval deadline
+// stays independent of the dial timeout.
 func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Client, error) {
-	conn, err := net.DialTimeout("unix", paths.SocketPath, 500*time.Millisecond)
+	conn, err := dialLocalDaemon("unix", paths.SocketPath, daemonDialTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("daemon not reachable: %w", err)
 	}
