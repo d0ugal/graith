@@ -49,15 +49,20 @@ func TestEffectiveTOMLMaterializesRuntimeDefaults(t *testing.T) {
 	}
 
 	for _, check := range []struct {
-		name string
-		raw  string
-		want time.Duration
+		name      string
+		raw       string
+		canonical string
+		want      time.Duration
 	}{
-		{"remote.pending_pairing_ttl", rendered.Remote.PendingPairingTTL, cfg.Remote.PendingPairingTTLDuration()},
-		{"remote.pair_fallback_window", rendered.Remote.PairFallbackWindow, fallback.Per},
-		{"approvals.command_timeout", rendered.Approvals.CommandTimeout, cfg.Approvals.CommandTimeoutDuration()},
-		{"approvals.localmost_timeout", rendered.Approvals.LocalmostTimeout, cfg.Approvals.LocalmostTimeoutDuration()},
+		{"remote.pending_pairing_ttl", rendered.Remote.PendingPairingTTL, "10m", RemotePendingPairingTTLDefault},
+		{"remote.pair_fallback_window", rendered.Remote.PairFallbackWindow, "1m", RemotePairFallbackWindowDefault},
+		{"approvals.command_timeout", rendered.Approvals.CommandTimeout, "", cfg.Approvals.CommandTimeoutDuration()},
+		{"approvals.localmost_timeout", rendered.Approvals.LocalmostTimeout, "", cfg.Approvals.LocalmostTimeoutDuration()},
 	} {
+		if check.canonical != "" && check.raw != check.canonical {
+			t.Errorf("%s rendered as %q, want canonical spelling %q", check.name, check.raw, check.canonical)
+		}
+
 		got, err := ParseDurationWithDays(check.raw)
 		if err != nil {
 			t.Errorf("%s raw rendered value %q is not a duration: %v", check.name, check.raw, err)
