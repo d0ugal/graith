@@ -590,68 +590,96 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 		backoffLevel = 0
 	}
 
-	delay := orchestratorRestartDelay(restartCfg, backoffLevel)
-
-	sm.mu.Lock()
-	if s, ok := sm.state.Sessions[id]; ok {
-		s.BackoffLevel = backoffLevel + 1
-	}
-
-	_ = sm.saveState()
-	sm.mu.Unlock()
-
-	sm.log.Info("scheduling orchestrator restart", "id", id, "delay", delay, "backoff_level", backoffLevel+1)
-
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(delay):
-	}
-
-	sm.mu.RLock()
-
-	sess, ok = sm.state.Sessions[id]
-	if !ok {
-		sm.mu.RUnlock()
-		return
-	}
-
-	enabled := sm.cfg.Orchestrator.Enabled
-	_, hasLivePTY := sm.sessions[id]
-	currentReason := sess.StopReason
-
-	sm.mu.RUnlock()
-
-	if !enabled || hasLivePTY || currentReason == StopReasonUser || currentReason == StopReasonIdle || currentReason == StopReasonShutdown {
-		sm.log.Info("orchestrator restart preconditions not met, skipping", "id", id)
-		return
-	}
-
-	if backoffLevel+1 >= restartCfg.FreshStartThresholdOrDefault() {
-		// Snapshot config off-lock: the mutation below holds sm.mu, under which
-		// sm.Config() (an RLock) must not be called.
-		cfg := sm.Config()
+	// Reconciliation loop toward the desired enabled state. A failed Resume no
+	// longer abandons an orchestrator that config still says should exist: it
+	// advances to the next backoff level and tries again, so a transient failure
+	// self-heals on a later attempt (issue #1284). The delay grows geometrically
+	// and is capped by max_backoff, so retries never become a restart storm, and
+	// ctx cancellation (daemon shutdown) ends the loop promptly.
+	for {
+		delay := orchestratorRestartDelay(restartCfg, backoffLevel)
 
 		sm.mu.Lock()
-		if s, ok := sm.state.Sessions[id]; ok && cfg.Agents[s.Agent].ForcesNativeID() {
-			s.AgentSessionID = newAgentSessionID()
-			s.FreshStart = true
-
-			sm.log.Info("regenerating orchestrator agent session ID for fresh start", "id", id)
+		if s, ok := sm.state.Sessions[id]; ok {
+			s.BackoffLevel = backoffLevel + 1
 		}
 
 		_ = sm.saveState()
 		sm.mu.Unlock()
-	}
 
-	lc := sm.Config().Lifecycle
+		sm.log.Info("scheduling orchestrator restart", "id", id, "delay", delay, "backoff_level", backoffLevel+1)
 
-	//nolint:contextcheck // session lifecycle is intentionally detached from the restart-scheduling ctx: the orchestrator session must persist, so Resume uses its own bounded background timeouts rather than this transient ctx.
-	if _, err := sm.Resume(id, lc.DefaultRowsOrDefault(), lc.DefaultColsOrDefault()); err != nil {
-		sm.log.Error("failed to auto-restart orchestrator", "id", id, "err", err)
-	} else {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+
+		sm.mu.RLock()
+
+		sess, ok = sm.state.Sessions[id]
+		if !ok {
+			sm.mu.RUnlock()
+			return
+		}
+
+		enabled := sm.cfg.Orchestrator.Enabled
+		_, hasLivePTY := sm.sessions[id]
+		currentReason := sess.StopReason
+
+		sm.mu.RUnlock()
+
+		if !enabled || hasLivePTY || currentReason == StopReasonUser || currentReason == StopReasonIdle || currentReason == StopReasonShutdown {
+			sm.log.Info("orchestrator restart preconditions not met, skipping", "id", id)
+			return
+		}
+
+		if backoffLevel+1 >= restartCfg.FreshStartThresholdOrDefault() {
+			// Snapshot config off-lock: the mutation below holds sm.mu, under which
+			// sm.Config() (an RLock) must not be called.
+			cfg := sm.Config()
+
+			sm.mu.Lock()
+			if s, ok := sm.state.Sessions[id]; ok && cfg.Agents[s.Agent].ForcesNativeID() {
+				s.AgentSessionID = newAgentSessionID()
+				s.FreshStart = true
+
+				sm.log.Info("regenerating orchestrator agent session ID for fresh start", "id", id)
+			}
+
+			_ = sm.saveState()
+			sm.mu.Unlock()
+		}
+
+		lc := sm.Config().Lifecycle
+
+		//nolint:contextcheck // session lifecycle is intentionally detached from the restart-scheduling ctx: the orchestrator session must persist, so Resume uses its own bounded background timeouts rather than this transient ctx.
+		if _, err := sm.resumeOrchestrator(id, lc.DefaultRowsOrDefault(), lc.DefaultColsOrDefault()); err != nil {
+			// Retry rather than give up: advance the backoff level so the next
+			// attempt waits longer, and loop. The precondition re-check above will
+			// still bail if the orchestrator is disabled or already live.
+			sm.log.Error("failed to auto-restart orchestrator; retrying after backoff", "id", id, "err", err, "next_backoff_level", backoffLevel+1)
+
+			backoffLevel++
+
+			continue
+		}
+
 		sm.log.Info("orchestrator auto-restarted", "id", id)
+
+		return
 	}
+}
+
+// resumeOrchestrator resumes the orchestrator session. It is a thin seam over
+// Resume so the supervisor's retry loop (issue #1284) can be driven with an
+// injected transient failure in tests; production leaves sm.resumeFn nil.
+func (sm *SessionManager) resumeOrchestrator(id string, rows, cols uint16) (SessionState, error) {
+	if sm.resumeFn != nil {
+		return sm.resumeFn(id, rows, cols)
+	}
+
+	return sm.Resume(id, rows, cols)
 }
 
 // orchestratorRestartDelay is the supervisor's final safety floor. Config load

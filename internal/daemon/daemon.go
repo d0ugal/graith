@@ -125,6 +125,11 @@ type SessionManager struct {
 	// without driving a full session respawn.
 	restartStuck func(id string, rows, cols uint16) error
 
+	// resumeFn is the orchestrator supervisor's resume action; nil in production
+	// (falls back to Resume). Tests override it to inject a transient resume
+	// failure and observe the reconciliation retry (issue #1284).
+	resumeFn func(id string, rows, cols uint16) (SessionState, error)
+
 	// watchAdd overrides fsnotify directory registration for watch-trigger
 	// bindings; nil in production (uses the watcher's Add). Tests set it to
 	// simulate an exhausted watch limit (fs.inotify.max_user_watches) and its
