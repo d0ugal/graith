@@ -46,6 +46,8 @@ gh_timeout                     = "5s"     # per-command timeout for the daemon's
 
 The loop-lifetime knobs — `base_tick`, `kick_channel_size`, and `ref_reconcile_interval` — are read when the daemon starts, so changing them takes effect on the next daemon restart; the rest apply on the next poll.
 
+The cadence knobs `base_tick` and `ref_reconcile_interval` pace daemon loop timers, so a `"0"`, `"0s"`, negative, or unparseable value falls back to the default shown rather than being applied.
+
 `kick_channel_size` must not exceed `4096`; larger values are rejected before
 the daemon starts so a typo cannot request an unsafe channel allocation. Kicks
 remain best-effort at any capacity, with ordinary timer polling as the fallback.
@@ -171,7 +173,9 @@ watched `.git` churns constantly and creates a feedback loop.
 
 The loop-lifetime knobs — `scheduler_tick` and `watch_reconcile_interval` — are
 read when the daemon starts, so changing them takes effect on the next daemon
-restart; the rest apply on the next fire.
+restart; the rest apply on the next fire. Both pace daemon loop timers, so a
+`"0"`, `"0s"`, negative, or unparseable value falls back to the default shown
+rather than being applied.
 
 ### Headless session actions (planned)
 

@@ -1931,9 +1931,11 @@ func (p PRWatchConfig) MaxNotifications() int {
 // debounce accessors above and keeps the embedded default_config.toml free to omit
 // the keys (so the Go fallback stays authoritative; see issue #1228).
 
-// BaseTickDuration is the base poll-loop cadence. Default 15s.
+// BaseTickDuration is the base poll-loop cadence. Default 15s; an unset,
+// unparseable, or non-positive value uses the default (the poll loop feeds this
+// straight to time.NewTicker, which panics on a non-positive interval).
 func (p PRWatchConfig) BaseTickDuration() time.Duration {
-	return parseDurationOr(p.Advanced.BaseTick, 15*time.Second)
+	return positiveDurationOrDefault(p.Advanced.BaseTick, 15*time.Second)
 }
 
 // BatchSize caps sessions polled per tick. Default 3.
@@ -2023,9 +2025,12 @@ func (p PRWatchConfig) KickedNoPRBackoffDuration() time.Duration {
 	return parseDurationOr(p.Advanced.KickedNoPRBackoff, 20*time.Second)
 }
 
-// RefReconcileIntervalDuration is the git-ref watcher reconcile cadence. Default 2s.
+// RefReconcileIntervalDuration is the git-ref watcher reconcile cadence. Default
+// 2s; an unset, unparseable, or non-positive value uses the default (the ref
+// watcher feeds this straight to time.NewTicker, which panics on a non-positive
+// interval).
 func (p PRWatchConfig) RefReconcileIntervalDuration() time.Duration {
-	return parseDurationOr(p.Advanced.RefReconcileInterval, 2*time.Second)
+	return positiveDurationOrDefault(p.Advanced.RefReconcileInterval, 2*time.Second)
 }
 
 // RefDebounceDuration coalesces a burst of ref writes into one kick. Default 750ms.
