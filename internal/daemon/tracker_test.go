@@ -242,6 +242,60 @@ func TestParseGitHubIssues(t *testing.T) {
 	}
 }
 
+// TestFetchGitHubIssuesUsesConfiguredTimeout guards issue #1318: the tracker
+// must route `gh issue list` through the effective configured gh timeout
+// (pr_watch.advanced.gh_timeout), not the 5s package fallback. It also proves the
+// value is read per-pass, so a live reload of the setting is observed.
+func TestFetchGitHubIssuesUsesConfiguredTimeout(t *testing.T) {
+	origAvail := ghAvailable
+	origRunner := ghRunner
+
+	t.Cleanup(func() { ghAvailable = origAvail; ghRunner = origRunner })
+
+	ghAvailable = func() bool { return true }
+
+	var observed time.Duration
+
+	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+		if dl, ok := ctx.Deadline(); ok {
+			observed = time.Until(dl)
+		}
+
+		return "[]", nil
+	}
+
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "remote", "add", "origin", "https://github.com/d0ugal/croft.git")
+
+	sm := newOrchTestSM(t)
+	tc := &config.TrackerConfig{Repo: repo}
+
+	// Mirror actionTracker's exact wiring: the effective timeout comes from the
+	// current config snapshot each pass.
+	fetchWith := func(ghTimeout string) time.Duration {
+		cfg := config.Default()
+		cfg.PRWatch.Advanced.GHTimeout = ghTimeout
+
+		if _, _, err := sm.fetchTrackerIssues(context.Background(), tc, repo, cfg.PRWatch.GHTimeoutDuration()); err != nil {
+			t.Fatalf("fetchTrackerIssues: %v", err)
+		}
+
+		return observed
+	}
+
+	// A non-default 45s timeout must be observed on the runner's deadline — the
+	// old code hard-capped this at the 5s ghTimeout constant.
+	if got := fetchWith("45s"); got < 44*time.Second || got > 45*time.Second {
+		t.Fatalf("observed deadline = %v, want ~45s (configured, not the 5s fallback)", got)
+	}
+
+	// A subsequent pass with a reloaded, shorter timeout is honoured too.
+	if got := fetchWith("12s"); got < 11*time.Second || got > 12*time.Second {
+		t.Fatalf("reloaded deadline = %v, want ~12s", got)
+	}
+}
+
 func TestParseGitHubIssuesEdgeCases(t *testing.T) {
 	if refs, err := parseGitHubIssues("", "croft"); err != nil || refs != nil {
 		t.Fatalf("empty output should be (nil, nil), got %+v %v", refs, err)

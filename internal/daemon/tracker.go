@@ -203,7 +203,14 @@ func (sm *SessionManager) actionTracker(ctx context.Context, t *config.TriggerCo
 		return "", errors.New("tracker action requires action.tracker.repo")
 	}
 
-	active, truncated, err := sm.fetchTrackerIssues(ctx, tc, repo)
+	// One config snapshot owns this reconciliation pass so the fetch timeout and
+	// the resume geometry below can never diverge if a reload lands mid-pass.
+	cfg := sm.Config()
+
+	// Reuse the PR-watch reader's effective gh timeout deliberately: the tracker
+	// shares the same `gh` command path, so raising pr_watch.advanced.gh_timeout
+	// for a slow GitHub host must lengthen tracker reconciliation too (issue #1318).
+	active, truncated, err := sm.fetchTrackerIssues(ctx, tc, repo, cfg.PRWatch.GHTimeoutDuration())
 	if err != nil {
 		return "", err
 	}
@@ -241,7 +248,7 @@ func (sm *SessionManager) actionTracker(ctx context.Context, t *config.TriggerCo
 
 	resumed := 0
 
-	lc := sm.Config().Lifecycle
+	lc := cfg.Lifecycle
 
 	for _, id := range plan.resume {
 		//nolint:contextcheck // Resume runs its own session lifecycle, detached from the fire ctx.
@@ -506,19 +513,20 @@ type ghIssue struct {
 // fetchTrackerIssues polls the configured provider for its active issues. The
 // truncated flag reports that the provider hit the fetch limit — the caller must
 // not infer inactivity (reap) from a capped, incomplete read.
-func (sm *SessionManager) fetchTrackerIssues(ctx context.Context, tc *config.TrackerConfig, repo string) (issues []issueRef, truncated bool, err error) {
+func (sm *SessionManager) fetchTrackerIssues(ctx context.Context, tc *config.TrackerConfig, repo string, ghTimeout time.Duration) (issues []issueRef, truncated bool, err error) {
 	switch tc.ProviderOr() {
 	case config.TrackerProviderGitHub:
-		return sm.fetchGitHubIssues(ctx, tc, repo)
+		return sm.fetchGitHubIssues(ctx, tc, repo, ghTimeout)
 	default:
 		return nil, false, fmt.Errorf("tracker provider %q is not supported", tc.ProviderOr())
 	}
 }
 
 // fetchGitHubIssues lists the repo's active issues via the `gh` CLI, reusing the
-// pr_watch reader's short-timeout, prompt-disabled runner. truncated is true when
-// the raw result hit the fetch limit (so the caller skips reaps that pass).
-func (sm *SessionManager) fetchGitHubIssues(ctx context.Context, tc *config.TrackerConfig, repo string) (issues []issueRef, truncated bool, err error) {
+// pr_watch reader's prompt-disabled runner and its effective configured timeout
+// (ghTimeout, from pr_watch.advanced.gh_timeout — issue #1318). truncated is true
+// when the raw result hit the fetch limit (so the caller skips reaps that pass).
+func (sm *SessionManager) fetchGitHubIssues(ctx context.Context, tc *config.TrackerConfig, repo string, ghTimeout time.Duration) (issues []issueRef, truncated bool, err error) {
 	if !ghAvailable() {
 		return nil, false, errors.New("gh CLI not found on PATH")
 	}

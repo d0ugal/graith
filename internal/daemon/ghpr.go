@@ -97,8 +97,9 @@ var ghRunner = func(ctx context.Context, dir string, args ...string) (string, er
 	return strings.TrimSpace(string(out)), err
 }
 
-// ghAvailable reports whether the gh binary is on PATH.
-func ghAvailable() bool {
+// ghAvailable reports whether the gh binary is on PATH. It is a var so tests can
+// exercise the gh-backed readers without a real gh binary installed.
+var ghAvailable = func() bool {
 	_, err := exec.LookPath(tools.GH())
 	return err == nil
 }
