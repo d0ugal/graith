@@ -5,7 +5,56 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/d0ugal/graith/internal/tools"
 )
+
+// TestDiscoverGitHubUsernameTimeoutBoundsGitFallbacks is the #1238 regression:
+// git.username_timeout must bound the WHOLE discovery, not just the gh attempt.
+// With gh failing fast, discovery falls through to the git fallbacks; a stalled
+// configured git wrapper must be cancelled by the ctx deadline rather than
+// hanging create/resume/fork. Before the fix the fallbacks used the context-less
+// RunOutput and would block for the wrapper's full sleep.
+func TestDiscoverGitHubUsernameTimeoutBoundsGitFallbacks(t *testing.T) {
+	dir := setupTestRepo(t)
+	stubGH(t, false, "") // gh exits non-zero → discovery falls through to git.
+	t.Cleanup(tools.Reset)
+
+	binDir := t.TempDir()
+	blockingGit := filepath.Join(binDir, "git")
+	// `exec sleep` replaces the shell with the sleep process so CommandContext
+	// kills the sleep directly on the deadline. A bare `sleep` would leave the
+	// shell's child holding the inherited stdout/stderr pipes, delaying Wait
+	// until the 30s sleep exits and making the regression flaky.
+	script := "#!/bin/sh\nexec sleep 30\n"
+
+	if err := os.WriteFile(blockingGit, []byte(script), 0o755); err != nil { //nolint:gosec // G306: stub must be executable
+		t.Fatal(err)
+	}
+
+	tools.Configure(tools.Config{Git: blockingGit})
+
+	const budget = 200 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+
+	start := time.Now()
+	got, err := DiscoverGitHubUsername(ctx, dir)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatalf("expected discovery to fail once the deadline cancels the git fallbacks, got %q", got)
+	}
+
+	// A single-process wrapper is killed promptly at the deadline, and the second
+	// fallback sees an already-expired ctx, so the whole discovery finishes well
+	// within a small multiple of the budget.
+	if elapsed > 10*budget {
+		t.Fatalf("discovery took %v; the git fallbacks were not bounded by the username_timeout deadline", elapsed)
+	}
+}
 
 func TestParseGitHubUsername(t *testing.T) {
 	tests := []struct {
