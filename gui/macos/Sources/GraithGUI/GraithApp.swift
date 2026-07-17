@@ -40,11 +40,12 @@ struct GraithApp: App {
             identity: identity,
             registry: registry
         )
+        let humanTokenPath = local.humanTokenPath
         let store = SessionStore(
             registry: registry,
             identity: identity,
             pairing: pairing,
-            localHumanToken: GraithLocalSocket.readHumanToken(at: local.humanTokenPath)
+            localHumanToken: { GraithLocalSocket.readHumanToken(at: humanTokenPath) }
         )
 
         _store = StateObject(wrappedValue: store)

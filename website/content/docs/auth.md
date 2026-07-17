@@ -54,9 +54,10 @@ The `gr` CLI handles this transparently:
 
 The macOS app uses the same local-human credential for its built-in **This
 Mac** connection. It resolves `human.token` alongside the active profile's data
-directory and connects over the local Unix socket automatically; local access
-does not use device pairing. Pairing in the app applies only when **Add Host**
-connects to another daemon over the tailnet.
+directory and re-reads it for each new local connection, so an app opened before
+the daemon starts recovers without relaunching. Local access does not use device
+pairing. Pairing in the app applies only when **Add Host** connects to another
+daemon over the tailnet.
 
 This closes the token-stripping gap: a sandboxed agent that unsets `GRAITH_TOKEN` can no longer masquerade as the human, because it cannot read `human.token` (the data dir is outside its sandbox). The security boundary is the sandbox — an *unsandboxed* agent can read either credential, so keep the sandbox on (and `gr doctor` warns when it is off).
 

@@ -64,36 +64,70 @@ struct ClientIntegrationTests {
         await conn.close()
     }
 
-    /// The high-level local client presents the daemon-written human token on
-    /// both handshake and RPC envelopes. Local transport sends NO auth_challenge.
-    @Test func protocolClientListLocalPresentsHumanToken() async throws {
-        let (clientStream, serverStream) = InMemoryByteStream.makePair()
-        let daemon = MockDaemon(stream: serverStream)
+    /// The high-level local client resolves the daemon-written human token when
+    /// each connection opens. This covers an app launched before `human.token`
+    /// exists and token changes across later reconnects. Local transport sends
+    /// NO auth_challenge.
+    @Test func protocolClientRefreshesLocalHumanTokenPerConnection() async throws {
+        let firstPair = InMemoryByteStream.makePair()
+        let secondPair = InMemoryByteStream.makePair()
+        let token = LockedBox<String?>(nil)
+        let streams = LockedBox([firstPair.client, secondPair.client])
 
-        let server = Task {
+        let firstServer = Task {
+            let daemon = MockDaemon(stream: firstPair.server)
             let hs = try await daemon.readControl()
             #expect(hs.type == "handshake")
             #expect(hs.token == "human-canny")
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl(
+                "handshake_ok",
+                HandshakeOkMsg(version: "1.0", daemonVersion: "dev")
+            )
             let listReq = try await daemon.readControl()
             #expect(listReq.type == "list")
             #expect(listReq.token == "human-canny")
             try await daemon.writeControl("session_list", SessionListMsg(sessions: [
                 makeSession(id: "canny", name: "canny"),
-                makeSession(id: "dreich", name: "dreich"),
             ]))
         }
 
-        let stream = clientStream
+        let secondServer = Task {
+            let daemon = MockDaemon(stream: secondPair.server)
+            let hs = try await daemon.readControl()
+            #expect(hs.type == "handshake")
+            #expect(hs.token == "human-braw")
+            try await daemon.writeControl(
+                "handshake_ok",
+                HandshakeOkMsg(version: "1.0", daemonVersion: "dev")
+            )
+            let listReq = try await daemon.readControl()
+            #expect(listReq.type == "list")
+            #expect(listReq.token == "human-braw")
+            try await daemon.writeControl("session_list", SessionListMsg(sessions: [
+                makeSession(id: "braw", name: "braw"),
+            ]))
+        }
+
         let client = GraithProtocolClient(
             transport: .unix(path: "/tmp/graith.sock"),
-            profile: "", clientID: "app", token: "human-canny", signer: nil,
-            streamFactory: { _ in stream }
+            profile: "", clientID: "app", token: nil, signer: nil,
+            tokenProvider: { token.withValue { $0 } },
+            streamFactory: { _ in streams.withValue { $0.removeFirst() } }
         )
-        let sessions = try await client.list()
-        #expect(sessions.map(\.name) == ["canny", "dreich"])
 
-        _ = await server.result
+        // The token appears after client construction but before its first
+        // connection, just as when the daemon starts after the app.
+        token.withValue { $0 = "human-canny" }
+        let firstSessions = try await client.list()
+        #expect(firstSessions.map(\.name) == ["canny"])
+        _ = await firstServer.result
+
+        await client.close()
+        token.withValue { $0 = "human-braw" }
+        let secondSessions = try await client.list()
+        #expect(secondSessions.map(\.name) == ["braw"])
+        _ = await secondServer.result
+
         await client.close()
     }
 
@@ -581,7 +615,24 @@ struct ClientIntegrationTests {
 
         _ = await server.result
         await client.close()
+}
+
+/// Lock-backed mutable test state that can be captured by `@Sendable` factory
+/// closures without introducing data races.
+private final class LockedBox<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+
+    init(_ value: Value) {
+        self.value = value
     }
+
+    func withValue<Result>(_ body: (inout Value) -> Result) -> Result {
+        lock.lock()
+        defer { lock.unlock() }
+        return body(&value)
+    }
+}
 
 /// Build a minimal valid ``SessionInfo`` for fixtures.
 func makeSession(id: String, name: String) -> SessionInfo {

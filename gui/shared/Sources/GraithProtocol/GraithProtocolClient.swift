@@ -74,6 +74,11 @@ public actor GraithProtocolClient {
     /// Bearer token placed in every envelope: the session token locally, or the
     /// paired client token remotely. Nil before pairing.
     private var token: String?
+    /// Optional late-bound credential source. The macOS local client uses this
+    /// to re-read the daemon's human token whenever it opens a connection, so
+    /// launching before the daemon creates the token recovers without an app
+    /// restart. Remote clients keep using ``token``.
+    private let tokenProvider: (@Sendable () -> String?)?
 
     private var control: GraithConnection?
     private var eventConn: GraithConnection?
@@ -89,18 +94,22 @@ public actor GraithProtocolClient {
     ///   - clientID: an identifier for logging (e.g. the app's instance id).
     ///   - token: session/client bearer token, or nil (e.g. local human).
     ///   - signer: device key signer for remote PoP; nil for local transports.
+    ///   - tokenProvider: optional late-bound token source, evaluated once for
+    ///     each new connection before falling back to `token`.
     public init(
         transport: GraithTransport,
         profile: String = "",
         clientID: String = "graith-app",
         token: String? = nil,
-        signer: DeviceKeySigner? = nil
+        signer: DeviceKeySigner? = nil,
+        tokenProvider: (@Sendable () -> String?)? = nil
     ) {
         self.transport = transport
         self.profile = profile
         self.clientID = clientID
         self.token = token
         self.signer = signer
+        self.tokenProvider = tokenProvider
         self.streamFactory = { NWByteStream(transport: $0) }
     }
 
@@ -112,6 +121,7 @@ public actor GraithProtocolClient {
         clientID: String,
         token: String?,
         signer: DeviceKeySigner?,
+        tokenProvider: (@Sendable () -> String?)? = nil,
         streamFactory: @escaping @Sendable (GraithTransport) -> ByteStream
     ) {
         self.transport = transport
@@ -119,6 +129,7 @@ public actor GraithProtocolClient {
         self.clientID = clientID
         self.token = token
         self.signer = signer
+        self.tokenProvider = tokenProvider
         self.streamFactory = streamFactory
     }
 
@@ -140,7 +151,12 @@ public actor GraithProtocolClient {
     // MARK: - Connections
 
     private func newConnection(cols: UInt16 = 80, rows: UInt16 = 24) async throws -> GraithConnection {
-        let conn = GraithConnection(transport: transport, stream: streamFactory(transport), token: token)
+        let connectionToken = tokenProvider?() ?? token
+        let conn = GraithConnection(
+            transport: transport,
+            stream: streamFactory(transport),
+            token: connectionToken
+        )
         let hs = HandshakeMsg(
             clientID: clientID,
             terminalSize: [cols, rows],
