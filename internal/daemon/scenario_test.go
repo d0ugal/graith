@@ -1908,7 +1908,7 @@ func TestStartScenarioSeedFailureRollsBackCreatedMembers(t *testing.T) {
 
 	sm.mu.Lock()
 	sm.state.Sessions["braw-shared"] = &SessionState{
-		ID: "braw-shared", Name: "braw-shared", Status: StatusRunning,
+		ID: "braw-shared", Name: "braw-shared", RepoPath: repo, Status: StatusRunning,
 	}
 	sm.mu.Unlock()
 
