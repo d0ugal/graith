@@ -61,7 +61,7 @@ private struct ScenarioMemberRow: View {
             Spacer()
             if member.todoTotal > 0 {
                 HStack(spacing: 4) {
-                    if member.isTodoComplete {
+                    if member.isComplete {
                         Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
                     }
                     Text("\(member.todoDone)/\(member.todoTotal)")
@@ -153,7 +153,7 @@ private struct ScenarioCard: View {
                     Spacer()
                     if member.todoTotal > 0 {
                         HStack(spacing: 4) {
-                            if member.isTodoComplete {
+                            if member.isComplete {
                                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                             }
                             Text("\(member.todoDone)/\(member.todoTotal)")

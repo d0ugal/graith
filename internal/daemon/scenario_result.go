@@ -290,6 +290,13 @@ func (sm *SessionManager) recordScenarioResultFailure(ref scenarioResultRef, sta
 	failed.PublishedAt = time.Time{}
 	failed.Error = publicationErr.Error()
 
+	if status == ScenarioResultFailed {
+		// The authenticated publisher receives publicationErr directly, but the
+		// durable status is visible to other scenario-status callers. Do not
+		// persist filesystem paths or other daemon-internal store details there.
+		failed.Error = "result storage failed"
+	}
+
 	_, persistErr := sm.updateScenarioResult(ref, failed)
 	if persistErr != nil {
 		return fmt.Errorf("%w (also failed to record result status: %w)", publicationErr, persistErr)

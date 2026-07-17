@@ -424,8 +424,8 @@ func TestPublishScenarioResultOversizeAndStoreFailure(t *testing.T) {
 		t.Fatalf("store failure error = %v", err)
 	}
 
-	if got := resultForMember(t, sm, "canny", "review"); got.Status != ScenarioResultFailed {
-		t.Fatalf("store failure status = %q, want failed", got.Status)
+	if got := resultForMember(t, sm, "canny", "review"); got.Status != ScenarioResultFailed || got.Error != "result storage failed" {
+		t.Fatalf("store failure result = %+v, want failed with sanitized error", got)
 	}
 }
 
@@ -475,6 +475,26 @@ func TestScenarioRequiredResultsGateCompletionOptionalDoesNot(t *testing.T) {
 	if completeStatus != "complete" {
 		t.Fatalf("available required + invalid optional status = %q, want complete", completeStatus)
 	}
+}
+
+func TestScenarioRequiredResultWithoutTodosGatesCompletion(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.todos = newTestTodoStore(t)
+	sm.mu.Lock()
+	seedScenarioResults(t, sm, map[string][]protocol.ScenarioResultSpec{
+		"canny": {resultSpec("review", "markdown", "review.md", true)},
+	})
+
+	scenario := sm.state.Scenarios["sc-braw"]
+	if got := sm.buildScenarioRecord(scenario).Status; got != "running" {
+		t.Fatalf("pending required result without todos status = %q, want running", got)
+	}
+
+	scenario.Sessions[0].Results[0].Status = ScenarioResultAvailable
+	if got := sm.buildScenarioRecord(scenario).Status; got != "complete" {
+		t.Fatalf("available required result without todos status = %q, want complete", got)
+	}
+	sm.mu.Unlock()
 }
 
 func TestDirectStoreWriteDoesNotSatisfyScenarioResult(t *testing.T) {
