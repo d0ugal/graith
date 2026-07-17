@@ -133,6 +133,10 @@ func TestAdoptSessionsAppliesConfiguredInputDelay(t *testing.T) {
 
 		driver.Close()
 		_ = r.Close()
+
+		// AdoptSessions started an exit watcher; wait for its post-exit state write
+		// to finish so it can't race the TempDir removal.
+		sm.watchers.Wait()
 	})
 
 	sess, ok := driver.(*grpty.Session)
