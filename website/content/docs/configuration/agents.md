@@ -60,7 +60,7 @@ Every agent-specific flag graith appends is defined here, so a custom agent can 
 | `developer_instructions` | Pass the prompt as Codex's `-c developer_instructions=...` override |
 | `none` | Do not inject a prompt |
 
-An unknown value is rejected at config load. This applies to ordinary sessions and to the [orchestrator]({{< relref "/docs/orchestrator.md" >}}) alike, so a Codex, Cursor, or custom orchestrator agent gets the right mechanism instead of an unsupported Claude flag.
+An unknown value is rejected at config load. Both `inject_prompt` and `prompt_injection` apply to ordinary sessions and to the [orchestrator]({{< relref "/docs/orchestrator.md" >}}) alike: a Codex, Cursor, or custom orchestrator agent gets the right mechanism instead of an unsupported Claude flag, and setting `inject_prompt = false` opts the orchestrator out entirely — it launches with no injected role prompt and no Cursor rule file, just like an ordinary session.
 
 ### Template variables
 

@@ -313,7 +313,19 @@ func (sm *SessionManager) rollbackOrchestratorCreate(id string) {
 // dir); an agent with no supported injection method silently gets no prompt
 // args. It returns an error only when a side-effecting injection (e.g. writing
 // the Cursor rule) fails.
+//
+// The selected agent's inject_prompt opt-out is honoured first: an orchestrator
+// agent with Agent.PromptInjectionEnabled() == false gets no prompt args and no
+// Cursor rule file, exactly like an ordinary session, so the prompt is neither
+// constructed nor injected. This mirrors the PromptInjectionEnabled() gate on
+// the non-orchestrator create/resume paths, which the orchestrator paths (both
+// createOrchestrator and Resume) previously skipped (issue #1292).
 func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg config.OrchestratorConfig, repoPaths []string, notifyEnabled bool, worktreePath string) ([]string, error) {
+	agent := sm.Config().Agents[agentName]
+	if !agent.PromptInjectionEnabled() {
+		return nil, nil
+	}
+
 	prompt := orchCfg.Prompt
 
 	if orchCfg.PromptFile != "" {
@@ -347,9 +359,7 @@ func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg conf
 		prompt += orchestratorNotificationsSection()
 	}
 
-	configured := sm.Config().Agents[agentName].PromptInjection
-
-	return promptInjectionArgs(agentName, configured, prompt, worktreePath)
+	return promptInjectionArgs(agentName, agent.PromptInjection, prompt, worktreePath)
 }
 
 // orchestratorNotificationsSection tells the orchestrator it can proactively
