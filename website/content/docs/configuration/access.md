@@ -101,6 +101,13 @@ show` reads the edited file directly, so it can still display the rejected
 candidate.) Correct the setting and reload again (or run `gr daemon restart`);
 the local Unix socket remains available.
 
+A tsnet auth key is consumed when its listener generation starts. If an
+unchanged `auth_key_file` later becomes unreadable, graith can keep that already
+registered generation for unrelated and policy-only reloads; this ensures an
+allowlist revocation is never blocked by a spent key file. Any change that
+actually replaces the listener still requires the key to be readable and fails
+closed as described above.
+
 `require_pairing` is also a live authority ceiling for devices that are already
 connected. Changing it from `true` to `false` immediately downgrades every
 paired device to the read-only guest role, including devices previously allowed

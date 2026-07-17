@@ -183,6 +183,17 @@ func remoteMaterialState(cfg config.RemoteConfig, stateDir string) (remoteMateri
 		material.authKey = fingerprint
 	}
 
+	tlsPair, err := remoteTLSMaterialFingerprint(stateDir)
+	if err != nil {
+		return remoteMaterial{}, err
+	}
+
+	material.tlsPair = tlsPair
+
+	return material, nil
+}
+
+func remoteTLSMaterialFingerprint(stateDir string) (string, error) {
 	certPath := filepath.Join(stateDir, "remote-tls.crt")
 	keyPath := filepath.Join(stateDir, "remote-tls.key")
 	pairBytes := make([]byte, 0)
@@ -190,16 +201,14 @@ func remoteMaterialState(cfg config.RemoteConfig, stateDir string) (remoteMateri
 	for _, path := range []string{certPath, keyPath} {
 		b, err := os.ReadFile(path)
 		if err != nil {
-			return remoteMaterial{}, err
+			return "", err
 		}
 
 		pairBytes = append(pairBytes, b...)
 		pairBytes = append(pairBytes, 0)
 	}
 
-	material.tlsPair = fmt.Sprintf("%x", sha256.Sum256(pairBytes))
-
-	return material, nil
+	return fmt.Sprintf("%x", sha256.Sum256(pairBytes)), nil
 }
 
 func remoteFileFingerprint(path string) (string, error) {
@@ -250,9 +259,34 @@ func (r *remoteRuntime) matches(cfg config.RemoteConfig, stateDir string) bool {
 		return false
 	}
 
-	material, err := remoteMaterialState(cfg, stateDir)
+	// TLS material is continuously required by the active listener, so any
+	// change or read failure must replace the generation. A tsnet auth key is
+	// different: it is consumed while creating the node and is not needed by an
+	// already-running generation. If its unchanged path later becomes
+	// unreadable, keep the active listener so an unrelated or security-policy
+	// reload can still apply. A transport change remains strict and build will
+	// fail closed until the key is readable again.
+	tlsPair, err := remoteTLSMaterialFingerprint(stateDir)
+	if err != nil || tlsPair != r.material.tlsPair {
+		return false
+	}
 
-	return err == nil && material == r.material
+	if cfg.AuthKeyFile == "" {
+		return r.material.authKey == ""
+	}
+
+	authKey, err := remoteFileFingerprint(config.ExpandPath(cfg.AuthKeyFile))
+	if err != nil {
+		r.sm.log.Warn("remote auth key unavailable; retaining active listener generation",
+			"path", config.ExpandPath(cfg.AuthKeyFile),
+			"generation", r.generation,
+			"err", err,
+		)
+
+		return true
+	}
+
+	return authKey == r.material.authKey
 }
 
 func (r *remoteRuntime) activate() {

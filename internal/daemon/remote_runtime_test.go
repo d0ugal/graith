@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -271,6 +272,74 @@ func TestRemoteRuntimeReloadTracksAuthKeyAndTLSMaterial(t *testing.T) {
 	})
 }
 
+func TestRemoteRuntimeReloadRetainsConsumedAuthKeyUntilReplacement(t *testing.T) {
+	authKey := filepath.Join(t.TempDir(), "tsnet.key")
+	if err := os.WriteFile(authKey, []byte("braw-key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	factory := &fakeRemoteFactory{}
+	initial := remoteRuntimeTestConfig(true)
+	initial.Remote.AuthKeyFile = authKey
+	sm := newRemoteRuntimeTestSM(t, initial, factory)
+	applyRemoteTestConfig(t, sm, initial)
+
+	sm.mu.RLock()
+	initialGeneration := sm.remoteGeneration
+	sm.mu.RUnlock()
+
+	if err := os.Remove(authKey); err != nil {
+		t.Fatal(err)
+	}
+
+	// The active tsnet node has consumed its one-shot key. Its absence must not
+	// block an unrelated change or, critically, a live allowlist tightening.
+	changed := *initial
+	changed.Remote = cloneRemoteConfig(initial.Remote)
+	changed.BranchPrefix = "canny/"
+	changed.Remote.AllowTailnetUsers = []string{"canny@example.com"}
+	applyRemoteTestConfig(t, sm, &changed)
+
+	sm.mu.RLock()
+	appliedGeneration := sm.remoteGeneration
+	appliedConfig := sm.cfg
+	sm.mu.RUnlock()
+
+	if factory.count() != 1 || factory.listener(0).closeCount() != 0 {
+		t.Fatalf("unchanged transport recreated or closed listener: creations=%d closes=%d", factory.count(), factory.listener(0).closeCount())
+	}
+
+	if appliedGeneration != initialGeneration {
+		t.Fatalf("generation changed from %d to %d", initialGeneration, appliedGeneration)
+	}
+
+	if appliedConfig.BranchPrefix != "canny/" || !slices.Equal(appliedConfig.Remote.AllowTailnetUsers, []string{"canny@example.com"}) {
+		t.Fatalf("reload was not published: branch_prefix=%q allowlist=%v", appliedConfig.BranchPrefix, appliedConfig.Remote.AllowTailnetUsers)
+	}
+
+	// A real transport replacement still needs the key. It closes the old
+	// generation first and leaves the successfully-applied config visible.
+	replacement := changed
+	replacement.Remote = cloneRemoteConfig(changed.Remote)
+	replacement.Remote.Hostname = "croft"
+
+	err := sm.applyConfig(&replacement)
+	if err == nil || !strings.Contains(err.Error(), "read auth_key_file") {
+		t.Fatalf("replacement error = %v, want unreadable auth_key_file", err)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if sm.remoteGeneration != 0 || sm.remoteTLSPin != "" {
+		t.Fatalf("failed replacement left generation=%d pin=%q", sm.remoteGeneration, sm.remoteTLSPin)
+	}
+
+	if sm.cfg != appliedConfig || factory.listener(0).closeCount() == 0 {
+		t.Fatal("failed replacement did not preserve config and close the old listener")
+	}
+}
+
 func TestRemoteRuntimePolicyReloadKeepsTransport(t *testing.T) {
 	factory := &fakeRemoteFactory{}
 	initial := remoteRuntimeTestConfig(true)
@@ -396,6 +465,50 @@ func TestRemoteRuntimeReplacementFailureClosesOldAndRollsBackConfig(t *testing.T
 
 	if sm.remote.runtime == nil || sm.remote.runtime.generation <= oldGeneration {
 		t.Fatalf("retry runtime = %+v, want a newer active generation", sm.remote.runtime)
+	}
+}
+
+func TestRemoteRuntimePreparedGenerationClosesWhenAnotherReloadTransitionRejects(t *testing.T) {
+	factory := &fakeRemoteFactory{}
+	initial := remoteRuntimeTestConfig(true)
+	initial.Orchestrator.Enabled = true
+	sm := newRemoteRuntimeTestSM(t, initial, factory)
+	applyRemoteTestConfig(t, sm, initial)
+
+	putSession(sm, &SessionState{
+		ID:         "orch-thrawn",
+		Name:       OrchestratorSessionName,
+		Status:     StatusCreating,
+		SystemKind: SystemKindOrchestrator,
+	})
+
+	candidate := *initial
+	candidate.Remote = cloneRemoteConfig(initial.Remote)
+	candidate.Remote.Port++
+	candidate.Orchestrator.Enabled = false
+
+	err := sm.applyConfig(&candidate)
+	if err == nil || !strings.Contains(err.Error(), "orchestrator.enabled") {
+		t.Fatalf("applyConfig() error = %v, want orchestrator transition rejection", err)
+	}
+
+	if factory.count() != 2 {
+		t.Fatalf("listener creations = %d, want old and prepared generations", factory.count())
+	}
+
+	if factory.listener(0).closeCount() == 0 || factory.listener(1).closeCount() == 0 {
+		t.Fatalf("rejected generation leaked listener: old closes=%d prepared closes=%d", factory.listener(0).closeCount(), factory.listener(1).closeCount())
+	}
+
+	sm.configReloadMu.Lock()
+	activeRuntime := sm.remote.runtime
+	sm.configReloadMu.Unlock()
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if sm.cfg != initial || sm.remoteGeneration != 0 || sm.remoteTLSPin != "" || activeRuntime != nil {
+		t.Fatalf("rejected generation remained active: config=%p want=%p generation=%d pin=%q runtime=%v", sm.cfg, initial, sm.remoteGeneration, sm.remoteTLSPin, activeRuntime)
 	}
 }
 

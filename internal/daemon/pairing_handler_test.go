@@ -513,6 +513,43 @@ func TestRemoteGuestReadOnlyEndToEnd(t *testing.T) {
 	}
 }
 
+func TestPairApproveRejectsInactiveRemoteGeneration(t *testing.T) {
+	h := newTestHarness(t)
+
+	pub, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requestID, _, _, err := h.sm.AddPendingPairing(
+		"bairn",
+		base64.StdEncoding.EncodeToString(pub),
+		TailnetIdentity{User: "speir@example.com", Node: "ben"},
+		time.Now(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Model the fail-closed interval after a serving daemon invalidates its old
+	// generation and before a replacement publishes a new TLS pin.
+	h.sm.configReloadMu.Lock()
+	h.sm.remote = &remoteController{}
+	h.sm.configReloadMu.Unlock()
+
+	h.sendControl(t, "pair_approve", protocol.PairApproveMsg{RequestID: requestID})
+	h.expectError(t, "remote listener is unavailable")
+
+	h.sm.mu.RLock()
+	_, stillPending := h.sm.pendingPairings[requestID]
+	paired := len(h.sm.state.PairedDevices)
+	h.sm.mu.RUnlock()
+
+	if !stillPending || paired != 0 {
+		t.Fatalf("unavailable-generation approval mutated state: pending=%v paired=%d", stillPending, paired)
+	}
+}
+
 // TestRevokeDropsLiveRemoteConnection: revoking a device force-closes its live
 // authenticated connection (design §B.5), not just future ones.
 func TestRevokeDropsLiveRemoteConnection(t *testing.T) {
