@@ -99,7 +99,15 @@ profile_owned_by() {
 	directory_owned_by "$CONFIG_DIR" "$owner" || return 1
 	directory_owned_by "$DEMO_DATA_DIR" "$owner" || return 1
 	if [ -n "$RUNTIME_DIR" ]; then
-		directory_owned_by "$RUNTIME_DIR" "$owner" || return 1
+		# The runtime dir is ephemeral (cleared on reboot / logout), so its
+		# absence is safe to reconstruct once the durable config and data markers
+		# already prove ownership — otherwise a rebooted machine's owned profile
+		# would be wrongly refused. A *present* runtime target must still prove
+		# the same ownership; a mismatched, unowned, or non-directory one fails
+		# closed here (#1298).
+		if [ -e "$RUNTIME_DIR" ] || [ -L "$RUNTIME_DIR" ]; then
+			directory_owned_by "$RUNTIME_DIR" "$owner" || return 1
+		fi
 	fi
 }
 

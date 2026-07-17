@@ -3,10 +3,11 @@
 # teardown.sh — remove the isolated graith demo environment created by setup.sh.
 #
 # Safety: this only ever acts on the fixed, harness-owned `demo` profile, and
-# only when the config, data, and runtime directories independently carry the
-# same ownership token. If any fixed target is absent, unmarked, mismatched, or
-# a symlink, teardown refuses before contacting a daemon — `demo` is a perfectly
-# valid profile name someone else could be using.
+# only when the durable config and data directories independently carry the same
+# ownership token. If a fixed target is present but unmarked, mismatched, or a
+# symlink, teardown refuses before contacting a daemon — `demo` is a perfectly
+# valid profile name someone else could be using. The runtime directory is
+# ephemeral, so an absent one is simply nothing to remove (#1298).
 
 set -euo pipefail
 
@@ -59,7 +60,14 @@ profile_owned_by() {
 	directory_owned_by "$CONFIG_DIR" "$owner" || return 1
 	directory_owned_by "$DATA_DIR" "$owner" || return 1
 	if [ -n "$RUNTIME_DIR" ]; then
-		directory_owned_by "$RUNTIME_DIR" "$owner" || return 1
+		# The runtime dir is ephemeral, so an absent one is nothing to remove and
+		# does not block a teardown whose durable config/data markers already
+		# prove ownership (this also lets setup's pre-clear run after a reboot).
+		# A *present* runtime target must still prove the same ownership; a
+		# mismatched, unowned, or non-directory one fails closed here (#1298).
+		if [ -e "$RUNTIME_DIR" ] || [ -L "$RUNTIME_DIR" ]; then
+			directory_owned_by "$RUNTIME_DIR" "$owner" || return 1
+		fi
 	fi
 }
 
