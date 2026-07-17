@@ -432,11 +432,13 @@ func displaySummary(s protocol.SessionInfo) string {
 		return ""
 	}
 
-	if lipgloss.Width(text) > summaryWidth {
-		text = text[:summaryWidth-1] + "…"
-	}
-
-	return text
+	// summaryWidth is a display-cell budget, so truncate by cell width rather
+	// than byte index: ansi.Truncate accounts for wide (CJK/emoji), combining,
+	// and zero-width runes and preserves ANSI styling, and never splits a
+	// multi-byte rune (unlike the old text[:summaryWidth-1] byte slice, which
+	// produced invalid UTF-8/mojibake — issue #1313). The ellipsis counts
+	// toward the budget, so the result is at most summaryWidth cells wide.
+	return ansi.Truncate(text, summaryWidth, "…")
 }
 
 func shortenPath(p string) string {
