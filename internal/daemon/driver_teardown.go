@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -15,8 +16,29 @@ import (
 // windows in total. Deriving the budget from the grace means a configured
 // process_kill_grace above the old fixed 10s wrapper is honored to its SIGKILL
 // transition instead of being cut off early.
+//
+// The 3× scaling saturates rather than overflows: a valid but very large
+// process_kill_grace (Config.Validate accepts any positive duration) multiplied
+// by three could otherwise wrap to a negative Duration, which would make the
+// shutdown context cancel immediately and force an instant SIGKILL — the exact
+// early cut-off deriving the budget was meant to prevent (issue #1243 round-4).
 func (sm *SessionManager) shutdownBudget() time.Duration {
-	return 3 * sm.Config().Lifecycle.ProcessKillGraceDuration()
+	return saturatingScaleDuration(sm.Config().Lifecycle.ProcessKillGraceDuration(), 3)
+}
+
+// saturatingScaleDuration returns d*n, clamped to math.MaxInt64 instead of
+// overflowing to a negative Duration. d is expected positive (the grace
+// accessor never returns a non-positive value); a non-positive d or n yields 0.
+func saturatingScaleDuration(d time.Duration, n int64) time.Duration {
+	if d <= 0 || n <= 0 {
+		return 0
+	}
+
+	if d > math.MaxInt64/time.Duration(n) {
+		return math.MaxInt64
+	}
+
+	return d * time.Duration(n)
 }
 
 // teardownLiveDriver applies the shared bounded lifecycle policy for removing a

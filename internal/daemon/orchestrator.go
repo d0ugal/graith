@@ -196,7 +196,18 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		"unix_sockets", opts.UnixSockets,
 		"workdir", opts.WorktreeDir)
 
-	lc := sm.Config().Lifecycle
+	// Test seam: pause here so a concurrent-reload regression can swap sm.cfg
+	// before the lifecycle values below are read, proving they still come from the
+	// launch-time snapshot rather than the reloaded generation (issue #1243).
+	if sm.launchPhase2Hook != nil {
+		sm.launchPhase2Hook("orchestrator", cfgSnap)
+	}
+
+	// Reuse the single config snapshot captured at the top of createOrchestrator
+	// rather than re-reading sm.Config() here: a reload landing mid-launch must
+	// not let one orchestrator start combine agent/geometry/log values from two
+	// different config generations (issue #1243 round-4).
+	lc := cfgSnap.Lifecycle
 
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
 		ID:         id,
