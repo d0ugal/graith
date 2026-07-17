@@ -85,10 +85,11 @@ var todoAddCmd = &cobra.Command{
 		parent, _ := cmd.Flags().GetString("parent")
 		note, _ := cmd.Flags().GetString("note")
 		assign, _ := cmd.Flags().GetString("assign")
+		dependsOn, _ := cmd.Flags().GetStringArray("depends-on")
 
 		resp, err := todoRoundTrip("todo_add", protocol.TodoAddMsg{
 			Scope: todoScopeFromFlags(cmd), Title: args[0], Tags: tags,
-			ParentID: parent, Note: note, Assignee: assign,
+			ParentID: parent, Note: note, Assignee: assign, DependsOn: dependsOn,
 		})
 		if err != nil {
 			return err
@@ -129,7 +130,7 @@ var todoListCmd = &cobra.Command{
 		}
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		_, _ = fmt.Fprintf(tw, "ID\tSTATUS\tTITLE\tOWNER\tTAGS\n")
+		_, _ = fmt.Fprintf(tw, "ID\tSTATUS\tTITLE\tOWNER\tTAGS\tWHY BLOCKED\n")
 
 		for _, it := range r.Items {
 			title := it.Title
@@ -137,13 +138,27 @@ var todoListCmd = &cobra.Command{
 				title = "  " + title
 			}
 
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", it.ID, it.Status, title, it.Owner, strings.Join(it.Tags, ","))
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+				it.ID, it.Status, title, it.Owner, strings.Join(it.Tags, ","), todoBlockedReason(it))
 		}
 
 		_ = tw.Flush()
 
 		return nil
 	},
+}
+
+func todoBlockedReason(item protocol.TodoItemInfo) string {
+	var reasons []string
+	if len(item.BlockedBy) > 0 {
+		reasons = append(reasons, "dependencies: "+strings.Join(item.BlockedBy, ","))
+	}
+
+	if item.Status == "blocked" && item.Note != "" {
+		reasons = append(reasons, item.Note)
+	}
+
+	return strings.Join(reasons, "; ")
 }
 
 func todoClaimRun(cmd *cobra.Command, args []string) error {
@@ -267,6 +282,24 @@ var todoAssignCmd = &cobra.Command{
 	},
 }
 
+var todoDependenciesCmd = &cobra.Command{
+	Use:   "deps <id> [dependency-id...]",
+	Short: "Replace an item's dependency set (omit IDs to clear it)",
+	Args:  cobra.MinimumNArgs(1),
+	RunE: func(_ *cobra.Command, args []string) error {
+		dependencies := append([]string(nil), args[1:]...)
+
+		resp, err := todoRoundTrip("todo_update", protocol.TodoUpdateMsg{
+			ID: args[0], DependsOn: &dependencies,
+		})
+		if err != nil {
+			return err
+		}
+
+		return printTodoItem(resp, "Updated")
+	},
+}
+
 var todoExportCmd = &cobra.Command{
 	Use:   "export",
 	Short: "Export the current scope's items to the document store",
@@ -306,6 +339,7 @@ func registerTodoCmd() {
 	todoAddCmd.Flags().String("parent", "", "parent item id (create a sub-item)")
 	todoAddCmd.Flags().String("note", "", "optional one-line note")
 	todoAddCmd.Flags().String("assign", "", "assign to a session id (scenario completion)")
+	todoAddCmd.Flags().StringArray("depends-on", nil, "todo id that must be done first (repeatable)")
 
 	todoListCmd.Flags().String("status", "", "filter by status (todo/in-progress/done/blocked)")
 	todoListCmd.Flags().String("tag", "", "filter by tag")
@@ -317,7 +351,7 @@ func registerTodoCmd() {
 	reopenCmd := todoTransitionCmd("reopen <id>", "Reopen an item (clears the owner)", "todo", false)
 
 	todoCmd.AddCommand(todoAddCmd, todoListCmd, todoClaimCmd, todoStartCmd, todoNextCmd,
-		doneCmd, blockCmd, reopenCmd, todoRemoveCmd, todoAssignCmd, todoExportCmd)
+		doneCmd, blockCmd, reopenCmd, todoRemoveCmd, todoAssignCmd, todoDependenciesCmd, todoExportCmd)
 
 	rootCmd.AddCommand(todoCmd)
 }

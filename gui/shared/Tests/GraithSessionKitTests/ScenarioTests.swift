@@ -33,7 +33,7 @@ struct ScenarioDecodingTests {
         {"scenarios":[{"id":"sc-abc","name":"strath","orchestrator_id":"orch0001",
         "goal":"g","status":"running","session_ids":["s1"],
         "sessions":[{"name":"braw","session_id":"s1","role":"Backend","task":"t",
-        "todo_done":3,"todo_total":3,"repo":"croft","agent":"claude","model":"opus","status":"running","shared":true}],
+        "todo_done":3,"todo_total":3,"blocked_by":["canny"],"repo":"croft","agent":"claude","model":"opus","status":"running","shared":true}],
         "created_at":"2026-07-14T09:00:00Z"}]}
         """
         let resp = try JSONDecoder().decode(ScenarioListResponse.self, from: Data(json.utf8))
@@ -47,6 +47,7 @@ struct ScenarioDecodingTests {
         #expect(member.role == "Backend")
         #expect(member.todoDone == 3)
         #expect(member.todoTotal == 3)
+        #expect(member.blockedBy == ["canny"])
         #expect(member.isTodoComplete)
         #expect(member.shared == true)
     }
@@ -80,6 +81,7 @@ struct ScenarioDecodingTests {
         #expect(member.role == nil)
         #expect(member.todoDone == 0)
         #expect(member.todoTotal == 0)
+        #expect(member.blockedBy.isEmpty)
         #expect(!member.isTodoComplete)
         #expect(member.shared == nil)
     }

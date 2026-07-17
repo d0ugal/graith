@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"database/sql"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -426,7 +427,7 @@ func TestTodoUpdateFields(t *testing.T) {
 	newTitle := "new title"
 	newTags := []string{"z", "a"}
 
-	up, err := s.UpdateFields(it.ID, &newTitle, nil, &newTags, nil)
+	up, err := s.UpdateFields(it.ID, &newTitle, nil, &newTags, nil, nil)
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -444,7 +445,7 @@ func TestTodoUpdateFields(t *testing.T) {
 	}
 
 	empty := "   "
-	if _, err := s.UpdateFields(it.ID, &empty, nil, nil, nil); err == nil {
+	if _, err := s.UpdateFields(it.ID, &empty, nil, nil, nil, nil); err == nil {
 		t.Error("expected empty-title rejection on update")
 	}
 }
@@ -673,5 +674,416 @@ func (s *TodoStore) mustAssignedAdd(t *testing.T, scope, title, assignee string)
 
 	if _, err := s.Add(TodoAdd{Scope: scope, Title: title, Assignee: assignee, CreatedBy: "orch"}); err != nil {
 		t.Fatalf("add assigned %q: %v", title, err)
+	}
+}
+
+func claimAndDone(t *testing.T, s *TodoStore, id, owner string) TodoItem {
+	t.Helper()
+
+	if _, ok, err := s.Claim(id, owner); err != nil || !ok {
+		t.Fatalf("Claim(%s): ok=%v err=%v", id, ok, err)
+	}
+
+	item, err := s.Transition(id, TodoStatusDone, owner, false)
+	if err != nil {
+		t.Fatalf("Transition done(%s): %v", id, err)
+	}
+
+	return item
+}
+
+func TestTodoDependenciesBlockUntilAllDone(t *testing.T) {
+	s := newTestTodoStore(t)
+	scope := "scenario:strath"
+	a := mustAdd(t, s, scope, "raise the brig")
+	b := mustAdd(t, s, scope, "mend the dyke")
+
+	downstream, err := s.Add(TodoAdd{
+		Scope: scope, Title: "inspect the croft", DependsOn: []string{b.ID, a.ID, a.ID}, CreatedBy: "canny",
+	})
+	if err != nil {
+		t.Fatalf("Add dependent: %v", err)
+	}
+
+	if downstream.Status != TodoStatusBlocked || downstream.Owner != "" {
+		t.Fatalf("dependent initial state = %+v, want ownerless blocked", downstream)
+	}
+
+	if len(downstream.DependsOn) != 2 || len(downstream.BlockedBy) != 2 {
+		t.Fatalf("dependency hydration = depends %v blocked %v", downstream.DependsOn, downstream.BlockedBy)
+	}
+
+	if _, ok, err := s.Claim(downstream.ID, "thrawn"); err != nil || ok {
+		t.Fatalf("blocked claim: ok=%v err=%v", ok, err)
+	}
+
+	claimAndDone(t, s, a.ID, "braw")
+
+	stillBlocked, err := s.Get(downstream.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if stillBlocked.Status != TodoStatusBlocked || len(stillBlocked.BlockedBy) != 1 || stillBlocked.BlockedBy[0] != b.ID {
+		t.Fatalf("after first dependency: %+v", stillBlocked)
+	}
+
+	if _, ok, err := s.Claim(b.ID, "braw"); err != nil || !ok {
+		t.Fatalf("claim final dependency: ok=%v err=%v", ok, err)
+	}
+
+	result, err := s.TransitionCascade(b.ID, TodoStatusDone, "", "braw", false)
+	if err != nil {
+		t.Fatalf("complete final dependency: %v", err)
+	}
+
+	if len(result.Unblocked) != 1 || result.Unblocked[0].ID != downstream.ID {
+		t.Fatalf("unblocked = %+v", result.Unblocked)
+	}
+
+	if result.Unblocked[0].Status != TodoStatusTodo || result.Unblocked[0].Revision != downstream.Revision+1 {
+		t.Fatalf("unblocked state = %+v", result.Unblocked[0])
+	}
+
+	if _, ok, err := s.Claim(downstream.ID, "thrawn"); err != nil || !ok {
+		t.Fatalf("ready claim: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestTodoDependencyCompletionConcurrentFinalEdges(t *testing.T) {
+	s := newTestTodoStore(t)
+	scope := "session:bothy"
+	a := mustAdd(t, s, scope, "first upstream")
+	b := mustAdd(t, s, scope, "second upstream")
+
+	downstream, err := s.Add(TodoAdd{Scope: scope, Title: "synthesis", DependsOn: []string{a.ID, b.ID}, CreatedBy: "braw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok, err := s.Claim(a.ID, "bairn-a"); err != nil || !ok {
+		t.Fatalf("claim a: ok=%v err=%v", ok, err)
+	}
+
+	if _, ok, err := s.Claim(b.ID, "bairn-b"); err != nil || !ok {
+		t.Fatalf("claim b: ok=%v err=%v", ok, err)
+	}
+
+	barrier := make(chan struct{})
+	results := make(chan TodoTransitionResult, 2)
+	errs := make(chan error, 2)
+
+	var wg sync.WaitGroup
+	for _, tc := range []struct{ id, owner string }{{a.ID, "bairn-a"}, {b.ID, "bairn-b"}} {
+		wg.Add(1)
+		go func(id, owner string) {
+			defer wg.Done()
+
+			<-barrier
+
+			result, err := s.TransitionCascade(id, TodoStatusDone, "", owner, false)
+			results <- result
+
+			errs <- err
+		}(tc.id, tc.owner)
+	}
+
+	close(barrier)
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent completion: %v", err)
+		}
+	}
+
+	unblocked := 0
+	for result := range results {
+		unblocked += len(result.Unblocked)
+	}
+
+	if unblocked != 1 {
+		t.Fatalf("cascade reported %d unblocks, want exactly 1", unblocked)
+	}
+
+	got, err := s.Get(downstream.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Status != TodoStatusTodo || got.Revision != downstream.Revision+1 {
+		t.Fatalf("downstream after race = %+v", got)
+	}
+}
+
+func TestTodoDependencyUpdateRejectsCycleAndCrossScopeAtomically(t *testing.T) {
+	s := newTestTodoStore(t)
+	a := mustAdd(t, s, "session:croft", "auld work")
+	b := mustAdd(t, s, "session:croft", "braw work")
+	other := mustAdd(t, s, "session:bothy", "distant work")
+
+	aDeps := []string{b.ID}
+	if _, err := s.UpdateFields(a.ID, nil, nil, nil, nil, &aDeps); err != nil {
+		t.Fatalf("set first edge: %v", err)
+	}
+
+	bDeps := []string{a.ID}
+	if _, err := s.UpdateFields(b.ID, nil, nil, nil, nil, &bDeps); err == nil {
+		t.Fatal("expected cycle rejection")
+	}
+
+	gotB, err := s.Get(b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(gotB.DependsOn) != 0 {
+		t.Fatalf("cycle failure changed old graph: %+v", gotB)
+	}
+
+	title := "must roll back too"
+
+	crossScope := []string{other.ID}
+	if _, err := s.UpdateFields(b.ID, &title, nil, nil, nil, &crossScope); err == nil {
+		t.Fatal("expected cross-scope rejection")
+	}
+
+	gotB, _ = s.Get(b.ID)
+	if gotB.Title != "braw work" || len(gotB.DependsOn) != 0 {
+		t.Fatalf("partial update survived failed dependency validation: %+v", gotB)
+	}
+}
+
+func TestTodoDependencyReopenAndReclaimSemantics(t *testing.T) {
+	s := newTestTodoStore(t)
+	scope := "session:glen"
+	upstream := mustAdd(t, s, scope, "prepare stones")
+	claimAndDone(t, s, upstream.ID, "mason")
+
+	downstream, err := s.Add(TodoAdd{Scope: scope, Title: "build wall", DependsOn: []string{upstream.ID}, CreatedBy: "braw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if downstream.Status != TodoStatusTodo {
+		t.Fatalf("dependency already done: downstream = %+v", downstream)
+	}
+
+	reopened, err := s.TransitionCascade(upstream.ID, TodoStatusTodo, "", "mason", true)
+	if err != nil {
+		t.Fatalf("reopen dependency: %v", err)
+	}
+
+	if len(reopened.DependencyBlocked) != 1 || reopened.DependencyBlocked[0].ID != downstream.ID {
+		t.Fatalf("newly blocked = %+v", reopened.DependencyBlocked)
+	}
+
+	claimAndDone(t, s, upstream.ID, "mason")
+
+	if _, ok, err := s.Claim(downstream.ID, "builder"); err != nil || !ok {
+		t.Fatalf("claim downstream: ok=%v err=%v", ok, err)
+	}
+
+	if _, err := s.Transition(upstream.ID, TodoStatusTodo, "mason", true); err != nil {
+		t.Fatalf("reopen dependency behind started work: %v", err)
+	}
+
+	started, _ := s.Get(downstream.ID)
+	if started.Status != TodoStatusInProgress || started.Owner != "builder" {
+		t.Fatalf("reopen unwound started dependent: %+v", started)
+	}
+
+	if n, err := s.ReopenOwnedBy("builder"); err != nil || n != 1 {
+		t.Fatalf("reclaim dependent: n=%d err=%v", n, err)
+	}
+
+	reclaimed, _ := s.Get(downstream.ID)
+	if reclaimed.Status != TodoStatusBlocked || reclaimed.Owner != "" || len(reclaimed.BlockedBy) != 1 {
+		t.Fatalf("reclaimed work should wait on reopened dependency: %+v", reclaimed)
+	}
+}
+
+func TestTodoDependencyRemovalAndRetentionProtectReferencedItems(t *testing.T) {
+	s := newTestTodoStore(t)
+	base := time.Date(2026, 7, 17, 9, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return base }
+
+	dependency := mustAdd(t, s, "session:croft", "foundation")
+	claimAndDone(t, s, dependency.ID, "mason")
+
+	dependent, err := s.Add(TodoAdd{Scope: dependency.Scope, Title: "roof", DependsOn: []string{dependency.ID}, CreatedBy: "braw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Remove(dependency.ID); err == nil {
+		t.Fatal("expected referenced dependency removal to be rejected")
+	}
+
+	s.now = func() time.Time { return base.Add(48 * time.Hour) }
+	if n, err := s.SweepDone(24 * time.Hour); err != nil || n != 0 {
+		t.Fatalf("retention removed referenced dependency: n=%d err=%v", n, err)
+	}
+
+	if _, err := s.Get(dependency.ID); err != nil {
+		t.Fatalf("referenced dependency disappeared: %v", err)
+	}
+
+	emptyDeps := []string{}
+	if _, err := s.UpdateFields(dependent.ID, nil, nil, nil, nil, &emptyDeps); err != nil {
+		t.Fatalf("clear dependencies: %v", err)
+	}
+
+	if err := s.Remove(dependency.ID); err != nil {
+		t.Fatalf("remove after clearing edge: %v", err)
+	}
+}
+
+func TestTodoDependencyRemovalAllowsEdgesInsideParentDeletionSet(t *testing.T) {
+	s := newTestTodoStore(t)
+	parent := mustAdd(t, s, "session:bothy", "raise frame")
+
+	child, err := s.Add(TodoAdd{
+		Scope: parent.Scope, Title: "fit roof", ParentID: parent.ID,
+		DependsOn: []string{parent.ID}, CreatedBy: "mason",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Remove(parent.ID); err != nil {
+		t.Fatalf("remove parent and internal dependency edge: %v", err)
+	}
+
+	if _, err := s.Get(child.ID); err != ErrTodoNotFound {
+		t.Fatalf("child survived parent removal: %v", err)
+	}
+}
+
+func TestTodoDependencyGraphPersistsAcrossRestart(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "todos.sqlite")
+
+	s, err := NewTodoStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dependency := mustAdd(t, s, "scenario:strath", "gather")
+
+	dependent, err := s.Add(TodoAdd{
+		Scope: dependency.Scope, Title: "synthesise", DependsOn: []string{dependency.ID}, CreatedBy: "braw",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := NewTodoStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer func() { _ = reopened.Close() }()
+
+	got, err := reopened.Get(dependent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Status != TodoStatusBlocked || len(got.DependsOn) != 1 || got.DependsOn[0] != dependency.ID {
+		t.Fatalf("dependency graph after restart = %+v", got)
+	}
+}
+
+func TestTodoDependencySchemaMigrationPreservesExistingItems(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "todos.sqlite")
+
+	db, err := sql.Open("sqlite", todoStoreDSN(dbPath, time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE todos (
+			id TEXT PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL, scope TEXT NOT NULL,
+			owner TEXT NOT NULL DEFAULT '', assignee TEXT NOT NULL DEFAULT '', parent_id TEXT,
+			note TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL, created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, position INTEGER NOT NULL DEFAULT 0
+		);
+		CREATE TABLE todo_tags (todo_id TEXT NOT NULL, tag TEXT NOT NULL, PRIMARY KEY (todo_id, tag));
+		INSERT INTO todos (id, title, status, scope, created_by, created_at, updated_at)
+		VALUES ('td-auld', 'auld task', 'todo', 'session:croft', 'braw', '2026-07-17T09:00:00Z', '2026-07-17T09:00:00Z');
+	`)
+	if err != nil {
+		_ = db.Close()
+
+		t.Fatalf("create pre-dependency schema: %v", err)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := NewTodoStore(dbPath)
+	if err != nil {
+		t.Fatalf("migrate store: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	old, err := s.Get("td-auld")
+	if err != nil || old.Status != TodoStatusTodo || len(old.DependsOn) != 0 {
+		t.Fatalf("old item after migration = %+v err=%v", old, err)
+	}
+
+	dependency := mustAdd(t, s, old.Scope, "new dependency")
+
+	deps := []string{dependency.ID}
+	if _, err := s.UpdateFields(old.ID, nil, nil, nil, nil, &deps); err != nil {
+		t.Fatalf("write graph after migration: %v", err)
+	}
+}
+
+func TestTodoAddBatchRollsBackCyclicGraph(t *testing.T) {
+	s := newTestTodoStore(t)
+
+	_, err := s.AddBatch([]TodoBatchAdd{
+		{Key: "braw", Item: TodoAdd{Scope: "scenario:croft", Title: "braw", CreatedBy: "orch"}, DependsOnKeys: []string{"canny"}},
+		{Key: "canny", Item: TodoAdd{Scope: "scenario:croft", Title: "canny", CreatedBy: "orch"}, DependsOnKeys: []string{"braw"}},
+	})
+	if err == nil {
+		t.Fatal("expected batch cycle rejection")
+	}
+
+	items, listErr := s.List("scenario:croft", TodoFilter{})
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+
+	if len(items) != 0 {
+		t.Fatalf("failed batch left partial rows: %+v", items)
+	}
+}
+
+func TestTodoDependencyEffectiveStatusFilters(t *testing.T) {
+	s := newTestTodoStore(t)
+	dependency := mustAdd(t, s, "session:croft", "dependency")
+
+	dependent, err := s.Add(TodoAdd{Scope: dependency.Scope, Title: "dependent", DependsOn: []string{dependency.ID}, CreatedBy: "braw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blocked, err := s.List(dependency.Scope, TodoFilter{Status: TodoStatusBlocked})
+	if err != nil || len(blocked) != 1 || blocked[0].ID != dependent.ID {
+		t.Fatalf("blocked filter = %+v err=%v", blocked, err)
+	}
+
+	ready, err := s.List(dependency.Scope, TodoFilter{Status: TodoStatusTodo})
+	if err != nil || len(ready) != 1 || ready[0].ID != dependency.ID {
+		t.Fatalf("todo filter = %+v err=%v", ready, err)
 	}
 }

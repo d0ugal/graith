@@ -72,7 +72,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 	gomcp.AddTool(srv, &gomcp.Tool{
 		Name:        "todo_add",
-		Description: "Add an item to the durable, shared todo list. The list persists across sessions and is visible to every agent in scope. Optionally attach tags, a parent item, a note, or target a different scenario/session scope.",
+		Description: "Add an item to the durable, shared todo list. The list persists across sessions and is visible to every agent in scope. Optionally attach tags, dependencies, a parent item, a note, or target a different scenario/session scope.",
 	}, s.todoAdd)
 
 	gomcp.AddTool(srv, &gomcp.Tool{
@@ -223,15 +223,17 @@ type ReadInboxInput struct {
 }
 
 type TodoItemOutput struct {
-	ID       string   `json:"id"`
-	Title    string   `json:"title"`
-	Status   string   `json:"status"`
-	Scope    string   `json:"scope,omitempty"`
-	Owner    string   `json:"owner,omitempty"`
-	Assignee string   `json:"assignee,omitempty"`
-	ParentID string   `json:"parent_id,omitempty"`
-	Note     string   `json:"note,omitempty"`
-	Tags     []string `json:"tags,omitempty"`
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Status    string   `json:"status"`
+	Scope     string   `json:"scope,omitempty"`
+	Owner     string   `json:"owner,omitempty"`
+	Assignee  string   `json:"assignee,omitempty"`
+	ParentID  string   `json:"parent_id,omitempty"`
+	Note      string   `json:"note,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
+	DependsOn []string `json:"depends_on,omitempty"`
+	BlockedBy []string `json:"blocked_by,omitempty"`
 }
 
 type TodoListInput struct {
@@ -246,12 +248,13 @@ type TodoListOutput struct {
 }
 
 type TodoAddInput struct {
-	Title    string   `json:"title"               jsonschema:"Short description of the work item"`
-	Tags     []string `json:"tags,omitempty"      jsonschema:"Optional tags to categorise the item"`
-	ParentID string   `json:"parent_id,omitempty" jsonschema:"Optional parent item ID to nest this under"`
-	Note     string   `json:"note,omitempty"      jsonschema:"Optional freeform note with more detail"`
-	Scenario string   `json:"scenario,omitempty"  jsonschema:"Add to a named scenario's list instead of this session's subtree"`
-	Session  string   `json:"session,omitempty"   jsonschema:"Add to a specific session's subtree instead of this session's own"`
+	Title     string   `json:"title"                jsonschema:"Short description of the work item"`
+	Tags      []string `json:"tags,omitempty"       jsonschema:"Optional tags to categorise the item"`
+	ParentID  string   `json:"parent_id,omitempty"  jsonschema:"Optional parent item ID to nest this under"`
+	Note      string   `json:"note,omitempty"       jsonschema:"Optional freeform note with more detail"`
+	Scenario  string   `json:"scenario,omitempty"   jsonschema:"Add to a named scenario's list instead of this session's subtree"`
+	Session   string   `json:"session,omitempty"    jsonschema:"Add to a specific session's subtree instead of this session's own"`
+	DependsOn []string `json:"depends_on,omitempty" jsonschema:"Todo IDs that must all be done before this item can be claimed"`
 }
 
 type TodoClaimInput struct {
@@ -279,9 +282,10 @@ type TodoReopenInput struct {
 }
 
 type TodoUpdateInput struct {
-	ID    string `json:"id"              jsonschema:"Item ID to update"`
-	Title string `json:"title,omitempty" jsonschema:"New title for the item"`
-	Note  string `json:"note,omitempty"  jsonschema:"New note for the item"`
+	ID        string    `json:"id"                   jsonschema:"Item ID to update"`
+	Title     string    `json:"title,omitempty"      jsonschema:"New title for the item"`
+	Note      string    `json:"note,omitempty"       jsonschema:"New note for the item"`
+	DependsOn *[]string `json:"depends_on,omitempty" jsonschema:"Replacement dependency IDs; pass an empty list to clear"`
 }
 
 // Tool handlers
@@ -677,11 +681,12 @@ func (s *Server) todoAdd(_ context.Context, _ *gomcp.CallToolRequest, input Todo
 	defer c.Close()
 
 	if err := c.SendControl("todo_add", protocol.TodoAddMsg{
-		Scope:    protocol.TodoScope{Scenario: input.Scenario, Session: input.Session},
-		Title:    input.Title,
-		Tags:     input.Tags,
-		ParentID: input.ParentID,
-		Note:     input.Note,
+		Scope:     protocol.TodoScope{Scenario: input.Scenario, Session: input.Session},
+		Title:     input.Title,
+		Tags:      input.Tags,
+		ParentID:  input.ParentID,
+		Note:      input.Note,
+		DependsOn: input.DependsOn,
 	}); err != nil {
 		return nil, TodoItemOutput{}, fmt.Errorf("send todo_add: %w", err)
 	}
@@ -747,6 +752,8 @@ func (s *Server) todoUpdate(_ context.Context, _ *gomcp.CallToolRequest, input T
 	if input.Note != "" {
 		msg.Note = &input.Note
 	}
+
+	msg.DependsOn = input.DependsOn
 
 	if err := c.SendControl("todo_update", msg); err != nil {
 		return nil, TodoItemOutput{}, fmt.Errorf("send todo_update: %w", err)
@@ -825,14 +832,16 @@ func sessionInfoToOutput(si protocol.SessionInfo) SessionInfoOutput {
 
 func todoItemToOutput(it protocol.TodoItemInfo) TodoItemOutput {
 	return TodoItemOutput{
-		ID:       it.ID,
-		Title:    it.Title,
-		Status:   it.Status,
-		Scope:    it.Scope,
-		Owner:    it.Owner,
-		Assignee: it.Assignee,
-		ParentID: it.ParentID,
-		Note:     it.Note,
-		Tags:     it.Tags,
+		ID:        it.ID,
+		Title:     it.Title,
+		Status:    it.Status,
+		Scope:     it.Scope,
+		Owner:     it.Owner,
+		Assignee:  it.Assignee,
+		ParentID:  it.ParentID,
+		Note:      it.Note,
+		Tags:      it.Tags,
+		DependsOn: it.DependsOn,
+		BlockedBy: it.BlockedBy,
 	}
 }
