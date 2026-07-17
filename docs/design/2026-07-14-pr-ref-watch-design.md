@@ -13,9 +13,10 @@ The PR/CI watcher (`internal/daemon/prwatch.go`) resolves each session's PR by
 polling `gh` on a timer. When an agent creates a branch, pushes, and opens a PR,
 graith only notices on the next poll — up to ~15s plus batch-cap and
 negative-cache latency — so the PR badge and any early CI-failure / review
-notifications lag behind reality. This doc adds a cheap local filesystem watch on
-each running session's git refs that *kicks* an immediate PR re-poll the moment a
-push/commit/checkout touches the worktree, keeping the poll loop as the fallback.
+notifications lag behind reality. This doc adds a cheap local filesystem watch
+shared by sessions from the same repository. It *kicks* immediate PR re-polls
+the moment a push/commit/checkout touches Git state, keeping the poll loop as the
+fallback.
 
 ## Background
 
@@ -99,8 +100,8 @@ cheap and well-precedented in this codebase.
 ### Proposal 1: A dedicated git-refs watch that kicks the poll loop (Recommended)
 
 Add a lightweight watcher, owned by the PR-watch loop, that watches the
-ref-bearing parts of each running eligible session's git directory and, on any
-change, asks the existing poll loop to re-poll *that session now*.
+ref-bearing parts of each active repository and its eligible worktrees and, on a
+change, asks the existing poll loop to re-poll the affected session(s) now.
 
 #### Mechanism
 
@@ -123,23 +124,21 @@ gates/rate-limits/cursor logic are unchanged — a kick just moves *when* a poll
 happens, never *what* it does.
 
 The watcher itself (`prrefwatch.go`) mirrors `filewatch.go`'s shape but is much
-smaller because it watches a fixed, tiny path set rather than a whole worktree:
+smaller because it watches Git metadata rather than whole worktrees:
 
-- A reconcile tick (~2s) diffs desired watches (one per running, non-mirror,
-  non-in-place session with a worktree) against live ones, creating/closing
-  fsnotify watchers to match — the same create/teardown pattern as
-  `reconcileBindings`.
-- For each session it resolves the git dirs via `git rev-parse
-  --absolute-git-dir` and `--git-common-dir` (worktrees share a common dir; HEAD
-  and the worktree reflog live in the per-worktree gitdir) and watches only:
-  the gitdir top level (`HEAD`, `ORIG_HEAD`), `<gitdir>/logs` (commit/checkout
-  reflog), the common-dir top level (`packed-refs`, `HEAD`), `<common>/refs`
-  (heads/remotes/tags — updated by commit and by push's remote-tracking write),
-  and `<common>/logs`. The object store is never watched.
-- Events are coalesced with a short debounce (~750ms) and then the session ID is
-  sent non-blocking to `kick`. Over-firing is harmless (a redundant, cooled-down,
-  rate-limited poll); under-firing is the enemy, so the watch is deliberately
-  broad within the ref/log subtrees and every write→kick.
+- A reconcile tick (~2s) diffs running, non-mirror, non-in-place sessions against
+  live memberships. Sessions are grouped by their canonical `--git-common-dir`,
+  with exactly one fsnotify backend per group.
+- The repository backend registers the common-dir top level (`packed-refs` and
+  the primary worktree's `HEAD`) plus the recursive `<common>/refs` and
+  `<common>/logs` trees exactly once. Common events fan out to every member.
+- A linked worktree contributes only its own gitdir top level (`HEAD`,
+  `ORIG_HEAD`) and local `logs` tree to that backend. Ownership is ref-counted,
+  so stopping or deleting the session removes those paths without disturbing
+  the shared repository watch. The object store is never watched.
+- Events are coalesced with a short per-session debounce (~750ms) and session IDs
+  are sent non-blocking to `kick`. New nested ref/log directories inherit their
+  parent's common or local ownership and are registered once.
 
 #### Why this path set
 
@@ -148,14 +147,15 @@ A `git commit` writes `<gitdir>/logs/HEAD` and `refs/heads/<b>`; `git checkout
 `refs/remotes/origin/<b>` (and its reflog) in the common dir. Watching the
 gitdir top + `logs` + the common `refs`/`logs` + `packed-refs` covers commit,
 checkout, and push without touching the high-churn `objects/` tree. Multiple
-sessions on one repo each watch the shared common dir independently; a push
-kicks all of them, and only the one whose branch now has a PR actually matches —
-the extra polls are cheap and rate-limited.
+sessions on one repo share the common registration; a common ref or reflog event
+kicks all of them, while a linked `HEAD` event kicks only its owner. Only the
+session whose branch now has a PR actually matches, and extra polls remain cheap
+and rate-limited.
 
 #### Trade-offs
 
 - **Pro:** near-instant; reuses all poll-side logic; no new config; fail-open;
-  bounded, low-churn watch set.
+  common metadata costs are paid once per repository rather than per worktree.
 - **Con:** a few redundant polls when several sessions share a repo (bounded by
   cooldown + rate-limit). fsnotify semantics vary by OS, but the poll fallback
   covers any missed event — the watch is a pure accelerator.
@@ -190,22 +190,37 @@ Relatedly, a *dropped* kick (kick channel saturated under fan-out) clears the
 session's `nextPoll` so the next tick re-polls it rather than leaving it stranded
 on a long backoff.
 
+### kqueue resource bound (issue #1402)
+
+On macOS/BSD, fsnotify's kqueue backend opens a real descriptor for every watched
+path and for directory contents. Recursively registering the same common
+`refs`/`logs` tree once per worktree therefore multiplied both descriptors and
+memory by active session count. Grouping by canonical common dir makes growth
+`repository Git metadata + small linked-worktree gitdirs`, rather than
+`sessions × repository Git metadata`. Tests assert that two linked worktrees
+have one backend and one unique common registration set; platform-independent
+ownership assertions are used because descriptor accounting itself is
+kqueue-specific. Any path registration failure is logged and leaves the timer
+poll active, so descriptor/watch limits degrade latency instead of correctness.
+
 ### References
 
 - `internal/daemon/prwatch.go` — `RunPRWatchLoop`, `reconcileBranch`,
   `pollSession`, `diffAndBuild` (priming).
 - `internal/daemon/ghpr.go` — `resolvePR`.
 - `internal/daemon/filewatch.go` — fsnotify reconcile/debounce reference.
-- Issue #1008 (branch-drift re-match), the PR-comment author-trust design docs.
+- Issues #1008 (branch-drift re-match) and #1402 (shared repository watchers),
+  plus the PR-comment author-trust design docs.
 
 ### Testing
 
-- `gitDirs` / `gitRefWatchPaths` resolve the right dirs for a normal repo and a
-  linked worktree.
-- The reconcile creates a watcher for a running eligible session and tears it
-  down when the session stops / soft-deletes / disappears.
-- A commit and a simulated push into a watched repo each deliver a kick within
-  the debounce window (event-driven, no sleeps beyond the debounce).
+- `resolveGitRefWatchPaths` / `gitRefWatchDirs` resolve the right common and
+  local directories for a normal repo and a linked worktree.
+- Two worktrees from one repository have one fsnotify backend and a unique union
+  of common plus worktree-local registered directories. Removing one membership
+  releases its local paths; removing the last closes the backend.
+- Commits and pushes through the common refs/reflogs fan out to all repository
+  sessions, while a linked worktree's `HEAD` change targets only its owner.
 - `pollKicked` honours the cooldown (a second immediate kick is a no-op) and, via
   a stubbed `ghRunner`, drives a real notification through the unchanged
   `pollSession` path.
