@@ -71,8 +71,15 @@ struct SessionDetailView: View {
 struct SessionTerminalPane: View {
     @StateObject private var viewModel: TerminalAttachViewModel
     private let state: GhosttyTerminalState
+    /// Terminal font size, resolved from the user's persisted presentation
+    /// preferences (#1254). Defaults to the production `UserDefaults`, so a
+    /// stored `terminalFontSize` is actually consumed by the live renderer
+    /// rather than the static `PresentationPreferences.default`; tests inject a
+    /// scratch domain.
+    private let terminalFontSize: CGFloat
 
-    init(connection: HostConnection, session: SessionInfo) {
+    init(connection: HostConnection, session: SessionInfo,
+         preferences: PresentationPreferences = PresentationPreferences(userDefaults: .standard)) {
         let st = GhosttyTerminalState(cols: 80, rows: 24)
         let vm = TerminalAttachViewModel(
             hostID: connection.id,
@@ -83,11 +90,13 @@ struct SessionTerminalPane: View {
         )
         _viewModel = StateObject(wrappedValue: vm)
         self.state = st
+        self.terminalFontSize = preferences.terminalFontSize
     }
 
     var body: some View {
         #if canImport(UIKit)
-        TerminalAttachView(viewModel: viewModel, makeRenderer: { GhosttyMetalRenderer(state: state) })
+        TerminalAttachView(viewModel: viewModel,
+                           makeRenderer: { GhosttyMetalRenderer(state: state, fontSize: terminalFontSize) })
         #else
         TerminalAttachView(viewModel: viewModel)
         #endif

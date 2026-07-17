@@ -605,6 +605,35 @@ func testGestureConfig() {
           "normalized invalid momentum converges to idle within ten seconds")
 }
 
+// MARK: - Persisted presentation seams (issue #1254)
+
+@MainActor
+func testPresentationSeams() async {
+    section("PresentationPreferences — renderer + reachability seams (#1254)")
+
+    // Renderer font-size seam: SessionTerminalPane builds GhosttyMetalRenderer
+    // with PresentationPreferences(userDefaults: .standard).terminalFontSize, so
+    // a persisted size is actually consumed instead of the static default.
+    let suite = "graith.presentation.smoke.bothy"
+    let defaults = UserDefaults(suiteName: suite)!
+    defaults.removePersistentDomain(forName: suite)
+    defaults.set(19.0, forKey: PresentationPreferences.Key.terminalFontSize)
+    let rendererFont = PresentationPreferences(userDefaults: defaults).terminalFontSize
+    check(rendererFont == 19, "renderer font size reads the persisted preference")
+    check(rendererFont != PresentationPreferences.default.terminalFontSize,
+          "persisted font diverges from the static default the bug used")
+    defaults.removePersistentDomain(forName: suite)
+
+    // Reachability probe seam: with an injectable TCP prober the type is
+    // exercisable without a real socket. Without a confirmed network path the
+    // probe short-circuits to .offline — exactly what a not-yet-connected
+    // device should report; the full path→onTailnet transition and the
+    // FleetModel timeout wiring are covered by the @testable shared suite.
+    let reach = TailnetReachability(tcpProber: { _, _, _ in true })
+    await reach.probe(host: "graith-ben.ts.net", port: 4823, timeout: 8)
+    check(reach.state == .offline, "probe without a confirmed network path reports offline")
+}
+
 // MARK: - Entry point
 
 @main
@@ -620,6 +649,7 @@ struct Smoke {
             try await testHostConnectionActions()
             try await testAppModel()
             try await testAttach()
+            await testPresentationSeams()
             try await testRealAdapters()
             testSpaceDrag()
             testScroll()

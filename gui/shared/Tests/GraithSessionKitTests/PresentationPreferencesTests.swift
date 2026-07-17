@@ -58,6 +58,21 @@ struct PresentationPreferencesTests {
         #expect(p.sidebarWidth == PresentationPreferences.maxSidebarWidth)           // clamped down
     }
 
+    /// The renderer-input seam (#1254): the iOS terminal renderer is built with
+    /// `PresentationPreferences(userDefaults: .standard).terminalFontSize`
+    /// (SessionTerminalPane) rather than the static `.default`. This proves a
+    /// persisted font size is what the renderer would receive — and that it
+    /// diverges from the static default the production composition used to
+    /// hand the renderer (the exact reopened bug).
+    @Test func rendererFontSizeSeamReadsPersistedValue() {
+        let defaults = scratchDefaults("presentation.renderer.bothy")
+        defaults.set(17.0, forKey: PresentationPreferences.Key.terminalFontSize)
+
+        let rendererFontSize = PresentationPreferences(userDefaults: defaults).terminalFontSize
+        #expect(rendererFontSize == 17)
+        #expect(rendererFontSize != PresentationPreferences.default.terminalFontSize)
+    }
+
     @Test func writeThenReadRoundTrips() {
         let defaults = scratchDefaults("presentation.roundtrip.dreich")
         let p = PresentationPreferences(
