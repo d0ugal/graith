@@ -253,12 +253,14 @@ final class TerminalScrollControllerTests: XCTestCase {
             scrollFriction: 6,
             scrollMomentumCutoff: 40,
             scrollSpringStiffness: 300,
-            scrollSpringDamping: 30)
+            scrollSpringDamping: 30)   // above the 4...29 stability-safe range
         let c = TerminalScrollController(config: config, cellHeight: 20)
         XCTAssertEqual(c.friction, 6)
         XCTAssertEqual(c.momentumCutoff, 40)
         XCTAssertEqual(c.springStiffness, 300)
-        XCTAssertEqual(c.springDamping, 30)
+        // Damping above the shared TerminalGestureConfig range (4...29) normalizes
+        // to its upper bound, matching the shared normalization tests (#1300).
+        XCTAssertEqual(c.springDamping, 29)
         XCTAssertEqual(c.cellHeight, 20)
         XCTAssertEqual(c.rubberBandConstant, 0.55, accuracy: 0.0001,
                        "rubber-band constant is an invariant, not sourced from config")
