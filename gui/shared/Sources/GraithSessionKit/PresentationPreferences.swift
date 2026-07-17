@@ -49,27 +49,53 @@ public struct PresentationPreferences: Equatable, Sendable {
     public static let minSidebarWidth: CGFloat = 180
     public static let maxSidebarWidth: CGFloat = 600
 
+    /// The shipped default for each field, kept as literal constants (not derived
+    /// from `.default`) so the memberwise init and clamp helpers can fall back to
+    /// them without re-entering `.default`'s own initialization.
+    private enum Defaults {
+        static let fleetPollInterval: TimeInterval = 2.0
+        static let reachabilityProbeTimeout: TimeInterval = 3
+        static let terminalFontSize: CGFloat = 13
+        static let sidebarWidth: CGFloat = 260
+        /// Floor for the cadence/timeout knobs so a zero can't busy-loop or
+        /// instantly fail a probe.
+        static let minInterval: TimeInterval = 0.1
+    }
+
     /// The built-in defaults — the values the GUIs previously hard-coded. These
     /// mirror `FleetModel`'s 2s poll, `TailnetReachability`'s 3s probe,
     /// `Theme.defaultFontSize` (13), and `GraithDesign.sidebarWidth` (260).
     public static let `default` = PresentationPreferences(
-        fleetPollInterval: 2.0,
-        reachabilityProbeTimeout: 3,
-        terminalFontSize: 13,
-        sidebarWidth: 260
+        fleetPollInterval: Defaults.fleetPollInterval,
+        reachabilityProbeTimeout: Defaults.reachabilityProbeTimeout,
+        terminalFontSize: Defaults.terminalFontSize,
+        sidebarWidth: Defaults.sidebarWidth
     )
 
     /// Memberwise init with clamping so an out-of-range value (from user defaults
     /// or a caller) can't wedge the UI. Cadences/timeouts are floored at a small
     /// positive value so a zero can't busy-loop or instantly fail a probe.
+    ///
+    /// A non-finite value (`NaN`, ±infinity) is replaced with the product default
+    /// *before* clamping: `min`/`max` don't reject NaN — their result depends on
+    /// argument order — so a stored NaN would otherwise slip straight through the
+    /// range clamp and feed non-finite geometry into the UI (#1323).
     public init(fleetPollInterval: TimeInterval = PresentationPreferences.default.fleetPollInterval,
                 reachabilityProbeTimeout: TimeInterval = PresentationPreferences.default.reachabilityProbeTimeout,
                 terminalFontSize: CGFloat = PresentationPreferences.default.terminalFontSize,
                 sidebarWidth: CGFloat = PresentationPreferences.default.sidebarWidth) {
-        self.fleetPollInterval = max(0.1, fleetPollInterval)
-        self.reachabilityProbeTimeout = max(0.1, reachabilityProbeTimeout)
-        self.terminalFontSize = min(max(terminalFontSize, Self.minFontSize), Self.maxFontSize)
-        self.sidebarWidth = min(max(sidebarWidth, Self.minSidebarWidth), Self.maxSidebarWidth)
+        self.fleetPollInterval = max(Defaults.minInterval,
+                                     Self.finite(fleetPollInterval, fallback: Defaults.fleetPollInterval))
+        self.reachabilityProbeTimeout = max(Defaults.minInterval,
+                                            Self.finite(reachabilityProbeTimeout, fallback: Defaults.reachabilityProbeTimeout))
+        self.terminalFontSize = Self.clampFontSize(terminalFontSize)
+        self.sidebarWidth = Self.clampSidebarWidth(sidebarWidth)
+    }
+
+    /// Replace a non-finite value (`NaN`, ±infinity) with a safe fallback so it
+    /// can't slip through a subsequent `min`/`max` range clamp (#1323).
+    private static func finite<T: BinaryFloatingPoint>(_ value: T, fallback: T) -> T {
+        value.isFinite ? value : fallback
     }
 
     // MARK: - UserDefaults
@@ -113,13 +139,15 @@ public struct PresentationPreferences: Equatable, Sendable {
 
     /// Clamp an arbitrary font size to the supported range. Exposed so the
     /// platform font-size commands (⌘+/⌘-/reset) share one definition of the
-    /// bounds instead of re-deriving them.
+    /// bounds instead of re-deriving them. A non-finite input falls back to the
+    /// product default before clamping (#1323).
     public static func clampFontSize(_ size: CGFloat) -> CGFloat {
-        min(max(size, minFontSize), maxFontSize)
+        min(max(finite(size, fallback: Defaults.terminalFontSize), minFontSize), maxFontSize)
     }
 
-    /// Clamp an arbitrary sidebar width to the supported range.
+    /// Clamp an arbitrary sidebar width to the supported range. A non-finite
+    /// input falls back to the product default before clamping (#1323).
     public static func clampSidebarWidth(_ width: CGFloat) -> CGFloat {
-        min(max(width, minSidebarWidth), maxSidebarWidth)
+        min(max(finite(width, fallback: Defaults.sidebarWidth), minSidebarWidth), maxSidebarWidth)
     }
 }

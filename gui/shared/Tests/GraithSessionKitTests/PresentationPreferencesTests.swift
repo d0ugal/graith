@@ -78,4 +78,50 @@ struct PresentationPreferencesTests {
         #expect(PresentationPreferences.clampSidebarWidth(10000) == PresentationPreferences.maxSidebarWidth)
         #expect(PresentationPreferences.clampSidebarWidth(300) == 300)
     }
+
+    // MARK: - Non-finite normalization (#1323)
+
+    /// The memberwise init must replace every non-finite value with the product
+    /// default before clamping, so `min`/`max` (whose result depends on argument
+    /// order for NaN) can't leak NaN/±inf into font/layout/cadence geometry.
+    @Test(arguments: [CGFloat.nan, .infinity, -.infinity])
+    func directInitNormalizesNonFiniteToDefault(_ bad: CGFloat) {
+        let p = PresentationPreferences(
+            fleetPollInterval: TimeInterval(bad),
+            reachabilityProbeTimeout: TimeInterval(bad),
+            terminalFontSize: bad,
+            sidebarWidth: bad)
+        #expect(p.fleetPollInterval == PresentationPreferences.default.fleetPollInterval)
+        #expect(p.reachabilityProbeTimeout == PresentationPreferences.default.reachabilityProbeTimeout)
+        #expect(p.terminalFontSize == PresentationPreferences.default.terminalFontSize)
+        #expect(p.sidebarWidth == PresentationPreferences.default.sidebarWidth)
+        // Every stored value is finite regardless of the bad input.
+        #expect(p.fleetPollInterval.isFinite)
+        #expect(p.reachabilityProbeTimeout.isFinite)
+        #expect(p.terminalFontSize.isFinite)
+        #expect(p.sidebarWidth.isFinite)
+    }
+
+    /// The static clamp helpers share the same normalization so the font-size
+    /// commands (⌘+/⌘-/reset) and sidebar resize can't be fed a stored NaN.
+    @Test(arguments: [CGFloat.nan, .infinity, -.infinity])
+    func clampHelpersNormalizeNonFiniteToDefault(_ bad: CGFloat) {
+        #expect(PresentationPreferences.clampFontSize(bad) == PresentationPreferences.default.terminalFontSize)
+        #expect(PresentationPreferences.clampSidebarWidth(bad) == PresentationPreferences.default.sidebarWidth)
+    }
+
+    /// A `UserDefaults`-persisted NaN (what `double(forKey:)` returns for a
+    /// malformed override) must recover to the safe default rather than remaining
+    /// stored as non-finite geometry across launches.
+    @Test(arguments: [Double.nan, .infinity, -.infinity])
+    func userDefaultsNonFiniteRecoversToDefault(_ bad: Double) {
+        let defaults = scratchDefaults("presentation.nonfinite.strath.\(bad)")
+        defaults.set(bad, forKey: PresentationPreferences.Key.fleetPollInterval)
+        defaults.set(bad, forKey: PresentationPreferences.Key.reachabilityProbeTimeout)
+        defaults.set(bad, forKey: PresentationPreferences.Key.terminalFontSize)
+        defaults.set(bad, forKey: PresentationPreferences.Key.sidebarWidth)
+
+        let p = PresentationPreferences(userDefaults: defaults)
+        #expect(p == .default)
+    }
 }
