@@ -1020,3 +1020,59 @@ func TestRenderThread_SystemAndOutbound(t *testing.T) {
 		t.Errorf("outbound messages should carry the 'me →' header:\n%s", outbound)
 	}
 }
+
+// TestMessageOverlayUsesConfiguredRefreshInterval is the regression test for
+// issue #1315: the message viewer must schedule its daemon re-poll at the
+// shared, configurable terminal.refresh_interval rather than its old hard-coded
+// 2s cadence. It injects a capturing tickFn so the duration tickCmd actually
+// passes to the timer is observed directly (no real sleep), which fails if the
+// literal tea.Tick(2*time.Second) is restored.
+func TestMessageOverlayUsesConfiguredRefreshInterval(t *testing.T) {
+	savePresentation(t)
+
+	// Capture the interval tickCmd schedules without arming a real timer.
+	var captured time.Duration
+
+	realTickFn := tickFn
+	tickFn = func(d time.Duration, fn func(time.Time) tea.Msg) tea.Cmd {
+		captured = d
+		return func() tea.Msg { return fn(time.Time{}) }
+	}
+
+	t.Cleanup(func() { tickFn = realTickFn })
+
+	const want = 5 * time.Second // deliberately not the 2s default
+	ConfigurePresentation(PresentationPrefs{RefreshInterval: want})
+
+	m := newMessageOverlayModel("ben", nil, nil)
+	if m.refresh != want {
+		t.Errorf("overlay refresh field = %v, want configured %v (issue #1315)", m.refresh, want)
+	}
+
+	captured = 0
+
+	if cmd := m.tickCmd(); cmd == nil {
+		t.Fatal("tickCmd() returned nil for a configured overlay")
+	}
+
+	if captured != want {
+		t.Errorf("tickCmd scheduled %v, want configured %v (issue #1315)", captured, want)
+	}
+
+	// A bare struct literal (refresh unset) must fall back to the live package
+	// cadence, not busy-loop tea.Tick on a zero duration.
+	bare := messageOverlayModel{}
+	if bare.refresh != 0 {
+		t.Fatalf("bare model refresh = %v, want 0 to exercise the fallback", bare.refresh)
+	}
+
+	captured = 0
+
+	if cmd := bare.tickCmd(); cmd == nil {
+		t.Fatal("tickCmd() returned nil for a zero-refresh model (fallback missing)")
+	}
+
+	if captured != refreshInterval {
+		t.Errorf("zero-refresh tickCmd scheduled %v, want fallback %v", captured, refreshInterval)
+	}
+}
