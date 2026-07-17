@@ -109,6 +109,26 @@ final class Gate: @unchecked Sendable {
     func open() { sem.signal() }
 }
 
+/// A pairing backend that records whether `beginPairing` was ever invoked, so a
+/// test can prove the coordinator's early fail-closed guard refuses BEFORE opening
+/// any pairing flow (issue #1299).
+final class RecordingPairing: GraithPairing, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _beginCalled = false
+
+    var beginCalled: Bool { lock.withLock { _beginCalled } }
+
+    func beginPairing(
+        transport: GraithTransport,
+        deviceLabel: String,
+        profile: String,
+        signer: DeviceKeySigner
+    ) async throws -> PairingSession {
+        lock.withLock { _beginCalled = true }
+        throw ControlError.daemon("beginPairing must not be called after a fail-closed refusal")
+    }
+}
+
 /// A canned pairing backend for driving `PairingCoordinator` without a daemon.
 struct StubPairing: GraithPairing {
     enum Outcome: Sendable {
@@ -157,6 +177,132 @@ final class ThrowOnceOnSetStore: SecretStore, @unchecked Sendable {
     }
 
     func remove(_ account: String) throws { try backing.remove(account) }
+}
+
+/// Thread-safe ordered event recorder shared between ``RecordingFileOps`` and a
+/// ``StubPairingSession``'s `onAck`, so a test can assert every durable file step
+/// completes before pair_ack is sent (issue #1299).
+final class Timeline: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [String] = []
+    func record(_ e: String) { lock.withLock { events.append(e) } }
+    var all: [String] { lock.withLock { events } }
+}
+
+/// A ``DurableFileOps`` that records each step's order (into an optional
+/// ``Timeline``) and can inject a one-shot failure at any step, while delegating
+/// to real POSIX ops so the store genuinely persists. Lets tests prove (a) write →
+/// file sync → rename → dir sync all precede pair_ack, and (b) a failed durable
+/// step stays pre-ack and rolls back to the exact prior state (issue #1299).
+final class RecordingFileOps: DurableFileOps, @unchecked Sendable {
+    enum Step: String { case writeTemp, syncFile, replace, syncDir, removeItem }
+
+    private let real = POSIXFileOps()
+    private let lock = NSLock()
+    private let timeline: Timeline?
+    private var failAt: Step?
+    private var failPathSubstring: String?
+
+    init(timeline: Timeline? = nil, failAt: Step? = nil) {
+        self.timeline = timeline
+        self.failAt = failAt
+    }
+
+    /// Arm a one-shot failure at `step` for the next durable write.
+    func armFailure(at step: Step) { lock.withLock { failAt = step; failPathSubstring = nil } }
+
+    /// Arm a one-shot failure at `step`, but only for a write whose path contains
+    /// `substring` — so a test can target the hosts.json write while letting the
+    /// pending-pairing.json journal writes succeed (issue #1299).
+    func armFailure(at step: Step, pathContains substring: String) {
+        lock.withLock { failAt = step; failPathSubstring = substring }
+    }
+
+    struct InjectedFailure: Error { let step: Step }
+
+    private func record(_ step: Step, path: String) throws {
+        timeline?.record(step.rawValue)
+        let matches = lock.withLock { () -> Bool in
+            let m = failAt == step && (failPathSubstring == nil || path.contains(failPathSubstring!))
+            if m { failAt = nil; failPathSubstring = nil }
+            return m
+        }
+        if matches { throw InjectedFailure(step: step) }
+    }
+
+    func writeTemp(_ data: Data, forDestination destination: URL) throws -> URL {
+        try record(.writeTemp, path: destination.path)
+        return try real.writeTemp(data, forDestination: destination)
+    }
+
+    func syncFile(at url: URL) throws {
+        try record(.syncFile, path: url.path)
+        try real.syncFile(at: url)
+    }
+
+    func replaceItem(at destination: URL, with source: URL) throws {
+        try record(.replace, path: destination.path)
+        try real.replaceItem(at: destination, with: source)
+    }
+
+    func syncDirectory(at url: URL) throws {
+        try record(.syncDir, path: url.path)
+        try real.syncDirectory(at: url)
+    }
+
+    func discardTemp(at url: URL) { real.discardTemp(at: url) }
+
+    func removeItem(at url: URL) throws {
+        try record(.removeItem, path: url.path)
+        try real.removeItem(at: url)
+    }
+}
+
+/// A ``DurableFileOps`` that fails `removeItem` on demand while delegating every
+/// other op to a real POSIX writer, so a test can force a journal-removal failure
+/// and assert the journal-first ordering never leaves a stuck receipt (#1299).
+final class FailingRemoveFileOps: DurableFileOps, @unchecked Sendable {
+    private let real = POSIXFileOps()
+    private let lock = NSLock()
+    private var failRemove = false
+
+    func setFailRemove(_ on: Bool) { lock.withLock { failRemove = on } }
+
+    func writeTemp(_ data: Data, forDestination destination: URL) throws -> URL {
+        try real.writeTemp(data, forDestination: destination)
+    }
+    func syncFile(at url: URL) throws { try real.syncFile(at: url) }
+    func replaceItem(at destination: URL, with source: URL) throws { try real.replaceItem(at: destination, with: source) }
+    func syncDirectory(at url: URL) throws { try real.syncDirectory(at: url) }
+    func discardTemp(at url: URL) { real.discardTemp(at: url) }
+    func removeItem(at url: URL) throws {
+        if lock.withLock({ failRemove }) { throw NSError(domain: "FailingRemoveFileOps", code: 1) }
+        try real.removeItem(at: url)
+    }
+}
+
+/// A ``SecretStore`` whose `remove` fails for armed accounts (delegating reads /
+/// writes to an in-memory backing), so a test can force the candidate-token
+/// cleanup to fail during a rollback and assert it surfaces via
+/// ``HostRegistryError/pairingRollbackIncomplete`` (issue #1299).
+final class ThrowOnRemoveStore: SecretStore, @unchecked Sendable {
+    struct RemoveFailure: Error {}
+
+    private let backing = InMemorySecretStore()
+    private let lock = NSLock()
+    private var failAccounts: Set<String> = []
+
+    func armRemoveFailure(for account: String) {
+        lock.withLock { _ = failAccounts.insert(account) }
+    }
+
+    func data(for account: String) throws -> Data? { try backing.data(for: account) }
+    func set(_ data: Data, for account: String) throws { try backing.set(data, for: account) }
+
+    func remove(_ account: String) throws {
+        if lock.withLock({ failAccounts.contains(account) }) { throw RemoveFailure() }
+        try backing.remove(account)
+    }
 }
 
 /// A pairing backend that vends a queued session per `beginPairing` call, for

@@ -188,6 +188,27 @@ public final class PairingCoordinator: ObservableObject {
         profile: String = "",
         deviceLabel: String
     ) async {
+        // Fail closed: don't start a new attempt while one is still being confirmed
+        // (a confirm in flight) or a prior receipt is awaiting its probe. Starting
+        // one would abandon/disrupt the in-flight attempt only to be refused at
+        // beginCandidate (the registry refuses to overwrite an in-flight journal).
+        // Surface a settle/retry message WITHOUT bumping the generation, so the
+        // in-flight attempt is left completely untouched (issue #1299).
+        //
+        // Gate DIRECTLY on journal file existence (captured once) — NOT on
+        // pendingReceipt(), which is nil for a corrupt/unreadable journal and would
+        // let a relaunch (persisted=false) start a disruptive new flow only to be
+        // refused later at beginCandidate. `persisted` is a per-attempt hint that can
+        // outlive its receipt, so self-heal it: once the probe has resolved the
+        // receipt (no journal on disk) a stale `persisted` must not block a
+        // legitimate re-pair.
+        let hasJournal = registry.hasPendingJournal()
+        if !hasJournal { persisted = false }
+        if confirmingGeneration != nil || persisted || hasJournal {
+            phase = .failed("A previous pairing is still being confirmed; wait for it to settle, then retry.")
+            return
+        }
+
         generation &+= 1
         let myGen = generation
         phase = .awaitingApproval
@@ -279,12 +300,25 @@ public final class PairingCoordinator: ObservableObject {
 
     /// The user confirmed the SPKI fingerprint matches `gr pair`'s local output.
     ///
-    /// This is the receipt-protocol commit point (issue #1299): durably persist
-    /// the credential FIRST (throwing), then send pair_ack and await
-    /// pair_committed. Persistence-before-ack ensures a crash after the ack cannot
-    /// leave the daemon paired with no client credential. Rollback is outcome-aware:
-    /// only a pre-ack failure (the persist itself) removes the host; any post-ack
-    /// failure retains it because the daemon may already be durable.
+    /// This is the receipt-protocol commit point (issue #1299). Rather than
+    /// promoting the credential to a live paired host before the ack — which a
+    /// crash could leave stranded as a ghost — it stages an attempt-scoped
+    /// *candidate* (token in a separate account + a durable journal) and only
+    /// promotes it to the paired row on/after commit:
+    ///
+    ///   1. `beginCandidate` — durably record the candidate + `.candidate` journal.
+    ///   2. `markCandidateAcked` — durably flip the journal to `.acked` BEFORE the
+    ///      ack, so a crash after the ack reconciles as commit-unknown/retain.
+    ///   3. `ackAndAwaitCommit` — send `pair_ack` and await `pair_committed`.
+    ///   4. `commitCandidate` — promote the candidate to the live paired host.
+    ///
+    /// A crash before step 2 completes discards the candidate on relaunch (no ghost,
+    /// prior credential intact); after it, the candidate is RETAINED for a
+    /// probe-based commit oracle (an authenticated connection confirms or refutes
+    /// the daemon commit) rather than blindly promoted. Only step 3 receiving an
+    /// explicit `pair_committed` promotes directly (step 4). Every post-step-1 await
+    /// is generation-scoped so a stale (superseded) confirm can't clobber a newer
+    /// attempt's row or phase.
     public func confirmPairing() async {
         let myGen = generation
 
@@ -303,22 +337,14 @@ public final class PairingCoordinator: ObservableObject {
         guard let hostID = pendingHostID, let response = pendingResponse,
               var host = pendingHost, let session = pendingSession else { return }
 
-        // 1. Durable persist FIRST (synchronous, no await before this — myGen is
-        //    still current). If it throws, completePairing has already restored the
-        //    exact prior state, so nothing is durable for this attempt and no ack
-        //    was sent — abandon the grant. Only a placeholder THIS attempt created
-        //    is removed; a failed re-pair of an existing host keeps the prior row.
-        //    deviceID is NOT recorded yet (it must not outlive a failed pre-ack persist).
-        //    Every registry and coordinator-state mutation after the first await is
-        //    generation-scoped so a stale (superseded) confirm cannot clobber a newer
-        //    attempt's row or phase.
+        // 1. Pre-ack: durably record the attempt-scoped candidate + `.candidate`
+        //    journal. This touches neither the live token nor the paired row, so a
+        //    failure here (or a crash before the ack) leaves any prior working
+        //    credential intact and exposes no ghost paired host. No ack was sent, so
+        //    abandon the grant; drop only a placeholder THIS attempt created.
         do {
-            try registry.completePairing(hostID: hostID, response: response)
+            try registry.beginCandidate(host: host, response: response, createdPlaceholder: createdPlaceholder)
         } catch {
-            // completePairing already restored the exact prior state. While still
-            // current, drop only a placeholder this attempt created (before awaiting
-            // abandon, so a new attempt during the await isn't affected); if
-            // superseded, touch nothing in the registry.
             if myGen == generation {
                 if createdPlaceholder { registry.remove(hostID: hostID) }
                 persisted = false
@@ -329,29 +355,40 @@ public final class PairingCoordinator: ObservableObject {
             return
         }
 
-        // The credential is now durable. From here a concurrent reset/dismiss must
-        // never delete it (see `persisted`) — once the ack is sent no outcome proves
-        // the daemon did not commit.
+        // 2. Pre-ack: durably flip the journal to `.acked` BEFORE sending the ack.
+        //    Still pre-ack, so a failure discards the candidate and sends no ack.
+        do {
+            try registry.markCandidateAcked(hostID: hostID)
+        } catch {
+            registry.discardCandidate(hostID: hostID)
+            if myGen == generation {
+                if createdPlaceholder { registry.remove(hostID: hostID) }
+                persisted = false
+                phase = .failed(error.localizedDescription)
+                clearPending()
+            }
+            await session.abandon()
+            return
+        }
+
+        // The candidate is now durably marked acked. From here a concurrent
+        // reset/dismiss must never delete it (see `persisted`) — once the ack is
+        // sent no outcome proves the daemon did not commit.
         if myGen == generation { persisted = true }
 
-        // 2. Only after durable persistence, acknowledge receipt and await the
-        //    daemon's commit confirmation. Everything after this await is scoped to
-        //    myGen == generation, since a new pair()/reset() may have advanced the
-        //    attempt while the ack was in flight.
-        //
-        //    Once the ack is sent, NO failure proves the daemon did not commit (an
-        //    error reply may be an atomic-write failure that already landed the
-        //    device on disk). So every post-ack failure RETAINS the durable
-        //    credential — deleting it could strand a paired device (issue #1299) —
-        //    records the device ID for the retained credential, and surfaces the
-        //    unknown outcome.
+        // 3. Send `pair_ack` and await the daemon's commit confirmation. Once the
+        //    ack is sent, NO failure proves the daemon did not commit. But nor does
+        //    it prove the daemon DID commit — so rather than promote a possible
+        //    ghost, RETAIN the durable `.acked` candidate and let the probe-based
+        //    commit oracle settle it: an authenticated connection with the
+        //    candidate credential confirms (→ commit) or refutes (→ discard) it.
+        //    The credential is kept (never deleted) so a committed device is never
+        //    stranded; the device ID is recorded for the retained candidate.
         do {
             try await session.ackAndAwaitCommit()
         } catch {
-            // Retain the credential (the daemon may be durable). Only record the
-            // global device-ID fallback and touch coordinator state while this
-            // attempt is still current — a stale continuation must not clobber a
-            // newer attempt's identity or phase.
+            // Commit-unknown: leave the durable candidate for the connection layer
+            // (FleetModel / next launch) to probe. Do NOT mark the host paired here.
             if myGen == generation {
                 try? identity.setDeviceID(response.deviceID)
                 phase = .failed("Pairing acknowledged but not confirmed by the daemon; credentials kept. A later connection will settle it. (\(String(describing: error)))")
@@ -360,8 +397,20 @@ public final class PairingCoordinator: ObservableObject {
             return
         }
 
-        // 3. Committed on both ends. Record the daemon-assigned device ID and mark
-        //    paired only while this attempt is still current.
+        // 4. Committed on both ends. Promote the candidate to the live paired host.
+        //    A commit-time store failure is still post-ack — retain (the .acked
+        //    journal survives for a relaunch to reconcile) and surface it.
+        do {
+            try registry.commitCandidate(hostID: hostID)
+        } catch {
+            if myGen == generation {
+                try? identity.setDeviceID(response.deviceID)
+                phase = .failed("Pairing committed by the daemon but the local store write failed; credentials kept. A later connection will settle it. (\(String(describing: error)))")
+                clearPending()
+            }
+            return
+        }
+
         host.isPaired = true
         if myGen == generation {
             try? identity.setDeviceID(response.deviceID)
