@@ -69,7 +69,7 @@ var rootCmd = &cobra.Command{
 
 		// Install the configured external-tool resolver so CLI-side git calls
 		// (store repo discovery) use the same executables as the daemon (#1238).
-		tools.Configure(cfg.Tools.Resolved())
+		tools.Configure(cfg.Tools.Resolved(cfg.SourceDir))
 
 		// Install the configured client connection deadlines and attach reconnect
 		// cadence so every dial/handshake this invocation makes honours the

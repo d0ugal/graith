@@ -86,7 +86,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	// Install the configured external-tool resolver before anything shells out
 	// to git/gh/ps/etc. Validation already ran at config load, so this only fills
 	// defaults for unset fields (issue #1238).
-	tools.Configure(cfg.Tools.Resolved())
+	tools.Configure(cfg.Tools.Resolved(cfg.SourceDir))
 
 	sm := NewSessionManager(cfg, paths, log)
 	sm.configFile = configFile

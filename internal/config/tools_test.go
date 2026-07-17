@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/tools"
 )
 
@@ -112,8 +113,96 @@ func TestToolsResolvedCopiesFields(t *testing.T) {
 	}
 
 	want := tools.Config{Git: "g", GH: "h", Shell: "s", OSAScript: "o", PS: "p", Lsof: "l"}
-	if got := tc.Resolved(); got != want {
+	if got := tc.Resolved(""); got != want {
 		t.Errorf("Resolved() = %+v, want %+v", got, want)
+	}
+}
+
+// TestResolveToolPath covers the normalization rules directly: bare names and
+// absolute paths pass through untouched, a relative path is anchored to the
+// config directory, and an empty baseDir leaves a relative path alone (#1293).
+func TestResolveToolPath(t *testing.T) {
+	base := filepath.Join(string(filepath.Separator), "croft", "graith")
+
+	cases := []struct {
+		name    string
+		baseDir string
+		in      string
+		want    string
+	}{
+		{"empty", base, "", ""},
+		{"bare name", base, "git", "git"},
+		{"absolute", base, "/usr/bin/git", "/usr/bin/git"},
+		{"relative dot", base, "./bin/braw-git", filepath.Join(base, "bin", "braw-git")},
+		{"relative subdir", base, "bin/braw-git", filepath.Join(base, "bin", "braw-git")},
+		{"relative no base", "", "./bin/braw-git", "./bin/braw-git"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveToolPath(tc.baseDir, tc.in); got != tc.want {
+				t.Errorf("resolveToolPath(%q, %q) = %q, want %q", tc.baseDir, tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestToolsRelativePathResolvesAgainstConfigDir is the #1293 regression. A
+// relative tool path in config.toml must validate at load and then run even when
+// the executing command's working directory (exec.Cmd.Dir) is a different
+// worktree. Before the fix the path resolved against the process working
+// directory for validation but against exec.Cmd.Dir at run time, so it either
+// failed validation or failed to execute. The config directory is neither the
+// process cwd nor the run-time Cmd.Dir here, proving the anchor is config.toml's
+// directory.
+func TestToolsRelativePathResolvesAgainstConfigDir(t *testing.T) {
+	t.Cleanup(tools.Reset)
+
+	configDir := t.TempDir()
+	binDir := filepath.Join(configDir, "bin")
+
+	if err := os.MkdirAll(binDir, 0o750); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+
+	// A wrapper git that echoes a sentinel so the test needs no real git.
+	wrapper := filepath.Join(binDir, "braw-git")
+	script := "#!/bin/sh\necho \"canny-marker $@\"\n"
+
+	if err := os.WriteFile(wrapper, []byte(script), 0o755); err != nil { //nolint:gosec // G306: stub must be executable for exec
+		t.Fatalf("write wrapper: %v", err)
+	}
+
+	cfgPath := filepath.Join(configDir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("[tools]\ngit = \"./bin/braw-git\"\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	// Load validates the relative override; before the fix this failed because
+	// "./bin/braw-git" does not exist relative to the test process's cwd.
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load with relative tools.git = %v, want nil", err)
+	}
+
+	resolved := cfg.Tools.Resolved(cfg.SourceDir)
+	if !filepath.IsAbs(resolved.Git) {
+		t.Fatalf("resolved git = %q, want absolute path", resolved.Git)
+	}
+
+	tools.Configure(resolved)
+
+	// Run git with Cmd.Dir pointed at an unrelated worktree. The relative path
+	// must NOT resolve against this directory.
+	runDir := t.TempDir()
+
+	out, err := git.RunOutput(runDir, "status")
+	if err != nil {
+		t.Fatalf("RunOutput from a different Cmd.Dir = %v, want the wrapper to run", err)
+	}
+
+	if out != "canny-marker status" {
+		t.Errorf("RunOutput = %q, want the wrapper's sentinel output", out)
 	}
 }
 

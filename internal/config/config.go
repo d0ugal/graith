@@ -72,6 +72,13 @@ type Config struct {
 	// (e.g. conflicting keybindings). They are surfaced to the user but do not
 	// prevent startup. Not serialised. See issue #1233.
 	Warnings []string `toml:"-"`
+
+	// SourceDir is the absolute directory containing the config.toml this Config
+	// was loaded from. It anchors relative paths in the config (currently the
+	// [tools] executable overrides) so they mean the same file regardless of the
+	// process working directory or a later exec.Cmd.Dir. Empty for an in-memory
+	// Default() with no source file. Not serialised. See issue #1293.
+	SourceDir string `toml:"-"`
 }
 
 // ConfigReloadDebounceDefault is the quiet period the config-file watcher waits
@@ -181,25 +188,55 @@ type ToolsConfig struct {
 	Lsof string `toml:"lsof"`
 }
 
-// Resolved converts the config block into the tools package's Config. Empty
-// fields are left empty here; tools.Configure fills them from tools.Defaults so
-// there is a single source of default values.
-func (t ToolsConfig) Resolved() tools.Config {
+// Resolved converts the config block into the tools package's Config,
+// normalizing each path-valued override against baseDir (the directory holding
+// config.toml). Empty fields are left empty here; tools.Configure fills them
+// from tools.Defaults so there is a single source of default values. Because
+// normalization produces a stable absolute path, the same value is used for
+// validation and for execution regardless of the later exec.Cmd.Dir (#1293).
+func (t ToolsConfig) Resolved(baseDir string) tools.Config {
 	return tools.Config{
-		Git:       t.Git,
-		GH:        t.GH,
-		Shell:     t.Shell,
-		OSAScript: t.OSAScript,
-		PS:        t.PS,
-		Lsof:      t.Lsof,
+		Git:       resolveToolPath(baseDir, t.Git),
+		GH:        resolveToolPath(baseDir, t.GH),
+		Shell:     resolveToolPath(baseDir, t.Shell),
+		OSAScript: resolveToolPath(baseDir, t.OSAScript),
+		PS:        resolveToolPath(baseDir, t.PS),
+		Lsof:      resolveToolPath(baseDir, t.Lsof),
 	}
 }
 
-// Validate checks that every explicitly-set tool override resolves (an absolute
-// path exists and is executable; a bare name is found on PATH). Unset fields are
-// skipped so defaults keep PATH-lookup semantics.
-func (t ToolsConfig) Validate() error {
-	return tools.Validate(t.Resolved())
+// Validate checks that every explicitly-set tool override resolves (a path
+// exists and is executable; a bare name is found on PATH). Path-valued overrides
+// are normalized against baseDir first, so a relative wrapper is validated at
+// the exact location it will later be executed from. Unset fields are skipped so
+// defaults keep PATH-lookup semantics.
+func (t ToolsConfig) Validate(baseDir string) error {
+	return tools.Validate(t.Resolved(baseDir))
+}
+
+// resolveToolPath normalizes a configured [tools] executable value to a stable,
+// working-directory-independent form. A bare command name (no path separator) is
+// returned unchanged for PATH lookup, and an absolute path is returned
+// unchanged. A relative path (one containing a separator, e.g.
+// "./bin/git-wrapper") is resolved against baseDir — the directory containing
+// config.toml — so it names the same file whether validated from the daemon/CLI
+// working directory or executed with exec.Cmd.Dir set to a session worktree
+// (issue #1293). An empty baseDir (an in-memory config with no source file)
+// leaves a relative path unchanged.
+func resolveToolPath(baseDir, v string) string {
+	if v == "" {
+		return v
+	}
+
+	if !strings.ContainsRune(v, filepath.Separator) && !strings.ContainsRune(v, '/') {
+		return v // bare command name: PATH lookup
+	}
+
+	if filepath.IsAbs(v) || baseDir == "" {
+		return v
+	}
+
+	return filepath.Join(baseDir, v)
 }
 
 // GitConfig is the [git] block tuning the timeouts graith applies to the git
@@ -4460,7 +4497,7 @@ func (c *Config) Validate() error {
 	// [tools]: validate explicit executable overrides so a bad path/name fails
 	// at startup, not at the first git/gh/notification call. Unset defaults are
 	// skipped (they keep PATH-lookup semantics).
-	if err := c.Tools.Validate(); err != nil {
+	if err := c.Tools.Validate(c.SourceDir); err != nil {
 		errs = append(errs, err)
 	}
 
@@ -4629,6 +4666,16 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg.Agents = mergeAgents(defaultAgents, cfg.Agents)
+
+	// Record the absolute directory of the config file so relative [tools] paths
+	// resolve against it consistently for both validation (below) and execution.
+	// Must be set before Validate so a relative override is checked at the same
+	// location it will later run from (issue #1293).
+	if abs, err := filepath.Abs(path); err == nil {
+		cfg.SourceDir = filepath.Dir(abs)
+	} else {
+		cfg.SourceDir = filepath.Dir(path)
+	}
 
 	applyPRWatchCommentCompat(cfg, data)
 
