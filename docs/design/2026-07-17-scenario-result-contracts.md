@@ -23,7 +23,9 @@ progress in `ScenarioState`. At start, the daemon sends each member a topology
 manifest through its inbox and writes the same manifest to the shared document
 store. Members otherwise coordinate with ordinary `gr msg` and `gr store`
 commands. Scenario completion is derived from assigned todo items: all tracked
-members must finish their work and no member may be errored.
+members must finish their work and no member may be errored. The same
+authoritative completion edge drives configured completion actions and
+lifecycle cleanup.
 
 Message publication already forces sender identity from the authenticated
 connection. The document store already validates keys, serializes writes,
@@ -126,7 +128,10 @@ A member with tracked todos or required results is complete only when all its
 tracked todos are done and every required result is available. Members with no
 tracked todos and no required results retain existing behavior. Aggregate
 scenario completion requires every tracked member to be complete and no member
-to be errored. Optional results never enter this predicate.
+to be errored. Optional results never enter this predicate. Completion actions
+and lifecycle cleanup use this combined todo-and-result predicate, and every
+result publication hints the authoritative reconciler so a successful result
+can close an epoch and a later invalid replacement can reopen it.
 
 The trade-off is a new control message plus additive protocol and Swift status
 fields. Result content remains in the existing store, while only small metadata
@@ -160,7 +165,9 @@ existing state and clients remain valid without a state-version migration.
 Required Swift scenario status models gain optional/defaulted result fields;
 publication remains CLI-only. Scenario start and programmatic `scenario_add`
 both run the same declaration compiler. Manifest republishing uses persisted
-declarations rather than re-reading the source TOML.
+declarations rather than re-reading the source TOML. Scenario completion
+automation reads persisted result state under the session-manager lock rather
+than trusting publication hints.
 
 ### Testing
 
@@ -168,8 +175,8 @@ Cover TOML/protocol round trips, name/format/template/collision validation,
 empty and malformed JSON, oversize input, missing and misnamed results,
 scenario misrouting, human and peer authorization, store failure, retry to
 available, optional-versus-required completion, direct-store non-recognition,
-state reload, stop/resume metadata retention, manifest destinations, CLI body
-and response handling, remote policy completeness, integration publication, and
-race coverage around concurrent publication. Regenerate protocol and capability
-fixtures, then run focused Go, integration/race, Swift shared, docs, vet, and
-lint checks.
+state reload, stop/resume metadata retention, completion-action gating and
+reopening, manifest destinations, CLI body and response handling, remote policy
+completeness, integration publication, and race coverage around concurrent
+publication. Regenerate protocol and capability fixtures, then run focused Go,
+integration/race, Swift shared, docs, vet, and lint checks.

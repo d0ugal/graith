@@ -188,16 +188,18 @@ func (sm *SessionManager) saveScenarioCompletionState(operation string) {
 	}
 }
 
-// authoritativeScenarioComplete rereads todo state outside sm.mu. Todo event
-// payloads are never trusted to establish an edge.
+// authoritativeScenarioComplete rereads todo state outside sm.mu and result
+// state under sm.mu. Event payloads are only hints and never establish an edge.
 func (sm *SessionManager) authoritativeScenarioComplete(id string) (bool, error) {
-	if sm.todos == nil {
-		return false, nil
-	}
+	var progress map[string][2]int
 
-	progress, err := sm.todos.AssigneeProgress("scenario:" + id)
-	if err != nil {
-		return false, err
+	if sm.todos != nil {
+		var err error
+
+		progress, err = sm.todos.AssigneeProgress("scenario:" + id)
+		if err != nil {
+			return false, err
+		}
 	}
 
 	sm.mu.RLock()
@@ -208,13 +210,32 @@ func (sm *SessionManager) authoritativeScenarioComplete(id string) (bool, error)
 		return false, nil
 	}
 
-	ids := append([]string(nil), sc.SessionIDs...)
+	type completionMember struct {
+		id                       string
+		requiredResults          int
+		requiredResultsAvailable bool
+	}
+
+	members := make([]completionMember, len(sc.SessionIDs))
 	errored := false
 
-	for _, sid := range ids {
+	for i, sid := range sc.SessionIDs {
+		members[i] = completionMember{id: sid, requiredResultsAvailable: true}
+		if i < len(sc.Sessions) {
+			for _, result := range sc.Sessions[i].Results {
+				if !result.Required {
+					continue
+				}
+
+				members[i].requiredResults++
+				if result.Status != ScenarioResultAvailable {
+					members[i].requiredResultsAvailable = false
+				}
+			}
+		}
+
 		if s := sm.state.Sessions[sid]; s != nil && s.Status == StatusErrored {
 			errored = true
-			break
 		}
 	}
 
@@ -223,13 +244,17 @@ func (sm *SessionManager) authoritativeScenarioComplete(id string) (bool, error)
 	tracked := 0
 	complete := 0
 
-	for _, sid := range ids {
-		if p, ok := progress[sid]; ok && p[1] > 0 {
-			tracked++
+	for _, member := range members {
+		p := progress[member.id]
+		if p[1] == 0 && member.requiredResults == 0 {
+			continue
+		}
 
-			if p[0] == p[1] {
-				complete++
-			}
+		tracked++
+
+		todosComplete := p[1] == 0 || p[0] == p[1]
+		if todosComplete && member.requiredResultsAvailable {
+			complete++
 		}
 	}
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 func newScenarioCompletionTestSM(t *testing.T, trigger config.TriggerConfig, lifecycle config.ScenarioLifecycleConfig) (*SessionManager, TodoItem) {
@@ -136,6 +137,94 @@ func TestScenarioCompletionEpochIdempotentAndRecompletion(t *testing.T) {
 
 	if got := loaded.Scenarios["sc-braw"].Completion.Epoch; got != 2 {
 		t.Fatalf("persisted epoch = %d, want 2", got)
+	}
+}
+
+func TestScenarioCompletionRequiresDeclaredResults(t *testing.T) {
+	sm, _ := newScenarioCompletionTestSM(t, completionCommandTrigger("archive"), config.ScenarioLifecycleConfig{})
+
+	results, err := compileScenarioResults(
+		"sc-braw", "braw", "ben-id", "ben",
+		[]protocol.ScenarioResultSpec{{
+			Name: "facts", Format: "json", Store: "ben/facts.json", Required: true,
+		}},
+		map[string]string{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sm.mu.Lock()
+	sm.state.Scenarios["sc-braw"].Sessions[0].Results = results
+	sm.mu.Unlock()
+
+	if err := sm.reconcileScenarioCompletion("sc-braw"); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.mu.RLock()
+
+	if sm.state.Scenarios["sc-braw"].Completion.Complete {
+		t.Fatal("todo completion bypassed the pending required result")
+	}
+
+	sm.mu.RUnlock()
+
+	// Discard the todo transition hint so the next receive proves publication
+	// wakes the authoritative completion reconciler.
+drainHints:
+	for {
+		select {
+		case <-sm.completion.wake:
+		default:
+			break drainHints
+		}
+	}
+
+	auth := authContext{authenticated: true, role: roleSession, sessionID: "ben-id"}
+	if _, err := sm.PublishScenarioResult(auth, protocol.ScenarioResultPublishMsg{
+		Scenario: "braw", Name: "facts", Body: `{"croft":"ready"}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case got := <-sm.completion.wake:
+		if got != "sc-braw" {
+			t.Fatalf("completion hint = %q, want sc-braw", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("result publication did not hint completion reconciliation")
+	}
+
+	if err := sm.reconcileScenarioCompletion("sc-braw"); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.mu.RLock()
+
+	if completion := sm.state.Scenarios["sc-braw"].Completion; !completion.Complete || completion.Epoch != 1 {
+		t.Fatalf("available required result did not complete scenario: %+v", completion)
+	}
+
+	sm.mu.RUnlock()
+
+	if _, err := sm.PublishScenarioResult(auth, protocol.ScenarioResultPublishMsg{
+		Scenario: "braw", Name: "facts", Body: `{"croft":`,
+	}); err == nil {
+		t.Fatal("expected malformed replacement to fail")
+	}
+
+	if err := sm.reconcileScenarioCompletion("sc-braw"); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	completion := sm.state.Scenarios["sc-braw"].Completion
+	if completion.Complete || len(completion.Actions) != 1 || completion.Actions[0].State != CompletionActionFailed {
+		t.Fatalf("invalid replacement did not reopen scenario: %+v", completion)
 	}
 }
 
