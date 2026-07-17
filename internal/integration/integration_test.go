@@ -28,7 +28,6 @@ type testEnv struct {
 	socket string
 	tmpDir string
 	repo   string
-	config string
 	conns  []net.Conn
 }
 
@@ -146,7 +145,7 @@ func setupAt(t *testing.T, tmpDir string, mutators ...func(*config.Config)) *tes
 	go sm.RunTriggerLoop(ctx)
 	go sm.RunFileWatchLoop(ctx)
 
-	return &testEnv{sm: sm, srv: srv, cancel: cancel, socket: socketPath, tmpDir: tmpDir, repo: repo, config: paths.ConfigFile}
+	return &testEnv{sm: sm, srv: srv, cancel: cancel, socket: socketPath, tmpDir: tmpDir, repo: repo}
 }
 
 func (e *testEnv) teardown() {
@@ -1291,48 +1290,16 @@ func TestScenarioMirrorSharedSourceLifecycle(t *testing.T) {
 
 	env := setupAt(t, root, func(cfg *config.Config) {
 		cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "nono", Command: backend}
+		cfg.Orchestrator.Enabled = true
+		cfg.Orchestrator.Agent = "echo"
 	})
 	defer env.teardown()
 
-	// Enable the declarative orchestrator through the public config-reload path,
-	// then authenticate the scenario_start request with its real session token.
-	next := *env.sm.Config()
-	next.Orchestrator.Enabled = true
-	next.Orchestrator.Agent = "echo"
-
-	data, err := config.EffectiveTOML(&next)
+	// Bootstrap the real authenticated orchestrator synchronously so the wire
+	// lifecycle below does not depend on an unrelated config-reload goroutine.
+	orchestrator, err := env.sm.CreateOrchestratorForIntegration(context.Background())
 	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(env.config, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := env.sm.ReloadConfig(); err != nil {
-		t.Fatalf("ReloadConfig: %v", err)
-	}
-
-	var orchestrator daemon.SessionState
-
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		for _, session := range env.sm.List() {
-			if session.SystemKind == daemon.SystemKindOrchestrator && session.Status == daemon.StatusRunning {
-				orchestrator = session
-				break
-			}
-		}
-
-		if orchestrator.ID != "" {
-			break
-		}
-
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	if orchestrator.ID == "" || orchestrator.Token == "" {
-		t.Fatal("orchestrator did not start after config reload")
+		t.Fatalf("create orchestrator: %v", err)
 	}
 
 	r, w := env.connect(t)
