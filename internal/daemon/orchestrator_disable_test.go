@@ -89,6 +89,7 @@ func TestApplyConfigOrchestratorDisableStopFailure(t *testing.T) {
 	// supervisor would suppress a restart if it later exited on its own even though
 	// config still has it enabled.
 	sm.mu.RLock()
+
 	s := sm.state.Sessions[orchID]
 	if s == nil || s.Status != StatusRunning {
 		sm.mu.RUnlock()
@@ -99,6 +100,7 @@ func TestApplyConfigOrchestratorDisableStopFailure(t *testing.T) {
 		sm.mu.RUnlock()
 		t.Fatalf("failed disable left StopReason=%q; want it restored so lifecycle state stays coherent", s.StopReason)
 	}
+
 	sm.mu.RUnlock()
 
 	// Retry: the second Kill succeeds, so the disable completes cleanly.
