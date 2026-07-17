@@ -124,6 +124,12 @@ gr sandbox watch my-session --proc node
 
 Type text into a session's PTY stdin. Appends a newline by default.
 
+When a user is attached to the target session, graith waits for their input to
+go idle before injecting. The shared `inbox_idle_timeout` and `inbox_max_wait`
+settings under `[notifications.timing]` control that wait; after the maximum,
+graith warns in the daemon log and injects anyway. See
+[Notification timing]({{< relref "/docs/configuration/notifications.md#timing" >}}).
+
 | Flag | Description |
 |------|-------------|
 | `--no-newline` | Do not append a newline after the text |

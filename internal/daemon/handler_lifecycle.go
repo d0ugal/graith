@@ -415,7 +415,11 @@ func handleType(sm *SessionManager, auth authContext, send func(string, any), ms
 	}
 
 	if sm.HasAttachedClient(t.SessionID) {
-		if !pty.WaitForUserIdle(typeIdleTimeout, typeMaxWait) {
+		// gr type deliberately shares the inbox-injection idle policy. Copy the
+		// timing value from one config snapshot so a concurrent reload cannot mix
+		// values; the reloaded policy applies to the next operation instead.
+		timing := sm.Config().Notifications.Timing
+		if !pty.WaitForUserIdle(timing.InboxIdleTimeoutDuration(), timing.InboxMaxWaitDuration()) {
 			log.Warn("gr type: max wait expired, injecting while user may still be active",
 				"session", t.SessionID)
 		}
