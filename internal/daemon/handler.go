@@ -17,6 +17,21 @@ import (
 	"github.com/d0ugal/graith/internal/version"
 )
 
+// daemonHandshakeOk builds the handshake_ok/auth_ok reply, stamping the daemon's
+// version, per-process instance ID (issue #1319), and effective server-side
+// approval bound from the *accepted* config generation (issue #1251). Reading
+// the timeout from sm.Config() ties the value the approve-request hook uses to
+// the config the daemon actually accepted — a rejected reload leaves shorter
+// on-disk values that must not shorten the helper's deadline.
+func daemonHandshakeOk(sm *SessionManager) protocol.HandshakeOkMsg {
+	return protocol.HandshakeOkMsg{
+		Version:                 protocol.Version,
+		DaemonVersion:           version.Version,
+		DaemonInstanceID:        sm.InstanceID(),
+		ApprovalServerTimeoutMs: sm.Config().Approvals.ServerTimeoutDuration().Milliseconds(),
+	}
+}
+
 // sessionLabel returns a human-friendly identifier for a session, preferring
 // its name and falling back to its ID.
 func sessionLabel(s SessionState) string {
@@ -230,7 +245,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				clientCols = h.TerminalSize[0]
 				clientRows = h.TerminalSize[1]
 
-				sendControl("handshake_ok", protocol.HandshakeOkMsg{Version: protocol.Version, DaemonVersion: version.Version, DaemonInstanceID: sm.InstanceID()})
+				sendControl("handshake_ok", daemonHandshakeOk(sm))
 				log.Info("client connected", "client_id", h.ClientID, "cwd", h.Cwd)
 
 				// On a remote connection, issue a proof-of-possession challenge.
@@ -274,7 +289,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				challengeNonce = "" // single-use
 
 				sm.RegisterDeviceConn(dev.ID, conn)
-				sendControl("auth_ok", protocol.HandshakeOkMsg{Version: protocol.Version, DaemonVersion: version.Version, DaemonInstanceID: sm.InstanceID()})
+				sendControl("auth_ok", daemonHandshakeOk(sm))
 
 			case "pair_request":
 				// A device requests pairing. Queue it for local human approval;

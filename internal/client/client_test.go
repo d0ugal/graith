@@ -346,6 +346,92 @@ func approvalPipeHandshake(t *testing.T, server net.Conn) <-chan error {
 	return done
 }
 
+// approvalPipeHandshakeWithBound is approvalPipeHandshake but stamps the daemon's
+// effective approval server bound (ms) into handshake_ok, so tests can prove the
+// helper adopts the daemon-reported value.
+func approvalPipeHandshakeWithBound(t *testing.T, server net.Conn, boundMs int64) <-chan error {
+	t.Helper()
+
+	done := make(chan error, 1)
+
+	go func() {
+		reader := protocol.NewFrameReader(server)
+		writer := protocol.NewFrameWriter(server)
+
+		if _, err := reader.ReadFrame(); err != nil {
+			done <- err
+			return
+		}
+
+		resp, err := protocol.EncodeControl("handshake_ok", protocol.HandshakeOkMsg{
+			Version: protocol.Version, DaemonVersion: "dev", ApprovalServerTimeoutMs: boundMs,
+		})
+		if err == nil {
+			err = writer.WriteFrame(protocol.ChannelControl, resp)
+		}
+
+		done <- err
+	}()
+
+	return done
+}
+
+// TestConnectForApprovalPrefersDaemonReportedTimeout proves the approve-request
+// hook's operation deadline is derived from the daemon's reported (accepted)
+// approval bound, NOT the stale on-disk value passed in. A rejected daemon
+// reload can leave a much shorter timeout on disk; using it would end the helper
+// before the daemon and trip the fail-open early (issue #1251).
+func TestConnectForApprovalPrefersDaemonReportedTimeout(t *testing.T) {
+	saveConnectionTimeouts(t)
+
+	clientConn, serverConn := net.Pipe()
+	defer func() { _ = serverConn.Close() }()
+
+	recorded := &deadlineRecordingConn{Conn: clientConn}
+
+	origDial := dialLocalDaemon
+	dialLocalDaemon = func(string, string, time.Duration) (net.Conn, error) { return recorded, nil }
+
+	t.Cleanup(func() { dialLocalDaemon = origDial })
+
+	daemonHandshakeTimeout = 200 * time.Millisecond
+	approvalResponseGrace = 50 * time.Millisecond
+
+	// The daemon (accepted generation) enforces a large bound; the on-disk value
+	// the caller passes is deliberately tiny, as if a rejected reload shortened it.
+	const daemonBound = time.Hour
+
+	staleClientTimeout := 5 * time.Millisecond
+
+	handshakeDone := approvalPipeHandshakeWithBound(t, serverConn, daemonBound.Milliseconds())
+
+	before := time.Now()
+
+	c, err := ConnectForApproval(config.Paths{}, staleClientTimeout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	if err := <-handshakeDone; err != nil {
+		t.Fatal(err)
+	}
+
+	deadlines := recorded.recordedDeadlines()
+	if len(deadlines) != 2 {
+		t.Fatalf("SetDeadline calls = %d, want handshake + operation: %v", len(deadlines), deadlines)
+	}
+
+	// The operation deadline must reflect the daemon bound (~1h), not the stale
+	// client value (~5ms). Allow generous slack for the handshake round-trip.
+	gotDur := deadlines[1].Sub(before)
+
+	wantAtLeast := ApprovalOperationTimeout(daemonBound) - 30*time.Second
+	if gotDur < wantAtLeast {
+		t.Fatalf("operation deadline is %v after start; a rejected on-disk value shortened it instead of using the daemon-reported %v bound", gotDur, daemonBound)
+	}
+}
+
 // TestConnectForApprovalRetainsOperationDeadline records every SetDeadline
 // call and proves the handshake deadline is replaced by a later, nonzero
 // backend+human operation deadline rather than cleared after handshake (#1251).

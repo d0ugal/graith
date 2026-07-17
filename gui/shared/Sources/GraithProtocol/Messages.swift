@@ -43,11 +43,16 @@ public struct HandshakeOkMsg: Codable, Sendable {
     // readiness wait (issue #1319). GUI clients don't need it, so it's optional
     // and simply ignored when absent.
     public var daemonInstanceID: String?
+    // Optional: the daemon's effective server-side approval bound (ms) from its
+    // accepted config generation, used by the approve-request hook (issue #1251).
+    // GUI clients don't need it.
+    public var approvalServerTimeoutMs: Int?
 
     enum CodingKeys: String, CodingKey {
         case version
         case daemonVersion = "daemon_version"
         case daemonInstanceID = "daemon_instance_id"
+        case approvalServerTimeoutMs = "approval_server_timeout_ms"
     }
 }
 

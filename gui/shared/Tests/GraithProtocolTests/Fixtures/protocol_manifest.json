@@ -1111,6 +1111,13 @@
             "kind": "string"
           },
           "optional": true
+        },
+        {
+          "name": "approval_server_timeout_ms",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
         }
       ]
     },

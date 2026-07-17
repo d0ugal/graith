@@ -512,6 +512,15 @@ type HandshakeOkMsg struct {
 	// readiness must require a *different* instance ID rather than merely a
 	// reachable listener (issue #1319). Omitted by older daemons.
 	DaemonInstanceID string `json:"daemon_instance_id,omitempty"`
+	// ApprovalServerTimeoutMs is the daemon's effective server-side approval bound
+	// (backend execution + human wait) from its *accepted* config generation, in
+	// milliseconds. The approve-request hook uses this rather than its own on-disk
+	// config so a rejected daemon reload — which can leave shorter timeouts on
+	// disk than the daemon actually accepted — cannot shorten the helper's
+	// deadline into an early fail-open (issue #1251). Zero/omitted means the
+	// daemon did not report it (older daemon); the hook falls back to its local
+	// config value.
+	ApprovalServerTimeoutMs int64 `json:"approval_server_timeout_ms,omitempty"`
 }
 
 type HandshakeErrMsg struct {
