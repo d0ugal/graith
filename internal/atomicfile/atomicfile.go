@@ -11,6 +11,17 @@ import (
 	"path/filepath"
 )
 
+// The temp-write / fsync / rename steps are indirected through package vars so
+// tests can inject a failure at each stage and assert the crash-safety
+// guarantee (the prior file survives, no temp file is stranded) holds for every
+// failure point — not just the read-only-directory case a real filesystem can
+// reproduce. Production always uses the real syscalls below.
+var (
+	writeTemp  = func(f *os.File, data []byte) (int, error) { return f.Write(data) }
+	syncTemp   = func(f *os.File) error { return f.Sync() }
+	renameTemp = os.Rename
+)
+
 // Write atomically writes data to path with the given permissions. The parent
 // directory is created (mode 0o700) if it does not exist. The temp file is
 // created in the same directory as path so the final rename stays on one
@@ -47,7 +58,7 @@ func Write(path string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("%s: %w", verb, cause)
 	}
 
-	if _, err := tmp.Write(data); err != nil {
+	if _, err := writeTemp(tmp, data); err != nil {
 		return cleanup(err, "write temp")
 	}
 
@@ -55,7 +66,7 @@ func Write(path string, data []byte, perm os.FileMode) error {
 		return cleanup(err, "chmod temp")
 	}
 
-	if err := tmp.Sync(); err != nil {
+	if err := syncTemp(tmp); err != nil {
 		return cleanup(err, "sync temp")
 	}
 
@@ -64,7 +75,7 @@ func Write(path string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("close temp: %w", err)
 	}
 
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := renameTemp(tmpPath, path); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename: %w", err)
 	}
