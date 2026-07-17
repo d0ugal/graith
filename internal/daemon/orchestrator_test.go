@@ -201,6 +201,56 @@ func TestBuildOrchestratorPrompt_AgentAdapters(t *testing.T) {
 	}
 }
 
+// TestBuildOrchestratorPrompt_InjectPromptDisabled is the #1292 regression: an
+// orchestrator agent configured with inject_prompt = false must launch without
+// any injected role prompt — no launch args for Codex/Claude and no Cursor rule
+// file — exactly like an ordinary session. buildOrchestratorPrompt is the sole
+// prompt-construction seam shared by createOrchestrator and Resume, so gating it
+// covers both the create and resume paths (mirroring the sandbox-free coverage
+// of TestBuildOrchestratorPromptMechanismParity). Before the fix a disabled
+// Codex orchestrator still received developer_instructions args and a disabled
+// Cursor orchestrator still wrote its .cursor/rules file.
+func TestBuildOrchestratorPrompt_InjectPromptDisabled(t *testing.T) {
+	sm := newOrchTestSM(t)
+	sm.cfg = &config.Config{
+		Agents: map[string]config.Agent{
+			"codex":  {InjectPrompt: boolPtr(false)},
+			"cursor": {InjectPrompt: boolPtr(false)},
+		},
+	}
+
+	cfg := config.OrchestratorConfig{Prompt: "ken this"}
+
+	// Codex disabled: no developer_instructions args, no error. The prompt is
+	// neither constructed nor injected.
+	got, err := sm.buildOrchestratorPrompt("codex", cfg, nil, false, "")
+	if err != nil {
+		t.Fatalf("codex disabled: unexpected error: %v", err)
+	}
+
+	if got != nil {
+		t.Errorf("codex with inject_prompt=false must get no prompt args, got %v", got)
+	}
+
+	// Cursor disabled: no launch args, no error, and — into a writable worktree
+	// where the enabled path would have written .cursor/rules/graith.mdc — no
+	// Cursor rule file is created.
+	worktree := t.TempDir()
+
+	got, err = sm.buildOrchestratorPrompt("cursor", cfg, nil, false, worktree)
+	if err != nil {
+		t.Fatalf("cursor disabled: unexpected error: %v", err)
+	}
+
+	if got != nil {
+		t.Errorf("cursor with inject_prompt=false must get no prompt args, got %v", got)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(worktree, ".cursor", "rules", "graith.mdc")); !os.IsNotExist(statErr) {
+		t.Errorf("cursor with inject_prompt=false must not write a rule file, stat err = %v", statErr)
+	}
+}
+
 func TestBuildOrchestratorPrompt_RepoPaths(t *testing.T) {
 	sm := newOrchTestSM(t)
 
