@@ -155,6 +155,17 @@ func TestValidateMessagesLimits(t *testing.T) {
 		{"busy_timeout above ceiling", func(c *Config) {
 			c.Messages.BusyTimeout = "10m"
 		}, "at most"},
+		// SQLite's busy_timeout pragma has millisecond resolution; a positive
+		// sub-millisecond value would collapse to busy_timeout(0) (#1322).
+		{"busy_timeout 500us rejected", func(c *Config) {
+			c.Messages.BusyTimeout = "500us"
+		}, "at least 1ms"},
+		{"busy_timeout 1ns rejected", func(c *Config) {
+			c.Messages.BusyTimeout = "1ns"
+		}, "at least 1ms"},
+		{"busy_timeout 1ms passes", func(c *Config) {
+			c.Messages.BusyTimeout = "1ms"
+		}, ""},
 		{"max_age empty passes", func(c *Config) {
 			c.Messages.MaxAge = ""
 		}, ""},
@@ -228,6 +239,18 @@ func TestValidateTodoLimits(t *testing.T) {
 		{"busy_timeout above ceiling", func(c *Config) {
 			c.Todo.BusyTimeout = "10m"
 		}, "at most"},
+		// SQLite's busy_timeout pragma has millisecond resolution; a positive
+		// sub-millisecond value would collapse to busy_timeout(0), disabling the
+		// wait the claim contract depends on (#1322).
+		{"busy_timeout 500us rejected", func(c *Config) {
+			c.Todo.BusyTimeout = "500us"
+		}, "at least 1ms"},
+		{"busy_timeout 1ns rejected", func(c *Config) {
+			c.Todo.BusyTimeout = "1ns"
+		}, "at least 1ms"},
+		{"busy_timeout 1ms passes", func(c *Config) {
+			c.Todo.BusyTimeout = "1ms"
+		}, ""},
 		{"tightened title under ceiling passes", func(c *Config) {
 			c.Todo.MaxTitle = 100
 			c.Todo.MaxNote = 500
@@ -399,6 +422,54 @@ func TestLoadConversationPageSizeOverride(t *testing.T) {
 
 			if !strings.Contains(err.Error(), tc.wantErr) {
 				t.Errorf("Load() = %v, want error containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestLoadBusyTimeoutSubMillisecond is the issue #1322 acceptance case exercised
+// through the real Load path (not just Validate): SQLite's busy_timeout pragma
+// has millisecond resolution, so a positive sub-1ms messages/todo busy_timeout
+// is rejected at load with a field-specific error, while 1ms loads. It would
+// otherwise collapse to busy_timeout(0) and disable SQLite lock waiting.
+func TestLoadBusyTimeoutSubMillisecond(t *testing.T) {
+	cases := []struct {
+		name    string
+		toml    string
+		wantErr string
+	}{
+		{"messages 1ns rejected", "[messages]\nbusy_timeout = \"1ns\"\n", "messages.busy_timeout"},
+		{"messages 500us rejected", "[messages]\nbusy_timeout = \"500us\"\n", "messages.busy_timeout"},
+		{"messages 1ms loads", "[messages]\nbusy_timeout = \"1ms\"\n", ""},
+		{"todo 1ns rejected", "[todo]\nbusy_timeout = \"1ns\"\n", "todo.busy_timeout"},
+		{"todo 500us rejected", "[todo]\nbusy_timeout = \"500us\"\n", "todo.busy_timeout"},
+		{"todo 1ms loads", "[todo]\nbusy_timeout = \"1ms\"\n", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgPath := filepath.Join(dir, "config.toml")
+
+			if err := os.WriteFile(cfgPath, []byte(tc.toml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := Load(cfgPath)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Load() = %v, want nil", err)
+				}
+
+				return
+			}
+
+			if err == nil {
+				t.Fatalf("Load() = nil, want error containing %q", tc.wantErr)
+			}
+
+			if !strings.Contains(err.Error(), tc.wantErr) || !strings.Contains(err.Error(), "at least 1ms") {
+				t.Errorf("Load() = %v, want error containing %q and %q", err, tc.wantErr, "at least 1ms")
 			}
 		})
 	}

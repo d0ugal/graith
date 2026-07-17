@@ -114,6 +114,12 @@ type TodoStoreSettings struct {
 func (s TodoStoreSettings) resolved() TodoStoreSettings {
 	if s.BusyTimeout <= 0 {
 		s.BusyTimeout = config.TodoBusyTimeoutDefault
+	} else if s.BusyTimeout < config.SQLiteBusyTimeoutResolution {
+		// SQLite's busy_timeout pragma has millisecond resolution; a positive
+		// sub-millisecond value would render as busy_timeout(0) and disable the
+		// wait the claim contract depends on. Config rejects such values, but
+		// floor here so no direct caller can produce a zero DSN. See #1322.
+		s.BusyTimeout = config.SQLiteBusyTimeoutResolution
 	}
 
 	if s.MaxTitle < 1 || s.MaxTitle > todoTitleHardCeiling {
@@ -129,6 +135,15 @@ func (s TodoStoreSettings) resolved() TodoStoreSettings {
 	}
 
 	return s
+}
+
+// todoStoreDSN builds the sqlite DSN for the todo database. It is a pure helper
+// so the busy_timeout rendering can be tested at its boundaries; it shares
+// sqliteBusyTimeoutMillis so a positive sub-millisecond wait can never render as
+// busy_timeout(0) and silently disable the claim contract's lock wait. See #1322.
+func todoStoreDSN(dbPath string, busyTimeout time.Duration) string {
+	return fmt.Sprintf("%s?_pragma=journal_mode(wal)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(on)",
+		dbPath, sqliteBusyTimeoutMillis(busyTimeout))
 }
 
 // NewTodoStore opens (creating if needed) the todo database at dbPath. An
@@ -150,8 +165,7 @@ func NewTodoStore(dbPath string, settings ...TodoStoreSettings) (*TodoStore, err
 	// The busy_timeout is load-bearing: the claim contract ("loser gets zero
 	// rows") relies on a contended writer waiting rather than erroring with
 	// SQLITE_BUSY. foreign_keys(on) makes the parent ON DELETE CASCADE fire.
-	dsn := fmt.Sprintf("%s?_pragma=journal_mode(wal)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(on)",
-		dbPath, st.BusyTimeout.Milliseconds())
+	dsn := todoStoreDSN(dbPath, st.BusyTimeout)
 
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {

@@ -2105,11 +2105,22 @@ type Messages struct {
 	SubscriberBuffer int `toml:"subscriber_buffer"`
 	// BusyTimeout is the SQLite busy_timeout for the messages database — how long
 	// a contended operation waits for the lock before erroring. It is graith's
-	// database operation deadline. Empty, unparseable, or non-positive uses the
-	// default (MessagesBusyTimeoutDefault); a value above MessagesBusyTimeoutCeiling
-	// is rejected at load. Restart-only.
+	// database operation deadline. Empty/unset uses the default
+	// (MessagesBusyTimeoutDefault, 5s). An explicit value must parse and fall in
+	// [SQLiteBusyTimeoutResolution, MessagesBusyTimeoutCeiling] (1ms–5m):
+	// SQLite's busy_timeout has millisecond resolution, so a positive sub-1ms
+	// value would collapse to busy_timeout(0) and disable lock waiting, and it —
+	// along with any unparseable, non-positive, or above-ceiling value — is
+	// rejected at load. Restart-only.
 	BusyTimeout string `toml:"busy_timeout"`
 }
+
+// SQLiteBusyTimeoutResolution is the smallest busy_timeout SQLite can honour.
+// The pragma takes a whole number of milliseconds, so any positive duration
+// below 1ms would render as busy_timeout(0), which disables lock waiting
+// entirely. Both the messages and todo busy timeouts are validated and clamped
+// to at least this resolution (see #1322).
+const SQLiteBusyTimeoutResolution = time.Millisecond
 
 // Messages operational-limit defaults, mirroring the fixed literals that
 // governed the message log before issue #1249 made them configurable.
@@ -2374,9 +2385,13 @@ type TodoConfig struct {
 	SweepInterval string `toml:"sweep_interval"`
 	// BusyTimeout is the SQLite busy_timeout for the todos database. The claim
 	// contract ("loser gets zero rows") relies on a contended writer waiting rather
-	// than erroring with SQLITE_BUSY, so this is load-bearing. Empty, unparseable,
-	// or non-positive uses the default (TodoBusyTimeoutDefault); a value above
-	// TodoBusyTimeoutCeiling is rejected at load. Restart-only.
+	// than erroring with SQLITE_BUSY, so this is load-bearing. Empty/unset uses the
+	// default (TodoBusyTimeoutDefault, 5s). An explicit value must parse and fall
+	// in [SQLiteBusyTimeoutResolution, TodoBusyTimeoutCeiling] (1ms–5m): SQLite's
+	// busy_timeout has millisecond resolution, so a positive sub-1ms value would
+	// collapse to busy_timeout(0) and disable the wait the claim contract depends
+	// on, and it — along with any unparseable, non-positive, or above-ceiling
+	// value — is rejected at load. Restart-only.
 	BusyTimeout string `toml:"busy_timeout"`
 }
 
@@ -3994,6 +4009,8 @@ func (c *Config) validateMessagesLimits() []error {
 			errs = append(errs, fmt.Errorf("messages.busy_timeout %q: %w", s, err))
 		} else if d <= 0 {
 			errs = append(errs, fmt.Errorf("messages.busy_timeout %q: must be a positive duration", s))
+		} else if d < SQLiteBusyTimeoutResolution {
+			errs = append(errs, fmt.Errorf("messages.busy_timeout %q: must be at least %s (SQLite busy_timeout has millisecond resolution; a smaller value would disable lock waiting)", s, SQLiteBusyTimeoutResolution))
 		} else if d > MessagesBusyTimeoutCeiling {
 			errs = append(errs, fmt.Errorf("messages.busy_timeout %q: must be at most %s", s, MessagesBusyTimeoutCeiling))
 		}
@@ -4072,6 +4089,8 @@ func (c *Config) validateTodoLimits() []error {
 			errs = append(errs, fmt.Errorf("todo.busy_timeout %q: %w", s, err))
 		} else if d <= 0 {
 			errs = append(errs, fmt.Errorf("todo.busy_timeout %q: must be a positive duration", s))
+		} else if d < SQLiteBusyTimeoutResolution {
+			errs = append(errs, fmt.Errorf("todo.busy_timeout %q: must be at least %s (SQLite busy_timeout has millisecond resolution; a smaller value would disable the wait the claim contract depends on)", s, SQLiteBusyTimeoutResolution))
 		} else if d > TodoBusyTimeoutCeiling {
 			errs = append(errs, fmt.Errorf("todo.busy_timeout %q: must be at most %s", s, TodoBusyTimeoutCeiling))
 		}

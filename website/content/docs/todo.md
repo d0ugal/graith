@@ -215,7 +215,7 @@ max_title      = 500       # max todo title length in bytes (may only tighten be
 max_note       = 2000      # max todo note length in bytes (may only tighten below the 2000 hard ceiling)
 list_limit     = 2000      # max items a single list returns (ceiling 100000)
 sweep_interval = "1m"      # how often the lease/retention sweep runs
-busy_timeout   = "5s"      # SQLite busy/operation timeout for the todos DB (max 5m)
+busy_timeout   = "5s"      # SQLite busy/operation timeout for the todos DB ("" => 5s; explicit value must be 1ms–5m)
 ```
 
 All fields are optional. `claim_lease`, `retention`, `sweep_interval`, and
@@ -234,3 +234,6 @@ sweep loop starts and the database opens, so they are **restart-only** — chang
 them and run `gr daemon restart`. `max_title`/`max_note` are re-read per
 operation (reloadable). `busy_timeout` is load-bearing for the claim contract:
 it lets a contended writer wait for the lock instead of failing immediately.
+SQLite's `busy_timeout` pragma has **millisecond resolution**, so a positive
+value below `1ms` is rejected at load — it would otherwise collapse to
+`busy_timeout(0)` and disable the wait the claim contract depends on.
