@@ -17,6 +17,14 @@ type TodoTransitionResult struct {
 	DependencyBlocked []TodoItem
 }
 
+// TodoUpdateResult reports an item's readiness change using snapshots taken
+// inside the same transaction that replaced its dependency edges.
+type TodoUpdateResult struct {
+	Item              TodoItem
+	Unblocked         bool
+	DependencyBlocked bool
+}
+
 // hydrateTodoDependencies loads both the declared edge set and its currently
 // unsatisfied subset. Dependency waiting is an effective blocked state: the
 // stored row remains todo (and ownerless), avoiding overlap with a manually
@@ -261,6 +269,10 @@ func (s *TodoStore) AddBatch(entries []TodoBatchAdd) (map[string]TodoItem, error
 			return nil, fmt.Errorf("insert todo batch entry %q: %w", entry.Key, err)
 		}
 
+		if err := recordScenarioSeed(tx, item); err != nil {
+			return nil, fmt.Errorf("record todo batch seed %q: %w", entry.Key, err)
+		}
+
 		for _, tag := range item.Tags {
 			if _, err := tx.Exec(`INSERT OR IGNORE INTO todo_tags (todo_id, tag) VALUES (?, ?)`, item.ID, tag); err != nil {
 				return nil, fmt.Errorf("insert todo batch tag: %w", err)
@@ -304,9 +316,23 @@ func (s *TodoStore) AddBatch(entries []TodoBatchAdd) (map[string]TodoItem, error
 	return byKey, nil
 }
 
+func recordScenarioSeed(tx *sql.Tx, item TodoItem) error {
+	if item.CreatedBy != item.Scope || item.ParentID != "" || item.Assignee == "" {
+		return nil
+	}
+
+	if _, err := tx.Exec(
+		`INSERT INTO todo_scenario_seeds (todo_id, scope, original_assignee) VALUES (?, ?, ?)`,
+		item.ID, item.Scope, item.Assignee); err != nil {
+		return fmt.Errorf("record scenario todo seed: %w", err)
+	}
+
+	return nil
+}
+
 // ScenarioSeedItemIDs returns the original scenario-seeded top-level todo ID
-// for each assignee. The seeding convention (created_by == scope) distinguishes
-// these from later user-created assigned work.
+// for each member session. The immutable seed association survives later
+// assignee changes.
 func (s *TodoStore) ScenarioSeedItemIDs(scope string) (map[string]string, error) {
 	items, err := s.ScenarioSeedItems(scope)
 	if err != nil {
@@ -322,15 +348,18 @@ func (s *TodoStore) ScenarioSeedItemIDs(scope string) (map[string]string, error)
 }
 
 // ScenarioSeedItems returns the original scenario-seeded top-level todo for
-// each assignee, including its effective dependency state.
+// each member session, including its effective dependency state. The immutable
+// seed association is independent of the item's mutable current assignee.
 func (s *TodoStore) ScenarioSeedItems(scope string) (map[string]TodoItem, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	rows, err := s.db.Query(
-		`SELECT assignee, id FROM todos
-		 WHERE scope = ? AND created_by = ? AND parent_id IS NULL AND assignee <> ''
-		 ORDER BY assignee, position, id`, scope, scope)
+		`SELECT seed.original_assignee, todo.id
+		 FROM todo_scenario_seeds seed
+		 JOIN todos todo ON todo.id = seed.todo_id
+		 WHERE seed.scope = ? AND todo.scope = ?
+		 ORDER BY seed.original_assignee, todo.position, todo.id`, scope, scope)
 	if err != nil {
 		return nil, fmt.Errorf("query scenario seed todos: %w", err)
 	}

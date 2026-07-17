@@ -404,6 +404,11 @@ blocked until every named member's seeded item is done. A member is *complete* o
 is. `gr scenario status` renders per-member `done/total` and **WAITING ON** names
 from that real item state; JSON uses `blocked_by`.
 
+The original member-to-seed identity is durable. Reassigning a seeded item
+changes current responsibility and progress accounting, but later
+`gr scenario add --depends-on <member>` commands still resolve the named
+member's original seed.
+
 So instead of flipping a single flag, a member signals it has finished by marking
 its task item done:
 
@@ -439,4 +444,4 @@ orchestrator *session*, which the GUI (a human client) is not.
 - **Orchestrator only:** Only the orchestrator session (`system_kind: orchestrator`) can start scenarios
 - **Unique names:** Scenario names must be unique across all scenarios. Session names must not collide with any existing session
 - **Atomic creation:** All sessions are created or none are — partial failures trigger rollback
-- **No live updates:** You cannot add or remove sessions from a running scenario. Delete and recreate instead
+- **No live removal:** The orchestrator can add sessions with `gr scenario add`, but cannot remove individual live members. Delete and recreate the scenario to remove members
