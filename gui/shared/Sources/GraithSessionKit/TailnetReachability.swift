@@ -22,28 +22,34 @@ public final class TailnetReachability: ObservableObject {
         case onTailnet
     }
 
+    /// A TCP-reachability probe: returns whether `host:port` accepted a
+    /// connection within `timeout`. Injectable so tests can drive `probe`
+    /// deterministically without touching the real network.
+    public typealias TCPProber = @Sendable (_ host: String, _ port: UInt16, _ timeout: TimeInterval) async -> Bool
+
     @Published public private(set) var state: State = .unknown
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "com.graith.mobile.reachability")
     private var hasNetworkPath = false
+    private let tcpProber: TCPProber
 
-    public init() {}
+    /// - Parameter tcpProber: the TCP reachability probe used by
+    ///   `probe(host:port:timeout:)`. Defaults to the live `NWConnection`
+    ///   probe; tests inject a stub to exercise the state transitions and the
+    ///   tunable timeout wiring without a real socket.
+    public init(tcpProber: @escaping TCPProber = TailnetReachability.liveTCPProbe) {
+        self.tcpProber = tcpProber
+    }
 
-    /// Begin observing the network path. Call `probe(host:port:)` after a path
-    /// change or before connecting to refine `notOnTailnet` vs `onTailnet`.
+    /// Begin observing the network path. `FleetModel.refreshReachability` calls
+    /// `probe(host:port:timeout:)` after each connect attempt to refine
+    /// `notOnTailnet` vs `onTailnet` for a fleet that failed to connect.
     public func start() {
         monitor.pathUpdateHandler = { [weak self] path in
             let usable = path.status == .satisfied
             Task { @MainActor in
-                guard let self else { return }
-                self.hasNetworkPath = usable
-                if !usable {
-                    self.state = .offline
-                } else if self.state == .offline || self.state == .unknown {
-                    // We have a path but haven't confirmed the tailnet yet.
-                    self.state = .notOnTailnet
-                }
+                self?.applyNetworkPath(usable: usable)
             }
         }
         monitor.start(queue: queue)
@@ -53,22 +59,44 @@ public final class TailnetReachability: ObservableObject {
         monitor.cancel()
     }
 
+    /// Fold a network-path change into `state`. Extracted from the path-update
+    /// handler so tests can drive the path→state transition directly (the real
+    /// `NWPathMonitor` needs a live network and can't be simulated in a unit
+    /// test).
+    func applyNetworkPath(usable: Bool) {
+        hasNetworkPath = usable
+        if !usable {
+            state = .offline
+        } else if state == .offline || state == .unknown {
+            // We have a path but haven't confirmed the tailnet yet.
+            state = .notOnTailnet
+        }
+    }
+
     /// Probe a single host:port to confirm the tailnet is routable. Updates
     /// `state` to `.onTailnet` on success, `.notOnTailnet` on failure (when a
-    /// network path exists). A short timeout keeps this cheap to call.
+    /// network path exists) — a host that accepts a TCP connection proves the
+    /// tailnet is routable even when the higher-level control handshake failed
+    /// (daemon down / restarting), which is *not* the "open Tailscale" case the
+    /// banner is for. Without a network path we report `.offline`. `timeout`
+    /// comes from the tunable `reachabilityProbeTimeout` preference (#1254);
+    /// a short timeout keeps this cheap to call.
     public func probe(host: String, port: UInt16, timeout: TimeInterval = PresentationPreferences.default.reachabilityProbeTimeout) async {
         guard hasNetworkPath else {
             state = .offline
             return
         }
-        let reachable = await Self.tcpProbe(host: host, port: port, timeout: timeout)
+        let reachable = await tcpProber(host, port, timeout)
         state = reachable ? .onTailnet : .notOnTailnet
     }
 
     /// Fold in ground-truth connectivity observed from a real host connection.
     /// A live control connection to any paired host proves the tailnet is
-    /// routable, so it is authoritative over the heuristic probe — this is what
-    /// actually drives the banner (the speculative `probe` was never wired up).
+    /// routable, so it is authoritative over the heuristic probe. This is the
+    /// fast path: when any host connects, the banner clears without a probe.
+    /// `FleetModel.refreshReachability` only falls back to `probe` when *no*
+    /// host connected, to tell "daemon down but on the tailnet" apart from
+    /// "genuinely off the tailnet".
     ///
     /// Pass `reachable: true` when at least one host connected. Pass `false` only
     /// when *every* configured host failed while a network path exists — that is
@@ -90,8 +118,16 @@ public final class TailnetReachability: ObservableObject {
         }
     }
 
+    /// The live TCP probe: attempt a connection and return whether it became
+    /// `.ready` within `timeout`. This is the default `TCPProber`. `nonisolated`
+    /// so it can be used as the `@MainActor` initializer's default argument
+    /// (the probe touches only local sockets, no actor state).
+    public nonisolated static let liveTCPProbe: TCPProber = { host, port, timeout in
+        await tcpProbe(host: host, port: port, timeout: timeout)
+    }
+
     /// Attempt a TCP connection; return whether it became `.ready` in time.
-    private static func tcpProbe(host: String, port: UInt16, timeout: TimeInterval) async -> Bool {
+    private nonisolated static func tcpProbe(host: String, port: UInt16, timeout: TimeInterval) async -> Bool {
         guard let nwPort = NWEndpoint.Port(rawValue: port) else { return false }
         let endpoint = NWEndpoint.hostPort(host: NWEndpoint.Host(host), port: nwPort)
         let conn = NWConnection(to: endpoint, using: .tcp)

@@ -44,12 +44,17 @@ struct GraithMobileApp: App {
             identity: identity,
             registry: registry
         )
+        // Consume the user's persisted presentation preferences (#1254): the
+        // production UserDefaults drives the tailnet-probe timeout here, and the
+        // terminal font size in SessionTerminalPane.
+        let preferences = PresentationPreferences(userDefaults: .standard)
         return FleetModel(
             registry: registry,
             identity: identity,
             reachability: TailnetReachability(),
             factory: RealHostClientFactory(clientID: "graith-ios"),
-            pairing: pairing
+            pairing: pairing,
+            reachabilityProbeTimeout: preferences.reachabilityProbeTimeout
         )
     }
 

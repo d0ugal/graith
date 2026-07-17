@@ -56,6 +56,11 @@ open class FleetModel: ObservableObject {
     /// The poll cadence used by `startPolling`, from the [terminal]-equivalent
     /// presentation preferences (issue #1254). Defaults to the historical 2s.
     private let pollInterval: TimeInterval
+    /// How long a tailnet reachability TCP probe waits, from the tunable
+    /// presentation preferences (issue #1254). Threaded into
+    /// `reachability.probe(host:port:timeout:)` — the production caller for the
+    /// otherwise-unused configurable timeout. Defaults to the shared 3s.
+    private let reachabilityProbeTimeout: TimeInterval
 
     /// - Parameters:
     ///   - identity: the device ed25519 identity, or nil if it could not be
@@ -66,6 +71,9 @@ open class FleetModel: ObservableObject {
     ///     desktop behaviour). iOS refreshes on connect/foreground instead.
     ///   - pollInterval: seconds between automatic refreshes when `poll` is on.
     ///     Defaults to the shared presentation default (2s).
+    ///   - reachabilityProbeTimeout: seconds a tailnet reachability probe waits
+    ///     before treating a host as unreachable, from the tunable presentation
+    ///     preferences (#1254). Defaults to the shared 3s.
     public init(
         registry: HostRegistry,
         identity: DeviceIdentity?,
@@ -74,7 +82,8 @@ open class FleetModel: ObservableObject {
         pairing: PairingCoordinator,
         poll: Bool = false,
         subscribeApprovals: Bool = true,
-        pollInterval: TimeInterval = PresentationPreferences.default.fleetPollInterval
+        pollInterval: TimeInterval = PresentationPreferences.default.fleetPollInterval,
+        reachabilityProbeTimeout: TimeInterval = PresentationPreferences.default.reachabilityProbeTimeout
     ) {
         self.registry = registry
         self.identity = identity
@@ -83,6 +92,7 @@ open class FleetModel: ObservableObject {
         self.pairing = pairing
         self.subscribeApprovals = subscribeApprovals
         self.pollInterval = max(0.1, pollInterval)
+        self.reachabilityProbeTimeout = max(0.1, reachabilityProbeTimeout)
         rebuildConnections()
         // Rebuild + reconnect when the *membership* changes (a pairing completes
         // or a host is removed). Gated on the set of host ids — a display-only
@@ -161,7 +171,7 @@ open class FleetModel: ObservableObject {
                 group.addTask { await conn.connect() }
             }
         }
-        refreshReachability()
+        await refreshReachability()
     }
 
     public func disconnectAll() async {
@@ -177,11 +187,41 @@ open class FleetModel: ObservableObject {
     }
 
     /// Drive the tailnet banner from ground truth: if any host's control
-    /// connection is live we are demonstrably on the tailnet. Only report
-    /// "not on tailnet" when hosts exist but none connected.
-    private func refreshReachability() {
+    /// connection is live we are demonstrably on the tailnet. When none is
+    /// live, fall back to a cheap TCP probe of the configured hosts using the
+    /// tunable `reachabilityProbeTimeout` (#1254) — this is the production
+    /// caller for that preference. A host that accepts a TCP connection proves
+    /// the tailnet is routable even though the control handshake failed (daemon
+    /// down), so the "open Tailscale" banner should *not* show; only when every
+    /// probe also fails do we report `.notOnTailnet`. Hosts without a probeable
+    /// endpoint fall back to the plain aggregate observation.
+    private func refreshReachability() async {
         guard let reachability, !connections.isEmpty else { return }
-        reachability.observed(reachable: connections.contains { $0.state == .connected })
+        if connections.contains(where: { $0.state == .connected }) {
+            reachability.observed(reachable: true)
+            return
+        }
+        let targets = reachabilityProbeTargets()
+        guard !targets.isEmpty else {
+            reachability.observed(reachable: false)
+            return
+        }
+        for target in targets {
+            await reachability.probe(host: target.host, port: target.port,
+                                     timeout: reachabilityProbeTimeout)
+            // A single reachable host is enough to prove we're on the tailnet.
+            if reachability.state == .onTailnet { return }
+        }
+    }
+
+    /// The `host:port` endpoints a reachability probe can dial: remote hosts
+    /// that advertise a MagicDNS name. Local (Unix-socket) hosts have no tailnet
+    /// endpoint to probe, so they're excluded.
+    private func reachabilityProbeTargets() -> [(host: String, port: UInt16)] {
+        registry.hosts.compactMap { host in
+            guard host.kind == .remote, let dns = host.magicDNSName, !dns.isEmpty else { return nil }
+            return (dns, host.port)
+        }
     }
 
     public func connection(for ref: SessionRef) -> HostConnection? {
