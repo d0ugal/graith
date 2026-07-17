@@ -1,7 +1,6 @@
 package transcript
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -111,11 +110,10 @@ func (claudeReader) read(path string) ([]Turn, int, error) {
 
 	dropped := 0
 
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), maxLineBytes())
+	sc := newBoundedLineReader(f, maxLineBytes())
 
-	for sc.Scan() {
-		line := bytes.TrimSpace(sc.Bytes())
+	for sc.scan() {
+		line := bytes.TrimSpace(sc.bytes())
 		if len(line) == 0 {
 			continue
 		}
@@ -135,8 +133,10 @@ func (claudeReader) read(path string) ([]Turn, int, error) {
 		}
 	}
 
-	if err := sc.Err(); err != nil {
-		// A long unterminated final line (live file) is tolerated as a drop.
+	dropped += sc.oversized // over-cap records skipped, scanning continued
+
+	if sc.err != nil {
+		// A truncated/unreadable tail (e.g. a live file) is tolerated as a drop.
 		dropped++
 	}
 
@@ -176,11 +176,10 @@ func (claudeReader) usage(path string) (Usage, error) {
 	// double-counted.
 	seen := make(map[string]claudeUsage)
 
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), maxLineBytes())
+	sc := newBoundedLineReader(f, maxLineBytes())
 
-	for sc.Scan() {
-		line := bytes.TrimSpace(sc.Bytes())
+	for sc.scan() {
+		line := bytes.TrimSpace(sc.bytes())
 		if len(line) == 0 {
 			continue
 		}
@@ -208,8 +207,10 @@ func (claudeReader) usage(path string) (Usage, error) {
 		countClaudeUsage(&u, seen, msg)
 	}
 
-	if err := sc.Err(); err != nil {
-		u.Dropped++ // long unterminated final line on a live file
+	u.Dropped += sc.oversized // over-cap records skipped, scanning continued
+
+	if sc.err != nil {
+		u.Dropped++ // truncated/unreadable tail on a live file
 	}
 
 	return u, nil

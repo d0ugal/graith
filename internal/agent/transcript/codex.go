@@ -1,7 +1,6 @@
 package transcript
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -304,12 +303,13 @@ func codexRolloutCwd(path string) (string, bool) {
 	}
 	defer func() { _ = f.Close() }()
 
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), maxMetadataLineBytes())
+	// session_meta is at the top; bound to the first 5 physical records so an
+	// oversized blob can't push the search deeper or drain the whole rollout.
+	sc := newBoundedLineReader(f, maxMetadataLineBytes()).limitRecords(5)
 
-	for i := 0; sc.Scan() && i < 5; i++ { // session_meta is at the top
+	for sc.scan() {
 		var line codexLine
-		if err := json.Unmarshal(bytes.TrimSpace(sc.Bytes()), &line); err != nil {
+		if err := json.Unmarshal(bytes.TrimSpace(sc.bytes()), &line); err != nil {
 			continue
 		}
 
@@ -333,12 +333,13 @@ func CodexRolloutID(path string) (string, bool) {
 	}
 	defer func() { _ = f.Close() }()
 
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), maxMetadataLineBytes())
+	// session_meta is at the top; bound to the first 5 physical records so an
+	// oversized blob can't push the search deeper or drain the whole rollout.
+	sc := newBoundedLineReader(f, maxMetadataLineBytes()).limitRecords(5)
 
-	for i := 0; sc.Scan() && i < 5; i++ {
+	for sc.scan() {
 		var line codexLine
-		if err := json.Unmarshal(bytes.TrimSpace(sc.Bytes()), &line); err != nil {
+		if err := json.Unmarshal(bytes.TrimSpace(sc.bytes()), &line); err != nil {
 			continue
 		}
 
@@ -396,11 +397,10 @@ func (codexReader) usage(path string) (Usage, error) {
 		havany bool
 	)
 
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), maxLineBytes())
+	sc := newBoundedLineReader(f, maxLineBytes())
 
-	for sc.Scan() {
-		raw := bytes.TrimSpace(sc.Bytes())
+	for sc.scan() {
+		raw := bytes.TrimSpace(sc.bytes())
 		if len(raw) == 0 {
 			continue
 		}
@@ -423,9 +423,11 @@ func (codexReader) usage(path string) (Usage, error) {
 		havany = true
 	}
 
-	scanErr := 0
-	if err := sc.Err(); err != nil {
-		scanErr = 1
+	// Over-cap records are skipped (not fatal), so a later cumulative snapshot is
+	// still seen; count each skip plus any truncated tail as a degradation.
+	scanErr := sc.oversized
+	if sc.err != nil {
+		scanErr++
 	}
 
 	if havany {
@@ -538,11 +540,10 @@ func (codexReader) read(path string) ([]Turn, int, error) {
 	toolIdx := make(map[string]int) // call_id -> index into turns
 	dropped := 0
 
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), maxLineBytes())
+	sc := newBoundedLineReader(f, maxLineBytes())
 
-	for sc.Scan() {
-		raw := bytes.TrimSpace(sc.Bytes())
+	for sc.scan() {
+		raw := bytes.TrimSpace(sc.bytes())
 		if len(raw) == 0 {
 			continue
 		}
@@ -568,7 +569,9 @@ func (codexReader) read(path string) ([]Turn, int, error) {
 		appendCodexTurn(item, &turns, toolIdx)
 	}
 
-	if err := sc.Err(); err != nil {
+	dropped += sc.oversized // over-cap records skipped, scanning continued
+
+	if sc.err != nil {
 		dropped++
 	}
 
