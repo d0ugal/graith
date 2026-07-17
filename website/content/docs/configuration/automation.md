@@ -48,6 +48,8 @@ The loop-lifetime knobs — `base_tick`, `kick_channel_size`, and `ref_reconcile
 
 The cadence knobs `base_tick` and `ref_reconcile_interval` pace daemon loop timers, so a `"0"`, `"0s"`, negative, or unparseable value falls back to the default shown rather than being applied.
 
+The rolling anti-flood windows `notification_rate_window` and `untrusted_author_prompt_window` behave the same way: a `"0"`, `"0s"`, negative, or unparseable value falls back to the default shown. These windows bound their paired caps (`notification_rate_limit` and the security-sensitive `untrusted_author_prompt_rate`), and a non-positive window would silently disable the cap, so it is never honoured as "no limit".
+
 `kick_channel_size` must not exceed `4096`; larger values are rejected before
 the daemon starts so a typo cannot request an unsafe channel allocation. Kicks
 remain best-effort at any capacity, with ordinary timer polling as the fallback.

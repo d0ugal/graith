@@ -1973,10 +1973,24 @@ func (p PRWatchConfig) MaxNotifications() int {
 }
 
 // The accessors below resolve the [pr_watch.advanced] tuning knobs, each falling
-// back to the daemon's historical default when unset (or non-positive / invalid).
-// Keeping the default in one place here — not in the daemon — mirrors the poll/
-// debounce accessors above and keeps the embedded default_config.toml free to omit
-// the keys (so the Go fallback stays authoritative; see issue #1228).
+// back to the daemon's historical default when the value is unset or unparseable.
+// The embedded default_config.toml also carries these keys (the drift guard in
+// TestPRWatchAdvancedEmbeddedDefaults enforces that), so `gr config show/diff/reset`
+// surfaces them; the Go fallbacks here are the runtime fail-safes that back a
+// directly-constructed or partial config (see issue #1228).
+//
+// Non-positive handling is NOT uniform, by design (issues #1285, #1304):
+//   - Cadences fed to time.NewTicker (base_tick, ref_reconcile_interval) and the
+//     two rolling anti-flood windows (notification_rate_window,
+//     untrusted_author_prompt_window) use positiveDurationOrDefault, so "0" / a
+//     negative value falls back to the default. A zero/negative ticker interval
+//     panics; a zero/negative window prunes every prior timestamp and silently
+//     disables the cap (notification anti-thrash, and the security-sensitive
+//     untrusted-author prompt cap).
+//   - The remaining duration knobs (no_pr_negative_cache, kick_cooldown,
+//     kicked_no_pr_backoff, ref_debounce, gh_timeout) use parseDurationOr: they are
+//     one-shot cache/backoff/throttle/timeout spans, not rolling anti-flood windows,
+//     so a non-positive value is a harmless cadence change rather than a disabled cap.
 
 // BaseTickDuration is the base poll-loop cadence. Default 15s; an unset,
 // unparseable, or non-positive value uses the default (the poll loop feeds this
@@ -2017,9 +2031,13 @@ func (p PRWatchConfig) NotificationRateLimit() int {
 	return p.Advanced.NotificationRateLimit
 }
 
-// NotificationRateWindowDuration is the per-session rate-limit window. Default 30m.
+// NotificationRateWindowDuration is the per-session rate-limit window. Default 30m;
+// an unset, unparseable, or non-positive value uses the default. This window bounds
+// a rolling anti-thrash cap (NotificationRateLimit), so a zero/negative value must
+// not slip through: it would prune every prior timestamp and disable the cap
+// (issue #1304).
 func (p PRWatchConfig) NotificationRateWindowDuration() time.Duration {
-	return parseDurationOr(p.Advanced.NotificationRateWindow, 30*time.Minute)
+	return positiveDurationOrDefault(p.Advanced.NotificationRateWindow, 30*time.Minute)
 }
 
 // UntrustedAuthorPromptRate caps untrusted-author trust prompts per window. Default 5.
@@ -2031,9 +2049,13 @@ func (p PRWatchConfig) UntrustedAuthorPromptRate() int {
 	return p.Advanced.UntrustedAuthorPromptRate
 }
 
-// UntrustedAuthorPromptWindowDuration is the trust-prompt rate window. Default 30m.
+// UntrustedAuthorPromptWindowDuration is the trust-prompt rate window. Default 30m;
+// an unset, unparseable, or non-positive value uses the default. This window bounds
+// the security-sensitive rolling anti-flood cap on untrusted-author trust prompts
+// (UntrustedAuthorPromptRate); a zero/negative value must not slip through, or it
+// would prune every prior timestamp and disable the cap (issue #1304).
 func (p PRWatchConfig) UntrustedAuthorPromptWindowDuration() time.Duration {
-	return parseDurationOr(p.Advanced.UntrustedAuthorPromptWindow, 30*time.Minute)
+	return positiveDurationOrDefault(p.Advanced.UntrustedAuthorPromptWindow, 30*time.Minute)
 }
 
 // MaxPromptedAuthors bounds the persisted surfaced-authors set. Default 5000.
