@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/agent/transcript"
+	"github.com/d0ugal/graith/internal/config"
 )
 
 // Migrate swaps the agent on an existing session in place: it renders the
@@ -37,6 +38,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 
 	srcAgent := sess.Agent
 	srcAgentSessionID := sess.AgentSessionID
+	srcNativeIDLocator := sess.NativeIDLocator
 	srcModel := sess.Model
 	srcCodex := cloneCodexOptions(sess.Codex)
 	srcFreshStart := sess.FreshStart
@@ -76,7 +78,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		return SessionState{}, fmt.Errorf("unknown target agent %q", targetAgent)
 	}
 
-	if !transcript.Supported(srcAgent) {
+	if !transcript.Supported(transcriptKind(srcNativeIDLocator, srcAgent)) {
 		return SessionState{}, fmt.Errorf("migration from agent %q is not supported (no transcript reader)", srcAgent)
 	}
 
@@ -87,7 +89,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	}
 
 	// --- Phase 0: read + render the source transcript (fail fast) ---
-	conv, err := transcript.Read(srcAgent, srcAgentSessionID, worktreePath)
+	conv, err := transcript.Read(transcriptKind(srcNativeIDLocator, srcAgent), srcAgentSessionID, worktreePath)
 	if err != nil {
 		return SessionState{}, fmt.Errorf("read source transcript: %w", err)
 	}
@@ -192,7 +194,9 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	s.Tokens = nil
 
 	s.FreshStart = true // force a fresh start (agent.Args + seed), not resume_args
-	if forcesID(targetAgent) {
+	s.NativeIDLocator = cfg.Agents[targetAgent].NativeIDLocator()
+
+	if cfg.Agents[targetAgent].ForcesNativeID() {
 		s.AgentSessionID = newAgentSessionID()
 	} else {
 		s.AgentSessionID = ""
@@ -245,6 +249,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 			s.Model = srcModel
 			s.Codex = srcCodex
 			s.AgentSessionID = srcAgentSessionID
+			s.NativeIDLocator = srcNativeIDLocator
 			s.FreshStart = srcFreshStart
 			s.Status = StatusStopped
 			s.PID = 0
@@ -321,28 +326,6 @@ func newAgentSessionID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-// forcesID reports whether graith assigns the agent's native session id at
-// launch (the agent accepts a client-supplied id via its args). For these
-// agents graith mints the id with newAgentSessionID; for all others the id must
-// be captured from the agent's own on-disk state after start (captureNativeSessionID).
-//
-// Only Claude is forced today. OpenCode also has a --session flag, but forcing
-// it is gated on verifying it accepts a brand-new id in graith's UUID format at
-// first start (OpenCode's native ids are not UUIDs) — until then OpenCode falls
-// back to a fresh conversation via the empty-id guard rather than shipping a
-// broken `--session ""`.
-func forcesID(agent string) bool {
-	return agent == "claude"
-}
-
-// scrapesID reports whether graith can recover an agent's native session id by
-// reading its on-disk transcript after start. Only agents with a known,
-// reverse-engineered state layout are listed; others resume fresh until a
-// locator is added (e.g. Agy under ~/.gemini, Cursor under ~/.cursor/projects).
-func scrapesID(agent string) bool {
-	return agent == "codex"
-}
-
 // captureNativeSessionID polls for the native session id a freshly-started,
 // self-minting agent writes to disk and records it so later resume is
 // deterministic. Best-effort: on timeout the id is left empty and the agent
@@ -366,16 +349,22 @@ func scrapesID(agent string) bool {
 // falls back to a non-pinned resume (issue #844).
 //
 // stateRoot is the agent's effective state root (e.g. CODEX_HOME from the
-// session's launch env); pass "" to fall back to the daemon's default.
-func (sm *SessionManager) captureNativeSessionID(id, agent, worktreePath, stateRoot string, since time.Time, expectedPID int, expectedPIDStartTime int64) {
-	if !scrapesID(agent) {
+// session's launch env); pass "" to fall back to the daemon's default. locator
+// is the agent's config-declared native-id locator (config.NativeIDLocator*),
+// resolved at launch so a custom alias/wrapper scrapes with the same strategy as
+// the built-in it wraps (issue #1236); an empty locator means no capture.
+// Cross-assignment detection compares each sibling's PERSISTED launch locator, so
+// a reload that changed/removed an alias's locator after another session started
+// cannot make us cross-assign that session's rollout.
+func (sm *SessionManager) captureNativeSessionID(id, agent, locator, worktreePath, stateRoot string, since time.Time, expectedPID int, expectedPIDStartTime int64) {
+	if locator == "" {
 		return
 	}
 
 	for i := 0; i < 40; i++ {
 		time.Sleep(250 * time.Millisecond)
 
-		sid, ok := scrapeSessionID(agent, worktreePath, stateRoot, since)
+		sid, ok := scrapeSessionID(locator, worktreePath, stateRoot, since)
 		if !ok || sid == "" {
 			continue
 		}
@@ -391,7 +380,7 @@ func (sm *SessionManager) captureNativeSessionID(id, agent, worktreePath, stateR
 		case expectedPID != 0 && (s.PID != expectedPID || (expectedPIDStartTime != 0 && s.PIDStartTime != expectedPIDStartTime)):
 			// a newer start replaced this process generation; its own capture
 			// goroutine owns the id now.
-		case sm.wouldCrossAssign(id, agent, worktreePath, sid, since):
+		case sm.wouldCrossAssign(id, locator, worktreePath, sid, since):
 			// the scraped id can't be safely attributed to us — either another
 			// same-agent session shared this cwd during our capture window, or
 			// the id is already claimed by another session. The scrape's own
@@ -400,7 +389,7 @@ func (sm *SessionManager) captureNativeSessionID(id, agent, worktreePath, stateR
 			// present and it would be mis-assigned. Skip capture; resume falls
 			// back to --last rather than pinning the wrong conversation (#844).
 			sm.mu.Unlock()
-			sm.log.Warn("native session id capture skipped: ambiguous shared cwd", "session_id", id, "agent", agent, "worktree", worktreePath)
+			sm.log.Warn("native session id capture skipped: ambiguous shared cwd", "session_id", id, "agent", agent, "locator", locator, "worktree", worktreePath)
 
 			return
 		default:
@@ -421,16 +410,23 @@ func (sm *SessionManager) captureNativeSessionID(id, agent, worktreePath, stateR
 //   - `sid` is already recorded as another session's AgentSessionID — a native
 //     id is unique to one conversation, so it must never back two sessions,
 //     regardless of that session's cwd or current status.
-//   - a different same-agent session shares this worktree and was live during
-//     our capture window: it is currently running/creating, or it stopped only
-//     after `since` (our start). Such a sibling may have written the rollout we
-//     just scraped, and the scrape can't say whose it is. A sibling that stopped
-//     before `since` is excluded — its rollout predates our window and the
-//     scrape's mtime filter already skips it.
+//   - a different session that uses the SAME native-id locator shares this
+//     worktree and was live during our capture window: it is currently
+//     running/creating, or it stopped only after `since` (our start). Such a
+//     sibling may have written the rollout we just scraped, and the scrape can't
+//     say whose it is. Siblings are matched by each session's PERSISTED launch
+//     locator, not agent name or current config: a custom alias and the built-in
+//     it wraps write to the same rollout store, and comparing the launch-time
+//     value means a later reload that changed/removed an alias's locator can't
+//     make us miss an older-generation sibling (issue #1236). A session with an
+//     empty persisted locator (pre-#1236, unknown) sharing the worktree is
+//     treated conservatively as a possible sibling so its rollout is never
+//     cross-assigned. A sibling that stopped before `since` is excluded — its
+//     rollout predates our window and the scrape's mtime filter already skips it.
 //
 // This closes the staggered-write race in #844 including the variant where the
 // sibling exits between the scrape and this check. Callers must hold sm.mu.
-func (sm *SessionManager) wouldCrossAssign(id, agent, worktreePath, sid string, since time.Time) bool {
+func (sm *SessionManager) wouldCrossAssign(id, locator, worktreePath, sid string, since time.Time) bool {
 	want := canonWorktree(worktreePath)
 
 	for other, s := range sm.state.Sessions {
@@ -442,7 +438,14 @@ func (sm *SessionManager) wouldCrossAssign(id, agent, worktreePath, sid string, 
 			return true
 		}
 
-		if s.Agent != agent || canonWorktree(s.WorktreePath) != want {
+		if canonWorktree(s.WorktreePath) != want {
+			continue
+		}
+
+		// Skip only a sibling with a KNOWN, different locator; an empty (unknown)
+		// persisted locator is treated conservatively as a possible same-store
+		// sibling.
+		if s.NativeIDLocator != locator && s.NativeIDLocator != "" {
 			continue
 		}
 
@@ -457,6 +460,20 @@ func (sm *SessionManager) wouldCrossAssign(id, agent, worktreePath, sid string, 
 	}
 
 	return false
+}
+
+// transcriptKind returns the on-disk transcript/id kind for a session: its
+// persisted native-id locator when set, else a conservative fallback to the agent
+// name for pre-#1236 sessions that predate the locator field. A custom
+// alias/wrapper that declares locator "claude"/"codex" thus reads, confirms, and
+// token-counts against the right on-disk format instead of failing an
+// agent-name-keyed transcript lookup (issue #1236).
+func transcriptKind(locator, agent string) string {
+	if locator != "" {
+		return locator
+	}
+
+	return agent
 }
 
 // canonWorktree cleans a worktree path (resolving symlinks when possible) so
@@ -481,9 +498,9 @@ func canonWorktree(p string) string {
 // on-disk state, matching only files created at/after `since` in worktreePath.
 // It returns no id when the match is ambiguous (multiple distinct ids in the
 // same cwd window), so callers never pin the wrong conversation.
-func scrapeSessionID(agent, worktreePath, stateRoot string, since time.Time) (string, bool) {
-	switch agent {
-	case "codex":
+func scrapeSessionID(locator, worktreePath, stateRoot string, since time.Time) (string, bool) {
+	switch locator {
+	case config.NativeIDLocatorCodex:
 		return transcript.CodexSessionIDSince(stateRoot, worktreePath, since)
 	default:
 		return "", false

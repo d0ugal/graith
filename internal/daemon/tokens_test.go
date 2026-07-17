@@ -257,19 +257,55 @@ func TestSetTokenStatsIdentityGuard(t *testing.T) {
 	})
 
 	// Snapshot taken while the session was still on claude/old-id.
-	stale := tokenTarget{id: "braw", agent: "claude", agentSessionID: "old-id", worktreePath: "/w"}
+	stale := tokenTarget{id: "braw", agent: "claude", kind: "claude", agentSessionID: "old-id", worktreePath: "/w"}
 	sm.setTokenStats(stale, &TokenStats{Total: 999})
 
 	if sm.state.Sessions["braw"].Tokens != nil {
 		t.Error("stale parse published despite identity change — migration mislabel")
 	}
 
-	// A matching snapshot publishes normally.
-	fresh := tokenTarget{id: "braw", agent: "codex", agentSessionID: "new-id", worktreePath: "/w"}
+	// A matching snapshot publishes normally (kind resolves to the agent name here).
+	fresh := tokenTarget{id: "braw", agent: "codex", kind: "codex", agentSessionID: "new-id", worktreePath: "/w"}
 	sm.setTokenStats(fresh, &TokenStats{Total: 42})
 
 	if got := sm.state.Sessions["braw"].Tokens; got == nil || got.Total != 42 {
 		t.Errorf("matching identity should publish: %+v", got)
+	}
+}
+
+// TestSetTokenStatsLocatorChangeGuard proves a parse made under one native-id
+// locator is not published after the session's persisted locator changed, even
+// though agent/id/worktree are unchanged (issue #1236).
+func TestSetTokenStatsLocatorChangeGuard(t *testing.T) {
+	sm := newTokenTestSM(map[string]*SessionState{
+		"braw": {ID: "braw", Agent: "mycodex", NativeIDLocator: "codex", AgentSessionID: "id", WorktreePath: "/w"},
+	})
+
+	// Snapshot parsed under a now-stale locator (e.g. before a reload changed it).
+	stale := tokenTarget{id: "braw", agent: "mycodex", kind: "claude", agentSessionID: "id", worktreePath: "/w"}
+	sm.setTokenStats(stale, &TokenStats{Total: 7})
+
+	if sm.state.Sessions["braw"].Tokens != nil {
+		t.Error("parse from a stale locator kind was published")
+	}
+
+	fresh := tokenTarget{id: "braw", agent: "mycodex", kind: "codex", agentSessionID: "id", worktreePath: "/w"}
+	sm.setTokenStats(fresh, &TokenStats{Total: 7})
+
+	if got := sm.state.Sessions["braw"].Tokens; got == nil || got.Total != 7 {
+		t.Errorf("matching locator kind should publish: %+v", got)
+	}
+}
+
+// TestTokenFingerprintIncludesKind proves a locator change invalidates the cache
+// fingerprint even when agent/id/worktree are identical (issue #1236).
+func TestTokenFingerprintIncludesKind(t *testing.T) {
+	src := []transcript.Source{{Path: "/p", Size: 10}}
+	a := tokenFingerprint(tokenTarget{id: "x", agent: "mycodex", kind: "codex", agentSessionID: "s", worktreePath: "/w"}, src)
+	b := tokenFingerprint(tokenTarget{id: "x", agent: "mycodex", kind: "claude", agentSessionID: "s", worktreePath: "/w"}, src)
+
+	if a == b {
+		t.Error("fingerprint should differ when the parser kind (locator) differs")
 	}
 }
 

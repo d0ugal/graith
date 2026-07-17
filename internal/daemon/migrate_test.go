@@ -24,8 +24,17 @@ func newMigrateTestManager(t *testing.T) *SessionManager {
 	tmpDir := t.TempDir()
 	cfg := config.Default()
 	cfg.Sandbox.Enabled = false
-	cfg.Agents["claude"] = shAgent()
-	cfg.Agents["codex"] = shAgent()
+
+	// Preserve the pre-#1236 native-id strategies (claude forces, codex scrapes
+	// via the codex locator) now that they live in config rather than name checks,
+	// so capture/resume/migrate tests behave as before.
+	claude := shAgent()
+	claude.NativeID = &config.AgentNativeIDConfig{Force: true, Locator: config.NativeIDLocatorClaude}
+	cfg.Agents["claude"] = claude
+
+	codex := shAgent()
+	codex.NativeID = &config.AgentNativeIDConfig{Locator: config.NativeIDLocatorCodex}
+	cfg.Agents["codex"] = codex
 
 	return NewSessionManager(cfg, config.Paths{
 		StateFile:  filepath.Join(tmpDir, "state.json"),

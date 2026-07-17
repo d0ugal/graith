@@ -87,7 +87,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	}
 
 	agentSessionID := ""
-	if forcesID(agentName) {
+	if cfgSnap.Agents[agentName].ForcesNativeID() {
 		agentSessionID = newAgentSessionID()
 	}
 
@@ -104,6 +104,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		Name:            OrchestratorSessionName,
 		Agent:           agentName,
 		AgentSessionID:  agentSessionID,
+		NativeIDLocator: agent.NativeIDLocator(),
 		Model:           orchCfg.Model,
 		SystemKind:      SystemKindOrchestrator,
 		Status:          StatusCreating,
@@ -622,8 +623,12 @@ func (sm *SessionManager) handleOrchestratorExit(ctx context.Context, id string)
 	}
 
 	if backoffLevel+1 >= restartCfg.FreshStartThresholdOrDefault() {
+		// Snapshot config off-lock: the mutation below holds sm.mu, under which
+		// sm.Config() (an RLock) must not be called.
+		cfg := sm.Config()
+
 		sm.mu.Lock()
-		if s, ok := sm.state.Sessions[id]; ok && forcesID(s.Agent) {
+		if s, ok := sm.state.Sessions[id]; ok && cfg.Agents[s.Agent].ForcesNativeID() {
 			s.AgentSessionID = newAgentSessionID()
 			s.FreshStart = true
 

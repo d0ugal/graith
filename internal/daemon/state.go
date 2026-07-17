@@ -62,6 +62,13 @@ type SessionState struct {
 	BaseBranch     string `json:"base_branch"`
 	Agent          string `json:"agent"`
 	AgentSessionID string `json:"agent_session_id,omitempty"`
+	// NativeIDLocator is the agent's native-id locator kind (config.NativeIDLocator*)
+	// captured at launch, persisted so native-id cross-assignment detection compares
+	// each session's OWN launch generation rather than the current config — a reload
+	// that changes/removes an alias's locator can't then let another session
+	// cross-assign this one's rollout (issue #1236). Empty for sessions launched
+	// before this field existed or with no locator.
+	NativeIDLocator string `json:"native_id_locator,omitempty"`
 	// DriverKind is the session's transport: DriverPTY (interactive PTY) or
 	// DriverHeadless (headless stream-json, issue #1075). Resolved once at
 	// creation and never re-derived from config. Empty is treated as DriverPTY.

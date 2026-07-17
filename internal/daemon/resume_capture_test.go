@@ -81,25 +81,49 @@ func writeCodexRollout(t *testing.T, root, id, cwd string, mtime time.Time) stri
 	return path
 }
 
+// TestForcesAndScrapesPredicates asserts the native-id strategy now comes from
+// the agent's config (issue #1236): the embedded defaults keep claude forcing
+// and codex scraping via the codex locator, an unconfigured/custom agent gets
+// neither by name alone, and a custom alias opts into the same behaviour purely
+// from config.
 func TestForcesAndScrapesPredicates(t *testing.T) {
-	if !forcesID("claude") {
-		t.Error("claude should be forced")
+	def := config.Default()
+
+	if !def.Agents["claude"].ForcesNativeID() {
+		t.Error("built-in claude should force its native id from config")
 	}
 
-	for _, a := range []string{"codex", "opencode", "agy", "cursor", "haar"} {
-		if forcesID(a) {
-			t.Errorf("%q should not be forced (no client-supplied-id flag verified)", a)
-		}
+	if def.Agents["claude"].ScrapesNativeID() {
+		t.Error("built-in claude forces; it should not also scrape")
 	}
 
-	if !scrapesID("codex") {
-		t.Error("codex should be scrapeable")
+	if !def.Agents["codex"].ScrapesNativeID() {
+		t.Error("built-in codex should scrape its native id from config")
 	}
 
-	for _, a := range []string{"claude", "opencode", "agy", "cursor"} {
-		if scrapesID(a) {
-			t.Errorf("%q has no on-disk locator yet; should not scrape", a)
-		}
+	if got := def.Agents["codex"].NativeIDLocator(); got != config.NativeIDLocatorCodex {
+		t.Errorf("codex locator = %q, want %q", got, config.NativeIDLocatorCodex)
+	}
+
+	if def.Agents["codex"].ForcesNativeID() {
+		t.Error("built-in codex scrapes; it should not also force")
+	}
+
+	// An unconfigured agent gets no native-id lifecycle merely from its name.
+	var bare config.Agent
+	if bare.ForcesNativeID() || bare.ScrapesNativeID() {
+		t.Error("an agent with no native_id config must neither force nor scrape")
+	}
+
+	// A custom alias opts in from config alone.
+	alias := config.Agent{NativeID: &config.AgentNativeIDConfig{Locator: config.NativeIDLocatorCodex}}
+	if !alias.ScrapesNativeID() || alias.NativeIDLocator() != config.NativeIDLocatorCodex {
+		t.Error("a custom alias declaring the codex locator should scrape like codex")
+	}
+
+	forcedAlias := config.Agent{NativeID: &config.AgentNativeIDConfig{Force: true, Locator: config.NativeIDLocatorClaude}}
+	if !forcedAlias.ForcesNativeID() || forcedAlias.ScrapesNativeID() {
+		t.Error("a custom alias declaring force+claude locator should force (not scrape) like claude")
 	}
 }
 
@@ -160,7 +184,7 @@ func TestCaptureNativeSessionIDCodex(t *testing.T) {
 		Status: StatusRunning, WorktreePath: cwd,
 	}
 
-	sm.captureNativeSessionID("bide", "codex", cwd, root, since, 4242, 111)
+	sm.captureNativeSessionID("bide", "codex", config.NativeIDLocatorCodex, cwd, root, since, 4242, 111)
 
 	if got := sm.state.Sessions["bide"].AgentSessionID; got != "braw-native-id" {
 		t.Fatalf("AgentSessionID = %q; want braw-native-id", got)
@@ -180,7 +204,7 @@ func TestCaptureNativeSessionIDStartTimeMismatch(t *testing.T) {
 		Status: StatusRunning, WorktreePath: cwd,
 	}
 
-	sm.captureNativeSessionID("skelf", "codex", cwd, root, time.Now().Add(-time.Minute), 50, 111)
+	sm.captureNativeSessionID("skelf", "codex", config.NativeIDLocatorCodex, cwd, root, time.Now().Add(-time.Minute), 50, 111)
 
 	if got := sm.state.Sessions["skelf"].AgentSessionID; got != "" {
 		t.Fatalf("AgentSessionID = %q; want empty (start-time mismatch must not write)", got)
@@ -228,7 +252,7 @@ func TestCaptureNativeSessionIDSkipsSharedCwdSibling(t *testing.T) {
 	}
 
 	// B's capture runs while only A's rollout exists — it must not pin A's id.
-	sm.captureNativeSessionID("bairn", "codex", cwd, root, time.Now().Add(-time.Minute), 200, 200)
+	sm.captureNativeSessionID("bairn", "codex", config.NativeIDLocatorCodex, cwd, root, time.Now().Add(-time.Minute), 200, 200)
 
 	if got := sm.state.Sessions["bairn"].AgentSessionID; got != "" {
 		t.Fatalf("AgentSessionID = %q; want empty (must not cross-assign sibling's id)", got)
@@ -255,7 +279,7 @@ func TestCaptureNativeSessionIDCapturesWhenSiblingStopped(t *testing.T) {
 		Status: StatusRunning, WorktreePath: cwd,
 	}
 
-	sm.captureNativeSessionID("bonnie", "codex", cwd, root, time.Now().Add(-time.Minute), 300, 300)
+	sm.captureNativeSessionID("bonnie", "codex", config.NativeIDLocatorCodex, cwd, root, time.Now().Add(-time.Minute), 300, 300)
 
 	if got := sm.state.Sessions["bonnie"].AgentSessionID; got != "bonnie-native-id" {
 		t.Fatalf("AgentSessionID = %q; want bonnie-native-id (stopped sibling must not block)", got)
@@ -285,7 +309,7 @@ func TestCaptureNativeSessionIDSkipsSiblingStoppedAfterStart(t *testing.T) {
 		Status: StatusRunning, WorktreePath: cwd,
 	}
 
-	sm.captureNativeSessionID("fash", "codex", cwd, root, since, 400, 400)
+	sm.captureNativeSessionID("fash", "codex", config.NativeIDLocatorCodex, cwd, root, since, 400, 400)
 
 	if got := sm.state.Sessions["fash"].AgentSessionID; got != "" {
 		t.Fatalf("AgentSessionID = %q; want empty (sibling stopped mid-capture must not cross-assign)", got)
@@ -312,7 +336,7 @@ func TestCaptureNativeSessionIDSkipsIDAlreadyClaimed(t *testing.T) {
 		Status: StatusRunning, WorktreePath: cwd,
 	}
 
-	sm.captureNativeSessionID("scunner", "codex", cwd, root, time.Now().Add(-time.Minute), 500, 500)
+	sm.captureNativeSessionID("scunner", "codex", config.NativeIDLocatorCodex, cwd, root, time.Now().Add(-time.Minute), 500, 500)
 
 	if got := sm.state.Sessions["scunner"].AgentSessionID; got != "" {
 		t.Fatalf("AgentSessionID = %q; want empty (id already claimed must not be reused)", got)
@@ -366,7 +390,7 @@ func TestResolveForcedIDResume(t *testing.T) {
 	t.Run("existing transcript resumes native", func(t *testing.T) {
 		writeClaudeTranscript(t, "bide-id", braeLine)
 
-		id, fresh, fellBack := resolveForcedIDResume("claude", "bide-id", t.TempDir(), false, mint)
+		id, fresh, fellBack := resolveForcedIDResume(true, "claude", "bide-id", t.TempDir(), false, mint)
 		if id != "bide-id" || fresh || fellBack {
 			t.Fatalf("got (%q,%v,%v); want (bide-id,false,false)", id, fresh, fellBack)
 		}
@@ -379,7 +403,7 @@ func TestResolveForcedIDResume(t *testing.T) {
 	t.Run("missing transcript mints fresh id", func(t *testing.T) {
 		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir()) // empty → no conversation
 
-		id, fresh, fellBack := resolveForcedIDResume("claude", "dreich-id", t.TempDir(), false, mint)
+		id, fresh, fellBack := resolveForcedIDResume(true, "claude", "dreich-id", t.TempDir(), false, mint)
 		if id != minted || !fresh || !fellBack {
 			t.Fatalf("got (%q,%v,%v); want (%q,true,true)", id, fresh, fellBack, minted)
 		}
@@ -394,7 +418,7 @@ func TestResolveForcedIDResume(t *testing.T) {
 		// before the kill) — must mint fresh, not attempt a doomed --resume.
 		writeClaudeTranscript(t, "haar-id") // no lines → 0 bytes
 
-		id, fresh, fellBack := resolveForcedIDResume("claude", "haar-id", t.TempDir(), false, mint)
+		id, fresh, fellBack := resolveForcedIDResume(true, "claude", "haar-id", t.TempDir(), false, mint)
 		if id != minted || !fresh || !fellBack {
 			t.Fatalf("got (%q,%v,%v); want (%q,true,true)", id, fresh, fellBack, minted)
 		}
@@ -405,7 +429,7 @@ func TestResolveForcedIDResume(t *testing.T) {
 		// cleared on the successful start, so the next resume replays it natively.
 		writeClaudeTranscript(t, minted, braeLine)
 
-		id, fresh, fellBack := resolveForcedIDResume("claude", minted, t.TempDir(), false, mint)
+		id, fresh, fellBack := resolveForcedIDResume(true, "claude", minted, t.TempDir(), false, mint)
 		if id != minted || fresh || fellBack {
 			t.Fatalf("got (%q,%v,%v); want (%q,false,false)", id, fresh, fellBack, minted)
 		}
@@ -422,7 +446,7 @@ func TestResolveForcedIDResume(t *testing.T) {
 		// on an existing conversation (which would re-wedge).
 		writeClaudeTranscript(t, minted, braeLine)
 
-		id, fresh, fellBack := resolveForcedIDResume("claude", minted, t.TempDir(), true, mint)
+		id, fresh, fellBack := resolveForcedIDResume(true, "claude", minted, t.TempDir(), true, mint)
 		if id != minted || fresh || fellBack {
 			t.Fatalf("got (%q,%v,%v); want (%q,false,false)", id, fresh, fellBack, minted)
 		}
@@ -437,21 +461,21 @@ func TestResolveForcedIDResume(t *testing.T) {
 		// and the id is untouched (no re-mint), so the seeded fresh start proceeds.
 		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir()) // empty → no conversation
 
-		id, fresh, fellBack := resolveForcedIDResume("claude", "bide-id", t.TempDir(), true, mint)
+		id, fresh, fellBack := resolveForcedIDResume(true, "claude", "bide-id", t.TempDir(), true, mint)
 		if id != "bide-id" || !fresh || fellBack {
 			t.Fatalf("got (%q,%v,%v); want (bide-id,true,false)", id, fresh, fellBack)
 		}
 	})
 
 	t.Run("non-forced agent skips the check", func(t *testing.T) {
-		id, fresh, fellBack := resolveForcedIDResume("codex", "braw-id", t.TempDir(), false, mint)
+		id, fresh, fellBack := resolveForcedIDResume(false, "codex", "braw-id", t.TempDir(), false, mint)
 		if id != "braw-id" || fresh || fellBack {
 			t.Fatalf("got (%q,%v,%v); want (braw-id,false,false)", id, fresh, fellBack)
 		}
 	})
 
 	t.Run("empty id skips the check", func(t *testing.T) {
-		id, fresh, fellBack := resolveForcedIDResume("claude", "", t.TempDir(), false, mint)
+		id, fresh, fellBack := resolveForcedIDResume(true, "claude", "", t.TempDir(), false, mint)
 		if id != "" || fresh || fellBack {
 			t.Fatalf("got (%q,%v,%v); want (\"\",false,false)", id, fresh, fellBack)
 		}
@@ -470,6 +494,7 @@ func newForcedIDResumeSM(t *testing.T, agentSessionID string, freshStart bool) *
 		Command:    "sleep",
 		Args:       []string{"60"},
 		ResumeArgs: []string{"60"},
+		NativeID:   &config.AgentNativeIDConfig{Force: true, Locator: config.NativeIDLocatorClaude},
 	}
 
 	sm := newSMWithConfig(t, cfg)
@@ -603,6 +628,7 @@ func TestCaptureNativeSessionIDGuards(t *testing.T) {
 	tests := []struct {
 		name           string
 		agent          string
+		locator        string
 		initialAgentID string
 		storedPID      int
 		expectedPID    int
@@ -612,6 +638,7 @@ func TestCaptureNativeSessionIDGuards(t *testing.T) {
 		{
 			name:           "no overwrite of existing id",
 			agent:          "codex",
+			locator:        config.NativeIDLocatorCodex,
 			initialAgentID: "kept-id",
 			storedPID:      7,
 			expectedPID:    7,
@@ -622,6 +649,7 @@ func TestCaptureNativeSessionIDGuards(t *testing.T) {
 			// A later start replaced the process generation: stored PID != expectedPID.
 			name:           "stale process generation",
 			agent:          "codex",
+			locator:        config.NativeIDLocatorCodex,
 			initialAgentID: "",
 			storedPID:      999,
 			expectedPID:    111,
@@ -629,14 +657,16 @@ func TestCaptureNativeSessionIDGuards(t *testing.T) {
 			reason:         "stale generation must not write",
 		},
 		{
-			// claude is forced, never scraped: capture is a no-op even if a file exists.
+			// claude is forced, never scraped: an empty locator is a capture no-op
+			// even if a rollout file exists.
 			name:           "non-scrape agent",
 			agent:          "claude",
+			locator:        "",
 			initialAgentID: "",
 			storedPID:      1,
 			expectedPID:    1,
 			wantAgentID:    "",
-			reason:         "claude is not scraped",
+			reason:         "claude has no locator",
 		},
 	}
 	for _, tt := range tests {
@@ -652,7 +682,7 @@ func TestCaptureNativeSessionIDGuards(t *testing.T) {
 				Status: StatusRunning, WorktreePath: cwd,
 			}
 
-			sm.captureNativeSessionID("bonnie", tt.agent, cwd, root, time.Now().Add(-time.Minute), tt.expectedPID, 0)
+			sm.captureNativeSessionID("bonnie", tt.agent, tt.locator, cwd, root, time.Now().Add(-time.Minute), tt.expectedPID, 0)
 
 			if got := sm.state.Sessions["bonnie"].AgentSessionID; got != tt.wantAgentID {
 				t.Fatalf("AgentSessionID = %q; want %q (%s)", got, tt.wantAgentID, tt.reason)

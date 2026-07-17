@@ -309,8 +309,17 @@ func resolveResumeArgs(agent config.Agent, sessAgent, sessAgentSessionID string,
 // loop (pollTokens). A per-agent `[agents.claude.env] CLAUDE_CONFIG_DIR`
 // override is not threaded through here yet — that's a shared limitation of the
 // transcript subsystem, tracked separately.
-func forcedIDConversationExists(agent, agentSessionID, worktreePath string) bool {
-	sources, err := transcript.Locate(agent, agentSessionID, worktreePath)
+// forcedIDConversationExists reports whether a transcript exists on disk for the
+// forced id. It locates by the agent's configured native-id locator kind (issue
+// #1236), not the literal agent name, so a custom forced wrapper that declares
+// locator = "claude" resolves the Claude transcript instead of failing the
+// lookup and re-minting on every resume.
+func forcedIDConversationExists(locator, agentSessionID, worktreePath string) bool {
+	if locator == "" {
+		return false
+	}
+
+	sources, err := transcript.Locate(locator, agentSessionID, worktreePath)
 	if err != nil {
 		return false
 	}
@@ -341,12 +350,12 @@ func forcedIDConversationExists(agent, agentSessionID, worktreePath string) bool
 //     → keep the minted id and the pending fresh start unchanged.
 //
 // Non-forced agents and empty ids are returned unchanged.
-func resolveForcedIDResume(agent, agentSessionID, worktreePath string, freshStart bool, mint func() string) (id string, fresh, fellBack bool) {
-	if !forcesID(agent) || agentSessionID == "" {
+func resolveForcedIDResume(forces bool, locator, agentSessionID, worktreePath string, freshStart bool, mint func() string) (id string, fresh, fellBack bool) {
+	if !forces || agentSessionID == "" {
 		return agentSessionID, freshStart, false
 	}
 
-	if forcedIDConversationExists(agent, agentSessionID, worktreePath) {
+	if forcedIDConversationExists(locator, agentSessionID, worktreePath) {
 		return agentSessionID, false, false
 	}
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
@@ -30,25 +31,50 @@ func TestWithCommas(t *testing.T) {
 }
 
 func TestNewTokenRow(t *testing.T) {
+	agents := map[string]config.Agent{
+		"claude": {NativeID: &config.AgentNativeIDConfig{Force: true, Locator: config.NativeIDLocatorClaude}},
+		"codex":  {NativeID: &config.AgentNativeIDConfig{Locator: config.NativeIDLocatorCodex}},
+		"cursor": {},
+		// A custom alias declaring the codex locator: supported even before its
+		// first successful poll (config-driven), not merely once Tokens exist.
+		"mycodex": {NativeID: &config.AgentNativeIDConfig{Locator: config.NativeIDLocatorCodex}},
+	}
+
 	// Supported + known.
 	r := newTokenRow(protocol.SessionInfo{
 		Name: "braw", ID: "id1", Agent: "claude",
 		Tokens: &protocol.TokenInfo{Input: 10, Output: 20, Total: 30, Degraded: true},
-	})
+	}, agents)
 	if !r.Supported || !r.Known || r.Total != 30 || !r.Degraded {
 		t.Errorf("row = %+v, want supported+known, total 30, degraded", r)
 	}
 
 	// Supported agent, no counts yet.
-	r = newTokenRow(protocol.SessionInfo{Name: "canny", Agent: "codex"})
+	r = newTokenRow(protocol.SessionInfo{Name: "canny", Agent: "codex"}, agents)
 	if !r.Supported || r.Known {
 		t.Errorf("row = %+v, want supported but not known", r)
 	}
 
 	// Unsupported agent.
-	r = newTokenRow(protocol.SessionInfo{Name: "dreich", Agent: "cursor"})
+	r = newTokenRow(protocol.SessionInfo{Name: "dreich", Agent: "cursor"}, agents)
 	if r.Supported {
 		t.Errorf("row = %+v, want unsupported", r)
+	}
+
+	// Custom alias with a configured locator: supported BEFORE any Tokens exist.
+	r = newTokenRow(protocol.SessionInfo{Name: "wrapper", Agent: "mycodex"}, agents)
+	if !r.Supported || r.Known {
+		t.Errorf("row = %+v, want config-driven supported (alias) but not known", r)
+	}
+
+	// Persisted/pre-reload session whose agent is absent from current config but
+	// already has Tokens: still supported via the Tokens fallback.
+	r = newTokenRow(protocol.SessionInfo{
+		Name: "ghost", Agent: "removed-alias",
+		Tokens: &protocol.TokenInfo{Total: 5},
+	}, agents)
+	if !r.Supported || !r.Known {
+		t.Errorf("row = %+v, want supported via persisted Tokens fallback", r)
 	}
 }
 

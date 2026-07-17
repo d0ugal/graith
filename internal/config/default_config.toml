@@ -703,6 +703,15 @@ headless_args = ["-p", "--output-format", "stream-json", "--input-format", "stre
 # prompt. Delivery mechanism is chosen by prompt_injection above. (issue #1236)
 prompt_injection_args = ["--append-system-prompt", "{prompt}"]
 
+# Native session-id strategy (issue #1236). graith mints the id and supplies it
+# via {agent_session_id} in args (force = true); the locator names Claude's
+# on-disk transcript kind so resume can confirm the pinned conversation still
+# exists rather than re-minting. A custom Claude wrapper opts into the same
+# lifecycle by setting these, not by matching the name "claude".
+[agents.claude.native_id]
+force = true
+locator = "claude"
+
 # Lifecycle-hook wiring. graith builds the settings JSON dynamically; only the
 # argv spelling lives here. mechanism selects the Go builder; settings_args wires
 # the generated file in with {path} bound. (issue #1236)
@@ -741,6 +750,14 @@ empty_id_resume_args = ["resume", "--last"]
 # Prompt delivery: developer_instructions is injected as a -c config override.
 # {prompt} is bound to the JSON-encoded prompt (a valid TOML basic string). (#1236)
 prompt_injection_args = ["-c", "developer_instructions={prompt}"]
+
+# Native session-id strategy (issue #1236). Codex mints its own id, so graith
+# does not force one; the locator names Codex's rollout kind so graith scrapes
+# the id from disk after start (deterministic resume) and confirms it on resume.
+# A custom Codex wrapper opts into the same lifecycle by setting this table.
+[agents.codex.native_id]
+locator = "codex"
+
 # Conditional launch flags for the session model and typed Codex options (issue
 # #1186), each emitted only when its `when` template variable is set — an unset
 # option leaves Codex's own default untouched. These are the config-driven

@@ -1214,10 +1214,18 @@ func TestValidateOrchestratorAgent(t *testing.T) {
 func TestLoadAgentExplicitEmptyArgs(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
+	// Emptying args drops {agent_session_id}, so also disable the inherited force
+	// strategy to keep the config coherent — force with no id-passing args is
+	// rejected. Under graith's in-place unmarshal, a strategy is disabled with
+	// explicit keys (force = false, locator = ""), not an empty table (#1236).
 	toml := `
 [agents.claude]
 command = "claude"
 args = []
+
+[agents.claude.native_id]
+force = false
+locator = ""
 `
 	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
 
@@ -1229,6 +1237,10 @@ args = []
 	claude := cfg.Agents["claude"]
 	if len(claude.Args) != 0 {
 		t.Errorf("claude.Args = %v, want [] (explicit empty should override default)", claude.Args)
+	}
+
+	if claude.ForcesNativeID() {
+		t.Error("explicit force = false should disable the inherited force strategy")
 	}
 
 	if len(claude.ResumeArgs) != 2 {

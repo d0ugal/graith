@@ -383,6 +383,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptFromConfig(cfgSnapshot *conf
 	prevToken := sessState.Token
 	prevAgentSessionID := sessState.AgentSessionID
 	prevFreshStart := sessState.FreshStart
+	prevNativeIDLocator := sessState.NativeIDLocator
 
 	// For a forced-id agent (Claude), the resume command is decided by whether a
 	// conversation exists on disk for the captured id (see resolveForcedIDResume):
@@ -393,10 +394,10 @@ func (sm *SessionManager) resumeWithSummaryAndPromptFromConfig(cfgSnapshot *conf
 	// save below persists it before the PTY spawn.
 	forcedFreshFallback := false
 
-	if forcesID(sessState.Agent) && sessState.AgentSessionID != "" {
+	if cfgSnapshot.Agents[sessState.Agent].ForcesNativeID() && sessState.AgentSessionID != "" {
 		oldID := sessState.AgentSessionID
 		oldFresh := sessState.FreshStart
-		newID, fresh, fellBack := resolveForcedIDResume(sessState.Agent, oldID, sessState.WorktreePath, oldFresh, newAgentSessionID)
+		newID, fresh, fellBack := resolveForcedIDResume(true, cfgSnapshot.Agents[sessState.Agent].NativeIDLocator(), oldID, sessState.WorktreePath, oldFresh, newAgentSessionID)
 
 		// For a forced-id agent the helper returns fresh=false only via the
 		// conversation-exists branch, so !fresh is exactly "conversation exists".
@@ -425,6 +426,15 @@ func (sm *SessionManager) resumeWithSummaryAndPromptFromConfig(cfgSnapshot *conf
 		return SessionState{}, fmt.Errorf("generate session token: %w", err)
 	}
 
+	// Refresh the persisted launch locator to the current effective value so a
+	// config transition (or a pre-#1236 session with none recorded) has an
+	// accurate locator before capture and for cross-assignment detection by other
+	// sessions. Assigned AFTER the fallible generateToken so an early return can't
+	// leave a mutated-but-unsaved locator; every rollback below restores the prior
+	// value alongside AgentSessionID (issue #1236). Persisted by the StatusCreating
+	// save below.
+	sessState.NativeIDLocator = cfgSnapshot.Agents[sessState.Agent].NativeIDLocator()
+
 	if prevToken != "" {
 		delete(sm.tokenIndex, prevToken)
 	}
@@ -447,6 +457,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptFromConfig(cfgSnapshot *conf
 		// while disk still has the original, and a later restart re-wedges.
 		sessState.AgentSessionID = prevAgentSessionID
 		sessState.FreshStart = prevFreshStart
+		sessState.NativeIDLocator = prevNativeIDLocator
 
 		delete(sm.tokenIndex, newToken)
 
@@ -514,6 +525,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptFromConfig(cfgSnapshot *conf
 			// rollback meaning "this attempt changed nothing".
 			s.AgentSessionID = prevAgentSessionID
 			s.FreshStart = prevFreshStart
+			s.NativeIDLocator = prevNativeIDLocator
 
 			delete(sm.tokenIndex, newToken)
 
@@ -931,6 +943,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptFromConfig(cfgSnapshot *conf
 		// Roll back the forced-id fresh fallback (minted id + FreshStart).
 		sessState.AgentSessionID = prevAgentSessionID
 		sessState.FreshStart = prevFreshStart
+		sessState.NativeIDLocator = prevNativeIDLocator
 
 		delete(sm.tokenIndex, newToken)
 
@@ -980,8 +993,8 @@ func (sm *SessionManager) resumeWithSummaryAndPromptFromConfig(cfgSnapshot *conf
 	// If a self-minting agent (Codex) had no captured id, this resume fell back
 	// to its empty-id behaviour; scrape the id now so the *next* resume is
 	// deterministic. Skipped when an id is already known.
-	if scrapesID(sessAgent) && sessAgentSessionID == "" {
-		go sm.captureNativeSessionID(id, sessAgent, sessWorktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
+	if agent := cfgSnapshot.Agents[sessAgent]; agent.ScrapesNativeID() && sessAgentSessionID == "" {
+		go sm.captureNativeSessionID(id, sessAgent, agent.NativeIDLocator(), sessWorktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
 	}
 
 	if scenarioIDForRepublish != "" {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/agent/transcript"
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
@@ -33,12 +34,28 @@ type tokenRow struct {
 	CountedAt     string `json:"counted_at,omitempty"`
 }
 
-func newTokenRow(s protocol.SessionInfo) tokenRow {
+// tokenAgentSupported resolves whether a session's transcript can be parsed,
+// config-driven: it maps the agent to its effective transcript kind (the
+// configured native_id locator, falling back to the agent name), so a custom
+// alias/wrapper declaring locator "codex"/"claude" is reported supported even
+// before its first successful poll. A published Tokens value also counts, for
+// persisted/pre-reload sessions whose agent may not be in the current config
+// (issue #1236).
+func tokenAgentSupported(agents map[string]config.Agent, s protocol.SessionInfo) bool {
+	kind := s.Agent
+	if loc := agents[s.Agent].NativeIDLocator(); loc != "" {
+		kind = loc
+	}
+
+	return transcript.Supported(kind) || s.Tokens != nil
+}
+
+func newTokenRow(s protocol.SessionInfo, agents map[string]config.Agent) tokenRow {
 	r := tokenRow{
 		Name:      s.Name,
 		ID:        s.ID,
 		Agent:     s.Agent,
-		Supported: transcript.Supported(s.Agent),
+		Supported: tokenAgentSupported(agents, s),
 	}
 	if s.Tokens != nil {
 		t := s.Tokens
@@ -90,7 +107,7 @@ var tokensCmd = &cobra.Command{
 
 		rows := make([]tokenRow, 0, len(list.Sessions))
 		for _, s := range list.Sessions {
-			rows = append(rows, newTokenRow(s))
+			rows = append(rows, newTokenRow(s, cfg.Agents))
 		}
 
 		sort.Slice(rows, func(i, j int) bool {

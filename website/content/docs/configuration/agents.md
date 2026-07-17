@@ -67,6 +67,7 @@ Every agent-specific flag graith appends is defined here, so a custom agent can 
 - **`option_args`** — conditional flag groups appended on every launch. Each group is emitted only when its `when` template variable is set, so an unset option leaves the agent's own default untouched (see [Conditional option flags](#conditional-option-flags)).
 - **`prompt_injection_args`** — the argv template graith uses to deliver the operating prompt, with `{prompt}` bound to it, for the `append_system_prompt` and `developer_instructions` mechanisms (see below). Unset falls back to the built-in spelling for the selected mechanism.
 - **`empty_id_resume_args`** — the fallback resume argv used when `resume_args` templates `{agent_session_id}` but graith never captured a native session id. Codex's default is `["resume", "--last"]` (cwd-scoped, best-effort); unset means start fresh.
+- **`[native_id]`** — the agent's native session-id strategy (`force`, `locator`), which lets graith pin a conversation across resume/fork/migrate. See [Native session-id strategy](#native-session-id-strategy).
 - **`[agents.<name>.hooks]`** and **`[agents.<name>.mcp]`** — how graith wires its generated lifecycle hooks and daemon-managed MCP servers into the launch (see [Hook and MCP adapters](#hook-and-mcp-adapters)).
 
 Dynamic values — the generated settings/MCP files, the encoded prompt, the Codex hook TOML — are still built by graith; only the capability declaration and argv spelling live in config, and the security checks (e.g. skipping an MCP server whose name isn't a valid Codex config key) stay in graith.
@@ -155,6 +156,26 @@ mechanism = "cursor_project"
 ```
 
 The hook mechanisms are `claude_settings` (write a settings JSON, pass `settings_args` with `{path}` bound), `codex_config` (emit `event_args` once per hook event with `{hook_event}`/`{hook_value}` bound, then `trust_args`), and `cursor_project` (write `.cursor/hooks.json`, no args). The MCP mechanisms are `claude_config` (write an MCP config JSON, pass `config_args` with `{path}` bound) and `codex_config` (emit `server_args` once per server with `{mcp_name}`, `{mcp_command}`, and `{mcp_args}` bound). An agent with no `[agents.<name>.hooks]`/`[agents.<name>.mcp]` block gets no hooks/MCP wiring. An unknown mechanism is rejected at config load.
+
+For the `cursor_project` mechanism graith owns the generated `.cursor/hooks.json`: it records a per-session ownership marker (the SHA-256 of the exact bytes it wrote, kept in graith's own state dir, not your worktree) and publishes the file atomically. On cleanup it removes that file **only** when the marker confirms graith wrote it and the bytes are unchanged — a file you created or edited is always preserved, and cleanup stays correct even if a later reload changes or drops the mechanism. If a `.cursor/hooks.json` already exists that graith doesn't own, launch fails safely rather than overwriting it; move the file aside to let graith manage it.
+
+### Native session-id strategy
+
+Some agents let graith pin a conversation across resume/fork/migrate. This is declared per agent in `[agents.<name>.native_id]`, replacing the former hard-coded name checks so a custom alias/wrapper opts into the same lifecycle from config:
+
+```toml
+# Claude: graith mints the id and passes it via {agent_session_id}; the locator
+# names Claude's transcript kind so resume can confirm the conversation exists.
+[agents.claude.native_id]
+force   = true
+locator = "claude"
+
+# Codex: mints its own id, which graith recovers from the codex rollout on disk.
+[agents.codex.native_id]
+locator = "codex"
+```
+
+`force = true` makes graith mint the native id at launch and supply it through the agent's own `args`/`resume_args`/`fork_args` (each must template `{agent_session_id}`, or config load fails). `locator` names the on-disk transcript kind (`claude` or `codex`) graith uses to confirm a forced id's conversation and to scrape a self-minted id; a forced agent needs a locator too, or resume can't confirm the conversation and would re-mint. `force` and `locator` combine but a non-forced `locator = "claude"` is rejected — only the codex rollout has a self-mint scraper. To disable an inherited built-in strategy, set the keys explicitly (`force = false`, `locator = ""`); omitting the table inherits the built-in. An agent with no `[agents.<name>.native_id]` starts a fresh conversation each launch.
 
 ### Per-agent sandbox
 
@@ -269,6 +290,10 @@ resume_args  = ["--resume", "{agent_session_id}"]
 fork_args    = ["--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"]
 add_dir_args = ["--add-dir", "{dir}"]
 headless_args = ["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"]
+
+[agents.claude.native_id]
+force   = true
+locator = "claude"
 ```
 
 ### Codex
@@ -280,6 +305,9 @@ args         = []
 resume_args  = ["resume", "{agent_session_id}"]
 fork_args    = ["fork", "{fork_source_agent_session_id}"]
 add_dir_args = ["--add-dir", "{dir}"]
+
+[agents.codex.native_id]
+locator = "codex"
 
 # The model and typed Codex options (--model, --profile, reasoning effort,
 # service tier, --search, --ask-for-approval) are emitted via option_args groups

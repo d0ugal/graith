@@ -3632,6 +3632,83 @@ type Agent struct {
 	// `resume --last` branch in resolveResumeArgs. Built-in codex:
 	// ["resume", "--last"].
 	EmptyIDResumeArgs []string `json:"empty_id_resume_args,omitempty" toml:"empty_id_resume_args,omitempty"`
+	// NativeID declares this agent's native session-id lifecycle strategy (issue
+	// #1236). Nil (or an all-zero value) means graith neither mints nor recovers a
+	// native id for the agent — it starts a fresh conversation each launch. This
+	// replaces the former hard-coded forcesID/scrapesID name checks, so a custom
+	// alias/wrapper opts into the same create/resume/fork/migrate lifecycle from
+	// config rather than by matching a built-in name.
+	NativeID *AgentNativeIDConfig `json:"native_id,omitempty" toml:"native_id,omitempty"`
+}
+
+// AgentNativeIDConfig declares how graith manages an agent's native session id
+// (issue #1236). Force and Locator are independent knobs, not mutually exclusive:
+//
+//   - Force: graith mints the id (newAgentSessionID) at launch and supplies it
+//     through the agent's own args template ({agent_session_id}); resume replays
+//     the same id. Built-in claude sets force = true.
+//   - Locator: names the agent's on-disk transcript/state kind. It serves two
+//     jobs. For a self-minting (non-forced) agent it selects the on-disk parser
+//     that recovers the agent-chosen id after launch (scrape). For any agent it
+//     selects the transcript kind used to check whether the pinned conversation
+//     still exists on resume — so a forced agent needs a locator too, or a custom
+//     forced wrapper would fail that lookup and re-mint on every resume.
+//
+// Built-in claude sets {force = true, locator = "claude"} and codex sets
+// {locator = "codex"} (self-minting, so no force). The id value construction and
+// on-disk parsing stay in Go; only the capability declaration lives here.
+type AgentNativeIDConfig struct {
+	// Force makes graith mint and supply the native id at launch.
+	//
+	// No omitempty: the disable form for an inherited strategy is `force = false`
+	// / `locator = ""`, and those zero values must survive `gr config show`'s
+	// marshal → reload round-trip. With omitempty a disabled built-in would
+	// marshal as an empty table and, reloaded over Default(), silently re-enable
+	// the inherited strategy (issue #1236).
+	Force bool `json:"force" toml:"force"`
+	// Locator names the agent's on-disk transcript/id kind (one of the
+	// NativeIDLocator* constants). Empty means graith cannot locate the agent's
+	// state, so it can neither scrape a self-minted id nor confirm a forced id's
+	// conversation.
+	Locator string `json:"locator" toml:"locator"`
+}
+
+// Native session-id on-disk locators graith knows how to read (issue #1236).
+// graith owns this enum, so an unknown value is a config error, not a silent
+// no-op that would leave resume non-deterministic. Values match the transcript
+// package's agent kinds so they select the same on-disk parser.
+const (
+	// NativeIDLocatorClaude locates Claude's conversation transcript (used to
+	// confirm a forced id's conversation exists on resume).
+	NativeIDLocatorClaude = "claude"
+	// NativeIDLocatorCodex reads Codex's rollout transcript under CODEX_HOME
+	// (used to scrape the self-minted id and confirm it on resume).
+	NativeIDLocatorCodex = "codex"
+)
+
+// ForcesNativeID reports whether graith mints and supplies this agent's native
+// session id at launch.
+func (a Agent) ForcesNativeID() bool {
+	return a.NativeID != nil && a.NativeID.Force
+}
+
+// NativeIDLocator returns the agent's on-disk transcript/id locator kind, or ""
+// when it has none.
+func (a Agent) NativeIDLocator() string {
+	if a.NativeID == nil {
+		return ""
+	}
+
+	return a.NativeID.Locator
+}
+
+// ScrapesNativeID reports whether graith recovers this agent's native session id
+// from disk after launch. Only a self-minting (non-forced) agent that declares a
+// locator scrapes: a forced agent already knows its id, so it never scrapes even
+// though it carries a locator for the resume conversation-exists check. This is
+// deliberately distinct from mere locator presence.
+func (a Agent) ScrapesNativeID() bool {
+	return !a.ForcesNativeID() && a.NativeIDLocator() != ""
 }
 
 // Hook-injection mechanisms an agent may declare in [agents.<name>.hooks]
@@ -3767,7 +3844,72 @@ func (a Agent) validateAdapters(name string) []error {
 
 	errs = appendTemplateErrs(errs, field("prompt_injection_args"), a.PromptInjectionArgs, "prompt")
 
+	if a.NativeID != nil {
+		switch a.NativeID.Locator {
+		case "", NativeIDLocatorClaude, NativeIDLocatorCodex:
+		default:
+			errs = append(errs, fmt.Errorf("agents.%s.native_id.locator %q: must be %q or %q (or empty)",
+				name, a.NativeID.Locator, NativeIDLocatorClaude, NativeIDLocatorCodex))
+		}
+
+		// Force mode only works if the launch args actually deliver the minted id to
+		// the agent. An agent declaring force=true but whose args never template
+		// {agent_session_id} would mint an id graith could never pass, so fail before
+		// launch rather than starting a conversation graith can't later resume. The
+		// check covers create (args) and any non-empty resume_args/fork_args, which
+		// carry the pinned/new id; an empty resume_args/fork_args falls back to args
+		// (already checked), so it needs no separate token.
+		if a.NativeID.Force {
+			// create always uses args, so they must carry the token (empty args can't).
+			if !templateContainsToken(a.Args, "agent_session_id") {
+				errs = append(errs, fmt.Errorf("agents.%s.native_id.force is set but args do not pass {agent_session_id}; the minted id would never reach the agent", name))
+			}
+
+			// resume_args/fork_args carry the pinned/new id when non-empty; an empty
+			// value falls back to args (already checked), so only validate non-empty.
+			for _, f := range []struct {
+				field string
+				argv  []string
+			}{
+				{"resume_args", a.ResumeArgs},
+				{"fork_args", a.ForkArgs},
+			} {
+				if len(f.argv) > 0 && !templateContainsToken(f.argv, "agent_session_id") {
+					errs = append(errs, fmt.Errorf("agents.%s.native_id.force is set but %s does not pass {agent_session_id}; the pinned session id would never reach the agent", name, f.field))
+				}
+			}
+		}
+
+		// A forced agent replays its pinned id on resume and confirms the
+		// conversation still exists via the transcript locator; without a locator it
+		// cannot, so it would re-mint every resume. Require one (issue #1236).
+		if a.NativeID.Force && a.NativeID.Locator == "" {
+			errs = append(errs, fmt.Errorf("agents.%s.native_id.force is set but no locator is configured; resume cannot confirm the pinned conversation and would re-mint", name))
+		}
+
+		// A self-minting (non-forced) agent recovers its id by scraping the locator's
+		// on-disk state, which only the codex rollout parser supports today. A
+		// non-forced claude locator would silently never capture an id, so reject the
+		// unsupported combination rather than leaving resume non-deterministic.
+		if !a.NativeID.Force && a.NativeID.Locator == NativeIDLocatorClaude {
+			errs = append(errs, fmt.Errorf("agents.%s.native_id: locator %q has no self-mint scraper; set force=true (graith mints the id) or use a scrape-capable locator like %q",
+				name, NativeIDLocatorClaude, NativeIDLocatorCodex))
+		}
+	}
+
 	return errs
+}
+
+// templateContainsToken reports whether any element of tmpl contains the given
+// {token} placeholder.
+func templateContainsToken(tmpl []string, token string) bool {
+	for _, tok := range templateTokens(tmpl) {
+		if tok == token {
+			return true
+		}
+	}
+
+	return false
 }
 
 // appendTemplateErrs appends an error for each {token} in tmpl that is not in
@@ -5536,6 +5678,16 @@ func mergeAgent(def, usr Agent) Agent {
 
 	if usr.EmptyIDResumeArgs != nil {
 		def.EmptyIDResumeArgs = usr.EmptyIDResumeArgs
+	}
+
+	// Load unmarshals the user file in place over Default(), so present keys
+	// override and absent keys inherit the built-in strategy: a custom agent
+	// disables an inherited strategy with explicit `force = false` / `locator = ""`
+	// and inherits it by omitting the keys (issue #1236). This assignment matters
+	// only if the agent maps are ever merged as separate values (non-aliased); it
+	// is a safe no-op under the current in-place unmarshal.
+	if usr.NativeID != nil {
+		def.NativeID = usr.NativeID
 	}
 
 	return def

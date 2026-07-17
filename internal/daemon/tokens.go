@@ -68,8 +68,13 @@ func (c *tokenCache) prune(live map[string]bool) {
 // tokenTarget is a snapshot of the fields RunTokenLoop needs to resolve and
 // parse a session's transcript, taken under RLock and used off-lock.
 type tokenTarget struct {
-	id             string
-	agent          string
+	id    string
+	agent string
+	// kind is the transcript/on-disk parser kind (native-id locator, or the agent
+	// name as a legacy fallback), so a custom alias with locator "codex"/"claude"
+	// is token-counted against the right format (issue #1236). agent is kept for
+	// the identity match against SessionState.
+	kind           string
 	agentSessionID string
 	worktreePath   string
 }
@@ -155,13 +160,15 @@ func (sm *SessionManager) tokenTargets() ([]tokenTarget, map[string]bool) {
 			continue
 		}
 
-		if !transcript.Supported(s.Agent) {
+		kind := transcriptKind(s.NativeIDLocator, s.Agent)
+		if !transcript.Supported(kind) {
 			continue
 		}
 
 		targets = append(targets, tokenTarget{
 			id:             id,
 			agent:          s.Agent,
+			kind:           kind,
 			agentSessionID: s.AgentSessionID,
 			worktreePath:   s.WorktreePath,
 		})
@@ -176,7 +183,7 @@ func (sm *SessionManager) tokenTargets() ([]tokenTarget, map[string]bool) {
 // or an unreadable transcript returns false. Runs OFF sm.mu (it touches the
 // filesystem); only the final write-back takes the lock.
 func (sm *SessionManager) pollTokens(t tokenTarget) bool {
-	sources, err := transcript.Locate(t.agent, t.agentSessionID, t.worktreePath)
+	sources, err := transcript.Locate(t.kind, t.agentSessionID, t.worktreePath)
 	if err != nil || len(sources) == 0 {
 		// No transcript yet (or unreadable): leave any previous stats in place
 		// rather than clearing a known total on a transient miss.
@@ -189,7 +196,7 @@ func (sm *SessionManager) pollTokens(t tokenTarget) bool {
 		return false // unchanged since last successful parse
 	}
 
-	u, err := transcript.UsageFrom(t.agent, sources)
+	u, err := transcript.UsageFrom(t.kind, sources)
 	if err != nil {
 		return false
 	}
@@ -198,7 +205,7 @@ func (sm *SessionManager) pollTokens(t tokenTarget) bool {
 	// parse may be inconsistent — don't cache it under the (now stale) pre-read
 	// fingerprint, so the next tick re-reads. (Publishing the value is still
 	// safe; it just isn't cached as authoritative.)
-	post, err := transcript.Locate(t.agent, t.agentSessionID, t.worktreePath)
+	post, err := transcript.Locate(t.kind, t.agentSessionID, t.worktreePath)
 	stable := err == nil && tokenFingerprint(t, post) == fp
 
 	if !u.Found {
@@ -247,8 +254,9 @@ func (sm *SessionManager) setTokenStats(t tokenTarget, stats *TokenStats) {
 		return
 	}
 
-	if s.Agent != t.agent || s.AgentSessionID != t.agentSessionID || s.WorktreePath != t.worktreePath {
-		return // identity changed under us — the parse describes a stale agent
+	if s.Agent != t.agent || transcriptKind(s.NativeIDLocator, s.Agent) != t.kind ||
+		s.AgentSessionID != t.agentSessionID || s.WorktreePath != t.worktreePath {
+		return // identity/parser-kind changed under us — the parse describes a stale agent
 	}
 
 	s.Tokens = stats
@@ -260,7 +268,9 @@ func (sm *SessionManager) setTokenStats(t tokenTarget, stats *TokenStats) {
 // the new agent, and a grown/rotated/re-pointed file forces a re-read while an
 // untouched one is skipped.
 func tokenFingerprint(t tokenTarget, sources []transcript.Source) string {
-	b := []byte(t.agent + "\x00" + t.agentSessionID + "\x00" + t.worktreePath + "\x00")
+	// Include kind: a locator transition (same agent/id/worktree, different parser
+	// kind) must invalidate the cache so the transcript is re-parsed (issue #1236).
+	b := []byte(t.agent + "\x00" + t.kind + "\x00" + t.agentSessionID + "\x00" + t.worktreePath + "\x00")
 	for _, s := range sources {
 		b = append(b, s.Path...)
 		b = append(b, byte(0))

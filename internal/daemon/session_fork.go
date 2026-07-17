@@ -130,6 +130,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	}
 
 	srcAgent := source.Agent
+	srcLocator := source.NativeIDLocator
 	srcWorktree := source.WorktreePath
 
 	// A cross-agent fork changes the agent type; empty or equal to the source is
@@ -155,7 +156,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	if crossAgent {
 		// The source's conversation must be readable to seed the new agent.
 		// (targetModel was validated pre-lock to avoid exec under sm.mu.)
-		if !transcript.Supported(srcAgent) {
+		if !transcript.Supported(transcriptKind(srcLocator, srcAgent)) {
 			sm.mu.Unlock()
 			return SessionState{}, fmt.Errorf("cannot fork session %q to agent %q: forking from %q is not supported (no transcript reader)", source.Name, targetAgent, srcAgent)
 		}
@@ -210,7 +211,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	}
 
 	agentSessionID := ""
-	if forcesID(agentName) {
+	if cfgSnapshot.Agents[agentName].ForcesNativeID() {
 		agentSessionID = newAgentSessionID()
 	}
 
@@ -244,6 +245,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		BaseBranch:      baseBranch,
 		Agent:           agentName,
 		AgentSessionID:  agentSessionID,
+		NativeIDLocator: agent.NativeIDLocator(),
 		Model:           effectiveModel,
 		Codex:           sourceCodex,
 		AgentHooks:      sourceAgentHooks,
@@ -315,7 +317,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	// fork — unsupported/missing/empty source transcript — fails fast. The
 	// source session keeps running throughout; we only read its on-disk history.
 	if crossAgent {
-		conv, err := transcript.Read(srcAgent, sourceAgentSessionID, srcWorktree)
+		conv, err := transcript.Read(transcriptKind(srcLocator, srcAgent), sourceAgentSessionID, srcWorktree)
 		if err != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("read source transcript: %w", err)
@@ -738,8 +740,8 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	// Capture the forked child's native id for self-minting agents (Codex): the
 	// fork mints a new conversation graith didn't choose, so read it from disk
 	// for deterministic later resume. Skipped when the id was forced (Claude).
-	if scrapesID(agentName) && agentSessionID == "" {
-		go sm.captureNativeSessionID(id, agentName, worktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
+	if agent := cfgSnapshot.Agents[agentName]; agent.ScrapesNativeID() && agentSessionID == "" {
+		go sm.captureNativeSessionID(id, agentName, agent.NativeIDLocator(), worktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
 	}
 
 	return result, nil

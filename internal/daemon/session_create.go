@@ -274,7 +274,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	}
 
 	agentSessionID := ""
-	if forcesID(agentName) {
+	if cfgSnapshot.Agents[agentName].ForcesNativeID() {
 		agentSessionID = newAgentSessionID()
 	}
 
@@ -340,6 +340,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		BaseBranch:      baseBranch,
 		Agent:           agentName,
 		AgentSessionID:  agentSessionID,
+		NativeIDLocator: agent.NativeIDLocator(),
 		Model:           model,
 		Codex:           codexStatePtr(codexOpts),
 		Mirror:          isMirror,
@@ -939,9 +940,10 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	// Best-effort native session-id capture for self-minting agents (Codex):
 	// graith didn't force the id, so read it from the agent's on-disk state so
 	// later resume is deterministic. Skipped when the id was forced (agentSessionID
-	// non-empty). Uses the session's effective state root (e.g. CODEX_HOME).
-	if scrapesID(agentName) && agentSessionID == "" {
-		go sm.captureNativeSessionID(id, agentName, worktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
+	// non-empty). Uses the session's effective state root (e.g. CODEX_HOME) and the
+	// agent's config-declared locator, so a custom alias scrapes like the built-in.
+	if agent := cfgSnapshot.Agents[agentName]; agent.ScrapesNativeID() && agentSessionID == "" {
+		go sm.captureNativeSessionID(id, agentName, agent.NativeIDLocator(), worktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
 	}
 
 	return result, nil
