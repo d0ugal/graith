@@ -436,6 +436,7 @@ func TestApprovalsServerTimeoutIncludesBackendThenHumanPhases(t *testing.T) {
 	if got := command.BackendPhaseTimeoutDuration(); got != 5*time.Second {
 		t.Errorf("command backend phase = %v, want 5s", got)
 	}
+
 	if got := command.ServerTimeoutDuration(); got != 35*time.Second {
 		t.Errorf("command server bound = %v, want backend 5s + human 30s", got)
 	}
@@ -444,6 +445,7 @@ func TestApprovalsServerTimeoutIncludesBackendThenHumanPhases(t *testing.T) {
 	if got := prompt.BackendPhaseTimeoutDuration(); got != 0 {
 		t.Errorf("prompt backend phase = %v, want 0", got)
 	}
+
 	if got := prompt.ServerTimeoutDuration(); got != 30*time.Second {
 		t.Errorf("prompt server bound = %v, want human wait 30s", got)
 	}

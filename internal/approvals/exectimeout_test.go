@@ -48,6 +48,7 @@ func TestCommandBackendHonoursExecTimeout(t *testing.T) {
 	if d.Decision != DecisionDefer {
 		t.Errorf("timed-out command -> %q, want defer", d.Decision)
 	}
+
 	if !strings.Contains(err.Error(), "command backend execution deadline") {
 		t.Errorf("timeout error = %q, want named command execution deadline", err)
 	}
@@ -91,6 +92,7 @@ func TestLocalmostBackendHonoursExecTimeout(t *testing.T) {
 	if d.Decision != DecisionDefer {
 		t.Errorf("timed-out localmost -> %q, want defer", d.Decision)
 	}
+
 	if !strings.Contains(err.Error(), "localmost backend execution deadline") {
 		t.Errorf("timeout error = %q, want named localmost execution deadline", err)
 	}

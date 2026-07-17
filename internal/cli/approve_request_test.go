@@ -46,6 +46,7 @@ func TestSubmitApprovalRequestChecksSendError(t *testing.T) {
 	if !c.sent || c.read {
 		t.Errorf("send/read calls = %v/%v, want send then stop", c.sent, c.read)
 	}
+
 	for _, want := range []string{"permissionDecision\":\"allow", "send request failed", "dreich write failure", "fail-open hook policy"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("send-error hook output %q missing %q", out, want)

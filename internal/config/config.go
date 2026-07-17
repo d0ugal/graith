@@ -3343,9 +3343,11 @@ func (a Approvals) BackendPhaseTimeoutDuration() time.Duration {
 // approval: automated backend execution followed by the full human wait. The
 // hook connection adds its own response-delivery grace beyond this bound.
 func (a Approvals) ServerTimeoutDuration() time.Duration {
+	const maxDuration = time.Duration(1<<63 - 1)
+
 	backend := a.BackendPhaseTimeoutDuration()
 	human := a.TimeoutDuration()
-	const maxDuration = time.Duration(1<<63 - 1)
+
 	if human > maxDuration-backend {
 		return maxDuration
 	}
