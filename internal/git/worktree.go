@@ -9,47 +9,62 @@ import (
 	"strings"
 )
 
+func (r Runner) CreateWorktree(repoPath, worktreePath, branchName string) error {
+	_, err := r.RunOutput(repoPath, "worktree", "add", worktreePath, branchName)
+	return err
+}
+
 func CreateWorktree(repoPath, worktreePath, branchName string) error {
-	_, err := RunOutput(repoPath, "worktree", "add", worktreePath, branchName)
+	return NewRunner().CreateWorktree(repoPath, worktreePath, branchName)
+}
+
+func (r Runner) RemoveWorktree(repoPath, worktreePath string) error {
+	_, err := r.RunOutput(repoPath, "worktree", "remove", "--force", worktreePath)
 	return err
 }
 
 func RemoveWorktree(repoPath, worktreePath string) error {
-	_, err := RunOutput(repoPath, "worktree", "remove", "--force", worktreePath)
-	return err
+	return NewRunner().RemoveWorktree(repoPath, worktreePath)
 }
 
+// SetupSession creates a session's branch and worktree, optionally fetching
+// origin first. It runs several git subprocesses (fetch → ref check → branch →
+// worktree add), so it pins one Runner for the whole operation to stay
+// generation-coherent if a [tools] reload swaps the git executable mid-setup
+// (#1287).
 func SetupSession(ctx context.Context, repoPath, worktreePath, branchName, baseBranch string, fetch bool) error {
-	if fetch && HasRemote(repoPath, "origin") {
-		if err := FetchOriginContext(ctx, repoPath); err != nil {
+	r := NewRunner()
+
+	if fetch && r.HasRemote(repoPath, "origin") {
+		if err := r.FetchOriginContext(ctx, repoPath); err != nil {
 			return fmt.Errorf("fetch: %w", err)
 		}
 	}
 
 	startRef := "origin/" + baseBranch
-	if !RefExists(repoPath, startRef) {
+	if !r.RefExists(repoPath, startRef) {
 		startRef = baseBranch
 	}
 
-	if err := CreateBranch(repoPath, branchName, startRef); err != nil {
+	if err := r.CreateBranch(repoPath, branchName, startRef); err != nil {
 		return fmt.Errorf("create branch: %w", err)
 	}
 
-	if err := CreateWorktree(repoPath, worktreePath, branchName); err != nil {
-		_ = DeleteBranch(repoPath, branchName)
+	if err := r.CreateWorktree(repoPath, worktreePath, branchName); err != nil {
+		_ = r.DeleteBranch(repoPath, branchName)
 		return fmt.Errorf("create worktree: %w", err)
 	}
 
 	return nil
 }
 
-func WorktreeGitDirs(worktreePath string) (gitDir, commonDir string, err error) {
-	gitDir, err = RunOutput(worktreePath, "rev-parse", "--absolute-git-dir")
+func (r Runner) WorktreeGitDirs(worktreePath string) (gitDir, commonDir string, err error) {
+	gitDir, err = r.RunOutput(worktreePath, "rev-parse", "--absolute-git-dir")
 	if err != nil {
 		return "", "", fmt.Errorf("resolve git dir: %w", err)
 	}
 
-	commonDir, err = RunOutput(worktreePath, "rev-parse", "--git-common-dir")
+	commonDir, err = r.RunOutput(worktreePath, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return "", "", fmt.Errorf("resolve git common dir: %w", err)
 	}
@@ -57,13 +72,21 @@ func WorktreeGitDirs(worktreePath string) (gitDir, commonDir string, err error) 
 	return gitDir, commonDir, nil
 }
 
-func DiscoverDefaultBranchOrHEAD(repoPath string) (string, error) {
-	branch, err := DiscoverDefaultBranch(repoPath)
+func WorktreeGitDirs(worktreePath string) (gitDir, commonDir string, err error) {
+	return NewRunner().WorktreeGitDirs(worktreePath)
+}
+
+// DiscoverDefaultBranchOrHEAD resolves the default branch, falling back to the
+// current HEAD's short name. Both the primary discovery and the HEAD fallback
+// run on one pinned Runner so the whole operation — including the fallback —
+// stays on a single tools generation (#1287).
+func (r Runner) DiscoverDefaultBranchOrHEAD(repoPath string) (string, error) {
+	branch, err := r.DiscoverDefaultBranch(repoPath)
 	if err == nil {
 		return branch, nil
 	}
 
-	out, headErr := RunOutput(repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+	out, headErr := r.RunOutput(repoPath, "rev-parse", "--abbrev-ref", "HEAD")
 	if headErr != nil || out == "HEAD" {
 		return "", err
 	}
@@ -71,9 +94,17 @@ func DiscoverDefaultBranchOrHEAD(repoPath string) (string, error) {
 	return out, nil
 }
 
-func PruneWorktrees(repoPath string) error {
-	_, err := RunOutput(repoPath, "worktree", "prune")
+func DiscoverDefaultBranchOrHEAD(repoPath string) (string, error) {
+	return NewRunner().DiscoverDefaultBranchOrHEAD(repoPath)
+}
+
+func (r Runner) PruneWorktrees(repoPath string) error {
+	_, err := r.RunOutput(repoPath, "worktree", "prune")
 	return err
+}
+
+func PruneWorktrees(repoPath string) error {
+	return NewRunner().PruneWorktrees(repoPath)
 }
 
 func RepoRootFromWorktree(worktreePath string) (string, error) {
@@ -105,8 +136,8 @@ func resolvePath(p string) string {
 // entry), so teardown never deletes a directory graith doesn't own. Detection
 // is based on the stable `--porcelain` listing rather than git's error text, so
 // it is independent of git's locale and message wording.
-func IsRegisteredWorktree(repoPath, worktreePath string) bool {
-	out, err := RunOutput(repoPath, "worktree", "list", "--porcelain")
+func (r Runner) IsRegisteredWorktree(repoPath, worktreePath string) bool {
+	out, err := r.RunOutput(repoPath, "worktree", "list", "--porcelain")
 	if err != nil {
 		return false
 	}
@@ -123,6 +154,10 @@ func IsRegisteredWorktree(repoPath, worktreePath string) bool {
 	return false
 }
 
+func IsRegisteredWorktree(repoPath, worktreePath string) bool {
+	return NewRunner().IsRegisteredWorktree(repoPath, worktreePath)
+}
+
 // TeardownSession removes a session's worktree and branch. It is idempotent: a
 // missing or broken worktree is treated as already-removed and never blocks
 // dropping the session. `git worktree remove --force` fails with exit 128 when
@@ -134,12 +169,17 @@ func IsRegisteredWorktree(repoPath, worktreePath string) bool {
 // pointing somewhere graith doesn't own — is surfaced so the session is kept
 // for retry rather than dropped (and nothing unowned is deleted).
 func TeardownSession(repoPath, worktreePath, branchName string) error {
+	// Pin one Runner for the whole teardown (remove worktree → prune → delete
+	// branch) so a mid-teardown [tools] reload can't split it across executables
+	// (#1287).
+	r := NewRunner()
+
 	var errs []error
 
 	switch _, statErr := os.Stat(worktreePath); {
 	case statErr == nil:
-		if err := RemoveWorktree(repoPath, worktreePath); err != nil {
-			if IsRegisteredWorktree(repoPath, worktreePath) {
+		if err := r.RemoveWorktree(repoPath, worktreePath); err != nil {
+			if r.IsRegisteredWorktree(repoPath, worktreePath) {
 				// graith owns this worktree but git can't cleanly remove it
 				// (broken .git link, etc). Remove the directory ourselves and
 				// prune the now-stale registration.
@@ -147,20 +187,20 @@ func TeardownSession(repoPath, worktreePath, branchName string) error {
 					errs = append(errs, fmt.Errorf("remove worktree: %w (git worktree remove: %w)", rmErr, err))
 				}
 
-				_ = PruneWorktrees(repoPath)
+				_ = r.PruneWorktrees(repoPath)
 			} else {
 				errs = append(errs, fmt.Errorf("remove worktree: %w", err))
 			}
 		}
 	case errors.Is(statErr, os.ErrNotExist):
 		// Worktree directory already gone; drop the stale registration.
-		_ = PruneWorktrees(repoPath)
+		_ = r.PruneWorktrees(repoPath)
 	default:
 		errs = append(errs, fmt.Errorf("stat worktree: %w", statErr))
 	}
 
-	if branchName != "" && RefExists(repoPath, branchName) {
-		if err := DeleteBranch(repoPath, branchName); err != nil {
+	if branchName != "" && r.RefExists(repoPath, branchName) {
+		if err := r.DeleteBranch(repoPath, branchName); err != nil {
 			errs = append(errs, fmt.Errorf("delete branch: %w", err))
 		}
 	}

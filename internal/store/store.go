@@ -5,14 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/d0ugal/graith/internal/atomicfile"
-	"github.com/d0ugal/graith/internal/tools"
+	"github.com/d0ugal/graith/internal/git"
 )
 
 // Entry represents a document in the store.
@@ -74,29 +73,26 @@ func Init(storePath string) error {
 // commit); resolving tools.Git() independently for each one let a config reload
 // that swaps the executable land between subcommands, running e.g. `add`
 // through wrapper A and `commit` through wrapper B — a within-operation
-// generation split. Snapshotting the executable once (newGitRunner) and
-// threading it through every subprocess keeps the whole operation on one
-// generation, and a subsequent operation picks up the new one wholesale (#1287).
+// generation split. It wraps the shared, pinned git.Runner (issue #1287) so the
+// store and the daemon's git-pull/username paths share one generation-coherence
+// mechanism; newGitRunner snapshots the executable once for the operation.
 type gitRunner struct {
-	bin string
+	r   git.Runner
 	dir string
 }
 
-// newGitRunner resolves the git executable once, capturing the current tools
-// generation for the operation about to run.
+// newGitRunner captures the current tools generation for the operation about to
+// run via the shared git.Runner.
 func newGitRunner(dir string) gitRunner {
-	return gitRunner{bin: tools.Git(), dir: dir}
+	return gitRunner{r: git.NewRunner(), dir: dir}
 }
 
 // run executes git with the given args using the pinned executable, returning
-// combined output on failure.
+// the git stderr on failure.
 func (g gitRunner) run(args ...string) error {
-	cmd := exec.Command(g.bin, args...)
-	cmd.Dir = g.dir
-
-	out, err := cmd.CombinedOutput()
+	_, stderr, err := g.r.Run(g.dir, args...)
 	if err != nil {
-		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("%w: %s", err, stderr)
 	}
 
 	return nil

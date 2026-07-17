@@ -13,7 +13,180 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/testutil"
+	"github.com/d0ugal/graith/internal/tools"
 )
+
+// TestPullIfCleanPinsToolGenerationAcrossReload is the #1287 git-pull A/B
+// regression: a single pull runs many git subprocesses (rev-parse, symbolic-ref,
+// fetch, merge-base, merge). They must all run against one resolved git
+// generation. This configures wrapper A, starts a pull whose `fetch` blocks,
+// reloads the tools registry to wrapper B mid-operation, then releases. The
+// whole pull must stay on A; a subsequent pull must run entirely on B.
+func TestPullIfCleanPinsToolGenerationAcrossReload(t *testing.T) {
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not found on PATH")
+	}
+
+	bareDir, cloneDir := setupTestRepo(t)
+	advanceRemote(t, bareDir, cloneDir)
+
+	t.Cleanup(tools.Reset)
+
+	binDir := t.TempDir()
+	logPath := filepath.Join(binDir, "calls.log")
+	releasePath := filepath.Join(binDir, "release")
+
+	wrapperA := writePullGitWrapper(t, binDir, "gitA", "A", realGit, logPath, releasePath)
+	wrapperB := writePullGitWrapper(t, binDir, "gitB", "B", realGit, logPath, "")
+
+	sm := newTestSM(t)
+
+	tools.Configure(tools.Config{Git: wrapperA})
+
+	pullErr := make(chan error, 1)
+
+	go func() {
+		_, err := sm.pullIfClean(context.Background(), cloneDir)
+		pullErr <- err
+	}()
+
+	// Wait until the blocking fetch has started, proving the operation pinned A.
+	waitForLogContains(t, logPath, " fetch")
+
+	// An accepted reload swaps the git executable mid-pull.
+	tools.Configure(tools.Config{Git: wrapperB})
+
+	if err := os.WriteFile(releasePath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-pullErr:
+		if err != nil {
+			t.Fatalf("first pull: %v", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("first pull did not complete after release")
+	}
+
+	op1 := readNonEmptyLines(t, logPath)
+	if len(op1) == 0 {
+		t.Fatal("first pull ran no git subcommands")
+	}
+
+	sawFetch := false
+
+	for _, line := range op1 {
+		if !strings.HasPrefix(line, "A ") {
+			t.Fatalf("first pull ran a subcommand on the wrong generation: %q (the pull must stay entirely on A across the reload)", line)
+		}
+
+		if strings.Contains(line, " fetch") {
+			sawFetch = true
+		}
+	}
+
+	if !sawFetch {
+		t.Fatal("first pull never reached the fetch subcommand; the test did not exercise the reload window")
+	}
+
+	// A fresh pull picks up the new generation wholesale — every subcommand on B.
+	if err := os.Truncate(logPath, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	// Advance the remote again with distinct content so the second pull has a
+	// real fast-forward to perform (gitRun uses the real git, not the wrappers).
+	secondClone := filepath.Join(t.TempDir(), "advance2")
+	gitRun(t, "", "clone", bareDir, secondClone)
+
+	if err := os.WriteFile(filepath.Join(secondClone, "second-advance.txt"), []byte("second generation content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	gitRun(t, secondClone, "add", ".")
+	gitRun(t, secondClone, "commit", "-m", "second advance")
+	gitRun(t, secondClone, "push", "origin", "main")
+
+	if _, err := sm.pullIfClean(context.Background(), cloneDir); err != nil {
+		t.Fatalf("second pull: %v", err)
+	}
+
+	op2 := readNonEmptyLines(t, logPath)
+	if len(op2) == 0 {
+		t.Fatal("second pull ran no git subcommands")
+	}
+
+	for _, line := range op2 {
+		if !strings.HasPrefix(line, "B ") {
+			t.Fatalf("second pull ran a subcommand on the old generation: %q (a new operation must run entirely on B)", line)
+		}
+	}
+}
+
+// writePullGitWrapper writes an executable git wrapper that logs "<tag> <args>"
+// and, when releasePath is non-empty, blocks on any `fetch` subcommand until
+// releasePath exists, then execs the real git so the pull still succeeds.
+func writePullGitWrapper(t *testing.T, dir, name, tag, realGit, logPath, releasePath string) string {
+	t.Helper()
+
+	var block string
+	if releasePath != "" {
+		block = "for a in \"$@\"; do\n" +
+			"  if [ \"$a\" = fetch ]; then\n" +
+			"    while [ ! -e '" + releasePath + "' ]; do sleep 0.02; done\n" +
+			"    break\n" +
+			"  fi\n" +
+			"done\n"
+	}
+
+	script := "#!/bin/sh\n" +
+		"printf '" + tag + " %s\\n' \"$*\" >> '" + logPath + "'\n" +
+		block +
+		"exec '" + realGit + "' \"$@\"\n"
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	return path
+}
+
+func waitForLogContains(t *testing.T, logPath, want string) {
+	t.Helper()
+
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile(logPath); err == nil && strings.Contains(string(data), want) {
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("log %q did not contain %q in time", logPath, want)
+}
+
+func readNonEmptyLines(t *testing.T, path string) []string {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var lines []string
+
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+
+	return lines
+}
 
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
@@ -531,7 +704,7 @@ func TestResolveUpstream_Cov(t *testing.T) {
 	// A clone tracks origin/main, so resolveUpstream reports the remote and ref.
 	_, cloneDir := setupTestRepo(t)
 
-	remote, ref := resolveUpstream(context.Background(), cloneDir, "main")
+	remote, ref := resolveUpstream(context.Background(), git.NewRunner(), cloneDir, "main")
 	if remote != "origin" {
 		t.Errorf("expected remote 'origin', got %q", remote)
 	}
@@ -544,7 +717,7 @@ func TestResolveUpstream_Cov(t *testing.T) {
 	// back to ("origin", "").
 	gitRun(t, cloneDir, "checkout", "-b", "canny-feature")
 
-	remote, ref = resolveUpstream(context.Background(), cloneDir, "canny-feature")
+	remote, ref = resolveUpstream(context.Background(), git.NewRunner(), cloneDir, "canny-feature")
 	if remote != "origin" || ref != "" {
 		t.Errorf("untracked branch with origin should be ('origin',''), got (%q,%q)", remote, ref)
 	}
@@ -554,7 +727,7 @@ func TestResolveUpstream_Cov(t *testing.T) {
 	gitRun(t, "", "init", "--initial-branch=main", local)
 	gitRun(t, local, "commit", "--allow-empty", "-m", "initial")
 
-	remote, ref = resolveUpstream(context.Background(), local, "main")
+	remote, ref = resolveUpstream(context.Background(), git.NewRunner(), local, "main")
 	if remote != "" || ref != "" {
 		t.Errorf("repo with no remote should be ('',''), got (%q,%q)", remote, ref)
 	}

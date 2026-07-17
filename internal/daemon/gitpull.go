@@ -106,7 +106,14 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 	// merge timeouts can never race a concurrent applyConfig (issue #1287).
 	cfg := sm.Config()
 
-	isBare, err := git.RunOutputContext(ctx, repoPath, "rev-parse", "--is-bare-repository")
+	// Pin the git executable once for the whole pull so a config reload that
+	// swaps the [tools] git binary between subcommands can't split one pull
+	// across two executables (rev-parse on A, merge on B). Every git subprocess
+	// below — including resolveUpstream and DiscoverDefaultBranch — runs on this
+	// one Runner (issue #1287).
+	r := git.NewRunner()
+
+	isBare, err := r.RunOutputContext(ctx, repoPath, "rev-parse", "--is-bare-repository")
 	if err != nil {
 		return false, fmt.Errorf("checking bare: %w", err)
 	}
@@ -116,7 +123,7 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, nil
 	}
 
-	gitDir, err := git.RunOutputContext(ctx, repoPath, "rev-parse", "--git-dir")
+	gitDir, err := r.RunOutputContext(ctx, repoPath, "rev-parse", "--git-dir")
 	if err != nil {
 		return false, fmt.Errorf("resolving git dir: %w", err)
 	}
@@ -130,7 +137,7 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, nil
 	}
 
-	branch, _, err := git.RunContext(ctx, repoPath, "symbolic-ref", "-q", "--short", "HEAD")
+	branch, _, err := r.RunContext(ctx, repoPath, "symbolic-ref", "-q", "--short", "HEAD")
 	if err != nil {
 		sm.log.Debug("git-pull: skipping detached HEAD", "repo", repoPath)
 		return false, nil
@@ -142,7 +149,7 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, nil
 	}
 
-	defaultBranch, err := git.DiscoverDefaultBranch(repoPath)
+	defaultBranch, err := r.DiscoverDefaultBranch(repoPath)
 	if err != nil {
 		sm.log.Warn("git-pull: cannot determine default branch", "repo", repoPath, "err", err)
 		return false, nil
@@ -158,13 +165,13 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, nil
 	}
 
-	remote, upstreamRef := resolveUpstream(ctx, repoPath, branch)
+	remote, upstreamRef := resolveUpstream(ctx, r, repoPath, branch)
 	if remote == "" {
 		sm.log.Debug("git-pull: skipping repo with no upstream", "repo", repoPath)
 		return false, nil
 	}
 
-	dirty, err := git.HasUncommittedChanges(repoPath)
+	dirty, err := r.HasUncommittedChanges(repoPath)
 	if err != nil {
 		return false, fmt.Errorf("checking dirty state: %w", err)
 	}
@@ -174,7 +181,7 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, nil
 	}
 
-	oldHead, err := git.RunOutputContext(ctx, repoPath, "rev-parse", "--short", "HEAD")
+	oldHead, err := r.RunOutputContext(ctx, repoPath, "rev-parse", "--short", "HEAD")
 	if err != nil {
 		return false, fmt.Errorf("capturing old HEAD: %w", err)
 	}
@@ -182,7 +189,7 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 	fetchCtx, fetchCancel := context.WithTimeout(ctx, cfg.Git.FetchTimeoutDuration())
 	defer fetchCancel()
 
-	_, fetchStderr, err := git.RunContextEnv(fetchCtx, repoPath, gitNoPromptEnv, "-c", "core.hooksPath=/dev/null", "fetch", "--", remote)
+	_, fetchStderr, err := r.RunContextEnv(fetchCtx, repoPath, gitNoPromptEnv, "-c", "core.hooksPath=/dev/null", "fetch", "--", remote)
 	if err != nil {
 		return false, fmt.Errorf("fetching %s: %w (stderr: %s)", remote, err, fetchStderr)
 	}
@@ -192,17 +199,17 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		mergeTarget = remote + "/" + branch
 	}
 
-	if !git.RefExists(repoPath, mergeTarget) {
+	if !r.RefExists(repoPath, mergeTarget) {
 		sm.log.Debug("git-pull: remote tracking ref missing after fetch", "repo", repoPath, "ref", mergeTarget)
 		return false, nil
 	}
 
-	headRev, err := git.RunOutputContext(ctx, repoPath, "rev-parse", "HEAD")
+	headRev, err := r.RunOutputContext(ctx, repoPath, "rev-parse", "HEAD")
 	if err != nil {
 		return false, fmt.Errorf("rev-parse HEAD: %w", err)
 	}
 
-	remoteRev, err := git.RunOutputContext(ctx, repoPath, "rev-parse", mergeTarget)
+	remoteRev, err := r.RunOutputContext(ctx, repoPath, "rev-parse", mergeTarget)
 	if err != nil {
 		return false, fmt.Errorf("rev-parse %s: %w", mergeTarget, err)
 	}
@@ -212,8 +219,8 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, nil
 	}
 
-	if !git.RunCheck(repoPath, "merge-base", "--is-ancestor", "HEAD", mergeTarget) {
-		if git.RunCheck(repoPath, "merge-base", "--is-ancestor", mergeTarget, "HEAD") {
+	if !r.RunCheck(repoPath, "merge-base", "--is-ancestor", "HEAD", mergeTarget) {
+		if r.RunCheck(repoPath, "merge-base", "--is-ancestor", mergeTarget, "HEAD") {
 			sm.log.Debug("git-pull: local ahead of remote", "repo", repoPath)
 		} else {
 			sm.log.Debug("git-pull: branches diverged", "repo", repoPath)
@@ -222,7 +229,7 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, nil
 	}
 
-	dirty, err = git.HasUncommittedChanges(repoPath)
+	dirty, err = r.HasUncommittedChanges(repoPath)
 	if err != nil {
 		return false, fmt.Errorf("re-checking dirty state: %w", err)
 	}
@@ -237,7 +244,7 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 		return false, nil
 	}
 
-	currentBranch, _, err := git.RunContext(ctx, repoPath, "symbolic-ref", "-q", "--short", "HEAD")
+	currentBranch, _, err := r.RunContext(ctx, repoPath, "symbolic-ref", "-q", "--short", "HEAD")
 	if err != nil || strings.TrimSpace(currentBranch) != branch {
 		sm.log.Debug("git-pull: skipping repo whose branch changed during fetch", "repo", repoPath)
 		return false, nil
@@ -251,12 +258,12 @@ func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (boo
 	mergeCtx, mergeCancel := context.WithTimeout(ctx, cfg.Git.MergeTimeoutDuration())
 	defer mergeCancel()
 
-	_, stderr, err := git.RunContextEnv(mergeCtx, repoPath, gitNoPromptEnv, "-c", "core.hooksPath=/dev/null", "merge", "--ff-only", "--quiet", "--", mergeTarget)
+	_, stderr, err := r.RunContextEnv(mergeCtx, repoPath, gitNoPromptEnv, "-c", "core.hooksPath=/dev/null", "merge", "--ff-only", "--quiet", "--", mergeTarget)
 	if err != nil {
 		return false, fmt.Errorf("ff-only merge: %w (stderr: %s)", err, stderr)
 	}
 
-	newHead, _ := git.RunOutputContext(ctx, repoPath, "rev-parse", "--short", "HEAD")
+	newHead, _ := r.RunOutputContext(ctx, repoPath, "rev-parse", "--short", "HEAD")
 	sm.log.Info("git-pull: updated", "repo", repoPath, "old", oldHead, "new", newHead)
 
 	return true, nil
@@ -319,8 +326,8 @@ func (sm *SessionManager) hasBlockingSessionForRepo(repoPath, defaultBranch stri
 	return false
 }
 
-func resolveUpstream(ctx context.Context, repoPath, branch string) (remote string, upstreamRef string) {
-	out, err := git.RunOutputContext(ctx, repoPath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", branch+"@{upstream}")
+func resolveUpstream(ctx context.Context, r git.Runner, repoPath, branch string) (remote string, upstreamRef string) {
+	out, err := r.RunOutputContext(ctx, repoPath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", branch+"@{upstream}")
 	if err == nil && out != "" {
 		upstreamRef = out
 		if idx := strings.Index(out, "/"); idx > 0 {
@@ -330,7 +337,7 @@ func resolveUpstream(ctx context.Context, repoPath, branch string) (remote strin
 		return remote, upstreamRef
 	}
 
-	if git.HasRemote(repoPath, "origin") {
+	if r.HasRemote(repoPath, "origin") {
 		return "origin", ""
 	}
 

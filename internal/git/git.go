@@ -11,8 +11,38 @@ import (
 	"github.com/d0ugal/graith/internal/tools"
 )
 
-func Run(dir string, args ...string) (string, string, error) {
-	cmd := exec.Command(tools.Git(), args...)
+// Runner pins the git executable resolved from the tools registry at
+// construction. A single multi-step git operation (git-pull's
+// rev-parse→fetch→merge, username discovery, a store write) runs several git
+// subprocesses; resolving tools.Git() independently for each one lets a config
+// reload that swaps the executable land between subcommands, splitting one
+// operation across two binaries (#1287). Snapshot a Runner once with NewRunner
+// and thread it through every subprocess so the whole operation stays on one
+// tools generation, while a later operation picks up the new one wholesale.
+//
+// The package-level Run/RunOutput/… functions delegate to a freshly-resolved
+// Runner, preserving per-call resolution for one-shot callers.
+type Runner struct {
+	git string
+}
+
+// NewRunner snapshots the current git executable for one multi-step operation.
+func NewRunner() Runner {
+	return Runner{git: tools.Git()}
+}
+
+// bin returns the pinned executable, falling back to a live resolution for a
+// zero-value Runner so an accidentally-unpinned Runner still runs git.
+func (r Runner) bin() string {
+	if r.git == "" {
+		return tools.Git()
+	}
+
+	return r.git
+}
+
+func (r Runner) Run(dir string, args ...string) (string, string, error) {
+	cmd := exec.Command(r.bin(), args...)
 	cmd.Dir = dir
 
 	var stdout, stderr bytes.Buffer
@@ -24,8 +54,8 @@ func Run(dir string, args ...string) (string, string, error) {
 	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
 }
 
-func RunContext(ctx context.Context, dir string, args ...string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, tools.Git(), args...)
+func (r Runner) RunContext(ctx context.Context, dir string, args ...string) (string, string, error) {
+	cmd := exec.CommandContext(ctx, r.bin(), args...)
 	cmd.Dir = dir
 
 	var stdout, stderr bytes.Buffer
@@ -37,8 +67,8 @@ func RunContext(ctx context.Context, dir string, args ...string) (string, string
 	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
 }
 
-func RunContextEnv(ctx context.Context, dir string, env []string, args ...string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, tools.Git(), args...)
+func (r Runner) RunContextEnv(ctx context.Context, dir string, env []string, args ...string) (string, string, error) {
+	cmd := exec.CommandContext(ctx, r.bin(), args...)
 	cmd.Dir = dir
 
 	cmd.Env = append(os.Environ(), env...)
@@ -52,8 +82,8 @@ func RunContextEnv(ctx context.Context, dir string, env []string, args ...string
 	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
 }
 
-func RunOutput(dir string, args ...string) (string, error) {
-	stdout, stderr, err := Run(dir, args...)
+func (r Runner) RunOutput(dir string, args ...string) (string, error) {
+	stdout, stderr, err := r.Run(dir, args...)
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w\nstderr: %s", strings.Join(args, " "), err, stderr)
 	}
@@ -61,8 +91,8 @@ func RunOutput(dir string, args ...string) (string, error) {
 	return stdout, nil
 }
 
-func RunOutputContext(ctx context.Context, dir string, args ...string) (string, error) {
-	stdout, stderr, err := RunContext(ctx, dir, args...)
+func (r Runner) RunOutputContext(ctx context.Context, dir string, args ...string) (string, error) {
+	stdout, stderr, err := r.RunContext(ctx, dir, args...)
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w\nstderr: %s", strings.Join(args, " "), err, stderr)
 	}
@@ -70,23 +100,19 @@ func RunOutputContext(ctx context.Context, dir string, args ...string) (string, 
 	return stdout, nil
 }
 
-func RunCheck(dir string, args ...string) bool {
-	cmd := exec.Command(tools.Git(), args...)
+func (r Runner) RunCheck(dir string, args ...string) bool {
+	cmd := exec.Command(r.bin(), args...)
 	cmd.Dir = dir
 
 	return cmd.Run() == nil
 }
 
-func IsInsideGitRepo(dir string) bool {
-	return RunCheck(dir, "rev-parse", "--is-inside-work-tree")
+func (r Runner) RefExists(dir string, ref string) bool {
+	return r.RunCheck(dir, "rev-parse", "--verify", ref)
 }
 
-func RefExists(dir string, ref string) bool {
-	return RunCheck(dir, "rev-parse", "--verify", ref)
-}
-
-func HasRemote(dir string, name string) bool {
-	out, err := RunOutput(dir, "remote")
+func (r Runner) HasRemote(dir string, name string) bool {
+	out, err := r.RunOutput(dir, "remote")
 	if err != nil {
 		return false
 	}
@@ -100,13 +126,53 @@ func HasRemote(dir string, name string) bool {
 	return false
 }
 
-func HasUncommittedChanges(dir string) (bool, error) {
-	out, err := RunOutput(dir, "status", "--porcelain")
+func (r Runner) HasUncommittedChanges(dir string) (bool, error) {
+	out, err := r.RunOutput(dir, "status", "--porcelain")
 	if err != nil {
 		return false, err
 	}
 
 	return len(out) > 0, nil
+}
+
+func Run(dir string, args ...string) (string, string, error) {
+	return NewRunner().Run(dir, args...)
+}
+
+func RunContext(ctx context.Context, dir string, args ...string) (string, string, error) {
+	return NewRunner().RunContext(ctx, dir, args...)
+}
+
+func RunContextEnv(ctx context.Context, dir string, env []string, args ...string) (string, string, error) {
+	return NewRunner().RunContextEnv(ctx, dir, env, args...)
+}
+
+func RunOutput(dir string, args ...string) (string, error) {
+	return NewRunner().RunOutput(dir, args...)
+}
+
+func RunOutputContext(ctx context.Context, dir string, args ...string) (string, error) {
+	return NewRunner().RunOutputContext(ctx, dir, args...)
+}
+
+func RunCheck(dir string, args ...string) bool {
+	return NewRunner().RunCheck(dir, args...)
+}
+
+func IsInsideGitRepo(dir string) bool {
+	return RunCheck(dir, "rev-parse", "--is-inside-work-tree")
+}
+
+func RefExists(dir string, ref string) bool {
+	return NewRunner().RefExists(dir, ref)
+}
+
+func HasRemote(dir string, name string) bool {
+	return NewRunner().HasRemote(dir, name)
+}
+
+func HasUncommittedChanges(dir string) (bool, error) {
+	return NewRunner().HasUncommittedChanges(dir)
 }
 
 // UnpushedCommitCount returns the number of commits on HEAD that have not been
@@ -123,25 +189,29 @@ func HasUncommittedChanges(dir string) (bool, error) {
 // counting commits ahead of the base branch — everything that would be pushed.
 // The base ref itself may be stale without a fetch; a periodic fetch in the
 // daemon keeps it reasonably fresh.
-func UnpushedCommitCount(worktreePath, baseBranch string) (int, error) {
-	branch, err := RunOutput(worktreePath, "rev-parse", "--abbrev-ref", "HEAD")
+func (r Runner) UnpushedCommitCount(worktreePath, baseBranch string) (int, error) {
+	branch, err := r.RunOutput(worktreePath, "rev-parse", "--abbrev-ref", "HEAD")
 	if err == nil && branch != "" && branch != "HEAD" {
-		if trackingRef := "origin/" + branch; RefExists(worktreePath, trackingRef) {
-			return commitCount(worktreePath, trackingRef+"..HEAD")
+		if trackingRef := "origin/" + branch; r.RefExists(worktreePath, trackingRef) {
+			return r.commitCount(worktreePath, trackingRef+"..HEAD")
 		}
 	}
 
 	// Branch not pushed yet (no tracking ref): count commits ahead of the base.
 	baseRef := "origin/" + baseBranch
-	if !RefExists(worktreePath, baseRef) {
+	if !r.RefExists(worktreePath, baseRef) {
 		baseRef = baseBranch
 	}
 
-	return commitCount(worktreePath, baseRef+"..HEAD")
+	return r.commitCount(worktreePath, baseRef+"..HEAD")
 }
 
-func commitCount(worktreePath, revRange string) (int, error) {
-	out, err := RunOutput(worktreePath, "rev-list", "--count", revRange)
+func UnpushedCommitCount(worktreePath, baseBranch string) (int, error) {
+	return NewRunner().UnpushedCommitCount(worktreePath, baseBranch)
+}
+
+func (r Runner) commitCount(worktreePath, revRange string) (int, error) {
+	out, err := r.RunOutput(worktreePath, "rev-list", "--count", revRange)
 	if err != nil {
 		return 0, err
 	}
@@ -180,13 +250,13 @@ func DirtyFiles(dir string) ([]string, error) {
 	return strings.Split(out, "\n"), nil
 }
 
-func UnpushedCommitSummaries(worktreePath, baseBranch string) ([]string, error) {
+func (r Runner) UnpushedCommitSummaries(worktreePath, baseBranch string) ([]string, error) {
 	baseRef := "origin/" + baseBranch
-	if !RefExists(worktreePath, baseRef) {
+	if !r.RefExists(worktreePath, baseRef) {
 		baseRef = baseBranch
 	}
 
-	out, err := RunOutput(worktreePath, "log", "--oneline", baseRef+"..HEAD")
+	out, err := r.RunOutput(worktreePath, "log", "--oneline", baseRef+"..HEAD")
 	if err != nil {
 		return nil, err
 	}
@@ -196,6 +266,10 @@ func UnpushedCommitSummaries(worktreePath, baseBranch string) ([]string, error) 
 	}
 
 	return strings.Split(out, "\n"), nil
+}
+
+func UnpushedCommitSummaries(worktreePath, baseBranch string) ([]string, error) {
+	return NewRunner().UnpushedCommitSummaries(worktreePath, baseBranch)
 }
 
 func RepoRootPath(dir string) (string, error) {
