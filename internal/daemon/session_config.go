@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/d0ugal/graith/internal/agent/transcript"
 	"github.com/d0ugal/graith/internal/approvals"
@@ -120,6 +121,17 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 		sm.log.Info("config changed", "key", "launch.max_concurrent", "old", oldMax, "new", newMax)
 	}
 
+	// Push a changed [lifecycle] input_delay to every live PTY so `gr type` uses
+	// the new type-then-submit pause without a restart or resume (issue #1294).
+	// The resolved (validated, defaulted) duration is compared so an equivalent
+	// edit — e.g. "" -> "50ms", both the default — is a no-op rather than a churny
+	// re-apply. applyLiveInputDelay snapshots the drivers under the lock and calls
+	// each setter after releasing it, honouring the no-slow-work-under-sm.mu rule.
+	if oldDelay, newDelay := old.Lifecycle.InputDelayDuration(), newCfg.Lifecycle.InputDelayDuration(); oldDelay != newDelay {
+		sm.applyLiveInputDelay(newDelay)
+		sm.log.Info("config changed", "key", "lifecycle.input_delay", "old", oldDelay, "new", newDelay)
+	}
+
 	if old.Launch.StartupTimeout != newCfg.Launch.StartupTimeout {
 		sm.log.Info("config changed", "key", "launch.startup_timeout", "old", old.Launch.StartupTimeout, "new", newCfg.Launch.StartupTimeout)
 	}
@@ -185,6 +197,29 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) {
 				_ = sm.stopWithReason(orchID, StopReasonUser, "orchestrator-disabled")
 			}
 		}
+	}
+}
+
+// applyLiveInputDelay pushes a reloaded [lifecycle] input_delay to every live
+// session whose driver honours it (the PTY driver; headless has no submit pause,
+// see inputDelaySetter). It snapshots the drivers under sm.mu and then updates
+// them after releasing the lock, so the (lock-free, non-blocking) setter calls
+// never run while sm.mu is held. Each setter is atomic and does not race an
+// in-flight WriteInputAndSubmit — the new delay takes effect on the next submit.
+func (sm *SessionManager) applyLiveInputDelay(delay time.Duration) {
+	sm.mu.RLock()
+	setters := make([]inputDelaySetter, 0, len(sm.sessions))
+
+	for _, drv := range sm.sessions {
+		if s, ok := drv.(inputDelaySetter); ok {
+			setters = append(setters, s)
+		}
+	}
+
+	sm.mu.RUnlock()
+
+	for _, s := range setters {
+		s.SetInputDelay(delay)
 	}
 }
 

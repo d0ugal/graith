@@ -37,6 +37,73 @@ func TestSessionOptsInputDelayHonoured(t *testing.T) {
 	}
 }
 
+// TestSetInputDelayUpdatesLiveSubmit proves SetInputDelay changes the pause a
+// live session applies on its next WriteInputAndSubmit, so a reloaded
+// [lifecycle] input_delay takes effect without a restart (issue #1294). The
+// session starts with a tiny delay; after the setter raises it, the next submit
+// must be dominated by the new, larger delay.
+func TestSetInputDelayUpdatesLiveSubmit(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "test.log")
+
+	s, err := NewSession(SessionOpts{
+		ID: "thrawn", Command: "sh", Args: []string{"-c", "sleep 30"},
+		Dir: t.TempDir(), Rows: 24, Cols: 80,
+		LogPath: logPath, MaxLogSize: 1024 * 1024,
+		InputDelay: time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	// Baseline: the tiny construction-time delay must not dominate.
+	start := time.Now()
+
+	if err := s.WriteInputAndSubmit([]byte("croft")); err != nil {
+		t.Fatal(err)
+	}
+
+	if elapsed := time.Since(start); elapsed > 150*time.Millisecond {
+		t.Fatalf("baseline submit took %v with a 1ms delay, want well under 150ms", elapsed)
+	}
+
+	s.SetInputDelay(300 * time.Millisecond)
+
+	start = time.Now()
+
+	if err := s.WriteInputAndSubmit([]byte("bothy")); err != nil {
+		t.Fatal(err)
+	}
+
+	if elapsed := time.Since(start); elapsed < 250*time.Millisecond {
+		t.Fatalf("submit after SetInputDelay took %v, want >= ~300ms (updated delay not applied)", elapsed)
+	}
+}
+
+// TestSetInputDelayNonPositiveRestoresDefault proves a non-positive delay resets
+// the pause to the built-in typeInputDelay default, mirroring construction so a
+// reload that clears the policy can't leave a live session with a stale delay.
+func TestSetInputDelayNonPositiveRestoresDefault(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "test.log")
+
+	s, err := NewSession(SessionOpts{
+		ID: "strath", Command: "sh", Args: []string{"-c", "sleep 30"},
+		Dir: t.TempDir(), Rows: 24, Cols: 80,
+		LogPath: logPath, MaxLogSize: 1024 * 1024,
+		InputDelay: 300 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	s.SetInputDelay(0)
+
+	if got := time.Duration(s.inputDelay.Load()); got != typeInputDelay {
+		t.Fatalf("inputDelay after SetInputDelay(0) = %v, want the typeInputDelay default %v", got, typeInputDelay)
+	}
+}
+
 // TestSessionOptsInputDelayDefault proves an unset (zero) InputDelay falls back
 // to the built-in typeInputDelay rather than writing text and CR back to back.
 func TestSessionOptsInputDelayDefault(t *testing.T) {
@@ -53,8 +120,8 @@ func TestSessionOptsInputDelayDefault(t *testing.T) {
 	}
 	defer s.Close()
 
-	if s.inputDelay != typeInputDelay {
-		t.Fatalf("inputDelay = %v, want the typeInputDelay default %v", s.inputDelay, typeInputDelay)
+	if got := time.Duration(s.inputDelay.Load()); got != typeInputDelay {
+		t.Fatalf("inputDelay = %v, want the typeInputDelay default %v", got, typeInputDelay)
 	}
 }
 
