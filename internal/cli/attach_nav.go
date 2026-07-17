@@ -112,8 +112,31 @@ func reconnectLoop(
 	timeout, interval time.Duration,
 ) (reconnectConn, protocol.Envelope, error) {
 	deadline := now().Add(timeout)
-	for now().Before(deadline) {
-		sleep(interval)
+	for {
+		// Cap the pre-dial sleep to the remaining budget so a reconnect_interval
+		// larger than the aggregate reconnect_timeout can't overshoot the
+		// documented window (issue #1242). When no budget remains, stop.
+		remaining := deadline.Sub(now())
+		if remaining <= 0 {
+			break
+		}
+
+		nap := interval
+		if nap > remaining {
+			nap = remaining
+		}
+
+		sleep(nap)
+
+		// Re-check the budget after sleeping and stop BEFORE dialing once it is
+		// exhausted: a dial + handshake started at (or past) the aggregate
+		// deadline carries its own distinct dial/handshake budget and would run
+		// well beyond reconnect_timeout, still violating the aggregate cap
+		// (issue #1242). Every actual attempt therefore starts strictly before
+		// the deadline.
+		if !now().Before(deadline) {
+			break
+		}
 
 		c, err := dial()
 		if err != nil {
