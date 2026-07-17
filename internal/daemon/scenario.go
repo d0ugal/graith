@@ -622,7 +622,7 @@ func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.Scenario
 			SessionID: sessionIDs[j],
 			Role:      s.Role,
 			Repo:      repo,
-			Results:   manifestScenarioResults(scenarioID, msg.Name, sessionIDs[j], s),
+			Results:   sm.manifestScenarioResults(scenarioID, msg.Name, sessionIDs[j], s),
 		})
 	}
 
@@ -636,7 +636,7 @@ func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.Scenario
 			SessionID: sessionIDs[selfIndex],
 			Role:      self.Role,
 			Task:      self.Task,
-			Results:   manifestScenarioResults(scenarioID, msg.Name, sessionIDs[selfIndex], self),
+			Results:   sm.manifestScenarioResults(scenarioID, msg.Name, sessionIDs[selfIndex], self),
 		},
 		Siblings: siblings,
 		Orchestrator: scenarioManifestOrch{
@@ -646,7 +646,10 @@ func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.Scenario
 	}
 }
 
-func manifestScenarioResults(scenarioID, scenarioName, sessionID string, session protocol.ScenarioSessionInput) []scenarioManifestResult {
+func (sm *SessionManager) manifestScenarioResults(
+	scenarioID, scenarioName, sessionID string,
+	session protocol.ScenarioSessionInput,
+) []scenarioManifestResult {
 	if len(session.Results) == 0 {
 		return nil
 	}
@@ -657,6 +660,13 @@ func manifestScenarioResults(scenarioID, scenarioName, sessionID string, session
 			scenarioID, scenarioName, sessionID, session.Name, spec.Name, spec.Store,
 		)
 		if err != nil {
+			sm.log.Error("failed to render validated scenario result destination",
+				"scenario", scenarioName,
+				"session", session.Name,
+				"result", spec.Name,
+				"err", err,
+			)
+
 			continue
 		}
 

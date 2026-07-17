@@ -51,6 +51,7 @@ struct ScenarioDecodingTests {
         #expect(member.todoTotal == 3)
         #expect(member.blockedBy == ["canny"])
         #expect(member.isTodoComplete)
+        #expect(member.isComplete)
         #expect(member.shared == true)
         #expect(member.results.count == 1)
         #expect(member.results[0].name == "review")
@@ -91,6 +92,25 @@ struct ScenarioDecodingTests {
         #expect(!member.isTodoComplete)
         #expect(member.shared == nil)
         #expect(member.results.isEmpty)
+    }
+
+    @Test func requiredResultsGateMemberCompletion() {
+        let pending = ScenarioResultInfo(
+            name: "review", format: "markdown", destination: "scenarios/sc-a/results/review.md",
+            required: true, status: "pending")
+        let available = ScenarioResultInfo(
+            name: "review", format: "markdown", destination: "scenarios/sc-a/results/review.md",
+            required: true, status: "available")
+
+        let waiting = ScenarioSessionInfo(
+            name: "braw", sessionID: "s1", todoDone: 1, todoTotal: 1, results: [pending])
+        #expect(waiting.isTodoComplete)
+        #expect(!waiting.isComplete)
+
+        let resultOnly = ScenarioSessionInfo(
+            name: "canny", sessionID: "s2", results: [available])
+        #expect(!resultOnly.isTodoComplete)
+        #expect(resultOnly.isComplete)
     }
 }
 

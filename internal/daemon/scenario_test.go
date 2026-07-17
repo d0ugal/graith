@@ -873,6 +873,59 @@ func TestAddToScenarioCovSessionNameCollision(t *testing.T) {
 	}
 }
 
+func TestAddToScenarioRejectsResultDestinationCollision(t *testing.T) {
+	cfg := config.Default()
+	cfg.Sandbox.Enabled = false
+	cfg.Agents["claude"] = shAgent()
+	sm := newSMWithConfig(t, cfg)
+	repo := initTempGitRepo(t)
+
+	results, err := compileScenarioResults(
+		"sc-strath", "strath-neep", "braw-existing-id", "braw-existing",
+		[]protocol.ScenarioResultSpec{{
+			Name: "review", Format: "markdown", Store: "shared/review.md", Required: true,
+		}},
+		map[string]string{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sm.mu.Lock()
+	sm.state.Scenarios["sc-strath"] = &ScenarioState{
+		ID: "sc-strath", Name: "strath-neep",
+		SessionIDs: []string{"braw-existing-id"},
+		Sessions:   []ScenarioSession{{Name: "braw-existing", Results: results}},
+	}
+	sm.state.Sessions["braw-existing-id"] = &SessionState{
+		ID: "braw-existing-id", Name: "braw-existing", Status: StatusRunning,
+	}
+	sm.mu.Unlock()
+
+	_, err = sm.AddToScenario("strath-neep", protocol.ScenarioSessionInput{
+		Name: "canny-new", Repo: repo, Agent: "claude",
+		Results: []protocol.ScenarioResultSpec{{
+			Name: "facts", Format: "json", Store: "shared/review.md", Required: true,
+		}},
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "collides") {
+		t.Fatalf("error = %v, want result destination collision", err)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if got := len(sm.state.Scenarios["sc-strath"].Sessions); got != 1 {
+		t.Fatalf("scenario members = %d, want original member only", got)
+	}
+
+	for _, session := range sm.state.Sessions {
+		if session.Name == "canny-new" {
+			t.Fatalf("colliding member was not rolled back: %+v", session)
+		}
+	}
+}
+
 // --- StartScenario collision / preflight paths (return before Create) ---
 
 func startScenarioOrchestrator(t *testing.T) *SessionManager {

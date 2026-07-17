@@ -780,9 +780,19 @@ public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
         results = try c.decodeIfPresent([ScenarioResultInfo].self, forKey: .results) ?? []
     }
 
-    /// A member is complete when it has tracked todo work and all of it is done.
-    /// `todoTotal == 0` means "no tracked work" (not complete).
+    /// Whether all tracked todo work is done. `todoTotal == 0` means there is
+    /// no tracked todo work, so this todo-only predicate is false.
     public var isTodoComplete: Bool { todoTotal > 0 && todoDone == todoTotal }
+
+    /// Mirrors the daemon's member-completion contract: there must be tracked
+    /// todo work or a required result, all todos must be done, and every
+    /// required result must be available. Optional results never block.
+    public var isComplete: Bool {
+        let requiredResults = results.filter(\.required)
+        guard todoTotal > 0 || !requiredResults.isEmpty else { return false }
+        let todosComplete = todoTotal == 0 || todoDone == todoTotal
+        return todosComplete && requiredResults.allSatisfy { $0.status == "available" }
+    }
 }
 
 public struct ScenarioCompletionActionInfo: Codable, Sendable, Identifiable, Hashable {
