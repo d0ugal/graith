@@ -6999,3 +6999,60 @@ func TestDetectAgentStatusesGitBranchesCov2(t *testing.T) {
 		t.Errorf("AgentStatus = %q, want active (from hook report)", s.AgentStatus)
 	}
 }
+
+// TestDaemonHandshakeReportsAcceptedApprovalBound proves handshake_ok/auth_ok
+// carry the daemon's effective approval server bound from its accepted config
+// generation, so the approve-request hook uses that rather than on-disk values
+// (issue #1251).
+func TestDaemonHandshakeReportsAcceptedApprovalBound(t *testing.T) {
+	accepted := &config.Config{Approvals: config.Approvals{Timeout: "10m"}}
+	sm := newSMWithConfig(t, accepted)
+
+	wantMs := accepted.Approvals.ServerTimeoutDuration().Milliseconds()
+
+	if got := daemonHandshakeOk(sm).ApprovalServerTimeoutMs; got != wantMs {
+		t.Fatalf("handshake_ok approval bound = %d, want accepted %d", got, wantMs)
+	}
+}
+
+// TestRejectedReloadCannotChangeApprovalBound is the #1251 failed-reload
+// regression: a rejected daemon reload leaves shorter/invalid approval timeouts
+// on disk, but the daemon keeps serving its accepted generation. The value the
+// approve-request hook reads (handshake_ok) must therefore be unchanged, so a
+// rejected on-disk value can never shorten the helper's deadline into an early
+// fail-open.
+func TestRejectedReloadCannotChangeApprovalBound(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+
+	accepted := &config.Config{Approvals: config.Approvals{Timeout: "10m"}}
+	sm := newSMWithConfig(t, accepted)
+	sm.configFile = cfgPath
+
+	wantMs := accepted.Approvals.ServerTimeoutDuration().Milliseconds()
+	if got := daemonHandshakeOk(sm).ApprovalServerTimeoutMs; got != wantMs {
+		t.Fatalf("initial handshake approval bound = %d, want %d", got, wantMs)
+	}
+
+	// An incoherent (and much shorter) approvals config lands on disk: a backend
+	// execution timeout at/above the enclosing approval timeout — exactly the
+	// deadline-hierarchy contradiction reload validation must reject (#244/#1251).
+	invalid := "[approvals]\nbackend = \"command\"\ntimeout = \"3s\"\ncommand_timeout = \"5s\"\n"
+	if err := os.WriteFile(cfgPath, []byte(invalid), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := sm.ReloadConfig(); err == nil {
+		t.Fatal("expected the incoherent approvals reload to be rejected")
+	}
+
+	// The rejected on-disk value must not have changed the daemon-accepted bound
+	// the helper reads.
+	if got := daemonHandshakeOk(sm).ApprovalServerTimeoutMs; got != wantMs {
+		t.Fatalf("rejected reload changed the approval bound to %d, want unchanged %d", got, wantMs)
+	}
+
+	if got := sm.Config().Approvals.ServerTimeoutDuration().Milliseconds(); got != wantMs {
+		t.Fatalf("rejected reload changed the accepted ServerTimeoutDuration to %d, want %d", got, wantMs)
+	}
+}

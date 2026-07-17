@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/output"
@@ -596,6 +597,72 @@ func TestCheckApprovalsDeadlineHierarchyIsVisible(t *testing.T) {
 		if !strings.Contains(passed, want) {
 			t.Errorf("doctor deadline hierarchy %q missing %q", passed, want)
 		}
+	}
+}
+
+// TestCheckApprovalsWarnsOnDaemonOnDiskMismatch proves doctor surfaces the
+// daemon's effective (accepted-generation) approval bound and warns when the
+// on-disk config disagrees — the fingerprint of a rejected reload whose stale
+// on-disk values would otherwise be mistaken for the enforced policy (#1251).
+func TestCheckApprovalsWarnsOnDaemonOnDiskMismatch(t *testing.T) {
+	oldCfg, oldOut := cfg, out
+
+	t.Cleanup(func() { cfg, out = oldCfg, oldOut })
+
+	out = output.NewWithWriter(false, io.Discard)
+	cfg = &config.Config{}
+	cfg.Approvals = config.Approvals{
+		Backend:        "command",
+		Command:        "canny-approver",
+		Timeout:        "30s",
+		CommandTimeout: "5s",
+	}
+
+	dc := newDoctorContext()
+	// The live daemon enforces a different (longer) accepted bound than the 35s
+	// the on-disk config computes.
+	dc.probe = daemonProbe{reach: daemonReachOK, approvalServerTimeoutMs: (10 * time.Minute).Milliseconds()}
+	dc.checkApprovalsBackend()
+
+	warned := strings.Join(checkResults(dc, "warn"), "\n")
+	if !strings.Contains(warned, "daemon-enforced server bound is 10m0s") {
+		t.Errorf("expected a mismatch warning naming the daemon bound, got warns: %q", warned)
+	}
+
+	if !strings.Contains(warned, "rejected daemon reload") {
+		t.Errorf("mismatch warning should explain the rejected-reload cause, got: %q", warned)
+	}
+}
+
+// TestCheckApprovalsDaemonBoundMatchesOnDisk proves that when the daemon's
+// accepted bound agrees with the on-disk config, doctor reports the match rather
+// than a spurious warning.
+func TestCheckApprovalsDaemonBoundMatchesOnDisk(t *testing.T) {
+	oldCfg, oldOut := cfg, out
+
+	t.Cleanup(func() { cfg, out = oldCfg, oldOut })
+
+	out = output.NewWithWriter(false, io.Discard)
+	cfg = &config.Config{}
+	cfg.Approvals = config.Approvals{
+		Backend:        "command",
+		Command:        "canny-approver",
+		Timeout:        "30s",
+		CommandTimeout: "5s",
+	}
+
+	dc := newDoctorContext()
+	// Daemon reports exactly the on-disk-computed bound (30s + 5s = 35s).
+	dc.probe = daemonProbe{reach: daemonReachOK, approvalServerTimeoutMs: (35 * time.Second).Milliseconds()}
+	dc.checkApprovalsBackend()
+
+	if warned := checkResults(dc, "warn"); len(warned) != 0 {
+		t.Errorf("no mismatch warning expected when bounds agree, got: %v", warned)
+	}
+
+	passed := strings.Join(checkResults(dc, "ok"), "\n")
+	if !strings.Contains(passed, "daemon-enforced server bound 35s matches on-disk config") {
+		t.Errorf("expected a match confirmation, got: %q", passed)
 	}
 }
 

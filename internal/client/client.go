@@ -378,7 +378,18 @@ func ConnectForApproval(paths config.Paths, serverTimeout time.Duration) (*Clien
 		return nil, fmt.Errorf("protocol version mismatch: server=%s, client=%s; try: gr daemon restart", hsOk.Version, protocol.Version)
 	}
 
-	if err := conn.SetDeadline(time.Now().Add(ApprovalOperationTimeout(serverTimeout))); err != nil {
+	// Prefer the daemon's effective server-side approval bound from its ACCEPTED
+	// config generation over the caller's on-disk value: a rejected daemon reload
+	// can leave shorter timeouts on disk than the daemon actually enforces, and
+	// using those would end the helper before the daemon and trip the documented
+	// hook fail-open early (issue #1251). Fall back to the caller's value when the
+	// daemon doesn't report one (older daemon, or a non-positive bound).
+	effectiveServerTimeout := serverTimeout
+	if hsOk.ApprovalServerTimeoutMs > 0 {
+		effectiveServerTimeout = time.Duration(hsOk.ApprovalServerTimeoutMs) * time.Millisecond
+	}
+
+	if err := conn.SetDeadline(time.Now().Add(ApprovalOperationTimeout(effectiveServerTimeout))); err != nil {
 		c.Close()
 		return nil, fmt.Errorf("set approval operation deadline: %w", err)
 	}

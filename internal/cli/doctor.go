@@ -61,6 +61,11 @@ type doctorContext struct {
 	// might be worth measuring (orphaned files/worktrees, a legacy dir). When
 	// set and --disk was not passed, doctor recommends re-running with --disk.
 	suggestDisk bool
+
+	// probe holds the single daemon probe result so environment checks can read
+	// daemon-authoritative values (e.g. the effective approval bound, issue
+	// #1251) without re-dialing. Zero-valued when the daemon is unreachable.
+	probe daemonProbe
 }
 
 func newDoctorContext() *doctorContext {
@@ -111,6 +116,7 @@ var doctorCmd = &cobra.Command{
 		// "cannot verify" in a single place rather than producing a cascade of
 		// false failures across sections (issue #945).
 		probe := dc.probeDaemon()
+		dc.probe = probe
 		report.DaemonVersion = probe.daemonVersion
 
 		dc.checkVersion(probe)
@@ -189,6 +195,10 @@ type daemonProbe struct {
 	daemonVersion   string
 	diag            *protocol.DiagnosticsMsg
 	diagUnsupported bool // handshake ok but the daemon didn't return diagnostics
+	// approvalServerTimeoutMs is the daemon's effective server-side approval bound
+	// from its accepted config generation (issue #1251). Zero when the daemon is
+	// unreachable or predates the field.
+	approvalServerTimeoutMs int64
 }
 
 // classifyDialErr maps a socket dial error onto a reachability class. EPERM and
@@ -251,6 +261,7 @@ func (dc *doctorContext) probeDaemon() daemonProbe {
 
 		_ = protocol.DecodePayload(env, &hsOk)
 		probe.daemonVersion = hsOk.DaemonVersion
+		probe.approvalServerTimeoutMs = hsOk.ApprovalServerTimeoutMs
 	}
 
 	// Ask the daemon to gather diagnostics on the same connection. An older
@@ -600,6 +611,23 @@ func (dc *doctorContext) checkApprovalsBackend() {
 	} else {
 		dc.passf("environment", "Approvals deadlines: human wait/server bound %s < hook operation %s",
 			cfg.Approvals.ServerTimeoutDuration(), client.ApprovalOperationTimeout(cfg.Approvals.ServerTimeoutDuration()))
+	}
+
+	// The approve-request hook uses the DAEMON's effective approval bound, not the
+	// on-disk config (issue #1251). When a live daemon is reachable, report that
+	// authoritative value and warn if the on-disk config disagrees — the signature
+	// of a rejected reload whose shorter on-disk timeouts would otherwise be
+	// mistaken for the enforced policy.
+	if dc.probe.reach == daemonReachOK && dc.probe.approvalServerTimeoutMs > 0 {
+		daemonBound := time.Duration(dc.probe.approvalServerTimeoutMs) * time.Millisecond
+		if daemonBound != cfg.Approvals.ServerTimeoutDuration() {
+			dc.warnf("environment",
+				"Approvals: daemon-enforced server bound is %s (hook operation %s) but on-disk config computes %s — "+
+					"a rejected daemon reload left a stale value on disk; run `gr daemon reload` or restart to reconcile",
+				daemonBound, client.ApprovalOperationTimeout(daemonBound), cfg.Approvals.ServerTimeoutDuration())
+		} else {
+			dc.passf("environment", "Approvals: daemon-enforced server bound %s matches on-disk config", daemonBound)
+		}
 	}
 }
 

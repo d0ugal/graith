@@ -144,6 +144,8 @@ Both backend timeouts default to `5s` when unset. Each must be a positive durati
 
 The hook connection uses `[connection] handshake_timeout` only for its handshake. After `handshake_ok` it installs a fresh, nonzero operation deadline equal to the complete server bound plus one minute of response-delivery grace; this is separate from `dial_timeout`. A human-wait expiry is a daemon decision and blocks the tool with a reason naming that deadline. If the connection itself fails or its operation deadline expires, the longstanding hook-edge policy remains fail-open, but the allow result now includes a visible reason naming the failed phase instead of silently allowing.
 
+The server bound the hook uses comes from the **running daemon's accepted configuration**, reported in the handshake, not from the config file on disk. This matters after a *rejected* reload: an invalid `[approvals]` change (for example a `command_timeout` at or above `timeout`) is refused and the daemon keeps serving its previous, accepted values, but the shorter values may still be sitting in the file. Because the hook adopts the daemon-reported bound, those rejected on-disk values can never shorten the hook's deadline and trip the fail-open early. `gr doctor` reads the same daemon-reported bound and warns when the on-disk config disagrees with it, pointing at `gr daemon reload`/restart to reconcile.
+
 > **Upgrade note (v0.69.1):** the timeout hierarchy is validated fail-closed. A previously loadable command/localmost configuration with `timeout <= 5s` may now be rejected because the effective default backend timeout is `5s`. Raise `timeout` above `5s`, or explicitly choose a shorter `command_timeout` / `localmost_timeout`.
 
 ## Messages

@@ -39,10 +39,15 @@ public struct HandshakeMsg: Codable, Sendable {
 public struct HandshakeOkMsg: Codable, Sendable {
     public var version: String
     public var daemonVersion: String
+    // Optional: the daemon's effective server-side approval bound (ms) from its
+    // accepted config generation, used by the approve-request hook (issue #1251).
+    // GUI clients don't need it.
+    public var approvalServerTimeoutMs: Int?
 
     enum CodingKeys: String, CodingKey {
         case version
         case daemonVersion = "daemon_version"
+        case approvalServerTimeoutMs = "approval_server_timeout_ms"
     }
 }
 
