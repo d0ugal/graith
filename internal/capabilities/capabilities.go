@@ -406,6 +406,7 @@ func (m *Manifest) MatrixMarkdown() string {
 
 			for i, c := range notes {
 				fmt.Fprintf(&b, "<sup>%d</sup> %s:", i+1, c.Name)
+
 				if c.Notes != "" {
 					fmt.Fprintf(&b, " %s", c.Notes)
 				}
