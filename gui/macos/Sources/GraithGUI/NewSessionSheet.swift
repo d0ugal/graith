@@ -139,14 +139,17 @@ struct NewSessionSheet: View {
                                 .foregroundStyle(Theme.overlay0)
                         }
                     case .available:
-                        HStack(spacing: 8) {
+                        // Wrap so a large config-driven catalog or long custom
+                        // agent names stay reachable instead of clipping off the
+                        // fixed-width sheet edge (#1234).
+                        FlowLayout(spacing: 8, lineSpacing: 8) {
                             ForEach(agents, id: \.self) { a in
                                 AgentChip(name: a, isSelected: agent == a) {
                                     agent = a
                                 }
                             }
-                            Spacer()
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     case let .unavailable(reason):
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Agent catalog unavailable — the daemon will choose its default.")

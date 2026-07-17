@@ -1233,14 +1233,24 @@ struct MigrateSheet: View {
                 Text("Swap \u{201c}\(sessionName)\u{201d} to a different agent")
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(Theme.subtext0)
-                HStack(spacing: 8) {
-                    ForEach(agents, id: \.self) { a in
-                        AgentChip(name: a, isSelected: selectedAgent == a) {
-                            selectedAgent = a
+                // Wrap so a large catalog / long custom agent names stay
+                // reachable instead of clipping off the sheet edge (#1234).
+                // Unlike NewSessionSheet, this modal has no surrounding
+                // ScrollView, so bound the wrapped rows in their own scroll
+                // region: a many-row catalog scrolls here instead of growing
+                // the fixed-width modal past the screen and pushing the
+                // Cancel/Migrate buttons out of reach.
+                ScrollView(.vertical) {
+                    FlowLayout(spacing: 8, lineSpacing: 8) {
+                        ForEach(agents, id: \.self) { a in
+                            AgentChip(name: a, isSelected: selectedAgent == a) {
+                                selectedAgent = a
+                            }
                         }
                     }
-                    Spacer()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .frame(maxHeight: 220)
             }
             .padding(20)
 
