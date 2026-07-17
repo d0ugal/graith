@@ -428,6 +428,7 @@ func TestRenderPurgeDiagnostic(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
+
 			out = output.NewWithWriter(false, &buf)
 
 			dc := newDoctorContext()
@@ -467,6 +468,7 @@ func TestDoctorPlainOutputRendersPurgeDiagnostic(t *testing.T) {
 	})
 
 	dataDir := t.TempDir()
+
 	paths = config.Paths{
 		DataDir:        dataDir,
 		SocketPath:     filepath.Join(dataDir, "d.sock"),
@@ -489,6 +491,7 @@ func TestDoctorPlainOutputRendersPurgeDiagnostic(t *testing.T) {
 	daemonGCFetch = func(bool) ([]protocol.GCOrphanInfo, error) { return nil, nil }
 
 	var buf bytes.Buffer
+
 	out = output.NewWithWriter(false, &buf)
 
 	doctorDaemonProbe = func(*doctorContext) daemonProbe {
