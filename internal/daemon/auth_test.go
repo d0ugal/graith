@@ -482,6 +482,122 @@ func TestResolveAuth_RemoteGuestReadOnly(t *testing.T) {
 	}
 }
 
+func TestResolveAuth_RequirePairingReloadSemantics(t *testing.T) {
+	sm := newPairingSM(t)
+	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
+	now := time.Now()
+
+	rid, _, _, err := sm.AddPendingPairing("bairn", testPubKey(t), id, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deviceID, token, err := sm.ApprovePairing(rid, false, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	origin := ConnOrigin{Remote: true, Identity: &id}
+
+	resolveRole := func() authRole {
+		t.Helper()
+
+		sm.mu.RLock()
+		defer sm.mu.RUnlock()
+
+		auth, err := resolveAuth(sm, token, origin, deviceID)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return auth.role
+	}
+
+	if got := resolveRole(); got != roleRemoteHuman {
+		t.Fatalf("initial role = %d, want remote human", got)
+	}
+
+	downgraded := *sm.Config()
+	downgraded.Remote = cloneRemoteConfig(sm.Config().Remote)
+
+	downgraded.Remote.RequirePairing = false
+	if err := sm.applyConfig(&downgraded); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := resolveRole(); got != roleRemoteGuest {
+		t.Fatalf("role after require_pairing=false = %d, want guest", got)
+	}
+
+	restored := downgraded
+	restored.Remote = cloneRemoteConfig(downgraded.Remote)
+
+	restored.Remote.RequirePairing = true
+	if err := sm.applyConfig(&restored); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := resolveRole(); got != roleRemoteHuman {
+		t.Fatalf("full device role after require_pairing restore = %d, want remote human", got)
+	}
+
+	// Approval-time ReadOnly is persistent: enabling pairing is not an implicit
+	// privilege grant to a device originally approved as a guest.
+	rid, _, _, err = sm.AddPendingPairing("croft", testPubKey(t), id, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	guestID, guestToken, err := sm.ApprovePairing(rid, true, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sm.mu.RLock()
+	guestAuth, err := resolveAuth(sm, guestToken, origin, guestID)
+	sm.mu.RUnlock()
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if guestAuth.role != roleRemoteGuest {
+		t.Fatalf("approval-time guest role after require_pairing=true = %d, want guest", guestAuth.role)
+	}
+}
+
+func TestRemoteDataAllowedUsesLivePolicyAndPairingRole(t *testing.T) {
+	sm := newPairingSM(t)
+	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}
+
+	rid, _, _, err := sm.AddPendingPairing("bairn", testPubKey(t), id, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deviceID, _, err := sm.ApprovePairing(rid, false, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	origin := ConnOrigin{Remote: true, Identity: &id}
+	if !sm.remoteDataAllowed(origin, deviceID) {
+		t.Fatal("full paired device should be allowed to send input")
+	}
+
+	downgraded := *sm.Config()
+	downgraded.Remote = cloneRemoteConfig(sm.Config().Remote)
+
+	downgraded.Remote.RequirePairing = false
+	if err := sm.applyConfig(&downgraded); err != nil {
+		t.Fatal(err)
+	}
+
+	if sm.remoteDataAllowed(origin, deviceID) {
+		t.Fatal("require_pairing=false must immediately block existing device input")
+	}
+}
+
 func TestResolveAuth_RemoteIdentityMismatchIsRoleNone(t *testing.T) {
 	sm := newPairingSM(t)
 	id := TailnetIdentity{User: "speir@example.com", Node: "ben"}

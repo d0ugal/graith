@@ -577,7 +577,8 @@ type RemoteConfig struct {
 	// Mode selects the transport: "tsnet" (embedded Tailscale via tsnet) or
 	// "interface" (bind the host's existing tailnet interface IP).
 	Mode string `toml:"mode"`
-	// Hostname is the tsnet node name / MagicDNS label (tsnet mode).
+	// Hostname is the tsnet node name / MagicDNS label and the remote TLS
+	// certificate name.
 	Hostname string `toml:"hostname"`
 	// Port is the TCP port the listener binds.
 	Port int `toml:"port"`

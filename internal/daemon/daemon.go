@@ -66,7 +66,9 @@ type SessionManager struct {
 	pendingPairings   map[string]*pendingPairing     // requestID → pending device pairing (in-memory; not persisted)
 	pairWaiters       map[string]chan pairApproval   // requestID → waiter for a blocked pair_request connection
 	approvalSubs      map[net.Conn]func(string, any) // conn → sendControl for approval subscribers (no attach)
-	remoteTLSPin      string                         // SPKI pin of the remote listener's cert (set once at startup; "" if remote disabled)
+	remoteTLSPin      string                         // SPKI pin of the active remote generation; guarded by mu
+	remoteGeneration  uint64                         // active remote runtime generation; 0 means no production listener
+	remote            *remoteController              // owned under configReloadMu; nil for bare SessionManagers used outside Run
 	deviceTokenIndex  map[string]string              // client-token HMAC → device ID (reverse lookup)
 	connsByDevice     map[string][]net.Conn          // device ID → live remote connections (for revocation)
 	pairReqTimes      []time.Time                    // recent pair_request timestamps (rate limiting)

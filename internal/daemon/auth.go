@@ -79,8 +79,16 @@ func (ac authContext) describe() string {
 // connection (poppedDeviceID, empty until a valid auth_proof).
 // Must be called with sm.mu at least RLocked.
 func resolveAuth(sm *SessionManager, token string, origin ConnOrigin, poppedDeviceID string) (authContext, error) {
-	// A session token authenticates an agent regardless of origin; the
-	// self/descendant limits are enforced downstream.
+	// A remote credential is meaningful only while the connection still belongs
+	// to the active listener generation and its WhoIs identity remains allowed by
+	// the live config. HandleConnection checks the same predicate before every
+	// frame; keeping it here makes direct authorization callers fail closed too.
+	if origin.Remote && !sm.remoteOriginAllowedLocked(origin) {
+		return authContext{role: roleNone, origin: origin}, nil
+	}
+
+	// Once the origin boundary passes, a session token authenticates an agent on
+	// either transport; the self/descendant limits are enforced downstream.
 	if token != "" {
 		if sid := sm.SessionForToken(token); sid != "" {
 			ac := authContext{role: roleSession, sessionID: sid, authenticated: true, origin: origin}
@@ -131,10 +139,7 @@ func resolveAuth(sm *SessionManager, token string, origin ConnOrigin, poppedDevi
 		return authContext{role: roleNone, origin: origin}, nil
 	}
 
-	role := roleRemoteHuman
-	if d.ReadOnly {
-		role = roleRemoteGuest
-	}
+	role := remoteDeviceRole(sm.cfg.Remote, d)
 
 	return authContext{role: role, deviceID: d.ID, origin: origin}, nil
 }

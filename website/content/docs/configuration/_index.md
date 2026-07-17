@@ -30,6 +30,14 @@ reload. It is read when the daemon starts, so a change to `reload_debounce`
 itself only takes effect after a `gr daemon restart` (every other setting
 re-reads on reload).
 
+A reload is applied as one config generation. If a runtime change cannot be
+applied, the command or automatic watcher logs an error and keeps the previous
+generation visible. Remote listener replacement has a stricter fail-closed
+detail: graith closes the old remote listener before attempting the new bind,
+so a failed remote transport reload keeps the previous config but leaves remote
+access closed until a corrected reload or restart succeeds. See
+[Orchestrator & remote access]({{< relref "access.md#hot-reload-and-revocation" >}}).
+
 > **Full default config.** The complete, annotated set of defaults lives in
 > [`internal/config/default_config.toml`](https://github.com/d0ugal/graith/blob/main/internal/config/default_config.toml)
 > — the same file `gr config reset` writes. Run `gr config reset` to drop a copy

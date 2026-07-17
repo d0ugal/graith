@@ -4720,6 +4720,7 @@ func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 		// Swap config via applyConfig to match the real hot-reload path.
 		newCfg := *sm.cfg
 		newCfg.Messages.MaxPerStream = 0
+
 		newCfg.Messages.MaxAge = "1ns"
 		_ = sm.applyConfig(&newCfg)
 
@@ -4756,6 +4757,7 @@ func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 
 		newCfg := *sm.cfg
 		newCfg.Messages.MaxPerStream = 0
+
 		newCfg.Messages.MaxAge = "30x" // unparseable; never reaches a validated config
 		_ = sm.applyConfig(&newCfg)
 

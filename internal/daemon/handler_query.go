@@ -334,7 +334,7 @@ func handlePairApprove(sm *SessionManager, auth authContext, send func(string, a
 	}
 
 	log.Info("device paired", "device", deviceID, "read_only", readOnly)
-	send("pair_approved", protocol.PairResponseMsg{DeviceID: deviceID, ClientToken: token, DaemonProfile: sm.paths.Profile, TLSPinSPKI: sm.remoteTLSPin})
+	send("pair_approved", protocol.PairResponseMsg{DeviceID: deviceID, ClientToken: token, DaemonProfile: sm.paths.Profile, TLSPinSPKI: sm.RemoteTLSPin()})
 }
 
 // handlePairList lists pending and paired devices (local human only).

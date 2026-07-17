@@ -576,7 +576,10 @@ fresh_start_threshold = 3 # after this many consecutive restarts, relaunch the a
 
 [remote]
 # Optional tailnet-facing control listener. Disabled by default and fail-closed:
-# when enabled, an invalid block is a hard config-load error.
+# when enabled, an invalid block is a hard config-load error. Transport edits
+# hot-reload by closing the old listener/connections before binding the new
+# generation; a failed replacement keeps the previous config but remote access
+# stays closed until a corrected reload or restart succeeds.
 enabled = false           # expose the remote control listener over the tailnet
 mode = "tsnet"            # transport: "tsnet" (embedded Tailscale) or "interface" (bind an existing tailnet IP)
 port = 4823               # TCP port the listener binds

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -164,6 +165,28 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 		return fmt.Errorf("data_dir changed from %q to %q: run 'gr daemon restart' to apply", oldDataDir, newCfg.DataDir)
 	}
 
+	var (
+		remoteRuntimeChanged bool
+		runtime              *remoteRuntime
+	)
+
+	if sm.remote != nil {
+		var err error
+
+		runtime, remoteRuntimeChanged, err = sm.remote.prepare(newCfg.Remote)
+		if err != nil {
+			return fmt.Errorf("remote runtime replacement failed; remote access is closed and the previous config remains active: %w", err)
+		}
+	}
+
+	rejectPreparedRemote := func(err error) error {
+		if remoteRuntimeChanged {
+			sm.remote.discardPrepared()
+		}
+
+		return err
+	}
+
 	if transitioningOrchestratorOff && orchestratorDisableSnapshotHook != nil {
 		orchestratorDisableSnapshotHook()
 	}
@@ -176,7 +199,7 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 			// and this check. In that case the desired runtime state was reached and
 			// the disable can still commit.
 			if !sm.orchestratorStoppedSince(orchestrator.id) {
-				return sm.orchestratorDisableError(orchestrator.id, fmt.Errorf("stop session: %w", err))
+				return rejectPreparedRemote(sm.orchestratorDisableError(orchestrator.id, fmt.Errorf("stop session: %w", err)))
 			}
 		}
 	}
@@ -184,11 +207,11 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 	if transitioningOrchestratorOff && orchestrator.id != "" && !orchestrator.live() {
 		switch orchestrator.status {
 		case StatusCreating:
-			return sm.orchestratorDisableError(orchestrator.id, errors.New("session is being created; retry reload"))
+			return rejectPreparedRemote(sm.orchestratorDisableError(orchestrator.id, errors.New("session is being created; retry reload")))
 		case StatusDeleting:
-			return sm.orchestratorDisableError(orchestrator.id, errors.New("session is being deleted; retry reload"))
+			return rejectPreparedRemote(sm.orchestratorDisableError(orchestrator.id, errors.New("session is being deleted; retry reload")))
 		case StatusRunning:
-			return sm.orchestratorDisableError(orchestrator.id, errors.New("session is marked running without a live process; retry reload after recovery"))
+			return rejectPreparedRemote(sm.orchestratorDisableError(orchestrator.id, errors.New("session is marked running without a live process; retry reload after recovery")))
 		}
 	}
 
@@ -203,11 +226,21 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 				id = orchestrator.id
 			}
 
-			return sm.orchestratorDisableError(id, errors.New("session lifecycle changed during reload; retry reload"))
+			return rejectPreparedRemote(sm.orchestratorDisableError(id, errors.New("session lifecycle changed during reload; retry reload")))
 		}
 	}
 
 	sm.cfg = newCfg
+
+	if sm.remote != nil {
+		if runtime == nil {
+			sm.remoteGeneration = 0
+			sm.remoteTLSPin = ""
+		} else {
+			sm.remoteGeneration = runtime.generation
+			sm.remoteTLSPin = runtime.pin
+		}
+	}
 	// Resize the launch throttle under the same lock that publishes the config so
 	// the two can't diverge if two reloads (fsnotify + SIGHUP) interleave — the
 	// live limit always matches the currently-published cfg. resize only takes the
@@ -238,6 +271,23 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 		reloadLimitsPublishedHook()
 	}
 	sm.mu.Unlock()
+
+	// The replacement listener was synchronously bound before publication, but
+	// begins accepting only now that config, generation, and TLS pin are visible
+	// as one coherent state. A policy-only reload keeps the listener and closes
+	// identities removed from the new allowlist after the publish; the per-frame
+	// live gate covers the same transition independently.
+	if runtime != nil {
+		if remoteRuntimeChanged {
+			runtime.activate()
+		}
+
+		runtime.closeUnauthorized(newCfg.Remote)
+	}
+
+	if !reflect.DeepEqual(old.Remote, newCfg.Remote) {
+		sm.log.Info("config changed", "key", "remote")
+	}
 
 	// Re-install the external-tool resolver so a changed [tools] block takes
 	// effect on reload without a daemon restart (git timeouts are read live from
