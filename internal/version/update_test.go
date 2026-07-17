@@ -103,6 +103,52 @@ func TestBuildResult(t *testing.T) {
 	}
 }
 
+// TestCheckForUpdate_FetchTargetMatchesConfiguredRepository is the #1253
+// fetch-seam regression: the configured repository must reach the release fetch
+// AND the cache identity verbatim, so the value config validated/normalized is
+// exactly the API target and cache key. Any divergence (e.g. a smuggled
+// whitespace/query suffix, or the layer re-mangling the value) would corrupt
+// the lookup or split the cache identity.
+func TestCheckForUpdate_FetchTargetMatchesConfiguredRepository(t *testing.T) {
+	origVersion := Version
+	defer func() { Version = origVersion }()
+
+	Version = "v0.2.0"
+
+	origFetch := fetchLatest
+	defer func() { fetchLatest = origFetch }()
+
+	const repo = "canny/bothy"
+
+	var fetched string
+
+	fetchLatest = func(r string, _ time.Duration) (string, error) {
+		fetched = r
+
+		return "v0.5.0", nil
+	}
+
+	dir := t.TempDir()
+
+	result := CheckForUpdate(dir, UpdateSettings{Repository: repo})
+	if fetched != repo {
+		t.Fatalf("fetch target = %q, want the configured repository %q verbatim", fetched, repo)
+	}
+
+	if result == nil || result.LatestVersion != "v0.5.0" {
+		t.Fatalf("unexpected result %+v", result)
+	}
+
+	got, err := readUpdateCache(filepath.Join(dir, "update-check.json"))
+	if err != nil {
+		t.Fatalf("read cache: %v", err)
+	}
+
+	if got.Repository != repo {
+		t.Fatalf("cache repository = %q, want %q (the validated value must be the cache key)", got.Repository, repo)
+	}
+}
+
 func TestCheckForUpdate_SkipsDev(t *testing.T) {
 	origVersion := Version
 	defer func() { Version = origVersion }()

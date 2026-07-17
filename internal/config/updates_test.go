@@ -96,6 +96,58 @@ timeout = "2s"
 	}
 }
 
+// TestUpdatesConfig_RepositoryNormalizedOnLoad is the #1253 load/reload
+// regression: surrounding whitespace is normalized at load so the stored value
+// the runtime consumes (cache key + API target) equals what validation checked;
+// a non-canonical suffix is rejected loudly rather than corrupting the lookup.
+func TestUpdatesConfig_RepositoryNormalizedOnLoad(t *testing.T) {
+	write := func(t *testing.T, body string) string {
+		t.Helper()
+
+		dir := t.TempDir()
+		cfgPath := filepath.Join(dir, "config.toml")
+
+		if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		return cfgPath
+	}
+
+	t.Run("surrounding whitespace trimmed and accepted", func(t *testing.T) {
+		cfgPath := write(t, "[updates]\nrepository = \"  canny/bothy  \"\n")
+
+		cfg, err := Load(cfgPath)
+		if err != nil {
+			t.Fatalf("Load rejected whitespace-padded repository: %v", err)
+		}
+
+		if cfg.Updates.Repository != "canny/bothy" {
+			t.Fatalf("stored repository = %q, want normalized \"canny/bothy\" (validated value must equal the cache key/API target)", cfg.Updates.Repository)
+		}
+
+		// Reload reuses Load→Validate: the normalized value stays consistent.
+		reloaded, err := Load(cfgPath)
+		if err != nil {
+			t.Fatalf("reload rejected the padded repository: %v", err)
+		}
+
+		if reloaded.Updates.Repository != "canny/bothy" {
+			t.Fatalf("reloaded repository = %q, want \"canny/bothy\"", reloaded.Updates.Repository)
+		}
+	})
+
+	t.Run("query suffix rejected at load", func(t *testing.T) {
+		cfgPath := write(t, "[updates]\nrepository = \"canny/bothy?ref=x\"\n")
+
+		if _, err := Load(cfgPath); err == nil {
+			t.Fatal("Load accepted a repository with a query suffix")
+		} else if !strings.Contains(err.Error(), "updates.repository") {
+			t.Fatalf("error %q does not mention updates.repository", err)
+		}
+	})
+}
+
 func TestUpdatesConfig_OmittedBlockKeepsDefault(t *testing.T) {
 	// A user config that never mentions [updates] must inherit the embedded
 	// enabled=true default rather than the bool zero value.
@@ -131,7 +183,16 @@ func TestUpdatesConfig_Validate(t *testing.T) {
 		{"repository missing name", UpdatesConfig{Enabled: true, Repository: "d0ugal/"}, "updates.repository"},
 		{"repository extra segment", UpdatesConfig{Enabled: true, Repository: "d0ugal/graith/x"}, "updates.repository"},
 		{"repository no slash", UpdatesConfig{Enabled: true, Repository: "graith"}, "updates.repository"},
+		// #1253: non-canonical suffixes that pass a bare single-slash check but
+		// corrupt the API URL / cache key must be rejected.
+		{"repository query suffix", UpdatesConfig{Enabled: true, Repository: "d0ugal/graith?ref=x"}, "updates.repository"},
+		{"repository fragment suffix", UpdatesConfig{Enabled: true, Repository: "d0ugal/graith#frag"}, "updates.repository"},
+		{"repository internal whitespace", UpdatesConfig{Enabled: true, Repository: "d0ugal/gr aith"}, "updates.repository"},
+		{"repository dot escape owner", UpdatesConfig{Enabled: true, Repository: "../graith"}, "updates.repository"},
+		{"repository dot escape name", UpdatesConfig{Enabled: true, Repository: "d0ugal/.."}, "updates.repository"},
+		{"repository colon scheme", UpdatesConfig{Enabled: true, Repository: "https:/graith"}, "updates.repository"},
 		{"valid custom block", UpdatesConfig{Enabled: true, Repository: "canny/bothy", Interval: "3h", Timeout: "8s"}, ""},
+		{"valid dotted repo name", UpdatesConfig{Enabled: true, Repository: "canny/bothy.js"}, ""},
 		{"empty durations allowed", UpdatesConfig{Enabled: true, Repository: "canny/bothy"}, ""},
 	}
 

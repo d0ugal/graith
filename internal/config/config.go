@@ -2571,6 +2571,48 @@ func (t TodoConfig) BusyTimeoutDuration() time.Duration {
 	return positiveDurationOrDefault(t.BusyTimeout, TodoBusyTimeoutDefault)
 }
 
+// validateUpdatesRepository reports whether repo is a canonical "owner/repo"
+// GitHub slug safe to splice into an API URL and use as a cache key. It expects
+// an already-trimmed value (Load normalizes surrounding whitespace). Each
+// component must be non-empty, must not be a "." or ".." path escape, and may
+// contain only characters GitHub allows in owner/repository names
+// (letters, digits, '.', '-', '_'); this forbids embedded whitespace, '/'
+// (extra path segments), and '?'/'#'/':' (query, fragment, scheme) that would
+// otherwise pass a bare single-slash check and corrupt the release lookup.
+func validateUpdatesRepository(repo string) error {
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok || owner == "" || name == "" {
+		return errors.New(`must be in "owner/repo" form`)
+	}
+
+	for _, part := range []struct{ label, val string }{{"owner", owner}, {"repository name", name}} {
+		if !isCanonicalRepoComponent(part.val) {
+			return fmt.Errorf("%s %q must contain only letters, digits, '.', '-', or '_' and must not be a path escape", part.label, part.val)
+		}
+	}
+
+	return nil
+}
+
+// isCanonicalRepoComponent reports whether s is a valid single owner or repo
+// name component: non-"."/".." and made only of the allowed name characters.
+func isCanonicalRepoComponent(s string) bool {
+	if s == "." || s == ".." {
+		return false
+	}
+
+	for _, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '.' || c == '-' || c == '_':
+		default:
+			return false
+		}
+	}
+
+	return true
+}
+
 func ParseDurationWithDays(s string) (time.Duration, error) {
 	var total time.Duration
 
@@ -5052,9 +5094,16 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if repo := strings.TrimSpace(c.Updates.Repository); repo != "" {
-		if owner, name, ok := strings.Cut(repo, "/"); !ok || owner == "" || name == "" || strings.Contains(name, "/") {
-			errs = append(errs, fmt.Errorf("updates.repository %q: must be in \"owner/repo\" form", c.Updates.Repository))
+	// [updates].repository is both the cache-identity key and the GitHub API
+	// target (spliced into https://api.github.com/repos/<repo>/releases/latest),
+	// so it must be exactly canonical "owner/repo": surrounding whitespace is
+	// normalized away at load, but a query/fragment/extra-path/dot-escape or any
+	// other non-name character is rejected rather than silently corrupting the
+	// lookup URL and cache key (issue #1253). Load already trimmed the stored
+	// value, so validation and the runtime consumer see the identical string.
+	if repo := c.Updates.Repository; repo != "" {
+		if err := validateUpdatesRepository(repo); err != nil {
+			errs = append(errs, fmt.Errorf("updates.repository %q: %w", repo, err))
 		}
 	}
 
@@ -5335,6 +5384,11 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg.Tools = cfg.Tools.NormalizeRelative(configDir)
+
+	// Normalize updates.repository once so the stored value the runtime consumes
+	// (cache key + API target) is exactly what Validate checks — surrounding
+	// whitespace can't validate-then-corrupt the lookup (issue #1253).
+	cfg.Updates.Repository = strings.TrimSpace(cfg.Updates.Repository)
 
 	applyPRWatchCommentCompat(cfg, data)
 
