@@ -5,7 +5,7 @@ import GraithRemoteKit
 @testable import GraithSessionKit
 
 // The shared session/feature layer (#1131). These tests exercise the parts both
-// apps now bind to: the per-host `HostConnection` state machine + approvals, the
+// apps now bind to: the per-host `HostConnection` state machine, the
 // `FleetModel` tree/grouping helpers and single-attach coordination, and the
 // shared model conveniences.
 
@@ -24,8 +24,6 @@ struct SessionInfoConvenienceTests {
 
     @Test func flags() {
         #expect(makeSession(id: "1", name: "bonnie", yolo: true).isYolo)
-        #expect(makeSession(id: "2", name: "kirk", scenarioID: "sc-1").isScenarioMember)
-        #expect(!makeSession(id: "3", name: "neep").isScenarioMember)
     }
 
     @Test func repoEntryRecentDefaultsFalse() throws {
@@ -52,17 +50,12 @@ struct HostConnectionTests {
         Host(id: id, label: "Ben Nevis", kind: .remote, magicDNSName: "ben.tail", isPaired: true)
     }
 
-    @Test func connectLoadsSessionsAndApprovals() async {
-        let approval = try! JSONDecoder().decode(ApprovalInfo.self, from: Data(
-            "{\"request_id\":\"r1\",\"session_id\":\"s1\",\"session_name\":\"braw\",\"tool_name\":\"Bash\",\"agent\":\"claude\",\"repo_name\":\"croft\",\"requested_at\":\"\"}".utf8))
-        let client = MockHostClient(sessions: [makeSession(id: "s1", name: "braw")], pending: [approval])
+    @Test func connectLoadsSessions() async {
+        let client = MockHostClient(sessions: [makeSession(id: "s1", name: "braw")])
         let conn = HostConnection(entry: host(), client: client)
         await conn.connect()
         #expect(conn.state == .connected)
         #expect(conn.sessions.map(\.id) == ["s1"])
-        // The approval subscription runs on a task; give it a moment to deliver.
-        for _ in 0..<50 where conn.approvals.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
-        #expect(conn.approvals.map(\.requestID) == ["r1"])
     }
 
     @Test func failedConnectSurfacesError() async {
@@ -104,7 +97,6 @@ struct FleetTreeTests {
         let fleet = makeEmptyFleet()
         #expect(!fleet.hasRemoteHosts)
         #expect(fleet.sessions.isEmpty)
-        #expect(fleet.allApprovals.isEmpty)
     }
 }
 

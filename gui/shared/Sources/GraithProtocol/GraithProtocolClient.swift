@@ -49,10 +49,8 @@ public struct AttachSession: Sendable {
 /// The transport-abstract client for one daemon host.
 ///
 /// Owns multiple ``GraithConnection``s per host: a lazily-opened **control**
-/// connection for short-lived RPCs, one **attach** connection per live
-/// terminal, and (on demand) an **event** connection carrying the
-/// approval subscription — matching the daemon's non-multiplexed handler
-/// (design C.2).
+/// connection for short-lived RPCs and one **attach** connection per live
+/// terminal, matching the daemon's non-multiplexed handler (design C.2).
 ///
 /// The same client serves the local macOS daemon (`.unix`) and remote tailnet
 /// daemons (`.remote` + TLS); only the ``GraithTransport`` differs.
@@ -81,7 +79,6 @@ public actor GraithProtocolClient {
     private let tokenProvider: (@Sendable () -> String?)?
 
     private var control: GraithConnection?
-    private var eventConn: GraithConnection?
 
     /// How to build the underlying byte stream for a connection. Defaults to
     /// Network.framework (``NWByteStream``); tests inject an in-memory stream.
@@ -402,35 +399,6 @@ public actor GraithProtocolClient {
         _ = try await conn.request(type, payload: SessionScopeMsg(sessionID: sessionID, children: children))
     }
 
-    // MARK: - Scenarios (#903)
-
-    /// `scenario_list` — every running scenario on this daemon, each with its
-    /// member sessions. Read-only; the daemon does not gate it.
-    public func listScenarios() async throws -> [ScenarioRecord] {
-        let conn = try await controlConnection()
-        let reply = try await conn.request("scenario_list", payload: EmptyMsg())
-        return try decodePayload(reply, as: ScenarioListResponse.self).scenarios
-    }
-
-    /// `scenario_stop` — stop every session in the named scenario. The daemon
-    /// replies `scenario_stopped`; the GUI re-lists, so the body is ignored.
-    public func stopScenario(name: String) async throws {
-        let conn = try await controlConnection()
-        _ = try await conn.request("scenario_stop", payload: ScenarioNameMsg(name: name))
-    }
-
-    /// `scenario_resume` — resume every stopped/errored session in the scenario.
-    public func resumeScenario(name: String) async throws {
-        let conn = try await controlConnection()
-        _ = try await conn.request("scenario_resume", payload: ScenarioNameMsg(name: name))
-    }
-
-    /// `scenario_delete` — delete the scenario and all its sessions/worktrees.
-    public func deleteScenario(name: String) async throws {
-        let conn = try await controlConnection()
-        _ = try await conn.request("scenario_delete", payload: ScenarioNameMsg(name: name))
-    }
-
     // MARK: - Inter-agent messaging (gr msg)
 
     /// Send a direct message to `sessionID`'s inbox (`gr msg send`).
@@ -482,55 +450,6 @@ public actor GraithProtocolClient {
         }
         let info = try decodePayload(reply, as: SessionInfo.self)
         return AttachSession(session: info, connection: conn)
-    }
-
-    // MARK: - Approvals (event connection)
-
-    /// Subscribe to approval notifications on a dedicated event connection
-    /// (design §C.6 — no PTY attach, no desktop kick).
-    ///
-    /// Yields the full pending-approval list each time it changes.
-    ///
-    /// Contract: **a finished stream means the subscription has ended** (the
-    /// event connection dropped, or the consumer stopped iterating), never "no
-    /// approvals". If establishing the subscription fails, this call throws
-    /// before returning a stream. When the consumer stops iterating, the pump
-    /// task is cancelled and the underlying connection is closed, so nothing
-    /// buffers forever.
-    public func subscribeApprovals() async throws -> AsyncStream<[ApprovalInfo]> {
-        let conn = try await newConnection()
-        eventConn = conn
-        try await conn.send(control: "approval_subscribe", payload: ApprovalSubscribeMsg())
-        return AsyncStream { continuation in
-            let events = conn.events
-            let pump = Task {
-                for await env in events where env.type == "approval_notification" {
-                    if let note = try? decodePayload(env, as: ApprovalNotificationMsg.self) {
-                        continuation.yield(note.pending)
-                    }
-                }
-                // The event connection ended (dropped/closed) — finish promptly
-                // so the consumer's `for await` completes rather than hanging.
-                continuation.finish()
-            }
-            continuation.onTermination = { _ in
-                pump.cancel()
-                Task { await conn.close() }
-            }
-        }
-    }
-
-    /// Respond to a pending approval (approve/deny).
-    public func respondApproval(requestID: String, decision: String, reason: String? = nil) async throws {
-        // Use the event connection if present (it is the human's approval
-        // channel); otherwise the control connection.
-        let conn: GraithConnection
-        if let eventConn {
-            conn = eventConn
-        } else {
-            conn = try await controlConnection()
-        }
-        _ = try await conn.request("approval_respond", payload: ApprovalRespondMsg(requestID: requestID, decision: decision, reason: reason))
     }
 
     // MARK: - Pairing (design §B.2)
@@ -610,8 +529,6 @@ public actor GraithProtocolClient {
 
     public func close() async {
         if let control { await control.close() }
-        if let eventConn { await eventConn.close() }
         control = nil
-        eventConn = nil
     }
 }

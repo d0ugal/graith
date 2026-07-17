@@ -25,10 +25,10 @@ matrix, edit the manifest and regenerate:
 go test ./internal/capabilities -run TestDocMatchesManifest -update
 ```
 
-A `planned` cell is an intentional statement of intent — a gap we mean to
-close — while `n/a` marks a capability that deliberately does not apply to a
-surface (for example, CLI scripting primitives that the GUIs express as live
-state instead).
+A `planned` cell is an intentional statement of intent — a targeted gap we mean
+to close — while `n/a` marks a surface deliberately excluded by the linked
+platform decision (for example, CLI scripting primitives that the GUIs express
+as live state instead).
 
 ## Matrix
 
@@ -40,7 +40,7 @@ state instead).
 |-------|---------|
 | ✅ `supported` | Wired end-to-end and usable on this surface. |
 | 🚧 `planned` | Not yet wired on this surface; a gap we intend to close. |
-| — `n/a` | Deliberately not applicable to this surface. |
+| — `n/a` | Deliberately excluded from this surface by a linked platform decision. |
 
 ### Session lifecycle
 
@@ -63,7 +63,7 @@ state instead).
 | Block until a session matches a condition <sup>1</sup> | ✅ | — | — |
 | List available repositories for new sessions | ✅ | ✅ | ✅ |
 
-<sup>1</sup> Block until a session matches a condition: A scripting/automation gate; the GUIs surface live state instead.
+<sup>1</sup> Block until a session matches a condition: A scripting/automation gate; the GUIs surface live state instead. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-platform-scope-policy.md#platform-support)
 
 ### Terminal I/O
 
@@ -77,82 +77,99 @@ state instead).
 | Render a screen snapshot / preview | ✅ | ✅ | ✅ |
 | Type into another session remotely <sup>1</sup> | ✅ | — | — |
 
-<sup>1</sup> Type into another session remotely: An attached GUI types directly; the standalone remote-type command is a CLI convenience.
+<sup>1</sup> Type into another session remotely: An attached GUI types directly; the standalone remote-type command is a CLI convenience. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-platform-scope-policy.md#platform-support)
 
 ### Approvals & pairing
 
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
-| View pending tool approvals | ✅ | ✅ | ✅ |
-| Respond to a tool approval | ✅ | ✅ | ✅ |
+| View pending tool approvals <sup>1</sup> | ✅ | — | — |
+| Respond to a tool approval <sup>2</sup> | ✅ | — | — |
 | Request device pairing | ✅ | ✅ | ✅ |
-| List / approve / revoke paired devices <sup>1</sup> | ✅ | 🚧 | 🚧 |
+| List / approve / revoke paired devices <sup>3</sup> | ✅ | — | — |
 
-<sup>1</sup> List / approve / revoke paired devices: Listing/approving/revoking devices is gated to the local human on the daemon (remote-denied), so it stays CLI-only for now; the GUIs pair *with* a daemon (pairing.request) but don't manage its device list.
+<sup>1</sup> View pending tool approvals: Native approval queues are removed in preparation for eliminating interactive approvals entirely under [issue #1392](https://github.com/d0ugal/graith/issues/1392). [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
+<sup>2</sup> Respond to a tool approval: Native approval responses are removed in preparation for eliminating interactive approvals entirely under [issue #1392](https://github.com/d0ugal/graith/issues/1392). [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
+<sup>3</sup> List / approve / revoke paired devices: Device-list administration is local-human-only and remote-denied. Native apps pair with a daemon but deliberately do not manage its trust list. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
 
 ### Messaging
 
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
-| Send / publish inter-agent messages <sup>1</sup> | ✅ | ✅ | ✅ |
-| Read inbox / subscribe to topics <sup>2</sup> | ✅ | ✅ | ✅ |
-| Inspect / release jailed PR comments | ✅ | 🚧 | 🚧 |
+| Send direct messages <sup>1</sup> | ✅ | ✅ | ✅ |
+| Read direct-message conversations <sup>2</sup> | ✅ | ✅ | ✅ |
+| Publish / subscribe to messaging topics <sup>3</sup> | ✅ | — | — |
+| Inspect / release jailed PR comments <sup>4</sup> | ✅ | — | — |
 
-<sup>1</sup> Send / publish inter-agent messages: GUIs compose a direct message to a session's inbox (msg send) from the session context menu; topic publish (msg pub) stays CLI-only for now.
-<sup>2</sup> Read inbox / subscribe to topics: GUIs show a session's direct-message conversation (inbox view) with mark-as-read (ack); topic subscribe/follow stays CLI-only for now.
+<sup>1</sup> Send direct messages: Native apps compose a direct message to a session's inbox from the session context menu.
+<sup>2</sup> Read direct-message conversations: Native apps show a session's direct-message conversation with mark-as-read.
+<sup>3</sup> Publish / subscribe to messaging topics: Topics are an agent and orchestrator coordination primitive rather than a native human-chat surface. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
+<sup>4</sup> Inspect / release jailed PR comments: Quarantined PR comments are an untrusted-input moderation workflow kept in the CLI. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
 
 ### Scenarios
 
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
-| Start / stop / resume / inspect scenarios <sup>1</sup> | ✅ | ✅ | ✅ |
-| Completion actions and lifecycle cleanup <sup>2</sup> | ✅ | 🚧 | 🚧 |
-| Declare and publish scenario results <sup>3</sup> | ✅ | 🚧 | 🚧 |
+| Start / stop / resume / inspect scenarios <sup>1</sup> | ✅ | — | — |
+| Completion actions and lifecycle cleanup <sup>2</sup> | ✅ | — | — |
+| Declare and publish scenario results <sup>3</sup> | ✅ | — | — |
 | Scenario timeout, retry & quorum policy <sup>4</sup> | ✅ | — | — |
 
-<sup>1</sup> Start / stop / resume / inspect scenarios: The CLI can start scenario members that mirror another member's worktree read-only. The GUIs list scenarios, including each member's mirror relationship, role/task, and todo-derived progress; group scenario members in the sidebar; and run the human-authorized stop/resume/delete actions. `start`/`add` stay CLI-only (they are orchestrator-session-scoped, not human-client operations).
-<sup>2</sup> Completion actions and lifecycle cleanup: Scenario TOML can run durable trigger actions once per todo-derived completion epoch and opt into delayed recoverable cleanup. The CLI reports action and cleanup state; GUI presentation is planned.
-<sup>3</sup> Declare and publish scenario results: The CLI declares text, Markdown, and JSON result contracts in scenario TOML, authenticates member self-publication, and reports durable result status; GUI publication and result-detail presentation are planned.
-<sup>4</sup> Scenario timeout, retry & quorum policy: Scenario runtime policies are CLI/daemon-only; iOS and macOS do not model or surface policy state.
+<sup>1</sup> Start / stop / resume / inspect scenarios: Scenarios are operated through the CLI and orchestrator. Native apps show scenario-created sessions as ordinary sessions without scenario grouping or lifecycle controls. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-scenarios-cli-only.md#platform-support)
+<sup>2</sup> Completion actions and lifecycle cleanup: Scenario TOML and the CLI expose completion actions and cleanup state; native GUI presentation is deliberately excluded. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-scenarios-cli-only.md#platform-support)
+<sup>3</sup> Declare and publish scenario results: The CLI declares result contracts and reports durable publication state; native GUI publication and result-detail presentation are deliberately excluded. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-scenarios-cli-only.md#platform-support)
+<sup>4</sup> Scenario timeout, retry & quorum policy: Scenario runtime policies are CLI/daemon-only; iOS and macOS do not model or surface policy state. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-scenarios-cli-only.md#platform-support)
 
 ### Todo list
 
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
-| Todo list <sup>1</sup> | ✅ | 🚧 | 🚧 |
+| Manage todo items <sup>1</sup> | ✅ | — | — |
+| View todo lists and progress <sup>2</sup> | ✅ | 🚧 | 🚧 |
 
-<sup>1</sup> Todo list: A durable, shared todo list with atomic claim of items across sessions; the `gr todo` CLI ships now, GUI surfacing is a planned follow-up (issue #591).
+<sup>1</sup> Manage todo items: Add, claim, assign, transition, and remove are agent/orchestrator operations; native apps deliberately do not edit todo state. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
+<sup>2</sup> View todo lists and progress: A read-only native overview is in scope; todo mutation remains CLI/orchestrator-only.
 
 ### Triggers
 
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
-| List / status / run / pause / resume triggers | ✅ | 🚧 | 🚧 |
+| List / status / run / pause / resume triggers <sup>1</sup> | ✅ | — | — |
+
+<sup>1</sup> List / status / run / pause / resume triggers: Trigger lifecycle is an automation control plane kept in the CLI and orchestrator. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
 
 ### MCP servers
 
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
-| List / restart / inspect MCP servers | ✅ | 🚧 | 🚧 |
+| List / restart / inspect MCP servers <sup>1</sup> | ✅ | — | — |
+
+<sup>1</sup> List / restart / inspect MCP servers: MCP server inspection and restart are developer operations kept in the CLI. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
 
 ### Document store
 
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
-| Put / get / list / append / remove documents | ✅ | 🚧 | 🚧 |
+| Put / append / remove documents <sup>1</sup> | ✅ | — | — |
 | Browse and read documents (list keys, view a document body) | ✅ | ✅ | ✅ |
+
+<sup>1</sup> Put / append / remove documents: Document mutation is an agent and scripting primitive; native apps retain the separate read-only browser. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
 
 ### Notifications
 
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
-| Send a desktop / push notification to the human | ✅ | 🚧 | 🚧 |
+| Send a desktop / push notification to the human <sup>1</sup> | ✅ | — | — |
+
+<sup>1</sup> Send a desktop / push notification to the human: Agents and scripts send notifications; native apps are notification recipients and presenters. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
 
 ### Sandbox introspection
 
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
-| Explain / watch sandbox policy and denials | ✅ | 🚧 | 🚧 |
+| Explain / watch sandbox policy and denials <sup>1</sup> | ✅ | — | — |
+
+<sup>1</sup> Explain / watch sandbox policy and denials: Sandbox explain/watch output is diagnostic and streaming, making the terminal its natural interface. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
 
 ### Diagnostics
 

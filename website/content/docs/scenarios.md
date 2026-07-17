@@ -9,6 +9,11 @@ draft: false
 
 Scenarios are declarative multi-session orchestration. A TOML file defines a group of related sessions — each with its own repo, agent, role, and task — and `gr scenario start` creates them atomically as a coordinated fleet.
 
+Scenarios are operated through the `gr scenario` commands and orchestrator
+sessions. The native iOS and macOS apps do not provide scenario grouping,
+status, or lifecycle controls; they show scenario-created sessions as ordinary
+sessions, which can still be opened and attached normally.
+
 ## When to use scenarios
 
 | Approach | Best for |

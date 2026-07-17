@@ -22,7 +22,7 @@ struct DeletedAndStatusTests {
     // MARK: - HostConnection
 
     @Test func deleteThenRestoreRoundTrips() async {
-        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let conn = fleet.connections[0]
         let target = conn.sessions.first { $0.id == "braw0001" }!
@@ -43,7 +43,7 @@ struct DeletedAndStatusTests {
     }
 
     @Test func purgeRemovesPermanently() async {
-        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let conn = fleet.connections[0]
         let live = conn.sessions.first { $0.id == "braw0001" }!
@@ -57,7 +57,7 @@ struct DeletedAndStatusTests {
     }
 
     @Test func purgeAlsoRemovesASoftDeletedSession() async {
-        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let conn = fleet.connections[0]
         let target = conn.sessions.first { $0.id == "bide0003" }!
@@ -69,7 +69,7 @@ struct DeletedAndStatusTests {
     }
 
     @Test func setStatusForwardsTextAndClearFlag() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let conn = fleet.connections[0]
         let target = conn.sessions.first { $0.id == "braw0001" }!
@@ -87,7 +87,7 @@ struct DeletedAndStatusTests {
     }
 
     @Test func setStatusFailureSurfacesOnConnection() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let conn = fleet.connections[0]
         let target = conn.sessions.first { $0.id == "braw0001" }!
@@ -97,7 +97,7 @@ struct DeletedAndStatusTests {
     }
 
     @Test func deletedSessionsFailureSurfacesAsHostError() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let conn = fleet.connections[0]
         await mock.setFailList(.daemon("list broke"))
@@ -109,7 +109,7 @@ struct DeletedAndStatusTests {
     // MARK: - FleetModel aggregation
 
     @Test func fleetDeletedSessionsAggregatesTaggedByHost() async {
-        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let conn = fleet.connections[0]
         await conn.delete(conn.sessions.first { $0.id == "braw0001" }!)
@@ -121,7 +121,7 @@ struct DeletedAndStatusTests {
     }
 
     @Test func fleetRestoreByHostReturnsSessionToLiveList() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let conn = fleet.connections[0]
         await conn.delete(conn.sessions.first { $0.id == "braw0001" }!)
@@ -135,7 +135,7 @@ struct DeletedAndStatusTests {
     }
 
     @Test func fleetPurgeByUnknownHostIsANoOp() async {
-        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let target = fleet.sessions.first { $0.id == "braw0001" }!
         // Unknown host id (thrawn — a stubborn miss): nothing to act on, must not
@@ -146,7 +146,7 @@ struct DeletedAndStatusTests {
     }
 
     @Test func fleetSetStatusDelegatesToOwningConnection() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let target = fleet.sessions.first { $0.id == "braw0001" }!
         fleet.setStatus(target, text: "ken this", ttlSeconds: nil, clear: false)
@@ -158,7 +158,7 @@ struct DeletedAndStatusTests {
     }
 
     @Test func fleetPurgeSessionHardDeletesALiveSession() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let target = fleet.sessions.first { $0.id == "bide0003" }!
         fleet.purgeSession(target)

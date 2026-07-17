@@ -4,12 +4,9 @@ import GraithSessionKit
 
 struct SessionSidebar: View {
     @EnvironmentObject var store: SessionStore
-    @EnvironmentObject var approvals: ApprovalMonitor
     @Binding var showNewSession: Bool
     @State private var showAddHost = false
-    @State private var showApprovals = false
     @State private var showDeleted = false
-    @State private var showScenarios = false
     @State private var showStore = false
 
     var body: some View {
@@ -30,59 +27,6 @@ struct SessionSidebar: View {
                     .padding(.vertical, 2)
                     .background(Theme.surface0)
                     .clipShape(Capsule())
-
-                // Approvals button — surfaces the pending count and opens the
-                // panel to allow/deny (#1130). Always visible so it's
-                // discoverable; badged only when something is waiting.
-                Button(action: { showApprovals = true }) {
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: approvals.pending.isEmpty ? "bell" : "bell.badge.fill")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(approvals.pending.isEmpty ? Theme.subtext0 : Theme.yellow)
-                            .frame(width: 22, height: 22)
-                            .background(Theme.surface0)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                        if !approvals.pending.isEmpty {
-                            Text("\(approvals.pending.count)")
-                                .font(.system(size: 8, weight: .bold, design: .monospaced))
-                                .foregroundStyle(Theme.crust)
-                                .padding(.horizontal, 3)
-                                .padding(.vertical, 1)
-                                .background(Theme.yellow)
-                                .clipShape(Capsule())
-                                .offset(x: 4, y: -4)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-                .help("Pending approvals")
-
-                // Scenarios button — list running scenarios, per-session status,
-                // and stop/resume/delete actions (#903). Badged with the running
-                // scenario count so it's discoverable when a fleet is active.
-                Button(action: { showScenarios = true }) {
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: "square.stack.3d.up")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(store.hostedScenarios.isEmpty ? Theme.subtext0 : Theme.mauve)
-                            .frame(width: 22, height: 22)
-                            .background(Theme.surface0)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                        if !store.hostedScenarios.isEmpty {
-                            Text("\(store.hostedScenarios.count)")
-                                .font(.system(size: 8, weight: .bold, design: .monospaced))
-                                .foregroundStyle(Theme.crust)
-                                .padding(.horizontal, 3)
-                                .padding(.vertical, 1)
-                                .background(Theme.mauve)
-                                .clipShape(Capsule())
-                                .offset(x: 4, y: -4)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-                .help("Scenarios")
-                .disabled(store.connections.isEmpty)
 
                 // Deleted sessions button — recover (restore) or permanently
                 // remove (purge) soft-deleted sessions within the retention
@@ -162,7 +106,6 @@ struct SessionSidebar: View {
                 // status stays visible.
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ScenarioSidebarSection()
                         ForEach(store.sessionsByHost, id: \.host.id) { entry in
                             HostSection(host: entry.host, groups: entry.groups)
                         }
@@ -203,7 +146,6 @@ struct SessionSidebar: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ScenarioSidebarSection()
                         ForEach(store.sessionsByRepo, id: \.repo) { group in
                             RepoSection(repo: group.repo, sessions: group.sessions)
                         }
@@ -232,14 +174,8 @@ struct SessionSidebar: View {
         .sheet(isPresented: $showAddHost) {
             AddHostSheet()
         }
-        .sheet(isPresented: $showApprovals) {
-            ApprovalsSheet()
-        }
         .sheet(isPresented: $showDeleted) {
             DeletedSessionsSheet()
-        }
-        .sheet(isPresented: $showScenarios) {
-            ScenariosSheet()
         }
         .sheet(isPresented: $showStore) {
             StoreBrowserSheet()
@@ -919,8 +855,8 @@ struct SessionRow: View {
                         .background(agentColor.opacity(0.12))
                         .clipShape(RoundedRectangle(cornerRadius: 3))
 
-                    // Mode/membership indicators (issue #901): YOLO, sandboxed,
-                    // scenario membership, and a config-stale warning.
+                    // Mode indicators (issue #901): YOLO, sandboxed, and a
+                    // config-stale warning.
                     if session.isYolo {
                         Image(systemName: "bolt.fill")
                             .foregroundStyle(Theme.peach)
@@ -932,12 +868,6 @@ struct SessionRow: View {
                             .foregroundStyle(Theme.teal)
                             .font(.system(size: 8))
                             .help("Sandboxed")
-                    }
-                    if session.isScenarioMember {
-                        Image(systemName: "square.stack.3d.up.fill")
-                            .foregroundStyle(Theme.mauve)
-                            .font(.system(size: 8))
-                            .help("Scenario: \(session.scenarioName ?? "member")")
                     }
                     if session.isConfigStale {
                         Image(systemName: "exclamationmark.triangle.fill")

@@ -17,8 +17,8 @@ let package = Package(
         .library(name: "GraithRemoteKit", targets: ["GraithRemoteKit"]),
         // The shared session/feature view-model layer (#1131): the capability
         // boundary (GraithHostClient et al.), the per-host connection view-model,
-        // the multi-host FleetModel aggregator, single-attach + approvals
-        // aggregation, and the production RealHostClient wrapping
+        // the multi-host FleetModel aggregator, single-attach coordination, and
+        // the production RealHostClient wrapping
         // GraithProtocolClient. Built on GraithProtocol + GraithRemoteKit only
         // (no libghostty), so both the macOS and iOS apps bind to one definition
         // of "what a session app can do" — parity by construction, not review.

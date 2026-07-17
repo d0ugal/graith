@@ -31,8 +31,9 @@ import Testing
 //     *shared* capability surface. A capability the manifest marks `supported`
 //     on a GUI must have a backing shared affordance (or a declared view-only
 //     exception); a wired affordance the manifest marks anything but
-//     `supported` is a red test; iOS/macOS must stay at parity. A registered
-//     row is rot-proof against renames/removals via the compile anchor.
+//     `supported` is a red test on every targeted GUI surface; iOS/macOS must
+//     stay at parity when both are targeted. A registered row is rot-proof
+//     against renames/removals via the compile anchor.
 //   - NOT guaranteed: that each app's *views* actually surface the capability.
 //     The shared layer is the model surface, not the SwiftUI/AppKit views the
 //     apps own on top of it — and surfacing is sometimes a semantic judgment
@@ -58,6 +59,12 @@ private struct CapabilityEntry: Decodable {
     let id: String
     let ios: String
     let macos: String
+    let platformDecision: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, ios, macos
+        case platformDecision = "platform_decision"
+    }
 }
 
 private enum CapabilityFixtureError: Error, CustomStringConvertible {
@@ -132,24 +139,8 @@ private func sharedAffordances() -> Set<String> {
     wire("messaging.send") { _ = FleetModel.sendMessage }
     wire("messaging.read") { _ = FleetModel.conversation }
 
-    // Approvals & pairing.
-    wire("approvals.subscribe") { _ = \FleetModel.allApprovals }
-    wire("approvals.respond") { _ = HostConnection.respond }
+    // Pairing.
     wire("pairing.request") { _ = ControlType.pairRequest }
-
-    // Scenarios — FleetModel aggregates per-host scenarios and routes each
-    // human-authorized lifecycle action to the owning host (#903). Anchor the
-    // full shared surface (list transport + all three verbs) so removing any of
-    // them trips this guard, not just the representative one.
-    wire("scenarios.manage") {
-        _ = \FleetModel.hostedScenarios
-        _ = FleetModel.sessions(in:)
-        _ = FleetModel.stopScenario(name:hostID:)
-        _ = FleetModel.resumeScenario(name:hostID:)
-        _ = FleetModel.deleteScenario(name:hostID:)
-        _ = HostConnection.stopScenario
-        _ = ControlType.scenarioList
-    }
 
     // Host introspection — config viewer + diagnostics panel (#904). FleetModel
     // fetches both over the control protocol; the shared HealthReport derives
@@ -167,11 +158,6 @@ private func sharedAffordances() -> Set<String> {
 /// not a silent hand-edit.
 private let viewOnlyCapabilities: Set<String> = []
 
-/// Capabilities allowed to differ between iOS and macOS. Empty today: #1147
-/// made the GUIs parity-by-construction. An intentional divergence must be
-/// declared here (with a reason) rather than quietly diverging in the manifest.
-private let knownDivergences: Set<String> = []
-
 // MARK: - Tests
 
 struct CapabilityConformanceTests {
@@ -184,21 +170,27 @@ struct CapabilityConformanceTests {
         let shared = sharedAffordances()
 
         // Reverse-lie: everything the shared layer wires must be a manifest id
-        // and `supported` on both GUIs — the #1143 direction (code ahead of the
-        // manifest) as a red test, for the capabilities registered here.
+        // and `supported` on every targeted GUI — the #1143 direction (code
+        // ahead of the manifest) as a red test, for the capabilities registered
+        // here. Shared model availability does not pull an intentionally
+        // excluded app surface back into product scope.
         for id in shared.sorted() {
             guard let c = byID[id] else {
                 Issue.record("shared affordance `\(id)` is not a capability in the manifest — fix the id in sharedAffordances() or add it to capabilities.json")
                 continue
             }
-            #expect(
-                c.ios == "supported",
-                "`\(id)` is wired in GraithSessionKit but the manifest marks iOS `\(c.ios)` — a wired affordance can't be `\(c.ios)`; update capabilities.json + regenerate"
-            )
-            #expect(
-                c.macos == "supported",
-                "`\(id)` is wired in GraithSessionKit but the manifest marks macOS `\(c.macos)` — a wired affordance can't be `\(c.macos)`; update capabilities.json + regenerate"
-            )
+            if c.ios != "n/a" {
+                #expect(
+                    c.ios == "supported",
+                    "`\(id)` is wired in GraithSessionKit but the targeted iOS surface is `\(c.ios)` — update capabilities.json + regenerate"
+                )
+            }
+            if c.macos != "n/a" {
+                #expect(
+                    c.macos == "supported",
+                    "`\(id)` is wired in GraithSessionKit but the targeted macOS surface is `\(c.macos)` — update capabilities.json + regenerate"
+                )
+            }
         }
 
         // Forward-lie: a GUI-`supported` capability must be backed by a shared
@@ -211,16 +203,28 @@ struct CapabilityConformanceTests {
         }
     }
 
-    /// View-level divergence guard. #1147 made the GUIs parity-by-construction,
-    /// so a capability surfaced on one app but not the other is a silent drift —
-    /// force it to be a declared, reviewed exception.
+    /// View-level scope + parity guard. Targeted GUI surfaces remain
+    /// parity-by-construction. An `n/a` surface is outside that comparison, but
+    /// must carry the design-doc decision that deliberately excluded it.
     @Test func guiParityHolds() throws {
         let manifest = try loadCapabilityManifest()
-        for c in manifest.capabilities where !knownDivergences.contains(c.id) {
-            #expect(
-                c.ios == c.macos,
-                "capability `\(c.id)` diverges (iOS=\(c.ios), macOS=\(c.macos)) but is not in knownDivergences — the shared layer is parity-by-construction (#1147); add a reviewed exception if this is intentional"
-            )
+        for c in manifest.capabilities {
+            let iosTargeted = c.ios != "n/a"
+            let macOSTargeted = c.macos != "n/a"
+
+            if !iosTargeted || !macOSTargeted {
+                #expect(
+                    !(c.platformDecision ?? "").isEmpty,
+                    "capability `\(c.id)` excludes a GUI surface but has no platform_decision — link the feature design's ## Platform support section"
+                )
+            }
+
+            if iosTargeted && macOSTargeted {
+                #expect(
+                    c.ios == c.macos,
+                    "capability `\(c.id)` targets both GUIs but diverges (iOS=\(c.ios), macOS=\(c.macos)) — targeted surfaces must stay at parity"
+                )
+            }
         }
     }
 
@@ -229,33 +233,16 @@ struct CapabilityConformanceTests {
     @Test func fixtureLoads() throws {
         let manifest = try loadCapabilityManifest()
         #expect(!manifest.capabilities.isEmpty)
-        #expect(manifest.version == 1, "capability fixture version \(manifest.version) — the conformance check models version 1")
+        #expect(manifest.version == 2, "capability fixture version \(manifest.version) — the conformance check models version 2")
     }
 
-    /// Guards against a stale exception outliving its need. An escape hatch that
-    /// no longer describes reality is worse than none — it launders a drift as
-    /// "known". So each exception must be a real capability *and* still meet the
-    /// condition it exempts:
-    ///   - a `knownDivergences` id must actually diverge (iOS != macOS) — once
-    ///     parity is restored the exception is stale and must be removed;
-    ///   - a `viewOnlyCapabilities` id must still be GUI-`supported` yet have no
-    ///     shared affordance — once it becomes shared (or drops to planned/n/a)
-    ///     the exception is stale.
-    @MainActor @Test func exceptionsAreStillNeeded() throws {
+    /// Guards against a stale view-only exception outliving its need. Platform
+    /// scope is manifest-owned; this remaining implementation exception must be
+    /// a real GUI-supported capability with no shared affordance.
+    @MainActor @Test func viewOnlyExceptionsAreStillNeeded() throws {
         let manifest = try loadCapabilityManifest()
         let byID = Dictionary(uniqueKeysWithValues: manifest.capabilities.map { ($0.id, $0) })
         let shared = sharedAffordances()
-
-        for id in knownDivergences {
-            guard let c = byID[id] else {
-                Issue.record("knownDivergences has stale id `\(id)` — not in the manifest")
-                continue
-            }
-            #expect(
-                c.ios != c.macos,
-                "knownDivergences lists `\(id)` but iOS==macOS==\(c.ios) — parity holds, so the exception is stale; remove it"
-            )
-        }
 
         for id in viewOnlyCapabilities {
             guard let c = byID[id] else {

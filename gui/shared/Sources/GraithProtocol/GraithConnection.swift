@@ -7,14 +7,12 @@ import Foundation
 /// - ``request(_:payload:)`` — send a control message and await its reply,
 /// - ``send(control:payload:)`` — fire-and-forget a control message,
 /// - ``sendData(_:)`` / ``dataStream`` — the raw PTY byte channel (0x01),
-/// - ``events`` — unsolicited control notifications (`detached`,
-///   `approval_notification`).
+/// - ``events`` — unsolicited control notifications such as `detached`.
 ///
 /// Because the daemon handler is *not* fully multiplexed (some ops take over
 /// the connection in blocking read loops), a client opens several of these —
-/// one for control RPCs, one per attached terminal, one for the event/approval
-/// subscription — rather than multiplexing everything onto one. See
-/// ``GraithProtocolClient``.
+/// one for control RPCs and one per attached terminal rather than multiplexing
+/// everything onto one. See ``GraithProtocolClient``.
 public actor GraithConnection {
     public let transport: GraithTransport
 
@@ -23,7 +21,7 @@ public actor GraithConnection {
     private var decoder = FrameDecoder()
 
     /// Control envelopes treated as unsolicited pushes rather than RPC replies.
-    private static let unsolicitedTypes: Set<String> = ["detached", "approval_notification"]
+    private static let unsolicitedTypes: Set<String> = ["detached"]
 
     // Reply plumbing: replies are FIFO. If a reply arrives before anyone is
     // waiting (a benign race on a fast local socket), it is buffered so the
@@ -46,7 +44,7 @@ public actor GraithConnection {
     private var eventContinuation: AsyncStream<ControlEnvelope>.Continuation?
     /// Raw PTY output frames (channel 0x01) from the daemon.
     public nonisolated let dataStream: AsyncStream<Data>
-    /// Unsolicited control pushes (`detached`, `approval_notification`).
+    /// Unsolicited control pushes such as `detached`.
     public nonisolated let events: AsyncStream<ControlEnvelope>
 
     private var closed = false

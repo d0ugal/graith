@@ -124,7 +124,9 @@ go test ./internal/capabilities -update
 ```
 
 Commit the generated docs region and GUI fixture. Do not edit generated regions
-or fixtures by hand. See
+or fixtures by hand. A deliberate platform exclusion uses `n/a` plus a
+`platform_decision` link to the feature design's exact `## Platform support`
+section; targeted but unfinished work remains `planned`. See
 [`internal/capabilities/AGENTS.md`](internal/capabilities/AGENTS.md) and
 [`gui/AGENTS.md`](gui/AGENTS.md).
 
@@ -140,7 +142,8 @@ See [`website/AGENTS.md`](website/AGENTS.md) for the Hugo authoring rules.
 Non-trivial features require a design doc before implementation. Start from
 [`docs/design/TEMPLATE.md`](docs/design/TEMPLATE.md), retain the prescribed
 frontmatter and section order, compare alternatives (including “Do Nothing”),
-and advance the document status only as review and implementation occur.
+decide CLI/iOS/macOS scope in `## Platform support`, and advance the document
+status only as review and implementation occur.
 
 ## Architecture and safety invariants
 

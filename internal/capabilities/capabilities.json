@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "surfaces": [
     { "id": "cli", "name": "CLI", "description": "The `gr` command-line client." },
     { "id": "ios", "name": "iOS", "description": "The GraithMobile iOS app." },
@@ -8,7 +8,7 @@
   "states": [
     { "id": "supported", "symbol": "✅", "description": "Wired end-to-end and usable on this surface." },
     { "id": "planned", "symbol": "🚧", "description": "Not yet wired on this surface; a gap we intend to close." },
-    { "id": "n/a", "symbol": "—", "description": "Deliberately not applicable to this surface." }
+    { "id": "n/a", "symbol": "—", "description": "Deliberately excluded from this surface by a linked platform decision." }
   ],
   "capabilities": [
     {
@@ -100,6 +100,7 @@
       "category": "Session lifecycle",
       "name": "Block until a session matches a condition",
       "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-platform-scope-policy.md#platform-support",
       "notes": "A scripting/automation gate; the GUIs surface live state instead."
     },
     {
@@ -149,19 +150,24 @@
       "category": "Terminal I/O",
       "name": "Type into another session remotely",
       "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-platform-scope-policy.md#platform-support",
       "notes": "An attached GUI types directly; the standalone remote-type command is a CLI convenience."
     },
     {
       "id": "approvals.subscribe",
       "category": "Approvals & pairing",
       "name": "View pending tool approvals",
-      "cli": "supported", "ios": "supported", "macos": "supported"
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",
+      "notes": "Native approval queues are removed in preparation for eliminating interactive approvals entirely under [issue #1392](https://github.com/d0ugal/graith/issues/1392)."
     },
     {
       "id": "approvals.respond",
       "category": "Approvals & pairing",
       "name": "Respond to a tool approval",
-      "cli": "supported", "ios": "supported", "macos": "supported"
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",
+      "notes": "Native approval responses are removed in preparation for eliminating interactive approvals entirely under [issue #1392](https://github.com/d0ugal/graith/issues/1392)."
     },
     {
       "id": "pairing.request",
@@ -173,81 +179,110 @@
       "id": "pairing.manage",
       "category": "Approvals & pairing",
       "name": "List / approve / revoke paired devices",
-      "cli": "supported", "ios": "planned", "macos": "planned",
-      "notes": "Listing/approving/revoking devices is gated to the local human on the daemon (remote-denied), so it stays CLI-only for now; the GUIs pair *with* a daemon (pairing.request) but don't manage its device list."
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",
+      "notes": "Device-list administration is local-human-only and remote-denied. Native apps pair with a daemon but deliberately do not manage its trust list."
     },
     {
       "id": "messaging.send",
       "category": "Messaging",
-      "name": "Send / publish inter-agent messages",
+      "name": "Send direct messages",
       "cli": "supported", "ios": "supported", "macos": "supported",
-      "notes": "GUIs compose a direct message to a session's inbox (msg send) from the session context menu; topic publish (msg pub) stays CLI-only for now."
+      "notes": "Native apps compose a direct message to a session's inbox from the session context menu."
     },
     {
       "id": "messaging.read",
       "category": "Messaging",
-      "name": "Read inbox / subscribe to topics",
+      "name": "Read direct-message conversations",
       "cli": "supported", "ios": "supported", "macos": "supported",
-      "notes": "GUIs show a session's direct-message conversation (inbox view) with mark-as-read (ack); topic subscribe/follow stays CLI-only for now."
+      "notes": "Native apps show a session's direct-message conversation with mark-as-read."
+    },
+    {
+      "id": "messaging.topics",
+      "category": "Messaging",
+      "name": "Publish / subscribe to messaging topics",
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",
+      "notes": "Topics are an agent and orchestrator coordination primitive rather than a native human-chat surface."
     },
     {
       "id": "messaging.jail",
       "category": "Messaging",
       "name": "Inspect / release jailed PR comments",
-      "cli": "supported", "ios": "planned", "macos": "planned"
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",
+      "notes": "Quarantined PR comments are an untrusted-input moderation workflow kept in the CLI."
     },
     {
       "id": "scenarios.manage",
       "category": "Scenarios",
       "name": "Start / stop / resume / inspect scenarios",
-      "cli": "supported", "ios": "supported", "macos": "supported",
-      "notes": "The CLI can start scenario members that mirror another member's worktree read-only. The GUIs list scenarios, including each member's mirror relationship, role/task, and todo-derived progress; group scenario members in the sidebar; and run the human-authorized stop/resume/delete actions. `start`/`add` stay CLI-only (they are orchestrator-session-scoped, not human-client operations)."
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-scenarios-cli-only.md#platform-support",
+      "notes": "Scenarios are operated through the CLI and orchestrator. Native apps show scenario-created sessions as ordinary sessions without scenario grouping or lifecycle controls."
     },
     {
       "id": "scenarios.completion-automation",
       "category": "Scenarios",
       "name": "Completion actions and lifecycle cleanup",
-      "cli": "supported", "ios": "planned", "macos": "planned",
-      "notes": "Scenario TOML can run durable trigger actions once per todo-derived completion epoch and opt into delayed recoverable cleanup. The CLI reports action and cleanup state; GUI presentation is planned."
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-scenarios-cli-only.md#platform-support",
+      "notes": "Scenario TOML and the CLI expose completion actions and cleanup state; native GUI presentation is deliberately excluded."
     },
     {
       "id": "scenarios.results",
       "category": "Scenarios",
       "name": "Declare and publish scenario results",
-      "cli": "supported", "ios": "planned", "macos": "planned",
-      "notes": "The CLI declares text, Markdown, and JSON result contracts in scenario TOML, authenticates member self-publication, and reports durable result status; GUI publication and result-detail presentation are planned."
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-scenarios-cli-only.md#platform-support",
+      "notes": "The CLI declares result contracts and reports durable publication state; native GUI publication and result-detail presentation are deliberately excluded."
     },
     {
       "id": "scenarios.runtime-policy",
       "category": "Scenarios",
       "name": "Scenario timeout, retry & quorum policy",
       "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-scenarios-cli-only.md#platform-support",
       "notes": "Scenario runtime policies are CLI/daemon-only; iOS and macOS do not model or surface policy state."
     },
     {
       "id": "todo.manage",
       "category": "Todo list",
-      "name": "Todo list",
+      "name": "Manage todo items",
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",
+      "notes": "Add, claim, assign, transition, and remove are agent/orchestrator operations; native apps deliberately do not edit todo state."
+    },
+    {
+      "id": "todo.browse",
+      "category": "Todo list",
+      "name": "View todo lists and progress",
       "cli": "supported", "ios": "planned", "macos": "planned",
-      "notes": "A durable, shared todo list with atomic claim of items across sessions; the `gr todo` CLI ships now, GUI surfacing is a planned follow-up (issue #591)."
+      "notes": "A read-only native overview is in scope; todo mutation remains CLI/orchestrator-only."
     },
     {
       "id": "triggers.manage",
       "category": "Triggers",
       "name": "List / status / run / pause / resume triggers",
-      "cli": "supported", "ios": "planned", "macos": "planned"
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",
+      "notes": "Trigger lifecycle is an automation control plane kept in the CLI and orchestrator."
     },
     {
       "id": "mcp.manage",
       "category": "MCP servers",
       "name": "List / restart / inspect MCP servers",
-      "cli": "supported", "ios": "planned", "macos": "planned"
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",
+      "notes": "MCP server inspection and restart are developer operations kept in the CLI."
     },
     {
       "id": "store.access",
       "category": "Document store",
-      "name": "Put / get / list / append / remove documents",
-      "cli": "supported", "ios": "planned", "macos": "planned"
+      "name": "Put / append / remove documents",
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",
+      "notes": "Document mutation is an agent and scripting primitive; native apps retain the separate read-only browser."
     },
     {
       "id": "store.browse",
@@ -259,13 +294,17 @@
       "id": "notify.send",
       "category": "Notifications",
       "name": "Send a desktop / push notification to the human",
-      "cli": "supported", "ios": "planned", "macos": "planned"
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",
+      "notes": "Agents and scripts send notifications; native apps are notification recipients and presenters."
     },
     {
       "id": "sandbox.introspect",
       "category": "Sandbox introspection",
       "name": "Explain / watch sandbox policy and denials",
-      "cli": "supported", "ios": "planned", "macos": "planned"
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",
+      "notes": "Sandbox explain/watch output is diagnostic and streaming, making the terminal its natural interface."
     },
     {
       "id": "config.view",

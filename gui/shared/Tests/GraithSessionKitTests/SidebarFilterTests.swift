@@ -154,7 +154,7 @@ struct FleetModelFilterTests {
     }
 
     @Test func defaultsAreInactive() async {
-        let (fleet, _) = makeFleetWithRemote(sessions: sample(), subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote(sessions: sample())
         await fleet.connectAll()
         #expect(fleet.viewMode == .all)
         #expect(!fleet.isFilterActive)
@@ -162,7 +162,7 @@ struct FleetModelFilterTests {
     }
 
     @Test func viewModeNarrowsGrouping() async {
-        let (fleet, _) = makeFleetWithRemote(sessions: sample(), subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote(sessions: sample())
         await fleet.connectAll()
         fleet.viewMode = .needsAttention
         #expect(fleet.isFilterActive)
@@ -171,7 +171,7 @@ struct FleetModelFilterTests {
     }
 
     @Test func searchNarrowsGrouping() async {
-        let (fleet, _) = makeFleetWithRemote(sessions: sample(), subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote(sessions: sample())
         await fleet.connectAll()
         fleet.searchQuery = "bide"
         let ids = fleet.sessionsByRepo.flatMap { $0.sessions }.map(\.id)
@@ -179,7 +179,7 @@ struct FleetModelFilterTests {
     }
 
     @Test func starredOnlyNarrowsGrouping() async {
-        let (fleet, _) = makeFleetWithRemote(sessions: sample(), subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote(sessions: sample())
         await fleet.connectAll()
         fleet.starredOnly = true
         let ids = fleet.sessionsByRepo.flatMap { $0.sessions }.map(\.id)
@@ -187,7 +187,7 @@ struct FleetModelFilterTests {
     }
 
     @Test func repoFilterNarrowsGrouping() async {
-        let (fleet, _) = makeFleetWithRemote(sessions: sample(), subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote(sessions: sample())
         await fleet.connectAll()
         fleet.repoFilter = "glen"
         let ids = fleet.sessionsByRepo.flatMap { $0.sessions }.map(\.id)
@@ -195,13 +195,13 @@ struct FleetModelFilterTests {
     }
 
     @Test func availableReposIsSortedDistinct() async {
-        let (fleet, _) = makeFleetWithRemote(sessions: sample(), subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote(sessions: sample())
         await fleet.connectAll()
         #expect(fleet.availableRepos == ["croft", "glen"])
     }
 
     @Test func clearFiltersResetsEverything() async {
-        let (fleet, _) = makeFleetWithRemote(sessions: sample(), subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote(sessions: sample())
         await fleet.connectAll()
         fleet.viewMode = .active
         fleet.searchQuery = "braw"
@@ -216,7 +216,7 @@ struct FleetModelFilterTests {
     }
 
     @Test func allSessionsByRepoIgnoresFilter() async {
-        let (fleet, _) = makeFleetWithRemote(sessions: sample(), subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote(sessions: sample())
         await fleet.connectAll()
         fleet.viewMode = .active
         // Filtered view has one repo group entry (croft/braw); the raw grouping
@@ -269,5 +269,5 @@ private func makeTwoHostFleet(hostA: [SessionInfo], hostB: [SessionInfo]) -> Fle
     let pairing = PairingCoordinator(pairing: StubPairing(), identity: identity, registry: registry)
     return FleetModel(
         registry: registry, identity: identity, reachability: nil,
-        factory: factory, pairing: pairing, subscribeApprovals: false)
+        factory: factory, pairing: pairing)
 }

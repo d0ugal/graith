@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "capabilities": [
     {
       "id": "session.list",
@@ -74,7 +74,8 @@
     {
       "id": "session.wait",
       "ios": "n/a",
-      "macos": "n/a"
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-platform-scope-policy.md#platform-support"
     },
     {
       "id": "session.repo-list",
@@ -114,17 +115,20 @@
     {
       "id": "terminal.remote-type",
       "ios": "n/a",
-      "macos": "n/a"
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-platform-scope-policy.md#platform-support"
     },
     {
       "id": "approvals.subscribe",
-      "ios": "supported",
-      "macos": "supported"
+      "ios": "n/a",
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support"
     },
     {
       "id": "approvals.respond",
-      "ios": "supported",
-      "macos": "supported"
+      "ios": "n/a",
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support"
     },
     {
       "id": "pairing.request",
@@ -133,8 +137,9 @@
     },
     {
       "id": "pairing.manage",
-      "ios": "planned",
-      "macos": "planned"
+      "ios": "n/a",
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support"
     },
     {
       "id": "messaging.send",
@@ -147,49 +152,69 @@
       "macos": "supported"
     },
     {
+      "id": "messaging.topics",
+      "ios": "n/a",
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support"
+    },
+    {
       "id": "messaging.jail",
-      "ios": "planned",
-      "macos": "planned"
+      "ios": "n/a",
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support"
     },
     {
       "id": "scenarios.manage",
-      "ios": "supported",
-      "macos": "supported"
+      "ios": "n/a",
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-scenarios-cli-only.md#platform-support"
     },
     {
       "id": "scenarios.completion-automation",
-      "ios": "planned",
-      "macos": "planned"
+      "ios": "n/a",
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-scenarios-cli-only.md#platform-support"
     },
     {
       "id": "scenarios.results",
-      "ios": "planned",
-      "macos": "planned"
+      "ios": "n/a",
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-scenarios-cli-only.md#platform-support"
     },
     {
       "id": "scenarios.runtime-policy",
       "ios": "n/a",
-      "macos": "n/a"
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-scenarios-cli-only.md#platform-support"
     },
     {
       "id": "todo.manage",
+      "ios": "n/a",
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support"
+    },
+    {
+      "id": "todo.browse",
       "ios": "planned",
       "macos": "planned"
     },
     {
       "id": "triggers.manage",
-      "ios": "planned",
-      "macos": "planned"
+      "ios": "n/a",
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support"
     },
     {
       "id": "mcp.manage",
-      "ios": "planned",
-      "macos": "planned"
+      "ios": "n/a",
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support"
     },
     {
       "id": "store.access",
-      "ios": "planned",
-      "macos": "planned"
+      "ios": "n/a",
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support"
     },
     {
       "id": "store.browse",
@@ -198,13 +223,15 @@
     },
     {
       "id": "notify.send",
-      "ios": "planned",
-      "macos": "planned"
+      "ios": "n/a",
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support"
     },
     {
       "id": "sandbox.introspect",
-      "ios": "planned",
-      "macos": "planned"
+      "ios": "n/a",
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support"
     },
     {
       "id": "config.view",
