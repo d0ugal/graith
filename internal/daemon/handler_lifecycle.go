@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -416,7 +417,10 @@ func handleType(sm *SessionManager, auth authContext, send func(string, any), ms
 	}
 
 	if sm.HasAttachedClient(t.SessionID) {
-		if !pty.WaitForUserIdle(typeIdleTimeout, typeMaxWait) {
+		// Read one coherent config snapshot for this operation so a concurrent
+		// reload can't split the idle timeout and max wait across generations; a
+		// reload applies to the next gr type (issue #1317).
+		if maxWaitExpired := !waitForTypeIdle(sm.Config().Input, pty.WaitForUserIdle); maxWaitExpired {
 			log.Warn("gr type: max wait expired, injecting while user may still be active",
 				"session", t.SessionID)
 		}
@@ -439,6 +443,16 @@ func handleType(sm *SessionManager, auth authContext, send func(string, any), ms
 	send("typed", struct {
 		SessionID string `json:"session_id"`
 	}{t.SessionID})
+}
+
+// waitForTypeIdle applies the effective [input] gr type PTY-injection timing:
+// it blocks (via wait) until an attached user has been idle for the configured
+// idle timeout, bounded by the configured max wait. It returns true when the
+// user went idle in time and false when the max wait expired (the caller then
+// injects anyway and warns). Extracted so the timing policy can be tested
+// without a real PTY (issue #1317).
+func waitForTypeIdle(input config.InputConfig, wait func(idleTimeout, maxWait time.Duration) bool) bool {
+	return wait(input.TypeIdleTimeoutDuration(), input.TypeMaxWaitDuration())
 }
 
 // lifecycleRequest holds the fields shared by the stop and delete control

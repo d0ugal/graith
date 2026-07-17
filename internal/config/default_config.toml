@@ -522,6 +522,14 @@ message_prev_conversation = "h left shift+tab"  # switch to the previous convers
 drag_arrow_keys = false
 # Cells of drag movement per emitted arrow-key press (values < 1 use the default).
 drag_arrow_threshold = 2
+# gr type PTY-injection timing. When a human is attached, gr type waits for the
+# terminal to be idle before injecting so it doesn't collide with active typing.
+# These are separate from [notifications.timing] so manual injection and inbox
+# notifications can be tuned independently (issue #1317). Unset uses the defaults
+# shown; an explicit invalid, zero, or negative value is rejected at load.
+# Reloads apply to the next gr type.
+type_idle_timeout = "10s"   # idle time required before injecting
+type_max_wait = "2m"        # cap on the idle wait; then inject with a warning
 
 # A special worktree-less session for coordinating other sessions (ctrl+b o).
 [orchestrator]

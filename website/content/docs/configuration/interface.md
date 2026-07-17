@@ -109,9 +109,13 @@ In the session picker (`ctrl+b w`), each of these keys jumps directly to the cor
 [input]
 drag_arrow_keys      = false  # translate a left-click hold-and-drag into arrow-key presses
 drag_arrow_threshold = 2      # cells of drag movement per emitted arrow-key press (values < 1 use the default)
+type_idle_timeout    = "10s"  # idle time required before gr type injects into an attached session
+type_max_wait        = "2m"   # cap on the idle wait; then gr type injects with a warning
 ```
 
 `drag_arrow_keys` lets you press-and-hold the left mouse button and drag up/down/left/right to emit discrete arrow-key presses to the focused pane — handy on touch/mobile terminals. It is off by default because it repurposes left-drag, which terminals otherwise use for text selection. Mouse-wheel scrolling always passes through unchanged. It only takes effect when the focused app has SGR mouse reporting enabled (e.g. a TUI tracking the mouse); graith translates those reports, it does not enable mouse tracking itself.
+
+`type_idle_timeout` and `type_max_wait` govern when `gr type` injects into a session that has an attached human. To avoid colliding with active typing, `gr type` waits for the terminal to be idle for `type_idle_timeout`; if the terminal never settles it injects anyway after `type_max_wait`, logging a warning. These are deliberately separate from `[notifications.timing]` so manual injection and inbox notifications can be tuned independently. Leaving a value unset uses the default shown; an explicit invalid, zero, or negative duration is rejected at load, and a reload applies to the next `gr type`.
 
 ## Terminal & TUI presentation
 

@@ -39,11 +39,6 @@ func describeSessionExit(s SessionState) string {
 	}
 }
 
-const (
-	typeIdleTimeout = 10 * time.Second
-	typeMaxWait     = 2 * time.Minute
-)
-
 // HandleConnection processes the frame protocol for a single client connection.
 // origin describes where the connection came from (local Unix socket vs remote
 // tailnet listener) and carries the tailnet identity for remote connections;

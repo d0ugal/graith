@@ -556,6 +556,41 @@ type InputConfig struct {
 	// DragArrowThreshold is the number of cells of drag movement that produces
 	// one arrow-key press. Values below 1 fall back to the default.
 	DragArrowThreshold int `toml:"drag_arrow_threshold"`
+	// TypeIdleTimeout is how long an attached session's PTY must be free of user
+	// input before `gr type` injects, so an injected line doesn't collide with a
+	// human's active typing. Unset uses the default (TypeIdleTimeoutDefault); a
+	// non-empty invalid, zero, or negative value is rejected at load/reload by
+	// Validate. Mirrors the notification inbox-idle policy but is deliberately a
+	// separate knob so manual injection and inbox notifications can be tuned
+	// independently (issue #1317).
+	TypeIdleTimeout string `toml:"type_idle_timeout"`
+	// TypeMaxWait caps the total wait for user idle before `gr type` injects
+	// regardless (with a warning). Unset uses the default (TypeMaxWaitDefault); a
+	// non-empty invalid, zero, or negative value is rejected at load/reload by
+	// Validate. See issue #1317.
+	TypeMaxWait string `toml:"type_max_wait"`
+}
+
+// gr type PTY-injection timing defaults. Each mirrors the fixed constant that
+// governed the behaviour before issue #1317 made the policy configurable.
+const (
+	TypeIdleTimeoutDefault = 10 * time.Second
+	TypeMaxWaitDefault     = 2 * time.Minute
+)
+
+// TypeIdleTimeoutDuration returns the user-idle wait before `gr type` injects.
+// A loaded config only ever holds an empty value (default) or a valid positive
+// duration because Validate rejects the rest; the non-positive/unparseable
+// fallback here is defensive for directly-constructed InputConfig values.
+func (i InputConfig) TypeIdleTimeoutDuration() time.Duration {
+	return positiveDurationOrDefault(i.TypeIdleTimeout, TypeIdleTimeoutDefault)
+}
+
+// TypeMaxWaitDuration returns the cap on the `gr type` user-idle wait. As with
+// TypeIdleTimeoutDuration, the fallback is defensive: Validate already rejects a
+// non-empty invalid, zero, or negative value at load/reload.
+func (i InputConfig) TypeMaxWaitDuration() time.Duration {
+	return positiveDurationOrDefault(i.TypeMaxWait, TypeMaxWaitDefault)
 }
 
 // DefaultRemotePort is the TCP port the tailnet control listener binds when
@@ -2545,22 +2580,29 @@ type Keybindings struct {
 	Overlay OverlayKeybindings `toml:"overlay"`
 }
 
+// passthroughActions lists the remappable prefix actions. The slice ORDER is the
+// single source of truth for runtime precedence when two actions share a byte:
+// it must match the switch order in internal/client/passthrough.go
+// (runPassthroughLoop), where the first matching case wins. Conflicts() relies on
+// this order to report the action that actually executes; a mismatch would name
+// the wrong winner (issue #1233). Validate() ignores the order. Keep the two in
+// lockstep — TestPassthroughActionOrderMatchesRuntime guards this.
 func (k Keybindings) passthroughActions() []struct{ label, key string } {
 	return []struct{ label, key string }{
 		{"detach", k.Detach},
+		{"approvals", k.Approvals},
 		{"session_list", k.SessionList},
+		{"messages", k.Messages},
 		{"shell", k.Shell},
 		{"next_session", k.NextSession},
 		{"prev_session", k.PrevSession},
+		{"restart_session", k.RestartSession},
 		{"last_session", k.LastSession},
 		{"new_session", k.NewSession},
 		{"fork_session", k.ForkSession},
 		{"orchestrator_session", k.OrchestratorSession},
 		{"rename_session", k.RenameSession},
 		{"scroll_mode", k.ScrollMode},
-		{"messages", k.Messages},
-		{"approvals", k.Approvals},
-		{"restart_session", k.RestartSession},
 	}
 }
 
@@ -2577,19 +2619,23 @@ func parsePassthroughByte(raw string) (byte, bool) {
 }
 
 func parsePrefixByte(raw string) (byte, bool) {
-	s := strings.TrimSpace(strings.ToLower(raw))
-	if s == "" {
+	if raw == "" {
 		return 0x02, true // empty keeps the historical ctrl+b default
 	}
 
-	if strings.HasPrefix(s, "ctrl+") && len(s) == 6 {
-		ch := s[5]
+	// Normalize only the documented ctrl+letter control syntax (case-insensitive).
+	// A single printable ASCII byte is a literal and must survive byte-for-byte:
+	// applying TrimSpace/ToLower to the whole value silently rewrites the valid
+	// literal "A" to "a" and collapses the valid literal " " (0x20) to empty,
+	// which would restore the ctrl+b default (issue #1233).
+	if lowered := strings.ToLower(raw); strings.HasPrefix(lowered, "ctrl+") && len(lowered) == 6 {
+		ch := lowered[5]
 		if ch >= 'a' && ch <= 'z' {
 			return ch - 'a' + 1, true
 		}
 	}
 
-	return parsePassthroughByte(s)
+	return parsePassthroughByte(raw)
 }
 
 // Validate rejects passthrough bindings that the byte-oriented runtime cannot
@@ -2649,9 +2695,12 @@ func (k Keybindings) Conflicts() []string {
 	for _, key := range keys {
 		labels := seen[key]
 		if len(labels) > 1 {
+			// labels are collected in runtime-precedence order — the prefix first,
+			// then passthroughActions() in switch order — so labels[0] is the
+			// action that actually executes for this byte (issue #1233).
 			conflicts = append(conflicts, fmt.Sprintf(
-				"keybinding byte %q is bound to multiple prefix commands: %s (prefix and earlier actions take precedence)",
-				string(rune(key)), strings.Join(labels, ", ")))
+				"keybinding byte %q is bound to multiple prefix commands: %s (%s takes precedence)",
+				string(rune(key)), strings.Join(labels, ", "), labels[0]))
 		}
 	}
 
@@ -4814,6 +4863,8 @@ func (c *Config) Validate() error {
 		{"lifecycle.adopted_timeout", c.Lifecycle.AdoptedTimeout},
 		{"lifecycle.adopted_poll_interval", c.Lifecycle.AdoptedPollInterval},
 		{"lifecycle.input_delay", c.Lifecycle.InputDelay},
+		{"input.type_idle_timeout", c.Input.TypeIdleTimeout},
+		{"input.type_max_wait", c.Input.TypeMaxWait},
 	} {
 		validatePositiveDurationField(&errs, f.name, f.val)
 	}
