@@ -2,8 +2,8 @@
 title: "Design Doc: Scenario Member Mirrors"
 authors: Codex
 created: 2026-07-17
-status: Accepted
-reviewers: (pending implementation review)
+status: Implemented
+reviewers: Implementation review complete
 informed: Graith maintainers
 issue: https://github.com/d0ugal/graith/issues/1378
 ---
