@@ -14,6 +14,7 @@ import (
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/store"
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 // Fork creates a new session/worktree that natively continues the source
@@ -45,8 +46,12 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	}
 
 	// --- Pre-lock: discover GitHub username ---
+	// Capture cfg, the source session, and the git/gh tool generation under one
+	// RLock so the whole fork runs on a single coherent (config, tools) snapshot;
+	// gitRunner threads through every git call below (#1287).
 	sm.mu.RLock()
 	cfgSnapshot := sm.cfg
+	toolSnap := tools.Snapshot()
 	source, sourceOk := sm.state.Sessions[sourceSessionID]
 
 	var (
@@ -60,6 +65,9 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	}
 
 	sm.mu.RUnlock()
+
+	gitRunner := git.NewRunnerWith(toolSnap.Git)
+	ghBin := toolSnap.GH
 
 	// Validate the target model outside the lock — validateModel may exec an
 	// external validator (up to a 10s timeout), and holding sm.mu across it would
@@ -84,7 +92,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	preUsername := cfgSnapshot.GitHubUsername
 	if preUsername == "" && sourceRepoPath != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), cfgSnapshot.Git.UsernameTimeoutDuration())
-		preUsername, _ = git.DiscoverGitHubUsername(ctx, sourceRepoPath)
+		preUsername, _ = git.DiscoverGitHubUsernameWith(ctx, gitRunner, ghBin, sourceRepoPath)
 
 		cancel()
 	}
@@ -291,9 +299,9 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		_ = os.Remove(sm.safehouseFragmentPath(id))
 
 		if len(forkIncludes) > 0 {
-			_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, forkIncludes)
+			_ = sm.teardownIncludes(gitRunner, repoRoot, worktreePath, branchName, forkIncludes)
 		} else {
-			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+			_ = gitRunner.TeardownSession(repoRoot, worktreePath, branchName)
 		}
 	}
 	rollbackState := func() {
@@ -362,7 +370,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	defer gitCancel()
 
 	if len(sourceForkIncludes) > 0 {
-		if err := git.SetupSession(gitCtx, repoRoot, worktreePath, branchName, baseBranch, fetchOnCreate); err != nil {
+		if err := gitRunner.SetupSession(gitCtx, repoRoot, worktreePath, branchName, baseBranch, fetchOnCreate); err != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("setup main repo git session for fork: %w", err)
 		}
@@ -371,8 +379,8 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 			incBranch := fmt.Sprintf("%s/%s-%s/%s", branchPrefix, name, id, srcInc.RepoName)
 
 			incWorktreePath := filepath.Join(sessionDir, srcInc.RepoName)
-			if err := git.SetupSession(gitCtx, srcInc.RepoPath, incWorktreePath, incBranch, srcInc.Branch, fetchOnCreate); err != nil {
-				_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, forkIncludes)
+			if err := gitRunner.SetupSession(gitCtx, srcInc.RepoPath, incWorktreePath, incBranch, srcInc.Branch, fetchOnCreate); err != nil {
+				_ = sm.teardownIncludes(gitRunner, repoRoot, worktreePath, branchName, forkIncludes)
 
 				rollbackState()
 
@@ -393,7 +401,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		// rewritten too (#1033).
 		sm.applyIncludePathRewrites(repoRoot, worktreePath, forkIncludes)
 	} else {
-		if err := git.SetupSession(gitCtx, repoRoot, worktreePath, branchName, baseBranch, fetchOnCreate); err != nil {
+		if err := gitRunner.SetupSession(gitCtx, repoRoot, worktreePath, branchName, baseBranch, fetchOnCreate); err != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("setup git session: %w", err)
 		}
@@ -597,7 +605,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 
 		opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
 		if len(forkIncludes) > 0 {
-			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(forkIncludes)...)
+			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(gitRunner, forkIncludes)...)
 		}
 
 		var wrapErr error

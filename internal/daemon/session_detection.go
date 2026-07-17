@@ -90,12 +90,15 @@ func (sm *SessionManager) fetchRemotes(ctx context.Context) {
 			return
 		}
 
-		if !git.HasRemote(dir, "origin") {
+		// Pin one Runner per repo so the remote check and the fetch run against
+		// the same git executable across a possible mid-loop [tools] reload (#1287).
+		r := git.NewRunner()
+		if !r.HasRemote(dir, "origin") {
 			continue
 		}
 
 		fetchCtx, cancel := context.WithTimeout(ctx, fetchPerRepoTimeout)
-		if err := git.FetchRemote(fetchCtx, dir); err != nil {
+		if err := r.FetchRemote(fetchCtx, dir); err != nil {
 			sm.log.Debug("periodic fetch failed", "dir", dir, "error", err)
 		}
 
@@ -246,13 +249,19 @@ func (sm *SessionManager) detectAgentStatuses() {
 		)
 
 		if !t.mirror {
+			// Pin one Runner for this target's whole status computation (dirty +
+			// unpushed, across the main worktree and every include) so a mid-scan
+			// [tools] reload can't run some checks on a different git executable
+			// (#1287).
+			r := git.NewRunner()
+
 			if t.worktreePath != "" && t.repoPath != "" {
-				if d, err := git.HasUncommittedChanges(t.worktreePath); err == nil {
+				if d, err := r.HasUncommittedChanges(t.worktreePath); err == nil {
 					dirty = d
 				}
 
 				if t.baseBranch != "" {
-					if n, err := git.UnpushedCommitCount(t.worktreePath, t.baseBranch); err == nil {
+					if n, err := r.UnpushedCommitCount(t.worktreePath, t.baseBranch); err == nil {
 						unpushed = n
 					}
 				}
@@ -260,13 +269,13 @@ func (sm *SessionManager) detectAgentStatuses() {
 
 			for i := range t.includes {
 				inc := &t.includes[i]
-				if d, err := git.HasUncommittedChanges(inc.WorktreePath); err == nil {
+				if d, err := r.HasUncommittedChanges(inc.WorktreePath); err == nil {
 					inc.dirty = d
 					dirty = dirty || d
 				}
 
 				if inc.BaseBranch != "" {
-					if n, err := git.UnpushedCommitCount(inc.WorktreePath, inc.BaseBranch); err == nil {
+					if n, err := r.UnpushedCommitCount(inc.WorktreePath, inc.BaseBranch); err == nil {
 						inc.unpushed = n
 						unpushed += n
 					}

@@ -16,6 +16,113 @@ import (
 	"github.com/d0ugal/graith/internal/tools"
 )
 
+// TestLifecycleSetupPinsToolGenerationAcrossReload is the #1287 create/fork/
+// resume-style A/B regression. It exercises the exact Runner threading the
+// lifecycle uses: a config+tools bundle is captured once via configWithTools,
+// then setup (fetch → branch → worktree) and rollback teardown run on that one
+// pinned Runner. The fetch blocks; the tools registry is reloaded to wrapper B
+// mid-setup; after release the whole setup AND its rollback must stay on A, and
+// a fresh operation (new bundle) must run entirely on B.
+func TestLifecycleSetupPinsToolGenerationAcrossReload(t *testing.T) {
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not found on PATH")
+	}
+
+	_, cloneDir := setupTestRepo(t)
+
+	t.Cleanup(tools.Reset)
+
+	binDir := t.TempDir()
+	logPath := filepath.Join(binDir, "calls.log")
+	releasePath := filepath.Join(binDir, "release")
+
+	wrapperA := writePullGitWrapper(t, binDir, "gitA", "A", realGit, logPath, releasePath)
+	wrapperB := writePullGitWrapper(t, binDir, "gitB", "B", realGit, logPath, "")
+
+	sm := newTestSM(t)
+
+	tools.Configure(tools.Config{Git: wrapperA})
+
+	// Capture the pinned Runner exactly as create/fork/resume do.
+	_, r, _ := sm.configWithTools()
+
+	wtA := filepath.Join(t.TempDir(), "wtA")
+
+	setupErr := make(chan error, 1)
+
+	go func() {
+		setupErr <- r.SetupSession(context.Background(), cloneDir, wtA, "graith/gen-a", "main", true)
+	}()
+
+	waitForLogContains(t, logPath, " fetch")
+
+	// Reload the tools registry mid-setup; the in-flight operation must ignore it.
+	tools.Configure(tools.Config{Git: wrapperB})
+
+	if err := os.WriteFile(releasePath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-setupErr:
+		if err != nil {
+			t.Fatalf("SetupSession: %v", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("SetupSession did not complete after release")
+	}
+
+	// Rollback teardown runs on the SAME pinned Runner (as create/fork rollback).
+	if err := r.TeardownSession(cloneDir, wtA, "graith/gen-a"); err != nil {
+		t.Fatalf("TeardownSession: %v", err)
+	}
+
+	op1 := readNonEmptyLines(t, logPath)
+	if len(op1) == 0 {
+		t.Fatal("setup+teardown ran no git subcommands")
+	}
+
+	sawFetch := false
+
+	for _, line := range op1 {
+		if !strings.HasPrefix(line, "A ") {
+			t.Fatalf("lifecycle op ran a subcommand on the wrong generation: %q (setup + rollback must stay on A)", line)
+		}
+
+		if strings.Contains(line, " fetch") {
+			sawFetch = true
+		}
+	}
+
+	if !sawFetch {
+		t.Fatal("setup never reached the fetch stage; the reload window was not exercised")
+	}
+
+	// A fresh lifecycle operation picks up the new generation wholesale.
+	if err := os.Truncate(logPath, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	_, r2, _ := sm.configWithTools()
+	wtB := filepath.Join(t.TempDir(), "wtB")
+
+	if err := r2.SetupSession(context.Background(), cloneDir, wtB, "graith/gen-b", "main", true); err != nil {
+		t.Fatalf("second SetupSession: %v", err)
+	}
+
+	op2 := readNonEmptyLines(t, logPath)
+	if len(op2) == 0 {
+		t.Fatal("second setup ran no git subcommands")
+	}
+
+	for _, line := range op2 {
+		if !strings.HasPrefix(line, "B ") {
+			t.Fatalf("second lifecycle op ran a subcommand on the old generation: %q (must run entirely on B)", line)
+		}
+	}
+}
+
 // TestPullIfCleanPinsToolGenerationAcrossReload is the #1287 git-pull A/B
 // regression: a single pull runs many git subprocesses (rev-parse, symbolic-ref,
 // fetch, merge-base, merge). They must all run against one resolved git
@@ -147,7 +254,7 @@ func writePullGitWrapper(t *testing.T, dir, name, tag, realGit, logPath, release
 		"exec '" + realGit + "' \"$@\"\n"
 
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil { //nolint:gosec // G306: git wrapper must be executable
 		t.Fatal(err)
 	}
 

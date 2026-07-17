@@ -71,7 +71,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		return SessionState{}, fmt.Errorf("session %q already uses agent %q", id, targetAgent)
 	}
 
-	cfg := sm.Config()
+	cfg, gitRunner, ghBin := sm.configWithTools()
 
 	targetCfg, ok := cfg.Agents[targetAgent]
 	if !ok {
@@ -215,7 +215,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 
 	// --- start the target agent in the same worktree, seeded ---
 	seed := transcript.BuildSeedPrompt(srcAgent, contextPath)
-	res, startErr := sm.resumeWithSummaryAndPromptFromConfig(cfg, id, rows, cols, "Migrated from "+srcAgent, seed)
+	res, startErr := sm.resumeWithSummaryAndPromptFromConfig(cfg, gitRunner, ghBin, id, rows, cols, "Migrated from "+srcAgent, seed)
 
 	// Post-start health check: a PTY that spawns but exits immediately (bad
 	// auth/config — the likely outage case) is not a healthy start.
@@ -264,7 +264,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 				targetAgent, srcAgent, contextPath, errors.Join(startErr, targetStopErr))
 		}
 
-		if _, rerr := sm.resumeWithSummaryAndPromptFromConfig(cfg, id, rows, cols, "Restored after failed migrate to "+targetAgent, ""); rerr != nil {
+		if _, rerr := sm.resumeWithSummaryAndPromptFromConfig(cfg, gitRunner, ghBin, id, rows, cols, "Restored after failed migrate to "+targetAgent, ""); rerr != nil {
 			// Both agents failed: leave the session Stopped with the original
 			// fields, retaining MigratedFrom + the rendered context for recovery.
 			return SessionState{}, fmt.Errorf(

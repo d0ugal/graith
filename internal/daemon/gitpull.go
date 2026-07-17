@@ -102,16 +102,14 @@ func (sm *SessionManager) runGitPullTick(ctx context.Context) {
 }
 
 func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (bool, error) {
-	// Take a single config snapshot for the whole operation so the fetch and
-	// merge timeouts can never race a concurrent applyConfig (issue #1287).
-	cfg := sm.Config()
-
-	// Pin the git executable once for the whole pull so a config reload that
-	// swaps the [tools] git binary between subcommands can't split one pull
-	// across two executables (rev-parse on A, merge on B). Every git subprocess
-	// below — including resolveUpstream and DiscoverDefaultBranch — runs on this
-	// one Runner (issue #1287).
-	r := git.NewRunner()
+	// Capture the config and the git executable as one coherent generation:
+	// configWithTools reads both under one sm.mu RLock (applyConfig co-publishes
+	// them), so the fetch/merge timeouts and the pinned git binary can never come
+	// from different generations. Every git subprocess below — including
+	// resolveUpstream and DiscoverDefaultBranch — runs on this one Runner, so a
+	// reload mid-pull can neither pair old timeouts with a new executable nor
+	// split the pull across two executables (issue #1287).
+	cfg, r, _ := sm.configWithTools()
 
 	isBare, err := r.RunOutputContext(ctx, repoPath, "rev-parse", "--is-bare-repository")
 	if err != nil {

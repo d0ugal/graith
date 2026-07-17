@@ -10,24 +10,12 @@ import (
 	"github.com/d0ugal/graith/internal/tools"
 )
 
-// DiscoverGitHubUsername resolves the GitHub username via the gh CLI, then two
-// git fallbacks (config github.user, then the origin remote URL). ctx bounds the
-// WHOLE operation: previously only the gh attempt was context-aware while the
-// git fallbacks used the context-less RunOutput, so a stalled configured git
-// wrapper could hang create/resume/fork past git.username_timeout even after the
-// deadline expired (#1238). The gh and git executables are snapshotted once so
-// every attempt runs against a single tools generation (#1287) — a reload
-// mid-discovery cannot mix executables.
-func DiscoverGitHubUsername(ctx context.Context, repoPath string) (string, error) {
-	// Snapshot both executables once (gh for the API attempt, git for the two
-	// fallbacks) via the shared pinned Runner, and bound every attempt with the
-	// same ctx. Previously only the gh attempt honored ctx while the git
-	// fallbacks used the context-less RunOutput, so a stalled configured git
-	// wrapper could hang create/resume/fork past git.username_timeout (#1238);
-	// resolving per subprocess also let a reload mix executables (#1287).
-	ghBin := tools.GH()
-	r := NewRunner()
-
+// DiscoverGitHubUsernameWith runs discovery on a caller-pinned git Runner and gh
+// executable, so an enclosing lifecycle operation (create/fork/resume) uses ONE
+// atomic tool snapshot for the whole username lookup — the gh attempt and both
+// git fallbacks share the same generation (#1287). ctx bounds every attempt so
+// a stalled git wrapper can't hang past git.username_timeout (#1238).
+func DiscoverGitHubUsernameWith(ctx context.Context, r Runner, ghBin, repoPath string) (string, error) {
 	if u, err := ghCLIUsername(ctx, ghBin); err == nil && u != "" {
 		return u, nil
 	}
@@ -43,6 +31,13 @@ func DiscoverGitHubUsername(ctx context.Context, repoPath string) (string, error
 	}
 
 	return "", errors.New("cannot determine GitHub username; set github_username in config")
+}
+
+// DiscoverGitHubUsername snapshots the gh and git executables itself for one-shot
+// callers.
+func DiscoverGitHubUsername(ctx context.Context, repoPath string) (string, error) {
+	snap := tools.Snapshot()
+	return DiscoverGitHubUsernameWith(ctx, NewRunnerWith(snap.Git), snap.GH, repoPath)
 }
 
 func ghCLIUsername(ctx context.Context, ghBin string) (string, error) {

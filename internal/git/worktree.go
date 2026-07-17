@@ -29,12 +29,11 @@ func RemoveWorktree(repoPath, worktreePath string) error {
 
 // SetupSession creates a session's branch and worktree, optionally fetching
 // origin first. It runs several git subprocesses (fetch → ref check → branch →
-// worktree add), so it pins one Runner for the whole operation to stay
-// generation-coherent if a [tools] reload swaps the git executable mid-setup
-// (#1287).
-func SetupSession(ctx context.Context, repoPath, worktreePath, branchName, baseBranch string, fetch bool) error {
-	r := NewRunner()
-
+// worktree add) on one Runner to stay generation-coherent if a [tools] reload
+// swaps the git executable mid-setup (#1287). The Runner-method form lets an
+// enclosing create/fork operation share a single pinned Runner across all its
+// git calls.
+func (r Runner) SetupSession(ctx context.Context, repoPath, worktreePath, branchName, baseBranch string, fetch bool) error {
 	if fetch && r.HasRemote(repoPath, "origin") {
 		if err := r.FetchOriginContext(ctx, repoPath); err != nil {
 			return fmt.Errorf("fetch: %w", err)
@@ -56,6 +55,10 @@ func SetupSession(ctx context.Context, repoPath, worktreePath, branchName, baseB
 	}
 
 	return nil
+}
+
+func SetupSession(ctx context.Context, repoPath, worktreePath, branchName, baseBranch string, fetch bool) error {
+	return NewRunner().SetupSession(ctx, repoPath, worktreePath, branchName, baseBranch, fetch)
 }
 
 func (r Runner) WorktreeGitDirs(worktreePath string) (gitDir, commonDir string, err error) {
@@ -107,13 +110,17 @@ func PruneWorktrees(repoPath string) error {
 	return NewRunner().PruneWorktrees(repoPath)
 }
 
-func RepoRootFromWorktree(worktreePath string) (string, error) {
-	commonDir, err := RunOutput(worktreePath, "rev-parse", "--git-common-dir")
+func (r Runner) RepoRootFromWorktree(worktreePath string) (string, error) {
+	commonDir, err := r.RunOutput(worktreePath, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return "", err
 	}
 
 	return filepath.Dir(commonDir), nil
+}
+
+func RepoRootFromWorktree(worktreePath string) (string, error) {
+	return NewRunner().RepoRootFromWorktree(worktreePath)
 }
 
 // resolvePath returns the canonical path for comparison, following symlinks
@@ -168,12 +175,12 @@ func IsRegisteredWorktree(repoPath, worktreePath string) bool {
 // registered worktree — an unreachable/invalid source repo, or a stale path
 // pointing somewhere graith doesn't own — is surfaced so the session is kept
 // for retry rather than dropped (and nothing unowned is deleted).
-func TeardownSession(repoPath, worktreePath, branchName string) error {
-	// Pin one Runner for the whole teardown (remove worktree → prune → delete
-	// branch) so a mid-teardown [tools] reload can't split it across executables
-	// (#1287).
-	r := NewRunner()
-
+//
+// It runs on one Runner (remove worktree → prune → delete branch) so a
+// mid-teardown [tools] reload can't split it across executables (#1287); the
+// Runner-method form lets an enclosing create/fork cleanup share the operation's
+// pinned Runner.
+func (r Runner) TeardownSession(repoPath, worktreePath, branchName string) error {
 	var errs []error
 
 	switch _, statErr := os.Stat(worktreePath); {
@@ -206,4 +213,8 @@ func TeardownSession(repoPath, worktreePath, branchName string) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+func TeardownSession(repoPath, worktreePath, branchName string) error {
+	return NewRunner().TeardownSession(repoPath, worktreePath, branchName)
 }

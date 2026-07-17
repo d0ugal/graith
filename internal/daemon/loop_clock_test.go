@@ -421,6 +421,7 @@ func TestRunTokenLoopRetimesCadenceOnReload(t *testing.T) {
 
 	// First tick resets with the original cadence.
 	timer.c <- time.Unix(1, 0)
+
 	<-ticked
 
 	if got := <-timer.resets; got != 30*time.Second {
@@ -432,6 +433,7 @@ func TestRunTokenLoopRetimesCadenceOnReload(t *testing.T) {
 
 	// The next tick must observe the new generation.
 	timer.c <- time.Unix(2, 0)
+
 	<-ticked
 
 	if got := <-timer.resets; got != 5*time.Second {
@@ -442,6 +444,7 @@ func TestRunTokenLoopRetimesCadenceOnReload(t *testing.T) {
 	poll.set(90 * time.Second)
 
 	timer.c <- time.Unix(3, 0)
+
 	<-ticked
 
 	if got := <-timer.resets; got != 90*time.Second {
@@ -482,6 +485,7 @@ func TestRunResourceMonitorLoopRetimesCadenceOnReload(t *testing.T) {
 	}()
 
 	// Immediate startup sample, then the timer is created with the current cadence.
+
 	<-sampled
 
 	if got := <-createdWith; got != 30*time.Second {
@@ -490,6 +494,7 @@ func TestRunResourceMonitorLoopRetimesCadenceOnReload(t *testing.T) {
 
 	// A kick samples immediately but must NOT reset the scheduled timer.
 	kick <- struct{}{}
+
 	<-sampled
 
 	select {
@@ -500,6 +505,7 @@ func TestRunResourceMonitorLoopRetimesCadenceOnReload(t *testing.T) {
 
 	// A scheduled tick samples and resets with the current cadence.
 	timer.c <- time.Unix(1, 0)
+
 	<-sampled
 
 	if got := <-timer.resets; got != 30*time.Second {
@@ -510,6 +516,7 @@ func TestRunResourceMonitorLoopRetimesCadenceOnReload(t *testing.T) {
 	interval.set(5 * time.Second)
 
 	timer.c <- time.Unix(2, 0)
+
 	<-sampled
 
 	if got := <-timer.resets; got != 5*time.Second {

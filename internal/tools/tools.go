@@ -110,6 +110,15 @@ func get() Config {
 	return Defaults()
 }
 
+// Snapshot returns the current fully-merged executable set in a single atomic
+// load. A multi-step operation that needs several tools (e.g. create/fork uses
+// both git and gh for username discovery) captures one Snapshot so every
+// subprocess runs against the same generation even if a config reload swaps the
+// registry mid-operation (#1287).
+func Snapshot() Config {
+	return get()
+}
+
 // Git returns the configured git executable.
 func Git() string { return get().Git }
 

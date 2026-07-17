@@ -342,18 +342,22 @@ func (sm *SessionManager) reconcileLaunchedInputDelay(driver SessionDriver) {
 	setter.SetInputDelay(delay)
 }
 
-func (sm *SessionManager) teardownIncludes(mainRepoPath, mainWorktreePath, mainBranch string, includes []IncludedRepoState) error {
+// teardownIncludes tears down every include worktree and the main worktree on
+// the caller-pinned Runner r, so a create/fork rollback stays on the same git
+// generation as the setup it is undoing, and a standalone teardown runs the
+// whole multi-worktree sweep on one generation (#1287).
+func (sm *SessionManager) teardownIncludes(r git.Runner, mainRepoPath, mainWorktreePath, mainBranch string, includes []IncludedRepoState) error {
 	var errs []error
 
 	for i := len(includes) - 1; i >= 0; i-- {
 		inc := includes[i]
-		if err := git.TeardownSession(inc.RepoPath, inc.WorktreePath, inc.Branch); err != nil {
+		if err := r.TeardownSession(inc.RepoPath, inc.WorktreePath, inc.Branch); err != nil {
 			sm.log.Warn("failed to teardown included worktree", "repo", inc.RepoName, "path", inc.WorktreePath, "err", err)
 			errs = append(errs, err)
 		}
 	}
 
-	if err := git.TeardownSession(mainRepoPath, mainWorktreePath, mainBranch); err != nil {
+	if err := r.TeardownSession(mainRepoPath, mainWorktreePath, mainBranch); err != nil {
 		sm.log.Warn("failed to teardown main worktree", "path", mainWorktreePath, "err", err)
 		errs = append(errs, err)
 	}
@@ -368,12 +372,15 @@ func (sm *SessionManager) teardownIncludes(mainRepoPath, mainWorktreePath, mainB
 	return errors.Join(errs...)
 }
 
-func (sm *SessionManager) deriveSandboxIncludesWriteDirs(includes []IncludedRepoState) []string {
+// deriveSandboxIncludesWriteDirs resolves each include's git dirs on the
+// caller-pinned Runner r, so launch sandbox derivation stays on the same git
+// generation as the rest of the create/fork/resume operation (#1287).
+func (sm *SessionManager) deriveSandboxIncludesWriteDirs(r git.Runner, includes []IncludedRepoState) []string {
 	var dirs []string
 	for _, inc := range includes {
 		dirs = append(dirs, inc.WorktreePath)
 
-		gitDir, commonDir, err := git.WorktreeGitDirs(inc.WorktreePath)
+		gitDir, commonDir, err := r.WorktreeGitDirs(inc.WorktreePath)
 		if err != nil {
 			sm.log.Warn("failed to resolve git dirs for included repo", "repo", inc.RepoName, "err", err)
 			continue

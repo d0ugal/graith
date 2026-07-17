@@ -5,9 +5,8 @@ import (
 	"strings"
 
 	"github.com/aymanbagabas/go-udiff"
-	"github.com/pelletier/go-toml/v2"
-
 	"github.com/d0ugal/graith/internal/tools"
+	"github.com/pelletier/go-toml/v2"
 )
 
 // RedactedMask is the placeholder substituted for secret-bearing values when

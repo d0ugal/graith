@@ -18,9 +18,11 @@ import (
 	"github.com/d0ugal/graith/internal/agent/transcript"
 	"github.com/d0ugal/graith/internal/atomicfile"
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/store"
+	"github.com/d0ugal/graith/internal/tools"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -237,6 +239,23 @@ func (sm *SessionManager) Config() *config.Config {
 	sm.mu.RUnlock()
 
 	return cfg
+}
+
+// configWithTools returns the current config snapshot together with a git Runner
+// and gh executable pinned to the SAME tools generation. applyConfig publishes
+// the config pointer and the process-global tools registry under sm.mu (before
+// the pointer swap), so reading both under one RLock yields a coherent
+// (config, tools) pair. A multi-step lifecycle operation (create/fork/resume)
+// captures this bundle once and threads the Runner through every git call, so a
+// concurrent reload can neither pair the old config with the new executable nor
+// split the operation across two tool generations (#1287).
+func (sm *SessionManager) configWithTools() (*config.Config, git.Runner, string) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	snap := tools.Snapshot()
+
+	return sm.cfg, git.NewRunnerWith(snap.Git), snap.GH
 }
 
 func (sm *SessionManager) SetMsgStore(ms *MsgStore) {

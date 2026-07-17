@@ -6459,7 +6459,7 @@ func TestCovDeriveSandboxIncludesWriteDirsNonGit(t *testing.T) {
 	// A non-git worktree path: the git-dir lookup fails, so only the worktree
 	// path itself is returned (with a warning).
 	nonGit := t.TempDir()
-	dirs := sm.deriveSandboxIncludesWriteDirs([]IncludedRepoState{
+	dirs := sm.deriveSandboxIncludesWriteDirs(git.NewRunner(), []IncludedRepoState{
 		{RepoName: "croft", WorktreePath: nonGit},
 	})
 
@@ -6486,7 +6486,7 @@ func TestCovDeriveSandboxIncludesWriteDirsGit(t *testing.T) {
 		t.Fatalf("expected non-empty git dirs, got gitDir=%q commonDir=%q", gitDir, commonDir)
 	}
 
-	dirs := sm.deriveSandboxIncludesWriteDirs([]IncludedRepoState{
+	dirs := sm.deriveSandboxIncludesWriteDirs(git.NewRunner(), []IncludedRepoState{
 		{RepoName: "croft", WorktreePath: worktree},
 	})
 
@@ -6535,7 +6535,7 @@ func TestCovTeardownIncludes(t *testing.T) {
 		t.Fatal("expected both worktrees registered before teardown")
 	}
 
-	if err := sm.teardownIncludes(clone, mainWorktree, "graith/skelf-main", includes); err != nil {
+	if err := sm.teardownIncludes(git.NewRunner(), clone, mainWorktree, "graith/skelf-main", includes); err != nil {
 		t.Fatalf("teardownIncludes: %v", err)
 	}
 

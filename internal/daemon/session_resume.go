@@ -191,10 +191,15 @@ func (sm *SessionManager) Resume(id string, rows, cols uint16) (SessionState, er
 }
 
 func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecycleSummary string) (SessionState, error) {
-	return sm.resumeWithSummaryAndPromptFromConfig(sm.Config(), id, rows, cols, lifecycleSummary, "")
+	cfg, gitRunner, ghBin := sm.configWithTools()
+	return sm.resumeWithSummaryAndPromptFromConfig(cfg, gitRunner, ghBin, id, rows, cols, lifecycleSummary, "")
 }
 
-func (sm *SessionManager) resumeWithSummaryAndPromptFromConfig(cfgSnapshot *config.Config, id string, rows, cols uint16, lifecycleSummary, seedPrompt string) (SessionState, error) {
+// resumeWithSummaryAndPromptFromConfig receives an immutable (config, git
+// Runner, gh executable) bundle captured atomically by the caller, and threads
+// gitRunner through every git call so a concurrent [tools] reload can't split
+// the resume across executables (#1287).
+func (sm *SessionManager) resumeWithSummaryAndPromptFromConfig(cfgSnapshot *config.Config, gitRunner git.Runner, ghBin string, id string, rows, cols uint16, lifecycleSummary, seedPrompt string) (SessionState, error) {
 	// --- Pre-lock: discover GitHub username ---
 	sm.mu.RLock()
 	sessSnap, snapOk := sm.state.Sessions[id]
@@ -210,7 +215,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptFromConfig(cfgSnapshot *conf
 	preUsername := cfgSnapshot.GitHubUsername
 	if preUsername == "" && snapRepoPath != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), cfgSnapshot.Git.UsernameTimeoutDuration())
-		preUsername, _ = git.DiscoverGitHubUsername(ctx, snapRepoPath)
+		preUsername, _ = git.DiscoverGitHubUsernameWith(ctx, gitRunner, ghBin, snapRepoPath)
 
 		cancel()
 	}
@@ -311,12 +316,12 @@ func (sm *SessionManager) resumeWithSummaryAndPromptFromConfig(cfgSnapshot *conf
 	}
 
 	if sessState.InPlace {
-		if !git.IsInsideGitRepo(sessState.WorktreePath) {
+		if !gitRunner.IsInsideGitRepo(sessState.WorktreePath) {
 			sm.mu.Unlock()
 			return SessionState{}, fmt.Errorf("in-place repo path %q is no longer a git repository", sessState.WorktreePath)
 		}
 
-		currentRoot, err := git.RepoRootPath(sessState.WorktreePath)
+		currentRoot, err := gitRunner.RepoRootPath(sessState.WorktreePath)
 		if err != nil {
 			sm.mu.Unlock()
 			return SessionState{}, fmt.Errorf("resolve in-place repo root: %w", err)
@@ -679,7 +684,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptFromConfig(cfgSnapshot *conf
 	resumeIncludes := resumeIncludeSet(sessMirror, sessIncludes, sharedSourceIncludes)
 
 	for _, inc := range resumeIncludes {
-		if !git.IsInsideGitRepo(inc.WorktreePath) {
+		if !gitRunner.IsInsideGitRepo(inc.WorktreePath) {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("included worktree %q (%s) is no longer a valid git repo — delete and recreate the session", inc.WorktreePath, inc.RepoName)
 		}
@@ -786,7 +791,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptFromConfig(cfgSnapshot *conf
 		}
 
 		if len(sessIncludes) > 0 {
-			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(sessIncludes)...)
+			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(gitRunner, sessIncludes)...)
 		}
 
 		if sessMirror {

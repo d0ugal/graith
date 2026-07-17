@@ -49,7 +49,10 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, err
 	}
 
-	cfgSnapshot := sm.Config()
+	// Capture the config and the git/gh tool generation as one coherent bundle,
+	// then thread gitRunner through every git call in this create so a concurrent
+	// [tools] reload can't split the operation across executables (#1287).
+	cfgSnapshot, gitRunner, ghBin := sm.configWithTools()
 
 	agent, ok := cfgSnapshot.Agents[agentName]
 	if !ok {
@@ -92,7 +95,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	var preRepoRoot string
 
 	if !noRepo && mirror == "" && repoPath != "" {
-		if !git.IsInsideGitRepo(repoPath) {
+		if !gitRunner.IsInsideGitRepo(repoPath) {
 			if inPlace {
 				return SessionState{}, fmt.Errorf("not inside a git repository: %s", repoPath)
 			}
@@ -102,7 +105,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 		var err error
 
-		preRepoRoot, err = git.RepoRootPath(repoPath)
+		preRepoRoot, err = gitRunner.RepoRootPath(repoPath)
 		if err != nil {
 			return SessionState{}, fmt.Errorf("find repo root: %w", err)
 		}
@@ -111,7 +114,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	preUsername := cfgSnapshot.GitHubUsername
 	if preUsername == "" && preRepoRoot != "" && !inPlace {
 		ctx, cancel := context.WithTimeout(context.Background(), cfgSnapshot.Git.UsernameTimeoutDuration())
-		preUsername, _ = git.DiscoverGitHubUsername(ctx, preRepoRoot)
+		preUsername, _ = git.DiscoverGitHubUsernameWith(ctx, gitRunner, ghBin, preRepoRoot)
 
 		cancel()
 	}
@@ -244,7 +247,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		if baseBranch == "" {
 			var err error
 
-			baseBranch, err = git.DiscoverDefaultBranch(repoRoot)
+			baseBranch, err = gitRunner.DiscoverDefaultBranch(repoRoot)
 			if err != nil {
 				sm.mu.Unlock()
 				return SessionState{}, err
@@ -403,9 +406,9 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		case noRepo:
 			_ = os.RemoveAll(worktreePath)
 		case len(includes) > 0:
-			_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+			_ = sm.teardownIncludes(gitRunner, repoRoot, worktreePath, branchName, includes)
 		case repoRoot != "":
-			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+			_ = gitRunner.TeardownSession(repoRoot, worktreePath, branchName)
 		}
 	}
 	rollbackState := func() {
@@ -423,7 +426,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		branchPrefix, _ := config.Expand(cfgSnapshot.BranchPrefix, config.TemplateVars{Username: preUsername})
 
 		if len(rcIncludes) > 0 {
-			if err := git.SetupSession(gitCtx, repoRoot, worktreePath, branchName, baseBranch, fetchOnCreate); err != nil {
+			if err := gitRunner.SetupSession(gitCtx, repoRoot, worktreePath, branchName, baseBranch, fetchOnCreate); err != nil {
 				rollbackState()
 				return SessionState{}, fmt.Errorf("setup main repo git session: %w", err)
 			}
@@ -431,24 +434,24 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			for _, incPath := range rcIncludes {
 				resolved := config.ResolvePath(incPath)
 				if !cfgSnapshot.RepoPathAllowed(resolved) {
-					_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+					_ = sm.teardownIncludes(gitRunner, repoRoot, worktreePath, branchName, includes)
 
 					rollbackState()
 
 					return SessionState{}, fmt.Errorf("included repo %q is not under any allowed_repo_paths", incPath)
 				}
 
-				if !git.IsInsideGitRepo(resolved) {
-					_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+				if !gitRunner.IsInsideGitRepo(resolved) {
+					_ = sm.teardownIncludes(gitRunner, repoRoot, worktreePath, branchName, includes)
 
 					rollbackState()
 
 					return SessionState{}, fmt.Errorf("included repo %q is not a git repository", incPath)
 				}
 
-				incRoot, err := git.RepoRootPath(resolved)
+				incRoot, err := gitRunner.RepoRootPath(resolved)
 				if err != nil {
-					_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+					_ = sm.teardownIncludes(gitRunner, repoRoot, worktreePath, branchName, includes)
 
 					rollbackState()
 
@@ -457,9 +460,9 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 				incName := filepath.Base(incRoot)
 
-				incBaseBranch, err := git.DiscoverDefaultBranchOrHEAD(incRoot)
+				incBaseBranch, err := gitRunner.DiscoverDefaultBranchOrHEAD(incRoot)
 				if err != nil {
-					_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+					_ = sm.teardownIncludes(gitRunner, repoRoot, worktreePath, branchName, includes)
 
 					rollbackState()
 
@@ -470,8 +473,8 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 				sessionDir := filepath.Dir(worktreePath)
 				incWorktreePath := filepath.Join(sessionDir, incName)
 
-				if err := git.SetupSession(gitCtx, incRoot, incWorktreePath, incBranch, incBaseBranch, fetchOnCreate); err != nil {
-					_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+				if err := gitRunner.SetupSession(gitCtx, incRoot, incWorktreePath, incBranch, incBaseBranch, fetchOnCreate); err != nil {
+					_ = sm.teardownIncludes(gitRunner, repoRoot, worktreePath, branchName, includes)
 
 					rollbackState()
 
@@ -487,7 +490,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 				})
 			}
 		} else {
-			if err := git.SetupSession(gitCtx, repoRoot, worktreePath, branchName, baseBranch, fetchOnCreate); err != nil {
+			if err := gitRunner.SetupSession(gitCtx, repoRoot, worktreePath, branchName, baseBranch, fetchOnCreate); err != nil {
 				rollbackState()
 				return SessionState{}, fmt.Errorf("setup git session: %w", err)
 			}
@@ -742,7 +745,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 		opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
 		if len(includes) > 0 {
-			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(includes)...)
+			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(gitRunner, includes)...)
 		}
 
 		if isMirror {

@@ -31,6 +31,13 @@ func NewRunner() Runner {
 	return Runner{git: tools.Git()}
 }
 
+// NewRunnerWith pins an explicitly-resolved git executable, so a caller that
+// captured a tools.Snapshot atomically with its config snapshot can build a
+// Runner from the same generation (#1287).
+func NewRunnerWith(gitBin string) Runner {
+	return Runner{git: gitBin}
+}
+
 // bin returns the pinned executable, falling back to a live resolution for a
 // zero-value Runner so an accidentally-unpinned Runner still runs git.
 func (r Runner) bin() string {
@@ -159,8 +166,12 @@ func RunCheck(dir string, args ...string) bool {
 	return NewRunner().RunCheck(dir, args...)
 }
 
+func (r Runner) IsInsideGitRepo(dir string) bool {
+	return r.RunCheck(dir, "rev-parse", "--is-inside-work-tree")
+}
+
 func IsInsideGitRepo(dir string) bool {
-	return RunCheck(dir, "rev-parse", "--is-inside-work-tree")
+	return NewRunner().IsInsideGitRepo(dir)
 }
 
 func RefExists(dir string, ref string) bool {
@@ -228,13 +239,17 @@ func (r Runner) commitCount(worktreePath, revRange string) (int, error) {
 // remote branches and never rewrites local branches. It is best-effort:
 // callers use it to keep base-branch refs fresh for the diverged-from-base
 // count and should tolerate failures (offline, no remote).
-func FetchRemote(ctx context.Context, worktreePath string) error {
-	_, stderr, err := RunContext(ctx, worktreePath, "fetch", "--prune", "--quiet", "origin")
+func (r Runner) FetchRemote(ctx context.Context, worktreePath string) error {
+	_, stderr, err := r.RunContext(ctx, worktreePath, "fetch", "--prune", "--quiet", "origin")
 	if err != nil {
 		return fmt.Errorf("git fetch origin: %w\nstderr: %s", err, stderr)
 	}
 
 	return nil
+}
+
+func FetchRemote(ctx context.Context, worktreePath string) error {
+	return NewRunner().FetchRemote(ctx, worktreePath)
 }
 
 func DirtyFiles(dir string) ([]string, error) {
@@ -272,6 +287,10 @@ func UnpushedCommitSummaries(worktreePath, baseBranch string) ([]string, error) 
 	return NewRunner().UnpushedCommitSummaries(worktreePath, baseBranch)
 }
 
+func (r Runner) RepoRootPath(dir string) (string, error) {
+	return r.RunOutput(dir, "rev-parse", "--show-toplevel")
+}
+
 func RepoRootPath(dir string) (string, error) {
-	return RunOutput(dir, "rev-parse", "--show-toplevel")
+	return NewRunner().RepoRootPath(dir)
 }

@@ -452,7 +452,7 @@ func writeGitWrapper(t *testing.T, dir, name, tag, realGit, logPath, releasePath
 		"exec '" + realGit + "' \"$@\"\n"
 
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil { //nolint:gosec // G306: git wrapper must be executable
 		t.Fatal(err)
 	}
 

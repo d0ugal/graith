@@ -59,7 +59,7 @@ func (sm *SessionManager) teardownArtifacts(t teardownSpec) error {
 		// In-place sessions leave the repo untouched.
 		return nil
 	case t.RepoPath != "" && len(t.Includes) > 0:
-		return sm.teardownIncludes(t.RepoPath, t.WorktreePath, t.Branch, t.Includes)
+		return sm.teardownIncludes(git.NewRunner(), t.RepoPath, t.WorktreePath, t.Branch, t.Includes)
 	case t.RepoPath != "":
 		return git.TeardownSession(t.RepoPath, t.WorktreePath, t.Branch)
 	case t.WorktreePath != "":

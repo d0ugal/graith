@@ -245,12 +245,16 @@ func gitRefWatchDirs(worktree string) []string {
 		return nil
 	}
 
-	gitDir, err := git.RunOutput(worktree, "rev-parse", "--absolute-git-dir")
+	// Pin one Runner so both rev-parse subprocesses resolve the same git
+	// executable even if a [tools] reload lands between them (#1287).
+	r := git.NewRunner()
+
+	gitDir, err := r.RunOutput(worktree, "rev-parse", "--absolute-git-dir")
 	if err != nil || gitDir == "" {
 		return nil
 	}
 
-	commonDir, err := git.RunOutput(worktree, "rev-parse", "--git-common-dir")
+	commonDir, err := r.RunOutput(worktree, "rev-parse", "--git-common-dir")
 	if err != nil || commonDir == "" {
 		commonDir = gitDir
 	}

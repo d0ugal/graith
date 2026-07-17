@@ -4,9 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pelletier/go-toml/v2"
-
 	"github.com/d0ugal/graith/internal/tools"
+	"github.com/pelletier/go-toml/v2"
 )
 
 func TestEffectiveTOMLRendersConfig(t *testing.T) {
