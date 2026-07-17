@@ -29,4 +29,19 @@ enum AgentPreference {
         if let explicit, catalog.names.contains(explicit) { return explicit }
         return catalog.resolvedDefault
     }
+
+    /// The Settings picker selection to show for a host whose catalog is
+    /// `catalog`, given the stored global `explicit` preference. Returns the
+    /// explicit value only when *this* host offers it; otherwise `""` ("follow
+    /// this host's daemon default").
+    ///
+    /// The preference is stored globally, so this is deliberately **read-only**:
+    /// a host that does not offer the agent shows the daemon-default row but must
+    /// never erase the stored value, or inspecting one host in Settings would
+    /// destroy a choice still valid on another (#1234). Only an explicit user
+    /// pick — via `store(_:)` — changes the persisted preference.
+    static func selection(explicit: String?, catalog: AgentCatalogResponseMsg?) -> String {
+        guard let explicit, let catalog, catalog.names.contains(explicit) else { return "" }
+        return explicit
+    }
 }

@@ -31,10 +31,14 @@ The macOS and iOS New Session forms fetch this effective catalog and
 `default_agent` from the selected host. Catalogs are host-scoped: switching hosts
 can change both the available names and the default. On macOS, a locally saved
 preference overrides the daemon default only when that host still offers the
-agent; a fresh profile and a removed preference follow the daemon default. If a
-catalog is still loading or unavailable (including from an older daemon), the
-apps do not invent built-in names. They leave the agent unspecified so the
-daemon resolves its own default.
+agent; a fresh profile and a removed preference follow the daemon default. The
+saved preference is global and read-only when inspected: opening Settings against
+a host that does not offer the agent shows that host's daemon default without
+erasing a choice that is still valid on another host. Only picking an agent (or
+"Daemon default") in Settings changes the stored preference. If a catalog is
+still loading or unavailable (including from an older daemon), the apps do not
+invent built-in names. They leave the agent unspecified so the daemon resolves
+its own default.
 
 ```toml
 [agents.claude]

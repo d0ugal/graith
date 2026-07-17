@@ -191,19 +191,15 @@ struct GeneralSettings: View {
         }
         .formStyle(.grouped)
         .task {
-            let explicit = AgentPreference.explicitAgent()
             let loaded = await store.fetchAgentCatalog()
             catalogState = loaded
-            if let catalog = loaded.catalog,
-               let explicit,
-               catalog.names.contains(explicit) {
-                selectedPreference = explicit
-            } else {
-                selectedPreference = ""
-                // A successful daemon response proves this stored value was
-                // removed; clear it so it cannot unexpectedly reappear later.
-                if loaded.catalog != nil, explicit != nil { AgentPreference.store(nil) }
-            }
+            // Read-only against the stored preference: a host that doesn't offer
+            // the agent shows the daemon-default row without erasing a choice
+            // still valid on another host (#1234). Only an explicit pick (the
+            // Picker's setter) mutates the persisted preference.
+            selectedPreference = AgentPreference.selection(
+                explicit: AgentPreference.explicitAgent(),
+                catalog: loaded.catalog)
         }
     }
 }
