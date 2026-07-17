@@ -1,6 +1,10 @@
 package cli
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/d0ugal/graith/internal/config"
+)
 
 func TestParseKeyByte(t *testing.T) {
 	tests := []struct {
@@ -35,10 +39,15 @@ func TestParsePrefixKey(t *testing.T) {
 		{"ctrl+z", 0x1a},
 		{"Ctrl+B", 0x02},
 		{"CTRL+A", 0x01},
-		{" ctrl+b ", 0x02},
 		{"`", '`'},
 		{"", 0x02},
 		{"nonsense", 0x02},
+		// Printable literals must survive byte-for-byte: uppercase "A" stays 0x41
+		// (not lowercased to 0x61) and the space byte stays 0x20 (not trimmed to
+		// empty and silently restored to ctrl+b) — issue #1233.
+		{"A", 'A'},
+		{"Z", 'Z'},
+		{" ", 0x20},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
@@ -47,5 +56,22 @@ func TestParsePrefixKey(t *testing.T) {
 				t.Errorf("parsePrefixKey(%q) = %#x, want %#x", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestParsePrefixKeyMatchesCanonical locks that the CLI prefix parser delegates
+// to the shared config.ParsePrefixByte parser (issue #1233): for any valid value
+// the two must agree byte-for-byte, so the CLI never re-diverges into its own
+// trim/lowercase normalization.
+func TestParsePrefixKeyMatchesCanonical(t *testing.T) {
+	for _, in := range []string{"ctrl+b", "CTRL+A", "ctrl+z", "A", "Z", "a", " ", "`", "~", "!", ""} {
+		want, ok := config.ParsePrefixByte(in)
+		if !ok {
+			continue // invalid values fall back to the default, covered above
+		}
+
+		if got := parsePrefixKey(in); got != want {
+			t.Errorf("parsePrefixKey(%q) = %#x, want canonical %#x", in, got, want)
+		}
 	}
 }

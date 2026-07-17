@@ -166,20 +166,17 @@ var remoteAttachCmd = &cobra.Command{
 // rather than the local daemon. Remote overlay / session-switching is not yet
 // supported — those prefix actions detach with a notice instead of silently
 // talking to the local daemon.
-// remotePassthroughKeysFromConfig builds the subset of prefix-action keys that
-// a remote attach honours. Overlay/session-switching isn't supported over a
-// remote connection, but session_list/shell (and next/prev) are still wired so
-// those prefix actions hit the "not yet supported — detaching" notice rather
-// than silently forwarding the raw bytes to the remote agent.
+// remotePassthroughKeysFromConfig builds the prefix-action keys that a remote
+// attach honours. Overlay/session-switching isn't supported over a remote
+// connection, but every configured prefix binding must be mapped — identically
+// to a local attach — so those prefix actions hit the "not yet supported —
+// detaching" notice rather than silently forwarding the raw prefix/key bytes to
+// the remote agent. In particular messages, approvals, and restart_session must
+// be present: an omitted binding falls through the passthrough switch to the
+// default arm, which re-injects {prefix, key} into the agent PTY (issue #1233).
+// It delegates to the shared local builder so the two mappings can't drift.
 func remotePassthroughKeysFromConfig() client.PassthroughKeys {
-	return client.PassthroughKeys{
-		Prefix:      parsePrefixKey(cfg.Keybindings.Prefix),
-		Detach:      parseKeyByte(cfg.Keybindings.Detach),
-		SessionList: parseKeyByte(cfg.Keybindings.SessionList),
-		Shell:       parseKeyByte(cfg.Keybindings.Shell),
-		NextSession: parseKeyByte(cfg.Keybindings.NextSession),
-		PrevSession: parseKeyByte(cfg.Keybindings.PrevSession),
-	}
+	return passthroughKeysFromConfig()
 }
 
 func runRemoteAttach(rh *client.RemoteHost, signer ed25519.PrivateKey, sessionArg string) error {

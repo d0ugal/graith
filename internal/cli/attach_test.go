@@ -274,10 +274,10 @@ func TestOverlayCancelKeepsCtrlCFromDefaultConfig(t *testing.T) {
 	}
 }
 
-// TestRemotePassthroughKeysFromConfig verifies remote attach still wires
-// session_list and shell (regression for the #918 review): without them,
-// prefix+w / prefix+s forward raw bytes to the remote agent instead of hitting
-// the "not yet supported — detaching" notice.
+// TestRemotePassthroughKeysFromConfig verifies remote attach wires every prefix
+// action — including messages, approvals, and restart_session, which were omitted
+// before the #1233 fix so prefix+m / prefix+a / prefix+r fell through to the
+// agent PTY instead of hitting the "not yet supported — detaching" notice.
 func TestRemotePassthroughKeysFromConfig(t *testing.T) {
 	oldCfg := cfg
 
@@ -285,28 +285,88 @@ func TestRemotePassthroughKeysFromConfig(t *testing.T) {
 
 	cfg = &config.Config{
 		Keybindings: config.Keybindings{
-			Prefix:      "ctrl+b",
-			Detach:      "d",
-			SessionList: "w",
-			Shell:       "s",
-			NextSession: "n",
-			PrevSession: "p",
+			Prefix:              "ctrl+b",
+			Detach:              "d",
+			SessionList:         "w",
+			Shell:               "s",
+			NextSession:         "n",
+			PrevSession:         "p",
+			LastSession:         "l",
+			NewSession:          "c",
+			ForkSession:         "f",
+			OrchestratorSession: "o",
+			RenameSession:       ",",
+			ScrollMode:          "[",
+			Messages:            "m",
+			Approvals:           "a",
+			RestartSession:      "r",
 		},
 	}
 
 	keys := remotePassthroughKeysFromConfig()
 
-	if key, enabled := keys.SessionList.Byte(); !enabled || key != 'w' {
-		t.Errorf("remote SessionList = (%q, %v), want ('w', true)", key, enabled)
+	if keys.Prefix != 0x02 {
+		t.Errorf("remote Prefix = %#x, want 0x02", keys.Prefix)
 	}
 
-	if key, enabled := keys.Shell.Byte(); !enabled || key != 's' {
-		t.Errorf("remote Shell = (%q, %v), want ('s', true)", key, enabled)
+	// Every configured prefix action must be mapped so none falls through to the
+	// remote agent PTY. The three that regressed (messages/approvals/restart) are
+	// included alongside the rest.
+	checks := []struct {
+		label   string
+		binding client.PassthroughBinding
+		want    byte
+	}{
+		{"detach", keys.Detach, 'd'},
+		{"session_list", keys.SessionList, 'w'},
+		{"shell", keys.Shell, 's'},
+		{"next_session", keys.NextSession, 'n'},
+		{"prev_session", keys.PrevSession, 'p'},
+		{"last_session", keys.LastSession, 'l'},
+		{"new_session", keys.NewSession, 'c'},
+		{"fork_session", keys.ForkSession, 'f'},
+		{"orchestrator_session", keys.OrchestratorSession, 'o'},
+		{"rename_session", keys.RenameSession, ','},
+		{"scroll_mode", keys.ScrollMode, '['},
+		{"messages", keys.Messages, 'm'},
+		{"approvals", keys.Approvals, 'a'},
+		{"restart_session", keys.RestartSession, 'r'},
 	}
+	for _, c := range checks {
+		key, enabled := c.binding.Byte()
+		if !enabled || key != c.want {
+			t.Errorf("remote %s = (%q, %v), want (%q, true)", c.label, key, enabled, c.want)
+		}
+	}
+}
 
-	key, enabled := keys.Detach.Byte()
-	if !enabled || key != 'd' || keys.Prefix != 0x02 {
-		t.Errorf("remote Detach/Prefix = (%q, %v)/%#x, want ('d', true)/0x02", key, enabled, keys.Prefix)
+// TestRemotePassthroughKeysPreservesLiteralPrefix is the end-to-end #1233
+// regression for the CLI prefix path: a configured uppercase or space literal
+// prefix must reach the remote (and local) passthrough keys byte-for-byte rather
+// than being lowercased or trimmed away.
+func TestRemotePassthroughKeysPreservesLiteralPrefix(t *testing.T) {
+	oldCfg := cfg
+
+	t.Cleanup(func() { cfg = oldCfg })
+
+	cases := []struct {
+		prefix string
+		want   byte
+	}{
+		{"A", 'A'},
+		{" ", 0x20},
+		{"ctrl+a", 0x01},
+	}
+	for _, tc := range cases {
+		cfg = &config.Config{Keybindings: config.Keybindings{Prefix: tc.prefix}}
+
+		if got := remotePassthroughKeysFromConfig().Prefix; got != tc.want {
+			t.Errorf("remote prefix for %q = %#x, want %#x", tc.prefix, got, tc.want)
+		}
+
+		if got := passthroughKeysFromConfig().Prefix; got != tc.want {
+			t.Errorf("local prefix for %q = %#x, want %#x", tc.prefix, got, tc.want)
+		}
 	}
 }
 

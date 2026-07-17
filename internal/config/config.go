@@ -2669,6 +2669,14 @@ func parsePassthroughByte(raw string) (byte, bool) {
 	return raw[0], true
 }
 
+// ParsePrefixByte is the canonical parser for the configured attach-prefix key.
+// It is exported so the CLI attach/remote paths decode the prefix through the
+// same rules config validation enforces, rather than a divergent copy that
+// trims/lowercases the whole value (issue #1233). See parsePrefixByte.
+func ParsePrefixByte(raw string) (byte, bool) {
+	return parsePrefixByte(raw)
+}
+
 func parsePrefixByte(raw string) (byte, bool) {
 	if raw == "" {
 		return 0x02, true // empty keeps the historical ctrl+b default
