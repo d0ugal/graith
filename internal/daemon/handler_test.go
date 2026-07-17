@@ -809,6 +809,115 @@ func TestLogsDefaultUsesConfiguredLimit(t *testing.T) {
 	}
 }
 
+// TestLogsDefaultUsesReloadedLimitAfterReconnect is the daemon-side regression
+// for issue #1320. A reconnect that repeats the zero sentinel must resolve the
+// latest live [limits].log_lines value, not a value snapshotted by the CLI.
+func TestLogsDefaultUsesReloadedLimitAfterReconnect(t *testing.T) {
+	cfg := config.Default()
+	cfg.Limits.LogLines = 3
+	h := newTestHarnessWithConfig(t, cfg)
+
+	var scrollback strings.Builder
+	for i := 1; i <= 12; i++ {
+		fmt.Fprintf(&scrollback, "line %02d\n", i)
+	}
+
+	h.addStoppedSession(t, "bothy-log", "bothy-still", 0, scrollback.String())
+
+	got := fetchLogsOnNewConnection(t, h.sm, "bothy-log", 0)
+	if count := countLogLines(got); count != 3 {
+		t.Fatalf("before reload got %d lines, want 3: %q", count, got)
+	}
+
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("[limits]\nlog_lines = 7\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h.sm.configFile = cfgPath
+	if err := h.sm.ReloadConfig(); err != nil {
+		t.Fatalf("ReloadConfig() error = %v", err)
+	}
+
+	got = fetchLogsOnNewConnection(t, h.sm, "bothy-log", 0)
+	if count := countLogLines(got); count != 7 {
+		t.Fatalf("after reload and reconnect got %d lines, want 7: %q", count, got)
+	}
+
+	if strings.Contains(got, "line 05") || !strings.Contains(got, "line 06") || !strings.Contains(got, "line 12") {
+		t.Fatalf("after reload expected exactly lines 06-12, got %q", got)
+	}
+}
+
+func fetchLogsOnNewConnection(t *testing.T, sm *SessionManager, sessionID string, lines int) string {
+	t.Helper()
+
+	clientConn, serverConn := net.Pipe()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	go func() {
+		defer close(done)
+
+		HandleConnection(ctx, serverConn, ConnOrigin{}, sm, log)
+	}()
+
+	defer func() {
+		cancel()
+
+		_ = clientConn.Close()
+		_ = serverConn.Close()
+
+		<-done
+	}()
+
+	data, err := protocol.EncodeControl("logs", protocol.LogsMsg{SessionID: sessionID, Lines: lines})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writer := protocol.NewFrameWriter(clientConn)
+	if err := writer.WriteFrame(protocol.ChannelControl, data); err != nil {
+		t.Fatal(err)
+	}
+
+	reader := protocol.NewFrameReader(clientConn)
+
+	var output strings.Builder
+
+	for {
+		frame, err := reader.ReadFrame()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		switch frame.Channel {
+		case protocol.ChannelData:
+			output.Write(frame.Payload)
+		case protocol.ChannelControl:
+			env, err := protocol.DecodeControl(frame.Payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if env.Type != "logs_done" {
+				t.Fatalf("expected logs_done, got %q", env.Type)
+			}
+
+			return output.String()
+		}
+	}
+}
+
+func countLogLines(logs string) int {
+	if strings.TrimSpace(logs) == "" {
+		return 0
+	}
+
+	return len(strings.Split(strings.TrimRight(logs, "\n"), "\n"))
+}
+
 func TestLogsFollowThenDetach(t *testing.T) {
 	h := newTestHarness(t)
 	h.addPTYSession(t, "braw-logf", "bonnie-follow")

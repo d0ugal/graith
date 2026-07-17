@@ -669,8 +669,8 @@ func (l *attachLoop) onRenameSession() (bool, error) {
 }
 
 func (l *attachLoop) onScrollMode() (bool, error) {
-	scrollback := client.FetchScrollback(cfg, paths, cfgFile, l.sessionID, 2000)
-	client.RunScrollView("Scrollback — "+l.info.Name, scrollback, scrollKeysFromConfig())
+	scrollback := fetchScrollback(cfg, paths, cfgFile, l.sessionID, 0)
+	runScrollView("Scrollback — "+l.info.Name, scrollback, scrollKeysFromConfig())
 
 	nc, err := freshClient()
 	if err != nil {

@@ -15,6 +15,14 @@ var freshClient = func() (attachConn, error) {
 	return client.ConnectPassive(cfg, paths, cfgFile)
 }
 
+// fetchScrollback and runScrollView are seams for the scroll-mode handler.
+// Production uses the client implementations; tests replace them so the
+// handler can be exercised without dialing a daemon or launching a TUI.
+var (
+	fetchScrollback = client.FetchScrollback
+	runScrollView   = client.RunScrollView
+)
+
 func previewFetcher() func(string) string {
 	return func(sessionID string) string {
 		return client.FetchScrollbackPreview(cfg, paths, cfgFile, sessionID)
