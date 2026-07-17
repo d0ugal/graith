@@ -267,6 +267,8 @@ func TestPRWatchAdvancedParsing(t *testing.T) {
 // cadences that feed time.NewTicker (base_tick, ref_reconcile_interval) fall back
 // to their documented defaults for "0", "0s", and negative values, so a
 // validly-parsed config can never construct a non-positive ticker (issue #1285).
+//
+//nolint:dupl // shares the loop-over-bad-durations shape with TestPRWatchRateWindowNonPositiveSafety but asserts distinct accessors and a distinct failure mode (a panicking ticker vs a disabled anti-flood cap); merging would obscure both.
 func TestPRWatchTickerCadenceNonPositiveSafety(t *testing.T) {
 	for _, bad := range []string{"0", "0s", "-1s", "-500ms"} {
 		p := PRWatchConfig{Advanced: PRWatchAdvancedConfig{
@@ -290,6 +292,70 @@ func TestPRWatchTickerCadenceNonPositiveSafety(t *testing.T) {
 		if got := p.RefReconcileIntervalDuration(); got <= 0 {
 			t.Errorf("RefReconcileIntervalDuration(%q) = %v, must be > 0 for time.NewTicker", bad, got)
 		}
+	}
+}
+
+// TestPRWatchRateWindowNonPositiveSafety proves the two [pr_watch.advanced] rolling
+// anti-flood windows (notification_rate_window, untrusted_author_prompt_window) fall
+// back to their documented 30m default for "0", "0s", and negative values. These
+// windows bound a "prune timestamps older than now−window" limiter, so a
+// zero/negative window would discard every prior timestamp and silently disable the
+// cap — including the security-sensitive untrusted-author prompt cap (issue #1304).
+//
+//nolint:dupl // shares the loop-over-bad-durations shape with TestPRWatchTickerCadenceNonPositiveSafety but asserts distinct accessors and a distinct failure mode (a disabled anti-flood cap vs a panicking ticker); merging would obscure both.
+func TestPRWatchRateWindowNonPositiveSafety(t *testing.T) {
+	for _, bad := range []string{"0", "0s", "-1s", "-30m"} {
+		p := PRWatchConfig{Advanced: PRWatchAdvancedConfig{
+			NotificationRateWindow:      bad,
+			UntrustedAuthorPromptWindow: bad,
+		}}
+
+		if got := p.NotificationRateWindowDuration(); got != 30*time.Minute {
+			t.Errorf("NotificationRateWindowDuration(%q) = %v, want default 30m", bad, got)
+		}
+
+		if got := p.UntrustedAuthorPromptWindowDuration(); got != 30*time.Minute {
+			t.Errorf("UntrustedAuthorPromptWindowDuration(%q) = %v, want default 30m", bad, got)
+		}
+
+		// The window fed to the rolling limiter must be strictly positive, or
+		// now.Add(-window) lands at/after now and prunes every prior timestamp.
+		if got := p.NotificationRateWindowDuration(); got <= 0 {
+			t.Errorf("NotificationRateWindowDuration(%q) = %v, must be > 0", bad, got)
+		}
+
+		if got := p.UntrustedAuthorPromptWindowDuration(); got <= 0 {
+			t.Errorf("UntrustedAuthorPromptWindowDuration(%q) = %v, must be > 0", bad, got)
+		}
+	}
+}
+
+// TestPRWatchRateWindowNonPositiveThroughLoad proves the fall-back also holds for a
+// config that reaches the accessors via Load() (an operator explicitly writing
+// notification_rate_window = "0" or a negative untrusted-author window over the
+// embedded default), not only a directly-constructed struct (issue #1304).
+func TestPRWatchRateWindowNonPositiveThroughLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	body := "[pr_watch]\nenabled = true\n\n[pr_watch.advanced]\n" +
+		"notification_rate_window = \"0\"\nuntrusted_author_prompt_window = \"-5m\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	pw := cfg.PRWatch
+	if got := pw.NotificationRateWindowDuration(); got != 30*time.Minute {
+		t.Errorf("NotificationRateWindowDuration (loaded \"0\") = %v, want default 30m", got)
+	}
+
+	if got := pw.UntrustedAuthorPromptWindowDuration(); got != 30*time.Minute {
+		t.Errorf("UntrustedAuthorPromptWindowDuration (loaded \"-5m\") = %v, want default 30m", got)
 	}
 }
 

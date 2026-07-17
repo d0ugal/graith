@@ -1071,6 +1071,61 @@ func TestAllowKick_ConfiguredCooldown(t *testing.T) {
 	}
 }
 
+// TestGateRateLimit_NonPositiveWindowStillLimits proves a zero/negative
+// notification_rate_window cannot disable the per-session anti-thrash cap. The
+// rolling limiter prunes timestamps older than now−window; a non-positive window
+// would land that cutoff at/after now and discard every prior send, so the cap
+// would never trip. With the accessor falling back to the 30m default (issue
+// #1304), a second immediate notification past the limit is still refused.
+func TestGateRateLimit_NonPositiveWindowStillLimits(t *testing.T) {
+	for _, bad := range []string{"0", "0s", "-1s", "-30m"} {
+		sm := newPRWatchSM()
+		cfg := &config.PRWatchConfig{
+			Enabled: true, Debounce: "0s", MaxNotificationsPerPR: 100,
+			Advanced: config.PRWatchAdvancedConfig{
+				NotificationRateLimit:  1,
+				NotificationRateWindow: bad,
+			},
+		}
+		cur := &prWatchCursor{failing: map[string]bool{}}
+
+		if _, ok := sm.gate(cfg, "fash", cur, false); !ok {
+			t.Fatalf("window %q: first notification should be allowed", bad)
+		}
+
+		if reason, ok := sm.gate(cfg, "fash", cur, false); ok {
+			t.Errorf("window %q: second immediate notification should be rate-limited, got allowed (reason %q)", bad, reason)
+		}
+	}
+}
+
+// TestAllowAuthorPrompt_NonPositiveWindowStillLimits proves a zero/negative
+// untrusted_author_prompt_window cannot disable the security-sensitive rolling
+// anti-flood cap on untrusted-author trust prompts. As with the notification
+// window, a non-positive window would prune every prior prompt and let a busy
+// public PR flood the orchestrator; the accessor's fall-back to the 30m default
+// keeps the second immediate prompt past the limit refused (issue #1304).
+func TestAllowAuthorPrompt_NonPositiveWindowStillLimits(t *testing.T) {
+	for _, bad := range []string{"0", "0s", "-1s", "-30m"} {
+		sm := newPRWatchSM()
+		cfg := &config.PRWatchConfig{
+			Enabled: true,
+			Advanced: config.PRWatchAdvancedConfig{
+				UntrustedAuthorPromptRate:   1,
+				UntrustedAuthorPromptWindow: bad,
+			},
+		}
+
+		if !sm.allowAuthorPrompt(cfg) {
+			t.Fatalf("window %q: first author prompt should be allowed", bad)
+		}
+
+		if sm.allowAuthorPrompt(cfg) {
+			t.Errorf("window %q: second immediate author prompt should be rate-limited, got allowed", bad)
+		}
+	}
+}
+
 // TestRunPRWatchTick_ConfiguredBatchSize proves runPRWatchTick caps polls at the
 // configured batch_size, not the old hard-coded 3. Mirrors TestRunPRWatchTick_
 // BatchCap_Cov's real-session setup (non-GitHub remote → each polled session just
