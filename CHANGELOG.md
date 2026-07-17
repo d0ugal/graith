@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.69.3](https://github.com/d0ugal/graith/compare/v0.69.2...v0.69.3) (2026-07-17)
+
+
+### Bug Fixes
+
+* **cli:** accept repo-less inherited scenario members ([56576d5](https://github.com/d0ugal/graith/commit/56576d5d420d4a4de704062dbd5e28ba9114acd0))
+* **cli:** retain scenario availability validation ([f230532](https://github.com/d0ugal/graith/commit/f2305320d2721d34c88ae7ef5e035dac91c1ef9d))
+
 ## [0.69.2](https://github.com/d0ugal/graith/compare/v0.69.1...v0.69.2) (2026-07-17)
 
 
