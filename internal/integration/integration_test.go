@@ -38,8 +38,13 @@ func setup(t *testing.T, mutators ...func(*config.Config)) *testEnv {
 
 func setupWithState(t *testing.T, initialState *daemon.State, mutators ...func(*config.Config)) *testEnv {
 	t.Helper()
+
+	return setupAt(t, t.TempDir(), mutators...)
+}
+
+func setupAt(t *testing.T, tmpDir string, mutators ...func(*config.Config)) *testEnv {
+	t.Helper()
 	testutil.IsolateGit(t)
-	tmpDir := t.TempDir()
 
 	repo := filepath.Join(tmpDir, "repo")
 	_ = os.MkdirAll(repo, 0o750)
@@ -1267,13 +1272,24 @@ func TestUnknownAgent(t *testing.T) {
 }
 
 func TestScenarioMirrorSharedSourceLifecycle(t *testing.T) {
-	backend := filepath.Join(t.TempDir(), "safehouse-stub")
-	if err := os.WriteFile(backend, []byte("#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = \"--\" ]; then\n    shift\n    exec \"$@\"\n  fi\n  shift\ndone\nexit 64\n"), 0o755); err != nil { //nolint:gosec // G306: test backend stub must be executable
+	home, err := os.UserHomeDir()
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	env := setup(t, func(cfg *config.Config) {
-		cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "safehouse", Command: backend}
+	root, err := os.MkdirTemp(home, "graith-integration-mirror-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+
+	backend := filepath.Join(root, "nono-stub")
+	if err := os.WriteFile(backend, []byte("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'nono 0.66.0'\n  exit 0\nfi\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = \"--\" ]; then\n    shift\n    exec \"$@\"\n  fi\n  shift\ndone\nexit 64\n"), 0o755); err != nil { //nolint:gosec // G306: test backend stub must be executable
+		t.Fatal(err)
+	}
+
+	env := setupAt(t, root, func(cfg *config.Config) {
+		cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "nono", Command: backend}
 	})
 	defer env.teardown()
 
