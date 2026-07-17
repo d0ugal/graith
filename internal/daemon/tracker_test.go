@@ -247,16 +247,16 @@ func TestParseGitHubIssues(t *testing.T) {
 // (pr_watch.advanced.gh_timeout), not the 5s package fallback. It also proves the
 // value is read per-pass, so a live reload of the setting is observed.
 func TestFetchGitHubIssuesUsesConfiguredTimeout(t *testing.T) {
-	origAvail := ghAvailable
+	origLookPath := ghLookPath
 	origRunner := ghRunner
 
-	t.Cleanup(func() { ghAvailable = origAvail; ghRunner = origRunner })
+	t.Cleanup(func() { ghLookPath = origLookPath; ghRunner = origRunner })
 
-	ghAvailable = func() bool { return true }
+	ghLookPath = func(string) bool { return true }
 
 	var observed time.Duration
 
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		if dl, ok := ctx.Deadline(); ok {
 			observed = time.Until(dl)
 		}

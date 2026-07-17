@@ -236,7 +236,7 @@ func TestPRWatchTarget(t *testing.T) {
 		Branch: "main", Status: StatusRunning,
 	}
 
-	tgt, ok := sm.prWatchTarget("braw1")
+	tgt, ok := sm.prWatchTarget(testPollTools(), "braw1")
 	if !ok {
 		t.Fatal("expected an eligible target")
 	}
@@ -245,14 +245,14 @@ func TestPRWatchTarget(t *testing.T) {
 		t.Errorf("unexpected target %+v", tgt)
 	}
 
-	if _, ok := sm.prWatchTarget("missing"); ok {
+	if _, ok := sm.prWatchTarget(testPollTools(), "missing"); ok {
 		t.Error("missing session should not resolve")
 	}
 
 	now := time.Now()
 	sm.state.Sessions["braw1"].DeletedAt = &now
 
-	if _, ok := sm.prWatchTarget("braw1"); ok {
+	if _, ok := sm.prWatchTarget(testPollTools(), "braw1"); ok {
 		t.Error("soft-deleted session should not resolve")
 	}
 }
@@ -265,7 +265,7 @@ func TestPollKicked_DrivesPollAndCooldown(t *testing.T) {
 	defer func() { ghRunner = orig }()
 
 	calls := 0
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		calls++
 
 		if args[0] == "pr" && args[1] == "list" {
@@ -289,7 +289,7 @@ func TestPollKicked_DrivesPollAndCooldown(t *testing.T) {
 
 	cfg := config.Default()
 
-	sm.pollKicked(context.Background(), &cfg.PRWatch, "braw1")
+	sm.pollKicked(context.Background(), &cfg.PRWatch, testPollTools(), "braw1")
 
 	if pr := sm.state.Sessions["braw1"].PullRequest; pr.Number != 42 {
 		t.Fatalf("expected PR #42 written by the kicked poll, got %+v", pr)
@@ -298,7 +298,7 @@ func TestPollKicked_DrivesPollAndCooldown(t *testing.T) {
 	// An immediate second kick is suppressed by the cooldown — no extra gh calls.
 	before := calls
 
-	sm.pollKicked(context.Background(), &cfg.PRWatch, "braw1")
+	sm.pollKicked(context.Background(), &cfg.PRWatch, testPollTools(), "braw1")
 
 	if calls != before {
 		t.Errorf("second kick within cooldown should not poll gh (calls %d -> %d)", before, calls)
@@ -515,7 +515,7 @@ func TestPollSession_KickedNoPRShortBackoff(t *testing.T) {
 	orig := ghRunner
 	defer func() { ghRunner = orig }()
 
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		return `[]`, nil // no PR for the branch
 	}
 
@@ -529,7 +529,7 @@ func TestPollSession_KickedNoPRShortBackoff(t *testing.T) {
 	tgt := prWatchTarget{id: "braw1", name: "braw", branch: "main", worktreePath: repo}
 
 	// Kicked miss → short backoff.
-	sm.pollSession(context.Background(), &cfg.PRWatch, tgt, true)
+	sm.pollSession(context.Background(), &cfg.PRWatch, testPollTools(), tgt, true)
 
 	sm.prWatch.mu.Lock()
 	kickedNext := sm.prWatch.nextPoll["braw1"]
@@ -540,7 +540,7 @@ func TestPollSession_KickedNoPRShortBackoff(t *testing.T) {
 	}
 
 	// Timer-driven miss → full negative cache.
-	sm.pollSession(context.Background(), &cfg.PRWatch, tgt, false)
+	sm.pollSession(context.Background(), &cfg.PRWatch, testPollTools(), tgt, false)
 
 	sm.prWatch.mu.Lock()
 	tickNext := sm.prWatch.nextPoll["braw1"]

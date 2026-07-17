@@ -16,6 +16,124 @@ import (
 	"github.com/d0ugal/graith/internal/tools"
 )
 
+// TestCreateEntrypointPinsToolGenerationAcrossReload is the #1287 REAL-entrypoint
+// regression: it drives the actual Create() entrypoint (repo-backed, stub agent)
+// and proves the entrypoint captured generation A before a reload and threaded it
+// through git setup. It pauses at the phase-2 hook (which fires before git
+// setup), reloads the tools registry to wrapper B, releases, and asserts every
+// git subcommand of the create ran on A; a subsequent create then runs on B.
+func TestCreateEntrypointPinsToolGenerationAcrossReload(t *testing.T) {
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not found on PATH")
+	}
+
+	repoDir := initTempGitRepo(t)
+	sm, _ := newRecorderManager(t, repoDir, nil)
+
+	t.Cleanup(tools.Reset)
+
+	binDir := t.TempDir()
+	logPath := filepath.Join(binDir, "calls.log")
+	wrapperA := writePullGitWrapper(t, binDir, "gitA", "A", realGit, logPath, "")
+	wrapperB := writePullGitWrapper(t, binDir, "gitB", "B", realGit, logPath, "")
+
+	tools.Configure(tools.Config{Git: wrapperA})
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	sm.launchPhase2Hook = func(op string, _ *config.Config) {
+		if op == "create" {
+			close(entered)
+			<-release
+		}
+	}
+
+	type createResult struct {
+		session SessionState
+		err     error
+	}
+
+	done := make(chan createResult, 1)
+
+	go func() {
+		s, e := sm.Create(CreateOpts{Name: "braw", AgentName: "cursor", RepoPath: repoDir, BaseBranch: "main", Rows: 24, Cols: 80})
+		done <- createResult{session: s, err: e}
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(20 * time.Second):
+		t.Fatal("create did not reach phase 2")
+	}
+
+	// A reload swaps the git executable while the create is paused before git setup.
+	tools.Configure(tools.Config{Git: wrapperB})
+	close(release)
+
+	res := <-done
+	if res.err != nil {
+		t.Fatalf("Create: %v", res.err)
+	}
+
+	created := res.session
+
+	t.Cleanup(func() { stopAndClosePTY(sm, created.ID) })
+
+	// Filter to the create's OWN setup git calls: `git worktree ...` is unique to
+	// SetupSession, so it isolates the create's pinned generation from the
+	// separate, independently-pinned document-store git ops (init/add/commit)
+	// that also run during phase 2 and legitimately use the current generation.
+	setup1 := filterLinesContaining(readNonEmptyLines(t, logPath), "worktree")
+	if len(setup1) == 0 {
+		t.Fatal("create never reached the worktree-add git stage; setup was not exercised")
+	}
+
+	for _, line := range setup1 {
+		if !strings.HasPrefix(line, "A ") {
+			t.Fatalf("create ran a setup git subcommand on the wrong generation: %q (the create entrypoint must thread generation A through setup across the reload)", line)
+		}
+	}
+
+	// A fresh create picks up the new generation wholesale — every git call on B.
+	sm.launchPhase2Hook = nil
+
+	if err := os.Truncate(logPath, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := sm.Create(CreateOpts{Name: "canny", AgentName: "cursor", RepoPath: repoDir, BaseBranch: "main", Rows: 24, Cols: 80})
+	if err != nil {
+		t.Fatalf("second Create: %v", err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, second.ID) })
+
+	setup2 := filterLinesContaining(readNonEmptyLines(t, logPath), "worktree")
+	if len(setup2) == 0 {
+		t.Fatal("second create ran no worktree git subcommands")
+	}
+
+	for _, line := range setup2 {
+		if !strings.HasPrefix(line, "B ") {
+			t.Fatalf("second create ran a setup git subcommand on the old generation: %q (must run entirely on B)", line)
+		}
+	}
+}
+
+// filterLinesContaining returns the lines that contain sub.
+func filterLinesContaining(lines []string, sub string) []string {
+	var out []string
+
+	for _, l := range lines {
+		if strings.Contains(l, sub) {
+			out = append(out, l)
+		}
+	}
+
+	return out
+}
+
 // TestLifecycleSetupPinsToolGenerationAcrossReload is the #1287 create/fork/
 // resume-style A/B regression. It exercises the exact Runner threading the
 // lifecycle uses: a config+tools bundle is captured once via configWithTools,

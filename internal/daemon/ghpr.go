@@ -84,9 +84,14 @@ type ghUser struct {
 	Login string `json:"login"`
 }
 
-// ghRunner runs a gh command and returns trimmed stdout. Swapped in tests.
-var ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, tools.GH(), args...)
+// ghRunner runs a gh command with an explicitly-pinned gh executable and
+// returns trimmed stdout. A caller (a PR-watch poll, a tracker resolution)
+// captures one gh executable per operation and threads it here, so a config
+// reload that swaps [tools].gh mid-operation can't split it across binaries
+// (#1287). Swapped in tests (binary-aware: the ghBin argument is ignored by the
+// stubs, which return canned output).
+var ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, ghBin, args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -97,11 +102,22 @@ var ghRunner = func(ctx context.Context, dir string, args ...string) (string, er
 	return strings.TrimSpace(string(out)), err
 }
 
-// ghAvailable reports whether the gh binary is on PATH. It is a var so tests can
-// exercise the gh-backed readers without a real gh binary installed.
-var ghAvailable = func() bool {
-	_, err := exec.LookPath(tools.GH())
+// ghLookPath reports whether the given gh executable is resolvable. It is a var
+// so tests can exercise the gh-backed readers without a real gh binary, and so
+// availability can be re-derived per config generation.
+var ghLookPath = func(ghBin string) bool {
+	_, err := exec.LookPath(ghBin)
 	return err == nil
+}
+
+// ghAvailableFor reports whether the pinned gh executable is resolvable.
+func ghAvailableFor(ghBin string) bool {
+	return ghLookPath(ghBin)
+}
+
+// ghAvailable reports whether the currently-configured gh binary is on PATH.
+func ghAvailable() bool {
+	return ghLookPath(tools.GH())
 }
 
 var githubRemoteRe = regexp.MustCompile(`github\.com[:/]+([^/]+)/(.+?)(?:\.git)?$`)
@@ -125,9 +141,11 @@ func parseGitHubRemote(remoteURL string) (slug string, ok bool) {
 	return owner + "/" + repo, true
 }
 
-// repoSlug resolves the GitHub owner/repo for a worktree from its origin remote.
-func repoSlug(worktreePath string) (string, bool) {
-	url, err := git.RunOutput(worktreePath, "remote", "get-url", "origin")
+// repoSlugWith resolves the GitHub owner/repo for a worktree from its origin
+// remote using the caller-pinned git Runner, so one PR-watch poll/tracker
+// resolution resolves the slug and its gh calls on one tools generation (#1287).
+func repoSlugWith(r git.Runner, worktreePath string) (string, bool) {
+	url, err := r.RunOutput(worktreePath, "remote", "get-url", "origin")
 	if err != nil {
 		return "", false
 	}
@@ -135,10 +153,15 @@ func repoSlug(worktreePath string) (string, bool) {
 	return parseGitHubRemote(url)
 }
 
-// effectiveBranch returns the branch to resolve a PR against: the recorded
-// SessionState.Branch when set, otherwise the live HEAD of the worktree. It is
-// empty for detached/no-branch worktrees (caller then skips the session).
-func effectiveBranch(branch, worktreePath string) string {
+// repoSlug resolves the GitHub owner/repo for a worktree from its origin remote.
+func repoSlug(worktreePath string) (string, bool) {
+	return repoSlugWith(git.NewRunner(), worktreePath)
+}
+
+// effectiveBranchWith returns the branch to resolve a PR against using the
+// caller-pinned git Runner: the recorded SessionState.Branch when set, otherwise
+// the live HEAD of the worktree. Empty for detached/no-branch worktrees.
+func effectiveBranchWith(r git.Runner, branch, worktreePath string) string {
 	if branch != "" {
 		return branch
 	}
@@ -147,12 +170,17 @@ func effectiveBranch(branch, worktreePath string) string {
 		return ""
 	}
 
-	head, err := git.RunOutput(worktreePath, "symbolic-ref", "--quiet", "--short", "HEAD")
+	head, err := r.RunOutput(worktreePath, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil {
 		return ""
 	}
 
 	return strings.TrimSpace(head)
+}
+
+// effectiveBranch resolves the poll branch on a fresh git generation.
+func effectiveBranch(branch, worktreePath string) string {
+	return effectiveBranchWith(git.NewRunner(), branch, worktreePath)
 }
 
 // prListItem is the JSON shape of `gh pr list --json ...`.
@@ -176,13 +204,13 @@ type prCheck struct {
 
 // resolvePR finds the PR for a branch and fills in CI + comment state. It
 // returns ok=false (no error) when there is simply no PR for the branch.
-func resolvePR(ctx context.Context, slug, branch, worktreePath string, timeout time.Duration) (prData, bool, error) {
+func resolvePR(ctx context.Context, ghBin, slug, branch, worktreePath string, timeout time.Duration) (prData, bool, error) {
 	timeout = ghTimeoutOr(timeout)
 
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	out, err := ghRunner(cctx, worktreePath,
+	out, err := ghRunner(cctx, ghBin, worktreePath,
 		"pr", "list", "--repo", slug, "--head", branch, "--state", "all",
 		"--json", "number,state,isDraft,url,reviewDecision,headRefOid,mergeable", "--limit", "1")
 	if err != nil {
@@ -212,12 +240,12 @@ func resolvePR(ctx context.Context, slug, branch, worktreePath string, timeout t
 	// CI checks + comments — only meaningful while the PR is open.
 	d.CommentsOK = true
 	if d.State == "open" || d.State == "draft" {
-		d.CIState, d.FailingChecks, d.CIPending, d.CIPassed, d.CITotal = fetchChecks(ctx, slug, it.Number, worktreePath, timeout)
+		d.CIState, d.FailingChecks, d.CIPending, d.CIPassed, d.CITotal = fetchChecks(ctx, ghBin, slug, it.Number, worktreePath, timeout)
 
 		var issueOK, reviewOK bool
 
-		d.IssueComments, issueOK = fetchComments(ctx, slug, it.Number, worktreePath, "issues", timeout)
-		d.ReviewComments, reviewOK = fetchComments(ctx, slug, it.Number, worktreePath, "pulls", timeout)
+		d.IssueComments, issueOK = fetchComments(ctx, ghBin, slug, it.Number, worktreePath, "issues", timeout)
+		d.ReviewComments, reviewOK = fetchComments(ctx, ghBin, slug, it.Number, worktreePath, "pulls", timeout)
 		d.CommentsOK = issueOK && reviewOK
 	}
 
@@ -251,11 +279,11 @@ func normalizePRState(state string, isDraft bool) string {
 // check has finished. passed/total are surfaced so the display can show
 // progress ("16/22"); total == 0 means no count is available (degraded read or
 // no checks).
-func fetchChecks(ctx context.Context, slug string, number int, worktreePath string, timeout time.Duration) (state string, failing []string, pending, passed, total int) {
+func fetchChecks(ctx context.Context, ghBin, slug string, number int, worktreePath string, timeout time.Duration) (state string, failing []string, pending, passed, total int) {
 	cctx, cancel := context.WithTimeout(ctx, ghTimeoutOr(timeout))
 	defer cancel()
 
-	out, err := ghRunner(cctx, worktreePath,
+	out, err := ghRunner(cctx, ghBin, worktreePath,
 		"pr", "checks", strconv.Itoa(number), "--repo", slug,
 		"--json", "name,state,bucket,link")
 	if err != nil {
@@ -324,7 +352,7 @@ func ciBucket(c prCheck) string {
 // bool is false if the fetch degraded (error or unparseable), so the caller can
 // avoid priming a cursor from a partial read. An empty-but-ok result is
 // (nil, true).
-func fetchComments(ctx context.Context, slug string, number int, worktreePath, surface string, timeout time.Duration) ([]ghComment, bool) {
+func fetchComments(ctx context.Context, ghBin, slug string, number int, worktreePath, surface string, timeout time.Duration) ([]ghComment, bool) {
 	cctx, cancel := context.WithTimeout(ctx, ghTimeoutOr(timeout))
 	defer cancel()
 
@@ -332,7 +360,7 @@ func fetchComments(ctx context.Context, slug string, number int, worktreePath, s
 	// --slurp wraps every page into one outer array ([[page1...],[page2...]]),
 	// so multi-page results parse. Without it, gh emits adjacent arrays that
 	// json.Unmarshal can't read past the first page.
-	out, err := ghRunner(cctx, worktreePath, "api", "--paginate", "--slurp", path)
+	out, err := ghRunner(cctx, ghBin, worktreePath, "api", "--paginate", "--slurp", path)
 	if err != nil {
 		return nil, false
 	}

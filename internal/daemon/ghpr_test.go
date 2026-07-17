@@ -132,11 +132,11 @@ func TestFetchChecksAggregate(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+			ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 				return c.json, nil
 			}
 
-			state, fail, pending, passed, total := fetchChecks(context.Background(), "croft/loch", 1, "", 0)
+			state, fail, pending, passed, total := fetchChecks(context.Background(), "gh", "croft/loch", 1, "", 0)
 			if state != c.wantState {
 				t.Errorf("state = %q, want %q", state, c.wantState)
 			}
@@ -164,11 +164,11 @@ func TestFetchCommentsSlurpFlattensPages(t *testing.T) {
 	orig := ghRunner
 	defer func() { ghRunner = orig }()
 	// gh api --paginate --slurp wraps each page in an outer array.
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		return `[[{"id":1,"user":{"login":"ailsa"},"body":"a"}],[{"id":2,"user":{"login":"hamish"},"body":"b"}]]`, nil
 	}
 
-	comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "issues", 0)
+	comments, ok := fetchComments(context.Background(), "gh", "croft/loch", 1, "", "issues", 0)
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
@@ -187,7 +187,7 @@ func TestFetchCommentsDecodesAuthorAssociation(t *testing.T) {
 	orig := ghRunner
 	defer func() { ghRunner = orig }()
 
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		// One --slurp page with the association field present, as the GitHub REST
 		// API returns it.
 		return `[[
@@ -196,7 +196,7 @@ func TestFetchCommentsDecodesAuthorAssociation(t *testing.T) {
 		]]`, nil
 	}
 
-	comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "issues", 0)
+	comments, ok := fetchComments(context.Background(), "gh", "croft/loch", 1, "", "issues", 0)
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
@@ -218,11 +218,11 @@ func TestFetchCommentsDegradedReportsNotOK(t *testing.T) {
 	orig := ghRunner
 	defer func() { ghRunner = orig }()
 
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		return "", context.DeadlineExceeded
 	}
 
-	comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "issues", 0)
+	comments, ok := fetchComments(context.Background(), "gh", "croft/loch", 1, "", "issues", 0)
 	if ok {
 		t.Error("degraded fetch should report ok=false")
 	}
@@ -237,7 +237,7 @@ func TestResolvePRParsesMergeable(t *testing.T) {
 	defer func() { ghRunner = orig }()
 
 	calls := 0
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		calls++
 		if calls == 1 { // gh pr list
 			return `[{"number":4,"state":"OPEN","isDraft":false,"url":"https://github.com/croft/loch/pull/4","headRefOid":"sha1","mergeable":"CONFLICTING"}]`, nil
@@ -246,7 +246,7 @@ func TestResolvePRParsesMergeable(t *testing.T) {
 		return `[]`, nil // checks/comments
 	}
 
-	d, found, err := resolvePR(context.Background(), "croft/loch", "bide", "", 0)
+	d, found, err := resolvePR(context.Background(), "gh", "croft/loch", "bide", "", 0)
 	if err != nil || !found {
 		t.Fatalf("expected found PR, got found=%v err=%v", found, err)
 	}
@@ -260,11 +260,11 @@ func TestResolvePRNoPR(t *testing.T) {
 	orig := ghRunner
 	defer func() { ghRunner = orig }()
 
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		return `[]`, nil
 	}
 
-	_, found, err := resolvePR(context.Background(), "croft/loch", "bide", "", 0)
+	_, found, err := resolvePR(context.Background(), "gh", "croft/loch", "bide", "", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -334,20 +334,20 @@ func TestResolvePR_ErrorPaths_Cov(t *testing.T) {
 	defer func() { ghRunner = orig }()
 
 	// gh pr list errors → wrapped error.
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		return "", errors.New("gh boom")
 	}
 
-	if _, _, err := resolvePR(context.Background(), "croft/loch", "bide", "", 0); err == nil {
+	if _, _, err := resolvePR(context.Background(), "gh", "croft/loch", "bide", "", 0); err == nil {
 		t.Error("expected error when gh pr list fails")
 	}
 
 	// Unparseable JSON → parse error.
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		return "not json", nil
 	}
 
-	if _, _, err := resolvePR(context.Background(), "croft/loch", "bide", "", 0); err == nil {
+	if _, _, err := resolvePR(context.Background(), "gh", "croft/loch", "bide", "", 0); err == nil {
 		t.Error("expected parse error for malformed pr list JSON")
 	}
 }
@@ -357,38 +357,38 @@ func TestFetchChecks_Degraded_Cov(t *testing.T) {
 	defer func() { ghRunner = orig }()
 
 	// Error with empty output → no state, no failing.
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		return "", errors.New("no checks")
 	}
 
-	if state, fail, _, _, total := fetchChecks(context.Background(), "croft/loch", 1, "", 0); state != "" || fail != nil || total != 0 {
+	if state, fail, _, _, total := fetchChecks(context.Background(), "gh", "croft/loch", 1, "", 0); state != "" || fail != nil || total != 0 {
 		t.Errorf("error+empty output should give ('',nil,total=0), got (%q,%v,total=%d)", state, fail, total)
 	}
 
 	// Malformed JSON → ('',nil).
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		return "{bad", nil
 	}
 
-	if state, _, _, _, _ := fetchChecks(context.Background(), "croft/loch", 1, "", 0); state != "" {
+	if state, _, _, _, _ := fetchChecks(context.Background(), "gh", "croft/loch", 1, "", 0); state != "" {
 		t.Errorf("malformed checks JSON should give '', got %q", state)
 	}
 
 	// Empty checks array → ('',nil).
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		return "[]", nil
 	}
 
-	if state, fail, _, _, total := fetchChecks(context.Background(), "croft/loch", 1, "", 0); state != "" || fail != nil || total != 0 {
+	if state, fail, _, _, total := fetchChecks(context.Background(), "gh", "croft/loch", 1, "", 0); state != "" || fail != nil || total != 0 {
 		t.Errorf("empty checks should give ('',nil,total=0), got (%q,%v,total=%d)", state, fail, total)
 	}
 
 	// Non-zero exit but JSON still on stdout (gh pr checks does this when red).
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		return `[{"name":"build","bucket":"fail"}]`, errors.New("exit 1")
 	}
 
-	if state, fail, _, passed, total := fetchChecks(context.Background(), "croft/loch", 1, "", 0); state != "failing" || len(fail) != 1 || passed != 0 || total != 1 {
+	if state, fail, _, passed, total := fetchChecks(context.Background(), "gh", "croft/loch", 1, "", 0); state != "failing" || len(fail) != 1 || passed != 0 || total != 1 {
 		t.Errorf("failing checks should still parse despite exit 1, got (%q,%v,passed=%d,total=%d)", state, fail, passed, total)
 	}
 }
@@ -398,20 +398,20 @@ func TestFetchComments_EmptyAndBad_Cov(t *testing.T) {
 	defer func() { ghRunner = orig }()
 
 	// Empty output → (nil, true): a real, empty comment set.
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		return "", nil
 	}
 
-	if comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "issues", 0); !ok || comments != nil {
+	if comments, ok := fetchComments(context.Background(), "gh", "croft/loch", 1, "", "issues", 0); !ok || comments != nil {
 		t.Errorf("empty output should be (nil,true), got (%v,%v)", comments, ok)
 	}
 
 	// Unparseable → (nil, false): degraded.
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		return "not json", nil
 	}
 
-	if comments, ok := fetchComments(context.Background(), "croft/loch", 1, "", "pulls", 0); ok || comments != nil {
+	if comments, ok := fetchComments(context.Background(), "gh", "croft/loch", 1, "", "pulls", 0); ok || comments != nil {
 		t.Errorf("bad JSON should be (nil,false), got (%v,%v)", comments, ok)
 	}
 }

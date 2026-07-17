@@ -38,7 +38,7 @@ func TestReconcileBranch_DetectsCheckout(t *testing.T) {
 	// Agent adopts an existing PR: a new local branch is checked out.
 	gitRun(t, repo, "checkout", "-b", "adopt-pr-42")
 
-	got := sm.reconcileBranch("braw1", "main", repo)
+	got := sm.reconcileBranch(testPollTools(), "braw1", "main", repo)
 	if got != "adopt-pr-42" {
 		t.Fatalf("reconcileBranch = %q, want adopt-pr-42", got)
 	}
@@ -81,7 +81,7 @@ func TestReconcileBranch_DoesNotMutateOwnedBranch(t *testing.T) {
 	// Agent adopts a foreign PR branch.
 	gitRun(t, repo, "checkout", "-b", "adopt-pr-42")
 
-	if got := sm.reconcileBranch("braw1", "d0ugal/graith/braw", repo); got != "adopt-pr-42" {
+	if got := sm.reconcileBranch(testPollTools(), "braw1", "d0ugal/graith/braw", repo); got != "adopt-pr-42" {
 		t.Fatalf("reconcileBranch should poll the live branch, got %q", got)
 	}
 
@@ -106,7 +106,7 @@ func TestReconcileBranch_SwitchBack(t *testing.T) {
 	}
 
 	// First: adopt the PR branch (a change relative to recorded "main").
-	if got := sm.reconcileBranch("braw1", "main", repo); got != "main" {
+	if got := sm.reconcileBranch(testPollTools(), "braw1", "main", repo); got != "main" {
 		t.Fatalf("worktree is on main, want main, got %q", got)
 	}
 
@@ -114,7 +114,7 @@ func TestReconcileBranch_SwitchBack(t *testing.T) {
 	gitRun(t, repo, "checkout", "adopt-pr-42")
 
 	sm.prWatch.cursors["braw1"] = &prWatchCursor{number: 42, primed: true}
-	if got := sm.reconcileBranch("braw1", "main", repo); got != "adopt-pr-42" {
+	if got := sm.reconcileBranch(testPollTools(), "braw1", "main", repo); got != "adopt-pr-42" {
 		t.Fatalf("want adopt-pr-42, got %q", got)
 	}
 
@@ -126,7 +126,7 @@ func TestReconcileBranch_SwitchBack(t *testing.T) {
 	gitRun(t, repo, "checkout", "main")
 
 	sm.prWatch.cursors["braw1"] = &prWatchCursor{number: 42, primed: true}
-	if got := sm.reconcileBranch("braw1", "main", repo); got != "main" {
+	if got := sm.reconcileBranch(testPollTools(), "braw1", "main", repo); got != "main" {
 		t.Fatalf("want main after switch-back, got %q", got)
 	}
 
@@ -151,7 +151,7 @@ func TestReconcileBranch_NoChange(t *testing.T) {
 	sm.prWatch.cursors["braw1"] = cur
 
 	// First observation baselines to recorded "main" == live "main": no change.
-	if got := sm.reconcileBranch("braw1", "main", repo); got != "main" {
+	if got := sm.reconcileBranch(testPollTools(), "braw1", "main", repo); got != "main" {
 		t.Fatalf("reconcileBranch = %q, want main", got)
 	}
 
@@ -160,7 +160,7 @@ func TestReconcileBranch_NoChange(t *testing.T) {
 	}
 
 	// Second observation: still main, still no change.
-	if got := sm.reconcileBranch("braw1", "main", repo); got != "main" {
+	if got := sm.reconcileBranch(testPollTools(), "braw1", "main", repo); got != "main" {
 		t.Fatalf("reconcileBranch = %q, want main", got)
 	}
 
@@ -184,7 +184,7 @@ func TestReconcileBranch_DetachedKeepsRecorded(t *testing.T) {
 		Branch: "main", Status: StatusRunning,
 	}
 
-	if got := sm.reconcileBranch("braw1", "main", repo); got != "main" {
+	if got := sm.reconcileBranch(testPollTools(), "braw1", "main", repo); got != "main" {
 		t.Fatalf("detached HEAD should keep recorded branch, got %q", got)
 	}
 }
@@ -204,7 +204,7 @@ func TestReconcileBranch_EmptyRecordedUsesLive(t *testing.T) {
 	cur := &prWatchCursor{number: 3, primed: true}
 	sm.prWatch.cursors["braw1"] = cur
 
-	if got := sm.reconcileBranch("braw1", "", repo); got != "main" {
+	if got := sm.reconcileBranch(testPollTools(), "braw1", "", repo); got != "main" {
 		t.Fatalf("empty recorded should resolve live HEAD, got %q", got)
 	}
 
@@ -266,7 +266,7 @@ func TestPRWatchTargets_ReflectsBranchChange(t *testing.T) {
 
 	gitRun(t, repo, "checkout", "-b", "adopt-pr-42")
 
-	targets := sm.prWatchTargets()
+	targets := sm.prWatchTargets(testPollTools())
 	if len(targets) != 1 {
 		t.Fatalf("want 1 target, got %d", len(targets))
 	}

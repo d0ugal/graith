@@ -46,7 +46,14 @@ func (sm *SessionManager) RunGitPullLoop(ctx context.Context) {
 }
 
 func (sm *SessionManager) runGitPullTick(ctx context.Context) {
-	repos, err := git.ListMaintenanceRepos(ctx)
+	// Capture the config and git executable as one coherent generation for the
+	// whole tick, and use the pinned Runner for maintenance-repo discovery, the
+	// allowlist policy (cfg), and every repo pull — so a reload mid-tick can't
+	// list repos on one executable and pull them on another, nor pair old
+	// allowlist policy with a new git binary (#1287).
+	cfg, r, _ := sm.configWithTools()
+
+	repos, err := r.ListMaintenanceRepos(ctx)
 	if err != nil {
 		sm.log.Warn("git-pull: failed to list maintenance repos", "err", err)
 		return
@@ -55,10 +62,6 @@ func (sm *SessionManager) runGitPullTick(ctx context.Context) {
 	if len(repos) == 0 {
 		return
 	}
-
-	sm.mu.RLock()
-	cfg := sm.cfg
-	sm.mu.RUnlock()
 
 	seen := make(map[string]bool)
 
@@ -85,7 +88,7 @@ func (sm *SessionManager) runGitPullTick(ctx context.Context) {
 			return
 		}
 
-		pulled, err := sm.pullIfClean(ctx, repo)
+		pulled, err := sm.pullIfCleanWith(ctx, cfg, r, repo)
 		switch {
 		case err != nil:
 			sm.log.Warn("git-pull: error", "repo", repo, "err", err)
@@ -101,16 +104,23 @@ func (sm *SessionManager) runGitPullTick(ctx context.Context) {
 	sm.log.Info("git-pull: cycle complete", "updated", updated, "skipped", skipped, "errors", errored)
 }
 
+// pullIfClean captures one coherent (config, git executable) generation and
+// pulls a single repo on it. It is the entry point for a standalone pull; the
+// git-pull tick uses pullIfCleanWith to share one generation across the whole
+// tick (discovery + allowlist + every pull).
 func (sm *SessionManager) pullIfClean(ctx context.Context, repoPath string) (bool, error) {
-	// Capture the config and the git executable as one coherent generation:
-	// configWithTools reads both under one sm.mu RLock (applyConfig co-publishes
-	// them), so the fetch/merge timeouts and the pinned git binary can never come
-	// from different generations. Every git subprocess below — including
-	// resolveUpstream and DiscoverDefaultBranch — runs on this one Runner, so a
-	// reload mid-pull can neither pair old timeouts with a new executable nor
-	// split the pull across two executables (issue #1287).
 	cfg, r, _ := sm.configWithTools()
+	return sm.pullIfCleanWith(ctx, cfg, r, repoPath)
+}
 
+// pullIfCleanWith pulls one repo using the caller-pinned config and git Runner.
+// configWithTools reads both under one sm.mu RLock (applyConfig co-publishes
+// them), so the fetch/merge timeouts and the pinned git binary can never come
+// from different generations. Every git subprocess below — including
+// resolveUpstream and DiscoverDefaultBranch — runs on this one Runner, so a
+// reload mid-pull can neither pair old timeouts with a new executable nor split
+// the pull across two executables (issue #1287).
+func (sm *SessionManager) pullIfCleanWith(ctx context.Context, cfg *config.Config, r git.Runner, repoPath string) (bool, error) {
 	isBare, err := r.RunOutputContext(ctx, repoPath, "rev-parse", "--is-bare-repository")
 	if err != nil {
 		return false, fmt.Errorf("checking bare: %w", err)

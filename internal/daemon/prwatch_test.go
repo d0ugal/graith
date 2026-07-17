@@ -8,12 +8,191 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/tools"
 )
+
+// TestPollSessionPinsOneGHGenerationAcrossReload is the #1287 blocking A/B poll
+// regression: one PR poll makes several gh calls (pr list → checks → comments).
+// They must all run against the gh executable pinned for the poll, even if a
+// config reload swaps [tools].gh mid-poll. The pr-list call blocks; the tools
+// registry is reloaded to gh-B; after release every gh call must still be gh-A.
+func TestPollSessionPinsOneGHGenerationAcrossReload(t *testing.T) {
+	cloneDir := filepath.Join(t.TempDir(), "clone")
+	gitRun(t, "", "init", "--initial-branch=main", cloneDir)
+	gitRun(t, cloneDir, "remote", "add", "origin", "git@github.com:croft/loch.git")
+
+	origRun := ghRunner
+
+	t.Cleanup(func() { ghRunner = origRun })
+	t.Cleanup(tools.Reset)
+
+	var (
+		mu      sync.Mutex
+		seen    []string
+		release = make(chan struct{})
+		first   = make(chan struct{}, 1)
+	)
+
+	ghRunner = func(_ context.Context, ghBin, _ string, _ ...string) (string, error) {
+		mu.Lock()
+
+		seen = append(seen, ghBin)
+		n := len(seen)
+		mu.Unlock()
+
+		if n == 1 {
+			first <- struct{}{}
+
+			<-release
+
+			return `[{"number":9,"state":"OPEN","isDraft":false,"url":"u","headRefOid":"sha9","mergeable":"MERGEABLE"}]`, nil
+		}
+
+		return `[]`, nil
+	}
+
+	tools.Configure(tools.Config{Git: "git", GH: "gh-A"})
+
+	sm := newPRWatchCovSM()
+	sm.state.Sessions["bonnie"] = &SessionState{ID: "bonnie"}
+	cfg := &config.PRWatchConfig{Enabled: true, PollTerminal: "10m", PollPending: "1m", PollMerged: "1h"}
+	tgt := prWatchTarget{id: "bonnie", branch: "bide", worktreePath: cloneDir}
+
+	// Capture the pinned tools exactly as RunPRWatchLoop does for a tick.
+	_, r, ghBin := sm.configWithTools()
+	pt := pollTools{git: r, gh: ghBin}
+
+	done := make(chan struct{})
+
+	go func() {
+		sm.pollSession(context.Background(), cfg, pt, tgt, false)
+		close(done)
+	}()
+
+	<-first
+
+	// A reload swaps gh mid-poll; the in-flight poll must ignore it.
+	tools.Configure(tools.Config{Git: "git", GH: "gh-B"})
+	close(release)
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("pollSession did not complete")
+	}
+
+	mu.Lock()
+
+	got := append([]string(nil), seen...)
+	mu.Unlock()
+
+	if len(got) < 2 {
+		t.Fatalf("expected multiple gh calls (list + checks + comments), got %d: %v", len(got), got)
+	}
+
+	for i, b := range got {
+		if b != "gh-A" {
+			t.Fatalf("gh call %d used %q, want gh-A (poll must stay on the pinned generation across the reload)", i, b)
+		}
+	}
+}
+
+// TestPRWatchLoopGHAvailabilityFollowsGeneration is the #1287 missing→valid
+// reload regression: gh availability was cached once at loop start, so a
+// missing→valid [tools].gh reload never enabled PR awareness and valid→missing
+// left a stale gate. The loop must re-derive availability per tick/kick from the
+// current generation.
+func TestPRWatchLoopGHAvailabilityFollowsGeneration(t *testing.T) {
+	cloneDir := filepath.Join(t.TempDir(), "clone")
+	gitRun(t, "", "init", "--initial-branch=main", cloneDir)
+	gitRun(t, cloneDir, "remote", "add", "origin", "git@github.com:croft/loch.git")
+
+	origRun, origLook := ghRunner, ghLookPath
+
+	t.Cleanup(func() { ghRunner = origRun; ghLookPath = origLook })
+	t.Cleanup(tools.Reset)
+	tools.Configure(tools.Config{Git: "git", GH: "gh"})
+
+	var avail atomic.Bool
+
+	ghLookPath = func(string) bool { return avail.Load() }
+
+	polled := make(chan struct{}, 8)
+	ghRunner = func(_ context.Context, _, _ string, _ ...string) (string, error) {
+		polled <- struct{}{}
+
+		return `[]`, nil // no PR
+	}
+
+	sm := newPRWatchCovSM()
+	sm.cfg = &config.Config{PRWatch: config.PRWatchConfig{Enabled: true}}
+	sm.state.Sessions["bonnie"] = &SessionState{
+		ID: "bonnie", Status: StatusRunning, RepoPath: cloneDir, WorktreePath: cloneDir, Branch: "bide",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	loopDone := make(chan struct{})
+
+	// Registered last so it runs FIRST (Cleanup is LIFO): stop the loop and wait
+	// for it to exit before the seam-restore cleanups above run, so the loop can't
+	// read ghLookPath/ghRunner while they are being restored.
+	t.Cleanup(func() {
+		cancel()
+		<-loopDone
+	})
+
+	go func() {
+		sm.RunPRWatchLoop(ctx)
+		close(loopDone)
+	}()
+
+	// Phase 1 — gh unavailable: a kick must be gated, no poll.
+	avail.Store(false)
+
+	sm.prWatch.kick <- "bonnie"
+
+	select {
+	case <-polled:
+		t.Fatal("poll ran while gh was unavailable")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	// Phase 2 — gh becomes valid on reload: the next kick must poll.
+	avail.Store(true)
+
+	sm.prWatch.kick <- "bonnie"
+
+	select {
+	case <-polled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("poll did not run after gh became available (missing→valid reload not observed)")
+	}
+
+	// Phase 3 — gh removed again: the gate must re-close.
+	avail.Store(false)
+
+	// Drain any residual poll signal from phase 2 before asserting the gate.
+	select {
+	case <-polled:
+	default:
+	}
+
+	sm.prWatch.kick <- "bonnie"
+
+	select {
+	case <-polled:
+		t.Fatal("poll ran after gh was removed (stale gate)")
+	case <-time.After(300 * time.Millisecond):
+	}
+}
 
 func newPRWatchSM() *SessionManager {
 	return &SessionManager{
@@ -1114,7 +1293,7 @@ func TestRunPRWatchTick_ConfiguredBatchSize(t *testing.T) {
 	}
 
 	cfg := &config.PRWatchConfig{Enabled: true, Advanced: config.PRWatchAdvancedConfig{BatchSize: 2}}
-	sm.runPRWatchTick(context.Background(), cfg)
+	sm.runPRWatchTick(context.Background(), cfg, testPollTools())
 
 	sm.prWatch.mu.Lock()
 	polled := len(sm.prWatch.nextPoll)
@@ -1469,7 +1648,7 @@ func TestPollSession_NonGitHubBacksOff_Cov(t *testing.T) {
 	cfg := &config.PRWatchConfig{Enabled: true}
 	tgt := prWatchTarget{id: "haar", branch: "main", worktreePath: cloneDir}
 
-	sm.pollSession(context.Background(), cfg, tgt, false)
+	sm.pollSession(context.Background(), cfg, testPollTools(), tgt, false)
 
 	sm.prWatch.mu.Lock()
 	next, ok := sm.prWatch.nextPoll["haar"]
@@ -1498,7 +1677,7 @@ func TestPollSession_FoundPRWritesState_Cov(t *testing.T) {
 	defer func() { ghRunner = orig }()
 
 	calls := 0
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		calls++
 		if calls == 1 { // gh pr list
 			return `[{"number":9,"state":"OPEN","isDraft":false,"url":"https://github.com/croft/loch/pull/9","headRefOid":"sha9","mergeable":"MERGEABLE"}]`, nil
@@ -1512,7 +1691,7 @@ func TestPollSession_FoundPRWritesState_Cov(t *testing.T) {
 	cfg := &config.PRWatchConfig{Enabled: true, PollTerminal: "10m", PollPending: "1m", PollMerged: "1h"}
 	tgt := prWatchTarget{id: "bonnie", branch: "bide", worktreePath: cloneDir}
 
-	sm.pollSession(context.Background(), cfg, tgt, false)
+	sm.pollSession(context.Background(), cfg, testPollTools(), tgt, false)
 
 	if sm.state.Sessions["bonnie"].PullRequest.Number != 9 {
 		t.Errorf("pollSession should write PR #9, got %+v", sm.state.Sessions["bonnie"].PullRequest)
@@ -1539,7 +1718,7 @@ func TestPollSession_NoPRClearsState_Cov(t *testing.T) {
 	orig := ghRunner
 	defer func() { ghRunner = orig }()
 
-	ghRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
+	ghRunner = func(ctx context.Context, ghBin, dir string, args ...string) (string, error) {
 		return `[]`, nil // no PR
 	}
 
@@ -1554,7 +1733,7 @@ func TestPollSession_NoPRClearsState_Cov(t *testing.T) {
 
 	before := time.Now()
 
-	sm.pollSession(context.Background(), cfg, tgt, false)
+	sm.pollSession(context.Background(), cfg, testPollTools(), tgt, false)
 
 	s := sm.state.Sessions["ken"]
 	if s.PullRequest.Number != 0 {
@@ -1606,7 +1785,7 @@ func TestPRWatchTargets_Cov(t *testing.T) {
 	// Ineligible: errored status.
 	sm.state.Sessions["errored"] = &SessionState{ID: "errored", Status: StatusErrored, RepoPath: cloneDir}
 
-	targets := sm.prWatchTargets()
+	targets := sm.prWatchTargets(testPollTools())
 
 	if len(targets) != 1 || targets[0].id != "braw" || targets[0].branch != "canny-feature" {
 		t.Fatalf("expected only 'braw' eligible with recorded branch, got %+v", targets)
@@ -1655,7 +1834,7 @@ func TestRunPRWatchTick_BatchCap_Cov(t *testing.T) {
 	}
 
 	cfg := &config.PRWatchConfig{Enabled: true}
-	sm.runPRWatchTick(context.Background(), cfg)
+	sm.runPRWatchTick(context.Background(), cfg, testPollTools())
 
 	// At most the default batch size of sessions should have been polled (scheduled).
 	sm.prWatch.mu.Lock()

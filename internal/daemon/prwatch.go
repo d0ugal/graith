@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/textutil"
 )
@@ -106,18 +107,19 @@ type prWatchTarget struct {
 // RunPRWatchLoop is the daemon-owned PR/CI watcher. Modeled on RunGitPullLoop:
 // config-gated, tolerant of errors, off the request path.
 func (sm *SessionManager) RunPRWatchLoop(ctx context.Context) {
-	ghOK := ghAvailable()
-	if !ghOK {
-		sm.log.Info("pr-watch: gh not found on PATH, PR/CI awareness disabled")
+	if !ghAvailable() {
+		sm.log.Info("pr-watch: gh not found on PATH at startup; PR/CI awareness will enable automatically if [tools].gh becomes valid on reload")
 	}
 
 	// The git-refs watch (prrefwatch.go) accelerates detection by kicking an
 	// immediate poll when a session's refs change (push/commit/checkout). It shares
-	// this loop's lifecycle and the same gh availability gate; the poll below is the
-	// always-on fallback, so a degraded watch never drops PR awareness. The nil
+	// this loop's lifecycle; the poll below is the always-on fallback, so a degraded
+	// watch never drops PR awareness. It is started regardless of the current gh
+	// availability — its kicks are gated per generation below, so a missing→valid
+	// [tools].gh reload enables PR awareness without a restart (#1287). The nil
 	// guard keeps the accelerator optional — a SessionManager built without it (some
 	// unit tests) still runs the poll loop.
-	if ghOK && sm.prRefWatch != nil {
+	if sm.prRefWatch != nil {
 		go sm.RunPRRefWatchLoop(ctx)
 	}
 
@@ -131,21 +133,33 @@ func (sm *SessionManager) RunPRWatchLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			cfg := sm.Config()
-			if !cfg.PRWatch.Enabled || !ghOK {
+			// Re-derive the config, git Runner, and gh executable per tick from one
+			// coherent generation, and re-check gh availability against that gh so a
+			// missing→valid reload enables the loop and valid→missing gates it (#1287).
+			cfg, r, ghBin := sm.configWithTools()
+			if !cfg.PRWatch.Enabled || !ghAvailableFor(ghBin) {
 				continue
 			}
 
-			sm.runPRWatchTick(ctx, &cfg.PRWatch)
+			sm.runPRWatchTick(ctx, &cfg.PRWatch, pollTools{git: r, gh: ghBin})
 		case id := <-sm.prWatch.kick:
-			cfg := sm.Config()
-			if !cfg.PRWatch.Enabled || !ghOK {
+			cfg, r, ghBin := sm.configWithTools()
+			if !cfg.PRWatch.Enabled || !ghAvailableFor(ghBin) {
 				continue
 			}
 
-			sm.pollKicked(ctx, &cfg.PRWatch, id)
+			sm.pollKicked(ctx, &cfg.PRWatch, pollTools{git: r, gh: ghBin}, id)
 		}
 	}
+}
+
+// pollTools is the git/gh executable generation pinned for one PR-watch tick or
+// kick. Threading it through target resolution and every poll keeps a whole tick
+// on one tools generation, so a reload mid-tick can't split a poll across git or
+// gh binaries (#1287).
+type pollTools struct {
+	git git.Runner
+	gh  string
 }
 
 // pollKicked runs an immediate, targeted poll for one session in response to a
@@ -155,17 +169,17 @@ func (sm *SessionManager) RunPRWatchLoop(ctx context.Context) {
 // pollSession — so a kick only changes WHEN a poll happens, never WHAT it does.
 // A per-session cooldown (kick_cooldown) collapses a burst of ref writes into a
 // single poll.
-func (sm *SessionManager) pollKicked(ctx context.Context, cfg *configPRWatch, id string) {
+func (sm *SessionManager) pollKicked(ctx context.Context, cfg *configPRWatch, pt pollTools, id string) {
 	if !sm.allowKick(cfg, id) {
 		return
 	}
 
-	t, ok := sm.prWatchTarget(id)
+	t, ok := sm.prWatchTarget(pt, id)
 	if !ok {
 		return
 	}
 
-	sm.pollSession(ctx, cfg, t, true)
+	sm.pollSession(ctx, cfg, pt, t, true)
 }
 
 // allowKick applies the per-session kick cooldown, recording the time on success.
@@ -186,7 +200,7 @@ func (sm *SessionManager) allowKick(cfg *configPRWatch, id string) bool {
 // prWatchTarget resolves a single eligible session to a poll target, mirroring
 // prWatchTargets' eligibility rules and off-lock branch reconciliation. ok is
 // false when the session is gone, ineligible, or has no branch to poll.
-func (sm *SessionManager) prWatchTarget(id string) (prWatchTarget, bool) {
+func (sm *SessionManager) prWatchTarget(pt pollTools, id string) (prWatchTarget, bool) {
 	sm.mu.RLock()
 
 	s, ok := sm.state.Sessions[id]
@@ -200,7 +214,7 @@ func (sm *SessionManager) prWatchTarget(id string) (prWatchTarget, bool) {
 
 	sm.mu.RUnlock()
 
-	poll := sm.reconcileBranch(id, branch, worktreePath)
+	poll := sm.reconcileBranch(pt, id, branch, worktreePath)
 	if poll == "" {
 		return prWatchTarget{}, false
 	}
@@ -208,8 +222,8 @@ func (sm *SessionManager) prWatchTarget(id string) (prWatchTarget, bool) {
 	return prWatchTarget{id: id, name: name, branch: poll, worktreePath: worktreePath}, true
 }
 
-func (sm *SessionManager) runPRWatchTick(ctx context.Context, cfg *configPRWatch) {
-	targets := sm.prWatchTargets()
+func (sm *SessionManager) runPRWatchTick(ctx context.Context, cfg *configPRWatch, pt pollTools) {
+	targets := sm.prWatchTargets(pt)
 	now := time.Now()
 
 	sm.prunePRWatchState()
@@ -231,7 +245,7 @@ func (sm *SessionManager) runPRWatchTick(ctx context.Context, cfg *configPRWatch
 
 		polled++
 
-		sm.pollSession(ctx, cfg, t, false)
+		sm.pollSession(ctx, cfg, pt, t, false)
 	}
 }
 
@@ -247,7 +261,7 @@ func (sm *SessionManager) runPRWatchTick(ctx context.Context, cfg *configPRWatch
 // different branch (e.g. the agent ran `gh pr checkout`) and re-matches the PR
 // against the branch the worktree is actually on (#1008), without mutating the
 // session's owned branch identity.
-func (sm *SessionManager) prWatchTargets() []prWatchTarget {
+func (sm *SessionManager) prWatchTargets(pt pollTools) []prWatchTarget {
 	type raw struct {
 		id, name, branch, worktreePath string
 	}
@@ -281,7 +295,7 @@ func (sm *SessionManager) prWatchTargets() []prWatchTarget {
 	var targets []prWatchTarget
 
 	for _, r := range rawTargets {
-		branch := sm.reconcileBranch(r.id, r.branch, r.worktreePath)
+		branch := sm.reconcileBranch(pt, r.id, r.branch, r.worktreePath)
 		if branch == "" {
 			continue
 		}
@@ -315,9 +329,9 @@ func (sm *SessionManager) prWatchTargets() []prWatchTarget {
 // skips the session.
 //
 // Called from prWatchTargets OFF sm.mu: it shells out to git for the live HEAD.
-func (sm *SessionManager) reconcileBranch(id, recorded, worktreePath string) string {
+func (sm *SessionManager) reconcileBranch(pt pollTools, id, recorded, worktreePath string) string {
 	// Live HEAD of the worktree; "" if detached, on error, or no worktree.
-	live := effectiveBranch("", worktreePath)
+	live := effectiveBranchWith(pt.git, "", worktreePath)
 
 	// Poll against the live HEAD; fall back to the recorded branch when the live
 	// HEAD is unreadable (detached mid-rebase, git error, bare) so a transient
@@ -377,15 +391,15 @@ func (sm *SessionManager) notePollBranch(id, recorded, poll string) bool {
 	return true
 }
 
-func (sm *SessionManager) pollSession(ctx context.Context, cfg *configPRWatch, t prWatchTarget, kicked bool) {
-	slug, ok := repoSlug(t.worktreePath)
+func (sm *SessionManager) pollSession(ctx context.Context, cfg *configPRWatch, pt pollTools, t prWatchTarget, kicked bool) {
+	slug, ok := repoSlugWith(pt.git, t.worktreePath)
 	if !ok {
 		// Non-GitHub remote — back off hard (negative cache).
 		sm.schedulePoll(t.id, cfg.NoPRNegativeCacheDuration())
 		return
 	}
 
-	d, found, err := resolvePR(ctx, slug, t.branch, t.worktreePath, cfg.GHTimeoutDuration())
+	d, found, err := resolvePR(ctx, pt.gh, slug, t.branch, t.worktreePath, cfg.GHTimeoutDuration())
 	if err != nil {
 		// Transient (network/timeout/auth) — keep last-known, retry next pending cadence.
 		sm.schedulePoll(t.id, cfg.PollPendingDuration())

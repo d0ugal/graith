@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/git"
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 // tracker.go implements the `tracker` trigger action (issue #643): a scheduled
@@ -527,11 +529,16 @@ func (sm *SessionManager) fetchTrackerIssues(ctx context.Context, tc *config.Tra
 // (ghTimeout, from pr_watch.advanced.gh_timeout — issue #1318). truncated is true
 // when the raw result hit the fetch limit (so the caller skips reaps that pass).
 func (sm *SessionManager) fetchGitHubIssues(ctx context.Context, tc *config.TrackerConfig, repo string, ghTimeout time.Duration) (issues []issueRef, truncated bool, err error) {
-	if !ghAvailable() {
+	// Pin one gh+git tool generation for the whole resolution (availability check,
+	// slug resolution, and the gh issue list) so a reload can't split it across
+	// binaries (#1287).
+	toolSnap := tools.Snapshot()
+
+	if !ghAvailableFor(toolSnap.GH) {
 		return nil, false, errors.New("gh CLI not found on PATH")
 	}
 
-	slug, ok := repoSlug(repo)
+	slug, ok := repoSlugWith(git.NewRunnerWith(toolSnap.Git), repo)
 	if !ok {
 		return nil, false, fmt.Errorf("no GitHub remote for %q", repo)
 	}
@@ -555,7 +562,7 @@ func (sm *SessionManager) fetchGitHubIssues(ctx context.Context, tc *config.Trac
 		args = append(args, "--assignee", tc.Assignee)
 	}
 
-	out, err := ghRunner(cctx, repo, args...)
+	out, err := ghRunner(cctx, toolSnap.GH, repo, args...)
 	if err != nil {
 		return nil, false, fmt.Errorf("gh issue list: %w", err)
 	}
