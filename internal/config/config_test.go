@@ -413,6 +413,14 @@ func TestApprovalsValidate(t *testing.T) {
 		// A non-subprocess backend has no execution timeout, so a tiny enclosing
 		// timeout is fine on its own.
 		{"tiny enclosing ok for prompt backend", Approvals{Timeout: "1s"}, false},
+
+		// Human approval timeout validation (#1251 round 3). The value composes
+		// into the server/client operation budget, so a non-empty unparseable,
+		// zero, or negative timeout must be rejected at load/reload.
+		{"timeout valid ok", Approvals{Timeout: "5m"}, false},
+		{"timeout unparseable", Approvals{Timeout: "haar"}, true},
+		{"timeout zero", Approvals{Timeout: "0s"}, true},
+		{"timeout negative", Approvals{Timeout: "-1m"}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -445,6 +453,43 @@ func TestApprovalsServerTimeoutIncludesBackendThenHumanPhases(t *testing.T) {
 	overflow := Approvals{Backend: "command", Timeout: "2562047h47m16.854775807s", CommandTimeout: "5s"}
 	if got := overflow.ServerTimeoutDuration(); got != time.Duration(1<<63-1) {
 		t.Errorf("overflowing server bound = %v, want saturated duration", got)
+	}
+}
+
+// TestApprovalsTimeoutDefensiveFallbackAndBound covers the accessor's defensive
+// fallback for directly-constructed configs (kept separate from the load/reload
+// rejection in TestApprovalsValidate) and the effective server-timeout bound
+// (#1251 round 3). TimeoutDuration must never yield a non-positive human wait —
+// even for an unparseable, zero, or negative field — so ServerTimeoutDuration
+// stays a positive, coherent operation budget.
+func TestApprovalsTimeoutDefensiveFallbackAndBound(t *testing.T) {
+	const def = 10 * time.Minute
+
+	for _, in := range []string{"", "0s", "-5m", "haar"} {
+		if got := (Approvals{Timeout: in}).TimeoutDuration(); got != def {
+			t.Errorf("TimeoutDuration(%q) = %v, want %v defensive fallback", in, got, def)
+		}
+	}
+
+	if got := (Approvals{Timeout: "3m"}).TimeoutDuration(); got != 3*time.Minute {
+		t.Errorf("TimeoutDuration(\"3m\") = %v, want 3m", got)
+	}
+
+	// Even a directly-constructed bad timeout composes into a positive server
+	// bound (prompt backend has no execution phase, so the bound is the human
+	// wait fallback).
+	if got := (Approvals{Timeout: "0s"}).ServerTimeoutDuration(); got != def {
+		t.Errorf("ServerTimeoutDuration with bad timeout = %v, want %v (defensive human wait)", got, def)
+	}
+
+	if got := (Approvals{Timeout: "0s"}).ServerTimeoutDuration(); got <= 0 {
+		t.Errorf("ServerTimeoutDuration must stay positive, got %v", got)
+	}
+
+	// A valid subprocess-backend config bounds the budget as backend + human.
+	command := Approvals{Backend: "command", Command: "canny", Timeout: "3m", CommandTimeout: "5s"}
+	if got := command.ServerTimeoutDuration(); got != 3*time.Minute+5*time.Second {
+		t.Errorf("ServerTimeoutDuration = %v, want backend 5s + human 3m", got)
 	}
 }
 

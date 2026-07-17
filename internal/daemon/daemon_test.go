@@ -2358,6 +2358,8 @@ func TestReloadConfigRejectsUnsafeTimingPolicies(t *testing.T) {
 		{"orchestrator restart", "[orchestrator.restart]\ninitial_backoff = \"0s\"\n", "orchestrator.restart.initial_backoff"},
 		{"PR anti-flood window", "[pr_watch.advanced]\nnotification_rate_window = \"0s\"\n", "pr_watch.advanced.notification_rate_window"},
 		{"degraded watch retry", "[triggers.advanced]\nwatch_retry_base_backoff = \"0s\"\n", "triggers.advanced.watch_retry_base_backoff"},
+		// Human approval timeout composed into the operation budget (#1251).
+		{"approvals human timeout", "[approvals]\ntimeout = \"0s\"\n", "approvals] timeout"},
 		// Message retention: a negative window would silently disable cleanup (#1321).
 		{"messages max_age negative", "[messages]\nmax_age = \"-1h\"\n", "messages.max_age"},
 		// Sub-millisecond SQLite busy timeouts collapse to busy_timeout(0) (#1322).

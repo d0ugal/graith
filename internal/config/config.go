@@ -3329,6 +3329,20 @@ func (a Approvals) Validate() error {
 		}
 	}
 
+	// The human approval timeout composes into the client/server operation
+	// budget (ServerTimeoutDuration) and is the enclosing bound the per-backend
+	// timeouts are checked against. A non-empty unparseable, zero, or negative
+	// value would make TimeoutDuration fall back defensively but still leave the
+	// stated policy incoherent, so reject it at load/reload (issue #1251). Empty
+	// keeps the 10m default.
+	if s := strings.TrimSpace(a.Timeout); s != "" {
+		if d, err := ParseDurationWithDays(s); err != nil {
+			return fmt.Errorf("[approvals] timeout=%q is not a valid duration: %w", s, err)
+		} else if d <= 0 {
+			return fmt.Errorf("[approvals] timeout=%q must be a positive duration", s)
+		}
+	}
+
 	if err := a.validateBackendTimeouts(backend); err != nil {
 		return err
 	}
@@ -3416,13 +3430,20 @@ func (s StatusConfig) TTLDuration() time.Duration {
 	return d
 }
 
+// TimeoutDuration returns the human approval-decision timeout. Empty uses the
+// 10m default. Load/reload validation rejects a non-empty unparseable, zero, or
+// negative value; the accessor also falls back to the default on a non-positive
+// or unparseable value so a directly-constructed config can never compose a
+// zero/negative human wait into the server/client operation budget
+// (ServerTimeoutDuration) that would collapse the approval deadline hierarchy
+// (issue #1251, regression history #244).
 func (a Approvals) TimeoutDuration() time.Duration {
-	if a.Timeout == "" {
+	if strings.TrimSpace(a.Timeout) == "" {
 		return 10 * time.Minute
 	}
 
 	d, err := ParseDurationWithDays(a.Timeout)
-	if err != nil {
+	if err != nil || d <= 0 {
 		return 10 * time.Minute
 	}
 
