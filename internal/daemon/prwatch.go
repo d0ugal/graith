@@ -11,6 +11,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/textutil"
 )
 
 // configPRWatch is a short local alias for the config struct.
@@ -1397,12 +1398,10 @@ func commentAwarenessBody(cfg *configPRWatch, header string, d prData, comments 
 // --- helpers ---
 
 func truncate(s string, n int) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= n {
-		return s
-	}
-
-	return s[:n] + "…"
+	// Back the retained prefix up to a rune boundary so a byte cap that lands
+	// mid-rune can never emit invalid UTF-8 into inbox/store output (issue #1313).
+	// The marker stays outside the byte budget, matching the prior contract.
+	return textutil.TruncateUTF8Bytes(strings.TrimSpace(s), n, "…")
 }
 
 func commentsAfter(comments []ghComment, after int64) []ghComment {

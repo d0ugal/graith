@@ -5,8 +5,10 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/store"
@@ -1095,6 +1097,38 @@ func TestTruncateOutput(t *testing.T) {
 	// A smaller configured cap truncates sooner.
 	if out := truncateOutput(string(long), 10); len(out) != len("aaaaaaaaaa")+len("\n… (truncated)") {
 		t.Errorf("custom cap not honoured: %q", out)
+	}
+}
+
+// TestTruncateOutputUTF8Safe guards issue #1313: a byte cap landing inside a
+// multi-byte rune must back up to a rune boundary so trigger command output
+// stays valid UTF-8, with the marker preserved outside the byte budget.
+func TestTruncateOutputUTF8Safe(t *testing.T) {
+	const marker = "\n… (truncated)"
+
+	for _, tc := range []struct {
+		name  string
+		in    string
+		limit int
+	}{
+		{"accented", "éééééé", 5}, // 2-byte runes, cap mid-rune
+		{"emoji", "🐉🐉🐉", 6},       // 4-byte runes, cap mid-rune
+		{"cjk", "了了了了了", 7},       // 3-byte runes, cap mid-rune
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncateOutput(tc.in, tc.limit)
+			if !utf8.ValidString(got) {
+				t.Fatalf("truncateOutput(%q, %d) = %q, not valid UTF-8", tc.in, tc.limit, got)
+			}
+
+			if !strings.HasSuffix(got, marker) {
+				t.Fatalf("truncateOutput(%q, %d) = %q, want truncation marker", tc.in, tc.limit, got)
+			}
+
+			if prefix := strings.TrimSuffix(got, marker); len(prefix) > tc.limit {
+				t.Fatalf("retained %d bytes, want <= budget %d", len(prefix), tc.limit)
+			}
+		})
 	}
 }
 

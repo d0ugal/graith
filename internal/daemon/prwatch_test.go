@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/d0ugal/graith/internal/config"
 )
@@ -1362,6 +1363,39 @@ func TestTruncate_Cov(t *testing.T) {
 
 	if got := truncate("short", 100); got != "short" {
 		t.Errorf("truncate under limit should be unchanged, got %q", got)
+	}
+}
+
+// TestTruncateUTF8Safe guards issue #1313: a byte cap that lands inside a
+// multi-byte rune must back up to a rune boundary and never emit invalid UTF-8
+// into inbox/store output.
+func TestTruncateUTF8Safe(t *testing.T) {
+	// "é" (U+00E9) is two bytes; a cap of 1 lands mid-rune.
+	for _, tc := range []struct {
+		name  string
+		in    string
+		limit int
+	}{
+		{"accented", "éééé", 3},  // cap splits the 2-byte é at byte 3
+		{"emoji", "🐉🐉🐉", 5},      // 4-byte runes, cap mid-rune
+		{"combining", "éé", 2}, // combining acute accent
+		{"cjk", "了了了了", 5},       // 3-byte runes, cap mid-rune
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncate(tc.in, tc.limit)
+			if !utf8.ValidString(got) {
+				t.Fatalf("truncate(%q, %d) = %q, not valid UTF-8", tc.in, tc.limit, got)
+			}
+
+			if !strings.HasSuffix(got, "…") {
+				t.Fatalf("truncate(%q, %d) = %q, want ellipsis marker", tc.in, tc.limit, got)
+			}
+
+			// The retained prefix (marker stripped) must honour the byte budget.
+			if prefix := strings.TrimSuffix(got, "…"); len(prefix) > tc.limit {
+				t.Fatalf("retained %d bytes, want <= budget %d", len(prefix), tc.limit)
+			}
+		})
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/scenariofile"
+	"github.com/d0ugal/graith/internal/textutil"
 	"github.com/d0ugal/graith/internal/tools"
 )
 
@@ -242,12 +243,10 @@ func triggerCommandEnv(scratch string) []string {
 // truncateOutput trims and caps captured command output to maxBytes, appending a
 // marker when it truncates. maxBytes comes from [triggers.advanced] command_output_cap.
 func truncateOutput(s string, maxBytes int) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= maxBytes {
-		return s
-	}
-
-	return s[:maxBytes] + "\n… (truncated)"
+	// Back the retained prefix up to a rune boundary so a byte cap that lands
+	// mid-rune can never emit invalid UTF-8 into trigger command output
+	// (issue #1313). The marker stays outside the byte budget, as before.
+	return textutil.TruncateUTF8Bytes(strings.TrimSpace(s), maxBytes, "\n… (truncated)")
 }
 
 // actionSession spawns (or, with ensure, reuses) a session parented to the
