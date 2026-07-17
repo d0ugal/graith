@@ -217,11 +217,15 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 	}
 
 	cfgUsername := sm.cfg.GitHubUsername
+	// Capture the username-discovery timeout under the same RLock as the username
+	// itself, so the lock-free discovery below can't race a config hot reload
+	// swapping sm.cfg (issue #1287, regression from 2acbe3c).
+	usernameTimeout := sm.cfg.Git.UsernameTimeoutDuration()
 	sm.mu.RUnlock()
 
 	preUsername := cfgUsername
 	if preUsername == "" && snapRepoPath != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), sm.cfg.Git.UsernameTimeoutDuration())
+		ctx, cancel := context.WithTimeout(context.Background(), usernameTimeout)
 		preUsername, _ = git.DiscoverGitHubUsername(ctx, snapRepoPath)
 
 		cancel()

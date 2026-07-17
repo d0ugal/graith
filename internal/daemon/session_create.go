@@ -105,7 +105,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	preUsername := preLockCfg.GitHubUsername
 	if preUsername == "" && preRepoRoot != "" && !inPlace {
-		ctx, cancel := context.WithTimeout(context.Background(), sm.cfg.Git.UsernameTimeoutDuration())
+		ctx, cancel := context.WithTimeout(context.Background(), preLockCfg.Git.UsernameTimeoutDuration())
 		preUsername, _ = git.DiscoverGitHubUsername(ctx, preRepoRoot)
 
 		cancel()
@@ -409,7 +409,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	// Git worktree setup (default path only — includes fetch which can block).
 	if repoRoot != "" && !isMirror && !inPlace {
-		gitCtx, gitCancel := context.WithTimeout(context.Background(), sm.cfg.Git.FetchTimeoutDuration())
+		gitCtx, gitCancel := context.WithTimeout(context.Background(), cfgSnapshot.Git.FetchTimeoutDuration())
 		defer gitCancel()
 
 		branchPrefix, _ := config.Expand(cfgSnapshot.BranchPrefix, config.TemplateVars{Username: preUsername})
@@ -811,10 +811,10 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			Prompt:           prompt,
 			Control:          true,
 			OnPermission:     sm.headlessPermissionFunc(id),
-			MaxLineBytes:     sm.cfg.Headless.MaxLineBytesOrDefault(),
-			ControlTimeout:   sm.cfg.Headless.ControlTimeoutDuration(),
-			InterruptTimeout: sm.cfg.Headless.InterruptTimeoutDuration(),
-			PreviewBytes:     sm.cfg.Headless.PreviewBytesOrDefault(),
+			MaxLineBytes:     cfgSnapshot.Headless.MaxLineBytesOrDefault(),
+			ControlTimeout:   cfgSnapshot.Headless.ControlTimeoutDuration(),
+			InterruptTimeout: cfgSnapshot.Headless.InterruptTimeoutDuration(),
+			PreviewBytes:     cfgSnapshot.Headless.PreviewBytesOrDefault(),
 		})
 	} else {
 		ptySess, err = grpty.NewSession(grpty.SessionOpts{
