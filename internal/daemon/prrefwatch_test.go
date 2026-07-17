@@ -403,6 +403,7 @@ func TestNotePRRefChange_DebounceCoalesces(t *testing.T) {
 // without replacing it or dropping a ref change whose timer is already armed.
 func TestPRRefWatch_ReloadDebounceAppliesToExistingWatcher(t *testing.T) {
 	dir := t.TempDir()
+
 	cfgPath := filepath.Join(dir, "config.toml")
 	if err := os.WriteFile(cfgPath, []byte("[pr_watch.advanced]\nref_debounce = \"500ms\"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -428,6 +429,7 @@ func TestPRRefWatch_ReloadDebounceAppliesToExistingWatcher(t *testing.T) {
 	sm.prRefWatch.mu.Lock()
 	existing := sm.prRefWatch.watchers["braw1"]
 	sm.prRefWatch.mu.Unlock()
+
 	if existing == nil {
 		t.Fatal("expected an existing ref watcher")
 	}
@@ -438,6 +440,7 @@ func TestPRRefWatch_ReloadDebounceAppliesToExistingWatcher(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("[pr_watch.advanced]\nref_debounce = \"10ms\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := sm.ReloadConfig(); err != nil {
 		t.Fatalf("ReloadConfig() error = %v", err)
 	}
@@ -445,6 +448,7 @@ func TestPRRefWatch_ReloadDebounceAppliesToExistingWatcher(t *testing.T) {
 	sm.prRefWatch.mu.Lock()
 	afterReload := sm.prRefWatch.watchers["braw1"]
 	sm.prRefWatch.mu.Unlock()
+
 	if afterReload != existing {
 		t.Fatal("reload should retain the existing ref watcher")
 	}
@@ -456,6 +460,7 @@ func TestPRRefWatch_ReloadDebounceAppliesToExistingWatcher(t *testing.T) {
 	// A ref change armed after reload must use the new 10ms duration, not the
 	// 500ms duration captured when the watcher was created.
 	sm.notePRRefChange(existing)
+
 	if id, ok := waitForKick(t, sm, 200*time.Millisecond); !ok || id != "braw1" {
 		t.Fatalf("reloaded debounce did not affect existing watcher: id=%q ok=%v", id, ok)
 	}
