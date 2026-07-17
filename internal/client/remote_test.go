@@ -17,6 +17,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -626,5 +627,131 @@ func TestCompletePairingLegacyDaemonResponse(t *testing.T) {
 
 	if <-ackSeen {
 		t.Fatal("client must not send pair_ack to a legacy daemon")
+	}
+}
+
+// stalledTLSListener accepts TCP connections but never speaks TLS, modelling a
+// peer that completes the TCP handshake and then hangs. Accepted connections are
+// held open (and closed on cleanup) so the client's TLS handshake blocks waiting
+// for a ServerHello that never comes.
+func stalledTLSListener(t *testing.T) (host string, port int) {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var (
+		mu    sync.Mutex
+		conns []net.Conn
+	)
+
+	done := make(chan struct{})
+
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
+		}
+	}()
+
+	t.Cleanup(func() {
+		_ = ln.Close()
+		close(done)
+
+		mu.Lock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+		mu.Unlock()
+	})
+
+	addr := ln.Addr().(*net.TCPAddr)
+
+	return "127.0.0.1", addr.Port
+}
+
+func withShortRemoteHandshake(t *testing.T) {
+	t.Helper()
+
+	origHS, origDial := remoteHandshakeTimeout, remoteDialTimeout
+
+	t.Cleanup(func() { remoteHandshakeTimeout, remoteDialTimeout = origHS, origDial })
+
+	remoteHandshakeTimeout = 200 * time.Millisecond
+	remoteDialTimeout = 2 * time.Second
+}
+
+// TestConnectRemoteBoundsTLSHandshakeAgainstStalledPeer proves the paired-lane
+// TLS handshake deadline is installed BEFORE conn.Handshake(): a peer that
+// accepts TCP but never completes TLS must fail within the handshake budget, not
+// hang forever (issue #1242).
+func TestConnectRemoteBoundsTLSHandshakeAgainstStalledPeer(t *testing.T) {
+	withShortRemoteHandshake(t)
+
+	host, port := stalledTLSListener(t)
+
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	_, pin := makeCertAndPin(t, key)
+
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+
+	rh := &RemoteHost{Host: host, Port: port, TLSPin: pin, Token: "braw"}
+
+	start := time.Now()
+
+	done := make(chan error, 1)
+
+	go func() {
+		_, err := ConnectRemote(config.Paths{}, rh, priv, 80, 24)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected a TLS handshake error against a stalled peer")
+		}
+
+		if !strings.Contains(err.Error(), "tls handshake") {
+			t.Errorf("err = %v, want a tls handshake failure", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("ConnectRemote hung past the handshake budget (%v elapsed) — deadline not installed before TLS handshake", time.Since(start))
+	}
+}
+
+// TestPairRemoteBoundsTLSHandshakeAgainstStalledPeer proves the first-contact
+// pairing lane installs the same TLS handshake deadline before conn.Handshake().
+func TestPairRemoteBoundsTLSHandshakeAgainstStalledPeer(t *testing.T) {
+	withShortRemoteHandshake(t)
+
+	host, port := stalledTLSListener(t)
+
+	done := make(chan error, 1)
+
+	go func() {
+		_, err := PairRemote(config.Paths{}, host, port, "", "canny", "pubkey")
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected a TLS handshake error against a stalled peer")
+		}
+
+		if !strings.Contains(err.Error(), "tls handshake") {
+			t.Errorf("err = %v, want a tls handshake failure", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("PairRemote hung past the handshake budget — deadline not installed before TLS handshake")
 	}
 }

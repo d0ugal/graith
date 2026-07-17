@@ -540,6 +540,14 @@ func (c *Client) SetReadDeadline(t time.Time) error {
 	return c.conn.SetReadDeadline(t)
 }
 
+// SetDeadline sets the combined read+write deadline on the underlying
+// connection. A zero time clears it. Callers that drive a bounded handshake on a
+// connection New() leaves deadline-free (e.g. the exec-upgrade path) use this so
+// a stale or hung daemon can't wedge the handshake/read (issue #1242).
+func (c *Client) SetDeadline(t time.Time) error {
+	return c.conn.SetDeadline(t)
+}
+
 func (c *Client) ReadControlResponse() (protocol.Envelope, error) {
 	frame, err := c.reader.ReadFrame()
 	if err != nil {

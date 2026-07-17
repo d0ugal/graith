@@ -74,6 +74,14 @@ func ConnectRemote(paths config.Paths, rh *RemoteHost, signer ed25519.PrivateKey
 	}
 
 	conn := tls.Client(raw, remoteTLSConfig(rh))
+
+	// Bound the TLS handshake itself: a TCP peer that accepts the connection but
+	// never completes the TLS handshake would otherwise hang conn.Handshake()
+	// indefinitely (issue #1242). Install the deadline BEFORE the handshake, not
+	// after. Re-armed below for the app handshake + proof-of-possession, and
+	// cleared before the long-lived passthrough loop.
+	_ = conn.SetDeadline(time.Now().Add(remoteHandshakeTimeout))
+
 	if err := conn.Handshake(); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("tls handshake with %s: %w", rh.Host, err)
@@ -179,6 +187,13 @@ func PairRemote(paths config.Paths, host string, port int, profile, deviceLabel,
 	}
 
 	conn := tls.Client(raw, tlsConf)
+
+	// Bound the TLS handshake itself (first-contact pairing lane): a peer that
+	// accepts TCP but never completes TLS must not hang conn.Handshake(). Install
+	// the deadline BEFORE the handshake, not after (issue #1242). Re-armed below
+	// for the app handshake, then extended to the pairing wait.
+	_ = conn.SetDeadline(time.Now().Add(remoteHandshakeTimeout))
+
 	if err := conn.Handshake(); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("tls handshake: %w", err)

@@ -131,9 +131,10 @@ func TestReconnectLoopTimesOut(t *testing.T) {
 		t.Fatalf("err = %v, want \"timed out after 1s\"", err)
 	}
 
-	// 1s / 250ms = 4 sleeps advance the clock to the deadline.
-	if dials != 4 {
-		t.Errorf("dialed %d times, want 4 before timeout", dials)
+	// 1s / 250ms fits 3 attempts strictly before the deadline; the 4th sleep
+	// lands exactly on the deadline, so no dial is started there (no overshoot).
+	if dials != 3 {
+		t.Errorf("dialed %d times, want 3 strictly before timeout", dials)
 	}
 }
 
@@ -154,6 +155,33 @@ func TestReconnectLoopImmediateTimeout(t *testing.T) {
 
 	if dialed {
 		t.Error("dial should not run when the deadline has already passed")
+	}
+}
+
+// TestReconnectLoopCapsSleepToRemaining proves a reconnect_interval larger than
+// the aggregate reconnect_timeout does not overshoot the budget: the pre-dial
+// sleep is capped to the remaining time, and once that single sleep consumes the
+// whole window the loop stops WITHOUT dialing — a dial started at the deadline
+// carries its own dial/handshake budget and would run past reconnect_timeout
+// (issue #1242). The dial here would block if ever called, proving no overshoot.
+func TestReconnectLoopCapsSleepToRemaining(t *testing.T) {
+	clock := newFakeClock()
+
+	dial := func() (reconnectConn, error) {
+		t.Fatal("dial started at/after the aggregate deadline — reconnect_timeout overshoot")
+
+		return nil, nil
+	}
+
+	// Interval (10s) far exceeds the timeout (1s): a single capped sleep of 1s
+	// advances exactly to the deadline, then the loop breaks before any dial.
+	_, _, err := reconnectLoop("braw", dial, clock.now, clock.sleep, 1*time.Second, 10*time.Second)
+	if err == nil || err.Error() != "timed out after 1s" {
+		t.Fatalf("err = %v, want \"timed out after 1s\"", err)
+	}
+
+	if len(clock.slept) != 1 || clock.slept[0] != 1*time.Second {
+		t.Errorf("slept = %v, want a single 1s sleep capped to the remaining budget", clock.slept)
 	}
 }
 

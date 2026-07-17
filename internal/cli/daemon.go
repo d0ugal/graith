@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/daemon"
@@ -115,10 +116,39 @@ var daemonReloadCmd = &cobra.Command{
 	},
 }
 
+// upgradeExchangeConn is the connection surface execUpgrade drives for the
+// handshake + upgrade round-trip. It is an interface (satisfied by
+// *client.Client) so the deadline installation and readiness handoff can be
+// tested against a scripted connection without a live daemon.
+type upgradeExchangeConn interface {
+	SetDeadline(time.Time) error
+	Handshake() error
+	SendControl(string, any) error
+	ReadControlResponse() (protocol.Envelope, error)
+	Close()
+}
+
+// dialUpgradeClient opens the daemon connection execUpgrade drives. A package
+// var so tests can substitute a scripted connection.
+var dialUpgradeClient = func() (upgradeExchangeConn, error) {
+	return client.New(cfg, paths, cfgFile)
+}
+
 func execUpgrade(successMsg string) error {
-	c, err := client.New(cfg, paths, cfgFile)
+	c, err := dialUpgradeClient()
 	if err != nil {
 		return fmt.Errorf("connect to daemon: %w", err)
+	}
+
+	// client.New leaves the connection deadline-free, so the raw handshake and
+	// reads below would hang forever against a stale/foreign daemon that accepts
+	// but never replies. Bound the whole handshake + upgrade exchange with the
+	// configured local handshake deadline — distinct from the post-exec startup
+	// budget the readiness wait uses (issue #1242). A connection that can't accept
+	// the deadline can't be safely bounded, so fail rather than proceed unbounded.
+	if err := c.SetDeadline(connectionNow().Add(localDaemonHandshakeTimeout())); err != nil {
+		c.Close()
+		return fmt.Errorf("set upgrade handshake deadline: %w", err)
 	}
 
 	if err := c.Handshake(); err != nil {
