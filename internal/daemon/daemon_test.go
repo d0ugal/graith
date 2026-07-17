@@ -2233,7 +2233,7 @@ func TestApplyConfig(t *testing.T) {
 	newCfg.DefaultAgent = "codex"
 	newCfg.Agents["newagent"] = config.Agent{Command: "newagent"}
 
-	sm.applyConfig(newCfg)
+	_ = sm.applyConfig(newCfg)
 
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -2292,7 +2292,7 @@ func TestApplyConfigUpdatesLiveInputDelay(t *testing.T) {
 	newCfg := config.Default()
 	newCfg.Lifecycle.InputDelay = "300ms"
 
-	sm.applyConfig(newCfg)
+	_ = sm.applyConfig(newCfg)
 
 	// The next submit on the live session must be dominated by the new delay.
 	start := time.Now()
@@ -4721,7 +4721,7 @@ func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 		newCfg := *sm.cfg
 		newCfg.Messages.MaxPerStream = 0
 		newCfg.Messages.MaxAge = "1ns"
-		sm.applyConfig(&newCfg)
+		_ = sm.applyConfig(&newCfg)
 
 		sm.runMessageCleanupFromConfig()
 
@@ -4757,7 +4757,7 @@ func TestRunMessageCleanupLoopReadsConfig(t *testing.T) {
 		newCfg := *sm.cfg
 		newCfg.Messages.MaxPerStream = 0
 		newCfg.Messages.MaxAge = "30x" // unparseable; never reaches a validated config
-		sm.applyConfig(&newCfg)
+		_ = sm.applyConfig(&newCfg)
 
 		sm.runMessageCleanupFromConfig()
 
@@ -5980,7 +5980,7 @@ func TestConcurrentConfigReadWrite(t *testing.T) {
 			cfg.Notifications.OnStopped = true
 			cfg.Notifications.Command = "true"
 			cfg.Approvals.Timeout = "1s"
-			sm.applyConfig(cfg)
+			_ = sm.applyConfig(cfg)
 		}
 	}()
 
@@ -7060,7 +7060,7 @@ func TestApplyConfigChangesCov2(t *testing.T) {
 	newCfg.Agents["neep"] = config.Agent{Command: "sleep"}
 	delete(newCfg.Agents, "claude") // exercise the "removed" branch
 
-	sm.applyConfig(newCfg)
+	_ = sm.applyConfig(newCfg)
 
 	if got := sm.Config().DefaultAgent; got != "codex" {
 		t.Errorf("DefaultAgent after applyConfig = %q, want codex", got)

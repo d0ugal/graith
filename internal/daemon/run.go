@@ -271,6 +271,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	if configFile == "" {
 		configFile = paths.ConfigFile
 	}
+
 	sm.configFile = configFile
 
 	w := config.NewWatcher(configFile, sm.applyWatchedConfig, log, sm.Config().ConfigReload.ReloadDebounceDuration())

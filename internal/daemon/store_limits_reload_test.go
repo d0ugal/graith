@@ -203,7 +203,7 @@ func TestStoreLimitsPublishedAtomicallyWithConfig(t *testing.T) {
 
 	t.Cleanup(func() { reloadLimitsPublishedHook = nil })
 
-	sm.applyConfig(want)
+	_ = sm.applyConfig(want)
 
 	if !invoked {
 		t.Fatal("reloadLimitsPublishedHook was not invoked — applyConfig did not reach the publish point")
