@@ -52,6 +52,18 @@ open class FleetModel: ObservableObject {
     /// cross-connection state (`sessions`, `allSessions`, `error`, …) refresh.
     private var connectionObservers: [AnyCancellable] = []
     private var registryObserver: AnyCancellable?
+    /// Observes the pairing coordinator so a same-process commit-unknown outcome
+    /// (which leaves a durable `.acked` candidate rather than a paired host)
+    /// triggers the probe-based commit oracle (issue #1299).
+    private var pairingObserver: AnyCancellable?
+    /// Single-flight guard for the pending-receipt probe, so the init kick and the
+    /// pairing-phase observer can't run overlapping probes.
+    private var isReconcilingReceipt = false
+    /// The last connection fingerprint the model rebuilt for. The registry observer
+    /// and `reconcilePendingReceipt` both advance it, so whichever handles a change
+    /// first dedups the other — keeping exactly one rebuild/connect per change
+    /// (issue #1299).
+    private var knownConnectionFingerprint: [String] = []
     private var pollTimer: Timer?
     /// The poll cadence used by `startPolling`, from the [terminal]-equivalent
     /// presentation preferences (issue #1254). Defaults to the historical 2s.
@@ -94,22 +106,33 @@ open class FleetModel: ObservableObject {
         self.pollInterval = max(0.1, pollInterval)
         self.reachabilityProbeTimeout = max(0.1, reachabilityProbeTimeout)
         rebuildConnections()
-        // Rebuild + reconnect when the *membership* changes (a pairing completes
-        // or a host is removed). Gated on the set of host ids — a display-only
-        // mutation like `markSeen` (same ids, new `lastSeen`) must NOT tear down
-        // and re-dial every connection.
-        var knownHostIDs = Set(registry.hosts.map(\.id))
+        // Rebuild + reconnect when any *connection-relevant* host state changes (a
+        // pairing completes, a host is removed, a pin/deviceID/isPaired transition).
+        // Gated on the connection fingerprint — NOT the id set alone: a
+        // commit-unknown pairing flips an existing placeholder's `isPaired` without
+        // adding an id, so an id-only gate would ignore the transition and never
+        // dial the newly-trusted host (issue #1299). Display-only mutations
+        // (`markSeen`, `label`) leave the fingerprint unchanged, so they still
+        // don't tear down and re-dial every connection.
+        knownConnectionFingerprint = Self.connectionFingerprint(registry.hosts)
+        // @Published fires in willSet (registry.hosts still holds the OLD value when
+        // the closure runs), so the rebuild MUST be deferred to a Task that reads the
+        // committed state. rebuildAndConnectIfChanged re-checks the fingerprint, so a
+        // change reconcile already handled is a no-op (one rebuild per change).
         registryObserver = registry.$hosts
             .dropFirst()
-            .sink { [weak self] hosts in
-                let ids = Set(hosts.map(\.id))
-                guard ids != knownHostIDs else { return }
-                knownHostIDs = ids
-                Task { @MainActor in
-                    guard let self else { return }
-                    self.rebuildConnections()
-                    await self.connectAll()
-                }
+            .sink { [weak self] _ in
+                Task { @MainActor in await self?.rebuildAndConnectIfChanged() }
+            }
+        // Recover a pairing that was in flight when the app last exited: probe the
+        // pending `.acked` receipt and commit or discard it (issue #1299).
+        Task { [weak self] in await self?.reconcilePendingReceipt() }
+        // Re-probe when an in-process pairing settles to a commit-unknown outcome,
+        // which leaves a durable `.acked` candidate for the same oracle.
+        pairingObserver = pairing.$phase
+            .dropFirst()
+            .sink { [weak self] _ in
+                Task { @MainActor in await self?.reconcilePendingReceipt() }
             }
         if poll {
             // Desktop (always-on) mode: connect immediately and keep polling.
@@ -118,6 +141,80 @@ open class FleetModel: ObservableObject {
             startPolling()
             Task { await connectAll() }
         }
+    }
+
+    /// Rebuild + reconnect when the connection fingerprint has changed since the
+    /// last rebuild. Exposed (internal) so tests can await the registry observer's
+    /// effect deterministically instead of polling. Idempotent via the fingerprint
+    /// baseline — a change already handled by `reconcilePendingReceipt` is a no-op,
+    /// so there is exactly one rebuild/connect per change (issue #1299).
+    func rebuildAndConnectIfChanged() async {
+        let fingerprint = Self.connectionFingerprint(registry.hosts)
+        guard fingerprint != knownConnectionFingerprint else { return }
+        knownConnectionFingerprint = fingerprint
+        rebuildConnections()
+        await connectAll()
+    }
+
+    // MARK: - Pending-pairing recovery (issue #1299)
+
+    /// Resolve a pending `.acked` pairing receipt using an authenticated
+    /// connection as the commit oracle. A receipt is ambiguous — the daemon may
+    /// have durably committed the device before the client crashed / lost the
+    /// commit reply, or it may have timed the request out — so we never trust it
+    /// as paired on disk. Instead we probe with the candidate credential:
+    ///
+    ///   • auth accepted  → the daemon committed → promote (`commitCandidate`).
+    ///   • auth rejected  → the daemon never committed → discard the candidate and
+    ///                      restore the prior state (no ghost paired host).
+    ///   • transport/TLS/timeout → indeterminate → keep the journal for a later
+    ///                      retry — never discards a possibly-committed credential.
+    public func reconcilePendingReceipt() async {
+        guard !isReconcilingReceipt, let identity, let pending = registry.pendingReceipt() else { return }
+        isReconcilingReceipt = true
+        defer { isReconcilingReceipt = false }
+
+        let client = factory.makeClient(
+            transport: pending.host.transport,
+            credentials: pending.credentials,
+            signer: identity
+        )
+        do {
+            try await client.connect()
+            await client.disconnect()
+            // Authenticated → the daemon committed the device. Promote the candidate,
+            // then rebuild + connect it DETERMINISTICALLY here (awaited) and advance
+            // the connection-fingerprint baseline, so the registry observer's Task
+            // for the same commit is a no-op — exactly one rebuild/connect path, and
+            // `await`-able so callers see a settled result (issue #1299).
+            try registry.commitCandidate(hostID: pending.host.id)
+            knownConnectionFingerprint = Self.connectionFingerprint(registry.hosts)
+            rebuildConnections()
+            await connectAll()
+        } catch let error as GraithClientError where Self.isAuthRejection(error) {
+            // The daemon rejected the candidate: it never committed (it timed out).
+            // Discard the candidate; a prior working credential (re-pair) survives.
+            registry.discardPendingReceipt(hostID: pending.host.id, createdPlaceholder: pending.createdPlaceholder)
+        } catch {
+            // Transport/TLS/timeout — indeterminate. Keep the journal for retry.
+        }
+    }
+
+    /// Whether a probe error definitively proves the daemon never committed this
+    /// device — the ONLY signal that may discard a candidate (issue #1299).
+    ///
+    /// Only a canonical invalid-token / not-authorized rejection (`.notPaired`)
+    /// qualifies. Everything else is indeterminate and must RETAIN the candidate:
+    ///   • `.authenticationFailed` — a handshake rejection (profile / protocol
+    ///     version mismatch), unrelated to whether the device was committed.
+    ///   • `.daemon` — includes a generic "proof of possession failed", which the
+    ///     daemon returns for a bad signature or a tailnet-identity mismatch that
+    ///     can happen to a *committed* candidate — so it is NOT proof of no-commit.
+    ///   • `.tlsPinMismatch`, `.tailnetUnreachable`, `.disconnected`, `.decoding`
+    ///     — transport / TLS / timeout failures, all indeterminate.
+    private static func isAuthRejection(_ error: GraithClientError) -> Bool {
+        if case .notPaired = error { return true }
+        return false
     }
 
     // MARK: - Connections
@@ -164,6 +261,20 @@ open class FleetModel: ObservableObject {
             && a.deviceID == b.deviceID && a.isPaired == b.isPaired
     }
 
+    /// A comparable snapshot of every host's *connection-relevant* fields (the
+    /// same fields `connectionUnchanged` compares, in registry order). Used to gate
+    /// the registry observer: a change here means some connection must be rebuilt,
+    /// whereas a display-only mutation (`markSeen`, `label`) leaves it identical.
+    /// Ordering matters — a reorder that changes which host a client dials must
+    /// still rebuild.
+    private static func connectionFingerprint(_ hosts: [Host]) -> [String] {
+        hosts.map { h in
+            [h.id, h.kind.rawValue, h.socketPath ?? "", h.magicDNSName ?? "",
+             String(h.port), h.daemonProfile, h.tlsPinSPKI, h.deviceID, String(h.isPaired)]
+                .joined(separator: "\u{1f}")
+        }
+    }
+
     /// Connect all hosts (called on appear / on returning to foreground).
     public func connectAll() async {
         await withTaskGroup(of: Void.self) { group in
@@ -172,6 +283,13 @@ open class FleetModel: ObservableObject {
             }
         }
         await refreshReachability()
+        // A normal connect is also the natural retry point for a pending pairing
+        // receipt whose earlier probe hit a transport/TLS/timeout failure — so a
+        // recovered link promotes it without an app restart. Awaited (not
+        // fire-and-forget) so `await connectAll()` fully settles the recovery;
+        // recursion-safe because reconcile's own `connectAll` re-enters while
+        // `isReconcilingReceipt` is set, and reconcilePendingReceipt self-guards on it.
+        await reconcilePendingReceipt()
     }
 
     public func disconnectAll() async {

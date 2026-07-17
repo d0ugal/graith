@@ -117,6 +117,7 @@ actor MockHostClient: GraithHostClient {
 
     func appendSession(_ s: SessionInfo) { sessions.append(s) }
     func setFailList(_ e: GraithClientError?) { failList = e }
+    func setFailConnect(_ e: GraithClientError?) { failConnect = e }
     func setFailSetStatus(_ e: GraithClientError?) { failSetStatus = e }
     func setFailConfig(_ e: GraithClientError?) { failConfig = e }
     func setFailAgentCatalog(_ e: GraithClientError?) { failAgentCatalog = e }
