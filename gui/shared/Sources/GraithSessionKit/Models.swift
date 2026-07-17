@@ -27,14 +27,6 @@ public typealias ScreenSnapshot = GraithProtocol.ScreenSnapshotResponseMsg
 /// The one-time pairing response returned on approval.
 public typealias PairResponse = GraithProtocol.PairResponseMsg
 
-// MARK: - App-level value types (no wire counterpart)
-
-/// An approval decision the human makes on a pending tool request.
-public enum ApprovalDecision: String, Codable, Sendable {
-    case allow
-    case deny
-}
-
 // `FleetSummary` moved to `GraithProtocol` (Messages.swift) — it is a wire type
 // (embedded in `DiagnosticsMsg` and the Go `StatusResponseMsg`), and the
 // diagnostics panel (#904) needs it in the module the conformance test imports.
@@ -65,7 +57,6 @@ public extension SessionInfo {
     var isYolo: Bool { yolo == true }
     var isSandboxed: Bool { sandboxed == true }
     var isConfigStale: Bool { configStale == true }
-    var isScenarioMember: Bool { !(scenarioID ?? "").isEmpty }
 
     /// The trailing segment of a `user/graith/<name>-<id>` branch.
     var shortBranch: String {
@@ -90,7 +81,7 @@ extension GraithClientError: LocalizedError {
 
 public extension GraithClientError {
     /// A friendly, case-specific message for surfacing in the UI (used by
-    /// `HostConnection` and the approvals/detail views).
+    /// `HostConnection` and the detail views).
     var userMessage: String {
         switch self {
         case .notPaired:

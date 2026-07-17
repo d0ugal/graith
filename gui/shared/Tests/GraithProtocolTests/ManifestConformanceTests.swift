@@ -132,7 +132,6 @@ private let swiftDecoders: [String: DecodeProbe] = [
     "AttachMsg": probe(AttachMsg.self),
     "RenameMsg": probe(RenameMsg.self),
     "SetStatusMsg": probe(SetStatusMsg.self),
-    "TypeMsg": probe(TypeMsg.self),
     "ResizeMsg": probe(ResizeMsg.self),
     "LogsMsg": probe(LogsMsg.self),
 
@@ -153,10 +152,6 @@ private let swiftDecoders: [String: DecodeProbe] = [
 
     // No-payload requests → EmptyMsg.
     "ListMsg": probe(EmptyMsg.self),
-    "MCPListMsg": probe(EmptyMsg.self),
-    "ScenarioListMsg": probe(EmptyMsg.self),
-    "TriggerListMsg": probe(EmptyMsg.self),
-    "PairListMsg": probe(EmptyMsg.self),
     "ConfigMsg": probe(EmptyMsg.self),
     "AgentCatalogMsg": probe(EmptyMsg.self),
 
@@ -185,20 +180,10 @@ private let swiftDecoders: [String: DecodeProbe] = [
     "ScreenPreviewResponseMsg": probe(ScreenPreviewResponseMsg.self),
     "ScreenSnapshotResponseMsg": probe(ScreenSnapshotResponseMsg.self),
 
-    // Approvals.
-    "ApprovalInfo": probe(ApprovalInfo.self),
-    "ApprovalNotificationMsg": probe(ApprovalNotificationMsg.self),
-    "ApprovalRespondMsg": probe(ApprovalRespondMsg.self),
-    "ApprovalSubscribeMsg": probe(ApprovalSubscribeMsg.self),
 
     // Pairing + proof-of-possession.
     "PairRequestMsg": probe(PairRequestMsg.self),
     "PairResponseMsg": probe(PairResponseMsg.self),
-    "PairApproveMsg": probe(PairApproveMsg.self),
-    "PairListResponseMsg": probe(PairListResponseMsg.self),
-    "PairPending": probe(PairPending.self),
-    "PairedDeviceInfo": probe(PairedDeviceInfo.self),
-    "PairRevokeMsg": probe(PairRevokeMsg.self),
     "AuthChallengeMsg": probe(AuthChallengeMsg.self),
     "AuthProofMsg": probe(AuthProofMsg.self),
 
@@ -206,17 +191,6 @@ private let swiftDecoders: [String: DecodeProbe] = [
     "RepoListMsg": probe(RepoListMsg.self),
     "RepoListResponseMsg": probe(RepoListResponseMsg.self),
     "RepoEntry": probe(RepoEntry.self),
-
-    // Scenarios (#903). stop/resume/delete → ScenarioNameMsg.
-    "ScenarioStopMsg": probe(ScenarioNameMsg.self),
-    "ScenarioResumeMsg": probe(ScenarioNameMsg.self),
-    "ScenarioDeleteMsg": probe(ScenarioNameMsg.self),
-    "ScenarioRecord": probe(ScenarioRecord.self),
-    "ScenarioSessionInfo": probe(ScenarioSessionInfo.self),
-    "ScenarioCompletionActionInfo": probe(ScenarioCompletionActionInfo.self),
-    "ScenarioCleanupInfo": probe(ScenarioCleanupInfo.self),
-    "ScenarioResultInfo": probe(ScenarioResultInfo.self),
-    "ScenarioListResponse": probe(ScenarioListResponse.self),
 
     // Document store browser (#902).
     "StoreListMsg": probe(StoreListMsg.self),

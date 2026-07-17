@@ -22,7 +22,7 @@ struct FleetConnectedTests {
     }
 
     @Test func connectBuildsConnectionAndAggregates() async {
-        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions())
         #expect(fleet.connections.count == 1)
         #expect(fleet.hasRemoteHosts)
         await fleet.connectAll()
@@ -37,7 +37,7 @@ struct FleetConnectedTests {
     }
 
     @Test func disconnectAndReconnect() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         #expect(fleet.connections.first?.state == .connected)
         await fleet.disconnectAll()
@@ -49,7 +49,7 @@ struct FleetConnectedTests {
     }
 
     @Test func mutationsDelegateToOwningConnection() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let conn = fleet.connections[0]
         let target = conn.sessions.first { $0.id == "braw0001" }!
@@ -66,7 +66,7 @@ struct FleetConnectedTests {
     }
 
     @Test func migrateForwardsModelToClient() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let conn = fleet.connections[0]
         let target = conn.sessions.first { $0.id == "braw0001" }!
@@ -77,7 +77,7 @@ struct FleetConnectedTests {
     }
 
     @Test func fleetMigrateNormalisesBlankModelToNil() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let target = fleet.sessions.first { $0.id == "braw0001" }!
         fleet.migrateSession(target, agent: "codex", model: "   ")
@@ -94,7 +94,7 @@ struct FleetConnectedTests {
     @Test func createSessionReportsCreated() async {
         let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(),
                                                 repos: [RepoEntry(path: "/tmp/croft", name: "croft", recent: true)],
-                                                subscribeApprovals: false)
+                                                )
         await fleet.connectAll()
         // The mock's `create` is a no-op, so seed the session it should surface.
         await mock.appendSession(makeSession(id: "new9", name: "bonnie", repoName: "croft"))
@@ -112,7 +112,7 @@ struct FleetConnectedTests {
     @Test func createSessionForwardsAdvancedOptions() async {
         let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(),
                                                 repos: [RepoEntry(path: "/tmp/croft", name: "croft", recent: true)],
-                                                subscribeApprovals: false)
+                                                )
         await fleet.connectAll()
         await withCheckedContinuation { cont in
             fleet.createSession(name: "canny", agent: "claude", repoPath: "/tmp/croft",
@@ -133,7 +133,7 @@ struct FleetConnectedTests {
     @Test func createSessionYoloForcesAgentHooksOn() async {
         let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(),
                                                 repos: [RepoEntry(path: "/tmp/croft", name: "croft", recent: true)],
-                                                subscribeApprovals: false)
+                                                )
         await fleet.connectAll()
         // Yolo on + hooks off is a combination the daemon rewrites (agentHooks ||
         // yolo); the client sends the effective value so the wire matches reality.
@@ -152,7 +152,7 @@ struct FleetConnectedTests {
     @Test func createSessionRejectsInPlaceWithBase() async {
         let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(),
                                                 repos: [RepoEntry(path: "/tmp/croft", name: "croft", recent: true)],
-                                                subscribeApprovals: false)
+                                                )
         await fleet.connectAll()
         var failed = false
         await withCheckedContinuation { cont in
@@ -177,7 +177,7 @@ struct FleetConnectedTests {
     }
 
     @Test func createSessionUnknownHostFails() async {
-        let (fleet, _) = makeFleetWithRemote(subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote()
         await fleet.connectAll()
         var failed = false
         await withCheckedContinuation { cont in
@@ -190,7 +190,7 @@ struct FleetConnectedTests {
     }
 
     @Test func listFailureSurfacesAsHostErrorThenClears() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let conn = fleet.connections[0]
         await mock.setFailList(.daemon("list broke"))
@@ -207,7 +207,7 @@ struct FleetConnectedTests {
     }
 
     @Test func refreshCoalescesOverlappingCallIntoOneFollowUp() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()  // one refresh already ran (list call #1)
         let conn = fleet.connections[0]
         await mock.setGateList(true)
@@ -245,7 +245,7 @@ struct FleetConnectedTests {
     }
 
     @Test func removeHostTearsDownConnection() async {
-        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         #expect(fleet.connections.count == 1)
         let host = fleet.connections[0].entry
@@ -254,21 +254,9 @@ struct FleetConnectedTests {
         #expect(!fleet.hasRemoteHosts)
     }
 
-    @Test func approvalsAggregateAcrossConnection() async {
-        let approval = try! JSONDecoder().decode(ApprovalInfo.self, from: Data(
-            "{\"request_id\":\"r1\",\"session_id\":\"canny002\",\"session_name\":\"canny\",\"tool_name\":\"Bash\",\"agent\":\"codex\",\"repo_name\":\"croft\",\"requested_at\":\"\"}".utf8))
-        let (fleet, _) = makeFleetWithRemote(sessions: sampleSessions(), pending: [approval], subscribeApprovals: true)
-        await fleet.connectAll()
-        for _ in 0..<60 where fleet.totalPendingApprovals == 0 { try? await Task.sleep(nanoseconds: 5_000_000) }
-        #expect(fleet.totalPendingApprovals == 1)
-        #expect(fleet.allApprovals.first?.host.id == "ben")
-        #expect(fleet.allApprovals.first?.approval.requestID == "r1")
-        await fleet.disconnectAll()  // stop the retry loop
-    }
-
     @Test func forceClaimAttachPublishesChange() {
         final class Owner {}
-        let (fleet, _) = makeFleetWithRemote(subscribeApprovals: false)
+        let (fleet, _) = makeFleetWithRemote()
         let a = Owner(); let b = Owner()
         fleet.claimAttach("s1", owner: a)
         var fired = false

@@ -10,17 +10,23 @@ derived from it; never hand-edit those outputs.
 ## Changing a capability
 
 1. Add or update the capability in `capabilities.json`, choosing each frontend
-   state deliberately (`supported`, `planned`, or `n/a`).
-2. If a GUI capability is implemented in the shared feature layer, update
+   state deliberately: `supported` is shipped, `planned` is targeted but not
+   shipped, and `n/a` is deliberately excluded. An `n/a` cell or intentional
+   GUI divergence requires `platform_decision` pointing to the feature design's
+   exact `## Platform support` section.
+2. Decide CLI, iOS, and macOS scope in the design doc before implementation.
+   Keep parity across targeted GUI surfaces; do not use `n/a` for a temporary
+   implementation gap.
+3. If a GUI capability is implemented in the shared feature layer, update
    `sharedAffordances()` in
    `gui/shared/Tests/GraithSessionKitTests/CapabilityConformanceTests.swift`
    with a compile anchor to the real symbol.
-3. Use `viewOnlyCapabilities` only for reviewed UI-only support with no shared
-   model affordance. Use `knownDivergences` only for an intentional iOS/macOS
-   difference. Both lists are checked for stale entries.
-4. Confirm the actual iOS and macOS views expose what the manifest claims;
+4. Use `viewOnlyCapabilities` only for reviewed UI-only support with no shared
+   model affordance. Platform exclusions belong only in the manifest and design
+   doc, not in a second Swift exception list.
+5. Confirm the actual iOS and macOS views expose what the manifest claims;
    shared-model conformance cannot prove view wiring.
-5. Regenerate both artifacts and run tests:
+6. Regenerate both artifacts and run tests:
 
    ```bash
    go test ./internal/capabilities -update

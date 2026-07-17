@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"slices"
 	"sort"
 	"strings"
@@ -26,6 +27,13 @@ import (
 // exactly these — no more, no fewer — or a surface's field would go
 // unvalidated (or a declared surface would have nowhere to read its state).
 var requiredSurfaces = []string{"cli", "ios", "macos"}
+
+const (
+	manifestVersion        = 2
+	platformDecisionPrefix = "docs/design/"
+	platformDecisionAnchor = "platform-support"
+	platformDecisionURL    = "https://github.com/d0ugal/graith/blob/main/"
+)
 
 //go:embed capabilities.json
 var manifestJSON []byte
@@ -54,13 +62,14 @@ type State struct {
 
 // Capability is one unit of behaviour and its support state per surface.
 type Capability struct {
-	ID       string `json:"id"`
-	Category string `json:"category"`
-	Name     string `json:"name"`
-	CLI      string `json:"cli"`
-	IOS      string `json:"ios"`
-	MacOS    string `json:"macos"`
-	Notes    string `json:"notes,omitempty"`
+	ID               string `json:"id"`
+	Category         string `json:"category"`
+	Name             string `json:"name"`
+	CLI              string `json:"cli"`
+	IOS              string `json:"ios"`
+	MacOS            string `json:"macos"`
+	PlatformDecision string `json:"platform_decision,omitempty"`
+	Notes            string `json:"notes,omitempty"`
 }
 
 // state returns the capability's state for the given surface ID.
@@ -75,6 +84,13 @@ func (c Capability) state(surfaceID string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// needsPlatformDecision reports whether the row departs from the default that
+// every surface is targeted and the two shared GUI clients remain at parity.
+// A planned surface is still targeted; only n/a deliberately excludes it.
+func (c Capability) needsPlatformDecision() bool {
+	return c.CLI == "n/a" || c.IOS == "n/a" || c.MacOS == "n/a" || c.IOS != c.MacOS
 }
 
 // Manifest is the whole capability matrix.
@@ -128,8 +144,8 @@ func checkDisplay(field, val string) error {
 // states, unique capability IDs, and every capability carrying a valid state
 // for every surface.
 func (m *Manifest) Validate() error {
-	if m.Version != 1 {
-		return fmt.Errorf("unsupported manifest version %d (want 1)", m.Version)
+	if m.Version != manifestVersion {
+		return fmt.Errorf("unsupported manifest version %d (want %d)", m.Version, manifestVersion)
 	}
 
 	if len(m.Surfaces) == 0 {
@@ -247,6 +263,14 @@ func (m *Manifest) Validate() error {
 			return err
 		}
 
+		if err := validatePlatformDecision(c.PlatformDecision); err != nil {
+			return fmt.Errorf("capability %q: %w", c.ID, err)
+		}
+
+		if c.needsPlatformDecision() && c.PlatformDecision == "" {
+			return fmt.Errorf("capability %q: n/a or divergent platform state requires platform_decision", c.ID)
+		}
+
 		for _, s := range m.Surfaces {
 			st, ok := c.state(s.ID)
 			if !ok {
@@ -257,6 +281,35 @@ func (m *Manifest) Validate() error {
 				return fmt.Errorf("capability %q: invalid state %q for surface %q", c.ID, st, s.ID)
 			}
 		}
+	}
+
+	return nil
+}
+
+// validatePlatformDecision validates the repository-local link shape. File and
+// heading existence are repository concerns and are checked by the package
+// tests; keeping those filesystem checks out of Validate lets embedded-manifest
+// consumers load the package independently of a source checkout.
+func validatePlatformDecision(ref string) error {
+	if ref == "" {
+		return nil
+	}
+
+	if strings.ContainsAny(ref, "|\n\r") {
+		return fmt.Errorf("platform_decision contains a Markdown-breaking character: %q", ref)
+	}
+
+	doc, anchor, ok := strings.Cut(ref, "#")
+	if !ok || anchor != platformDecisionAnchor || strings.Contains(anchor, "#") {
+		return fmt.Errorf("platform_decision %q must end in #%s", ref, platformDecisionAnchor)
+	}
+
+	if !strings.HasPrefix(doc, platformDecisionPrefix) || !strings.HasSuffix(doc, ".md") {
+		return fmt.Errorf("platform_decision %q must reference a Markdown file under %s", ref, platformDecisionPrefix)
+	}
+
+	if path.IsAbs(doc) || path.Clean(doc) != doc {
+		return fmt.Errorf("platform_decision %q must be a clean repository-relative path", ref)
 	}
 
 	return nil
@@ -326,7 +379,7 @@ func (m *Manifest) MatrixMarkdown() string {
 		var notes []Capability
 
 		for _, c := range caps {
-			if c.Notes != "" {
+			if c.Notes != "" || c.PlatformDecision != "" {
 				notes = append(notes, c)
 				noteNum[c.ID] = len(notes)
 			}
@@ -352,7 +405,16 @@ func (m *Manifest) MatrixMarkdown() string {
 			b.WriteString("\n")
 
 			for i, c := range notes {
-				fmt.Fprintf(&b, "<sup>%d</sup> %s: %s\n", i+1, c.Name, c.Notes)
+				fmt.Fprintf(&b, "<sup>%d</sup> %s:", i+1, c.Name)
+				if c.Notes != "" {
+					fmt.Fprintf(&b, " %s", c.Notes)
+				}
+
+				if c.PlatformDecision != "" {
+					fmt.Fprintf(&b, " [Platform decision](%s%s)", platformDecisionURL, c.PlatformDecision)
+				}
+
+				b.WriteString("\n")
 			}
 		}
 	}
@@ -455,9 +517,10 @@ func (m *Manifest) Coverage() map[string]map[string]int {
 // dropped — the Swift check only reasons about iOS/macOS, and coupling the GUI
 // fixture to CLI churn would make it stale for no reason.
 type GUICapability struct {
-	ID    string `json:"id"`
-	IOS   string `json:"ios"`
-	MacOS string `json:"macos"`
+	ID               string `json:"id"`
+	IOS              string `json:"ios"`
+	MacOS            string `json:"macos"`
+	PlatformDecision string `json:"platform_decision,omitempty"`
 }
 
 // GUIFixture is the language-neutral projection the Swift GraithSessionKit
@@ -473,7 +536,12 @@ type GUIFixture struct {
 func (m *Manifest) GUIFixture() GUIFixture {
 	caps := make([]GUICapability, 0, len(m.Capabilities))
 	for _, c := range m.Capabilities {
-		caps = append(caps, GUICapability{ID: c.ID, IOS: c.IOS, MacOS: c.MacOS})
+		caps = append(caps, GUICapability{
+			ID:               c.ID,
+			IOS:              c.IOS,
+			MacOS:            c.MacOS,
+			PlatformDecision: c.PlatformDecision,
+		})
 	}
 
 	return GUIFixture{Version: m.Version, Capabilities: caps}

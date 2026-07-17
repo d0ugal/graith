@@ -4,8 +4,8 @@ import GraithProtocol
 import GraithRemoteKit
 
 /// A `MainActor` view-model wrapping one host's `GraithHostClient`: owns the
-/// connection lifecycle, the session list, and the approval subscription for
-/// that daemon. The SwiftUI shell observes an array of these (one per host).
+/// connection lifecycle and the session list for that daemon. The SwiftUI shell
+/// observes an array of these (one per host).
 @MainActor
 public final class HostConnection: ObservableObject, Identifiable {
     public enum ConnectionState: Equatable, Sendable {
@@ -20,8 +20,6 @@ public final class HostConnection: ObservableObject, Identifiable {
 
     @Published public private(set) var state: ConnectionState = .idle
     @Published public private(set) var sessions: [SessionInfo] = []
-    @Published public private(set) var approvals: [ApprovalInfo] = []
-    @Published public private(set) var scenarios: [ScenarioRecord] = []
     /// The daemon's configured agent catalog + default_agent (#1234). Nil until
     /// the first successful fetch; the UI falls back to a built-in default list
     /// while nil so the New Session sheet is never empty on a slow/old host.
@@ -29,7 +27,6 @@ public final class HostConnection: ObservableObject, Identifiable {
     @Published public private(set) var lastError: String?
 
     private let client: any GraithHostClient
-    private var approvalTask: Task<Void, Never>?
     /// Guards `refresh()` against overlapping list() calls piling up.
     private var isRefreshing = false
     /// Set when a refresh is requested while one is already in flight, so the
@@ -47,21 +44,14 @@ public final class HostConnection: ObservableObject, Identifiable {
     /// through this directly for its richer AppKit terminal chrome.
     public var protocolClient: GraithProtocolClient? { (client as? RealHostClient)?.protocolClient }
 
-    /// Whether this connection owns the approval subscription. iOS aggregates
-    /// approvals through `FleetModel` (default true); macOS runs its own
-    /// `ApprovalMonitor` presenter subscribing via the raw clients, so it opts
-    /// out here (false) to avoid a redundant second event subscription per host.
-    private let ownsApprovals: Bool
-
-    public init(entry: Host, client: any GraithHostClient, subscribeApprovals: Bool = true) {
+    public init(entry: Host, client: any GraithHostClient) {
         self.entry = entry
         self.client = client
-        self.ownsApprovals = subscribeApprovals
     }
 
     // MARK: - Lifecycle
 
-    /// Connect the control + event connections and start reading approvals.
+    /// Connect the control connection and load the initial state.
     public func connect() async {
         guard state != .connecting else { return }
         state = .connecting
@@ -71,7 +61,6 @@ public final class HostConnection: ObservableObject, Identifiable {
             state = .connected
             await refresh()
             await refreshAgentCatalog()
-            if ownsApprovals { startApprovalSubscription() }
         } catch {
             state = .failed(Self.describe(error))
             lastError = Self.describe(error)
@@ -79,13 +68,11 @@ public final class HostConnection: ObservableObject, Identifiable {
     }
 
     public func disconnect() async {
-        approvalTask?.cancel()
-        approvalTask = nil
         await client.disconnect()
         state = .idle
     }
 
-    /// Reload the session list (and scenarios). Overlapping calls coalesce
+    /// Reload the session list. Overlapping calls coalesce
     /// *losslessly*: while a `list` is in flight, a further `refresh()` sets a
     /// pending flag instead of running concurrently, and the in-flight refresh
     /// loops once more when it finishes. This keeps a slow/hung host from piling
@@ -108,23 +95,10 @@ public final class HostConnection: ObservableObject, Identifiable {
             } catch {
                 lastError = Self.describe(error)
             }
-            await refreshScenarios()
         } while refreshQueued && state == .connected
     }
 
-    /// Reload this host's running scenarios. Best-effort: on failure the
-    /// last-known scenarios are **retained** (not cleared) and the error is not
-    /// surfaced on `lastError` — the session list is the primary health signal,
-    /// and a daemon that lists sessions but hiccups on scenarios shouldn't blank
-    /// the fleet view or paint the host red. Only runs while connected.
-    private func refreshScenarios() async {
-        guard state == .connected else { return }
-        if let fetched = try? await client.listScenarios() {
-            scenarios = fetched
-        }
-    }
-
-    /// Reload this host's configured agent catalog. Best-effort like scenarios:
+    /// Reload this host's configured agent catalog. Best-effort: on failure the
     /// on failure the last-known catalog is retained (an old daemon that predates
     /// the `agent_catalog` RPC just leaves it nil, and the UI falls back to the
     /// built-in default list). Only runs while connected.
@@ -132,53 +106,6 @@ public final class HostConnection: ObservableObject, Identifiable {
         guard state == .connected else { return }
         if let fetched = try? await client.agentCatalog() {
             agentCatalog = fetched
-        }
-    }
-
-    // MARK: - Approvals (design §C.6 — subscribe, don't attach)
-
-    private func startApprovalSubscription() {
-        approvalTask?.cancel()
-        approvalTask = Task { [weak self] in
-            guard let self else { return }
-            // Mirrors the macOS ApprovalMonitor retry loop: a finished stream
-            // means the subscription ended (setup failed or the event
-            // connection dropped), never "no approvals". While we're still
-            // meant to be connected, re-subscribe with bounded exponential
-            // backoff so a flaky link recovers without dying silently or
-            // tight-looping. An intentional disconnect() cancels this task, so
-            // we never re-subscribe after it.
-            let baseBackoff: UInt64 = 500_000_000 // 0.5s
-            let maxBackoff: UInt64 = 8_000_000_000 // 8s
-            var backoff = baseBackoff
-            while !Task.isCancelled {
-                // `approvalStream()` is actor-isolated on the client, so resolve
-                // it inside the task. This Task inherits @MainActor, so the
-                // assignments below are main-actor safe.
-                let stream = await self.client.approvalStream()
-                var delivered = false
-                for await pending in stream {
-                    delivered = true
-                    backoff = baseBackoff // healthy delivery — reset backoff
-                    self.approvals = pending
-                }
-                // Stream ended. Stop if we're cancelled or no longer connected
-                // (an intentional disconnect). Otherwise surface it and retry.
-                if Task.isCancelled || self.state != .connected { break }
-                self.lastError = delivered
-                    ? "Approval stream dropped; reconnecting…"
-                    : "Approval subscription failed to start; retrying…"
-                try? await Task.sleep(nanoseconds: backoff)
-                backoff = Swift.min(backoff * 2, maxBackoff)
-            }
-        }
-    }
-
-    public func respond(_ approval: ApprovalInfo, decision: ApprovalDecision, reason: String? = nil) async {
-        do {
-            try await client.respondApproval(requestID: approval.requestID, decision: decision, reason: reason)
-        } catch {
-            lastError = Self.describe(error)
         }
     }
 
@@ -296,12 +223,6 @@ public final class HostConnection: ObservableObject, Identifiable {
     public func migrate(_ session: SessionInfo, agent: String, model: String? = nil) async {
         await run { try await self.client.migrate(sessionID: session.id, agent: agent, model: model) }
     }
-
-    // MARK: - Scenario lifecycle (#903)
-
-    public func stopScenario(_ name: String) async { await run { try await self.client.stopScenario(name: name) } }
-    public func resumeScenario(_ name: String) async { await run { try await self.client.resumeScenario(name: name) } }
-    public func deleteScenario(_ name: String) async { await run { try await self.client.deleteScenario(name: name) } }
 
     // MARK: - Messaging (gr msg)
 

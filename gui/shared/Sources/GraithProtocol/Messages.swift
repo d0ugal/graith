@@ -204,22 +204,6 @@ public struct SetStatusMsg: Codable, Sendable {
     }
 }
 
-public struct TypeMsg: Codable, Sendable {
-    public var sessionID: String
-    public var input: String
-    public var noNewline: Bool?
-    public init(sessionID: String, input: String, noNewline: Bool? = nil) {
-        self.sessionID = sessionID
-        self.input = input
-        self.noNewline = noNewline
-    }
-    enum CodingKeys: String, CodingKey {
-        case sessionID = "session_id"
-        case input
-        case noNewline = "no_newline"
-    }
-}
-
 public struct ResizeMsg: Codable, Sendable {
     public var cols: UInt16
     public var rows: UInt16
@@ -251,8 +235,9 @@ public struct LogsMsg: Codable, Sendable {
 ///
 /// This is the shared wire model used by both apps (reconciled with the
 /// current daemon: the gui-poc's `cost_usd`/`context_percent` are NOT on the
-/// wire and have been dropped; the PR/CI/scenario/summary/system-kind fields
-/// the POC lacked are added).
+/// wire and have been dropped; the PR/CI/summary/system-kind fields the POC
+/// lacked are added). Scenario metadata is deliberately left Go-only because
+/// the native apps treat orchestrated members as ordinary sessions.
 public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
     public var id: String
     public var parentID: String?
@@ -283,8 +268,6 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
     public var configStale: Bool?
     public var starred: Bool?
     public var systemKind: String?
-    public var scenarioID: String?
-    public var scenarioName: String?
     public var summaryText: String?
     public var summaryFaded: Bool?
     public var lastOutputAt: String?
@@ -308,7 +291,7 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
         sandboxed: Bool? = nil, mirror: Bool? = nil, inPlace: Bool? = nil,
         yolo: Bool? = nil, model: String? = nil, toolName: String? = nil,
         includes: [IncludedRepoInfo]? = nil, configStale: Bool? = nil, starred: Bool? = nil,
-        systemKind: String? = nil, scenarioID: String? = nil, scenarioName: String? = nil,
+        systemKind: String? = nil,
         summaryText: String? = nil, summaryFaded: Bool? = nil, lastOutputAt: String? = nil,
         migratedFrom: String? = nil, pullRequest: PRInfo? = nil, ci: CIInfo? = nil
     ) {
@@ -321,7 +304,7 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
         self.sandboxed = sandboxed; self.mirror = mirror; self.inPlace = inPlace; self.yolo = yolo
         self.model = model; self.toolName = toolName; self.includes = includes
         self.configStale = configStale; self.starred = starred; self.systemKind = systemKind
-        self.scenarioID = scenarioID; self.scenarioName = scenarioName; self.summaryText = summaryText
+        self.summaryText = summaryText
         self.summaryFaded = summaryFaded; self.lastOutputAt = lastOutputAt; self.migratedFrom = migratedFrom
         self.pullRequest = pullRequest; self.ci = ci
     }
@@ -356,8 +339,6 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
         case configStale = "config_stale"
         case starred
         case systemKind = "system_kind"
-        case scenarioID = "scenario_id"
-        case scenarioName = "scenario_name"
         case summaryText = "summary_text"
         case summaryFaded = "summary_faded"
         case lastOutputAt = "last_output_at"
@@ -475,66 +456,6 @@ public struct ScreenSnapshotResponseMsg: Codable, Sendable {
     }
 }
 
-// MARK: - Approvals
-
-public struct ApprovalInfo: Codable, Sendable, Identifiable, Hashable {
-    public var requestID: String
-    public var sessionID: String
-    public var sessionName: String
-    public var toolName: String
-    public var toolInput: String?
-    public var agent: String
-    public var repoName: String
-    public var requestedAt: String
-
-    public var id: String { requestID }
-
-    public init(requestID: String, sessionID: String, sessionName: String,
-                toolName: String, toolInput: String? = nil, agent: String = "",
-                repoName: String = "", requestedAt: String = "") {
-        self.requestID = requestID; self.sessionID = sessionID; self.sessionName = sessionName
-        self.toolName = toolName; self.toolInput = toolInput; self.agent = agent
-        self.repoName = repoName; self.requestedAt = requestedAt
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case requestID = "request_id"
-        case sessionID = "session_id"
-        case sessionName = "session_name"
-        case toolName = "tool_name"
-        case toolInput = "tool_input"
-        case agent
-        case repoName = "repo_name"
-        case requestedAt = "requested_at"
-    }
-}
-
-public struct ApprovalNotificationMsg: Codable, Sendable {
-    public var pending: [ApprovalInfo]
-}
-
-public struct ApprovalRespondMsg: Codable, Sendable {
-    public var requestID: String
-    public var decision: String
-    public var reason: String?
-    public init(requestID: String, decision: String, reason: String? = nil) {
-        self.requestID = requestID
-        self.decision = decision
-        self.reason = reason
-    }
-    enum CodingKeys: String, CodingKey {
-        case requestID = "request_id"
-        case decision
-        case reason
-    }
-}
-
-/// `approval_subscribe` has no payload; sent to register for approval pushes
-/// without attaching. Matches `protocol.ApprovalSubscribeMsg{}`.
-public struct ApprovalSubscribeMsg: Codable, Sendable {
-    public init() {}
-}
-
 // MARK: - Pairing + proof-of-possession (design §B.2 / §B.2.4)
 
 public struct PairRequestMsg: Codable, Sendable {
@@ -565,57 +486,6 @@ public struct PairResponseMsg: Codable, Sendable {
         case clientToken = "client_token"
         case daemonProfile = "daemon_profile"
         case tlsPinSPKI = "tls_pin_spki"
-    }
-}
-
-public struct PairApproveMsg: Codable, Sendable {
-    public var requestID: String
-    public init(requestID: String) { self.requestID = requestID }
-    enum CodingKeys: String, CodingKey { case requestID = "request_id" }
-}
-
-public struct PairRevokeMsg: Codable, Sendable {
-    public var deviceID: String
-    public init(deviceID: String) { self.deviceID = deviceID }
-    enum CodingKeys: String, CodingKey { case deviceID = "device_id" }
-}
-
-public struct PairListResponseMsg: Codable, Sendable {
-    public var pending: [PairPending]
-    public var paired: [PairedDeviceInfo]
-}
-
-public struct PairPending: Codable, Sendable, Identifiable {
-    public var requestID: String
-    public var deviceLabel: String
-    public var tailnetUser: String
-    public var tailnetNode: String
-    public var requestedAt: String
-    public var id: String { requestID }
-    enum CodingKeys: String, CodingKey {
-        case requestID = "request_id"
-        case deviceLabel = "device_label"
-        case tailnetUser = "tailnet_user"
-        case tailnetNode = "tailnet_node"
-        case requestedAt = "requested_at"
-    }
-}
-
-public struct PairedDeviceInfo: Codable, Sendable, Identifiable {
-    public var deviceID: String
-    public var label: String
-    public var tailnetUser: String
-    public var tailnetNode: String
-    public var createdAt: String
-    public var lastSeenAt: String
-    public var id: String { deviceID }
-    enum CodingKeys: String, CodingKey {
-        case deviceID = "device_id"
-        case label
-        case tailnetUser = "tailnet_user"
-        case tailnetNode = "tailnet_node"
-        case createdAt = "created_at"
-        case lastSeenAt = "last_seen_at"
     }
 }
 
@@ -659,236 +529,6 @@ public struct RepoEntry: Codable, Sendable, Identifiable, Hashable {
     public init(path: String, name: String, recent: Bool? = nil) {
         self.path = path; self.name = name; self.recent = recent
     }
-}
-
-// MARK: - Scenarios (multi-session orchestration, #903)
-//
-// The GUI surfaces the human-accessible slice of `gr scenario`: inspect (list +
-// per-scenario status), and the stop/resume/delete lifecycle actions the daemon
-// authorizes for a human. `start`/`task-done`/`add` stay CLI-only — they are
-// orchestrator-*session*-scoped (the daemon requires the caller to be the
-// scenario's orchestrator session, which a human client is not), so they are not
-// modelled here.
-
-/// A scenario lifecycle request keyed by scenario name. One Swift shape for the
-/// wire-identical `{name}` requests (`scenario_stop` / `scenario_resume` /
-/// `scenario_delete`), mirroring the `SessionIDMsg` consolidation.
-public struct ScenarioNameMsg: Codable, Sendable {
-    public var name: String
-    public init(name: String) { self.name = name }
-}
-
-/// Durable status for one declared scenario result. The body is stored in the
-/// shared document store at `destination`; scenario status carries metadata.
-public struct ScenarioResultInfo: Codable, Sendable, Identifiable, Hashable {
-    public var name: String
-    public var format: String
-    public var destination: String
-    public var required: Bool
-    public var status: String
-    public var sizeBytes: Int
-    public var publishedAt: String?
-    public var error: String?
-
-    public var id: String { name }
-
-    public init(name: String, format: String, destination: String,
-                required: Bool = false, status: String,
-                sizeBytes: Int = 0, publishedAt: String? = nil, error: String? = nil) {
-        self.name = name; self.format = format; self.destination = destination
-        self.required = required; self.status = status; self.sizeBytes = sizeBytes
-        self.publishedAt = publishedAt; self.error = error
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case name, format, destination, required, status
-        case sizeBytes = "size_bytes"
-        case publishedAt = "published_at"
-        case error
-    }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        name = try c.decode(String.self, forKey: .name)
-        format = try c.decode(String.self, forKey: .format)
-        destination = try c.decode(String.self, forKey: .destination)
-        required = try c.decodeIfPresent(Bool.self, forKey: .required) ?? false
-        status = try c.decode(String.self, forKey: .status)
-        sizeBytes = try c.decodeIfPresent(Int.self, forKey: .sizeBytes) ?? 0
-        publishedAt = try c.decodeIfPresent(String.self, forKey: .publishedAt)
-        error = try c.decodeIfPresent(String.self, forKey: .error)
-    }
-}
-
-/// One member session of a scenario, as reported in a `ScenarioRecord`. Only
-/// `name` and `session_id` are always present; the rest are `omitempty` on the
-/// wire and therefore optional here (the conformance guard requires Swift's
-/// required-field set to be a subset of Go's).
-public struct ScenarioSessionInfo: Codable, Sendable, Identifiable, Hashable {
-    public var name: String
-    public var sessionID: String
-    public var mirror: String?
-    public var role: String?
-    public var task: String?
-    public var todoDone: Int
-    public var todoTotal: Int
-    public var blockedBy: [String]
-    public var repo: String?
-    public var agent: String?
-    public var model: String?
-    public var status: String?
-    public var shared: Bool?
-    public var results: [ScenarioResultInfo]
-
-    public var id: String { sessionID }
-
-    public init(name: String, sessionID: String, mirror: String? = nil, role: String? = nil, task: String? = nil,
-                todoDone: Int = 0, todoTotal: Int = 0, blockedBy: [String] = [], repo: String? = nil, agent: String? = nil,
-                model: String? = nil, status: String? = nil, shared: Bool? = nil,
-                results: [ScenarioResultInfo] = []) {
-        self.name = name; self.sessionID = sessionID; self.mirror = mirror; self.role = role; self.task = task
-        self.todoDone = todoDone; self.todoTotal = todoTotal
-        self.blockedBy = blockedBy
-        self.repo = repo; self.agent = agent; self.model = model
-        self.status = status; self.shared = shared
-        self.results = results
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case name
-        case sessionID = "session_id"
-        case mirror, role, task
-        case todoDone = "todo_done"
-        case todoTotal = "todo_total"
-        case blockedBy = "blocked_by"
-        case repo, agent, model, status, shared, results
-    }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        name = try c.decode(String.self, forKey: .name)
-        sessionID = try c.decode(String.self, forKey: .sessionID)
-        mirror = try c.decodeIfPresent(String.self, forKey: .mirror)
-        role = try c.decodeIfPresent(String.self, forKey: .role)
-        task = try c.decodeIfPresent(String.self, forKey: .task)
-        todoDone = try c.decodeIfPresent(Int.self, forKey: .todoDone) ?? 0
-        todoTotal = try c.decodeIfPresent(Int.self, forKey: .todoTotal) ?? 0
-        blockedBy = try c.decodeIfPresent([String].self, forKey: .blockedBy) ?? []
-        repo = try c.decodeIfPresent(String.self, forKey: .repo)
-        agent = try c.decodeIfPresent(String.self, forKey: .agent)
-        model = try c.decodeIfPresent(String.self, forKey: .model)
-        status = try c.decodeIfPresent(String.self, forKey: .status)
-        shared = try c.decodeIfPresent(Bool.self, forKey: .shared)
-        results = try c.decodeIfPresent([ScenarioResultInfo].self, forKey: .results) ?? []
-    }
-
-    /// Whether all tracked todo work is done. `todoTotal == 0` means there is
-    /// no tracked todo work, so this todo-only predicate is false.
-    public var isTodoComplete: Bool { todoTotal > 0 && todoDone == todoTotal }
-
-    /// Mirrors the daemon's member-completion contract: there must be tracked
-    /// todo work or a required result, all todos must be done, and every
-    /// required result must be available. Optional results never block.
-    public var isComplete: Bool {
-        let requiredResults = results.filter(\.required)
-        guard todoTotal > 0 || !requiredResults.isEmpty else { return false }
-        let todosComplete = todoTotal == 0 || todoDone == todoTotal
-        return todosComplete && requiredResults.allSatisfy { $0.status == "available" }
-    }
-}
-
-public struct ScenarioCompletionActionInfo: Codable, Sendable, Identifiable, Hashable {
-    public var name: String
-    public var state: String
-    public var attempt: Int?
-    public var startedAt: String?
-    public var finishedAt: String?
-    public var result: String?
-    public var error: String?
-    public var sessionID: String?
-
-    public var id: String { name }
-
-    public init(name: String, state: String, attempt: Int? = nil, startedAt: String? = nil,
-                finishedAt: String? = nil, result: String? = nil, error: String? = nil,
-                sessionID: String? = nil) {
-        self.name = name; self.state = state; self.attempt = attempt
-        self.startedAt = startedAt; self.finishedAt = finishedAt
-        self.result = result; self.error = error; self.sessionID = sessionID
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case name, state, attempt, result, error
-        case startedAt = "started_at"
-        case finishedAt = "finished_at"
-        case sessionID = "session_id"
-    }
-}
-
-public struct ScenarioCleanupInfo: Codable, Sendable, Hashable {
-    public var policy: String
-    public var state: String
-    public var scheduledAt: String?
-    public var finishedAt: String?
-    public var result: String?
-    public var error: String?
-
-    public init(policy: String, state: String, scheduledAt: String? = nil,
-                finishedAt: String? = nil, result: String? = nil, error: String? = nil) {
-        self.policy = policy; self.state = state; self.scheduledAt = scheduledAt
-        self.finishedAt = finishedAt; self.result = result; self.error = error
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case policy, state, result, error
-        case scheduledAt = "scheduled_at"
-        case finishedAt = "finished_at"
-    }
-}
-
-/// A running scenario and its member sessions (`gr scenario list` / `status`).
-public struct ScenarioRecord: Codable, Sendable, Identifiable, Hashable {
-    public var id: String
-    public var name: String
-    public var orchestratorID: String
-    public var goal: String
-    public var status: String
-    public var sessionIDs: [String]
-    public var sessions: [ScenarioSessionInfo]
-    public var createdAt: String
-	public var completionEpoch: Int?
-	public var completionActions: [ScenarioCompletionActionInfo]?
-	public var cleanup: ScenarioCleanupInfo?
-
-    public init(id: String, name: String, orchestratorID: String, goal: String,
-                status: String, sessionIDs: [String], sessions: [ScenarioSessionInfo],
-                createdAt: String, completionEpoch: Int? = nil,
-                completionActions: [ScenarioCompletionActionInfo]? = nil,
-                cleanup: ScenarioCleanupInfo? = nil) {
-        self.id = id; self.name = name; self.orchestratorID = orchestratorID; self.goal = goal
-        self.status = status; self.sessionIDs = sessionIDs; self.sessions = sessions
-        self.createdAt = createdAt
-		self.completionEpoch = completionEpoch; self.completionActions = completionActions
-		self.cleanup = cleanup
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case id, name
-        case orchestratorID = "orchestrator_id"
-        case goal, status
-        case sessionIDs = "session_ids"
-        case sessions
-        case createdAt = "created_at"
-		case completionEpoch = "completion_epoch"
-		case completionActions = "completion_actions"
-		case cleanup
-    }
-}
-
-/// The reply to `scenario_list`: every running scenario on the daemon.
-public struct ScenarioListResponse: Codable, Sendable {
-    public var scenarios: [ScenarioRecord]
-    public init(scenarios: [ScenarioRecord]) { self.scenarios = scenarios }
 }
 
 // MARK: - Document store browser (#902)

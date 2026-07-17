@@ -5,14 +5,12 @@ import GraithDesign
 
 /// The app's top-level universal shell: a `NavigationSplitView` with the
 /// multi-host session sidebar and a session detail pane, plus the
-/// not-connected-to-tailnet banner, an approvals entry point, and add-host.
+/// not-connected-to-tailnet banner and add-host.
 public struct RootView: View {
     @ObservedObject var model: FleetModel
     @State private var showingAddHost = false
-    @State private var showingApprovals = false
     @State private var showingNewSession = false
     @State private var showingDeleted = false
-    @State private var showingScenarios = false
     @State private var showingStore = false
     @State private var showingInspector = false
 
@@ -36,17 +34,11 @@ public struct RootView: View {
         .sheet(isPresented: $showingAddHost) {
             PairingView(model: model)
         }
-        .sheet(isPresented: $showingApprovals) {
-            ApprovalsView(model: model)
-        }
         .sheet(isPresented: $showingNewSession) {
             NewSessionView(model: model)
         }
         .sheet(isPresented: $showingDeleted) {
             DeletedSessionsView(model: model)
-        }
-        .sheet(isPresented: $showingScenarios) {
-            ScenariosView(model: model)
         }
         .sheet(isPresented: $showingStore) {
             StoreBrowserView(model: model)
@@ -72,13 +64,6 @@ public struct RootView: View {
             }
             ToolbarItemGroup {
                 Button {
-                    showingApprovals = true
-                } label: {
-                    Label("Approvals", systemImage: "checkmark.shield")
-                }
-                .badgeCompat(model.totalPendingApprovals)
-
-                Button {
                     showingNewSession = true
                 } label: {
                     Label("New Session", systemImage: "plus")
@@ -90,14 +75,6 @@ public struct RootView: View {
                 } label: {
                     Label("Add Host", systemImage: "externaldrive.badge.plus")
                 }
-
-                Button {
-                    showingScenarios = true
-                } label: {
-                    Label("Scenarios", systemImage: "square.stack.3d.up")
-                }
-                .badgeCompat(model.hostedScenarios.count)
-                .disabled(model.connections.isEmpty)
 
                 Button {
                     showingDeleted = true

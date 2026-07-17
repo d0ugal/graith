@@ -2,7 +2,7 @@
 
 A native **universal** app (iOS + macOS) that connects to one or more graith
 daemons **over Tailscale** and drives their sessions: a multi-host session
-sidebar, a Ghostty-backed terminal, approvals, and device pairing. Built on the
+sidebar, a Ghostty-backed terminal, direct messages, and device pairing. Built on the
 same daemon, protocol, and auth substrate as the `gr` CLI — no web surface.
 
 See the design doc: [`docs/design/2026-07-07-native-ios-app-design.md`](../docs/design/2026-07-07-native-ios-app-design.md)
@@ -35,7 +35,7 @@ gui/
             state + the AppKit terminal-attach client accessor only).
   ios/      The iOS app + modules. Depends on ../shared:
               GraithMobileApp     @main SwiftUI App (the launchable app)
-              GraithMobileUI      RootView, sidebar, session detail, pairing, approvals
+              GraithMobileUI      RootView, sidebar, session detail, pairing
               GraithTerminalUIKit UIKit terminal surface (UITextInput/IME, key accessory)
               GraithMobileRealTerminal  libghostty TerminalCoreDriving adapter (iOS)
               GraithMobileMock    in-memory mocks for previews/tests/dev
@@ -45,8 +45,10 @@ gui/
 > The session/feature layer now lives once in `shared/GraithSessionKit`, and the
 > iOS-local `GraithClientAPI` / `GraithMobileKit` / `GraithMobileReal` targets
 > (which duplicated the boundary, the RemoteKit types, and the real client) have
-> been folded away. A new capability is wired once in shared and appears on both
-> platforms. See `docs/design/2026-07-14-shared-session-feature-layer.md`.
+> been folded away. Capabilities targeted at the native apps are wired once in
+> shared and appear on both platforms; deliberate exclusions link to a design
+> decision in the capability manifest. See
+> `docs/design/2026-07-17-platform-scope-policy.md`.
 
 ## Build & run
 
@@ -187,8 +189,8 @@ gr remote attach graith-ben/my-session   # attach a session over the tailnet (#6
 ```
 
 The app connects to **all** paired hosts and shows their sessions in one
-sidebar. Approvals use a non-attaching `approval_subscribe` so the app is
-notified without kicking a desktop attach.
+sidebar. Interactive approvals are intentionally not exposed in the native
+apps; issue #1392 tracks removing that mechanism from graith entirely.
 
 ## Status & deferred work
 
@@ -216,7 +218,5 @@ Deferred / not yet done:
   persistent identity and distribution. The macOS app runs via `swift run` but
   has no packaged `.app`.
 - **Simulator XCTest suites** (`make -C gui/ios test`) and running them in CI.
-- **APNs background push for approvals** (foreground/subscribed works; background
-  is the biggest open product risk).
 - **Security review** of the auth/pairing model before it ships.
 ```

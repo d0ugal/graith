@@ -4,15 +4,15 @@ import GraithSessionKit
 
 // Small, compact metadata badges shown on each sidebar row (issue #901). The
 // daemon already sends these fields on the wire (sandboxed, yolo, config_stale,
-// scenario, pull_request, ci) — before this they were decoded and thrown away.
+// pull_request, ci) — before this they were decoded and thrown away.
 //
 // The presentation *logic* (which state maps to which colour/icon) is factored
 // into pure functions/enums so it can be unit-tested without driving SwiftUI —
 // `Color` values are opaque in tests, the style buckets are not.
 
-// The `isYolo`/`isSandboxed`/`isScenarioMember`/`isConfigStale` conveniences now
-// live once in the shared `GraithSessionKit` (SessionInfo extension) so both
-// apps share them (#1131). Import GraithSessionKit where they're consumed.
+// The `isYolo`/`isSandboxed`/`isConfigStale` conveniences live once in the
+// shared `GraithSessionKit` (SessionInfo extension) so both apps share them
+// (#1131). Import GraithSessionKit where they're consumed.
 
 /// Visual style buckets for the PR badge, derived from the PR state (plus the
 /// merge-conflict flag). Kept separate from the SwiftUI `Color` so it is testable.

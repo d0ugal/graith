@@ -302,7 +302,7 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"AttachMsg":    {SwiftRequired, "AttachMsg"},
 	"RenameMsg":    {SwiftRequired, "RenameMsg"},
 	"SetStatusMsg": {SwiftRequired, "SetStatusMsg"},
-	"TypeMsg":      {SwiftRequired, "TypeMsg"},
+	"TypeMsg":      {SwiftNA, ""}, // standalone remote typing is CLI-only
 	"ResizeMsg":    {SwiftRequired, "ResizeMsg"},
 	"LogsMsg":      {SwiftRequired, "LogsMsg"},
 
@@ -327,12 +327,11 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	// No-payload requests share Swift's EmptyMsg. ListMsg's optional `deleted`
 	// is Go-only for now (EmptyMsg satisfies the default `list`).
 	"ListMsg":         {SwiftRequired, "EmptyMsg"},
-	"MCPListMsg":      {SwiftRequired, "EmptyMsg"},
-	"ScenarioListMsg": {SwiftRequired, "EmptyMsg"},
-	"TriggerListMsg":  {SwiftRequired, "EmptyMsg"},
 	"ConfigMsg":       {SwiftRequired, "EmptyMsg"}, // config viewer request (#904)
 	"AgentCatalogMsg": {SwiftRequired, "EmptyMsg"}, // agent catalog request (#1234)
-	"PairListMsg":     {SwiftRequired, "EmptyMsg"},
+	"MCPListMsg":      {SwiftNA, ""},               // MCP management is CLI-only
+	"TriggerListMsg":  {SwiftNA, ""},               // trigger management is CLI-only
+	"PairListMsg":     {SwiftNA, ""},               // paired-device management is CLI-only
 
 	// Session model (daemon -> client).
 	"SessionListMsg":   {SwiftRequired, "SessionListMsg"},
@@ -347,20 +346,21 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"ScreenPreviewResponseMsg":  {SwiftRequired, "ScreenPreviewResponseMsg"},
 	"ScreenSnapshotResponseMsg": {SwiftRequired, "ScreenSnapshotResponseMsg"},
 
-	// Approvals (the client-facing subset).
-	"ApprovalInfo":            {SwiftRequired, "ApprovalInfo"},
-	"ApprovalNotificationMsg": {SwiftRequired, "ApprovalNotificationMsg"},
-	"ApprovalRespondMsg":      {SwiftRequired, "ApprovalRespondMsg"},
-	"ApprovalSubscribeMsg":    {SwiftRequired, "ApprovalSubscribeMsg"},
+	// Interactive approvals are being removed (#1392); native apps no longer
+	// subscribe to or respond through the approval protocol.
+	"ApprovalInfo":            {SwiftNA, ""},
+	"ApprovalNotificationMsg": {SwiftNA, ""},
+	"ApprovalRespondMsg":      {SwiftNA, ""},
+	"ApprovalSubscribeMsg":    {SwiftNA, ""},
 
 	// Pairing + proof-of-possession.
 	"PairRequestMsg":      {SwiftRequired, "PairRequestMsg"},
 	"PairResponseMsg":     {SwiftRequired, "PairResponseMsg"},
-	"PairApproveMsg":      {SwiftRequired, "PairApproveMsg"},
-	"PairListResponseMsg": {SwiftRequired, "PairListResponseMsg"},
-	"PairPending":         {SwiftRequired, "PairPending"},
-	"PairedDeviceInfo":    {SwiftRequired, "PairedDeviceInfo"},
-	"PairRevokeMsg":       {SwiftRequired, "PairRevokeMsg"},
+	"PairApproveMsg":      {SwiftNA, ""},
+	"PairListResponseMsg": {SwiftNA, ""},
+	"PairPending":         {SwiftNA, ""},
+	"PairedDeviceInfo":    {SwiftNA, ""},
+	"PairRevokeMsg":       {SwiftNA, ""},
 	"AuthChallengeMsg":    {SwiftRequired, "AuthChallengeMsg"},
 	"AuthProofMsg":        {SwiftRequired, "AuthProofMsg"},
 
@@ -385,88 +385,61 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"RestoreResultMsg":        {SwiftPlanned, ""},
 	"UpdateMsg":               {SwiftPlanned, ""},
 	"StatusSetMsg":            {SwiftPlanned, ""},
-	"WaitMsg":                 {SwiftPlanned, ""},
-	"WaitMatchedMsg":          {SwiftPlanned, ""},
+	"WaitMsg":                 {SwiftNA, ""},
+	"WaitMatchedMsg":          {SwiftNA, ""},
 	"MsgPubMsg":               {SwiftRequired, "MsgPubMsg"},
-	"MsgSubMsg":               {SwiftPlanned, ""},
-	"MsgInboxMsg":             {SwiftPlanned, ""},
+	"MsgSubMsg":               {SwiftNA, ""},
+	"MsgInboxMsg":             {SwiftNA, ""},
 	"MsgAckMsg":               {SwiftRequired, "MsgAckMsg"},
-	"MsgTopicsMsg":            {SwiftPlanned, ""},
+	"MsgTopicsMsg":            {SwiftNA, ""},
 	"MsgConversationMsg":      {SwiftRequired, "MsgConversationMsg"},
 	"ConversationMessage":     {SwiftRequired, "ConversationMessage"},
 	"MsgConversationListMsg":  {SwiftRequired, "MsgConversationListMsg"},
-	"JailedCommentInfo":       {SwiftPlanned, ""},
-	"MsgJailListMsg":          {SwiftPlanned, ""},
-	"MsgJailListResponse":     {SwiftPlanned, ""},
-	"MsgJailShowMsg":          {SwiftPlanned, ""},
-	"MsgJailShowResponse":     {SwiftPlanned, ""},
-	"MsgJailReleaseMsg":       {SwiftPlanned, ""},
-	"MsgJailReleaseResponse":  {SwiftPlanned, ""},
-	"NotifyMsg":               {SwiftPlanned, ""},
-	"NotifyResponse":          {SwiftPlanned, ""},
+	"JailedCommentInfo":       {SwiftNA, ""},
+	"MsgJailListMsg":          {SwiftNA, ""},
+	"MsgJailListResponse":     {SwiftNA, ""},
+	"MsgJailShowMsg":          {SwiftNA, ""},
+	"MsgJailShowResponse":     {SwiftNA, ""},
+	"MsgJailReleaseMsg":       {SwiftNA, ""},
+	"MsgJailReleaseResponse":  {SwiftNA, ""},
+	"NotifyMsg":               {SwiftNA, ""},
+	"NotifyResponse":          {SwiftNA, ""},
 	"TokenInfo":               {SwiftPlanned, ""},
 	"FleetSummary":            {SwiftRequired, "FleetSummary"},            // GUI diagnostics panel (#904)
 	"ConfigResponseMsg":       {SwiftRequired, "ConfigResponseMsg"},       // GUI config viewer (#904)
 	"AgentCatalogEntry":       {SwiftRequired, "AgentCatalogEntry"},       // GUI agent catalog (#1234)
 	"AgentCatalogResponseMsg": {SwiftRequired, "AgentCatalogResponseMsg"}, // GUI agent catalog (#1234)
 	"StatusResponseMsg":       {SwiftPlanned, ""},
-	"MCPConnectionInfo":       {SwiftPlanned, ""},
-	"MCPServerStatus":         {SwiftPlanned, ""},
-	"MCPListResponse":         {SwiftPlanned, ""},
-	"MCPRestartMsg":           {SwiftPlanned, ""},
-	"MCPRestartResponse":      {SwiftPlanned, ""},
-	"MCPLogsMsg":              {SwiftPlanned, ""},
-	"MCPLogFile":              {SwiftPlanned, ""},
-	"MCPLogsResponse":         {SwiftPlanned, ""},
-	// Scenario reads + lifecycle wired into the GUI (#903). The `{name}` requests
-	// (stop/resume/delete) consolidate onto Swift's ScenarioNameMsg, like the
-	// SessionIDMsg pattern. start/task-done/add stay planned — they are
-	// orchestrator-session-scoped, not human-client operations.
-	"ScenarioStopMsg":              {SwiftRequired, "ScenarioNameMsg"},
-	"ScenarioResumeMsg":            {SwiftRequired, "ScenarioNameMsg"},
-	"ScenarioDeleteMsg":            {SwiftRequired, "ScenarioNameMsg"},
-	"ScenarioRecord":               {SwiftRequired, "ScenarioRecord"},
-	"ScenarioPolicyInfo":           {SwiftPlanned, ""},
-	"ScenarioMemberPolicyInfo":     {SwiftPlanned, ""},
-	"ScenarioSessionInfo":          {SwiftRequired, "ScenarioSessionInfo"},
-	"ScenarioCompletionActionInfo": {SwiftRequired, "ScenarioCompletionActionInfo"},
-	"ScenarioCleanupInfo":          {SwiftRequired, "ScenarioCleanupInfo"},
-	"ScenarioResultInfo":           {SwiftRequired, "ScenarioResultInfo"},
-	"ScenarioListResponse":         {SwiftRequired, "ScenarioListResponse"},
-
-	"ScenarioStartMsg":              {SwiftPlanned, ""},
-	"ScenarioPolicyInput":           {SwiftPlanned, ""},
-	"ScenarioMemberPolicyInput":     {SwiftPlanned, ""},
-	"ScenarioSessionInput":          {SwiftPlanned, ""},
-	"ScenarioResultSpec":            {SwiftPlanned, ""},
-	"ScenarioResultPublishMsg":      {SwiftPlanned, ""},
-	"ScenarioResultPublishResponse": {SwiftPlanned, ""},
-	"ScenarioStatusMsg":             {SwiftPlanned, ""},
-	"ScenarioStatusResponse":        {SwiftPlanned, ""},
-	"ScenarioAddMsg":                {SwiftPlanned, ""},
-
-	// Task-list wire types (issue #591). Planned on the GUI (Phase 6 follow-up); the CLI/MCP
-	// front doors ship first, so these are not yet modelled in Messages.swift.
+	"MCPConnectionInfo":       {SwiftNA, ""},
+	"MCPServerStatus":         {SwiftNA, ""},
+	"MCPListResponse":         {SwiftNA, ""},
+	"MCPRestartMsg":           {SwiftNA, ""},
+	"MCPRestartResponse":      {SwiftNA, ""},
+	"MCPLogsMsg":              {SwiftNA, ""},
+	"MCPLogFile":              {SwiftNA, ""},
+	"MCPLogsResponse":         {SwiftNA, ""},
+	// Read-only task-list types remain planned for the GUIs. Mutation types are
+	// intentionally not applicable to the native apps.
 	"TodoItemInfo":          {SwiftPlanned, ""},
 	"TodoScope":             {SwiftPlanned, ""},
-	"TodoAddMsg":            {SwiftPlanned, ""},
+	"TodoAddMsg":            {SwiftNA, ""},
 	"TodoListMsg":           {SwiftPlanned, ""},
 	"TodoListResponse":      {SwiftPlanned, ""},
-	"TodoClaimMsg":          {SwiftPlanned, ""},
-	"TodoClaimResponse":     {SwiftPlanned, ""},
-	"TodoUpdateMsg":         {SwiftPlanned, ""},
-	"TodoTransitionMsg":     {SwiftPlanned, ""},
-	"TodoAssignMsg":         {SwiftPlanned, ""},
-	"TodoRemoveMsg":         {SwiftPlanned, ""},
-	"TodoExportMsg":         {SwiftPlanned, ""},
-	"TodoExportResponse":    {SwiftPlanned, ""},
-	"TodoResponse":          {SwiftPlanned, ""},
-	"TriggerStatusMsg":      {SwiftPlanned, ""},
-	"TriggerRunMsg":         {SwiftPlanned, ""},
-	"TriggerPauseMsg":       {SwiftPlanned, ""},
-	"TriggerRecord":         {SwiftPlanned, ""},
-	"TriggerListResponse":   {SwiftPlanned, ""},
-	"TriggerStatusResponse": {SwiftPlanned, ""},
+	"TodoClaimMsg":          {SwiftNA, ""},
+	"TodoClaimResponse":     {SwiftNA, ""},
+	"TodoUpdateMsg":         {SwiftNA, ""},
+	"TodoTransitionMsg":     {SwiftNA, ""},
+	"TodoAssignMsg":         {SwiftNA, ""},
+	"TodoRemoveMsg":         {SwiftNA, ""},
+	"TodoExportMsg":         {SwiftNA, ""},
+	"TodoExportResponse":    {SwiftNA, ""},
+	"TodoResponse":          {SwiftNA, ""},
+	"TriggerStatusMsg":      {SwiftNA, ""},
+	"TriggerRunMsg":         {SwiftNA, ""},
+	"TriggerPauseMsg":       {SwiftNA, ""},
+	"TriggerRecord":         {SwiftNA, ""},
+	"TriggerListResponse":   {SwiftNA, ""},
+	"TriggerStatusResponse": {SwiftNA, ""},
 
 	// --- Not applicable: a GUI/remote client never decodes these. ---
 	"StatusReportMsg":      {SwiftNA, ""},                           // hook CLI -> daemon
@@ -484,6 +457,32 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"PurgeDiagnostic":      {SwiftNA, ""},                           // local-only (doctor)
 	"ScrollbackDiagnostic": {SwiftRequired, "ScrollbackDiagnostic"}, // GUI diagnostics panel (#904)
 	"MessagesDiagnostic":   {SwiftRequired, "MessagesDiagnostic"},   // GUI diagnostics panel (#904)
+
+	// Scenarios are an orchestrator/CLI feature. Native apps still see member
+	// sessions through SessionInfo but do not decode or operate the scenario
+	// graph (docs/design/2026-07-17-scenarios-cli-only.md).
+	"ScenarioStartMsg":              {SwiftNA, ""},
+	"ScenarioPolicyInput":           {SwiftNA, ""},
+	"ScenarioMemberPolicyInput":     {SwiftNA, ""},
+	"ScenarioSessionInput":          {SwiftNA, ""},
+	"ScenarioResultSpec":            {SwiftNA, ""},
+	"ScenarioResultInfo":            {SwiftNA, ""},
+	"ScenarioResultPublishMsg":      {SwiftNA, ""},
+	"ScenarioResultPublishResponse": {SwiftNA, ""},
+	"ScenarioStopMsg":               {SwiftNA, ""},
+	"ScenarioDeleteMsg":             {SwiftNA, ""},
+	"ScenarioStatusMsg":             {SwiftNA, ""},
+	"ScenarioListMsg":               {SwiftNA, ""},
+	"ScenarioRecord":                {SwiftNA, ""},
+	"ScenarioPolicyInfo":            {SwiftNA, ""},
+	"ScenarioMemberPolicyInfo":      {SwiftNA, ""},
+	"ScenarioSessionInfo":           {SwiftNA, ""},
+	"ScenarioCompletionActionInfo":  {SwiftNA, ""},
+	"ScenarioCleanupInfo":           {SwiftNA, ""},
+	"ScenarioStatusResponse":        {SwiftNA, ""},
+	"ScenarioListResponse":          {SwiftNA, ""},
+	"ScenarioResumeMsg":             {SwiftNA, ""},
+	"ScenarioAddMsg":                {SwiftNA, ""},
 }
 
 // rawMessageType is encoding/json.RawMessage, treated as an opaque JSON blob.

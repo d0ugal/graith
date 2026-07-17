@@ -274,8 +274,7 @@ enum GraithLocalSocket {
 /// grouping, actions, and single-attach coordination all live in the shared
 /// session/feature layer both apps bind to. Only macOS-specific pieces remain
 /// here: terminal presentation state (font size, renderer), the raw-client
-/// accessors the AppKit terminal view / read-only peeks attach through, and the
-/// `hostClients` view the macOS `ApprovalMonitor` presenter subscribes over.
+/// accessors the AppKit terminal view and read-only peeks attach through.
 @MainActor
 final class SessionStore: FleetModel {
     enum RendererType: String, CaseIterable {
@@ -299,9 +298,6 @@ final class SessionStore: FleetModel {
     }
 
     /// Production initializer: local + paired remote hosts, 2s polling (desktop).
-    /// `subscribeApprovals: false` — the macOS `ApprovalMonitor` owns the approval
-    /// subscription (over `hostClients`), so the shared per-host connections skip
-    /// it to avoid a redundant second event subscription per host.
     init(
         registry: HostRegistry,
         identity: DeviceIdentity?,
@@ -318,7 +314,6 @@ final class SessionStore: FleetModel {
             ),
             pairing: pairing,
             poll: true,
-            subscribeApprovals: false,
             pollInterval: PresentationPreferences(userDefaults: .standard).fleetPollInterval
         )
     }
@@ -368,12 +363,6 @@ final class SessionStore: FleetModel {
     /// remote session id would be sent to the local daemon.
     private func ownerClient(for sessionID: String) -> GraithProtocolClient? {
         connection(ownerOf: sessionID)?.protocolClient
-    }
-
-    /// All (host, raw client) pairs, in registry order — the macOS
-    /// `ApprovalMonitor` presenter subscribes to approvals across each.
-    var hostClients: [(host: Host, client: GraithProtocolClient)] {
-        connections.compactMap { conn in conn.protocolClient.map { (host: conn.entry, client: $0) } }
     }
 
     // MARK: - Read-only peeks (logs, screen snapshot, repo list)

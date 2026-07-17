@@ -64,8 +64,9 @@ func TestManifestLoads(t *testing.T) {
 // negative cases can vary a single field without repeating the boilerplate.
 // Both fragments end with a trailing comma; a case appends `"capabilities":[...]}`.
 const (
-	surfacesJSON = `{"version":1,"surfaces":[{"id":"cli","name":"CLI"},{"id":"ios","name":"iOS"},{"id":"macos","name":"macOS"}],`
+	surfacesJSON = `{"version":2,"surfaces":[{"id":"cli","name":"CLI"},{"id":"ios","name":"iOS"},{"id":"macos","name":"macOS"}],`
 	statesJSON   = `"states":[{"id":"supported","symbol":"✅","description":"ok"}],`
+	statesWithNA = `"states":[{"id":"supported","symbol":"✅","description":"ok"},{"id":"planned","symbol":"p","description":"later"},{"id":"n/a","symbol":"-","description":"excluded"}],`
 )
 
 func TestValidateRejectsBadManifests(t *testing.T) {
@@ -76,12 +77,12 @@ func TestValidateRejectsBadManifests(t *testing.T) {
 	}{
 		{
 			name: "bad version",
-			json: `{"version":2,"surfaces":[{"id":"cli","name":"CLI"}],` + statesJSON + `"capabilities":[]}`,
+			json: `{"version":1,"surfaces":[{"id":"cli","name":"CLI"}],` + statesJSON + `"capabilities":[]}`,
 			want: "unsupported manifest version",
 		},
 		{
 			name: "no surfaces",
-			json: `{"version":1,"surfaces":[],` + statesJSON + `"capabilities":[]}`,
+			json: `{"version":2,"surfaces":[],` + statesJSON + `"capabilities":[]}`,
 			want: "no surfaces",
 		},
 		{
@@ -116,13 +117,13 @@ func TestValidateRejectsBadManifests(t *testing.T) {
 		},
 		{
 			name: "missing required surface",
-			json: `{"version":1,"surfaces":[{"id":"cli","name":"CLI"},{"id":"ios","name":"iOS"}],` + statesJSON + `"capabilities":[` +
+			json: `{"version":2,"surfaces":[{"id":"cli","name":"CLI"},{"id":"ios","name":"iOS"}],` + statesJSON + `"capabilities":[` +
 				`{"id":"a","category":"c","name":"n","cli":"supported","ios":"supported","macos":"supported"}]}`,
 			want: "missing required surface \"macos\"",
 		},
 		{
 			name: "unknown surface",
-			json: `{"version":1,"surfaces":[{"id":"cli","name":"CLI"},{"id":"ios","name":"iOS"},{"id":"macos","name":"macOS"},{"id":"web","name":"Web"}],` + statesJSON + `"capabilities":[` +
+			json: `{"version":2,"surfaces":[{"id":"cli","name":"CLI"},{"id":"ios","name":"iOS"},{"id":"macos","name":"macOS"},{"id":"web","name":"Web"}],` + statesJSON + `"capabilities":[` +
 				`{"id":"a","category":"c","name":"n","cli":"supported","ios":"supported","macos":"supported"}]}`,
 			want: "unknown surface id \"web\"",
 		},
@@ -134,7 +135,7 @@ func TestValidateRejectsBadManifests(t *testing.T) {
 		},
 		{
 			name: "empty surface name",
-			json: `{"version":1,"surfaces":[{"id":"cli","name":""},{"id":"ios","name":"iOS"},{"id":"macos","name":"macOS"}],` + statesJSON + `"capabilities":[` +
+			json: `{"version":2,"surfaces":[{"id":"cli","name":""},{"id":"ios","name":"iOS"},{"id":"macos","name":"macOS"}],` + statesJSON + `"capabilities":[` +
 				`{"id":"a","category":"c","name":"n","cli":"supported","ios":"supported","macos":"supported"}]}`,
 			want: "surface \"cli\" has empty name",
 		},
@@ -155,6 +156,36 @@ func TestValidateRejectsBadManifests(t *testing.T) {
 			json: surfacesJSON + `"states":[{"id":"supported","symbol":"✅","description":"d"},{"id":"planned","symbol":"✅","description":"e"}],"capabilities":[` +
 				`{"id":"a","category":"c","name":"n","cli":"supported","ios":"planned","macos":"planned"}]}`,
 			want: "share symbol",
+		},
+		{
+			name: "excluded platform without decision",
+			json: surfacesJSON + statesWithNA + `"capabilities":[` +
+				`{"id":"a","category":"c","name":"n","cli":"supported","ios":"n/a","macos":"n/a"}]}`,
+			want: "requires platform_decision",
+		},
+		{
+			name: "divergent guis without decision",
+			json: surfacesJSON + statesWithNA + `"capabilities":[` +
+				`{"id":"a","category":"c","name":"n","cli":"supported","ios":"supported","macos":"planned"}]}`,
+			want: "requires platform_decision",
+		},
+		{
+			name: "decision outside design directory",
+			json: surfacesJSON + statesWithNA + `"capabilities":[` +
+				`{"id":"a","category":"c","name":"n","cli":"supported","ios":"n/a","macos":"n/a","platform_decision":"README.md#platform-support"}]}`,
+			want: "under docs/design/",
+		},
+		{
+			name: "decision with parent traversal",
+			json: surfacesJSON + statesWithNA + `"capabilities":[` +
+				`{"id":"a","category":"c","name":"n","cli":"supported","ios":"n/a","macos":"n/a","platform_decision":"docs/design/../README.md#platform-support"}]}`,
+			want: "clean repository-relative path",
+		},
+		{
+			name: "decision with wrong anchor",
+			json: surfacesJSON + statesWithNA + `"capabilities":[` +
+				`{"id":"a","category":"c","name":"n","cli":"supported","ios":"n/a","macos":"n/a","platform_decision":"docs/design/2026-07-17-braw.md#alternatives"}]}`,
+			want: "must end in #platform-support",
 		},
 	}
 	for _, tt := range tests {
@@ -256,6 +287,62 @@ func TestMatrixMarkdownMultipleNotes(t *testing.T) {
 	// Rendering must be deterministic.
 	if md != m.MatrixMarkdown() {
 		t.Error("MatrixMarkdown is not deterministic")
+	}
+}
+
+func TestMatrixMarkdownIncludesPlatformDecision(t *testing.T) {
+	const decision = "docs/design/2026-07-17-braw.md#platform-support"
+	raw := surfacesJSON + statesJSON + `"capabilities":[` +
+		`{"id":"a","category":"c","name":"With note","cli":"supported","ios":"supported","macos":"supported","platform_decision":"` + decision + `","notes":"canny reason."},` +
+		`{"id":"b","category":"c","name":"Decision only","cli":"supported","ios":"supported","macos":"supported","platform_decision":"` + decision + `"}]}`
+
+	m, err := parse([]byte(raw))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	md := m.MatrixMarkdown()
+	for _, want := range []string{
+		"With note <sup>1</sup>",
+		"Decision only <sup>2</sup>",
+		"<sup>1</sup> With note: canny reason. [Platform decision](" + platformDecisionURL + decision + ")",
+		"<sup>2</sup> Decision only: [Platform decision](" + platformDecisionURL + decision + ")",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("rendered matrix missing %q\n%s", want, md)
+		}
+	}
+}
+
+func TestPlatformDecisionReferencesResolve(t *testing.T) {
+	m, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	seen := map[string]bool{}
+	for _, c := range m.Capabilities {
+		if c.PlatformDecision == "" || seen[c.PlatformDecision] {
+			continue
+		}
+		seen[c.PlatformDecision] = true
+
+		doc, _, ok := strings.Cut(c.PlatformDecision, "#")
+		if !ok {
+			t.Errorf("capability %q platform_decision has no anchor: %q", c.ID, c.PlatformDecision)
+			continue
+		}
+
+		raw, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(doc)))
+		if err != nil {
+			t.Errorf("capability %q platform_decision %q: %v", c.ID, c.PlatformDecision, err)
+			continue
+		}
+
+		contents := "\n" + strings.ReplaceAll(string(raw), "\r\n", "\n")
+		if !strings.Contains(contents, "\n## Platform support\n") {
+			t.Errorf("capability %q platform_decision %q: document has no exact %q heading", c.ID, c.PlatformDecision, "## Platform support")
+		}
 	}
 }
 
@@ -370,8 +457,8 @@ func TestGUIFixtureProjection(t *testing.T) {
 
 	for i, c := range m.Capabilities {
 		got := fx.Capabilities[i]
-		if got.ID != c.ID || got.IOS != c.IOS || got.MacOS != c.MacOS {
-			t.Errorf("capability %d = %+v, want id=%q ios=%q macos=%q", i, got, c.ID, c.IOS, c.MacOS)
+		if got.ID != c.ID || got.IOS != c.IOS || got.MacOS != c.MacOS || got.PlatformDecision != c.PlatformDecision {
+			t.Errorf("capability %d = %+v, want id=%q ios=%q macos=%q platform_decision=%q", i, got, c.ID, c.IOS, c.MacOS, c.PlatformDecision)
 		}
 	}
 	// The projection must be deterministic so the fixture is diff-stable.

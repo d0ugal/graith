@@ -20,7 +20,7 @@ struct MessagingTests {
     }
 
     @Test func sendRoutesToOwningConnectionAndReportsSuccess() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let target = fleet.sessions.first { $0.id == "braw0001" }!
 
@@ -34,7 +34,7 @@ struct MessagingTests {
     }
 
     @Test func sendRejectsBlankBodyWithoutHittingTheClient() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let target = fleet.sessions.first { $0.id == "braw0001" }!
 
@@ -45,7 +45,7 @@ struct MessagingTests {
     }
 
     @Test func sendSurfacesDaemonError() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         await mock.setFailSend(.daemon("session not found"))
         let target = fleet.sessions.first { $0.id == "braw0001" }!
@@ -56,7 +56,7 @@ struct MessagingTests {
     }
 
     @Test func conversationReturnsSeededMessagesOldestFirst() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         await mock.seedConversation("braw0001", [
             ConversationMessage(id: "m1", seq: 1, stream: "inbox:braw0001", senderID: "canny",
@@ -74,7 +74,7 @@ struct MessagingTests {
     }
 
     @Test func conversationRespectsLimit() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         await mock.seedConversation("braw0001", (1...5).map {
             ConversationMessage(id: "m\($0)", seq: Int64($0), stream: "inbox:braw0001",
@@ -87,7 +87,7 @@ struct MessagingTests {
     }
 
     @Test func conversationSurfacesDaemonError() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         await mock.setFailConversation(.daemon("not authorized"))
         let target = fleet.sessions.first { $0.id == "braw0001" }!
@@ -98,7 +98,7 @@ struct MessagingTests {
     }
 
     @Test func ackInboxRoutesToOwningConnectionAndReportsSuccess() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         let target = fleet.sessions.first { $0.id == "canny002" }!
 
@@ -109,7 +109,7 @@ struct MessagingTests {
     }
 
     @Test func ackInboxReportsFailure() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(), subscribeApprovals: false)
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions())
         await fleet.connectAll()
         await mock.setFailAck(.disconnected("link dropped"))
         let target = fleet.sessions.first { $0.id == "canny002" }!

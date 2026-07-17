@@ -51,13 +51,15 @@ support. Shared feature wiring is registered with compile anchors in
 When support changes:
 
 1. Implement/remove the behavior and verify the actual app views.
-2. Update the manifest and shared affordance or a reviewed exception.
+2. Update the manifest and shared affordance. A deliberately excluded surface
+   is `n/a` with a `platform_decision` link to the feature design; targeted but
+   unfinished work is `planned`.
 3. Run `go test ./internal/capabilities -update` from the repository root.
 4. Run shared and affected app tests.
 
 Do not hand-edit the generated capability fixture. Prefer iOS/macOS parity in
-the shared layer; declare a `knownDivergences` entry only when the difference is
-intentional and reviewed.
+the shared layer for every feature that targets both apps. Platform scope is
+declared once in the capability manifest rather than in a Swift exception list.
 
 From the repository root, see `internal/capabilities/AGENTS.md`,
 `gui/README.md`, and `docs/design/2026-07-14-shared-session-feature-layer.md`

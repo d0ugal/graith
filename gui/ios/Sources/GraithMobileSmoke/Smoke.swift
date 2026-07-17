@@ -128,7 +128,7 @@ func testPairing() async throws {
 // MARK: - Mock host client
 
 func testMockClient() async throws {
-    section("MockHostClient — read / create / approvals")
+    section("MockHostClient — read / create")
     let client = MockHostClient()
     try await client.connect()
     let sessions = try await client.listSessions()
@@ -141,14 +141,6 @@ func testMockClient() async throws {
     try await client.create(CreateRequest(name: "bonnie", agent: "claude", repoPath: "/Users/x/Code/croft"))
     check(try await client.listSessions().count == 4, "create adds a session")
 
-    // Approval stream yields the pending set and clears on respond.
-    let stream = await client.approvalStream()
-    var iterator = stream.makeAsyncIterator()
-    let first = await iterator.next()
-    check(first?.count == 1, "approval stream yields one pending")
-    try await client.respondApproval(requestID: "req-canny-1", decision: .deny, reason: "no")
-    let second = await iterator.next()
-    check(second?.isEmpty == true, "respond clears the pending approval")
 }
 
 // MARK: - Session actions (issue #899): delete / rename / star / fork / migrate
@@ -263,14 +255,6 @@ func testAppModel() async throws {
 
     await model.connectAll()
     check(model.allSessions.count == 6, "aggregates 3 sessions x 2 hosts")
-    // Approvals arrive asynchronously over the subscription stream; give the
-    // subscription tasks a moment to deliver their first yield.
-    for _ in 0..<50 where model.totalPendingApprovals < 2 {
-        try? await Task.sleep(nanoseconds: 10_000_000)
-    }
-    check(model.totalPendingApprovals == 2, "aggregates 1 approval x 2 hosts")
-    check(model.allApprovals.allSatisfy { !$0.host.label.isEmpty }, "approvals tagged with host")
-
     // Selection resolves to the right host connection.
     let ref = SessionRef(hostID: "ben", sessionID: "braw0001")
     check(model.connection(for: ref)?.id == "ben", "selection resolves host connection")

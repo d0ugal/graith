@@ -21,11 +21,6 @@ open class FleetModel: ObservableObject {
     public let pairing: PairingCoordinator
 
     private let factory: HostClientFactory
-    /// Whether per-host connections own the approval subscription + aggregation.
-    /// macOS drives approvals through its own `ApprovalMonitor` presenter, so it
-    /// opts out (false) to avoid a redundant second subscription per host.
-    private let subscribeApprovals: Bool
-
     /// One connection per host, keyed by host id, in registry order.
     @Published public private(set) var connections: [HostConnection] = []
     /// The currently selected session, namespaced by host (host id + session id).
@@ -73,7 +68,6 @@ open class FleetModel: ObservableObject {
         factory: HostClientFactory,
         pairing: PairingCoordinator,
         poll: Bool = false,
-        subscribeApprovals: Bool = true,
         pollInterval: TimeInterval = PresentationPreferences.default.fleetPollInterval
     ) {
         self.registry = registry
@@ -81,7 +75,6 @@ open class FleetModel: ObservableObject {
         self.reachability = reachability
         self.factory = factory
         self.pairing = pairing
-        self.subscribeApprovals = subscribeApprovals
         self.pollInterval = max(0.1, pollInterval)
         rebuildConnections()
         // Rebuild + reconnect when the *membership* changes (a pairing completes
@@ -116,7 +109,7 @@ open class FleetModel: ObservableObject {
     /// connection whenever its *connection-relevant* host fields are unchanged
     /// (ignoring display-only fields like `label`/`lastSeen`), and disconnects
     /// any connection that is dropped or replaced so it can't leak an open
-    /// client socket + approval task.
+    /// client socket.
     public func rebuildConnections() {
         let existing = Dictionary(uniqueKeysWithValues: connections.map { ($0.id, $0) })
         let next: [HostConnection] = registry.hosts.compactMap { entry -> HostConnection? in
@@ -126,11 +119,11 @@ open class FleetModel: ObservableObject {
             switch entry.kind {
             case .local:
                 let client = factory.makeLocalClient(transport: entry.transport, profile: entry.daemonProfile)
-                return HostConnection(entry: entry, client: client, subscribeApprovals: subscribeApprovals)
+                return HostConnection(entry: entry, client: client)
             case .remote:
                 guard entry.isPaired, let creds = registry.credentials(for: entry), let identity else { return nil }
                 let client = factory.makeClient(transport: entry.transport, credentials: creds, signer: identity)
-                return HostConnection(entry: entry, client: client, subscribeApprovals: subscribeApprovals)
+                return HostConnection(entry: entry, client: client)
             }
         }
         // Tear down connections that went away or were replaced by a fresh client.
@@ -237,42 +230,6 @@ open class FleetModel: ObservableObject {
             }
         }
         return merged
-    }
-
-    /// Total pending approvals across all hosts (for a badge).
-    public var totalPendingApprovals: Int {
-        connections.reduce(0) { $0 + $1.approvals.count }
-    }
-
-    /// Every running scenario across hosts, tagged with its host (scenarios are
-    /// per-daemon), sorted by host order then scenario name.
-    public var hostedScenarios: [HostedScenario] {
-        connections.flatMap { conn in
-            conn.scenarios
-                .sorted { $0.name < $1.name }
-                .map { HostedScenario(host: conn.entry, scenario: $0) }
-        }
-    }
-
-    /// The host-agnostic scenario list (single-host rendering path).
-    public var scenarios: [ScenarioRecord] {
-        hostedScenarios.map(\.scenario)
-    }
-
-    /// The member `SessionInfo`s of a scenario, resolved from the owning host's
-    /// live session list (a member may be soft-deleted/absent, so this filters to
-    /// what's currently live), in the scenario's declared order.
-    public func sessions(in scenario: HostedScenario) -> [SessionInfo] {
-        guard let conn = connections.first(where: { $0.id == scenario.host.id }) else { return [] }
-        let byID = Dictionary(uniqueKeysWithValues: conn.sessions.map { ($0.id, $0) })
-        return scenario.scenario.sessions.compactMap { byID[$0.sessionID] }
-    }
-
-    /// Every pending approval across hosts, tagged with its host.
-    public var allApprovals: [HostedApproval] {
-        connections.flatMap { conn in
-            conn.approvals.map { HostedApproval(host: conn.entry, approval: $0) }
-        }
     }
 
     /// The primary error for the sidebar footer: the local daemon's if it has
@@ -421,25 +378,6 @@ open class FleetModel: ObservableObject {
     /// Run an action against the session's owning connection, then refresh.
     private func act(_ session: SessionInfo, _ op: @escaping (HostConnection) async -> Void) {
         guard let conn = connection(ownerOf: session.id) else { return }
-        Task { await op(conn) }
-    }
-
-    // MARK: - Scenario actions (#903)
-    //
-    // Scenarios are per-daemon, so an action is routed to the owning host. Only
-    // the human-authorized lifecycle verbs are exposed (stop/resume/delete);
-    // start and task-done are orchestrator-session-scoped and stay CLI-only.
-
-    public func stopScenario(name: String, hostID: String) { actScenario(hostID) { await $0.stopScenario(name) } }
-    public func resumeScenario(name: String, hostID: String) { actScenario(hostID) { await $0.resumeScenario(name) } }
-    public func deleteScenario(name: String, hostID: String) { actScenario(hostID) { await $0.deleteScenario(name) } }
-
-    public func stopScenario(_ scenario: HostedScenario) { stopScenario(name: scenario.scenario.name, hostID: scenario.host.id) }
-    public func resumeScenario(_ scenario: HostedScenario) { resumeScenario(name: scenario.scenario.name, hostID: scenario.host.id) }
-    public func deleteScenario(_ scenario: HostedScenario) { deleteScenario(name: scenario.scenario.name, hostID: scenario.host.id) }
-
-    private func actScenario(_ hostID: String, _ op: @escaping (HostConnection) async -> Void) {
-        guard let conn = connections.first(where: { $0.id == hostID }) else { return }
         Task { await op(conn) }
     }
 
@@ -709,22 +647,4 @@ public struct HostedSession: Identifiable, Hashable, Sendable {
     public let session: SessionInfo
     public var id: String { "\(host.id)/\(session.id)" }
     public var ref: SessionRef { SessionRef(hostID: host.id, sessionID: session.id) }
-}
-
-/// An approval paired with the host it belongs to.
-public struct HostedApproval: Identifiable, Hashable, Sendable {
-    public let host: Host
-    public let approval: ApprovalInfo
-    public var id: String { "\(host.id)/\(approval.requestID)" }
-}
-
-/// A scenario paired with the host it belongs to (scenarios are per-daemon).
-public struct HostedScenario: Identifiable, Hashable, Sendable {
-    public let host: Host
-    public let scenario: ScenarioRecord
-    public var id: String { "\(host.id)/\(scenario.id)" }
-    public init(host: Host, scenario: ScenarioRecord) {
-        self.host = host
-        self.scenario = scenario
-    }
 }

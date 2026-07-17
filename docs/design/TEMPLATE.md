@@ -69,6 +69,21 @@ informed: (TBD)
 
 - <non-goal>
 
+## Platform support
+
+<!-- Decide the intended surface area during design, before implementation.
+     Include every applicable frontend/platform (currently CLI, iOS, and macOS)
+     and state whether it is targeted or deliberately excluded, with a short
+     rationale. Capability-manifest `n/a` cells link to this section, so keep
+     this exact heading. Example:
+
+     | Surface | Decision | Rationale |
+     |---------|----------|-----------|
+     | CLI     | Targeted | <why> |
+     | iOS     | Excluded | <why the feature does not belong here> |
+     | macOS   | Targeted | <why> |
+-->
+
 ## Proposals
 
 <!--

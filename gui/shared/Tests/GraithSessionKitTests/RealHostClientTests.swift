@@ -6,7 +6,7 @@ import Foundation
 // End-to-end coverage for the production `RealHostClient` adapter, driving a
 // real `GraithProtocolClient` over an in-memory transport against a scripted
 // `MockDaemon`. Covers the control-path methods + error normalisation; the
-// event-connection paths (approvalStream/attach) are covered structurally by
+// event-connection paths used by attach are covered structurally by
 // GraithProtocolTests' multi-connection integration tests.
 
 @Suite("RealHostClient — over the framed protocol")
@@ -208,19 +208,6 @@ struct RealHostClientTests {
         let snap = try await client.screenSnapshot(sessionID: "x")
         #expect(snap.frame == "hullo")
         #expect(snap.cols == 80)
-        _ = await server.result
-        await client.disconnect()
-    }
-
-    @Test func respondApprovalRoundTrips() async throws {
-        let (client, server) = make { d in
-            try await self.handshake(d)
-            let req = try await d.readControl()
-            #expect(req.type == "approval_respond")
-            try await d.writeControl("ok", EmptyMsg())
-        }
-        try await client.connect()
-        try await client.respondApproval(requestID: "r1", decision: .allow, reason: nil)
         _ = await server.result
         await client.disconnect()
     }

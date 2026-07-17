@@ -11,12 +11,11 @@ struct GraithApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     /// App-global state shared by every window: one host registry (local +
-    /// paired remotes), one aggregated session list, one approvals stream, one
-    /// pairing coordinator. Per-window state (selection, split) lives in
+    /// paired remotes), one aggregated session list, and one pairing
+    /// coordinator. Per-window state (selection, split) lives in
     /// `WindowState`, owned by each `ContentView`.
     @StateObject private var store: SessionStore
     @StateObject private var registry: HostRegistry
-    @StateObject private var approvals: ApprovalMonitor
     @StateObject private var pairing: PairingCoordinator
 
     init() {
@@ -50,7 +49,6 @@ struct GraithApp: App {
 
         _store = StateObject(wrappedValue: store)
         _registry = StateObject(wrappedValue: registry)
-        _approvals = StateObject(wrappedValue: ApprovalMonitor(store: store))
         _pairing = StateObject(wrappedValue: pairing)
     }
 
@@ -59,7 +57,6 @@ struct GraithApp: App {
             ContentView()
                 .environmentObject(store)
                 .environmentObject(registry)
-                .environmentObject(approvals)
                 .environmentObject(pairing)
                 .frame(minWidth: 800, minHeight: 500)
         }

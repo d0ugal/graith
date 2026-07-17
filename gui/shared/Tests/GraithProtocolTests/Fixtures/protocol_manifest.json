@@ -76,8 +76,7 @@
     },
     {
       "name": "ApprovalInfo",
-      "swift": "required",
-      "swift_type": "ApprovalInfo",
+      "swift": "na",
       "fields": [
         {
           "name": "request_id",
@@ -139,8 +138,7 @@
     },
     {
       "name": "ApprovalNotificationMsg",
-      "swift": "required",
-      "swift_type": "ApprovalNotificationMsg",
+      "swift": "na",
       "fields": [
         {
           "name": "pending",
@@ -198,8 +196,7 @@
     },
     {
       "name": "ApprovalRespondMsg",
-      "swift": "required",
-      "swift_type": "ApprovalRespondMsg",
+      "swift": "na",
       "fields": [
         {
           "name": "request_id",
@@ -226,8 +223,7 @@
     },
     {
       "name": "ApprovalSubscribeMsg",
-      "swift": "required",
-      "swift_type": "ApprovalSubscribeMsg",
+      "swift": "na",
       "fields": []
     },
     {
@@ -1186,7 +1182,7 @@
     },
     {
       "name": "JailedCommentInfo",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "id",
@@ -1386,7 +1382,7 @@
     },
     {
       "name": "MCPConnectionInfo",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "proxy_id",
@@ -1427,13 +1423,12 @@
     },
     {
       "name": "MCPListMsg",
-      "swift": "required",
-      "swift_type": "EmptyMsg",
+      "swift": "na",
       "fields": []
     },
     {
       "name": "MCPListResponse",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "servers",
@@ -1450,7 +1445,7 @@
     },
     {
       "name": "MCPLogFile",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "proxy_id",
@@ -1477,7 +1472,7 @@
     },
     {
       "name": "MCPLogsMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -1497,7 +1492,7 @@
     },
     {
       "name": "MCPLogsResponse",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -1521,7 +1516,7 @@
     },
     {
       "name": "MCPRestartMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -1534,7 +1529,7 @@
     },
     {
       "name": "MCPRestartResponse",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -1554,7 +1549,7 @@
     },
     {
       "name": "MCPServerStatus",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -1701,7 +1696,7 @@
     },
     {
       "name": "MsgInboxMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "only_unread",
@@ -1742,7 +1737,7 @@
     },
     {
       "name": "MsgJailListMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "include_released",
@@ -1755,7 +1750,7 @@
     },
     {
       "name": "MsgJailListResponse",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "jailed",
@@ -1772,7 +1767,7 @@
     },
     {
       "name": "MsgJailReleaseMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "id",
@@ -1799,7 +1794,7 @@
     },
     {
       "name": "MsgJailReleaseResponse",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "released",
@@ -1816,7 +1811,7 @@
     },
     {
       "name": "MsgJailShowMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "id",
@@ -1829,7 +1824,7 @@
     },
     {
       "name": "MsgJailShowResponse",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "jailed",
@@ -1906,7 +1901,7 @@
     },
     {
       "name": "MsgSubMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "stream",
@@ -1961,7 +1956,7 @@
     },
     {
       "name": "MsgTopicsMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "subscriber",
@@ -1981,7 +1976,7 @@
     },
     {
       "name": "NotifyMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "message",
@@ -2008,7 +2003,7 @@
     },
     {
       "name": "NotifyResponse",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "delivered",
@@ -2070,8 +2065,7 @@
     },
     {
       "name": "PairApproveMsg",
-      "swift": "required",
-      "swift_type": "PairApproveMsg",
+      "swift": "na",
       "fields": [
         {
           "name": "request_id",
@@ -2084,14 +2078,12 @@
     },
     {
       "name": "PairListMsg",
-      "swift": "required",
-      "swift_type": "EmptyMsg",
+      "swift": "na",
       "fields": []
     },
     {
       "name": "PairListResponseMsg",
-      "swift": "required",
-      "swift_type": "PairListResponseMsg",
+      "swift": "na",
       "fields": [
         {
           "name": "pending",
@@ -2119,8 +2111,7 @@
     },
     {
       "name": "PairPending",
-      "swift": "required",
-      "swift_type": "PairPending",
+      "swift": "na",
       "fields": [
         {
           "name": "request_id",
@@ -2217,8 +2208,7 @@
     },
     {
       "name": "PairRevokeMsg",
-      "swift": "required",
-      "swift_type": "PairRevokeMsg",
+      "swift": "na",
       "fields": [
         {
           "name": "device_id",
@@ -2231,8 +2221,7 @@
     },
     {
       "name": "PairedDeviceInfo",
-      "swift": "required",
-      "swift_type": "PairedDeviceInfo",
+      "swift": "na",
       "fields": [
         {
           "name": "device_id",
@@ -2495,7 +2484,7 @@
     },
     {
       "name": "ScenarioAddMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -2516,8 +2505,7 @@
     },
     {
       "name": "ScenarioCleanupInfo",
-      "swift": "required",
-      "swift_type": "ScenarioCleanupInfo",
+      "swift": "na",
       "fields": [
         {
           "name": "policy",
@@ -2565,8 +2553,7 @@
     },
     {
       "name": "ScenarioCompletionActionInfo",
-      "swift": "required",
-      "swift_type": "ScenarioCompletionActionInfo",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -2628,8 +2615,7 @@
     },
     {
       "name": "ScenarioDeleteMsg",
-      "swift": "required",
-      "swift_type": "ScenarioNameMsg",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -2642,14 +2628,12 @@
     },
     {
       "name": "ScenarioListMsg",
-      "swift": "required",
-      "swift_type": "EmptyMsg",
+      "swift": "na",
       "fields": []
     },
     {
       "name": "ScenarioListResponse",
-      "swift": "required",
-      "swift_type": "ScenarioListResponse",
+      "swift": "na",
       "fields": [
         {
           "name": "scenarios",
@@ -2666,7 +2650,7 @@
     },
     {
       "name": "ScenarioMemberPolicyInfo",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "required",
@@ -2735,7 +2719,7 @@
     },
     {
       "name": "ScenarioMemberPolicyInput",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "required",
@@ -2762,7 +2746,7 @@
     },
     {
       "name": "ScenarioPolicyInfo",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "completion",
@@ -2845,7 +2829,7 @@
     },
     {
       "name": "ScenarioPolicyInput",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "completion",
@@ -2872,8 +2856,7 @@
     },
     {
       "name": "ScenarioRecord",
-      "swift": "required",
-      "swift_type": "ScenarioRecord",
+      "swift": "na",
       "fields": [
         {
           "name": "id",
@@ -2976,8 +2959,7 @@
     },
     {
       "name": "ScenarioResultInfo",
-      "swift": "required",
-      "swift_type": "ScenarioResultInfo",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -3039,7 +3021,7 @@
     },
     {
       "name": "ScenarioResultPublishMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "scenario",
@@ -3066,7 +3048,7 @@
     },
     {
       "name": "ScenarioResultPublishResponse",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "scenario",
@@ -3094,7 +3076,7 @@
     },
     {
       "name": "ScenarioResultSpec",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -3128,8 +3110,7 @@
     },
     {
       "name": "ScenarioResumeMsg",
-      "swift": "required",
-      "swift_type": "ScenarioNameMsg",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -3142,8 +3123,7 @@
     },
     {
       "name": "ScenarioSessionInfo",
-      "swift": "required",
-      "swift_type": "ScenarioSessionInfo",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -3262,7 +3242,7 @@
     },
     {
       "name": "ScenarioSessionInput",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -3384,7 +3364,7 @@
     },
     {
       "name": "ScenarioStartMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "caller_session_id",
@@ -3449,7 +3429,7 @@
     },
     {
       "name": "ScenarioStatusMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -3462,7 +3442,7 @@
     },
     {
       "name": "ScenarioStatusResponse",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "scenario",
@@ -3476,8 +3456,7 @@
     },
     {
       "name": "ScenarioStopMsg",
-      "swift": "required",
-      "swift_type": "ScenarioNameMsg",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -4414,7 +4393,7 @@
     },
     {
       "name": "TodoAddMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "scope",
@@ -4476,7 +4455,7 @@
     },
     {
       "name": "TodoAssignMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "id",
@@ -4496,7 +4475,7 @@
     },
     {
       "name": "TodoClaimMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "id",
@@ -4517,7 +4496,7 @@
     },
     {
       "name": "TodoClaimResponse",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "claimed",
@@ -4538,7 +4517,7 @@
     },
     {
       "name": "TodoExportMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "scope",
@@ -4559,7 +4538,7 @@
     },
     {
       "name": "TodoExportResponse",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "key",
@@ -4744,7 +4723,7 @@
     },
     {
       "name": "TodoRemoveMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "id",
@@ -4757,7 +4736,7 @@
     },
     {
       "name": "TodoResponse",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "item",
@@ -4798,7 +4777,7 @@
     },
     {
       "name": "TodoTransitionMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "id",
@@ -4825,7 +4804,7 @@
     },
     {
       "name": "TodoUpdateMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "id",
@@ -4989,13 +4968,12 @@
     },
     {
       "name": "TriggerListMsg",
-      "swift": "required",
-      "swift_type": "EmptyMsg",
+      "swift": "na",
       "fields": []
     },
     {
       "name": "TriggerListResponse",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "triggers",
@@ -5012,7 +4990,7 @@
     },
     {
       "name": "TriggerPauseMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -5032,7 +5010,7 @@
     },
     {
       "name": "TriggerRecord",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -5164,7 +5142,7 @@
     },
     {
       "name": "TriggerRunMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -5177,7 +5155,7 @@
     },
     {
       "name": "TriggerStatusMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "name",
@@ -5190,7 +5168,7 @@
     },
     {
       "name": "TriggerStatusResponse",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "trigger",
@@ -5204,8 +5182,7 @@
     },
     {
       "name": "TypeMsg",
-      "swift": "required",
-      "swift_type": "TypeMsg",
+      "swift": "na",
       "fields": [
         {
           "name": "session_id",
@@ -5293,7 +5270,7 @@
     },
     {
       "name": "WaitMatchedMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "matched_line",
@@ -5313,7 +5290,7 @@
     },
     {
       "name": "WaitMsg",
-      "swift": "planned",
+      "swift": "na",
       "fields": [
         {
           "name": "session_id",

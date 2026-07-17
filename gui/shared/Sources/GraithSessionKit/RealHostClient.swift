@@ -5,8 +5,8 @@ import GraithProtocol
 /// actor. Since the boundary now speaks the canonical `GraithProtocol` wire
 /// models directly (#1131), the old `GraithProtocol.* → GraithClientAPI.*`
 /// translation is gone — this adapter now only reshapes the API surface the
-/// boundary needs (a non-throwing `approvalStream`, a `status` synthesized from
-/// `list`, `ApprovalDecision` typing) and normalises errors.
+/// boundary needs (including `status` synthesized from `list`) and normalises
+/// errors.
 public actor RealHostClient: GraithHostClient {
     private let inner: GraithProtocolClient
     private var connected = false
@@ -99,14 +99,6 @@ public actor RealHostClient: GraithHostClient {
         }
     }
 
-    public func listScenarios() async throws -> [ScenarioRecord] {
-        do {
-            return try await inner.listScenarios()
-        } catch {
-            throw RealClientError.map(error)
-        }
-    }
-
     public func storeList(repo: String?, shared: Bool, prefix: String?) async throws -> [StoreEntryInfo] {
         do {
             return try await inner.storeList(repo: repo, shared: shared, prefix: prefix)
@@ -179,12 +171,6 @@ public actor RealHostClient: GraithHostClient {
         try await run { _ = try await self.inner.migrate(sessionID: sessionID, agent: agent, model: model) }
     }
 
-    // MARK: - Scenarios (#903)
-
-    public func stopScenario(name: String) async throws { try await run { try await self.inner.stopScenario(name: name) } }
-    public func resumeScenario(name: String) async throws { try await run { try await self.inner.resumeScenario(name: name) } }
-    public func deleteScenario(name: String) async throws { try await run { try await self.inner.deleteScenario(name: name) } }
-
     // MARK: - Messaging (gr msg)
 
     public func sendMessage(toSessionID sessionID: String, body: String) async throws -> ConversationMessage {
@@ -207,46 +193,6 @@ public actor RealHostClient: GraithHostClient {
 
     public func ackInbox(sessionID: String) async throws {
         try await run { try await self.inner.ackInbox(sessionID: sessionID) }
-    }
-
-    // MARK: - Approvals (event connection)
-
-    /// Bridge the shared `subscribeApprovals()` (async/throws) into the boundary's
-    /// synchronous stream: a producer task establishes the subscription and
-    /// forwards each pending set.
-    ///
-    /// Contract: **a finished stream means the subscription has ended**, never
-    /// "no approvals". Because the boundary stream is non-throwing, a failure to
-    /// establish the subscription — or a dropped event connection — is signalled
-    /// by finishing the stream promptly, so a consumer's `for await` always
-    /// completes instead of hanging. When the consumer stops iterating, the
-    /// producer task is cancelled, which tears down the shared subscription and
-    /// its connection.
-    public func approvalStream() -> AsyncStream<[ApprovalInfo]> {
-        AsyncStream { continuation in
-            let task = Task {
-                do {
-                    let shared = try await inner.subscribeApprovals()
-                    for await pending in shared {
-                        continuation.yield(pending)
-                    }
-                } catch {
-                    // Failed to establish the subscription — fall through to
-                    // finish() so the caller's `for await` loop completes rather
-                    // than waiting on a subscription that will never arrive.
-                }
-                continuation.finish()
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
-    }
-
-    public func respondApproval(requestID: String, decision: ApprovalDecision, reason: String?) async throws {
-        do {
-            try await inner.respondApproval(requestID: requestID, decision: decision.rawValue, reason: reason)
-        } catch {
-            throw RealClientError.map(error)
-        }
     }
 
     // MARK: - Attach
