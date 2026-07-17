@@ -156,9 +156,41 @@ func execUpgrade(successMsg string) error {
 		return err
 	}
 
-	_, _ = c.ReadControlResponse()
+	// Capture the daemon's pre-upgrade instance ID from its handshake_ok so
+	// readiness below can prove the NEW generation is serving rather than the
+	// inherited listener (issue #1319). This capture MUST succeed: if the read
+	// fails, the reply isn't handshake_ok, or it doesn't decode, we cannot
+	// establish the pre-upgrade generation — and a silently-empty priorInstanceID
+	// would let the unchanged old daemon (any non-empty instance ID) satisfy the
+	// "id != prior" readiness check and be falsely accepted as the replacement.
+	// Fail the exchange instead. A successfully decoded (possibly legacy)
+	// handshake_ok with a genuinely absent instance ID may keep "" for backward
+	// compatibility.
+	hsResp, err := c.ReadControlResponse()
+	if err != nil {
+		c.Close()
+		return fmt.Errorf("read daemon handshake before upgrade: %w", err)
+	}
 
-	_ = c.SendControl("upgrade", upgradeMsg())
+	if hsResp.Type != "handshake_ok" {
+		c.Close()
+		return fmt.Errorf("unexpected pre-upgrade handshake response %q", hsResp.Type)
+	}
+
+	var hsOk protocol.HandshakeOkMsg
+	if err := protocol.DecodePayload(hsResp, &hsOk); err != nil {
+		c.Close()
+		return fmt.Errorf("decode daemon handshake before upgrade: %w", err)
+	}
+
+	priorInstanceID := hsOk.DaemonInstanceID
+
+	// Propagate a send failure rather than waiting for the readiness of an upgrade
+	// that was never requested.
+	if err := c.SendControl("upgrade", upgradeMsg()); err != nil {
+		c.Close()
+		return fmt.Errorf("send upgrade request: %w", err)
+	}
 
 	resp, err := c.ReadControlResponse()
 	c.Close()
@@ -175,22 +207,25 @@ func execUpgrade(successMsg string) error {
 		return fmt.Errorf("%s", e.Message)
 	}
 
-	// Wait for the replacement daemon to report our version. exec preserves the
-	// inherited listening socket, so a bare dial can't distinguish the old daemon
-	// from the new one — the version probe is the real readiness signal. Bound
+	// Wait for the NEW daemon generation to report our version AND a different
+	// boot instance ID. exec preserves the inherited listening socket and a
+	// same-version rebuild keeps the version string, so neither a bare dial nor a
+	// version match distinguishes the old daemon from the new one — only a
+	// changed instance ID proves the replacement is serving (issue #1319). Bound
 	// the wait by the effective [connection] start policy (start_timeout /
-	// start_poll_interval) instead of a fixed 20×250ms retry count (issue #1319).
-	// The probe's own dial and handshake deadlines stay distinct from this budget.
-	if v, ready := waitForLocalDaemonVersion(version.Version); !ready {
+	// start_poll_interval) instead of a fixed 20×250ms retry count. The probe's
+	// own dial and handshake deadlines stay distinct from this budget.
+	if v, ready := waitForNewLocalDaemonGeneration(version.Version, priorInstanceID); !ready {
 		// Old daemons that don't understand ExecPath exec back into the old binary;
-		// report that concrete mismatch. An empty probe means the replacement never
-		// became reachable within the budget — a failure, not a silent success, so
-		// the caller falls back to a clean restart.
-		if v != "" {
+		// report that concrete mismatch. Otherwise the replacement never presented a
+		// new generation within the budget (an inherited/old listener kept answering,
+		// or it never became reachable) — a failure, not a silent success, so the
+		// caller falls back to a clean restart.
+		if v != "" && v != version.Version {
 			return fmt.Errorf("daemon exec'd into %s instead of %s", v, version.Version)
 		}
 
-		return fmt.Errorf("daemon did not report version %s within the start budget", version.Version)
+		return fmt.Errorf("daemon did not present a new %s generation within the start budget", version.Version)
 	}
 
 	out.Printf("%s\n", successMsg)
@@ -198,10 +233,10 @@ func execUpgrade(successMsg string) error {
 	return nil
 }
 
-func probeDaemonVersion() string {
+func probeDaemonIdentity() (daemonVersion, instanceID string) {
 	conn, err := dialLocalDaemonSocket()
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -220,17 +255,17 @@ func probeDaemonVersion() string {
 
 	frame, err := reader.ReadFrame()
 	if err != nil || frame.Channel != protocol.ChannelControl {
-		return ""
+		return "", ""
 	}
 
 	env, _ := protocol.DecodeControl(frame.Payload)
 
 	var hsOk protocol.HandshakeOkMsg
 	if err := protocol.DecodePayload(env, &hsOk); err != nil {
-		return ""
+		return "", ""
 	}
 
-	return hsOk.DaemonVersion
+	return hsOk.DaemonVersion, hsOk.DaemonInstanceID
 }
 
 func restartClean() error {

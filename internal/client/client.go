@@ -112,16 +112,18 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 		if hsOk.DaemonVersion != "" && hsOk.DaemonVersion != version.Version && version.IsNewer(version.Version, hsOk.DaemonVersion) {
 			fmt.Fprintf(os.Stderr, "Daemon version mismatch (daemon=%s, cli=%s), upgrading daemon...\n", hsOk.DaemonVersion, version.Version)
 
+			// Capture the daemon's pre-upgrade instance ID so readiness can prove
+			// the NEW generation is serving, not the inherited listener (#1319).
+			priorInstanceID := hsOk.DaemonInstanceID
+
 			if requestUpgrade(c) {
 				c.Close()
 
-				if waitForDaemon(paths.SocketPath) {
-					if v := probeDaemonVersion(paths.SocketPath, paths); v == version.Version {
-						return connect(cfg, paths, configFile, false)
-					}
-
-					fmt.Fprintf(os.Stderr, "Exec upgrade did not produce correct version, falling back to clean restart...\n")
+				if waitForNewDaemonGeneration(paths.SocketPath, paths, version.Version, priorInstanceID) {
+					return connect(cfg, paths, configFile, false)
 				}
+
+				fmt.Fprintf(os.Stderr, "Exec upgrade did not produce a new daemon generation, falling back to clean restart...\n")
 			} else {
 				c.Close()
 			}
@@ -142,10 +144,13 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 	return c, nil
 }
 
-func probeDaemonVersion(sockPath string, paths config.Paths) string {
-	conn, err := net.DialTimeout("unix", sockPath, daemonDialTimeout)
+// probeDaemonIdentity handshakes the daemon at sockPath and returns its reported
+// version and per-process instance ID. Empty strings mean the daemon was
+// unreachable, didn't reply, or (for the instance ID) predates that field.
+func probeDaemonIdentity(sockPath string, paths config.Paths) (daemonVersion, instanceID string) {
+	conn, err := dialLocalDaemon("unix", sockPath, daemonDialTimeout)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -172,17 +177,32 @@ func probeDaemonVersion(sockPath string, paths config.Paths) string {
 
 	frame, err := reader.ReadFrame()
 	if err != nil || frame.Channel != protocol.ChannelControl {
-		return ""
+		return "", ""
 	}
 
 	env, _ := protocol.DecodeControl(frame.Payload)
 
 	var hsOk protocol.HandshakeOkMsg
 	if err := protocol.DecodePayload(env, &hsOk); err != nil {
-		return ""
+		return "", ""
 	}
 
-	return hsOk.DaemonVersion
+	return hsOk.DaemonVersion, hsOk.DaemonInstanceID
+}
+
+// waitForNewDaemonGeneration polls until the daemon reports the wanted version
+// AND a boot instance ID different from priorInstanceID (the one observed before
+// the upgrade was requested). An exec upgrade preserves the inherited listening
+// socket and can keep the same version string (a same-version rebuild), so a
+// bare dial — or even a version match — cannot distinguish the old daemon from
+// the new one; only a changed instance ID proves the replacement generation is
+// actually serving (issue #1319). Bounded by the effective start policy.
+func waitForNewDaemonGeneration(sockPath string, paths config.Paths, wantVersion, priorInstanceID string) bool {
+	return pollDaemonReady(func() bool {
+		v, id := probeDaemonIdentity(sockPath, paths)
+
+		return v == wantVersion && id != "" && id != priorInstanceID
+	})
 }
 
 func requestUpgrade(c *Client) bool {
@@ -232,23 +252,6 @@ func pollDaemonReady(ready func() bool) bool {
 
 		time.Sleep(sleep)
 	}
-}
-
-// waitForDaemon waits for a daemon to accept a socket dial again after an exec
-// upgrade, bounded by the effective start policy rather than a fixed 20×250ms
-// retry count. The dial keeps its distinct daemonDialTimeout deadline and routes
-// through the dialLocalDaemon seam so tests can observe the wait deterministically.
-func waitForDaemon(sockPath string) bool {
-	return pollDaemonReady(func() bool {
-		conn, err := dialLocalDaemon("unix", sockPath, daemonDialTimeout)
-		if err != nil {
-			return false
-		}
-
-		_ = conn.Close()
-
-		return true
-	})
 }
 
 func stopDaemonByPID(pidFile string) bool {

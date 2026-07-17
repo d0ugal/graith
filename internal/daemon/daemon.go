@@ -58,33 +58,39 @@ type SessionManager struct {
 	// atomically, and so a single session's publish/cleanup can't interleave with
 	// another's on the same artifact (issues #1325, #1328). It is a dedicated lock
 	// held only across cursor-hook file work, never nested under sm.mu.
-	cursorHooksMu      sync.Mutex
-	state              *State
-	sessions           map[string]SessionDriver
-	attachedClients    map[string]*attachedClient
-	hookReports        map[string]hookReport
-	pendingApprovals   map[string]*pendingApproval
-	headlessEscalated  map[string]bool                // session ID → orchestrator already escalated once (headless non-blocking deny)
-	tokenIndex         map[string]string              // token → session ID (reverse lookup)
-	humanToken         string                         // local human credential, loaded at startup
-	saveStateFault     func() error                   // test-only saveState fault injection; nil in production
-	pendingPairings    map[string]*pendingPairing     // requestID → pending device pairing (in-memory; not persisted)
-	pairWaiters        map[string]*pairWaiter         // requestID → waiter for a blocked pair_request connection
-	approvalSubs       map[net.Conn]func(string, any) // conn → sendControl for approval subscribers (no attach)
-	remoteTLSPin       string                         // SPKI pin of the active remote listener's cert; guarded by mu
-	remoteRuntime      *remoteRuntime                 // listener generation owner; mutated under configApplyMu
-	deviceTokenIndex   map[string]string              // client-token HMAC → device ID (reverse lookup)
-	connsByDevice      map[string][]net.Conn          // device ID → live remote connections (for revocation)
-	pairReqTimes       []time.Time                    // recent pair_request timestamps (rate limiting)
-	cfg                *config.Config
-	paths              config.Paths
-	log                *slog.Logger
-	configFile         string
-	upgradeCh          chan string
-	messages           *MsgStore
-	todos              *TodoStore
-	mcpManager         *MCPManager
-	startedAt          time.Time
+	cursorHooksMu     sync.Mutex
+	state             *State
+	sessions          map[string]SessionDriver
+	attachedClients   map[string]*attachedClient
+	hookReports       map[string]hookReport
+	pendingApprovals  map[string]*pendingApproval
+	headlessEscalated map[string]bool                // session ID → orchestrator already escalated once (headless non-blocking deny)
+	tokenIndex        map[string]string              // token → session ID (reverse lookup)
+	humanToken        string                         // local human credential, loaded at startup
+	saveStateFault    func() error                   // test-only saveState fault injection; nil in production
+	pendingPairings   map[string]*pendingPairing     // requestID → pending device pairing (in-memory; not persisted)
+	pairWaiters       map[string]*pairWaiter         // requestID → waiter for a blocked pair_request connection
+	approvalSubs      map[net.Conn]func(string, any) // conn → sendControl for approval subscribers (no attach)
+	remoteTLSPin      string                         // SPKI pin of the active remote listener's cert; guarded by mu
+	remoteRuntime     *remoteRuntime                 // listener generation owner; mutated under configApplyMu
+	deviceTokenIndex  map[string]string              // client-token HMAC → device ID (reverse lookup)
+	connsByDevice     map[string][]net.Conn          // device ID → live remote connections (for revocation)
+	pairReqTimes      []time.Time                    // recent pair_request timestamps (rate limiting)
+	cfg               *config.Config
+	paths             config.Paths
+	log               *slog.Logger
+	configFile        string
+	upgradeCh         chan string
+	messages          *MsgStore
+	todos             *TodoStore
+	mcpManager        *MCPManager
+	startedAt         time.Time
+	// instanceID is a nonce generated once per daemon process start (including
+	// after an exec upgrade, which re-runs main and constructs a fresh
+	// SessionManager). It is returned in handshake_ok/auth_ok so an upgrade
+	// readiness wait can prove the new daemon generation is serving rather than
+	// the inherited listener (issue #1319).
+	instanceID         string
 	orchestratorExitCh chan string
 	orchestratorKickCh chan struct{}
 	recentExits        []time.Time
@@ -193,6 +199,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		paths:              paths,
 		log:                log,
 		startedAt:          time.Now(),
+		instanceID:         newDaemonInstanceID(),
 	}
 	sm.pushDispatch = sm.newPushDispatch()
 
@@ -203,6 +210,23 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 	transcript.Configure(cfg.Transcript.MaxLineBytesOrDefault(), cfg.Transcript.MaxMetadataLineBytesOrDefault())
 
 	return sm
+}
+
+// newDaemonInstanceID returns a fresh per-process nonce. On the (near-impossible)
+// event that the CSPRNG read fails it falls back to a start-time+PID string,
+// which is still distinct across an exec upgrade — the property #1319 needs — so
+// the readiness signal degrades rather than becoming empty.
+func newDaemonInstanceID() string {
+	if id, err := randomHex(16); err == nil {
+		return id
+	}
+
+	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), os.Getpid())
+}
+
+// InstanceID returns this daemon process's boot nonce (see the instanceID field).
+func (sm *SessionManager) InstanceID() string {
+	return sm.instanceID
 }
 
 // Config returns a snapshot of the current config pointer, safe for use

@@ -100,14 +100,15 @@ func TestDaemonVersionProbeUsesConfiguredConnectionPolicy(t *testing.T) {
 		}
 
 		data, _ := protocol.EncodeControl("handshake_ok", protocol.HandshakeOkMsg{
-			Version:       protocol.Version,
-			DaemonVersion: "1.2.3-braw",
+			Version:          protocol.Version,
+			DaemonVersion:    "1.2.3-braw",
+			DaemonInstanceID: "inst-braw",
 		})
 		_ = writer.WriteFrame(protocol.ChannelControl, data)
 	}()
 
-	if got := probeDaemonVersion(); got != "1.2.3-braw" {
-		t.Fatalf("probeDaemonVersion() = %q, want 1.2.3-braw", got)
+	if got, id := probeDaemonIdentity(); got != "1.2.3-braw" || id != "inst-braw" {
+		t.Fatalf("probeDaemonIdentity() = (%q, %q), want (1.2.3-braw, inst-braw)", got, id)
 	}
 
 	if captured != 1357*time.Millisecond {

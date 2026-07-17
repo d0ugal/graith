@@ -24,11 +24,11 @@ func preserveLifecyclePolicy(t *testing.T) {
 	t.Helper()
 
 	oldCfg := cfg
-	oldNow, oldSleep, oldProbe := connectionNow, connectionSleep, probeDaemonVersionFn
+	oldNow, oldSleep, oldProbe := connectionNow, connectionSleep, probeDaemonIdentityFn
 
 	t.Cleanup(func() {
 		cfg = oldCfg
-		connectionNow, connectionSleep, probeDaemonVersionFn = oldNow, oldSleep, oldProbe
+		connectionNow, connectionSleep, probeDaemonIdentityFn = oldNow, oldSleep, oldProbe
 	})
 }
 
@@ -99,9 +99,11 @@ func TestPollLocalDaemonTimesOutOnConfiguredBudget(t *testing.T) {
 	}
 }
 
-// TestWaitForLocalDaemonVersionReportsReady proves the post-exec version wait
-// returns once the replacement daemon reports the wanted version.
-func TestWaitForLocalDaemonVersionReportsReady(t *testing.T) {
+// TestWaitForNewLocalDaemonGenerationReportsReady proves the post-exec wait
+// returns once the replacement daemon reports the wanted version AND a fresh
+// instance ID — the inherited old-generation probes (same instance ID) in
+// between do not satisfy it (issue #1319).
+func TestWaitForNewLocalDaemonGenerationReportsReady(t *testing.T) {
 	preserveLifecyclePolicy(t)
 	installFakeClock(t)
 
@@ -110,30 +112,36 @@ func TestWaitForLocalDaemonVersionReportsReady(t *testing.T) {
 		StartPollInterval: "10ms",
 	}}
 
-	responses := []string{"", "0.68.0-old", "0.69.1-new"}
-	probeDaemonVersionFn = func() string {
-		v := responses[0]
+	type probe struct{ v, id string }
+
+	responses := []probe{
+		{"", ""},                  // not reachable yet
+		{"0.69.1-new", "old-gen"}, // inherited listener: right version, OLD instance
+		{"0.69.1-new", "new-gen"}, // exec'd replacement: fresh instance
+	}
+	probeDaemonIdentityFn = func() (string, string) {
+		p := responses[0]
 		if len(responses) > 1 {
 			responses = responses[1:]
 		}
 
-		return v
+		return p.v, p.id
 	}
 
-	got, ready := waitForLocalDaemonVersion("0.69.1-new")
+	got, ready := waitForNewLocalDaemonGeneration("0.69.1-new", "old-gen")
 	if !ready {
-		t.Fatal("waitForLocalDaemonVersion should report ready once the wanted version appears")
+		t.Fatal("should report ready once a fresh instance ID with the wanted version appears")
 	}
 
 	if got != "0.69.1-new" {
-		t.Fatalf("waitForLocalDaemonVersion = %q, want 0.69.1-new", got)
+		t.Fatalf("last version = %q, want 0.69.1-new", got)
 	}
 }
 
-// TestWaitForLocalDaemonVersionReturnsLastOnTimeout proves that when the daemon
-// exec's into the wrong (old) version, the wait returns that last-observed value
-// so execUpgrade can report the mismatch instead of silently succeeding.
-func TestWaitForLocalDaemonVersionReturnsLastOnTimeout(t *testing.T) {
+// TestWaitForNewLocalDaemonGenerationRejectsInheritedListener is the core #1319
+// regression: an inherited listener answering with the RIGHT version but the
+// SAME (pre-upgrade) instance ID must never be reported ready.
+func TestWaitForNewLocalDaemonGenerationRejectsInheritedListener(t *testing.T) {
 	preserveLifecyclePolicy(t)
 	installFakeClock(t)
 
@@ -142,22 +150,47 @@ func TestWaitForLocalDaemonVersionReturnsLastOnTimeout(t *testing.T) {
 		StartPollInterval: "10ms",
 	}}
 
-	probeDaemonVersionFn = func() string { return "0.68.0-old" }
+	// Right version, unchanged instance ID: the old daemon on the inherited socket.
+	probeDaemonIdentityFn = func() (string, string) { return "0.69.1-new", "old-gen" }
 
-	got, ready := waitForLocalDaemonVersion("0.69.1-new")
+	got, ready := waitForNewLocalDaemonGeneration("0.69.1-new", "old-gen")
 	if ready {
-		t.Fatal("waitForLocalDaemonVersion should not report ready when the wanted version never appears")
+		t.Fatal("an inherited listener with an unchanged instance ID must not be reported ready")
 	}
 
-	if got != "0.68.0-old" {
-		t.Fatalf("waitForLocalDaemonVersion = %q, want the last-observed 0.68.0-old", got)
+	if got != "0.69.1-new" {
+		t.Fatalf("last version = %q, want the last-observed 0.69.1-new", got)
 	}
 }
 
-// TestWaitForLocalDaemonVersionTimesOutWhenUnreachable proves an empty probe
-// (replacement never becomes reachable) is reported as not-ready so execUpgrade
-// fails instead of silently printing success (#1319 review).
-func TestWaitForLocalDaemonVersionTimesOutWhenUnreachable(t *testing.T) {
+// TestWaitForNewLocalDaemonGenerationReturnsLastOnWrongVersion proves that when
+// the daemon exec's into the wrong (old) version, the wait returns that
+// last-observed value so execUpgrade can report the mismatch.
+func TestWaitForNewLocalDaemonGenerationReturnsLastOnWrongVersion(t *testing.T) {
+	preserveLifecyclePolicy(t)
+	installFakeClock(t)
+
+	cfg = &config.Config{Connection: config.ConnectionConfig{
+		StartTimeout:      "50ms",
+		StartPollInterval: "10ms",
+	}}
+
+	// A fresh instance but the wrong version (exec'd back into the old binary).
+	probeDaemonIdentityFn = func() (string, string) { return "0.68.0-old", "new-gen" }
+
+	got, ready := waitForNewLocalDaemonGeneration("0.69.1-new", "old-gen")
+	if ready {
+		t.Fatal("a wrong-version replacement must not be reported as ready")
+	}
+
+	if got != "0.68.0-old" {
+		t.Fatalf("last version = %q, want the last-observed 0.68.0-old", got)
+	}
+}
+
+// TestWaitForNewLocalDaemonGenerationTimesOutWhenUnreachable proves an empty
+// probe (replacement never becomes reachable) is reported as not-ready.
+func TestWaitForNewLocalDaemonGenerationTimesOutWhenUnreachable(t *testing.T) {
 	preserveLifecyclePolicy(t)
 	installFakeClock(t)
 
@@ -166,15 +199,15 @@ func TestWaitForLocalDaemonVersionTimesOutWhenUnreachable(t *testing.T) {
 		StartPollInterval: "10ms",
 	}}
 
-	probeDaemonVersionFn = func() string { return "" }
+	probeDaemonIdentityFn = func() (string, string) { return "", "" }
 
-	got, ready := waitForLocalDaemonVersion("0.69.1-new")
+	got, ready := waitForNewLocalDaemonGeneration("0.69.1-new", "old-gen")
 	if ready {
 		t.Fatal("an unreachable replacement must not be reported as ready")
 	}
 
 	if got != "" {
-		t.Fatalf("waitForLocalDaemonVersion = %q, want empty on an unreachable daemon", got)
+		t.Fatalf("last version = %q, want empty on an unreachable daemon", got)
 	}
 }
 

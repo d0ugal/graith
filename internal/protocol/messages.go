@@ -504,6 +504,14 @@ type StatusReportMsg struct {
 type HandshakeOkMsg struct {
 	Version       string `json:"version"`
 	DaemonVersion string `json:"daemon_version"`
+	// DaemonInstanceID is a nonce the daemon generates once per process start,
+	// including after an exec upgrade (which re-runs main). An upgrade readiness
+	// wait uses it to prove the NEW daemon generation is serving: an inherited
+	// listening socket, or a same-version restart, keeps answering with the
+	// pre-upgrade instance ID until the replacement process is actually up, so
+	// readiness must require a *different* instance ID rather than merely a
+	// reachable listener (issue #1319). Omitted by older daemons.
+	DaemonInstanceID string `json:"daemon_instance_id,omitempty"`
 }
 
 type HandshakeErrMsg struct {

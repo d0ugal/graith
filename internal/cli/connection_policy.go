@@ -18,9 +18,9 @@ var connectionNow = time.Now
 // advance a fake clock instead of sleeping real time.
 var connectionSleep = time.Sleep
 
-// probeDaemonVersionFn is a seam so waitForLocalDaemonVersion can be tested
-// without a live daemon socket.
-var probeDaemonVersionFn = probeDaemonVersion
+// probeDaemonIdentityFn is a seam so waitForNewLocalDaemonGeneration can be
+// tested without a live daemon socket.
+var probeDaemonIdentityFn = probeDaemonIdentity
 
 func localDaemonDialTimeout() time.Duration {
 	if cfg == nil {
@@ -98,20 +98,27 @@ func pollLocalDaemon(ready func() bool) bool {
 	}
 }
 
-// waitForLocalDaemonVersion polls the version probe until the daemon reports the
-// wanted version or the start budget elapses. It returns the last value observed
-// and whether the wanted version was reached. Because an exec upgrade preserves
-// the inherited listening socket, a bare dial cannot distinguish the old daemon
-// from the new one — the version probe is the real readiness signal. A ready=false
-// result means the replacement never reported the wanted version within the
-// budget: either it exec'd into a different (last != "") version, or it never
-// became probeable at all (last == ""). Both are upgrade failures, not success.
-func waitForLocalDaemonVersion(want string) (last string, ready bool) {
+// waitForNewLocalDaemonGeneration polls the daemon identity probe until the
+// daemon reports the wanted version AND a boot instance ID different from
+// priorInstanceID (the one captured before the upgrade was requested), or the
+// start budget elapses. It returns the last version observed and whether the new
+// generation was reached.
+//
+// An exec upgrade preserves the inherited listening socket and can keep the same
+// version string (a same-version rebuild), so neither a bare dial nor a version
+// match distinguishes the old daemon from the new one — only a CHANGED instance
+// ID proves the replacement generation is actually serving (issue #1319). A
+// ready=false result means the new generation never appeared within the budget:
+// it exec'd into a different (lastVersion != want) version, kept answering with
+// the pre-upgrade instance ID (an inherited/old listener), or never became
+// probeable at all. All are upgrade failures, not success.
+func waitForNewLocalDaemonGeneration(wantVersion, priorInstanceID string) (lastVersion string, ready bool) {
 	ready = pollLocalDaemon(func() bool {
-		last = probeDaemonVersionFn()
+		v, id := probeDaemonIdentityFn()
+		lastVersion = v
 
-		return last == want
+		return v == wantVersion && id != "" && id != priorInstanceID
 	})
 
-	return last, ready
+	return lastVersion, ready
 }
