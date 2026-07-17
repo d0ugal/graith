@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -860,8 +861,11 @@ var orchestratorDefaultSchedule = []time.Duration{
 }
 
 // parsedSchedule parses the explicit Schedule entries, dropping any that fail to
-// parse or are negative. It returns nil when Schedule is empty or nothing valid
-// survives, signalling geometric mode to callers.
+// parse or are non-positive. Validate rejects those values on load/reload;
+// filtering here is the defensive fallback for directly-constructed configs so a
+// restart can never be scheduled without a positive delay. It returns nil when
+// Schedule is empty or nothing valid survives, signalling geometric mode to
+// callers.
 func (r OrchestratorRestartConfig) parsedSchedule() []time.Duration {
 	if len(r.Schedule) == 0 {
 		return nil
@@ -871,7 +875,7 @@ func (r OrchestratorRestartConfig) parsedSchedule() []time.Duration {
 
 	for _, s := range r.Schedule {
 		d, err := ParseDurationWithDays(s)
-		if err != nil || d < 0 {
+		if err != nil || d <= 0 {
 			continue
 		}
 
@@ -913,11 +917,16 @@ func (r OrchestratorRestartConfig) DelayForLevel(level int) time.Duration {
 		return orchestratorDefaultSchedule[idx]
 	}
 
-	initial := durationOrDefault(r.InitialBackoff, OrchestratorInitialBackoffDefault)
-	maxDelay := durationOrDefault(r.MaxBackoff, OrchestratorMaxBackoffDefault)
+	initial := positiveDurationOrDefault(r.InitialBackoff, OrchestratorInitialBackoffDefault)
+	maxDelay := positiveDurationOrDefault(r.MaxBackoff, OrchestratorMaxBackoffDefault)
 
+	// A finite value <= 1 falls back to the default; so does any non-finite
+	// value (NaN/±Inf), which Validate rejects at load but which a directly
+	// constructed config could still carry. Keeping the loop below on a finite
+	// multiplier > 1 keeps the delay positive, monotonic, and capped rather than
+	// collapsing through time.Duration(NaN) into the supervisor floor (#1303).
 	mult := r.Multiplier
-	if mult <= 1 {
+	if math.IsNaN(mult) || math.IsInf(mult, 0) || mult <= 1 {
 		mult = OrchestratorMultiplierDefault
 	}
 
@@ -929,7 +938,7 @@ func (r OrchestratorRestartConfig) DelayForLevel(level int) time.Duration {
 		}
 	}
 
-	if d := time.Duration(delay); d < maxDelay {
+	if d := time.Duration(delay); d > 0 && d < maxDelay {
 		return d
 	}
 
@@ -937,9 +946,10 @@ func (r OrchestratorRestartConfig) DelayForLevel(level int) time.Duration {
 }
 
 // StableResetDuration is how long a run must last before its exit resets the
-// backoff level. Empty or unparseable uses OrchestratorStableResetDefault.
+// backoff level. Empty, unparseable, or non-positive uses
+// OrchestratorStableResetDefault.
 func (r OrchestratorRestartConfig) StableResetDuration() time.Duration {
-	return durationOrDefault(r.StableReset, OrchestratorStableResetDefault)
+	return positiveDurationOrDefault(r.StableReset, OrchestratorStableResetDefault)
 }
 
 // FreshStartThresholdOrDefault returns the consecutive-restart count that
@@ -4183,27 +4193,82 @@ func (c *Config) Validate() error {
 		))
 	}
 
-	// [orchestrator.restart]: a non-empty but unparseable duration must fail
-	// loudly rather than silently falling back to the accessor default (mirrors
-	// delete.retention). Schedule entries are validated too; a bad entry is
-	// otherwise silently skipped by parsedSchedule.
+	// [orchestrator.restart]: every configured duration must be a positive value
+	// so a crash-looping orchestrator can never be rescheduled with a zero or
+	// negative delay (a restart storm) or kept at the shortest retry by a
+	// non-positive stable_reset (#1303). A non-empty but unparseable duration
+	// still fails loudly rather than silently falling back to the accessor
+	// default (mirrors delete.retention). Accessors retain positive fallbacks for
+	// directly-constructed configs.
 	rc := c.Orchestrator.Restart
 	for _, f := range []struct{ name, val string }{
 		{"orchestrator.restart.initial_backoff", rc.InitialBackoff},
 		{"orchestrator.restart.max_backoff", rc.MaxBackoff},
 		{"orchestrator.restart.stable_reset", rc.StableReset},
 	} {
-		if strings.TrimSpace(f.val) != "" {
-			if _, err := ParseDurationWithDays(f.val); err != nil {
-				errs = append(errs, fmt.Errorf("%s %q: %w", f.name, f.val, err))
-			}
+		validatePositiveDurationField(&errs, f.name, f.val)
+	}
+
+	// The geometric multiplier must be a finite number. A NaN slips past the
+	// DelayForLevel guards (every NaN comparison is false), so the delay never
+	// caps and time.Duration(NaN) collapses the retry to the supervisor safety
+	// floor rather than the configured backoff; ±Inf is equally meaningless. A
+	// finite value <= 1 remains legal — it documents fall-back to the default
+	// multiplier (#1303).
+	if math.IsNaN(rc.Multiplier) || math.IsInf(rc.Multiplier, 0) {
+		errs = append(errs, fmt.Errorf("orchestrator.restart.multiplier %v: must be a finite number", rc.Multiplier))
+	}
+
+	// The initial delay cannot exceed its cap, or backoff would start above the
+	// maximum and every attempt would clamp to it. This only matters in geometric
+	// mode (no valid schedule), where the two knobs are actually consumed — an
+	// explicit schedule makes them inert, so a contradiction there is harmless and
+	// must not error. Compare the *effective* values (each explicit value or its
+	// default) so a single explicit key can't silently contradict the other's
+	// default and get clamped at runtime — e.g. initial_backoff="10m" with an
+	// omitted max (default 300s), or an omitted initial (default 2s) with
+	// max_backoff="1s". Skip a field already flagged unparseable or non-positive
+	// above so its own error stands without a duplicate contradiction error.
+	initialSet := strings.TrimSpace(rc.InitialBackoff) != ""
+	maxSet := strings.TrimSpace(rc.MaxBackoff) != ""
+	initialDur, initialErr := ParseDurationWithDays(rc.InitialBackoff)
+	maxDur, maxErr := ParseDurationWithDays(rc.MaxBackoff)
+	initialValid := !initialSet || (initialErr == nil && initialDur > 0)
+	maxValid := !maxSet || (maxErr == nil && maxDur > 0)
+
+	if initialValid && maxValid && rc.parsedSchedule() == nil {
+		effInitial := positiveDurationOrDefault(rc.InitialBackoff, OrchestratorInitialBackoffDefault)
+		effMax := positiveDurationOrDefault(rc.MaxBackoff, OrchestratorMaxBackoffDefault)
+
+		if effInitial > effMax {
+			errs = append(errs, fmt.Errorf("orchestrator.restart.initial_backoff effective delay %s must not exceed max_backoff %s (in geometric mode)", effInitial, effMax))
 		}
 	}
 
+	// Explicit schedule entries must each be positive and nondecreasing so a
+	// later crash never reduces the restart floor below an earlier attempt.
+	var previous time.Duration
+
+	havePrevious := false
+
 	for i, s := range rc.Schedule {
-		if _, err := ParseDurationWithDays(s); err != nil {
+		d, err := ParseDurationWithDays(s)
+		if err != nil {
 			errs = append(errs, fmt.Errorf("orchestrator.restart.schedule[%d] %q: %w", i, s, err))
+			continue
 		}
+
+		if d <= 0 {
+			errs = append(errs, fmt.Errorf("orchestrator.restart.schedule[%d] %q: must be greater than zero", i, s))
+			continue
+		}
+
+		if havePrevious && d < previous {
+			errs = append(errs, fmt.Errorf("orchestrator.restart.schedule[%d] %q: must not be less than the previous delay %s", i, s, previous))
+		}
+
+		previous = d
+		havePrevious = true
 	}
 
 	// [updates]: a non-empty but unparseable interval/timeout must fail loudly

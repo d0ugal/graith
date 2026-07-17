@@ -35,7 +35,7 @@ stable_reset          = "60s"  # a run lasting at least this long resets the bac
 fresh_start_threshold = 3      # after this many consecutive restarts, relaunch the agent fresh (new session id)
 ```
 
-There are two backoff modes. By default an explicit **`schedule`** lists the delay for each attempt, with the final entry repeating for every attempt beyond its length — this preserves graith's historical backoff curve. Setting `schedule = []` switches to **geometric** backoff computed as `initial_backoff × multiplier` each attempt, capped at `max_backoff`. The defaults are chosen so an unconfigured daemon behaves exactly as before.
+There are two backoff modes. By default an explicit **`schedule`** lists the delay for each attempt, with the final entry repeating for every attempt beyond its length — this preserves graith's historical backoff curve. Schedule entries must be positive and nondecreasing. Setting `schedule = []` switches to **geometric** backoff computed as `initial_backoff × multiplier` each attempt, capped at `max_backoff`; `initial_backoff`, `max_backoff`, and `stable_reset` must be positive, and `multiplier` must be a finite number (a value of `1.0` or less falls back to the default of `2.0`). In geometric mode the effective initial delay must not exceed the effective maximum — the check uses each value's default when the key is omitted, so setting only one of the pair cannot silently contradict the other. Invalid or contradictory policies are rejected on load and reload with a field-specific error. The defaults are chosen so an unconfigured daemon behaves exactly as before.
 
 ## Remote access
 
