@@ -26,8 +26,7 @@ func RedactSecrets(cfg *Config) *Config {
 	if len(cfg.MCPServers) > 0 {
 		c.MCPServers = make([]MCPServerConfig, len(cfg.MCPServers))
 		for i, s := range cfg.MCPServers {
-			s.Env = maskValues(s.Env)
-			c.MCPServers[i] = s
+			c.MCPServers[i] = redactMCPServer(s)
 		}
 	}
 
@@ -35,11 +34,27 @@ func RedactSecrets(cfg *Config) *Config {
 		c.Agents = make(map[string]Agent, len(cfg.Agents))
 		for name, a := range cfg.Agents {
 			a.Env = maskValues(a.Env)
+			if len(a.MCPServers) > 0 {
+				a.MCPServers = make(map[string]MCPServerConfig, len(a.MCPServers))
+				for serverName, server := range cfg.Agents[name].MCPServers {
+					a.MCPServers[serverName] = redactMCPServer(server)
+				}
+			}
+
 			c.Agents[name] = a
 		}
 	}
 
 	return &c
+}
+
+// redactMCPServer returns a shallow copy of server with a separately allocated,
+// masked env map. It is shared by global servers and per-agent overrides so
+// every MCP config shape follows the same redaction boundary.
+func redactMCPServer(server MCPServerConfig) MCPServerConfig {
+	server.Env = maskValues(server.Env)
+
+	return server
 }
 
 // maskValues returns a new map with every value replaced by RedactedMask,
