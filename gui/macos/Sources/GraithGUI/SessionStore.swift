@@ -31,6 +31,7 @@ enum GraithLocalSocket {
         let profileError: String?
         let configPath: String
         let socketPath: String
+        let humanTokenPath: String
         let source: ResolutionSource
     }
 
@@ -74,16 +75,6 @@ enum GraithLocalSocket {
             configPath = automaticConfigPath
         }
 
-        if let explicit = nonEmpty(socketPathOverride) {
-            return Resolution(
-                profile: profile,
-                profileError: profileError,
-                configPath: configPath,
-                socketPath: expandPath(explicit, home: home),
-                source: .override
-            )
-        }
-
         // adrg/xdg's Darwin defaults use Application Support for *both* data
         // and runtime roots. Port Paths.WithDataDir's relative rebasing rule
         // literally rather than guessing based on whether a socket exists.
@@ -94,13 +85,29 @@ enum GraithLocalSocket {
         let runtimeRoot = absoluteEnvironmentPath("XDG_RUNTIME_DIR", in: environment, home: home)
             ?? applicationSupport
         let oldDataDir = URL(fileURLWithPath: dataRoot).appendingPathComponent(appName).path
+        let configuredDataDir = configuredDataDir(at: configPath, home: home)
+        let dataDir = configuredDataDir ?? oldDataDir
+        let humanTokenPath = URL(fileURLWithPath: dataDir)
+            .appendingPathComponent("human.token").path
+
+        if let explicit = nonEmpty(socketPathOverride) {
+            return Resolution(
+                profile: profile,
+                profileError: profileError,
+                configPath: configPath,
+                socketPath: expandPath(explicit, home: home),
+                humanTokenPath: humanTokenPath,
+                source: .override
+            )
+        }
+
         var runtimeDir = URL(fileURLWithPath: runtimeRoot).appendingPathComponent(appName).path
         var source: ResolutionSource = absoluteEnvironmentPath(
             "XDG_RUNTIME_DIR", in: environment, home: home
         ) == nil
             ? .default : .environment
 
-        if let configured = configuredDataDir(at: configPath, home: home) {
+        if let configured = configuredDataDir {
             if let suffix = relativeSuffix(of: runtimeDir, under: oldDataDir) {
                 runtimeDir = suffix.isEmpty
                     ? configured
@@ -114,27 +121,44 @@ enum GraithLocalSocket {
             profileError: profileError,
             configPath: configPath,
             socketPath: URL(fileURLWithPath: runtimeDir).appendingPathComponent("graith.sock").path,
+            humanTokenPath: humanTokenPath,
             source: source
         )
     }
 
-    static func defaultPath() -> String {
-        let defaults = UserDefaults.standard
-        return resolve(
+    /// Read the daemon-written local-human credential, mirroring the CLI's
+    /// `resolveClientToken` fallback outside a graith session. The macOS app
+    /// deliberately ignores `GRAITH_TOKEN`: if it was launched from an agent
+    /// shell, that session credential must not narrow the desktop UI to the
+    /// agent's identity.
+    static func readHumanToken(at path: String) -> String? {
+        guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else {
+            return nil
+        }
+        let token = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+        return token.isEmpty ? nil : token
+    }
+
+    static func currentResolution(defaults: UserDefaults = .standard) -> Resolution {
+        resolve(
             profileOverride: defaults.string(forKey: profileOverrideKey),
             configPathOverride: defaults.string(forKey: configPathOverrideKey),
             socketPathOverride: defaults.string(forKey: socketPathOverrideKey)
-        ).socketPath
+        )
+    }
+
+    static func defaultPath() -> String {
+        currentResolution().socketPath
     }
 
     static var profile: String {
-        nonEmpty(UserDefaults.standard.string(forKey: profileOverrideKey))
-            ?? ProcessInfo.processInfo.environment["GRAITH_PROFILE"] ?? ""
+        currentResolution().profile
     }
 
     /// The local daemon host entry for this machine.
     static func localHost() -> Host {
-        Host.local(socketPath: defaultPath(), profile: profile)
+        let current = currentResolution()
+        return Host.local(socketPath: current.socketPath, profile: current.profile)
     }
 
     private static func configuredDataDir(at configPath: String, home: String) -> String? {
@@ -278,12 +302,20 @@ final class SessionStore: FleetModel {
     /// `subscribeApprovals: false` — the macOS `ApprovalMonitor` owns the approval
     /// subscription (over `hostClients`), so the shared per-host connections skip
     /// it to avoid a redundant second event subscription per host.
-    init(registry: HostRegistry, identity: DeviceIdentity?, pairing: PairingCoordinator) {
+    init(
+        registry: HostRegistry,
+        identity: DeviceIdentity?,
+        pairing: PairingCoordinator,
+        localHumanToken: String? = nil
+    ) {
         super.init(
             registry: registry,
             identity: identity,
             reachability: nil,
-            factory: RealHostClientFactory(clientID: "graith-macos"),
+            factory: RealHostClientFactory(
+                clientID: "graith-macos",
+                localHumanToken: localHumanToken
+            ),
             pairing: pairing,
             poll: true,
             subscribeApprovals: false,

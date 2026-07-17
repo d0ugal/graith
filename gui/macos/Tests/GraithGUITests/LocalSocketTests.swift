@@ -11,6 +11,7 @@ final class LocalSocketTests: XCTestCase {
         let resolution = GraithLocalSocket.resolve(environment: ["HOME": hame.path])
 
         XCTAssertEqual(resolution.socketPath, socket.path)
+        XCTAssertEqual(resolution.humanTokenPath, dataDir.appendingPathComponent("human.token").path)
         XCTAssertEqual(resolution.source, .config)
     }
 
@@ -108,16 +109,49 @@ final class LocalSocketTests: XCTestCase {
 
     func testXDGDataHomeAloneDoesNotMoveIndependentDarwinRuntime() throws {
         let hame = try makeHame()
+        let dataHome = hame.appendingPathComponent("loch")
 
         let resolution = GraithLocalSocket.resolve(environment: [
             "HOME": hame.path,
-            "XDG_DATA_HOME": hame.appendingPathComponent("loch").path,
+            "XDG_DATA_HOME": dataHome.path,
         ])
 
         XCTAssertEqual(
             resolution.socketPath,
             hame.appendingPathComponent("Library/Application Support/graith/graith.sock").path
         )
+        XCTAssertEqual(
+            resolution.humanTokenPath,
+            dataHome.appendingPathComponent("graith/human.token").path
+        )
+    }
+
+    func testSocketOverrideDoesNotMoveHumanTokenFromConfiguredDataDir() throws {
+        let hame = try makeHame()
+        let dataDir = hame.appendingPathComponent("bothy", isDirectory: true)
+        try writeConfig("data_dir = \"\(dataDir.path)\"\n", beneath: hame)
+
+        let resolution = GraithLocalSocket.resolve(
+            environment: ["HOME": hame.path],
+            socketPathOverride: "~/wynd/braw.sock"
+        )
+
+        XCTAssertEqual(resolution.socketPath, hame.appendingPathComponent("wynd/braw.sock").path)
+        XCTAssertEqual(resolution.humanTokenPath, dataDir.appendingPathComponent("human.token").path)
+    }
+
+    func testReadHumanTokenTrimsDaemonFileAndRejectsMissingOrEmptyContent() throws {
+        let hame = try makeHame()
+        let tokenPath = hame.appendingPathComponent("human.token")
+        try "  human-canny\n".write(to: tokenPath, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(GraithLocalSocket.readHumanToken(at: tokenPath.path), "human-canny")
+
+        try " \n".write(to: tokenPath, atomically: true, encoding: .utf8)
+        XCTAssertNil(GraithLocalSocket.readHumanToken(at: tokenPath.path))
+        XCTAssertNil(GraithLocalSocket.readHumanToken(
+            at: hame.appendingPathComponent("missing.token").path
+        ))
     }
 
     func testTildeRuntimeEnvironmentPathExpandsLikeXDG() throws {

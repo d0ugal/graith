@@ -239,9 +239,10 @@ public protocol HostClientFactory: Sendable {
     ) -> any GraithHostClient
 
     /// A client for the **local** daemon over its Unix socket. The desktop app
-    /// is the local human: it owns the 0700 socket trust boundary and connects
-    /// tokenless (no PoP), so no credentials/signer are presented. Never used on
-    /// iOS (no local daemon).
+    /// is the local human: it owns the 0700 socket trust boundary and presents
+    /// the daemon-written human token (configured on the concrete factory), but
+    /// no remote pairing credentials or PoP signer. Never used on iOS (no local
+    /// daemon).
     func makeLocalClient(
         transport: GraithTransport,
         profile: String

@@ -30,13 +30,22 @@ struct GraithApp: App {
         // pairing coordinator always has a signer.
         let identity = (try? DeviceIdentity(keychain: secrets))
             ?? (try! DeviceIdentity(keychain: InMemorySecretStore()))
-        let registry = HostRegistry(keychain: secrets, localHost: GraithLocalSocket.localHost())
+        let local = GraithLocalSocket.currentResolution()
+        let registry = HostRegistry(
+            keychain: secrets,
+            localHost: Host.local(socketPath: local.socketPath, profile: local.profile)
+        )
         let pairing = PairingCoordinator(
             pairing: RealPairing(clientID: "graith-macos"),
             identity: identity,
             registry: registry
         )
-        let store = SessionStore(registry: registry, identity: identity, pairing: pairing)
+        let store = SessionStore(
+            registry: registry,
+            identity: identity,
+            pairing: pairing,
+            localHumanToken: GraithLocalSocket.readHumanToken(at: local.humanTokenPath)
+        )
 
         _store = StateObject(wrappedValue: store)
         _registry = StateObject(wrappedValue: registry)

@@ -12,17 +12,20 @@ public enum RealClientError {
             case let .daemon(m):
                 // The daemon has no error codes on the wire, only text. Recognise
                 // the genuine "this device is not paired / not allowed on a remote
-                // link" signals explicitly (an unpaired or revoked device's RPCs
-                // are rejected with these), and preserve every other message.
+                // link" signal explicitly, and preserve every other message.
                 //
                 // Previously any message merely *containing* "pair" collapsed to
                 // .notPaired — which mis-mapped pairing-flow failures (rate limits,
                 // capacity limits, timeouts, "unknown or expired") and dropped
-                // their detail, while missing the real "invalid token" signal that
-                // does not contain "pair".
+                // their detail. "invalid token" is the local daemon's fail-closed
+                // response when the human credential is missing/stale; describing
+                // that as device pairing sends macOS users down the wrong path.
                 let lower = m.lowercased()
-                if lower.contains("invalid token") || lower.contains("not authorized over remote") {
+                if lower.contains("not authorized over remote") {
                     return .notPaired
+                }
+                if lower.contains("invalid token") {
+                    return .authenticationFailed("the local human token was rejected")
                 }
                 return .daemon(m)
             case let .handshakeRejected(m):
