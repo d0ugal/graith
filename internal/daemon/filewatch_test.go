@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -641,6 +642,49 @@ func TestWatchRetryBackoffDefensiveBounds(t *testing.T) {
 				t.Errorf("watchRetryBackoff() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestWatchRetryBackoffSaturatesNearMaxDuration is the #1310 regression: very
+// large but accepted base/max values must saturate at the cap across many
+// attempts rather than overflowing int64 on `d *= 2`, wrapping negative, and
+// returning a past retry time that busy-loops the reconciler.
+func TestWatchRetryBackoffSaturatesNearMaxDuration(t *testing.T) {
+	const maxBackoff = time.Duration(math.MaxInt64)
+
+	// base just over half the cap: the first double would exceed math.MaxInt64
+	// and wrap negative without the saturating guard.
+	base := maxBackoff/2 + time.Hour
+
+	for retry := 1; retry <= 64; retry++ {
+		got := watchRetryBackoff(retry, base, maxBackoff)
+
+		if got <= 0 {
+			t.Fatalf("watchRetryBackoff(%d) = %v; must stay positive (overflow wrapped negative)", retry, got)
+		}
+
+		if got > maxBackoff {
+			t.Fatalf("watchRetryBackoff(%d) = %v; must not exceed cap %v", retry, got, maxBackoff)
+		}
+	}
+
+	// A base at exactly half the cap must still be monotonic and capped.
+	half := maxBackoff / 2
+
+	var prev time.Duration
+
+	for retry := 1; retry <= 8; retry++ {
+		got := watchRetryBackoff(retry, half, maxBackoff)
+
+		if got <= 0 || got > maxBackoff {
+			t.Fatalf("watchRetryBackoff(%d, half) = %v out of (0, cap]", retry, got)
+		}
+
+		if got < prev {
+			t.Fatalf("watchRetryBackoff(%d, half) = %v decreased from %v", retry, got, prev)
+		}
+
+		prev = got
 	}
 }
 

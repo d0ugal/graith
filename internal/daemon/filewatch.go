@@ -36,6 +36,15 @@ func watchRetryBackoff(retry int, base, maxBackoff time.Duration) time.Duration 
 
 	d := base
 	for i := 1; i < retry; i++ {
+		// Saturating double. A very large but accepted base/max (near max Duration)
+		// would otherwise wrap d negative on `d *= 2`, defeating the cap check
+		// below (negative < positive cap) and returning a past nextRetryAt that
+		// busy-loops the reconciler. Bail to the cap before the double can
+		// overflow int64 (#1310).
+		if d > maxBackoff/2 {
+			return maxBackoff
+		}
+
 		d *= 2
 		if d >= maxBackoff {
 			return maxBackoff
