@@ -435,11 +435,12 @@ func TestInjectCursorHooksTargetPublishFailurePreserves(t *testing.T) {
 	assertReinjectFailurePreserves(t, "hooks.json")
 }
 
-// TestInjectCursorHooksPostRenameErrorKeepsNewMarker covers the atomicfile.Write
-// ambiguity: the writer can succeed at renaming the new bytes into place and then
-// return an error (e.g. a directory fsync failure). In that case the target holds
-// the NEW bytes, so the marker must stay on the NEW hash — never rolled back to
-// the old one, which would mismatch the published target (issue #1236).
+// TestInjectCursorHooksPostRenameErrorKeepsNewMarker covers the post-placement
+// durability ambiguity: publishCursorHooks links the new bytes into place and
+// then fsyncs the directory; that fsync can fail (e.g. an I/O error) after the
+// new bytes are already on disk. In that case the target holds the NEW bytes, so
+// the marker must stay on the NEW hash — never rolled back to the old one, which
+// would mismatch the published target (issue #1236).
 func TestInjectCursorHooksPostRenameErrorKeepsNewMarker(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	worktree := t.TempDir()
@@ -452,20 +453,12 @@ func TestInjectCursorHooksPostRenameErrorKeepsNewMarker(t *testing.T) {
 
 	oldMarker := readFile(t, sm.cursorHooksOwnershipPath(sessionID))
 
-	// Re-inject with DIFFERENT content, and simulate a post-rename durability
-	// error: the writer actually publishes the new bytes, then returns an error.
-	orig := atomicWriteCursorFile
-	atomicWriteCursorFile = func(path string, data []byte, perm os.FileMode) error {
-		if strings.Contains(path, "hooks.json") {
-			_ = orig(path, data, perm) // the rename really happened
+	// Re-inject with DIFFERENT content, and simulate a post-link durability error:
+	// the bytes are linked into place, then the directory fsync fails.
+	orig := cursorHooksSyncDir
+	cursorHooksSyncDir = func(string) error { return errInjectedWrite }
 
-			return errInjectedWrite // ...but the writer reports a durability failure
-		}
-
-		return orig(path, data, perm)
-	}
-
-	t.Cleanup(func() { atomicWriteCursorFile = orig })
+	t.Cleanup(func() { cursorHooksSyncDir = orig })
 
 	_, _, err := sm.injectCursorHooks(sessionID, worktree, true, cursorProjectAgent(), true)
 	if err == nil {

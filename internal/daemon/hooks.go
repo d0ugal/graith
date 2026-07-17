@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -666,58 +665,12 @@ func preTrustCursorWorkspace(worktreePath string) error {
 	return nil
 }
 
-// injectCursorHooks generates a .cursor/hooks.json in the worktree for a
-// Cursor session. Returns no extra args or env — cursor reads hooks from the
-// project directory automatically.
-func (sm *SessionManager) injectCursorHooks(
-	sessionID, worktreePath string,
-	yolo bool,
-	agent config.Agent,
-	approvalHooksEnabled bool,
-) (extraArgs []string, extraEnv map[string]string, err error) {
-	if worktreePath == "" {
-		return nil, nil, nil
-	}
-
-	// The caller supplies the already-selected agent and approval policy from one
-	// config snapshot. A custom cursor_project adapter must never inherit the
-	// built-in cursor entry's trust policy (issues #1236, #1287).
-	if agent.PreTrustWorkspaceEnabled() {
-		if err := preTrustCursorWorkspace(worktreePath); err != nil {
-			sm.log.Warn("failed to pre-trust cursor workspace", "session_id", sessionID, "err", err)
-		}
-	}
-
-	cursorDir := filepath.Join(worktreePath, ".cursor")
-	if err := os.MkdirAll(cursorDir, 0o700); err != nil {
-		return nil, nil, fmt.Errorf("create .cursor dir: %w", err)
-	}
-
-	hooksPath := filepath.Join(cursorDir, "hooks.json")
-
-	// Never claim/overwrite a hooks.json graith doesn't own unmodified for THIS
-	// session. When the target exists, replacement is allowed ONLY if the recorded
-	// ownership marker's SHA-256 exactly matches the current bytes — i.e. it is
-	// precisely what graith last wrote. A missing, unreadable, invalid, or
-	// mismatched marker means the file is a pre-existing user file or a user
-	// modification of ours; overwriting it would let a later exact-hash cleanup
-	// delete the user's data, so refuse the launch instead. A clean re-injection on
-	// resume (unmodified graith file) passes and is rewritten atomically below
-	// (issue #1236).
-	if existing, statErr := os.ReadFile(hooksPath); statErr == nil {
-		recorded, markerErr := os.ReadFile(sm.cursorHooksOwnershipPath(sessionID))
-		if markerErr != nil {
-			return nil, nil, fmt.Errorf("refusing to overwrite %s: not owned by this graith session; move it aside to use cursor_project hooks: %w", hooksPath, markerErr)
-		}
-
-		sum := sha256.Sum256(existing)
-		if !strings.EqualFold(strings.TrimSpace(string(recorded)), hex.EncodeToString(sum[:])) {
-			return nil, nil, fmt.Errorf("refusing to overwrite %s: it was modified since graith wrote it; move it aside to re-enable cursor_project hooks", hooksPath)
-		}
-	} else if !errors.Is(statErr, os.ErrNotExist) {
-		return nil, nil, fmt.Errorf("read existing cursor hooks: %w", statErr)
-	}
-
+// cursorHooksJSON builds the exact bytes graith publishes as a session's
+// .cursor/hooks.json for the given yolo / approval policy. It is pure (depends
+// only on the resolved gr binary and the two flags) so two --allow-concurrent
+// sessions sharing a worktree with the same settings produce byte-identical
+// output, which is what makes their ownership safely shareable (issue #1328).
+func cursorHooksJSON(yolo, approvalHooksEnabled bool) ([]byte, error) {
 	quoted := shellQuote(resolveGrBin())
 
 	type hookEntry struct {
@@ -753,53 +706,168 @@ func (sm *SessionManager) injectCursorHooks(
 
 	data, err := json.MarshalIndent(hooks, "", "  ")
 	if err != nil {
-		return nil, nil, fmt.Errorf("marshal cursor hooks: %w", err)
+		return nil, fmt.Errorf("marshal cursor hooks: %w", err)
 	}
 
-	// Publish crash-safely: both the marker and the target are written with
-	// atomicfile.Write (temp + fsync + atomic rename + dir fsync), so neither is
-	// ever truncated or partially written — a failure leaves the previous file
-	// fully intact (issue #1236). The marker is recorded BEFORE the target. This
-	// keeps recovery fail-closed rather than guaranteeing the two always agree:
-	//   - first injection, crash after the marker: marker-without-target, which
-	//     cleanup ignores (no file) and the next launch overwrites cleanly.
-	//   - re-injection, crash after the new marker but before the target rename:
-	//     the NEW marker sits over the OLD target. That is a mismatch, but a safe
-	//     one — the marker hash won't match the old bytes, so cleanup preserves
-	//     the file and the next launch REFUSES to overwrite it (the ownership gate
-	//     above), surfacing the drift instead of deleting or clobbering data.
-	// On a target-write failure below the marker is rolled back to its prior state
-	// unless the target already holds the new bytes (a post-rename durability
-	// error), in which case the new marker is kept so it matches what is on disk.
-	prevMarker, prevErr := os.ReadFile(sm.cursorHooksOwnershipPath(sessionID))
-	hadPrevMarker := prevErr == nil
+	return data, nil
+}
 
-	if err := sm.recordCursorHooksOwnership(sessionID, data); err != nil {
-		return nil, nil, fmt.Errorf("record cursor hooks ownership: %w", err)
+// injectCursorHooks generates a .cursor/hooks.json in the worktree for a
+// Cursor session. Returns no extra args or env — cursor reads hooks from the
+// project directory automatically.
+//
+// Ownership is SHARED and refcounted across concurrent sessions (issue #1328):
+// several --allow-concurrent sessions running in the same worktree can co-own a
+// single graith-generated hooks.json as long as the artifact each would produce
+// is byte-identical. A live co-owner is a session still present in state whose
+// per-session ownership marker matches the on-disk artifact; the artifact is
+// removed only after the last such owner exits (see removeGeneratedCursorHooks).
+// Publication and cleanup make the pathname operation conditional on the exact
+// file object that was verified, so a concurrent external replacement is never
+// overwritten or deleted (issue #1325).
+func (sm *SessionManager) injectCursorHooks(
+	sessionID, worktreePath string,
+	yolo bool,
+	agent config.Agent,
+	approvalHooksEnabled bool,
+) (extraArgs []string, extraEnv map[string]string, err error) {
+	if worktreePath == "" {
+		return nil, nil, nil
 	}
 
-	if err := atomicWriteCursorFile(hooksPath, data, 0o600); err != nil {
-		// atomicfile.Write can return an error AFTER a successful rename (e.g. the
-		// directory fsync fails), leaving the NEW bytes already on disk. Rolling the
-		// marker back unconditionally would then pair the OLD marker with the NEW
-		// target — a mismatch. So inspect the actual target: if it already holds the
-		// new bytes, publication occurred; keep the new marker and surface the
-		// durability error honestly. Only roll back when the target is still old or
-		// absent (issue #1236).
-		if cur, rerr := os.ReadFile(hooksPath); rerr == nil && bytes.Equal(cur, data) {
-			return nil, nil, fmt.Errorf("publish cursor hooks (target written but not durably synced): %w", err)
+	// The caller supplies the already-selected agent and approval policy from one
+	// config snapshot. A custom cursor_project adapter must never inherit the
+	// built-in cursor entry's trust policy (issues #1236, #1287).
+	if agent.PreTrustWorkspaceEnabled() {
+		if err := preTrustCursorWorkspace(worktreePath); err != nil {
+			sm.log.Warn("failed to pre-trust cursor workspace", "session_id", sessionID, "err", err)
+		}
+	}
+
+	cursorDir := filepath.Join(worktreePath, ".cursor")
+	if err := os.MkdirAll(cursorDir, 0o700); err != nil {
+		return nil, nil, fmt.Errorf("create .cursor dir: %w", err)
+	}
+
+	hooksPath := filepath.Join(cursorDir, "hooks.json")
+
+	data, err := cursorHooksJSON(yolo, approvalHooksEnabled)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	newHash := sha256Hex(data)
+
+	// Serialize ownership decisions and publication so two --allow-concurrent
+	// sessions sharing this worktree cannot race each other into overwriting or
+	// double-publishing the shared artifact (issues #1325, #1328).
+	sm.cursorHooksMu.Lock()
+	defer sm.cursorHooksMu.Unlock()
+
+	existing, statErr := os.ReadFile(hooksPath)
+
+	switch {
+	case statErr == nil:
+		existingHash := sha256Hex(existing)
+
+		recorded, markerErr := os.ReadFile(sm.cursorHooksOwnershipPath(sessionID))
+		ownedByMe := markerErr == nil &&
+			strings.EqualFold(strings.TrimSpace(string(recorded)), existingHash)
+		ownedByOther := sm.liveCursorHookCoOwnerExists(worktreePath, existingHash, sessionID)
+
+		if !ownedByMe && !ownedByOther {
+			// A pre-existing user file, or a user modification of a graith file. Never
+			// claim/overwrite it: a later exact-hash cleanup could then delete the
+			// user's data, so refuse the launch instead (issue #1236).
+			if markerErr != nil {
+				return nil, nil, fmt.Errorf("refusing to overwrite %s: not owned by this graith session; move it aside to use cursor_project hooks: %w", hooksPath, markerErr)
+			}
+
+			return nil, nil, fmt.Errorf("refusing to overwrite %s: it was modified since graith wrote it; move it aside to re-enable cursor_project hooks", hooksPath)
 		}
 
-		if rbErr := sm.restoreCursorHooksOwnership(sessionID, prevMarker, hadPrevMarker); rbErr != nil {
-			return nil, nil, fmt.Errorf("publish cursor hooks: %w (ownership marker rollback also failed: %w)", err, rbErr)
+		if existingHash == newHash {
+			// The identical graith artifact is already on disk. Co-own it: record this
+			// session's ownership marker and leave the file untouched. Nothing is
+			// published, so there is no pathname race to run (issue #1328). This is
+			// also the clean-resume path (our own unmodified file).
+			if err := sm.recordCursorHooksOwnership(sessionID, data); err != nil {
+				return nil, nil, fmt.Errorf("record cursor hooks ownership: %w", err)
+			}
+
+			sm.log.Info("adopted shared cursor hooks", "session_id", sessionID, "hooks_path", hooksPath)
+
+			return nil, nil, nil
 		}
 
-		return nil, nil, fmt.Errorf("publish cursor hooks: %w", err)
+		// The on-disk content differs from what this session would generate.
+		if ownedByOther {
+			// Another live session sharing this worktree published a DIFFERENT hook
+			// definition. Shared ownership requires byte-identical artifacts, so fail
+			// clearly before launch rather than clobbering the other session (#1328).
+			return nil, nil, fmt.Errorf("refusing to launch cursor_project hooks in %s: another concurrent session already published an incompatible hooks.json (differing approval/hook settings); align the sessions' settings or don't share the worktree", worktreePath)
+		}
+
+		// Owned only by this session (a solo re-inject with changed config). Replace
+		// our own file, conditional on it still being the object we just verified.
+		return nil, nil, sm.publishCursorHooks(sessionID, hooksPath, data, existingHash)
+
+	case errors.Is(statErr, os.ErrNotExist):
+		// First publication: create the file only if it is still absent, so a file
+		// that appears concurrently is preserved rather than overwritten (#1325).
+		return nil, nil, sm.publishCursorHooks(sessionID, hooksPath, data, "")
+
+	default:
+		return nil, nil, fmt.Errorf("read existing cursor hooks: %w", statErr)
+	}
+}
+
+// liveCursorHookCoOwnerExists reports whether some session OTHER than excludeID,
+// still present in state and sharing worktreePath, currently owns the cursor
+// hooks artifact — i.e. its recorded ownership marker matches wantHash (the hash
+// of the on-disk .cursor/hooks.json). It is the refcount predicate for shared
+// ownership (issue #1328): true authorizes adopting an identical artifact at
+// launch and blocks removing it at cleanup while a live owner remains. A stale
+// marker for a session no longer in state is never counted, so a crashed owner
+// cannot keep the artifact alive forever (stale-owner recovery). The worktree is
+// compared on its resolved path so an in-place session and a symlinked view of
+// the same directory are recognised as sharing the artifact.
+func (sm *SessionManager) liveCursorHookCoOwnerExists(worktreePath, wantHash, excludeID string) bool {
+	want := config.ResolvePath(worktreePath)
+
+	type candidate struct {
+		id, worktree string
 	}
 
-	sm.log.Info("injected cursor hooks", "session_id", sessionID, "hooks_path", hooksPath)
+	sm.mu.RLock()
 
-	return nil, nil, nil
+	candidates := make([]candidate, 0, len(sm.state.Sessions))
+	for id, s := range sm.state.Sessions {
+		if id == excludeID || s == nil {
+			continue
+		}
+
+		candidates = append(candidates, candidate{id: id, worktree: s.WorktreePath})
+	}
+
+	sm.mu.RUnlock()
+
+	for _, c := range candidates {
+		if config.ResolvePath(c.worktree) != want {
+			continue
+		}
+
+		recorded, err := os.ReadFile(sm.cursorHooksOwnershipPath(c.id))
+		if err != nil {
+			continue
+		}
+
+		if strings.EqualFold(strings.TrimSpace(string(recorded)), wantHash) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // cursorHooksOwnershipPath is the marker graith writes when it generates a
@@ -851,6 +919,334 @@ func (sm *SessionManager) restoreCursorHooksOwnership(sessionID string, prev []b
 	}
 
 	return nil
+}
+
+// sha256Hex returns the lowercase hex SHA-256 of data.
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+
+	return hex.EncodeToString(sum[:])
+}
+
+// cursorHooksRaceHook, when non-nil, is invoked at the exact check/use boundary
+// inside the race-safe publish and cleanup paths — after graith has atomically
+// taken possession of (or confirmed the absence of) the current
+// .cursor/hooks.json but before it acts on the pathname. Tests set it to replace
+// the file at that instant to prove a concurrent replacement is never
+// overwritten or deleted (issue #1325). Nil in production.
+var cursorHooksRaceHook func()
+
+// cursorHooksSyncDir fsyncs the directory holding a freshly-placed hooks.json so
+// the new directory entry is durable. It is a package var so a test can inject a
+// post-placement durability failure deterministically (issue #1236). Nil-safe:
+// always assigned a real implementation.
+var cursorHooksSyncDir = fsyncDir
+
+// fsyncDir fsyncs a directory so a rename/link into it is durable.
+func fsyncDir(path string) error {
+	d, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+
+	err = d.Sync()
+	_ = d.Close()
+
+	return err
+}
+
+// errCursorHooksRaced signals that .cursor/hooks.json was concurrently created
+// or replaced by another process at the pathname boundary, so graith refused to
+// overwrite it. The launch fails closed and the concurrent file is preserved.
+var errCursorHooksRaced = errors.New("cursor hooks.json was concurrently replaced; refusing to overwrite user content")
+
+// errCursorHooksDurability signals that the new hooks.json was linked into place
+// but a post-link directory fsync failed. The new bytes are on disk, so the new
+// ownership marker is kept (it matches the target); the durability error is
+// surfaced rather than swallowed (mirrors the atomicfile post-rename ambiguity).
+var errCursorHooksDurability = errors.New("cursor hooks published but directory fsync failed")
+
+// reserveCursorSidecar exclusively creates a uniquely-named empty file next to
+// the hooks.json (via os.CreateTemp, which uses O_EXCL) and returns its path.
+// Because the name is guaranteed unique and freshly created, a later os.Rename
+// INTO this path (or an atomicfile write to it) overwrites only graith's own
+// reservation — never a pre-existing user file or a stale graith sidecar left by
+// a crashed run. This is what keeps the quarantine/preserve machinery from
+// clobbering anything at a fixed sidecar name (issue #1325). The pattern keeps
+// "hooks.json" in the name so the atomicWriteCursorFile test seam (which matches
+// that substring) still fires for the staged target write.
+func reserveCursorSidecar(dir, kind string) (string, error) {
+	f, err := os.CreateTemp(dir, "hooks.json.graith-"+kind+"-*")
+	if err != nil {
+		return "", fmt.Errorf("reserve cursor %s sidecar: %w", kind, err)
+	}
+
+	name := f.Name()
+	_ = f.Close()
+
+	return name, nil
+}
+
+// publishCursorHooks records this session's ownership marker and then publishes
+// data at hooksPath, making the pathname write conditional on the file object
+// graith verified so a concurrent external replacement is never overwritten
+// (issue #1325).
+//
+//   - expectHash == "": first publication. hooksPath must still be ABSENT; the
+//     bytes are placed with an exclusive hard link, so a file that appeared
+//     concurrently is preserved and the launch fails.
+//   - expectHash != "": replacing this session's own file. hooksPath must still
+//     hash to expectHash at the instant graith claims it; a mismatch (concurrent
+//     replacement) is restored and the launch fails.
+//
+// The marker is recorded BEFORE the target and rolled back on a pre-placement
+// failure, so recovery stays fail-closed exactly as the crash-safety contract in
+// recordCursorHooksOwnership requires (issue #1236).
+func (sm *SessionManager) publishCursorHooks(sessionID, hooksPath string, data []byte, expectHash string) error {
+	markerPath := sm.cursorHooksOwnershipPath(sessionID)
+
+	// Reserve the staging path FIRST, exclusively, so it can never collide with a
+	// pre-existing user or stale graith sidecar (the later write/rename only ever
+	// touches graith's own freshly-created reservation, issue #1325).
+	tmpPath, err := reserveCursorSidecar(filepath.Dir(hooksPath), "stage")
+	if err != nil {
+		return err
+	}
+
+	prevMarker, prevErr := os.ReadFile(markerPath)
+	hadPrevMarker := prevErr == nil
+
+	if err := sm.recordCursorHooksOwnership(sessionID, data); err != nil {
+		_ = os.Remove(tmpPath)
+
+		return fmt.Errorf("record cursor hooks ownership: %w", err)
+	}
+
+	rollback := func(cause error) error {
+		_ = os.Remove(tmpPath)
+
+		if rbErr := sm.restoreCursorHooksOwnership(sessionID, prevMarker, hadPrevMarker); rbErr != nil {
+			return fmt.Errorf("%w (ownership marker rollback also failed: %w)", cause, rbErr)
+		}
+
+		return cause
+	}
+
+	if err := atomicWriteCursorFile(tmpPath, data, 0o600); err != nil {
+		return rollback(fmt.Errorf("stage cursor hooks: %w", err))
+	}
+
+	if err := sm.placeCursorHooks(hooksPath, tmpPath, expectHash); err != nil {
+		if errors.Is(err, errCursorHooksDurability) {
+			// The new bytes are already linked into place; keep the new marker (it
+			// matches the on-disk target) and surface the durability error honestly.
+			_ = os.Remove(tmpPath)
+
+			return fmt.Errorf("publish cursor hooks (target linked but not durably synced): %w", err)
+		}
+
+		return rollback(fmt.Errorf("publish cursor hooks: %w", err))
+	}
+
+	_ = os.Remove(tmpPath)
+
+	sm.log.Info("injected cursor hooks", "session_id", sessionID, "hooks_path", hooksPath)
+
+	return nil
+}
+
+// placeCursorHooks atomically moves the staged file at tmpPath into hooksPath,
+// conditional on the current state of hooksPath. See publishCursorHooks for the
+// expectHash contract. It never overwrites or deletes content graith did not
+// verify: on any concurrent replacement it preserves the other file (leaving it
+// in place, or setting the claimed content aside under a uniquely-reserved
+// preserved sidecar) and returns errCursorHooksRaced.
+func (sm *SessionManager) placeCursorHooks(hooksPath, tmpPath, expectHash string) error {
+	dir := filepath.Dir(hooksPath)
+
+	if expectHash == "" {
+		// First publication: the check (absence) and the use (create) are fused by
+		// an exclusive hard link, which fails rather than overwriting if a file
+		// appeared in the window. Fire the interleaving seam right before it.
+		if cursorHooksRaceHook != nil {
+			cursorHooksRaceHook()
+		}
+
+		if err := os.Link(tmpPath, hooksPath); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				return errCursorHooksRaced
+			}
+
+			return fmt.Errorf("link cursor hooks: %w", err)
+		}
+
+		if err := cursorHooksSyncDir(dir); err != nil {
+			return fmt.Errorf("%w: %w", errCursorHooksDurability, err)
+		}
+
+		return nil
+	}
+
+	// Replacing our own file: atomically claim the current object by renaming it
+	// aside into a uniquely-reserved sidecar (never a fixed name, so we can't
+	// clobber a user/stale sidecar). This is the linearization point — from here
+	// the claimed bytes are immutable, so verifying them is authoritative, and
+	// hooksPath is momentarily free.
+	quarantine, err := reserveCursorSidecar(dir, "claim")
+	if err != nil {
+		return err
+	}
+
+	if err := os.Rename(hooksPath, quarantine); err != nil {
+		_ = os.Remove(quarantine)
+
+		if errors.Is(err, os.ErrNotExist) {
+			// Our file vanished under us (concurrent removal); treat as a raced
+			// replacement rather than blindly recreating over whatever is there now.
+			return errCursorHooksRaced
+		}
+
+		return fmt.Errorf("claim cursor hooks: %w", err)
+	}
+
+	// The classic check/use window: hooksPath is free right now. A test replaces
+	// it here to prove graith never clobbers the replacement.
+	if cursorHooksRaceHook != nil {
+		cursorHooksRaceHook()
+	}
+
+	claimed, err := os.ReadFile(quarantine)
+	if err != nil {
+		_ = restoreCursorClaim(quarantine, hooksPath)
+
+		return fmt.Errorf("verify claimed cursor hooks: %w", err)
+	}
+
+	if !strings.EqualFold(sha256Hex(claimed), expectHash) {
+		// Concurrently replaced between the ownership check and the claim: restore
+		// the claimed content and refuse; never delete or overwrite it (#1325).
+		if rErr := restoreCursorClaim(quarantine, hooksPath); rErr != nil {
+			return fmt.Errorf("%w (and restore failed: %w)", errCursorHooksRaced, rErr)
+		}
+
+		return errCursorHooksRaced
+	}
+
+	// Verified ours. hooksPath is free, so an exclusive link still guards against a
+	// third writer landing in the window between the claim and here.
+	if err := os.Link(tmpPath, hooksPath); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			// A third party recreated hooksPath after we claimed. Preserve BOTH: leave
+			// their file in place and set our verified-old content aside under a unique
+			// preserved name (never a fixed name, so no existing sidecar is clobbered).
+			if preserved, rErr := reserveCursorSidecar(dir, "preserved"); rErr == nil {
+				if rnErr := os.Rename(quarantine, preserved); rnErr == nil {
+					sm.log.Warn("cursor hooks concurrently recreated during republish; preserved prior content",
+						"hooks_path", hooksPath, "preserved", preserved)
+				} else {
+					_ = os.Remove(preserved)
+
+					sm.log.Warn("cursor hooks concurrently recreated during republish; failed to set prior content aside",
+						"hooks_path", hooksPath, "err", rnErr)
+				}
+			}
+
+			return errCursorHooksRaced
+		}
+
+		_ = restoreCursorClaim(quarantine, hooksPath)
+
+		return fmt.Errorf("link cursor hooks: %w", err)
+	}
+
+	_ = os.Remove(quarantine)
+
+	if err := cursorHooksSyncDir(dir); err != nil {
+		return fmt.Errorf("%w: %w", errCursorHooksDurability, err)
+	}
+
+	return nil
+}
+
+// restoreCursorClaim puts a claimed (renamed-aside) hooks file back at its
+// original path without ever clobbering a file that appeared there meanwhile. It
+// uses an exclusive hard link, so a concurrent newcomer at hooksPath is left
+// intact and the claimed content is instead set aside under a uniquely-reserved
+// preserved sidecar (never a fixed name, so no existing sidecar is clobbered).
+func restoreCursorClaim(quarantine, hooksPath string) error {
+	if err := os.Link(quarantine, hooksPath); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			preserved, rErr := reserveCursorSidecar(filepath.Dir(hooksPath), "preserved")
+			if rErr != nil {
+				return rErr
+			}
+
+			if rErr := os.Rename(quarantine, preserved); rErr != nil {
+				_ = os.Remove(preserved)
+
+				return rErr
+			}
+
+			return nil
+		}
+
+		return err
+	}
+
+	return os.Remove(quarantine)
+}
+
+// safeRemoveCursorHooks deletes hooksPath only if, at the atomic instant graith
+// takes possession of it, its content still hashes to wantHash. It claims the
+// file by renaming it aside, verifies the claimed bytes, and deletes the claimed
+// copy — so a concurrent external replacement, which lands at the now-free
+// pathname, is never deleted. A mismatch restores the claimed content (#1325).
+func (sm *SessionManager) safeRemoveCursorHooks(sessionID, hooksPath, wantHash string) {
+	quarantine, err := reserveCursorSidecar(filepath.Dir(hooksPath), "rm")
+	if err != nil {
+		sm.log.Warn("failed to reserve cursor hooks removal sidecar", "session_id", sessionID, "err", err)
+
+		return
+	}
+
+	if err := os.Rename(hooksPath, quarantine); err != nil {
+		_ = os.Remove(quarantine)
+
+		if !errors.Is(err, os.ErrNotExist) {
+			sm.log.Warn("failed to claim cursor hooks for removal", "session_id", sessionID, "err", err)
+		}
+
+		return
+	}
+
+	// Check/use boundary: a test replaces hooksPath here to prove the replacement
+	// (now at the free pathname) is never deleted.
+	if cursorHooksRaceHook != nil {
+		cursorHooksRaceHook()
+	}
+
+	claimed, err := os.ReadFile(quarantine)
+	if err != nil {
+		_ = restoreCursorClaim(quarantine, hooksPath)
+
+		sm.log.Warn("failed to verify claimed cursor hooks; restored", "session_id", sessionID, "err", err)
+
+		return
+	}
+
+	if !strings.EqualFold(sha256Hex(claimed), wantHash) {
+		if rErr := restoreCursorClaim(quarantine, hooksPath); rErr != nil {
+			sm.log.Warn("cursor hooks changed under removal and restore failed", "session_id", sessionID, "err", rErr)
+		} else {
+			sm.log.Info("cursor hooks changed under removal; preserved", "session_id", sessionID, "path", hooksPath)
+		}
+
+		return
+	}
+
+	if err := os.Remove(quarantine); err != nil && !os.IsNotExist(err) {
+		sm.log.Warn("failed to remove cursor hooks", "session_id", sessionID, "err", err)
+	}
 }
 
 type cursorHookCmd struct {
@@ -933,18 +1329,26 @@ func isGraithGeneratedCursorHooks(path string) bool {
 	return true
 }
 
-// removeGeneratedCursorHooks removes the .cursor/hooks.json graith generated for
-// a session. The deletion target is always derived from the session's persisted
-// worktree (a trusted value), never from a stored path, so a tampered marker
-// cannot redirect the delete. It fails CLOSED: it deletes only when it can
-// positively confirm graith ownership, and preserves the file on any ambiguity
-// (issue #1236):
+// removeGeneratedCursorHooks releases this session's ownership of the
+// .cursor/hooks.json graith generated and removes the artifact only when this
+// session is the LAST live owner (issue #1328). The deletion target is always
+// derived from the session's persisted worktree (a trusted value), never from a
+// stored path, so a tampered marker cannot redirect the delete. It fails CLOSED:
+// it deletes only when it can positively confirm graith ownership, and preserves
+// the file on any ambiguity (issue #1236). The actual deletion is race-safe: the
+// file is claimed and re-verified before removal so a concurrent external
+// replacement is never deleted (issue #1325).
 //
-//   - marker present: delete only if the current bytes hash identically to the
-//     recorded SHA-256, so any user modification/replacement is preserved.
+//   - marker present, current bytes match it, another live co-owner remains:
+//     keep the artifact for the surviving owner (refcounted).
+//   - marker present, current bytes match it, no other live owner: last owner —
+//     remove the artifact race-safely.
+//   - marker present but current bytes differ: a user modification/replacement —
+//     preserve.
 //   - marker genuinely absent (os.ErrNotExist, e.g. a session predating the
-//     marker): legacy best-effort — delete only when the current config still
-//     selects cursor_project AND the file still fingerprints as graith-generated.
+//     marker): legacy best-effort — remove race-safely only when the current
+//     config still selects cursor_project AND the file still fingerprints as
+//     graith-generated.
 //   - marker unreadable for any other reason (permission/I/O): preserve; never
 //     blind-delete when ownership cannot be determined.
 //
@@ -954,6 +1358,9 @@ func (sm *SessionManager) removeGeneratedCursorHooks(sessionID, agentName, workt
 	if worktreePath == "" {
 		return
 	}
+
+	sm.cursorHooksMu.Lock()
+	defer sm.cursorHooksMu.Unlock()
 
 	hooksPath := filepath.Join(worktreePath, ".cursor", "hooks.json")
 
@@ -965,17 +1372,25 @@ func (sm *SessionManager) removeGeneratedCursorHooks(sessionID, agentName, workt
 			return // already gone (or unreadable) — never blind-delete.
 		}
 
-		sum := sha256.Sum256(current)
-		if !strings.EqualFold(strings.TrimSpace(string(recorded)), hex.EncodeToString(sum[:])) {
+		curHash := sha256Hex(current)
+		if !strings.EqualFold(strings.TrimSpace(string(recorded)), curHash) {
 			sm.log.Info("leaving modified cursor hooks in place",
 				"session_id", sessionID, "path", hooksPath)
 
 			return
 		}
 
-		if rmErr := os.Remove(hooksPath); rmErr != nil && !os.IsNotExist(rmErr) {
-			sm.log.Warn("failed to remove cursor hooks", "session_id", sessionID, "err", rmErr)
+		// We own the current content. If another live session sharing this worktree
+		// also owns it, keep the artifact for them (refcounted shared ownership;
+		// issue #1328). Only the last live owner removes it.
+		if sm.liveCursorHookCoOwnerExists(worktreePath, curHash, sessionID) {
+			sm.log.Info("cursor hooks still owned by another concurrent session; leaving in place",
+				"session_id", sessionID, "path", hooksPath)
+
+			return
 		}
+
+		sm.safeRemoveCursorHooks(sessionID, hooksPath, curHash)
 	case errors.Is(err, os.ErrNotExist):
 		// Legacy path: no launch-time marker. Only remove a file that is both
 		// selected by current config and fingerprints as graith-generated.
@@ -990,9 +1405,12 @@ func (sm *SessionManager) removeGeneratedCursorHooks(sessionID, agentName, workt
 			return
 		}
 
-		if rmErr := os.Remove(hooksPath); rmErr != nil && !os.IsNotExist(rmErr) {
-			sm.log.Warn("failed to remove cursor hooks", "session_id", sessionID, "err", rmErr)
+		current, cerr := os.ReadFile(hooksPath)
+		if cerr != nil {
+			return // already gone (or unreadable) — never blind-delete.
 		}
+
+		sm.safeRemoveCursorHooks(sessionID, hooksPath, sha256Hex(current))
 	default:
 		// Ownership marker unreadable (permission/I/O): fail closed, preserve.
 		sm.log.Warn("cursor hooks ownership marker unreadable; leaving hooks in place",

@@ -50,8 +50,15 @@ type hookReport struct {
 
 // SessionManager orchestrates PTY sessions, state persistence, and git worktrees.
 type SessionManager struct {
-	mu                 sync.RWMutex
-	configApplyMu      sync.Mutex // serializes config publication and runtime reconciliation
+	mu            sync.RWMutex
+	configApplyMu sync.Mutex // serializes config publication and runtime reconciliation
+	// cursorHooksMu serializes cursor_project hook ownership operations (inject
+	// and cleanup) so concurrent --allow-concurrent sessions sharing one worktree
+	// take and release shared ownership of the generated .cursor/hooks.json
+	// atomically, and so a single session's publish/cleanup can't interleave with
+	// another's on the same artifact (issues #1325, #1328). It is a dedicated lock
+	// held only across cursor-hook file work, never nested under sm.mu.
+	cursorHooksMu      sync.Mutex
 	state              *State
 	sessions           map[string]SessionDriver
 	attachedClients    map[string]*attachedClient
