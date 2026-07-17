@@ -63,7 +63,20 @@ func resolveScenarioSourceFrom(source, dir string) ([]byte, error) {
 }
 
 func parseScenarioFile(data []byte) (*scenarioFile, error) {
-	return scenariofile.Parse(data)
+	sf, err := scenariofile.Parse(data)
+	if err != nil {
+		return nil, err
+	}
+
+	// Available scenario discovery parses files without building session inputs,
+	// so retain its ordinary-member repo check while allowing derived repos.
+	for _, session := range sf.Sessions {
+		if session.Repo == "" && !session.Shared && session.Mirror == "" {
+			return nil, fmt.Errorf("session %q: repo is required", session.Name)
+		}
+	}
+
+	return sf, nil
 }
 
 func scenarioPolicyInput(policy *scenariofile.PolicyConfig) *protocol.ScenarioPolicyInput {
