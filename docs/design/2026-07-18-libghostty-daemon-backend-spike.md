@@ -202,8 +202,8 @@ the exact commands and corpus.
 | `CGO_ENABLED=0` with `libghostty` tag | Tagged no-cgo selector builds and runs Charm corpus | Verified locally |
 | Darwin arm64 tagged adapter | Shared corpus and full daemon link against checksummed static artifact | Verified locally |
 | Darwin amd64 tagged adapter | Cross-compiled with `clang -arch x86_64` and the universal static artifact | Verified locally |
-| Linux amd64 tagged adapter | Exact-source static build plus native corpus | Pending the PR's `libghostty-vt spike` CI result |
-| Linux arm64 tagged adapter | Exact-source static build plus cgo cross-link | Pending the PR's `libghostty-vt spike` CI result |
+| Linux amd64 tagged adapter | Exact-source static build, exact-header diff, and native corpus | Verified in PR #1440 CI |
+| Linux arm64 tagged adapter | Exact-source static build, exact-header diff, and cgo cross-link | Verified in PR #1440 CI |
 
 The current GoReleaser builds are intentionally `CGO_ENABLED=0`. Production
 adoption would require per-OS/architecture C compilers and native archives, and
@@ -226,9 +226,9 @@ local-development/rebuild blocker, not evidence that another macOS SDK fails.
 
 The repository now carries a path-scoped CI workflow that builds the exact
 Ghostty pin for both Linux release architectures and verifies the committed
-headers against that source. It also verifies the universal Apple archive and
-both Darwin Go/cgo links. Results must be recorded here before any follow-up can
-claim the full experimental matrix is green.
+headers against that source. PR #1440 proved both Linux builds, the amd64 native
+corpus, and the arm64 cgo cross-link. The workflow also verifies the universal
+Apple archive and both Darwin Go/cgo links.
 
 ### Pinning and native supply chain
 
