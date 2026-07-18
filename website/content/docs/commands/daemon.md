@@ -26,6 +26,12 @@ Restart the daemon, preserving live sessions via exec.
 | `--force` | Clean stop/start that kills running sessions |
 
 After rebuilding `gr`, run `gr daemon restart` to pick up the new daemon binary.
+Before it hands off any live terminal, graith checks that the exact replacement
+binary can adopt every session and understands the current helper handoff. It
+refuses the attempt while session creation or another lifecycle launch is in
+progress. Such a refusal leaves the existing daemon and agents running; retry
+after the reported work finishes. If preparation or exec fails, inheritable terminal
+descriptors are restored and the existing daemon continues serving.
 If the preserve request is accepted but the replacement is still not ready after
 the configured startup wait, graith rechecks the live daemon. It only falls back
 to a clean start after proving that the exact process which answered the
