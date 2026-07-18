@@ -14,9 +14,11 @@ func setOutBufForPairings(t *testing.T, jsonMode bool) *bytes.Buffer {
 	t.Helper()
 
 	orig := out
+
 	t.Cleanup(func() { out = orig })
 
 	var buf bytes.Buffer
+
 	out = output.NewWithWriter(jsonMode, &buf)
 
 	return &buf
@@ -29,6 +31,7 @@ func TestRemotePairingsCommandTree(t *testing.T) {
 		if cmd.Name() == "pair" {
 			t.Fatal("root command still contains removed gr pair namespace")
 		}
+
 		for _, alias := range cmd.Aliases {
 			if alias == "pair" {
 				t.Fatalf("root command %q retains removed gr pair alias", cmd.Name())
@@ -41,6 +44,7 @@ func TestRemotePairingsCommandTree(t *testing.T) {
 		"approve": "gr remote pairings approve",
 		"revoke":  "gr remote pairings revoke",
 	}
+
 	for _, cmd := range remotePairingsCmd.Commands() {
 		if cmd.Name() == "help" {
 			continue
@@ -105,6 +109,7 @@ func TestRemotePairingsHelpNamespace(t *testing.T) {
 	if err := rootCmd.Help(); err != nil {
 		t.Fatalf("render root help: %v", err)
 	}
+
 	if strings.Contains(rootHelp.String(), "\n  pair ") {
 		t.Errorf("root help retains removed gr pair command:\n%s", rootHelp.String())
 	}
@@ -116,6 +121,7 @@ func TestRemotePairingsHelpNamespace(t *testing.T) {
 	if err := remoteCmd.Help(); err != nil {
 		t.Fatalf("render remote help: %v", err)
 	}
+
 	if !strings.Contains(remoteHelp.String(), "pairings") ||
 		!strings.Contains(remoteHelp.String(), "Manage remote device pairings") {
 		t.Errorf("remote help does not advertise pairing administration:\n%s", remoteHelp.String())
