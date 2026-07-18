@@ -87,10 +87,10 @@ github.com/coreos/go-iptables v0.7.1-0.20240112124308-65c67c9f46e6/go.mod h1:Qe8
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
 github.com/cpuguy83/go-md2man/v2 v2.0.7 h1:zbFlGlXEAKlwXpmvle3d8Oe3YnkKIK4xSRTd3sHPnBo=
 github.com/cpuguy83/go-md2man/v2 v2.0.7/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
-github.com/creachadair/mds v0.29.0 h1:LyR8pWAj2ofsrdJ9s2YoIqN8b6a1djHmPQULD2fTSCA=
-github.com/creachadair/mds v0.29.0/go.mod h1:dMBTCSy3iS3dwh4Rb1zxeZz2d7K8+N24GCTsayWtQRI=
-github.com/creachadair/msync v0.9.1 h1:LEomnt/hETiaVxmYeU9PQ3dW/qYZoSZ/HebPi4vFp3k=
-github.com/creachadair/msync v0.9.1/go.mod h1:Fw4SK/DMHsIz4uEmgBdg7evUQaGhcFrA/RKrrPz9fxM=
+github.com/creachadair/mds v0.30.2 h1:cOP0xkfYkk4mxqPl4SmjnrY+agrpgiEqsVygLnPvJto=
+github.com/creachadair/mds v0.30.2/go.mod h1:dMBTCSy3iS3dwh4Rb1zxeZz2d7K8+N24GCTsayWtQRI=
+github.com/creachadair/msync v0.10.0 h1:2RlGs187RQN5tzyluKEkbkXq+LRK2KIR+An6FoB9x+M=
+github.com/creachadair/msync v0.10.0/go.mod h1:J+4p7as+O7NWydXYGJNrigY67qj1F1GB0CcTWyV/5AE=
 github.com/creachadair/taskgroup v0.13.2 h1:3KyqakBuFsm3KkXi/9XIb0QcA8tEzLHLgaoidf0MdVc=
 github.com/creachadair/taskgroup v0.13.2/go.mod h1:i3V1Zx7H8RjwljUEeUWYT30Lmb9poewSb2XI1yTwD0g=
 github.com/creack/pty v1.1.24 h1:bJrF4RRfyJnbTJqzRLHzcGaZK1NeM5kTC9jGgovnR1s=
