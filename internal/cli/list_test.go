@@ -88,6 +88,19 @@ func TestDescendantsOfOrphans(t *testing.T) {
 	}
 }
 
+func TestSessionInfoLessBreaksDuplicateNameTiesByID(t *testing.T) {
+	a := protocol.SessionInfo{ID: "braw", Name: "canny", RepoName: "croft"}
+	b := protocol.SessionInfo{ID: "thrawn", Name: "canny", RepoName: "croft"}
+
+	if !sessionInfoLess(a, b) {
+		t.Errorf("sessionInfoLess(%+v, %+v) = false, want ID tie-break", a, b)
+	}
+
+	if sessionInfoLess(b, a) {
+		t.Errorf("sessionInfoLess(%+v, %+v) = true, want false", b, a)
+	}
+}
+
 func TestPrintTree(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{ID: "ben", Name: "hame", RepoName: "croft", Agent: "claude", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},

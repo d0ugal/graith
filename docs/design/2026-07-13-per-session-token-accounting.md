@@ -426,6 +426,8 @@ TOTAL                     81,562  51,726  1,961,106  96,004   0      2,190,398  
 - Runs after the normal `--repo`, `--children`, and `--starred` filters and
   honours `--tree` and `--deleted`, so token selection cannot drift from normal
   list selection.
+- Is mutually exclusive with `--quiet` and `--wide` because each flag selects
+  a distinct output projection.
 - Uses the **existing `ListSessions` RPC** and formats the token fields on
   `SessionInfo` — there is no new control-message handler case, so no
   `remoteMessagePolicy`/`authmatrix` row (which `TestRemoteMatrixCompleteness`
