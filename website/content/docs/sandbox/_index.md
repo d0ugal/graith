@@ -7,8 +7,8 @@ toc: true
 draft: false
 ---
 
-graith can wrap agent processes in a deny-by-default OS sandbox that restricts
-file access, environment, and — depending on backend — the network. There are
+graith runs every agent process in an enforceable OS sandbox that restricts
+file access, environment, processes, signals, and — depending on backend — the network. There are
 two backends:
 
 | Backend | Platforms | Primitive |
@@ -23,19 +23,20 @@ sub-pages for [how it works]({{< relref "how-it-works.md" >}}),
 
 ## Why sandbox
 
-AI coding agents often request broad permissions (e.g.
-`--dangerously-skip-permissions` for Claude,
-`--dangerously-bypass-approvals-and-sandbox` for Codex). Sandboxing lets you
-grant those agent-level permissions while confining the process at the OS level.
+Graith starts supported agents with their native permission prompts disabled so
+they can run unattended. Those agent flags are not the security boundary: the
+outer OS sandbox confines the process regardless of what the agent believes it
+may do.
 The agent thinks it has full access; the kernel enforces boundaries. This also
 isolates sessions from each other — without a sandbox, one agent can read
 graith's `state.json` and impersonate another session.
 
 ## Choosing a backend
 
-The `backend` field is **required** when the sandbox is enabled — there is no
-default. If you enable the sandbox without choosing a backend, session creation
-fails closed with an actionable error. Pick:
+The `backend` field is required. The built-in default is `nono`; choose
+`safehouse` explicitly on macOS if preferred. If the selected backend is absent,
+unsupported, or cannot enforce the requested policy, creation and resume fail
+closed with an actionable error.
 
 - `backend = "safehouse"` on macOS if you already use safehouse.
 - `backend = "nono"` on Linux (the only cross-platform option) or on macOS.
@@ -48,10 +49,9 @@ read_dirs  = ["~/Code"]
 write_dirs = []
 ```
 
-> **Migration (pre-1.0 breaking change).** Earlier versions defaulted to
-> safehouse implicitly. `backend` is now required when `sandbox.enabled = true`.
-> **To keep your current behaviour, add `backend = "safehouse"` to your
-> `[sandbox]` block.** `gr doctor` flags a missing backend.
+`enabled = false`, a per-agent `disabled = true`, or an empty backend does not
+start an unsandboxed agent; it makes session creation fail. There is no
+unsandboxed compatibility mode.
 
 ## Setup
 
@@ -80,4 +80,12 @@ layer); network filtering, when graith grows it, needs 6.7+. On macOS, nono uses
 Seatbelt, which is always present. graith requires a minimum nono version and
 refuses to run below it (see `gr doctor`).
 
-Then enable in config with a backend, as above.
+The default configuration already enables `nono`. Install the selected backend
+before creating or resuming sessions.
+
+## Command policy is subtractive
+
+The optional `[command_policy]` layer can synchronously deny shell commands
+before execution. An allow only continues to normal sandbox enforcement; it can
+never widen filesystem, process, signal, or network access. With no command
+policy configured, tools use everything the sandbox permits.

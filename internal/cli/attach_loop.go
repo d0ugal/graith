@@ -79,7 +79,6 @@ func runAttachByID(c attachConn, sessionID string, initialCollapsed map[string]b
 		}
 	}
 
-	l.opts.AutoPopApproval = cfg.Approvals.AutoPop
 	l.opts.DragArrowKeys = cfg.Input.DragArrowKeys
 	l.opts.DragArrowThreshold = cfg.Input.DragArrowThreshold
 
@@ -130,8 +129,6 @@ func (l *attachLoop) dispatch(result client.PassthroughResult) (bool, error) {
 		return l.onNewSession()
 	case client.ResultForkSession:
 		return l.onForkSession()
-	case client.ResultApprovalOverlay:
-		return l.onApprovalOverlay()
 	case client.ResultOrchestratorSession:
 		return l.onOrchestratorSession()
 	case client.ResultRenameSession:
@@ -536,44 +533,6 @@ func (l *attachLoop) onForkSession() (bool, error) {
 
 	_ = protocol.DecodePayload(createResp, &newInfo)
 	l.switchTo(nc, newInfo.ID)
-
-	return false, nil
-}
-
-func (l *attachLoop) onApprovalOverlay() (bool, error) {
-	nc, err := freshClient()
-	if err != nil {
-		return false, err
-	}
-
-	_ = nc.SendControl("approval_list", struct{}{})
-
-	listResp, err := nc.ReadControlResponse()
-	if err != nil {
-		nc.Close()
-		return false, err
-	}
-
-	var notif protocol.ApprovalNotificationMsg
-
-	_ = protocol.DecodePayload(listResp, &notif)
-
-	if len(notif.Pending) == 0 {
-		l.restoreAndAdopt(nc)
-		return false, nil
-	}
-
-	results := client.RunApprovalOverlay(notif.Pending, approvalKeysFromConfig())
-	for _, r := range results {
-		_ = nc.SendControl("approval_respond", protocol.ApprovalRespondMsg{
-			RequestID: r.RequestID,
-			Decision:  r.Decision,
-			Reason:    r.Reason,
-		})
-		_, _ = nc.ReadControlResponse()
-	}
-
-	l.restoreAndAdopt(nc)
 
 	return false, nil
 }

@@ -9,7 +9,7 @@ draft: false
 
 ## Headless sessions
 
-**Experimental.** A headless session runs the agent in Claude Code's stream-json mode instead of an interactive PTY — for fire-and-forget work such as review judges and one-shot helpers. graith parses the typed event stream, so `gr logs -f` renders it and the run's cost/token usage is captured from the result envelope. v1 is Claude-only, one-shot, requires a prompt, and is **incompatible with the sandbox** (headless requires `sandbox.enabled = false`, or a per-agent sandbox that resolves to disabled).
+**Experimental.** A headless session runs the agent in Claude Code's stream-json mode instead of an interactive PTY — for fire-and-forget work such as review judges and one-shot helpers. graith parses the typed event stream, so `gr logs -f` renders it and the run's cost/token usage is captured from the result envelope. v1 is Claude-only, one-shot, requires a prompt, and runs inside the same mandatory OS sandbox as a PTY session.
 
 ```toml
 [headless]
@@ -32,7 +32,12 @@ without converting it (see [Session Lifecycle → Headless sessions]({{< relref 
 
 The remaining keys are processing limits that rarely need tuning. `max_line_bytes` caps a single stream-json line (large tool outputs and base64 images exceed the 64 KiB scanner default). `control_timeout` bounds how long a synchronous control request waits for its response; `interrupt_timeout` is the much shorter interrupt round-trip before graith falls back to SIGINT. `preview_bytes` bounds the scrollback tail rendered by the overlay preview and the `screen_preview` control message. A zero or non-positive value falls back to the default shown.
 
-A headless session drives Claude Code over its stdin control protocol, giving graith a clean interrupt and inline tool-approval handling. It has no human to answer prompts, so its approval policy must be **non-blocking**: `yolo` auto-allows, a non-blocking `[approvals]` backend decides, and anything that would queue for a human is denied (escalated once to the orchestrator inbox). See [Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}}).
+A headless session drives Claude Code over its stdin control protocol, giving
+graith a clean interrupt. Native permission requests are denied immediately and
+reported as runtime errors; there is no human-response path. Optional
+`[command_policy]` rules synchronously restrict shell commands before the OS
+sandbox enforces its filesystem, process, signal, and network policy. See
+[Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}}).
 
 ## Delete retention
 
@@ -121,7 +126,7 @@ Empty or non-positive duration values fall back to the defaults shown (a zero wa
 
 ## Detection & status classification
 
-The daemon decides each session's `agent_status` (`active`, `ready`, `approval`, `unknown`) from two sources: authoritative reports from agent hooks, and, when no fresh hook report exists, a periodic scrape of the PTY scrollback. The `[detection]` block exposes the timing policy behind both so you can tune how often the daemon looks and how long each signal is trusted.
+The daemon decides each session's `agent_status` (`active`, `ready`, `error`, `unknown`) from two sources: authoritative reports from agent hooks, and, when no fresh hook report exists, a periodic scrape of the PTY scrollback. The `[detection]` block exposes the timing policy behind both so you can tune how often the daemon looks and how long each signal is trusted.
 
 ```toml
 [detection]
@@ -133,12 +138,12 @@ adopted_grace        = "60s"    # after a daemon upgrade, keep the prior status 
 recent_output_window = "3s"     # recent PTY output alone implies "active" when scraping is inconclusive ("0" disables)
 hook_start_window    = "5s"     # a SessionStart hook stays authoritative this long
 hook_activity_window = "30s"    # tool-use hooks (prompt / pre / post) stay authoritative this long
-hook_terminal_window = "30m"    # ready / approval hooks (Stop, idle, permission) stay authoritative this long
+hook_terminal_window = "30m"    # ready/error hooks (Stop, idle, unexpected permission) stay authoritative this long
 ```
 
 **Scanning.** `scan_interval` is the scrollback poll cadence — the shortest window in which a status change can be noticed from PTY text. `fetch_interval` governs the much slower background `git fetch` that keeps `origin/<base>` fresh so the diverged-from-base count doesn't go stale after remote merges, and `fetch_timeout` bounds each repo's fetch so one slow remote can't stall the pass for other sessions.
 
-**Hook authority.** When an agent hook reports a status, that report is trusted over PTY scraping until its window elapses. `hook_start_window`, `hook_activity_window`, and `hook_terminal_window` are the windows for start, tool-use, and terminal (ready/approval) events respectively — longer for terminal states, which are stable, and short for the noisy activity events.
+**Hook authority.** When an agent hook reports a status, that report is trusted over PTY scraping until its window elapses. `hook_start_window`, `hook_activity_window`, and `hook_terminal_window` are the windows for start, tool-use, and terminal (ready/error) events respectively — longer for terminal states, which are stable, and short for the noisy activity events.
 
 **Scraping fallbacks.** `silent_threshold` is how long a running session may produce zero PTY output before the daemon logs a "silent session" warning. `recent_output_window` treats a session that produced output very recently as `active` even when the scraped text is inconclusive; `adopted_grace` keeps a session's previous status for a short window after a daemon upgrade re-attaches to a surviving agent, so a freshly adopted PTY isn't misread as `unknown`. Setting either window to `"0"` disables that fallback.
 
@@ -171,7 +176,7 @@ sample_history  = 5      # how many recent samples are retained per session
 
 ## Output & display limits
 
-graith truncates output in several user-visible places so a huge log, a runaway tool input, or a long final message never floods a view or an inbox nudge. These caps were formerly scattered as unrelated constants across the daemon and CLI; the `[limits]` block gathers them so one change updates every surface. Each value is a plain count and the unit is in the key name (lines, bytes, runes); a value less than 1 falls back to the default shown.
+graith truncates output in several user-visible places so a huge log or a long final message never floods a view or an inbox nudge. These caps were formerly scattered as unrelated constants across the daemon and CLI; the `[limits]` block gathers them so one change updates every surface. Each value is a plain count and the unit is in the key name (lines, bytes, runes); a value less than 1 falls back to the default shown.
 
 ```toml
 [limits]
@@ -179,12 +184,11 @@ log_lines              = 300      # default trailing lines for `gr logs`, `gr mc
 wait_scan_lines        = 500      # scrollback lines `gr wait --contains` scans for an already-present match
 wait_buffer_bytes      = 65536    # partial-line buffer cap in the live `gr wait` matcher (64 KiB)
 mcp_log_read_bytes     = 1048576  # max trailing bytes read from an MCP log file before splitting into lines (1 MiB)
-approval_display_bytes = 500      # tool input shown in the approval overlay (backends still evaluate the full input)
 last_message_runes     = 2000     # agent's final Stop message the status hook forwards (counted in runes)
 inbox_preview_bytes    = 1000     # unread-inbox preview injected into a session's SessionStart hook context
 ```
 
-`log_lines` is the shared default used whenever a `--lines`/`-n` count is omitted: `gr logs`, `gr mcp logs`, and attach scroll mode send `0`, so the daemon applies its current value on every request. Because the daemon owns the resolution, reconnecting attach sessions and the graphical clients' log peeks pick up the same server-side default after a config reload too. `wait_scan_lines` and `wait_buffer_bytes` bound how much history `gr wait --contains` scans and how much unterminated output the live matcher retains. `approval_display_bytes`, `last_message_runes`, and `inbox_preview_bytes` cap what is *shown* — the untruncated values are still evaluated (approval backends) or recoverable (`gr msg inbox --all` shows the full message body). The byte caps are counted in bytes but never split a multi-byte character mid-rune, and `last_message_runes` is counted in whole runes.
+`log_lines` is the shared default used whenever a `--lines`/`-n` count is omitted: `gr logs`, `gr mcp logs`, and attach scroll mode send `0`, so the daemon applies its current value on every request. Because the daemon owns the resolution, reconnecting attach sessions and the graphical clients' log peeks pick up the same server-side default after a config reload too. `wait_scan_lines` and `wait_buffer_bytes` bound how much history `gr wait --contains` scans and how much unterminated output the live matcher retains. `last_message_runes` and `inbox_preview_bytes` cap what is shown; the full message remains available through `gr msg inbox --all`. Byte caps never split a multi-byte character mid-rune, and `last_message_runes` is counted in whole runes.
 
 ## Update check
 

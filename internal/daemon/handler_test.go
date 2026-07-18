@@ -205,7 +205,7 @@ func TestHandshake(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sendControl(t, "handshake", protocol.HandshakeMsg{
-		Version:      "1.0",
+		Version:      "2.0",
 		ClientID:     "test-client",
 		TerminalSize: [2]uint16{120, 40},
 		Cwd:          "/tmp",
@@ -312,7 +312,7 @@ func TestHandshakeCompatibleMinorVersion(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sendControl(t, "handshake", protocol.HandshakeMsg{
-		Version:      "1.99",
+		Version:      "2.99",
 		ClientID:     "test-client",
 		TerminalSize: [2]uint16{80, 24},
 		Cwd:          "/tmp",
@@ -515,7 +515,7 @@ func TestResizeWhileAttached(t *testing.T) {
 
 	// Handshake + attach
 	h.sendControl(t, "handshake", protocol.HandshakeMsg{
-		Version: "1.0", ClientID: "c1",
+		Version: "2.0", ClientID: "c1",
 		TerminalSize: [2]uint16{80, 24}, Cwd: "/tmp",
 	})
 	h.readControlMsg(t) // handshake_ok
@@ -2141,8 +2141,7 @@ func TestNullPayloadRejected(t *testing.T) {
 		{"screen_snapshot", "invalid screen_snapshot message"},
 		{"status", "invalid status message"},
 		{"status_report", "invalid status_report"},
-		{"approval_request", "invalid approval_request"},
-		{"approval_respond", "invalid approval_respond"},
+		{"command_policy_check", "invalid command_policy_check"},
 	}
 
 	for _, tt := range types {
@@ -2150,7 +2149,7 @@ func TestNullPayloadRejected(t *testing.T) {
 			h := newTestHarness(t)
 
 			h.sendControl(t, "handshake", protocol.HandshakeMsg{
-				Version:      "1.0",
+				Version:      "2.0",
 				ClientID:     "test",
 				TerminalSize: [2]uint16{80, 24},
 				Cwd:          "/tmp",
@@ -2359,12 +2358,14 @@ func assertAttachAutoResumes(t *testing.T, name string, status SessionStatus) {
 
 	cfg := config.Default()
 	cfg.Agents["test"] = config.Agent{
-		Command:    "sleep",
-		Args:       []string{"300"},
-		ResumeArgs: []string{"300"},
+		NonInteractiveArgs: []string{},
+		Command:            "sleep",
+		Args:               []string{"300"},
+		ResumeArgs:         []string{"300"},
 	}
 
 	h := newTestHarnessWithConfig(t, cfg)
+	h.sm.sandboxResolver = func(string) (bool, error) { return false, nil }
 	workDir := t.TempDir()
 
 	h.sm.mu.Lock()
@@ -3043,57 +3044,12 @@ func TestCoverDiagnostics(t *testing.T) {
 	}
 }
 
-// --- approval_list / approval_subscribe / approval_respond ----------------
-
-func TestCoverApprovalList(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "approval_list", struct{}{})
-
-	h.expectType(t, "approval_notification")
-}
-
-func TestCoverApprovalSubscribeLocalHuman(t *testing.T) {
-	h := newTestHarness(t)
-
-	// Local Unix socket (no token) resolves to the local human operator, who is
-	// allowed to subscribe and immediately receives the current pending set.
-	h.sendControl(t, "approval_subscribe", struct{}{})
-
-	h.expectType(t, "approval_notification")
-}
-
-func TestCoverApprovalSubscribeRejectsAgent(t *testing.T) {
-	h := newTestHarness(t)
-	h.addAuthenticatedSession(t, "thrawn-sess", "thrawn", "tok-thrawn")
-
-	h.sendControlWithToken(t, "approval_subscribe", struct{}{}, "tok-thrawn")
-
-	h.expectError(t, "human operator")
-}
-
-func TestCoverApprovalRespondRejectsAgent(t *testing.T) {
-	h := newTestHarness(t)
-	h.addAuthenticatedSession(t, "fash-sess", "fash", "tok-fash")
-
-	h.sendControlWithToken(t, "approval_respond", protocol.ApprovalRespondMsg{
-		RequestID: "req-1", Decision: "allow",
-	}, "tok-fash")
-
-	h.expectError(t, "not permitted for agent sessions")
-}
-
-// TestInvalidPayloads exercises the per-case DecodePayload branch for every
-// control message that reports a specific "invalid <type>" error. Each row
-// sends a wrong-shape (but syntactically valid) payload as the local human so
-// it reaches the DecodePayload branch rather than an earlier auth short-circuit.
 func TestInvalidPayloads(t *testing.T) {
 	cases := []struct {
 		msgType string
 		wantErr string
 	}{
-		{"approval_respond", "invalid approval_respond"},
-		{"approval_request", "invalid approval_request"},
+		{"command_policy_check", "invalid command_policy_check"},
 		{"set_status", "invalid set_status message"},
 		{"status", "invalid status message"},
 		{"status_report", "invalid status_report"},
@@ -3142,7 +3098,6 @@ func TestNotFounds(t *testing.T) {
 		payload any
 		wantErr string
 	}{
-		{"approval_respond", "approval_respond", protocol.ApprovalRespondMsg{RequestID: "haar-missing", Decision: "deny"}, "not found"},
 		{"set_status", "set_status", protocol.SetStatusMsg{SessionID: "haar", Text: "nae session"}, "not found"},
 		{"set_status_clear", "set_status", protocol.SetStatusMsg{SessionID: "haar", Clear: true}, "not found"},
 		{"status", "status", protocol.StatusRequestMsg{SessionID: "haar"}, "not found"},

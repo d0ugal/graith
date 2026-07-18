@@ -520,7 +520,7 @@ func richListWatchSessions() []protocol.SessionInfo {
 	return []protocol.SessionInfo{
 		{
 			ID: "s1", Name: "braw-longish-name", RepoName: "croft", Agent: "claude",
-			Status: "running", AgentStatus: "approval", Branch: "graith/braw/s1",
+			Status: "running", AgentStatus: "error", Branch: "graith/braw/s1",
 			Dirty: true, UnpushedCount: 3,
 			CreatedAt:      now.Add(-90 * time.Minute).Format(time.RFC3339),
 			LastAttachedAt: now.Add(-5 * time.Minute).Format(time.RFC3339),
@@ -782,7 +782,7 @@ func TestListWatchComputeColsAndRenderRow2(t *testing.T) {
 		t.Errorf("name column %d too small for longest name", layout.name)
 	}
 
-	// Row for the dirty+unpushed running session with approval activity.
+	// Row for the dirty+unpushed running session with error activity.
 	dim := m.View() // ensure View path is exercised end-to-end
 	_ = dim
 

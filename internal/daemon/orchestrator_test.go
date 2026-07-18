@@ -529,10 +529,10 @@ func TestCreateOrchestratorAgentMissing_Cov2(t *testing.T) {
 func TestCreateOrchestratorRequiresSandbox_Cov2(t *testing.T) {
 	sm := newOrchTestSM(t)
 
-	// A real default config has the claude agent but sandbox disabled, so the
-	// agent-missing guard passes and the requires-sandbox guard fires.
+	// Explicitly disabling the mandatory sandbox must fail before launch.
 	sm.mu.Lock()
 	sm.cfg = config.Default()
+	sm.cfg.Sandbox.Enabled = false
 	sm.mu.Unlock()
 
 	_, err := sm.createOrchestrator(context.Background())
@@ -540,12 +540,47 @@ func TestCreateOrchestratorRequiresSandbox_Cov2(t *testing.T) {
 		t.Fatal("expected error when sandbox is not available for orchestrator")
 	}
 
-	if !strings.Contains(err.Error(), "requires sandbox") {
+	if !strings.Contains(err.Error(), "required") {
 		t.Fatalf("error = %q, want to mention sandbox requirement", err.Error())
 	}
 
 	if id := sm.findOrchestratorID(); id != "" {
 		t.Fatalf("createOrchestrator must not persist a session when sandbox is unavailable, got %q", id)
+	}
+}
+
+func TestCreateOrchestratorRequiresNonInteractiveAgent(t *testing.T) {
+	sm := newOrchTestSM(t)
+	cfg := config.Default()
+	agent := cfg.Agents["claude"]
+	agent.NonInteractiveArgs = nil
+	cfg.Agents["claude"] = agent
+	sm.cfg = cfg
+
+	_, err := sm.createOrchestrator(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no non_interactive_args") {
+		t.Fatalf("createOrchestrator error = %v, want non-interactive launch failure", err)
+	}
+	if id := sm.findOrchestratorID(); id != "" {
+		t.Fatalf("failed non-interactive validation persisted session %q", id)
+	}
+}
+
+func TestCreateOrchestratorRejectsUnavailableCommandPolicy(t *testing.T) {
+	sm := newOrchTestSM(t)
+	cfg := config.Default()
+	cfg.CommandPolicy = config.CommandPolicy{
+		Backend: "localmost", Command: filepath.Join(t.TempDir(), "missing-localmost"),
+	}
+	sm.cfg = cfg
+	sm.sandboxResolver = func(string) (bool, error) { return true, nil }
+
+	_, err := sm.createOrchestrator(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "cannot enforce") {
+		t.Fatalf("createOrchestrator error = %v, want command-policy availability failure", err)
+	}
+	if id := sm.findOrchestratorID(); id != "" {
+		t.Fatalf("failed command-policy validation persisted session %q", id)
 	}
 }
 

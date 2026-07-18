@@ -66,7 +66,7 @@ func TestAgentCatalogHandlerIncludesCustomAgentAndDefault(t *testing.T) {
 		h.sm.cfg.Agents = map[string]config.Agent{}
 	}
 
-	h.sm.cfg.Agents["thrawn"] = config.Agent{Command: "thrawn-cli"}
+	h.sm.cfg.Agents["thrawn"] = config.Agent{NonInteractiveArgs: []string{}, Command: "thrawn-cli"}
 	h.sm.cfg.DefaultAgent = "thrawn"
 	h.sm.mu.Unlock()
 

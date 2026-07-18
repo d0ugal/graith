@@ -63,7 +63,7 @@ The following capability scope is intentional:
 
 | Capability | CLI | iOS | macOS | Rationale |
 |------------|-----|-----|-------|-----------|
-| Interactive approval queue and responses | Targeted pending removal | Excluded | Excluded | Native approval UI and protocol plumbing are removed now; issue [#1392](https://github.com/d0ugal/graith/issues/1392) tracks removing interactive approvals entirely in favour of sandbox enforcement. |
+| Interactive approval queue and responses | Removed | Removed | Removed | Issue [#1392](https://github.com/d0ugal/graith/issues/1392) removed the workflow across every platform in favour of mandatory sandbox enforcement. |
 | Manage paired devices | Targeted | Excluded | Excluded | Management is local-human-only and remote-denied; apps pair with a daemon but do not administer its trust list. |
 | Direct messages | Targeted | Targeted | Targeted | A focused human-to-session conversation fits both native apps. |
 | Topic publish/subscribe | Targeted | Excluded | Excluded | Topics are an agent/orchestrator coordination primitive rather than a human chat UI. |
@@ -95,10 +95,11 @@ topic publish/subscribe (excluded). Split todo into a targeted read-only overvie
 and excluded mutation. Narrow document mutation to put/append/remove while
 retaining the existing browse/read capability.
 
-Remove the existing approval queue, response actions, subscriptions, and Swift
-wire models from both native apps. The CLI and daemon remain unchanged in this
-change so the capability rows continue to describe their current support;
-[#1392](https://github.com/d0ugal/graith/issues/1392) owns the broader removal.
+This decision originally removed the queue, response actions, subscriptions,
+and Swift wire models only from the native apps. Issue
+[#1392](https://github.com/d0ugal/graith/issues/1392) subsequently removed the
+same workflow from the CLI, daemon, and protocol, replacing it with mandatory
+sandbox enforcement and an optional subtractive command policy.
 
 Reclassify Swift protocol expectations from `planned` or `required` to `na` when
 the corresponding wire type has no remaining native consumer. Delete now-unused

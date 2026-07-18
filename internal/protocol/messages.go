@@ -9,7 +9,10 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const Version = "1.0"
+// Version 2 removes the interactive approval wire protocol. The major bump is
+// intentional: older clients must not connect expecting approval queues or
+// human decision messages that the daemon can no longer provide.
+const Version = "2.0"
 
 func VersionCompatible(v string) bool {
 	ourMajor, _, ok := strings.Cut(Version, ".")
@@ -89,14 +92,13 @@ type CreateMsg struct {
 	InPlace             bool   `json:"in_place,omitempty"`
 	AllowConcurrent     bool   `json:"allow_concurrent,omitempty"`
 	SkipModelValidation bool   `json:"skip_model_validation,omitempty"`
-	Yolo                bool   `json:"yolo,omitempty"`
 	Headless            bool   `json:"headless,omitempty"`
 	// NoFetch skips the `git fetch origin` that normally runs before the
 	// worktree is created (issue #1012). Lets sessions be created from local
 	// repo state when SSH auth is unavailable (Secretive/biometric, offline).
 	NoFetch bool `json:"no_fetch,omitempty"`
 	// Codex carries typed per-session Codex CLI options (profile, reasoning
-	// effort, service tier, web search, approval policy — issue #1186). Nil when
+	// effort, service tier, and web search — issue #1186). Nil when
 	// none were set; only meaningful for `--agent codex`.
 	Codex *config.CodexOptions `json:"codex,omitempty"`
 }
@@ -545,7 +547,6 @@ type SessionInfo struct {
 	Sandboxed       bool               `json:"sandboxed,omitempty"`
 	Mirror          bool               `json:"mirror,omitempty"`
 	InPlace         bool               `json:"in_place,omitempty"`
-	Yolo            bool               `json:"yolo,omitempty"`
 	Model           string             `json:"model,omitempty"`
 	ToolName        string             `json:"tool_name,omitempty"`
 	Includes        []IncludedRepoInfo `json:"includes,omitempty"`
@@ -646,46 +647,16 @@ type ScreenPreviewResponseMsg struct {
 	Preview   string `json:"preview"`
 }
 
-// Approval protocol messages
-
-// ApprovalRequestMsg is sent by the hook CLI (gr approve-request) to the daemon.
-// The handler blocks until a decision is made.
-//
-// ToolInput carries the FULL, untruncated tool input JSON — approvals backends
-// may need to evaluate the whole command, so truncation happens only at the
-// display layer (ApprovalInfo). HookPayload is the raw agent hook payload,
-// forwarded verbatim for backends (e.g. localmost) that speak the agent's
-// native protocol; it may be empty.
-type ApprovalRequestMsg struct {
-	RequestID   string `json:"request_id"`
+// CommandPolicyCheckMsg is the bounded synchronous hook-to-daemon policy
+// request. The daemon always replies immediately with allow or deny.
+type CommandPolicyCheckMsg struct {
 	SessionID   string `json:"session_id"`
 	ToolName    string `json:"tool_name"`
 	ToolInput   string `json:"tool_input,omitempty"`
 	HookPayload string `json:"hook_payload,omitempty"`
 }
 
-type ApprovalInfo struct {
-	RequestID   string `json:"request_id"`
-	SessionID   string `json:"session_id"`
-	SessionName string `json:"session_name"`
-	ToolName    string `json:"tool_name"`
-	ToolInput   string `json:"tool_input,omitempty"`
-	Agent       string `json:"agent"`
-	RepoName    string `json:"repo_name"`
-	RequestedAt string `json:"requested_at"`
-}
-
-type ApprovalNotificationMsg struct {
-	Pending []ApprovalInfo `json:"pending"`
-}
-
-type ApprovalRespondMsg struct {
-	RequestID string `json:"request_id"`
-	Decision  string `json:"decision"`
-	Reason    string `json:"reason,omitempty"`
-}
-
-type ApprovalDecisionMsg struct {
+type CommandPolicyDecisionMsg struct {
 	Decision string `json:"decision"`
 	Reason   string `json:"reason,omitempty"`
 }
@@ -908,12 +879,11 @@ type MessagesDiagnostic struct {
 }
 
 type FleetSummary struct {
-	Total    int `json:"total"`
-	Active   int `json:"active"`
-	Approval int `json:"approval"`
-	Ready    int `json:"ready"`
-	Errored  int `json:"errored"`
-	Stopped  int `json:"stopped"`
+	Total   int `json:"total"`
+	Active  int `json:"active"`
+	Ready   int `json:"ready"`
+	Errored int `json:"errored"`
+	Stopped int `json:"stopped"`
 }
 
 type StatusResponseMsg struct {
@@ -1464,9 +1434,6 @@ const popSigningPrefix = "graith-pop-v1:"
 func PoPSigningInput(nonce, spki string) []byte {
 	return []byte(popSigningPrefix + nonce + ":" + spki)
 }
-
-// ApprovalSubscribeMsg subscribes the client to approval notifications.
-type ApprovalSubscribeMsg struct{}
 
 // Remote-create repo picker messages (see design §C.4)
 

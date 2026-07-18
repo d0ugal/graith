@@ -19,7 +19,7 @@ type TemplateVars struct {
 	// add_dir_args, once per granted worktree (see Agent.AddDirArgsFor). It is
 	// empty in every other expansion context.
 	Dir string
-	// Profile, ReasoningEffort, ServiceTier, ApprovalPolicy, and WebSearch are
+	// Profile, ReasoningEffort, ServiceTier, and WebSearch are
 	// the Codex per-session options (issue #1186) surfaced as template variables
 	// so an agent's conditional option_args groups (Agent.OptionArgsFor) can turn
 	// them into CLI flags from config rather than hard-coded Go (issue #1236).
@@ -28,7 +28,6 @@ type TemplateVars struct {
 	Profile         string
 	ReasoningEffort string
 	ServiceTier     string
-	ApprovalPolicy  string
 	WebSearch       bool
 }
 
@@ -45,7 +44,6 @@ func (v TemplateVars) toMap() map[string]string {
 		"profile":                      v.Profile,
 		"reasoning_effort":             v.ReasoningEffort,
 		"service_tier":                 v.ServiceTier,
-		"approval_policy":              v.ApprovalPolicy,
 		"web_search":                   boolVar(v.WebSearch),
 	}
 }

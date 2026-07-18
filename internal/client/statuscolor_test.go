@@ -28,7 +28,6 @@ func TestAgentStatusColor(t *testing.T) {
 		status string
 		want   any
 	}{
-		{"approval", colorRed},
 		{"active", colorGreen},
 		{"running", colorGreen},
 		{"ready", colorBlue},

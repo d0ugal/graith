@@ -15,7 +15,7 @@ struct MessagingTests {
 
         let server = Task {
             _ = try await daemon.readControl() // handshake
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             let req = try await daemon.readControl()
             #expect(req.type == "msg_pub")
             let pub = try decodePayload(req, as: MsgPubMsg.self)
@@ -53,7 +53,7 @@ struct MessagingTests {
 
         let server = Task {
             _ = try await daemon.readControl() // handshake
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             let req = try await daemon.readControl()
             #expect(req.type == "msg_conversation")
             let conv = try decodePayload(req, as: MsgConversationMsg.self)
@@ -90,7 +90,7 @@ struct MessagingTests {
 
         let server = Task {
             _ = try await daemon.readControl()
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             let req = try await daemon.readControl()
             #expect(req.type == "msg_conversation")
             #expect(try decodePayload(req, as: MsgConversationMsg.self).limit == nil)
@@ -116,7 +116,7 @@ struct MessagingTests {
 
         let server = Task {
             _ = try await daemon.readControl()
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             let req = try await daemon.readControl()
             #expect(req.type == "msg_ack")
             let ack = try decodePayload(req, as: MsgAckMsg.self)
@@ -144,7 +144,7 @@ struct MessagingTests {
 
         let server = Task {
             _ = try await daemon.readControl()
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             _ = try await daemon.readControl() // msg_pub
             try await daemon.writeControl("error", ErrorMsg(message: "session not found"))
         }

@@ -79,18 +79,14 @@ as live state instead).
 
 <sup>1</sup> Type into another session remotely: An attached GUI types directly; the standalone remote-type command is a CLI convenience. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-platform-scope-policy.md#platform-support)
 
-### Approvals & pairing
+### Pairing
 
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
-| View pending tool approvals <sup>1</sup> | ✅ | — | — |
-| Respond to a tool approval <sup>2</sup> | ✅ | — | — |
 | Request device pairing | ✅ | ✅ | ✅ |
-| List / approve / revoke paired devices <sup>3</sup> | ✅ | — | — |
+| List / approve / revoke paired devices <sup>1</sup> | ✅ | — | — |
 
-<sup>1</sup> View pending tool approvals: Native approval queues are removed in preparation for eliminating interactive approvals entirely under [issue #1392](https://github.com/d0ugal/graith/issues/1392). [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
-<sup>2</sup> Respond to a tool approval: Native approval responses are removed in preparation for eliminating interactive approvals entirely under [issue #1392](https://github.com/d0ugal/graith/issues/1392). [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
-<sup>3</sup> List / approve / revoke paired devices: Device-list administration is local-human-only and remote-denied. Native apps pair with a daemon but deliberately do not manage its trust list. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
+<sup>1</sup> List / approve / revoke paired devices: Device-list administration is local-human-only and remote-denied. Native apps pair with a daemon but deliberately do not manage its trust list. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
 
 ### Messaging
 

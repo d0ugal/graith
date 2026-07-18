@@ -7,7 +7,7 @@ import "strings"
 // combinatorially over quantified terms — a classic backtracking shape that can
 // go super-linear. Rules are operator-controlled, but a malicious agent
 // controls the command length, so a pathological rule against a long command
-// could otherwise pin a CPU on the approval path. The bound is far above any
+// could otherwise pin a CPU on the command-policy path. The bound is far above any
 // realistic rule/command pairing. See issue #798.
 const maxMatchSteps = 1_000_000
 
@@ -284,7 +284,7 @@ func isInt(s string) bool {
 // rejects the empty-string argument ""). Tightening this to a "path-shaped"
 // heuristic (requiring a leading /, ./, ~, etc.) would break parity with
 // localmost, which allows e.g. `mkdir foo`. See issue #732 and the documented
-// behaviour in docs/design/2026-07-03-pluggable-approvals-backends-design.md.
+// behaviour in docs/design/2026-07-03-non-interactive-sandbox-policy.md.
 func isValidPath(s string) bool {
 	return s != "" && strings.IndexByte(s, 0) < 0
 }

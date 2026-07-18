@@ -11,8 +11,8 @@ draft: false
 
 ```toml
 [sandbox]
-enabled     = false           # wrap all agents in the sandbox
-backend     = "nono"          # REQUIRED when enabled: "safehouse" | "nono"
+enabled     = true            # required; false makes session launch fail closed
+backend     = "nono"          # required: "safehouse" | "nono"
 command     = "nono"          # path/name of the backend binary (default: backend name)
 features    = ["ssh"]         # feature gates (see caveats below)
 read_dirs   = ["~/Code"]      # additional read-only paths (directories)
@@ -37,8 +37,6 @@ read_dirs  = ["~/.claude"]    # merged with global read_dirs
 write_dirs = ["~/.claude"]    # merged with global write_dirs
 write_files = ["~/.claude.json", "~/.claude.json.lock", "~/.claude.lock"]  # login file (read+write)
 
-[agents.codex.sandbox]
-disabled = true               # force-disable for this agent
 ```
 
 ## Merge behavior
@@ -46,8 +44,7 @@ disabled = true               # force-disable for this agent
 - `features`, `read_dirs`, `write_dirs`, `read_files`, and `write_files` are merged (global + agent, deduplicated)
 - `backend`, `command`, and `signal_mode` are overridable per-agent (agent takes precedence)
 - `network` is overridable per-agent — an agent's `[agents.*.sandbox.network]` replaces the global policy wholesale (not merged element-wise)
-- `disabled = true` on an agent overrides `enabled = true` on the global config
-- `enabled = true` on an agent enables sandboxing even if the global config has `enabled = false`
+- `enabled = false` or `disabled = true` may still be parsed, but the resulting session configuration is rejected; every agent requires enforcement
 
 ## Feature gate caveats
 
@@ -67,6 +64,48 @@ sandboxed process may signal other processes: `isolated` (no signalling outside
 the sandbox), `allow_same_sandbox` (nono's default), or `allow_all`. Setting it
 to `isolated` is what makes the `process-control` feature meaningful under nono.
 Leaving it unset inherits nono's base default. `safehouse` ignores it.
+
+## Command policy
+
+```toml
+[command_policy]
+backend = ""          # disabled by default; "builtin" or "localmost"
+timeout = "5s"        # hard bound for one synchronous check (maximum 60s)
+command = ""          # optional localmost executable override
+
+[command_policy.builtin]
+config = ""           # localmost-format config.json
+# allow = ["git status", "go test *"]
+# deny  = ["rm *"]
+```
+
+Command policy is an optional, synchronous restriction applied before shell
+commands. It can only subtract from what the OS sandbox permits:
+
+- `backend = ""` installs no policy hook; commands proceed directly to sandbox enforcement.
+- `backend = "builtin"` uses graith's localmost-compatible parser and rules.
+- `backend = "localmost"` invokes the native localmost binary, optionally selected with `command`.
+
+Only shell tools are in policy scope. Other tools go directly to the sandbox.
+An allow means “continue to sandbox enforcement”; it never bypasses filesystem,
+process, signal, or network restrictions. A deny blocks immediately. Interactive
+results (`ask`/`defer`), malformed output, timeouts, backend errors, and an
+unavailable configured backend all fail closed without waiting for a human.
+
+Configured policy availability is checked at session creation and resume. The
+session does not start if enforcement cannot be established. `timeout` defaults
+to `5s`, must be positive, and may not exceed `60s`.
+
+Enabling, disabling, or otherwise changing `[command_policy]` marks existing
+sessions config-stale. Restart those sessions to install the exact policy hook
+recorded for their launch; rule checks remain synchronous and fail closed.
+
+Rule tooling lives under the sandbox namespace:
+
+```bash
+printf '%s\n' 'git status' | gr sandbox policy check
+gr sandbox policy validate
+```
 
 ### Network egress (nono only)
 
@@ -108,8 +147,9 @@ write_dirs = []
 
 [agents.claude]
 command     = "claude"
-args        = ["--dangerously-skip-permissions", "--session-id", "{agent_session_id}"]
-resume_args = ["--dangerously-skip-permissions", "--resume", "{agent_session_id}"]
+non_interactive_args = ["--dangerously-skip-permissions"]
+args        = ["--session-id", "{agent_session_id}"]
+resume_args = ["--resume", "{agent_session_id}"]
 
 [agents.claude.sandbox]
 read_dirs   = ["~/.claude"]
@@ -117,8 +157,7 @@ write_dirs  = ["~/.claude"]
 write_files = ["~/.claude.json", "~/.claude.json.lock", "~/.claude.lock"]
 ```
 
-The agent runs with `--dangerously-skip-permissions` (no interactive approval
-prompts), but the kernel sandbox restricts it to the worktree, `~/Code`
+The agent runs with native permission prompting disabled, but the kernel sandbox restricts it to the worktree, `~/Code`
 (read-only), and `~/.claude` (read-write), and denies credentials/shell history
 via nono's default deny groups. The `write_files` grant is what keeps Claude
 **logged in**: its OAuth login lives in `~/.claude.json` (a file next to the

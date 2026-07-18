@@ -11,21 +11,6 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-func TestOnAgentStatusChange_NotifiesOnApproval(t *testing.T) {
-	sm := &SessionManager{
-		cfg: &config.Config{
-			Notifications: config.Notifications{
-				Enabled:    true,
-				OnApproval: true,
-			},
-		},
-		log: slog.Default(),
-	}
-
-	// Should not panic with nil messages store
-	sm.onAgentStatusChange("braw-id", "bonnie-session", "active", "approval")
-}
-
 func TestOnAgentStatusChange_DisabledNotifications(t *testing.T) {
 	sm := &SessionManager{
 		cfg: &config.Config{
@@ -36,23 +21,7 @@ func TestOnAgentStatusChange_DisabledNotifications(t *testing.T) {
 		log: slog.Default(),
 	}
 
-	sm.onAgentStatusChange("braw-id", "bonnie-session", "active", "approval")
-}
-
-func TestOnAgentStatusChange_SkipsNonApprovalWhenOnlyApprovalEnabled(t *testing.T) {
-	sm := &SessionManager{
-		cfg: &config.Config{
-			Notifications: config.Notifications{
-				Enabled:    true,
-				OnApproval: true,
-				OnStopped:  false,
-			},
-		},
-		log: slog.Default(),
-	}
-
-	// "active" transitions should not trigger notifications
-	sm.onAgentStatusChange("braw-id", "bonnie-session", "unknown", "active")
+	sm.onAgentStatusChange("braw-id", "bonnie-session", "active", "stopped")
 }
 
 func TestSendNotification_CommandUsesEnvVars(t *testing.T) {
@@ -61,15 +30,15 @@ func TestSendNotification_CommandUsesEnvVars(t *testing.T) {
 	sm := &SessionManager{
 		cfg: &config.Config{
 			Notifications: config.Notifications{
-				Enabled:    true,
-				OnApproval: true,
-				Command:    "printf '%s|%s|%s' \"$GRAITH_SESSION_NAME\" \"$GRAITH_STATUS\" \"$GRAITH_MESSAGE\" > " + outFile,
+				Enabled:   true,
+				OnStopped: true,
+				Command:   "printf '%s|%s|%s' \"$GRAITH_SESSION_NAME\" \"$GRAITH_STATUS\" \"$GRAITH_MESSAGE\" > " + outFile,
 			},
 		},
 		log: slog.Default(),
 	}
 
-	sm.sendNotification("braw-kirk", "approval", sm.cfg.Notifications.Command)
+	sm.sendNotification("braw-kirk", "stopped", sm.cfg.Notifications.Command)
 
 	deadline := time.After(5 * time.Second)
 
@@ -78,7 +47,7 @@ func TestSendNotification_CommandUsesEnvVars(t *testing.T) {
 		if err == nil && len(data) > 0 {
 			got := string(data)
 
-			want := "braw-kirk|approval|braw-kirk needs approval"
+			want := "braw-kirk|stopped|braw-kirk has stopped"
 			if got != want {
 				t.Errorf("got %q, want %q", got, want)
 			}
@@ -101,8 +70,8 @@ func TestSendNotification_CommandInjectionPrevented(t *testing.T) {
 	sm := &SessionManager{
 		cfg: &config.Config{
 			Notifications: config.Notifications{
-				Enabled:    true,
-				OnApproval: true,
+				Enabled:   true,
+				OnStopped: true,
 				// Use $GRAITH_SESSION_NAME so the value reaches the shell;
 				// under the old {name} interpolation a malicious name would
 				// have been executed as a subshell.
@@ -113,7 +82,7 @@ func TestSendNotification_CommandInjectionPrevented(t *testing.T) {
 	}
 
 	malicious := "$(touch " + markerFile + ")"
-	sm.sendNotification(malicious, "approval", sm.cfg.Notifications.Command)
+	sm.sendNotification(malicious, "stopped", sm.cfg.Notifications.Command)
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -306,7 +275,7 @@ func TestOnAgentStatusChange_PublishesToMessageStore(t *testing.T) {
 		messages: ms,
 	}
 
-	sm.onAgentStatusChange("braw-sess", "braw-kirk", "active", "approval")
+	sm.onAgentStatusChange("braw-sess", "braw-kirk", "active", "error")
 
 	msgs, err := ms.Read("_system.status", "", false, "")
 	if err != nil {

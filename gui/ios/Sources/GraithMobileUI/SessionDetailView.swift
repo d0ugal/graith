@@ -52,8 +52,8 @@ struct SessionDetailView: View {
                 Label(session.status.capitalized, systemImage: "circle.fill")
                 Label(session.agent, systemImage: "cpu")
                 Label(connection.entry.label, systemImage: "server.rack")
-                if session.needsApproval {
-                    Label("Waiting for approval", systemImage: "bell.badge")
+                if session.agentStatus == "error" {
+                    Label("Agent runtime error", systemImage: "exclamationmark.triangle")
                 }
             } header: {
                 Text(session.branch)

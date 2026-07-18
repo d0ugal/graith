@@ -16,13 +16,14 @@ func newTokenRotationManager(t *testing.T, command string, args ...string) (*Ses
 
 	dir := t.TempDir()
 	cfg := config.Default()
-	cfg.Agents["bide-agent"] = config.Agent{Command: command, Args: args, ResumeArgs: args}
+	cfg.Agents["bide-agent"] = config.Agent{NonInteractiveArgs: []string{}, Command: command, Args: args, ResumeArgs: args}
 
 	sm := NewSessionManager(cfg, config.Paths{
 		StateFile: filepath.Join(dir, "state.json"),
 		DataDir:   dir,
 		LogDir:    dir,
 	}, slog.Default())
+	sm.sandboxResolver = func(string) (bool, error) { return false, nil }
 
 	return sm, dir
 }

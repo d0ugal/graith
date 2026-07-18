@@ -28,10 +28,10 @@ When a valid token is present, the daemon enforces these rules:
 
 | Rule | Message types | Effect |
 |------|--------------|--------|
-| Always allowed | `handshake`, `list`, `diagnostics`, `config`, `detach`, `resize`, `approval_list` | No restriction |
-| Self only | `set_status`, `status_report`, `approval_request`, `mcp_connect` | Agent can only target its own session |
+| Always allowed | `handshake`, `list`, `diagnostics`, `config`, `detach`, `resize` | No restriction |
+| Self only | `set_status`, `status_report`, `command_policy_check`, `mcp_connect` | Agent can only target its own session |
 | Self or descendant | `fork`, `attach`, `stop`, `delete`, `type`, `resume`, `restart`, `update`, `logs`, `screen_preview`, `screen_snapshot`, `status` | Agent can target itself or any session it created (including transitive children) |
-| Human only | `reload`, `upgrade`, `approval_respond` | Rejected when a token is present; reserved for human operators |
+| Human only | `reload`, `upgrade` | Rejected when a token is present; reserved for human operators |
 
 For `update --parent`, an authenticated session must also have authority over
 the new parent. Only the orchestrator or a human CLI connection may clear a
@@ -63,7 +63,10 @@ the daemon starts recovers without relaunching. Local access does not use device
 pairing. Pairing in the app applies only when **Add Host** connects to another
 daemon over the tailnet.
 
-This closes the token-stripping gap: a sandboxed agent that unsets `GRAITH_TOKEN` can no longer masquerade as the human, because it cannot read `human.token` (the data dir is outside its sandbox). The security boundary is the sandbox — an *unsandboxed* agent can read either credential, so keep the sandbox on (and `gr doctor` warns when it is off).
+This closes the token-stripping gap: an agent that unsets `GRAITH_TOKEN` cannot
+masquerade as the human because the mandatory sandbox excludes `human.token`
+and the data directory. Session creation fails if sandbox enforcement is off or
+unavailable.
 
 ## Token lifecycle
 
@@ -84,7 +87,9 @@ Token auth and [sandbox]({{< relref "sandbox" >}}) are complementary:
 - **Token auth** prevents impersonation at the protocol level — an agent with a valid token can only act as itself or its descendants
 - **Sandbox** prevents filesystem access — a sandboxed agent cannot read `state.json` (which contains all tokens) or other sessions' worktrees
 
-Together they provide defense in depth. Token auth is useful even without sandbox (prevents accidental impersonation by cooperative agents), and sandbox is useful even without token auth (restricts filesystem and network access).
+Together they provide defense in depth. The sandbox is mandatory for every
+agent launch; token auth then narrows what that confined process may request
+from the daemon.
 
 ## Health checks
 
@@ -95,16 +100,14 @@ $ gr doctor
 ...
 [sessions] "my-agent" (abc123): missing auth token — session may need restart to receive token
   hint: Run: gr restart my-agent
-[sessions] sandbox disabled with 3 running sessions — tokens in state.json are readable by all agents
-  hint: Enable sandbox in config or limit to single-agent workflows
 ```
 
 ## Limitations
 
-- **The sandbox is the boundary**: all sessions run as the same OS user, so an *unsandboxed* agent can read `human.token` and `state.json` directly and act as any identity. graith hardens the cooperative + sandboxed case; keep the sandbox on for the guarantees above to hold. `gr doctor` warns when it is disabled.
-- **No encryption at rest**: tokens are stored in plaintext in `state.json` and `human.token`. The sandbox prevents agents from reading these files; unsandboxed agents can access them.
+- **The sandbox is the boundary**: all sessions run as the same OS user, so graith refuses creation and resume unless the configured OS sandbox can be enforced. `gr doctor` diagnoses a missing or unavailable backend.
+- **No encryption at rest**: tokens are stored in plaintext in `state.json` and `human.token`. The mandatory sandbox prevents agent processes from reading these files.
 - **Local only**: the Unix socket is protected by filesystem permissions (user-only). Token auth does not protect against other OS users — it protects sessions from each other, and agents from the human role, within the same user.
-- **OS-enforced identity is future work**: kernel peer credentials or per-session sockets (to defend even the unsandboxed case) are deferred — see the design doc `docs/design/2026-07-11-auth-identity-hardening.md`.
+- **OS-enforced identity is future work**: kernel peer credentials or per-session sockets would add another boundary beyond the mandatory process sandbox; see `docs/design/2026-07-11-auth-identity-hardening.md`.
 
 ## Environment variables
 

@@ -69,12 +69,11 @@ public enum SidebarFilter {
     }
 
     /// A single session's "needs attention" test, matching the overlay's
-    /// `filterNeedsAttention` (`internal/client/overlay.go`): pending approval,
-    /// errored, running-and-ready, or a stopped non-mirror session with
+    /// `filterNeedsAttention` (`internal/client/overlay.go`): errored,
+    /// running-and-ready, or a stopped non-mirror session with
     /// uncommitted/unpushed work.
     public static func needsAttention(_ session: SessionInfo) -> Bool {
-        if session.needsApproval { return true }
-        if session.isErrored { return true }
+        if session.isErrored || session.agentStatus == "error" { return true }
         if session.isRunning && session.agentStatus == "ready" { return true }
         if session.isStopped && !(session.mirror ?? false)
             && ((session.dirty ?? false) || (session.unpushedCount ?? 0) > 0) {

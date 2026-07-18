@@ -70,6 +70,24 @@ toml_escape() {
 	printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
 
+case "$(uname -s)" in
+	Darwin) DEMO_SANDBOX_BACKEND="${GRAITH_DEMO_SANDBOX_BACKEND:-safehouse}" ;;
+	Linux)  DEMO_SANDBOX_BACKEND="${GRAITH_DEMO_SANDBOX_BACKEND:-nono}" ;;
+	*)
+		echo "refusing: the demo requires a supported OS sandbox (Darwin or Linux)." >&2
+		exit 1
+		;;
+esac
+
+append_default_sandbox() {
+	cat >> "$CONFIG_FILE" <<EOF
+
+[sandbox]
+enabled = true
+backend = "$(toml_escape "$DEMO_SANDBOX_BACKEND")"
+EOF
+}
+
 # Prefer the freshly-built binary in the repo root; fall back to building it.
 GR="$REPO_ROOT/gr"
 if [ ! -x "$GR" ]; then
@@ -122,26 +140,16 @@ if [ -n "$agents_sandbox" ]; then
 		if printf '%s\n' "$agents_sandbox" | grep -qE '^[[:space:]]*enabled[[:space:]]*=[[:space:]]*true'; then
 			echo "==> demo agents will run SANDBOXED (copied [sandbox] enabled = true)"
 		else
-			echo "!! WARNING: copied [sandbox] is present but NOT enabled — demo agents run UNSANDBOXED" >&2
+			echo "refusing: copied [sandbox] is not enabled; demo agents may not run unsandboxed." >&2
+			exit 1
 		fi
 	else
-		echo "!! WARNING: no [sandbox] table in $SRC_CONFIG — demo agents run UNSANDBOXED" >&2
+		echo "==> no copied [sandbox]; using mandatory $DEMO_SANDBOX_BACKEND sandbox"
+		append_default_sandbox
 	fi
 else
-	echo "!! WARNING: no agent/sandbox config found in $SRC_CONFIG — using unsandboxed claude/codex" >&2
-	cat >> "$CONFIG_FILE" <<'FALLBACK'
-
-[sandbox]
-enabled = false
-
-[agents.claude]
-command = "claude"
-args = ["--dangerously-skip-permissions", "--session-id", "{agent_session_id}"]
-
-[agents.codex]
-command = "codex"
-args = ["--dangerously-bypass-approvals-and-sandbox"]
-FALLBACK
+	echo "==> no agent/sandbox config found in $SRC_CONFIG — using secure built-in agent defaults"
+	append_default_sandbox
 fi
 
 # Start a fresh daemon that loads the config above. NOTE: don't call

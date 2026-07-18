@@ -34,9 +34,9 @@ struct ControlAndMessageTests {
     }
 
     @Test func versionCompatibility() {
-        #expect(versionCompatible("1.0"))
-        #expect(versionCompatible("1.9"))
-        #expect(!versionCompatible("2.0"))
+        #expect(versionCompatible("2.0"))
+        #expect(versionCompatible("2.9"))
+        #expect(!versionCompatible("1.0"))
         #expect(!versionCompatible("garbage"))
     }
 

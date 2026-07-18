@@ -164,7 +164,7 @@ func SessionColumns() []SessionColumn {
 }
 
 // displayStatus is the merged status shown in the TUI status column: the agent
-// status takes over while the session is running (e.g. "thinking", "approval").
+// status takes over while the session is running (e.g. "thinking").
 func displayStatus(s protocol.SessionInfo) string {
 	if s.AgentStatus != "" && s.Status == "running" {
 		return s.AgentStatus
@@ -173,14 +173,11 @@ func displayStatus(s protocol.SessionInfo) string {
 	return s.Status
 }
 
-// statusStyle colours the TUI status cell by its meaning; approval is bolded so
-// it stands out as needing attention.
+// statusStyle colours the TUI status cell by its meaning.
 func statusStyle(s protocol.SessionInfo) lipgloss.Style {
 	switch displayStatus(s) {
 	case "active", "running":
 		return lipgloss.NewStyle().Foreground(colorGreen)
-	case "approval":
-		return lipgloss.NewStyle().Foreground(colorRed).Bold(true)
 	case "ready":
 		return lipgloss.NewStyle().Foreground(colorBlue)
 	case "errored":
@@ -220,15 +217,13 @@ func tuiGitStyle(s protocol.SessionInfo) lipgloss.Style {
 }
 
 // cliActivity is the plain-text agent-activity cell for `gr ls`: empty unless
-// the session is running, with the approval glyph and active-tool annotation.
+// the session is running, with the active-tool annotation.
 func cliActivity(s protocol.SessionInfo) string {
 	if s.Status != "running" || s.AgentStatus == "" {
 		return ""
 	}
 
 	switch {
-	case s.AgentStatus == "approval":
-		return "⚠ approval"
 	case s.AgentStatus == "active" && s.ToolName != "":
 		return fmt.Sprintf("active (%s)", s.ToolName)
 	default:

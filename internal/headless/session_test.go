@@ -37,18 +37,17 @@ func newBareSession(t *testing.T) *Session {
 }
 
 // startFake launches a real headless Session whose "agent" is a shell script.
-func startFake(t *testing.T, script string, onPerm func(PermissionRequest) PermissionDecision) *Session {
+func startFake(t *testing.T, script string) *Session {
 	t.Helper()
 
 	dir := t.TempDir()
 
 	s, err := New(Opts{
-		ID:           "braw",
-		Command:      "sh",
-		Args:         []string{"-c", script},
-		Dir:          dir,
-		LogPath:      filepath.Join(dir, "scrollback.log"),
-		OnPermission: onPerm,
+		ID:      "braw",
+		Command: "sh",
+		Args:    []string{"-c", script},
+		Dir:     dir,
+		LogPath: filepath.Join(dir, "scrollback.log"),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -76,9 +75,9 @@ func TestSetStatusKeepsToolName(t *testing.T) {
 
 	s := newBareSession(t)
 
-	s.setStatus(StatusApproval, "Bash")
+	s.setStatus(StatusActive, "Bash")
 
-	if snap := s.Snapshot(); snap.Status != StatusApproval || snap.ToolName != "Bash" {
+	if snap := s.Snapshot(); snap.Status != StatusActive || snap.ToolName != "Bash" {
 		t.Fatalf("after setStatus: %+v", snap)
 	}
 
@@ -424,7 +423,7 @@ func TestEndToEndReady(t *testing.T) {
 		`'{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"blether"}]}}' ` +
 		`'{"type":"result","is_error":false,"total_cost_usd":0.1234,"num_turns":3,"result":"bide"}'`
 
-	s := startFake(t, script, nil)
+	s := startFake(t, script)
 	waitDone(t, s, 10*time.Second)
 
 	snap := s.Snapshot()
@@ -464,7 +463,7 @@ func TestEndToEndErroredResult(t *testing.T) {
 		`'{"type":"system","session_id":"canny"}' ` +
 		`'{"type":"result","is_error":true,"total_cost_usd":0.02,"num_turns":1,"result":"thrawn"}'`
 
-	s := startFake(t, script, nil)
+	s := startFake(t, script)
 	waitDone(t, s, 10*time.Second)
 
 	res := s.Snapshot().Result
@@ -491,7 +490,7 @@ func TestEndToEndMalformedLineSkipped(t *testing.T) {
 		`'this is not json at all' ` +
 		`'{"type":"result","is_error":false,"total_cost_usd":0.01,"num_turns":2,"result":"bonnie"}'`
 
-	s := startFake(t, script, nil)
+	s := startFake(t, script)
 	waitDone(t, s, 10*time.Second)
 
 	snap := s.Snapshot()
@@ -511,7 +510,7 @@ func TestEndToEndMalformedLineSkipped(t *testing.T) {
 func TestEndToEndExitCode(t *testing.T) {
 	t.Parallel()
 
-	s := startFake(t, `exit 3`, nil)
+	s := startFake(t, `exit 3`)
 	waitDone(t, s, 10*time.Second)
 
 	if s.ExitCode() != 3 {
@@ -519,73 +518,20 @@ func TestEndToEndExitCode(t *testing.T) {
 	}
 }
 
-func TestEndToEndPermissionApprovedRoundTrip(t *testing.T) {
+func TestUnexpectedNativePermissionPromptIsDeniedAndDiagnosable(t *testing.T) {
 	t.Parallel()
-
-	gotReq := make(chan PermissionRequest, 1)
-	onPerm := func(r PermissionRequest) PermissionDecision {
-		gotReq <- r
-
-		return PermissionDecision{Allow: true, Reason: "bonnie"}
-	}
-
-	// The fake emits a can_use_tool request, then reads the control_response
-	// graith writes back and echoes it to stdout (prefixed so it renders as a
-	// verbatim banner the test can inspect).
-	script := `printf '%s\n' '{"type":"control_request","request_id":"ctl-1","request":{"subtype":"can_use_tool","tool_name":"Bash"}}'; IFS= read -r line; printf 'RESP %s\n' "$line"`
-
-	s := startFake(t, script, onPerm)
-
-	select {
-	case req := <-gotReq:
-		if req.RequestID != "ctl-1" {
-			t.Fatalf("request id = %q, want ctl-1", req.RequestID)
-		}
-
-		if req.ToolName != "Bash" {
-			t.Fatalf("tool name = %q, want Bash", req.ToolName)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("OnPermission callback was never invoked")
-	}
-
-	waitDone(t, s, 10*time.Second)
-
-	preview := s.ScreenPreview()
-	if !strings.Contains(preview, `"behavior":"allow"`) {
-		t.Fatalf("expected an allow control_response in scrollback:\n%s", preview)
-	}
-
-	if !strings.Contains(preview, `"request_id":"ctl-1"`) {
-		t.Fatalf("control_response missing request id:\n%s", preview)
-	}
-
-	if s.Snapshot().Degraded {
-		t.Fatal("a well-formed approval round-trip should not be degraded")
-	}
-}
-
-func TestEndToEndPermissionFailClosed(t *testing.T) {
-	t.Parallel()
-
-	// With OnPermission nil the session must fail closed: deny with a reason,
-	// without invoking any callback path.
 	script := `printf '%s\n' '{"type":"control_request","request_id":"ctl-9","request":{"subtype":"can_use_tool","tool_name":"Bash"}}'; IFS= read -r line; printf 'RESP %s\n' "$line"`
-
-	s := startFake(t, script, nil)
+	s := startFake(t, script)
 	waitDone(t, s, 10*time.Second)
-
 	preview := s.ScreenPreview()
 	if !strings.Contains(preview, `"behavior":"deny"`) {
 		t.Fatalf("expected a deny control_response in scrollback:\n%s", preview)
 	}
-
-	if !strings.Contains(preview, "no approval backend") {
-		t.Fatalf("expected the fail-closed reason in scrollback:\n%s", preview)
+	if !strings.Contains(preview, "unexpected native permission prompt") {
+		t.Fatalf("expected a diagnostic in scrollback:\n%s", preview)
 	}
-
-	if s.Snapshot().Status != StatusApproval {
-		t.Fatalf("status = %q, want approval", s.Snapshot().Status)
+	if !s.Snapshot().Degraded {
+		t.Fatal("unexpected permission prompt must mark the session degraded")
 	}
 }
 
@@ -596,7 +542,7 @@ func TestEndToEndControlResponseEmptyIDDegrades(t *testing.T) {
 	// must flag the session degraded.
 	script := `printf '%s\n' '{"type":"control_response","request_id":"","response":{}}'`
 
-	s := startFake(t, script, nil)
+	s := startFake(t, script)
 	waitDone(t, s, 10*time.Second)
 
 	if !s.Snapshot().Degraded {
@@ -614,7 +560,7 @@ func TestEndToEndControlRoundTrip(t *testing.T) {
 	// parsing the id.
 	script := `IFS= read -r line; printf '%s\n' '{"type":"control_response","response":{"subtype":"success","request_id":"req-1","response":{"tokens":42}}}'`
 
-	s := startFake(t, script, nil)
+	s := startFake(t, script)
 
 	resp, err := s.ContextUsage()
 	if err != nil {
@@ -635,7 +581,7 @@ func TestEndToEndControlErrorResponse(t *testing.T) {
 	// call, not a nil payload.
 	script := `IFS= read -r line; printf '%s\n' '{"type":"control_response","response":{"subtype":"error","request_id":"req-1","error":"dreich"}}'`
 
-	s := startFake(t, script, nil)
+	s := startFake(t, script)
 
 	if _, err := s.ContextUsage(); err == nil {
 		t.Fatal("ContextUsage should error when the CLI returns an error subtype")
@@ -690,7 +636,7 @@ func TestInterruptFallsBackToSignalWithoutControl(t *testing.T) {
 	// A session launched WITHOUT the control channel (Control:false) has no
 	// stdin control path, so Interrupt must SIGINT the process group. A `sleep`
 	// with a SIGINT trap that prints then exits proves the signal landed.
-	s := startFake(t, `trap 'printf "INT\n"; exit 0' INT; sleep 30`, nil)
+	s := startFake(t, `trap 'printf "INT\n"; exit 0' INT; sleep 30`)
 
 	// Give the trap a moment to install before signalling.
 	time.Sleep(200 * time.Millisecond)
@@ -826,7 +772,7 @@ func TestExitSignalReflectsSignaledExit(t *testing.T) {
 	t.Parallel()
 
 	// The fake terminates itself with SIGTERM so waitLoop records the signal.
-	s := startFake(t, `kill -TERM $$`, nil)
+	s := startFake(t, `kill -TERM $$`)
 	waitDone(t, s, 10*time.Second)
 
 	if s.ExitSignal() != syscall.SIGTERM {
@@ -837,7 +783,7 @@ func TestExitSignalReflectsSignaledExit(t *testing.T) {
 func TestKillTerminatesRunningProcess(t *testing.T) {
 	t.Parallel()
 
-	s := startFake(t, `sleep 30`, nil)
+	s := startFake(t, `sleep 30`)
 
 	if s.ProcessPID() <= 0 {
 		t.Fatalf("ProcessPID = %d, want > 0 for a live process", s.ProcessPID())
@@ -857,7 +803,7 @@ func TestKillTerminatesRunningProcess(t *testing.T) {
 func TestForceKillTerminatesRunningProcess(t *testing.T) {
 	t.Parallel()
 
-	s := startFake(t, `sleep 30`, nil)
+	s := startFake(t, `sleep 30`)
 
 	if err := s.ForceKill(); err != nil {
 		t.Fatalf("ForceKill: %v", err)
@@ -877,7 +823,7 @@ func TestEndToEndWriteInputLive(t *testing.T) {
 	// write is exercised against a live process.
 	script := `IFS= read -r line; printf 'GOT %s\n' "$line"`
 
-	s := startFake(t, script, nil)
+	s := startFake(t, script)
 
 	if err := s.WriteInput([]byte("bide a wee")); err != nil {
 		t.Fatalf("WriteInput: %v", err)

@@ -7,7 +7,7 @@
 // docs/examples.md), NOT from its GPL-3.0 Haskell source. Behavioural parity is
 // validated by a conformance corpus rather than bit-identical parsing (graith
 // uses mvdan.cc/sh where localmost uses ShellCheck). Known divergences are
-// tracked in docs/design/2026-07-03-pluggable-approvals-backends-design.md.
+// tracked in docs/design/2026-07-18-non-interactive-sandbox-policy.md.
 package localmost
 
 import (
@@ -146,17 +146,16 @@ func parsePipe(raw json.RawMessage) (pipePolicy, error) {
 
 // fileConfig is the on-disk config.json shape.
 type fileConfig struct {
-	Allow             []Rule `json:"allow"`
-	Deny              []Rule `json:"deny"`
-	AllowSafeXargs    *bool  `json:"allowSafeXargs"`
-	AskNoninteractive *bool  `json:"askNoninteractive"`
+	Allow          []Rule `json:"allow"`
+	Deny           []Rule `json:"deny"`
+	AllowSafeXargs *bool  `json:"allowSafeXargs"`
 }
 
 // Load reads and compiles a localmost-format config.json from path.
 func Load(path string) (*Engine, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read approvals config: %w", err)
+		return nil, fmt.Errorf("read command policy config: %w", err)
 	}
 
 	return Parse(data)
@@ -166,7 +165,7 @@ func Load(path string) (*Engine, error) {
 func Parse(data []byte) (*Engine, error) {
 	var fc fileConfig
 	if err := json.Unmarshal(data, &fc); err != nil {
-		return nil, fmt.Errorf("parse approvals config: %w", err)
+		return nil, fmt.Errorf("parse command policy config: %w", err)
 	}
 
 	return newEngine(fc)

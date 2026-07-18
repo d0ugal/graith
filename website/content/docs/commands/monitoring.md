@@ -115,10 +115,6 @@ Show session output without attaching.
 
 Show info for the current session. Auto-detects the session by matching the current working directory against session worktree paths.
 
-### `gr approvals`
-
-List sessions waiting for approval.
-
 ### `gr doctor` (alias: `doc`)
 
 Run health checks and diagnostics. Checks daemon status, safehouse availability, orphaned worktrees, oversized scrollback files, and stale PID files.
@@ -131,6 +127,17 @@ By default `gr doctor` avoids walking the data dir to measure on-disk sizes — 
 |------|-------------|
 | `--autofix` | Automatically fix issues |
 | `--disk` | Measure on-disk sizes (walks the data dir; can be slow on large installs) |
+
+### `gr sandbox policy`
+
+Inspect the optional shell command restriction layer without launching an
+agent. `gr sandbox policy check` reads a command from stdin; `validate` checks
+the configured built-in rules.
+
+```bash
+printf '%s\n' 'git status' | gr sandbox policy check
+gr sandbox policy validate
+```
 
 ### `gr sandbox explain`
 

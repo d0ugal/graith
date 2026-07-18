@@ -28,7 +28,6 @@ const (
 	ResultNewSession
 	ResultForkSession
 	ResultLastSession
-	ResultApprovalOverlay
 	ResultOrchestratorSession
 	ResultMessageOverlay
 	ResultRenameSession
@@ -175,11 +174,10 @@ func keyLabel(b byte) string {
 // about a remapped key (issue #1233).
 func showHelpBar(w io.Writer, keys PassthroughKeys) {
 	help := fmt.Sprintf(
-		"\x1b[7m %s detach  %s sessions  %s messages  %s approvals  %s orch  %s last  %s/%s next/prev  %s new  %s fork  %s rename  %s scroll  %s shell  %s restart \x1b[0m",
+		"\x1b[7m %s detach  %s sessions  %s messages  %s orch  %s last  %s/%s next/prev  %s new  %s fork  %s rename  %s scroll  %s shell  %s restart \x1b[0m",
 		keyLabel(keys.Detach),
 		keyLabel(keys.SessionList),
 		keyLabel(keys.Messages),
-		keyLabel(keys.Approvals),
 		keyLabel(keys.OrchestratorSession),
 		keyLabel(keys.LastSession),
 		keyLabel(keys.NextSession),
@@ -224,16 +222,14 @@ type PassthroughKeys struct {
 	RenameSession       byte
 	ScrollMode          byte
 	Messages            byte
-	Approvals           byte
 	RestartSession      byte
 }
 
 type PassthroughOpts struct {
-	Keys            PassthroughKeys
-	SessionID       string
-	Info            *protocol.SessionInfo
-	StatusBar       *StatusBarCfg
-	AutoPopApproval bool
+	Keys      PassthroughKeys
+	SessionID string
+	Info      *protocol.SessionInfo
+	StatusBar *StatusBarCfg
 	// DragArrowKeys enables the touch/hold-and-drag gesture that translates
 	// left-button mouse drags into arrow-key presses. Off by default.
 	DragArrowKeys bool
@@ -457,19 +453,6 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 							sb.render(stdout)
 						}
 					}
-				case "approval_notification":
-					var notif protocol.ApprovalNotificationMsg
-					if protocol.DecodePayload(msg, &notif) == nil {
-						if sb != nil {
-							sb.updatePendingApprovals(len(notif.Pending))
-							sb.render(stdout)
-						}
-
-						if len(notif.Pending) > 0 && opts.AutoPopApproval {
-							setResult(ResultApprovalOverlay)
-							return
-						}
-					}
 				}
 			case <-tickerCh:
 				sb.render(stdout)
@@ -548,9 +531,6 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 						sendInput([]byte{prefixByte})
 					case keys.Detach:
 						setResult(ResultDetached)
-						return
-					case keys.Approvals:
-						setResult(ResultApprovalOverlay)
 						return
 					case keys.SessionList, 0:
 						setResult(ResultOverlay)

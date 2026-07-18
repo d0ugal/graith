@@ -159,7 +159,9 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 		}
 
 		if err := sm.AdoptSessions(manifest); err != nil {
-			log.Warn("failed to adopt sessions", "err", err)
+			_ = l.Close()
+
+			return fmt.Errorf("securely adopt upgraded sessions: %w", err)
 		}
 
 		log.Info("daemon upgraded", "adopted_sessions", len(manifest.Sessions), "pid", os.Getpid())

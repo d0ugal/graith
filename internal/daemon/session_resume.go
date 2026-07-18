@@ -313,6 +313,10 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("unknown agent %q", sessState.Agent)
 	}
+	if agent.NonInteractiveArgs == nil {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("agent %q has no non_interactive_args; refusing to start an agent that may prompt for permission", sessState.Agent)
+	}
 
 	sandboxed, err := sm.resolveSandbox(sessState.Agent)
 	if err != nil {
@@ -320,10 +324,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		return SessionState{}, err
 	}
 
-	// Resume re-enforces the approvals backend too, for parity with the sandbox
-	// re-check above: a config change that made the backend unenforceable must
-	// not silently resume a non-enforcing approver.
-	if err := sm.validateApprovalsBackend(sessState.Yolo); err != nil {
+	if err := sm.validateCommandPolicy(sessState.Agent); err != nil {
 		sm.mu.Unlock()
 		return SessionState{}, err
 	}
@@ -383,12 +384,10 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		}
 	}
 
-	// Resolve MCP servers under the lock. Yolo forces hooks on (see Create), so
-	// resolve MCP servers for a yolo session even if hooks were disabled. MCP is a
-	// decision distinct from hooks (see #1135); resume is PTY-only, so they
-	// coincide here.
+	// MCP is a separate injection mechanism (see #1135), but resume is PTY-only
+	// so it retains the lifecycle-hook gate.
 	var mcpServers []config.MCPServerConfig
-	if sessState.AgentHooks || sessState.Yolo {
+	if sessState.AgentHooks {
 		mcpServers = sm.resolveMCPServers(sessState.Agent)
 	}
 
@@ -405,6 +404,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	if sessState.SystemKind == SystemKindOrchestrator {
 		sandboxMerged = sm.cfg.OrchestratorSandboxMerged(sessState.Agent)
 	}
+	commandPolicy := sm.cfg.CommandPolicy
 	// Save previous state for rollback.
 	prevStatus := sessState.Status
 	prevExitCode := sessState.ExitCode
@@ -506,10 +506,9 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	sessAgentSessionID := sessState.AgentSessionID
 	sessModel := sessState.Model
 	sessCodex := cloneCodexOptions(sessState.Codex)
-	sessYolo := sessState.Yolo
-	// Yolo forces agent hooks on (see Create) so a resumed yolo session always
-	// re-installs the approval hook, even if hooks were disabled at create.
-	sessAgentHooks := sessState.AgentHooks || sessYolo
+	sessAgentHooks := sessState.AgentHooks
+	policyEnabled := sm.cfg.CommandPolicy.Enabled()
+	hookFilesNeeded := sessAgentHooks || policyEnabled
 	// MCP config injection is decided separately from hooks (see #1135). Resume is
 	// PTY-only, so the two coincide here.
 	sessMCPEnabled := sessAgentHooks
@@ -592,6 +591,12 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		rollbackState()
 		return SessionState{}, fmt.Errorf("expand resume args: %w", err)
 	}
+	nonInteractiveArgs, err := config.ExpandSlice(agent.NonInteractiveArgs, vars)
+	if err != nil {
+		rollbackState()
+		return SessionState{}, fmt.Errorf("expand non-interactive args: %w", err)
+	}
+	expandedArgs = append(nonInteractiveArgs, expandedArgs...)
 
 	// Replay the conditional option flags after the resume subcommand/args
 	// (issue #1186) so a resumed session keeps its model and typed options; the
@@ -712,8 +717,8 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 	}
 
-	if sessAgentHooks {
-		hookArgs, hookEnv, err := sm.injectHooks(sessAgent, id, sessWorktreePath, sessYolo)
+	if hookFilesNeeded {
+		hookArgs, hookEnv, err := sm.injectHooks(sessAgent, id, sessWorktreePath, sessAgentHooks, policyEnabled)
 		if err != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)
@@ -807,7 +812,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 			envKeys = append(envKeys, k)
 		}
 
-		opts := sm.sandboxOptsFromConfig(merged, id, ptyCWD, agent.Command, envKeys, sessAgentHooks || sessMCPEnabled)
+		opts := sm.sandboxOptsFromConfig(merged, id, ptyCWD, agent.Command, envKeys, hookFilesNeeded || sessMCPEnabled)
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
@@ -940,6 +945,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	sessState.CreationCfg = &CreationConfig{
 		Agent:         agent,
 		SandboxConfig: sandboxMerged,
+		CommandPolicy: commandPolicy,
 	}
 	if isOrchestrator {
 		sessState.LastStartedAt = time.Now()

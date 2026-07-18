@@ -28,7 +28,7 @@ const (
 	// sessions, but not a read-only guest.
 	remoteHumanRW
 	// remoteSessionOnly: session-originated messages (a session acting on
-	// itself — e.g. requesting approval, reporting hook status). Allowed for
+	// itself — e.g. checking command policy or reporting hook status). Allowed for
 	// sessions/orchestrator only; NOT paired humans (who could otherwise
 	// impersonate a session) or guests.
 	remoteSessionOnly
@@ -54,11 +54,10 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"logs":            remoteReadOnly,
 	"screen_preview":  remoteReadOnly,
 	"screen_snapshot": remoteReadOnly,
-	"approval_list":   remoteReadOnly,
 
 	// Session-originated (a session acting on itself); not humans/guests.
-	"approval_request": remoteSessionOnly,
-	"status_report":    remoteSessionOnly,
+	"command_policy_check": remoteSessionOnly,
+	"status_report":        remoteSessionOnly,
 	// Result publication derives the member from the authenticated session; a
 	// remote human must not gain a path that can claim a member's success.
 	"scenario_result_publish": remoteSessionOnly,
@@ -88,38 +87,36 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"agent_catalog": remoteHumanRW, // configured agent names + default_agent (GUI agent pickers, #1234)
 	"diagnostics":   remoteHumanRW, // health/doctor payload for the GUI diagnostics panel (#904)
 
-	"wait":               remoteHumanRW, // targets arbitrary sessions
-	"repo_list":          remoteHumanRW, // only useful for create, which guests can't do
-	"store_list":         remoteHumanRW, // store contents may be sensitive: human + sessions, not guests
-	"store_get":          remoteHumanRW, // reads a document body; same sensitivity as store_list
-	"attach":             remoteHumanRW,
-	"attach_convert":     remoteHumanRW, // convert a headless session to interactive on attach (#1137)
-	"detach":             remoteHumanRW,
-	"resize":             remoteHumanRW,
-	"type":               remoteHumanRW,
-	"create":             remoteHumanRW,
-	"delete":             remoteHumanRW,
-	"restore":            remoteHumanRW,
-	"stop":               remoteHumanRW,
-	"resume":             remoteHumanRW,
-	"restart":            remoteHumanRW,
-	"update":             remoteHumanRW,
-	"fork":               remoteHumanRW,
-	"migrate":            remoteHumanRW,
-	"set_status":         remoteHumanRW,
-	"interrupt":          remoteHumanRW,
-	"msg_pub":            remoteHumanRW,
-	"msg_inbox":          remoteHumanRW,
-	"msg_sub":            remoteHumanRW,
-	"msg_ack":            remoteHumanRW,
-	"msg_topics":         remoteHumanRW,
-	"approval_respond":   remoteHumanRW,
-	"approval_subscribe": remoteHumanRW,
-	"scenario_start":     remoteHumanRW,
-	"scenario_stop":      remoteHumanRW,
-	"scenario_delete":    remoteHumanRW,
-	"scenario_resume":    remoteHumanRW,
-	"scenario_add":       remoteHumanRW,
+	"wait":            remoteHumanRW, // targets arbitrary sessions
+	"repo_list":       remoteHumanRW, // only useful for create, which guests can't do
+	"store_list":      remoteHumanRW, // store contents may be sensitive: human + sessions, not guests
+	"store_get":       remoteHumanRW, // reads a document body; same sensitivity as store_list
+	"attach":          remoteHumanRW,
+	"attach_convert":  remoteHumanRW, // convert a headless session to interactive on attach (#1137)
+	"detach":          remoteHumanRW,
+	"resize":          remoteHumanRW,
+	"type":            remoteHumanRW,
+	"create":          remoteHumanRW,
+	"delete":          remoteHumanRW,
+	"restore":         remoteHumanRW,
+	"stop":            remoteHumanRW,
+	"resume":          remoteHumanRW,
+	"restart":         remoteHumanRW,
+	"update":          remoteHumanRW,
+	"fork":            remoteHumanRW,
+	"migrate":         remoteHumanRW,
+	"set_status":      remoteHumanRW,
+	"interrupt":       remoteHumanRW,
+	"msg_pub":         remoteHumanRW,
+	"msg_inbox":       remoteHumanRW,
+	"msg_sub":         remoteHumanRW,
+	"msg_ack":         remoteHumanRW,
+	"msg_topics":      remoteHumanRW,
+	"scenario_start":  remoteHumanRW,
+	"scenario_stop":   remoteHumanRW,
+	"scenario_delete": remoteHumanRW,
+	"scenario_resume": remoteHumanRW,
+	"scenario_add":    remoteHumanRW,
 
 	// Task-list ops (issue #591). Reads and mutations carry item bodies (free text
 	// that may name sensitive work), so like store bodies they are human+session,

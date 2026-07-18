@@ -111,8 +111,9 @@ func TestCreateConcurrentSuppliedIDRace(t *testing.T) {
 	cfg := config.Default()
 	cfg.Sandbox = config.SandboxConfig{Enabled: false}
 	cfg.Agents["sleeper"] = config.Agent{
-		Command: "sleep",
-		Args:    []string{"60"},
+		NonInteractiveArgs: []string{},
+		Command:            "sleep",
+		Args:               []string{"60"},
 	}
 
 	sm := newSMWithConfig(t, cfg)
@@ -173,8 +174,9 @@ func TestCreateUsesSuppliedID(t *testing.T) {
 	cfg := config.Default()
 	cfg.Sandbox = config.SandboxConfig{Enabled: false}
 	cfg.Agents["sleeper"] = config.Agent{
-		Command: "sleep",
-		Args:    []string{"60"},
+		NonInteractiveArgs: []string{},
+		Command:            "sleep",
+		Args:               []string{"60"},
 	}
 
 	sm := newSMWithConfig(t, cfg)
@@ -218,8 +220,9 @@ func TestCreateGeneratesIDWhenUnset(t *testing.T) {
 	cfg := config.Default()
 	cfg.Sandbox = config.SandboxConfig{Enabled: false}
 	cfg.Agents["sleeper"] = config.Agent{
-		Command: "sleep",
-		Args:    []string{"60"},
+		NonInteractiveArgs: []string{},
+		Command:            "sleep",
+		Args:               []string{"60"},
 	}
 
 	sm := newSMWithConfig(t, cfg)

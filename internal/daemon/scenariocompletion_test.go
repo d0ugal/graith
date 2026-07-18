@@ -287,7 +287,7 @@ func TestScenarioCompletionSessionActionSpawnsWithDurableIdentity(t *testing.T) 
 	sm, _ := newScenarioCompletionTestSM(t, trigger, config.ScenarioLifecycleConfig{
 		Cleanup: config.ScenarioCleanupOnSuccess, Delay: "1h",
 	})
-	sm.cfg.Agents["canny"] = config.Agent{Command: agentCommand}
+	sm.cfg.Agents["canny"] = config.Agent{NonInteractiveArgs: []string{}, Command: agentCommand}
 	sm.cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "safehouse", Command: backend}
 	sm.sandboxResolver = func(string) (bool, error) { return true, nil }
 

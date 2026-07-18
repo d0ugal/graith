@@ -325,37 +325,6 @@ func TestRemoteHandshakePairingUnaffectedByHumanToken(t *testing.T) {
 	}
 }
 
-func TestApprovalSubscriberReceivesAndUnsubscribes(t *testing.T) {
-	sm := newPairingSM(t)
-	got := make(chan string, 4)
-
-	c1, c2 := net.Pipe()
-	defer func() { _ = c1.Close(); _ = c2.Close() }()
-
-	sm.AddApprovalSubscriber(c1, func(msgType string, _ any) { got <- msgType })
-
-	sm.broadcastApprovalNotification()
-
-	select {
-	case m := <-got:
-		if m != "approval_notification" {
-			t.Errorf("subscriber got %q, want approval_notification", m)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("subscriber did not receive the broadcast")
-	}
-
-	// After unsubscribing, a further broadcast must not reach it.
-	sm.RemoveApprovalSubscriber(c1)
-	sm.broadcastApprovalNotification()
-
-	select {
-	case <-got:
-		t.Error("removed subscriber still received a broadcast")
-	case <-time.After(100 * time.Millisecond):
-	}
-}
-
 func TestAvailableReposReturnsSessionRepos(t *testing.T) {
 	sm := newPairingSM(t)
 	sm.state.Sessions["braw1"] = &SessionState{ID: "braw1", RepoPath: "/glen/croft", RepoName: "croft"}

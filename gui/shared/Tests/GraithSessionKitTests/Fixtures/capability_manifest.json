@@ -119,18 +119,6 @@
       "platform_decision": "docs/design/2026-07-17-platform-scope-policy.md#platform-support"
     },
     {
-      "id": "approvals.subscribe",
-      "ios": "n/a",
-      "macos": "n/a",
-      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support"
-    },
-    {
-      "id": "approvals.respond",
-      "ios": "n/a",
-      "macos": "n/a",
-      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support"
-    },
-    {
       "id": "pairing.request",
       "ios": "supported",
       "macos": "supported"

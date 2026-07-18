@@ -69,8 +69,7 @@ The client sends a message type; the daemon responds with a corresponding respon
 | `msg_topics` | List message topics |
 | `set_status` | Set session status summary |
 | `status_report` | Report agent hook status |
-| `approval_list` | List pending approvals |
-| `approval_respond` | Respond to an approval request |
+| `command_policy_check` | Synchronously evaluate an optional shell command restriction |
 | `mcp_connect` | Connect to an MCP server |
 | `reload` | Reload config |
 | `diagnostics` | Request diagnostics |
@@ -89,8 +88,7 @@ The client sends a message type; the daemon responds with a corresponding respon
 | `msg_message` | Message data |
 | `msg_done` | Message streaming complete |
 | `msg_following` | Following mode active |
-| `approval_notification` | Approval notification |
-| `approval_decision` | Approval decision |
+| `command_policy_decision` | Immediate allow/deny command-policy result |
 | `status_set` | Status set confirmation |
 | `screen_preview_response` | Screen preview data |
 | `screen_snapshot_response` | Full screen snapshot |
@@ -108,7 +106,7 @@ The daemon (`SessionManager`) is the central component:
 - **Worktree management:** creating, removing git worktrees and branches
 - **Client handling:** connection acceptance, frame demuxing, message dispatch
 - **Hook reporting:** tracking agent status from hook reports
-- **Approval handling:** managing approval requests and responses
+- **Command policy:** bounded synchronous shell checks that can only deny before sandbox enforcement
 - **MCP management:** proxying MCP connections for sessions
 - **Git pull:** periodic background pulls (when enabled)
 - **Idle timeout:** automatic session stopping after inactivity
@@ -117,7 +115,7 @@ The daemon (`SessionManager`) is the central component:
 
 `state.json` stores session metadata: ID, name, agent type, repo path, worktree path, branch, status, parent ID, starred flag, and timestamps. It is loaded on daemon start and written synchronously on every mutation.
 
-Runtime-only state (hook reports, attached clients, pending approvals, in-memory caches) is not persisted and is rebuilt from PTY state on restart.
+Runtime-only state (hook reports, attached clients, and in-memory caches) is not persisted and is rebuilt from PTY state on restart.
 
 **State-version backups.** The state file carries a schema version, and a newer daemon migrates an older `state.json` forward in place. Because a downgraded (older) binary refuses to start against forward-migrated state, the daemon writes a crash-safe copy of the pre-migration file to `state.json.v<oldVersion>.bak` (alongside `state.json`) *before* migrating. Only the most recent pre-migration backup is kept — an earlier one is removed once the new backup is durable. To recover a downgrade, stop the daemon, restore the backup over `state.json` (e.g. `mv state.json.v16.bak state.json`), and start the older binary. `gr doctor` lists any available backups.
 
@@ -150,7 +148,7 @@ In passthrough mode:
 - Terminal is set to raw mode
 - stdin is read in a goroutine and forwarded to the daemon on channel `0x01`
 - Daemon output on channel `0x01` is written to stdout
-- Control messages on channel `0x00` are processed (detach, approval notifications, status updates, screen snapshots)
+- Control messages on channel `0x00` are processed (detach, status updates, screen snapshots)
 - The prefix key intercepts the next keystroke for commands
 - SIGWINCH signals trigger PTY resize messages
 

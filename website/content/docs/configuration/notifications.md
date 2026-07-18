@@ -1,7 +1,7 @@
 ---
 weight: 330
-title: "Notifications & approvals"
-description: "Status bar, desktop/push notifications, approvals, and messages."
+title: "Notifications & messages"
+description: "Status bar, desktop/push notifications, and messages."
 icon: "notifications"
 toc: true
 draft: false
@@ -21,10 +21,9 @@ The status bar shows the session name, status, agent type, branch, git status, u
 
 ```toml
 [notifications]
-enabled     = true   # desktop notifications (status changes AND `gr notify`)
-on_approval = true   # notify when a session needs approval
-on_stopped  = false  # notify when a session stops
-command     = ""     # custom notification command (optional)
+enabled    = true   # desktop notifications (status changes AND `gr notify`)
+on_stopped = false  # notify when a session stops
+command    = ""     # custom notification command (optional)
 
 # Proactive `gr notify` push notifications:
 backend           = "macos"   # "macos" (helper app, falls back to osascript) or "command"; default "macos"
@@ -107,39 +106,6 @@ disable that behaviour. `dispatch_timeout`, `inbox_idle_timeout`, and
 `inbox_max_wait` fall back to their default when set to zero or a negative value
 (they have no sensible zero). An unparseable value always falls back to the
 default.
-
-## Approvals
-
-```toml
-[approvals]
-backend  = ""        # who decides (see below); default "" = always prompt the human
-timeout  = "10m"     # how long to wait for a human decision
-auto_pop = false     # auto-open the approval overlay when a request is queued
-command  = ""        # required for backend "command"/"external"; path override for "localmost"
-
-command_timeout   = "5s"  # bounds one "command"/"external" backend invocation
-localmost_timeout = "5s"  # bounds one "localmost" binary check
-
-[approvals.builtin]
-config   = ""        # localmost-format config.json (backend "builtin")
-```
-
-The approval system integrates with agent hooks. When an agent requests approval (e.g. for a dangerous tool call), the `backend` decides who resolves it:
-
-| `backend` | Who decides |
-|-----------|-------------|
-| `""` (default, equivalent to `"prompt"`) | Always prompt the human via the overlay |
-| `"command"` / `"external"` | Delegate to `command` over graith's JSON contract (one JSON object on stdin — `{tool_name,tool_input,session_id,session_name}` — and one on stdout — `{decision:allow\|block\|deny\|defer,reason}`) |
-| `"localmost"` | Delegate to the real localmost binary via its native protocol (`command` optionally overrides the binary path) |
-| `"builtin"` | graith's built-in localmost-compatible engine — configured via `[approvals.builtin] config` (a localmost-format `config.json` path) **or** inline rules (`allow`, `deny`, `allowSafeXargs`, `askNoninteractive`) |
-
-`mode` is deprecated. With no `backend` set, legacy `mode = "command"`, `mode = "external"`, and `mode = "localmost"` all resolve to `backend = "command"` (graith's JSON contract) for compatibility — `mode = "localmost"` does **not** select the native-protocol `backend = "localmost"`. Set `backend = "localmost"` explicitly to run the real localmost binary. See `ResolveBackend` in `internal/config/config.go` for the full resolution order.
-
-### Backend execution timeouts
-
-An automated backend's decision runs *inside* the enclosing approval deadline: for an interactive session that decision precedes the human-queue wait; for a headless session it is bounded by the caller-side `timeout`. The `command`/`external` and `localmost` backends spawn a subprocess to make that decision, and `command_timeout` / `localmost_timeout` bound a single such invocation.
-
-Both default to `5s` when unset. Each must be a positive duration, at most `60s`, and **strictly shorter** than the enclosing `timeout` — a backend timeout at or above the approval deadline is rejected at config load, because a hung backend that outlives its enclosing deadline is exactly the kind of mismatch that has caused approval-behaviour bugs in the past. The other backends (`prompt`, `builtin`, `auto`) decide in-process and have no execution timeout. `gr doctor` prints the effective hierarchy (`backend execution <timeout> < approval timeout <timeout>`) so a tight configuration is visible before it bites.
 
 ## Messages
 

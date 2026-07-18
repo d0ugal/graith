@@ -95,6 +95,10 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 
 	// --- Phase 1: Lock, validate, reserve ---
 	sm.mu.Lock()
+	// The pre-lock snapshot was used only for slow username/model discovery.
+	// Capture the launch generation again under the lock so command-policy hook
+	// installation and the persisted CreationConfig describe the same config.
+	cfgSnapshot = sm.cfg
 
 	source, ok := sm.state.Sessions[sourceSessionID]
 	if !ok {
@@ -151,6 +155,10 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 
 		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
 	}
+	if agent.NonInteractiveArgs == nil {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("agent %q has no non_interactive_args; refusing to start an agent that may prompt for permission", agentName)
+	}
 
 	if crossAgent {
 		// The source's conversation must be readable to seed the new agent.
@@ -187,10 +195,9 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	sourceCodex := codexOptsForAgent(agentName, cloneCodexOptions(source.Codex))
 
 	sourceAgentSessionID := source.AgentSessionID
-	sourceYolo := source.Yolo
-	// Yolo forces agent hooks on (see Create) so a forked yolo session always
-	// installs the approval hook, even if the source had hooks disabled.
-	sourceAgentHooks := source.AgentHooks || sourceYolo
+	sourceAgentHooks := source.AgentHooks
+	policyEnabled := sm.cfg.CommandPolicy.Enabled()
+	hookFilesNeeded := sourceAgentHooks || policyEnabled
 	// MCP config injection is decided separately from hooks (see #1135). Fork is
 	// PTY-only, so the two coincide here.
 	sourceMCPEnabled := sourceAgentHooks
@@ -220,7 +227,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		return SessionState{}, err
 	}
 
-	if err := sm.validateApprovalsBackend(sourceYolo); err != nil {
+	if err := sm.validateCommandPolicy(agentName); err != nil {
 		sm.mu.Unlock()
 		return SessionState{}, err
 	}
@@ -247,7 +254,6 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		Model:           effectiveModel,
 		Codex:           sourceCodex,
 		AgentHooks:      sourceAgentHooks,
-		Yolo:            sourceYolo,
 		Status:          StatusCreating,
 		CreatedAt:       time.Now().UTC(),
 		StatusChangedAt: time.Now().UTC(),
@@ -437,6 +443,13 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 
 		return SessionState{}, fmt.Errorf("expand fork args: %w", err)
 	}
+	nonInteractiveArgs, err := config.ExpandSlice(agent.NonInteractiveArgs, vars)
+	if err != nil {
+		forkCleanup()
+		rollbackState()
+		return SessionState{}, fmt.Errorf("expand non-interactive args: %w", err)
+	}
+	expandedArgs = append(nonInteractiveArgs, expandedArgs...)
 
 	// Replay the conditional option flags after the fork/args (issue #1186); the
 	// agent's option_args config decides which are emitted (issue #1236). Codex
@@ -501,8 +514,8 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 	}
 
-	if sourceAgentHooks {
-		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, sourceYolo)
+	if hookFilesNeeded {
+		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, sourceAgentHooks, policyEnabled)
 		if err != nil {
 			forkCleanup()
 			rollbackState()
@@ -579,7 +592,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 			envKeys = append(envKeys, k)
 		}
 
-		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, sourceAgentHooks || sourceMCPEnabled)
+		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, hookFilesNeeded || sourceMCPEnabled)
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
@@ -677,6 +690,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	sessState.CreationCfg = &CreationConfig{
 		Agent:         agent,
 		SandboxConfig: cfgSnapshot.Sandbox.Merge(agent.Sandbox),
+		CommandPolicy: cfgSnapshot.CommandPolicy,
 	}
 
 	// Record cross-agent provenance (surfaced via SessionInfo.MigratedFrom) and,

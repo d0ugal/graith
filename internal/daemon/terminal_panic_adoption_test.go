@@ -39,7 +39,8 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 
 	for _, id := range []string{"thrawn-fash", "canny-braw"} {
 		sm.state.Sessions[id] = &SessionState{
-			ID: id, Name: id, Agent: "sleeper", Status: StatusRunning,
+			ID: id, Name: id, Agent: "sleeper", Status: StatusRunning, Sandboxed: true,
+			CreationCfg: &CreationConfig{Agent: sm.cfg.Agents["sleeper"]},
 		}
 	}
 

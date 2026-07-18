@@ -299,7 +299,7 @@ the log alone:
   `fds_partial: true` means at least one short-lived or inaccessible process
   could not be counted. The report also records `last_output_age_ms`,
   `observed_lifetime_ms`, `sandbox_backend`, `sandbox_diagnostic`, attachment
-  state, pending approvals, unread messages, and the health of session-scoped
+  state, unread messages, and the health of session-scoped
   MCP processes.
 
 The most useful exit fields are:

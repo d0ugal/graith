@@ -49,6 +49,29 @@ func TestStateSaveLoad(t *testing.T) {
 	}
 }
 
+func TestStatePreservesExplicitEmptyNonInteractiveArgs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	state := &State{Sessions: map[string]*SessionState{
+		"canny": {
+			ID: "canny", Name: "canny", Agent: "custom", Status: StatusStopped,
+			CreationCfg: &CreationConfig{Agent: config.Agent{
+				Command: "canny-agent", NonInteractiveArgs: []string{},
+			}},
+		},
+	}}
+	if err := SaveState(path, state); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := loaded.Sessions["canny"].CreationCfg.Agent.NonInteractiveArgs
+	if args == nil || len(args) != 0 {
+		t.Fatalf("non_interactive_args = %#v, want explicit empty slice", args)
+	}
+}
+
 func TestLoadStateV0Migration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	// Write a v0 state file (no version field)
@@ -584,98 +607,6 @@ func TestEnsurePairingHMACKey(t *testing.T) {
 	}
 }
 
-func TestMigrateApprovalsEnabledToAgentHooks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.json")
-
-	data := []byte(`{"version":3,"sessions":{
-		"braw1":{"id":"braw1","name":"braw-approvals","status":"running","approvals_enabled":true},
-		"canny1":{"id":"canny1","name":"neep-approvals","status":"running"},
-		"kirk1":{"id":"kirk1","name":"auld-migrated","status":"running","agent_hooks":true}
-	}}`)
-	if err := writeFileAtomic(path, data); err != nil {
-		t.Fatal(err)
-	}
-
-	loaded, err := LoadState(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if loaded.Version != CurrentStateVersion {
-		t.Errorf("version = %d, want %d", loaded.Version, CurrentStateVersion)
-	}
-
-	if s := loaded.Sessions["braw1"]; !s.AgentHooks {
-		t.Error("braw1: AgentHooks = false, want true (migrated from approvals_enabled)")
-	}
-
-	if s := loaded.Sessions["braw1"]; s.ApprovalsEnabled {
-		t.Error("braw1: ApprovalsEnabled should be cleared after migration")
-	}
-
-	if s := loaded.Sessions["canny1"]; s.AgentHooks {
-		t.Error("canny1: AgentHooks = true, want false (was never set)")
-	}
-
-	if s := loaded.Sessions["kirk1"]; !s.AgentHooks {
-		t.Error("kirk1: AgentHooks = false, want true (was already set)")
-	}
-}
-
-func TestMigrateApprovalsEnabledBothFieldsSet(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.json")
-
-	data := []byte(`{"version":3,"sessions":{
-		"braw-both":{"id":"braw-both","name":"braw-both","status":"running","approvals_enabled":true,"agent_hooks":true},
-		"thrawn-clash":{"id":"thrawn-clash","name":"thrawn-clash","status":"running","approvals_enabled":true,"agent_hooks":false}
-	}}`)
-	if err := writeFileAtomic(path, data); err != nil {
-		t.Fatal(err)
-	}
-
-	loaded, err := LoadState(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if s := loaded.Sessions["braw-both"]; !s.AgentHooks || s.ApprovalsEnabled {
-		t.Errorf("braw-both: AgentHooks=%v ApprovalsEnabled=%v, want true/false", s.AgentHooks, s.ApprovalsEnabled)
-	}
-
-	if s := loaded.Sessions["thrawn-clash"]; !s.AgentHooks || s.ApprovalsEnabled {
-		t.Errorf("thrawn-clash: AgentHooks=%v ApprovalsEnabled=%v, want true/false", s.AgentHooks, s.ApprovalsEnabled)
-	}
-}
-
-func TestMigrateApprovalsEnabledFromV1(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.json")
-
-	data := []byte(`{"version":1,"sessions":{
-		"auld1":{"id":"auld1","name":"auld-kirk","status":"running","approvals_enabled":true}
-	}}`)
-	if err := writeFileAtomic(path, data); err != nil {
-		t.Fatal(err)
-	}
-
-	loaded, err := LoadState(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if loaded.Version != CurrentStateVersion {
-		t.Errorf("version = %d, want %d", loaded.Version, CurrentStateVersion)
-	}
-
-	s := loaded.Sessions["auld1"]
-	if !s.AgentHooks {
-		t.Error("AgentHooks = false, want true (migrated from v1 approvals_enabled)")
-	}
-
-	if s.ApprovalsEnabled {
-		t.Error("ApprovalsEnabled should be cleared after migration")
-	}
-}
-
 func TestReconcileDeletingRevertedToStopped(t *testing.T) {
 	state := &State{
 		Sessions: map[string]*SessionState{
@@ -1016,6 +947,25 @@ func TestLoadStateNoBackupOnCorruptedJSON(t *testing.T) {
 
 	if backups := ListStateBackups(path); len(backups) != 0 {
 		t.Errorf("no backup expected for corrupted state, got %v", backups)
+	}
+}
+
+func TestMigrateV22ToV23RemovesApprovalStatus(t *testing.T) {
+	state := &State{
+		Version: 22,
+		Sessions: map[string]*SessionState{
+			"canny": {ID: "canny", AgentStatus: "approval"},
+			"braw":  {ID: "braw", AgentStatus: "ready"},
+		},
+	}
+	if err := migrateState(state); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Sessions["canny"].AgentStatus; got != "error" {
+		t.Fatalf("migrated approval status = %q, want error", got)
+	}
+	if got := state.Sessions["braw"].AgentStatus; got != "ready" {
+		t.Fatalf("unrelated status = %q, want ready", got)
 	}
 }
 

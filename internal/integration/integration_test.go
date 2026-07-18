@@ -238,7 +238,7 @@ func readControl(t *testing.T, r *protocol.FrameReader) protocol.Envelope {
 func handshake(t *testing.T, r *protocol.FrameReader, w *protocol.FrameWriter) {
 	t.Helper()
 	sendControl(t, w, "handshake", protocol.HandshakeMsg{
-		Version: "1.0", ClientID: "test", TerminalSize: [2]uint16{80, 24},
+		Version: "2.0", ClientID: "test", TerminalSize: [2]uint16{80, 24},
 	})
 
 	resp := readControl(t, r)

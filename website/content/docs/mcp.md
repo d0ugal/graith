@@ -84,8 +84,8 @@ at `gr mcp-proxy <name>` so the daemon supervises the real process:
   config overrides. Because these override only `command` and `args` (not a full
   config file), any extra Codex per-server controls you set for a matching
   stdio server in `~/.codex/config.toml` — such as `startup_timeout_sec`,
-  `tool_timeout_sec`, `enabled`, enabled/disabled tools, or per-tool approval
-  mode — are preserved and merged. (If a same-named server in your Codex config
+  `tool_timeout_sec`, `enabled`, or enabled/disabled tools — are preserved and
+  merged. (If a same-named server in your Codex config
   is a remote/HTTP transport, the injected stdio `command`/`args` will conflict
   with it — pick a distinct name to avoid the clash.)
 

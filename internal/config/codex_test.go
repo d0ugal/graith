@@ -12,7 +12,6 @@ func TestCodexOptionsIsZero(t *testing.T) {
 		{ReasoningEffort: "high"},
 		{ServiceTier: "flex"},
 		{WebSearch: true},
-		{ApprovalPolicy: "never"},
 	}
 	for _, c := range cases {
 		if c.IsZero() {

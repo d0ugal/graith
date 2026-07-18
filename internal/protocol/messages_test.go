@@ -8,7 +8,7 @@ import (
 
 func TestEncodeDecodeControl(t *testing.T) {
 	handshake := HandshakeMsg{
-		Version: "1.0", ClientID: "brig-client",
+		Version: "2.0", ClientID: "brig-client",
 		TerminalSize: [2]uint16{80, 24}, Cwd: "/home/user/croft",
 	}
 
@@ -136,12 +136,12 @@ func TestVersionCompatible(t *testing.T) {
 		want    bool
 	}{
 		{"same version", Version, true},
-		{"same major different minor", "1.99", true},
-		{"different major", "2.0", false},
+		{"same major different minor", "2.99", true},
+		{"different major", "1.0", false},
 		{"no dot", "1", false},
 		{"empty string", "", false},
-		{"major only with dot", "1.", true},
-		{"three part version", "1.2.3", true},
+		{"major only with dot", "2.", true},
+		{"three part version", "2.2.3", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -342,27 +342,6 @@ func TestAuthProofRoundTrip(t *testing.T) {
 
 	if got.DeviceID != "dev-skelf" || got.Signature != "sig-bairn" {
 		t.Errorf("auth proof = %+v", got)
-	}
-}
-
-func TestApprovalSubscribeRoundTrip(t *testing.T) {
-	data, err := EncodeControl("approval_subscribe", ApprovalSubscribeMsg{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	msg, err := DecodeControl(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if msg.Type != "approval_subscribe" {
-		t.Errorf("Type = %q, want approval_subscribe", msg.Type)
-	}
-
-	var got ApprovalSubscribeMsg
-	if err := DecodePayload(msg, &got); err != nil {
-		t.Fatal(err)
 	}
 }
 

@@ -60,7 +60,6 @@ func passthroughKeysFromConfig() client.PassthroughKeys {
 		RenameSession:       parseKeyByte(cfg.Keybindings.RenameSession),
 		ScrollMode:          parseKeyByte(cfg.Keybindings.ScrollMode),
 		Messages:            parseKeyByte(cfg.Keybindings.Messages),
-		Approvals:           parseKeyByte(cfg.Keybindings.Approvals),
 		RestartSession:      parseKeyByte(cfg.Keybindings.RestartSession),
 	}
 }
@@ -97,20 +96,6 @@ func listWatchKeysFromConfig() client.ListWatchKeys {
 	k.Delete = overrideKeys(ov.ListWatchDelete, k.Delete)
 	k.Resume = overrideKeys(ov.ListWatchResume, k.Resume)
 	k.Confirm = overrideKeys(ov.Confirm, k.Confirm)
-	k.Cancel = overrideKeys(ov.Cancel, k.Cancel)
-
-	return k
-}
-
-// approvalKeysFromConfig builds the approval-overlay keybindings from config.
-func approvalKeysFromConfig() client.ApprovalKeys {
-	ov := cfg.Keybindings.Overlay
-	k := client.DefaultApprovalKeys()
-	k.Up = overrideKeys(ov.Up, k.Up)
-	k.Down = overrideKeys(ov.Down, k.Down)
-	k.Allow = overrideKeys(ov.ApprovalAllow, k.Allow)
-	k.Deny = overrideKeys(ov.ApprovalDeny, k.Deny)
-	k.AllowAll = overrideKeys(ov.ApprovalAllowAll, k.AllowAll)
 	k.Cancel = overrideKeys(ov.Cancel, k.Cancel)
 
 	return k

@@ -374,9 +374,8 @@ func TestConfigShowCovMissingFileUsesDefaults(t *testing.T) {
 		t.Errorf("config show tools = %+v, want runtime defaults %+v", got, toolDefaults)
 	}
 
-	if rendered.Approvals.CommandTimeout != "5s" || rendered.Approvals.LocalmostTimeout != "5s" {
-		t.Errorf("config show approval timeouts = {%q, %q}, want {5s, 5s}",
-			rendered.Approvals.CommandTimeout, rendered.Approvals.LocalmostTimeout)
+	if rendered.CommandPolicy.Timeout != "5s" {
+		t.Errorf("config show command-policy timeout = %q, want 5s", rendered.CommandPolicy.Timeout)
 	}
 }
 

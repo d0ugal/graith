@@ -380,9 +380,10 @@ func TestScenarioPolicyRetryUsesLaunchThrottleAndAdvancesGeneration(t *testing.T
 	cfg.Launch.MaxConcurrent = 1
 	cfg.Launch.SettleTimeout = "0"
 	cfg.Agents["echo"] = config.Agent{
-		Command:    "sh",
-		Args:       []string{"-c", "exec cat"},
-		ResumeArgs: []string{"-c", "exec cat"},
+		NonInteractiveArgs: []string{},
+		Command:            "sh",
+		Args:               []string{"-c", "exec cat"},
+		ResumeArgs:         []string{"-c", "exec cat"},
 	}
 
 	sm := NewSessionManager(cfg, config.Paths{
@@ -392,6 +393,7 @@ func TestScenarioPolicyRetryUsesLaunchThrottleAndAdvancesGeneration(t *testing.T
 		RuntimeDir: dir,
 		TmpDir:     filepath.Join(dir, "tmp"),
 	}, quietLogger())
+	sm.sandboxResolver = func(string) (bool, error) { return false, nil }
 	sm.todos = newTestTodoStore(t)
 
 	created, err := sm.Create(CreateOpts{

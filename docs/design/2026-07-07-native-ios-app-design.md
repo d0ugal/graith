@@ -10,6 +10,11 @@ issue: 628
 
 # Universal (iOS + macOS) App with Tailscale Remote Control
 
+> **Security amendment (2026-07-18):** The mobile approval milestones and wire
+> types in this historical proposal are superseded by
+> [Non-interactive agents with sandbox-enforced policy](2026-07-18-non-interactive-sandbox-policy.md).
+> Native apps no longer expose tool-permission state or actions.
+
 ## Background
 
 graith is **Unix-socket + TUI only**. The daemon (`graithd`) listens on a Unix

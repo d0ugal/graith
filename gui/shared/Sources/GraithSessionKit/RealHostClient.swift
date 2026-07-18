@@ -224,9 +224,8 @@ public actor RealHostClient: GraithHostClient {
         FleetSummary(
             total: sessions.count,
             active: sessions.filter { $0.agentStatus == "active" }.count,
-            approval: sessions.filter { $0.agentStatus == "approval" }.count,
             ready: sessions.filter { $0.agentStatus == "ready" }.count,
-            errored: sessions.filter { $0.status == "errored" }.count,
+            errored: sessions.filter { $0.status == "errored" || $0.agentStatus == "error" }.count,
             stopped: sessions.filter { $0.status == "stopped" }.count
         )
     }

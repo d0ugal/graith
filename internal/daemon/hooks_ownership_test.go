@@ -84,8 +84,6 @@ func TestInjectCursorHooksRefusesPreExistingUserFile(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 			sm := newTestSessionManagerWithDataDir(t)
-			approvalsDisabled := false
-			sm.cfg.Approvals.Enabled = &approvalsDisabled
 			worktree := t.TempDir()
 			hooksPath := testCursorHooksPath(worktree)
 
@@ -104,7 +102,7 @@ func TestInjectCursorHooksRefusesPreExistingUserFile(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			_, _, err := sm.injectCursorHooks("unowned-bothy", worktree, false)
+			_, _, err := sm.injectCursorHooks("unowned-bothy", worktree, true, false)
 			if err == nil || !strings.Contains(err.Error(), "refusing to overwrite") {
 				t.Fatalf("injectCursorHooks() error = %v, want refusal", err)
 			}
@@ -145,7 +143,7 @@ func TestCursorHooksFirstPublicationRacePreservesReplacement(t *testing.T) {
 				replaceCursorHooks(t, hooksPath, userContent)
 			})
 
-			_, _, err := sm.injectCursorHooks("first-racer", worktree, false)
+			_, _, err := sm.injectCursorHooks("first-racer", worktree, true, false)
 			if !errors.Is(err, errCursorHooksRaced) {
 				t.Fatalf("injectCursorHooks() error = %v, want %v", err, errCursorHooksRaced)
 			}
@@ -179,8 +177,6 @@ func TestCursorHooksRepublicationRacePreservesReplacement(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 			sm := newTestSessionManagerWithDataDir(t)
-			approvalsDisabled := false
-			sm.cfg.Approvals.Enabled = &approvalsDisabled
 			worktree := t.TempDir()
 			sessionID := "republish-racer"
 			hooksPath := testCursorHooksPath(worktree)
@@ -191,7 +187,7 @@ func TestCursorHooksRepublicationRacePreservesReplacement(t *testing.T) {
 				}
 			}
 
-			if _, _, err := sm.injectCursorHooks(sessionID, worktree, false); err != nil {
+			if _, _, err := sm.injectCursorHooks(sessionID, worktree, true, false); err != nil {
 				t.Fatalf("first injectCursorHooks(): %v", err)
 			}
 
@@ -200,9 +196,9 @@ func TestCursorHooksRepublicationRacePreservesReplacement(t *testing.T) {
 				replaceCursorHooks(t, hooksPath, userContent)
 			})
 
-			// Yolo adds preToolUse, forcing a real replacement rather than the
+			// Command policy adds preToolUse, forcing a real replacement rather than the
 			// byte-identical no-op reinjection path.
-			_, _, err := sm.injectCursorHooks(sessionID, worktree, true)
+			_, _, err := sm.injectCursorHooks(sessionID, worktree, true, true)
 			if !errors.Is(err, errCursorHooksRaced) {
 				t.Fatalf("re-inject error = %v, want %v", err, errCursorHooksRaced)
 			}
@@ -236,8 +232,6 @@ func TestCursorHooksSuccessfulRepublication(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 			sm := newTestSessionManagerWithDataDir(t)
-			approvalsDisabled := false
-			sm.cfg.Approvals.Enabled = &approvalsDisabled
 			worktree := t.TempDir()
 			sessionID := "successful-republish"
 
@@ -248,7 +242,7 @@ func TestCursorHooksSuccessfulRepublication(t *testing.T) {
 				t.Cleanup(func() { linkCursorHooksFile = original })
 			}
 
-			if _, _, err := sm.injectCursorHooks(sessionID, worktree, false); err != nil {
+			if _, _, err := sm.injectCursorHooks(sessionID, worktree, true, false); err != nil {
 				t.Fatalf("first injectCursorHooks(): %v", err)
 			}
 
@@ -257,7 +251,7 @@ func TestCursorHooksSuccessfulRepublication(t *testing.T) {
 				t.Fatal("first publication unexpectedly contains preToolUse")
 			}
 
-			if _, _, err := sm.injectCursorHooks(sessionID, worktree, true); err != nil {
+			if _, _, err := sm.injectCursorHooks(sessionID, worktree, true, true); err != nil {
 				t.Fatalf("re-injectCursorHooks(): %v", err)
 			}
 
@@ -298,7 +292,7 @@ func TestCursorHooksCleanupRacePreservesReplacement(t *testing.T) {
 				}
 			}
 
-			if _, _, err := sm.injectCursorHooks(sessionID, worktree, false); err != nil {
+			if _, _, err := sm.injectCursorHooks(sessionID, worktree, true, false); err != nil {
 				t.Fatalf("injectCursorHooks(): %v", err)
 			}
 
@@ -333,7 +327,7 @@ func TestCursorHooksCleanupPreservesUserModification(t *testing.T) {
 	sessionID := "modified-bairn"
 	hooksPath := testCursorHooksPath(worktree)
 
-	if _, _, err := sm.injectCursorHooks(sessionID, worktree, false); err != nil {
+	if _, _, err := sm.injectCursorHooks(sessionID, worktree, true, false); err != nil {
 		t.Fatalf("injectCursorHooks(): %v", err)
 	}
 

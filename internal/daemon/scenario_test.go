@@ -2168,7 +2168,7 @@ func newScenarioOrchestrator(t *testing.T) (*SessionManager, string) {
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
 	cfg.DefaultAgent = "sleeper"
-	cfg.Agents["sleeper"] = config.Agent{Command: "sh", Args: []string{"-c", "exec sleep 60"}}
+	cfg.Agents["sleeper"] = config.Agent{NonInteractiveArgs: []string{}, Command: "sh", Args: []string{"-c", "exec sleep 60"}}
 
 	sm := newSMWithConfig(t, cfg)
 
@@ -2210,9 +2210,10 @@ func newScenarioOrchestrator(t *testing.T) (*SessionManager, string) {
 func configureScenarioPromptRecorder(sm *SessionManager, recordPath string) {
 	sm.mu.Lock()
 	sm.cfg.Agents["recorder"] = config.Agent{
-		Command: "sh",
-		Args:    []string{"-c", `printf %s "$0" > "$GRAITH_PROMPT_RECORD"; exec sleep 60`},
-		Env:     map[string]string{"GRAITH_PROMPT_RECORD": recordPath},
+		NonInteractiveArgs: []string{},
+		Command:            "sh",
+		Args:               []string{"-c", `printf %s "$0" > "$GRAITH_PROMPT_RECORD"; exec sleep 60`},
+		Env:                map[string]string{"GRAITH_PROMPT_RECORD": recordPath},
 	}
 	sm.mu.Unlock()
 }
@@ -2385,7 +2386,7 @@ func newMirroredScenarioOrchestrator(t *testing.T) (*SessionManager, string) {
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
 	cfg.DefaultAgent = "sleeper"
-	cfg.Agents["sleeper"] = config.Agent{Command: "sleep", Args: []string{"60"}}
+	cfg.Agents["sleeper"] = config.Agent{NonInteractiveArgs: []string{}, Command: "sleep", Args: []string{"60"}}
 	cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "safehouse", Command: backend}
 
 	sm := newSMWithConfig(t, cfg)
@@ -2834,7 +2835,7 @@ func TestStartScenarioMirrorFailureRollsBackReaders(t *testing.T) {
 	sm, orchID := newMirroredScenarioOrchestrator(t)
 	repo := initScenarioGitRepo(t)
 
-	badAgent := config.Agent{Command: "sleep", Args: []string{"60"}}
+	badAgent := config.Agent{NonInteractiveArgs: []string{}, Command: "sleep", Args: []string{"60"}}
 	badAgent.Sandbox.Command = filepath.Join(t.TempDir(), "missing-safehouse")
 
 	sm.mu.Lock()
@@ -3227,7 +3228,7 @@ func TestAddToScenarioCommitSaveFailureRollsBackPolicyAndContract(t *testing.T) 
 	repo := initScenarioGitRepo(t)
 
 	sm.mu.Lock()
-	sm.cfg.Agents["sleeper"] = config.Agent{Command: "sh", Args: []string{"-c", "sleep 60", "--"}}
+	sm.cfg.Agents["sleeper"] = config.Agent{NonInteractiveArgs: []string{}, Command: "sh", Args: []string{"-c", "sleep 60", "--"}}
 	sm.state.Sessions["braw-old"] = &SessionState{ID: "braw-old", Name: "braw-old", Status: StatusStopped}
 	sm.state.Scenarios["sc-add"] = &ScenarioState{
 		ID: "sc-add", Name: "strath-add", OrchestratorID: orchID,
@@ -3289,7 +3290,8 @@ func TestScenarioRetryPolicyForcesPTYUnderHeadlessDefault(t *testing.T) {
 	sm.cfg.Headless.Experimental = true
 	sm.cfg.Headless.Default = true
 	sm.cfg.Agents["sleeper"] = config.Agent{
-		Command: "sh", Args: []string{"-c", "sleep 60", "--"}, HeadlessCapable: &capable,
+		NonInteractiveArgs: []string{},
+		Command:            "sh", Args: []string{"-c", "sleep 60", "--"}, HeadlessCapable: &capable,
 	}
 	sm.mu.Unlock()
 

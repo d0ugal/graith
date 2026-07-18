@@ -52,9 +52,9 @@ func truncateRunes(s string, maxRunes int) string {
 // parsed hook stdin. The CLI forwards the raw notification subtype (empty when
 // stdin didn't parse within the budget) and no longer decides what a subtype
 // means — the daemon routes it (idle_prompt -> ready, permission_prompt ->
-// approval, everything else -> no status change). This is deliberately coupled
+// error, everything else -> no status change). This is deliberately coupled
 // with the daemon's subtype-aware switch: an empty/unparsed subtype must map to
-// no status change there, not to approval.
+// no status change there, not to error.
 func buildStatusReport(sessionID, event, toolFlag string, stdin hookStdin, parsed bool, maxLastMessageRunes int) protocol.StatusReportMsg {
 	msg := protocol.StatusReportMsg{
 		SessionID: sessionID,

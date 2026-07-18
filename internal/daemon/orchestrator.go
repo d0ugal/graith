@@ -79,6 +79,9 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	if !ok {
 		return SessionState{}, fmt.Errorf("orchestrator agent %q not found in config", agentName)
 	}
+	if agent.NonInteractiveArgs == nil {
+		return SessionState{}, fmt.Errorf("orchestrator agent %q has no non_interactive_args; refusing to start an agent that may prompt for permission", agentName)
+	}
 
 	sandboxed, err := sm.resolveSandboxFromConfig(cfgSnap, agentName)
 	if err != nil {
@@ -88,6 +91,10 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	if !sandboxed {
 		return SessionState{}, errors.New("orchestrator requires sandbox but sandbox is not available — install safehouse and enable sandbox in config")
 	}
+	if err := sm.validateCommandPolicyFromConfig(cfgSnap.CommandPolicy, agentName); err != nil {
+		return SessionState{}, fmt.Errorf("orchestrator command policy: %w", err)
+	}
+	policyEnabled := cfgSnap.CommandPolicy.Enabled()
 
 	scratchDir := sm.orchestratorScratchDir()
 	tmpDir := sm.orchestratorTmpDir()
@@ -164,6 +171,12 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		sm.rollbackOrchestratorCreate(id)
 		return SessionState{}, fmt.Errorf("expand orchestrator agent args: %w", err)
 	}
+	nonInteractiveArgs, err := config.ExpandSlice(agent.NonInteractiveArgs, vars)
+	if err != nil {
+		sm.rollbackOrchestratorCreate(id)
+		return SessionState{}, fmt.Errorf("expand orchestrator non-interactive args: %w", err)
+	}
+	expandedArgs = append(nonInteractiveArgs, expandedArgs...)
 
 	promptArgs, err := sm.buildOrchestratorPrompt(agentName, orchCfg, cfgSnap.AvailableRepoPaths(), cfgSnap.Notifications.Enabled, scratchDir)
 	if err != nil {
@@ -190,6 +203,17 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	if sm.paths.Profile != "" {
 		env["GRAITH_PROFILE"] = sm.paths.Profile
 	}
+	if policyEnabled {
+		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, scratchDir, false, true)
+		if err != nil {
+			sm.rollbackOrchestratorCreate(id)
+			return SessionState{}, fmt.Errorf("inject orchestrator command-policy hook: %w", err)
+		}
+		expandedArgs = append(expandedArgs, hookArgs...)
+		for key, value := range hookEnv {
+			env[key] = value
+		}
+	}
 
 	merged := sandboxMerged
 	merged.ReadDirs = expandPaths(merged.ReadDirs, sm.log, "read")
@@ -205,7 +229,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		envKeys = append(envKeys, k)
 	}
 
-	opts := sm.sandboxOptsFromConfig(merged, id, scratchDir, agent.Command, envKeys, false)
+	opts := sm.sandboxOptsFromConfig(merged, id, scratchDir, agent.Command, envKeys, policyEnabled)
 	opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 	opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
 	opts.WriteDirs = append(opts.WriteDirs, scratchDir)
@@ -267,6 +291,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	sess.CreationCfg = &CreationConfig{
 		Agent:         agent,
 		SandboxConfig: sandboxMerged,
+		CommandPolicy: cfgSnap.CommandPolicy,
 	}
 
 	sm.sessions[id] = ptySess
@@ -297,7 +322,11 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 }
 
 func (sm *SessionManager) rollbackOrchestratorCreate(id string) {
+	agentName := ""
 	sm.mu.Lock()
+	if sess, ok := sm.state.Sessions[id]; ok {
+		agentName = sess.Agent
+	}
 	delete(sm.state.Sessions, id)
 	_ = sm.saveState()
 	sm.mu.Unlock()
@@ -307,6 +336,9 @@ func (sm *SessionManager) rollbackOrchestratorCreate(id string) {
 	// Delete would remove it. Mirrors cleanupOnError/forkCleanup in Create/Fork.
 	_ = os.Remove(sm.nonoProfilePath(id))
 	_ = os.Remove(sm.safehouseFragmentPath(id))
+	if agentName != "" {
+		sm.cleanupHooks(id, agentName, sm.orchestratorScratchDir())
+	}
 }
 
 // buildOrchestratorPrompt assembles the orchestrator's system prompt from

@@ -6,59 +6,29 @@ import (
 	"testing"
 )
 
-func TestApproval(t *testing.T) {
+func TestCommandPolicyNeverDefersToNativePrompt(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
-		agent    string
-		decision string
-		reason   string
-		want     string
+		agent, decision, want string
 	}{
-		{"claude", "allow", "", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}`},
-		{"claude", "block", "", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}`},
-		{"claude", "deny", "", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}`},
-		{"claude", "defer", "", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask"}}`},
-		{"claude", "ask", "", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask"}}`},
-		{"claude", "haar", "", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"haar"}}`},
-		{"claude", "allow", "braw-approved", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"braw-approved"}}`},
-		{"claude", "block", "neep-forbidden", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"neep-forbidden"}}`},
-		// Codex's PermissionRequest output nests the decision under
-		// hookSpecificOutput.decision.behavior (issue #1183) — the legacy
-		// top-level {"decision":...} is rejected by Codex's deny_unknown_fields.
-		{"codex", "allow", "", `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`},
-		{"codex", "deny", "", `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny"}}}`},
-		{"codex", "block", "", `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny"}}}`},
-		{"codex", "block", "neep-forbidden", `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"neep-forbidden"}}}`},
-		// defer/unknown omit the decision so Codex runs its own approval flow.
-		{"codex", "defer", "", `{"hookSpecificOutput":{"hookEventName":"PermissionRequest"}}`},
-		{"codex", "haar", "", `{"hookSpecificOutput":{"hookEventName":"PermissionRequest"}}`},
-		{"cursor", "allow", "", `{"permission":"allow"}`},
-		{"cursor", "deny", "", `{"permission":"deny"}`},
-		{"cursor", "block", "", `{"permission":"deny"}`},
-		{"agy", "allow", "", `{"decision":"allow"}`},
+		{"claude", "allow", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}`},
+		{"claude", "ask", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}`},
+		{"claude", "unknown", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}`},
+		{"codex", "allow", `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`},
+		{"codex", "defer", `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny"}}}`},
+		{"cursor", "allow", `{"permission":"allow"}`},
+		{"cursor", "ask", `{"permission":"deny"}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.agent+"/"+tt.decision, func(t *testing.T) {
-			got := Approval(tt.agent, tt.decision, tt.reason)
-			if got != tt.want {
-				t.Errorf("Approval(%q, %q, %q) = %s, want %s", tt.agent, tt.decision, tt.reason, got, tt.want)
+			t.Parallel()
+			if got := CommandPolicy(tt.agent, tt.decision, ""); got != tt.want {
+				t.Fatalf("CommandPolicy() = %s, want %s", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestAllowAll(t *testing.T) {
-	want := `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}`
-	if got := AllowAll("claude"); got != want {
-		t.Errorf("AllowAll(claude) = %s, want %s", got, want)
-	}
-
-	codexWant := `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`
-	if got := AllowAll("codex"); got != codexWant {
-		t.Errorf("AllowAll(codex) = %s, want %s", got, codexWant)
-	}
-}
-
-// TestInboxContextClaude is the regression test for issue #1072: Claude Code
 // inbox context must go through hookSpecificOutput.additionalContext (which
 // reaches the model), not a top-level systemMessage (which is user-facing only).
 func TestInboxContextClaude(t *testing.T) {
