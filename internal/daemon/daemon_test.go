@@ -425,6 +425,7 @@ func TestUpdate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Update() with no changes should succeed, got: %v", err)
 		}
+
 		if !result.Starred {
 			t.Error("omitted starred field changed true to false")
 		}

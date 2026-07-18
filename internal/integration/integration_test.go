@@ -642,6 +642,7 @@ func TestUpdateStarredPersistsAndProtectsDeletion(t *testing.T) {
 	})
 
 	var created protocol.SessionInfo
+
 	_ = protocol.DecodePayload(readControl(t, r), &created)
 
 	name := "bonnie"
@@ -673,6 +674,7 @@ func TestUpdateStarredPersistsAndProtectsDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load persisted state: %v", err)
 	}
+
 	if persisted := loaded.Sessions[created.ID]; persisted == nil || persisted.Name != "bonnie" || !persisted.Starred {
 		t.Fatalf("persisted = %+v, want combined update", persisted)
 	}
@@ -680,23 +682,29 @@ func TestUpdateStarredPersistsAndProtectsDeletion(t *testing.T) {
 	sendControl(t, w, "list", protocol.ListMsg{})
 
 	var list protocol.SessionListMsg
+
 	_ = protocol.DecodePayload(readControl(t, r), &list)
+
 	if len(list.Sessions) != 1 || list.Sessions[0].ID != created.ID || !list.Sessions[0].Starred {
 		t.Fatalf("list = %+v, want starred session", list.Sessions)
 	}
 
 	sendControl(t, w, "delete", protocol.DeleteMsg{SessionID: created.ID})
+
 	if resp := readControl(t, r); resp.Type != "error" {
 		t.Fatalf("delete starred session response = %q, want error", resp.Type)
 	}
 
 	starred = false
+
 	sendControl(t, w, "update", protocol.UpdateMsg{SessionID: created.ID, Starred: &starred})
+
 	if resp := readControl(t, r); resp.Type != "updated" {
 		t.Fatalf("clear starred response = %q, want updated", resp.Type)
 	}
 
 	sendControl(t, w, "delete", protocol.DeleteMsg{SessionID: created.ID})
+
 	if resp := readControl(t, r); resp.Type != "deleted" {
 		t.Fatalf("delete unstarred response = %q, want deleted", resp.Type)
 	}
