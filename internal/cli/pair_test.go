@@ -29,6 +29,11 @@ func TestRemotePairingsCommandTree(t *testing.T) {
 		if cmd.Name() == "pair" {
 			t.Fatal("root command still contains removed gr pair namespace")
 		}
+		for _, alias := range cmd.Aliases {
+			if alias == "pair" {
+				t.Fatalf("root command %q retains removed gr pair alias", cmd.Name())
+			}
+		}
 	}
 
 	wantPaths := map[string]string{

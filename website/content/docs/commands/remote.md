@@ -1,5 +1,5 @@
 ---
-weight: 440
+weight: 445
 title: "Remote access commands"
 description: "Pair, administer, list, and attach to remote graith daemons."
 icon: "lan"
