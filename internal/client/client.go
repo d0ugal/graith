@@ -45,6 +45,13 @@ func New(cfg *config.Config, paths config.Paths, configFile string) (*Client, er
 	return c, nil
 }
 
+// DaemonPID returns the operating-system peer PID for this client's local Unix
+// socket. Unlike the daemon PID file, this identity is bound to the process
+// that owns the connection and can therefore be used to guard restart races.
+func (c *Client) DaemonPID() (int, error) {
+	return daemonPID(c.conn)
+}
+
 // Connect creates a new client, performs the handshake, and reads the
 // handshake response. If the daemon is running a different version, it
 // automatically triggers a restart and reconnects. On failure the
