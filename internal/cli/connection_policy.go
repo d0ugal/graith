@@ -153,17 +153,22 @@ func pollLocalDaemon(ready func(deadline time.Time) bool) bool {
 // version string (a same-version rebuild), so neither a bare dial nor a version
 // match distinguishes the old daemon from the new one — only a CHANGED instance
 // ID proves the replacement generation is actually serving (issue #1319). A
-// ready=false result means the new generation never appeared within the budget:
-// it exec'd into a different (lastVersion != want) version, kept answering with
-// the pre-upgrade instance ID (an inherited/old listener), or never became
-// probeable at all. All are upgrade failures, not success.
+// ready=false result means the new generation was not observed within the
+// budget: it exec'd into a different (lastVersion != want) version, kept
+// answering with the pre-upgrade instance ID (an inherited/old listener), or
+// never became probeable at all. It is not proof that an accepted preserve
+// restart failed because exec/adoption may still be progressing.
 func waitForNewLocalDaemonGeneration(wantVersion, priorInstanceID string) (lastVersion string, ready bool) {
 	ready = pollLocalDaemon(func(deadline time.Time) bool {
 		v, id := probeDaemonIdentityFn(deadline)
 		lastVersion = v
 
-		return v == wantVersion && id != "" && id != priorInstanceID
+		return isNewDaemonGeneration(v, id, wantVersion, priorInstanceID)
 	})
 
 	return lastVersion, ready
+}
+
+func isNewDaemonGeneration(version, instanceID, wantVersion, priorInstanceID string) bool {
+	return version == wantVersion && instanceID != "" && instanceID != priorInstanceID
 }

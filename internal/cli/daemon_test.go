@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -200,10 +203,259 @@ func TestExecUpgradeWaitsForNewGenerationDespiteInheritedListener(t *testing.T) 
 	}
 }
 
+// TestRestartPreserveReconcilesGenerationAfterReadinessDeadline models the
+// replacement becoming healthy immediately after the aggregate readiness wait:
+// the old PID file is already gone, but the socket serves the requested version
+// from a fresh generation before fallback begins. The restart must succeed from
+// that authoritative identity and never enter the session-killing clean path.
+func TestRestartPreserveReconcilesGenerationAfterReadinessDeadline(t *testing.T) {
+	origCfg, origNow, origSleep := cfg, connectionNow, connectionSleep
+	origDial, origProbe, origOut, origPaths := dialUpgradeClient, probeDaemonIdentityFn, out, paths
+
+	t.Cleanup(func() {
+		cfg, connectionNow, connectionSleep = origCfg, origNow, origSleep
+		dialUpgradeClient, probeDaemonIdentityFn, out, paths = origDial, origProbe, origOut, origPaths
+	})
+
+	cfg = &config.Config{Connection: config.ConnectionConfig{
+		HandshakeTimeout:  "1s",
+		StartTimeout:      "10ms",
+		StartPollInterval: "10ms",
+	}}
+
+	clk := &fakeConnClock{now: time.Unix(1_700_000, 0)}
+	connectionNow = clk.Now
+	connectionSleep = clk.Sleep
+
+	paths.PIDFile = filepath.Join(t.TempDir(), "graith.pid")
+	if err := os.WriteFile(paths.PIDFile, []byte("48309\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeUpgradeConn{
+		responses: []protocol.Envelope{
+			payloadEnv("handshake_ok", protocol.HandshakeOkMsg{
+				Version:          version.Version,
+				DaemonVersion:    version.Version,
+				DaemonInstanceID: "croft-auld",
+			}),
+		},
+	}
+	dialUpgradeClient = func() (upgradeExchangeConn, error) { return fake, nil }
+
+	probes := 0
+	probeDaemonIdentityFn = func(deadline time.Time) (string, string) {
+		probes++
+
+		if deadline.IsZero() {
+			return version.Version, "bothy-new"
+		}
+
+		if err := os.Remove(paths.PIDFile); err != nil {
+			t.Fatalf("remove old PID file: %v", err)
+		}
+
+		return version.Version, "croft-auld"
+	}
+
+	var rendered bytes.Buffer
+
+	out = output.NewWithWriter(false, &rendered)
+
+	cleanCalled := false
+
+	err := restartDaemonPreservingSessions(func() error {
+		cleanCalled = true
+
+		return errors.New("clean restart must not run")
+	}, func() error {
+		cleanCalled = true
+
+		return errors.New("clean start must not run")
+	})
+	if err != nil {
+		t.Fatalf("late healthy replacement should reconcile as success: %v", err)
+	}
+
+	if cleanCalled {
+		t.Fatal("clean restart ran after a healthy replacement generation was serving")
+	}
+
+	if probes != 2 {
+		t.Fatalf("identity probes = %d, want readiness probe plus final reconciliation", probes)
+	}
+
+	got := rendered.String()
+	if !strings.Contains(got, "Daemon restarted (sessions preserved)") {
+		t.Fatalf("restart output = %q, want preserved-session success", got)
+	}
+
+	for _, contradictory := range []string{"Preserve failed", "Falling back", "daemon is still running"} {
+		if strings.Contains(got, contradictory) {
+			t.Errorf("restart output = %q, must not contain %q after successful reconciliation", got, contradictory)
+		}
+	}
+}
+
+// TestRestartPreserveDoesNotKillWhenReadinessIsUnconfirmed proves an accepted
+// preserve request never escalates to the PID-signalling clean path merely
+// because both the aggregate wait and final reconciliation remain inconclusive.
+// The same PID can exec into the valid replacement immediately after the probe.
+func TestRestartPreserveDoesNotKillWhenReadinessIsUnconfirmed(t *testing.T) {
+	origCfg, origNow, origSleep := cfg, connectionNow, connectionSleep
+	origDial, origProbe, origOut, origPaths := dialUpgradeClient, probeDaemonIdentityFn, out, paths
+	origProcessAlive := daemonProcessAlive
+
+	t.Cleanup(func() {
+		cfg, connectionNow, connectionSleep = origCfg, origNow, origSleep
+		dialUpgradeClient, probeDaemonIdentityFn, out, paths = origDial, origProbe, origOut, origPaths
+		daemonProcessAlive = origProcessAlive
+	})
+
+	cfg = &config.Config{Connection: config.ConnectionConfig{
+		HandshakeTimeout:  "1s",
+		StartTimeout:      "10ms",
+		StartPollInterval: "10ms",
+	}}
+	out = output.NewWithWriter(false, io.Discard)
+
+	clk := &fakeConnClock{now: time.Unix(1_700_000, 0)}
+	connectionNow = clk.Now
+	connectionSleep = clk.Sleep
+
+	paths.PIDFile = filepath.Join(t.TempDir(), "graith.pid")
+	if err := os.WriteFile(paths.PIDFile, []byte("48309\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeUpgradeConn{
+		responses: []protocol.Envelope{
+			payloadEnv("handshake_ok", protocol.HandshakeOkMsg{
+				Version:          version.Version,
+				DaemonVersion:    version.Version,
+				DaemonInstanceID: "strath-auld",
+			}),
+		},
+	}
+	dialUpgradeClient = func() (upgradeExchangeConn, error) { return fake, nil }
+	probeDaemonIdentityFn = func(time.Time) (string, string) {
+		return version.Version, "strath-auld"
+	}
+	daemonProcessAlive = func(pid int) bool {
+		if pid != 48309 {
+			t.Fatalf("process check PID = %d, want captured PID 48309", pid)
+		}
+
+		return true
+	}
+
+	cleanCalled := false
+
+	err := restartDaemonPreservingSessions(func() error {
+		cleanCalled = true
+
+		return nil
+	}, func() error {
+		cleanCalled = true
+
+		return nil
+	})
+	if err == nil {
+		t.Fatal("unconfirmed preserve restart should return a precise error")
+	}
+
+	if cleanCalled {
+		t.Fatal("clean restart ran without proving an accepted preserve restart had stopped progressing")
+	}
+
+	if !strings.Contains(err.Error(), "automatic clean fallback skipped") {
+		t.Fatalf("error = %q, want explicit safe-fallback explanation", err)
+	}
+}
+
+// TestRestartPreserveFallsBackOnlyAfterPriorPIDExits covers a genuine preserve
+// crash: after the final identity probe finds no valid replacement, clean start
+// is allowed only because the exact pre-upgrade PID is proven dead. Its stale
+// PID file is removed without calling the signalling restart path.
+func TestRestartPreserveFallsBackOnlyAfterPriorPIDExits(t *testing.T) {
+	origCfg, origNow, origSleep := cfg, connectionNow, connectionSleep
+	origDial, origProbe, origOut, origPaths := dialUpgradeClient, probeDaemonIdentityFn, out, paths
+	origProcessAlive := daemonProcessAlive
+
+	t.Cleanup(func() {
+		cfg, connectionNow, connectionSleep = origCfg, origNow, origSleep
+		dialUpgradeClient, probeDaemonIdentityFn, out, paths = origDial, origProbe, origOut, origPaths
+		daemonProcessAlive = origProcessAlive
+	})
+
+	cfg = &config.Config{Connection: config.ConnectionConfig{
+		HandshakeTimeout:  "1s",
+		StartTimeout:      "10ms",
+		StartPollInterval: "10ms",
+	}}
+	out = output.NewWithWriter(false, io.Discard)
+
+	clk := &fakeConnClock{now: time.Unix(1_700_000, 0)}
+	connectionNow = clk.Now
+	connectionSleep = clk.Sleep
+
+	paths.PIDFile = filepath.Join(t.TempDir(), "graith.pid")
+	if err := os.WriteFile(paths.PIDFile, []byte("48309\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeUpgradeConn{
+		responses: []protocol.Envelope{
+			payloadEnv("handshake_ok", protocol.HandshakeOkMsg{
+				Version:          version.Version,
+				DaemonVersion:    version.Version,
+				DaemonInstanceID: "haar-auld",
+			}),
+		},
+	}
+	dialUpgradeClient = func() (upgradeExchangeConn, error) { return fake, nil }
+	probeDaemonIdentityFn = func(time.Time) (string, string) { return "", "" }
+	daemonProcessAlive = func(pid int) bool {
+		if pid != 48309 {
+			t.Fatalf("process check PID = %d, want captured PID 48309", pid)
+		}
+
+		return false
+	}
+
+	signallingRestartCalled := false
+	cleanStartCalled := false
+
+	err := restartDaemonPreservingSessions(func() error {
+		signallingRestartCalled = true
+
+		return nil
+	}, func() error {
+		cleanStartCalled = true
+
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("dead preserve PID should allow clean fallback: %v", err)
+	}
+
+	if signallingRestartCalled {
+		t.Fatal("dead preserve PID was passed to the signalling clean restart path")
+	}
+
+	if !cleanStartCalled {
+		t.Fatal("clean start did not run after the preserve PID was proven dead")
+	}
+
+	if _, err := os.Stat(paths.PIDFile); !os.IsNotExist(err) {
+		t.Fatalf("stale preserve PID file still exists: %v", err)
+	}
+}
+
 // TestExecUpgradeFailsWhenOnlyInheritedListenerResponds proves execUpgrade does
 // NOT report success when the inherited listener keeps answering with the
 // pre-upgrade instance ID (the exec never took), so the caller falls back to a
-// clean restart instead of losing sessions on a false success (issue #1319).
+// guarded reconciliation instead of reporting a false success (issue #1319).
 func TestExecUpgradeFailsWhenOnlyInheritedListenerResponds(t *testing.T) {
 	origCfg, origNow, origSleep := cfg, connectionNow, connectionSleep
 	origDial, origProbe, origOut := dialUpgradeClient, probeDaemonIdentityFn, out
