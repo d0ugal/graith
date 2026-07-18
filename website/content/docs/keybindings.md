@@ -96,7 +96,7 @@ Cycle with `h`/`l` or left/right arrow keys:
 | `/` | Enter filter mode (type to search by name or repo) |
 | Esc (in filter) | Clear filter and return to list |
 
-There is no stop, resume, or rename action in the overlay. Use `gr stop`, `gr restart`, or `gr rename` from the CLI.
+There is no stop, resume, or rename action in the overlay. Use `gr stop`, `gr restart`, or `gr update <session> --name <new-name>` from the CLI.
 
 ### Preview panel
 

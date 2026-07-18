@@ -208,7 +208,7 @@ public actor MockHostClient: GraithHostClient {
     }
 
     public func rename(sessionID: String, newName: String) async throws {
-        try check(ControlType.rename)
+        try check(ControlType.update)
         mutate(sessionID) { $0 = $0.with(name: newName) }
     }
 

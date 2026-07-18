@@ -88,7 +88,7 @@ var newControlConn = func() (controlConn, func(), error) {
 // withFreshClient opens a fresh connection and runs a single control operation
 // against it, closing the connection afterwards. It is the shared skeleton for
 // the one-shot session operations the overlay drives (star, stop, restart,
-// rename, delete, restore).
+// update-name, delete, restore).
 func withFreshClient(op func(controlConn) error) error {
 	c, closeConn, err := newControlConn()
 	if err != nil {
@@ -121,13 +121,13 @@ func stopSession(sessionID string) error {
 	})
 }
 
-func renameSession(sessionID, newName string) error {
+func updateSessionName(sessionID, newName string) error {
 	if err := daemon.ValidateSessionName(newName); err != nil {
 		return err
 	}
 
 	return withFreshClient(func(c controlConn) error {
-		return controlOp(c, "rename", protocol.RenameMsg{SessionID: sessionID, NewName: newName})
+		return controlOp(c, "update", protocol.UpdateMsg{SessionID: sessionID, Name: &newName})
 	})
 }
 

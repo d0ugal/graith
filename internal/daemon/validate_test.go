@@ -169,16 +169,17 @@ func TestCreateSkipModelValidation(t *testing.T) {
 	})
 }
 
-func TestRenameRejectsUnsafeName(t *testing.T) {
+func TestUpdateRejectsUnsafeName(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.state.Sessions["braw-id"] = &SessionState{
 		ID:   "braw-id",
 		Name: "bonnie-name",
 	}
 
-	err := sm.Rename("braw-id", "bad|name")
+	badName := "bad|name"
+	err := sm.Update("braw-id", &badName, nil)
 	if err == nil {
-		t.Fatal("Rename with unsafe name should fail")
+		t.Fatal("Update with unsafe name should fail")
 	}
 
 	if sm.state.Sessions["braw-id"].Name != "bonnie-name" {
@@ -205,5 +206,9 @@ func TestResumeRejectsUnsafePersistedName(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "unsafe name") {
 		t.Errorf("expected unsafe name error, got: %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "gr update <session> --name <new-name>") || !strings.Contains(err.Error(), "braw-id") {
+		t.Errorf("expected update recovery guidance with the session ID, got: %v", err)
 	}
 }

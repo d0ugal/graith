@@ -352,9 +352,9 @@ public actor GraithProtocolClient {
         _ = try await conn.request("interrupt", payload: SessionIDMsg(sessionID: sessionID))
     }
 
-    public func rename(sessionID: String, newName: String) async throws {
+    public func update(sessionID: String, name: String? = nil, parentID: String? = nil) async throws {
         let conn = try await controlConnection()
-        _ = try await conn.request("rename", payload: RenameMsg(sessionID: sessionID, newName: newName))
+        _ = try await conn.request("update", payload: UpdateMsg(sessionID: sessionID, name: name, parentID: parentID))
     }
 
     /// `star` — mark a session as starred. The daemon replies `starred`.

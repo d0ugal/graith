@@ -169,9 +169,21 @@ This is a lossy reseed, not a native resume: reasoning/thinking and exact tool-c
 | `--model <model>` | Model for the target agent (default: the target's default) |
 | `--background` | Migrate without attaching |
 
-## `gr rename <name-or-id> <new-name>`
+## `gr update <name-or-id>`
 
-Rename a session.
+Update a session's mutable properties in place. A name-only update keeps the
+session ID, worktree, branch, ownership, scenario membership, and parent
+relationship unchanged.
+
+| Flag | Description |
+|------|-------------|
+| `--name <new-name>` | Set a new session name |
+| `--parent <name-or-id>` | Set a new parent session; pass an empty string to orphan the session |
+
+At least one flag is required. Session names may be duplicated, so use the
+session ID when a name is ambiguous. Soft-deleted sessions must be restored
+before they can be updated. With `--json` or agent mode, success is emitted as
+a JSON object containing `session_id` and the properties that changed.
 
 ## `gr star <name-or-id>`
 

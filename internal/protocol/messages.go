@@ -233,11 +233,6 @@ type GCResultMsg struct {
 	Orphans []GCOrphanInfo `json:"orphans"`
 }
 
-type RenameMsg struct {
-	SessionID string `json:"session_id"`
-	NewName   string `json:"new_name"`
-}
-
 type UpdateMsg struct {
 	SessionID string  `json:"session_id"`
 	Name      *string `json:"name,omitempty"`

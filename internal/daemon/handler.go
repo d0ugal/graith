@@ -499,9 +499,6 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					lifecycleRequest{SessionID: s.SessionID, Children: s.Children, ExcludeRoot: s.ExcludeRoot},
 					"stopped", "stopped", sm.StopWithChildren, sm.Stop)
 
-			case "rename":
-				handleRename(sm, auth, sendControl, msg)
-
 			case "update":
 				handleUpdate(sm, auth, sendControl, msg)
 

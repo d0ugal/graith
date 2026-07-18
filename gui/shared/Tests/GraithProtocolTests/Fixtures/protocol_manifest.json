@@ -2302,27 +2302,6 @@
       ]
     },
     {
-      "name": "RenameMsg",
-      "swift": "required",
-      "swift_type": "RenameMsg",
-      "fields": [
-        {
-          "name": "session_id",
-          "type": {
-            "kind": "string"
-          },
-          "optional": false
-        },
-        {
-          "name": "new_name",
-          "type": {
-            "kind": "string"
-          },
-          "optional": false
-        }
-      ]
-    },
-    {
       "name": "RepoEntry",
       "swift": "required",
       "swift_type": "RepoEntry",
@@ -5406,7 +5385,8 @@
     },
     {
       "name": "UpdateMsg",
-      "swift": "planned",
+      "swift": "required",
+      "swift_type": "UpdateMsg",
       "fields": [
         {
           "name": "session_id",

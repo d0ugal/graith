@@ -5,9 +5,21 @@ import (
 	"fmt"
 
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
+
+type updateOptions struct {
+	name   *string
+	parent *string
+}
+
+type updateOutput struct {
+	SessionID string  `json:"session_id"`
+	Name      *string `json:"name,omitempty"`
+	ParentID  *string `json:"parent_id,omitempty"`
+}
 
 var updateCmd = &cobra.Command{
 	Use:               "update <name-or-id>",
@@ -18,11 +30,20 @@ var updateCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		nameFlag, _ := cmd.Flags().GetString("name")
 		parentFlag, _ := cmd.Flags().GetString("parent")
-		nameSet := cmd.Flags().Changed("name")
-		parentSet := cmd.Flags().Changed("parent")
+		opts := updateOptions{}
 
-		if !nameSet && !parentSet {
-			return errors.New("at least one of --name or --parent must be specified")
+		if cmd.Flags().Changed("name") {
+			opts.name = &nameFlag
+		}
+
+		if cmd.Flags().Changed("parent") {
+			opts.parent = &parentFlag
+		}
+
+		// Match the old rename command's fail-fast behavior: reject missing,
+		// unsafe, and reserved names before opening a daemon connection.
+		if err := validateUpdateOptions(opts); err != nil {
+			return err
 		}
 
 		c, err := client.Connect(cfg, paths, cfgFile)
@@ -31,63 +52,113 @@ var updateCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		sessionID, err := resolveSession(c, args[0])
-		if err != nil {
-			return err
-		}
-
-		msg := protocol.UpdateMsg{SessionID: sessionID}
-		if nameSet {
-			msg.Name = &nameFlag
-		}
-
-		if parentSet {
-			if parentFlag == "" {
-				msg.ParentID = &parentFlag
-			} else {
-				parentSessionID, err := resolveSession(c, parentFlag)
-				if err != nil {
-					return fmt.Errorf("resolving parent: %w", err)
-				}
-
-				msg.ParentID = &parentSessionID
-			}
-		}
-
-		_ = c.SendControl("update", msg)
-
-		resp, err := c.ReadControlResponse()
-		if err != nil {
-			return err
-		}
-
-		if resp.Type == "error" {
-			var e protocol.ErrorMsg
-
-			_ = protocol.DecodePayload(resp, &e)
-
-			return fmt.Errorf("%s", e.Message)
-		}
-
-		if nameSet {
-			out.Printf("Name updated to %s\n", nameFlag)
-		}
-
-		if parentSet {
-			if parentFlag == "" {
-				out.Printf("Parent removed\n")
-			} else {
-				out.Printf("Parent set to %s\n", parentFlag)
-			}
-		}
-
-		return nil
+		return runUpdate(c, args[0], opts)
 	},
+}
+
+func validateUpdateOptions(opts updateOptions) error {
+	if opts.name == nil && opts.parent == nil {
+		return errors.New("at least one of --name or --parent must be specified")
+	}
+
+	if opts.name != nil {
+		if err := daemon.ValidateSessionName(*opts.name); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func runUpdate(c controlConn, nameOrID string, opts updateOptions) error {
+	if err := validateUpdateOptions(opts); err != nil {
+		return err
+	}
+
+	session, err := resolveUpdatableSessionInfo(c, nameOrID)
+	if err != nil {
+		return err
+	}
+
+	msg := protocol.UpdateMsg{SessionID: session.ID, Name: opts.name}
+	if opts.parent != nil {
+		if *opts.parent == "" {
+			empty := ""
+			msg.ParentID = &empty
+		} else {
+			parent, err := resolveUpdatableSessionInfo(c, *opts.parent)
+			if err != nil {
+				return fmt.Errorf("resolving parent: %w", err)
+			}
+
+			msg.ParentID = &parent.ID
+		}
+	}
+
+	if err := controlOp(c, "update", msg); err != nil {
+		return err
+	}
+
+	if jsonOutput {
+		return out.JSON(updateOutput{
+			SessionID: session.ID,
+			Name:      msg.Name,
+			ParentID:  msg.ParentID,
+		})
+	}
+
+	if opts.name != nil {
+		out.Printf("Name updated to %s\n", *opts.name)
+	}
+
+	if opts.parent != nil {
+		if *opts.parent == "" {
+			out.Printf("Parent removed\n")
+		} else {
+			out.Printf("Parent set to %s\n", *opts.parent)
+		}
+	}
+
+	return nil
+}
+
+// resolveUpdatableSessionInfo resolves a live session by exact ID or unambiguous
+// name. If the reference only exists in the soft-delete list, return the same
+// explicit recovery guidance as the daemon's raw-ID update guard.
+func resolveUpdatableSessionInfo(c controlConn, nameOrID string) (*protocol.SessionInfo, error) {
+	session, err := resolveSessionInfo(c, nameOrID)
+	if err == nil {
+		return session, nil
+	}
+
+	var notFound *sessionNotFoundError
+	if !errors.As(err, &notFound) {
+		return nil, err
+	}
+
+	deleted, deletedErr := listSessions(c, true)
+	if deletedErr != nil {
+		return nil, deletedErr
+	}
+
+	deletedSession, deletedErr := resolveByNameOrID(nameOrID, deleted)
+	if deletedErr == nil {
+		return nil, fmt.Errorf("session %q is soft-deleted; `gr restore` it first", deletedSession.Name)
+	}
+
+	if !errors.As(deletedErr, &notFound) {
+		return nil, deletedErr
+	}
+
+	return nil, err
 }
 
 // registerUpdateCmd registers this command on rootCmd. Called from registerCommands.
 func registerUpdateCmd() {
 	updateCmd.Flags().String("name", "", "new session name")
 	updateCmd.Flags().String("parent", "", "new parent session (empty string to orphan)")
+	_ = updateCmd.RegisterFlagCompletionFunc("parent", func(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return completeSessionNames(cmd, nil, toComplete)
+	})
 	rootCmd.AddCommand(updateCmd)
 }

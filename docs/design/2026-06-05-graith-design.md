@@ -275,7 +275,7 @@ Confirmation ladder:
 
 On confirmation: kill process, remove worktree, remove branch, remove scrollback log, remove state entry.
 
-### Rename (`gr rename <old> <new>`)
+### Name update (`gr update <session> --name <new-name>`)
 
 Changes display name only. Stable ID, worktree path, and branch are unchanged.
 
@@ -398,7 +398,7 @@ USAGE:
     gr list [--json] [--repo <path>]    List all sessions
     gr attach [name]                    Attach to a session (fuzzy match)
     gr delete <name>                    Delete a session
-    gr rename <old> <new>              Rename a session
+    gr update <session> --name <new>   Rename a session
     gr info [--json]                    Show current session info (from within worktree)
     gr doctor [--autofix]               Health checks and diagnostics
     gr daemon start|stop                Daemon management

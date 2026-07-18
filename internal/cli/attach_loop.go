@@ -653,7 +653,7 @@ func (l *attachLoop) onOrchestratorSession() (bool, error) {
 func (l *attachLoop) onRenameSession() (bool, error) {
 	newName := client.RunNameInput("Rename Session")
 	if newName != "" {
-		if err := renameSession(l.sessionID, newName); err != nil {
+		if err := updateSessionName(l.sessionID, newName); err != nil {
 			out.Printf("Rename failed: %s\n", err)
 		}
 	}

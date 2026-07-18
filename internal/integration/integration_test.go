@@ -579,7 +579,7 @@ func TestResumeInvalidatesPreviousSessionToken(t *testing.T) {
 	}
 }
 
-func TestRename(t *testing.T) {
+func TestUpdateName(t *testing.T) {
 	env := setup(t)
 	defer env.teardown()
 
@@ -595,14 +595,15 @@ func TestRename(t *testing.T) {
 
 	_ = protocol.DecodePayload(createResp, &info)
 
-	sendControl(t, w, "rename", protocol.RenameMsg{SessionID: info.ID, NewName: "bonnie"})
+	newName := "bonnie"
+	sendControl(t, w, "update", protocol.UpdateMsg{SessionID: info.ID, Name: &newName})
 
-	renameResp := readControl(t, r)
-	if renameResp.Type == "error" {
+	updateResp := readControl(t, r)
+	if updateResp.Type == "error" {
 		var e protocol.ErrorMsg
 
-		_ = protocol.DecodePayload(renameResp, &e)
-		t.Fatalf("rename error: %s", e.Message)
+		_ = protocol.DecodePayload(updateResp, &e)
+		t.Fatalf("update error: %s", e.Message)
 	}
 
 	sendControl(t, w, "list", struct{}{})
@@ -625,7 +626,7 @@ func TestRename(t *testing.T) {
 	}
 
 	if !found {
-		t.Error("session not found after rename")
+		t.Error("session not found after name update")
 	}
 }
 

@@ -255,7 +255,7 @@ func TestRegisterCommandsIdempotent(t *testing.T) {
 	registerCommands()
 	registerCommands()
 
-	want := []string{"new", "list", "msg", "scenario", "sandbox", "store", "daemon", "config"}
+	want := []string{"new", "list", "update", "msg", "scenario", "sandbox", "store", "daemon", "config"}
 	for _, name := range want {
 		found := false
 
@@ -268,6 +268,12 @@ func TestRegisterCommandsIdempotent(t *testing.T) {
 
 		if !found {
 			t.Errorf("subcommand %q not registered on rootCmd", name)
+		}
+	}
+
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "rename" {
+			t.Fatal("removed rename command is still registered")
 		}
 	}
 

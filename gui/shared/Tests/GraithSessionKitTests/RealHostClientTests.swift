@@ -159,12 +159,18 @@ struct RealHostClientTests {
     }
 
     @Test func lifecycleMutationsRoundTrip() async throws {
-        let expected = ["resume", "restart", "interrupt", "delete", "rename", "star", "unstar"]
+        let expected = ["resume", "restart", "interrupt", "delete", "update", "star", "unstar"]
         let (client, server) = make { d in
             try await self.handshake(d)
             for want in expected {
                 let req = try await d.readControl()
                 #expect(req.type == want)
+                if want == "update" {
+                    let update = try decodePayload(req, as: UpdateMsg.self)
+                    #expect(update.sessionID == "x")
+                    #expect(update.name == "renamed")
+                    #expect(update.parentID == nil)
+                }
                 try await d.writeControl("ok", EmptyMsg())
             }
         }

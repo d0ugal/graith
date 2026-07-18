@@ -123,27 +123,6 @@ func handleAttachConvert(sm *SessionManager, auth authContext, send func(string,
 	}
 }
 
-// handleRename renames a session.
-func handleRename(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
-	r, ok := decodePayload[protocol.RenameMsg](msg, send, "invalid rename message")
-	if !ok {
-		return
-	}
-
-	if !auth.authorizeTarget(sm, r.SessionID, authSelfOrDescendant, send) {
-		return
-	}
-
-	if err := sm.Rename(r.SessionID, r.NewName); err != nil {
-		send("error", protocol.ErrorMsg{Message: err.Error()})
-	} else {
-		send("renamed", struct {
-			SessionID string `json:"session_id"`
-			NewName   string `json:"new_name"`
-		}{r.SessionID, r.NewName})
-	}
-}
-
 // authorizeUpdate checks that the caller may update the target session — and,
 // when adopting a new parent, over that parent too — under sm.mu. Clearing the
 // parent ("") is a privileged reparent: only the orchestrator and the human CLI
@@ -167,7 +146,7 @@ func authorizeUpdate(sm *SessionManager, auth authContext, u protocol.UpdateMsg)
 	return authErr
 }
 
-// handleUpdate renames and/or reparents a session, guarding the reparent so a
+// handleUpdate changes a session's name and/or parent, guarding the reparent so a
 // session can't manufacture a descendant relationship to bypass the auth model.
 func handleUpdate(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
 	u, ok := decodePayload[protocol.UpdateMsg](msg, send, "invalid update message")

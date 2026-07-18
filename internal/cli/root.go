@@ -204,7 +204,6 @@ func registerCommands() {
 		registerNewCmd()
 		registerNotifyCmd()
 		registerPathCmd()
-		registerRenameCmd()
 		registerReportStatusCmd()
 		registerRestartCmd()
 		registerRestoreCmd()

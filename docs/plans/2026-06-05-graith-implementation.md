@@ -4031,7 +4031,7 @@ func init() {
 }
 ```
 
-- [ ] **Step 6: Implement `gr rename`**
+- [ ] **Step 6: Implement session name updates**
 
 ```go
 // internal/cli/rename.go
@@ -4303,9 +4303,9 @@ Expected: creates session, shows session info
 Run: `./gr list`
 Expected: shows the test session
 
-- [ ] **Step 6: Test `gr rename`**
+- [ ] **Step 6: Test session name updates**
 
-Run: `./gr rename test-session renamed-session`
+Run: `./gr update test-session --name renamed-session`
 Expected: success
 
 - [ ] **Step 7: Test `gr delete`**
@@ -4334,7 +4334,7 @@ The following must work for v1 to be considered complete:
 - [ ] `gr list` shows all sessions grouped by repo
 - [ ] `gr attach` opens the overlay and allows session switching
 - [ ] `gr delete` with confirmation removes session, worktree, and branch
-- [ ] `gr rename` changes display name
+- [ ] `gr update <session> --name <new-name>` changes display name
 - [ ] `gr info --json` returns session info from within a worktree
 - [ ] `gr doctor` reports health status
 - [ ] Daemon auto-starts and persists sessions across terminal closures
