@@ -383,7 +383,7 @@ type ScenarioSession struct {
 }
 
 func (s ScenarioSession) startupPrompt() string {
-	if s.Prompt != "" {
+	if strings.TrimSpace(s.Prompt) != "" {
 		return s.Prompt
 	}
 

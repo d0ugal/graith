@@ -453,4 +453,8 @@ func TestScenarioStartupPromptRoundTrip(t *testing.T) {
 	if fallback := (ScenarioSessionInput{Task: "legacy task"}).StartupPrompt(); fallback != "legacy task" {
 		t.Fatalf("task-only startup prompt = %q", fallback)
 	}
+
+	if fallback := (ScenarioSessionInput{Prompt: " \n\t", Task: "legacy task"}).StartupPrompt(); fallback != "legacy task" {
+		t.Fatalf("whitespace-only prompt fallback = %q", fallback)
+	}
 }
