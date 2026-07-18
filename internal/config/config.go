@@ -315,8 +315,8 @@ type ConnectionConfig struct {
 	// proof-of-possession exchange (default "15s").
 	RemoteHandshakeTimeout string `toml:"remote_handshake_timeout"`
 	// RemotePairingTimeout bounds how long the CLI waits for the remote human to
-	// approve `gr pair`, and should sit just past the daemon's pending-pairing
-	// TTL (default "11m").
+	// approve `gr remote pairings approve`, and should sit just past the daemon's
+	// pending-pairing TTL (default "11m").
 	RemotePairingTimeout string `toml:"remote_pairing_timeout"`
 }
 

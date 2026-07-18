@@ -369,7 +369,8 @@ func (sm *SessionManager) RevokeDevice(deviceID string) (int, error) {
 	if err != nil && sm.log != nil {
 		// The device is revoked in memory and its connections are being closed,
 		// but persistence failed — a restart would reload it. Surface loudly; the
-		// error is also returned so `gr pair revoke` reports failure to the human.
+		// error is also returned so `gr remote pairings revoke` reports failure
+		// to the human.
 		sm.log.Error("pairing revocation persisted only in memory; retry revoke after a restart", "device", deviceID, "err", err)
 	}
 

@@ -8,15 +8,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// pairCmd groups the local-only device-pairing management commands for the
-// remote control surface (design §B.2). These run over the local Unix socket
-// (roleLocalHuman) — the daemon rejects them over the network.
-var pairCmd = &cobra.Command{
-	Use:   "pair",
+// remotePairingsCmd groups the local-only device-pairing administration
+// commands under the remote control surface (design §B.2). These run over the
+// local Unix socket (roleLocalHuman) — the daemon rejects them over the network.
+var remotePairingsCmd = &cobra.Command{
+	Use:   "pairings",
 	Short: "Manage remote device pairings (local only)",
 }
 
-var pairListCmd = &cobra.Command{
+var remotePairingsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List pending pairing requests and paired devices",
 	Args:  cobra.NoArgs,
@@ -43,36 +43,11 @@ var pairListCmd = &cobra.Command{
 			return err
 		}
 
-		if out.IsJSON() {
-			return out.JSON(pl)
-		}
-
-		if len(pl.Pending) == 0 && len(pl.Paired) == 0 {
-			out.Printf("No pending requests or paired devices.\n")
-			return nil
-		}
-
-		if len(pl.Pending) > 0 {
-			out.Printf("Pending pairing requests:\n")
-
-			for _, p := range pl.Pending {
-				out.Printf("  %s  %q  %s (%s)  requested %s\n", p.RequestID, p.DeviceLabel, p.TailnetUser, p.TailnetNode, p.RequestedAt)
-			}
-		}
-
-		if len(pl.Paired) > 0 {
-			out.Printf("Paired devices:\n")
-
-			for _, d := range pl.Paired {
-				out.Printf("  %s  %q  %s (%s)  paired %s\n", d.DeviceID, d.Label, d.TailnetUser, d.TailnetNode, d.CreatedAt)
-			}
-		}
-
-		return nil
+		return writePairings(pl)
 	},
 }
 
-var pairApproveCmd = &cobra.Command{
+var remotePairingsApproveCmd = &cobra.Command{
 	Use:   "approve <request-id>",
 	Short: "Approve a pending device pairing request",
 	Args:  cobra.ExactArgs(1),
@@ -99,18 +74,13 @@ var pairApproveCmd = &cobra.Command{
 			return err
 		}
 
-		out.Printf("Device paired: %s\n", pr.DeviceID)
-		out.Printf("The device received its credentials over its pairing connection.\n")
-
-		if pr.TLSPinSPKI != "" {
-			out.Printf("TLS SPKI pin: %s\n", pr.TLSPinSPKI)
-		}
+		writePairingApproval(pr)
 
 		return nil
 	},
 }
 
-var pairRevokeCmd = &cobra.Command{
+var remotePairingsRevokeCmd = &cobra.Command{
 	Use:   "revoke <device-id>",
 	Short: "Revoke a paired device (force-closes its live connections)",
 	Args:  cobra.ExactArgs(1),
@@ -132,10 +102,52 @@ var pairRevokeCmd = &cobra.Command{
 			return controlError(resp)
 		}
 
-		out.Printf("Device revoked: %s\n", args[0])
+		writePairingRevocation(args[0])
 
 		return nil
 	},
+}
+
+func writePairings(pl protocol.PairListResponseMsg) error {
+	if out.IsJSON() {
+		return out.JSON(pl)
+	}
+
+	if len(pl.Pending) == 0 && len(pl.Paired) == 0 {
+		out.Printf("No pending requests or paired devices.\n")
+		return nil
+	}
+
+	if len(pl.Pending) > 0 {
+		out.Printf("Pending pairing requests:\n")
+
+		for _, p := range pl.Pending {
+			out.Printf("  %s  %q  %s (%s)  requested %s\n", p.RequestID, p.DeviceLabel, p.TailnetUser, p.TailnetNode, p.RequestedAt)
+		}
+	}
+
+	if len(pl.Paired) > 0 {
+		out.Printf("Paired devices:\n")
+
+		for _, d := range pl.Paired {
+			out.Printf("  %s  %q  %s (%s)  paired %s\n", d.DeviceID, d.Label, d.TailnetUser, d.TailnetNode, d.CreatedAt)
+		}
+	}
+
+	return nil
+}
+
+func writePairingApproval(pr protocol.PairResponseMsg) {
+	out.Printf("Device paired: %s\n", pr.DeviceID)
+	out.Printf("The device received its credentials over its pairing connection.\n")
+
+	if pr.TLSPinSPKI != "" {
+		out.Printf("TLS SPKI pin: %s\n", pr.TLSPinSPKI)
+	}
+}
+
+func writePairingRevocation(deviceID string) {
+	out.Printf("Device revoked: %s\n", deviceID)
 }
 
 func controlError(resp protocol.Envelope) error {
@@ -146,10 +158,11 @@ func controlError(resp protocol.Envelope) error {
 	return fmt.Errorf("%s", e.Message)
 }
 
-// registerPairCmd registers this command on rootCmd. Called from registerCommands.
-func registerPairCmd() {
-	pairCmd.AddCommand(pairListCmd)
-	pairCmd.AddCommand(pairApproveCmd)
-	pairCmd.AddCommand(pairRevokeCmd)
-	rootCmd.AddCommand(pairCmd)
+// registerRemotePairingsCmd registers pairing administration below remoteCmd.
+// Called from registerRemoteCmd so no root-level compatibility command exists.
+func registerRemotePairingsCmd() {
+	remotePairingsCmd.AddCommand(remotePairingsListCmd)
+	remotePairingsCmd.AddCommand(remotePairingsApproveCmd)
+	remotePairingsCmd.AddCommand(remotePairingsRevokeCmd)
+	remoteCmd.AddCommand(remotePairingsCmd)
 }

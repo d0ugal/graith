@@ -74,6 +74,13 @@ Pairing policy limits keep the historically-fixed values as defaults and are cla
 
 Access is gated in two layers: a WhoIs **allowlist** (`allow_tailnet_users` — who on the tailnet may connect at all) and per-device **pairing** (`require_pairing` — each device proves possession of a paired key before it gets human-level rights).
 
+Initiate pairing on the client with `gr remote pair <host>`. On the daemon host,
+use `gr remote pairings list` to find the pending request, then approve it with
+`gr remote pairings approve <request-id>`. Device administration is local-only;
+`gr remote pairings revoke <device-id>` revokes a device and force-closes its
+live connections. See [Remote access commands]({{< relref "/docs/commands/remote.md" >}})
+for the complete CLI reference.
+
 > **Warning:** `require_pairing = false` is **UNSAFE** — it trusts the tailnet identity alone with no per-device proof, so it is restricted to **read-only** access. Leave pairing on for any device that should control sessions.
 
 ### Hot reload and revocation

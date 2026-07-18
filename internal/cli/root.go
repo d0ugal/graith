@@ -209,7 +209,6 @@ func registerCommands() {
 		registerRestartCmd()
 		registerRestoreCmd()
 		registerResumeCmd()
-		registerPairCmd()
 		registerPurgeCmd()
 		registerRemoteCmd()
 		registerSandboxCmd()

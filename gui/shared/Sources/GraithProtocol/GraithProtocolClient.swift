@@ -458,8 +458,8 @@ public actor GraithProtocolClient {
     ///
     /// This opens a fresh (token-less) remote connection. The daemon surfaces a
     /// pending pairing to the local human; this call resolves once that human
-    /// runs `gr pair approve` (or the daemon errors). On success the returned
-    /// token is adopted for subsequent connections.
+    /// runs `gr remote pairings approve` (or the daemon errors). On success the
+    /// returned token is adopted for subsequent connections.
     ///
     /// > Note: The daemon's `pair_request` handler is landing under Phase 1
     /// > Task 6; the blocking-until-approved semantics assumed here must be

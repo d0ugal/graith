@@ -250,7 +250,7 @@ reconnect_timeout        = "10s"    # attach disconnect-recovery before giving u
 reconnect_interval       = "250ms"  # re-probe cadence while reattaching
 remote_dial_timeout      = "10s"    # TCP dial to a paired remote daemon
 remote_handshake_timeout = "15s"    # remote handshake + proof-of-possession
-remote_pairing_timeout   = "11m"    # wait for the remote human to approve `gr pair`
+remote_pairing_timeout   = "11m"    # wait for `gr remote pairings approve` on the host
 ```
 
 An unset field keeps its built-in default (shown above). A value that is set but unparseable, or that is zero or negative, is rejected at config load. The `remote_*` fields apply only to remote-daemon connections (see [Orchestrator & remote access]({{< relref "/docs/configuration/access.md" >}})); the others apply to the local daemon and attach recovery.

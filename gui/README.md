@@ -167,9 +167,9 @@ the host.
 gr remote pair graith-ben            # sends a pair_request over the tailnet
 
 # On the host (local human):
-gr pair list                         # show pending requests + paired devices
-gr pair approve <request-id>         # mint a client token, return the TLS SPKI pin
-# gr pair revoke <device-id>         # revoke a device (force-closes its connections)
+gr remote pairings list                         # show pending requests + paired devices
+gr remote pairings approve <request-id>         # mint a client token, return the TLS SPKI pin
+# gr remote pairings revoke <device-id>         # revoke a device (force-closes its connections)
 ```
 
 In the app, "Add Host" runs the same flow via the pairing sheet. On approval the
@@ -197,7 +197,7 @@ apps; issue #1392 tracks removing that mechanism from graith entirely.
 Done: shared core (protocol + terminal + tests), macOS app (`GraithGUI`, builds
 and runs), iOS app (`GraithMobileApp`, **launches in the simulator** against
 real identity/registry/reachability with mock hosts), remote daemon substrate +
-auth/pairing, `gr remote`/`gr pair` CLI, the Makefile/build tooling.
+auth/pairing, the `gr remote` CLI, and the Makefile/build tooling.
 
 Deferred / not yet done:
 
