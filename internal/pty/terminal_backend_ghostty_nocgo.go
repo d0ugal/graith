@@ -11,3 +11,9 @@ var errLibghosttyRequiresCGO = errors.New("libghostty backend requires CGO_ENABL
 func newTerminal(_, _ int) (Terminal, error) {
 	return nil, errLibghosttyRequiresCGO
 }
+
+func TerminalAdoptionCapacity() (maxSessions int, available bool) {
+	return 0, false
+}
+
+func ProbeTerminalAdoption() (maxSessions int, available bool) { return 0, false }

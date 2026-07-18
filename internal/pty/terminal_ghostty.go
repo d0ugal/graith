@@ -57,7 +57,11 @@ func newGhosttyTerminal(cols, rows int) (gt *ghosttyTerminal, err error) {
 
 	terminal, err := libghostty.NewTerminal(
 		libghostty.WithSize(uint16(cols), uint16(rows)),
-		libghostty.WithMaxScrollback(10_000),
+		// Graith's bounded raw Scrollback is authoritative and is replayed when
+		// reconstructing a helper. The native backend only needs the visible
+		// viewport; retaining historical native lines multiplies memory by width
+		// and helper count without exposing any additional product behavior.
+		libghostty.WithMaxScrollback(0),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create go-libghostty terminal: %w", err)

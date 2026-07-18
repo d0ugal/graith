@@ -1,6 +1,7 @@
 package pty
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"golang.org/x/sys/unix"
 )
 
 type Session struct {
@@ -23,10 +25,20 @@ type Session struct {
 	Ptmx       *os.File
 	Scrollback *Scrollback
 
-	mu      sync.RWMutex
-	writeMu sync.Mutex
-	writers []io.Writer
-	screen  Terminal
+	mu        sync.RWMutex
+	writeMu   sync.Mutex
+	upgradeMu sync.Mutex
+	// upgradePause coordinates a bounded safe point in readLoop while writeMu
+	// separately drains and bars input. ack closes only when no PTY read is in
+	// flight and every returned byte has reached scrollback and the screen.
+	upgradePause        bool
+	upgradeAck          chan struct{}
+	upgradeResume       chan struct{}
+	upgradeInputBlocked atomic.Bool
+	writers             []io.Writer
+	screen              Terminal
+	closed              bool
+	closeOnce           sync.Once
 	// screenFactory is fixed at construction and provides a deterministic seam
 	// for proving recovery behavior without weakening the production selector.
 	screenFactory func(cols, rows int) (Terminal, error)
@@ -34,17 +46,47 @@ type Session struct {
 	// the terminal helper fails. The raw scrollback remains authoritative; the
 	// helper owns only reconstructable derived state.
 	screenHydrationBytes int
-	done                 chan struct{}
-	readDone             chan struct{}
-	exitCode             int
-	exitSignal           syscall.Signal
-	peakRSSBytes         int64
-	bytesRead            int64
-	exited               bool
-	adoptedPID           int
-	adoptedStartTime     int64
-	lastOutputAt         time.Time
-	lastUserInputAt      time.Time
+	// screenInitializing keeps raw PTY drainage independent from potentially
+	// slow derived-screen construction during upgrade adoption. While true,
+	// readLoop appends authoritative bytes without starting a competing helper;
+	// the completed helper is hydrated from that exact tail before publication.
+	screenInitializing bool
+	// scrollbackErr records that a PTY chunk could not be durably appended. A
+	// preserve upgrade must refuse at the reader safe point rather than claim a
+	// lossless handoff after raw output has diverged from the authoritative log.
+	scrollbackErr error
+	// screenRecoveryPending records parser failure while helper generation is
+	// frozen for exec. Raw output remains in scrollback and is replayed if exec
+	// fails and the old daemon thaws.
+	screenRecoveryPending bool
+	screenRecoveryCols    int
+	screenRecoveryRows    int
+	// screenRecoveryNext bounds repeated helper launches when the backend is
+	// unavailable. Raw PTY bytes continue into scrollback while reconstruction
+	// attempts back off per session.
+	screenRecoveryNext  time.Time
+	screenRecoveryDelay time.Duration
+	// screenRecoveryNow is a package-test seam; production uses time.Now.
+	screenRecoveryNow func() time.Time
+	// setSize is a test seam for the PTY ownership window. Production uses
+	// pty.Setsize when it is nil.
+	setSize func(*os.File, *pty.Winsize) error
+	// afterScrollbackAppend is a deterministic test seam. It runs while mu is
+	// held, proving snapshots cannot interleave between durable append and
+	// applying the same chunk to the derived screen.
+	afterScrollbackAppend func()
+
+	done             chan struct{}
+	readDone         chan struct{}
+	exitCode         int
+	exitSignal       syscall.Signal
+	peakRSSBytes     int64
+	bytesRead        int64
+	exited           bool
+	adoptedPID       int
+	adoptedStartTime int64
+	lastOutputAt     time.Time
+	lastUserInputAt  time.Time
 	// inputDelay is the pause (in nanoseconds) between typed text and the submit
 	// CR in WriteInputAndSubmit. Seeded at construction from SessionOpts.InputDelay
 	// (or the typeInputDelay default) and updated live by SetInputDelay when the
@@ -58,6 +100,7 @@ type Session struct {
 	// after. Unused for a freshly-launched (non-adopted) session.
 	adoptedPollTimeout  time.Duration
 	adoptedPollInterval time.Duration
+	adoptedWaitOnce     sync.Once
 	userInputCond       *sync.Cond
 	adoptedAt           time.Time
 	createdAt           time.Time
@@ -86,6 +129,17 @@ type SessionOpts struct {
 }
 
 func NewSession(opts SessionOpts) (*Session, error) {
+	return newSessionWithTerminalFactory(opts, newTerminal)
+}
+
+func newSessionWithTerminalFactory(
+	opts SessionOpts,
+	factory func(cols, rows int) (Terminal, error),
+) (*Session, error) {
+	if factory == nil {
+		factory = newTerminal
+	}
+
 	cmd := exec.Command(opts.Command, opts.Args...)
 	cmd.Dir = opts.Dir
 	cmd.Env = buildEnv(opts.Env)
@@ -96,38 +150,23 @@ func NewSession(opts SessionOpts) (*Session, error) {
 	size := &pty.Winsize{Rows: opts.Rows, Cols: opts.Cols}
 
 	// Stamp the launch instant *before* the process starts so the launch→first-
-	// output and launch→active durations (issue #1104) include PTY and
+	// output and launch→active durations (issue #1104) include terminal, PTY, and
 	// scrollback setup — otherwise a fast agent can emit output before the epoch
 	// is recorded, under-reporting the true startup time.
 	launchedAt := time.Now()
 
-	ptmx, err := pty.StartWithSize(cmd, size)
+	// Reserve the derived terminal model and open persistent scrollback before
+	// starting the user command. In particular, native-helper capacity failure
+	// must not let a rejected command execute side effects. No fallible setup
+	// remains after StartWithSize succeeds.
+	screen, err := factory(int(opts.Cols), int(opts.Rows))
 	if err != nil {
-		return nil, fmt.Errorf("start pty: %w", err)
+		return nil, fmt.Errorf("terminal screen: %w", err)
 	}
 
 	sb, err := NewScrollback(opts.LogPath, opts.MaxLogSize)
 	if err != nil {
-		// The process is already running; kill it so a scrollback-open failure
-		// doesn't leak an unmanaged agent. No "session spawned"/"session exited"
-		// record will ever be emitted for this pid, so log the rollback kill here
-		// (issue #1104).
-		rollbackLog := opts.Logger
-		if rollbackLog == nil {
-			rollbackLog = slog.Default()
-		}
-
-		pid := 0
-		if cmd.Process != nil {
-			pid = cmd.Process.Pid
-		}
-
-		rollbackLog.Info("stopping session",
-			"id", opts.ID, "reason", "rollback", "initiator", "pty-scrollback-failure",
-			"pid", pid, "pgid", pid, "err", err)
-
-		_ = ptmx.Close()
-		_ = cmd.Process.Kill()
+		_ = screen.Close()
 
 		return nil, fmt.Errorf("scrollback: %w", err)
 	}
@@ -139,16 +178,12 @@ func NewSession(opts SessionOpts) (*Session, error) {
 
 	sb.SetLogger(log)
 
-	screen, err := newTerminal(int(opts.Cols), int(opts.Rows))
+	ptmx, err := pty.StartWithSize(cmd, size)
 	if err != nil {
 		_ = sb.Close()
-		_ = ptmx.Close()
+		_ = screen.Close()
 
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-
-		return nil, fmt.Errorf("terminal screen: %w", err)
+		return nil, fmt.Errorf("start pty: %w", err)
 	}
 
 	inputDelay := opts.InputDelay
@@ -159,7 +194,7 @@ func NewSession(opts SessionOpts) (*Session, error) {
 	s := &Session{
 		ID: opts.ID, Cmd: cmd, Ptmx: ptmx, Scrollback: sb,
 		screen:               screen,
-		screenFactory:        newTerminal,
+		screenFactory:        factory,
 		screenHydrationBytes: defaultScreenHydrationBytes,
 		done:                 make(chan struct{}),
 		readDone:             make(chan struct{}),
@@ -182,11 +217,15 @@ func NewSession(opts SessionOpts) (*Session, error) {
 }
 
 type AdoptOpts struct {
-	ID         string
-	Fd         uintptr
-	PID        int
-	LogPath    string
-	MaxLogSize int64
+	ID           string
+	Fd           uintptr
+	ScrollbackFd uintptr
+	PID          int
+	// ExpectedPIDStartTime binds adoption to the process identity captured by
+	// the old daemon. Zero is accepted only for a legacy helper-free manifest.
+	ExpectedPIDStartTime int64
+	LogPath              string
+	MaxLogSize           int64
 	// DefaultRows / DefaultCols are the geometry used when the adopted ptmx size
 	// can't be read. Non-positive falls back to the built-in 24x80 (the daemon
 	// passes the [lifecycle] default_rows/default_cols policy).
@@ -203,6 +242,17 @@ type AdoptOpts struct {
 	// Logger routes this session's diagnostics to the daemon's logger. Nil
 	// falls back to slog.Default().
 	Logger *slog.Logger
+	// DegradedScreen skips synchronous derived-screen construction while still
+	// adopting the PTY and starting raw-output drainage. Later screen access or
+	// output retries the ordinary backend through screenFactory.
+	DegradedScreen bool
+	// DeferWait leaves exact-child reaping dormant until StartAdoptedWaiter.
+	// Upgrade adoption uses this to finish all rejection-prone manager checks
+	// before any waiter can consume the leader status needed by cleanup.
+	DeferWait bool
+	// screenFactory is a deterministic package-test seam. Production leaves it
+	// nil and always selects the build-tagged terminal backend.
+	screenFactory func(cols, rows int) (Terminal, error)
 }
 
 func AdoptSession(opts AdoptOpts) (*Session, error) {
@@ -215,13 +265,30 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-
-	sb, err := NewScrollback(opts.LogPath, opts.MaxLogSize)
-	if err != nil {
-		return nil, fmt.Errorf("open scrollback: %w", err)
+	var sb *Scrollback
+	var err error
+	if opts.ScrollbackFd > 0 {
+		sb, err = AdoptScrollback(opts.ScrollbackFd, opts.LogPath, opts.MaxLogSize)
+	} else {
+		// Legacy and package-local callers may not have a transferred writer.
+		// Current daemon handoffs require one structurally before this point.
+		sb, err = NewScrollback(opts.LogPath, opts.MaxLogSize)
 	}
+	if err != nil {
+		_ = ptmx.Close()
 
+		return nil, fmt.Errorf("adopt scrollback: %w", err)
+	}
 	sb.SetLogger(log)
+
+	startTime, stErr := ProcessStartTime(opts.PID)
+	if opts.ExpectedPIDStartTime > 0 && (stErr != nil || startTime != opts.ExpectedPIDStartTime) {
+		drainErr := drainTransferredPTY(ptmx, sb)
+		_ = ptmx.Close()
+		_ = sb.Close()
+
+		return nil, errors.Join(errors.New("adopted process identity does not match handoff"), drainErr)
+	}
 
 	defCols := opts.DefaultCols
 	if defCols == 0 {
@@ -238,15 +305,10 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		cols, rows = int(ws.Cols), int(ws.Rows)
 	}
 
-	screen, err := newTerminal(cols, rows)
-	if err != nil {
-		_ = sb.Close()
-		_ = ptmx.Close()
-
-		return nil, fmt.Errorf("terminal screen: %w", err)
+	factory := opts.screenFactory
+	if factory == nil {
+		factory = newTerminal
 	}
-
-	startTime, stErr := ProcessStartTime(opts.PID)
 	if stErr != nil {
 		log.Warn("could not capture process start time for adopted session; PID reuse detection degraded",
 			"session", opts.ID, "pid", opts.PID, "error", stErr)
@@ -266,8 +328,9 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		ID:                  opts.ID,
 		Ptmx:                ptmx,
 		Scrollback:          sb,
-		screen:              screen,
-		screenFactory:       newTerminal,
+		screen:              newUnavailableTerminal(cols, rows),
+		screenFactory:       factory,
+		screenInitializing:  true,
 		done:                make(chan struct{}),
 		readDone:            make(chan struct{}),
 		adoptedPID:          opts.PID,
@@ -287,26 +350,116 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 	}
 
 	s.screenHydrationBytes = hydrate
+	go s.readLoop()
 
-	if hydrate > 0 {
-		if tail, err := sb.TailBytes(int64(hydrate)); err == nil && len(tail) > 0 {
-			if _, err := s.screen.Write(tail); err != nil {
-				_ = s.screen.Close()
-				_ = sb.Close()
-				_ = ptmx.Close()
-
-				return nil, fmt.Errorf("hydrate terminal screen: %w", err)
-			}
+	if opts.DegradedScreen {
+		s.mu.Lock()
+		s.screenInitializing = false
+		s.noteScreenRecoveryFailureLocked()
+		s.mu.Unlock()
+		if !opts.DeferWait {
+			s.StartAdoptedWaiter()
 		}
+
+		return s, nil
 	}
 
-	go s.readLoop()
-	go s.adoptedWaitLoop()
+	screen, screenErr := factory(cols, rows)
+	s.mu.Lock()
+	s.screenInitializing = false
+	if screenErr != nil {
+		log.Warn("terminal screen unavailable during adoption; preserving PTY with degraded screen",
+			"session", opts.ID, "error", screenErr)
+		s.noteScreenRecoveryFailureLocked()
+	} else {
+		if hydrate > 0 {
+			if tail, tailErr := sb.TailBytes(int64(hydrate)); tailErr == nil && len(tail) > 0 {
+				if err := writeTerminalChunks(screen, tail); err != nil {
+					_ = screen.Close()
+					log.Warn("terminal hydration failed during adoption; preserving PTY with empty screen",
+						"session", opts.ID, "error", err)
+					screen, screenErr = factory(cols, rows)
+				}
+			}
+		}
+		if screenErr == nil {
+			_ = s.screen.Close()
+			s.screen = screen
+		} else {
+			s.noteScreenRecoveryFailureLocked()
+		}
+	}
+	s.mu.Unlock()
+	if !opts.DeferWait {
+		s.StartAdoptedWaiter()
+	}
 
 	return s, nil
 }
 
+// StartAdoptedWaiter starts the adopted process waiter exactly once.
+func (s *Session) StartAdoptedWaiter() {
+	s.adoptedWaitOnce.Do(func() { go s.adoptedWaitLoop() })
+}
+
+const maxTransferredPTYDrainBytes = 1024 * 1024
+
+// drainTransferredPTY preserves output already queued in a transferred PTY
+// when its recorded process identity is gone or reused. It never waits for new
+// bytes and never signals the observed PID; the bounded raw bytes go only to
+// authoritative scrollback and are never included in diagnostics.
+func drainTransferredPTY(ptmx *os.File, scrollback *Scrollback) error {
+	if ptmx == nil || scrollback == nil {
+		return nil
+	}
+	fd := int(ptmx.Fd())
+	flags, err := unix.FcntlInt(ptmx.Fd(), unix.F_GETFL, 0)
+	if err != nil {
+		return errors.New("inspect transferred PTY for final drain")
+	}
+	if _, err := unix.FcntlInt(ptmx.Fd(), unix.F_SETFL, flags|unix.O_NONBLOCK); err != nil {
+		return errors.New("make transferred PTY final drain nonblocking")
+	}
+	buf := make([]byte, 32*1024)
+	total := 0
+	for total < maxTransferredPTYDrainBytes {
+		limit := min(len(buf), maxTransferredPTYDrainBytes-total)
+		n, readErr := unix.Read(fd, buf[:limit])
+		if n > 0 {
+			written, writeErr := scrollback.Write(buf[:n])
+			if writeErr != nil || written != n {
+				return errors.New("persist transferred PTY final drain")
+			}
+			total += n
+		}
+		switch {
+		case readErr == nil && n > 0:
+			continue
+		case errors.Is(readErr, unix.EINTR):
+			continue
+		case readErr == nil, errors.Is(readErr, unix.EAGAIN), errors.Is(readErr, unix.EWOULDBLOCK),
+			errors.Is(readErr, unix.EIO):
+			return nil
+		default:
+			return errors.New("read transferred PTY final drain")
+		}
+	}
+
+	return errors.New("transferred PTY final drain exceeded byte limit")
+}
+
+// DrainTransferredPTY performs the bounded final drain for a daemon handoff
+// rejection before the exact inherited descriptors are closed.
+func DrainTransferredPTY(ptmx *os.File, scrollback *Scrollback) error {
+	return drainTransferredPTY(ptmx, scrollback)
+}
+
 const defaultScreenHydrationBytes = 128 * 1024
+
+const (
+	minScreenRecoveryBackoff = 100 * time.Millisecond
+	maxScreenRecoveryBackoff = 5 * time.Second
+)
 
 // adoptedPollTimeout is the built-in safety deadline for the adopted-PTY babysit
 // loop when AdoptOpts.PollTimeout is unset. The daemon overrides it via the
@@ -419,6 +572,25 @@ func (s *Session) Fd() uintptr {
 	return s.Ptmx.Fd()
 }
 
+// DuplicateFD returns a close-on-exec duplicate of the PTY master. The
+// duplicate is owned by the caller. Close serializes the original descriptor
+// close with this operation, so a successful return cannot duplicate an
+// already-closed descriptor or a descriptor number reused by another goroutine.
+func (s *Session) DuplicateFD() (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.closed || s.Ptmx == nil {
+		return -1, errors.New("PTY session is closed")
+	}
+	fd, err := unix.FcntlInt(s.Ptmx.Fd(), unix.F_DUPFD_CLOEXEC, 3)
+	if err != nil {
+		return -1, fmt.Errorf("duplicate PTY descriptor: %w", err)
+	}
+
+	return fd, nil
+}
+
 // ScrollbackFile returns the session's scrollback buffer. It exists so a
 // SessionDriver interface can expose the scrollback via a method (interfaces
 // can't have fields), while the exported Scrollback field stays for direct
@@ -432,11 +604,48 @@ func (s *Session) readLoop() {
 
 	buf := make([]byte, 32*1024)
 	for {
+		if !s.upgradeReadSafePoint() {
+			return
+		}
+
+		s.mu.RLock()
+		if s.closed || s.Ptmx == nil {
+			s.mu.RUnlock()
+			return
+		}
+		fd := int(s.Ptmx.Fd())
+		pollFD := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN | unix.POLLHUP | unix.POLLERR}}
+		_, pollErr := unix.Poll(pollFD, 100)
+		s.mu.RUnlock()
+		if pollErr != nil && !errors.Is(pollErr, unix.EINTR) {
+			return
+		}
+		if pollErr != nil || pollFD[0].Revents == 0 {
+			continue
+		}
+		// A pause may have arrived while Poll waited. Acknowledge it before
+		// consuming bytes, then re-poll after rollback.
+		if !s.upgradeReadSafePoint() {
+			return
+		}
+
+		s.mu.RLock()
+		if s.closed || s.Ptmx == nil || int(s.Ptmx.Fd()) != fd {
+			s.mu.RUnlock()
+			return
+		}
 		n, err := s.Ptmx.Read(buf)
+		s.mu.RUnlock()
 		if n > 0 {
 			chunk := buf[:n]
-			_, _ = s.Scrollback.Write(chunk)
 			s.mu.Lock()
+			written, appendErr := s.Scrollback.Write(chunk)
+			if appendErr != nil || written != len(chunk) {
+				s.scrollbackErr = errors.New("scrollback append failed")
+			}
+			if s.afterScrollbackAppend != nil {
+				s.afterScrollbackAppend()
+			}
 			screenErr := s.writeScreenLocked(chunk)
 			s.lastOutputAt = time.Now()
 			first := s.bytesRead == 0
@@ -444,6 +653,9 @@ func (s *Session) readLoop() {
 			writers := make([]io.Writer, len(s.writers))
 			copy(writers, s.writers)
 			s.mu.Unlock()
+			if appendErr != nil || written != len(chunk) {
+				s.log.Error("scrollback append failed; preserve upgrade disabled", "session", s.ID)
+			}
 
 			if screenErr != nil {
 				s.log.Warn("terminal parser failed; screen reset",
@@ -495,13 +707,110 @@ func (s *Session) readLoop() {
 	}
 }
 
+func (s *Session) upgradeReadSafePoint() bool {
+	s.upgradeMu.Lock()
+	if !s.upgradePause {
+		s.upgradeMu.Unlock()
+		return true
+	}
+	ack := s.upgradeAck
+	resume := s.upgradeResume
+	select {
+	case <-ack:
+	default:
+		close(ack)
+	}
+	s.upgradeMu.Unlock()
+
+	select {
+	case <-resume:
+		return true
+	case <-s.readDone:
+		return false
+	}
+}
+
+// QuiesceIOForUpgrade drains input and pauses the PTY reader at a lossless safe
+// point. The returned release must be called on every path where syscall.Exec
+// does not replace the process image.
+func (s *Session) QuiesceIOForUpgrade(ctx context.Context) (func(), error) {
+	// Close input admission before waiting for the current writer. Writers use
+	// TryLock and observe this flag, so none can strand behind the lock across
+	// syscall.Exec.
+	s.upgradeInputBlocked.Store(true)
+	for !s.writeMu.TryLock() {
+		select {
+		case <-ctx.Done():
+			s.upgradeInputBlocked.Store(false)
+			return nil, ctx.Err()
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	s.upgradeMu.Lock()
+	if s.upgradePause {
+		s.upgradeMu.Unlock()
+		s.writeMu.Unlock()
+		return nil, errors.New("session I/O is already quiesced")
+	}
+	s.upgradePause = true
+	s.upgradeAck = make(chan struct{})
+	s.upgradeResume = make(chan struct{})
+	ack := s.upgradeAck
+	s.upgradeMu.Unlock()
+
+	released := false
+	release := func() {
+		doUnlock := false
+		s.upgradeMu.Lock()
+		if !released {
+			released = true
+			doUnlock = true
+			s.upgradePause = false
+			close(s.upgradeResume)
+		}
+		s.upgradeMu.Unlock()
+		if doUnlock {
+			s.writeMu.Unlock()
+			s.upgradeInputBlocked.Store(false)
+		}
+	}
+
+	select {
+	case <-ack:
+		s.mu.RLock()
+		scrollbackErr := s.scrollbackErr
+		s.mu.RUnlock()
+		if scrollbackErr != nil {
+			release()
+
+			return nil, scrollbackErr
+		}
+
+		return release, nil
+	case <-s.readDone:
+		return release, nil
+	case <-ctx.Done():
+		release()
+		return nil, ctx.Err()
+	}
+}
+
 // writeScreenLocked parses one PTY output chunk. If the helper reports a
 // failure or exits, replace it immediately and reconstruct the screen from the
 // bounded persistent scrollback tail. The caller has already appended chunk to
 // Scrollback and must hold s.mu.
 func (s *Session) writeScreenLocked(chunk []byte) error {
-	if _, err := s.screen.Write(chunk); err != nil {
-		return errors.Join(err, s.replaceScreenLocked())
+	if s.screenInitializing {
+		return nil
+	}
+	n, err := s.screen.Write(chunk)
+	if err == nil && n != len(chunk) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		recoveryErr := s.replaceScreenLocked()
+
+		return errors.Join(err, recoveryErr)
 	}
 
 	return nil
@@ -514,10 +823,33 @@ func (s *Session) writeScreenLocked(chunk []byte) error {
 func (s *Session) replaceScreenLocked() error {
 	cols, rows := s.screen.Size()
 
-	return s.replaceScreenAtSizeLocked(cols, rows)
+	return s.replaceScreenAtSizeLocked(cols, rows, false)
 }
 
-func (s *Session) replaceScreenAtSizeLocked(cols, rows int) error {
+func (s *Session) replaceScreenAtSizeLocked(cols, rows int, explicitResize bool) (returnErr error) {
+	if !s.screenRecoveryNext.IsZero() && s.screenRecoveryTime().Before(s.screenRecoveryNext) {
+		return errTerminalUnavailable
+	}
+	defer func() {
+		if errors.Is(returnErr, errTerminalGenerationFrozen) {
+			if explicitResize || !s.screenRecoveryPending {
+				s.screenRecoveryCols = cols
+				s.screenRecoveryRows = rows
+			}
+			s.screenRecoveryPending = true
+			return
+		}
+		if returnErr != nil {
+			s.noteScreenRecoveryFailureLocked()
+		} else {
+			s.screenRecoveryNext = time.Time{}
+			s.screenRecoveryDelay = 0
+		}
+	}()
+	if s.closed {
+		return os.ErrClosed
+	}
+
 	factory := s.screenFactory
 	if factory == nil {
 		factory = newTerminal
@@ -537,7 +869,7 @@ func (s *Session) replaceScreenAtSizeLocked(cols, rows int) error {
 		}
 
 		if len(tail) > 0 {
-			if _, writeErr := replacement.Write(tail); writeErr != nil {
+			if writeErr := writeTerminalChunks(replacement, tail); writeErr != nil {
 				_ = replacement.Close()
 
 				s.log.Warn("terminal recovery hydration failed; using empty screen",
@@ -559,12 +891,53 @@ func (s *Session) replaceScreenAtSizeLocked(cols, rows int) error {
 
 	failed := s.screen
 	s.screen = replacement
+	s.screenRecoveryPending = false
+	s.screenRecoveryCols = 0
+	s.screenRecoveryRows = 0
 
 	if failed != nil {
 		_ = failed.Close()
 	}
 
 	return nil
+}
+
+func (s *Session) screenRecoveryTime() time.Time {
+	if s.screenRecoveryNow != nil {
+		return s.screenRecoveryNow()
+	}
+
+	return time.Now()
+}
+
+func (s *Session) noteScreenRecoveryFailureLocked() {
+	delay := s.screenRecoveryDelay
+	if delay <= 0 {
+		delay = minScreenRecoveryBackoff
+	} else {
+		delay = min(delay*2, maxScreenRecoveryBackoff)
+	}
+	s.screenRecoveryDelay = delay
+	s.screenRecoveryNext = s.screenRecoveryTime().Add(delay)
+}
+
+// RecoverTerminalAfterUpgrade reconstructs a screen that failed while helper
+// generation was frozen. It is called only after a failed exec has thawed the
+// registry; raw PTY bytes were already persisted while replacement was barred.
+func (s *Session) RecoverTerminalAfterUpgrade() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed || !s.screenRecoveryPending {
+		return nil
+	}
+
+	cols, rows := s.screenRecoveryCols, s.screenRecoveryRows
+	if cols <= 0 || rows <= 0 {
+		cols, rows = s.screen.Size()
+	}
+
+	return s.replaceScreenAtSizeLocked(cols, rows, false)
 }
 
 func (s *Session) waitLoop() {
@@ -616,7 +989,9 @@ func extractPeakRSS(ps *os.ProcessState) int64 {
 }
 
 func (s *Session) WriteInput(data []byte) error {
-	s.writeMu.Lock()
+	if err := s.lockInputWriter(); err != nil {
+		return err
+	}
 	defer s.writeMu.Unlock()
 
 	return s.writeInputLocked(data)
@@ -634,7 +1009,9 @@ const typeInputDelay = 50 * time.Millisecond
 // pause between the two so that TUI frameworks treat them as separate events.
 // The entire operation holds writeMu to prevent interleaving from other sources.
 func (s *Session) WriteInputAndSubmit(data []byte) error {
-	s.writeMu.Lock()
+	if err := s.lockInputWriter(); err != nil {
+		return err
+	}
 	defer s.writeMu.Unlock()
 
 	if len(data) > 0 {
@@ -684,7 +1061,9 @@ func (s *Session) Interrupt(count int, delay time.Duration) error {
 		count = 1
 	}
 
-	s.writeMu.Lock()
+	if err := s.lockInputWriter(); err != nil {
+		return err
+	}
 	defer s.writeMu.Unlock()
 
 	for i := 0; i < count; i++ {
@@ -702,6 +1081,23 @@ func (s *Session) Interrupt(count int, delay time.Duration) error {
 
 			return err
 		}
+	}
+
+	return nil
+}
+
+var errSessionIOQuiesced = errors.New("session input is temporarily unavailable during daemon upgrade")
+
+func (s *Session) lockInputWriter() error {
+	for !s.writeMu.TryLock() {
+		if s.upgradeInputBlocked.Load() {
+			return errSessionIOQuiesced
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if s.upgradeInputBlocked.Load() {
+		s.writeMu.Unlock()
+		return errSessionIOQuiesced
 	}
 
 	return nil
@@ -741,12 +1137,28 @@ func (s *Session) NotifyUserInput() {
 // last user keystroke, or until maxWait has elapsed (whichever comes first).
 // Returns true if the idle condition was met, false if maxWait expired.
 func (s *Session) WaitForUserIdle(idleTimeout, maxWait time.Duration) bool {
+	return s.WaitForUserIdleContext(context.Background(), idleTimeout, maxWait)
+}
+
+// WaitForUserIdleContext is the daemon-owned variant used by notification
+// tasks. Cancellation wakes the condition wait so an upgrade/shutdown can join
+// the complete task tree rather than waiting for the two-minute idle bound.
+func (s *Session) WaitForUserIdleContext(ctx context.Context, idleTimeout, maxWait time.Duration) bool {
 	deadline := time.Now().Add(maxWait)
+	stopCancelWake := context.AfterFunc(ctx, func() {
+		s.userInputCond.L.Lock()
+		s.userInputCond.Broadcast()
+		s.userInputCond.L.Unlock()
+	})
+	defer stopCancelWake()
 
 	s.userInputCond.L.Lock()
 	defer s.userInputCond.L.Unlock()
 
 	for {
+		if ctx.Err() != nil {
+			return false
+		}
 		s.mu.RLock()
 		exited := s.exited
 		s.mu.RUnlock()
@@ -784,14 +1196,20 @@ func (s *Session) WaitForUserIdle(idleTimeout, maxWait time.Duration) bool {
 
 func (s *Session) Resize(rows, cols uint16) error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return os.ErrClosed
+	}
 
 	screenErr := s.screen.Resize(int(cols), int(rows))
 	if screenErr != nil {
-		screenErr = errors.Join(screenErr, s.replaceScreenAtSizeLocked(int(cols), int(rows)))
+		screenErr = errors.Join(screenErr, s.replaceScreenAtSizeLocked(int(cols), int(rows), true))
 	}
-	s.mu.Unlock()
-
-	ptyErr := pty.Setsize(s.Ptmx, &pty.Winsize{Rows: rows, Cols: cols})
+	setSize := s.setSize
+	if setSize == nil {
+		setSize = pty.Setsize
+	}
+	ptyErr := setSize(s.Ptmx, &pty.Winsize{Rows: rows, Cols: cols})
 
 	return errors.Join(screenErr, ptyErr)
 }
@@ -884,13 +1302,30 @@ func (s *Session) ForceKill() error {
 }
 
 func (s *Session) Close() {
-	_ = s.Ptmx.Close()
-	<-s.readDone
-	// readDone is closed once readLoop returns, so no goroutine writes to the
-	// screen after this point; closing it stops the emulator's response-drain
-	// goroutine.
-	_ = s.screen.Close()
-	_ = s.Scrollback.Close()
+	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		s.closed = true
+		if s.Ptmx != nil {
+			_ = s.Ptmx.Close()
+		}
+		s.mu.Unlock()
+		if s.readDone != nil {
+			<-s.readDone
+		}
+
+		// Do not hold s.mu while waiting for readLoop: it may need the mutex to
+		// finish its last chunk. Once readDone closes, take the same serialization
+		// lock used by preview, snapshot, resize, and screen writes before teardown.
+		s.mu.Lock()
+		if s.screen != nil {
+			_ = s.screen.Close()
+		}
+		s.mu.Unlock()
+
+		if s.Scrollback != nil {
+			_ = s.Scrollback.Close()
+		}
+	})
 }
 
 func buildEnv(extra map[string]string) []string {

@@ -16,6 +16,11 @@ type ScreenCapture struct {
 
 func (s *Session) ScreenSnapshot() ScreenCapture {
 	s.mu.Lock()
+	if s.closed || s.screenInitializing {
+		s.mu.Unlock()
+
+		return ScreenCapture{}
+	}
 
 	snap, err := renderFrameErr(s.screen)
 	if err != nil {
@@ -34,6 +39,11 @@ func (s *Session) ScreenSnapshot() ScreenCapture {
 
 func (s *Session) ScreenPreview() string {
 	s.mu.Lock()
+	if s.closed || s.screenInitializing {
+		s.mu.Unlock()
+
+		return ""
+	}
 
 	preview, err := renderPreviewErr(s.screen)
 	if err != nil {

@@ -357,18 +357,7 @@ func TestTerminalBackendPeakMemoryWorkload(t *testing.T) {
 }
 
 func writeTerminalFixture(term Terminal, fixture []byte) error {
-	const chunkBytes = 512 * 1024
-
-	for len(fixture) > 0 {
-		n := min(len(fixture), chunkBytes)
-		if _, err := term.Write(fixture[:n]); err != nil {
-			return err
-		}
-
-		fixture = fixture[n:]
-	}
-
-	return nil
+	return writeTerminalChunks(term, fixture)
 }
 
 func syntheticTerminalWorkload(minBytes int) []byte {

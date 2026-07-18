@@ -159,11 +159,15 @@ run_go() {
             verify_metadata
             go test -count=1 go.mitchellh.com/libghostty
             go test -count=1 -tags=libghostty ./internal/pty
+            go test -count=1 -tags=libghostty ./internal/daemon \
+                -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
             ;;
         race)
             verify_metadata
             go test -race -count=1 -tags=libghostty ./internal/pty \
                 -run 'TestTerminalBackendCompatibilityCorpus|TestGhostty'
+            go test -race -count=1 -tags=libghostty ./internal/daemon \
+                -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
             ;;
         fuzz)
             verify_metadata

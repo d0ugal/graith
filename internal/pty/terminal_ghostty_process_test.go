@@ -4,6 +4,7 @@ package pty
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -316,6 +317,72 @@ func TestGhosttyProcessLimiterBoundsAndReleases(t *testing.T) {
 	limiter.release()
 }
 
+func TestGhosttyHelperExecutesPinnedSelfImage(t *testing.T) {
+	sourcePath, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	dir := t.TempDir()
+	targetPath := filepath.Join(dir, "graith-pinned")
+	target, err := os.OpenFile(targetPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(target, source); err != nil {
+		_ = target.Close()
+		t.Fatal(err)
+	}
+	if err := target.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	term, err := newGhosttyProcessTerminalWithConfig(20, 3, ghosttyProcessConfig{
+		executable: targetPath,
+		limiter:    newGhosttyProcessLimiter(1),
+		onExecutablePinned: func() {
+			if err := os.Remove(targetPath); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(targetPath, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("helper did not execute the pinned pre-replacement inode: %v", err)
+	}
+	defer term.Close()
+	reply, err := term.exchange(ghosttyOpPinProbe, nil)
+	if err != nil || !bytes.Equal(reply, []byte{1}) {
+		t.Fatalf("helper pinned-FD bootstrap = (%v, %v), want closed", reply, err)
+	}
+}
+
+func TestGhosttyPinProbeReplyWriterBounds(t *testing.T) {
+	for name, payload := range map[string][]byte{
+		"empty": nil,
+		"large": {0, 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := writeGhosttyReply(io.Discard, ghosttyOpPinProbe, ghosttyStatusOK, payload); !errors.Is(err, errGhosttyHelperProtocol) {
+				t.Fatalf("write pin probe reply error = %v, want protocol violation", err)
+			}
+		})
+	}
+	var encoded bytes.Buffer
+	if err := writeGhosttyReply(&encoded, ghosttyOpPinProbe, ghosttyStatusOK, []byte{1}); err != nil {
+		t.Fatalf("write valid pin probe reply: %v", err)
+	}
+	if got := encoded.Len(); got != 13 {
+		t.Fatalf("encoded pin probe reply = %d bytes, want 13", got)
+	}
+}
+
 func TestGhosttyLimiterExhaustionAndLifecycleRelease(t *testing.T) {
 	executable, err := os.Executable()
 	if err != nil {
@@ -388,6 +455,41 @@ func TestGhosttyLimiterExhaustionAndLifecycleRelease(t *testing.T) {
 		}
 		limiter.release()
 	})
+}
+
+func TestGhosttyLimiterExhaustionPreventsSessionCommandLaunch(t *testing.T) {
+	held := 0
+	for ghosttyHelperLimiter.acquire() {
+		held++
+	}
+	defer func() {
+		for range held {
+			ghosttyHelperLimiter.release()
+		}
+	}()
+
+	tempDir := t.TempDir()
+	marker := filepath.Join(tempDir, "command-started")
+	touch, err := exec.LookPath("touch")
+	if err != nil {
+		t.Skip("touch is unavailable")
+	}
+
+	session, err := NewSession(SessionOpts{
+		ID:      "dreich-limit-preflight",
+		Command: touch,
+		Args:    []string{marker},
+		Dir:     tempDir,
+		Rows:    24,
+		Cols:    80,
+		LogPath: filepath.Join(tempDir, "croft.log"),
+	})
+	if session != nil || !errors.Is(err, errGhosttyHelperLimit) {
+		t.Fatalf("constructor result = (%v, %v), want nil helper limit", session, err)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("limiter-rejected command created its side-effect marker: %v", err)
+	}
 }
 
 func TestGhosttyHelperResourceLimits(t *testing.T) {
@@ -567,6 +669,217 @@ func TestGhosttyTerminalSizeLimit(t *testing.T) {
 	if _, _, err := validateGhosttySize(1024, 257); err == nil {
 		t.Fatal("oversized terminal returned nil error")
 	}
+}
+
+func TestGhosttyAdoptHydrationOverRequestLimit(t *testing.T) {
+	line := []byte("dreich hydration on the brae\r\n")
+	fixture := bytes.Repeat(line, ghosttyMaxRequestBytes/len(line)+1)
+	fixture = append(fixture, []byte("\x1b[2J\x1b[Hcanny hydration marker")...)
+	if len(fixture) <= ghosttyMaxRequestBytes {
+		t.Fatalf("fixture bytes = %d, want more than request limit %d", len(fixture), ghosttyMaxRequestBytes)
+	}
+
+	logPath := filepath.Join(t.TempDir(), "strath.log")
+	if err := os.WriteFile(logPath, fixture, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = r.Close()
+		_ = w.Close()
+	})
+
+	transferredFD, err := unix.Dup(int(r.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	session, err := AdoptSession(AdoptOpts{
+		ID:             "canny-large-hydration",
+		Fd:             uintptr(transferredFD),
+		PID:            cmd.Process.Pid,
+		LogPath:        logPath,
+		MaxLogSize:     int64(len(fixture) + 1024),
+		DefaultRows:    24,
+		DefaultCols:    80,
+		HydrationBytes: len(fixture),
+		PollInterval:   10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("adopt with hydration over request limit: %v", err)
+	}
+	if got := session.ScreenPreview(); !strings.Contains(got, "canny hydration marker") {
+		t.Fatalf("hydrated screen missing final marker: %q", got)
+	}
+
+	closeDone := make(chan struct{})
+	go func() {
+		session.Close()
+		close(closeDone)
+	}()
+	// A synthetic pipe read can remain blocked across close on Darwin. One write
+	// lets that read observe teardown; the post-Close write below is the actual
+	// endpoint-ownership assertion.
+	_, _ = w.Write([]byte("unblock adopted read"))
+	select {
+	case <-closeDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("adopted session close did not finish")
+	}
+	if _, err := w.Write([]byte("bothy ownership probe")); !errors.Is(err, unix.EPIPE) {
+		t.Fatalf("write after adopted endpoint teardown = %v, want EPIPE", err)
+	}
+}
+
+func TestGhosttyFreezeBlocksGenerationAndSnapshotsUnreapedHelpers(t *testing.T) {
+	terminal, err := newGhosttyProcessTerminal(8, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	helpers, err := FreezeTerminalHelpers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ThawTerminalHelpers()
+	if len(helpers) != 1 || helpers[0].PID <= 0 || helpers[0].StartTime <= 0 {
+		t.Fatalf("frozen helper registry = %+v", helpers)
+	}
+	if _, err := newGhosttyProcessTerminal(8, 4); !errors.Is(err, errTerminalGenerationFrozen) {
+		t.Fatalf("generation while frozen error = %v", err)
+	}
+	if err := terminal.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGhosttyFreezeDeadlineThawsGeneration(t *testing.T) {
+	registry := newGhosttyHelperRegistry()
+	if err := registry.begin(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := registry.freeze(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("freeze error = %v, want deadline exceeded", err)
+	}
+	registry.finish(HelperProcessIdentity{})
+	if err := registry.begin(); err != nil {
+		t.Fatalf("generation remained frozen after deadline: %v", err)
+	}
+	registry.finish(HelperProcessIdentity{})
+}
+
+func TestGhosttyRegistryRetainsReplacedHelperUntilWait(t *testing.T) {
+	registry := newGhosttyHelperRegistry()
+	identity := HelperProcessIdentity{PID: 4242, StartTime: 99}
+	if err := registry.begin(); err != nil {
+		t.Fatal(err)
+	}
+	registry.finish(identity)
+
+	// Losing the terminal's current-screen reference does not touch the global
+	// registry. Only the exact Wait completion removes the old helper.
+	if got, err := registry.freeze(context.Background()); err != nil || !slices.Equal(got, []HelperProcessIdentity{identity}) {
+		t.Fatalf("snapshot before Wait = %+v", got)
+	}
+	registry.remove(identity)
+	registry.thaw()
+	if got, err := registry.freeze(context.Background()); err != nil || len(got) != 0 {
+		t.Fatalf("snapshot after Wait = %+v", got)
+	}
+	registry.thaw()
+}
+
+func TestGhosttyHelperFailureDuringFreezeRecoversAfterThaw(t *testing.T) {
+	terminal, err := newGhosttyProcessTerminal(20, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scrollback, err := NewScrollback(filepath.Join(t.TempDir(), "bothy.log"), 1024*1024)
+	if err != nil {
+		_ = terminal.Close()
+		t.Fatal(err)
+	}
+	session := &Session{
+		ID: "bothy-freeze", Scrollback: scrollback, screen: terminal,
+		screenFactory: newTerminal, screenHydrationBytes: 1024, log: slog.Default(),
+	}
+	defer session.Close()
+	helpers, err := FreezeTerminalHelpers(context.Background())
+	if err != nil || len(helpers) != 1 {
+		ThawTerminalHelpers()
+		t.Fatalf("FreezeTerminalHelpers = (%+v, %v)", helpers, err)
+	}
+	payload := []byte("canny output retained during freeze")
+	if _, err := scrollback.Write(payload); err != nil {
+		ThawTerminalHelpers()
+		t.Fatal(err)
+	}
+	if err := unix.Kill(helpers[0].PID, unix.SIGKILL); err != nil {
+		ThawTerminalHelpers()
+		t.Fatal(err)
+	}
+	<-terminal.waitDone
+
+	session.mu.Lock()
+	writeErr := session.writeScreenLocked(payload)
+	pending := session.screenRecoveryPending
+	session.mu.Unlock()
+	if writeErr == nil || !errors.Is(writeErr, errTerminalGenerationFrozen) || !pending {
+		ThawTerminalHelpers()
+		t.Fatalf("write while frozen = (%v, pending=%v)", writeErr, pending)
+	}
+	ThawTerminalHelpers()
+	if err := session.RecoverTerminalAfterUpgrade(); err != nil {
+		t.Fatal(err)
+	}
+	if got := session.ScreenPreview(); !strings.Contains(got, "canny output") {
+		t.Fatalf("reconstructed preview = %q", got)
+	}
+}
+
+func TestGhosttyPeakRSSConcurrentClose(t *testing.T) {
+	terminal, err := newGhosttyProcessTerminal(8, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	var readers sync.WaitGroup
+	for range 8 {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					_ = terminal.PeakRSSBytes()
+				}
+			}
+		}()
+	}
+	if err := terminal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	close(stop)
+	readers.Wait()
 }
 
 func TestGhosttyPoisonReplayFallsBackOnceAndKeepsLogsPrivate(t *testing.T) {

@@ -10,6 +10,8 @@ on:
       - gui/shared/Sources/CGhosttyVT/include/**
       - go.mod
       - go.sum
+      - internal/cli/**
+      - internal/daemon/**
       - internal/pty/**
       - libghostty-native.spdx.json
       - scripts/libghostty-native.sh
@@ -151,8 +153,12 @@ jobs:
             scripts/libghostty-native.sh source-test "$TARGET"
             go test -count=1 go.mitchellh.com/libghostty
             go test -count=1 -tags=libghostty ./internal/pty
+            go test -count=1 -tags=libghostty ./internal/daemon \
+              -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
             go test -race -count=1 -tags=libghostty ./internal/pty \
               -run 'TestTerminalBackendCompatibilityCorpus|TestGhostty'
+            go test -race -count=1 -tags=libghostty ./internal/daemon \
+              -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
             go test -tags=libghostty ./internal/pty -run '^$' -parallel=4 \
               -fuzz '^FuzzGhosttySnapshotDecoder$' -fuzztime=10s
             go test -tags=libghostty ./internal/pty -run '^$' -parallel=4 \
@@ -163,6 +169,9 @@ jobs:
             CGO_ENABLED=1 GOOS=linux CC="zig cc -target $TARGET" \
               go test -c -tags=libghostty -o "${RUNNER_TEMP}/pty-${GOARCH}.test" \
               ./internal/pty
+            CGO_ENABLED=1 GOOS=linux CC="zig cc -target $TARGET" \
+              go test -c -tags=libghostty -o "${RUNNER_TEMP}/daemon-${GOARCH}.test" \
+              ./internal/daemon
           fi
           mkdir -p "${RUNNER_TEMP}/native-binaries"
           CGO_ENABLED=1 GOOS=linux CC="zig cc -target $TARGET" \

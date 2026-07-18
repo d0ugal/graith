@@ -4,6 +4,7 @@ package pty
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -11,7 +12,9 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"sort"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -22,7 +25,8 @@ import (
 const (
 	ghosttyHelperArg       = "--graith-internal-libghostty-helper"
 	ghosttyHelperEnv       = "GRAITH_INTERNAL_LIBGHOSTTY_HELPER"
-	ghosttyHelperFD        = 3
+	ghosttyPinnedExecFD    = 3
+	ghosttyHelperFD        = 4
 	ghosttyProtocolVersion = 1
 	ghosttyRPCTimeout      = 5 * time.Second
 	ghosttyShutdownTimeout = 250 * time.Millisecond
@@ -41,6 +45,7 @@ const (
 	ghosttyOpResize   = 3
 	ghosttyOpSnapshot = 4
 	ghosttyOpClose    = 5
+	ghosttyOpPinProbe = 6
 
 	ghosttyStatusOK       = 0
 	ghosttyStatusInvalid  = 1
@@ -84,36 +89,214 @@ func (l *ghosttyProcessLimiter) release() {
 
 var ghosttyHelperLimiter = newGhosttyProcessLimiter(ghosttyMaxHelperProcesses)
 
-type ghosttyProcessConfig struct {
-	executable string
-	limiter    *ghosttyProcessLimiter
-	onStart    func(*exec.Cmd)
+// ghosttyHelperRegistry is the exec-upgrade barrier. A helper is retained from
+// successful Start until the exact cmd.Wait completes, including failed and
+// replaced terminals whose bounded Close has returned. Freeze first bars new
+// starts, then waits for starts already between the gate and registration.
+type ghosttyHelperRegistry struct {
+	mu       sync.Mutex
+	frozen   bool
+	creating int
+	helpers  map[int]int64
+	changed  chan struct{}
 }
+
+func newGhosttyHelperRegistry() *ghosttyHelperRegistry {
+	return &ghosttyHelperRegistry{helpers: make(map[int]int64), changed: make(chan struct{})}
+}
+
+func (r *ghosttyHelperRegistry) signalLocked() {
+	close(r.changed)
+	r.changed = make(chan struct{})
+}
+
+func (r *ghosttyHelperRegistry) begin() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.frozen {
+		return errTerminalGenerationFrozen
+	}
+	r.creating++
+
+	return nil
+}
+
+func (r *ghosttyHelperRegistry) finish(identity HelperProcessIdentity) {
+	r.mu.Lock()
+	if identity.PID > 0 && identity.StartTime > 0 {
+		r.helpers[identity.PID] = identity.StartTime
+	}
+	r.creating--
+	r.signalLocked()
+	r.mu.Unlock()
+}
+
+func (r *ghosttyHelperRegistry) remove(identity HelperProcessIdentity) {
+	r.mu.Lock()
+	if r.helpers[identity.PID] == identity.StartTime {
+		delete(r.helpers, identity.PID)
+	}
+	r.mu.Unlock()
+}
+
+func (r *ghosttyHelperRegistry) freeze(ctx context.Context) ([]HelperProcessIdentity, error) {
+	r.mu.Lock()
+	r.frozen = true
+	for r.creating > 0 {
+		changed := r.changed
+		r.mu.Unlock()
+		select {
+		case <-changed:
+			r.mu.Lock()
+		case <-ctx.Done():
+			r.mu.Lock()
+			r.frozen = false
+			r.signalLocked()
+			r.mu.Unlock()
+
+			return nil, ctx.Err()
+		}
+	}
+
+	result := make([]HelperProcessIdentity, 0, len(r.helpers))
+	for pid, startTime := range r.helpers {
+		result = append(result, HelperProcessIdentity{PID: pid, StartTime: startTime})
+	}
+	r.mu.Unlock()
+	sort.Slice(result, func(i, j int) bool { return result[i].PID < result[j].PID })
+
+	return result, nil
+}
+
+func (r *ghosttyHelperRegistry) thaw() {
+	r.mu.Lock()
+	r.frozen = false
+	r.signalLocked()
+	r.mu.Unlock()
+}
+
+var ghosttyHelpers = newGhosttyHelperRegistry()
+
+func FreezeTerminalHelpers(ctx context.Context) ([]HelperProcessIdentity, error) {
+	return ghosttyHelpers.freeze(ctx)
+}
+
+func ThawTerminalHelpers() { ghosttyHelpers.thaw() }
+
+type ghosttyProcessConfig struct {
+	executable         string
+	limiter            *ghosttyProcessLimiter
+	onExecutablePinned func()
+	onStart            func(*exec.Cmd)
+}
+
+type ghosttyPinnedImage struct {
+	file        *os.File
+	path        string
+	prepare     func() error
+	validate    func() error
+	releasePath func() error
+	cleanup     func() error
+}
+
+var (
+	ghosttyPinnedMu         sync.Mutex
+	ghosttyPinnedExecutable *ghosttyPinnedImage
+	ghosttyPinnedFDClosed   bool
+)
 
 // init supplies the helper entry point to every libghostty-enabled Graith or Go
 // test binary. It activates only for the exact private argument and marker set
-// by newGhosttyProcessTerminal; ordinary package import has no side effects.
+// by newGhosttyProcessTerminal. Ordinary import performs no filesystem work;
+// the daemon or the first lazy terminal construction pins the running image
+// after upgrade ownership has been established.
 func init() {
-	if len(os.Args) != 2 || os.Args[1] != ghosttyHelperArg || os.Getenv(ghosttyHelperEnv) != "1" {
+	if len(os.Args) == 2 && os.Args[1] == ghosttyHelperArg && os.Getenv(ghosttyHelperEnv) == "1" {
+		err := unix.Close(ghosttyPinnedExecFD)
+		ghosttyPinnedFDClosed = err == nil || errors.Is(err, unix.EBADF)
+		code := 0
+		if err := serveGhosttyHelperFD(); err != nil {
+			code = 70
+		}
+
+		os.Exit(code)
+	}
+
+}
+
+// PreparePinnedTerminalExecutable performs the fallible running-image pin only
+// after the daemon has established ownership of any transferred upgrade
+// resources. Package init deliberately does no filesystem, hashing, or fsync
+// work before RunAdoptBootstrap can arm its cleanup guard.
+func PreparePinnedTerminalExecutable() error {
+	ghosttyPinnedMu.Lock()
+	defer ghosttyPinnedMu.Unlock()
+	return preparePinnedTerminalExecutableLocked()
+}
+
+func preparePinnedTerminalExecutableLocked() error {
+	if ghosttyPinnedExecutable != nil {
+		return nil
+	}
+	pinned, err := pinRunningGhosttyExecutable()
+	if err != nil {
+		return err
+	}
+	ghosttyPinnedExecutable = pinned
+	return nil
+}
+
+// ClosePinnedTerminalExecutable releases the daemon-lifetime executable pin.
+// Run calls it only during final daemon shutdown, after new helper creation has
+// stopped. A failed cleanup is deliberately ignored: it is safer to leave a
+// private retained image than to make shutdown or recovery fail.
+func ClosePinnedTerminalExecutable() {
+	ghosttyPinnedMu.Lock()
+	defer ghosttyPinnedMu.Unlock()
+	if ghosttyPinnedExecutable == nil || ghosttyPinnedExecutable.cleanup == nil {
 		return
 	}
-
-	code := 0
-	if err := serveGhosttyHelperFD(); err != nil {
-		code = 70
+	if err := ghosttyPinnedExecutable.cleanup(); err == nil {
+		ghosttyPinnedExecutable = nil
 	}
+}
 
-	os.Exit(code)
+// ReleasePinnedTerminalExecutablePathForExec removes platform-specific
+// retained path state after helper generation has been frozen. The open image
+// descriptor remains available so a failed syscall.Exec can recreate the path
+// during terminal recovery. Linux executes through that descriptor directly.
+func ReleasePinnedTerminalExecutablePathForExec() error {
+	ghosttyPinnedMu.Lock()
+	defer ghosttyPinnedMu.Unlock()
+	if ghosttyPinnedExecutable == nil || ghosttyPinnedExecutable.releasePath == nil {
+		return nil
+	}
+	return ghosttyPinnedExecutable.releasePath()
+}
+
+func RestorePinnedTerminalExecutableAfterExec() error {
+	ghosttyPinnedMu.Lock()
+	defer ghosttyPinnedMu.Unlock()
+	if ghosttyPinnedExecutable == nil {
+		return errGhosttyHelperStart
+	}
+	if err := ghosttyPinnedExecutable.prepare(); err != nil {
+		return err
+	}
+	return ghosttyPinnedExecutable.validate()
 }
 
 // ghosttyProcessTerminal owns no native terminal state. The pinned C/Zig
 // adapter lives in a child process so an abort, segmentation fault, or safety
 // trap loses only a reconstructable screen model rather than the daemon.
 type ghosttyProcessTerminal struct {
+	opMu     sync.Mutex
 	cmd      *exec.Cmd
 	conn     net.Conn
 	waitDone chan error
 	limiter  *ghosttyProcessLimiter
+	peakRSS  atomic.Int64
 
 	rpcTimeout      time.Duration
 	shutdownTimeout time.Duration
@@ -136,14 +319,8 @@ var _ Terminal = (*ghosttyProcessTerminal)(nil)
 var _ terminalSnapshotter = (*ghosttyProcessTerminal)(nil)
 
 func newGhosttyProcessTerminal(cols, rows int) (*ghosttyProcessTerminal, error) {
-	executable, err := os.Executable()
-	if err != nil {
-		return nil, errGhosttyHelperStart
-	}
-
 	return newGhosttyProcessTerminalWithConfig(cols, rows, ghosttyProcessConfig{
-		executable: executable,
-		limiter:    ghosttyHelperLimiter,
+		limiter: ghosttyHelperLimiter,
 	})
 }
 
@@ -155,6 +332,15 @@ func newGhosttyProcessTerminalWithConfig(
 	if err != nil {
 		return nil, err
 	}
+	if err := ghosttyHelpers.begin(); err != nil {
+		return nil, err
+	}
+	generationActive := true
+	defer func() {
+		if generationActive {
+			ghosttyHelpers.finish(HelperProcessIdentity{})
+		}
+	}()
 	if config.limiter == nil || !config.limiter.acquire() {
 		return nil, errGhosttyHelperLimit
 	}
@@ -191,9 +377,76 @@ func newGhosttyProcessTerminalWithConfig(
 		return nil, fmt.Errorf("open libghostty helper socket: %w", err)
 	}
 
-	cmd := exec.Command(config.executable, ghosttyHelperArg)
+	globalPinLocked := false
+	if config.executable == "" {
+		// Registry begin above makes an in-progress launch visible to the exec
+		// freeze. Hold the owner lock until the child has completed bootstrap so
+		// path release or final shutdown cannot close the pin beneath Start.
+		ghosttyPinnedMu.Lock()
+		globalPinLocked = true
+		defer func() {
+			if globalPinLocked {
+				ghosttyPinnedMu.Unlock()
+			}
+		}()
+		if err := preparePinnedTerminalExecutableLocked(); err != nil {
+			_ = childFile.Close()
+			_ = conn.Close()
+			return nil, errGhosttyHelperStart
+		}
+	}
+	var pinned *ghosttyPinnedImage
+	if globalPinLocked {
+		pinned = ghosttyPinnedExecutable
+	}
+	closePinned := false
+	customCleanupPending := false
+	if config.executable != "" {
+		pinned, err = pinGhosttyExecutable(config.executable)
+		if err != nil {
+			_ = childFile.Close()
+			_ = conn.Close()
+
+			return nil, errGhosttyHelperStart
+		}
+		closePinned = true
+		customCleanupPending = true
+		defer func() {
+			if customCleanupPending {
+				_ = pinned.cleanup()
+			}
+		}()
+	}
+	if pinned == nil || pinned.file == nil || pinned.prepare == nil {
+		_ = childFile.Close()
+		_ = conn.Close()
+
+		return nil, errGhosttyHelperStart
+	}
+	if err := pinned.prepare(); err != nil {
+		_ = childFile.Close()
+		_ = conn.Close()
+
+		return nil, errGhosttyHelperStart
+	}
+	if config.onExecutablePinned != nil {
+		config.onExecutablePinned()
+	}
+	if pinned.path == "" || pinned.validate == nil {
+		_ = childFile.Close()
+		_ = conn.Close()
+
+		return nil, errGhosttyHelperStart
+	}
+	if err := pinned.validate(); err != nil {
+		_ = childFile.Close()
+		_ = conn.Close()
+
+		return nil, errGhosttyHelperStart
+	}
+	cmd := exec.Command(pinned.path, ghosttyHelperArg)
 	cmd.Env = ghosttyChildEnvironment()
-	cmd.ExtraFiles = []*os.File{childFile}
+	cmd.ExtraFiles = []*os.File{pinned.file, childFile}
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
@@ -204,10 +457,25 @@ func newGhosttyProcessTerminalWithConfig(
 
 		return nil, errGhosttyHelperStart
 	}
+	if globalPinLocked {
+		ghosttyPinnedMu.Unlock()
+		globalPinLocked = false
+	}
 	if config.onStart != nil {
 		config.onStart(cmd)
 	}
 	_ = childFile.Close()
+	helperStartTime, startErr := ProcessStartTime(cmd.Process.Pid)
+	if startErr != nil || helperStartTime == 0 {
+		_ = conn.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+
+		return nil, errGhosttyHelperStart
+	}
+	helperIdentity := HelperProcessIdentity{PID: cmd.Process.Pid, StartTime: helperStartTime}
+	ghosttyHelpers.finish(helperIdentity)
+	generationActive = false
 
 	terminal := &ghosttyProcessTerminal{
 		cmd:      cmd,
@@ -226,6 +494,8 @@ func newGhosttyProcessTerminalWithConfig(
 	slotHeld = false
 	go func() {
 		waitErr := cmd.Wait()
+		terminal.peakRSS.Store(extractPeakRSS(cmd.ProcessState))
+		ghosttyHelpers.remove(helperIdentity)
 		terminal.releaseSlot()
 		terminal.waitDone <- waitErr
 		close(terminal.waitDone)
@@ -238,6 +508,10 @@ func newGhosttyProcessTerminalWithConfig(
 		terminal.stop(true)
 
 		return nil, fmt.Errorf("initialize libghostty helper: %w", err)
+	}
+	if closePinned {
+		_ = pinned.cleanup()
+		customCleanupPending = false
 	}
 
 	return terminal, nil
@@ -274,13 +548,16 @@ func ghosttyChildEnvironment() []string {
 }
 
 func (gt *ghosttyProcessTerminal) Write(p []byte) (int, error) {
+	gt.opMu.Lock()
+	defer gt.opMu.Unlock()
+
 	if len(p) == 0 {
 		return 0, gt.currentError()
 	}
 	if len(p) > ghosttyMaxRequestBytes {
 		return 0, errGhosttyHelperLimit
 	}
-	if _, err := gt.exchange(ghosttyOpWrite, p); err != nil {
+	if _, err := gt.exchangeLocked(ghosttyOpWrite, p); err != nil {
 		return 0, err
 	}
 
@@ -291,6 +568,9 @@ func (gt *ghosttyProcessTerminal) Write(p []byte) (int, error) {
 }
 
 func (gt *ghosttyProcessTerminal) Resize(cols, rows int) error {
+	gt.opMu.Lock()
+	defer gt.opMu.Unlock()
+
 	cols, rows, err := validateGhosttySize(cols, rows)
 	if err != nil {
 		return err
@@ -299,7 +579,7 @@ func (gt *ghosttyProcessTerminal) Resize(cols, rows int) error {
 	payload := make([]byte, 4)
 	binary.BigEndian.PutUint16(payload[0:2], uint16(cols))
 	binary.BigEndian.PutUint16(payload[2:4], uint16(rows))
-	if _, err := gt.exchange(ghosttyOpResize, payload); err != nil {
+	if _, err := gt.exchangeLocked(ghosttyOpResize, payload); err != nil {
 		return err
 	}
 
@@ -312,11 +592,17 @@ func (gt *ghosttyProcessTerminal) Resize(cols, rows int) error {
 }
 
 func (gt *ghosttyProcessTerminal) Size() (int, int) {
+	gt.opMu.Lock()
+	defer gt.opMu.Unlock()
+
 	return gt.cols, gt.rows
 }
 
 func (gt *ghosttyProcessTerminal) Cursor() (int, int, bool) {
-	snapshot, err := gt.Snapshot()
+	gt.opMu.Lock()
+	defer gt.opMu.Unlock()
+
+	snapshot, err := gt.snapshotLocked()
 	if err != nil {
 		return 0, 0, false
 	}
@@ -325,11 +611,14 @@ func (gt *ghosttyProcessTerminal) Cursor() (int, int, bool) {
 }
 
 func (gt *ghosttyProcessTerminal) Cell(x, y int) Cell {
+	gt.opMu.Lock()
+	defer gt.opMu.Unlock()
+
 	if x < 0 || x >= gt.cols || y < 0 || y >= gt.rows {
 		return Cell{Content: " "}
 	}
 
-	snapshot, err := gt.Snapshot()
+	snapshot, err := gt.snapshotLocked()
 	if err != nil {
 		return Cell{Content: " "}
 	}
@@ -338,6 +627,13 @@ func (gt *ghosttyProcessTerminal) Cell(x, y int) Cell {
 }
 
 func (gt *ghosttyProcessTerminal) Snapshot() (TerminalSnapshot, error) {
+	gt.opMu.Lock()
+	defer gt.opMu.Unlock()
+
+	return gt.snapshotLocked()
+}
+
+func (gt *ghosttyProcessTerminal) snapshotLocked() (TerminalSnapshot, error) {
 	if err := gt.currentError(); err != nil {
 		return TerminalSnapshot{}, err
 	}
@@ -345,7 +641,7 @@ func (gt *ghosttyProcessTerminal) Snapshot() (TerminalSnapshot, error) {
 		return gt.cache, nil
 	}
 
-	payload, err := gt.exchange(ghosttyOpSnapshot, nil)
+	payload, err := gt.exchangeLocked(ghosttyOpSnapshot, nil)
 	if err != nil {
 		return TerminalSnapshot{}, err
 	}
@@ -371,9 +667,12 @@ func (gt *ghosttyProcessTerminal) Snapshot() (TerminalSnapshot, error) {
 }
 
 func (gt *ghosttyProcessTerminal) Close() error {
+	gt.opMu.Lock()
+	defer gt.opMu.Unlock()
+
 	gt.closeOnce.Do(func() {
 		if gt.conn != nil && gt.fatalErr == nil {
-			_, gt.closeErr = gt.exchange(ghosttyOpClose, nil)
+			_, gt.closeErr = gt.exchangeLocked(ghosttyOpClose, nil)
 		}
 		gt.stop(false)
 	})
@@ -382,11 +681,7 @@ func (gt *ghosttyProcessTerminal) Close() error {
 }
 
 func (gt *ghosttyProcessTerminal) PeakRSSBytes() int64 {
-	if gt.cmd == nil {
-		return 0
-	}
-
-	return extractPeakRSS(gt.cmd.ProcessState)
+	return gt.peakRSS.Load()
 }
 
 func (gt *ghosttyProcessTerminal) currentError() error {
@@ -401,6 +696,13 @@ func (gt *ghosttyProcessTerminal) currentError() error {
 }
 
 func (gt *ghosttyProcessTerminal) exchange(op byte, payload []byte) ([]byte, error) {
+	gt.opMu.Lock()
+	defer gt.opMu.Unlock()
+
+	return gt.exchangeLocked(op, payload)
+}
+
+func (gt *ghosttyProcessTerminal) exchangeLocked(op byte, payload []byte) ([]byte, error) {
 	if err := gt.currentError(); err != nil {
 		return nil, err
 	}
@@ -567,7 +869,7 @@ func validateGhosttyRequest(op byte, length int) error {
 		}
 	case ghosttyOpWrite:
 		// Zero-length writes are harmless and keep the wire grammar simple.
-	case ghosttyOpSnapshot, ghosttyOpClose:
+	case ghosttyOpSnapshot, ghosttyOpClose, ghosttyOpPinProbe:
 		if length != 0 {
 			return errGhosttyHelperProtocol
 		}
@@ -602,6 +904,10 @@ func validateGhosttyReply(op, status byte, length, cols, rows int) error {
 			maximum = ghosttyMaxReplyBytes
 		}
 		if length < minimum || length > maximum {
+			return errGhosttyHelperProtocol
+		}
+	case ghosttyOpPinProbe:
+		if length != 1 {
 			return errGhosttyHelperProtocol
 		}
 	case ghosttyOpCreate, ghosttyOpWrite, ghosttyOpResize, ghosttyOpClose:
@@ -704,6 +1010,15 @@ func serveGhosttyHelper(conn net.Conn) error {
 			if err != nil {
 				status = ghosttyStatusNative
 			}
+		case ghosttyOpPinProbe:
+			if len(payload) != 0 {
+				status = ghosttyStatusInvalid
+				break
+			}
+			reply = []byte{0}
+			if ghosttyPinnedFDClosed {
+				reply[0] = 1
+			}
 		default:
 			status = ghosttyStatusInvalid
 		}
@@ -764,10 +1079,24 @@ func readGhosttyRequest(r io.Reader) (byte, []byte, error) {
 
 func writeGhosttyReply(w io.Writer, op, status byte, payload []byte) error {
 	if status > ghosttyStatusProtocol || len(payload) > ghosttyMaxReplyBytes ||
-		(status != ghosttyStatusOK && len(payload) != 0) ||
-		(status == ghosttyStatusOK && op != ghosttyOpSnapshot && len(payload) != 0) ||
-		(status == ghosttyStatusOK && op == ghosttyOpSnapshot && len(payload) == 0) {
+		(status != ghosttyStatusOK && len(payload) != 0) {
 		return errGhosttyHelperProtocol
+	}
+	if status == ghosttyStatusOK {
+		switch op {
+		case ghosttyOpSnapshot:
+			if len(payload) == 0 {
+				return errGhosttyHelperProtocol
+			}
+		case ghosttyOpPinProbe:
+			if len(payload) != 1 {
+				return errGhosttyHelperProtocol
+			}
+		default:
+			if len(payload) != 0 {
+				return errGhosttyHelperProtocol
+			}
+		}
 	}
 	header := make([]byte, 12)
 	copy(header[0:4], ghosttyReplyMagic[:])
