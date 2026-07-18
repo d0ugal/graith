@@ -715,6 +715,8 @@ verify_selectors() {
     selected="$(CGO_ENABLED=1 GOOS=freebsd GOARCH=amd64 go list -tags=libghostty -f '{{join .GoFiles "\n"}}{{join .TestGoFiles "\n"}}' ./internal/pty)"
     grep -Fqx 'terminal_backend_ghostty_unsupported.go' <<<"$selected" ||
         die "unsupported OS did not select the fail-closed selector"
+    grep -Fqx 'terminal_backend_ghostty_unsupported_error.go' <<<"$selected" ||
+        die "unsupported OS did not select the shared fail-closed error helper"
     grep -Fqx 'terminal_backend_ghostty_unsupported_test.go' <<<"$selected" ||
         die "unsupported OS regression test is not selected"
     if grep -Eq '^terminal_backend_ghostty\.go$' <<<"$selected"; then
@@ -723,8 +725,8 @@ verify_selectors() {
 
     CGO_ENABLED=0 go test -count=1 -tags=libghostty ./internal/pty \
         -run '^TestLibghosttyRequiresCGO$'
-    CGO_ENABLED=0 go test -count=1 -tags='libghostty libghostty_test_unsupported' \
-        ./internal/pty -run '^TestLibghosttyRejectsUnsupportedOS$'
+    CGO_ENABLED=0 go test -count=1 -tags=libghostty ./internal/pty \
+        -run '^TestLibghosttyRejectsUnsupportedOS$'
 }
 
 package_candidate() {

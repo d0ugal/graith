@@ -313,8 +313,9 @@ The path-scoped native workflow performs these checks:
   rollback binary contains neither the build tag, wrapper module, nor a native
   Ghostty symbol;
 - runtime assertions that an explicit tag without cgo returns the requires-cgo
-  error and that the private forced-unsupported test selector returns the
-  unsupported-OS error, plus a FreeBSD source-selection check;
+  error and that the same unexported error helper used by the production
+  unsupported-OS selector returns its explicit error, plus a FreeBSD
+  source-selection check;
 - tagged Darwin amd64/arm64 linking against the checksum-pinned universal
   archive, with execution on the runner architecture;
 - exact-source Linux amd64 execution and arm64 cross-link using Zig 0.15.2;

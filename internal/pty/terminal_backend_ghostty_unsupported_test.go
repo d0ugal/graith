@@ -1,4 +1,4 @@
-//go:build libghostty && ((cgo && !darwin && !linux) || libghostty_test_unsupported)
+//go:build libghostty
 
 package pty
 
@@ -8,7 +8,7 @@ import (
 )
 
 func TestLibghosttyRejectsUnsupportedOS(t *testing.T) {
-	term, err := newTerminal(80, 24)
+	term, err := newUnsupportedLibghosttyTerminal(80, 24)
 	if term != nil {
 		t.Fatalf("newTerminal() terminal = %T, want nil", term)
 	}
