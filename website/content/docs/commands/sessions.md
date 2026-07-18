@@ -197,7 +197,7 @@ resulting value. `--json` and agent mode return one object with `session_id`,
 |------|-------------|
 | `--name <name>` | Set the session name |
 | `--parent <name-or-id>` | Set the parent session; pass an empty string to orphan |
-| `--starred[=true|false]` | Set deletion protection and Starred-view membership; a bare flag means true |
+| `--starred[=true\|false]` | Set deletion protection and Starred-view membership; a bare flag means true |
 
 Flags can be combined in one persisted update:
 
