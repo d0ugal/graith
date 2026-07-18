@@ -3,12 +3,13 @@
 # build-libghostty.sh — build a SHA-pinned libghostty-vt.xcframework
 # (macos + ios + ios-simulator) for the universal graith app (#628, Task 13).
 #
-# This replaces the unpinned, macOS-only gui/shared/Libraries/libghostty-vt.a with a
-# reproducible, version-pinned artifact. It clones Ghostty at a pinned commit
-# and uses Ghostty's OWN build system, which already knows how to emit a
-# universal libghostty-vt xcframework on Apple platforms (verified against the
-# pinned tree: build.zig gates the xcframework on `emit-lib-vt && emit-xcframework`
-# and calls GhosttyLibVt.initStaticAppleUniversal + GhosttyLibVt.xcframework).
+# This rebuilds the reproducible artifact consumed by the shared package's
+# checksum-pinned remote binary target. It clones Ghostty at a pinned commit and
+# uses Ghostty's own build system, which knows how to emit a universal
+# libghostty-vt xcframework on Apple platforms (verified against the pinned
+# tree: build.zig gates the xcframework on
+# `emit-lib-vt && emit-xcframework` and calls
+# GhosttyLibVt.initStaticAppleUniversal + GhosttyLibVt.xcframework).
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # PINNED VERSION

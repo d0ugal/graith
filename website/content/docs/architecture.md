@@ -157,7 +157,10 @@ In passthrough mode:
 
 ### Overlay
 
-The overlay is a full-screen TUI built with [Bubble Tea](https://github.com/charmbracelet/bubbletea). It renders session lists with filtering, view modes, and a live preview panel. The preview uses [vt10x](https://github.com/hinshun/vt10x) to parse terminal output into a rendered screen.
+The overlay is a full-screen TUI built with
+[Bubble Tea](https://github.com/charmbracelet/bubbletea). It renders session
+lists with filtering, view modes, and a live preview panel backed by terminal
+screen snapshots from the daemon.
 
 ## PTY management
 

@@ -13,10 +13,9 @@ import GraithTerminalCore
 // property and method sharing a base name on one type, so an extension can't
 // conform. The wrapper forwards to those methods with no such clash.
 //
-// This target is deliberately NOT linked by any executable in this package:
-// GraithTerminalCore → CGhosttyVT → libghostty-vt.a is macOS-only + unpinned
-// (Task 13), so wiring it into the live app must wait for the pinned
-// .xcframework. As a library it still type-checks against the real core here.
+// The live iOS app links this target through GraithMobileUI. GraithTerminalCore
+// → CGhosttyVT resolves to the shared package's checksum-pinned, multi-platform
+// libghostty-vt xcframework.
 public final class GhosttyTerminalDriver: TerminalCoreDriving {
     private let core: GhosttyTerminalState
 

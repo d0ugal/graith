@@ -100,7 +100,9 @@ There is no stop, resume, or rename action in the overlay. Use `gr stop`, `gr re
 
 ### Preview panel
 
-The right side of the overlay shows a live preview of the selected session's terminal output, rendered with a VT100 parser (vt10x). The preview updates as the session produces output.
+The right side of the overlay shows a live preview of the selected session's
+terminal screen. The daemon maintains the screen model and sends snapshots as
+the session produces output.
 
 ### Session display
 

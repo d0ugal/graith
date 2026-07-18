@@ -195,19 +195,14 @@ apps; issue #1392 tracks removing that mechanism from graith entirely.
 ## Status & deferred work
 
 Done: shared core (protocol + terminal + tests), macOS app (`GraithGUI`, builds
-and runs), iOS app (`GraithMobileApp`, **launches in the simulator** against
-real identity/registry/reachability with mock hosts), remote daemon substrate +
-auth/pairing, `gr remote`/`gr pair` CLI, the Makefile/build tooling.
+and runs), iOS app (`GraithMobileApp`, **launches in the simulator** with the
+live Ghostty terminal adapter), remote daemon substrate + auth/pairing,
+`gr remote`/`gr pair` CLI, and the Makefile/build tooling. The shared package
+uses a checksum-pinned, multi-platform libghostty-vt `.xcframework`; rebuild it
+with `shared/build-libghostty.sh` when rotating the Ghostty pin.
 
 Deferred / not yet done:
 
-- **Live terminal render on iOS.** The iOS app is unified onto `../shared`'s real
-  `GraithProtocolClient` (connects + drives sessions), but the terminal *render*
-  adapter (`GraithMobileRealTerminal`) isn't linked into the app yet — it needs
-  the libghostty-vt `.xcframework` below.
-- **libghostty-vt `.xcframework`.** `shared/Libraries/libghostty-vt.a` is
-  unpinned + macOS-only; `shared/build-libghostty.sh` produces a SHA-pinned
-  universal xcframework but needs Zig 0.15.2 + full Xcode (Task 13).
 - **Automatic daemon discovery (backlog).** Hosts are added manually by MagicDNS
   name today. Future: Tailscale admin API + a `tag:graith` device tag (cleanest),
   a naming-convention probe (no credential), or daemon-advertised siblings. mDNS
