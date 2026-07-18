@@ -147,9 +147,11 @@ preflight error.
 
 Trigger fire-time variables remain separate. For example,
 `inbox = "{scenario}-{session_name}"` fixes the scenario prefix at start but
-leaves `{session_name}` for the trigger fire. Result `store` templates likewise
-keep the result vocabulary documented below; `{session_name}` receives the
-already-rendered member name.
+leaves `{session_name}` for the trigger fire. When the two vocabularies overlap,
+the instance token takes priority: `{date}`, `{datetime}`, and `{scenario_id}`
+in an inbox target are fixed at scenario start rather than evaluated again when
+the trigger fires. Result `store` templates likewise keep the result vocabulary
+documented below; `{session_name}` receives the already-rendered member name.
 
 The rendered scenario and member names are returned by `gr scenario start` and
 are the selectors used by `status`, results, `stop`, `resume`, `delete`, and
