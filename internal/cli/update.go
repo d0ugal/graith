@@ -35,6 +35,7 @@ var updateCmd = &cobra.Command{
 		if cmd.Flags().Changed("parent") {
 			opts.parent = &parentFlag
 		}
+
 		if cmd.Flags().Changed("starred") {
 			opts.starred = &starredFlag
 		}
@@ -105,6 +106,7 @@ func runUpdate(c controlConn, nameOrID string, opts updateOptions) error {
 	if resp.Type == "error" {
 		return fmt.Errorf("%s", errorMessage(resp))
 	}
+
 	if resp.Type != "updated" {
 		return fmt.Errorf("unexpected update response: %s", resp.Type)
 	}
@@ -129,6 +131,7 @@ func runUpdate(c controlConn, nameOrID string, opts updateOptions) error {
 			out.Printf("Parent: %s\n", result.ParentID)
 		}
 	}
+
 	if opts.starred != nil {
 		out.Printf("Starred: %t\n", result.Starred)
 	}

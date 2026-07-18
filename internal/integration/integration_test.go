@@ -655,6 +655,7 @@ func TestUpdateStarredPersistsAndProtectsDeletion(t *testing.T) {
 	updatedEnv := readControl(t, r)
 	if updatedEnv.Type != "updated" {
 		var e protocol.ErrorMsg
+
 		_ = protocol.DecodePayload(updatedEnv, &e)
 		t.Fatalf("update error: %s", e.Message)
 	}
@@ -677,6 +678,7 @@ func TestUpdateStarredPersistsAndProtectsDeletion(t *testing.T) {
 	}
 
 	sendControl(t, w, "list", protocol.ListMsg{})
+
 	var list protocol.SessionListMsg
 	_ = protocol.DecodePayload(readControl(t, r), &list)
 	if len(list.Sessions) != 1 || list.Sessions[0].ID != created.ID || !list.Sessions[0].Starred {

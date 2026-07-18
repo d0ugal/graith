@@ -438,6 +438,7 @@ func TestUpdate(t *testing.T) {
 		}
 
 		starred := true
+
 		_, err := sm.Update("sys", nil, nil, &starred)
 		if err == nil || !strings.Contains(err.Error(), "cannot update system session") {
 			t.Fatalf("expected explicit error for system session, got %v", err)
@@ -492,6 +493,7 @@ func TestUpdate(t *testing.T) {
 		putSession(sm, &SessionState{ID: "bairn", Name: "auld", Status: StatusRunning})
 
 		starred := true
+
 		updated, err := sm.Update("bairn", strPtr("bonnie"), strPtr("ben"), &starred)
 		if err != nil {
 			t.Fatalf("Update() error = %v", err)
@@ -515,7 +517,6 @@ func TestUpdate(t *testing.T) {
 
 	t.Run("idempotent starred values", func(t *testing.T) {
 		for _, initial := range []bool{false, true} {
-			initial := initial
 			t.Run(fmt.Sprintf("%t to %t", initial, initial), func(t *testing.T) {
 				sm := newTestSessionManager(t)
 				putSession(sm, &SessionState{
@@ -541,6 +542,7 @@ func TestUpdate(t *testing.T) {
 		})
 
 		starred := true
+
 		updated, err := sm.Update("bothy", nil, nil, &starred)
 		if err != nil {
 			t.Fatalf("Update() error = %v", err)
@@ -574,12 +576,14 @@ func TestUpdate(t *testing.T) {
 
 		go func() {
 			defer wg.Done()
+
 			_, err := sm.Update("strath", &name, nil, nil)
 			errs <- err
 		}()
 
 		go func() {
 			defer wg.Done()
+
 			_, err := sm.Update("strath", nil, nil, &starred)
 			errs <- err
 		}()
