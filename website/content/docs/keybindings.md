@@ -117,17 +117,16 @@ Each session row shows:
 ## Live list watch
 
 `gr ls --watch` is a live-updating TUI for monitoring and controlling the
-filtered session list. The historical `dashboard_*` config key names remain so
-existing keybinding customizations continue to work.
+filtered session list.
 
 | Key | Action | Config key |
 |-----|--------|-----------|
 | `j` / Down | Move cursor down | `overlay.down` |
 | `k` / Up | Move cursor up | `overlay.up` |
-| Enter / `a` | Attach to session | `overlay.dashboard_attach` |
-| `s` | Stop session (with confirmation) | `overlay.dashboard_stop` |
-| `x` / `d` | Delete session (with confirmation) | `overlay.dashboard_delete` |
-| `r` | Resume a stopped session | `overlay.dashboard_resume` |
+| Enter / `a` | Attach to session | `overlay.list_watch_attach` |
+| `s` | Stop session (with confirmation) | `overlay.list_watch_stop` |
+| `x` / `d` | Delete session (with confirmation) | `overlay.list_watch_delete` |
+| `r` | Resume a stopped session | `overlay.list_watch_resume` |
 | `q` / Escape / `ctrl+c` | Quit | `overlay.cancel` |
 
 ## Message viewer, approvals, and scroll pager

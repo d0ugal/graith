@@ -61,11 +61,11 @@ top       = "g home"
 bottom    = "G end"
 confirm   = "enter y"                  # confirm a prompt (e.g. delete/stop)
 cancel    = "q esc ctrl+c"             # close the overlay / cancel
-# List watch actions (the historical config names remain stable).
-dashboard_attach = "enter a"
-dashboard_stop   = "s"
-dashboard_delete = "x d"
-dashboard_resume = "r"
+# List watch actions.
+list_watch_attach = "enter a"
+list_watch_stop   = "s"
+list_watch_delete = "x d"
+list_watch_resume = "r"
 # Approval prompt actions.
 approval_allow     = "y enter"
 approval_deny      = "n x"
