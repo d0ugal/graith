@@ -889,6 +889,7 @@ func TestCompletionReactorName(t *testing.T) {
 	sanitisedA.completionAction = "synthesise:canny"
 	sanitisedB := base
 	sanitisedB.completionAction = "synthesise/canny"
+
 	if gotA, gotB := completionReactorName(scenarioTriggerName(base.scenarioID, sanitisedA.completionAction), sanitisedA), completionReactorName(scenarioTriggerName(base.scenarioID, sanitisedB.completionAction), sanitisedB); gotA == gotB {
 		t.Fatalf("actions that sanitise alike produced colliding name %q", gotA)
 	}
@@ -901,6 +902,7 @@ func TestCompletionReactorName(t *testing.T) {
 
 	longNameA := completionReactorName(scenarioTriggerName(longA.scenarioID, longA.completionAction), longA)
 	longNameB := completionReactorName(scenarioTriggerName(longB.scenarioID, longB.completionAction), longB)
+
 	if len(longNameA) > 64 || ValidateSessionName(longNameA) != nil {
 		t.Fatalf("long completion identity produced invalid name %q", longNameA)
 	}
