@@ -260,23 +260,34 @@ func TestScenarioCompletionActionSuccessSchedulesDelayedCleanup(t *testing.T) {
 }
 
 func TestScenarioCompletionSessionActionSpawnsWithDurableIdentity(t *testing.T) {
-	backend := filepath.Join(t.TempDir(), "safehouse-stub")
+	fixtureDir := t.TempDir()
+	backend := filepath.Join(fixtureDir, "safehouse-stub")
+
 	if err := os.WriteFile(backend, []byte("#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = \"--\" ]; then\n    shift\n    exec \"$@\"\n  fi\n  shift\ndone\nexit 64\n"), 0o755); err != nil { //nolint:gosec // executable sandbox adapter fixture
+		t.Fatal(err)
+	}
+
+	agentArgs := filepath.Join(fixtureDir, "canny-agent-args")
+	agentCommand := filepath.Join(fixtureDir, "canny-agent")
+	agentScript := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\nexit 0\n", agentArgs)
+
+	if err := os.WriteFile(agentCommand, []byte(agentScript), 0o755); err != nil { //nolint:gosec // executable agent fixture
 		t.Fatal(err)
 	}
 
 	trigger := config.TriggerConfig{
 		Name: "synthesise", Completion: &config.CompletionConfig{Event: "complete", Session: "ben"},
 		Action: config.ActionConfig{
-			Type: config.ActionSession, Agent: "sleeper", Prompt: "summarise the croft",
+			Type: config.ActionSession, Agent: "canny", Prompt: "summarise the croft",
 			AutoCleanup: config.CleanupOnSuccess, IdleTimeout: "1m",
+			Deliver: config.DeliverConfig{Store: "canny/report.md", Required: true},
 		},
 	}
 
 	sm, _ := newScenarioCompletionTestSM(t, trigger, config.ScenarioLifecycleConfig{
 		Cleanup: config.ScenarioCleanupOnSuccess, Delay: "1h",
 	})
-	sm.cfg.Agents["sleeper"] = config.Agent{Command: "sleep", Args: []string{"60"}}
+	sm.cfg.Agents["canny"] = config.Agent{Command: agentCommand}
 	sm.cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "safehouse", Command: backend}
 	sm.sandboxResolver = func(string) (bool, error) { return true, nil }
 
@@ -307,7 +318,9 @@ func TestScenarioCompletionSessionActionSpawnsWithDurableIdentity(t *testing.T) 
 
 	sm.dispatchPendingCompletionActions(t.Context(), "sc-braw")
 
+	spawnedID := ""
 	deadline := time.Now().Add(5 * time.Second)
+
 	for time.Now().Before(deadline) {
 		sm.mu.RLock()
 		action := sm.state.Scenarios["sc-braw"].Completion.Actions[0]
@@ -372,10 +385,76 @@ func TestScenarioCompletionSessionActionSpawnsWithDurableIdentity(t *testing.T) 
 			t.Fatalf("spawned completion action state = %q, want running", action.State)
 		}
 
+		spawnedID = session.ID
+
+		break
+	}
+
+	if spawnedID == "" {
+		t.Fatal("completion session was not spawned")
+	}
+
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		sm.recoverOrFinishCompletionSessions("sc-braw")
+
+		sm.mu.RLock()
+		action := sm.state.Scenarios["sc-braw"].Completion.Actions[0]
+		cleanup := *sm.state.Scenarios["sc-braw"].Completion.Cleanup
+		session := sm.state.Sessions[spawnedID]
+
+		if session != nil {
+			sessionCopy := *session
+			session = &sessionCopy
+		}
+
+		sm.mu.RUnlock()
+
+		if action.State == CompletionActionFailed {
+			t.Fatalf("completion session action failed: %+v", action)
+		}
+
+		if action.State != CompletionActionSucceeded || session == nil || !session.IsSoftDeleted() {
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+
+		if session.Status != StatusStopped || session.ExitCode == nil || *session.ExitCode != 0 {
+			t.Fatalf("completion session terminal state = %+v", session)
+		}
+
+		if cleanup.State != ScenarioCleanupScheduled || cleanup.ScheduledAt == nil {
+			t.Fatalf("successful completion did not schedule cleanup: %+v", cleanup)
+		}
+
+		gotArgs, err := os.ReadFile(agentArgs)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if prompt := string(gotArgs); !strings.Contains(prompt, "Every delivery below is required") ||
+			!strings.Contains(prompt, "gr store put canny/report.md") {
+			t.Fatalf("completion session prompt missing required delivery instructions: %q", prompt)
+		}
+
+		loaded, err := LoadState(sm.paths.StateFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		persistedAction := loaded.Scenarios["sc-braw"].Completion.Actions[0]
+		persistedSession := loaded.Sessions[spawnedID]
+		persistedCleanup := loaded.Scenarios["sc-braw"].Completion.Cleanup
+
+		if persistedAction.State != CompletionActionSucceeded || persistedSession == nil || !persistedSession.IsSoftDeleted() ||
+			persistedCleanup == nil || persistedCleanup.State != ScenarioCleanupScheduled {
+			t.Fatalf("persisted completion lifecycle = action %+v session %+v cleanup %+v", persistedAction, persistedSession, persistedCleanup)
+		}
+
 		return
 	}
 
-	t.Fatal("completion session was not spawned")
+	t.Fatal("completion session did not finish successfully and unblock cleanup")
 }
 
 func TestScenarioCompletionRequiredDeliveryFailureAndRetry(t *testing.T) {
@@ -511,6 +590,55 @@ func TestScenarioCompletionRestartTransitions(t *testing.T) {
 		cleanup := sm.state.Scenarios["sc-braw"].Completion.Cleanup
 		if cleanup == nil || cleanup.State != ScenarioCleanupScheduled {
 			t.Fatalf("successful recovered session did not unblock cleanup: %+v", cleanup)
+		}
+	})
+
+	t.Run("missing session action fails and can retry", func(t *testing.T) {
+		trigger := config.TriggerConfig{
+			Name: "synthesise", Completion: &config.CompletionConfig{Session: "ben"},
+			Action: config.ActionConfig{Type: config.ActionSession, Prompt: "synthesise then exit"},
+		}
+
+		sm, _ := newScenarioCompletionTestSM(t, trigger, config.ScenarioLifecycleConfig{Cleanup: config.ScenarioCleanupAlways})
+		if err := sm.reconcileScenarioCompletion("sc-braw"); err != nil {
+			t.Fatal(err)
+		}
+
+		sm.mu.Lock()
+		action := &sm.state.Scenarios["sc-braw"].Completion.Actions[0]
+		action.State = CompletionActionRunning
+		action.Attempt = 1
+		action.SessionID = "auld-reactor"
+		_ = sm.saveState()
+		sm.mu.Unlock()
+
+		sm.recoverOrFinishCompletionSessions("sc-braw")
+
+		sm.mu.RLock()
+		actionState := sm.state.Scenarios["sc-braw"].Completion.Actions[0]
+		cleanup := *sm.state.Scenarios["sc-braw"].Completion.Cleanup
+		sm.mu.RUnlock()
+
+		if actionState.State != CompletionActionFailed || !strings.Contains(actionState.Error, "auld-reactor is no longer available") {
+			t.Fatalf("missing session action = %+v", actionState)
+		}
+
+		if cleanup.State != ScenarioCleanupScheduled {
+			t.Fatalf("always cleanup remained blocked by missing session: %+v", cleanup)
+		}
+
+		if err := sm.TriggerRunNow(t.Context(), "scenario:sc-braw:synthesise"); err != nil {
+			t.Fatalf("retry missing session action: %v", err)
+		}
+
+		sm.mu.RLock()
+		defer sm.mu.RUnlock()
+
+		actionState = sm.state.Scenarios["sc-braw"].Completion.Actions[0]
+		cleanup = *sm.state.Scenarios["sc-braw"].Completion.Cleanup
+
+		if actionState.State != CompletionActionPending || actionState.SessionID != "" || cleanup.State != ScenarioCleanupPending {
+			t.Fatalf("retried missing session action = %+v cleanup = %+v", actionState, cleanup)
 		}
 	})
 }

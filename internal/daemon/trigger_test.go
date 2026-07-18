@@ -913,6 +913,23 @@ func TestCompletionReactorName(t *testing.T) {
 	if longNameA == longNameB {
 		t.Fatalf("long identities differing after truncation collided: %q", longNameA)
 	}
+
+	separatorEdge := base
+	separatorEdge.completionAction = strings.Repeat("a", 19) + ":canny"
+	separatorEdgeName := completionReactorName(scenarioTriggerName(separatorEdge.scenarioID, separatorEdge.completionAction), separatorEdge)
+
+	if strings.Contains(separatorEdgeName, "--") {
+		t.Fatalf("truncated readable hint retained a trailing separator: %q", separatorEdgeName)
+	}
+
+	emptyHint := base
+	emptyHint.completionAction = "☃"
+	emptyHint.sessionName = "..."
+	emptyHintName := completionReactorName(scenarioTriggerName(emptyHint.scenarioID, emptyHint.completionAction), emptyHint)
+
+	if !strings.HasPrefix(emptyHintName, "completion-action-") || ValidateSessionName(emptyHintName) != nil {
+		t.Fatalf("empty readable hint did not use valid fallback: %q", emptyHintName)
+	}
 }
 
 func TestFireSchedule_RecordsRun(t *testing.T) {

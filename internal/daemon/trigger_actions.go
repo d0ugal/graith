@@ -450,7 +450,7 @@ func completionReactorName(triggerID string, fc fireContext) string {
 
 	keep := maxLen - len(prefix) - len(suffix)
 	if len(readable) > keep {
-		readable = readable[:keep]
+		readable = strings.TrimRight(readable[:keep], "-")
 	}
 
 	return prefix + readable + suffix
