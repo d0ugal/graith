@@ -861,6 +861,10 @@ func TestCompletionReactorName(t *testing.T) {
 		t.Fatalf("completion reactor name is too long: %q (%d)", name, len(name))
 	}
 
+	if !strings.HasPrefix(name, "completion-synthesise-canny-") {
+		t.Fatalf("completion reactor name lost its readable hint: %q", name)
+	}
+
 	if got := completionReactorName(triggerID, base); got != name {
 		t.Fatalf("completion reactor name is not deterministic: %q != %q", got, name)
 	}
