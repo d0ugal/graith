@@ -1,11 +1,76 @@
 package pty
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
+
+func TestAdoptSessionDefersExactWaiterUntilPublished(t *testing.T) {
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	reaped := false
+	t.Cleanup(func() {
+		if !reaped {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	})
+	startTime, err := ProcessStartTime(cmd.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	readEnd, writeEnd, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fd, err := syscall.Dup(int(readEnd.Fd()))
+	_ = readEnd.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := AdoptSession(AdoptOpts{
+		ID: "canny-deferred-wait", Fd: uintptr(fd), PID: cmd.Process.Pid,
+		ExpectedPIDStartTime: startTime,
+		LogPath:              filepath.Join(t.TempDir(), "canny-deferred-wait.log"),
+		HydrationBytes:       0,
+		PollInterval:         10 * time.Millisecond,
+		DegradedScreen:       true,
+		DeferWait:            true,
+	})
+	if err != nil {
+		_ = writeEnd.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeEnd.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-s.Done():
+		t.Fatal("deferred waiter reaped before manager publication")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	s.StartAdoptedWaiter()
+	select {
+	case <-s.Done():
+		reaped = true
+	case <-time.After(5 * time.Second):
+		t.Fatal("adopted waiter did not reap after publication")
+	}
+}
 
 func TestAdoptedWaitLoopExitsOnProcessDeath(t *testing.T) {
 	t.Parallel()

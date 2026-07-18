@@ -9,3 +9,9 @@ var errLibghosttyUnsupportedOS = errors.New("libghostty backend is supported onl
 func newTerminal(_, _ int) (Terminal, error) {
 	return nil, errLibghosttyUnsupportedOS
 }
+
+func TerminalAdoptionCapacity() (maxSessions int, available bool) {
+	return 0, false
+}
+
+func ProbeTerminalAdoption() (maxSessions int, available bool) { return 0, false }

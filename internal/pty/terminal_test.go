@@ -1,6 +1,9 @@
 package pty
 
 import (
+	"bytes"
+	"errors"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -40,6 +43,57 @@ func write(t *testing.T, term Terminal, s string) {
 		t.Fatalf("write %q: %v", s, err)
 	}
 }
+
+func TestWriteTerminalChunksBoundsReplayRequests(t *testing.T) {
+	payload := bytes.Repeat([]byte("dreich"), terminalWriteChunkBytes/6*2+37)
+	term := &terminalChunkRecorder{}
+
+	if err := writeTerminalChunks(term, payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(term.writes) < 3 {
+		t.Fatalf("writes = %d, want at least three bounded requests", len(term.writes))
+	}
+	for i, write := range term.writes {
+		if len(write) > terminalWriteChunkBytes {
+			t.Fatalf("write %d bytes = %d, limit %d", i, len(write), terminalWriteChunkBytes)
+		}
+	}
+	if got := bytes.Join(term.writes, nil); !bytes.Equal(got, payload) {
+		t.Fatal("bounded writes did not preserve replay bytes")
+	}
+}
+
+func TestWriteTerminalChunksRejectsShortWrite(t *testing.T) {
+	term := &terminalChunkRecorder{short: true}
+	if err := writeTerminalChunks(term, []byte("canny")); !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("error = %v, want io.ErrShortWrite", err)
+	}
+}
+
+type terminalChunkRecorder struct {
+	writes [][]byte
+	short  bool
+}
+
+func (t *terminalChunkRecorder) Write(p []byte) (int, error) {
+	t.writes = append(t.writes, append([]byte(nil), p...))
+	if t.short {
+		return len(p) - 1, nil
+	}
+
+	return len(p), nil
+}
+
+func (t *terminalChunkRecorder) Resize(_, _ int) error { return nil }
+
+func (t *terminalChunkRecorder) Size() (int, int) { return 80, 24 }
+
+func (t *terminalChunkRecorder) Cursor() (int, int, bool) { return 0, 0, false }
+
+func (t *terminalChunkRecorder) Cell(_, _ int) Cell { return Cell{Content: " "} }
+
+func (t *terminalChunkRecorder) Close() error { return nil }
 
 // line returns the plain text of screen row y with wide-grapheme continuation
 // columns skipped and trailing blanks trimmed — the same normalization
