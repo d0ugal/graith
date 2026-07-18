@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -25,6 +26,11 @@ import (
 //
 // See docs/design/2026-06-24-cross-agent-conversation-migration-design.md.
 func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, cols uint16) (SessionState, error) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return SessionState{}, err
+	}
+	defer sm.endLifecycleOperation()
+
 	// --- snapshot + validate ---
 	sm.mu.RLock()
 
@@ -361,12 +367,27 @@ func scrapesID(agent string) bool {
 // stateRoot is the agent's effective state root (e.g. CODEX_HOME from the
 // session's launch env); pass "" to fall back to the daemon's default.
 func (sm *SessionManager) captureNativeSessionID(id, agent, worktreePath, stateRoot string, since time.Time, expectedPID int, expectedPIDStartTime int64) {
+	sm.captureNativeSessionIDContext(context.Background(), id, agent, worktreePath, stateRoot, since, expectedPID, expectedPIDStartTime)
+}
+
+func (sm *SessionManager) captureNativeSessionIDContext(ctx context.Context, id, agent, worktreePath, stateRoot string, since time.Time, expectedPID int, expectedPIDStartTime int64) {
 	if !scrapesID(agent) {
 		return
 	}
 
 	for i := 0; i < 40; i++ {
-		time.Sleep(250 * time.Millisecond)
+		timer := time.NewTimer(250 * time.Millisecond)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return
+		}
 
 		sid, ok := scrapeSessionID(agent, worktreePath, stateRoot, since)
 		if !ok || sid == "" {
@@ -398,6 +419,8 @@ func (sm *SessionManager) captureNativeSessionID(id, agent, worktreePath, stateR
 			return
 		default:
 			s.AgentSessionID = sid
+			s.NativeStateRoot = ""
+			s.NativeCaptureStartedAt = nil
 			_ = sm.saveState()
 		}
 		sm.mu.Unlock()

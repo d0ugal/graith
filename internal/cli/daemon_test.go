@@ -75,6 +75,7 @@ type fakeUpgradeConn struct {
 	daemonPID    int
 	daemonPIDErr error
 	sendErr      error
+	sendErrAt    int
 	responses    []protocol.Envelope
 	readIdx      int
 	sent         []string
@@ -104,8 +105,10 @@ func (f *fakeUpgradeConn) DaemonPID() (int, error) {
 
 func (f *fakeUpgradeConn) SendControl(msgType string, _ any) error {
 	f.sent = append(f.sent, msgType)
-
-	return f.sendErr
+	if f.sendErr != nil && (f.sendErrAt == 0 || f.sendErrAt == len(f.sent)) {
+		return f.sendErr
+	}
+	return nil
 }
 
 func (f *fakeUpgradeConn) ReadControlResponse() (protocol.Envelope, error) {
@@ -126,12 +129,9 @@ func setupUpgradeTest(t *testing.T) *fakeConnClock {
 
 	origCfg, origNow, origSleep := cfg, connectionNow, connectionSleep
 	origDial, origProbe, origOut, origPaths := dialUpgradeClient, probeDaemonIdentityFn, out, paths
-	origProcessAlive := daemonProcessAlive
-
 	t.Cleanup(func() {
 		cfg, connectionNow, connectionSleep = origCfg, origNow, origSleep
 		dialUpgradeClient, probeDaemonIdentityFn, out, paths = origDial, origProbe, origOut, origPaths
-		daemonProcessAlive = origProcessAlive
 	})
 
 	cfg = &config.Config{Connection: config.ConnectionConfig{
@@ -156,6 +156,10 @@ func upgradeHandshake(instanceID string) protocol.Envelope {
 	})
 }
 
+func upgradePreflightOK() protocol.Envelope {
+	return payloadEnv("upgrade_preflight_ok", struct{}{})
+}
+
 // TestExecUpgradeInstallsConfiguredHandshakeDeadline proves execUpgrade bounds
 // its raw handshake + upgrade exchange with the configured local handshake
 // deadline before driving it, so a stale daemon that accepts but never replies
@@ -173,6 +177,7 @@ func TestExecUpgradeInstallsConfiguredHandshakeDeadline(t *testing.T) {
 		daemonPID: 48309,
 		responses: []protocol.Envelope{
 			upgradeHandshake("old-gen"),
+			upgradePreflightOK(),
 			errEnv("upgrade refused"), // upgrade refused -> early return
 		},
 	}
@@ -208,6 +213,7 @@ func TestExecUpgradeWaitsForNewGenerationDespiteInheritedListener(t *testing.T) 
 	fake := &fakeUpgradeConn{
 		responses: []protocol.Envelope{
 			upgradeHandshake("old-gen"),
+			upgradePreflightOK(),
 			// upgrade reply: connection drops (daemon exec'ing) -> EOF read.
 		},
 	}
@@ -251,7 +257,7 @@ func TestRestartPreserveReconcilesGenerationAfterReadinessDeadline(t *testing.T)
 
 	fake := &fakeUpgradeConn{
 		daemonPID: 48309,
-		responses: []protocol.Envelope{upgradeHandshake("croft-auld")},
+		responses: []protocol.Envelope{upgradeHandshake("croft-auld"), upgradePreflightOK()},
 	}
 	dialUpgradeClient = func() (upgradeExchangeConn, error) { return fake, nil }
 
@@ -321,20 +327,12 @@ func TestRestartPreserveDoesNotKillWhenReadinessIsUnconfirmed(t *testing.T) {
 
 	fake := &fakeUpgradeConn{
 		daemonPID: 48309,
-		responses: []protocol.Envelope{upgradeHandshake("strath-auld")},
+		responses: []protocol.Envelope{upgradeHandshake("strath-auld"), upgradePreflightOK()},
 	}
 	dialUpgradeClient = func() (upgradeExchangeConn, error) { return fake, nil }
 	probeDaemonIdentityFn = func(time.Time) (string, string) {
 		return version.Version, "strath-auld"
 	}
-	daemonProcessAlive = func(pid int) bool {
-		if pid != 48309 {
-			t.Fatalf("process check PID = %d, want captured PID 48309", pid)
-		}
-
-		return true
-	}
-
 	cleanCalled := false
 
 	err := restartDaemonPreservingSessions(func() error {
@@ -355,11 +353,10 @@ func TestRestartPreserveDoesNotKillWhenReadinessIsUnconfirmed(t *testing.T) {
 	}
 }
 
-// TestRestartPreserveFallsBackOnlyAfterPriorPIDExits covers a genuine preserve
-// crash: after the final identity probe finds no valid replacement, clean start
-// is allowed only because the exact socket peer PID is proven dead. A stale,
-// mismatched PID file neither authorizes fallback nor gets unlinked by the CLI.
-func TestRestartPreserveFallsBackOnlyAfterPriorPIDExits(t *testing.T) {
+// TestRestartPreserveNeverFallsBackAfterUnconfirmedPeerExit proves even a dead
+// socket peer cannot turn a mutating preserve request into an implicit clean
+// restart: the acknowledgement may have been lost after a successful exec.
+func TestRestartPreserveNeverFallsBackAfterUnconfirmedPeerExit(t *testing.T) {
 	setupUpgradeTest(t)
 
 	cfg.Connection.StartTimeout = "10ms"
@@ -375,7 +372,7 @@ func TestRestartPreserveFallsBackOnlyAfterPriorPIDExits(t *testing.T) {
 
 	fake := &fakeUpgradeConn{
 		daemonPID: 48309,
-		responses: []protocol.Envelope{upgradeHandshake("haar-auld")},
+		responses: []protocol.Envelope{upgradeHandshake("haar-auld"), upgradePreflightOK()},
 	}
 	dialUpgradeClient = func() (upgradeExchangeConn, error) { return fake, nil }
 	cleanStartCalled := false
@@ -386,25 +383,17 @@ func TestRestartPreserveFallsBackOnlyAfterPriorPIDExits(t *testing.T) {
 
 		return "", ""
 	}
-	daemonProcessAlive = func(pid int) bool {
-		if pid != 48309 {
-			t.Fatalf("process check PID = %d, want captured PID 48309", pid)
-		}
-
-		return false
-	}
-
 	err := restartDaemonPreservingSessions(func() error {
 		cleanStartCalled = true
 
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("dead preserve PID should allow clean fallback: %v", err)
+	if err == nil {
+		t.Fatal("unconfirmed preserve restart unexpectedly succeeded")
 	}
 
-	if !cleanStartCalled {
-		t.Fatal("clean start did not run after the preserve PID was proven dead")
+	if cleanStartCalled {
+		t.Fatal("clean start ran after an unconfirmed preserve request")
 	}
 
 	data, err := os.ReadFile(paths.PIDFile)
@@ -416,81 +405,8 @@ func TestRestartPreserveFallsBackOnlyAfterPriorPIDExits(t *testing.T) {
 		t.Fatalf("stale PID file changed to %q, want it left untouched", data)
 	}
 
-	got := rendered.String()
-	if !strings.Contains(got, "sessions not preserved") || strings.Contains(got, "sessions preserved)") {
-		t.Fatalf("restart output = %q, want validated clean-restart result", got)
-	}
-}
-
-func TestReconcileCleanStartRequiresRequestedGeneration(t *testing.T) {
-	setupUpgradeTest(t)
-
-	tests := []struct {
-		name       string
-		startErr   error
-		version    string
-		instanceID string
-		wantErr    string
-		wantOK     bool
-	}{
-		{
-			name:       "matching generation after successful start",
-			version:    version.Version,
-			instanceID: "bothy-clean",
-			wantOK:     true,
-		},
-		{
-			name:       "matching generation reconciles start error",
-			startErr:   errors.New("daemon is still running, cannot restart cleanly"),
-			version:    version.Version,
-			instanceID: "bothy-concurrent",
-			wantOK:     true,
-		},
-		{
-			name:       "wrong version is not success",
-			version:    "0.1.0-auld",
-			instanceID: "bothy-wrong",
-			wantErr:    "instead of",
-		},
-		{
-			name:       "old generation is not success",
-			version:    version.Version,
-			instanceID: "bothy-auld",
-			wantErr:    "did not present a new",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var rendered bytes.Buffer
-
-			out = output.NewWithWriter(false, &rendered)
-			probeDaemonIdentityFn = func(time.Time) (string, string) {
-				return tc.version, tc.instanceID
-			}
-
-			err := reconcileCleanStart(tc.startErr, "bothy-auld")
-			if tc.wantOK {
-				if err != nil {
-					t.Fatalf("reconcileCleanStart() error = %v", err)
-				}
-
-				got := rendered.String()
-				if !strings.Contains(got, "sessions not preserved") || strings.Contains(got, "sessions preserved)") {
-					t.Fatalf("restart output = %q, want non-preserve success", got)
-				}
-
-				return
-			}
-
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("reconcileCleanStart() error = %v, want containing %q", err, tc.wantErr)
-			}
-
-			if rendered.Len() != 0 {
-				t.Fatalf("invalid generation produced success output %q", rendered.String())
-			}
-		})
+	if rendered.Len() != 0 {
+		t.Fatalf("unconfirmed preserve request produced success output %q", rendered.String())
 	}
 }
 
@@ -504,7 +420,7 @@ func TestExecUpgradeFailsWhenOnlyInheritedListenerResponds(t *testing.T) {
 	cfg.Connection.StartTimeout = "50ms"
 
 	fake := &fakeUpgradeConn{
-		responses: []protocol.Envelope{upgradeHandshake("old-gen")},
+		responses: []protocol.Envelope{upgradeHandshake("old-gen"), upgradePreflightOK()},
 	}
 	dialUpgradeClient = func() (upgradeExchangeConn, error) { return fake, nil }
 
@@ -592,8 +508,9 @@ func TestExecUpgradeFailsWhenSendUpgradeFails(t *testing.T) {
 	setupUpgradeTest(t)
 
 	fake := &fakeUpgradeConn{
-		responses: []protocol.Envelope{upgradeHandshake("old-gen")},
+		responses: []protocol.Envelope{upgradeHandshake("old-gen"), upgradePreflightOK()},
 		sendErr:   errors.New("write failed"),
+		sendErrAt: 2,
 	}
 	dialUpgradeClient = func() (upgradeExchangeConn, error) { return fake, nil }
 
@@ -648,6 +565,7 @@ func TestRestartPreserveDefiniteRefusalSkipsCleanFallback(t *testing.T) {
 	fake := &fakeUpgradeConn{
 		responses: []protocol.Envelope{
 			upgradeHandshake("canny-auld"),
+			upgradePreflightOK(),
 			errEnv("operation not permitted for agent sessions"),
 		},
 	}
@@ -705,6 +623,7 @@ func TestExecUpgradeAlreadyInProgressRemainsUnconfirmed(t *testing.T) {
 		daemonPID: 48309,
 		responses: []protocol.Envelope{
 			upgradeHandshake("thrawn-auld"),
+			upgradePreflightOK(),
 			errEnv("upgrade already in progress"),
 		},
 	}

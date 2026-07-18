@@ -456,7 +456,16 @@ func (sm *SessionManager) dispatchPendingCompletionActions(ctx context.Context, 
 		attemptKey := completionActionKey(scenarioID, epoch, name, attempt)
 		sm.completion.moveCancel(key, attemptKey)
 
-		go sm.runCompletionAction(actionCtx, cancel, scenarioID, epoch, name, attempt)
+		if !sm.startBackgroundTask(actionCtx, func(taskCtx context.Context) {
+			sm.runCompletionAction(taskCtx, cancel, scenarioID, epoch, name, attempt)
+		}) {
+			cancel()
+			sm.completion.clearCancel(attemptKey)
+			sm.releaseSlot()
+			// The durable Running claim is intentionally retained. A successful
+			// exec/shutdown recovery will classify it as interrupted; no external
+			// action was launched after task admission closed.
+		}
 	}
 }
 
@@ -826,12 +835,17 @@ func (sm *SessionManager) dispatchDueScenarioCleanup(ctx context.Context, scenar
 		sm.completion.setCancel(key, cancel)
 		sm.completion.setCleanup(key, true)
 
-		go func() {
+		if !sm.startBackgroundTask(cleanupCtx, func(taskCtx context.Context) {
 			defer cancel()
 			defer sm.completion.clearCancel(key)
 
-			sm.runScenarioCleanup(cleanupCtx, scenarioID, epoch)
-		}()
+			sm.runScenarioCleanup(taskCtx, scenarioID, epoch)
+		}) {
+			cancel()
+			sm.completion.clearCancel(key)
+			sm.completion.setCleanup(key, false)
+			// Keep the durable Running state for restart recovery.
+		}
 	}
 }
 

@@ -1,17 +1,16 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
-	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/version"
 	"golang.org/x/term"
@@ -123,23 +122,18 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 			// the NEW generation is serving, not the inherited listener (#1319).
 			priorInstanceID := hsOk.DaemonInstanceID
 
-			if requestUpgrade(c) {
+			if err := requestUpgrade(c); err != nil {
 				c.Close()
 
-				if waitForNewDaemonGeneration(paths.SocketPath, paths, version.Version, priorInstanceID) {
-					return connect(cfg, paths, configFile, false)
-				}
+				return nil, fmt.Errorf("preserve upgrade was not confirmed: %w; use 'gr daemon restart --force' only for an intentional clean restart", err)
+			}
+			c.Close()
 
-				fmt.Fprintf(os.Stderr, "Exec upgrade did not produce a new daemon generation, falling back to clean restart...\n")
-			} else {
-				c.Close()
+			if waitForNewDaemonGeneration(paths.SocketPath, paths, version.Version, priorInstanceID) {
+				return connect(cfg, paths, configFile, false)
 			}
 
-			if stopDaemonByPID(paths.PIDFile) {
-				waitForSocketGone(paths.SocketPath)
-			}
-
-			return connect(cfg, paths, configFile, false)
+			return nil, fmt.Errorf("preserve upgrade readiness was not confirmed; use 'gr daemon restart --force' only for an intentional clean restart")
 		}
 	}
 
@@ -222,20 +216,42 @@ func waitForNewDaemonGeneration(sockPath string, paths config.Paths, wantVersion
 	})
 }
 
-func requestUpgrade(c *Client) bool {
-	execPath, _ := os.Executable()
+func requestUpgrade(c *Client) error {
+	execPath, err := os.Executable()
+	if err != nil {
+		return errors.New("resolve upgrade executable")
+	}
 
 	msg := protocol.UpgradeMsg{
 		ExecPath:      execPath,
 		ClientVersion: version.Version,
 	}
-	if err := c.SendControl("upgrade", msg); err != nil {
-		return false
+	if err := c.conn.SetDeadline(time.Now().Add(daemonHandshakeTimeout)); err != nil {
+		return errors.New("set upgrade negotiation deadline")
 	}
-	// Connection drop is expected — the daemon exec'd itself.
-	_, _ = c.ReadControlResponse()
+	defer func() { _ = c.conn.SetDeadline(time.Time{}) }()
+	if err := c.SendControl("upgrade_preflight", msg); err != nil {
+		return errors.New("send upgrade preflight")
+	}
+	preflight, err := c.ReadControlResponse()
+	if err != nil {
+		return errors.New("read upgrade preflight response")
+	}
+	if preflight.Type != "upgrade_preflight_ok" {
+		return errors.New("daemon rejected upgrade preflight")
+	}
+	if err := c.SendControl("upgrade", msg); err != nil {
+		return errors.New("send confirmed upgrade request")
+	}
+	ack, err := c.ReadControlResponse()
+	if err != nil {
+		return errors.New("read upgrade acknowledgement")
+	}
+	if ack.Type != "upgrading" {
+		return errors.New("daemon did not acknowledge upgrade")
+	}
 
-	return true
+	return nil
 }
 
 // pollDaemonReady polls ready at daemonStartPollInterval until it returns true
@@ -274,43 +290,6 @@ func pollDaemonReady(ready func(deadline time.Time) bool) bool {
 
 		time.Sleep(sleep)
 	}
-}
-
-func stopDaemonByPID(pidFile string) bool {
-	data, err := os.ReadFile(pidFile)
-	if err != nil {
-		return false
-	}
-
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 1 {
-		return false
-	}
-
-	if !daemon.IsGraithDaemon(pid) {
-		return false
-	}
-
-	_ = syscall.Kill(pid, syscall.SIGTERM)
-
-	// Wait for the process to actually exit, bounded by the same effective start
-	// policy as the other lifecycle waits rather than a fixed 50×100ms retry
-	// count (issue #1319).
-	return pollDaemonReady(func(time.Time) bool {
-		return syscall.Kill(pid, 0) != nil
-	})
-}
-
-// waitForSocketGone waits for a stopped daemon's socket to disappear, bounded by
-// the effective start policy rather than a fixed 20×100ms retry count (issue
-// #1319). It is best-effort: it returns once the socket is gone or the budget
-// elapses.
-func waitForSocketGone(sockPath string) {
-	_ = pollDaemonReady(func(time.Time) bool {
-		_, err := os.Stat(sockPath)
-
-		return os.IsNotExist(err)
-	})
 }
 
 // ConnectFast is a fast-path connect for hooks. It dials the daemon socket

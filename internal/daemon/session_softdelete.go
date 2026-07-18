@@ -55,6 +55,11 @@ func (sm *SessionManager) fallbackExpiryLocked(s *SessionState, now time.Time) (
 // elapses. System and starred sessions are protected, matching Delete. Returns
 // a snapshot of the soft-deleted session so the caller can report the expiry.
 func (sm *SessionManager) SoftDelete(id string) (SessionState, error) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return SessionState{}, err
+	}
+	defer sm.endLifecycleOperation()
+
 	sm.mu.Lock()
 
 	sessState, ok := sm.state.Sessions[id]
@@ -220,6 +225,11 @@ func softDeletableLocked(sess *SessionState) bool {
 // only re-marks, never tears down, since deferring teardown is the whole point.
 // Returns the list of session IDs that were soft-deleted.
 func (sm *SessionManager) SoftDeleteWithChildren(rootID string, excludeRoot bool) ([]string, error) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return nil, err
+	}
+	defer sm.endLifecycleOperation()
+
 	sm.mu.RLock()
 	_, ok := sm.state.Sessions[rootID]
 	sm.mu.RUnlock()
@@ -309,10 +319,29 @@ func (sm *SessionManager) SoftDeleteWithChildren(rootID string, excludeRoot bool
 // already elapsed (in which case it is scheduled for purge and must not be
 // resurrected past its advertised deadline).
 func (sm *SessionManager) Restore(id string) (SessionState, error) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return SessionState{}, err
+	}
+	defer sm.endLifecycleOperation()
 
-	return sm.restoreLocked(id)
+	sm.mu.Lock()
+	original, ok := sm.state.Sessions[id]
+	if !ok {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("session %q not found", id)
+	}
+	before := cloneSessionState(original)
+	restored, err := sm.restoreLocked(id)
+	sm.mu.Unlock()
+	if err != nil {
+		return SessionState{}, err
+	}
+	if err := sm.persistLatestUpgradeState(); err != nil {
+		sm.rollbackRestoredStates(map[string]SessionState{id: before})
+		return SessionState{}, err
+	}
+
+	return restored, nil
 }
 
 // restoreLocked performs the restore under an already-held write lock.
@@ -345,10 +374,6 @@ func (sm *SessionManager) restoreLocked(id string) (SessionState, error) {
 	sessState.StatusChangedAt = time.Now()
 	applyLifecycleSummaryLocked(sessState, "Restored — resume to continue")
 
-	if err := sm.saveState(); err != nil {
-		return SessionState{}, err
-	}
-
 	return cloneSessionState(sessState), nil
 }
 
@@ -356,16 +381,22 @@ func (sm *SessionManager) restoreLocked(id string) (SessionState, error) {
 // descendant, bringing a subtree hidden by a `--children` delete back at once.
 // Non-deleted or expired descendants are skipped. Returns the restored IDs.
 func (sm *SessionManager) RestoreWithChildren(rootID string) ([]SessionState, error) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return nil, err
+	}
+	defer sm.endLifecycleOperation()
+
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
 
 	if _, ok := sm.state.Sessions[rootID]; !ok {
+		sm.mu.Unlock()
 		return nil, fmt.Errorf("session %q not found", rootID)
 	}
 
 	ids := sm.collectDescendants(rootID)
 
 	var restored []SessionState
+	originals := make(map[string]SessionState)
 
 	for _, id := range ids {
 		sess, ok := sm.state.Sessions[id]
@@ -373,8 +404,10 @@ func (sm *SessionManager) RestoreWithChildren(rootID string) ([]SessionState, er
 			continue
 		}
 
+		originals[id] = cloneSessionState(sess)
 		s, err := sm.restoreLocked(id)
 		if err != nil {
+			delete(originals, id)
 			sm.log.Warn("restore of descendant failed", "id", id, "err", err)
 			continue
 		}
@@ -383,10 +416,31 @@ func (sm *SessionManager) RestoreWithChildren(rootID string) ([]SessionState, er
 	}
 
 	if len(restored) == 0 {
+		sm.mu.Unlock()
 		return nil, fmt.Errorf("session %q is not deleted", rootID)
+	}
+	sm.mu.Unlock()
+	if err := sm.persistLatestUpgradeState(); err != nil {
+		sm.rollbackRestoredStates(originals)
+		return nil, err
 	}
 
 	return restored, nil
+}
+
+func (sm *SessionManager) rollbackRestoredStates(originals map[string]SessionState) {
+	sm.mu.Lock()
+	for id, original := range originals {
+		current := sm.state.Sessions[id]
+		if current == nil || current.DeletedAt != nil || current.ExpiresAt != nil || current.Status != StatusStopped {
+			continue
+		}
+		*current = original
+	}
+	sm.mu.Unlock()
+	if err := sm.persistLatestUpgradeState(); err != nil {
+		sm.log.Error("failed to persist restore rollback", "err", err)
+	}
 }
 
 // softDeletedDescendantCount returns how many transitive descendants of id are

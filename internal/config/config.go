@@ -4720,6 +4720,14 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("reading config: %w", err)
 	}
 
+	return LoadBytes(path, data)
+}
+
+// LoadBytes validates an exact configuration snapshot while preserving path-
+// relative semantics. Upgrade adoption uses it to avoid reopening a path that
+// may have changed after the old daemon's final pre-exec validation.
+func LoadBytes(path string, data []byte) (*Config, error) {
+
 	cfg := Default()
 
 	defaultAgents := cfg.Agents
