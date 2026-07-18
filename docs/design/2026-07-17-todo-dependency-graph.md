@@ -170,10 +170,10 @@ revision.
   parent/sub-item deletion set depends on it. Authors first clear or replace
   those edges. Retention likewise keeps done items that are still referenced.
 - **Dependency reclaimed after a session stops or a lease expires:** a claimed
-  dependency returns to stored `todo` as today. If that item itself has
-  unfinished dependencies it is exposed as blocked, not returned to the ready
-  pool. Its dependents were already waiting while it was in progress, so no
-  extra cascade occurs.
+  dependency returns to stored `todo` as today with ownership cleared and its
+  assignment preserved. If that item itself has unfinished dependencies it is
+  exposed as blocked, not returned to the ready pool. Its dependents were
+  already waiting while it was in progress, so no extra cascade occurs.
 - **Dependency edge changed:** adding an unfinished edge blocks an unclaimed
   item; removing or satisfying the final unfinished edge unblocks it. Started
   or terminal work is not rewound.

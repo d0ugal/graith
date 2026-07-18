@@ -1056,8 +1056,9 @@ func (s *TodoStore) Counts(scope string) (done, total int, err error) {
 }
 
 // ReopenOwnedBy reopens (status=todo, owner cleared) every in-progress item
-// owned by ownerID. Used when the owning session stops so its claims are not
-// stranded. Returns the number of items reopened.
+// owned by ownerID. Used when the owning session stops so it retains no active
+// claims. Assignment is deliberately preserved for session resume/retry and
+// must be changed explicitly for takeover. Returns the number of items reopened.
 func (s *TodoStore) ReopenOwnedBy(ownerID string) (int, error) {
 	if ownerID == "" {
 		return 0, nil
@@ -1083,7 +1084,8 @@ func (s *TodoStore) ReopenOwnedBy(ownerID string) (int, error) {
 }
 
 // ReopenStale reopens in-progress items whose updated_at is older than the
-// lease window (a claimant that went quiet). lease <= 0 disables the sweep.
+// lease window (a claimant that went quiet). It clears ownership but preserves
+// assignment. lease <= 0 disables the sweep.
 func (s *TodoStore) ReopenStale(lease time.Duration) (int, error) {
 	if lease <= 0 {
 		return 0, nil

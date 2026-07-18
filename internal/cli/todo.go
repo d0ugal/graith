@@ -184,19 +184,21 @@ func todoClaimRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if !r.Claimed {
-		if id != "" {
-			out.Printf("Item %s was already claimed.\n", id)
-		} else {
-			out.Printf("No unclaimed items in scope.\n")
-		}
-
-		return nil
-	}
-
-	out.Printf("Claimed %s: %s\n", r.Item.ID, r.Item.Title)
+	out.Printf("%s", todoClaimMessage(id, r))
 
 	return nil
+}
+
+func todoClaimMessage(id string, response protocol.TodoClaimResponse) string {
+	if response.Claimed {
+		return fmt.Sprintf("Claimed %s: %s\n", response.Item.ID, response.Item.Title)
+	}
+
+	if id != "" {
+		return fmt.Sprintf("Item %s is not eligible to claim.\n", id)
+	}
+
+	return "No eligible items in scope.\n"
 }
 
 var todoClaimCmd = &cobra.Command{

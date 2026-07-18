@@ -393,6 +393,30 @@ func TestTodoOpAssignedOwnershipTransitions(t *testing.T) {
 			t.Fatalf("human completion after claim: %v", err)
 		}
 	})
+
+	t.Run("former assignee outside scope", func(t *testing.T) {
+		item := addAssigned("inspect the far bothy")
+
+		sm.mu.Lock()
+		sm.state.Sessions["bairn"].ParentID = ""
+		sm.mu.Unlock()
+		t.Cleanup(func() {
+			sm.mu.Lock()
+			sm.state.Sessions["bairn"].ParentID = "ben"
+			sm.mu.Unlock()
+		})
+
+		_, err := sm.TodoTransitionOp(assignee, protocol.TodoTransitionMsg{ID: item.ID, Status: TodoStatusDone})
+		if err == nil {
+			t.Fatal("expected former assignee outside the scope to be denied")
+		}
+
+		assertErrContains(t, err, "only the owner")
+
+		if strings.Contains(err.Error(), "gr todo claim") {
+			t.Errorf("out-of-scope assignee received an unusable claim instruction: %v", err)
+		}
+	})
 }
 
 // TestTodoOpScenarioScope verifies membership gating for scenario-scoped todos
@@ -591,16 +615,19 @@ func TestTodoOpFillCounts(t *testing.T) {
 	}
 }
 
-// TestTodoOpReopenForSession verifies that reopenTodosForSession returns a
-// stopped session's claimed item to the pool.
+// TestTodoOpReopenForSession verifies that reopenTodosForSession clears a
+// stopped session's ownership while preserving its assignment reservation.
 func TestTodoOpReopenForSession(t *testing.T) {
 	sm := newTodoSM(t)
 
 	putTodoSession(sm, "ben", "", "")
+	putTodoSession(sm, "skelf", "ben", "")
 
 	ac := authContext{role: roleSession, sessionID: "ben", authenticated: true}
+	peer := authContext{role: roleSession, sessionID: "skelf", authenticated: true}
+	human := authContext{role: roleLocalHuman}
 
-	item, err := sm.TodoAddOp(ac, protocol.TodoAddMsg{Title: "in flight"})
+	item, err := sm.TodoAddOp(ac, protocol.TodoAddMsg{Title: "in flight", Assignee: "ben"})
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -616,8 +643,23 @@ func TestTodoOpReopenForSession(t *testing.T) {
 		t.Fatalf("get: %v", err)
 	}
 
-	if got.Status != TodoStatusTodo || got.Owner != "" {
-		t.Errorf("item not reopened: status=%q owner=%q", got.Status, got.Owner)
+	if got.Status != TodoStatusTodo || got.Owner != "" || got.Assignee != "ben" {
+		t.Errorf("item not reopened with its assignment: %+v", got)
+	}
+
+	if _, err := sm.TodoClaimOp(peer, protocol.TodoClaimMsg{ID: item.ID}); err == nil {
+		t.Fatal("sibling claimed work still assigned to the stopped session")
+	} else {
+		assertErrContains(t, err, "only that assignee or the scope's override authority")
+	}
+
+	if _, err := sm.TodoAssignOp(human, protocol.TodoAssignMsg{ID: item.ID, Assignee: "skelf"}); err != nil {
+		t.Fatalf("reassign abandoned work: %v", err)
+	}
+
+	claim, err := sm.TodoClaimOp(peer, protocol.TodoClaimMsg{ID: item.ID})
+	if err != nil || !claim.Claimed {
+		t.Fatalf("replacement claim after reassignment: claimed=%v err=%v", claim.Claimed, err)
 	}
 }
 

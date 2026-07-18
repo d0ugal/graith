@@ -70,8 +70,9 @@ func (sm *SessionManager) activeScenarioPolicyTodoScopes() []string {
 	return scopes
 }
 
-// reopenTodosForSession reopens todo items claimed by a session that has just
-// stopped, so its in-flight work is not stranded (issue #591). Best-effort.
+// reopenTodosForSession clears ownership held by a session that has just
+// stopped, so its in-flight work can be reclaimed according to its assignment
+// (issue #591). Best-effort.
 func (sm *SessionManager) reopenTodosForSession(id string) {
 	if sm.todos == nil || id == "" {
 		return
@@ -80,7 +81,7 @@ func (sm *SessionManager) reopenTodosForSession(id string) {
 	if n, err := sm.todos.ReopenOwnedBy(id); err != nil {
 		sm.log.Error("failed to reopen todos for stopped session", "id", id, "err", err)
 	} else if n > 0 {
-		sm.log.Info("reopened stranded todos on session stop", "id", id, "count", n)
+		sm.log.Info("cleared todo ownership on session stop", "id", id, "count", n)
 	}
 }
 
@@ -421,7 +422,7 @@ func (sm *SessionManager) TodoTransitionOp(ac authContext, m protocol.TodoTransi
 	acc := sm.accessForItem(ac, item)
 	if m.Status == TodoStatusDone && item.Status == TodoStatusTodo && item.Owner == "" {
 		switch {
-		case ac.sessionID != "" && item.Assignee == ac.sessionID:
+		case acc.inScope && ac.sessionID != "" && item.Assignee == ac.sessionID:
 			return protocol.TodoItemInfo{}, fmt.Errorf(
 				"todo %q is assigned to this session but is not claimed; run `gr todo claim %s` before `gr todo done %s`",
 				m.ID, m.ID, m.ID)
