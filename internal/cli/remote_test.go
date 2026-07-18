@@ -84,6 +84,7 @@ func TestRemotePairPromptNamesPairingsApprovalCommand(t *testing.T) {
 	origPort := remotePairPort
 	origProfile := remotePairProfile
 	origLabel := remotePairLabel
+
 	t.Cleanup(func() {
 		remotePairFn = origPairFn
 		remotePairPort = origPort
@@ -98,6 +99,7 @@ func TestRemotePairPromptNamesPairingsApprovalCommand(t *testing.T) {
 		if gotPaths.DataDir != dir || host != "ben.tailnet.ts.net" || port != 4823 || profile != "kirk" || label != "canny phone" {
 			t.Errorf("pair request args = paths=%+v host=%q port=%d profile=%q label=%q", gotPaths, host, port, profile, label)
 		}
+
 		if pubKey == "" {
 			t.Error("pair request received an empty device public key")
 		}
@@ -112,10 +114,12 @@ func TestRemotePairPromptNamesPairingsApprovalCommand(t *testing.T) {
 	}
 
 	got := buf.String()
+
 	wantPrompt := "approve on the remote host: gr remote pairings approve <request-id>"
 	if !strings.Contains(got, wantPrompt) {
 		t.Errorf("output = %q, want prompt %q", got, wantPrompt)
 	}
+
 	if strings.Contains(got, "gr pair approve") {
 		t.Errorf("output retains removed approval command: %q", got)
 	}
