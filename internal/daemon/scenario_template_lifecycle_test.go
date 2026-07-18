@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -108,6 +110,18 @@ func TestStartScenarioTemplatesRenderSharedInitiatorReferencesResultsAndRestart(
 		t.Fatalf("manifest = %+v", manifest)
 	}
 
+	stopped, err := sm.StopScenario(wantScenario)
+	if err != nil || len(stopped) != 1 {
+		t.Fatalf("StopScenario = %v, %v", stopped, err)
+	}
+
+	if source, ok := sm.Get(initiatorID); !ok || source.Status != StatusRunning {
+		t.Fatalf("shared initiator changed by stop: %+v, ok=%t", source, ok)
+	}
+
+	reviewerID := scenario.SessionIDs[1]
+	waitForScenarioSessionStopped(t, sm, reviewerID)
+
 	restarted := NewSessionManager(sm.Config(), sm.paths, sm.log)
 	if err := restarted.LoadState(); err != nil {
 		t.Fatalf("restart load: %v", err)
@@ -122,42 +136,37 @@ func TestStartScenarioTemplatesRenderSharedInitiatorReferencesResultsAndRestart(
 		t.Fatalf("restart record = %+v", restartedRecord)
 	}
 
-	stopped, err := sm.StopScenario(wantScenario)
-	if err != nil || len(stopped) != 1 {
-		t.Fatalf("StopScenario = %v, %v", stopped, err)
+	if source, ok := restarted.Get(initiatorID); !ok || source.Status != StatusRunning {
+		t.Fatalf("shared initiator changed across restart: %+v, ok=%t", source, ok)
 	}
 
-	if source, ok := sm.Get(initiatorID); !ok || source.Status != StatusRunning {
-		t.Fatalf("shared initiator changed by stop: %+v, ok=%t", source, ok)
+	resumed, err := restarted.ResumeScenario(wantScenario, 24, 80)
+	if err != nil || len(resumed) != 1 || resumed[0] != reviewerID {
+		t.Fatalf("restart ResumeScenario = %v, %v", resumed, err)
 	}
 
-	reviewerID := scenario.SessionIDs[1]
-	deadline := time.Now().Add(2 * time.Second)
-
-	for {
-		reviewer, ok := sm.Get(reviewerID)
-		if ok && (reviewer.Status == StatusStopped || reviewer.Status == StatusErrored) {
-			break
-		}
-
-		if time.Now().After(deadline) {
-			t.Fatalf("reviewer did not settle after stop: %+v, ok=%t", reviewer, ok)
-		}
-
-		time.Sleep(10 * time.Millisecond)
+	afterResume, err := restarted.ScenarioStatus(wantScenario)
+	if err != nil || !reflect.DeepEqual(afterResume.Render, restartedRecord.Render) {
+		t.Fatalf("render metadata changed on restart resume: before=%+v after=%+v err=%v", restartedRecord.Render, afterResume.Render, err)
 	}
 
-	resumed, err := sm.ResumeScenario(wantScenario, 24, 80)
-	if err != nil || len(resumed) != 1 {
-		t.Fatalf("ResumeScenario = %v, %v", resumed, err)
+	stopped, err = restarted.StopScenario(wantScenario)
+	if err != nil || len(stopped) != 1 || stopped[0] != reviewerID {
+		t.Fatalf("restart StopScenario = %v, %v", stopped, err)
 	}
 
-	deleted, err := sm.DeleteScenario(wantScenario)
+	waitForScenarioSessionStopped(t, restarted, reviewerID)
+
+	if source, ok := restarted.Get(initiatorID); !ok || source.Status != StatusRunning {
+		t.Fatalf("shared initiator changed by restarted lifecycle: %+v, ok=%t", source, ok)
+	}
+
+	deleted, err := restarted.DeleteScenario(wantScenario)
 	if err != nil || len(deleted) != 1 {
-		t.Fatalf("DeleteScenario = %v, %v", deleted, err)
+		t.Fatalf("restart DeleteScenario = %v, %v", deleted, err)
 	}
 
-	if _, err := sm.ScenarioStatus(wantScenario); err == nil {
+	if _, err := restarted.ScenarioStatus(wantScenario); err == nil {
 		t.Fatal("rendered scenario remained after delete")
 	}
 }
@@ -350,5 +359,188 @@ func TestScenarioAddRejectsNameTemplatesAfterInstantiation(t *testing.T) {
 	}, 24, 80)
 	if err == nil || !strings.Contains(err.Error(), "session name") {
 		t.Fatalf("scenario add template error = %v", err)
+	}
+}
+
+func TestScenarioAddPersistsRenderedMetadataAndRollsBackOnSaveFailure(t *testing.T) {
+	t.Run("success survives manifests and restart", func(t *testing.T) {
+		sm, scenario, repo, firstName := startTemplatedScenarioForAdd(t)
+
+		const addedName = "canny-added"
+
+		added, err := sm.AddToScenario(scenario.Name, protocol.ScenarioSessionInput{
+			Name: addedName, Repo: repo, Agent: "sleeper", Task: "inspect the new bothy",
+			DependsOn: []string{firstName},
+		}, 24, 80)
+		if err != nil {
+			t.Fatalf("AddToScenario: %v", err)
+		}
+
+		record, err := sm.ScenarioStatus(scenario.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		assertAddedScenarioRenderMetadata(t, record.Render, addedName, firstName)
+
+		for _, member := range record.Sessions {
+			key := "scenarios/" + scenario.ID + "/manifest-" + member.Name + ".json"
+
+			body, getErr := store.Get(store.SharedStorePath(sm.paths.DataDir), key)
+			if getErr != nil {
+				t.Fatalf("read republished manifest %q: %v", key, getErr)
+			}
+
+			var manifest scenarioManifest
+			if unmarshalErr := json.Unmarshal([]byte(body), &manifest); unmarshalErr != nil {
+				t.Fatalf("decode republished manifest %q: %v", key, unmarshalErr)
+			}
+
+			if manifest.You.SessionID == added.ID && manifest.You.Name != addedName {
+				t.Fatalf("added member manifest identity = %+v", manifest.You)
+			}
+
+			if !reflect.DeepEqual(manifest.Render, record.Render) {
+				t.Fatalf("manifest %q render metadata = %+v, want %+v", key, manifest.Render, record.Render)
+			}
+		}
+
+		restarted := NewSessionManager(sm.Config(), sm.paths, sm.log)
+		if err := restarted.LoadState(); err != nil {
+			t.Fatalf("restart load: %v", err)
+		}
+
+		restartedRecord, err := restarted.ScenarioStatus(scenario.Name)
+		if err != nil {
+			t.Fatalf("restart status: %v", err)
+		}
+
+		if !reflect.DeepEqual(restartedRecord.Render, record.Render) {
+			t.Fatalf("restart render metadata = %+v, want %+v", restartedRecord.Render, record.Render)
+		}
+	})
+
+	t.Run("failed save restores exact metadata", func(t *testing.T) {
+		sm, scenario, repo, firstName := startTemplatedScenarioForAdd(t)
+
+		before, err := sm.ScenarioStatus(scenario.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		manifestKey := "scenarios/" + scenario.ID + "/manifest-" + firstName + ".json"
+
+		beforeManifest, err := store.Get(store.SharedStorePath(sm.paths.DataDir), manifestKey)
+		if err != nil {
+			t.Fatalf("read pre-add manifest: %v", err)
+		}
+
+		sm.saveStateFault = func() error {
+			if current := sm.state.Scenarios[scenario.ID]; current != nil && len(current.Sessions) == 2 {
+				return errors.New("dreich disk")
+			}
+
+			return nil
+		}
+
+		_, err = sm.AddToScenario(scenario.Name, protocol.ScenarioSessionInput{
+			Name: "dreich-failed", Repo: repo, Agent: "sleeper", Task: "inspect the failed bothy",
+			DependsOn: []string{firstName},
+		}, 24, 80)
+		if err == nil || !strings.Contains(err.Error(), "persist scenario member addition") {
+			t.Fatalf("AddToScenario error = %v, want save failure", err)
+		}
+
+		after, statusErr := sm.ScenarioStatus(scenario.Name)
+		if statusErr != nil {
+			t.Fatal(statusErr)
+		}
+
+		if !reflect.DeepEqual(after.Render, before.Render) || !reflect.DeepEqual(after.Sessions, before.Sessions) || !reflect.DeepEqual(after.SessionIDs, before.SessionIDs) {
+			t.Fatalf("failed add changed scenario: before=%+v after=%+v", before, after)
+		}
+
+		sm.mu.RLock()
+
+		for _, session := range sm.state.Sessions {
+			if session.Name == "dreich-failed" {
+				sm.mu.RUnlock()
+				t.Fatalf("failed added session survived rollback: %+v", session)
+			}
+		}
+
+		sm.mu.RUnlock()
+
+		afterManifest, getErr := store.Get(store.SharedStorePath(sm.paths.DataDir), manifestKey)
+		if getErr != nil {
+			t.Fatalf("read post-failure manifest: %v", getErr)
+		}
+
+		if afterManifest != beforeManifest || strings.Contains(afterManifest, "dreich-failed") {
+			t.Fatal("failed add changed persisted manifest metadata")
+		}
+
+		items, listErr := sm.todos.ListAll(TodoFilter{})
+		if listErr != nil {
+			t.Fatal(listErr)
+		}
+
+		if len(items) != 1 || items[0].Assignee != scenario.SessionIDs[0] {
+			t.Fatalf("failed add changed scenario todos: %+v", items)
+		}
+	})
+}
+
+func startTemplatedScenarioForAdd(t *testing.T) (*SessionManager, *ScenarioState, string, string) {
+	t.Helper()
+
+	sm, orchestratorID := newScenarioOrchestrator(t)
+	sm.todos = newTestTodoStore(t)
+	repo := initScenarioGitRepo(t)
+
+	scenario, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: orchestratorID,
+		Name:            "strath-add-{short_id}",
+		Policy:          &protocol.ScenarioPolicyInput{},
+		Sessions: []protocol.ScenarioSessionInput{{
+			Name: "{scenario}-first", Repo: repo, Agent: "sleeper", Task: "inspect the old croft",
+		}},
+	}, 24, 80)
+	if err != nil {
+		t.Fatalf("StartScenario: %v", err)
+	}
+
+	return sm, scenario, repo, scenario.Sessions[0].Name
+}
+
+func assertAddedScenarioRenderMetadata(t *testing.T, render *protocol.ScenarioRenderInfo, addedName, dependencyName string) {
+	t.Helper()
+
+	if render == nil || len(render.Members) != 2 || render.Members[1].AuthoredName != addedName || render.Members[1].RenderedName != addedName {
+		t.Fatalf("added member render metadata = %+v", render)
+	}
+
+	wantPath := "sessions[1].depends_on[0]"
+	if len(render.References) != 1 || render.References[0].Path != wantPath || render.References[0].Authored != dependencyName || render.References[0].Rendered != dependencyName {
+		t.Fatalf("added dependency render metadata = %+v, want path %q and target %q", render.References, wantPath, dependencyName)
+	}
+}
+
+func waitForScenarioSessionStopped(t *testing.T, sm *SessionManager, sessionID string) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+
+	for {
+		session, ok := sm.Get(sessionID)
+		if ok && (session.Status == StatusStopped || session.Status == StatusErrored) {
+			return
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf("session %q did not settle after stop: %+v, ok=%t", sessionID, session, ok)
+		}
+
+		time.Sleep(10 * time.Millisecond)
 	}
 }
