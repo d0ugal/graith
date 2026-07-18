@@ -61,6 +61,10 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		return nil, errors.New("scenario must define at least one session")
 	}
 
+	if err := scenariofile.ValidateSessionContracts(msg.Sessions, sm.scenarioTodoTitleLimit()); err != nil {
+		return nil, err
+	}
+
 	normalizedPolicy, err := normalizeProtocolScenarioPolicy(msg, sm.scenarioTodoTitleLimit())
 	if err != nil {
 		return nil, err
@@ -359,7 +363,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		}
 
 		scenarioSessions[i] = ScenarioSession{
-			Name: s.Name, Mirror: s.Mirror, Role: s.Role, Task: s.Task,
+			Name: s.Name, Mirror: s.Mirror, Role: s.Role, Prompt: s.Prompt, Task: s.Task,
 			Repo: repoName, Agent: agentName, Model: s.Model, Shared: s.Shared,
 		}
 		if normalizedPolicy != nil {
@@ -529,7 +533,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 				sess, createErr := sm.Create(CreateOpts{
 					ID: sessionIDs[idx], Name: s.Name, AgentName: agentName,
 					RepoPath: repoRoots[idx], Mirror: mirrorSourceID,
-					BaseBranch: s.Base, Prompt: s.Task, Model: s.Model,
+					BaseBranch: s.Base, Prompt: s.StartupPrompt(), Model: s.Model,
 					ParentID: msg.CallerSessionID, AgentHooks: s.AgentHooks,
 					Includes: s.Includes, Starred: s.Star,
 					ForcePTY: normalizedPolicy != nil && normalizedPolicy.Members[idx].Retries > 0,
@@ -737,6 +741,7 @@ type scenarioManifestSelf struct {
 	SessionID string                   `json:"session_id"`
 	Mirror    string                   `json:"mirror,omitempty"`
 	Role      string                   `json:"role"`
+	Prompt    string                   `json:"prompt,omitempty"`
 	Task      string                   `json:"task"`
 	Results   []scenarioManifestResult `json:"results,omitempty"`
 }
@@ -797,6 +802,7 @@ func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.Scenario
 			SessionID: sessionIDs[selfIndex],
 			Mirror:    self.Mirror,
 			Role:      self.Role,
+			Prompt:    self.StartupPrompt(),
 			Task:      self.Task,
 			Results:   sm.manifestScenarioResults(scenarioID, msg.Name, sessionIDs[selfIndex], self),
 		},
@@ -1281,6 +1287,12 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		return nil, errors.New("repo is required")
 	}
 
+	if err := scenariofile.ValidateSessionContracts(
+		[]protocol.ScenarioSessionInput{input}, sm.scenarioTodoTitleLimit(),
+	); err != nil {
+		return nil, err
+	}
+
 	if err := validateScenarioResultDeclarations(name, []protocol.ScenarioSessionInput{input}); err != nil {
 		return nil, err
 	}
@@ -1494,7 +1506,7 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		AgentName:  agentName,
 		RepoPath:   repoRoot,
 		BaseBranch: input.Base,
-		Prompt:     input.Task,
+		Prompt:     input.StartupPrompt(),
 		Model:      input.Model,
 		ParentID:   orchestratorID,
 		AgentHooks: agentHooks,
@@ -1596,7 +1608,7 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 	scenario.SessionIDs = append(scenario.SessionIDs, sess.ID)
 
 	scenario.Sessions = append(scenario.Sessions, ScenarioSession{
-		Name: input.Name, Role: input.Role, Task: input.Task,
+		Name: input.Name, Role: input.Role, Prompt: input.Prompt, Task: input.Task,
 		Repo: filepath.Base(repoRoot), Agent: agentName, Model: input.Model,
 		Results: results, Policy: memberPolicy,
 	})
@@ -1783,7 +1795,7 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 
 		sessions[i] = protocol.ScenarioSessionInput{
 			Name: ss.Name, Repo: ss.Repo, Mirror: ss.Mirror, Role: ss.Role,
-			Task: ss.Task, Agent: ss.Agent, Model: ss.Model, Results: results,
+			Prompt: ss.Prompt, Task: ss.Task, Agent: ss.Agent, Model: ss.Model, Results: results,
 		}
 	}
 
@@ -1870,7 +1882,7 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 
 	for i, ss := range sc.Sessions {
 		sessions[i] = protocol.ScenarioSessionInfo{
-			Name: ss.Name, Mirror: ss.Mirror, Role: ss.Role, Task: ss.Task,
+			Name: ss.Name, Mirror: ss.Mirror, Role: ss.Role, Prompt: ss.startupPrompt(), Task: ss.Task,
 			Repo: ss.Repo, Agent: ss.Agent, Model: ss.Model, Shared: ss.Shared,
 		}
 

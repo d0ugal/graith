@@ -16,7 +16,12 @@ const (
 	// the same limit so every accepted result remains consumable via store_get.
 	MaxStoreDocumentBytes      = MaxPayload - 64*1024
 	MaxScenarioResultBodyBytes = MaxStoreDocumentBytes
-	headerSize                 = 5
+	// MaxScenarioPromptBytes treats scenario startup instructions as a body,
+	// rather than coupling them to the much smaller todo-title limit. Keeping the
+	// per-member cap below common per-argument process limits and the frame ceiling
+	// leaves room for both agent launch and the rest of a multi-member start.
+	MaxScenarioPromptBytes = 64 * 1024
+	headerSize             = 5
 )
 
 type Frame struct {

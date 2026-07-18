@@ -39,6 +39,7 @@ type Session struct {
 	Model      string   `toml:"model"`
 	Base       string   `toml:"base"`
 	Role       string   `toml:"role"`
+	Prompt     string   `toml:"prompt"`
 	Task       string   `toml:"task"`
 	DependsOn  []string `toml:"depends_on"`
 	AgentHooks *bool    `toml:"agent_hooks"`
@@ -195,7 +196,13 @@ func Parse(data []byte) (*File, error) {
 
 	depInputs := make([]protocol.ScenarioSessionInput, len(sf.Sessions))
 	for i, s := range sf.Sessions {
-		depInputs[i] = protocol.ScenarioSessionInput{Name: s.Name, Task: s.Task, DependsOn: s.DependsOn}
+		depInputs[i] = protocol.ScenarioSessionInput{
+			Name: s.Name, Prompt: s.Prompt, Task: s.Task, DependsOn: s.DependsOn, Shared: s.Shared,
+		}
+	}
+
+	if err := ValidateSessionContracts(depInputs, config.TodoMaxTitleCeiling); err != nil {
+		return nil, err
 	}
 
 	if err := ValidateSessionDependencies(depInputs); err != nil {
@@ -446,6 +453,7 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 			Model:      s.Model,
 			Base:       s.Base,
 			Role:       s.Role,
+			Prompt:     s.Prompt,
 			Task:       s.Task,
 			DependsOn:  append([]string(nil), s.DependsOn...),
 			AgentHooks: s.AgentHooks == nil || *s.AgentHooks,
@@ -457,11 +465,42 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 		})
 	}
 
+	if err := ValidateSessionContracts(inputs, config.TodoMaxTitleCeiling); err != nil {
+		return nil, err
+	}
+
 	if err := ValidateSessionDependencies(inputs); err != nil {
 		return nil, err
 	}
 
 	return inputs, nil
+}
+
+// ValidateSessionContracts checks the independent launch and tracked-work
+// fields shared by every scenario entry point. maxTitle is the effective todo
+// title limit; pass zero to skip only that configurable check. Prompt has a
+// fixed body-sized wire limit and is invalid for an already-running shared
+// member, where it could never be delivered at startup.
+func ValidateSessionContracts(sessions []protocol.ScenarioSessionInput, maxTitle int) error {
+	for _, session := range sessions {
+		task := strings.TrimSpace(session.Task)
+		if task != "" && maxTitle > 0 && len(task) > maxTitle {
+			return fmt.Errorf("session %q: task exceeds todo title limit %d bytes", session.Name, maxTitle)
+		}
+
+		if session.Shared && session.Prompt != "" {
+			return fmt.Errorf("session %q: prompt is not valid for a shared session because it is already running", session.Name)
+		}
+
+		if prompt := session.StartupPrompt(); len(prompt) > protocol.MaxScenarioPromptBytes {
+			return fmt.Errorf(
+				"session %q: prompt is too large: %d bytes (max %d)",
+				session.Name, len(prompt), protocol.MaxScenarioPromptBytes,
+			)
+		}
+	}
+
+	return nil
 }
 
 // PolicyInput maps a parsed scenario policy into the wire shape.

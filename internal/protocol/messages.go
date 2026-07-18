@@ -965,6 +965,10 @@ type ScenarioSessionInput struct {
 	Model  string `json:"model,omitempty"`
 	Base   string `json:"base,omitempty"`
 	Role   string `json:"role,omitempty"`
+	// Prompt is the member's startup instructions. When empty, Task remains the
+	// launch prompt for compatibility; unlike Task, Prompt never seeds a todo or
+	// forms a completion contract.
+	Prompt string `json:"prompt,omitempty"`
 	Task   string `json:"task,omitempty"`
 	// DependsOn names scenario members whose seeded assigned todo items must be
 	// done before this member's seeded task becomes claimable (issue #641).
@@ -980,6 +984,16 @@ type ScenarioSessionInput struct {
 	// Policy opts this member into required/optional membership, an immutable
 	// attempt timeout, and bounded automatic retries.
 	Policy *ScenarioMemberPolicyInput `json:"policy,omitempty"`
+}
+
+// StartupPrompt returns the effective instructions sent when this member is
+// launched. Task-only scenario definitions retain their historical behaviour.
+func (s ScenarioSessionInput) StartupPrompt() string {
+	if s.Prompt != "" {
+		return s.Prompt
+	}
+
+	return s.Task
 }
 
 // ScenarioResultSpec declares one named result a scenario member may publish.
@@ -1104,6 +1118,7 @@ type ScenarioSessionInfo struct {
 	SessionID string `json:"session_id"`
 	Mirror    string `json:"mirror,omitempty"`
 	Role      string `json:"role,omitempty"`
+	Prompt    string `json:"prompt,omitempty"`
 	Task      string `json:"task,omitempty"`
 	// TodoDone / TodoTotal report the member's progress derived from the todo
 	// items assigned to it (issue #591). They replace the former one-bit

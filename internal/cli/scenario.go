@@ -130,6 +130,7 @@ func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, erro
 			Model:      s.Model,
 			Base:       s.Base,
 			Role:       s.Role,
+			Prompt:     s.Prompt,
 			Task:       s.Task,
 			DependsOn:  append([]string(nil), s.DependsOn...),
 			AgentHooks: s.AgentHooks == nil || *s.AgentHooks,
@@ -146,6 +147,10 @@ func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, erro
 	}
 
 	if _, err := scenariofile.ValidateMirrorMembers(mirrorMembers); err != nil {
+		return nil, err
+	}
+
+	if err := scenariofile.ValidateSessionContracts(sessions, config.TodoMaxTitleCeiling); err != nil {
 		return nil, err
 	}
 
@@ -633,6 +638,7 @@ var scenarioAddCmd = &cobra.Command{
 		agent, _ := cmd.Flags().GetString("agent")
 		model, _ := cmd.Flags().GetString("model")
 		role, _ := cmd.Flags().GetString("role")
+		prompt, _ := cmd.Flags().GetString("prompt")
 		task, _ := cmd.Flags().GetString("task")
 		dependsOn, _ := cmd.Flags().GetStringArray("depends-on")
 		base, _ := cmd.Flags().GetString("base")
@@ -675,6 +681,7 @@ var scenarioAddCmd = &cobra.Command{
 				Model:      model,
 				Base:       base,
 				Role:       role,
+				Prompt:     prompt,
 				Task:       task,
 				DependsOn:  dependsOn,
 				AgentHooks: true,
@@ -871,7 +878,8 @@ func registerScenarioCmd() {
 	scenarioAddCmd.Flags().String("agent", "", "Agent type")
 	scenarioAddCmd.Flags().String("model", "", "Model override")
 	scenarioAddCmd.Flags().String("role", "", "Session role")
-	scenarioAddCmd.Flags().String("task", "", "Task/prompt")
+	scenarioAddCmd.Flags().String("prompt", "", "Startup prompt (defaults to --task)")
+	scenarioAddCmd.Flags().String("task", "", "Tracked task used to seed an assigned todo")
 	scenarioAddCmd.Flags().StringArray("depends-on", nil, "Member whose seeded task must finish first (repeatable)")
 	scenarioAddCmd.Flags().String("base", "", "Base branch")
 	scenarioResultPutCmd.Flags().StringVar(&scenarioResultFile, "file", "", "Read result body from file")

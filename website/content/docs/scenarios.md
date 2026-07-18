@@ -7,7 +7,7 @@ toc: true
 draft: false
 ---
 
-Scenarios are declarative multi-session orchestration. A TOML file defines a group of related sessions — each with its own repo, agent, role, and task — and `gr scenario start` creates them atomically as a coordinated fleet.
+Scenarios are declarative multi-session orchestration. A TOML file defines a group of related sessions — each with its own repo, agent, role, startup prompt, and optional tracked task — and `gr scenario start` creates them atomically as a coordinated fleet.
 
 Scenarios are operated through the `gr scenario` commands and orchestrator
 sessions. The native iOS and macOS apps do not provide scenario grouping,
@@ -139,7 +139,8 @@ legacy indefinite/manual behaviour.
 | `model` | no | agent default | Model override (fills `{model}` in agent args) |
 | `base` | no | repo default | Base branch for the worktree |
 | `role` | no | — | Human-readable role description |
-| `task` | no | — | Task/prompt sent to the agent on start; a runtime-policy member needs this or a required result contract |
+| `prompt` | no | `task` | Startup instructions sent to a newly created agent; does not seed a todo or form a completion contract (maximum 64 KiB) |
+| `task` | no | — | Tracked work title: seeds an assigned todo and participates in completion; also supplies the startup prompt when `prompt` is omitted (maximum 500 bytes, or a lower configured todo-title limit) |
 | `depends_on` | no | — | Member names whose seeded tasks must all finish before this seeded task is claimable |
 | `agent_hooks` | no | `true` | Enable agent hooks (check-inbox, etc.) |
 | `shared` | no | `false` | Reuse an existing running session by name |
@@ -184,6 +185,14 @@ actions because the scenario does not own their process.
 
 Unknown fields are rejected — typos produce a parse error rather than being silently ignored.
 
+Use `prompt` when the instructions are richer than the tracked work title, or
+when a required declared result is the member's only completion contract. A
+runtime-policy member still needs a non-empty `task` or a required result;
+`prompt` alone is only launch input and never makes a member tracked or
+complete. If both fields are present, the agent launches with `prompt` while
+only `task` becomes an assigned todo. Task-only files retain their existing
+launch and completion behaviour.
+
 `depends_on` references names in the same file. Both the dependent and every
 referenced member must have a non-empty `task`; unknown names, duplicates,
 self-dependencies, and cycles are rejected before sessions start. The daemon
@@ -194,6 +203,8 @@ accepts repeatable `--depends-on <existing-member>` flags for the same behavior.
 session instead of creating a new one. The named session must already be
 running. Shared sessions participate in the scenario (receive manifests, appear
 in status) but are never stopped or deleted by scenario lifecycle operations.
+Because a shared agent is already running, a shared entry cannot declare a
+startup `prompt`; it may still declare tracked `task` work.
 
 **Mirrored sessions:** Set `mirror` to another `[[sessions]]` member's `name` to
 create a normal scenario-owned worker over that member's exact worktree. The
@@ -208,7 +219,7 @@ path. A mirrored member must not also set `shared`, `repo`, `base`, or
 from its target. The target may itself be mirrored, but references must be
 acyclic. Missing targets, duplicate/ambiguous names, cycles, sources without a
 worktree, and unavailable sandbox enforcement fail preflight before any member
-starts. Agent, model, role, task, hooks, and `star` still configure the mirrored
+starts. Agent, model, role, prompt, task, hooks, and `star` still configure the mirrored
 worker itself.
 
 This generic multi-reader scenario attaches two independent readers to an
@@ -483,6 +494,9 @@ overdue members; stopping does not grant a fresh timeout window.
 Add a member from the orchestrator. Runtime policy flags are `--optional`,
 `--timeout <duration>`, and `--retries <0-10>`. Adding to a terminal policy
 scenario or a paused policy scenario is rejected; resume it first.
+Use `--prompt` for startup instructions and `--task` for the independently
+tracked todo. With no `--prompt`, `--task` remains the startup prompt for
+compatibility.
 
 Adding any runtime-policy flag to a legacy scenario opts the whole scenario into
 policy completion semantics. Existing members become required with no timeout;
@@ -503,7 +517,7 @@ gr scenario delete tracing-pipeline
 ## How it works
 
 1. The CLI parses the TOML file (with strict field validation) and sends a `scenario_start` control message to the daemon
-2. The daemon validates all inputs: scenario name uniqueness, session name uniqueness, repo paths, agent configs
+2. The daemon validates all inputs, including prompt bodies, todo-title limits, result contracts, dependencies, scenario/session names, repo paths, and agent configs, before any member starts
 3. **Reserve phase:** placeholders are created atomically under the state lock
 4. **Start phase:** independent members are created concurrently using the normal `Create` flow; mirror dependency waves follow after their sources are running, using the same read-only sandbox primitive as `gr new --mirror`
 5. **Manifest phase:** after all sessions start, the daemon publishes a manifest to each session's inbox and persists it to the shared store
@@ -534,6 +548,7 @@ Each session receives a JSON manifest in its inbox describing the full scenario 
     "name": "backend",
     "session_id": "def456",
     "role": "Backend engineer",
+    "prompt": "Implement the backend plan and publish the declared notes.",
     "task": "Add tracing ingest endpoint",
     "results": [
       {
@@ -561,7 +576,7 @@ Each session receives a JSON manifest in its inbox describing the full scenario 
 
 The manifest gives each agent awareness of:
 
-- **`you`** — its own identity, role, task, and declared result destinations
+- **`you`** — its own identity, role, effective startup prompt, tracked task, and declared result destinations
 - **`siblings`** — the other sessions in the scenario, with their roles, repos, and result destinations
 - **`orchestrator`** — the parent session that started the scenario
 
@@ -601,6 +616,10 @@ JSON uses `blocked_by` for dependencies. Completion actions and lifecycle
 cleanup use this same gate, so neither starts while a required result is
 pending, invalid, or failed.
 
+A `prompt` is never seeded into the todo list. This makes prompt-only members
+useful for result contracts: the agent receives full instructions, and publishing
+its required result is sufficient for completion without a redundant todo.
+
 The original member-to-seed identity is durable. Reassigning a seeded item
 changes current responsibility and progress accounting, but later
 `gr scenario add --depends-on <member>` commands still resolve the named
@@ -635,7 +654,7 @@ using member-specific destinations, then let a later synthesizer consume them:
 [[sessions]]
 name = "research-api"
 repo = "~/Code/graith"
-task = "Research the API surface and publish your findings."
+prompt = "Research the API surface in detail and publish your findings."
 [[sessions.results]]
 name = "findings"
 format = "markdown"
@@ -645,7 +664,7 @@ required = true
 [[sessions]]
 name = "research-data"
 repo = "~/Code/graith"
-task = "Collect structured compatibility facts and publish them."
+prompt = "Collect structured compatibility facts and publish them."
 [[sessions.results]]
 name = "facts"
 format = "json"
@@ -655,7 +674,7 @@ required = true
 [[sessions]]
 name = "synthesizer"
 repo = "~/Code/graith"
-task = "Wait for required sibling results, read their manifest destinations, and synthesize the recommendation."
+prompt = "Wait for required sibling results, read their manifest destinations, and synthesize the recommendation."
 [[sessions.results]]
 name = "recommendation"
 format = "markdown"
