@@ -117,6 +117,7 @@ func TestRunUpdateNameResolution(t *testing.T) {
 
 	t.Run("duplicate name is explicitly ambiguous", func(t *testing.T) {
 		captureUpdateOutput(t, false)
+
 		c := &scriptedConn{responses: []scriptedResp{
 			okResp(payloadEnv("session_list", duplicateNames)),
 			okResp(payloadEnv("session_list", protocol.SessionListMsg{})),
@@ -134,6 +135,7 @@ func TestRunUpdateNameResolution(t *testing.T) {
 
 	t.Run("exact ID works with duplicate names", func(t *testing.T) {
 		captureUpdateOutput(t, false)
+
 		c := &scriptedConn{responses: []scriptedResp{
 			okResp(payloadEnv("session_list", duplicateNames)),
 			okResp(typeEnv("updated")),
@@ -238,6 +240,7 @@ func TestRunUpdateDaemonError(t *testing.T) {
 
 func TestRunUpdateInvalidNameDoesNotUseConnection(t *testing.T) {
 	captureUpdateOutput(t, false)
+
 	c := &scriptedConn{responses: []scriptedResp{errResp(io.ErrUnexpectedEOF)}}
 
 	if err := runUpdate(c, "braw", updateOptions{name: strptr("bad name/slash")}); err == nil {
