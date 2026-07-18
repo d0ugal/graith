@@ -2,6 +2,8 @@
 
 package pty
 
+import "time"
+
 func ghosttyTerminalBackendExpectations() terminalBackendExpectations {
 	expectations := charmTerminalBackendExpectations()
 	expectations.contains1430Panic = false
@@ -37,6 +39,22 @@ func nativeTerminalBackendFactories() []terminalBackendFactory {
 		{
 			name:         "libghostty-helper",
 			expectations: ghosttyTerminalBackendExpectations(),
+			helperPID: func(term Terminal) (int, bool) {
+				helper, ok := term.(*ghosttyProcessTerminal)
+				if !ok || helper.cmd == nil || helper.cmd.Process == nil {
+					return 0, false
+				}
+
+				return helper.cmd.Process.Pid, true
+			},
+			helperCPUTime: func(term Terminal) (time.Duration, bool) {
+				helper, ok := term.(*ghosttyProcessTerminal)
+				if !ok || helper.cmd == nil || helper.cmd.ProcessState == nil {
+					return 0, false
+				}
+
+				return helper.cmd.ProcessState.UserTime() + helper.cmd.ProcessState.SystemTime(), true
+			},
 			new: func(cols, rows int) (Terminal, error) {
 				return newTerminal(cols, rows)
 			},
