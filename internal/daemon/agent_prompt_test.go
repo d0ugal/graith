@@ -75,6 +75,12 @@ func TestInjectPrompt_Claude(t *testing.T) {
 	if claim < 0 || done < 0 || claim > done {
 		t.Error("prompt should instruct scenario members to claim their assigned todo before marking it done")
 	}
+
+	for _, want := range []string{"non-empty task", "Once any dependencies are complete", "scenario-name-from-manifest", "shared members keep their original environment"} {
+		if !strings.Contains(args[1], want) {
+			t.Errorf("prompt should explain scenario todo applicability; missing %q", want)
+		}
+	}
 }
 
 func TestInjectPrompt_Cursor(t *testing.T) {

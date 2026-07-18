@@ -49,6 +49,34 @@ func TestWriteTodoListShowsOwnerAndAssignee(t *testing.T) {
 	}
 }
 
+func TestTodoClaimMessageUsesEligibilityLanguage(t *testing.T) {
+	tests := []struct {
+		name     string
+		id       string
+		response protocol.TodoClaimResponse
+		want     string
+	}{
+		{name: "next has no eligible item", want: "No eligible items in scope.\n"},
+		{name: "specific item unavailable", id: "td-braw", want: "Item td-braw is not eligible to claim.\n"},
+		{
+			name: "claimed",
+			response: protocol.TodoClaimResponse{
+				Claimed: true,
+				Item:    protocol.TodoItemInfo{ID: "td-canny", Title: "mend the dyke"},
+			},
+			want: "Claimed td-canny: mend the dyke\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := todoClaimMessage(tt.id, tt.response); got != tt.want {
+				t.Fatalf("todoClaimMessage() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTodoDependenciesUpdateClearsWithJSONEmptyArray(t *testing.T) {
 	msg := todoDependenciesUpdate([]string{"td-braw"})
 

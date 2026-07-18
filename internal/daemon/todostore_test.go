@@ -593,7 +593,11 @@ func TestTodoCounts(t *testing.T) {
 func TestTodoReopenOwnedBy(t *testing.T) {
 	s := newTestTodoStore(t)
 
-	a := mustAdd(t, s, "session:ben", "a")
+	a, err := s.Add(TodoAdd{Scope: "session:ben", Title: "a", Assignee: "gone", CreatedBy: "ben"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	b := mustAdd(t, s, "session:ben", "b")
 
 	if _, _, err := s.Claim(a.ID, "gone", false); err != nil {
@@ -614,8 +618,16 @@ func TestTodoReopenOwnedBy(t *testing.T) {
 	}
 
 	ga, _ := s.Get(a.ID)
-	if ga.Status != TodoStatusTodo || ga.Owner != "" {
+	if ga.Status != TodoStatusTodo || ga.Owner != "" || ga.Assignee != "gone" {
 		t.Errorf("a not reopened: %+v", ga)
+	}
+
+	if _, ok, err := s.Claim(a.ID, "sibling", false); err != nil || ok {
+		t.Fatalf("sibling claim of reopened assigned work: ok=%v err=%v", ok, err)
+	}
+
+	if _, ok, err := s.Claim(a.ID, "gone", false); err != nil || !ok {
+		t.Fatalf("assignee reclaim after reopen: ok=%v err=%v", ok, err)
 	}
 
 	gb, _ := s.Get(b.ID)
@@ -634,7 +646,11 @@ func TestTodoReopenStaleLease(t *testing.T) {
 	base := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	s.now = func() time.Time { return base }
 
-	it := mustAdd(t, s, "session:ben", "leased")
+	it, err := s.Add(TodoAdd{Scope: "session:ben", Title: "leased", Assignee: "worker", CreatedBy: "ben"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if _, _, err := s.Claim(it.ID, "worker", false); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
@@ -658,8 +674,12 @@ func TestTodoReopenStaleLease(t *testing.T) {
 	}
 
 	got, _ := s.Get(it.ID)
-	if got.Status != TodoStatusTodo {
+	if got.Status != TodoStatusTodo || got.Owner != "" || got.Assignee != "worker" {
 		t.Errorf("stale item not reopened: %+v", got)
+	}
+
+	if _, ok, err := s.Claim(it.ID, "sibling", false); err != nil || ok {
+		t.Fatalf("sibling claim of stale assigned work: ok=%v err=%v", ok, err)
 	}
 
 	// Disabled lease reopens nothing.

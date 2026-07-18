@@ -142,8 +142,9 @@ The less-obvious lifecycle cases are deliberate:
 - Removing a todo that another item depends on is rejected. Clear or replace
   the dependent edge first. Retention also keeps referenced done items and
   parents whose sub-items are still referenced.
-- Reclaimed work returns ownerless. If its own dependencies are unfinished, it
-  is shown as dependency-blocked instead of returning to the claimable pool.
+- Reclaimed work returns ownerless but keeps its assignment. If its own
+  dependencies are unfinished, it is shown as dependency-blocked instead of
+  becoming eligible to claim.
 
 All todo rows, dependency edges, cascade revisions, and block notes involved in
 one mutation commit or roll back together. Event delivery uses the separate
@@ -167,26 +168,33 @@ Ownership rules:
   An assigned item is reserved for its `assignee`; only that session or the
   scope's override authority may claim it. `owner` is set to the calling session
   server-side, so a session can never claim on another's behalf.
-- **Transition a claimed item** (done / block / reopen / edit / remove) — only the
-  **owner**, an **override authority** (the subtree's anchor root, or a scenario's
-  orchestrator), or the **human**. A peer draining the same backlog can't close a
-  sibling's in-progress item.
-- **The human always wins** — consistent with every other subsystem. The human
-  *assigns* work (creates and can transition any item) but does not claim by
-  default; claiming is a session grabbing work for itself.
+- **Mutate an item** (done / block / reopen / edit / remove) — only the **owner**,
+  an **override authority** (the subtree's anchor root, or a scenario's
+  orchestrator), or the **human**, subject to the operation's state
+  preconditions. A peer draining the same backlog can't close a sibling's
+  in-progress item.
+- **The human retains override authority** — consistent with every other
+  subsystem. The human *assigns* work and can transition any item once the
+  transition's required pre-state exists. In particular, `done` still requires
+  a session claim; claiming is a session grabbing work for itself.
 
 ### Reclaiming stranded work
 
 An agent can claim an item and then stop or crash before finishing, leaving it
-`in-progress` under a dead session. Two defences return it to the pool:
+`in-progress` under a dead session. Two defences clear stale ownership:
 
 - **On stop.** When a session stops or is soft-deleted, its `in-progress` items
   auto-reopen (`owner` cleared). A ready item returns to `todo`; one with an
-  unfinished dependency returns to dependency-blocked.
+  unfinished dependency returns to dependency-blocked. An unassigned item goes
+  back to the shared pool. An assigned item stays reserved so the assignee can
+  resume or retry without losing responsibility.
 - **Claim lease.** An `in-progress` item that sees no progress for
-  `[todo] claim_lease` is reopened automatically (see [configuration](#configuration)).
+  `[todo] claim_lease` is reopened automatically with the same assignment (see
+  [configuration](#configuration)).
 
-The override authority and the human can always `reopen` an item manually.
+For permanently abandoned assigned work, the override authority or human first
+runs `gr todo assign <id> <replacement-session>`, then that session claims it.
+They can also `reopen` a done or blocked item manually.
 
 ## Events
 
@@ -247,10 +255,15 @@ The seeded item starts ownerless. A member must claim it, then mark it done; an
 attempt to skip the claim names the exact recovery command:
 
 ```bash
-gr todo list --scenario "$GRAITH_SCENARIO_NAME" # find assignee=$GRAITH_SESSION_ID
-gr todo claim <its-task-item>                    # sets owner, moves to in-progress
-gr todo done <its-task-item>                     # moves to done
+gr todo list --scenario "<scenario-name-from-manifest>" # find assignee=$GRAITH_SESSION_ID
+gr todo claim <its-task-item>                            # sets owner, moves to in-progress
+gr todo done <its-task-item>                             # moves to done
 ```
+
+Scenario-created members may substitute `$GRAITH_SCENARIO_NAME`. Shared members
+keep their existing environment and use the scenario name from the delivered
+manifest. A dependency-blocked seed becomes claimable only after its upstream
+items finish; members without a `task` receive no seed.
 
 This is the same "I finished my task" signal formerly represented by
 `gr scenario task-done`, now backed by a real object with sub-items, ordering,

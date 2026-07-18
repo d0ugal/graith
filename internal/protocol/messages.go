@@ -1303,7 +1303,7 @@ type TodoListResponse struct {
 	Items []TodoItemInfo `json:"items"`
 }
 
-// TodoClaimMsg claims an item. When ID is empty it claims the next unclaimed
+// TodoClaimMsg claims an item. When ID is empty it claims the next eligible
 // item in Scope (claim-next). The owner is always the calling session,
 // server-derived — never taken from the payload.
 type TodoClaimMsg struct {

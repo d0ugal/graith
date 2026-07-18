@@ -82,16 +82,19 @@ gr store ls --shared
 
 ## Scenario task completion
 
-When `GRAITH_SCENARIO_NAME` is set, your scenario task has a todo item assigned \
-to `GRAITH_SESSION_ID`. Find that assigned item, claim it before starting or \
-finishing the work, then mark it done:
+A scenario member with a non-empty task receives one ownerless todo assigned to \
+`GRAITH_SESSION_ID`. Once any dependencies are complete, find that item in the \
+scenario named by your manifest, claim it before working on it, then mark it done:
 
 ```
-gr todo list --scenario "$GRAITH_SCENARIO_NAME"
+gr todo list --scenario "<scenario-name-from-manifest>"
 gr todo claim <assigned-todo-id>
 gr todo done <assigned-todo-id>
 ```
 
+`GRAITH_SCENARIO_NAME` names the current scenario for scenario-created sessions, \
+but shared members keep their original environment. Members without a task get \
+no seeded todo. \
 `assignee` records who is responsible; `owner` is set only by `gr todo claim`. \
 Do not skip the claim step.
 

@@ -727,14 +727,19 @@ The seeded item is assigned but initially ownerless. A member signals it has
 finished by finding its assigned item, claiming it, and then marking it done:
 
 ```bash
-gr todo list --scenario "$GRAITH_SCENARIO_NAME" # find assignee=$GRAITH_SESSION_ID
-gr todo claim <its-task-item>                    # establish ownership
-gr todo done <its-task-item>                     # complete the claimed item
+gr todo list --scenario "<scenario-name-from-manifest>" # find assignee=$GRAITH_SESSION_ID
+gr todo claim <its-task-item>                            # establish ownership
+gr todo done <its-task-item>                             # complete the claimed item
 ```
 
 Assigned items are reserved: another member cannot claim or complete this work.
 The scenario orchestrator remains the override authority and the human retains
 transition authority.
+
+Scenario-created members may substitute `$GRAITH_SCENARIO_NAME`. A shared member
+keeps its existing environment, so it uses the scenario name from the delivered
+manifest instead. A dependency-blocked seed is claimed only after its upstream
+items finish; members without a `task` receive no seeded item.
 
 See [Todo list — in scenarios]({{< relref "todo.md#in-scenarios" >}}) for the full
 model.

@@ -647,9 +647,18 @@ func TestTodoReopen(t *testing.T) {
 		t.Errorf("status = %q, want %q", reopened.Status, "todo")
 	}
 
-	// Reopening clears the owner so any agent can claim it again.
+	// Reopening clears the owner; this item is unassigned, so it returns to the
+	// shared pool. Assigned items remain reserved for their assignee.
 	if reopened.Owner != "" {
 		t.Errorf("owner = %q, want empty after reopen", reopened.Owner)
+	}
+}
+
+func TestTodoReopenDescriptionPreservesAssignmentReservation(t *testing.T) {
+	for _, want := range []string{"clearing its owner", "assigned items remain reserved", "override authority"} {
+		if !strings.Contains(todoReopenToolDescription, want) {
+			t.Errorf("todo_reopen description missing %q: %s", want, todoReopenToolDescription)
+		}
 	}
 }
 

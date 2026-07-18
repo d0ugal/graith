@@ -156,8 +156,9 @@ func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
 		return
 	}
 
-	// A stopped/crashed owner must not strand its claimed todo items: reopen them
-	// so a sibling can pick the work up (issue #591).
+	// A stopped/crashed owner must not retain active todo ownership. Reopen its
+	// claims; assignment reservations remain intact for resume/retry or explicit
+	// reassignment (issue #591).
 	sm.reopenTodosForSession(id)
 
 	if stopReason == "" {

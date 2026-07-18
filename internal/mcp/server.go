@@ -14,6 +14,8 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+const todoReopenToolDescription = "Reopen a done or blocked todo item, moving it back to todo and clearing its owner. Unassigned items then return to the shared pool; assigned items remain reserved for their assignee or the scope's override authority."
+
 type Server struct {
 	cfg        *config.Config
 	paths      config.Paths
@@ -92,7 +94,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 	gomcp.AddTool(srv, &gomcp.Tool{
 		Name:        "todo_reopen",
-		Description: "Reopen a done or blocked todo item, moving it back to todo and clearing its owner so any agent can claim it again.",
+		Description: todoReopenToolDescription,
 	}, s.todoReopen)
 
 	gomcp.AddTool(srv, &gomcp.Tool{
