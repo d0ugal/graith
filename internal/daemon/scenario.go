@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -50,6 +51,114 @@ func (sm *SessionManager) unstarAndDelete(id string) error {
 	sm.mu.Unlock()
 
 	return sm.Delete(id)
+}
+
+type scenarioSharedSource struct {
+	id           string
+	repoPath     string
+	worktreePath string
+}
+
+// resolveScenarioSharedSourceLocked resolves the one reusable session behind a
+// shared scenario member. Stopped sessions remain reusable because Stop keeps
+// their state and worktree intact; transient, errored, and soft-deleted rows do
+// not. Caller must hold sm.mu for reading.
+func (sm *SessionManager) resolveScenarioSharedSourceLocked(name string) (scenarioSharedSource, error) {
+	var (
+		candidates  []*SessionState
+		deleted     int
+		unavailable []SessionStatus
+	)
+
+	for _, existing := range sm.state.Sessions {
+		if existing.Name != name {
+			continue
+		}
+
+		if existing.IsSoftDeleted() {
+			deleted++
+			continue
+		}
+
+		switch existing.Status {
+		case StatusRunning, StatusStopped:
+			candidates = append(candidates, existing)
+		default:
+			unavailable = append(unavailable, existing.Status)
+		}
+	}
+
+	switch len(candidates) {
+	case 0:
+		switch {
+		case deleted == 1 && len(unavailable) == 0:
+			return scenarioSharedSource{}, fmt.Errorf("shared session %q is deleted", name)
+		case deleted > 1 && len(unavailable) == 0:
+			return scenarioSharedSource{}, fmt.Errorf("shared session %q is unavailable: %d matching sessions are deleted", name, deleted)
+		case len(unavailable) == 1 && deleted == 0:
+			return scenarioSharedSource{}, fmt.Errorf("shared session %q is %s; only running or stopped sessions can be shared", name, unavailable[0])
+		default:
+			return scenarioSharedSource{}, fmt.Errorf("shared session %q: no running or stopped session with that name exists", name)
+		}
+	case 1:
+		// Continue below.
+	default:
+		return scenarioSharedSource{}, fmt.Errorf("shared session %q is ambiguous: %d running or stopped sessions have that name", name, len(candidates))
+	}
+
+	source := candidates[0]
+
+	return scenarioSharedSource{
+		id:           source.ID,
+		repoPath:     source.RepoPath,
+		worktreePath: source.WorktreePath,
+	}, nil
+}
+
+// snapshotScenarioSharedSources performs the authoritative state-only lookup
+// under the manager lock. Filesystem validation is deliberately left to the
+// caller so scenario startup never performs slow I/O while holding sm.mu.
+func (sm *SessionManager) snapshotScenarioSharedSources(sessions []protocol.ScenarioSessionInput) ([]scenarioSharedSource, error) {
+	sources := make([]scenarioSharedSource, len(sessions))
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	for i, session := range sessions {
+		if !session.Shared {
+			continue
+		}
+
+		source, err := sm.resolveScenarioSharedSourceLocked(session.Name)
+		if err != nil {
+			return nil, err
+		}
+
+		sources[i] = source
+	}
+
+	return sources, nil
+}
+
+func validateScenarioMirrorWorktree(memberName, targetName, worktreePath string) error {
+	if worktreePath == "" {
+		return fmt.Errorf("session %q: mirror target %q has no worktree to mirror", memberName, targetName)
+	}
+
+	info, err := os.Stat(worktreePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("session %q: mirror target %q worktree %q no longer exists", memberName, targetName, worktreePath)
+		}
+
+		return fmt.Errorf("session %q: mirror target %q worktree %q is unavailable: %w", memberName, targetName, worktreePath, err)
+	}
+
+	if !info.IsDir() {
+		return fmt.Errorf("session %q: mirror target %q worktree %q is not a directory", memberName, targetName, worktreePath)
+	}
+
+	return nil
 }
 
 func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, cols uint16) (*ScenarioState, error) {
@@ -234,6 +343,58 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		repoRoots[i] = repoRoot
 	}
 
+	// Resolve shared members before reserving scenario state. Running and
+	// stopped sessions are both eligible; soft-deleted or transient rows remain
+	// unavailable. Mirror worktrees are checked outside sm.mu so an already-
+	// cleaned stopped session fails before any scenario-owned member starts.
+	sharedSources, err := sm.snapshotScenarioSharedSources(msg.Sessions)
+	if err != nil {
+		return nil, err
+	}
+
+	for i, session := range msg.Sessions {
+		if !session.Shared {
+			continue
+		}
+
+		source := sharedSources[i]
+		// RepoRootPath returns the canonical Git top-level path for an explicit
+		// repo, and SessionState.RepoPath stores that same value.
+		if repoRoots[i] != "" && filepath.Clean(repoRoots[i]) != filepath.Clean(source.repoPath) {
+			return nil, fmt.Errorf("shared session %q: configured repo %q does not match selected session repo %q", session.Name, repoRoots[i], source.repoPath)
+		}
+
+		repoRoots[i] = source.repoPath
+	}
+
+	validatedSharedRoots := make(map[int]bool)
+
+	for depth := 1; depth <= maxMirrorDepth; depth++ {
+		for i, session := range msg.Sessions {
+			if mirrorDepths[i] != depth {
+				continue
+			}
+
+			target := memberIndexes[session.Mirror]
+			repoRoots[i] = repoRoots[target]
+
+			root := target
+			for msg.Sessions[root].Mirror != "" {
+				root = memberIndexes[msg.Sessions[root].Mirror]
+			}
+
+			if !msg.Sessions[root].Shared || validatedSharedRoots[root] {
+				continue
+			}
+
+			if err := validateScenarioMirrorWorktree(session.Name, msg.Sessions[root].Name, sharedSources[root].worktreePath); err != nil {
+				return nil, err
+			}
+
+			validatedSharedRoots[root] = true
+		}
+	}
+
 	// Serialize every lifecycle operation that can discover this scenario after
 	// its reserve record becomes visible. Generating the stable ID before the
 	// reserve means stop/delete/add will wait for start to commit or roll back.
@@ -279,76 +440,30 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	sessionIDs := make([]string, len(msg.Sessions))
 	sharedReused := make([]bool, len(msg.Sessions))
 	seenResultDestinations := make(map[string]string)
-	sharedWorktrees := make([]string, len(msg.Sessions))
 
 	// Resolve shared members authoritatively while holding the state lock. A
 	// mirror reference never searches global daemon state itself; it resolves to
 	// one of these scenario member indexes, and that member owns the only allowed
-	// global binding. Count candidates instead of taking map iteration order so a
-	// corrupted/legacy ambiguous name fails closed.
+	// global binding. Re-check the preflight snapshot so a concurrent lifecycle
+	// change cannot silently substitute a different source or worktree.
 	for i, s := range msg.Sessions {
 		if !s.Shared {
 			continue
 		}
 
-		var candidates []*SessionState
-
-		for _, existing := range sm.state.Sessions {
-			if existing.IsSoftDeleted() || existing.Name != s.Name || existing.Status != StatusRunning {
-				continue
-			}
-
-			candidates = append(candidates, existing)
+		source, resolveErr := sm.resolveScenarioSharedSourceLocked(s.Name)
+		if resolveErr != nil {
+			sm.mu.Unlock()
+			return nil, resolveErr
 		}
 
-		switch len(candidates) {
-		case 0:
+		if source != sharedSources[i] {
 			sm.mu.Unlock()
-			return nil, fmt.Errorf("shared session %q: no running session with that name exists", s.Name)
-		case 1:
-			// Continue below.
-		default:
-			sm.mu.Unlock()
-			return nil, fmt.Errorf("shared session %q is ambiguous: %d running sessions have that name", s.Name, len(candidates))
+			return nil, fmt.Errorf("shared session %q changed during scenario start; try again", s.Name)
 		}
 
-		source := candidates[0]
-		// RepoRootPath returns the canonical Git top-level path for an explicit
-		// repo, and SessionState.RepoPath stores that same value. Compare the
-		// already-resolved snapshots directly: ResolvePath would perform
-		// EvalSymlinks filesystem I/O while the manager lock is held.
-		if repoRoots[i] != "" && filepath.Clean(repoRoots[i]) != filepath.Clean(source.RepoPath) {
-			sm.mu.Unlock()
-			return nil, fmt.Errorf("shared session %q: configured repo %q does not match running session repo %q", s.Name, repoRoots[i], source.RepoPath)
-		}
-
-		sessionIDs[i] = source.ID
+		sessionIDs[i] = source.id
 		sharedReused[i] = true
-		sharedWorktrees[i] = source.WorktreePath
-		repoRoots[i] = source.RepoPath
-	}
-
-	// Fill effective repos for mirrors in dependency order, then reject a shared
-	// root that cannot supply a worktree before any scenario-owned member starts.
-	for depth := 1; depth <= maxMirrorDepth; depth++ {
-		for i, s := range msg.Sessions {
-			if mirrorDepths[i] != depth {
-				continue
-			}
-
-			target := memberIndexes[s.Mirror]
-			repoRoots[i] = repoRoots[target]
-
-			root := target
-			for msg.Sessions[root].Mirror != "" {
-				root = memberIndexes[msg.Sessions[root].Mirror]
-			}
-
-			if msg.Sessions[root].Shared && sharedWorktrees[root] == "" {
-				sm.mu.Unlock()
-				return nil, fmt.Errorf("session %q: mirror target %q has no worktree to mirror", s.Name, msg.Sessions[root].Name)
-			}
-		}
 	}
 
 	for i, s := range msg.Sessions {
@@ -1184,11 +1299,25 @@ func (sm *SessionManager) ResumeScenario(name string, rows, cols uint16) ([]stri
 	copy(sessionIDs, scenario.SessionIDs)
 	scenarioID := scenario.ID
 
+	shared := make([]bool, len(sessionIDs))
+	for i := range sessionIDs {
+		if i < len(scenario.Sessions) {
+			shared[i] = scenario.Sessions[i].Shared
+		}
+	}
+
 	sm.mu.RUnlock()
 
 	var resumed []string
 
-	for _, id := range sessionIDs {
+	for i, id := range sessionIDs {
+		// Shared members are referenced context, not scenario-owned processes.
+		// This is especially important for a stopped shared mirror source: bulk
+		// resume must leave it stopped just as stop/delete leave it untouched.
+		if shared[i] {
+			continue
+		}
+
 		sm.mu.RLock()
 		sess := sm.state.Sessions[id]
 
