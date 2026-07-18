@@ -680,7 +680,14 @@ func (sm *SessionManager) recoverOrFinishCompletionSessions(scenarioID string) {
 		sm.mu.RLock()
 
 		s := sm.state.Sessions[id]
-		if s == nil || s.Status == StatusRunning || s.Status == StatusCreating {
+		if s == nil {
+			sm.mu.RUnlock()
+			sm.finishCompletionAction(scenarioID, a.epoch, a.name, a.attempt, "", fmt.Errorf("session %s is no longer available; retry explicitly", id))
+
+			continue
+		}
+
+		if s.Status == StatusRunning || s.Status == StatusCreating {
 			sm.mu.RUnlock()
 			continue
 		}
