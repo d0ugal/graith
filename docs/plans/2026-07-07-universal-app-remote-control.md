@@ -231,7 +231,7 @@ This is the security core. The matrix must cover **every** `case` in the
 
 - [ ] **Step 1: Enumerate every `case`.** Produce the full list from the switch
   (includes `handshake, list, create, fork, migrate, attach, detach, delete, stop,
-  rename, update, star, unstar, set_status, resume, restart, logs, msg_pub,
+  rename, update, set_status, resume, restart, logs, msg_pub,
   msg_inbox, msg_sub, msg_ack, msg_topics, msg_conversation, approval_request,
   approval_respond, approval_list, approval_subscribe, type, resize,
   screen_preview, screen_snapshot, reload, status, status_report, diagnostics,

@@ -13,6 +13,17 @@ import (
 
 func strptr(s string) *string { return &s }
 
+func boolptr(v bool) *bool { return &v }
+
+func updatedResp(id, name, parentID string, starred bool) scriptedResp {
+	return okResp(payloadEnv("updated", protocol.UpdateResultMsg{
+		SessionID: id,
+		Name:      name,
+		ParentID:  parentID,
+		Starred:   starred,
+	}))
+}
+
 func captureUpdateOutput(t *testing.T, jsonMode bool) *bytes.Buffer {
 	t.Helper()
 
@@ -38,6 +49,7 @@ func TestValidateUpdateOptions(t *testing.T) {
 		{name: "no properties", wantErr: "at least one"},
 		{name: "valid name", opts: updateOptions{name: strptr("bonnie")}},
 		{name: "valid orphan", opts: updateOptions{parent: strptr("")}},
+		{name: "valid starred false", opts: updateOptions{starred: boolptr(false)}},
 		{name: "invalid name", opts: updateOptions{name: strptr("bad name/slash")}, wantErr: "invalid"},
 		{name: "reserved name", opts: updateOptions{name: strptr("orchestrator")}, wantErr: "reserved for system use"},
 	}
@@ -66,7 +78,7 @@ func TestRunUpdateName(t *testing.T) {
 		c := &scriptedConn{responses: []scriptedResp{
 			okResp(payloadEnv("session_list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{{ID: "id-braw", Name: "braw"}}})),
 			okResp(payloadEnv("session_list", protocol.SessionListMsg{})),
-			okResp(typeEnv("updated")),
+			updatedResp("id-braw", "bonnie", "", false),
 		}}
 
 		if err := runUpdate(c, "braw", updateOptions{name: strptr("bonnie")}); err != nil {
@@ -78,11 +90,11 @@ func TestRunUpdateName(t *testing.T) {
 		}
 
 		msg, ok := c.sends[2].Payload.(protocol.UpdateMsg)
-		if !ok || msg.SessionID != "id-braw" || msg.Name == nil || *msg.Name != "bonnie" || msg.ParentID != nil {
+		if !ok || msg.SessionID != "id-braw" || msg.Name == nil || *msg.Name != "bonnie" || msg.ParentID != nil || msg.Starred != nil {
 			t.Fatalf("payload = %+v, want name-only update", c.sends[2].Payload)
 		}
 
-		if got := buf.String(); got != "Name updated to bonnie\n" {
+		if got := buf.String(); got != "Name: bonnie\n" {
 			t.Fatalf("output = %q", got)
 		}
 	})
@@ -91,19 +103,19 @@ func TestRunUpdateName(t *testing.T) {
 		buf := captureUpdateOutput(t, true)
 		c := &scriptedConn{responses: []scriptedResp{
 			okResp(payloadEnv("session_list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{{ID: "id-braw", Name: "braw"}}})),
-			okResp(typeEnv("updated")),
+			updatedResp("id-braw", "bonnie", "", false),
 		}}
 
 		if err := runUpdate(c, "id-braw", updateOptions{name: strptr("bonnie")}); err != nil {
 			t.Fatalf("runUpdate: %v", err)
 		}
 
-		var got updateOutput
+		var got protocol.UpdateResultMsg
 		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 			t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
 		}
 
-		if got.SessionID != "id-braw" || got.Name == nil || *got.Name != "bonnie" || got.ParentID != nil {
+		if got.SessionID != "id-braw" || got.Name != "bonnie" || got.ParentID != "" || got.Starred {
 			t.Fatalf("JSON result = %+v", got)
 		}
 	})
@@ -138,7 +150,7 @@ func TestRunUpdateNameResolution(t *testing.T) {
 
 		c := &scriptedConn{responses: []scriptedResp{
 			okResp(payloadEnv("session_list", duplicateNames)),
-			okResp(typeEnv("updated")),
+			updatedResp("id-dreich-2", "bonnie", "", false),
 		}}
 
 		if err := runUpdate(c, "id-dreich-2", updateOptions{name: strptr("bonnie")}); err != nil {
@@ -201,10 +213,10 @@ func TestRunUpdateCombinedProperties(t *testing.T) {
 			{ID: "id-ben", Name: "ben"},
 		}})),
 		okResp(payloadEnv("session_list", protocol.SessionListMsg{})),
-		okResp(typeEnv("updated")),
+		updatedResp("id-bairn", "bonnie", "id-ben", false),
 	}}
 
-	if err := runUpdate(c, "bairn", updateOptions{name: strptr("bonnie"), parent: strptr("ben")}); err != nil {
+	if err := runUpdate(c, "bairn", updateOptions{name: strptr("bonnie"), parent: strptr("ben"), starred: boolptr(false)}); err != nil {
 		t.Fatalf("runUpdate: %v", err)
 	}
 
@@ -212,13 +224,16 @@ func TestRunUpdateCombinedProperties(t *testing.T) {
 	if msg.ParentID == nil || *msg.ParentID != "id-ben" {
 		t.Fatalf("parent_id = %v, want id-ben", msg.ParentID)
 	}
+	if msg.Starred == nil || *msg.Starred {
+		t.Fatalf("starred = %v, want explicit false", msg.Starred)
+	}
 
-	var result updateOutput
+	var result protocol.UpdateResultMsg
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
 
-	if result.ParentID == nil || *result.ParentID != "id-ben" {
+	if result.ParentID != "id-ben" || result.Starred {
 		t.Fatalf("JSON parent_id = %v, want id-ben", result.ParentID)
 	}
 }
@@ -249,5 +264,58 @@ func TestRunUpdateInvalidNameDoesNotUseConnection(t *testing.T) {
 
 	if len(c.sends) != 0 || c.readIdx != 0 {
 		t.Fatalf("invalid name used connection: sends=%v reads=%d", c.sentTypes(), c.readIdx)
+	}
+}
+
+func TestRunUpdateStarredFalseReportsResult(t *testing.T) {
+	buf := captureUpdateOutput(t, false)
+	c := &scriptedConn{responses: []scriptedResp{
+		okResp(payloadEnv("session_list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{{ID: "id-braw", Name: "braw", Starred: true}}})),
+		updatedResp("id-braw", "braw", "", false),
+	}}
+
+	if err := runUpdate(c, "id-braw", updateOptions{starred: boolptr(false)}); err != nil {
+		t.Fatalf("runUpdate: %v", err)
+	}
+
+	msg := c.sends[1].Payload.(protocol.UpdateMsg)
+	if msg.Starred == nil || *msg.Starred {
+		t.Fatalf("starred = %v, want explicit false", msg.Starred)
+	}
+	if got := buf.String(); got != "Starred: false\n" {
+		t.Fatalf("output = %q", got)
+	}
+}
+
+func TestUpdateStarredFlagAndRemovedCommands(t *testing.T) {
+	registerCommands()
+
+	flag := updateCmd.Flags().Lookup("starred")
+	if flag == nil {
+		t.Fatal("update --starred flag is not registered")
+	}
+	if flag.NoOptDefVal != "true" {
+		t.Errorf("--starred NoOptDefVal = %q, want true", flag.NoOptDefVal)
+	}
+
+	originalValue, originalChanged := flag.Value.String(), flag.Changed
+	t.Cleanup(func() {
+		_ = flag.Value.Set(originalValue)
+		flag.Changed = originalChanged
+	})
+
+	if err := flag.Value.Set("false"); err != nil {
+		t.Fatalf("setting --starred=false: %v", err)
+	}
+	if got, _ := updateCmd.Flags().GetBool("starred"); got {
+		t.Error("--starred=false did not remain explicit false")
+	}
+
+	for _, removed := range []string{"star", "unstar"} {
+		for _, cmd := range rootCmd.Commands() {
+			if cmd.Name() == removed {
+				t.Errorf("removed top-level command %q is still registered", removed)
+			}
+		}
 	}
 }

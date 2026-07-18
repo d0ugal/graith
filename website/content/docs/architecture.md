@@ -54,8 +54,7 @@ The client sends a message type; the daemon responds with a corresponding respon
 | `attach` | Attach to a session |
 | `detach` | Detach from a session |
 | `delete` | Delete a session |
-| `update` | Update a session's name or parent |
-| `star` / `unstar` | Star/unstar a session |
+| `update` | Atomically update session name, parent, and/or starred state |
 | `stop` | Stop a session |
 | `resume` | Resume a stopped session |
 | `restart` | Restart a session |

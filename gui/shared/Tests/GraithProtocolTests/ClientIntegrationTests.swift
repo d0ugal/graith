@@ -187,9 +187,9 @@ struct ClientIntegrationTests {
         await attach.close()
     }
 
-    /// `star`/`unstar` send `{session_id}` and complete on the daemon's
-    /// `starred`/`unstarred` acks (issue #899).
-    @Test func starAndUnstarRoundTrip() async throws {
+    /// `update` preserves optional fields and explicit false, and returns the
+    /// daemon's resulting persisted metadata.
+    @Test func updateRoundTrip() async throws {
         let (clientStream, serverStream) = InMemoryByteStream.makePair()
         let daemon = MockDaemon(stream: serverStream)
 
@@ -197,15 +197,17 @@ struct ClientIntegrationTests {
             _ = try await daemon.readControl() // handshake
             try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
 
-            let starReq = try await daemon.readControl()
-            #expect(starReq.type == "star")
-            #expect(try decodePayload(starReq, as: SessionIDMsg.self).sessionID == "braw")
-            try await daemon.writeControl("starred", SessionIDMsg(sessionID: "braw"))
-
-            let unstarReq = try await daemon.readControl()
-            #expect(unstarReq.type == "unstar")
-            #expect(try decodePayload(unstarReq, as: SessionIDMsg.self).sessionID == "braw")
-            try await daemon.writeControl("unstarred", SessionIDMsg(sessionID: "braw"))
+            let updateReq = try await daemon.readControl()
+            #expect(updateReq.type == "update")
+            let update = try decodePayload(updateReq, as: UpdateMsg.self)
+            #expect(update.sessionID == "braw")
+            #expect(update.name == "bonnie")
+            #expect(update.parentID == "ben")
+            #expect(update.starred == false)
+            try await daemon.writeControl(
+                "updated",
+                UpdateResultMsg(sessionID: "braw", name: "bonnie", parentID: "ben", starred: false)
+            )
         }
 
         let stream = clientStream
@@ -214,8 +216,10 @@ struct ClientIntegrationTests {
             profile: "", clientID: "app", token: nil, signer: nil,
             streamFactory: { _ in stream }
         )
-        try await client.star(sessionID: "braw")
-        try await client.unstar(sessionID: "braw")
+        let result = try await client.update(
+            sessionID: "braw", name: "bonnie", parentID: "ben", starred: false
+        )
+        #expect(result == UpdateResultMsg(sessionID: "braw", name: "bonnie", parentID: "ben", starred: false))
 
         _ = await server.result
         await client.close()

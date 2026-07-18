@@ -502,12 +502,6 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			case "update":
 				handleUpdate(sm, auth, sendControl, msg)
 
-			case "star":
-				handleStar(sm, auth, sendControl, msg)
-
-			case "unstar":
-				handleUnstar(sm, auth, sendControl, msg)
-
 			case "set_status":
 				handleSetStatus(sm, auth, sendControl, msg)
 

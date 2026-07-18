@@ -237,14 +237,17 @@ type UpdateMsg struct {
 	SessionID string  `json:"session_id"`
 	Name      *string `json:"name,omitempty"`
 	ParentID  *string `json:"parent_id,omitempty"`
+	Starred   *bool   `json:"starred,omitempty"`
 }
 
-type StarMsg struct {
+// UpdateResultMsg reports the persisted metadata after an update. Starred and
+// parent_id deliberately do not use omitempty so false and orphaned state remain
+// explicit for JSON and remote clients.
+type UpdateResultMsg struct {
 	SessionID string `json:"session_id"`
-}
-
-type UnstarMsg struct {
-	SessionID string `json:"session_id"`
+	Name      string `json:"name"`
+	ParentID  string `json:"parent_id"`
+	Starred   bool   `json:"starred"`
 }
 
 type SetStatusMsg struct {

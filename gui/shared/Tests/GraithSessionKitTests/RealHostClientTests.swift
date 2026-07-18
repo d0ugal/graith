@@ -159,7 +159,7 @@ struct RealHostClientTests {
     }
 
     @Test func lifecycleMutationsRoundTrip() async throws {
-        let expected = ["resume", "restart", "interrupt", "delete", "update", "star", "unstar"]
+        let expected = ["resume", "restart", "interrupt", "delete", "update"]
         let (client, server) = make { d in
             try await self.handshake(d)
             for want in expected {
@@ -170,8 +170,13 @@ struct RealHostClientTests {
                     #expect(update.sessionID == "x")
                     #expect(update.name == "renamed")
                     #expect(update.parentID == nil)
+                    try await d.writeControl(
+                        "updated",
+                        UpdateResultMsg(sessionID: "x", name: "renamed", parentID: "", starred: false)
+                    )
+                } else {
+                    try await d.writeControl("ok", EmptyMsg())
                 }
-                try await d.writeControl("ok", EmptyMsg())
             }
         }
         try await client.connect()
@@ -180,8 +185,25 @@ struct RealHostClientTests {
         try await client.interrupt(sessionID: "x")
         try await client.delete(sessionID: "x")
         try await client.rename(sessionID: "x", newName: "renamed")
-        try await client.star(sessionID: "x")
-        try await client.unstar(sessionID: "x")
+        _ = await server.result
+        await client.disconnect()
+    }
+
+    @Test func updateReturnsPersistedState() async throws {
+        let (client, server) = make { d in
+            try await self.handshake(d)
+            let req = try await d.readControl()
+            #expect(req.type == "update")
+            let update = try decodePayload(req, as: UpdateMsg.self)
+            #expect(update.starred == false)
+            try await d.writeControl(
+                "updated",
+                UpdateResultMsg(sessionID: "x", name: "braw", parentID: "", starred: false)
+            )
+        }
+        try await client.connect()
+        let result = try await client.update(sessionID: "x", name: nil, parentID: nil, starred: false)
+        #expect(result.starred == false)
         _ = await server.result
         await client.disconnect()
     }

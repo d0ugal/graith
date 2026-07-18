@@ -630,6 +630,76 @@ func TestUpdateName(t *testing.T) {
 	}
 }
 
+func TestUpdateStarredPersistsAndProtectsDeletion(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	r, w := env.connect(t)
+	handshake(t, r, w)
+
+	sendControl(t, w, "create", protocol.CreateMsg{
+		Name: "auld", Agent: "echo", RepoPath: env.repo, Base: "main",
+	})
+
+	var created protocol.SessionInfo
+	_ = protocol.DecodePayload(readControl(t, r), &created)
+
+	name := "bonnie"
+	starred := true
+	sendControl(t, w, "update", protocol.UpdateMsg{
+		SessionID: created.ID,
+		Name:      &name,
+		Starred:   &starred,
+	})
+
+	updatedEnv := readControl(t, r)
+	if updatedEnv.Type != "updated" {
+		var e protocol.ErrorMsg
+		_ = protocol.DecodePayload(updatedEnv, &e)
+		t.Fatalf("update error: %s", e.Message)
+	}
+
+	var updated protocol.UpdateResultMsg
+	if err := protocol.DecodePayload(updatedEnv, &updated); err != nil {
+		t.Fatalf("decode update result: %v", err)
+	}
+
+	if updated.SessionID != created.ID || updated.Name != "bonnie" || !updated.Starred {
+		t.Fatalf("updated = %+v, want combined persisted state", updated)
+	}
+
+	loaded, err := daemon.LoadState(filepath.Join(env.tmpDir, "state.json"))
+	if err != nil {
+		t.Fatalf("load persisted state: %v", err)
+	}
+	if persisted := loaded.Sessions[created.ID]; persisted == nil || persisted.Name != "bonnie" || !persisted.Starred {
+		t.Fatalf("persisted = %+v, want combined update", persisted)
+	}
+
+	sendControl(t, w, "list", protocol.ListMsg{})
+	var list protocol.SessionListMsg
+	_ = protocol.DecodePayload(readControl(t, r), &list)
+	if len(list.Sessions) != 1 || list.Sessions[0].ID != created.ID || !list.Sessions[0].Starred {
+		t.Fatalf("list = %+v, want starred session", list.Sessions)
+	}
+
+	sendControl(t, w, "delete", protocol.DeleteMsg{SessionID: created.ID})
+	if resp := readControl(t, r); resp.Type != "error" {
+		t.Fatalf("delete starred session response = %q, want error", resp.Type)
+	}
+
+	starred = false
+	sendControl(t, w, "update", protocol.UpdateMsg{SessionID: created.ID, Starred: &starred})
+	if resp := readControl(t, r); resp.Type != "updated" {
+		t.Fatalf("clear starred response = %q, want updated", resp.Type)
+	}
+
+	sendControl(t, w, "delete", protocol.DeleteMsg{SessionID: created.ID})
+	if resp := readControl(t, r); resp.Type != "deleted" {
+		t.Fatalf("delete unstarred response = %q, want deleted", resp.Type)
+	}
+}
+
 func TestDelete(t *testing.T) {
 	env := setup(t)
 	defer env.teardown()

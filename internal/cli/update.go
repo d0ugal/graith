@@ -11,25 +11,21 @@ import (
 )
 
 type updateOptions struct {
-	name   *string
-	parent *string
-}
-
-type updateOutput struct {
-	SessionID string  `json:"session_id"`
-	Name      *string `json:"name,omitempty"`
-	ParentID  *string `json:"parent_id,omitempty"`
+	name    *string
+	parent  *string
+	starred *bool
 }
 
 var updateCmd = &cobra.Command{
 	Use:               "update <name-or-id>",
 	Short:             "Update session properties",
-	Long:              "Update session properties such as name and parent. Use --parent \"\" to orphan a session.",
+	Long:              "Update session properties such as name, parent, and starred state. Use --parent \"\" to orphan a session.",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		nameFlag, _ := cmd.Flags().GetString("name")
 		parentFlag, _ := cmd.Flags().GetString("parent")
+		starredFlag, _ := cmd.Flags().GetBool("starred")
 		opts := updateOptions{}
 
 		if cmd.Flags().Changed("name") {
@@ -38,6 +34,9 @@ var updateCmd = &cobra.Command{
 
 		if cmd.Flags().Changed("parent") {
 			opts.parent = &parentFlag
+		}
+		if cmd.Flags().Changed("starred") {
+			opts.starred = &starredFlag
 		}
 
 		// Match the old rename command's fail-fast behavior: reject missing,
@@ -57,8 +56,8 @@ var updateCmd = &cobra.Command{
 }
 
 func validateUpdateOptions(opts updateOptions) error {
-	if opts.name == nil && opts.parent == nil {
-		return errors.New("at least one of --name or --parent must be specified")
+	if opts.name == nil && opts.parent == nil && opts.starred == nil {
+		return errors.New("at least one of --name, --parent, or --starred must be specified")
 	}
 
 	if opts.name != nil {
@@ -80,7 +79,7 @@ func runUpdate(c controlConn, nameOrID string, opts updateOptions) error {
 		return err
 	}
 
-	msg := protocol.UpdateMsg{SessionID: session.ID, Name: opts.name}
+	msg := protocol.UpdateMsg{SessionID: session.ID, Name: opts.name, Starred: opts.starred}
 	if opts.parent != nil {
 		if *opts.parent == "" {
 			empty := ""
@@ -95,28 +94,43 @@ func runUpdate(c controlConn, nameOrID string, opts updateOptions) error {
 		}
 	}
 
-	if err := controlOp(c, "update", msg); err != nil {
+	if err := c.SendControl("update", msg); err != nil {
 		return err
 	}
 
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return err
+	}
+	if resp.Type == "error" {
+		return fmt.Errorf("%s", errorMessage(resp))
+	}
+	if resp.Type != "updated" {
+		return fmt.Errorf("unexpected update response: %s", resp.Type)
+	}
+
+	var result protocol.UpdateResultMsg
+	if err := protocol.DecodePayload(resp, &result); err != nil {
+		return fmt.Errorf("decoding update response: %w", err)
+	}
+
 	if jsonOutput {
-		return out.JSON(updateOutput{
-			SessionID: session.ID,
-			Name:      msg.Name,
-			ParentID:  msg.ParentID,
-		})
+		return out.JSON(result)
 	}
 
 	if opts.name != nil {
-		out.Printf("Name updated to %s\n", *opts.name)
+		out.Printf("Name: %s\n", result.Name)
 	}
 
 	if opts.parent != nil {
-		if *opts.parent == "" {
-			out.Printf("Parent removed\n")
+		if result.ParentID == "" {
+			out.Printf("Parent: none\n")
 		} else {
-			out.Printf("Parent set to %s\n", *opts.parent)
+			out.Printf("Parent: %s\n", result.ParentID)
 		}
+	}
+	if opts.starred != nil {
+		out.Printf("Starred: %t\n", result.Starred)
 	}
 
 	return nil
@@ -178,6 +192,7 @@ func resolveUpdatableSessionInfo(c controlConn, nameOrID string) (*protocol.Sess
 func registerUpdateCmd() {
 	updateCmd.Flags().String("name", "", "new session name")
 	updateCmd.Flags().String("parent", "", "new parent session (empty string to orphan)")
+	updateCmd.Flags().Bool("starred", false, "set whether the session is starred (bare flag means true)")
 	_ = updateCmd.RegisterFlagCompletionFunc("parent", func(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return completeSessionNames(cmd, nil, toComplete)
 	})

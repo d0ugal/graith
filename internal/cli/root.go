@@ -212,7 +212,6 @@ func registerCommands() {
 		registerSandboxCmd()
 		registerScenarioCmd()
 		registerTriggerCmd()
-		registerStarCmd()
 		registerStatusSummaryCmd()
 		registerStopCmd()
 		registerStoreCmd()

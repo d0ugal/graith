@@ -166,19 +166,44 @@ public struct SessionScopeMsg: Codable, Sendable {
     }
 }
 
+/// Atomic session metadata update. Nil fields are omitted and left unchanged;
+/// `starred: false` is encoded explicitly.
 public struct UpdateMsg: Codable, Sendable {
     public var sessionID: String
     public var name: String?
     public var parentID: String?
-    public init(sessionID: String, name: String? = nil, parentID: String? = nil) {
+    public var starred: Bool?
+    public init(sessionID: String, name: String? = nil, parentID: String? = nil, starred: Bool? = nil) {
         self.sessionID = sessionID
         self.name = name
         self.parentID = parentID
+        self.starred = starred
     }
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
         case name
         case parentID = "parent_id"
+        case starred
+    }
+}
+
+/// The persisted metadata returned by the daemon after an update.
+public struct UpdateResultMsg: Codable, Sendable, Equatable {
+    public var sessionID: String
+    public var name: String
+    public var parentID: String
+    public var starred: Bool
+    public init(sessionID: String, name: String, parentID: String, starred: Bool) {
+        self.sessionID = sessionID
+        self.name = name
+        self.parentID = parentID
+        self.starred = starred
+    }
+    enum CodingKeys: String, CodingKey {
+        case sessionID = "session_id"
+        case name
+        case parentID = "parent_id"
+        case starred
     }
 }
 

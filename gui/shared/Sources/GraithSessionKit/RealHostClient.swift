@@ -160,10 +160,15 @@ public actor RealHostClient: GraithHostClient {
         try await run { try await self.inner.setStatus(sessionID: sessionID, text: text, ttlSeconds: ttlSeconds, clear: clear) }
     }
     public func rename(sessionID: String, newName: String) async throws {
-        try await run { try await self.inner.update(sessionID: sessionID, name: newName) }
+        try await run { _ = try await self.inner.update(sessionID: sessionID, name: newName) }
     }
-    public func star(sessionID: String) async throws { try await run { try await self.inner.star(sessionID: sessionID) } }
-    public func unstar(sessionID: String) async throws { try await run { try await self.inner.unstar(sessionID: sessionID) } }
+    public func update(sessionID: String, name: String?, parentID: String?, starred: Bool?) async throws -> UpdateResultMsg {
+        do {
+            return try await inner.update(sessionID: sessionID, name: name, parentID: parentID, starred: starred)
+        } catch {
+            throw RealClientError.map(error)
+        }
+    }
     public func fork(name: String, sourceSessionID: String) async throws {
         try await run { _ = try await self.inner.fork(name: name, sourceSessionID: sourceSessionID) }
     }

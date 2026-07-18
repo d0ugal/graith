@@ -212,14 +212,21 @@ public actor MockHostClient: GraithHostClient {
         mutate(sessionID) { $0 = $0.with(name: newName) }
     }
 
-    public func star(sessionID: String) async throws {
-        try check(ControlType.star)
-        mutate(sessionID) { $0 = $0.with(starred: true) }
-    }
-
-    public func unstar(sessionID: String) async throws {
-        try check(ControlType.unstar)
-        mutate(sessionID) { $0 = $0.with(starred: false) }
+    public func update(sessionID: String, name: String?, parentID: String?, starred: Bool?) async throws -> UpdateResultMsg {
+        try check(ControlType.update)
+        mutate(sessionID) {
+            let parentOverride: String?? = parentID.map { $0.isEmpty ? nil : $0 }
+            $0 = $0.with(parentID: parentOverride, name: name, starred: starred)
+        }
+        guard let updated = sessions.first(where: { $0.id == sessionID }) else {
+            throw GraithClientError.daemon("session not found: \(sessionID)")
+        }
+        return UpdateResultMsg(
+            sessionID: updated.id,
+            name: updated.name,
+            parentID: updated.parentID ?? "",
+            starred: updated.starred ?? false
+        )
     }
 
     public func fork(name: String, sourceSessionID: String) async throws {
@@ -378,13 +385,14 @@ extension SessionInfo {
     func with(
         status: String? = nil,
         agentStatus: String? = nil,
+        parentID: String?? = nil,
         name: String? = nil,
         agent: String? = nil,
         starred: Bool? = nil,
         summaryText: String?? = nil
     ) -> SessionInfo {
         SessionInfo(
-            id: id, parentID: parentID, name: name ?? self.name, repoPath: repoPath, repoName: repoName,
+            id: id, parentID: parentID ?? self.parentID, name: name ?? self.name, repoPath: repoPath, repoName: repoName,
             worktreePath: worktreePath, branch: branch, baseBranch: baseBranch, agent: agent ?? self.agent,
             agentSessionID: agentSessionID, status: status ?? self.status,
             agentStatus: agentStatus ?? self.agentStatus,

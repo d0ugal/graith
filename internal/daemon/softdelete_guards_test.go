@@ -48,18 +48,12 @@ func TestGuardRestartRejectsSoftDeleted(t *testing.T) {
 	assertSoftDeletedError(t, err)
 }
 
-func TestGuardStarRejectsSoftDeleted(t *testing.T) {
-	sm := newSoftDeletedSession(t, "kirk-id", "kirk")
-
-	assertSoftDeletedError(t, sm.Star("kirk-id"))
-	assertSoftDeletedError(t, sm.Unstar("kirk-id"))
-}
-
 func TestGuardUpdateRejectsSoftDeleted(t *testing.T) {
 	sm := newSoftDeletedSession(t, "wynd-id", "wynd")
 
-	newName := "glen"
-	assertSoftDeletedError(t, sm.Update("wynd-id", &newName, nil))
+	starred := true
+	_, err := sm.Update("wynd-id", nil, nil, &starred)
+	assertSoftDeletedError(t, err)
 }
 
 func TestGuardForkRejectsSoftDeleted(t *testing.T) {

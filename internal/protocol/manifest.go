@@ -125,8 +125,7 @@ var registeredTypes = []any{
 	GCOrphanInfo{},
 	GCResultMsg{},
 	UpdateMsg{},
-	StarMsg{},
-	UnstarMsg{},
+	UpdateResultMsg{},
 	SetStatusMsg{},
 	StatusSetMsg{},
 	StopMsg{},
@@ -299,14 +298,16 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"HandshakeErrMsg": {SwiftRequired, "HandshakeErrMsg"},
 
 	// Lifecycle / control (client -> daemon).
-	"CreateMsg":    {SwiftRequired, "CreateMsg"},
-	"ForkMsg":      {SwiftRequired, "ForkMsg"},
-	"MigrateMsg":   {SwiftRequired, "MigrateMsg"},
-	"AttachMsg":    {SwiftRequired, "AttachMsg"},
-	"SetStatusMsg": {SwiftRequired, "SetStatusMsg"},
-	"TypeMsg":      {SwiftNA, ""}, // standalone remote typing is CLI-only
-	"ResizeMsg":    {SwiftRequired, "ResizeMsg"},
-	"LogsMsg":      {SwiftRequired, "LogsMsg"},
+	"CreateMsg":       {SwiftRequired, "CreateMsg"},
+	"ForkMsg":         {SwiftRequired, "ForkMsg"},
+	"MigrateMsg":      {SwiftRequired, "MigrateMsg"},
+	"AttachMsg":       {SwiftRequired, "AttachMsg"},
+	"UpdateMsg":       {SwiftRequired, "UpdateMsg"},
+	"UpdateResultMsg": {SwiftRequired, "UpdateResultMsg"},
+	"SetStatusMsg":    {SwiftRequired, "SetStatusMsg"},
+	"TypeMsg":         {SwiftNA, ""}, // standalone remote typing is CLI-only
+	"ResizeMsg":       {SwiftRequired, "ResizeMsg"},
+	"LogsMsg":         {SwiftRequired, "LogsMsg"},
 
 	// stop/delete/restart/restore share Swift's SessionScopeMsg (session_id +
 	// children + exclude_root + purge). DeleteMsg's `purge` is now settable in
@@ -320,8 +321,6 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	// Bare {session_id} requests share Swift's SessionIDMsg.
 	"InterruptMsg":      {SwiftRequired, "SessionIDMsg"},
 	"ResumeMsg":         {SwiftRequired, "SessionIDMsg"},
-	"StarMsg":           {SwiftRequired, "SessionIDMsg"},
-	"UnstarMsg":         {SwiftRequired, "SessionIDMsg"},
 	"StatusRequestMsg":  {SwiftRequired, "SessionIDMsg"},
 	"ScreenPreviewMsg":  {SwiftRequired, "SessionIDMsg"},
 	"ScreenSnapshotMsg": {SwiftRequired, "SessionIDMsg"},
@@ -385,7 +384,6 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"ConvertRequiredMsg":      {SwiftPlanned, ""},
 	"DeleteResultMsg":         {SwiftPlanned, ""},
 	"RestoreResultMsg":        {SwiftPlanned, ""},
-	"UpdateMsg":               {SwiftRequired, "UpdateMsg"},
 	"StatusSetMsg":            {SwiftPlanned, ""},
 	"WaitMsg":                 {SwiftNA, ""},
 	"WaitMatchedMsg":          {SwiftNA, ""},

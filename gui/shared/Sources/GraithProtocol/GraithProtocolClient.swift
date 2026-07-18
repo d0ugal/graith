@@ -352,23 +352,20 @@ public actor GraithProtocolClient {
         _ = try await conn.request("interrupt", payload: SessionIDMsg(sessionID: sessionID))
     }
 
-    public func update(sessionID: String, name: String? = nil, parentID: String? = nil) async throws {
+    /// Atomically update any combination of mutable session metadata. Nil fields
+    /// are omitted; explicit `starred: false` clears the persisted star.
+    public func update(
+        sessionID: String,
+        name: String? = nil,
+        parentID: String? = nil,
+        starred: Bool? = nil
+    ) async throws -> UpdateResultMsg {
         let conn = try await controlConnection()
-        _ = try await conn.request("update", payload: UpdateMsg(sessionID: sessionID, name: name, parentID: parentID))
-    }
-
-    /// `star` — mark a session as starred. The daemon replies `starred`.
-    /// `StarMsg` is wire-identical to `SessionIDMsg` (`{session_id}`), so the
-    /// latter is reused.
-    public func star(sessionID: String) async throws {
-        let conn = try await controlConnection()
-        _ = try await conn.request("star", payload: SessionIDMsg(sessionID: sessionID))
-    }
-
-    /// `unstar` — clear a session's star. The daemon replies `unstarred`.
-    public func unstar(sessionID: String) async throws {
-        let conn = try await controlConnection()
-        _ = try await conn.request("unstar", payload: SessionIDMsg(sessionID: sessionID))
+        let reply = try await conn.request(
+            "update",
+            payload: UpdateMsg(sessionID: sessionID, name: name, parentID: parentID, starred: starred)
+        )
+        return try decodePayload(reply, as: UpdateResultMsg.self)
     }
 
     /// `fork` — create a new session cloning `sourceSessionID`'s worktree and

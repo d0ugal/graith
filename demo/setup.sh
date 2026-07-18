@@ -171,7 +171,7 @@ echo "==> stopping one session (docs-refresh) for a running/stopped mix"
 "$GR" stop docs-refresh --force >/dev/null 2>&1 || true
 
 # Star one so the demo can show the starred marker.
-"$GR" star tracing-api >/dev/null 2>&1 || true
+"$GR" update tracing-api --starred=true >/dev/null 2>&1 || true
 
 echo
 echo "Demo environment ready. Sessions:"

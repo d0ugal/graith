@@ -87,8 +87,8 @@ var newControlConn = func() (controlConn, func(), error) {
 
 // withFreshClient opens a fresh connection and runs a single control operation
 // against it, closing the connection afterwards. It is the shared skeleton for
-// the one-shot session operations the overlay drives (star, stop, restart,
-// update-name, delete, restore).
+// the one-shot session operations the overlay drives (update, stop, restart,
+// delete, restore).
 func withFreshClient(op func(controlConn) error) error {
 	c, closeConn, err := newControlConn()
 	if err != nil {
@@ -101,11 +101,7 @@ func withFreshClient(op func(controlConn) error) error {
 
 func toggleStar(sessionID string, star bool) error {
 	return withFreshClient(func(c controlConn) error {
-		if star {
-			return controlOp(c, "star", protocol.StarMsg{SessionID: sessionID})
-		}
-
-		return controlOp(c, "unstar", protocol.UnstarMsg{SessionID: sessionID})
+		return controlOp(c, "update", protocol.UpdateMsg{SessionID: sessionID, Starred: &star})
 	})
 }
 
