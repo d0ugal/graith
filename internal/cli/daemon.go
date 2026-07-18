@@ -246,7 +246,7 @@ func execUpgrade(successMsg string) error {
 	// configured local handshake deadline — distinct from the post-exec startup
 	// budget the readiness wait uses (issue #1242). A connection that can't accept
 	// the deadline can't be safely bounded, so fail rather than proceed unbounded.
-	if err := c.SetDeadline(connectionNow().Add(localDaemonHandshakeTimeout())); err != nil {
+	if err := c.SetDeadline(connectionNow().Add(localUpgradeNegotiationTimeout())); err != nil {
 		c.Close()
 		return fmt.Errorf("set upgrade handshake deadline: %w", err)
 	}

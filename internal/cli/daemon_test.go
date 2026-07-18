@@ -129,10 +129,14 @@ func setupUpgradeTest(t *testing.T) *fakeConnClock {
 
 	origCfg, origNow, origSleep := cfg, connectionNow, connectionSleep
 	origDial, origProbe, origOut, origPaths := dialUpgradeClient, probeDaemonIdentityFn, out, paths
+	origNegotiationFloor, origReadinessFloor := upgradeNegotiationFloor, upgradeReadinessFloor
 	t.Cleanup(func() {
 		cfg, connectionNow, connectionSleep = origCfg, origNow, origSleep
 		dialUpgradeClient, probeDaemonIdentityFn, out, paths = origDial, origProbe, origOut, origPaths
+		upgradeNegotiationFloor, upgradeReadinessFloor = origNegotiationFloor, origReadinessFloor
 	})
+	upgradeNegotiationFloor = 0
+	upgradeReadinessFloor = 0
 
 	cfg = &config.Config{Connection: config.ConnectionConfig{
 		HandshakeTimeout:  "1s",
@@ -198,6 +202,29 @@ func TestExecUpgradeInstallsConfiguredHandshakeDeadline(t *testing.T) {
 
 	if !fake.closed {
 		t.Error("execUpgrade did not close the connection")
+	}
+}
+
+func TestExecUpgradeNegotiationFloorCoversServerAdmission(t *testing.T) {
+	setupUpgradeTest(t)
+	upgradeNegotiationFloor = 30 * time.Second
+	cfg.Connection.HandshakeTimeout = "1s"
+	fixedNow := time.Unix(1_700_000, 0)
+	connectionNow = func() time.Time { return fixedNow }
+	fake := &fakeUpgradeConn{
+		responses: []protocol.Envelope{
+			upgradeHandshake("old-gen"),
+			upgradePreflightOK(),
+			errEnv("upgrade refused"),
+		},
+	}
+	dialUpgradeClient = func() (upgradeExchangeConn, error) { return fake, nil }
+
+	if err := execUpgrade("done"); err == nil {
+		t.Fatal("expected injected refusal")
+	}
+	if want := fixedNow.Add(30 * time.Second); !fake.deadline.Equal(want) {
+		t.Fatalf("upgrade negotiation deadline = %v, want %v", fake.deadline, want)
 	}
 }
 

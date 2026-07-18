@@ -110,7 +110,8 @@ func runOldLibghosttyUpgradeStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listenerW.Close()
-	if err := clearCloseOnExec(int(listenerR.Fd())); err != nil {
+	listenerFD := duplicateTransferredFileFD(t, listenerR)
+	if err := clearCloseOnExec(listenerFD); err != nil {
 		t.Fatal(err)
 	}
 	handoffFD, err := session.DuplicateFD()
@@ -118,6 +119,13 @@ func runOldLibghosttyUpgradeStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := clearCloseOnExec(handoffFD); err != nil {
+		t.Fatal(err)
+	}
+	scrollbackFD, err := session.Scrollback.DuplicateFD()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := clearCloseOnExec(scrollbackFD); err != nil {
 		t.Fatal(err)
 	}
 	executable, err := os.Executable()
@@ -132,10 +140,22 @@ func runOldLibghosttyUpgradeStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	configFile := filepath.Join(dir, "config.toml")
 	manifest := &UpgradeManifest{
-		Version: upgradeManifestVersion, ListenerFd: int(listenerR.Fd()),
+		Version:       upgradeManifestVersion,
+		ListenerFd:    listenerFD,
+		StateSnapshot: []byte(`{"version":23,"sessions":{}}`),
+		ConfigFile:    configFile,
+		Paths: UpgradePathDescriptor{
+			ConfigFile: configFile,
+			DataDir:    dir,
+			StateFile:  filepath.Join(dir, "state.json"),
+			RuntimeDir: dir,
+			SocketPath: filepath.Join(dir, "graith.sock"),
+		},
 		Sessions: []UpgradeSession{{
-			ID: session.ID, Fd: handoffFD, PID: session.ProcessPID(), PIDStartTime: startTime,
+			ID: session.ID, Fd: handoffFD, ScrollbackFd: scrollbackFD,
+			PID: session.ProcessPID(), PIDStartTime: startTime,
 		}},
 		Target: UpgradeTargetDescriptor{
 			ResolvedPath: executable, Size: info.Size(), Mode: uint32(info.Mode()),
@@ -185,7 +205,7 @@ func runNewLibghosttyUpgradeStage(t *testing.T) {
 	_ = syscall.Close(manifest.ListenerFd)
 	entry := manifest.Sessions[0]
 	session, err := grpty.AdoptSession(grpty.AdoptOpts{
-		ID: entry.ID, Fd: uintptr(entry.Fd), PID: entry.PID,
+		ID: entry.ID, Fd: uintptr(entry.Fd), ScrollbackFd: uintptr(entry.ScrollbackFd), PID: entry.PID,
 		ExpectedPIDStartTime: entry.PIDStartTime,
 		LogPath:              filepath.Join(os.Getenv(libghosttyUpgradeDirEnv), "canny-exec.log"),
 		HydrationBytes:       1024 * 1024,

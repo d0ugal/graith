@@ -4,6 +4,8 @@ import (
 	"context"
 	"net"
 	"time"
+
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 // dialLocalDaemon dials the local daemon Unix socket. It is a package var (not a
@@ -59,6 +61,8 @@ var (
 	daemonHandshakeTimeout  = 5 * time.Second
 	daemonStartTimeout      = 5 * time.Second
 	daemonStartPollInterval = 50 * time.Millisecond
+	upgradeNegotiationFloor = protocol.UpgradeNegotiationTimeout
+	upgradeReadinessFloor   = protocol.UpgradeReadinessTimeout
 
 	// Remote daemon (TLS over TCP): used by ConnectRemote and PairRemote.
 	remoteDialTimeout      = 10 * time.Second

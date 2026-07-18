@@ -281,6 +281,46 @@ func TestRequestUpgradeUsesExactPreflightBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestRequestUpgradeNegotiationFloorCoversHealthyAdmission(t *testing.T) {
+	c, serverConn := setupTestClient(t)
+	originalHandshake := daemonHandshakeTimeout
+	originalFloor := upgradeNegotiationFloor
+	daemonHandshakeTimeout = 10 * time.Millisecond
+	upgradeNegotiationFloor = 200 * time.Millisecond
+	t.Cleanup(func() {
+		daemonHandshakeTimeout = originalHandshake
+		upgradeNegotiationFloor = originalFloor
+	})
+	serverReader := protocol.NewFrameReader(serverConn)
+	serverWriter := protocol.NewFrameWriter(serverConn)
+	errCh := make(chan error, 1)
+	go func() {
+		if _, err := serverReader.ReadFrame(); err != nil {
+			errCh <- err
+			return
+		}
+		time.Sleep(40 * time.Millisecond)
+		preflight, _ := protocol.EncodeControl("upgrade_preflight_ok", struct{}{})
+		if err := serverWriter.WriteFrame(protocol.ChannelControl, preflight); err != nil {
+			errCh <- err
+			return
+		}
+		if _, err := serverReader.ReadFrame(); err != nil {
+			errCh <- err
+			return
+		}
+		time.Sleep(40 * time.Millisecond)
+		ack, _ := protocol.EncodeControl("upgrading", struct{}{})
+		errCh <- serverWriter.WriteFrame(protocol.ChannelControl, ack)
+	}()
+	if err := requestUpgrade(c); err != nil {
+		t.Fatalf("healthy delayed upgrade negotiation failed: %v", err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRequestUpgradeRefusalNeverSendsMutatingRequest(t *testing.T) {
 	c, serverConn := setupTestClient(t)
 	serverReader := protocol.NewFrameReader(serverConn)

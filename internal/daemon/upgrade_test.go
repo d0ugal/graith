@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adrg/xdg"
 	"github.com/d0ugal/graith/internal/config"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"golang.org/x/sys/unix"
@@ -132,6 +133,86 @@ func TestUpgradeOwnershipCapsuleRoundTripScrubsPrivateEnvironment(t *testing.T) 
 	}
 	if !upgradeOwnershipResourcesMatch(manifest, owned) {
 		t.Fatalf("decoded capsule resources = %+v, want %+v", owned, manifest)
+	}
+}
+
+func TestRunAdoptBootstrapSecuresCapsuleDescriptorsBeforeManifestRead(t *testing.T) {
+	dir := t.TempDir()
+	listenerR, listenerW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listenerW.Close()
+	listenerFD := duplicateTransferredFileFD(t, listenerR)
+	sessionR, sessionW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sessionW.Close()
+	sessionFD := duplicateTransferredFileFD(t, sessionR)
+	cmd := exec.Command("sleep", "30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	reaped := false
+	t.Cleanup(func() {
+		if !reaped {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_ = cmd.Wait()
+		}
+	})
+	startTime, err := grpty.ProcessStartTime(cmd.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scrollbackFD := openUpgradeScrollbackFD(t, filepath.Join(dir, "canny.log"))
+	manifest := validUpgradeManifestForBoundaryTest(t, listenerFD, []UpgradeSession{{
+		ID: "canny", Fd: sessionFD, ScrollbackFd: scrollbackFD,
+		PID: cmd.Process.Pid, PIDStartTime: startTime,
+	}})
+	path, err := WriteManifest(dir, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := prepareManifestHandoff(path, manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := prepareOwnershipCapsule(manifest); err != nil {
+		t.Fatal(err)
+	}
+	resourceFDs := []int{manifest.ListenerFd, manifest.Sessions[0].Fd, manifest.Sessions[0].ScrollbackFd}
+	for _, fd := range resourceFDs {
+		flags, err := descriptorFlags(fd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := setDescriptorFlags(fd, flags&^syscall.FD_CLOEXEC); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv(upgradeOwnershipCapsuleEnv, manifest.ownershipCapsule)
+	t.Setenv(upgradeOwnershipFDEnv, strconv.Itoa(manifest.ownershipFD))
+
+	originalPread := upgradePread
+	preadCalled := false
+	upgradePread = func(int, []byte, int64) (int, error) {
+		preadCalled = true
+		for _, fd := range resourceFDs {
+			flags, flagErr := descriptorFlags(fd)
+			if flagErr != nil || flags&syscall.FD_CLOEXEC == 0 {
+				t.Errorf("capsule descriptor %d was not secured before manifest read: flags=%d err=%v", fd, flags, flagErr)
+			}
+		}
+		return 0, errors.New("injected manifest read refusal")
+	}
+	t.Cleanup(func() { upgradePread = originalPread })
+	if err := RunAdoptBootstrap("", path); err == nil {
+		t.Fatal("injected manifest read failure was ignored")
+	}
+	reaped = true
+	if !preadCalled {
+		t.Fatal("bootstrap did not reach manifest read")
 	}
 }
 
@@ -389,11 +470,13 @@ func TestManifestReadDeadlineRunsArmedCleanupWithoutDescriptorABA(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer listenerW.Close()
+	listenerFD := duplicateTransferredFileFD(t, listenerR)
 	sessionR, sessionW, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer sessionW.Close()
+	sessionFD := duplicateTransferredFileFD(t, sessionR)
 	cmd := exec.Command("sleep", "30")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
@@ -407,8 +490,8 @@ func TestManifestReadDeadlineRunsArmedCleanupWithoutDescriptorABA(t *testing.T) 
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		_ = cmd.Wait()
 	})
-	manifest := validUpgradeManifestForBoundaryTest(t, int(listenerR.Fd()), []UpgradeSession{{
-		ID: "strath", Fd: int(sessionR.Fd()),
+	manifest := validUpgradeManifestForBoundaryTest(t, listenerFD, []UpgradeSession{{
+		ID: "strath", Fd: sessionFD,
 		ScrollbackFd: openUpgradeScrollbackFD(t, filepath.Join(dir, "strath.log")),
 		PID:          cmd.Process.Pid, PIDStartTime: start,
 	}})
@@ -753,6 +836,21 @@ func openUpgradeScrollbackFD(t *testing.T, path string) int {
 	return fd
 }
 
+func duplicateTransferredFileFD(t *testing.T, source *os.File) int {
+	t.Helper()
+	fd, err := unix.FcntlInt(source.Fd(), unix.F_DUPFD_CLOEXEC, 3)
+	if err != nil {
+		_ = source.Close()
+		t.Fatal(err)
+	}
+	if err := source.Close(); err != nil {
+		_ = syscall.Close(fd)
+		t.Fatal(err)
+	}
+
+	return fd
+}
+
 func writeCapacityProbeExecutable(t *testing.T, probe any) string {
 	t.Helper()
 	data, err := json.Marshal(probe)
@@ -800,9 +898,9 @@ func TestProbeUpgradeTargetContracts(t *testing.T) {
 			name: "unavailable", probe: compatibleCapacityProbe("unavailable"), wantErr: true,
 		},
 		{
-			name: "unknown version", probe: func() UpgradeCapacityProbe {
+			name: "old version", probe: func() UpgradeCapacityProbe {
 				probe := compatibleCapacityProbe("unlimited")
-				probe.Version = 99
+				probe.Version = 1
 				return probe
 			}(), wantErr: true,
 		},
@@ -820,6 +918,61 @@ func TestProbeUpgradeTargetContracts(t *testing.T) {
 				t.Cleanup(func() { _ = target.pin.close() })
 			}
 		})
+	}
+}
+
+func TestCurrentUpgradeCapacityProbeBindsLegacyEffectiveConfigSource(t *testing.T) {
+	oldConfigHome := xdg.ConfigHome
+	t.Cleanup(func() { xdg.ConfigHome = oldConfigHome })
+	currentHome := t.TempDir()
+	legacyHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", currentHome)
+	t.Setenv("GRAITH_PROFILE", "")
+	xdg.ConfigHome = legacyHome
+	legacyPath := filepath.Join(legacyHome, "graith", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("default_agent = \"claude\"\n")
+	if err := os.WriteFile(legacyPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	probe, err := CurrentUpgradeCapacityProbeForConfig("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSource := makeUpgradeConfigSource(legacyPath, data, true)
+	if probe.ConfigSource != wantSource {
+		t.Fatalf("effective config source = %+v, want %+v", probe.ConfigSource, wantSource)
+	}
+	if probe.Paths.ConfigFile != canonicalUpgradePath(legacyPath) {
+		t.Fatalf("effective probe config path = %q, want legacy %q", probe.Paths.ConfigFile, legacyPath)
+	}
+}
+
+func TestProbeUpgradeTargetRejectsSilentDefaultConfig(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "canny.toml")
+	data := []byte("default_agent = \"claude\"\n")
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := config.ResolvePaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectation := upgradeProbeExpectation{
+		profile:      paths.Profile,
+		paths:        makeUpgradePathDescriptor(paths, configPath),
+		configSource: makeUpgradeConfigSource(configPath, data, true),
+	}
+	probe := compatibleCapacityProbe("unlimited")
+	probe.Profile = expectation.profile
+	probe.Paths = expectation.paths
+	probe.ConfigSource = UpgradeConfigSource{Path: canonicalUpgradePath(configPath)}
+	_, err = probeUpgradeTarget(writeCapacityProbeExecutable(t, probe), expectation)
+	if err == nil || !strings.Contains(err.Error(), "config source") {
+		t.Fatalf("silent-default target error = %v, want config-source refusal", err)
 	}
 }
 
@@ -1096,6 +1249,83 @@ func TestRollbackUpgradeDescriptorsTreatsClosedOriginalAsResolved(t *testing.T) 
 	}
 }
 
+func TestListenerFileRemainsSoleCloserAcrossRollback(t *testing.T) {
+	tests := []struct {
+		name     string
+		rollback func(*UpgradeManifest) error
+	}{
+		{name: "reversible", rollback: rollbackUpgradeDescriptors},
+		{name: "under_fork_lock", rollback: func(manifest *UpgradeManifest) error {
+			cause := errors.New("injected exec refusal")
+			syscall.ForkLock.Lock()
+			err := rollbackUpgradeDescriptorsBeforeForkUnlock(manifest, cause)
+			syscall.ForkLock.Unlock()
+			if !errors.Is(err, cause) {
+				return fmt.Errorf("rollback cause was lost: %w", err)
+			}
+
+			return nil
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			listenerFile, peer, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = listenerFile.Close() })
+			t.Cleanup(func() { _ = peer.Close() })
+			listenerFD := int(listenerFile.Fd())
+
+			sm := sleeperSM(t)
+			sm.upgradePending = true
+			manifest, err := sm.prepareUpgrade(listenerFile.Fd(), "", 0, nil, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := makeUpgradeDescriptorsInheritable(manifest); err != nil {
+				t.Fatal(err)
+			}
+			if err := tt.rollback(manifest); err != nil {
+				t.Fatal(err)
+			}
+
+			// New behavior leaves the duplicate open but secured for its os.File
+			// owner. The old raw-owned path closed it here without updating the
+			// wrapper, opening an ABA window before the deferred File.Close.
+			if _, err := descriptorFlags(listenerFD); err == nil {
+				if err := listenerFile.Close(); err != nil {
+					t.Fatal(err)
+				}
+			} else if !errors.Is(err, syscall.EBADF) {
+				t.Fatal(err)
+			}
+
+			reuseRead, reuseWrite, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = reuseRead.Close() })
+			t.Cleanup(func() { _ = reuseWrite.Close() })
+			reuseFD := int(reuseRead.Fd())
+			if reuseFD != listenerFD {
+				if err := unix.Dup2(reuseFD, listenerFD); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = syscall.Close(listenerFD) })
+			}
+
+			// This is a harmless repeated Close only when the wrapper was the sole
+			// original closer. If raw rollback closed it first, this closes the
+			// deliberately reused descriptor instead.
+			_ = listenerFile.Close()
+			if _, err := descriptorFlags(listenerFD); err != nil {
+				t.Fatalf("listener File.Close closed a reused descriptor: %v", err)
+			}
+		})
+	}
+}
+
 func TestRollbackUpgradeDescriptorsRetainsUnsafeRestorationForRetry(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -1131,7 +1361,7 @@ func TestRollbackUpgradeDescriptorsRetainsUnsafeRestorationForRetry(t *testing.T
 	}
 }
 
-func TestUnsafeRollbackForkLockPreventsListenerAndPTMInheritance(t *testing.T) {
+func TestUnsafeRollbackForkLockPreventsListenerPTMAndLogInheritance(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -1141,12 +1371,8 @@ func TestUnsafeRollbackForkLockPreventsListenerAndPTMInheritance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listenerFD, err := unix.FcntlInt(listenerFile.Fd(), unix.F_DUPFD_CLOEXEC, 100)
-	_ = listenerFile.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer syscall.Close(listenerFD)
+	t.Cleanup(func() { _ = listenerFile.Close() })
+	listenerFD := int(listenerFile.Fd())
 
 	sm := sleeperSM(t)
 	session, err := grpty.NewSession(grpty.SessionOpts{
@@ -1165,13 +1391,22 @@ func TestUnsafeRollbackForkLockPreventsListenerAndPTMInheritance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer syscall.Close(ptmFD)
+	logFile, err := os.OpenFile(filepath.Join(t.TempDir(), "canny.log"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logFD, err := unix.FcntlInt(logFile.Fd(), unix.F_DUPFD_CLOEXEC, ptmFD+1)
+	_ = logFile.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
 	manifest := &UpgradeManifest{
 		descriptorFlags: map[int]int{
 			listenerFD: syscall.FD_CLOEXEC,
 			ptmFD:      syscall.FD_CLOEXEC,
+			logFD:      syscall.FD_CLOEXEC,
 		},
-		ownedDescriptors: map[int]struct{}{listenerFD: {}, ptmFD: {}},
+		ownedDescriptors: map[int]struct{}{ptmFD: {}, logFD: {}},
 	}
 
 	syscall.ForkLock.Lock()
@@ -1185,7 +1420,7 @@ func TestUnsafeRollbackForkLockPreventsListenerAndPTMInheritance(t *testing.T) {
 		t.Fatal(err)
 	}
 	child := exec.Command("sh", "-c", `for fd in "$@"; do if [ -e "/dev/fd/$fd" ] || [ -e "/proc/self/fd/$fd" ]; then exit 42; fi; done`,
-		"sh", strconv.Itoa(listenerFD), strconv.Itoa(ptmFD))
+		"sh", strconv.Itoa(listenerFD), strconv.Itoa(ptmFD), strconv.Itoa(logFD))
 	childDone := make(chan error, 1)
 	go func() { childDone <- child.Run() }()
 	select {
@@ -1194,45 +1429,47 @@ func TestUnsafeRollbackForkLockPreventsListenerAndPTMInheritance(t *testing.T) {
 	case <-time.After(25 * time.Millisecond):
 	}
 
+	originalSet := rollbackSetDescriptorFlags
 	originalClose := rollbackCloseDescriptor
+	originalExit := unsafeUpgradeRollbackExit
+	t.Cleanup(func() {
+		rollbackSetDescriptorFlags = originalSet
+		rollbackCloseDescriptor = originalClose
+		unsafeUpgradeRollbackExit = originalExit
+	})
+	rollbackSetDescriptorFlags = func(int, int) error { return syscall.EIO }
 	rollbackCloseDescriptor = func(int) error { return syscall.EIO }
-	rollbackErr := rollbackUpgradeDescriptors(manifest)
-	rollbackCloseDescriptor = originalClose
+	exitCalled := make(chan struct{})
+	unsafeUpgradeRollbackExit = func() {
+		// Production exits here without releasing ForkLock. The test restores
+		// real rollback operations so the helper may return only after proving
+		// the queued child cannot inherit any handoff descriptor.
+		rollbackSetDescriptorFlags = originalSet
+		rollbackCloseDescriptor = originalClose
+		close(exitCalled)
+	}
+	rollbackErr := rollbackUpgradeDescriptorsBeforeForkUnlock(manifest, errors.New("injected exec failure"))
 	if rollbackErr == nil {
-		t.Fatal("injected rollback close failure was ignored")
+		t.Fatal("injected CLOEXEC restoration failure was ignored")
 	}
-	for _, fd := range []int{listenerFD, ptmFD} {
-		flags, err := descriptorFlags(fd)
-		if err != nil || flags&syscall.FD_CLOEXEC == 0 {
-			t.Fatalf("descriptor %d was not secured before ForkLock release: flags=%d err=%v", fd, flags, err)
-		}
-	}
-
-	signals := make(chan os.Signal)
-	upgrades := make(chan *upgradeRequest)
-	shutdown := make(chan struct{}, 1)
-	controlDone := make(chan error, 1)
-	go func() {
-		controlDone <- runControlLoop(signals, upgrades, discardLogger(), func() error { return nil }, func() {
-			shutdown <- struct{}{}
-		}, func(*upgradeRequest) error {
-			return unsafeUpgradeDescriptor(rollbackErr)
-		})
-	}()
-	upgrades <- newUpgradeRequest("/thrawn/gr")
 	select {
-	case <-shutdown:
-	case <-time.After(time.Second):
-		t.Fatal("unsafe rollback did not enter fail-closed shutdown")
+	case <-exitCalled:
+	default:
+		t.Fatal("unsafe rollback did not enter fail-closed exit while ForkLock was held")
+	}
+	listenerFlags, err := descriptorFlags(listenerFD)
+	if err != nil || listenerFlags&syscall.FD_CLOEXEC == 0 {
+		t.Fatalf("wrapper-owned listener was not restored CLOEXEC: flags=%d err=%v", listenerFlags, err)
+	}
+	for _, fd := range []int{ptmFD, logFD} {
+		if _, err := descriptorFlags(fd); !errors.Is(err, syscall.EBADF) {
+			t.Fatalf("raw-owned descriptor %d remained live before ForkLock release: %v", fd, err)
+		}
 	}
 	syscall.ForkLock.Unlock()
 	forkLocked = false
 	if err := <-childDone; err != nil {
-		t.Fatalf("queued child observed listener/PTM handoff descriptors: %v", err)
-	}
-	var unsafeErr *upgradeDescriptorSafetyError
-	if err := <-controlDone; !errors.As(err, &unsafeErr) {
-		t.Fatalf("control loop error = %v, want unsafe rollback", err)
+		t.Fatalf("queued child observed listener/PTM/log handoff descriptors: %v", err)
 	}
 }
 
@@ -2311,6 +2548,194 @@ func TestAdoptSessionsUsesOneDeadlineAndDegradesLaterScreens(t *testing.T) {
 			t.Errorf("%s raw marker missing after shutdown: %q, err=%v", item.id, data, err)
 		}
 	}
+}
+
+func TestAdoptSessionsPostAdoptStateChangeTerminatesAfterFinalDrain(t *testing.T) {
+	sm := sleeperSM(t)
+	cmd := exec.Command("sleep", "30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	reaped := false
+	t.Cleanup(func() {
+		if !reaped {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_ = cmd.Wait()
+		}
+	})
+	startTime, err := grpty.ProcessStartTime(cmd.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readEnd, writeEnd, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fd, err := syscall.Dup(int(readEnd.Fd()))
+	_ = readEnd.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(sm.paths.LogDir, "canny.log")
+	marker := []byte("canny queued post-adoption marker")
+	sm.state.Sessions["canny"] = &SessionState{
+		ID: "canny", Name: "canny", Status: StatusRunning,
+		PID: cmd.Process.Pid, PIDStartTime: startTime,
+	}
+	sm.adoptSession = func(opts grpty.AdoptOpts) (*grpty.Session, error) {
+		session, adoptErr := grpty.AdoptSession(opts)
+		if adoptErr != nil {
+			return nil, adoptErr
+		}
+		if _, err := writeEnd.Write(marker); err != nil {
+			t.Errorf("queue marker: %v", err)
+		}
+		if err := writeEnd.Close(); err != nil {
+			t.Errorf("close marker writer: %v", err)
+		}
+		sm.mu.Lock()
+		sm.state.Sessions["canny"].Status = StatusDeleting
+		sm.mu.Unlock()
+
+		return session, nil
+	}
+	manifest := &UpgradeManifest{
+		adoptionDeadline: time.Now().Add(5 * time.Second),
+		Sessions: []UpgradeSession{{
+			ID: "canny", Fd: fd, ScrollbackFd: openUpgradeScrollbackFD(t, logPath),
+			PID: cmd.Process.Pid, PIDStartTime: startTime,
+		}},
+	}
+	result, err := sm.adoptSessions(manifest, nil, nil, nil, false)
+	if err != nil || len(result.UnresolvedSessions) != 0 || len(result.ResolvedSessions) != 1 {
+		t.Fatalf("post-adoption rejection = (%+v, %v)", result, err)
+	}
+	reaped = true
+	if _, ok := sm.GetPTY("canny"); ok {
+		t.Fatal("state-changed adopted session was published")
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil || !bytes.Contains(data, marker) {
+		t.Fatalf("post-adoption final drain = %q, err=%v", data, err)
+	}
+	if !exactProcessGroupGone(cmd.Process.Pid) {
+		t.Fatal("post-adoption rejection left the exact process group alive")
+	}
+}
+
+func TestAdoptSessionsKeepsEarlierWaiterDormantAcrossLaterFailure(t *testing.T) {
+	sm := sleeperSM(t)
+	type fixture struct {
+		id        string
+		cmd       *exec.Cmd
+		startTime int64
+		writer    *os.File
+		fd        int
+		logFD     int
+		reaped    bool
+	}
+	fixtures := make([]*fixture, 0, 2)
+	for _, id := range []string{"canny", "dreich"} {
+		cmd := exec.Command("sleep", "30")
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		startTime, err := grpty.ProcessStartTime(cmd.Process.Pid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		readEnd, writeEnd, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		fd, err := syscall.Dup(int(readEnd.Fd()))
+		_ = readEnd.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		logFD := openUpgradeScrollbackFD(t, filepath.Join(sm.paths.LogDir, id+".log"))
+		fixtures = append(fixtures, &fixture{
+			id: id, cmd: cmd, startTime: startTime, writer: writeEnd, fd: fd, logFD: logFD,
+		})
+		sm.state.Sessions[id] = &SessionState{
+			ID: id, Name: id, Status: StatusRunning,
+			PID: cmd.Process.Pid, PIDStartTime: startTime,
+		}
+	}
+	t.Cleanup(func() {
+		for _, item := range fixtures {
+			_ = item.writer.Close()
+			if !item.reaped {
+				_ = syscall.Kill(-item.cmd.Process.Pid, syscall.SIGKILL)
+				_ = item.cmd.Wait()
+			}
+		}
+	})
+
+	call := 0
+	sm.adoptSession = func(opts grpty.AdoptOpts) (*grpty.Session, error) {
+		call++
+		if call == 1 {
+			return grpty.AdoptSession(opts)
+		}
+		first := fixtures[0]
+		if err := syscall.Kill(-first.cmd.Process.Pid, syscall.SIGKILL); err != nil {
+			t.Errorf("kill earlier adopted process: %v", err)
+		}
+		_ = first.writer.Close()
+		deadline := time.Now().Add(time.Second)
+		for {
+			var status syscall.WaitStatus
+			pid, waitErr := syscall.Wait4(first.cmd.Process.Pid, &status, syscall.WNOHANG, nil)
+			if waitErr != nil {
+				t.Errorf("wait for earlier adopted process: %v", waitErr)
+				break
+			}
+			if pid == first.cmd.Process.Pid {
+				first.reaped = true
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Error("earlier adopted process was not exact-waitable during later failure")
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		_ = syscall.Close(int(opts.Fd))
+		_ = syscall.Close(int(opts.ScrollbackFd))
+
+		return nil, errors.New("injected later-session adoption failure")
+	}
+	manifest := &UpgradeManifest{adoptionDeadline: time.Now().Add(5 * time.Second)}
+	for _, item := range fixtures {
+		manifest.Sessions = append(manifest.Sessions, UpgradeSession{
+			ID: item.id, Fd: item.fd, ScrollbackFd: item.logFD,
+			PID: item.cmd.Process.Pid, PIDStartTime: item.startTime,
+		})
+	}
+	result, err := sm.adoptSessions(manifest, nil, nil, nil, false)
+	if err != nil || len(result.UnresolvedSessions) != 0 {
+		t.Fatalf("later-session failure result = (%+v, %v)", result, err)
+	}
+	fixtures[1].reaped = true
+	if len(result.adoptedSessions) != 1 {
+		t.Fatalf("adopted sessions = %d, want 1", len(result.adoptedSessions))
+	}
+	firstSession := result.adoptedSessions[0]
+	select {
+	case <-firstSession.Done():
+		t.Fatal("earlier adopted waiter ran before durable commit and guard disarm")
+	default:
+	}
+	firstSession.StartAdoptedWaiter()
+	select {
+	case <-firstSession.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("earlier adopted session did not finish after waiter activation")
+	}
+	firstSession.Close()
 }
 
 func TestAdoptSessionsReturnsResolvedOwnershipBeforePersistError(t *testing.T) {

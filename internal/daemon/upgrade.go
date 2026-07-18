@@ -83,15 +83,15 @@ type UpgradePathDescriptor struct {
 }
 
 const (
-	upgradeCapacityProbeVersion  = 1
+	upgradeCapacityProbeVersion  = 2
 	upgradeManifestVersion       = 2
 	upgradeHelperHandoffVersion  = 2
 	upgradeCapacityProbeMaxBytes = 1024
-	upgradeCapacityProbeTimeout  = 2 * time.Second
+	upgradeCapacityProbeTimeout  = 3 * time.Second
 	upgradeManifestMaxBytes      = 4 * 1024 * 1024
 	upgradeManifestMaxSessions   = 4096
 	upgradeManifestMaxHelpers    = 256
-	upgradeCapacityProbeMarker   = "graith-private-upgrade-probe-v1"
+	upgradeCapacityProbeMarker   = "graith-private-upgrade-probe-v2"
 	upgradeOwnershipFDEnv        = "GRAITH_PRIVATE_UPGRADE_OWNERSHIP_FD"
 	upgradeOwnershipCapsuleEnv   = "GRAITH_PRIVATE_UPGRADE_CAPSULE"
 	upgradeOwnershipHeaderMax    = 2 * 1024 * 1024
@@ -125,6 +125,13 @@ type UpgradeCapacityProbe struct {
 	AdoptionVersion      int                   `json:"adoption_version"`
 	Profile              string                `json:"profile,omitempty"`
 	Paths                UpgradePathDescriptor `json:"paths,omitempty"`
+	ConfigSource         UpgradeConfigSource   `json:"config_source"`
+}
+
+type UpgradeConfigSource struct {
+	Path    string `json:"path"`
+	Present bool   `json:"present"`
+	SHA256  string `json:"sha256,omitempty"`
 }
 
 func IsUpgradeCapacityProbeMarker(marker string) bool {
@@ -162,7 +169,15 @@ func CurrentUpgradeCapacityProbe() UpgradeCapacityProbe {
 
 func CurrentUpgradeCapacityProbeForConfig(configFile string) (UpgradeCapacityProbe, error) {
 	probe := CurrentUpgradeCapacityProbe()
-	cfg, err := config.LoadOrDefault(configFile)
+	effectiveConfig, _, err := config.ResolveConfigPath(configFile)
+	if err != nil {
+		return UpgradeCapacityProbe{}, err
+	}
+	configSnapshot, configPresent, err := captureUpgradeConfigSnapshot(effectiveConfig)
+	if err != nil {
+		return UpgradeCapacityProbe{}, err
+	}
+	cfg, err := config.LoadOrDefault(effectiveConfig)
 	if err != nil {
 		return UpgradeCapacityProbe{}, err
 	}
@@ -174,7 +189,8 @@ func CurrentUpgradeCapacityProbeForConfig(configFile string) (UpgradeCapacityPro
 		paths = paths.WithDataDir(cfg.DataDir)
 	}
 	probe.Profile = paths.Profile
-	probe.Paths = makeUpgradePathDescriptor(paths, configFile)
+	probe.Paths = makeUpgradePathDescriptor(paths, effectiveConfig)
+	probe.ConfigSource = makeUpgradeConfigSource(effectiveConfig, configSnapshot, configPresent)
 	return probe, nil
 }
 
@@ -201,8 +217,9 @@ type upgradeTarget struct {
 }
 
 type upgradeProbeExpectation struct {
-	profile string
-	paths   UpgradePathDescriptor
+	profile      string
+	paths        UpgradePathDescriptor
+	configSource UpgradeConfigSource
 }
 
 func probeUpgradeTarget(clientExecPath string, expectations ...upgradeProbeExpectation) (*upgradeTarget, error) {
@@ -229,7 +246,7 @@ func probeUpgradeTarget(clientExecPath string, expectations ...upgradeProbeExpec
 	if len(expectations) > 0 {
 		expectation = expectations[0]
 	}
-	data, err := runUpgradeCapacityProbe(pin, expectation.paths.ConfigFile, expectation.profile)
+	data, err := runUpgradeCapacityProbe(pin, expectation.configSource.Path, expectation.profile)
 	if err != nil {
 		return nil, err
 	}
@@ -252,6 +269,9 @@ func probeUpgradeTarget(clientExecPath string, expectations ...upgradeProbeExpec
 	}
 	if len(expectations) > 0 && (probe.Profile != expectation.profile || probe.Paths != expectation.paths) {
 		return nil, refuseUpgrade("upgrade target effective paths do not match the running daemon")
+	}
+	if len(expectations) > 0 && probe.ConfigSource != expectation.configSource {
+		return nil, refuseUpgrade("upgrade target config source does not match the captured daemon config")
 	}
 
 	capacity := 0
@@ -503,8 +523,10 @@ func secureUpgradeManifestDescriptors(manifest *UpgradeManifest) error {
 		if err := secureTransferredDescriptor(session.Fd); err != nil {
 			return fmt.Errorf("secure inherited session descriptor: %w", err)
 		}
-		if err := secureTransferredDescriptor(session.ScrollbackFd); err != nil {
-			return fmt.Errorf("secure inherited scrollback descriptor: %w", err)
+		if session.ScrollbackFd > 2 {
+			if err := secureTransferredDescriptor(session.ScrollbackFd); err != nil {
+				return fmt.Errorf("secure inherited scrollback descriptor: %w", err)
+			}
 		}
 	}
 	return nil
@@ -514,6 +536,7 @@ var (
 	rollbackGetDescriptorFlags = descriptorFlags
 	rollbackSetDescriptorFlags = setDescriptorFlags
 	rollbackCloseDescriptor    = syscall.Close
+	unsafeUpgradeRollbackExit  = func() { syscall.Exit(1) }
 )
 
 type upgradeDescriptorSafetyError struct {
@@ -585,6 +608,11 @@ func (sm *SessionManager) prepareUpgrade(
 		ownedDescriptors: make(map[int]struct{}, len(candidates)),
 		planSessions:     make(map[string]*grpty.Session, len(candidates)),
 	}
+	// The caller retains the *os.File returned by net.UnixListener.File. Keep
+	// that wrapper as the listener duplicate's sole closer: a raw close here
+	// followed by the wrapper's deferred Close can otherwise close a reused FD.
+	// Rollback still restores its exact descriptor flags before the wrapper is
+	// closed, including while syscall.ForkLock is held.
 	defer func() {
 		if returnErr != nil {
 			returnErr = errors.Join(returnErr, rollbackUpgradeDescriptors(manifest))
@@ -1230,9 +1258,30 @@ func rollbackUpgradeDescriptors(manifest *UpgradeManifest) error {
 						delete(manifest.descriptorFlags, fd)
 						continue
 					}
-					rollbackErr = errors.Join(rollbackErr, unsafeUpgradeDescriptor(
-						fmt.Errorf("secure owned upgrade descriptor %d: %w", fd, err),
-					))
+					closeErr := rollbackCloseDescriptor(fd)
+					if closeErr == nil || errors.Is(closeErr, syscall.EBADF) {
+						delete(manifest.ownedDescriptors, fd)
+						delete(manifest.descriptorFlags, fd)
+						rollbackErr = errors.Join(rollbackErr,
+							fmt.Errorf("secure owned upgrade descriptor %d before close: %w", fd, err))
+						continue
+					}
+					verifiedFlags, verifyErr := rollbackGetDescriptorFlags(fd)
+					switch {
+					case errors.Is(verifyErr, syscall.EBADF):
+						delete(manifest.ownedDescriptors, fd)
+						delete(manifest.descriptorFlags, fd)
+						rollbackErr = errors.Join(rollbackErr, err, closeErr)
+					case verifyErr == nil && verifiedFlags&syscall.FD_CLOEXEC != 0:
+						delete(manifest.ownedDescriptors, fd)
+						delete(manifest.descriptorFlags, fd)
+						rollbackErr = errors.Join(rollbackErr, err, closeErr)
+					default:
+						rollbackErr = errors.Join(rollbackErr, unsafeUpgradeDescriptor(errors.Join(
+							fmt.Errorf("secure owned upgrade descriptor %d: %w", fd, err),
+							fmt.Errorf("close unsecured upgrade descriptor %d: %w", fd, closeErr),
+						)))
+					}
 					continue
 				}
 			}
@@ -1282,6 +1331,22 @@ func rollbackUpgradeDescriptors(manifest *UpgradeManifest) error {
 	}
 
 	return rollbackErr
+}
+
+// rollbackUpgradeDescriptorsBeforeForkUnlock resolves every inheritable
+// descriptor while syscall.ForkLock is still held. A genuinely unsafe result
+// terminates the production process without running defers; the callback is a
+// private test seam and must make the descriptor set safe before returning.
+func rollbackUpgradeDescriptorsBeforeForkUnlock(manifest *UpgradeManifest, cause error) error {
+	rollbackErr := rollbackUpgradeDescriptors(manifest)
+	result := errors.Join(cause, rollbackErr)
+	for hasUnsafeUpgradeDescriptor(rollbackErr) {
+		unsafeUpgradeRollbackExit()
+		rollbackErr = rollbackUpgradeDescriptors(manifest)
+		result = errors.Join(cause, errors.New("fail-closed upgrade rollback exit returned"), rollbackErr)
+	}
+
+	return result
 }
 
 func WriteManifest(dir string, m *UpgradeManifest) (string, error) {
@@ -2025,6 +2090,16 @@ func captureUpgradeConfigSnapshot(path string) ([]byte, bool, error) {
 	}
 
 	return data, true, nil
+}
+
+func makeUpgradeConfigSource(path string, snapshot []byte, present bool) UpgradeConfigSource {
+	source := UpgradeConfigSource{Path: canonicalUpgradePath(path), Present: present}
+	if present {
+		digest := sha256.Sum256(snapshot)
+		source.SHA256 = hex.EncodeToString(digest[:])
+	}
+
+	return source
 }
 
 func captureUpgradeBootstrapEnvironment() (capsule, ownershipFD string) {
@@ -3170,10 +3245,10 @@ func (sm *SessionManager) execPreparedUpgrade(
 			return err
 		}
 		if err := makeUpgradeDescriptorsInheritable(manifest); err != nil {
-			return errors.Join(err, rollbackUpgradeDescriptors(manifest))
+			return rollbackUpgradeDescriptorsBeforeForkUnlock(manifest, err)
 		}
 		if err := execUpgradeTarget(target, manifestPath, configFile, manifest.ownershipFD, manifest.ownershipCapsule); err != nil {
-			return errors.Join(err, rollbackUpgradeDescriptors(manifest))
+			return rollbackUpgradeDescriptorsBeforeForkUnlock(manifest, err)
 		}
 
 		return nil
