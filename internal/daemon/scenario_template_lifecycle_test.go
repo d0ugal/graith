@@ -123,6 +123,8 @@ func TestStartScenarioTemplatesRenderSharedInitiatorReferencesResultsAndRestart(
 	waitForScenarioSessionStopped(t, sm, reviewerID)
 
 	restarted := NewSessionManager(sm.Config(), sm.paths, sm.log)
+
+	restarted.sandboxResolver = sm.sandboxResolver
 	if err := restarted.LoadState(); err != nil {
 		t.Fatalf("restart load: %v", err)
 	}
