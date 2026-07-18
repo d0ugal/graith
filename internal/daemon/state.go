@@ -372,6 +372,7 @@ type ScenarioSession struct {
 	Name    string                     `json:"name"`
 	Mirror  string                     `json:"mirror,omitempty"`
 	Role    string                     `json:"role"`
+	Prompt  string                     `json:"prompt,omitempty"`
 	Task    string                     `json:"task"`
 	Repo    string                     `json:"repo"`
 	Agent   string                     `json:"agent"`
@@ -379,6 +380,14 @@ type ScenarioSession struct {
 	Shared  bool                       `json:"shared,omitempty"`
 	Results []ScenarioResultState      `json:"results,omitempty"`
 	Policy  *ScenarioMemberPolicyState `json:"policy,omitempty"`
+}
+
+func (s ScenarioSession) startupPrompt() string {
+	if s.Prompt != "" {
+		return s.Prompt
+	}
+
+	return s.Task
 }
 
 type ScenarioResultStatus string

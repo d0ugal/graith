@@ -47,7 +47,10 @@ immediately reconciles elapsed deadlines.
 ### `gr scenario add <name>`
 
 Add a member from the orchestrator. Alongside `--name`, `--repo`, `--agent`,
-`--model`, `--role`, `--task`, and `--base`, policy members accept:
+`--model`, `--role`, `--prompt`, `--task`, and `--base`, policy members accept:
+
+`--prompt` supplies startup instructions without tracked work. `--task` seeds an
+assigned todo and also acts as the startup prompt when `--prompt` is omitted.
 
 | Flag | Description |
 |------|-------------|

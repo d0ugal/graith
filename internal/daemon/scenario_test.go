@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/git"
@@ -259,6 +260,21 @@ func TestStartScenarioRejectsImpossiblePolicyBeforeCallerLookup(t *testing.T) {
 	}
 }
 
+func TestStartScenarioPolicyRejectsPromptWithoutContractBeforeCallerLookup(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		Name:   "strath-policy",
+		Policy: &protocol.ScenarioPolicyInput{},
+		Sessions: []protocol.ScenarioSessionInput{{
+			Name: "braw", Repo: "/tmp/croft", Prompt: "Inspect the croft",
+		}},
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "non-empty task or required result contract") {
+		t.Fatalf("error = %v, want prompt-only contract rejection", err)
+	}
+}
+
 func TestStartScenarioCallerNotFound(t *testing.T) {
 	sm := newTestSessionManager(t)
 
@@ -349,6 +365,28 @@ func TestStartScenarioValidation(t *testing.T) {
 			wantErr: "duplicate session name",
 		},
 		{
+			name: "oversized startup prompt",
+			msg: protocol.ScenarioStartMsg{
+				CallerSessionID: "ben-orch",
+				Name:            "strath-neep",
+				Sessions: []protocol.ScenarioSessionInput{{
+					Name: "braw-a", Repo: "/glen", Prompt: strings.Repeat("p", protocol.MaxScenarioPromptBytes+1),
+				}},
+			},
+			wantErr: "prompt is too large",
+		},
+		{
+			name: "shared startup prompt",
+			msg: protocol.ScenarioStartMsg{
+				CallerSessionID: "ben-orch",
+				Name:            "strath-neep",
+				Sessions: []protocol.ScenarioSessionInput{{
+					Name: "braw-a", Repo: "/glen", Shared: true, Prompt: "instructions",
+				}},
+			},
+			wantErr: "prompt is not valid for a shared session",
+		},
+		{
 			name: "invalid result before repo preflight",
 			msg: protocol.ScenarioStartMsg{
 				CallerSessionID: "ben-orch",
@@ -414,7 +452,7 @@ func TestBuildManifest(t *testing.T) {
 		Name:            "strath-kirk",
 		Goal:            "Build braw things",
 		Sessions: []protocol.ScenarioSessionInput{
-			{Name: "braw-forge", Repo: "/hame/glen/croft-forge", Role: "Braw forge dev", Task: "Build braw API",
+			{Name: "braw-forge", Repo: "/hame/glen/croft-forge", Role: "Braw forge dev", Prompt: "Use the detailed API plan", Task: "Build braw API",
 				Results: []protocol.ScenarioResultSpec{{Name: "review", Format: "markdown", Store: "{session_name}/review.md", Required: true}}},
 			{Name: "bonnie-loom", Mirror: "braw-forge", Role: "Bonnie loom dev", Task: "Build bonnie UI",
 				Results: []protocol.ScenarioResultSpec{{Name: "facts", Format: "json", Store: "{session_name}/facts.json", Required: true}}},
@@ -439,6 +477,10 @@ func TestBuildManifest(t *testing.T) {
 
 	if m.You.SessionID != "braw-s1" {
 		t.Errorf("you.session_id = %q", m.You.SessionID)
+	}
+
+	if m.You.Prompt != "Use the detailed API plan" || m.You.Task != "Build braw API" {
+		t.Errorf("self prompt/task = %q/%q", m.You.Prompt, m.You.Task)
 	}
 
 	if len(m.Siblings) != 1 {
@@ -1594,6 +1636,167 @@ func newScenarioOrchestrator(t *testing.T) (*SessionManager, string) {
 	return sm, orchID
 }
 
+func configureScenarioPromptRecorder(sm *SessionManager, recordPath string) {
+	sm.mu.Lock()
+	sm.cfg.Agents["recorder"] = config.Agent{
+		Command: "sh",
+		Args:    []string{"-c", `printf %s "$0" > "$GRAITH_PROMPT_RECORD"; exec sleep 60`},
+		Env:     map[string]string{"GRAITH_PROMPT_RECORD": recordPath},
+	}
+	sm.mu.Unlock()
+}
+
+func readScenarioPromptRecord(t *testing.T, path string) string {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		body, err := os.ReadFile(path)
+		if err == nil {
+			return string(body)
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("startup prompt was not recorded at %s", path)
+
+	return ""
+}
+
+func TestStartScenarioPromptOnlyRequiredResultCompletesWithoutTodo(t *testing.T) {
+	sm, orchID := newScenarioOrchestrator(t)
+	sm.todos = newTestTodoStore(t)
+	repo := initScenarioGitRepo(t)
+	recordPath := filepath.Join(t.TempDir(), "prompt.txt")
+	configureScenarioPromptRecorder(sm, recordPath)
+
+	prompt := "Inspect the project and publish the declared report result.\n\n" + strings.Repeat("canny detail ", 60)
+
+	scenario, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: orchID,
+		Name:            "strath-reporter",
+		Sessions: []protocol.ScenarioSessionInput{{
+			Name: "canny-reporter", Repo: repo, Agent: "recorder", Prompt: prompt,
+			Results: []protocol.ScenarioResultSpec{{
+				Name: "report", Format: "markdown", Store: "{session_name}/report.md", Required: true,
+			}},
+		}},
+	}, 24, 80)
+	if err != nil {
+		t.Fatalf("StartScenario: %v", err)
+	}
+
+	if got := readScenarioPromptRecord(t, recordPath); got != prompt {
+		t.Fatalf("launched prompt length/content = %d/%q, want %d bytes", len(got), got, len(prompt))
+	}
+
+	items, err := sm.todos.List("scenario:"+scenario.ID, TodoFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(items) != 0 {
+		t.Fatalf("prompt-only member seeded todos: %+v", items)
+	}
+
+	record, err := sm.ScenarioStatus("strath-reporter")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if record.Status == "complete" || record.Sessions[0].Prompt != prompt || record.Sessions[0].Task != "" || record.Sessions[0].TodoTotal != 0 {
+		t.Fatalf("pending prompt-only status = %+v", record)
+	}
+
+	persisted, err := LoadState(sm.paths.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := persisted.Scenarios[scenario.ID].Sessions[0]; got.Prompt != prompt || got.Task != "" {
+		t.Fatalf("persisted prompt/task = %q/%q", got.Prompt, got.Task)
+	}
+
+	manifestMessages, err := sm.messages.Read("inbox:"+scenario.SessionIDs[0], scenario.SessionIDs[0], false, "")
+	if err != nil || len(manifestMessages) != 1 {
+		t.Fatalf("manifest messages = %d, err=%v", len(manifestMessages), err)
+	}
+
+	var manifest scenarioManifest
+	if err := json.Unmarshal([]byte(manifestMessages[0].Body), &manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	if manifest.You.Prompt != prompt || manifest.You.Task != "" {
+		t.Fatalf("manifest prompt/task = %q/%q", manifest.You.Prompt, manifest.You.Task)
+	}
+
+	if _, err := sm.PublishScenarioResult(
+		authContext{authenticated: true, role: roleSession, sessionID: scenario.SessionIDs[0]},
+		protocol.ScenarioResultPublishMsg{Scenario: scenario.Name, Name: "report", Body: "# Canny report\n"},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if actions := sm.planScenarioPolicyActionsFor(time.Now().UTC(), scenario.ID); len(actions) != 0 {
+		t.Fatalf("unexpected policy actions after result publication: %+v", actions)
+	}
+
+	record, err = sm.ScenarioStatus("strath-reporter")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if record.Status != "complete" || record.Policy != nil {
+		t.Fatalf("completed prompt-only result status = %+v", record)
+	}
+}
+
+func TestStartScenarioPromptAndTaskRemainIndependent(t *testing.T) {
+	sm, orchID := newScenarioOrchestrator(t)
+	sm.todos = newTestTodoStore(t)
+	repo := initScenarioGitRepo(t)
+	recordPath := filepath.Join(t.TempDir(), "prompt.txt")
+	configureScenarioPromptRecorder(sm, recordPath)
+
+	prompt := "Follow these launch instructions:\n" + strings.Repeat("braw context ", 50)
+	task := "publish the tracked report"
+
+	scenario, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: orchID,
+		Name:            "strath-both",
+		Sessions: []protocol.ScenarioSessionInput{{
+			Name: "braw-reporter", Repo: repo, Agent: "recorder", Prompt: prompt, Task: task,
+		}},
+	}, 24, 80)
+	if err != nil {
+		t.Fatalf("StartScenario: %v", err)
+	}
+
+	if got := readScenarioPromptRecord(t, recordPath); got != prompt {
+		t.Fatalf("launched prompt = %q, want %q", got, prompt)
+	}
+
+	items, err := sm.todos.List("scenario:"+scenario.ID, TodoFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(items) != 1 || items[0].Title != task || items[0].Title == prompt {
+		t.Fatalf("seeded todo = %+v, want tracked task only", items)
+	}
+
+	record, err := sm.ScenarioStatus("strath-both")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if record.Sessions[0].Prompt != prompt || record.Sessions[0].Task != task {
+		t.Fatalf("status prompt/task = %q/%q", record.Sessions[0].Prompt, record.Sessions[0].Task)
+	}
+}
+
 // newMirroredScenarioOrchestrator uses the real safehouse command-line adapter
 // with a tiny exec-through backend stub. That keeps this lifecycle test
 // portable while still driving scenario members through Create's mirror
@@ -1952,7 +2155,7 @@ func TestStartScenarioRollbackDeletesStarredMember(t *testing.T) {
 	}
 }
 
-func TestStartScenarioSeedFailureRollsBackCreatedMembers(t *testing.T) {
+func TestStartScenarioRejectsOversizedTaskBeforeCreatingMembers(t *testing.T) {
 	sm, orchID := newScenarioOrchestrator(t)
 	sm.todos = newTestTodoStore(t)
 	sm.todos.SetMaxTitle(12)
@@ -1973,8 +2176,8 @@ func TestStartScenarioSeedFailureRollsBackCreatedMembers(t *testing.T) {
 			{Name: "dreich-mason", Repo: repo, Task: "raise a very long stone wall", Star: true},
 		},
 	}, 24, 80)
-	if err == nil || !strings.Contains(err.Error(), "title too long") {
-		t.Fatalf("seed failure = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "task exceeds todo title limit") {
+		t.Fatalf("task preflight failure = %v", err)
 	}
 
 	sm.mu.RLock()
@@ -2006,7 +2209,7 @@ func TestStartScenarioSeedFailureRollsBackCreatedMembers(t *testing.T) {
 	}
 }
 
-func TestAddToScenarioSeedFailureRestoresMembership(t *testing.T) {
+func TestAddToScenarioRejectsOversizedTaskBeforeCreatingMember(t *testing.T) {
 	sm, orchID := newScenarioOrchestrator(t)
 	sm.todos = newTestTodoStore(t)
 	sm.todos.SetMaxTitle(12)
@@ -2022,8 +2225,8 @@ func TestAddToScenarioSeedFailureRestoresMembership(t *testing.T) {
 	_, err := sm.AddToScenario("strath-add-fail", protocol.ScenarioSessionInput{
 		Name: "dreich-mason", Repo: repo, Task: "raise a very long stone wall", Star: true,
 	}, 24, 80)
-	if err == nil || !strings.Contains(err.Error(), "title too long") {
-		t.Fatalf("seed failure = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "task exceeds todo title limit") {
+		t.Fatalf("task preflight failure = %v", err)
 	}
 
 	sm.mu.RLock()

@@ -373,6 +373,7 @@ name = "kirk"
 [[sessions]]
 name = "canny"
 repo = "/tmp/croft"
+prompt = "Inspect the croft and publish the review."
 [[sessions.results]]
 name = "review"
 format = "markdown"
@@ -392,6 +393,10 @@ required = true
 
 	if len(inputs[0].Results) != 1 {
 		t.Fatalf("results = %+v", inputs[0].Results)
+	}
+
+	if inputs[0].Prompt != "Inspect the croft and publish the review." || inputs[0].Task != "" {
+		t.Fatalf("prompt/task = %q/%q", inputs[0].Prompt, inputs[0].Task)
 	}
 
 	result := inputs[0].Results[0]

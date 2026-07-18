@@ -3154,6 +3154,13 @@
           "optional": true
         },
         {
+          "name": "prompt",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
           "name": "task",
           "type": {
             "kind": "string"
@@ -3288,6 +3295,13 @@
         },
         {
           "name": "role",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "prompt",
           "type": {
             "kind": "string"
           },

@@ -223,20 +223,23 @@ per-session boolean (this **replaces** the old `gr scenario task-done`):
   todo item** in the scenario's scope (`assignee` = that member, title = the task).
   A member breaks its task down by adding sub-items. A session entry's
   `depends_on = ["member-name"]` references are resolved to these seeded items;
-  all seed items and edges are inserted atomically.
+  all seed items and edges are inserted atomically. A separate scenario
+  `prompt` is startup instructions only and never creates a todo.
 - **`assignee` vs `owner`.** `assignee` is *who is responsible*; `owner` is *who is
   currently working it* (set by the claim). They usually coincide, but an
   orchestrator can assign work a member hasn't claimed yet.
 - **Seed identity is stable.** Reassigning a scenario's seeded item changes
   current responsibility, but member-name dependencies continue to resolve the
   original member's seed.
-- **Completion is derived, not declared.** A member is complete when it has at
-  least one assigned item and every assigned item is `done`. A member with **no**
-  assigned items reports "no tracked work" (`—`), neither pending nor complete.
-  `gr scenario status` renders per-member `done/total` from real item state and
+- **Completion is derived, not declared.** A member is tracked when it has
+  assigned todo work or a required declared result. It is complete when every
+  assigned item is `done` and every required result is available. A prompt-only
+  member with no required result reports "no tracked work" (`—`); a prompt-only
+  member with a required result completes by publishing that result. `gr
+  scenario status` renders per-member `done/total` from real item state and
   names unfinished upstream members in **WAITING ON**. Its JSON response carries
-  the same names in `blocked_by`. The scenario is complete once every member
-  with tracked work is.
+  the same names in `blocked_by`. The scenario is complete once every tracked
+  member is complete.
 
 So the gesture a member used to make with `gr scenario task-done` is now
 `gr todo done <its-task-item>` — the same "I finished my task" signal, backed by a

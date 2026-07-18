@@ -425,3 +425,32 @@ func TestScenarioMirrorRoundTrip(t *testing.T) {
 		t.Errorf("mirror = %q, want subject", got.Scenario.Sessions[0].Mirror)
 	}
 }
+
+func TestScenarioStartupPromptRoundTrip(t *testing.T) {
+	input := ScenarioSessionInput{
+		Name: "canny", Prompt: "Inspect the croft in detail.", Task: "publish the report",
+	}
+
+	data, err := EncodeControl("scenario_add", ScenarioAddMsg{Name: "strath", Session: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	envelope, err := DecodeControl(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got ScenarioAddMsg
+	if err := DecodePayload(envelope, &got); err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Session.Prompt != input.Prompt || got.Session.Task != input.Task || got.Session.StartupPrompt() != input.Prompt {
+		t.Fatalf("round trip session = %+v", got.Session)
+	}
+
+	if fallback := (ScenarioSessionInput{Task: "legacy task"}).StartupPrompt(); fallback != "legacy task" {
+		t.Fatalf("task-only startup prompt = %q", fallback)
+	}
+}

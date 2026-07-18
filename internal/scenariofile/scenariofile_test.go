@@ -141,6 +141,115 @@ store = "{session_name}/facts.json"
 	}
 }
 
+func TestParseScenarioStartupPromptContracts(t *testing.T) {
+	longPrompt := "Inspect the croft and publish the declared report.\n\n" + strings.Repeat("braw detail ", 60)
+	data := []byte(fmt.Sprintf(`
+version = 1
+[scenario]
+name = "strath-prompts"
+[scenario.policy]
+completion = "all"
+[[sessions]]
+name = "reporter"
+repo = "~/Code/croft"
+prompt = %q
+[[sessions.results]]
+name = "report"
+format = "markdown"
+store = "{session_name}/report.md"
+required = true
+[[sessions]]
+name = "builder"
+repo = "~/Code/bothy"
+prompt = "Follow the detailed build instructions."
+task = "build the brig"
+[[sessions]]
+name = "legacy"
+repo = "~/Code/glen"
+task = "inspect the brig"
+`, longPrompt))
+
+	sf, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	inputs, err := SessionInputs(sf)
+	if err != nil {
+		t.Fatalf("SessionInputs: %v", err)
+	}
+
+	if inputs[0].Prompt != longPrompt || inputs[0].Task != "" || inputs[0].StartupPrompt() != longPrompt {
+		t.Fatalf("prompt-only input = %+v", inputs[0])
+	}
+
+	if inputs[1].StartupPrompt() != "Follow the detailed build instructions." || inputs[1].Task != "build the brig" {
+		t.Fatalf("prompt+task input = %+v", inputs[1])
+	}
+
+	if inputs[2].Prompt != "" || inputs[2].StartupPrompt() != inputs[2].Task {
+		t.Fatalf("task-only compatibility input = %+v", inputs[2])
+	}
+}
+
+func TestParseScenarioStartupPromptLimitsAndContradictions(t *testing.T) {
+	base := `
+version = 1
+[scenario]
+name = "strath"
+[[sessions]]
+name = "canny"
+repo = "/croft"
+%s
+`
+
+	cases := []struct {
+		name, fields, want string
+	}{
+		{
+			name:   "oversized prompt",
+			fields: fmt.Sprintf("prompt = %q", strings.Repeat("d", protocol.MaxScenarioPromptBytes+1)),
+			want:   "prompt is too large",
+		},
+		{
+			name:   "oversized task",
+			fields: fmt.Sprintf("task = %q", strings.Repeat("t", config.TodoMaxTitleCeiling+1)),
+			want:   "task exceeds todo title limit",
+		},
+		{
+			name:   "shared prompt",
+			fields: "shared = true\nprompt = \"instructions that cannot be launched\"",
+			want:   "prompt is not valid for a shared session",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte(fmt.Sprintf(base, tc.fields)))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseScenarioPolicyRejectsPromptWithoutContract(t *testing.T) {
+	_, err := Parse([]byte(`
+version = 1
+[scenario]
+name = "strath"
+[scenario.policy]
+completion = "all"
+[[sessions]]
+name = "canny"
+repo = "/croft"
+prompt = "Inspect the croft"
+`))
+	if err == nil || !strings.Contains(err.Error(), "non-empty task or required result contract") {
+		t.Fatalf("prompt-only policy contract error = %v", err)
+	}
+}
+
 func TestParseScenarioResultRejectsUnknownField(t *testing.T) {
 	_, err := Parse([]byte(`
 version = 1
