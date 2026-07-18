@@ -3,11 +3,13 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -331,6 +333,9 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 	}
 
 	name := triggerReactorName(t.Name, suffix)
+	if t.IsCompletion() && fc.scenarioID != "" {
+		name = completionReactorName(t.Name, fc)
+	}
 
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -412,6 +417,62 @@ func triggerReactorName(triggerName, sessionName string) string {
 	}
 
 	return base
+}
+
+// completionReactorName builds a bounded display name for a session spawned by
+// a durable scenario-completion action. The readable portion is deliberately
+// separate from ownership: TriggerID and the Completion* fields remain the
+// authoritative, persisted identity used by retry and restart recovery.
+//
+// The digest covers that complete identity, including epoch and attempt, so
+// sanitising or truncating long action/member names cannot make different
+// scenarios, actions, recompletions, or retries collide.
+func completionReactorName(triggerID string, fc fireContext) string {
+	const maxLen = 64
+
+	identity := strings.Join([]string{
+		strconv.Quote(triggerID),
+		strconv.Quote(fc.scenarioID),
+		strconv.Itoa(fc.completionEpoch),
+		strconv.Quote(fc.completionAction),
+		strconv.Itoa(fc.completionAttempt),
+		strconv.Quote(fc.sessionName),
+	}, "\n")
+	sum := sha256.Sum256([]byte(identity))
+	suffix := fmt.Sprintf("-%x", sum[:16])
+
+	readable := completionReactorSlug(fc.completionAction, fc.sessionName)
+	if readable == "" {
+		readable = "action"
+	}
+
+	prefix := "completion-"
+	keep := maxLen - len(prefix) - len(suffix)
+	if len(readable) > keep {
+		readable = readable[:keep]
+	}
+
+	return prefix + readable + suffix
+}
+
+// completionReactorSlug keeps only a compact ASCII hint for display. Hashing
+// happens before this lossy conversion, so punctuation, Unicode, and truncated
+// tails still contribute to the collision-resistant identity.
+func completionReactorSlug(parts ...string) string {
+	var b strings.Builder
+
+	separator := false
+	for _, c := range strings.Join(parts, "-") {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			b.WriteRune(c)
+			separator = false
+		} else if b.Len() > 0 && !separator {
+			b.WriteByte('-')
+			separator = true
+		}
+	}
+
+	return strings.TrimRight(b.String(), "-")
 }
 
 // actionScenario starts a named scenario, owned by the orchestrator.

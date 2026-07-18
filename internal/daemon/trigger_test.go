@@ -845,6 +845,67 @@ func TestTriggerReactorName(t *testing.T) {
 	}
 }
 
+func TestCompletionReactorName(t *testing.T) {
+	base := fireContext{
+		scenarioID: "sc-12345678", completionEpoch: 1,
+		completionAction: "synthesise", completionAttempt: 1, sessionName: "canny",
+	}
+	triggerID := scenarioTriggerName(base.scenarioID, base.completionAction)
+	name := completionReactorName(triggerID, base)
+
+	if err := ValidateSessionName(name); err != nil {
+		t.Fatalf("completion reactor name %q is invalid: %v", name, err)
+	}
+
+	if len(name) > 64 {
+		t.Fatalf("completion reactor name is too long: %q (%d)", name, len(name))
+	}
+
+	if got := completionReactorName(triggerID, base); got != name {
+		t.Fatalf("completion reactor name is not deterministic: %q != %q", got, name)
+	}
+
+	variants := []struct {
+		name      string
+		triggerID string
+		fc        fireContext
+	}{
+		{"other scenario", scenarioTriggerName("sc-87654321", base.completionAction), func() fireContext { v := base; v.scenarioID = "sc-87654321"; return v }()},
+		{"retry", triggerID, func() fireContext { v := base; v.completionAttempt = 2; return v }()},
+		{"recompletion", triggerID, func() fireContext { v := base; v.completionEpoch = 2; return v }()},
+		{"other member", triggerID, func() fireContext { v := base; v.sessionName = "dreich"; return v }()},
+	}
+	for _, variant := range variants {
+		if got := completionReactorName(variant.triggerID, variant.fc); got == name {
+			t.Errorf("%s produced colliding name %q", variant.name, got)
+		}
+	}
+
+	sanitisedA := base
+	sanitisedA.completionAction = "synthesise:canny"
+	sanitisedB := base
+	sanitisedB.completionAction = "synthesise/canny"
+	if gotA, gotB := completionReactorName(scenarioTriggerName(base.scenarioID, sanitisedA.completionAction), sanitisedA), completionReactorName(scenarioTriggerName(base.scenarioID, sanitisedB.completionAction), sanitisedB); gotA == gotB {
+		t.Fatalf("actions that sanitise alike produced colliding name %q", gotA)
+	}
+
+	longA := base
+	longA.completionAction = strings.Repeat("a", 128) + "-braw"
+	longA.sessionName = strings.Repeat("c", 128) + "-bothy"
+	longB := longA
+	longB.completionAction = strings.Repeat("a", 128) + "-canny"
+
+	longNameA := completionReactorName(scenarioTriggerName(longA.scenarioID, longA.completionAction), longA)
+	longNameB := completionReactorName(scenarioTriggerName(longB.scenarioID, longB.completionAction), longB)
+	if len(longNameA) > 64 || ValidateSessionName(longNameA) != nil {
+		t.Fatalf("long completion identity produced invalid name %q", longNameA)
+	}
+
+	if longNameA == longNameB {
+		t.Fatalf("long identities differing after truncation collided: %q", longNameA)
+	}
+}
+
 func TestFireSchedule_RecordsRun(t *testing.T) {
 	trig := config.TriggerConfig{
 		Name: "kirk", Schedule: &config.ScheduleConfig{Cron: "@daily"},
