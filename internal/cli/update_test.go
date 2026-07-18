@@ -299,6 +299,7 @@ func TestUpdateStarredFlagAndRemovedCommands(t *testing.T) {
 	}
 
 	originalValue, originalChanged := flag.Value.String(), flag.Changed
+
 	t.Cleanup(func() {
 		_ = flag.Value.Set(originalValue)
 		flag.Changed = originalChanged
