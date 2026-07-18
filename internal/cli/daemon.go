@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -68,7 +66,7 @@ Use --force to do a clean stop/start, which kills running agent sessions.`,
 			return restartClean()
 		}
 
-		return restartDaemonPreservingSessions(restartClean, startCleanDaemon)
+		return restartDaemonPreservingSessions(startCleanDaemon)
 	},
 }
 
@@ -121,6 +119,7 @@ var daemonReloadCmd = &cobra.Command{
 type upgradeExchangeConn interface {
 	SetDeadline(deadline time.Time) error
 	Handshake() error
+	DaemonPID() (int, error)
 	SendControl(messageType string, payload any) error
 	ReadControlResponse() (protocol.Envelope, error)
 	Close()
@@ -132,10 +131,10 @@ var dialUpgradeClient = func() (upgradeExchangeConn, error) {
 	return client.New(cfg, paths, cfgFile)
 }
 
-// preserveRestartUnconfirmedError means the upgrade request reached the daemon,
-// but the requested replacement generation was not observed. The old process
-// can still be preparing its exec/adoption at this point, so callers must not
-// infer that it is safe to send SIGTERM to the PID retained across exec.
+// preserveRestartUnconfirmedError means the upgrade request may have reached
+// the daemon, but the requested replacement generation was not observed. The
+// old process can still be preparing its exec/adoption at this point, so callers
+// must not infer that it is safe to send SIGTERM to the PID retained across exec.
 type preserveRestartUnconfirmedError struct {
 	cause           error
 	priorInstanceID string
@@ -146,25 +145,49 @@ func (e *preserveRestartUnconfirmedError) Error() string { return e.cause.Error(
 
 func (e *preserveRestartUnconfirmedError) Unwrap() error { return e.cause }
 
+// preserveRestartRejectedError means the daemon definitively refused the
+// preserve request. The request is not in progress, but an automatic clean
+// restart would turn a refusal (for example, an agent-session permission
+// boundary) into a destructive action, so the caller must stop.
+type preserveRestartRejectedError struct {
+	cause error
+}
+
+func (e *preserveRestartRejectedError) Error() string { return e.cause.Error() }
+
+func (e *preserveRestartRejectedError) Unwrap() error { return e.cause }
+
 var daemonProcessAlive = func(pid int) bool {
 	err := syscall.Kill(pid, 0)
 
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
-func restartDaemonPreservingSessions(cleanRestart, startAfterDeadPreserve func() error) error {
-	const successMsg = "Daemon restarted (sessions preserved)"
+const (
+	preserveRestartSuccessMsg = "Daemon restarted (sessions preserved)"
+	cleanRestartSuccessMsg    = "Daemon restarted after preserve process exited (sessions not preserved)"
+)
 
-	err := execUpgrade(successMsg)
+func restartDaemonPreservingSessions(startAfterDeadPreserve func() error) error {
+	err := execUpgrade(preserveRestartSuccessMsg)
 	if err == nil {
 		return nil
 	}
 
+	var rejected *preserveRestartRejectedError
+	if errors.As(err, &rejected) {
+		return fmt.Errorf(
+			"%w; automatic clean fallback skipped because the daemon rejected the preserve restart (use --force for an intentional clean restart)",
+			err,
+		)
+	}
+
 	var unconfirmed *preserveRestartUnconfirmedError
 	if !errors.As(err, &unconfirmed) {
-		out.Printf("Preserve failed: %s\nFalling back to clean restart...\n", err)
-
-		return cleanRestart()
+		return fmt.Errorf(
+			"%w; automatic clean fallback skipped because no preserve request was safely initiated (use --force for an intentional clean restart)",
+			err,
+		)
 	}
 
 	// The aggregate readiness budget expiring is not proof that the preserve
@@ -175,32 +198,23 @@ func restartDaemonPreservingSessions(cleanRestart, startAfterDeadPreserve func()
 	// still the inherited old daemon, not a successful replacement.
 	v, id := probeDaemonIdentityFn(time.Time{})
 	if isNewDaemonGeneration(v, id, version.Version, unconfirmed.priorInstanceID) {
-		out.Printf("%s\n", successMsg)
+		out.Printf("%s\n", preserveRestartSuccessMsg)
 
 		return nil
 	}
 
-	// If the exact PID captured before the request has exited, it cannot later
-	// exec into the replacement. Remove only its unchanged stale PID file; a
-	// missing file is also safe, while a changed/invalid file may belong to a
-	// concurrent daemon and therefore blocks fallback.
-	if reconcileDeadPreservePID(unconfirmed.priorPID) {
-		err := startAfterDeadPreserve()
-		if err == nil {
-			return nil
-		}
+	// The PID comes from the peer credentials of the same Unix socket that
+	// supplied priorInstanceID, not from the independently mutable PID file. If
+	// that exact process has exited, it cannot later exec into the replacement.
+	// A reused PID or a zombie conservatively blocks fallback as still alive.
+	if preserveProcessExited(unconfirmed.priorPID) {
+		startErr := startAfterDeadPreserve()
 
-		// A concurrent client can start or reach the valid replacement while the
-		// clean start is checking the socket. Turn that otherwise contradictory
-		// "daemon is still running" result into preserve success.
-		v, id := probeDaemonIdentityFn(time.Time{})
-		if isNewDaemonGeneration(v, id, version.Version, unconfirmed.priorInstanceID) {
-			out.Printf("%s\n", successMsg)
-
-			return nil
-		}
-
-		return err
+		// A concurrent client can start or reach the requested version while the
+		// clean start is checking the socket. Validate the generation after both
+		// success and failure so neither a wrong-version daemon nor a contradictory
+		// "daemon is still running" error can be reported as restart success.
+		return reconcileCleanStart(startErr, unconfirmed.priorInstanceID)
 	}
 
 	// Once the request was accepted, the old and new generation can be the same
@@ -208,40 +222,32 @@ func restartDaemonPreservingSessions(cleanRestart, startAfterDeadPreserve func()
 	// generation it will hit, so leave clean restart as an explicit --force
 	// choice instead of risking the sessions the preserve path was meant to keep.
 	return fmt.Errorf(
-		"%w; automatic clean fallback skipped because the preserve restart may still be in progress (retry later or use --force)",
+		"%w; automatic clean fallback skipped because the daemon process that received the preserve request may still be serving or restarting (use --force for an intentional clean restart)",
 		err,
 	)
 }
 
-func readDaemonPID(path string) (int, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0, err
-	}
-
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 1 {
-		return 0, errors.New("invalid daemon PID file")
-	}
-
-	return pid, nil
+func preserveProcessExited(priorPID int) bool {
+	return priorPID > 1 && !daemonProcessAlive(priorPID)
 }
 
-func reconcileDeadPreservePID(priorPID int) bool {
-	if priorPID <= 1 || daemonProcessAlive(priorPID) {
-		return false
+func reconcileCleanStart(startErr error, priorInstanceID string) error {
+	v, id := probeDaemonIdentityFn(time.Time{})
+	if isNewDaemonGeneration(v, id, version.Version, priorInstanceID) {
+		out.Printf("%s\n", cleanRestartSuccessMsg)
+
+		return nil
 	}
 
-	currentPID, err := readDaemonPID(paths.PIDFile)
-	if err != nil {
-		return os.IsNotExist(err)
+	if startErr != nil {
+		return startErr
 	}
 
-	if currentPID != priorPID {
-		return false
+	if v != "" && v != version.Version {
+		return fmt.Errorf("clean restart presented daemon version %s instead of %s", v, version.Version)
 	}
 
-	return os.Remove(paths.PIDFile) == nil
+	return fmt.Errorf("clean restart did not present a new %s generation", version.Version)
 }
 
 func execUpgrade(successMsg string) error {
@@ -294,7 +300,13 @@ func execUpgrade(successMsg string) error {
 	}
 
 	priorInstanceID := hsOk.DaemonInstanceID
-	priorPID, _ := readDaemonPID(paths.PIDFile)
+
+	priorPID, err := c.DaemonPID()
+	if err != nil {
+		c.Close()
+
+		return fmt.Errorf("identify daemon process before upgrade: %w", err)
+	}
 
 	// Propagate a send failure rather than waiting for the readiness of an upgrade
 	// that was not confirmed. A failed write does not prove the daemon received no
@@ -312,14 +324,24 @@ func execUpgrade(successMsg string) error {
 	resp, err := c.ReadControlResponse()
 	c.Close()
 
-	// A decodable "error" reply means the daemon refused the upgrade outright;
-	// surface it. Otherwise the connection either dropped (the daemon exec'd
-	// itself) or we got "upgrading" — both mean the replacement daemon is coming
-	// up, so fall through to the readiness wait.
+	// A decodable "error" reply usually means the daemon refused the upgrade
+	// outright. "upgrade already in progress" is the exception: another client
+	// has initiated the same transition, so its readiness remains unconfirmed.
+	// Otherwise the connection either dropped (the daemon exec'd itself) or we
+	// got "upgrading" — both mean the replacement daemon is coming up, so fall
+	// through to the readiness wait.
 	if err == nil && resp.Type == "error" {
 		var e protocol.ErrorMsg
 
 		_ = protocol.DecodePayload(resp, &e)
+		if e.Message != "upgrade already in progress" {
+			message := e.Message
+			if message == "" {
+				message = "daemon rejected preserve restart"
+			}
+
+			return &preserveRestartRejectedError{cause: errors.New(message)}
+		}
 
 		return &preserveRestartUnconfirmedError{
 			cause:           errors.New(e.Message),
@@ -426,39 +448,26 @@ func restartClean() error {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 	}
 
-	return startCleanDaemon()
+	if err := startCleanDaemon(); err != nil {
+		return err
+	}
+
+	out.Printf("Daemon restarted (sessions killed)\n")
+
+	return nil
 }
 
 // startCleanDaemon completes a clean restart after the old daemon is known to
 // have stopped. Keeping this separate lets preserve fallback avoid signalling a
-// PID that was proven dead while still using the normal socket/start checks.
+// PID that was proven dead. EnsureDaemon owns stale-socket and PID-file
+// reconciliation: doing either unlink here would race a concurrent starter.
 func startCleanDaemon() error {
-	// Wait for the stopped daemon's socket to disappear, bounded by the effective
-	// [connection] start policy rather than a fixed 20×100ms retry count (issue
-	// #1319).
-	pollLocalDaemon(func(time.Time) bool {
-		_, err := os.Stat(paths.SocketPath)
-
-		return os.IsNotExist(err)
-	})
-
-	if _, err := os.Stat(paths.SocketPath); err == nil {
-		if conn, err := dialLocalDaemonSocket(); err == nil {
-			_ = conn.Close()
-			return errors.New("daemon is still running, cannot restart cleanly")
-		}
-	}
-
-	_ = os.Remove(paths.SocketPath)
-
 	conn, err := client.EnsureDaemon(paths, cfgFile)
 	if err != nil {
 		return fmt.Errorf("restart daemon: %w", err)
 	}
 
 	_ = conn.Close()
-
-	out.Printf("Daemon restarted (sessions killed)\n")
 
 	return nil
 }

@@ -28,9 +28,12 @@ Restart the daemon, preserving live sessions via exec.
 After rebuilding `gr`, run `gr daemon restart` to pick up the new daemon binary.
 If the preserve request is accepted but the replacement is still not ready after
 the configured startup wait, graith rechecks the live daemon. It only falls back
-to a clean start after proving that the pre-upgrade process exited; otherwise it
-leaves the possible in-progress replacement alone. Retry once startup finishes,
-or use `--force` when killing the sessions is intentional.
+to a clean start after proving that the exact process which answered the
+pre-upgrade socket handshake has exited; a stale PID file alone is not enough.
+The clean result is then checked for the requested version and a fresh daemon
+generation. Otherwise graith leaves the possible in-progress replacement alone.
+Retry once startup finishes, or use `--force` when killing the sessions is
+intentional.
 
 ### `gr daemon reload`
 

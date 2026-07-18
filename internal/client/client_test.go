@@ -12,6 +12,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
+	"golang.org/x/sys/unix"
 )
 
 func setupTestClient(t *testing.T) (*Client, net.Conn) {
@@ -28,6 +29,61 @@ func setupTestClient(t *testing.T) (*Client, net.Conn) {
 	}
 
 	return c, serverConn
+}
+
+func TestDaemonPIDRejectsConnectionWithoutSocketDescriptor(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+
+	t.Cleanup(func() {
+		_ = clientConn.Close()
+		_ = serverConn.Close()
+	})
+
+	c := &Client{conn: clientConn}
+	if _, err := c.DaemonPID(); err == nil {
+		t.Fatal("DaemonPID() succeeded for an in-memory connection without Unix peer credentials")
+	}
+}
+
+func TestDaemonPIDUsesUnixPeerCredentials(t *testing.T) {
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clientFile := os.NewFile(uintptr(fds[0]), "client.sock")
+	serverFile := os.NewFile(uintptr(fds[1]), "server.sock")
+
+	t.Cleanup(func() {
+		_ = clientFile.Close()
+		_ = serverFile.Close()
+	})
+
+	clientConn, err := net.FileConn(clientFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	serverConn, err := net.FileConn(serverFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		_ = clientConn.Close()
+		_ = serverConn.Close()
+	})
+
+	c := &Client{conn: clientConn}
+
+	pid, err := c.DaemonPID()
+	if err != nil {
+		t.Fatalf("DaemonPID() error = %v", err)
+	}
+
+	if pid != os.Getpid() {
+		t.Fatalf("DaemonPID() = %d, want socket peer PID %d", pid, os.Getpid())
+	}
 }
 
 func TestSendControl(t *testing.T) {
