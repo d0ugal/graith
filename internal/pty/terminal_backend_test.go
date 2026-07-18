@@ -129,6 +129,7 @@ func TestTerminalBackendCompatibilityCorpus(t *testing.T) {
 			t.Run("shrink_reflow", func(t *testing.T) {
 				term := newTerminalBackendTestTerm(t, factory, 20, 2)
 				write(t, term, "keep me canny")
+
 				if err := term.Resize(4, 2); err != nil {
 					t.Fatal(err)
 				}
@@ -197,6 +198,7 @@ func BenchmarkTerminalBackends(b *testing.B) {
 					if err != nil {
 						b.Fatal(err)
 					}
+
 					if err := term.Close(); err != nil {
 						b.Fatal(err)
 					}
@@ -236,6 +238,7 @@ func BenchmarkTerminalBackends(b *testing.B) {
 					if err != nil {
 						b.Fatal(err)
 					}
+
 					for _, cell := range snapshot.Cells {
 						checksum += uint64(len(cell.Content)) + uint64(cell.Style.FG.Value)
 					}
@@ -336,6 +339,7 @@ func TestTerminalBackendPeakMemoryWorkload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var checksum uint64
 	for _, cell := range snapshot.Cells {
 		checksum += uint64(len(cell.Content)) + uint64(cell.Style.FG.Value)
@@ -344,6 +348,7 @@ func TestTerminalBackendPeakMemoryWorkload(t *testing.T) {
 	if err := term.Close(); err != nil {
 		t.Fatal(err)
 	}
+
 	if observer, ok := term.(interface{ PeakRSSBytes() int64 }); ok {
 		t.Logf("helper_peak_rss_bytes=%d", observer.PeakRSSBytes())
 	}

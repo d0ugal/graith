@@ -16,11 +16,13 @@ type ScreenCapture struct {
 
 func (s *Session) ScreenSnapshot() ScreenCapture {
 	s.mu.Lock()
+
 	snap, err := renderFrameErr(s.screen)
 	if err != nil {
 		recoveryErr := s.replaceScreenLocked()
 		s.log.Warn("terminal snapshot failed; screen reconstructed",
 			"session", s.ID, "error", err, "recovery_error", recoveryErr)
+
 		if recoveryErr == nil {
 			snap, _ = renderFrameErr(s.screen)
 		}
@@ -32,11 +34,13 @@ func (s *Session) ScreenSnapshot() ScreenCapture {
 
 func (s *Session) ScreenPreview() string {
 	s.mu.Lock()
+
 	preview, err := renderPreviewErr(s.screen)
 	if err != nil {
 		recoveryErr := s.replaceScreenLocked()
 		s.log.Warn("terminal preview failed; screen reconstructed",
 			"session", s.ID, "error", err, "recovery_error", recoveryErr)
+
 		if recoveryErr == nil {
 			preview, _ = renderPreviewErr(s.screen)
 		}

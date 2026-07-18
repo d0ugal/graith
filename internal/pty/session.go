@@ -135,10 +135,12 @@ func NewSession(opts SessionOpts) (*Session, error) {
 	}
 
 	sb.SetLogger(log)
+
 	screen, err := newTerminal(int(opts.Cols), int(opts.Rows))
 	if err != nil {
 		_ = sb.Close()
 		_ = ptmx.Close()
+
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
@@ -278,6 +280,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 	if hydrate < 0 {
 		hydrate = defaultScreenHydrationBytes
 	}
+
 	s.screenHydrationBytes = hydrate
 
 	if hydrate > 0 {
@@ -522,9 +525,11 @@ func (s *Session) replaceScreenAtSizeLocked(cols, rows int) error {
 
 			return fmt.Errorf("read terminal recovery scrollback: %w", tailErr)
 		}
+
 		if len(tail) > 0 {
 			if _, writeErr := replacement.Write(tail); writeErr != nil {
 				_ = replacement.Close()
+
 				s.log.Warn("terminal recovery hydration failed; using empty screen",
 					"session", s.ID, "error", writeErr)
 				// The retained tail may contain the exact input that killed the
@@ -544,6 +549,7 @@ func (s *Session) replaceScreenAtSizeLocked(cols, rows int) error {
 
 	failed := s.screen
 	s.screen = replacement
+
 	if failed != nil {
 		_ = failed.Close()
 	}
@@ -768,6 +774,7 @@ func (s *Session) WaitForUserIdle(idleTimeout, maxWait time.Duration) bool {
 
 func (s *Session) Resize(rows, cols uint16) error {
 	s.mu.Lock()
+
 	screenErr := s.screen.Resize(int(cols), int(rows))
 	if screenErr != nil {
 		screenErr = errors.Join(screenErr, s.replaceScreenAtSizeLocked(int(cols), int(rows)))

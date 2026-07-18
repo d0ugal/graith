@@ -249,6 +249,8 @@ source_test() {
         return 2
     fi
     verify_metadata "$source"
+    # Ghostty's test-lib-vt target asserts slow runtime safety; release artifacts
+    # remain ReleaseFast in source_build above.
     (
         cd "$source"
         zig build test-lib-vt \
@@ -256,7 +258,7 @@ source_test() {
             --cache-dir "$NATIVE_WORK/zig-local" \
             -Demit-lib-vt=true \
             -Demit-xcframework=false \
-            -Doptimize=ReleaseFast \
+            -Doptimize=ReleaseSafe \
             -Dtarget="$target"
     )
 }

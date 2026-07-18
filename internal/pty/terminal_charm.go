@@ -126,6 +126,7 @@ func (ct *charmTerminal) Cell(x, y int) Cell {
 func (ct *charmTerminal) Snapshot() (TerminalSnapshot, error) {
 	cols, rows := ct.Size()
 	cursorX, cursorY, cursorVisible := ct.Cursor()
+
 	cells := make([]Cell, cols*rows)
 	for y := 0; y < rows; y++ {
 		for x := 0; x < cols; x++ {

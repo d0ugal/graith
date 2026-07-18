@@ -251,9 +251,11 @@ func TestAdoptSessionReturnsTerminalHydrationPanic(t *testing.T) {
 
 			t.Fatal("AdoptSession returned nil error for parser panic")
 		}
+
 		if s != nil {
 			t.Fatal("AdoptSession returned a session after hydration failed")
 		}
+
 		if got := err.Error(); got != "hydrate terminal screen: terminal parser panic" {
 			t.Errorf("AdoptSession error = %q, want sanitized hydration failure", got)
 		}
@@ -261,9 +263,11 @@ func TestAdoptSessionReturnsTerminalHydrationPanic(t *testing.T) {
 		if err != nil {
 			t.Fatalf("AdoptSession rejected malformed-but-safe hydration: %v", err)
 		}
+
 		if s == nil {
 			t.Fatal("AdoptSession returned nil session after successful hydration")
 		}
+
 		s.Close()
 	}
 

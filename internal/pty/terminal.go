@@ -108,6 +108,7 @@ func snapshotTerminal(term Terminal) (TerminalSnapshot, error) {
 
 	cols, rows := term.Size()
 	cursorX, cursorY, cursorVisible := term.Cursor()
+
 	cells := make([]Cell, cols*rows)
 	for y := 0; y < rows; y++ {
 		for x := 0; x < cols; x++ {
