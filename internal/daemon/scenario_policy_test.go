@@ -61,7 +61,7 @@ func addScenarioResult(t *testing.T, sm *SessionManager, sessionID string, done 
 		return
 	}
 
-	if _, ok, err := sm.todos.Claim(item.ID, sessionID); err != nil || !ok {
+	if _, ok, err := sm.todos.Claim(item.ID, sessionID, false); err != nil || !ok {
 		t.Fatalf("claim result: ok=%v err=%v", ok, err)
 	}
 
@@ -512,7 +512,7 @@ func TestScenarioPolicyCompletionAfterClaimCountsForNewAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, ok, err := sm.todos.Claim(items[0].ID, "braw-id"); err != nil || !ok {
+	if _, ok, err := sm.todos.Claim(items[0].ID, "braw-id", false); err != nil || !ok {
 		t.Fatalf("claim: ok=%v err=%v", ok, err)
 	}
 
@@ -623,7 +623,7 @@ func TestScenarioPolicyQuorumRequiresRequiredResults(t *testing.T) {
 			continue
 		}
 
-		if _, ok, err := sm.todos.Claim(item.ID, "braw-id"); err != nil || !ok {
+		if _, ok, err := sm.todos.Claim(item.ID, "braw-id", false); err != nil || !ok {
 			t.Fatalf("claim required result: ok=%v err=%v", ok, err)
 		}
 

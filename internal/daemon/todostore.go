@@ -605,11 +605,12 @@ func (s *TodoStore) ListAll(f TodoFilter) ([]TodoItem, error) {
 	return s.queryTodos(query, args...)
 }
 
-// Claim atomically claims a specific unclaimed item for owner. It reports
-// whether the claim succeeded (false = already claimed / not claimable). owner
-// must be non-empty and is set server-side by the caller, never trusted from a
-// client payload.
-func (s *TodoStore) Claim(id, owner string) (TodoItem, bool, error) {
+// Claim atomically claims a specific eligible unclaimed item for owner. An
+// ordinary caller is eligible for unassigned work and work assigned to itself;
+// an override caller may also take assigned work. It reports whether the claim
+// succeeded (false = already claimed / not claimable). owner must be non-empty
+// and is set server-side by the caller, never trusted from a client payload.
+func (s *TodoStore) Claim(id, owner string, override bool) (TodoItem, bool, error) {
 	if owner == "" {
 		return TodoItem{}, false, errors.New("claim requires an owner")
 	}
@@ -620,12 +621,13 @@ func (s *TodoStore) Claim(id, owner string) (TodoItem, bool, error) {
 	res, err := s.db.Exec(
 		`UPDATE todos SET status = ?, owner = ?, revision = revision + 1, updated_at = ?
 		 WHERE id = ? AND status = ? AND owner = ''
+		 AND (? OR assignee = '' OR assignee = ?)
 		 AND NOT EXISTS (
 			SELECT 1 FROM todo_dependencies d
 			JOIN todos dependency ON dependency.id = d.dependency_id
 			WHERE d.todo_id = todos.id AND dependency.status <> ?
 		 )`,
-		TodoStatusInProgress, owner, s.nowStr(), id, TodoStatusTodo, TodoStatusDone,
+		TodoStatusInProgress, owner, s.nowStr(), id, TodoStatusTodo, override, owner, TodoStatusDone,
 	)
 	if err != nil {
 		return TodoItem{}, false, fmt.Errorf("claim todo: %w", err)

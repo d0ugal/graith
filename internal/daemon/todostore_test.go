@@ -161,7 +161,7 @@ func TestTodoClaimRaceSingleItem(t *testing.T) {
 
 			owner := fmt.Sprintf("worker-%d", i)
 
-			_, ok, err := s.Claim(it.ID, owner)
+			_, ok, err := s.Claim(it.ID, owner, false)
 			if err != nil {
 				t.Errorf("claim: %v", err)
 				return
@@ -288,11 +288,43 @@ func TestTodoClaimNextHonorsAssignment(t *testing.T) {
 	}
 }
 
+func TestTodoClaimHonorsAssignment(t *testing.T) {
+	s := newTestTodoStore(t)
+
+	const scope = "scenario:strath"
+
+	assigned, err := s.Add(TodoAdd{Scope: scope, Title: "raise the brig", Assignee: "bairn", CreatedBy: "ben"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok, err := s.Claim(assigned.ID, "skelf", false); err != nil || ok {
+		t.Fatalf("peer claim of assigned item: ok=%v err=%v", ok, err)
+	}
+
+	if item, ok, err := s.Claim(assigned.ID, "bairn", false); err != nil || !ok {
+		t.Fatalf("assignee claim: ok=%v err=%v", ok, err)
+	} else if item.Owner != "bairn" {
+		t.Errorf("assignee claim owner = %q", item.Owner)
+	}
+
+	overrideItem, err := s.Add(TodoAdd{Scope: scope, Title: "thatch the bothy", Assignee: "canny", CreatedBy: "ben"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if item, ok, err := s.Claim(overrideItem.ID, "ben", true); err != nil || !ok {
+		t.Fatalf("override claim: ok=%v err=%v", ok, err)
+	} else if item.Owner != "ben" {
+		t.Errorf("override claim owner = %q", item.Owner)
+	}
+}
+
 func TestTodoClaimRequiresOwner(t *testing.T) {
 	s := newTestTodoStore(t)
 
 	it := mustAdd(t, s, "session:ben", "x")
-	if _, _, err := s.Claim(it.ID, ""); err == nil {
+	if _, _, err := s.Claim(it.ID, "", false); err == nil {
 		t.Fatal("expected empty-owner rejection")
 	}
 }
@@ -307,7 +339,7 @@ func TestTodoTransitions(t *testing.T) {
 		t.Error("expected done-on-unclaimed to fail")
 	}
 
-	claimed, ok, err := s.Claim(it.ID, "owner")
+	claimed, ok, err := s.Claim(it.ID, "owner", false)
 	if err != nil || !ok {
 		t.Fatalf("claim: ok=%v err=%v", ok, err)
 	}
@@ -373,7 +405,7 @@ func TestTodoTransitionBlockedToDone(t *testing.T) {
 	s := newTestTodoStore(t)
 
 	it := mustAdd(t, s, "session:ben", "work")
-	if _, _, err := s.Claim(it.ID, "owner"); err != nil {
+	if _, _, err := s.Claim(it.ID, "owner", false); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
@@ -409,7 +441,7 @@ func TestTodoSweepDoneKeepsParentWithUnfinishedChild(t *testing.T) {
 	}
 
 	// Complete the parent, leave the child as todo.
-	if _, _, err := s.Claim(parent.ID, "o"); err != nil {
+	if _, _, err := s.Claim(parent.ID, "o", false); err != nil {
 		t.Fatalf("claim parent: %v", err)
 	}
 
@@ -438,7 +470,7 @@ func TestTodoTransitionOverride(t *testing.T) {
 
 	it := mustAdd(t, s, "session:ben", "work")
 
-	if _, _, err := s.Claim(it.ID, "worker"); err != nil {
+	if _, _, err := s.Claim(it.ID, "worker", false); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
@@ -503,7 +535,7 @@ func TestTodoListFilters(t *testing.T) {
 	mustAdd(t, s, "session:ben", "b")
 	mustAdd(t, s, "session:other", "c") // different scope
 
-	if _, _, err := s.Claim(a.ID, "owner"); err != nil {
+	if _, _, err := s.Claim(a.ID, "owner", false); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
@@ -540,7 +572,7 @@ func TestTodoCounts(t *testing.T) {
 	}
 
 	items, _ := s.List("session:ben", TodoFilter{})
-	if _, _, err := s.Claim(items[0].ID, "o"); err != nil {
+	if _, _, err := s.Claim(items[0].ID, "o", false); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
@@ -564,11 +596,11 @@ func TestTodoReopenOwnedBy(t *testing.T) {
 	a := mustAdd(t, s, "session:ben", "a")
 	b := mustAdd(t, s, "session:ben", "b")
 
-	if _, _, err := s.Claim(a.ID, "gone"); err != nil {
+	if _, _, err := s.Claim(a.ID, "gone", false); err != nil {
 		t.Fatalf("claim a: %v", err)
 	}
 
-	if _, _, err := s.Claim(b.ID, "other"); err != nil {
+	if _, _, err := s.Claim(b.ID, "other", false); err != nil {
 		t.Fatalf("claim b: %v", err)
 	}
 
@@ -603,7 +635,7 @@ func TestTodoReopenStaleLease(t *testing.T) {
 	s.now = func() time.Time { return base }
 
 	it := mustAdd(t, s, "session:ben", "leased")
-	if _, _, err := s.Claim(it.ID, "worker"); err != nil {
+	if _, _, err := s.Claim(it.ID, "worker", false); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
@@ -643,7 +675,7 @@ func TestTodoSweepDone(t *testing.T) {
 	s.now = func() time.Time { return base }
 
 	it := mustAdd(t, s, "session:ben", "finish me")
-	if _, _, err := s.Claim(it.ID, "o"); err != nil {
+	if _, _, err := s.Claim(it.ID, "o", false); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
@@ -719,7 +751,7 @@ func TestTodoAssigneeProgress(t *testing.T) {
 	mustAdd(t, s, scope, "unassigned")
 
 	// Complete backend's a1.
-	if _, _, err := s.Claim(a1.ID, "backend"); err != nil {
+	if _, _, err := s.Claim(a1.ID, "backend", false); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
@@ -756,7 +788,7 @@ func (s *TodoStore) mustAssignedAdd(t *testing.T, scope, title, assignee string)
 func claimAndDone(t *testing.T, s *TodoStore, id, owner string) TodoItem {
 	t.Helper()
 
-	if _, ok, err := s.Claim(id, owner); err != nil || !ok {
+	if _, ok, err := s.Claim(id, owner, false); err != nil || !ok {
 		t.Fatalf("Claim(%s): ok=%v err=%v", id, ok, err)
 	}
 
@@ -789,7 +821,7 @@ func TestTodoDependenciesBlockUntilAllDone(t *testing.T) {
 		t.Fatalf("dependency hydration = depends %v blocked %v", downstream.DependsOn, downstream.BlockedBy)
 	}
 
-	if _, ok, err := s.Claim(downstream.ID, "thrawn"); err != nil || ok {
+	if _, ok, err := s.Claim(downstream.ID, "thrawn", false); err != nil || ok {
 		t.Fatalf("blocked claim: ok=%v err=%v", ok, err)
 	}
 
@@ -804,7 +836,7 @@ func TestTodoDependenciesBlockUntilAllDone(t *testing.T) {
 		t.Fatalf("after first dependency: %+v", stillBlocked)
 	}
 
-	if _, ok, err := s.Claim(b.ID, "braw"); err != nil || !ok {
+	if _, ok, err := s.Claim(b.ID, "braw", false); err != nil || !ok {
 		t.Fatalf("claim final dependency: ok=%v err=%v", ok, err)
 	}
 
@@ -821,7 +853,7 @@ func TestTodoDependenciesBlockUntilAllDone(t *testing.T) {
 		t.Fatalf("unblocked state = %+v", result.Unblocked[0])
 	}
 
-	if _, ok, err := s.Claim(downstream.ID, "thrawn"); err != nil || !ok {
+	if _, ok, err := s.Claim(downstream.ID, "thrawn", false); err != nil || !ok {
 		t.Fatalf("ready claim: ok=%v err=%v", ok, err)
 	}
 }
@@ -837,11 +869,11 @@ func TestTodoDependencyCompletionConcurrentFinalEdges(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, ok, err := s.Claim(a.ID, "bairn-a"); err != nil || !ok {
+	if _, ok, err := s.Claim(a.ID, "bairn-a", false); err != nil || !ok {
 		t.Fatalf("claim a: ok=%v err=%v", ok, err)
 	}
 
-	if _, ok, err := s.Claim(b.ID, "bairn-b"); err != nil || !ok {
+	if _, ok, err := s.Claim(b.ID, "bairn-b", false); err != nil || !ok {
 		t.Fatalf("claim b: ok=%v err=%v", ok, err)
 	}
 
@@ -958,7 +990,7 @@ func TestTodoDependencyReopenAndReclaimSemantics(t *testing.T) {
 
 	claimAndDone(t, s, upstream.ID, "mason")
 
-	if _, ok, err := s.Claim(downstream.ID, "builder"); err != nil || !ok {
+	if _, ok, err := s.Claim(downstream.ID, "builder", false); err != nil || !ok {
 		t.Fatalf("claim downstream: ok=%v err=%v", ok, err)
 	}
 

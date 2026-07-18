@@ -215,7 +215,7 @@ var todoStartCmd = &cobra.Command{
 
 var todoNextCmd = &cobra.Command{
 	Use:   "next",
-	Short: "Claim the next unclaimed item in scope",
+	Short: "Claim the next eligible item in scope",
 	Args:  cobra.NoArgs,
 	RunE:  todoClaimRun,
 }

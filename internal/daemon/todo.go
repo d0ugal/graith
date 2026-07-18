@@ -329,7 +329,7 @@ func (sm *SessionManager) TodoListOp(ac authContext, m protocol.TodoListMsg) ([]
 	return out, nil
 }
 
-// TodoClaimOp claims a specific item (m.ID) or the next unclaimed item in scope
+// TodoClaimOp claims a specific item (m.ID) or the next eligible item in scope
 // (m.ID empty). The owner is always the calling session, server-derived.
 func (sm *SessionManager) TodoClaimOp(ac authContext, m protocol.TodoClaimMsg) (protocol.TodoClaimResponse, error) {
 	if sm.todos == nil {
@@ -361,7 +361,7 @@ func (sm *SessionManager) TodoClaimOp(ac authContext, m protocol.TodoClaimMsg) (
 				m.ID, item.Assignee)
 		}
 
-		claimed, ok, err := sm.todos.Claim(m.ID, owner)
+		claimed, ok, err := sm.todos.Claim(m.ID, owner, acc.override)
 		if err != nil {
 			return protocol.TodoClaimResponse{}, err
 		}
@@ -421,7 +421,7 @@ func (sm *SessionManager) TodoTransitionOp(ac authContext, m protocol.TodoTransi
 	acc := sm.accessForItem(ac, item)
 	if m.Status == TodoStatusDone && item.Status == TodoStatusTodo && item.Owner == "" {
 		switch {
-		case item.Assignee == ac.sessionID:
+		case ac.sessionID != "" && item.Assignee == ac.sessionID:
 			return protocol.TodoItemInfo{}, fmt.Errorf(
 				"todo %q is assigned to this session but is not claimed; run `gr todo claim %s` before `gr todo done %s`",
 				m.ID, m.ID, m.ID)
