@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.69.4](https://github.com/d0ugal/graith/compare/v0.69.3...v0.69.4) (2026-07-18)
+
+
+### Features
+
+* **scenarios:** separate startup prompts from tasks ([2f922ed](https://github.com/d0ugal/graith/commit/2f922edeb04d8aa8057e16117620a3f10ad94fc6))
+
+
+### Bug Fixes
+
+* **daemon:** generate valid completion reactor names ([9b097d2](https://github.com/d0ugal/graith/commit/9b097d292956dff300b45d1c1c3860cb82bc7898))
+* **scenario:** clarify seeded todo ownership ([c92cfb2](https://github.com/d0ugal/graith/commit/c92cfb22bb852b58e2a07da43daecb1ecd7cc780))
+* **scenarios:** treat blank prompts as omitted ([1f85f41](https://github.com/d0ugal/graith/commit/1f85f41fe2b4726f13e8c0f0de4cbd7da0ac3a08))
+* **todo:** enforce claim eligibility atomically ([b3e973b](https://github.com/d0ugal/graith/commit/b3e973bfb516efaca3f211fee8a26713b38744ee))
+
+
+### Tests
+
+* **daemon:** preserve completion reactor name hint ([562520e](https://github.com/d0ugal/graith/commit/562520e4dab69c5da21966e028158c426b18a18f))
+
 ## [0.69.3](https://github.com/d0ugal/graith/compare/v0.69.2...v0.69.3) (2026-07-17)
 
 
