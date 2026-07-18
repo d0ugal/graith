@@ -151,6 +151,7 @@ func TestRunUpdateNameResolution(t *testing.T) {
 
 	t.Run("soft-deleted target has restore guidance", func(t *testing.T) {
 		captureUpdateOutput(t, false)
+
 		c := &scriptedConn{responses: []scriptedResp{
 			okResp(payloadEnv("session_list", protocol.SessionListMsg{})),
 			okResp(payloadEnv("session_list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{{ID: "id-auld", Name: "auld"}}})),
@@ -164,6 +165,7 @@ func TestRunUpdateNameResolution(t *testing.T) {
 
 	t.Run("deleted exact ID takes precedence over a live colliding name", func(t *testing.T) {
 		captureUpdateOutput(t, false)
+
 		c := &scriptedConn{responses: []scriptedResp{
 			okResp(payloadEnv("session_list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{
 				{ID: "id-canny", Name: "id-auld"},
@@ -221,6 +223,7 @@ func TestRunUpdateCombinedProperties(t *testing.T) {
 
 func TestRunUpdateDaemonError(t *testing.T) {
 	captureUpdateOutput(t, false)
+
 	c := &scriptedConn{responses: []scriptedResp{
 		okResp(payloadEnv("session_list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{{ID: "id-braw", Name: "braw"}}})),
 		okResp(payloadEnv("session_list", protocol.SessionListMsg{})),

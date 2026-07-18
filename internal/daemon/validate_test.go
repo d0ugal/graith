@@ -177,6 +177,7 @@ func TestUpdateRejectsUnsafeName(t *testing.T) {
 	}
 
 	badName := "bad|name"
+
 	err := sm.Update("braw-id", &badName, nil)
 	if err == nil {
 		t.Fatal("Update with unsafe name should fail")
