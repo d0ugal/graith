@@ -193,3 +193,15 @@ func snapshotTerminal(term Terminal) (TerminalSnapshot, error) {
 		Rows:          rows,
 	}, nil
 }
+
+func clampSize(cols, rows int) (int, int) {
+	if cols < 1 {
+		cols = 1
+	}
+
+	if rows < 1 {
+		rows = 1
+	}
+
+	return cols, rows
+}

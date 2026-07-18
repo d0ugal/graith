@@ -83,6 +83,159 @@ func TestGhosttyTerminalEnablesRecommendedGraphemeMode(t *testing.T) {
 	}
 }
 
+func TestGhosttyTerminalRestoresGraphemeModeAfterRIS(t *testing.T) {
+	graphemes := []struct {
+		name    string
+		content string
+	}{
+		{name: "zwj", content: "👩‍💻"},
+		{name: "variation_selector", content: "♥️"},
+		{name: "regional_indicator", content: "🇬🇧"},
+	}
+	deliveries := []struct {
+		name   string
+		chunks []string
+	}{
+		{name: "same_write", chunks: []string{"\x1bc"}},
+		{name: "split_escape_final", chunks: []string{"\x1b", "c"}},
+		{name: "multiple_same_write", chunks: []string{"\x1bcbraw\x1bc"}},
+		// ESC is an anywhere transition in the exact Ghostty parser, so RIS
+		// also interrupts an unfinished control string.
+		{name: "unfinished_osc", chunks: []string{"\x1b]0;dreich", "\x1bc"}},
+		{name: "unfinished_dcs", chunks: []string{"\x1bP1;2|thrawn", "\x1bc"}},
+		{name: "unfinished_apc", chunks: []string{"\x1b_blether", "\x1bc"}},
+		{name: "unfinished_csi", chunks: []string{"\x1b[999;", "\x1bc"}},
+		// The incomplete lead byte forces Ghostty's scalar decoder to reject
+		// and retry ESC as a control byte before dispatching RIS.
+		{name: "malformed_utf8", chunks: []string{string([]byte{0xe2, 0x1b, 'c'})}},
+	}
+
+	for _, delivery := range deliveries {
+		t.Run(delivery.name, func(t *testing.T) {
+			for _, grapheme := range graphemes {
+				t.Run(grapheme.name, func(t *testing.T) {
+					term, err := newGhosttyTerminal(12, 2)
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					t.Cleanup(func() { _ = term.Close() })
+
+					if _, err := term.Write([]byte("\x1b[?2027l")); err != nil {
+						t.Fatal(err)
+					}
+
+					assertGhosttyGraphemeMode(t, term, false)
+
+					for i, chunk := range delivery.chunks {
+						if i == len(delivery.chunks)-1 {
+							chunk += grapheme.content + "b"
+						}
+
+						if _, err := term.Write([]byte(chunk)); err != nil {
+							t.Fatal(err)
+						}
+					}
+
+					assertGhosttyGraphemeMode(t, term, true)
+					assertGhosttyCluster(t, term, grapheme.content)
+				})
+			}
+		})
+	}
+}
+
+func TestGhosttyTerminalApplicationGraphemeModePolicy(t *testing.T) {
+	term, err := newGhosttyTerminal(12, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = term.Close() })
+
+	// Applications may explicitly disable mode 2027. Graith preserves that
+	// choice until the application enables it again or RIS restores defaults.
+	if _, err := term.Write([]byte("\x1b[?2027lbraw")); err != nil {
+		t.Fatal(err)
+	}
+
+	assertGhosttyGraphemeMode(t, term, false)
+
+	for _, nonRIS := range []struct {
+		name   string
+		chunks []string
+	}{
+		{name: "can", chunks: []string{"\x1b", "\x18", "c"}},
+		{name: "sub", chunks: []string{"\x1b", "\x1a", "c"}},
+		{name: "intermediate", chunks: []string{"\x1b", "(", "c"}},
+	} {
+		t.Run(nonRIS.name, func(t *testing.T) {
+			for _, chunk := range nonRIS.chunks {
+				if _, err := term.Write([]byte(chunk)); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			assertGhosttyGraphemeMode(t, term, false)
+		})
+	}
+
+	if _, err := term.Write([]byte("\x1b[?2027h")); err != nil {
+		t.Fatal(err)
+	}
+
+	assertGhosttyGraphemeMode(t, term, true)
+
+	if _, err := term.Write([]byte("\x1b[?2027l")); err != nil {
+		t.Fatal(err)
+	}
+
+	assertGhosttyGraphemeMode(t, term, false)
+
+	if _, err := term.Write([]byte("\x1bc")); err != nil {
+		t.Fatal(err)
+	}
+
+	assertGhosttyGraphemeMode(t, term, true)
+}
+
+func assertGhosttyGraphemeMode(t *testing.T, term *ghosttyTerminal, want bool) {
+	t.Helper()
+
+	got, err := term.terminal.ModeGet(libghostty.ModeGraphemeCluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got != want {
+		t.Fatalf("Ghostty grapheme-cluster mode = %t, want %t", got, want)
+	}
+}
+
+func assertGhosttyCluster(t *testing.T, term *ghosttyTerminal, grapheme string) {
+	t.Helper()
+
+	if got := term.Cell(0, 0).Content; got != grapheme {
+		t.Errorf("leading cell = %q, want %q", got, grapheme)
+	}
+
+	if got := term.Cell(1, 0).Content; got != "" {
+		t.Errorf("wide tail = %q, want empty", got)
+	}
+
+	if got := term.Cell(2, 0).Content; got != "b" {
+		t.Errorf("following cell = %q, want b", got)
+	}
+
+	if got := renderPreview(term); got != grapheme+"b\n" {
+		t.Errorf("preview = %q, want %q", got, grapheme+"b\n")
+	}
+
+	if x, y, visible := term.Cursor(); x != 3 || y != 0 || !visible {
+		t.Errorf("cursor = (%d,%d,%t), want (3,0,true)", x, y, visible)
+	}
+}
+
 func TestGhosttySnapshotProtocolRejectsMalformedFrames(t *testing.T) {
 	valid, err := encodeGhosttySnapshot(TerminalSnapshot{
 		Cells: []Cell{{Content: "braw"}}, Cols: 1, Rows: 1,

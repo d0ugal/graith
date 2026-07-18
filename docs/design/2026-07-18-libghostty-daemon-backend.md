@@ -246,6 +246,15 @@ styles, palette/RGB colors, alternate screen, device queries, and the reduced
 #1430 sequence. #1446 expands fragmented control strings, margins, erase/wrap,
 ZWJ/variation sequences, and background-only cells before handoff.
 
+Ordinary builds compile and test the Charm rollback. Production
+`libghostty` builds compile only the native backend and exclude x/vt and
+Ultraviolet from the `internal/pty` terminal-screen dependency graph and its
+isolated binary. The full `gr` binary legitimately retains Ultraviolet through
+its Bubble Tea/Lip Gloss UI, but no longer retains x/vt. The explicit
+`libghostty,libghostty_compare` tag pair compiles both backends for this shared
+corpus and its comparative benchmarks. `libghostty_compare` alone does not
+select the native backend and intentionally remains a default Charm build.
+
 Current intentional differences are explicit assertions rather than hidden
 normalization:
 

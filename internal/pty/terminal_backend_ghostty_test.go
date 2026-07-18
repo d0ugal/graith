@@ -1,4 +1,4 @@
-//go:build libghostty && cgo
+//go:build libghostty && libghostty_compare && cgo && (darwin || linux)
 
 package pty
 
@@ -25,6 +25,9 @@ func ghosttyTerminalBackendExpectations() terminalBackendExpectations {
 	expectations.graphemes["combining"] = terminalGraphemeExpectation{
 		cells: []string{"e\u0301", "b"}, cursorX: 2, preview: "e\u0301b",
 	}
+	// Ghostty keeps grapheme assembly state across Write boundaries, so its
+	// byte-fragmented expectations remain identical to whole writes.
+	expectations.fragmented = nil
 
 	return expectations
 }

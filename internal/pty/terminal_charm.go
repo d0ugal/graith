@@ -1,3 +1,5 @@
+//go:build !libghostty || libghostty_compare
+
 package pty
 
 import (
@@ -157,18 +159,6 @@ func (ct *charmTerminal) Close() error {
 	})
 
 	return nil
-}
-
-func clampSize(cols, rows int) (int, int) {
-	if cols < 1 {
-		cols = 1
-	}
-
-	if rows < 1 {
-		rows = 1
-	}
-
-	return cols, rows
 }
 
 // convertCell maps an ultraviolet cell to graith's backend-neutral Cell.

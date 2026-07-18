@@ -161,10 +161,12 @@ run_go() {
             go test -count=1 -tags=libghostty ./internal/pty
             go test -count=1 -tags=libghostty ./internal/daemon \
                 -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
+            go test -count=1 -tags=libghostty,libghostty_compare ./internal/pty \
+                -run '^TestTerminalBackendCompatibilityCorpus$'
             ;;
         race)
             verify_metadata
-            go test -race -count=1 -tags=libghostty ./internal/pty \
+            go test -race -count=1 -tags=libghostty,libghostty_compare ./internal/pty \
                 -run 'TestTerminalBackendCompatibilityCorpus|TestGhostty'
             go test -race -count=1 -tags=libghostty ./internal/daemon \
                 -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
@@ -187,14 +189,14 @@ run_go() {
                 -fuzz '^FuzzGhosttyHelperWrite$' -fuzztime="$helper_fuzztime"
             ;;
         bench)
-            go test -run '^$' -tags=libghostty ./internal/pty \
+            go test -run '^$' -tags=libghostty,libghostty_compare ./internal/pty \
                 -bench '^BenchmarkTerminalBackends$' -benchmem -benchtime=3x -count=5
             ;;
         memory)
             local charm_test="$NATIVE_WORK/pty-charm.test"
             local ghostty_test="$NATIVE_WORK/pty-libghostty.test"
             go test -c -o "$charm_test" ./internal/pty
-            go test -c -tags=libghostty \
+            go test -c -tags=libghostty,libghostty_compare \
                 -o "$ghostty_test" ./internal/pty
 
             for backend in charm libghostty-helper; do

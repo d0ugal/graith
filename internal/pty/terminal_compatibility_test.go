@@ -1,3 +1,5 @@
+//go:build !libghostty || libghostty_compare
+
 package pty
 
 import (
@@ -22,6 +24,7 @@ type terminalBackendExpectations struct {
 	resizePreviews    []string
 	alternateScreens  map[int]terminalAlternateExpectation
 	graphemes         map[string]terminalGraphemeExpectation
+	fragmented        map[string]terminalGraphemeExpectation
 }
 
 func charmTerminalBackendExpectations() terminalBackendExpectations {
@@ -49,6 +52,20 @@ func charmTerminalBackendExpectations() terminalBackendExpectations {
 			"variation_selector": {cells: []string{"♥️", "", "b"}, cursorX: 3, preview: "♥️b"},
 			"regional_indicator": {cells: []string{"🇬🇧", "", "b"}, cursorX: 3, preview: "🇬🇧b"},
 			"wide":               {cells: []string{"你", "", "b"}, cursorX: 3, preview: "你b"},
+		},
+		fragmented: map[string]terminalGraphemeExpectation{
+			// Charm's parser preserves incomplete UTF-8 between writes, but
+			// commits each completed codepoint before a later write can extend
+			// it into these multi-codepoint clusters.
+			"zwj": {
+				cells: []string{"👩", "", "💻", "", "b"}, cursorX: 5, preview: "👩💻b",
+			},
+			"variation_selector": {
+				cells: []string{"♥", "b"}, cursorX: 2, preview: "♥b",
+			},
+			"regional_indicator": {
+				cells: []string{"🇬", "", "🇧", "", "b"}, cursorX: 5, preview: "🇬🇧b",
+			},
 		},
 	}
 }
@@ -83,6 +100,9 @@ func TestTerminalBackendCompatibilityCorpus(t *testing.T) {
 			})
 			t.Run("graphemes_and_width", func(t *testing.T) {
 				testTerminalGraphemes(t, factory)
+			})
+			t.Run("ris_and_grapheme_mode", func(t *testing.T) {
+				testTerminalRISGraphemes(t, factory)
 			})
 			t.Run("styles_and_colors", func(t *testing.T) {
 				testTerminalStylesAndColors(t, factory)
@@ -332,18 +352,92 @@ func testTerminalGraphemes(t *testing.T, factory terminalBackendFactory) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			term := newTerminalBackendTestTerm(t, factory, 12, 2)
-			write(t, term, tc.input)
+			for _, fragmented := range []bool{false, true} {
+				name := "whole_write"
+				if fragmented {
+					name = "byte_fragmented"
+				}
 
-			want := factory.expectations.graphemes[tc.name]
-			assertLeadingCellContents(t, term, want.cells)
+				t.Run(name, func(t *testing.T) {
+					term := newTerminalBackendTestTerm(t, factory, 12, 2)
 
-			if got := renderPreview(term); got != want.preview+"\n" {
-				t.Errorf("rendered preview = %q, want %q", got, want.preview+"\n")
+					if fragmented {
+						for _, b := range []byte(tc.input) {
+							write(t, term, string([]byte{b}))
+						}
+					} else {
+						write(t, term, tc.input)
+					}
+
+					want := factory.expectations.graphemes[tc.name]
+					if fragmented {
+						if fragmentedWant, ok := factory.expectations.fragmented[tc.name]; ok {
+							want = fragmentedWant
+						}
+					}
+
+					assertLeadingCellContents(t, term, want.cells)
+
+					if got := renderPreview(term); got != want.preview+"\n" {
+						t.Errorf("rendered preview = %q, want %q", got, want.preview+"\n")
+					}
+
+					if x, y, visible := term.Cursor(); x != want.cursorX || y != 0 || !visible {
+						t.Errorf("cursor = (%d,%d,%t), want (%d,0,true)", x, y, visible, want.cursorX)
+					}
+				})
 			}
+		})
+	}
+}
 
-			if x, y, visible := term.Cursor(); x != want.cursorX || y != 0 || !visible {
-				t.Errorf("cursor = (%d,%d,%t), want (%d,0,true)", x, y, visible, want.cursorX)
+func testTerminalRISGraphemes(t *testing.T, factory terminalBackendFactory) {
+	t.Helper()
+
+	graphemes := []struct {
+		name  string
+		input string
+	}{
+		{name: "zwj", input: "👩‍💻b"},
+		{name: "variation_selector", input: "♥️b"},
+		{name: "regional_indicator", input: "🇬🇧b"},
+	}
+	deliveries := []struct {
+		name   string
+		chunks []string
+	}{
+		{name: "same_write", chunks: []string{"\x1bc"}},
+		{name: "split_escape_final", chunks: []string{"\x1b", "c"}},
+	}
+
+	for _, delivery := range deliveries {
+		t.Run(delivery.name, func(t *testing.T) {
+			for _, grapheme := range graphemes {
+				t.Run(grapheme.name, func(t *testing.T) {
+					term := newTerminalBackendTestTerm(t, factory, 12, 2)
+					// Applications may explicitly reset mode 2027, but RIS then
+					// restores each backend's grapheme behavior.
+					write(t, term, "\x1b[?2027l")
+
+					for i, chunk := range delivery.chunks {
+						if i == len(delivery.chunks)-1 {
+							chunk += grapheme.input
+						}
+
+						write(t, term, chunk)
+					}
+
+					want := factory.expectations.graphemes[grapheme.name]
+					assertLeadingCellContents(t, term, want.cells)
+
+					if got := renderPreview(term); got != want.preview+"\n" {
+						t.Errorf("rendered preview = %q, want %q", got, want.preview+"\n")
+					}
+
+					if x, y, visible := term.Cursor(); x != want.cursorX || y != 0 || !visible {
+						t.Errorf("cursor = (%d,%d,%t), want (%d,0,true)", x, y, visible, want.cursorX)
+					}
+				})
 			}
 		})
 	}
