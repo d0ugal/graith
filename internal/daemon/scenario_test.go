@@ -1179,6 +1179,58 @@ func TestStartScenarioRejectsUnavailableSharedSession(t *testing.T) {
 			},
 			wantErr: "only running or stopped sessions can be shared",
 		},
+		{
+			name: "creating",
+			seed: func(sm *SessionManager) {
+				sm.state.Sessions["creating-shared"] = &SessionState{
+					ID: "creating-shared", Name: "clachan-shared", Status: StatusCreating,
+				}
+			},
+			wantErr: "is creating",
+		},
+		{
+			name: "deleting",
+			seed: func(sm *SessionManager) {
+				sm.state.Sessions["deleting-shared"] = &SessionState{
+					ID: "deleting-shared", Name: "clachan-shared", Status: StatusDeleting,
+				}
+			},
+			wantErr: "is deleting",
+		},
+		{
+			name: "unknown status",
+			seed: func(sm *SessionManager) {
+				sm.state.Sessions["unknown-shared"] = &SessionState{
+					ID: "unknown-shared", Name: "clachan-shared",
+				}
+			},
+			wantErr: "is unknown",
+		},
+		{
+			name: "multiple transient states",
+			seed: func(sm *SessionManager) {
+				sm.state.Sessions["creating-shared"] = &SessionState{
+					ID: "creating-shared", Name: "clachan-shared", Status: StatusCreating,
+				}
+				sm.state.Sessions["deleting-shared"] = &SessionState{
+					ID: "deleting-shared", Name: "clachan-shared", Status: StatusDeleting,
+				}
+			},
+			wantErr: "creating=1, deleting=1",
+		},
+		{
+			name: "deleted and errored",
+			seed: func(sm *SessionManager) {
+				now := time.Now().UTC()
+				sm.state.Sessions["deleted-shared"] = &SessionState{
+					ID: "deleted-shared", Name: "clachan-shared", Status: StatusStopped, DeletedAt: &now,
+				}
+				sm.state.Sessions["errored-shared"] = &SessionState{
+					ID: "errored-shared", Name: "clachan-shared", Status: StatusErrored,
+				}
+			},
+			wantErr: "deleted=1, errored=1",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1313,6 +1365,102 @@ func TestStartScenarioRejectsStoppedSharedMirrorSourceWithCleanedWorktree(t *tes
 
 	if len(sm.state.Scenarios) != 0 {
 		t.Errorf("cleaned-worktree preflight reserved scenario state: %+v", sm.state.Scenarios)
+	}
+}
+
+func TestStartScenarioRejectsStoppedSharedMirrorSourceWithFileWorktree(t *testing.T) {
+	sm := startScenarioOrchestrator(t)
+	sm.sandboxResolver = func(string) (bool, error) { return true, nil }
+
+	worktreeFile := filepath.Join(t.TempDir(), "dreich-bothy")
+	if err := os.WriteFile(worktreeFile, []byte("not a worktree\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := initTempGitRepo(t)
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw-source"] = &SessionState{
+		ID: "braw-source", Name: "subject", Status: StatusStopped,
+		RepoPath: repo, WorktreePath: worktreeFile,
+	}
+	sm.mu.Unlock()
+
+	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: "ben-orch", Name: "strath-file-worktree",
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "subject", Shared: true},
+			{Name: "reader", Mirror: "subject"},
+		},
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "is not a directory") {
+		t.Fatalf("error = %v, want file-worktree rejection", err)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if len(sm.state.Scenarios) != 0 {
+		t.Errorf("file-worktree preflight reserved scenario state: %+v", sm.state.Scenarios)
+	}
+}
+
+func TestStartScenarioRejectsStoppedSharedMirrorSourceWithUnavailableInclude(t *testing.T) {
+	tests := []struct {
+		name        string
+		includePath func(*testing.T) string
+	}{
+		{
+			name: "missing",
+			includePath: func(t *testing.T) string {
+				return filepath.Join(t.TempDir(), "cleaned-croft")
+			},
+		},
+		{
+			name: "not a git repo",
+			includePath: func(t *testing.T) string {
+				return t.TempDir()
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sm := startScenarioOrchestrator(t)
+			sm.sandboxResolver = func(string) (bool, error) { return true, nil }
+
+			repo := initTempGitRepo(t)
+			includePath := tt.includePath(t)
+
+			sm.mu.Lock()
+			sm.state.Sessions["braw-source"] = &SessionState{
+				ID: "braw-source", Name: "subject", Status: StatusStopped,
+				RepoPath: repo, WorktreePath: repo,
+				Includes: []IncludedRepoState{{
+					RepoPath: repo, RepoName: "canny-croft", WorktreePath: includePath,
+				}},
+			}
+			sm.mu.Unlock()
+
+			_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+				CallerSessionID: "ben-orch", Name: "strath-unavailable-include",
+				Sessions: []protocol.ScenarioSessionInput{
+					{Name: "subject", Shared: true},
+					{Name: "middle-reader", Mirror: "subject"},
+					{Name: "deep-reader", Mirror: "middle-reader"},
+				},
+			}, 24, 80)
+			if err == nil || !strings.Contains(err.Error(), "included worktree") || !strings.Contains(err.Error(), "no longer a valid git repo") {
+				t.Fatalf("error = %v, want unavailable-include rejection", err)
+			}
+
+			sm.mu.RLock()
+			defer sm.mu.RUnlock()
+
+			if len(sm.state.Scenarios) != 0 {
+				t.Errorf("include preflight reserved scenario state: %+v", sm.state.Scenarios)
+			}
+		})
 	}
 }
 

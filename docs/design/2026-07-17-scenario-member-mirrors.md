@@ -81,7 +81,8 @@ to exactly one running or stopped existing session; zero or multiple available
 candidates fail before any session starts. Soft-deleted, errored, creating, and
 deleting rows remain unavailable. A shared source without a worktree, or whose
 saved worktree is no longer an accessible directory, is incompatible with
-mirroring. Filesystem validation is performed outside the manager lock and the
+mirroring. Its effective included worktrees must also remain valid Git
+worktrees. Filesystem validation is performed outside the manager lock and the
 selected session identity and paths are revalidated while reserving the
 topology.
 

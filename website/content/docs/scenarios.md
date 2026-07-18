@@ -143,7 +143,7 @@ legacy indefinite/manual behaviour.
 | `task` | no | — | Tracked work title: seeds an assigned todo and participates in completion; also supplies the startup prompt when `prompt` is omitted (maximum 500 bytes, or a lower configured todo-title limit) |
 | `depends_on` | no | — | Member names whose seeded tasks must all finish before this seeded task is claimable |
 | `agent_hooks` | no | `true` | Enable agent hooks (check-inbox, etc.) |
-| `shared` | no | `false` | Reuse an existing running session by name |
+| `shared` | no | `false` | Reuse an existing running or stopped session by name; see the eligibility and ownership rules below |
 | `includes` | no | — | Extra worktrees to attach, in addition to any inherited from the repo's `[[repos]]` config (`~` expanded; deduplicated against repo-config includes) |
 | `star` | no | `false` | Create the session already starred, protecting it from an accidental manual `gr delete` |
 
@@ -223,7 +223,8 @@ path. A mirrored member must not also set `shared`, `repo`, `base`, or
 from its target. The target may itself be mirrored, but references must be
 acyclic. Missing targets, duplicate/ambiguous names, cycles, sources without a
 worktree, stopped sources whose saved worktree has already been cleaned up, and
-unavailable sandbox enforcement fail preflight before any member starts.
+sources with missing or invalid inherited included worktrees fail preflight
+before any member starts, as does unavailable sandbox enforcement.
 Agent, model, role, prompt, task, hooks, and `star` still configure the mirrored
 worker itself.
 
