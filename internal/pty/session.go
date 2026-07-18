@@ -258,7 +258,13 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 
 	if hydrate > 0 {
 		if tail, err := sb.TailBytes(int64(hydrate)); err == nil && len(tail) > 0 {
-			_, _ = s.screen.Write(tail)
+			if _, err := s.screen.Write(tail); err != nil {
+				_ = s.screen.Close()
+				_ = sb.Close()
+				_ = ptmx.Close()
+
+				return nil, fmt.Errorf("hydrate terminal screen: %w", err)
+			}
 		}
 	}
 
@@ -397,13 +403,18 @@ func (s *Session) readLoop() {
 			chunk := buf[:n]
 			_, _ = s.Scrollback.Write(chunk)
 			s.mu.Lock()
-			_, _ = s.screen.Write(chunk)
+			screenErr := s.writeScreenLocked(chunk)
 			s.lastOutputAt = time.Now()
 			first := s.bytesRead == 0
 			s.bytesRead += int64(n)
 			writers := make([]io.Writer, len(s.writers))
 			copy(writers, s.writers)
 			s.mu.Unlock()
+
+			if screenErr != nil {
+				s.log.Warn("terminal parser failed; screen reset",
+					"session", s.ID, "error", screenErr)
+			}
 
 			// Record the first byte of PTY output. Its absence is the signature
 			// of the blank-screen-on-restart bug (issue #1087): the agent process
@@ -448,6 +459,22 @@ func (s *Session) readLoop() {
 			return
 		}
 	}
+}
+
+// writeScreenLocked parses one PTY output chunk. If the parser reports a
+// failure, replace the possibly inconsistent emulator immediately and keep the
+// raw scrollback/fan-out path alive. The caller must hold s.mu.
+func (s *Session) writeScreenLocked(chunk []byte) error {
+	cols, rows := s.screen.Size()
+	if _, err := s.screen.Write(chunk); err != nil {
+		failed := s.screen
+		s.screen = newTerminal(cols, rows)
+		_ = failed.Close()
+
+		return err
+	}
+
+	return nil
 }
 
 func (s *Session) waitLoop() {
