@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -56,9 +57,24 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Cleanup(func() { _ = badW.Close() })
+	t.Cleanup(func() {
+		_ = badR.Close()
+		_ = badW.Close()
+	})
+
+	badFD, err := syscall.Dup(int(badR.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	goodR, goodW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = goodR.Close() })
+
+	goodFD, err := syscall.Dup(int(goodR.Fd()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,8 +92,8 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 	})
 
 	manifest := &UpgradeManifest{Sessions: []UpgradeSession{
-		{ID: "thrawn-fash", Fd: int(badR.Fd()), PID: cmd.Process.Pid},
-		{ID: "canny-braw", Fd: int(goodR.Fd()), PID: cmd.Process.Pid},
+		{ID: "thrawn-fash", Fd: badFD, PID: cmd.Process.Pid},
+		{ID: "canny-braw", Fd: goodFD, PID: cmd.Process.Pid},
 	}}
 
 	if err := sm.AdoptSessions(manifest); err != nil {
