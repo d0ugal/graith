@@ -119,7 +119,10 @@ KiB, viewports to 262,144 cells, and live helpers to 64. It validates
 operation-specific lengths, status/payload combinations, color values, style
 flags, cursor geometry, and UTF-8 before retaining decoded state. Every RPC has
 a five-second deadline; protocol, native, I/O, and timeout failures poison the
-connection and synchronously kill and reap the child.
+connection. Failure handling synchronously closes the socket and requests
+termination, then makes bounded graceful and forced reap attempts. A helper
+that cannot be reaped within those waits remains registered and retains its
+capacity slot until its actual `Wait` completion.
 
 The public `Terminal` contract now returns resize errors, construction returns
 an error, and an optional `Snapshot` capability provides one coherent viewport.
@@ -128,7 +131,9 @@ dirty frame. Compatibility `Cursor` and `Cell` methods read the cached frame.
 
 When a write, resize, or snapshot fails, `Session` creates a new helper and
 hydrates it from at most the configured persistent scrollback tail (128 KiB by
-default). It swaps models only after successful construction and replay. If the
+default). Replay is streamed in 512 KiB writes so a configured tail above 1 MiB
+does not weaken or trip the per-request bound. It swaps models only after
+successful construction and replay. If the
 retained bytes reproduce the fault, it creates an empty helper rather than
 looping on poison input. Errors contain operation/status classes, never PTY
 content.
@@ -145,8 +150,37 @@ helper creates a new session so it has no controlling terminal.
 Graceful close has a 250 ms exit grace period before kill and a bounded final
 reap wait; repeated and concurrent close are idempotent. Dirty writes and
 resizes release the parent's old snapshot cache. Helper slots are released only
-after reaping, so a pathological unreapable process consumes capacity instead
+after actual `Wait` completion, so a pathological unreapable process consumes capacity instead
 of allowing the process bound to grow silently.
+
+`Session` serializes write, preview, snapshot, resize, replacement, and close;
+the process terminal also serializes every RPC and teardown operation. Session
+construction reserves the terminal helper and opens scrollback before starting
+the user PTY command, so capacity/setup failure cannot execute a rejected
+command. All pre-start resources are closed if the later PTY start fails.
+
+Daemon exec upgrade is a transactional boundary. A hidden, bounded, versioned
+target-binary probe reports backend availability, session capacity, and helper
+handoff schema; the native probe actually starts and reaps a tiny helper. The
+old daemon resolves one exact executable, validates its file identity, reserves
+session lifecycle under the manager lock, refuses any in-flight creation, and
+freezes helper generation. A limiter-owned registry snapshots every
+started-but-not-yet-waited helper, including failed/replaced screens. The
+private manifest is written atomically with mode 0600 and contains sorted PTY
+FD/process identities, the exact target identity, and every helper PID/start
+identity. Descriptor inheritance mutations retain and restore the original
+flags on every failure. The handler says `upgrading` only after preparation and
+must acknowledge before exec proceeds.
+
+After exec, the new image securely reads a bounded, owner-checked, non-symlink
+manifest and reaps every inherited exact helper child before creating any new
+terminal. Capacity and process-start identities are checked again. Failed
+adoption closes the transferred FD and performs verified TERM/KILL plus exact
+wait outside the manager lock; only verified absence/reap becomes stopped,
+while unresolved or mismatched identity stays errored with PID identity
+retained. If exec returns, the old daemon restores descriptor flags, thaws
+helper generation, reconstructs a screen that failed during the freeze from
+raw scrollback, clears the lifecycle reservation, and remains available.
 
 Before constructing native state, the helper disables core dumps so terminal
 or native heap bytes cannot be persisted by the kernel, and irreversibly caps
@@ -197,7 +231,7 @@ passed the same corpus is more useful than a theoretical rollback.
 | `Size` | Last acknowledged geometry | Exact for supported `uint16` PTY sizes and bounded by the viewport limit. |
 | `Cursor` | `CursorX`, `CursorY`, `CursorVisible` | Included in the coherent snapshot. |
 | `Cell`/snapshot | `RenderState`, row and cell iterators, raw cell, style, graphemes | Maps all rendered fields, wide tails, and background-only palette/RGB cells. |
-| `Close` | Close cell iterator, row iterator, render state, terminal, then helper | Idempotent at the Graith boundary and child-reaped. |
+| `Close` | Close cell iterator, row iterator, render state, terminal, then helper | Idempotent; bounded close/kill/reap attempts, with registry/slot retention until actual Wait. |
 
 Graith disables Kitty image storage and file, temporary-file, and shared-memory
 image media because the daemon consumes text cells only. This narrows effects
@@ -347,6 +381,13 @@ treated as stable performance claims.
 - `scripts/libghostty-native.sh memory`
 - `scripts/libghostty-native.sh verify-metadata`
 - tagged helper protocol fuzz targets and targeted `-race` tests
+- backend-neutral and tagged >1 MiB hydration, poison-replay, repeated-close,
+  close-versus-render/resize, helper RSS polling, limiter prelaunch, and
+  failure-during-freeze recovery tests
+- Charm→native 64/65 capacity, native→native exec, native→Charm compatible
+  handoff, unavailable tagged builds, target replacement, malformed/bounded
+  probe and manifest, transactional descriptor rollback, and exact helper/agent
+  reaping tests
 - default `go test -race ./...`, `go vet ./...`, repository lint, actionlint,
   shell validation, generated-file checks, and integration tests
 - Darwin/Linux amd64/arm64 candidate linkage plus native execution where the
