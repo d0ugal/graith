@@ -65,6 +65,7 @@ func NewListWatchModel(sessions []protocol.SessionInfo, refresh func() []protoco
 
 func newListWatchModel(sessions []protocol.SessionInfo, refresh func() []protocol.SessionInfo, options ListWatchOptions) *ListWatchModel {
 	m := NewListWatchModel(sessions, refresh)
+
 	m.options = options
 	if options.Tree {
 		m.sessions, m.treeNames = prepareListWatchTree(sessions)
@@ -105,9 +106,11 @@ func (m *ListWatchModel) visibleRows() int {
 	if m.offset > 0 && rows > 1 {
 		rows--
 	}
+
 	if m.offset+rows < len(m.sessions) && rows > 1 {
 		rows--
 	}
+
 	if rows < 1 {
 		rows = 1
 	}
@@ -141,10 +144,12 @@ func (m *ListWatchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		selectedID := m.selectedSessionID()
+
 		m.sessions = msg.sessions
 		if m.options.Tree {
 			m.sessions, m.treeNames = prepareListWatchTree(msg.sessions)
 		}
+
 		m.clampCursor()
 
 		if selectedID != "" {
@@ -396,6 +401,7 @@ func (l listWatchLayout) totalWidth() int {
 // without introducing another field registry or renderer.
 func listWatchColumns(wide bool) []SessionColumn {
 	var columns []SessionColumn
+
 	for _, column := range SessionColumns() {
 		if column.ShowCLI && (wide || !column.Wide) {
 			columns = append(columns, column)
@@ -415,6 +421,7 @@ func (m *ListWatchModel) computeListWatchLayout() listWatchLayout {
 	}
 
 	now := time.Now()
+
 	for _, session := range m.sessions {
 		if width := lipgloss.Width(m.displayName(session)); width > layout.name {
 			layout.name = width
@@ -445,6 +452,7 @@ func (m *ListWatchModel) renderRow(session protocol.SessionInfo, layout listWatc
 	}
 
 	indicator = m.style(lipgloss.NewStyle().Foreground(indicatorColor)).Render(indicator)
+
 	cursor := " "
 	if selected {
 		cursor = ">"
@@ -572,6 +580,7 @@ func sortListWatchSessions(sessions []protocol.SessionInfo) {
 func prepareListWatchTree(sessions []protocol.SessionInfo) ([]protocol.SessionInfo, map[string]string) {
 	byID := make(map[string]protocol.SessionInfo, len(sessions))
 	children := make(map[string][]protocol.SessionInfo)
+
 	var roots []protocol.SessionInfo
 
 	for _, session := range sessions {
@@ -602,6 +611,7 @@ func prepareListWatchTree(sessions []protocol.SessionInfo) ([]protocol.SessionIn
 		})
 	}
 	sortGroup(roots)
+
 	for id := range children {
 		sortGroup(children[id])
 	}
@@ -611,6 +621,7 @@ func prepareListWatchTree(sessions []protocol.SessionInfo) ([]protocol.SessionIn
 	seen := make(map[string]bool, len(sessions))
 
 	var walk func(protocol.SessionInfo, string, string)
+
 	walk = func(session protocol.SessionInfo, prefix, childPrefix string) {
 		if seen[session.ID] {
 			return
@@ -638,6 +649,7 @@ func prepareListWatchTree(sessions []protocol.SessionInfo) ([]protocol.SessionIn
 	// first sorted member of each cycle act as a root.
 	remainder := append([]protocol.SessionInfo(nil), sessions...)
 	sortGroup(remainder)
+
 	for _, session := range remainder {
 		walk(session, "", "")
 	}

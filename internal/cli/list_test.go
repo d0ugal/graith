@@ -111,6 +111,7 @@ func TestListWatchRejectsNonInteractiveModesBeforeConnect(t *testing.T) {
 	origTokens := listTokens
 	origTTY := listWatchTerminalFn
 	origConnect := listConnectFn
+
 	t.Cleanup(func() {
 		listWatch = origWatch
 		jsonOutput = origJSON
@@ -146,6 +147,7 @@ func TestListWatchRejectsNonInteractiveModesBeforeConnect(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			jsonOutput, listQuiet, listDeleted, listTokens = tt.json, tt.quiet, tt.deleted, tt.tokens
+
 			err := runList(&cobra.Command{}, nil)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("runList error = %v, want %q", err, tt.want)
@@ -165,6 +167,7 @@ func TestListWatchRequiresTerminalInputAndOutput(t *testing.T) {
 	origDeleted := listDeleted
 	origTokens := listTokens
 	origTTY := listWatchTerminalFn
+
 	t.Cleanup(func() {
 		listWatch = origWatch
 		jsonOutput = origJSON
@@ -178,6 +181,7 @@ func TestListWatchRequiresTerminalInputAndOutput(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetIn(strings.NewReader(""))
 	cmd.SetOut(&bytes.Buffer{})
+
 	listWatchTerminalFn = listWatchTerminal
 
 	err := validateListWatch(cmd)
@@ -186,6 +190,7 @@ func TestListWatchRequiresTerminalInputAndOutput(t *testing.T) {
 	}
 
 	listWatchTerminalFn = func(*cobra.Command) bool { return true }
+
 	if err := validateListWatch(cmd); err != nil {
 		t.Fatalf("terminal watch unexpectedly rejected: %v", err)
 	}
@@ -195,6 +200,7 @@ func TestListSessionFilterIsSharedAcrossRefreshes(t *testing.T) {
 	origRepo := listRepo
 	origChildren := listChildren
 	origStarred := listStarred
+
 	t.Cleanup(func() {
 		listRepo = origRepo
 		listChildren = origChildren
@@ -222,6 +228,7 @@ func TestListSessionFilterIsSharedAcrossRefreshes(t *testing.T) {
 		{ID: "wee", ParentID: "bairn", Name: "wee", RepoName: "croft"},
 		{ID: "canny", ParentID: "ben", Name: "canny", RepoName: "bothy", Starred: true},
 	}
+
 	got := filter.apply(refresh)
 	if len(got) != 1 || got[0].ID != "bairn" {
 		t.Fatalf("filtered refresh = %+v, want only bairn", got)
@@ -233,12 +240,14 @@ func TestListWatchDeleteUsesRecoverableDeleteAction(t *testing.T) {
 	origFetch := listWatchFetchFn
 	origAction := listWatchActionFn
 	origCfg := cfg
+
 	t.Cleanup(func() {
 		listWatchRunFn = origRun
 		listWatchFetchFn = origFetch
 		listWatchActionFn = origAction
 		cfg = origCfg
 	})
+
 	cfg = &config.Config{}
 
 	runs := 0
@@ -255,6 +264,7 @@ func TestListWatchDeleteUsesRecoverableDeleteAction(t *testing.T) {
 	actionCalled := false
 	listWatchActionFn = func(msgType string, payload any) error {
 		actionCalled = true
+
 		msg, ok := payload.(protocol.DeleteMsg)
 		if msgType != "delete" || !ok || msg.SessionID != "braw-id" {
 			t.Fatalf("action = %q %+v, want recoverable DeleteMsg for braw-id", msgType, payload)
@@ -274,6 +284,7 @@ func TestListWatchDeleteUsesRecoverableDeleteAction(t *testing.T) {
 
 func TestListCommandExposesWatchAndRemovesDashboard(t *testing.T) {
 	registerCommands()
+
 	if listCmd.Flags().Lookup("watch") == nil {
 		t.Fatal("list command is missing --watch")
 	}

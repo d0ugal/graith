@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"image/color"
 	"io"
@@ -176,23 +177,23 @@ func validateListWatch(cmd *cobra.Command) error {
 	}
 
 	if jsonOutput {
-		return fmt.Errorf("--watch is interactive and cannot be used with --json or --agent-mode")
+		return errors.New("--watch is interactive and cannot be used with --json or --agent-mode")
 	}
 
 	if listQuiet {
-		return fmt.Errorf("--watch cannot be used with --quiet")
+		return errors.New("--watch cannot be used with --quiet")
 	}
 
 	if listDeleted {
-		return fmt.Errorf("--watch cannot be used with --deleted")
+		return errors.New("--watch cannot be used with --deleted")
 	}
 
 	if listTokens {
-		return fmt.Errorf("--watch cannot be used with --tokens")
+		return errors.New("--watch cannot be used with --tokens")
 	}
 
 	if !listWatchTerminalFn(cmd) {
-		return fmt.Errorf("--watch requires an interactive terminal on stdin and stdout")
+		return errors.New("--watch requires an interactive terminal on stdin and stdout")
 	}
 
 	return nil
@@ -201,6 +202,7 @@ func validateListWatch(cmd *cobra.Command) error {
 func listWatchTerminal(cmd *cobra.Command) bool {
 	in, inOK := cmd.InOrStdin().(*os.File)
 	outFile, outOK := cmd.OutOrStdout().(*os.File)
+
 	return inOK && outOK && term.IsTerminal(int(in.Fd())) && term.IsTerminal(int(outFile.Fd()))
 }
 
@@ -222,12 +224,14 @@ func newListSessionFilter(sessions []protocol.SessionInfo) (listSessionFilter, e
 	}
 
 	filter.parentID = parent.ID
+
 	return filter, nil
 }
 
 func (f listSessionFilter) apply(sessions []protocol.SessionInfo) []protocol.SessionInfo {
 	filtered := make([]protocol.SessionInfo, len(sessions))
 	copy(filtered, sessions)
+
 	if f.parentID != "" {
 		filtered = descendantsOf(filtered, f.parentID)
 	}
@@ -320,6 +324,7 @@ func runListWatch(sessions []protocol.SessionInfo, filter listSessionFilter) err
 
 			err = runAttachByID(c, result.SessionID, nil)
 			c.Close()
+
 			return err
 
 		case "delete":
