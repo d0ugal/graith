@@ -3,13 +3,22 @@
 package pty
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"io"
 	"log/slog"
+	"net"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestGhosttySnapshotProtocolRoundTrip(t *testing.T) {
@@ -72,6 +81,10 @@ func TestGhosttySnapshotProtocolRejectsMalformedFrames(t *testing.T) {
 		"invalid cursor bool": append([]byte(nil), valid...),
 		"unknown style flag":  append([]byte(nil), valid...),
 		"invalid utf8":        append([]byte(nil), valid...),
+		"cursor outside grid": append([]byte(nil), valid...),
+		"indexed color range": append([]byte(nil), valid...),
+		"rgb color range":     append([]byte(nil), valid...),
+		"default color value": append([]byte(nil), valid...),
 	}
 	tests["cell count"][12] = 2
 	tests["content length"][13] = 0xff
@@ -79,6 +92,12 @@ func TestGhosttySnapshotProtocolRejectsMalformedFrames(t *testing.T) {
 	tests["invalid cursor bool"][8] = 2
 	tests["unknown style flag"][19] = 0x80
 	tests["invalid utf8"][len(valid)-1] = 0xff
+	tests["cursor outside grid"][5] = 1
+	tests["indexed color range"][17] = byte(ColorIndexed)
+	binary.BigEndian.PutUint32(tests["indexed color range"][21:25], 256)
+	tests["rgb color range"][18] = byte(ColorRGB)
+	binary.BigEndian.PutUint32(tests["rgb color range"][25:29], 0x01000000)
+	tests["default color value"][24] = 1
 
 	for name, payload := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -86,6 +105,314 @@ func TestGhosttySnapshotProtocolRejectsMalformedFrames(t *testing.T) {
 				t.Fatalf("decode error = %v, want protocol violation", err)
 			}
 		})
+	}
+}
+
+func TestGhosttySnapshotEncoderBoundsCellContent(t *testing.T) {
+	_, err := encodeGhosttySnapshot(TerminalSnapshot{
+		Cells: []Cell{{Content: strings.Repeat("a", ghosttyMaxCellContentBytes+1)}},
+		Cols:  1,
+		Rows:  1,
+	})
+	if !errors.Is(err, errGhosttyHelperProtocol) {
+		t.Fatalf("encode error = %v, want protocol violation", err)
+	}
+}
+
+func TestGhosttyRequestProtocolRejectsMalformedFramesBeforeAllocation(t *testing.T) {
+	valid := ghosttyTestRequest(ghosttyOpWrite, []byte("braw"))
+
+	tests := map[string][]byte{
+		"truncated header":  valid[:11],
+		"bad magic":         append([]byte(nil), valid...),
+		"bad version":       append([]byte(nil), valid...),
+		"reserved byte":     append([]byte(nil), valid...),
+		"unknown operation": append([]byte(nil), valid...),
+		"wrong resize size": ghosttyTestRequest(ghosttyOpResize, []byte{1}),
+		"truncated payload": valid[:len(valid)-1],
+		"oversized payload": ghosttyTestRequestHeader(ghosttyOpWrite, ghosttyMaxRequestBytes+1),
+	}
+	tests["bad magic"][0] = 'X'
+	tests["bad version"][4]++
+	tests["reserved byte"][6] = 1
+	tests["unknown operation"][5] = 0xff
+
+	for name, frame := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := readGhosttyRequest(bytes.NewReader(frame)); err == nil {
+				t.Fatal("malformed request returned nil error")
+			}
+		})
+	}
+}
+
+func TestGhosttyExchangeRejectsMalformedReplies(t *testing.T) {
+	valid := ghosttyTestReply(ghosttyOpWrite, ghosttyStatusOK, nil)
+	tests := map[string][]byte{
+		"truncated header":      valid[:11],
+		"bad magic":             append([]byte(nil), valid...),
+		"bad version":           append([]byte(nil), valid...),
+		"wrong operation":       append([]byte(nil), valid...),
+		"reserved byte":         append([]byte(nil), valid...),
+		"unknown status":        append([]byte(nil), valid...),
+		"invalid status":        ghosttyTestReply(ghosttyOpWrite, ghosttyStatusInvalid, nil),
+		"protocol status":       ghosttyTestReply(ghosttyOpWrite, ghosttyStatusProtocol, nil),
+		"ok unexpected payload": ghosttyTestReply(ghosttyOpWrite, ghosttyStatusOK, []byte("canny")),
+		"error with payload":    ghosttyTestReply(ghosttyOpWrite, ghosttyStatusNative, []byte("dreich")),
+		"truncated payload":     ghosttyTestReply(ghosttyOpWrite, ghosttyStatusOK, nil),
+		"oversized payload":     ghosttyTestReplyHeader(ghosttyOpWrite, ghosttyStatusOK, ghosttyMaxReplyBytes+1),
+	}
+	tests["bad magic"][0] = 'X'
+	tests["bad version"][4]++
+	tests["wrong operation"][5] = ghosttyOpResize
+	tests["reserved byte"][7] = 1
+	tests["unknown status"][6] = 0xff
+	tests["truncated payload"] = ghosttyTestReplyHeader(ghosttyOpWrite, ghosttyStatusOK, 1)
+
+	for name, reply := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := ghosttyRunScriptedExchange(t, ghosttyOpWrite, []byte("braw"), func(conn net.Conn) {
+				_, _ = conn.Write(reply)
+			})
+			if err == nil {
+				t.Fatal("malformed reply returned nil error")
+			}
+		})
+	}
+
+	t.Run("snapshot ok without payload", func(t *testing.T) {
+		err := ghosttyRunScriptedExchange(t, ghosttyOpSnapshot, nil, func(conn net.Conn) {
+			_, _ = conn.Write(ghosttyTestReply(ghosttyOpSnapshot, ghosttyStatusOK, nil))
+		})
+		if !errors.Is(err, errGhosttyHelperProtocol) {
+			t.Fatalf("snapshot error = %v, want protocol violation", err)
+		}
+	})
+
+	t.Run("truncated snapshot payload", func(t *testing.T) {
+		err := ghosttyRunScriptedExchange(t, ghosttyOpSnapshot, nil, func(conn net.Conn) {
+			frame := append(
+				ghosttyTestReplyHeader(ghosttyOpSnapshot, ghosttyStatusOK, 29),
+				[]byte("short")...,
+			)
+			_, _ = conn.Write(frame)
+		})
+		if !errors.Is(err, errGhosttyHelperIO) {
+			t.Fatalf("snapshot error = %v, want truncated communication failure", err)
+		}
+	})
+}
+
+func TestGhosttyHelperExitDuringEveryOperation(t *testing.T) {
+	operations := map[string]struct {
+		op      byte
+		payload []byte
+	}{
+		"create":   {op: ghosttyOpCreate, payload: []byte{0, 20, 0, 3}},
+		"write":    {op: ghosttyOpWrite, payload: []byte("braw")},
+		"resize":   {op: ghosttyOpResize, payload: []byte{0, 30, 0, 4}},
+		"snapshot": {op: ghosttyOpSnapshot},
+		"close":    {op: ghosttyOpClose},
+	}
+
+	for name, operation := range operations {
+		t.Run(name, func(t *testing.T) {
+			err := ghosttyRunScriptedExchange(t, operation.op, operation.payload, func(conn net.Conn) {
+				_ = conn.Close()
+			})
+			if !errors.Is(err, errGhosttyHelperIO) {
+				t.Fatalf("exchange error = %v, want communication failure", err)
+			}
+		})
+	}
+}
+
+func TestGhosttyExchangeTimeoutPoisonsConnection(t *testing.T) {
+	started := time.Now()
+	err := ghosttyRunScriptedExchangeWithTimeout(
+		t,
+		ghosttyOpWrite,
+		[]byte("braw"),
+		25*time.Millisecond,
+		func(conn net.Conn) {
+			var one [1]byte
+			_, _ = conn.Read(one[:])
+		},
+	)
+	if !errors.Is(err, errGhosttyHelperTimeout) {
+		t.Fatalf("exchange error = %v, want timeout", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("timeout took %v, want bounded failure", elapsed)
+	}
+}
+
+func TestGhosttyNativeFailureIsClassifiedAndPrivate(t *testing.T) {
+	terminalData := "braw-terminal-secret credential=dreich /private/croft/session.log"
+	err := ghosttyRunScriptedExchange(t, ghosttyOpWrite, []byte(terminalData), func(conn net.Conn) {
+		_, _ = conn.Write(ghosttyTestReply(ghosttyOpWrite, ghosttyStatusNative, nil))
+	})
+	if !errors.Is(err, errGhosttyHelperNative) {
+		t.Fatalf("exchange error = %v, want native failure", err)
+	}
+	if strings.Contains(err.Error(), terminalData) {
+		t.Fatalf("native error exposed terminal bytes: %q", err)
+	}
+}
+
+func TestGhosttyChildEnvironmentIsAllowlisted(t *testing.T) {
+	t.Setenv("GRAITH_SECRET_CREDENTIAL", "dreich-secret")
+	t.Setenv("HOME", "/private/croft")
+	t.Setenv("DYLD_INSERT_LIBRARIES", "/private/bothy.dylib")
+	t.Setenv("ASAN_OPTIONS", "abort_on_error=1")
+	t.Setenv("GORACE", "halt_on_error=1")
+
+	env := ghosttyChildEnvironment()
+	joined := strings.Join(env, "\n")
+	for _, forbidden := range []string{"GRAITH_SECRET_CREDENTIAL", "dreich-secret", "HOME=", "/private/croft", "DYLD_"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("helper environment contains %q: %q", forbidden, joined)
+		}
+	}
+	for _, required := range []string{ghosttyHelperEnv + "=1", "ASAN_OPTIONS=abort_on_error=1", "GORACE=halt_on_error=1"} {
+		if !slices.Contains(env, required) {
+			t.Errorf("helper environment missing %q: %q", required, env)
+		}
+	}
+}
+
+func TestGhosttySocketpairIsCloseOnExec(t *testing.T) {
+	fds, err := ghosttySocketpair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(fds[0])
+	defer unix.Close(fds[1])
+
+	for _, fd := range fds {
+		flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if flags&unix.FD_CLOEXEC == 0 {
+			t.Errorf("socket fd %d is inheritable", fd)
+		}
+	}
+}
+
+func TestGhosttyProcessLimiterBoundsAndReleases(t *testing.T) {
+	limiter := newGhosttyProcessLimiter(2)
+	if !limiter.acquire() || !limiter.acquire() {
+		t.Fatal("limiter rejected an available slot")
+	}
+	if limiter.acquire() {
+		t.Fatal("limiter exceeded its process bound")
+	}
+	limiter.release()
+	if !limiter.acquire() {
+		t.Fatal("limiter did not reuse a released slot")
+	}
+	limiter.release()
+	limiter.release()
+}
+
+func TestGhosttyLimiterExhaustionAndLifecycleRelease(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("exhaustion is immediate", func(t *testing.T) {
+		limiter := newGhosttyProcessLimiter(1)
+		if !limiter.acquire() {
+			t.Fatal("reserve limiter slot")
+		}
+		defer limiter.release()
+
+		started := time.Now()
+		_, err := newGhosttyProcessTerminalWithConfig(20, 3, ghosttyProcessConfig{
+			executable: executable,
+			limiter:    limiter,
+		})
+		if !errors.Is(err, errGhosttyHelperLimit) {
+			t.Fatalf("constructor error = %v, want resource limit", err)
+		}
+		if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+			t.Fatalf("limiter exhaustion blocked for %v", elapsed)
+		}
+	})
+
+	t.Run("close reaps and releases", func(t *testing.T) {
+		limiter := newGhosttyProcessLimiter(1)
+		term, err := newGhosttyProcessTerminalWithConfig(20, 3, ghosttyProcessConfig{
+			executable: executable,
+			limiter:    limiter,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := term.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if term.cmd.ProcessState == nil {
+			t.Fatal("close did not reap helper")
+		}
+		if !limiter.acquire() {
+			t.Fatal("close did not release helper slot")
+		}
+		limiter.release()
+	})
+
+	t.Run("failed construction reaps and releases", func(t *testing.T) {
+		falsePath, err := exec.LookPath("false")
+		if err != nil {
+			t.Skip("false executable unavailable")
+		}
+		limiter := newGhosttyProcessLimiter(1)
+		var started *exec.Cmd
+		term, err := newGhosttyProcessTerminalWithConfig(20, 3, ghosttyProcessConfig{
+			executable: falsePath,
+			limiter:    limiter,
+			onStart: func(cmd *exec.Cmd) {
+				started = cmd
+			},
+		})
+		if term != nil || !errors.Is(err, errGhosttyHelperIO) {
+			t.Fatalf("constructor result = (%v, %v), want nil communication failure", term, err)
+		}
+		if started == nil || started.ProcessState == nil {
+			t.Fatal("failed constructor did not reap started helper")
+		}
+		if !limiter.acquire() {
+			t.Fatal("failed constructor did not release helper slot")
+		}
+		limiter.release()
+	})
+}
+
+func TestGhosttyHelperResourceLimits(t *testing.T) {
+	if os.Getenv("GRAITH_TEST_HELPER_RLIMITS") == "1" {
+		if err := hardenGhosttyHelperResources(); err != nil {
+			t.Fatal(err)
+		}
+		var core, files unix.Rlimit
+		if err := unix.Getrlimit(unix.RLIMIT_CORE, &core); err != nil {
+			t.Fatal(err)
+		}
+		if err := unix.Getrlimit(unix.RLIMIT_NOFILE, &files); err != nil {
+			t.Fatal(err)
+		}
+		if core.Cur != 0 || core.Max != 0 || files.Cur > ghosttyHelperFDLimit || files.Max > ghosttyHelperFDLimit {
+			t.Fatalf("limits core=%+v files=%+v", core, files)
+		}
+
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestGhosttyHelperResourceLimits$")
+	cmd.Env = append(os.Environ(), "GRAITH_TEST_HELPER_RLIMITS=1")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("resource-limit helper: %v: %s", err, output)
 	}
 }
 
@@ -113,6 +440,9 @@ func TestGhosttyProcessTerminalLifecycle(t *testing.T) {
 	if err := term.Resize(30, 4); err != nil {
 		t.Fatal(err)
 	}
+	if term.cache.Cells != nil {
+		t.Fatal("resize retained a stale viewport cache")
+	}
 	if cols, rows := term.Size(); cols != 30 || rows != 4 {
 		t.Errorf("size = (%d,%d), want (30,4)", cols, rows)
 	}
@@ -120,8 +450,57 @@ func TestGhosttyProcessTerminalLifecycle(t *testing.T) {
 	if err := term.Close(); err != nil {
 		t.Fatal(err)
 	}
+	if err := term.Close(); err != nil {
+		t.Fatalf("second close: %v", err)
+	}
+	if term.cmd.ProcessState == nil {
+		t.Fatal("close returned before the helper was reaped")
+	}
 	if _, err := term.Write([]byte("thrawn")); !errors.Is(err, errGhosttyHelperClosed) {
 		t.Fatalf("write after close = %v, want helper closed", err)
+	}
+}
+
+func TestGhosttyProcessTerminalConcurrentClose(t *testing.T) {
+	term, err := newGhosttyProcessTerminal(20, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- term.Close()
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Errorf("concurrent close: %v", err)
+		}
+	}
+	if term.cmd.ProcessState == nil {
+		t.Fatal("concurrent close returned before helper reaping")
+	}
+}
+
+func TestGhosttyWriteRequestLimitDoesNotPoisonHelper(t *testing.T) {
+	term, err := newGhosttyProcessTerminal(20, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = term.Close() })
+
+	if _, err := term.Write(make([]byte, ghosttyMaxRequestBytes+1)); !errors.Is(err, errGhosttyHelperLimit) {
+		t.Fatalf("oversized write error = %v, want resource limit", err)
+	}
+	if _, err := term.Write([]byte("braw after rejected write")); err != nil {
+		t.Fatalf("helper poisoned by local request rejection: %v", err)
 	}
 }
 
@@ -185,7 +564,176 @@ func TestGhosttyHelperCrashReconstructsFromScrollback(t *testing.T) {
 }
 
 func TestGhosttyTerminalSizeLimit(t *testing.T) {
-	if _, err := newGhosttyProcessTerminal(65535, 65535); err == nil {
+	if _, _, err := validateGhosttySize(1024, 257); err == nil {
 		t.Fatal("oversized terminal returned nil error")
 	}
+}
+
+func TestGhosttyPoisonReplayFallsBackOnceAndKeepsLogsPrivate(t *testing.T) {
+	poison := []byte("dreich-poison-terminal-secret")
+	scrollback, err := NewScrollback(filepath.Join(t.TempDir(), "croft.log"), 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = scrollback.Close() })
+	if _, err := scrollback.Write(poison); err != nil {
+		t.Fatal(err)
+	}
+
+	failed := &poisonReplayTerminal{cols: 20, rows: 2, poison: poison}
+	var replacements []*poisonReplayTerminal
+	var logs bytes.Buffer
+	session := &Session{
+		ID:         "canny-poison",
+		Scrollback: scrollback,
+		screen:     failed,
+		screenFactory: func(cols, rows int) (Terminal, error) {
+			replacement := &poisonReplayTerminal{cols: cols, rows: rows, poison: poison}
+			replacements = append(replacements, replacement)
+
+			return replacement, nil
+		},
+		screenHydrationBytes: len(poison),
+		log:                  slog.New(slog.NewTextHandler(&logs, nil)),
+	}
+
+	if err := session.writeScreenLocked(poison); !errors.Is(err, errGhosttyHelperNative) {
+		t.Fatalf("poison write error = %v, want native failure", err)
+	}
+	if len(replacements) != 2 {
+		t.Fatalf("replacement attempts = %d, want hydrated then empty", len(replacements))
+	}
+	if got := len(replacements[0].writes); got != 1 {
+		t.Fatalf("hydrated replacement writes = %d, want one bounded replay", got)
+	}
+	if got := len(replacements[1].writes); got != 0 {
+		t.Fatalf("empty replacement writes = %d, poison was replayed again", got)
+	}
+
+	safe := []byte("braw after poison")
+	if _, err := scrollback.Write(safe); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.writeScreenLocked(safe); err != nil {
+		t.Fatalf("write after poison recovery: %v", err)
+	}
+	if got := string(replacements[1].writes[0]); got != string(safe) {
+		t.Fatalf("post-recovery write = %q, want %q", got, safe)
+	}
+	if strings.Contains(logs.String(), string(poison)) {
+		t.Fatalf("recovery log exposed terminal bytes: %s", logs.String())
+	}
+}
+
+type poisonReplayTerminal struct {
+	cols   int
+	rows   int
+	poison []byte
+	writes [][]byte
+}
+
+func (t *poisonReplayTerminal) Write(p []byte) (int, error) {
+	t.writes = append(t.writes, append([]byte(nil), p...))
+	if bytes.Contains(p, t.poison) {
+		return 0, errGhosttyHelperNative
+	}
+
+	return len(p), nil
+}
+
+func (t *poisonReplayTerminal) Resize(cols, rows int) error {
+	t.cols, t.rows = cols, rows
+
+	return nil
+}
+
+func (t *poisonReplayTerminal) Size() (int, int) { return t.cols, t.rows }
+
+func (t *poisonReplayTerminal) Cursor() (int, int, bool) { return 0, 0, false }
+
+func (t *poisonReplayTerminal) Cell(_, _ int) Cell { return Cell{Content: " "} }
+
+func (t *poisonReplayTerminal) Close() error { return nil }
+
+func ghosttyRunScriptedExchange(
+	t *testing.T,
+	op byte,
+	payload []byte,
+	script func(net.Conn),
+) error {
+	t.Helper()
+
+	return ghosttyRunScriptedExchangeWithTimeout(t, op, payload, time.Second, script)
+}
+
+func ghosttyRunScriptedExchangeWithTimeout(
+	t *testing.T,
+	op byte,
+	payload []byte,
+	timeout time.Duration,
+	script func(net.Conn),
+) error {
+	t.Helper()
+
+	parent, child := net.Pipe()
+	terminal := &ghosttyProcessTerminal{
+		conn:            parent,
+		cols:            1,
+		rows:            1,
+		rpcTimeout:      timeout,
+		shutdownTimeout: 10 * time.Millisecond,
+		reapTimeout:     10 * time.Millisecond,
+	}
+	serverDone := make(chan error, 1)
+	go func() {
+		defer child.Close()
+		if _, _, err := readGhosttyRequest(child); err != nil {
+			serverDone <- err
+
+			return
+		}
+		script(child)
+		serverDone <- nil
+	}()
+
+	_, exchangeErr := terminal.exchange(op, payload)
+	_ = parent.Close()
+	if serverErr := <-serverDone; serverErr != nil {
+		t.Fatalf("scripted server request: %v", serverErr)
+	}
+
+	return exchangeErr
+}
+
+func ghosttyTestRequest(op byte, payload []byte) []byte {
+	frame := ghosttyTestRequestHeader(op, len(payload))
+
+	return append(frame, payload...)
+}
+
+func ghosttyTestRequestHeader(op byte, length int) []byte {
+	header := make([]byte, 12)
+	copy(header, ghosttyRequestMagic[:])
+	header[4] = ghosttyProtocolVersion
+	header[5] = op
+	binary.BigEndian.PutUint32(header[8:12], uint32(length))
+
+	return header
+}
+
+func ghosttyTestReply(op, status byte, payload []byte) []byte {
+	frame := ghosttyTestReplyHeader(op, status, len(payload))
+
+	return append(frame, payload...)
+}
+
+func ghosttyTestReplyHeader(op, status byte, length int) []byte {
+	header := make([]byte, 12)
+	copy(header, ghosttyReplyMagic[:])
+	header[4] = ghosttyProtocolVersion
+	header[5] = op
+	header[6] = status
+	binary.BigEndian.PutUint32(header[8:12], uint32(length))
+
+	return header
 }

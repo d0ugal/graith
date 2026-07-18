@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -24,8 +25,16 @@ const (
 	ghosttyHelperFD        = 3
 	ghosttyProtocolVersion = 1
 	ghosttyRPCTimeout      = 5 * time.Second
-	ghosttyMaxRequestBytes = 16 * 1024 * 1024
-	ghosttyMaxReplyBytes   = 128 * 1024 * 1024
+	ghosttyShutdownTimeout = 250 * time.Millisecond
+	ghosttyReapTimeout     = 2 * time.Second
+	ghosttyMaxRequestBytes = 1 * 1024 * 1024
+	ghosttyMaxReplyBytes   = 32 * 1024 * 1024
+	// A terminal cell is one grapheme, not arbitrary retained output. This
+	// generous cap contains malicious combining-mark runs without affecting
+	// ordinary emoji or composed scripts.
+	ghosttyMaxCellContentBytes = 1024
+	ghosttyMaxHelperProcesses  = 64
+	ghosttyHelperFDLimit       = 64
 
 	ghosttyOpCreate   = 1
 	ghosttyOpWrite    = 2
@@ -44,10 +53,42 @@ var (
 	errGhosttyHelperIO       = errors.New("libghostty helper communication failed")
 	errGhosttyHelperProtocol = errors.New("libghostty helper protocol violation")
 	errGhosttyHelperTimeout  = errors.New("libghostty helper operation timed out")
+	errGhosttyHelperNative   = errors.New("libghostty native operation failed")
+	errGhosttyHelperLimit    = errors.New("libghostty helper resource limit reached")
+	errGhosttyHelperStart    = errors.New("libghostty helper could not start")
 )
 
 var ghosttyRequestMagic = [4]byte{'G', 'V', 'T', 'Q'}
 var ghosttyReplyMagic = [4]byte{'G', 'V', 'T', 'R'}
+
+type ghosttyProcessLimiter struct {
+	slots chan struct{}
+}
+
+func newGhosttyProcessLimiter(limit int) *ghosttyProcessLimiter {
+	return &ghosttyProcessLimiter{slots: make(chan struct{}, limit)}
+}
+
+func (l *ghosttyProcessLimiter) acquire() bool {
+	select {
+	case l.slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (l *ghosttyProcessLimiter) release() {
+	<-l.slots
+}
+
+var ghosttyHelperLimiter = newGhosttyProcessLimiter(ghosttyMaxHelperProcesses)
+
+type ghosttyProcessConfig struct {
+	executable string
+	limiter    *ghosttyProcessLimiter
+	onStart    func(*exec.Cmd)
+}
 
 // init supplies the helper entry point to every libghostty-enabled Graith or Go
 // test binary. It activates only for the exact private argument and marker set
@@ -72,6 +113,11 @@ type ghosttyProcessTerminal struct {
 	cmd      *exec.Cmd
 	conn     net.Conn
 	waitDone chan error
+	limiter  *ghosttyProcessLimiter
+
+	rpcTimeout      time.Duration
+	shutdownTimeout time.Duration
+	reapTimeout     time.Duration
 
 	cols int
 	rows int
@@ -82,23 +128,47 @@ type ghosttyProcessTerminal struct {
 
 	closeOnce sync.Once
 	closeErr  error
+	stopOnce  sync.Once
+	slotOnce  sync.Once
 }
 
 var _ Terminal = (*ghosttyProcessTerminal)(nil)
 var _ terminalSnapshotter = (*ghosttyProcessTerminal)(nil)
 
 func newGhosttyProcessTerminal(cols, rows int) (*ghosttyProcessTerminal, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, errGhosttyHelperStart
+	}
+
+	return newGhosttyProcessTerminalWithConfig(cols, rows, ghosttyProcessConfig{
+		executable: executable,
+		limiter:    ghosttyHelperLimiter,
+	})
+}
+
+func newGhosttyProcessTerminalWithConfig(
+	cols, rows int,
+	config ghosttyProcessConfig,
+) (*ghosttyProcessTerminal, error) {
 	cols, rows, err := validateGhosttySize(cols, rows)
 	if err != nil {
 		return nil, err
 	}
+	if config.limiter == nil || !config.limiter.acquire() {
+		return nil, errGhosttyHelperLimit
+	}
+	slotHeld := true
+	defer func() {
+		if slotHeld {
+			config.limiter.release()
+		}
+	}()
 
-	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+	fds, err := ghosttySocketpair()
 	if err != nil {
 		return nil, fmt.Errorf("create libghostty helper socket: %w", err)
 	}
-	unix.CloseOnExec(fds[0])
-	unix.CloseOnExec(fds[1])
 
 	parentFile := os.NewFile(uintptr(fds[0]), "libghostty-parent")
 	childFile := os.NewFile(uintptr(fds[1]), "libghostty-child")
@@ -121,25 +191,21 @@ func newGhosttyProcessTerminal(cols, rows int) (*ghosttyProcessTerminal, error) 
 		return nil, fmt.Errorf("open libghostty helper socket: %w", err)
 	}
 
-	executable, err := os.Executable()
-	if err != nil {
-		_ = childFile.Close()
-		_ = conn.Close()
-
-		return nil, fmt.Errorf("resolve libghostty helper executable: %w", err)
-	}
-
-	cmd := exec.Command(executable, ghosttyHelperArg)
+	cmd := exec.Command(config.executable, ghosttyHelperArg)
 	cmd.Env = ghosttyChildEnvironment()
 	cmd.ExtraFiles = []*os.File{childFile}
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		_ = childFile.Close()
 		_ = conn.Close()
 
-		return nil, fmt.Errorf("start libghostty helper: %w", err)
+		return nil, errGhosttyHelperStart
+	}
+	if config.onStart != nil {
+		config.onStart(cmd)
 	}
 	_ = childFile.Close()
 
@@ -147,12 +213,21 @@ func newGhosttyProcessTerminal(cols, rows int) (*ghosttyProcessTerminal, error) 
 		cmd:      cmd,
 		conn:     conn,
 		waitDone: make(chan error, 1),
-		cols:     cols,
-		rows:     rows,
-		dirty:    true,
+		limiter:  config.limiter,
+
+		rpcTimeout:      ghosttyRPCTimeout,
+		shutdownTimeout: ghosttyShutdownTimeout,
+		reapTimeout:     ghosttyReapTimeout,
+
+		cols:  cols,
+		rows:  rows,
+		dirty: true,
 	}
+	slotHeld = false
 	go func() {
-		terminal.waitDone <- cmd.Wait()
+		waitErr := cmd.Wait()
+		terminal.releaseSlot()
+		terminal.waitDone <- waitErr
 		close(terminal.waitDone)
 	}()
 
@@ -160,12 +235,29 @@ func newGhosttyProcessTerminal(cols, rows int) (*ghosttyProcessTerminal, error) 
 	binary.BigEndian.PutUint16(payload[0:2], uint16(cols))
 	binary.BigEndian.PutUint16(payload[2:4], uint16(rows))
 	if _, err := terminal.exchange(ghosttyOpCreate, payload); err != nil {
-		terminal.stop()
+		terminal.stop(true)
 
 		return nil, fmt.Errorf("initialize libghostty helper: %w", err)
 	}
 
 	return terminal, nil
+}
+
+func ghosttySocketpair() ([2]int, error) {
+	// Darwin has no SOCK_CLOEXEC flag. Pair socket creation and FD_CLOEXEC
+	// under the same fork lock used by os/exec so a concurrent process launch
+	// cannot inherit either private endpoint in the small setup window.
+	syscall.ForkLock.RLock()
+	defer syscall.ForkLock.RUnlock()
+
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+	if err != nil {
+		return [2]int{}, err
+	}
+	unix.CloseOnExec(fds[0])
+	unix.CloseOnExec(fds[1])
+
+	return fds, nil
 }
 
 func ghosttyChildEnvironment() []string {
@@ -186,13 +278,14 @@ func (gt *ghosttyProcessTerminal) Write(p []byte) (int, error) {
 		return 0, gt.currentError()
 	}
 	if len(p) > ghosttyMaxRequestBytes {
-		return 0, fmt.Errorf("libghostty write exceeds %d-byte helper limit", ghosttyMaxRequestBytes)
+		return 0, errGhosttyHelperLimit
 	}
 	if _, err := gt.exchange(ghosttyOpWrite, p); err != nil {
 		return 0, err
 	}
 
 	gt.dirty = true
+	gt.cache = TerminalSnapshot{}
 
 	return len(p), nil
 }
@@ -213,6 +306,7 @@ func (gt *ghosttyProcessTerminal) Resize(cols, rows int) error {
 	gt.cols = cols
 	gt.rows = rows
 	gt.dirty = true
+	gt.cache = TerminalSnapshot{}
 
 	return nil
 }
@@ -281,7 +375,7 @@ func (gt *ghosttyProcessTerminal) Close() error {
 		if gt.conn != nil && gt.fatalErr == nil {
 			_, gt.closeErr = gt.exchange(ghosttyOpClose, nil)
 		}
-		gt.stop()
+		gt.stop(false)
 	})
 
 	return gt.closeErr
@@ -310,11 +404,11 @@ func (gt *ghosttyProcessTerminal) exchange(op byte, payload []byte) ([]byte, err
 	if err := gt.currentError(); err != nil {
 		return nil, err
 	}
-	if len(payload) > ghosttyMaxRequestBytes {
-		return nil, errGhosttyHelperProtocol
+	if err := validateGhosttyRequest(op, len(payload)); err != nil {
+		return nil, err
 	}
 
-	if err := gt.conn.SetDeadline(time.Now().Add(ghosttyRPCTimeout)); err != nil {
+	if err := gt.conn.SetDeadline(time.Now().Add(gt.rpcDeadline())); err != nil {
 		gt.fail(errGhosttyHelperIO)
 
 		return nil, errGhosttyHelperIO
@@ -343,7 +437,8 @@ func (gt *ghosttyProcessTerminal) exchange(op byte, payload []byte) ([]byte, err
 	}
 
 	length := int(binary.BigEndian.Uint32(header[8:12]))
-	if length > ghosttyMaxReplyBytes {
+	status := header[6]
+	if err := validateGhosttyReply(op, status, length, gt.cols, gt.rows); err != nil {
 		gt.fail(errGhosttyHelperProtocol)
 
 		return nil, errGhosttyHelperProtocol
@@ -354,17 +449,29 @@ func (gt *ghosttyProcessTerminal) exchange(op byte, payload []byte) ([]byte, err
 	}
 	_ = gt.conn.SetDeadline(time.Time{})
 
-	status := header[6]
-	if status > ghosttyStatusProtocol || (status != ghosttyStatusOK && len(payload) != 0) {
+	switch status {
+	case ghosttyStatusOK:
+		return payload, nil
+	case ghosttyStatusNative:
+		gt.fail(errGhosttyHelperNative)
+
+		return nil, errGhosttyHelperNative
+	default:
+		// The parent only emits valid operations, so Invalid and Protocol are
+		// evidence that the two sides disagree. Poison the connection rather
+		// than continuing on a potentially desynchronized native state.
 		gt.fail(errGhosttyHelperProtocol)
 
 		return nil, errGhosttyHelperProtocol
 	}
-	if status != ghosttyStatusOK {
-		return nil, fmt.Errorf("libghostty helper rejected operation %d (status %d)", op, status)
+}
+
+func (gt *ghosttyProcessTerminal) rpcDeadline() time.Duration {
+	if gt.rpcTimeout > 0 {
+		return gt.rpcTimeout
 	}
 
-	return payload, nil
+	return ghosttyRPCTimeout
 }
 
 func (gt *ghosttyProcessTerminal) exchangeIOError(err error) error {
@@ -381,41 +488,138 @@ func (gt *ghosttyProcessTerminal) fail(err error) {
 	if gt.fatalErr == nil {
 		gt.fatalErr = err
 	}
-	if gt.conn != nil {
-		_ = gt.conn.Close()
-		gt.conn = nil
-	}
-	if gt.cmd != nil && gt.cmd.Process != nil {
-		_ = gt.cmd.Process.Kill()
+	gt.stop(true)
+}
+
+func (gt *ghosttyProcessTerminal) stop(force bool) {
+	gt.stopOnce.Do(func() {
+		if gt.conn != nil {
+			_ = gt.conn.Close()
+			gt.conn = nil
+		}
+
+		if force && gt.cmd != nil && gt.cmd.Process != nil {
+			_ = gt.cmd.Process.Kill()
+		}
+
+		reaped := gt.waitDone == nil
+		if gt.waitDone != nil {
+			reaped = gt.waitForExit(gt.shutdownDeadline())
+			if !reaped {
+				if gt.cmd != nil && gt.cmd.Process != nil {
+					_ = gt.cmd.Process.Kill()
+				}
+				reaped = gt.waitForExit(gt.reapDeadline())
+			}
+		}
+		gt.cache = TerminalSnapshot{}
+		if reaped {
+			gt.releaseSlot()
+		}
+	})
+}
+
+func (gt *ghosttyProcessTerminal) releaseSlot() {
+	gt.slotOnce.Do(func() {
+		if gt.limiter != nil {
+			gt.limiter.release()
+		}
+	})
+}
+
+func (gt *ghosttyProcessTerminal) waitForExit(timeout time.Duration) bool {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case <-gt.waitDone:
+		return true
+	case <-timer.C:
+		return false
 	}
 }
 
-func (gt *ghosttyProcessTerminal) stop() {
-	if gt.conn != nil {
-		_ = gt.conn.Close()
-		gt.conn = nil
+func (gt *ghosttyProcessTerminal) shutdownDeadline() time.Duration {
+	if gt.shutdownTimeout > 0 {
+		return gt.shutdownTimeout
 	}
 
-	if gt.waitDone == nil {
-		return
+	return ghosttyShutdownTimeout
+}
+
+func (gt *ghosttyProcessTerminal) reapDeadline() time.Duration {
+	if gt.reapTimeout > 0 {
+		return gt.reapTimeout
 	}
 
-	select {
-	case <-gt.waitDone:
-		return
-	case <-time.After(ghosttyRPCTimeout):
-		if gt.cmd != nil && gt.cmd.Process != nil {
-			_ = gt.cmd.Process.Kill()
+	return ghosttyReapTimeout
+}
+
+func validateGhosttyRequest(op byte, length int) error {
+	if length < 0 || length > ghosttyMaxRequestBytes {
+		return errGhosttyHelperLimit
+	}
+
+	switch op {
+	case ghosttyOpCreate, ghosttyOpResize:
+		if length != 4 {
+			return errGhosttyHelperProtocol
 		}
+	case ghosttyOpWrite:
+		// Zero-length writes are harmless and keep the wire grammar simple.
+	case ghosttyOpSnapshot, ghosttyOpClose:
+		if length != 0 {
+			return errGhosttyHelperProtocol
+		}
+	default:
+		return errGhosttyHelperProtocol
 	}
 
-	select {
-	case <-gt.waitDone:
-	case <-time.After(time.Second):
+	return nil
+}
+
+func validateGhosttyReply(op, status byte, length, cols, rows int) error {
+	if status > ghosttyStatusProtocol || length < 0 || length > ghosttyMaxReplyBytes {
+		return errGhosttyHelperProtocol
 	}
+	if status != ghosttyStatusOK {
+		if length != 0 {
+			return errGhosttyHelperProtocol
+		}
+
+		return nil
+	}
+
+	switch op {
+	case ghosttyOpSnapshot:
+		if cols < 1 || rows < 1 || cols > maxGhosttyCells/rows {
+			return errGhosttyHelperProtocol
+		}
+		cells := cols * rows
+		minimum := 13 + cells*16
+		maximum := 13 + cells*(16+ghosttyMaxCellContentBytes)
+		if maximum > ghosttyMaxReplyBytes {
+			maximum = ghosttyMaxReplyBytes
+		}
+		if length < minimum || length > maximum {
+			return errGhosttyHelperProtocol
+		}
+	case ghosttyOpCreate, ghosttyOpWrite, ghosttyOpResize, ghosttyOpClose:
+		if length != 0 {
+			return errGhosttyHelperProtocol
+		}
+	default:
+		return errGhosttyHelperProtocol
+	}
+
+	return nil
 }
 
 func serveGhosttyHelperFD() error {
+	if err := hardenGhosttyHelperResources(); err != nil {
+		return errGhosttyHelperLimit
+	}
+
 	file := os.NewFile(ghosttyHelperFD, "libghostty-helper")
 	if file == nil {
 		return errGhosttyHelperProtocol
@@ -513,10 +717,33 @@ func serveGhosttyHelper(conn net.Conn) error {
 	}
 }
 
+func hardenGhosttyHelperResources() error {
+	// Core dumps can retain terminal contents and native heap state. Disable
+	// them before constructing any terminal, and irreversibly cap descriptors
+	// because this helper needs only stdio plus its private socket.
+	if err := unix.Setrlimit(unix.RLIMIT_CORE, &unix.Rlimit{}); err != nil {
+		return err
+	}
+
+	var files unix.Rlimit
+	if err := unix.Getrlimit(unix.RLIMIT_NOFILE, &files); err != nil {
+		return err
+	}
+	limit := files.Cur
+	if uint64(ghosttyHelperFDLimit) < limit {
+		limit = ghosttyHelperFDLimit
+	}
+	if files.Max < limit {
+		limit = files.Max
+	}
+
+	return unix.Setrlimit(unix.RLIMIT_NOFILE, &unix.Rlimit{Cur: limit, Max: limit})
+}
+
 func readGhosttyRequest(r io.Reader) (byte, []byte, error) {
 	header := make([]byte, 12)
 	if _, err := io.ReadFull(r, header); err != nil {
-		return 0, nil, err
+		return 0, nil, errGhosttyHelperProtocol
 	}
 	if !bytes.Equal(header[0:4], ghosttyRequestMagic[:]) ||
 		header[4] != ghosttyProtocolVersion || header[6] != 0 || header[7] != 0 {
@@ -524,19 +751,22 @@ func readGhosttyRequest(r io.Reader) (byte, []byte, error) {
 	}
 
 	length := int(binary.BigEndian.Uint32(header[8:12]))
-	if length > ghosttyMaxRequestBytes {
-		return 0, nil, errGhosttyHelperProtocol
+	if err := validateGhosttyRequest(header[5], length); err != nil {
+		return 0, nil, err
 	}
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(r, payload); err != nil {
-		return 0, nil, err
+		return 0, nil, errGhosttyHelperProtocol
 	}
 
 	return header[5], payload, nil
 }
 
 func writeGhosttyReply(w io.Writer, op, status byte, payload []byte) error {
-	if len(payload) > ghosttyMaxReplyBytes {
+	if status > ghosttyStatusProtocol || len(payload) > ghosttyMaxReplyBytes ||
+		(status != ghosttyStatusOK && len(payload) != 0) ||
+		(status == ghosttyStatusOK && op != ghosttyOpSnapshot && len(payload) != 0) ||
+		(status == ghosttyStatusOK && op == ghosttyOpSnapshot && len(payload) == 0) {
 		return errGhosttyHelperProtocol
 	}
 	header := make([]byte, 12)
@@ -570,14 +800,24 @@ func writeAll(w io.Writer, p []byte) error {
 func encodeGhosttySnapshot(snapshot TerminalSnapshot) ([]byte, error) {
 	if snapshot.Cols < 1 || snapshot.Rows < 1 ||
 		snapshot.Cols > int(^uint16(0)) || snapshot.Rows > int(^uint16(0)) ||
-		snapshot.CursorX < 0 || snapshot.CursorX > int(^uint16(0)) ||
-		snapshot.CursorY < 0 || snapshot.CursorY > int(^uint16(0)) ||
+		snapshot.CursorX < 0 || snapshot.CursorX >= snapshot.Cols ||
+		snapshot.CursorY < 0 || snapshot.CursorY >= snapshot.Rows ||
 		len(snapshot.Cells) != snapshot.Cols*snapshot.Rows || len(snapshot.Cells) > maxGhosttyCells {
 		return nil, errGhosttyHelperProtocol
 	}
 
+	total := 13
+	for _, cell := range snapshot.Cells {
+		if len(cell.Content) > ghosttyMaxCellContentBytes || !utf8.ValidString(cell.Content) ||
+			!validGhosttyColor(cell.Style.FG) || !validGhosttyColor(cell.Style.BG) ||
+			total > ghosttyMaxReplyBytes-16-len(cell.Content) {
+			return nil, errGhosttyHelperProtocol
+		}
+		total += 16 + len(cell.Content)
+	}
+
 	var buf bytes.Buffer
-	buf.Grow(13 + len(snapshot.Cells)*16)
+	buf.Grow(total)
 	fixed := make([]byte, 13)
 	binary.BigEndian.PutUint16(fixed[0:2], uint16(snapshot.Cols))
 	binary.BigEndian.PutUint16(fixed[2:4], uint16(snapshot.Rows))
@@ -590,9 +830,6 @@ func encodeGhosttySnapshot(snapshot TerminalSnapshot) ([]byte, error) {
 	_, _ = buf.Write(fixed)
 
 	for _, cell := range snapshot.Cells {
-		if len(cell.Content) > ghosttyMaxReplyBytes {
-			return nil, errGhosttyHelperProtocol
-		}
 		record := make([]byte, 16)
 		binary.BigEndian.PutUint32(record[0:4], uint32(len(cell.Content)))
 		record[4] = byte(cell.Style.FG.Kind)
@@ -602,9 +839,6 @@ func encodeGhosttySnapshot(snapshot TerminalSnapshot) ([]byte, error) {
 		binary.BigEndian.PutUint32(record[12:16], cell.Style.BG.Value)
 		_, _ = buf.Write(record)
 		_, _ = buf.WriteString(cell.Content)
-		if buf.Len() > ghosttyMaxReplyBytes {
-			return nil, errGhosttyHelperProtocol
-		}
 	}
 
 	return buf.Bytes(), nil
@@ -627,7 +861,8 @@ func decodeGhosttySnapshot(payload []byte) (TerminalSnapshot, error) {
 	}
 	count := int(binary.BigEndian.Uint32(payload[9:13]))
 	if snapshot.Cols < 1 || snapshot.Rows < 1 || count != snapshot.Cols*snapshot.Rows ||
-		count > maxGhosttyCells || count > (len(payload)-13)/16 {
+		count > maxGhosttyCells || count > (len(payload)-13)/16 ||
+		snapshot.CursorX >= snapshot.Cols || snapshot.CursorY >= snapshot.Rows {
 		return TerminalSnapshot{}, errGhosttyHelperProtocol
 	}
 
@@ -641,15 +876,20 @@ func decodeGhosttySnapshot(payload []byte) (TerminalSnapshot, error) {
 		fgKind := ColorKind(payload[4])
 		bgKind := ColorKind(payload[5])
 		flags := binary.BigEndian.Uint16(payload[6:8])
-		if fgKind > ColorRGB || bgKind > ColorRGB || flags&^uint16(0x7f) != 0 ||
+		fg := Color{Kind: fgKind, Value: binary.BigEndian.Uint32(payload[8:12])}
+		bg := Color{Kind: bgKind, Value: binary.BigEndian.Uint32(payload[12:16])}
+		if flags&^uint16(0x7f) != 0 || contentLen > ghosttyMaxCellContentBytes ||
 			contentLen > len(payload)-16 || !utf8.Valid(payload[16:16+contentLen]) {
+			return TerminalSnapshot{}, errGhosttyHelperProtocol
+		}
+		if !validGhosttyColor(fg) || !validGhosttyColor(bg) {
 			return TerminalSnapshot{}, errGhosttyHelperProtocol
 		}
 		snapshot.Cells[i] = Cell{
 			Content: string(payload[16 : 16+contentLen]),
 			Style: CellStyle{
-				FG: Color{Kind: fgKind, Value: binary.BigEndian.Uint32(payload[8:12])},
-				BG: Color{Kind: bgKind, Value: binary.BigEndian.Uint32(payload[12:16])},
+				FG: fg,
+				BG: bg,
 			},
 		}
 		decodeGhosttyStyleFlags(&snapshot.Cells[i].Style, flags)
@@ -660,6 +900,19 @@ func decodeGhosttySnapshot(payload []byte) (TerminalSnapshot, error) {
 	}
 
 	return snapshot, nil
+}
+
+func validGhosttyColor(color Color) bool {
+	switch color.Kind {
+	case ColorDefault:
+		return color.Value == 0
+	case ColorIndexed:
+		return color.Value <= 255
+	case ColorRGB:
+		return color.Value <= 0xFFFFFF
+	default:
+		return false
+	}
 }
 
 func encodeGhosttyStyleFlags(style CellStyle) uint16 {

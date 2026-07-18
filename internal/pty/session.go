@@ -27,6 +27,9 @@ type Session struct {
 	writeMu sync.Mutex
 	writers []io.Writer
 	screen  Terminal
+	// screenFactory is fixed at construction and provides a deterministic seam
+	// for proving recovery behavior without weakening the production selector.
+	screenFactory func(cols, rows int) (Terminal, error)
 	// screenHydrationBytes bounds how much persistent output is replayed when
 	// the terminal helper fails. The raw scrollback remains authoritative; the
 	// helper owns only reconstructable derived state.
@@ -156,6 +159,7 @@ func NewSession(opts SessionOpts) (*Session, error) {
 	s := &Session{
 		ID: opts.ID, Cmd: cmd, Ptmx: ptmx, Scrollback: sb,
 		screen:               screen,
+		screenFactory:        newTerminal,
 		screenHydrationBytes: defaultScreenHydrationBytes,
 		done:                 make(chan struct{}),
 		readDone:             make(chan struct{}),
@@ -263,6 +267,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		Ptmx:                ptmx,
 		Scrollback:          sb,
 		screen:              screen,
+		screenFactory:       newTerminal,
 		done:                make(chan struct{}),
 		readDone:            make(chan struct{}),
 		adoptedPID:          opts.PID,
@@ -513,7 +518,12 @@ func (s *Session) replaceScreenLocked() error {
 }
 
 func (s *Session) replaceScreenAtSizeLocked(cols, rows int) error {
-	replacement, err := newTerminal(cols, rows)
+	factory := s.screenFactory
+	if factory == nil {
+		factory = newTerminal
+	}
+
+	replacement, err := factory(cols, rows)
 	if err != nil {
 		return fmt.Errorf("create replacement terminal: %w", err)
 	}
@@ -536,7 +546,7 @@ func (s *Session) replaceScreenAtSizeLocked(cols, rows int) error {
 				// previous parser. Keep the daemon and future output usable by
 				// falling back to an empty replacement rather than replaying the
 				// same poison sequence indefinitely.
-				replacement, err = newTerminal(cols, rows)
+				replacement, err = factory(cols, rows)
 				if err != nil {
 					return errors.Join(
 						fmt.Errorf("hydrate replacement terminal: %w", writeErr),

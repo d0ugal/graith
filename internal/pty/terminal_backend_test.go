@@ -282,7 +282,7 @@ func BenchmarkTerminalBackends(b *testing.B) {
 						b.Fatal(err)
 					}
 
-					if _, err := term.Write(hydrationWorkload); err != nil {
+					if err := writeTerminalFixture(term, hydrationWorkload); err != nil {
 						_ = term.Close()
 
 						b.Fatal(err)
@@ -331,7 +331,7 @@ func TestTerminalBackendPeakMemoryWorkload(t *testing.T) {
 	term := newTerminalBackendTestTerm(t, *selected, 120, 40)
 
 	fixture := syntheticTerminalWorkload(4 * 1024 * 1024)
-	if _, err := term.Write(fixture); err != nil {
+	if err := writeTerminalFixture(term, fixture); err != nil {
 		t.Fatal(err)
 	}
 
@@ -354,6 +354,21 @@ func TestTerminalBackendPeakMemoryWorkload(t *testing.T) {
 	}
 
 	t.Logf("backend=%s fixture_bytes=%d checksum=%d", name, len(fixture), checksum)
+}
+
+func writeTerminalFixture(term Terminal, fixture []byte) error {
+	const chunkBytes = 512 * 1024
+
+	for len(fixture) > 0 {
+		n := min(len(fixture), chunkBytes)
+		if _, err := term.Write(fixture[:n]); err != nil {
+			return err
+		}
+
+		fixture = fixture[n:]
+	}
+
+	return nil
 }
 
 func syntheticTerminalWorkload(minBytes int) []byte {

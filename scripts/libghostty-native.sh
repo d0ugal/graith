@@ -160,6 +160,22 @@ run_go() {
             go test -count=1 go.mitchellh.com/libghostty
             go test -count=1 -tags=libghostty ./internal/pty
             ;;
+        race)
+            verify_metadata
+            go test -race -count=1 -tags=libghostty ./internal/pty \
+                -run 'TestTerminalBackendCompatibilityCorpus|TestGhostty'
+            ;;
+        fuzz)
+            verify_metadata
+            local fuzztime="${GRAITH_LIBGHOSTTY_FUZZTIME:-10s}"
+            local parallel="${GRAITH_LIBGHOSTTY_FUZZ_PARALLEL:-4}"
+            go test -tags=libghostty ./internal/pty -run '^$' -parallel="$parallel" \
+                -fuzz '^FuzzGhosttySnapshotDecoder$' -fuzztime="$fuzztime"
+            go test -tags=libghostty ./internal/pty -run '^$' -parallel="$parallel" \
+                -fuzz '^FuzzGhosttyRequestDecoder$' -fuzztime="$fuzztime"
+            go test -tags=libghostty ./internal/pty -run '^$' -parallel="$parallel" \
+                -fuzz '^FuzzGhosttyHelperWrite$' -fuzztime="$fuzztime"
+            ;;
         bench)
             go test -run '^$' -tags=libghostty ./internal/pty \
                 -bench '^BenchmarkTerminalBackends$' -benchmem -benchtime=3x -count=5
@@ -265,7 +281,7 @@ source_test() {
 
 usage() {
     cat <<EOF
-usage: $0 test|bench|memory|all
+usage: $0 test|race|fuzz|bench|memory|all
        $0 source-build <zig-target> <output-library>
        $0 source-test <zig-target>
        $0 verify-metadata [ghostty-source]
@@ -276,11 +292,13 @@ EOF
 }
 
 case "${1:-}" in
-    test|bench|memory)
+    test|race|fuzz|bench|memory)
         run_go "$1"
         ;;
     all)
         run_go test
+        run_go race
+        run_go fuzz
         run_go bench
         run_go memory
         ;;
