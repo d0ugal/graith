@@ -224,6 +224,7 @@ func TestRunUpdateCombinedProperties(t *testing.T) {
 	if msg.ParentID == nil || *msg.ParentID != "id-ben" {
 		t.Fatalf("parent_id = %v, want id-ben", msg.ParentID)
 	}
+
 	if msg.Starred == nil || *msg.Starred {
 		t.Fatalf("starred = %v, want explicit false", msg.Starred)
 	}
@@ -282,6 +283,7 @@ func TestRunUpdateStarredFalseReportsResult(t *testing.T) {
 	if msg.Starred == nil || *msg.Starred {
 		t.Fatalf("starred = %v, want explicit false", msg.Starred)
 	}
+
 	if got := buf.String(); got != "Starred: false\n" {
 		t.Fatalf("output = %q", got)
 	}
@@ -294,6 +296,7 @@ func TestUpdateStarredFlagAndRemovedCommands(t *testing.T) {
 	if flag == nil {
 		t.Fatal("update --starred flag is not registered")
 	}
+
 	if flag.NoOptDefVal != "true" {
 		t.Errorf("--starred NoOptDefVal = %q, want true", flag.NoOptDefVal)
 	}
@@ -308,6 +311,7 @@ func TestUpdateStarredFlagAndRemovedCommands(t *testing.T) {
 	if err := flag.Value.Set("false"); err != nil {
 		t.Fatalf("setting --starred=false: %v", err)
 	}
+
 	if got, _ := updateCmd.Flags().GetBool("starred"); got {
 		t.Error("--starred=false did not remain explicit false")
 	}

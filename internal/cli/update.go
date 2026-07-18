@@ -103,6 +103,7 @@ func runUpdate(c controlConn, nameOrID string, opts updateOptions) error {
 	if err != nil {
 		return err
 	}
+
 	if resp.Type == "error" {
 		return fmt.Errorf("%s", errorMessage(resp))
 	}
