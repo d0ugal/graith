@@ -317,6 +317,47 @@ role = "auditor"
 	}
 }
 
+func TestParseDefersTemplatedMemberGraphToDaemonRenderContext(t *testing.T) {
+	data := []byte(`
+version = 1
+[scenario]
+name = "parallel-{date}-{short_id}"
+[[sessions]]
+name = "{initiator}"
+shared = true
+[[sessions]]
+name = "{scenario}-reviewer"
+mirror = "{caller}"
+task = "review"
+depends_on = ["{initiator}"]
+
+[[trigger]]
+name = "complete-review"
+[trigger.completion]
+event = "complete"
+session = "{scenario}-reviewer"
+[trigger.action]
+type = "message"
+body = "done"
+[trigger.action.deliver]
+inbox = "{scenario}-reviewer"
+`)
+
+	sf, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse templated scenario: %v", err)
+	}
+
+	inputs, err := SessionInputs(sf)
+	if err != nil {
+		t.Fatalf("SessionInputs templated scenario: %v", err)
+	}
+
+	if !HasTemplatedMemberGraph(inputs) || inputs[1].Mirror != "{caller}" || inputs[1].DependsOn[0] != "{initiator}" {
+		t.Fatalf("templated inputs = %+v", inputs)
+	}
+}
+
 func TestValidateMirrorMembers_DepthsAndChains(t *testing.T) {
 	depths, err := ValidateMirrorMembers([]MirrorMember{
 		{Name: "subject", Repo: "/croft"},

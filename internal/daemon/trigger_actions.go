@@ -479,7 +479,7 @@ func completionReactorSlug(parts ...string) string {
 }
 
 // actionScenario starts a named scenario, owned by the orchestrator.
-func (sm *SessionManager) actionScenario(ctx context.Context, t *config.TriggerConfig) (string, error) {
+func (sm *SessionManager) actionScenario(ctx context.Context, t *config.TriggerConfig, fc fireContext) (string, error) {
 	_ = ctx // reserved; StartScenario runs its own lifecycle detached from the fire ctx
 
 	orchestratorID := sm.orchestratorID()
@@ -505,14 +505,21 @@ func (sm *SessionManager) actionScenario(ctx context.Context, t *config.TriggerC
 		return "", err
 	}
 
+	initiatorID := orchestratorID
+	if fc.sessionID != "" {
+		initiatorID = fc.sessionID
+	}
+
 	msg := protocol.ScenarioStartMsg{
-		CallerSessionID: orchestratorID,
-		Name:            sf.Scenario.Name,
-		Goal:            sf.Scenario.Goal,
-		Sessions:        inputs,
-		Policy:          scenariofile.PolicyInput(sf.Scenario.Policy),
-		Triggers:        sf.Triggers,
-		Lifecycle:       sf.Scenario.Lifecycle,
+		CallerSessionID:    orchestratorID,
+		ParentSessionID:    orchestratorID,
+		InitiatorSessionID: initiatorID,
+		Name:               sf.Scenario.Name,
+		Goal:               sf.Scenario.Goal,
+		Sessions:           inputs,
+		Policy:             scenariofile.PolicyInput(sf.Scenario.Policy),
+		Triggers:           sf.Triggers,
+		Lifecycle:          sf.Scenario.Lifecycle,
 	}
 	lc := sm.Config().Lifecycle
 	//nolint:contextcheck // StartScenario runs its own session lifecycle, detached from the fire ctx.

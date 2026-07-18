@@ -15,6 +15,13 @@ See [Scenarios]({{< relref "/docs/scenarios.md" >}}) for full details.
 
 Start a scenario from a TOML file. Pass `-` to read from stdin. Only the orchestrator session can start scenarios.
 
+Scenario and member names may use the bounded instance tokens `{caller}`,
+`{parent}`, `{initiator}`, `{date}`, `{time}`, `{datetime}`, `{scenario_id}`,
+`{short_id}`, and (after the scenario name is rendered) `{scenario}`. The
+daemon renders member references from the same immutable context and returns
+the rendered names. See [Scenarios → Instance name templates]({{< relref
+"/docs/scenarios.md#instance-name-templates" >}}).
+
 ```bash
 gr scenario start tracing.toml
 cat tracing.toml | gr scenario start -
@@ -51,6 +58,9 @@ Add a member from the orchestrator. Alongside `--name`, `--repo`, `--agent`,
 
 `--prompt` supplies startup instructions without tracked work. `--task` seeds an
 assigned todo and also acts as the startup prompt when `--prompt` is omitted.
+
+`<name>`, `--name`, and `--depends-on` use the already-rendered instance and
+member names. `scenario add` does not evaluate instance-name templates.
 
 | Flag | Description |
 |------|-------------|

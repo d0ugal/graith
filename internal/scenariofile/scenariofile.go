@@ -205,8 +205,10 @@ func Parse(data []byte) (*File, error) {
 		return nil, err
 	}
 
-	if err := ValidateSessionDependencies(depInputs); err != nil {
-		return nil, err
+	if !HasTemplatedMemberGraph(depInputs) {
+		if err := ValidateSessionDependencies(depInputs); err != nil {
+			return nil, err
+		}
 	}
 
 	members := make([]MirrorMember, len(sf.Sessions))
@@ -217,8 +219,10 @@ func Parse(data []byte) (*File, error) {
 		}
 	}
 
-	if _, err := ValidateMirrorMembers(members); err != nil {
-		return nil, err
+	if !hasTemplatedMirrorMembers(members) {
+		if _, err := ValidateMirrorMembers(members); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := ValidateScenarioTriggers(sf.Triggers, sf.DefinedRoles(), sf.DefinedMembers(), sf.DefinedOwnedMembers()); err != nil {
@@ -380,7 +384,7 @@ func validateScenarioTriggerRestrictions(where string, t *config.TriggerConfig, 
 			return fmt.Errorf("%s: completion %s action requires completion.session", where, t.Action.Type)
 		}
 
-		if member != "" && !ownedMembers[member] {
+		if member != "" && !strings.ContainsAny(member, "{}") && !ownedMembers[member] {
 			return fmt.Errorf("%s: completion.session %q is not a non-shared session in this scenario", where, member)
 		}
 	}
@@ -469,8 +473,10 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 		return nil, err
 	}
 
-	if err := ValidateSessionDependencies(inputs); err != nil {
-		return nil, err
+	if !HasTemplatedMemberGraph(inputs) {
+		if err := ValidateSessionDependencies(inputs); err != nil {
+			return nil, err
+		}
 	}
 
 	return inputs, nil
@@ -501,6 +507,36 @@ func ValidateSessionContracts(sessions []protocol.ScenarioSessionInput, maxTitle
 	}
 
 	return nil
+}
+
+// HasTemplatedMemberGraph reports whether member identity or dependency fields
+// need the daemon's immutable render context before their graph can be checked.
+// Literal definitions retain eager file/CLI validation; templated definitions
+// are always validated authoritatively after rendering in StartScenario.
+func HasTemplatedMemberGraph(sessions []protocol.ScenarioSessionInput) bool {
+	for _, session := range sessions {
+		if strings.ContainsAny(session.Name, "{}") || strings.ContainsAny(session.Mirror, "{}") {
+			return true
+		}
+
+		for _, dependency := range session.DependsOn {
+			if strings.ContainsAny(dependency, "{}") {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func hasTemplatedMirrorMembers(members []MirrorMember) bool {
+	for _, member := range members {
+		if strings.ContainsAny(member.Name, "{}") || strings.ContainsAny(member.Mirror, "{}") {
+			return true
+		}
+	}
+
+	return false
 }
 
 // PolicyInput maps a parsed scenario policy into the wire shape.

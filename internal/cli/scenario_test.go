@@ -365,6 +365,36 @@ name = "dreich"`,
 	}
 }
 
+func TestParseAndBuildScenarioNameTemplates(t *testing.T) {
+	data := []byte(`
+version = 1
+[scenario]
+name = "parallel-review-{initiator}-{date}-{short_id}"
+[[sessions]]
+name = "{initiator}"
+shared = true
+[[sessions]]
+name = "{scenario}-reviewer"
+mirror = "{caller}"
+`)
+
+	sf, err := parseScenarioFile(data)
+	if err != nil {
+		t.Fatalf("parseScenarioFile: %v", err)
+	}
+
+	inputs, err := buildSessionInputs(sf)
+	if err != nil {
+		t.Fatalf("buildSessionInputs: %v", err)
+	}
+
+	if sf.Scenario.Name != "parallel-review-{initiator}-{date}-{short_id}" ||
+		len(inputs) != 2 || inputs[0].Name != "{initiator}" ||
+		inputs[1].Name != "{scenario}-reviewer" || inputs[1].Mirror != "{caller}" {
+		t.Fatalf("authored template graph changed in CLI: scenario=%q inputs=%+v", sf.Scenario.Name, inputs)
+	}
+}
+
 func TestParseAndBuildScenarioResults(t *testing.T) {
 	data := []byte(`
 version = 1

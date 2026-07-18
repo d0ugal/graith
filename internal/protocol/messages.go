@@ -927,11 +927,19 @@ type StatusResponseMsg struct {
 // Scenario messages
 
 type ScenarioStartMsg struct {
-	CallerSessionID string                 `json:"caller_session_id"`
-	Name            string                 `json:"name"`
-	Goal            string                 `json:"goal"`
-	Sessions        []ScenarioSessionInput `json:"sessions"`
-	Policy          *ScenarioPolicyInput   `json:"policy,omitempty"`
+	CallerSessionID string `json:"caller_session_id"`
+	// ParentSessionID is the orchestrator session that owns the scenario and
+	// becomes the parent of created members. Direct starts set it to the
+	// authenticated caller; a mediated start may keep it distinct.
+	ParentSessionID string `json:"parent_session_id,omitempty"`
+	// InitiatorSessionID is the original session that requested the scenario.
+	// It defaults to CallerSessionID and is kept distinct for orchestrator-
+	// mediated starts (issue #1415).
+	InitiatorSessionID string                 `json:"initiator_session_id,omitempty"`
+	Name               string                 `json:"name"`
+	Goal               string                 `json:"goal"`
+	Sessions           []ScenarioSessionInput `json:"sessions"`
+	Policy             *ScenarioPolicyInput   `json:"policy,omitempty"`
 	// Triggers are the scenario-embedded [[trigger]] blocks parsed from the
 	// scenario TOML. They are carried on the start message (rather than re-read
 	// from disk at fire time, since the file may change) and associated with the
@@ -1061,6 +1069,38 @@ type ScenarioRecord struct {
 	CompletionActions []ScenarioCompletionActionInfo `json:"completion_actions,omitempty"`
 	Cleanup           *ScenarioCleanupInfo           `json:"cleanup,omitempty"`
 	Policy            *ScenarioPolicyInfo            `json:"policy,omitempty"`
+	Render            *ScenarioRenderInfo            `json:"render,omitempty"`
+}
+
+// ScenarioRenderInfo is the immutable authored-to-rendered naming context for
+// one scenario instance. Runtime fields elsewhere in ScenarioRecord always use
+// rendered names; this metadata exists for diagnosis and restart transparency.
+type ScenarioRenderInfo struct {
+	AuthoredName string                        `json:"authored_name"`
+	ScenarioID   string                        `json:"scenario_id"`
+	ShortID      string                        `json:"short_id"`
+	RenderedAt   string                        `json:"rendered_at"`
+	Caller       ScenarioRenderIdentityInfo    `json:"caller"`
+	Parent       ScenarioRenderIdentityInfo    `json:"parent"`
+	Initiator    ScenarioRenderIdentityInfo    `json:"initiator"`
+	Members      []ScenarioRenderMemberInfo    `json:"members"`
+	References   []ScenarioRenderReferenceInfo `json:"references,omitempty"`
+}
+
+type ScenarioRenderIdentityInfo struct {
+	SessionID string `json:"session_id"`
+	Name      string `json:"name"`
+}
+
+type ScenarioRenderMemberInfo struct {
+	AuthoredName string `json:"authored_name"`
+	RenderedName string `json:"rendered_name"`
+}
+
+type ScenarioRenderReferenceInfo struct {
+	Path     string `json:"path"`
+	Authored string `json:"authored"`
+	Rendered string `json:"rendered"`
 }
 
 // ScenarioCompletionActionInfo exposes the durable state of one embedded

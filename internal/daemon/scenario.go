@@ -255,10 +255,6 @@ func validateScenarioMirrorIncludes(memberName, targetName string, includes []sc
 }
 
 func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, cols uint16) (*ScenarioState, error) {
-	if err := ValidateScenarioName(msg.Name); err != nil {
-		return nil, err
-	}
-
 	if len(msg.Sessions) == 0 {
 		return nil, errors.New("scenario must define at least one session")
 	}
@@ -280,13 +276,37 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		}
 	}
 
-	// Validate caller is orchestrator (snapshot under lock).
+	// Snapshot the three distinct start identities under one lock. Direct starts
+	// default parent and initiator to the authenticated caller. A future mediated
+	// start (#1415) can supply an authoritative orchestrator parent and original
+	// initiator without changing template semantics.
 	sm.mu.RLock()
 	callerSess := sm.state.Sessions[msg.CallerSessionID]
 
-	var callerSystemKind string
+	parentID := msg.ParentSessionID
+	if parentID == "" {
+		parentID = msg.CallerSessionID
+	}
+
+	initiatorID := msg.InitiatorSessionID
+	if initiatorID == "" {
+		initiatorID = msg.CallerSessionID
+	}
+
+	parentSess := sm.state.Sessions[parentID]
+	initiatorSess := sm.state.Sessions[initiatorID]
+
+	var callerSnapshot, parentSnapshot, initiatorSnapshot SessionState
 	if callerSess != nil {
-		callerSystemKind = callerSess.SystemKind
+		callerSnapshot = *callerSess
+	}
+
+	if parentSess != nil {
+		parentSnapshot = *parentSess
+	}
+
+	if initiatorSess != nil {
+		initiatorSnapshot = *initiatorSess
 	}
 
 	sm.mu.RUnlock()
@@ -295,8 +315,39 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		return nil, fmt.Errorf("caller session %q not found", msg.CallerSessionID)
 	}
 
-	if callerSystemKind != SystemKindOrchestrator {
+	if parentSess == nil {
+		return nil, fmt.Errorf("scenario parent session %q not found", parentID)
+	}
+
+	if parentSnapshot.SystemKind != SystemKindOrchestrator {
 		return nil, errors.New("only the orchestrator session can start scenarios")
+	}
+
+	if initiatorSess == nil {
+		return nil, fmt.Errorf("scenario initiator session %q not found", initiatorID)
+	}
+
+	msg.ParentSessionID = parentID
+	msg.InitiatorSessionID = initiatorID
+
+	scenarioID, releaseScenarioID, err := sm.reserveScenarioID()
+	if err != nil {
+		return nil, err
+	}
+	defer releaseScenarioID()
+
+	renderState := newScenarioRenderState(
+		msg.Name, scenarioID, sm.scenarioPolicyTime(),
+		&callerSnapshot, &parentSnapshot, &initiatorSnapshot,
+	)
+
+	msg, err = renderScenarioStart(msg, renderState)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := ValidateScenarioName(msg.Name); err != nil {
+		return nil, err
 	}
 
 	// Validate session definitions and build the scenario-local mirror graph.
@@ -312,7 +363,9 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 			return nil, fmt.Errorf("session %d: name is required", i)
 		}
 
-		if err := ValidateSessionName(s.Name); err != nil {
+		// A shared member may intentionally bind the reserved orchestrator
+		// session; owned members still cannot create a reserved name.
+		if err := validateSessionName(s.Name, s.Shared); err != nil {
 			return nil, fmt.Errorf("session %q: %w", s.Name, err)
 		}
 
@@ -493,9 +546,8 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	}
 
 	// Serialize every lifecycle operation that can discover this scenario after
-	// its reserve record becomes visible. Generating the stable ID before the
-	// reserve means stop/delete/add will wait for start to commit or roll back.
-	scenarioID := "sc-" + generateID()
+	// its reserve record becomes visible. The stable ID was transiently reserved
+	// before rendering, so concurrent starts cannot share a render token.
 	unlockScenario := sm.lockScenarioPolicy(scenarioID)
 
 	defer unlockScenario()
@@ -531,7 +583,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		}
 	}
 
-	now := time.Now().UTC()
+	now := renderState.RenderedAt
 
 	scenarioSessions := make([]ScenarioSession, len(msg.Sessions))
 	sessionIDs := make([]string, len(msg.Sessions))
@@ -624,7 +676,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 		sm.state.Sessions[id] = &SessionState{
 			ID:              id,
-			ParentID:        msg.CallerSessionID,
+			ParentID:        msg.ParentSessionID,
 			Name:            s.Name,
 			RepoPath:        repoRoots[i],
 			RepoName:        repoName,
@@ -644,13 +696,14 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	scenario := &ScenarioState{
 		ID:             scenarioID,
 		Name:           msg.Name,
-		OrchestratorID: msg.CallerSessionID,
+		OrchestratorID: msg.ParentSessionID,
 		Goal:           msg.Goal,
 		SessionIDs:     sessionIDs,
 		Sessions:       scenarioSessions,
 		CreatedAt:      now,
 		Lifecycle:      msg.Lifecycle,
 		Policy:         newScenarioPolicyState(normalizedPolicy),
+		Render:         renderState,
 	}
 	sm.state.Scenarios[scenarioID] = scenario
 
@@ -747,7 +800,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 					ID: sessionIDs[idx], Name: s.Name, AgentName: agentName,
 					RepoPath: repoRoots[idx], Mirror: mirrorSourceID,
 					BaseBranch: s.Base, Prompt: s.StartupPrompt(), Model: s.Model,
-					ParentID: msg.CallerSessionID, AgentHooks: s.AgentHooks,
+					ParentID: msg.ParentSessionID, AgentHooks: s.AgentHooks,
 					Includes: s.Includes, Starred: s.Star,
 					ForcePTY: normalizedPolicy != nil && normalizedPolicy.Members[idx].Retries > 0,
 					Rows:     rows, Cols: cols,
@@ -916,7 +969,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	}
 
 	for i, id := range sessionIDs {
-		manifest := sm.buildManifest(scenarioID, msg, repos, sessionIDs, i)
+		manifest := sm.buildManifest(scenarioID, msg, repos, sessionIDs, i, scenarioRenderInfo(renderState))
 
 		manifestJSON, err := json.Marshal(manifest)
 		if err != nil {
@@ -926,7 +979,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 		stream := "inbox:" + id
 		if sm.messages != nil {
-			_, err = sm.messages.Publish(PublishOpts{Stream: stream, SenderID: msg.CallerSessionID, SenderName: "orchestrator", Body: string(manifestJSON)})
+			_, err = sm.messages.Publish(PublishOpts{Stream: stream, SenderID: msg.ParentSessionID, SenderName: "orchestrator", Body: string(manifestJSON)})
 			if err != nil {
 				sm.log.Error("failed to publish scenario manifest", "session", id, "err", err)
 			}
@@ -934,19 +987,20 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	}
 
 	// Persist manifest to shared store.
-	sm.persistManifest(scenarioID, msg, repos, sessionIDs)
+	sm.persistManifest(scenarioID, msg, repos, sessionIDs, scenarioRenderInfo(renderState))
 
 	return scenario, nil
 }
 
 type scenarioManifest struct {
-	Version      int                       `json:"version"`
-	ScenarioID   string                    `json:"scenario_id"`
-	ScenarioName string                    `json:"scenario_name"`
-	Goal         string                    `json:"goal"`
-	You          scenarioManifestSelf      `json:"you"`
-	Siblings     []scenarioManifestSibling `json:"siblings"`
-	Orchestrator scenarioManifestOrch      `json:"orchestrator"`
+	Version      int                          `json:"version"`
+	ScenarioID   string                       `json:"scenario_id"`
+	ScenarioName string                       `json:"scenario_name"`
+	Goal         string                       `json:"goal"`
+	You          scenarioManifestSelf         `json:"you"`
+	Siblings     []scenarioManifestSibling    `json:"siblings"`
+	Orchestrator scenarioManifestOrch         `json:"orchestrator"`
+	Render       *protocol.ScenarioRenderInfo `json:"render,omitempty"`
 }
 
 type scenarioManifestSelf struct {
@@ -980,8 +1034,20 @@ type scenarioManifestOrch struct {
 	Name      string `json:"name"`
 }
 
-func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.ScenarioStartMsg, repos []string, sessionIDs []string, selfIndex int) scenarioManifest {
+func (sm *SessionManager) buildManifest(
+	scenarioID string,
+	msg protocol.ScenarioStartMsg,
+	repos []string,
+	sessionIDs []string,
+	selfIndex int,
+	render *protocol.ScenarioRenderInfo,
+) scenarioManifest {
 	self := msg.Sessions[selfIndex]
+
+	parentID := msg.ParentSessionID
+	if parentID == "" {
+		parentID = msg.CallerSessionID
+	}
 
 	var siblings []scenarioManifestSibling
 
@@ -1006,7 +1072,7 @@ func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.Scenario
 	}
 
 	return scenarioManifest{
-		Version:      1,
+		Version:      2,
 		ScenarioID:   scenarioID,
 		ScenarioName: msg.Name,
 		Goal:         msg.Goal,
@@ -1021,9 +1087,10 @@ func (sm *SessionManager) buildManifest(scenarioID string, msg protocol.Scenario
 		},
 		Siblings: siblings,
 		Orchestrator: scenarioManifestOrch{
-			SessionID: msg.CallerSessionID,
+			SessionID: parentID,
 			Name:      "orchestrator",
 		},
+		Render: render,
 	}
 }
 
@@ -1059,7 +1126,13 @@ func (sm *SessionManager) manifestScenarioResults(
 	return results
 }
 
-func (sm *SessionManager) persistManifest(scenarioID string, msg protocol.ScenarioStartMsg, repos []string, sessionIDs []string) {
+func (sm *SessionManager) persistManifest(
+	scenarioID string,
+	msg protocol.ScenarioStartMsg,
+	repos []string,
+	sessionIDs []string,
+	render *protocol.ScenarioRenderInfo,
+) {
 	storeDir := store.SharedStorePath(sm.paths.DataDir)
 	if err := store.Init(storeDir); err != nil {
 		sm.log.Error("failed to init shared store for manifest", "err", err)
@@ -1067,7 +1140,7 @@ func (sm *SessionManager) persistManifest(scenarioID string, msg protocol.Scenar
 	}
 
 	for i := range msg.Sessions {
-		manifest := sm.buildManifest(scenarioID, msg, repos, sessionIDs, i)
+		manifest := sm.buildManifest(scenarioID, msg, repos, sessionIDs, i, render)
 
 		data, err := json.MarshalIndent(manifest, "", "  ")
 		if err != nil {
@@ -1834,6 +1907,27 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 
 	scenario.SessionIDs = append(scenario.SessionIDs, sess.ID)
 
+	renderMemberCount := 0
+	renderReferenceCount := 0
+
+	if scenario.Render != nil {
+		renderMemberCount = len(scenario.Render.Members)
+		renderReferenceCount = len(scenario.Render.References)
+		memberIndex := len(scenario.Sessions)
+		scenario.Render.Members = append(scenario.Render.Members, ScenarioRenderMemberState{
+			AuthoredName: input.Name,
+			RenderedName: input.Name,
+		})
+
+		for dependencyIndex, dependency := range input.DependsOn {
+			scenario.Render.References = append(scenario.Render.References, ScenarioRenderReferenceState{
+				Path:     fmt.Sprintf("sessions[%d].depends_on[%d]", memberIndex, dependencyIndex),
+				Authored: dependency,
+				Rendered: dependency,
+			})
+		}
+	}
+
 	scenario.Sessions = append(scenario.Sessions, ScenarioSession{
 		Name: input.Name, Role: input.Role, Prompt: input.Prompt, Task: input.Task,
 		Repo: filepath.Base(repoRoot), Agent: agentName, Model: input.Model,
@@ -1841,7 +1935,14 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 	})
 	if err := sm.saveState(); err != nil {
 		scenario.SessionIDs = scenario.SessionIDs[:len(scenario.SessionIDs)-1]
+
 		scenario.Sessions = scenario.Sessions[:len(scenario.Sessions)-1]
+
+		if scenario.Render != nil {
+			scenario.Render.Members = scenario.Render.Members[:renderMemberCount]
+			scenario.Render.References = scenario.Render.References[:renderReferenceCount]
+		}
+
 		restoreScenarioPolicyRuntime(scenario, beforePolicy, beforeMemberPolicies)
 
 		if created, ok := sm.state.Sessions[sess.ID]; ok {
@@ -2027,8 +2128,10 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 	}
 
 	orchestratorID := scenario.OrchestratorID
+	render := scenarioRenderInfo(scenario.Render)
 	msg := protocol.ScenarioStartMsg{
 		CallerSessionID: orchestratorID,
+		ParentSessionID: orchestratorID,
 		Name:            scenario.Name,
 		Goal:            scenario.Goal,
 		Sessions:        sessions,
@@ -2037,7 +2140,7 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 	sm.mu.RUnlock()
 
 	for i, id := range sessionIDs {
-		manifest := sm.buildManifest(scenarioID, msg, repos, sessionIDs, i)
+		manifest := sm.buildManifest(scenarioID, msg, repos, sessionIDs, i, render)
 
 		manifestJSON, err := json.Marshal(manifest)
 		if err != nil {
@@ -2061,7 +2164,7 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 	}
 
 	for i := range sessions {
-		manifest := sm.buildManifest(scenarioID, msg, repos, sessionIDs, i)
+		manifest := sm.buildManifest(scenarioID, msg, repos, sessionIDs, i, render)
 
 		data, err := json.MarshalIndent(manifest, "", "  ")
 		if err != nil {
@@ -2231,6 +2334,7 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 		CompletionEpoch:   sc.Completion.Epoch,
 		CompletionActions: scenarioCompletionActionsToWire(sc.Completion.Actions),
 		Cleanup:           scenarioCleanupToWire(sc.Completion.Cleanup),
+		Render:            scenarioRenderInfo(sc.Render),
 	}
 	if sc.Policy != nil {
 		record.Policy = &protocol.ScenarioPolicyInfo{

@@ -461,10 +461,10 @@ func TestBuildManifest(t *testing.T) {
 	sessionIDs := []string{"braw-s1", "bonnie-s2"}
 	repos := []string{"croft-forge", "croft-loom"}
 
-	m := sm.buildManifest("sc-glen", msg, repos, sessionIDs, 0)
+	m := sm.buildManifest("sc-glen", msg, repos, sessionIDs, 0, nil)
 
-	if m.Version != 1 {
-		t.Errorf("version = %d, want 1", m.Version)
+	if m.Version != 2 {
+		t.Errorf("version = %d, want 2", m.Version)
 	}
 
 	if m.ScenarioID != "sc-glen" {
@@ -1481,7 +1481,7 @@ func TestPersistManifestCovWritesStore(t *testing.T) {
 	repos := []string{"croft-forge", "croft-loom"}
 	sessionIDs := []string{"braw-s1", "bonnie-s2"}
 
-	sm.persistManifest("sc-loch", msg, repos, sessionIDs)
+	sm.persistManifest("sc-loch", msg, repos, sessionIDs, nil)
 
 	storeDir := store.SharedStorePath(sm.paths.DataDir)
 

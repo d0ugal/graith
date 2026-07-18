@@ -1405,10 +1405,12 @@ func TestScenarioMirrorSharedSourceLifecycle(t *testing.T) {
 	assertSubjectPreserved("before scenario start")
 
 	sendControlWithToken(t, w, "scenario_start", protocol.ScenarioStartMsg{
-		Name: "strath-readers",
+		ParentSessionID:    subject.ID, // direct handlers must ignore a spoofed owner
+		InitiatorSessionID: subject.ID, // direct handlers must also ignore a spoofed initiator
+		Name:               "strath-readers-{short_id}",
 		Sessions: []protocol.ScenarioSessionInput{
 			{Name: "subject", Repo: env.repo, Agent: "echo", Shared: true},
-			{Name: "reader", Mirror: "subject", Agent: "echo", Role: "auditor"},
+			{Name: "{scenario}-reader", Mirror: "subject", Agent: "echo", Role: "auditor"},
 		},
 	}, orchestrator.Token)
 
@@ -1423,7 +1425,10 @@ func TestScenarioMirrorSharedSourceLifecycle(t *testing.T) {
 	var record protocol.ScenarioRecord
 
 	_ = protocol.DecodePayload(started, &record)
-	if len(record.Sessions) != 2 || record.Sessions[1].Mirror != "subject" {
+	if len(record.Sessions) != 2 || record.Sessions[0].Name != "subject" ||
+		record.Sessions[1].Name != record.Name+"-reader" || record.Sessions[1].Mirror != "subject" ||
+		record.Render == nil || record.Render.AuthoredName != "strath-readers-{short_id}" ||
+		record.Render.Parent.SessionID != orchestrator.ID || record.Render.Initiator.SessionID != orchestrator.ID {
 		t.Fatalf("scenario record = %+v, want mirrored reader", record)
 	}
 
@@ -1438,7 +1443,7 @@ func TestScenarioMirrorSharedSourceLifecycle(t *testing.T) {
 
 	assertSubjectPreserved("scenario start")
 
-	sendControl(t, w, "scenario_status", protocol.ScenarioStatusMsg{Name: "strath-readers"})
+	sendControl(t, w, "scenario_status", protocol.ScenarioStatusMsg{Name: record.Name})
 
 	var status protocol.ScenarioStatusResponse
 
@@ -1451,9 +1456,9 @@ func TestScenarioMirrorSharedSourceLifecycle(t *testing.T) {
 		msgType string
 		payload any
 	}{
-		{"scenario_stop", protocol.ScenarioStopMsg{Name: "strath-readers"}},
-		{"scenario_resume", protocol.ScenarioResumeMsg{Name: "strath-readers"}},
-		{"scenario_delete", protocol.ScenarioDeleteMsg{Name: "strath-readers"}},
+		{"scenario_stop", protocol.ScenarioStopMsg{Name: record.Name}},
+		{"scenario_resume", protocol.ScenarioResumeMsg{Name: record.Name}},
+		{"scenario_delete", protocol.ScenarioDeleteMsg{Name: record.Name}},
 	}
 	for _, operation := range operations {
 		sendControl(t, w, operation.msgType, operation.payload)

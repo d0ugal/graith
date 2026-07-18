@@ -120,6 +120,13 @@ type SessionManager struct {
 	// scenario avoids deleting a lock while another goroutine is waiting on it.
 	scenarioPolicyLocksMu sync.Mutex
 	scenarioPolicyLocks   map[string]*lifecycleGate
+	// scenarioStartIDs transiently reserves stable scenario IDs before template
+	// rendering and preflight. It is guarded by mu alongside state.Scenarios, so
+	// concurrent starts cannot render with the same {short_id} candidate.
+	scenarioStartIDs map[string]bool
+	// scenarioIDGenerator is a deterministic test seam. Production uses the
+	// same CSPRNG-backed eight-hex generator as session IDs.
+	scenarioIDGenerator func() string
 	// scenarioPolicyInFlight contains retry dispatches currently executing in
 	// this daemon. RetryDispatched is durable; this runtime companion lets a
 	// concurrent planner distinguish live work from a dispatch interrupted by a
