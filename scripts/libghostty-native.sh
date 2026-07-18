@@ -420,8 +420,12 @@ verify_static_archive() {
 
     local archive
     for archive in "${archives[@]}"; do
-        local actual_members symbols
-        actual_members="$(ar -t "$archive" | grep -v '^__.SYMDEF' | sort)"
+        local actual_members member symbols
+        actual_members="$({
+            while IFS= read -r member; do
+                printf '%s\n' "${member##*/}"
+            done < <(ar -t "$archive")
+        } | grep -v '^__.SYMDEF' | sort)"
         [[ "$actual_members" == "$expected_members" ]] || {
             printf 'expected archive members:\n%s\nactual archive members:\n%s\n' \
                 "$expected_members" "$actual_members" >&2
