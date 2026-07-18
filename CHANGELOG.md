@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.69.6](https://github.com/d0ugal/graith/compare/v0.69.5...v0.69.6) (2026-07-18)
+
+
+### Bug Fixes
+
+* update github.com/tailscale/hujson digest to 10d7940 ([4027630](https://github.com/d0ugal/graith/commit/40276301a9a57802592e5f1d6a942f56aca92b38))
+
 ## [0.69.5](https://github.com/d0ugal/graith/compare/v0.69.4...v0.69.5) (2026-07-18)
 
 
