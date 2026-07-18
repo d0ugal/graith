@@ -48,6 +48,10 @@ func TestDefaultOverlayKeybindings(t *testing.T) {
 			t.Errorf("Keybindings.Overlay.%s is empty; expected a default", name)
 		}
 	}
+
+	if !strings.Contains(ov.Cancel, "ctrl+c") {
+		t.Errorf("Keybindings.Overlay.cancel = %q, want ctrl+c clean-exit binding", ov.Cancel)
+	}
 }
 
 // TestOverlayKeybindingPartialOverride confirms that naming only some overlay

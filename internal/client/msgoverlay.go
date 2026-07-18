@@ -65,7 +65,7 @@ type messageOverlayModel struct {
 	// refresh is the daemon re-poll cadence, snapshotted from the shared
 	// configurable refreshInterval (issue #1315) when the overlay opens so the
 	// message viewer tracks terminal.refresh_interval like the picker,
-	// dashboard, and status bar rather than a private hard-coded cadence.
+	// list watch, and status bar rather than a private hard-coded cadence.
 	refresh time.Duration
 }
 
@@ -774,7 +774,7 @@ func sanitizeMessageBody(s string) string {
 // RunMessageOverlay displays the chatroom-style message viewer for sessionID,
 // showing direct messages to and from that session grouped by peer. It is
 // read-only in v1 and re-polls the daemon at the configured shared refresh
-// interval (terminal.refresh_interval), matching the picker, dashboard, and
+// interval (terminal.refresh_interval), matching the picker, list watch, and
 // status bar. fetch returns the conversation and ok=false on a transient error
 // (so the last good snapshot is kept).
 // Returns when the user closes the overlay; the caller then reattaches.

@@ -210,13 +210,14 @@ func TestOverlayKeysFromConfigOverrideAndDefault(t *testing.T) {
 		},
 	}
 
-	dash := dashboardKeysFromConfig()
-	if len(dash.Attach) != 1 || dash.Attach[0] != "z" {
-		t.Errorf("dashboard attach = %v, want [z]", dash.Attach)
+	watch := listWatchKeysFromConfig()
+	if len(watch.Attach) != 1 || watch.Attach[0] != "z" {
+		t.Errorf("list watch attach = %v, want [z]", watch.Attach)
 	}
-	// Unset dashboard_stop keeps the built-in default.
-	if want := client.DefaultDashboardKeys().Stop; len(dash.Stop) != len(want) || dash.Stop[0] != want[0] {
-		t.Errorf("dashboard stop = %v, want default %v", dash.Stop, want)
+	// Unset dashboard_stop keeps the built-in default (the config key retains
+	// its historical name for compatibility).
+	if want := client.DefaultListWatchKeys().Stop; len(watch.Stop) != len(want) || watch.Stop[0] != want[0] {
+		t.Errorf("list watch stop = %v, want default %v", watch.Stop, want)
 	}
 
 	appr := approvalKeysFromConfig()

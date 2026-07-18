@@ -12,7 +12,7 @@ import "time"
 // arithmetic, wrap widths, minimum name width, panel breakpoints) stay as
 // documented constants next to the render logic they must match.
 var (
-	// refreshInterval is the cadence at which the session picker, the dashboard,
+	// refreshInterval is the cadence at which the session picker, list watch,
 	// an attached status bar, and the in-picker message viewer re-poll the daemon
 	// for fresh session state (issue #1315).
 	refreshInterval = 2 * time.Second

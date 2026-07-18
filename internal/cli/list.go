@@ -29,6 +29,7 @@ var (
 	listTokens   bool
 	listNoColor  bool
 	listDeleted  bool
+	listWatch    bool
 )
 
 type listConn interface {
@@ -41,6 +42,13 @@ type listConn interface {
 var listConnectFn = func(cfg *config.Config, paths config.Paths, cfgFile string) (listConn, error) {
 	return client.Connect(cfg, paths, cfgFile)
 }
+
+var (
+	listWatchTerminalFn = listWatchTerminal
+	listWatchRunFn      = client.RunListWatch
+	listWatchFetchFn    = fetchListSessions
+	listWatchActionFn   = sendListWatchAction
+)
 
 // colorize wraps text in the given foreground color for terminal output. When
 // coloring is disabled (or the text is empty) it returns the text unchanged.
@@ -81,9 +89,18 @@ func listColorEnabled(cmd *cobra.Command) bool {
 var listCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls"},
-	Short:   "List all sessions",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		updateCh := make(chan *version.UpdateResult, 1)
+	Short:   "List or watch sessions",
+	RunE:    runList,
+}
+
+func runList(cmd *cobra.Command, _ []string) error {
+	if err := validateListWatch(cmd); err != nil {
+		return err
+	}
+
+	var updateCh chan *version.UpdateResult
+	if !listWatch {
+		updateCh = make(chan *version.UpdateResult, 1)
 		// Snapshot the data dir before the goroutine so it doesn't read the
 		// mutable package-global `paths` after RunE returns (data race under -race).
 		updateDataDir := paths.DataDir
@@ -92,73 +109,273 @@ var listCmd = &cobra.Command{
 		go func() {
 			updateCh <- version.CheckForUpdate(updateDataDir, updateCfg)
 		}()
+	}
 
-		c, err := listConnectFn(cfg, paths, cfgFile)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
+	sessions, err := fetchListSessions(listDeleted)
+	if err != nil {
+		return err
+	}
 
-		_ = c.SendControl("list", protocol.ListMsg{Deleted: listDeleted})
+	filter, err := newListSessionFilter(sessions)
+	if err != nil {
+		return err
+	}
 
-		resp, err := c.ReadControlResponse()
-		if err != nil {
-			return err
-		}
+	sessions = filter.apply(sessions)
+	if listWatch {
+		return runListWatch(sessions, filter)
+	}
 
-		var list protocol.SessionListMsg
-		if err := protocol.DecodePayload(resp, &list); err != nil {
-			return err
-		}
+	list := protocol.SessionListMsg{Sessions: sessions}
+	if listQuiet {
+		return printQuiet(cmd, list.Sessions)
+	}
 
-		list.Sessions, err = applyListFilters(list.Sessions, listChildren, listRepo, listStarred)
-		if err != nil {
-			return err
-		}
+	if jsonOutput {
+		return out.JSON(list)
+	}
 
-		if listQuiet {
-			return printQuiet(cmd, list.Sessions)
-		}
+	if paths.Profile != "" {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Profile: %s\n\n", paths.Profile)
+	}
 
-		if jsonOutput {
-			return out.JSON(list)
-		}
-
-		if paths.Profile != "" {
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Profile: %s\n\n", paths.Profile)
-		}
-
-		if len(list.Sessions) == 0 {
-			if listDeleted {
-				out.Printf("No deleted sessions.\n")
-			} else {
-				out.Printf("No sessions. Create one with: gr new <name>\n")
-			}
-
-			return nil
-		}
-
-		now := time.Now()
-
-		if listTokens {
-			printTokenProjection(cmd, list.Sessions, now, listTree)
-		} else if listTree {
-			printTree(cmd, list.Sessions, now)
+	if len(list.Sessions) == 0 {
+		if listDeleted {
+			out.Printf("No deleted sessions.\n")
 		} else {
-			printFlat(cmd, list.Sessions, now)
-		}
-
-		select {
-		case result := <-updateCh:
-			if result != nil {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nUpdate available: %s → %s (brew upgrade graith)\n",
-					result.CurrentVersion, result.LatestVersion)
-			}
-		default:
+			out.Printf("No sessions. Create one with: gr new <name>\n")
 		}
 
 		return nil
-	},
+	}
+
+	now := time.Now()
+	if listTokens {
+		printTokenProjection(cmd, list.Sessions, now, listTree)
+	} else if listTree {
+		printTree(cmd, list.Sessions, now)
+	} else {
+		printFlat(cmd, list.Sessions, now)
+	}
+
+	select {
+	case result := <-updateCh:
+		if result != nil {
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nUpdate available: %s → %s (brew upgrade graith)\n",
+				result.CurrentVersion, result.LatestVersion)
+		}
+	default:
+	}
+
+	return nil
+}
+
+func validateListWatch(cmd *cobra.Command) error {
+	if !listWatch {
+		return nil
+	}
+
+	if jsonOutput {
+		return fmt.Errorf("--watch is interactive and cannot be used with --json or --agent-mode")
+	}
+
+	if listQuiet {
+		return fmt.Errorf("--watch cannot be used with --quiet")
+	}
+
+	if listDeleted {
+		return fmt.Errorf("--watch cannot be used with --deleted")
+	}
+
+	if listTokens {
+		return fmt.Errorf("--watch cannot be used with --tokens")
+	}
+
+	if !listWatchTerminalFn(cmd) {
+		return fmt.Errorf("--watch requires an interactive terminal on stdin and stdout")
+	}
+
+	return nil
+}
+
+func listWatchTerminal(cmd *cobra.Command) bool {
+	in, inOK := cmd.InOrStdin().(*os.File)
+	outFile, outOK := cmd.OutOrStdout().(*os.File)
+	return inOK && outOK && term.IsTerminal(int(in.Fd())) && term.IsTerminal(int(outFile.Fd()))
+}
+
+type listSessionFilter struct {
+	parentID string
+	repo     string
+	starred  bool
+}
+
+func newListSessionFilter(sessions []protocol.SessionInfo) (listSessionFilter, error) {
+	filter := listSessionFilter{repo: listRepo, starred: listStarred}
+	if listChildren == "" {
+		return filter, nil
+	}
+
+	parent := findSession(sessions, listChildren)
+	if parent == nil {
+		return listSessionFilter{}, fmt.Errorf("session %q not found", listChildren)
+	}
+
+	filter.parentID = parent.ID
+	return filter, nil
+}
+
+func (f listSessionFilter) apply(sessions []protocol.SessionInfo) []protocol.SessionInfo {
+	filtered := make([]protocol.SessionInfo, len(sessions))
+	copy(filtered, sessions)
+	if f.parentID != "" {
+		filtered = descendantsOf(filtered, f.parentID)
+	}
+
+	if f.repo != "" {
+		matches := make([]protocol.SessionInfo, 0, len(filtered))
+		for _, session := range filtered {
+			if matchesRepo(session, f.repo) {
+				matches = append(matches, session)
+			}
+		}
+
+		filtered = matches
+	}
+
+	if f.starred {
+		matches := make([]protocol.SessionInfo, 0, len(filtered))
+		for _, session := range filtered {
+			if session.Starred {
+				matches = append(matches, session)
+			}
+		}
+
+		filtered = matches
+	}
+
+	if filtered == nil {
+		return []protocol.SessionInfo{}
+	}
+
+	return filtered
+}
+
+func fetchListSessions(deleted bool) ([]protocol.SessionInfo, error) {
+	c, err := listConnectFn(cfg, paths, cfgFile)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+
+	if err := c.SendControl("list", protocol.ListMsg{Deleted: deleted}); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return nil, err
+	}
+
+	var list protocol.SessionListMsg
+	if err := protocol.DecodePayload(resp, &list); err != nil {
+		return nil, err
+	}
+
+	return list.Sessions, nil
+}
+
+func runListWatch(sessions []protocol.SessionInfo, filter listSessionFilter) error {
+	options := client.ListWatchOptions{
+		Wide:    listWide,
+		Tree:    listTree,
+		NoColor: listNoColor || os.Getenv("NO_COLOR") != "",
+	}
+
+	for {
+		result, err := listWatchRunFn(sessions, listWatchKeysFromConfig(), options, func() []protocol.SessionInfo {
+			fresh, err := listWatchFetchFn(false)
+			if err != nil {
+				// A transient refresh failure must not clear the screen or lose the
+				// selected session; nil tells the model to preserve its state.
+				return nil
+			}
+
+			return filter.apply(fresh)
+		})
+		if err != nil {
+			return err
+		}
+
+		if result == nil {
+			return nil
+		}
+
+		switch result.Action {
+		case "attach":
+			c, err := freshClient()
+			if err != nil {
+				return err
+			}
+
+			err = runAttachByID(c, result.SessionID, nil)
+			c.Close()
+			return err
+
+		case "delete":
+			if err := listWatchActionFn("delete", protocol.DeleteMsg{SessionID: result.SessionID}); err != nil {
+				return err
+			}
+
+		case "stop":
+			if err := listWatchActionFn("stop", protocol.StopMsg{SessionID: result.SessionID}); err != nil {
+				return err
+			}
+
+		case "resume":
+			if err := listWatchActionFn("resume", protocol.ResumeMsg{SessionID: result.SessionID}); err != nil {
+				return err
+			}
+
+		default:
+			return fmt.Errorf("unknown list watch action %q", result.Action)
+		}
+
+		fresh, err := listWatchFetchFn(false)
+		if err != nil {
+			return err
+		}
+
+		sessions = filter.apply(fresh)
+	}
+}
+
+func sendListWatchAction(msgType string, payload any) error {
+	c, err := client.Connect(cfg, paths, cfgFile)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	if err := c.SendControl(msgType, payload); err != nil {
+		return err
+	}
+
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return err
+	}
+
+	if resp.Type != "error" {
+		return nil
+	}
+
+	var response protocol.ErrorMsg
+	if err := protocol.DecodePayload(resp, &response); err != nil {
+		return err
+	}
+
+	return fmt.Errorf("%s", response.Message)
 }
 
 // applyListFilters applies the normal session-list filters in command order.
@@ -557,6 +774,7 @@ func registerListCmd() {
 	listCmd.Flags().BoolVar(&listDeleted, "deleted", false, "show soft-deleted sessions with their expiry time")
 	listCmd.MarkFlagsMutuallyExclusive("quiet", "tokens")
 	listCmd.MarkFlagsMutuallyExclusive("wide", "tokens")
+	listCmd.Flags().BoolVar(&listWatch, "watch", false, "watch sessions in an interactive live-updating view")
 
 	_ = listCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	_ = listCmd.RegisterFlagCompletionFunc("children", completeSessionNames)

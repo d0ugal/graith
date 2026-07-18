@@ -1696,7 +1696,7 @@ func (l LimitsConfig) InboxPreviewBytesOrDefault() int {
 
 // TerminalConfig is the [terminal] block: user-tunable interactive-TUI
 // presentation preferences that were previously fixed literals in the client
-// (issue #1254) — how often the picker/dashboard/status bar refresh, and how
+// (issue #1254) — how often the picker/list-watch/status bar refresh, and how
 // wide a `gr status` summary may grow in the picker before truncation.
 //
 // Session-lifecycle presentation (the fallback terminal geometry and the
@@ -1707,7 +1707,7 @@ func (l LimitsConfig) InboxPreviewBytesOrDefault() int {
 // are also excluded — they must match render logic and stay as documented
 // constants. Every field is optional and falls back to its default constant.
 type TerminalConfig struct {
-	// RefreshInterval is the cadence at which the session picker, the dashboard,
+	// RefreshInterval is the cadence at which the session picker, list watch,
 	// and an attached status bar re-poll the daemon for fresh session state.
 	// Empty, unparseable, or non-positive uses the default
 	// (TerminalRefreshIntervalDefault); a zero cadence would busy-loop.
@@ -2619,7 +2619,7 @@ type Keybindings struct {
 	Approvals      string `toml:"approvals"`
 	RestartSession string `toml:"restart_session"`
 	// Overlay holds the keys used inside the full-screen terminal overlays
-	// (dashboard, approval prompt, message viewer, scroll pager). See #1233.
+	// (list watch, approval prompt, message viewer, scroll pager). See #1233.
 	Overlay OverlayKeybindings `toml:"overlay"`
 }
 
@@ -2696,7 +2696,8 @@ type OverlayKeybindings struct {
 	Bottom   string `toml:"bottom"`
 	Confirm  string `toml:"confirm"`
 	Cancel   string `toml:"cancel"`
-	// Dashboard actions.
+	// List-watch actions. The Dashboard* field and TOML names are retained so
+	// existing keybinding customizations survive removal of `gr dashboard`.
 	DashboardAttach string `toml:"dashboard_attach"`
 	DashboardStop   string `toml:"dashboard_stop"`
 	DashboardDelete string `toml:"dashboard_delete"`

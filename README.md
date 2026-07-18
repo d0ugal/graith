@@ -20,7 +20,7 @@ Running several agents at once shouldn't mean juggling terminal tabs and steppin
 - **Persistence** — a daemon owns the PTYs; sessions survive terminal closures, daemon restarts, and SSH drops
 - **Switching** — hop between agents instantly with a tmux-style prefix key
 - **Visibility** — see every session at a glance, with a "Needs Attention" view for blocked work and `gr ls --tokens` for per-session token usage
-- **Coordination** — agents message each other over pub/sub, and you drive them remotely with `type`, `logs`, and a live dashboard
+- **Coordination** — agents message each other over pub/sub, and you drive them remotely with `type`, `logs`, and the live `gr ls --watch` view
 
 It owns the PTY, manages the worktrees, and otherwise gets out of your way.
 

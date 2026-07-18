@@ -114,9 +114,11 @@ Each session row shows:
 | Git | Branch name (or "(in-place)"), dirty indicator, unpushed commit count |
 | Output | Age of most recent output |
 
-## Dashboard
+## Live list watch
 
-The dashboard (`gr dashboard`) is a live-updating TUI similar to the session picker but designed for monitoring.
+`gr ls --watch` is a live-updating TUI for monitoring and controlling the
+filtered session list. The historical `dashboard_*` config key names remain so
+existing keybinding customizations continue to work.
 
 | Key | Action | Config key |
 |-----|--------|-----------|
@@ -126,7 +128,7 @@ The dashboard (`gr dashboard`) is a live-updating TUI similar to the session pic
 | `s` | Stop session (with confirmation) | `overlay.dashboard_stop` |
 | `x` / `d` | Delete session (with confirmation) | `overlay.dashboard_delete` |
 | `r` | Resume a stopped session | `overlay.dashboard_resume` |
-| `q` / `ctrl+c` | Quit | `overlay.cancel` |
+| `q` / Escape / `ctrl+c` | Quit | `overlay.cancel` |
 
 ## Message viewer, approvals, and scroll pager
 

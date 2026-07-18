@@ -71,44 +71,44 @@ func TestKeyHintAndPrimaryKey(t *testing.T) {
 	}
 }
 
-// TestDashboardKeysRemapped confirms the dashboard honours a remapped attach key
+// TestListWatchKeysRemapped confirms list watch honours a remapped attach key
 // and ignores the old default once rebound (issue #1233).
-func TestDashboardKeysRemapped(t *testing.T) {
-	sessions := dashboardTestSessions()
+func TestListWatchKeysRemapped(t *testing.T) {
+	sessions := listWatchTestSessions()
 
-	keys := DefaultDashboardKeys()
+	keys := DefaultListWatchKeys()
 	keys.Attach = []string{"z"}
 
-	m := NewDashboardModel(sessions, nil)
+	m := NewListWatchModel(sessions, nil)
 	m.keys = keys
 	m.width = 120
 	m.height = 40
 
 	// The old default 'a' no longer attaches.
-	dm := updateDash(m, "a")
+	dm := updateListWatch(m, "a")
 	if dm.result != nil {
 		t.Fatalf("old attach key 'a' should be inert after remap, got %+v", dm.result)
 	}
 
 	// The remapped 'z' attaches.
-	dm = updateDash(dm, "z")
+	dm = updateListWatch(dm, "z")
 	if dm.result == nil || dm.result.Action != "attach" {
 		t.Fatalf("remapped attach key 'z' did not attach: %+v", dm.result)
 	}
 }
 
-func TestDashboardFooterReflectsConfiguredKeys(t *testing.T) {
-	keys := DefaultDashboardKeys()
+func TestListWatchFooterReflectsConfiguredKeys(t *testing.T) {
+	keys := DefaultListWatchKeys()
 	keys.Delete = []string{"z"}
 
-	m := NewDashboardModel(dashboardTestSessions(), nil)
+	m := NewListWatchModel(listWatchTestSessions(), nil)
 	m.keys = keys
 	m.width = 120
 	m.height = 40
 
 	view := m.View().Content
 	if !strings.Contains(view, "z delete") {
-		t.Errorf("dashboard footer should show remapped delete key; got:\n%s", view)
+		t.Errorf("list watch footer should show remapped delete key; got:\n%s", view)
 	}
 }
 
