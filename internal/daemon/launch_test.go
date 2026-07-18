@@ -592,9 +592,10 @@ func TestResumeClearsFreshStart(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.Agents["claude"] = config.Agent{
-		Command:    "true",
-		Args:       []string{},
-		ResumeArgs: []string{},
+		NonInteractiveArgs: []string{},
+		Command:            "true",
+		Args:               []string{},
+		ResumeArgs:         []string{},
 	}
 
 	sm := NewSessionManager(cfg, config.Paths{
@@ -602,6 +603,7 @@ func TestResumeClearsFreshStart(t *testing.T) {
 		DataDir:   tmpDir,
 		LogDir:    tmpDir,
 	}, quietLogger())
+	sm.sandboxResolver = func(string) (bool, error) { return false, nil }
 
 	id := "bide-fresh"
 	sm.state.Sessions[id] = &SessionState{

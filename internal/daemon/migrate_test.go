@@ -14,7 +14,7 @@ import (
 // positional args (the seed prompt), so migration's start step succeeds in
 // tests without a real agent binary.
 func shAgent() config.Agent {
-	return config.Agent{Command: "/bin/sh", Args: []string{"-c", "sleep 30"}}
+	return config.Agent{NonInteractiveArgs: []string{}, Command: "/bin/sh", Args: []string{"-c", "sleep 30"}}
 }
 
 func newMigrateTestManager(t *testing.T) *SessionManager {
@@ -25,12 +25,15 @@ func newMigrateTestManager(t *testing.T) *SessionManager {
 	cfg.Agents["claude"] = shAgent()
 	cfg.Agents["codex"] = shAgent()
 
-	return NewSessionManager(cfg, config.Paths{
+	sm := NewSessionManager(cfg, config.Paths{
 		StateFile: filepath.Join(tmpDir, "state.json"),
 		DataDir:   tmpDir,
 		LogDir:    tmpDir,
 		TmpDir:    filepath.Join(tmpDir, "tmp"),
 	}, slog.Default())
+	sm.sandboxResolver = func(string) (bool, error) { return false, nil }
+
+	return sm
 }
 
 func TestMigrateRejectsBadTargets(t *testing.T) {
@@ -160,7 +163,7 @@ func TestMigrateRestoresOnTargetFailure(t *testing.T) {
 
 	sm := newMigrateTestManager(t)
 	// Target codex exits immediately; source claude stays alive on restore.
-	sm.cfg.Agents["codex"] = config.Agent{Command: "/bin/sh", Args: []string{"-c", "true"}}
+	sm.cfg.Agents["codex"] = config.Agent{NonInteractiveArgs: []string{}, Command: "/bin/sh", Args: []string{"-c", "true"}}
 	repo := initTempGitRepo(t)
 
 	claudeRoot := t.TempDir()

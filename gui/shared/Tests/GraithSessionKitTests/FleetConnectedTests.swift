@@ -16,7 +16,7 @@ struct FleetConnectedTests {
     private func sampleSessions() -> [SessionInfo] {
         [
             makeSession(id: "braw0001", name: "braw", status: "running", agentStatus: "active", repoName: "croft"),
-            makeSession(id: "canny002", name: "canny", status: "running", agentStatus: "approval", repoName: "croft"),
+            makeSession(id: "canny002", name: "canny", status: "running", agentStatus: "error", repoName: "croft"),
             makeSession(id: "bide0003", name: "bide", status: "stopped", repoName: "glen"),
         ]
     }
@@ -116,37 +116,17 @@ struct FleetConnectedTests {
         await fleet.connectAll()
         await withCheckedContinuation { cont in
             fleet.createSession(name: "canny", agent: "claude", repoPath: "/tmp/croft",
-                                model: "", prompt: "", base: "  auld-main  ", yolo: false,
+                                model: "", prompt: "", base: "  auld-main  ",
                                 inPlace: false, agentHooks: false, hostID: "ben") { _ in
                 cont.resume()
             }
         }
         let req = await mock.lastCreate
         #expect(req?.base == "auld-main")  // trimmed before it goes on the wire
-        #expect(req?.yolo == nil)          // false collapses to nil (omitted)
         #expect(req?.inPlace == nil)       // false collapses to nil (omitted)
         // agentHooks is always sent explicitly (false is meaningful — Go's
         // omitempty can't distinguish absent from false).
         #expect(req?.agentHooks == false)
-    }
-
-    @Test func createSessionYoloForcesAgentHooksOn() async {
-        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(),
-                                                repos: [RepoEntry(path: "/tmp/croft", name: "croft", recent: true)],
-                                                )
-        await fleet.connectAll()
-        // Yolo on + hooks off is a combination the daemon rewrites (agentHooks ||
-        // yolo); the client sends the effective value so the wire matches reality.
-        await withCheckedContinuation { cont in
-            fleet.createSession(name: "bonnie", agent: "claude", repoPath: "/tmp/croft",
-                                model: "", prompt: "", yolo: true, agentHooks: false,
-                                hostID: "ben") { _ in
-                cont.resume()
-            }
-        }
-        let req = await mock.lastCreate
-        #expect(req?.yolo == true)
-        #expect(req?.agentHooks == true)
     }
 
     @Test func createSessionRejectsInPlaceWithBase() async {

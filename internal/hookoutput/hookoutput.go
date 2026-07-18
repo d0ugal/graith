@@ -2,27 +2,23 @@ package hookoutput
 
 import "encoding/json"
 
-// approvalResponse is the legacy top-level decision format. It is still used by
-// agents whose hook schema expects a top-level "decision" field (agy).
-type approvalResponse struct {
+type commandPolicyResponse struct {
 	Decision string `json:"decision"`
 	Reason   string `json:"reason,omitempty"`
 }
 
-// codexApprovalResponse models Codex's current PermissionRequest hook-output
+// codexCommandPolicyResponse models Codex's current PermissionRequest hook-output
 // contract. Codex's PermissionRequestCommandOutputWire carries the decision
 // under hookSpecificOutput.decision.behavior ("allow" | "deny") — NOT the legacy
 // top-level "decision" field — and uses deny_unknown_fields, so a top-level
-// "decision" is rejected and the decision silently dropped, defeating the
-// approval bridge (issue #1183).
-type codexApprovalResponse struct {
+// "decision" is rejected and the decision silently dropped (issue #1183).
+type codexCommandPolicyResponse struct {
 	HookSpecificOutput codexPermissionHookSpecificOutput `json:"hookSpecificOutput"`
 }
 
 // codexPermissionHookSpecificOutput carries the PermissionRequest decision.
-// Decision is a pointer so it can be omitted: when graith defers (or the
-// decision is unrecognised) no decision is sent and Codex falls back to its own
-// approval flow rather than being forced to allow or deny.
+// Decision retains Codex's optional wire shape, but command-policy responses
+// always populate it with an immediate allow or deny.
 type codexPermissionHookSpecificOutput struct {
 	HookEventName string                   `json:"hookEventName"`
 	Decision      *codexPermissionDecision `json:"decision,omitempty"`
@@ -33,23 +29,23 @@ type codexPermissionDecision struct {
 	Message  string `json:"message,omitempty"`
 }
 
-type cursorApprovalResponse struct {
+type cursorCommandPolicyResponse struct {
 	Permission string `json:"permission"`
 	Reason     string `json:"reason,omitempty"`
 }
 
-// claudeApprovalResponse models Claude Code's current PreToolUse hook-output
+// claudeCommandPolicyResponse models Claude Code's current PreToolUse hook-output
 // contract, which carries the permission decision under hookSpecificOutput
 // rather than the legacy top-level "decision" field (still accepted by Claude,
 // but deprecated). See the PreToolUse decision-control section of
 // https://docs.claude.com/en/docs/claude-code/hooks (source:
 // claude-code/src/utils/hooks.ts, permissions/permissions.ts).
-type claudeApprovalResponse struct {
+type claudeCommandPolicyResponse struct {
 	HookSpecificOutput claudeHookSpecificOutput `json:"hookSpecificOutput"`
 }
 
 // claudeHookSpecificOutput carries the PreToolUse permission decision.
-// PermissionDecision is one of "allow", "deny", or "ask". UpdatedInput, when
+// PermissionDecision is always "allow" or "deny". UpdatedInput, when
 // non-nil, rewrites the tool input Claude will run (input rewriting/redaction).
 // graith does not populate UpdatedInput yet, but the field is here so the
 // struct matches the full contract and can carry it in future.
@@ -60,13 +56,12 @@ type claudeHookSpecificOutput struct {
 	UpdatedInput             json.RawMessage `json:"updatedInput,omitempty"`
 }
 
-// Approval returns JSON for a hook approval decision formatted for the given agent.
-// The decision parameter uses graith's internal values ("allow", "block", "deny",
-// "defer"). Each agent maps these to its own hook schema vocabulary.
-func Approval(agent, decision, reason string) string {
+// CommandPolicy returns a deterministic allow-or-deny response in each agent's
+// hook schema. Unknown decisions are denied; native prompting is never resumed.
+func CommandPolicy(agent, decision, reason string) string {
 	switch agent {
 	case "claude":
-		return marshalString(claudeApprovalResponse{
+		return marshalString(claudeCommandPolicyResponse{
 			HookSpecificOutput: claudeHookSpecificOutput{
 				HookEventName:            "PreToolUse",
 				PermissionDecision:       claudeDecision(decision),
@@ -74,26 +69,21 @@ func Approval(agent, decision, reason string) string {
 			},
 		})
 	case "codex":
-		resp := codexApprovalResponse{
+		resp := codexCommandPolicyResponse{
 			HookSpecificOutput: codexPermissionHookSpecificOutput{
 				HookEventName: "PermissionRequest",
 			},
 		}
-		if behavior := codexBehavior(decision); behavior != "" {
-			resp.HookSpecificOutput.Decision = &codexPermissionDecision{
-				Behavior: behavior,
-				Message:  reason,
-			}
-		}
+		resp.HookSpecificOutput.Decision = &codexPermissionDecision{Behavior: codexBehavior(decision), Message: reason}
 
 		return marshalString(resp)
 	case "cursor":
-		return marshalString(cursorApprovalResponse{
+		return marshalString(cursorCommandPolicyResponse{
 			Permission: cursorDecision(decision),
 			Reason:     reason,
 		})
 	default:
-		return marshalString(approvalResponse{Decision: decision, Reason: reason})
+		return marshalString(commandPolicyResponse{Decision: denyUnlessAllow(decision), Reason: reason})
 	}
 }
 
@@ -108,11 +98,6 @@ func marshalString(v any) string {
 	}
 
 	return string(out)
-}
-
-// AllowAll returns a fail-open approval response for the given agent.
-func AllowAll(agent string) string {
-	return Approval(agent, "allow", "")
 }
 
 // claudeHookOutput is Claude Code's hook stdout envelope for injecting model
@@ -153,8 +138,7 @@ func InboxContext(agent, event, context string) string {
 
 // codexBehavior maps graith's internal decision vocabulary onto Codex's
 // PermissionRequest behavior ("allow" | "deny"). "block" and "deny" both refuse.
-// "defer"/"ask" (and anything unrecognised) return "" so the caller omits the
-// decision entirely and Codex falls back to its own approval flow.
+// Every other value is denied so native prompting can never resume.
 func codexBehavior(d string) string {
 	switch d {
 	case "allow":
@@ -162,31 +146,32 @@ func codexBehavior(d string) string {
 	case "block", "deny":
 		return "deny"
 	default:
-		return ""
+		return "deny"
 	}
 }
 
 // claudeDecision maps graith's internal decision vocabulary onto Claude Code's
-// permissionDecision values ("allow" | "deny" | "ask"). "block" and "deny" both
-// refuse; "defer" (and "ask") hand the decision back to Claude's own prompt.
+// permissionDecision values ("allow" | "deny"). "block" and "deny" both
+// refuse, as do unknown or interactive decisions.
 func claudeDecision(d string) string {
 	switch d {
 	case "allow":
 		return "allow"
 	case "block", "deny":
 		return "deny"
-	case "defer", "ask":
-		return "ask"
 	default:
-		return d
+		return "deny"
 	}
 }
 
 // Cursor uses "permission" field with "allow" and "deny" values.
 func cursorDecision(d string) string {
-	if d == "block" {
-		return "deny"
-	}
+	return denyUnlessAllow(d)
+}
 
-	return d
+func denyUnlessAllow(d string) string {
+	if d == "allow" {
+		return "allow"
+	}
+	return "deny"
 }

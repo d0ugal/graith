@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/d0ugal/graith/internal/approvals"
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
@@ -436,8 +435,6 @@ func (dc *doctorContext) checkEnvironment() {
 		dc.warnf("environment", "Sandbox disabled")
 	}
 
-	dc.checkApprovalsBackend()
-
 	switch {
 	case cfg.AgentPrompt == "":
 		dc.warnf("environment", "Agent prompt is empty (agents will not receive graith context)")
@@ -525,81 +522,6 @@ func (dc *doctorContext) checkSandboxBackend() {
 		case len(cfg.Sandbox.Network.AllowDomains) > 0:
 			dc.passf("environment", "Sandbox network policy: proxy allowlist of %d domain(s)", len(cfg.Sandbox.Network.AllowDomains))
 		}
-	}
-}
-
-// checkApprovalsBackend reports whether the configured approvals backend can
-// enforce with the current config. This mirrors the daemon's fail-closed
-// validateApprovalsBackend check, which rejects an unenforceable backend at
-// session-create — a rejection that otherwise surfaces only as a bare "Crashed
-// exit 1" session with zero scrollback and a reason buried in daemon.log (see
-// issue #738). Surfacing it here means the reason is visible from a channel a
-// user can read, including from inside a sandboxed session.
-func (dc *doctorContext) checkApprovalsBackend() {
-	backend, deprecation, err := cfg.Approvals.ResolveBackend()
-	if err != nil {
-		dc.failf("environment", "Approvals backend invalid: %v", err)
-
-		return
-	}
-
-	if deprecation != "" {
-		dc.warnf("environment", "Approvals config deprecated: %s", deprecation)
-	}
-
-	// The prompt backend (the default) always defers to the human and needs no
-	// external dependency, so it can never fail closed.
-	if backend == "" || backend == approvals.BackendPrompt {
-		dc.passf("environment", "Approvals backend: prompt (manual)")
-
-		return
-	}
-
-	be, err := approvals.BackendByName(backend)
-	if err != nil {
-		dc.failf("environment", "Approvals backend invalid: %v", err)
-
-		return
-	}
-
-	acfg := approvals.Config{
-		Backend:       backend,
-		Command:       cfg.Approvals.Command,
-		BuiltinConfig: config.ExpandPathRelative(cfg.Approvals.Builtin.Config, approvalsConfigDir()),
-	}
-
-	// Mirror the daemon's approvalsBackendConfig: render inline
-	// [approvals.builtin] rules to localmost JSON so an inline-only config is
-	// judged enforceable here exactly as it is at session-create, rather than
-	// being reported as a missing external config.
-	if cfg.Approvals.Builtin.HasInline() {
-		inline, err := cfg.Approvals.Builtin.InlineJSON()
-		if err != nil {
-			dc.failf("environment", "Approvals inline rules invalid: %v", err)
-
-			return
-		}
-
-		acfg.BuiltinInline = inline
-	}
-
-	av := be.Availability(acfg)
-	if !av.CanEnforce {
-		dc.failf("environment", "Approvals backend %q cannot enforce: %s", backend, av.Detail)
-		dc.hintf("Sessions will fail to start until this is fixed; set [approvals] backend = \"prompt\" or correct the backend config")
-
-		return
-	}
-
-	dc.passf("environment", "Approvals backend %q available", backend)
-
-	// Surface the effective deadline hierarchy so a mismatch (a backend
-	// execution timeout approaching the enclosing approval timeout) is visible
-	// rather than latent (see #1251/#244). Only the subprocess-spawning backends
-	// have an execution timeout.
-	if execTimeout, ok := cfg.Approvals.BackendExecTimeout(backend); ok {
-		dc.passf("environment", "Approvals deadlines: %s backend execution %s < approval timeout %s",
-			backend, execTimeout, cfg.Approvals.TimeoutDuration())
 	}
 }
 
@@ -851,10 +773,6 @@ func (dc *doctorContext) checkSessions(diag *protocol.DiagnosticsMsg) {
 	parts := []string{}
 	if f.Active > 0 {
 		parts = append(parts, fmt.Sprintf("%d active", f.Active))
-	}
-
-	if f.Approval > 0 {
-		parts = append(parts, fmt.Sprintf("%d approval", f.Approval))
 	}
 
 	if f.Ready > 0 {

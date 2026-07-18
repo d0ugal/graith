@@ -26,10 +26,11 @@ you see an actual agent respond.
 types, one starred, each with a status summary — so the recording looks like a
 real working fleet. It copies only the `[agents.*]` and `[sandbox]` tables from
 your default config (not triggers, repos, or MCP servers); set
-`GRAITH_DEMO_SRC_CONFIG` to copy from a different file. It prints the sandbox
-posture it detected and **warns loudly** if the copied config leaves the agents
-unsandboxed; if no agent/sandbox config is found at all it falls back to
-unsandboxed `claude`/`codex`. Safety guardrails: the fixed `demo` profile is
+`GRAITH_DEMO_SRC_CONFIG` to copy from a different file. It reports the sandbox
+posture it detected and rejects a copied config that leaves agents unsandboxed.
+If no sandbox config is found, it
+uses the mandatory platform sandbox (`safehouse` on macOS, `nono` on Linux) and
+the built-in non-interactive agent definitions. Safety guardrails: the fixed `demo` profile is
 protected by an ownership marker, so the harness refuses to purge or delete a
 `~/.config/graith-demo` it didn't create.
 

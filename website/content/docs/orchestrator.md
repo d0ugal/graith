@@ -11,13 +11,16 @@ The orchestrator is a special system session that coordinates other agent sessio
 
 ## Prerequisites
 
-The orchestrator requires sandbox to be enabled. If sandbox is not available (safehouse not installed or `sandbox.enabled = false`), orchestrator creation fails with an error.
+Like every agent session, the orchestrator requires sandbox enforcement. If the
+selected backend is unavailable or the merged configuration disables it,
+orchestrator creation fails with an error.
 
 ## Enabling
 
 ```toml
 [sandbox]
 enabled = true
+backend = "nono"       # or "safehouse" on macOS
 
 [orchestrator]
 enabled      = true

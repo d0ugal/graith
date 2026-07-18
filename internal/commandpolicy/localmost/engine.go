@@ -17,21 +17,16 @@ type compiledRule struct {
 
 // Engine evaluates commands against compiled allow/deny rules.
 type Engine struct {
-	allow             []compiledRule
-	deny              []compiledRule
-	allowSafeXargs    bool
-	askNoninteractive bool
+	allow          []compiledRule
+	deny           []compiledRule
+	allowSafeXargs bool
 }
 
 func newEngine(fc fileConfig) (*Engine, error) {
-	e := &Engine{allowSafeXargs: true, askNoninteractive: true}
+	e := &Engine{allowSafeXargs: true}
 
 	if fc.AllowSafeXargs != nil {
 		e.allowSafeXargs = *fc.AllowSafeXargs
-	}
-
-	if fc.AskNoninteractive != nil {
-		e.askNoninteractive = *fc.AskNoninteractive
 	}
 
 	var err error
@@ -45,11 +40,6 @@ func newEngine(fc fileConfig) (*Engine, error) {
 
 	return e, nil
 }
-
-// AskNoninteractive reports the config's askNoninteractive setting (default
-// true). When false, callers should turn an "ask" into a "deny" in
-// non-interactive contexts.
-func (e *Engine) AskNoninteractive() bool { return e.askNoninteractive }
 
 func (e *Engine) compileRules(rs []Rule) ([]compiledRule, error) {
 	out := make([]compiledRule, 0, len(rs))
@@ -151,7 +141,7 @@ func (e *Engine) Evaluate(command string) (Policy, error) {
 //     the budget while exploring alternatives. Checking exhaustion *before*
 //     honouring an allow match keeps the "exhaustion → human review" guarantee
 //     uniform: only commands that overrun the (huge) step budget are affected,
-//     and routing those to a human is the conservative choice on the approval
+//     and routing those to a human is the conservative choice on the command-policy
 //     path. Deny still returns on a positive match — a hard block is strictly
 //     safer than deferring to a human.
 func (e *Engine) subPolicy(sub subcommand, budget *evalBudget) Policy {

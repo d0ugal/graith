@@ -112,7 +112,7 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 	}
 
 	// Handshake done — clear the deadline so the long-lived connection can block
-	// on reads (attach, subscribe, approval waits) without timing out.
+	// on long-lived reads (attach and subscriptions) without timing out.
 	_ = c.conn.SetDeadline(time.Time{})
 
 	if autoUpgrade && version.Version != "dev" {
@@ -375,19 +375,15 @@ func ConnectFast(paths config.Paths) (*Client, error) {
 	return c, nil
 }
 
-// ConnectForApproval is like ConnectFast but with a long deadline suitable
-// for blocking on approval responses. The dial uses the configured local dial
-// timeout ([connection].dial_timeout), while the socket deadline is set to
-// approvalTimeout plus a one-minute grace period (minimum one minute total)
-// so the connection outlives the daemon's approval timer. The approval deadline
-// stays independent of the dial timeout.
-func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Client, error) {
+// ConnectForPolicy establishes a hook connection with a bounded end-to-end
+// deadline. The deadline remains installed for the synchronous policy reply.
+func ConnectForPolicy(paths config.Paths, timeout time.Duration) (*Client, error) {
 	conn, err := dialLocalDaemon("unix", paths.SocketPath, daemonDialTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("daemon not reachable: %w", err)
 	}
 
-	_ = conn.SetDeadline(time.Now().Add(approvalDeadline(approvalTimeout)))
+	_ = conn.SetDeadline(time.Now().Add(timeout))
 
 	c := &Client{
 		conn:   conn,
@@ -434,18 +430,7 @@ func ConnectForApproval(paths config.Paths, approvalTimeout time.Duration) (*Cli
 		return nil, fmt.Errorf("protocol version mismatch: server=%s, client=%s; try: gr daemon restart", hsOk.Version, protocol.Version)
 	}
 
-	_ = conn.SetDeadline(time.Time{})
-
 	return c, nil
-}
-
-func approvalDeadline(approvalTimeout time.Duration) time.Duration {
-	d := approvalTimeout + time.Minute
-	if d < time.Minute {
-		d = time.Minute
-	}
-
-	return d
 }
 
 func readHumanToken(paths config.Paths) string {

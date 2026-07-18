@@ -16,8 +16,9 @@ func TestResolveResumeArgs(t *testing.T) {
 	codex := config.Agent{Args: nil, ResumeArgs: []string{"resume", "{agent_session_id}"}}
 	opencode := config.Agent{Args: nil, ResumeArgs: []string{"--session", "{agent_session_id}"}}
 	claude := config.Agent{
-		Args:       []string{"--session-id", "{agent_session_id}"},
-		ResumeArgs: []string{"--resume", "{agent_session_id}"},
+		NonInteractiveArgs: []string{},
+		Args:               []string{"--session-id", "{agent_session_id}"},
+		ResumeArgs:         []string{"--resume", "{agent_session_id}"},
 	}
 	cursor := config.Agent{Args: nil, ResumeArgs: []string{"resume"}}
 
@@ -323,8 +324,9 @@ func TestCaptureNativeSessionIDSkipsIDAlreadyClaimed(t *testing.T) {
 // client-supplied id (--session-id), a resume replays it (--resume).
 func claudeAgentConfig() config.Agent {
 	return config.Agent{
-		Args:       []string{"--session-id", "{agent_session_id}"},
-		ResumeArgs: []string{"--resume", "{agent_session_id}"},
+		NonInteractiveArgs: []string{},
+		Args:               []string{"--session-id", "{agent_session_id}"},
+		ResumeArgs:         []string{"--resume", "{agent_session_id}"},
 	}
 }
 
@@ -467,9 +469,10 @@ func newForcedIDResumeSM(t *testing.T, agentSessionID string, freshStart bool) *
 	cfg := config.Default()
 	cfg.Sandbox = config.SandboxConfig{Enabled: false}
 	cfg.Agents["claude"] = config.Agent{
-		Command:    "sleep",
-		Args:       []string{"60"},
-		ResumeArgs: []string{"60"},
+		NonInteractiveArgs: []string{},
+		Command:            "sleep",
+		Args:               []string{"60"},
+		ResumeArgs:         []string{"60"},
 	}
 
 	sm := newSMWithConfig(t, cfg)

@@ -457,7 +457,7 @@ open class FleetModel: ObservableObject {
     /// Create a session on `hostID` and report the created session (found by
     /// name after the connection refreshes) so the caller can select it.
     ///
-    /// The advanced options (`base`, `yolo`, `inPlace`, `agentHooks`) mirror the
+    /// The advanced options (`base`, `inPlace`, `agentHooks`) mirror the
     /// matching `gr new` flags and are shared by both GUIs' New Session forms.
     public func createSession(
         name: String,
@@ -466,7 +466,6 @@ open class FleetModel: ObservableObject {
         model: String,
         prompt: String,
         base: String = "",
-        yolo: Bool = false,
         inPlace: Bool = false,
         agentHooks: Bool = true,
         hostID: String = "local",
@@ -491,11 +490,8 @@ open class FleetModel: ObservableObject {
             base: trimmedBase.isEmpty ? nil : trimmedBase,
             prompt: prompt.isEmpty ? nil : prompt,
             model: model.isEmpty ? nil : model,
-            // Yolo forces the approval hook on daemon-side (agentHooks || yolo),
-            // so send the effective value the session will actually run with.
-            agentHooks: agentHooks || yolo,
-            inPlace: inPlace ? true : nil,
-            yolo: yolo ? true : nil
+            agentHooks: agentHooks,
+            inPlace: inPlace ? true : nil
         )
         Task {
             let ok = await conn.create(request)

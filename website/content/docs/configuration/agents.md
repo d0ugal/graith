@@ -33,6 +33,7 @@ command        = "claude"
 args           = ["--session-id", "{agent_session_id}"]
 resume_args    = ["--resume", "{agent_session_id}"]
 fork_args      = ["--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"]
+non_interactive_args = ["--dangerously-skip-permissions"]
 env            = {}             # extra environment variables
 idle_timeout   = ""             # auto-stop after idle (default: 1h when resume_args is set, 0 otherwise)
 inject_prompt  = true           # inject agent_prompt into the session
@@ -48,7 +49,8 @@ headless_args  = []             # argv prefix prepended in headless mode (see be
 Every agent-specific flag graith appends is defined here, so a custom agent can adopt (or drop) each pattern from config alone rather than waiting on a graith release:
 
 - **`add_dir_args`** — the flag template graith uses to grant the agent an extra directory (each [included repo](#includes)'s co-located worktree). It is expanded once per directory with `{dir}` bound to that path. Leave it unset for an agent whose CLI has no such flag; those agents rely on the `GRAITH_INCLUDE_*_PATH` environment variables instead.
-- **`headless_args`** — the control-channel argv prefix graith prepends when launching the agent in [headless mode]({{< relref "sessions.md#headless-sessions" >}}); the agent's own args follow it. Claude's default is `["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"]`.
+- **`non_interactive_args`** — required declaration prepended on every create, resume, and fork to disable the agent's native permission prompts. A missing value refuses launch; use an explicit empty array only for an agent that is inherently non-interactive. These flags do not grant OS access: the outer graith sandbox remains authoritative.
+- **`headless_args`** — the control-channel argv prefix graith prepends when launching the agent in [headless mode]({{< relref "sessions.md#headless-sessions" >}}); the agent's own args follow it. Claude's default is `["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose"]`.
 - **`option_args`** — conditional flag groups appended on every launch. Each group is emitted only when its `when` template variable is set, so an unset option leaves the agent's own default untouched (see [Conditional option flags](#conditional-option-flags)).
 
 `inject_prompt` is the on/off switch for prompt injection; `prompt_injection` selects the *mechanism*. When `prompt_injection` is empty (the default), graith picks the mechanism from the agent name — `claude` → `append_system_prompt`, `cursor` → `cursor_rules`, `codex` → `developer_instructions`, and any other name → `none`. Set it explicitly to override that mapping or, most usefully, to give a [custom agent](#custom-agents) a mechanism it would otherwise not get. The values are:
@@ -64,7 +66,7 @@ An unknown value is rejected at config load. Both `inject_prompt` and `prompt_in
 
 ### Template variables
 
-These are substituted in `args`, `resume_args`, `fork_args`, and `headless_args`:
+These are substituted in `args`, `resume_args`, `fork_args`, `non_interactive_args`, and `headless_args`:
 
 | Variable | Expands to |
 |----------|-----------|
@@ -78,11 +80,11 @@ These are substituted in `args`, `resume_args`, `fork_args`, and `headless_args`
 
 Only `{username}` is available in `branch_prefix`.
 
-Two more variables are scoped to specific fields. `{dir}` is available only in `add_dir_args`, bound to each granted directory in turn. The Codex option values — `{profile}`, `{reasoning_effort}`, `{service_tier}`, `{approval_policy}`, and `{web_search}` (a boolean rendering as `true`/empty) — are available in `option_args`, alongside `{model}`.
+Two more variables are scoped to specific fields. `{dir}` is available only in `add_dir_args`, bound to each granted directory in turn. The Codex option values — `{profile}`, `{reasoning_effort}`, `{service_tier}`, and `{web_search}` (a boolean rendering as `true`/empty) — are available in `option_args`, alongside `{model}`.
 
 ### Conditional option flags
 
-`option_args` moves the per-session flags that used to be hard-coded (Codex's `--model`, `--profile`, reasoning-effort, service-tier, `--search`, and `--ask-for-approval`) into config, so a custom agent can define its own. Each group lists the argv to append and a `when` template variable that gates it — the group is emitted only when that variable resolves to a non-empty value (`true` for a boolean such as `web_search`). An empty `when` emits the group unconditionally.
+`option_args` moves per-session choices (Codex's `--model`, `--profile`, reasoning-effort, service-tier, and `--search`) into config, so a custom agent can define its own. Each group lists the argv to append and a `when` template variable that gates it — the group is emitted only when that variable resolves to a non-empty value (`true` for a boolean such as `web_search`). An empty `when` emits the group unconditionally. Non-interactive launch flags belong in `non_interactive_args`, not in conditional options.
 
 ```toml
 [[agents.codex.option_args]]
@@ -104,15 +106,13 @@ This is why an unset option can't just be a `{model}` template inside `args`: an
 
 ```toml
 [agents.claude.sandbox]
-enabled    = true        # enable sandbox for this agent (merged with global)
-disabled   = false       # force-disable even if global sandbox is enabled
 read_dirs  = ["~/.claude"]
 write_dirs = ["~/.claude"]
 write_files = ["~/.claude.json", "~/.claude.json.lock", "~/.claude.lock"]  # login file (read+write)
 features   = ["clipboard"]
 ```
 
-Features, directories, and files (`read_files`/`write_files`, for single files that can't be a directory grant without over-sharing — e.g. Claude's `~/.claude.json` login file) are merged with the global sandbox config. Setting `disabled = true` overrides `enabled = true` on the global config. See the [Sandbox]({{< relref "/docs/sandbox/how-it-works.md#file-grants" >}}) page for file grants.
+Features, directories, and files (`read_files`/`write_files`, for single files that can't be a directory grant without over-sharing — e.g. Claude's `~/.claude.json` login file) are merged with the global sandbox config. Per-agent settings may choose a backend or add grants, but a merged configuration that disables enforcement refuses launch. See the [Sandbox]({{< relref "/docs/sandbox/how-it-works.md#file-grants" >}}) page for file grants.
 
 ### Per-agent MCP overrides
 
@@ -208,11 +208,12 @@ command, args, and resume/fork settings.
 ```toml
 [agents.claude]
 command      = "claude"
+non_interactive_args = ["--dangerously-skip-permissions"]
 args         = ["--session-id", "{agent_session_id}"]
 resume_args  = ["--resume", "{agent_session_id}"]
 fork_args    = ["--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"]
 add_dir_args = ["--add-dir", "{dir}"]
-headless_args = ["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"]
+headless_args = ["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose"]
 ```
 
 ### Codex
@@ -220,18 +221,19 @@ headless_args = ["-p", "--output-format", "stream-json", "--input-format", "stre
 ```toml
 [agents.codex]
 command      = "codex"
+non_interactive_args = ["--ask-for-approval", "never", "--sandbox", "danger-full-access"]
 args         = []
 resume_args  = ["resume", "{agent_session_id}"]
 fork_args    = ["fork", "{fork_source_agent_session_id}"]
 add_dir_args = ["--add-dir", "{dir}"]
 
 # The model and typed Codex options (--model, --profile, reasoning effort,
-# service tier, --search, --ask-for-approval) are emitted via option_args groups
+# service tier, --search) are emitted via option_args groups
 # gated on the matching template variable. See "Conditional option flags" above.
 [[agents.codex.option_args]]
 when = "model"
 args = ["--model", "{model}"]
-# … profile, reasoning_effort, service_tier, web_search, approval_policy …
+# … profile, reasoning_effort, service_tier, web_search …
 ```
 
 ### OpenCode
@@ -239,6 +241,7 @@ args = ["--model", "{model}"]
 ```toml
 [agents.opencode]
 command     = "opencode"
+non_interactive_args = ["--dangerously-skip-permissions"]
 args        = []
 resume_args = ["--session", "{agent_session_id}"]
 ```
@@ -248,6 +251,7 @@ resume_args = ["--session", "{agent_session_id}"]
 ```toml
 [agents.cursor]
 command        = "agent"
+non_interactive_args = ["--force"]
 args           = []
 resume_args    = ["resume"]
 validate_model = "agent --list-models"
@@ -267,6 +271,7 @@ sessions.
 ```toml
 [agents.agy]
 command     = "agy"
+non_interactive_args = ["--dangerously-skip-permissions"]
 args        = []
 resume_args = ["--conversation", "{agent_session_id}"]
 ```

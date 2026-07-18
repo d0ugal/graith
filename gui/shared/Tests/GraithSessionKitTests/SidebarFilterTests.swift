@@ -12,8 +12,8 @@ import GraithRemoteKit
 struct SidebarFilterPureTests {
     // MARK: - Needs-attention (mirrors overlay.filterNeedsAttention)
 
-    @Test func needsAttentionMatchesApproval() {
-        let s = makeSession(id: "fash0001", name: "fash", status: "running", agentStatus: "approval")
+    @Test func needsAttentionMatchesAgentError() {
+        let s = makeSession(id: "fash0001", name: "fash", status: "running", agentStatus: "error")
         #expect(SidebarFilter.needsAttention(s))
     }
 

@@ -855,14 +855,7 @@ struct SessionRow: View {
                         .background(agentColor.opacity(0.12))
                         .clipShape(RoundedRectangle(cornerRadius: 3))
 
-                    // Mode indicators (issue #901): YOLO, sandboxed, and a
-                    // config-stale warning.
-                    if session.isYolo {
-                        Image(systemName: "bolt.fill")
-                            .foregroundStyle(Theme.peach)
-                            .font(.system(size: 8))
-                            .help("YOLO mode \u{2014} approvals bypassed")
-                    }
+                    // Mode indicators (issue #901): sandboxed and config-stale.
                     if session.isSandboxed {
                         Image(systemName: "shield.lefthalf.filled")
                             .foregroundStyle(Theme.teal)
@@ -1003,7 +996,7 @@ struct SessionRow: View {
     }
 
     var statusColor: Color {
-        if session.needsApproval { return Theme.yellow }
+        if session.agentStatus == "error" { return Theme.red }
         switch session.status {
         case "running": return Theme.green
         case "errored": return Theme.red
@@ -1031,9 +1024,6 @@ struct SessionRow: View {
         }
         // Fall back to agent status for running sessions
         if session.isRunning {
-            if session.needsApproval {
-                return "Needs approval"
-            }
             if let agentSt = session.agentStatus, !agentSt.isEmpty {
                 if agentSt == "active", let tool = session.toolName, !tool.isEmpty {
                     return tool
@@ -1046,7 +1036,7 @@ struct SessionRow: View {
 
     /// Color for the status line text — faded summaries get dimmer treatment.
     var statusLineColor: Color {
-        if session.needsApproval { return Theme.yellow }
+        if session.agentStatus == "error" { return Theme.red }
         if session.summaryFaded ?? false { return Theme.overlay0 }
         if session.summaryText != nil { return Theme.subtext0 }
         return Theme.overlay0

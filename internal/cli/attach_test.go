@@ -165,7 +165,6 @@ func TestPassthroughKeysFromConfig(t *testing.T) {
 			ForkSession:         "f",
 			OrchestratorSession: "o",
 			Messages:            "m",
-			Approvals:           "a",
 			RestartSession:      "r",
 		},
 	}
@@ -184,7 +183,6 @@ func TestPassthroughKeysFromConfig(t *testing.T) {
 		ForkSession:         'f',
 		OrchestratorSession: 'o',
 		Messages:            'm',
-		Approvals:           'a',
 		RestartSession:      'r',
 	}
 	if keys != want {
@@ -204,7 +202,6 @@ func TestOverlayKeysFromConfigOverrideAndDefault(t *testing.T) {
 		Keybindings: config.Keybindings{
 			Overlay: config.OverlayKeybindings{
 				ListWatchAttach: "z",
-				ApprovalAllow:   "Y",
 				MessagePin:      "P",
 			},
 		},
@@ -217,11 +214,6 @@ func TestOverlayKeysFromConfigOverrideAndDefault(t *testing.T) {
 	// An unset list_watch_stop keeps the built-in default.
 	if want := client.DefaultListWatchKeys().Stop; len(watch.Stop) != len(want) || watch.Stop[0] != want[0] {
 		t.Errorf("list watch stop = %v, want default %v", watch.Stop, want)
-	}
-
-	appr := approvalKeysFromConfig()
-	if len(appr.Allow) != 1 || appr.Allow[0] != "Y" {
-		t.Errorf("approval allow = %v, want [Y]", appr.Allow)
 	}
 
 	msg := messageKeysFromConfig()

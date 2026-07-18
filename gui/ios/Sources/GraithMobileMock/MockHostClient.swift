@@ -301,9 +301,8 @@ public actor MockHostClient: GraithHostClient {
         FleetSummary(
             total: sessions.count,
             active: sessions.filter { $0.agentStatus == "active" }.count,
-            approval: sessions.filter { $0.agentStatus == "approval" }.count,
             ready: sessions.filter { $0.agentStatus == "ready" }.count,
-            errored: sessions.filter { $0.isErrored }.count,
+            errored: sessions.filter { $0.isErrored || $0.agentStatus == "error" }.count,
             stopped: sessions.filter { $0.isStopped }.count
         )
     }
@@ -321,7 +320,7 @@ extension MockHostClient {
                     ci: CIInfo(state: "passing")),
         SessionInfo(id: "canny002", name: "canny", repoPath: "/Users/x/Code/croft", repoName: "croft",
                     branch: "user/graith/canny-canny002", agent: "codex", status: "running",
-                    agentStatus: "approval", summaryText: "awaiting tool approval"),
+                    agentStatus: "error", summaryText: "unexpected native permission prompt"),
         SessionInfo(id: "bide0003", name: "bide", repoPath: "/Users/x/Code/glen", repoName: "glen",
                     branch: "user/graith/bide-bide0003", agent: "claude", status: "stopped",
                     agentStatus: "ready", exitCode: 0, summaryText: "task done"),
@@ -399,7 +398,7 @@ extension SessionInfo {
             exitCode: exitCode, exitSignal: exitSignal, createdAt: createdAt,
             lastAttachedAt: lastAttachedAt, statusChangedAt: statusChangedAt, dirty: dirty,
             unpushedCount: unpushedCount, sandboxed: sandboxed, mirror: mirror,
-            inPlace: inPlace, yolo: yolo, model: model, toolName: toolName, includes: includes,
+            inPlace: inPlace, model: model, toolName: toolName, includes: includes,
             configStale: configStale, starred: starred ?? self.starred, systemKind: systemKind,
             summaryText: summaryText ?? self.summaryText,
             summaryFaded: summaryFaded, lastOutputAt: lastOutputAt, migratedFrom: migratedFrom,

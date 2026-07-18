@@ -215,7 +215,6 @@ func runRemoteAttach(rh *client.RemoteHost, signer ed25519.PrivateKey, sessionAr
 		_ = protocol.DecodePayload(resp, &info)
 
 		opts := client.PassthroughOpts{Keys: keys, SessionID: sessionID, Info: &info}
-		opts.AutoPopApproval = cfg.Approvals.AutoPop
 		opts.DragArrowKeys = cfg.Input.DragArrowKeys
 		opts.DragArrowThreshold = cfg.Input.DragArrowThreshold
 

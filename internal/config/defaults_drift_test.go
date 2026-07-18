@@ -226,7 +226,6 @@ func TestEmbeddedDefaultsCarryAgentAdapters(t *testing.T) {
 			"--output-format", "stream-json",
 			"--input-format", "stream-json",
 			"--verbose",
-			"--permission-prompt-tool", "stdio",
 		}
 		if got := d.Agents["claude"].HeadlessArgs; !reflect.DeepEqual(got, want) {
 			t.Errorf("claude HeadlessArgs = %v, want %v", got, want)
@@ -240,7 +239,6 @@ func TestEmbeddedDefaultsCarryAgentAdapters(t *testing.T) {
 			{When: "reasoning_effort", Args: []string{"-c", "model_reasoning_effort={reasoning_effort}"}},
 			{When: "service_tier", Args: []string{"-c", "service_tier={service_tier}"}},
 			{When: "web_search", Args: []string{"--search"}},
-			{When: "approval_policy", Args: []string{"--ask-for-approval", "{approval_policy}"}},
 		}
 		if got := d.Agents["codex"].OptionArgs; !reflect.DeepEqual(got, want) {
 			t.Errorf("codex OptionArgs = %v, want %v", got, want)

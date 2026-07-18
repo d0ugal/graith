@@ -3,7 +3,7 @@ package client
 import "strings"
 
 // This file carries the configurable keybindings for the full-screen terminal
-// overlays (list watch, approval prompt, message viewer, scroll pager). Each
+// overlays (list watch, message viewer, scroll pager). Each
 // action holds a list of bubbletea key names; pressing any listed key triggers
 // it. The cli layer builds these from the [keybindings.overlay] config table,
 // falling back to the Default*Keys() values below when a key is unset. See #1233.
@@ -69,28 +69,6 @@ func DefaultListWatchKeys() ListWatchKeys {
 		Resume:  []string{"r"},
 		Confirm: []string{"enter", "y"},
 		Cancel:  []string{"q", "esc", "ctrl+c"},
-	}
-}
-
-// ApprovalKeys are the keys the pending-approvals overlay listens for.
-type ApprovalKeys struct {
-	Up       []string
-	Down     []string
-	Allow    []string
-	Deny     []string
-	AllowAll []string
-	Cancel   []string
-}
-
-// DefaultApprovalKeys returns the built-in approval-overlay bindings.
-func DefaultApprovalKeys() ApprovalKeys {
-	return ApprovalKeys{
-		Up:       []string{"k", "up"},
-		Down:     []string{"j", "down"},
-		Allow:    []string{"y", "enter"},
-		Deny:     []string{"n", "x"},
-		AllowAll: []string{"a"},
-		Cancel:   []string{"q", "esc"},
 	}
 }
 

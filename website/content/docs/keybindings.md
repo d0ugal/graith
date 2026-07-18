@@ -34,7 +34,6 @@ Every prefix-action key is configurable via the matching `keybindings.*` field
 | `,` | Rename the current session | `rename_session` |
 | `[` | Open the scrollback pager | `scroll_mode` |
 | `m` | Open the message viewer | `messages` |
-| `a` | Open the approvals overlay | `approvals` |
 | `r` | Restart/resume the current session | `restart_session` |
 | `ctrl+b` | Send a literal prefix byte to the agent | -- |
 
@@ -78,7 +77,7 @@ Cycle with `h`/`l` or left/right arrow keys:
 | View | Description |
 |------|-------------|
 | All | Every session, grouped by repo. Starred first, then running, then by name |
-| Needs Attention | Sessions needing user action: waiting for approval, errored, idle (running but ready), or stopped with dirty/unpushed changes. Sorted oldest-first by time in current state |
+| Needs Attention | Errored sessions, agent runtime errors, idle sessions (running but ready), or stopped sessions with dirty/unpushed changes. Sorted oldest-first by time in current state |
 | Active | Running sessions only, sorted newest-first by creation time |
 | Starred | Starred sessions only |
 
@@ -109,7 +108,7 @@ Each session row shows:
 | Column | Content |
 |--------|---------|
 | Name | Session name (with star indicator if starred) |
-| Status | Running, stopped, errored, or agent status (e.g. approval) |
+| Status | Running, stopped, errored, or agent status (`active`, `ready`, or `error`) |
 | Summary | Status text, tool name from hooks, or auto-derived activity |
 | Git | Branch name (or "(in-place)"), dirty indicator, unpushed commit count |
 | Output | Age of most recent output |
@@ -129,16 +128,14 @@ filtered session list.
 | `r` | Resume a stopped session | `overlay.list_watch_resume` |
 | `q` / Escape / `ctrl+c` | Quit | `overlay.cancel` |
 
-## Message viewer, approvals, and scroll pager
+## Message viewer and scroll pager
 
-The message viewer (`ctrl+b m`), approvals overlay (`ctrl+b a`), and scrollback
-pager (`ctrl+b [`) share a configurable navigation vocabulary and add their own
-action keys.
+The message viewer (`ctrl+b m`) and scrollback pager (`ctrl+b [`) share a
+configurable navigation vocabulary and add their own action keys.
 
 | Overlay | Keys | Config keys |
 |---------|------|-------------|
 | Message viewer | `j`/`k` move · `pgdn`/`pgup` scroll · `g`/`G` first/last · `h`/`l` conversation · `enter` pin · `O`/`C` expand/collapse all · `q` close | `overlay.up`/`down`, `overlay.page_down`/`page_up`, `overlay.top`/`bottom`, `overlay.message_prev_conversation`/`message_next_conversation`, `overlay.message_pin`, `overlay.message_expand_all`/`message_collapse_all`, `overlay.cancel` |
-| Approvals | `y` allow · `n`/`x` deny · `a` allow-all · `q` cancel | `overlay.approval_allow`, `overlay.approval_deny`, `overlay.approval_allow_all`, `overlay.cancel` |
 | Scroll pager | `g`/`G` top/bottom · `q` quit (up/down/page keys are handled by the pager) | `overlay.top`/`bottom`, `overlay.cancel` |
 
 ## Configuring overlay keys

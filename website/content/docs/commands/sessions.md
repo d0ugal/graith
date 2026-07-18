@@ -28,7 +28,6 @@ Create a new agent session.
 | `--codex-reasoning-effort <level>` | Codex only: reasoning effort — `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `--codex-service-tier <tier>` | Codex only: service tier — `auto`, `default`, `flex`, `priority` |
 | `--codex-web-search` | Codex only: enable live web search (`codex --search`) |
-| `--codex-approval-policy <policy>` | Codex only: approval policy — `untrusted`, `on-request`, `never` |
 | `--headless` | Run the agent headless (stream-json) instead of an interactive PTY, for fire-and-forget sessions (experimental; Claude only) |
 | `--no-fetch` | Skip `git fetch origin` and create the worktree from local repo state |
 
@@ -39,9 +38,8 @@ The `--no-fetch` flag skips the `git fetch origin` step that normally runs befor
 For `--agent codex`, graith passes typed per-session options through to the Codex
 CLI so you don't have to override the whole agent `args` array in config.
 `--model` becomes `codex --model <name>`; reasoning effort and service tier ride
-`-c model_reasoning_effort=…` / `-c service_tier=…` config overrides; profile,
-web search, and approval policy map to `--profile`, `--search`, and
-`--ask-for-approval`. Each is passed only when set, so an unset option leaves
+`-c model_reasoning_effort=…` / `-c service_tier=…` config overrides; profile
+and web search map to `--profile` and `--search`. Each is passed only when set, so an unset option leaves
 Codex's own default untouched. They are persisted, so a resume or fork replays
 the same flags. The `--codex-*` flags are Codex-specific — using one with another
 agent is an error. Their *values* (e.g. the reasoning-effort or service-tier
@@ -54,11 +52,10 @@ error. Don't also template `{model}` into the codex `args` in config — use
 gr new review --agent codex \
   --model gpt-5.1-codex \
   --codex-reasoning-effort high \
-  --codex-web-search \
-  --codex-approval-policy never
+  --codex-web-search
 ```
 
-The `--headless` flag runs the agent in Claude Code's stream-json mode rather than an interactive terminal — suited to fire-and-forget work such as review judges and one-shot helpers. graith parses the typed event stream, so `gr logs -f` shows rendered output and the run's cost/token usage is captured from the result envelope. It is **experimental** and inert unless `[headless] experimental = true` is set in config; it is Claude-only in v1, requires a prompt (`-p`), runs one-shot (one prompt, run to completion, exit), and is **incompatible with the sandbox** in v1 (a `--headless` request with the sandbox enabled is an error). Asking for `--headless` on an agent that can't do it is an error, not a silent downgrade to PTY. Because a headless session starts without a PTY, `--headless` implies `--background`; attaching later converts it to interactive. See [Configuration → Headless sessions]({{< relref "/docs/configuration/sessions.md#headless-sessions" >}}) and [Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}}).
+The `--headless` flag runs the agent in Claude Code's stream-json mode rather than an interactive terminal — suited to fire-and-forget work such as review judges and one-shot helpers. graith parses the typed event stream, so `gr logs -f` shows rendered output and the run's cost/token usage is captured from the result envelope. It is **experimental** and inert unless `[headless] experimental = true` is set in config; it is Claude-only in v1, requires a prompt (`-p`), and runs one-shot (one prompt, run to completion, exit). Headless sessions use the same mandatory OS sandbox as PTY sessions. Asking for `--headless` on an agent that can't do it is an error, not a silent downgrade to PTY. Because a headless session starts without a PTY, `--headless` implies `--background`; attaching later converts it to interactive. See [Configuration → Headless sessions]({{< relref "/docs/configuration/sessions.md#headless-sessions" >}}) and [Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}}).
 
 When a session is created:
 

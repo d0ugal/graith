@@ -16,11 +16,7 @@ func newTestSessionManagerWithDataDir(t *testing.T) *SessionManager {
 	t.Helper()
 	dir := t.TempDir()
 
-	// Approval gating is opt-in (disabled by default). These tests exercise
-	// the hook-generation and approval-queue mechanics, so enable it here.
 	cfg := config.Default()
-	enabled := true
-	cfg.Approvals.Enabled = &enabled
 
 	return NewSessionManager(cfg, config.Paths{
 		StateFile: filepath.Join(dir, "state.json"),
@@ -32,7 +28,7 @@ func TestGenerateClaudeSettings(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-braw-02"
 
-	settingsPath, err := sm.generateClaudeSettings(sessionID, false)
+	settingsPath, err := sm.generateClaudeSettings(sessionID, true, true)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
@@ -81,11 +77,11 @@ func TestGenerateClaudeSettings(t *testing.T) {
 			continue
 		}
 
-		// PreToolUse is scoped to exclude read-only tools (fail-closed); every
+		// PreToolUse is restricted to the shell command-policy scope; every
 		// other event stays match-all (empty matcher).
 		wantMatcher := ""
 		if event == "PreToolUse" {
-			wantMatcher = preToolUseMatcher()
+			wantMatcher = "^Bash$"
 		}
 
 		if matchers[0].Matcher != wantMatcher {
@@ -102,8 +98,8 @@ func TestGenerateClaudeSettings(t *testing.T) {
 		case "PreToolUse":
 			if len(matchers[0].Hooks) != 1 {
 				t.Errorf("event %q has %d hooks, want 1", event, len(matchers[0].Hooks))
-			} else if !strings.Contains(matchers[0].Hooks[0].Command, "approve-request") {
-				t.Errorf("event %q command = %q, does not contain approve-request", event, matchers[0].Hooks[0].Command)
+			} else if !strings.Contains(matchers[0].Hooks[0].Command, "command-policy-check") {
+				t.Errorf("event %q command = %q, does not contain command-policy-check", event, matchers[0].Hooks[0].Command)
 			}
 		case "SessionStart":
 			if len(matchers[0].Hooks) != 2 {
@@ -141,7 +137,7 @@ func TestInjectClaudeHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-braw-03"
 
-	extraArgs, extraEnv, err := sm.injectClaudeHooks(sessionID, false)
+	extraArgs, extraEnv, err := sm.injectClaudeHooks(sessionID, true, false)
 	if err != nil {
 		t.Fatalf("injectClaudeHooks() error = %v", err)
 	}
@@ -167,7 +163,7 @@ func TestCleanupHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-braw-04"
 
-	_, err := sm.generateClaudeSettings(sessionID, false)
+	_, err := sm.generateClaudeSettings(sessionID, true, false)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
@@ -195,7 +191,7 @@ func TestCleanupCursorHooks(t *testing.T) {
 	sessionID := "kirk-cursor"
 	worktree := t.TempDir()
 
-	_, _, err := sm.injectCursorHooks(sessionID, worktree, false)
+	_, _, err := sm.injectCursorHooks(sessionID, worktree, true, false)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
@@ -410,7 +406,7 @@ func TestInjectCodexHooks(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-codex-01"
 
-	extraArgs, extraEnv, err := sm.injectCodexHooks(sessionID, false)
+	extraArgs, extraEnv, err := sm.injectCodexHooks(sessionID, true, true)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -471,7 +467,7 @@ func TestInjectCodexHooks(t *testing.T) {
 func TestCodexHookOverrideContent(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
-	extraArgs, _, err := sm.injectCodexHooks("kirk-codex-02", false)
+	extraArgs, _, err := sm.injectCodexHooks("kirk-codex-02", true, true)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -491,9 +487,9 @@ func TestCodexHookOverrideContent(t *testing.T) {
 		return b.String()
 	}
 
-	// PermissionRequest bridges to the approval backend.
-	if got := joined("PermissionRequest"); !strings.Contains(got, "approve-request") {
-		t.Errorf("PermissionRequest command = %q, want approve-request", got)
+	// PermissionRequest performs the bounded synchronous command-policy check.
+	if got := joined("PermissionRequest"); !strings.Contains(got, "command-policy-check") {
+		t.Errorf("PermissionRequest command = %q, want command-policy-check", got)
 	}
 
 	// SessionStart reports status and then checks the inbox.
@@ -522,7 +518,7 @@ func TestCodexHookOverrideContent(t *testing.T) {
 func TestInjectCodexHooksNoHooksDirEnv(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
-	extraArgs, extraEnv, err := sm.injectCodexHooks("thrawn-codex-1183", false)
+	extraArgs, extraEnv, err := sm.injectCodexHooks("thrawn-codex-1183", true, false)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -704,7 +700,7 @@ func TestInjectHooksSupported(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	sm := newTestSessionManagerWithDataDir(t)
 
-	args, env, err := sm.injectHooks("claude", "kirk-claude", "", false)
+	args, env, err := sm.injectHooks("claude", "kirk-claude", "", true, false)
 	if err != nil {
 		t.Fatalf("injectHooks(claude) error = %v", err)
 	}
@@ -717,7 +713,7 @@ func TestInjectHooksSupported(t *testing.T) {
 		t.Errorf("injectHooks(claude) returned unexpected env: %v", env)
 	}
 
-	args, env, err = sm.injectHooks("codex", "kirk-codex", "", false)
+	args, env, err = sm.injectHooks("codex", "kirk-codex", "", true, false)
 	if err != nil {
 		t.Fatalf("injectHooks(codex) error = %v", err)
 	}
@@ -741,7 +737,7 @@ func TestInjectHooksSupported(t *testing.T) {
 
 	worktree := t.TempDir()
 
-	args, env, err = sm.injectHooks("cursor", "kirk-cursor-sup", worktree, false)
+	args, env, err = sm.injectHooks("cursor", "kirk-cursor-sup", worktree, true, false)
 	if err != nil {
 		t.Fatalf("injectHooks(cursor) error = %v", err)
 	}
@@ -764,7 +760,7 @@ func TestInjectHooksUnsupportedIsNoop(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
 	for _, agent := range []string{"agy", "opencode", "custom-agent"} {
-		args, env, err := sm.injectHooks(agent, "haar-unsupported", "", false)
+		args, env, err := sm.injectHooks(agent, "haar-unsupported", "", true, false)
 		if err != nil {
 			t.Errorf("injectHooks(%q) unexpected error: %v", agent, err)
 		}
@@ -833,7 +829,7 @@ func TestCodexHookCommandsEscapeSingleQuotes(t *testing.T) {
 
 	sm := newTestSessionManagerWithDataDir(t)
 
-	extraArgs, _, err := sm.injectCodexHooks("kirk-codex-quote", false)
+	extraArgs, _, err := sm.injectCodexHooks("kirk-codex-quote", true, false)
 	if err != nil {
 		t.Fatalf("injectCodexHooks() error = %v", err)
 	}
@@ -923,7 +919,7 @@ func TestInjectClaudeHooksExcludesMCP(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-mcp-inject"
 
-	args, env, err := sm.injectClaudeHooks(sessionID, false)
+	args, env, err := sm.injectClaudeHooks(sessionID, true, false)
 	if err != nil {
 		t.Fatalf("injectClaudeHooks() error = %v", err)
 	}
@@ -1051,7 +1047,7 @@ func TestGenerateClaudeSettingsNoMCPServers(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-mcp-02"
 
-	settingsPath, err := sm.generateClaudeSettings(sessionID, false)
+	settingsPath, err := sm.generateClaudeSettings(sessionID, true, false)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
@@ -1208,7 +1204,7 @@ func TestInjectCursorHooks(t *testing.T) {
 	sessionID := "kirk-cursor-01"
 	worktree := t.TempDir()
 
-	extraArgs, extraEnv, err := sm.injectCursorHooks(sessionID, worktree, false)
+	extraArgs, extraEnv, err := sm.injectCursorHooks(sessionID, worktree, true, true)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
@@ -1266,7 +1262,7 @@ func TestInjectCursorHooksContent(t *testing.T) {
 	sessionID := "kirk-cursor-02"
 	worktree := t.TempDir()
 
-	_, _, err := sm.injectCursorHooks(sessionID, worktree, false)
+	_, _, err := sm.injectCursorHooks(sessionID, worktree, true, true)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
@@ -1292,8 +1288,8 @@ func TestInjectCursorHooksContent(t *testing.T) {
 		t.Error("cursor hooks missing report-status command")
 	}
 
-	if !strings.Contains(content, "approve-request") {
-		t.Error("cursor hooks missing approve-request command")
+	if !strings.Contains(content, "command-policy-check") {
+		t.Error("cursor hooks missing command-policy-check command")
 	}
 
 	if !strings.Contains(content, "check-inbox") {
@@ -1364,7 +1360,7 @@ func TestPreTrustCursorWorkspaceDisabled(t *testing.T) {
 
 	worktree := t.TempDir()
 
-	_, _, err := sm.injectCursorHooks("haar-no-trust", worktree, false)
+	_, _, err := sm.injectCursorHooks("haar-no-trust", worktree, true, false)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
@@ -1394,7 +1390,7 @@ func TestPreTrustCursorWorkspaceIdempotent(t *testing.T) {
 func TestInjectCursorHooksEmptyWorktree(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
-	args, env, err := sm.injectCursorHooks("haar-no-worktree", "", false)
+	args, env, err := sm.injectCursorHooks("haar-no-worktree", "", true, false)
 	if err != nil {
 		t.Fatalf("injectCursorHooks() error = %v", err)
 	}
@@ -1431,7 +1427,7 @@ func TestClaudeSettingsEscapeSingleQuotes(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	sessionID := "kirk-claude-quote"
 
-	settingsPath, err := sm.generateClaudeSettings(sessionID, false)
+	settingsPath, err := sm.generateClaudeSettings(sessionID, true, false)
 	if err != nil {
 		t.Fatalf("generateClaudeSettings() error = %v", err)
 	}
@@ -1465,314 +1461,69 @@ func TestClaudeSettingsEscapeSingleQuotes(t *testing.T) {
 	}
 }
 
-func TestGenerateClaudeSettingsApprovalsDisabled(t *testing.T) {
-	sm := newTestSessionManagerWithDataDir(t)
-	disabled := false
-	sm.cfg.Approvals.Enabled = &disabled
-
-	settingsPath, err := sm.generateClaudeSettings("thrawn-no-approve", false)
-	if err != nil {
-		t.Fatalf("generateClaudeSettings() error = %v", err)
-	}
-
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		t.Fatalf("read settings: %v", err)
-	}
-
-	var parsed struct {
-		Hooks map[string][]struct {
-			Hooks []struct {
-				Command string `json:"command"`
+func TestCommandPolicyHooksAreIndependentAndShellScoped(t *testing.T) {
+	t.Run("claude", func(t *testing.T) {
+		sm := newTestSessionManagerWithDataDir(t)
+		path, err := sm.generateClaudeSettings("canny-policy", false, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var parsed struct {
+			Hooks map[string][]struct {
+				Matcher string `json:"matcher"`
+				Hooks   []struct {
+					Command string `json:"command"`
+				} `json:"hooks"`
 			} `json:"hooks"`
-		} `json:"hooks"`
-	}
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("unmarshal settings: %v", err)
-	}
-
-	if _, ok := parsed.Hooks["PreToolUse"]; ok {
-		t.Error("PreToolUse hook present when approvals disabled, want omitted")
-	}
-
-	// The other lifecycle hooks must still be installed.
-	for _, event := range []string{"SessionStart", "SessionEnd", "UserPromptSubmit", "PostToolUse", "Notification", "Stop"} {
-		if _, ok := parsed.Hooks[event]; !ok {
-			t.Errorf("event %q missing when approvals disabled, want present", event)
 		}
-	}
-
-	if strings.Contains(string(data), "approve-request") {
-		t.Error("settings contain approve-request when approvals disabled")
-	}
-}
-
-// TestGenerateClaudeSettingsYoloInstallsPreToolUse verifies that a yolo session
-// installs the PreToolUse approve-request hook even when global approval gating
-// is disabled, so its tool calls route through the daemon's auto-approve path.
-func TestGenerateClaudeSettingsYoloInstallsPreToolUse(t *testing.T) {
-	sm := newTestSessionManagerWithDataDir(t)
-	disabled := false
-	sm.cfg.Approvals.Enabled = &disabled
-
-	settingsPath, err := sm.generateClaudeSettings("bonnie-yolo", true)
-	if err != nil {
-		t.Fatalf("generateClaudeSettings() error = %v", err)
-	}
-
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		t.Fatalf("read settings: %v", err)
-	}
-
-	var parsed struct {
-		Hooks map[string][]struct {
-			Hooks []struct {
-				Command string `json:"command"`
-			} `json:"hooks"`
-		} `json:"hooks"`
-	}
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("unmarshal settings: %v", err)
-	}
-
-	if _, ok := parsed.Hooks["PreToolUse"]; !ok {
-		t.Error("PreToolUse hook omitted for yolo session, want installed")
-	}
-
-	if !strings.Contains(string(data), "approve-request") {
-		t.Error("yolo settings missing approve-request command")
-	}
-}
-
-// TestInjectCodexHooksYoloInstallsPermissionRequest verifies a yolo codex
-// session installs the permission-request (approve-request) hook script even
-// when global approval gating is off.
-func TestInjectCodexHooksYoloInstallsPermissionRequest(t *testing.T) {
-	sm := newTestSessionManagerWithDataDir(t)
-	disabled := false
-	sm.cfg.Approvals.Enabled = &disabled
-
-	extraArgs, _, err := sm.injectCodexHooks("bonnie-codex-yolo", true)
-	if err != nil {
-		t.Fatalf("injectCodexHooks() error = %v", err)
-	}
-
-	hooks, _ := parseCodexHookOverrides(t, extraArgs)
-
-	groups, ok := hooks["PermissionRequest"]
-	if !ok {
-		t.Fatal("PermissionRequest hook missing for yolo session")
-	}
-
-	var found bool
-
-	for _, g := range groups {
-		for _, h := range g.Hooks {
-			if strings.Contains(h.Command, "approve-request") {
-				found = true
-			}
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			t.Fatal(err)
 		}
-	}
-
-	if !found {
-		t.Error("yolo PermissionRequest hook missing approve-request command")
-	}
-}
-
-// TestInjectCursorHooksYoloInstallsPreToolUse verifies a yolo cursor session
-// installs the preToolUse approve-request hook even when gating is off.
-func TestInjectCursorHooksYoloInstallsPreToolUse(t *testing.T) {
-	sm := newTestSessionManagerWithDataDir(t)
-	disabled := false
-	sm.cfg.Approvals.Enabled = &disabled
-
-	worktree := t.TempDir()
-
-	if _, _, err := sm.injectCursorHooks("bonnie-cursor-yolo", worktree, true); err != nil {
-		t.Fatalf("injectCursorHooks() error = %v", err)
-	}
-
-	data, err := os.ReadFile(filepath.Join(worktree, ".cursor", "hooks.json"))
-	if err != nil {
-		t.Fatalf("read cursor hooks: %v", err)
-	}
-
-	if !strings.Contains(string(data), "preToolUse") || !strings.Contains(string(data), "approve-request") {
-		t.Errorf("yolo cursor hooks missing preToolUse approve-request: %s", data)
-	}
-}
-
-func TestInjectCodexHooksApprovalsDisabled(t *testing.T) {
-	sm := newTestSessionManagerWithDataDir(t)
-	disabled := false
-	sm.cfg.Approvals.Enabled = &disabled
-
-	extraArgs, _, err := sm.injectCodexHooks("thrawn-codex-no-approve", false)
-	if err != nil {
-		t.Fatalf("injectCodexHooks() error = %v", err)
-	}
-
-	hooks, _ := parseCodexHookOverrides(t, extraArgs)
-
-	if _, ok := hooks["PermissionRequest"]; ok {
-		t.Error("PermissionRequest hook present when approvals disabled, want omitted")
-	}
-
-	// Other lifecycle hooks must still be installed.
-	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"} {
-		if _, ok := hooks[event]; !ok {
-			t.Errorf("event %q missing when approvals disabled, want present", event)
+		if len(parsed.Hooks) != 1 || len(parsed.Hooks["PreToolUse"]) != 1 {
+			t.Fatalf("hooks = %+v", parsed.Hooks)
 		}
-	}
-}
-
-func TestInjectCursorHooksApprovalsDisabled(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	sm := newTestSessionManagerWithDataDir(t)
-	disabled := false
-	sm.cfg.Approvals.Enabled = &disabled
-	worktree := t.TempDir()
-
-	_, _, err := sm.injectCursorHooks("thrawn-cursor-no-approve", worktree, false)
-	if err != nil {
-		t.Fatalf("injectCursorHooks() error = %v", err)
-	}
-
-	data, err := os.ReadFile(filepath.Join(worktree, ".cursor", "hooks.json"))
-	if err != nil {
-		t.Fatalf("read cursor hooks: %v", err)
-	}
-
-	var parsed struct {
-		Hooks map[string][]struct {
-			Command string `json:"command"`
-		} `json:"hooks"`
-	}
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("unmarshal cursor hooks: %v", err)
-	}
-
-	if _, ok := parsed.Hooks["preToolUse"]; ok {
-		t.Error("preToolUse hook present when approvals disabled, want omitted")
-	}
-
-	for _, event := range []string{"sessionStart", "postToolUse", "stop"} {
-		if _, ok := parsed.Hooks[event]; !ok {
-			t.Errorf("event %q missing when approvals disabled, want present", event)
+		group := parsed.Hooks["PreToolUse"][0]
+		if group.Matcher != "^Bash$" || len(group.Hooks) != 1 || !strings.Contains(group.Hooks[0].Command, "command-policy-check") {
+			t.Fatalf("PreToolUse policy hook = %+v", group)
 		}
-	}
+	})
 
-	if strings.Contains(string(data), "approve-request") {
-		t.Error("cursor hooks contain approve-request when approvals disabled")
-	}
-}
-
-// TestPreToolUseMatcher verifies the PreToolUse approval hook is scoped to
-// exclude a known read-only set (fail-closed): the matcher is an anchored
-// negative lookahead over exactly that set, and every other tool — mutating,
-// MCP, or unknown/new — still routes to the daemon.
-func TestPreToolUseMatcher(t *testing.T) {
-	// Exact string: guards the anchor (^), the trailing "." and the exact
-	// exempt set all at once. Dropping the anchor or widening the set would be
-	// a fail-open regression, so pin the literal.
-	want := `^(?!(Read|Glob|Grep|LS|NotebookRead)$).`
-	if got := preToolUseMatcher(); got != want {
-		t.Fatalf("preToolUseMatcher() = %q, want %q", got, want)
-	}
-
-	// The matcher semantic is "fire for every tool NOT exactly in the exempt
-	// set". Membership in preToolUseExemptTools is that semantic; this table
-	// documents which tools skip the round-trip and, crucially, that mutating,
-	// MCP, and unknown tools do not.
-	inExempt := func(name string) bool {
-		for _, e := range preToolUseExemptTools {
-			if e == name {
-				return true
-			}
+	t.Run("codex", func(t *testing.T) {
+		sm := newTestSessionManagerWithDataDir(t)
+		args, _, err := sm.injectCodexHooks("canny-policy", false, true)
+		if err != nil {
+			t.Fatal(err)
 		}
-
-		return false
-	}
-
-	cases := []struct {
-		tool         string
-		wantExcluded bool
-	}{
-		// Read-only set: excluded (hook skipped).
-		{"Read", true},
-		{"Glob", true},
-		{"Grep", true},
-		{"LS", true},
-		{"NotebookRead", true},
-		// Mutating tools: still route.
-		{"Bash", false},
-		{"Write", false},
-		{"Edit", false},
-		{"MultiEdit", false},
-		{"NotebookEdit", false},
-		{"WebFetch", false},
-		{"WebSearch", false},
-		{"Task", false},
-		// TodoWrite mutates state — explicitly NOT exempt.
-		{"TodoWrite", false},
-		// MCP tools always route (fail-closed).
-		{"mcp__memory__create", false},
-		{"mcp__chrome-devtools__click", false},
-		// Unknown / renamed tools route (fail-closed).
-		{"SomeFutureTool", false},
-		{"ReadFile", false}, // superstring of Read must not be excluded
-	}
-
-	for _, tc := range cases {
-		if got := inExempt(tc.tool); got != tc.wantExcluded {
-			t.Errorf("tool %q excluded = %v, want %v", tc.tool, got, tc.wantExcluded)
+		hooks, _ := parseCodexHookOverrides(t, args)
+		if _, ok := hooks["SessionStart"]; ok {
+			t.Fatal("lifecycle hook installed when lifecycle=false")
 		}
-	}
-}
-
-// TestGenerateClaudeSettingsPreToolUseScoped verifies the generated settings
-// file carries the scoped matcher on the PreToolUse group.
-func TestGenerateClaudeSettingsPreToolUseScoped(t *testing.T) {
-	sm := newTestSessionManagerWithDataDir(t)
-
-	settingsPath, err := sm.generateClaudeSettings("canny-scope", false)
-	if err != nil {
-		t.Fatalf("generateClaudeSettings() error = %v", err)
-	}
-
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		t.Fatalf("read settings: %v", err)
-	}
-
-	var parsed struct {
-		Hooks map[string][]struct {
-			Matcher string `json:"matcher"`
-		} `json:"hooks"`
-	}
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("unmarshal settings: %v", err)
-	}
-
-	pre, ok := parsed.Hooks["PreToolUse"]
-	if !ok || len(pre) != 1 {
-		t.Fatalf("PreToolUse group = %v, want exactly one", pre)
-	}
-
-	if pre[0].Matcher != preToolUseMatcher() {
-		t.Errorf("PreToolUse matcher = %q, want %q", pre[0].Matcher, preToolUseMatcher())
-	}
-
-	// Every other event stays match-all (empty matcher).
-	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "Stop"} {
-		g, ok := parsed.Hooks[event]
-		if !ok || len(g) != 1 {
-			t.Fatalf("event %q group = %v, want exactly one", event, g)
+		groups, ok := hooks["PermissionRequest"]
+		if !ok || !strings.Contains(groups[0].Hooks[0].Command, "command-policy-check") {
+			t.Fatalf("PermissionRequest hook = %+v", groups)
 		}
+	})
 
-		if g[0].Matcher != "" {
-			t.Errorf("event %q matcher = %q, want empty", event, g[0].Matcher)
+	t.Run("cursor", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		sm := newTestSessionManagerWithDataDir(t)
+		worktree := t.TempDir()
+		if _, _, err := sm.injectCursorHooks("canny-policy", worktree, false, true); err != nil {
+			t.Fatal(err)
 		}
-	}
+		data, err := os.ReadFile(filepath.Join(worktree, ".cursor", "hooks.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), "preToolUse") || !strings.Contains(string(data), "command-policy-check") {
+			t.Fatalf("cursor policy hooks = %s", data)
+		}
+		if strings.Contains(string(data), "sessionStart") {
+			t.Fatal("lifecycle hook installed when lifecycle=false")
+		}
+	})
 }

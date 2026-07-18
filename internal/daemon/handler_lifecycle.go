@@ -29,7 +29,6 @@ func createOptsFromMsg(c protocol.CreateMsg, agentName string, rows, cols uint16
 		InPlace:             c.InPlace,
 		AllowConcurrent:     c.AllowConcurrent,
 		SkipModelValidation: c.SkipModelValidation,
-		Yolo:                c.Yolo,
 		Headless:            c.Headless,
 		NoFetch:             c.NoFetch,
 		Rows:                rows,

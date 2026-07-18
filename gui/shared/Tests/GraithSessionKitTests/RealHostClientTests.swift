@@ -29,7 +29,7 @@ struct RealHostClientTests {
     private func handshake(_ d: MockDaemon) async throws {
         let hs = try await d.readControl()
         #expect(hs.type == "handshake")
-        try await d.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+        try await d.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
     }
 
     @Test func connectThenListSessions() async throws {
@@ -56,14 +56,14 @@ struct RealHostClientTests {
             try await self.handshake(d)
             _ = try await d.readControl()
             try await d.writeControl("session_list", SessionListMsg(sessions: [
-                makeSession(id: "x", name: "braw", status: "running", agentStatus: "approval"),
+                makeSession(id: "x", name: "braw", status: "running", agentStatus: "error"),
             ]))
         }
         try await client.connect()
         let status = try await client.status(sessionID: "x")
         #expect(status.session.name == "braw")
         #expect(status.fleet.total == 1)
-        #expect(status.fleet.approval == 1)
+        #expect(status.fleet.errored == 1)
         _ = await server.result
         await client.disconnect()
     }

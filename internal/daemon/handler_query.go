@@ -3,7 +3,6 @@ package daemon
 import (
 	"errors"
 	"log/slog"
-	"net"
 	"os"
 	"sort"
 	"time"
@@ -194,49 +193,6 @@ func handleStoreGet(sm *SessionManager, auth authContext, send func(string, any)
 	}
 
 	send("store_get", resp)
-}
-
-// handleApprovalList returns the current set of pending approvals. Read-only.
-func handleApprovalList(sm *SessionManager, send func(string, any)) {
-	send("approval_notification", protocol.ApprovalNotificationMsg{
-		Pending: sm.PendingApprovals(),
-	})
-}
-
-// handleApprovalSubscribe registers a connection to receive approval
-// notifications without attaching to a session (design §C.6). Human operators
-// only; cleaned up on disconnect. The current pending set is sent immediately so
-// the subscriber starts with fleet state.
-func handleApprovalSubscribe(sm *SessionManager, auth authContext, send func(string, any), conn net.Conn) {
-	if !auth.isHuman() {
-		send("error", protocol.ErrorMsg{Message: "approval_subscribe requires a human operator"})
-
-		return
-	}
-
-	sm.AddApprovalSubscriber(conn, send)
-	send("approval_notification", protocol.ApprovalNotificationMsg{Pending: sm.PendingApprovals()})
-}
-
-// handleApprovalRespond records a human's decision on a pending approval. Not
-// permitted for agent sessions.
-func handleApprovalRespond(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
-	if auth.authenticated {
-		send("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
-
-		return
-	}
-
-	resp, ok := decodePayload[protocol.ApprovalRespondMsg](msg, send, "invalid approval_respond")
-	if !ok {
-		return
-	}
-
-	if err := sm.RespondToApproval(resp.RequestID, resp.Decision, resp.Reason); err != nil {
-		send("error", protocol.ErrorMsg{Message: err.Error()})
-	} else {
-		send("approval_responded", struct{}{})
-	}
 }
 
 // handleReload reloads the daemon config from disk. Not permitted for agent

@@ -189,8 +189,7 @@ gr remote attach graith-ben/my-session   # attach a session over the tailnet (#6
 ```
 
 The app connects to **all** paired hosts and shows their sessions in one
-sidebar. Interactive approvals are intentionally not exposed in the native
-apps; issue #1392 tracks removing that mechanism from graith entirely.
+sidebar.
 
 ## Status & deferred work
 

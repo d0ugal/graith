@@ -43,7 +43,7 @@ func TestManifestLoads(t *testing.T) {
 	}
 	// The acceptance criteria require these areas to be covered.
 	wantCategories := []string{
-		"Session lifecycle", "Terminal I/O", "Approvals & pairing",
+		"Session lifecycle", "Terminal I/O", "Pairing",
 		"Messaging", "Scenarios", "Triggers", "MCP servers",
 		"Document store", "Notifications", "Sandbox introspection", "Diagnostics",
 	}

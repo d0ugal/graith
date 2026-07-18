@@ -190,7 +190,7 @@ func TestReadControlResponse(t *testing.T) {
 	serverWriter := protocol.NewFrameWriter(serverConn)
 
 	ctrlBytes, err := protocol.EncodeControl("handshake_ok", protocol.HandshakeOkMsg{
-		Version:       "1.0",
+		Version:       "2.0",
 		DaemonVersion: "0.1.0",
 	})
 	if err != nil {
@@ -246,28 +246,6 @@ func TestReadControlResponseWithDataFrame(t *testing.T) {
 	want := "expected control frame, got channel 1"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
-	}
-}
-
-func TestApprovalDeadline(t *testing.T) {
-	tests := []struct {
-		name    string
-		timeout time.Duration
-		want    time.Duration
-	}{
-		{"normal 10m", 10 * time.Minute, 11 * time.Minute},
-		{"large 30m", 30 * time.Minute, 31 * time.Minute},
-		{"zero", 0, time.Minute},
-		{"negative clamped", -5 * time.Minute, time.Minute},
-		{"small negative", -30 * time.Second, time.Minute},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := approvalDeadline(tt.timeout)
-			if got != tt.want {
-				t.Errorf("approvalDeadline(%v) = %v, want %v", tt.timeout, got, tt.want)
-			}
-		})
 	}
 }
 
@@ -352,36 +330,24 @@ func TestConnectFastClearsDeadline(t *testing.T) {
 	}
 }
 
-func TestConnectForApprovalClearsDeadline(t *testing.T) {
+func TestConnectForPolicyRetainsEndToEndDeadline(t *testing.T) {
 	socketPath, serverReady := startMockDaemon(t)
 
-	c, err := ConnectForApproval(config.Paths{SocketPath: socketPath}, 5*time.Minute)
+	c, err := ConnectForPolicy(config.Paths{SocketPath: socketPath}, 250*time.Millisecond)
 	if err != nil {
-		t.Fatalf("ConnectForApproval: %v", err)
+		t.Fatalf("ConnectForPolicy: %v", err)
 	}
 	defer c.Close()
 
 	serverConn := <-serverReady
 	defer func() { _ = serverConn.Close() }()
 
-	// Same check: send after the ConnectFast deadline (2s) would have fired.
-	// ConnectForApproval uses a longer deadline, but if it wasn't cleared,
-	// the connection would still have a fixed expiry.
-	go func() {
-		time.Sleep(2500 * time.Millisecond)
-
-		resp, _ := protocol.EncodeControl("ping", struct{}{})
-		serverWriter := protocol.NewFrameWriter(serverConn)
-		_ = serverWriter.WriteFrame(protocol.ChannelControl, resp)
-	}()
-
-	env, err := c.ReadControlResponse()
-	if err != nil {
-		t.Fatalf("ReadControlResponse after deadline window: %v (deadline was not cleared)", err)
-	}
-
-	if env.Type != "ping" {
-		t.Errorf("expected ping, got %s", env.Type)
+	// Unlike long-lived attach/subscription clients, the policy connection must
+	// retain an aggregate deadline so a daemon that handshakes and then stalls
+	// can never strand the agent hook.
+	time.Sleep(300 * time.Millisecond)
+	if _, err := c.ReadControlResponse(); err == nil {
+		t.Fatal("ReadControlResponse succeeded after the policy deadline")
 	}
 }
 
@@ -445,10 +411,10 @@ func TestConnectFastRejectsIncompatibleVersion(t *testing.T) {
 	}
 }
 
-func TestConnectForApprovalRejectsIncompatibleVersion(t *testing.T) {
+func TestConnectForPolicyRejectsIncompatibleVersion(t *testing.T) {
 	socketPath, _ := startMockDaemonWithVersion(t, "999.0")
 
-	_, err := ConnectForApproval(config.Paths{SocketPath: socketPath}, 5*time.Minute)
+	_, err := ConnectForPolicy(config.Paths{SocketPath: socketPath}, 5*time.Minute)
 	if err == nil {
 		t.Fatal("expected error for incompatible protocol version")
 	}
@@ -524,10 +490,10 @@ func TestConnectFastUsesConfiguredDialTimeout(t *testing.T) {
 	}
 }
 
-// TestConnectForApprovalUsesConfiguredDialTimeout proves the approval fast path
-// dials with the configured [connection].dial_timeout. The long approval
+// TestConnectForPolicyUsesConfiguredDialTimeout proves the policy fast path
+// dials with the configured [connection].dial_timeout. The long policy
 // deadline stays independent of the dial timeout. See issue #1286.
-func TestConnectForApprovalUsesConfiguredDialTimeout(t *testing.T) {
+func TestConnectForPolicyUsesConfiguredDialTimeout(t *testing.T) {
 	saveConnectionTimeouts(t)
 
 	const canny = 274 * time.Millisecond
@@ -536,14 +502,14 @@ func TestConnectForApprovalUsesConfiguredDialTimeout(t *testing.T) {
 
 	captured := captureDialTimeout(t)
 
-	c, err := ConnectForApproval(config.Paths{SocketPath: "/bothy/approval.sock"}, 5*time.Minute)
+	c, err := ConnectForPolicy(config.Paths{SocketPath: "/bothy/policy.sock"}, 5*time.Minute)
 	if err != nil {
-		t.Fatalf("ConnectForApproval: %v", err)
+		t.Fatalf("ConnectForPolicy: %v", err)
 	}
 	defer c.Close()
 
 	if *captured != canny {
-		t.Errorf("ConnectForApproval dial timeout = %v, want the configured %v", *captured, canny)
+		t.Errorf("ConnectForPolicy dial timeout = %v, want the configured %v", *captured, canny)
 	}
 }
 

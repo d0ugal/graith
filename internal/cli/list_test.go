@@ -782,7 +782,7 @@ func TestTrailingColumnsValues(t *testing.T) {
 // TestTrailingColumnsColorize confirms the STATUS/ACTIVITY columns emit ANSI
 // escapes when colour is enabled and stay plain when it is not.
 func TestTrailingColumnsColorize(t *testing.T) {
-	s := protocol.SessionInfo{Status: "running", AgentStatus: "approval"}
+	s := protocol.SessionInfo{Status: "running", AgentStatus: "error"}
 
 	var statusCol, activityCol sessionColumn
 
@@ -795,8 +795,8 @@ func TestTrailingColumnsColorize(t *testing.T) {
 		}
 	}
 
-	if plain := activityCol.value(s, time.Time{}, false); plain != "⚠ approval" {
-		t.Errorf("activity plain = %q, want %q", plain, "⚠ approval")
+	if plain := activityCol.value(s, time.Time{}, false); plain != "error" {
+		t.Errorf("activity plain = %q, want %q", plain, "error")
 	}
 
 	if colored := activityCol.value(s, time.Time{}, true); !strings.Contains(colored, "\x1b[") {
@@ -912,7 +912,7 @@ func columnStarts(cells []string, widths []int) []int {
 // sequences). renderRows measures visible width via ansi.StringWidth, so each
 // column starts at the same display offset on every row.
 //
-// The fixture deliberately mixes: an ANSI-coloured cell, the ⚠ approval marker
+// The fixture deliberately mixes: an ANSI-coloured cell, the error marker
 // and ★ star prefix (both ambiguous width-1), a genuinely width-2 CJK glyph
 // ("编辑", four display cells for two runes — which tabwriter's rune count would
 // get wrong), empty interior cells, and a long name.
@@ -921,7 +921,7 @@ func TestRenderRowsAlignsColoredAndWideCells(t *testing.T) {
 
 	rows := [][]string{
 		{"NAME", "STATUS", "ACTIVITY", "GIT", "AGE"},
-		{"braw", colorize("running", green, true), "⚠ approval", colorize("dirty, 1 ahead", green, true), "1h"},
+		{"braw", colorize("running", green, true), "error", colorize("dirty, 1 ahead", green, true), "1h"},
 		{"a-much-longer-session-name", colorize("stopped", green, true), "", "", "2h"},
 		{"★ canny", colorize("errored", green, true), "编辑 (Bash)", "3 ahead", "2d"},
 	}

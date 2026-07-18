@@ -180,8 +180,8 @@ func (sm *SessionManager) fleetSummary() protocol.FleetSummary {
 		switch s.Status {
 		case StatusRunning:
 			switch s.AgentStatus {
-			case "approval":
-				f.Approval++
+			case "error":
+				f.Errored++
 			case "ready":
 				f.Ready++
 			default:
@@ -236,8 +236,8 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 		switch s.Status {
 		case StatusRunning:
 			switch s.AgentStatus {
-			case "approval":
-				fleet.Approval++
+			case "error":
+				fleet.Errored++
 			case "ready":
 				fleet.Ready++
 			default:

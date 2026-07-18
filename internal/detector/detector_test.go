@@ -71,50 +71,6 @@ func TestIsBusy_ThinkingWords(t *testing.T) {
 	}
 }
 
-func TestNeedsApproval_IgnoresTerminalText(t *testing.T) {
-	d := New("claude")
-
-	tests := []struct {
-		name    string
-		content string
-	}{
-		{"trust prompt", "Do you trust the files in this folder?\n"},
-		{"allow once", "Yes, allow once\n"},
-		{"allow always", "Yes, allow always\n"},
-		{"no prompt", "Bonnie glen\n❯\n"},
-		{"MCP permission", "Allow this MCP server\n"},
-		{"tell claude differently", "No, and tell Claude what to do differently\n"},
-		{"arrow keys nav", "Use arrow keys to navigate\n"},
-		{"Y/n prompt", "Continue? (Y/n)\n"},
-		{"yes/no prompt", "Proceed? [yes/no]\n"},
-		{"selected yes", "❯ Yes\n"},
-		{"selected no", "❯ No\n"},
-		{"selected allow", "❯ Allow\n"},
-		{"nothing prompt", "❯ Nothing\n"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if d.NeedsApproval(tt.content) {
-				t.Error("NeedsApproval() = true, want false")
-			}
-		})
-	}
-}
-
-func TestNeedsApproval_IgnoresToolSpecificPrompts(t *testing.T) {
-	codex := New("codex")
-	claude := New("claude")
-
-	content := "Continue?\n"
-	if codex.NeedsApproval(content) {
-		t.Error("Codex should not treat 'Continue?' as approval")
-	}
-
-	if claude.NeedsApproval(content) {
-		t.Error("Claude should not treat 'Continue?' as approval")
-	}
-}
-
 func TestIsReady_PromptCharacters(t *testing.T) {
 	d := New("claude")
 
@@ -127,7 +83,7 @@ func TestIsReady_PromptCharacters(t *testing.T) {
 		{"unicode chevron", "output done\n❯\n", true},
 		{"try suggestion", "output done\n❯ Try something\n", true},
 		{"not ready when busy", "⠋ Working\n>\n", false},
-		{"ready despite approval-looking text", "Do you trust the files in this folder?\n>\n", true},
+		{"ready despite permission-looking text", "Do you trust the files in this folder?\n>\n", true},
 		{"empty content", "", false},
 	}
 	for _, tt := range tests {
@@ -192,7 +148,7 @@ func TestDetect(t *testing.T) {
 		want      AgentStatus
 	}{
 		{"busy", "⠋ Working\nctrl+c to interrupt\n", OutputAgeUnknown, StatusActive},
-		{"approval-looking text", "Do you trust the files in this folder?\n", OutputAgeUnknown, StatusUnknown},
+		{"permission-looking text", "Do you trust the files in this folder?\n", OutputAgeUnknown, StatusUnknown},
 		{"ready", "output done\n❯\n", OutputAgeUnknown, StatusReady},
 		{"unknown", "thrawn neep text\n", OutputAgeUnknown, StatusUnknown},
 	}
@@ -245,7 +201,7 @@ func TestDetect_OutputRecency(t *testing.T) {
 			StatusReady,
 		},
 		{
-			"approval-looking text follows output recency fallback",
+			"permission-looking text follows output recency fallback",
 			"Do you trust the files in this folder?\n",
 			100 * time.Millisecond,
 			StatusActive,

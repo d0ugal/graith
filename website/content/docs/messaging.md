@@ -20,7 +20,7 @@ graith includes a SQLite-backed messaging system that enables communication betw
 
 **Threads** group related messages within a stream. Pass `--thread <id>` to `pub`/`send` to continue a thread, and `--thread <id>` to `sub` to filter.
 
-**System streams** are prefixed with `_system.` and used internally (e.g. for approval notifications). They are hidden from `gr msg topics` unless `--system` is passed.
+**System streams** are prefixed with `_system.` and used internally for status and daemon notifications. They are hidden from `gr msg topics` unless `--system` is passed.
 
 ## Publishing to topics
 

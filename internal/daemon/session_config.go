@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/agent/transcript"
-	"github.com/d0ugal/graith/internal/approvals"
+	"github.com/d0ugal/graith/internal/commandpolicy"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/sandbox"
@@ -595,7 +595,6 @@ func optionArgs(agent config.Agent, vars config.TemplateVars, opts *config.Codex
 		vars.Profile = opts.Profile
 		vars.ReasoningEffort = opts.ReasoningEffort
 		vars.ServiceTier = opts.ServiceTier
-		vars.ApprovalPolicy = opts.ApprovalPolicy
 		vars.WebSearch = opts.WebSearch
 	}
 
@@ -649,69 +648,30 @@ func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
 	return sm.resolveSandboxFromConfig(sm.cfg, agentName)
 }
 
-// approvalsConfigDir returns the directory holding graith's config file, used to
-// resolve a relative [approvals.builtin] config path deterministically (rather
-// than against the daemon's working directory). It prefers the explicit global
-// --config override (sm.configFile, the file the daemon actually loaded) over
-// the default resolved path, mirroring the CLI's approvalsConfigDir so
-// `gr --config X approvals validate` and daemon enforcement resolve a relative
-// path against the same directory. Returns "" when no config path is known, in
-// which case a relative path is left for the caller to resolve against the
-// working directory as before.
-func (sm *SessionManager) approvalsConfigDir() string {
-	if f := strings.TrimSpace(sm.configFile); f != "" {
-		return filepath.Dir(f)
-	}
-
-	if sm.paths.ConfigFile == "" {
-		return ""
-	}
-
-	return filepath.Dir(sm.paths.ConfigFile)
+// validateCommandPolicy fails session start when configured enforcement cannot
+// be established. Callers hold sm.mu.
+func (sm *SessionManager) validateCommandPolicy(agentName string) error {
+	return sm.validateCommandPolicyFromConfig(sm.cfg.CommandPolicy, agentName)
 }
 
-// validateApprovalsBackend fails closed at session-create when the configured
-// approvals backend can't enforce — a command backend with no command, a
-// missing localmost binary, or an unreadable/invalid builtin config. This
-// mirrors the sandbox availability check (resolveSandboxFromConfig) so a
-// misconfigured approvals backend errors loudly at create time instead of
-// silently deferring every request to the human. The default (prompt) backend
-// always enforces. Callers hold sm.mu.
-//
-// A yolo session resolves every request through the auto backend, which always
-// enforces, so the global [approvals] backend is irrelevant to it — validating
-// (and failing on) an unavailable global backend would contradict yolo's
-// per-session override. Yolo sessions therefore skip the global check.
-func (sm *SessionManager) validateApprovalsBackend(yolo bool) error {
-	if yolo {
+func (sm *SessionManager) validateCommandPolicyFromConfig(policy config.CommandPolicy, agentName string) error {
+	if !policy.Enabled() {
 		return nil
 	}
-
-	acfg := sm.cfg.Approvals
-
-	backend, _, err := acfg.ResolveBackend()
+	if agentName != "claude" && agentName != "codex" && agentName != "cursor" {
+		return fmt.Errorf("command policy cannot be enforced for agent %q: no synchronous shell hook is supported", agentName)
+	}
+	backend, err := commandpolicy.BackendByName(strings.TrimSpace(policy.Backend))
 	if err != nil {
 		return err
 	}
-
-	if backend == "" || backend == approvals.BackendPrompt {
-		return nil
-	}
-
-	be, err := approvals.BackendByName(backend)
+	backendCfg, err := commandPolicyBackendConfig(policy, sm.commandPolicyConfigDir())
 	if err != nil {
 		return err
 	}
-
-	beCfg, err := approvalsBackendConfig(backend, acfg, sm.approvalsConfigDir())
-	if err != nil {
-		return err
+	if availability := backend.Availability(backendCfg); !availability.CanEnforce {
+		return fmt.Errorf("command policy backend %q cannot enforce: %s", policy.Backend, availability.Detail)
 	}
-
-	if av := be.Availability(beCfg); !av.CanEnforce {
-		return fmt.Errorf("approvals backend %q cannot enforce: %s", backend, av.Detail)
-	}
-
 	return nil
 }
 
@@ -726,7 +686,7 @@ func (sm *SessionManager) resolveSandboxFromConfig(cfg *config.Config, agentName
 
 	merged := cfg.Sandbox.Merge(cfg.Agents[agentName].Sandbox)
 	if !merged.Enabled {
-		return false, nil
+		return false, errors.New("sandbox enforcement is required for every agent session; enable [sandbox] and select an available backend")
 	}
 
 	avail, err := validateSandboxBackend(merged, fmt.Sprintf("agent %q", agentName))

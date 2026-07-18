@@ -194,7 +194,6 @@ struct SessionRow: View {
                 HStack(spacing: 6) {
                     Text(session.name).font(.body)
                     if session.starred == true { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow) }
-                    if session.isYolo { Image(systemName: "bolt.fill").font(.caption2).foregroundStyle(.orange) }
                     if session.sandboxed == true { Image(systemName: "shield.lefthalf.filled").font(.caption2).foregroundStyle(.secondary) }
                     if session.configStale == true { Image(systemName: "exclamationmark.triangle.fill").font(.caption2).foregroundStyle(.yellow) }
                 }
@@ -217,9 +216,6 @@ struct SessionRow: View {
                 }
             }
             Spacer()
-            if session.needsApproval {
-                Image(systemName: "bell.badge.fill").foregroundStyle(.orange)
-            }
         }
         .padding(.vertical, 2)
         // Swipe left → Delete (red). Confirms when running, immediate when
@@ -422,7 +418,7 @@ struct StatusDot: View {
     }
     private var color: Color {
         if session.isErrored { return .red }
-        if session.needsApproval { return .orange }
+        if session.agentStatus == "error" { return .red }
         if session.isStopped { return .gray }
         if session.agentStatus == "active" { return .green }
         return .blue

@@ -44,7 +44,7 @@ func TestBuildStatusReport(t *testing.T) {
 
 	// Regression: an unparsed hook (parse timeout) forwards an EMPTY subtype so
 	// the daemon leaves status unchanged, instead of the old behaviour where a
-	// bare Notification was mapped to approval.
+	// bare Notification was mapped to a permission state.
 	t.Run("unparsed forwards empty subtype", func(t *testing.T) {
 		msg := buildStatusReport("haar", "Notification", "", hookStdin{NotificationType: "idle_prompt"}, false, maxLastMessageRunes)
 

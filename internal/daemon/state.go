@@ -19,7 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 22
+const CurrentStateVersion = 23
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -49,6 +49,7 @@ const (
 type CreationConfig struct {
 	Agent         config.Agent         `json:"agent"`
 	SandboxConfig config.SandboxConfig `json:"sandbox_config"`
+	CommandPolicy config.CommandPolicy `json:"command_policy,omitempty"`
 }
 
 type SessionState struct {
@@ -130,16 +131,11 @@ type SessionState struct {
 	InPlace              bool                `json:"in_place,omitempty"`
 	Includes             []IncludedRepoState `json:"includes,omitempty"`
 	AgentHooks           bool                `json:"agent_hooks,omitempty"`
-	ApprovalsEnabled     bool                `json:"approvals_enabled,omitempty"` // deprecated: migrated to AgentHooks in v4
-	// Yolo opts this session into auto-approve ("yolo") mode: the PreToolUse
-	// approval hook is installed and every request is auto-allowed via the
-	// "auto" approvals backend, regardless of the global [approvals] backend.
-	Yolo         bool   `json:"yolo,omitempty"`
-	Starred      bool   `json:"starred,omitempty"`
-	SystemKind   string `json:"system_kind,omitempty"`
-	StopReason   string `json:"stop_reason,omitempty"`
-	BackoffLevel int    `json:"backoff_level,omitempty"`
-	FreshStart   bool   `json:"fresh_start,omitempty"`
+	Starred              bool                `json:"starred,omitempty"`
+	SystemKind           string              `json:"system_kind,omitempty"`
+	StopReason           string              `json:"stop_reason,omitempty"`
+	BackoffLevel         int                 `json:"backoff_level,omitempty"`
+	FreshStart           bool                `json:"fresh_start,omitempty"`
 	// StuckRestarts counts consecutive startup-watchdog restarts for this session
 	// (#1092). It caps restart storms for a permanently-broken session and is
 	// reset to 0 once the session produces output. Runtime-recovery state, but
@@ -666,6 +662,7 @@ var migrations = map[int]func(*State) error{
 	19: migrateV19ToV20,
 	20: migrateV20ToV21,
 	21: migrateV21ToV22,
+	22: migrateV22ToV23,
 }
 
 func generateToken() (string, error) {
@@ -710,17 +707,7 @@ func migrateV2ToV3(_ *State) error {
 	return nil
 }
 
-// migrateV3ToV4 transfers the renamed approvals_enabled field to agent_hooks.
-func migrateV3ToV4(state *State) error {
-	for _, s := range state.Sessions {
-		if s.ApprovalsEnabled {
-			s.AgentHooks = true
-			s.ApprovalsEnabled = false
-		}
-	}
-
-	return nil
-}
+func migrateV3ToV4(_ *State) error { return nil }
 
 // migrateV4ToV5 backfills StatusChangedAt from CreatedAt for existing sessions
 // that predate the field. This gives a conservative "last changed at" of session
@@ -900,6 +887,20 @@ func migrateV20ToV21(state *State) error {
 // migrateV21ToV22 is additive. Existing literal scenarios have no authored
 // render metadata; their persisted runtime names remain authoritative.
 func migrateV21ToV22(_ *State) error { return nil }
+
+// migrateV22ToV23 removes the last persisted interactive workflow state. A
+// pre-transition daemon may have saved agent_status="approval" while an agent
+// was waiting. The new runtime has no such state, so surface it as a diagnostic
+// error instead of resurrecting a waiting-for-human status after restart.
+func migrateV22ToV23(state *State) error {
+	for _, s := range state.Sessions {
+		if s.AgentStatus == "approval" {
+			s.AgentStatus = "error"
+		}
+	}
+
+	return nil
+}
 
 // writeFileAtomic writes state to disk crash-safely (temp + fsync + rename +
 // dir fsync). It delegates to the shared atomicfile helper so every state

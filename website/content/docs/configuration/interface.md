@@ -27,7 +27,6 @@ scroll_mode          = "["       # open a scrollable pager over the session hist
 shell                = "s"       # open a shell in the worktree
 orchestrator_session = "o"       # switch to the orchestrator session
 messages             = "m"       # open the message viewer for the current session
-approvals            = "a"       # open the pending-approvals prompt
 restart_session      = "r"       # restart (resume) the current session
 ```
 
@@ -44,7 +43,7 @@ would fire).
 
 ### Overlay keys
 
-The full-screen terminal overlays (list watch, approval prompt, message viewer,
+The full-screen terminal overlays (list watch, message viewer,
 scroll pager) read their keys from `[keybindings.overlay]`. Each value is a
 space-separated list of [Bubble Tea](https://github.com/charmbracelet/bubbletea)
 key names; pressing any listed key triggers the action. A partial table
@@ -66,10 +65,6 @@ list_watch_attach = "enter a"
 list_watch_stop   = "s"
 list_watch_delete = "x d"
 list_watch_resume = "r"
-# Approval prompt actions.
-approval_allow     = "y enter"
-approval_deny      = "n x"
-approval_allow_all = "a"
 # Message viewer actions.
 message_pin               = "enter"
 message_expand_all        = "O"

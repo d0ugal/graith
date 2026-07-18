@@ -146,8 +146,9 @@ func TestCreateSkipModelValidation(t *testing.T) {
 	sm := newTestSessionManager(t)
 	script := writeScript(t, "#!/bin/sh\necho 'model-a - Model A'\necho 'model-b - Model B'\n")
 	sm.cfg.Agents["claude"] = config.Agent{
-		Command:       "/nonexistent-graith-test-binary",
-		ValidateModel: script,
+		NonInteractiveArgs: []string{},
+		Command:            "/nonexistent-graith-test-binary",
+		ValidateModel:      script,
 	}
 
 	t.Run("validation rejects unknown model by default", func(t *testing.T) {

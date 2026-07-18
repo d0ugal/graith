@@ -4,7 +4,7 @@ import GraithSessionKit
 @testable import GraithGUI
 
 /// Covers the sidebar metadata badges (issue #901): the daemon sends
-/// sandboxed/yolo/config_stale/PR/CI on the wire, and the row must surface them.
+/// sandboxed/config_stale/PR/CI on the wire, and the row must surface them.
 /// The pure style-mapping functions and the boolean helpers are
 /// tested here (SwiftUI `Color`s are opaque, the style buckets are not).
 final class SessionBadgesTests: XCTestCase {
@@ -25,7 +25,6 @@ final class SessionBadgesTests: XCTestCase {
 
     func testModeHelpersDefaultFalseWhenAbsent() throws {
         let s = try session(braw)
-        XCTAssertFalse(s.isYolo)
         XCTAssertFalse(s.isSandboxed)
         XCTAssertFalse(s.isConfigStale)
     }
@@ -34,10 +33,9 @@ final class SessionBadgesTests: XCTestCase {
         let s = try session("""
         {"id":"canny","name":"canny","repo_path":"/croft","repo_name":"croft",
          "worktree_path":"/bothy","branch":"b","base_branch":"main","agent":"codex",
-         "status":"running","created_at":"now","yolo":true,"sandboxed":true,
+         "status":"running","created_at":"now","sandboxed":true,
          "config_stale":true}
         """)
-        XCTAssertTrue(s.isYolo)
         XCTAssertTrue(s.isSandboxed)
         XCTAssertTrue(s.isConfigStale)
     }

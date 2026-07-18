@@ -9,6 +9,19 @@ draft: false
 
 ## First session
 
+Every agent must run inside an OS sandbox. The default configuration selects
+`nono`; install it before starting a session:
+
+```bash
+brew install nono # macOS or Linuxbrew
+gr doctor
+```
+
+On macOS you may instead install safehouse and set
+`[sandbox] backend = "safehouse"`. See the [sandbox setup]({{< relref
+"sandbox/_index.md#setup" >}}) for details. Graith refuses to start or resume an
+agent when the selected backend cannot enforce.
+
 The daemon starts automatically on your first command. Create a session:
 
 ```bash
@@ -56,7 +69,7 @@ Cycle views with `h`/`l` or left/right arrows:
 | View | Shows |
 |------|-------|
 | All | Every session, grouped by repo |
-| Needs Attention | Sessions waiting for approval, errored, idle (running but ready), or stopped with uncommitted/unpushed changes. Sorted oldest-first by time in current state |
+| Needs Attention | Errored sessions, agent runtime errors, idle sessions (running but ready), or stopped sessions with uncommitted/unpushed changes. Sorted oldest-first by time in current state |
 | Active | Running sessions only, newest first |
 | Starred | Starred sessions only |
 

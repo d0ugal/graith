@@ -151,7 +151,7 @@ func TestAgentOptionArgsForUnknownVarErrors(t *testing.T) {
 }
 
 func TestIsTemplateVar(t *testing.T) {
-	known := []string{"model", "dir", "profile", "reasoning_effort", "service_tier", "approval_policy", "web_search", "worktree_path"}
+	known := []string{"model", "dir", "profile", "reasoning_effort", "service_tier", "web_search", "worktree_path"}
 	for _, v := range known {
 		if !IsTemplateVar(v) {
 			t.Errorf("IsTemplateVar(%q) = false, want true", v)
@@ -245,5 +245,35 @@ func TestDefaultAgentArgsRoundTrip(t *testing.T) {
 
 	if len(orig.Agents["codex"].OptionArgs) == 0 {
 		t.Fatal("expected the embedded codex agent to define option_args")
+	}
+}
+
+func TestDefaultAgentsDisableNativePrompting(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	tests := []struct {
+		name string
+		want []string
+	}{
+		{name: "claude", want: []string{"--dangerously-skip-permissions"}},
+		{name: "codex", want: []string{"--ask-for-approval", "never", "--sandbox", "danger-full-access"}},
+		{name: "cursor", want: []string{"--force"}},
+		{name: "agy", want: []string{"--dangerously-skip-permissions"}},
+		{name: "opencode", want: []string{"--dangerously-skip-permissions"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			agent, ok := cfg.Agents[tt.name]
+			if !ok {
+				t.Fatalf("default agent %q is missing", tt.name)
+			}
+			if agent.NonInteractiveArgs == nil {
+				t.Fatalf("agent %q has nil non_interactive_args", tt.name)
+			}
+			if !reflect.DeepEqual(agent.NonInteractiveArgs, tt.want) {
+				t.Fatalf("agent %q non_interactive_args = %v, want %v", tt.name, agent.NonInteractiveArgs, tt.want)
+			}
+		})
 	}
 }

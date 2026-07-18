@@ -13,20 +13,19 @@ import (
 )
 
 type statusBarInfo struct {
-	name             string
-	agent            string
-	status           string
-	agentStatus      string
-	branch           string
-	dirty            bool
-	unpushed         int
-	unread           int
-	fleet            protocol.FleetSummary
-	pendingApprovals int
-	prNumber         int
-	prState          string // open | draft | merged | closed
-	prConflicting    bool
-	ciState          string // passing | failing | pending
+	name          string
+	agent         string
+	status        string
+	agentStatus   string
+	branch        string
+	dirty         bool
+	unpushed      int
+	unread        int
+	fleet         protocol.FleetSummary
+	prNumber      int
+	prState       string // open | draft | merged | closed
+	prConflicting bool
+	ciState       string // passing | failing | pending
 }
 
 func newStatusBarInfo(s protocol.SessionInfo, unreadCount int, fleet protocol.FleetSummary) statusBarInfo {
@@ -70,8 +69,6 @@ func styledStatus(status string, bg color.Color) lipgloss.Style {
 	switch status {
 	case "active", "running":
 		return base.Foreground(colorGreen)
-	case "approval":
-		return base.Foreground(colorRed).Bold(true)
 	case "ready":
 		return base.Foreground(colorBlue)
 	case "errored":
@@ -95,11 +92,6 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 	accent := accentBg
 	fill := barBg
 
-	if info.pendingApprovals > 0 {
-		accent = lipgloss.Color("#8b0000")
-		fill = lipgloss.Color("#5f0000")
-	}
-
 	accentPad := lipgloss.NewStyle().Background(accent)
 	fillPad := lipgloss.NewStyle().Background(fill)
 	nameStyle := lipgloss.NewStyle().Bold(true).Background(accent)
@@ -117,8 +109,6 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 	var dot string
 
 	switch {
-	case status == "approval":
-		dot = styledStatus(status, accent).Render("⚠")
 	case status == "errored":
 		dot = styledStatus(status, accent).Render("✗")
 	case status != "active" && status != "running" && status != "ready":
@@ -133,11 +123,6 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 	sep := fillSep.Render(" │ ")
 	leftContent := fillPad.Render(" ") + agentStyle.Render(info.agent) +
 		fillPad.Render("  ") + styledStatus(status, fill).Render(status)
-
-	if info.pendingApprovals > 0 {
-		leftContent += sep + lipgloss.NewStyle().Foreground(colorRed).Bold(true).Background(fill).
-			Render(fmt.Sprintf("⚠ %d pending", info.pendingApprovals))
-	}
 
 	var mid string
 	if branch != "" {
@@ -291,10 +276,6 @@ func formatFleetSection(fleet protocol.FleetSummary, bg color.Color) string {
 
 	var parts []string
 
-	if fleet.Approval > 0 {
-		parts = append(parts, styledStatus("approval", bg).Render(fmt.Sprintf("⚠ %d approval", fleet.Approval)))
-	}
-
 	if fleet.Errored > 0 {
 		parts = append(parts, styledStatus("errored", bg).Render(fmt.Sprintf("✗ %d error", fleet.Errored)))
 	}
@@ -323,10 +304,6 @@ func formatFleetMinimal(fleet protocol.FleetSummary, bg color.Color) string {
 		return ""
 	}
 
-	if fleet.Approval > 0 {
-		return styledStatus("approval", bg).Render(fmt.Sprintf("⚠ %d approval", fleet.Approval))
-	}
-
 	if fleet.Errored > 0 {
 		return styledStatus("errored", bg).Render(fmt.Sprintf("✗ %d error", fleet.Errored))
 	}
@@ -335,13 +312,12 @@ func formatFleetMinimal(fleet protocol.FleetSummary, bg color.Color) string {
 }
 
 type statusBarState struct {
-	mu               sync.Mutex
-	sessionID        string
-	info             statusBarInfo
-	rows             int
-	cols             int
-	position         string
-	pendingApprovals int
+	mu        sync.Mutex
+	sessionID string
+	info      statusBarInfo
+	rows      int
+	cols      int
+	position  string
 	// readOnly renders a read-only indicator instead of the normal status line,
 	// used as the persistent indicator for a read-only attach (issue #31).
 	readOnly bool
@@ -366,7 +342,6 @@ func (sb *statusBarState) scrollRegion() string {
 func (sb *statusBarState) render(w io.Writer) {
 	sb.mu.Lock()
 	info := sb.info
-	info.pendingApprovals = sb.pendingApprovals
 	cols := sb.cols
 	row := sb.barRow()
 	readOnly := sb.readOnly
@@ -386,7 +361,6 @@ func (sb *statusBarState) setup(w io.Writer) {
 	region := sb.scrollRegion()
 	pos := sb.position
 	info := sb.info
-	info.pendingApprovals = sb.pendingApprovals
 	cols := sb.cols
 	row := sb.barRow()
 	readOnly := sb.readOnly
@@ -419,12 +393,6 @@ func (sb *statusBarState) teardown(w io.Writer) {
 func (sb *statusBarState) updateInfo(info statusBarInfo) {
 	sb.mu.Lock()
 	sb.info = info
-	sb.mu.Unlock()
-}
-
-func (sb *statusBarState) updatePendingApprovals(count int) {
-	sb.mu.Lock()
-	sb.pendingApprovals = count
 	sb.mu.Unlock()
 }
 

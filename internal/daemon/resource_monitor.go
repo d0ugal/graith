@@ -273,13 +273,6 @@ func (sm *SessionManager) logAbnormalExitReport(
 	state := sm.state.Sessions[id]
 	attached := sm.attachedClients[id] != nil
 
-	pendingApprovals := 0
-	for _, approval := range sm.pendingApprovals {
-		if approval.Info.SessionID == id {
-			pendingApprovals++
-		}
-	}
-
 	sandboxed, sandboxBackend := false, ""
 	if state != nil {
 		sandboxed = state.Sandboxed
@@ -341,7 +334,7 @@ func (sm *SessionManager) logAbnormalExitReport(
 		"resource_samples", samples,
 		"sandboxed", sandboxed, "sandbox_backend", sandboxBackend,
 		"sandbox_diagnostic", sandboxDiagnostic,
-		"attached", attached, "pending_approvals", pendingApprovals,
+		"attached", attached,
 		"unread_messages", unread, "mcp_processes", mcpStatuses)
 }
 

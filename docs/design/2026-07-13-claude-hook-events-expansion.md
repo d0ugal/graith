@@ -10,6 +10,12 @@ issue: https://github.com/d0ugal/graith/issues/1073
 
 # Wire the missing Claude Code hook events
 
+> **Security amendment (2026-07-18):** Approval/Yolo/`approve-request`
+> sections in this historical hook analysis are superseded by
+> [Non-interactive agents with sandbox-enforced policy](2026-07-18-non-interactive-sandbox-policy.md).
+> Permission prompting is disabled at launch; the only permission hook retained
+> is an optional synchronous shell command-policy check that never waits.
+
 Claude Code emits on the order of two-dozen lifecycle hook events (the issue's
 source snapshot counts 27); graith registers 6 of them
 (`internal/daemon/hooks.go:60`) and never wires the rest. That leaves graith

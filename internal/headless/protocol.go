@@ -30,10 +30,9 @@ import (
 type Status string
 
 const (
-	StatusActive   Status = "active"
-	StatusApproval Status = "approval"
-	StatusReady    Status = "ready"
-	StatusStopped  Status = "stopped"
+	StatusActive  Status = "active"
+	StatusReady   Status = "ready"
+	StatusStopped Status = "stopped"
 )
 
 // event is a single stream-json line. Only the fields graith consumes are
@@ -82,8 +81,8 @@ type controlResponse struct {
 	Error     string          `json:"error"`
 }
 
-// canUseToolRequest is the body of an inbound can_use_tool control request: the
-// CLI asking graith to approve a tool call.
+// canUseToolRequest is retained only to fail closed on an unexpected native
+// permission prompt; supported launches disable these prompts.
 type canUseToolRequest struct {
 	Subtype  string          `json:"subtype"`
 	ToolName string          `json:"tool_name"`
@@ -139,22 +138,6 @@ type controlSubtype struct {
 	Subtype string `json:"subtype"`
 }
 
-// PermissionRequest is an inbound can_use_tool control request: the CLI asking
-// graith to approve a tool call.
-type PermissionRequest struct {
-	RequestID string
-	ToolName  string
-	// Input is the raw tool input JSON, passed through to the approval backend.
-	Input json.RawMessage
-}
-
-// PermissionDecision is graith's answer to a PermissionRequest.
-type PermissionDecision struct {
-	Allow bool
-	// Reason is surfaced to the agent on deny.
-	Reason string
-}
-
 // userMessage is the SDKUserMessage graith writes to feed a prompt/turn.
 type userMessage struct {
 	Type    string `json:"type"` // "user"
@@ -171,12 +154,6 @@ func statusForEvent(ev event) (Status, bool) {
 		return StatusActive, true
 	case "result":
 		return StatusReady, true
-	case "control_request":
-		// An inbound control_request from the CLI is (in v1) a can_use_tool
-		// permission ask — the agent is blocked awaiting a decision.
-		if controlSubtypeOf(ev.Request) == "can_use_tool" {
-			return StatusApproval, true
-		}
 	}
 
 	return "", false

@@ -21,7 +21,6 @@ func TestLimitsAccessorsFallBackToDefault(t *testing.T) {
 		{"wait_scan_lines", LimitsConfig.WaitScanLinesOrDefault, func(l *LimitsConfig, v int) { l.WaitScanLines = v }, LimitsWaitScanLinesDefault},
 		{"wait_buffer_bytes", LimitsConfig.WaitBufferBytesOrDefault, func(l *LimitsConfig, v int) { l.WaitBufferBytes = v }, LimitsWaitBufferBytesDefault},
 		{"mcp_log_read_bytes", LimitsConfig.MCPLogReadBytesOrDefault, func(l *LimitsConfig, v int) { l.MCPLogReadBytes = v }, LimitsMCPLogReadBytesDefault},
-		{"approval_display_bytes", LimitsConfig.ApprovalDisplayBytesOrDefault, func(l *LimitsConfig, v int) { l.ApprovalDisplayBytes = v }, LimitsApprovalDisplayBytesDefault},
 		{"last_message_runes", LimitsConfig.LastMessageRunesOrDefault, func(l *LimitsConfig, v int) { l.LastMessageRunes = v }, LimitsLastMessageRunesDefault},
 		{"inbox_preview_bytes", LimitsConfig.InboxPreviewBytesOrDefault, func(l *LimitsConfig, v int) { l.InboxPreviewBytes = v }, LimitsInboxPreviewBytesDefault},
 	}
@@ -69,7 +68,6 @@ func TestEmbeddedLimitsCarryPolicyValues(t *testing.T) {
 		{"wait_scan_lines", l.WaitScanLines, LimitsWaitScanLinesDefault},
 		{"wait_buffer_bytes", l.WaitBufferBytes, LimitsWaitBufferBytesDefault},
 		{"mcp_log_read_bytes", l.MCPLogReadBytes, LimitsMCPLogReadBytesDefault},
-		{"approval_display_bytes", l.ApprovalDisplayBytes, LimitsApprovalDisplayBytesDefault},
 		{"last_message_runes", l.LastMessageRunes, LimitsLastMessageRunesDefault},
 		{"inbox_preview_bytes", l.InboxPreviewBytes, LimitsInboxPreviewBytesDefault},
 	}
@@ -108,10 +106,6 @@ log_lines = 42
 	// Every unmentioned limit keeps its embedded default after the merge.
 	if got := cfg.Limits.WaitScanLinesOrDefault(); got != LimitsWaitScanLinesDefault {
 		t.Errorf("wait_scan_lines = %d, want default %d (preserved)", got, LimitsWaitScanLinesDefault)
-	}
-
-	if got := cfg.Limits.ApprovalDisplayBytesOrDefault(); got != LimitsApprovalDisplayBytesDefault {
-		t.Errorf("approval_display_bytes = %d, want default %d (preserved)", got, LimitsApprovalDisplayBytesDefault)
 	}
 
 	if got := cfg.Limits.InboxPreviewBytesOrDefault(); got != LimitsInboxPreviewBytesDefault {

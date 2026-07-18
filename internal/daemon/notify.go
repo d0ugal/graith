@@ -34,10 +34,6 @@ func (sm *SessionManager) onAgentStatusChange(sessionID, sessionName, oldStatus,
 	}
 
 	switch newStatus {
-	case "approval":
-		if !notifCfg.OnApproval {
-			return
-		}
 	case "stopped":
 		if !notifCfg.OnStopped {
 			return
@@ -286,8 +282,6 @@ func (sm *SessionManager) sendNotification(sessionName, status, command string) 
 	var message string
 
 	switch status {
-	case "approval":
-		message = sessionName + " needs approval"
 	case "stopped":
 		message = sessionName + " has stopped"
 	default:

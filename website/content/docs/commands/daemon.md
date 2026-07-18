@@ -26,6 +26,10 @@ Restart the daemon, preserving live sessions via exec.
 | `--force` | Clean stop/start that kills running sessions |
 
 After rebuilding `gr`, run `gr daemon restart` to pick up the new daemon binary.
+Live adoption is allowed only when persisted launch state proves the process was
+OS-sandboxed and started with native permission prompting disabled. Sessions
+from releases before the sandbox-only security model are terminated and marked
+stopped during upgrade; resume them to launch under the current enforcement.
 If the preserve request is accepted but the replacement is still not ready after
 the configured startup wait, graith rechecks the live daemon. It only falls back
 to a clean start after proving that the exact process which answered the
@@ -93,5 +97,5 @@ These are used by graith internally and are not intended for direct use:
 |---------|---------|
 | `gr report-status` | Report agent status (used by hooks) |
 | `gr check-inbox` | Check unread inbox messages (used by hooks) |
-| `gr approve-request` | Handle approval requests |
+| `gr command-policy-check` | Perform a bounded synchronous shell-policy check |
 | `gr mcp-proxy` | MCP proxy for session-scoped MCP connections |

@@ -49,7 +49,7 @@ This reference is organized by area:
 
 - **[Agents & repositories]({{< relref "agents.md" >}})** — agent definitions, template variables, MCP servers, per-agent sandbox, and per-repo settings.
 - **[Session behavior]({{< relref "sessions.md" >}})** — headless sessions, delete retention, the launch throttle, and periodic git pull.
-- **[Notifications & approvals]({{< relref "notifications.md" >}})** — the status bar, desktop/push notifications, approvals, and messages.
+- **[Notifications & messages]({{< relref "notifications.md" >}})** — the status bar, desktop/push notifications, and messages.
 - **[Automation & PR awareness]({{< relref "automation.md" >}})** — PR/CI watching, the comment author-trust gate, and triggers.
 - **[TUI & input]({{< relref "interface.md" >}})** — keybindings, the overlay, and input handling.
 - **[Orchestrator & remote access]({{< relref "access.md" >}})** — the orchestrator session and the tailnet remote listener.

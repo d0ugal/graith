@@ -19,7 +19,10 @@ A session is always in one of these lifecycle states:
 | `creating` | Session is being set up (transient) |
 | `deleting` | Session is being torn down (transient) |
 
-Running sessions also have an **agent status** that reflects the agent's current activity (e.g. `approval` when waiting for an approval decision, tool names from hook reports). This is separate from the session lifecycle state and is not persisted.
+Running sessions also have an **agent status** that reflects the agent's current
+activity (`active`, `ready`, or `error`, plus tool names from hook reports). An
+unexpected native permission prompt is a diagnosable `error`, never a workflow
+state. Agent status is separate from lifecycle state and is not persisted.
 
 ## Creation
 
@@ -33,8 +36,8 @@ Steps:
 2. **Branch** -- creates `<branch_prefix>/<session-name>-<session-id>` from the base branch (default: repo's default branch, override with `--base`)
 3. **Worktree** -- creates a git worktree at `<data_dir>/worktrees/<repo-name>/<repo-hash>/<session-id>/`
 4. **Environment** -- sets `GRAITH_SESSION_ID`, `GRAITH_SESSION_NAME`, `GRAITH_AGENT_TYPE`, `GRAITH_WORKTREE_PATH`, `GRAITH_REPO_PATH`, `GRAITH_TMPDIR`, `TMPDIR`
-5. **Sandbox** (if enabled) -- wraps the command with the configured backend (`safehouse wrap` or `nono run --profile`); fails closed if no `backend` is set or it can't enforce
-6. **Agent** -- starts the agent process with configured `command` and `args`
+5. **Sandbox** -- requires an available configured backend and wraps the command (`safehouse wrap` or `nono run --profile`); creation fails closed if enforcement cannot be established
+6. **Agent** -- starts the agent process with configured non-interactive arguments followed by `args`
 7. **Prompt** (if `--prompt` or `--prompt-file`) -- types the prompt into the agent's stdin after startup
 8. **Attach** (unless `--background`) -- enters passthrough mode
 
@@ -44,11 +47,11 @@ Steps:
 
 **In-place:** `gr new quick --in-place` runs the agent directly in the repo without creating a worktree. No branch is created. Use `--allow-concurrent` to permit multiple in-place sessions on the same repo.
 
-**Mirror:** `gr new observer --mirror my-session` creates a session that mounts another session's worktree read-only. Useful for observation or review. Requires sandbox to be enabled (`sandbox.enabled = true` in config).
+**Mirror:** `gr new observer --mirror my-session` creates a session that mounts another session's worktree read-only. Useful for observation or review. Like every session, it requires an enforceable sandbox.
 
 ### Headless sessions
 
-**Experimental.** `gr new watcher --headless -p "…"` runs the agent in Claude Code's stream-json mode instead of an interactive PTY. Headless sessions are **non-interactive**: they are meant for fire-and-forget work such as review judges and one-shot helpers. graith parses the typed event stream (so `gr logs -f` renders it and the run's cost/token usage is captured from the result envelope). v1 is Claude-only, one-shot (one prompt, run to completion, exit), requires a prompt, is **incompatible with the sandbox**, and implies `--background`; the whole path is inert unless `[headless] experimental = true` is set. A headless session is one-shot, so once it exits it cannot be resumed as headless. See [Configuration → Headless sessions]({{< relref "configuration/sessions.md#headless-sessions" >}}).
+**Experimental.** `gr new watcher --headless -p "…"` runs the agent in Claude Code's stream-json mode instead of an interactive PTY. Headless sessions are **non-interactive**: they are meant for fire-and-forget work such as review judges and one-shot helpers. graith parses the typed event stream (so `gr logs -f` renders it and the run's cost/token usage is captured from the result envelope). v1 is Claude-only, one-shot (one prompt, run to completion, exit), requires a prompt, runs inside the same mandatory OS sandbox as PTY sessions, and implies `--background`; the whole path is inert unless `[headless] experimental = true` is set. A headless session is one-shot, so once it exits it cannot be resumed as headless. See [Configuration → Headless sessions]({{< relref "configuration/sessions.md#headless-sessions" >}}).
 
 Because there is no PTY to stream, `gr attach` on a headless session
 **converts it to interactive**: it stops the headless process and relaunches
@@ -58,15 +61,12 @@ prompts you to confirm first (any in-flight tool call is cancelled, not resumed)
 pass `-y`/`--yes` to skip the prompt. To watch a headless session read-only
 *without* converting it, use `gr logs -f` instead.
 
-**Interrupts and approvals.** A headless session runs over Claude Code's stdin
-control protocol, so graith can cleanly `interrupt` an in-flight turn (rather
-than firing terminal signals) and answer tool-permission prompts inline. Because
-a headless session has no human to answer, its approval policy must be
-**non-blocking**: a `yolo` session auto-allows, a non-blocking `[approvals]`
-backend (`auto`/`external`/`builtin`/`localmost`) decides, and any policy that
-would otherwise wait for a human is **denied** — with a one-time notice posted to
-the orchestrator inbox. Set a non-blocking backend (or run it `--yolo`) for a
-headless session that needs to use gated tools.
+**Interrupts and permission errors.** A headless session runs over Claude Code's
+stdin control protocol, so graith can cleanly `interrupt` an in-flight turn
+rather than firing terminal signals. Native tool-permission requests are denied
+immediately and reported as runtime configuration errors; no human-response
+channel exists. The optional synchronous `[command_policy]` applies the same
+additional shell restrictions as it does to PTY sessions.
 
 ## Attachment
 
@@ -201,7 +201,7 @@ When includes are configured:
 
 Session state is stored in `state.json` in the data directory. The file is loaded on daemon start and saved on every mutation. Sessions survive daemon restarts.
 
-Runtime-only state (hook reports, attached clients, pending approvals) is not persisted and is rebuilt on restart.
+Runtime-only state (hook reports and attached clients) is not persisted and is rebuilt on restart.
 
 ## Scrollback
 

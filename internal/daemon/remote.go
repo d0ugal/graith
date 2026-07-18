@@ -231,7 +231,7 @@ func (sm *SessionManager) remoteDataAllowed(origin ConnOrigin, deviceID string) 
 }
 
 // remoteDeviceRole applies the live require_pairing authority ceiling while
-// preserving the device's approval-time ReadOnly restriction. Disabling
+// preserving the device's pairing-time ReadOnly restriction. Disabling
 // pairing downgrades every device immediately; re-enabling it never elevates a
 // device that was originally approved read-only.
 func remoteDeviceRole(cfg config.RemoteConfig, d *PairedDevice) authRole {

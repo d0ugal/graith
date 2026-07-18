@@ -58,7 +58,7 @@ func TestCliActivity(t *testing.T) {
 		want string
 	}{
 		{"not running clears activity", protocol.SessionInfo{Status: "stopped", AgentStatus: "active"}, ""},
-		{"approval gets glyph", protocol.SessionInfo{Status: "running", AgentStatus: "approval"}, "⚠ approval"},
+		{"runtime error passes through", protocol.SessionInfo{Status: "running", AgentStatus: "error"}, "error"},
 		{"active with tool annotated", protocol.SessionInfo{Status: "running", AgentStatus: "active", ToolName: "Bash"}, "active (Bash)"},
 		{"active without tool passes through", protocol.SessionInfo{Status: "running", AgentStatus: "active"}, "active"},
 		{"idle passes through", protocol.SessionInfo{Status: "running", AgentStatus: "idle"}, "idle"},
@@ -293,11 +293,11 @@ func TestTuiGitAndStyle(t *testing.T) {
 	}
 }
 
-// TestStatusStyle checks the approval styling is bold and red.
+// TestStatusStyle checks error and ready styling.
 func TestStatusStyle(t *testing.T) {
-	st := statusStyle(protocol.SessionInfo{Status: "running", AgentStatus: "approval"})
-	if st.GetForeground() != colorRed || !st.GetBold() {
-		t.Errorf("approval style = fg %v bold %v, want red bold", st.GetForeground(), st.GetBold())
+	st := statusStyle(protocol.SessionInfo{Status: "running", AgentStatus: "errored"})
+	if st.GetForeground() != colorRed {
+		t.Errorf("error style = fg %v, want red", st.GetForeground())
 	}
 
 	if statusStyle(protocol.SessionInfo{Status: "ready"}).GetForeground() != colorBlue {

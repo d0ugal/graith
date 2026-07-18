@@ -541,7 +541,7 @@ func TestResolveAuth_RequirePairingReloadSemantics(t *testing.T) {
 		t.Fatalf("full device role after require_pairing restore = %d, want remote human", got)
 	}
 
-	// Approval-time ReadOnly is persistent: enabling pairing is not an implicit
+	// Pairing-time ReadOnly is persistent: enabling pairing is not an implicit
 	// privilege grant to a device originally approved as a guest.
 	rid, _, _, err = sm.AddPendingPairing("croft", testPubKey(t), id, now.Add(time.Second))
 	if err != nil {
@@ -562,7 +562,7 @@ func TestResolveAuth_RequirePairingReloadSemantics(t *testing.T) {
 	}
 
 	if guestAuth.role != roleRemoteGuest {
-		t.Fatalf("approval-time guest role after require_pairing=true = %d, want guest", guestAuth.role)
+		t.Fatalf("pairing-time guest role after require_pairing=true = %d, want guest", guestAuth.role)
 	}
 }
 

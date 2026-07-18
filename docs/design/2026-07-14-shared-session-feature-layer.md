@@ -10,10 +10,15 @@ issue: https://github.com/d0ugal/graith/issues/1131
 
 # Shared session/feature view-model layer (GraithSessionKit)
 
+> **Security amendment (2026-07-18):** Approval aggregation, streams, models,
+> and UI described below were removed across the product by
+> [Non-interactive agents with sandbox-enforced policy](2026-07-18-non-interactive-sandbox-policy.md).
+> The shared session layer remains, without an interactive permission workflow.
+
 The macOS and iOS SwiftUI apps share code only up to the protocol/transport
 level (`GraithProtocol`, `GraithRemoteKit`, `GraithTerminalCore`, `GraithDesign`).
 Everything above the wire — the session store, the per-host connection
-view-model, approvals aggregation, host/pairing management — is written twice,
+view-model, and host/pairing management — is written twice,
 once per platform, in mutually incompatible shapes. This doc introduces a single
 shared session/feature layer, `GraithSessionKit`, that both apps bind to, so a
 new capability is wired once and appears on both platforms by construction.

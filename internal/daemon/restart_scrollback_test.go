@@ -95,9 +95,10 @@ func TestRestartCapturesScrollback(t *testing.T) {
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
 	cfg.Agents["echo"] = config.Agent{
-		Command:    "sh",
-		Args:       []string{"-c", "echo FRESH-OUTPUT; exec cat"},
-		ResumeArgs: []string{"-c", "echo RESUME-OUTPUT; exec cat"},
+		NonInteractiveArgs: []string{},
+		Command:            "sh",
+		Args:               []string{"-c", "echo FRESH-OUTPUT; exec cat"},
+		ResumeArgs:         []string{"-c", "echo RESUME-OUTPUT; exec cat"},
 	}
 
 	sm := NewSessionManager(cfg, config.Paths{
@@ -107,6 +108,7 @@ func TestRestartCapturesScrollback(t *testing.T) {
 		RuntimeDir: dir,
 		TmpDir:     filepath.Join(dir, "tmp"),
 	}, slog.Default())
+	sm.sandboxResolver = func(string) (bool, error) { return false, nil }
 
 	created, err := sm.Create(CreateOpts{
 		Name: "bide", AgentName: "echo", RepoPath: repo, BaseBranch: "main", Rows: 24, Cols: 80,
@@ -187,9 +189,10 @@ func TestRestartRunningSessionCapturesScrollback(t *testing.T) {
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
 	cfg.Agents["echo"] = config.Agent{
-		Command:    "sh",
-		Args:       []string{"-c", "echo FRESH-OUTPUT; exec cat"},
-		ResumeArgs: []string{"-c", "echo RESUME-OUTPUT; exec cat"},
+		NonInteractiveArgs: []string{},
+		Command:            "sh",
+		Args:               []string{"-c", "echo FRESH-OUTPUT; exec cat"},
+		ResumeArgs:         []string{"-c", "echo RESUME-OUTPUT; exec cat"},
 	}
 
 	sm := NewSessionManager(cfg, config.Paths{
@@ -199,6 +202,7 @@ func TestRestartRunningSessionCapturesScrollback(t *testing.T) {
 		RuntimeDir: dir,
 		TmpDir:     filepath.Join(dir, "tmp"),
 	}, slog.Default())
+	sm.sandboxResolver = func(string) (bool, error) { return false, nil }
 
 	created, err := sm.Create(CreateOpts{
 		Name: "canny", AgentName: "echo", RepoPath: repo, BaseBranch: "main", Rows: 24, Cols: 80,

@@ -71,12 +71,10 @@ public struct CreateMsg: Codable, Sendable {
     public var inPlace: Bool?
     public var allowConcurrent: Bool?
     public var skipModelValidation: Bool?
-    public var yolo: Bool?
 
     public init(name: String, agent: String, repoPath: String, base: String? = nil,
                 prompt: String? = nil, model: String? = nil, parentID: String? = nil,
-                noRepo: Bool? = nil, agentHooks: Bool? = nil, inPlace: Bool? = nil,
-                yolo: Bool? = nil) {
+                noRepo: Bool? = nil, agentHooks: Bool? = nil, inPlace: Bool? = nil) {
         self.name = name
         self.agent = agent
         self.repoPath = repoPath
@@ -87,7 +85,6 @@ public struct CreateMsg: Codable, Sendable {
         self.noRepo = noRepo
         self.agentHooks = agentHooks
         self.inPlace = inPlace
-        self.yolo = yolo
     }
 
     enum CodingKeys: String, CodingKey {
@@ -104,7 +101,6 @@ public struct CreateMsg: Codable, Sendable {
         case inPlace = "in_place"
         case allowConcurrent = "allow_concurrent"
         case skipModelValidation = "skip_model_validation"
-        case yolo
     }
 }
 
@@ -289,7 +285,6 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
     public var sandboxed: Bool?
     public var mirror: Bool?
     public var inPlace: Bool?
-    public var yolo: Bool?
     public var model: String?
     public var toolName: String?
     public var includes: [IncludedRepoInfo]?
@@ -317,7 +312,7 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
         exitSignal: String? = nil, createdAt: String = "", lastAttachedAt: String? = nil,
         statusChangedAt: String? = nil, dirty: Bool? = nil, unpushedCount: Int? = nil,
         sandboxed: Bool? = nil, mirror: Bool? = nil, inPlace: Bool? = nil,
-        yolo: Bool? = nil, model: String? = nil, toolName: String? = nil,
+        model: String? = nil, toolName: String? = nil,
         includes: [IncludedRepoInfo]? = nil, configStale: Bool? = nil, starred: Bool? = nil,
         systemKind: String? = nil,
         summaryText: String? = nil, summaryFaded: Bool? = nil, lastOutputAt: String? = nil,
@@ -329,7 +324,7 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
         self.status = status; self.agentStatus = agentStatus; self.exitCode = exitCode
         self.exitSignal = exitSignal; self.createdAt = createdAt; self.lastAttachedAt = lastAttachedAt
         self.statusChangedAt = statusChangedAt; self.dirty = dirty; self.unpushedCount = unpushedCount
-        self.sandboxed = sandboxed; self.mirror = mirror; self.inPlace = inPlace; self.yolo = yolo
+        self.sandboxed = sandboxed; self.mirror = mirror; self.inPlace = inPlace
         self.model = model; self.toolName = toolName; self.includes = includes
         self.configStale = configStale; self.starred = starred; self.systemKind = systemKind
         self.summaryText = summaryText
@@ -360,7 +355,6 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
         case sandboxed
         case mirror = "mirror"
         case inPlace = "in_place"
-        case yolo
         case model
         case toolName = "tool_name"
         case includes
@@ -828,16 +822,14 @@ public struct AgentCatalogResponseMsg: Codable, Sendable {
 public struct FleetSummary: Codable, Hashable, Sendable {
     public var total: Int
     public var active: Int
-    public var approval: Int
     public var ready: Int
     public var errored: Int
     public var stopped: Int
 
-    public init(total: Int = 0, active: Int = 0, approval: Int = 0,
-                ready: Int = 0, errored: Int = 0, stopped: Int = 0) {
+    public init(total: Int = 0, active: Int = 0, ready: Int = 0,
+                errored: Int = 0, stopped: Int = 0) {
         self.total = total
         self.active = active
-        self.approval = approval
         self.ready = ready
         self.errored = errored
         self.stopped = stopped

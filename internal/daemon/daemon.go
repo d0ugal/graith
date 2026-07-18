@@ -55,36 +55,33 @@ type SessionManager struct {
 	// scenarioResultMu serializes store-write + state-commit publication. Store
 	// I/O never holds mu, while the separate lock prevents two publications from
 	// leaving artifact content and metadata describing different attempts.
-	scenarioResultMu  sync.Mutex
-	state             *State
-	sessions          map[string]SessionDriver
-	stopAttempts      map[string]*stopAttempt
-	attachedClients   map[string]*attachedClient
-	hookReports       map[string]hookReport
-	pendingApprovals  map[string]*pendingApproval
-	headlessEscalated map[string]bool                // session ID → orchestrator already escalated once (headless non-blocking deny)
-	tokenIndex        map[string]string              // token → session ID (reverse lookup)
-	humanToken        string                         // local human credential, loaded at startup
-	saveStateFault    func() error                   // test-only saveState fault injection; nil in production
-	sandboxResolver   func(string) (bool, error)     // test-only sandbox-availability override; nil in production
-	pendingPairings   map[string]*pendingPairing     // requestID → pending device pairing (in-memory; not persisted)
-	pairWaiters       map[string]chan pairApproval   // requestID → waiter for a blocked pair_request connection
-	approvalSubs      map[net.Conn]func(string, any) // conn → sendControl for approval subscribers (no attach)
-	remoteTLSPin      string                         // SPKI pin of the active remote generation; guarded by mu
-	remoteGeneration  uint64                         // active remote runtime generation; 0 means no production listener
-	remote            *remoteController              // owned under configReloadMu; nil for bare SessionManagers used outside Run
-	deviceTokenIndex  map[string]string              // client-token HMAC → device ID (reverse lookup)
-	connsByDevice     map[string][]net.Conn          // device ID → live remote connections (for revocation)
-	pairReqTimes      []time.Time                    // recent pair_request timestamps (rate limiting)
-	cfg               *config.Config
-	paths             config.Paths
-	log               *slog.Logger
-	configFile        string
-	upgradeCh         chan string
-	messages          *MsgStore
-	todos             *TodoStore
-	mcpManager        *MCPManager
-	startedAt         time.Time
+	scenarioResultMu sync.Mutex
+	state            *State
+	sessions         map[string]SessionDriver
+	stopAttempts     map[string]*stopAttempt
+	attachedClients  map[string]*attachedClient
+	hookReports      map[string]hookReport
+	tokenIndex       map[string]string            // token → session ID (reverse lookup)
+	humanToken       string                       // local human credential, loaded at startup
+	saveStateFault   func() error                 // test-only saveState fault injection; nil in production
+	sandboxResolver  func(string) (bool, error)   // test-only sandbox-availability override; nil in production
+	pendingPairings  map[string]*pendingPairing   // requestID → pending device pairing (in-memory; not persisted)
+	pairWaiters      map[string]chan pairApproval // requestID → waiter for a blocked pair_request connection
+	remoteTLSPin     string                       // SPKI pin of the active remote generation; guarded by mu
+	remoteGeneration uint64                       // active remote runtime generation; 0 means no production listener
+	remote           *remoteController            // owned under configReloadMu; nil for bare SessionManagers used outside Run
+	deviceTokenIndex map[string]string            // client-token HMAC → device ID (reverse lookup)
+	connsByDevice    map[string][]net.Conn        // device ID → live remote connections (for revocation)
+	pairReqTimes     []time.Time                  // recent pair_request timestamps (rate limiting)
+	cfg              *config.Config
+	paths            config.Paths
+	log              *slog.Logger
+	configFile       string
+	upgradeCh        chan string
+	messages         *MsgStore
+	todos            *TodoStore
+	mcpManager       *MCPManager
+	startedAt        time.Time
 	// instanceID is a nonce generated once per daemon process start (including
 	// after an exec upgrade, which re-runs main and constructs a fresh
 	// SessionManager). It is returned in handshake_ok/auth_ok so an upgrade
@@ -186,10 +183,6 @@ type SessionManager struct {
 	pushCoalesce map[string]time.Time
 	pushDispatch func(backend, title, message, priority string) error // overridable in tests
 
-	// approvalsWarnOnce guards the one-time [approvals] mode deprecation warning
-	// so it fires once per daemon lifetime, not per approval request.
-	approvalsWarnOnce sync.Once
-
 	// watchers tracks in-flight watchSession goroutines. StopAll waits on it so
 	// that post-exit state writes and status publishes complete before the
 	// daemon (or a test harness) closes the message store and removes data dirs.
@@ -204,12 +197,9 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		stopAttempts:       make(map[string]*stopAttempt),
 		attachedClients:    make(map[string]*attachedClient),
 		hookReports:        make(map[string]hookReport),
-		pendingApprovals:   make(map[string]*pendingApproval),
-		headlessEscalated:  make(map[string]bool),
 		tokenIndex:         make(map[string]string),
 		pendingPairings:    make(map[string]*pendingPairing),
 		pairWaiters:        make(map[string]chan pairApproval),
-		approvalSubs:       make(map[net.Conn]func(string, any)),
 		deviceTokenIndex:   make(map[string]string),
 		connsByDevice:      make(map[string][]net.Conn),
 		orchestratorExitCh: make(chan string, 4),
@@ -285,7 +275,7 @@ func (sm *SessionManager) SetMCPManager(mm *MCPManager) {
 func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 	// Context-pressure and sub-agent events are runtime signals that must NOT
 	// change AgentStatus — a compacting agent, or one that spawned a sub-agent,
-	// is still active, and clobbering an approval/ready status here would be a
+	// is still active, and clobbering a ready status here would be a
 	// regression. They update runtime-only fields and return early (issue #1073).
 	switch sr.Event {
 	case "PreCompact", "PostCompact", "SubagentStart", "SubagentStop":
@@ -345,18 +335,19 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 		// A Claude Notification's meaning is in its subtype. The CLI forwards
 		// the raw notification_type (empty when stdin didn't parse); the daemon
 		// decides. Only idle_prompt (agent awaiting input) and permission_prompt
-		// (approval needed) change status. Everything else — auth_success,
+		// (an invalid non-interactive launch) change status. Everything else — auth_success,
 		// elicitation_*, and crucially an empty/unknown/unparsed subtype — is
 		// logged without touching AgentStatus, so a parse timeout can no longer
 		// spuriously flag a session as needing attention (the pre-subtype code
-		// mapped every Notification to approval).
+		// mapped every Notification to a permission state).
 		switch sr.NotificationType {
 		case "idle_prompt":
 			status = "ready"
 			staleness = hookTerminalWindow
 		case "permission_prompt":
-			status = "approval"
+			status = "error"
 			staleness = hookTerminalWindow
+			sm.log.Error("agent emitted an unexpected native permission prompt", "session_id", sr.SessionID)
 		default:
 			sm.log.Info("ignoring notification subtype",
 				"event", sr.Event, "notification_type", sr.NotificationType,
@@ -365,9 +356,11 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 			return
 		}
 	case "PermissionRequest":
-		// Codex's PreToolUse approval hook; not subtype-carrying.
-		status = "approval"
+		// A PermissionRequest is invalid because every launch disables native
+		// prompting. Surface it as a runtime configuration error.
+		status = "error"
 		staleness = hookTerminalWindow
+		sm.log.Error("agent emitted an unexpected PermissionRequest", "session_id", sr.SessionID)
 	case "Stop":
 		status = "ready"
 		staleness = hookTerminalWindow
@@ -465,7 +458,7 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 // SubagentStart/SubagentStop hook events (issue #1073). These update runtime-only
 // signals on the session and deliberately do NOT touch AgentStatus: a compacting
 // agent, or one that has spawned a sub-agent, is still whatever it was before
-// (active / approval / ready). The SubAgents map is replaced, never mutated in
+// (active / error / ready). The SubAgents map is replaced, never mutated in
 // place, so an off-lock cloneSessionState reading len() is race-free.
 func (sm *SessionManager) handleContextSubagentReport(sr protocol.StatusReportMsg) {
 	sm.mu.Lock()
@@ -682,12 +675,44 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 	// would take the read lock and deadlock).
 	lc := sm.cfg.Lifecycle
 
-	var adoptedIDs []string
+	var (
+		adoptedIDs       []string
+		rejectedSessions []UpgradeSession
+		adoptionErrs     []error
+	)
 
 	for _, us := range manifest.Sessions {
 		sessState, ok := sm.state.Sessions[us.ID]
 		if !ok {
-			sm.log.Warn("manifest references unknown session", "id", us.ID)
+			// Never attach an inherited PTY to state we could not authenticate.
+			// Closing the inherited master normally delivers SIGHUP to the old
+			// process; startup still fails below because we cannot safely prove
+			// the PID belongs to that missing state entry.
+			if f := os.NewFile(uintptr(us.Fd), "rejected-upgrade-session"); f != nil {
+				_ = f.Close()
+			}
+			adoptionErrs = append(adoptionErrs, fmt.Errorf("upgrade manifest references unknown session %q", us.ID))
+			sm.log.Error("refusing unknown session from upgrade manifest", "id", us.ID, "pid", us.PID)
+			continue
+		}
+		if sessState.PID > 1 && sessState.PID != us.PID {
+			if f := os.NewFile(uintptr(us.Fd), "rejected-upgrade-session"); f != nil {
+				_ = f.Close()
+			}
+			adoptionErrs = append(adoptionErrs, fmt.Errorf("upgrade session %q PID mismatch: state has %d, manifest has %d", us.ID, sessState.PID, us.PID))
+			continue
+		}
+
+		if reason := unsafeUpgradeAdoptionReason(sessState); reason != "" {
+			if f := os.NewFile(uintptr(us.Fd), "rejected-upgrade-session"); f != nil {
+				_ = f.Close()
+			}
+			sessState.Status = StatusStopped
+			sessState.StatusChangedAt = time.Now()
+			applyLifecycleSummaryLocked(sessState, "Stopped during incompatible security-model upgrade")
+			rejectedSessions = append(rejectedSessions, us)
+			sm.log.Warn("terminating upgrade session that lacks sandbox/non-interactive proof", "id", us.ID, "pid", us.PID, "reason", reason)
+
 			continue
 		}
 
@@ -726,14 +751,49 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 		sm.log.Info("adopted session", "id", us.ID, "pid", us.PID)
 	}
 
-	err := sm.saveState()
+	sm.mu.Unlock()
+
+	// Old manifests do not carry the non-interactive launch proof introduced by
+	// the sandbox-only security model. Terminate those process groups outside
+	// sm.mu so a bounded SIGTERM/SIGKILL wait cannot stall daemon state access.
+	killed := make(map[string]int, len(rejectedSessions))
+	for _, us := range rejectedSessions {
+		if err := killProcessGroup(us.PID, lc.ProcessKillGraceDuration()); err != nil {
+			adoptionErrs = append(adoptionErrs, fmt.Errorf("terminate incompatible upgrade session %q: %w", us.ID, err))
+			continue
+		}
+		killed[us.ID] = us.PID
+	}
+
+	sm.mu.Lock()
+	for id, pid := range killed {
+		if sess, ok := sm.state.Sessions[id]; ok && sess.PID == pid {
+			sess.PID = 0
+			sess.PIDStartTime = 0
+		}
+	}
+	saveErr := sm.saveState()
 	sm.mu.Unlock()
 
 	for _, id := range adoptedIDs {
 		go sm.notifyUnreadInbox(id)
 	}
 
-	return err
+	return errors.Join(append(adoptionErrs, saveErr)...)
+}
+
+func unsafeUpgradeAdoptionReason(sess *SessionState) string {
+	if !sess.Sandboxed {
+		return "session was not recorded as OS-sandboxed"
+	}
+	if sess.CreationCfg == nil {
+		return "session has no recorded launch configuration"
+	}
+	if sess.CreationCfg.Agent.NonInteractiveArgs == nil {
+		return "session has no recorded non-interactive launch arguments"
+	}
+
+	return ""
 }
 
 func (sm *SessionManager) saveState() error {
@@ -967,7 +1027,6 @@ type CreateOpts struct {
 	InPlace             bool
 	AllowConcurrent     bool
 	SkipModelValidation bool
-	Yolo                bool
 	// Headless requests a headless stream-json session instead of an
 	// interactive PTY (issue #1075). Honoured only when the agent is
 	// headless_capable and [headless] experimental is enabled; otherwise Create

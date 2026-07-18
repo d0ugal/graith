@@ -139,7 +139,7 @@ func TestCreateOptsStarred(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
-	cfg.Agents["sleeper"] = config.Agent{Command: "sleep", Args: []string{"60"}}
+	cfg.Agents["sleeper"] = config.Agent{NonInteractiveArgs: []string{}, Command: "sleep", Args: []string{"60"}}
 
 	dir := t.TempDir()
 	sm := NewSessionManager(cfg, config.Paths{
@@ -149,6 +149,7 @@ func TestCreateOptsStarred(t *testing.T) {
 		RuntimeDir: dir,
 		TmpDir:     filepath.Join(dir, "tmp"),
 	}, slog.Default())
+	sm.sandboxResolver = func(string) (bool, error) { return false, nil }
 
 	created, err := sm.Create(CreateOpts{
 		Name: "canny", AgentName: "sleeper", RepoPath: repoDir, BaseBranch: "main",

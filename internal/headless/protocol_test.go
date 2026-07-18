@@ -39,10 +39,9 @@ func TestStatusForEvent(t *testing.T) {
 			wantOK:     true,
 		},
 		{
-			name:       "control_request can_use_tool is approval",
-			ev:         event{Type: "control_request", Request: json.RawMessage(`{"subtype":"can_use_tool","tool_name":"Bash"}`)},
-			wantStatus: StatusApproval,
-			wantOK:     true,
+			name:   "unexpected permission prompt is not a status",
+			ev:     event{Type: "control_request", Request: json.RawMessage(`{"subtype":"can_use_tool","tool_name":"Bash"}`)},
+			wantOK: false,
 		},
 		{
 			name:   "control_request other subtype does not change status",

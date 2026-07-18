@@ -8,18 +8,16 @@ import (
 )
 
 // TestDefaultKeybindingsIncludePrefixCommands verifies the embedded default
-// config wires the previously-hardcoded m/a/r prefix commands (issue #1233).
+// config wires the previously-hardcoded m/r prefix commands (issue #1233).
 func TestDefaultKeybindingsIncludePrefixCommands(t *testing.T) {
 	cfg := Default()
 
 	cases := map[string]string{
 		"messages":        cfg.Keybindings.Messages,
-		"approvals":       cfg.Keybindings.Approvals,
 		"restart_session": cfg.Keybindings.RestartSession,
 	}
 	want := map[string]string{
 		"messages":        "m",
-		"approvals":       "a",
 		"restart_session": "r",
 	}
 
@@ -39,7 +37,6 @@ func TestDefaultOverlayKeybindings(t *testing.T) {
 		"up":                ov.Up,
 		"down":              ov.Down,
 		"list_watch_attach": ov.ListWatchAttach,
-		"approval_allow":    ov.ApprovalAllow,
 		"message_pin":       ov.MessagePin,
 		"message_next_conv": ov.MessageNextConv,
 	}
@@ -107,7 +104,7 @@ func TestKeybindingsConflicts(t *testing.T) {
 	})
 
 	t.Run("empty bindings are not conflicts", func(t *testing.T) {
-		k := Keybindings{Messages: "", Approvals: ""}
+		k := Keybindings{Messages: ""}
 		if got := k.Conflicts(); len(got) != 0 {
 			t.Errorf("empty bindings reported as conflicting: %v", got)
 		}

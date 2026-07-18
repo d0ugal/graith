@@ -122,7 +122,7 @@ sandbox — Landlock/Seatbelt restrictions are inherited by all descendants.
 
 ## Fail closed
 
-If the sandbox is enabled but cannot be enforced, session creation is refused —
+If the mandatory sandbox cannot be enforced, session creation is refused —
 graith never silently runs unsandboxed. The rules:
 
 | Condition | Result |

@@ -376,7 +376,7 @@ func TestEmptyUnlessDoesNotDisableDeny(t *testing.T) {
 // TestBacktrackingBudgetTerminates guards issue #798: a pathological rule with
 // several unbounded quantifiers, matched against a long agent-controlled
 // command, must not send the matcher super-linear. The step budget makes it
-// bail and fail closed (PolicyAsk) rather than pinning a CPU on the approval
+// bail and fail closed (PolicyAsk) rather than pinning a CPU on the command-policy
 // path. Without the bound this evaluation would take effectively forever, so
 // the test runs it under a watchdog to fail fast instead of hanging the suite.
 func TestBacktrackingBudgetTerminates(t *testing.T) {
