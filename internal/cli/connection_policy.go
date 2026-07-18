@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 // dialLocalDaemon is a test seam shared by the CLI-only daemon probes. Normal
@@ -18,6 +19,11 @@ var connectionNow = time.Now
 // connectionSleep is the lifecycle-wait sleep, a seam so start-policy tests can
 // advance a fake clock instead of sleeping real time.
 var connectionSleep = time.Sleep
+
+var (
+	upgradeNegotiationFloor = protocol.UpgradeNegotiationTimeout
+	upgradeReadinessFloor   = protocol.UpgradeReadinessTimeout
+)
 
 // probeDaemonIdentityFn is a seam so waitForNewLocalDaemonGeneration can be
 // tested without a live daemon socket. The deadline is the absolute aggregate
@@ -38,6 +44,10 @@ func localDaemonHandshakeTimeout() time.Duration {
 	}
 
 	return cfg.Connection.HandshakeTimeoutDuration()
+}
+
+func localUpgradeNegotiationTimeout() time.Duration {
+	return maxConnectionDuration(localDaemonHandshakeTimeout(), upgradeNegotiationFloor)
 }
 
 func dialLocalDaemonSocket() (net.Conn, error) {
@@ -114,7 +124,11 @@ func localDaemonStartPollInterval() time.Duration {
 // ready so each dial and handshake caps its distinct operation policy at the
 // remaining startup budget.
 func pollLocalDaemon(ready func(deadline time.Time) bool) bool {
-	deadline := connectionNow().Add(localDaemonStartTimeout())
+	return pollLocalDaemonWithin(localDaemonStartTimeout(), ready)
+}
+
+func pollLocalDaemonWithin(timeout time.Duration, ready func(deadline time.Time) bool) bool {
+	deadline := connectionNow().Add(timeout)
 	interval := localDaemonStartPollInterval()
 
 	for {
@@ -159,7 +173,8 @@ func pollLocalDaemon(ready func(deadline time.Time) bool) bool {
 // never became probeable at all. It is not proof that an accepted preserve
 // restart failed because exec/adoption may still be progressing.
 func waitForNewLocalDaemonGeneration(wantVersion, priorInstanceID string) (lastVersion string, ready bool) {
-	ready = pollLocalDaemon(func(deadline time.Time) bool {
+	budget := maxConnectionDuration(localDaemonStartTimeout(), upgradeReadinessFloor)
+	ready = pollLocalDaemonWithin(budget, func(deadline time.Time) bool {
 		v, id := probeDaemonIdentityFn(deadline)
 		lastVersion = v
 
@@ -167,6 +182,14 @@ func waitForNewLocalDaemonGeneration(wantVersion, priorInstanceID string) (lastV
 	})
 
 	return lastVersion, ready
+}
+
+func maxConnectionDuration(a, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+
+	return b
 }
 
 func isNewDaemonGeneration(version, instanceID, wantVersion, priorInstanceID string) bool {

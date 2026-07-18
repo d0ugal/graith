@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -758,6 +759,7 @@ func (sm *SessionManager) SessionForToken(token string) string {
 type UpgradeAdoptionResult struct {
 	ResolvedSessions   []UpgradeSession
 	UnresolvedSessions []UpgradeSession
+	adoptedSessions    []*grpty.Session
 }
 
 func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) (UpgradeAdoptionResult, error) {
@@ -988,13 +990,25 @@ func (sm *SessionManager) adoptSessions(
 		if state == nil || state.PID != us.PID || state.PIDStartTime != us.PIDStartTime ||
 			state.Status != StatusRunning || state.IsSoftDeleted() {
 			sm.mu.Unlock()
-			ptySess.Close()
-			cleaned, _ := terminateFailedUpgradeSession(us)
+			cleanupDeadline := manifest.adoptionDeadline
+			if cleanupDeadline.IsZero() {
+				cleanupTimeout := lc.AdoptedTimeoutDuration()
+				if cleanupTimeout <= 0 {
+					cleanupTimeout = 5 * time.Second
+				}
+				cleanupDeadline = time.Now().Add(cleanupTimeout)
+			}
+			cleanupCtx, cancelCleanup := context.WithDeadline(context.Background(), cleanupDeadline)
+			cleanupErr := ptySess.RejectAdoption(cleanupCtx)
+			cancelCleanup()
+			cleaned := cleanupErr == nil
 			if cleaned {
 				result.ResolvedSessions = append(result.ResolvedSessions, us)
 			} else {
 				addUnresolved(us)
 			}
+			sm.log.Warn("adopted session failed final publication check", "id", us.ID,
+				"cleanup_error", cleanupErr)
 
 			continue
 		}
@@ -1003,7 +1017,7 @@ func (sm *SessionManager) adoptSessions(
 		sm.sessions[us.ID] = ptySess
 		adoptedDrivers[us.ID] = ptySess
 		sm.mu.Unlock()
-		ptySess.StartAdoptedWaiter()
+		result.adoptedSessions = append(result.adoptedSessions, ptySess)
 		result.ResolvedSessions = append(result.ResolvedSessions, us)
 		sm.log.Info("adopted session", "id", us.ID, "pid", us.PID)
 	}
@@ -1024,6 +1038,9 @@ func (sm *SessionManager) adoptSessions(
 	}
 	err = errors.Join(err, identityErr)
 	if persist {
+		for _, session := range result.adoptedSessions {
+			session.StartAdoptedWaiter()
+		}
 		for id, driver := range adoptedDrivers {
 			sm.startWatcher(id, driver)
 		}

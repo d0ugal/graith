@@ -209,7 +209,8 @@ func probeDaemonIdentity(sockPath string, paths config.Paths, aggregateDeadline 
 // the new one; only a changed instance ID proves the replacement generation is
 // actually serving (issue #1319). Bounded by the effective start policy.
 func waitForNewDaemonGeneration(sockPath string, paths config.Paths, wantVersion, priorInstanceID string) bool {
-	return pollDaemonReady(func(deadline time.Time) bool {
+	budget := maxDuration(daemonStartTimeout, upgradeReadinessFloor)
+	return pollDaemonReadyWithin(budget, func(deadline time.Time) bool {
 		v, id := probeDaemonIdentity(sockPath, paths, deadline)
 
 		return v == wantVersion && id != "" && id != priorInstanceID
@@ -226,7 +227,8 @@ func requestUpgrade(c *Client) error {
 		ExecPath:      execPath,
 		ClientVersion: version.Version,
 	}
-	if err := c.conn.SetDeadline(time.Now().Add(daemonHandshakeTimeout)); err != nil {
+	negotiationTimeout := maxDuration(daemonHandshakeTimeout, upgradeNegotiationFloor)
+	if err := c.conn.SetDeadline(time.Now().Add(negotiationTimeout)); err != nil {
 		return errors.New("set upgrade negotiation deadline")
 	}
 	defer func() { _ = c.conn.SetDeadline(time.Time{}) }()
@@ -264,7 +266,11 @@ func requestUpgrade(c *Client) error {
 // dial and handshake can cap its distinct operation policy at the remaining
 // startup budget.
 func pollDaemonReady(ready func(deadline time.Time) bool) bool {
-	deadline := time.Now().Add(daemonStartTimeout)
+	return pollDaemonReadyWithin(daemonStartTimeout, ready)
+}
+
+func pollDaemonReadyWithin(timeout time.Duration, ready func(deadline time.Time) bool) bool {
+	deadline := time.Now().Add(timeout)
 
 	for {
 		remaining := time.Until(deadline)
@@ -290,6 +296,14 @@ func pollDaemonReady(ready func(deadline time.Time) bool) bool {
 
 		time.Sleep(sleep)
 	}
+}
+
+func maxDuration(a, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+
+	return b
 }
 
 // ConnectFast is a fast-path connect for hooks. It dials the daemon socket

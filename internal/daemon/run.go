@@ -76,11 +76,15 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) (
 	if adoptFrom != "" {
 		return RunAdoptBootstrap(configFile, adoptFrom)
 	}
+	effectiveConfigFile, _, err := config.ResolveConfigPath(configFile)
+	if err != nil {
+		return fmt.Errorf("resolve effective config source: %w", err)
+	}
 	if err := grpty.PreparePinnedTerminalExecutable(); err != nil {
 		return fmt.Errorf("prepare terminal helper executable: %w", err)
 	}
 	defer grpty.ClosePinnedTerminalExecutable()
-	return run(cfg, paths, configFile, adoptFrom, nil, nil)
+	return run(cfg, paths, effectiveConfigFile, adoptFrom, nil, nil)
 }
 
 // RunAdoptBootstrap establishes post-exec ownership before config loading or
@@ -96,6 +100,12 @@ func RunAdoptBootstrap(configFile, adoptFrom string) (returnErr error) {
 	adoptionDeadline := time.Now().Add(upgradeAdoptionTimeout)
 	ownership := newUpgradeOwnershipGuard(owned, adoptionDeadline)
 	defer func() { returnErr = errors.Join(returnErr, ownership.Cleanup()) }()
+	// The immutable capsule is the first trustworthy enumeration of every
+	// transferred resource. Restore CLOEXEC before reading the manifest or
+	// touching config, paths, MCP, or any other subsystem that could fork.
+	if err := secureUpgradeManifestDescriptors(owned); err != nil {
+		return err
+	}
 	if capsuleErr != nil {
 		return fmt.Errorf("read upgrade ownership capsule: %w", capsuleErr)
 	}
@@ -152,15 +162,21 @@ func adoptUpgradeListener(
 	if f == nil {
 		return nil, errors.New("inherited listener descriptor is invalid")
 	}
-	listener, err := net.FileListener(f)
+	listener, conversionErr := net.FileListener(f)
 	closeErr := f.Close()
-	if err != nil {
-		return nil, errors.New("inherited listener conversion failed")
-	}
-	if err := ownership.consumeListener(closeErr); err != nil {
-		_ = listener.Close()
+	ownershipErr := ownership.consumeListener(closeErr)
+	if ownershipErr != nil {
+		if listener != nil {
+			_ = listener.Close()
+		}
 
-		return nil, errors.New("inherited listener descriptor close could not be proven")
+		return nil, errors.Join(
+			errors.New("inherited listener descriptor close could not be proven"),
+			conversionErr,
+		)
+	}
+	if conversionErr != nil {
+		return nil, errors.New("inherited listener conversion failed")
 	}
 	if afterConversion != nil {
 		if err := afterConversion(); err != nil {
@@ -181,6 +197,13 @@ func run(
 	ownership *upgradeOwnershipGuard,
 ) (returnErr error) {
 	defer grpty.ClosePinnedTerminalExecutable()
+	if configFile == "" {
+		var err error
+		configFile, _, err = config.ResolveConfigPath("")
+		if err != nil {
+			return fmt.Errorf("resolve effective config source: %w", err)
+		}
+	}
 	if adoptFrom != "" {
 		if manifest == nil {
 			var err error
@@ -276,9 +299,6 @@ func run(
 				return err
 			}
 		}
-		if err := secureUpgradeManifestDescriptors(manifest); err != nil {
-			return err
-		}
 		originalStateVersion, err := sm.loadStateSnapshotForAdoption(manifest.StateSnapshot)
 		if err != nil {
 			var ve *StateVersionError
@@ -337,6 +357,12 @@ func run(
 		}
 		for _, session := range adoption.ResolvedSessions {
 			ownership.disarmSession(session)
+		}
+		// Only the committed marker plus disarmed cleanup guard makes manager
+		// publication irreversible. Until now the daemon remains the sole waiter,
+		// preserving exact-child identity for any later-session rollback.
+		for _, session := range adoption.adoptedSessions {
+			session.StartAdoptedWaiter()
 		}
 		// Resolve processes which exited during adoption immediately. Anything
 		// still live remains registered for the recurring cleanup loop below;
@@ -450,10 +476,6 @@ func run(
 		if len(sm.Config().Remote.AllowTailnetUsers) == 0 {
 			log.Warn("[remote] enabled with empty allow_tailnet_users — all remote connections denied (Gate 1 fail-closed)")
 		}
-	}
-
-	if configFile == "" {
-		configFile = paths.ConfigFile
 	}
 
 	sm.configFile = configFile
@@ -668,10 +690,16 @@ func run(
 
 			return err
 		}
+		configSnapshot, configPresent, err := captureUpgradeConfigSnapshot(configFile)
+		if err != nil {
+			return fail("upgrade config snapshot could not be captured", err)
+		}
+		configSource := makeUpgradeConfigSource(configFile, configSnapshot, configPresent)
 
 		target, err := probeUpgradeTarget(clientExecPath, upgradeProbeExpectation{
-			profile: paths.Profile,
-			paths:   makeUpgradePathDescriptor(paths, configFile),
+			profile:      paths.Profile,
+			paths:        makeUpgradePathDescriptor(paths, configFile),
+			configSource: configSource,
 		})
 		if err != nil {
 			return fail(err.Error(), err)
@@ -780,10 +808,8 @@ func run(
 		if err := sm.persistFrozenUpgradeState(manifest); err != nil {
 			return fail("upgrade state could not be persisted", err)
 		}
-		manifest.ConfigSnapshot, manifest.ConfigPresent, err = captureUpgradeConfigSnapshot(configFile)
-		if err != nil {
-			return fail("upgrade config snapshot could not be captured", err)
-		}
+		manifest.ConfigSnapshot = configSnapshot
+		manifest.ConfigPresent = configPresent
 		snapshotCfg := config.Default()
 		if manifest.ConfigPresent {
 			snapshotCfg, err = config.LoadBytes(configFile, manifest.ConfigSnapshot)
