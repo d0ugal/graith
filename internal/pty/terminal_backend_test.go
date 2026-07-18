@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// terminalSpikeFactory lets the same reduced synthetic corpus and benchmarks
-// exercise the production backend and any explicitly tagged spike backend.
-type terminalSpikeFactory struct {
+// terminalBackendFactory lets the same reduced synthetic corpus and benchmarks
+// exercise the rollback backend and an explicitly tagged native candidate.
+type terminalBackendFactory struct {
 	name                      string
 	new                       func(cols, rows int) (Terminal, error)
 	expectsContained1430Panic bool
@@ -18,8 +18,8 @@ type terminalSpikeFactory struct {
 	shrinkFirstLine           string
 }
 
-func terminalSpikeFactories() []terminalSpikeFactory {
-	backends := []terminalSpikeFactory{
+func terminalBackendFactories() []terminalBackendFactory {
+	backends := []terminalBackendFactory{
 		{
 			name: "charm",
 			new: func(cols, rows int) (Terminal, error) {
@@ -32,12 +32,12 @@ func terminalSpikeFactories() []terminalSpikeFactory {
 		},
 	}
 
-	return append(backends, experimentalTerminalSpikeFactories()...)
+	return append(backends, nativeTerminalBackendFactories()...)
 }
 
-func newTerminalSpikeTestTerm(
+func newTerminalBackendTestTerm(
 	t testing.TB,
-	factory terminalSpikeFactory,
+	factory terminalBackendFactory,
 	cols, rows int,
 ) Terminal {
 	t.Helper()
@@ -56,14 +56,14 @@ func newTerminalSpikeTestTerm(
 	return term
 }
 
-// TestTerminalSpikeCompatibilityCorpus runs both backends through the same
+// TestTerminalBackendCompatibilityCorpus runs both backends through the same
 // generic inputs. The corpus is deliberately reduced and synthetic: it
 // contains no captured user/agent output, local paths, or session identifiers.
-func TestTerminalSpikeCompatibilityCorpus(t *testing.T) {
-	for _, factory := range terminalSpikeFactories() {
+func TestTerminalBackendCompatibilityCorpus(t *testing.T) {
+	for _, factory := range terminalBackendFactories() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Run("graphemes_styles_colors_and_cursor", func(t *testing.T) {
-				term := newTerminalSpikeTestTerm(t, factory, 24, 4)
+				term := newTerminalBackendTestTerm(t, factory, 24, 4)
 				write(t, term, "\x1b[2J\x1b[H")
 				write(t, term, "\x1b[1;2;3;4;5;7;9;38;5;208;48;2;10;20;30mZ\x1b[0m")
 				write(t, term, "\r\ne\u0301你😀")
@@ -104,7 +104,7 @@ func TestTerminalSpikeCompatibilityCorpus(t *testing.T) {
 			})
 
 			t.Run("scrollback_hydration_and_resize", func(t *testing.T) {
-				term := newTerminalSpikeTestTerm(t, factory, 36, 5)
+				term := newTerminalBackendTestTerm(t, factory, 36, 5)
 				fixture := syntheticTerminalWorkload(128 * 1024)
 				write(t, term, string(fixture))
 
@@ -113,7 +113,9 @@ func TestTerminalSpikeCompatibilityCorpus(t *testing.T) {
 					t.Fatalf("hydrated preview missing final synthetic rows: %q", before)
 				}
 
-				term.Resize(52, 8)
+				if err := term.Resize(52, 8); err != nil {
+					t.Fatal(err)
+				}
 
 				if cols, rows := term.Size(); cols != 52 || rows != 8 {
 					t.Errorf("size after grow = (%d,%d), want (52,8)", cols, rows)
@@ -125,9 +127,11 @@ func TestTerminalSpikeCompatibilityCorpus(t *testing.T) {
 			})
 
 			t.Run("shrink_reflow", func(t *testing.T) {
-				term := newTerminalSpikeTestTerm(t, factory, 20, 2)
+				term := newTerminalBackendTestTerm(t, factory, 20, 2)
 				write(t, term, "keep me canny")
-				term.Resize(4, 2)
+				if err := term.Resize(4, 2); err != nil {
+					t.Fatal(err)
+				}
 
 				if got := line(t, term, 0); got != factory.shrinkFirstLine {
 					t.Errorf("first line after shrink = %q, want %q", got, factory.shrinkFirstLine)
@@ -135,7 +139,7 @@ func TestTerminalSpikeCompatibilityCorpus(t *testing.T) {
 			})
 
 			t.Run("alternate_screen_and_device_queries", func(t *testing.T) {
-				term := newTerminalSpikeTestTerm(t, factory, 30, 3)
+				term := newTerminalBackendTestTerm(t, factory, 30, 3)
 				write(t, term, "on the brae")
 				write(t, term, "\x1b[?1049h\x1b[6n\x1b[c\x1b[5n")
 				write(t, term, "in the bothy")
@@ -157,7 +161,7 @@ func TestTerminalSpikeCompatibilityCorpus(t *testing.T) {
 			})
 
 			t.Run("issue_1430_reduced_regression", func(t *testing.T) {
-				term := newTerminalSpikeTestTerm(t, factory, 80, 24)
+				term := newTerminalBackendTestTerm(t, factory, 80, 24)
 
 				n, err := term.Write(terminalParserPanicFixture(t))
 				if factory.expectsContained1430Panic {
@@ -178,14 +182,29 @@ func TestTerminalSpikeCompatibilityCorpus(t *testing.T) {
 	}
 }
 
-func BenchmarkTerminalSpike(b *testing.B) {
+func BenchmarkTerminalBackends(b *testing.B) {
 	parseWorkload := syntheticTerminalWorkload(64 * 1024)
 	hydrationWorkload := syntheticTerminalWorkload(4 * 1024 * 1024)
 
-	for _, factory := range terminalSpikeFactories() {
+	for _, factory := range terminalBackendFactories() {
 		b.Run(factory.name, func(b *testing.B) {
+			b.Run("start_close", func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+
+				for i := 0; i < b.N; i++ {
+					term, err := factory.new(120, 40)
+					if err != nil {
+						b.Fatal(err)
+					}
+					if err := term.Close(); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+
 			b.Run("parse", func(b *testing.B) {
-				term := newTerminalSpikeTestTerm(b, factory, 120, 40)
+				term := newTerminalBackendTestTerm(b, factory, 120, 40)
 				b.ReportAllocs()
 				b.SetBytes(int64(len(parseWorkload)))
 				b.ResetTimer()
@@ -197,8 +216,8 @@ func BenchmarkTerminalSpike(b *testing.B) {
 				}
 			})
 
-			b.Run("cell_extraction", func(b *testing.B) {
-				term := newTerminalSpikeTestTerm(b, factory, 120, 40)
+			b.Run("snapshot_120x40", func(b *testing.B) {
+				term := newTerminalBackendTestTerm(b, factory, 120, 40)
 				if _, err := term.Write(parseWorkload); err != nil {
 					b.Fatal(err)
 				}
@@ -213,11 +232,12 @@ func BenchmarkTerminalSpike(b *testing.B) {
 						b.Fatal(err)
 					}
 
-					for y := 0; y < 40; y++ {
-						for x := 0; x < 120; x++ {
-							cell := term.Cell(x, y)
-							checksum += uint64(len(cell.Content)) + uint64(cell.Style.FG.Value)
-						}
+					snapshot, err := snapshotTerminal(term)
+					if err != nil {
+						b.Fatal(err)
+					}
+					for _, cell := range snapshot.Cells {
+						checksum += uint64(len(cell.Content)) + uint64(cell.Style.FG.Value)
 					}
 				}
 
@@ -227,7 +247,7 @@ func BenchmarkTerminalSpike(b *testing.B) {
 			})
 
 			b.Run("resize", func(b *testing.B) {
-				term := newTerminalSpikeTestTerm(b, factory, 80, 24)
+				term := newTerminalBackendTestTerm(b, factory, 80, 24)
 				if _, err := term.Write(parseWorkload); err != nil {
 					b.Fatal(err)
 				}
@@ -237,9 +257,13 @@ func BenchmarkTerminalSpike(b *testing.B) {
 
 				for i := 0; i < b.N; i++ {
 					if i%2 == 0 {
-						term.Resize(120, 40)
+						if err := term.Resize(120, 40); err != nil {
+							b.Fatal(err)
+						}
 					} else {
-						term.Resize(80, 24)
+						if err := term.Resize(80, 24); err != nil {
+							b.Fatal(err)
+						}
 					}
 				}
 			})
@@ -261,10 +285,10 @@ func BenchmarkTerminalSpike(b *testing.B) {
 						b.Fatal(err)
 					}
 
-					for y := 0; y < 40; y++ {
-						for x := 0; x < 120; x++ {
-							_ = term.Cell(x, y)
-						}
+					if _, err := snapshotTerminal(term); err != nil {
+						_ = term.Close()
+
+						b.Fatal(err)
 					}
 
 					if err := term.Close(); err != nil {
@@ -276,19 +300,19 @@ func BenchmarkTerminalSpike(b *testing.B) {
 	}
 }
 
-// TestTerminalSpikePeakMemoryWorkload is an opt-in process-level workload for
+// TestTerminalBackendPeakMemoryWorkload is an opt-in process-level workload for
 // /usr/bin/time (or an equivalent RSS observer). Go's benchmark allocation
 // counters cannot see native allocations, so peak RSS must be measured around
 // a separate test process for each backend.
-func TestTerminalSpikePeakMemoryWorkload(t *testing.T) {
+func TestTerminalBackendPeakMemoryWorkload(t *testing.T) {
 	name := os.Getenv("GRAITH_TERMINAL_MEMORY_BACKEND")
 	if name == "" {
 		t.Skip("set GRAITH_TERMINAL_MEMORY_BACKEND to run the process-level RSS workload")
 	}
 
-	var selected *terminalSpikeFactory
+	var selected *terminalBackendFactory
 
-	for _, factory := range terminalSpikeFactories() {
+	for _, factory := range terminalBackendFactories() {
 		if factory.name == name {
 			factory := factory
 			selected = &factory
@@ -301,20 +325,27 @@ func TestTerminalSpikePeakMemoryWorkload(t *testing.T) {
 		t.Fatalf("unknown terminal backend %q", name)
 	}
 
-	term := newTerminalSpikeTestTerm(t, *selected, 120, 40)
+	term := newTerminalBackendTestTerm(t, *selected, 120, 40)
 
 	fixture := syntheticTerminalWorkload(4 * 1024 * 1024)
 	if _, err := term.Write(fixture); err != nil {
 		t.Fatal(err)
 	}
 
+	snapshot, err := snapshotTerminal(term)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var checksum uint64
+	for _, cell := range snapshot.Cells {
+		checksum += uint64(len(cell.Content)) + uint64(cell.Style.FG.Value)
+	}
 
-	for y := 0; y < 40; y++ {
-		for x := 0; x < 120; x++ {
-			cell := term.Cell(x, y)
-			checksum += uint64(len(cell.Content)) + uint64(cell.Style.FG.Value)
-		}
+	if err := term.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if observer, ok := term.(interface{ PeakRSSBytes() int64 }); ok {
+		t.Logf("helper_peak_rss_bytes=%d", observer.PeakRSSBytes())
 	}
 
 	t.Logf("backend=%s fixture_bytes=%d checksum=%d", name, len(fixture), checksum)

@@ -54,6 +54,19 @@ type Cell struct {
 	Style   CellStyle
 }
 
+// TerminalSnapshot is one coherent read of a terminal's visible viewport.
+// Cells are stored in row-major order and always contain Cols*Rows entries.
+// Keeping this bulk form behind the narrow Terminal interface avoids one FFI
+// or helper-process round trip per cell.
+type TerminalSnapshot struct {
+	Cells         []Cell
+	CursorX       int
+	CursorY       int
+	CursorVisible bool
+	Cols          int
+	Rows          int
+}
+
 // Terminal is the terminal-screen emulation surface graith needs: feed it raw
 // PTY output with Write, then read back the rendered screen for previews and
 // snapshots. It deliberately hides the concrete emulator (issue #1211).
@@ -66,7 +79,7 @@ type Terminal interface {
 	// terminal query responses (the implementation drains them).
 	Write(p []byte) (int, error)
 	// Resize changes the screen dimensions to cols columns by rows rows.
-	Resize(cols, rows int)
+	Resize(cols, rows int) error
 	// Size returns the current dimensions as (columns, rows).
 	Size() (cols, rows int)
 	// Cursor returns the cursor column, row (both zero-based), and whether it
@@ -78,4 +91,36 @@ type Terminal interface {
 	// Close releases resources held by the emulator (e.g. its response-drain
 	// goroutine). It is safe to call more than once.
 	Close() error
+}
+
+// terminalSnapshotter is implemented by backends that can extract a coherent
+// viewport more efficiently than repeated Cursor and Cell calls. All built-in
+// backends implement it; the fallback keeps small test doubles source-compatible
+// with Terminal.
+type terminalSnapshotter interface {
+	Snapshot() (TerminalSnapshot, error)
+}
+
+func snapshotTerminal(term Terminal) (TerminalSnapshot, error) {
+	if snapshotter, ok := term.(terminalSnapshotter); ok {
+		return snapshotter.Snapshot()
+	}
+
+	cols, rows := term.Size()
+	cursorX, cursorY, cursorVisible := term.Cursor()
+	cells := make([]Cell, cols*rows)
+	for y := 0; y < rows; y++ {
+		for x := 0; x < cols; x++ {
+			cells[y*cols+x] = term.Cell(x, y)
+		}
+	}
+
+	return TerminalSnapshot{
+		Cells:         cells,
+		CursorX:       cursorX,
+		CursorY:       cursorY,
+		CursorVisible: cursorVisible,
+		Cols:          cols,
+		Rows:          rows,
+	}, nil
 }

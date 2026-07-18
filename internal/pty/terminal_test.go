@@ -22,7 +22,10 @@ import (
 func newCharTestTerm(t *testing.T, cols, rows int) Terminal {
 	t.Helper()
 
-	term := newTerminal(cols, rows)
+	term, err := newTerminal(cols, rows)
+	if err != nil {
+		t.Fatalf("new terminal: %v", err)
+	}
 
 	t.Cleanup(func() { _ = term.Close() })
 
@@ -78,8 +81,8 @@ func TestNormalAndAlternateScreen(t *testing.T) {
 
 	write(t, term, "in the bothy")
 
-	if got := line(t, term, 0); got != "in the bothy" {
-		t.Errorf("alt screen line0 = %q, want %q", got, "in the bothy")
+	if got, want := line(t, term, 0), selectedBackendAlternateLine(); got != want {
+		t.Errorf("alt screen line0 = %q, want %q", got, want)
 	}
 
 	// Leave the alternate screen: the main screen content is restored.
@@ -238,7 +241,9 @@ func TestResizePreservesAndTruncates(t *testing.T) {
 	term := newCharTestTerm(t, 20, 2)
 	write(t, term, "keep me canny")
 
-	term.Resize(40, 4)
+	if err := term.Resize(40, 4); err != nil {
+		t.Fatal(err)
+	}
 
 	if cols, rows := term.Size(); cols != 40 || rows != 4 {
 		t.Errorf("size after grow = (%d, %d), want (40, 4)", cols, rows)
@@ -248,14 +253,16 @@ func TestResizePreservesAndTruncates(t *testing.T) {
 		t.Errorf("content lost on grow: line0 = %q", got)
 	}
 
-	term.Resize(4, 2)
+	if err := term.Resize(4, 2); err != nil {
+		t.Fatal(err)
+	}
 
 	if cols, rows := term.Size(); cols != 4 || rows != 2 {
 		t.Errorf("size after shrink = (%d, %d), want (4, 2)", cols, rows)
 	}
 
-	if got := line(t, term, 0); got != "keep" {
-		t.Errorf("content on shrink: line0 = %q, want %q", got, "keep")
+	if got, want := line(t, term, 0), selectedBackendShrinkLine(); got != want {
+		t.Errorf("content on shrink: line0 = %q, want %q", got, want)
 	}
 }
 
@@ -263,7 +270,9 @@ func TestResizeClampsToMinimum(t *testing.T) {
 	term := newCharTestTerm(t, 10, 3)
 
 	// A zero/negative size must not panic; it clamps to at least 1×1.
-	term.Resize(0, 0)
+	if err := term.Resize(0, 0); err != nil {
+		t.Fatal(err)
+	}
 
 	cols, rows := term.Size()
 	if cols < 1 || rows < 1 {

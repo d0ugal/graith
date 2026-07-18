@@ -243,20 +243,28 @@ func TestAdoptSessionReturnsTerminalHydrationPanic(t *testing.T) {
 		MaxLogSize: 1024 * 1024, DefaultRows: 24, DefaultCols: 80,
 		HydrationBytes: 128 * 1024,
 	})
-	if err == nil {
-		if s != nil {
-			s.Close()
+	if selectedBackendParserPanic {
+		if err == nil {
+			if s != nil {
+				s.Close()
+			}
+
+			t.Fatal("AdoptSession returned nil error for parser panic")
 		}
-
-		t.Fatal("AdoptSession returned nil error for parser panic")
-	}
-
-	if s != nil {
-		t.Fatal("AdoptSession returned a session after hydration failed")
-	}
-
-	if got := err.Error(); got != "hydrate terminal screen: terminal parser panic" {
-		t.Errorf("AdoptSession error = %q, want sanitized hydration failure", got)
+		if s != nil {
+			t.Fatal("AdoptSession returned a session after hydration failed")
+		}
+		if got := err.Error(); got != "hydrate terminal screen: terminal parser panic" {
+			t.Errorf("AdoptSession error = %q, want sanitized hydration failure", got)
+		}
+	} else {
+		if err != nil {
+			t.Fatalf("AdoptSession rejected malformed-but-safe hydration: %v", err)
+		}
+		if s == nil {
+			t.Fatal("AdoptSession returned nil session after successful hydration")
+		}
+		s.Close()
 	}
 
 	var stat syscall.Stat_t

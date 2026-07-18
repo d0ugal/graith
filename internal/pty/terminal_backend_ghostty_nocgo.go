@@ -2,8 +2,12 @@
 
 package pty
 
-// The experiment must not make CGO_ENABLED=0 builds fail. Without cgo the
-// libghostty selector is unavailable and the production Go backend remains.
-func newTerminal(cols, rows int) Terminal {
-	return newCharmTerminal(cols, rows)
+import "errors"
+
+var errLibghosttyRequiresCGO = errors.New("libghostty backend requires CGO_ENABLED=1")
+
+// A libghostty build is an explicit native selection. Returning an error keeps
+// a misconfigured build observable instead of silently changing semantics.
+func newTerminal(_, _ int) (Terminal, error) {
+	return nil, errLibghosttyRequiresCGO
 }

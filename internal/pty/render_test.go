@@ -10,7 +10,10 @@ import (
 func newRenderTestTerm(t *testing.T, cols, rows int) Terminal {
 	t.Helper()
 
-	term := newTerminal(cols, rows)
+	term, err := newTerminal(cols, rows)
+	if err != nil {
+		t.Fatalf("new terminal: %v", err)
+	}
 
 	t.Cleanup(func() { _ = term.Close() })
 

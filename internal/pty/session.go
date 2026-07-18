@@ -23,21 +23,25 @@ type Session struct {
 	Ptmx       *os.File
 	Scrollback *Scrollback
 
-	mu               sync.RWMutex
-	writeMu          sync.Mutex
-	writers          []io.Writer
-	screen           Terminal
-	done             chan struct{}
-	readDone         chan struct{}
-	exitCode         int
-	exitSignal       syscall.Signal
-	peakRSSBytes     int64
-	bytesRead        int64
-	exited           bool
-	adoptedPID       int
-	adoptedStartTime int64
-	lastOutputAt     time.Time
-	lastUserInputAt  time.Time
+	mu      sync.RWMutex
+	writeMu sync.Mutex
+	writers []io.Writer
+	screen  Terminal
+	// screenHydrationBytes bounds how much persistent output is replayed when
+	// the terminal helper fails. The raw scrollback remains authoritative; the
+	// helper owns only reconstructable derived state.
+	screenHydrationBytes int
+	done                 chan struct{}
+	readDone             chan struct{}
+	exitCode             int
+	exitSignal           syscall.Signal
+	peakRSSBytes         int64
+	bytesRead            int64
+	exited               bool
+	adoptedPID           int
+	adoptedStartTime     int64
+	lastOutputAt         time.Time
+	lastUserInputAt      time.Time
 	// inputDelay is the pause (in nanoseconds) between typed text and the submit
 	// CR in WriteInputAndSubmit. Seeded at construction from SessionOpts.InputDelay
 	// (or the typeInputDelay default) and updated live by SetInputDelay when the
@@ -131,6 +135,16 @@ func NewSession(opts SessionOpts) (*Session, error) {
 	}
 
 	sb.SetLogger(log)
+	screen, err := newTerminal(int(opts.Cols), int(opts.Rows))
+	if err != nil {
+		_ = sb.Close()
+		_ = ptmx.Close()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+
+		return nil, fmt.Errorf("terminal screen: %w", err)
+	}
 
 	inputDelay := opts.InputDelay
 	if inputDelay <= 0 {
@@ -139,11 +153,12 @@ func NewSession(opts SessionOpts) (*Session, error) {
 
 	s := &Session{
 		ID: opts.ID, Cmd: cmd, Ptmx: ptmx, Scrollback: sb,
-		screen:    newTerminal(int(opts.Cols), int(opts.Rows)),
-		done:      make(chan struct{}),
-		readDone:  make(chan struct{}),
-		createdAt: launchedAt,
-		log:       log,
+		screen:               screen,
+		screenHydrationBytes: defaultScreenHydrationBytes,
+		done:                 make(chan struct{}),
+		readDone:             make(chan struct{}),
+		createdAt:            launchedAt,
+		log:                  log,
 	}
 	s.inputDelay.Store(int64(inputDelay))
 	s.userInputCond = sync.NewCond(&sync.Mutex{})
@@ -217,6 +232,14 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		cols, rows = int(ws.Cols), int(ws.Rows)
 	}
 
+	screen, err := newTerminal(cols, rows)
+	if err != nil {
+		_ = sb.Close()
+		_ = ptmx.Close()
+
+		return nil, fmt.Errorf("terminal screen: %w", err)
+	}
+
 	startTime, stErr := ProcessStartTime(opts.PID)
 	if stErr != nil {
 		log.Warn("could not capture process start time for adopted session; PID reuse detection degraded",
@@ -237,7 +260,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		ID:                  opts.ID,
 		Ptmx:                ptmx,
 		Scrollback:          sb,
-		screen:              newTerminal(cols, rows),
+		screen:              screen,
 		done:                make(chan struct{}),
 		readDone:            make(chan struct{}),
 		adoptedPID:          opts.PID,
@@ -253,8 +276,9 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 	// HydrationBytes < 0 means "use the built-in default"; 0 disables hydration.
 	hydrate := opts.HydrationBytes
 	if hydrate < 0 {
-		hydrate = 128 * 1024
+		hydrate = defaultScreenHydrationBytes
 	}
+	s.screenHydrationBytes = hydrate
 
 	if hydrate > 0 {
 		if tail, err := sb.TailBytes(int64(hydrate)); err == nil && len(tail) > 0 {
@@ -273,6 +297,8 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 
 	return s, nil
 }
+
+const defaultScreenHydrationBytes = 128 * 1024
 
 // adoptedPollTimeout is the built-in safety deadline for the adopted-PTY babysit
 // loop when AdoptOpts.PollTimeout is unset. The daemon overrides it via the
@@ -461,17 +487,65 @@ func (s *Session) readLoop() {
 	}
 }
 
-// writeScreenLocked parses one PTY output chunk. If the parser reports a
-// failure, replace the possibly inconsistent emulator immediately and keep the
-// raw scrollback/fan-out path alive. The caller must hold s.mu.
+// writeScreenLocked parses one PTY output chunk. If the helper reports a
+// failure or exits, replace it immediately and reconstruct the screen from the
+// bounded persistent scrollback tail. The caller has already appended chunk to
+// Scrollback and must hold s.mu.
 func (s *Session) writeScreenLocked(chunk []byte) error {
-	cols, rows := s.screen.Size()
 	if _, err := s.screen.Write(chunk); err != nil {
-		failed := s.screen
-		s.screen = newTerminal(cols, rows)
-		_ = failed.Close()
+		return errors.Join(err, s.replaceScreenLocked())
+	}
 
-		return err
+	return nil
+}
+
+// replaceScreenLocked reconstructs the derived terminal model from persistent
+// scrollback. It swaps only after construction and hydration both succeed, so
+// callers never lose the last model merely because replacement initialization
+// failed. The caller must hold s.mu.
+func (s *Session) replaceScreenLocked() error {
+	cols, rows := s.screen.Size()
+
+	return s.replaceScreenAtSizeLocked(cols, rows)
+}
+
+func (s *Session) replaceScreenAtSizeLocked(cols, rows int) error {
+	replacement, err := newTerminal(cols, rows)
+	if err != nil {
+		return fmt.Errorf("create replacement terminal: %w", err)
+	}
+
+	if s.screenHydrationBytes > 0 && s.Scrollback != nil {
+		tail, tailErr := s.Scrollback.TailBytes(int64(s.screenHydrationBytes))
+		if tailErr != nil {
+			_ = replacement.Close()
+
+			return fmt.Errorf("read terminal recovery scrollback: %w", tailErr)
+		}
+		if len(tail) > 0 {
+			if _, writeErr := replacement.Write(tail); writeErr != nil {
+				_ = replacement.Close()
+				s.log.Warn("terminal recovery hydration failed; using empty screen",
+					"session", s.ID, "error", writeErr)
+				// The retained tail may contain the exact input that killed the
+				// previous parser. Keep the daemon and future output usable by
+				// falling back to an empty replacement rather than replaying the
+				// same poison sequence indefinitely.
+				replacement, err = newTerminal(cols, rows)
+				if err != nil {
+					return errors.Join(
+						fmt.Errorf("hydrate replacement terminal: %w", writeErr),
+						fmt.Errorf("create empty replacement terminal: %w", err),
+					)
+				}
+			}
+		}
+	}
+
+	failed := s.screen
+	s.screen = replacement
+	if failed != nil {
+		_ = failed.Close()
 	}
 
 	return nil
@@ -694,10 +768,15 @@ func (s *Session) WaitForUserIdle(idleTimeout, maxWait time.Duration) bool {
 
 func (s *Session) Resize(rows, cols uint16) error {
 	s.mu.Lock()
-	s.screen.Resize(int(cols), int(rows))
+	screenErr := s.screen.Resize(int(cols), int(rows))
+	if screenErr != nil {
+		screenErr = errors.Join(screenErr, s.replaceScreenAtSizeLocked(int(cols), int(rows)))
+	}
 	s.mu.Unlock()
 
-	return pty.Setsize(s.Ptmx, &pty.Winsize{Rows: rows, Cols: cols})
+	ptyErr := pty.Setsize(s.Ptmx, &pty.Winsize{Rows: rows, Cols: cols})
+
+	return errors.Join(screenErr, ptyErr)
 }
 
 // Poke sends SIGWINCH to the session's process group. This interrupts

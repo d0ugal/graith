@@ -113,13 +113,14 @@ func TestReadLoopContainsParserPanicAndResetsScreen(t *testing.T) {
 	var logBuf syncBuf
 
 	s := &Session{
-		ID:         "canny-live",
-		Ptmx:       r,
-		Scrollback: sb,
-		screen:     newTerminal(80, 24),
-		readDone:   make(chan struct{}),
-		createdAt:  time.Now(),
-		log:        slog.New(slog.NewJSONHandler(&logBuf, nil)),
+		ID:                   "canny-live",
+		Ptmx:                 r,
+		Scrollback:           sb,
+		screen:               newCharmTerminal(80, 24),
+		screenHydrationBytes: defaultScreenHydrationBytes,
+		readDone:             make(chan struct{}),
+		createdAt:            time.Now(),
+		log:                  slog.New(slog.NewJSONHandler(&logBuf, nil)),
 	}
 
 	go s.readLoop()

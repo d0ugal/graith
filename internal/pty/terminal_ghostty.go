@@ -1,427 +1,142 @@
-//go:build libghostty && cgo
+//go:build libghostty && cgo && (darwin || linux)
 
 package pty
 
-/*
-#cgo CFLAGS: -DGHOSTTY_STATIC -I${SRCDIR}/../../gui/shared/Sources/CGhosttyVT/include
-
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-
-#include <ghostty/vt.h>
-
-// This spike deliberately uses the same public C ABI and pinned headers as the
-// native clients. The small C-side snapshot cache keeps a full screen
-// extraction to one cgo crossing instead of crossing once per cell.
-typedef struct {
-    size_t content_offset;
-    size_t content_len;
-    uint32_t fg_value;
-    uint32_t bg_value;
-    uint8_t fg_kind;
-    uint8_t bg_kind;
-    uint8_t wide;
-    uint8_t bold;
-    uint8_t faint;
-    uint8_t italic;
-    uint8_t underline;
-    uint8_t blink;
-    uint8_t reverse;
-    uint8_t strikethrough;
-} GraithGhosttyCell;
-
-typedef struct {
-    GhosttyTerminal terminal;
-    GhosttyRenderState render_state;
-    GhosttyRenderStateRowIterator row_iterator;
-    GhosttyRenderStateRowCells row_cells;
-    GraithGhosttyCell* cells;
-    size_t cells_cap;
-    size_t cells_len;
-    uint8_t* content;
-    size_t content_cap;
-    size_t content_len;
-} GraithGhosttyTerminal;
-
-static void graith_ghostty_terminal_free(GraithGhosttyTerminal* terminal);
-
-static GraithGhosttyTerminal* graith_ghostty_terminal_new(
-    uint16_t cols,
-    uint16_t rows
-) {
-    GraithGhosttyTerminal* result = calloc(1, sizeof(GraithGhosttyTerminal));
-    if (result == NULL) return NULL;
-
-    GhosttyTerminalOptions options = {
-        .cols = cols,
-        .rows = rows,
-        .max_scrollback = 10000,
-    };
-
-    if (ghostty_terminal_new(NULL, &result->terminal, options) != GHOSTTY_SUCCESS ||
-        ghostty_render_state_new(NULL, &result->render_state) != GHOSTTY_SUCCESS ||
-        ghostty_render_state_row_iterator_new(NULL, &result->row_iterator) != GHOSTTY_SUCCESS ||
-        ghostty_render_state_row_cells_new(NULL, &result->row_cells) != GHOSTTY_SUCCESS) {
-        graith_ghostty_terminal_free(result);
-        return NULL;
-    }
-
-    return result;
-}
-
-static void graith_ghostty_terminal_free(GraithGhosttyTerminal* terminal) {
-    if (terminal == NULL) return;
-
-    ghostty_render_state_row_cells_free(terminal->row_cells);
-    ghostty_render_state_row_iterator_free(terminal->row_iterator);
-    ghostty_render_state_free(terminal->render_state);
-    ghostty_terminal_free(terminal->terminal);
-    free(terminal->content);
-    free(terminal->cells);
-    free(terminal);
-}
-
-static void graith_ghostty_terminal_write(
-    GraithGhosttyTerminal* terminal,
-    const uint8_t* data,
-    size_t len
-) {
-    if (terminal == NULL || terminal->terminal == NULL || len == 0) return;
-    ghostty_terminal_vt_write(terminal->terminal, data, len);
-}
-
-static bool graith_ghostty_terminal_resize(
-    GraithGhosttyTerminal* terminal,
-    uint16_t cols,
-    uint16_t rows
-) {
-    if (terminal == NULL || terminal->terminal == NULL) return false;
-    return ghostty_terminal_resize(terminal->terminal, cols, rows, 8, 16) == GHOSTTY_SUCCESS;
-}
-
-static bool graith_ghostty_terminal_cursor(
-    GraithGhosttyTerminal* terminal,
-    uint16_t* x,
-    uint16_t* y,
-    bool* visible
-) {
-    if (terminal == NULL || terminal->terminal == NULL) return false;
-
-    return ghostty_terminal_get(terminal->terminal, GHOSTTY_TERMINAL_DATA_CURSOR_X, x) == GHOSTTY_SUCCESS &&
-        ghostty_terminal_get(terminal->terminal, GHOSTTY_TERMINAL_DATA_CURSOR_Y, y) == GHOSTTY_SUCCESS &&
-        ghostty_terminal_get(terminal->terminal, GHOSTTY_TERMINAL_DATA_CURSOR_VISIBLE, visible) == GHOSTTY_SUCCESS;
-}
-
-static uint32_t graith_ghostty_rgb(GhosttyColorRgb color) {
-    return ((uint32_t)color.r << 16) | ((uint32_t)color.g << 8) | (uint32_t)color.b;
-}
-
-static void graith_ghostty_style_color(
-    GhosttyStyleColor color,
-    uint8_t* kind,
-    uint32_t* value
-) {
-    switch (color.tag) {
-    case GHOSTTY_STYLE_COLOR_PALETTE:
-        *kind = 1;
-        *value = color.value.palette;
-        break;
-    case GHOSTTY_STYLE_COLOR_RGB:
-        *kind = 2;
-        *value = graith_ghostty_rgb(color.value.rgb);
-        break;
-    default:
-        *kind = 0;
-        *value = 0;
-        break;
-    }
-}
-
-static bool graith_ghostty_reserve_cells(
-    GraithGhosttyTerminal* terminal,
-    size_t required
-) {
-    if (required <= terminal->cells_cap) return true;
-    if (required > SIZE_MAX / sizeof(GraithGhosttyCell)) return false;
-
-    GraithGhosttyCell* cells = realloc(
-        terminal->cells,
-        required * sizeof(GraithGhosttyCell)
-    );
-    if (cells == NULL) return false;
-
-    terminal->cells = cells;
-    terminal->cells_cap = required;
-    return true;
-}
-
-static bool graith_ghostty_reserve_content(
-    GraithGhosttyTerminal* terminal,
-    size_t required
-) {
-    if (required <= terminal->content_cap) return true;
-
-    size_t cap = terminal->content_cap == 0 ? 4096 : terminal->content_cap;
-    while (cap < required) {
-        if (cap > SIZE_MAX / 2) {
-            cap = required;
-            break;
-        }
-        cap *= 2;
-    }
-
-    uint8_t* content = realloc(terminal->content, cap);
-    if (content == NULL) return false;
-
-    terminal->content = content;
-    terminal->content_cap = cap;
-    return true;
-}
-
-// Returns 0 on success, 1 on allocation failure, and 2 on an unexpected C API
-// result. It never includes terminal data in the result, keeping failures safe
-// to surface in daemon diagnostics.
-static int graith_ghostty_terminal_snapshot(
-    GraithGhosttyTerminal* terminal,
-    uint16_t cols,
-    uint16_t rows
-) {
-    if (terminal == NULL || terminal->terminal == NULL) return 2;
-
-    size_t cell_count = (size_t)cols * (size_t)rows;
-    if (!graith_ghostty_reserve_cells(terminal, cell_count)) return 1;
-
-    memset(terminal->cells, 0, cell_count * sizeof(GraithGhosttyCell));
-    terminal->cells_len = cell_count;
-    terminal->content_len = 0;
-
-    if (ghostty_render_state_update(terminal->render_state, terminal->terminal) != GHOSTTY_SUCCESS ||
-        ghostty_render_state_get(
-            terminal->render_state,
-            GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR,
-            &terminal->row_iterator
-        ) != GHOSTTY_SUCCESS) {
-        terminal->cells_len = 0;
-        return 2;
-    }
-
-    uint16_t y = 0;
-    while (y < rows && ghostty_render_state_row_iterator_next(terminal->row_iterator)) {
-        if (ghostty_render_state_row_get(
-                terminal->row_iterator,
-                GHOSTTY_RENDER_STATE_ROW_DATA_CELLS,
-                &terminal->row_cells
-            ) != GHOSTTY_SUCCESS) {
-            terminal->cells_len = 0;
-            return 2;
-        }
-
-        uint16_t x = 0;
-        while (x < cols && ghostty_render_state_row_cells_next(terminal->row_cells)) {
-            GraithGhosttyCell* out = &terminal->cells[(size_t)y * cols + x];
-            GhosttyCell raw = 0;
-            GhosttyStyle style = { .size = sizeof(GhosttyStyle) };
-
-            if (ghostty_render_state_row_cells_get(
-                    terminal->row_cells,
-                    GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW,
-                    &raw
-                ) != GHOSTTY_SUCCESS ||
-                ghostty_render_state_row_cells_get(
-                    terminal->row_cells,
-                    GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE,
-                    &style
-                ) != GHOSTTY_SUCCESS) {
-                terminal->cells_len = 0;
-                return 2;
-            }
-
-            GhosttyCellWide wide = GHOSTTY_CELL_WIDE_NARROW;
-            if (ghostty_cell_get(raw, GHOSTTY_CELL_DATA_WIDE, &wide) != GHOSTTY_SUCCESS) {
-                terminal->cells_len = 0;
-                return 2;
-            }
-            out->wide = (uint8_t)wide;
-
-            graith_ghostty_style_color(style.fg_color, &out->fg_kind, &out->fg_value);
-            graith_ghostty_style_color(style.bg_color, &out->bg_kind, &out->bg_value);
-
-            // A background-only cell stores its color in the raw cell content,
-            // not in GhosttyStyle. Preserve its palette/RGB identity too.
-            if (out->bg_kind == 0) {
-                GhosttyCellContentTag tag = GHOSTTY_CELL_CONTENT_CODEPOINT;
-                if (ghostty_cell_get(raw, GHOSTTY_CELL_DATA_CONTENT_TAG, &tag) != GHOSTTY_SUCCESS) {
-                    terminal->cells_len = 0;
-                    return 2;
-                }
-
-                if (tag == GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE) {
-                    GhosttyColorPaletteIndex palette = 0;
-                    if (ghostty_cell_get(raw, GHOSTTY_CELL_DATA_COLOR_PALETTE, &palette) != GHOSTTY_SUCCESS) {
-                        terminal->cells_len = 0;
-                        return 2;
-                    }
-                    out->bg_kind = 1;
-                    out->bg_value = palette;
-                } else if (tag == GHOSTTY_CELL_CONTENT_BG_COLOR_RGB) {
-                    GhosttyColorRgb rgb = {0};
-                    if (ghostty_cell_get(raw, GHOSTTY_CELL_DATA_COLOR_RGB, &rgb) != GHOSTTY_SUCCESS) {
-                        terminal->cells_len = 0;
-                        return 2;
-                    }
-                    out->bg_kind = 2;
-                    out->bg_value = graith_ghostty_rgb(rgb);
-                }
-            }
-
-            out->bold = style.bold;
-            out->faint = style.faint;
-            out->italic = style.italic;
-            out->underline = style.underline != GHOSTTY_SGR_UNDERLINE_NONE;
-            out->blink = style.blink;
-            out->reverse = style.inverse;
-            out->strikethrough = style.strikethrough;
-
-            GhosttyBuffer query = {0};
-            GhosttyResult content_result = ghostty_render_state_row_cells_get(
-                terminal->row_cells,
-                GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_UTF8,
-                &query
-            );
-            if (content_result == GHOSTTY_OUT_OF_SPACE && query.len > 0) {
-                if (query.len > SIZE_MAX - terminal->content_len ||
-                    !graith_ghostty_reserve_content(terminal, terminal->content_len + query.len)) {
-                    terminal->cells_len = 0;
-                    return 1;
-                }
-
-                out->content_offset = terminal->content_len;
-                GhosttyBuffer content = {
-                    .ptr = terminal->content + terminal->content_len,
-                    .cap = query.len,
-                    .len = 0,
-                };
-                if (ghostty_render_state_row_cells_get(
-                        terminal->row_cells,
-                        GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_UTF8,
-                        &content
-                    ) != GHOSTTY_SUCCESS) {
-                    terminal->cells_len = 0;
-                    return 2;
-                }
-
-                out->content_len = content.len;
-                terminal->content_len += content.len;
-            } else if (content_result != GHOSTTY_SUCCESS) {
-                terminal->cells_len = 0;
-                return 2;
-            }
-
-            x++;
-        }
-        y++;
-    }
-
-    return 0;
-}
-
-static const GraithGhosttyCell* graith_ghostty_terminal_cells(
-    GraithGhosttyTerminal* terminal
-) {
-    return terminal == NULL ? NULL : terminal->cells;
-}
-
-static size_t graith_ghostty_terminal_cells_len(GraithGhosttyTerminal* terminal) {
-    return terminal == NULL ? 0 : terminal->cells_len;
-}
-
-static const uint8_t* graith_ghostty_terminal_content(
-    GraithGhosttyTerminal* terminal
-) {
-    return terminal == NULL ? NULL : terminal->content;
-}
-*/
-import "C"
-
 import (
 	"errors"
-	"unsafe"
+	"fmt"
+	"strings"
+
+	libghostty "go.mitchellh.com/libghostty"
 )
+
+const maxGhosttyCells = 4 * 1024 * 1024
 
 var (
-	errGhosttyClosed      = errors.New("libghostty-vt terminal is closed")
-	errGhosttyInit        = errors.New("libghostty-vt terminal initialization failed")
-	errGhosttySnapshot    = errors.New("libghostty-vt render-state snapshot failed")
-	errGhosttySnapshotOOM = errors.New("libghostty-vt render-state snapshot allocation failed")
+	errGhosttyClosed       = errors.New("libghostty-vt terminal is closed")
+	errGhosttyBindingPanic = errors.New("go-libghostty operation panicked")
 )
 
-// ghosttyTerminal is an experimental libghostty-vt adapter. It is omitted from
-// normal builds and can only be compiled with both cgo and the libghostty build
-// tag. Linking is intentionally supplied by the caller's external linker
-// flags, so the default daemon and release build do not acquire a native
-// dependency.
+// ghosttyTerminal adapts go-libghostty's public Go API to Graith's narrow
+// backend-neutral terminal contract. It exists only inside the isolated helper
+// process; the daemon never owns a native terminal handle.
 type ghosttyTerminal struct {
-	handle *C.GraithGhosttyTerminal
-	cols   int
-	rows   int
-	cells  []Cell
-	dirty  bool
+	terminal    *libghostty.Terminal
+	renderState *libghostty.RenderState
+	rowIterator *libghostty.RenderStateRowIterator
+	rowCells    *libghostty.RenderStateRowCells
+
+	cols  int
+	rows  int
+	cells []Cell
+	dirty bool
 }
 
 var _ Terminal = (*ghosttyTerminal)(nil)
+var _ terminalSnapshotter = (*ghosttyTerminal)(nil)
 
-func newGhosttyTerminal(cols, rows int) (*ghosttyTerminal, error) {
-	cols, rows = clampGhosttySize(cols, rows)
-	handle := C.graith_ghostty_terminal_new(C.uint16_t(cols), C.uint16_t(rows))
-	if handle == nil {
-		return nil, errGhosttyInit
+func newGhosttyTerminal(cols, rows int) (gt *ghosttyTerminal, err error) {
+	defer func() {
+		if recover() != nil {
+			err = errGhosttyBindingPanic
+		}
+		if err != nil && gt != nil {
+			_ = gt.Close()
+			gt = nil
+		}
+	}()
+
+	cols, rows, err = validateGhosttySize(cols, rows)
+	if err != nil {
+		return nil, err
 	}
 
-	return &ghosttyTerminal{
-		handle: handle,
-		cols:   cols,
-		rows:   rows,
-		dirty:  true,
-	}, nil
+	terminal, err := libghostty.NewTerminal(
+		libghostty.WithSize(uint16(cols), uint16(rows)),
+		libghostty.WithMaxScrollback(10_000),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create go-libghostty terminal: %w", err)
+	}
+
+	gt = &ghosttyTerminal{terminal: terminal, cols: cols, rows: rows, dirty: true}
+
+	// Graith renders text cells only. Disable the image storage and all
+	// filesystem/shared-memory image media exposed by the upstream binding.
+	zero := uint64(0)
+	if err = terminal.SetKittyImageStorageLimit(&zero); err != nil {
+		return nil, fmt.Errorf("disable Kitty image storage: %w", err)
+	}
+	if err = terminal.SetKittyImageMediumFile(false); err != nil {
+		return nil, fmt.Errorf("disable Kitty file medium: %w", err)
+	}
+	if err = terminal.SetKittyImageMediumTempFile(false); err != nil {
+		return nil, fmt.Errorf("disable Kitty temporary-file medium: %w", err)
+	}
+	if err = terminal.SetKittyImageMediumSharedMem(false); err != nil {
+		return nil, fmt.Errorf("disable Kitty shared-memory medium: %w", err)
+	}
+
+	gt.renderState, err = libghostty.NewRenderState()
+	if err != nil {
+		return nil, fmt.Errorf("create go-libghostty render state: %w", err)
+	}
+	gt.rowIterator, err = libghostty.NewRenderStateRowIterator()
+	if err != nil {
+		return nil, fmt.Errorf("create go-libghostty row iterator: %w", err)
+	}
+	gt.rowCells, err = libghostty.NewRenderStateRowCells()
+	if err != nil {
+		return nil, fmt.Errorf("create go-libghostty cell iterator: %w", err)
+	}
+
+	return gt, nil
 }
 
-func (gt *ghosttyTerminal) Write(p []byte) (int, error) {
-	if gt.handle == nil {
+func (gt *ghosttyTerminal) Write(p []byte) (n int, err error) {
+	defer func() {
+		if recover() != nil {
+			n = 0
+			err = errGhosttyBindingPanic
+		}
+	}()
+
+	if gt.terminal == nil {
 		return 0, errGhosttyClosed
 	}
 	if len(p) == 0 {
 		return 0, nil
 	}
 
-	C.graith_ghostty_terminal_write(
-		gt.handle,
-		(*C.uint8_t)(unsafe.Pointer(&p[0])),
-		C.size_t(len(p)),
-	)
+	gt.terminal.VTWrite(p)
 	gt.dirty = true
 
 	return len(p), nil
 }
 
-func (gt *ghosttyTerminal) Resize(cols, rows int) {
-	if gt.handle == nil {
-		return
-	}
+func (gt *ghosttyTerminal) Resize(cols, rows int) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = errGhosttyBindingPanic
+		}
+	}()
 
-	cols, rows = clampGhosttySize(cols, rows)
-	if !bool(C.graith_ghostty_terminal_resize(
-		gt.handle,
-		C.uint16_t(cols),
-		C.uint16_t(rows),
-	)) {
-		return
+	if gt.terminal == nil {
+		return errGhosttyClosed
+	}
+	cols, rows, err = validateGhosttySize(cols, rows)
+	if err != nil {
+		return err
+	}
+	if err := gt.terminal.Resize(uint16(cols), uint16(rows), 8, 16); err != nil {
+		return fmt.Errorf("resize go-libghostty terminal: %w", err)
 	}
 
 	gt.cols = cols
 	gt.rows = rows
 	gt.dirty = true
+
+	return nil
 }
 
 func (gt *ghosttyTerminal) Size() (int, int) {
@@ -429,24 +144,39 @@ func (gt *ghosttyTerminal) Size() (int, int) {
 }
 
 func (gt *ghosttyTerminal) Cursor() (int, int, bool) {
-	if gt.handle == nil {
+	x, y, visible, err := gt.cursor()
+	if err != nil {
 		return 0, 0, false
 	}
 
-	var x, y C.uint16_t
-	var visible C.bool
-	if !bool(C.graith_ghostty_terminal_cursor(gt.handle, &x, &y, &visible)) {
-		return 0, 0, false
+	return x, y, visible
+}
+
+func (gt *ghosttyTerminal) cursor() (int, int, bool, error) {
+	if gt.terminal == nil {
+		return 0, 0, false, errGhosttyClosed
 	}
 
-	return int(x), int(y), bool(visible)
+	x, err := gt.terminal.CursorX()
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("read go-libghostty cursor x: %w", err)
+	}
+	y, err := gt.terminal.CursorY()
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("read go-libghostty cursor y: %w", err)
+	}
+	visible, err := gt.terminal.CursorVisible()
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("read go-libghostty cursor visibility: %w", err)
+	}
+
+	return int(x), int(y), visible, nil
 }
 
 func (gt *ghosttyTerminal) Cell(x, y int) Cell {
 	if x < 0 || x >= gt.cols || y < 0 || y >= gt.rows {
 		return Cell{Content: " "}
 	}
-
 	if err := gt.refreshCells(); err != nil {
 		return Cell{Content: " "}
 	}
@@ -454,99 +184,211 @@ func (gt *ghosttyTerminal) Cell(x, y int) Cell {
 	return gt.cells[y*gt.cols+x]
 }
 
-func (gt *ghosttyTerminal) Close() error {
-	if gt.handle != nil {
-		C.graith_ghostty_terminal_free(gt.handle)
-		gt.handle = nil
-		gt.cells = nil
+func (gt *ghosttyTerminal) Snapshot() (snapshot TerminalSnapshot, err error) {
+	defer func() {
+		if recover() != nil {
+			snapshot = TerminalSnapshot{}
+			err = errGhosttyBindingPanic
+		}
+	}()
+
+	if err := gt.refreshCells(); err != nil {
+		return TerminalSnapshot{}, err
 	}
+	cursorX, cursorY, cursorVisible, err := gt.cursor()
+	if err != nil {
+		return TerminalSnapshot{}, err
+	}
+	cells := make([]Cell, len(gt.cells))
+	copy(cells, gt.cells)
+
+	return TerminalSnapshot{
+		Cells:         cells,
+		CursorX:       cursorX,
+		CursorY:       cursorY,
+		CursorVisible: cursorVisible,
+		Cols:          gt.cols,
+		Rows:          gt.rows,
+	}, nil
+}
+
+func (gt *ghosttyTerminal) Close() (err error) {
+	defer func() {
+		if recover() != nil {
+			err = errGhosttyBindingPanic
+		}
+	}()
+
+	if gt.rowCells != nil {
+		gt.rowCells.Close()
+		gt.rowCells = nil
+	}
+	if gt.rowIterator != nil {
+		gt.rowIterator.Close()
+		gt.rowIterator = nil
+	}
+	if gt.renderState != nil {
+		gt.renderState.Close()
+		gt.renderState = nil
+	}
+	if gt.terminal != nil {
+		gt.terminal.Close()
+		gt.terminal = nil
+	}
+	gt.cells = nil
 
 	return nil
 }
 
 func (gt *ghosttyTerminal) refreshCells() error {
-	if gt.handle == nil {
+	if gt.terminal == nil || gt.renderState == nil || gt.rowIterator == nil || gt.rowCells == nil {
 		return errGhosttyClosed
 	}
 	if !gt.dirty {
 		return nil
 	}
-
-	switch result := int(C.graith_ghostty_terminal_snapshot(
-		gt.handle,
-		C.uint16_t(gt.cols),
-		C.uint16_t(gt.rows),
-	)); result {
-	case 0:
-	case 1:
-		return errGhosttySnapshotOOM
-	default:
-		return errGhosttySnapshot
+	if err := gt.renderState.Update(gt.terminal); err != nil {
+		return fmt.Errorf("update go-libghostty render state: %w", err)
+	}
+	if err := gt.renderState.RowIterator(gt.rowIterator); err != nil {
+		return fmt.Errorf("read go-libghostty rows: %w", err)
 	}
 
-	count := int(C.graith_ghostty_terminal_cells_len(gt.handle))
-	if count != gt.cols*gt.rows {
-		return errGhosttySnapshot
-	}
-
+	count := gt.cols * gt.rows
 	if cap(gt.cells) < count {
 		gt.cells = make([]Cell, count)
 	} else {
 		gt.cells = gt.cells[:count]
+		clear(gt.cells)
+	}
+	for i := range gt.cells {
+		gt.cells[i].Content = " "
 	}
 
-	nativeCells := unsafe.Slice(C.graith_ghostty_terminal_cells(gt.handle), count)
-	contentBase := C.graith_ghostty_terminal_content(gt.handle)
-	for i := range nativeCells {
-		native := &nativeCells[i]
-		content := " "
-		if native.content_len > 0 {
-			start := unsafe.Add(unsafe.Pointer(contentBase), uintptr(native.content_offset))
-			content = string(unsafe.Slice((*byte)(start), int(native.content_len)))
-		} else if native.wide == C.uint8_t(C.GHOSTTY_CELL_WIDE_SPACER_TAIL) ||
-			native.wide == C.uint8_t(C.GHOSTTY_CELL_WIDE_SPACER_HEAD) {
-			content = ""
+	for y := 0; y < gt.rows && gt.rowIterator.Next(); y++ {
+		if err := gt.rowIterator.Cells(gt.rowCells); err != nil {
+			return fmt.Errorf("read go-libghostty row %d cells: %w", y, err)
 		}
-
-		gt.cells[i] = Cell{
-			Content: content,
-			Style: CellStyle{
-				FG:            ghosttyColor(native.fg_kind, native.fg_value),
-				BG:            ghosttyColor(native.bg_kind, native.bg_value),
-				Bold:          native.bold != 0,
-				Faint:         native.faint != 0,
-				Italic:        native.italic != 0,
-				Underline:     native.underline != 0,
-				Blink:         native.blink != 0,
-				Reverse:       native.reverse != 0,
-				Strikethrough: native.strikethrough != 0,
-			},
+		for x := 0; x < gt.cols && gt.rowCells.Next(); x++ {
+			cell, err := gt.convertCell()
+			if err != nil {
+				return fmt.Errorf("read go-libghostty cell %d,%d: %w", x, y, err)
+			}
+			gt.cells[y*gt.cols+x] = cell
 		}
 	}
 
 	gt.dirty = false
+
 	return nil
 }
 
-func ghosttyColor(kind C.uint8_t, value C.uint32_t) Color {
-	switch kind {
-	case 1:
-		return Color{Kind: ColorIndexed, Value: uint32(value)}
-	case 2:
-		return Color{Kind: ColorRGB, Value: uint32(value)}
+func (gt *ghosttyTerminal) convertCell() (Cell, error) {
+	raw, err := gt.rowCells.Raw()
+	if err != nil {
+		return Cell{}, err
+	}
+	style, err := gt.rowCells.Style()
+	if err != nil {
+		return Cell{}, err
+	}
+	graphemes, err := gt.rowCells.Graphemes()
+	if err != nil {
+		return Cell{}, err
+	}
+
+	content := ghosttyGraphemes(graphemes)
+	wide, err := raw.Wide()
+	if err != nil {
+		return Cell{}, err
+	}
+	if len(graphemes) == 0 &&
+		(wide == libghostty.CellWideSpacerTail || wide == libghostty.CellWideSpacerHead) {
+		content = ""
+	}
+
+	cell := Cell{
+		Content: content,
+		Style: CellStyle{
+			FG:            ghosttyStyleColor(style.FgColor()),
+			BG:            ghosttyStyleColor(style.BgColor()),
+			Bold:          style.Bold(),
+			Faint:         style.Faint(),
+			Italic:        style.Italic(),
+			Underline:     style.Underline() != libghostty.UnderlineNone,
+			Blink:         style.Blink(),
+			Reverse:       style.Inverse(),
+			Strikethrough: style.Strikethrough(),
+		},
+	}
+
+	// Background-only cells encode their palette/RGB identity in the raw cell
+	// rather than Style. Preserve that distinction for Graith's ANSI renderer.
+	if cell.Style.BG.Kind == ColorDefault {
+		tag, err := raw.ContentTag()
+		if err != nil {
+			return Cell{}, err
+		}
+		switch tag {
+		case libghostty.CellContentBgColorPalette:
+			palette, err := raw.ColorPalette()
+			if err != nil {
+				return Cell{}, err
+			}
+			cell.Style.BG = Color{Kind: ColorIndexed, Value: uint32(palette)}
+		case libghostty.CellContentBgColorRGB:
+			rgb, err := raw.ColorRGB()
+			if err != nil {
+				return Cell{}, err
+			}
+			cell.Style.BG = ghosttyRGB(rgb)
+		}
+	}
+
+	return cell, nil
+}
+
+func ghosttyGraphemes(codepoints []uint32) string {
+	if len(codepoints) == 0 {
+		return " "
+	}
+	if len(codepoints) == 1 {
+		return string(rune(codepoints[0]))
+	}
+
+	var content strings.Builder
+	for _, codepoint := range codepoints {
+		content.WriteRune(rune(codepoint))
+	}
+
+	return content.String()
+}
+
+func ghosttyStyleColor(color libghostty.StyleColor) Color {
+	switch color.Tag {
+	case libghostty.StyleColorPalette:
+		return Color{Kind: ColorIndexed, Value: uint32(color.Palette)}
+	case libghostty.StyleColorRGB:
+		return ghosttyRGB(color.RGB)
 	default:
 		return Color{Kind: ColorDefault}
 	}
 }
 
-func clampGhosttySize(cols, rows int) (int, int) {
-	cols, rows = clampSize(cols, rows)
-	if cols > int(^uint16(0)) {
-		cols = int(^uint16(0))
+func ghosttyRGB(color libghostty.ColorRGB) Color {
+	return Color{
+		Kind: ColorRGB,
+		Value: uint32(color.R)<<16 |
+			uint32(color.G)<<8 |
+			uint32(color.B),
 	}
-	if rows > int(^uint16(0)) {
-		rows = int(^uint16(0))
+}
+
+func validateGhosttySize(cols, rows int) (int, int, error) {
+	cols, rows = clampSize(cols, rows)
+	if cols > int(^uint16(0)) || rows > int(^uint16(0)) || cols > maxGhosttyCells/rows {
+		return 0, 0, fmt.Errorf("libghostty terminal size %dx%d exceeds safety limit", cols, rows)
 	}
 
-	return cols, rows
+	return cols, rows, nil
 }
