@@ -109,6 +109,7 @@ func TestOrderTokenProjectionSessionsTree(t *testing.T) {
 	}
 
 	rows := orderTokenProjectionSessions(sessions, true)
+
 	got := make([]string, 0, len(rows))
 	for _, row := range rows {
 		got = append(got, row.name)

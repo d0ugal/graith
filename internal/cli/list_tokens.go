@@ -156,6 +156,7 @@ func orderTokenProjectionSessions(sessions []protocol.SessionInfo, tree bool) []
 	}
 
 	sortTokenProjectionSessions(roots)
+
 	for id := range children {
 		sortTokenProjectionSessions(children[id])
 	}
