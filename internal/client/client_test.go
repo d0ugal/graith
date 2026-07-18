@@ -225,6 +225,96 @@ func TestReadControlResponse(t *testing.T) {
 	}
 }
 
+func TestRequestUpgradeUsesExactPreflightBeforeMutation(t *testing.T) {
+	c, serverConn := setupTestClient(t)
+	serverReader := protocol.NewFrameReader(serverConn)
+	serverWriter := protocol.NewFrameWriter(serverConn)
+	errCh := make(chan error, 1)
+	go func() {
+		preflightFrame, err := serverReader.ReadFrame()
+		if err != nil {
+			errCh <- err
+			return
+		}
+		preflight, err := protocol.DecodeControl(preflightFrame.Payload)
+		if err != nil || preflight.Type != "upgrade_preflight" {
+			errCh <- errors.New("first request was not upgrade_preflight")
+			return
+		}
+		var preflightMsg protocol.UpgradeMsg
+		if err := protocol.DecodePayload(preflight, &preflightMsg); err != nil {
+			errCh <- err
+			return
+		}
+		ok, _ := protocol.EncodeControl("upgrade_preflight_ok", struct{}{})
+		if err := serverWriter.WriteFrame(protocol.ChannelControl, ok); err != nil {
+			errCh <- err
+			return
+		}
+		upgradeFrame, err := serverReader.ReadFrame()
+		if err != nil {
+			errCh <- err
+			return
+		}
+		upgrade, err := protocol.DecodeControl(upgradeFrame.Payload)
+		if err != nil || upgrade.Type != "upgrade" {
+			errCh <- errors.New("second request was not upgrade")
+			return
+		}
+		var upgradeMsg protocol.UpgradeMsg
+		if err := protocol.DecodePayload(upgrade, &upgradeMsg); err != nil {
+			errCh <- err
+			return
+		}
+		if upgradeMsg != preflightMsg {
+			errCh <- errors.New("upgrade request differed from preflight")
+			return
+		}
+		ack, _ := protocol.EncodeControl("upgrading", struct{}{})
+		errCh <- serverWriter.WriteFrame(protocol.ChannelControl, ack)
+	}()
+	if err := requestUpgrade(c); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRequestUpgradeRefusalNeverSendsMutatingRequest(t *testing.T) {
+	c, serverConn := setupTestClient(t)
+	serverReader := protocol.NewFrameReader(serverConn)
+	serverWriter := protocol.NewFrameWriter(serverConn)
+	seen := make(chan string, 2)
+	go func() {
+		frame, err := serverReader.ReadFrame()
+		if err != nil {
+			seen <- "read-error"
+			return
+		}
+		env, _ := protocol.DecodeControl(frame.Payload)
+		seen <- env.Type
+		refusal, _ := protocol.EncodeControl("error", protocol.ErrorMsg{Message: "canny refusal"})
+		_ = serverWriter.WriteFrame(protocol.ChannelControl, refusal)
+		_ = serverConn.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+		if frame, err := serverReader.ReadFrame(); err == nil {
+			env, _ := protocol.DecodeControl(frame.Payload)
+			seen <- env.Type
+		}
+		close(seen)
+	}()
+	if err := requestUpgrade(c); err == nil {
+		t.Fatal("preflight refusal was accepted")
+	}
+	var got []string
+	for msgType := range seen {
+		got = append(got, msgType)
+	}
+	if len(got) != 1 || got[0] != "upgrade_preflight" {
+		t.Fatalf("requests after refusal = %v, want preflight only", got)
+	}
+}
+
 func TestReadControlResponseWithDataFrame(t *testing.T) {
 	c, serverConn := setupTestClient(t)
 	serverWriter := protocol.NewFrameWriter(serverConn)

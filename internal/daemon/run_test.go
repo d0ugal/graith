@@ -10,11 +10,33 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/d0ugal/graith/internal/config"
 )
+
+func TestResolvedUpgradeSnapshotPathsDoesNotRetainRemovedDataDir(t *testing.T) {
+	defaults, err := config.ResolvePaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	running := defaults.WithDataDir(filepath.Join(t.TempDir(), "croft-custom-data"))
+	snapshot := config.Default() // data_dir deliberately removed
+	got, err := resolvedUpgradeSnapshotPaths(snapshot, defaults.ConfigFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := makeUpgradePathDescriptor(defaults, defaults.ConfigFile)
+	if got != want {
+		t.Fatalf("fresh snapshot paths = %+v, want replacement defaults %+v", got, want)
+	}
+	if got == makeUpgradePathDescriptor(running, defaults.ConfigFile) {
+		t.Fatal("removed data_dir inherited the running daemon's custom paths")
+	}
+}
 
 func TestRunControlLoopReloadsThenShutsDown(t *testing.T) {
 	signals := make(chan os.Signal)
-	upgrades := make(chan string)
+	upgrades := make(chan *upgradeRequest)
 	wantReloadErr := errors.New("invalid config")
 	reloaded := make(chan struct{}, 1)
 	shutdown := make(chan struct{}, 1)
@@ -27,7 +49,7 @@ func TestRunControlLoopReloadsThenShutsDown(t *testing.T) {
 			return wantReloadErr
 		}, func() {
 			shutdown <- struct{}{}
-		}, func(string) error {
+		}, func(*upgradeRequest) error {
 			unexpected <- "upgrade callback ran"
 			return nil
 		})
@@ -56,42 +78,72 @@ func TestRunControlLoopReloadsThenShutsDown(t *testing.T) {
 	assertNoUnexpectedCallback(t, unexpected)
 }
 
-func TestRunControlLoopReturnsUpgradeResult(t *testing.T) {
+func TestRunControlLoopKeepsServingAfterUpgradeError(t *testing.T) {
 	signals := make(chan os.Signal)
-	upgrades := make(chan string)
+	upgrades := make(chan *upgradeRequest)
 	wantErr := errors.New("upgrade failed")
-	unexpected := make(chan string, 2)
+	callback := make(chan struct{}, 1)
+	shutdown := make(chan struct{}, 1)
 	done := make(chan error, 1)
 
 	go func() {
 		done <- runControlLoop(signals, upgrades, discardLogger(), func() error {
-			unexpected <- "reload callback ran"
 			return nil
 		}, func() {
-			unexpected <- "shutdown callback ran"
-		}, func(path string) error {
-			if path != "/tmp/new-gr" {
-				unexpected <- "upgrade callback received wrong path"
+			shutdown <- struct{}{}
+		}, func(request *upgradeRequest) error {
+			if request.execPath != "/tmp/new-gr" {
+				t.Errorf("upgrade callback path = %q", request.execPath)
 			}
-
+			callback <- struct{}{}
 			return wantErr
 		})
 	}()
 
-	upgrades <- "/tmp/new-gr"
+	upgrades <- newUpgradeRequest("/tmp/new-gr")
+	<-callback
+	signals <- syscall.SIGTERM
+	<-shutdown
 
-	if got := <-done; !errors.Is(got, wantErr) {
-		t.Fatalf("runControlLoop error = %v, want %v", got, wantErr)
+	if got := <-done; got != nil {
+		t.Fatalf("runControlLoop error = %v, want nil", got)
 	}
+}
 
-	assertNoUnexpectedCallback(t, unexpected)
+func TestRunControlLoopFailsClosedAfterUnsafeDescriptorRollback(t *testing.T) {
+	signals := make(chan os.Signal)
+	upgrades := make(chan *upgradeRequest)
+	shutdown := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	wantErr := unsafeUpgradeDescriptor(errors.New("descriptor flags remain inheritable"))
+
+	go func() {
+		done <- runControlLoop(signals, upgrades, discardLogger(), func() error {
+			return nil
+		}, func() {
+			shutdown <- struct{}{}
+		}, func(*upgradeRequest) error {
+			return wantErr
+		})
+	}()
+
+	upgrades <- newUpgradeRequest("/tmp/new-gr")
+	select {
+	case <-shutdown:
+	case <-time.After(time.Second):
+		t.Fatal("unsafe rollback did not shut down the daemon")
+	}
+	var unsafeErr *upgradeDescriptorSafetyError
+	if err := <-done; !errors.As(err, &unsafeErr) {
+		t.Fatalf("runControlLoop error = %v, want unsafe descriptor error", err)
+	}
 }
 
 func TestRunControlLoopTerminalSignalsShutDown(t *testing.T) {
 	for _, signal := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT} {
 		t.Run(signal.String(), func(t *testing.T) {
 			signals := make(chan os.Signal)
-			upgrades := make(chan string)
+			upgrades := make(chan *upgradeRequest)
 			shutdown := make(chan struct{}, 1)
 			unexpected := make(chan string, 2)
 			done := make(chan error, 1)
@@ -103,7 +155,7 @@ func TestRunControlLoopTerminalSignalsShutDown(t *testing.T) {
 					return nil
 				}, func() {
 					shutdown <- struct{}{}
-				}, func(string) error {
+				}, func(*upgradeRequest) error {
 					unexpected <- "upgrade callback ran"
 
 					return nil

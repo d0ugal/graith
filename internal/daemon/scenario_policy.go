@@ -674,6 +674,11 @@ func clearScenarioPendingRetries(sc *ScenarioState) {
 }
 
 func (sm *SessionManager) executeScenarioRetry(ctx context.Context, action scenarioRetryAction, now time.Time) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return
+	}
+	defer sm.endLifecycleOperation()
+
 	unlockLaunch, err := sm.lockSessionLaunchContext(ctx, action.sessionID)
 	if err != nil {
 		return

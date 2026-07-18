@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"context"
+
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -71,7 +73,9 @@ func handleMsgPub(sm *SessionManager, auth authContext, send func(string, any), 
 
 	if !m.Quiet {
 		if targetID, isInbox := parseInboxStream(m.Stream); isInbox {
-			go sm.notifyInbox(targetID, m.SenderID, m.SenderName, m.NoReply)
+			sm.startBackgroundTask(context.Background(), func(ctx context.Context) {
+				sm.notifyInboxContext(ctx, targetID, m.SenderID, m.SenderName, m.NoReply)
+			})
 		}
 	}
 }

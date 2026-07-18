@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -88,7 +89,9 @@ func (sm *SessionManager) notifyFromDaemon(sessionID, body string) error {
 		sm.log.Error("failed to publish daemon notification", "session", sessionID, "err", err)
 		return err
 	}
-	go sm.notifyInbox(sessionID, systemSenderID, systemSenderName, false)
+	sm.startBackgroundTask(context.Background(), func(ctx context.Context) {
+		sm.notifyInboxContext(ctx, sessionID, systemSenderID, systemSenderName, false)
+	})
 
 	return nil
 }
@@ -99,9 +102,13 @@ func (sm *SessionManager) notifyFromDaemon(sessionID, body string) error {
 // notification in that case. This runs daemon-side so it bypasses the
 // per-session auth check on the "type" command.
 func (sm *SessionManager) notifyInbox(targetID, senderID, senderName string, noReply bool) {
+	sm.notifyInboxContext(context.Background(), targetID, senderID, senderName, noReply)
+}
+
+func (sm *SessionManager) notifyInboxContext(ctx context.Context, targetID, senderID, senderName string, noReply bool) {
 	ptySess, ok := sm.GetPTY(targetID)
 	if !ok {
-		sm.resumeForInbox(targetID, senderID, senderName, noReply)
+		sm.resumeForInboxContext(ctx, targetID, senderID, senderName, noReply)
 		return
 	}
 
@@ -109,7 +116,10 @@ func (sm *SessionManager) notifyInbox(targetID, senderID, senderName string, noR
 
 	if sm.HasAttachedClient(targetID) {
 		timing := sm.Config().Notifications.Timing
-		ptySess.WaitForUserIdle(timing.InboxIdleTimeoutDuration(), timing.InboxMaxWaitDuration())
+		waitForUserIdleContext(ctx, ptySess, timing.InboxIdleTimeoutDuration(), timing.InboxMaxWaitDuration())
+	}
+	if ctx.Err() != nil {
+		return
 	}
 
 	if err := ptySess.WriteInputAndSubmit([]byte(hint)); err != nil {
@@ -161,6 +171,10 @@ func inboxResumeSummary(senderID, senderName string, noReply bool) string {
 // resumeForInbox auto-resumes a stopped session when an inbox message arrives.
 // The resume flow calls notifyUnreadInbox which handles the PTY notification.
 func (sm *SessionManager) resumeForInbox(targetID, senderID, senderName string, noReply bool) {
+	sm.resumeForInboxContext(context.Background(), targetID, senderID, senderName, noReply)
+}
+
+func (sm *SessionManager) resumeForInboxContext(ctx context.Context, targetID, senderID, senderName string, noReply bool) {
 	sess, ok := sm.Get(targetID)
 	if !ok || sess.Status != StatusStopped {
 		return
@@ -177,7 +191,7 @@ func (sm *SessionManager) resumeForInbox(targetID, senderID, senderName string, 
 		"session", sess.Name, "id", targetID, "sender", sender)
 
 	lc := sm.Config().Lifecycle
-	if _, err := sm.resumeWithSummary(targetID, lc.DefaultRowsOrDefault(), lc.DefaultColsOrDefault(), summary); err != nil {
+	if _, err := sm.resumeWithSummaryContext(ctx, targetID, lc.DefaultRowsOrDefault(), lc.DefaultColsOrDefault(), summary); err != nil {
 		sm.log.Error("failed to auto-resume session for inbox",
 			"session", targetID, "err", err)
 	}
@@ -187,6 +201,10 @@ func (sm *SessionManager) resumeForInbox(targetID, senderID, senderName string, 
 // notification if any exist. Always call as a goroutine — the idle-wait
 // can block for up to 2 minutes.
 func (sm *SessionManager) notifyUnreadInbox(sessionID string) {
+	sm.notifyUnreadInboxContext(context.Background(), sessionID)
+}
+
+func (sm *SessionManager) notifyUnreadInboxContext(ctx context.Context, sessionID string) {
 	if sm.messages == nil {
 		return
 	}
@@ -210,9 +228,23 @@ func (sm *SessionManager) notifyUnreadInbox(sessionID string) {
 	}
 
 	if sm.HasAttachedClient(sessionID) {
-		ptySess.WaitForUserIdle(timing.InboxIdleTimeoutDuration(), timing.InboxMaxWaitDuration())
+		waitForUserIdleContext(ctx, ptySess, timing.InboxIdleTimeoutDuration(), timing.InboxMaxWaitDuration())
 	} else {
-		time.Sleep(timing.InboxDetachedDelayDuration())
+		timer := time.NewTimer(timing.InboxDetachedDelayDuration())
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return
+		}
+	}
+	if ctx.Err() != nil {
+		return
 	}
 
 	count := sm.messages.TotalUnread(sessionID)
@@ -237,6 +269,16 @@ func (sm *SessionManager) notifyUnreadInbox(sessionID string) {
 	}
 
 	ptySess.Poke()
+}
+
+func waitForUserIdleContext(ctx context.Context, session SessionDriver, idleTimeout, maxWait time.Duration) bool {
+	if waiter, ok := session.(interface {
+		WaitForUserIdleContext(context.Context, time.Duration, time.Duration) bool
+	}); ok {
+		return waiter.WaitForUserIdleContext(ctx, idleTimeout, maxWait)
+	}
+
+	return session.WaitForUserIdle(idleTimeout, maxWait)
 }
 
 // InterruptSession delivers an interrupt (Ctrl-C) to a session's live PTY using
@@ -300,8 +342,8 @@ func (sm *SessionManager) sendNotification(sessionName, status, command string) 
 	fmt.Print("\a")
 
 	if command != "" {
-		go func() {
-			cmd := exec.Command(tools.Shell(), "-c", command)
+		sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) {
+			cmd := exec.CommandContext(taskCtx, tools.Shell(), "-c", command)
 
 			cmd.Env = append(os.Environ(),
 				"GRAITH_SESSION_NAME="+sessionName,
@@ -311,17 +353,17 @@ func (sm *SessionManager) sendNotification(sessionName, status, command string) 
 			if err := cmd.Run(); err != nil {
 				sm.log.Error("custom notification command failed", "err", err)
 			}
-		}()
+		})
 
 		return
 	}
 
 	if runtime.GOOS == "darwin" {
 		script := fmt.Sprintf(`display notification %q with title %q`, message, title)
-		go func() {
-			if err := exec.Command(tools.OSAScript(), "-e", script).Run(); err != nil {
+		sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) {
+			if err := exec.CommandContext(taskCtx, tools.OSAScript(), "-e", script).Run(); err != nil {
 				sm.log.Error("osascript notification failed", "err", err)
 			}
-		}()
+		})
 	}
 }

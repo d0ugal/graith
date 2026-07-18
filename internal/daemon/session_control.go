@@ -25,6 +25,11 @@ func (sm *SessionManager) Stop(id string) error {
 }
 
 func (sm *SessionManager) stopWithReason(id, reason, initiator string) error {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return err
+	}
+	defer sm.endLifecycleOperation()
+
 	sm.mu.Lock()
 	sessState, ok := sm.state.Sessions[id]
 
@@ -216,6 +221,11 @@ func filterExcludeRoot(ids []string, rootID string) []string {
 // the root session itself is not stopped. Already-stopped sessions are skipped.
 // Returns the list of session IDs that were actually stopped.
 func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]string, error) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return nil, err
+	}
+	defer sm.endLifecycleOperation()
+
 	sm.mu.Lock()
 
 	if _, ok := sm.state.Sessions[rootID]; !ok {
@@ -404,6 +414,11 @@ func (sm *SessionManager) restartWithReason(id string, rows, cols uint16, stopRe
 }
 
 func (sm *SessionManager) restartWithReasonMode(id string, rows, cols uint16, stopReason, initiator string, bounded bool) (SessionState, error) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return SessionState{}, err
+	}
+	defer sm.endLifecycleOperation()
+
 	unlock := sm.lockSessionLaunch(id)
 	defer unlock()
 
@@ -418,14 +433,19 @@ func (sm *SessionManager) restartWithReasonModeContextLocked(ctx context.Context
 	sm.mu.RLock()
 
 	softDeleted := false
+	cleanupPending := false
 	if s, ok := sm.state.Sessions[id]; ok {
 		softDeleted = s.IsSoftDeleted()
+		cleanupPending = sm.rejectPendingUpgradeCleanupLocked(id) != nil
 	}
 
 	sm.mu.RUnlock()
 
 	if softDeleted {
 		return SessionState{}, errSoftDeleted(sm.sessionName(id))
+	}
+	if cleanupPending {
+		return SessionState{}, errors.New("session process cleanup from daemon upgrade is still pending")
 	}
 
 	ptySess, hasPTY := sm.GetPTY(id)
@@ -538,6 +558,11 @@ func (sm *SessionManager) restartWithReasonModeContextLocked(ctx context.Context
 }
 
 func (sm *SessionManager) RestartWithChildren(rootID string, excludeRoot bool, rows, cols uint16) ([]string, error) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return nil, err
+	}
+	defer sm.endLifecycleOperation()
+
 	sm.mu.Lock()
 	if _, ok := sm.state.Sessions[rootID]; !ok {
 		sm.mu.Unlock()

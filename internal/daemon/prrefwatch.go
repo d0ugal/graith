@@ -259,7 +259,11 @@ func (sm *SessionManager) createPRRefWatcher(ctx context.Context, id, worktree s
 	}
 
 	if startRepo {
-		go sm.runPRRefRepoWatcher(repo)
+		if !sm.startBackgroundTask(repo.ctx, func(context.Context) {
+			sm.runPRRefRepoWatcher(repo)
+		}) {
+			repo.stop()
+		}
 	}
 
 	if sm.log != nil {

@@ -63,7 +63,7 @@ func (sm *SessionManager) RunGCXTriggerLoop(ctx context.Context) {
 	sm.reconcileGCXBindings(sm.allTriggers(), now)
 
 	for _, name := range sm.dueGCXPolls(now) {
-		go sm.pollGCXTrigger(ctx, name, runGCXCommand)
+		sm.startGCXPollTask(ctx, name)
 	}
 
 	for {
@@ -74,10 +74,23 @@ func (sm *SessionManager) RunGCXTriggerLoop(ctx context.Context) {
 			sm.reconcileGCXBindings(sm.allTriggers(), now)
 
 			for _, name := range sm.dueGCXPolls(now) {
-				go sm.pollGCXTrigger(ctx, name, runGCXCommand)
+				sm.startGCXPollTask(ctx, name)
 			}
 		}
 	}
+}
+
+func (sm *SessionManager) startGCXPollTask(ctx context.Context, name string) {
+	if sm.startBackgroundTask(ctx, func(taskCtx context.Context) {
+		sm.pollGCXTrigger(taskCtx, name, runGCXCommand)
+	}) {
+		return
+	}
+	sm.triggers.mu.Lock()
+	if binding := sm.triggers.gcxBindings[name]; binding != nil {
+		binding.inFlight = false
+	}
+	sm.triggers.mu.Unlock()
 }
 
 func (sm *SessionManager) reconcileGCXBindings(triggers []config.TriggerConfig, now time.Time) {

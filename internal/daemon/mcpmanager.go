@@ -3,6 +3,8 @@ package daemon
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -35,14 +37,23 @@ type MCPProcess struct {
 // MCPManager manages MCP server processes. Each proxy connection gets its own
 // dedicated MCP server process, started lazily on connect.
 type MCPManager struct {
-	mu        sync.Mutex
-	servers   map[string]config.MCPServerConfig // server name -> config
-	processes map[string]*MCPProcess            // proxyID -> process
-	extraSvrs []config.MCPServerConfig          // auto-injected servers (e.g. graith)
-	logDir    string
-	globalSbx config.SandboxConfig
-	limits    config.LimitsConfig // output/log display caps (issue #1252)
-	log       *slog.Logger
+	mu         sync.Mutex
+	servers    map[string]config.MCPServerConfig // server name -> config
+	processes  map[string]*MCPProcess            // proxyID -> process
+	pending    map[string]bool
+	creating   int
+	changed    chan struct{}
+	extraSvrs  []config.MCPServerConfig // auto-injected servers (e.g. graith)
+	logDir     string
+	globalSbx  config.SandboxConfig
+	limits     config.LimitsConfig // output/log display caps (issue #1252)
+	log        *slog.Logger
+	frozen     bool
+	generation uint64
+
+	startProcessBeforeStart func()
+	startProcessAfterStart  func(*MCPProcess)
+	killProcessContextHook  func(context.Context, *MCPProcess) error
 }
 
 // NewMCPManager creates an MCPManager. extraServers are auto-injected servers
@@ -67,6 +78,8 @@ func NewMCPManager(cfg *config.Config, extraServers []config.MCPServerConfig, lo
 	return &MCPManager{
 		servers:   servers,
 		processes: make(map[string]*MCPProcess),
+		pending:   make(map[string]bool),
+		changed:   make(chan struct{}),
 		extraSvrs: extraServers,
 		logDir:    logDir,
 		globalSbx: cfg.Sandbox,
@@ -83,26 +96,92 @@ func NewMCPManager(cfg *config.Config, extraServers []config.MCPServerConfig, lo
 // per-session Chrome profile dir for chrome-devtools-mcp.
 func (m *MCPManager) Connect(serverName, proxyID string, vars config.TemplateVars) (*MCPProcess, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	if m.frozen {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("MCP connections are frozen for daemon upgrade")
+	}
 
 	serverCfg, ok := m.servers[serverName]
 	if !ok {
+		m.mu.Unlock()
 		return nil, fmt.Errorf("unknown MCP server %q", serverName)
 	}
 
-	if _, exists := m.processes[proxyID]; exists {
+	if current := m.processes[proxyID]; current != nil && !current.isRunning() {
+		delete(m.processes, proxyID)
+	}
+	if _, exists := m.processes[proxyID]; exists || m.pending[proxyID] {
+		m.mu.Unlock()
 		return nil, fmt.Errorf("proxy %q already connected", proxyID)
 	}
+	m.pending[proxyID] = true
+	m.creating++
+	serverCfg = cloneMCPServerConfig(serverCfg)
+	globalSbx := cloneSandboxConfig(m.globalSbx)
+	generation := m.generation
+	m.mu.Unlock()
 
-	proc, err := m.startProcess(serverCfg, proxyID, vars)
+	proc, err := m.startProcess(serverCfg, globalSbx, proxyID, vars)
 	if err != nil {
+		m.finishMCPCreate(proxyID)
 		return nil, fmt.Errorf("start MCP server %q: %w", serverName, err)
 	}
-
+	m.mu.Lock()
+	currentCfg, configured := m.servers[serverName]
+	stale := m.generation != generation || !configured || !reflect.DeepEqual(currentCfg, serverCfg)
+	if m.frozen || stale {
+		frozen := m.frozen
+		m.mu.Unlock()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		killErr := m.killProcessContext(ctx, proc)
+		cancel()
+		if killErr == nil || !proc.isRunning() {
+			m.finishMCPCreate(proxyID)
+		} else {
+			go func() {
+				<-proc.done
+				m.finishMCPCreate(proxyID)
+			}()
+		}
+		if frozen {
+			return nil, fmt.Errorf("MCP connections are frozen for daemon upgrade")
+		}
+		return nil, fmt.Errorf("MCP server %q configuration changed while starting", serverName)
+	}
 	m.processes[proxyID] = proc
+	delete(m.pending, proxyID)
+	m.creating--
+	m.signalChangedLocked()
+	m.mu.Unlock()
+	go m.removeMCPProcessWhenDone(proxyID, proc)
 	m.log.Info("MCP server started", "server", serverName, "proxy_id", proxyID, "pid", proc.cmd.Process.Pid)
 
 	return proc, nil
+}
+
+func (m *MCPManager) finishMCPCreate(proxyID string) {
+	m.mu.Lock()
+	if m.pending[proxyID] {
+		delete(m.pending, proxyID)
+		m.creating--
+		m.signalChangedLocked()
+	}
+	m.mu.Unlock()
+}
+
+func (m *MCPManager) removeMCPProcessWhenDone(proxyID string, proc *MCPProcess) {
+	<-proc.done
+	m.mu.Lock()
+	if m.processes[proxyID] == proc {
+		delete(m.processes, proxyID)
+		m.signalChangedLocked()
+	}
+	m.mu.Unlock()
+}
+
+func (m *MCPManager) signalChangedLocked() {
+	close(m.changed)
+	m.changed = make(chan struct{})
 }
 
 // Disconnect kills the MCP server process for the given proxy. It is
@@ -183,6 +262,7 @@ func (m *MCPManager) Reload(cfg *config.Config) {
 	m.servers = newServers
 	m.globalSbx = cfg.Sandbox
 	m.limits = cfg.Limits
+	m.generation++
 	m.mu.Unlock()
 
 	for proxyID, proc := range killed {
@@ -194,6 +274,60 @@ func (m *MCPManager) Reload(cfg *config.Config) {
 // Shutdown kills all running MCP server processes.
 func (m *MCPManager) Shutdown() {
 	m.mu.Lock()
+	m.frozen = true
+	m.mu.Unlock()
+	m.drain("shutdown")
+}
+
+// FreezeAndDrain bars new lazy MCP child creation and waits for every process
+// registered before the barrier to exit. It is the MCP side of the exec
+// handoff: Shutdown alone cannot prevent a concurrent Connect from starting a
+// new child after the process map was drained.
+func (m *MCPManager) FreezeAndDrain(ctx context.Context) error {
+	for !m.mu.TryLock() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	m.frozen = true
+	for m.creating > 0 {
+		changed := m.changed
+		m.mu.Unlock()
+		select {
+		case <-changed:
+			for !m.mu.TryLock() {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(5 * time.Millisecond):
+				}
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	m.mu.Unlock()
+
+	return m.drainContext(ctx, "upgrade")
+}
+
+// Thaw allows lazy MCP processes to be started again after a failed exec.
+func (m *MCPManager) Thaw() {
+	m.mu.Lock()
+	m.frozen = false
+	m.mu.Unlock()
+}
+
+func (m *MCPManager) drain(reason string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = m.drainContext(ctx, reason)
+}
+
+func (m *MCPManager) drainContext(ctx context.Context, reason string) error {
+	m.mu.Lock()
 
 	procs := make(map[string]*MCPProcess, len(m.processes))
 	for k, v := range m.processes {
@@ -203,10 +337,26 @@ func (m *MCPManager) Shutdown() {
 	m.processes = make(map[string]*MCPProcess)
 	m.mu.Unlock()
 
+	var result error
+	unresolved := make(map[string]*MCPProcess)
 	for proxyID, proc := range procs {
-		m.killProcess(proc)
-		m.log.Info("MCP server stopped (shutdown)", "proxy_id", proxyID)
+		if err := m.killProcessContext(ctx, proc); err != nil {
+			result = errors.Join(result, err)
+			unresolved[proxyID] = proc
+		}
+		m.log.Info("MCP server stopped", "reason", reason, "proxy_id", proxyID)
 	}
+	if len(unresolved) > 0 {
+		m.mu.Lock()
+		for proxyID, proc := range unresolved {
+			if _, exists := m.processes[proxyID]; !exists && proc.isRunning() {
+				m.processes[proxyID] = proc
+			}
+		}
+		m.mu.Unlock()
+	}
+
+	return result
 }
 
 // HasServer returns true if the named MCP server is configured.
@@ -459,7 +609,15 @@ func tailFile(path string, n int, maxRead int64) (string, error) {
 	return strings.Join(linesArr, "\n") + "\n", nil
 }
 
-func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID string, vars config.TemplateVars) (*MCPProcess, error) {
+func (m *MCPManager) startProcess(
+	serverCfg config.MCPServerConfig,
+	globalSbx config.SandboxConfig,
+	proxyID string,
+	vars config.TemplateVars,
+) (*MCPProcess, error) {
+	if m.startProcessBeforeStart != nil {
+		m.startProcessBeforeStart()
+	}
 	mcpLogDir := filepath.Join(m.logDir, "mcp")
 	if err := os.MkdirAll(mcpLogDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create MCP log dir: %w", err)
@@ -513,8 +671,8 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 		sbxEnabled = *serverCfg.Sandbox
 	}
 
-	if sbxEnabled && m.globalSbx.Enabled {
-		merged := m.globalSbx
+	if sbxEnabled && globalSbx.Enabled {
+		merged := globalSbx
 		if serverCfg.SandboxConfig != nil {
 			merged = merged.Merge(*serverCfg.SandboxConfig)
 		}
@@ -618,6 +776,9 @@ func (m *MCPManager) startProcess(serverCfg config.MCPServerConfig, proxyID stri
 		stderr:     stderrFile,
 		done:       make(chan struct{}),
 	}
+	if m.startProcessAfterStart != nil {
+		m.startProcessAfterStart(proc)
+	}
 
 	go func() {
 		_ = cmd.Wait()
@@ -666,17 +827,78 @@ func mapsEqual(a, b map[string]string) bool {
 	return true
 }
 
+func cloneMCPServerConfig(source config.MCPServerConfig) config.MCPServerConfig {
+	result := source
+	result.Args = append([]string(nil), source.Args...)
+	if source.Env != nil {
+		result.Env = make(map[string]string, len(source.Env))
+		for key, value := range source.Env {
+			result.Env[key] = value
+		}
+	}
+	if source.Sandbox != nil {
+		value := *source.Sandbox
+		result.Sandbox = &value
+	}
+	if source.SandboxConfig != nil {
+		value := cloneSandboxConfig(*source.SandboxConfig)
+		result.SandboxConfig = &value
+	}
+	return result
+}
+
+func cloneSandboxConfig(source config.SandboxConfig) config.SandboxConfig {
+	result := source
+	if source.Disabled != nil {
+		value := *source.Disabled
+		result.Disabled = &value
+	}
+	result.Features = append([]string(nil), source.Features...)
+	result.ReadDirs = append([]string(nil), source.ReadDirs...)
+	result.WriteDirs = append([]string(nil), source.WriteDirs...)
+	result.ReadFiles = append([]string(nil), source.ReadFiles...)
+	result.WriteFiles = append([]string(nil), source.WriteFiles...)
+	if source.Network != nil {
+		network := *source.Network
+		network.AllowDomains = append([]string(nil), source.Network.AllowDomains...)
+		result.Network = &network
+	}
+	return result
+}
+
 func (m *MCPManager) killProcess(proc *MCPProcess) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = m.killProcessContext(ctx, proc)
+}
+
+func (m *MCPManager) killProcessContext(ctx context.Context, proc *MCPProcess) error {
+	if m.killProcessContextHook != nil {
+		return m.killProcessContextHook(ctx, proc)
+	}
 	_ = proc.stdin.Close()
 
 	if proc.cmd.Process != nil {
 		_ = proc.cmd.Process.Signal(os.Interrupt)
 
+		timer := time.NewTimer(5 * time.Second)
+		defer timer.Stop()
 		select {
 		case <-proc.done:
-		case <-time.After(5 * time.Second):
+			return nil
+		case <-timer.C:
 			_ = proc.cmd.Process.Kill()
-			<-proc.done
+		case <-ctx.Done():
+			_ = proc.cmd.Process.Kill()
+			return ctx.Err()
+		}
+		select {
+		case <-proc.done:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
+
+	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"time"
@@ -36,6 +37,29 @@ func describeSessionExit(s SessionState) string {
 		return fmt.Sprintf("exited with code %d", *s.ExitCode)
 	default:
 		return fmt.Sprintf("status: %s", s.Status)
+	}
+}
+
+// mutatingControlMessage classifies the connection-level generation barrier.
+// Defaulting to mutation keeps new message types fail-closed until explicitly
+// proven observational. Upgrade negotiation is excluded because it owns the
+// barrier transition itself.
+func mutatingControlMessage(msg protocol.Envelope) bool {
+	switch msg.Type {
+	case "msg_inbox":
+		var payload protocol.MsgInboxMsg
+		return protocol.DecodePayload(msg, &payload) != nil || payload.Ack
+	case "msg_sub":
+		var payload protocol.MsgSubMsg
+		return protocol.DecodePayload(msg, &payload) != nil || payload.Ack
+	case "handshake", "auth_proof", "approval_subscribe", "repo_list", "store_list", "store_get", "list",
+		"logs", "wait", "msg_topics", "msg_conversation", "msg_jail_list",
+		"msg_jail_show", "approval_list", "screen_preview", "screen_snapshot", "status",
+		"diagnostics", "config", "agent_catalog", "mcp_connect", "mcp_list", "mcp_logs", "scenario_status", "trigger_list",
+		"trigger_status", "todo_list", "scenario_list", "upgrade_preflight", "upgrade":
+		return false
+	default:
+		return true
 	}
 }
 
@@ -76,6 +100,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 		// challengeNonce is the per-connection PoP nonce issued after a remote
 		// handshake; the client must sign it in auth_proof. Single-use.
 		challengeNonce string
+		// upgradeTicket binds the mutating request to an exact, successful
+		// preflight on this connection. It is single-use even when preparation
+		// later refuses, so callers cannot replay stale authority or parameters.
+		upgradeTicket *protocol.UpgradeMsg
+		mutationLease bool
 	)
 
 	// connDone is closed when this connection's handler returns (for any
@@ -87,6 +116,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 	// or an early return from logs --follow / wait / msg_sub / approval_request
 	// / upgrade), so per-connection registrations never leak.
 	defer func() {
+		if mutationLease {
+			sm.endMutationRequest()
+		}
 		close(connDone)
 
 		if attachedSessionID != "" {
@@ -104,17 +136,27 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 		sm.RemoveApprovalSubscriber(conn)
 	}()
 
-	sendControl := func(msgType string, payload any) {
+	sendControlResult := func(msgType string, payload any) error {
 		data, err := protocol.EncodeControl(msgType, payload)
 		if err != nil {
 			log.Error("encode control", "err", err)
-			return
+			return err
 		}
 
-		_ = writer.WriteFrame(protocol.ChannelControl, data)
+		return writer.WriteFrame(protocol.ChannelControl, data)
+	}
+	sendControl := func(msgType string, payload any) {
+		_ = sendControlResult(msgType, payload)
 	}
 
 	for {
+		// The prior synchronous dispatch, including its response write, has
+		// completed. Release its generation lease before blocking for another
+		// frame. Early returns release through the connection defer above.
+		if mutationLease {
+			sm.endMutationRequest()
+			mutationLease = false
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -175,6 +217,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			if origin.Remote && !remoteAllowed(auth.role, msg.Type) {
 				sendControl("error", protocol.ErrorMsg{Message: "not authorized over remote connection"})
 				continue
+			}
+			if mutatingControlMessage(msg) {
+				if err := sm.beginMutationRequest(); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
+				mutationLease = true
 			}
 
 			switch msg.Type {
@@ -277,8 +326,27 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 				log.Info("pairing requested", "request_id", rid, "label", pr.DeviceLabel, "tailnet_user", identity.User)
+				// Transfer ownership of token delivery beyond this dispatch's
+				// connection lease. Upgrade/shutdown may not cross until the response
+				// write completes or a failed delivery has rolled back persistence.
+				if err := sm.beginMutationRequest(); err != nil {
+					sm.cancelPendingPairing(rid)
+					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+					continue
+				}
 
 				go func() {
+					defer sm.endMutationRequest()
+					cancelUndelivered := func() {
+						sm.cancelPendingPairing(rid)
+						select {
+						case approval := <-waitCh:
+							if err := sm.rollbackPairingDelivery(approval); err != nil {
+								log.Error("pairing cancellation rollback failed", "request_id", rid)
+							}
+						default:
+						}
+					}
 					// Time the waiter out against the request's immutable deadline,
 					// not the live TTL. A reload that changes pendingPairingTTL() must
 					// not leave this waiter and the approval/cleanup paths disagreeing
@@ -288,17 +356,22 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 					select {
 					case appr := <-waitCh:
-						sendControl("pair_response", protocol.PairResponseMsg{
+						writeErr := sendControlResult("pair_response", protocol.PairResponseMsg{
 							DeviceID:      appr.DeviceID,
 							ClientToken:   appr.Token,
 							DaemonProfile: appr.Profile,
 							TLSPinSPKI:    appr.TLSPin,
 						})
+						if writeErr != nil {
+							if err := sm.rollbackPairingDelivery(appr); err != nil {
+								log.Error("pairing response delivery rollback failed", "request_id", rid)
+							}
+						}
 					case <-timer.C:
-						sm.unregisterPairWaiter(rid)
+						cancelUndelivered()
 						sendControl("error", protocol.ErrorMsg{Message: "pairing request timed out"})
 					case <-connDone:
-						sm.unregisterPairWaiter(rid)
+						cancelUndelivered()
 					}
 				}()
 
@@ -960,21 +1033,72 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			case "scenario_list":
 				handleScenarioList(sm, sendControl)
 
+			case "upgrade_preflight":
+				if auth.authenticated {
+					sendControl("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
+					continue
+				}
+				if upgradeTicket != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "upgrade preflight already completed on this connection"})
+					continue
+				}
+				var u protocol.UpgradeMsg
+				if err := protocol.DecodePayload(msg, &u); err != nil || u.ExecPath == "" ||
+					!filepath.IsAbs(u.ExecPath) || u.ClientVersion == "" {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid upgrade preflight request"})
+					continue
+				}
+				upgradeTicket = &u
+				sendControl("upgrade_preflight_ok", struct{}{})
+
 			case "upgrade":
 				if auth.authenticated {
 					sendControl("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
 					continue
 				}
 
+				ticket := upgradeTicket
+				upgradeTicket = nil
 				var u protocol.UpgradeMsg
-
-				_ = protocol.DecodePayload(msg, &u)
-				select {
-				case sm.upgradeCh <- u.ExecPath:
-					sendControl("upgrading", struct{}{})
-				default:
-					sendControl("error", protocol.ErrorMsg{Message: "upgrade already in progress"})
+				if err := protocol.DecodePayload(msg, &u); err != nil {
+					sendControl("error", protocol.ErrorMsg{Message: "invalid upgrade request"})
+					continue
 				}
+				if ticket == nil || *ticket != u {
+					sendControl("error", protocol.ErrorMsg{Message: "upgrade request does not match a same-connection preflight"})
+					continue
+				}
+				if !sm.beginUpgradeAttempt() {
+					sendControl("error", protocol.ErrorMsg{Message: "upgrade already in progress"})
+					continue
+				}
+				request := newUpgradeRequest(u.ExecPath)
+				select {
+				case sm.upgradeCh <- request:
+				default:
+					sm.endUpgradeAttempt()
+					sendControl("error", protocol.ErrorMsg{Message: "upgrade already in progress"})
+					continue
+				}
+
+				select {
+				case err := <-request.ready:
+					if err != nil {
+						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+						continue
+					}
+				case <-ctx.Done():
+					request.cancel()
+					return
+				}
+
+				ack, err := protocol.EncodeControl("upgrading", struct{}{})
+				if err != nil || writer.WriteFrame(protocol.ChannelControl, ack) != nil {
+					request.cancel()
+
+					return
+				}
+				close(request.proceed)
 
 				return
 
@@ -983,6 +1107,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			}
 
 		case protocol.ChannelData:
+			if err := sm.beginMutationRequest(); err != nil {
+				sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+				continue
+			}
+			mutationLease = true
 			if origin.Remote && !sm.remoteDataAllowed(origin, poppedDeviceID) {
 				sendControl("error", protocol.ErrorMsg{Message: "not authorized to send remote input"})
 
@@ -998,8 +1127,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 			if attachedSessionID != "" && sm.IsAttachedClient(attachedSessionID, conn) {
 				if pty, ok := sm.GetPTY(attachedSessionID); ok {
+					if err := pty.WriteInput(frame.Payload); err != nil {
+						sendControl("error", protocol.ErrorMsg{Message: "session input was not accepted; reconnect and retry"})
+						return
+					}
 					pty.NotifyUserInput()
-					_ = pty.WriteInput(frame.Payload)
 				}
 			}
 		}

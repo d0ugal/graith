@@ -118,7 +118,7 @@ func (sm *SessionManager) RunPRWatchLoop(ctx context.Context) {
 	// guard keeps the accelerator optional — a SessionManager built without it (some
 	// unit tests) still runs the poll loop.
 	if ghOK && sm.prRefWatch != nil {
-		go sm.RunPRRefWatchLoop(ctx)
+		sm.startBackgroundTask(ctx, sm.RunPRRefWatchLoop)
 	}
 
 	// Cadence is read once at loop start; changing base_tick takes effect on the

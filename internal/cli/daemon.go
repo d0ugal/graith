@@ -1,11 +1,11 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"os"
-	"syscall"
 	"time"
 
 	"github.com/d0ugal/graith/internal/client"
@@ -35,8 +35,38 @@ var daemonStartCmd = &cobra.Command{
 	Use:    "start",
 	Short:  "Start the daemon",
 	Hidden: true,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if adoptFrom != "" {
+			return nil
+		}
+		return rootCmd.PersistentPreRunE(cmd, args)
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if adoptFrom != "" {
+			return daemon.RunAdoptBootstrap(cfgFile, adoptFrom)
+		}
 		return daemon.Run(cfg, paths, cfgFile, adoptFrom)
+	},
+}
+
+var daemonAdoptionCapacityCmd = &cobra.Command{
+	Use:    "adoption-capacity",
+	Hidden: true,
+	// This private exec-upgrade probe must not read ordinary configuration or
+	// resolve profile paths: a broken replacement config must not make backend
+	// capability discovery hang or report an unrelated failure.
+	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
+	Args:              cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if !daemon.IsUpgradeCapacityProbeMarker(args[0]) {
+			return errors.New("invalid private upgrade probe marker")
+		}
+
+		probe, err := daemon.CurrentUpgradeCapacityProbeForConfig(cfgFile)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(probe)
 	},
 }
 
@@ -157,18 +187,9 @@ func (e *preserveRestartRejectedError) Error() string { return e.cause.Error() }
 
 func (e *preserveRestartRejectedError) Unwrap() error { return e.cause }
 
-var daemonProcessAlive = func(pid int) bool {
-	err := syscall.Kill(pid, 0)
+const preserveRestartSuccessMsg = "Daemon restarted (sessions preserved)"
 
-	return err == nil || errors.Is(err, syscall.EPERM)
-}
-
-const (
-	preserveRestartSuccessMsg = "Daemon restarted (sessions preserved)"
-	cleanRestartSuccessMsg    = "Daemon restarted after preserve process exited (sessions not preserved)"
-)
-
-func restartDaemonPreservingSessions(startAfterDeadPreserve func() error) error {
+func restartDaemonPreservingSessions(_ func() error) error {
 	err := execUpgrade(preserveRestartSuccessMsg)
 	if err == nil {
 		return nil
@@ -203,51 +224,14 @@ func restartDaemonPreservingSessions(startAfterDeadPreserve func() error) error 
 		return nil
 	}
 
-	// The PID comes from the peer credentials of the same Unix socket that
-	// supplied priorInstanceID, not from the independently mutable PID file. If
-	// that exact process has exited, it cannot later exec into the replacement.
-	// A reused PID or a zombie conservatively blocks fallback as still alive.
-	if preserveProcessExited(unconfirmed.priorPID) {
-		startErr := startAfterDeadPreserve()
-
-		// A concurrent client can start or reach the requested version while the
-		// clean start is checking the socket. Validate the generation after both
-		// success and failure so neither a wrong-version daemon nor a contradictory
-		// "daemon is still running" error can be reported as restart success.
-		return reconcileCleanStart(startErr, unconfirmed.priorInstanceID)
-	}
-
-	// Once the request was accepted, the old and new generation can be the same
-	// PID. There is no race-free way for a subsequent PID signal to prove which
-	// generation it will hit, so leave clean restart as an explicit --force
-	// choice instead of risking the sessions the preserve path was meant to keep.
+	// Once a mutating preserve request was sent, a vanished peer PID is not proof
+	// that the replacement failed: the acknowledgement or readiness response may
+	// have been lost after exec. Never convert this uncertainty into an automatic
+	// clean start. Destructive restart remains an explicit --force operation.
 	return fmt.Errorf(
-		"%w; automatic clean fallback skipped because the daemon process that received the preserve request may still be serving or restarting (use --force for an intentional clean restart)",
+		"%w; automatic clean fallback skipped because preserve restart completion is unconfirmed (use --force for an intentional clean restart)",
 		err,
 	)
-}
-
-func preserveProcessExited(priorPID int) bool {
-	return priorPID > 1 && !daemonProcessAlive(priorPID)
-}
-
-func reconcileCleanStart(startErr error, priorInstanceID string) error {
-	v, id := probeDaemonIdentityFn(time.Time{})
-	if isNewDaemonGeneration(v, id, version.Version, priorInstanceID) {
-		out.Printf("%s\n", cleanRestartSuccessMsg)
-
-		return nil
-	}
-
-	if startErr != nil {
-		return startErr
-	}
-
-	if v != "" && v != version.Version {
-		return fmt.Errorf("clean restart presented daemon version %s instead of %s", v, version.Version)
-	}
-
-	return fmt.Errorf("clean restart did not present a new %s generation", version.Version)
 }
 
 func execUpgrade(successMsg string) error {
@@ -306,6 +290,27 @@ func execUpgrade(successMsg string) error {
 		c.Close()
 
 		return fmt.Errorf("identify daemon process before upgrade: %w", err)
+	}
+
+	// Capability negotiation is deliberately a separate round trip before the
+	// state-changing UpgradeMsg. A legacy daemon rejects the unknown message and
+	// remains fully live, giving the first native rollout an explicit clean
+	// stop/start migration path instead of a destructive hot handoff.
+	if err := c.SendControl("upgrade_preflight", upgradeMsg()); err != nil {
+		c.Close()
+		return &preserveRestartRejectedError{cause: fmt.Errorf("daemon does not support safe preserve-restart preflight: %w", err)}
+	}
+	preflight, err := c.ReadControlResponse()
+	if err != nil || preflight.Type != "upgrade_preflight_ok" {
+		c.Close()
+		message := "daemon does not support safe preserve restart; use --force for an intentional clean stop/start migration"
+		if err == nil && preflight.Type == "error" {
+			var response protocol.ErrorMsg
+			if protocol.DecodePayload(preflight, &response) == nil && response.Message != "" {
+				message = message + ": " + response.Message
+			}
+		}
+		return &preserveRestartRejectedError{cause: errors.New(message)}
 	}
 
 	// Propagate a send failure rather than waiting for the readiness of an upgrade
@@ -476,6 +481,7 @@ func startCleanDaemon() error {
 func registerDaemonCmd() {
 	rootCmd.AddCommand(daemonCmd)
 	daemonCmd.AddCommand(daemonStartCmd)
+	daemonCmd.AddCommand(daemonAdoptionCapacityCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonReloadCmd)

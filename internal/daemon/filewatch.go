@@ -348,7 +348,19 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 	sm.triggers.bindings[key] = b
 	sm.triggers.mu.Unlock()
 
-	go sm.runBinding(bctx, t.Name, b, matcher)
+	if !sm.startBackgroundTask(bctx, func(taskCtx context.Context) {
+		sm.runBinding(taskCtx, t.Name, b, matcher)
+	}) {
+		cancel()
+		_ = watcher.Close()
+		sm.triggers.mu.Lock()
+		if sm.triggers.bindings[key] == b {
+			delete(sm.triggers.bindings, key)
+		}
+		sm.triggers.mu.Unlock()
+
+		return
+	}
 
 	// Re-note any changes carried across an ignore-policy recreate that the new
 	// matcher still admits, (re)arming the debounce so they fire rather than being

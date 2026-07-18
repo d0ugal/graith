@@ -49,7 +49,11 @@ func (sm *SessionManager) RunTriggerLoop(ctx context.Context) {
 			sm.reconcileSchedules(sm.allTriggers(), now)
 
 			for _, name := range sm.dueSchedules(now) {
-				go sm.fireSchedule(ctx, name, causeSchedule)
+				if !sm.startBackgroundTask(ctx, func(taskCtx context.Context) {
+					sm.fireSchedule(taskCtx, name, causeSchedule)
+				}) {
+					sm.releaseFire(name)
+				}
 			}
 		}
 	}
@@ -951,7 +955,13 @@ func (sm *SessionManager) TriggerRunNow(ctx context.Context, name string) error 
 		return fmt.Errorf("trigger %q is already running (overlap=skip)", name)
 	}
 
-	go sm.fireSchedule(context.WithoutCancel(ctx), name, causeManual)
+	if !sm.startBackgroundTask(context.WithoutCancel(ctx), func(taskCtx context.Context) {
+		sm.fireSchedule(taskCtx, name, causeManual)
+	}) {
+		sm.releaseFire(name)
+
+		return errors.New("daemon background generation is draining")
+	}
 
 	return nil
 }

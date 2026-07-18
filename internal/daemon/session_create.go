@@ -25,6 +25,11 @@ import (
 //  2. Git setup and PTY spawn (no lock held)
 //  3. Lock: commit to StatusRunning, unlock
 func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return SessionState{}, err
+	}
+	defer sm.endLifecycleOperation()
+
 	// Destructure into local names so the body below stays unchanged.
 	name := opts.Name
 	agentName := opts.AgentName
@@ -132,6 +137,11 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	// --- Phase 1: Lock, validate state, reserve session ---
 	sm.mu.Lock()
+	if err := sm.rejectLaunchDuringUpgradeLocked(); err != nil {
+		sm.mu.Unlock()
+
+		return SessionState{}, err
+	}
 
 	id := opts.ID
 	if id == "" {
@@ -860,6 +870,16 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 		return SessionState{}, fmt.Errorf("acquire launch slot: %w", err)
 	}
+	if err := sm.lifecyclePreSpawnBarrier(); err != nil {
+		slot.release()
+		cleanupOnError()
+		if scratchDir != "" {
+			_ = os.RemoveAll(scratchDir)
+		}
+		rollbackState()
+
+		return SessionState{}, err
+	}
 
 	// Record the pre-spawn time so native session-id capture only matches
 	// transcript files this start creates (race-safe against stale rollouts).
@@ -919,6 +939,20 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	// --- Phase 3: Lock, commit to running ---
 	sm.mu.Lock()
+	if err := sm.rejectLaunchDuringUpgradeLocked(); err != nil {
+		sm.mu.Unlock()
+		sm.logStopping(id, name, "rollback", "create-rollback", ptySess)
+		_ = ptySess.Kill()
+		ptySess.Close()
+		cleanupOnError()
+		if scratchDir != "" {
+			_ = os.RemoveAll(scratchDir)
+		}
+		rollbackState()
+		_ = os.Remove(logPath)
+
+		return SessionState{}, err
+	}
 
 	// Check the session wasn't deleted while we were setting up.
 	if _, ok := sm.state.Sessions[id]; !ok {
@@ -946,6 +980,11 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	sessState.Status = StatusRunning
 	sessState.StatusChangedAt = time.Now()
 	sessState.LaunchGeneration = 1
+	if scrapesID(agentName) && agentSessionID == "" {
+		captureStartedAt := startedAt.UTC()
+		sessState.NativeStateRoot = env["CODEX_HOME"]
+		sessState.NativeCaptureStartedAt = &captureStartedAt
+	}
 
 	if opts.Starred {
 		sessState.Starred = true
@@ -1010,7 +1049,9 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	// later resume is deterministic. Skipped when the id was forced (agentSessionID
 	// non-empty). Uses the session's effective state root (e.g. CODEX_HOME).
 	if scrapesID(agentName) && agentSessionID == "" {
-		go sm.captureNativeSessionID(id, agentName, worktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
+		sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) {
+			sm.captureNativeSessionIDContext(taskCtx, id, agentName, worktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
+		})
 	}
 
 	return result, nil
