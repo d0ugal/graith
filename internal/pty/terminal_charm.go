@@ -1,6 +1,7 @@
 package pty
 
 import (
+	"errors"
 	"image/color"
 	"io"
 	"sync"
@@ -37,6 +38,8 @@ type charmTerminal struct {
 	closeOnce sync.Once
 }
 
+var errTerminalParserPanic = errors.New("terminal parser panic")
+
 // newCharmTerminal builds a charm-vt-backed Terminal at cols×rows. Dimensions
 // below 1 are clamped so a zero-size PTY (seen briefly on some launch paths)
 // can't panic the emulator.
@@ -71,7 +74,23 @@ func newCharmTerminal(cols, rows int) *charmTerminal {
 }
 
 func (ct *charmTerminal) Write(p []byte) (int, error) {
-	return ct.emu.Write(p)
+	return writeTerminalOutput(ct.emu, p)
+}
+
+// writeTerminalOutput contains panics from the terminal parser. PTY output is
+// untrusted input: a parser defect must be reported to the owning session, not
+// unwind through its read loop and terminate the daemon. The recovered value
+// is deliberately discarded so a dependency panic cannot copy raw terminal
+// contents or secrets into daemon logs.
+func writeTerminalOutput(emu *cvt.Emulator, p []byte) (n int, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			n = 0
+			err = errTerminalParserPanic
+		}
+	}()
+
+	return emu.Write(p)
 }
 
 func (ct *charmTerminal) Resize(cols, rows int) {

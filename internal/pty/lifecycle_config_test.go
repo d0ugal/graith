@@ -204,3 +204,52 @@ func TestAdoptOptsHydration(t *testing.T) {
 		}
 	})
 }
+
+func TestAdoptSessionReturnsTerminalHydrationPanic(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "scrollback.log")
+	if err := os.WriteFile(logPath, terminalParserPanicFixture(t), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = w.Close() })
+
+	s, err := AdoptSession(AdoptOpts{
+		ID: "thrawn-adopt", Fd: r.Fd(), PID: cmd.Process.Pid, LogPath: logPath,
+		MaxLogSize: 1024 * 1024, DefaultRows: 24, DefaultCols: 80,
+		HydrationBytes: 128 * 1024,
+	})
+	if err == nil {
+		if s != nil {
+			s.Close()
+		}
+
+		t.Fatal("AdoptSession returned nil error for parser panic")
+	}
+
+	if s != nil {
+		t.Fatal("AdoptSession returned a session after hydration failed")
+	}
+
+	if got := err.Error(); got != "hydrate terminal screen: terminal parser panic" {
+		t.Errorf("AdoptSession error = %q, want sanitized hydration failure", got)
+	}
+
+	if _, err := r.Stat(); err == nil {
+		t.Error("AdoptSession left the transferred PTY fd open after hydration failed")
+	}
+}
