@@ -69,6 +69,10 @@ func newGhosttyTerminal(cols, rows int) (gt *ghosttyTerminal, err error) {
 
 	gt = &ghosttyTerminal{terminal: terminal, cols: cols, rows: rows, dirty: true}
 
+	if err = terminal.ModeSet(libghostty.ModeGraphemeCluster, true); err != nil {
+		return nil, fmt.Errorf("enable go-libghostty grapheme clustering: %w", err)
+	}
+
 	// Graith renders text cells only. Disable the image storage and all
 	// filesystem/shared-memory image media exposed by the upstream binding.
 	zero := uint64(0)

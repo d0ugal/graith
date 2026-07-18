@@ -10,12 +10,9 @@ import (
 // terminalBackendFactory lets the same reduced synthetic corpus and benchmarks
 // exercise the rollback backend and an explicitly tagged native candidate.
 type terminalBackendFactory struct {
-	name                      string
-	new                       func(cols, rows int) (Terminal, error)
-	expectsContained1430Panic bool
-	combiningContent          string
-	alternateScreenHomes      bool
-	shrinkFirstLine           string
+	name         string
+	new          func(cols, rows int) (Terminal, error)
+	expectations terminalBackendExpectations
 }
 
 func terminalBackendFactories() []terminalBackendFactory {
@@ -25,10 +22,7 @@ func terminalBackendFactories() []terminalBackendFactory {
 			new: func(cols, rows int) (Terminal, error) {
 				return newCharmTerminal(cols, rows), nil
 			},
-			expectsContained1430Panic: true,
-			combiningContent:          "e",
-			alternateScreenHomes:      true,
-			shrinkFirstLine:           "keep",
+			expectations: charmTerminalBackendExpectations(),
 		},
 	}
 
@@ -54,133 +48,6 @@ func newTerminalBackendTestTerm(
 	})
 
 	return term
-}
-
-// TestTerminalBackendCompatibilityCorpus runs both backends through the same
-// generic inputs. The corpus is deliberately reduced and synthetic: it
-// contains no captured user/agent output, local paths, or session identifiers.
-func TestTerminalBackendCompatibilityCorpus(t *testing.T) {
-	for _, factory := range terminalBackendFactories() {
-		t.Run(factory.name, func(t *testing.T) {
-			t.Run("graphemes_styles_colors_and_cursor", func(t *testing.T) {
-				term := newTerminalBackendTestTerm(t, factory, 24, 4)
-				write(t, term, "\x1b[2J\x1b[H")
-				write(t, term, "\x1b[1;2;3;4;5;7;9;38;5;208;48;2;10;20;30mZ\x1b[0m")
-				write(t, term, "\r\ne\u0301你😀")
-				write(t, term, "\x1b[?25l")
-
-				styled := term.Cell(0, 0).Style
-				if styled.FG != (Color{Kind: ColorIndexed, Value: 208}) ||
-					styled.BG != (Color{Kind: ColorRGB, Value: 0x0A141E}) {
-					t.Errorf("styled cell colors = FG %+v BG %+v", styled.FG, styled.BG)
-				}
-
-				if !styled.Bold || !styled.Faint || !styled.Italic || !styled.Underline ||
-					!styled.Blink || !styled.Reverse || !styled.Strikethrough {
-					t.Errorf("styled cell attributes incomplete: %+v", styled)
-				}
-
-				// Charm currently drops the combining mark while Ghostty
-				// clusters it with the base codepoint, matching Terminal's
-				// documented grapheme semantics. Keep the difference explicit
-				// while driving both backends with the same input.
-				wantCells := map[int]string{
-					0: factory.combiningContent,
-					1: "你",
-					2: "",
-					3: "😀",
-					4: "",
-				}
-				for x, want := range wantCells {
-					if got := term.Cell(x, 1).Content; got != want {
-						t.Errorf("cell (%d,1) = %q, want %q", x, got, want)
-					}
-				}
-
-				x, y, visible := term.Cursor()
-				if x != 5 || y != 1 || visible {
-					t.Errorf("cursor = (%d,%d,%t), want (5,1,false)", x, y, visible)
-				}
-			})
-
-			t.Run("scrollback_hydration_and_resize", func(t *testing.T) {
-				term := newTerminalBackendTestTerm(t, factory, 36, 5)
-				fixture := syntheticTerminalWorkload(128 * 1024)
-				write(t, term, string(fixture))
-
-				before := renderPreview(term)
-				if !strings.Contains(before, "canny synthetic line") {
-					t.Fatalf("hydrated preview missing final synthetic rows: %q", before)
-				}
-
-				if err := term.Resize(52, 8); err != nil {
-					t.Fatal(err)
-				}
-
-				if cols, rows := term.Size(); cols != 52 || rows != 8 {
-					t.Errorf("size after grow = (%d,%d), want (52,8)", cols, rows)
-				}
-
-				if after := renderPreview(term); !strings.Contains(after, "canny synthetic line") {
-					t.Errorf("resize lost hydrated content: %q", after)
-				}
-			})
-
-			t.Run("shrink_reflow", func(t *testing.T) {
-				term := newTerminalBackendTestTerm(t, factory, 20, 2)
-				write(t, term, "keep me canny")
-
-				if err := term.Resize(4, 2); err != nil {
-					t.Fatal(err)
-				}
-
-				if got := line(t, term, 0); got != factory.shrinkFirstLine {
-					t.Errorf("first line after shrink = %q, want %q", got, factory.shrinkFirstLine)
-				}
-			})
-
-			t.Run("alternate_screen_and_device_queries", func(t *testing.T) {
-				term := newTerminalBackendTestTerm(t, factory, 30, 3)
-				write(t, term, "on the brae")
-				write(t, term, "\x1b[?1049h\x1b[6n\x1b[c\x1b[5n")
-				write(t, term, "in the bothy")
-
-				wantAlternate := "           in the bothy"
-				if factory.alternateScreenHomes {
-					wantAlternate = "in the bothy"
-				}
-
-				if got := line(t, term, 0); got != wantAlternate {
-					t.Errorf("alternate screen = %q, want %q", got, wantAlternate)
-				}
-
-				write(t, term, "\x1b[?1049l")
-
-				if got := line(t, term, 0); got != "on the brae" {
-					t.Errorf("restored main screen = %q", got)
-				}
-			})
-
-			t.Run("issue_1430_reduced_regression", func(t *testing.T) {
-				term := newTerminalBackendTestTerm(t, factory, 80, 24)
-
-				n, err := term.Write(terminalParserPanicFixture(t))
-				if factory.expectsContained1430Panic {
-					if n != 0 || err != errTerminalParserPanic {
-						t.Fatalf("contained result = (%d,%v), want (0,%v)", n, err, errTerminalParserPanic)
-					}
-
-					return
-				}
-
-				if n != len(terminalParserPanicFixture(t)) || err != nil {
-					t.Fatalf("write regression fixture = (%d,%v)", n, err)
-				}
-
-				write(t, term, "canny after malformed region")
-			})
-		})
-	}
 }
 
 func BenchmarkTerminalBackends(b *testing.B) {
@@ -367,7 +234,7 @@ func syntheticTerminalWorkload(minBytes int) []byte {
 	for i := 0; fixture.Len() < minBytes; i++ {
 		fmt.Fprintf(
 			&fixture,
-			"\x1b[3%dm%06d canny synthetic line on the brae with e\u0301, 你, and 😀\x1b[0m\r\n",
+			"\x1b[3%dm%06d canny braw brae e\u0301 你 😀\x1b[0m\r\n",
 			i%8,
 			i,
 		)
