@@ -1,10 +1,12 @@
 package pty
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -226,10 +228,18 @@ func TestAdoptSessionReturnsTerminalHydrationPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Cleanup(func() { _ = w.Close() })
+	t.Cleanup(func() {
+		_ = r.Close()
+		_ = w.Close()
+	})
+
+	transferredFD, err := syscall.Dup(int(r.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	s, err := AdoptSession(AdoptOpts{
-		ID: "thrawn-adopt", Fd: r.Fd(), PID: cmd.Process.Pid, LogPath: logPath,
+		ID: "thrawn-adopt", Fd: uintptr(transferredFD), PID: cmd.Process.Pid, LogPath: logPath,
 		MaxLogSize: 1024 * 1024, DefaultRows: 24, DefaultCols: 80,
 		HydrationBytes: 128 * 1024,
 	})
@@ -249,7 +259,8 @@ func TestAdoptSessionReturnsTerminalHydrationPanic(t *testing.T) {
 		t.Errorf("AdoptSession error = %q, want sanitized hydration failure", got)
 	}
 
-	if _, err := r.Stat(); err == nil {
-		t.Error("AdoptSession left the transferred PTY fd open after hydration failed")
+	var stat syscall.Stat_t
+	if err := syscall.Fstat(transferredFD, &stat); !errors.Is(err, syscall.EBADF) {
+		t.Errorf("transferred PTY fd remains usable after hydration failed: %v", err)
 	}
 }
