@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.69.5](https://github.com/d0ugal/graith/compare/v0.69.4...v0.69.5) (2026-07-18)
+
+
+### Features
+
+* add collision-safe scenario name templates ([85dd3d7](https://github.com/d0ugal/graith/commit/85dd3d70c3a35e4c7365146b23749f4dfb119282))
+
+
+### Bug Fixes
+
+* avoid concurrent scenario ID slice mutation ([7215b89](https://github.com/d0ugal/graith/commit/7215b8977f50afca8cfea20b0a1643d5292451e4))
+* **cli:** bind restart fallback to socket peer ([4337ea7](https://github.com/d0ugal/graith/commit/4337ea7011916cc18cb81a4b00faee87010437a8))
+* **cli:** make daemon restart fallback generation-safe ([ac0fdac](https://github.com/d0ugal/graith/commit/ac0fdac7b1b99b9adb02991390a910f212654f2a))
+* contain terminal parser panics ([0748e0f](https://github.com/d0ugal/graith/commit/0748e0f9d39d1793669573792a81cda97639416b))
+* **daemon:** harden completion reactor recovery ([6587c2c](https://github.com/d0ugal/graith/commit/6587c2c880bdc5123ee3e0bb8a2f13b322cf4c07))
+* **scenario:** allow mirrors of stopped sessions ([66bf2b7](https://github.com/d0ugal/graith/commit/66bf2b7bf1190ca7540348134216a3849186b49a))
+* **scenario:** harden shared mirror source binding ([fb2355d](https://github.com/d0ugal/graith/commit/fb2355d8e8c75ff5d1ae5ac1efd9b1fa833f4738))
+* **scenario:** harden shared mirror validation ([0a00399](https://github.com/d0ugal/graith/commit/0a00399ebe58dddbab0a2dc80087ee2047ad1b4a))
+* **scenarios:** harden prompt transport limits ([0078821](https://github.com/d0ugal/graith/commit/00788216f5bbfa843149b136589ec899ed13db8f))
+* **todo:** clarify assigned recovery semantics ([72b63ee](https://github.com/d0ugal/graith/commit/72b63ee9ca62ddf1aac0434baf32b761a55c1b85))
+
+
+### Documentation
+
+* clarify scenario trigger token priority ([dcf1c62](https://github.com/d0ugal/graith/commit/dcf1c62357e6362cca2758a8c1a5fb80f7bc2387))
+
+
+### Tests
+
+* clarify adoption fd ownership ([a0c9cbb](https://github.com/d0ugal/graith/commit/a0c9cbb739ba905e43c343b62b275ff96bbf7715))
+* cover scenario template lifecycle recovery ([1fcd259](https://github.com/d0ugal/graith/commit/1fcd2590e6a186335ebaa8431561cefaf9dd34c5))
+* preserve sandbox resolver in restart fixture ([1a2abdc](https://github.com/d0ugal/graith/commit/1a2abdcdbb76ab32695f06704b823c7911e79ae6))
+
 ## [0.69.4](https://github.com/d0ugal/graith/compare/v0.69.3...v0.69.4) (2026-07-18)
 
 
