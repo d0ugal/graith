@@ -23,7 +23,8 @@ func newScenarioPolicyTestManager(t *testing.T, now time.Time, members ...Scenar
 	for i := range members {
 		ids[i] = members[i].Name + "-id"
 		sm.state.Sessions[ids[i]] = &SessionState{
-			ID: ids[i], Name: members[i].Name, Status: StatusRunning, LaunchGeneration: 1,
+			ID: ids[i], Name: members[i].Name, Status: StatusRunning,
+			LaunchGeneration: 1, ScenarioID: "sc-strath",
 		}
 	}
 

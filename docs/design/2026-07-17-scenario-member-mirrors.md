@@ -82,16 +82,22 @@ candidates fail before any session starts. Soft-deleted, errored, creating, and
 deleting rows remain unavailable. A shared source without a worktree, or whose
 saved worktree is no longer an accessible directory, is incompatible with
 mirroring. Its effective included worktrees must also remain valid Git
-worktrees. Filesystem validation is performed outside the manager lock and the
-selected session identity and paths are revalidated while reserving the
-topology.
+worktrees belonging to their saved repositories. If that shared source is
+already a mirror, every backing session must still exist, have a running or
+stopped state, remain non-deleted, and form an acyclic chain to the ordinary
+worktree owner. Filesystem validation is performed outside the manager lock and
+the selected session identity, full backing chain, paths, and includes are
+revalidated while reserving the topology and immediately before exact-ID mirror
+creation.
 
-Each mirror is created through `SessionManager.Create` with `CreateOpts.Mirror`
-set to the already-resolved source session ID. This is the existing primitive:
-it copies source identity and includes, creates no Git worktree or branch, and
-requires a functioning sandbox. Sandbox availability for every mirrored
-member is checked during preflight so a disabled or unavailable backend cannot
-partially start the scenario.
+Each mirror is created through `SessionManager.Create` with the internal
+`CreateOpts.MirrorSourceID` contract set to the already-resolved source session
+ID. Unlike the user-facing name-or-ID selector, this performs only an exact ID
+lookup, so a session name cannot collide with and replace the reserved source.
+The existing primitive still copies source identity and includes, creates no
+Git worktree or branch, and requires a functioning sandbox. Sandbox availability
+for every mirrored member is checked during preflight so a disabled or
+unavailable backend cannot partially start the scenario.
 
 The direct member-name relationship is stored as `ScenarioSession.Mirror` and
 returned as `ScenarioSessionInfo.Mirror`. Manifests add `mirror` to both the

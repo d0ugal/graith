@@ -35,6 +35,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	parentID := opts.ParentID
 	noRepo := opts.NoRepo
 	mirror := opts.Mirror
+	exactMirrorSourceID := opts.MirrorSourceID
 	agentHooks := opts.AgentHooks
 	inPlace := opts.InPlace
 	allowConcurrent := opts.AllowConcurrent
@@ -74,7 +75,13 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, errors.New("--in-place and --no-repo are mutually exclusive")
 	}
 
-	if inPlace && mirror != "" {
+	if mirror != "" && exactMirrorSourceID != "" {
+		return SessionState{}, errors.New("mirror name and exact mirror source id are mutually exclusive")
+	}
+
+	hasMirror := mirror != "" || exactMirrorSourceID != ""
+
+	if inPlace && hasMirror {
 		return SessionState{}, errors.New("--in-place and --mirror are mutually exclusive")
 	}
 
@@ -86,7 +93,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	// These can involve network calls (gh api) and must not hold the mutex.
 	var preRepoRoot string
 
-	if !noRepo && mirror == "" && repoPath != "" {
+	if !noRepo && !hasMirror && repoPath != "" {
 		if !git.IsInsideGitRepo(repoPath) {
 			if inPlace {
 				return SessionState{}, fmt.Errorf("not inside a git repository: %s", repoPath)
@@ -147,9 +154,32 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		fetchOnCreate                                bool
 		rcIncludes                                   []string
 		sourceIncludes                               []IncludedRepoState
+		exactMirrorSnapshot                          scenarioSharedSource
 	)
 
 	switch {
+	case exactMirrorSourceID != "":
+		var resolveErr error
+
+		exactMirrorSnapshot, resolveErr = sm.resolveScenarioMirrorSourceIDLocked(exactMirrorSourceID)
+		if resolveErr != nil {
+			sm.mu.Unlock()
+			return SessionState{}, fmt.Errorf("resolve exact mirror source %q: %w", exactMirrorSourceID, resolveErr)
+		}
+
+		source := sm.state.Sessions[exactMirrorSourceID]
+		if source.WorktreePath == "" {
+			sm.mu.Unlock()
+			return SessionState{}, fmt.Errorf("session %q has no worktree to mirror", exactMirrorSourceID)
+		}
+
+		worktreePath = source.WorktreePath
+		repoRoot = source.RepoPath
+		repoName = source.RepoName
+		baseBranch = source.BaseBranch
+		isMirror = true
+		mirrorSourceID = exactMirrorSourceID
+		sourceIncludes = sm.mirrorSourceIncludesLocked(source)
 	case mirror != "":
 		var source *SessionState
 
@@ -408,6 +438,39 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		delete(sm.state.Sessions, id)
 		_ = sm.saveState()
 		sm.mu.Unlock()
+	}
+
+	// Scenario callers use the exact-ID mirror contract. Revalidate the source
+	// filesystem after reservation, immediately before any sandbox/process work,
+	// then prove that the complete backing chain still matches the locked
+	// snapshot. This keeps slow Git/filesystem I/O outside sm.mu while failing
+	// closed if the preserved source changes during validation.
+	if exactMirrorSourceID != "" {
+		if err := validateScenarioMirrorWorktree(name, exactMirrorSourceID, exactMirrorSnapshot.repoPath, exactMirrorSnapshot.worktreePath); err != nil {
+			rollbackState()
+			return SessionState{}, err
+		}
+
+		if err := validateScenarioMirrorIncludes(name, exactMirrorSourceID, exactMirrorSnapshot.includes); err != nil {
+			rollbackState()
+			return SessionState{}, err
+		}
+
+		sm.mu.RLock()
+		currentMirrorSnapshot, resolveErr := sm.resolveScenarioMirrorSourceIDLocked(exactMirrorSourceID)
+		unchanged := resolveErr == nil && sameScenarioSharedSource(currentMirrorSnapshot, exactMirrorSnapshot)
+
+		sm.mu.RUnlock()
+
+		if resolveErr != nil {
+			rollbackState()
+			return SessionState{}, fmt.Errorf("revalidate exact mirror source %q: %w", exactMirrorSourceID, resolveErr)
+		}
+
+		if !unchanged {
+			rollbackState()
+			return SessionState{}, fmt.Errorf("exact mirror source %q changed during session creation; try again", exactMirrorSourceID)
+		}
 	}
 
 	// Git worktree setup (default path only — includes fetch which can block).

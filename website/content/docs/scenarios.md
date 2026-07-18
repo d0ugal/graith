@@ -273,7 +273,9 @@ Soft-deleted, errored, creating, and deleting sessions are unavailable. If
 more than one running or stopped session has the requested name, startup fails
 as ambiguous. Because a shared agent is not started by the scenario, a shared
 entry cannot declare a startup `prompt`; it may still declare tracked `task`
-work.
+work. That task and any required results still participate in completion even
+when the shared source is stopped; omit them unless the external session or a
+human will satisfy those obligations.
 
 **Mirrored sessions:** Set `mirror` to another `[[sessions]]` member's `name` to
 create a normal scenario-owned worker over that member's exact worktree. The
@@ -286,10 +288,13 @@ branches.
 path. A mirrored member must not also set `shared`, `repo`, `base`, or
 `includes`: the repository, base, worktree, and included worktrees are derived
 from its target. The target may itself be mirrored, but references must be
-acyclic. Missing targets, duplicate/ambiguous names, cycles, sources without a
-worktree, stopped sources whose saved worktree has already been cleaned up, and
-sources with missing or invalid inherited included worktrees fail preflight
-before any member starts, as does unavailable sandbox enforcement.
+acyclic. Every session in an existing mirror source's backing chain must still
+exist, be running or stopped, and remain non-deleted. Missing targets,
+duplicate/ambiguous names, stale or cyclic backing chains, sources without a
+worktree, stopped sources whose saved worktree has already been cleaned up or
+replaced by an unrelated checkout, and sources with missing, invalid, or
+unrelated inherited included worktrees fail preflight before any member starts,
+as does unavailable sandbox enforcement.
 Agent, model, role, prompt, task, hooks, and `star` still configure the mirrored
 worker itself.
 

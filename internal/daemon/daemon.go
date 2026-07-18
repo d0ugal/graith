@@ -955,10 +955,14 @@ type CreateOpts struct {
 	Model      string
 	// Codex carries typed per-session Codex CLI options (issue #1186). Ignored
 	// (and rejected if non-zero) for non-codex agents.
-	Codex               config.CodexOptions
-	ParentID            string
-	NoRepo              bool
-	Mirror              string
+	Codex    config.CodexOptions
+	ParentID string
+	NoRepo   bool
+	Mirror   string
+	// MirrorSourceID is the internal exact-ID mirror contract. Unlike Mirror,
+	// it never treats the value as a session name. Scenario startup uses it
+	// after resolving and reserving an authoritative source identity.
+	MirrorSourceID      string
 	AgentHooks          bool
 	InPlace             bool
 	AllowConcurrent     bool

@@ -589,6 +589,12 @@ multi-repo rrweb orphan mutation fix scenario and have been addressed.
      exactly one non-deleted running or stopped session
    - Missing, soft-deleted, transient, errored, and ambiguous matches fail
      before scenario-owned members start
+   - An already-mirrored shared source is followed by exact session ID to its
+     ordinary worktree owner; missing, unavailable, deleted, or cyclic backing
+     chains fail closed
+   - Repository-backed preserved worktrees and inherited includes must still
+     belong to their saved repositories; an unrelated checkout at the same
+     path is rejected
    - Shared sessions are tagged into the scenario (receive manifests, appear
      in `gr scenario status`) but are never stopped, resumed, deleted, or
      cleaned up by scenario lifecycle operations
