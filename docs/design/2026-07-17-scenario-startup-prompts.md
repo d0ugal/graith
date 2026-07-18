@@ -77,19 +77,28 @@ durable member state, status, and self manifest. The effective launch prompt is
 Only a non-empty `task` seeds a todo or participates in todo dependencies.
 
 The canonical parser and authoritative daemon both validate every explicit
-prompt against a fixed 64 KiB body limit. The daemon separately validates
-every non-empty task against the effective todo-title limit before reservation
-or process creation. Runtime-policy validation continues to require a task or
-at least one required result; prompt is deliberately absent from that check.
+prompt against a fixed 64 KiB body limit and reject NUL in either prompt or
+task. The daemon separately validates each raw task against the effective
+todo-title limit before reservation or process creation. To keep scenario
+start/status frames bounded, the JSON-encoded effective prompts and tasks for a
+roster may occupy at most 3 MiB, reserving 1 MiB of the 4 MiB control frame for
+the envelope and other member metadata. The same aggregate check includes the
+existing roster before `scenario add` starts a new member.
+
+Runtime-policy validation continues to require a task or at least one required
+result; prompt is deliberately absent from that check.
 
 Storing the explicit prompt lets daemon restart and manifest republishing keep
-the distinction. Status and the member's self manifest expose the effective
-startup prompt alongside the tracked task. Old persisted members have no
-`prompt`; their effective prompt therefore remains their task.
+the distinction. Detailed status and an owned member's self manifest expose
+the effective startup prompt alongside the tracked task; list summaries omit
+prompt bodies. Shared members expose no effective startup prompt because the
+scenario never launches them. Old persisted owned members have no `prompt`;
+their effective prompt therefore remains their task.
 
 The main cost is a larger state/status payload for unusually long prompts. The
 64 KiB per-member cap is far above normal instructions while remaining below
-common process-argument limits and the 4 MiB control-frame ceiling.
+common process-argument limits; the separate 3 MiB aggregate encoded budget
+keeps multi-member control messages below the 4 MiB frame ceiling.
 
 ### Proposal 2: Put Rich Instructions in Todo Notes
 
@@ -110,16 +119,19 @@ on todo presentation data, so it does not separate the contracts.
 
 ### Implementation Notes
 
-Both TOML parsing and daemon entry points validate the new shape. `depends_on`
-continues to require tasks on both sides. `gr scenario add` receives a matching
-`--prompt` flag; result declarations remain file-only as before.
+Both TOML parsing and daemon entry points validate the new shape. Blank raw
+fields are size-checked and then canonicalized to empty, while NUL is rejected
+before argv construction. `depends_on` continues to require tasks on both
+sides. `gr scenario add` receives a matching `--prompt` flag; result
+declarations remain file-only as before.
 
 ### Testing
 
 Parser tests cover task-only compatibility, prompt-only required results, both
 fields, unknown fields, policy rejection for prompt alone, and prompt/task size
-limits. Daemon tests prove preflight rejection occurs before state/process
-mutation, long prompts launch intact without a todo, task-only members retain
-their todo, both fields stay independent, and prompt-only result publication
-completes the member. Protocol manifest and focused race tests cover the wire
-and lifecycle changes.
+limits, NUL rejection, and aggregate frame headroom. Daemon tests prove
+preflight rejection occurs before state/process mutation, long prompts launch
+intact without a todo, task-only members retain their todo, both fields stay
+independent, shared members expose no launch prompt, and prompt-only result
+publication completes the member. Protocol manifest and focused race tests
+cover the wire and lifecycle changes.

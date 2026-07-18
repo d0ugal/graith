@@ -251,16 +251,77 @@ prompt = "Inspect the croft"
 }
 
 func TestValidateSessionContractsTreatsWhitespacePromptAsOmitted(t *testing.T) {
-	session := protocol.ScenarioSessionInput{
+	sessions := []protocol.ScenarioSessionInput{{
 		Name: "canny", Shared: true, Prompt: " \n\t", Task: "inspect the croft",
-	}
+	}}
 
-	if err := ValidateSessionContracts([]protocol.ScenarioSessionInput{session}, config.TodoMaxTitleCeiling); err != nil {
+	if err := ValidateSessionContracts(sessions, config.TodoMaxTitleCeiling); err != nil {
 		t.Fatalf("whitespace-only prompt: %v", err)
 	}
 
-	if got := session.StartupPrompt(); got != session.Task {
-		t.Fatalf("startup prompt = %q, want task %q", got, session.Task)
+	if got := sessions[0].StartupPrompt(); got != "" {
+		t.Fatalf("shared startup prompt = %q, want empty", got)
+	}
+
+	NormalizeSessionContracts(sessions)
+
+	if sessions[0].Prompt != "" || sessions[0].Task != "inspect the croft" {
+		t.Fatalf("normalized prompt/task = %q/%q", sessions[0].Prompt, sessions[0].Task)
+	}
+}
+
+func TestValidateSessionContractsRejectsUnsafeRawFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		session protocol.ScenarioSessionInput
+		want    string
+	}{
+		{
+			name:    "prompt NUL",
+			session: protocol.ScenarioSessionInput{Name: "canny", Prompt: "inspect\x00croft"},
+			want:    "prompt contains a NUL byte",
+		},
+		{
+			name:    "task NUL",
+			session: protocol.ScenarioSessionInput{Name: "dreich", Task: "inspect\x00croft"},
+			want:    "task contains a NUL byte",
+		},
+		{
+			name:    "whitespace task exceeds raw title limit",
+			session: protocol.ScenarioSessionInput{Name: "thrawn", Task: strings.Repeat(" ", config.TodoMaxTitleCeiling+1)},
+			want:    "task exceeds todo title limit",
+		},
+		{
+			name:    "whitespace prompt exceeds raw body limit",
+			session: protocol.ScenarioSessionInput{Name: "bairn", Prompt: strings.Repeat(" ", protocol.MaxScenarioPromptBytes+1)},
+			want:    "prompt is too large",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateSessionContracts([]protocol.ScenarioSessionInput{tt.session}, config.TodoMaxTitleCeiling)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateSessionContractsRejectsAggregatePromptPayload(t *testing.T) {
+	memberCount := protocol.MaxScenarioContractPayloadBytes/protocol.MaxScenarioPromptBytes + 1
+
+	sessions := make([]protocol.ScenarioSessionInput, memberCount)
+	for i := range sessions {
+		sessions[i] = protocol.ScenarioSessionInput{
+			Name:   fmt.Sprintf("canny-%d", i),
+			Prompt: strings.Repeat("p", protocol.MaxScenarioPromptBytes),
+		}
+	}
+
+	err := ValidateSessionContracts(sessions, config.TodoMaxTitleCeiling)
+	if err == nil || !strings.Contains(err.Error(), "scenario prompt/task payload is too large") {
+		t.Fatalf("error = %v, want aggregate prompt/task payload rejection", err)
 	}
 }
 
