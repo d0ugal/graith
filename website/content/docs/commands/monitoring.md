@@ -19,8 +19,12 @@ List all sessions with status.
 | `--tree` | Show parent-child hierarchy |
 | `--children <name-or-id>` | Filter to descendants of a session |
 | `--starred` | Show only starred sessions |
+| `-q`, `--quiet` | Output session names only (or IDs with `--json`) |
 | `--wide` | Show all columns, including per-session token usage |
 | `--tokens` | Show the detailed token-usage projection and aggregate totals |
+| `--no-color` | Disable coloured status output |
+| `--deleted` | Show recoverably deleted sessions and their expiry |
+| `--watch` | Open a live-updating interactive view |
 
 The `--wide` view adds a **Tokens** column with the compact total token usage
 for each session's current agent (a trailing `~` marks an approximate count).
@@ -35,6 +39,20 @@ braw     graith  claude  12,431  48,209  1,204,882  96,004   0      1,361,526  8
 canny    graith  codex   69,131  3,517   756,224    0        0      828,872    11s ago
 TOTAL                     81,562  51,726  1,961,106  96,004   0      2,190,398  2/2 known
 ```
+
+`gr ls --watch` opens the session list in an alternate-screen TUI and refreshes
+it at the configured `terminal.refresh_interval`. The `--repo`, `--children`,
+and `--starred` filters continue to apply on every refresh; `--tree`, `--wide`,
+and `--no-color` control the live display just as they control the snapshot.
+Use `j`/`k` or the arrow keys to move, Enter/`a` to attach, `s` to stop, `r` to
+resume, and `x`/`d` to delete. Stop and delete ask for confirmation, and delete
+uses graith's normal recoverable soft-delete path.
+
+Watch mode requires terminal input and output. It rejects `--json` (including
+JSON implied by agent mode), `--quiet`, `--tokens`, and `--deleted`, so scripts
+and agents always receive a finite non-interactive snapshot rather than terminal
+control sequences or an unbounded stream. Press `q`, Escape, or `ctrl+c` to exit
+cleanly.
 
 The detailed projection composes with the normal list selection flags, including
 `--repo`, `--children`, `--starred`, `--deleted`, and `--tree`. `--quiet` and
@@ -91,10 +109,6 @@ Show session output without attaching.
 ### `gr info`
 
 Show info for the current session. Auto-detects the session by matching the current working directory against session worktree paths.
-
-### `gr dashboard`
-
-Live-updating TUI dashboard of all sessions. Supports inline attach, stop, delete, and resume.
 
 ### `gr approvals`
 

@@ -12,21 +12,21 @@ import (
 )
 
 // SessionColumn is the single source of truth for one column shown in the
-// session picker (the TUI overlay) and/or the `gr ls` table (the CLI). A column
-// is defined exactly once here, so adding a new column makes it appear in both
-// surfaces — flip ShowCLI/ShowTUI to control where it shows up and the two
-// views stay in sync automatically.
+// session picker (the TUI overlay), the `gr ls` snapshot, and/or `gr ls
+// --watch`. A column is defined exactly once here, so adding a new column makes
+// it appear in every enabled surface — flip ShowCLI/ShowTUI to control where it
+// shows up and the views stay in sync automatically.
 //
-// The two surfaces render very differently: the CLI aligns plain-text cells
-// (optionally colorised) by visible width, while the TUI uses lipgloss
-// fixed-width cells with unicode glyphs and per-cell styling. So each column
-// carries a value formatter (and styling) for each surface rather than a single
-// shared string.
+// The list snapshot/watch table and picker render differently: the list aligns
+// plain-text cells (optionally colourised) by visible width, while the picker
+// uses fixed-width cells with unicode glyphs and per-cell styling. So each
+// column carries a value formatter (and styling) for each kind of surface
+// rather than a single shared string.
 //
 // The NAME/Session column is deliberately NOT part of this registry: both
-// surfaces render it specially (star prefix and tree indentation in the CLI,
-// collapse indicators and tree prefixes in the TUI), so it is handled inline by
-// each renderer. This registry covers only the trailing columns.
+// surfaces render it specially (star prefix and tree indentation in list,
+// collapse indicators and tree prefixes in the picker), so it is handled
+// inline by each renderer. This registry covers only the trailing columns.
 type SessionColumn struct {
 	// Key is a stable identifier used for TUI width lookups.
 	Key string
@@ -34,7 +34,7 @@ type SessionColumn struct {
 	// the TUI uses it verbatim ("Status").
 	Header string
 
-	// ShowCLI includes the column in `gr ls`.
+	// ShowCLI includes the column in `gr ls` snapshot and watch modes.
 	ShowCLI bool
 	// ShowTUI includes the column in the TUI session picker.
 	ShowTUI bool
@@ -62,9 +62,10 @@ type SessionColumn struct {
 }
 
 // SessionColumns returns every trailing column in a single display order. Each
-// surface filters by ShowCLI/ShowTUI (the CLI additionally hides Wide columns
-// unless --wide is set) and renders the survivors in this order. The order is
-// chosen so that the two filtered subsets each match their historical layout:
+// surface filters by ShowCLI/ShowTUI (list snapshot/watch additionally hide
+// Wide columns unless --wide is set) and renders the survivors in this order.
+// The order is chosen so that the two filtered subsets each match their
+// historical layout:
 //
 //	CLI: Repo Agent Status Activity [Model Branch] Git PR Review Age [Attached]
 //	TUI: Status Summary Git PR Review Output

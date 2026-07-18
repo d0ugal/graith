@@ -7,11 +7,10 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
-func dashboardTestSessions() []protocol.SessionInfo {
+func listWatchTestSessions() []protocol.SessionInfo {
 	return []protocol.SessionInfo{
 		{
 			ID:        "s1",
@@ -34,19 +33,19 @@ func dashboardTestSessions() []protocol.SessionInfo {
 	}
 }
 
-func updateDash(m *DashboardModel, key string) *DashboardModel {
+func updateListWatch(m *ListWatchModel, key string) *ListWatchModel {
 	result, _ := m.Update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
-	return result.(*DashboardModel)
+	return result.(*ListWatchModel)
 }
 
-func updateDashKey(m *DashboardModel, k rune) (*DashboardModel, tea.Cmd) {
+func updateListWatchKey(m *ListWatchModel, k rune) (*ListWatchModel, tea.Cmd) {
 	result, cmd := m.Update(tea.KeyPressMsg{Code: k})
-	return result.(*DashboardModel), cmd
+	return result.(*ListWatchModel), cmd
 }
 
-func TestDashboardNavigation(t *testing.T) {
-	sessions := dashboardTestSessions()
-	m := NewDashboardModel(sessions, nil)
+func TestListWatchNavigation(t *testing.T) {
+	sessions := listWatchTestSessions()
+	m := NewListWatchModel(sessions, nil)
 	m.width = 120
 	m.height = 40
 
@@ -54,34 +53,34 @@ func TestDashboardNavigation(t *testing.T) {
 		t.Errorf("initial cursor = %d, want 0", m.cursor)
 	}
 
-	dm := updateDash(m, "j")
+	dm := updateListWatch(m, "j")
 	if dm.cursor != 1 {
 		t.Errorf("after j: cursor = %d, want 1", dm.cursor)
 	}
 
-	dm = updateDash(dm, "j")
+	dm = updateListWatch(dm, "j")
 	if dm.cursor != 1 {
 		t.Errorf("after j at end: cursor = %d, want 1", dm.cursor)
 	}
 
-	dm = updateDash(dm, "k")
+	dm = updateListWatch(dm, "k")
 	if dm.cursor != 0 {
 		t.Errorf("after k: cursor = %d, want 0", dm.cursor)
 	}
 
-	dm = updateDash(dm, "k")
+	dm = updateListWatch(dm, "k")
 	if dm.cursor != 0 {
 		t.Errorf("after k at start: cursor = %d, want 0", dm.cursor)
 	}
 }
 
-func TestDashboardAttach(t *testing.T) {
-	sessions := dashboardTestSessions()
-	m := NewDashboardModel(sessions, nil)
+func TestListWatchAttach(t *testing.T) {
+	sessions := listWatchTestSessions()
+	m := NewListWatchModel(sessions, nil)
 	m.width = 120
 	m.height = 40
 
-	dm, cmd := updateDashKey(m, tea.KeyEnter)
+	dm, cmd := updateListWatchKey(m, tea.KeyEnter)
 	if dm.result == nil {
 		t.Fatal("expected result after enter")
 	}
@@ -99,25 +98,25 @@ func TestDashboardAttach(t *testing.T) {
 	}
 }
 
-func TestDashboardDeleteConfirm(t *testing.T) {
-	sessions := dashboardTestSessions()
-	m := NewDashboardModel(sessions, nil)
+func TestListWatchDeleteConfirm(t *testing.T) {
+	sessions := listWatchTestSessions()
+	m := NewListWatchModel(sessions, nil)
 	m.width = 120
 	m.height = 40
 
-	dm := updateDash(m, "x")
-	if dm.state != dashStateConfirmDelete {
-		t.Errorf("state = %d, want dashStateConfirmDelete", dm.state)
+	dm := updateListWatch(m, "x")
+	if dm.state != listWatchStateConfirmDelete {
+		t.Errorf("state = %d, want listWatchStateConfirmDelete", dm.state)
 	}
 
-	dm = updateDash(dm, "n")
-	if dm.state != dashStateNormal {
-		t.Errorf("state after n = %d, want dashStateNormal", dm.state)
+	dm = updateListWatch(dm, "n")
+	if dm.state != listWatchStateNormal {
+		t.Errorf("state after n = %d, want listWatchStateNormal", dm.state)
 	}
 
-	dm = updateDash(dm, "x")
+	dm = updateListWatch(dm, "x")
 
-	dm = updateDash(dm, "y")
+	dm = updateListWatch(dm, "y")
 	if dm.result == nil {
 		t.Fatal("expected result after y confirm")
 	}
@@ -131,18 +130,18 @@ func TestDashboardDeleteConfirm(t *testing.T) {
 	}
 }
 
-func TestDashboardStopConfirm(t *testing.T) {
-	sessions := dashboardTestSessions()
-	m := NewDashboardModel(sessions, nil)
+func TestListWatchStopConfirm(t *testing.T) {
+	sessions := listWatchTestSessions()
+	m := NewListWatchModel(sessions, nil)
 	m.width = 120
 	m.height = 40
 
-	dm := updateDash(m, "s")
-	if dm.state != dashStateConfirmStop {
-		t.Errorf("state = %d, want dashStateConfirmStop", dm.state)
+	dm := updateListWatch(m, "s")
+	if dm.state != listWatchStateConfirmStop {
+		t.Errorf("state = %d, want listWatchStateConfirmStop", dm.state)
 	}
 
-	dm = updateDash(dm, "y")
+	dm = updateListWatch(dm, "y")
 	if dm.result == nil {
 		t.Fatal("expected result after y confirm")
 	}
@@ -152,34 +151,34 @@ func TestDashboardStopConfirm(t *testing.T) {
 	}
 }
 
-func TestDashboardStopOnlyStopping(t *testing.T) {
-	sessions := dashboardTestSessions()
-	m := NewDashboardModel(sessions, nil)
+func TestListWatchStopOnlyStopping(t *testing.T) {
+	sessions := listWatchTestSessions()
+	m := NewListWatchModel(sessions, nil)
 	m.width = 120
 	m.height = 40
 
-	dm := updateDash(m, "j")
+	dm := updateListWatch(m, "j")
 
-	dm = updateDash(dm, "s")
-	if dm.state != dashStateNormal {
-		t.Errorf("state = %d, want dashStateNormal (can't stop already stopped)", dm.state)
+	dm = updateListWatch(dm, "s")
+	if dm.state != listWatchStateNormal {
+		t.Errorf("state = %d, want listWatchStateNormal (can't stop already stopped)", dm.state)
 	}
 }
 
-func TestDashboardResumeOnlyStopped(t *testing.T) {
-	sessions := dashboardTestSessions()
-	m := NewDashboardModel(sessions, nil)
+func TestListWatchResumeOnlyStopped(t *testing.T) {
+	sessions := listWatchTestSessions()
+	m := NewListWatchModel(sessions, nil)
 	m.width = 120
 	m.height = 40
 
-	dm := updateDash(m, "r")
+	dm := updateListWatch(m, "r")
 	if dm.result != nil {
 		t.Error("resume should not work on running session")
 	}
 
-	dm = updateDash(m, "j")
+	dm = updateListWatch(m, "j")
 
-	dm = updateDash(dm, "r")
+	dm = updateListWatch(dm, "r")
 	if dm.result == nil {
 		t.Fatal("expected result after resume")
 	}
@@ -189,9 +188,9 @@ func TestDashboardResumeOnlyStopped(t *testing.T) {
 	}
 }
 
-func TestDashboardViewRendersContent(t *testing.T) {
-	sessions := dashboardTestSessions()
-	m := NewDashboardModel(sessions, nil)
+func TestListWatchViewRendersContent(t *testing.T) {
+	sessions := listWatchTestSessions()
+	m := NewListWatchModel(sessions, nil)
 	m.width = 120
 	m.height = 40
 
@@ -200,7 +199,7 @@ func TestDashboardViewRendersContent(t *testing.T) {
 		t.Error("view should not be empty")
 	}
 
-	checks := []string{"graith dashboard", "braw-fix", "canny-feature", "attach", "stop", "delete", "resume", "quit"}
+	checks := []string{"graith list --watch", "braw-fix", "canny-feature", "attach", "stop", "delete", "resume", "quit"}
 	for _, check := range checks {
 		if !strings.Contains(view, check) {
 			t.Errorf("view should contain %q", check)
@@ -208,13 +207,13 @@ func TestDashboardViewRendersContent(t *testing.T) {
 	}
 }
 
-func TestDashboardRefresh(t *testing.T) {
-	sessions := dashboardTestSessions()
-	m := NewDashboardModel(sessions, nil)
+func TestListWatchRefresh(t *testing.T) {
+	sessions := listWatchTestSessions()
+	m := NewListWatchModel(sessions, nil)
 	m.width = 120
 	m.height = 40
 
-	newSessions := append(dashboardTestSessions(), protocol.SessionInfo{
+	newSessions := append(listWatchTestSessions(), protocol.SessionInfo{
 		ID:        "s3",
 		Name:      "bonnie-work",
 		RepoName:  "croft",
@@ -225,51 +224,51 @@ func TestDashboardRefresh(t *testing.T) {
 
 	result, _ := m.Update(refreshMsg{sessions: newSessions})
 
-	dm := result.(*DashboardModel)
+	dm := result.(*ListWatchModel)
 	if len(dm.sessions) != 3 {
 		t.Errorf("sessions count = %d, want 3", len(dm.sessions))
 	}
 }
 
-func TestDashboardRefreshNilPreservesState(t *testing.T) {
-	sessions := dashboardTestSessions()
-	m := NewDashboardModel(sessions, nil)
+func TestListWatchRefreshNilPreservesState(t *testing.T) {
+	sessions := listWatchTestSessions()
+	m := NewListWatchModel(sessions, nil)
 	m.width = 120
 	m.height = 40
 
 	result, _ := m.Update(refreshMsg{sessions: nil})
 
-	dm := result.(*DashboardModel)
+	dm := result.(*ListWatchModel)
 	if len(dm.sessions) != 2 {
 		t.Errorf("sessions count = %d, want 2 (preserved on nil refresh)", len(dm.sessions))
 	}
 }
 
-func TestDashboardEmptySessions(t *testing.T) {
-	m := NewDashboardModel(nil, nil)
+func TestListWatchEmptySessions(t *testing.T) {
+	m := NewListWatchModel(nil, nil)
 	m.width = 120
 	m.height = 40
 
 	view := m.View().Content
 	if !strings.Contains(view, "No sessions") {
-		t.Error("empty dashboard should show 'No sessions' message")
+		t.Error("empty list watch should show 'No sessions' message")
 	}
 }
 
-func TestDashboardCursorPreservedOnRefresh(t *testing.T) {
-	sessions := dashboardTestSessions()
-	m := NewDashboardModel(sessions, nil)
+func TestListWatchCursorPreservedOnRefresh(t *testing.T) {
+	sessions := listWatchTestSessions()
+	m := NewListWatchModel(sessions, nil)
 	m.width = 120
 	m.height = 40
 
-	dm := updateDash(m, "j")
+	dm := updateListWatch(m, "j")
 	if dm.cursor != 1 {
 		t.Fatalf("cursor = %d, want 1", dm.cursor)
 	}
 
-	result, _ := dm.Update(refreshMsg{sessions: dashboardTestSessions()})
+	result, _ := dm.Update(refreshMsg{sessions: listWatchTestSessions()})
 
-	dm = result.(*DashboardModel)
+	dm = result.(*ListWatchModel)
 	if dm.cursor != 1 {
 		t.Errorf("cursor after refresh = %d, want 1 (preserved)", dm.cursor)
 	}
@@ -279,9 +278,9 @@ func TestDashboardCursorPreservedOnRefresh(t *testing.T) {
 	}
 }
 
-func TestDashboardNarrowTerminal(t *testing.T) {
-	sessions := dashboardTestSessions()
-	m := NewDashboardModel(sessions, nil)
+func TestListWatchNarrowTerminal(t *testing.T) {
+	sessions := listWatchTestSessions()
+	m := NewListWatchModel(sessions, nil)
 	m.width = 3
 	m.height = 10
 
@@ -291,7 +290,7 @@ func TestDashboardNarrowTerminal(t *testing.T) {
 	}
 }
 
-func TestDashboardViewportScrolling(t *testing.T) {
+func TestListWatchViewportScrolling(t *testing.T) {
 	var sessions []protocol.SessionInfo
 	for i := range 20 {
 		sessions = append(sessions, protocol.SessionInfo{
@@ -304,7 +303,7 @@ func TestDashboardViewportScrolling(t *testing.T) {
 		})
 	}
 
-	m := NewDashboardModel(sessions, nil)
+	m := NewListWatchModel(sessions, nil)
 	m.width = 120
 	m.height = 15
 
@@ -320,7 +319,7 @@ func TestDashboardViewportScrolling(t *testing.T) {
 	// Navigate to the bottom
 	dm := m
 	for range 19 {
-		dm = updateDash(dm, "j")
+		dm = updateListWatch(dm, "j")
 	}
 
 	if dm.cursor != 19 {
@@ -337,15 +336,15 @@ func TestDashboardViewportScrolling(t *testing.T) {
 	}
 }
 
-func TestDashboardDeleteConfirmTargetsOriginalSession(t *testing.T) {
-	sessions := dashboardTestSessions()
-	m := NewDashboardModel(sessions, nil)
+func TestListWatchDeleteConfirmTargetsOriginalSession(t *testing.T) {
+	sessions := listWatchTestSessions()
+	m := NewListWatchModel(sessions, nil)
 	m.width = 120
 	m.height = 40
 
-	dm := updateDash(m, "x")
-	if dm.state != dashStateConfirmDelete {
-		t.Fatalf("state = %d, want dashStateConfirmDelete", dm.state)
+	dm := updateListWatch(m, "x")
+	if dm.state != listWatchStateConfirmDelete {
+		t.Fatalf("state = %d, want listWatchStateConfirmDelete", dm.state)
 	}
 
 	if dm.confirmSessionID != "s1" {
@@ -365,11 +364,11 @@ func TestDashboardDeleteConfirmTargetsOriginalSession(t *testing.T) {
 		sessions[1],
 	}
 	result, _ := dm.Update(refreshMsg{sessions: newSessions})
-	dm = result.(*DashboardModel)
+	dm = result.(*ListWatchModel)
 
 	// s1 disappeared — confirmation should be cancelled
-	if dm.state != dashStateNormal {
-		t.Errorf("state = %d, want dashStateNormal (confirm cancelled)", dm.state)
+	if dm.state != listWatchStateNormal {
+		t.Errorf("state = %d, want listWatchStateNormal (confirm cancelled)", dm.state)
 	}
 
 	if dm.confirmSessionID != "" {
@@ -381,15 +380,15 @@ func TestDashboardDeleteConfirmTargetsOriginalSession(t *testing.T) {
 // confirmation on s1, refreshes the list so a new session is inserted before
 // s1, and verifies the confirmation stays armed on the original session (not
 // the cursor position) and that pressing y yields the expected action on s1.
-func assertConfirmSurvivesRefreshWithTarget(t *testing.T, triggerKey string, wantState dashboardState, wantAction string) {
+func assertConfirmSurvivesRefreshWithTarget(t *testing.T, triggerKey string, wantState listWatchState, wantAction string) {
 	t.Helper()
 
-	sessions := dashboardTestSessions()
-	m := NewDashboardModel(sessions, nil)
+	sessions := listWatchTestSessions()
+	m := NewListWatchModel(sessions, nil)
 	m.width = 120
 	m.height = 40
 
-	dm := updateDash(m, triggerKey)
+	dm := updateListWatch(m, triggerKey)
 	if dm.confirmSessionID != "s1" {
 		t.Fatalf("confirmSessionID = %q, want %q", dm.confirmSessionID, "s1")
 	}
@@ -408,7 +407,7 @@ func assertConfirmSurvivesRefreshWithTarget(t *testing.T, triggerKey string, wan
 		sessions[1],
 	}
 	result, _ := dm.Update(refreshMsg{sessions: newSessions})
-	dm = result.(*DashboardModel)
+	dm = result.(*ListWatchModel)
 
 	// Confirmation should still be active targeting s1
 	if dm.state != wantState {
@@ -416,7 +415,7 @@ func assertConfirmSurvivesRefreshWithTarget(t *testing.T, triggerKey string, wan
 	}
 
 	// Pressing y should act on s1, not whatever is at cursor index 0
-	dm = updateDash(dm, "y")
+	dm = updateListWatch(dm, "y")
 	if dm.result == nil {
 		t.Fatal("expected result after y confirm")
 	}
@@ -430,19 +429,19 @@ func assertConfirmSurvivesRefreshWithTarget(t *testing.T, triggerKey string, wan
 	}
 }
 
-func TestDashboardDeleteConfirmSurvivesRefreshWithTarget(t *testing.T) {
-	assertConfirmSurvivesRefreshWithTarget(t, "x", dashStateConfirmDelete, "delete")
+func TestListWatchDeleteConfirmSurvivesRefreshWithTarget(t *testing.T) {
+	assertConfirmSurvivesRefreshWithTarget(t, "x", listWatchStateConfirmDelete, "delete")
 }
 
-func TestDashboardStopConfirmTargetsOriginalSession(t *testing.T) {
-	sessions := dashboardTestSessions()
-	m := NewDashboardModel(sessions, nil)
+func TestListWatchStopConfirmTargetsOriginalSession(t *testing.T) {
+	sessions := listWatchTestSessions()
+	m := NewListWatchModel(sessions, nil)
 	m.width = 120
 	m.height = 40
 
-	dm := updateDash(m, "s")
-	if dm.state != dashStateConfirmStop {
-		t.Fatalf("state = %d, want dashStateConfirmStop", dm.state)
+	dm := updateListWatch(m, "s")
+	if dm.state != listWatchStateConfirmStop {
+		t.Fatalf("state = %d, want listWatchStateConfirmStop", dm.state)
 	}
 
 	if dm.confirmSessionID != "s1" {
@@ -451,26 +450,26 @@ func TestDashboardStopConfirmTargetsOriginalSession(t *testing.T) {
 
 	// Refresh removes s1
 	result, _ := dm.Update(refreshMsg{sessions: []protocol.SessionInfo{sessions[1]}})
-	dm = result.(*DashboardModel)
+	dm = result.(*ListWatchModel)
 
-	if dm.state != dashStateNormal {
-		t.Errorf("state = %d, want dashStateNormal (confirm cancelled)", dm.state)
+	if dm.state != listWatchStateNormal {
+		t.Errorf("state = %d, want listWatchStateNormal (confirm cancelled)", dm.state)
 	}
 }
 
-func TestDashboardStopConfirmSurvivesRefreshWithTarget(t *testing.T) {
-	assertConfirmSurvivesRefreshWithTarget(t, "s", dashStateConfirmStop, "stop")
+func TestListWatchStopConfirmSurvivesRefreshWithTarget(t *testing.T) {
+	assertConfirmSurvivesRefreshWithTarget(t, "s", listWatchStateConfirmStop, "stop")
 }
 
-func TestDashboardStopConfirmCancelledWhenTargetStops(t *testing.T) {
-	sessions := dashboardTestSessions()
-	m := NewDashboardModel(sessions, nil)
+func TestListWatchStopConfirmCancelledWhenTargetStops(t *testing.T) {
+	sessions := listWatchTestSessions()
+	m := NewListWatchModel(sessions, nil)
 	m.width = 120
 	m.height = 40
 
-	dm := updateDash(m, "s")
-	if dm.state != dashStateConfirmStop {
-		t.Fatalf("state = %d, want dashStateConfirmStop", dm.state)
+	dm := updateListWatch(m, "s")
+	if dm.state != listWatchStateConfirmStop {
+		t.Fatalf("state = %d, want listWatchStateConfirmStop", dm.state)
 	}
 
 	// Refresh where the target session changed from running to stopped
@@ -479,10 +478,10 @@ func TestDashboardStopConfirmCancelledWhenTargetStops(t *testing.T) {
 	stoppedSessions[0].Status = "stopped"
 
 	result, _ := dm.Update(refreshMsg{sessions: stoppedSessions})
-	dm = result.(*DashboardModel)
+	dm = result.(*ListWatchModel)
 
-	if dm.state != dashStateNormal {
-		t.Errorf("state = %d, want dashStateNormal (stop cancelled because target stopped)", dm.state)
+	if dm.state != listWatchStateNormal {
+		t.Errorf("state = %d, want listWatchStateNormal (stop cancelled because target stopped)", dm.state)
 	}
 
 	if dm.confirmSessionID != "" {
@@ -490,21 +489,21 @@ func TestDashboardStopConfirmCancelledWhenTargetStops(t *testing.T) {
 	}
 }
 
-func TestDashboardConfirmCancelClearsSessionID(t *testing.T) {
-	sessions := dashboardTestSessions()
-	m := NewDashboardModel(sessions, nil)
+func TestListWatchConfirmCancelClearsSessionID(t *testing.T) {
+	sessions := listWatchTestSessions()
+	m := NewListWatchModel(sessions, nil)
 	m.width = 120
 	m.height = 40
 
-	dm := updateDash(m, "x")
+	dm := updateListWatch(m, "x")
 	if dm.confirmSessionID != "s1" {
 		t.Fatalf("confirmSessionID = %q, want %q", dm.confirmSessionID, "s1")
 	}
 
 	// Press n to cancel
-	dm = updateDash(dm, "n")
-	if dm.state != dashStateNormal {
-		t.Errorf("state = %d, want dashStateNormal", dm.state)
+	dm = updateListWatch(dm, "n")
+	if dm.state != listWatchStateNormal {
+		t.Errorf("state = %d, want listWatchStateNormal", dm.state)
 	}
 
 	if dm.confirmSessionID != "" {
@@ -512,10 +511,10 @@ func TestDashboardConfirmCancelClearsSessionID(t *testing.T) {
 	}
 }
 
-// richDashSessions exercises the column-sizing and rendering branches that the
+// richListWatchSessions exercises the column-sizing and rendering branches that the
 // minimal two-session fixture doesn't: git dirty/unpushed, activity states,
 // scenario-style branch names, and last-attached timestamps.
-func richDashSessions() []protocol.SessionInfo {
+func richListWatchSessions() []protocol.SessionInfo {
 	now := time.Now()
 
 	return []protocol.SessionInfo{
@@ -539,15 +538,15 @@ func richDashSessions() []protocol.SessionInfo {
 	}
 }
 
-func TestDashboardInitReturnsTick2(t *testing.T) {
-	m := NewDashboardModel(richDashSessions(), nil)
+func TestListWatchInitReturnsTick2(t *testing.T) {
+	m := NewListWatchModel(richListWatchSessions(), nil)
 	if m.Init() == nil {
 		t.Error("Init should return a tick cmd")
 	}
 }
 
-func TestDashboardTickBatchesRefresh2(t *testing.T) {
-	m := NewDashboardModel(richDashSessions(), func() []protocol.SessionInfo { return nil })
+func TestListWatchTickBatchesRefresh2(t *testing.T) {
+	m := NewListWatchModel(richListWatchSessions(), func() []protocol.SessionInfo { return nil })
 	m.width, m.height = 120, 40
 
 	_, cmd := m.Update(tickMsg(time.Now()))
@@ -556,9 +555,9 @@ func TestDashboardTickBatchesRefresh2(t *testing.T) {
 	}
 }
 
-func TestDashboardDoRefreshProducesMsg2(t *testing.T) {
-	want := richDashSessions()
-	m := NewDashboardModel(nil, func() []protocol.SessionInfo { return want })
+func TestListWatchDoRefreshProducesMsg2(t *testing.T) {
+	want := richListWatchSessions()
+	m := NewListWatchModel(nil, func() []protocol.SessionInfo { return want })
 
 	cmd := m.doRefresh()
 	msg := cmd()
@@ -573,81 +572,81 @@ func TestDashboardDoRefreshProducesMsg2(t *testing.T) {
 	}
 }
 
-func TestDashboardRefreshRepositionsCursorToSelectedID2(t *testing.T) {
-	m := NewDashboardModel(richDashSessions(), nil)
+func TestListWatchRefreshRepositionsCursorToSelectedID2(t *testing.T) {
+	m := NewListWatchModel(richListWatchSessions(), nil)
 	m.width, m.height = 120, 40
 	m.cursor = 0 // selected s1
 
 	// Refresh with sessions reordered so s1 moves to index 2.
 	reordered := []protocol.SessionInfo{
-		richDashSessions()[1],
-		richDashSessions()[2],
-		richDashSessions()[0],
+		richListWatchSessions()[1],
+		richListWatchSessions()[2],
+		richListWatchSessions()[0],
 	}
 
 	res, _ := m.Update(refreshMsg{sessions: reordered})
-	dm := res.(*DashboardModel)
+	dm := res.(*ListWatchModel)
 
 	if dm.sessions[dm.cursor].ID != "s1" {
 		t.Fatalf("cursor should track s1 after reorder, landed on %q", dm.sessions[dm.cursor].ID)
 	}
 }
 
-func TestDashboardRefreshClearsConfirmWhenTargetGone2(t *testing.T) {
-	m := NewDashboardModel(richDashSessions(), nil)
+func TestListWatchRefreshClearsConfirmWhenTargetGone2(t *testing.T) {
+	m := NewListWatchModel(richListWatchSessions(), nil)
 	m.width, m.height = 120, 40
-	m.state = dashStateConfirmDelete
+	m.state = listWatchStateConfirmDelete
 	m.confirmSessionID = "s2"
 
 	// Refresh without s2.
-	res, _ := m.Update(refreshMsg{sessions: []protocol.SessionInfo{richDashSessions()[0]}})
-	dm := res.(*DashboardModel)
+	res, _ := m.Update(refreshMsg{sessions: []protocol.SessionInfo{richListWatchSessions()[0]}})
+	dm := res.(*ListWatchModel)
 
-	if dm.state != dashStateNormal || dm.confirmSessionID != "" {
+	if dm.state != listWatchStateNormal || dm.confirmSessionID != "" {
 		t.Fatalf("confirm should clear when target vanishes: state=%d id=%q", dm.state, dm.confirmSessionID)
 	}
 }
 
-func TestDashboardRefreshClearsStopConfirmWhenTargetStopped2(t *testing.T) {
-	m := NewDashboardModel(richDashSessions(), nil)
+func TestListWatchRefreshClearsStopConfirmWhenTargetStopped2(t *testing.T) {
+	m := NewListWatchModel(richListWatchSessions(), nil)
 	m.width, m.height = 120, 40
-	m.state = dashStateConfirmStop
+	m.state = listWatchStateConfirmStop
 	m.confirmSessionID = "s1"
 
 	// s1 comes back stopped — the stop confirm no longer applies.
-	stopped := richDashSessions()
+	stopped := richListWatchSessions()
 	stopped[0].Status = "stopped"
 
 	res, _ := m.Update(refreshMsg{sessions: stopped})
-	dm := res.(*DashboardModel)
+	dm := res.(*ListWatchModel)
 
-	if dm.state != dashStateNormal {
+	if dm.state != listWatchStateNormal {
 		t.Fatalf("stop-confirm should clear when target stops, state=%d", dm.state)
 	}
 }
 
-func TestDashboardConfirmStopThenCancelWithAnyKey2(t *testing.T) {
-	m := NewDashboardModel(richDashSessions(), nil)
+func TestListWatchConfirmStopThenCancelWithAnyKey2(t *testing.T) {
+	m := NewListWatchModel(richListWatchSessions(), nil)
 	m.width, m.height = 120, 40
-	m.state = dashStateConfirmStop
+	m.state = listWatchStateConfirmStop
 	m.confirmSessionID = "s1"
 
 	res, _ := m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
-	dm := res.(*DashboardModel)
+	dm := res.(*ListWatchModel)
 
-	if dm.state != dashStateNormal || dm.confirmSessionID != "" {
+	if dm.state != listWatchStateNormal || dm.confirmSessionID != "" {
 		t.Fatalf("any non-y key should cancel stop confirm: state=%d", dm.state)
 	}
 }
 
-func TestDashboardConfirmStopYieldsResult2(t *testing.T) {
-	m := NewDashboardModel(richDashSessions(), nil)
+func TestListWatchConfirmStopYieldsResult2(t *testing.T) {
+	m := NewListWatchModel(richListWatchSessions(), nil)
 	m.width, m.height = 120, 40
-	m.state = dashStateConfirmStop
+	m.state = listWatchStateConfirmStop
 	m.confirmSessionID = "s1"
 
 	res, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
-	dm := res.(*DashboardModel)
+	dm := res.(*ListWatchModel)
 
 	if dm.result == nil || dm.result.Action != "stop" || dm.result.SessionID != "s1" {
 		t.Fatalf("stop confirm y should yield stop result: %+v", dm.result)
@@ -658,33 +657,33 @@ func TestDashboardConfirmStopYieldsResult2(t *testing.T) {
 	}
 }
 
-func TestDashboardStopKeyOnlyForRunning2(t *testing.T) {
-	m := NewDashboardModel(richDashSessions(), nil)
+func TestListWatchStopKeyOnlyForRunning2(t *testing.T) {
+	m := NewListWatchModel(richListWatchSessions(), nil)
 	m.width, m.height = 120, 40
 	m.cursor = 1 // s2 is stopped
 
 	res, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
-	dm := res.(*DashboardModel)
+	dm := res.(*ListWatchModel)
 
-	if dm.state != dashStateNormal {
+	if dm.state != listWatchStateNormal {
 		t.Errorf("s on a stopped session should not enter stop-confirm, state=%d", dm.state)
 	}
 }
 
-func TestDashboardResumeKeyOnlyForStopped2(t *testing.T) {
-	m := NewDashboardModel(richDashSessions(), nil)
+func TestListWatchResumeKeyOnlyForStopped2(t *testing.T) {
+	m := NewListWatchModel(richListWatchSessions(), nil)
 	m.width, m.height = 120, 40
 
 	// cursor 0 (running) — r does nothing.
 	res, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-	if res.(*DashboardModel).result != nil {
+	if res.(*ListWatchModel).result != nil {
 		t.Error("r on running session should not resume")
 	}
 
 	// cursor 1 (stopped) — r resumes.
 	m.cursor = 1
 	res, cmd := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-	dm := res.(*DashboardModel)
+	dm := res.(*ListWatchModel)
 
 	if dm.result == nil || dm.result.Action != "resume" || dm.result.SessionID != "s2" {
 		t.Fatalf("r on stopped session should resume: %+v", dm.result)
@@ -695,8 +694,8 @@ func TestDashboardResumeKeyOnlyForStopped2(t *testing.T) {
 	}
 }
 
-func TestDashboardQuitKeys2(t *testing.T) {
-	m := NewDashboardModel(richDashSessions(), nil)
+func TestListWatchQuitKeys2(t *testing.T) {
+	m := NewListWatchModel(richListWatchSessions(), nil)
 	m.width, m.height = 120, 40
 
 	if _, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"}); cmd == nil {
@@ -704,23 +703,23 @@ func TestDashboardQuitKeys2(t *testing.T) {
 	}
 }
 
-func TestDashboardWindowSizeScrolls2(t *testing.T) {
-	m := NewDashboardModel(richDashSessions(), nil)
+func TestListWatchWindowSizeScrolls2(t *testing.T) {
+	m := NewListWatchModel(richListWatchSessions(), nil)
 	res, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
-	dm := res.(*DashboardModel)
+	dm := res.(*ListWatchModel)
 
 	if dm.width != 100 || dm.height != 20 {
 		t.Fatalf("window size not applied: w=%d h=%d", dm.width, dm.height)
 	}
 }
 
-func TestDashboardVisibleRowsReservesForConfirm2(t *testing.T) {
-	m := NewDashboardModel(richDashSessions(), nil)
+func TestListWatchVisibleRowsReservesForConfirm2(t *testing.T) {
+	m := NewListWatchModel(richListWatchSessions(), nil)
 	m.height = 20
 
 	normal := m.visibleRows()
 
-	m.state = dashStateConfirmDelete
+	m.state = listWatchStateConfirmDelete
 	confirming := m.visibleRows()
 
 	if confirming != normal-2 {
@@ -728,8 +727,8 @@ func TestDashboardVisibleRowsReservesForConfirm2(t *testing.T) {
 	}
 }
 
-func TestDashboardVisibleRowsFloorsAtOne2(t *testing.T) {
-	m := NewDashboardModel(richDashSessions(), nil)
+func TestListWatchVisibleRowsFloorsAtOne2(t *testing.T) {
+	m := NewListWatchModel(richListWatchSessions(), nil)
 	m.height = 2
 
 	if got := m.visibleRows(); got != 1 {
@@ -737,13 +736,13 @@ func TestDashboardVisibleRowsFloorsAtOne2(t *testing.T) {
 	}
 }
 
-func TestDashboardScrollToCursorWindows2(t *testing.T) {
+func TestListWatchScrollToCursorWindows2(t *testing.T) {
 	sessions := make([]protocol.SessionInfo, 20)
 	for i := range sessions {
 		sessions[i] = protocol.SessionInfo{ID: string(rune('a' + i)), Name: "s", Status: "running"}
 	}
 
-	m := NewDashboardModel(sessions, nil)
+	m := NewListWatchModel(sessions, nil)
 	m.height = 12 // ~6 visible rows
 
 	// Jump cursor to the bottom; offset must follow so cursor stays visible.
@@ -763,8 +762,8 @@ func TestDashboardScrollToCursorWindows2(t *testing.T) {
 	}
 }
 
-func TestDashboardClampCursorEmpty2(t *testing.T) {
-	m := NewDashboardModel(nil, nil)
+func TestListWatchClampCursorEmpty2(t *testing.T) {
+	m := NewListWatchModel(nil, nil)
 	m.cursor = 5
 	m.clampCursor()
 
@@ -773,13 +772,14 @@ func TestDashboardClampCursorEmpty2(t *testing.T) {
 	}
 }
 
-func TestDashboardComputeColsAndRenderRow2(t *testing.T) {
-	m := NewDashboardModel(richDashSessions(), nil)
-	cols := m.computeDashCols()
+func TestListWatchComputeColsAndRenderRow2(t *testing.T) {
+	m := NewListWatchModel(richListWatchSessions(), nil)
+	m.width, m.height = 140, 40
+	layout := m.computeListWatchLayout()
 
 	// The longest name drives the name column.
-	if cols.name < len("braw-longish-name") {
-		t.Errorf("name column %d too small for longest name", cols.name)
+	if layout.name < len("braw-longish-name") {
+		t.Errorf("name column %d too small for longest name", layout.name)
 	}
 
 	// Row for the dirty+unpushed running session with approval activity.
@@ -787,18 +787,73 @@ func TestDashboardComputeColsAndRenderRow2(t *testing.T) {
 	_ = dim
 
 	now := time.Now()
-	style := lipgloss.NewStyle()
-	row := m.renderRow(richDashSessions()[0], cols, now, true, style, style)
+	row := m.renderRow(richListWatchSessions()[0], layout, now, true)
 
-	for _, want := range []string{"braw-longish-name", "dirty", "3↑"} {
+	for _, want := range []string{"braw-longish-name", "dirty", "3 ahead"} {
 		if !strings.Contains(row, want) {
 			t.Errorf("rendered row missing %q:\n%s", want, row)
 		}
 	}
 }
 
-func TestDashboardViewErroredAndBadTimestamps2(t *testing.T) {
-	m := NewDashboardModel(richDashSessions(), nil)
+func TestListWatchColumnsFollowRegistryWideSetting(t *testing.T) {
+	compact := newListWatchModel(richListWatchSessions(), nil, ListWatchOptions{})
+	wide := newListWatchModel(richListWatchSessions(), nil, ListWatchOptions{Wide: true})
+
+	headers := func(layout listWatchLayout) string {
+		var values []string
+		for _, column := range layout.columns {
+			values = append(values, column.column.Header)
+		}
+
+		return strings.Join(values, ",")
+	}
+
+	compactHeaders := headers(compact.computeListWatchLayout())
+	wideHeaders := headers(wide.computeListWatchLayout())
+	if strings.Contains(compactHeaders, "Model") || strings.Contains(compactHeaders, "Tokens") {
+		t.Fatalf("compact watch unexpectedly includes wide columns: %s", compactHeaders)
+	}
+
+	for _, want := range []string{"Model", "Branch", "Tokens", "Todo", "Attached"} {
+		if !strings.Contains(wideHeaders, want) {
+			t.Errorf("wide watch missing registry column %q: %s", want, wideHeaders)
+		}
+	}
+}
+
+func TestListWatchNoColorEmitsNoANSI(t *testing.T) {
+	m := newListWatchModel(richListWatchSessions(), nil, ListWatchOptions{NoColor: true})
+	m.width, m.height = 140, 40
+
+	if view := m.View().Content; strings.ContainsRune(view, '\x1b') {
+		t.Errorf("--no-color watch emitted ANSI escapes: %q", view)
+	}
+}
+
+func TestListWatchTreeOrdersAndPrefixesChildren(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "bairn", ParentID: "ben", Name: "bairn", RepoName: "croft", Status: "running"},
+		{ID: "ben", Name: "hame", RepoName: "croft", Status: "running"},
+		{ID: "wee", ParentID: "bairn", Name: "wee-bairn", RepoName: "croft", Status: "stopped"},
+	}
+	m := newListWatchModel(sessions, nil, ListWatchOptions{Tree: true, NoColor: true})
+	m.width, m.height = 140, 40
+
+	if got := []string{m.sessions[0].ID, m.sessions[1].ID, m.sessions[2].ID}; strings.Join(got, ",") != "ben,bairn,wee" {
+		t.Fatalf("tree order = %v, want [ben bairn wee]", got)
+	}
+
+	view := m.View().Content
+	for _, want := range []string{"hame", "`-- bairn", "    `-- wee-bairn"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("tree view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestListWatchViewErroredAndBadTimestamps2(t *testing.T) {
+	m := NewListWatchModel(richListWatchSessions(), nil)
 	m.width, m.height = 140, 40
 	m.cursor = 2 // errored session with bad timestamps
 
@@ -808,7 +863,7 @@ func TestDashboardViewErroredAndBadTimestamps2(t *testing.T) {
 	}
 }
 
-func TestDashboardViewScrollIndicators2(t *testing.T) {
+func TestListWatchViewScrollIndicators2(t *testing.T) {
 	sessions := make([]protocol.SessionInfo, 30)
 	for i := range sessions {
 		sessions[i] = protocol.SessionInfo{
@@ -818,7 +873,7 @@ func TestDashboardViewScrollIndicators2(t *testing.T) {
 		}
 	}
 
-	m := NewDashboardModel(sessions, nil)
+	m := NewListWatchModel(sessions, nil)
 	m.width, m.height = 120, 16
 	m.cursor = 20
 	m.scrollToCursor()
@@ -829,14 +884,14 @@ func TestDashboardViewScrollIndicators2(t *testing.T) {
 	}
 }
 
-func TestSortDashboardSessions2(t *testing.T) {
+func TestSortListWatchSessions2(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{Name: "zed", RepoName: "croft"},
 		{Name: "aaa", RepoName: "croft"},
 		{Name: "mid", RepoName: "bothy"},
 	}
 
-	sortDashboardSessions(sessions)
+	sortListWatchSessions(sessions)
 
 	// Sorted by repo then name: bothy/mid, croft/aaa, croft/zed.
 	if sessions[0].RepoName != "bothy" || sessions[1].Name != "aaa" || sessions[2].Name != "zed" {

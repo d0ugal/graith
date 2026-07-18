@@ -3,7 +3,7 @@ package client
 import "strings"
 
 // This file carries the configurable keybindings for the full-screen terminal
-// overlays (dashboard, approval prompt, message viewer, scroll pager). Each
+// overlays (list watch, approval prompt, message viewer, scroll pager). Each
 // action holds a list of bubbletea key names; pressing any listed key triggers
 // it. The cli layer builds these from the [keybindings.overlay] config table,
 // falling back to the Default*Keys() values below when a key is unset. See #1233.
@@ -45,8 +45,8 @@ func primaryKey(bound []string) string {
 	return bound[0]
 }
 
-// DashboardKeys are the keys the `gr dashboard` TUI listens for.
-type DashboardKeys struct {
+// ListWatchKeys are the keys the `gr list --watch` TUI listens for.
+type ListWatchKeys struct {
 	Up      []string
 	Down    []string
 	Attach  []string
@@ -57,10 +57,10 @@ type DashboardKeys struct {
 	Cancel  []string
 }
 
-// DefaultDashboardKeys returns the built-in dashboard bindings. They mirror the
+// DefaultListWatchKeys returns the built-in list-watch bindings. They mirror the
 // [keybindings.overlay] defaults in default_config.toml.
-func DefaultDashboardKeys() DashboardKeys {
-	return DashboardKeys{
+func DefaultListWatchKeys() ListWatchKeys {
+	return ListWatchKeys{
 		Up:      []string{"k", "up"},
 		Down:    []string{"j", "down"},
 		Attach:  []string{"enter", "a"},

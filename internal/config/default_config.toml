@@ -212,7 +212,7 @@ inbox_preview_bytes   = 1000     # unread-inbox preview injected into a session'
 # (column arithmetic, wrap widths, frame rates) are deliberately NOT configurable
 # — they must match render logic. Empty or non-positive values fall back below.
 [terminal]
-refresh_interval = "2s"   # how often the session picker/dashboard/status bar re-poll for state ("0"/non-positive => 2s)
+refresh_interval = "2s"   # how often the picker/list watch/status bar re-poll for state ("0"/non-positive => 2s)
 summary_width = 40        # max visible width of a `gr status` summary in the picker before truncation
 
 # Update check: `gr list` and `gr doctor` query GitHub for a newer graith release
@@ -489,7 +489,7 @@ messages = "m"               # open the message viewer for the current session
 approvals = "a"              # open the pending-approvals prompt
 restart_session = "r"        # restart (resume) the current session
 
-# Keys used inside the full-screen terminal overlays (dashboard, approval
+# Keys used inside the full-screen terminal overlays (list watch, approval
 # prompt, message viewer, scroll pager). Each value is a space-separated list of
 # bubbletea key names (single letters, "up", "down", "enter", "esc", "pgup",
 # "ctrl+d", ...); pressing any listed key triggers the action. A partial table
@@ -503,8 +503,9 @@ page_down = "pgdown space ctrl+d ctrl+f" # scroll down one page
 top = "g home"                           # jump to the first item / top
 bottom = "G end"                         # jump to the last item / bottom
 confirm = "enter y"                      # confirm a prompt (e.g. delete/stop)
-cancel = "q esc"                         # close the overlay / cancel
-# Dashboard (gr dashboard) actions.
+cancel = "q esc ctrl+c"                  # close the overlay / cancel
+# List watch (`gr ls --watch`) actions. The dashboard_* config names are kept
+# so existing keybinding customizations continue to work after command removal.
 dashboard_attach = "enter a"             # attach to the selected session
 dashboard_stop = "s"                     # stop the selected running session
 dashboard_delete = "x d"                 # delete the selected session

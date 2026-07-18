@@ -85,11 +85,11 @@ func overrideKeys(cfgVal string, def []string) []string {
 	return def
 }
 
-// dashboardKeysFromConfig builds the dashboard TUI keybindings from the
+// listWatchKeysFromConfig builds the list-watch TUI keybindings from the
 // [keybindings.overlay] config table, falling back to the defaults per key.
-func dashboardKeysFromConfig() client.DashboardKeys {
+func listWatchKeysFromConfig() client.ListWatchKeys {
 	ov := cfg.Keybindings.Overlay
-	k := client.DefaultDashboardKeys()
+	k := client.DefaultListWatchKeys()
 	k.Up = overrideKeys(ov.Up, k.Up)
 	k.Down = overrideKeys(ov.Down, k.Down)
 	k.Attach = overrideKeys(ov.DashboardAttach, k.Attach)
