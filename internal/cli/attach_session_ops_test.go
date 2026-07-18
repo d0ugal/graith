@@ -26,15 +26,20 @@ func withScriptedControl(t *testing.T, resp ...scriptedResp) *scriptedConn {
 }
 
 func TestToggleStar(t *testing.T) {
-	t.Run("star sends star", func(t *testing.T) {
+	t.Run("star sends update true", func(t *testing.T) {
 		c := withScriptedControl(t, okResp(typeEnv("ok")))
 
 		if err := toggleStar("braw", true); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if got := c.sentTypes(); len(got) != 1 || got[0] != "star" {
-			t.Errorf("sent = %v, want [star]", got)
+		if got := c.sentTypes(); len(got) != 1 || got[0] != "update" {
+			t.Fatalf("sent = %v, want [update]", got)
+		}
+
+		msg, ok := c.sends[0].Payload.(protocol.UpdateMsg)
+		if !ok || msg.SessionID != "braw" || msg.Starred == nil || !*msg.Starred {
+			t.Errorf("payload = %#v, want starred update for braw", c.sends[0].Payload)
 		}
 
 		if c.closed != 1 {
@@ -42,15 +47,20 @@ func TestToggleStar(t *testing.T) {
 		}
 	})
 
-	t.Run("unstar sends unstar", func(t *testing.T) {
+	t.Run("unstar sends update false", func(t *testing.T) {
 		c := withScriptedControl(t, okResp(typeEnv("ok")))
 
 		if err := toggleStar("braw", false); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if got := c.sentTypes(); len(got) != 1 || got[0] != "unstar" {
-			t.Errorf("sent = %v, want [unstar]", got)
+		if got := c.sentTypes(); len(got) != 1 || got[0] != "update" {
+			t.Fatalf("sent = %v, want [update]", got)
+		}
+
+		msg, ok := c.sends[0].Payload.(protocol.UpdateMsg)
+		if !ok || msg.Starred == nil || *msg.Starred {
+			t.Errorf("payload = %#v, want explicit starred=false", c.sends[0].Payload)
 		}
 	})
 

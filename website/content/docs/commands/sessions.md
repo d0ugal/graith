@@ -185,10 +185,27 @@ session ID when a name is ambiguous. Soft-deleted sessions must be restored
 before they can be updated. With `--json` or agent mode, success is emitted as
 a JSON object containing `session_id` and the properties that changed.
 
-## `gr star <name-or-id>`
+## `gr update <name-or-id>`
 
-Star a session. Starred sessions are protected from accidental deletion and appear in the Starred view.
+Update one or more session properties atomically. At least one flag is required.
+The target and a non-empty parent may be a unique session name or an ID; an
+ambiguous name is rejected. Human output reports each requested property's
+resulting value. `--json` and agent mode return one object with `session_id`,
+`name`, `parent_id`, and the explicit boolean `starred` state.
 
-## `gr unstar <name-or-id>`
+| Flag | Description |
+|------|-------------|
+| `--name <name>` | Set the session name |
+| `--parent <name-or-id>` | Set the parent session; pass an empty string to orphan |
+| `--starred[=true|false]` | Set deletion protection and Starred-view membership; a bare flag means true |
 
-Remove the star from a session.
+Flags can be combined in one persisted update:
+
+```bash
+gr update important-session --name release-watch --parent orchestrator --starred
+gr update release-watch --starred=false
+```
+
+Starred sessions are protected from accidental deletion and appear in the
+Starred view. Omitted properties are left unchanged, and setting the current
+value again succeeds.

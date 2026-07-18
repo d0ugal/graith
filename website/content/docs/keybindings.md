@@ -88,7 +88,7 @@ Cycle with `h`/`l` or left/right arrow keys:
 |-----|--------|
 | `n` | Create a new session (opens a form with name and repo fields) |
 | `x` | Delete session (prompts for confirmation with `y`) |
-| `s` | Star/unstar session |
+| `s` | Toggle starred state |
 | `r` | Restart session (prompts for confirmation) |
 | `R` | Restart all sessions in current view (prompts for confirmation) |
 | Space | Fold/unfold children of a parent session |

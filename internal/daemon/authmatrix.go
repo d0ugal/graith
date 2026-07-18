@@ -103,8 +103,6 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"stop":               remoteHumanRW,
 	"resume":             remoteHumanRW,
 	"restart":            remoteHumanRW,
-	"star":               remoteHumanRW,
-	"unstar":             remoteHumanRW,
 	"update":             remoteHumanRW,
 	"fork":               remoteHumanRW,
 	"migrate":            remoteHumanRW,

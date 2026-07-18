@@ -56,7 +56,7 @@ as live state instead).
 | Restore a soft-deleted session | ✅ | ✅ | ✅ |
 | Purge (hard delete) | ✅ | ✅ | ✅ |
 | Rename session | ✅ | ✅ | ✅ |
-| Star / unstar session | ✅ | ✅ | ✅ |
+| Update starred state | ✅ | ✅ | ✅ |
 | Fork session | ✅ | ✅ | ✅ |
 | Migrate session to another agent | ✅ | ✅ | ✅ |
 | Set session status summary | ✅ | ✅ | ✅ |

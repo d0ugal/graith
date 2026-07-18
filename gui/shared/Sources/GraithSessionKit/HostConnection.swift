@@ -205,12 +205,11 @@ public final class HostConnection: ObservableObject, Identifiable {
         await run { try await self.client.rename(sessionID: session.id, newName: trimmed) }
     }
 
-    /// Toggle a session's star: `unstar` when currently starred, else `star`.
+    /// Toggle a session's star through the canonical metadata update operation.
     public func toggleStar(_ session: SessionInfo) async {
-        if session.starred == true {
-            await run { try await self.client.unstar(sessionID: session.id) }
-        } else {
-            await run { try await self.client.star(sessionID: session.id) }
+        let starred = session.starred != true
+        await run {
+            _ = try await self.client.update(sessionID: session.id, name: nil, parentID: nil, starred: starred)
         }
     }
 

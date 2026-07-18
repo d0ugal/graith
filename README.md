@@ -48,3 +48,10 @@ gr remote pairings approve <request-id>
 Use `gr remote pairings revoke <device-id>` on the host to revoke a device and
 force-close its live connections. See the [remote access guide](https://d0ugal.github.io/graith/docs/configuration/access/#remote-access)
 for listener configuration and the complete security model.
+
+Session metadata changes share one update command and can be combined:
+
+```bash
+gr update important-session --starred --name release-watch
+gr update release-watch --starred=false
+```

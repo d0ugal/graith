@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -267,6 +268,11 @@ func TestNewSessionManagerPRWatchKickChannelBoundary(t *testing.T) {
 
 func TestUpdate(t *testing.T) {
 	strPtr := func(s string) *string { return &s }
+	update := func(sm *SessionManager, id string, name, parentID *string) error {
+		_, err := sm.Update(id, name, parentID, nil)
+
+		return err
+	}
 
 	t.Run("rename via update", func(t *testing.T) {
 		sm := newTestSessionManager(t)
@@ -276,7 +282,7 @@ func TestUpdate(t *testing.T) {
 			ScenarioID: "sc-strath", ScenarioName: "strath", ScenarioRole: "implementer",
 		}
 
-		if err := sm.Update("sess1", strPtr("bonnie-name"), nil); err != nil {
+		if err := update(sm, "sess1", strPtr("bonnie-name"), nil); err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
 
@@ -314,7 +320,7 @@ func TestUpdate(t *testing.T) {
 			ID: "bairn", Name: "bairn", ParentID: "ben", Status: StatusRunning,
 		}
 
-		if err := sm.Update("bairn", nil, strPtr("")); err != nil {
+		if err := update(sm, "bairn", nil, strPtr("")); err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
 
@@ -335,7 +341,7 @@ func TestUpdate(t *testing.T) {
 			ID: "bairn", Name: "bairn", ParentID: "p1", Status: StatusRunning,
 		}
 
-		if err := sm.Update("bairn", nil, strPtr("p2")); err != nil {
+		if err := update(sm, "bairn", nil, strPtr("p2")); err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
 
@@ -350,7 +356,7 @@ func TestUpdate(t *testing.T) {
 			ID: "sess1", Name: "braw-sess", Status: StatusRunning,
 		}
 
-		err := sm.Update("sess1", nil, strPtr("sess1"))
+		err := update(sm, "sess1", nil, strPtr("sess1"))
 		if err == nil {
 			t.Fatal("expected error for self-parent")
 		}
@@ -368,7 +374,7 @@ func TestUpdate(t *testing.T) {
 			ID: "bairn", Name: "bairn", ParentID: "ben", Status: StatusRunning,
 		}
 
-		err := sm.Update("grandparent", nil, strPtr("bairn"))
+		err := update(sm, "grandparent", nil, strPtr("bairn"))
 		if err == nil {
 			t.Fatal("expected error for cycle")
 		}
@@ -380,7 +386,7 @@ func TestUpdate(t *testing.T) {
 			ID: "sess1", Name: "braw-sess", Status: StatusRunning,
 		}
 
-		err := sm.Update("sess1", nil, strPtr("nonexistent"))
+		err := update(sm, "sess1", nil, strPtr("nonexistent"))
 		if err == nil {
 			t.Fatal("expected error for nonexistent parent")
 		}
@@ -389,7 +395,7 @@ func TestUpdate(t *testing.T) {
 	t.Run("not found", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 
-		err := sm.Update("nonexistent", strPtr("bonnie-name"), nil)
+		err := update(sm, "nonexistent", strPtr("bonnie-name"), nil)
 		if err == nil {
 			t.Fatal("expected error for nonexistent session")
 		}
@@ -400,7 +406,7 @@ func TestUpdate(t *testing.T) {
 		sm.state.Sessions["sess1"] = &SessionState{ID: "sess1", Name: "dreich", Status: StatusRunning}
 		sm.state.Sessions["sess2"] = &SessionState{ID: "sess2", Name: "canny", Status: StatusRunning}
 
-		if err := sm.Update("sess2", strPtr("dreich"), nil); err != nil {
+		if _, err := sm.Update("sess2", strPtr("dreich"), nil, nil); err != nil {
 			t.Fatalf("Update() duplicate display name error = %v", err)
 		}
 
@@ -412,12 +418,15 @@ func TestUpdate(t *testing.T) {
 	t.Run("no changes is no-op", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "braw-sess", Status: StatusRunning,
+			ID: "sess1", Name: "braw-sess", Status: StatusRunning, Starred: true,
 		}
 
-		err := sm.Update("sess1", nil, nil)
+		result, err := sm.Update("sess1", nil, nil, nil)
 		if err != nil {
 			t.Fatalf("Update() with no changes should succeed, got: %v", err)
+		}
+		if !result.Starred {
+			t.Error("omitted starred field changed true to false")
 		}
 	})
 
@@ -428,7 +437,8 @@ func TestUpdate(t *testing.T) {
 			SystemKind: SystemKindOrchestrator,
 		}
 
-		err := sm.Update("sys", strPtr("bonnie-name"), nil)
+		starred := true
+		_, err := sm.Update("sys", nil, nil, &starred)
 		if err == nil || !strings.Contains(err.Error(), "cannot update system session") {
 			t.Fatalf("expected explicit error for system session, got %v", err)
 		}
@@ -446,7 +456,7 @@ func TestUpdate(t *testing.T) {
 			ID: "bairn", Name: "auld-name", ParentID: "p1", Status: StatusRunning,
 		}
 
-		if err := sm.Update("bairn", strPtr("bonnie-name"), strPtr("p2")); err != nil {
+		if err := update(sm, "bairn", strPtr("bonnie-name"), strPtr("p2")); err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
 
@@ -466,13 +476,126 @@ func TestUpdate(t *testing.T) {
 			ID: "sess1", Name: "auld-name", Status: StatusRunning,
 		}
 
-		err := sm.Update("sess1", strPtr("bonnie-name"), strPtr("nonexistent"))
+		err := update(sm, "sess1", strPtr("bonnie-name"), strPtr("nonexistent"))
 		if err == nil {
 			t.Fatal("expected error for nonexistent parent")
 		}
 
 		if sm.state.Sessions["sess1"].Name != "auld-name" {
 			t.Errorf("Name = %q, want %q (should not have changed)", sm.state.Sessions["sess1"].Name, "auld-name")
+		}
+	})
+
+	t.Run("combined name parent and starred persist", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		putSession(sm, &SessionState{ID: "ben", Name: "ben", Status: StatusRunning})
+		putSession(sm, &SessionState{ID: "bairn", Name: "auld", Status: StatusRunning})
+
+		starred := true
+		updated, err := sm.Update("bairn", strPtr("bonnie"), strPtr("ben"), &starred)
+		if err != nil {
+			t.Fatalf("Update() error = %v", err)
+		}
+
+		if updated.Name != "bonnie" || updated.ParentID != "ben" || !updated.Starred {
+			t.Fatalf("updated = {Name:%q ParentID:%q Starred:%t}, want bonnie/ben/true",
+				updated.Name, updated.ParentID, updated.Starred)
+		}
+
+		loaded, err := LoadState(sm.paths.StateFile)
+		if err != nil {
+			t.Fatalf("LoadState() error = %v", err)
+		}
+
+		persisted := loaded.Sessions["bairn"]
+		if persisted == nil || persisted.Name != "bonnie" || persisted.ParentID != "ben" || !persisted.Starred {
+			t.Fatalf("persisted = %+v, want combined update", persisted)
+		}
+	})
+
+	t.Run("idempotent starred values", func(t *testing.T) {
+		for _, initial := range []bool{false, true} {
+			initial := initial
+			t.Run(fmt.Sprintf("%t to %t", initial, initial), func(t *testing.T) {
+				sm := newTestSessionManager(t)
+				putSession(sm, &SessionState{
+					ID: "croft", Name: "croft", Status: StatusStopped, Starred: initial,
+				})
+
+				updated, err := sm.Update("croft", nil, nil, &initial)
+				if err != nil {
+					t.Fatalf("Update() error = %v", err)
+				}
+
+				if updated.Starred != initial {
+					t.Errorf("Starred = %t, want %t", updated.Starred, initial)
+				}
+			})
+		}
+	})
+
+	t.Run("scenario-owned session can be starred", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		putSession(sm, &SessionState{
+			ID: "bothy", Name: "bothy", Status: StatusRunning, ScenarioID: "scenario-croft",
+		})
+
+		starred := true
+		updated, err := sm.Update("bothy", nil, nil, &starred)
+		if err != nil {
+			t.Fatalf("Update() error = %v", err)
+		}
+
+		if !updated.Starred || updated.ScenarioID != "scenario-croft" {
+			t.Errorf("updated = %+v, want starred scenario membership preserved", updated)
+		}
+	})
+
+	t.Run("deleting session rejected", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		putSession(sm, &SessionState{ID: "thrawn", Name: "thrawn", Status: StatusDeleting})
+
+		starred := true
+		if _, err := sm.Update("thrawn", nil, nil, &starred); err == nil {
+			t.Fatal("expected deleting session update to fail")
+		}
+	})
+
+	t.Run("concurrent partial updates retain both fields", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		putSession(sm, &SessionState{ID: "strath", Name: "auld", Status: StatusRunning})
+
+		name := "bonnie"
+		starred := true
+		errs := make(chan error, 2)
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			_, err := sm.Update("strath", &name, nil, nil)
+			errs <- err
+		}()
+
+		go func() {
+			defer wg.Done()
+			_, err := sm.Update("strath", nil, nil, &starred)
+			errs <- err
+		}()
+
+		wg.Wait()
+		close(errs)
+
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("concurrent Update() error = %v", err)
+			}
+		}
+
+		got, ok := sm.Get("strath")
+		if !ok || got.Name != "bonnie" || !got.Starred {
+			t.Fatalf("session = %+v, ok=%t; want name and star updates retained", got, ok)
 		}
 	})
 }
@@ -6166,46 +6289,6 @@ func spawnContainedSleeper(t *testing.T) int {
 	return pid
 }
 
-func TestCovStarUnstarLifecycle(t *testing.T) {
-	sm := newTestSessionManager(t)
-	putSession(sm, &SessionState{ID: "braw1", Name: "braw", Status: StatusStopped})
-
-	if err := sm.Star("braw1"); err != nil {
-		t.Fatalf("Star: %v", err)
-	}
-
-	if s, _ := sm.Get("braw1"); !s.Starred {
-		t.Fatal("expected session to be starred")
-	}
-
-	if err := sm.Unstar("braw1"); err != nil {
-		t.Fatalf("Unstar: %v", err)
-	}
-
-	if s, _ := sm.Get("braw1"); s.Starred {
-		t.Fatal("expected session to be unstarred")
-	}
-
-	if err := sm.Star("haar-missing"); err == nil {
-		t.Fatal("expected error starring unknown session")
-	}
-
-	if err := sm.Unstar("haar-missing"); err == nil {
-		t.Fatal("expected error unstarring unknown session")
-	}
-
-	// A session being deleted rejects both operations.
-	putSession(sm, &SessionState{ID: "thrawn1", Name: "thrawn", Status: StatusDeleting})
-
-	if err := sm.Star("thrawn1"); err == nil {
-		t.Fatal("expected error starring a deleting session")
-	}
-
-	if err := sm.Unstar("thrawn1"); err == nil {
-		t.Fatal("expected error unstarring a deleting session")
-	}
-}
-
 func TestCovStarBlocksDelete(t *testing.T) {
 	sm := newTestSessionManager(t)
 
@@ -6218,16 +6301,18 @@ func TestCovStarBlocksDelete(t *testing.T) {
 
 	putSession(sm, &SessionState{ID: "canny1", Name: "canny", Status: StatusStopped, WorktreePath: dir})
 
-	if err := sm.Star("canny1"); err != nil {
-		t.Fatalf("Star: %v", err)
+	starred := true
+	if _, err := sm.Update("canny1", nil, nil, &starred); err != nil {
+		t.Fatalf("Update(starred=true): %v", err)
 	}
 
 	if err := sm.Delete("canny1"); err == nil {
 		t.Fatal("expected starred session to reject Delete")
 	}
 
-	if err := sm.Unstar("canny1"); err != nil {
-		t.Fatalf("Unstar: %v", err)
+	starred = false
+	if _, err := sm.Update("canny1", nil, nil, &starred); err != nil {
+		t.Fatalf("Update(starred=false): %v", err)
 	}
 
 	if err := sm.Delete("canny1"); err != nil {

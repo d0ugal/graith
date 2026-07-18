@@ -129,10 +129,10 @@ gr doctor --disk
 
 ### Cannot delete starred session
 
-Starred sessions are protected from deletion and skipped by batch operations. Unstar first:
+Starred sessions are protected from deletion and skipped by batch operations. Clear the property first:
 
 ```bash
-gr unstar <session>
+gr update <session> --starred=false
 gr delete <session>
 ```
 

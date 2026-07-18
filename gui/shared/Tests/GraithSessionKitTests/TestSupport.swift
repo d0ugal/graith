@@ -224,8 +224,9 @@ actor MockHostClient: GraithHostClient {
         lastSetStatus = (text, ttlSeconds, clear)
     }
     func rename(sessionID: String, newName: String) async throws {}
-    func star(sessionID: String) async throws {}
-    func unstar(sessionID: String) async throws {}
+    func update(sessionID: String, name: String?, parentID: String?, starred: Bool?) async throws -> UpdateResultMsg {
+        UpdateResultMsg(sessionID: sessionID, name: name ?? "braw", parentID: parentID ?? "", starred: starred ?? false)
+    }
     func fork(name: String, sourceSessionID: String) async throws {}
     func migrate(sessionID: String, agent: String, model: String?) async throws {
         lastMigrate = (agent, model)

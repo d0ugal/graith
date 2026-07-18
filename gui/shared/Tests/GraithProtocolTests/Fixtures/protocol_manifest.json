@@ -4250,20 +4250,6 @@
       ]
     },
     {
-      "name": "StarMsg",
-      "swift": "required",
-      "swift_type": "SessionIDMsg",
-      "fields": [
-        {
-          "name": "session_id",
-          "type": {
-            "kind": "string"
-          },
-          "optional": false
-        }
-      ]
-    },
-    {
       "name": "StatusReportMsg",
       "swift": "na",
       "fields": [
@@ -5370,20 +5356,6 @@
       ]
     },
     {
-      "name": "UnstarMsg",
-      "swift": "required",
-      "swift_type": "SessionIDMsg",
-      "fields": [
-        {
-          "name": "session_id",
-          "type": {
-            "kind": "string"
-          },
-          "optional": false
-        }
-      ]
-    },
-    {
       "name": "UpdateMsg",
       "swift": "required",
       "swift_type": "UpdateMsg",
@@ -5408,6 +5380,48 @@
             "kind": "string"
           },
           "optional": true
+        },
+        {
+          "name": "starred",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "UpdateResultMsg",
+      "swift": "required",
+      "swift_type": "UpdateResultMsg",
+      "fields": [
+        {
+          "name": "session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "parent_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "starred",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": false
         }
       ]
     },

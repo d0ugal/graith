@@ -1877,7 +1877,7 @@ func TestMsgPubUsesCurrentNameAfterUpdate(t *testing.T) {
 	h.sm.mu.Unlock()
 
 	newName := "new-name"
-	if err := h.sm.Update("s1", &newName, nil); err != nil {
+	if _, err := h.sm.Update("s1", &newName, nil, nil); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
 
@@ -2143,8 +2143,6 @@ func TestNullPayloadRejected(t *testing.T) {
 		{"status_report", "invalid status_report"},
 		{"approval_request", "invalid approval_request"},
 		{"approval_respond", "invalid approval_respond"},
-		{"star", "invalid star message"},
-		{"unstar", "invalid unstar message"},
 	}
 
 	for _, tt := range types {
@@ -2947,7 +2945,7 @@ func TestUpdateAllowsHumanReparent(t *testing.T) {
 }
 
 // This file adds handler-dispatch tests for control messages that were not
-// otherwise exercised: repo listing, status summaries, star/unstar, session
+// otherwise exercised: repo listing, status summaries, session metadata, session
 // status queries, hook reports, restart/interrupt, conversation reads, fork /
 // migrate payload validation, config reload, MCP connect guards, the scenario
 // lifecycle messages, and the unsupported-message fallthrough. Each test drives
@@ -3008,11 +3006,13 @@ func (h *testHarness) expectType(t *testing.T, want string) protocol.Envelope {
 // --- unsupported / fallthrough -------------------------------------------
 
 func TestCoverUnsupportedMessage(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "wheesht_unknown", struct{}{})
-
-	h.expectError(t, "unsupported control message")
+	for _, msgType := range []string{"wheesht_unknown", "star", "unstar"} {
+		t.Run(msgType, func(t *testing.T) {
+			h := newTestHarness(t)
+			h.sendControl(t, msgType, struct{}{})
+			h.expectError(t, "unsupported control message")
+		})
+	}
 }
 
 // --- repo_list ------------------------------------------------------------
@@ -3097,8 +3097,7 @@ func TestInvalidPayloads(t *testing.T) {
 		{"set_status", "invalid set_status message"},
 		{"status", "invalid status message"},
 		{"status_report", "invalid status_report"},
-		{"star", "invalid star message"},
-		{"unstar", "invalid unstar message"},
+		{"update", "invalid update message"},
 		{"interrupt", "invalid interrupt message"},
 		{"restart", "invalid restart message"},
 		{"msg_conversation", "invalid msg_conversation message"},
@@ -3147,8 +3146,7 @@ func TestNotFounds(t *testing.T) {
 		{"set_status", "set_status", protocol.SetStatusMsg{SessionID: "haar", Text: "nae session"}, "not found"},
 		{"set_status_clear", "set_status", protocol.SetStatusMsg{SessionID: "haar", Clear: true}, "not found"},
 		{"status", "status", protocol.StatusRequestMsg{SessionID: "haar"}, "not found"},
-		{"star", "star", protocol.StarMsg{SessionID: "haar"}, "not found"},
-		{"unstar", "unstar", protocol.UnstarMsg{SessionID: "haar"}, "not found"},
+		{"update", "update", protocol.UpdateMsg{SessionID: "haar"}, "not found"},
 		{"interrupt", "interrupt", protocol.InterruptMsg{SessionID: "haar"}, "no live process to interrupt"},
 		{"restart", "restart", protocol.RestartMsg{SessionID: "haar"}, "not found"},
 		{"restart_children", "restart", protocol.RestartMsg{SessionID: "haar", Children: true}, "not found"},
@@ -3291,9 +3289,9 @@ func TestCoverStatusReport(t *testing.T) {
 	}
 }
 
-// --- star / unstar --------------------------------------------------------
+// --- starred update -------------------------------------------------------
 
-func TestCoverStarUnstar(t *testing.T) {
+func TestCoverUpdateStarred(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sm.mu.Lock()
@@ -3303,28 +3301,19 @@ func TestCoverStarUnstar(t *testing.T) {
 	}
 	h.sm.mu.Unlock()
 
-	h.sendControl(t, "star", protocol.StarMsg{SessionID: "bonnie-star"})
+	for _, starred := range []bool{true, false} {
+		h.sendControl(t, "update", protocol.UpdateMsg{SessionID: "bonnie-star", Starred: &starred})
 
-	h.expectType(t, "starred")
+		env := h.expectType(t, "updated")
 
-	h.sm.mu.RLock()
-	starred := h.sm.state.Sessions["bonnie-star"].Starred
-	h.sm.mu.RUnlock()
+		var result protocol.UpdateResultMsg
+		if err := protocol.DecodePayload(env, &result); err != nil {
+			t.Fatalf("DecodePayload() error = %v", err)
+		}
 
-	if !starred {
-		t.Error("expected session to be starred")
-	}
-
-	h.sendControl(t, "unstar", protocol.UnstarMsg{SessionID: "bonnie-star"})
-
-	h.expectType(t, "unstarred")
-
-	h.sm.mu.RLock()
-	starred = h.sm.state.Sessions["bonnie-star"].Starred
-	h.sm.mu.RUnlock()
-
-	if starred {
-		t.Error("expected session to be unstarred")
+		if result.SessionID != "bonnie-star" || result.Name != "bonnie" || result.ParentID != "" || result.Starred != starred {
+			t.Errorf("result = %+v, want persisted starred=%t state", result, starred)
+		}
 	}
 }
 
@@ -3716,7 +3705,7 @@ func TestCoverSessionCannotTargetForeignSession(t *testing.T) {
 	const callerToken = "tok-bairn"
 
 	msgTypes := []string{
-		"star", "unstar", "resume", "restart",
+		"update", "resume", "restart",
 		"logs", "wait", "stop", "delete",
 	}
 

@@ -13,51 +13,6 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
-// Star marks a session as starred.
-func (sm *SessionManager) Star(id string) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	s, ok := sm.state.Sessions[id]
-	if !ok {
-		return fmt.Errorf("session %q not found", id)
-	}
-
-	if s.Status == StatusDeleting {
-		return fmt.Errorf("session %q is being deleted", id)
-	}
-
-	if s.IsSoftDeleted() {
-		return errSoftDeleted(s.Name)
-	}
-
-	s.Starred = true
-
-	return sm.saveState()
-}
-
-func (sm *SessionManager) Unstar(id string) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	s, ok := sm.state.Sessions[id]
-	if !ok {
-		return fmt.Errorf("session %q not found", id)
-	}
-
-	if s.Status == StatusDeleting {
-		return fmt.Errorf("session %q is being deleted", id)
-	}
-
-	if s.IsSoftDeleted() {
-		return errSoftDeleted(s.Name)
-	}
-
-	s.Starred = false
-
-	return sm.saveState()
-}
-
 func sanitizeSummaryText(text string) string {
 	var b strings.Builder
 
@@ -125,26 +80,32 @@ func (sm *SessionManager) ClearSummary(sessionID string) error {
 	return sm.saveState()
 }
 
-func (sm *SessionManager) Update(id string, name *string, parentID *string) error {
+// Update atomically validates, applies, and persists the requested session
+// metadata fields. Nil fields are left unchanged.
+func (sm *SessionManager) Update(id string, name *string, parentID *string, starred *bool) (SessionState, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	s, ok := sm.state.Sessions[id]
 	if !ok {
-		return fmt.Errorf("session %q not found", id)
+		return SessionState{}, fmt.Errorf("session %q not found", id)
 	}
 
 	if IsSystemSession(s) {
-		return fmt.Errorf("cannot update system session %q", s.Name)
+		return SessionState{}, fmt.Errorf("cannot update system session %q", s.Name)
+	}
+
+	if s.Status == StatusDeleting {
+		return SessionState{}, fmt.Errorf("session %q is being deleted", id)
 	}
 
 	if s.IsSoftDeleted() {
-		return errSoftDeleted(s.Name)
+		return SessionState{}, errSoftDeleted(s.Name)
 	}
 
 	if name != nil {
 		if err := ValidateSessionName(*name); err != nil {
-			return err
+			return SessionState{}, err
 		}
 	}
 
@@ -156,17 +117,17 @@ func (sm *SessionManager) Update(id string, name *string, parentID *string) erro
 			newParentValue = ""
 		} else {
 			if newParent == id {
-				return errors.New("cannot set session as its own parent")
+				return SessionState{}, errors.New("cannot set session as its own parent")
 			}
 
 			if _, ok := sm.state.Sessions[newParent]; !ok {
-				return fmt.Errorf("parent session %q not found", newParent)
+				return SessionState{}, fmt.Errorf("parent session %q not found", newParent)
 			}
 
 			descendants := sm.collectDescendants(id)
 			for _, d := range descendants {
 				if d == newParent {
-					return fmt.Errorf("cannot set descendant %q as parent (would create cycle)", newParent)
+					return SessionState{}, fmt.Errorf("cannot set descendant %q as parent (would create cycle)", newParent)
 				}
 			}
 
@@ -179,8 +140,15 @@ func (sm *SessionManager) Update(id string, name *string, parentID *string) erro
 	}
 
 	s.ParentID = newParentValue
+	if starred != nil {
+		s.Starred = *starred
+	}
 
-	return sm.saveState()
+	if err := sm.saveState(); err != nil {
+		return SessionState{}, err
+	}
+
+	return cloneSessionState(s), nil
 }
 
 // List returns copies of all known session states.

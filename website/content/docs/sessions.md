@@ -212,16 +212,20 @@ Each session's PTY output is appended to a scrollback file at `<data_dir>/logs/<
 ## Starring
 
 ```bash
-gr star important-session
-gr unstar important-session
+gr update important-session --starred
+gr update important-session --starred=false
 ```
 
 Starred sessions:
-- Cannot be deleted. Unstar first, then delete
+- Cannot be deleted. Set `--starred=false` first, then delete
 - Are skipped by batch `stop`/`delete` operations (e.g. `--stale`, `--stopped`)
 - Can still be stopped directly with `gr stop <session>`
 - Appear in the Starred view in the session picker
 - Show a star indicator in the session list
+
+`--starred` can be combined with `--name` and `--parent`; the daemon validates
+and persists the requested properties as one update. Repeating the same true or
+false value is safe.
 
 ## Status summaries
 

@@ -94,8 +94,8 @@ gr restart fix-auth-bug     # restart agent in same worktree
 gr migrate fix-auth-bug --agent codex  # swap agent in place (e.g. on a provider outage)
 gr delete fix-auth-bug      # kill agent, remove worktree and branch
 gr update fix-auth-bug --name auth-fix
-gr star important-session   # protect from accidental deletion
-gr unstar important-session
+gr update important-session --starred       # protect from accidental deletion
+gr update important-session --starred=false # remove deletion protection
 ```
 
 ## Forking

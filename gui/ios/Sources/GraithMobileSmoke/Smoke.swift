@@ -143,7 +143,7 @@ func testMockClient() async throws {
 
 }
 
-// MARK: - Session actions (issue #899): delete / rename / star / fork / migrate
+// MARK: - Session actions: delete / rename / update / fork / migrate
 
 func testMockClientSessionActions() async throws {
     section("MockHostClient — session actions (#899)")
@@ -155,14 +155,14 @@ func testMockClientSessionActions() async throws {
     var sessions = try await client.listSessions()
     check(sessions.first { $0.id == "braw0001" }?.name == "bonnie", "rename updates the session name")
 
-    // Star / unstar toggle the flag.
+    // Explicit true / false update the starred flag.
     check(sessions.first { $0.id == "braw0001" }?.starred != true, "session starts unstarred")
-    try await client.star(sessionID: "braw0001")
+    _ = try await client.update(sessionID: "braw0001", name: nil, parentID: nil, starred: true)
     sessions = try await client.listSessions()
-    check(sessions.first { $0.id == "braw0001" }?.starred == true, "star sets the flag")
-    try await client.unstar(sessionID: "braw0001")
+    check(sessions.first { $0.id == "braw0001" }?.starred == true, "update starred=true sets the flag")
+    _ = try await client.update(sessionID: "braw0001", name: nil, parentID: nil, starred: false)
     sessions = try await client.listSessions()
-    check(sessions.first { $0.id == "braw0001" }?.starred != true, "unstar clears the flag")
+    check(sessions.first { $0.id == "braw0001" }?.starred != true, "update starred=false clears the flag")
 
     // Migrate swaps the agent.
     try await client.migrate(sessionID: "braw0001", agent: "codex", model: nil)
