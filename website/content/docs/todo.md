@@ -96,9 +96,9 @@ gr todo list --all                    # fleet-wide, every scope (human/orchestra
 
 # Claim and progress
 gr todo claim td-abc123               # atomic claim → in-progress, owned by me
-gr todo next                          # claim the next unclaimed item in my scope
+gr todo next                          # claim the next eligible item in my scope
 gr todo start td-abc123               # alias for claim
-gr todo done td-abc123                # → done
+gr todo done td-abc123                # claimed item → done
 gr todo block td-abc123 "waiting on API review"   # → blocked, with a note
 gr todo reopen td-abc123              # → todo, clears the owner
 
@@ -157,14 +157,16 @@ Claiming is the correctness centrepiece: it is a single **atomic compare-and-set
 (`todo` **and** unclaimed → `in-progress`, owned by the caller). When two agents
 race to claim the same item, exactly one wins and the other is told "already
 claimed" — there is no read-then-write window and no double-claim. `gr todo next`
-does the same over a whole scope, handing out the lowest-ordered unclaimed item,
-so several agents can drain one backlog collision-free.
+does the same over a whole scope, handing out the lowest-ordered eligible item,
+so several agents can drain unassigned backlog collision-free without taking
+work reserved for another assignee.
 
 Ownership rules:
 
-- **Claim** — any session **in scope** may claim an unclaimed item. `owner` is set
-  to the calling session server-side; a session can never claim on another's
-  behalf.
+- **Claim** — any session **in scope** may claim an unassigned, unclaimed item.
+  An assigned item is reserved for its `assignee`; only that session or the
+  scope's override authority may claim it. `owner` is set to the calling session
+  server-side, so a session can never claim on another's behalf.
 - **Transition a claimed item** (done / block / reopen / edit / remove) — only the
   **owner**, an **override authority** (the subtree's anchor root, or a scenario's
   orchestrator), or the **human**. A peer draining the same backlog can't close a
@@ -238,9 +240,18 @@ per-session boolean (this **replaces** the old `gr scenario task-done`):
   the same names in `blocked_by`. The scenario is complete once every member
   with tracked work is.
 
-So the gesture a member used to make with `gr scenario task-done` is now
-`gr todo done <its-task-item>` — the same "I finished my task" signal, backed by a
-real object with sub-items, ordering, and derived progress.
+The seeded item starts ownerless. A member must claim it, then mark it done; an
+attempt to skip the claim names the exact recovery command:
+
+```bash
+gr todo list --scenario "$GRAITH_SCENARIO_NAME" # find assignee=$GRAITH_SESSION_ID
+gr todo claim <its-task-item>                    # sets owner, moves to in-progress
+gr todo done <its-task-item>                     # moves to done
+```
+
+This is the same "I finished my task" signal formerly represented by
+`gr scenario task-done`, now backed by a real object with sub-items, ordering,
+and derived progress.
 
 ## In `gr list` and the overlay
 

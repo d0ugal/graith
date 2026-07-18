@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -129,23 +130,25 @@ var todoListCmd = &cobra.Command{
 			return nil
 		}
 
-		tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		_, _ = fmt.Fprintf(tw, "ID\tSTATUS\tTITLE\tOWNER\tTAGS\tWHY BLOCKED\n")
+		return writeTodoList(os.Stdout, r.Items)
+	},
+}
 
-		for _, it := range r.Items {
-			title := it.Title
-			if it.ParentID != "" {
-				title = "  " + title
-			}
+func writeTodoList(w io.Writer, items []protocol.TodoItemInfo) error {
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	_, _ = fmt.Fprintf(tw, "ID\tSTATUS\tTITLE\tOWNER\tASSIGNEE\tTAGS\tWHY BLOCKED\n")
 
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				it.ID, it.Status, title, it.Owner, strings.Join(it.Tags, ","), todoBlockedReason(it))
+	for _, it := range items {
+		title := it.Title
+		if it.ParentID != "" {
+			title = "  " + title
 		}
 
-		_ = tw.Flush()
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			it.ID, it.Status, title, it.Owner, it.Assignee, strings.Join(it.Tags, ","), todoBlockedReason(it))
+	}
 
-		return nil
-	},
+	return tw.Flush()
 }
 
 func todoBlockedReason(item protocol.TodoItemInfo) string {
@@ -349,7 +352,7 @@ func registerTodoCmd() {
 
 	todoExportCmd.Flags().String("format", "md", "export format (md|json)")
 
-	doneCmd := todoTransitionCmd("done <id>", "Mark an item done", "done", false)
+	doneCmd := todoTransitionCmd("done <id>", "Mark a claimed item done", "done", false)
 	blockCmd := todoTransitionCmd("block <id> [note]", "Mark an item blocked", "blocked", true)
 	reopenCmd := todoTransitionCmd("reopen <id>", "Reopen an item (clears the owner)", "todo", false)
 

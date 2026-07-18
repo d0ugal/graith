@@ -645,14 +645,16 @@ func (s *TodoStore) Claim(id, owner string) (TodoItem, bool, error) {
 	return it, true, err
 }
 
-// ClaimNext atomically claims the lowest-position unclaimed item in scope and
-// returns that exact item. It selects a candidate, then flips it with a guarded
-// UPDATE keyed by that id; if a (hypothetical, given the store mutex) concurrent
+// ClaimNext atomically claims the lowest-position eligible unclaimed item in
+// scope and returns that exact item. An ordinary caller is eligible for
+// unassigned work and work assigned to itself; an override caller may also take
+// assigned work. It selects a candidate, then flips it with a guarded UPDATE
+// keyed by that id; if a (hypothetical, given the store mutex) concurrent
 // claimant took it the UPDATE affects zero rows and we advance to the next
 // candidate. This returns the precise row claimed — not one inferred by recency
 // — so it is correct even when the same owner claims repeatedly under a coarse
 // or mocked clock. Only genuine emptiness returns ok=false.
-func (s *TodoStore) ClaimNext(scope, owner string) (TodoItem, bool, error) {
+func (s *TodoStore) ClaimNext(scope, owner string, override bool) (TodoItem, bool, error) {
 	if owner == "" {
 		return TodoItem{}, false, errors.New("claim requires an owner")
 	}
@@ -665,13 +667,14 @@ func (s *TodoStore) ClaimNext(scope, owner string) (TodoItem, bool, error) {
 
 		err := s.db.QueryRow(
 			`SELECT id FROM todos WHERE scope = ? AND status = ? AND owner = ''
+			 AND (? OR assignee = '' OR assignee = ?)
 			 AND NOT EXISTS (
 				SELECT 1 FROM todo_dependencies d
 				JOIN todos dependency ON dependency.id = d.dependency_id
 				WHERE d.todo_id = todos.id AND dependency.status <> ?
 			 )
 			 ORDER BY position ASC, id ASC LIMIT 1`,
-			scope, TodoStatusTodo, TodoStatusDone,
+			scope, TodoStatusTodo, override, owner, TodoStatusDone,
 		).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return TodoItem{}, false, nil
@@ -684,12 +687,13 @@ func (s *TodoStore) ClaimNext(scope, owner string) (TodoItem, bool, error) {
 		res, err := s.db.Exec(
 			`UPDATE todos SET status = ?, owner = ?, revision = revision + 1, updated_at = ?
 			 WHERE id = ? AND status = ? AND owner = ''
+			 AND (? OR assignee = '' OR assignee = ?)
 			 AND NOT EXISTS (
 				SELECT 1 FROM todo_dependencies d
 				JOIN todos dependency ON dependency.id = d.dependency_id
 				WHERE d.todo_id = todos.id AND dependency.status <> ?
 			 )`,
-			TodoStatusInProgress, owner, s.nowStr(), id, TodoStatusTodo, TodoStatusDone,
+			TodoStatusInProgress, owner, s.nowStr(), id, TodoStatusTodo, override, owner, TodoStatusDone,
 		)
 		if err != nil {
 			return TodoItem{}, false, fmt.Errorf("claim next todo: %w", err)
