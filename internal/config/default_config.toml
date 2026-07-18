@@ -504,12 +504,11 @@ top = "g home"                           # jump to the first item / top
 bottom = "G end"                         # jump to the last item / bottom
 confirm = "enter y"                      # confirm a prompt (e.g. delete/stop)
 cancel = "q esc ctrl+c"                  # close the overlay / cancel
-# List watch (`gr ls --watch`) actions. The dashboard_* config names are kept
-# so existing keybinding customizations continue to work after command removal.
-dashboard_attach = "enter a"             # attach to the selected session
-dashboard_stop = "s"                     # stop the selected running session
-dashboard_delete = "x d"                 # delete the selected session
-dashboard_resume = "r"                   # resume the selected stopped session
+# List watch (`gr ls --watch`) actions.
+list_watch_attach = "enter a"             # attach to the selected session
+list_watch_stop = "s"                     # stop the selected running session
+list_watch_delete = "x d"                 # delete the selected session
+list_watch_resume = "r"                   # resume the selected stopped session
 # Approval prompt actions.
 approval_allow = "y enter"               # allow the selected request
 approval_deny = "n x"                    # deny the selected request

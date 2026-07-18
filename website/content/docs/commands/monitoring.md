@@ -54,6 +54,11 @@ and agents always receive a finite non-interactive snapshot rather than terminal
 control sequences or an unbounded stream. Press `q`, Escape, or `ctrl+c` to exit
 cleanly.
 
+This is a breaking replacement for the removed `gr dashboard` command; there
+is no forwarding alias. Replace dashboard invocations with `gr ls --watch` and
+rename any `overlay.dashboard_*` keybinding settings to
+`overlay.list_watch_*`.
+
 The detailed projection composes with the normal list selection flags, including
 `--repo`, `--children`, `--starred`, `--deleted`, and `--tree`. `--quiet` and
 `--wide` are each mutually exclusive with `--tokens` because all three select

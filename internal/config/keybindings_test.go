@@ -38,7 +38,7 @@ func TestDefaultOverlayKeybindings(t *testing.T) {
 	cases := map[string]string{
 		"up":                ov.Up,
 		"down":              ov.Down,
-		"dashboard_attach":  ov.DashboardAttach,
+		"list_watch_attach": ov.ListWatchAttach,
 		"approval_allow":    ov.ApprovalAllow,
 		"message_pin":       ov.MessagePin,
 		"message_next_conv": ov.MessageNextConv,
@@ -61,7 +61,7 @@ func TestOverlayKeybindingPartialOverride(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.toml")
 	toml := `
 [keybindings.overlay]
-dashboard_attach = "enter"
+list_watch_attach = "enter"
 `
 
 	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
@@ -73,13 +73,13 @@ dashboard_attach = "enter"
 		t.Fatalf("Load: %v", err)
 	}
 
-	if cfg.Keybindings.Overlay.DashboardAttach != "enter" {
-		t.Errorf("dashboard_attach = %q, want overridden %q", cfg.Keybindings.Overlay.DashboardAttach, "enter")
+	if cfg.Keybindings.Overlay.ListWatchAttach != "enter" {
+		t.Errorf("list_watch_attach = %q, want overridden %q", cfg.Keybindings.Overlay.ListWatchAttach, "enter")
 	}
 
 	// An unspecified key keeps its default from the embedded config.
-	if cfg.Keybindings.Overlay.DashboardStop != "s" {
-		t.Errorf("dashboard_stop = %q, want default %q (partial table must not zero other keys)", cfg.Keybindings.Overlay.DashboardStop, "s")
+	if cfg.Keybindings.Overlay.ListWatchStop != "s" {
+		t.Errorf("list_watch_stop = %q, want default %q (partial table must not zero other keys)", cfg.Keybindings.Overlay.ListWatchStop, "s")
 	}
 }
 

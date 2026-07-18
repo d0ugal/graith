@@ -47,9 +47,6 @@ useful monitoring and control surface.
 
 - Changing the attached-session picker or native GUI session views.
 - Adding a streaming JSON protocol.
-- Renaming the existing `dashboard_*` overlay config keys; retaining them
-  preserves user keybinding customizations even though the command name goes
-  away.
 
 ## Platform support
 
@@ -86,10 +83,10 @@ checks happen before daemon connection, so automation never enters an
 interactive program or receives partial terminal control streams.
 
 The `gr dashboard` Cobra registration and command implementation are deleted,
-and the client model and tests are renamed around list watch. The existing
-`dashboard_*` overlay config keys remain accepted because their values describe
-the same preserved actions and changing them would unnecessarily discard user
-customization.
+and the client model and tests are renamed around list watch. The associated
+overlay keys are renamed from `dashboard_*` to `list_watch_*`; the former names
+are not accepted as aliases. This is an intentional breaking transition that
+leaves no dashboard-named active configuration surface behind.
 
 ### Proposal 2: Keep Dashboard as a Hidden Alias
 

@@ -2696,12 +2696,11 @@ type OverlayKeybindings struct {
 	Bottom   string `toml:"bottom"`
 	Confirm  string `toml:"confirm"`
 	Cancel   string `toml:"cancel"`
-	// List-watch actions. The Dashboard* field and TOML names are retained so
-	// existing keybinding customizations survive removal of `gr dashboard`.
-	DashboardAttach string `toml:"dashboard_attach"`
-	DashboardStop   string `toml:"dashboard_stop"`
-	DashboardDelete string `toml:"dashboard_delete"`
-	DashboardResume string `toml:"dashboard_resume"`
+	// List-watch actions.
+	ListWatchAttach string `toml:"list_watch_attach"`
+	ListWatchStop   string `toml:"list_watch_stop"`
+	ListWatchDelete string `toml:"list_watch_delete"`
+	ListWatchResume string `toml:"list_watch_resume"`
 	// Approval prompt actions.
 	ApprovalAllow    string `toml:"approval_allow"`
 	ApprovalDeny     string `toml:"approval_deny"`

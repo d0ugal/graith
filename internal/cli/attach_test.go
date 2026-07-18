@@ -203,7 +203,7 @@ func TestOverlayKeysFromConfigOverrideAndDefault(t *testing.T) {
 	cfg = &config.Config{
 		Keybindings: config.Keybindings{
 			Overlay: config.OverlayKeybindings{
-				DashboardAttach: "z",
+				ListWatchAttach: "z",
 				ApprovalAllow:   "Y",
 				MessagePin:      "P",
 			},
@@ -214,8 +214,7 @@ func TestOverlayKeysFromConfigOverrideAndDefault(t *testing.T) {
 	if len(watch.Attach) != 1 || watch.Attach[0] != "z" {
 		t.Errorf("list watch attach = %v, want [z]", watch.Attach)
 	}
-	// Unset dashboard_stop keeps the built-in default (the config key retains
-	// its historical name for compatibility).
+	// An unset list_watch_stop keeps the built-in default.
 	if want := client.DefaultListWatchKeys().Stop; len(watch.Stop) != len(want) || watch.Stop[0] != want[0] {
 		t.Errorf("list watch stop = %v, want default %v", watch.Stop, want)
 	}
