@@ -59,6 +59,7 @@ type scenarioSharedSource struct {
 	repoPath     string
 	worktreePath string
 	includes     []scenarioSharedInclude
+	chain        []scenarioSharedChainMember
 }
 
 type scenarioSharedInclude struct {
@@ -67,11 +68,20 @@ type scenarioSharedInclude struct {
 	worktreePath string
 }
 
+type scenarioSharedChainMember struct {
+	id             string
+	mirror         bool
+	mirrorSourceID string
+	repoPath       string
+	worktreePath   string
+}
+
 func sameScenarioSharedSource(a, b scenarioSharedSource) bool {
 	return a.id == b.id &&
 		a.repoPath == b.repoPath &&
 		a.worktreePath == b.worktreePath &&
-		slices.Equal(a.includes, b.includes)
+		slices.Equal(a.includes, b.includes) &&
+		slices.Equal(a.chain, b.chain)
 }
 
 func scenarioSharedUnavailableSummary(deleted int, unavailable []SessionStatus) string {
@@ -105,18 +115,131 @@ func scenarioSharedUnavailableSummary(deleted int, unavailable []SessionStatus) 
 	return strings.Join(parts, ", ")
 }
 
+// resolveScenarioMirrorSourceIDLocked follows a scenario mirror source to the
+// ordinary session that owns its worktree and includes. Unlike the permissive
+// runtime include lookup, scenario startup must fail closed on corrupt or
+// unavailable backing chains because it promises a preserved, stable source.
+// Caller must hold sm.mu for reading.
+func (sm *SessionManager) resolveScenarioMirrorSourceIDLocked(sourceID string) (scenarioSharedSource, error) {
+	if sourceID == "" {
+		return scenarioSharedSource{}, errors.New("mirror source has no session id")
+	}
+
+	selected, ok := sm.state.Sessions[sourceID]
+	if !ok {
+		return scenarioSharedSource{}, fmt.Errorf("mirror source %q is missing", sourceID)
+	}
+
+	visited := make(map[string]bool)
+	chain := make([]scenarioSharedChainMember, 0, 1)
+	currentID := sourceID
+
+	var root *SessionState
+
+	for {
+		if currentID == "" {
+			return scenarioSharedSource{}, fmt.Errorf("mirror source chain from %q contains an empty session id", sourceID)
+		}
+
+		if visited[currentID] {
+			return scenarioSharedSource{}, fmt.Errorf("mirror source chain from %q is cyclic at session %q", sourceID, currentID)
+		}
+
+		visited[currentID] = true
+
+		current, exists := sm.state.Sessions[currentID]
+		if !exists {
+			return scenarioSharedSource{}, fmt.Errorf("backing mirror source %q is missing", currentID)
+		}
+
+		if current.ID != currentID {
+			return scenarioSharedSource{}, fmt.Errorf("mirror source %q has inconsistent stored id %q", currentID, current.ID)
+		}
+
+		if current.IsSoftDeleted() {
+			return scenarioSharedSource{}, fmt.Errorf("backing mirror source %q is deleted", currentID)
+		}
+
+		switch current.Status {
+		case StatusRunning, StatusStopped:
+			// Eligible.
+		default:
+			label := string(current.Status)
+			if label == "" {
+				label = "unknown"
+			}
+
+			return scenarioSharedSource{}, fmt.Errorf(
+				"backing mirror source %q is %s; only running or stopped sessions can back a shared mirror",
+				currentID,
+				label,
+			)
+		}
+
+		chain = append(chain, scenarioSharedChainMember{
+			id:             currentID,
+			mirror:         current.Mirror,
+			mirrorSourceID: current.MirrorSourceID,
+			repoPath:       current.RepoPath,
+			worktreePath:   current.WorktreePath,
+		})
+
+		if !current.Mirror {
+			root = current
+			break
+		}
+
+		if current.MirrorSourceID == "" {
+			return scenarioSharedSource{}, fmt.Errorf("mirror source %q has no backing source id", currentID)
+		}
+
+		currentID = current.MirrorSourceID
+	}
+
+	for _, member := range chain[:len(chain)-1] {
+		if member.repoPath != root.RepoPath || member.worktreePath != root.WorktreePath {
+			return scenarioSharedSource{}, fmt.Errorf(
+				"mirror source %q worktree does not match backing source %q",
+				member.id,
+				root.ID,
+			)
+		}
+	}
+
+	includes := make([]scenarioSharedInclude, len(root.Includes))
+	for i, include := range root.Includes {
+		includes[i] = scenarioSharedInclude{
+			repoPath:     include.RepoPath,
+			repoName:     include.RepoName,
+			worktreePath: include.WorktreePath,
+		}
+	}
+
+	return scenarioSharedSource{
+		id:           sourceID,
+		repoPath:     selected.RepoPath,
+		worktreePath: selected.WorktreePath,
+		includes:     includes,
+		chain:        chain,
+	}, nil
+}
+
 // resolveScenarioSharedSourceLocked resolves the one reusable session behind a
 // shared scenario member. Stopped sessions remain reusable because Stop keeps
 // their state and worktree intact; transient, errored, and soft-deleted rows do
 // not. Caller must hold sm.mu for reading.
 func (sm *SessionManager) resolveScenarioSharedSourceLocked(name string) (scenarioSharedSource, error) {
+	type candidate struct {
+		id string
+	}
+
 	var (
-		candidates  []*SessionState
+		candidates  []candidate
 		deleted     int
 		unavailable []SessionStatus
 	)
 
-	for _, existing := range sm.state.Sessions {
+	for id, existing := range sm.state.Sessions {
 		if existing.Name != name {
 			continue
 		}
@@ -128,7 +251,7 @@ func (sm *SessionManager) resolveScenarioSharedSourceLocked(name string) (scenar
 
 		switch existing.Status {
 		case StatusRunning, StatusStopped:
-			candidates = append(candidates, existing)
+			candidates = append(candidates, candidate{id: id})
 		default:
 			unavailable = append(unavailable, existing.Status)
 		}
@@ -163,24 +286,12 @@ func (sm *SessionManager) resolveScenarioSharedSourceLocked(name string) (scenar
 		return scenarioSharedSource{}, fmt.Errorf("shared session %q is ambiguous: %d running or stopped sessions have that name", name, len(candidates))
 	}
 
-	source := candidates[0]
-	sourceIncludes := sm.mirrorSourceIncludesLocked(source)
-
-	includes := make([]scenarioSharedInclude, len(sourceIncludes))
-	for i, include := range sourceIncludes {
-		includes[i] = scenarioSharedInclude{
-			repoPath:     include.RepoPath,
-			repoName:     include.RepoName,
-			worktreePath: include.WorktreePath,
-		}
+	source, err := sm.resolveScenarioMirrorSourceIDLocked(candidates[0].id)
+	if err != nil {
+		return scenarioSharedSource{}, fmt.Errorf("shared session %q: %w", name, err)
 	}
 
-	return scenarioSharedSource{
-		id:           source.ID,
-		repoPath:     source.RepoPath,
-		worktreePath: source.WorktreePath,
-		includes:     includes,
-	}, nil
+	return source, nil
 }
 
 // snapshotScenarioSharedSources performs the authoritative state-only lookup
@@ -208,7 +319,42 @@ func (sm *SessionManager) snapshotScenarioSharedSources(sessions []protocol.Scen
 	return sources, nil
 }
 
-func validateScenarioMirrorWorktree(memberName, targetName, worktreePath string) error {
+func scenarioGitCommonDir(worktreePath string) (string, error) {
+	_, commonDir, err := git.WorktreeGitDirs(worktreePath)
+	if err != nil {
+		return "", err
+	}
+
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(worktreePath, commonDir)
+	}
+
+	return filepath.Clean(config.ResolvePath(commonDir)), nil
+}
+
+func validateScenarioGitWorktree(repoPath, worktreePath string) error {
+	if repoPath == "" {
+		return errors.New("saved repository path is empty")
+	}
+
+	wantCommonDir, err := scenarioGitCommonDir(repoPath)
+	if err != nil {
+		return fmt.Errorf("saved repo %q is unavailable: %w", repoPath, err)
+	}
+
+	gotCommonDir, err := scenarioGitCommonDir(worktreePath)
+	if err != nil {
+		return fmt.Errorf("not a valid git worktree: %w", err)
+	}
+
+	if gotCommonDir != wantCommonDir {
+		return fmt.Errorf("belongs to a different git repository (got common dir %q, want %q)", gotCommonDir, wantCommonDir)
+	}
+
+	return nil
+}
+
+func validateScenarioMirrorWorktree(memberName, targetName, repoPath, worktreePath string) error {
 	if worktreePath == "" {
 		return fmt.Errorf("session %q: mirror target %q has no worktree to mirror", memberName, targetName)
 	}
@@ -226,6 +372,22 @@ func validateScenarioMirrorWorktree(memberName, targetName, worktreePath string)
 		return fmt.Errorf("session %q: mirror target %q worktree %q is not a directory", memberName, targetName, worktreePath)
 	}
 
+	// Scratch/no-repo sources deliberately have no Git identity to validate;
+	// their preserved directory is still a valid read-only mirror target.
+	if repoPath == "" {
+		return nil
+	}
+
+	if err := validateScenarioGitWorktree(repoPath, worktreePath); err != nil {
+		return fmt.Errorf(
+			"session %q: mirror target %q worktree %q does not match its saved repository: %w",
+			memberName,
+			targetName,
+			worktreePath,
+			err,
+		)
+	}
+
 	return nil
 }
 
@@ -240,13 +402,46 @@ func validateScenarioMirrorIncludes(memberName, targetName string, includes []sc
 			)
 		}
 
-		if !git.IsInsideGitRepo(include.worktreePath) {
+		info, err := os.Stat(include.worktreePath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf(
+					"session %q: mirror target %q included worktree %q (%s) no longer exists",
+					memberName,
+					targetName,
+					include.worktreePath,
+					include.repoName,
+				)
+			}
+
 			return fmt.Errorf(
-				"session %q: mirror target %q included worktree %q (%s) is no longer a valid git repo",
+				"session %q: mirror target %q included worktree %q (%s) is unavailable: %w",
 				memberName,
 				targetName,
 				include.worktreePath,
 				include.repoName,
+				err,
+			)
+		}
+
+		if !info.IsDir() {
+			return fmt.Errorf(
+				"session %q: mirror target %q included worktree %q (%s) is not a directory",
+				memberName,
+				targetName,
+				include.worktreePath,
+				include.repoName,
+			)
+		}
+
+		if err := validateScenarioGitWorktree(include.repoPath, include.worktreePath); err != nil {
+			return fmt.Errorf(
+				"session %q: mirror target %q included worktree %q (%s) does not match its saved repository: %w",
+				memberName,
+				targetName,
+				include.worktreePath,
+				include.repoName,
+				err,
 			)
 		}
 	}
@@ -533,7 +728,12 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 				continue
 			}
 
-			if err := validateScenarioMirrorWorktree(session.Name, msg.Sessions[root].Name, sharedSources[root].worktreePath); err != nil {
+			if err := validateScenarioMirrorWorktree(
+				session.Name,
+				msg.Sessions[root].Name,
+				sharedSources[root].repoPath,
+				sharedSources[root].worktreePath,
+			); err != nil {
 				return nil, err
 			}
 
@@ -798,7 +998,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 				sess, createErr := sm.Create(CreateOpts{
 					ID: sessionIDs[idx], Name: s.Name, AgentName: agentName,
-					RepoPath: repoRoots[idx], Mirror: mirrorSourceID,
+					RepoPath: repoRoots[idx], MirrorSourceID: mirrorSourceID,
 					BaseBranch: s.Base, Prompt: s.StartupPrompt(), Model: s.Model,
 					ParentID: msg.ParentSessionID, AgentHooks: s.AgentHooks,
 					Includes: s.Includes, Starred: s.Star,
@@ -1465,14 +1665,37 @@ func (sm *SessionManager) ResumeScenario(name string, rows, cols uint16) ([]stri
 		return nil, fmt.Errorf("scenario %q not found", name)
 	}
 
+	if len(scenario.SessionIDs) != len(scenario.Sessions) {
+		sm.mu.RUnlock()
+
+		return nil, fmt.Errorf(
+			"scenario %q state is inconsistent: %d session ids for %d member records",
+			name,
+			len(scenario.SessionIDs),
+			len(scenario.Sessions),
+		)
+	}
+
 	sessionIDs := make([]string, len(scenario.SessionIDs))
 	copy(sessionIDs, scenario.SessionIDs)
 	scenarioID := scenario.ID
 
 	shared := make([]bool, len(sessionIDs))
 	for i := range sessionIDs {
-		if i < len(scenario.Sessions) {
-			shared[i] = scenario.Sessions[i].Shared
+		shared[i] = scenario.Sessions[i].Shared
+		if shared[i] {
+			continue
+		}
+
+		if sess := sm.state.Sessions[sessionIDs[i]]; sess != nil && sess.ScenarioID != scenarioID {
+			sm.mu.RUnlock()
+
+			return nil, fmt.Errorf(
+				"scenario %q member %q references unowned session %q",
+				name,
+				scenario.Sessions[i].Name,
+				sessionIDs[i],
+			)
 		}
 	}
 

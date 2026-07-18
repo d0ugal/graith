@@ -924,9 +924,14 @@ func TestResumeScenarioCovSkipsAndLogsErrors(t *testing.T) {
 
 	sm.mu.Lock()
 	// Running -> skipped (not stopped/errored).
-	sm.state.Sessions["braw-run"] = &SessionState{ID: "braw-run", Name: "braw-run", Status: StatusRunning}
+	sm.state.Sessions["braw-run"] = &SessionState{
+		ID: "braw-run", Name: "braw-run", Status: StatusRunning, ScenarioID: "sc-strath",
+	}
 	// Stopped but unknown agent -> Resume errors, logged, not counted as resumed.
-	sm.state.Sessions["dreich-stop"] = &SessionState{ID: "dreich-stop", Name: "dreich-stop", Status: StatusStopped, Agent: "nae-such-agent"}
+	sm.state.Sessions["dreich-stop"] = &SessionState{
+		ID: "dreich-stop", Name: "dreich-stop", Status: StatusStopped,
+		Agent: "nae-such-agent", ScenarioID: "sc-strath",
+	}
 	sm.state.Scenarios["sc-strath"] = &ScenarioState{
 		ID:         "sc-strath",
 		Name:       "strath-bide",
@@ -960,6 +965,56 @@ func TestResumeScenarioCovSkipsAndLogsErrors(t *testing.T) {
 	// agent, so it stays stopped rather than being marked resumed/running.
 	if sm.state.Sessions["dreich-stop"].Status != StatusStopped {
 		t.Errorf("dreich-stop status = %q, want stopped (resume should have failed)", sm.state.Sessions["dreich-stop"].Status)
+	}
+}
+
+func TestResumeScenarioRejectsIncompleteOrUnownedMemberState(t *testing.T) {
+	tests := []struct {
+		name      string
+		sessions  []ScenarioSession
+		scenario  string
+		wantError string
+	}{
+		{
+			name:      "missing member metadata",
+			wantError: "1 session ids for 0 member records",
+		},
+		{
+			name:      "foreign session",
+			sessions:  []ScenarioSession{{Name: "canny-member"}},
+			scenario:  "sc-elsewhere",
+			wantError: "references unowned session",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sm := newTestSessionManager(t)
+			resumeCalled := false
+			sm.scenarioResume = func(string, uint16, uint16) error {
+				resumeCalled = true
+				return nil
+			}
+
+			sm.mu.Lock()
+			sm.state.Sessions["canny-stop"] = &SessionState{
+				ID: "canny-stop", Name: "canny-stop", Status: StatusStopped, ScenarioID: tt.scenario,
+			}
+			sm.state.Scenarios["sc-strath"] = &ScenarioState{
+				ID: "sc-strath", Name: "strath-invalid-resume",
+				SessionIDs: []string{"canny-stop"}, Sessions: tt.sessions,
+			}
+			sm.mu.Unlock()
+
+			resumed, err := sm.ResumeScenario("strath-invalid-resume", 24, 80)
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("ResumeScenario() = %v, err=%v, want %q", resumed, err, tt.wantError)
+			}
+
+			if resumeCalled {
+				t.Error("ResumeScenario called the session resume path before rejecting corrupt ownership state")
+			}
+		})
 	}
 }
 
@@ -1236,6 +1291,7 @@ func TestStartScenarioRejectsUnavailableSharedSession(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sm := startScenarioOrchestrator(t)
+			sm.sandboxResolver = func(string) (bool, error) { return true, nil }
 			repo := initTempGitRepo(t)
 
 			if tt.seed != nil {
@@ -1409,18 +1465,28 @@ func TestStartScenarioRejectsStoppedSharedMirrorSourceWithUnavailableInclude(t *
 	tests := []struct {
 		name        string
 		includePath func(*testing.T) string
+		wantErr     string
 	}{
 		{
 			name: "missing",
 			includePath: func(t *testing.T) string {
 				return filepath.Join(t.TempDir(), "cleaned-croft")
 			},
+			wantErr: "no longer exists",
 		},
 		{
 			name: "not a git repo",
 			includePath: func(t *testing.T) string {
 				return t.TempDir()
 			},
+			wantErr: "not a valid git worktree",
+		},
+		{
+			name: "different git repo",
+			includePath: func(t *testing.T) string {
+				return initTempGitRepo(t)
+			},
+			wantErr: "different git repository",
 		},
 	}
 
@@ -1450,7 +1516,7 @@ func TestStartScenarioRejectsStoppedSharedMirrorSourceWithUnavailableInclude(t *
 					{Name: "deep-reader", Mirror: "middle-reader"},
 				},
 			}, 24, 80)
-			if err == nil || !strings.Contains(err.Error(), "included worktree") || !strings.Contains(err.Error(), "no longer a valid git repo") {
+			if err == nil || !strings.Contains(err.Error(), "included worktree") || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("error = %v, want unavailable-include rejection", err)
 			}
 
@@ -1461,6 +1527,218 @@ func TestStartScenarioRejectsStoppedSharedMirrorSourceWithUnavailableInclude(t *
 				t.Errorf("include preflight reserved scenario state: %+v", sm.state.Scenarios)
 			}
 		})
+	}
+}
+
+func TestStartScenarioRejectsStoppedSharedMirrorSourceWithReplacedWorktree(t *testing.T) {
+	tests := []struct {
+		name         string
+		worktreePath func(*testing.T) string
+		wantErr      string
+	}{
+		{
+			name: "plain directory",
+			worktreePath: func(t *testing.T) string {
+				return t.TempDir()
+			},
+			wantErr: "not a valid git worktree",
+		},
+		{
+			name: "different git repo",
+			worktreePath: func(t *testing.T) string {
+				return initTempGitRepo(t)
+			},
+			wantErr: "different git repository",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sm := startScenarioOrchestrator(t)
+			sm.sandboxResolver = func(string) (bool, error) { return true, nil }
+
+			repo := initTempGitRepo(t)
+			replacement := tt.worktreePath(t)
+
+			sm.mu.Lock()
+			sm.state.Sessions["braw-source"] = &SessionState{
+				ID: "braw-source", Name: "subject", Status: StatusStopped,
+				RepoPath: repo, WorktreePath: replacement,
+			}
+			sm.mu.Unlock()
+
+			_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+				CallerSessionID: "ben-orch", Name: "strath-replaced-worktree",
+				Sessions: []protocol.ScenarioSessionInput{
+					{Name: "subject", Shared: true},
+					{Name: "reader", Mirror: "subject"},
+				},
+			}, 24, 80)
+			if err == nil || !strings.Contains(err.Error(), "does not match its saved repository") || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want replaced-worktree rejection containing %q", err, tt.wantErr)
+			}
+
+			sm.mu.RLock()
+			defer sm.mu.RUnlock()
+
+			if len(sm.state.Scenarios) != 0 {
+				t.Errorf("replaced-worktree preflight reserved scenario state: %+v", sm.state.Scenarios)
+			}
+		})
+	}
+}
+
+func TestStartScenarioRejectsUnavailableSharedMirrorBackingChain(t *testing.T) {
+	tests := []struct {
+		name    string
+		seed    func(*SessionManager, string)
+		wantErr string
+	}{
+		{
+			name: "deleted root",
+			seed: func(sm *SessionManager, repo string) {
+				deletedAt := time.Now().UTC()
+				sm.state.Sessions["braw-root"] = &SessionState{
+					ID: "braw-root", Name: "root", Status: StatusStopped,
+					RepoPath: repo, WorktreePath: repo, DeletedAt: &deletedAt,
+				}
+			},
+			wantErr: `backing mirror source "braw-root" is deleted`,
+		},
+		{
+			name: "creating root",
+			seed: func(sm *SessionManager, repo string) {
+				sm.state.Sessions["braw-root"] = &SessionState{
+					ID: "braw-root", Name: "root", Status: StatusCreating,
+					RepoPath: repo, WorktreePath: repo,
+				}
+			},
+			wantErr: `backing mirror source "braw-root" is creating`,
+		},
+		{
+			name: "deleting root",
+			seed: func(sm *SessionManager, repo string) {
+				sm.state.Sessions["braw-root"] = &SessionState{
+					ID: "braw-root", Name: "root", Status: StatusDeleting,
+					RepoPath: repo, WorktreePath: repo,
+				}
+			},
+			wantErr: `backing mirror source "braw-root" is deleting`,
+		},
+		{
+			name:    "missing root",
+			seed:    func(*SessionManager, string) {},
+			wantErr: `backing mirror source "braw-root" is missing`,
+		},
+		{
+			name: "cycle",
+			seed: func(sm *SessionManager, repo string) {
+				sm.state.Sessions["braw-root"] = &SessionState{
+					ID: "braw-root", Name: "root", Status: StatusStopped,
+					RepoPath: repo, WorktreePath: repo, Mirror: true, MirrorSourceID: "canny-mirror",
+				}
+			},
+			wantErr: "is cyclic",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sm := startScenarioOrchestrator(t)
+			sm.sandboxResolver = func(string) (bool, error) { return true, nil }
+			repo := initTempGitRepo(t)
+
+			sm.mu.Lock()
+			sm.state.Sessions["canny-mirror"] = &SessionState{
+				ID: "canny-mirror", Name: "subject", Status: StatusStopped,
+				RepoPath: repo, WorktreePath: repo, Mirror: true, MirrorSourceID: "braw-root",
+			}
+			tt.seed(sm, repo)
+			sm.mu.Unlock()
+
+			_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+				CallerSessionID: "ben-orch", Name: "strath-broken-chain",
+				Sessions: []protocol.ScenarioSessionInput{
+					{Name: "subject", Shared: true},
+					{Name: "reader", Mirror: "subject"},
+				},
+			}, 24, 80)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want backing-chain rejection containing %q", err, tt.wantErr)
+			}
+
+			sm.mu.RLock()
+			defer sm.mu.RUnlock()
+
+			if len(sm.state.Scenarios) != 0 {
+				t.Errorf("backing-chain preflight reserved scenario state: %+v", sm.state.Scenarios)
+			}
+		})
+	}
+}
+
+func TestStartScenarioRejectsSharedSourceWithInconsistentStoredID(t *testing.T) {
+	sm := startScenarioOrchestrator(t)
+	sm.sandboxResolver = func(string) (bool, error) { return true, nil }
+	repo := initTempGitRepo(t)
+
+	sm.mu.Lock()
+	sm.state.Sessions["deadbeef"] = &SessionState{
+		Name: "subject", Status: StatusStopped, RepoPath: repo, WorktreePath: repo,
+	}
+	sm.mu.Unlock()
+
+	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: "ben-orch", Name: "strath-bad-source-id",
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "subject", Shared: true},
+			{Name: "reader", Mirror: "subject"},
+		},
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), `mirror source "deadbeef" has inconsistent stored id ""`) {
+		t.Fatalf("error = %v, want inconsistent source-id rejection", err)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if len(sm.state.Scenarios) != 0 {
+		t.Errorf("invalid source identity reserved scenario state: %+v", sm.state.Scenarios)
+	}
+}
+
+func TestCreateExactMirrorSourceRevalidatesWorktreeAndRollsBack(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.sandboxResolver = func(string) (bool, error) { return true, nil }
+
+	repo := initTempGitRepo(t)
+	replacement := initTempGitRepo(t)
+
+	sm.mu.Lock()
+	sm.state.Sessions["deadbeef"] = &SessionState{
+		ID: "deadbeef", Name: "subject", Agent: "claude", Status: StatusStopped,
+		RepoPath: repo, RepoName: filepath.Base(repo), WorktreePath: replacement,
+	}
+	sm.mu.Unlock()
+
+	_, err := sm.Create(CreateOpts{
+		Name: "canny-reader", AgentName: "claude", MirrorSourceID: "deadbeef", Rows: 24, Cols: 80,
+	})
+	if err == nil || !strings.Contains(err.Error(), "different git repository") {
+		t.Fatalf("Create() error = %v, want exact-source repository identity rejection", err)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if _, ok := sm.state.Sessions["deadbeef"]; !ok {
+		t.Error("exact mirror validation removed the source")
+	}
+
+	for _, session := range sm.state.Sessions {
+		if session.Name == "canny-reader" {
+			t.Fatalf("exact mirror validation left reader reservation: %+v", session)
+		}
 	}
 }
 
@@ -2289,6 +2567,147 @@ func TestStartScenarioMirrorsStoppedSharedSourceWithoutOwningIt(t *testing.T) {
 	}
 
 	assertSourceUntouched("scenario delete")
+}
+
+func TestStartScenarioBindsSharedMirrorByExactSourceID(t *testing.T) {
+	sm, orchID := newMirroredScenarioOrchestrator(t)
+	repo := initScenarioGitRepo(t)
+	decoyRepo := initScenarioGitRepo(t)
+
+	const (
+		sourceID = "deadbeef"
+		decoyID  = "c0ffee00"
+	)
+
+	sm.mu.Lock()
+	sm.state.Sessions[sourceID] = &SessionState{
+		ID: sourceID, Name: "subject", Status: StatusStopped,
+		RepoPath: repo, RepoName: filepath.Base(repo), WorktreePath: repo,
+	}
+	// A public --mirror selector accepts names or IDs. Scenario startup must not
+	// feed its authoritative source ID through that ambiguous resolver.
+	sm.state.Sessions[decoyID] = &SessionState{
+		ID: decoyID, Name: sourceID, Status: StatusRunning,
+		RepoPath: decoyRepo, RepoName: filepath.Base(decoyRepo), WorktreePath: decoyRepo,
+	}
+	sm.mu.Unlock()
+
+	scenario, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: orchID, Name: "strath-exact-source",
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "subject", Repo: repo, Shared: true},
+			{Name: "reader", Mirror: "subject"},
+		},
+	}, 24, 80)
+	if err != nil {
+		t.Fatalf("StartScenario: %v", err)
+	}
+
+	reader, ok := sm.Get(scenario.SessionIDs[1])
+	if !ok || reader.MirrorSourceID != sourceID || reader.WorktreePath != repo {
+		t.Fatalf("reader = %+v, want exact source %q at %q", reader, sourceID, repo)
+	}
+
+	if _, err := sm.DeleteScenario("strath-exact-source"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStartScenarioMirrorsStoppedSharedScratchSource(t *testing.T) {
+	sm, orchID := newMirroredScenarioOrchestrator(t)
+	scratch := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(scratch, "canny-note.txt"), []byte("preserved scratch\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw-scratch"] = &SessionState{
+		ID: "braw-scratch", Name: "subject", Status: StatusStopped, WorktreePath: scratch,
+	}
+	sm.mu.Unlock()
+
+	scenario, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: orchID, Name: "strath-scratch-source",
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "subject", Shared: true},
+			{Name: "reader", Mirror: "subject"},
+		},
+	}, 24, 80)
+	if err != nil {
+		t.Fatalf("StartScenario: %v", err)
+	}
+
+	reader, ok := sm.Get(scenario.SessionIDs[1])
+	if !ok || reader.MirrorSourceID != "braw-scratch" || reader.WorktreePath != scratch {
+		t.Fatalf("reader = %+v, want preserved scratch source", reader)
+	}
+
+	if _, err := sm.DeleteScenario("strath-scratch-source"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStartScenarioMirrorsStoppedSharedMirrorWithValidBackingChain(t *testing.T) {
+	sm, orchID := newMirroredScenarioOrchestrator(t)
+	repo := initScenarioGitRepo(t)
+	includeRepo := initScenarioGitRepo(t)
+
+	const (
+		rootID   = "braw-root"
+		sourceID = "canny-mirror"
+	)
+
+	sm.mu.Lock()
+	sm.state.Sessions[rootID] = &SessionState{
+		ID: rootID, Name: "root", Status: StatusStopped,
+		RepoPath: repo, RepoName: filepath.Base(repo), WorktreePath: repo,
+		Includes: []IncludedRepoState{{
+			RepoPath: includeRepo, RepoName: filepath.Base(includeRepo), WorktreePath: includeRepo,
+		}},
+	}
+	sm.state.Sessions[sourceID] = &SessionState{
+		ID: sourceID, Name: "subject", Status: StatusStopped,
+		RepoPath: repo, RepoName: filepath.Base(repo), WorktreePath: repo,
+		Mirror: true, MirrorSourceID: rootID,
+	}
+	sm.mu.Unlock()
+
+	scenario, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: orchID, Name: "strath-valid-chain",
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "subject", Repo: repo, Shared: true},
+			{Name: "reader", Mirror: "subject"},
+		},
+	}, 24, 80)
+	if err != nil {
+		t.Fatalf("StartScenario: %v", err)
+	}
+
+	reader, ok := sm.Get(scenario.SessionIDs[1])
+	if !ok || reader.MirrorSourceID != sourceID || reader.WorktreePath != repo {
+		t.Fatalf("reader = %+v, want stopped shared mirror %q", reader, sourceID)
+	}
+
+	sm.mu.RLock()
+	effectiveIncludes := sm.mirrorSourceIncludesLocked(sm.state.Sessions[reader.ID])
+	sm.mu.RUnlock()
+
+	if len(effectiveIncludes) != 1 || effectiveIncludes[0].WorktreePath != includeRepo {
+		t.Fatalf("effective includes = %+v, want backing source include %q", effectiveIncludes, includeRepo)
+	}
+
+	if _, err := sm.DeleteScenario("strath-valid-chain"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := sm.Get(sourceID); !ok {
+		t.Error("scenario delete removed shared mirror source")
+	}
+
+	if _, ok := sm.Get(rootID); !ok {
+		t.Error("scenario delete removed shared backing source")
+	}
 }
 
 func TestStartScenarioMirrorsScenarioOwnedSource(t *testing.T) {
