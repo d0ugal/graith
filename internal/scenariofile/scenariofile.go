@@ -488,7 +488,7 @@ func ValidateSessionContracts(sessions []protocol.ScenarioSessionInput, maxTitle
 			return fmt.Errorf("session %q: task exceeds todo title limit %d bytes", session.Name, maxTitle)
 		}
 
-		if session.Shared && session.Prompt != "" {
+		if session.Shared && strings.TrimSpace(session.Prompt) != "" {
 			return fmt.Errorf("session %q: prompt is not valid for a shared session because it is already running", session.Name)
 		}
 

@@ -2,8 +2,8 @@
 title: "Design Doc: Separate Scenario Startup Prompts"
 authors: OpenAI Codex
 created: 2026-07-17
-status: Accepted
-reviewers: (pending implementation review)
+status: Implemented
+reviewers: Independent implementation review
 informed: Graith maintainers and scenario users
 issue: https://github.com/d0ugal/graith/issues/1413
 ---

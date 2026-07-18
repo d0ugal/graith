@@ -250,6 +250,20 @@ prompt = "Inspect the croft"
 	}
 }
 
+func TestValidateSessionContractsTreatsWhitespacePromptAsOmitted(t *testing.T) {
+	session := protocol.ScenarioSessionInput{
+		Name: "canny", Shared: true, Prompt: " \n\t", Task: "inspect the croft",
+	}
+
+	if err := ValidateSessionContracts([]protocol.ScenarioSessionInput{session}, config.TodoMaxTitleCeiling); err != nil {
+		t.Fatalf("whitespace-only prompt: %v", err)
+	}
+
+	if got := session.StartupPrompt(); got != session.Task {
+		t.Fatalf("startup prompt = %q, want task %q", got, session.Task)
+	}
+}
+
 func TestParseScenarioResultRejectsUnknownField(t *testing.T) {
 	_, err := Parse([]byte(`
 version = 1
