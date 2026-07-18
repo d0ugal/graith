@@ -146,12 +146,12 @@ Empty or non-positive values fall back to the defaults shown above. These values
 
 ## Token accounting
 
-The daemon periodically re-derives each session's token usage from its agent's on-disk transcript, surfaced by `gr tokens`. A fingerprint cache means an idle fleet does almost no work between ticks. The `[token_accounting]` block tunes the loop's cadence and how much work it does per tick.
+The daemon periodically re-derives each session's token usage from its agent's on-disk transcript, surfaced by `gr ls --wide`, `gr ls --tokens`, and `gr ls --json`. A fingerprint cache means an idle fleet does almost no work between ticks. The `[token_accounting]` block tunes the loop's cadence and how much work it does per tick.
 
 ```toml
 [token_accounting]
 poll_interval = "30s"  # how often per-session token usage is re-derived from transcripts
-startup_delay = "5s"   # first-tick delay after a daemon (re)start so `gr tokens` isn't blank ("0" polls immediately)
+startup_delay = "5s"   # first-tick delay after restart so token columns aren't blank ("0" polls immediately)
 batch_size    = 8      # max sessions (re)parsed per tick (bounds work on a large fleet with big transcripts)
 ```
 
