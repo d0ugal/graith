@@ -19,7 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 21
+const CurrentStateVersion = 22
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -322,6 +322,39 @@ type ScenarioState struct {
 	Lifecycle  config.ScenarioLifecycleConfig `json:"lifecycle,omitempty"`
 	Completion ScenarioCompletionState        `json:"completion,omitempty"`
 	Policy     *ScenarioPolicyState           `json:"policy,omitempty"`
+	Render     *ScenarioRenderState           `json:"render,omitempty"`
+}
+
+// ScenarioRenderState persists the one immutable context used to render an
+// authored scenario definition. ScenarioState.Name/Sessions/Triggers contain
+// the rendered runtime graph; this state explains how those names were derived
+// and is never evaluated again after start.
+type ScenarioRenderState struct {
+	AuthoredName string                         `json:"authored_name"`
+	ScenarioID   string                         `json:"scenario_id"`
+	ShortID      string                         `json:"short_id"`
+	RenderedAt   time.Time                      `json:"rendered_at"`
+	Caller       ScenarioRenderIdentityState    `json:"caller"`
+	Parent       ScenarioRenderIdentityState    `json:"parent"`
+	Initiator    ScenarioRenderIdentityState    `json:"initiator"`
+	Members      []ScenarioRenderMemberState    `json:"members"`
+	References   []ScenarioRenderReferenceState `json:"references,omitempty"`
+}
+
+type ScenarioRenderIdentityState struct {
+	SessionID string `json:"session_id"`
+	Name      string `json:"name"`
+}
+
+type ScenarioRenderMemberState struct {
+	AuthoredName string `json:"authored_name"`
+	RenderedName string `json:"rendered_name"`
+}
+
+type ScenarioRenderReferenceState struct {
+	Path     string `json:"path"`
+	Authored string `json:"authored"`
+	Rendered string `json:"rendered"`
 }
 
 const (
@@ -628,6 +661,7 @@ var migrations = map[int]func(*State) error{
 	18: migrateV18ToV19,
 	19: migrateV19ToV20,
 	20: migrateV20ToV21,
+	21: migrateV21ToV22,
 }
 
 func generateToken() (string, error) {
@@ -858,6 +892,10 @@ func migrateV20ToV21(state *State) error {
 
 	return nil
 }
+
+// migrateV21ToV22 is additive. Existing literal scenarios have no authored
+// render metadata; their persisted runtime names remain authoritative.
+func migrateV21ToV22(_ *State) error { return nil }
 
 // writeFileAtomic writes state to disk crash-safely (temp + fsync + rename +
 // dir fsync). It delegates to the shared atomicfile helper so every state

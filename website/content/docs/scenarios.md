@@ -98,6 +98,67 @@ depends_on = ["backend", "frontend"]
 | `name` | yes | Scenario name (lowercase alphanumeric + hyphens, max 128 chars) |
 | `goal` | no | Overall goal — injected as `GRAITH_SCENARIO_GOAL` env var |
 
+### Instance name templates
+
+Scenario names, member names, and scenario-local member references may use a
+small built-in template vocabulary. This lets one saved file run repeatedly or
+concurrently without an external TOML rewrite:
+
+```toml
+version = 1
+
+[scenario]
+name = "parallel-review-{initiator}-{date}-{short_id}"
+
+[[sessions]]
+name = "{initiator}"
+shared = true
+
+[[sessions]]
+name = "{scenario}-reviewer"
+mirror = "{initiator}"
+```
+
+The daemon allocates the scenario ID and snapshots one UTC render context. It
+renders the scenario name first, then every member name and these member
+references: `mirror`, each `depends_on` entry, completion-trigger `session`, and
+literal or mixed `action.deliver.inbox` targets.
+
+| Token | Start-time value |
+|-------|------------------|
+| `{caller}` | Authenticated session that submitted the start |
+| `{parent}` | Orchestrator session that owns the scenario and its created members |
+| `{initiator}` | Original requesting session; the caller for a direct start |
+| `{date}` | UTC date as `YYYYMMDD` |
+| `{time}` | UTC time as `hhmmss` |
+| `{datetime}` | UTC timestamp as `YYYYMMDDthhmmssz` |
+| `{scenario_id}` | Full stable ID, such as `sc-a1b2c3d4` |
+| `{short_id}` | Eight hexadecimal characters from the stable ID |
+| `{scenario}` | Fully rendered scenario name; available only after rendering `[scenario].name` |
+
+Expansion is one pass: text introduced by a token is not expanded again.
+Unknown tokens and malformed braces are errors. graith does not sanitize,
+truncate, or silently rename rendered values. The final scenario name must
+still be lowercase alphanumeric with hyphens, member names must satisfy the
+normal session-name rules, and both retain their 128-character limits. Use
+`{short_id}` wherever concurrent instances need guaranteed practical
+uniqueness; a remaining scenario or owned-member collision is a clear
+preflight error.
+
+Trigger fire-time variables remain separate. For example,
+`inbox = "{scenario}-{session_name}"` fixes the scenario prefix at start but
+leaves `{session_name}` for the trigger fire. Result `store` templates likewise
+keep the result vocabulary documented below; `{session_name}` receives the
+already-rendered member name.
+
+The rendered scenario and member names are returned by `gr scenario start` and
+are the selectors used by `status`, results, `stop`, `resume`, `delete`, and
+other lifecycle commands. The authored template is not an alias. `list` and
+`status --json` include the immutable identities, timestamp, and
+authored-to-rendered mappings; human `status` prints the authored name and
+caller/parent/initiator context. That metadata and the rendered graph persist
+across daemon restart and are never re-rendered.
+
 ### `[scenario.lifecycle]` section
 
 Lifecycle cleanup is disabled by default. To clean up after final actions:
@@ -198,6 +259,8 @@ referenced member must have a non-empty `task`; unknown names, duplicates,
 self-dependencies, and cycles are rejected before sessions start. The daemon
 resolves names to the members' seeded assigned todo IDs. `gr scenario add`
 accepts repeatable `--depends-on <existing-member>` flags for the same behavior.
+When names are templated, dependency references are rendered from the same
+snapshot before this validation runs.
 
 **Shared sessions:** Set `shared = true` to reference an existing running or
 stopped session instead of creating a new one. A stopped session remains
@@ -296,7 +359,8 @@ these extra restrictions:
 - **Completion context stays inside the scenario.** A completion `command` or
   `session` names a non-shared member with `completion.session`; literal inbox
   delivery resolves against this scenario's members, even if another session
-  elsewhere has the same name.
+  elsewhere has the same name. Instance-name tokens in both fields render at
+  scenario start.
 
 ```toml
 version = 1
@@ -416,6 +480,8 @@ cat tracing.toml | gr scenario start -
 ```
 
 Only the orchestrator session can start scenarios. Running this from a regular session produces an error.
+The success output always shows the rendered scenario name and rendered member
+names, including the unique suffix when the file uses `{short_id}`.
 
 ### `gr scenario status <name>`
 
@@ -511,6 +577,9 @@ that every existing task member still has its original durable seeded todo; the
 add is rejected without changing the scenario if that contract cannot be
 proved. `scenario add` always creates a new scenario-owned session and does not
 accept shared members.
+It operates after the instance namespace has been fixed, so `--name` and every
+`--depends-on` value must be literal rendered names; `scenario add` does not
+evaluate instance-name templates.
 
 ### `gr scenario delete <name>`
 
@@ -542,12 +611,15 @@ Every session in a scenario gets these additional environment variables at creat
 
 ## Manifest
 
-Each session receives a JSON manifest in its inbox describing the full scenario topology. The manifest is also persisted to the shared store at `scenarios/<id>/manifest-<name>.json`.
+Each session receives a version 2 JSON manifest in its inbox describing the
+full rendered scenario topology. The manifest includes the immutable render
+context and authored-to-rendered mappings. It is also persisted to the shared
+store at `scenarios/<id>/manifest-<rendered-name>.json`.
 
 ```json
 {
-  "version": 1,
-  "scenario_id": "sc-abc123",
+  "version": 2,
+  "scenario_id": "sc-abc12345",
   "scenario_name": "tracing-pipeline",
   "goal": "Build end-to-end distributed tracing",
   "you": {
@@ -560,7 +632,7 @@ Each session receives a JSON manifest in its inbox describing the full scenario 
       {
         "name": "implementation-notes",
         "format": "markdown",
-        "destination": "scenarios/sc-abc123/results/backend/implementation.md",
+        "destination": "scenarios/sc-abc12345/results/backend/implementation.md",
         "required": true
       }
     ]
@@ -576,6 +648,18 @@ Each session receives a JSON manifest in its inbox describing the full scenario 
   "orchestrator": {
     "session_id": "orch-001",
     "name": "orchestrator"
+  },
+  "render": {
+    "authored_name": "tracing-pipeline",
+    "scenario_id": "sc-abc12345",
+    "short_id": "abc12345",
+    "rendered_at": "2026-07-18T09:10:11Z",
+    "caller": {"session_id": "orch-001", "name": "orchestrator"},
+    "parent": {"session_id": "orch-001", "name": "orchestrator"},
+    "initiator": {"session_id": "orch-001", "name": "orchestrator"},
+    "members": [
+      {"authored_name": "backend", "rendered_name": "backend"}
+    ]
   }
 }
 ```
@@ -585,6 +669,8 @@ The manifest gives each agent awareness of:
 - **`you`** — its own identity, role, effective startup prompt, tracked task, and declared result destinations
 - **`siblings`** — the other sessions in the scenario, with their roles, repos, and result destinations
 - **`orchestrator`** — the parent session that started the scenario
+- **`render`** — immutable start identities, timestamp, unique token, and
+  authored-to-rendered name/reference mappings
 
 For mirrored members, both `you` and sibling entries also include `mirror` with
 the referenced member name, so the declared read-only relationship survives
@@ -694,8 +780,8 @@ exact destinations from its inbox manifest or JSON status:
 
 ```bash
 gr scenario status research-swarm --json
-gr store get --shared scenarios/sc-abc123/results/research-api/findings.md
-gr store get --shared scenarios/sc-abc123/results/research-data/facts.json
+gr store get --shared scenarios/sc-abc12345/results/research-api/findings.md
+gr store get --shared scenarios/sc-abc12345/results/research-data/facts.json
 ```
 
 Those keys include the stable scenario ID and declared member destinations, so

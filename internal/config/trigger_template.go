@@ -68,6 +68,16 @@ func (v TriggerVars) toMap() map[string]string {
 	}
 }
 
+// IsTriggerTemplateVar reports whether name is a fire-time trigger template
+// variable. Scenario instance rendering uses this to leave trigger-only
+// variables (for example {session_name}) deferred while still rejecting an
+// unknown variable before a scenario is created.
+func IsTriggerTemplateVar(name string) bool {
+	_, ok := (TriggerVars{}).toMap()[name]
+
+	return ok
+}
+
 // ExpandTrigger replaces {token} occurrences in s using the trigger variable
 // set. An unknown token is an error (parity with Expand's discipline).
 func ExpandTrigger(s string, vars TriggerVars) (string, error) {

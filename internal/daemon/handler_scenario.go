@@ -21,6 +21,12 @@ func handleScenarioStart(sm *SessionManager, auth authContext, send func(string,
 	}
 
 	s.CallerSessionID = auth.sessionID
+	// Direct starts are owned by their authenticated caller. A future mediated
+	// request handler may call StartScenario with distinct authoritative parent
+	// and initiator identities, but payload data on this direct path must not
+	// choose either one.
+	s.ParentSessionID = auth.sessionID
+	s.InitiatorSessionID = auth.sessionID
 
 	scenario, err := sm.StartScenario(s, rows, cols)
 	if err != nil {

@@ -2954,6 +2954,161 @@
             "ref": "ScenarioPolicyInfo"
           },
           "optional": true
+        },
+        {
+          "name": "render",
+          "type": {
+            "kind": "object",
+            "ref": "ScenarioRenderInfo"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "ScenarioRenderIdentityInfo",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "ScenarioRenderInfo",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "authored_name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "scenario_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "short_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "rendered_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "caller",
+          "type": {
+            "kind": "object",
+            "ref": "ScenarioRenderIdentityInfo"
+          },
+          "optional": false
+        },
+        {
+          "name": "parent",
+          "type": {
+            "kind": "object",
+            "ref": "ScenarioRenderIdentityInfo"
+          },
+          "optional": false
+        },
+        {
+          "name": "initiator",
+          "type": {
+            "kind": "object",
+            "ref": "ScenarioRenderIdentityInfo"
+          },
+          "optional": false
+        },
+        {
+          "name": "members",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "ScenarioRenderMemberInfo"
+            }
+          },
+          "optional": false
+        },
+        {
+          "name": "references",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "ScenarioRenderReferenceInfo"
+            }
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "ScenarioRenderMemberInfo",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "authored_name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "rendered_name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "ScenarioRenderReferenceInfo",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "path",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "authored",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "rendered",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
         }
       ]
     },
@@ -3386,6 +3541,20 @@
             "kind": "string"
           },
           "optional": false
+        },
+        {
+          "name": "parent_session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "initiator_session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
         },
         {
           "name": "name",

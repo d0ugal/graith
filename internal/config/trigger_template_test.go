@@ -48,3 +48,13 @@ func TestExpandTrigger_UnknownVar(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+func TestIsTriggerTemplateVar(t *testing.T) {
+	if !IsTriggerTemplateVar("session_name") {
+		t.Fatal("session_name should be a trigger template variable")
+	}
+
+	if IsTriggerTemplateVar("dreich") {
+		t.Fatal("dreich should not be a trigger template variable")
+	}
+}

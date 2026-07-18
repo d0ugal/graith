@@ -146,16 +146,21 @@ func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, erro
 		}
 	}
 
-	if _, err := scenariofile.ValidateMirrorMembers(mirrorMembers); err != nil {
-		return nil, err
+	templatedMemberGraph := scenariofile.HasTemplatedMemberGraph(sessions)
+	if !templatedMemberGraph {
+		if _, err := scenariofile.ValidateMirrorMembers(mirrorMembers); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := scenariofile.ValidateSessionContracts(sessions, config.TodoMaxTitleCeiling); err != nil {
 		return nil, err
 	}
 
-	if err := scenariofile.ValidateSessionDependencies(sessions); err != nil {
-		return nil, err
+	if !templatedMemberGraph {
+		if err := scenariofile.ValidateSessionDependencies(sessions); err != nil {
+			return nil, err
+		}
 	}
 
 	return sessions, nil
@@ -459,6 +464,12 @@ var scenarioStatusCmd = &cobra.Command{
 		sc := statusResp.Scenario
 		out.Printf("Scenario: %s (%s) — %s\n", sc.Name, sc.ID, sc.Status)
 		out.Printf("Goal: %s\n", sc.Goal)
+
+		if sc.Render != nil {
+			out.Printf("Authored name: %s\n", sc.Render.AuthoredName)
+			out.Printf("Render context: caller=%s parent=%s initiator=%s at %s\n",
+				sc.Render.Caller.Name, sc.Render.Parent.Name, sc.Render.Initiator.Name, sc.Render.RenderedAt)
+		}
 
 		if sc.Policy != nil {
 			out.Printf("Policy: %s\n", formatScenarioPolicySummary(sc.Policy))

@@ -429,7 +429,7 @@ func TestActionScenario_NoOrchestrator(t *testing.T) {
 	trig := config.TriggerConfig{Name: "sc", Schedule: &config.ScheduleConfig{Cron: "@daily"}, Action: config.ActionConfig{Type: config.ActionScenario, Scenario: "x"}}
 
 	sm := newTriggerTestSM(t, trig)
-	if _, err := sm.actionScenario(t.Context(), &trig); err == nil {
+	if _, err := sm.actionScenario(t.Context(), &trig, fireContext{}); err == nil {
 		t.Error("expected error when no orchestrator")
 	}
 }
@@ -440,7 +440,7 @@ func TestActionScenario_MissingFile(t *testing.T) {
 	sm.state.Sessions["o"] = &SessionState{ID: "o", SystemKind: SystemKindOrchestrator}
 
 	sm.paths.ConfigFile = filepath.Join(t.TempDir(), "config.toml")
-	if _, err := sm.actionScenario(t.Context(), &trig); err == nil {
+	if _, err := sm.actionScenario(t.Context(), &trig, fireContext{}); err == nil {
 		t.Error("expected error for missing scenario file")
 	}
 }
@@ -466,13 +466,13 @@ func TestActionScenario_ParsesRuntimePolicy(t *testing.T) {
 
 	document := fmt.Sprintf(`version = 1
 [scenario]
-name = "trigger-croft"
+name = "trigger-{initiator}-{short_id}"
 [scenario.policy]
 completion = "all"
 on_exhausted = "fail"
 
 [[sessions]]
-name = "braw-live"
+name = "{initiator}"
 repo = %q
 task = "review the croft"
 shared = true
@@ -482,16 +482,19 @@ shared = true
 	}
 
 	trigger := config.TriggerConfig{Action: config.ActionConfig{Type: config.ActionScenario, Scenario: "croft"}}
-	if _, err := sm.actionScenario(t.Context(), &trigger); err != nil {
+	if _, err := sm.actionScenario(t.Context(), &trigger, fireContext{sessionID: "braw-live"}); err != nil {
 		t.Fatal(err)
 	}
 
-	status, err := sm.ScenarioStatus("trigger-croft")
-	if err != nil {
-		t.Fatal(err)
+	scenarios := sm.ListScenarios()
+	if len(scenarios) != 1 || !strings.HasPrefix(scenarios[0].Name, "trigger-braw-live-") {
+		t.Fatalf("trigger-rendered scenarios = %+v", scenarios)
 	}
 
-	if status.Policy == nil || status.Policy.Completion != "all" || status.Policy.OnExhausted != "fail" {
+	status := scenarios[0]
+
+	if status.Render == nil || status.Render.Initiator.SessionID != "braw-live" ||
+		status.Policy == nil || status.Policy.Completion != "all" || status.Policy.OnExhausted != "fail" {
 		t.Fatalf("trigger-started policy = %+v", status.Policy)
 	}
 }

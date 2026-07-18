@@ -410,7 +410,7 @@ func (sm *SessionManager) fireAction(ctx context.Context, t *config.TriggerConfi
 	case config.ActionSession:
 		return sm.actionSession(ctx, t, fc)
 	case config.ActionScenario:
-		return sm.actionScenario(ctx, t)
+		return sm.actionScenario(ctx, t, fc)
 	case config.ActionTracker:
 		return sm.actionTracker(ctx, t, fc)
 	default:
