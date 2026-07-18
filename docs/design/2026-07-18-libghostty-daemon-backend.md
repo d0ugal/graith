@@ -351,6 +351,13 @@ arm64 cross-link on an amd64 Linux host as execution. Local validation for
 and candidate packaging. The Linux source builds and any non-runner Darwin
 architecture remain CI evidence.
 
+The archive verifier accounts for a measured executable-format distinction
+without weakening the closure proof: Mach-O requires defined text symbols with
+Darwin's leading underscore, while ELF uses its single-underscore C++ mangling
+and may expose the exact `__ubsan_handle_*` compiler-runtime family as defined
+weak symbols. Ghostty, simdutf, and Highway remain defined text requirements in
+both formats; undefined and unrelated weak symbols are rejected.
+
 ### Pinning, licensing, security, and SBOM
 
 Graith pins `go.mitchellh.com/libghostty` to pseudo-version

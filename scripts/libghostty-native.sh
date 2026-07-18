@@ -398,6 +398,7 @@ verify_static_archive() {
     local library="${1:-}"
     [[ -f "$library" ]] || die "usage: $0 verify-static-archive <library>"
     require_command ar
+    require_command file
     require_command nm
     require_command strings
 
@@ -431,14 +432,42 @@ verify_static_archive() {
                 "$expected_members" "$actual_members" >&2
             die "static archive contents do not match the audited dependency closure"
         }
+        local object_member="" object_format
+        while IFS= read -r object_member; do
+            [[ "${object_member##*/}" == "__.SYMDEF"* ]] || break
+        done < <(ar -t "$archive")
+        [[ -n "$object_member" ]] || die "static archive does not contain an object"
+        object_format="$(ar -p "$archive" "$object_member" | file -b -)"
+
+        local ghostty_pattern simdutf_pattern highway_pattern ubsan_pattern
+        case "$object_format" in
+            *Mach-O*)
+                ghostty_pattern='[[:space:]][Tt][[:space:]]_ghostty_terminal_new$'
+                simdutf_pattern='[[:space:]][Tt][[:space:]]__ZN7simdutf'
+                highway_pattern='[[:space:]][Tt][[:space:]]__ZN3hwy'
+                ubsan_pattern='[[:space:]][Tt][[:space:]]___ubsan_handle_[[:alnum:]_]+$'
+                ;;
+            *ELF*)
+                ghostty_pattern='[[:space:]][Tt][[:space:]]ghostty_terminal_new$'
+                simdutf_pattern='[[:space:]][Tt][[:space:]]_ZN7simdutf'
+                highway_pattern='[[:space:]][Tt][[:space:]]_ZN3hwy'
+                # Zig emits defined weak UBSan handlers in ELF compiler_rt;
+                # lowercase weak/undefined symbols are intentionally rejected.
+                ubsan_pattern='[[:space:]][TtW][[:space:]]__ubsan_handle_[[:alnum:]_]+$'
+                ;;
+            *)
+                die "unsupported static archive object format: $object_format"
+                ;;
+        esac
+
         symbols="$(nm -g "$archive" 2>/dev/null)"
-        grep -Eq '[[:space:]][Tt][[:space:]]_?ghostty_terminal_new$' <<<"$symbols" ||
+        grep -Eq "$ghostty_pattern" <<<"$symbols" ||
             die "static archive does not define ghostty_terminal_new"
-        grep -Eq '[[:space:]][TtWw][[:space:]]_+ZN7simdutf' <<<"$symbols" ||
+        grep -Eq "$simdutf_pattern" <<<"$symbols" ||
             die "static archive does not contain simdutf"
-        grep -Eq '[[:space:]][TtWw][[:space:]]_+ZN3hwy' <<<"$symbols" ||
+        grep -Eq "$highway_pattern" <<<"$symbols" ||
             die "static archive does not contain Highway"
-        grep -Eq '[[:space:]][Tt][[:space:]]_?__ubsan_handle_' <<<"$symbols" ||
+        grep -Eq "$ubsan_pattern" <<<"$symbols" ||
             die "static archive does not contain the audited Zig UBSan runtime"
         grep -Fq "zig $REQUIRED_ZIG" < <(strings "$archive") ||
             die "static archive does not identify the required Zig toolchain"
