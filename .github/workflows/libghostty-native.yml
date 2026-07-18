@@ -33,11 +33,15 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Check the native script and dependency unit
+        env:
+          GRAITH_LIBGHOSTTY_REQUIRE_GO_VCS: "1"
         run: |
           bash -n scripts/libghostty-native.sh
           shellcheck scripts/libghostty-native.sh
           scripts/libghostty-native.sh verify-provenance
           scripts/libghostty-native.sh verify-selectors
+          scripts/libghostty-native.sh test-build-identity \
+            "${RUNNER_TEMP}/candidate-build-identity"
           git diff --check
       - name: Install the checksum-pinned SPDX validator
         id: spdx
@@ -108,6 +112,7 @@ jobs:
       - name: Verify exact source, headers, and Apple static archive
         env:
           GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
+          GRAITH_LIBGHOSTTY_REQUIRE_GO_VCS: "1"
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/libghostty-native
         run: scripts/libghostty-native.sh prepare-apple
       - name: Run upstream and Graith tests on the runner architecture
@@ -138,11 +143,16 @@ jobs:
           go test -c -tags=libghostty -o "${RUNNER_TEMP}/pty-${GOARCH}.test" ./internal/pty
 
           inspection_binary="${RUNNER_TEMP}/gr-darwin-${GOARCH}-inspection"
-          go build -trimpath -tags=libghostty -o "$inspection_binary" ./cmd/graith
+          identity_ldflags="$(scripts/libghostty-native.sh candidate-ldflags \
+            "$GOOS" "$GOARCH" false)"
+          go build -buildvcs=true -trimpath -ldflags="$identity_ldflags" \
+            -tags=libghostty -o "$inspection_binary" ./cmd/graith
           scripts/libghostty-native.sh inspect-linkage "$inspection_binary" true
 
           packaged_binary="${RUNNER_TEMP}/gr-darwin-${GOARCH}"
-          go build -buildvcs=true -trimpath -ldflags='-s -w' -tags=libghostty \
+          package_ldflags="$(scripts/libghostty-native.sh candidate-ldflags \
+            "$GOOS" "$GOARCH" true)"
+          go build -buildvcs=true -trimpath -ldflags="$package_ldflags" -tags=libghostty \
             -o "$packaged_binary" ./cmd/graith
           scripts/libghostty-native.sh inspect-linkage "$packaged_binary" false
           scripts/libghostty-native.sh verify-binary-privacy "$packaged_binary"
@@ -189,6 +199,7 @@ jobs:
       - name: Build and inspect the exact Ghostty source pin
         env:
           GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
+          GRAITH_LIBGHOSTTY_REQUIRE_GO_VCS: "1"
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}
           LIBRARY: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}.a
           TARGET: ${{ matrix.target }}
@@ -245,11 +256,16 @@ jobs:
           go test -c -tags=libghostty -o "${RUNNER_TEMP}/pty-${GOARCH}.test" ./internal/pty
 
           inspection_binary="${RUNNER_TEMP}/gr-linux-${GOARCH}-inspection"
-          go build -trimpath -tags=libghostty -o "$inspection_binary" ./cmd/graith
+          identity_ldflags="$(scripts/libghostty-native.sh candidate-ldflags \
+            "$GOOS" "$GOARCH" false)"
+          go build -buildvcs=true -trimpath -ldflags="$identity_ldflags" \
+            -tags=libghostty -o "$inspection_binary" ./cmd/graith
           scripts/libghostty-native.sh inspect-linkage "$inspection_binary" true
 
           packaged_binary="${RUNNER_TEMP}/gr-linux-${GOARCH}"
-          go build -buildvcs=true -trimpath -ldflags='-s -w' -tags=libghostty \
+          package_ldflags="$(scripts/libghostty-native.sh candidate-ldflags \
+            "$GOOS" "$GOARCH" true)"
+          go build -buildvcs=true -trimpath -ldflags="$package_ldflags" -tags=libghostty \
             -o "$packaged_binary" ./cmd/graith
           scripts/libghostty-native.sh inspect-linkage "$packaged_binary" false
           scripts/libghostty-native.sh verify-binary-privacy "$packaged_binary"

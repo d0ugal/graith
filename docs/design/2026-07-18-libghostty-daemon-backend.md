@@ -373,12 +373,23 @@ The committed `libghostty-native.spdx.json` is the six-package dependency
 inventory: go-libghostty, Ghostty, uucode 0.2.0, Highway 1.2.0 at its exact
 upstream commit, the vendored simdutf 9.0.0 amalgamation, and the bundled Zig
 0.15.2 compiler/UBSan runtimes. Packaging never copies that template unchanged.
-It reads the stripped binary's Go build metadata, requires an unmodified full
-Git revision and exact GOOS/GOARCH, and materializes a seventh candidate package
-whose name, version, purl, SHA-256, source information, relationships, and
-deterministic namespace bind the document to those exact bytes and target.
-Positive, changed-binary, and wrong-target checks run for every candidate, and
-the official SPDX validator accepts the materialized document before upload.
+Every candidate uses the exact custom Go build ID
+`graith-native/<revision>/<goos>/<goarch>` and injects that same full revision
+into `internal/version.CommitSHA`. Packaging requires the build-ID revision to
+equal a clean Git HEAD and the build-ID target to equal the GOOS/GOARCH reported
+by `go version -m`. Normal CI clones additionally require Go's `vcs=git`,
+matching `vcs.revision`, and `vcs.modified=false` settings. Go 1.26 intentionally
+omits those VCS settings in linked worktrees whose common Git directory is
+outside the module, so a clean linked worktree may use the custom build ID,
+injected runtime revision, current HEAD, and Go target as its structured
+fallback; an ordinary checkout may not.
+
+The packager then materializes a seventh candidate package whose name, version,
+purl, SHA-256, source information, relationships, and deterministic namespace
+bind the document to those exact bytes and target. Positive, changed-binary,
+wrong-target, embedded-revision, and mismatched-build-ID checks cover both the
+normal-clone and linked-worktree paths. The official SPDX validator accepts the
+materialized document before upload.
 
 Ghostty's simdutf package manifest is stale at 5.2.8, so the dependency
 inventory is bound instead to the exact vendored file hashes, the compiled

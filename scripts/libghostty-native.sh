@@ -698,14 +698,70 @@ build_setting() {
     local build_info="$1"
     local key="$2"
     local value
-    value="$(awk -v prefix="$key=" \
-        '$1 == "build" && index($2, prefix) == 1 { print substr($2, length(prefix) + 1) }' \
-        <<<"$build_info")"
-    if [[ -z "$value" || "$value" == *$'\n'* ]]; then
-        die "candidate build metadata must contain exactly one $key setting"
+    if ! value="$(optional_build_setting "$build_info" "$key")"; then
+        return 1
+    fi
+    if [[ -z "$value" ]]; then
+        die "candidate build metadata does not contain $key"
         return 1
     fi
     printf '%s\n' "$value"
+}
+
+optional_build_setting() {
+    local build_info="$1"
+    local key="$2"
+    local value
+    value="$(awk -v prefix="$key=" \
+        '$1 == "build" && index($2, prefix) == 1 { print substr($2, length(prefix) + 1) }' \
+        <<<"$build_info")"
+    if [[ "$value" == *$'\n'* ]]; then
+        die "candidate build metadata contains multiple $key settings"
+        return 1
+    fi
+    printf '%s\n' "$value"
+}
+
+candidate_git_revision() {
+    local revision status
+    if ! revision="$(git -C "$REPO_DIR" rev-parse --verify HEAD)" ||
+        [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
+        die "candidate source is not at a full Git revision"
+        return 1
+    fi
+    status="$(git -C "$REPO_DIR" status --porcelain=v1 --untracked-files=all)"
+    if [[ -n "$status" ]]; then
+        die "candidate source Git worktree is modified"
+        return 1
+    fi
+    printf '%s\n' "$revision"
+}
+
+candidate_ldflags() {
+    local goos="${1:-}"
+    local goarch="${2:-}"
+    local strip="${3:-true}"
+    case "$goos/$goarch" in
+        darwin/amd64|darwin/arm64|linux/amd64|linux/arm64) ;;
+        *)
+            die "unsupported candidate target: $goos/$goarch"
+            return 1
+            ;;
+    esac
+    if [[ "$strip" != "true" && "$strip" != "false" ]]; then
+        die "candidate ldflags strip mode must be true or false"
+        return 1
+    fi
+
+    local revision
+    if ! revision="$(candidate_git_revision)"; then
+        return 1
+    fi
+    local flags="-buildid=graith-native/$revision/$goos/$goarch -X github.com/d0ugal/graith/internal/version.CommitSHA=$revision"
+    if [[ "$strip" == "true" ]]; then
+        flags="-s -w $flags"
+    fi
+    printf '%s\n' "$flags"
 }
 
 candidate_identity() {
@@ -720,37 +776,136 @@ candidate_identity() {
             ;;
     esac
 
+    local build_id
+    if ! build_id="$(go tool buildid "$binary")"; then
+        die "candidate does not contain a readable Go build ID"
+        return 1
+    fi
+    local build_id_pattern='^graith-native/([0-9a-f]{40})/(darwin|linux)/(amd64|arm64)$'
+    if [[ ! "$build_id" =~ $build_id_pattern ]]; then
+        die "candidate does not contain the required native build ID"
+        return 1
+    fi
+    local revision="${BASH_REMATCH[1]}"
+    local build_id_goos="${BASH_REMATCH[2]}"
+    local build_id_goarch="${BASH_REMATCH[3]}"
+    if [[ "$build_id_goos" != "$expected_goos" || "$build_id_goarch" != "$expected_goarch" ]]; then
+        die "candidate build ID target is $build_id_goos/$build_id_goarch; want $expected_goos/$expected_goarch"
+        return 1
+    fi
+
+    local source_revision
+    if ! source_revision="$(candidate_git_revision)"; then
+        return 1
+    fi
+    if [[ "$revision" != "$source_revision" ]]; then
+        die "candidate build ID revision does not match the clean Git HEAD"
+        return 1
+    fi
+
     local build_info
     if ! build_info="$(go version -m "$binary")"; then
         die "candidate does not contain readable Go build metadata"
         return 1
     fi
 
-    local vcs revision modified actual_goos actual_goarch
-    if ! vcs="$(build_setting "$build_info" vcs)" ||
-        ! revision="$(build_setting "$build_info" vcs.revision)" ||
-        ! modified="$(build_setting "$build_info" vcs.modified)" ||
-        ! actual_goos="$(build_setting "$build_info" GOOS)" ||
+    local actual_goos actual_goarch
+    if ! actual_goos="$(build_setting "$build_info" GOOS)" ||
         ! actual_goarch="$(build_setting "$build_info" GOARCH)"; then
-        return 1
-    fi
-    if [[ "$vcs" != "git" ]]; then
-        die "candidate vcs setting is $vcs; want git"
-        return 1
-    fi
-    if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
-        die "candidate does not contain a full Git revision"
-        return 1
-    fi
-    if [[ "$modified" != "false" ]]; then
-        die "candidate was built from a modified Git worktree"
         return 1
     fi
     if [[ "$actual_goos" != "$expected_goos" || "$actual_goarch" != "$expected_goarch" ]]; then
         die "candidate target is $actual_goos/$actual_goarch; want $expected_goos/$expected_goarch"
         return 1
     fi
+
+    local vcs vcs_revision modified
+    if ! vcs="$(optional_build_setting "$build_info" vcs)" ||
+        ! vcs_revision="$(optional_build_setting "$build_info" vcs.revision)" ||
+        ! modified="$(optional_build_setting "$build_info" vcs.modified)"; then
+        return 1
+    fi
+    local vcs_fields=0
+    [[ -n "$vcs" ]] && ((vcs_fields += 1))
+    [[ -n "$vcs_revision" ]] && ((vcs_fields += 1))
+    [[ -n "$modified" ]] && ((vcs_fields += 1))
+    if ((vcs_fields != 0 && vcs_fields != 3)); then
+        die "candidate contains incomplete Go VCS build metadata"
+        return 1
+    fi
+    if ((vcs_fields == 3)); then
+        if [[ "$vcs" != "git" || "$vcs_revision" != "$revision" || "$modified" != "false" ]]; then
+            die "candidate Go VCS metadata does not match its clean Git build ID"
+            return 1
+        fi
+    elif [[ "${GRAITH_LIBGHOSTTY_REQUIRE_GO_VCS:-auto}" == "1" ]]; then
+        die "candidate is missing required Go VCS build metadata"
+        return 1
+    elif [[ "${GRAITH_LIBGHOSTTY_REQUIRE_GO_VCS:-auto}" != "auto" ]]; then
+        die "GRAITH_LIBGHOSTTY_REQUIRE_GO_VCS must be 1 or auto"
+        return 1
+    elif [[ ! -f "$REPO_DIR/.git" ]]; then
+        die "missing Go VCS metadata is allowed only in a linked Git worktree"
+        return 1
+    fi
     printf '%s\t%s\t%s\n' "$revision" "$actual_goos" "$actual_goarch"
+}
+
+test_candidate_build_identity() {
+    local destination="${1:-}"
+    [[ -n "$destination" ]] || {
+        die "usage: $0 test-build-identity <empty-directory>"
+        return 1
+    }
+    ensure_empty_directory "$destination"
+
+    local goos goarch
+    case "$(uname -s)-$(uname -m)" in
+        Darwin-arm64) goos="darwin"; goarch="arm64" ;;
+        Darwin-x86_64) goos="darwin"; goarch="amd64" ;;
+        Linux-x86_64) goos="linux"; goarch="amd64" ;;
+        Linux-aarch64) goos="linux"; goarch="arm64" ;;
+        *)
+            die "unsupported build-identity test host: $(uname -s)-$(uname -m)"
+            return 1
+            ;;
+    esac
+
+    local revision flags binary
+    revision="$(candidate_git_revision)"
+    flags="$(candidate_ldflags "$goos" "$goarch" true)"
+    binary="$destination/gr"
+    (
+        cd "$REPO_DIR"
+        CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+            go build -buildvcs=true -trimpath -ldflags="$flags" \
+            -o "$binary" ./cmd/graith
+    )
+    candidate_identity "$binary" "$goos" "$goarch" >/dev/null
+    local embedded_revision
+    embedded_revision="$("$binary" --json version | jq -r '.commit')"
+    if [[ "$embedded_revision" != "$revision" ]]; then
+        die "candidate CommitSHA does not match its build ID revision"
+        return 1
+    fi
+
+    local wrong_goarch="arm64"
+    if [[ "$goarch" == "arm64" ]]; then
+        wrong_goarch="amd64"
+    fi
+    local wrong_flags="-s -w -buildid=graith-native/$revision/$goos/$wrong_goarch -X github.com/d0ugal/graith/internal/version.CommitSHA=$revision"
+    local wrong_binary="$destination/gr-wrong-build-id"
+    (
+        cd "$REPO_DIR"
+        CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+            go build -buildvcs=true -trimpath -ldflags="$wrong_flags" \
+            -o "$wrong_binary" ./cmd/graith
+    )
+    if candidate_identity "$wrong_binary" "$goos" "$goarch" >/dev/null 2>&1; then
+        die "candidate identity accepted a mismatched custom build ID"
+        return 1
+    fi
+    printf 'candidate build identity checks passed for %s/%s\n' "$goos" "$goarch"
 }
 
 materialize_candidate_spdx() {
@@ -1063,6 +1218,8 @@ usage: $0 test|race|fuzz|bench|memory|all
        $0 inspect-linkage <binary> [true|false]
        $0 verify-default-binary <binary>
        $0 verify-binary-privacy <binary>
+       $0 candidate-ldflags <goos> <goarch> <true|false>
+       $0 test-build-identity <empty-directory>
        $0 materialize-spdx <binary> <goos> <goarch> <output>
        $0 verify-candidate-binding <binary> <goos> <goarch> <spdx>
        $0 verify-selectors
@@ -1124,6 +1281,12 @@ case "${1:-}" in
         ;;
     verify-binary-privacy)
         verify_binary_privacy "${2:-}"
+        ;;
+    candidate-ldflags)
+        candidate_ldflags "${2:-}" "${3:-}" "${4:-true}"
+        ;;
+    test-build-identity)
+        test_candidate_build_identity "${2:-}"
         ;;
     materialize-spdx)
         materialize_candidate_spdx "${2:-}" "${3:-}" "${4:-}" "${5:-}"
