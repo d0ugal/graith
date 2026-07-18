@@ -3,6 +3,7 @@
 # All generated source, archives, caches, and binaries stay below a temporary
 # work directory. Pin rotation is documented in the libghostty design record.
 set -euo pipefail
+export LC_ALL=C
 
 readonly GHOSTTY_SHA="91f66da24527fa02d92b5fd0b41cd020f553a64c"
 readonly GHOSTTY_VERSION="1.3.2-dev"
@@ -54,6 +55,12 @@ readonly SPDX_TOOLS_VERSION="2.0.7"
 readonly SPDX_TOOLS_URL="https://github.com/spdx/tools-java/releases/download/v2.0.7/tools-java-2.0.7.zip"
 readonly SPDX_TOOLS_SHA256="2dc63c3399c5178058b1be8a3de6f13b9f24981cd86c4292ef98f4a7e90de36d"
 readonly SPDX_NAMESPACE="https://github.com/d0ugal/graith/sbom/libghostty-native/91f66da24527fa02d92b5fd0b41cd020f553a64c/e9e1010f80b1ced0b7efcdb300f4838513c0816e"
+
+# Graith supports the latest stable macOS release and the immediately previous
+# major, currently macOS 26 and 15. The archive's macOS 13 objects are compatible
+# inputs, but native candidates follow product policy and declare 15.0.
+readonly DARWIN_ARCHIVE_DEPLOYMENT_TARGET="13.0"
+readonly DARWIN_CANDIDATE_DEPLOYMENT_TARGET="15.0"
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 readonly REPO_DIR
@@ -171,15 +178,23 @@ EOF
     printf '%s\n' "$directory"
 }
 
+new_source_materialization() {
+    local work_directory="${1:-$NATIVE_WORK}"
+    [[ -d "$work_directory" && "$work_directory" != "/" ]] || {
+        die "source materialization requires a safe work directory"
+        return 1
+    }
+    mktemp -d "$work_directory/ghostty-source.XXXXXX"
+}
+
 fetch_source() {
-    local source="$NATIVE_WORK/ghostty"
-    if [[ ! -d "$source/.git" ]]; then
-        if [[ -e "$source" && -n "$(find "$source" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
-            die "$source exists but is not a Git checkout"
-        fi
-        git init -q "$source"
-        git -C "$source" remote add origin "$GHOSTTY_REPO"
-    fi
+    # Each operation gets a fresh script-owned materialization. Reusing a
+    # checkout would either admit ignored build outputs or require deleting
+    # arbitrary content from a caller-selected work directory.
+    local source
+    source="$(new_source_materialization)"
+    git init -q "$source"
+    git -C "$source" remote add origin "$GHOSTTY_REPO"
 
     # Inspect the configured URL rather than Git's transport-rewritten value;
     # developer SSH insteadOf rules must not change the recorded provenance.
@@ -191,10 +206,70 @@ fetch_source() {
     if [[ "$(git -C "$source" rev-parse HEAD)" != "$GHOSTTY_SHA" ]]; then
         die "Ghostty checkout did not resolve to the required SHA"
     fi
-    if ! git -C "$source" diff --quiet || ! git -C "$source" diff --cached --quiet; then
-        die "Ghostty checkout contains tracked modifications"
-    fi
+    verify_clean_checkout "$source" "Ghostty checkout"
     printf '%s\n' "$source"
+}
+
+verify_clean_checkout() {
+    local repository="${1:-}"
+    local label="${2:-Git checkout}"
+    [[ -d "$repository" ]] || die "checkout does not exist: $repository"
+
+    local status
+    status="$(git -C "$repository" status --porcelain=v1 \
+        --untracked-files=all --ignored=matching)"
+    [[ -z "$status" ]] ||
+        die "$label contains tracked, untracked, or ignored content"
+}
+
+test_source_cleanliness() {
+    local checkout="$NATIVE_WORK/source-cleanliness-test"
+    ensure_empty_directory "$checkout"
+    git init -q "$checkout"
+    git -C "$checkout" -c user.name=Graith -c user.email=graith@example.invalid \
+        commit -q --allow-empty -m braw
+    verify_clean_checkout "$checkout" "cleanliness fixture"
+
+    printf 'dreich untracked content\n' >"$checkout/dreich"
+    if verify_clean_checkout "$checkout" "cleanliness fixture" >/dev/null 2>&1; then
+        die "source cleanliness check accepted untracked content"
+        return 1
+    fi
+    printf 'dreich\n' >"$checkout/.git/info/exclude"
+    if verify_clean_checkout "$checkout" "cleanliness fixture" >/dev/null 2>&1; then
+        die "source cleanliness check accepted ignored content"
+        return 1
+    fi
+    [[ "$(<"$checkout/dreich")" == "dreich untracked content" ]] || {
+        die "source cleanliness check changed rejected ignored content"
+        return 1
+    }
+
+    local materialization_root="$NATIVE_WORK/source-materialization-test"
+    ensure_empty_directory "$materialization_root"
+    local unowned="$materialization_root/ghostty"
+    mkdir -p "$unowned"
+    git init -q "$unowned"
+    git -C "$unowned" -c user.name=Graith -c user.email=graith@example.invalid \
+        commit -q --allow-empty -m bothy
+    printf 'result*\n' >"$unowned/.git/info/exclude"
+    printf 'thrawn developer content\n' >"$unowned/result-local"
+    git -C "$unowned" status --porcelain=v1 --ignored=matching | \
+        grep -Fqx '!! result-local' || {
+        die "unowned materialization fixture is not ignored"
+        return 1
+    }
+    local fresh
+    fresh="$(new_source_materialization "$materialization_root")"
+    [[ "$fresh" != "$unowned" && -z "$(find "$fresh" -mindepth 1 -print -quit)" ]] || {
+        die "source materialization reused an unowned checkout"
+        return 1
+    }
+    [[ "$(<"$unowned/result-local")" == "thrawn developer content" ]] || {
+        die "source materialization changed an unowned checkout"
+        return 1
+    }
+    printf 'source cleanliness checks passed\n'
 }
 
 apple_library() {
@@ -397,6 +472,43 @@ verify_provenance() {
         "zig-$REQUIRED_ZIG/LICENSE" "Zig license"
 }
 
+verify_macho_archive_deployment_target() {
+    local archive="$1"
+    local expected_members="$2"
+    require_command otool
+
+    local load_commands build_version_count minos minos_count
+    if ! load_commands="$(otool -l "$archive")"; then
+        die "cannot inspect Mach-O archive deployment targets"
+        return 1
+    fi
+    build_version_count="$(awk '
+        $1 == "cmd" && $2 == "LC_BUILD_VERSION" { count++ }
+        END { print count + 0 }
+    ' <<<"$load_commands")"
+    minos="$(awk '$1 == "minos" { print $2 }' <<<"$load_commands")"
+    minos_count="$(awk 'NF { count++ } END { print count + 0 }' <<<"$minos")"
+
+    [[ "$build_version_count" == "$expected_members" &&
+        "$minos_count" == "$expected_members" ]] || {
+        die "each Mach-O archive member must contain one LC_BUILD_VERSION minimum"
+        return 1
+    }
+    if awk -v expected="$DARWIN_ARCHIVE_DEPLOYMENT_TARGET" '
+        NF && $0 != expected { exit 1 }
+    ' <<<"$minos"; then
+        printf 'Mach-O archive members target macOS %s (compatible with candidate floor %s)\n' \
+            "$DARWIN_ARCHIVE_DEPLOYMENT_TARGET" "$DARWIN_CANDIDATE_DEPLOYMENT_TARGET"
+    else
+        die "Mach-O archive members do not match the audited deployment target"
+        return 1
+    fi
+    if grep -Eq 'LC_VERSION_MIN_[A-Z0-9_]+' <<<"$load_commands"; then
+        die "Mach-O archive contains an unaccounted legacy deployment-target command"
+        return 1
+    fi
+}
+
 verify_static_archive() {
     local library="${1:-}"
     [[ -f "$library" ]] || die "usage: $0 verify-static-archive <library>"
@@ -424,7 +536,7 @@ verify_static_archive() {
 
     local archive
     for archive in "${archives[@]}"; do
-        local actual_members member symbols
+        local actual_members member symbols member_count
         actual_members="$({
             while IFS= read -r member; do
                 printf '%s\n' "${member##*/}"
@@ -435,6 +547,8 @@ verify_static_archive() {
                 "$expected_members" "$actual_members" >&2
             die "static archive contents do not match the audited dependency closure"
         }
+        member_count="$(awk 'NF { count++ } END { print count + 0 }' \
+            <<<"$actual_members")"
         local object_member="" object_format
         while IFS= read -r object_member; do
             [[ "${object_member##*/}" == "__.SYMDEF"* ]] || break
@@ -445,6 +559,10 @@ verify_static_archive() {
         local ghostty_pattern simdutf_pattern highway_pattern ubsan_pattern
         case "$object_format" in
             *Mach-O*)
+                if ! verify_macho_archive_deployment_target \
+                    "$archive" "$member_count"; then
+                    return 1
+                fi
                 ghostty_pattern='[[:space:]][Tt][[:space:]]_ghostty_terminal_new$'
                 simdutf_pattern='[[:space:]][Tt][[:space:]]__ZN7simdutf'
                 highway_pattern='[[:space:]][Tt][[:space:]]__ZN3hwy'
@@ -623,49 +741,586 @@ run_go() {
     esac
 }
 
+parse_macho_dependencies() {
+    local binary="$1"
+    local libraries="$2"
+    local line dependency
+    local saw_header=0
+    local dependency_count=0
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if ((saw_header == 0)); then
+            [[ "$line" == "$binary:" ]] || {
+                die "otool -L output has an unexpected candidate header"
+                return 1
+            }
+            saw_header=1
+            continue
+        fi
+        if [[ ! "$line" =~ ^[[:space:]]+(.+)[[:space:]]+\(compatibility[[:space:]]version[[:space:]][0-9]+(\.[0-9]+){1,2},[[:space:]]current[[:space:]]version[[:space:]][0-9]+(\.[0-9]+){1,2}\)$ ]]; then
+            die "otool -L output contains a malformed dependency record"
+            return 1
+        fi
+        dependency="${BASH_REMATCH[1]}"
+        [[ -n "$dependency" ]] || {
+            die "otool -L output contains an empty dependency name"
+            return 1
+        }
+        printf '%s\n' "$dependency"
+        ((dependency_count += 1))
+    done <<<"$libraries"
+
+    ((saw_header == 1 && dependency_count > 0)) || {
+        die "otool -L output does not contain dependencies"
+        return 1
+    }
+}
+
+parse_elf_dependencies() {
+    local dynamic="$1"
+    local line dependency
+    local dependency_count=0
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" == *"(NEEDED)"* ]] || continue
+        if [[ ! "$line" =~ ^[[:space:]]*0x[0-9a-fA-F]+[[:space:]]+\(NEEDED\)[[:space:]]+Shared[[:space:]]library:[[:space:]]\[(.*)\][[:space:]]*$ ]]; then
+            die "readelf output contains a malformed NEEDED record"
+            return 1
+        fi
+        dependency="${BASH_REMATCH[1]}"
+        [[ -n "$dependency" ]] || {
+            die "readelf output contains an empty NEEDED name"
+            return 1
+        }
+        printf '%s\n' "$dependency"
+        ((dependency_count += 1))
+    done <<<"$dynamic"
+
+    ((dependency_count > 0)) || {
+        die "readelf output does not contain NEEDED dependencies"
+        return 1
+    }
+}
+
+parse_elf_interpreter() {
+    local program_headers="$1"
+    local line interpreter=""
+    local interpreter_count=0
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" == *"Requesting program interpreter:"* ]] || continue
+        if [[ ! "$line" =~ ^[[:space:]]*\[Requesting[[:space:]]program[[:space:]]interpreter:[[:space:]](.*)\][[:space:]]*$ ]]; then
+            die "readelf output contains a malformed PT_INTERP record"
+            return 1
+        fi
+        interpreter="${BASH_REMATCH[1]}"
+        [[ -n "$interpreter" ]] || {
+            die "readelf output contains an empty PT_INTERP value"
+            return 1
+        }
+        ((interpreter_count += 1))
+    done <<<"$program_headers"
+
+    ((interpreter_count == 1)) || {
+        die "readelf output must contain exactly one PT_INTERP value"
+        return 1
+    }
+    printf '%s\n' "$interpreter"
+}
+
+parse_elf_forbidden_dynamic_records() {
+    local dynamic="$1"
+    local line
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" =~ \((RPATH|RUNPATH|AUDIT|DEPAUDIT|FILTER|AUXILIARY)\) ]]; then
+            printf '%s\n' "$line"
+        fi
+    done <<<"$dynamic"
+}
+
+verify_macho_load_policy() {
+    local load_commands="$1"
+    local expected_minos="$2"
+    local line trimmed command=""
+    local dyld_info_count=0
+    local build_version_count=0
+    local dylinker_count=0
+    local dylinker_name_count=0
+    local platform_count=0
+    local minos_count=0
+    local ntools_count=0
+    local linker_tool_count=0
+    local linker_version_count=0
+    local forbidden_count=0
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        trimmed="${line#"${line%%[![:space:]]*}"}"
+        if [[ "$trimmed" == cmd\ * ]]; then
+            if [[ ! "$trimmed" =~ ^cmd[[:space:]]+(LC_[A-Z0-9_]+)$ ]]; then
+                die "otool -l output contains a malformed load-command name"
+                return 1
+            fi
+            command="${BASH_REMATCH[1]}"
+            case "$command" in
+                LC_DYLD_INFO_ONLY) ((dyld_info_count += 1)) ;;
+                LC_BUILD_VERSION) ((build_version_count += 1)) ;;
+                LC_LOAD_DYLINKER) ((dylinker_count += 1)) ;;
+                LC_DYLD_INFO|LC_DYLD_CHAINED_FIXUPS|LC_RPATH|LC_DYLD_ENVIRONMENT|LC_VERSION_MIN_*)
+                    ((forbidden_count += 1))
+                    ;;
+            esac
+            continue
+        fi
+
+        case "$trimmed" in
+            name\ *)
+                if [[ "$command" == "LC_LOAD_DYLINKER" ]]; then
+                    if [[ ! "$trimmed" =~ ^name[[:space:]]+(.+)[[:space:]]+\(offset[[:space:]][0-9]+\)$ ]]; then
+                        die "otool -l output contains a malformed LC_LOAD_DYLINKER name"
+                        return 1
+                    fi
+                    [[ "${BASH_REMATCH[1]}" == "/usr/lib/dyld" ]] || {
+                        die "Darwin candidate has an unexpected dynamic linker: ${BASH_REMATCH[1]}"
+                        return 1
+                    }
+                    ((dylinker_name_count += 1))
+                fi
+                ;;
+            platform\ *)
+                if [[ "$command" == "LC_BUILD_VERSION" ]]; then
+                    [[ "$trimmed" == "platform 1" ]] || {
+                        die "Darwin candidate LC_BUILD_VERSION is not for macOS"
+                        return 1
+                    }
+                    ((platform_count += 1))
+                fi
+                ;;
+            minos\ *)
+                [[ "$command" == "LC_BUILD_VERSION" &&
+                    "$trimmed" == "minos $expected_minos" ]] || {
+                    die "Darwin candidate has an unexpected minimum OS: $trimmed"
+                    return 1
+                }
+                ((minos_count += 1))
+                ;;
+            ntools\ *)
+                if [[ "$command" == "LC_BUILD_VERSION" ]]; then
+                    [[ "$trimmed" == "ntools 1" ]] || {
+                        die "Darwin candidate must record exactly one external build tool"
+                        return 1
+                    }
+                    ((ntools_count += 1))
+                fi
+                ;;
+            tool\ *)
+                if [[ "$command" == "LC_BUILD_VERSION" ]]; then
+                    [[ "$trimmed" == "tool 3" ]] || {
+                        die "Darwin candidate was not stamped by the external Apple linker"
+                        return 1
+                    }
+                    ((linker_tool_count += 1))
+                fi
+                ;;
+            version\ *)
+                if [[ "$command" == "LC_BUILD_VERSION" ]]; then
+                    [[ "$trimmed" =~ ^version[[:space:]][0-9]+(\.[0-9]+){1,2}$ ]] || {
+                        die "Darwin candidate has a malformed external linker version"
+                        return 1
+                    }
+                    ((linker_version_count += 1))
+                fi
+                ;;
+        esac
+    done <<<"$load_commands"
+
+    ((forbidden_count == 0)) || {
+        die "Darwin candidate contains a forbidden loader or search-path command"
+        return 1
+    }
+    ((dyld_info_count == 1)) || {
+        die "Darwin candidate must contain exactly one LC_DYLD_INFO_ONLY command"
+        return 1
+    }
+    ((build_version_count == 1 && platform_count == 1 && minos_count == 1)) || {
+        die "Darwin candidate must contain one exact macOS LC_BUILD_VERSION command"
+        return 1
+    }
+    ((dylinker_count == 1 && dylinker_name_count == 1)) || {
+        die "Darwin candidate must use exactly one canonical LC_LOAD_DYLINKER"
+        return 1
+    }
+    ((ntools_count == 1 && linker_tool_count == 1 && linker_version_count == 1)) || {
+        die "Darwin candidate does not prove an external Apple linker invocation"
+        return 1
+    }
+}
+
 inspect_linkage() {
     local binary="${1:-}"
     local require_symbols="${2:-true}"
     [[ -f "$binary" ]] || die "usage: $0 inspect-linkage <binary> [true|false]"
 
     local build_info
-    build_info="$(go version -m "$binary")"
-    grep -Fq "go.mitchellh.com/libghostty" <<<"$build_info" ||
+    if ! build_info="$(go version -m "$binary")"; then
+        die "candidate does not contain readable Go build metadata"
+        return 1
+    fi
+    grep -Fq "go.mitchellh.com/libghostty" <<<"$build_info" || {
         die "candidate does not contain go-libghostty module metadata"
-    grep -Fq "$GO_LIBGHOSTTY_VERSION" <<<"$build_info" ||
+        return 1
+    }
+    grep -Fq "$GO_LIBGHOSTTY_VERSION" <<<"$build_info" || {
         die "candidate contains the wrong go-libghostty version"
-    grep -Fq "$GO_LIBGHOSTTY_SUM" <<<"$build_info" ||
+        return 1
+    }
+    grep -Fq "$GO_LIBGHOSTTY_SUM" <<<"$build_info" || {
         die "candidate contains the wrong go-libghostty module checksum"
-    grep -Fq 'tags=libghostty' <<<"$build_info" ||
+        return 1
+    }
+    grep -Fq 'tags=libghostty' <<<"$build_info" || {
         die "candidate was not built with the libghostty tag"
+        return 1
+    }
+    if grep -Eq '(^|[,[:space:]])libghostty_compare($|[,[:space:]])' \
+        <<<"$build_info"; then
+        die "candidate was built with the test-only libghostty_compare tag"
+        return 1
+    fi
+    if grep -Fq 'github.com/charmbracelet/x/vt' <<<"$build_info"; then
+        die "production candidate contains the excluded x/vt module"
+        return 1
+    fi
 
-    local format dependencies
+    local cgo_enabled actual_goos actual_goarch
+    if ! cgo_enabled="$(build_setting "$build_info" CGO_ENABLED)" ||
+        [[ "$cgo_enabled" != "1" ]]; then
+        die "native candidate build metadata does not require cgo"
+        return 1
+    fi
+    if ! actual_goos="$(build_setting "$build_info" GOOS)" ||
+        ! actual_goarch="$(build_setting "$build_info" GOARCH)"; then
+        return 1
+    fi
+
+    local format dependencies interpreter forbidden_records
     format="$(file -b "$binary")"
     case "$format" in
         *Mach-O*)
+            [[ "$actual_goos" == "darwin" ]] || {
+                die "Mach-O candidate build metadata is not for Darwin"
+                return 1
+            }
             require_command otool
-            dependencies="$(otool -L "$binary")"
+            local libraries load_commands
+            if ! libraries="$(otool -L "$binary")" ||
+                ! dependencies="$(parse_macho_dependencies "$binary" "$libraries")" ||
+                ! load_commands="$(otool -l "$binary")" ||
+                ! verify_macho_load_policy "$load_commands" \
+                    "$DARWIN_CANDIDATE_DEPLOYMENT_TARGET"; then
+                return 1
+            fi
+            interpreter=""
+            forbidden_records=""
+            if ! verify_dynamic_dependency_policy darwin "$actual_goarch" "$dependencies" \
+                "$interpreter" "$forbidden_records"; then
+                return 1
+            fi
             ;;
         *ELF*)
-            require_command objdump
-            dependencies="$(objdump -p "$binary" | grep -E 'NEEDED|RPATH|RUNPATH|interpreter' || true)"
+            [[ "$actual_goos" == "linux" ]] || {
+                die "ELF candidate build metadata is not for Linux"
+                return 1
+            }
+            require_command readelf
+            local dynamic program_headers
+            dynamic="$(readelf -dW "$binary")"
+            program_headers="$(readelf -lW "$binary")"
+            if ! dependencies="$(parse_elf_dependencies "$dynamic")" ||
+                ! interpreter="$(parse_elf_interpreter "$program_headers")"; then
+                return 1
+            fi
+            forbidden_records="$(parse_elf_forbidden_dynamic_records "$dynamic")"
+            if ! verify_dynamic_dependency_policy linux "$actual_goarch" "$dependencies" \
+                "$interpreter" "$forbidden_records"; then
+                return 1
+            fi
             ;;
         *)
             die "unsupported executable format: $format"
+            return 1
             ;;
     esac
     printf 'executable: %s\ndynamic dependencies:\n%s\n' "$format" "$dependencies"
-    if grep -Eiq 'libghostty|libsimdutf|libhwy|libhighway|libc\+\+|libstdc\+\+' <<<"$dependencies"; then
-        die "candidate has an unexpected dynamic native dependency"
+    if [[ -n "$interpreter" ]]; then
+        printf 'program interpreter: %s\n' "$interpreter"
     fi
 
     if [[ "$require_symbols" == "true" ]]; then
+        local go_symbols
+        if ! go_symbols="$(go tool nm "$binary" 2>/dev/null)"; then
+            die "candidate Go symbols are unreadable"
+            return 1
+        fi
+        if grep -Fq 'github.com/charmbracelet/x/vt' <<<"$go_symbols"; then
+            die "production candidate contains excluded x/vt symbols"
+            return 1
+        fi
         grep -Eq '[[:space:]][Tt][[:space:]]_?ghostty_terminal_new$' \
-            < <(nm -g "$binary" 2>/dev/null) ||
+            < <(nm -g "$binary" 2>/dev/null) || {
             die "candidate does not define ghostty_terminal_new; static linkage is unproven"
+            return 1
+        }
     elif [[ "$require_symbols" != "false" ]]; then
         die "inspect-linkage symbol mode must be true or false"
+        return 1
     fi
+}
+
+verify_dynamic_dependency_policy() {
+    local goos="${1:-}"
+    local goarch="${2:-}"
+    local dependencies="${3:-}"
+    local interpreter="${4:-}"
+    local forbidden_records="${5:-}"
+    case "$goos/$goarch" in
+        darwin/amd64|darwin/arm64|linux/amd64|linux/arm64) ;;
+        *)
+            die "unsupported dynamic dependency policy target: $goos/$goarch"
+            return 1
+            ;;
+    esac
+    [[ -z "$forbidden_records" ]] || {
+        die "$goos candidate contains a forbidden runtime loader record"
+        return 1
+    }
+
+    local dependency saw_system_runtime=0
+    while IFS= read -r dependency; do
+        [[ -n "$dependency" ]] || continue
+        case "$goos:$dependency" in
+            darwin:/usr/lib/libSystem.B.dylib)
+                saw_system_runtime=1
+                ;;
+            linux:libc.so.6)
+                saw_system_runtime=1
+                ;;
+            linux:libpthread.so.0|linux:libresolv.so.2|linux:libdl.so.2) ;;
+            *)
+                if [[ "$goos" == "darwin" ]] && {
+                    [[ "$dependency" =~ ^/usr/lib/libresolv\.[0-9]+\.dylib$ ]] ||
+                        [[ "$dependency" =~ ^/System/Library/Frameworks/CoreFoundation\.framework/Versions/[A-Za-z0-9.]+/CoreFoundation$ ]] ||
+                        [[ "$dependency" =~ ^/System/Library/Frameworks/Security\.framework/Versions/[A-Za-z0-9.]+/Security$ ]]
+                }; then
+                    continue
+                fi
+                die "$goos candidate has unexpected dynamic dependency: $dependency"
+                return 1
+                ;;
+        esac
+    done <<<"$dependencies"
+    ((saw_system_runtime == 1)) || {
+        die "$goos candidate does not declare its expected system runtime"
+        return 1
+    }
+
+    case "$goos/$goarch:$interpreter" in
+        darwin/amd64:|darwin/arm64:) ;;
+        linux/amd64:/lib64/ld-linux-x86-64.so.2) ;;
+        linux/arm64:/lib/ld-linux-aarch64.so.1) ;;
+        *)
+            die "$goos/$goarch candidate has an unexpected program interpreter: $interpreter"
+            return 1
+            ;;
+    esac
+}
+
+test_linkage_policy() {
+    local darwin_dependencies linux_dependencies parsed
+    darwin_dependencies="$(printf '%s\n' \
+        /usr/lib/libresolv.9.dylib \
+        /System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation \
+        /System/Library/Frameworks/Security.framework/Versions/A/Security \
+        /usr/lib/libSystem.B.dylib)"
+    verify_dynamic_dependency_policy darwin arm64 "$darwin_dependencies" "" ""
+    if verify_dynamic_dependency_policy darwin arm64 \
+        "$darwin_dependencies"$'\n/opt/dreich/libunknown.dylib' "" "" \
+        >/dev/null 2>&1; then
+        die "Darwin dependency policy accepted an unknown library"
+        return 1
+    fi
+    if verify_dynamic_dependency_policy darwin arm64 "$darwin_dependencies" "" \
+        "LC_RPATH" >/dev/null 2>&1; then
+        die "Darwin dependency policy accepted a runtime search path"
+        return 1
+    fi
+    if verify_dynamic_dependency_policy darwin arm64 "$darwin_dependencies" "" \
+        "LC_DYLD_CHAINED_FIXUPS" >/dev/null 2>&1; then
+        die "Darwin dependency policy accepted chained fixups"
+        return 1
+    fi
+
+    local macho_libraries
+    macho_libraries=$'/opt/braw/gr:\n\t/usr/lib/libresolv.9.dylib (compatibility version 1.0.0, current version 1.0.0)\n\t/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 4000.1.0)\n\t/System/Library/Frameworks/Security.framework/Versions/A/Security (compatibility version 1.0.0, current version 61439.140.12)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1345.120.2)'
+    parsed="$(parse_macho_dependencies /opt/braw/gr "$macho_libraries")"
+    [[ "$parsed" == "$darwin_dependencies" ]] ||
+        die "Mach-O dependency parser changed canonical install names"
+
+    local macho_spoofed
+    macho_spoofed=$'/opt/braw/gr:\n\t/usr/lib/libresolv.9.dylib (compatibility version 1.0.0, current version 1.0.0)\n\t/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 4000.1.0)\n\t/System/Library/Frameworks/Security.framework/Versions/A/Security (compatibility version 1.0.0, current version 61439.140.12)\n\t/usr/lib/libSystem.B.dylib evil (compatibility version 1.0.0, current version 1345.120.2)'
+    parsed="$(parse_macho_dependencies /opt/braw/gr "$macho_spoofed")"
+    if verify_dynamic_dependency_policy darwin arm64 "$parsed" "" "" \
+        >/dev/null 2>&1; then
+        die "Mach-O parser truncated an adversarial install-name suffix"
+        return 1
+    fi
+    if parse_macho_dependencies /opt/braw/gr \
+        $'/opt/braw/gr:\n\t/usr/lib/libSystem.B.dylib' >/dev/null 2>&1; then
+        die "Mach-O parser accepted a malformed dependency record"
+        return 1
+    fi
+
+    local macho_load_commands
+    macho_load_commands=$'Load command 0\n      cmd LC_DYLD_INFO_ONLY\n  cmdsize 48\nLoad command 1\n      cmd LC_LOAD_DYLINKER\n  cmdsize 32\n     name /usr/lib/dyld (offset 12)\nLoad command 2\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform 1\n    minos 15.0\n      sdk 26.5\n   ntools 1\n     tool 3\n  version 1267.1'
+    verify_macho_load_policy "$macho_load_commands" \
+        "$DARWIN_CANDIDATE_DEPLOYMENT_TARGET"
+    if verify_macho_load_policy \
+        "${macho_load_commands/cmd LC_DYLD_INFO_ONLY/cmd LC_UUID}" \
+        "$DARWIN_CANDIDATE_DEPLOYMENT_TARGET" >/dev/null 2>&1; then
+        die "Mach-O load policy accepted missing dyld-info"
+        return 1
+    fi
+    if verify_macho_load_policy \
+        "$macho_load_commands"$'\nLoad command 3\n      cmd LC_DYLD_INFO_ONLY' \
+        "$DARWIN_CANDIDATE_DEPLOYMENT_TARGET" >/dev/null 2>&1; then
+        die "Mach-O load policy accepted duplicate dyld-info"
+        return 1
+    fi
+    if verify_macho_load_policy "${macho_load_commands/minos 15.0/minos 14.0}" \
+        "$DARWIN_CANDIDATE_DEPLOYMENT_TARGET" >/dev/null 2>&1; then
+        die "Mach-O load policy accepted the wrong deployment target"
+        return 1
+    fi
+    if verify_macho_load_policy \
+        "${macho_load_commands/\/usr\/lib\/dyld/\/usr\/lib\/dyld evil}" \
+        "$DARWIN_CANDIDATE_DEPLOYMENT_TARGET" >/dev/null 2>&1; then
+        die "Mach-O load policy truncated an adversarial dynamic-linker suffix"
+        return 1
+    fi
+    if verify_macho_load_policy \
+        "${macho_load_commands/$'     tool 3\n'/}" \
+        "$DARWIN_CANDIDATE_DEPLOYMENT_TARGET" >/dev/null 2>&1; then
+        die "Mach-O load policy accepted a binary without external-link proof"
+        return 1
+    fi
+    local forbidden_command
+    for forbidden_command in \
+        LC_DYLD_INFO LC_DYLD_CHAINED_FIXUPS LC_RPATH LC_DYLD_ENVIRONMENT \
+        LC_VERSION_MIN_MACOSX LC_VERSION_MIN_IPHONEOS; do
+        if verify_macho_load_policy \
+            "$macho_load_commands"$'\nLoad command 3\n      cmd '"$forbidden_command" \
+            "$DARWIN_CANDIDATE_DEPLOYMENT_TARGET" >/dev/null 2>&1; then
+            die "Mach-O load policy accepted $forbidden_command"
+            return 1
+        fi
+    done
+
+    linux_dependencies="$(printf '%s\n' libc.so.6 libresolv.so.2)"
+    verify_dynamic_dependency_policy linux amd64 "$linux_dependencies" \
+        /lib64/ld-linux-x86-64.so.2 ""
+    verify_dynamic_dependency_policy linux arm64 "$linux_dependencies" \
+        /lib/ld-linux-aarch64.so.1 ""
+    if verify_dynamic_dependency_policy linux amd64 \
+        "$linux_dependencies"$'\nlibdreich.so.1' \
+        /lib64/ld-linux-x86-64.so.2 "" >/dev/null 2>&1; then
+        die "Linux dependency policy accepted an unknown library"
+        return 1
+    fi
+    if verify_dynamic_dependency_policy linux amd64 "$linux_dependencies" \
+        /lib64/ld-linux-x86-64.so.2 "RUNPATH /opt/dreich" \
+        >/dev/null 2>&1; then
+        die "Linux dependency policy accepted a runtime search path"
+        return 1
+    fi
+
+    local elf_dynamic elf_program_headers forbidden_records
+    elf_dynamic=$'Dynamic section at offset 0xbraw contains 3 entries:\n 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]\n 0x0000000000000001 (NEEDED)             Shared library: [libresolv.so.2]\n 0x0000000000000000 (NULL)               0x0'
+    parsed="$(parse_elf_dependencies "$elf_dynamic")"
+    [[ "$parsed" == "$linux_dependencies" ]] ||
+        die "ELF dependency parser changed canonical SONAMEs"
+    parsed="$(parse_elf_dependencies \
+        "${elf_dynamic/libc.so.6]/libc.so.6]evil]}")"
+    if verify_dynamic_dependency_policy linux amd64 "$parsed" \
+        /lib64/ld-linux-x86-64.so.2 "" >/dev/null 2>&1; then
+        die "ELF parser truncated an adversarial SONAME suffix"
+        return 1
+    fi
+    local elf_malformed_dynamic
+    elf_malformed_dynamic=$'Dynamic section at offset 0xbraw contains 1 entry:\n 0x0000000000000001 (NEEDED)             Shared library: libc.so.6'
+    if parse_elf_dependencies "$elf_malformed_dynamic" >/dev/null 2>&1; then
+        die "ELF parser accepted a malformed NEEDED record"
+        return 1
+    fi
+
+    elf_program_headers=$'Program Headers:\n  INTERP         0x00000000000002e0\n      [Requesting program interpreter: /lib64/ld-linux-x86-64.so.2]'
+    parsed="$(parse_elf_interpreter "$elf_program_headers")"
+    [[ "$parsed" == "/lib64/ld-linux-x86-64.so.2" ]] ||
+        die "ELF parser changed the canonical PT_INTERP value"
+    parsed="$(parse_elf_interpreter \
+        "${elf_program_headers/ld-linux-x86-64.so.2]/ld-linux-x86-64.so.2]evil]}")"
+    if verify_dynamic_dependency_policy linux amd64 "$linux_dependencies" \
+        "$parsed" "" >/dev/null 2>&1; then
+        die "ELF parser truncated an adversarial PT_INTERP suffix"
+        return 1
+    fi
+    if verify_dynamic_dependency_policy linux amd64 "$linux_dependencies" \
+        /lib/ld-linux-aarch64.so.1 "" >/dev/null 2>&1; then
+        die "Linux amd64 policy accepted the arm64 program interpreter"
+        return 1
+    fi
+    if verify_dynamic_dependency_policy linux arm64 "$linux_dependencies" \
+        /lib64/ld-linux-x86-64.so.2 "" >/dev/null 2>&1; then
+        die "Linux arm64 policy accepted the amd64 program interpreter"
+        return 1
+    fi
+    local elf_malformed_program_headers
+    elf_malformed_program_headers=$'Program Headers:\n  INTERP         0x00000000000002e0\n      [Requesting program interpreter: /lib64/ld-linux-x86-64.so.2'
+    if parse_elf_interpreter "$elf_malformed_program_headers" >/dev/null 2>&1; then
+        die "ELF parser accepted a malformed PT_INTERP record"
+        return 1
+    fi
+
+    local forbidden_tag
+    for forbidden_tag in RPATH RUNPATH AUDIT DEPAUDIT FILTER AUXILIARY; do
+        forbidden_records="$(parse_elf_forbidden_dynamic_records \
+            "$elf_dynamic"$'\n 0x000000000000001d ('"$forbidden_tag"$') loader value')"
+        [[ -n "$forbidden_records" ]] ||
+            die "ELF parser did not preserve $forbidden_tag"
+        if verify_dynamic_dependency_policy linux amd64 "$linux_dependencies" \
+            /lib64/ld-linux-x86-64.so.2 "$forbidden_records" \
+            >/dev/null 2>&1; then
+            die "ELF load policy accepted $forbidden_tag"
+            return 1
+        fi
+    done
+    printf 'dynamic dependency policy checks passed\n'
+}
+
+verify_candidate_for_packaging() {
+    local binary="${1:-}"
+    local goos="${2:-}"
+    local goarch="${3:-}"
+    [[ -f "$binary" ]] || {
+        die "usage: verify_candidate_for_packaging <binary> <goos> <goarch>"
+        return 1
+    }
+
+    if ! candidate_identity "$binary" "$goos" "$goarch" >/dev/null; then
+        return 1
+    fi
+    if ! inspect_linkage "$binary" true; then
+        return 1
+    fi
+    verify_binary_privacy "$binary"
 }
 
 verify_default_binary() {
@@ -690,7 +1345,7 @@ verify_binary_privacy() {
     [[ -f "$binary" ]] || die "usage: $0 verify-binary-privacy <binary>"
     if grep -Eq '/home/runner|/Users/|/private/var/folders/|/runner/work/' \
         < <(strings "$binary"); then
-        die "candidate contains a local or CI build path; package a stripped binary"
+        die "candidate contains a local or CI build path; package a trimpath binary"
     fi
 }
 
@@ -737,7 +1392,80 @@ candidate_git_revision() {
     printf '%s\n' "$revision"
 }
 
-candidate_ldflags() {
+is_linked_git_worktree() {
+    local repository="${1:-$REPO_DIR}"
+    local git_dir common_dir
+    if ! git_dir="$(git -C "$repository" rev-parse --absolute-git-dir)" ||
+        ! common_dir="$(git -C "$repository" rev-parse \
+            --path-format=absolute --git-common-dir)"; then
+        die "cannot resolve Git directories for candidate source"
+        return 1
+    fi
+    if ! git_dir="$(cd "$git_dir" && pwd -P)" ||
+        ! common_dir="$(cd "$common_dir" && pwd -P)"; then
+        die "cannot canonicalize Git directories for candidate source"
+        return 1
+    fi
+    [[ "$git_dir" != "$common_dir" ]]
+}
+
+host_go_target() {
+    case "$(uname -s)-$(uname -m)" in
+        Darwin-arm64) printf 'darwin\tarm64\n' ;;
+        Darwin-x86_64) printf 'darwin\tamd64\n' ;;
+        Linux-x86_64) printf 'linux\tamd64\n' ;;
+        Linux-aarch64) printf 'linux\tarm64\n' ;;
+        *) return 1 ;;
+    esac
+}
+
+verify_candidate_commit() {
+    local binary="$1"
+    local revision="$2"
+    local goos="$3"
+    local goarch="$4"
+    local symbols
+    if ! symbols="$(go tool nm -size -type "$binary" 2>/dev/null)"; then
+        die "candidate does not retain the symbols required for provenance verification"
+        return 1
+    fi
+    grep -Eq '[[:space:]][Dd][[:space:]]github\.com/d0ugal/graith/internal/version\.CommitSHA$' \
+        <<<"$symbols" || {
+        die "candidate does not define internal/version.CommitSHA"
+        return 1
+    }
+    grep -Eq '[[:space:]][Rr][[:space:]]github\.com/d0ugal/graith/internal/version\.CommitSHA\.str$' \
+        <<<"$symbols" || {
+        die "candidate does not retain the injected CommitSHA data symbol"
+        return 1
+    }
+
+    if ! (
+        cd "$REPO_DIR"
+        go run ./internal/cmd/read-go-string "$binary" \
+            github.com/d0ugal/graith/internal/version.CommitSHA "$revision"
+    ); then
+        die "candidate CommitSHA data does not equal its build ID revision"
+        return 1
+    fi
+
+    local host_target host_goos host_goarch runtime_revision
+    if host_target="$(host_go_target)"; then
+        IFS=$'\t' read -r host_goos host_goarch <<<"$host_target"
+        if [[ "$host_goos/$host_goarch" == "$goos/$goarch" ]]; then
+            if ! runtime_revision="$("$binary" --json version | jq -er '.commit')"; then
+                die "candidate runtime version identity is unreadable"
+                return 1
+            fi
+            if [[ "$runtime_revision" != "$revision" ]]; then
+                die "candidate runtime CommitSHA does not match its build ID revision"
+                return 1
+            fi
+        fi
+    fi
+}
+
+candidate_identity_ldflags() {
     local goos="${1:-}"
     local goarch="${2:-}"
     local strip="${3:-true}"
@@ -759,7 +1487,56 @@ candidate_ldflags() {
     fi
     local flags="-buildid=graith-native/$revision/$goos/$goarch -X github.com/d0ugal/graith/internal/version.CommitSHA=$revision"
     if [[ "$strip" == "true" ]]; then
-        flags="-s -w $flags"
+        # Omit DWARF while retaining the global symbols that let the packager
+        # prove static Ghostty linkage and the injected revision on exact bytes.
+        flags="-w $flags"
+    fi
+    printf '%s\n' "$flags"
+}
+
+verify_darwin_candidate_environment() {
+    local goarch="$1"
+    local clang_arch
+    case "$goarch" in
+        amd64) clang_arch="x86_64" ;;
+        arm64) clang_arch="arm64" ;;
+        *)
+            die "unsupported Darwin candidate architecture: $goarch"
+            return 1
+            ;;
+    esac
+
+    [[ "${MACOSX_DEPLOYMENT_TARGET:-}" == "$DARWIN_CANDIDATE_DEPLOYMENT_TARGET" ]] || {
+        die "Darwin candidates require MACOSX_DEPLOYMENT_TARGET=$DARWIN_CANDIDATE_DEPLOYMENT_TARGET"
+        return 1
+    }
+    local cc=" ${CC:-} "
+    [[ "$cc" == *" -arch $clang_arch "* ]] || {
+        die "Darwin candidate CC must select -arch $clang_arch"
+        return 1
+    }
+    [[ "$cc" == *" -mmacosx-version-min=$DARWIN_CANDIDATE_DEPLOYMENT_TARGET "* ]] || {
+        die "Darwin candidate CC must include the exact deployment target"
+        return 1
+    }
+}
+
+candidate_ldflags() {
+    local goos="${1:-}"
+    local goarch="${2:-}"
+    local strip="${3:-true}"
+    local flags
+    if ! flags="$(candidate_identity_ldflags "$goos" "$goarch" "$strip")"; then
+        return 1
+    fi
+    if [[ "$goos" == "darwin" ]]; then
+        if ! verify_darwin_candidate_environment "$goarch"; then
+            return 1
+        fi
+        # Force Apple ld explicitly. Without legacy dyld info, the external
+        # linker encodes CommitSHA's pointer as a chained fixup rather than the
+        # direct on-disk address required by the exact-byte provenance reader.
+        flags="$flags -linkmode=external -extldflags=-Wl,-no_fixup_chains"
     fi
     printf '%s\n' "$flags"
 }
@@ -819,6 +1596,10 @@ candidate_identity() {
         return 1
     fi
 
+    if ! verify_candidate_commit "$binary" "$revision" "$actual_goos" "$actual_goarch"; then
+        return 1
+    fi
+
     local vcs vcs_revision modified
     if ! vcs="$(optional_build_setting "$build_info" vcs)" ||
         ! vcs_revision="$(optional_build_setting "$build_info" vcs.revision)" ||
@@ -844,7 +1625,7 @@ candidate_identity() {
     elif [[ "${GRAITH_LIBGHOSTTY_REQUIRE_GO_VCS:-auto}" != "auto" ]]; then
         die "GRAITH_LIBGHOSTTY_REQUIRE_GO_VCS must be 1 or auto"
         return 1
-    elif [[ ! -f "$REPO_DIR/.git" ]]; then
+    elif ! is_linked_git_worktree "$REPO_DIR"; then
         die "missing Go VCS metadata is allowed only in a linked Git worktree"
         return 1
     fi
@@ -859,21 +1640,19 @@ test_candidate_build_identity() {
     }
     ensure_empty_directory "$destination"
 
-    local goos goarch
-    case "$(uname -s)-$(uname -m)" in
-        Darwin-arm64) goos="darwin"; goarch="arm64" ;;
-        Darwin-x86_64) goos="darwin"; goarch="amd64" ;;
-        Linux-x86_64) goos="linux"; goarch="amd64" ;;
-        Linux-aarch64) goos="linux"; goarch="arm64" ;;
-        *)
-            die "unsupported build-identity test host: $(uname -s)-$(uname -m)"
-            return 1
-            ;;
-    esac
+    local host_target goos goarch
+    if ! host_target="$(host_go_target)"; then
+        die "unsupported build-identity test host: $(uname -s)-$(uname -m)"
+        return 1
+    fi
+    IFS=$'\t' read -r goos goarch <<<"$host_target"
 
     local revision flags binary
     revision="$(candidate_git_revision)"
-    flags="$(candidate_ldflags "$goos" "$goarch" true)"
+    # This intentionally invalid pure-Go fixture exercises identity and native
+    # rejection only; external Darwin flags require cgo and belong exclusively
+    # to real candidate builds.
+    flags="$(candidate_identity_ldflags "$goos" "$goarch" true)"
     binary="$destination/gr"
     (
         cd "$REPO_DIR"
@@ -882,10 +1661,21 @@ test_candidate_build_identity() {
             -o "$binary" ./cmd/graith
     )
     candidate_identity "$binary" "$goos" "$goarch" >/dev/null
-    local embedded_revision
-    embedded_revision="$("$binary" --json version | jq -r '.commit')"
-    if [[ "$embedded_revision" != "$revision" ]]; then
-        die "candidate CommitSHA does not match its build ID revision"
+    if verify_candidate_for_packaging "$binary" "$goos" "$goarch" \
+        >/dev/null 2>&1; then
+        die "packaging input verification accepted a pure-Go binary"
+        return 1
+    fi
+    local fake_validator="$destination/not-a-validator.jar"
+    local pure_package="$destination/pure-package"
+    printf 'braw validator sentinel\n' >"$fake_validator"
+    if package_candidate "$binary" "$goos" "$goarch" "$pure_package" \
+        "$fake_validator" >/dev/null 2>&1; then
+        die "package-candidate accepted a pure-Go binary"
+        return 1
+    fi
+    if [[ -n "$(find "$pure_package" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+        die "package-candidate wrote output before proving native linkage"
         return 1
     fi
 
@@ -905,6 +1695,85 @@ test_candidate_build_identity() {
         die "candidate identity accepted a mismatched custom build ID"
         return 1
     fi
+
+    local wrong_commit_binary="$destination/gr-wrong-commit"
+    local wrong_commit="0000000000000000000000000000000000000000"
+    local wrong_commit_flags="-w -buildid=graith-native/$revision/$goos/$goarch -X github.com/d0ugal/graith/internal/version.CommitSHA=$wrong_commit"
+    (
+        cd "$REPO_DIR"
+        CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+            go build -buildvcs=true -trimpath -ldflags="$wrong_commit_flags" \
+            -o "$wrong_commit_binary" ./cmd/graith
+    )
+    if candidate_identity "$wrong_commit_binary" "$goos" "$goarch" >/dev/null 2>&1; then
+        die "candidate identity accepted a mismatched runtime CommitSHA"
+        return 1
+    fi
+
+    local cross_binary="$destination/gr-cross-wrong-commit"
+    local cross_flags="-w -buildid=graith-native/$revision/$goos/$wrong_goarch -X github.com/d0ugal/graith/internal/version.CommitSHA=$wrong_commit -X github.com/d0ugal/graith/internal/version.Version=$revision"
+    (
+        cd "$REPO_DIR"
+        CGO_ENABLED=0 GOOS="$goos" GOARCH="$wrong_goarch" \
+            go build -buildvcs=true -trimpath -ldflags="$cross_flags" \
+            -o "$cross_binary" ./cmd/graith
+    )
+    if candidate_identity "$cross_binary" "$goos" "$wrong_goarch" \
+        >/dev/null 2>&1; then
+        die "candidate identity accepted a cross-target spoofed CommitSHA"
+        return 1
+    fi
+
+    local template_sha hardlink output fixed_partial
+    template_sha="$(sha256_value "$SPDX_DOCUMENT")"
+    if materialize_candidate_spdx "$binary" "$goos" "$goarch" \
+        "$REPO_DIR/./libghostty-native.spdx.json" >/dev/null 2>&1; then
+        die "SPDX materialization accepted an equivalent committed-template path"
+        return 1
+    fi
+    hardlink="$destination/committed-template-hardlink.json"
+    ln "$SPDX_DOCUMENT" "$hardlink"
+    if materialize_candidate_spdx "$binary" "$goos" "$goarch" "$hardlink" \
+        >/dev/null 2>&1; then
+        die "SPDX materialization accepted a hard link to the committed template"
+        return 1
+    fi
+    if [[ "$(sha256_value "$SPDX_DOCUMENT")" != "$template_sha" ]]; then
+        die "SPDX output safety test changed the committed dependency inventory"
+        return 1
+    fi
+
+    output="$destination/candidate.spdx.json"
+    fixed_partial="${output}.partial"
+    printf 'braw sentinel\n' >"$fixed_partial"
+    materialize_candidate_spdx "$binary" "$goos" "$goarch" "$output"
+    grep -Fqx 'braw sentinel' "$fixed_partial" || {
+        die "SPDX materialization reused a predictable partial path"
+        return 1
+    }
+
+    local regular_repo linked_repo separate_work separate_git
+    regular_repo="$destination/regular-repository"
+    linked_repo="$destination/linked-worktree"
+    separate_work="$destination/separate-worktree"
+    separate_git="$destination/separate-git-dir"
+    git init -q "$regular_repo"
+    git -C "$regular_repo" -c user.name=Graith -c user.email=graith@example.invalid \
+        commit -q --allow-empty -m braw
+    git -C "$regular_repo" worktree add -q --detach "$linked_repo" HEAD
+    git init -q --separate-git-dir="$separate_git" "$separate_work"
+    if is_linked_git_worktree "$regular_repo"; then
+        die "ordinary Git checkout was classified as a linked worktree"
+        return 1
+    fi
+    is_linked_git_worktree "$linked_repo" || {
+        die "linked Git worktree was not recognized"
+        return 1
+    }
+    if is_linked_git_worktree "$separate_work"; then
+        die "separate-git-dir checkout was classified as a linked worktree"
+        return 1
+    fi
     printf 'candidate build identity checks passed for %s/%s\n' "$goos" "$goarch"
 }
 
@@ -917,7 +1786,21 @@ materialize_candidate_spdx() {
         die "usage: $0 materialize-spdx <binary> <goos> <goarch> <output>"
         return 1
     fi
-    if [[ "$output" == "$SPDX_DOCUMENT" ]]; then
+    local output_parent output_name canonical_output canonical_template
+    output_parent="$(dirname "$output")"
+    output_name="$(basename "$output")"
+    if [[ ! -d "$output_parent" ]]; then
+        die "SPDX output directory does not exist: $output_parent"
+        return 1
+    fi
+    if ! output_parent="$(cd "$output_parent" && pwd -P)"; then
+        die "cannot canonicalize SPDX output directory"
+        return 1
+    fi
+    canonical_output="$output_parent/$output_name"
+    canonical_template="$(cd "$(dirname "$SPDX_DOCUMENT")" && pwd -P)/$(basename "$SPDX_DOCUMENT")"
+    if [[ "$canonical_output" == "$canonical_template" ]] ||
+        [[ -e "$output" && "$output" -ef "$SPDX_DOCUMENT" ]]; then
         die "refusing to overwrite the committed SPDX dependency inventory"
         return 1
     fi
@@ -936,9 +1819,12 @@ materialize_candidate_spdx() {
     source_info="Graith revision $revision; target GOOS=$actual_goos GOARCH=$actual_goarch; packaged binary SHA-256 $binary_sha."
     document_name="$candidate_name-$revision"
 
-    mkdir -p "$(dirname "$output")"
-    local partial="${output}.partial"
-    jq \
+    local partial
+    if ! partial="$(mktemp "$output_parent/.${output_name}.partial.XXXXXX")"; then
+        die "cannot create a unique SPDX staging file"
+        return 1
+    fi
+    if ! jq \
         --arg candidate_name "$candidate_name" \
         --arg candidate_purl "$candidate_purl" \
         --arg document_name "$document_name" \
@@ -988,9 +1874,16 @@ materialize_candidate_spdx() {
                 }
             ]
         )
-        ' "$SPDX_DOCUMENT" >"$partial"
-    mv "$partial" "$output"
-    verify_candidate_binding "$binary" "$goos" "$goarch" "$output"
+        ' "$SPDX_DOCUMENT" >"$partial"; then
+        rm -f -- "$partial"
+        die "cannot materialize candidate SPDX document"
+        return 1
+    fi
+    if ! verify_candidate_binding "$binary" "$goos" "$goarch" "$partial"; then
+        rm -f -- "$partial"
+        return 1
+    fi
+    mv "$partial" "$canonical_output"
 }
 
 verify_candidate_binding() {
@@ -1092,6 +1985,7 @@ test_candidate_binding() {
 
 verify_selectors() {
     cd "$REPO_DIR"
+    require_command jq
     local selected
 
     selected="$(CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go list -f '{{join .GoFiles "\n"}}' ./internal/pty)"
@@ -1122,10 +2016,16 @@ verify_selectors() {
         die "unsupported OS selected the native implementation"
     fi
 
-    CGO_ENABLED=0 go test -count=1 -tags=libghostty ./internal/pty \
-        -run '^TestLibghosttyRequiresCGO$'
-    CGO_ENABLED=0 go test -count=1 -tags=libghostty ./internal/pty \
-        -run '^TestLibghosttyRejectsUnsupportedOS$'
+    local test_output
+    test_output="$(CGO_ENABLED=0 go test -json -count=1 -tags=libghostty \
+        ./internal/pty -run '^TestLibghosttyBackendRequiresCGO$')"
+    jq -e 'select(.Action == "pass" and .Test == "TestLibghosttyBackendRequiresCGO")' \
+        <<<"$test_output" >/dev/null || die "requires-cgo regression test did not execute and pass"
+
+    test_output="$(CGO_ENABLED=0 go test -json -count=1 -tags=libghostty \
+        ./internal/pty -run '^TestLibghosttyRejectsUnsupportedOS$')"
+    jq -e 'select(.Action == "pass" and .Test == "TestLibghosttyRejectsUnsupportedOS")' \
+        <<<"$test_output" >/dev/null || die "unsupported-OS regression test did not execute and pass"
 }
 
 package_candidate() {
@@ -1134,24 +2034,43 @@ package_candidate() {
     local goarch="${3:-}"
     local destination="${4:-}"
     local spdx_jar="${5:-}"
-    [[ -f "$binary" && -n "$destination" && -f "$spdx_jar" ]] ||
+    [[ -f "$binary" && -n "$destination" && -f "$spdx_jar" ]] || {
         die "usage: $0 package-candidate <binary> <goos> <goarch> <empty-directory> <spdx-jar>"
+        return 1
+    }
     mkdir -p "$destination"
     local -a existing
     shopt -s nullglob dotglob
     existing=("$destination"/*)
     shopt -u nullglob dotglob
-    ((${#existing[@]} == 0)) || die "candidate destination is not empty: $destination"
+    ((${#existing[@]} == 0)) || {
+        die "candidate destination is not empty: $destination"
+        return 1
+    }
 
-    verify_metadata
-    verify_binary_privacy "$binary"
+    if ! verify_candidate_for_packaging "$binary" "$goos" "$goarch"; then
+        return 1
+    fi
+    if ! verify_metadata; then
+        return 1
+    fi
     cp "$binary" "$destination/gr"
     cp "$NOTICE_DOCUMENT" "$destination/"
-    materialize_candidate_spdx "$destination/gr" "$goos" "$goarch" \
-        "$destination/libghostty-native.spdx.json"
-    test_candidate_binding "$destination/gr" "$goos" "$goarch" \
-        "$destination/libghostty-native.spdx.json"
-    validate_spdx "$spdx_jar" "$destination/libghostty-native.spdx.json"
+    if ! verify_candidate_for_packaging "$destination/gr" "$goos" "$goarch"; then
+        return 1
+    fi
+    if ! materialize_candidate_spdx "$destination/gr" "$goos" "$goarch" \
+        "$destination/libghostty-native.spdx.json"; then
+        return 1
+    fi
+    if ! test_candidate_binding "$destination/gr" "$goos" "$goarch" \
+        "$destination/libghostty-native.spdx.json"; then
+        return 1
+    fi
+    if ! validate_spdx "$spdx_jar" \
+        "$destination/libghostty-native.spdx.json"; then
+        return 1
+    fi
     if grep -Eq '/home/runner|/Users/|/private/var/folders/|/runner/work/' \
         "$destination/libghostty-native.spdx.json" \
         "$destination/THIRD_PARTY_NOTICES.libghostty.md"; then
@@ -1219,6 +2138,8 @@ usage: $0 test|race|fuzz|bench|memory|all
        $0 verify-default-binary <binary>
        $0 verify-binary-privacy <binary>
        $0 candidate-ldflags <goos> <goarch> <true|false>
+       $0 test-linkage-policy
+       $0 test-source-cleanliness
        $0 test-build-identity <empty-directory>
        $0 materialize-spdx <binary> <goos> <goarch> <output>
        $0 verify-candidate-binding <binary> <goos> <goarch> <spdx>
@@ -1284,6 +2205,12 @@ case "${1:-}" in
         ;;
     candidate-ldflags)
         candidate_ldflags "${2:-}" "${3:-}" "${4:-true}"
+        ;;
+    test-linkage-policy)
+        test_linkage_policy
+        ;;
+    test-source-cleanliness)
+        test_source_cleanliness
         ;;
     test-build-identity)
         test_candidate_build_identity "${2:-}"

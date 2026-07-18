@@ -107,10 +107,12 @@ bounded, versioned requests over a Unix socket. Only the child constructs
 reconstructable derived screen, not the daemon or persistent scrollback.
 
 The helper is not a user-facing command. Package initialization recognizes an
-exact private argument plus a private marker, serves inherited descriptor 3,
-and exits. The parent passes no terminal bytes on argv or environment, discards
-child stdio, and copies only sanitizer/race settings into an otherwise minimal
-environment.
+exact private argument plus a private marker. The parent pins and verifies the
+executable before launch and passes it on inherited descriptor 3; helper startup
+closes descriptor 3 immediately and serves the RPC socket on inherited
+descriptor 4. The parent passes no terminal bytes on argv or environment,
+discards child stdio, and copies only sanitizer/race settings into an otherwise
+minimal environment.
 
 Requests cover create, write, resize, coherent snapshot, and close. Frames have
 magic bytes, a protocol version, operation/status fields, and bounded lengths.
@@ -142,10 +144,12 @@ content.
 
 The private socket is created and marked `FD_CLOEXEC` while holding the same
 fork lock used by `os/exec`, closing Darwin's create-versus-fork inheritance
-window. Descriptor 3 is the only inherited non-stdio endpoint. Stdin is the
-null device, stdout and stderr are discarded, and the environment contains only
-the private marker plus explicitly allowlisted sanitizer/race settings. The
-helper creates a new session so it has no controlling terminal.
+window. Descriptor 3 carries the pinned verified executable and is closed
+immediately after startup validation. Descriptor 4 is the sole long-lived
+inherited RPC endpoint. Stdin is the null device, stdout and stderr are
+discarded, and the environment contains only the private marker plus explicitly
+allowlisted sanitizer/race settings. The helper creates a new session so it has
+no controlling terminal.
 
 Graceful close has a 250 ms exit grace period before kill and a bounded final
 reap wait; repeated and concurrent close are idempotent. Dirty writes and
@@ -243,8 +247,8 @@ available to untrusted terminal input.
 generic data. It covers the default 128 KiB hydration size, grow/shrink resize,
 cursor visibility, wide characters, emoji, combining graphemes, represented
 styles, palette/RGB colors, alternate screen, device queries, and the reduced
-#1430 sequence. #1446 expands fragmented control strings, margins, erase/wrap,
-ZWJ/variation sequences, and background-only cells before handoff.
+#1430 sequence. The completed #1446 coverage adds fragmented control strings,
+margins, erase/wrap, ZWJ/variation sequences, and background-only cells.
 
 Ordinary builds compile and test the Charm rollback. Production
 `libghostty` builds compile only the native backend and exclude x/vt and
@@ -317,7 +321,8 @@ The path-scoped native workflow performs these checks:
   unsupported-OS selector returns its explicit error, plus a FreeBSD
   source-selection check;
 - tagged Darwin amd64/arm64 linking against the checksum-pinned universal
-  archive, with execution on the runner architecture;
+  archive, with native execution on matching `macos-15-intel` and `macos-15`
+  runners respectively;
 - exact-source Linux amd64 execution and arm64 cross-link using Zig 0.15.2;
 - exact committed-header comparison against the Ghostty checkout and every
   Apple XCFramework header slice;
@@ -328,7 +333,8 @@ The path-scoped native workflow performs these checks:
 - audited static-archive membership, native dependency/runtime symbols,
   defined Ghostty symbols in unstripped executables, and remaining Mach-O/ELF
   dynamic dependencies; and
-- path-free stripped testing artifacts whose exact contents are `gr`, a
+- path-free, DWARF-free testing artifacts that retain their global symbol table
+  for package-time inspection and whose exact contents are `gr`, a
   target-specific SPDX document bound to that binary, and the complete notice
   file.
 
@@ -343,6 +349,13 @@ source rebuild on the current macOS 26 host is blocked by Zig linking its build
 runner against that SDK, while the archive links and runs. Linux source builds
 are reproduced in CI. This is a documented local toolchain limitation, not a
 claim that the library is unsupported on macOS.
+
+Each source operation fetches the pin into a fresh, script-owned materialization
+under the native work directory. Cleanliness includes tracked, ordinary
+untracked, and Git-ignored content. The script neither reuses nor destructively
+cleans a pre-existing checkout supplied under a developer-selected work path;
+regressions preserve such content while proving the build uses a separate empty
+materialization.
 
 Evidence is classified by where code actually executes. A runner-native test
 or candidate is measured evidence; a non-native architecture is cross-link and
@@ -375,12 +388,56 @@ upstream commit, the vendored simdutf 9.0.0 amalgamation, and the bundled Zig
 0.15.2 compiler/UBSan runtimes. Packaging never copies that template unchanged.
 Every candidate uses the exact custom Go build ID
 `graith-native/<revision>/<goos>/<goarch>` and injects that same full revision
-into `internal/version.CommitSHA`. Packaging requires the build-ID revision to
-equal a clean Git HEAD and the build-ID target to equal the GOOS/GOARCH reported
+into `internal/version.CommitSHA`. Packaging inspects the exact binary it will
+ship: it requires the production `libghostty` tag, pinned wrapper module, defined
+Ghostty symbol, permitted dynamic dependencies, and linker-generated
+`CommitSHA` data containing the build-ID revision. The target-independent
+verifier reads the Go string header and the exact ELF/Mach-O `CommitSHA.str`
+backing bytes, so an unrelated copy of the revision cannot satisfy this check.
+A cgo-linked Mach-O normally stores that header pointer as a dyld chained fixup,
+which is not the direct on-disk address the verifier must correlate. Darwin
+candidates therefore force `-linkmode=external` and pass Apple ld
+`-no_fixup_chains`. The selected architecture and
+`-mmacosx-version-min=15.0` are part of `CC`, and
+`MACOSX_DEPLOYMENT_TARGET=15.0` is set at the same time so cached cgo objects and
+the final external link agree. Every object in both checksum-pinned archive
+slices declares macOS 13.0 and is a compatible input, but does not determine
+Graith's support floor. Graith supports the latest stable macOS release and the
+immediately previous major; in July 2026 those are macOS 26 and macOS 15. The
+final candidates therefore declare exactly 15.0. This staged candidate policy
+does not broaden ordinary release packaging.
+
+Inspection requires exactly one `LC_DYLD_INFO_ONLY`, no legacy
+`LC_VERSION_MIN_*`, `LC_DYLD_CHAINED_FIXUPS`, `LC_RPATH`, or
+`LC_DYLD_ENVIRONMENT`, canonical
+`/usr/lib/dyld`, and one macOS `LC_BUILD_VERSION` that identifies the external
+Apple linker and minimum 15.0. Both archive slices must link, and each candidate
+must execute on a matching macOS 15 hosted runner. Support for
+`-no_fixup_chains` is therefore an explicit
+candidate-build requirement: an older or incompatible linker fails closed.
+The `macos-15` runner images, Xcode, and Apple ld still receive updates; both
+jobs record their exact OS and tool versions, while native execution,
+load-command, and exact-byte assertions are the semantic compatibility gate
+rather than a claim that every toolchain component is pinned.
+The Mach-O dependency allowlist is limited to canonical, optionally versioned
+`libresolv`, CoreFoundation, Security, and `libSystem` paths. The ELF allowlist
+is limited to the audited glibc runtime libraries and the architecture's exact
+x86-64 or arm64 loader path, bound to the `GOARCH` in the binary's build
+metadata. The opposite architecture's otherwise-valid loader is rejected. Any
+other library or runtime search path fails packaging. Mach-O install names and
+ELF SONAME/interpreter records are parsed as complete `LC_ALL=C` tool-output
+records so suffixes cannot be truncated into an allowed name. ELF audit,
+dependency-audit, filter, and auxiliary loader entries are also rejected.
+Deterministic parser and policy fixtures run before the native matrix.
+A runnable native target must also report that revision through
+`gr --json version`. The build-ID revision
+must equal a clean Git HEAD and its target must equal the GOOS/GOARCH reported
 by `go version -m`. Normal CI clones additionally require Go's `vcs=git`,
 matching `vcs.revision`, and `vcs.modified=false` settings. Go 1.26 intentionally
 omits those VCS settings in linked worktrees whose common Git directory is
-outside the module, so a clean linked worktree may use the custom build ID,
+outside the module. The fallback compares the resolved Git directory and common
+directory, so ordinary, submodule, and separate-git-dir checkouts cannot claim
+linked-worktree status. A clean linked worktree may use the custom build ID,
 injected runtime revision, current HEAD, and Go target as its structured
 fallback; an ordinary checkout may not.
 
@@ -429,8 +486,9 @@ A pin rotation is atomic:
 6. validate SPDX 2.3 with the pinned standard validator and run Ghostty's VT
    tests, the complete wrapper suite, shared compatibility, fuzz/race,
    benchmarks, selector assertions, and the four-target default/native matrix;
-7. inspect every archive and executable for the expected static symbols and
-   only permitted system dynamic dependencies, then strip and scan build paths;
+7. inspect every archive and exact packaged executable for the expected static
+   symbols and only permitted system dynamic dependencies, omit DWARF while
+   retaining global provenance symbols, and scan build paths;
    and
 8. publish each candidate only when its exact three-file payload contains the
    binary, its target/revision/checksum-bound validated SPDX document, and the

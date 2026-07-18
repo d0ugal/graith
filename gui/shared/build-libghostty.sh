@@ -89,5 +89,4 @@ if [[ -n "$HEADERS" ]]; then
 fi
 
 echo "==> Done. Pinned to Ghostty $GHOSTTY_SHA (Zig $REQUIRED_ZIG)."
-echo "    Next: switch Package.swift's CGhosttyVT to a binaryTarget on"
-echo "    Libraries/libghostty-vt.xcframework (see NEEDS-MAC-VALIDATION.md)."
+echo "    Package.swift consumes Libraries/libghostty-vt.xcframework as a binary target."

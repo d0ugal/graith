@@ -101,6 +101,14 @@ make build    # produces ./gr
 {{% /tab %}}
 {{< /tabs >}}
 
+## Native testing candidates
+
+Experimental `libghostty-vt` native candidate artifacts for macOS require
+macOS 15 or newer. Graith supports the latest stable macOS release and the
+immediately previous major; this currently means macOS 26 and macOS 15. These
+artifacts are part of the staged backend evaluation; ordinary pure-Go releases
+and their rollback path remain unchanged while that evaluation is in progress.
+
 ## Shell completion
 
 Generate completion scripts for your shell:
