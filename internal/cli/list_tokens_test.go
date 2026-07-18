@@ -242,6 +242,81 @@ func TestListTokensJSONUsesCanonicalSessionInfoShape(t *testing.T) {
 	}
 }
 
+func TestListTokensHumanDeletedProjection(t *testing.T) {
+	origConnect := listConnectFn
+	origOut := out
+	origJSON := jsonOutput
+	origQuiet := listQuiet
+	origWide := listWide
+	origTokens := listTokens
+	origTree := listTree
+	origRepo := listRepo
+	origChildren := listChildren
+	origStarred := listStarred
+	origDeleted := listDeleted
+	origPaths := paths
+
+	t.Cleanup(func() {
+		listConnectFn = origConnect
+		out = origOut
+		jsonOutput = origJSON
+		listQuiet = origQuiet
+		listWide = origWide
+		listTokens = origTokens
+		listTree = origTree
+		listRepo = origRepo
+		listChildren = origChildren
+		listStarred = origStarred
+		listDeleted = origDeleted
+		paths = origPaths
+	})
+
+	fake := &scriptedConn{responses: []scriptedResp{okResp(payloadEnv("session_list", protocol.SessionListMsg{
+		Sessions: []protocol.SessionInfo{{
+			ID: "dreich", Name: "dreich", RepoName: "croft", Agent: "claude",
+			Tokens: &protocol.TokenInfo{Input: 10, Output: 5, Total: 15},
+		}},
+	}))}}
+	listConnectFn = func(*config.Config, config.Paths, string) (listConn, error) {
+		return fake, nil
+	}
+
+	var buf bytes.Buffer
+
+	jsonOutput = false
+	listQuiet = false
+	listWide = false
+	listTokens = true
+	listTree = false
+	listRepo = ""
+	listChildren = ""
+	listStarred = false
+	listDeleted = true
+	paths.Profile = ""
+	out = output.NewWithWriter(false, &buf)
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+
+	if err := listCmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("list --deleted --tokens: %v", err)
+	}
+
+	if len(fake.sends) != 1 || fake.sends[0].Type != "list" {
+		t.Fatalf("list sends = %+v, want one list request", fake.sends)
+	}
+
+	msg, ok := fake.sends[0].Payload.(protocol.ListMsg)
+	if !ok || !msg.Deleted {
+		t.Fatalf("list payload = %#v, want Deleted true", fake.sends[0].Payload)
+	}
+
+	if !strings.Contains(buf.String(), "SESSION") || !strings.Contains(buf.String(), "dreich") ||
+		!strings.Contains(buf.String(), "15") {
+		t.Errorf("human token projection missing deleted session detail:\n%s", buf.String())
+	}
+}
+
 func assertLineFields(t *testing.T, lines []string, prefix string, want ...string) {
 	t.Helper()
 

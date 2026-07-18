@@ -186,15 +186,7 @@ func orderTokenProjectionSessions(sessions []protocol.SessionInfo, tree bool) []
 
 func sortTokenProjectionSessions(sessions []protocol.SessionInfo) {
 	sort.Slice(sessions, func(i, j int) bool {
-		if sessions[i].RepoName != sessions[j].RepoName {
-			return sessions[i].RepoName < sessions[j].RepoName
-		}
-
-		if sessions[i].Name != sessions[j].Name {
-			return sessions[i].Name < sessions[j].Name
-		}
-
-		return sessions[i].ID < sessions[j].ID
+		return sessionInfoLess(sessions[i], sessions[j])
 	})
 }
 

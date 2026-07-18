@@ -207,17 +207,7 @@ func printQuiet(cmd *cobra.Command, sessions []protocol.SessionInfo) error {
 	sorted := make([]protocol.SessionInfo, len(sessions))
 	copy(sorted, sessions)
 	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].RepoName != sorted[j].RepoName {
-			return sorted[i].RepoName < sorted[j].RepoName
-		}
-
-		if sorted[i].Name != sorted[j].Name {
-			return sorted[i].Name < sorted[j].Name
-		}
-
-		// Tie-break on ID so output ordering is deterministic even when two
-		// sessions share a repo and name (names are not globally unique).
-		return sorted[i].ID < sorted[j].ID
+		return sessionInfoLess(sorted[i], sorted[j])
 	})
 
 	if jsonOutput {
@@ -418,11 +408,7 @@ func renderRows(w io.Writer, rows [][]string) {
 
 func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Time) {
 	sort.Slice(sessions, func(i, j int) bool {
-		if sessions[i].RepoName != sessions[j].RepoName {
-			return sessions[i].RepoName < sessions[j].RepoName
-		}
-
-		return sessions[i].Name < sessions[j].Name
+		return sessionInfoLess(sessions[i], sessions[j])
 	})
 
 	colorOn := listColorEnabled(cmd)
@@ -463,11 +449,7 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 
 	sortSessions := func(ss []protocol.SessionInfo) {
 		sort.Slice(ss, func(i, j int) bool {
-			if ss[i].RepoName != ss[j].RepoName {
-				return ss[i].RepoName < ss[j].RepoName
-			}
-
-			return ss[i].Name < ss[j].Name
+			return sessionInfoLess(ss[i], ss[j])
 		})
 	}
 	sortSessions(roots)
@@ -506,6 +488,20 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 	}
 
 	renderRows(cmd.OutOrStdout(), rows)
+}
+
+// sessionInfoLess is the canonical ordering for human session-list projections.
+// IDs break repo/name ties so duplicate session names remain deterministic.
+func sessionInfoLess(a, b protocol.SessionInfo) bool {
+	if a.RepoName != b.RepoName {
+		return a.RepoName < b.RepoName
+	}
+
+	if a.Name != b.Name {
+		return a.Name < b.Name
+	}
+
+	return a.ID < b.ID
 }
 
 func findSession(sessions []protocol.SessionInfo, nameOrID string) *protocol.SessionInfo {
@@ -560,6 +556,7 @@ func registerListCmd() {
 	listCmd.Flags().BoolVar(&listNoColor, "no-color", false, "disable colored status output")
 	listCmd.Flags().BoolVar(&listDeleted, "deleted", false, "show soft-deleted sessions with their expiry time")
 	listCmd.MarkFlagsMutuallyExclusive("quiet", "tokens")
+	listCmd.MarkFlagsMutuallyExclusive("wide", "tokens")
 
 	_ = listCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	_ = listCmd.RegisterFlagCompletionFunc("children", completeSessionNames)

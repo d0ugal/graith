@@ -38,7 +38,8 @@ TOTAL                     81,562  51,726  1,961,106  96,004   0      2,190,398  
 
 The detailed projection composes with the normal list selection flags, including
 `--repo`, `--children`, `--starred`, `--deleted`, and `--tree`. `--quiet` and
-`--tokens` are mutually exclusive because both select an output projection.
+`--wide` are each mutually exclusive with `--tokens` because all three select
+an output projection.
 
 Counts reflect the session's **current agent** and are updated by a background
 poll, so they normally lag by up to the configured poll interval (30 seconds by

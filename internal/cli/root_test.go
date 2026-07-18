@@ -313,3 +313,36 @@ func TestCompletionOmitsTokensCommandAndIncludesListFlag(t *testing.T) {
 		t.Error("completion does not contain gr list --tokens flag")
 	}
 }
+
+func TestListTokenProjectionFlagsAreExclusive(t *testing.T) {
+	registerCommands()
+
+	tokens := listCmd.Flags().Lookup("tokens")
+	quiet := listCmd.Flags().Lookup("quiet")
+	wide := listCmd.Flags().Lookup("wide")
+
+	origTokensChanged := tokens.Changed
+	origQuietChanged := quiet.Changed
+	origWideChanged := wide.Changed
+
+	t.Cleanup(func() {
+		tokens.Changed = origTokensChanged
+		quiet.Changed = origQuietChanged
+		wide.Changed = origWideChanged
+	})
+
+	tokens.Changed = true
+	quiet.Changed = true
+	wide.Changed = false
+
+	if err := listCmd.ValidateFlagGroups(); err == nil {
+		t.Error("--tokens and --quiet should be mutually exclusive")
+	}
+
+	quiet.Changed = false
+	wide.Changed = true
+
+	if err := listCmd.ValidateFlagGroups(); err == nil {
+		t.Error("--tokens and --wide should be mutually exclusive")
+	}
+}
