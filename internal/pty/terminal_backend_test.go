@@ -1,3 +1,5 @@
+//go:build !libghostty || libghostty_compare
+
 package pty
 
 import (

@@ -34,6 +34,15 @@ type ghosttyTerminal struct {
 	rows  int
 	cells []Cell
 	dirty bool
+
+	// Ghostty's public C options cannot set default_modes at the exact pin.
+	// Track ESC across Write boundaries so RIS can restore Graith's default
+	// grapheme mode before any later bytes reach the native parser. This relies
+	// on the exact pin's raw-adjacency invariant: ESC is an anywhere transition
+	// and a following bare c dispatches RIS. Revalidate that invariant whenever
+	// the pin changes; exposing default_modes in the C API is the desired
+	// upstream simplification.
+	previousByteWasESC bool
 }
 
 var _ Terminal = (*ghosttyTerminal)(nil)
@@ -120,8 +129,34 @@ func (gt *ghosttyTerminal) Write(p []byte) (n int, err error) {
 		return 0, nil
 	}
 
-	gt.terminal.VTWrite(p)
-	gt.dirty = true
+	start := 0
+	previousByteWasESC := gt.previousByteWasESC
+
+	for i, b := range p {
+		if previousByteWasESC && b == 'c' {
+			// ESC is an anywhere transition in Ghostty's parser, and a bare
+			// final c dispatches RIS. Feed through the reset, then restore
+			// Graith's default before parsing any bytes that follow it.
+			gt.terminal.VTWrite(p[start : i+1])
+			gt.dirty = true
+
+			gt.previousByteWasESC = false
+			if err := gt.terminal.ModeSet(libghostty.ModeGraphemeCluster, true); err != nil {
+				return i + 1, fmt.Errorf("restore go-libghostty grapheme clustering after RIS: %w", err)
+			}
+
+			start = i + 1
+		}
+
+		previousByteWasESC = b == '\x1b'
+	}
+
+	if start < len(p) {
+		gt.terminal.VTWrite(p[start:])
+		gt.dirty = true
+	}
+
+	gt.previousByteWasESC = previousByteWasESC
 
 	return len(p), nil
 }
