@@ -10,7 +10,11 @@ import (
 	libghostty "go.mitchellh.com/libghostty"
 )
 
-const maxGhosttyCells = 4 * 1024 * 1024
+// maxGhosttyCells bounds both native viewport allocation and the retained Go
+// snapshots on either side of the helper boundary. 262,144 cells still permits
+// unusually large 1024x256 terminals while keeping a single hostile resize
+// from turning into several hundred MiB of duplicated cell state.
+const maxGhosttyCells = 256 * 1024
 
 var (
 	errGhosttyClosed       = errors.New("libghostty-vt terminal is closed")

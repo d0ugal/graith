@@ -114,9 +114,12 @@ environment.
 
 Requests cover create, write, resize, coherent snapshot, and close. Frames have
 magic bytes, a protocol version, operation/status fields, and bounded lengths.
-The implementation limits writes to 16 MiB, replies to 128 MiB, and viewports
-to four million cells, validates color/style/UTF-8 fields, applies deadlines,
-and kills the child after protocol, I/O, or timeout failure.
+The implementation limits writes to 1 MiB, replies to 32 MiB, graphemes to 1
+KiB, viewports to 262,144 cells, and live helpers to 64. It validates
+operation-specific lengths, status/payload combinations, color values, style
+flags, cursor geometry, and UTF-8 before retaining decoded state. Every RPC has
+a five-second deadline; protocol, native, I/O, and timeout failures poison the
+connection and synchronously kill and reap the child.
 
 The public `Terminal` contract now returns resize errors, construction returns
 an error, and an optional `Snapshot` capability provides one coherent viewport.
@@ -129,6 +132,38 @@ default). It swaps models only after successful construction and replay. If the
 retained bytes reproduce the fault, it creates an empty helper rather than
 looping on poison input. Errors contain operation/status classes, never PTY
 content.
+
+### Hardened helper boundary (#1445)
+
+The private socket is created and marked `FD_CLOEXEC` while holding the same
+fork lock used by `os/exec`, closing Darwin's create-versus-fork inheritance
+window. Descriptor 3 is the only inherited non-stdio endpoint. Stdin is the
+null device, stdout and stderr are discarded, and the environment contains only
+the private marker plus explicitly allowlisted sanitizer/race settings. The
+helper creates a new session so it has no controlling terminal.
+
+Graceful close has a 250 ms exit grace period before kill and a bounded final
+reap wait; repeated and concurrent close are idempotent. Dirty writes and
+resizes release the parent's old snapshot cache. Helper slots are released only
+after reaping, so a pathological unreapable process consumes capacity instead
+of allowing the process bound to grow silently.
+
+Before constructing native state, the helper disables core dumps so terminal
+or native heap bytes cannot be persisted by the kernel, and irreversibly caps
+its descriptor table at 64. Failure to apply either control exits before the
+binding is called. Helper and binding failures cross the boundary only as fixed
+classifications—never as terminal bytes, environment values, native error
+strings, credentials, session output, or local paths.
+
+Portable hard address-space and CPU controls are deliberately excluded. Darwin
+does not provide Linux-equivalent address-space/cgroup enforcement; cumulative
+`RLIMIT_CPU` eventually kills a healthy long-lived terminal; and per-UID
+`RLIMIT_NPROC` affects unrelated processes. Cross-platform allocation/process
+caps and kill-on-RPC-deadline behavior are predictable on both supported
+kernels. Linux cgroups or platform sandbox profiles remain a possible
+deployment-layer defense. The helper still has the daemon user's OS privileges,
+and the 64-process cap can reject new tagged sessions under extreme concurrency;
+neither is represented as a complete sandbox.
 
 This proposal adds process startup and IPC cost, and one process per live
 terminal has an operational footprint. Those costs are measurable and bounded;
@@ -295,8 +330,19 @@ that one screen automatically.
 
 ### Testing
 
+Local Darwin arm64 validation against the checksum-pinned archive on 2026-07-18
+ran each target for five seconds with four workers and found no crash or saved
+failure: `FuzzGhosttySnapshotDecoder` completed 610,443 executions,
+`FuzzGhosttyRequestDecoder` completed 621,504, and the native
+`FuzzGhosttyHelperWrite` completed 933 isolated helper lifecycles. The
+exact-source Linux workflow runs the same targets for ten seconds and repeats
+the resource-limit tests on that kernel; execution counts are intentionally not
+treated as stable performance claims.
+
 - `go test ./internal/pty`
 - `scripts/libghostty-native.sh test`
+- `scripts/libghostty-native.sh race`
+- `scripts/libghostty-native.sh fuzz`
 - `scripts/libghostty-native.sh bench`
 - `scripts/libghostty-native.sh memory`
 - `scripts/libghostty-native.sh verify-metadata`

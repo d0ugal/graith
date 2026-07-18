@@ -2,7 +2,10 @@
 
 package pty
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func FuzzGhosttyHelperWrite(f *testing.F) {
 	f.Add([]byte("braw plain text\r\n"))
@@ -49,5 +52,18 @@ func FuzzGhosttySnapshotDecoder(f *testing.F) {
 			t.Skip()
 		}
 		_, _ = decodeGhosttySnapshot(payload)
+	})
+}
+
+func FuzzGhosttyRequestDecoder(f *testing.F) {
+	f.Add(ghosttyTestRequest(ghosttyOpWrite, []byte("braw")))
+	f.Add(ghosttyTestRequest(ghosttyOpResize, []byte{0, 80, 0, 24}))
+	f.Add([]byte("dreich"))
+
+	f.Fuzz(func(t *testing.T, frame []byte) {
+		if len(frame) > ghosttyMaxRequestBytes+12 {
+			t.Skip()
+		}
+		_, _, _ = readGhosttyRequest(bytes.NewReader(frame))
 	})
 }

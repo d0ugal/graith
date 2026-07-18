@@ -153,6 +153,12 @@ jobs:
             go test -count=1 -tags=libghostty ./internal/pty
             go test -race -count=1 -tags=libghostty ./internal/pty \
               -run 'TestTerminalBackendCompatibilityCorpus|TestGhostty'
+            go test -tags=libghostty ./internal/pty -run '^$' -parallel=4 \
+              -fuzz '^FuzzGhosttySnapshotDecoder$' -fuzztime=10s
+            go test -tags=libghostty ./internal/pty -run '^$' -parallel=4 \
+              -fuzz '^FuzzGhosttyRequestDecoder$' -fuzztime=10s
+            go test -tags=libghostty ./internal/pty -run '^$' -parallel=4 \
+              -fuzz '^FuzzGhosttyHelperWrite$' -fuzztime=10s
           else
             CGO_ENABLED=1 GOOS=linux CC="zig cc -target $TARGET" \
               go test -c -tags=libghostty -o "${RUNNER_TEMP}/pty-${GOARCH}.test" \
