@@ -338,8 +338,8 @@ defense in depth** (the accurate framing — not "TLS instead of WireGuard"):
 - **Pinning:** prefer **SPKI / public-key pinning** over pinning the leaf
   certificate — a pinned `tsnet` Let's Encrypt leaf will break on renewal. For
   `interface`-mode self-signed certs, TOFU: the app pins the fingerprint at
-  pairing time, and `gr pair` shows the fingerprint locally so the human can
-  confirm it. Host rename / re-key requires re-pairing.
+  pairing time, and `gr remote pairings approve` shows the fingerprint locally
+  so the human can confirm it. Host rename / re-key requires re-pairing.
 
 #### A.4 Config
 
@@ -391,8 +391,9 @@ distinct from session tokens:
    `pair_request` without a token" (B.2) don't contradict.
 2. `pair_request` carries a device label **and a device public key**. The daemon
    surfaces a pending pairing to the **local human** — via the overlay/dashboard
-   and a new `gr pair` CLI (`gr pair list` / `gr pair approve <id>` / `gr pair
-   revoke <id>`). Approval is a **local, out-of-band human action**.
+   and the `gr remote pairings` CLI (`gr remote pairings list` / `gr remote
+   pairings approve <id>` / `gr remote pairings revoke <id>`). Approval is a
+   **local, out-of-band human action**.
 3. On approval the daemon records the device (public key, WhoIs user+node, label)
    and mints a client token, returned once via `pair_response`; the app stores it
    in the iOS **Keychain**.
@@ -529,11 +530,11 @@ role checks, with `upgrade`/`reload`/pairing being **local-only**.
   (HMAC/SHA-256; password hashing is unnecessary), compared in constant time.
 - **Revocation drops live connections.** Auth is resolved per *control* message,
   but keystrokes flow on channel `0x01` guarded only by `IsAttachedClient` with
-  no per-frame token re-check (`handler.go:1446-1452`). So `gr pair revoke` must
-  **track connections by device/principal and force-close active connections**
-  for that device — otherwise a revoked (e.g. stolen) phone keeps typing into an
-  attached session until it disconnects. This is stated as a hard requirement,
-  not "takes effect on next message."
+  no per-frame token re-check (`handler.go:1446-1452`). So `gr remote pairings
+  revoke` must **track connections by device/principal and force-close active
+  connections** for that device — otherwise a revoked (e.g. stolen) phone keeps
+  typing into an attached session until it disconnects. This is stated as a hard
+  requirement, not "takes effect on next message."
 - **Audit logging.** Remote security-sensitive actions (pair request/approve,
   attach + takeover, create/delete, approval decisions) are logged with the
   paired **device ID and WhoIs identity**, not just "human" — the `0700` socket
@@ -748,8 +749,8 @@ remote daemon's profile. Real but bounded client work; **zero new daemon work**.
   matrix ensures no handler path silently inherits socket trust.
 - **Revocable, identity-bound, least-privilege credentials.** Per-device tokens,
   hashed at rest, bound to WhoIs identity + device key, revocable
-  (`gr pair revoke`) — and revocation **force-closes live connections** for that
-  device.
+  (`gr remote pairings revoke`) — and revocation **force-closes live
+  connections** for that device.
 - **Attack surface acknowledged:** social-engineering the local human into
   approving a rogue device; theft of the device + Keychain (mitigated by revoke +
   identity binding); tsnet auth-key leakage (attacker can *become* a daemon node
@@ -792,9 +793,10 @@ remote daemon's profile. Real but bounded client work; **zero new daemon work**.
 
 1. **Substrate (server):** `[remote]` config + validation, tsnet + interface
    listeners, `ConnOrigin` threading, WhoIs gate, the role/matrix refactor
-   (B.3–B.4), pairing messages/state + `gr pair`, `approval_subscribe`,
-   revocation-closes-connections, audit logging. Verified with the Go client and
-   the auth-matrix tests above. **Largest risk lives here.**
+   (B.3–B.4), pairing messages/state + `gr remote pairings`,
+   `approval_subscribe`, revocation-closes-connections, audit logging. Verified
+   with the Go client and the auth-matrix tests above. **Largest risk lives
+   here.**
 2. **Shared Swift package + `GraithProtocolClient`:** extract `GraithTerminalCore`
    from gui-poc; build the transport-abstract protocol client (Unix socket +
    `NWConnection`/TLS); build the SHA-pinned `libghostty-vt` `.xcframework`

@@ -29,6 +29,17 @@ client (`RealHostClient`) all live in `shared/GraithSessionKit`. Host / pairing 
 identity live in `shared/GraithRemoteKit`. See
 `docs/design/2026-07-14-shared-session-feature-layer.md`.
 
+The Add Host pairing sheet waits for out-of-band approval on the daemon host.
+List and approve the request there with:
+
+```bash
+gr remote pairings list
+gr remote pairings approve <request-id>
+```
+
+The host command prints the TLS SPKI pin that the iOS confirmation screen asks
+the user to compare before trusting the daemon.
+
 ## Tunable gesture physics (issue #1255)
 
 The interactive terminal's touch gestures — two-finger scrollback momentum /

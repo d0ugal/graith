@@ -137,8 +137,9 @@ func ConnectRemote(paths config.Paths, rh *RemoteHost, signer ed25519.PrivateKey
 // PairRemote performs the CLI side of device pairing with a remote daemon: it
 // dials (capturing the server's SPKI pin via TOFU), handshakes, sends
 // pair_request with the device public key, and blocks until the remote human
-// runs `gr pair approve`, then returns the minted RemoteHost credentials. No
-// token or proof-of-possession is used — this is the roleNone pairing lane.
+// runs `gr remote pairings approve`, then returns the minted RemoteHost
+// credentials. No token or proof-of-possession is used — this is the roleNone
+// pairing lane.
 func PairRemote(paths config.Paths, host string, port int, profile, deviceLabel, devicePubKey string) (*RemoteHost, error) {
 	raw, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), remoteDialTimeout)
 	if err != nil {

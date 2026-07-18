@@ -8,9 +8,10 @@ import GraithProtocol
 /// (the real conformer needs a live daemon over the tailnet).
 public protocol GraithPairing: Sendable {
     /// Send `pair_request` to the daemon at `transport` and await the
-    /// `pair_response`. Resolves once the local human runs `gr pair approve`,
-    /// or throws if the daemon rejects. The client cryptographically binds the
-    /// TLS pin to the presented certificate before returning (TOFU binding).
+    /// `pair_response`. Resolves once the local human runs
+    /// `gr remote pairings approve`, or throws if the daemon rejects. The client
+    /// cryptographically binds the TLS pin to the presented certificate before
+    /// returning (TOFU binding).
     func requestPairing(
         transport: GraithTransport,
         deviceLabel: String,
@@ -58,12 +59,14 @@ public struct RealPairing: GraithPairing {
 ///   1. The user enters a MagicDNS host + label and taps Pair.
 ///   2. We open a pre-auth connection and send `pair_request` with the device
 ///      label + ed25519 public key (via ``GraithPairing``).
-///   3. The **local human** approves out-of-band with `gr pair approve <id>`.
+///   3. The **local human** approves out-of-band with
+///      `gr remote pairings approve <request-id>`.
 ///   4. The daemon returns a `PairResponseMsg` once: client token + profile +
 ///      TLS SPKI pin. Nothing is persisted yet.
 ///   5. The SPKI fingerprint is surfaced so the user can confirm it matches
-///      what `gr pair` printed locally (TOFU). Only on confirmation do we
-///      persist the token to the store and mark the host paired.
+///      what `gr remote pairings approve` printed locally (TOFU). Only on
+///      confirmation do we persist the token to the store and mark the host
+///      paired.
 @MainActor
 public final class PairingCoordinator: ObservableObject {
     public enum Phase: Equatable, Sendable {
@@ -71,15 +74,17 @@ public final class PairingCoordinator: ObservableObject {
         /// Sending `pair_request` and waiting for the local human to approve.
         case awaitingApproval
         /// The daemon returned a token, but nothing is persisted yet: the user
-        /// must confirm the SPKI fingerprint matches `gr pair`'s local output
-        /// before we trust it (TOFU confirmation).
+        /// must confirm the SPKI fingerprint matches
+        /// `gr remote pairings approve`'s local output before we trust it (TOFU
+        /// confirmation).
         case awaitingConfirmation(Host)
         case paired(Host)
         case failed(String)
     }
 
     @Published public private(set) var phase: Phase = .idle
-    /// The human-readable SPKI fingerprint to confirm against `gr pair` output.
+    /// The human-readable SPKI fingerprint to confirm against
+    /// `gr remote pairings approve` output.
     @Published public private(set) var spkiFingerprint: String?
 
     private let pairing: GraithPairing
@@ -106,7 +111,8 @@ public final class PairingCoordinator: ObservableObject {
     }
 
     /// Kick off pairing with a daemon at `magicDNSName:port`, labelled `label`.
-    /// `deviceLabel` is what the local human sees in `gr pair list`.
+    /// `deviceLabel` is what the local human sees in
+    /// `gr remote pairings list`.
     public func pair(
         hostID: String = UUID().uuidString,
         label: String,
@@ -167,7 +173,8 @@ public final class PairingCoordinator: ObservableObject {
         }
     }
 
-    /// The user confirmed the SPKI fingerprint matches `gr pair`'s local output.
+    /// The user confirmed the SPKI fingerprint matches
+    /// `gr remote pairings approve`'s local output.
     /// This is the first point anything is written to the store or marked
     /// paired — persist the token/pin/device-ID now.
     public func confirmPairing() {
@@ -187,8 +194,8 @@ public final class PairingCoordinator: ObservableObject {
 
     /// The user rejected the fingerprint: discard the token without ever writing
     /// it, and drop the placeholder host entry. (The daemon already issued the
-    /// token; it can be cleared there with `gr pair revoke` — this device simply
-    /// never trusts it.)
+    /// token; it can be cleared there with `gr remote pairings revoke` — this
+    /// device simply never trusts it.)
     public func rejectPairing() {
         if let hostID = pendingHostID { registry.remove(hostID: hostID) }
         clearPending()

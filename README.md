@@ -33,3 +33,18 @@ brew install d0ugal/tap/graith
 ```
 
 For apt, dnf, prebuilt binaries, Go, and source installs, see the [installation guide](https://d0ugal.github.io/graith/docs/installation/). Then follow the [getting started guide](https://d0ugal.github.io/graith/docs/getting-started/) to create your first session.
+
+## Remote access
+
+graith can pair with another daemon over a Tailscale tailnet. Initiate pairing
+from the client, then approve it locally on the daemon host:
+
+```bash
+gr remote pair <host>
+gr remote pairings list
+gr remote pairings approve <request-id>
+```
+
+Use `gr remote pairings revoke <device-id>` on the host to revoke a device and
+force-close its live connections. See the [remote access guide](https://d0ugal.github.io/graith/docs/configuration/access/#remote-access)
+for listener configuration and the complete security model.
