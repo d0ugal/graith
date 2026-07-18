@@ -290,17 +290,19 @@ small, deterministic, generic old Scots data rather than captured output; the
 
 ### Performance evidence
 
-The direct in-process spike showed that Ghostty parsing and 4 MiB reconstruction
-were orders of magnitude faster and used substantially less memory than Charm,
-while resize and viewport extraction were slower. Those numbers are not reused
-as final claims because the accepted design adds helper startup, IPC, coherent
-encoding, and the public wrapper iterator path.
+The [focused benchmark evidence](2026-07-18-libghostty-daemon-backend-benchmarks.md)
+measures the accepted helper process and public `go-libghostty` wrapper, not the
+superseded in-process shim. On the representative Apple M5 host, five-sample
+medians show a 4.95 ms helper start/close cost, 319.96 µs per 65,564-byte parse,
+1.35 ms per dirty coherent `120x40` snapshot, 597.96 µs per alternating resize,
+and 24.19 ms for full 4 MiB reconstruction plus snapshot and close.
 
-#1444 owns the operational measurement of helper start/close, 64 KiB parsing,
-dirty `120x40` snapshots, alternating resize, 4 MiB reconstruction, Go
-allocations, parent RSS, and child peak RSS. The final medians and exact commands
-will replace this paragraph before the branch is handed off. This prevents a
-faster superseded shim from being presented as evidence for the selected design.
+The same record separates parent Go allocations from helper/native memory and
+reports median peak RSS of 20.95 MiB in the parent and 18.41 MiB in the helper;
+Charm's rollback process measured 153.25 MiB for the identical 4 MiB workload.
+It pins the host, toolchain, revisions, ReleaseFast artifact, sample count,
+benchtime, commands, validation checksum, and measurement limitations. Raw
+captured output and machine-local paths are deliberately not committed.
 
 ### Build and release consequences
 
