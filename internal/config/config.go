@@ -1492,7 +1492,7 @@ type TokenAccounting struct {
 	// default (TokenPollIntervalDefault); a zero cadence would busy-loop.
 	PollInterval string `toml:"poll_interval"`
 	// StartupDelay is the short first-tick delay after a daemon (re)start so
-	// `gr tokens` isn't blank for a full interval. Empty or unparseable uses the
+	// token columns aren't blank for a full interval. Empty or unparseable uses the
 	// default (TokenStartupDelayDefault); an explicit "0" polls immediately.
 	StartupDelay string `toml:"startup_delay"`
 	// BatchSize bounds how many sessions are (re)parsed per tick so a large fleet

@@ -220,7 +220,6 @@ func registerCommands() {
 		registerStopCmd()
 		registerStoreCmd()
 		registerTodoCmd()
-		registerTokensCmd()
 		registerTypeCmd()
 		registerUpdateCmd()
 		registerVersionCmd()

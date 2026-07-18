@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
-	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
 )
 
@@ -154,7 +153,7 @@ func TestConfigFlagAllowedOutsideSession(t *testing.T) {
 	configFile := filepath.Join(t.TempDir(), "dreich.toml")
 	connectErr := errors.New("dreich daemon unavailable")
 	origListConnectFn := listConnectFn
-	listConnectFn = func(*config.Config, config.Paths, string) (*client.Client, error) {
+	listConnectFn = func(*config.Config, config.Paths, string) (listConn, error) {
 		return nil, connectErr
 	}
 
@@ -286,5 +285,31 @@ func TestRegisterCommandsIdempotent(t *testing.T) {
 		if n > 1 {
 			t.Errorf("subcommand %q registered %d times, want 1", name, n)
 		}
+	}
+
+	if seen["tokens"] != 0 {
+		t.Error("obsolete tokens subcommand is still registered")
+	}
+
+	if listCmd.Flags().Lookup("tokens") == nil {
+		t.Error("list --tokens flag is not registered")
+	}
+}
+
+func TestCompletionOmitsTokensCommandAndIncludesListFlag(t *testing.T) {
+	registerCommands()
+
+	var buf bytes.Buffer
+	if err := rootCmd.GenBashCompletion(&buf); err != nil {
+		t.Fatalf("generate bash completion: %v", err)
+	}
+
+	script := buf.String()
+	if strings.Contains(script, "_gr_tokens()") {
+		t.Error("completion still contains the obsolete standalone token command")
+	}
+
+	if !strings.Contains(script, "--tokens") {
+		t.Error("completion does not contain gr list --tokens flag")
 	}
 }

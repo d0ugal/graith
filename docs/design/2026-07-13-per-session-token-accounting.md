@@ -14,8 +14,9 @@ graith already opens each agent's on-disk transcript to power cross-agent
 migration, and those transcripts already record how many tokens every turn
 consumed — graith just streams past the numbers. This doc proposes extracting
 the token usage graith is already reading, tallying it per session, and
-surfacing per-session totals in `gr list` and a new `gr tokens` command. USD
-cost (from a user-supplied price table) and budget caps are designed here but
+surfacing per-session totals through `gr list --wide`, `gr list --tokens`, and
+`SessionInfo.tokens` in `gr list --json`. USD cost (from a user-supplied price
+table) and budget caps are designed here but
 deferred to follow-ups; the core deliverable is honest token counts for the
 current agent of each session graith can already parse (Claude Code and Codex).
 
@@ -83,8 +84,8 @@ stands alone as a post-hoc, file-read feature.
   the Claude and Codex transcripts graith already parses, as **mutually
   exclusive** categories so a total is meaningful.
 - Aggregate to a per-session total for the session's **current agent** and
-  expose it as a `SessionInfo` field, visible in `gr list --wide` and queryable
-  via a new `gr tokens` command.
+  expose it as a `SessionInfo` field, visible in `gr list --wide` and in the
+  detailed `gr list --tokens` projection.
 - Be correct: no double-counting (across duplicate Claude records, across the
   overlapping Codex cache/reasoning sub-fields, or across a Codex agent's
   multiple rollout files), and count all tokens the current agent actually spent
@@ -110,8 +111,8 @@ stands alone as a post-hoc, file-read feature.
   price table (and it needs accurate per-model attribution, which v1 does not
   build).
 - **Budget caps / enforcement in v1.** Designed as a follow-up.
-- **TUI picker column in v1.** Shipped CLI-first (`gr list --wide` + `gr
-  tokens`); the shared registry makes adding the TUI column a fast-follow once a
+- **TUI picker column in v1.** Shipped CLI-first (`gr list --wide` + `gr list
+  --tokens`); the shared registry makes adding the TUI column a fast-follow once a
   width/layout decision is made. The v1 goals therefore do **not** promise TUI.
 - **Real-time / per-turn live metering.** The read model is post-hoc polling;
   counts lag by up to one poll interval. Real-time paths (statusLine, OTel) are
@@ -148,7 +149,7 @@ on-disk JSONL ── Locate() ─> []Source{Path,Size,ModTime}
                                      │
                 RunTokenLoop tick ─> SessionState.Tokens (json:"-", replaced whole)
                                      │
-                     toSessionInfo ─> SessionInfo.Tokens ─> gr list --wide / gr tokens
+                     toSessionInfo ─> SessionInfo.Tokens ─> gr list --wide / --tokens / --json
 ```
 
 #### The reader API: resolve, fingerprint, then parse
@@ -298,8 +299,8 @@ backward tail scan suffices — no full parse). Two shapes:
 
 - **Legacy:** `payload.total` (an int; the `codex_test.go:19` fixture). This is
   an opaque aggregate with no breakdown, so it lands in **`Unclassified`**, never
-  `Output`. (Folding it into `Output` would make the `gr tokens` OUTPUT column
-  lie — the open question in the first draft, now resolved.)
+  `Output`. (Folding it into `Output` would make the `gr list --tokens` OUTPUT
+  column lie — the open question in the first draft, now resolved.)
 
 **Multi-rollout per session.** A single Codex agent's cwd routinely accumulates
 several rollout files — the codebase already disambiguates this
@@ -358,7 +359,7 @@ A new `RunTokenLoop(ctx)` (`internal/daemon/tokens.go`), registered next to the
 other loops (`daemon.go:6059`):
 
 1. **Startup sweep:** a short initial timer (as `RunGitPullLoop` does,
-   `gitpull.go:20`) so `gr tokens` isn't blank for a full interval after daemon
+   `gitpull.go:20`) so token columns aren't blank for a full interval after daemon
    start.
 2. **Eligibility:** status running, stopped, **or errored** (errored sessions can
    have billable usage), agent `transcript.Supported()`. **Unlike
@@ -410,29 +411,31 @@ zero, and `""`/`—` for unknown. A trailing `~` marks a degraded count. It ship
 it requires `TUIValue`+`TUIStyle` and a width decision — a fast-follow, not a v1
 claim).
 
-**`gr tokens`** — a new read-only command (`internal/cli/tokens.go`, registered
-in `root.go`):
+**`gr list --tokens`** — a token-focused human projection of the existing list
+command (`internal/cli/list_tokens.go`, selected from `list.go`):
 
-```
-$ gr tokens
-SESSION   AGENT   INPUT    OUTPUT   CACHE-R    CACHE-W   OTHER   TOTAL
-braw      claude  12,431   48,209   1,204,882  96,004    0       1,361,526
-canny     codex   69,131   3,517    756,224    0         0       828,872
-dreich    cursor  —        —        —          —         —       (unsupported)
-
-$ gr tokens braw          # single-session detail
-$ gr tokens --json        # agent-mode structured output
+```console
+$ gr ls --tokens --repo graith
+SESSION  REPO    AGENT   INPUT   OUTPUT  CACHE-R    CACHE-W  OTHER  TOTAL      COUNTED
+braw     graith  claude  12,431  48,209  1,204,882  96,004   0      1,361,526  8s ago
+canny    graith  codex   69,131  3,517   756,224    0        0      828,872    11s ago
+dreich   graith  cursor  —       —       —          —        —      (unsupported) —
+TOTAL                     81,562  51,726  1,961,106  96,004   0      2,190,398  2/3 known
 ```
 
-- Reuses the **existing `ListSessions` RPC** and formats the token fields on
-  `SessionInfo` — no new control-message handler case, so no
+- Runs after the normal `--repo`, `--children`, and `--starred` filters and
+  honours `--tree` and `--deleted`, so token selection cannot drift from normal
+  list selection.
+- Uses the **existing `ListSessions` RPC** and formats the token fields on
+  `SessionInfo` — there is no new control-message handler case, so no
   `remoteMessagePolicy`/`authmatrix` row (which `TestRemoteMatrixCompleteness`
   would otherwise require).
-- Single-session lookup uses the **ambiguity-safe** `resolveByNameOrID`
-  (`delete.go:272`), not `findSession` (`list.go:442`, first-match), since names
-  aren't globally unique.
-- Unknown/unsupported render `—`; degraded totals show `~`; the `--json` schema
-  is a token-focused projection (documented in Phase 2).
+- Unknown/unsupported render distinctly; a present zero remains `0`; degraded
+  totals show `~`; the `COUNTED` age exposes poll lag and retained stale values.
+  Aggregate rows report known-session coverage so partial totals are explicit.
+- `gr list --json` (also implied by agent mode) remains the canonical full
+  `SessionListMsg` shape with data nested under `SessionInfo.tokens`. `--tokens`
+  does not introduce a second JSON schema.
 
 #### `SessionInfo` field
 
@@ -454,9 +457,10 @@ consumers see nothing new until a session has a count.
 
 **Visibility decision (made explicit per review):** because token data rides on
 `SessionInfo`, it becomes visible to every `SessionInfo` consumer, including
-read-only remote guests — not just `gr tokens`. For raw token *counts* this is
-acceptable (they're low-sensitivity). It is called out here so the follow-up that
-adds USD **cost** revisits whether cost should be gated more tightly.
+read-only remote guests — not just the token-focused list projection. For raw
+token *counts* this is acceptable (they're low-sensitivity). It is called out
+here so the follow-up that adds USD **cost** revisits whether cost should be
+gated more tightly.
 
 #### Trade-offs
 
@@ -534,8 +538,8 @@ Codex-cumulative hazards. The following findings changed the design:
 - **Smaller fixes adopted:** immutable `Tokens` replacement; drop the recursive
   `Usage.ByModel` and **omit per-model breakdown from v1** (accurate Codex
   attribution needs cumulative-delta logic — deferred to the cost follow-up);
-  `resolveByNameOrID` for `gr tokens`; include `StatusErrored`; prune purged
-  cache entries; constant interval (no config knob) in v1; explicit remote
+  shared list filtering for the token projection; include `StatusErrored`;
+  prune purged cache entries; constant interval (no config knob) in v1; explicit remote
   visibility note; Claude `usage()` must not inherit `Read`'s `ErrNoTurns`.
 
 Remaining items intentionally left to Phase 2 (verified with real fixtures, not
@@ -560,8 +564,8 @@ one located file. Both are called out inline above.
   per-tick cap at `:129`), `internal/daemon/gitpull.go` (startup sweep at `:20`);
   registration at `internal/daemon/daemon.go:6059`.
 - CLI: `internal/client/sessioncols.go` (`SessionColumns`),
-  `internal/cli/list.go` (`findSession`), `internal/cli/delete.go`
-  (`resolveByNameOrID`), `internal/cli/root.go` (command registration).
+  `internal/cli/list.go` (selection and projection routing), and
+  `internal/cli/list_tokens.go` (detailed token projection).
 - Migration continuity: `internal/daemon/migrate.go` (`MigratedFrom` at `:149`).
 - Related memory: token-accounting feasibility; #644 transcript-format gotchas.
 
@@ -570,8 +574,8 @@ one located file. Both are called out inline above.
 - **Phasing.** (1) reader `Locate`/`UsageFrom` for Claude+Codex with the
   exclusive mappings + dedup + validation, driven by real fixtures; (2)
   `RunTokenLoop` + `SessionState.Tokens` + `SessionInfo.Tokens`; (3) the
-  `tokens` `--wide` column + `gr tokens` command + `website/content/docs/`
-  updates (`commands.md`; `configuration.md` only if a knob is later added).
+  `gr list --wide` token column + `gr list --tokens` projection +
+  `website/content/docs/` updates.
   Ships as one core PR; cost and budgets are separate follow-ups.
 - **Fixture-first for the format-sensitive bits.** The Codex enumeration/resume
   behaviour and the Claude subagent storage layout are verified with captured
@@ -637,9 +641,9 @@ within each full scan. Deferred so v1 stays migration-free.
   most of the active-session cost with no durable state. v1 ships full-rescan +
   fingerprint cache + batch cap; this is the first optimization if it proves
   costly.
-- **Lazy compute on `gr tokens`/`gr list`** (no loop). Rejected: puts synchronous
-  file reads on the interactive path and gives a future TUI column nothing to
-  poll.
+- **Lazy compute on `gr list --tokens`/`gr list`** (no loop). Rejected: puts
+  synchronous file reads on the interactive path and gives a future TUI column
+  nothing to poll.
 - **Additive Codex mapping** (first draft). Rejected: double-counts overlapping
   sub-fields (see Consensus).
 
@@ -663,8 +667,8 @@ within each full scan. Deferred so v1 stays migration-free.
   cache reuse + invalidation on size/mtime change; retain-on-error (transient
   error doesn't clear a known total); startup sweep; batch cap; ctx cancellation.
 - **CLI/formatting tests:** `cliTokens` humanisation (unknown `—` vs zero `0` vs
-  `k`/`M`, degraded `~`); `gr tokens` table + `--json`; `resolveByNameOrID`
-  ambiguity rejection; unsupported → `—`.
+  `k`/`M`, degraded `~`); `gr list --tokens` table, filter/tree composition,
+  canonical nested `--json`, aggregate coverage, and unsupported/unknown states.
 - Coverage bar (≥80%) and `-race` apply; new behaviour ships with its tests in
   the same PR.
 

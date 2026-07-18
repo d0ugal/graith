@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/version"
 	"github.com/spf13/cobra"
@@ -25,12 +26,21 @@ var (
 	listStarred  bool
 	listQuiet    bool
 	listWide     bool
+	listTokens   bool
 	listNoColor  bool
 	listDeleted  bool
 )
 
-// listConnectFn lets command-validation tests fail before daemon auto-start.
-var listConnectFn = client.Connect
+type listConn interface {
+	controlConn
+	Close()
+}
+
+// listConnectFn lets command-validation and rendering tests run without daemon
+// auto-start.
+var listConnectFn = func(cfg *config.Config, paths config.Paths, cfgFile string) (listConn, error) {
+	return client.Connect(cfg, paths, cfgFile)
+}
 
 // colorize wraps text in the given foreground color for terminal output. When
 // coloring is disabled (or the text is empty) it returns the text unchanged.
@@ -101,35 +111,9 @@ var listCmd = &cobra.Command{
 			return err
 		}
 
-		if listChildren != "" {
-			parent := findSession(list.Sessions, listChildren)
-			if parent == nil {
-				return fmt.Errorf("session %q not found", listChildren)
-			}
-
-			list.Sessions = descendantsOf(list.Sessions, parent.ID)
-		}
-
-		if listRepo != "" {
-			filtered := list.Sessions[:0]
-			for _, s := range list.Sessions {
-				if matchesRepo(s, listRepo) {
-					filtered = append(filtered, s)
-				}
-			}
-
-			list.Sessions = filtered
-		}
-
-		if listStarred {
-			filtered := list.Sessions[:0]
-			for _, s := range list.Sessions {
-				if s.Starred {
-					filtered = append(filtered, s)
-				}
-			}
-
-			list.Sessions = filtered
+		list.Sessions, err = applyListFilters(list.Sessions, listChildren, listRepo, listStarred)
+		if err != nil {
+			return err
 		}
 
 		if listQuiet {
@@ -156,7 +140,9 @@ var listCmd = &cobra.Command{
 
 		now := time.Now()
 
-		if listTree {
+		if listTokens {
+			printTokenProjection(cmd, list.Sessions, now, listTree)
+		} else if listTree {
 			printTree(cmd, list.Sessions, now)
 		} else {
 			printFlat(cmd, list.Sessions, now)
@@ -173,6 +159,46 @@ var listCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+// applyListFilters applies the normal session-list filters in command order.
+// Keeping selection separate from rendering ensures every projection, including
+// --tokens, sees exactly the same sessions.
+func applyListFilters(sessions []protocol.SessionInfo, children, repo string, starred bool) ([]protocol.SessionInfo, error) {
+	filtered := sessions
+
+	if children != "" {
+		parent := findSession(filtered, children)
+		if parent == nil {
+			return nil, fmt.Errorf("session %q not found", children)
+		}
+
+		filtered = descendantsOf(filtered, parent.ID)
+	}
+
+	if repo != "" {
+		byRepo := make([]protocol.SessionInfo, 0, len(filtered))
+		for _, s := range filtered {
+			if matchesRepo(s, repo) {
+				byRepo = append(byRepo, s)
+			}
+		}
+
+		filtered = byRepo
+	}
+
+	if starred {
+		starredSessions := make([]protocol.SessionInfo, 0, len(filtered))
+		for _, s := range filtered {
+			if s.Starred {
+				starredSessions = append(starredSessions, s)
+			}
+		}
+
+		filtered = starredSessions
+	}
+
+	return filtered, nil
 }
 
 // printQuiet emits bare session names, one per line (or a JSON array of session
@@ -529,9 +555,11 @@ func registerListCmd() {
 	listCmd.Flags().StringVar(&listChildren, "children", "", "filter to descendants of a session")
 	listCmd.Flags().BoolVar(&listStarred, "starred", false, "show only starred sessions")
 	listCmd.Flags().BoolVarP(&listQuiet, "quiet", "q", false, "output only session names (or IDs as JSON with --json)")
-	listCmd.Flags().BoolVar(&listWide, "wide", false, "show all columns (model, branch, attached)")
+	listCmd.Flags().BoolVar(&listWide, "wide", false, "show all columns, including compact token totals")
+	listCmd.Flags().BoolVar(&listTokens, "tokens", false, "show detailed per-session token usage and totals")
 	listCmd.Flags().BoolVar(&listNoColor, "no-color", false, "disable colored status output")
 	listCmd.Flags().BoolVar(&listDeleted, "deleted", false, "show soft-deleted sessions with their expiry time")
+	listCmd.MarkFlagsMutuallyExclusive("quiet", "tokens")
 
 	_ = listCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	_ = listCmd.RegisterFlagCompletionFunc("children", completeSessionNames)

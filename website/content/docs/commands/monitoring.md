@@ -20,31 +20,63 @@ List all sessions with status.
 | `--children <name-or-id>` | Filter to descendants of a session |
 | `--starred` | Show only starred sessions |
 | `--wide` | Show all columns, including per-session token usage |
+| `--tokens` | Show the detailed token-usage projection and aggregate totals |
 
 The `--wide` view adds a **Tokens** column with the compact total token usage
 for each session's current agent (a trailing `~` marks an approximate count).
-See `gr tokens` for the full breakdown.
 
-### `gr tokens [session]`
+Use `--tokens` for the detailed input, output, cache-read, cache-write, other,
+and total counts:
 
-Show per-session token usage — input, output, and cache tokens — extracted from
-each agent's on-disk transcript. With no argument it lists every session and a
-grand total; with a session name or ID it shows just that session.
+```console
+$ gr ls --tokens
+SESSION  REPO    AGENT   INPUT   OUTPUT  CACHE-R    CACHE-W  OTHER  TOTAL      COUNTED
+braw     graith  claude  12,431  48,209  1,204,882  96,004   0      1,361,526  8s ago
+canny    graith  codex   69,131  3,517   756,224    0        0      828,872    11s ago
+TOTAL                     81,562  51,726  1,961,106  96,004   0      2,190,398  2/2 known
+```
+
+The detailed projection composes with the normal list selection flags, including
+`--repo`, `--children`, `--starred`, `--deleted`, and `--tree`. `--quiet` and
+`--tokens` are mutually exclusive because both select an output projection.
 
 Counts reflect the session's **current agent** and are updated by a background
-poll, so they lag by up to ~30 seconds. Agents without a transcript reader
-(currently anything other than Claude Code and Codex) show `—` / `(unsupported)`;
-a session that hasn't been observed yet shows `(unknown)`, distinct from a real
-zero. USD cost is not shown (a planned opt-in via a user-supplied price table).
+poll, so they normally lag by up to the configured poll interval (30 seconds by
+default). **Counted** is the age of the last successful observation; if a later
+poll cannot read a transcript, the last count is retained and its age continues
+to grow rather than being replaced with a false zero. Agents without a
+transcript reader (currently anything other than Claude Code and Codex) show
+`(unsupported)`, while a supported session that has not been observed shows
+`(unknown)`. A present all-zero row is a genuine observed zero. A trailing `~`
+marks an approximate/degraded count.
 
-```
-$ gr tokens
-SESSION   AGENT   INPUT    OUTPUT   CACHE-R    CACHE-W   OTHER   TOTAL
-braw      claude  12,431   48,209   1,204,882  96,004    0       1,361,526
-canny     codex   69,131   3,517    756,224    0         0       828,872
+The input, output, cache-read, cache-write, and other categories are mutually
+exclusive; **Total** does not add cache or reasoning fields a second time. The
+aggregate includes known rows only and its **Counted** cell reports coverage
+(for example, `2/4 known`) so a partial total is not presented as fleet-wide.
+
+`gr ls --json` is the canonical structured form. Token data is nested under each
+session's `tokens` field, including `counted_at` and the optional `degraded`
+marker:
+
+```console
+$ gr ls --json | jq '.sessions[] | {name, tokens}'
+{
+  "name": "braw",
+  "tokens": {
+    "input": 12431,
+    "output": 48209,
+    "cache_creation": 96004,
+    "cache_read": 1204882,
+    "total": 1361526,
+    "counted_at": "2026-07-18T12:00:00Z"
+  }
+}
 ```
 
-Use `--json` (implied in agent mode) for a structured per-session projection.
+`--json` and agent mode always use this full `SessionInfo` shape, even when
+`--tokens` is also present; there is no separate flat token JSON schema. USD
+cost is not shown (a planned opt-in via a user-supplied price table).
 
 ### `gr logs <name-or-id>` (alias: `l`)
 
