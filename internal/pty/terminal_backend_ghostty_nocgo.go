@@ -1,4 +1,4 @@
-//go:build libghostty && !cgo
+//go:build libghostty && !cgo && !libghostty_test_unsupported
 
 package pty
 

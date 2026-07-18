@@ -310,14 +310,25 @@ is rejected.
 The path-scoped native workflow performs these checks:
 
 - ordinary `CGO_ENABLED=0` builds for Darwin/Linux amd64/arm64, proving the
-  rollback build does not select cgo or require a native archive;
-- tagged Darwin arm64 execution and amd64/arm64 linking against the
-  checksum-pinned universal archive;
+  rollback binary contains neither the build tag, wrapper module, nor a native
+  Ghostty symbol;
+- runtime assertions that an explicit tag without cgo returns the requires-cgo
+  error and that the private forced-unsupported test selector returns the
+  unsupported-OS error, plus a FreeBSD source-selection check;
+- tagged Darwin amd64/arm64 linking against the checksum-pinned universal
+  archive, with execution on the runner architecture;
 - exact-source Linux amd64 execution and arm64 cross-link using Zig 0.15.2;
-- committed-header diff against the exact Ghostty checkout;
-- upstream `go-libghostty` tests against Graith's newer Ghostty pin;
-- tagged PTY, focused race, and candidate executable builds; and
-- testing artifacts that include the native SPDX and notice inventory.
+- exact committed-header comparison against the Ghostty checkout and every
+  Apple XCFramework header slice;
+- Ghostty `test-lib-vt` in Debug (where its runtime-safety assertions are
+  enabled), while candidate archives remain ReleaseFast with SIMD enabled;
+- the complete `go.mitchellh.com/libghostty/...` suite against Graith's newer
+  Ghostty pin, tagged PTY tests, and focused race tests;
+- audited static-archive membership, native dependency/runtime symbols,
+  defined Ghostty symbols in unstripped executables, and remaining Mach-O/ELF
+  dynamic dependencies; and
+- path-free stripped testing artifacts whose exact contents are `gr`, the
+  SPDX document, and the complete notice file.
 
 An explicit tagged build without cgo, or on an unsupported OS, returns a
 configuration error rather than silently changing emulator. Ordinary
@@ -331,6 +342,15 @@ runner against that SDK, while the archive links and runs. Linux source builds
 are reproduced in CI. This is a documented local toolchain limitation, not a
 claim that the library is unsupported on macOS.
 
+Evidence is classified by where code actually executes. A runner-native test
+or candidate is measured evidence; a non-native architecture is cross-link and
+format-inspection evidence only. The workflow prints the Mach-O or ELF dynamic
+dependency table for every candidate it can inspect, but does not describe an
+arm64 cross-link on an amd64 Linux host as execution. Local validation for
+#1448 measured the Darwin arm64 archive, wrapper suite, PTY suite, static link,
+and candidate packaging. The Linux source builds and any non-runner Darwin
+architecture remain CI evidence.
+
 ### Pinning, licensing, security, and SBOM
 
 Graith pins `go.mitchellh.com/libghostty` to pseudo-version
@@ -341,22 +361,49 @@ useful for tooling. Its API is not yet version-stable, so upgrades are reviewed
 changes rather than floating module updates.
 
 `libghostty-native.spdx.json` records the native closure that Go tooling cannot
-see: Ghostty, uucode 0.2.0, Highway 1.2.0 at exact upstream commit, and the
-vendored simdutf 5.2.8 amalgamation. `THIRD_PARTY_NOTICES.libghostty.md` carries
-the elected MIT/BSD-3-Clause/Unicode notices. The helper script checks the Go
-module, SPDX entries, notice pins, source manifests, Git commit, toolchain,
-headers, and Apple checksum as one unit.
+see: Ghostty, uucode 0.2.0, Highway 1.2.0 at its exact upstream commit, the
+vendored simdutf 9.0.0 amalgamation, and the bundled Zig 0.15.2 compiler/UBSan
+runtimes. Ghostty's simdutf package manifest is stale at 5.2.8, so the SBOM is
+bound instead to the exact vendored file hashes, the compiled version macro,
+and the corresponding upstream commit. Archive membership and symbols confirm
+that simdutf, Highway, compiler runtime, and UBSan runtime content is carried.
+
+`THIRD_PARTY_NOTICES.libghostty.md` carries the MIT, both BSD-3-Clause,
+Unicode-3.0, Apache-2.0, and LLVM-exception terms required by that compiled
+closure. In particular, the simdutf amalgamation contains PyTorch-derived BSD
+ISA detection and a Google Fuchsia-derived Apache validator; choosing MIT for
+simdutf itself does not remove those embedded notices. The script checks the Go
+module sum and license, SPDX structure and relationships, notice pins and
+license hashes, source manifests, Git commit, toolchain, headers, archive
+contents, and Apple checksum as one unit. CI then validates the document with
+the checksum-pinned official SPDX Java tool.
+
+The Apple archive checksum identifies the reviewed bytes but is not a claim of
+an upstream Ghostty attestation: it is a Graith-hosted testing input. A rotation
+must retain the source-build reproduction and exact archive inspection rather
+than treating the hosting release description as sufficient provenance.
 
 A pin rotation is atomic:
 
-1. select the Ghostty and `go-libghostty` commits together;
-2. rebuild every static target with the exact required Zig version;
-3. synchronize and diff the public headers;
-4. update `go.mod`, artifact digests, script constants, SPDX entries, licenses,
-   and notices in one review;
-5. run Ghostty lib-vt tests, the complete wrapper suite, shared compatibility,
-   fuzz/race, benchmarks, and the four-target workflow; and
-6. publish candidate archives only after provenance and binary linkage checks.
+1. triage the security update across the wrapper, Ghostty, Zig runtime,
+   uucode, Highway, and simdutf rather than relying only on Go advisories;
+2. select the Ghostty and `go-libghostty` commits together and record the
+   wrapper module sum, Ghostty commit/version, and exact Zig requirement;
+3. re-audit Ghostty manifests, vendored file version macros and hashes, runtime
+   bundling flags, archive members, license choices, copyright notices, and all
+   source/archive/license checksums;
+4. rebuild every static target with that exact Zig version, synchronize the
+   public headers, and compare every committed/artifact header byte-for-byte;
+5. update `go.mod`, `go.sum`, script constants, artifact digests, SPDX packages
+   and relationships, and notices in the same review—none may rotate alone;
+6. validate SPDX 2.3 with the pinned standard validator and run Ghostty's VT
+   tests, the complete wrapper suite, shared compatibility, fuzz/race,
+   benchmarks, selector assertions, and the four-target default/native matrix;
+7. inspect every archive and executable for the expected static symbols and
+   only permitted system dynamic dependencies, then strip and scan build paths;
+   and
+8. publish each candidate only when its exact three-file payload contains the
+   matching binary, SPDX inventory, and notices.
 
 Native advisories are not visible to Go vulnerability scanners. Dependency
 monitoring must therefore track Ghostty, uucode, Highway, simdutf, and the
@@ -406,6 +453,10 @@ treated as stable performance claims.
 - `scripts/libghostty-native.sh bench`
 - `scripts/libghostty-native.sh memory`
 - `scripts/libghostty-native.sh verify-metadata`
+- `scripts/libghostty-native.sh verify-provenance`
+- `scripts/libghostty-native.sh verify-selectors`
+- `scripts/libghostty-native.sh prepare-apple`
+- `scripts/libghostty-native.sh validate-spdx <tools-java-jar>`
 - tagged helper protocol fuzz targets and targeted `-race` tests
 - backend-neutral and tagged >1 MiB hydration, poison-replay, repeated-close,
   close-versus-render/resize, helper RSS polling, limiter prelaunch, and
