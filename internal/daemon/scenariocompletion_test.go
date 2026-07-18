@@ -259,6 +259,119 @@ func TestScenarioCompletionActionSuccessSchedulesDelayedCleanup(t *testing.T) {
 	t.Fatal("completion action did not reach succeeded")
 }
 
+func TestScenarioCompletionSessionActionSpawnsWithDurableIdentity(t *testing.T) {
+	backend := filepath.Join(t.TempDir(), "safehouse-stub")
+	if err := os.WriteFile(backend, []byte("#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = \"--\" ]; then\n    shift\n    exec \"$@\"\n  fi\n  shift\ndone\nexit 64\n"), 0o755); err != nil { //nolint:gosec // executable sandbox adapter fixture
+		t.Fatal(err)
+	}
+
+	trigger := config.TriggerConfig{
+		Name: "synthesise", Completion: &config.CompletionConfig{Event: "complete", Session: "ben"},
+		Action: config.ActionConfig{
+			Type: config.ActionSession, Agent: "sleeper", Prompt: "summarise the croft",
+			AutoCleanup: config.CleanupOnSuccess, IdleTimeout: "1m",
+		},
+	}
+
+	sm, _ := newScenarioCompletionTestSM(t, trigger, config.ScenarioLifecycleConfig{
+		Cleanup: config.ScenarioCleanupOnSuccess, Delay: "1h",
+	})
+	sm.cfg.Agents["sleeper"] = config.Agent{Command: "sleep", Args: []string{"60"}}
+	sm.cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "safehouse", Command: backend}
+	sm.sandboxResolver = func(string) (bool, error) { return true, nil }
+	t.Cleanup(func() {
+		sm.mu.RLock()
+		ids := make([]string, 0, len(sm.sessions))
+		for id := range sm.sessions {
+			ids = append(ids, id)
+		}
+		sm.mu.RUnlock()
+
+		for _, id := range ids {
+			stopAndClosePTY(sm, id)
+		}
+	})
+
+	sm.mu.Lock()
+	sm.state.Sessions["orch"] = &SessionState{
+		ID: "orch", Name: OrchestratorSessionName, SystemKind: SystemKindOrchestrator, Status: StatusRunning,
+	}
+	sm.mu.Unlock()
+
+	if err := sm.reconcileScenarioCompletion("sc-braw"); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.dispatchPendingCompletionActions(t.Context(), "sc-braw")
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		sm.mu.RLock()
+		action := sm.state.Scenarios["sc-braw"].Completion.Actions[0]
+		session := sm.state.Sessions[action.SessionID]
+		if session != nil {
+			copy := *session
+			session = &copy
+		}
+		sm.mu.RUnlock()
+
+		if session == nil {
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+
+		fullTriggerID := scenarioTriggerName("sc-braw", "synthesise")
+		wantName := completionReactorName(fullTriggerID, fireContext{
+			scenarioID: "sc-braw", completionEpoch: 1,
+			completionAction: "synthesise", completionAttempt: 1, sessionName: "ben",
+		})
+		if session.Name != wantName {
+			t.Fatalf("spawned completion session name = %q, want %q", session.Name, wantName)
+		}
+
+		if err := ValidateSessionName(session.Name); err != nil {
+			t.Fatalf("spawned completion session name is invalid: %v", err)
+		}
+
+		if session.TriggerID != fullTriggerID || session.CompletionScenarioID != "sc-braw" ||
+			session.CompletionEpoch != 1 || session.CompletionAction != "synthesise" || session.CompletionAttempt != 1 {
+			t.Fatalf("spawned completion ownership = %+v", session)
+		}
+
+		loaded, err := LoadState(sm.paths.StateFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		persisted := loaded.Sessions[session.ID]
+		if persisted == nil || persisted.TriggerID != fullTriggerID || persisted.CompletionScenarioID != "sc-braw" ||
+			persisted.CompletionEpoch != 1 || persisted.CompletionAction != "synthesise" || persisted.CompletionAttempt != 1 {
+			t.Fatalf("persisted completion ownership = %+v", persisted)
+		}
+
+		persistedAction := loaded.Scenarios["sc-braw"].Completion.Actions[0]
+		if persistedAction.SessionID != session.ID || persistedAction.State != CompletionActionRunning {
+			t.Fatalf("persisted completion action = %+v", persistedAction)
+		}
+
+		if session.ParentID != "orch" || session.MirrorSourceID != "ben-id" {
+			t.Fatalf("spawned completion parent/mirror = %q/%q", session.ParentID, session.MirrorSourceID)
+		}
+
+		if session.AutoCleanup != config.CleanupOnSuccess || session.IdleTimeoutSecs != 60 {
+			t.Fatalf("spawned completion lifecycle = cleanup %q, idle %d", session.AutoCleanup, session.IdleTimeoutSecs)
+		}
+
+		if action.State != CompletionActionRunning {
+			t.Fatalf("spawned completion action state = %q, want running", action.State)
+		}
+
+		return
+	}
+
+	t.Fatal("completion session was not spawned")
+}
+
 func TestScenarioCompletionRequiredDeliveryFailureAndRetry(t *testing.T) {
 	trigger := config.TriggerConfig{
 		Name: "report", Completion: &config.CompletionConfig{Session: "ben"},
@@ -371,9 +484,9 @@ func TestScenarioCompletionRestartTransitions(t *testing.T) {
 
 		sm.mu.Lock()
 		sm.state.Scenarios["sc-braw"].Completion.Actions[0].State = CompletionActionRunning
-		sm.state.Scenarios["sc-braw"].Completion.Actions[0].SessionID = "synth-id"
 		sm.state.Sessions["synth-id"] = &SessionState{
-			ID: "synth-id", Status: StatusStopped, StopReason: StopReasonCrash, ExitCode: &exit0,
+			ID: "synth-id", Name: "display-name-is-not-ownership", Status: StatusStopped, StopReason: StopReasonCrash, ExitCode: &exit0,
+			TriggerID:            scenarioTriggerName("sc-braw", "synthesise"),
 			CompletionScenarioID: "sc-braw", CompletionEpoch: 1, CompletionAction: "synthesise",
 		}
 		_ = sm.saveState()
@@ -384,8 +497,14 @@ func TestScenarioCompletionRestartTransitions(t *testing.T) {
 		sm.mu.RLock()
 		defer sm.mu.RUnlock()
 
-		if got := sm.state.Scenarios["sc-braw"].Completion.Actions[0].State; got != CompletionActionSucceeded {
-			t.Fatalf("adopted session action = %q", got)
+		action := sm.state.Scenarios["sc-braw"].Completion.Actions[0]
+		if action.State != CompletionActionSucceeded || action.SessionID != "synth-id" {
+			t.Fatalf("adopted session action = %+v", action)
+		}
+
+		cleanup := sm.state.Scenarios["sc-braw"].Completion.Cleanup
+		if cleanup == nil || cleanup.State != ScenarioCleanupScheduled {
+			t.Fatalf("successful recovered session did not unblock cleanup: %+v", cleanup)
 		}
 	})
 }
