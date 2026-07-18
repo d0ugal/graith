@@ -1,0 +1,140 @@
+name: libghostty-vt spike
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/libghostty-spike.yml
+      - docs/design/2026-07-18-libghostty-daemon-backend-spike.md
+      - gui/shared/Package.swift
+      - gui/shared/Sources/CGhosttyVT/include/**
+      - internal/pty/terminal_ghostty.go
+      - internal/pty/terminal_ghostty_spike_test.go
+      - internal/pty/terminal_backend_ghostty*.go
+      - internal/pty/terminal_spike*.go
+      - scripts/libghostty-spike.sh
+
+permissions:
+  contents: read
+
+jobs:
+  default-builds:
+    name: Default build (${{ matrix.goos }}/${{ matrix.goarch }}, no cgo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Build without the experimental backend or cgo
+        env:
+          CGO_ENABLED: "0"
+          GOARCH: ${{ matrix.goarch }}
+          GOOS: ${{ matrix.goos }}
+        run: go build -trimpath -o "${RUNNER_TEMP}/gr" ./cmd/graith
+
+  apple-adapter:
+    name: Adapter and universal artifact (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Run the shared corpus with the pinned GUI artifact
+        env:
+          GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/libghostty-spike
+        run: scripts/libghostty-spike.sh test
+      - name: Verify and link both release architectures
+        env:
+          LIBRARY: ${{ runner.temp }}/libghostty-spike/libghostty-vt.xcframework/macos-arm64_x86_64/libghostty-vt.a
+        run: |
+          set -euo pipefail
+          lipo -verify_arch arm64 x86_64 "$LIBRARY"
+          for arch in arm64 amd64; do
+            compiler_arch="$arch"
+            if [ "$arch" = "amd64" ]; then compiler_arch="x86_64"; fi
+            GOOS=darwin GOARCH="$arch" CGO_ENABLED=1 CC="clang -arch $compiler_arch" \
+              go test -c -tags=libghostty -o "${RUNNER_TEMP}/pty-${arch}.test" \
+              -ldflags="-extldflags $LIBRARY" ./internal/pty
+          done
+
+  linux-adapter:
+    name: Adapter source build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-linux-gnu
+            goarch: amd64
+            run_tests: true
+          - target: aarch64-linux-gnu
+            goarch: arm64
+            run_tests: false
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Install checksum-verified Zig 0.15.2
+        env:
+          ZIG_SHA256: 02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239
+          ZIG_URL: https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/zig"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            "$ZIG_URL" --output "${RUNNER_TEMP}/zig.tar.xz"
+          printf '%s  %s\n' "$ZIG_SHA256" "${RUNNER_TEMP}/zig.tar.xz" | sha256sum --check --status
+          tar -xf "${RUNNER_TEMP}/zig.tar.xz" -C "${RUNNER_TEMP}/zig" --strip-components=1
+          echo "${RUNNER_TEMP}/zig" >> "$GITHUB_PATH"
+      - name: Build the exact Ghostty source pin
+        env:
+          GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}
+          LIBRARY: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}.a
+          TARGET: ${{ matrix.target }}
+        run: scripts/libghostty-spike.sh source-build "$TARGET" "$LIBRARY"
+      - name: Verify committed headers match the source pin
+        env:
+          SOURCE: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}/ghostty/include/ghostty
+        run: diff -ru "$SOURCE" gui/shared/Sources/CGhosttyVT/include/ghostty
+      - name: Compile and optionally run the adapter
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          LIBRARY: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}.a
+          RUN_TESTS: ${{ matrix.run_tests }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          if [ "$RUN_TESTS" = "true" ]; then
+            go test -count=1 -tags=libghostty -ldflags="-extldflags $LIBRARY" ./internal/pty \
+              -run 'TestTerminalSpikeCompatibilityCorpus'
+          else
+            CGO_ENABLED=1 GOOS=linux CC="zig cc -target $TARGET" \
+              go test -c -tags=libghostty -o "${RUNNER_TEMP}/pty-${GOARCH}.test" \
+              -ldflags="-extldflags $LIBRARY" ./internal/pty
+          fi

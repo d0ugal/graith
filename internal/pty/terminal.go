@@ -79,8 +79,3 @@ type Terminal interface {
 	// goroutine). It is safe to call more than once.
 	Close() error
 }
-
-// newTerminal constructs the default Terminal backend at the given size.
-func newTerminal(cols, rows int) Terminal {
-	return newCharmTerminal(cols, rows)
-}
