@@ -457,4 +457,8 @@ func TestScenarioStartupPromptRoundTrip(t *testing.T) {
 	if fallback := (ScenarioSessionInput{Prompt: " \n\t", Task: "legacy task"}).StartupPrompt(); fallback != "legacy task" {
 		t.Fatalf("whitespace-only prompt fallback = %q", fallback)
 	}
+
+	if shared := (ScenarioSessionInput{Shared: true, Task: "tracked elsewhere"}).StartupPrompt(); shared != "" {
+		t.Fatalf("shared startup prompt = %q, want empty", shared)
+	}
 }

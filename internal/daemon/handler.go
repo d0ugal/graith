@@ -108,10 +108,18 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 		data, err := protocol.EncodeControl(msgType, payload)
 		if err != nil {
 			log.Error("encode control", "err", err)
+
+			_ = conn.Close()
+
 			return
 		}
 
-		_ = writer.WriteFrame(protocol.ChannelControl, data)
+		if err := writer.WriteFrame(protocol.ChannelControl, data); err != nil {
+			log.Error("write control", "type", msgType, "err", err)
+			// A response that cannot be written must terminate the connection so
+			// clients waiting in ReadControlResponse observe EOF instead of hanging.
+			_ = conn.Close()
+		}
 	}
 
 	for {

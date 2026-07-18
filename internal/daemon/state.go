@@ -416,6 +416,10 @@ type ScenarioSession struct {
 }
 
 func (s ScenarioSession) startupPrompt() string {
+	if s.Shared {
+		return ""
+	}
+
 	if strings.TrimSpace(s.Prompt) != "" {
 		return s.Prompt
 	}

@@ -21,7 +21,11 @@ const (
 	// per-member cap below common per-argument process limits and the frame ceiling
 	// leaves room for both agent launch and the rest of a multi-member start.
 	MaxScenarioPromptBytes = 64 * 1024
-	headerSize             = 5
+	// MaxScenarioContractPayloadBytes bounds the JSON-encoded prompt/task fields
+	// for one scenario roster. The remaining 1 MiB of a control frame is reserved
+	// for member metadata, the envelope, and status fields.
+	MaxScenarioContractPayloadBytes = MaxPayload - 1024*1024
+	headerSize                      = 5
 )
 
 type Frame struct {

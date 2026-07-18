@@ -3444,6 +3444,41 @@ func TestCoverScenarioList(t *testing.T) {
 	}
 }
 
+func TestOversizedControlResponseClosesConnection(t *testing.T) {
+	h := newTestHarness(t)
+	prompt := strings.Repeat("p", protocol.MaxScenarioPromptBytes)
+	memberCount := protocol.MaxPayload/protocol.MaxScenarioPromptBytes + 1
+
+	sessions := make([]ScenarioSession, memberCount)
+	for i := range sessions {
+		sessions[i] = ScenarioSession{Name: fmt.Sprintf("canny-%d", i), Prompt: prompt}
+	}
+
+	h.sm.mu.Lock()
+	h.sm.state.Scenarios["sc-oversized"] = &ScenarioState{
+		ID: "sc-oversized", Name: "strath-oversized", Sessions: sessions,
+	}
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "scenario_status", protocol.ScenarioStatusMsg{Name: "strath-oversized"})
+
+	errCh := make(chan error, 1)
+
+	go func() {
+		_, err := h.reader.ReadFrame()
+		errCh <- err
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("oversized response unexpectedly produced a frame")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("client remained blocked after oversized response write failed")
+	}
+}
+
 func TestCoverScenarioAddIncompleteSession(t *testing.T) {
 	h := newTestHarness(t)
 

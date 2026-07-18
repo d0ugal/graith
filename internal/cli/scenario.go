@@ -157,6 +157,8 @@ func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, erro
 		return nil, err
 	}
 
+	scenariofile.NormalizeSessionContracts(sessions)
+
 	if !templatedMemberGraph {
 		if err := scenariofile.ValidateSessionDependencies(sessions); err != nil {
 			return nil, err
@@ -180,6 +182,18 @@ type scenarioResultControlClient interface {
 
 var scenarioResultConnect = func() (scenarioResultControlClient, error) {
 	return client.Connect(cfg, paths, cfgFile)
+}
+
+type scenarioControlSender interface {
+	SendControl(msgType string, payload any) error
+}
+
+func sendScenarioControl(sender scenarioControlSender, msgType string, payload any) error {
+	if err := sender.SendControl(msgType, payload); err != nil {
+		return fmt.Errorf("send %s: %w", msgType, err)
+	}
+
+	return nil
 }
 
 func listAvailableScenarios() []availableScenario {
@@ -265,7 +279,7 @@ The source can be:
 		}
 		defer c.Close()
 
-		_ = c.SendControl("scenario_start", protocol.ScenarioStartMsg{
+		if err := sendScenarioControl(c, "scenario_start", protocol.ScenarioStartMsg{
 			CallerSessionID: callerID,
 			Name:            sf.Scenario.Name,
 			Goal:            sf.Scenario.Goal,
@@ -273,7 +287,9 @@ The source can be:
 			Policy:          scenarioPolicyInput(sf.Scenario.Policy),
 			Triggers:        sf.Triggers,
 			Lifecycle:       sf.Scenario.Lifecycle,
-		})
+		}); err != nil {
+			return err
+		}
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -317,7 +333,9 @@ func runScenarioLifecycle(controlType string, payload any, resultKey string) (na
 	}
 	defer c.Close()
 
-	_ = c.SendControl(controlType, payload)
+	if err := sendScenarioControl(c, controlType, payload); err != nil {
+		return nil, false, err
+	}
 
 	resp, err := c.ReadControlResponse()
 	if err != nil {
@@ -438,7 +456,9 @@ var scenarioStatusCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		_ = c.SendControl("scenario_status", protocol.ScenarioStatusMsg{Name: args[0]})
+		if err := sendScenarioControl(c, "scenario_status", protocol.ScenarioStatusMsg{Name: args[0]}); err != nil {
+			return err
+		}
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -683,7 +703,7 @@ var scenarioAddCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		_ = c.SendControl("scenario_add", protocol.ScenarioAddMsg{
+		if err := sendScenarioControl(c, "scenario_add", protocol.ScenarioAddMsg{
 			Name: args[0],
 			Session: protocol.ScenarioSessionInput{
 				Name:       name,
@@ -698,7 +718,9 @@ var scenarioAddCmd = &cobra.Command{
 				AgentHooks: true,
 				Policy:     memberPolicy,
 			},
-		})
+		}); err != nil {
+			return err
+		}
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -739,7 +761,9 @@ var scenarioListCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		_ = c.SendControl("scenario_list", protocol.ScenarioListMsg{})
+		if err := sendScenarioControl(c, "scenario_list", protocol.ScenarioListMsg{}); err != nil {
+			return err
+		}
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {

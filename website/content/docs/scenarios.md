@@ -202,8 +202,8 @@ legacy indefinite/manual behaviour.
 | `model` | no | agent default | Model override (fills `{model}` in agent args) |
 | `base` | no | repo default | Base branch for the worktree |
 | `role` | no | — | Human-readable role description |
-| `prompt` | no | `task` | Startup instructions sent to a newly created agent; does not seed a todo or form a completion contract (maximum 64 KiB) |
-| `task` | no | — | Tracked work title: seeds an assigned todo and participates in completion; also supplies the startup prompt when `prompt` is omitted (maximum 500 bytes, or a lower configured todo-title limit) |
+| `prompt` | no | `task` | Startup instructions sent to a newly created agent; does not seed a todo or form a completion contract (maximum 64 KiB; NUL is rejected) |
+| `task` | no | — | Tracked work title: seeds an assigned todo and participates in completion; also supplies the startup prompt when `prompt` is omitted (maximum 500 raw bytes, or a lower configured todo-title limit; NUL is rejected) |
 | `depends_on` | no | — | Member names whose seeded tasks must all finish before this seeded task is claimable |
 | `agent_hooks` | no | `true` | Enable agent hooks (check-inbox, etc.) |
 | `shared` | no | `false` | Reuse an existing running or stopped session by name; see the eligibility and ownership rules below |
@@ -248,6 +248,13 @@ actions because the scenario does not own their process.
 
 Unknown fields are rejected — typos produce a parse error rather than being silently ignored.
 
+Across one scenario roster, the JSON-encoded effective prompts and tracked task
+fields may occupy at most 3 MiB. This reserves 1 MiB of the 4 MiB control frame
+for member metadata and response fields. `gr scenario add` checks the new member
+together with the existing roster before it starts the member. Whitespace-only
+prompt and task values are checked against their raw field limits, then stored
+as omitted values.
+
 Use `prompt` when the instructions are richer than the tracked work title, or
 when a required declared result is the member's only completion contract. A
 runtime-policy member still needs a non-empty `task` or a required result;
@@ -273,7 +280,9 @@ Soft-deleted, errored, creating, and deleting sessions are unavailable. If
 more than one running or stopped session has the requested name, startup fails
 as ambiguous. Because a shared agent is not started by the scenario, a shared
 entry cannot declare a startup `prompt`; it may still declare tracked `task`
-work. That task and any required results still participate in completion even
+work. Detailed status and its self manifest leave the effective startup prompt
+empty for that shared member, since the scenario did not deliver one. That task
+and any required results still participate in completion even
 when the shared source is stopped; omit them unless the external session or a
 human will satisfy those obligations.
 
@@ -544,6 +553,9 @@ List all scenarios with their aggregate status.
 gr scenario list
 ```
 
+List responses omit startup prompt bodies; use
+`gr scenario status <name> --json` for one scenario's detailed member prompts.
+
 Aggregate status is `complete` when every member with tracked todos or required
 results has satisfied both and no member is errored. Otherwise it reflects
 session lifecycle: `running` (all running), `stopped` (all stopped), `errored`
@@ -577,6 +589,10 @@ Use `--prompt` for startup instructions and `--task` for the independently
 tracked todo. With no `--prompt`, `--task` remains the startup prompt for
 compatibility.
 
+The same per-field and aggregate prompt/task limits used by scenario files are
+enforced against the existing roster before the daemon creates the added
+session.
+
 Adding any runtime-policy flag to a legacy scenario opts the whole scenario into
 policy completion semantics. Existing members become required with no timeout;
 the new member uses the supplied policy. Before opting in, the daemon verifies
@@ -599,7 +615,7 @@ gr scenario delete tracing-pipeline
 ## How it works
 
 1. The CLI parses the TOML file (with strict field validation) and sends a `scenario_start` control message to the daemon
-2. The daemon validates all inputs, including prompt bodies, todo-title limits, result contracts, dependencies, scenario/session names, repo paths, and agent configs, before any member starts
+2. The daemon validates all inputs, including prompt bodies, NUL bytes, aggregate frame headroom, todo-title limits, result contracts, dependencies, scenario/session names, repo paths, and agent configs, before any member starts
 3. **Reserve phase:** placeholders are created atomically under the state lock
 4. **Start phase:** independent members are created concurrently using the normal `Create` flow; mirror dependency waves follow after their sources are running, using the same read-only sandbox primitive as `gr new --mirror`
 5. **Manifest phase:** after all sessions start, the daemon publishes a manifest to each session's inbox and persists it to the shared store
@@ -673,7 +689,7 @@ store at `scenarios/<id>/manifest-<rendered-name>.json`.
 
 The manifest gives each agent awareness of:
 
-- **`you`** — its own identity, role, effective startup prompt, tracked task, and declared result destinations
+- **`you`** — its own identity, role, effective startup prompt (empty for a shared member), tracked task, and declared result destinations
 - **`siblings`** — the other sessions in the scenario, with their roles, repos, and result destinations
 - **`orchestrator`** — the parent session that started the scenario
 - **`render`** — immutable start identities, timestamp, unique token, and

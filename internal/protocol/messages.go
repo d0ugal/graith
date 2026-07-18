@@ -995,8 +995,13 @@ type ScenarioSessionInput struct {
 }
 
 // StartupPrompt returns the effective instructions sent when this member is
-// launched. Task-only scenario definitions retain their historical behaviour.
+// launched. Task-only scenario definitions retain their historical behaviour;
+// shared members return empty because scenario startup never launches them.
 func (s ScenarioSessionInput) StartupPrompt() string {
+	if s.Shared {
+		return ""
+	}
+
 	if strings.TrimSpace(s.Prompt) != "" {
 		return s.Prompt
 	}

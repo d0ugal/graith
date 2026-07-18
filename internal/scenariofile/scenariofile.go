@@ -5,6 +5,7 @@ package scenariofile
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -473,6 +474,8 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 		return nil, err
 	}
 
+	NormalizeSessionContracts(inputs)
+
 	if !HasTemplatedMemberGraph(inputs) {
 		if err := ValidateSessionDependencies(inputs); err != nil {
 			return nil, err
@@ -485,25 +488,87 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 // ValidateSessionContracts checks the independent launch and tracked-work
 // fields shared by every scenario entry point. maxTitle is the effective todo
 // title limit; pass zero to skip only that configurable check. Prompt has a
-// fixed body-sized wire limit and is invalid for an already-running shared
-// member, where it could never be delivered at startup.
+// fixed body-sized wire limit and is invalid for a shared member, which scenario
+// startup does not launch. The roster's encoded prompt/task fields are also
+// bounded so accepted start, status, and manifest payloads retain frame
+// headroom.
 func ValidateSessionContracts(sessions []protocol.ScenarioSessionInput, maxTitle int) error {
 	for _, session := range sessions {
-		task := strings.TrimSpace(session.Task)
-		if task != "" && maxTitle > 0 && len(task) > maxTitle {
+		if maxTitle > 0 && len(session.Task) > maxTitle {
 			return fmt.Errorf("session %q: task exceeds todo title limit %d bytes", session.Name, maxTitle)
 		}
 
 		if session.Shared && strings.TrimSpace(session.Prompt) != "" {
-			return fmt.Errorf("session %q: prompt is not valid for a shared session because it is already running", session.Name)
+			return fmt.Errorf("session %q: prompt is not valid for a shared session because scenario start does not launch it", session.Name)
+		}
+
+		if len(session.Prompt) > protocol.MaxScenarioPromptBytes {
+			return fmt.Errorf(
+				"session %q: prompt is too large: %d bytes (max %d)",
+				session.Name, len(session.Prompt), protocol.MaxScenarioPromptBytes,
+			)
+		}
+
+		if strings.ContainsRune(session.Prompt, '\x00') {
+			return fmt.Errorf("session %q: prompt contains a NUL byte", session.Name)
+		}
+
+		if strings.ContainsRune(session.Task, '\x00') {
+			return fmt.Errorf("session %q: task contains a NUL byte", session.Name)
 		}
 
 		if prompt := session.StartupPrompt(); len(prompt) > protocol.MaxScenarioPromptBytes {
 			return fmt.Errorf(
-				"session %q: prompt is too large: %d bytes (max %d)",
+				"session %q: task fallback prompt is too large: %d bytes (max %d)",
 				session.Name, len(prompt), protocol.MaxScenarioPromptBytes,
 			)
 		}
+	}
+
+	return ValidateScenarioContractPayload(sessions)
+}
+
+// NormalizeSessionContracts canonicalizes omitted prompt/task fields without
+// altering non-empty bodies or titles. Callers validate first so whitespace-only
+// raw values still count toward their field limits before they are discarded.
+func NormalizeSessionContracts(sessions []protocol.ScenarioSessionInput) {
+	for i := range sessions {
+		if strings.TrimSpace(sessions[i].Prompt) == "" {
+			sessions[i].Prompt = ""
+		}
+
+		if strings.TrimSpace(sessions[i].Task) == "" {
+			sessions[i].Task = ""
+		}
+	}
+}
+
+// ValidateScenarioContractPayload bounds the JSON representation that status
+// and manifests expose for startup prompts and tracked tasks. StartupPrompt is
+// included separately because task-only members expose their task in both
+// fields for compatibility. A 1 MiB reserve remains for the rest of the control
+// envelope and scenario metadata.
+func ValidateScenarioContractPayload(sessions []protocol.ScenarioSessionInput) error {
+	type contractPayload struct {
+		Prompt string `json:"prompt,omitempty"`
+		Task   string `json:"task,omitempty"`
+	}
+
+	contracts := make([]contractPayload, len(sessions))
+	for i, session := range sessions {
+		contracts[i] = contractPayload{Prompt: session.StartupPrompt(), Task: session.Task}
+	}
+
+	encoded, err := json.Marshal(contracts)
+	if err != nil {
+		return fmt.Errorf("encode scenario prompt/task payload: %w", err)
+	}
+
+	if len(encoded) > protocol.MaxScenarioContractPayloadBytes {
+		return fmt.Errorf(
+			"scenario prompt/task payload is too large: %d encoded bytes (max %d)",
+			len(encoded), protocol.MaxScenarioContractPayloadBytes,
+		)
 	}
 
 	return nil

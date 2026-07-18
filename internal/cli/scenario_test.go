@@ -1080,6 +1080,15 @@ func (f *fakeScenarioResultClient) ReadControlResponse() (protocol.Envelope, err
 
 func (f *fakeScenarioResultClient) Close() { f.closed = true }
 
+func TestSendScenarioControlReturnsWriteError(t *testing.T) {
+	fake := &fakeScenarioResultClient{sendErr: errors.New("dreich socket")}
+
+	err := sendScenarioControl(fake, "scenario_status", protocol.ScenarioStatusMsg{Name: "strath"})
+	if err == nil || !strings.Contains(err.Error(), "send scenario_status: dreich socket") {
+		t.Fatalf("error = %v, want scenario send failure", err)
+	}
+}
+
 func scenarioResultEnvelope(t *testing.T, msgType string, payload any) protocol.Envelope {
 	t.Helper()
 
