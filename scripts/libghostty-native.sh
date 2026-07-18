@@ -434,9 +434,9 @@ verify_static_archive() {
         symbols="$(nm -g "$archive" 2>/dev/null)"
         grep -Eq '[[:space:]][Tt][[:space:]]_?ghostty_terminal_new$' <<<"$symbols" ||
             die "static archive does not define ghostty_terminal_new"
-        grep -Eq '[[:space:]][Tt][[:space:]]_?__ZN7simdutf' <<<"$symbols" ||
+        grep -Eq '[[:space:]][TtWw][[:space:]]_+ZN7simdutf' <<<"$symbols" ||
             die "static archive does not contain simdutf"
-        grep -Eq '[[:space:]][Tt][[:space:]]_?__ZN3hwy' <<<"$symbols" ||
+        grep -Eq '[[:space:]][TtWw][[:space:]]_+ZN3hwy' <<<"$symbols" ||
             die "static archive does not contain Highway"
         grep -Eq '[[:space:]][Tt][[:space:]]_?__ubsan_handle_' <<<"$symbols" ||
             die "static archive does not contain the audited Zig UBSan runtime"
