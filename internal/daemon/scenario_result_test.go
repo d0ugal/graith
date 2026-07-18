@@ -448,7 +448,7 @@ func TestScenarioRequiredResultsGateCompletionOptionalDoesNot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, err := sm.todos.Claim(item.ID, "canny-id"); err != nil {
+	if _, _, err := sm.todos.Claim(item.ID, "canny-id", false); err != nil {
 		t.Fatal(err)
 	}
 

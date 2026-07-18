@@ -517,7 +517,7 @@ func TestScenarioProgressDerivedFromTodos(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, err := sm.todos.Claim(item.ID, "braw-s1"); err != nil {
+	if _, _, err := sm.todos.Claim(item.ID, "braw-s1", false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2325,7 +2325,7 @@ func TestScenarioCompleteDerivedFromTodos(t *testing.T) {
 		t.Fatal("scenario should not be complete before the item is done")
 	}
 
-	if _, _, err := sm.todos.Claim(item.ID, "braw-s1"); err != nil {
+	if _, _, err := sm.todos.Claim(item.ID, "braw-s1", false); err != nil {
 		t.Fatal(err)
 	}
 

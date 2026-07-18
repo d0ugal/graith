@@ -40,7 +40,7 @@ func newScenarioCompletionTestSM(t *testing.T, trigger config.TriggerConfig, lif
 		t.Fatal(err)
 	}
 
-	if _, ok, err := sm.todos.Claim(item.ID, "ben-id"); err != nil || !ok {
+	if _, ok, err := sm.todos.Claim(item.ID, "ben-id", false); err != nil || !ok {
 		t.Fatalf("claim: ok=%v err=%v", ok, err)
 	}
 
@@ -110,7 +110,7 @@ func TestScenarioCompletionEpochIdempotentAndRecompletion(t *testing.T) {
 
 	sm.mu.RUnlock()
 
-	if _, ok, err := sm.todos.Claim(item.ID, "ben-id"); err != nil || !ok {
+	if _, ok, err := sm.todos.Claim(item.ID, "ben-id", false); err != nil || !ok {
 		t.Fatalf("reclaim: ok=%v err=%v", ok, err)
 	}
 

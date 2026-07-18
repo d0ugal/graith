@@ -363,6 +363,21 @@ func TestTodoOpAssignedOwnershipTransitions(t *testing.T) {
 	})
 
 	t.Run("human", func(t *testing.T) {
+		unassigned, err := sm.TodoAddOp(root, protocol.TodoAddMsg{Title: "harvest the bere"})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := sm.TodoTransitionOp(human, protocol.TodoTransitionMsg{ID: unassigned.ID, Status: TodoStatusDone}); err == nil {
+			t.Fatal("expected human completion of unassigned work to require a session claim")
+		} else {
+			assertErrContains(t, err, "a session must run `gr todo claim "+unassigned.ID+"`")
+
+			if strings.Contains(err.Error(), "assigned to this session") {
+				t.Errorf("human received a false assignment message: %v", err)
+			}
+		}
+
 		item := addAssigned("roof the croft")
 		if _, err := sm.TodoTransitionOp(human, protocol.TodoTransitionMsg{ID: item.ID, Status: TodoStatusDone}); err == nil {
 			t.Fatal("expected human completion to require a session claim")

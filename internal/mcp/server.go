@@ -77,7 +77,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 	gomcp.AddTool(srv, &gomcp.Tool{
 		Name:        "todo_claim",
-		Description: "Atomically claim a todo item so no other agent can take it — claims never double-assign across parallel agents. Pass an id to claim a specific item, or leave it empty to claim the next unclaimed item in scope. Returns claimed=false when there is nothing to claim.",
+		Description: "Atomically claim a todo item so no other agent can take it — claims never double-assign across parallel agents. Pass an id to claim a specific eligible item, or leave it empty to claim the next eligible item in scope. Assigned items are eligible only for their assignee or the scope's override authority. Returns claimed=false when there is nothing eligible to claim.",
 	}, s.todoClaim)
 
 	gomcp.AddTool(srv, &gomcp.Tool{
@@ -258,7 +258,7 @@ type TodoAddInput struct {
 }
 
 type TodoClaimInput struct {
-	ID       string `json:"id,omitempty"       jsonschema:"Item ID to claim. Leave empty to claim the next unclaimed item in scope."`
+	ID       string `json:"id,omitempty"       jsonschema:"Item ID to claim. Leave empty to claim the next eligible item in scope."`
 	Scenario string `json:"scenario,omitempty" jsonschema:"Claim from a named scenario's list instead of this session's subtree"`
 	Session  string `json:"session,omitempty"  jsonschema:"Claim from a specific session's subtree instead of this session's own"`
 }
