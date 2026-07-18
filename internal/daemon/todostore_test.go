@@ -210,7 +210,7 @@ func TestTodoClaimNextRace(t *testing.T) {
 
 			<-barrier
 
-			it, ok, err := s.ClaimNext("scenario:strath", fmt.Sprintf("w%d", i))
+			it, ok, err := s.ClaimNext("scenario:strath", fmt.Sprintf("w%d", i), false)
 			if err != nil {
 				t.Errorf("claimnext: %v", err)
 				return
@@ -238,8 +238,53 @@ func TestTodoClaimNextRace(t *testing.T) {
 	}
 
 	// A further ClaimNext on the drained scope reports empty.
-	if _, ok, err := s.ClaimNext("scenario:strath", "late"); err != nil || ok {
+	if _, ok, err := s.ClaimNext("scenario:strath", "late", false); err != nil || ok {
 		t.Fatalf("drained ClaimNext: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestTodoClaimNextHonorsAssignment(t *testing.T) {
+	s := newTestTodoStore(t)
+
+	const scope = "scenario:strath"
+
+	assigned, err := s.Add(TodoAdd{Scope: scope, Title: "raise the brig", Assignee: "bairn", CreatedBy: "ben"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unassigned := mustAdd(t, s, scope, "stack the peat")
+
+	peerClaim, ok, err := s.ClaimNext(scope, "skelf", false)
+	if err != nil || !ok {
+		t.Fatalf("peer ClaimNext: ok=%v err=%v", ok, err)
+	}
+
+	if peerClaim.ID != unassigned.ID {
+		t.Errorf("peer claimed %q, want eligible unassigned item %q", peerClaim.ID, unassigned.ID)
+	}
+
+	assigneeClaim, ok, err := s.ClaimNext(scope, "bairn", false)
+	if err != nil || !ok {
+		t.Fatalf("assignee ClaimNext: ok=%v err=%v", ok, err)
+	}
+
+	if assigneeClaim.ID != assigned.ID {
+		t.Errorf("assignee claimed %q, want assigned item %q", assigneeClaim.ID, assigned.ID)
+	}
+
+	overrideItem, err := s.Add(TodoAdd{Scope: scope, Title: "thatch the bothy", Assignee: "canny", CreatedBy: "ben"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	overrideClaim, ok, err := s.ClaimNext(scope, "ben", true)
+	if err != nil || !ok {
+		t.Fatalf("override ClaimNext: ok=%v err=%v", ok, err)
+	}
+
+	if overrideClaim.ID != overrideItem.ID {
+		t.Errorf("override claimed %q, want assigned item %q", overrideClaim.ID, overrideItem.ID)
 	}
 }
 
@@ -308,7 +353,7 @@ func TestTodoClaimNextSameOwnerTiedClock(t *testing.T) {
 	var got []string
 
 	for range 3 {
-		it, ok, err := s.ClaimNext("scenario:strath", "solo")
+		it, ok, err := s.ClaimNext("scenario:strath", "solo", false)
 		if err != nil || !ok {
 			t.Fatalf("ClaimNext: ok=%v err=%v", ok, err)
 		}

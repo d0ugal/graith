@@ -246,6 +246,25 @@ func TestCoverTodoTransitionUnknownItem(t *testing.T) {
 	h.expectError(t, "todo not found")
 }
 
+// TestCoverTodoAssignedUnclaimedErrorRoundTrip verifies the actionable #1421
+// guidance survives the control-protocol error envelope unchanged.
+func TestCoverTodoAssignedUnclaimedErrorRoundTrip(t *testing.T) {
+	h := newTestHarness(t)
+	h.sm.todos = newTestTodoStore(t)
+	h.addAuthenticatedSession(t, "braw-id", "bonnie", "tok-braw")
+
+	item, err := h.sm.todos.Add(TodoAdd{
+		Scope: "session:braw-id", Title: "raise the brig", Assignee: "braw-id", CreatedBy: "ben",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h.sendControlWithToken(t, "todo_transition", protocol.TodoTransitionMsg{ID: item.ID, Status: TodoStatusDone}, "tok-braw")
+
+	h.expectError(t, "gr todo claim "+item.ID)
+}
+
 // TestCoverTodoRemoveUnknownItem verifies todo_remove on a missing item errors.
 func TestCoverTodoRemoveUnknownItem(t *testing.T) {
 	h := newTestHarness(t)

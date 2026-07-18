@@ -68,6 +68,13 @@ func TestInjectPrompt_Claude(t *testing.T) {
 	if !strings.Contains(args[1], "gr status") {
 		t.Error("prompt should mention gr status")
 	}
+
+	claim := strings.Index(args[1], "gr todo claim <assigned-todo-id>")
+
+	done := strings.Index(args[1], "gr todo done <assigned-todo-id>")
+	if claim < 0 || done < 0 || claim > done {
+		t.Error("prompt should instruct scenario members to claim their assigned todo before marking it done")
+	}
 }
 
 func TestInjectPrompt_Cursor(t *testing.T) {

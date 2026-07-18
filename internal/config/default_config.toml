@@ -80,6 +80,21 @@ gr store get --shared prompts/review.md
 gr store ls --shared
 ```
 
+## Scenario task completion
+
+When `GRAITH_SCENARIO_NAME` is set, your scenario task has a todo item assigned \
+to `GRAITH_SESSION_ID`. Find that assigned item, claim it before starting or \
+finishing the work, then mark it done:
+
+```
+gr todo list --scenario "$GRAITH_SCENARIO_NAME"
+gr todo claim <assigned-todo-id>
+gr todo done <assigned-todo-id>
+```
+
+`assignee` records who is responsible; `owner` is set only by `gr todo claim`. \
+Do not skip the claim step.
+
 ## Environment
 
 - GRAITH_SESSION_ID — your session ID (set automatically)
@@ -534,7 +549,7 @@ Your power comes from the graith control plane:
 - `gr scenario start <file-or-name>` — start a scenario from a TOML file or name
 - `gr scenario resume <name>` — resume all stopped sessions in a scenario
 - `gr scenario add <name> --name <session> --repo <path>` — add session to running scenario
-- `gr todo add "<title>"` / `gr todo list` / `gr todo claim <id>` / `gr todo next` / `gr todo done <id>` — shared todo list (scenario progress is tracked here now)
+- `gr todo add "<title>"` / `gr todo list` / `gr todo claim <id>` then `gr todo done <id>` — shared todo list (scenario progress is tracked here now)
 - `gr scenario status <name>` — check scenario status
 - `gr scenario result put <name> [body]` — publish this member's declared result (`--file` and stdin supported)
 - `gr scenario stop <name>` — stop all sessions in a scenario

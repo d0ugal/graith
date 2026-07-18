@@ -231,6 +231,155 @@ func TestTodoOpTransitionAuthorization(t *testing.T) {
 	}
 }
 
+// TestTodoOpAssignedOwnershipTransitions is the regression for #1421. Scenario-
+// seeded work is assigned before it is owned: the assignee must claim it before
+// completion, peers cannot take the reservation, and existing override/human
+// transition authority remains intact after a claim.
+func TestTodoOpAssignedOwnershipTransitions(t *testing.T) {
+	sm := newTodoSM(t)
+
+	putTodoSession(sm, "ben", "", "")
+	putTodoSession(sm, "bairn", "ben", "")
+	putTodoSession(sm, "skelf", "ben", "")
+
+	root := authContext{role: roleSession, sessionID: "ben", authenticated: true}
+	assignee := authContext{role: roleSession, sessionID: "bairn", authenticated: true}
+	peer := authContext{role: roleSession, sessionID: "skelf", authenticated: true}
+	human := authContext{role: roleLocalHuman}
+
+	addAssigned := func(title string) protocol.TodoItemInfo {
+		t.Helper()
+
+		item, err := sm.TodoAddOp(root, protocol.TodoAddMsg{Title: title, Assignee: "bairn"})
+		if err != nil {
+			t.Fatalf("add assigned item: %v", err)
+		}
+
+		return item
+	}
+
+	t.Run("assigned unowned", func(t *testing.T) {
+		item := addAssigned("raise the brig")
+
+		_, err := sm.TodoTransitionOp(assignee, protocol.TodoTransitionMsg{ID: item.ID, Status: TodoStatusDone})
+		if err == nil {
+			t.Fatal("expected unclaimed assigned item to reject done")
+		}
+
+		for _, command := range []string{"gr todo claim " + item.ID, "gr todo done " + item.ID} {
+			assertErrContains(t, err, command)
+		}
+
+		stored, getErr := sm.todos.Get(item.ID)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+
+		if stored.Status != TodoStatusTodo || stored.Owner != "" {
+			t.Errorf("failed done changed assigned item: %+v", stored)
+		}
+	})
+
+	t.Run("assigned owned", func(t *testing.T) {
+		item := addAssigned("mend the dyke")
+
+		claim, err := sm.TodoClaimOp(assignee, protocol.TodoClaimMsg{ID: item.ID})
+		if err != nil || !claim.Claimed {
+			t.Fatalf("assignee claim: claimed=%v err=%v", claim.Claimed, err)
+		}
+
+		done, err := sm.TodoTransitionOp(assignee, protocol.TodoTransitionMsg{ID: item.ID, Status: TodoStatusDone})
+		if err != nil {
+			t.Fatalf("assignee done after claim: %v", err)
+		}
+
+		if done.Status != TodoStatusDone || done.Owner != "bairn" {
+			t.Errorf("assigned completion = %+v", done)
+		}
+	})
+
+	t.Run("unassigned", func(t *testing.T) {
+		item, err := sm.TodoAddOp(root, protocol.TodoAddMsg{Title: "stack the peat"})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := sm.TodoTransitionOp(peer, protocol.TodoTransitionMsg{ID: item.ID, Status: TodoStatusDone}); err == nil {
+			t.Fatal("expected unassigned item to require a claim")
+		} else {
+			assertErrContains(t, err, "only the owner")
+		}
+
+		claim, err := sm.TodoClaimOp(peer, protocol.TodoClaimMsg{ID: item.ID})
+		if err != nil || !claim.Claimed {
+			t.Fatalf("in-scope peer claim of unassigned item: claimed=%v err=%v", claim.Claimed, err)
+		}
+	})
+
+	t.Run("wrong session", func(t *testing.T) {
+		item := addAssigned("thatch the bothy")
+		if _, err := sm.TodoClaimOp(peer, protocol.TodoClaimMsg{ID: item.ID}); err == nil {
+			t.Fatal("expected peer claim of assigned item to fail")
+		} else {
+			assertErrContains(t, err, "assigned to session \"bairn\"")
+		}
+
+		next, err := sm.TodoClaimOp(peer, protocol.TodoClaimMsg{})
+		if err != nil {
+			t.Fatalf("peer claim next: %v", err)
+		}
+
+		if next.Claimed {
+			t.Errorf("peer claim next took reserved work: %+v", next.Item)
+		}
+
+		if _, err := sm.TodoTransitionOp(peer, protocol.TodoTransitionMsg{ID: item.ID, Status: TodoStatusDone}); err == nil {
+			t.Fatal("expected peer completion of assigned item to fail")
+		} else {
+			assertErrContains(t, err, "only the owner")
+
+			if strings.Contains(err.Error(), "gr todo claim") {
+				t.Errorf("peer received misleading claim instruction: %v", err)
+			}
+		}
+	})
+
+	t.Run("override authority", func(t *testing.T) {
+		item := addAssigned("point the kirk")
+		if _, err := sm.TodoClaimOp(assignee, protocol.TodoClaimMsg{ID: item.ID}); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := sm.TodoTransitionOp(root, protocol.TodoTransitionMsg{ID: item.ID, Status: TodoStatusDone}); err != nil {
+			t.Fatalf("override completion: %v", err)
+		}
+
+		takeover := addAssigned("lime the wall")
+
+		claim, err := sm.TodoClaimOp(root, protocol.TodoClaimMsg{ID: takeover.ID})
+		if err != nil || !claim.Claimed {
+			t.Fatalf("override claim: claimed=%v err=%v", claim.Claimed, err)
+		}
+	})
+
+	t.Run("human", func(t *testing.T) {
+		item := addAssigned("roof the croft")
+		if _, err := sm.TodoTransitionOp(human, protocol.TodoTransitionMsg{ID: item.ID, Status: TodoStatusDone}); err == nil {
+			t.Fatal("expected human completion to require a session claim")
+		} else {
+			assertErrContains(t, err, "a session must run `gr todo claim "+item.ID+"`")
+		}
+
+		if _, err := sm.TodoClaimOp(assignee, protocol.TodoClaimMsg{ID: item.ID}); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := sm.TodoTransitionOp(human, protocol.TodoTransitionMsg{ID: item.ID, Status: TodoStatusDone}); err != nil {
+			t.Fatalf("human completion after claim: %v", err)
+		}
+	})
+}
+
 // TestTodoOpScenarioScope verifies membership gating for scenario-scoped todos
 // and that the orchestrator is the override authority.
 func TestTodoOpScenarioScope(t *testing.T) {

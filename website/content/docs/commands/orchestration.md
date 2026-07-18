@@ -116,11 +116,14 @@ List items, grouped by status.
 ### `gr todo claim <id>` / `gr todo next` / `gr todo start <id>`
 
 Atomically claim an item (→ `in-progress`, owned by you). `next` claims the next
-unclaimed item in your scope; `start` is an alias for `claim`.
+eligible unclaimed item in your scope; `start` is an alias for `claim`. An
+assigned item may be claimed only by its assignee or the scope's override
+authority.
 
 ### `gr todo done <id>`
 
-Mark a claimed item done.
+Mark a claimed item done. For an assigned ownerless item, first run
+`gr todo claim <id>`; skipping that step returns the exact claim command.
 
 ### `gr todo block <id> <note>`
 

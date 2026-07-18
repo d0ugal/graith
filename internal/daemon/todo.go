@@ -347,8 +347,18 @@ func (sm *SessionManager) TodoClaimOp(ac authContext, m protocol.TodoClaimMsg) (
 			return protocol.TodoClaimResponse{}, err
 		}
 
-		if !sm.accessForItem(ac, item).inScope {
+		acc := sm.accessForItem(ac, item)
+		if !acc.inScope {
 			return protocol.TodoClaimResponse{}, errors.New("not authorized to claim that item")
+		}
+
+		// Assignment reserves an item for the responsible session. Unassigned
+		// backlog remains available to every in-scope session, while the scope's
+		// override authority can still take over or reassign reserved work.
+		if item.Assignee != "" && item.Assignee != owner && !acc.override {
+			return protocol.TodoClaimResponse{}, fmt.Errorf(
+				"todo %q is assigned to session %q; only that assignee or the scope's override authority may claim it",
+				m.ID, item.Assignee)
 		}
 
 		claimed, ok, err := sm.todos.Claim(m.ID, owner)
@@ -381,7 +391,9 @@ func (sm *SessionManager) TodoClaimOp(ac authContext, m protocol.TodoClaimMsg) (
 		return protocol.TodoClaimResponse{}, err
 	}
 
-	claimed, ok, err := sm.todos.ClaimNext(scope, owner)
+	acc := sm.accessForItem(ac, TodoItem{Scope: scope})
+
+	claimed, ok, err := sm.todos.ClaimNext(scope, owner, acc.override)
 	if err != nil {
 		return protocol.TodoClaimResponse{}, err
 	}
@@ -407,6 +419,23 @@ func (sm *SessionManager) TodoTransitionOp(ac authContext, m protocol.TodoTransi
 	}
 
 	acc := sm.accessForItem(ac, item)
+	if m.Status == TodoStatusDone && item.Status == TodoStatusTodo && item.Owner == "" {
+		switch {
+		case item.Assignee == ac.sessionID:
+			return protocol.TodoItemInfo{}, fmt.Errorf(
+				"todo %q is assigned to this session but is not claimed; run `gr todo claim %s` before `gr todo done %s`",
+				m.ID, m.ID, m.ID)
+		case acc.human:
+			return protocol.TodoItemInfo{}, fmt.Errorf(
+				"todo %q is not claimed; a session must run `gr todo claim %s` before it can be marked done",
+				m.ID, m.ID)
+		case acc.override && ac.sessionID != "":
+			return protocol.TodoItemInfo{}, fmt.Errorf(
+				"todo %q is not claimed; run `gr todo claim %s` before `gr todo done %s`",
+				m.ID, m.ID, m.ID)
+		}
+	}
+
 	if !acc.owner && !acc.override {
 		return protocol.TodoItemInfo{}, errors.New("only the owner, the scope's override authority, or the human may transition this item")
 	}

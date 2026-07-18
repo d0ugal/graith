@@ -610,13 +610,18 @@ Without a runtime policy, every tracked member must complete. With a policy,
 required and quorum rules decide which successful members complete the
 scenario.
 
-So instead of flipping a single flag, a member signals it has finished by marking
-its task item done:
+The seeded item is assigned but initially ownerless. A member signals it has
+finished by finding its assigned item, claiming it, and then marking it done:
 
 ```bash
-gr todo done <its-task-item>       # from the member session
-gr todo list --scenario tracing-pipeline   # see the shared backlog
+gr todo list --scenario "$GRAITH_SCENARIO_NAME" # find assignee=$GRAITH_SESSION_ID
+gr todo claim <its-task-item>                    # establish ownership
+gr todo done <its-task-item>                     # complete the claimed item
 ```
+
+Assigned items are reserved: another member cannot claim or complete this work.
+The scenario orchestrator remains the override authority and the human retains
+transition authority.
 
 See [Todo list — in scenarios]({{< relref "todo.md#in-scenarios" >}}) for the full
 model.
