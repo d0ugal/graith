@@ -580,18 +580,18 @@ multi-repo rrweb orphan mutation fix scenario and have been addressed.
 #### Shared sessions (implemented)
 
 8. **`shared = true` in scenario TOML** — A session with `shared = true`
-   reuses an existing running session by name instead of creating a new one.
-   This enables scenarios that reference sessions already running (e.g. the
-   orchestrator itself, or a long-running service session).
+   reuses an existing running or stopped session by name instead of creating a
+   new one. This enables scenarios that reference active coordinators as well
+   as preserved worktrees whose agent process should remain stopped.
 
    Semantics:
-   - Name uniqueness is not enforced for shared sessions — they must match an
-     existing running session
-   - If the named session doesn't exist or isn't running, the scenario start
-     fails
+   - Name uniqueness is not enforced for shared sessions — they must resolve to
+     exactly one non-deleted running or stopped session
+   - Missing, soft-deleted, transient, errored, and ambiguous matches fail
+     before scenario-owned members start
    - Shared sessions are tagged into the scenario (receive manifests, appear
-     in `gr scenario status`) but are never stopped or deleted by scenario
-     lifecycle operations (`gr scenario stop`, `gr scenario delete`)
+     in `gr scenario status`) but are never stopped, resumed, deleted, or
+     cleaned up by scenario lifecycle operations
    - The `shared` flag is tracked in `ScenarioSession.Shared` in state,
      protocol messages, and CLI output
 
@@ -640,9 +640,11 @@ multi-repo rrweb orphan mutation fix scenario and have been addressed.
     can no longer send `scenario_start`. Previously, an unauthenticated client
     could supply any `CallerSessionID` and bypass the orchestrator check.
 
-16. **Shared sessions fail closed** — If `shared = true` is set but no running
-    session with that name exists, `StartScenario` now returns an error instead
-    of creating a new session that would be orphaned by stop/delete.
+16. **Shared sessions fail closed** — If `shared = true` does not resolve to
+    exactly one available running or stopped session, `StartScenario` returns
+    an error instead of creating a new session that would be orphaned by
+    lifecycle operations. Mirrored stopped sources also require their preserved
+    worktree to remain available.
 
 17. **Snapshot all state under lock** — `StopScenario`, `DeleteScenario`, and
     `ResumeScenario` now snapshot `SessionState.Status` under `RLock` instead

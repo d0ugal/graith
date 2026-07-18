@@ -199,12 +199,16 @@ self-dependencies, and cycles are rejected before sessions start. The daemon
 resolves names to the members' seeded assigned todo IDs. `gr scenario add`
 accepts repeatable `--depends-on <existing-member>` flags for the same behavior.
 
-**Shared sessions:** Set `shared = true` to reference an existing running
-session instead of creating a new one. The named session must already be
-running. Shared sessions participate in the scenario (receive manifests, appear
-in status) but are never stopped or deleted by scenario lifecycle operations.
-Because a shared agent is already running, a shared entry cannot declare a
-startup `prompt`; it may still declare tracked `task` work.
+**Shared sessions:** Set `shared = true` to reference an existing running or
+stopped session instead of creating a new one. A stopped session remains
+stopped; scenario start and resume do not relaunch it. Shared sessions
+participate in the scenario (receive manifests, appear in status) but are never
+stopped, resumed, deleted, or cleaned up by scenario lifecycle operations.
+Soft-deleted, errored, creating, and deleting sessions are unavailable. If
+more than one running or stopped session has the requested name, startup fails
+as ambiguous. Because a shared agent is not started by the scenario, a shared
+entry cannot declare a startup `prompt`; it may still declare tracked `task`
+work.
 
 **Mirrored sessions:** Set `mirror` to another `[[sessions]]` member's `name` to
 create a normal scenario-owned worker over that member's exact worktree. The
@@ -218,8 +222,9 @@ path. A mirrored member must not also set `shared`, `repo`, `base`, or
 `includes`: the repository, base, worktree, and included worktrees are derived
 from its target. The target may itself be mirrored, but references must be
 acyclic. Missing targets, duplicate/ambiguous names, cycles, sources without a
-worktree, and unavailable sandbox enforcement fail preflight before any member
-starts. Agent, model, role, prompt, task, hooks, and `star` still configure the mirrored
+worktree, stopped sources whose saved worktree has already been cleaned up, and
+unavailable sandbox enforcement fail preflight before any member starts.
+Agent, model, role, prompt, task, hooks, and `star` still configure the mirrored
 worker itself.
 
 This generic multi-reader scenario attaches two independent readers to an
@@ -257,8 +262,8 @@ can see and edit sibling repos. Paths are merged with — and deduplicated
 against — any includes configured on the repo's `[[repos]]` entry.
 
 `includes` and `star` only apply to sessions the scenario creates. A
-`shared = true` session reuses an already-running session as-is, so those two
-fields are ignored for it.
+`shared = true` session reuses an existing running or stopped session as-is, so
+those two fields are ignored for it.
 
 **Starred sessions:** `star = true` creates the session already starred. A
 starred session is protected from an accidental manual `gr delete` (and bulk

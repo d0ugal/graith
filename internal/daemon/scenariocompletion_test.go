@@ -763,6 +763,12 @@ func TestScenarioManualStopCancelsCompletion(t *testing.T) {
 func TestScenarioCleanupOwnershipProtections(t *testing.T) {
 	sm := newTestSessionManager(t)
 	now := time.Now().UTC()
+	sharedWorktree := t.TempDir()
+	sharedSentinel := filepath.Join(sharedWorktree, "canny-preserved.txt")
+
+	if err := os.WriteFile(sharedSentinel, []byte("shared source\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	sm.mu.Lock()
 	sm.state.Scenarios["sc-croft"] = &ScenarioState{
@@ -774,7 +780,9 @@ func TestScenarioCleanupOwnershipProtections(t *testing.T) {
 		},
 	}
 	sm.state.Sessions["owned"] = &SessionState{ID: "owned", Name: "owned", Status: StatusStopped, ScenarioID: "sc-croft"}
-	sm.state.Sessions["shared"] = &SessionState{ID: "shared", Name: "shared", Status: StatusStopped}
+	sm.state.Sessions["shared"] = &SessionState{
+		ID: "shared", Name: "shared", Status: StatusStopped, WorktreePath: sharedWorktree,
+	}
 	sm.state.Sessions["starred"] = &SessionState{ID: "starred", Name: "starred", Status: StatusStopped, ScenarioID: "sc-croft", Starred: true}
 	sm.state.Sessions["replaced"] = &SessionState{ID: "replaced", Name: "replaced", Status: StatusStopped, ScenarioID: "sc-other"}
 	sm.state.Sessions["trigger-child"] = &SessionState{ID: "trigger-child", Name: "trigger-child", Status: StatusStopped, TriggerID: "scenario:sc-croft:archive", ParentID: "owned"}
@@ -794,6 +802,10 @@ func TestScenarioCleanupOwnershipProtections(t *testing.T) {
 		if sm.state.Sessions[id].IsSoftDeleted() {
 			t.Errorf("protected/unowned session %q was soft-deleted", id)
 		}
+	}
+
+	if body, err := os.ReadFile(sharedSentinel); err != nil || string(body) != "shared source\n" {
+		t.Errorf("cleanup changed shared source worktree: body=%q err=%v", body, err)
 	}
 
 	if cleanup := sm.state.Scenarios["sc-croft"].Completion.Cleanup; cleanup.State != ScenarioCleanupSucceeded {

@@ -1150,29 +1150,59 @@ func TestStartScenarioCovSessionNameCollision(t *testing.T) {
 	}
 }
 
-func TestStartScenarioCovSharedSessionNotRunning(t *testing.T) {
-	sm := startScenarioOrchestrator(t)
-	repo := initTempGitRepo(t)
-
-	// A session with the shared name exists but is stopped, so the shared
-	// block's StatusRunning requirement (scenario.go) is not satisfied and
-	// reuse must be rejected — covers "present but not running", not merely
-	// "absent".
-	sm.mu.Lock()
-	sm.state.Sessions["stale-shared"] = &SessionState{
-		ID: "stale-shared", Name: "clachan-shared", Status: StatusStopped,
-	}
-	sm.mu.Unlock()
-
-	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
-		CallerSessionID: "ben-orch",
-		Name:            "strath-neep",
-		Sessions: []protocol.ScenarioSessionInput{
-			{Name: "clachan-shared", Repo: repo, Shared: true},
+func TestStartScenarioRejectsUnavailableSharedSession(t *testing.T) {
+	tests := []struct {
+		name    string
+		seed    func(*SessionManager)
+		wantErr string
+	}{
+		{
+			name:    "missing",
+			wantErr: "no running or stopped session",
 		},
-	}, 24, 80)
-	if err == nil || !strings.Contains(err.Error(), "no running session") {
-		t.Fatalf("error = %v, want shared-session-not-running", err)
+		{
+			name: "deleted",
+			seed: func(sm *SessionManager) {
+				now := time.Now().UTC()
+				sm.state.Sessions["deleted-shared"] = &SessionState{
+					ID: "deleted-shared", Name: "clachan-shared", Status: StatusStopped, DeletedAt: &now,
+				}
+			},
+			wantErr: "is deleted",
+		},
+		{
+			name: "errored",
+			seed: func(sm *SessionManager) {
+				sm.state.Sessions["errored-shared"] = &SessionState{
+					ID: "errored-shared", Name: "clachan-shared", Status: StatusErrored,
+				}
+			},
+			wantErr: "only running or stopped sessions can be shared",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sm := startScenarioOrchestrator(t)
+			repo := initTempGitRepo(t)
+
+			if tt.seed != nil {
+				sm.mu.Lock()
+				tt.seed(sm)
+				sm.mu.Unlock()
+			}
+
+			_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+				CallerSessionID: "ben-orch",
+				Name:            "strath-neep",
+				Sessions: []protocol.ScenarioSessionInput{
+					{Name: "clachan-shared", Repo: repo, Shared: true},
+				},
+			}, 24, 80)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 
@@ -1212,7 +1242,7 @@ func TestStartScenarioRejectsAmbiguousSharedSource(t *testing.T) {
 
 	sm.mu.Lock()
 	sm.state.Sessions["source-a"] = &SessionState{ID: "source-a", Name: "subject", Status: StatusRunning, RepoPath: repo, WorktreePath: repo}
-	sm.state.Sessions["source-b"] = &SessionState{ID: "source-b", Name: "subject", Status: StatusRunning, RepoPath: repo, WorktreePath: repo}
+	sm.state.Sessions["source-b"] = &SessionState{ID: "source-b", Name: "subject", Status: StatusStopped, RepoPath: repo, WorktreePath: repo}
 	sm.mu.Unlock()
 
 	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
@@ -1250,6 +1280,39 @@ func TestStartScenarioRejectsSharedMirrorSourceWithoutWorktree(t *testing.T) {
 
 	if len(sm.state.Scenarios) != 0 {
 		t.Errorf("worktree preflight reserved scenario state: %+v", sm.state.Scenarios)
+	}
+}
+
+func TestStartScenarioRejectsStoppedSharedMirrorSourceWithCleanedWorktree(t *testing.T) {
+	sm := startScenarioOrchestrator(t)
+	sm.sandboxResolver = func(string) (bool, error) { return true, nil }
+
+	cleaned := filepath.Join(t.TempDir(), "cleaned-bothy")
+	repo := initTempGitRepo(t)
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw-source"] = &SessionState{
+		ID: "braw-source", Name: "subject", Status: StatusStopped,
+		RepoPath: repo, WorktreePath: cleaned,
+	}
+	sm.mu.Unlock()
+
+	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: "ben-orch", Name: "strath-cleaned-worktree",
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "subject", Shared: true},
+			{Name: "reader", Mirror: "subject"},
+		},
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "no longer exists") {
+		t.Fatalf("error = %v, want cleaned-worktree rejection", err)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if len(sm.state.Scenarios) != 0 {
+		t.Errorf("cleaned-worktree preflight reserved scenario state: %+v", sm.state.Scenarios)
 	}
 }
 
@@ -1979,6 +2042,105 @@ func TestStartScenarioMirrorsSharedSourceLifecycle(t *testing.T) {
 	if !sourceExists {
 		t.Error("shared source must survive scenario delete")
 	}
+}
+
+func TestStartScenarioMirrorsStoppedSharedSourceWithoutOwningIt(t *testing.T) {
+	sm, orchID := newMirroredScenarioOrchestrator(t)
+	repo := initScenarioGitRepo(t)
+
+	sentinel := filepath.Join(repo, "canny-preserved.txt")
+	if err := os.WriteFile(sentinel, []byte("preserved view\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	const (
+		sourceID    = "canny-source"
+		sourceToken = "preserved-token"
+	)
+
+	changedAt := time.Date(2026, 7, 17, 10, 30, 0, 0, time.UTC)
+
+	sm.mu.Lock()
+	sm.state.Sessions[sourceID] = &SessionState{
+		ID: sourceID, Name: "subject", Status: StatusStopped,
+		StatusChangedAt: changedAt, RepoPath: repo, RepoName: filepath.Base(repo),
+		WorktreePath: repo, BaseBranch: "main", Token: sourceToken,
+	}
+	sm.mu.Unlock()
+
+	assertSourceUntouched := func(stage string) {
+		t.Helper()
+
+		source, ok := sm.Get(sourceID)
+		if !ok {
+			t.Fatalf("%s: shared source was removed", stage)
+		}
+
+		if source.Status != StatusStopped || source.PID != 0 {
+			t.Errorf("%s: shared source process changed: status=%q pid=%d", stage, source.Status, source.PID)
+		}
+
+		if source.WorktreePath != repo || source.Token != sourceToken || !source.StatusChangedAt.Equal(changedAt) {
+			t.Errorf("%s: shared source metadata changed: %+v", stage, source)
+		}
+
+		if source.ScenarioID != "" || source.ScenarioName != "" || source.ScenarioRole != "" {
+			t.Errorf("%s: scenario claimed shared source: %+v", stage, source)
+		}
+
+		if _, ok := sm.GetPTY(sourceID); ok {
+			t.Errorf("%s: shared source was resumed", stage)
+		}
+
+		body, err := os.ReadFile(sentinel)
+		if err != nil || string(body) != "preserved view\n" {
+			t.Errorf("%s: shared source worktree changed: body=%q err=%v", stage, body, err)
+		}
+	}
+
+	scenario, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: orchID, Name: "strath-stopped-source", Goal: "inspect the preserved subject",
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "subject", Repo: repo, Shared: true},
+			{Name: "reader", Mirror: "subject", Role: "auditor"},
+		},
+	}, 24, 80)
+	if err != nil {
+		t.Fatalf("StartScenario: %v", err)
+	}
+
+	if len(scenario.SessionIDs) != 2 || scenario.SessionIDs[0] != sourceID {
+		t.Fatalf("session IDs = %v, want stopped source and reader", scenario.SessionIDs)
+	}
+
+	reader, ok := sm.Get(scenario.SessionIDs[1])
+	if !ok || !reader.Mirror || reader.MirrorSourceID != sourceID || reader.WorktreePath != repo {
+		t.Fatalf("reader = %+v, want stopped shared source mirror", reader)
+	}
+
+	assertSourceUntouched("scenario start")
+
+	stopped, err := sm.StopScenario("strath-stopped-source")
+	if err != nil || len(stopped) != 1 || stopped[0] != reader.ID {
+		t.Fatalf("StopScenario = %v, err=%v, want reader only", stopped, err)
+	}
+
+	assertSourceUntouched("scenario stop")
+	waitForStatus(t, sm, reader.ID, StatusStopped)
+
+	resumed, err := sm.ResumeScenario("strath-stopped-source", 24, 80)
+	if err != nil || len(resumed) != 1 || resumed[0] != reader.ID {
+		t.Fatalf("ResumeScenario = %v, err=%v, want reader only", resumed, err)
+	}
+
+	assertSourceUntouched("scenario resume")
+
+	deleted, err := sm.DeleteScenario("strath-stopped-source")
+	if err != nil || len(deleted) != 1 || deleted[0] != reader.ID {
+		t.Fatalf("DeleteScenario = %v, err=%v, want reader only", deleted, err)
+	}
+
+	assertSourceUntouched("scenario delete")
 }
 
 func TestStartScenarioMirrorsScenarioOwnedSource(t *testing.T) {

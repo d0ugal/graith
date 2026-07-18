@@ -1340,9 +1340,69 @@ func TestScenarioMirrorSharedSourceLifecycle(t *testing.T) {
 	var subject protocol.SessionInfo
 
 	_ = protocol.DecodePayload(created, &subject)
-	if err := os.WriteFile(filepath.Join(subject.WorktreePath, "dreich-uncommitted.txt"), []byte("shared view\n"), 0o600); err != nil {
+	sentinel := filepath.Join(subject.WorktreePath, "dreich-uncommitted.txt")
+
+	if err := os.WriteFile(sentinel, []byte("shared view\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
+	// Stop the source through the real control path and wait for its process
+	// watcher to commit the stopped state. Its worktree must remain available to
+	// the scenario without relaunching the source agent.
+	sendControl(t, w, "stop", protocol.StopMsg{SessionID: subject.ID})
+
+	if response := readControl(t, r); response.Type == "error" {
+		var msg protocol.ErrorMsg
+
+		_ = protocol.DecodePayload(response, &msg)
+		t.Fatalf("stop subject: %s", msg.Message)
+	}
+
+	if ptySess, ok := env.sm.GetPTY(subject.ID); ok {
+		select {
+		case <-ptySess.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for subject to stop")
+		}
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+
+	for {
+		stopped, ok := env.sm.Get(subject.ID)
+		if ok && stopped.Status == daemon.StatusStopped {
+			break
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf("subject did not reach stopped state: %+v", stopped)
+		}
+
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	assertSubjectPreserved := func(stage string) {
+		t.Helper()
+
+		preserved, ok := env.sm.Get(subject.ID)
+		if !ok {
+			t.Fatalf("%s: shared source was removed", stage)
+		}
+
+		if preserved.Status != daemon.StatusStopped || preserved.PID != 0 {
+			t.Errorf("%s: shared source was resumed: status=%q pid=%d", stage, preserved.Status, preserved.PID)
+		}
+
+		if preserved.WorktreePath != subject.WorktreePath || preserved.ScenarioID != "" {
+			t.Errorf("%s: shared source ownership changed: %+v", stage, preserved)
+		}
+
+		if body, readErr := os.ReadFile(sentinel); readErr != nil || string(body) != "shared view\n" {
+			t.Errorf("%s: shared source worktree changed: body=%q err=%v", stage, body, readErr)
+		}
+	}
+
+	assertSubjectPreserved("before scenario start")
 
 	sendControlWithToken(t, w, "scenario_start", protocol.ScenarioStartMsg{
 		Name: "strath-readers",
@@ -1376,6 +1436,8 @@ func TestScenarioMirrorSharedSourceLifecycle(t *testing.T) {
 		t.Fatalf("reader does not see uncommitted source file: body=%q err=%v", body, readErr)
 	}
 
+	assertSubjectPreserved("scenario start")
+
 	sendControl(t, w, "scenario_status", protocol.ScenarioStatusMsg{Name: "strath-readers"})
 
 	var status protocol.ScenarioStatusResponse
@@ -1402,6 +1464,25 @@ func TestScenarioMirrorSharedSourceLifecycle(t *testing.T) {
 			_ = protocol.DecodePayload(response, &msg)
 			t.Fatalf("%s: %s", operation.msgType, msg.Message)
 		}
+
+		if operation.msgType == "scenario_stop" {
+			deadline = time.Now().Add(5 * time.Second)
+
+			for {
+				stoppedReader, exists := env.sm.Get(reader.ID)
+				if exists && stoppedReader.Status == daemon.StatusStopped {
+					break
+				}
+
+				if time.Now().After(deadline) {
+					t.Fatalf("reader did not reach stopped state: %+v", stoppedReader)
+				}
+
+				time.Sleep(25 * time.Millisecond)
+			}
+		}
+
+		assertSubjectPreserved(operation.msgType)
 	}
 
 	if _, ok := env.sm.Get(subject.ID); !ok {

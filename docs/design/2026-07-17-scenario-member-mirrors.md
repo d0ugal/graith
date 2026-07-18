@@ -26,7 +26,8 @@ scratch directory. Mirror identity is durable through `SessionState.Mirror` and
 Scenarios use a two-phase flow in `internal/daemon/scenario.go`: validate and
 reserve the whole topology, then create members, rolling all created members
 back if any creation fails. A `shared = true` member binds an existing running
-session and is deliberately skipped by scenario stop and delete.
+or stopped session and is deliberately skipped by scenario stop, resume,
+delete, rollback, and automatic cleanup.
 
 ## Problem
 
@@ -76,9 +77,13 @@ Preflight builds a dependency graph over member indexes. Missing references and
 self-references fail immediately. A depth-first traversal detects cycles and
 produces dependency levels, allowing ordinary roots to start concurrently,
 then their mirrors, then any later mirror-chain level. Shared roots are resolved
-to exactly one running existing session while the topology is reserved; zero or
-multiple candidates fail before any session starts. A shared source without a
-worktree is incompatible with mirroring.
+to exactly one running or stopped existing session; zero or multiple available
+candidates fail before any session starts. Soft-deleted, errored, creating, and
+deleting rows remain unavailable. A shared source without a worktree, or whose
+saved worktree is no longer an accessible directory, is incompatible with
+mirroring. Filesystem validation is performed outside the manager lock and the
+selected session identity and paths are revalidated while reserving the
+topology.
 
 Each mirror is created through `SessionManager.Create` with `CreateOpts.Mirror`
 set to the already-resolved source session ID. This is the existing primitive:
@@ -92,7 +97,9 @@ returned as `ScenarioSessionInfo.Mirror`. Manifests add `mirror` to both the
 current member and sibling entries. `SessionState.MirrorSourceID` continues to
 store the runtime session relationship used by resume. Stop, resume, delete,
 rollback, and trigger behavior continue to treat mirrored workers as ordinary
-scenario-owned sessions; only `shared` members retain lifecycle protection.
+scenario-owned sessions; only `shared` members retain lifecycle protection. In
+particular, scenario resume skips a stopped shared source rather than
+relaunching it.
 
 This adds optional JSON fields and a no-op state migration. Old state and old
 clients continue to decode because omitted mirror fields preserve the previous
@@ -126,9 +133,10 @@ new member-scoped dependency without a separate topology mutation design.
 
 ### Testing
 
-Tests cover CLI parsing and constraints; daemon graph validation, shared-source
-resolution, multiple readers, mirror chains, atomic rollback, status and
-manifest fields, stop/resume/delete ownership, state restart/migration, and the
+Tests cover CLI parsing and constraints; daemon graph validation; running,
+stopped, deleted, ambiguous, and cleaned shared sources; multiple readers;
+mirror chains; atomic rollback; status and manifest fields; stop/resume/delete
+and automatic-cleanup ownership; state restart/migration; and the
 protocol/Swift shapes. Existing backend enforcement tests remain the authority
 that the reused mirror primitive denies source writes under safehouse and nono;
 scenario tests assert that creation reaches that exact `Mirror` state and source
