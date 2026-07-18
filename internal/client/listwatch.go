@@ -93,7 +93,8 @@ func (m *ListWatchModel) Init() tea.Cmd {
 
 // visibleRows returns how many session rows fit in the viewport.
 // Reserves lines for: header (2), column header (1), separator (1),
-// confirmation prompt (2 when active), footer (2).
+// confirmation prompt (2 when active), footer (2), and any scroll
+// indicators surrounding the session rows.
 func (m *ListWatchModel) visibleRows() int {
 	reserved := 6
 	if m.state != listWatchStateNormal {
@@ -101,6 +102,12 @@ func (m *ListWatchModel) visibleRows() int {
 	}
 
 	rows := m.height - reserved
+	if m.offset > 0 && rows > 1 {
+		rows--
+	}
+	if m.offset+rows < len(m.sessions) && rows > 1 {
+		rows--
+	}
 	if rows < 1 {
 		rows = 1
 	}

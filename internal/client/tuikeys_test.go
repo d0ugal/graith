@@ -1,6 +1,7 @@
 package client
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -109,6 +110,15 @@ func TestListWatchFooterReflectsConfiguredKeys(t *testing.T) {
 	view := m.View().Content
 	if !strings.Contains(view, "z delete") {
 		t.Errorf("list watch footer should show remapped delete key; got:\n%s", view)
+	}
+}
+
+func TestDefaultListWatchKeysMirrorOverlayCancelDefaults(t *testing.T) {
+	keys := DefaultListWatchKeys()
+	for _, want := range []string{"q", "esc", "ctrl+c"} {
+		if !slices.Contains(keys.Cancel, want) {
+			t.Errorf("DefaultListWatchKeys().Cancel = %v, want %q", keys.Cancel, want)
+		}
 	}
 }
 

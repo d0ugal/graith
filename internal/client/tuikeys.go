@@ -68,7 +68,7 @@ func DefaultListWatchKeys() ListWatchKeys {
 		Delete:  []string{"x", "d"},
 		Resume:  []string{"r"},
 		Confirm: []string{"enter", "y"},
-		Cancel:  []string{"q", "ctrl+c"},
+		Cancel:  []string{"q", "esc", "ctrl+c"},
 	}
 }
 

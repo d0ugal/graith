@@ -882,6 +882,9 @@ func TestListWatchViewScrollIndicators2(t *testing.T) {
 	if !strings.Contains(out, "more above") || !strings.Contains(out, "more below") {
 		t.Errorf("expected both scroll indicators in windowed view:\n%s", out)
 	}
+	if lines := strings.Count(out, "\n"); lines > m.height {
+		t.Errorf("windowed view rendered %d lines in a %d-row terminal:\n%s", lines, m.height, out)
+	}
 }
 
 func TestSortListWatchSessions2(t *testing.T) {
