@@ -211,7 +211,7 @@ func formatDeleteDeadline(expiresAt string) string {
 // can hard-delete one that was already soft-deleted (empty one trash entry). If
 // the name is ambiguous across the combined set (e.g. a live session and a
 // soft-deleted one share a name), it requires an explicit ID.
-func resolveDeletableSessionInfo(c *client.Client, nameOrID string) (*protocol.SessionInfo, error) {
+func resolveDeletableSessionInfo(c controlConn, nameOrID string) (*protocol.SessionInfo, error) {
 	live, err := listSessions(c, false)
 	if err != nil {
 		return nil, err
@@ -227,7 +227,7 @@ func resolveDeletableSessionInfo(c *client.Client, nameOrID string) (*protocol.S
 
 // resolveDeletedSessionInfo finds a soft-deleted session by name or ID, with the
 // same ambiguity handling. Used by `gr restore`.
-func resolveDeletedSessionInfo(c *client.Client, nameOrID string) (*protocol.SessionInfo, error) {
+func resolveDeletedSessionInfo(c controlConn, nameOrID string) (*protocol.SessionInfo, error) {
 	deleted, err := listSessions(c, true)
 	if err != nil {
 		return nil, err
@@ -236,13 +236,13 @@ func resolveDeletedSessionInfo(c *client.Client, nameOrID string) (*protocol.Ses
 	return resolveByNameOrID(nameOrID, deleted)
 }
 
-func resolveSessionInfo(c *client.Client, nameOrID string) (*protocol.SessionInfo, error) {
+func resolveSessionInfo(c controlConn, nameOrID string) (*protocol.SessionInfo, error) {
 	return resolveSessionInfoFiltered(c, nameOrID, false)
 }
 
 // resolveSessionInfoFiltered looks up a session by name or ID. When deleted is
 // true it searches the soft-deleted sessions; otherwise the live ones.
-func resolveSessionInfoFiltered(c *client.Client, nameOrID string, deleted bool) (*protocol.SessionInfo, error) {
+func resolveSessionInfoFiltered(c controlConn, nameOrID string, deleted bool) (*protocol.SessionInfo, error) {
 	sessions, err := listSessions(c, deleted)
 	if err != nil {
 		return nil, err
@@ -252,7 +252,7 @@ func resolveSessionInfoFiltered(c *client.Client, nameOrID string, deleted bool)
 }
 
 // listSessions fetches the session list (live or soft-deleted) from the daemon.
-func listSessions(c *client.Client, deleted bool) ([]protocol.SessionInfo, error) {
+func listSessions(c controlConn, deleted bool) ([]protocol.SessionInfo, error) {
 	_ = c.SendControl("list", protocol.ListMsg{Deleted: deleted})
 
 	resp, err := c.ReadControlResponse()
@@ -288,7 +288,7 @@ func resolveByNameOrID(nameOrID string, sessions []protocol.SessionInfo) (*proto
 
 	switch len(byName) {
 	case 0:
-		return nil, fmt.Errorf("session %q not found", nameOrID)
+		return nil, &sessionNotFoundError{nameOrID: nameOrID}
 	case 1:
 		return &byName[0], nil
 	default:
@@ -300,6 +300,14 @@ func resolveByNameOrID(nameOrID string, sessions []protocol.SessionInfo) (*proto
 		return nil, fmt.Errorf("%q is ambiguous — matches %d sessions (%s); use an explicit ID",
 			nameOrID, len(byName), strings.Join(ids, ", "))
 	}
+}
+
+type sessionNotFoundError struct {
+	nameOrID string
+}
+
+func (e *sessionNotFoundError) Error() string {
+	return fmt.Sprintf("session %q not found", e.nameOrID)
 }
 
 type repoStatus struct {

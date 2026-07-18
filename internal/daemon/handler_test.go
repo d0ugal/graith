@@ -441,7 +441,7 @@ func TestStopInvalidPayload(t *testing.T) {
 	h.expectType(t, "error")
 }
 
-func TestRenameSession(t *testing.T) {
+func TestUpdateSessionName(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sm.mu.Lock()
@@ -451,9 +451,10 @@ func TestRenameSession(t *testing.T) {
 	}
 	h.sm.mu.Unlock()
 
-	h.sendControl(t, "rename", protocol.RenameMsg{SessionID: "auld1", NewName: "bonnie-kirk"})
+	newName := "bonnie-kirk"
+	h.sendControl(t, "update", protocol.UpdateMsg{SessionID: "auld1", Name: &newName})
 
-	h.expectType(t, "renamed")
+	h.expectType(t, "updated")
 
 	h.sm.mu.RLock()
 	name := h.sm.state.Sessions["auld1"].Name
@@ -464,18 +465,19 @@ func TestRenameSession(t *testing.T) {
 	}
 }
 
-func TestRenameSessionNotFound(t *testing.T) {
+func TestUpdateSessionNotFound(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sendControl(t, "rename", protocol.RenameMsg{SessionID: "haar", NewName: "x"})
+	newName := "x"
+	h.sendControl(t, "update", protocol.UpdateMsg{SessionID: "haar", Name: &newName})
 
 	h.expectType(t, "error")
 }
 
-func TestRenameInvalidPayload(t *testing.T) {
+func TestUpdateInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw := []byte(`{"type":"rename","payload":{bad}`)
+	raw := []byte(`{"type":"update","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	h.expectType(t, "error")
@@ -1864,7 +1866,7 @@ func TestMsgPubWithThread(t *testing.T) {
 	}
 }
 
-func TestMsgPubUsesCurrentNameAfterRename(t *testing.T) {
+func TestMsgPubUsesCurrentNameAfterUpdate(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sm.mu.Lock()
@@ -1874,15 +1876,16 @@ func TestMsgPubUsesCurrentNameAfterRename(t *testing.T) {
 	}
 	h.sm.mu.Unlock()
 
-	if err := h.sm.Rename("s1", "new-name"); err != nil {
-		t.Fatalf("Rename() error = %v", err)
+	newName := "new-name"
+	if err := h.sm.Update("s1", &newName, nil); err != nil {
+		t.Fatalf("Update() error = %v", err)
 	}
 
 	h.sendControl(t, "msg_pub", protocol.MsgPubMsg{
 		Stream:     "test-topic",
 		SenderID:   "s1",
 		SenderName: "old-name",
-		Body:       "hello after rename",
+		Body:       "hello after name update",
 	})
 
 	env := h.expectType(t, "msg_published")
@@ -2125,7 +2128,7 @@ func TestNullPayloadRejected(t *testing.T) {
 		{"attach", "invalid attach message"},
 		{"delete", "invalid delete message"},
 		{"stop", "invalid stop message"},
-		{"rename", "invalid rename message"},
+		{"update", "invalid update message"},
 		{"resume", "invalid resume message"},
 		{"logs", "invalid logs message"},
 		{"type", "invalid type message"},
@@ -3713,7 +3716,7 @@ func TestCoverSessionCannotTargetForeignSession(t *testing.T) {
 	const callerToken = "tok-bairn"
 
 	msgTypes := []string{
-		"rename", "star", "unstar", "resume", "restart",
+		"star", "unstar", "resume", "restart",
 		"logs", "wait", "stop", "delete",
 	}
 
@@ -3732,7 +3735,7 @@ func TestCoverSessionCannotTargetForeignSession(t *testing.T) {
 
 			// A generic payload carrying only session_id; every targeted message
 			// type decodes this into its SessionID field.
-			payload := map[string]any{"session_id": "ben-foreign", "new_name": "scunner"}
+			payload := map[string]any{"session_id": "ben-foreign"}
 			h.sendControlWithToken(t, mt, payload, callerToken)
 			h.expectError(t, "not authorized")
 		})

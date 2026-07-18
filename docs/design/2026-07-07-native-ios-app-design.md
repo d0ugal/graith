@@ -493,7 +493,7 @@ that fails when a new `case` is added without a matrix entry. Representative row
 | `attach`, data channel, `resize` | ✓ | ✓ | ✗ | self/descendant | ✗ |
 | `approval_list` | ✓ | ✓ | ✓ | ✗ | ✗ |
 | `approval_respond`, `approval_subscribe` (C.6) | ✓ | ✓ | ✗ | ✗ | ✗ |
-| `create`, `delete`, `stop`, `resume`, `restart`, `rename`, `star`, `fork`, `migrate`, `update` | ✓ | ✓ | ✗ | self/descendant | ✗ |
+| `create`, `delete`, `stop`, `resume`, `restart`, `star`, `fork`, `migrate`, `update` | ✓ | ✓ | ✗ | self/descendant | ✗ |
 | `msg_pub` | ✓ (sender forced) | ✓ (sender forced) | ✗ | ✓ (sender forced) | ✗ |
 | `msg_inbox`, `msg_sub`, `msg_ack`, `msg_conversation`, `msg_topics` | ✓ | ✓ | ✗ | self/descendant | ✗ |
 | `scenario_*` | ✓ (operator) | ✓ (operator) | ✗ | orchestrator/descendant | ✗ |

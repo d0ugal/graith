@@ -130,7 +130,7 @@ private let swiftDecoders: [String: DecodeProbe] = [
     "ForkMsg": probe(ForkMsg.self),
     "MigrateMsg": probe(MigrateMsg.self),
     "AttachMsg": probe(AttachMsg.self),
-    "RenameMsg": probe(RenameMsg.self),
+    "UpdateMsg": probe(UpdateMsg.self),
     "SetStatusMsg": probe(SetStatusMsg.self),
     "ResizeMsg": probe(ResizeMsg.self),
     "LogsMsg": probe(LogsMsg.self),

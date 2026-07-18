@@ -166,16 +166,19 @@ public struct SessionScopeMsg: Codable, Sendable {
     }
 }
 
-public struct RenameMsg: Codable, Sendable {
+public struct UpdateMsg: Codable, Sendable {
     public var sessionID: String
-    public var newName: String
-    public init(sessionID: String, newName: String) {
+    public var name: String?
+    public var parentID: String?
+    public init(sessionID: String, name: String? = nil, parentID: String? = nil) {
         self.sessionID = sessionID
-        self.newName = newName
+        self.name = name
+        self.parentID = parentID
     }
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
-        case newName = "new_name"
+        case name
+        case parentID = "parent_id"
     }
 }
 

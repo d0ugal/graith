@@ -48,12 +48,6 @@ func TestGuardRestartRejectsSoftDeleted(t *testing.T) {
 	assertSoftDeletedError(t, err)
 }
 
-func TestGuardRenameRejectsSoftDeleted(t *testing.T) {
-	sm := newSoftDeletedSession(t, "auld-id", "auld")
-
-	assertSoftDeletedError(t, sm.Rename("auld-id", "bonnie"))
-}
-
 func TestGuardStarRejectsSoftDeleted(t *testing.T) {
 	sm := newSoftDeletedSession(t, "kirk-id", "kirk")
 

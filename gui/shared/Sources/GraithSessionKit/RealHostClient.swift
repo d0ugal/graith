@@ -160,7 +160,7 @@ public actor RealHostClient: GraithHostClient {
         try await run { try await self.inner.setStatus(sessionID: sessionID, text: text, ttlSeconds: ttlSeconds, clear: clear) }
     }
     public func rename(sessionID: String, newName: String) async throws {
-        try await run { try await self.inner.rename(sessionID: sessionID, newName: newName) }
+        try await run { try await self.inner.update(sessionID: sessionID, name: newName) }
     }
     public func star(sessionID: String) async throws { try await run { try await self.inner.star(sessionID: sessionID) } }
     public func unstar(sessionID: String) async throws { try await run { try await self.inner.unstar(sessionID: sessionID) } }

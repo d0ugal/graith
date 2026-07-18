@@ -125,32 +125,6 @@ func (sm *SessionManager) ClearSummary(sessionID string) error {
 	return sm.saveState()
 }
 
-func (sm *SessionManager) Rename(id, newName string) error {
-	if err := ValidateSessionName(newName); err != nil {
-		return err
-	}
-
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	s, ok := sm.state.Sessions[id]
-	if !ok {
-		return fmt.Errorf("session %q not found", id)
-	}
-
-	if IsSystemSession(s) {
-		return fmt.Errorf("cannot rename system session %q", s.Name)
-	}
-
-	if s.IsSoftDeleted() {
-		return errSoftDeleted(s.Name)
-	}
-
-	s.Name = newName
-
-	return sm.saveState()
-}
-
 func (sm *SessionManager) Update(id string, name *string, parentID *string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()

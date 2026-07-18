@@ -265,44 +265,15 @@ func TestNewSessionManagerPRWatchKickChannelBoundary(t *testing.T) {
 	}
 }
 
-func TestRename(t *testing.T) {
-	t.Run("happy path", func(t *testing.T) {
-		sm := newTestSessionManager(t)
-		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "auld-name", Status: StatusRunning,
-		}
-
-		if err := sm.Rename("sess1", "bonnie-name"); err != nil {
-			t.Fatalf("Rename() error = %v", err)
-		}
-
-		s, ok := sm.state.Sessions["sess1"]
-		if !ok {
-			t.Fatal("session not found after rename")
-		}
-
-		if s.Name != "bonnie-name" {
-			t.Errorf("Name = %q, want %q", s.Name, "bonnie-name")
-		}
-	})
-
-	t.Run("not found", func(t *testing.T) {
-		sm := newTestSessionManager(t)
-
-		err := sm.Rename("nonexistent", "bonnie-name")
-		if err == nil {
-			t.Fatal("expected error for nonexistent session")
-		}
-	})
-}
-
 func TestUpdate(t *testing.T) {
 	strPtr := func(s string) *string { return &s }
 
 	t.Run("rename via update", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "auld-name", Status: StatusRunning,
+			ID: "sess1", ParentID: "ben", Name: "auld-name", Status: StatusRunning,
+			WorktreePath: "/bothy/sess1", Branch: "user/auld-name-sess1", Token: "tok-sess1",
+			ScenarioID: "sc-strath", ScenarioName: "strath", ScenarioRole: "implementer",
 		}
 
 		if err := sm.Update("sess1", strPtr("bonnie-name"), nil); err != nil {
@@ -311,6 +282,26 @@ func TestUpdate(t *testing.T) {
 
 		if sm.state.Sessions["sess1"].Name != "bonnie-name" {
 			t.Errorf("Name = %q, want %q", sm.state.Sessions["sess1"].Name, "bonnie-name")
+		}
+
+		got := sm.state.Sessions["sess1"]
+		if got.ID != "sess1" || got.ParentID != "ben" || got.WorktreePath != "/bothy/sess1" ||
+			got.Branch != "user/auld-name-sess1" || got.Token != "tok-sess1" ||
+			got.ScenarioID != "sc-strath" || got.ScenarioName != "strath" || got.ScenarioRole != "implementer" {
+			t.Errorf("name-only update changed stable session identity or relationships: %+v", got)
+		}
+
+		persisted, err := LoadState(sm.paths.StateFile)
+		if err != nil {
+			t.Fatalf("LoadState() after name update: %v", err)
+		}
+
+		reloaded := persisted.Sessions["sess1"]
+		if reloaded == nil || reloaded.Name != "bonnie-name" || reloaded.ParentID != "ben" ||
+			reloaded.WorktreePath != "/bothy/sess1" || reloaded.Branch != "user/auld-name-sess1" ||
+			reloaded.Token != "tok-sess1" || reloaded.ScenarioID != "sc-strath" ||
+			reloaded.ScenarioName != "strath" || reloaded.ScenarioRole != "implementer" {
+			t.Errorf("persisted name update changed stable session identity or relationships: %+v", reloaded)
 		}
 	})
 
@@ -404,6 +395,20 @@ func TestUpdate(t *testing.T) {
 		}
 	})
 
+	t.Run("duplicate display name remains allowed", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{ID: "sess1", Name: "dreich", Status: StatusRunning}
+		sm.state.Sessions["sess2"] = &SessionState{ID: "sess2", Name: "canny", Status: StatusRunning}
+
+		if err := sm.Update("sess2", strPtr("dreich"), nil); err != nil {
+			t.Fatalf("Update() duplicate display name error = %v", err)
+		}
+
+		if got := sm.state.Sessions["sess2"].Name; got != "dreich" {
+			t.Fatalf("Name = %q, want dreich", got)
+		}
+	})
+
 	t.Run("no changes is no-op", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
@@ -424,8 +429,8 @@ func TestUpdate(t *testing.T) {
 		}
 
 		err := sm.Update("sys", strPtr("bonnie-name"), nil)
-		if err == nil {
-			t.Fatal("expected error for system session")
+		if err == nil || !strings.Contains(err.Error(), "cannot update system session") {
+			t.Fatalf("expected explicit error for system session, got %v", err)
 		}
 	})
 

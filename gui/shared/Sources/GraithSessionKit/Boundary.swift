@@ -54,7 +54,7 @@ public enum ControlType {
     public static let restore = "restore"
     public static let setStatus = "set_status"
     public static let interrupt = "interrupt"
-    public static let rename = "rename"
+    public static let update = "update"
     public static let star = "star"
     public static let unstar = "unstar"
     public static let fork = "fork"

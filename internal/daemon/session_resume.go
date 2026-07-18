@@ -305,7 +305,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 
 	if err := validateSessionName(sessState.Name, IsSystemSession(sessState)); err != nil {
 		sm.mu.Unlock()
-		return SessionState{}, fmt.Errorf("session has unsafe name %q (created before validation was added): %w — use 'gr rename' to fix", sessState.Name, err)
+		return SessionState{}, fmt.Errorf("session has unsafe name %q (created before validation was added): %w — use 'gr update <session> --name <new-name>' to fix (session ID: %s)", sessState.Name, err, sessState.ID)
 	}
 
 	agent, ok := sm.cfg.Agents[sessState.Agent]

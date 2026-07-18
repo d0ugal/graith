@@ -93,7 +93,7 @@ gr stop fix-auth-bug        # stop agent, keep worktree
 gr restart fix-auth-bug     # restart agent in same worktree
 gr migrate fix-auth-bug --agent codex  # swap agent in place (e.g. on a provider outage)
 gr delete fix-auth-bug      # kill agent, remove worktree and branch
-gr rename fix-auth-bug auth-fix
+gr update fix-auth-bug --name auth-fix
 gr star important-session   # protect from accidental deletion
 gr unstar important-session
 ```
