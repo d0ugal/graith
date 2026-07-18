@@ -3,7 +3,7 @@ title: "Design Doc: Collision-Safe Scenario Name Templates"
 authors: OpenAI Codex
 created: 2026-07-17
 status: Implemented
-reviewers: (pending implementation review)
+reviewers: Implementation review complete
 informed: (TBD)
 issue: https://github.com/d0ugal/graith/issues/1417
 ---
