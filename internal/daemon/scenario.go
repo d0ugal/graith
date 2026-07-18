@@ -825,7 +825,6 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 			}
 
 			startedIDs = append(startedIDs, result.sess.ID)
-			sessionIDs[i] = result.sess.ID
 			waveStarted = append(waveStarted, result)
 		}
 
