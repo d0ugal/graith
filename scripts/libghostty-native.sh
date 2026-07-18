@@ -53,6 +53,7 @@ readonly SIMDUTF_MIT_LICENSE_SHA256="fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c
 readonly SPDX_TOOLS_VERSION="2.0.7"
 readonly SPDX_TOOLS_URL="https://github.com/spdx/tools-java/releases/download/v2.0.7/tools-java-2.0.7.zip"
 readonly SPDX_TOOLS_SHA256="2dc63c3399c5178058b1be8a3de6f13b9f24981cd86c4292ef98f4a7e90de36d"
+readonly SPDX_NAMESPACE="https://github.com/d0ugal/graith/sbom/libghostty-native/91f66da24527fa02d92b5fd0b41cd020f553a64c/e9e1010f80b1ced0b7efcdb300f4838513c0816e"
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 readonly REPO_DIR
@@ -271,14 +272,17 @@ verify_metadata() {
         --arg simdutf_cpp "$SIMDUTF_CPP_SHA256" \
         --arg simdutf_h "$SIMDUTF_HEADER_SHA256" \
         --arg zig "$REQUIRED_ZIG" \
-        --arg zig_sha "$ZIG_SOURCE_SHA256" '
+        --arg zig_sha "$ZIG_SOURCE_SHA256" \
+        --arg namespace "$SPDX_NAMESPACE" '
         def package($id): first(.packages[] | select(.SPDXID == $id));
         def has_sha($package; $sha): any($package.checksums[]?; .algorithm == "SHA256" and .checksumValue == $sha);
         def relates($from; $type; $to): any(.relationships[];
             .spdxElementId == $from and .relationshipType == $type and .relatedSpdxElement == $to);
         .spdxVersion == "SPDX-2.3" and
         .dataLicense == "CC0-1.0" and
-        (.packages | length) == 7 and
+        (.documentNamespace == $namespace) and
+        (.packages | length) == 6 and
+        ([.packages[] | select(.SPDXID == "SPDXRef-Package-GraithNativeCandidate")] | length) == 0 and
         (package("SPDXRef-Package-GoLibghostty").versionInfo == $go_libghostty) and
         (package("SPDXRef-Package-GoLibghostty").licenseConcluded == "MIT") and
         (package("SPDXRef-Package-Ghostty").versionInfo == $ghostty_version) and
@@ -296,10 +300,9 @@ verify_metadata() {
         (package("SPDXRef-Package-ZigRuntime").versionInfo == $zig) and
         has_sha(package("SPDXRef-Package-ZigRuntime"); $zig_sha) and
         (package("SPDXRef-Package-ZigRuntime").licenseConcluded == "MIT AND (Apache-2.0 WITH LLVM-exception)") and
-        (.relationships | length) == 7 and
-        relates("SPDXRef-DOCUMENT"; "DESCRIBES"; "SPDXRef-Package-GraithNativeCandidate") and
-        relates("SPDXRef-Package-GraithNativeCandidate"; "STATIC_LINK"; "SPDXRef-Package-GoLibghostty") and
-        relates("SPDXRef-Package-GraithNativeCandidate"; "STATIC_LINK"; "SPDXRef-Package-Ghostty") and
+        (.relationships | length) == 6 and
+        relates("SPDXRef-DOCUMENT"; "DESCRIBES"; "SPDXRef-Package-GoLibghostty") and
+        relates("SPDXRef-DOCUMENT"; "DESCRIBES"; "SPDXRef-Package-Ghostty") and
         relates("SPDXRef-Package-Ghostty"; "STATIC_LINK"; "SPDXRef-Package-Uucode") and
         relates("SPDXRef-Package-Ghostty"; "STATIC_LINK"; "SPDXRef-Package-Highway") and
         relates("SPDXRef-Package-Ghostty"; "STATIC_LINK"; "SPDXRef-Package-Simdutf") and
@@ -691,6 +694,247 @@ verify_binary_privacy() {
     fi
 }
 
+build_setting() {
+    local build_info="$1"
+    local key="$2"
+    local value
+    value="$(awk -v prefix="$key=" \
+        '$1 == "build" && index($2, prefix) == 1 { print substr($2, length(prefix) + 1) }' \
+        <<<"$build_info")"
+    if [[ -z "$value" || "$value" == *$'\n'* ]]; then
+        die "candidate build metadata must contain exactly one $key setting"
+        return 1
+    fi
+    printf '%s\n' "$value"
+}
+
+candidate_identity() {
+    local binary="$1"
+    local expected_goos="$2"
+    local expected_goarch="$3"
+    case "$expected_goos/$expected_goarch" in
+        darwin/amd64|darwin/arm64|linux/amd64|linux/arm64) ;;
+        *)
+            die "unsupported candidate target: $expected_goos/$expected_goarch"
+            return 1
+            ;;
+    esac
+
+    local build_info
+    if ! build_info="$(go version -m "$binary")"; then
+        die "candidate does not contain readable Go build metadata"
+        return 1
+    fi
+
+    local vcs revision modified actual_goos actual_goarch
+    if ! vcs="$(build_setting "$build_info" vcs)" ||
+        ! revision="$(build_setting "$build_info" vcs.revision)" ||
+        ! modified="$(build_setting "$build_info" vcs.modified)" ||
+        ! actual_goos="$(build_setting "$build_info" GOOS)" ||
+        ! actual_goarch="$(build_setting "$build_info" GOARCH)"; then
+        return 1
+    fi
+    if [[ "$vcs" != "git" ]]; then
+        die "candidate vcs setting is $vcs; want git"
+        return 1
+    fi
+    if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
+        die "candidate does not contain a full Git revision"
+        return 1
+    fi
+    if [[ "$modified" != "false" ]]; then
+        die "candidate was built from a modified Git worktree"
+        return 1
+    fi
+    if [[ "$actual_goos" != "$expected_goos" || "$actual_goarch" != "$expected_goarch" ]]; then
+        die "candidate target is $actual_goos/$actual_goarch; want $expected_goos/$expected_goarch"
+        return 1
+    fi
+    printf '%s\t%s\t%s\n' "$revision" "$actual_goos" "$actual_goarch"
+}
+
+materialize_candidate_spdx() {
+    local binary="${1:-}"
+    local goos="${2:-}"
+    local goarch="${3:-}"
+    local output="${4:-}"
+    if [[ ! -f "$binary" || -z "$output" ]]; then
+        die "usage: $0 materialize-spdx <binary> <goos> <goarch> <output>"
+        return 1
+    fi
+    if [[ "$output" == "$SPDX_DOCUMENT" ]]; then
+        die "refusing to overwrite the committed SPDX dependency inventory"
+        return 1
+    fi
+
+    local identity revision actual_goos actual_goarch
+    if ! identity="$(candidate_identity "$binary" "$goos" "$goarch")"; then
+        return 1
+    fi
+    IFS=$'\t' read -r revision actual_goos actual_goarch <<<"$identity"
+
+    local binary_sha namespace candidate_name candidate_purl source_info document_name
+    binary_sha="$(sha256_value "$binary")"
+    namespace="$SPDX_NAMESPACE/candidate/$revision/$actual_goos/$actual_goarch/$binary_sha"
+    candidate_name="graith-libghostty-$actual_goos-$actual_goarch"
+    candidate_purl="pkg:github/d0ugal/graith@$revision"
+    source_info="Graith revision $revision; target GOOS=$actual_goos GOARCH=$actual_goarch; packaged binary SHA-256 $binary_sha."
+    document_name="$candidate_name-$revision"
+
+    mkdir -p "$(dirname "$output")"
+    local partial="${output}.partial"
+    jq \
+        --arg candidate_name "$candidate_name" \
+        --arg candidate_purl "$candidate_purl" \
+        --arg document_name "$document_name" \
+        --arg namespace "$namespace" \
+        --arg revision "$revision" \
+        --arg source_info "$source_info" \
+        --arg binary_sha "$binary_sha" '
+        .name = $document_name |
+        .documentNamespace = $namespace |
+        .packages += [{
+            "SPDXID": "SPDXRef-Package-GraithNativeCandidate",
+            "checksums": [{"algorithm": "SHA256", "checksumValue": $binary_sha}],
+            "copyrightText": "Copyright (c) 2025 Dougal Matthews",
+            "downloadLocation": "NOASSERTION",
+            "externalRefs": [{
+                "referenceCategory": "PACKAGE-MANAGER",
+                "referenceLocator": $candidate_purl,
+                "referenceType": "purl"
+            }],
+            "filesAnalyzed": false,
+            "licenseConcluded": "MIT",
+            "licenseDeclared": "MIT",
+            "name": $candidate_name,
+            "packageFileName": "gr",
+            "sourceInfo": $source_info,
+            "supplier": "Person: Dougal Matthews",
+            "versionInfo": $revision
+        }] |
+        .relationships = (
+            [.relationships[] | select(
+                .spdxElementId != "SPDXRef-DOCUMENT" or .relationshipType != "DESCRIBES"
+            )] + [
+                {
+                    "relatedSpdxElement": "SPDXRef-Package-GraithNativeCandidate",
+                    "relationshipType": "DESCRIBES",
+                    "spdxElementId": "SPDXRef-DOCUMENT"
+                },
+                {
+                    "relatedSpdxElement": "SPDXRef-Package-GoLibghostty",
+                    "relationshipType": "STATIC_LINK",
+                    "spdxElementId": "SPDXRef-Package-GraithNativeCandidate"
+                },
+                {
+                    "relatedSpdxElement": "SPDXRef-Package-Ghostty",
+                    "relationshipType": "STATIC_LINK",
+                    "spdxElementId": "SPDXRef-Package-GraithNativeCandidate"
+                }
+            ]
+        )
+        ' "$SPDX_DOCUMENT" >"$partial"
+    mv "$partial" "$output"
+    verify_candidate_binding "$binary" "$goos" "$goarch" "$output"
+}
+
+verify_candidate_binding() {
+    local binary="${1:-}"
+    local goos="${2:-}"
+    local goarch="${3:-}"
+    local document="${4:-}"
+    if [[ ! -f "$binary" || ! -f "$document" ]]; then
+        die "usage: $0 verify-candidate-binding <binary> <goos> <goarch> <spdx>"
+        return 1
+    fi
+
+    local identity revision actual_goos actual_goarch
+    if ! identity="$(candidate_identity "$binary" "$goos" "$goarch")"; then
+        return 1
+    fi
+    IFS=$'\t' read -r revision actual_goos actual_goarch <<<"$identity"
+
+    local binary_sha namespace candidate_name candidate_purl source_info document_name
+    binary_sha="$(sha256_value "$binary")"
+    namespace="$SPDX_NAMESPACE/candidate/$revision/$actual_goos/$actual_goarch/$binary_sha"
+    candidate_name="graith-libghostty-$actual_goos-$actual_goarch"
+    candidate_purl="pkg:github/d0ugal/graith@$revision"
+    source_info="Graith revision $revision; target GOOS=$actual_goos GOARCH=$actual_goarch; packaged binary SHA-256 $binary_sha."
+    document_name="$candidate_name-$revision"
+
+    if ! jq -e \
+        --arg binary_sha "$binary_sha" \
+        --arg candidate_name "$candidate_name" \
+        --arg candidate_purl "$candidate_purl" \
+        --arg document_name "$document_name" \
+        --arg namespace "$namespace" \
+        --arg revision "$revision" \
+        --arg source_info "$source_info" '
+        def package($id): first(.packages[] | select(.SPDXID == $id));
+        def relates($from; $type; $to): any(.relationships[];
+            .spdxElementId == $from and .relationshipType == $type and .relatedSpdxElement == $to);
+        .spdxVersion == "SPDX-2.3" and
+        .dataLicense == "CC0-1.0" and
+        .name == $document_name and
+        .documentNamespace == $namespace and
+        (.packages | length) == 7 and
+        ([.packages[] | select(.SPDXID == "SPDXRef-Package-GraithNativeCandidate")] | length) == 1 and
+        (package("SPDXRef-Package-GraithNativeCandidate").name == $candidate_name) and
+        (package("SPDXRef-Package-GraithNativeCandidate").versionInfo == $revision) and
+        (package("SPDXRef-Package-GraithNativeCandidate").packageFileName == "gr") and
+        (package("SPDXRef-Package-GraithNativeCandidate").sourceInfo == $source_info) and
+        (package("SPDXRef-Package-GraithNativeCandidate").filesAnalyzed == false) and
+        (package("SPDXRef-Package-GraithNativeCandidate").licenseConcluded == "MIT") and
+        (package("SPDXRef-Package-GraithNativeCandidate").checksums ==
+            [{"algorithm": "SHA256", "checksumValue": $binary_sha}]) and
+        (package("SPDXRef-Package-GraithNativeCandidate").externalRefs == [{
+            "referenceCategory": "PACKAGE-MANAGER",
+            "referenceLocator": $candidate_purl,
+            "referenceType": "purl"
+        }]) and
+        (.relationships | length) == 7 and
+        relates("SPDXRef-DOCUMENT"; "DESCRIBES"; "SPDXRef-Package-GraithNativeCandidate") and
+        relates("SPDXRef-Package-GraithNativeCandidate"; "STATIC_LINK"; "SPDXRef-Package-GoLibghostty") and
+        relates("SPDXRef-Package-GraithNativeCandidate"; "STATIC_LINK"; "SPDXRef-Package-Ghostty") and
+        relates("SPDXRef-Package-Ghostty"; "STATIC_LINK"; "SPDXRef-Package-Uucode") and
+        relates("SPDXRef-Package-Ghostty"; "STATIC_LINK"; "SPDXRef-Package-Highway") and
+        relates("SPDXRef-Package-Ghostty"; "STATIC_LINK"; "SPDXRef-Package-Simdutf") and
+        relates("SPDXRef-Package-Ghostty"; "STATIC_LINK"; "SPDXRef-Package-ZigRuntime")
+        ' "$document" >/dev/null; then
+        die "candidate SPDX document is not bound to the binary and target"
+        return 1
+    fi
+}
+
+test_candidate_binding() {
+    local binary="$1"
+    local goos="$2"
+    local goarch="$3"
+    local document="$4"
+    verify_candidate_binding "$binary" "$goos" "$goarch" "$document"
+
+    local tampered="$NATIVE_WORK/binding-tampered-$goos-$goarch"
+    cp "$binary" "$tampered"
+    printf '\0' >>"$tampered"
+    if verify_candidate_binding "$tampered" "$goos" "$goarch" "$document" \
+        >/dev/null 2>&1; then
+        die "candidate binding accepted changed binary bytes"
+        return 1
+    fi
+
+    local wrong_goarch="arm64"
+    if [[ "$goarch" == "arm64" ]]; then
+        wrong_goarch="amd64"
+    fi
+    if verify_candidate_binding "$binary" "$goos" "$wrong_goarch" "$document" \
+        >/dev/null 2>&1; then
+        die "candidate binding accepted the wrong target"
+        return 1
+    fi
+    rm -f -- "$tampered"
+    printf 'candidate binding checks passed for %s/%s\n' "$goos" "$goarch"
+}
+
 verify_selectors() {
     cd "$REPO_DIR"
     local selected
@@ -731,9 +975,12 @@ verify_selectors() {
 
 package_candidate() {
     local binary="${1:-}"
-    local destination="${2:-}"
-    [[ -f "$binary" && -n "$destination" ]] ||
-        die "usage: $0 package-candidate <binary> <empty-directory>"
+    local goos="${2:-}"
+    local goarch="${3:-}"
+    local destination="${4:-}"
+    local spdx_jar="${5:-}"
+    [[ -f "$binary" && -n "$destination" && -f "$spdx_jar" ]] ||
+        die "usage: $0 package-candidate <binary> <goos> <goarch> <empty-directory> <spdx-jar>"
     mkdir -p "$destination"
     local -a existing
     shopt -s nullglob dotglob
@@ -744,7 +991,12 @@ package_candidate() {
     verify_metadata
     verify_binary_privacy "$binary"
     cp "$binary" "$destination/gr"
-    cp "$SPDX_DOCUMENT" "$NOTICE_DOCUMENT" "$destination/"
+    cp "$NOTICE_DOCUMENT" "$destination/"
+    materialize_candidate_spdx "$destination/gr" "$goos" "$goarch" \
+        "$destination/libghostty-native.spdx.json"
+    test_candidate_binding "$destination/gr" "$goos" "$goarch" \
+        "$destination/libghostty-native.spdx.json"
+    validate_spdx "$spdx_jar" "$destination/libghostty-native.spdx.json"
     if grep -Eq '/home/runner|/Users/|/private/var/folders/|/runner/work/' \
         "$destination/libghostty-native.spdx.json" \
         "$destination/THIRD_PARTY_NOTICES.libghostty.md"; then
@@ -785,13 +1037,15 @@ install_spdx_validator() {
 
 validate_spdx() {
     local jar="${1:-}"
-    [[ -f "$jar" ]] || die "usage: $0 validate-spdx <tools-java-jar>"
+    local document="${2:-$SPDX_DOCUMENT}"
+    [[ -f "$jar" && -f "$document" ]] ||
+        die "usage: $0 validate-spdx <tools-java-jar> [spdx-document]"
     require_command java
     local output
-    output="$(java -jar "$jar" Verify "$SPDX_DOCUMENT")"
+    output="$(java -jar "$jar" Verify "$document")"
     printf '%s\n' "$output"
     grep -Fq 'This SPDX Document is valid.' <<<"$output" ||
-        die "official SPDX validator did not accept $SPDX_DOCUMENT"
+        die "official SPDX validator did not accept $document"
 }
 
 usage() {
@@ -809,8 +1063,10 @@ usage: $0 test|race|fuzz|bench|memory|all
        $0 inspect-linkage <binary> [true|false]
        $0 verify-default-binary <binary>
        $0 verify-binary-privacy <binary>
+       $0 materialize-spdx <binary> <goos> <goarch> <output>
+       $0 verify-candidate-binding <binary> <goos> <goarch> <spdx>
        $0 verify-selectors
-       $0 package-candidate <binary> <empty-directory>
+       $0 package-candidate <binary> <goos> <goarch> <empty-directory> <spdx-jar>
        $0 install-zig <empty-directory>
        $0 install-spdx-validator <empty-directory>
        $0 validate-spdx <tools-java-jar>
@@ -869,11 +1125,17 @@ case "${1:-}" in
     verify-binary-privacy)
         verify_binary_privacy "${2:-}"
         ;;
+    materialize-spdx)
+        materialize_candidate_spdx "${2:-}" "${3:-}" "${4:-}" "${5:-}"
+        ;;
+    verify-candidate-binding)
+        verify_candidate_binding "${2:-}" "${3:-}" "${4:-}" "${5:-}"
+        ;;
     verify-selectors)
         verify_selectors
         ;;
     package-candidate)
-        package_candidate "${2:-}" "${3:-}"
+        package_candidate "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}"
         ;;
     install-zig)
         install_zig "${2:-}"

@@ -2,9 +2,11 @@
 
 This file applies only to Graith testing candidates built with the
 `libghostty` build tag. Ordinary pure-Go rollback builds do not contain this
-native dependency closure. The matching machine-readable inventory is
-`libghostty-native.spdx.json`; the script, SBOM, and this file must be rotated
-as one dependency unit.
+native dependency closure. The committed `libghostty-native.spdx.json` is the
+machine-readable dependency inventory; candidate packaging materializes from it
+a document with the same filename that is bound to the binary's exact revision,
+target, and SHA-256. The script, inventory, and this file must be rotated as one
+dependency unit.
 
 ## Exact dependency and provenance inventory
 

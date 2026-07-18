@@ -11,17 +11,6 @@
   "name": "graith-libghostty-native-dependencies",
   "packages": [
     {
-      "SPDXID": "SPDXRef-Package-GraithNativeCandidate",
-      "copyrightText": "Copyright (c) 2025 Dougal Matthews",
-      "downloadLocation": "NOASSERTION",
-      "filesAnalyzed": false,
-      "licenseConcluded": "MIT",
-      "licenseDeclared": "MIT",
-      "name": "graith-native-libghostty-candidate",
-      "supplier": "Person: Dougal Matthews",
-      "versionInfo": "91f66da24527fa02d92b5fd0b41cd020f553a64c+e9e1010f80b1ced0b7efcdb300f4838513c0816e"
-    },
-    {
       "SPDXID": "SPDXRef-Package-GoLibghostty",
       "copyrightText": "Copyright (c) 2026 Mitchell Hashimoto",
       "downloadLocation": "https://tangled.org/mitchellh.com/go-libghostty",
@@ -161,19 +150,14 @@
   ],
   "relationships": [
     {
-      "relatedSpdxElement": "SPDXRef-Package-GraithNativeCandidate",
+      "relatedSpdxElement": "SPDXRef-Package-GoLibghostty",
       "relationshipType": "DESCRIBES",
       "spdxElementId": "SPDXRef-DOCUMENT"
     },
     {
-      "relatedSpdxElement": "SPDXRef-Package-GoLibghostty",
-      "relationshipType": "STATIC_LINK",
-      "spdxElementId": "SPDXRef-Package-GraithNativeCandidate"
-    },
-    {
       "relatedSpdxElement": "SPDXRef-Package-Ghostty",
-      "relationshipType": "STATIC_LINK",
-      "spdxElementId": "SPDXRef-Package-GraithNativeCandidate"
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
     },
     {
       "relatedSpdxElement": "SPDXRef-Package-Uucode",

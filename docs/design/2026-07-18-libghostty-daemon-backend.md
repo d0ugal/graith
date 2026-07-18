@@ -328,8 +328,9 @@ The path-scoped native workflow performs these checks:
 - audited static-archive membership, native dependency/runtime symbols,
   defined Ghostty symbols in unstripped executables, and remaining Mach-O/ELF
   dynamic dependencies; and
-- path-free stripped testing artifacts whose exact contents are `gr`, the
-  SPDX document, and the complete notice file.
+- path-free stripped testing artifacts whose exact contents are `gr`, a
+  target-specific SPDX document bound to that binary, and the complete notice
+  file.
 
 An explicit tagged build without cgo, or on an unsupported OS, returns a
 configuration error rather than silently changing emulator. Ordinary
@@ -368,13 +369,22 @@ Graith pins `go.mitchellh.com/libghostty` to pseudo-version
 useful for tooling. Its API is not yet version-stable, so upgrades are reviewed
 changes rather than floating module updates.
 
-`libghostty-native.spdx.json` records the native closure that Go tooling cannot
-see: Ghostty, uucode 0.2.0, Highway 1.2.0 at its exact upstream commit, the
-vendored simdutf 9.0.0 amalgamation, and the bundled Zig 0.15.2 compiler/UBSan
-runtimes. Ghostty's simdutf package manifest is stale at 5.2.8, so the SBOM is
-bound instead to the exact vendored file hashes, the compiled version macro,
-and the corresponding upstream commit. Archive membership and symbols confirm
-that simdutf, Highway, compiler runtime, and UBSan runtime content is carried.
+The committed `libghostty-native.spdx.json` is the six-package dependency
+inventory: go-libghostty, Ghostty, uucode 0.2.0, Highway 1.2.0 at its exact
+upstream commit, the vendored simdutf 9.0.0 amalgamation, and the bundled Zig
+0.15.2 compiler/UBSan runtimes. Packaging never copies that template unchanged.
+It reads the stripped binary's Go build metadata, requires an unmodified full
+Git revision and exact GOOS/GOARCH, and materializes a seventh candidate package
+whose name, version, purl, SHA-256, source information, relationships, and
+deterministic namespace bind the document to those exact bytes and target.
+Positive, changed-binary, and wrong-target checks run for every candidate, and
+the official SPDX validator accepts the materialized document before upload.
+
+Ghostty's simdutf package manifest is stale at 5.2.8, so the dependency
+inventory is bound instead to the exact vendored file hashes, the compiled
+version macro, and the corresponding upstream commit. Archive membership and
+symbols confirm that simdutf, Highway, compiler runtime, and UBSan runtime
+content is carried.
 
 `THIRD_PARTY_NOTICES.libghostty.md` carries the MIT, both BSD-3-Clause,
 Unicode-3.0, Apache-2.0, and LLVM-exception terms required by that compiled
@@ -383,8 +393,9 @@ ISA detection and a Google Fuchsia-derived Apache validator; choosing MIT for
 simdutf itself does not remove those embedded notices. The script checks the Go
 module sum and license, SPDX structure and relationships, notice pins and
 license hashes, source manifests, Git commit, toolchain, headers, archive
-contents, and Apple checksum as one unit. CI then validates the document with
-the checksum-pinned official SPDX Java tool.
+contents, and Apple checksum as one unit. CI validates both the committed
+dependency inventory and every generated candidate document with the
+checksum-pinned official SPDX Java tool.
 
 The Apple archive checksum identifies the reviewed bytes but is not a claim of
 an upstream Ghostty attestation: it is a Graith-hosted testing input. A rotation
@@ -411,7 +422,8 @@ A pin rotation is atomic:
    only permitted system dynamic dependencies, then strip and scan build paths;
    and
 8. publish each candidate only when its exact three-file payload contains the
-   matching binary, SPDX inventory, and notices.
+   binary, its target/revision/checksum-bound validated SPDX document, and the
+   matching notices.
 
 Native advisories are not visible to Go vulnerability scanners. Dependency
 monitoring must therefore track Ghostty, uucode, Highway, simdutf, and the

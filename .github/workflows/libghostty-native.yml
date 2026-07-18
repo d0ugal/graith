@@ -142,12 +142,15 @@ jobs:
           scripts/libghostty-native.sh inspect-linkage "$inspection_binary" true
 
           packaged_binary="${RUNNER_TEMP}/gr-darwin-${GOARCH}"
-          go build -trimpath -ldflags='-s -w' -tags=libghostty \
+          go build -buildvcs=true -trimpath -ldflags='-s -w' -tags=libghostty \
             -o "$packaged_binary" ./cmd/graith
           scripts/libghostty-native.sh inspect-linkage "$packaged_binary" false
           scripts/libghostty-native.sh verify-binary-privacy "$packaged_binary"
+          spdx_jar="$(scripts/libghostty-native.sh install-spdx-validator \
+            "${RUNNER_TEMP}/spdx-validator-${GOARCH}")"
           scripts/libghostty-native.sh package-candidate \
-            "$packaged_binary" "${RUNNER_TEMP}/candidate-darwin-${GOARCH}"
+            "$packaged_binary" "$GOOS" "$GOARCH" \
+            "${RUNNER_TEMP}/candidate-darwin-${GOARCH}" "$spdx_jar"
       - name: Upload the exact Darwin testing candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -246,12 +249,15 @@ jobs:
           scripts/libghostty-native.sh inspect-linkage "$inspection_binary" true
 
           packaged_binary="${RUNNER_TEMP}/gr-linux-${GOARCH}"
-          go build -trimpath -ldflags='-s -w' -tags=libghostty \
+          go build -buildvcs=true -trimpath -ldflags='-s -w' -tags=libghostty \
             -o "$packaged_binary" ./cmd/graith
           scripts/libghostty-native.sh inspect-linkage "$packaged_binary" false
           scripts/libghostty-native.sh verify-binary-privacy "$packaged_binary"
+          spdx_jar="$(scripts/libghostty-native.sh install-spdx-validator \
+            "${RUNNER_TEMP}/spdx-validator-${GOARCH}")"
           scripts/libghostty-native.sh package-candidate \
-            "$packaged_binary" "${RUNNER_TEMP}/candidate-linux-${GOARCH}"
+            "$packaged_binary" "$GOOS" "$GOARCH" \
+            "${RUNNER_TEMP}/candidate-linux-${GOARCH}" "$spdx_jar"
       - name: Upload the exact Linux testing candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
