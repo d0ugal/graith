@@ -31,12 +31,15 @@ trap cleanup EXIT
 sha256_check() {
     local expected="$1"
     local path="$2"
+    local actual
 
-    if command -v sha256sum >/dev/null 2>&1; then
-        printf '%s  %s\n' "$expected" "$path" | sha256sum --check --status
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        actual="$(shasum -a 256 "$path" | awk '{print $1}')"
     else
-        printf '%s  %s\n' "$expected" "$path" | shasum -a 256 --check --status
+        actual="$(sha256sum "$path" | awk '{print $1}')"
     fi
+
+    [[ "$actual" == "$expected" ]]
 }
 
 apple_library() {
