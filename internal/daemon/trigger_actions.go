@@ -447,6 +447,7 @@ func completionReactorName(triggerID string, fc fireContext) string {
 	}
 
 	prefix := "completion-"
+
 	keep := maxLen - len(prefix) - len(suffix)
 	if len(readable) > keep {
 		readable = readable[:keep]
@@ -465,9 +466,11 @@ func completionReactorSlug(parts ...string) string {
 	for _, c := range strings.Join(parts, "-") {
 		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
 			b.WriteRune(c)
+
 			separator = false
 		} else if b.Len() > 0 && !separator {
 			b.WriteByte('-')
+
 			separator = true
 		}
 	}

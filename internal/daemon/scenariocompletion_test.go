@@ -279,12 +279,15 @@ func TestScenarioCompletionSessionActionSpawnsWithDurableIdentity(t *testing.T) 
 	sm.cfg.Agents["sleeper"] = config.Agent{Command: "sleep", Args: []string{"60"}}
 	sm.cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "safehouse", Command: backend}
 	sm.sandboxResolver = func(string) (bool, error) { return true, nil }
+
 	t.Cleanup(func() {
 		sm.mu.RLock()
+
 		ids := make([]string, 0, len(sm.sessions))
 		for id := range sm.sessions {
 			ids = append(ids, id)
 		}
+
 		sm.mu.RUnlock()
 
 		for _, id := range ids {
@@ -309,10 +312,12 @@ func TestScenarioCompletionSessionActionSpawnsWithDurableIdentity(t *testing.T) 
 		sm.mu.RLock()
 		action := sm.state.Scenarios["sc-braw"].Completion.Actions[0]
 		session := sm.state.Sessions[action.SessionID]
+
 		if session != nil {
-			copy := *session
-			session = &copy
+			sessionCopy := *session
+			session = &sessionCopy
 		}
+
 		sm.mu.RUnlock()
 
 		if session == nil {
@@ -321,6 +326,7 @@ func TestScenarioCompletionSessionActionSpawnsWithDurableIdentity(t *testing.T) 
 		}
 
 		fullTriggerID := scenarioTriggerName("sc-braw", "synthesise")
+
 		wantName := completionReactorName(fullTriggerID, fireContext{
 			scenarioID: "sc-braw", completionEpoch: 1,
 			completionAction: "synthesise", completionAttempt: 1, sessionName: "ben",
