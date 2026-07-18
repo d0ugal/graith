@@ -2,12 +2,38 @@
 
 package pty
 
+func ghosttyTerminalBackendExpectations() terminalBackendExpectations {
+	expectations := charmTerminalBackendExpectations()
+	expectations.contains1430Panic = false
+	expectations.resizePreviews = []string{
+		"canny brae bide\n\n\n",
+		"ae b\nide",
+		"canny bra\ne bide\n",
+		" bide\n",
+		"canny brae b\nide\n\n",
+	}
+	// Ghostty implements all three alternate modes and clears the screen, but
+	// retains the main screen's cursor column on entry.
+	expectations.alternateScreens = map[int]terminalAlternateExpectation{
+		47:   {active: "    bothy", restored: "brae"},
+		1047: {active: "    bothy", restored: "brae"},
+		1049: {active: "    bothy", restored: "brae"},
+	}
+	// Graith enables Ghostty's recommended mode 2027, so all remaining
+	// multi-codepoint and wide expectations match Charm. Unlike Charm, Ghostty
+	// also preserves the combining mark.
+	expectations.graphemes["combining"] = terminalGraphemeExpectation{
+		cells: []string{"e\u0301", "b"}, cursorX: 2, preview: "e\u0301b",
+	}
+
+	return expectations
+}
+
 func nativeTerminalBackendFactories() []terminalBackendFactory {
 	return []terminalBackendFactory{
 		{
-			name:             "libghostty-helper",
-			combiningContent: "e\u0301",
-			shrinkFirstLine:  "cann",
+			name:         "libghostty-helper",
+			expectations: ghosttyTerminalBackendExpectations(),
 			new: func(cols, rows int) (Terminal, error) {
 				return newTerminal(cols, rows)
 			},

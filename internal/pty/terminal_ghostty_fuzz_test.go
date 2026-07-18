@@ -8,11 +8,16 @@ import (
 )
 
 func FuzzGhosttyHelperWrite(f *testing.F) {
-	f.Add([]byte("braw plain text\r\n"))
-	f.Add([]byte("\x1b[1;38;5;208mstyled\x1b[0m"))
+	f.Add([]byte("braw canny\r\n"))
+	f.Add([]byte("\x1b[1;38;5;208mbraw\x1b[0m"))
 	f.Add([]byte("e\u0301 你 😀\r\n"))
 	f.Add([]byte("\x1b[?1049hbothy\x1b[?1049l"))
 	f.Add([]byte{0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x36, 0x68, 0x1b, 0x5b, 0x7a, 0x00})
+	// Reduced deterministic parser edge cases from the shared corpus.
+	f.Add([]byte("\x1b[2;133r\x1b[1S"))
+	f.Add([]byte("\x1b[999;999z\x1b]2;haar\x18canny"))
+	f.Add([]byte("\x1bP1;2|thrawn\x18braw"))
+	f.Add([]byte("e\u0301👩‍💻♥️🇬🇧你"))
 
 	f.Fuzz(func(t *testing.T, input []byte) {
 		if len(input) > 1024*1024 {

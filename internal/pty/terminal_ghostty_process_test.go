@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	libghostty "go.mitchellh.com/libghostty"
 	"golang.org/x/sys/unix"
 )
 
@@ -61,6 +62,24 @@ func TestGhosttySnapshotProtocolRoundTrip(t *testing.T) {
 		if got.Cells[i] != want.Cells[i] {
 			t.Errorf("cell %d = %+v, want %+v", i, got.Cells[i], want.Cells[i])
 		}
+	}
+}
+
+func TestGhosttyTerminalEnablesRecommendedGraphemeMode(t *testing.T) {
+	term, err := newGhosttyTerminal(20, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = term.Close() })
+
+	enabled, err := term.terminal.ModeGet(libghostty.ModeGraphemeCluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !enabled {
+		t.Fatal("Ghostty grapheme-cluster mode is disabled")
 	}
 }
 
