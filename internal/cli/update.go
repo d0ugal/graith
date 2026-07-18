@@ -126,7 +126,33 @@ func runUpdate(c controlConn, nameOrID string, opts updateOptions) error {
 // name. If the reference only exists in the soft-delete list, return the same
 // explicit recovery guidance as the daemon's raw-ID update guard.
 func resolveUpdatableSessionInfo(c controlConn, nameOrID string) (*protocol.SessionInfo, error) {
-	session, err := resolveSessionInfo(c, nameOrID)
+	live, err := listSessions(c, false)
+	if err != nil {
+		return nil, err
+	}
+
+	// An exact live ID is authoritative and needs no deleted-list lookup.
+	for i := range live {
+		if live[i].ID == nameOrID {
+			return &live[i], nil
+		}
+	}
+
+	// Before treating the input as a live display name, rule out an exact ID in
+	// the trash. Otherwise a live session named after a deleted session's ID
+	// could be updated when the caller explicitly targeted the deleted session.
+	deleted, err := listSessions(c, true)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range deleted {
+		if deleted[i].ID == nameOrID {
+			return nil, fmt.Errorf("session %q is soft-deleted; `gr restore` it first", deleted[i].Name)
+		}
+	}
+
+	session, err := resolveByNameOrID(nameOrID, live)
 	if err == nil {
 		return session, nil
 	}
@@ -134,11 +160,6 @@ func resolveUpdatableSessionInfo(c controlConn, nameOrID string) (*protocol.Sess
 	var notFound *sessionNotFoundError
 	if !errors.As(err, &notFound) {
 		return nil, err
-	}
-
-	deleted, deletedErr := listSessions(c, true)
-	if deletedErr != nil {
-		return nil, deletedErr
 	}
 
 	deletedSession, deletedErr := resolveByNameOrID(nameOrID, deleted)

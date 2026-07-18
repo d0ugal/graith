@@ -65,6 +65,7 @@ func TestRunUpdateName(t *testing.T) {
 		buf := captureUpdateOutput(t, false)
 		c := &scriptedConn{responses: []scriptedResp{
 			okResp(payloadEnv("session_list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{{ID: "id-braw", Name: "braw"}}})),
+			okResp(payloadEnv("session_list", protocol.SessionListMsg{})),
 			okResp(typeEnv("updated")),
 		}}
 
@@ -72,13 +73,13 @@ func TestRunUpdateName(t *testing.T) {
 			t.Fatalf("runUpdate: %v", err)
 		}
 
-		if got := c.sentTypes(); len(got) != 2 || got[0] != "list" || got[1] != "update" {
-			t.Fatalf("sent = %v, want [list update]", got)
+		if got := c.sentTypes(); len(got) != 3 || got[0] != "list" || got[1] != "list" || got[2] != "update" {
+			t.Fatalf("sent = %v, want [list list update]", got)
 		}
 
-		msg, ok := c.sends[1].Payload.(protocol.UpdateMsg)
+		msg, ok := c.sends[2].Payload.(protocol.UpdateMsg)
 		if !ok || msg.SessionID != "id-braw" || msg.Name == nil || *msg.Name != "bonnie" || msg.ParentID != nil {
-			t.Fatalf("payload = %+v, want name-only update", c.sends[1].Payload)
+			t.Fatalf("payload = %+v, want name-only update", c.sends[2].Payload)
 		}
 
 		if got := buf.String(); got != "Name updated to bonnie\n" {
@@ -116,15 +117,18 @@ func TestRunUpdateNameResolution(t *testing.T) {
 
 	t.Run("duplicate name is explicitly ambiguous", func(t *testing.T) {
 		captureUpdateOutput(t, false)
-		c := &scriptedConn{responses: []scriptedResp{okResp(payloadEnv("session_list", duplicateNames))}}
+		c := &scriptedConn{responses: []scriptedResp{
+			okResp(payloadEnv("session_list", duplicateNames)),
+			okResp(payloadEnv("session_list", protocol.SessionListMsg{})),
+		}}
 
 		err := runUpdate(c, "dreich", updateOptions{name: strptr("bonnie")})
 		if err == nil || !strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), "use an explicit ID") {
 			t.Fatalf("error = %v, want explicit ambiguity guidance", err)
 		}
 
-		if got := c.sentTypes(); len(got) != 1 || got[0] != "list" {
-			t.Fatalf("sent = %v, want only list", got)
+		if got := c.sentTypes(); len(got) != 2 || got[0] != "list" || got[1] != "list" {
+			t.Fatalf("sent = %v, want live and deleted list lookups", got)
 		}
 	})
 
@@ -157,6 +161,27 @@ func TestRunUpdateNameResolution(t *testing.T) {
 			t.Fatalf("error = %v, want restore guidance", err)
 		}
 	})
+
+	t.Run("deleted exact ID takes precedence over a live colliding name", func(t *testing.T) {
+		captureUpdateOutput(t, false)
+		c := &scriptedConn{responses: []scriptedResp{
+			okResp(payloadEnv("session_list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{
+				{ID: "id-canny", Name: "id-auld"},
+			}})),
+			okResp(payloadEnv("session_list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{
+				{ID: "id-auld", Name: "auld"},
+			}})),
+		}}
+
+		err := runUpdate(c, "id-auld", updateOptions{name: strptr("bonnie")})
+		if err == nil || !strings.Contains(err.Error(), "soft-deleted") || !strings.Contains(err.Error(), "gr restore") {
+			t.Fatalf("error = %v, want restore guidance for exact deleted ID", err)
+		}
+
+		if got := c.sentTypes(); len(got) != 2 || got[0] != "list" || got[1] != "list" {
+			t.Fatalf("sent = %v, want only live and deleted list lookups", got)
+		}
+	})
 }
 
 func TestRunUpdateCombinedProperties(t *testing.T) {
@@ -166,10 +191,12 @@ func TestRunUpdateCombinedProperties(t *testing.T) {
 			{ID: "id-bairn", Name: "bairn"},
 			{ID: "id-ben", Name: "ben"},
 		}})),
+		okResp(payloadEnv("session_list", protocol.SessionListMsg{})),
 		okResp(payloadEnv("session_list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{
 			{ID: "id-bairn", Name: "bairn"},
 			{ID: "id-ben", Name: "ben"},
 		}})),
+		okResp(payloadEnv("session_list", protocol.SessionListMsg{})),
 		okResp(typeEnv("updated")),
 	}}
 
@@ -177,7 +204,7 @@ func TestRunUpdateCombinedProperties(t *testing.T) {
 		t.Fatalf("runUpdate: %v", err)
 	}
 
-	msg := c.sends[2].Payload.(protocol.UpdateMsg)
+	msg := c.sends[4].Payload.(protocol.UpdateMsg)
 	if msg.ParentID == nil || *msg.ParentID != "id-ben" {
 		t.Fatalf("parent_id = %v, want id-ben", msg.ParentID)
 	}
@@ -196,6 +223,7 @@ func TestRunUpdateDaemonError(t *testing.T) {
 	captureUpdateOutput(t, false)
 	c := &scriptedConn{responses: []scriptedResp{
 		okResp(payloadEnv("session_list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{{ID: "id-braw", Name: "braw"}}})),
+		okResp(payloadEnv("session_list", protocol.SessionListMsg{})),
 		okResp(errEnv("cannot update system session \"orchestrator\"")),
 	}}
 
