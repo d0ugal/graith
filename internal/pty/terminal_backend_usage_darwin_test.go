@@ -19,7 +19,3 @@ func terminalBenchmarkProcessUsage() (time.Duration, int64, bool) {
 
 	return cpu, usage.Maxrss, true
 }
-
-func terminalBenchmarkCurrentRSS([]int) ([]int64, bool) {
-	return nil, false
-}

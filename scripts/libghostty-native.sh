@@ -27,6 +27,10 @@ readonly SPDX_TOOLS_VERSION="2.0.7"
 readonly SPDX_TOOLS_URL="https://github.com/spdx/tools-java/releases/download/v2.0.7/tools-java-2.0.7.zip"
 readonly SPDX_TOOLS_SHA256="2dc63c3399c5178058b1be8a3de6f13b9f24981cd86c4292ef98f4a7e90de36d"
 readonly SPDX_NAMESPACE="https://github.com/d0ugal/graith/sbom/libghostty-native/$GHOSTTY_SHA/$GO_LIBGHOSTTY_SHA"
+readonly BENCH_SAMPLES="5"
+readonly BENCHTIME="1s"
+readonly MEASUREMENT_GOMAXPROCS="10"
+readonly MEMORY_SAMPLES="5"
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 NATIVE_WORK="${GRAITH_LIBGHOSTTY_WORK:-}"
@@ -251,28 +255,45 @@ run_go() {
                 -fuzz '^FuzzGhosttyHelperWrite$' -fuzztime="$helper_fuzztime"
             ;;
         bench)
-            go test -run '^$' -tags=libghostty,libghostty_compare ./internal/pty \
-                -bench '^BenchmarkTerminalBackends$' -benchmem -benchtime=3x -count=5
+            GOMAXPROCS="$MEASUREMENT_GOMAXPROCS" \
+                go test -run '^$' -tags=libghostty,libghostty_compare ./internal/pty \
+                -bench '^BenchmarkTerminalBackends$' -benchmem \
+                -benchtime="$BENCHTIME" -count="$BENCH_SAMPLES"
             ;;
         memory)
             local charm_test="$NATIVE_WORK/pty-charm.test"
             local ghostty_test="$NATIVE_WORK/pty-libghostty.test"
+            local rss_probe="$NATIVE_WORK/pty-current-rss"
             go test -c -o "$charm_test" ./internal/pty
             go test -c -tags=libghostty,libghostty_compare \
                 -o "$ghostty_test" ./internal/pty
+            go build -o "$rss_probe" ./internal/pty/testdata/currentrss
 
+            local workloads=(
+                reconstruct_4MiB_1term
+                scroll_12000_1term
+                scroll_24000_1term
+                scroll_12000_3term
+                scroll_24000_3term
+            )
             for backend in charm libghostty-helper; do
                 local test_binary="$charm_test"
                 if [[ "$backend" == "libghostty-helper" ]]; then
                     test_binary="$ghostty_test"
                 fi
-                if [[ "$(uname -s)" == "Darwin" ]]; then
-                    /usr/bin/time -l env GRAITH_TERMINAL_MEMORY_BACKEND="$backend" \
-                        "$test_binary" -test.run '^TestTerminalBackendPeakMemoryWorkload$' -test.v
-                else
-                    /usr/bin/time -v env GRAITH_TERMINAL_MEMORY_BACKEND="$backend" \
-                        "$test_binary" -test.run '^TestTerminalBackendPeakMemoryWorkload$' -test.v
-                fi
+                local workload
+                for workload in "${workloads[@]}"; do
+                    local sample
+                    for ((sample = 1; sample <= MEMORY_SAMPLES; sample++)); do
+                        printf 'backend=%s workload=%s sample=%d/%d\n' \
+                            "$backend" "$workload" "$sample" "$MEMORY_SAMPLES"
+                        /usr/bin/time -l env GOMAXPROCS="$MEASUREMENT_GOMAXPROCS" \
+                            GRAITH_TERMINAL_MEMORY_BACKEND="$backend" \
+                            GRAITH_TERMINAL_MEMORY_WORKLOAD="$workload" \
+                            GRAITH_TERMINAL_RSS_PROBE="$rss_probe" \
+                            "$test_binary" -test.run '^TestTerminalBackendPeakMemoryWorkload$' -test.v
+                    done
+                done
             done
             ;;
     esac
