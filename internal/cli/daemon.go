@@ -158,6 +158,24 @@ func (e *preserveRestartRejectedError) Error() string { return e.cause.Error() }
 
 func (e *preserveRestartRejectedError) Unwrap() error { return e.cause }
 
+// protocolBoundaryRestartError means the running daemon speaks an older,
+// incompatible wire protocol (e.g. a protocol-1 daemon still running after the
+// binary upgraded to protocol 2) and rejected the preserve handshake before any
+// upgrade request could be sent. Sessions are never preserved across this
+// protocol security boundary by design, so the restart must fall through to a
+// clean stop/start — mirroring the client connect() path's
+// restartAcrossProtocolBoundary — rather than aborting with a confusing error.
+type protocolBoundaryRestartError struct {
+	serverProtocol string
+}
+
+func (e *protocolBoundaryRestartError) Error() string {
+	return fmt.Sprintf(
+		"daemon speaks incompatible protocol %s; sessions cannot be preserved across the protocol boundary",
+		e.serverProtocol,
+	)
+}
+
 var daemonProcessAlive = func(pid int) bool {
 	err := syscall.Kill(pid, 0)
 
@@ -173,6 +191,22 @@ func restartDaemonPreservingSessions(startAfterDeadPreserve func() error) error 
 	err := execUpgrade(preserveRestartSuccessMsg)
 	if err == nil {
 		return nil
+	}
+
+	// A protocol-incompatible daemon rejects the preserve handshake before any
+	// upgrade request is sent, so no session is ever at risk from a fallback here.
+	// Preservation across the protocol security boundary is impossible by design,
+	// so do the clean stop/start automatically instead of forcing the user to
+	// re-run with --force.
+	var boundary *protocolBoundaryRestartError
+	if errors.As(err, &boundary) {
+		fmt.Fprintf(
+			os.Stderr,
+			"Daemon protocol changed (daemon=%s, cli=%s); stopping old daemon and its sessions before clean restart...\n",
+			boundary.serverProtocol, protocol.Version,
+		)
+
+		return restartAfterProtocolBoundary(startAfterDeadPreserve)
 	}
 
 	var rejected *preserveRestartRejectedError
@@ -287,6 +321,23 @@ func execUpgrade(successMsg string) error {
 	if err != nil {
 		c.Close()
 		return fmt.Errorf("read daemon handshake before upgrade: %w", err)
+	}
+
+	// An older-protocol daemon rejects the protocol-2 handshake with handshake_err
+	// before it can report handshake_ok. Recognize that exact rejection (the same
+	// one the client connect() path routes into restartAcrossProtocolBoundary) and
+	// signal a clean, non-preserving restart rather than a generic failure.
+	if hsResp.Type == "handshake_err" {
+		c.Close()
+
+		var hsErr protocol.HandshakeErrMsg
+
+		_ = protocol.DecodePayload(hsResp, &hsErr)
+		if serverProtocol, ok := client.OlderServerProtocolFromHandshakeError(hsErr.Reason); ok {
+			return &protocolBoundaryRestartError{serverProtocol: serverProtocol}
+		}
+
+		return fmt.Errorf("daemon rejected upgrade handshake: %s", hsErr.Reason)
 	}
 
 	if hsResp.Type != "handshake_ok" {
@@ -442,6 +493,27 @@ func probeDaemonIdentityWithDeadline(aggregateDeadline time.Time) (daemonVersion
 	}
 
 	return hsOk.DaemonVersion, hsOk.DaemonInstanceID
+}
+
+// restartAfterProtocolBoundary performs the clean stop/start when the running
+// daemon speaks an incompatible older protocol. StopDaemon signals the old PID
+// and waits for it to exit (its graceful StopAll terminates protocol-1 sessions
+// the new daemon cannot adopt); startAfterStop then acquires the freed socket via
+// EnsureDaemon, which owns stale-socket and PID-file reconciliation. A stop error
+// is a warning, not fatal: the old daemon may already be gone, and startAfterStop
+// still fails closed if the socket is not actually free.
+func restartAfterProtocolBoundary(startAfterStop func() error) error {
+	if err := daemon.StopDaemon(paths.PIDFile); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
+
+	if err := startAfterStop(); err != nil {
+		return err
+	}
+
+	out.Printf("%s\n", cleanRestartSuccessMsg)
+
+	return nil
 }
 
 func restartClean() error {
