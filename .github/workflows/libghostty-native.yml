@@ -159,12 +159,15 @@ jobs:
               -run 'TestTerminalBackendCompatibilityCorpus|TestGhostty'
             go test -race -count=1 -tags=libghostty ./internal/daemon \
               -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
+            # Fixed budgets avoid the wall-clock deadline path affected by
+            # golang/go#75804. Snapshot CI reached 494,054 executions; local
+            # request/helper calibration reached 789,507-829,186 and 341-747.
             go test -tags=libghostty ./internal/pty -run '^$' -parallel=4 \
-              -fuzz '^FuzzGhosttySnapshotDecoder$' -fuzztime=10s
+              -fuzz '^FuzzGhosttySnapshotDecoder$' -fuzztime=500000x
             go test -tags=libghostty ./internal/pty -run '^$' -parallel=4 \
-              -fuzz '^FuzzGhosttyRequestDecoder$' -fuzztime=10s
+              -fuzz '^FuzzGhosttyRequestDecoder$' -fuzztime=830000x
             go test -tags=libghostty ./internal/pty -run '^$' -parallel=4 \
-              -fuzz '^FuzzGhosttyHelperWrite$' -fuzztime=10s
+              -fuzz '^FuzzGhosttyHelperWrite$' -fuzztime=750x
           else
             CGO_ENABLED=1 GOOS=linux CC="zig cc -target $TARGET" \
               go test -c -tags=libghostty -o "${RUNNER_TEMP}/pty-${GOARCH}.test" \

@@ -107,13 +107,6 @@ type pairApproval struct {
 	TLSPin   string
 }
 
-// unregisterPairWaiter removes a pair_request waiter (on timeout/disconnect).
-func (sm *SessionManager) unregisterPairWaiter(requestID string) {
-	sm.mu.Lock()
-	delete(sm.pairWaiters, requestID)
-	sm.mu.Unlock()
-}
-
 func (sm *SessionManager) cancelPendingPairing(requestID string) {
 	sm.mu.Lock()
 	delete(sm.pairWaiters, requestID)
@@ -200,7 +193,7 @@ func (sm *SessionManager) expirePendingLocked(now time.Time) {
 // The returned channel is the waiter for this request: it is registered under
 // the same lock that creates the pending entry, so an approval can never race
 // ahead of the waiter and drop the delivery. The caller reads it (with its own
-// timeout / disconnect handling) and must unregisterPairWaiter when done.
+// timeout / disconnect handling) and must cancelPendingPairing when done.
 // The returned deadline is the request's immutable expiry: the caller must time
 // its waiter out against this exact value (not the live TTL) so the waiter,
 // cleanup, and approval never disagree about when the request expires (#1299).

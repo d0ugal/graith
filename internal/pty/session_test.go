@@ -187,3 +187,68 @@ func TestSessionAttachDetach(t *testing.T) {
 		t.Fatal("timeout waiting for process exit")
 	}
 }
+
+func TestSessionPokeRetainsFastFinalOutput(t *testing.T) {
+	const iterations = 8
+
+	for i := 0; i < iterations; i++ {
+		dir := t.TempDir()
+
+		s, err := NewSession(SessionOpts{
+			ID: "canny", Command: "bash", Args: []string{"-c", `trap 'IFS= read -r line; printf "got:%s\n" "$line"; exit 0' WINCH; printf 'ready\n'; sleep 600 & wait`},
+			Dir: dir, Rows: 24, Cols: 80,
+			LogPath: filepath.Join(dir, "session.log"), MaxLogSize: 1024 * 1024,
+		})
+		if err != nil {
+			t.Fatalf("iteration %d: start session: %v", i, err)
+		}
+
+		if !waitForScrollbackMarker(s, "ready", 5*time.Second) {
+			_ = s.Kill()
+			s.Close()
+
+			t.Fatalf("iteration %d: sleeper did not become ready", i)
+		}
+
+		if err := s.WriteInputAndSubmit([]byte("bothy-input")); err != nil {
+			_ = s.Kill()
+			s.Close()
+
+			t.Fatalf("iteration %d: write input: %v", i, err)
+		}
+
+		s.Poke()
+
+		select {
+		case <-s.Done():
+		case <-time.After(5 * time.Second):
+			_ = s.Kill()
+			s.Close()
+
+			t.Fatalf("iteration %d: sleeper did not exit after poke", i)
+		}
+
+		if !waitForScrollbackMarker(s, "got:bothy-input", time.Second) {
+			s.Close()
+
+			t.Fatalf("iteration %d: final marker was not retained", i)
+		}
+
+		s.Close()
+	}
+}
+
+func waitForScrollbackMarker(s *Session, marker string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		tail, err := s.ScrollbackFile().TailBytes(4096)
+		if err == nil && bytes.Contains(tail, []byte(marker)) {
+			return true
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	return false
+}

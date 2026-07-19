@@ -1619,7 +1619,7 @@ func WriteManifest(dir string, m *UpgradeManifest) (string, error) {
 	}
 	// Dev is retained only as an opaque kernel identity and compared using the
 	// same bit-preserving conversion after adoption.
-	m.journalDev = uint64(committed.Dev) //nolint:gosec // G115: opaque device identity
+	m.journalDev = uint64(committed.Dev) //nolint:gosec,unconvert,nolintlint // G115/unconvert are platform-exclusive because Dev is signed on Darwin and unsigned on Linux.
 	m.journalIno = committed.Ino
 
 	if err := syncUpgradeManifestDirectory(dir); err != nil {
@@ -1898,7 +1898,7 @@ func removeUpgradeJournal(path string, manifest *UpgradeManifest) error {
 	}
 
 	if stat.Mode&unix.S_IFMT != unix.S_IFREG ||
-		uint64(stat.Dev) != manifest.journalDev || stat.Ino != manifest.journalIno { //nolint:gosec // G115: opaque device identity
+		uint64(stat.Dev) != manifest.journalDev || stat.Ino != manifest.journalIno { //nolint:gosec,unconvert,nolintlint // G115/unconvert are platform-exclusive because Dev is signed on Darwin and unsigned on Linux.
 		return errors.New("upgrade adoption journal pathname was replaced")
 	}
 
@@ -2118,7 +2118,7 @@ func ReadManifest(path string) (*UpgradeManifest, error) {
 		return nil, errors.New("upgrade manifest ownership differs from cleanup header")
 	}
 
-	manifest.journalDev = uint64(stat.Dev) //nolint:gosec // G115: opaque device identity
+	manifest.journalDev = uint64(stat.Dev) //nolint:gosec,unconvert,nolintlint // G115/unconvert are platform-exclusive because Dev is signed on Darwin and unsigned on Linux.
 	manifest.journalIno = stat.Ino
 	manifest.journalSHA256 = sha256.Sum256(data)
 
@@ -2640,7 +2640,7 @@ func readManifestHandoffDescriptor(fd int) (*UpgradeManifest, *UpgradeManifest, 
 	_, _ = digest.Write(body)
 	copy(owned.journalSHA256[:], digest.Sum(nil))
 	manifest.journalSHA256 = owned.journalSHA256
-	manifest.journalDev = uint64(stat.Dev) //nolint:gosec // G115: opaque kernel device identity
+	manifest.journalDev = uint64(stat.Dev) //nolint:gosec,unconvert,nolintlint // G115/unconvert are platform-exclusive because Dev is signed on Darwin and unsigned on Linux.
 	manifest.journalIno = stat.Ino
 
 	return owned, manifest, nil

@@ -157,6 +157,7 @@ func (m *MCPManager) Connect(serverName, proxyID string, vars config.TemplateVar
 
 		return nil, fmt.Errorf("MCP server %q configuration changed while starting", serverName)
 	}
+
 	m.processes[proxyID] = proc
 	delete(m.pending, proxyID)
 	m.creating--
@@ -164,6 +165,7 @@ func (m *MCPManager) Connect(serverName, proxyID string, vars config.TemplateVar
 
 	m.mu.Unlock()
 	go m.removeMCPProcessWhenDone(proxyID, proc)
+
 	m.log.Info("MCP server started", "server", serverName, "proxy_id", proxyID, "pid", proc.cmd.Process.Pid)
 
 	return proc, nil
@@ -353,6 +355,7 @@ func (m *MCPManager) drainContext(ctx context.Context, reason string) error {
 	var result error
 
 	unresolved := make(map[string]*MCPProcess)
+
 	for proxyID, proc := range procs {
 		if err := m.killProcessContext(ctx, proc); err != nil {
 			result = errors.Join(result, err)
@@ -634,6 +637,7 @@ func (m *MCPManager) startProcess(
 	if m.startProcessBeforeStart != nil {
 		m.startProcessBeforeStart()
 	}
+
 	mcpLogDir := filepath.Join(m.logDir, "mcp")
 	if err := os.MkdirAll(mcpLogDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create MCP log dir: %w", err)
@@ -900,6 +904,7 @@ func (m *MCPManager) killProcessContext(ctx context.Context, proc *MCPProcess) e
 	if m.killProcessContextHook != nil {
 		return m.killProcessContextHook(ctx, proc)
 	}
+
 	_ = proc.stdin.Close()
 
 	if proc.cmd.Process != nil {
@@ -907,6 +912,7 @@ func (m *MCPManager) killProcessContext(ctx context.Context, proc *MCPProcess) e
 
 		timer := time.NewTimer(5 * time.Second)
 		defer timer.Stop()
+
 		select {
 		case <-proc.done:
 			return nil

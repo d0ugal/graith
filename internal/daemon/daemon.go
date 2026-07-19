@@ -1084,6 +1084,7 @@ func (sm *SessionManager) adoptSessions(
 func (sm *SessionManager) saveState() error {
 	sm.statePersistMu.Lock()
 	defer sm.statePersistMu.Unlock()
+
 	if sm.saveStateFault != nil {
 		if err := sm.saveStateFault(); err != nil {
 			return err

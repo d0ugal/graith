@@ -729,6 +729,7 @@ func run(
 		beginBackgroundShutdown()
 		serverCancel()
 		srv.Shutdown()
+
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 
 		drainErr := stopBackground(shutdownCtx)
@@ -739,6 +740,7 @@ func run(
 		if drainErr == nil {
 			drainErr = sm.waitMutationIdle(shutdownCtx)
 		}
+
 		shutdownCancel()
 
 		if drainErr != nil {

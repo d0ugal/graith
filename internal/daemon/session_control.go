@@ -434,6 +434,7 @@ func (sm *SessionManager) restartWithReasonModeContextLocked(ctx context.Context
 
 	softDeleted := false
 	cleanupPending := false
+
 	if s, ok := sm.state.Sessions[id]; ok {
 		softDeleted = s.IsSoftDeleted()
 		cleanupPending = sm.rejectPendingUpgradeCleanupLocked(id) != nil

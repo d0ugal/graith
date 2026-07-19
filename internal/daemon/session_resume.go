@@ -1002,6 +1002,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		sessState.NativeStateRoot = ""
 		sessState.NativeCaptureStartedAt = nil
 	}
+
 	if isOrchestrator {
 		sessState.LastStartedAt = time.Now()
 	}
@@ -1092,7 +1093,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		"pid", result.PID, "pgid", ptySess.Pgid(), "sandboxed", sandboxed,
 		"scrollback_path", logPath)
 
-	sm.startWatcher(id, ptySess)
+	sm.startWatcher(id, ptySess)                                                 //nolint:contextcheck // The committed session owns its exit watcher beyond the resume request lifetime.
 	sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) { //nolint:contextcheck // unread notification is daemon-owned after resume commits
 		sm.notifyUnreadInboxContext(taskCtx, id)
 	})

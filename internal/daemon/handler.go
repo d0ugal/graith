@@ -119,6 +119,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 		if mutationLease {
 			sm.endMutationRequest()
 		}
+
 		close(connDone)
 
 		if attachedSessionID != "" {
@@ -158,6 +159,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 			mutationLease = false
 		}
+
 		select {
 		case <-ctx.Done():
 			return
@@ -822,7 +824,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				handleStatus(sm, auth, sendControl, msg)
 
 			case "status_report":
-				handleStatusReport(sm, auth, sendControl, msg)
+				handleStatusReport(sm, auth, sendControl, msg) //nolint:contextcheck // Accepted hook status and its notification are daemon-owned after the report is recorded.
 
 			case "diagnostics":
 				handleDiagnostics(sm, sendControl)
@@ -893,7 +895,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 				proxyID := fmt.Sprintf("%s-%s", mc.SessionID, mc.Server)
 
-				proc, err := sm.mcpManager.Connect(mc.Server, proxyID, mcpVars)
+				proc, err := sm.mcpManager.Connect(mc.Server, proxyID, mcpVars) //nolint:contextcheck // The manager owns bounded process cleanup across client disconnects.
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 					return
@@ -938,7 +940,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}()
 
 				// Read frames from proxy and write to MCP server stdin.
-				func() {
+				func() { //nolint:contextcheck // Disconnect must finish bounded manager-owned cleanup after the connection context ends.
 					defer sm.mcpManager.Disconnect(proxyID, proc)
 
 					for {
@@ -968,7 +970,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				handleMCPList(sm, sendControl)
 
 			case "mcp_restart":
-				handleMCPRestart(sm, auth, sendControl, msg)
+				handleMCPRestart(sm, auth, sendControl, msg) //nolint:contextcheck // An accepted restart owns bounded daemon process cleanup independent of the requester.
 
 			case "mcp_logs":
 				handleMCPLogs(sm, sendControl, msg)
@@ -1069,6 +1071,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 				ticket := upgradeTicket
 				upgradeTicket = nil
+
 				var u protocol.UpgradeMsg
 				if err := protocol.DecodePayload(msg, &u); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "invalid upgrade request"})
@@ -1128,6 +1131,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			}
 
 			mutationLease = true
+
 			if origin.Remote && !sm.remoteDataAllowed(origin, poppedDeviceID) {
 				sendControl("error", protocol.ErrorMsg{Message: "not authorized to send remote input"})
 
@@ -1147,6 +1151,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 						sendControl("error", protocol.ErrorMsg{Message: "session input was not accepted; reconnect and retry"})
 						return
 					}
+
 					pty.NotifyUserInput()
 				}
 			}
