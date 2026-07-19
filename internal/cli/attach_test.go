@@ -201,19 +201,9 @@ func TestOverlayKeysFromConfigOverrideAndDefault(t *testing.T) {
 	cfg = &config.Config{
 		Keybindings: config.Keybindings{
 			Overlay: config.OverlayKeybindings{
-				ListWatchAttach: "z",
-				MessagePin:      "P",
+				MessagePin: "P",
 			},
 		},
-	}
-
-	watch := listWatchKeysFromConfig()
-	if len(watch.Attach) != 1 || watch.Attach[0] != "z" {
-		t.Errorf("list watch attach = %v, want [z]", watch.Attach)
-	}
-	// An unset list_watch_stop keeps the built-in default.
-	if want := client.DefaultListWatchKeys().Stop; len(watch.Stop) != len(want) || watch.Stop[0] != want[0] {
-		t.Errorf("list watch stop = %v, want default %v", watch.Stop, want)
 	}
 
 	msg := messageKeysFromConfig()

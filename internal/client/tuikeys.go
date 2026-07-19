@@ -3,7 +3,7 @@ package client
 import "strings"
 
 // This file carries the configurable keybindings for the full-screen terminal
-// overlays (list watch, message viewer, scroll pager). Each
+// overlays (message viewer and scroll pager). Each
 // action holds a list of bubbletea key names; pressing any listed key triggers
 // it. The cli layer builds these from the [keybindings.overlay] config table,
 // falling back to the Default*Keys() values below when a key is unset. See #1233.
@@ -43,33 +43,6 @@ func primaryKey(bound []string) string {
 	}
 
 	return bound[0]
-}
-
-// ListWatchKeys are the keys the `gr list --watch` TUI listens for.
-type ListWatchKeys struct {
-	Up      []string
-	Down    []string
-	Attach  []string
-	Stop    []string
-	Delete  []string
-	Resume  []string
-	Confirm []string
-	Cancel  []string
-}
-
-// DefaultListWatchKeys returns the built-in list-watch bindings. They mirror the
-// [keybindings.overlay] defaults in default_config.toml.
-func DefaultListWatchKeys() ListWatchKeys {
-	return ListWatchKeys{
-		Up:      []string{"k", "up"},
-		Down:    []string{"j", "down"},
-		Attach:  []string{"enter", "a"},
-		Stop:    []string{"s"},
-		Delete:  []string{"x", "d"},
-		Resume:  []string{"r"},
-		Confirm: []string{"enter", "y"},
-		Cancel:  []string{"q", "esc", "ctrl+c"},
-	}
 }
 
 // MessageKeys are the keys the message-viewer overlay listens for.

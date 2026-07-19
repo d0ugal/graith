@@ -113,21 +113,6 @@ Each session row shows:
 | Git | Branch name (or "(in-place)"), dirty indicator, unpushed commit count |
 | Output | Age of most recent output |
 
-## Live list watch
-
-`gr ls --watch` is a live-updating TUI for monitoring and controlling the
-filtered session list.
-
-| Key | Action | Config key |
-|-----|--------|-----------|
-| `j` / Down | Move cursor down | `overlay.down` |
-| `k` / Up | Move cursor up | `overlay.up` |
-| Enter / `a` | Attach to session | `overlay.list_watch_attach` |
-| `s` | Stop session (with confirmation) | `overlay.list_watch_stop` |
-| `x` / `d` | Delete session (with confirmation) | `overlay.list_watch_delete` |
-| `r` | Resume a stopped session | `overlay.list_watch_resume` |
-| `q` / Escape / `ctrl+c` | Quit | `overlay.cancel` |
-
 ## Message viewer and scroll pager
 
 The message viewer (`ctrl+b m`) and scrollback pager (`ctrl+b [`) share a

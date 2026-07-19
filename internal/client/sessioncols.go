@@ -12,12 +12,12 @@ import (
 )
 
 // SessionColumn is the single source of truth for one column shown in the
-// session picker (the TUI overlay), the `gr ls` snapshot, and/or `gr ls
-// --watch`. A column is defined exactly once here, so adding a new column makes
+// session picker (the TUI overlay) and/or the `gr ls` snapshot. A column is
+// defined exactly once here, so adding a new column makes
 // it appear in every enabled surface — flip ShowCLI/ShowTUI to control where it
 // shows up and the views stay in sync automatically.
 //
-// The list snapshot/watch table and picker render differently: the list aligns
+// The list snapshot table and picker render differently: the list aligns
 // plain-text cells (optionally colourised) by visible width, while the picker
 // uses fixed-width cells with unicode glyphs and per-cell styling. So each
 // column carries a value formatter (and styling) for each kind of surface
@@ -34,7 +34,7 @@ type SessionColumn struct {
 	// the TUI uses it verbatim ("Status").
 	Header string
 
-	// ShowCLI includes the column in `gr ls` snapshot and watch modes.
+	// ShowCLI includes the column in `gr ls` snapshot mode.
 	ShowCLI bool
 	// ShowTUI includes the column in the TUI session picker.
 	ShowTUI bool

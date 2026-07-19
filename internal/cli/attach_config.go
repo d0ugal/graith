@@ -84,23 +84,6 @@ func overrideKeys(cfgVal string, def []string) []string {
 	return def
 }
 
-// listWatchKeysFromConfig builds the list-watch TUI keybindings from the
-// [keybindings.overlay] config table, falling back to the defaults per key.
-func listWatchKeysFromConfig() client.ListWatchKeys {
-	ov := cfg.Keybindings.Overlay
-	k := client.DefaultListWatchKeys()
-	k.Up = overrideKeys(ov.Up, k.Up)
-	k.Down = overrideKeys(ov.Down, k.Down)
-	k.Attach = overrideKeys(ov.ListWatchAttach, k.Attach)
-	k.Stop = overrideKeys(ov.ListWatchStop, k.Stop)
-	k.Delete = overrideKeys(ov.ListWatchDelete, k.Delete)
-	k.Resume = overrideKeys(ov.ListWatchResume, k.Resume)
-	k.Confirm = overrideKeys(ov.Confirm, k.Confirm)
-	k.Cancel = overrideKeys(ov.Cancel, k.Cancel)
-
-	return k
-}
-
 // messageKeysFromConfig builds the message-viewer keybindings from config.
 func messageKeysFromConfig() client.MessageKeys {
 	ov := cfg.Keybindings.Overlay

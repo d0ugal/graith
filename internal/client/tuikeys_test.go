@@ -1,8 +1,6 @@
 package client
 
 import (
-	"slices"
-	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -69,56 +67,6 @@ func TestKeyHintAndPrimaryKey(t *testing.T) {
 
 	if got := primaryKey(nil); got != "" {
 		t.Errorf("primaryKey(nil) = %q, want empty", got)
-	}
-}
-
-// TestListWatchKeysRemapped confirms list watch honours a remapped attach key
-// and ignores the old default once rebound (issue #1233).
-func TestListWatchKeysRemapped(t *testing.T) {
-	sessions := listWatchTestSessions()
-
-	keys := DefaultListWatchKeys()
-	keys.Attach = []string{"z"}
-
-	m := NewListWatchModel(sessions, nil)
-	m.keys = keys
-	m.width = 120
-	m.height = 40
-
-	// The old default 'a' no longer attaches.
-	dm := updateListWatch(m, "a")
-	if dm.result != nil {
-		t.Fatalf("old attach key 'a' should be inert after remap, got %+v", dm.result)
-	}
-
-	// The remapped 'z' attaches.
-	dm = updateListWatch(dm, "z")
-	if dm.result == nil || dm.result.Action != "attach" {
-		t.Fatalf("remapped attach key 'z' did not attach: %+v", dm.result)
-	}
-}
-
-func TestListWatchFooterReflectsConfiguredKeys(t *testing.T) {
-	keys := DefaultListWatchKeys()
-	keys.Delete = []string{"z"}
-
-	m := NewListWatchModel(listWatchTestSessions(), nil)
-	m.keys = keys
-	m.width = 120
-	m.height = 40
-
-	view := m.View().Content
-	if !strings.Contains(view, "z delete") {
-		t.Errorf("list watch footer should show remapped delete key; got:\n%s", view)
-	}
-}
-
-func TestDefaultListWatchKeysMirrorOverlayCancelDefaults(t *testing.T) {
-	keys := DefaultListWatchKeys()
-	for _, want := range []string{"q", "esc", "ctrl+c"} {
-		if !slices.Contains(keys.Cancel, want) {
-			t.Errorf("DefaultListWatchKeys().Cancel = %v, want %q", keys.Cancel, want)
-		}
 	}
 }
 

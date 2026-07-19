@@ -1680,7 +1680,7 @@ func (l LimitsConfig) InboxPreviewBytesOrDefault() int {
 
 // TerminalConfig is the [terminal] block: user-tunable interactive-TUI
 // presentation preferences that were previously fixed literals in the client
-// (issue #1254) — how often the picker/list-watch/status bar refresh, and how
+// (issue #1254) — how often interactive session views refresh, and how
 // wide a `gr status` summary may grow in the picker before truncation.
 //
 // Session-lifecycle presentation (the fallback terminal geometry and the
@@ -1691,8 +1691,8 @@ func (l LimitsConfig) InboxPreviewBytesOrDefault() int {
 // are also excluded — they must match render logic and stay as documented
 // constants. Every field is optional and falls back to its default constant.
 type TerminalConfig struct {
-	// RefreshInterval is the cadence at which the session picker, list watch,
-	// and an attached status bar re-poll the daemon for fresh session state.
+	// RefreshInterval is the cadence at which the session picker, attached
+	// status bar, and message viewer re-poll the daemon for fresh session state.
 	// Empty, unparseable, or non-positive uses the default
 	// (TerminalRefreshIntervalDefault); a zero cadence would busy-loop.
 	RefreshInterval string `toml:"refresh_interval"`
@@ -2602,7 +2602,7 @@ type Keybindings struct {
 	Messages       string `toml:"messages"`
 	RestartSession string `toml:"restart_session"`
 	// Overlay holds the keys used inside the full-screen terminal overlays
-	// (list watch, message viewer, scroll pager). See #1233.
+	// (message viewer and scroll pager). See #1233.
 	Overlay OverlayKeybindings `toml:"overlay"`
 }
 
@@ -2676,13 +2676,7 @@ type OverlayKeybindings struct {
 	PageDown string `toml:"page_down"`
 	Top      string `toml:"top"`
 	Bottom   string `toml:"bottom"`
-	Confirm  string `toml:"confirm"`
 	Cancel   string `toml:"cancel"`
-	// List-watch actions.
-	ListWatchAttach string `toml:"list_watch_attach"`
-	ListWatchStop   string `toml:"list_watch_stop"`
-	ListWatchDelete string `toml:"list_watch_delete"`
-	ListWatchResume string `toml:"list_watch_resume"`
 	// Message viewer actions.
 	MessagePin         string `toml:"message_pin"`
 	MessageExpandAll   string `toml:"message_expand_all"`

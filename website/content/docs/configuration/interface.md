@@ -43,8 +43,8 @@ would fire).
 
 ### Overlay keys
 
-The full-screen terminal overlays (list watch, message viewer,
-scroll pager) read their keys from `[keybindings.overlay]`. Each value is a
+The full-screen terminal overlays (message viewer and scroll pager) read their
+keys from `[keybindings.overlay]`. Each value is a
 space-separated list of [Bubble Tea](https://github.com/charmbracelet/bubbletea)
 key names; pressing any listed key triggers the action. A partial table
 overrides only the keys it names.
@@ -58,13 +58,7 @@ page_up   = "pgup ctrl+u ctrl+b"
 page_down = "pgdown space ctrl+d ctrl+f"
 top       = "g home"
 bottom    = "G end"
-confirm   = "enter y"                  # confirm a prompt (e.g. delete/stop)
 cancel    = "q esc ctrl+c"             # close the overlay / cancel
-# List watch actions.
-list_watch_attach = "enter a"
-list_watch_stop   = "s"
-list_watch_delete = "x d"
-list_watch_resume = "r"
 # Message viewer actions.
 message_pin               = "enter"
 message_expand_all        = "O"
@@ -98,13 +92,13 @@ drag_arrow_threshold = 2      # cells of drag movement per emitted arrow-key pre
 
 ```toml
 [terminal]
-refresh_interval = "2s"  # how often the picker/list watch/status bar/message viewer re-poll
+refresh_interval = "2s"  # how often the picker/status bar/message viewer re-poll
 summary_width    = 40    # max visible width of a `gr status` summary in the picker
 ```
 
 The `[terminal]` block collects the interactive client's presentation preferences that were previously fixed.
 
-**`refresh_interval`** is the cadence at which the session picker (`ctrl+b w`), `gr ls --watch`, an attached status bar, and the in-picker message viewer (`m`) re-poll the daemon for fresh session state. A shorter interval feels more live at the cost of more polling; a non-positive value falls back to the default (a zero cadence would busy-loop).
+**`refresh_interval`** is the cadence at which the session picker (`ctrl+b w`), an attached status bar, and the in-picker message viewer (`m`) re-poll the daemon for fresh session state. A shorter interval feels more live at the cost of more polling; a non-positive value falls back to the default (a zero cadence would busy-loop).
 
 **`summary_width`** is the widest a `gr status` summary may render in the picker before it is truncated with an ellipsis. It is a **display-cell** budget, not a byte or rune count: wide characters (CJK, emoji) count as two cells, zero-width and combining marks count as none, and ANSI styling is ignored when measuring. Truncation never splits a multi-byte character, so the rendered summary is always valid UTF-8. (This differs from the `[limits]` byte caps such as `inbox_preview_bytes`, which are measured in bytes.)
 
