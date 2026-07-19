@@ -9,16 +9,16 @@ draft: false
 
 ## Passthrough mode
 
-When attached to a session, your terminal is in raw passthrough mode. All input goes directly to the agent's PTY except when intercepted by the prefix key.
+When attached to a session, your terminal's in raw passthrough mode. All input goes straight to the agent's PTY unless the prefix key intercepts it.
 
 ### Prefix key
 
 Default: `ctrl+b` (configurable via `keybindings.prefix` in config).
 
-Press the prefix key to show a help bar, then press one of the following:
+Press the prefix key to show a help bar, then press one of the following.
 
 Every prefix-action key is configurable via the matching `keybindings.*` field
-(the defaults are shown below):
+(defaults shown below):
 
 | Key | Action | Config key |
 |-----|--------|-----------|
@@ -37,24 +37,24 @@ Every prefix-action key is configurable via the matching `keybindings.*` field
 | `r` | Restart/resume the current session | `restart_session` |
 | `ctrl+b` | Send a literal prefix byte to the agent | -- |
 
-The help bar appears at the bottom of the screen when the prefix key is pressed,
+The help bar appears at the bottom of the screen when you press the prefix key,
 showing the currently-configured commands. It disappears after the next keypress.
 
-If two prefix commands are bound to the same key, graith starts anyway but prints
-a warning at load time (only the first command in the passthrough order would
-fire), so pick distinct keys.
+If two prefix commands are bound to the same key, graith starts anyway but warns
+at load time — only the first command in the passthrough order fires — so pick
+distinct keys.
 
 ### Literal prefix
 
-Press the prefix key twice (`ctrl+b ctrl+b`) to send a single `ctrl+b` to the agent. This is necessary when the agent or a program inside the session needs to receive the prefix byte.
+Press the prefix key twice (`ctrl+b ctrl+b`) to send a single `ctrl+b` to the agent. You'll need this when the agent or a program inside the session needs the prefix byte.
 
 ### Kitty protocol
 
-graith handles both raw control bytes and Kitty keyboard protocol CSI u sequences. Terminals that use the extended protocol (e.g. Ghostty) send `ESC [ <codepoint> ; 5 u` for ctrl+key combinations. graith normalizes these to raw control bytes for prefix detection, and strips release events.
+graith handles both raw control bytes and Kitty keyboard protocol CSI u sequences. Terminals using the extended protocol (e.g. Ghostty) send `ESC [ <codepoint> ; 5 u` for ctrl+key combinations. graith normalizes these to raw control bytes for prefix detection, and strips release events.
 
 ## Session picker overlay
 
-The overlay is a full-screen TUI (built with Bubble Tea) that shows all sessions. Open it with `ctrl+b w` or by running `gr attach` with no arguments.
+The overlay is a full-screen TUI (built with Bubble Tea) that shows all sessions. Open it with `ctrl+b w`, or run `gr attach` with no arguments.
 
 ### Navigation
 
@@ -95,11 +95,11 @@ Cycle with `h`/`l` or left/right arrow keys:
 | `/` | Enter filter mode (type to search by name or repo) |
 | Esc (in filter) | Clear filter and return to list |
 
-There is no stop, resume, or rename action in the overlay. Use `gr stop`, `gr restart`, or `gr update <session> --name <new-name>` from the CLI.
+The overlay has no stop, resume, or rename action. Use `gr stop`, `gr restart`, or `gr update <session> --name <new-name>` from the CLI.
 
 ### Preview panel
 
-The right side of the overlay shows a live preview of the selected session's terminal output, rendered with a VT100 parser (vt10x). The preview updates as the session produces output.
+The right side of the overlay shows a live preview of the selected session's terminal output, rendered with a VT100 parser (vt10x). It updates as the session produces output.
 
 ### Session display
 
@@ -116,7 +116,7 @@ Each session row shows:
 ## Message viewer and scroll pager
 
 The message viewer (`ctrl+b m`) and scrollback pager (`ctrl+b [`) share a
-configurable navigation vocabulary and add their own action keys.
+configurable navigation vocabulary, then add their own action keys.
 
 | Overlay | Keys | Config keys |
 |---------|------|-------------|
@@ -131,8 +131,8 @@ key names (single letters, `up`, `down`, `enter`, `esc`, `pgup`, `ctrl+d`, …);
 pressing any listed key triggers the action. A partial table overrides only the
 keys it names — every other key keeps its default. See the
 [interface configuration]({{< relref "configuration/interface.md" >}}) page for
-the full list of keys and their defaults.
+the full list of keys and defaults.
 
 ## Shell
 
-Press `ctrl+b s` to open an interactive shell in the current session's worktree. The shell runs as a child process with `GRAITH_WORKTREE` set to the worktree path. When you exit the shell, the terminal is reset (alternate screen buffer cleared, mouse tracking disabled, cursor shown) and you return to the agent session.
+Press `ctrl+b s` to open an interactive shell in the current session's worktree. The shell runs as a child process with `GRAITH_WORKTREE` set to the worktree path. When you exit it, the terminal resets (alternate screen buffer cleared, mouse tracking disabled, cursor shown) and you return to the agent session.

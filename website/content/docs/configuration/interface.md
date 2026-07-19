@@ -37,17 +37,15 @@ session picker). graith handles both raw control bytes and Kitty keyboard
 protocol sequences, so it works in terminals like Ghostty that use the extended
 protocol.
 
-If two prefix commands are bound to the same key, graith prints a warning at
-load time and starts anyway (only the first command in the passthrough order
-would fire).
+If two prefix commands share a key, graith prints a warning at load time and
+starts anyway (only the first command in the passthrough order fires).
 
 ### Overlay keys
 
 The full-screen terminal overlays (message viewer and scroll pager) read their
-keys from `[keybindings.overlay]`. Each value is a
-space-separated list of [Bubble Tea](https://github.com/charmbracelet/bubbletea)
-key names; pressing any listed key triggers the action. A partial table
-overrides only the keys it names.
+keys from `[keybindings.overlay]`. Each value is a space-separated list of
+[Bubble Tea](https://github.com/charmbracelet/bubbletea) key names; pressing any
+listed key triggers the action. A partial table overrides only the keys it names.
 
 ```toml
 [keybindings.overlay]
@@ -76,7 +74,7 @@ See [Keybindings]({{< relref "/docs/keybindings.md" >}}) for the complete keybin
 shortcut_keys = "1234567890"  # keys that jump straight to the Nth session in the picker
 ```
 
-In the session picker (`ctrl+b w`), each of these keys jumps directly to the corresponding session — the 1st key selects session 1, the 2nd key session 2, and so on.
+In the session picker (`ctrl+b w`), each key jumps straight to its session — the 1st key selects session 1, the 2nd key session 2, and so on.
 
 ## Input
 
@@ -86,7 +84,7 @@ drag_arrow_keys      = false  # translate a left-click hold-and-drag into arrow-
 drag_arrow_threshold = 2      # cells of drag movement per emitted arrow-key press (values < 1 use the default)
 ```
 
-`drag_arrow_keys` lets you press-and-hold the left mouse button and drag up/down/left/right to emit discrete arrow-key presses to the focused pane — handy on touch/mobile terminals. It is off by default because it repurposes left-drag, which terminals otherwise use for text selection. Mouse-wheel scrolling always passes through unchanged. It only takes effect when the focused app has SGR mouse reporting enabled (e.g. a TUI tracking the mouse); graith translates those reports, it does not enable mouse tracking itself.
+`drag_arrow_keys` lets you press-and-hold the left mouse button and drag up/down/left/right to emit discrete arrow-key presses to the focused pane — handy on touch/mobile terminals. It's off by default because it repurposes left-drag, which terminals otherwise use for text selection. Mouse-wheel scrolling always passes through unchanged. It only takes effect when the focused app has SGR mouse reporting enabled (e.g. a TUI tracking the mouse); graith translates those reports, it doesn't enable mouse tracking itself.
 
 ## Terminal & TUI presentation
 
@@ -98,10 +96,10 @@ summary_width    = 40    # max visible width of a `gr status` summary in the pic
 
 The `[terminal]` block collects the interactive client's presentation preferences that were previously fixed.
 
-**`refresh_interval`** is the cadence at which the session picker (`ctrl+b w`), an attached status bar, and the in-picker message viewer (`m`) re-poll the daemon for fresh session state. A shorter interval feels more live at the cost of more polling; a non-positive value falls back to the default (a zero cadence would busy-loop).
+**`refresh_interval`** is the cadence at which the session picker (`ctrl+b w`), an attached status bar, and the in-picker message viewer (`m`) re-poll the daemon for fresh session state. A shorter interval feels more live but polls more; a non-positive value falls back to the default (a zero cadence would busy-loop).
 
-**`summary_width`** is the widest a `gr status` summary may render in the picker before it is truncated with an ellipsis. It is a **display-cell** budget, not a byte or rune count: wide characters (CJK, emoji) count as two cells, zero-width and combining marks count as none, and ANSI styling is ignored when measuring. Truncation never splits a multi-byte character, so the rendered summary is always valid UTF-8. (This differs from the `[limits]` byte caps such as `inbox_preview_bytes`, which are measured in bytes.)
+**`summary_width`** is the widest a `gr status` summary may render in the picker before it's truncated with an ellipsis. It's a **display-cell** budget, not a byte or rune count: wide characters (CJK, emoji) count as two cells, zero-width and combining marks as none, and ANSI styling is ignored when measuring. Truncation never splits a multi-byte character, so the rendered summary is always valid UTF-8. (This differs from the `[limits]` byte caps such as `inbox_preview_bytes`, which are measured in bytes.)
 
-The fallback terminal geometry (used when graith can't read the real terminal size, e.g. piped output) and the per-session scrollback cap are session-lifecycle settings — see [`[lifecycle]`]({{< relref "/docs/configuration/sessions.md" >}}) (`default_cols`, `default_rows`, `max_log_bytes`). The client's not-a-TTY fallback geometry follows the same `[lifecycle]` defaults, so there is a single source of truth.
+The fallback terminal geometry (used when graith can't read the real terminal size, e.g. piped output) and the per-session scrollback cap are session-lifecycle settings — see [`[lifecycle]`]({{< relref "/docs/configuration/sessions.md" >}}) (`default_cols`, `default_rows`, `max_log_bytes`). The client's not-a-TTY fallback geometry follows the same `[lifecycle]` defaults, so there's a single source of truth.
 
 Only genuine preferences are configurable here. Layout invariants — the picker's column-width arithmetic, wrap widths, the minimum name column, and the GUI's 60 fps redraw rate — must match the render logic and stay as fixed constants in the code.

@@ -9,7 +9,7 @@ draft: false
 
 ## PR & CI awareness
 
-When enabled, the daemon resolves each session's GitHub PR via `gh`, polls its CI checks and comments, and delivers a structured notification to the session's inbox on a meaningful change — auto-resuming a stopped agent so it reacts to review feedback and CI results without you relaying them.
+When enabled, the daemon resolves each session's GitHub PR via `gh`, polls its CI checks and comments, and delivers a structured notification to the session's inbox on any meaningful change — auto-resuming a stopped agent so it reacts to review feedback and CI results without you relaying them.
 
 ```toml
 [pr_watch]
@@ -23,7 +23,7 @@ debounce                 = "2m"   # minimum cooldown between notifications to a 
 
 ### Advanced watcher tuning
 
-The `[pr_watch.advanced]` table exposes the low-level policy knobs that pace the watch loop and its git-ref accelerator. Every key is optional and falls back to the default shown, so omitting the table keeps the built-in behaviour. Tune these only to trade off `gh` load, detection latency, notification retention, and the untrusted-author prompt surface.
+The `[pr_watch.advanced]` table exposes the low-level knobs that pace the watch loop and its git-ref accelerator. Every key is optional and falls back to the default shown, so omitting the table keeps the built-in behaviour. Tune these only to trade off `gh` load, detection latency, notification retention, and the untrusted-author prompt surface.
 
 ```toml
 [pr_watch.advanced]
@@ -44,11 +44,11 @@ ref_debounce                   = "750ms"  # coalesce a burst of ref writes from 
 gh_timeout                     = "5s"     # per-command timeout for the daemon's gh invocations (PR watch + tracker poll)
 ```
 
-The loop-lifetime knobs — `base_tick`, `kick_channel_size`, and `ref_reconcile_interval` — are read when the daemon starts, so changing them takes effect on the next daemon restart. Other policy settings are read live when their corresponding work occurs. In particular, `ref_debounce` is read whenever an existing git-ref watcher arms or re-arms its timer. A timer already pending during a reload keeps the duration it was armed with and still fires, so the policy change does not discard the pending ref event.
+The loop-lifetime knobs — `base_tick`, `kick_channel_size`, and `ref_reconcile_interval` — are read at daemon start, so changing them takes effect on the next restart. Other settings are read live as their work occurs. In particular, `ref_debounce` is read whenever an existing git-ref watcher arms or re-arms its timer. A timer already pending during a reload keeps the duration it was armed with and still fires, so the change doesn't discard the pending ref event.
 
 The cadence knobs `base_tick` and `ref_reconcile_interval` pace daemon loop timers, so a `"0"`, `"0s"`, negative, or unparseable value falls back to the default shown rather than being applied.
 
-The rolling anti-flood windows `notification_rate_window` and `untrusted_author_prompt_window` behave the same way: a `"0"`, `"0s"`, negative, or unparseable value falls back to the default shown. These windows bound their paired caps (`notification_rate_limit` and the security-sensitive `untrusted_author_prompt_rate`), and a non-positive window would silently disable the cap, so it is never honoured as "no limit".
+The rolling anti-flood windows `notification_rate_window` and `untrusted_author_prompt_window` behave the same way: a `"0"`, `"0s"`, negative, or unparseable value falls back to the default shown. These windows bound their paired caps (`notification_rate_limit` and the security-sensitive `untrusted_author_prompt_rate`), and a non-positive window would silently disable the cap, so it's never honoured as "no limit".
 
 `kick_channel_size` must not exceed `4096`; larger values are rejected before
 the daemon starts so a typo cannot request an unsafe channel allocation. Kicks
@@ -56,13 +56,13 @@ remain best-effort at any capacity, with ordinary timer polling as the fallback.
 
 ### Near-instant detection
 
-The GitHub poll runs on a timer, so on its own a freshly pushed PR would only be picked up on the next tick. To make detection near-instant, the daemon also puts a lightweight local file watch on Git refs (`HEAD`, `refs/`, and the reflogs — never the object store). Sessions from the same repository share one recursive watch of its common refs and reflogs; each linked worktree adds only its small local `HEAD` and reflog paths. When a `git push`, commit, or checkout touches them, it triggers immediate PR re-checks for the affected sessions instead of waiting for the poll. The poll stays on as the always-on fallback, so a push from outside the worktree — or a platform where the file watch degrades or reaches a watch limit — is still caught on the next cycle. There is nothing to configure: the watch turns on and off with `[pr_watch] enabled` and needs no extra permissions.
+The GitHub poll runs on a timer, so on its own a freshly pushed PR would only be picked up on the next tick. To make detection near-instant, the daemon also puts a lightweight local file watch on Git refs (`HEAD`, `refs/`, and the reflogs — never the object store). Sessions from the same repository share one recursive watch of its common refs and reflogs; each linked worktree adds only its small local `HEAD` and reflog paths. When a `git push`, commit, or checkout touches them, the affected sessions re-check immediately instead of waiting for the poll. The poll stays on as the always-on fallback, so a push from outside the worktree — or a platform where the file watch degrades or hits a watch limit — is still caught on the next cycle. There's nothing to configure: the watch turns on and off with `[pr_watch] enabled` and needs no extra permissions.
 
-When graith first associates a PR, it surfaces any **currently-broken mechanical state** — a failing CI build or a merge conflict — so a session that was stopped (or a daemon that restarted) doesn't strand an agent on a red PR. It deliberately does **not** replay pre-existing review comments, PR comments, or review decisions from before it noticed the PR: those are baselined silently to avoid dumping a whole backlog when re-discovering an old PR. Near-instant detection keeps that pre-association window down to about a second, so little is missed in practice.
+When graith first associates a PR, it surfaces any **currently-broken mechanical state** — a failing CI build or a merge conflict — so a stopped session (or a restarted daemon) doesn't strand an agent on a red PR. It deliberately does **not** replay review comments, PR comments, or review decisions from before it noticed the PR: those are baselined silently, so re-discovering an old PR doesn't dump a whole backlog. Near-instant detection keeps that pre-association window down to about a second, so little is missed in practice.
 
 ### Comment author-trust gate
 
-PR comments are free text from arbitrary GitHub users. Because they reach the agent verbatim and can auto-resume a stopped session, an untrusted comment is a **prompt-injection vector**. graith gates comment notifications on the author's trust: a comment only notifies if its author is trusted.
+PR comments are free text from arbitrary GitHub users. Because they reach the agent verbatim and can auto-resume a stopped session, an untrusted comment is a **prompt-injection vector**. graith gates comment notifications on author trust: a comment only notifies if its author is trusted.
 
 ```toml
 [pr_watch]
@@ -82,7 +82,7 @@ trusted_author_associations = ["OWNER", "MEMBER", "COLLABORATOR"]
 notify_untrusted_authors = true
 ```
 
-An untrusted comment is **held (jailed)**, not discarded: its full content is quarantined in a store the agent can't release, and the comment cursor advances so a later trusted comment isn't reported alongside the whole untrusted backlog. For the common case — an owner working on their own repos — every comment is from the owner, so behaviour is unchanged.
+An untrusted comment is **held (jailed)**, not discarded: its full content is quarantined in a store the agent can't release, and the comment cursor advances so a later trusted comment isn't reported alongside the untrusted backlog. In the common case — an owner working on their own repos — every comment is from the owner, so behaviour is unchanged.
 
 ### Comment jail
 
@@ -95,16 +95,16 @@ gr msg jail release <id>                        # deliver it to its target sessi
 gr msg jail release --all --author <login>      # release everything from an author
 ```
 
-**Releasing is restricted to the human or the orchestrator** — a plain agent session is rejected. Releasing delivers previously-untrusted content to a working agent, so allowing an agent to release its own quarantined comment would defeat the point.
+**Releasing is restricted to the human or the orchestrator** — a plain agent session is rejected. Releasing delivers previously-untrusted content to a working agent, so letting an agent release its own quarantined comment would defeat the point.
 
-The **raw comment body is only ever shown to the human or the orchestrator**. `list` is a metadata-only summary (never carries a body); `show` returns the full body only to a release-authorized caller — an agent or a read-only remote guest sees the metadata with the body withheld. This keeps the prompt-injection boundary intact: an agent can see *what* is jailed (PR, author, association) but can't be fed the untrusted content through a graith channel.
+The **raw comment body is only ever shown to the human or the orchestrator**. `list` is a metadata-only summary (never a body); `show` returns the full body only to a release-authorized caller — an agent or a read-only remote guest sees the metadata with the body withheld. This keeps the prompt-injection boundary intact: an agent can see *what* is jailed (PR, author, association) but can't be fed the untrusted content through a graith channel.
 
 When you add an author to `comment_author_allowlist` (or widen `trusted_author_associations`) and reload the config, their jailed comments are **released automatically** — the reload is a local-human action, so it's implicitly authorized. Jailed comments respect the `[messages] max_age` retention window and don't accumulate forever.
 
 Two trust knobs, fail-closed:
 
-- **`trusted_author_associations`** defaults to `OWNER`/`MEMBER`/`COLLABORATOR` when the key is **absent**. Setting it to an explicit empty list (`trusted_author_associations = []`) is honoured as **allowlist-only** mode — no association is trusted — and is *not* silently widened back to the default.
-- **`comment_author_allowlist`** is the only way to trust a bot/App. Allowlisting a bot login trusts that workflow to not echo untrusted PR text back into its comments; fine for a repo's own first-party CI, a documented caveat on public repos.
+- **`trusted_author_associations`** defaults to `OWNER`/`MEMBER`/`COLLABORATOR` when the key is **absent**. An explicit empty list (`trusted_author_associations = []`) is honoured as **allowlist-only** mode — no association is trusted — and is *not* silently widened back to the default.
+- **`comment_author_allowlist`** is the only way to trust a bot/App. Allowlisting a bot login trusts that workflow not to echo untrusted PR text back into its comments; fine for a repo's own first-party CI, a documented caveat on public repos.
 
 ## Triggers
 
@@ -149,15 +149,15 @@ MCP-server config), `session`, `scenario`, `message`, `tracker`. Delivery routes
 `skip`), `rate_limit` (default `5/30m`). See [Triggers]({{< relref "/docs/triggers.md" >}}) for the full
 reference.
 
-Scenario files may additionally use `[trigger.completion]` and
-`[scenario.lifecycle]` for todo-derived final actions and opt-in delayed soft
-cleanup. Completion is deliberately rejected in global `config.toml` because it
-must be bound to one persisted scenario. See
+Scenario files can also use `[trigger.completion]` and `[scenario.lifecycle]`
+for todo-derived final actions and opt-in delayed soft cleanup. Completion is
+deliberately rejected in global `config.toml` because it must bind to one
+persisted scenario. See
 [Scenarios — completion examples]({{< relref "/docs/scenarios.md#completion-examples" >}}).
 
 ### Advanced scheduler and file-watch tuning
 
-The `[triggers.advanced]` table exposes the low-level policy knobs that pace the
+The `[triggers.advanced]` table exposes the low-level knobs that pace the
 trigger scheduler and the file-watch runtime. Every key is optional and falls
 back to the default shown, so omitting the table keeps the built-in behaviour.
 Tune these only to trade off dispatch latency, file-watch reconcile load,
@@ -175,26 +175,26 @@ watch_builtin_ignores    = [".git/", ".git", ".hg/", ".svn/", "*.swp", "*.swx", 
 ```
 
 An empty, invalid, or non-positive `watch_retry_base_backoff` or
-`watch_retry_max_backoff` uses its default above. If the resolved base is
-greater than the resolved maximum, the maximum also caps the first retry.
+`watch_retry_max_backoff` uses its default above. If the resolved base exceeds
+the resolved maximum, the maximum also caps the first retry.
 
 `watch_builtin_ignores` is the daemon-wide set of directories/patterns never
 watched by any file-watch trigger (on top of git ignore rules and per-trigger
-`watch.ignore`). `.git` is always ignored regardless of this list, because a
+`watch.ignore`). `.git` is always ignored regardless of this list, since a
 watched `.git` churns constantly and creates a feedback loop. Omitting the key
 uses the defaults shown above; set `watch_builtin_ignores = []` to keep only that
 mandatory `.git` protection and drop every optional built-in ignore.
 
-Reloading `watch_builtin_ignores` (adding, removing, or clearing to `[]`) is
-applied to already-running file-watch bindings on the next reconcile: each
-affected binding is rebuilt with the new matcher and its watched directory set
-reconciled, so the change does not wait for a source-session restart.
+Reloading `watch_builtin_ignores` (adding, removing, or clearing to `[]`) applies
+to already-running file-watch bindings on the next reconcile: each affected
+binding is rebuilt with the new matcher and its watched directory set reconciled,
+so the change doesn't wait for a source-session restart.
 
 The loop-lifetime knobs — `scheduler_tick` and `watch_reconcile_interval` — are
-read when the daemon starts, so changing them takes effect on the next daemon
-restart; the other settings apply on the next reconcile or fire. Both cadence
-knobs pace daemon loop timers, so a `"0"`, `"0s"`, negative, or unparseable value
-falls back to the default shown rather than being applied.
+read at daemon start, so changing them takes effect on the next restart; the
+other settings apply on the next reconcile or fire. Both cadence knobs pace
+daemon loop timers, so a `"0"`, `"0s"`, negative, or unparseable value falls back
+to the default shown rather than being applied.
 
 ### Headless session actions (planned)
 

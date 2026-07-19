@@ -7,8 +7,7 @@ toc: true
 draft: false
 ---
 
-Practical patterns for using graith's primitives together. This section is split
-into three parts:
+Practical patterns for using graith's primitives together, in three parts:
 
 - **[Everyday recipes]({{< relref "recipes.md" >}})** — parallel development,
   explore-then-fork, review pipelines, batch processing, and other day-to-day

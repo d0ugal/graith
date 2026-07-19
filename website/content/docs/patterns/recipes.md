@@ -11,7 +11,7 @@ Practical patterns for using graith's primitives together.
 
 ## Parallel feature development
 
-Run multiple agents on different features of the same repo simultaneously:
+Run multiple agents on different features of the same repo at once:
 
 ```bash
 gr new auth-rewrite --repo ~/Code/api --prompt "rewrite the auth middleware to use JWT"
@@ -19,7 +19,7 @@ gr new add-pagination --repo ~/Code/api --prompt "add cursor-based pagination to
 gr new fix-n-plus-one --repo ~/Code/api --prompt "find and fix N+1 queries in the user endpoints"
 ```
 
-Each agent works in its own worktree and branch. No working-tree conflicts. Switch between them with `ctrl+b n/p` or the session picker (`ctrl+b w`).
+Each agent works in its own worktree and branch -- no working-tree conflicts. Switch between them with `ctrl+b n/p` or the session picker (`ctrl+b w`).
 
 ## Explore-then-fork
 
@@ -32,7 +32,7 @@ gr fork explore-auth fix-token-refresh
 gr fork explore-auth fix-session-handling
 ```
 
-Each fork inherits the git state. If the agent has `fork_args` configured, the new agent also gets the source session's conversation history. The original session is unaffected.
+Each fork inherits the git state. With `fork_args` configured, the new agent also gets the source session's conversation history. The original session is unaffected.
 
 ## Code review pipeline
 
@@ -43,7 +43,7 @@ gr new implement-feature --prompt "implement the user profile endpoint"
 gr new review-feature --mirror implement-feature --prompt "review the code changes in this worktree"
 ```
 
-The reviewer shares the implementer's worktree (read-only) and can see changes as they happen. Use messaging to coordinate:
+The reviewer shares the implementer's worktree (read-only) and sees changes as they happen. Coordinate via messaging:
 
 ```bash
 # From implement-feature:
@@ -57,11 +57,11 @@ gr msg send implement-feature "found an issue in handler.go:45, missing error ch
 
 The [code review pipeline](#code-review-pipeline) above is set up by hand. A
 **[trigger]({{< relref "triggers" >}})** makes the daemon do it automatically — no attached
-orchestrator, surviving terminal close.
+orchestrator, and it survives terminal close.
 
 **Continuous reviewer** — keep a reviewer reacting to an implementer's changes.
 A watch trigger with a `session` action (`ensure = true`) messages the owned
-reviewer if it exists (auto-resuming a stopped one), else spawns one mirroring
+reviewer if it exists (auto-resuming a stopped one), or else spawns one mirroring
 the implementer's worktree read-only:
 
 ```toml
@@ -78,8 +78,8 @@ agent  = "claude"
 prompt = "Review the changes since your last look; send feedback via gr msg."
 ```
 
-**Tests on change** — run the suite when source changes, results to the session's
-inbox:
+**Tests on change** — run the suite when source changes, with results to the
+session's inbox:
 
 ```toml
 [[trigger]]
@@ -113,6 +113,7 @@ inbox = "orchestrator"
 Inspect and control them with `gr trigger list/status/run/pause/resume`. See the
 [triggers docs]({{< relref "triggers" >}}) for the full model.
 
+
 ## Orchestrated multi-agent workflow
 
 Use the orchestrator to manage a fleet of agents:
@@ -139,7 +140,7 @@ gr msg send --children "rebase on main before pushing"
 
 ## Declarative multi-repo scenario
 
-When you have a known topology of sessions across multiple repos, use a scenario file instead of imperative `gr new` commands:
+For a known topology of sessions across multiple repos, use a scenario file instead of imperative `gr new` commands:
 
 ```toml
 # integration-test.toml
@@ -194,7 +195,7 @@ gr scenario status integration-tests
 gr scenario stop integration-tests
 ```
 
-Each session receives a manifest with the full scenario topology — who the siblings are, their roles, and how to message them. Sessions coordinate via `gr msg send <sibling-name> "message"`.
+Each session receives a manifest with the full scenario topology — the siblings, their roles, and how to message them. Sessions coordinate via `gr msg send <sibling-name> "message"`.
 
 Scenarios are reproducible — the same TOML file always creates the same fleet. See [Scenarios]({{< relref "scenarios" >}}) for the full reference.
 
@@ -293,7 +294,7 @@ For quick one-off tasks that don't need worktree isolation:
 gr new quick-check --in-place --prompt "run the tests and tell me if anything fails"
 ```
 
-No worktree is created. The agent runs directly in the repo. Useful for read-only tasks or when you want the agent to see uncommitted changes.
+No worktree is created -- the agent runs directly in the repo. Useful for read-only tasks, or when you want the agent to see uncommitted changes.
 
 Allow multiple in-place sessions on the same repo:
 
@@ -332,4 +333,4 @@ gr status "Phase 3: running tests"
 gr status "Done - all tests passing"
 ```
 
-The orchestrator or user monitors progress in the session picker (`ctrl+b w`), which shows status summaries for all sessions.
+The orchestrator or user watches progress in the session picker (`ctrl+b w`), which shows status summaries for all sessions.

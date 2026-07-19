@@ -15,9 +15,9 @@ See [Scenarios]({{< relref "/docs/scenarios.md" >}}) for full details.
 
 Start a scenario from a TOML file. Pass `-` to read from stdin. Only the orchestrator session can start scenarios.
 
-Scenario and member names may use the bounded instance tokens `{caller}`,
+Scenario and member names can use the bounded instance tokens `{caller}`,
 `{parent}`, `{initiator}`, `{date}`, `{time}`, `{datetime}`, `{scenario_id}`,
-`{short_id}`, and (after the scenario name is rendered) `{scenario}`. The
+`{short_id}`, and — once the scenario name is rendered — `{scenario}`. The
 daemon renders member references from the same immutable context and returns
 the rendered names. See [Scenarios → Instance name templates]({{< relref
 "/docs/scenarios.md#instance-name-templates" >}}).
@@ -30,13 +30,13 @@ cat tracing.toml | gr scenario start -
 ### `gr scenario status <name>`
 
 Show each session's lifecycle, todo progress, and declared result status. JSON
-output includes resolved shared-store destinations and validation errors.
+output adds resolved shared-store destinations and validation errors.
 
 ### `gr scenario result put <name> [body]`
 
 Publish the authenticated member's declared text, Markdown, or JSON result. Use
-`--file <path>` or standard input for file content, and `--scenario <name>` to
-disambiguate a shared member that participates in multiple scenarios.
+`--file <path>` or stdin for file content, and `--scenario <name>` to
+disambiguate a shared member in multiple scenarios.
 
 ### `gr scenario list`
 
@@ -49,18 +49,18 @@ Stop all running sessions in a scenario.
 
 For policy scenarios this suspends automatic actions without moving immutable
 deadlines. `gr scenario resume <name>` resumes members, unsuspends actions, and
-immediately reconciles elapsed deadlines.
+reconciles elapsed deadlines immediately.
 
 ### `gr scenario add <name>`
 
-Add a member from the orchestrator. Alongside `--name`, `--repo`, `--agent`,
+Add a member from the orchestrator. Beyond `--name`, `--repo`, `--agent`,
 `--model`, `--role`, `--prompt`, `--task`, and `--base`, policy members accept:
 
 `--prompt` supplies startup instructions without tracked work. `--task` seeds an
-assigned todo and also acts as the startup prompt when `--prompt` is omitted.
+assigned todo and doubles as the startup prompt when `--prompt` is omitted.
 
 `<name>`, `--name`, and `--depends-on` use the already-rendered instance and
-member names. `scenario add` does not evaluate instance-name templates.
+member names — `scenario add` doesn't evaluate instance-name templates.
 
 | Flag | Description |
 |------|-------------|
@@ -99,7 +99,7 @@ orchestrator or a descendant.
 
 ## Todo list
 
-A durable, claimable list of work shared across a session subtree or a scenario.
+A durable, claimable list of work shared across a session subtree or scenario.
 See [Todo list]({{< relref "/docs/todo.md" >}}) for the full model.
 
 ### `gr todo add <title>`
@@ -130,13 +130,13 @@ List items, grouped by status.
 
 Atomically claim an item (→ `in-progress`, owned by you). `next` claims the next
 eligible unclaimed item in your scope; `start` is an alias for `claim`. An
-assigned item may be claimed only by its assignee or the scope's override
+assigned item can be claimed only by its assignee or the scope's override
 authority.
 
 ### `gr todo done <id>`
 
-Mark a claimed item done. For an assigned ownerless item, first run
-`gr todo claim <id>`; skipping that step returns the exact claim command.
+Mark a claimed item done. For an assigned ownerless item, run
+`gr todo claim <id>` first; skip that step and it returns the exact claim command.
 
 ### `gr todo block <id> <note>`
 
@@ -149,13 +149,13 @@ Return an item to `todo` and clear its owner.
 ### `gr todo deps <id> [dependency-id...]`
 
 Replace an item's dependency set. Omit dependency IDs to clear it. Dependencies
-must exist in the same scope and the resulting graph must be acyclic.
+must exist in the same scope, and the resulting graph must be acyclic.
 
 ### `gr todo rm <id>`
 
-Remove an item (and any sub-items). Removal is rejected while another retained
-item depends on it.
+Remove an item (and any sub-items). Rejected while another retained item
+depends on it.
 
 ### `gr todo export <scope>`
 
-Dump a scope to a markdown/JSON document in the store for archival.
+Dump a scope to a markdown/JSON document in the store for archiving.

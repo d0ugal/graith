@@ -7,8 +7,8 @@ toc: true
 draft: false
 ---
 
-The `gr remote` namespace covers both sides of device pairing and connections
-to daemons over a Tailscale tailnet. Configure the listener first; see
+The `gr remote` namespace covers both sides of device pairing and connections to
+daemons over a Tailscale tailnet. Configure the listener first; see
 [Orchestrator & remote access]({{< relref "/docs/configuration/access.md#remote-access" >}}).
 
 ## Pair a client
@@ -16,7 +16,7 @@ to daemons over a Tailscale tailnet. Configure the listener first; see
 ### `gr remote pair <host>`
 
 Request pairing with a remote daemon. The command waits while a local human on
-the daemon host approves the pending request with
+the daemon host approves the request with
 `gr remote pairings approve <request-id>`.
 
 | Flag | Description |
@@ -28,8 +28,8 @@ the daemon host approves the pending request with
 ## Administer paired devices
 
 These commands always connect through the local Unix socket and require the
-local-human credential. The daemon rejects the same administrative protocol
-messages over a remote connection.
+local-human credential. The daemon rejects the same administrative messages over
+a remote connection.
 
 ### `gr remote pairings list`
 
@@ -49,7 +49,7 @@ Revoke a paired device. Revocation force-closes that device's live connections.
 
 ### `gr remote list`
 
-List remote hosts paired by this client. This is deliberately separate from
+List remote hosts paired by this client. Deliberately separate from
 `gr remote pairings list`, which administers devices trusted by the local host.
 
 ### `gr remote attach <host>/<session>`
