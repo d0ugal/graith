@@ -174,10 +174,12 @@ func executeWithArgs(args []string) (err error) {
 	}
 
 	registerCommands()
+
 	rootCtx := context.Background()
 	if upgradeGuard != nil {
 		rootCtx = context.WithValue(rootCtx, upgradeGuardContextKey{}, upgradeGuard)
 	}
+
 	rootCmd.SetContext(rootCtx)
 	rootCmd.SetArgs(args)
 

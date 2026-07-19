@@ -181,6 +181,7 @@ func TestUpgradeFailureGuardDisarmPreservesTransferredProcess(t *testing.T) {
 	}
 
 	guard.Disarm()
+
 	if err := guard.Cleanup(); err != nil {
 		t.Fatalf("Cleanup after Disarm: %v", err)
 	}

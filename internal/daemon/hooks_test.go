@@ -46,17 +46,22 @@ func TestHookGenerationSnapshotsPolicyTimeoutDuringReload(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
 	var reloads sync.WaitGroup
+
 	reloads.Add(1)
+
 	go func() {
 		defer reloads.Done()
+
 		for i := 0; i < 500; i++ {
 			sm.mu.Lock()
+
 			next := *sm.cfg
 			if i%2 == 0 {
 				next.CommandPolicy.Timeout = "1s"
 			} else {
 				next.CommandPolicy.Timeout = "2s"
 			}
+
 			sm.cfg = &next
 			sm.mu.Unlock()
 		}
@@ -67,6 +72,7 @@ func TestHookGenerationSnapshotsPolicyTimeoutDuringReload(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+
 	reloads.Wait()
 }
 
