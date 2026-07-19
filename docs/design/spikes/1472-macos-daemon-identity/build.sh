@@ -35,7 +35,9 @@ xcrun swiftc -O -target "$(uname -m)-apple-macosx13.0" \
 
 (cd "$repo_dir" && go build -o "$app/Contents/MacOS/gr" ./cmd/graith)
 
-codesign --force --deep --sign - "$app"
+codesign --force --sign - "$app/Contents/MacOS/gr"
+codesign --force --sign - "$app/Contents/MacOS/graith-identity-spike-control"
+codesign --force --sign - "$app"
 codesign --verify --deep --strict "$app"
 
 echo "$app"
