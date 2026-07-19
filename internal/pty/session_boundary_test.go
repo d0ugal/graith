@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -213,6 +215,296 @@ func TestTerminalFailureDuringFreezeReplaysAfterThaw(t *testing.T) {
 	}
 	if got := bytes.Join(replacement.writes, nil); !bytes.Equal(got, payload) {
 		t.Fatalf("replayed bytes = %q, want %q", got, payload)
+	}
+}
+
+func TestAsyncScreenRecoveryPublishesOnlyCoherentRawGeneration(t *testing.T) {
+	scrollback, err := NewScrollback(filepath.Join(t.TempDir(), "strath.log"), 2*1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = scrollback.Close() })
+	initial := []byte("canny initial output\n")
+	if _, err := scrollback.Write(initial); err != nil {
+		t.Fatal(err)
+	}
+
+	blocked := &blockedHydrationTerminal{
+		entered: make(chan struct{}), release: make(chan struct{}), cols: 80, rows: 24,
+	}
+	final := &terminalChunkRecorder{}
+	var factoryMu sync.Mutex
+	factoryCalls := 0
+	lastCols, lastRows := 0, 0
+	session := &Session{
+		ID: "thrawn-coherent-recovery", Scrollback: scrollback,
+		screen: newUnavailableTerminal(80, 24), screenHydrationBytes: 2 * 1024 * 1024,
+		screenInitializing: true, screenRecoveryPending: true,
+		screenRecoveryCols: 80, screenRecoveryRows: 24,
+		setSize: func(*os.File, *creackpty.Winsize) error { return nil },
+		log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	session.screenFactory = func(cols, rows int) (Terminal, error) {
+		factoryMu.Lock()
+		defer factoryMu.Unlock()
+		factoryCalls++
+		lastCols, lastRows = cols, rows
+		switch factoryCalls {
+		case 1:
+			return blocked, nil
+		case 2:
+			return nil, errors.New("injected one-shot recovery failure")
+		default:
+			return final, nil
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	recoveryDone := make(chan error, 1)
+	go func() { recoveryDone <- session.RecoverTerminalAfterUpgradeContext(ctx) }()
+	select {
+	case <-blocked.entered:
+	case <-ctx.Done():
+		t.Fatal("recovery hydration did not block")
+	}
+
+	marker := []byte("dreich marker during hydration\n")
+	if _, err := scrollback.Write(marker); err != nil {
+		t.Fatal(err)
+	}
+	session.mu.Lock()
+	if err := session.writeScreenLocked(marker); err != nil {
+		session.mu.Unlock()
+		t.Fatal(err)
+	}
+	session.mu.Unlock()
+	resizeDone := make(chan error, 1)
+	go func() { resizeDone <- session.Resize(37, 91) }()
+	select {
+	case err := <-resizeDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("resize entered a competing factory during hydration")
+	}
+	close(blocked.release)
+	if err := <-recoveryDone; err != nil {
+		t.Fatal(err)
+	}
+
+	factoryMu.Lock()
+	gotCalls, gotCols, gotRows := factoryCalls, lastCols, lastRows
+	factoryMu.Unlock()
+	if gotCalls != 3 {
+		t.Fatalf("factory calls = %d, want stale discard + one failure + success", gotCalls)
+	}
+	if gotCols != 91 || gotRows != 37 {
+		t.Fatalf("published geometry = (%d, %d), want (91, 37)", gotCols, gotRows)
+	}
+	wantTail := append(append([]byte(nil), initial...), marker...)
+	if got := bytes.Join(final.writes, nil); !bytes.Equal(got, wantTail) {
+		t.Fatalf("published replay = %q, want coherent raw tail", got)
+	}
+	session.mu.RLock()
+	initializing := session.screenInitializing
+	pending := session.screenRecoveryPending
+	session.mu.RUnlock()
+	if initializing || pending {
+		t.Fatalf("successful current generation remained pending: initializing=%v pending=%v", initializing, pending)
+	}
+}
+
+func TestAsyncScreenRecoveryRequeuesAfterExhaustedStaleBatch(t *testing.T) {
+	scrollback, err := NewScrollback(filepath.Join(t.TempDir(), "bothy.log"), 2*1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = scrollback.Close() })
+	initial := []byte("canny retained before recovery\r\n")
+	if _, err := scrollback.Write(initial); err != nil {
+		t.Fatal(err)
+	}
+
+	const invalidations = 4
+	entered := make([]chan struct{}, invalidations)
+	release := make([]chan struct{}, invalidations)
+	for i := range invalidations {
+		entered[i] = make(chan struct{})
+		release[i] = make(chan struct{})
+	}
+	var factoryMu sync.Mutex
+	factoryCalls := 0
+	discardedClosed := 0
+	var final *recordingRecoveryTerminal
+	session := &Session{
+		ID: "thrawn-eventual-recovery", Scrollback: scrollback,
+		screen: newUnavailableTerminal(80, 24), screenHydrationBytes: 2 * 1024 * 1024,
+		screenInitializing: true, screenRecoveryPending: true,
+		screenRecoveryCols: 80, screenRecoveryRows: 24,
+		setSize: func(*os.File, *creackpty.Winsize) error { return nil },
+		log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	session.screenFactory = func(cols, rows int) (Terminal, error) {
+		factoryMu.Lock()
+		defer factoryMu.Unlock()
+		call := factoryCalls
+		factoryCalls++
+		if call >= invalidations {
+			final = &recordingRecoveryTerminal{Terminal: newCharmTerminal(cols, rows)}
+			return final, nil
+		}
+
+		return &coordinatedRecoveryTerminal{
+			entered: entered[call], release: release[call],
+			onClose: func() {
+				factoryMu.Lock()
+				discardedClosed++
+				factoryMu.Unlock()
+			},
+		}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	recoveryDone := make(chan error, 1)
+	go func() { recoveryDone <- session.RecoverTerminalAfterUpgradeContext(ctx) }()
+	wantTail := append([]byte(nil), initial...)
+	for i := range invalidations {
+		select {
+		case <-entered[i]:
+		case <-ctx.Done():
+			t.Fatalf("recovery attempt %d did not hydrate", i+1)
+		}
+		marker := []byte(fmt.Sprintf("dreich generation %d\r\n", i+1))
+		wantTail = append(wantTail, marker...)
+		if _, err := scrollback.Write(marker); err != nil {
+			t.Fatal(err)
+		}
+		session.mu.Lock()
+		if err := session.writeScreenLocked(marker); err != nil {
+			session.mu.Unlock()
+			t.Fatal(err)
+		}
+		session.mu.Unlock()
+		if i == invalidations-1 {
+			if err := session.Resize(41, 97); err != nil {
+				t.Fatal(err)
+			}
+		}
+		close(release[i])
+	}
+	if err := <-recoveryDone; err != nil {
+		t.Fatal(err)
+	}
+	factoryMu.Lock()
+	gotCalls, gotClosed, published := factoryCalls, discardedClosed, final
+	factoryMu.Unlock()
+	if gotCalls != invalidations+1 || gotClosed != invalidations {
+		t.Fatalf("recovery candidates = (calls=%d, closed=%d), want (%d, %d)",
+			gotCalls, gotClosed, invalidations+1, invalidations)
+	}
+	if got := published.bytes(); !bytes.Equal(got, wantTail) {
+		t.Fatalf("eventual replay = %q, want exact retained tail", got)
+	}
+	session.mu.RLock()
+	cols, rows := session.screen.Size()
+	initializing := session.screenInitializing
+	session.mu.RUnlock()
+	if cols != 97 || rows != 41 {
+		t.Fatalf("eventual recovery geometry = (%d, %d), want (97, 41)", cols, rows)
+	}
+	preview := session.ScreenPreview()
+	if initializing || !strings.Contains(preview, "dreich generation 4") {
+		t.Fatalf("quiescent generation did not publish an eventual preview: initializing=%v preview=%q", initializing, preview)
+	}
+}
+
+func TestRecoveryBatchCancellationJoinsBoundedStages(t *testing.T) {
+	largeTail := bytes.Repeat([]byte("canny"), terminalWriteChunkBytes/5+32*1024)
+	newRecoveringSession := func(id string) *Session {
+		t.Helper()
+		scrollback, err := NewScrollback(filepath.Join(t.TempDir(), id+".log"), 2*1024*1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = scrollback.Close() })
+		if _, err := scrollback.Write(largeTail); err != nil {
+			t.Fatal(err)
+		}
+
+		return &Session{
+			ID: id, Scrollback: scrollback,
+			screen: newUnavailableTerminal(80, 24), screenHydrationBytes: len(largeTail),
+			screenInitializing: true, screenRecoveryPending: true,
+			screenRecoveryCols: 80, screenRecoveryRows: 24,
+			log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		}
+	}
+
+	constructionStarted := make(chan struct{})
+	constructionCandidate := newDelayedRecoveryTerminal(0)
+	construction := newRecoveringSession("canny-bounded-construction")
+	construction.screenFactory = func(_, _ int) (Terminal, error) {
+		close(constructionStarted)
+		time.Sleep(150 * time.Millisecond)
+		return constructionCandidate, nil
+	}
+	hydrationCandidate := newDelayedRecoveryTerminal(150 * time.Millisecond)
+	hydration := newRecoveringSession("dreich-bounded-hydration")
+	hydration.screenFactory = func(_, _ int) (Terminal, error) { return hydrationCandidate, nil }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	batchDone := make(chan []error, 1)
+	go func() {
+		batchDone <- RecoverTerminalSessionsAfterUpgrade(ctx, []*Session{construction, hydration})
+	}()
+	select {
+	case <-constructionStarted:
+	case <-time.After(time.Second):
+		t.Fatal("bounded construction did not start")
+	}
+	select {
+	case <-hydrationCandidate.entered:
+	case <-time.After(time.Second):
+		t.Fatal("bounded hydration did not start")
+	}
+	canceledAt := time.Now()
+	cancel()
+	var results []error
+	select {
+	case results = <-batchDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("canceled recovery batch exceeded the bounded in-flight operation")
+	}
+	if time.Since(canceledAt) > 450*time.Millisecond {
+		t.Fatal("canceled recovery batch returned outside the operation bound")
+	}
+	for i, err := range results {
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("recovery %d error = %v, want cancellation", i, err)
+		}
+	}
+	for name, candidate := range map[string]*delayedRecoveryTerminal{
+		"construction": constructionCandidate, "hydration": hydrationCandidate,
+	} {
+		if !candidate.isClosed() {
+			t.Errorf("%s candidate was not joined and closed", name)
+		}
+	}
+	if hydrationCandidate.writeCount() != 1 {
+		t.Fatalf("hydration writes after cancellation = %d, want one in-flight chunk only", hydrationCandidate.writeCount())
+	}
+
+	lockCtx, lockCancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer lockCancel()
+	construction.screenRecoveryMu.Lock()
+	lockStarted := time.Now()
+	err := construction.RecoverTerminalAfterUpgradeContext(lockCtx)
+	construction.screenRecoveryMu.Unlock()
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(lockStarted) > 150*time.Millisecond {
+		t.Fatalf("recovery lock cancellation = %v after %v", err, time.Since(lockStarted))
 	}
 }
 
@@ -457,6 +749,129 @@ func (*failingRecoveryTerminal) Snapshot() (TerminalSnapshot, error) {
 type shortWriteSessionTerminal struct{ failingSessionTerminal }
 
 func (*shortWriteSessionTerminal) Write(p []byte) (int, error) { return len(p) - 1, nil }
+
+type blockedHydrationTerminal struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+	cols    int
+	rows    int
+}
+
+func (t *blockedHydrationTerminal) Write(p []byte) (int, error) {
+	t.once.Do(func() { close(t.entered) })
+	<-t.release
+
+	return len(p), nil
+}
+
+func (t *blockedHydrationTerminal) Resize(cols, rows int) error {
+	t.cols, t.rows = cols, rows
+
+	return nil
+}
+
+func (t *blockedHydrationTerminal) Size() (int, int)         { return t.cols, t.rows }
+func (t *blockedHydrationTerminal) Cursor() (int, int, bool) { return 0, 0, false }
+func (t *blockedHydrationTerminal) Cell(_, _ int) Cell       { return Cell{Content: " "} }
+func (t *blockedHydrationTerminal) Close() error             { return nil }
+
+type coordinatedRecoveryTerminal struct {
+	entered   chan struct{}
+	release   chan struct{}
+	onClose   func()
+	enterOnce sync.Once
+	closeOnce sync.Once
+}
+
+func (t *coordinatedRecoveryTerminal) Write(p []byte) (int, error) {
+	t.enterOnce.Do(func() { close(t.entered) })
+	<-t.release
+
+	return len(p), nil
+}
+func (*coordinatedRecoveryTerminal) Resize(_, _ int) error    { return nil }
+func (*coordinatedRecoveryTerminal) Size() (int, int)         { return 80, 24 }
+func (*coordinatedRecoveryTerminal) Cursor() (int, int, bool) { return 0, 0, false }
+func (*coordinatedRecoveryTerminal) Cell(_, _ int) Cell       { return Cell{Content: " "} }
+func (t *coordinatedRecoveryTerminal) Close() error {
+	t.closeOnce.Do(func() {
+		if t.onClose != nil {
+			t.onClose()
+		}
+	})
+
+	return nil
+}
+
+type delayedRecoveryTerminal struct {
+	mu        sync.Mutex
+	entered   chan struct{}
+	enterOnce sync.Once
+	delay     time.Duration
+	writes    int
+	closed    bool
+}
+
+func newDelayedRecoveryTerminal(delay time.Duration) *delayedRecoveryTerminal {
+	return &delayedRecoveryTerminal{entered: make(chan struct{}), delay: delay}
+}
+
+func (t *delayedRecoveryTerminal) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	t.writes++
+	t.mu.Unlock()
+	t.enterOnce.Do(func() { close(t.entered) })
+	time.Sleep(t.delay)
+
+	return len(p), nil
+}
+func (*delayedRecoveryTerminal) Resize(_, _ int) error    { return nil }
+func (*delayedRecoveryTerminal) Size() (int, int)         { return 80, 24 }
+func (*delayedRecoveryTerminal) Cursor() (int, int, bool) { return 0, 0, false }
+func (*delayedRecoveryTerminal) Cell(_, _ int) Cell       { return Cell{Content: " "} }
+func (t *delayedRecoveryTerminal) Close() error {
+	t.mu.Lock()
+	t.closed = true
+	t.mu.Unlock()
+
+	return nil
+}
+func (t *delayedRecoveryTerminal) isClosed() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	return t.closed
+}
+func (t *delayedRecoveryTerminal) writeCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	return t.writes
+}
+
+type recordingRecoveryTerminal struct {
+	Terminal
+
+	mu     sync.Mutex
+	writes []byte
+}
+
+func (t *recordingRecoveryTerminal) Write(p []byte) (int, error) {
+	n, err := t.Terminal.Write(p)
+	t.mu.Lock()
+	t.writes = append(t.writes, p[:n]...)
+	t.mu.Unlock()
+
+	return n, err
+}
+
+func (t *recordingRecoveryTerminal) bytes() []byte {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	return append([]byte(nil), t.writes...)
+}
 
 type blockingSessionTerminal struct {
 	blockResize bool

@@ -487,6 +487,7 @@ func run(
 	startBackground = func() bool {
 		group := newDaemonTaskGroup()
 		jobs := []func(context.Context){
+			sm.recoverTerminalScreensAfterUpgrade,
 			sm.RunDetectionLoop,
 			sm.RunStartupWatchdogLoop,
 			sm.RunResourceMonitorLoop,
@@ -738,7 +739,12 @@ func run(
 				return
 			}
 			grpty.ThawTerminalHelpers()
-			sm.recoverTerminalScreensAfterUpgrade()
+			if !backgroundDrainAttempted {
+				// The active generation owns retries until recovery succeeds or the
+				// generation is canceled. A drained generation is replaced below and
+				// its startup recovery job assumes the same ownership.
+				sm.startBackgroundTask(context.Background(), sm.recoverTerminalScreensAfterUpgrade)
+			}
 			if backgroundDrainAttempted {
 				// A timed-out drain remains the active generation and keeps the
 				// lifecycle reservation closed until every owned descendant exits

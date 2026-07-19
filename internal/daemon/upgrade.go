@@ -978,7 +978,10 @@ func (sm *SessionManager) lifecyclePreSpawnBarrier() error {
 	return sm.rejectLaunchDuringUpgradeLocked()
 }
 
-func (sm *SessionManager) recoverTerminalScreensAfterUpgrade() {
+func (sm *SessionManager) recoverTerminalScreensAfterUpgrade(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	sm.mu.RLock()
 	sessions := make([]*grpty.Session, 0, len(sm.sessions))
 	for _, driver := range sm.sessions {
@@ -988,9 +991,10 @@ func (sm *SessionManager) recoverTerminalScreensAfterUpgrade() {
 	}
 	sm.mu.RUnlock()
 
-	for _, session := range sessions {
-		if err := session.RecoverTerminalAfterUpgrade(); err != nil {
-			sm.log.Warn("terminal recovery after failed upgrade was incomplete", "session", session.ID, "err", err)
+	results := grpty.RecoverTerminalSessionsAfterUpgrade(ctx, sessions)
+	for i, err := range results {
+		if err != nil && ctx.Err() == nil {
+			sm.log.Warn("terminal recovery after failed upgrade was incomplete", "session", sessions[i].ID, "err", err)
 		}
 	}
 }

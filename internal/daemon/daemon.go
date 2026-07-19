@@ -92,15 +92,13 @@ type SessionManager struct {
 	// beforeLifecycleSpawn is a deterministic test seam for the final shared
 	// Create/Fork/Resume admission barrier. Production leaves it nil.
 	beforeLifecycleSpawn func()
-	// adoptSession and adoptionScreenBudget are private startup test seams for
-	// proving one absolute adoption budget across a batch. Production uses
-	// pty.AdoptSession and permits at most three seconds of synchronous helper
-	// attempts before later sessions start in raw-drain/degraded mode.
-	adoptSession         func(grpty.AdoptOpts) (*grpty.Session, error)
-	adoptionScreenBudget time.Duration
-	backgroundTasksMu    sync.Mutex
-	backgroundTasks      *daemonTaskGroup
-	backgroundManaged    bool
+	// adoptSession is a private startup test seam. Production uses
+	// pty.AdoptSession. Every adoption starts in raw-drain mode so derived-screen
+	// construction cannot consume or multiply the batch's absolute deadline.
+	adoptSession      func(grpty.AdoptOpts) (*grpty.Session, error)
+	backgroundTasksMu sync.Mutex
+	backgroundTasks   *daemonTaskGroup
+	backgroundManaged bool
 	// afterBackgroundPublication is a deterministic test barrier between
 	// replacement-generation publication and the rollback completion callback.
 	// Production leaves it nil.
@@ -776,13 +774,9 @@ func (sm *SessionManager) adoptSessions(
 	sm.mu.RLock()
 	lc := sm.cfg.Lifecycle
 	adoptSession := sm.adoptSession
-	screenBudget := sm.adoptionScreenBudget
 	sm.mu.RUnlock()
 	if adoptSession == nil {
 		adoptSession = grpty.AdoptSession
-	}
-	if screenBudget <= 0 {
-		screenBudget = 3 * time.Second
 	}
 
 	sessions := slices.Clone(manifest.Sessions)
@@ -850,9 +844,6 @@ func (sm *SessionManager) adoptSessions(
 	addUnresolved := func(session UpgradeSession) {
 		unresolved[upgradeCleanupKey(session)] = session
 	}
-	batchStarted := time.Now()
-	screenAttemptsDegraded := false
-
 	for _, us := range sessions {
 		legacyAlreadyReaped := false
 		if us.PIDStartTime == 0 {
@@ -934,10 +925,6 @@ func (sm *SessionManager) adoptSessions(
 		}
 
 		logPath := filepath.Join(sm.paths.LogDir, us.ID+".log")
-		if !manifest.adoptionDeadline.IsZero() &&
-			(time.Until(manifest.adoptionDeadline) < 5*time.Second || time.Since(batchStarted) > screenBudget) {
-			screenAttemptsDegraded = true
-		}
 		ptySess, adoptErr := adoptSession(grpty.AdoptOpts{
 			ID:                   us.ID,
 			Fd:                   uintptr(us.Fd),
@@ -952,7 +939,7 @@ func (sm *SessionManager) adoptSessions(
 			PollTimeout:          lc.AdoptedTimeoutDuration(),
 			PollInterval:         lc.AdoptedPollIntervalDuration(),
 			Logger:               sm.log,
-			DegradedScreen:       screenAttemptsDegraded,
+			DegradedScreen:       true,
 			DeferWait:            true,
 		})
 		if adoptErr != nil {
