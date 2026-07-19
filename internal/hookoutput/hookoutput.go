@@ -35,7 +35,8 @@ type claudeHookSpecificOutput struct {
 }
 
 // CommandPolicy returns a deterministic allow-or-deny response in each agent's
-// hook schema. Unknown decisions are denied; native prompting is never resumed.
+// hook schema. Unknown decisions are denied; policy ask/defer is never forwarded
+// to a human. The agent's separate native approval setting remains independent.
 func CommandPolicy(agent, decision, reason string) string {
 	switch agent {
 	case "claude":
@@ -47,12 +48,11 @@ func CommandPolicy(agent, decision, reason string) string {
 			},
 		})
 	case "codex":
-		// Codex runs command policy as a PreToolUse hook. With approval policy
-		// "never", PermissionRequest is never reached. An allow deliberately
-		// emits no hook opinion: Codex continues through its normal execution
-		// path, where graith's outer OS sandbox remains authoritative. Current
-		// Codex rejects permissionDecision:"allow" on PreToolUse, but accepts a
-		// blocking deny.
+		// Codex runs command policy as a PreToolUse hook independently of its
+		// native approval setting. An allow deliberately emits no hook opinion:
+		// Codex continues through its normal execution path, under any configured
+		// Graith sandbox, native policy, or external isolation. Current Codex
+		// rejects permissionDecision:"allow" on PreToolUse, but accepts a deny.
 		if decision == "allow" {
 			return ""
 		}

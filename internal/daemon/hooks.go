@@ -400,9 +400,9 @@ type codexHookGroup struct {
 // repeatable `-c hooks.<Event>=<toml>` overrides. Each override's value is
 // parsed by Codex as TOML (codex-rs/utils/cli config_override), so graith emits
 // a TOML array of matcher groups. Lifecycle groups have no matcher (match all),
-// while command policy matches Bash only. `--dangerously-bypass-hook-trust` skips Codex's
-// interactive hook-trust review, safe here because graith generated and vetted
-// these hooks and no human is watching the TUI to approve them.
+// while command policy matches Bash only. `--dangerously-bypass-hook-trust`
+// skips Codex's hook-trust review because graith generated and vetted these
+// hooks; it does not disable the agent's separate native tool approvals.
 //
 // MCP-server wiring is NOT handled here — it rides the separate injectMCPConfig
 // path (issue #1135), so a headless codex session gets MCP without hooks.
@@ -436,8 +436,8 @@ func (sm *SessionManager) injectCodexHooks(sessionID string, lifecycle, policy b
 	}
 
 	if policy {
-		// PreToolUse runs independently of Codex's approval policy. A
-		// PermissionRequest hook is unreachable under --ask-for-approval never.
+		// PreToolUse runs independently of Codex's native approval policy, so
+		// command policy remains enforceable whether the agent prompts or not.
 		preToolGroups = append(preToolGroups, codexHookGroup{
 			matcher:  "^Bash$",
 			commands: []string{commandPolicyHookCommand(grBin)},

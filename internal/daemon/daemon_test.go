@@ -1430,10 +1430,10 @@ func TestHandleHookReport(t *testing.T) {
 		}
 	})
 
-	t.Run("native permission prompt event", func(t *testing.T) {
+	t.Run("native permission prompt leaves status unchanged", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "braw", Status: StatusRunning,
+			ID: "sess1", Name: "braw", Status: StatusRunning, AgentStatus: "active",
 		}
 
 		sm.HandleHookReport(protocol.StatusReportMsg{
@@ -1443,32 +1443,38 @@ func TestHandleHookReport(t *testing.T) {
 		})
 
 		sm.mu.RLock()
-		report, ok := sm.hookReports["sess1"]
+		_, ok := sm.hookReports["sess1"]
+		agentStatus := sm.state.Sessions["sess1"].AgentStatus
 		sm.mu.RUnlock()
 
-		if !ok {
-			t.Fatal("hookReport not found for sess1")
+		if ok {
+			t.Fatal("native permission prompt must not create a Graith hook status")
 		}
 
-		if report.Status != "error" {
-			t.Errorf("Status = %q, want %q", report.Status, "error")
-		}
-		// AuthoritativeUntil should be ~30 minutes in the future (sticky)
-		untilDelta := time.Until(report.AuthoritativeUntil)
-		if untilDelta < 29*time.Minute || untilDelta > 31*time.Minute {
-			t.Errorf("AuthoritativeUntil delta = %v, want ~30m", untilDelta)
+		if agentStatus != "active" {
+			t.Errorf("AgentStatus = %q, want unchanged active", agentStatus)
 		}
 	})
 
-	// PermissionRequest is unexpected in non-interactive mode and must map to a
-	// diagnosable runtime error.
-	t.Run("PermissionRequest maps to error", func(t *testing.T) {
-		report := recordHookReport(t, "speir", protocol.StatusReportMsg{
-			Event: "PermissionRequest",
-		})
+	t.Run("PermissionRequest leaves status unchanged", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["speir"] = &SessionState{
+			ID: "speir", Name: "speir", Status: StatusRunning, AgentStatus: "active",
+		}
 
-		if report.Status != "error" {
-			t.Errorf("Status = %q, want %q", report.Status, "error")
+		sm.HandleHookReport(protocol.StatusReportMsg{SessionID: "speir", Event: "PermissionRequest"})
+
+		sm.mu.RLock()
+		_, ok := sm.hookReports["speir"]
+		agentStatus := sm.state.Sessions["speir"].AgentStatus
+		sm.mu.RUnlock()
+
+		if ok {
+			t.Fatal("PermissionRequest must not create a Graith hook status")
+		}
+
+		if agentStatus != "active" {
+			t.Errorf("AgentStatus = %q, want unchanged active", agentStatus)
 		}
 	})
 
@@ -1573,11 +1579,8 @@ func TestHandleHookReport(t *testing.T) {
 		}
 	})
 
-	// Notification is subtype-aware: idle_prompt -> ready, permission_prompt ->
-	// error, and every other subtype (including empty/unparsed) leaves the
-	// status untouched. The empty case is the regression guard — the pre-subtype
-	// code mapped every Notification to a permission state, so a timed-out hook
-	// spuriously flagged a session as needing attention.
+	// Notification is subtype-aware: idle_prompt -> ready; permission_prompt and
+	// every other subtype (including empty/unparsed) leave status untouched.
 	t.Run("notification idle_prompt maps to ready", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["ken"] = &SessionState{
@@ -1613,7 +1616,7 @@ func TestHandleHookReport(t *testing.T) {
 		}
 	})
 
-	t.Run("notification permission_prompt maps to error", func(t *testing.T) {
+	t.Run("notification permission_prompt leaves status unchanged", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["haar"] = &SessionState{
 			ID: "haar", Name: "haar", Status: StatusRunning, AgentStatus: "active",
@@ -1629,8 +1632,8 @@ func TestHandleHookReport(t *testing.T) {
 		agentStatus := sm.state.Sessions["haar"].AgentStatus
 		sm.mu.RUnlock()
 
-		if agentStatus != "error" {
-			t.Errorf("AgentStatus = %q, want %q", agentStatus, "error")
+		if agentStatus != "active" {
+			t.Errorf("AgentStatus = %q, want %q", agentStatus, "active")
 		}
 	})
 
@@ -3073,9 +3076,8 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 		cfg := config.Default()
 		cfg.Sandbox = config.SandboxConfig{Enabled: false}
 		cfg.Agents["sleeper"] = config.Agent{
-			NonInteractiveArgs: []string{},
-			Command:            "sleep",
-			Args:               []string{"60"},
+			Command: "sleep",
+			Args:    []string{"60"},
 		}
 
 		sm := newSMWithConfig(t, cfg)
@@ -6982,60 +6984,19 @@ func TestAdoptSessionsCov2(t *testing.T) {
 	}
 }
 
-func TestAdoptSessionsTerminatesPreTransitionProcess(t *testing.T) {
-	sm := sleeperSM(t)
-	pid := spawnReapableSleeper(t)
-
-	start, err := grpty.ProcessStartTime(pid)
-	if err != nil {
-		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+func TestUpgradeAdoptionAllowsUnsandboxedNativePromptSession(t *testing.T) {
+	sess := &SessionState{
+		ID: "dreich-old", PID: 123, PIDStartTime: 456,
+		Sandboxed: false, CreationCfg: nil,
 	}
 
-	readEnd, writeEnd, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
+	if reason := invalidUpgradeAdoptionReason(sess); reason != "" {
+		t.Fatalf("identity-valid session rejected: %s", reason)
 	}
 
-	t.Cleanup(func() {
-		_ = readEnd.Close()
-		_ = writeEnd.Close()
-	})
-
-	fd, err := syscall.Dup(int(readEnd.Fd()))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	sm.state.Sessions["dreich-old"] = &SessionState{
-		ID: "dreich-old", Name: "dreich-old", Agent: "sleeper", Status: StatusRunning,
-		PID: pid, PIDStartTime: start,
-		// A pre-transition state cannot prove that the inherited process is
-		// sandboxed or that native permission prompting was disabled.
-		Sandboxed: false,
-	}
-
-	err = sm.AdoptSessions(&UpgradeManifest{Sessions: []UpgradeSession{{
-		ID: "dreich-old", Fd: fd, HasPTY: true, PID: pid,
-	}}})
-	if err != nil {
-		t.Fatalf("AdoptSessions: %v", err)
-	}
-
-	sess, ok := sm.Get("dreich-old")
-	if !ok {
-		t.Fatal("rejected session disappeared")
-	}
-
-	if sess.Status != StatusStopped || sess.PID != 0 {
-		t.Fatalf("rejected session = status %q pid %d, want stopped with cleared pid", sess.Status, sess.PID)
-	}
-
-	if !strings.Contains(sess.SummaryText, "incompatible security-model upgrade") {
-		t.Fatalf("summary = %q, want security-model diagnostic", sess.SummaryText)
-	}
-
-	if err := syscall.Kill(-pid, 0); !errors.Is(err, syscall.ESRCH) {
-		t.Fatalf("pre-transition process group remains after adoption rejection: %v", err)
+	sess.PIDStartTime = 0
+	if reason := invalidUpgradeAdoptionReason(sess); !strings.Contains(reason, "process identity") {
+		t.Fatalf("missing identity reason = %q", reason)
 	}
 }
 

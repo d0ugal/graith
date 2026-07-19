@@ -1,5 +1,5 @@
 ---
-title: "Design Doc: Non-interactive agents with sandbox-enforced policy"
+title: "Design Doc: Remove Graith interactive approvals"
 authors: Dougal Matthews
 created: 2026-07-18
 status: Implemented
@@ -8,13 +8,14 @@ informed: (TBD)
 issue: https://github.com/d0ugal/graith/issues/1392
 ---
 
-# Non-interactive agents with sandbox-enforced policy
+# Remove Graith interactive approvals
 
-Graith will remove its human tool-approval loop and run every agent in a
-non-interactive permission mode inside an enforceable OS sandbox. An optional
-localmost-compatible command policy remains as a synchronous deny layer: it may
-stop a shell command, but an allow only continues into the existing sandbox and
-can never widen that sandbox.
+Graith removes its human tool-approval loop. Agent-native approval prompts remain
+available and are owned entirely by the agent's TUI. Graith's OS sandbox is
+enabled by default but may be explicitly disabled when the operator relies on
+native controls, an external sandbox, or a VM. An optional localmost-compatible
+command policy remains as an independent synchronous deny layer: it may stop a
+shell command, but an allow never grants a capability.
 
 ## Background
 
@@ -46,14 +47,16 @@ can actually access. Failures in hook transport have historically needed a
 choice between failing open and stranding a session.
 
 Keeping the queue requires protocol and lifecycle state whose only purpose is
-to pause execution. It also leaves agent-native prompts as a second hidden
-workflow state. That conflicts with the automation model in issue #1392.
+to pause execution. Agent-native prompts are different: the agent already owns
+their presentation and response path, so Graith treats time spent in that TUI as
+ordinary running state.
 
 ## Goals
 
-- Make every supported agent launch non-interactive and incapable of waiting
-  for a Graith or native tool-approval response.
-- Require an enforceable Graith OS sandbox at session creation and resume.
+- Ensure no session can wait for a Graith-owned tool-approval response.
+- Allow operators to retain or disable each agent's native approval UI.
+- Default to Graith's enforceable OS sandbox while allowing explicit opt-out
+  with a startup warning and `gr doctor` diagnostic.
 - Retain the built-in and native localmost command evaluators only as optional,
   bounded, fail-closed restrictions on shell commands.
 - Make deny, ask, malformed input/output, timeout, missing backend, and runtime
@@ -68,6 +71,7 @@ workflow state. That conflicts with the automation model in issue #1392.
 - Letting command policy grant filesystem, process, signal, socket, or network
   access.
 - Replacing OS sandbox configuration with a command allowlist.
+- Detecting or attesting an external sandbox or VM.
 - Adding command-policy editing to the iOS or macOS applications.
 
 ## Platform support
@@ -87,17 +91,17 @@ This preserves a workflow that can pause indefinitely, keeps an allow-all path,
 and leaves Graith with two competing permission models. It does not meet the
 automation or security goals.
 
-### Proposal 1: Mandatory outer sandbox plus synchronous deny policy (Recommended)
+### Proposal 1: Independent native prompts, sandbox, and deny policy (Recommended)
 
-Require the merged sandbox configuration to be enabled, explicitly select a
-backend, and pass its availability check before create or resume. Headless
-processes use the same wrapper as PTY processes. The launch path prepends a
-non-interactive argument list supplied by each agent definition. Built-in
-definitions pin Claude to skipped native permission prompts, Codex to
-`--ask-for-approval never` with its inner shell sandbox disabled, Cursor to
-force mode, and Agy and OpenCode to their non-prompting modes. A custom agent
-must explicitly declare its non-interactive arguments, including an empty list
-when none are needed, or creation fails.
+Treat three controls independently. First, `non_interactive_args` is an optional
+launch prefix. Bundled definitions retain unattended defaults, while clearing
+the list preserves the agent's native approval TUI; Graith does not answer,
+count, or map those prompts to a workflow status. Second, the merged Graith
+sandbox defaults on. When enabled it must select an available backend and every
+requested primitive fails closed; when explicitly disabled the process starts
+with a one-time warning and a doctor diagnostic. Third, command policy can be
+enabled with either sandbox setting and only subtracts from the resulting
+capabilities.
 
 OpenCode's TUI non-prompting mode is `--auto`: it approves requests that would
 otherwise ask while preserving explicit native denies. Cursor's force mode is
@@ -124,20 +128,20 @@ the supervisor is converted to the hook runner's blocking exit-2 contract. The
 agent runner timeout is deliberately longer than the supervisor deadline, so a
 runner timeout cannot turn a policy transport failure into an allow:
 
-| Result | Non-interactive meaning |
+| Result | Command-policy meaning |
 |--------|-------------------------|
-| allow | Continue without widening permissions; the outer sandbox still applies. |
+| allow | Continue without granting permissions; any enabled Graith, native, or external controls still apply. |
 | deny | Emit an immediate deny with the rule reason. |
 | ask/defer | Deny immediately because no human decision path exists. |
 | malformed tool input or backend output | Deny immediately with a diagnostic reason. |
 | timeout or evaluation error | Deny immediately with a diagnostic reason. |
 | backend unavailable at create/resume | Fail session startup before spawning the agent. |
-| non-shell tool | Do not invoke policy; proceed directly to sandbox enforcement. |
+| non-shell tool | Do not invoke policy; proceed directly to normal agent execution. |
 
 Agent-native permission events are no longer mapped to `agent_status=approval`.
-An unexpected event is logged and represented as a runtime/configuration error;
-an unexpected headless `can_use_tool` request is denied immediately and marks
-the driver degraded so it cannot become a waiting state.
+For interactive PTY sessions they leave status unchanged and remain in the
+agent's TUI. A headless `can_use_tool` request is denied immediately and marks
+the driver degraded because there is no TUI in which a human can respond.
 
 Remove the old approval wire messages and fleet count, daemon maps and
 subscribers, human responders, terminal overlay and keybindings, notification
@@ -146,16 +150,17 @@ prompt/auto backends, Yolo state, and the user-selectable Codex approval flag.
 Move localmost parser code to `internal/commandpolicy` and retain its focused
 unit and CLI validation coverage.
 
-The trade-off is deliberate strictness: a machine without a working sandbox,
-or an agent that cannot provide the configured command-policy hook, cannot run
-a session. This turns a hidden security downgrade into a clear startup error.
+The trade-off is explicit responsibility: disabling Graith's sandbox may expose
+daemon tokens, sibling worktrees, and host credentials unless another boundary
+protects them. Graith warns but cannot verify external isolation. A configured
+sandbox or command-policy backend still fails closed rather than silently
+downgrading.
 
-### Proposal 2: Disable prompts but keep sandbox optional
+### Proposal 2: Require Graith's sandbox for every session
 
-This removes waiting states while allowing an agent to run unrestricted when
-the sandbox is off. It makes the native “allow all” mode authoritative on those
-hosts and contradicts the issue's requirement that OS enforcement be the
-capability boundary. Rejected.
+This gives Graith a uniform capability boundary but prevents deliberate use in
+an already-sandboxed container, VM, or host policy and prevents manual native-
+approval workflows. Rejected in favour of an explicit, diagnosed opt-out.
 
 ## Other Notes
 
@@ -174,8 +179,8 @@ capability boundary. Rejected.
 No compatibility shim is added. Old approval wire messages become unknown,
 old `[approvals]` configuration is rejected, and removed Yolo fields are not
 restored from persisted state. The historical state migration chain remains
-structurally readable but maps a last persisted `agent_status=approval` to a
-diagnosable error. The wire protocol major version advances to 2 so an old
+structurally readable but clears approval-era runtime agent status. The wire
+protocol major version advances to 2 so an old
 approval-aware client cannot connect under false assumptions. This is an
 intentional breaking transition rather than a staged deprecation.
 
@@ -190,15 +195,17 @@ upgrades may use the identity-bearing manifest described below.
 
 Policy evaluation occurs in the daemon, outside the agent process, but its
 result only controls whether the agent's proposed shell command continues. The
-already-wrapped process executes the command, so even a policy allow remains
-inside the sandbox. Native localmost execution bounds output, the direct child,
-and pipe-holding descendants so a backend cannot extend the synchronous check.
+agent process executes the command under whatever Graith sandbox, native policy,
+or external confinement was selected. Native localmost execution bounds output,
+the direct child, and pipe-holding descendants so a backend cannot extend the
+synchronous check.
 
 Current-format live daemon upgrade also fails closed. The manifest records every live process,
 including headless drivers and PTYs whose fd cannot be transferred. An inherited
-PTY is adopted only when persisted state proves its PID identity, OS sandboxing,
-and non-interactive native agent arguments. Headless processes cannot transfer a
-PTY and are identity-checked and terminated during handoff. Replacement startup
+PTY is adopted only when persisted state and the manifest prove its PID
+identity. Sandbox and native-prompt choices are preserved, not adoption gates.
+Headless processes cannot transfer a PTY and are identity-checked and terminated
+during handoff. Replacement startup
 arms identity-verified cleanup immediately after reading the manifest, before
 configuration loading, path initialization, state-version, authentication, or
 adoption work, so an earlier startup error cannot strand an inherited process.
@@ -213,10 +220,10 @@ daemon startup after any partially adopted processes are also stopped.
   malformed output, timeout, and execution errors.
 - Test hook output for Claude and Codex, fail-closed hook transport, and
   startup rejection for agents without a verified synchronous deny contract.
-- Test create, resume, fork, headless, scenario, and trigger paths for mandatory
-  sandbox and policy availability checks.
-- Test that headless permission requests never produce an approval status and
-  are answered immediately as runtime errors.
+- Test create, resume, fork, headless, scenario, and trigger paths with sandbox
+  enabled and explicitly disabled, while configured enforcement still fails closed.
+- Test that PTY native permission requests leave Graith status unchanged and
+  headless requests are denied immediately because they cannot be serviced.
 - Regenerate and test Go/Swift protocol and capability manifests.
 - Run focused package tests, daemon and protocol tests with the race detector,
   tagged integration tests, shared Swift tests, app builds, the documentation

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -431,8 +432,14 @@ func (dc *doctorContext) checkEnvironment() {
 	if cfg.Sandbox.Enabled {
 		dc.checkSandboxBackend()
 		dc.checkSandboxPaths()
+
+		if disabled := disabledGraithSandboxAgents(cfg); len(disabled) > 0 {
+			dc.warnf("environment", "Graith sandbox disabled for agent(s): %s", strings.Join(disabled, ", "))
+			dc.hintf("Remove the per-agent sandbox opt-out or confirm those agents run inside an external sandbox or VM")
+		}
 	} else {
-		dc.warnf("environment", "Sandbox disabled")
+		dc.warnf("environment", "Sandbox disabled: Graith will not constrain agent filesystem, process, signal, or network access")
+		dc.hintf("Enable [sandbox] or confirm the agent runs inside an external sandbox or VM")
 	}
 
 	switch {
@@ -443,6 +450,24 @@ func (dc *doctorContext) checkEnvironment() {
 	default:
 		dc.passf("environment", "Agent prompt: default")
 	}
+}
+
+func disabledGraithSandboxAgents(c *config.Config) []string {
+	if c == nil || !c.Sandbox.Enabled {
+		return nil
+	}
+
+	var disabled []string
+
+	for name, agent := range c.Agents {
+		if !c.Sandbox.Merge(agent.Sandbox).Enabled {
+			disabled = append(disabled, name)
+		}
+	}
+
+	sort.Strings(disabled)
+
+	return disabled
 }
 
 // checkConfigKeys warns about config keys graith doesn't recognise — typos or

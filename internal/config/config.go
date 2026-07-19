@@ -1389,9 +1389,9 @@ type DetectionConfig struct {
 	// PreToolUse, PostToolUse) stays authoritative. Empty uses the default
 	// (DetectionHookActivityWindowDefault).
 	HookActivityWindow string `toml:"hook_activity_window"`
-	// HookTerminalWindow is how long a terminal hook report (ready/error:
-	// Stop, idle_prompt, permission_prompt, PermissionRequest) stays
-	// authoritative. Empty uses the default (DetectionHookTerminalWindowDefault).
+	// HookTerminalWindow is how long a terminal hook report (Stop or idle_prompt)
+	// stays authoritative. Agent-native permission prompts do not alter Graith
+	// status. Empty uses the default (DetectionHookTerminalWindowDefault).
 	HookTerminalWindow string `toml:"hook_terminal_window"`
 }
 
@@ -3165,12 +3165,10 @@ type Agent struct {
 	// custom agent can opt in from config alone (issue #1236). Built-in
 	// claude/codex/cursor set ["--add-dir", "{dir}"].
 	AddDirArgs []string `json:"add_dir_args,omitempty" toml:"add_dir_args"`
-	// NonInteractiveArgs disables the agent's native permission prompts. A nil
-	// value means the agent has no declared non-interactive mode and cannot be
-	// launched; an explicit empty list is valid for agents that never prompt.
-	// Keep the JSON distinction between nil (not configured, unsafe) and an
-	// explicit empty list (the operator asserts this agent needs no flag). State
-	// adoption uses that distinction to reject pre-transition agent processes.
+	// NonInteractiveArgs is an optional argv prefix for disabling the agent's
+	// native permission prompts. Nil or empty leaves the agent's native behavior
+	// unchanged; Graith does not participate in those prompts. Bundled agents set
+	// this for unattended operation, and users may clear it for manual approval.
 	NonInteractiveArgs []string `json:"non_interactive_args" toml:"non_interactive_args"`
 	// HeadlessArgs is the argv prefix graith prepends when launching this agent in
 	// headless stream-json mode (issue #1075); the agent's own template-expanded
@@ -4520,7 +4518,7 @@ func checkCommandPolicyKeys(data []byte) error {
 	}
 
 	if _, ok := raw["approvals"]; ok {
-		return errors.New("[approvals] was removed; use optional [command_policy] rules, which can only restrict commands inside the mandatory sandbox")
+		return errors.New("[approvals] was removed; use optional [command_policy] rules, which can only restrict shell commands and never grant capabilities")
 	}
 
 	policy, ok := raw["command_policy"].(map[string]any)

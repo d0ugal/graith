@@ -953,11 +953,11 @@ func TestLoadStateNoBackupOnCorruptedJSON(t *testing.T) {
 	}
 }
 
-func TestMigrateV22ToV23RemovesApprovalStatus(t *testing.T) {
+func TestMigrateV22ToV23ClearsRuntimeAgentStatus(t *testing.T) {
 	state := &State{
 		Version: 22,
 		Sessions: map[string]*SessionState{
-			"canny": {ID: "canny", AgentStatus: "approval"},
+			"canny": {ID: "canny", AgentStatus: "active"},
 			"braw":  {ID: "braw", AgentStatus: "ready"},
 		},
 	}
@@ -965,12 +965,12 @@ func TestMigrateV22ToV23RemovesApprovalStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := state.Sessions["canny"].AgentStatus; got != "error" {
-		t.Fatalf("migrated approval status = %q, want error", got)
+	if got := state.Sessions["canny"].AgentStatus; got != "" {
+		t.Fatalf("migrated active status = %q, want empty", got)
 	}
 
-	if got := state.Sessions["braw"].AgentStatus; got != "ready" {
-		t.Fatalf("unrelated status = %q, want ready", got)
+	if got := state.Sessions["braw"].AgentStatus; got != "" {
+		t.Fatalf("migrated ready status = %q, want empty", got)
 	}
 }
 

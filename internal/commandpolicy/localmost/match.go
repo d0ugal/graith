@@ -14,8 +14,8 @@ const maxMatchSteps = 1_000_000
 // evalBudget is a single work budget shared across every rule, unless
 // expression, and @sub recursion within one Engine.Evaluate call. When the
 // budget is exhausted, exhausted latches true and every subsequent seq returns
-// no positions; subPolicy observes the flag and fails closed to PolicyAsk
-// (human review) rather than trusting an incomplete match. A shared budget also
+// no positions; subPolicy observes the flag and fails closed to PolicyAsk,
+// which the command-policy backend converts to deny. A shared budget also
 // stops an attacker from multiplying the per-rule bound by the rule count or
 // @sub depth. See issue #798.
 type evalBudget struct {
@@ -284,7 +284,7 @@ func isInt(s string) bool {
 // rejects the empty-string argument ""). Tightening this to a "path-shaped"
 // heuristic (requiring a leading /, ./, ~, etc.) would break parity with
 // localmost, which allows e.g. `mkdir foo`. See issue #732 and the documented
-// behaviour in docs/design/2026-07-03-non-interactive-sandbox-policy.md.
+// behaviour in docs/design/2026-07-03-pluggable-approvals-backends-design.md.
 func isValidPath(s string) bool {
 	return s != "" && strings.IndexByte(s, 0) < 0
 }

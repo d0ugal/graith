@@ -80,17 +80,9 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		return SessionState{}, fmt.Errorf("orchestrator agent %q not found in config", agentName)
 	}
 
-	if agent.NonInteractiveArgs == nil {
-		return SessionState{}, fmt.Errorf("orchestrator agent %q has no non_interactive_args; refusing to start an agent that may prompt for permission", agentName)
-	}
-
 	sandboxed, err := sm.resolveSandboxFromConfig(cfgSnap, agentName)
 	if err != nil {
 		return SessionState{}, fmt.Errorf("orchestrator sandbox: %w", err)
-	}
-
-	if !sandboxed {
-		return SessionState{}, errors.New("orchestrator requires sandbox but sandbox is not available — install safehouse and enable sandbox in config")
 	}
 
 	if err := sm.validateCommandPolicyFromConfig(cfgSnap, agentName); err != nil {
@@ -226,7 +218,11 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	merged := sandboxMerged
 	merged.ReadDirs = expandPaths(merged.ReadDirs, sm.log, "read")
 	merged.WriteDirs = expandPaths(merged.WriteDirs, sm.log, "write")
-	mergedSandbox := &merged
+
+	var mergedSandbox *config.SandboxConfig
+	if sandboxed {
+		mergedSandbox = &merged
+	}
 
 	envKeys := []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME", "GRAITH_AGENT_TYPE", "GRAITH_TMPDIR", "TMPDIR", "TERM"}
 	for k := range agent.Env {
@@ -293,7 +289,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		sess.PIDStartTime = st
 	}
 
-	sess.Sandboxed = true
+	sess.Sandboxed = sandboxed
 	sess.SandboxConfig = mergedSandbox
 	sess.LastStartedAt = time.Now()
 	sess.CreationCfg = &CreationConfig{
@@ -324,7 +320,11 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	go sm.watchSession(id, ptySess)
 
 	sm.log.Info("orchestrator session created",
-		"id", id, "pid", result.PID, "pgid", ptySess.Pgid())
+		"id", id, "pid", result.PID, "pgid", ptySess.Pgid(), "sandboxed", sandboxed)
+
+	if !sandboxed {
+		sm.logUnsandboxedStart(id, result.Name, agentName)
+	}
 
 	return result, nil
 }

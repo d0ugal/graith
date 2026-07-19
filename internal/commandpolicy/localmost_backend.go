@@ -141,7 +141,7 @@ func (localmostBackend) Evaluate(ctx context.Context, req Request, cfg Config) (
 	case "deny", "block":
 		return Decision{Decision: DecisionDeny, Reason: reason}, nil
 	case "ask", "defer":
-		return Decision{Decision: DecisionDeny, Reason: "command policy requested interaction; non-interactive sessions deny immediately"}, nil
+		return Decision{Decision: DecisionDeny, Reason: "command policy requested interaction; command policy has no human decision path"}, nil
 	default:
 		return Decision{}, fmt.Errorf("localmost returned unknown decision %q", decision)
 	}

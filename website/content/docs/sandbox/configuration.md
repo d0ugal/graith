@@ -11,8 +11,8 @@ draft: false
 
 ```toml
 [sandbox]
-enabled     = true            # required; false makes session launch fail closed
-backend     = "nono"          # required: "safehouse" | "nono"
+enabled     = true            # default; false relies on native/external isolation
+backend     = "nono"          # required when enabled: "safehouse" | "nono"
 command     = "nono"          # path/name of the backend binary (default: backend name)
 features    = ["ssh"]         # feature gates (see caveats below)
 read_dirs   = ["~/Code"]      # additional read-only paths (directories)
@@ -44,7 +44,7 @@ write_files = ["~/.claude.json", "~/.claude.json.lock", "~/.claude.lock"]  # log
 - `features`, `read_dirs`, `write_dirs`, `read_files`, and `write_files` are merged (global + agent, deduplicated)
 - `backend`, `command`, and `signal_mode` are overridable per-agent (agent takes precedence)
 - `network` is overridable per-agent — an agent's `[agents.*.sandbox.network]` replaces the global policy wholesale (not merged element-wise)
-- `enabled = false` or `disabled = true` may still be parsed, but the resulting session configuration is rejected; every agent requires enforcement
+- `enabled = false` or `disabled = true` starts the agent without Graith's sandbox and emits a startup warning; use this only with deliberate native or external isolation
 
 ## Feature gate caveats
 
@@ -80,15 +80,16 @@ config = ""           # localmost-format config.json
 ```
 
 Command policy is an optional, synchronous restriction applied before shell
-commands. It can only subtract from what the OS sandbox permits:
+commands. It can only subtract from the agent's effective capabilities:
 
-- `backend = ""` installs no policy hook; commands proceed directly to sandbox enforcement.
+- `backend = ""` installs no policy hook; commands proceed directly to normal agent execution.
 - `backend = "builtin"` uses graith's localmost-compatible parser and rules.
 - `backend = "localmost"` invokes the native localmost binary, optionally selected with `command`.
 
-Only shell tools are in policy scope. Other tools go directly to the sandbox.
-An allow means “continue to sandbox enforcement”; it never bypasses filesystem,
-process, signal, or network restrictions. A deny blocks immediately. Interactive
+Only shell tools are in policy scope. Other tools go directly to normal agent
+execution. An allow grants nothing: it bypasses neither an enabled Graith
+sandbox, the agent's own policy, nor external isolation. A deny blocks
+immediately. Interactive
 results (`ask`/`defer`), malformed output, timeouts, backend errors, and an
 unavailable configured backend all fail closed without waiting for a human.
 The generated hook uses a shorter hard-deadline worker inside the agent hook
@@ -104,7 +105,8 @@ Command policy is currently enforceable for the built-in Claude and Codex
 agents. Graith rejects policy-enabled Cursor, OpenCode, Agy, and custom-agent
 sessions at startup because those integrations do not currently provide a
 verified synchronous deny contract. They remain fully usable with command
-policy disabled and are still constrained by the mandatory OS sandbox.
+policy disabled, with whatever Graith sandbox, native controls, or external
+isolation you configured.
 
 Enabling, disabling, or otherwise changing `[command_policy]` marks existing
 sessions config-stale. Restart those sessions to install the exact policy hook
@@ -116,6 +118,67 @@ Rule tooling lives under the sandbox namespace:
 printf '%s\n' 'git status' | gr sandbox policy check
 gr sandbox policy validate
 ```
+
+### How the controls combine
+
+Graith's sandbox and command policy are independent:
+
+| Graith sandbox | `command_policy` | Shell command result |
+|---|---|---|
+| On | Off | No policy pre-check; the command runs only if the OS sandbox permits it. |
+| On | On | Policy deny blocks immediately; policy allow continues inside the OS sandbox. |
+| Off | Off | Graith adds no capability boundary or shell restriction; only agent-native or external controls apply. |
+| Off | On | Policy deny blocks immediately; policy allow continues without a Graith sandbox, under any agent-native or external controls. |
+
+Native agent prompting is a third independent control:
+
+| `non_interactive_args` | Native behavior | Graith behavior |
+|---|---|---|
+| Bundled value retained | Starts the agent in its non-prompting/unattended mode. | Does not create an approval workflow. |
+| Set to `[]` or omitted | The agent may pause in its own approval TUI. | Treats the session as ordinarily running; the agent renders and resolves the prompt. |
+
+The generated `PreToolUse` hooks are independent of both sandbox selection and
+native prompting. “Lifecycle” below means the session's Graith lifecycle hooks
+are enabled (the normal `gr new` behavior):
+
+| Agent | Lifecycle | Policy | Graith-generated `PreToolUse` entry |
+|---|---:|---:|---|
+| Claude | Off or on | Off | None. |
+| Claude | Off or on | On | Bash matcher → bounded `gr command-policy-check`. |
+| Codex | Off | Off | None. |
+| Codex | On | Off | Match-all → `gr report-status --event PreToolUse`. |
+| Codex | Off | On | Bash matcher → bounded `gr command-policy-check`. |
+| Codex | On | On | Two groups: match-all status reporting, plus the Bash policy check. |
+
+On policy allow, the hook emits the agent's native “continue” result (empty
+output for the verified Claude/Codex contracts). On deny, ask/defer, malformed
+data, evaluation failure, or timeout, it emits a native blocking deny; failure
+to run the supervisor uses the hook runner's blocking exit status. Graith never
+installs a hook that asks a human.
+
+For example, this runs Codex unattended without Graith's sandbox while still
+blocking every `gh api` shell call (including POST) synchronously. The broad
+deny is intentional: a command-string policy cannot reliably infer HTTP methods
+that a CLI may select implicitly.
+
+```toml
+[sandbox]
+enabled = false
+
+[agents.codex]
+non_interactive_args = ["--ask-for-approval", "never", "--sandbox", "danger-full-access"]
+
+[command_policy]
+backend = "builtin"
+
+[command_policy.builtin]
+allow = ["@*"]
+deny = ["gh api @*"]
+```
+
+With this configuration, Graith prints an unsandboxed startup warning and
+`gr doctor` reports the missing Graith sandbox. The command policy still fails
+closed if its hook or backend cannot be established.
 
 ### Network egress (nono only)
 

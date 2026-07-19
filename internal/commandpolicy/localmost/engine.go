@@ -92,7 +92,8 @@ func (e *Engine) compileRules(rs []Rule) ([]compiledRule, error) {
 
 // Evaluate parses a shell command into subcommands and returns the combined
 // policy: deny if any subcommand is denied, allow if all are allowed, otherwise
-// ask. A parse failure is treated as ask (fail-safe to the human).
+// ask. A parse failure is treated as ask; the command-policy backend converts
+// ask to an immediate deny.
 func (e *Engine) Evaluate(command string) (Policy, error) {
 	subs, err := parseCommand(command)
 	if err != nil {
@@ -139,11 +140,11 @@ func (e *Engine) Evaluate(command string) (Policy, error) {
 //   - The matcher enumerates every reachable end position (it does not stop at
 //     the first match), so an allow rule can find a genuine match yet still trip
 //     the budget while exploring alternatives. Checking exhaustion *before*
-//     honouring an allow match keeps the "exhaustion → human review" guarantee
+//     honouring an allow match keeps the "exhaustion → PolicyAsk" guarantee
 //     uniform: only commands that overrun the (huge) step budget are affected,
-//     and routing those to a human is the conservative choice on the command-policy
-//     path. Deny still returns on a positive match — a hard block is strictly
-//     safer than deferring to a human.
+//     and the command-policy backend converts that result to deny. Deny still
+//     returns on a positive match — a hard block is strictly safer than an
+//     indeterminate result.
 func (e *Engine) subPolicy(sub subcommand, budget *evalBudget) Policy {
 	for _, r := range e.deny {
 		if e.ruleMatches(r, sub, budget) {

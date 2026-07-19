@@ -603,8 +603,11 @@ require_pairing = true    # require per-device pairing for human-level rights; f
 # write_dirs = ["~/.config/graith"]
 
 [sandbox]
-# Mandatory OS-level sandbox for every agent process. A session fails to start
-# when the selected backend cannot enforce the configured policy.
+# Recommended OS-level sandbox for agent processes. Disable it only when native
+# agent controls or an external sandbox/VM provide the boundary you intend.
+# When enabled, a session fails to start if the selected backend cannot enforce
+# the configured policy. Disabled sessions start with a warning and are reported
+# by `gr doctor`.
 #   backend = "safehouse"  # macOS Seatbelt (sandbox-exec)
 #   backend = "nono"       # Landlock+seccomp on Linux, Seatbelt on macOS
 enabled = true
@@ -645,8 +648,8 @@ backend = "nono"
 # fire-and-forget sessions (tribunal judges, trigger briefings) can run a
 # headless Claude process (`claude -p --output-format stream-json`) instead of an
 # interactive PTY; graith parses the typed event stream for status and captures
-# the run's cost/token usage. v1 is one-shot, requires a prompt, and runs inside
-# the same mandatory sandbox. Inert unless experimental = true. Per-agent
+# the run's cost/token usage. v1 is one-shot, requires a prompt, and uses the
+# same configured sandbox setting as PTY sessions. Inert unless experimental = true. Per-agent
 # support is `headless_capable`. The processing limits (issue #1250) rarely need
 # tuning; a zero/non-positive value falls back to the default shown.
 [headless]
@@ -666,7 +669,7 @@ preview_bytes = 16384       # scrollback tail rendered by the overlay/screen_pre
 
 [agents.claude]
 command = "claude"                                    # binary to launch
-non_interactive_args = ["--dangerously-skip-permissions"] # outer sandbox remains authoritative
+non_interactive_args = ["--dangerously-skip-permissions"] # bundled unattended default; set [] to use Claude's native approval TUI
 args = ["--session-id", "{agent_session_id}"]        # args for a fresh session (templates expanded)
 resume_args = ["--resume", "{agent_session_id}"]     # args to resume an existing session
 # args to fork from a source session (used by ctrl+b f)
@@ -700,7 +703,7 @@ write_dirs = ["~/.claude"]
 
 [agents.codex]
 command = "codex"
-non_interactive_args = ["--ask-for-approval", "never", "--sandbox", "danger-full-access"] # disables Codex prompts/inner sandbox; graith still enforces the outer sandbox
+non_interactive_args = ["--ask-for-approval", "never", "--sandbox", "danger-full-access"] # bundled unattended default; set [] to keep Codex native approvals/sandbox
 args = []
 # Codex mints its own session id; graith captures it from the rollout on disk
 # after start (captureNativeSessionID). Resume pins to that id when known; when
@@ -741,7 +744,7 @@ write_dirs = ["~/.codex"]
 
 [agents.opencode]
 command = "opencode"
-non_interactive_args = ["--auto"] # auto-approves asks; explicit OpenCode denies and the outer sandbox remain authoritative
+non_interactive_args = ["--auto"] # bundled unattended default; set [] to keep OpenCode native prompts
 args = []
 resume_args = ["--session", "{agent_session_id}"]
 idle_timeout        = "1h"     # auto-stop after this long idle (0 disables)
@@ -751,7 +754,7 @@ pre_trust_workspace = true     # pre-trust the worktree so the agent skips its t
 
 [agents.cursor]
 command = "agent"           # the Cursor CLI binary is named `agent`
-non_interactive_args = ["--force"] # outer sandbox remains authoritative
+non_interactive_args = ["--force"] # bundled unattended default; set [] to keep Cursor native prompts
 args = []
 resume_args = ["resume"]
 # Command listing valid model IDs ("id - description" per line); a requested
@@ -769,7 +772,7 @@ write_dirs = ["~/.cursor"]
 
 [agents.agy]
 command = "agy"
-non_interactive_args = ["--dangerously-skip-permissions"] # outer sandbox remains authoritative
+non_interactive_args = ["--dangerously-skip-permissions"] # bundled unattended default; set [] to keep Agy native prompts
 args = []
 resume_args = ["--conversation", "{agent_session_id}"]
 idle_timeout        = "1h"     # auto-stop after this long idle (0 disables)

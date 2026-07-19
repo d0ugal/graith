@@ -648,6 +648,14 @@ func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
 	return sm.resolveSandboxFromConfig(sm.cfg, agentName)
 }
 
+// logUnsandboxedStart emits one warning for each successful process start that
+// Graith did not wrap in its OS sandbox. It deliberately does not claim that
+// the process lacks agent-native controls, an external sandbox, or VM isolation.
+func (sm *SessionManager) logUnsandboxedStart(sessionID, name, agent string) {
+	sm.log.Warn("session started without Graith sandbox; Graith is not enforcing OS isolation",
+		"id", sessionID, "name", name, "agent", agent)
+}
+
 // validateCommandPolicy fails session start when configured enforcement cannot
 // be established. Callers hold sm.mu.
 func (sm *SessionManager) validateCommandPolicy(agentName string) error {
@@ -699,14 +707,14 @@ func (sm *SessionManager) resolveSandboxFromConfig(cfg *config.Config, agentName
 	// Test-only seam so orchestrator create/resume rollback tests can drive the
 	// post-sandbox launch path deterministically on any platform, rather than
 	// depending on a real (darwin-only safehouse / Linux nono) backend. nil in
-	// production, where the real availability check below always runs.
+	// production, where an enabled sandbox always gets the real check below.
 	if sm.sandboxResolver != nil {
 		return sm.sandboxResolver(agentName)
 	}
 
 	merged := cfg.Sandbox.Merge(cfg.Agents[agentName].Sandbox)
 	if !merged.Enabled {
-		return false, errors.New("sandbox enforcement is required for every agent session; enable [sandbox] and select an available backend")
+		return false, nil
 	}
 
 	avail, err := validateSandboxBackend(merged, fmt.Sprintf("agent %q", agentName))

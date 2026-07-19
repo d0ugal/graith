@@ -334,21 +334,21 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 	case "Notification":
 		// A Claude Notification's meaning is in its subtype. The CLI forwards
 		// the raw notification_type (empty when stdin didn't parse); the daemon
-		// decides. Only idle_prompt (agent awaiting input) and permission_prompt
-		// (an invalid non-interactive launch) change status. Everything else — auth_success,
-		// elicitation_*, and crucially an empty/unknown/unparsed subtype — is
-		// logged without touching AgentStatus, so a parse timeout can no longer
-		// spuriously flag a session as needing attention (the pre-subtype code
-		// mapped every Notification to a permission state).
+		// decides. Only idle_prompt (agent awaiting input) changes status. A
+		// permission_prompt belongs entirely to the agent's native TUI and is an
+		// ordinary running state from Graith's perspective. Everything else —
+		// auth_success, elicitation_*, and crucially an empty/unknown/unparsed
+		// subtype — is logged without touching AgentStatus.
 		switch sr.NotificationType {
 		case "idle_prompt":
 			status = "ready"
 			staleness = hookTerminalWindow
 		case "permission_prompt":
-			status = "error"
-			staleness = hookTerminalWindow
+			sm.log.Info("agent entered native permission prompt",
+				"event", sr.Event, "notification_type", sr.NotificationType,
+				"session_id", sr.SessionID)
 
-			sm.log.Error("agent emitted an unexpected native permission prompt", "session_id", sr.SessionID)
+			return
 		default:
 			sm.log.Info("ignoring notification subtype",
 				"event", sr.Event, "notification_type", sr.NotificationType,
@@ -357,12 +357,11 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 			return
 		}
 	case "PermissionRequest":
-		// A PermissionRequest is invalid because every launch disables native
-		// prompting. Surface it as a runtime configuration error.
-		status = "error"
-		staleness = hookTerminalWindow
+		// Agent-native approval prompts are not Graith workflow states. The
+		// agent's own TUI remains responsible for rendering and resolving them.
+		sm.log.Info("agent entered native PermissionRequest", "session_id", sr.SessionID)
 
-		sm.log.Error("agent emitted an unexpected PermissionRequest", "session_id", sr.SessionID)
+		return
 	case "Stop":
 		status = "ready"
 		staleness = hookTerminalWindow
@@ -774,10 +773,10 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 			continue
 		}
 
-		if reason := unsafeUpgradeAdoptionReason(sessState); reason != "" {
+		if reason := invalidUpgradeAdoptionReason(sessState); reason != "" {
 			closeFD(us)
-			scheduleState(us.ID, "Stopped during incompatible security-model upgrade")
-			sm.log.Warn("terminating upgrade session that lacks sandbox/non-interactive proof", "id", us.ID, "pid", us.PID, "reason", reason)
+			scheduleState(us.ID, "Stopped during incompatible process-identity upgrade")
+			sm.log.Warn("terminating upgrade session that lacks process identity", "id", us.ID, "pid", us.PID, "reason", reason)
 
 			continue
 		}
@@ -803,7 +802,7 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 			}
 
 			sessState := sm.state.Sessions[us.ID]
-			if unsafeUpgradeAdoptionReason(sessState) != "" {
+			if invalidUpgradeAdoptionReason(sessState) != "" {
 				continue
 			}
 
@@ -842,8 +841,8 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 		}
 
 		summary := "Stopped during daemon upgrade"
-		if reason := unsafeUpgradeAdoptionReason(sess); reason != "" {
-			summary = "Stopped during incompatible security-model upgrade"
+		if reason := invalidUpgradeAdoptionReason(sess); reason != "" {
+			summary = "Stopped during incompatible process-identity upgrade"
 		} else if sess.DriverKind == DriverHeadless {
 			summary = "Headless session stopped during daemon upgrade"
 		}
@@ -951,25 +950,13 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 	return nil
 }
 
-func unsafeUpgradeAdoptionReason(sess *SessionState) string {
+func invalidUpgradeAdoptionReason(sess *SessionState) string {
 	if sess.PID <= 1 {
 		return "session has no recorded process ID"
 	}
 
 	if sess.PIDStartTime == 0 {
 		return "session has no recorded process identity"
-	}
-
-	if !sess.Sandboxed {
-		return "session was not recorded as OS-sandboxed"
-	}
-
-	if sess.CreationCfg == nil {
-		return "session has no recorded launch configuration"
-	}
-
-	if sess.CreationCfg.Agent.NonInteractiveArgs == nil {
-		return "session has no recorded non-interactive launch arguments"
 	}
 
 	return ""

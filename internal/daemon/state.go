@@ -888,15 +888,12 @@ func migrateV20ToV21(state *State) error {
 // render metadata; their persisted runtime names remain authoritative.
 func migrateV21ToV22(_ *State) error { return nil }
 
-// migrateV22ToV23 removes the last persisted interactive workflow state. A
-// pre-transition daemon may have saved agent_status="approval" while an agent
-// was waiting. The new runtime has no such state, so surface it as a diagnostic
-// error instead of resurrecting a waiting-for-human status after restart.
+// migrateV22ToV23 clears persisted agent status from the approval-era format.
+// Agent status is runtime-only in the new model and will be rebuilt from fresh
+// hook reports or PTY state.
 func migrateV22ToV23(state *State) error {
 	for _, s := range state.Sessions {
-		if s.AgentStatus == "approval" {
-			s.AgentStatus = "error"
-		}
+		s.AgentStatus = ""
 	}
 
 	return nil

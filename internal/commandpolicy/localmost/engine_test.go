@@ -110,6 +110,18 @@ func TestEngineExampleConfig(t *testing.T) {
 	})
 }
 
+func TestEngineAllowAllWithTargetedGhAPIDeny(t *testing.T) {
+	e := mustEngine(t, `{"allow":["@*"],"deny":["gh api @*"]}`)
+
+	assertEvaluate(t, e, []evalCase{
+		{"git status", PolicyAllow},
+		{"gh pr view", PolicyAllow},
+		{"gh api repos/ken/bothy", PolicyDeny},
+		{"gh api --method POST repos/ken/bothy/issues", PolicyDeny},
+		{"echo ok && gh api -X POST repos/ken/bothy/issues", PolicyDeny},
+	})
+}
+
 // TestEnginePathMatching documents @path's semantics (issue #732): it matches
 // any valid POSIX pathname — non-empty and NUL-free — mirroring localmost.
 // @path is only marginally narrower than @arg: it accepts bare relative names,
@@ -386,7 +398,7 @@ func TestBacktrackingBudgetTerminates(t *testing.T) {
 	eng := mustEngine(t, `{"allow":[{"rule":"thrawn @arg* @arg* @arg* @arg* @arg* @arg* zzz"}]}`)
 
 	// The trailing literal is absent, so the rule cannot match; the engine must
-	// fail closed to human review rather than hang.
+	// fail closed to PolicyAsk (converted to deny by command policy) rather than hang.
 	if pol := evalWithWatchdog(t, eng, longCommand("thrawn", 400)); pol != PolicyAsk {
 		t.Fatalf("got %q, want ask (fail closed)", pol)
 	}
@@ -421,7 +433,7 @@ func longCommand(name string, args int) string {
 // tribunal judges flagged for issue #798: when a pathological DENY rule
 // exhausts the shared work budget, budget exhaustion is a silent non-match, so
 // a cheap ALLOW rule for the same command must NOT auto-approve it. Exhaustion
-// has to fail closed to PolicyAsk (human review), never PolicyAllow.
+// has to fail closed to PolicyAsk (converted to deny), never PolicyAllow.
 func TestBacktrackingBudgetDenyFailsClosed(t *testing.T) {
 	eng := mustEngine(t, `{
 		"deny": [{"rule":"thrawn @arg* @arg* @arg* @arg* @arg* @arg* zzz"}],
@@ -451,7 +463,7 @@ func TestBacktrackingBudgetUnlessFailsClosed(t *testing.T) {
 // rather than stopping at the first match, so an allow rule can find a genuine
 // match AND trip the budget while exploring alternatives. subPolicy must check
 // exhaustion before honouring the allow match — otherwise the "exhaustion →
-// human review" guarantee only holds for non-matching rules. See issue #798.
+// PolicyAsk" guarantee only holds for non-matching rules. See issue #798.
 func TestBacktrackingBudgetAllowMatchFailsClosed(t *testing.T) {
 	// Six stars with no trailing literal: `thrawn` + 400 args is a genuine
 	// full match, but enumerating every split overruns the step budget.

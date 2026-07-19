@@ -1,6 +1,7 @@
 // Package commandpolicy provides an optional, synchronous restriction layer
-// for shell commands. An allow decision only continues to the OS sandbox; it
-// never grants capabilities or bypasses sandbox enforcement.
+// for shell commands. An allow decision only continues normal agent execution;
+// it never grants capabilities or bypasses Graith, agent-native, or external
+// enforcement.
 package commandpolicy
 
 import (
@@ -76,7 +77,8 @@ func BackendByName(name string) (Backend, error) {
 }
 
 // shellCommand returns the command for a supported shell tool. Tools outside
-// this deliberately narrow scope proceed directly to sandbox enforcement.
+// this deliberately narrow scope proceed directly to normal agent execution
+// and whatever Graith, agent-native, or external enforcement is configured.
 func shellCommand(toolName, toolInput string) (string, bool, error) {
 	switch strings.ToLower(strings.TrimSpace(toolName)) {
 	case "bash", "shell", "run_shell_command", "exec_command":

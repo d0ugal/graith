@@ -119,14 +119,20 @@ file is absent.
 Sandboxing is **config-only**. There are no CLI flags to enable or disable it.
 This prevents a sandboxed agent from spawning a child process that escapes the
 sandbox — Landlock/Seatbelt restrictions are inherited by all descendants.
+Set `[sandbox] enabled = false` (globally or via the per-agent merge) only when
+you deliberately rely on agent-native controls, an external sandbox, or a VM.
+Graith prints one warning for each successful unsandboxed start and reports the
+configuration in `gr doctor`; it cannot verify external isolation.
 
 ## Fail closed
 
-If the mandatory sandbox cannot be enforced, session creation is refused —
-graith never silently runs unsandboxed. The rules:
+An explicitly disabled sandbox is allowed and visible. Once the merged sandbox
+is enabled, inability to enforce it refuses session creation or resume; Graith
+never silently downgrades an enabled policy. The rules:
 
 | Condition | Result |
 |-----------|--------|
+| `enabled = false` | **Runs without Graith's sandbox**, with a startup warning and `gr doctor` diagnostic. |
 | `backend` unset | **Hard error** — choose `safehouse` or `nono`. |
 | Backend binary not on `$PATH` | **Hard error** (with an install hint). |
 | nono version below the required minimum | **Hard error** (profile schema may not match). |

@@ -143,7 +143,7 @@ func (b builtinBackend) evaluate(req Request, cfg Config) (Decision, error) {
 	case localmost.PolicyDeny:
 		return Decision{Decision: DecisionDeny, Reason: "denied by command policy"}, nil
 	default:
-		return Decision{Decision: DecisionDeny, Reason: "command policy returned ask; non-interactive sessions deny immediately"}, nil
+		return Decision{Decision: DecisionDeny, Reason: "command policy returned ask; command policy has no human decision path"}, nil
 	}
 }
 

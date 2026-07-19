@@ -63,7 +63,7 @@ The following capability scope is intentional:
 
 | Capability | CLI | iOS | macOS | Rationale |
 |------------|-----|-----|-------|-----------|
-| Interactive approval queue and responses | Removed | Removed | Removed | Issue [#1392](https://github.com/d0ugal/graith/issues/1392) removed the workflow across every platform in favour of mandatory sandbox enforcement. |
+| Interactive Graith approval queue and responses | Removed | Removed | Removed | Issue [#1392](https://github.com/d0ugal/graith/issues/1392) removed Graith's queue; native agent approval TUIs remain agent-owned, while sandbox and command policy are independent configuration. |
 | Manage paired devices | Targeted | Excluded | Excluded | Management is local-human-only and remote-denied; apps pair with a daemon but do not administer its trust list. |
 | Direct messages | Targeted | Targeted | Targeted | A focused human-to-session conversation fits both native apps. |
 | Topic publish/subscribe | Targeted | Excluded | Excluded | Topics are an agent/orchestrator coordination primitive rather than a human chat UI. |

@@ -314,11 +314,6 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		return SessionState{}, fmt.Errorf("unknown agent %q", sessState.Agent)
 	}
 
-	if agent.NonInteractiveArgs == nil {
-		sm.mu.Unlock()
-		return SessionState{}, fmt.Errorf("agent %q has no non_interactive_args; refusing to start an agent that may prompt for permission", sessState.Agent)
-	}
-
 	sandboxed, err := sm.resolveSandbox(sessState.Agent)
 	if err != nil {
 		sm.mu.Unlock()
@@ -333,11 +328,6 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	if sessState.Mirror && !sandboxed {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("mirror session %q requires sandbox but sandbox is not enabled in current config; enable sandbox to resume", id)
-	}
-
-	if sessState.SystemKind == SystemKindOrchestrator && !sandboxed {
-		sm.mu.Unlock()
-		return SessionState{}, errors.New("orchestrator requires sandbox but sandbox is not available — install safehouse and enable sandbox in config")
 	}
 
 	if sessState.RepoPath != "" {
@@ -1040,6 +1030,10 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		"session_id", id, "summary", lifecycleSummary, "agent", sessAgent,
 		"pid", result.PID, "pgid", ptySess.Pgid(), "sandboxed", sandboxed,
 		"scrollback_path", logPath)
+
+	if !sandboxed {
+		sm.logUnsandboxedStart(id, result.Name, sessAgent)
+	}
 
 	sm.startWatcher(id, ptySess)
 	go sm.notifyUnreadInbox(id)

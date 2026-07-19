@@ -21,8 +21,9 @@ A session is always in one of these lifecycle states:
 
 Running sessions also have an **agent status** that reflects the agent's current
 activity (`active`, `ready`, or `error`, plus tool names from hook reports). An
-unexpected native permission prompt is a diagnosable `error`, never a workflow
-state. Agent status is separate from lifecycle state and is not persisted.
+agent waiting in its own permission TUI remains ordinarily `running`; Graith
+does not create an approval status or answer it. Agent status is separate from
+lifecycle state and is not persisted.
 
 ## Creation
 
@@ -36,8 +37,8 @@ Steps:
 2. **Branch** -- creates `<branch_prefix>/<session-name>-<session-id>` from the base branch (default: repo's default branch, override with `--base`)
 3. **Worktree** -- creates a git worktree at `<data_dir>/worktrees/<repo-name>/<repo-hash>/<session-id>/`
 4. **Environment** -- sets `GRAITH_SESSION_ID`, `GRAITH_SESSION_NAME`, `GRAITH_AGENT_TYPE`, `GRAITH_WORKTREE_PATH`, `GRAITH_REPO_PATH`, `GRAITH_TMPDIR`, `TMPDIR`
-5. **Sandbox** -- requires an available configured backend and wraps the command (`safehouse wrap` or `nono run --profile`); creation fails closed if enforcement cannot be established
-6. **Agent** -- starts the agent process with configured non-interactive arguments followed by `args`
+5. **Sandbox** -- when enabled, requires an available configured backend and wraps the command (`safehouse wrap` or `nono run --profile`); when explicitly disabled, starts with a warning
+6. **Agent** -- starts the agent process with optional `non_interactive_args` followed by `args`; clear the prefix to keep the agent's native approval TUI
 7. **Prompt** (if `--prompt` or `--prompt-file`) -- types the prompt into the agent's stdin after startup
 8. **Attach** (unless `--background`) -- enters passthrough mode
 
@@ -47,11 +48,11 @@ Steps:
 
 **In-place:** `gr new quick --in-place` runs the agent directly in the repo without creating a worktree. No branch is created. Use `--allow-concurrent` to permit multiple in-place sessions on the same repo.
 
-**Mirror:** `gr new observer --mirror my-session` creates a session that mounts another session's worktree read-only. Useful for observation or review. Like every session, it requires an enforceable sandbox.
+**Mirror:** `gr new observer --mirror my-session` creates a session that mounts another session's worktree read-only. Useful for observation or review. Mirror sessions specifically require Graith's enforceable sandbox because it provides the read-only guarantee.
 
 ### Headless sessions
 
-**Experimental.** `gr new watcher --headless -p "…"` runs the agent in Claude Code's stream-json mode instead of an interactive PTY. Headless sessions are **non-interactive**: they are meant for fire-and-forget work such as review judges and one-shot helpers. graith parses the typed event stream (so `gr logs -f` renders it and the run's cost/token usage is captured from the result envelope). v1 is Claude-only, one-shot (one prompt, run to completion, exit), requires a prompt, runs inside the same mandatory OS sandbox as PTY sessions, and implies `--background`; the whole path is inert unless `[headless] experimental = true` is set. A headless session is one-shot, so once it exits it cannot be resumed as headless. See [Configuration → Headless sessions]({{< relref "configuration/sessions.md#headless-sessions" >}}).
+**Experimental.** `gr new watcher --headless -p "…"` runs the agent in Claude Code's stream-json mode instead of an interactive PTY. Headless sessions are **non-interactive**: they are meant for fire-and-forget work such as review judges and one-shot helpers. graith parses the typed event stream (so `gr logs -f` renders it and the run's cost/token usage is captured from the result envelope). v1 is Claude-only, one-shot (one prompt, run to completion, exit), requires a prompt, uses the same optional Graith sandbox setting as PTY sessions, and implies `--background`; the whole path is inert unless `[headless] experimental = true` is set. A headless session is one-shot, so once it exits it cannot be resumed as headless. See [Configuration → Headless sessions]({{< relref "configuration/sessions.md#headless-sessions" >}}).
 
 Because there is no PTY to stream, `gr attach` on a headless session
 **converts it to interactive**: it stops the headless process and relaunches
@@ -64,7 +65,7 @@ pass `-y`/`--yes` to skip the prompt. To watch a headless session read-only
 **Interrupts and permission errors.** A headless session runs over Claude Code's
 stdin control protocol, so graith can cleanly `interrupt` an in-flight turn
 rather than firing terminal signals. Native tool-permission requests are denied
-immediately and reported as runtime configuration errors; no human-response
+immediately and mark the driver degraded because no native TUI or human-response
 channel exists. The optional synchronous `[command_policy]` applies the same
 additional shell restrictions as it does to PTY sessions.
 

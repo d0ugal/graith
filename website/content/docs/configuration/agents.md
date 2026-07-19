@@ -49,7 +49,7 @@ headless_args  = []             # argv prefix prepended in headless mode (see be
 Every agent-specific flag graith appends is defined here, so a custom agent can adopt (or drop) each pattern from config alone rather than waiting on a graith release:
 
 - **`add_dir_args`** — the flag template graith uses to grant the agent an extra directory (each [included repo](#includes)'s co-located worktree). It is expanded once per directory with `{dir}` bound to that path. Leave it unset for an agent whose CLI has no such flag; those agents rely on the `GRAITH_INCLUDE_*_PATH` environment variables instead.
-- **`non_interactive_args`** — required declaration prepended on every create, resume, and fork to disable the agent's native permission prompts. A missing value refuses launch; use an explicit empty array only for an agent that is inherently non-interactive. These flags do not grant OS access: the outer graith sandbox remains authoritative.
+- **`non_interactive_args`** — optional argv prepended on every create, resume, and fork. The bundled agents use it to disable native prompts for unattended operation. Set it to `[]` (or omit it on a custom agent) to keep the agent's native permission TUI; Graith treats time spent there as ordinary running state and never answers on the user's behalf. These flags are independent of `[sandbox]` and `[command_policy]`.
 - **`headless_args`** — the control-channel argv prefix graith prepends when launching the agent in [headless mode]({{< relref "sessions.md#headless-sessions" >}}); the agent's own args follow it. Claude's default is `["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose"]`.
 - **`option_args`** — conditional flag groups appended on every launch. Each group is emitted only when its `when` template variable is set, so an unset option leaves the agent's own default untouched (see [Conditional option flags](#conditional-option-flags)).
 
@@ -112,7 +112,7 @@ write_files = ["~/.claude.json", "~/.claude.json.lock", "~/.claude.lock"]  # log
 features   = ["clipboard"]
 ```
 
-Features, directories, and files (`read_files`/`write_files`, for single files that can't be a directory grant without over-sharing — e.g. Claude's `~/.claude.json` login file) are merged with the global sandbox config. Per-agent settings may choose a backend or add grants, but a merged configuration that disables enforcement refuses launch. See the [Sandbox]({{< relref "/docs/sandbox/how-it-works.md#file-grants" >}}) page for file grants.
+Features, directories, and files (`read_files`/`write_files`, for single files that can't be a directory grant without over-sharing — e.g. Claude's `~/.claude.json` login file) are merged with the global sandbox config. Per-agent settings may choose a backend, add grants, or explicitly disable Graith's sandbox for that agent. Disabled sessions start with a warning; `gr doctor` reports the missing Graith boundary. See the [Sandbox]({{< relref "/docs/sandbox/how-it-works.md#file-grants" >}}) page for file grants.
 
 ### Per-agent MCP overrides
 
@@ -247,8 +247,8 @@ resume_args = ["--session", "{agent_session_id}"]
 ```
 
 OpenCode's TUI uses `--auto` to approve requests that would otherwise ask.
-Explicit OpenCode deny rules still apply, followed by graith's mandatory OS
-sandbox.
+Explicit OpenCode deny rules still apply. Set `non_interactive_args = []` to
+keep its native prompt behavior instead.
 
 ### Cursor
 

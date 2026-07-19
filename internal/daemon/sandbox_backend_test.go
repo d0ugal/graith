@@ -50,55 +50,43 @@ func TestResolveSandboxRequiresBackend(t *testing.T) {
 	}
 }
 
-func TestResolveSandboxDisabledFailsClosed(t *testing.T) {
+func TestResolveSandboxDisabledIsAllowed(t *testing.T) {
 	cfg := config.Default()
 	cfg.Sandbox = config.SandboxConfig{Enabled: false}
-	cfg.Agents["canny"] = config.Agent{NonInteractiveArgs: []string{}, Command: "claude"}
+	cfg.Agents["canny"] = config.Agent{Command: "claude"}
 
 	sm := newSandboxTestManager(t, cfg)
 
 	ok, err := sm.resolveSandbox("canny")
-	if ok || err == nil {
-		t.Fatalf("disabled sandbox = (%v, %v), want (false, error)", ok, err)
-	}
-
-	if !strings.Contains(err.Error(), "required") {
-		t.Fatalf("error = %v, want mandatory-sandbox diagnostic", err)
+	if ok || err != nil {
+		t.Fatalf("disabled sandbox = (%v, %v), want (false, nil)", ok, err)
 	}
 }
 
-func TestCreateAndResumeRejectMissingSandboxEnforcement(t *testing.T) {
+func TestCreateAllowsDisabledSandboxAndNativePrompts(t *testing.T) {
 	cfg := config.Default()
 	cfg.Sandbox = config.SandboxConfig{Enabled: false}
 	cfg.Agents["canny"] = config.Agent{
-		Command: "true", NonInteractiveArgs: []string{}, Args: []string{}, ResumeArgs: []string{},
+		Command: "sleep", Args: []string{"60"}, ResumeArgs: []string{"60"},
 	}
 	sm := newSandboxTestManager(t, cfg)
 
-	_, err := sm.Create(CreateOpts{
+	sess, err := sm.Create(CreateOpts{
 		Name: "braw-create", AgentName: "canny", NoRepo: true, Rows: 24, Cols: 80,
 	})
-	if err == nil || !strings.Contains(err.Error(), "sandbox enforcement is required") {
-		t.Fatalf("Create error = %v, want mandatory-sandbox failure", err)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
 	}
 
-	if len(sm.state.Sessions) != 0 {
-		t.Fatalf("failed Create left reserved sessions: %+v", sm.state.Sessions)
+	if sess.Sandboxed {
+		t.Fatal("session with disabled sandbox reported sandboxed")
 	}
 
-	sm.state.Sessions["canny-resume"] = &SessionState{
-		ID: "canny-resume", Name: "canny-resume", Agent: "canny", Status: StatusStopped,
-		WorktreePath: t.TempDir(),
+	if sess.CreationCfg == nil || sess.CreationCfg.Agent.NonInteractiveArgs != nil {
+		t.Fatalf("creation config = %+v, want native prompt behavior preserved", sess.CreationCfg)
 	}
 
-	_, err = sm.Resume("canny-resume", 24, 80)
-	if err == nil || !strings.Contains(err.Error(), "sandbox enforcement is required") {
-		t.Fatalf("Resume error = %v, want mandatory-sandbox failure", err)
-	}
-
-	if got := sm.state.Sessions["canny-resume"].Status; got != StatusStopped {
-		t.Fatalf("failed Resume status = %q, want stopped", got)
-	}
+	stopAndClosePTY(sm, sess.ID)
 }
 
 func TestResolveSandboxUnknownBackend(t *testing.T) {

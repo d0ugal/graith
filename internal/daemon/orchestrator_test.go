@@ -498,9 +498,8 @@ func TestHandleOrchestratorExit_RestartConfig(t *testing.T) {
 // These tests cover the orchestrator lifecycle entry points that round 1 left
 // at 0%: createOrchestrator's two fail-closed early returns, ensureOrchestrator's
 // boot-time branch selection, and orchestratorSupervisor's dispatch/shutdown
-// loop. They pin the guards that keep the daemon from spawning an unsandboxed
-// orchestrator or churning on a misconfigured one, without needing a real
-// sandbox backend (unavailable in CI).
+// loop. They pin startup guards and rollback without needing a real sandbox
+// backend (unavailable in CI).
 
 // TestCreateOrchestratorAgentMissing_Cov2 asserts createOrchestrator fails
 // before touching any state when the configured orchestrator agent is not in
@@ -523,47 +522,43 @@ func TestCreateOrchestratorAgentMissing_Cov2(t *testing.T) {
 	}
 }
 
-// TestCreateOrchestratorRequiresSandbox_Cov2 asserts that when the agent exists
-// but the sandbox is not enabled/available, createOrchestrator fails closed
-// rather than starting an unsandboxed orchestrator.
-func TestCreateOrchestratorRequiresSandbox_Cov2(t *testing.T) {
+// TestCreateOrchestratorAllowsDisabledSandbox_Cov2 asserts that an explicitly
+// disabled Graith sandbox is not itself a startup failure. The test leaves the
+// orchestrator feature off so the next independent guard is deterministic.
+func TestCreateOrchestratorAllowsDisabledSandbox_Cov2(t *testing.T) {
 	sm := newOrchTestSM(t)
 
-	// Explicitly disabling the mandatory sandbox must fail before launch.
 	sm.mu.Lock()
 	sm.cfg = config.Default()
 	sm.cfg.Sandbox.Enabled = false
 	sm.mu.Unlock()
 
 	_, err := sm.createOrchestrator(context.Background())
-	if err == nil {
-		t.Fatal("expected error when sandbox is not available for orchestrator")
-	}
-
-	if !strings.Contains(err.Error(), "required") {
-		t.Fatalf("error = %q, want to mention sandbox requirement", err.Error())
+	if err == nil || !strings.Contains(err.Error(), "orchestrator is disabled") {
+		t.Fatalf("error = %v, want later orchestrator-disabled guard", err)
 	}
 
 	if id := sm.findOrchestratorID(); id != "" {
-		t.Fatalf("createOrchestrator must not persist a session when sandbox is unavailable, got %q", id)
+		t.Fatalf("disabled orchestrator persisted session %q", id)
 	}
 }
 
-func TestCreateOrchestratorRequiresNonInteractiveAgent(t *testing.T) {
+func TestCreateOrchestratorAllowsNativePromptAgent(t *testing.T) {
 	sm := newOrchTestSM(t)
 	cfg := config.Default()
 	agent := cfg.Agents["claude"]
 	agent.NonInteractiveArgs = nil
 	cfg.Agents["claude"] = agent
+	cfg.Sandbox.Enabled = false
 	sm.cfg = cfg
 
 	_, err := sm.createOrchestrator(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "no non_interactive_args") {
-		t.Fatalf("createOrchestrator error = %v, want non-interactive launch failure", err)
+	if err == nil || !strings.Contains(err.Error(), "orchestrator is disabled") {
+		t.Fatalf("createOrchestrator error = %v, want later orchestrator-disabled guard", err)
 	}
 
 	if id := sm.findOrchestratorID(); id != "" {
-		t.Fatalf("failed non-interactive validation persisted session %q", id)
+		t.Fatalf("disabled orchestrator persisted session %q", id)
 	}
 }
 

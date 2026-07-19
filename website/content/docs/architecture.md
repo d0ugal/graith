@@ -106,7 +106,7 @@ The daemon (`SessionManager`) is the central component:
 - **Worktree management:** creating, removing git worktrees and branches
 - **Client handling:** connection acceptance, frame demuxing, message dispatch
 - **Hook reporting:** tracking agent status from hook reports
-- **Command policy:** bounded synchronous shell checks that can only deny before sandbox enforcement
+- **Command policy:** bounded synchronous shell checks that can only deny before normal agent execution
 - **MCP management:** proxying MCP connections for sessions
 - **Git pull:** periodic background pulls (when enabled)
 - **Idle timeout:** automatic session stopping after inactivity

@@ -49,7 +49,7 @@ When an agent authenticates with a valid token, the daemon overrides identity fi
 
 ### The human token and the fail-closed default
 
-Local auth is **fail-closed**: a connection is treated as the human operator only if it presents a valid credential. On startup the daemon writes a **human token** to `human.token` in the data dir (mode `0600`, alongside `state.json`, and excluded from every agent sandbox), reusing it across restarts. A local connection resolves to the human role only when it presents either a valid session token or that human token; anything else is rejected rather than granted human access.
+Local auth is **fail-closed**: a connection is treated as the human operator only if it presents a valid credential. On startup the daemon writes a **human token** to `human.token` in the data dir (mode `0600`, alongside `state.json`, and excluded from each enabled Graith agent sandbox), reusing it across restarts. A local connection resolves to the human role only when it presents either a valid session token or that human token; anything else is rejected rather than granted human access.
 
 The `gr` CLI handles this transparently:
 
@@ -63,10 +63,12 @@ the daemon starts recovers without relaunching. Local access does not use device
 pairing. Pairing in the app applies only when **Add Host** connects to another
 daemon over the tailnet.
 
-This closes the token-stripping gap: an agent that unsets `GRAITH_TOKEN` cannot
-masquerade as the human because the mandatory sandbox excludes `human.token`
-and the data directory. Session creation fails if sandbox enforcement is off or
-unavailable.
+With Graith's sandbox enabled, an agent that unsets `GRAITH_TOKEN` cannot
+masquerade as the human because the sandbox excludes `human.token` and the data
+directory. If you disable Graith's sandbox, your agent-native controls, external
+sandbox, or VM must protect those files; protocol authentication cannot help
+after an agent reads the human token. The startup warning and `gr doctor` make
+that responsibility visible.
 
 ## Token lifecycle
 
@@ -87,9 +89,9 @@ Token auth and [sandbox]({{< relref "sandbox" >}}) are complementary:
 - **Token auth** prevents impersonation at the protocol level — an agent with a valid token can only act as itself or its descendants
 - **Sandbox** prevents filesystem access — a sandboxed agent cannot read `state.json` (which contains all tokens) or other sessions' worktrees
 
-Together they provide defense in depth. The sandbox is mandatory for every
-agent launch; token auth then narrows what that confined process may request
-from the daemon.
+Together they provide defense in depth when the sandbox is enabled. When it is
+disabled, token auth still narrows ordinary requests, but external isolation
+must prevent agents from reading other bearer tokens at rest.
 
 ## Health checks
 
@@ -104,10 +106,10 @@ $ gr doctor
 
 ## Limitations
 
-- **The sandbox is the boundary**: all sessions run as the same OS user, so graith refuses creation and resume unless the configured OS sandbox can be enforced. `gr doctor` diagnoses a missing or unavailable backend.
-- **No encryption at rest**: tokens are stored in plaintext in `state.json` and `human.token`. The mandatory sandbox prevents agent processes from reading these files.
+- **The sandbox is the recommended boundary**: all sessions run as the same OS user. When Graith's sandbox is enabled, creation and resume fail if its backend cannot enforce the configured policy. When explicitly disabled, Graith warns but cannot verify your external boundary.
+- **No encryption at rest**: tokens are stored in plaintext in `state.json` and `human.token`. An enabled Graith sandbox excludes these files; an external sandbox or VM must do so when Graith's sandbox is off.
 - **Local only**: the Unix socket is protected by filesystem permissions (user-only). Token auth does not protect against other OS users — it protects sessions from each other, and agents from the human role, within the same user.
-- **OS-enforced identity is future work**: kernel peer credentials or per-session sockets would add another boundary beyond the mandatory process sandbox; see `docs/design/2026-07-11-auth-identity-hardening.md`.
+- **OS-enforced identity is future work**: kernel peer credentials or per-session sockets would add another boundary beyond process isolation; see `docs/design/2026-07-11-auth-identity-hardening.md`.
 
 ## Environment variables
 

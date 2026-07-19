@@ -7,8 +7,8 @@ toc: true
 draft: false
 ---
 
-graith runs every agent process in an enforceable OS sandbox that restricts
-file access, environment, processes, signals, and — depending on backend — the network. There are
+graith can wrap agent processes in an enforceable OS sandbox that restricts
+file access, environment, processes, signals, and — depending on backend — the network. The sandbox is enabled by default but may be disabled when you deliberately rely on agent-native controls, an external sandbox, or a VM. There are
 two backends:
 
 | Backend | Platforms | Primitive |
@@ -23,11 +23,11 @@ sub-pages for [how it works]({{< relref "how-it-works.md" >}}),
 
 ## Why sandbox
 
-Graith starts supported agents with their native permission prompts disabled so
-they can run unattended. Those agent flags are not the security boundary: the
-outer OS sandbox confines the process regardless of what the agent believes it
-may do.
-The agent thinks it has full access; the kernel enforces boundaries. This also
+The bundled agent definitions disable their native permission prompts so they
+can run unattended. Clear `non_interactive_args` to use an agent's own approval
+TUI; Graith does not proxy or track those prompts. When enabled, Graith's OS
+sandbox confines the process regardless of what the agent believes it may do.
+The kernel enforces that boundary. This also
 isolates sessions from each other — without a sandbox, one agent can read
 graith's `state.json` and impersonate another session.
 
@@ -49,9 +49,11 @@ read_dirs  = ["~/Code"]
 write_dirs = []
 ```
 
-`enabled = false`, a per-agent `disabled = true`, or an empty backend does not
-start an unsandboxed agent; it makes session creation fail. There is no
-unsandboxed compatibility mode.
+`enabled = false` or a per-agent `disabled = true` starts the session without
+Graith's sandbox. Graith prints a one-time startup warning, logs the launch, and
+reports it in `gr doctor`; it cannot verify an external sandbox or VM. An empty,
+unsupported, or unavailable backend still fails closed whenever the merged
+sandbox is enabled.
 
 ## Setup
 
@@ -81,11 +83,12 @@ Seatbelt, which is always present. graith requires a minimum nono version and
 refuses to run below it (see `gr doctor`).
 
 The default configuration already enables `nono`. Install the selected backend
-before creating or resuming sessions.
+before creating or resuming sandboxed sessions.
 
 ## Command policy is subtractive
 
 The optional `[command_policy]` layer can synchronously deny shell commands
-before execution. An allow only continues to normal sandbox enforcement; it can
-never widen filesystem, process, signal, or network access. With no command
-policy configured, tools use everything the sandbox permits.
+before execution. It works whether Graith's sandbox is enabled or disabled. An
+allow only continues normal agent execution; it never grants a capability or
+bypasses an enabled Graith sandbox, agent-native policy, or external isolation.
+With no command policy configured, Graith adds no shell-command restriction.
