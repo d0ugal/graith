@@ -5,13 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/d0ugal/graith/internal/agent"
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
+	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/tools"
 	"github.com/d0ugal/graith/internal/version"
@@ -19,6 +22,7 @@ import (
 )
 
 type upgradeGuardContextKey struct{}
+type serviceBootstrapContextKey struct{}
 
 var (
 	cfgFile    string
@@ -54,11 +58,24 @@ var rootCmd = &cobra.Command{
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		commandPolicyStartupError = nil
 
+		if agentMode {
+			if err := os.Setenv("GR_AGENT_MODE", "1"); err != nil {
+				return fmt.Errorf("enable explicit agent mode: %w", err)
+			}
+		}
+
 		if err := rejectConfigInsideSession(cmd); err != nil {
 			return err
 		}
 
 		var err error
+
+		if cfgFile != "" {
+			cfgFile, err = canonicalConfigFile(cfgFile)
+			if err != nil {
+				return err
+			}
+		}
 
 		cfg, err = config.LoadOrDefault(cfgFile)
 		if err != nil {
@@ -83,6 +100,12 @@ var rootCmd = &cobra.Command{
 
 		if cfg.DataDir != "" && paths.DataDir != "" {
 			paths = paths.WithDataDir(cfg.DataDir)
+		}
+
+		if bootstrap, _ := cmd.Context().Value(serviceBootstrapContextKey{}).(*daemonservice.Bootstrap); bootstrap != nil {
+			if err := bootstrap.ValidateResolvedConfig(cfgFile, paths); err != nil {
+				return err
+			}
 		}
 
 		// Install the configured external-tool resolver so CLI-side git calls
@@ -141,11 +164,62 @@ var rootCmd = &cobra.Command{
 	},
 }
 
+func canonicalConfigFile(path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve config path: %w", err)
+	}
+
+	return filepath.Clean(absolute), nil
+}
+
 func Execute() error {
 	return executeWithArgs(os.Args[1:])
 }
 
 func executeWithArgs(args []string) (err error) {
+	previousAgentMode, hadAgentMode := os.LookupEnv("GR_AGENT_MODE")
+	defer func() {
+		if hadAgentMode {
+			_ = os.Setenv("GR_AGENT_MODE", previousAgentMode)
+		} else {
+			_ = os.Unsetenv("GR_AGENT_MODE")
+		}
+	}()
+
+	label, slot, serviceMarker, markerErr := serviceMarkerArgument(args)
+	if markerErr != nil {
+		out = output.New(false)
+		out.Error(markerErr)
+
+		return markerErr
+	}
+
+	var serviceBootstrap *daemonservice.Bootstrap
+
+	if serviceMarker && adoptFromArgument(args) == "" {
+		bootstrap, bootstrapErr := daemonservice.BootstrapFreshService(label, slot, time.Now())
+		if bootstrapErr != nil {
+			out = output.New(false)
+			out.Error(bootstrapErr)
+
+			return bootstrapErr
+		}
+
+		serviceBootstrap = &bootstrap
+		cfgFile = bootstrap.Request.ConfigFile
+
+		defer func() {
+			if err == nil {
+				return
+			}
+
+			if abortErr := bootstrap.Abort(); abortErr != nil {
+				err = errors.Join(err, fmt.Errorf("clear failed daemon service bootstrap: %w", abortErr))
+			}
+		}()
+	}
+
 	var upgradeGuard *daemon.UpgradeFailureGuard
 	if manifestPath := adoptFromArgument(args); manifestPath != "" {
 		upgradeGuard, err = daemon.ArmUpgradeFailureGuard(manifestPath)
@@ -170,14 +244,32 @@ func executeWithArgs(args []string) (err error) {
 				out.Error(wrapped)
 				err = errors.Join(err, wrapped)
 			}
+
+			// Exec preserves the PID, so a failure before daemon.Run installs its
+			// ordinary exit defer would otherwise leave the new generation marked
+			// as running in the managed-service receipt.
+			if markErr := daemonservice.MarkCurrentProcessStopped(upgradeGuard.Profile()); markErr != nil {
+				err = errors.Join(err, fmt.Errorf("clear failed managed upgrade marker: %w", markErr))
+			}
 		}()
+
+		if serviceMarker {
+			if _, validateErr := daemonservice.ValidateAdoptedService(label, slot, upgradeGuard.Profile(), os.Getpid()); validateErr != nil {
+				return validateErr
+			}
+		}
 	}
 
 	registerCommands()
+	applyServiceBootstrapConfig(serviceBootstrap)
 
 	rootCtx := context.Background()
 	if upgradeGuard != nil {
 		rootCtx = context.WithValue(rootCtx, upgradeGuardContextKey{}, upgradeGuard)
+	}
+
+	if serviceBootstrap != nil {
+		rootCtx = context.WithValue(rootCtx, serviceBootstrapContextKey{}, serviceBootstrap)
 	}
 
 	rootCmd.SetContext(rootCtx)
@@ -202,6 +294,70 @@ func executeWithArgs(args []string) (err error) {
 	}
 
 	return err
+}
+
+func applyServiceBootstrapConfig(serviceBootstrap *daemonservice.Bootstrap) {
+	// Persistent flag registration writes each flag's default into its target.
+	// The launchd bootstrap has already supplied the canonical config path, so
+	// restore it after registration when the static service argv has no
+	// --config flag of its own.
+	if serviceBootstrap != nil {
+		cfgFile = serviceBootstrap.Request.ConfigFile
+	}
+}
+
+// serviceMarkerArgument recognizes launchd's exact immutable marker before
+// Cobra or config/profile resolution. A partial, duplicate, or empty marker
+// fails closed instead of falling through to a manual daemon start.
+func serviceMarkerArgument(args []string) (label, slot string, present bool, err error) {
+	if len(args) < 2 || args[0] != "daemon" || args[1] != "start" {
+		return "", "", false, nil
+	}
+
+	for index := 2; index < len(args); index++ {
+		arg := args[index]
+		switch {
+		case strings.HasPrefix(arg, "--internal-service-label="):
+			if label != "" {
+				return "", "", true, errors.New("duplicate internal daemon service label")
+			}
+
+			label = strings.TrimPrefix(arg, "--internal-service-label=")
+		case arg == "--internal-service-label":
+			if label != "" || index+1 >= len(args) {
+				return "", "", true, errors.New("invalid internal daemon service label")
+			}
+
+			index++
+			label = args[index]
+		case strings.HasPrefix(arg, "--internal-service-slot="):
+			if slot != "" {
+				return "", "", true, errors.New("duplicate internal daemon service slot")
+			}
+
+			slot = strings.TrimPrefix(arg, "--internal-service-slot=")
+		case arg == "--internal-service-slot":
+			if slot != "" || index+1 >= len(args) {
+				return "", "", true, errors.New("invalid internal daemon service slot")
+			}
+
+			index++
+			slot = args[index]
+		}
+	}
+
+	present = label != "" || slot != ""
+	if present && (label == "" || slot == "") {
+		return "", "", true, errors.New("internal daemon service marker requires both label and slot")
+	}
+
+	if present {
+		if _, validateErr := daemonservice.ValidateMarker(label, slot); validateErr != nil {
+			return "", "", true, validateErr
+		}
+	}
+
+	return label, slot, present, nil
 }
 
 // adoptFromArgument recognizes the exact hidden replacement-daemon flag before

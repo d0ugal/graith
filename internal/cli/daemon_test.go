@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -10,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/version"
@@ -62,6 +65,123 @@ func TestDaemonStopMissingPIDFile(t *testing.T) {
 	err := daemonStopCmd.RunE(daemonStopCmd, nil)
 	if err == nil {
 		t.Fatalf("expected error stopping a daemon with no pid file")
+	}
+}
+
+func TestStopManagedServiceDaemonRequiresAuthenticatedSocketPath(t *testing.T) {
+	err := stopManagedServiceDaemon(daemonservice.ServiceReport{Label: "net.graith.service.daemon.profile.07", PID: 4242})
+	if err == nil || !strings.Contains(err.Error(), "without its recorded socket path") {
+		t.Fatalf("stopManagedServiceDaemon() = %v", err)
+	}
+}
+
+type fakeExistingDaemonConnection struct {
+	identity client.DaemonIdentity
+	err      error
+	closed   bool
+}
+
+func (connection *fakeExistingDaemonConnection) DaemonIdentity() (client.DaemonIdentity, error) {
+	return connection.identity, connection.err
+}
+
+func (connection *fakeExistingDaemonConnection) Close() { connection.closed = true }
+
+func TestStopManagedServiceDaemonUsesAuthenticatedIdentityAndWaitsForSocket(t *testing.T) {
+	originalConnect := connectExistingForCLI
+	originalStop := stopDaemonIdentityForCLI
+	originalWait := waitForDaemonSocketGoneForCLI
+
+	t.Cleanup(func() {
+		connectExistingForCLI = originalConnect
+		stopDaemonIdentityForCLI = originalStop
+		waitForDaemonSocketGoneForCLI = originalWait
+	})
+
+	connection := &fakeExistingDaemonConnection{identity: client.DaemonIdentity{PID: 4242, StartTime: 1473}}
+	connectExistingForCLI = func(*config.Config, config.Paths) (existingDaemonConnection, error) {
+		return connection, nil
+	}
+
+	stopDaemonIdentityForCLI = func(identity client.DaemonIdentity) error {
+		if identity != connection.identity {
+			t.Fatalf("stopped identity = %#v, want %#v", identity, connection.identity)
+		}
+
+		return nil
+	}
+
+	waitForDaemonSocketGoneForCLI = func(path string) bool {
+		if path != "/bothy/canny.sock" {
+			t.Fatalf("waited for socket %q", path)
+		}
+
+		return true
+	}
+
+	report := daemonservice.ServiceReport{
+		Label: "net.graith.service.daemon.profile.07", PID: 4242,
+		Paths: config.Paths{SocketPath: "/bothy/canny.sock"},
+	}
+	if err := stopManagedServiceDaemon(report); err != nil {
+		t.Fatal(err)
+	}
+
+	if !connection.closed {
+		t.Fatal("authenticated daemon connection was not closed before signalling")
+	}
+}
+
+func TestStopExistingDaemonDefersStaleSocketToStartupReconciliation(t *testing.T) {
+	originalPaths := paths
+	originalConnect := connectExistingForCLI
+	originalStop := stopDaemonIdentityForCLI
+
+	t.Cleanup(func() {
+		paths = originalPaths
+		connectExistingForCLI = originalConnect
+		stopDaemonIdentityForCLI = originalStop
+	})
+
+	paths.SocketPath = filepath.Join(t.TempDir(), "dreich.sock")
+	if err := os.WriteFile(paths.SocketPath, []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	connectExistingForCLI = func(*config.Config, config.Paths) (existingDaemonConnection, error) {
+		return nil, errors.New("not a graith socket")
+	}
+	stopDaemonIdentityForCLI = func(client.DaemonIdentity) error {
+		t.Fatal("stale socket caused a PID signal")
+		return nil
+	}
+
+	if err := stopExistingDaemon(); err != nil {
+		t.Fatalf("stopExistingDaemon() = %v, want startup to reconcile stale socket", err)
+	}
+}
+
+func TestStopExistingDaemonFailsClosedOnAuthenticatedHandshakeRejection(t *testing.T) {
+	originalPaths := paths
+	originalConnect := connectExistingForCLI
+
+	t.Cleanup(func() {
+		paths = originalPaths
+		connectExistingForCLI = originalConnect
+	})
+
+	paths.SocketPath = filepath.Join(t.TempDir(), "thrawn.sock")
+	if err := os.WriteFile(paths.SocketPath, []byte("occupied"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	connectExistingForCLI = func(*config.Config, config.Paths) (existingDaemonConnection, error) {
+		return nil, &client.ExistingDaemonHandshakeError{ResponseType: "handshake_err"}
+	}
+
+	err := stopExistingDaemon()
+	if err == nil || !strings.Contains(err.Error(), "authenticate daemon") {
+		t.Fatalf("stopExistingDaemon() = %v, want authenticated rejection to fail closed", err)
 	}
 }
 
@@ -127,11 +247,13 @@ func setupUpgradeTest(t *testing.T) *fakeConnClock {
 	origCfg, origNow, origSleep := cfg, connectionNow, connectionSleep
 	origDial, origProbe, origOut, origPaths := dialUpgradeClient, probeDaemonIdentityFn, out, paths
 	origProcessAlive := daemonProcessAlive
+	origPrepare, origStop := prepareDaemonCleanRestartForCLI, stopDaemonPIDForCLI
 
 	t.Cleanup(func() {
 		cfg, connectionNow, connectionSleep = origCfg, origNow, origSleep
 		dialUpgradeClient, probeDaemonIdentityFn, out, paths = origDial, origProbe, origOut, origPaths
 		daemonProcessAlive = origProcessAlive
+		prepareDaemonCleanRestartForCLI, stopDaemonPIDForCLI = origPrepare, origStop
 	})
 
 	cfg = &config.Config{Connection: config.ConnectionConfig{
@@ -140,6 +262,8 @@ func setupUpgradeTest(t *testing.T) *fakeConnClock {
 		StartPollInterval: "10ms",
 	}}
 	out = output.NewWithWriter(false, io.Discard)
+	prepareDaemonCleanRestartForCLI = func(context.Context, config.Paths) error { return nil }
+	stopDaemonPIDForCLI = func(int) error { return nil }
 
 	clk := &fakeConnClock{now: time.Unix(1_700_000, 0)}
 	connectionNow = clk.Now
@@ -306,6 +430,52 @@ func TestRestartPreserveCleanlyCrossesProtocolBoundary(t *testing.T) {
 
 	if len(fake.sent) != 0 {
 		t.Fatalf("sent %v to a protocol-1 daemon; the boundary crossing must send no preserve/upgrade request", fake.sent)
+	}
+}
+
+func TestRestartAfterProtocolBoundaryContinuesWhenPeerAlreadyExited(t *testing.T) {
+	setupUpgradeTest(t)
+
+	stopDaemonPIDForCLI = func(int) error { return errors.New("process already exited") }
+	daemonProcessAlive = func(pid int) bool {
+		if pid != 4242 {
+			t.Fatalf("checked PID %d, want authenticated peer", pid)
+		}
+
+		return false
+	}
+
+	started := false
+
+	if err := restartAfterProtocolBoundary(4242, func() error {
+		started = true
+		return nil
+	}); err != nil {
+		t.Fatalf("restartAfterProtocolBoundary() = %v", err)
+	}
+
+	if !started {
+		t.Fatal("already-exited protocol peer prevented clean start")
+	}
+}
+
+func TestRestartAfterProtocolBoundaryDoesNotStopBeforeManagedPreflight(t *testing.T) {
+	setupUpgradeTest(t)
+
+	prepareDaemonCleanRestartForCLI = func(context.Context, config.Paths) error {
+		return errors.New("agent-mode caller rejected")
+	}
+	stopDaemonPIDForCLI = func(int) error {
+		t.Fatal("daemon stopped before managed restart preflight")
+		return nil
+	}
+
+	err := restartAfterProtocolBoundary(4242, func() error {
+		t.Fatal("daemon started after failed managed restart preflight")
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "agent-mode caller rejected") {
+		t.Fatalf("restartAfterProtocolBoundary() = %v, want preflight rejection", err)
 	}
 }
 

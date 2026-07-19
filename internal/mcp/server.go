@@ -105,8 +105,8 @@ func (s *Server) Run(ctx context.Context) error {
 	return srv.Run(ctx, &gomcp.StdioTransport{})
 }
 
-func (s *Server) connect() (*client.Client, error) {
-	return client.ConnectPassive(s.cfg, s.paths, s.configFile)
+func (s *Server) connect(ctx context.Context) (*client.Client, error) {
+	return client.ConnectPassiveContext(ctx, s.cfg, s.paths, s.configFile)
 }
 
 // Tool input/output types
@@ -292,8 +292,8 @@ type TodoUpdateInput struct {
 
 // Tool handlers
 
-func (s *Server) listSessions(_ context.Context, _ *gomcp.CallToolRequest, _ ListSessionsInput) (*gomcp.CallToolResult, ListSessionsOutput, error) {
-	c, err := s.connect()
+func (s *Server) listSessions(ctx context.Context, _ *gomcp.CallToolRequest, _ ListSessionsInput) (*gomcp.CallToolResult, ListSessionsOutput, error) {
+	c, err := s.connect(ctx)
 	if err != nil {
 		return nil, ListSessionsOutput{}, fmt.Errorf("connect to daemon: %w", err)
 	}
@@ -325,8 +325,8 @@ func (s *Server) listSessions(_ context.Context, _ *gomcp.CallToolRequest, _ Lis
 	return nil, out, nil
 }
 
-func (s *Server) sessionStatus(_ context.Context, _ *gomcp.CallToolRequest, input SessionStatusInput) (*gomcp.CallToolResult, SessionInfoOutput, error) {
-	c, err := s.connect()
+func (s *Server) sessionStatus(ctx context.Context, _ *gomcp.CallToolRequest, input SessionStatusInput) (*gomcp.CallToolResult, SessionInfoOutput, error) {
+	c, err := s.connect(ctx)
 	if err != nil {
 		return nil, SessionInfoOutput{}, fmt.Errorf("connect to daemon: %w", err)
 	}
@@ -359,8 +359,8 @@ func (s *Server) sessionStatus(_ context.Context, _ *gomcp.CallToolRequest, inpu
 	return nil, SessionInfoOutput{}, fmt.Errorf("session %q not found", input.Session)
 }
 
-func (s *Server) createSession(_ context.Context, _ *gomcp.CallToolRequest, input CreateSessionInput) (*gomcp.CallToolResult, CreateSessionOutput, error) {
-	c, err := s.connect()
+func (s *Server) createSession(ctx context.Context, _ *gomcp.CallToolRequest, input CreateSessionInput) (*gomcp.CallToolResult, CreateSessionOutput, error) {
+	c, err := s.connect(ctx)
 	if err != nil {
 		return nil, CreateSessionOutput{}, fmt.Errorf("connect to daemon: %w", err)
 	}
@@ -409,8 +409,8 @@ func (s *Server) createSession(_ context.Context, _ *gomcp.CallToolRequest, inpu
 	}, nil
 }
 
-func (s *Server) publishMessage(_ context.Context, _ *gomcp.CallToolRequest, input PublishMessageInput) (*gomcp.CallToolResult, PublishMessageOutput, error) {
-	c, err := s.connect()
+func (s *Server) publishMessage(ctx context.Context, _ *gomcp.CallToolRequest, input PublishMessageInput) (*gomcp.CallToolResult, PublishMessageOutput, error) {
+	c, err := s.connect(ctx)
 	if err != nil {
 		return nil, PublishMessageOutput{}, fmt.Errorf("connect to daemon: %w", err)
 	}
@@ -457,7 +457,7 @@ func (s *Server) readMessages(ctx context.Context, _ *gomcp.CallToolRequest, inp
 		return nil, ReadMessagesOutput{}, errors.New("cannot read inbox streams via read_messages — use the read_inbox tool instead")
 	}
 
-	c, err := s.connect()
+	c, err := s.connect(ctx)
 	if err != nil {
 		return nil, ReadMessagesOutput{}, fmt.Errorf("connect to daemon: %w", err)
 	}
@@ -527,7 +527,7 @@ func (s *Server) subscribe(ctx context.Context, _ *gomcp.CallToolRequest, input 
 		return nil, SubscribeOutput{}, errors.New("cannot subscribe to inbox streams — use the read_inbox tool instead")
 	}
 
-	c, err := s.connect()
+	c, err := s.connect(ctx)
 	if err != nil {
 		return nil, SubscribeOutput{}, fmt.Errorf("connect to daemon: %w", err)
 	}
@@ -588,8 +588,8 @@ func (s *Server) subscribe(ctx context.Context, _ *gomcp.CallToolRequest, input 
 	}
 }
 
-func (s *Server) readInbox(_ context.Context, _ *gomcp.CallToolRequest, input ReadInboxInput) (*gomcp.CallToolResult, ReadMessagesOutput, error) {
-	c, err := s.connect()
+func (s *Server) readInbox(ctx context.Context, _ *gomcp.CallToolRequest, input ReadInboxInput) (*gomcp.CallToolResult, ReadMessagesOutput, error) {
+	c, err := s.connect(ctx)
 	if err != nil {
 		return nil, ReadMessagesOutput{}, fmt.Errorf("connect to daemon: %w", err)
 	}
@@ -638,8 +638,8 @@ func (s *Server) readInbox(_ context.Context, _ *gomcp.CallToolRequest, input Re
 	}
 }
 
-func (s *Server) todoList(_ context.Context, _ *gomcp.CallToolRequest, input TodoListInput) (*gomcp.CallToolResult, TodoListOutput, error) {
-	c, err := s.connect()
+func (s *Server) todoList(ctx context.Context, _ *gomcp.CallToolRequest, input TodoListInput) (*gomcp.CallToolResult, TodoListOutput, error) {
+	c, err := s.connect(ctx)
 	if err != nil {
 		return nil, TodoListOutput{}, fmt.Errorf("connect to daemon: %w", err)
 	}
@@ -675,8 +675,8 @@ func (s *Server) todoList(_ context.Context, _ *gomcp.CallToolRequest, input Tod
 	return nil, out, nil
 }
 
-func (s *Server) todoAdd(_ context.Context, _ *gomcp.CallToolRequest, input TodoAddInput) (*gomcp.CallToolResult, TodoItemOutput, error) {
-	c, err := s.connect()
+func (s *Server) todoAdd(ctx context.Context, _ *gomcp.CallToolRequest, input TodoAddInput) (*gomcp.CallToolResult, TodoItemOutput, error) {
+	c, err := s.connect(ctx)
 	if err != nil {
 		return nil, TodoItemOutput{}, fmt.Errorf("connect to daemon: %w", err)
 	}
@@ -696,8 +696,8 @@ func (s *Server) todoAdd(_ context.Context, _ *gomcp.CallToolRequest, input Todo
 	return s.readTodoItem(c)
 }
 
-func (s *Server) todoClaim(_ context.Context, _ *gomcp.CallToolRequest, input TodoClaimInput) (*gomcp.CallToolResult, TodoClaimOutput, error) {
-	c, err := s.connect()
+func (s *Server) todoClaim(ctx context.Context, _ *gomcp.CallToolRequest, input TodoClaimInput) (*gomcp.CallToolResult, TodoClaimOutput, error) {
+	c, err := s.connect(ctx)
 	if err != nil {
 		return nil, TodoClaimOutput{}, fmt.Errorf("connect to daemon: %w", err)
 	}
@@ -727,20 +727,20 @@ func (s *Server) todoClaim(_ context.Context, _ *gomcp.CallToolRequest, input To
 	return nil, TodoClaimOutput{Claimed: claim.Claimed, Item: todoItemToOutput(claim.Item)}, nil
 }
 
-func (s *Server) todoDone(_ context.Context, _ *gomcp.CallToolRequest, input TodoDoneInput) (*gomcp.CallToolResult, TodoItemOutput, error) {
-	return s.todoTransition(input.ID, "done", "")
+func (s *Server) todoDone(ctx context.Context, _ *gomcp.CallToolRequest, input TodoDoneInput) (*gomcp.CallToolResult, TodoItemOutput, error) {
+	return s.todoTransition(ctx, input.ID, "done", "")
 }
 
-func (s *Server) todoBlock(_ context.Context, _ *gomcp.CallToolRequest, input TodoBlockInput) (*gomcp.CallToolResult, TodoItemOutput, error) {
-	return s.todoTransition(input.ID, "blocked", input.Note)
+func (s *Server) todoBlock(ctx context.Context, _ *gomcp.CallToolRequest, input TodoBlockInput) (*gomcp.CallToolResult, TodoItemOutput, error) {
+	return s.todoTransition(ctx, input.ID, "blocked", input.Note)
 }
 
-func (s *Server) todoReopen(_ context.Context, _ *gomcp.CallToolRequest, input TodoReopenInput) (*gomcp.CallToolResult, TodoItemOutput, error) {
-	return s.todoTransition(input.ID, "todo", "")
+func (s *Server) todoReopen(ctx context.Context, _ *gomcp.CallToolRequest, input TodoReopenInput) (*gomcp.CallToolResult, TodoItemOutput, error) {
+	return s.todoTransition(ctx, input.ID, "todo", "")
 }
 
-func (s *Server) todoUpdate(_ context.Context, _ *gomcp.CallToolRequest, input TodoUpdateInput) (*gomcp.CallToolResult, TodoItemOutput, error) {
-	c, err := s.connect()
+func (s *Server) todoUpdate(ctx context.Context, _ *gomcp.CallToolRequest, input TodoUpdateInput) (*gomcp.CallToolResult, TodoItemOutput, error) {
+	c, err := s.connect(ctx)
 	if err != nil {
 		return nil, TodoItemOutput{}, fmt.Errorf("connect to daemon: %w", err)
 	}
@@ -764,8 +764,8 @@ func (s *Server) todoUpdate(_ context.Context, _ *gomcp.CallToolRequest, input T
 	return s.readTodoItem(c)
 }
 
-func (s *Server) todoTransition(id, status, note string) (*gomcp.CallToolResult, TodoItemOutput, error) {
-	c, err := s.connect()
+func (s *Server) todoTransition(ctx context.Context, id, status, note string) (*gomcp.CallToolResult, TodoItemOutput, error) {
+	c, err := s.connect(ctx)
 	if err != nil {
 		return nil, TodoItemOutput{}, fmt.Errorf("connect to daemon: %w", err)
 	}

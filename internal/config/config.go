@@ -24,49 +24,50 @@ import (
 var defaultConfigTOML []byte
 
 type Config struct {
-	DefaultAgent     string             `toml:"default_agent"`
-	GitHubUsername   string             `toml:"github_username"`
-	BranchPrefix     string             `toml:"branch_prefix"`
-	DataDir          string             `toml:"data_dir"`
-	FetchOnCreate    bool               `toml:"fetch_on_create"`
-	AgentPrompt      string             `toml:"agent_prompt"`
-	AllowedRepoPaths []string           `toml:"allowed_repo_paths"`
-	Repos            []RepoConfig       `toml:"repos"`
-	StatusBar        StatusBar          `toml:"status_bar"`
-	Keybindings      Keybindings        `toml:"keybindings"`
-	Notifications    Notifications      `toml:"notifications"`
-	Messages         Messages           `toml:"messages"`
-	Delete           Delete             `toml:"delete"`
-	GC               GCConfig           `toml:"gc"`
-	Todo             TodoConfig         `toml:"todo"`
-	Sandbox          SandboxConfig      `toml:"sandbox"`
-	CommandPolicy    CommandPolicy      `toml:"command_policy"`
-	Status           StatusConfig       `toml:"status"`
-	GitPull          GitPullConfig      `toml:"git_pull"`
-	Launch           LaunchConfig       `toml:"launch"`
-	PRWatch          PRWatchConfig      `toml:"pr_watch"`
-	MCPServers       []MCPServerConfig  `toml:"mcp_servers"`
-	Overlay          Overlay            `toml:"overlay"`
-	Orchestrator     OrchestratorConfig `toml:"orchestrator"`
-	Remote           RemoteConfig       `toml:"remote"`
-	Input            InputConfig        `toml:"input"`
-	Agents           map[string]Agent   `toml:"agents"`
-	Triggers         []TriggerConfig    `toml:"trigger"`          // [[trigger]] array
-	TriggersRuntime  TriggersRuntime    `toml:"triggers"`         // [triggers] table (daemon-wide settings)
-	Headless         HeadlessConfig     `toml:"headless"`         // [headless] table (issue #1075)
-	Updates          UpdatesConfig      `toml:"updates"`          // [updates] table (issue #1253)
-	Detection        DetectionConfig    `toml:"detection"`        // [detection] table (issue #1241)
-	ConfigReload     ConfigReload       `toml:"config"`           // [config] table (issue #1237)
-	Tools            ToolsConfig        `toml:"tools"`            // [tools] table (issue #1238)
-	Git              GitConfig          `toml:"git"`              // [git] table (issue #1238)
-	Connection       ConnectionConfig   `toml:"connection"`       // [connection] table (issue #1242)
-	TokenAccounting  TokenAccounting    `toml:"token_accounting"` // [token_accounting] table (issue #1244)
-	ResourceMonitor  ResourceMonitor    `toml:"resource_monitor"` // [resource_monitor] table (issue #1244)
-	Migration        MigrationConfig    `toml:"migration"`        // [migration] table (issue #1250)
-	Transcript       TranscriptConfig   `toml:"transcript"`       // [transcript] table (issue #1250)
-	Limits           LimitsConfig       `toml:"limits"`           // [limits] table (issue #1252)
-	Lifecycle        LifecycleConfig    `toml:"lifecycle"`        // [lifecycle] table (issue #1243)
-	Terminal         TerminalConfig     `toml:"terminal"`         // [terminal] table (issue #1254)
+	DefaultAgent     string              `toml:"default_agent"`
+	GitHubUsername   string              `toml:"github_username"`
+	BranchPrefix     string              `toml:"branch_prefix"`
+	DataDir          string              `toml:"data_dir"`
+	FetchOnCreate    bool                `toml:"fetch_on_create"`
+	AgentPrompt      string              `toml:"agent_prompt"`
+	AllowedRepoPaths []string            `toml:"allowed_repo_paths"`
+	Repos            []RepoConfig        `toml:"repos"`
+	StatusBar        StatusBar           `toml:"status_bar"`
+	Keybindings      Keybindings         `toml:"keybindings"`
+	Notifications    Notifications       `toml:"notifications"`
+	Messages         Messages            `toml:"messages"`
+	Delete           Delete              `toml:"delete"`
+	GC               GCConfig            `toml:"gc"`
+	Todo             TodoConfig          `toml:"todo"`
+	Sandbox          SandboxConfig       `toml:"sandbox"`
+	CommandPolicy    CommandPolicy       `toml:"command_policy"`
+	Status           StatusConfig        `toml:"status"`
+	GitPull          GitPullConfig       `toml:"git_pull"`
+	Launch           LaunchConfig        `toml:"launch"`
+	PRWatch          PRWatchConfig       `toml:"pr_watch"`
+	MCPServers       []MCPServerConfig   `toml:"mcp_servers"`
+	Overlay          Overlay             `toml:"overlay"`
+	Orchestrator     OrchestratorConfig  `toml:"orchestrator"`
+	Remote           RemoteConfig        `toml:"remote"`
+	Input            InputConfig         `toml:"input"`
+	Agents           map[string]Agent    `toml:"agents"`
+	Triggers         []TriggerConfig     `toml:"trigger"`          // [[trigger]] array
+	TriggersRuntime  TriggersRuntime     `toml:"triggers"`         // [triggers] table (daemon-wide settings)
+	Headless         HeadlessConfig      `toml:"headless"`         // [headless] table (issue #1075)
+	Updates          UpdatesConfig       `toml:"updates"`          // [updates] table (issue #1253)
+	Detection        DetectionConfig     `toml:"detection"`        // [detection] table (issue #1241)
+	ConfigReload     ConfigReload        `toml:"config"`           // [config] table (issue #1237)
+	Tools            ToolsConfig         `toml:"tools"`            // [tools] table (issue #1238)
+	Git              GitConfig           `toml:"git"`              // [git] table (issue #1238)
+	Connection       ConnectionConfig    `toml:"connection"`       // [connection] table (issue #1242)
+	DaemonService    DaemonServiceConfig `toml:"daemon_service"`   // [daemon_service] table (issue #1473)
+	TokenAccounting  TokenAccounting     `toml:"token_accounting"` // [token_accounting] table (issue #1244)
+	ResourceMonitor  ResourceMonitor     `toml:"resource_monitor"` // [resource_monitor] table (issue #1244)
+	Migration        MigrationConfig     `toml:"migration"`        // [migration] table (issue #1250)
+	Transcript       TranscriptConfig    `toml:"transcript"`       // [transcript] table (issue #1250)
+	Limits           LimitsConfig        `toml:"limits"`           // [limits] table (issue #1252)
+	Lifecycle        LifecycleConfig     `toml:"lifecycle"`        // [lifecycle] table (issue #1243)
+	Terminal         TerminalConfig      `toml:"terminal"`         // [terminal] table (issue #1254)
 
 	// Warnings collects non-fatal configuration problems detected at load time
 	// (e.g. conflicting keybindings). They are surfaced to the user but do not
@@ -314,6 +315,77 @@ type ConnectionConfig struct {
 	// approve `gr remote pairings approve`, and should sit just past the daemon's
 	// pending-pairing TTL (default "11m").
 	RemotePairingTimeout string `toml:"remote_pairing_timeout"`
+}
+
+// DaemonServiceConfig controls the deliberately small environment projection
+// used by the app-associated daemon on supported macOS packages. Direct-spawn
+// platforms keep their existing full inherited environment.
+type DaemonServiceConfig struct {
+	// InheritEnv names additional caller variables to include in the one-shot
+	// startup request. Values are never retained in the durable service receipt.
+	InheritEnv []string `toml:"inherit_env"`
+}
+
+// Validate rejects names that could change service identity, profile routing,
+// loader behavior, or launch-services behavior. The launcher validates values
+// separately because it is the boundary that knows the calling environment.
+func (d DaemonServiceConfig) Validate() error {
+	seen := make(map[string]struct{}, len(d.InheritEnv))
+
+	for _, name := range d.InheritEnv {
+		if !validEnvironmentName(name) {
+			return fmt.Errorf("daemon_service.inherit_env contains invalid environment name %q", name)
+		}
+
+		if DaemonServiceEnvironmentReserved(name) {
+			return fmt.Errorf("daemon_service.inherit_env cannot include reserved variable %q", name)
+		}
+
+		if _, exists := seen[name]; exists {
+			return fmt.Errorf("daemon_service.inherit_env contains duplicate variable %q", name)
+		}
+
+		seen[name] = struct{}{}
+	}
+
+	return nil
+}
+
+func validEnvironmentName(name string) bool {
+	if name == "" || !validEnvironmentNameStart(name[0]) {
+		return false
+	}
+
+	for i := 1; i < len(name); i++ {
+		if !validEnvironmentNameContinue(name[i]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func validEnvironmentNameStart(ch byte) bool {
+	return ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z' || ch == '_'
+}
+
+func validEnvironmentNameContinue(ch byte) bool {
+	return validEnvironmentNameStart(ch) || ch >= '0' && ch <= '9'
+}
+
+// DaemonServiceEnvironmentReserved reports whether a variable can alter the
+// managed daemon's identity, routing, loader, or launch-services boundary.
+func DaemonServiceEnvironmentReserved(name string) bool {
+	switch name {
+	case "HOME", "USER", "LOGNAME", "GRAITH_PROFILE":
+		return true
+	}
+
+	return strings.HasPrefix(name, "GRAITH_") ||
+		strings.HasPrefix(name, "DYLD_") ||
+		strings.HasPrefix(name, "LD_") ||
+		strings.HasPrefix(name, "XPC_") ||
+		strings.HasPrefix(name, "__CF")
 }
 
 // Connection timing defaults. Each mirrors the fixed value that governed the
@@ -3874,6 +3946,10 @@ func (c *Config) Validate() error {
 	}
 
 	if err := c.Notifications.Validate(); err != nil {
+		errs = append(errs, err)
+	}
+
+	if err := c.DaemonService.Validate(); err != nil {
 		errs = append(errs, err)
 	}
 

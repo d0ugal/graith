@@ -12,7 +12,22 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemonservice"
 )
+
+func TestServiceBootstrapConfigSurvivesFlagRegistration(t *testing.T) {
+	original := cfgFile
+
+	t.Cleanup(func() { cfgFile = original })
+
+	cfgFile = ""
+
+	applyServiceBootstrapConfig(&daemonservice.Bootstrap{Request: daemonservice.StartupRequest{ConfigFile: "/bothy/graith.toml"}})
+
+	if cfgFile != "/bothy/graith.toml" {
+		t.Fatalf("bootstrap config = %q, want canonical request config", cfgFile)
+	}
+}
 
 func TestExecuteJSONErrorFormat(t *testing.T) {
 	origOut := out
@@ -211,6 +226,23 @@ func TestConfigFlagBlockedWhenSetEmpty(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "not allowed inside a graith session") {
 		t.Errorf("unexpected error message: %s", err.Error())
+	}
+}
+
+func TestCanonicalConfigFileMakesRelativePathLaunchdStable(t *testing.T) {
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := canonicalConfigFile(filepath.Join("bothy", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := filepath.Join(dir, "bothy", "config.toml")
+	if got != want || !filepath.IsAbs(got) {
+		t.Fatalf("canonicalConfigFile() = %q, want %q", got, want)
 	}
 }
 

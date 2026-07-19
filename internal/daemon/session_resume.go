@@ -807,7 +807,13 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 			envKeys = append(envKeys, k)
 		}
 
-		opts := sm.sandboxOptsFromConfig(merged, id, ptyCWD, agent.Command, envKeys, hookFilesNeeded || sessMCPEnabled)
+		opts, err := sm.sandboxOptsFromConfig(merged, id, ptyCWD, agent.Command, envKeys, hookFilesNeeded || sessMCPEnabled)
+		if err != nil {
+			rollbackState()
+
+			return SessionState{}, fmt.Errorf("configure sandbox: %w", err)
+		}
+
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
@@ -838,6 +844,12 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 			}
 
 			opts.WorktreeDir = scratchDir
+		}
+
+		if err := sm.validateAutomaticSandboxGrants(opts, merged); err != nil {
+			rollbackState()
+
+			return SessionState{}, fmt.Errorf("validate sandbox grants: %w", err)
 		}
 
 		var wrapErr error

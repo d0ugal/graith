@@ -54,7 +54,25 @@ func WorktreeGitDirs(worktreePath string) (gitDir, commonDir string, err error) 
 		return "", "", fmt.Errorf("resolve git common dir: %w", err)
 	}
 
+	gitDir, err = absoluteGitMetadataPath(worktreePath, gitDir)
+	if err != nil {
+		return "", "", fmt.Errorf("make git dir absolute: %w", err)
+	}
+
+	commonDir, err = absoluteGitMetadataPath(worktreePath, commonDir)
+	if err != nil {
+		return "", "", fmt.Errorf("make git common dir absolute: %w", err)
+	}
+
 	return gitDir, commonDir, nil
+}
+
+func absoluteGitMetadataPath(worktreePath, metadataPath string) (string, error) {
+	if !filepath.IsAbs(metadataPath) {
+		metadataPath = filepath.Join(worktreePath, metadataPath)
+	}
+
+	return filepath.Abs(metadataPath)
 }
 
 func DiscoverDefaultBranchOrHEAD(repoPath string) (string, error) {

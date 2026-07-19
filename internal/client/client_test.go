@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/version"
 	"golang.org/x/sys/unix"
 )
 
@@ -750,5 +752,254 @@ func TestFetchConversation_ErrorWhenDaemonUnreachable(t *testing.T) {
 
 	if msgs != nil {
 		t.Errorf("FetchConversation should return nil messages on error, got %+v", msgs)
+	}
+}
+
+func TestUpgradeMessageUsesResolvedManagedCandidate(t *testing.T) {
+	originalResolver := resolveUpgradeCandidateForClient
+	originalVersion := version.Version
+	originalCommit := version.CommitSHA
+
+	t.Cleanup(func() {
+		resolveUpgradeCandidateForClient = originalResolver
+		version.Version = originalVersion
+		version.CommitSHA = originalCommit
+	})
+
+	version.Version = "2.0.0"
+	version.CommitSHA = "canny"
+	wantPath := "/bothy/Graith.app/Contents/MacOS/gr"
+
+	resolveUpgradeCandidateForClient = func(_ context.Context, currentPath, gotVersion, gotCommit string, uid int) (string, bool, error) {
+		if currentPath == "" || gotVersion != version.Version || gotCommit != version.CommitSHA || uid != os.Getuid() {
+			t.Fatalf("resolver inputs = (%q, %q, %q, %d)", currentPath, gotVersion, gotCommit, uid)
+		}
+
+		return wantPath, true, nil
+	}
+
+	msg, managed, err := upgradeMessageForClient(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if msg.ExecPath != wantPath || msg.ClientVersion != version.Version || !managed {
+		t.Fatalf("upgrade message = %#v, managed = %t", msg, managed)
+	}
+}
+
+func TestRequestUpgradeReportsDaemonOutcomes(t *testing.T) {
+	originalResolver := resolveUpgradeCandidateForClient
+
+	t.Cleanup(func() { resolveUpgradeCandidateForClient = originalResolver })
+
+	const wantPath = "/bothy/Graith.app/Contents/MacOS/gr"
+
+	resolveUpgradeCandidateForClient = func(context.Context, string, string, string, int) (string, bool, error) {
+		return wantPath, true, nil
+	}
+
+	tests := []struct {
+		name          string
+		responseType  string
+		response      any
+		drop          bool
+		wantRequested bool
+		wantError     string
+	}{
+		{name: "accepted", responseType: "upgrading", response: struct{}{}, wantRequested: true},
+		{name: "connection drop after exec", drop: true, wantRequested: true},
+		{name: "rejected", responseType: "error", response: protocol.ErrorMsg{Message: "thrawn candidate"}, wantError: "thrawn candidate"},
+		{name: "empty rejection", responseType: "error", response: protocol.ErrorMsg{}, wantError: "daemon rejected exec upgrade"},
+		{name: "unexpected response", responseType: "blether", response: struct{}{}, wantError: `unexpected daemon upgrade response "blether"`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			c, serverConn := setupTestClient(t)
+			serverErr := make(chan error, 1)
+
+			go func() {
+				reader := protocol.NewFrameReader(serverConn)
+
+				frame, err := reader.ReadFrame()
+				if err != nil {
+					serverErr <- err
+
+					return
+				}
+
+				envelope, err := protocol.DecodeControl(frame.Payload)
+				if err != nil {
+					serverErr <- err
+
+					return
+				}
+
+				if envelope.Type != "upgrade" {
+					serverErr <- errors.New("client sent a non-upgrade request")
+
+					return
+				}
+
+				var msg protocol.UpgradeMsg
+				if err := protocol.DecodePayload(envelope, &msg); err != nil {
+					serverErr <- err
+
+					return
+				}
+
+				if msg.ExecPath != wantPath || msg.ClientVersion != version.Version {
+					serverErr <- errors.New("client sent the wrong upgrade identity")
+
+					return
+				}
+
+				if test.drop {
+					serverErr <- serverConn.Close()
+
+					return
+				}
+
+				data, err := protocol.EncodeControl(test.responseType, test.response)
+				if err == nil {
+					err = protocol.NewFrameWriter(serverConn).WriteFrame(protocol.ChannelControl, data)
+				}
+
+				serverErr <- err
+			}()
+
+			requested, managed, err := requestUpgrade(context.Background(), c)
+			if requested != test.wantRequested || !managed {
+				t.Fatalf("requestUpgrade() = (requested %t, managed %t), want (%t, true)", requested, managed, test.wantRequested)
+			}
+
+			if test.wantError == "" && err != nil {
+				t.Fatalf("requestUpgrade() error = %v", err)
+			}
+
+			if test.wantError != "" && (err == nil || !strings.Contains(err.Error(), test.wantError)) {
+				t.Fatalf("requestUpgrade() error = %v, want %q", err, test.wantError)
+			}
+
+			if err := <-serverErr; err != nil {
+				t.Fatalf("daemon side: %v", err)
+			}
+		})
+	}
+}
+
+func TestRequestUpgradeRejectsCandidateResolutionFailure(t *testing.T) {
+	originalResolver := resolveUpgradeCandidateForClient
+
+	t.Cleanup(func() { resolveUpgradeCandidateForClient = originalResolver })
+
+	resolveUpgradeCandidateForClient = func(context.Context, string, string, string, int) (string, bool, error) {
+		return "", true, errors.New("dreich cache")
+	}
+
+	c, _ := setupTestClient(t)
+
+	requested, managed, err := requestUpgrade(context.Background(), c)
+	if requested || managed || err == nil || !strings.Contains(err.Error(), "dreich cache") {
+		t.Fatalf("requestUpgrade() = (%t, %t, %v)", requested, managed, err)
+	}
+}
+
+func TestConnectExistingHandshakeLifecycle(t *testing.T) {
+	originalDial := dialLocalDaemon
+
+	t.Cleanup(func() { dialLocalDaemon = originalDial })
+
+	tests := []struct {
+		name         string
+		responseType string
+		drop         bool
+		wantError    string
+	}{
+		{name: "connected", responseType: "handshake_ok"},
+		{name: "rejected", responseType: "error", wantError: "handshake rejected"},
+		{name: "daemon drops handshake", drop: true, wantError: "EOF"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clientConn, serverConn := net.Pipe()
+
+			t.Cleanup(func() {
+				_ = clientConn.Close()
+				_ = serverConn.Close()
+			})
+
+			dialLocalDaemon = func(network, address string, timeout time.Duration) (net.Conn, error) {
+				if network != "unix" || address != "/bothy/daemon.sock" || timeout != daemonDialTimeout {
+					t.Fatalf("dial = (%q, %q, %v)", network, address, timeout)
+				}
+
+				return clientConn, nil
+			}
+
+			serverErr := make(chan error, 1)
+
+			go func() {
+				frame, err := protocol.NewFrameReader(serverConn).ReadFrame()
+				if err != nil {
+					serverErr <- err
+
+					return
+				}
+
+				envelope, err := protocol.DecodeControl(frame.Payload)
+				if err != nil || envelope.Type != "handshake" {
+					if err == nil {
+						err = errors.New("client sent a non-handshake request")
+					}
+
+					serverErr <- err
+
+					return
+				}
+
+				if test.drop {
+					serverErr <- serverConn.Close()
+
+					return
+				}
+
+				data, err := protocol.EncodeControl(test.responseType, struct{}{})
+				if err == nil {
+					err = protocol.NewFrameWriter(serverConn).WriteFrame(protocol.ChannelControl, data)
+				}
+
+				serverErr <- err
+			}()
+
+			c, err := ConnectExisting(config.Default(), config.Paths{SocketPath: "/bothy/daemon.sock"})
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatalf("ConnectExisting() error = %v", err)
+				}
+
+				if c == nil {
+					t.Fatal("ConnectExisting() returned a nil client")
+				}
+
+				c.Close()
+			} else if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("ConnectExisting() error = %v, want %q", err, test.wantError)
+			}
+
+			if err := <-serverErr; err != nil {
+				t.Fatalf("daemon side: %v", err)
+			}
+		})
+	}
+
+	dialLocalDaemon = func(string, string, time.Duration) (net.Conn, error) {
+		return nil, errors.New("canny socket")
+	}
+
+	if _, err := ConnectExisting(config.Default(), config.Paths{SocketPath: "/bothy/daemon.sock"}); err == nil || !strings.Contains(err.Error(), "canny socket") {
+		t.Fatalf("dial error = %v", err)
 	}
 }

@@ -9,12 +9,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/d0ugal/graith/internal/agent/transcript"
 	"github.com/d0ugal/graith/internal/commandpolicy"
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/tools"
@@ -32,6 +34,14 @@ var reloadLimitsPublishedHook func()
 // orchestrator generation and releases sm.mu. It is a test-only seam for
 // deterministic reserve/act/commit interleavings.
 var orchestratorDisableSnapshotHook func()
+
+var protectedDaemonServiceControlRoot = func() (string, error) {
+	if runtime.GOOS != "darwin" || !daemonservice.IsManagedBuild() {
+		return "", nil
+	}
+
+	return daemonservice.ReceiptRoot(os.Geteuid())
+}
 
 type orchestratorRuntimeSnapshot struct {
 	id              string
@@ -801,7 +811,7 @@ func (sm *SessionManager) safehouseFragmentPath(sessionID string) string {
 	return filepath.Join(sm.paths.RuntimeDir, "safehouse", sessionID+".sb")
 }
 
-func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, sessionID, worktreePath, agentCommand string, envKeys []string, grantHookDir bool) sandbox.WrapOpts {
+func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, sessionID, worktreePath, agentCommand string, envKeys []string, grantHookDir bool) (sandbox.WrapOpts, error) {
 	readDirs := expandPaths(merged.ReadDirs, sm.log, "read")
 	writeDirs := expandPaths(merged.WriteDirs, sm.log, "write")
 	readFiles := expandFilePaths(merged.ReadFiles, sm.log, "read")
@@ -809,19 +819,62 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 
 	// The hook dir holds both the generated settings (hooks) file and the MCP
 	// config file, so grant it read whenever either was injected (see #1135).
-	if grantHookDir {
-		hd := sm.hookDir(sessionID)
-		if _, err := os.Stat(hd); err == nil {
-			readDirs = append(readDirs, hd)
+	controlRoot := ""
+
+	if merged.Enabled {
+		var err error
+
+		controlRoot, err = protectedDaemonServiceControlRoot()
+		if err != nil {
+			return sandbox.WrapOpts{}, fmt.Errorf("resolve protected daemon service control root: %w", err)
 		}
 	}
 
-	readDirs = append(readDirs, filepath.Dir(sm.paths.ConfigFile))
-	if dir, ok := grBinReadDir(resolveGrBin()); ok {
-		readDirs = append(readDirs, dir)
+	appendAutomaticRead := func(path string) error {
+		if path == "" {
+			return nil
+		}
+
+		if controlRoot != "" {
+			overlaps, err := daemonservice.CanonicalPathsOverlap(path, controlRoot)
+			if err != nil {
+				return fmt.Errorf("validate automatic sandbox read grant %q: %w", path, err)
+			}
+
+			if overlaps {
+				return nil
+			}
+		}
+
+		readDirs = append(readDirs, path)
+
+		return nil
 	}
 
-	readDirs = append(readDirs, sm.paths.RuntimeDir)
+	if grantHookDir {
+		hd := sm.hookDir(sessionID)
+		if _, err := os.Stat(hd); err == nil {
+			if err := appendAutomaticRead(hd); err != nil {
+				return sandbox.WrapOpts{}, err
+			}
+		}
+	}
+
+	if sm.paths.ConfigFile != "" {
+		if err := appendAutomaticRead(filepath.Dir(sm.paths.ConfigFile)); err != nil {
+			return sandbox.WrapOpts{}, err
+		}
+	}
+
+	if dir, ok := grBinReadDir(resolveGrBin()); ok {
+		if err := appendAutomaticRead(dir); err != nil {
+			return sandbox.WrapOpts{}, err
+		}
+	}
+
+	if err := appendAutomaticRead(sm.paths.RuntimeDir); err != nil {
+		return sandbox.WrapOpts{}, err
+	}
 
 	// The runtime dir grant above is read-only, which lets the agent see the
 	// daemon socket but NOT connect() to it (Seatbelt/Landlock gate socket
@@ -837,7 +890,9 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 	// paths like /usr/bin). Grant read on the agent binary's directory so the
 	// sandboxed process can exec it. safehouse is unaffected by the extra dir.
 	if dir := agentBinaryDir(agentCommand); dir != "" {
-		readDirs = append(readDirs, dir)
+		if err := appendAutomaticRead(dir); err != nil {
+			return sandbox.WrapOpts{}, err
+		}
 	}
 
 	// Under nono, a non-empty env allowlist scrubs everything else, so the vars
@@ -869,7 +924,60 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 		BackendCommand:        merged.Command,
 		ProfilePath:           profilePath,
 		SafehouseFragmentPath: fragmentPath,
+	}, nil
+}
+
+func (sm *SessionManager) validateAutomaticSandboxGrants(opts sandbox.WrapOpts, explicit config.SandboxConfig) error {
+	if !explicit.Enabled {
+		return nil
 	}
+
+	controlRoot, err := protectedDaemonServiceControlRoot()
+	if err != nil {
+		return fmt.Errorf("resolve protected daemon service control root: %w", err)
+	}
+
+	if controlRoot == "" {
+		return nil
+	}
+
+	validate := func(kind, path string, explicitGrants []string) error {
+		if path == "" {
+			return nil
+		}
+
+		for _, grant := range explicitGrants {
+			contains, containsErr := daemonservice.CanonicalPathContains(grant, path)
+			if containsErr == nil && contains {
+				return nil
+			}
+		}
+
+		overlaps, err := daemonservice.CanonicalPathsOverlap(path, controlRoot)
+		if err != nil {
+			return fmt.Errorf("validate automatic sandbox %s grant %q: %w", kind, path, err)
+		}
+
+		if overlaps {
+			return fmt.Errorf("automatic sandbox %s grant %q would expose protected daemon service control root", kind, path)
+		}
+
+		return nil
+	}
+
+	for _, path := range opts.ReadDirs {
+		if err := validate("read", path, explicit.ReadDirs); err != nil {
+			return err
+		}
+	}
+
+	for _, path := range opts.WriteDirs {
+		if err := validate("write", path, explicit.WriteDirs); err != nil {
+			return err
+		}
+	}
+
+	return validate("worktree", opts.WorktreeDir, explicit.WriteDirs)
 }
 
 // networkPolicy converts a config network policy into the sandbox package's

@@ -78,6 +78,17 @@ builds:
       - -s -w
       - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
       - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
+      - -X github.com/d0ugal/graith/internal/daemonservice.ManagedBuild=true
+      - -X github.com/d0ugal/graith/internal/daemonservice.DevelopmentBuild={{ .IsSnapshot }}
+      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedTeamID={{ if not .IsSnapshot }}{{ .Env.GRAITH_SIGNING_TEAM_ID }}{{ end }}
+      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedRequirementBase64={{ if not .IsSnapshot }}{{ .Env.GRAITH_SIGNING_REQUIREMENT_B64 }}{{ end }}
+    # GoReleaser exposes the completed artifact to post-build hooks. The hook
+    # signs/notarizes the matching architecture's Graith.app, then replaces this
+    # artifact with the signed embedded gr so the two payloads are byte-identical.
+    hooks:
+      post:
+        - cmd: macos/service/release-hook.sh "{{ .Path }}" "{{ .Target }}" "{{ .Version }}" "{{ .Commit }}" "{{ .IsSnapshot }}"
+          output: true
     goos:
       - darwin
     goarch:
@@ -133,6 +144,10 @@ archives:
       # verified with `goreleaser release --snapshot`.
       - src: macos/build/GraithNotifier.app/**/*
         dst: GraithNotifier.app/Contents
+      # Signed, notarized app-associated daemon service bundle. The build hook
+      # writes one architecture-specific tree before archive creation.
+      - src: macos/build/service-release-{{ .Arch }}/Graith.app/**/*
+        dst: Graith.app/Contents
 
 nfpms:
   - id: graith
@@ -198,6 +213,23 @@ nfpms:
 checksum:
   name_template: checksums.txt
 
+# Use GoReleaser's archive-signing pipe as an OSS before-publish verification
+# hook. It runs over the exact completed Darwin archives after checksums are
+# assembled and before any GitHub/Homebrew/AUR publisher. The small verification
+# record is uploaded alongside its archive and contains the verified SHA-256.
+signs:
+  - id: verify-darwin-service
+    cmd: macos/service/verify-release-archive.sh
+    args:
+      - "${artifact}"
+      - "${signature}"
+      - "{{ .IsSnapshot }}"
+    signature: "${artifact}.service-verified.txt"
+    artifacts: archive
+    ids:
+      - darwin
+    output: true
+
 changelog:
   disable: true
 
@@ -224,10 +256,14 @@ brews:
       # inside `def install`) — the Linux archive doesn't carry the bundle.
       if OS.mac?
         (libexec/"graith").install "GraithNotifier.app"
+        (libexec/"graith").install "Graith.app"
       end
     caveats: |
       To restart the graith daemon after upgrading:
         gr daemon restart
+
+      Before uninstalling on macOS, remove every registered Graith user service:
+        gr daemon service remove --all-profiles
 
 aurs:
   - name: graith-bin

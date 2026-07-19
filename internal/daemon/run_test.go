@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -136,6 +137,41 @@ func TestRunControlLoopReturnsUpgradeResult(t *testing.T) {
 	}
 
 	assertNoUnexpectedCallback(t, unexpected)
+}
+
+func TestRunControlLoopContinuesAfterPreMutationUpgradeRejection(t *testing.T) {
+	signals := make(chan os.Signal)
+	upgrades := make(chan string)
+	shutdown := make(chan struct{}, 1)
+	done := make(chan error, 1)
+
+	go func() {
+		done <- runControlLoop(signals, upgrades, discardLogger(), func() error { return nil }, func() {
+			shutdown <- struct{}{}
+		}, func(string) error {
+			return fmt.Errorf("%w: dreich candidate", errUpgradeRejected)
+		})
+	}()
+
+	upgrades <- "/bothy/unrecorded-gr"
+
+	select {
+	case err := <-done:
+		t.Fatalf("daemon exited after rejected upgrade: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	signals <- syscall.SIGTERM
+
+	select {
+	case <-shutdown:
+	case <-time.After(time.Second):
+		t.Fatal("daemon did not remain available for clean shutdown")
+	}
+
+	if err := <-done; err != nil {
+		t.Fatalf("runControlLoop returned %v, want nil", err)
+	}
 }
 
 func TestRunControlLoopTerminalSignalsShutDown(t *testing.T) {

@@ -265,6 +265,13 @@ remote_dial_timeout = "10s"       # bounds the TCP dial to a paired remote daemo
 remote_handshake_timeout = "15s"  # bounds the remote handshake + proof-of-possession
 remote_pairing_timeout = "11m"    # how long to wait for the remote human to approve pairing
 
+# Extra terminal variables copied into the one-shot startup request for the
+# app-associated daemon on supported macOS packages. PATH, SHELL, TMPDIR,
+# locale, and absolute XDG base directories are projected automatically.
+# Values named here become available to the daemon and eligible agents.
+[daemon_service]
+inherit_env = []
+
 # Cross-agent conversation migration (`gr migrate`). health_window is how long
 # the daemon waits after starting the target agent to confirm it survived startup
 # before declaring the migration successful; a longer window tolerates a slow

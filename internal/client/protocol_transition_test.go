@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"net"
 	"os"
@@ -37,14 +38,15 @@ func TestIncompatibleProtocolUpgradeUsesExactCleanRestart(t *testing.T) {
 			origStop := stopDaemonIdentityForUpgrade
 			origSocket := waitForSocketGoneForUpgrade
 			origReconnect := reconnectAfterCleanUpgrade
+			origPrepare := prepareDaemonCleanRestartForUpgrade
 			version.Version = "0.70.0"
 			dialLocalDaemon = dial
 
-			var requests, reconnects atomic.Int32
+			var requests, reconnects, prepares atomic.Int32
 
-			requestUpgradeForClient = func(*Client) bool {
+			requestUpgradeForClient = func(context.Context, *Client) (bool, bool, error) {
 				requests.Add(1)
-				return true
+				return true, false, nil
 			}
 			stopDaemonIdentityForUpgrade = func(pid int, start int64) error {
 				if pid != os.Getpid() || start == 0 {
@@ -60,6 +62,10 @@ func TestIncompatibleProtocolUpgradeUsesExactCleanRestart(t *testing.T) {
 
 				return tc.socketGone
 			}
+			prepareDaemonCleanRestartForUpgrade = func(context.Context, config.Paths) error {
+				prepares.Add(1)
+				return nil
+			}
 			wantClient := &Client{}
 			reconnectAfterCleanUpgrade = func(*config.Config, config.Paths, string) (*Client, error) {
 				reconnects.Add(1)
@@ -73,9 +79,10 @@ func TestIncompatibleProtocolUpgradeUsesExactCleanRestart(t *testing.T) {
 				stopDaemonIdentityForUpgrade = origStop
 				waitForSocketGoneForUpgrade = origSocket
 				reconnectAfterCleanUpgrade = origReconnect
+				prepareDaemonCleanRestartForUpgrade = origPrepare
 			})
 
-			got, err := connect(config.Default(), config.Paths{SocketPath: socketPath}, "", true)
+			got, err := connect(context.Background(), config.Default(), config.Paths{SocketPath: socketPath}, "", true)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("connect error = %v, wantErr %v", err, tc.wantErr)
 			}
@@ -90,6 +97,10 @@ func TestIncompatibleProtocolUpgradeUsesExactCleanRestart(t *testing.T) {
 
 			if reconnects.Load() != tc.wantResume {
 				t.Fatalf("clean restart count = %d, want %d", reconnects.Load(), tc.wantResume)
+			}
+
+			if prepares.Load() != 1 {
+				t.Fatalf("managed service reservation count = %d, want 1 before stop", prepares.Load())
 			}
 
 			select {

@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+func TestDefaultDataHomePreservesMacOSApplicationSupport(t *testing.T) {
+	home := filepath.Join(string(filepath.Separator), "Users", "bothy")
+	want := filepath.Join(home, "Library", "Application Support")
+
+	if got := defaultDataHome("darwin", home); got != want {
+		t.Fatalf("defaultDataHome(darwin) = %q, want %q", got, want)
+	}
+}
+
 func TestResolvePaths(t *testing.T) {
 	t.Setenv("GRAITH_PROFILE", "")
 
@@ -74,6 +83,21 @@ func TestResolvePathsWithProfile(t *testing.T) {
 
 	if !strings.Contains(p.SocketPath, "graith-braw") {
 		t.Errorf("SocketPath = %q, want graith-braw in path", p.SocketPath)
+	}
+}
+
+func TestResolvePathsReadsProjectedXDGAtCallTime(t *testing.T) {
+	t.Setenv("GRAITH_PROFILE", "canny")
+	t.Setenv("XDG_DATA_HOME", "/bothy/data")
+	t.Setenv("XDG_RUNTIME_DIR", "/bothy/run")
+
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if paths.DataDir != "/bothy/data/graith-canny" || paths.RuntimeDir != "/bothy/run/graith-canny" {
+		t.Fatalf("projected XDG paths were not used: %#v", paths)
 	}
 }
 

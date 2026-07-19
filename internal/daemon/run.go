@@ -13,8 +13,11 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/tools"
 )
+
+var errUpgradeRejected = errors.New("upgrade rejected before daemon state mutation")
 
 // cleanupLegacyDaemon stops an old daemon that may be listening on the
 // pre-v0.11 socket path ($TMPDIR or /tmp). Without this, upgrading would
@@ -71,6 +74,12 @@ func cleanupLegacyDaemonDirs(
 // Run starts the daemon: acquires PID file, listens on the Unix socket,
 // serves connections, and blocks until SIGTERM/SIGINT or an upgrade signal.
 func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string, earlyUpgradeGuard *UpgradeFailureGuard) (runErr error) {
+	defer func() {
+		if err := daemonservice.MarkCurrentProcessStopped(paths.Profile); err != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("clear daemon service running generation: %w", err))
+		}
+	}()
+
 	var manifest *UpgradeManifest
 
 	cleanupPending := false
@@ -319,10 +328,6 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string, e
 	}, func(clientExecPath string) error {
 		log.Info("preparing upgrade", "client_exec_path", clientExecPath)
 
-		// Kill MCP server processes before exec — defers don't
-		// run when syscall.Exec replaces the process image.
-		mcpMgr.Shutdown()
-
 		unixL, ok := l.(*net.UnixListener)
 		if !ok {
 			log.Error("listener is not a unix listener, cannot upgrade")
@@ -337,13 +342,23 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string, e
 
 		listenerFd := listenerFile.Fd()
 
+		// Validate and reserve the managed candidate before PrepareUpgrade
+		// mutates PTY/session state. A standalone or unrecorded payload must not
+		// turn a rejected version-mismatch request into a session-losing exit.
+		prepared, err := prepareExecUpgrade(paths.Profile, clientExecPath)
+		if err != nil {
+			_ = listenerFile.Close()
+
+			return fmt.Errorf("%w: %w", errUpgradeRejected, err)
+		}
+
 		manifest, err := sm.PrepareUpgrade(listenerFd, configFile)
 		if err != nil {
 			_ = listenerFile.Close()
 
 			log.Error("prepare upgrade", "err", err)
 
-			return fmt.Errorf("upgrade failed: %w", err)
+			return prepared.rollbackError(fmt.Errorf("upgrade failed: %w", err))
 		}
 
 		manifestPath, err := WriteManifest(paths.RuntimeDir, manifest)
@@ -352,12 +367,16 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string, e
 
 			log.Error("write manifest", "err", err)
 
-			return fmt.Errorf("upgrade failed: %w", err)
+			return prepared.rollbackError(fmt.Errorf("upgrade failed: %w", err))
 		}
+
+		// Kill MCP server processes immediately before exec — defers don't run
+		// when syscall.Exec replaces the process image.
+		mcpMgr.Shutdown()
 
 		log.Info("exec-ing new binary", "manifest", manifestPath, "sessions", len(manifest.Sessions))
 
-		if err := ExecUpgrade(manifestPath, configFile, clientExecPath); err != nil {
+		if err := execPreparedUpgrade(manifestPath, configFile, prepared); err != nil {
 			_ = listenerFile.Close()
 			_ = os.Remove(manifestPath)
 
@@ -399,7 +418,14 @@ func runControlLoop(
 			return nil
 
 		case clientExecPath := <-upgrades:
-			return upgrade(clientExecPath)
+			err := upgrade(clientExecPath)
+			if errors.Is(err, errUpgradeRejected) {
+				log.Error("upgrade request rejected", "err", err)
+
+				continue
+			}
+
+			return err
 		}
 	}
 }

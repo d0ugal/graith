@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemonservice"
 	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
@@ -75,6 +76,14 @@ func (g *UpgradeFailureGuard) Disarm() {
 	}
 
 	g.once.Do(func() {})
+}
+
+func (g *UpgradeFailureGuard) Profile() string {
+	if g == nil || g.manifest == nil {
+		return ""
+	}
+
+	return g.manifest.Profile
 }
 
 func clearCloseOnExec(fd int) error {
@@ -238,7 +247,19 @@ func cleanupUpgradeProcesses(manifest *UpgradeManifest, grace time.Duration) err
 	return errors.Join(errs...)
 }
 
-func ExecUpgrade(manifestPath, configFile, clientExecPath string) error {
+type preparedExecUpgrade struct {
+	execPath   string
+	definition daemonservice.Definition
+	rollback   func() error
+	managed    bool
+}
+
+var (
+	prepareManagedUpgradeForExec = daemonservice.PrepareManagedUpgrade
+	execProcessForUpgrade        = syscall.Exec
+)
+
+func prepareExecUpgrade(profile, clientExecPath string) (preparedExecUpgrade, error) {
 	execPath := clientExecPath
 	if execPath != "" {
 		if _, err := os.Stat(execPath); err != nil {
@@ -251,16 +272,56 @@ func ExecUpgrade(manifestPath, configFile, clientExecPath string) error {
 
 		execPath, err = resolveExecutable()
 		if err != nil {
-			return fmt.Errorf("resolve executable: %w", err)
+			return preparedExecUpgrade{}, fmt.Errorf("resolve executable: %w", err)
 		}
 	}
 
+	definition, rollback, managed, err := prepareManagedUpgradeForExec(profile, execPath)
+	if err != nil {
+		return preparedExecUpgrade{}, fmt.Errorf("validate managed upgrade: %w", err)
+	}
+
+	return preparedExecUpgrade{execPath: execPath, definition: definition, rollback: rollback, managed: managed}, nil
+}
+
+func (prepared preparedExecUpgrade) rollbackError(cause error) error {
+	if prepared.rollback == nil {
+		return cause
+	}
+
+	return errors.Join(cause, prepared.rollback())
+}
+
+func execPreparedUpgrade(manifestPath, configFile string, prepared preparedExecUpgrade) error {
+	execPath := prepared.execPath
+
 	args := []string{execPath, "daemon", "start", "--adopt-from", manifestPath}
+	if prepared.managed {
+		args = append(args,
+			"--internal-service-label", prepared.definition.Label,
+			"--internal-service-slot", prepared.definition.Slot,
+		)
+	}
+
 	if configFile != "" {
 		args = append(args, "--config", configFile)
 	}
 
-	return syscall.Exec(execPath, args, os.Environ())
+	err := execProcessForUpgrade(execPath, args, os.Environ())
+	if err != nil {
+		return prepared.rollbackError(err)
+	}
+
+	return err
+}
+
+func ExecUpgrade(manifestPath, configFile, profile, clientExecPath string) error {
+	prepared, err := prepareExecUpgrade(profile, clientExecPath)
+	if err != nil {
+		return err
+	}
+
+	return execPreparedUpgrade(manifestPath, configFile, prepared)
 }
 
 // resolveExecutable finds the binary to exec into during an upgrade.
@@ -315,8 +376,25 @@ func StopDaemon(pidFile string) error {
 		return fmt.Errorf("pid %d is not a graith daemon, removing stale pid file", pid)
 	}
 
+	return stopVerifiedDaemonPID(pid)
+}
+
+// StopDaemonPID stops one previously authenticated daemon peer identity. The
+// caller obtains pid from Unix peer credentials, not from a mutable PID file.
+func StopDaemonPID(pid int) error {
+	if pid <= 1 {
+		return fmt.Errorf("refusing to signal invalid pid %d", pid)
+	}
+
+	if !IsGraithDaemon(pid) {
+		return fmt.Errorf("pid %d is not a graith daemon", pid)
+	}
+
+	return stopVerifiedDaemonPID(pid)
+}
+
+func stopVerifiedDaemonPID(pid int) error {
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
-		_ = os.Remove(pidFile)
 		return fmt.Errorf("send SIGTERM to pid %d: %w", pid, err)
 	}
 

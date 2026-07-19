@@ -233,10 +233,22 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		envKeys = append(envKeys, k)
 	}
 
-	opts := sm.sandboxOptsFromConfig(merged, id, scratchDir, agent.Command, envKeys, policyEnabled)
+	opts, err := sm.sandboxOptsFromConfig(merged, id, scratchDir, agent.Command, envKeys, policyEnabled)
+	if err != nil {
+		sm.rollbackOrchestratorCreate(id)
+
+		return SessionState{}, fmt.Errorf("configure sandbox: %w", err)
+	}
+
 	opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 	opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
+
 	opts.WriteDirs = append(opts.WriteDirs, scratchDir)
+	if err := sm.validateAutomaticSandboxGrants(opts, merged); err != nil {
+		sm.rollbackOrchestratorCreate(id)
+
+		return SessionState{}, fmt.Errorf("validate sandbox grants: %w", err)
+	}
 
 	command, finalArgs, wrapErr := sandbox.Wrap(agent.Command, expandedArgs, opts)
 	if wrapErr != nil {

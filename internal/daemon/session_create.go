@@ -795,7 +795,14 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			envKeys = append(envKeys, k)
 		}
 
-		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, hookFilesNeeded || mcpEnabled)
+		opts, err := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, hookFilesNeeded || mcpEnabled)
+		if err != nil {
+			cleanupOnError()
+			rollbackState()
+
+			return SessionState{}, fmt.Errorf("configure sandbox: %w", err)
+		}
+
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
@@ -824,6 +831,18 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			}
 
 			opts.WorktreeDir = scratchDir
+		}
+
+		if err := sm.validateAutomaticSandboxGrants(opts, merged); err != nil {
+			cleanupOnError()
+
+			if scratchDir != "" {
+				_ = os.RemoveAll(scratchDir)
+			}
+
+			rollbackState()
+
+			return SessionState{}, fmt.Errorf("validate sandbox grants: %w", err)
 		}
 
 		var wrapErr error

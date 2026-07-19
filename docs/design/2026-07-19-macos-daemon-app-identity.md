@@ -290,18 +290,16 @@ The hidden marker is parsed in `executeWithArgs` before Cobra's
 `--adopt-from` failure guard is armed early. A marker-free manual
 `gr daemon start` and the older-OS direct-spawn path retain their current flow.
 Before kickstart, an eligible human CLI writes one short-lived request per
-service label under `<_CS_DARWIN_USER_TEMP_DIR>/Graith/service-control`.
-The `CGO_ENABLED=0` release cannot call `confstr` directly, so the implementation
-may execute the fixed absolute helper `/usr/bin/getconf DARWIN_USER_TEMP_DIR`
-with an empty environment, no user-controlled arguments, a short timeout, and a
-small output limit. It trims exactly one trailing newline, requires one clean
-absolute path, resolves it to a directory owned by the effective UID with
-owner-only permissions, and uses descriptor-relative no-symlink operations for
-the Graith children. A missing helper, non-zero exit, timeout, malformed output,
-ownership or permission mismatch, or unsafe child fails closed. An equivalent
-future pure-Go OS API is permitted if it returns and validates the same
-OS-defined value. The root is never taken from the request, `HOME`, `TMPDIR`,
-XDG variables, or config:
+service label under `<OS-account-home>/Library/Application Support/Graith/services/control/bootstrap`.
+The account is resolved for the effective UID with `os/user.LookupId`; the
+returned UID must match, and its clean absolute non-root home must be an
+effective-user-owned, non-symlink directory. The service, control, and bootstrap
+directories are owner-only. Request creation and consumption use
+descriptor-relative no-follow operations and fail closed on every ownership,
+mode, type, or path mismatch. Generation caches and durable receipts are
+protected siblings under the same `services` root. The root is never taken from
+the request, `HOME`, `TMPDIR`, a Darwin temporary-directory helper, XDG/profile
+data or runtime paths, or config:
 
 ```
 schema version, profile, slot, label, config file, resolved Paths,
@@ -309,7 +307,7 @@ bundle generation, projected environment, nonce, caller UID,
 creation/expiry time
 ```
 
-The directory is mode 0700 and requests are atomically written mode 0600 with
+The directories are mode 0700 and requests are atomically published mode 0600 with
 no symlink traversal. The early bootstrap accepts a request exactly once and
 only for its supported schema, current UID, immutable label/slot marker,
 validated cached generation, nonce, and short freshness window. For a named
@@ -325,8 +323,12 @@ create a request when it detects Graith session identity or an agent/hook
 caller. An existing daemon remains connectable from an agent, but an agent may
 not become the first managed starter. Independently, the early service
 bootstrap rejects reserved variables and any request/lease mismatch even if a
-caller bypasses the CLI check. The service control/cache paths stay outside
-every generated agent sandbox grant.
+caller bypasses the CLI check. Graith-generated safehouse and nono policies
+never grant the control tree or an enclosing directory. An exact execution/read
+grant for a cached `Graith.app/Contents/MacOS` path does not grant its sibling
+control tree. An operator can still expose it by disabling sandboxing or
+explicitly granting a broad home path; Graith never adds that exposure
+automatically.
 
 After any needed profile allocation under the global transaction, concurrent
 starters serialize through a per-label start lock. The first eligible
@@ -340,7 +342,11 @@ The request does **not** copy `os.Environ()`. UID, user name, `LOGNAME`, and
 `HOME` are derived afresh from the OS account and cannot be projected. Its
 built-in projection is limited to validated `PATH`, `SHELL`, `TMPDIR`, locale
 variables, and absolute XDG base-directory overrides needed to reproduce path
-and tool resolution. A new `[daemon_service].inherit_env` list lets a user
+and tool resolution. Before any registration or request mutation, the launcher
+rejects a `TMPDIR` whose canonical path is the protected services tree, an
+enclosing directory, or a symlink to either; generated sandbox base policies
+must not turn inherited temporary-directory access into service-state access.
+A new `[daemon_service].inherit_env` list lets a user
 explicitly opt additional names such as `SSH_AUTH_SOCK` or an agent API key into
 the daemon/agent base environment. Documentation calls out that this grants the
 service and eligible agent processes access to those values.
@@ -366,12 +372,12 @@ opted-in values are still sensitive, so the request is never logged or retained
 as durable service state. The bootstrap clears launchd's inherited environment,
 installs the OS-derived identity plus the validated projection, and removes any
 reserved names before config or agent process setup. Opted-in values do touch an
-owner-only file in the OS-derived per-user temporary directory until it is
-consumed and unlinked. macOS offers no secure-delete guarantee, so documentation
-treats that transient disk exposure as part of the explicit opt-in rather than
-claiming it is equivalent to an inherited environment.
+short-lived owner-only file below the protected OS-account-home service control
+directory until it is consumed and unlinked. macOS offers no secure-delete
+guarantee, so documentation treats that disk exposure as part of the explicit
+opt-in rather than claiming it is equivalent to an inherited environment.
 
-An explicit `--config` is recorded exactly as current direct auto-start does
+An explicit `--config` is resolved to a clean absolute path before it is recorded
 outside an agent session. The early parser installs that validated path into
 CLI startup state before `PersistentPreRunE`; the daemon loads it, applies
 `data_dir`, and then verifies that its derived config, data, runtime, socket,
@@ -471,6 +477,11 @@ handoff. The no-`KeepAlive` design separates process and registration rotation:
   changing the profile-slot mapping, and only then removes an unreferenced
   cache.
 
+Rotation uses a strict fresh-registration operation: an enabled or concurrently
+reappearing label is an error, never evidence that the candidate owns it. The
+receipt advances only after launchd reports the expected Graith parent bundle,
+bundle build, and daemon program identity for the candidate generation.
+
 If new registration fails, the retained old controller restores the old dormant
 definition and Graith returns an error without starting either generation. A
 failed restoration leaves the slot quarantined and preserves both caches; it is
@@ -492,6 +503,13 @@ The service app is hardened-runtime signed but not App Sandbox entitled: the
 daemon must manage PTYs, subprocesses, repositories, Unix sockets, and configured
 tools. Graith's per-agent safehouse/nono boundary is unchanged and still fails
 closed. No request or receipt can relax an agent sandbox.
+
+Implementation review found that the originally accepted temporary-directory
+control root was automatically writable by the same-UID agent sandboxes on
+macOS. That contradicted this record's protected-bootstrap boundary. The
+2026-07-20 accepted amendment replaces all `DARWIN_USER_TEMP_DIR`/`getconf`
+language with the OS-account-home sibling layout above and requires generated
+policy plus real macOS enforcement tests for read, modify, delete, and replace.
 
 Moving launch identity away from Terminal also moves macOS privacy attribution.
 Terminal Full Disk Access or Automation grants must not be assumed to carry to
@@ -588,6 +606,12 @@ paths, document lifecycle reproduction, and script its two-copy controller
 check. The lifecycle table now separates the ordinary CLI launcher from
 launchd's internal foreground payload so `daemon start` cannot recurse through
 `EnsureDaemon`.
+
+The #1473 implementation tribunal then identified the temporary-root sandbox
+contradiction. The #1472 design owner confirmed the OS-account-home correction
+recorded above as faithful to the architecture, not a mechanism change. This
+amendment supersedes the earlier temporary-root, transient-temp-secret,
+`getconf`, and associated test-matrix language.
 
 Reviewers disagreed only on whether missing visual evidence should block design
 acceptance. This record accepts the architecture on the captured
@@ -777,8 +801,8 @@ Unit and focused tests in #1473 must cover:
 - service states not registered, enabled, requires approval, disabled, missing,
   stale, and registration rollback failure;
 - pre-config marker parsing for fresh starts and same-PID adoption; fixed
-  OS-derived control root; bounded `/usr/bin/getconf DARWIN_USER_TEMP_DIR`
-  execution and every failure mode; startup request schema, lease agreement,
+  OS-account-home `services/control/bootstrap` root; effective-UID account,
+  home ownership/type/mode and no-follow failure modes; startup request schema, lease agreement,
   ownership, permissions, symlink rejection, expiry, nonce, one-creator
   contention, environment projection/reserved-name rejection, secrecy/cleanup,
   custom `--config`, XDG paths, and `data_dir`;
@@ -795,7 +819,8 @@ Unit and focused tests in #1473 must cover:
   auth/token, stop/restart, and concurrent default/profile daemons;
 - agent sandbox behavior and the service environment contract: built-in
   projection, explicit `SSH_AUTH_SOCK`/credential opt-in, reserved variables,
-  and no request or log leakage; and
+  no automatic grant of `services/control` or an enclosing path, real macOS
+  read/modify/delete/replace denial, and no request or log leakage; and
 - Homebrew/tarball install, upgrade, rollback, removal, notarization/stapling,
   exact payload parity, older macOS, unbundled fallback, and unchanged Linux
   archives.
