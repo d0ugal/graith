@@ -28,7 +28,7 @@ The daemon starts automatically on your first command. Create a session:
 gr new fix-auth-bug
 ```
 
-Pulls from origin, creates a worktree on a new branch, starts a Claude agent there, and attaches your terminal. The agent gets an isolated copy of the repo; your main checkout is untouched.
+Fetches from origin, creates a worktree on a new branch, starts a Claude agent there, and attaches your terminal. The agent gets an isolated copy of the repo; your main checkout is untouched.
 
 ## Detach and reattach
 

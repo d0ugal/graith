@@ -79,7 +79,7 @@ gr doctor            # checks the nono binary, its version, and Landlock support
 
 nono needs Linux kernel **5.13+** for Landlock filesystem enforcement (its
 practical floor is **5.14+**, for the seccomp supervisor-notify layer); network
-filtering, once graith grows it, needs 6.7+. On macOS, nono uses Seatbelt, which
+filtering, when graith grows it, needs 6.7+. On macOS, nono uses Seatbelt, which
 is always present. graith requires a minimum nono version and refuses to run
 below it (see `gr doctor`).
 
