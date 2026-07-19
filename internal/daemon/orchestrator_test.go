@@ -561,6 +561,7 @@ func TestCreateOrchestratorRequiresNonInteractiveAgent(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no non_interactive_args") {
 		t.Fatalf("createOrchestrator error = %v, want non-interactive launch failure", err)
 	}
+
 	if id := sm.findOrchestratorID(); id != "" {
 		t.Fatalf("failed non-interactive validation persisted session %q", id)
 	}
@@ -579,6 +580,7 @@ func TestCreateOrchestratorRejectsUnavailableCommandPolicy(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "cannot enforce") {
 		t.Fatalf("createOrchestrator error = %v, want command-policy availability failure", err)
 	}
+
 	if id := sm.findOrchestratorID(); id != "" {
 		t.Fatalf("failed command-policy validation persisted session %q", id)
 	}

@@ -99,6 +99,12 @@ force mode, and Agy and OpenCode to their non-prompting modes. A custom agent
 must explicitly declare its non-interactive arguments, including an empty list
 when none are needed, or creation fails.
 
+OpenCode's TUI non-prompting mode is `--auto`: it approves requests that would
+otherwise ask while preserving explicit native denies. Cursor's force mode is
+non-interactive, but its current hook runner can drop a fast synchronous deny,
+so Cursor sessions are rejected when command policy is configured until an
+upstream version provides a verified deny contract.
+
 Replace `[approvals]` with optional `[command_policy]`. An empty backend means
 the feature is disabled. The only backends are `builtin` and `localmost`; both
 are limited to shell commands and have a bounded evaluation timeout. A
@@ -111,11 +117,16 @@ The hook invokes a renamed hidden `gr command-policy-check` command. It sends a
 single authenticated `command_policy_check` request to the daemon and receives
 one `command_policy_decision` response. There is no request identifier, queue,
 subscription, notification, deadline owned by a human, or durable state. The
-daemon evaluates the full command input immediately:
+daemon evaluates the full command input immediately. The hook command is a
+hard-deadline supervisor around a child worker: worker crash, signal, malformed
+output, or timeout is rendered as an agent-native deny, while failure to start
+the supervisor is converted to the hook runner's blocking exit-2 contract. The
+agent runner timeout is deliberately longer than the supervisor deadline, so a
+runner timeout cannot turn a policy transport failure into an allow:
 
 | Result | Non-interactive meaning |
 |--------|-------------------------|
-| allow | Emit the agent-specific continue response; the outer sandbox still applies. |
+| allow | Continue without widening permissions; the outer sandbox still applies. |
 | deny | Emit an immediate deny with the rule reason. |
 | ask/defer | Deny immediately because no human decision path exists. |
 | malformed tool input or backend output | Deny immediately with a diagnostic reason. |
@@ -168,23 +179,40 @@ diagnosable error. The wire protocol major version advances to 2 so an old
 approval-aware client cannot connect under false assumptions. This is an
 intentional breaking transition rather than a staged deprecation.
 
+The first protocol-1 to protocol-2 upgrade is therefore a clean security-boundary
+restart, not an exec adoption. The protocol-2 client never sends the old daemon a
+preserve request: it identifies the exact Unix-socket peer and its process start
+time, asks that daemon to stop gracefully while it still owns all PTY and headless
+agents, and proves both that process identity and socket are gone before starting
+protocol 2. Failure to identify or stop the old daemon, or a socket that remains,
+fails closed without starting a competing daemon. Current-format protocol-2
+upgrades may use the identity-bearing manifest described below.
+
 Policy evaluation occurs in the daemon, outside the agent process, but its
 result only controls whether the agent's proposed shell command continues. The
 already-wrapped process executes the command, so even a policy allow remains
 inside the sandbox. Native localmost execution bounds output, the direct child,
 and pipe-holding descendants so a backend cannot extend the synchronous check.
 
-Live daemon upgrade also fails closed. An inherited PTY is adopted only when
-persisted state proves both OS sandboxing and non-interactive native agent
-arguments. Pre-transition processes without that proof are terminated and
-recorded as stopped; an unknown inherited session or a process that cannot be
-terminated aborts replacement-daemon startup.
+Current-format live daemon upgrade also fails closed. The manifest records every live process,
+including headless drivers and PTYs whose fd cannot be transferred. An inherited
+PTY is adopted only when persisted state proves its PID identity, OS sandboxing,
+and non-interactive native agent arguments. Headless processes cannot transfer a
+PTY and are identity-checked and terminated during handoff. Replacement startup
+arms identity-verified cleanup immediately after reading the manifest, before
+configuration loading, path initialization, state-version, authentication, or
+adoption work, so an earlier startup error cannot strand an inherited process.
+Pre-transition and failed-adoption processes
+are likewise terminated and recorded as stopped; an unknown or unverifiable
+inherited session, or a process that cannot be terminated, aborts replacement-
+daemon startup after any partially adopted processes are also stopped.
 
 ### Testing
 
 - Table-test built-in and native policy allow, deny, ask, malformed input,
   malformed output, timeout, and execution errors.
-- Test hook output for Claude, Codex, and Cursor and fail-closed hook transport.
+- Test hook output for Claude and Codex, fail-closed hook transport, and
+  startup rejection for agents without a verified synchronous deny contract.
 - Test create, resume, fork, headless, scenario, and trigger paths for mandatory
   sandbox and policy availability checks.
 - Test that headless permission requests never produce an approval status and

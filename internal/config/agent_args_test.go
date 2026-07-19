@@ -250,7 +250,9 @@ func TestDefaultAgentArgsRoundTrip(t *testing.T) {
 
 func TestDefaultAgentsDisableNativePrompting(t *testing.T) {
 	t.Parallel()
+
 	cfg := Default()
+
 	tests := []struct {
 		name string
 		want []string
@@ -259,18 +261,21 @@ func TestDefaultAgentsDisableNativePrompting(t *testing.T) {
 		{name: "codex", want: []string{"--ask-for-approval", "never", "--sandbox", "danger-full-access"}},
 		{name: "cursor", want: []string{"--force"}},
 		{name: "agy", want: []string{"--dangerously-skip-permissions"}},
-		{name: "opencode", want: []string{"--dangerously-skip-permissions"}},
+		{name: "opencode", want: []string{"--auto"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			agent, ok := cfg.Agents[tt.name]
 			if !ok {
 				t.Fatalf("default agent %q is missing", tt.name)
 			}
+
 			if agent.NonInteractiveArgs == nil {
 				t.Fatalf("agent %q has nil non_interactive_args", tt.name)
 			}
+
 			if !reflect.DeepEqual(agent.NonInteractiveArgs, tt.want) {
 				t.Fatalf("agent %q non_interactive_args = %v, want %v", tt.name, agent.NonInteractiveArgs, tt.want)
 			}

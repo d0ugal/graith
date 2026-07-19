@@ -26,10 +26,22 @@ Restart the daemon, preserving live sessions via exec.
 | `--force` | Clean stop/start that kills running sessions |
 
 After rebuilding `gr`, run `gr daemon restart` to pick up the new daemon binary.
+Crossing from the approval-era protocol to the sandbox-only protocol is an
+intentional breaking restart: graith gracefully stops the old daemon and all of
+its PTY and headless sessions instead of asking that daemon to preserve them.
+It verifies the exact old socket peer has exited and its socket has disappeared
+before starting the replacement; if either check fails, no competing daemon is
+started. Resume stopped sessions to relaunch them under the new security model.
 Live adoption is allowed only when persisted launch state proves the process was
 OS-sandboxed and started with native permission prompting disabled. Sessions
 from releases before the sandbox-only security model are terminated and marked
 stopped during upgrade; resume them to launch under the current enforcement.
+Headless sessions have no adoptable PTY and are likewise identity-checked,
+terminated, and marked stopped instead of being left unmanaged.
+The handoff manifest records every live process, not just transferable PTYs.
+The replacement process arms cleanup before loading configuration, paths, state,
+or authentication, so an early startup failure still identity-checks and
+terminates inherited agents.
 If the preserve request is accepted but the replacement is still not ready after
 the configured startup wait, graith rechecks the live daemon. It only falls back
 to a clean start after proving that the exact process which answered the

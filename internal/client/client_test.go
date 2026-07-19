@@ -346,6 +346,7 @@ func TestConnectForPolicyRetainsEndToEndDeadline(t *testing.T) {
 	// retain an aggregate deadline so a daemon that handshakes and then stalls
 	// can never strand the agent hook.
 	time.Sleep(300 * time.Millisecond)
+
 	if _, err := c.ReadControlResponse(); err == nil {
 		t.Fatal("ReadControlResponse succeeded after the policy deadline")
 	}

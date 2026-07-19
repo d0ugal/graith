@@ -651,27 +651,47 @@ func (sm *SessionManager) resolveSandbox(agentName string) (bool, error) {
 // validateCommandPolicy fails session start when configured enforcement cannot
 // be established. Callers hold sm.mu.
 func (sm *SessionManager) validateCommandPolicy(agentName string) error {
-	return sm.validateCommandPolicyFromConfig(sm.cfg.CommandPolicy, agentName)
+	return sm.validateCommandPolicyFromConfig(sm.cfg, agentName)
 }
 
-func (sm *SessionManager) validateCommandPolicyFromConfig(policy config.CommandPolicy, agentName string) error {
+func (sm *SessionManager) validateCommandPolicyFromConfig(cfg *config.Config, agentName string) error {
+	policy := cfg.CommandPolicy
 	if !policy.Enabled() {
 		return nil
 	}
-	if agentName != "claude" && agentName != "codex" && agentName != "cursor" {
+
+	if agentName == "cursor" {
+		return errors.New("command policy cannot be enforced for agent \"cursor\": the current Cursor hook runner can drop synchronous deny output")
+	}
+
+	if agentName != "claude" && agentName != "codex" {
 		return fmt.Errorf("command policy cannot be enforced for agent %q: no synchronous shell hook is supported", agentName)
 	}
+
+	agent, ok := cfg.Agents[agentName]
+	if !ok {
+		return fmt.Errorf("command policy cannot be enforced for agent %q: agent definition is missing", agentName)
+	}
+
+	expectedCommand := agentName
+	if filepath.Base(strings.TrimSpace(agent.Command)) != expectedCommand {
+		return fmt.Errorf("command policy cannot be enforced for agent %q: command %q is not the verified %s CLI", agentName, agent.Command, expectedCommand)
+	}
+
 	backend, err := commandpolicy.BackendByName(strings.TrimSpace(policy.Backend))
 	if err != nil {
 		return err
 	}
+
 	backendCfg, err := commandPolicyBackendConfig(policy, sm.commandPolicyConfigDir())
 	if err != nil {
 		return err
 	}
+
 	if availability := backend.Availability(backendCfg); !availability.CanEnforce {
 		return fmt.Errorf("command policy backend %q cannot enforce: %s", policy.Backend, availability.Detail)
 	}
+
 	return nil
 }
 

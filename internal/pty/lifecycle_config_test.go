@@ -264,3 +264,34 @@ func TestAdoptSessionReturnsTerminalHydrationPanic(t *testing.T) {
 		t.Errorf("transferred PTY fd remains usable after hydration failed: %v", err)
 	}
 }
+
+func TestAdoptSessionClosesTransferredFDWhenScrollbackOpenFails(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		_ = r.Close()
+		_ = w.Close()
+	})
+
+	transferredFD, err := syscall.Dup(int(r.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	session, err := AdoptSession(AdoptOpts{
+		ID: "dreich-scrollback", Fd: uintptr(transferredFD), PID: 4242,
+		LogPath:    filepath.Join(t.TempDir(), "missing", "scrollback.log"),
+		MaxLogSize: 1024,
+	})
+	if err == nil || session != nil {
+		t.Fatalf("AdoptSession = (%v, %v), want scrollback error and nil session", session, err)
+	}
+
+	var stat syscall.Stat_t
+	if err := syscall.Fstat(transferredFD, &stat); !errors.Is(err, syscall.EBADF) {
+		t.Errorf("transferred PTY fd remains usable after scrollback failure: %v", err)
+	}
+}

@@ -61,6 +61,7 @@ func TestResolveSandboxDisabledFailsClosed(t *testing.T) {
 	if ok || err == nil {
 		t.Fatalf("disabled sandbox = (%v, %v), want (false, error)", ok, err)
 	}
+
 	if !strings.Contains(err.Error(), "required") {
 		t.Fatalf("error = %v, want mandatory-sandbox diagnostic", err)
 	}
@@ -80,6 +81,7 @@ func TestCreateAndResumeRejectMissingSandboxEnforcement(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "sandbox enforcement is required") {
 		t.Fatalf("Create error = %v, want mandatory-sandbox failure", err)
 	}
+
 	if len(sm.state.Sessions) != 0 {
 		t.Fatalf("failed Create left reserved sessions: %+v", sm.state.Sessions)
 	}
@@ -88,10 +90,12 @@ func TestCreateAndResumeRejectMissingSandboxEnforcement(t *testing.T) {
 		ID: "canny-resume", Name: "canny-resume", Agent: "canny", Status: StatusStopped,
 		WorktreePath: t.TempDir(),
 	}
+
 	_, err = sm.Resume("canny-resume", 24, 80)
 	if err == nil || !strings.Contains(err.Error(), "sandbox enforcement is required") {
 		t.Fatalf("Resume error = %v, want mandatory-sandbox failure", err)
 	}
+
 	if got := sm.state.Sessions["canny-resume"].Status; got != StatusStopped {
 		t.Fatalf("failed Resume status = %q, want stopped", got)
 	}

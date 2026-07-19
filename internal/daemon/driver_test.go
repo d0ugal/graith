@@ -157,5 +157,4 @@ func TestHeadlessArgs(t *testing.T) {
 	if !slices.Contains(got, "--input-format") {
 		t.Fatal("headlessArgs must enable the stdin control channel (--input-format stream-json)")
 	}
-
 }

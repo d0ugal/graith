@@ -155,6 +155,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 
 		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
 	}
+
 	if agent.NonInteractiveArgs == nil {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("agent %q has no non_interactive_args; refusing to start an agent that may prompt for permission", agentName)
@@ -443,12 +444,15 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 
 		return SessionState{}, fmt.Errorf("expand fork args: %w", err)
 	}
+
 	nonInteractiveArgs, err := config.ExpandSlice(agent.NonInteractiveArgs, vars)
 	if err != nil {
 		forkCleanup()
 		rollbackState()
+
 		return SessionState{}, fmt.Errorf("expand non-interactive args: %w", err)
 	}
+
 	expandedArgs = append(nonInteractiveArgs, expandedArgs...)
 
 	// Replay the conditional option flags after the fork/args (issue #1186); the

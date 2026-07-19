@@ -6,12 +6,13 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
 func terminalParserPanicFixture(t *testing.T) []byte {
@@ -36,13 +37,6 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 	var logBuf syncBuffer
 
 	sm.log = slog.New(slog.NewJSONHandler(&logBuf, nil))
-
-	for _, id := range []string{"thrawn-fash", "canny-braw"} {
-		sm.state.Sessions[id] = &SessionState{
-			ID: id, Name: id, Agent: "sleeper", Status: StatusRunning, Sandboxed: true,
-			CreationCfg: &CreationConfig{Agent: sm.cfg.Agents["sleeper"]},
-		}
-	}
 
 	badScrollback := append(terminalParserPanicFixture(t), []byte("dreich-payload-must-not-be-logged")...)
 	if err := os.WriteFile(filepath.Join(sm.paths.LogDir, "thrawn-fash.log"), badScrollback, 0o600); err != nil {
@@ -80,21 +74,44 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd := exec.Command("sleep", "30")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
+	badPID := spawnReapableSleeper(t)
+	goodPID := spawnReapableSleeper(t)
+
+	badStart, err := grpty.ProcessStartTime(badPID)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	goodStart, err := grpty.ProcessStartTime(goodPID)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	for id, process := range map[string]struct {
+		pid   int
+		start int64
+	}{
+		"thrawn-fash": {pid: badPID, start: badStart},
+		"canny-braw":  {pid: goodPID, start: goodStart},
+	} {
+		sm.state.Sessions[id] = &SessionState{
+			ID: id, Name: id, Agent: "sleeper", Status: StatusRunning,
+			PID: process.pid, PIDStartTime: process.start, Sandboxed: true,
+			CreationCfg: &CreationConfig{Agent: sm.cfg.Agents["sleeper"]},
+		}
 	}
 
 	t.Cleanup(func() {
 		_ = goodW.Close()
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		_ = syscall.Kill(-goodPID, syscall.SIGKILL)
+		_ = syscall.Kill(-badPID, syscall.SIGKILL)
+
 		sm.watchers.Wait()
 	})
 
 	manifest := &UpgradeManifest{Sessions: []UpgradeSession{
-		{ID: "thrawn-fash", Fd: badFD, PID: cmd.Process.Pid},
-		{ID: "canny-braw", Fd: goodFD, PID: cmd.Process.Pid},
+		{ID: "thrawn-fash", Fd: badFD, HasPTY: true, PID: badPID, PIDStartTime: badStart},
+		{ID: "canny-braw", Fd: goodFD, HasPTY: true, PID: goodPID, PIDStartTime: goodStart},
 	}}
 
 	if err := sm.AdoptSessions(manifest); err != nil {
@@ -151,8 +168,8 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 
 	_ = badW.Close()
 	_ = goodW.Close()
-	_ = cmd.Process.Kill()
-	_ = cmd.Wait()
+	_ = syscall.Kill(-badPID, syscall.SIGKILL)
+	_ = syscall.Kill(-goodPID, syscall.SIGKILL)
 
 	watchersDone := make(chan struct{})
 

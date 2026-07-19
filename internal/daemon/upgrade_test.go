@@ -1,11 +1,23 @@
 package daemon
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+
+	grpty "github.com/d0ugal/graith/internal/pty"
 )
+
+type upgradeHeadlessDriver struct {
+	*wedgeDriver
+
+	pid int
+}
+
+func (d *upgradeHeadlessDriver) ProcessPID() int { return d.pid }
 
 func TestWriteAndReadManifest(t *testing.T) {
 	dir := t.TempDir()
@@ -14,8 +26,8 @@ func TestWriteAndReadManifest(t *testing.T) {
 		ListenerFd: 5,
 		ConfigFile: "/home/user/.config/graith/config.toml",
 		Sessions: []UpgradeSession{
-			{ID: "abc123", Fd: 10, PID: 1234},
-			{ID: "def456", Fd: 11, PID: 5678},
+			{ID: "abc123", Fd: 10, HasPTY: true, PID: 1234, PIDStartTime: 111},
+			{ID: "def456", Fd: -1, PID: 5678, PIDStartTime: 222},
 		},
 	}
 
@@ -48,7 +60,7 @@ func TestWriteAndReadManifest(t *testing.T) {
 
 	for i, s := range loaded.Sessions {
 		orig := original.Sessions[i]
-		if s.ID != orig.ID || s.Fd != orig.Fd || s.PID != orig.PID {
+		if s.ID != orig.ID || s.Fd != orig.Fd || s.HasPTY != orig.HasPTY || s.PID != orig.PID || s.PIDStartTime != orig.PIDStartTime {
 			t.Errorf("Sessions[%d] = %+v, want %+v", i, s, orig)
 		}
 	}
@@ -79,6 +91,72 @@ func TestWriteManifestEmptySessions(t *testing.T) {
 
 	if len(loaded.Sessions) != 0 {
 		t.Errorf("Sessions len = %d, want 0", len(loaded.Sessions))
+	}
+}
+
+func TestPrepareUpgradeRecordsNonPTYProcessIdentity(t *testing.T) {
+	sm := sleeperSM(t)
+	pid := spawnReapableSleeper(t)
+
+	start, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	t.Cleanup(func() { _ = syscall.Kill(-pid, syscall.SIGKILL) })
+
+	driver := &upgradeHeadlessDriver{wedgeDriver: newWedgeDriver(false), pid: pid}
+	sm.sessions["canny-headless"] = driver
+	sm.state.Sessions["canny-headless"] = &SessionState{
+		ID: "canny-headless", Name: "canny-headless", Agent: "sleeper",
+		Status: StatusRunning, DriverKind: DriverHeadless,
+		PID: driver.ProcessPID(), PIDStartTime: start,
+	}
+
+	listener, listenerPeer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		_ = listener.Close()
+		_ = listenerPeer.Close()
+	})
+
+	manifest, err := sm.PrepareUpgrade(listener.Fd(), "")
+	if err != nil {
+		t.Fatalf("PrepareUpgrade: %v", err)
+	}
+
+	if len(manifest.Sessions) != 1 {
+		t.Fatalf("manifest sessions = %+v, want one recorded headless process", manifest.Sessions)
+	}
+
+	got := manifest.Sessions[0]
+	if got.ID != "canny-headless" || got.HasPTY || got.Fd != -1 ||
+		got.PID != driver.ProcessPID() || got.PIDStartTime != start {
+		t.Fatalf("headless manifest entry = %+v, want identity without PTY handoff", got)
+	}
+}
+
+func TestCleanupUpgradeManifestTerminatesRecordedHeadlessProcess(t *testing.T) {
+	sm := sleeperSM(t)
+	pid := spawnReapableSleeper(t)
+
+	start, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	manifest := &UpgradeManifest{Sessions: []UpgradeSession{{
+		ID: "dreich-headless", Fd: -1, PID: pid, PIDStartTime: start,
+	}}}
+	if err := sm.cleanupUpgradeManifest(manifest); err != nil {
+		t.Fatalf("cleanupUpgradeManifest: %v", err)
+	}
+
+	if err := syscall.Kill(-pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("headless process group remains after replacement startup failure: %v", err)
 	}
 }
 

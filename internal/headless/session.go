@@ -288,6 +288,7 @@ func (s *Session) handlePermission(ev event) {
 
 	s.markDegraded()
 	s.scrollbackBanner("[graith] unexpected native permission prompt; check the agent's non_interactive_args")
+
 	inner := map[string]any{
 		"behavior": "deny",
 		"message":  "graith requires non-interactive agents; native permission prompt denied",

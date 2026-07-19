@@ -6,6 +6,7 @@ package commandpolicy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -48,6 +49,7 @@ func (c Config) execTimeout() time.Duration {
 	if c.ExecTimeout > 0 {
 		return c.ExecTimeout
 	}
+
 	return defaultExecTimeout
 }
 
@@ -58,8 +60,8 @@ type Availability struct {
 
 type Backend interface {
 	Name() string
-	Availability(Config) Availability
-	Evaluate(context.Context, Request, Config) (Decision, error)
+	Availability(cfg Config) Availability
+	Evaluate(ctx context.Context, req Request, cfg Config) (Decision, error)
 }
 
 func BackendByName(name string) (Backend, error) {
@@ -89,12 +91,15 @@ func shellCommand(toolName, toolInput string) (string, bool, error) {
 	if err := json.Unmarshal([]byte(toolInput), &input); err != nil {
 		return "", true, fmt.Errorf("parse shell tool input: %w", err)
 	}
+
 	command := input.Command
 	if command == "" {
 		command = input.Cmd
 	}
+
 	if strings.TrimSpace(command) == "" {
-		return "", true, fmt.Errorf("shell tool input has no command")
+		return "", true, errors.New("shell tool input has no command")
 	}
+
 	return command, true, nil
 }

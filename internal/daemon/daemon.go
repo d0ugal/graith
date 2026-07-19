@@ -347,6 +347,7 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 		case "permission_prompt":
 			status = "error"
 			staleness = hookTerminalWindow
+
 			sm.log.Error("agent emitted an unexpected native permission prompt", "session_id", sr.SessionID)
 		default:
 			sm.log.Info("ignoring notification subtype",
@@ -360,6 +361,7 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 		// prompting. Surface it as a runtime configuration error.
 		status = "error"
 		staleness = hookTerminalWindow
+
 		sm.log.Error("agent emitted an unexpected PermissionRequest", "session_id", sr.SessionID)
 	case "Stop":
 		status = "ready"
@@ -675,120 +677,297 @@ func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
 	// would take the read lock and deadlock).
 	lc := sm.cfg.Lifecycle
 
+	type terminationCandidate struct {
+		stateID, label, summary string
+		pid                     int
+		startTime               int64
+	}
+
+	type adoptedSession struct {
+		id     string
+		driver SessionDriver
+	}
+
 	var (
-		adoptedIDs       []string
-		rejectedSessions []UpgradeSession
-		adoptionErrs     []error
+		adopted       []adoptedSession
+		adoptedIDs    = make(map[string]struct{})
+		adoptedPIDs   = make(map[int]struct{})
+		candidates    []terminationCandidate
+		candidateKeys = make(map[string]struct{})
+		adoptionErrs  []error
+		closedFDs     = make(map[int]struct{})
+		preflightBad  bool
 	)
 
+	closeFD := func(us UpgradeSession) {
+		if !us.HasPTY || us.Fd < 0 {
+			return
+		}
+
+		if _, closed := closedFDs[us.Fd]; closed {
+			return
+		}
+
+		closedFDs[us.Fd] = struct{}{}
+		if f := os.NewFile(uintptr(us.Fd), "rejected-upgrade-session"); f != nil {
+			_ = f.Close()
+		}
+	}
+	schedule := func(stateID, label string, pid int, startTime int64, summary string) {
+		key := fmt.Sprintf("%s:%d", stateID, pid)
+		if stateID == "" {
+			key = fmt.Sprintf("manifest:%s:%d", label, pid)
+		}
+
+		if _, exists := candidateKeys[key]; exists {
+			return
+		}
+
+		candidateKeys[key] = struct{}{}
+
+		candidates = append(candidates, terminationCandidate{
+			stateID: stateID, label: label, summary: summary, pid: pid, startTime: startTime,
+		})
+	}
+	scheduleState := func(id, summary string) {
+		if sess := sm.state.Sessions[id]; sess != nil && sess.PID > 1 {
+			schedule(id, id, sess.PID, sess.PIDStartTime, summary)
+		}
+	}
+
+	// Preflight the entire manifest before attaching any PTY. If one entry
+	// cannot be authenticated, no process is adopted into a daemon that will
+	// immediately abort; every verifiable process is instead terminated below.
 	for _, us := range manifest.Sessions {
 		sessState, ok := sm.state.Sessions[us.ID]
 		if !ok {
-			// Never attach an inherited PTY to state we could not authenticate.
-			// Closing the inherited master normally delivers SIGHUP to the old
-			// process; startup still fails below because we cannot safely prove
-			// the PID belongs to that missing state entry.
-			if f := os.NewFile(uintptr(us.Fd), "rejected-upgrade-session"); f != nil {
-				_ = f.Close()
-			}
+			closeFD(us)
+			schedule("", us.ID, us.PID, us.PIDStartTime, "")
 			adoptionErrs = append(adoptionErrs, fmt.Errorf("upgrade manifest references unknown session %q", us.ID))
-			sm.log.Error("refusing unknown session from upgrade manifest", "id", us.ID, "pid", us.PID)
+			preflightBad = true
+
 			continue
 		}
-		if sessState.PID > 1 && sessState.PID != us.PID {
-			if f := os.NewFile(uintptr(us.Fd), "rejected-upgrade-session"); f != nil {
-				_ = f.Close()
+
+		if sessState.PID <= 1 || sessState.PID != us.PID {
+			closeFD(us)
+			scheduleState(us.ID, "Stopped after invalid daemon-upgrade process identity")
+
+			manifestStateID := ""
+			if sessState.PID <= 1 {
+				manifestStateID = us.ID
 			}
+
+			schedule(manifestStateID, us.ID, us.PID, us.PIDStartTime, "Stopped after invalid daemon-upgrade process identity")
 			adoptionErrs = append(adoptionErrs, fmt.Errorf("upgrade session %q PID mismatch: state has %d, manifest has %d", us.ID, sessState.PID, us.PID))
+			preflightBad = true
+
+			continue
+		}
+
+		if us.PIDStartTime != 0 && sessState.PIDStartTime != 0 && us.PIDStartTime != sessState.PIDStartTime {
+			closeFD(us)
+			scheduleState(us.ID, "Stopped after invalid daemon-upgrade process identity")
+			adoptionErrs = append(adoptionErrs, fmt.Errorf("upgrade session %q process start-time mismatch", us.ID))
+			preflightBad = true
+
 			continue
 		}
 
 		if reason := unsafeUpgradeAdoptionReason(sessState); reason != "" {
-			if f := os.NewFile(uintptr(us.Fd), "rejected-upgrade-session"); f != nil {
-				_ = f.Close()
-			}
-			sessState.Status = StatusStopped
-			sessState.StatusChangedAt = time.Now()
-			applyLifecycleSummaryLocked(sessState, "Stopped during incompatible security-model upgrade")
-			rejectedSessions = append(rejectedSessions, us)
+			closeFD(us)
+			scheduleState(us.ID, "Stopped during incompatible security-model upgrade")
 			sm.log.Warn("terminating upgrade session that lacks sandbox/non-interactive proof", "id", us.ID, "pid", us.PID, "reason", reason)
 
 			continue
 		}
 
-		logPath := filepath.Join(sm.paths.LogDir, us.ID+".log")
+		currentStart, err := grpty.ProcessStartTime(us.PID)
+		if err != nil || currentStart != sessState.PIDStartTime {
+			closeFD(us)
+			scheduleState(us.ID, "Stopped after invalid daemon-upgrade process identity")
+			adoptionErrs = append(adoptionErrs, fmt.Errorf("upgrade session %q process identity cannot be verified (recorded=%d, current=%d, err=%w)", us.ID, sessState.PIDStartTime, currentStart, err))
+			preflightBad = true
+		}
+	}
 
-		ptySess, err := grpty.AdoptSession(grpty.AdoptOpts{
-			ID:             us.ID,
-			Fd:             uintptr(us.Fd),
-			PID:            us.PID,
-			LogPath:        logPath,
-			MaxLogSize:     lc.MaxLogBytesOrDefault(),
-			DefaultRows:    lc.DefaultRowsOrDefault(),
-			DefaultCols:    lc.DefaultColsOrDefault(),
-			HydrationBytes: lc.ScrollbackHydrationBytesOrDefault(),
-			PollTimeout:    lc.AdoptedTimeoutDuration(),
-			PollInterval:   lc.AdoptedPollIntervalDuration(),
-			Logger:         sm.log,
-		})
-		if err != nil {
-			sm.log.Warn("failed to adopt session", "id", us.ID, "err", err)
+	if preflightBad {
+		for _, us := range manifest.Sessions {
+			closeFD(us)
+			scheduleState(us.ID, "Stopped because secure daemon upgrade preflight failed")
+		}
+	} else {
+		for _, us := range manifest.Sessions {
+			if !us.HasPTY {
+				continue
+			}
 
-			sessState.Status = StatusStopped
-			sessState.StatusChangedAt = time.Now()
-			applyLifecycleSummaryLocked(sessState, "Lost during daemon upgrade")
+			sessState := sm.state.Sessions[us.ID]
+			if unsafeUpgradeAdoptionReason(sessState) != "" {
+				continue
+			}
 
+			logPath := filepath.Join(sm.paths.LogDir, us.ID+".log")
+
+			ptySess, err := grpty.AdoptSession(grpty.AdoptOpts{
+				ID: us.ID, Fd: uintptr(us.Fd), PID: us.PID, LogPath: logPath,
+				MaxLogSize: lc.MaxLogBytesOrDefault(), DefaultRows: lc.DefaultRowsOrDefault(),
+				DefaultCols: lc.DefaultColsOrDefault(), HydrationBytes: lc.ScrollbackHydrationBytesOrDefault(),
+				PollTimeout: lc.AdoptedTimeoutDuration(), PollInterval: lc.AdoptedPollIntervalDuration(), Logger: sm.log,
+			})
+			if err != nil {
+				sm.log.Warn("failed to adopt session", "id", us.ID, "err", err, "action", "terminate process")
+				scheduleState(us.ID, "Lost during daemon upgrade")
+
+				continue
+			}
+
+			sm.sessions[us.ID] = ptySess
+			adopted = append(adopted, adoptedSession{id: us.ID, driver: ptySess})
+			adoptedIDs[us.ID] = struct{}{}
+			adoptedPIDs[us.PID] = struct{}{}
+			sm.log.Info("adopted session", "id", us.ID, "pid", us.PID)
+		}
+	}
+
+	// Headless drivers have no PTY to hand off, and a PTY may also have been
+	// omitted after an old-daemon fd error. Neither may survive unmanaged.
+	for id, sess := range sm.state.Sessions {
+		if sess.Status != StatusRunning || sess.PID <= 1 {
 			continue
 		}
 
-		if st, err := grpty.ProcessStartTime(us.PID); err == nil {
-			sessState.PIDStartTime = st
+		if _, ok := adoptedIDs[id]; ok {
+			continue
 		}
 
-		sm.sessions[us.ID] = ptySess
-		sm.startWatcher(us.ID, ptySess)
-		adoptedIDs = append(adoptedIDs, us.ID)
-		sm.log.Info("adopted session", "id", us.ID, "pid", us.PID)
+		summary := "Stopped during daemon upgrade"
+		if reason := unsafeUpgradeAdoptionReason(sess); reason != "" {
+			summary = "Stopped during incompatible security-model upgrade"
+		} else if sess.DriverKind == DriverHeadless {
+			summary = "Headless session stopped during daemon upgrade"
+		}
+
+		scheduleState(id, summary)
 	}
 
 	sm.mu.Unlock()
 
-	// Old manifests do not carry the non-interactive launch proof introduced by
-	// the sandbox-only security model. Terminate those process groups outside
-	// sm.mu so a bounded SIGTERM/SIGKILL wait cannot stall daemon state access.
-	killed := make(map[string]int, len(rejectedSessions))
-	for _, us := range rejectedSessions {
-		if err := killProcessGroup(us.PID, lc.ProcessKillGraceDuration()); err != nil {
-			adoptionErrs = append(adoptionErrs, fmt.Errorf("terminate incompatible upgrade session %q: %w", us.ID, err))
+	type terminationResult struct {
+		candidate terminationCandidate
+		err       error
+	}
+
+	results := make([]terminationResult, 0, len(candidates))
+	for _, candidate := range candidates {
+		if _, inUse := adoptedPIDs[candidate.pid]; inUse {
+			results = append(results, terminationResult{candidate: candidate, err: fmt.Errorf("PID %d is shared with an adopted session", candidate.pid)})
 			continue
 		}
-		killed[us.ID] = us.PID
+
+		_, err := sm.killVerifiedProcess(candidate.pid, candidate.startTime)
+
+		results = append(results, terminationResult{candidate: candidate, err: err})
+		if err != nil {
+			adoptionErrs = append(adoptionErrs, fmt.Errorf("terminate unadopted upgrade session %q: %w", candidate.label, err))
+		}
 	}
 
 	sm.mu.Lock()
-	for id, pid := range killed {
-		if sess, ok := sm.state.Sessions[id]; ok && sess.PID == pid {
-			sess.PID = 0
-			sess.PIDStartTime = 0
+	for _, result := range results {
+		candidate := result.candidate
+		if candidate.stateID == "" {
+			continue
 		}
+
+		sess := sm.state.Sessions[candidate.stateID]
+		if sess == nil || (sess.PID > 1 && sess.PID != candidate.pid) {
+			continue
+		}
+
+		sess.StatusChangedAt = time.Now()
+		if result.err != nil {
+			sess.Status = StatusErrored
+			applyLifecycleSummaryLocked(sess, fmt.Sprintf("Daemon upgrade could not terminate PID %d: %v", candidate.pid, result.err))
+
+			continue
+		}
+
+		sess.Status = StatusStopped
+		sess.PID = 0
+		sess.PIDStartTime = 0
+		applyLifecycleSummaryLocked(sess, candidate.summary)
 	}
+
 	saveErr := sm.saveState()
 	sm.mu.Unlock()
 
-	for _, id := range adoptedIDs {
-		go sm.notifyUnreadInbox(id)
+	if saveErr != nil {
+		adoptionErrs = append(adoptionErrs, saveErr)
 	}
 
-	return errors.Join(append(adoptionErrs, saveErr)...)
+	if len(adoptionErrs) > 0 {
+		// A daemon that aborts startup cannot retain ownership of partially
+		// adopted processes. Tear them down before returning the fatal error.
+		for _, session := range adopted {
+			teardownErr := sm.teardownLiveDriver(session.driver)
+			sm.mu.Lock()
+			if sess := sm.state.Sessions[session.id]; sess != nil {
+				sess.StatusChangedAt = time.Now()
+
+				if teardownErr == nil {
+					delete(sm.sessions, session.id)
+
+					sess.Status = StatusStopped
+					sess.PID = 0
+					sess.PIDStartTime = 0
+					applyLifecycleSummaryLocked(sess, "Stopped because secure daemon upgrade failed")
+				} else {
+					sess.Status = StatusErrored
+					applyLifecycleSummaryLocked(sess, fmt.Sprintf("Secure daemon upgrade failed and PID %d could not be terminated: %v", sess.PID, teardownErr))
+				}
+			}
+			sm.mu.Unlock()
+
+			if teardownErr != nil {
+				adoptionErrs = append(adoptionErrs, fmt.Errorf("terminate adopted session %q after upgrade failure: %w", session.id, teardownErr))
+			}
+		}
+
+		sm.mu.Lock()
+		if err := sm.saveState(); err != nil {
+			adoptionErrs = append(adoptionErrs, err)
+		}
+		sm.mu.Unlock()
+
+		return errors.Join(adoptionErrs...)
+	}
+
+	for _, session := range adopted {
+		sm.startWatcher(session.id, session.driver)
+		go sm.notifyUnreadInbox(session.id)
+	}
+
+	return nil
 }
 
 func unsafeUpgradeAdoptionReason(sess *SessionState) string {
+	if sess.PID <= 1 {
+		return "session has no recorded process ID"
+	}
+
+	if sess.PIDStartTime == 0 {
+		return "session has no recorded process identity"
+	}
+
 	if !sess.Sandboxed {
 		return "session was not recorded as OS-sandboxed"
 	}
+
 	if sess.CreationCfg == nil {
 		return "session has no recorded launch configuration"
 	}
+
 	if sess.CreationCfg.Agent.NonInteractiveArgs == nil {
 		return "session has no recorded non-interactive launch arguments"
 	}

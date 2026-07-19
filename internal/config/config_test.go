@@ -187,6 +187,7 @@ func TestIdleTimeoutDuration(t *testing.T) {
 
 func TestCommandPolicyTimeoutDuration(t *testing.T) {
 	t.Parallel()
+
 	for _, tt := range []struct {
 		name, raw string
 		want      time.Duration
@@ -197,6 +198,7 @@ func TestCommandPolicyTimeoutDuration(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			if got := (CommandPolicy{Timeout: tt.raw}).TimeoutDuration(); got != tt.want {
 				t.Fatalf("TimeoutDuration() = %v, want %v", got, tt.want)
 			}
@@ -206,6 +208,7 @@ func TestCommandPolicyTimeoutDuration(t *testing.T) {
 
 func TestCommandPolicyValidate(t *testing.T) {
 	t.Parallel()
+
 	tests := []struct {
 		name string
 		cfg  CommandPolicy
@@ -227,6 +230,7 @@ func TestCommandPolicyValidate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			if got := tt.cfg.Validate(); (got != nil) != tt.err {
 				t.Fatalf("Validate() error = %v, want error=%v", got, tt.err)
 			}
@@ -362,6 +366,7 @@ idle_timeout = "0"
 func TestLoadCommandPolicy(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
+
 	data := `
 [command_policy]
 backend = "builtin"
@@ -373,13 +378,16 @@ deny = ["rm @*"]
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	loaded, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !loaded.CommandPolicy.Enabled() || loaded.CommandPolicy.TimeoutDuration() != 8*time.Second {
 		t.Fatalf("command policy = %+v", loaded.CommandPolicy)
 	}
+
 	if len(loaded.CommandPolicy.Builtin.Allow) != 1 || len(loaded.CommandPolicy.Builtin.Deny) != 1 {
 		t.Fatalf("builtin rules = %+v", loaded.CommandPolicy.Builtin)
 	}
@@ -2628,6 +2636,7 @@ func TestOrchestratorSandboxBackwardCompat(t *testing.T) {
 func TestLoadCommandPolicyRejectsUnknownBuiltinKeys(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
+
 	data := `
 [command_policy]
 backend = "builtin"
@@ -2637,6 +2646,7 @@ dney = ["rm @*"]
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := Load(path); err == nil {
 		t.Fatal("Load should reject a misspelled command-policy key")
 	}
@@ -2645,6 +2655,7 @@ dney = ["rm @*"]
 func TestLoadRejectsRemovedApprovalsConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
+
 	data := `
 [approvals]
 backend = "auto"
@@ -2652,6 +2663,7 @@ backend = "auto"
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	_, err := Load(path)
 	if err == nil || !strings.Contains(err.Error(), "[approvals] was removed") {
 		t.Fatalf("Load removed config = %v, want explicit breaking-transition error", err)
@@ -2661,6 +2673,7 @@ backend = "auto"
 func TestLoadCommandPolicyRejectsUnknownTopLevelKey(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
+
 	data := `
 [command_policy]
 backend = "localmost"
@@ -2669,6 +2682,7 @@ commnad = "localmost"
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	_, err := Load(path)
 	if err == nil || !strings.Contains(err.Error(), "commnad") {
 		t.Fatalf("Load misspelled policy key = %v, want strict security-namespace error", err)
@@ -2678,6 +2692,7 @@ commnad = "localmost"
 func TestLoadCommandPolicyRuleTables(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
+
 	data := `
 [command_policy]
 backend = "builtin"
@@ -2690,10 +2705,12 @@ rule = "rm @arg*"
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	loaded, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(loaded.CommandPolicy.Builtin.Allow) != 1 || len(loaded.CommandPolicy.Builtin.Deny) != 1 {
 		t.Fatalf("rules = %+v", loaded.CommandPolicy.Builtin)
 	}

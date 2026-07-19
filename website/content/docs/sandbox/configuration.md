@@ -91,10 +91,20 @@ An allow means “continue to sandbox enforcement”; it never bypasses filesyst
 process, signal, or network restrictions. A deny blocks immediately. Interactive
 results (`ask`/`defer`), malformed output, timeouts, backend errors, and an
 unavailable configured backend all fail closed without waiting for a human.
+The generated hook uses a shorter hard-deadline worker inside the agent hook
+runner's deadline. Worker crashes, signals, malformed responses, and transport
+timeouts become native deny responses; failure to start the supervisor returns
+the hook runner's blocking exit code instead of continuing the command.
 
 Configured policy availability is checked at session creation and resume. The
 session does not start if enforcement cannot be established. `timeout` defaults
 to `5s`, must be positive, and may not exceed `60s`.
+
+Command policy is currently enforceable for the built-in Claude and Codex
+agents. Graith rejects policy-enabled Cursor, OpenCode, Agy, and custom-agent
+sessions at startup because those integrations do not currently provide a
+verified synchronous deny contract. They remain fully usable with command
+policy disabled and are still constrained by the mandatory OS sandbox.
 
 Enabling, disabling, or otherwise changing `[command_policy]` marks existing
 sessions config-stale. Restart those sessions to install the exact policy hook

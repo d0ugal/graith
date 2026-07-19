@@ -741,7 +741,7 @@ write_dirs = ["~/.codex"]
 
 [agents.opencode]
 command = "opencode"
-non_interactive_args = ["--dangerously-skip-permissions"] # outer sandbox remains authoritative
+non_interactive_args = ["--auto"] # auto-approves asks; explicit OpenCode denies and the outer sandbox remain authoritative
 args = []
 resume_args = ["--session", "{agent_session_id}"]
 idle_timeout        = "1h"     # auto-stop after this long idle (0 disables)

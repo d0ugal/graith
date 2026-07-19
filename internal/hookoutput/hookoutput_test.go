@@ -8,20 +8,22 @@ import (
 
 func TestCommandPolicyNeverDefersToNativePrompt(t *testing.T) {
 	t.Parallel()
+
 	tests := []struct {
 		agent, decision, want string
 	}{
 		{"claude", "allow", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}`},
 		{"claude", "ask", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}`},
 		{"claude", "unknown", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}`},
-		{"codex", "allow", `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`},
-		{"codex", "defer", `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny"}}}`},
+		{"codex", "allow", ``},
+		{"codex", "defer", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"command policy denied execution"}}`},
 		{"cursor", "allow", `{"permission":"allow"}`},
 		{"cursor", "ask", `{"permission":"deny"}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.agent+"/"+tt.decision, func(t *testing.T) {
 			t.Parallel()
+
 			if got := CommandPolicy(tt.agent, tt.decision, ""); got != tt.want {
 				t.Fatalf("CommandPolicy() = %s, want %s", got, tt.want)
 			}

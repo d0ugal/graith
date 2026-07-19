@@ -4,6 +4,7 @@ import "testing"
 
 func TestShellCommandScope(t *testing.T) {
 	t.Parallel()
+
 	tests := []struct {
 		name, tool, input, want string
 		inScope                 bool
@@ -18,6 +19,7 @@ func TestShellCommandScope(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			got, inScope, err := shellCommand(tt.tool, tt.input)
 			if got != tt.want || inScope != tt.inScope || (err != nil) != tt.wantErr {
 				t.Fatalf("shellCommand() = (%q, %v, %v), want (%q, %v, error=%v)", got, inScope, err, tt.want, tt.inScope, tt.wantErr)
@@ -28,6 +30,7 @@ func TestShellCommandScope(t *testing.T) {
 
 func TestBackendByNameRejectsInteractiveAndAllowAllBackends(t *testing.T) {
 	t.Parallel()
+
 	for _, name := range []string{"", "prompt", "auto", "command", "external"} {
 		if _, err := BackendByName(name); err == nil {
 			t.Fatalf("BackendByName(%q) unexpectedly succeeded", name)
