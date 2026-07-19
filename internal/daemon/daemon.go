@@ -637,25 +637,12 @@ func (sm *SessionManager) LoadState() error {
 	return sm.saveState()
 }
 
-func (sm *SessionManager) loadStateForAdoption() error {
-	state, err := LoadStateForAdoption(sm.paths.StateFile)
-	if err != nil {
-		return err
-	}
-	state.Reconcile()
-	recoverInterruptedScenarioStarts(state, time.Now().UTC())
-	sm.state = state
-	sm.rebuildTokenIndex()
-	sm.rebuildDeviceTokenIndex()
-
-	return nil
-}
-
 func (sm *SessionManager) loadStateSnapshotForAdoption(data []byte) (int, error) {
 	state, originalVersion, err := LoadStateSnapshotForAdoption(data)
 	if err != nil {
 		return 0, err
 	}
+
 	state.Reconcile()
 	recoverInterruptedScenarioStarts(state, time.Now().UTC())
 	sm.state = state
@@ -775,12 +762,14 @@ func (sm *SessionManager) adoptSessions(
 	lc := sm.cfg.Lifecycle
 	adoptSession := sm.adoptSession
 	sm.mu.RUnlock()
+
 	if adoptSession == nil {
 		adoptSession = grpty.AdoptSession
 	}
 
 	sessions := slices.Clone(manifest.Sessions)
 	slices.SortFunc(sessions, func(a, b UpgradeSession) int { return strings.Compare(a.ID, b.ID) })
+
 	closeRejectedDescriptors := func(session UpgradeSession) error {
 		ptmx := os.NewFile(uintptr(session.Fd), "rejected-upgrade-pty")
 		if ptmx == nil {
@@ -792,9 +781,11 @@ func (sm *SessionManager) adoptSessions(
 
 			return errors.Join(errors.New("invalid inherited session descriptor"), scrollbackCloseErr)
 		}
+
 		scrollback, err := grpty.AdoptScrollback(uintptr(session.ScrollbackFd), "", lc.MaxLogBytesOrDefault())
 		if err != nil {
 			ptyCloseErr := ptmx.Close()
+
 			scrollbackCloseErr := adoptCloseDescriptor(session.ScrollbackFd)
 			if onDescriptorClosed != nil {
 				err = errors.Join(err,
@@ -804,8 +795,10 @@ func (sm *SessionManager) adoptSessions(
 
 			return errors.Join(errors.New("adopt rejected-session scrollback"), err)
 		}
+
 		drainErr := grpty.DrainTransferredPTY(ptmx, scrollback)
 		ptyCloseErr := ptmx.Close()
+
 		scrollbackCloseErr := scrollback.Close()
 		if onDescriptorClosed != nil {
 			drainErr = errors.Join(drainErr,
@@ -815,21 +808,26 @@ func (sm *SessionManager) adoptSessions(
 
 		return drainErr
 	}
+
 	var descriptorValidationErr error
+
 	for _, session := range sessions {
 		if err := secureTransferredDescriptor(session.Fd); err != nil {
 			descriptorValidationErr = errors.New("secure inherited session descriptor")
 			break
 		}
+
 		if err := secureTransferredDescriptor(session.ScrollbackFd); err != nil {
 			descriptorValidationErr = errors.New("secure inherited scrollback descriptor")
 			break
 		}
+
 		if err := grpty.ValidateTransferredScrollbackFD(uintptr(session.ScrollbackFd)); err != nil {
 			descriptorValidationErr = errors.New("inherited scrollback descriptor validation failed")
 			break
 		}
 	}
+
 	if descriptorValidationErr != nil {
 		for _, session := range sessions {
 			descriptorValidationErr = errors.Join(descriptorValidationErr, closeRejectedDescriptors(session))
@@ -837,21 +835,30 @@ func (sm *SessionManager) adoptSessions(
 
 		return UpgradeAdoptionResult{}, descriptorValidationErr
 	}
+
 	adoptedDrivers := make(map[string]SessionDriver)
-	var result UpgradeAdoptionResult
-	var identityErr error
+
+	var (
+		result      UpgradeAdoptionResult
+		identityErr error
+	)
+
 	unresolved := make(map[string]UpgradeSession)
 	addUnresolved := func(session UpgradeSession) {
 		unresolved[upgradeCleanupKey(session)] = session
 	}
+
 	for _, us := range sessions {
 		legacyAlreadyReaped := false
+
 		if us.PIDStartTime == 0 {
 			original := us
+
 			resolved, reaped, resolveErr := resolveUpgradeCleanupIdentity(us)
 			if resolveErr == nil {
 				us = resolved
 				legacyAlreadyReaped = reaped
+
 				if onIdentityResolved != nil {
 					onIdentityResolved(original, resolved)
 				}
@@ -859,42 +866,52 @@ func (sm *SessionManager) adoptSessions(
 				drainErr := closeRejectedDescriptors(us)
 				identityErr = errors.Join(identityErr,
 					errors.New("legacy upgrade process identity could not be verified"), drainErr)
+
 				continue
 			}
 		}
 
 		sm.mu.RLock()
 		state := sm.state.Sessions[us.ID]
+
 		persistedCleanup := UpgradeSession{ID: us.ID}
 		if state != nil && state.PID > 1 && state.PIDStartTime > 0 &&
 			(state.PID != us.PID || state.PIDStartTime != us.PIDStartTime) {
 			persistedCleanup.PID = state.PID
 			persistedCleanup.PIDStartTime = state.PIDStartTime
 		}
+
 		adoptable := state != nil && state.PID == us.PID && state.PIDStartTime == us.PIDStartTime &&
 			us.PIDStartTime > 0 && state.Status == StatusRunning && !state.IsSoftDeleted()
+
 		sm.mu.RUnlock()
+
 		if !adoptable {
 			drainErr := closeRejectedDescriptors(us)
+
 			cleaned, cleanupErr := legacyAlreadyReaped, error(nil)
 			if !cleaned {
 				cleaned, cleanupErr = terminateFailedUpgradeSession(us)
 			}
+
 			if cleaned {
 				result.ResolvedSessions = append(result.ResolvedSessions, us)
 			} else {
 				addUnresolved(us)
 			}
+
 			sm.mu.Lock()
 			if current := sm.state.Sessions[us.ID]; current != nil && current.PID == us.PID &&
 				current.PIDStartTime == us.PIDStartTime && us.PIDStartTime > 0 {
 				current.StatusChangedAt = time.Now()
 				if cleaned {
 					current.PID = 0
+
 					current.PIDStartTime = 0
 					if !current.IsSoftDeleted() {
 						current.Status = StatusStopped
 					}
+
 					applyLifecycleSummaryLocked(current, "Stopped because upgrade state was not adoptable")
 				} else {
 					current.Status = StatusErrored
@@ -902,6 +919,7 @@ func (sm *SessionManager) adoptSessions(
 				}
 			}
 			sm.mu.Unlock()
+
 			if persistedCleanup.PID > 1 {
 				sm.mu.Lock()
 				if current := sm.state.Sessions[us.ID]; current != nil &&
@@ -913,11 +931,13 @@ func (sm *SessionManager) adoptSessions(
 				sm.mu.Unlock()
 				addUnresolved(persistedCleanup)
 			}
+
 			sm.log.Warn("manifest session is not adoptable", "id", us.ID,
 				"cleanup_error", errors.Join(cleanupErr, drainErr))
 
 			continue
 		}
+
 		if onDescriptorsMoved != nil {
 			if err := onDescriptorsMoved(us.ID); err != nil {
 				return UpgradeAdoptionResult{}, err
@@ -925,6 +945,7 @@ func (sm *SessionManager) adoptSessions(
 		}
 
 		logPath := filepath.Join(sm.paths.LogDir, us.ID+".log")
+
 		ptySess, adoptErr := adoptSession(grpty.AdoptOpts{
 			ID:                   us.ID,
 			Fd:                   uintptr(us.Fd),
@@ -963,6 +984,7 @@ func (sm *SessionManager) adoptSessions(
 				}
 			}
 			sm.mu.Unlock()
+
 			if cleaned {
 				result.ResolvedSessions = append(result.ResolvedSessions, us)
 			} else {
@@ -973,37 +995,46 @@ func (sm *SessionManager) adoptSessions(
 		}
 
 		sm.mu.Lock()
+
 		state = sm.state.Sessions[us.ID]
 		if state == nil || state.PID != us.PID || state.PIDStartTime != us.PIDStartTime ||
 			state.Status != StatusRunning || state.IsSoftDeleted() {
 			sm.mu.Unlock()
+
 			cleanupDeadline := manifest.adoptionDeadline
 			if cleanupDeadline.IsZero() {
 				cleanupTimeout := lc.AdoptedTimeoutDuration()
 				if cleanupTimeout <= 0 {
 					cleanupTimeout = 5 * time.Second
 				}
+
 				cleanupDeadline = time.Now().Add(cleanupTimeout)
 			}
+
 			cleanupCtx, cancelCleanup := context.WithDeadline(context.Background(), cleanupDeadline)
 			cleanupErr := ptySess.RejectAdoption(cleanupCtx)
+
 			cancelCleanup()
+
 			cleaned := cleanupErr == nil
 			if cleaned {
 				result.ResolvedSessions = append(result.ResolvedSessions, us)
 			} else {
 				addUnresolved(us)
 			}
+
 			sm.log.Warn("adopted session failed final publication check", "id", us.ID,
 				"cleanup_error", cleanupErr)
 
 			continue
 		}
+
 		state.PID = us.PID
 		state.PIDStartTime = us.PIDStartTime
 		sm.sessions[us.ID] = ptySess
 		adoptedDrivers[us.ID] = ptySess
 		sm.mu.Unlock()
+
 		result.adoptedSessions = append(result.adoptedSessions, ptySess)
 		result.ResolvedSessions = append(result.ResolvedSessions, us)
 		sm.log.Info("adopted session", "id", us.ID, "pid", us.PID)
@@ -1013,21 +1044,27 @@ func (sm *SessionManager) adoptSessions(
 	if sm.state.UpgradeCleanup == nil {
 		sm.state.UpgradeCleanup = make(map[string]UpgradeCleanupState)
 	}
+
 	for key, session := range unresolved {
 		sm.state.UpgradeCleanup[key] = UpgradeCleanupState{
 			ID: session.ID, PID: session.PID, PIDStartTime: session.PIDStartTime,
 		}
 	}
+
 	stateData, err := sm.snapshotUpgradeStateLocked()
 	sm.mu.Unlock()
+
 	if err == nil && persist {
 		err = sm.persistUpgradeStateSnapshot(stateData)
 	}
+
 	err = errors.Join(err, identityErr)
+
 	if persist {
 		for _, session := range result.adoptedSessions {
 			session.StartAdoptedWaiter()
 		}
+
 		for id, driver := range adoptedDrivers {
 			sm.startWatcher(id, driver)
 		}
@@ -1036,6 +1073,7 @@ func (sm *SessionManager) adoptSessions(
 	for _, session := range unresolved {
 		result.UnresolvedSessions = append(result.UnresolvedSessions, session)
 	}
+
 	slices.SortFunc(result.UnresolvedSessions, func(a, b UpgradeSession) int {
 		return strings.Compare(upgradeCleanupKey(a), upgradeCleanupKey(b))
 	})

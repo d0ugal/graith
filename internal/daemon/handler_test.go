@@ -619,12 +619,15 @@ func TestAttachedInputRejectedDuringUpgradeClosesConnectionExplicitly(t *testing
 	if !ok {
 		t.Fatal("missing PTY")
 	}
+
 	session, ok := driver.(*grpty.Session)
 	if !ok {
 		t.Fatalf("driver = %T, want PTY session", driver)
 	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
+
 	release, err := session.QuiesceIOForUpgrade(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -634,14 +637,18 @@ func TestAttachedInputRejectedDuringUpgradeClosesConnectionExplicitly(t *testing
 	if err := h.writer.WriteFrame(protocol.ChannelData, []byte("canny retryable input")); err != nil {
 		t.Fatal(err)
 	}
+
 	env := h.expectType(t, "error")
+
 	var msg protocol.ErrorMsg
 	if err := protocol.DecodePayload(env, &msg); err != nil {
 		t.Fatal(err)
 	}
+
 	if !strings.Contains(msg.Message, "reconnect and retry") {
 		t.Fatalf("attach rejection = %q, want explicit retry", msg.Message)
 	}
+
 	select {
 	case <-h.done:
 	case <-time.After(time.Second):
@@ -1090,9 +1097,11 @@ func TestScreenSnapshotInvalidPayload(t *testing.T) {
 func TestUpgrade(t *testing.T) {
 	h := newTestHarness(t)
 	msg := protocol.UpgradeMsg{ExecPath: "/tmp/braw-gr", ClientVersion: version.Version}
+
 	go func() {
 		request := <-h.sm.upgradeCh
 		request.ready <- nil
+
 		<-request.proceed
 	}()
 
@@ -1114,10 +1123,13 @@ func TestUpgradeSameVersion(t *testing.T) {
 	h := newTestHarness(t)
 	msg := protocol.UpgradeMsg{ExecPath: "/tmp/test-gr", ClientVersion: version.Version}
 	requestSeen := make(chan *upgradeRequest, 1)
+
 	go func() {
 		request := <-h.sm.upgradeCh
 		requestSeen <- request
+
 		request.ready <- nil
+
 		<-request.proceed
 	}()
 
@@ -1140,6 +1152,7 @@ func TestUpgradeSameVersion(t *testing.T) {
 func TestUpgradePreparationRefusalKeepsHandlerServing(t *testing.T) {
 	h := newTestHarness(t)
 	msg := protocol.UpgradeMsg{ExecPath: "/tmp/canny-gr", ClientVersion: version.Version}
+
 	go func() {
 		request := <-h.sm.upgradeCh
 		request.ready <- refuseUpgrade("upgrade target terminal backend is unavailable")
@@ -1149,13 +1162,16 @@ func TestUpgradePreparationRefusalKeepsHandlerServing(t *testing.T) {
 	h.expectType(t, "upgrade_preflight_ok")
 	h.sendControl(t, "upgrade", msg)
 	env := h.expectType(t, "error")
+
 	var errMsg protocol.ErrorMsg
 	if err := protocol.DecodePayload(env, &errMsg); err != nil {
 		t.Fatal(err)
 	}
+
 	if errMsg.Message != "upgrade target terminal backend is unavailable" {
 		t.Errorf("error = %q", errMsg.Message)
 	}
+
 	select {
 	case <-h.done:
 		t.Fatal("handler returned after upgrade preparation refusal")
@@ -1197,6 +1213,7 @@ func TestUpgradeRequiresExactSingleUseSameConnectionPreflight(t *testing.T) {
 		h := newTestHarness(t)
 		h.sendControl(t, "upgrade", protocol.UpgradeMsg{ExecPath: "/tmp/braw-gr", ClientVersion: version.Version})
 		h.expectType(t, "error")
+
 		select {
 		case request := <-h.sm.upgradeCh:
 			t.Fatalf("direct upgrade reached control loop: %+v", request)
@@ -1213,6 +1230,7 @@ func TestUpgradeRequiresExactSingleUseSameConnectionPreflight(t *testing.T) {
 		h.expectType(t, "error")
 		h.sendControl(t, "upgrade", preflight)
 		h.expectType(t, "error")
+
 		select {
 		case request := <-h.sm.upgradeCh:
 			t.Fatalf("mismatched or replayed upgrade reached control loop: %+v", request)
@@ -1222,10 +1240,12 @@ func TestUpgradeRequiresExactSingleUseSameConnectionPreflight(t *testing.T) {
 
 	t.Run("malformed_preflight", func(t *testing.T) {
 		h := newTestHarness(t)
+
 		raw := []byte(`{"type":"upgrade_preflight","payload":{"exec_path":7,"client_version":"braw"}}`)
 		if err := h.writer.WriteFrame(protocol.ChannelControl, raw); err != nil {
 			t.Fatal(err)
 		}
+
 		h.expectType(t, "error")
 		h.sendControl(t, "upgrade", protocol.UpgradeMsg{ExecPath: "/tmp/braw-gr", ClientVersion: version.Version})
 		h.expectType(t, "error")
@@ -1236,13 +1256,16 @@ func TestUpgradeRequiresExactSingleUseSameConnectionPreflight(t *testing.T) {
 		preflight := protocol.UpgradeMsg{ExecPath: "/tmp/braw-gr", ClientVersion: version.Version}
 		h.sendControl(t, "upgrade_preflight", preflight)
 		h.expectType(t, "upgrade_preflight_ok")
+
 		raw := []byte(`{"type":"upgrade","payload":{"exec_path":7,"client_version":"braw"}}`)
 		if err := h.writer.WriteFrame(protocol.ChannelControl, raw); err != nil {
 			t.Fatal(err)
 		}
+
 		h.expectType(t, "error")
 		h.sendControl(t, "upgrade", preflight)
 		h.expectType(t, "error")
+
 		select {
 		case request := <-h.sm.upgradeCh:
 			t.Fatalf("malformed upgrade ticket replay reached control loop: %+v", request)
@@ -1253,10 +1276,12 @@ func TestUpgradeRequiresExactSingleUseSameConnectionPreflight(t *testing.T) {
 	t.Run("preparation_refusal_consumes_ticket", func(t *testing.T) {
 		h := newTestHarness(t)
 		msg := protocol.UpgradeMsg{ExecPath: "/tmp/strath-gr", ClientVersion: version.Version}
+
 		go func() {
 			request := <-h.sm.upgradeCh
 			request.ready <- refuseUpgrade("canny refusal")
 		}()
+
 		h.sendControl(t, "upgrade_preflight", msg)
 		h.expectType(t, "upgrade_preflight_ok")
 		h.sendControl(t, "upgrade", msg)
@@ -1271,46 +1296,61 @@ func TestUpgradeMutationGateDrainsCommittedResponseAndRejectsLaterAdmission(t *t
 	h.sendControl(t, "msg_pub", protocol.MsgPubMsg{
 		Stream: "topic:braw", SenderID: "canny", Body: "croft", Quiet: true,
 	})
+
 	deadline := time.Now().Add(time.Second)
+
 	for {
 		messages, err := h.sm.messages.Read("topic:braw", "", false, "")
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if len(messages) == 1 {
 			break
 		}
+
 		if time.Now().After(deadline) {
 			t.Fatal("msg_pub did not commit before blocked response")
 		}
+
 		time.Sleep(time.Millisecond)
 	}
+
 	if err := h.sm.beginUpgradeReservation(); err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(h.sm.endUpgradeReservation)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	waitErr := h.sm.waitMutationIdle(ctx)
+
 	cancel()
+
 	if !errors.Is(waitErr, context.DeadlineExceeded) {
 		t.Fatalf("mutation drain before response = %v, want deadline", waitErr)
 	}
+
 	h.expectType(t, "msg_published")
+
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
 	if err := h.sm.waitMutationIdle(ctx); err != nil {
 		cancel()
 		t.Fatalf("mutation did not drain after response: %v", err)
 	}
+
 	cancel()
 
 	h.sendControl(t, "msg_pub", protocol.MsgPubMsg{
 		Stream: "topic:braw", SenderID: "canny", Body: "bothy", Quiet: true,
 	})
 	h.expectType(t, "error")
+
 	messages, err := h.sm.messages.Read("topic:braw", "", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(messages) != 1 || messages[0].Body != "croft" {
 		t.Fatalf("post-reservation mutation changed durable messages: %+v", messages)
 	}
@@ -1319,10 +1359,12 @@ func TestUpgradeMutationGateDrainsCommittedResponseAndRejectsLaterAdmission(t *t
 func TestMutatingControlMessageTreatsAckReadsAsMutations(t *testing.T) {
 	encode := func(msgType string, payload any) protocol.Envelope {
 		t.Helper()
+
 		data, err := protocol.EncodeControl(msgType, payload)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		env, err := protocol.DecodeControl(data)
 		if err != nil {
 			t.Fatal(err)
@@ -1333,15 +1375,19 @@ func TestMutatingControlMessageTreatsAckReadsAsMutations(t *testing.T) {
 	if mutatingControlMessage(encode("msg_inbox", protocol.MsgInboxMsg{})) {
 		t.Fatal("read-only inbox request was classified as mutation")
 	}
+
 	if !mutatingControlMessage(encode("msg_inbox", protocol.MsgInboxMsg{Ack: true})) {
 		t.Fatal("acknowledging inbox request was classified as read-only")
 	}
+
 	if !mutatingControlMessage(encode("todo_add", protocol.TodoAddMsg{})) {
 		t.Fatal("todo mutation was classified as read-only")
 	}
+
 	if !mutatingControlMessage(encode("status_report", protocol.StatusReportMsg{})) {
 		t.Fatal("hook status report was classified as read-only")
 	}
+
 	if !mutatingControlMessage(encode("attach", protocol.AttachMsg{})) {
 		t.Fatal("stateful attach was classified as read-only")
 	}

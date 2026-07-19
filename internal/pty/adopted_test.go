@@ -16,31 +16,40 @@ func TestDegradedAdoptionDoesNotEnterBlockedScreenFactory(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+
 	reaped := false
+
 	t.Cleanup(func() {
 		if !reaped {
 			_ = cmd.Process.Kill()
 			_ = cmd.Wait()
 		}
 	})
+
 	startTime, err := ProcessStartTime(cmd.Process.Pid)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	readEnd, writeEnd, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	fd, err := syscall.Dup(int(readEnd.Fd()))
 	_ = readEnd.Close()
+
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	factoryEntered := make(chan struct{})
 	releaseFactory := make(chan struct{})
+
 	var factoryOnce sync.Once
+
 	logPath := filepath.Join(t.TempDir(), "dreich-blocked-factory.log")
+
 	session, err := AdoptSession(AdoptOpts{
 		ID: "dreich-blocked-factory", Fd: uintptr(fd), PID: cmd.Process.Pid,
 		ExpectedPIDStartTime: startTime,
@@ -51,14 +60,18 @@ func TestDegradedAdoptionDoesNotEnterBlockedScreenFactory(t *testing.T) {
 		screenFactory: func(cols, rows int) (Terminal, error) {
 			factoryOnce.Do(func() { close(factoryEntered) })
 			<-releaseFactory
+
 			return newCharmTerminal(cols, rows), nil
 		},
 	})
 	if err != nil {
 		_ = writeEnd.Close()
+
 		t.Fatal(err)
 	}
+
 	t.Cleanup(session.Close)
+
 	select {
 	case <-factoryEntered:
 		t.Fatal("raw-first adoption entered the blocked screen factory")
@@ -67,32 +80,41 @@ func TestDegradedAdoptionDoesNotEnterBlockedScreenFactory(t *testing.T) {
 
 	recoveryDone := make(chan error, 1)
 	go func() { recoveryDone <- session.RecoverTerminalAfterUpgrade() }()
+
 	select {
 	case <-factoryEntered:
 	case <-time.After(time.Second):
 		t.Fatal("owned recovery did not enter the screen factory")
 	}
+
 	marker := []byte("canny raw bytes during blocked recovery")
 	if _, err := writeEnd.Write(marker); err != nil {
 		t.Fatal(err)
 	}
+
 	drainDeadline := time.Now().Add(time.Second)
+
 	for {
 		data, readErr := os.ReadFile(logPath)
 		if readErr == nil && bytes.Contains(data, marker) {
 			break
 		}
+
 		if time.Now().After(drainDeadline) {
 			t.Fatalf("blocked screen recovery stalled raw PTY drainage: %q, err=%v", data, readErr)
 		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
+
 	select {
 	case err := <-recoveryDone:
 		t.Fatalf("blocked recovery returned early: %v", err)
 	case <-time.After(100 * time.Millisecond):
 	}
+
 	close(releaseFactory)
+
 	if err := <-recoveryDone; err != nil {
 		t.Fatal(err)
 	}
@@ -100,8 +122,11 @@ func TestDegradedAdoptionDoesNotEnterBlockedScreenFactory(t *testing.T) {
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
+
 	_ = writeEnd.Close()
+
 	session.StartAdoptedWaiter()
+
 	select {
 	case <-session.Done():
 		reaped = true
@@ -115,13 +140,16 @@ func TestAdoptSessionDefersExactWaiterUntilPublished(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+
 	reaped := false
+
 	t.Cleanup(func() {
 		if !reaped {
 			_ = cmd.Process.Kill()
 			_ = cmd.Wait()
 		}
 	})
+
 	startTime, err := ProcessStartTime(cmd.Process.Pid)
 	if err != nil {
 		t.Fatal(err)
@@ -131,8 +159,10 @@ func TestAdoptSessionDefersExactWaiterUntilPublished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	fd, err := syscall.Dup(int(readEnd.Fd()))
 	_ = readEnd.Close()
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,16 +178,20 @@ func TestAdoptSessionDefersExactWaiterUntilPublished(t *testing.T) {
 	})
 	if err != nil {
 		_ = writeEnd.Close()
+
 		t.Fatal(err)
 	}
+
 	t.Cleanup(s.Close)
 
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := writeEnd.Close(); err != nil {
 		t.Fatal(err)
 	}
+
 	select {
 	case <-s.Done():
 		t.Fatal("deferred waiter reaped before manager publication")
@@ -165,6 +199,7 @@ func TestAdoptSessionDefersExactWaiterUntilPublished(t *testing.T) {
 	}
 
 	s.StartAdoptedWaiter()
+
 	select {
 	case <-s.Done():
 		reaped = true

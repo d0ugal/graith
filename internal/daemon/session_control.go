@@ -444,6 +444,7 @@ func (sm *SessionManager) restartWithReasonModeContextLocked(ctx context.Context
 	if softDeleted {
 		return SessionState{}, errSoftDeleted(sm.sessionName(id))
 	}
+
 	if cleanupPending {
 		return SessionState{}, errors.New("session process cleanup from daemon upgrade is still pending")
 	}

@@ -221,6 +221,7 @@ func TestAdoptSessionPreservesPTYAfterTerminalHydrationFailure(t *testing.T) {
 	}
 
 	cmd := exec.Command("sleep", "30")
+
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -260,15 +261,19 @@ func TestAdoptSessionPreservesPTYAfterTerminalHydrationFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AdoptSession rejected a live PTY for derived-screen failure: %v", err)
 	}
+
 	if s == nil {
 		t.Fatal("AdoptSession returned nil session")
 	}
+
 	if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
 		t.Fatalf("adopted process was not preserved: %v", err)
 	}
+
 	if _, err := w.Write([]byte("canny live output\n")); err != nil {
 		t.Fatalf("transferred PTY was not serviceable after hydration failure: %v", err)
 	}
+
 	s.Close()
 
 	if _, err := w.Write([]byte("canny ownership probe")); !errors.Is(err, syscall.EPIPE) {
@@ -278,17 +283,21 @@ func TestAdoptSessionPreservesPTYAfterTerminalHydrationFailure(t *testing.T) {
 
 func TestAdoptSessionDrainsRawPTYBeforeScreenFactoryReturns(t *testing.T) {
 	cmd := exec.Command("sleep", "30")
+
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+
 	cleanupProcess := true
+
 	t.Cleanup(func() {
 		if cleanupProcess {
 			_ = cmd.Process.Kill()
 			_ = cmd.Wait()
 		}
 	})
+
 	startTime, err := ProcessStartTime(cmd.Process.Pid)
 	if err != nil {
 		t.Fatal(err)
@@ -298,19 +307,25 @@ func TestAdoptSessionDrainsRawPTYBeforeScreenFactoryReturns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	fd, err := syscall.Dup(int(readEnd.Fd()))
 	_ = readEnd.Close()
+
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	logPath := filepath.Join(t.TempDir(), "canny-prompt-drain.log")
 	factoryStarted := make(chan struct{})
 	releaseFactory := make(chan struct{})
+
 	type result struct {
 		session *Session
 		err     error
 	}
+
 	resultCh := make(chan result, 1)
+
 	go func() {
 		session, adoptErr := AdoptSession(AdoptOpts{
 			ID: "canny-prompt-drain", Fd: uintptr(fd), PID: cmd.Process.Pid,
@@ -320,6 +335,7 @@ func TestAdoptSessionDrainsRawPTYBeforeScreenFactoryReturns(t *testing.T) {
 			screenFactory: func(cols, rows int) (Terminal, error) {
 				close(factoryStarted)
 				<-releaseFactory
+
 				return newCharmTerminal(cols, rows), nil
 			},
 		})
@@ -331,29 +347,38 @@ func TestAdoptSessionDrainsRawPTYBeforeScreenFactoryReturns(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("screen factory did not start")
 	}
+
 	marker := []byte("dreich prompt bytes while helper starts")
 	if _, err := writeEnd.Write(marker); err != nil {
 		t.Fatal(err)
 	}
+
 	deadline := time.Now().Add(time.Second)
+
 	for {
 		data, readErr := os.ReadFile(logPath)
 		if readErr == nil && bytes.Contains(data, marker) {
 			break
 		}
+
 		if time.Now().After(deadline) {
 			t.Fatalf("raw PTY reader did not drain before helper return: %q, err=%v", data, readErr)
 		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
+
 	close(releaseFactory)
+
 	adopted := <-resultCh
 	if adopted.err != nil {
 		t.Fatal(adopted.err)
 	}
+
 	if err := writeEnd.Close(); err != nil {
 		t.Fatal(err)
 	}
+
 	_ = adopted.session.ForceKill()
 	select {
 	case <-adopted.session.Done():
@@ -361,11 +386,13 @@ func TestAdoptSessionDrainsRawPTYBeforeScreenFactoryReturns(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("adopted session did not stop")
 	}
+
 	adopted.session.Close()
 }
 
 func TestAdoptSessionOneShotFactoryFailureReplaysRetainedScreen(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "dreich-replay.log")
+
 	want := "canny retained screen"
 	if err := os.WriteFile(logPath, []byte("\x1b[2J\x1b[H"+want), 0o600); err != nil {
 		t.Fatal(err)
@@ -375,6 +402,7 @@ func TestAdoptSessionOneShotFactoryFailureReplaysRetainedScreen(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
@@ -384,14 +412,18 @@ func TestAdoptSessionOneShotFactoryFailureReplaysRetainedScreen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() { _ = w.Close() })
+
 	fd, err := syscall.Dup(int(r.Fd()))
 	_ = r.Close()
+
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var calls atomic.Int32
+
 	s, err := AdoptSession(AdoptOpts{
 		ID: "canny-replay", Fd: uintptr(fd), PID: cmd.Process.Pid,
 		LogPath: logPath, MaxLogSize: 1024 * 1024,
@@ -407,21 +439,26 @@ func TestAdoptSessionOneShotFactoryFailureReplaysRetainedScreen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(s.Close)
 
 	if got := s.ScreenPreview(); !strings.Contains(got, want) {
 		t.Fatalf("recovered preview = %q, want retained screen", got)
 	}
+
 	if got := calls.Load(); got != 2 {
 		t.Fatalf("factory calls = %d, want failed construction plus hydrated replacement", got)
 	}
+
 	s.setSize = func(*os.File, *creackpty.Winsize) error { return nil }
 	if err := s.Resize(25, 81); err != nil {
 		t.Fatalf("resize recovered screen: %v", err)
 	}
+
 	if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
 		t.Fatalf("recovery lost adopted process: %v", err)
 	}
+
 	if _, err := w.Write([]byte("braw live output\n")); err != nil {
 		t.Fatalf("recovery lost adopted descriptor: %v", err)
 	}
@@ -432,6 +469,7 @@ func TestDegradedScreenRecoveryBackoffPreservesAndReplaysRawOutput(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() { _ = sb.Close() })
 
 	now := time.Unix(1_700_000_000, 0)
@@ -446,6 +484,7 @@ func TestDegradedScreenRecoveryBackoffPreservesAndReplaysRawOutput(t *testing.T)
 		log:                  slog.New(slog.NewTextHandler(io.Discard, nil)),
 		screenFactory: func(cols, rows int) (Terminal, error) {
 			attempts++
+
 			if !available {
 				return nil, errors.New("injected persistent helper failure")
 			}
@@ -457,25 +496,31 @@ func TestDegradedScreenRecoveryBackoffPreservesAndReplaysRawOutput(t *testing.T)
 	if got := s.ScreenPreview(); got != "" {
 		t.Fatalf("preview during outage = %q, want empty", got)
 	}
+
 	if attempts != 1 {
 		t.Fatalf("initial attempts = %d, want 1", attempts)
 	}
 
 	var raw bytes.Buffer
+
 	for i := 0; i < 128; i++ {
 		chunk := []byte(fmt.Sprintf("canny-%03d\n", i))
 		raw.Write(chunk)
+
 		if _, err := sb.Write(chunk); err != nil {
 			t.Fatal(err)
 		}
+
 		s.mu.Lock()
 		_ = s.writeScreenLocked(chunk)
 		s.mu.Unlock()
 		_ = s.ScreenPreview()
 	}
+
 	if attempts != 1 {
 		t.Fatalf("attempts during recovery backoff = %d, want 1", attempts)
 	}
+
 	tail, err := sb.TailBytes(int64(raw.Len()))
 	if err != nil || !bytes.Equal(tail, raw.Bytes()) {
 		t.Fatalf("raw scrollback during outage was not preserved: len=%d err=%v", len(tail), err)
@@ -484,9 +529,11 @@ func TestDegradedScreenRecoveryBackoffPreservesAndReplaysRawOutput(t *testing.T)
 	available = true
 	now = now.Add(minScreenRecoveryBackoff)
 	preview := s.ScreenPreview()
+
 	if attempts != 2 {
 		t.Fatalf("attempts after backoff = %d, want one successful retry", attempts)
 	}
+
 	if !strings.Contains(preview, "canny-127") {
 		t.Fatalf("recovered preview did not hydrate retained output: %q", preview)
 	}
@@ -494,14 +541,19 @@ func TestDegradedScreenRecoveryBackoffPreservesAndReplaysRawOutput(t *testing.T)
 
 func TestAdoptSessionKthScreenFailurePreservesAllPTYsAndRecovers(t *testing.T) {
 	const sessionCount = 3
-	var factoryCalls atomic.Int32
-	var backendAvailable atomic.Bool
+
+	var (
+		factoryCalls     atomic.Int32
+		backendAvailable atomic.Bool
+	)
 	backendAvailable.Store(true)
+
 	factory := func(cols, rows int) (Terminal, error) {
 		call := factoryCalls.Add(1)
 		if call == 2 || !backendAvailable.Load() {
 			return nil, errors.New("injected terminal construction failure")
 		}
+
 		return newCharmTerminal(cols, rows), nil
 	}
 
@@ -510,21 +562,26 @@ func TestAdoptSessionKthScreenFailurePreservesAllPTYsAndRecovers(t *testing.T) {
 		writer  *os.File
 		cmd     *exec.Cmd
 	}
+
 	fixtures := make([]adoptedFixture, 0, sessionCount)
 	for i := range sessionCount {
 		cmd := exec.Command("sleep", "30")
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
+
 		r, w, err := os.Pipe()
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		fd, err := syscall.Dup(int(r.Fd()))
 		_ = r.Close()
+
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		session, err := AdoptSession(AdoptOpts{
 			ID: fmt.Sprintf("canny-%d", i), Fd: uintptr(fd), PID: cmd.Process.Pid,
 			LogPath:     filepath.Join(t.TempDir(), fmt.Sprintf("canny-%d.log", i)),
@@ -534,8 +591,10 @@ func TestAdoptSessionKthScreenFailurePreservesAllPTYsAndRecovers(t *testing.T) {
 		if err != nil {
 			t.Fatalf("adopt session %d: %v", i, err)
 		}
+
 		fixtures = append(fixtures, adoptedFixture{session: session, writer: w, cmd: cmd})
 	}
+
 	t.Cleanup(func() {
 		for _, fixture := range fixtures {
 			fixture.session.Close()
@@ -546,36 +605,46 @@ func TestAdoptSessionKthScreenFailurePreservesAllPTYsAndRecovers(t *testing.T) {
 	})
 
 	backendAvailable.Store(false)
+
 	if _, err := fixtures[1].writer.Write([]byte("canny raw recovery marker\n")); err != nil {
 		t.Fatal(err)
 	}
+
 	time.Sleep(50 * time.Millisecond)
 	backendAvailable.Store(true)
+
 	if _, err := fixtures[1].writer.Write([]byte("\x1b[2J\x1b[Hdreich recovery trigger")); err != nil {
 		t.Fatal(err)
 	}
+
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		_ = fixtures[1].session.ScreenPreview()
 		fixtures[1].session.mu.RLock()
 		_, degraded := fixtures[1].session.screen.(*unavailableTerminal)
 		fixtures[1].session.mu.RUnlock()
+
 		if !degraded {
 			break
 		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
+
 	fixtures[1].session.mu.RLock()
 	_, degraded := fixtures[1].session.screen.(*unavailableTerminal)
 	fixtures[1].session.mu.RUnlock()
+
 	if degraded {
 		t.Fatal("degraded screen did not recover when the factory became available")
 	}
+
 	tail, err := fixtures[1].session.Scrollback.TailBytes(1024)
 	if err != nil || !strings.Contains(string(tail), "canny raw recovery marker") ||
 		!strings.Contains(string(tail), "dreich recovery trigger") {
 		t.Fatalf("authoritative raw scrollback was not preserved: %q, err=%v", tail, err)
 	}
+
 	for i, fixture := range fixtures {
 		if err := fixture.cmd.Process.Signal(syscall.Signal(0)); err != nil {
 			t.Fatalf("session %d process was lost: %v", i, err)
@@ -588,14 +657,17 @@ func TestAdoptSessionRejectsProcessIdentityAndClosesOwnedDescriptor(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer writeEnd.Close()
+	defer closePTYTestResource(t, writeEnd)
+
 	ownedFD, err := syscall.Dup(int(readEnd.Fd()))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := readEnd.Close(); err != nil {
 		t.Fatal(err)
 	}
+
 	startTime, err := ProcessStartTime(os.Getpid())
 	if err != nil {
 		t.Fatal(err)
@@ -609,6 +681,7 @@ func TestAdoptSessionRejectsProcessIdentityAndClosesOwnedDescriptor(t *testing.T
 	if err == nil || !strings.Contains(err.Error(), "identity") {
 		t.Fatalf("AdoptSession error = %v, want identity rejection", err)
 	}
+
 	if _, err := writeEnd.Write([]byte("canny")); !errors.Is(err, syscall.EPIPE) {
 		t.Fatalf("write error = %v, want EPIPE proving adopted descriptor closed", err)
 	}

@@ -386,6 +386,7 @@ func (sm *SessionManager) captureNativeSessionIDContext(ctx context.Context, id,
 				default:
 				}
 			}
+
 			return
 		}
 

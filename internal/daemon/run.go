@@ -76,14 +76,18 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) (
 	if adoptFrom != "" {
 		return RunAdoptBootstrap(configFile, adoptFrom)
 	}
+
 	effectiveConfigFile, _, err := config.ResolveConfigPath(configFile)
 	if err != nil {
 		return fmt.Errorf("resolve effective config source: %w", err)
 	}
+
 	if err := grpty.PreparePinnedTerminalExecutable(); err != nil {
 		return fmt.Errorf("prepare terminal helper executable: %w", err)
 	}
+
 	defer grpty.ClosePinnedTerminalExecutable()
+
 	return run(cfg, paths, effectiveConfigFile, adoptFrom, nil, nil)
 }
 
@@ -93,11 +97,14 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) (
 // config cannot strand transferred descriptors or processes.
 func RunAdoptBootstrap(configFile, adoptFrom string) (returnErr error) {
 	capsuleRaw, ownershipFDRaw := captureUpgradeBootstrapEnvironment()
+
 	owned, capsuleErr := readInheritedOwnershipCapsule(capsuleRaw)
 	if owned == nil {
 		return fmt.Errorf("read upgrade ownership capsule: %w", capsuleErr)
 	}
+
 	adoptionDeadline := time.Now().Add(upgradeAdoptionTimeout)
+
 	ownership := newUpgradeOwnershipGuard(owned, adoptionDeadline)
 	defer func() { returnErr = errors.Join(returnErr, ownership.Cleanup()) }()
 	// The immutable capsule is the first trustworthy enumeration of every
@@ -106,26 +113,35 @@ func RunAdoptBootstrap(configFile, adoptFrom string) (returnErr error) {
 	if err := secureUpgradeManifestDescriptors(owned); err != nil {
 		return err
 	}
+
 	if capsuleErr != nil {
 		return fmt.Errorf("read upgrade ownership capsule: %w", capsuleErr)
 	}
+
 	readDeadline := time.Now().Add(upgradeManifestReadTimeout)
 	if readDeadline.After(adoptionDeadline) {
 		readDeadline = adoptionDeadline
 	}
+
 	readCtx, cancelRead := context.WithDeadline(context.Background(), readDeadline)
 	headerOwned, manifest, err := readInheritedManifestHandoff(readCtx, ownershipFDRaw)
+
 	cancelRead()
+
 	if err == nil {
 		err = validateInheritedManifestBinding(owned, headerOwned, manifest)
 	}
+
 	if err != nil {
 		return fmt.Errorf("read upgrade manifest body: %w", err)
 	}
+
 	if err := ownership.refine(headerOwned); err != nil {
 		return err
 	}
+
 	manifest.adoptionDeadline = adoptionDeadline
+
 	if err := grpty.PreparePinnedTerminalExecutable(); err != nil {
 		return fmt.Errorf("prepare terminal helper executable: %w", err)
 	}
@@ -136,13 +152,16 @@ func RunAdoptBootstrap(configFile, adoptFrom string) (returnErr error) {
 	} else {
 		cfg = config.Default()
 	}
+
 	if err != nil {
 		return fmt.Errorf("loading exact upgrade config snapshot: %w", err)
 	}
+
 	paths, err := config.ResolvePaths()
 	if err != nil {
 		return err
 	}
+
 	if cfg.DataDir != "" {
 		paths = paths.WithDataDir(cfg.DataDir)
 	}
@@ -158,12 +177,15 @@ func adoptUpgradeListener(
 	if manifest == nil || ownership == nil {
 		return nil, errors.New("upgrade listener ownership is unavailable")
 	}
+
 	f := os.NewFile(uintptr(manifest.ListenerFd), "listener")
 	if f == nil {
 		return nil, errors.New("inherited listener descriptor is invalid")
 	}
+
 	listener, conversionErr := net.FileListener(f)
 	closeErr := f.Close()
+
 	ownershipErr := ownership.consumeListener(closeErr)
 	if ownershipErr != nil {
 		if listener != nil {
@@ -175,9 +197,11 @@ func adoptUpgradeListener(
 			conversionErr,
 		)
 	}
+
 	if conversionErr != nil {
 		return nil, errors.New("inherited listener conversion failed")
 	}
+
 	if afterConversion != nil {
 		if err := afterConversion(); err != nil {
 			_ = listener.Close()
@@ -197,20 +221,25 @@ func run(
 	ownership *upgradeOwnershipGuard,
 ) (returnErr error) {
 	defer grpty.ClosePinnedTerminalExecutable()
+
 	if configFile == "" {
 		var err error
+
 		configFile, _, err = config.ResolveConfigPath("")
 		if err != nil {
 			return fmt.Errorf("resolve effective config source: %w", err)
 		}
 	}
+
 	if adoptFrom != "" {
 		if manifest == nil {
 			var err error
+
 			manifest, err = ReadManifest(adoptFrom)
 			if err != nil {
 				return fmt.Errorf("read upgrade manifest: %w", err)
 			}
+
 			ownership = newUpgradeOwnershipGuard(manifest)
 			defer func() { returnErr = errors.Join(returnErr, ownership.Cleanup()) }()
 		}
@@ -219,13 +248,16 @@ func run(
 			if err := validateUpgradeTargetDescriptor(manifest.Target); err != nil {
 				return err
 			}
+
 			if err := cleanupRetainedUpgradeTarget(manifest.Target.ExecPath); err != nil {
 				return err
 			}
+
 			if err := validateUpgradePathDescriptor(manifest, paths, configFile); err != nil {
 				return err
 			}
 		}
+
 		if manifest.Profile != paths.Profile {
 			return fmt.Errorf("profile mismatch: manifest has %q but daemon is %q", manifest.Profile, paths.Profile)
 		}
@@ -299,17 +331,21 @@ func run(
 				return err
 			}
 		}
+
 		originalStateVersion, err := sm.loadStateSnapshotForAdoption(manifest.StateSnapshot)
 		if err != nil {
 			var ve *StateVersionError
 			if errors.As(err, &ve) {
 				return fmt.Errorf("refusing to start: %w (downgrade would discard the newer state)", err)
 			}
+
 			return fmt.Errorf("refusing upgrade adoption with unreadable durable state: %w", err)
 		}
+
 		if err := sm.restoreUpgradeCleanup(); err != nil {
 			return err
 		}
+
 		sm.reconcileUpgradeCleanup()
 		// Exec preserves child parenthood but destroys the old Wait goroutines.
 		// Resolve every registry entry before any new helper can be created.
@@ -341,20 +377,25 @@ func run(
 		if err != nil {
 			return fmt.Errorf("persist upgrade adoption state: %w", err)
 		}
+
 		if len(adoption.UnresolvedSessions) > 0 {
 			return errors.New("upgrade adoption process cleanup remains unresolved")
 		}
+
 		if originalStateVersion < CurrentStateVersion {
 			if err := backupStateBeforeMigration(paths.StateFile, originalStateVersion, manifest.StateSnapshot); err != nil {
 				return fmt.Errorf("persist pre-migration upgrade state backup: %w", err)
 			}
 		}
+
 		if err := sm.saveState(); err != nil {
 			return fmt.Errorf("persist adopted upgrade state: %w", err)
 		}
+
 		if err := writeUpgradeJournalMarker(adoptFrom, manifest, upgradeJournalCommitted); err != nil {
 			return fmt.Errorf("persist committed upgrade adoption marker: %w", err)
 		}
+
 		for _, session := range adoption.ResolvedSessions {
 			ownership.disarmSession(session)
 		}
@@ -369,13 +410,16 @@ func run(
 		// the ownership guard is disarmed only after exact cleanup succeeds.
 		sm.reconcileUpgradeCleanup()
 		sm.mu.RLock()
+
 		adoptedDrivers := make(map[string]SessionDriver, len(manifest.Sessions))
 		for _, session := range manifest.Sessions {
 			if driver := sm.sessions[session.ID]; driver != nil {
 				adoptedDrivers[session.ID] = driver
 			}
 		}
+
 		sm.mu.RUnlock()
+
 		for id, driver := range adoptedDrivers {
 			sm.startWatcher(id, driver)
 		}
@@ -385,6 +429,7 @@ func run(
 		sm.resumeTombstones()
 		sm.reconcileSoftDeletedOrphans()
 		sm.cleanupOrphanedProcesses()
+
 		if err := removeUpgradeJournal(adoptFrom, manifest); err != nil {
 			// Adoption is already committed and its live PTYs have left the
 			// rollback guard. A stale private manifest is safer than turning a
@@ -403,6 +448,7 @@ func run(
 		if err := AcquirePIDFile(paths.PIDFile); err != nil {
 			return err
 		}
+
 		if err := recoverPendingUpgradeJournals(paths.RuntimeDir); err != nil {
 			ReleasePIDFile(paths.PIDFile)
 
@@ -437,9 +483,12 @@ func run(
 
 		if err := sm.restoreUpgradeCleanup(); err != nil {
 			_ = l.Close()
+
 			ReleasePIDFile(paths.PIDFile)
+
 			return err
 		}
+
 		sm.reconcileUpgradeCleanup()
 
 		// Finish any deletes interrupted mid-flight (crash/kill/power loss)
@@ -480,11 +529,13 @@ func run(
 
 	sm.configFile = configFile
 
-	var backgroundMu sync.Mutex
-	var backgroundGroup *daemonTaskGroup
-	var backgroundShutdown bool
-	var startBackground func() bool
-	startBackground = func() bool {
+	var (
+		backgroundMu       sync.Mutex
+		backgroundGroup    *daemonTaskGroup
+		backgroundShutdown bool
+	)
+
+	startBackground := func() bool {
 		group := newDaemonTaskGroup()
 		jobs := []func(context.Context){
 			sm.recoverTerminalScreensAfterUpgrade,
@@ -519,20 +570,24 @@ func run(
 			if err := sm.startRemoteRuntime(ctx); err != nil {
 				log.Error("[remote] startup failed; remote surface disabled", "err", err)
 			}
+
 			<-ctx.Done()
 			sm.stopRemoteRuntime()
 		})
+
 		for _, fn := range jobs {
-			fn := fn
 			group.Go(fn)
 		}
+
 		backgroundMu.Lock()
 		if backgroundShutdown || backgroundGroup != nil || !sm.installBackgroundTasks(group) {
 			backgroundMu.Unlock()
 			group.BeginDrain()
 			group.Activate()
+
 			return false
 		}
+
 		backgroundGroup = group
 		backgroundMu.Unlock()
 		group.Activate()
@@ -540,14 +595,19 @@ func run(
 		// work before Run owns a generation. Reconstruct those best-effort tasks
 		// only after the complete group is published.
 		sm.mu.RLock()
+
 		type recoveredCapture struct {
 			id, agent, worktree, stateRoot string
 			since                          time.Time
 			pid                            int
 			pidStartTime                   int64
 		}
-		var runningIDs []string
-		var captures []recoveredCapture
+
+		var (
+			runningIDs []string
+			captures   []recoveredCapture
+		)
+
 		for id, state := range sm.state.Sessions {
 			if state.Status == StatusRunning && sm.sessions[id] != nil {
 				runningIDs = append(runningIDs, id)
@@ -560,15 +620,16 @@ func run(
 				}
 			}
 		}
+
 		sm.mu.RUnlock()
+
 		for _, id := range runningIDs {
-			id := id
 			sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) {
 				sm.notifyUnreadInboxContext(taskCtx, id)
 			})
 		}
+
 		for _, capture := range captures {
-			capture := capture
 			sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) {
 				sm.captureNativeSessionIDContext(taskCtx, capture.id, capture.agent, capture.worktree,
 					capture.stateRoot, capture.since, capture.pid, capture.pidStartTime)
@@ -579,6 +640,7 @@ func run(
 	}
 	stopBackground := func(ctx context.Context) error {
 		backgroundMu.Lock()
+
 		group := backgroundGroup
 		if group == nil {
 			backgroundMu.Unlock()
@@ -586,12 +648,15 @@ func run(
 		}
 		backgroundMu.Unlock()
 		group.BeginDrain()
+
 		if err := group.Wait(ctx); err != nil {
 			return err
 		}
+
 		backgroundMu.Lock()
 		if backgroundGroup == group {
 			backgroundGroup = nil
+
 			sm.clearBackgroundTasks(group)
 		}
 		backgroundMu.Unlock()
@@ -603,23 +668,30 @@ func run(
 		group := backgroundGroup
 		shuttingDown := backgroundShutdown
 		backgroundMu.Unlock()
+
 		if group == nil {
 			if !shuttingDown {
 				sm.finishBackgroundPublication(startBackground(), after)
 			}
+
 			return
 		}
 		go func(expected *daemonTaskGroup) {
 			_ = expected.Wait(context.Background())
+
 			backgroundMu.Lock()
 			if backgroundGroup != expected {
 				backgroundMu.Unlock()
 				return
 			}
+
 			backgroundGroup = nil
+
 			sm.clearBackgroundTasks(expected)
+
 			shuttingDown := backgroundShutdown
 			backgroundMu.Unlock()
+
 			if !shuttingDown {
 				sm.finishBackgroundPublication(startBackground(), after)
 			}
@@ -630,15 +702,19 @@ func run(
 		backgroundShutdown = true
 		group := backgroundGroup
 		backgroundMu.Unlock()
+
 		if group != nil {
 			group.BeginDrain()
 		}
 	}
 	_ = startBackground()
+
 	defer func() {
 		beginBackgroundShutdown()
+
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+
 		_ = stopBackground(ctx)
 	}()
 
@@ -654,20 +730,24 @@ func run(
 		serverCancel()
 		srv.Shutdown()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+
 		drainErr := stopBackground(shutdownCtx)
 		if drainErr == nil {
 			drainErr = sm.waitLifecycleIdle(shutdownCtx)
 		}
+
 		if drainErr == nil {
 			drainErr = sm.waitMutationIdle(shutdownCtx)
 		}
 		shutdownCancel()
+
 		if drainErr != nil {
 			// Never close stores or publish a completed shutdown while admitted
 			// work can still mutate them. The bounded phase above cancels every
 			// owned surface; this fail-closed join handles a non-context-aware OS
 			// child without permitting late publication into closed state.
 			log.Warn("shutdown drain exceeded deadline; waiting for owned work", "err", drainErr)
+
 			_ = stopBackground(context.Background())
 			_ = sm.waitLifecycleIdle(context.Background())
 			_ = sm.waitMutationIdle(context.Background())
@@ -684,17 +764,22 @@ func run(
 		ReleasePIDFile(paths.PIDFile)
 	}, func(request *upgradeRequest) (returnErr error) {
 		defer sm.endUpgradeAttempt()
+
 		clientExecPath := request.execPath
+
 		log.Info("preparing upgrade")
+
 		fail := func(public string, err error) error {
 			request.ready <- errors.New(public)
 
 			return err
 		}
+
 		configSnapshot, configPresent, err := captureUpgradeConfigSnapshot(configFile)
 		if err != nil {
 			return fail("upgrade config snapshot could not be captured", err)
 		}
+
 		configSource := makeUpgradeConfigSource(configFile, configSnapshot, configPresent)
 
 		target, err := probeUpgradeTarget(clientExecPath, upgradeProbeExpectation{
@@ -705,7 +790,10 @@ func run(
 		if err != nil {
 			return fail(err.Error(), err)
 		}
-		defer target.pin.close()
+		defer func() {
+			returnErr = errors.Join(returnErr, target.pin.close())
+		}()
+
 		if err := sm.beginUpgradeReservation(); err != nil {
 			return fail(err.Error(), err)
 		}
@@ -720,9 +808,11 @@ func run(
 			if manifest != nil {
 				returnErr = errors.Join(returnErr, rollbackUpgradeDescriptors(manifest))
 			}
+
 			if listenerFile != nil {
 				_ = listenerFile.Close()
 			}
+
 			if manifestPath != "" {
 				if markerErr := writeUpgradeJournalMarker(manifestPath, manifest, upgradeJournalRolledBack); markerErr != nil {
 					returnErr = errors.Join(returnErr, unsafeUpgradeDescriptor(
@@ -732,19 +822,23 @@ func run(
 					_ = removeUpgradeJournalMarker(manifestPath, upgradeJournalRolledBack)
 				}
 			}
+
 			if hasUnsafeUpgradeDescriptor(returnErr) {
 				// An inheritable descriptor may still be live. Do not thaw any
 				// surface which can fork a child before runControlLoop performs
 				// fail-closed shutdown and the OS closes the descriptor table.
 				return
 			}
+
 			grpty.ThawTerminalHelpers()
+
 			if !backgroundDrainAttempted {
 				// The active generation owns retries until recovery succeeds or the
 				// generation is canceled. A drained generation is replaced below and
 				// its startup recovery job assumes the same ownership.
 				sm.startBackgroundTask(context.Background(), sm.recoverTerminalScreensAfterUpgrade)
 			}
+
 			if backgroundDrainAttempted {
 				// A timed-out drain remains the active generation and keeps the
 				// lifecycle reservation closed until every owned descendant exits
@@ -756,11 +850,14 @@ func run(
 		}()
 
 		admissionCtx, admissionCancel := context.WithTimeout(context.Background(), upgradeAdoptionTimeout)
+
 		admissionErr := sm.waitMutationIdle(admissionCtx)
 		if admissionErr == nil {
 			admissionErr = sm.waitLifecycleIdle(admissionCtx)
 		}
+
 		admissionCancel()
+
 		if admissionErr != nil {
 			return fail("accepted daemon mutations did not drain before upgrade", admissionErr)
 		}
@@ -768,8 +865,10 @@ func run(
 		if err := sm.preflightUpgradeSessions(target.capacity); err != nil {
 			return fail(err.Error(), err)
 		}
+
 		freezeCtx, freezeCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		freezeComplete := make(chan struct{})
+
 		go func() {
 			select {
 			case <-request.canceled:
@@ -777,21 +876,28 @@ func run(
 			case <-freezeComplete:
 			}
 		}()
+
 		helpers, err := grpty.FreezeTerminalHelpers(freezeCtx)
+
 		close(freezeComplete)
 		freezeCancel()
+
 		if err != nil {
 			return fail("terminal helper handoff could not be frozen", err)
 		}
+
 		if err := validateUpgradeHelperHandoff(target, helpers); err != nil {
 			return fail(err.Error(), err)
 		}
+
 		sm.mu.RLock()
 		sessionCount := len(sm.upgradePTYSessionIDsLocked())
 		sm.mu.RUnlock()
+
 		if err := validateUpgradeDescriptorBudget(sessionCount); err != nil {
 			return fail(err.Error(), err)
 		}
+
 		unixL, ok := l.(*net.UnixListener)
 		if !ok {
 			err := errors.New("upgrade failed: listener type mismatch")
@@ -810,12 +916,15 @@ func run(
 		if err != nil {
 			return fail("upgrade state could not be prepared", err)
 		}
+
 		manifest.Target = target.descriptor()
 		if err := sm.persistFrozenUpgradeState(manifest); err != nil {
 			return fail("upgrade state could not be persisted", err)
 		}
+
 		manifest.ConfigSnapshot = configSnapshot
 		manifest.ConfigPresent = configPresent
+
 		snapshotCfg := config.Default()
 		if manifest.ConfigPresent {
 			snapshotCfg, err = config.LoadBytes(configFile, manifest.ConfigSnapshot)
@@ -830,6 +939,7 @@ func run(
 		if err != nil {
 			return fail("upgrade config snapshot paths could not be resolved", err)
 		}
+
 		if snapshotDescriptor != manifest.Paths {
 			return fail("upgrade config snapshot changes the effective daemon paths",
 				refuseUpgrade("upgrade config changed during preparation"))
@@ -839,17 +949,21 @@ func run(
 		if err != nil {
 			return fail("upgrade manifest could not be written", err)
 		}
+
 		if err := prepareManifestHandoff(manifestPath, manifest); err != nil {
 			return fail("upgrade ownership handoff could not be prepared", err)
 		}
+
 		if err := prepareOwnershipCapsule(manifest); err != nil {
 			return fail("upgrade cleanup capsule could not be prepared", err)
 		}
+
 		if err := target.validateFileIdentity(); err != nil {
 			return fail(err.Error(), err)
 		}
 
 		request.ready <- nil
+
 		select {
 		case <-request.proceed:
 		case <-request.canceled:
@@ -857,12 +971,15 @@ func run(
 		}
 
 		log.Info("exec-ing new binary", "sessions", len(manifest.Sessions))
+
 		backgroundCtx, backgroundCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		backgroundDrainAttempted = true
+
 		if err := stopBackground(backgroundCtx); err != nil {
 			backgroundCancel()
 			return fmt.Errorf("upgrade background drain failed: %w", err)
 		}
+
 		backgroundCancel()
 
 		// Defers do not run across syscall.Exec. Stop lazy MCP children only
@@ -870,6 +987,7 @@ func run(
 		// usable and proxy clients can reconnect on demand.
 		mcpCtx, mcpCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		mcpDone := make(chan struct{})
+
 		go func() {
 			select {
 			case <-request.canceled:
@@ -877,9 +995,12 @@ func run(
 			case <-mcpDone:
 			}
 		}()
+
 		err = mcpMgr.FreezeAndDrain(mcpCtx)
+
 		close(mcpDone)
 		mcpCancel()
+
 		if err != nil {
 			mcpMgr.Thaw()
 			return fmt.Errorf("upgrade MCP drain failed: %w", err)
@@ -890,6 +1011,7 @@ func run(
 		// terminal I/O flowing throughout preflight and bounds the final gap.
 		ioCtx, ioCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		ioComplete := make(chan struct{})
+
 		go func() {
 			select {
 			case <-request.canceled:
@@ -897,22 +1019,28 @@ func run(
 			case <-ioComplete:
 			}
 		}()
+
 		releaseSessionIO, err := sm.quiesceSessionIO(ioCtx)
+
 		close(ioComplete)
 		ioCancel()
+
 		if err != nil {
 			mcpMgr.Thaw()
 			return fmt.Errorf("upgrade session I/O drain failed: %w", err)
 		}
+
 		execErr := sm.execPreparedUpgrade(target, manifest, manifestPath, configFile)
 		// Even fail-closed shutdown must let the PTY reader reach readDone;
 		// otherwise StopAll can wait forever on a read loop paused at the
 		// upgrade safe point. The manager reservation remains closed and every
 		// child-creating surface stays frozen on the unsafe path.
 		releaseSessionIO()
+
 		if !hasUnsafeUpgradeDescriptor(execErr) {
 			mcpMgr.Thaw()
 		}
+
 		if execErr != nil {
 			return fmt.Errorf("upgrade exec failed: %w", execErr)
 		}
@@ -926,6 +1054,7 @@ func resolvedUpgradeSnapshotPaths(snapshotCfg *config.Config, configFile string)
 	if err != nil {
 		return UpgradePathDescriptor{}, err
 	}
+
 	if snapshotCfg != nil && snapshotCfg.DataDir != "" {
 		paths = paths.WithDataDir(snapshotCfg.DataDir)
 	}
@@ -970,6 +1099,7 @@ func runControlLoop(
 
 					return err
 				}
+
 				log.Error("upgrade attempt failed; old daemon remains active", "err", err)
 			}
 		}

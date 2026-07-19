@@ -870,12 +870,15 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 		return SessionState{}, fmt.Errorf("acquire launch slot: %w", err)
 	}
+
 	if err := sm.lifecyclePreSpawnBarrier(); err != nil {
 		slot.release()
 		cleanupOnError()
+
 		if scratchDir != "" {
 			_ = os.RemoveAll(scratchDir)
 		}
+
 		rollbackState()
 
 		return SessionState{}, err
@@ -945,10 +948,13 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		_ = ptySess.Kill()
 		ptySess.Close()
 		cleanupOnError()
+
 		if scratchDir != "" {
 			_ = os.RemoveAll(scratchDir)
 		}
+
 		rollbackState()
+
 		_ = os.Remove(logPath)
 
 		return SessionState{}, err
@@ -980,6 +986,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	sessState.Status = StatusRunning
 	sessState.StatusChangedAt = time.Now()
 	sessState.LaunchGeneration = 1
+
 	if scrapesID(agentName) && agentSessionID == "" {
 		captureStartedAt := startedAt.UTC()
 		sessState.NativeStateRoot = env["CODEX_HOME"]

@@ -106,10 +106,12 @@ const terminalWriteChunkBytes = 512 * 1024
 func writeTerminalChunks(term Terminal, p []byte) error {
 	for len(p) > 0 {
 		chunk := p[:min(len(p), terminalWriteChunkBytes)]
+
 		n, err := term.Write(chunk)
 		if err != nil {
 			return err
 		}
+
 		if n != len(chunk) {
 			return io.ErrShortWrite
 		}
@@ -156,6 +158,7 @@ func (t *unavailableTerminal) Write([]byte) (int, error) { return 0, errTerminal
 func (t *unavailableTerminal) Resize(cols, rows int) error {
 	t.cols = max(cols, 1)
 	t.rows = max(rows, 1)
+
 	return errTerminalUnavailable
 }
 func (t *unavailableTerminal) Size() (int, int)         { return t.cols, t.rows }

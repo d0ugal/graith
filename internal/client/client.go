@@ -127,13 +127,14 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 
 				return nil, fmt.Errorf("preserve upgrade was not confirmed: %w; use 'gr daemon restart --force' only for an intentional clean restart", err)
 			}
+
 			c.Close()
 
 			if waitForNewDaemonGeneration(paths.SocketPath, paths, version.Version, priorInstanceID) {
 				return connect(cfg, paths, configFile, false)
 			}
 
-			return nil, fmt.Errorf("preserve upgrade readiness was not confirmed; use 'gr daemon restart --force' only for an intentional clean restart")
+			return nil, errors.New("preserve upgrade readiness was not confirmed; use 'gr daemon restart --force' only for an intentional clean restart")
 		}
 	}
 
@@ -210,6 +211,7 @@ func probeDaemonIdentity(sockPath string, paths config.Paths, aggregateDeadline 
 // actually serving (issue #1319). Bounded by the effective start policy.
 func waitForNewDaemonGeneration(sockPath string, paths config.Paths, wantVersion, priorInstanceID string) bool {
 	budget := maxDuration(daemonStartTimeout, upgradeReadinessFloor)
+
 	return pollDaemonReadyWithin(budget, func(deadline time.Time) bool {
 		v, id := probeDaemonIdentity(sockPath, paths, deadline)
 
@@ -227,28 +229,35 @@ func requestUpgrade(c *Client) error {
 		ExecPath:      execPath,
 		ClientVersion: version.Version,
 	}
+
 	negotiationTimeout := maxDuration(daemonHandshakeTimeout, upgradeNegotiationFloor)
 	if err := c.conn.SetDeadline(time.Now().Add(negotiationTimeout)); err != nil {
 		return errors.New("set upgrade negotiation deadline")
 	}
+
 	defer func() { _ = c.conn.SetDeadline(time.Time{}) }()
+
 	if err := c.SendControl("upgrade_preflight", msg); err != nil {
 		return errors.New("send upgrade preflight")
 	}
+
 	preflight, err := c.ReadControlResponse()
 	if err != nil {
 		return errors.New("read upgrade preflight response")
 	}
+
 	if preflight.Type != "upgrade_preflight_ok" {
 		return errors.New("daemon rejected upgrade preflight")
 	}
 	if err := c.SendControl("upgrade", msg); err != nil {
 		return errors.New("send confirmed upgrade request")
 	}
+
 	ack, err := c.ReadControlResponse()
 	if err != nil {
 		return errors.New("read upgrade acknowledgement")
 	}
+
 	if ack.Type != "upgrading" {
 		return errors.New("daemon did not acknowledge upgrade")
 	}

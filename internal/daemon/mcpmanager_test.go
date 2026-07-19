@@ -49,6 +49,7 @@ func TestMCPManagerConnectDisconnect(t *testing.T) {
 
 func TestMCPManagerUpgradeFreezeDrainsAndBarsConnect(t *testing.T) {
 	cfg := &config.Config{MCPServers: []config.MCPServerConfig{{Name: "canny", Command: "cat"}}}
+
 	mgr := NewMCPManager(cfg, nil, t.TempDir(), slog.Default())
 	defer mgr.Shutdown()
 
@@ -56,29 +57,35 @@ func TestMCPManagerUpgradeFreezeDrainsAndBarsConnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := mgr.FreezeAndDrain(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	select {
 	case <-proc.done:
 	default:
 		t.Fatal("upgrade freeze returned before the existing MCP child exited")
 	}
+
 	if _, err := mgr.Connect("canny", "croft-two", config.TemplateVars{}); err == nil ||
 		!strings.Contains(err.Error(), "frozen") {
 		t.Fatalf("Connect during upgrade freeze error = %v", err)
 	}
 
 	mgr.Thaw()
+
 	resumed, err := mgr.Connect("canny", "croft-two", config.TemplateVars{})
 	if err != nil {
 		t.Fatalf("Connect after failed-upgrade thaw: %v", err)
 	}
+
 	mgr.Disconnect("croft-two", resumed)
 }
 
 func TestMCPManagerFreezeWaitsForFrozenCommitChildReap(t *testing.T) {
 	cfg := &config.Config{MCPServers: []config.MCPServerConfig{{Name: "canny", Command: "cat"}}}
+
 	mgr := NewMCPManager(cfg, nil, t.TempDir(), slog.Default())
 	defer mgr.Shutdown()
 
@@ -89,40 +96,52 @@ func TestMCPManagerFreezeWaitsForFrozenCommitChildReap(t *testing.T) {
 		<-release
 	}
 	connectDone := make(chan error, 1)
+
 	go func() {
 		_, err := mgr.Connect("canny", "croft", config.TemplateVars{})
 		connectDone <- err
 	}()
+
 	<-started
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
+
 	freezeDone := make(chan error, 1)
 	go func() { freezeDone <- mgr.FreezeAndDrain(ctx) }()
+
 	for {
 		mgr.mu.Lock()
 		frozen := mgr.frozen
 		mgr.mu.Unlock()
+
 		if frozen {
 			break
 		}
+
 		time.Sleep(time.Millisecond)
 	}
+
 	select {
 	case err := <-freezeDone:
 		t.Fatalf("freeze returned while pending child was live: %v", err)
 	default:
 	}
+
 	close(release)
+
 	if err := <-connectDone; err == nil || !strings.Contains(err.Error(), "frozen") {
 		t.Fatalf("pending Connect error = %v, want frozen refusal", err)
 	}
+
 	if err := <-freezeDone; err != nil {
 		t.Fatalf("FreezeAndDrain error = %v", err)
 	}
+
 	mgr.mu.Lock()
 	creating, pending := mgr.creating, len(mgr.pending)
 	mgr.mu.Unlock()
+
 	if creating != 0 || pending != 0 {
 		t.Fatalf("creation ownership remains: creating=%d pending=%d", creating, pending)
 	}
@@ -130,6 +149,7 @@ func TestMCPManagerFreezeWaitsForFrozenCommitChildReap(t *testing.T) {
 
 func TestMCPManagerPendingLaunchRejectsReloadedConfig(t *testing.T) {
 	cfg := &config.Config{MCPServers: []config.MCPServerConfig{{Name: "canny", Command: "cat"}}}
+
 	mgr := NewMCPManager(cfg, nil, t.TempDir(), slog.Default())
 	defer mgr.Shutdown()
 
@@ -140,18 +160,23 @@ func TestMCPManagerPendingLaunchRejectsReloadedConfig(t *testing.T) {
 		<-release
 	}
 	connectDone := make(chan error, 1)
+
 	go func() {
 		_, err := mgr.Connect("canny", "croft", config.TemplateVars{})
 		connectDone <- err
 	}()
+
 	<-blocked
 	mgr.Reload(&config.Config{Sandbox: config.SandboxConfig{Enabled: true, Backend: "nono"}})
 	close(release)
+
 	if err := <-connectDone; err == nil || !strings.Contains(err.Error(), "configuration changed") {
 		t.Fatalf("pending Connect error = %v, want stale-config refusal", err)
 	}
+
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
+
 	if len(mgr.processes) != 0 || len(mgr.pending) != 0 || mgr.creating != 0 {
 		t.Fatalf("stale launch ownership leaked: processes=%d pending=%d creating=%d", len(mgr.processes), len(mgr.pending), mgr.creating)
 	}
@@ -159,6 +184,7 @@ func TestMCPManagerPendingLaunchRejectsReloadedConfig(t *testing.T) {
 
 func TestMCPManagerDrainTimeoutDoesNotPoisonProxyID(t *testing.T) {
 	cfg := &config.Config{MCPServers: []config.MCPServerConfig{{Name: "canny", Command: "cat"}}}
+
 	mgr := NewMCPManager(cfg, nil, t.TempDir(), slog.Default())
 	defer mgr.Shutdown()
 
@@ -166,25 +192,31 @@ func TestMCPManagerDrainTimeoutDoesNotPoisonProxyID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	mgr.killProcessContextHook = func(_ context.Context, target *MCPProcess) error {
 		_ = target.stdin.Close()
 		_ = target.cmd.Process.Kill()
+
 		return context.DeadlineExceeded
 	}
 	if err := mgr.FreezeAndDrain(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("FreezeAndDrain error = %v, want deadline", err)
 	}
+
 	select {
 	case <-proc.done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed-out drain child was not reaped")
 	}
+
 	mgr.killProcessContextHook = nil
 	mgr.Thaw()
+
 	reconnected, err := mgr.Connect("canny", "croft", config.TemplateVars{})
 	if err != nil {
 		t.Fatalf("same proxy ID remained poisoned after reap: %v", err)
 	}
+
 	mgr.Disconnect("croft", reconnected)
 }
 

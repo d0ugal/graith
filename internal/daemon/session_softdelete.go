@@ -325,17 +325,21 @@ func (sm *SessionManager) Restore(id string) (SessionState, error) {
 	defer sm.endLifecycleOperation()
 
 	sm.mu.Lock()
+
 	original, ok := sm.state.Sessions[id]
 	if !ok {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session %q not found", id)
 	}
+
 	before := cloneSessionState(original)
 	restored, err := sm.restoreLocked(id)
 	sm.mu.Unlock()
+
 	if err != nil {
 		return SessionState{}, err
 	}
+
 	if err := sm.persistLatestUpgradeState(); err != nil {
 		sm.rollbackRestoredStates(map[string]SessionState{id: before})
 		return SessionState{}, err
@@ -396,6 +400,7 @@ func (sm *SessionManager) RestoreWithChildren(rootID string) ([]SessionState, er
 	ids := sm.collectDescendants(rootID)
 
 	var restored []SessionState
+
 	originals := make(map[string]SessionState)
 
 	for _, id := range ids {
@@ -420,6 +425,7 @@ func (sm *SessionManager) RestoreWithChildren(rootID string) ([]SessionState, er
 		return nil, fmt.Errorf("session %q is not deleted", rootID)
 	}
 	sm.mu.Unlock()
+
 	if err := sm.persistLatestUpgradeState(); err != nil {
 		sm.rollbackRestoredStates(originals)
 		return nil, err
@@ -435,9 +441,11 @@ func (sm *SessionManager) rollbackRestoredStates(originals map[string]SessionSta
 		if current == nil || current.DeletedAt != nil || current.ExpiresAt != nil || current.Status != StatusStopped {
 			continue
 		}
+
 		*current = original
 	}
 	sm.mu.Unlock()
+
 	if err := sm.persistLatestUpgradeState(); err != nil {
 		sm.log.Error("failed to persist restore rollback", "err", err)
 	}

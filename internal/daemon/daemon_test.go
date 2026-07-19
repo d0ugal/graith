@@ -6969,6 +6969,7 @@ func TestAdoptSessionsCov2(t *testing.T) {
 	if s.Status != StatusRunning {
 		t.Errorf("un-adoptable session status = %q, want unchanged running state", s.Status)
 	}
+
 	if len(sm.state.UpgradeCleanup) != 0 {
 		t.Fatalf("ambiguous zero-start ownership was persisted: %+v", sm.state.UpgradeCleanup)
 	}

@@ -627,6 +627,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 
 		return SessionState{}, fmt.Errorf("acquire launch slot: %w", err)
 	}
+
 	if err := sm.lifecyclePreSpawnBarrier(); err != nil {
 		slot.release()
 		forkCleanup()
@@ -672,6 +673,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		ptySess.Close()
 		forkCleanup()
 		rollbackState()
+
 		_ = os.Remove(logPath)
 
 		return SessionState{}, err
@@ -706,6 +708,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		Agent:         agent,
 		SandboxConfig: cfgSnapshot.Sandbox.Merge(agent.Sandbox),
 	}
+
 	if scrapesID(agentName) && agentSessionID == "" {
 		captureStartedAt := startedAt.UTC()
 		sessState.NativeStateRoot = env["CODEX_HOME"]

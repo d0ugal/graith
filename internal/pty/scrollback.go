@@ -30,7 +30,7 @@ type Scrollback struct {
 func validateScrollbackDescriptor(fd int) (unix.Stat_t, error) {
 	var descriptor unix.Stat_t
 	if err := unix.Fstat(fd, &descriptor); err != nil || descriptor.Mode&unix.S_IFMT != unix.S_IFREG ||
-		descriptor.Uid != uint32(os.Geteuid()) || descriptor.Mode&0o077 != 0 {
+		descriptor.Uid != uint32(os.Geteuid()) || descriptor.Mode&0o077 != 0 { //nolint:gosec // G115: geteuid returns the kernel's non-negative uid_t value
 		return unix.Stat_t{}, errors.New("scrollback descriptor is not a private regular file")
 	}
 
@@ -44,6 +44,7 @@ func ValidateTransferredScrollbackFD(fd uintptr) error {
 	if _, err := validateScrollbackDescriptor(int(fd)); err != nil {
 		return err
 	}
+
 	flags, err := unix.FcntlInt(fd, unix.F_GETFL, 0)
 	if err != nil || flags&unix.O_APPEND == 0 || flags&unix.O_ACCMODE != unix.O_RDWR {
 		return errors.New("inherited scrollback descriptor is not a readable append writer")
@@ -60,16 +61,19 @@ func AdoptScrollback(fd uintptr, path string, maxSize int64) (*Scrollback, error
 	if err != nil {
 		return nil, errors.New("inherited scrollback descriptor is not a private regular file")
 	}
+
 	if err := ValidateTransferredScrollbackFD(fd); err != nil {
 		return nil, errors.New("inherited scrollback descriptor is not a readable append writer")
 	}
+
 	f := os.NewFile(fd, "scrollback-adopted")
 	if f == nil {
 		return nil, errors.New("invalid inherited scrollback descriptor")
 	}
 
 	return &Scrollback{
-		file: f, path: path, dev: uint64(descriptor.Dev), ino: uint64(descriptor.Ino),
+		file: f, path: path,
+		dev: uint64(descriptor.Dev), ino: descriptor.Ino, //nolint:gosec // G115: opaque kernel device identity
 		maxSize: maxSize, written: descriptor.Size, log: slog.Default(),
 	}, nil
 }
@@ -79,12 +83,14 @@ func NewScrollback(path string, maxSize int64) (*Scrollback, error) {
 	if err != nil {
 		return nil, errors.New("open scrollback")
 	}
+
 	descriptor, validateErr := validateScrollbackDescriptor(fd)
 	if validateErr != nil {
 		_ = unix.Close(fd)
 
 		return nil, validateErr
 	}
+
 	f := os.NewFile(uintptr(fd), "scrollback")
 	if f == nil {
 		_ = unix.Close(fd)
@@ -93,7 +99,8 @@ func NewScrollback(path string, maxSize int64) (*Scrollback, error) {
 	}
 
 	return &Scrollback{
-		file: f, path: path, dev: uint64(descriptor.Dev), ino: uint64(descriptor.Ino),
+		file: f, path: path,
+		dev: uint64(descriptor.Dev), ino: descriptor.Ino, //nolint:gosec // G115: opaque kernel device identity
 		maxSize: maxSize, written: descriptor.Size, log: slog.Default(),
 	}, nil
 }
@@ -116,6 +123,7 @@ func (s *Scrollback) SetLogger(log *slog.Logger) {
 func (s *Scrollback) Write(data []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if s.closed || s.file == nil {
 		return 0, os.ErrClosed
 	}
@@ -139,9 +147,11 @@ func (s *Scrollback) Write(data []byte) (int, error) {
 func (s *Scrollback) DuplicateFD() (int, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	if s.closed || s.file == nil {
 		return -1, os.ErrClosed
 	}
+
 	fd, err := unix.FcntlInt(s.file.Fd(), unix.F_DUPFD_CLOEXEC, 3)
 	if err != nil {
 		return -1, fmt.Errorf("duplicate scrollback descriptor: %w", err)
@@ -155,18 +165,22 @@ func (s *Scrollback) DuplicateFD() (int, error) {
 func (s *Scrollback) ValidatePathIdentity() error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	if s.closed || s.file == nil {
 		return os.ErrClosed
 	}
+
 	descriptor, err := validateScrollbackDescriptor(int(s.file.Fd()))
 	if err != nil {
 		return errors.New("scrollback descriptor is not a private regular file")
 	}
+
 	var pathname unix.Stat_t
 	if err := unix.Lstat(s.path, &pathname); err != nil || pathname.Mode&unix.S_IFMT != unix.S_IFREG ||
 		pathname.Dev != descriptor.Dev || pathname.Ino != descriptor.Ino {
 		return errors.New("scrollback pathname identity changed")
 	}
+
 	flags, err := unix.FcntlInt(s.file.Fd(), unix.F_GETFL, 0)
 	if err != nil || flags&unix.O_APPEND == 0 || flags&unix.O_ACCMODE != unix.O_RDWR {
 		return errors.New("scrollback descriptor is not a readable append writer")
@@ -178,6 +192,7 @@ func (s *Scrollback) ValidatePathIdentity() error {
 func (s *Scrollback) Tail(lines int) ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	if s.closed || s.file == nil {
 		return nil, os.ErrClosed
 	}
@@ -194,11 +209,13 @@ func TailFile(path string, lines int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if _, err := validateScrollbackDescriptor(fd); err != nil {
 		_ = unix.Close(fd)
 
 		return nil, err
 	}
+
 	f := os.NewFile(uintptr(fd), "scrollback-tail")
 	if f == nil {
 		_ = unix.Close(fd)
@@ -275,9 +292,11 @@ func tailFile(f *os.File, lines int) ([]byte, error) {
 func (s *Scrollback) TailBytes(maxBytes int64) ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	if s.closed || s.file == nil {
 		return nil, os.ErrClosed
 	}
+
 	info, err := s.file.Stat()
 	if err != nil {
 		return nil, err
@@ -313,13 +332,16 @@ func (s *Scrollback) Stats() (written, maxSize int64, saturated bool) {
 func (s *Scrollback) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if s.closed {
 		return nil
 	}
+
 	s.closed = true
 	if s.file == nil {
 		return nil
 	}
+
 	err := s.file.Close()
 	if errors.Is(err, syscall.EBADF) {
 		return nil
@@ -330,13 +352,17 @@ func (s *Scrollback) Close() error {
 
 func (s *Scrollback) Remove() error {
 	_ = s.Close()
+
 	var pathname unix.Stat_t
 	if err := unix.Lstat(s.path, &pathname); err != nil {
 		return errors.New("scrollback pathname is unavailable")
 	}
-	if pathname.Mode&unix.S_IFMT != unix.S_IFREG || uint64(pathname.Dev) != s.dev || uint64(pathname.Ino) != s.ino {
+
+	if pathname.Mode&unix.S_IFMT != unix.S_IFREG ||
+		uint64(pathname.Dev) != s.dev || pathname.Ino != s.ino { //nolint:gosec // G115: opaque kernel device identity
 		return errors.New("scrollback pathname identity changed")
 	}
+
 	if err := os.Remove(s.path); err != nil {
 		return errors.New("remove scrollback")
 	}

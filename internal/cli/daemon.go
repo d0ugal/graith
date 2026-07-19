@@ -39,6 +39,7 @@ var daemonStartCmd = &cobra.Command{
 		if adoptFrom != "" {
 			return nil
 		}
+
 		return rootCmd.PersistentPreRunE(cmd, args)
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -66,6 +67,7 @@ var daemonAdoptionCapacityCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(probe)
 	},
 }
@@ -300,16 +302,20 @@ func execUpgrade(successMsg string) error {
 		c.Close()
 		return &preserveRestartRejectedError{cause: fmt.Errorf("daemon does not support safe preserve-restart preflight: %w", err)}
 	}
+
 	preflight, err := c.ReadControlResponse()
 	if err != nil || preflight.Type != "upgrade_preflight_ok" {
 		c.Close()
+
 		message := "daemon does not support safe preserve restart; use --force for an intentional clean stop/start migration"
+
 		if err == nil && preflight.Type == "error" {
 			var response protocol.ErrorMsg
 			if protocol.DecodePayload(preflight, &response) == nil && response.Message != "" {
 				message = message + ": " + response.Message
 			}
 		}
+
 		return &preserveRestartRejectedError{cause: errors.New(message)}
 	}
 
