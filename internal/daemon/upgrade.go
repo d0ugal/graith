@@ -3467,6 +3467,25 @@ func remainingCleanupDuration(deadline time.Time, maximum time.Duration) time.Du
 	return remaining
 }
 
+func waitForProcessGroupGoneUntil(
+	pgid int,
+	deadline time.Time,
+	processGroupGone func(int) bool,
+) bool {
+	for {
+		if processGroupGone(pgid) {
+			return true
+		}
+
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false
+		}
+
+		time.Sleep(min(10*time.Millisecond, remaining))
+	}
+}
+
 func reapInheritedHelperUntil(helper UpgradeHelper, deadline time.Time) error {
 	grace := remainingCleanupDuration(deadline, 250*time.Millisecond)
 
@@ -3493,7 +3512,13 @@ func reapInheritedHelperUntil(helper UpgradeHelper, deadline time.Time) error {
 	_ = syscall.Kill(helper.PID, syscall.SIGKILL)
 
 	reaped, err = waitForExactChild(helper.PID, helper.StartTime, remainingCleanupDuration(deadline, 0))
-	if err != nil || !reaped || !exactProcessGroupGone(helper.PID) {
+	if err != nil || !reaped {
+		return errors.New("inherited terminal helper did not exit within cleanup deadline")
+	}
+
+	// Reaping releases the leader identity, so only read-only absence checks are
+	// safe while a killed group member is still briefly visible to the kernel.
+	if !waitForProcessGroupGoneUntil(helper.PID, deadline, exactProcessGroupGone) {
 		return errors.New("inherited terminal helper did not exit within cleanup deadline")
 	}
 
