@@ -75,6 +75,43 @@ When non-empty, the daemon rejects `--repo` / `-C` paths not under one of these 
 allowed_repo_paths = ["~/Code", "~/Work"]
 ```
 
+## macOS daemon service environment
+
+Signed packaged installs on macOS 13 or newer start the daemon through launchd,
+which does not inherit the first terminal's full environment. Graith projects a
+small validated base into the one-use startup request:
+
+- `PATH` (absolute, non-empty entries), `SHELL`, and `TMPDIR` (unless its
+  canonical path would expose Graith's protected macOS service tree);
+- `LANG` and `LC_*`; and
+- absolute `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`,
+  `XDG_STATE_HOME`, and `XDG_RUNTIME_DIR` overrides.
+
+`HOME`, `USER`, and `LOGNAME` come from the effective user's OS account, and
+the canonical profile comes from the protected service lease. To opt additional
+variable names into the daemon and its eligible agent processes:
+
+```toml
+[daemon_service]
+inherit_env = ["SSH_AUTH_SOCK", "ANTHROPIC_API_KEY"]
+```
+
+This is an explicit credential grant. Values are not stored in the durable
+service receipt or logs, but they briefly exist in an owner-only startup file
+below `~/Library/Application Support/Graith/services/control/bootstrap` until
+the daemon consumes and unlinks it; macOS does not promise secure deletion. A variable absent from
+the shell that wins a startup race is simply omitted. `gr doctor` prints the
+effective variable **names**, never values, and calls out common current-shell
+variables that were not opted in.
+
+Identity, loader, and launch-service variables cannot be opted in: `HOME`,
+`USER`, `LOGNAME`, `GRAITH_PROFILE`, all `GRAITH_*`, `DYLD_*`, `LD_*`, `XPC_*`,
+and `__CF*` names are rejected. Linux, macOS 11/12, source/`go install` builds,
+and unmanaged development artifacts retain the full direct-spawn environment,
+so the same configuration intentionally differs across managed and fallback
+installs. Restart a dormant service after changing `inherit_env`; reload cannot
+replace a running process environment.
+
 ## File locations
 
 graith follows the XDG base directory spec (override `data_dir` to change the base data directory):
@@ -91,3 +128,17 @@ graith follows the XDG base directory spec (override `data_dir` to change the ba
 | `~/.local/share/graith/tmp/<repo-name>/<hash>/` | Per-repo temp directories |
 | `$XDG_RUNTIME_DIR/graith/graith.sock` | Unix control socket |
 | `$XDG_RUNTIME_DIR/graith/graith.pid` | Daemon PID file |
+| `~/Library/Application Support/Graith/services/` | macOS signed service generations, global profile-slot receipt, and bootstrap control (owner-only, independent of `HOME`, XDG settings, and `data_dir`) |
+
+On managed macOS, Graith resolves that location from the effective user's OS
+account record, not the `HOME` environment variable. One-use requests live in
+the `services/control/bootstrap` subtree. Graith-generated safehouse and nono
+policies do not grant that subtree or an enclosing directory; disabling the
+sandbox or explicitly granting a broad home directory remains an operator
+exposure. `TMPDIR`, XDG settings, profile paths, runtime paths, caller config,
+and `data_dir` never choose the service-control boundary.
+
+Graith also rejects a managed daemon start before registration if inherited
+`TMPDIR` is the services tree, an enclosing directory, or a symlink to either;
+this prevents sandbox base policies from implicitly making service state
+writable.

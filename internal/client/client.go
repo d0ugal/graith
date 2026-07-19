@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
+	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/version"
@@ -29,8 +31,33 @@ type Client struct {
 	token  string
 }
 
+// DaemonIdentity is the authenticated Unix-socket peer PID together with the
+// operating-system process start time that makes the identity safe against PID
+// reuse between authentication and signalling.
+type DaemonIdentity struct {
+	PID       int
+	StartTime int64
+}
+
+// ExistingDaemonHandshakeError means a well-formed control response rejected
+// lifecycle authentication. Unlike a stale/foreign socket transport failure,
+// callers must not treat this as an absent daemon and continue destructively.
+type ExistingDaemonHandshakeError struct {
+	ResponseType string
+}
+
+func (err *ExistingDaemonHandshakeError) Error() string {
+	return "handshake rejected while connecting to existing daemon: " + err.ResponseType
+}
+
 func New(cfg *config.Config, paths config.Paths, configFile string) (*Client, error) {
-	conn, err := EnsureDaemon(paths, configFile)
+	return NewContext(context.Background(), cfg, paths, configFile)
+}
+
+// NewContext constructs a client while allowing daemon startup to be bounded
+// by the caller as well as the configured connection policy.
+func NewContext(ctx context.Context, cfg *config.Config, paths config.Paths, configFile string) (*Client, error) {
+	conn, err := EnsureDaemonConfiguredContext(ctx, cfg, paths, configFile)
 	if err != nil {
 		return nil, err
 	}
@@ -54,12 +81,32 @@ func (c *Client) DaemonPID() (int, error) {
 	return daemonPID(c.conn)
 }
 
+// DaemonIdentity captures the exact process currently owning the authenticated
+// daemon connection. Callers must capture it before closing the socket.
+func (c *Client) DaemonIdentity() (DaemonIdentity, error) {
+	pid, err := c.DaemonPID()
+	if err != nil {
+		return DaemonIdentity{}, err
+	}
+
+	startTime, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		return DaemonIdentity{}, fmt.Errorf("read daemon PID %d start time: %w", pid, err)
+	}
+
+	if startTime == 0 {
+		return DaemonIdentity{}, fmt.Errorf("daemon PID %d has zero process start time", pid)
+	}
+
+	return DaemonIdentity{PID: pid, StartTime: startTime}, nil
+}
+
 // Connect creates a new client, performs the handshake, and reads the
 // handshake response. If the daemon is running a different version, it
 // automatically triggers a restart and reconnects. On failure the
 // connection is closed automatically.
 func Connect(cfg *config.Config, paths config.Paths, configFile string) (*Client, error) {
-	return connect(cfg, paths, configFile, true)
+	return connect(context.Background(), cfg, paths, configFile, true)
 }
 
 // ConnectPassive creates a new client and performs the handshake, but never
@@ -67,11 +114,53 @@ func Connect(cfg *config.Config, paths config.Paths, configFile string) (*Client
 // helper processes (e.g. MCP proxies) that may outlive a binary upgrade and
 // should not race with the user's explicit daemon restart.
 func ConnectPassive(cfg *config.Config, paths config.Paths, configFile string) (*Client, error) {
-	return connect(cfg, paths, configFile, false)
+	return ConnectPassiveContext(context.Background(), cfg, paths, configFile)
 }
 
-func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgrade bool) (*Client, error) {
-	c, err := New(cfg, paths, configFile)
+// ConnectPassiveContext is ConnectPassive with caller cancellation applied to
+// daemon startup. It intentionally retains passive version-mismatch behavior.
+func ConnectPassiveContext(ctx context.Context, cfg *config.Config, paths config.Paths, configFile string) (*Client, error) {
+	return connect(ctx, cfg, paths, configFile, false)
+}
+
+// ConnectExisting connects and authenticates to an already-running daemon but
+// never starts or upgrades one. Lifecycle controls such as `daemon stop` use it
+// so a down service is not demand-started merely in order to stop it.
+func ConnectExisting(cfg *config.Config, paths config.Paths) (*Client, error) {
+	conn, err := dialLocalDaemon("unix", paths.SocketPath, daemonDialTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	c := &Client{
+		conn: conn, reader: protocol.NewFrameReader(conn), writer: protocol.NewFrameWriter(conn),
+		cfg: cfg, paths: paths, token: resolveClientToken(paths),
+	}
+	_ = conn.SetDeadline(time.Now().Add(daemonHandshakeTimeout))
+
+	if err := c.Handshake(); err != nil {
+		c.Close()
+		return nil, err
+	}
+
+	response, err := c.ReadControlResponse()
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
+
+	if response.Type != "handshake_ok" {
+		c.Close()
+		return nil, &ExistingDaemonHandshakeError{ResponseType: response.Type}
+	}
+
+	_ = conn.SetDeadline(time.Time{})
+
+	return c, nil
+}
+
+func connect(ctx context.Context, cfg *config.Config, paths config.Paths, configFile string, autoUpgrade bool) (*Client, error) {
+	c, err := NewContext(ctx, cfg, paths, configFile)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +186,7 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 
 		_ = protocol.DecodePayload(resp, &hsErr)
 		if serverProtocol, ok := OlderServerProtocolFromHandshakeError(hsErr.Reason); ok && autoUpgrade && version.Version != "dev" {
-			return c.restartAcrossProtocolBoundary(paths, cfg, configFile, serverProtocol)
+			return c.restartAcrossProtocolBoundary(ctx, paths, cfg, configFile, serverProtocol)
 		}
 
 		c.Close()
@@ -123,7 +212,7 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 	if autoUpgrade && version.Version != "dev" {
 		if hsOk.DaemonVersion != "" && hsOk.DaemonVersion != version.Version && version.IsNewer(version.Version, hsOk.DaemonVersion) {
 			if !protocol.VersionCompatible(hsOk.Version) {
-				return c.restartAcrossProtocolBoundary(paths, cfg, configFile, hsOk.Version)
+				return c.restartAcrossProtocolBoundary(ctx, paths, cfg, configFile, hsOk.Version)
 			}
 
 			fmt.Fprintf(os.Stderr, "Daemon version mismatch (daemon=%s, cli=%s), upgrading daemon...\n", hsOk.DaemonVersion, version.Version)
@@ -132,11 +221,22 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 			// the NEW generation is serving, not the inherited listener (#1319).
 			priorInstanceID := hsOk.DaemonInstanceID
 
-			if requestUpgradeForClient(c) {
+			upgradeRequested, managedUpgrade, upgradeErr := requestUpgradeForClient(ctx, c)
+			if upgradeErr != nil {
+				c.Close()
+
+				return nil, fmt.Errorf("prepare daemon exec upgrade: %w", upgradeErr)
+			}
+
+			if upgradeRequested {
 				c.Close()
 
 				if waitForNewDaemonGeneration(paths.SocketPath, paths, version.Version, priorInstanceID) {
-					return connect(cfg, paths, configFile, false)
+					return connect(ctx, cfg, paths, configFile, false)
+				}
+
+				if managedUpgrade {
+					return nil, errors.New("managed daemon exec upgrade did not produce a new generation; the existing daemon and its sessions were left running")
 				}
 
 				fmt.Fprintf(os.Stderr, "Exec upgrade did not produce a new daemon generation, falling back to clean restart...\n")
@@ -148,7 +248,7 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 				waitForSocketGone(paths.SocketPath)
 			}
 
-			return connect(cfg, paths, configFile, false)
+			return connect(ctx, cfg, paths, configFile, false)
 		}
 	}
 
@@ -211,7 +311,7 @@ func OlderServerProtocolFromHandshakeError(reason string) (string, bool) {
 // so it must retain ownership long enough for graceful StopAll to terminate both
 // PTY and headless agents. No new daemon is started unless the exact old Unix
 // peer identity and its socket are both proved gone.
-func (c *Client) restartAcrossProtocolBoundary(paths config.Paths, cfg *config.Config, configFile, serverProtocol string) (*Client, error) {
+func (c *Client) restartAcrossProtocolBoundary(ctx context.Context, paths config.Paths, cfg *config.Config, configFile, serverProtocol string) (*Client, error) {
 	oldPID, err := c.DaemonPID()
 	if err != nil {
 		c.Close()
@@ -227,6 +327,16 @@ func (c *Client) restartAcrossProtocolBoundary(paths config.Paths, cfg *config.C
 	if oldStart == 0 {
 		c.Close()
 		return nil, fmt.Errorf("protocol-breaking daemon restart cannot verify old PID %d identity: zero process start time", oldPID)
+	}
+
+	prepareContext, cancel := context.WithTimeout(ctx, daemonStartTimeout)
+	err = prepareDaemonCleanRestartForUpgrade(prepareContext, paths)
+
+	cancel()
+
+	if err != nil {
+		c.Close()
+		return nil, fmt.Errorf("protocol-breaking daemon restart could not reserve its managed service before stopping: %w", err)
 	}
 
 	c.Close()
@@ -245,14 +355,16 @@ func (c *Client) restartAcrossProtocolBoundary(paths config.Paths, cfg *config.C
 		return reconnectAfterCleanUpgrade(cfg, paths, configFile)
 	}
 
-	return connect(cfg, paths, configFile, false)
+	return connect(ctx, cfg, paths, configFile, false)
 }
 
 var (
-	requestUpgradeForClient      = requestUpgrade
-	stopDaemonIdentityForUpgrade = stopDaemonIdentity
-	waitForSocketGoneForUpgrade  = waitForSocketGone
-	reconnectAfterCleanUpgrade   func(*config.Config, config.Paths, string) (*Client, error)
+	requestUpgradeForClient             = requestUpgrade
+	resolveUpgradeCandidateForClient    = daemonservice.ResolveUpgradeCandidateContext
+	stopDaemonIdentityForUpgrade        = stopDaemonIdentity
+	waitForSocketGoneForUpgrade         = waitForSocketGone
+	reconnectAfterCleanUpgrade          func(*config.Config, config.Paths, string) (*Client, error)
+	prepareDaemonCleanRestartForUpgrade = PrepareDaemonCleanRestart
 )
 
 // probeDaemonIdentity handshakes the daemon at sockPath and returns its reported
@@ -326,20 +438,56 @@ func waitForNewDaemonGeneration(sockPath string, paths config.Paths, wantVersion
 	})
 }
 
-func requestUpgrade(c *Client) bool {
-	execPath, _ := os.Executable()
+func upgradeMessageForClient(ctx context.Context) (protocol.UpgradeMsg, bool, error) {
+	execPath, err := os.Executable()
+	if err != nil {
+		return protocol.UpgradeMsg{}, false, err
+	}
 
-	msg := protocol.UpgradeMsg{
+	execPath, managed, err := resolveUpgradeCandidateForClient(ctx, execPath, version.Version, version.CommitSHA, os.Getuid())
+	if err != nil {
+		return protocol.UpgradeMsg{}, false, err
+	}
+
+	return protocol.UpgradeMsg{
 		ExecPath:      execPath,
 		ClientVersion: version.Version,
-	}
-	if err := c.SendControl("upgrade", msg); err != nil {
-		return false
-	}
-	// Connection drop is expected — the daemon exec'd itself.
-	_, _ = c.ReadControlResponse()
+	}, managed, nil
+}
 
-	return true
+func requestUpgrade(ctx context.Context, c *Client) (bool, bool, error) {
+	msg, managed, err := upgradeMessageForClient(ctx)
+	if err != nil {
+		return false, managed, err
+	}
+
+	if err := c.SendControl("upgrade", msg); err != nil {
+		return false, managed, err
+	}
+
+	// Connection drop is expected — the daemon exec'd itself.
+	response, err := c.ReadControlResponse()
+	if err != nil {
+		return true, managed, nil
+	}
+
+	if response.Type == "error" {
+		var upgradeErr protocol.ErrorMsg
+
+		_ = protocol.DecodePayload(response, &upgradeErr)
+
+		if upgradeErr.Message == "" {
+			upgradeErr.Message = "daemon rejected exec upgrade"
+		}
+
+		return false, managed, errors.New(upgradeErr.Message)
+	}
+
+	if response.Type != "upgrading" {
+		return false, managed, fmt.Errorf("unexpected daemon upgrade response %q", response.Type)
+	}
+
+	return true, managed, nil
 }
 
 // pollDaemonReady polls ready at daemonStartPollInterval until it returns true
@@ -352,8 +500,10 @@ func requestUpgrade(c *Client) bool {
 // dial and handshake can cap its distinct operation policy at the remaining
 // startup budget.
 func pollDaemonReady(ready func(deadline time.Time) bool) bool {
-	deadline := time.Now().Add(daemonStartTimeout)
+	return pollDaemonReadyBefore(time.Now().Add(daemonStartTimeout), ready)
+}
 
+func pollDaemonReadyBefore(deadline time.Time, ready func(deadline time.Time) bool) bool {
 	for {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
@@ -416,6 +566,12 @@ func waitForSocketGone(sockPath string) bool {
 	})
 }
 
+// WaitForDaemonSocketGone proves that a stopped daemon no longer owns its
+// filesystem rendezvous point before lifecycle state is committed.
+func WaitForDaemonSocketGone(sockPath string) bool {
+	return waitForSocketGone(sockPath)
+}
+
 // stopDaemonIdentity signals only the process that answered the authenticated
 // Unix-socket handshake and only while its start time still matches. It waits
 // for that exact identity to disappear before a new daemon may start.
@@ -426,6 +582,10 @@ func stopDaemonIdentity(pid int, startTime int64) error {
 
 	current, err := grpty.ProcessStartTime(pid)
 	if err != nil {
+		if killErr := syscall.Kill(pid, 0); errors.Is(killErr, syscall.ESRCH) {
+			return nil
+		}
+
 		return fmt.Errorf("verify daemon PID %d before SIGTERM: %w", pid, err)
 	}
 
@@ -454,6 +614,12 @@ func stopDaemonIdentity(pid int, startTime int64) error {
 	}
 
 	return fmt.Errorf("daemon PID %d did not exit within %s", pid, daemonStartTimeout)
+}
+
+// StopDaemonIdentity signals a previously authenticated daemon process while
+// guarding against PID reuse.
+func StopDaemonIdentity(identity DaemonIdentity) error {
+	return stopDaemonIdentity(identity.PID, identity.StartTime)
 }
 
 // ConnectFast is a fast-path connect for hooks. It dials the daemon socket

@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"net"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -455,7 +457,9 @@ func stubStartDaemon(t *testing.T, fn func(configFile string) error) {
 	t.Helper()
 
 	orig := startDaemonFn
-	startDaemonFn = fn
+	startDaemonFn = func(_ context.Context, _ *config.Config, _ config.Paths, configFile string) error {
+		return fn(configFile)
+	}
 
 	t.Cleanup(func() { startDaemonFn = orig })
 }
@@ -571,6 +575,147 @@ func TestEnsureDaemonStartBudgetCapsStalledHandshake(t *testing.T) {
 
 	if readinessDialTimeout <= 0 || readinessDialTimeout > 60*time.Millisecond {
 		t.Fatalf("readiness dial timeout = %v, want it capped by the remaining 60ms start budget", readinessDialTimeout)
+	}
+}
+
+func TestEnsureDaemonStartBudgetIncludesManagedLaunch(t *testing.T) {
+	shortenStartTimeout(t, 40*time.Millisecond)
+
+	origDial := dialLocalDaemon
+	origStart := startDaemonFn
+	dialLocalDaemon = func(_, _ string, _ time.Duration) (net.Conn, error) {
+		return nil, errors.New("dreich: daemon absent")
+	}
+	startDaemonFn = func(ctx context.Context, _ *config.Config, _ config.Paths, _ string) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	t.Cleanup(func() {
+		dialLocalDaemon = origDial
+		startDaemonFn = origStart
+	})
+
+	started := time.Now()
+
+	_, err := EnsureDaemon(config.Paths{SocketPath: "/bothy/absent.sock"}, "")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("EnsureDaemon error = %v, want managed launch deadline", err)
+	}
+
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("EnsureDaemon launch took %v, want it bounded by start_timeout", elapsed)
+	}
+}
+
+func TestEnsureDaemonConfiguredContextHonorsCanceledCaller(t *testing.T) {
+	origDial := dialLocalDaemon
+	origStart := startDaemonFn
+	dialLocalDaemon = func(_, _ string, _ time.Duration) (net.Conn, error) {
+		t.Fatal("canceled startup attempted to dial the daemon")
+
+		return nil, errors.New("dreich")
+	}
+	startDaemonFn = func(context.Context, *config.Config, config.Paths, string) error {
+		t.Fatal("canceled startup attempted to launch the daemon")
+
+		return nil
+	}
+
+	t.Cleanup(func() {
+		dialLocalDaemon = origDial
+		startDaemonFn = origStart
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := EnsureDaemonConfiguredContext(ctx, config.Default(), config.Paths{SocketPath: "/bothy/canceled.sock"}, "")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("EnsureDaemonConfiguredContext() = %v, want canceled caller", err)
+	}
+}
+
+func TestEnsureDaemonConfiguredContextBoundsInitialSocketProbe(t *testing.T) {
+	origDial := dialLocalDaemon
+	origStart := startDaemonFn
+
+	clientConn, serverConn := net.Pipe()
+
+	t.Cleanup(func() {
+		_ = clientConn.Close()
+		_ = serverConn.Close()
+		dialLocalDaemon = origDial
+		startDaemonFn = origStart
+	})
+
+	dialLocalDaemon = func(_, _ string, _ time.Duration) (net.Conn, error) {
+		return clientConn, nil
+	}
+	startCalled := false
+	startDaemonFn = func(ctx context.Context, _ *config.Config, _ config.Paths, _ string) error {
+		startCalled = true
+
+		<-ctx.Done()
+
+		return ctx.Err()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+
+	started := time.Now()
+
+	_, err := EnsureDaemonConfiguredContext(ctx, config.Default(), config.Paths{SocketPath: "/bothy/stuck.sock"}, "")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("EnsureDaemonConfiguredContext() = %v, want caller deadline", err)
+	}
+
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("initial socket probe took %v, want caller-bounded startup", elapsed)
+	}
+
+	if !startCalled {
+		t.Fatal("initial socket probe consumed the entire startup budget")
+	}
+}
+
+func TestPrepareDaemonCleanRestartRejectsManagedAgentBeforeResolution(t *testing.T) {
+	originalMode := detectDaemonServiceModeForCleanRestart
+	originalBoundary := cleanRestartSecurityBoundaryDetected
+
+	t.Cleanup(func() {
+		detectDaemonServiceModeForCleanRestart = originalMode
+		cleanRestartSecurityBoundaryDetected = originalBoundary
+	})
+
+	detectDaemonServiceModeForCleanRestart = func() (daemonservice.Mode, string, error) {
+		return daemonservice.ModeManaged, "braw", nil
+	}
+	cleanRestartSecurityBoundaryDetected = func() bool { return true }
+
+	err := PrepareDaemonCleanRestart(context.Background(), config.Paths{Profile: "canny"})
+	if err == nil || !strings.Contains(err.Error(), "agent-mode caller") {
+		t.Fatalf("PrepareDaemonCleanRestart() = %v, want preflight trust rejection", err)
+	}
+}
+
+func TestPrepareDaemonCleanRestartKeepsFallbackAgentBehavior(t *testing.T) {
+	originalMode := detectDaemonServiceModeForCleanRestart
+	originalBoundary := cleanRestartSecurityBoundaryDetected
+
+	t.Cleanup(func() {
+		detectDaemonServiceModeForCleanRestart = originalMode
+		cleanRestartSecurityBoundaryDetected = originalBoundary
+	})
+
+	detectDaemonServiceModeForCleanRestart = func() (daemonservice.Mode, string, error) {
+		return daemonservice.ModeLinuxFallback, "canny", nil
+	}
+	cleanRestartSecurityBoundaryDetected = func() bool { return true }
+
+	if err := PrepareDaemonCleanRestart(context.Background(), config.Paths{Profile: "canny"}); err != nil {
+		t.Fatalf("fallback PrepareDaemonCleanRestart() changed behavior: %v", err)
 	}
 }
 

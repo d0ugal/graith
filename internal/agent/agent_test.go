@@ -108,6 +108,37 @@ func TestDetect(t *testing.T) {
 	}
 }
 
+func TestDetectedEnvironUsesCanonicalOverrides(t *testing.T) {
+	t.Parallel()
+
+	if !DetectedEnviron([]string{"GR_AGENT_MODE=1"}) {
+		t.Fatal("explicit agent mode was not detected")
+	}
+
+	if DetectedEnviron([]string{"GRAITH_SESSION_ID=canny", "GR_AGENT_MODE=0"}) {
+		t.Fatal("explicit non-agent override did not take precedence")
+	}
+}
+
+func TestSecurityBoundaryDetectionIgnoresNegativePresentationOverride(t *testing.T) {
+	t.Parallel()
+
+	for _, environ := range [][]string{
+		{"GRAITH_SESSION_ID=canny", "GR_AGENT_MODE=0"},
+		{"CLAUDE_CODE=1", "GR_AGENT_MODE=false"},
+		{"CURSOR_AGENT=1", "GR_AGENT_MODE=no"},
+		{"GR_AGENT_MODE=1"},
+	} {
+		if !SecurityBoundaryDetectedEnviron(environ) {
+			t.Errorf("security boundary missed agent environment %v", environ)
+		}
+	}
+
+	if SecurityBoundaryDetectedEnviron([]string{"PATH=/usr/bin:/bin", "GR_AGENT_MODE=0"}) {
+		t.Fatal("negative presentation override alone was treated as an agent marker")
+	}
+}
+
 // TestDetectedLazyOverride verifies the public Detected() entry point, which
 // (after the removal of the package-init) resolves the environment lazily via
 // sync.Once. The GR_AGENT_MODE=0/false/no override must always win, even after

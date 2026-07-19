@@ -592,7 +592,14 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 			envKeys = append(envKeys, k)
 		}
 
-		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, hookFilesNeeded || sourceMCPEnabled)
+		opts, err := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, hookFilesNeeded || sourceMCPEnabled)
+		if err != nil {
+			forkCleanup()
+			rollbackState()
+
+			return SessionState{}, fmt.Errorf("configure sandbox: %w", err)
+		}
+
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
@@ -604,6 +611,13 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
 		if len(forkIncludes) > 0 {
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(forkIncludes)...)
+		}
+
+		if err := sm.validateAutomaticSandboxGrants(opts, merged); err != nil {
+			forkCleanup()
+			rollbackState()
+
+			return SessionState{}, fmt.Errorf("validate sandbox grants: %w", err)
 		}
 
 		var wrapErr error

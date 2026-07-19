@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/d0ugal/graith/internal/daemonservice"
 	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
@@ -188,6 +189,133 @@ func TestUpgradeFailureGuardDisarmPreservesTransferredProcess(t *testing.T) {
 
 	if err := syscall.Kill(-pid, 0); err != nil {
 		t.Fatalf("transferred process was terminated by disarmed startup guard: %v", err)
+	}
+}
+
+func TestUpgradeFailureGuardProfile(t *testing.T) {
+	var missing *UpgradeFailureGuard
+	if got := missing.Profile(); got != "" {
+		t.Fatalf("nil guard profile = %q", got)
+	}
+
+	guard := &UpgradeFailureGuard{manifest: &UpgradeManifest{Profile: "canny"}}
+	if got := guard.Profile(); got != "canny" {
+		t.Fatalf("guard profile = %q", got)
+	}
+}
+
+func TestExecUpgradeAddsManagedIdentityAndRollsBackExecFailure(t *testing.T) {
+	originalPrepare := prepareManagedUpgradeForExec
+	originalExec := execProcessForUpgrade
+
+	t.Cleanup(func() {
+		prepareManagedUpgradeForExec = originalPrepare
+		execProcessForUpgrade = originalExec
+	})
+
+	executable := filepath.Join(t.TempDir(), "gr")
+	if err := os.WriteFile(executable, []byte("canny"), 0o755); err != nil { // #nosec G306 -- executable upgrade fixture.
+		t.Fatal(err)
+	}
+
+	definition, err := daemonservice.DefinitionForSlot("07")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rollbackCalls := 0
+	prepareManagedUpgradeForExec = func(profile, candidate string) (daemonservice.Definition, func() error, bool, error) {
+		if profile != "canny" || candidate != executable {
+			t.Fatalf("managed preparation = profile %q candidate %q", profile, candidate)
+		}
+
+		return definition, func() error {
+			rollbackCalls++
+
+			return nil
+		}, true, nil
+	}
+
+	var (
+		gotPath string
+		gotArgs []string
+	)
+
+	execProcessForUpgrade = func(path string, args []string, environment []string) error {
+		gotPath = path
+
+		gotArgs = append([]string(nil), args...)
+
+		if len(environment) == 0 {
+			t.Fatal("exec upgrade discarded the daemon environment")
+		}
+
+		return errors.New("dreich exec")
+	}
+
+	err = ExecUpgrade("/bothy/manifest.json", "/bothy/config.toml", "canny", executable)
+	if err == nil || !strings.Contains(err.Error(), "dreich exec") {
+		t.Fatalf("ExecUpgrade() error = %v", err)
+	}
+
+	wantArgs := []string{
+		executable, "daemon", "start", "--adopt-from", "/bothy/manifest.json",
+		"--internal-service-label", definition.Label,
+		"--internal-service-slot", definition.Slot,
+		"--config", "/bothy/config.toml",
+	}
+	if gotPath != executable || strings.Join(gotArgs, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("exec = path %q args %q, want path %q args %q", gotPath, gotArgs, executable, wantArgs)
+	}
+
+	if rollbackCalls != 1 {
+		t.Fatalf("rollback calls = %d, want 1", rollbackCalls)
+	}
+}
+
+func TestPrepareExecUpgradeRejectsBeforeExec(t *testing.T) {
+	originalPrepare := prepareManagedUpgradeForExec
+
+	t.Cleanup(func() { prepareManagedUpgradeForExec = originalPrepare })
+
+	executable := filepath.Join(t.TempDir(), "gr")
+	if err := os.WriteFile(executable, []byte("braw"), 0o755); err != nil { // #nosec G306 -- executable upgrade fixture.
+		t.Fatal(err)
+	}
+
+	var validatedCandidate string
+
+	prepareManagedUpgradeForExec = func(_ string, candidate string) (daemonservice.Definition, func() error, bool, error) {
+		validatedCandidate = candidate
+
+		return daemonservice.Definition{}, nil, true, errors.New("thrawn candidate")
+	}
+
+	if _, err := prepareExecUpgrade("", executable); err == nil || !strings.Contains(err.Error(), "validate managed upgrade") {
+		t.Fatalf("prepareExecUpgrade() error = %v", err)
+	}
+
+	if validatedCandidate != executable {
+		t.Fatalf("validated candidate = %q, want %q", validatedCandidate, executable)
+	}
+
+	missing := filepath.Join(t.TempDir(), "missing")
+	if _, err := prepareExecUpgrade("", missing); err == nil || !strings.Contains(err.Error(), "validate managed upgrade") {
+		t.Fatalf("missing executable error = %v", err)
+	}
+
+	if validatedCandidate == "" || validatedCandidate == missing {
+		t.Fatalf("missing client candidate did not fall back to the daemon executable: %q", validatedCandidate)
+	}
+}
+
+func TestStopDaemonPIDRejectsUnauthenticatedIdentity(t *testing.T) {
+	if err := StopDaemonPID(1); err == nil || !strings.Contains(err.Error(), "invalid pid") {
+		t.Fatalf("StopDaemonPID(1) = %v", err)
+	}
+
+	if err := StopDaemonPID(os.Getpid()); err == nil || !strings.Contains(err.Error(), "not a graith daemon") {
+		t.Fatalf("StopDaemonPID(test process) = %v", err)
 	}
 }
 

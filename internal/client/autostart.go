@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -12,8 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/d0ugal/graith/internal/agent"
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/version"
 )
 
 // Timeouts for talking to the daemon socket live in timeouts.go as package vars
@@ -23,6 +27,11 @@ import (
 // startDaemonFn spawns a fresh daemon. It's a package var so tests can
 // substitute a stub instead of exec'ing a real daemon process.
 var startDaemonFn = startDaemon
+
+var (
+	detectDaemonServiceModeForCleanRestart = daemonservice.DetectMode
+	cleanRestartSecurityBoundaryDetected   = func() bool { return agent.SecurityBoundaryDetectedEnviron(os.Environ()) }
+)
 
 // EnsureDaemon returns a connection to a live graith daemon, starting one if
 // necessary.
@@ -39,6 +48,32 @@ var startDaemonFn = startDaemon
 // live-but-slow daemon that merely lost the probe race — its socket would be
 // gone but the PID guard would then block the replacement from rebinding.
 func EnsureDaemon(paths config.Paths, configFile string) (net.Conn, error) {
+	return EnsureDaemonConfigured(config.Default(), paths, configFile)
+}
+
+// EnsureDaemonConfigured is EnsureDaemon with the loaded config needed by the
+// managed macOS launcher. The compatibility wrapper above preserves direct
+// callers and tests; CLI connections use this form.
+func EnsureDaemonConfigured(cfg *config.Config, paths config.Paths, configFile string) (net.Conn, error) {
+	return EnsureDaemonConfiguredContext(context.Background(), cfg, paths, configFile)
+}
+
+// EnsureDaemonConfiguredContext is the context-aware managed launcher used by
+// long-lived frontends. The configured start timeout remains the upper bound;
+// an earlier caller deadline or cancellation shortens it.
+func EnsureDaemonConfiguredContext(parent context.Context, cfg *config.Config, paths config.Paths, configFile string) (net.Conn, error) {
+	if err := parent.Err(); err != nil {
+		return nil, err
+	}
+
+	startupDeadline := time.Now().Add(daemonStartTimeout)
+	if parentDeadline, ok := parent.Deadline(); ok && parentDeadline.Before(startupDeadline) {
+		startupDeadline = parentDeadline
+	}
+
+	startupContext, cancel := context.WithDeadline(parent, startupDeadline)
+	defer cancel()
+
 	sockPath := paths.SocketPath
 	// Present the caller's credential (session token or human token) in the
 	// probe, matching the real handshake and the other probes (probeDaemonIdentity,
@@ -50,14 +85,19 @@ func EnsureDaemon(paths config.Paths, configFile string) (net.Conn, error) {
 	// spurious handshake_err (which still counts as alive, but is noisier and
 	// diverges from the real handshake).
 	token := resolveClientToken(paths)
+	probeDeadline := initialDaemonProbeDeadline(startupDeadline)
 
-	if daemonResponds(sockPath, token, paths.Profile) {
-		if conn, err := dialLocalDaemon("unix", sockPath, daemonDialTimeout); err == nil {
+	if daemonRespondsUntil(sockPath, token, paths.Profile, probeDeadline) {
+		if conn, err := dialLocalDaemonBefore("unix", sockPath, daemonDialTimeout, probeDeadline); err == nil {
 			return conn, nil
 		}
 	}
 
-	if err := startDaemonFn(configFile); err != nil {
+	if err := startupContext.Err(); err != nil {
+		return nil, err
+	}
+
+	if err := startDaemonFn(startupContext, cfg, paths, configFile); err != nil {
 		return nil, fmt.Errorf("start daemon: %w", err)
 	}
 
@@ -67,7 +107,7 @@ func EnsureDaemon(paths config.Paths, configFile string) (net.Conn, error) {
 	// start_timeout on the first probe (issue #1319).
 	var readyConn net.Conn
 
-	ready := pollDaemonReady(func(deadline time.Time) bool {
+	ready := pollDaemonReadyBefore(startupDeadline, func(deadline time.Time) bool {
 		if !daemonRespondsUntil(sockPath, token, paths.Profile, deadline) {
 			return false
 		}
@@ -86,6 +126,25 @@ func EnsureDaemon(paths config.Paths, configFile string) (net.Conn, error) {
 	}
 
 	return readyConn, nil
+}
+
+func initialDaemonProbeDeadline(startupDeadline time.Time) time.Time {
+	now := time.Now()
+
+	remaining := startupDeadline.Sub(now)
+	if remaining <= 0 {
+		return startupDeadline
+	}
+
+	// A stale listener must not consume the entire first-command budget before
+	// the managed/direct starter gets a chance to reconcile it. Reserve at least
+	// half of the aggregate deadline for launch and readiness.
+	probeBudget := remaining / 2
+	if daemonHandshakeTimeout > 0 && daemonHandshakeTimeout < probeBudget {
+		probeBudget = daemonHandshakeTimeout
+	}
+
+	return now.Add(probeBudget)
 }
 
 // daemonResponds reports whether a live graith daemon is listening on sockPath.
@@ -187,8 +246,63 @@ func daemonRespondsWithDeadline(sockPath, token, profile string, aggregateDeadli
 	return env.Type == "handshake_ok" || env.Type == "handshake_err" || env.Type == "error"
 }
 
-func startDaemon(configFile string) error {
+func startDaemon(ctx context.Context, cfg *config.Config, paths config.Paths, configFile string) error {
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	resolution, err := daemonservice.ResolveContext(ctx, self, version.Version, version.CommitSHA, os.Getuid())
+	if err != nil {
+		return err
+	}
+
+	if resolution.Mode == daemonservice.ModeManaged {
+		lifetime := daemonStartTimeout + daemonHandshakeTimeout + 2*time.Second
+		if deadline, ok := ctx.Deadline(); ok {
+			lifetime = time.Until(deadline) + daemonHandshakeTimeout + 2*time.Second
+		}
+
+		if lifetime < 15*time.Second {
+			lifetime = 15 * time.Second
+		}
+
+		return resolution.Manager.Launch(ctx, cfg, paths, configFile, lifetime, os.Environ())
+	}
+
 	return startDaemonWithLauncher(configFile, launchDaemon)
+}
+
+// PrepareDaemonCleanRestart reserves the managed service identity before a
+// destructive stop. Fallback installations have nothing to reserve.
+func PrepareDaemonCleanRestart(ctx context.Context, paths config.Paths) error {
+	mode, _, err := detectDaemonServiceModeForCleanRestart()
+	if err != nil {
+		return err
+	}
+
+	// A managed clean restart can reserve/rotate service state and then stop all
+	// sessions. Enforce the same first-human boundary as Launch before resolving
+	// a manager or mutating the receipt.
+	if mode == daemonservice.ModeManaged && cleanRestartSecurityBoundaryDetected() {
+		return errors.New("an agent-mode caller cannot reserve a managed daemon clean restart")
+	}
+
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	resolution, err := daemonservice.ResolveContext(ctx, self, version.Version, version.CommitSHA, os.Getuid())
+	if err != nil {
+		return err
+	}
+
+	if resolution.Manager == nil {
+		return nil
+	}
+
+	return resolution.Manager.ReserveForCleanRestart(ctx, paths.Profile)
 }
 
 func startDaemonWithLauncher(configFile string, launch func(string, []string) error) error {

@@ -19,6 +19,7 @@ It checks:
 
 - **Version:** CLI and daemon version match, update availability
 - **Environment:** config file, data dir, daemon log size, state file, messages DB, sandbox availability, agent prompt
+- **macOS daemon service:** managed/fallback mode, projected variable names, receipt health, and named-profile slot usage
 - **Daemon:** connectivity, PID file freshness, uptime
 - **Sessions:** zombie processes (PID not alive but status running), missing worktrees, config drift, scrollback saturation
 - **Storage:** scrollback files, orphaned scrollback logs, orphaned worktree directories, tmp dir size, legacy share dir
@@ -82,6 +83,59 @@ gr daemon start
 ```bash
 gr daemon restart
 ```
+
+### Graith background service requires approval or is disabled
+
+This applies only to a signed packaged install on macOS 13 or newer. Inspect the
+exact profile job, then enable Graith under **System Settings → General → Login
+Items**:
+
+```bash
+gr daemon service status
+gr doctor
+```
+
+Run the original command again after approval. Graith intentionally does not
+direct-spawn around the setting. If the status and Login Items disagree, keep
+the daemon stopped and run `gr daemon service repair`; unknown live or disabled
+jobs are quarantined rather than killed.
+
+### Managed package is missing or has an invalid `Graith.app`
+
+A stable Darwin package fails rather than using an unsigned or mismatched app.
+Reinstall or upgrade from the official Homebrew tap/release tarball, preserving
+`Graith.app` beside a tarball's `gr`, then run:
+
+```bash
+gr daemon service repair
+gr daemon service status --all-profiles
+```
+
+If you deliberately built from source or used `go install`, `gr doctor` should
+instead report the explicit direct-spawn fallback.
+
+### All 64 named-profile service slots are leased
+
+List the mappings and remove a dormant profile you no longer need. This removes
+only its service registration; profile data is preserved.
+
+```bash
+gr daemon service status --all-profiles
+GRAITH_PROFILE=old-profile gr daemon service remove
+```
+
+Graith never solves capacity by starting a Terminal-owned named daemon. During
+an upgrade, a clean restart reserves the service before stopping a still-working
+direct daemon, so capacity or approval failure leaves that daemon running.
+
+### macOS privacy access changed after upgrading
+
+The daemon's macOS identity is Graith, not Terminal. Terminal's Full Disk Access,
+Automation, keychain, or other TCC grants do not automatically transfer. Grant
+the minimum required access to Graith in System Settings. For shell credentials
+or sockets, opt the variable name into
+[`[daemon_service].inherit_env`]({{< relref "/docs/configuration/_index.md#macos-daemon-service-environment" >}}).
+Graith does not fall back to the terminal process to inherit broader access.
 
 ## Session issues
 

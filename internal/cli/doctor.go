@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -16,6 +18,7 @@ import (
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
+	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/version"
@@ -117,6 +120,7 @@ var doctorCmd = &cobra.Command{
 
 		dc.checkVersion(probe)
 		dc.checkEnvironment()
+		dc.checkDaemonService()
 		dc.checkHumanToken()
 
 		diag := dc.checkDaemon(probe)
@@ -449,6 +453,94 @@ func (dc *doctorContext) checkEnvironment() {
 		dc.passf("environment", "Agent prompt: customized")
 	default:
 		dc.passf("environment", "Agent prompt: default")
+	}
+}
+
+func (dc *doctorContext) checkDaemonService() {
+	// Linux and the other direct-spawn platforms deliberately retain their
+	// existing doctor output. This section describes only the macOS ownership
+	// model introduced for packaged builds.
+	if runtime.GOOS != "darwin" {
+		return
+	}
+
+	const section = "daemon_service"
+
+	dc.section("macOS Daemon Service")
+
+	mode, reason, err := daemonservice.DetectMode()
+	if err != nil {
+		dc.failf(section, "Cannot determine daemon service mode: %v", err)
+		return
+	}
+
+	if mode != daemonservice.ModeManaged {
+		dc.warnf(section, "Direct-spawn fallback: %s", reason)
+		dc.hintf("A signed packaged build on macOS 13 or newer runs the daemon as a Graith-associated user service")
+
+		return
+	}
+
+	executable, err := os.Executable()
+	if err != nil {
+		dc.failf(section, "Cannot locate this Graith executable: %v", err)
+		return
+	}
+
+	if err := daemonservice.ValidateManagedInstallationContext(context.Background(), executable, version.Version, version.CommitSHA); err != nil {
+		dc.failf(section, "Managed daemon service package is invalid: %v", err)
+		dc.hintf("Reinstall the same Graith release before starting or restarting the daemon")
+
+		return
+	}
+
+	dc.passf(section, "Managed user service package verified (%s)", reason)
+
+	inherited := make(map[string]bool)
+
+	projected := append([]string(nil), daemonservice.BuiltInEnvironmentNames...)
+
+	if cfg != nil {
+		for _, name := range cfg.DaemonService.InheritEnv {
+			inherited[name] = true
+			projected = append(projected, name)
+		}
+	}
+
+	dc.passf(section, "Startup environment projects variable names only: %s", strings.Join(projected, ", "))
+
+	var omitted []string
+
+	for _, name := range []string{"SSH_AUTH_SOCK", "AWS_PROFILE", "GOOGLE_APPLICATION_CREDENTIALS", "KUBECONFIG"} {
+		if os.Getenv(name) != "" && !inherited[name] {
+			omitted = append(omitted, name)
+		}
+	}
+
+	if len(omitted) > 0 {
+		dc.warnf(section, "Current shell variables are not projected to the daemon: %s", strings.Join(omitted, ", "))
+		dc.hintf("Add only the required variable names to [daemon_service] inherit_env; values remain transient")
+	}
+
+	receipt, err := daemonservice.ReadReceipt(os.Getuid())
+	if errors.Is(err, daemonservice.ErrReceiptMissing) {
+		dc.passf(section, "No service registrations yet; the first eligible command will register one")
+		return
+	}
+
+	if err != nil {
+		dc.failf(section, "Cannot validate the daemon service receipt: %v", err)
+		dc.hintf("Run: gr daemon service repair")
+
+		return
+	}
+
+	used := len(receipt.Leases)
+	if used >= 56 {
+		dc.warnf(section, "%d of 64 named-profile service slots are leased", used)
+		dc.hintf("Remove dormant profile services before the fixed slot pool reaches capacity")
+	} else {
+		dc.passf(section, "%d of 64 named-profile service slots are leased", used)
 	}
 }
 

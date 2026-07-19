@@ -5077,7 +5077,7 @@ func TestNonoProfilePathMatchesWrapOpts(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.paths.RuntimeDir = t.TempDir()
 
-	opts := sm.sandboxOptsFromConfig(config.SandboxConfig{}, "braw1", "/nonexistent/worktree", "claude", nil, true)
+	opts := requireSandboxOpts(t, sm, config.SandboxConfig{}, "braw1", "/nonexistent/worktree", "claude", nil, true)
 
 	if opts.ProfilePath != sm.nonoProfilePath("braw1") {
 		t.Errorf("write path %q != cleanup path %q", opts.ProfilePath, sm.nonoProfilePath("braw1"))
@@ -5097,7 +5097,7 @@ func TestSafehouseFragmentPathMatchesWrapOpts(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.paths.RuntimeDir = t.TempDir()
 
-	opts := sm.sandboxOptsFromConfig(config.SandboxConfig{}, "braw1", "/nonexistent/worktree", "claude", nil, true)
+	opts := requireSandboxOpts(t, sm, config.SandboxConfig{}, "braw1", "/nonexistent/worktree", "claude", nil, true)
 
 	if opts.SafehouseFragmentPath != sm.safehouseFragmentPath("braw1") {
 		t.Errorf("fragment write path %q != cleanup path %q", opts.SafehouseFragmentPath, sm.safehouseFragmentPath("braw1"))
