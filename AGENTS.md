@@ -159,6 +159,11 @@ status only as review and implementation occur.
   trust and quarantine boundary before content reaches agents.
 - Avoid slow I/O, process waits, git operations, or callbacks while holding the
   session-manager lock. Follow existing reserve/act/commit/rollback patterns.
+- CLI arguments used to launch agents or external tools must never be hard-coded
+  in graith source. They must be configuration-driven, with bundled defaults
+  represented in configuration rather than literals at invocation call sites.
+  Bundled defaults must not surrender an agent's native approvals or sandbox
+  without a boundary graith can guarantee.
 
 Subsystem-specific details and design links live in the scoped guides.
 

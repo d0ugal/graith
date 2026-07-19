@@ -9,8 +9,10 @@ draft: false
 
 graith can wrap agent processes in an enforceable OS sandbox that restricts
 file access, environment, processes, signals, and — depending on backend — the
-network. It's enabled by default but can be disabled when you deliberately rely
-on agent-native controls, an external sandbox, or a VM. Two backends:
+network. It is **off by default** because graith does not assume a sandbox
+backend is installed on your machine; enabling it is strongly recommended once
+you have a backend. When it's disabled you rely on agent-native controls, an
+external sandbox, or a VM. Two backends:
 
 | Backend | Platforms | Primitive |
 |---------|-----------|-----------|
@@ -24,20 +26,22 @@ sub-pages for [how it works]({{< relref "how-it-works.md" >}}),
 
 ## Why sandbox
 
-The bundled agent definitions disable their native permission prompts so they
-can run unattended. Clear `non_interactive_args` to use an agent's own approval
-TUI; Graith won't proxy or track those prompts. When enabled, Graith's OS
-sandbox confines the process regardless of what the agent thinks it can do — the
-kernel enforces that boundary. It also isolates sessions from each other:
-without a sandbox, one agent can read graith's `state.json` and impersonate
-another session.
+The bundled agent definitions keep their native permission prompts (and, for
+Codex, its native sandbox) by default; graith never disables an agent's own
+safeguards out of the box. Set `non_interactive_args` to an agent's unattended
+flags to run without those prompts — do that only behind a boundary you control.
+Graith won't proxy or track those prompts. When enabled, Graith's OS sandbox
+confines the process regardless of what the agent thinks it can do — the kernel
+enforces that boundary. It also isolates sessions from each other: without a
+sandbox, one agent can read graith's `state.json` and impersonate another
+session.
 
 ## Choosing a backend
 
-The `backend` field is required. The built-in default is `nono`; pick
-`safehouse` explicitly on macOS if you prefer it. If the selected backend is
-absent, unsupported, or can't enforce the requested policy, creation and resume
-fail closed with an actionable error.
+The `backend` field is required whenever the sandbox is enabled — graith ships
+no default backend, so you must pick one that is installed. If the selected
+backend is absent, unsupported, or can't enforce the requested policy, creation
+and resume fail closed with an actionable error.
 
 - `backend = "safehouse"` on macOS if you already use safehouse.
 - `backend = "nono"` on Linux (the only cross-platform option) or on macOS.
@@ -83,8 +87,9 @@ filtering, when graith grows it, needs 6.7+. On macOS, nono uses Seatbelt, which
 is always present. graith requires a minimum nono version and refuses to run
 below it (see `gr doctor`).
 
-The default config already enables `nono`. Install the selected backend before
-creating or resuming sandboxed sessions.
+The sandbox is off by default and ships no backend. Install a backend and set
+`[sandbox] enabled = true` with a `backend` before creating or resuming
+sandboxed sessions.
 
 ## Command policy is subtractive
 

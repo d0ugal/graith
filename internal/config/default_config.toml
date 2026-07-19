@@ -597,15 +597,17 @@ require_pairing = true    # require per-device pairing for human-level rights; f
 # write_dirs = ["~/.config/graith"]
 
 [sandbox]
-# Recommended OS-level sandbox for agent processes. Disable it only when native
-# agent controls or an external sandbox/VM provide the boundary you intend.
-# When enabled, a session fails to start if the selected backend cannot enforce
-# the configured policy. Disabled sessions start with a warning and are reported
-# by `gr doctor`.
-#   backend = "safehouse"  # macOS Seatbelt (sandbox-exec)
-#   backend = "nono"       # Landlock+seccomp on Linux, Seatbelt on macOS
-enabled = true
-backend = "nono"
+# OS-level sandbox for agent processes. Off by default: graith does not assume a
+# sandbox backend (nono or safehouse) is installed on your machine. Enabling it
+# is strongly recommended — it confines the agent's filesystem, environment,
+# process, signal, socket, and (backend permitting) network access regardless of
+# what the agent believes it may do, and isolates sessions from each other.
+# Turn it on and pick an installed backend below. When enabled, a session fails
+# to start if the selected backend cannot enforce the configured policy; a
+# disabled session starts with a warning and is reported by `gr doctor`.
+enabled = false
+# backend = "nono"       # Landlock+seccomp on Linux, Seatbelt on macOS
+# backend = "safehouse"  # macOS Seatbelt (sandbox-exec)
 # read_dirs  = ["~/Code/shared"]
 # write_dirs = ["~/.cache/agent"]
 # features   = ["ssh"]      # ssh -> $SSH_AUTH_SOCK; process-control -> signals
@@ -663,7 +665,7 @@ preview_bytes = 16384       # scrollback tail rendered by the overlay/screen_pre
 
 [agents.claude]
 command = "claude"                                    # binary to launch
-non_interactive_args = ["--dangerously-skip-permissions"] # bundled unattended default; set [] to use Claude's native approval TUI
+non_interactive_args = [] # keep Claude's native approval TUI. Set ["--dangerously-skip-permissions"] to run fully unattended (skips all of Claude's approvals)
 args = ["--session-id", "{agent_session_id}"]        # args for a fresh session (templates expanded)
 resume_args = ["--resume", "{agent_session_id}"]     # args to resume an existing session
 # args to fork from a source session (used by ctrl+b f)
@@ -697,7 +699,7 @@ write_dirs = ["~/.claude"]
 
 [agents.codex]
 command = "codex"
-non_interactive_args = ["--ask-for-approval", "never", "--sandbox", "danger-full-access"] # bundled unattended default; set [] to keep Codex native approvals/sandbox
+non_interactive_args = [] # keep Codex's native approvals + sandbox; graith's OS sandbox is the outer boundary. Set e.g. ["--ask-for-approval", "never", "--sandbox", "danger-full-access"] to run fully unattended (see docs; this removes Codex's own safeguards, so only do it behind a guaranteed outer boundary)
 args = []
 # Codex mints its own session id; graith captures it from the rollout on disk
 # after start (captureNativeSessionID). Resume pins to that id when known; when
@@ -738,7 +740,7 @@ write_dirs = ["~/.codex"]
 
 [agents.opencode]
 command = "opencode"
-non_interactive_args = ["--auto"] # bundled unattended default; set [] to keep OpenCode native prompts
+non_interactive_args = [] # keep OpenCode's native prompts. Set ["--auto"] to run unattended (auto-approves what would otherwise ask; explicit denies still apply)
 args = []
 resume_args = ["--session", "{agent_session_id}"]
 idle_timeout        = "1h"     # auto-stop after this long idle (0 disables)
@@ -748,7 +750,7 @@ pre_trust_workspace = true     # pre-trust the worktree so the agent skips its t
 
 [agents.cursor]
 command = "agent"           # the Cursor CLI binary is named `agent`
-non_interactive_args = ["--force"] # bundled unattended default; set [] to keep Cursor native prompts
+non_interactive_args = [] # keep Cursor's native prompts. Set ["--force"] to run unattended
 args = []
 resume_args = ["resume"]
 # Command listing valid model IDs ("id - description" per line); a requested
@@ -766,7 +768,7 @@ write_dirs = ["~/.cursor"]
 
 [agents.agy]
 command = "agy"
-non_interactive_args = ["--dangerously-skip-permissions"] # bundled unattended default; set [] to keep Agy native prompts
+non_interactive_args = [] # keep Agy's native prompts. Set ["--dangerously-skip-permissions"] to run fully unattended
 args = []
 resume_args = ["--conversation", "{agent_session_id}"]
 idle_timeout        = "1h"     # auto-stop after this long idle (0 disables)

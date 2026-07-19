@@ -248,37 +248,69 @@ func TestDefaultAgentArgsRoundTrip(t *testing.T) {
 	}
 }
 
-func TestDefaultAgentsDisableNativePrompting(t *testing.T) {
+// TestDefaultAgentsKeepNativeSafeguards is the regression guard for issue #1467
+// and the wider dangerous-default hardening. Every bundled agent must default to
+// an empty non_interactive_args so it keeps its own approval TUI (and, for
+// Codex, its own sandbox) out of the box. Enabling unattended mode — which
+// disables those native safeguards — is now an explicit user opt-in, so graith
+// never disables an agent's controls without an operator-established boundary.
+func TestDefaultAgentsKeepNativeSafeguards(t *testing.T) {
 	t.Parallel()
 
 	cfg := Default()
 
-	tests := []struct {
-		name string
-		want []string
-	}{
-		{name: "claude", want: []string{"--dangerously-skip-permissions"}},
-		{name: "codex", want: []string{"--ask-for-approval", "never", "--sandbox", "danger-full-access"}},
-		{name: "cursor", want: []string{"--force"}},
-		{name: "agy", want: []string{"--dangerously-skip-permissions"}},
-		{name: "opencode", want: []string{"--auto"}},
+	// Flags that surrender an agent's native approval and/or sandbox controls.
+	// None may appear in a bundled default (issue #1467 called out the Codex
+	// three explicitly; the rest are the sibling unattended flags).
+	dangerous := []string{
+		"--dangerously-skip-permissions",
+		"--ask-for-approval",
+		"--sandbox",
+		"danger-full-access",
+		"--dangerously-bypass-approvals-and-sandbox",
+		"--force",
+		"--auto",
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+
+	for _, name := range []string{"claude", "codex", "cursor", "agy", "opencode"} {
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			agent, ok := cfg.Agents[tt.name]
+			agent, ok := cfg.Agents[name]
 			if !ok {
-				t.Fatalf("default agent %q is missing", tt.name)
+				t.Fatalf("default agent %q is missing", name)
 			}
 
-			if agent.NonInteractiveArgs == nil {
-				t.Fatalf("agent %q has nil non_interactive_args", tt.name)
+			if len(agent.NonInteractiveArgs) != 0 {
+				t.Fatalf("agent %q non_interactive_args = %v, want empty (native safeguards preserved)", name, agent.NonInteractiveArgs)
 			}
 
-			if !reflect.DeepEqual(agent.NonInteractiveArgs, tt.want) {
-				t.Fatalf("agent %q non_interactive_args = %v, want %v", tt.name, agent.NonInteractiveArgs, tt.want)
+			for _, got := range agent.NonInteractiveArgs {
+				for _, bad := range dangerous {
+					if got == bad {
+						t.Fatalf("agent %q bundled default surrenders native controls via %q", name, bad)
+					}
+				}
 			}
 		})
+	}
+}
+
+// TestDefaultSandboxOffByDefault guards the config-only posture change: graith
+// does not assume a sandbox backend (nono/safehouse) is installed, so the OS
+// sandbox is opt-in. Combined with the native-safeguard defaults above, an
+// out-of-the-box session relies on the agent's own controls until the operator
+// enables a backend.
+func TestDefaultSandboxOffByDefault(t *testing.T) {
+	t.Parallel()
+
+	cfg := Default()
+
+	if cfg.Sandbox.Enabled {
+		t.Fatalf("Default().Sandbox.Enabled = true, want false (backend must not be assumed)")
+	}
+
+	if cfg.Sandbox.Backend != "" {
+		t.Fatalf("Default().Sandbox.Backend = %q, want empty (no assumed backend)", cfg.Sandbox.Backend)
 	}
 }
