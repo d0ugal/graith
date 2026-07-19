@@ -9,7 +9,7 @@ draft: false
 
 ## Overview
 
-graith is a daemon/client system. A long-lived daemon (`graithd`) owns PTY sessions and persists state. A stateless CLI client (`gr`) connects over a Unix socket.
+graith is a daemon/client system. A long-lived daemon (`graithd`) owns PTY sessions and persists state; a stateless CLI client (`gr`) connects over a Unix socket.
 
 ```mermaid
 graph LR
@@ -40,7 +40,7 @@ Control messages use a JSON envelope:
 {"type": "create", "payload": {"name": "fix-bug", "agent": "claude", ...}}
 ```
 
-The client sends a message type; the daemon responds with a corresponding response type or `error`. The protocol is versioned (currently `1.0`) and checked during handshake.
+The client sends a message type; the daemon responds with a matching response type or `error`. The protocol is versioned (currently `1.0`) and checked during handshake.
 
 ### Message types
 
@@ -113,15 +113,15 @@ The daemon (`SessionManager`) is the central component:
 
 ### State persistence
 
-`state.json` stores session metadata: ID, name, agent type, repo path, worktree path, branch, status, parent ID, starred flag, and timestamps. It is loaded on daemon start and written synchronously on every mutation.
+`state.json` stores session metadata: ID, name, agent type, repo path, worktree path, branch, status, parent ID, starred flag, and timestamps. It's loaded on daemon start and written synchronously on every mutation.
 
-Runtime-only state (hook reports, attached clients, and in-memory caches) is not persisted and is rebuilt from PTY state on restart.
+Runtime-only state — hook reports, attached clients, and in-memory caches — isn't persisted; it's rebuilt from PTY state on restart.
 
-**State-version backups.** The state file carries a schema version, and a newer daemon migrates an older `state.json` forward in place. Because a downgraded (older) binary refuses to start against forward-migrated state, the daemon writes a crash-safe copy of the pre-migration file to `state.json.v<oldVersion>.bak` (alongside `state.json`) *before* migrating. Only the most recent pre-migration backup is kept — an earlier one is removed once the new backup is durable. To recover a downgrade, stop the daemon, restore the backup over `state.json` (e.g. `mv state.json.v16.bak state.json`), and start the older binary. `gr doctor` lists any available backups.
+**State-version backups.** The state file carries a schema version, and a newer daemon migrates an older `state.json` forward in place. Since a downgraded (older) binary won't start against forward-migrated state, the daemon writes a crash-safe copy of the pre-migration file to `state.json.v<oldVersion>.bak` (alongside `state.json`) *before* migrating. Only the most recent pre-migration backup is kept — an earlier one is removed once the new backup is durable. To recover a downgrade, stop the daemon, restore the backup over `state.json` (e.g. `mv state.json.v16.bak state.json`), and start the older binary. `gr doctor` lists any available backups.
 
 ### Session manager locking
 
-The `SessionManager` uses a `sync.RWMutex` for concurrent access. Read operations (list, info) take a read lock. Mutations (create, delete, stop) take a write lock. The handler dispatches all control messages through the session manager.
+The `SessionManager` uses a `sync.RWMutex` for concurrent access. Reads (list, info) take a read lock; mutations (create, delete, stop) take a write lock. The handler dispatches all control messages through the session manager.
 
 ## Client
 
@@ -139,7 +139,7 @@ For `attach`, the client enters a loop:
 2. **Overlay mode:** session picker TUI (Bubble Tea)
 3. **Shell mode:** interactive shell in the worktree
 
-The client transitions between these modes based on prefix key commands and overlay actions.
+The client switches between these modes on prefix key commands and overlay actions.
 
 ### Passthrough
 
@@ -155,6 +155,7 @@ In passthrough mode:
 ### Overlay
 
 The overlay is a full-screen TUI built with [Bubble Tea](https://github.com/charmbracelet/bubbletea). It renders session lists with filtering, view modes, and a live preview panel. The preview uses [vt10x](https://github.com/hinshun/vt10x) to parse terminal output into a rendered screen.
+
 
 ## PTY management
 
@@ -199,12 +200,12 @@ When sandbox is enabled (`sandbox/sandbox.go`), the backend is pluggable — sel
 
 1. The daemon resolves the merged sandbox config (global + per-agent)
 2. `~` paths and globs are expanded to absolute
-3. The command is wrapped by the selected backend — either `safehouse wrap` (`sandbox/safehouse.go`) or a generated per-session nono JSON profile run via `nono run --profile` (`sandbox/nono.go`)
-4. The daemon checks the selected backend can enforce before session creation (binary present, kernel/version adequate, network policy supported); if not, creation fails closed
+3. The selected backend wraps the command — either `safehouse wrap` (`sandbox/safehouse.go`) or a generated per-session nono JSON profile run via `nono run --profile` (`sandbox/nono.go`)
+4. Before session creation, the daemon checks the backend can enforce (binary present, kernel/version adequate, network policy supported); if not, creation fails closed
 
 ## Agent detection
 
-The `agent/agent.go` module detects AI agent environments by checking for environment variables: `GRAITH_SESSION_ID`, `CLAUDECODE`, `CLAUDE_CODE`, `CURSOR_AGENT`, `GITHUB_COPILOT`, `AMAZON_Q`, `OPENCODE`. When detected, JSON output is auto-enabled. Override with `GR_AGENT_MODE=0` or `GR_AGENT_MODE=1`.
+The `agent/agent.go` module detects AI agent environments by checking environment variables: `GRAITH_SESSION_ID`, `CLAUDECODE`, `CLAUDE_CODE`, `CURSOR_AGENT`, `GITHUB_COPILOT`, `AMAZON_Q`, `OPENCODE`. When detected, JSON output is auto-enabled. Override with `GR_AGENT_MODE=0` or `GR_AGENT_MODE=1`.
 
 ## Package layout
 
@@ -229,4 +230,4 @@ internal/
   version/               Build-time version injection
 ```
 
-All packages are under `internal/`. There is no public Go API.
+All packages live under `internal/`; there's no public Go API.

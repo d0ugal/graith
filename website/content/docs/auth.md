@@ -7,11 +7,11 @@ toc: true
 draft: false
 ---
 
-graith uses per-session bearer tokens to prevent agent sessions from impersonating each other. Each session gets a unique token at creation time, and the daemon validates it on every control message.
+graith uses per-session bearer tokens so agent sessions can't impersonate each other. Each session gets a unique token at creation, and the daemon validates it on every control message.
 
 ## Why authentication
 
-Without auth, any process that can reach the daemon's Unix socket can send control messages claiming to be any session. An agent could stop, delete, or type into a sibling session, read another session's inbox, or spoof messages with a fake sender identity. Token auth binds each agent to its own session identity.
+Without auth, any process that can reach the daemon's Unix socket can send control messages claiming to be any session — stopping, deleting, or typing into a sibling, reading another session's inbox, or spoofing messages with a fake sender identity. Token auth binds each agent to its own session identity.
 
 ## How it works
 
@@ -20,7 +20,7 @@ Without auth, any process that can reach the daemon's Unix socket can send contr
 3. The CLI reads `GRAITH_TOKEN` and includes it on every control message sent to the daemon
 4. The daemon validates the token and enforces an authorization matrix
 
-No configuration is needed. Tokens are generated automatically for all sessions. Existing sessions receive tokens when the daemon upgrades to a version with auth support (state migration v9 to v10).
+No configuration needed — tokens are generated automatically for all sessions. Existing sessions receive tokens when the daemon upgrades to a version with auth support (state migration v9 to v10).
 
 ## Authorization rules
 
@@ -34,12 +34,12 @@ When a valid token is present, the daemon enforces these rules:
 | Human only | `reload`, `upgrade` | Rejected when a token is present; reserved for human operators |
 
 For `update --parent`, an authenticated session must also have authority over
-the new parent. Only the orchestrator or a human CLI connection may clear a
-parent, preventing a child from orphaning itself to escape its parent's control.
+the new parent. Only the orchestrator or a human CLI connection can clear a
+parent — this stops a child from orphaning itself to escape its parent's control.
 
 ### Identity forcing
 
-When an agent authenticates with a valid token, the daemon overrides identity fields in the message payload (e.g. `sender_id`, `subscriber`, `session_id`) with the session ID from the token. This prevents an agent from claiming to be a different session even if it manipulates the payload.
+When an agent authenticates with a valid token, the daemon overrides identity fields in the message payload (e.g. `sender_id`, `subscriber`, `session_id`) with the session ID from the token, so an agent can't claim to be a different session by manipulating the payload.
 
 ### Messaging rules
 
@@ -49,7 +49,7 @@ When an agent authenticates with a valid token, the daemon overrides identity fi
 
 ### The human token and the fail-closed default
 
-Local auth is **fail-closed**: a connection is treated as the human operator only if it presents a valid credential. On startup the daemon writes a **human token** to `human.token` in the data dir (mode `0600`, alongside `state.json`, and excluded from each enabled Graith agent sandbox), reusing it across restarts. A local connection resolves to the human role only when it presents either a valid session token or that human token; anything else is rejected rather than granted human access.
+Local auth is **fail-closed**: a connection is treated as the human operator only if it presents a valid credential. On startup the daemon writes a **human token** to `human.token` in the data dir (mode `0600`, alongside `state.json`, and excluded from each enabled Graith agent sandbox), reusing it across restarts. A local connection resolves to the human role only when it presents a valid session token or that human token; anything else is rejected, not granted human access.
 
 The `gr` CLI handles this transparently:
 
@@ -59,16 +59,16 @@ The `gr` CLI handles this transparently:
 The macOS app uses the same local-human credential for its built-in **This
 Mac** connection. It resolves `human.token` alongside the active profile's data
 directory and re-reads it for each new local connection, so an app opened before
-the daemon starts recovers without relaunching. Local access does not use device
-pairing. Pairing in the app applies only when **Add Host** connects to another
+the daemon starts recovers without relaunching. Local access doesn't use device
+pairing — pairing in the app applies only when **Add Host** connects to another
 daemon over the tailnet.
 
-With Graith's sandbox enabled, an agent that unsets `GRAITH_TOKEN` cannot
-masquerade as the human because the sandbox excludes `human.token` and the data
+With Graith's sandbox enabled, an agent that unsets `GRAITH_TOKEN` can't
+masquerade as the human, because the sandbox excludes `human.token` and the data
 directory. If you disable Graith's sandbox, your agent-native controls, external
-sandbox, or VM must protect those files; protocol authentication cannot help
-after an agent reads the human token. The startup warning and `gr doctor` make
-that responsibility visible.
+sandbox, or VM must protect those files; protocol authentication can't help once
+an agent reads the human token. The startup warning and `gr doctor` make that
+responsibility visible.
 
 ## Token lifecycle
 
@@ -89,9 +89,9 @@ Token auth and [sandbox]({{< relref "sandbox" >}}) are complementary:
 - **Token auth** prevents impersonation at the protocol level — an agent with a valid token can only act as itself or its descendants
 - **Sandbox** prevents filesystem access — a sandboxed agent cannot read `state.json` (which contains all tokens) or other sessions' worktrees
 
-Together they provide defense in depth when the sandbox is enabled. When it is
+Together they provide defense in depth when the sandbox is enabled. When it's
 disabled, token auth still narrows ordinary requests, but external isolation
-must prevent agents from reading other bearer tokens at rest.
+must stop agents from reading other bearer tokens at rest.
 
 ## Health checks
 
@@ -106,9 +106,9 @@ $ gr doctor
 
 ## Limitations
 
-- **The sandbox is the recommended boundary**: all sessions run as the same OS user. When Graith's sandbox is enabled, creation and resume fail if its backend cannot enforce the configured policy. When explicitly disabled, Graith warns but cannot verify your external boundary.
+- **The sandbox is the recommended boundary**: all sessions run as the same OS user. When Graith's sandbox is enabled, creation and resume fail if its backend can't enforce the configured policy. When explicitly disabled, Graith warns but can't verify your external boundary.
 - **No encryption at rest**: tokens are stored in plaintext in `state.json` and `human.token`. An enabled Graith sandbox excludes these files; an external sandbox or VM must do so when Graith's sandbox is off.
-- **Local only**: the Unix socket is protected by filesystem permissions (user-only). Token auth does not protect against other OS users — it protects sessions from each other, and agents from the human role, within the same user.
+- **Local only**: the Unix socket is protected by filesystem permissions (user-only). Token auth doesn't protect against other OS users — it protects sessions from each other, and agents from the human role, within the same user.
 - **OS-enforced identity is future work**: kernel peer credentials or per-session sockets would add another boundary beyond process isolation; see `docs/design/2026-07-11-auth-identity-hardening.md`.
 
 ## Environment variables
@@ -124,4 +124,4 @@ The daemon sets `GRAITH_TOKEN` in every agent process alongside the other sessio
 | `GRAITH_WORKTREE_PATH` | Absolute path to the session worktree |
 | `GRAITH_REPO_PATH` | Absolute path to the source repository |
 
-`GRAITH_TOKEN` is read automatically by the `gr` CLI. Agents and tools that use `gr` commands do not need to handle it explicitly.
+The `gr` CLI reads `GRAITH_TOKEN` automatically. Agents and tools that use `gr` commands don't need to handle it explicitly.

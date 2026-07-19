@@ -11,7 +11,7 @@ draft: false
 
 ### `gr daemon start`
 
-Start the daemon. This is normally automatic and rarely needed.
+Start the daemon — normally automatic and rarely needed.
 
 ### `gr daemon stop`
 
@@ -26,40 +26,39 @@ Restart the daemon, preserving live sessions via exec.
 | `--force` | Clean stop/start that kills running sessions |
 
 After rebuilding `gr`, run `gr daemon restart` to pick up the new daemon binary.
-Crossing from the approval-era protocol to the non-interactive Graith protocol is an
-intentional breaking restart: graith gracefully stops the old daemon and all of
-its PTY and headless sessions instead of asking that daemon to preserve them.
-It verifies the exact old socket peer has exited and its socket has disappeared
-before starting the replacement; if either check fails, no competing daemon is
-started. Resume stopped sessions to relaunch them under the new security model.
+Crossing from the approval-era protocol to the non-interactive Graith protocol is
+an intentional breaking restart: graith gracefully stops the old daemon and all
+its PTY and headless sessions rather than asking that daemon to preserve them.
+It confirms the exact old socket peer has exited and its socket has disappeared
+before starting the replacement; if either check fails, no competing daemon
+starts. Resume stopped sessions to relaunch them under the new security model.
 Live adoption is allowed only when persisted state and the handoff manifest
 prove the exact process identity. Whether that process uses Graith's sandbox or
-the agent's native approval TUI is preserved rather than treated as an adoption
+the agent's native approval TUI is preserved, not treated as an adoption
 requirement. Sessions from releases before this security-model transition are
 terminated and marked stopped during upgrade; resume them to launch under the
 current configuration.
-Headless sessions have no adoptable PTY and are likewise identity-checked,
-terminated, and marked stopped instead of being left unmanaged.
+Headless sessions have no adoptable PTY, so they're likewise identity-checked,
+terminated, and marked stopped rather than left unmanaged.
 The handoff manifest records every live process, not just transferable PTYs.
 The replacement process arms cleanup before loading configuration, paths, state,
 or authentication, so an early startup failure still identity-checks and
 terminates inherited agents.
-If the preserve request is accepted but the replacement is still not ready after
+If the preserve request is accepted but the replacement still isn't ready after
 the configured startup wait, graith rechecks the live daemon. It only falls back
-to a clean start after proving that the exact process which answered the
-pre-upgrade socket handshake has exited; a stale PID file alone is not enough.
-The clean result is then checked for the requested version and a fresh daemon
-generation. Otherwise graith leaves the possible in-progress replacement alone.
-Retry once startup finishes, or use `--force` when killing the sessions is
-intentional.
+to a clean start after proving the exact process that answered the pre-upgrade
+socket handshake has exited — a stale PID file alone isn't enough. The clean
+result is then checked for the requested version and a fresh daemon generation.
+Otherwise graith leaves the possible in-progress replacement alone. Retry once
+startup finishes, or use `--force` when killing the sessions is intentional.
 
 ### `gr daemon reload`
 
 Reload configuration without restarting the daemon. Invalid settings or a
 runtime apply failure return an error and leave the previous config generation
-visible. Remote transport replacement closes the old listener first and stays
-closed if the replacement fails; correct the setting and reload again through
-the local socket. See [remote hot reload]({{< relref "/docs/configuration/access.md#hot-reload-and-revocation" >}}).
+in place. Remote transport replacement closes the old listener first and stays
+closed if the replacement fails; fix the setting and reload again through the
+local socket. See [remote hot reload]({{< relref "/docs/configuration/access.md#hot-reload-and-revocation" >}}).
 
 ## Other commands
 
@@ -105,7 +104,7 @@ Print version information.
 
 ## Hidden/internal commands
 
-These are used by graith internally and are not intended for direct use:
+Used by graith internally, not intended for direct use:
 
 | Command | Purpose |
 |---------|---------|

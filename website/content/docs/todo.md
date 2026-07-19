@@ -13,7 +13,7 @@ first-class primitive alongside [messaging]({{< relref "messaging.md" >}}), the
 Unlike an agent's in-context checklist, todo items **survive session end, resume,
 compaction, and daemon restart**, are visible across a session subtree or a whole
 scenario, and can be **claimed atomically** so parallel agents draining one list
-never double-work the same item.
+never double-work an item.
 
 Agents drive it through `gr todo`; the human sees "what's left" across the fleet
 in `gr list` and the overlay.
@@ -51,28 +51,28 @@ graph LR
 
 `reopen` clears the owner and returns an item to `todo` so it can be claimed
 again (from `in-progress`, `blocked`, or `done`); a `blocked` item can be
-completed directly once its blocker clears. Sub-items are one level deep (a sub-item can't itself have children),
-share their parent's scope, and are removed with their parent.
+completed directly once its blocker clears. Sub-items are one level deep (a
+sub-item can't have children of its own), share their parent's scope, and are
+removed with their parent.
 
-Dependency waiting is also shown as `blocked`, but it is ownerless and carries
-`blocked_by` instead of relying on a manual note. Internally it remains an
-unclaimed todo whose readiness is derived from the graph, so it cannot be
-claimed until every dependency is done and cannot drift after a daemon restart.
+Dependency waiting also shows as `blocked`, but it's ownerless and carries
+`blocked_by` instead of a manual note. Internally it stays an unclaimed todo
+whose readiness derives from the graph, so it can't be claimed until every
+dependency is done and can't drift after a daemon restart.
 
 ## Scoping
 
-Every item belongs to exactly one list, identified by its **scope**. There is no
+Every item belongs to exactly one list, identified by its **scope**. There's no
 free-floating global list — scoping mirrors how graith already draws coordination
 boundaries.
 
 - **Session subtree (default).** `gr todo add` anchors the item to the **root of
   your session subtree** — the daemon walks your `GRAITH_SESSION_ID` up its parent
-  chain to the topmost session. A parent and its children therefore share **one**
-  list, so an orchestrator and the sessions it spawns coordinate over a common
-  backlog. Any session in the subtree can read and claim; a session outside it
-  cannot.
+  chain to the topmost session. A parent and its children share **one** list, so
+  an orchestrator and the sessions it spawns coordinate over a common backlog.
+  Any session in the subtree can read and claim; one outside it can't.
 - **Scenario.** Pass `--scenario <name>` to work a scenario's shared list. Every
-  member of the scenario — including shared sessions — can read and claim from it.
+  member — including shared sessions — can read and claim from it.
 
 The local human (`gr` from the shell) is in every scope.
 
@@ -113,54 +113,53 @@ auto-anchor for the rare case an agent wants a sub-list at itself. Inside an
 agent, `gr todo` auto-enables `--json`, so agents get structured output for free
 (see [agent mode]({{< relref "/docs/commands/_index.md" >}})).
 
-Agents can also drive the same operations over
-[MCP]({{< relref "mcp.md" >}}) (`todo_list`, `todo_add`, `todo_claim`,
-`todo_update`, `todo_done`, `todo_block`, `todo_reopen`), so an agent can plan
-durably and drain a shared backlog without dropping to the shell.
+Agents can drive the same operations over [MCP]({{< relref "mcp.md" >}})
+(`todo_list`, `todo_add`, `todo_claim`, `todo_update`, `todo_done`, `todo_block`,
+`todo_reopen`), so they can plan durably and drain a shared backlog without
+dropping to the shell.
 
 ## Dependencies
 
 Dependencies form a directed acyclic graph inside one scope. Adding or replacing
 edges rejects missing IDs, self-dependencies, cycles, and cross-scope references
-without changing the previous item or graph. Duplicate IDs are folded into one
-edge. `gr todo list` includes a **WHY BLOCKED** column; JSON returns the full
+without touching the previous item or graph. Duplicate IDs fold into one edge.
+`gr todo list` includes a **WHY BLOCKED** column; JSON returns the full
 `depends_on` list and current `blocked_by` subset.
 
 Completing a dependency and making its newly-ready direct dependents claimable
 happen in one todo-database transaction. When the final unfinished dependency
-completes, each dependent's revision is bumped and an `unblocked` event is sent
-on `todo:<scope>`. Multiple agents completing the final dependencies
-concurrently still produce one readiness transition.
+completes, each dependent's revision is bumped and an `unblocked` event fires on
+`todo:<scope>`. Multiple agents completing the final dependencies concurrently
+still produce one readiness transition.
 
 The less-obvious lifecycle cases are deliberate:
 
-- Reopening a done dependency re-blocks unclaimed direct dependents. Work that
-  is already `in-progress`, manually `blocked`, or `done` is not unwound.
-- A manually blocked dependency remains unfinished, so its downstream work
-  waits until the dependency is completed. There is no implicit skip or failure
+- Reopening a done dependency re-blocks unclaimed direct dependents. Work that's
+  already `in-progress`, manually `blocked`, or `done` isn't unwound.
+- A manually blocked dependency stays unfinished, so its downstream work waits
+  until the dependency completes. There's no implicit skip or failure
   propagation.
-- Removing a todo that another item depends on is rejected. Clear or replace
+- Removing a todo that another item depends on is rejected — clear or replace
   the dependent edge first. Retention also keeps referenced done items and
   parents whose sub-items are still referenced.
 - Reclaimed work returns ownerless but keeps its assignment. If its own
-  dependencies are unfinished, it is shown as dependency-blocked instead of
-  becoming eligible to claim.
+  dependencies are unfinished, it shows as dependency-blocked instead of
+  becoming claimable.
 
-All todo rows, dependency edges, cascade revisions, and block notes involved in
-one mutation commit or roll back together. Event delivery uses the separate
-message database and remains best-effort: a publish failure is logged without
-rolling back committed todo state, and consumers reconcile from the item
-revision.
+All todo rows, dependency edges, cascade revisions, and block notes in one
+mutation commit or roll back together. Event delivery uses the separate message
+database and stays best-effort: a publish failure is logged without rolling back
+committed todo state, and consumers reconcile from the item revision.
 
 ## Claiming
 
-Claiming is the correctness centrepiece: it is a single **atomic compare-and-set**
+Claiming is the correctness centrepiece: a single **atomic compare-and-set**
 (`todo` **and** unclaimed → `in-progress`, owned by the caller). When two agents
-race to claim the same item, exactly one wins and the other is told "already
-claimed" — there is no read-then-write window and no double-claim. `gr todo next`
-does the same over a whole scope, handing out the lowest-ordered eligible item,
-so several agents can drain unassigned backlog collision-free without taking
-work reserved for another assignee.
+race for the same item, exactly one wins and the other is told "already claimed"
+— no read-then-write window, no double-claim. `gr todo next` does the same over a
+whole scope, handing out the lowest-ordered eligible item, so several agents can
+drain unassigned backlog collision-free without taking work reserved for another
+assignee.
 
 Ownership rules:
 
@@ -175,8 +174,8 @@ Ownership rules:
   in-progress item.
 - **The human retains override authority** — consistent with every other
   subsystem. The human *assigns* work and can transition any item once the
-  transition's required pre-state exists. In particular, `done` still requires
-  a session claim; claiming is a session grabbing work for itself.
+  transition's required pre-state exists. In particular, `done` still needs a
+  session claim; claiming is a session grabbing work for itself.
 
 ### Reclaiming stranded work
 
@@ -188,19 +187,19 @@ An agent can claim an item and then stop or crash before finishing, leaving it
   unfinished dependency returns to dependency-blocked. An unassigned item goes
   back to the shared pool. An assigned item stays reserved so the assignee can
   resume or retry without losing responsibility.
-- **Claim lease.** An `in-progress` item that sees no progress for
+- **Claim lease.** An `in-progress` item with no progress for
   `[todo] claim_lease` is reopened automatically with the same assignment (see
   [configuration](#configuration)).
 
-For permanently abandoned assigned work, the override authority or human first
-runs `gr todo assign <id> <replacement-session>`, then that session claims it.
-They can also `reopen` a done or blocked item manually.
+For permanently abandoned assigned work, the override authority or human runs
+`gr todo assign <id> <replacement-session>`, then that session claims it. They
+can also `reopen` a done or blocked item manually.
 
 ## Events
 
 State changes can emit pub/sub events so reviewers and [triggers]({{< relref "triggers.md" >}})
 react without polling. On each mutation the daemon publishes a compact JSON event
-to the topic `todo:<scope>` (from the `graith:system` sender):
+to topic `todo:<scope>` (from the `graith:system` sender):
 
 ```json
 {"event":"unblocked","id":"td-abc","scope":"scenario:strath","status":"todo","revision":4}
@@ -221,8 +220,8 @@ Emission is controlled by the tri-state `[todo] emit_events`:
 | `"off"` | Never emit |
 
 Events are best-effort and fail-open — the table is the source of truth. Each item
-carries a `revision`, so a consumer treats an event as a hint and re-reads the row,
-discarding a stale event.
+carries a `revision`, so a consumer treats an event as a hint, re-reads the row,
+and discards a stale event.
 
 ## In scenarios
 
@@ -232,24 +231,23 @@ per-session boolean (this **replaces** the old `gr scenario task-done`):
 - **Seeding.** At scenario start, each member with a `task` gets **one assigned
   todo item** in the scenario's scope (`assignee` = that member, title = the task).
   A member breaks its task down by adding sub-items. A session entry's
-  `depends_on = ["member-name"]` references are resolved to these seeded items;
-  all seed items and edges are inserted atomically. A separate scenario
-  `prompt` is startup instructions only and never creates a todo.
-- **`assignee` vs `owner`.** `assignee` is *who is responsible*; `owner` is *who is
+  `depends_on = ["member-name"]` references resolve to these seeded items; all
+  seed items and edges are inserted atomically. A separate scenario `prompt` is
+  startup instructions only and never creates a todo.
+- **`assignee` vs `owner`.** `assignee` is *who's responsible*; `owner` is *who's
   currently working it* (set by the claim). They usually coincide, but an
   orchestrator can assign work a member hasn't claimed yet.
 - **Seed identity is stable.** Reassigning a scenario's seeded item changes
-  current responsibility, but member-name dependencies continue to resolve the
+  current responsibility, but member-name dependencies still resolve the
   original member's seed.
 - **Completion is derived, not declared.** A member is tracked when it has
-  assigned todo work or a required declared result. It is complete when every
+  assigned todo work or a required declared result, and complete when every
   assigned item is `done` and every required result is available. A prompt-only
-  member with no required result reports "no tracked work" (`—`); a prompt-only
-  member with a required result completes by publishing that result. `gr
-  scenario status` renders per-member `done/total` from real item state and
-  names unfinished upstream members in **WAITING ON**. Its JSON response carries
-  the same names in `blocked_by`. The scenario is complete once every tracked
-  member is complete.
+  member with no required result reports "no tracked work" (`—`); one with a
+  required result completes by publishing that result. `gr scenario status`
+  renders per-member `done/total` from real item state and names unfinished
+  upstream members in **WAITING ON**. Its JSON response carries the same names
+  in `blocked_by`. The scenario is complete once every tracked member is.
 
 The seeded item starts ownerless. A member must claim it, then mark it done; an
 attempt to skip the claim names the exact recovery command:
@@ -263,7 +261,7 @@ gr todo done <its-task-item>                             # moves to done
 Scenario-created members may substitute `$GRAITH_SCENARIO_NAME`. Shared members
 keep their existing environment and use the scenario name from the delivered
 manifest. A dependency-blocked seed becomes claimable only after its upstream
-items finish; members without a `task` receive no seed.
+items finish; members without a `task` get no seed.
 
 This is the same "I finished my task" signal formerly represented by
 `gr scenario task-done`, now backed by a real object with sub-items, ordering,
@@ -272,10 +270,10 @@ and derived progress.
 ## In `gr list` and the overlay
 
 A `done/total` count column is available in both `gr list` and the overlay session
-picker. It is **opt-in and off by default**, to keep the default table tight. The
-column shows the count for a session's own subtree list; a scenario-wide total is
-shown only on the scenario's orchestrator session, so fleet totals aren't inflated
-by echoing it onto every member.
+picker. It's **opt-in and off by default**, to keep the default table tight. The
+column shows the count for a session's own subtree list; a scenario-wide total
+shows only on the scenario's orchestrator session, so fleet totals aren't
+inflated by echoing it onto every member.
 
 ## Configuration
 
@@ -301,17 +299,17 @@ All fields are optional. `claim_lease`, `retention`, `sweep_interval`, and
 
 `max_title` and `max_note` are the enforced length limits. Their `500`/`2000`
 defaults are also the **hard ceilings** baked into the database schema — config
-may tighten them below the ceiling but never raise them past it, so a configured
-limit can never exceed what the database will accept. `list_limit` bounds a
-single list query. Over-limit values are rejected at config load.
+can tighten them below the ceiling but never raise them past it, so a configured
+limit can't exceed what the database accepts. `list_limit` bounds a single list
+query. Over-limit values are rejected at config load.
 
 Reloadability: the `claim_lease` and `retention` windows the sweep applies are
 re-read each tick, so they take effect on the next `gr daemon reload`. The
 `sweep_interval` cadence, `list_limit`, and `busy_timeout` are fixed when the
-sweep loop starts and the database opens, so they are **restart-only** — change
+sweep loop starts and the database opens, so they're **restart-only** — change
 them and run `gr daemon restart`. `max_title`/`max_note` are re-read per
 operation (reloadable). `busy_timeout` is load-bearing for the claim contract:
 it lets a contended writer wait for the lock instead of failing immediately.
 SQLite's `busy_timeout` pragma has **millisecond resolution**, so a positive
-value below `1ms` is rejected at load — it would otherwise collapse to
+value below `1ms` is rejected at load — it'd otherwise collapse to
 `busy_timeout(0)` and disable the wait the claim contract depends on.

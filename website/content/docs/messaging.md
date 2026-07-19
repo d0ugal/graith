@@ -7,7 +7,7 @@ toc: true
 draft: false
 ---
 
-graith includes a SQLite-backed messaging system that enables communication between sessions, between sessions and the user, and between agents in a hierarchy.
+graith includes a SQLite-backed messaging system for communication between sessions, between sessions and the user, and between agents in a hierarchy.
 
 ## Concepts
 
@@ -18,9 +18,9 @@ graith includes a SQLite-backed messaging system that enables communication betw
 
 **Subscribers** track read position per stream. Each session is identified as a subscriber by its `GRAITH_SESSION_ID`. Unread counts are per-subscriber.
 
-**Threads** group related messages within a stream. Pass `--thread <id>` to `pub`/`send` to continue a thread, and `--thread <id>` to `sub` to filter.
+**Threads** group related messages within a stream. Pass `--thread <id>` to `pub`/`send` to continue a thread, and to `sub` to filter.
 
-**System streams** are prefixed with `_system.` and used internally for status and daemon notifications. They are hidden from `gr msg topics` unless `--system` is passed.
+**System streams** are prefixed with `_system.` and used internally for status and daemon notifications. They're hidden from `gr msg topics` unless `--system` is passed.
 
 ## Publishing to topics
 
@@ -30,7 +30,7 @@ gr msg pub --topic build-results --file ./test-output.txt
 gr msg pub --topic updates --no-reply "Morning report is ready"
 ```
 
-Any session can publish to any topic. The sender is auto-detected from `GRAITH_SESSION_ID` and `GRAITH_SESSION_NAME`. When run outside a graith session, `sender_name` is empty and `sender_id` is set to `pid:<pid>` (the process ID).
+Any session can publish to any topic. The sender is auto-detected from `GRAITH_SESSION_ID` and `GRAITH_SESSION_NAME`. Run outside a graith session, `sender_name` is empty and `sender_id` is set to `pid:<pid>` (the process ID).
 
 ## Direct messaging
 
@@ -41,18 +41,18 @@ gr msg send fix-auth-bug --quiet "silent context update"
 gr msg send --no-reply --parent "Morning briefing complete"
 ```
 
-`send` writes to the target session's inbox stream (`inbox:<session-id>`) and types a notification into the session's PTY by default. Use `--quiet` to skip the PTY notification (the message is still delivered to the inbox).
+By default, `send` writes to the target session's inbox stream (`inbox:<session-id>`) and types a notification into the session's PTY. Use `--quiet` to skip the PTY notification (the message still reaches the inbox).
 
-Use `--no-reply` for a one-way message. The message is delivered and resumes a
-stopped recipient normally, but recipient hints say **No reply expected** and do
-not suggest a reply command. The choice is stored with the message and appears
-as `"no_reply": true` in JSON output. It can also be used with topic publishes.
+Use `--no-reply` for a one-way message. It's delivered and resumes a stopped
+recipient normally, but recipient hints say **No reply expected** and don't
+suggest a reply command. The choice is stored with the message and appears as
+`"no_reply": true` in JSON output. It works with topic publishes too.
 
-`--no-reply`, `--reply-to`, and `--quiet` are independent. `--no-reply`
+`--no-reply`, `--reply-to`, and `--quiet` are independent: `--no-reply`
 describes whether a response is expected; `--reply-to` only supplies a route if
 someone does respond; `--quiet` suppresses the immediate PTY notification.
-Daemon-authored system notices have a separate automated identity and continue
-to omit reply suggestions without relying on `no_reply`.
+Daemon-authored system notices have a separate automated identity and keep
+omitting reply suggestions without relying on `no_reply`.
 
 ### Tree messaging
 
@@ -102,7 +102,7 @@ gr msg inbox --all --ack
 gr msg ack --topic code-review
 ```
 
-Marks all messages in the stream as read for the current subscriber.
+Marks every message in the stream as read for the current subscriber.
 
 ## Listing topics
 
@@ -111,11 +111,11 @@ gr msg topics
 gr msg topics --system   # include _system.* streams
 ```
 
-Shows each stream with its total message count and unread count.
+Shows each stream with its total and unread message counts.
 
 ## Threading
 
-Threads allow structured conversations within a stream:
+Threads enable structured conversations within a stream:
 
 ```bash
 # Start a thread
@@ -162,11 +162,11 @@ to the CLI:
 - **macOS** — right-click a session in the sidebar and choose **Messages…**.
 - **iOS** — open a session and pick **Messages** from the toolbar menu.
 
-The Messages view shows the session's direct-message conversation (both the
-messages it received and the ones it sent), a compose field to send a new
-message to its inbox, and a **mark-as-read** action that acks the inbox. System
-notices (PR/CI notifications) are marked *automated* so they read distinctly
-from session/human messages.
+The Messages view shows the session's direct-message conversation (both received
+and sent), a compose field to send a new message to its inbox, and a
+**mark-as-read** action that acks the inbox. System notices (PR/CI
+notifications) are marked *automated* so they read distinctly from session/human
+messages.
 
 Topic publish/subscribe (`gr msg pub` / `gr msg sub`) stays CLI-only for now —
 the GUI covers direct session messaging.
@@ -183,9 +183,9 @@ max_per_stream = 1000   # keep at most 1000 messages per stream
 
 Both are optional. When unset, messages are kept indefinitely. An empty
 `max_age`, or an explicit `"0"`, is the documented "retain forever" sentinel; a
-non-empty value that does not parse, or a negative duration, is rejected at
-config load and reload (a typo must not silently disable age-based cleanup and
-let messages and jailed comments grow without bound).
+non-empty value that doesn't parse, or a negative duration, is rejected at
+config load and reload — a typo must not silently disable age-based cleanup and
+let messages and jailed comments grow without bound.
 
 ## Operational limits
 
@@ -207,18 +207,18 @@ size is clamped down to the new maximum. Only an *explicit* `conversation_page_s
 larger than `conversation_max_limit` is rejected at load, as a contradiction of
 intent. The conversation paging bounds and the jail cap are read per request, so a
 change takes effect on the next `gr daemon reload`. `subscriber_buffer` and
-`busy_timeout` are fixed when the database is opened, so they are **restart-only**
+`busy_timeout` are fixed when the database is opened, so they're **restart-only**
 — change them and restart the daemon (`gr daemon restart`). `busy_timeout` is
 graith's database operation deadline: how long a contended read/write waits for
 the lock before erroring. SQLite's `busy_timeout` pragma has **millisecond
-resolution**, so a positive value below `1ms` is rejected at load — it would
-otherwise collapse to `busy_timeout(0)` and disable lock waiting entirely.
+resolution**, so a positive value below `1ms` is rejected at load — otherwise it
+would collapse to `busy_timeout(0)` and disable lock waiting entirely.
 
 > **Note on internal queue capacities.** `subscriber_buffer` is the one pub/sub
 > queue exposed here because a bursty fan-out is a real load-tuning case. Other
 > internal channel capacities (daemon control kicks, signal-request buffers)
-> remain code-owned — they have no load-tuning use case and are not configurable.
+> stay code-owned — they have no load-tuning use case and aren't configurable.
 
 ## Patterns
 
-See [Agent-to-agent communication]({{< relref "patterns/communication.md" >}}) for detailed messaging patterns including pub/sub broadcast, request/reply, coordination barriers, and hierarchical agent communication.
+See [Agent-to-agent communication]({{< relref "patterns/communication.md" >}}) for detailed messaging patterns: pub/sub broadcast, request/reply, coordination barriers, and hierarchical agent communication.

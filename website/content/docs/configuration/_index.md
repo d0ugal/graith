@@ -7,7 +7,7 @@ toc: true
 draft: false
 ---
 
-Configuration lives at `~/.config/graith/config.toml` (or `$XDG_CONFIG_HOME/graith/config.toml`). All fields are optional. Sensible defaults are provided.
+Configuration lives at `~/.config/graith/config.toml` (or `$XDG_CONFIG_HOME/graith/config.toml`). Every field is optional, with sensible defaults.
 
 Manage config with:
 
@@ -18,7 +18,7 @@ gr config reset    # write built-in defaults to config file
 ```
 
 The daemon reloads config on `gr daemon reload` without restarting. It also
-watches `config.toml` and reloads in place after you save it:
+watches `config.toml` and reloads in place when you save it:
 
 ```toml
 [config]
@@ -26,14 +26,14 @@ reload_debounce = "200ms"  # quiet period after the last write before reloading
 ```
 
 `reload_debounce` coalesces an editor's write-truncate-write burst into a single
-reload. It is read when the daemon starts, so a change to `reload_debounce`
+reload. It's read when the daemon starts, so a change to `reload_debounce`
 itself only takes effect after a `gr daemon restart` (every other setting
 re-reads on reload).
 
-A reload is applied as one config generation. If a runtime change cannot be
+A reload is applied as one config generation. If a runtime change can't be
 applied, the command or automatic watcher logs an error and keeps the previous
-generation visible. Remote listener replacement has a stricter fail-closed
-detail: graith closes the old remote listener before attempting the new bind,
+generation visible. Remote listener replacement is stricter and fail-closed:
+graith closes the old remote listener before attempting the new bind,
 so a failed remote transport reload keeps the previous config but leaves remote
 access closed until a corrected reload or restart succeeds. See
 [Orchestrator & remote access]({{< relref "access.md#hot-reload-and-revocation" >}}).
@@ -67,13 +67,13 @@ allowed_repo_paths = []                   # restrict which repo paths the daemon
 
 ### `agent_prompt`
 
-A multiline string injected into the agent's environment. For Claude, it is passed via `--append-system-prompt`. For Cursor, it is written to `.cursor/rules/graith.mdc`. For Codex, it is passed as a per-session `-c developer_instructions=...` config override (never written to a repository `AGENTS.md`). Other agents (OpenCode, Agy) and custom agents get no prompt injection by default, but can opt in by setting `prompt_injection` to one of `append_system_prompt`, `cursor_rules`, or `developer_instructions` under `[agents.<name>]` (see [Agents]({{< relref "agents.md" >}})). Teaches agents how to use `gr status`, `gr msg`, `gr store`, and other graith primitives. Set `inject_prompt = false` on a per-agent basis to disable.
+A multiline string injected into the agent's environment. For Claude, it's passed via `--append-system-prompt`. For Cursor, it's written to `.cursor/rules/graith.mdc`. For Codex, it's passed as a per-session `-c developer_instructions=...` config override (never written to a repository `AGENTS.md`). Other agents (OpenCode, Agy) and custom agents get no prompt injection by default, but can opt in by setting `prompt_injection` to one of `append_system_prompt`, `cursor_rules`, or `developer_instructions` under `[agents.<name>]` (see [Agents]({{< relref "agents.md" >}})). It teaches agents how to use `gr status`, `gr msg`, `gr store`, and other graith primitives. Set `inject_prompt = false` per-agent to disable.
 
-For Codex specifically, `developer_instructions` is a single-valued config key, so graith's override **replaces** (does not append to) any `developer_instructions` you have set in `~/.codex/config.toml`, a project `.codex/config.toml`, or a selected profile — the CLI override is the highest-precedence layer. If you rely on your own Codex `developer_instructions`, set `inject_prompt = false` under `[agents.codex]` to keep them and skip graith's injection.
+For Codex specifically, `developer_instructions` is a single-valued config key, so graith's override **replaces** (doesn't append to) any `developer_instructions` you've set in `~/.codex/config.toml`, a project `.codex/config.toml`, or a selected profile — the CLI override is the highest-precedence layer. If you rely on your own Codex `developer_instructions`, set `inject_prompt = false` under `[agents.codex]` to keep them and skip graith's injection.
 
 ### `allowed_repo_paths`
 
-When non-empty, the daemon rejects `--repo` / `-C` paths that are not under one of these prefixes. Paths support `~` expansion and are resolved to absolute paths before comparison. These paths also feed the repo autocomplete in the create-session form (`ctrl+b c` or `n` in the overlay) — each path is scanned one level deep for git repositories.
+When non-empty, the daemon rejects `--repo` / `-C` paths that aren't under one of these prefixes. Paths support `~` expansion and resolve to absolute paths before comparison. These paths also feed the repo autocomplete in the create-session form (`ctrl+b c` or `n` in the overlay) — each is scanned one level deep for git repositories.
 
 ```toml
 allowed_repo_paths = ["~/Code", "~/Work"]

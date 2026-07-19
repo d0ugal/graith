@@ -25,7 +25,7 @@ Publish a message to a stream.
 
 ### `gr msg send <session> [body]`
 
-Send a message to a session's inbox. By default, also types a notification into the session's PTY.
+Send a message to a session's inbox. By default it also types a notification into the session's PTY.
 
 | Flag | Description |
 |------|-------------|
@@ -80,7 +80,7 @@ Show a single quarantined comment, including its body.
 
 ### `gr msg jail release [id]`
 
-Release a quarantined comment — deliver its content to the target session's inbox. **Restricted to the human or the orchestrator**; a plain agent session is rejected.
+Release a quarantined comment — deliver its content to the target session's inbox. **Restricted to the human or orchestrator**; a plain agent session is rejected.
 
 | Flag | Description |
 |------|-------------|
@@ -113,7 +113,7 @@ List documents, optionally filtered by key prefix.
 
 ### `gr store append <key> [line]`
 
-Append a line to a document. Creates the document if it does not exist. Reads from stdin if no body or `--file` is given.
+Append a line to a document, creating it if it doesn't exist. Reads from stdin if no body or `--file` is given.
 
 | Flag | Description |
 |------|-------------|

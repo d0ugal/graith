@@ -9,18 +9,18 @@ draft: false
 
 ## First session
 
-Every agent must run inside an OS sandbox. The default configuration selects
-`nono`; install it before starting a session:
+By default, agents run inside an OS sandbox. The default backend is `nono`, so
+install it before starting a session:
 
 ```bash
 brew install nono # macOS or Linuxbrew
 gr doctor
 ```
 
-On macOS you may instead install safehouse and set
-`[sandbox] backend = "safehouse"`. See the [sandbox setup]({{< relref
-"sandbox/_index.md#setup" >}}) for details. Graith refuses to start or resume an
-agent when the selected backend cannot enforce.
+On macOS you can instead install safehouse and set
+`[sandbox] backend = "safehouse"` — see [sandbox setup]({{< relref
+"sandbox/_index.md#setup" >}}). Graith won't start or resume an agent if the
+backend can't enforce.
 
 The daemon starts automatically on your first command. Create a session:
 
@@ -28,7 +28,7 @@ The daemon starts automatically on your first command. Create a session:
 gr new fix-auth-bug
 ```
 
-This fetches the latest from origin, creates a git worktree on a new branch, starts a Claude agent in that worktree, and attaches your terminal. The agent sees an isolated copy of the repo and can work without affecting your main checkout.
+Pulls from origin, creates a worktree on a new branch, starts a Claude agent there, and attaches your terminal. The agent gets an isolated copy of the repo; your main checkout is untouched.
 
 ## Detach and reattach
 
@@ -38,7 +38,7 @@ Press `ctrl+b d` to detach. The agent keeps running. Reattach later:
 gr attach fix-auth-bug
 ```
 
-Or run `gr attach` with no arguments to open the session picker.
+Or `gr attach` with no arguments opens the picker.
 
 ## Multiple sessions
 
@@ -50,11 +50,11 @@ gr new add-tests --agent codex
 gr new explore-codebase --background    # don't attach yet
 ```
 
-Switch between them with `ctrl+b n` (next) and `ctrl+b p` (previous), or press `ctrl+b w` to open the session picker overlay.
+Switch with `ctrl+b n` (next) / `ctrl+b p` (previous), or `ctrl+b w` for the picker overlay.
 
 ## Session picker
 
-The session picker (overlay) shows all sessions grouped by repo. It displays:
+The picker shows all sessions grouped by repo:
 
 - Session name and status (running, stopped, errored)
 - Agent type
@@ -97,7 +97,7 @@ gr new quick-fix --model sonnet
 gr new deep-analysis --model opus
 ```
 
-The model string is passed through to the agent command. It only works if the agent's config includes `{model}` in its args (agents like `cursor` support `--list-models` validation via `validate_model` in config).
+The string is passed straight to the agent command, so it only works if the agent's args include `{model}`. Some agents (like `cursor`) validate it via `validate_model`.
 
 ## Lifecycle operations
 
@@ -119,7 +119,7 @@ Fork a session to branch off from a conversation:
 gr fork fix-auth-bug auth-approach-2
 ```
 
-This creates a new worktree (copied from the source) and a new agent process. If the agent has `fork_args` configured, the new agent inherits the source agent's conversation history. The source session is unaffected.
+This copies the source worktree into a new one and starts a fresh agent process. With `fork_args` configured, the new agent inherits the source's conversation history. The source session is unaffected.
 
 ## Monitoring
 

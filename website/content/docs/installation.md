@@ -7,7 +7,7 @@ toc: true
 draft: false
 ---
 
-The binary is called `gr`.
+The binary's called `gr`.
 
 ## Install
 
@@ -63,7 +63,7 @@ sudo dnf install graith
 
 Download a binary for your platform from the [releases page](https://github.com/d0ugal/graith/releases), extract it, and place `gr` on your `$PATH`.
 
-On Debian/Ubuntu, Fedora/RHEL and Alpine you can instead grab a prebuilt `.deb`, `.rpm` or `.apk` package (linux `amd64` and `arm64`; package name `graith`, binary `gr`, with shell completions), also from the [releases page](https://github.com/d0ugal/graith/releases), and install it manually:
+On Debian/Ubuntu, Fedora/RHEL and Alpine you can instead grab a prebuilt `.deb`, `.rpm` or `.apk` package (linux `amd64` and `arm64`; package name `graith`, binary `gr`, with shell completions) — also from the [releases page](https://github.com/d0ugal/graith/releases) — and install it manually:
 
 ```bash
 # Debian / Ubuntu
@@ -83,7 +83,7 @@ sudo apk add --allow-untrusted graith_*_linux_amd64.apk
 go install github.com/d0ugal/graith/cmd/graith@latest
 ```
 
-`go install` names the binary after the package directory (`graith`). Rename or symlink it to `gr`:
+`go install` names the binary after the package directory (`graith`), so rename or symlink it to `gr`:
 
 ```bash
 mv "$(go env GOPATH)/bin/graith" "$(go env GOPATH)/bin/gr"
@@ -126,4 +126,4 @@ gr version
 gr doctor      # health checks, verifies dependencies
 ```
 
-{{% alert context="info" text="`gr doctor --autofix` will attempt to fix common issues: truncate oversized logs, clean stale PID files, and remove orphaned worktrees." /%}}
+{{% alert context="info" text="`gr doctor --autofix` tries to fix common issues: truncate oversized logs, clean stale PID files, and remove orphaned worktrees." /%}}

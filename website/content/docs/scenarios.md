@@ -9,10 +9,10 @@ draft: false
 
 Scenarios are declarative multi-session orchestration. A TOML file defines a group of related sessions — each with its own repo, agent, role, startup prompt, and optional tracked task — and `gr scenario start` creates them atomically as a coordinated fleet.
 
-Scenarios are operated through the `gr scenario` commands and orchestrator
-sessions. The native iOS and macOS apps do not provide scenario grouping,
-status, or lifecycle controls; they show scenario-created sessions as ordinary
-sessions, which can still be opened and attached normally.
+You operate scenarios through the `gr scenario` commands and orchestrator
+sessions. The native iOS and macOS apps don't offer scenario grouping, status,
+or lifecycle controls; they show scenario-created sessions as ordinary sessions,
+which you can still open and attach normally.
 
 ## When to use scenarios
 
@@ -22,7 +22,7 @@ sessions, which can still be opened and attached normally.
 | Orchestrator + `gr new` | Dynamic decisions, branching logic, adaptive workflows |
 | **Scenarios** | Reproducible multi-repo fleets, known session topologies, team playbooks |
 
-Scenarios complement the orchestrator — the orchestrator can start scenarios declaratively, then coordinate the sessions dynamically after they're running.
+Scenarios complement the orchestrator — it can start scenarios declaratively, then coordinate the sessions dynamically once they're running.
 
 ## TOML file format
 
@@ -100,8 +100,8 @@ depends_on = ["backend", "frontend"]
 
 ### Instance name templates
 
-Scenario names, member names, and scenario-local member references may use a
-small built-in template vocabulary. This lets one saved file run repeatedly or
+Scenario names, member names, and scenario-local member references can use a
+small built-in template vocabulary, so one saved file runs repeatedly or
 concurrently without an external TOML rewrite:
 
 ```toml
@@ -136,30 +136,29 @@ literal or mixed `action.deliver.inbox` targets.
 | `{short_id}` | Eight hexadecimal characters from the stable ID |
 | `{scenario}` | Fully rendered scenario name; available only after rendering `[scenario].name` |
 
-Expansion is one pass: text introduced by a token is not expanded again.
-Unknown tokens and malformed braces are errors. graith does not sanitize,
-truncate, or silently rename rendered values. The final scenario name must
-still be lowercase alphanumeric with hyphens, member names must satisfy the
-normal session-name rules, and both retain their 128-character limits. Use
-`{short_id}` wherever concurrent instances need guaranteed practical
-uniqueness; a remaining scenario or owned-member collision is a clear
-preflight error.
+Expansion is one pass: text a token introduces isn't expanded again. Unknown
+tokens and malformed braces are errors. graith doesn't sanitize, truncate, or
+silently rename rendered values. The final scenario name must still be lowercase
+alphanumeric with hyphens, member names must satisfy the normal session-name
+rules, and both keep their 128-character limits. Use `{short_id}` wherever
+concurrent instances need guaranteed practical uniqueness; a remaining scenario
+or owned-member collision is a clear preflight error.
 
-Trigger fire-time variables remain separate. For example,
+Trigger fire-time variables stay separate. For example,
 `inbox = "{scenario}-{session_name}"` fixes the scenario prefix at start but
 leaves `{session_name}` for the trigger fire. When the two vocabularies overlap,
-the instance token takes priority: `{date}`, `{datetime}`, and `{scenario_id}`
-in an inbox target are fixed at scenario start rather than evaluated again when
-the trigger fires. Result `store` templates likewise keep the result vocabulary
-documented below; `{session_name}` receives the already-rendered member name.
+the instance token wins: `{date}`, `{datetime}`, and `{scenario_id}` in an inbox
+target are fixed at scenario start, not re-evaluated when the trigger fires.
+Result `store` templates likewise keep the result vocabulary documented below;
+`{session_name}` receives the already-rendered member name.
 
-The rendered scenario and member names are returned by `gr scenario start` and
-are the selectors used by `status`, results, `stop`, `resume`, `delete`, and
-other lifecycle commands. The authored template is not an alias. `list` and
-`status --json` include the immutable identities, timestamp, and
-authored-to-rendered mappings; human `status` prints the authored name and
-caller/parent/initiator context. That metadata and the rendered graph persist
-across daemon restart and are never re-rendered.
+`gr scenario start` returns the rendered scenario and member names — the
+selectors `status`, results, `stop`, `resume`, `delete`, and other lifecycle
+commands use. The authored template isn't an alias. `list` and `status --json`
+include the immutable identities, timestamp, and authored-to-rendered mappings;
+human `status` prints the authored name and caller/parent/initiator context.
+That metadata and the rendered graph persist across daemon restart and are never
+re-rendered.
 
 ### `[scenario.lifecycle]` section
 
@@ -173,7 +172,7 @@ delay = "30m"          # optional; default 0
 
 `on_success` schedules cleanup only after every completion action succeeds;
 `always` waits until every action is terminal but also cleans up after failures.
-The delay begins only after that gate is satisfied. Cleanup stops and
+The delay begins only once that gate is satisfied. Cleanup stops and
 soft-deletes owned members, preserving their state and worktrees for
 `gr restore` during the configured retention window. It never unstars sessions,
 never touches shared members or unrelated trigger-spawned sessions, and never
@@ -181,9 +180,9 @@ turns retention `0` into a purge.
 
 ### `[scenario.policy]` section
 
-The optional policy block turns on daemon-managed runtime completion and
-failure handling. Omitting this block and every member policy preserves the
-legacy indefinite/manual behaviour.
+The optional policy block turns on daemon-managed runtime completion and failure
+handling. Omit this block and every member policy to keep the legacy
+indefinite/manual behaviour.
 
 | Field | Default | Description |
 |-------|---------|-------------|
@@ -212,8 +211,8 @@ legacy indefinite/manual behaviour.
 
 ### `[[sessions.results]]` entries
 
-Each member may declare named artifacts that it publishes into the shared
-document store. A declaration is nested under its owning `[[sessions]]` entry:
+Each member can declare named artifacts that it publishes into the shared
+document store. Nest a declaration under its owning `[[sessions]]` entry:
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
@@ -222,16 +221,16 @@ document store. A declaration is nested under its owning `[[sessions]]` entry:
 | `store` | yes | — | Relative destination template beneath the scenario's result directory |
 | `required` | no | `false` | Whether this result must be available before the member can count as complete |
 
-`store` templates may use `{scenario_id}`, `{scenario_name}`, `{session_id}`,
+`store` templates can use `{scenario_id}`, `{scenario_name}`, `{session_id}`,
 `{session_name}`, and `{result_name}`. The daemon resolves them beneath
 `scenarios/<scenario-id>/results/` in the shared store and rejects invalid keys
 or collisions at scenario start. Exact resolved keys appear in every member's
 scenario manifest and in `gr scenario status --json`.
 
 Result bodies must be non-empty. JSON results must contain syntactically valid
-JSON; JSON Schema validation is not performed. Publication travels through the
-bounded control protocol and reserves framing overhead below its 4 MiB ceiling,
-so accepted artifacts remain readable through the store API.
+JSON; there's no JSON Schema validation. Publication travels through the bounded
+control protocol and reserves framing overhead below its 4 MiB ceiling, so
+accepted artifacts stay readable through the store API.
 
 ### `[sessions.policy]` section
 
@@ -243,13 +242,13 @@ Put this block after the `[[sessions]]` entry it belongs to.
 | `timeout` | — | Immutable wall-clock timeout for each attempt (Go duration, minimum `1s`) |
 | `retries` | `0` | Additional automatic attempts after timeout (`0`–`10`; requires `timeout`) |
 
-Shared members may be required or optional, but cannot have timeout or retry
-actions because the scenario does not own their process.
+Shared members can be required or optional, but can't have timeout or retry
+actions because the scenario doesn't own their process.
 
-Unknown fields are rejected — typos produce a parse error rather than being silently ignored.
+Unknown fields are rejected — typos produce a parse error instead of being silently ignored.
 
 Across one scenario roster, the JSON-encoded effective prompts and tracked task
-fields may occupy at most 3 MiB. This reserves 1 MiB of the 4 MiB control frame
+fields can occupy at most 3 MiB. This reserves 1 MiB of the 4 MiB control frame
 for member metadata and response fields. `gr scenario add` checks the new member
 together with the existing roster before it starts the member. Whitespace-only
 prompt and task values are checked against their raw field limits, then stored
@@ -260,43 +259,42 @@ when a required declared result is the member's only completion contract. A
 runtime-policy member still needs a non-empty `task` or a required result;
 `prompt` alone is only launch input and never makes a member tracked or
 complete. If both fields are present, the agent launches with `prompt` while
-only `task` becomes an assigned todo. Task-only files retain their existing
-launch and completion behaviour.
+only `task` becomes an assigned todo. Task-only files keep their existing launch
+and completion behaviour.
 
 `depends_on` references names in the same file. Both the dependent and every
 referenced member must have a non-empty `task`; unknown names, duplicates,
 self-dependencies, and cycles are rejected before sessions start. The daemon
 resolves names to the members' seeded assigned todo IDs. `gr scenario add`
 accepts repeatable `--depends-on <existing-member>` flags for the same behavior.
-When names are templated, dependency references are rendered from the same
-snapshot before this validation runs.
+When names are templated, dependency references render from the same snapshot
+before this validation runs.
 
 **Shared sessions:** Set `shared = true` to reference an existing running or
-stopped session instead of creating a new one. A stopped session remains
-stopped; scenario start and resume do not relaunch it. Shared sessions
-participate in the scenario (receive manifests, appear in status) but are never
-stopped, resumed, deleted, or cleaned up by scenario lifecycle operations.
-Soft-deleted, errored, creating, and deleting sessions are unavailable. If
-more than one running or stopped session has the requested name, startup fails
-as ambiguous. Because a shared agent is not started by the scenario, a shared
-entry cannot declare a startup `prompt`; it may still declare tracked `task`
-work. Detailed status and its self manifest leave the effective startup prompt
-empty for that shared member, since the scenario did not deliver one. That task
-and any required results still participate in completion even
-when the shared source is stopped; omit them unless the external session or a
-human will satisfy those obligations.
+stopped session instead of creating a new one. A stopped session stays stopped;
+scenario start and resume don't relaunch it. Shared sessions participate in the
+scenario (receive manifests, appear in status) but are never stopped, resumed,
+deleted, or cleaned up by scenario lifecycle operations. Soft-deleted, errored,
+creating, and deleting sessions are unavailable. If more than one running or
+stopped session has the requested name, startup fails as ambiguous. Because the
+scenario doesn't start a shared agent, a shared entry can't declare a startup
+`prompt`; it can still declare tracked `task` work. Detailed status and its self
+manifest leave the effective startup prompt empty for that shared member, since
+the scenario didn't deliver one. That task and any required results still
+participate in completion even when the shared source is stopped; omit them
+unless the external session or a human will satisfy those obligations.
 
 **Mirrored sessions:** Set `mirror` to another `[[sessions]]` member's `name` to
 create a normal scenario-owned worker over that member's exact worktree. The
 worker sees committed and uncommitted files, but the sandbox denies writes to
 the source worktree and provides the usual writable `GRAITH_TMPDIR` scratch
-space. Several members may mirror one source without creating Git worktrees or
+space. Several members can mirror one source without creating Git worktrees or
 branches.
 
 `mirror` is a scenario-local member reference, never a session ID or filesystem
 path. A mirrored member must not also set `shared`, `repo`, `base`, or
 `includes`: the repository, base, worktree, and included worktrees are derived
-from its target. The target may itself be mirrored, but references must be
+from its target. The target can itself be mirrored, but references must be
 acyclic. Every session in an existing mirror source's backing chain must still
 exist, be running or stopped, and remain non-deleted. Missing targets,
 duplicate/ambiguous names, stale or cyclic backing chains, sources without a
@@ -308,7 +306,7 @@ Agent, model, role, prompt, task, hooks, and `star` still configure the mirrored
 worker itself.
 
 This generic multi-reader scenario attaches two independent readers to an
-existing source session named `subject`:
+existing source session called `subject`:
 
 ```toml
 version = 1
@@ -341,19 +339,19 @@ session (the same mechanism as the repo-level `includes` config), so an agent
 can see and edit sibling repos. Paths are merged with — and deduplicated
 against — any includes configured on the repo's `[[repos]]` entry.
 
-`includes` and `star` only apply to sessions the scenario creates. A
+`includes` and `star` apply only to sessions the scenario creates. A
 `shared = true` session reuses an existing running or stopped session as-is, so
 those two fields are ignored for it.
 
 **Starred sessions:** `star = true` creates the session already starred. A
 starred session is protected from an accidental manual `gr delete` (and bulk
-sweeps). Note `shared = true` only shields a session from scenario
+sweeps). Note that `shared = true` only shields a session from scenario
 stop/delete, not from a manual `gr delete` — use `star` for that.
 
 ### `[[trigger]]` blocks (scenario-embedded triggers)
 
 A scenario can ship its own automation: add `[[trigger]]` blocks to the scenario
-TOML and they activate with the scenario. This is how a scenario wires in a
+TOML and they activate with the scenario. That's how a scenario wires in a
 continuous reviewer — a watch trigger that spawns (or reuses) a reviewer session
 whenever an implementer's files change. See [Triggers]({{< relref "triggers.md" >}})
 for the full trigger vocabulary; scenario-embedded triggers use the same
@@ -365,7 +363,7 @@ these extra restrictions:
   one a `[[sessions]]` entry in the same scenario declares. The trigger binds
   only to sessions **within its own scenario**, so two running instances of the
   same scenario file never cross-fire.
-- **No external references.** A scenario trigger cannot start another scenario
+- **No external references.** A scenario trigger can't start another scenario
   (`type = "scenario"`), and a `command` action must use a `[trigger.watch]` or
   `[trigger.completion]` source (a schedule `command` would name a repo outside
   the scenario).
@@ -375,7 +373,7 @@ these extra restrictions:
 - **Completion context stays inside the scenario.** A completion `command` or
   `session` names a non-shared member with `completion.session`; literal inbox
   delivery resolves against this scenario's members, even if another session
-  elsewhere has the same name. Instance-name tokens in both fields render at
+  elsewhere shares the name. Instance-name tokens in both fields render at
   scenario start.
 
 ```toml
@@ -407,14 +405,14 @@ prompt = "Review the changes since your last look; send feedback via gr msg."
 
 **Lifecycle.** Embedded triggers activate only **after** the scenario's
 two-phase start succeeds — if the start rolls back, the triggers are discarded
-with it, so there are never orphaned watchers. They are stored on the scenario
+with it, so there are never orphaned watchers. They're stored on the scenario
 (namespaced `scenario:<id>:<name>`) and survive a daemon restart. `gr scenario
 stop` tears down their watchers; `gr scenario resume` and `gr scenario add`
 rebind them to the scenario's running sessions; `gr scenario delete` removes them
 entirely. They appear in `gr trigger list` alongside config-origin triggers.
 
 Completion actions are an exception to the running-member activation rule: they
-remain addressable while their scenario record exists, including after members
+stay addressable while their scenario record exists, including after members
 stop. `gr scenario status` shows the current epoch and each action as `pending`,
 `running`, `succeeded`, or `failed`, plus scheduled/running/completed cleanup.
 An interrupted non-session action becomes a diagnosable failure after restart
@@ -431,11 +429,11 @@ teardown may already be underway.
 Reopening an assigned todo creates a not-complete transition and cancels pending
 work and cleanup for that epoch. A later recompletion creates a new epoch.
 Manual `gr scenario stop` likewise cancels pending/running completion work
-before stopping members; manual delete cancels it before explicit teardown.
+before stopping members; a manual delete cancels it before explicit teardown.
 
 ### Completion examples
 
-Archive a deterministic report, require the store write, and retain the working
+Archive a deterministic report, require the store write, and keep the working
 sessions for an hour so a human can inspect the result:
 
 ```toml
@@ -457,7 +455,7 @@ required = true
 ```
 
 For agent-led synthesis, use the ordinary session action. The completion action
-remains `running` until the synthesizer exits, so cleanup cannot race its result:
+stays `running` until the synthesizer exits, so cleanup can't race its result:
 
 ```toml
 [[trigger]]
@@ -496,8 +494,8 @@ cat tracing.toml | gr scenario start -
 ```
 
 Only the orchestrator session can start scenarios. Running this from a regular session produces an error.
-The success output always shows the rendered scenario name and rendered member
-names, including the unique suffix when the file uses `{short_id}`.
+The success output always shows the rendered scenario name and member names,
+including the unique suffix when the file uses `{short_id}`.
 
 ### `gr scenario status <name>`
 
@@ -517,7 +515,7 @@ size, publication time, error, and one of these states:
 - `invalid` — the latest body was empty, oversized, or malformed for its format
 - `failed` — validation passed but the store operation failed
 
-Task progress is derived from assigned
+Task progress comes from assigned
 [todo items]({{< relref "todo.md#in-scenarios" >}}). Status then shows the
 current completion epoch, completion-action states, and lifecycle-cleanup
 deadline or failure (see below).
@@ -533,12 +531,12 @@ jq '{components: $ARGS.positional}' --args api worker | \
   gr scenario result put changed-components
 ```
 
-The daemon derives the member from `GRAITH_TOKEN`; the request cannot select a
+The daemon derives the member from `GRAITH_TOKEN`; the request can't select a
 different member or destination. Use `--scenario <name>` only when a shared
 session belongs to multiple scenarios; ordinary members default to
 `GRAITH_SCENARIO_NAME`. A peer, local/remote human, misnamed result, or wrong
-scenario receives an explicit error. Direct `gr store put` remains available,
-but writing the same key does not mark a declared result successful.
+scenario receives an explicit error. Direct `gr store put` is still available,
+but writing the same key doesn't mark a declared result successful.
 
 When a runtime policy is configured, the status table also shows
 required/optional membership, attempt budget, immutable deadline, and any
@@ -562,8 +560,8 @@ session lifecycle: `running` (all running), `stopped` (all stopped), `errored`
 (any errored), or `partial` (mixed).
 
 At least one member must have tracked todo work or a required result before a
-completion edge can occur. Members with neither do not block members that do
-have tracked work from completing the scenario.
+completion edge can occur. Members with neither don't block members that do have
+tracked work from completing the scenario.
 
 Policy scenarios additionally report `retrying`, `exhausted`, terminal
 `complete`, or terminal `failed`, and list renders quorum progress.
@@ -577,17 +575,16 @@ gr scenario stop tracing-pipeline
 ```
 
 Stopping a policy scenario suspends automatic actions, but wall-clock deadlines
-continue to elapse. `gr scenario resume` unsuspends it and immediately reconciles
-overdue members; stopping does not grant a fresh timeout window.
+keep elapsing. `gr scenario resume` unsuspends it and immediately reconciles
+overdue members; stopping doesn't grant a fresh timeout window.
 
 ### `gr scenario add <name>`
 
 Add a member from the orchestrator. Runtime policy flags are `--optional`,
-`--timeout <duration>`, and `--retries <0-10>`. Adding to a terminal policy
-scenario or a paused policy scenario is rejected; resume it first.
-Use `--prompt` for startup instructions and `--task` for the independently
-tracked todo. With no `--prompt`, `--task` remains the startup prompt for
-compatibility.
+`--timeout <duration>`, and `--retries <0-10>`. Adding to a terminal or paused
+policy scenario is rejected; resume it first. Use `--prompt` for startup
+instructions and `--task` for the independently tracked todo. With no
+`--prompt`, `--task` stays the startup prompt for compatibility.
 
 The same per-field and aggregate prompt/task limits used by scenario files are
 enforced against the existing roster before the daemon creates the added
@@ -597,12 +594,11 @@ Adding any runtime-policy flag to a legacy scenario opts the whole scenario into
 policy completion semantics. Existing members become required with no timeout;
 the new member uses the supplied policy. Before opting in, the daemon verifies
 that every existing task member still has its original durable seeded todo; the
-add is rejected without changing the scenario if that contract cannot be
-proved. `scenario add` always creates a new scenario-owned session and does not
-accept shared members.
-It operates after the instance namespace has been fixed, so `--name` and every
-`--depends-on` value must be literal rendered names; `scenario add` does not
-evaluate instance-name templates.
+add is rejected without changing the scenario if that contract can't be proved.
+`scenario add` always creates a new scenario-owned session and doesn't accept
+shared members. It operates after the instance namespace is fixed, so `--name`
+and every `--depends-on` value must be literal rendered names; `scenario add`
+doesn't evaluate instance-name templates.
 
 ### `gr scenario delete <name>`
 
@@ -615,15 +611,15 @@ gr scenario delete tracing-pipeline
 ## How it works
 
 1. The CLI parses the TOML file (with strict field validation) and sends a `scenario_start` control message to the daemon
-2. The daemon validates all inputs, including prompt bodies, NUL bytes, aggregate frame headroom, todo-title limits, result contracts, dependencies, scenario/session names, repo paths, and agent configs, before any member starts
+2. The daemon validates all inputs — prompt bodies, NUL bytes, aggregate frame headroom, todo-title limits, result contracts, dependencies, scenario/session names, repo paths, and agent configs — before any member starts
 3. **Reserve phase:** placeholders are created atomically under the state lock
-4. **Start phase:** independent members are created concurrently using the normal `Create` flow; mirror dependency waves follow after their sources are running, using the same read-only sandbox primitive as `gr new --mirror`
+4. **Start phase:** independent members are created concurrently using the normal `Create` flow; mirror dependency waves follow once their sources are running, using the same read-only sandbox primitive as `gr new --mirror`
 5. **Manifest phase:** after all sessions start, the daemon publishes a manifest to each session's inbox and persists it to the shared store
 6. If any session fails to create, already-started sessions are rolled back (stopped and deleted)
 
 ## Environment variables
 
-Every session in a scenario gets these additional environment variables at creation time and on resume:
+Every session in a scenario gets these extra environment variables at creation time and on resume:
 
 | Variable | Description |
 |----------|-------------|
@@ -634,10 +630,10 @@ Every session in a scenario gets these additional environment variables at creat
 
 ## Manifest
 
-Each session receives a version 2 JSON manifest in its inbox describing the
-full rendered scenario topology. The manifest includes the immutable render
-context and authored-to-rendered mappings. It is also persisted to the shared
-store at `scenarios/<id>/manifest-<rendered-name>.json`.
+Each session receives a version 2 JSON manifest in its inbox describing the full
+rendered scenario topology. The manifest includes the immutable render context
+and authored-to-rendered mappings, and is also persisted to the shared store at
+`scenarios/<id>/manifest-<rendered-name>.json`.
 
 ```json
 {
@@ -718,22 +714,21 @@ gr msg inbox --all --ack
 
 Per-member progress is tracked through the [todo list]({{< relref "todo.md" >}}),
 not a per-session boolean. At start, each member with a `task` is seeded **one
-assigned todo item** in the scenario's shared scope; a member breaks its task down
-by adding sub-items. A member with `depends_on` starts with that seeded item
+assigned todo item** in the scenario's shared scope; a member breaks its task
+down by adding sub-items. A member with `depends_on` starts with that seeded item
 blocked until every named member's seeded item is done. A member is *complete*
 once every item assigned to it is `done` **and every required declared result is
-`available`**. A member with required results but no todos is complete once
-those results are available. Optional results never block completion. The
-scenario as a whole is complete once every member with tracked todos or
-required results is complete. `gr scenario status` renders per-member
-`done/total`, **WAITING ON** names, and result state from those durable records;
-JSON uses `blocked_by` for dependencies. Completion actions and lifecycle
-cleanup use this same gate, so neither starts while a required result is
-pending, invalid, or failed.
+`available`**. A member with required results but no todos is complete once those
+results are available. Optional results never block completion. The scenario as a
+whole is complete once every member with tracked todos or required results is
+complete. `gr scenario status` renders per-member `done/total`, **WAITING ON**
+names, and result state from those durable records; JSON uses `blocked_by` for
+dependencies. Completion actions and lifecycle cleanup use this same gate, so
+neither starts while a required result is pending, invalid, or failed.
 
-A `prompt` is never seeded into the todo list. This makes prompt-only members
-useful for result contracts: the agent receives full instructions, and publishing
-its required result is sufficient for completion without a redundant todo.
+A `prompt` is never seeded into the todo list, which makes prompt-only members
+useful for result contracts: the agent receives full instructions, and
+publishing its required result is enough for completion without a redundant todo.
 
 The original member-to-seed identity is durable. Reassigning a seeded item
 changes current responsibility and progress accounting, but later
@@ -741,11 +736,10 @@ changes current responsibility and progress accounting, but later
 member's original seed.
 
 Without a runtime policy, every tracked member must complete. With a policy,
-required and quorum rules decide which successful members complete the
-scenario.
+required and quorum rules decide which successful members complete the scenario.
 
-The seeded item is assigned but initially ownerless. A member signals it has
-finished by finding its assigned item, claiming it, and then marking it done:
+The seeded item is assigned but initially ownerless. A member signals it's
+finished by finding its assigned item, claiming it, then marking it done:
 
 ```bash
 gr todo list --scenario "<scenario-name-from-manifest>" # find assignee=$GRAITH_SESSION_ID
@@ -753,11 +747,11 @@ gr todo claim <its-task-item>                            # establish ownership
 gr todo done <its-task-item>                             # complete the claimed item
 ```
 
-Assigned items are reserved: another member cannot claim or complete this work.
-The scenario orchestrator remains the override authority and the human retains
+Assigned items are reserved: another member can't claim or complete this work.
+The scenario orchestrator stays the override authority and the human keeps
 transition authority.
 
-Scenario-created members may substitute `$GRAITH_SCENARIO_NAME`. A shared member
+Scenario-created members can substitute `$GRAITH_SCENARIO_NAME`. A shared member
 keeps its existing environment, so it uses the scenario name from the delivered
 manifest instead. A dependency-blocked seed is claimed only after its upstream
 items finish; members without a `task` receive no seeded item.
@@ -767,8 +761,8 @@ model.
 
 ## Fan-out / fan-in results
 
-A generic fan-out scenario can give several workers the same result name while
-using member-specific destinations, then let a later synthesizer consume them:
+A generic fan-out scenario can give several workers the same result name with
+member-specific destinations, then let a later synthesizer consume them:
 
 ```toml
 [[sessions]]
@@ -813,54 +807,54 @@ gr store get --shared scenarios/sc-abc12345/results/research-data/facts.json
 ```
 
 Those keys include the stable scenario ID and declared member destinations, so
-two runs of the same scenario name cannot overwrite or consume each other's
+two runs of the same scenario name can't overwrite or consume each other's
 results.
 
 ## Runtime policy semantics
 
 An initial attempt starts only after atomic scenario startup has committed. An
 added member starts when its add commits. A retry attempt starts when the daemon
-durably claims its one retry path, before it waits for a launch slot; the frozen
-deadline therefore includes launch queue time. Daemon downtime, process stops,
-and user activity all consume wall-clock time. Output, messages, hooks, todo
-claims, and other activity never extend a deadline.
+durably claims its one retry path, before it waits for a launch slot, so the
+frozen deadline includes launch queue time. Daemon downtime, process stops, and
+user activity all consume wall-clock time. Output, messages, hooks, todo claims,
+and other activity never extend a deadline.
 
 Success is contract-based: a member must have at least one assigned todo or
 required declared result; every assigned todo must be `done`, and every required
-result must be `available`. Exiting zero, crashing, or entering `stopped` is not
+result must be `available`. Exiting zero, crashing, or entering `stopped` isn't
 success. Completion already observed when a deadline is sampled wins; after a
 timeout claim is durable, later completion belongs to the newly claimed attempt.
-Completed and outstanding todo and result state survive retry.
-Policy start/add validates that each member has at least one completion contract
-and commits todo contracts before policy activation.
+Completed and outstanding todo and result state survive retry. Policy start/add
+validates that each member has at least one completion contract and commits todo
+contracts before policy activation.
 
 A retry uses the ordinary restart/resume path. It keeps the graith session ID,
 agent conversation, worktree, branch, and todo assignee identity; stopping the
-old process reopens any in-progress todo ownership so work is not stranded. It
+old process reopens any in-progress todo ownership so work isn't stranded. It
 also uses the normal launch concurrency control. Attempts and deadlines are
-stored in daemon state, and a durable launch generation prevents a daemon
-restart from repeating a retry that already launched successfully.
-Retryable members use a PTY even when the soft global headless default is on,
-because the one-shot headless driver cannot resume the same conversation.
+stored in daemon state, and a durable launch generation stops a daemon restart
+from repeating a retry that already launched successfully. Retryable members use
+a PTY even when the soft global headless default is on, because the one-shot
+headless driver can't resume the same conversation.
 
 A second durable dispatch marker is written immediately before process work.
-After daemon restart an undispatched claim continues; a dispatched attempt with
+After a daemon restart an undispatched claim continues; a dispatched attempt with
 neither an advanced launch generation nor a durable outcome is exhausted as
 interrupted, rather than risking a duplicate restart of the same attempt.
 
 Daemon cancellation reaches retries waiting on scenario serialization or a
 launch slot and is checked again immediately before spawning. A daemon restart
 that finds a scenario reserve record whose atomic startup never reached policy
-activation marks that scenario as a visible terminal startup failure; it does
-not retry a partial fleet. Completed policy todo contracts are exempt from todo
+activation marks that scenario as a visible terminal startup failure; it doesn't
+retry a partial fleet. Completed policy todo contracts are exempt from todo
 retention until the daemon has observed and durably recorded the policy outcome.
 
 Quorum completion is terminal but non-destructive: graith records the outcome
-without stopping or deleting remaining workers. Required members must all
-succeed even if enough optional members have reached the numerical quorum.
-Optional exhaustion does not fail the scenario by itself. With
-`on_exhausted = "fail"`, it does fail once the successful and still-eligible
-members together can no longer reach the configured quorum.
+without stopping or deleting remaining workers. Required members must all succeed
+even if enough optional members have reached the numerical quorum. Optional
+exhaustion doesn't fail the scenario by itself. With `on_exhausted = "fail"`, it
+does fail once the successful and still-eligible members together can no longer
+reach the configured quorum.
 
 ## In the GUI
 
@@ -879,7 +873,7 @@ layer:
   context menu.
 
 `start` and `add` stay CLI-only: the daemon scopes them to the scenario's
-orchestrator *session*, which the GUI (a human client) is not.
+orchestrator *session*, which the GUI (a human client) isn't.
 
 ## Constraints
 
@@ -887,7 +881,7 @@ orchestrator *session*, which the GUI (a human client) is not.
 - **Unique names:** Scenario names must be unique across all scenarios. Session names must not collide with any existing session
 - **Atomic creation:** All sessions are created or none are — partial failures trigger rollback
 - **Add-only topology:** `gr scenario add` can append a session, but sessions and
-  result declarations cannot be edited or removed in place. Delete and recreate
+  result declarations can't be edited or removed in place. Delete and recreate
   the scenario for those changes
 - **Bounded policy:** Retries are finite (`0`–`10`); provider/model replacement and failover are not part of runtime policy
-- **Live additions:** The orchestrator can add sessions, but cannot add to a terminal policy scenario; member removal still requires delete/recreate
+- **Live additions:** The orchestrator can add sessions, but can't add to a terminal policy scenario; member removal still requires delete/recreate

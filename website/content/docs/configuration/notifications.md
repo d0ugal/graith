@@ -15,7 +15,7 @@ enabled  = true      # show a status bar while attached
 position = "bottom"  # "bottom" or "top"
 ```
 
-The status bar shows the session name, status, agent type, branch, git status, unread messages, and fleet summary. It updates in real time.
+The status bar shows session name, status, agent type, branch, git status, unread messages, and fleet summary, updating in real time.
 
 ## Notifications
 
@@ -32,7 +32,7 @@ quiet_hours_start = "22:00"    # suppress low/normal pushes in this window (24h 
 quiet_hours_end   = "07:00"    # window may wrap past midnight; high priority bypasses
 ```
 
-When `command` is set, graith executes it via `sh -c` instead of using the system notification API. For status-change notifications the command receives `GRAITH_SESSION_NAME`, `GRAITH_STATUS`, and `GRAITH_MESSAGE`; for `gr notify` push notifications (`backend = "command"`) it receives `GRAITH_NOTIFY_TITLE`, `GRAITH_NOTIFY_MESSAGE`, and `GRAITH_NOTIFY_PRIORITY`.
+When `command` is set, graith runs it via `sh -c` instead of the system notification API. For status-change notifications the command receives `GRAITH_SESSION_NAME`, `GRAITH_STATUS`, and `GRAITH_MESSAGE`; for `gr notify` push notifications (`backend = "command"`) it receives `GRAITH_NOTIFY_TITLE`, `GRAITH_NOTIFY_MESSAGE`, and `GRAITH_NOTIFY_PRIORITY`.
 
 ### Proactive push notifications (`gr notify`)
 
@@ -47,7 +47,7 @@ gr notify "CI failing on main after 3 retries" --priority high
 
 Priority levels: `low`, `normal` (default), and `high`. `high` plays a sound and
 **bypasses quiet hours and the rate limit**; `low`/`normal` are subject to both.
-Only the orchestrator session and the human may send notifications — plain agent
+Only the orchestrator session and the human can send notifications — plain agent
 sessions are rejected to prevent spam. Identical notifications within the
 [coalesce window](#timing) (30s by default) are coalesced. Other backends (ntfy,
 Pushover, Slack) are planned follow-ups.
@@ -57,8 +57,8 @@ Pushover, Slack) are planned follow-ups.
 The `macos` backend prefers a small bundled helper app (`GraithNotifier.app`,
 bundle identifier `com.graith.notifier`) that posts via
 `UNUserNotificationCenter`. This makes graith appear as **"Graith"** in *System
-Settings > Notifications*, so you can configure its notification style, sounds,
-and Do-Not-Disturb behaviour like any other app.
+Settings > Notifications*, so you can configure its style, sounds, and
+Do-Not-Disturb behaviour like any other app.
 
 Build the helper with `make notifier` (macOS only — a no-op on Linux) and place
 the resulting `macos/build/GraithNotifier.app` where graith can find it:
@@ -66,12 +66,11 @@ alongside the `gr` binary, under `<prefix>/libexec/graith/` or
 `<prefix>/share/graith/`, in `/Applications`, or in `~/Applications`. Set
 `GRAITH_NOTIFIER_APP` to override the location explicitly.
 
-If the helper isn't installed — or is installed but fails to launch — graith
-falls back to `osascript`, whose notifications work but appear under "Script
-Editor" (and can't be configured per-app) — the reason the helper exists. The
-one exception is when you've explicitly turned off notifications for "Graith" in
-System Settings: graith honours that and does **not** route around it via
-`osascript`.
+If the helper isn't installed — or is installed but won't launch — graith falls
+back to `osascript`, whose notifications work but appear under "Script Editor"
+(and can't be configured per-app) — the reason the helper exists. The one
+exception: if you've explicitly turned off notifications for "Graith" in System
+Settings, graith honours that and does **not** route around it via `osascript`.
 
 Triggers can fire a notification when their action completes:
 
@@ -85,11 +84,11 @@ notify_priority    = "low"                        # low|normal|high; optional
 
 ### Timing
 
-Low-level notification pacing. These were formerly fixed constants; override them
-to tune coalescing, backend dispatch, and PTY injection. The idle timeout and
-maximum wait are deliberately shared by inbox notifications and `gr type`, so
-both paths avoid colliding with an attached user's typing under one policy.
-Every key is optional — leave the table out and the defaults below apply.
+Low-level notification pacing. These were once fixed constants; override them to
+tune coalescing, backend dispatch, and PTY injection. The idle timeout and max
+wait are deliberately shared by inbox notifications and `gr type`, so both paths
+avoid colliding with an attached user's typing under one policy. Every key is
+optional — leave the table out and the defaults below apply.
 
 ```toml
 [notifications.timing]
@@ -103,9 +102,8 @@ inbox_detached_delay = "5s"    # settle delay before notifying a session with no
 
 `coalesce_window`, `inbox_cooldown`, and `inbox_detached_delay` accept `"0"` to
 disable that behaviour. `dispatch_timeout`, `inbox_idle_timeout`, and
-`inbox_max_wait` fall back to their default when set to zero or a negative value
-(they have no sensible zero). An unparseable value always falls back to the
-default.
+`inbox_max_wait` fall back to their default when set to zero or negative (they
+have no sensible zero). An unparseable value always falls back to the default.
 
 ## Messages
 
@@ -124,4 +122,4 @@ Duration strings support days: `7d`, `30d`, `1d12h`.
 ttl = "5m"  # default TTL for status updates
 ```
 
-When an agent sets a status via `gr status`, it auto-expires after this TTL if the agent produces new output without updating the status. Override per-update with `gr status --ttl <duration>`.
+When an agent sets a status via `gr status`, it auto-expires after this TTL if the agent produces new output without updating it. Override per-update with `gr status --ttl <duration>`.
