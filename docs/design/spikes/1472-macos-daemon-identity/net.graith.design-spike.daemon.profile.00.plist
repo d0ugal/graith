@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>net.graith.design-spike.daemon.profile.00</string>
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/gr</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>gr</string>
+		<string>daemon</string>
+		<string>start</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>GRAITH_PROFILE</key>
+		<string>identity-spike-slot-a</string>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>LimitLoadToSessionType</key>
+	<string>Aqua</string>
+	<key>StandardOutPath</key>
+	<string>/tmp/net.graith.design-spike.daemon.profile.00.stdout.log</string>
+	<key>StandardErrorPath</key>
+	<string>/tmp/net.graith.design-spike.daemon.profile.00.stderr.log</string>
+	<key>ThrottleInterval</key>
+	<integer>1</integer>
+</dict>
+</plist>
