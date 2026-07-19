@@ -313,6 +313,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("unknown agent %q", sessState.Agent)
 	}
+
 	if agent.NonInteractiveArgs == nil {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("agent %q has no non_interactive_args; refusing to start an agent that may prompt for permission", sessState.Agent)
@@ -404,6 +405,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	if sessState.SystemKind == SystemKindOrchestrator {
 		sandboxMerged = sm.cfg.OrchestratorSandboxMerged(sessState.Agent)
 	}
+
 	commandPolicy := sm.cfg.CommandPolicy
 	// Save previous state for rollback.
 	prevStatus := sessState.Status
@@ -591,11 +593,13 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		rollbackState()
 		return SessionState{}, fmt.Errorf("expand resume args: %w", err)
 	}
+
 	nonInteractiveArgs, err := config.ExpandSlice(agent.NonInteractiveArgs, vars)
 	if err != nil {
 		rollbackState()
 		return SessionState{}, fmt.Errorf("expand non-interactive args: %w", err)
 	}
+
 	expandedArgs = append(nonInteractiveArgs, expandedArgs...)
 
 	// Replay the conditional option flags after the resume subcommand/args

@@ -21,9 +21,11 @@ func sandboxPolicyConfigDir() string {
 	if file := strings.TrimSpace(cfgFile); file != "" {
 		return filepath.Dir(file)
 	}
+
 	if paths.ConfigFile == "" {
 		return ""
 	}
+
 	return filepath.Dir(paths.ConfigFile)
 }
 
@@ -33,9 +35,12 @@ func sandboxPolicyEngine(flag string) (*localmost.Engine, string, error) {
 		if err != nil {
 			return nil, "", err
 		}
+
 		engine, err := localmost.Parse(data)
+
 		return engine, "inline [command_policy.builtin]", err
 	}
+
 	path := strings.TrimSpace(flag)
 	if path != "" {
 		if strings.HasPrefix(path, "~/") {
@@ -46,10 +51,13 @@ func sandboxPolicyEngine(flag string) (*localmost.Engine, string, error) {
 	} else {
 		path = config.ExpandPathRelative(cfg.CommandPolicy.Builtin.Config, sandboxPolicyConfigDir())
 	}
+
 	if path == "" {
 		return nil, "", errors.New("no command policy rules: configure [command_policy.builtin] or pass --config")
 	}
+
 	engine, err := localmost.Load(path)
+
 	return engine, path, err
 }
 
@@ -67,18 +75,23 @@ var sandboxPolicyCheckCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
 		data, err := io.ReadAll(cmd.InOrStdin())
 		if err != nil {
 			return err
 		}
+
 		policy, err := engine.Evaluate(strings.TrimSpace(string(data)))
 		if err != nil {
 			return err
 		}
+
 		if jsonOutput {
 			return out.JSON(map[string]string{"policy": string(policy)})
 		}
+
 		out.Printf("%s\n", policy)
+
 		return nil
 	},
 }
@@ -91,10 +104,13 @@ var sandboxPolicyValidateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
 		if jsonOutput {
 			return out.JSON(map[string]any{"ok": true, "config": source})
 		}
+
 		out.Printf("OK: %s\n", source)
+
 		return nil
 	},
 }

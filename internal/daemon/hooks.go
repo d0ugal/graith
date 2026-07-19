@@ -23,6 +23,24 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
+// commandPolicyHookCommand turns failure to start or run the bounded policy
+// supervisor into the exit-2 blocking contract shared by Claude and Codex
+// PreToolUse hooks. The supervisor itself emits a valid native deny for worker
+// crashes, malformed output, signals, and its shorter internal timeout.
+func commandPolicyHookCommand(quotedGr string) string {
+	return quotedGr + " command-policy-check || { printf '%s\\n' " +
+		"'graith command policy hook failed before returning a decision' >&2; exit 2; }"
+}
+
+// The agent hook runner must outlive the policy supervisor's own deadline. The
+// config caps policy evaluation at 60 seconds; ten seconds covers the worker's
+// transport slack and process startup/teardown without leaving a human-facing
+// prompt or an unbounded hook.
+func commandPolicyHookTimeout(timeout time.Duration) int {
+	const runnerSlack = 10 * time.Second
+	return int((timeout + runnerSlack + time.Second - 1) / time.Second)
+}
+
 // hookDir returns the directory for hook files for a session.
 func (sm *SessionManager) hookDir(sessionID string) string {
 	return filepath.Join(sm.paths.DataDir, "hooks", sessionID)
@@ -114,6 +132,7 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, lifecycle, po
 	type hookHandler struct {
 		Type    string `json:"type"`
 		Command string `json:"command"`
+		Timeout int    `json:"timeout,omitempty"`
 	}
 
 	type matcherGroup struct {
@@ -141,14 +160,19 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, lifecycle, po
 			if !policy {
 				continue
 			}
+
 			matcher = "^Bash$"
 			handlers = []hookHandler{
-				{Type: "command", Command: quoted + " command-policy-check"},
+				{
+					Type: "command", Command: commandPolicyHookCommand(quoted),
+					Timeout: commandPolicyHookTimeout(sm.cfg.CommandPolicy.TimeoutDuration()),
+				},
 			}
 		case "SessionStart":
 			if !lifecycle {
 				continue
 			}
+
 			handlers = []hookHandler{
 				{Type: "command", Command: fmt.Sprintf("%s report-status --event %s", quoted, event)},
 				{Type: "command", Command: quoted + " check-inbox"},
@@ -157,6 +181,7 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, lifecycle, po
 			if !lifecycle {
 				continue
 			}
+
 			handlers = []hookHandler{
 				{Type: "command", Command: fmt.Sprintf("%s report-status --event %s", quoted, event)},
 			}
@@ -351,15 +376,19 @@ func codexMCPServerArgs(mcpServers []config.MCPServerConfig) (args, skipped []st
 	return args, skipped, nil
 }
 
-// codexHookEvent describes one Codex lifecycle hook: the Codex event name and
-// the shell commands graith runs for it, in order.
+// codexHookEvent describes one Codex hook event and its independently matched
+// command groups.
 type codexHookEvent struct {
 	// event is the Codex hook event name. It must match a key the current Codex
 	// CLI recognises in its HookEventsToml schema (PascalCase, e.g. SessionStart).
-	event string
-	// commands are the shell command strings run for the event, in order.
+	event  string
+	groups []codexHookGroup
+}
+
+type codexHookGroup struct {
+	matcher  string
 	commands []string
-	policy   bool
+	timeout  int
 }
 
 // injectCodexHooks builds the Codex session-config overrides that register
@@ -370,8 +399,8 @@ type codexHookEvent struct {
 // [hooks] config, and accepts hooks per-invocation as trusted session config via
 // repeatable `-c hooks.<Event>=<toml>` overrides. Each override's value is
 // parsed by Codex as TOML (codex-rs/utils/cli config_override), so graith emits
-// a TOML array of matcher groups — [{hooks=[{type="command",command="..."}]}] —
-// with no matcher (match-all). `--dangerously-bypass-hook-trust` skips Codex's
+// a TOML array of matcher groups. Lifecycle groups have no matcher (match all),
+// while command policy matches Bash only. `--dangerously-bypass-hook-trust` skips Codex's
 // interactive hook-trust review, safe here because graith generated and vetted
 // these hooks and no human is watching the TUI to approve them.
 //
@@ -380,41 +409,49 @@ type codexHookEvent struct {
 func (sm *SessionManager) injectCodexHooks(sessionID string, lifecycle, policy bool) (extraArgs []string, extraEnv map[string]string, err error) {
 	grBin := shellQuote(resolveGrBin())
 
-	events := []codexHookEvent{
-		{event: "SessionStart", commands: []string{
-			grBin + " report-status --event SessionStart",
-			grBin + " check-inbox",
-		}},
-		{event: "UserPromptSubmit", commands: []string{
-			grBin + " report-status --event UserPromptSubmit",
-		}},
-		{event: "PreToolUse", commands: []string{
-			grBin + " report-status --event PreToolUse",
-		}},
-		{event: "PostToolUse", commands: []string{
-			grBin + " report-status --event PostToolUse",
-		}},
-		{event: "PermissionRequest", policy: true, commands: []string{
-			grBin + " command-policy-check",
-		}},
-		{event: "Stop", commands: []string{
-			grBin + " report-status --event Stop",
-		}},
+	var events []codexHookEvent
+	if lifecycle {
+		events = append(events,
+			codexHookEvent{event: "SessionStart", groups: []codexHookGroup{{commands: []string{
+				grBin + " report-status --event SessionStart",
+				grBin + " check-inbox",
+			}}}},
+			codexHookEvent{event: "UserPromptSubmit", groups: []codexHookGroup{{commands: []string{
+				grBin + " report-status --event UserPromptSubmit",
+			}}}},
+			codexHookEvent{event: "PostToolUse", groups: []codexHookGroup{{commands: []string{
+				grBin + " report-status --event PostToolUse",
+			}}}},
+			codexHookEvent{event: "Stop", groups: []codexHookGroup{{commands: []string{
+				grBin + " report-status --event Stop",
+			}}}},
+		)
 	}
 
-	installed := 0
+	var preToolGroups []codexHookGroup
+	if lifecycle {
+		preToolGroups = append(preToolGroups, codexHookGroup{commands: []string{
+			grBin + " report-status --event PreToolUse",
+		}})
+	}
+
+	if policy {
+		// PreToolUse runs independently of Codex's approval policy. A
+		// PermissionRequest hook is unreachable under --ask-for-approval never.
+		preToolGroups = append(preToolGroups, codexHookGroup{
+			matcher:  "^Bash$",
+			commands: []string{commandPolicyHookCommand(grBin)},
+			timeout:  commandPolicyHookTimeout(sm.cfg.CommandPolicy.TimeoutDuration()),
+		})
+	}
+
+	if len(preToolGroups) > 0 {
+		events = append(events, codexHookEvent{event: "PreToolUse", groups: preToolGroups})
+	}
 
 	for _, e := range events {
-		if e.policy && !policy {
-			continue
-		}
-		if !e.policy && !lifecycle {
-			continue
-		}
-
-		value := codexHookOverrideValue(e.commands)
+		value := codexHookOverrideGroups(e.groups)
 		extraArgs = append(extraArgs, "-c", fmt.Sprintf("hooks.%s=%s", e.event, value))
-		installed++
 	}
 
 	// NOTE: --dangerously-bypass-hook-trust is process-wide, not scoped to the
@@ -427,7 +464,7 @@ func (sm *SessionManager) injectCodexHooks(sessionID string, lifecycle, policy b
 	// trust only the session-config hooks without bypassing trust globally.
 	extraArgs = append(extraArgs, "--dangerously-bypass-hook-trust")
 
-	sm.log.Info("injected codex hooks", "session_id", sessionID, "events", installed)
+	sm.log.Info("injected codex hooks", "session_id", sessionID, "events", len(events))
 
 	return extraArgs, nil, nil
 }
@@ -437,12 +474,31 @@ func (sm *SessionManager) injectCodexHooks(sessionID string, lifecycle, policy b
 // the given shell commands in order. The shape mirrors Codex's HookEventsToml
 // matcher-group schema ([{hooks=[{type="command",command="..."}]}]).
 func codexHookOverrideValue(commands []string) string {
-	handlers := make([]string, len(commands))
-	for i, c := range commands {
-		handlers[i] = fmt.Sprintf(`{type="command",command=%s}`, tomlBasicString(c))
+	return codexHookOverrideGroups([]codexHookGroup{{commands: commands}})
+}
+
+func codexHookOverrideGroups(groups []codexHookGroup) string {
+	encodedGroups := make([]string, len(groups))
+	for i, group := range groups {
+		handlers := make([]string, len(group.commands))
+		for j, command := range group.commands {
+			timeout := ""
+			if group.timeout > 0 {
+				timeout = fmt.Sprintf(`,timeout=%d`, group.timeout)
+			}
+
+			handlers[j] = fmt.Sprintf(`{type="command",command=%s%s}`, tomlBasicString(command), timeout)
+		}
+
+		matcher := ""
+		if group.matcher != "" {
+			matcher = fmt.Sprintf(`matcher=%s,`, tomlBasicString(group.matcher))
+		}
+
+		encodedGroups[i] = fmt.Sprintf(`{%shooks=[%s]}`, matcher, strings.Join(handlers, ","))
 	}
 
-	return fmt.Sprintf(`[{hooks=[%s]}]`, strings.Join(handlers, ","))
+	return fmt.Sprintf(`[%s]`, strings.Join(encodedGroups, ","))
 }
 
 // tomlBasicString encodes s as a TOML basic (double-quoted) string, escaping the

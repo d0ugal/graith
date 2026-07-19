@@ -1000,6 +1000,7 @@ func TestIsConfigStale(t *testing.T) {
 		}
 
 		changedCfg := *cfg
+
 		changedCfg.CommandPolicy = config.CommandPolicy{
 			Backend: "builtin",
 			Builtin: config.CommandPolicyBuiltin{Deny: []any{"git push"}},
@@ -6984,6 +6985,7 @@ func TestAdoptSessionsCov2(t *testing.T) {
 func TestAdoptSessionsTerminatesPreTransitionProcess(t *testing.T) {
 	sm := sleeperSM(t)
 	pid := spawnReapableSleeper(t)
+
 	start, err := grpty.ProcessStartTime(pid)
 	if err != nil {
 		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
@@ -6993,10 +6995,12 @@ func TestAdoptSessionsTerminatesPreTransitionProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		_ = readEnd.Close()
 		_ = writeEnd.Close()
 	})
+
 	fd, err := syscall.Dup(int(readEnd.Fd()))
 	if err != nil {
 		t.Fatal(err)
@@ -7011,7 +7015,7 @@ func TestAdoptSessionsTerminatesPreTransitionProcess(t *testing.T) {
 	}
 
 	err = sm.AdoptSessions(&UpgradeManifest{Sessions: []UpgradeSession{{
-		ID: "dreich-old", Fd: fd, PID: pid,
+		ID: "dreich-old", Fd: fd, HasPTY: true, PID: pid,
 	}}})
 	if err != nil {
 		t.Fatalf("AdoptSessions: %v", err)
@@ -7021,14 +7025,58 @@ func TestAdoptSessionsTerminatesPreTransitionProcess(t *testing.T) {
 	if !ok {
 		t.Fatal("rejected session disappeared")
 	}
+
 	if sess.Status != StatusStopped || sess.PID != 0 {
 		t.Fatalf("rejected session = status %q pid %d, want stopped with cleared pid", sess.Status, sess.PID)
 	}
+
 	if !strings.Contains(sess.SummaryText, "incompatible security-model upgrade") {
 		t.Fatalf("summary = %q, want security-model diagnostic", sess.SummaryText)
 	}
+
 	if err := syscall.Kill(-pid, 0); !errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("pre-transition process group remains after adoption rejection: %v", err)
+	}
+}
+
+func TestAdoptSessionsTerminatesOmittedHeadlessProcess(t *testing.T) {
+	sm := sleeperSM(t)
+	pid := spawnReapableSleeper(t)
+
+	start, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	sm.state.Sessions["canny-headless"] = &SessionState{
+		ID: "canny-headless", Name: "canny-headless", Agent: "sleeper",
+		Status: StatusRunning, DriverKind: DriverHeadless,
+		PID: pid, PIDStartTime: start, Sandboxed: true,
+		CreationCfg: &CreationConfig{Agent: sm.cfg.Agents["sleeper"]},
+	}
+
+	// Headless drivers have no PTY fd and are intentionally omitted from the
+	// handoff manifest. The replacement daemon must still identity-check and
+	// terminate their process rather than leaving it unmanaged.
+	if err := sm.AdoptSessions(&UpgradeManifest{}); err != nil {
+		t.Fatalf("AdoptSessions: %v", err)
+	}
+
+	sess, ok := sm.Get("canny-headless")
+	if !ok {
+		t.Fatal("headless session disappeared")
+	}
+
+	if sess.Status != StatusStopped || sess.PID != 0 || sess.PIDStartTime != 0 {
+		t.Fatalf("headless session = status %q pid %d start %d, want stopped with cleared identity", sess.Status, sess.PID, sess.PIDStartTime)
+	}
+
+	if !strings.Contains(sess.SummaryText, "Headless session stopped") {
+		t.Fatalf("summary = %q, want headless upgrade diagnostic", sess.SummaryText)
+	}
+
+	if err := syscall.Kill(-pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("headless process group remains after upgrade: %v", err)
 	}
 }
 

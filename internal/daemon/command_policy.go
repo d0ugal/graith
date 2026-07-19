@@ -16,23 +16,28 @@ import (
 func (sm *SessionManager) CheckCommandPolicy(ctx context.Context, req protocol.CommandPolicyCheckMsg) protocol.CommandPolicyDecisionMsg {
 	sm.mu.RLock()
 	policyCfg := sm.cfg.CommandPolicy
+
 	var sessionName, agent string
 	if sess, ok := sm.state.Sessions[req.SessionID]; ok {
 		sessionName, agent = sess.Name, sess.Agent
 	}
+
 	sm.mu.RUnlock()
 
 	if !policyCfg.Enabled() {
 		return protocol.CommandPolicyDecisionMsg{Decision: commandpolicy.DecisionAllow}
 	}
+
 	backend, err := commandpolicy.BackendByName(strings.TrimSpace(policyCfg.Backend))
 	if err != nil {
 		return sm.commandPolicyError(req, err)
 	}
+
 	cfg, err := commandPolicyBackendConfig(policyCfg, sm.commandPolicyConfigDir())
 	if err != nil {
 		return sm.commandPolicyError(req, err)
 	}
+
 	decision, err := backend.Evaluate(ctx, commandpolicy.Request{
 		SessionID: req.SessionID, SessionName: sessionName, Agent: agent,
 		ToolName: req.ToolName, ToolInput: req.ToolInput, HookPayload: req.HookPayload,
@@ -40,14 +45,17 @@ func (sm *SessionManager) CheckCommandPolicy(ctx context.Context, req protocol.C
 	if err != nil {
 		return sm.commandPolicyError(req, err)
 	}
+
 	if decision.Decision != commandpolicy.DecisionAllow && decision.Decision != commandpolicy.DecisionDeny {
 		return sm.commandPolicyError(req, fmt.Errorf("backend returned invalid decision %q", decision.Decision))
 	}
+
 	return protocol.CommandPolicyDecisionMsg{Decision: decision.Decision, Reason: decision.Reason}
 }
 
 func (sm *SessionManager) commandPolicyError(req protocol.CommandPolicyCheckMsg, err error) protocol.CommandPolicyDecisionMsg {
 	sm.log.Warn("command policy denied after evaluation failure", "session", req.SessionID, "tool", req.ToolName, "err", err)
+
 	return protocol.CommandPolicyDecisionMsg{
 		Decision: commandpolicy.DecisionDeny,
 		Reason:   fmt.Sprintf("command policy could not be enforced: %v", err),
@@ -58,9 +66,11 @@ func (sm *SessionManager) commandPolicyConfigDir() string {
 	if file := strings.TrimSpace(sm.configFile); file != "" {
 		return filepath.Dir(file)
 	}
+
 	if sm.paths.ConfigFile == "" {
 		return ""
 	}
+
 	return filepath.Dir(sm.paths.ConfigFile)
 }
 
@@ -75,7 +85,9 @@ func commandPolicyBackendConfig(cfg config.CommandPolicy, configDir string) (com
 		if err != nil {
 			return commandpolicy.Config{}, fmt.Errorf("encode inline command policy rules: %w", err)
 		}
+
 		out.BuiltinInline = inline
 	}
+
 	return out, nil
 }

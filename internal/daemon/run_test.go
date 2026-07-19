@@ -7,10 +7,56 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/d0ugal/graith/internal/config"
+	grpty "github.com/d0ugal/graith/internal/pty"
 )
+
+func TestRunCleansUpgradeProcessesWhenBootstrapFails(t *testing.T) {
+	pid := spawnReapableSleeper(t)
+
+	start, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	t.Cleanup(func() { _ = syscall.Kill(-pid, syscall.SIGKILL) })
+
+	dir := t.TempDir()
+
+	manifestPath, err := WriteManifest(dir, &UpgradeManifest{Sessions: []UpgradeSession{{
+		ID: "thrawn-headless", Fd: -1, PID: pid, PIDStartTime: start,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blocker := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("dreich"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	paths := config.Paths{
+		ConfigFile: filepath.Join(blocker, "config.toml"),
+		DataDir:    filepath.Join(dir, "data"),
+		RuntimeDir: filepath.Join(dir, "run"),
+		LogDir:     filepath.Join(dir, "logs"),
+		TmpDir:     filepath.Join(dir, "tmp"),
+	}
+
+	err = Run(config.Default(), paths, "", manifestPath)
+	if err == nil || !strings.Contains(err.Error(), "create directory") {
+		t.Fatalf("Run error = %v, want pre-initialization directory failure", err)
+	}
+
+	if err := syscall.Kill(-pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("inherited process remains after Run bootstrap failure: %v", err)
+	}
+}
 
 func TestRunControlLoopReloadsThenShutsDown(t *testing.T) {
 	signals := make(chan os.Signal)

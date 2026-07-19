@@ -7,28 +7,6 @@ type commandPolicyResponse struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
-// codexCommandPolicyResponse models Codex's current PermissionRequest hook-output
-// contract. Codex's PermissionRequestCommandOutputWire carries the decision
-// under hookSpecificOutput.decision.behavior ("allow" | "deny") — NOT the legacy
-// top-level "decision" field — and uses deny_unknown_fields, so a top-level
-// "decision" is rejected and the decision silently dropped (issue #1183).
-type codexCommandPolicyResponse struct {
-	HookSpecificOutput codexPermissionHookSpecificOutput `json:"hookSpecificOutput"`
-}
-
-// codexPermissionHookSpecificOutput carries the PermissionRequest decision.
-// Decision retains Codex's optional wire shape, but command-policy responses
-// always populate it with an immediate allow or deny.
-type codexPermissionHookSpecificOutput struct {
-	HookEventName string                   `json:"hookEventName"`
-	Decision      *codexPermissionDecision `json:"decision,omitempty"`
-}
-
-type codexPermissionDecision struct {
-	Behavior string `json:"behavior"`
-	Message  string `json:"message,omitempty"`
-}
-
 type cursorCommandPolicyResponse struct {
 	Permission string `json:"permission"`
 	Reason     string `json:"reason,omitempty"`
@@ -69,14 +47,23 @@ func CommandPolicy(agent, decision, reason string) string {
 			},
 		})
 	case "codex":
-		resp := codexCommandPolicyResponse{
-			HookSpecificOutput: codexPermissionHookSpecificOutput{
-				HookEventName: "PermissionRequest",
-			},
+		// Codex runs command policy as a PreToolUse hook. With approval policy
+		// "never", PermissionRequest is never reached. An allow deliberately
+		// emits no hook opinion: Codex continues through its normal execution
+		// path, where graith's outer OS sandbox remains authoritative. Current
+		// Codex rejects permissionDecision:"allow" on PreToolUse, but accepts a
+		// blocking deny.
+		if decision == "allow" {
+			return ""
 		}
-		resp.HookSpecificOutput.Decision = &codexPermissionDecision{Behavior: codexBehavior(decision), Message: reason}
 
-		return marshalString(resp)
+		return marshalString(claudeCommandPolicyResponse{
+			HookSpecificOutput: claudeHookSpecificOutput{
+				HookEventName:            "PreToolUse",
+				PermissionDecision:       "deny",
+				PermissionDecisionReason: denyReason(reason),
+			},
+		})
 	case "cursor":
 		return marshalString(cursorCommandPolicyResponse{
 			Permission: cursorDecision(decision),
@@ -136,20 +123,6 @@ func InboxContext(agent, event, context string) string {
 	}
 }
 
-// codexBehavior maps graith's internal decision vocabulary onto Codex's
-// PermissionRequest behavior ("allow" | "deny"). "block" and "deny" both refuse.
-// Every other value is denied so native prompting can never resume.
-func codexBehavior(d string) string {
-	switch d {
-	case "allow":
-		return "allow"
-	case "block", "deny":
-		return "deny"
-	default:
-		return "deny"
-	}
-}
-
 // claudeDecision maps graith's internal decision vocabulary onto Claude Code's
 // permissionDecision values ("allow" | "deny"). "block" and "deny" both
 // refuse, as do unknown or interactive decisions.
@@ -173,5 +146,14 @@ func denyUnlessAllow(d string) string {
 	if d == "allow" {
 		return "allow"
 	}
+
 	return "deny"
+}
+
+func denyReason(reason string) string {
+	if reason != "" {
+		return reason
+	}
+
+	return "command policy denied execution"
 }

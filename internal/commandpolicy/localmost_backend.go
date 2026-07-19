@@ -18,6 +18,7 @@ var errLocalmostOutputLimit = errors.New("localmost command policy output exceed
 
 type limitedOutput struct {
 	bytes.Buffer
+
 	remaining int
 }
 
@@ -26,12 +27,15 @@ func (w *limitedOutput) Write(p []byte) (int, error) {
 		w.remaining -= len(p)
 		return w.Buffer.Write(p)
 	}
+
 	if w.remaining > 0 {
 		n := w.remaining
 		_, _ = w.Buffer.Write(p[:n])
 		w.remaining = 0
+
 		return n, errLocalmostOutputLimit
 	}
+
 	return 0, errLocalmostOutputLimit
 }
 
@@ -43,6 +47,7 @@ func localmostCommand(cfg Config) string {
 	if command := strings.TrimSpace(cfg.Command); command != "" {
 		return command
 	}
+
 	return "localmost"
 }
 
@@ -51,6 +56,7 @@ func (localmostBackend) Availability(cfg Config) Availability {
 	if _, err := exec.LookPath(command); err != nil {
 		return Availability{CanEnforce: false, Detail: fmt.Sprintf("command policy backend %q requires %q on PATH: %v", BackendLocalmost, command, err)}
 	}
+
 	return Availability{CanEnforce: true}
 }
 
@@ -68,15 +74,19 @@ func (localmostBackend) Evaluate(ctx context.Context, req Request, cfg Config) (
 	if err != nil {
 		return Decision{}, err
 	}
+
 	if !inScope {
 		return Decision{Decision: DecisionAllow}, nil
 	}
+
 	stdin, err := localmostStdin(req, command)
 	if err != nil {
 		return Decision{}, err
 	}
+
 	cmdCtx, cancel := context.WithTimeout(ctx, cfg.execTimeout())
 	defer cancel()
+
 	cmd := exec.CommandContext(cmdCtx, localmostCommand(cfg), "check")
 	// CommandContext kills the direct child at the deadline, but a descendant
 	// can keep inherited stdout/stderr pipes open after that child exits. Bound
@@ -91,31 +101,40 @@ func (localmostBackend) Evaluate(ctx context.Context, req Request, cfg Config) (
 	stderr := &limitedOutput{remaining: maxLocalmostOutput + 1}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+
 	err = cmd.Run()
 	if err != nil {
 		if cmdCtx.Err() != nil {
 			return Decision{}, fmt.Errorf("localmost command policy timed out: %w", cmdCtx.Err())
 		}
+
 		if errors.Is(err, errLocalmostOutputLimit) {
 			return Decision{}, errLocalmostOutputLimit
 		}
+
 		if detail := strings.TrimSpace(stderr.String()); detail != "" {
 			return Decision{}, fmt.Errorf("localmost command policy failed: %w: %s", err, detail)
 		}
+
 		return Decision{}, fmt.Errorf("localmost command policy failed: %w", err)
 	}
+
 	if stdout.Len() > maxLocalmostOutput || stderr.Len() > maxLocalmostOutput {
 		return Decision{}, errLocalmostOutputLimit
 	}
+
 	var parsed localmostHookOutput
 	if err := json.Unmarshal(stdout.Bytes(), &parsed); err != nil {
 		return Decision{}, fmt.Errorf("localmost returned malformed output: %w", err)
 	}
+
 	decision := parsed.HookSpecificOutput.PermissionDecision
+
 	reason := parsed.HookSpecificOutput.Reason
 	if decision == "" {
 		decision, reason = parsed.Decision, parsed.Reason
 	}
+
 	switch strings.ToLower(decision) {
 	case "allow", "approve":
 		return Decision{Decision: DecisionAllow, Reason: reason}, nil
@@ -134,6 +153,7 @@ func localmostStdin(req Request, command string) ([]byte, error) {
 	if strings.EqualFold(req.Agent, "claude") && strings.TrimSpace(req.HookPayload) != "" {
 		return []byte(req.HookPayload), nil
 	}
+
 	return json.Marshal(map[string]any{
 		"hook_event_name": "PreToolUse",
 		"tool_name":       "Bash",

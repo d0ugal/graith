@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/d0ugal/graith/internal/agent"
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/tools"
 	"github.com/d0ugal/graith/internal/version"
@@ -48,6 +50,7 @@ var rootCmd = &cobra.Command{
 	SilenceUsage:  true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		commandPolicyStartupError = nil
+
 		if err := rejectConfigInsideSession(cmd); err != nil {
 			return err
 		}
@@ -71,6 +74,7 @@ var rootCmd = &cobra.Command{
 			if cmd != commandPolicyCheckCmd {
 				return err
 			}
+
 			commandPolicyStartupError = errors.Join(commandPolicyStartupError, fmt.Errorf("resolving paths: %w", err))
 		}
 
@@ -138,11 +142,38 @@ func Execute() error {
 	return executeWithArgs(os.Args[1:])
 }
 
-func executeWithArgs(args []string) error {
+func executeWithArgs(args []string) (err error) {
+	var upgradeGuard *daemon.UpgradeFailureGuard
+	if manifestPath := adoptFromArgument(args); manifestPath != "" {
+		upgradeGuard, err = daemon.ArmUpgradeFailureGuard(manifestPath)
+		if err != nil {
+			out = output.New(false)
+			out.Error(err)
+
+			return err
+		}
+		defer func() {
+			if err == nil {
+				return
+			}
+
+			if cleanupErr := upgradeGuard.Cleanup(); cleanupErr != nil {
+				wrapped := fmt.Errorf("clean up inherited sessions after CLI bootstrap failure: %w", cleanupErr)
+
+				if out == nil {
+					out = output.New(false)
+				}
+
+				out.Error(wrapped)
+				err = errors.Join(err, wrapped)
+			}
+		}()
+	}
+
 	registerCommands()
 	rootCmd.SetArgs(args)
 
-	err := rootCmd.Execute()
+	err = rootCmd.Execute()
 	if err != nil {
 		w := out
 		if w == nil {
@@ -161,6 +192,28 @@ func executeWithArgs(args []string) error {
 	}
 
 	return err
+}
+
+// adoptFromArgument recognizes the exact hidden replacement-daemon flag before
+// Cobra loads configuration. ExecUpgrade emits the separated form, while the
+// equals form keeps direct/internal invocations equally fail closed.
+func adoptFromArgument(args []string) string {
+	if len(args) < 2 || args[0] != "daemon" || args[1] != "start" {
+		return ""
+	}
+
+	for i := 2; i < len(args); i++ {
+		arg := args[i]
+		if strings.HasPrefix(arg, "--adopt-from=") {
+			return strings.TrimPrefix(arg, "--adopt-from=")
+		}
+
+		if arg == "--adopt-from" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+
+	return ""
 }
 
 // insideSession reports whether the current process is running inside a

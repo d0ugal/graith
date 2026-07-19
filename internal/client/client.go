@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/protocol"
+	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/version"
 	"golang.org/x/term"
 )
@@ -94,6 +96,9 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 		var hsErr protocol.HandshakeErrMsg
 
 		_ = protocol.DecodePayload(resp, &hsErr)
+		if serverProtocol, ok := olderServerProtocolFromHandshakeError(hsErr.Reason); ok && autoUpgrade && version.Version != "dev" {
+			return c.restartAcrossProtocolBoundary(paths, cfg, configFile, serverProtocol)
+		}
 
 		c.Close()
 
@@ -117,13 +122,17 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 
 	if autoUpgrade && version.Version != "dev" {
 		if hsOk.DaemonVersion != "" && hsOk.DaemonVersion != version.Version && version.IsNewer(version.Version, hsOk.DaemonVersion) {
+			if !protocol.VersionCompatible(hsOk.Version) {
+				return c.restartAcrossProtocolBoundary(paths, cfg, configFile, hsOk.Version)
+			}
+
 			fmt.Fprintf(os.Stderr, "Daemon version mismatch (daemon=%s, cli=%s), upgrading daemon...\n", hsOk.DaemonVersion, version.Version)
 
 			// Capture the daemon's pre-upgrade instance ID so readiness can prove
 			// the NEW generation is serving, not the inherited listener (#1319).
 			priorInstanceID := hsOk.DaemonInstanceID
 
-			if requestUpgrade(c) {
+			if requestUpgradeForClient(c) {
 				c.Close()
 
 				if waitForNewDaemonGeneration(paths.SocketPath, paths, version.Version, priorInstanceID) {
@@ -150,6 +159,99 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 
 	return c, nil
 }
+
+// olderServerProtocolFromHandshakeError recognizes the exact rejection emitted
+// by older graith daemons. Protocol 1 rejects a protocol-2 client before it can
+// report handshake_ok, so this is the only safe point at which the new client
+// can choose a clean, non-preserving transition. Only an older numeric major is
+// accepted; arbitrary handshake failures never trigger process lifecycle work.
+func olderServerProtocolFromHandshakeError(reason string) (string, bool) {
+	marker := "protocol version mismatch: client=" + protocol.Version + ", server="
+	if !strings.HasPrefix(reason, marker) {
+		return "", false
+	}
+
+	server := reason[len(marker):]
+	if end := strings.IndexAny(server, ";, \t\r\n"); end >= 0 {
+		server = server[:end]
+	}
+
+	serverMajor, serverMinor, ok := strings.Cut(server, ".")
+	if !ok {
+		return "", false
+	}
+
+	currentMajor, _, ok := strings.Cut(protocol.Version, ".")
+	if !ok {
+		return "", false
+	}
+
+	serverNumber, err := strconv.Atoi(serverMajor)
+	if err != nil || serverNumber <= 0 {
+		return "", false
+	}
+
+	minorNumber, err := strconv.Atoi(serverMinor)
+	if err != nil || minorNumber < 0 {
+		return "", false
+	}
+
+	currentNumber, err := strconv.Atoi(currentMajor)
+	if err != nil || serverNumber >= currentNumber {
+		return "", false
+	}
+
+	return server, true
+}
+
+// restartAcrossProtocolBoundary performs a clean security-boundary restart.
+// Protocol 1 cannot provide the all-process, identity-bearing adoption manifest,
+// so it must retain ownership long enough for graceful StopAll to terminate both
+// PTY and headless agents. No new daemon is started unless the exact old Unix
+// peer identity and its socket are both proved gone.
+func (c *Client) restartAcrossProtocolBoundary(paths config.Paths, cfg *config.Config, configFile, serverProtocol string) (*Client, error) {
+	oldPID, err := c.DaemonPID()
+	if err != nil {
+		c.Close()
+		return nil, fmt.Errorf("protocol-breaking daemon restart cannot identify old socket peer: %w", err)
+	}
+
+	oldStart, err := grpty.ProcessStartTime(oldPID)
+	if err != nil {
+		c.Close()
+		return nil, fmt.Errorf("protocol-breaking daemon restart cannot verify old PID %d identity: %w", oldPID, err)
+	}
+
+	if oldStart == 0 {
+		c.Close()
+		return nil, fmt.Errorf("protocol-breaking daemon restart cannot verify old PID %d identity: zero process start time", oldPID)
+	}
+
+	c.Close()
+
+	fmt.Fprintf(os.Stderr, "Daemon protocol changed (daemon=%s, cli=%s); stopping old daemon and its sessions before clean restart...\n", serverProtocol, protocol.Version)
+
+	if err := stopDaemonIdentityForUpgrade(oldPID, oldStart); err != nil {
+		return nil, fmt.Errorf("protocol-breaking daemon restart failed closed: %w", err)
+	}
+
+	if !waitForSocketGoneForUpgrade(paths.SocketPath) {
+		return nil, fmt.Errorf("protocol-breaking daemon restart failed closed: old socket %s remained after PID %d exited", paths.SocketPath, oldPID)
+	}
+
+	if reconnectAfterCleanUpgrade != nil {
+		return reconnectAfterCleanUpgrade(cfg, paths, configFile)
+	}
+
+	return connect(cfg, paths, configFile, false)
+}
+
+var (
+	requestUpgradeForClient      = requestUpgrade
+	stopDaemonIdentityForUpgrade = stopDaemonIdentity
+	waitForSocketGoneForUpgrade  = waitForSocketGone
+	reconnectAfterCleanUpgrade   func(*config.Config, config.Paths, string) (*Client, error)
+)
 
 // probeDaemonIdentity handshakes the daemon at sockPath and returns its reported
 // version and per-process instance ID. Empty strings mean the daemon was
@@ -303,14 +405,53 @@ func stopDaemonByPID(pidFile string) bool {
 
 // waitForSocketGone waits for a stopped daemon's socket to disappear, bounded by
 // the effective start policy rather than a fixed 20×100ms retry count (issue
-// #1319). It is best-effort: it returns once the socket is gone or the budget
-// elapses.
-func waitForSocketGone(sockPath string) {
-	_ = pollDaemonReady(func(time.Time) bool {
+// #1319), and reports whether disappearance was proved.
+func waitForSocketGone(sockPath string) bool {
+	return pollDaemonReady(func(time.Time) bool {
 		_, err := os.Stat(sockPath)
 
 		return os.IsNotExist(err)
 	})
+}
+
+// stopDaemonIdentity signals only the process that answered the authenticated
+// Unix-socket handshake and only while its start time still matches. It waits
+// for that exact identity to disappear before a new daemon may start.
+func stopDaemonIdentity(pid int, startTime int64) error {
+	if pid <= 1 || startTime == 0 {
+		return fmt.Errorf("invalid daemon identity pid=%d start=%d", pid, startTime)
+	}
+
+	current, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		return fmt.Errorf("verify daemon PID %d before SIGTERM: %w", pid, err)
+	}
+
+	if current != startTime {
+		return fmt.Errorf("daemon PID %d identity changed before SIGTERM (recorded=%d, current=%d)", pid, startTime, current)
+	}
+
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
+
+		return fmt.Errorf("SIGTERM daemon PID %d: %w", pid, err)
+	}
+
+	if pollDaemonReady(func(time.Time) bool {
+		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+			return true
+		}
+
+		observed, err := grpty.ProcessStartTime(pid)
+
+		return err == nil && observed != startTime
+	}) {
+		return nil
+	}
+
+	return fmt.Errorf("daemon PID %d did not exit within %s", pid, daemonStartTimeout)
 }
 
 // ConnectFast is a fast-path connect for hooks. It dials the daemon socket

@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,6 +24,21 @@ func newTestSessionManagerWithDataDir(t *testing.T) *SessionManager {
 		StateFile: filepath.Join(dir, "state.json"),
 		DataDir:   dir,
 	}, slog.Default())
+}
+
+func TestCommandPolicyHookCommandBlocksSupervisorSpawnFailure(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing-gr")
+	cmd := exec.Command("sh", "-c", commandPolicyHookCommand(shellQuote(missing)))
+	output, err := cmd.CombinedOutput()
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 2 {
+		t.Fatalf("hook command error = %v, output = %q, want blocking exit 2", err, output)
+	}
+
+	if !strings.Contains(string(output), "failed before returning a decision") {
+		t.Fatalf("hook command output = %q, want useful fail-closed diagnostic", output)
+	}
 }
 
 func TestGenerateClaudeSettings(t *testing.T) {
@@ -44,6 +61,7 @@ func TestGenerateClaudeSettings(t *testing.T) {
 			Hooks   []struct {
 				Type    string `json:"type"`
 				Command string `json:"command"`
+				Timeout int    `json:"timeout"`
 			} `json:"hooks"`
 		} `json:"hooks"`
 	}
@@ -100,6 +118,8 @@ func TestGenerateClaudeSettings(t *testing.T) {
 				t.Errorf("event %q has %d hooks, want 1", event, len(matchers[0].Hooks))
 			} else if !strings.Contains(matchers[0].Hooks[0].Command, "command-policy-check") {
 				t.Errorf("event %q command = %q, does not contain command-policy-check", event, matchers[0].Hooks[0].Command)
+			} else if matchers[0].Hooks[0].Timeout <= 0 || !strings.Contains(matchers[0].Hooks[0].Command, "exit 2") {
+				t.Errorf("event %q hook is not bounded/fail-closed: %+v", event, matchers[0].Hooks[0])
 			}
 		case "SessionStart":
 			if len(matchers[0].Hooks) != 2 {
@@ -427,7 +447,6 @@ func TestInjectCodexHooks(t *testing.T) {
 		"UserPromptSubmit",
 		"PreToolUse",
 		"PostToolUse",
-		"PermissionRequest",
 		"Stop",
 	}
 
@@ -442,23 +461,28 @@ func TestInjectCodexHooks(t *testing.T) {
 			continue
 		}
 
-		if len(groups) != 1 {
-			t.Errorf("event %q has %d matcher groups, want 1", event, len(groups))
-			continue
+		wantGroups := 1
+		if event == "PreToolUse" {
+			wantGroups = 2 // lifecycle status plus the Bash-only policy gate
 		}
 
-		if len(groups[0].Hooks) == 0 {
-			t.Errorf("event %q has no command handlers", event)
-			continue
+		if len(groups) != wantGroups {
+			t.Errorf("event %q has %d matcher groups, want %d", event, len(groups), wantGroups)
 		}
 
-		for _, h := range groups[0].Hooks {
-			if h.Type != "command" {
-				t.Errorf("event %q handler type = %q, want command", event, h.Type)
+		for _, group := range groups {
+			if len(group.Hooks) == 0 {
+				t.Errorf("event %q has a matcher group with no command handlers", event)
 			}
 
-			if h.Command == "" {
-				t.Errorf("event %q handler has empty command", event)
+			for _, h := range group.Hooks {
+				if h.Type != "command" {
+					t.Errorf("event %q handler type = %q, want command", event, h.Type)
+				}
+
+				if h.Command == "" {
+					t.Errorf("event %q handler has empty command", event)
+				}
 			}
 		}
 	}
@@ -487,9 +511,23 @@ func TestCodexHookOverrideContent(t *testing.T) {
 		return b.String()
 	}
 
-	// PermissionRequest performs the bounded synchronous command-policy check.
-	if got := joined("PermissionRequest"); !strings.Contains(got, "command-policy-check") {
-		t.Errorf("PermissionRequest command = %q, want command-policy-check", got)
+	// PreToolUse performs the bounded synchronous command-policy check even when
+	// Codex approval policy is "never". The policy group must match Bash only.
+	var policyGroup *codexMatcherGroup
+
+	preToolGroups := hooks["PreToolUse"]
+	for i := range preToolGroups {
+		group := &preToolGroups[i]
+		if group.Matcher != nil && *group.Matcher == "^Bash$" {
+			policyGroup = group
+			break
+		}
+	}
+
+	if policyGroup == nil || len(policyGroup.Hooks) != 1 || !strings.Contains(policyGroup.Hooks[0].Command, "command-policy-check") {
+		t.Errorf("PreToolUse policy group = %+v, want Bash-only command-policy-check", policyGroup)
+	} else if policyGroup.Hooks[0].Timeout <= 0 || !strings.Contains(policyGroup.Hooks[0].Command, "exit 2") {
+		t.Errorf("PreToolUse policy hook is not bounded/fail-closed: %+v", policyGroup.Hooks[0])
 	}
 
 	// SessionStart reports status and then checks the inbox.
@@ -839,7 +877,7 @@ func TestCodexHookCommandsEscapeSingleQuotes(t *testing.T) {
 	hooks, _ := parseCodexHookOverrides(t, extraArgs)
 	expectedQuoted := shellQuote(fakeBin)
 
-	for _, event := range []string{"PermissionRequest", "SessionStart", "Stop"} {
+	for _, event := range []string{"PreToolUse", "SessionStart", "Stop"} {
 		for _, g := range hooks[event] {
 			for _, h := range g.Hooks {
 				if !strings.HasPrefix(h.Command, expectedQuoted+" ") {
@@ -1464,14 +1502,17 @@ func TestClaudeSettingsEscapeSingleQuotes(t *testing.T) {
 func TestCommandPolicyHooksAreIndependentAndShellScoped(t *testing.T) {
 	t.Run("claude", func(t *testing.T) {
 		sm := newTestSessionManagerWithDataDir(t)
+
 		path, err := sm.generateClaudeSettings("canny-policy", false, true)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		var parsed struct {
 			Hooks map[string][]struct {
 				Matcher string `json:"matcher"`
@@ -1483,9 +1524,11 @@ func TestCommandPolicyHooksAreIndependentAndShellScoped(t *testing.T) {
 		if err := json.Unmarshal(data, &parsed); err != nil {
 			t.Fatal(err)
 		}
+
 		if len(parsed.Hooks) != 1 || len(parsed.Hooks["PreToolUse"]) != 1 {
 			t.Fatalf("hooks = %+v", parsed.Hooks)
 		}
+
 		group := parsed.Hooks["PreToolUse"][0]
 		if group.Matcher != "^Bash$" || len(group.Hooks) != 1 || !strings.Contains(group.Hooks[0].Command, "command-policy-check") {
 			t.Fatalf("PreToolUse policy hook = %+v", group)
@@ -1494,34 +1537,42 @@ func TestCommandPolicyHooksAreIndependentAndShellScoped(t *testing.T) {
 
 	t.Run("codex", func(t *testing.T) {
 		sm := newTestSessionManagerWithDataDir(t)
+
 		args, _, err := sm.injectCodexHooks("canny-policy", false, true)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		hooks, _ := parseCodexHookOverrides(t, args)
 		if _, ok := hooks["SessionStart"]; ok {
 			t.Fatal("lifecycle hook installed when lifecycle=false")
 		}
-		groups, ok := hooks["PermissionRequest"]
-		if !ok || !strings.Contains(groups[0].Hooks[0].Command, "command-policy-check") {
-			t.Fatalf("PermissionRequest hook = %+v", groups)
+
+		groups, ok := hooks["PreToolUse"]
+		if !ok || len(groups) != 1 || groups[0].Matcher == nil || *groups[0].Matcher != "^Bash$" ||
+			!strings.Contains(groups[0].Hooks[0].Command, "command-policy-check") {
+			t.Fatalf("PreToolUse hook = %+v", groups)
 		}
 	})
 
 	t.Run("cursor", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		sm := newTestSessionManagerWithDataDir(t)
+
 		worktree := t.TempDir()
 		if _, _, err := sm.injectCursorHooks("canny-policy", worktree, false, true); err != nil {
 			t.Fatal(err)
 		}
+
 		data, err := os.ReadFile(filepath.Join(worktree, ".cursor", "hooks.json"))
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if !strings.Contains(string(data), "preToolUse") || !strings.Contains(string(data), "command-policy-check") {
 			t.Fatalf("cursor policy hooks = %s", data)
 		}
+
 		if strings.Contains(string(data), "sessionStart") {
 			t.Fatal("lifecycle hook installed when lifecycle=false")
 		}

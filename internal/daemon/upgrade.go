@@ -9,9 +9,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
@@ -23,9 +25,45 @@ type UpgradeManifest struct {
 }
 
 type UpgradeSession struct {
-	ID  string `json:"id"`
-	Fd  int    `json:"fd"`
-	PID int    `json:"pid"`
+	ID           string `json:"id"`
+	Fd           int    `json:"fd"`
+	HasPTY       bool   `json:"has_pty"`
+	PID          int    `json:"pid"`
+	PIDStartTime int64  `json:"pid_start_time"`
+}
+
+// UpgradeFailureGuard is armed by the CLI before configuration loading for an
+// exec-replacement start. If any pre-Run/bootstrap error returns to main, the
+// guard identity-checks and terminates every process the old daemon recorded.
+// Cleanup is idempotent because Run also owns a guard after it begins.
+type UpgradeFailureGuard struct {
+	manifest *UpgradeManifest
+	once     sync.Once
+	err      error
+}
+
+// ArmUpgradeFailureGuard reads the process identities before normal CLI
+// initialization can fail.
+func ArmUpgradeFailureGuard(manifestPath string) (*UpgradeFailureGuard, error) {
+	manifest, err := ReadManifest(manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("read upgrade manifest for early cleanup: %w", err)
+	}
+
+	return &UpgradeFailureGuard{manifest: manifest}, nil
+}
+
+// Cleanup terminates every still-live, identity-matching manifest process once.
+func (g *UpgradeFailureGuard) Cleanup() error {
+	if g == nil {
+		return nil
+	}
+
+	g.once.Do(func() {
+		g.err = cleanupUpgradeProcesses(g.manifest, config.ProcessKillGraceDefault)
+	})
+
+	return g.err
 }
 
 func clearCloseOnExec(fd int) error {
@@ -40,10 +78,6 @@ func clearCloseOnExec(fd int) error {
 func (sm *SessionManager) PrepareUpgrade(listenerFd uintptr, configFile string) (*UpgradeManifest, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-
-	if err := sm.saveState(); err != nil {
-		return nil, fmt.Errorf("save state: %w", err)
-	}
 
 	manifest := &UpgradeManifest{
 		ListenerFd: int(listenerFd),
@@ -60,26 +94,54 @@ func (sm *SessionManager) PrepareUpgrade(listenerFd uintptr, configFile string) 
 			continue
 		}
 
-		// Only interactive PTY sessions can be handed off by fd across an
-		// upgrade. A headless (pipe-backed) session has no adoptable PTY fd
-		// (Fd() == 0), so skip it — otherwise the new daemon would mis-adopt
-		// fd 0 (its own stdin) as a terminal (issue #1075).
-		if _, ok := sess.(*grpty.Session); !ok {
-			sm.log.Info("skipping non-PTY session for upgrade fd handoff", "id", id)
-			continue
+		pid := sess.ProcessPID()
+		if pid <= 1 {
+			return nil, fmt.Errorf("prepare session %q for upgrade: invalid PID %d", id, pid)
 		}
 
-		fd := int(sess.Fd())
-		if err := clearCloseOnExec(fd); err != nil {
-			sm.log.Warn("skipping session for upgrade", "id", id, "err", err)
-			continue
+		state := sm.state.Sessions[id]
+		if state == nil || state.PID != pid {
+			return nil, fmt.Errorf("prepare session %q for upgrade: persisted PID identity does not match live PID %d", id, pid)
 		}
 
-		manifest.Sessions = append(manifest.Sessions, UpgradeSession{
-			ID:  id,
-			Fd:  fd,
-			PID: sess.ProcessPID(),
-		})
+		startTime, err := grpty.ProcessStartTime(pid)
+		if err != nil {
+			return nil, fmt.Errorf("prepare session %q for upgrade: capture process identity for PID %d: %w", id, pid, err)
+		}
+
+		if state.PIDStartTime != 0 && state.PIDStartTime != startTime {
+			return nil, fmt.Errorf("prepare session %q for upgrade: PID %d identity changed", id, pid)
+		}
+
+		state.PIDStartTime = startTime
+
+		entry := UpgradeSession{ID: id, Fd: -1, PID: pid, PIDStartTime: startTime}
+		if _, ok := sess.(*grpty.Session); ok {
+			fd := int(sess.Fd())
+			if err := clearCloseOnExec(fd); err != nil {
+				// The process must still be represented in the manifest. The new
+				// daemon cannot adopt this PTY, so it will identity-check and
+				// terminate the process rather than leave it unmanaged.
+				sm.log.Warn("session PTY unavailable for upgrade handoff; process will be terminated", "id", id, "err", err)
+			} else {
+				entry.Fd = fd
+				entry.HasPTY = true
+			}
+		} else {
+			// Pipe-backed/headless drivers cannot transfer their I/O handles,
+			// but recording their process identity lets every replacement-daemon
+			// failure path terminate them safely after exec.
+			sm.log.Info("recording non-PTY session for upgrade cleanup", "id", id)
+		}
+
+		manifest.Sessions = append(manifest.Sessions, entry)
+	}
+
+	// Persist the exact identities recorded in the manifest before exec. The
+	// replacement daemon requires state and manifest to agree before adoption;
+	// failing here leaves the current daemon owning every live process.
+	if err := sm.saveState(); err != nil {
+		return nil, fmt.Errorf("save state: %w", err)
 	}
 
 	return manifest, nil
@@ -111,6 +173,58 @@ func ReadManifest(path string) (*UpgradeManifest, error) {
 	}
 
 	return &m, nil
+}
+
+// cleanupUpgradeManifest is the replacement daemon's last-resort ownership
+// path. Run installs it immediately after reading the manifest, so failures
+// that happen before state load or AdoptSessions cannot strand a headless or
+// otherwise unadopted agent after the old daemon has exec'd away.
+func (sm *SessionManager) cleanupUpgradeManifest(manifest *UpgradeManifest) error {
+	return cleanupUpgradeProcesses(manifest, sm.Config().Lifecycle.ProcessKillGraceDuration())
+}
+
+func cleanupUpgradeProcesses(manifest *UpgradeManifest, grace time.Duration) error {
+	var errs []error
+
+	killedPIDs := make(map[int]struct{})
+
+	for _, session := range manifest.Sessions {
+		if _, handled := killedPIDs[session.PID]; handled {
+			continue
+		}
+
+		killedPIDs[session.PID] = struct{}{}
+		if session.PID <= 1 {
+			errs = append(errs, fmt.Errorf("session %q has invalid upgrade PID %d", session.ID, session.PID))
+			continue
+		}
+
+		if session.PIDStartTime == 0 {
+			errs = append(errs, fmt.Errorf("session %q has no upgrade process identity for PID %d", session.ID, session.PID))
+			continue
+		}
+
+		if !isProcessAlive(session.PID) {
+			continue
+		}
+
+		current, err := grpty.ProcessStartTime(session.PID)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("verify session %q process identity: %w", session.ID, err))
+			continue
+		}
+
+		if current != session.PIDStartTime {
+			errs = append(errs, fmt.Errorf("session %q PID %d identity mismatch (recorded=%d, current=%d)", session.ID, session.PID, session.PIDStartTime, current))
+			continue
+		}
+
+		if err := killProcessGroup(session.PID, grace); err != nil {
+			errs = append(errs, fmt.Errorf("terminate session %q after replacement-daemon failure: %w", session.ID, err))
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 func ExecUpgrade(manifestPath, configFile, clientExecPath string) error {

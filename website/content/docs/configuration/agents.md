@@ -241,10 +241,14 @@ args = ["--model", "{model}"]
 ```toml
 [agents.opencode]
 command     = "opencode"
-non_interactive_args = ["--dangerously-skip-permissions"]
+non_interactive_args = ["--auto"]
 args        = []
 resume_args = ["--session", "{agent_session_id}"]
 ```
+
+OpenCode's TUI uses `--auto` to approve requests that would otherwise ask.
+Explicit OpenCode deny rules still apply, followed by graith's mandatory OS
+sandbox.
 
 ### Cursor
 

@@ -100,7 +100,6 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 		if poppedDeviceID != "" {
 			sm.UnregisterDeviceConn(poppedDeviceID, conn)
 		}
-
 	}()
 
 	sendControl := func(msgType string, payload any) {

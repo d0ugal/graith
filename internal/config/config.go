@@ -2995,6 +2995,7 @@ func validateInlineRules(list string, rules []any) error {
 			if rule, ok := v["rule"].(string); !ok || strings.TrimSpace(rule) == "" {
 				return fmt.Errorf("[command_policy.builtin] %s rule %d: table form requires a non-empty \"rule\" key", list, i)
 			}
+
 			for key := range v {
 				if _, ok := builtinRuleKeys[key]; !ok {
 					return fmt.Errorf("[command_policy.builtin] %s rule %d: unknown key %q (valid: rule, unless, redirect, pipe)", list, i, key)
@@ -3004,6 +3005,7 @@ func validateInlineRules(list string, rules []any) error {
 			return fmt.Errorf("[command_policy.builtin] %s rule %d: must be a string or a table, got %T", list, i, elem)
 		}
 	}
+
 	return nil
 }
 
@@ -3012,12 +3014,15 @@ func (b CommandPolicyBuiltin) InlineJSON() ([]byte, error) {
 	if b.Allow != nil {
 		payload["allow"] = b.Allow
 	}
+
 	if b.Deny != nil {
 		payload["deny"] = b.Deny
 	}
+
 	if b.AllowSafeXargs != nil {
 		payload["allowSafeXargs"] = *b.AllowSafeXargs
 	}
+
 	return json.Marshal(payload)
 }
 
@@ -3032,39 +3037,49 @@ func (p CommandPolicy) Validate() error {
 	default:
 		return fmt.Errorf("[command_policy] backend %q is not recognised (want builtin or localmost)", backend)
 	}
+
 	if strings.TrimSpace(p.Command) != "" && backend != "localmost" {
-		return fmt.Errorf("[command_policy] command is only valid with backend=\"localmost\"")
+		return errors.New("[command_policy] command is only valid with backend=\"localmost\"")
 	}
+
 	if strings.TrimSpace(p.Builtin.Config) != "" && p.Builtin.HasInline() {
 		return errors.New("[command_policy.builtin] config and inline rules are mutually exclusive")
 	}
+
 	if backend == "builtin" && strings.TrimSpace(p.Builtin.Config) == "" && !p.Builtin.HasInline() {
 		return errors.New("[command_policy] backend=\"builtin\" requires [command_policy.builtin] rules or config")
 	}
+
 	if p.Builtin.HasInline() {
 		if err := validateInlineRules("allow", p.Builtin.Allow); err != nil {
 			return err
 		}
+
 		if err := validateInlineRules("deny", p.Builtin.Deny); err != nil {
 			return err
 		}
+
 		data, err := p.Builtin.InlineJSON()
 		if err != nil {
 			return fmt.Errorf("[command_policy.builtin] encode inline rules: %w", err)
 		}
+
 		if _, err := localmost.Parse(data); err != nil {
 			return fmt.Errorf("[command_policy.builtin] inline rules are invalid: %w", err)
 		}
 	}
+
 	if strings.TrimSpace(p.Timeout) != "" {
 		d, err := ParseDurationWithDays(p.Timeout)
 		if err != nil {
 			return fmt.Errorf("[command_policy] timeout=%q is not a valid duration: %w", p.Timeout, err)
 		}
+
 		if d <= 0 || d > maxCommandPolicyTimeout {
 			return fmt.Errorf("[command_policy] timeout must be positive and no greater than %s", maxCommandPolicyTimeout)
 		}
 	}
+
 	return nil
 }
 
@@ -3072,10 +3087,12 @@ func (p CommandPolicy) TimeoutDuration() time.Duration {
 	if strings.TrimSpace(p.Timeout) == "" {
 		return defaultCommandPolicyTimeout
 	}
+
 	d, err := ParseDurationWithDays(p.Timeout)
 	if err != nil || d <= 0 {
 		return defaultCommandPolicyTimeout
 	}
+
 	return d
 }
 
@@ -3087,10 +3104,12 @@ func (s StatusConfig) TTLDuration() time.Duration {
 	if s.TTL == "" {
 		return 5 * time.Minute
 	}
+
 	d, err := ParseDurationWithDays(s.TTL)
 	if err != nil {
 		return 5 * time.Minute
 	}
+
 	return d
 }
 
@@ -4499,6 +4518,7 @@ func checkCommandPolicyKeys(data []byte) error {
 	if err := toml.Unmarshal(data, &raw); err != nil {
 		return nil // structural errors surface from the typed Unmarshal instead
 	}
+
 	if _, ok := raw["approvals"]; ok {
 		return errors.New("[approvals] was removed; use optional [command_policy] rules, which can only restrict commands inside the mandatory sandbox")
 	}
@@ -4507,6 +4527,7 @@ func checkCommandPolicyKeys(data []byte) error {
 	if !ok {
 		return nil
 	}
+
 	for k := range policy {
 		if _, ok := commandPolicyKeys[k]; !ok {
 			return fmt.Errorf("[command_policy] unknown key %q (valid: backend, timeout, command, builtin)", k)

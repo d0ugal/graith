@@ -51,6 +51,7 @@ func TestStateSaveLoad(t *testing.T) {
 
 func TestStatePreservesExplicitEmptyNonInteractiveArgs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
+
 	state := &State{Sessions: map[string]*SessionState{
 		"canny": {
 			ID: "canny", Name: "canny", Agent: "custom", Status: StatusStopped,
@@ -62,10 +63,12 @@ func TestStatePreservesExplicitEmptyNonInteractiveArgs(t *testing.T) {
 	if err := SaveState(path, state); err != nil {
 		t.Fatal(err)
 	}
+
 	loaded, err := LoadState(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	args := loaded.Sessions["canny"].CreationCfg.Agent.NonInteractiveArgs
 	if args == nil || len(args) != 0 {
 		t.Fatalf("non_interactive_args = %#v, want explicit empty slice", args)
@@ -961,9 +964,11 @@ func TestMigrateV22ToV23RemovesApprovalStatus(t *testing.T) {
 	if err := migrateState(state); err != nil {
 		t.Fatal(err)
 	}
+
 	if got := state.Sessions["canny"].AgentStatus; got != "error" {
 		t.Fatalf("migrated approval status = %q, want error", got)
 	}
+
 	if got := state.Sessions["braw"].AgentStatus; got != "ready" {
 		t.Fatalf("unrelated status = %q, want ready", got)
 	}

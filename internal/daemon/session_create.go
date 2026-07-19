@@ -54,6 +54,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	if !ok {
 		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
 	}
+
 	if agent.NonInteractiveArgs == nil {
 		return SessionState{}, fmt.Errorf("agent %q has no non_interactive_args; refusing to start an agent that may prompt for permission", agentName)
 	}
@@ -571,12 +572,15 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 		return SessionState{}, fmt.Errorf("expand agent args: %w", err)
 	}
+
 	nonInteractiveArgs, err := config.ExpandSlice(agent.NonInteractiveArgs, vars)
 	if err != nil {
 		cleanupOnError()
 		rollbackState()
+
 		return SessionState{}, fmt.Errorf("expand non-interactive args: %w", err)
 	}
+
 	expandedArgs = append(nonInteractiveArgs, expandedArgs...)
 
 	driverKind := DriverPTY

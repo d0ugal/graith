@@ -70,7 +70,31 @@ func cleanupLegacyDaemonDirs(
 
 // Run starts the daemon: acquires PID file, listens on the Unix socket,
 // serves connections, and blocks until SIGTERM/SIGINT or an upgrade signal.
-func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) error {
+func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) (runErr error) {
+	var manifest *UpgradeManifest
+
+	cleanupPending := false
+
+	if adoptFrom != "" {
+		var err error
+
+		manifest, err = ReadManifest(adoptFrom)
+		if err != nil {
+			return fmt.Errorf("read upgrade manifest: %w", err)
+		}
+
+		cleanupPending = true
+		defer func() {
+			if !cleanupPending {
+				return
+			}
+
+			if err := cleanupUpgradeProcesses(manifest, cfg.Lifecycle.ProcessKillGraceDuration()); err != nil {
+				runErr = errors.Join(runErr, fmt.Errorf("clean up inherited sessions after replacement-daemon failure: %w", err))
+			}
+		}()
+	}
+
 	if err := paths.EnsureDirs(); err != nil {
 		return err
 	}
@@ -125,11 +149,6 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 	var l net.Listener
 
 	if adoptFrom != "" {
-		manifest, err := ReadManifest(adoptFrom)
-		if err != nil {
-			return fmt.Errorf("read upgrade manifest: %w", err)
-		}
-
 		_ = os.Remove(adoptFrom)
 
 		if manifest.Profile != paths.Profile {
@@ -157,6 +176,11 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) e
 			_ = l.Close()
 			return fmt.Errorf("initialize human authentication: %w", err)
 		}
+
+		// AdoptSessions now owns every manifest process and inherited PTY; stop
+		// the outer fallback before handing it raw fds so a failed adoption
+		// cannot make the defer close an fd number that has since been reused.
+		cleanupPending = false
 
 		if err := sm.AdoptSessions(manifest); err != nil {
 			_ = l.Close()
