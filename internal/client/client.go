@@ -249,6 +249,7 @@ func requestUpgrade(c *Client) error {
 	if preflight.Type != "upgrade_preflight_ok" {
 		return errors.New("daemon rejected upgrade preflight")
 	}
+
 	if err := c.SendControl("upgrade", msg); err != nil {
 		return errors.New("send confirmed upgrade request")
 	}

@@ -73,7 +73,7 @@ func AdoptScrollback(fd uintptr, path string, maxSize int64) (*Scrollback, error
 
 	return &Scrollback{
 		file: f, path: path,
-		dev: uint64(descriptor.Dev), ino: descriptor.Ino, //nolint:gosec // G115: opaque kernel device identity
+		dev: uint64(descriptor.Dev), ino: descriptor.Ino, //nolint:gosec,unconvert,nolintlint // G115/unconvert are platform-exclusive because Dev is signed on Darwin and unsigned on Linux.
 		maxSize: maxSize, written: descriptor.Size, log: slog.Default(),
 	}, nil
 }
@@ -100,7 +100,7 @@ func NewScrollback(path string, maxSize int64) (*Scrollback, error) {
 
 	return &Scrollback{
 		file: f, path: path,
-		dev: uint64(descriptor.Dev), ino: descriptor.Ino, //nolint:gosec // G115: opaque kernel device identity
+		dev: uint64(descriptor.Dev), ino: descriptor.Ino, //nolint:gosec,unconvert,nolintlint // G115/unconvert are platform-exclusive because Dev is signed on Darwin and unsigned on Linux.
 		maxSize: maxSize, written: descriptor.Size, log: slog.Default(),
 	}, nil
 }
@@ -359,7 +359,7 @@ func (s *Scrollback) Remove() error {
 	}
 
 	if pathname.Mode&unix.S_IFMT != unix.S_IFREG ||
-		uint64(pathname.Dev) != s.dev || pathname.Ino != s.ino { //nolint:gosec // G115: opaque kernel device identity
+		uint64(pathname.Dev) != s.dev || pathname.Ino != s.ino { //nolint:gosec,unconvert,nolintlint // G115/unconvert are platform-exclusive because Dev is signed on Darwin and unsigned on Linux.
 		return errors.New("scrollback pathname identity changed")
 	}
 

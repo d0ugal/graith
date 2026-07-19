@@ -131,6 +131,7 @@ func setupUpgradeTest(t *testing.T) *fakeConnClock {
 	origCfg, origNow, origSleep := cfg, connectionNow, connectionSleep
 	origDial, origProbe, origOut, origPaths := dialUpgradeClient, probeDaemonIdentityFn, out, paths
 	origNegotiationFloor, origReadinessFloor := upgradeNegotiationFloor, upgradeReadinessFloor
+
 	t.Cleanup(func() {
 		cfg, connectionNow, connectionSleep = origCfg, origNow, origSleep
 		dialUpgradeClient, probeDaemonIdentityFn, out, paths = origDial, origProbe, origOut, origPaths
@@ -414,6 +415,7 @@ func TestRestartPreserveNeverFallsBackAfterUnconfirmedPeerExit(t *testing.T) {
 
 		return "", ""
 	}
+
 	err := restartDaemonPreservingSessions(func() error {
 		cleanStartCalled = true
 

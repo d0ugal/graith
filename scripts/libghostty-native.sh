@@ -171,14 +171,20 @@ run_go() {
             ;;
         fuzz)
             verify_metadata
-            local fuzztime="${GRAITH_LIBGHOSTTY_FUZZTIME:-10s}"
+            local fuzztime="${GRAITH_LIBGHOSTTY_FUZZTIME:-}"
+            # Fixed budgets avoid the wall-clock deadline path affected by
+            # golang/go#75804. Snapshot CI reached 494,054 executions; local
+            # request/helper calibration reached 789,507-829,186 and 341-747.
+            local snapshot_fuzztime="${fuzztime:-500000x}"
+            local request_fuzztime="${fuzztime:-830000x}"
+            local helper_fuzztime="${fuzztime:-750x}"
             local parallel="${GRAITH_LIBGHOSTTY_FUZZ_PARALLEL:-4}"
             go test -tags=libghostty ./internal/pty -run '^$' -parallel="$parallel" \
-                -fuzz '^FuzzGhosttySnapshotDecoder$' -fuzztime="$fuzztime"
+                -fuzz '^FuzzGhosttySnapshotDecoder$' -fuzztime="$snapshot_fuzztime"
             go test -tags=libghostty ./internal/pty -run '^$' -parallel="$parallel" \
-                -fuzz '^FuzzGhosttyRequestDecoder$' -fuzztime="$fuzztime"
+                -fuzz '^FuzzGhosttyRequestDecoder$' -fuzztime="$request_fuzztime"
             go test -tags=libghostty ./internal/pty -run '^$' -parallel="$parallel" \
-                -fuzz '^FuzzGhosttyHelperWrite$' -fuzztime="$fuzztime"
+                -fuzz '^FuzzGhosttyHelperWrite$' -fuzztime="$helper_fuzztime"
             ;;
         bench)
             go test -run '^$' -tags=libghostty ./internal/pty \

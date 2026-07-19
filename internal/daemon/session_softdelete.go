@@ -410,10 +410,12 @@ func (sm *SessionManager) RestoreWithChildren(rootID string) ([]SessionState, er
 		}
 
 		originals[id] = cloneSessionState(sess)
+
 		s, err := sm.restoreLocked(id)
 		if err != nil {
 			delete(originals, id)
 			sm.log.Warn("restore of descendant failed", "id", id, "err", err)
+
 			continue
 		}
 

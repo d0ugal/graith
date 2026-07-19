@@ -46,6 +46,7 @@ var daemonStartCmd = &cobra.Command{
 		if adoptFrom != "" {
 			return daemon.RunAdoptBootstrap(cfgFile, adoptFrom)
 		}
+
 		return daemon.Run(cfg, paths, cfgFile, adoptFrom)
 	},
 }

@@ -101,6 +101,7 @@ func TestRunControlLoopKeepsServingAfterUpgradeError(t *testing.T) {
 			}
 
 			callback <- struct{}{}
+
 			return wantErr
 		})
 	}()

@@ -292,6 +292,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 
 		return nil, fmt.Errorf("adopt scrollback: %w", err)
 	}
+
 	sb.SetLogger(log)
 
 	startTime, stErr := ProcessStartTime(opts.PID)
@@ -322,6 +323,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 	if factory == nil {
 		factory = newTerminal
 	}
+
 	if stErr != nil {
 		log.Warn("could not capture process start time for adopted session; PID reuse detection degraded",
 			"session", opts.ID, "pid", opts.PID, "error", stErr)
@@ -670,6 +672,7 @@ func (s *Session) readLoop() {
 	defer close(s.readDone)
 
 	buf := make([]byte, 32*1024)
+
 	for {
 		if !s.upgradeReadSafePoint() {
 			return
@@ -713,10 +716,13 @@ func (s *Session) readLoop() {
 			s.mu.RUnlock()
 			return
 		}
+
 		n, err := s.Ptmx.Read(buf)
 		s.mu.RUnlock()
+
 		if n > 0 {
 			chunk := buf[:n]
+
 			s.mu.Lock()
 
 			written, appendErr := s.Scrollback.Write(chunk)
@@ -727,6 +733,7 @@ func (s *Session) readLoop() {
 			if s.afterScrollbackAppend != nil {
 				s.afterScrollbackAppend()
 			}
+
 			screenErr := s.writeScreenLocked(chunk)
 			s.lastOutputAt = time.Now()
 			first := s.bytesRead == 0
@@ -1578,6 +1585,7 @@ func (s *Session) WaitForUserIdleContext(ctx context.Context, idleTimeout, maxWa
 		if ctx.Err() != nil {
 			return false
 		}
+
 		s.mu.RLock()
 		exited := s.exited
 		s.mu.RUnlock()
