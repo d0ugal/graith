@@ -32,7 +32,11 @@ quiet_hours_start = "22:00"    # suppress low/normal pushes in this window (24h 
 quiet_hours_end   = "07:00"    # window may wrap past midnight; high priority bypasses
 ```
 
-When `command` is set, graith runs it via `sh -c` instead of the system notification API. Status-change notifications pass `GRAITH_SESSION_NAME`, `GRAITH_STATUS`, and `GRAITH_MESSAGE`; `gr notify` push notifications (`backend = "command"`) pass `GRAITH_NOTIFY_TITLE`, `GRAITH_NOTIFY_MESSAGE`, and `GRAITH_NOTIFY_PRIORITY`.
+When `command` is set, status-change notifications run it via `sh -c` instead
+of the system notification API and pass `GRAITH_SESSION_NAME`, `GRAITH_STATUS`,
+and `GRAITH_MESSAGE`. `gr notify` push notifications use the command only when
+`backend = "command"`; they pass `GRAITH_NOTIFY_TITLE`,
+`GRAITH_NOTIFY_MESSAGE`, and `GRAITH_NOTIFY_PRIORITY`.
 
 ### Proactive push notifications (`gr notify`)
 
@@ -52,13 +56,16 @@ sessions are rejected to prevent spam. Identical notifications within the
 [coalesce window](#timing) (30s by default) are coalesced. Other backends (ntfy,
 Pushover, Slack) are planned.
 
-#### The `macos` backend
+#### Native macOS notifications
 
-The `macos` backend prefers a small bundled helper app (`GraithNotifier.app`,
+Both default session-status notifications (such as `on_stopped`) and the
+`macos` push backend prefer a small bundled helper app (`GraithNotifier.app`,
 bundle identifier `com.graith.notifier`) that posts via
-`UNUserNotificationCenter`. graith then appears as **"Graith"** in *System
-Settings > Notifications*, so you can configure its style, sounds, and
-Do-Not-Disturb like any other app.
+`UNUserNotificationCenter`. They therefore appear as **"Graith"** in *System
+Settings > Notifications*, where you can configure their style, sounds, and
+Do-Not-Disturb behavior like any other app. Stable and `graith-dev` Homebrew
+installations install this helper automatically on macOS; Linux packages do not
+contain it.
 
 Build the helper with `make notifier` (macOS only — a no-op on Linux) and place
 the resulting `macos/build/GraithNotifier.app` where graith can find it:
@@ -66,7 +73,8 @@ alongside the `gr` binary, under `<prefix>/libexec/graith/` or
 `<prefix>/share/graith/`, in `/Applications`, or in `~/Applications`. Set
 `GRAITH_NOTIFIER_APP` to override the location.
 
-If the helper isn't installed — or won't launch — graith falls back to
+If the helper isn't installed — or won't launch — both default status and push
+notifications fall back to
 `osascript`, whose notifications work but appear under "Script Editor" and can't
 be configured per-app — the reason the helper exists. One exception: if you've
 explicitly turned off notifications for "Graith" in System Settings, graith

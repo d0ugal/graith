@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/tools"
 )
 
@@ -310,12 +311,20 @@ func (sm *SessionManager) sendNotification(sessionName, status, command string) 
 		return
 	}
 
-	if runtime.GOOS == "darwin" {
-		script := fmt.Sprintf(`display notification %q with title %q`, message, title)
-		go func() {
-			if err := exec.Command(tools.OSAScript(), "-e", script).Run(); err != nil {
-				sm.log.Error("osascript notification failed", "err", err)
-			}
-		}()
+	dispatch := sm.statusDispatch
+	if dispatch == nil {
+		if runtime.GOOS != "darwin" {
+			return
+		}
+
+		dispatch = dispatchMacNotification
 	}
+
+	timeout := sm.Config().Notifications.Timing.DispatchTimeoutDuration()
+
+	go func() {
+		if err := dispatch(title, message, config.NotifyPriorityNormal, timeout); err != nil {
+			sm.log.Error("desktop notification failed", "err", err)
+		}
+	}()
 }

@@ -279,8 +279,24 @@ func dispatchMacNotification(title, message, priority string, timeout time.Durat
 		return fmt.Errorf("macos backend requires macOS (running on %s)", runtime.GOOS)
 	}
 
-	if exe, ok := findMacNotifierApp(); ok {
-		err := dispatchViaNotifierApp(exe, title, message, priority, timeout)
+	return dispatchMacNotificationWith(
+		title, message, priority, timeout,
+		findMacNotifierApp, dispatchViaNotifierApp, dispatchViaOsascript,
+	)
+}
+
+// dispatchMacNotificationWith contains the helper-first/fallback policy behind
+// dispatchMacNotification. Its dependencies are explicit so the permission
+// boundary can be tested on every host OS without launching macOS tools.
+func dispatchMacNotificationWith(
+	title, message, priority string,
+	timeout time.Duration,
+	findNotifier func() (string, bool),
+	dispatchNotifier func(string, string, string, string, time.Duration) error,
+	dispatchFallback func(string, string, string, time.Duration) error,
+) error {
+	if exe, ok := findNotifier(); ok {
+		err := dispatchNotifier(exe, title, message, priority, timeout)
 		if err == nil {
 			return nil
 		}
@@ -297,7 +313,7 @@ func dispatchMacNotification(title, message, priority string, timeout time.Durat
 		// notification still reaches the user.
 	}
 
-	return dispatchViaOsascript(title, message, priority, timeout)
+	return dispatchFallback(title, message, priority, timeout)
 }
 
 // macNotifierExecutable is the path, relative to the .app bundle root, of the

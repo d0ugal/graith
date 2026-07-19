@@ -415,7 +415,8 @@ ttl = "5m"  # how long a `gr status` value stays current before it expires
 [notifications]
 enabled = true      # master switch for status-change and push notifications
 # backend selects how `gr notify` push notifications are delivered:
-#   "macos"   osascript desktop notification (default; high priority plays a sound)
+#   "macos"   GraithNotifier.app desktop notification, with osascript fallback
+#             (default; high priority plays a sound)
 #   "command" run the [notifications] command with GRAITH_NOTIFY_{TITLE,MESSAGE,PRIORITY}
 # (ntfy/pushover/slack backends are planned follow-ups.)
 backend = "macos"

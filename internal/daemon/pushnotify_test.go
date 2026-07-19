@@ -495,6 +495,40 @@ func TestDispatchViaNotifierApp_DeniedExitCode(t *testing.T) {
 	}
 }
 
+func TestDispatchMacNotificationWith_PermissionDeniedDoesNotFallback(t *testing.T) {
+	notifierCalled := false
+	fallbackCalled := false
+
+	err := dispatchMacNotificationWith(
+		"Braw title", "canny message", config.NotifyPriorityNormal, 73*time.Millisecond,
+		func() (string, bool) { return "/bothy/GraithNotifier.app/graith-notifier", true },
+		func(exe, title, message, priority string, timeout time.Duration) error {
+			notifierCalled = true
+
+			if exe != "/bothy/GraithNotifier.app/graith-notifier" || title != "Braw title" || message != "canny message" || priority != config.NotifyPriorityNormal || timeout != 73*time.Millisecond {
+				t.Fatalf("unexpected notifier dispatch: exe=%q title=%q message=%q priority=%q timeout=%s", exe, title, message, priority, timeout)
+			}
+
+			return errNotifierPermissionDenied
+		},
+		func(_, _, _ string, _ time.Duration) error {
+			fallbackCalled = true
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("an explicit denial should be honoured as suppression, got %v", err)
+	}
+
+	if !notifierCalled {
+		t.Fatal("native notifier was not called")
+	}
+
+	if fallbackCalled {
+		t.Fatal("explicit Graith notification denial must not fall back to osascript")
+	}
+}
+
 func TestDispatchViaNotifierApp_GenericFailure(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	stub := notifierStub(t, 1, argsFile)

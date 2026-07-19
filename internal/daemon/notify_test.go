@@ -12,6 +12,7 @@ import (
 )
 
 func TestOnAgentStatusChange_DisabledNotifications(t *testing.T) {
+	dispatched := make(chan struct{}, 1)
 	sm := &SessionManager{
 		cfg: &config.Config{
 			Notifications: config.Notifications{
@@ -19,13 +20,68 @@ func TestOnAgentStatusChange_DisabledNotifications(t *testing.T) {
 			},
 		},
 		log: slog.Default(),
+		statusDispatch: func(_, _, _ string, _ time.Duration) error {
+			dispatched <- struct{}{}
+			return nil
+		},
 	}
 
 	sm.onAgentStatusChange("braw-id", "bonnie-session", "active", "stopped")
+
+	select {
+	case <-dispatched:
+		t.Fatal("disabled notifications must not reach any desktop dispatch")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestOnAgentStatusChange_DefaultUsesNativeDispatchAndConfiguredTimeout(t *testing.T) {
+	type dispatchCall struct {
+		title    string
+		message  string
+		priority string
+		timeout  time.Duration
+	}
+
+	calls := make(chan dispatchCall, 1)
+	sm := &SessionManager{
+		cfg: &config.Config{
+			Notifications: config.Notifications{
+				Enabled:   true,
+				OnStopped: true,
+				Timing: config.NotificationTiming{
+					DispatchTimeout: "37ms",
+				},
+			},
+		},
+		log: slog.Default(),
+		statusDispatch: func(title, message, priority string, timeout time.Duration) error {
+			calls <- dispatchCall{title: title, message: message, priority: priority, timeout: timeout}
+			return nil
+		},
+	}
+
+	sm.onAgentStatusChange("canny-id", "canny-session", "active", "stopped")
+
+	select {
+	case got := <-calls:
+		want := dispatchCall{
+			title:    "graith",
+			message:  "canny-session has stopped",
+			priority: config.NotifyPriorityNormal,
+			timeout:  37 * time.Millisecond,
+		}
+		if got != want {
+			t.Fatalf("dispatch = %#v, want %#v", got, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for native status notification dispatch")
+	}
 }
 
 func TestSendNotification_CommandUsesEnvVars(t *testing.T) {
 	outFile := filepath.Join(t.TempDir(), "out.txt")
+	nativeDispatch := make(chan struct{}, 1)
 
 	sm := &SessionManager{
 		cfg: &config.Config{
@@ -36,6 +92,10 @@ func TestSendNotification_CommandUsesEnvVars(t *testing.T) {
 			},
 		},
 		log: slog.Default(),
+		statusDispatch: func(_, _, _ string, _ time.Duration) error {
+			nativeDispatch <- struct{}{}
+			return nil
+		},
 	}
 
 	sm.sendNotification("braw-kirk", "stopped", sm.cfg.Notifications.Command)
@@ -50,6 +110,12 @@ func TestSendNotification_CommandUsesEnvVars(t *testing.T) {
 			want := "braw-kirk|stopped|braw-kirk has stopped"
 			if got != want {
 				t.Errorf("got %q, want %q", got, want)
+			}
+
+			select {
+			case <-nativeDispatch:
+				t.Fatal("custom command must replace the native status dispatch")
+			default:
 			}
 
 			return
