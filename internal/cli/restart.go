@@ -64,6 +64,7 @@ var restartCmd = &cobra.Command{
 		var info protocol.SessionInfo
 
 		_ = protocol.DecodePayload(resp, &info)
+		warnUnsandboxedStart(info)
 
 		if jsonOutput {
 			return out.JSON(info)

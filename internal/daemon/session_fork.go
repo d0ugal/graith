@@ -156,11 +156,6 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
 	}
 
-	if agent.NonInteractiveArgs == nil {
-		sm.mu.Unlock()
-		return SessionState{}, fmt.Errorf("agent %q has no non_interactive_args; refusing to start an agent that may prompt for permission", agentName)
-	}
-
 	if crossAgent {
 		// The source's conversation must be readable to seed the new agent.
 		// (targetModel was validated pre-lock to avoid exec under sm.mu.)
@@ -746,6 +741,10 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		"id", id, "name", name, "agent", agentName, "forked", true,
 		"pid", result.PID, "pgid", ptySess.Pgid(), "sandboxed", sandboxed,
 		"scrollback_path", logPath)
+
+	if !sandboxed {
+		sm.logUnsandboxedStart(id, name, agentName)
+	}
 
 	sm.startWatcher(id, ptySess)
 

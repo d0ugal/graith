@@ -27,8 +27,8 @@ func TestLocalmostDecisionSemantics(t *testing.T) {
 	}{
 		{name: "allow", output: `{"hookSpecificOutput":{"permissionDecision":"allow","permissionDecisionReason":"braw"}}`, want: DecisionAllow, reason: "braw"},
 		{name: "deny", output: `{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"dreich"}}`, want: DecisionDeny, reason: "dreich"},
-		{name: "ask fails closed", output: `{"hookSpecificOutput":{"permissionDecision":"ask"}}`, want: DecisionDeny, reason: "non-interactive"},
-		{name: "defer fails closed", output: `{"decision":"defer"}`, want: DecisionDeny, reason: "non-interactive"},
+		{name: "ask fails closed", output: `{"hookSpecificOutput":{"permissionDecision":"ask"}}`, want: DecisionDeny, reason: "no human decision path"},
+		{name: "defer fails closed", output: `{"decision":"defer"}`, want: DecisionDeny, reason: "no human decision path"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

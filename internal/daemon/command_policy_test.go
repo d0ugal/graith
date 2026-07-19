@@ -55,7 +55,7 @@ func TestCheckCommandPolicyIsSynchronousAndFailClosed(t *testing.T) {
 	}
 }
 
-func TestCheckCommandPolicyDisabledContinuesToSandbox(t *testing.T) {
+func TestCheckCommandPolicyDisabledContinuesNormalExecution(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.Default()
@@ -67,6 +67,34 @@ func TestCheckCommandPolicyDisabledContinuesToSandbox(t *testing.T) {
 	})
 	if got.Decision != "allow" {
 		t.Fatalf("decision = %q, want allow", got.Decision)
+	}
+}
+
+func TestConfiguredCommandPolicyIsIndependentOfSandboxAndNativePrompts(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	cfg.Sandbox.Enabled = false
+	cfg.CommandPolicy = config.CommandPolicy{
+		Backend: "builtin", Builtin: config.CommandPolicyBuiltin{Allow: []any{"@*"}, Deny: []any{"gh api @*"}},
+	}
+	agent := cfg.Agents["codex"]
+	agent.NonInteractiveArgs = nil
+	cfg.Agents["codex"] = agent
+
+	sm := NewSessionManager(cfg, config.Paths{DataDir: t.TempDir()}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := sm.validateCommandPolicy("codex"); err != nil {
+		t.Fatalf("validateCommandPolicy with sandbox off and native prompts on: %v", err)
+	}
+
+	sm.state.Sessions["braw"] = &SessionState{ID: "braw", Name: "braw", Agent: "codex"}
+
+	got := sm.CheckCommandPolicy(context.Background(), protocol.CommandPolicyCheckMsg{
+		SessionID: "braw", ToolName: "Bash", ToolInput: `{"command":"gh api -X POST repos/ken/bothy/issues"}`,
+	})
+
+	if got.Decision != "deny" {
+		t.Fatalf("decision = %+v, want deny", got)
 	}
 }
 

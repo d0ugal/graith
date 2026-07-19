@@ -11,9 +11,12 @@ The orchestrator is a special system session that coordinates other agent sessio
 
 ## Prerequisites
 
-Like every agent session, the orchestrator requires sandbox enforcement. If the
-selected backend is unavailable or the merged configuration disables it,
-orchestrator creation fails with an error.
+The orchestrator uses the same independent sandbox, native-prompt, and command-
+policy settings as ordinary sessions. The default sandbox is strongly
+recommended because the orchestrator can create and control descendants. If an
+enabled backend or configured command policy is unavailable, creation fails;
+an explicitly disabled sandbox is allowed with the normal startup warning and
+`gr doctor` diagnostic.
 
 ## Enabling
 

@@ -26,16 +26,18 @@ Restart the daemon, preserving live sessions via exec.
 | `--force` | Clean stop/start that kills running sessions |
 
 After rebuilding `gr`, run `gr daemon restart` to pick up the new daemon binary.
-Crossing from the approval-era protocol to the sandbox-only protocol is an
+Crossing from the approval-era protocol to the non-interactive Graith protocol is an
 intentional breaking restart: graith gracefully stops the old daemon and all of
 its PTY and headless sessions instead of asking that daemon to preserve them.
 It verifies the exact old socket peer has exited and its socket has disappeared
 before starting the replacement; if either check fails, no competing daemon is
 started. Resume stopped sessions to relaunch them under the new security model.
-Live adoption is allowed only when persisted launch state proves the process was
-OS-sandboxed and started with native permission prompting disabled. Sessions
-from releases before the sandbox-only security model are terminated and marked
-stopped during upgrade; resume them to launch under the current enforcement.
+Live adoption is allowed only when persisted state and the handoff manifest
+prove the exact process identity. Whether that process uses Graith's sandbox or
+the agent's native approval TUI is preserved rather than treated as an adoption
+requirement. Sessions from releases before this security-model transition are
+terminated and marked stopped during upgrade; resume them to launch under the
+current configuration.
 Headless sessions have no adoptable PTY and are likewise identity-checked,
 terminated, and marked stopped instead of being left unmanaged.
 The handoff manifest records every live process, not just transferable PTYs.

@@ -87,7 +87,7 @@ const (
 // preference, not a demand.
 //
 // Headless requires the experimental gate and an explicitly capable agent. It
-// runs inside the same mandatory outer sandbox as PTY sessions.
+// uses the same optional Graith sandbox setting as PTY sessions.
 func resolveDriverKind(explicit bool, agent config.Agent, hc config.HeadlessConfig, _ bool) (string, error) {
 	if !explicit && !hc.Default {
 		return DriverPTY, nil
@@ -120,9 +120,10 @@ func resolveDriverKind(explicit bool, agent config.Agent, hc config.HeadlessConf
 //
 // --input-format stream-json turns stdin into the message/control channel:
 // graith delivers the prompt as an initial user message (not a positional arg),
-// issues `interrupt` control requests. Native permission prompting is disabled
-// separately by non_interactive_args. The CLI still runs
-// one turn to a terminal result; graith closes stdin on that result so the
+// issues `interrupt` control requests. A bundled non_interactive_args prefix
+// normally prevents native prompts; if one arrives, the headless driver must
+// deny it because there is no TUI in which a human can respond. The CLI still
+// runs one turn to a terminal result; graith closes stdin on that result so the
 // process exits (one-shot semantics preserved). agentArgs carries the agent's
 // own template-expanded args (e.g. --session-id <id>) and follows the prefix.
 // The Claude defaults are pinned to what was verified against claude 2.1.211

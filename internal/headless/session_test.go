@@ -518,7 +518,7 @@ func TestEndToEndExitCode(t *testing.T) {
 	}
 }
 
-func TestUnexpectedNativePermissionPromptIsDeniedAndDiagnosable(t *testing.T) {
+func TestHeadlessNativePermissionPromptIsDeniedAndDiagnosable(t *testing.T) {
 	t.Parallel()
 
 	script := `printf '%s\n' '{"type":"control_request","request_id":"ctl-9","request":{"subtype":"can_use_tool","tool_name":"Bash"}}'; IFS= read -r line; printf 'RESP %s\n' "$line"`
@@ -530,12 +530,12 @@ func TestUnexpectedNativePermissionPromptIsDeniedAndDiagnosable(t *testing.T) {
 		t.Fatalf("expected a deny control_response in scrollback:\n%s", preview)
 	}
 
-	if !strings.Contains(preview, "unexpected native permission prompt") {
+	if !strings.Contains(preview, "headless session cannot service a native permission prompt") {
 		t.Fatalf("expected a diagnostic in scrollback:\n%s", preview)
 	}
 
 	if !s.Snapshot().Degraded {
-		t.Fatal("unexpected permission prompt must mark the session degraded")
+		t.Fatal("unserviceable permission prompt must mark the session degraded")
 	}
 }
 

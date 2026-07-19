@@ -270,8 +270,9 @@ func (s *Session) handleLine(line []byte) {
 	}
 }
 
-// handlePermission diagnoses and immediately denies an unexpected native
-// permission prompt. It never enters a workflow state or waits for a human.
+// handlePermission diagnoses and immediately denies a native permission prompt.
+// Headless sessions have no agent TUI in which a user could respond, so they
+// never enter a workflow state or wait for a human.
 //
 // The reply shape is the nested control_response form verified against claude
 // 2.1.211: the protocol-level subtype ("success") and request_id wrap an inner
@@ -287,11 +288,11 @@ func (s *Session) handlePermission(ev event) {
 	}
 
 	s.markDegraded()
-	s.scrollbackBanner("[graith] unexpected native permission prompt; check the agent's non_interactive_args")
+	s.scrollbackBanner("[graith] headless session cannot service a native permission prompt; request denied")
 
 	inner := map[string]any{
 		"behavior": "deny",
-		"message":  "graith requires non-interactive agents; native permission prompt denied",
+		"message":  "headless session cannot service native permission prompts; request denied",
 	}
 
 	resp := map[string]any{

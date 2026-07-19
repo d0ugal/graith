@@ -643,9 +643,9 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	cfg := sm.Config()
 	repoRoots := make([]string, len(msg.Sessions))
 
-	// Validate agents, sandbox enforcement, and explicitly supplied repos before
-	// reserving anything. Mirrored members have no repo path to validate: their
-	// effective repo/worktree is derived from the target during reservation.
+	// Validate agents, mirror sandbox enforcement, and explicitly supplied repos
+	// before reserving anything. Mirrored members have no repo path to validate:
+	// their effective repo/worktree is derived from the target during reservation.
 	for i, s := range msg.Sessions {
 		agentName := s.Agent
 		if agentName == "" {

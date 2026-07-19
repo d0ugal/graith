@@ -9,7 +9,7 @@ draft: false
 
 ## Headless sessions
 
-**Experimental.** A headless session runs the agent in Claude Code's stream-json mode instead of an interactive PTY — for fire-and-forget work such as review judges and one-shot helpers. graith parses the typed event stream, so `gr logs -f` renders it and the run's cost/token usage is captured from the result envelope. v1 is Claude-only, one-shot, requires a prompt, and runs inside the same mandatory OS sandbox as a PTY session.
+**Experimental.** A headless session runs the agent in Claude Code's stream-json mode instead of an interactive PTY — for fire-and-forget work such as review judges and one-shot helpers. graith parses the typed event stream, so `gr logs -f` renders it and the run's cost/token usage is captured from the result envelope. v1 is Claude-only, one-shot, requires a prompt, and uses the same optional Graith sandbox setting as a PTY session.
 
 ```toml
 [headless]
@@ -34,9 +34,9 @@ The remaining keys are processing limits that rarely need tuning. `max_line_byte
 
 A headless session drives Claude Code over its stdin control protocol, giving
 graith a clean interrupt. Native permission requests are denied immediately and
-reported as runtime errors; there is no human-response path. Optional
-`[command_policy]` rules synchronously restrict shell commands before the OS
-sandbox enforces its filesystem, process, signal, and network policy. See
+mark the driver degraded; there is no human-response path. Optional
+`[command_policy]` rules synchronously restrict shell commands before normal
+agent execution, independently of whether Graith's sandbox is enabled. See
 [Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}}).
 
 ## Delete retention

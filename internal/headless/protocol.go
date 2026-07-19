@@ -82,7 +82,8 @@ type controlResponse struct {
 }
 
 // canUseToolRequest is retained only to fail closed on an unexpected native
-// permission prompt; supported launches disable these prompts.
+// permission prompt. A headless session has no native TUI in which a user can
+// respond, so the driver diagnoses and denies it synchronously.
 type canUseToolRequest struct {
 	Subtype  string          `json:"subtype"`
 	ToolName string          `json:"tool_name"`

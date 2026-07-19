@@ -55,10 +55,6 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
 	}
 
-	if agent.NonInteractiveArgs == nil {
-		return SessionState{}, fmt.Errorf("agent %q has no non_interactive_args; refusing to start an agent that may prompt for permission", agentName)
-	}
-
 	if !skipModelValidation {
 		if err := validateModel(agent, model); err != nil {
 			return SessionState{}, err
@@ -1007,6 +1003,10 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		"id", id, "name", name, "agent", agentName,
 		"pid", result.PID, "pgid", ptySess.Pgid(), "sandboxed", sandboxed,
 		"scrollback_path", logPath)
+
+	if !sandboxed {
+		sm.logUnsandboxedStart(id, name, agentName)
+	}
 
 	sm.startWatcher(id, ptySess)
 

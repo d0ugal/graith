@@ -974,6 +974,16 @@ func TestMergeAgent(t *testing.T) {
 		}
 	})
 
+	t.Run("explicit empty non_interactive_args keeps native prompts", func(t *testing.T) {
+		withUnattendedDefault := def
+		withUnattendedDefault.NonInteractiveArgs = []string{"--unattended"}
+
+		got := mergeAgent(withUnattendedDefault, Agent{NonInteractiveArgs: []string{}})
+		if got.NonInteractiveArgs == nil || len(got.NonInteractiveArgs) != 0 {
+			t.Fatalf("NonInteractiveArgs = %#v, want explicit empty slice", got.NonInteractiveArgs)
+		}
+	})
+
 	t.Run("sandbox override", func(t *testing.T) {
 		usr := Agent{Sandbox: SandboxConfig{Enabled: true, Features: []string{"ssh"}}}
 
