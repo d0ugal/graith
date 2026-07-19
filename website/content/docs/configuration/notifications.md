@@ -26,7 +26,7 @@ on_stopped = false  # notify when a session stops
 command    = ""     # custom notification command (optional)
 
 # Proactive `gr notify` push notifications:
-backend           = "macos"   # "macos" (helper app, falls back to osascript) or "command"; default "macos"
+backend           = "macos"   # "macos" (required helper app) or "command"; default "macos"
 max_per_hour      = 12         # rolling-hour cap on low/normal pushes (high bypasses)
 quiet_hours_start = "22:00"    # suppress low/normal pushes in this window (24h "HH:MM")
 quiet_hours_end   = "07:00"    # window may wrap past midnight; high priority bypasses
@@ -73,12 +73,11 @@ alongside the `gr` binary, under `<prefix>/libexec/graith/` or
 `<prefix>/share/graith/`, in `/Applications`, or in `~/Applications`. Set
 `GRAITH_NOTIFIER_APP` to override the location.
 
-If the helper isn't installed — or won't launch — both default status and push
-notifications fall back to
-`osascript`, whose notifications work but appear under "Script Editor" and can't
-be configured per-app — the reason the helper exists. One exception: if you've
-explicitly turned off notifications for "Graith" in System Settings, graith
-honours that and does **not** route around it via `osascript`.
+The helper is required for native macOS delivery. If it isn't installed or
+can't launch, the dispatch fails and graith logs/reports the failure; it does
+not route the notification through another application. If you've explicitly
+turned off notifications for "Graith" in System Settings, graith honours that
+choice as a suppressed notification.
 
 Triggers can fire a notification when their action completes:
 
@@ -101,7 +100,7 @@ defaults below.
 ```toml
 [notifications.timing]
 coalesce_window      = "30s"   # drop an identical push within this window ("0" disables coalescing)
-dispatch_timeout     = "15s"   # per-backend dispatch timeout (osascript / helper app / command)
+dispatch_timeout     = "15s"   # per-backend dispatch timeout (helper app / command)
 inbox_idle_timeout   = "10s"   # wait before inbox notifications or `gr type` inject into an attached PTY
 inbox_max_wait       = "2m"    # cap that user-idle wait before injecting anyway
 inbox_cooldown       = "30s"   # minimum interval between unread-inbox nudges to one session ("0" disables)

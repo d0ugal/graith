@@ -1,8 +1,7 @@
 // Package tools resolves the external executables graith shells out to: git,
-// gh, gcx, the notification shell, osascript, ps, and lsof. Historically these names
-// and paths were hard-coded ("git", "gh", "sh", "osascript", "/bin/ps",
-// "/usr/sbin/lsof"), which broke Nix/custom-PATH installs, wrapper binaries, and
-// alternate shells (issue #1238).
+// gh, gcx, the notification shell, ps, and lsof. Historically these names and
+// paths were hard-coded, which broke Nix/custom-PATH installs, wrapper binaries,
+// and alternate shells (issue #1238).
 //
 // A single process-wide resolver holds the effective set. The daemon and the
 // stateless CLI configure it once at startup from the [tools] config block;
@@ -29,26 +28,23 @@ import (
 // a specific binary ("/run/current-system/sw/bin/git"). An empty field inherits
 // the built-in default from Defaults.
 type Config struct {
-	Git       string
-	GH        string
-	GCX       string
-	Shell     string
-	OSAScript string
-	PS        string
-	Lsof      string
+	Git   string
+	GH    string
+	GCX   string
+	Shell string
+	PS    string
+	Lsof  string
 }
 
-// Defaults returns the built-in executable set, preserving the names and paths
-// graith used before they became configurable.
+// Defaults returns the built-in executable names and paths.
 func Defaults() Config {
 	return Config{
-		Git:       "git",
-		GH:        "gh",
-		GCX:       "gcx",
-		Shell:     "sh",
-		OSAScript: "osascript",
-		PS:        "/bin/ps",
-		Lsof:      "/usr/sbin/lsof",
+		Git:   "git",
+		GH:    "gh",
+		GCX:   "gcx",
+		Shell: "sh",
+		PS:    "/bin/ps",
+		Lsof:  "/usr/sbin/lsof",
 	}
 }
 
@@ -71,10 +67,6 @@ func merge(c Config) Config {
 
 	if c.Shell == "" {
 		c.Shell = d.Shell
-	}
-
-	if c.OSAScript == "" {
-		c.OSAScript = d.OSAScript
 	}
 
 	if c.PS == "" {
@@ -129,9 +121,6 @@ func GCX() string { return get().GCX }
 // commands (invoked as `<shell> -c <command>`).
 func Shell() string { return get().Shell }
 
-// OSAScript returns the configured osascript executable (macOS notifications).
-func OSAScript() string { return get().OSAScript }
-
 // PS returns the configured process-listing executable.
 func PS() string { return get().PS }
 
@@ -140,9 +129,8 @@ func Lsof() string { return get().Lsof }
 
 // Validate checks that every explicitly-set field of c is resolvable, so a
 // misconfigured tool fails loudly at startup rather than at the first git fetch
-// or notification. Empty fields are skipped: a default bare name (e.g.
-// "osascript" on Linux) must retain plain PATH-lookup semantics and is not an
-// error until actually used.
+// or notification. Empty fields are skipped so defaults retain plain PATH-lookup
+// semantics and are not errors until actually used.
 //
 // A value containing a path separator (absolute or relative) must point at an
 // existing, regular, executable file. A bare name must be found on PATH.
@@ -154,7 +142,6 @@ func Validate(c Config) error {
 		{"gh", c.GH},
 		{"gcx", c.GCX},
 		{"shell", c.Shell},
-		{"osascript", c.OSAScript},
 		{"ps", c.PS},
 		{"lsof", c.Lsof},
 	} {

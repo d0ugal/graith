@@ -201,12 +201,11 @@ git       = "git"             # git executable
 gh        = "gh"              # GitHub CLI executable
 gcx       = "gcx"             # Grafana Cloud CLI executable (gcx trigger source)
 shell     = "sh"              # shell for notification/trigger commands (run as `<shell> -c ...`)
-osascript = "osascript"       # macOS desktop-notification helper
 ps        = "/bin/ps"         # process-listing binary
 lsof      = "/usr/sbin/lsof"  # open-files listing binary (macOS FD sampling)
 ```
 
-A value may be a **bare command name** resolved on `PATH` (`"git"`, `"hub"`) or an **absolute/relative path** to a specific binary (`"/run/current-system/sw/bin/git"`). Only fields you set are validated at load: an explicit path must exist and be executable, a bare name must be found on `PATH`. Unset fields keep the defaults above and resolve lazily on first use, so the macOS-only `osascript` default is never an error on Linux.
+A value may be a **bare command name** resolved on `PATH` (`"git"`, `"hub"`) or an **absolute/relative path** to a specific binary (`"/run/current-system/sw/bin/git"`). Only fields you set are validated at load: an explicit path must exist and be executable, a bare name must be found on `PATH`. Unset fields keep the defaults above and resolve lazily on first use.
 
 A **relative** path (e.g. `"./bin/git-wrapper"`) resolves against the directory containing your `config.toml`, not graith's working directory (which is set to a session's repository or worktree). It's normalized to absolute once at load, and the same normalized path validates and runs the override, so a wrapper that validates always executes from the same location.
 

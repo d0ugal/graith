@@ -236,7 +236,6 @@ timeout = "5s"              # HTTP request timeout for the release check
 # gh        = "gh"             # GitHub CLI executable
 # gcx       = "gcx"            # Grafana Cloud CLI executable (gcx trigger source)
 # shell     = "sh"             # shell for notification/trigger commands (`<shell> -c ...`)
-# osascript = "osascript"      # macOS desktop-notification helper
 # ps        = "/bin/ps"        # process-listing binary
 # lsof      = "/usr/sbin/lsof" # open-files listing binary (macOS FD sampling)
 
@@ -415,8 +414,8 @@ ttl = "5m"  # how long a `gr status` value stays current before it expires
 [notifications]
 enabled = true      # master switch for status-change and push notifications
 # backend selects how `gr notify` push notifications are delivered:
-#   "macos"   GraithNotifier.app desktop notification, with osascript fallback
-#             (default; high priority plays a sound)
+#   "macos"   GraithNotifier.app desktop notification
+#             (default; high priority plays a sound; helper is required)
 #   "command" run the [notifications] command with GRAITH_NOTIFY_{TITLE,MESSAGE,PRIORITY}
 # (ntfy/pushover/slack backends are planned follow-ups.)
 backend = "macos"
@@ -432,7 +431,7 @@ max_per_hour = 12
 # override to tune coalescing, dispatch, and PTY-injection pacing.
 [notifications.timing]
 coalesce_window = "30s"       # drop an identical push within this window ("0" disables coalescing)
-dispatch_timeout = "15s"      # per-backend dispatch timeout (osascript/notifier/command)
+dispatch_timeout = "15s"      # per-backend dispatch timeout (notifier/command)
 inbox_idle_timeout = "10s"    # wait before inbox notifications or `gr type` inject into an attached PTY
 inbox_max_wait = "2m"         # cap that user-idle wait before injecting anyway
 inbox_cooldown = "30s"        # minimum interval between unread-inbox nudges to one session ("0" disables)

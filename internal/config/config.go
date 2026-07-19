@@ -182,9 +182,6 @@ type ToolsConfig struct {
 	// Shell runs notification and trigger commands as `<shell> -c <cmd>`
 	// (default "sh").
 	Shell string `toml:"shell"`
-	// OSAScript is the macOS osascript executable used for desktop
-	// notifications (default "osascript").
-	OSAScript string `toml:"osascript"`
 	// PS is the process-listing executable (default "/bin/ps").
 	PS string `toml:"ps"`
 	// Lsof is the open-files listing executable (default "/usr/sbin/lsof").
@@ -199,13 +196,12 @@ type ToolsConfig struct {
 // validation and for execution regardless of the later exec.Cmd.Dir (#1293).
 func (t ToolsConfig) Resolved(baseDir string) tools.Config {
 	return tools.Config{
-		Git:       resolveToolPath(baseDir, t.Git),
-		GH:        resolveToolPath(baseDir, t.GH),
-		GCX:       resolveToolPath(baseDir, t.GCX),
-		Shell:     resolveToolPath(baseDir, t.Shell),
-		OSAScript: resolveToolPath(baseDir, t.OSAScript),
-		PS:        resolveToolPath(baseDir, t.PS),
-		Lsof:      resolveToolPath(baseDir, t.Lsof),
+		Git:   resolveToolPath(baseDir, t.Git),
+		GH:    resolveToolPath(baseDir, t.GH),
+		GCX:   resolveToolPath(baseDir, t.GCX),
+		Shell: resolveToolPath(baseDir, t.Shell),
+		PS:    resolveToolPath(baseDir, t.PS),
+		Lsof:  resolveToolPath(baseDir, t.Lsof),
 	}
 }
 
@@ -2690,7 +2686,7 @@ type Notifications struct {
 	OnStopped bool   `toml:"on_stopped"`
 	Command   string `toml:"command"`
 	// Backend selects how proactive `gr notify` push notifications are delivered:
-	// "macos" (GraithNotifier.app, with osascript fallback; the default when unset) or
+	// "macos" (GraithNotifier.app; the default when unset) or
 	// "command" (run [notifications] command with GRAITH_NOTIFY_* env vars). Other
 	// backends (ntfy/pushover/slack) are planned follow-ups and rejected for now.
 	Backend string `toml:"backend"`
@@ -2721,8 +2717,8 @@ type NotificationTiming struct {
 	// notification is dropped as a duplicate, coalescing rapid-fire events. Empty
 	// uses the default (NotifyCoalesceWindowDefault); "0" disables coalescing.
 	CoalesceWindow string `toml:"coalesce_window"`
-	// DispatchTimeout bounds a single backend dispatch (osascript / notifier app /
-	// command) so a hung helper can't block the caller. Empty or non-positive uses
+	// DispatchTimeout bounds a single backend dispatch (notifier app / command) so
+	// a hung helper can't block the caller. Empty or non-positive uses
 	// the default (NotifyDispatchTimeoutDefault).
 	DispatchTimeout string `toml:"dispatch_timeout"`
 	// InboxIdleTimeout is how long an attached session's PTY must be free of user

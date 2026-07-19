@@ -19,15 +19,14 @@ func writeFakeBinary(t *testing.T, dir, name string) string {
 	return path
 }
 
-func TestDefaultsPreservesHistoricalNames(t *testing.T) {
+func TestDefaults(t *testing.T) {
 	d := Defaults()
 
 	cases := map[string]string{
-		"git":       d.Git,
-		"gh":        d.GH,
-		"gcx":       d.GCX,
-		"sh":        d.Shell,
-		"osascript": d.OSAScript,
+		"git": d.Git,
+		"gh":  d.GH,
+		"gcx": d.GCX,
+		"sh":  d.Shell,
 	}
 	for want, got := range cases {
 		if got != want {
@@ -89,9 +88,8 @@ func TestResetRestoresDefaults(t *testing.T) {
 }
 
 func TestValidateSkipsUnsetFields(t *testing.T) {
-	// The zero Config sets nothing explicitly, so validation must pass even
-	// though "osascript" is absent on Linux — defaults keep PATH-lookup
-	// semantics and are only resolved when actually used.
+	// The zero Config sets nothing explicitly, so validation must pass; defaults
+	// keep PATH-lookup semantics and are only resolved when actually used.
 	if err := Validate(Config{}); err != nil {
 		t.Fatalf("Validate(zero) = %v, want nil", err)
 	}

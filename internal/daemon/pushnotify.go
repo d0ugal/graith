@@ -271,9 +271,8 @@ func (sm *SessionManager) newPushDispatch() func(backend, title, message, priori
 // It prefers the bundled graith-notifier .app, which posts via
 // UNUserNotificationCenter under graith's own bundle identifier so
 // notifications appear (and can be configured) under "Graith" in System
-// Settings > Notifications. If the helper isn't installed — or is installed but
-// fails — it falls back to osascript, whose notifications show up under "Script
-// Editor" but still reach the user (graceful degradation, issue #1094).
+// Settings > Notifications. The helper is required: missing bundles and launch
+// or delivery failures are reported instead of routing through another app.
 func dispatchMacNotification(title, message, priority string, timeout time.Duration) error {
 	if runtime.GOOS != "darwin" {
 		return fmt.Errorf("macos backend requires macOS (running on %s)", runtime.GOOS)
@@ -281,39 +280,32 @@ func dispatchMacNotification(title, message, priority string, timeout time.Durat
 
 	return dispatchMacNotificationWith(
 		title, message, priority, timeout,
-		findMacNotifierApp, dispatchViaNotifierApp, dispatchViaOsascript,
+		findMacNotifierApp, dispatchViaNotifierApp,
 	)
 }
 
-// dispatchMacNotificationWith contains the helper-first/fallback policy behind
-// dispatchMacNotification. Its dependencies are explicit so the permission
-// boundary can be tested on every host OS without launching macOS tools.
+// dispatchMacNotificationWith contains the native-helper policy behind
+// dispatchMacNotification. Its dependencies are explicit so missing-helper,
+// failure, and permission behavior can be tested without launching macOS tools.
 func dispatchMacNotificationWith(
 	title, message, priority string,
 	timeout time.Duration,
 	findNotifier func() (string, bool),
 	dispatchNotifier func(string, string, string, string, time.Duration) error,
-	dispatchFallback func(string, string, string, time.Duration) error,
 ) error {
-	if exe, ok := findNotifier(); ok {
-		err := dispatchNotifier(exe, title, message, priority, timeout)
-		if err == nil {
-			return nil
-		}
-
-		if errors.Is(err, errNotifierPermissionDenied) {
-			// The user has explicitly disabled notifications for Graith. Honour
-			// that — do NOT fall back to osascript, which would show the same
-			// notification under "Script Editor" and defeat the per-app control
-			// this feature exists to provide (issue #1094 review).
-			return nil
-		}
-		// Helper present but failed for another reason (not installed correctly,
-		// launch error, delivery error); fall through to osascript so the
-		// notification still reaches the user.
+	exe, ok := findNotifier()
+	if !ok {
+		return errors.New("native notifier GraithNotifier.app not found")
 	}
 
-	return dispatchFallback(title, message, priority, timeout)
+	err := dispatchNotifier(exe, title, message, priority, timeout)
+	if errors.Is(err, errNotifierPermissionDenied) {
+		// The user has explicitly disabled notifications for Graith. Honour the
+		// per-app setting as a successful suppression rather than an error.
+		return nil
+	}
+
+	return err
 }
 
 // macNotifierExecutable is the path, relative to the .app bundle root, of the
@@ -327,7 +319,7 @@ const notifierDeniedExitCode = 3
 
 // errNotifierPermissionDenied is returned by dispatchViaNotifierApp when the
 // helper reports the user has turned off Graith's notifications. The caller
-// suppresses the osascript fallback in that case.
+// treats that explicit choice as successful suppression.
 var errNotifierPermissionDenied = errors.New("notifications disabled for Graith by the user")
 
 // findMacNotifierApp locates the bundled macOS notification helper and returns
@@ -422,10 +414,9 @@ func resolveNotifierExecutable(path string) (string, bool) {
 }
 
 // dispatchViaNotifierApp runs the notifier helper with the notification
-// content. The helper exits non-zero on any failure so the caller can fall
-// back; the dedicated notifierDeniedExitCode is mapped to
-// errNotifierPermissionDenied so the caller can suppress the fallback for an
-// explicit user opt-out.
+// content. The helper exits non-zero on any failure. The dedicated
+// notifierDeniedExitCode is mapped to errNotifierPermissionDenied so the caller
+// can distinguish an explicit user opt-out from a delivery failure.
 func dispatchViaNotifierApp(exe, title, message, priority string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -441,39 +432,6 @@ func dispatchViaNotifierApp(exe, title, message, priority string, timeout time.D
 	}
 
 	return fmt.Errorf("notifier app: %w", err)
-}
-
-// dispatchViaOsascript shows a notification via osascript. High-priority
-// notifications play a sound. This is the fallback when the bundled helper
-// isn't available.
-func dispatchViaOsascript(title, message, priority string, timeout time.Duration) error {
-	script := fmt.Sprintf("display notification %s with title %s", osaQuote(message), osaQuote(title))
-	if priority == config.NotifyPriorityHigh {
-		script += " sound name " + osaQuote("Ping")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	if err := exec.CommandContext(ctx, tools.OSAScript(), "-e", script).Run(); err != nil {
-		return fmt.Errorf("osascript: %w", err)
-	}
-
-	return nil
-}
-
-// osaQuote renders a Go string as an AppleScript string literal: wrap in double
-// quotes and backslash-escape backslashes and embedded quotes. This prevents a
-// message containing a quote from breaking out of the string (or injecting
-// further AppleScript). Raw newlines/tabs/carriage returns are folded to spaces
-// first — an AppleScript string literal in a one-line `-e` script can't span
-// them, so a multi-line body would otherwise fail to compile.
-func osaQuote(s string) string {
-	s = strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(s)
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "\"", "\\\"")
-
-	return "\"" + s + "\""
 }
 
 // dispatchCommandBackend runs the configured shell command with GRAITH_NOTIFY_*
