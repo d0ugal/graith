@@ -69,6 +69,7 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := setDescriptorFlags(badFD, syscall.FD_CLOEXEC); err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +85,7 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := setDescriptorFlags(goodFD, syscall.FD_CLOEXEC); err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +94,7 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 	if err := badCmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+
 	goodCmd := exec.Command("sleep", "30")
 	if err := goodCmd.Start(); err != nil {
 		_ = badCmd.Process.Kill()
@@ -99,14 +102,17 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 
 		t.Fatal(err)
 	}
+
 	badStart, err := grpty.ProcessStartTime(badCmd.Process.Pid)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	goodStart, err := grpty.ProcessStartTime(goodCmd.Process.Pid)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for id, identity := range map[string]struct {
 		pid   int
 		start int64
@@ -148,10 +154,12 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 	if bad.Status != StatusRunning {
 		t.Errorf("failed hydration status = %q, want %q", bad.Status, StatusRunning)
 	}
+
 	badPTY, ok := sm.GetPTY("thrawn-fash")
 	if !ok {
 		t.Fatal("failed hydration did not retain the live PTY")
 	}
+
 	if err := badCmd.Process.Signal(syscall.Signal(0)); err != nil {
 		t.Fatalf("failed hydration killed the running agent: %v", err)
 	}
@@ -191,16 +199,20 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 	if strings.Contains(logBuf.String(), "dreich-payload-must-not-be-logged") {
 		t.Fatal("adoption failure log exposed scrollback contents")
 	}
+
 	if _, err := badW.Write([]byte("\x1b[2J\x1b[Hcanny-live-after-fallback")); err != nil {
 		t.Fatalf("write after hydration fallback: %v", err)
 	}
+
 	deadline := time.Now().Add(2 * time.Second)
 	for !strings.Contains(badPTY.ScreenPreview(), "canny-live-after-fallback") && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
+
 	if got := badPTY.ScreenPreview(); !strings.Contains(got, "canny-live-after-fallback") {
 		t.Fatalf("adopted screen did not remain serviceable: %q", got)
 	}
+
 	tail, err := badPTY.ScrollbackFile().TailBytes(256 * 1024)
 	if err != nil || !bytes.Contains(tail, badScrollback) {
 		t.Fatalf("raw scrollback was not preserved: bytes=%d err=%v", len(tail), err)

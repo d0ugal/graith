@@ -51,14 +51,17 @@ func TestWriteTerminalChunksBoundsReplayRequests(t *testing.T) {
 	if err := writeTerminalChunks(term, payload); err != nil {
 		t.Fatal(err)
 	}
+
 	if len(term.writes) < 3 {
 		t.Fatalf("writes = %d, want at least three bounded requests", len(term.writes))
 	}
+
 	for i, write := range term.writes {
 		if len(write) > terminalWriteChunkBytes {
 			t.Fatalf("write %d bytes = %d, limit %d", i, len(write), terminalWriteChunkBytes)
 		}
 	}
+
 	if got := bytes.Join(term.writes, nil); !bytes.Equal(got, payload) {
 		t.Fatal("bounded writes did not preserve replay bytes")
 	}

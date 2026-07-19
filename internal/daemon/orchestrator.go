@@ -293,7 +293,8 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	result := cloneSessionState(sess)
 	sm.mu.Unlock()
 
-	sm.startWatcher(id, ptySess)
+	// The watcher owns the new session's lifetime and must outlive this create call.
+	sm.startWatcher(id, ptySess) //nolint:contextcheck // intentionally session-owned, not request-owned
 
 	sm.log.Info("orchestrator session created",
 		"id", id, "pid", result.PID, "pgid", ptySess.Pgid())

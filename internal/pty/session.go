@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"os/exec"
 	"runtime"
@@ -273,8 +274,11 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	var sb *Scrollback
-	var err error
+
+	var (
+		sb  *Scrollback
+		err error
+	)
 	if opts.ScrollbackFd > 0 {
 		sb, err = AdoptScrollback(opts.ScrollbackFd, opts.LogPath, opts.MaxLogSize)
 	} else {
@@ -282,6 +286,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		// Current daemon handoffs require one structurally before this point.
 		sb, err = NewScrollback(opts.LogPath, opts.MaxLogSize)
 	}
+
 	if err != nil {
 		_ = ptmx.Close()
 
@@ -369,6 +374,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		s.screenRecoveryCols = cols
 		s.screenRecoveryRows = rows
 		s.mu.Unlock()
+
 		if !opts.DeferWait {
 			s.StartAdoptedWaiter()
 		}
@@ -377,8 +383,10 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 	}
 
 	screen, screenErr := factory(cols, rows)
+
 	s.mu.Lock()
 	s.screenInitializing = false
+
 	if screenErr != nil {
 		log.Warn("terminal screen unavailable during adoption; preserving PTY with degraded screen",
 			"session", opts.ID, "error", screenErr)
@@ -391,12 +399,15 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 			if tail, tailErr := sb.TailBytes(int64(hydrate)); tailErr == nil && len(tail) > 0 {
 				if err := writeTerminalChunks(screen, tail); err != nil {
 					_ = screen.Close()
+
 					log.Warn("terminal hydration failed during adoption; preserving PTY with empty screen",
 						"session", opts.ID, "error", err)
+
 					screen, screenErr = factory(cols, rows)
 				}
 			}
 		}
+
 		if screenErr == nil {
 			_ = s.screen.Close()
 			s.screen = screen
@@ -405,6 +416,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		}
 	}
 	s.mu.Unlock()
+
 	if !opts.DeferWait {
 		s.StartAdoptedWaiter()
 	}
@@ -425,15 +437,18 @@ func (s *Session) RejectAdoption(ctx context.Context) error {
 	if s.adoptedPID <= 1 || s.adoptedStartTime <= 0 {
 		return errors.New("adopted process identity is unavailable")
 	}
+
 	startTime, err := ProcessStartTime(s.adoptedPID)
 	if err != nil || startTime != s.adoptedStartTime {
 		return errors.New("adopted process identity changed before rejection")
 	}
+
 	if err := syscall.Kill(-s.adoptedPID, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return errors.New("terminate rejected adopted process group")
 	}
 
 	s.StartAdoptedWaiter()
+
 	select {
 	case <-s.Done():
 		s.Close()
@@ -453,26 +468,34 @@ func drainTransferredPTY(ptmx *os.File, scrollback *Scrollback) error {
 	if ptmx == nil || scrollback == nil {
 		return nil
 	}
+
 	fd := int(ptmx.Fd())
+
 	flags, err := unix.FcntlInt(ptmx.Fd(), unix.F_GETFL, 0)
 	if err != nil {
 		return errors.New("inspect transferred PTY for final drain")
 	}
+
 	if _, err := unix.FcntlInt(ptmx.Fd(), unix.F_SETFL, flags|unix.O_NONBLOCK); err != nil {
 		return errors.New("make transferred PTY final drain nonblocking")
 	}
+
 	buf := make([]byte, 32*1024)
+
 	total := 0
 	for total < maxTransferredPTYDrainBytes {
 		limit := min(len(buf), maxTransferredPTYDrainBytes-total)
+
 		n, readErr := unix.Read(fd, buf[:limit])
 		if n > 0 {
 			written, writeErr := scrollback.Write(buf[:n])
 			if writeErr != nil || written != n {
 				return errors.New("persist transferred PTY final drain")
 			}
+
 			total += n
 		}
+
 		switch {
 		case readErr == nil && n > 0:
 			continue
@@ -626,6 +649,7 @@ func (s *Session) DuplicateFD() (int, error) {
 	if s.closed || s.Ptmx == nil {
 		return -1, errors.New("PTY session is closed")
 	}
+
 	fd, err := unix.FcntlInt(s.Ptmx.Fd(), unix.F_DUPFD_CLOEXEC, 3)
 	if err != nil {
 		return -1, fmt.Errorf("duplicate PTY descriptor: %w", err)
@@ -652,17 +676,28 @@ func (s *Session) readLoop() {
 		}
 
 		s.mu.RLock()
+
 		if s.closed || s.Ptmx == nil {
 			s.mu.RUnlock()
 			return
 		}
+
 		fd := int(s.Ptmx.Fd())
+		if fd < 0 || fd > math.MaxInt32 {
+			s.mu.RUnlock()
+
+			return
+		}
+
 		pollFD := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN | unix.POLLHUP | unix.POLLERR}}
 		_, pollErr := unix.Poll(pollFD, 100)
+
 		s.mu.RUnlock()
+
 		if pollErr != nil && !errors.Is(pollErr, unix.EINTR) {
 			return
 		}
+
 		if pollErr != nil || pollFD[0].Revents == 0 {
 			continue
 		}
@@ -673,6 +708,7 @@ func (s *Session) readLoop() {
 		}
 
 		s.mu.RLock()
+
 		if s.closed || s.Ptmx == nil || int(s.Ptmx.Fd()) != fd {
 			s.mu.RUnlock()
 			return
@@ -682,10 +718,12 @@ func (s *Session) readLoop() {
 		if n > 0 {
 			chunk := buf[:n]
 			s.mu.Lock()
+
 			written, appendErr := s.Scrollback.Write(chunk)
 			if appendErr != nil || written != len(chunk) {
 				s.scrollbackErr = errors.New("scrollback append failed")
 			}
+
 			if s.afterScrollbackAppend != nil {
 				s.afterScrollbackAppend()
 			}
@@ -696,6 +734,7 @@ func (s *Session) readLoop() {
 			writers := make([]io.Writer, len(s.writers))
 			copy(writers, s.writers)
 			s.mu.Unlock()
+
 			if appendErr != nil || written != len(chunk) {
 				s.log.Error("scrollback append failed; preserve upgrade disabled", "session", s.ID)
 			}
@@ -756,8 +795,10 @@ func (s *Session) upgradeReadSafePoint() bool {
 		s.upgradeMu.Unlock()
 		return true
 	}
+
 	ack := s.upgradeAck
 	resume := s.upgradeResume
+
 	select {
 	case <-ack:
 	default:
@@ -781,6 +822,7 @@ func (s *Session) QuiesceIOForUpgrade(ctx context.Context) (func(), error) {
 	// TryLock and observe this flag, so none can strand behind the lock across
 	// syscall.Exec.
 	s.upgradeInputBlocked.Store(true)
+
 	for !s.writeMu.TryLock() {
 		select {
 		case <-ctx.Done():
@@ -789,12 +831,15 @@ func (s *Session) QuiesceIOForUpgrade(ctx context.Context) (func(), error) {
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
+
 	s.upgradeMu.Lock()
 	if s.upgradePause {
 		s.upgradeMu.Unlock()
 		s.writeMu.Unlock()
+
 		return nil, errors.New("session I/O is already quiesced")
 	}
+
 	s.upgradePause = true
 	s.upgradeAck = make(chan struct{})
 	s.upgradeResume = make(chan struct{})
@@ -804,6 +849,7 @@ func (s *Session) QuiesceIOForUpgrade(ctx context.Context) (func(), error) {
 	released := false
 	release := func() {
 		doUnlock := false
+
 		s.upgradeMu.Lock()
 		if !released {
 			released = true
@@ -812,6 +858,7 @@ func (s *Session) QuiesceIOForUpgrade(ctx context.Context) (func(), error) {
 			close(s.upgradeResume)
 		}
 		s.upgradeMu.Unlock()
+
 		if doUnlock {
 			s.writeMu.Unlock()
 			s.upgradeInputBlocked.Store(false)
@@ -823,6 +870,7 @@ func (s *Session) QuiesceIOForUpgrade(ctx context.Context) (func(), error) {
 		s.mu.RLock()
 		scrollbackErr := s.scrollbackErr
 		s.mu.RUnlock()
+
 		if scrollbackErr != nil {
 			release()
 
@@ -847,10 +895,12 @@ func (s *Session) writeScreenLocked(chunk []byte) error {
 		s.screenRecoveryGeneration++
 		return nil
 	}
+
 	n, err := s.screen.Write(chunk)
 	if err == nil && n != len(chunk) {
 		err = io.ErrShortWrite
 	}
+
 	if err != nil {
 		recoveryErr := s.replaceScreenLocked()
 
@@ -874,17 +924,21 @@ func (s *Session) replaceScreenAtSizeLocked(cols, rows int, explicitResize bool)
 	if !s.screenRecoveryNext.IsZero() && s.screenRecoveryTime().Before(s.screenRecoveryNext) {
 		return errTerminalUnavailable
 	}
+
 	defer func() {
 		if errors.Is(returnErr, errTerminalGenerationFrozen) {
 			if explicitResize || !s.screenRecoveryPending {
 				s.screenRecoveryCols = cols
 				s.screenRecoveryRows = rows
 			}
+
 			s.screenRecoveryPending = true
 			s.screenInitializing = true
 			s.screenRecoveryGeneration++
+
 			return
 		}
+
 		if returnErr != nil {
 			s.noteScreenRecoveryFailureLocked()
 		} else {
@@ -892,6 +946,7 @@ func (s *Session) replaceScreenAtSizeLocked(cols, rows int, explicitResize bool)
 			s.screenRecoveryDelay = 0
 		}
 	}()
+
 	if s.closed {
 		return os.ErrClosed
 	}
@@ -963,6 +1018,7 @@ func (s *Session) noteScreenRecoveryFailureLocked() {
 	} else {
 		delay = min(delay*2, maxScreenRecoveryBackoff)
 	}
+
 	s.screenRecoveryDelay = delay
 	s.screenRecoveryNext = s.screenRecoveryTime().Add(delay)
 }
@@ -980,26 +1036,34 @@ func (s *Session) RecoverTerminalAfterUpgrade() error {
 // RecoverTerminalAfterUpgradeContext is the daemon-owned, cancellation-aware
 // recovery path. Slow helper requests remain outside the session mutex so raw
 // PTY drainage is never coupled to reconstruction.
+//
+//nolint:contextcheck // terminal factories have their own bounded start/RPC deadlines; every retry and hydration stage checks ctx
 func (s *Session) RecoverTerminalAfterUpgradeContext(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
 	attempts := 0
+
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+
 		err := s.recoverTerminalAfterUpgradeAttempt(ctx)
 		if err == nil {
 			return nil
 		}
+
 		if ctx.Err() != nil {
 			return errors.Join(err, ctx.Err())
 		}
+
 		delay, delayErr := s.screenRecoveryRetryDelay(ctx, err)
 		if delayErr != nil {
 			return errors.Join(err, delayErr)
 		}
+
 		attempts++
 		if attempts >= screenRecoveryBatchAttempts {
 			// Yield between bounded batches, but keep this daemon-owned job alive.
@@ -1008,9 +1072,11 @@ func (s *Session) RecoverTerminalAfterUpgradeContext(ctx context.Context) error 
 			attempts = 0
 			delay = max(delay, minScreenRecoveryBackoff)
 		}
+
 		if delay <= 0 {
 			continue
 		}
+
 		timer := time.NewTimer(delay)
 		select {
 		case <-timer.C:
@@ -1024,26 +1090,35 @@ func (s *Session) RecoverTerminalAfterUpgradeContext(ctx context.Context) error 
 // RecoverTerminalSessionsAfterUpgrade owns a concurrent recovery generation.
 // It joins every started session operation before returning, so cancellation
 // cannot strand helper factories or candidate terminals in detached goroutines.
+//
+//nolint:contextcheck // nil retains the legacy background fallback; non-nil caller cancellation is passed unchanged to every worker
 func RecoverTerminalSessionsAfterUpgrade(ctx context.Context, sessions []*Session) []error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
 	results := make([]error, len(sessions))
+
 	var recoveries sync.WaitGroup
+
 	for i, session := range sessions {
 		if err := ctx.Err(); err != nil {
 			results[i] = err
 			continue
 		}
+
 		if session == nil {
 			continue
 		}
+
 		recoveries.Add(1)
 		go func() {
 			defer recoveries.Done()
+
 			results[i] = session.RecoverTerminalAfterUpgradeContext(ctx)
 		}()
 	}
+
 	recoveries.Wait()
 
 	return results
@@ -1058,26 +1133,32 @@ func (s *Session) recoverTerminalAfterUpgradeAttempt(ctx context.Context) error 
 	if err := s.lockScreenRecoveryState(ctx); err != nil {
 		return err
 	}
+
 	if s.closed || !s.screenRecoveryPending {
 		s.mu.Unlock()
 		return nil
 	}
+
 	if !s.screenRecoveryNext.IsZero() && s.screenRecoveryTime().Before(s.screenRecoveryNext) {
 		s.mu.Unlock()
 		return errTerminalUnavailable
 	}
 
 	generation := s.screenRecoveryGeneration
+
 	cols, rows := s.screenRecoveryCols, s.screenRecoveryRows
 	if cols <= 0 || rows <= 0 {
 		cols, rows = s.screen.Size()
 	}
+
 	factory := s.screenFactory
 	if factory == nil {
 		factory = newTerminal
 	}
+
 	hydrationBytes := s.screenHydrationBytes
 	scrollback := s.Scrollback
+
 	log := s.log
 	if log == nil {
 		log = slog.Default()
@@ -1087,46 +1168,59 @@ func (s *Session) recoverTerminalAfterUpgradeAttempt(ctx context.Context) error 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+
 	replacement, err := factory(cols, rows)
 	if err != nil {
 		s.noteAsyncScreenRecoveryFailure(ctx)
 		return fmt.Errorf("create replacement terminal: %w", err)
 	}
+
 	closeReplacement := func(cause error) error {
 		return errors.Join(cause, replacement.Close())
 	}
 	if err := ctx.Err(); err != nil {
 		return closeReplacement(err)
 	}
+
 	if hydrationBytes > 0 && scrollback != nil {
 		tail, tailErr := scrollback.TailBytes(int64(hydrationBytes))
 		if tailErr != nil {
 			result := closeReplacement(fmt.Errorf("read terminal recovery scrollback: %w", tailErr))
+
 			s.noteAsyncScreenRecoveryFailure(ctx)
+
 			return result
 		}
+
 		if err := ctx.Err(); err != nil {
 			return closeReplacement(err)
 		}
+
 		if len(tail) > 0 {
 			if writeErr := writeTerminalChunksContext(ctx, replacement, tail); writeErr != nil {
 				_ = replacement.Close()
+
 				if ctx.Err() != nil {
 					return errors.Join(writeErr, ctx.Err())
 				}
+
 				log.Warn("terminal recovery hydration failed; using empty screen",
 					"session", s.ID, "error", writeErr)
+
 				if err := ctx.Err(); err != nil {
 					return err
 				}
+
 				replacement, err = factory(cols, rows)
 				if err != nil {
 					s.noteAsyncScreenRecoveryFailure(ctx)
+
 					return errors.Join(
 						fmt.Errorf("hydrate replacement terminal: %w", writeErr),
 						fmt.Errorf("create empty replacement terminal: %w", err),
 					)
 				}
+
 				if err := ctx.Err(); err != nil {
 					return errors.Join(err, replacement.Close())
 				}
@@ -1137,18 +1231,24 @@ func (s *Session) recoverTerminalAfterUpgradeAttempt(ctx context.Context) error 
 	if err := s.lockScreenRecoveryState(ctx); err != nil {
 		return errors.Join(err, replacement.Close())
 	}
+
 	if s.closed || !s.screenRecoveryPending {
 		s.mu.Unlock()
+
 		_ = replacement.Close()
+
 		return nil
 	}
+
 	if generation != s.screenRecoveryGeneration ||
 		cols != s.screenRecoveryCols || rows != s.screenRecoveryRows {
 		s.mu.Unlock()
+
 		_ = replacement.Close()
 
 		return errScreenRecoveryGenerationChanged
 	}
+
 	failed := s.screen
 	s.screen = replacement
 	s.screenRecoveryPending = false
@@ -1158,6 +1258,7 @@ func (s *Session) recoverTerminalAfterUpgradeAttempt(ctx context.Context) error 
 	s.screenRecoveryDelay = 0
 	s.screenInitializing = false
 	s.mu.Unlock()
+
 	if failed != nil {
 		_ = failed.Close()
 	}
@@ -1169,13 +1270,16 @@ func (s *Session) screenRecoveryRetryDelay(ctx context.Context, recoveryErr erro
 	if errors.Is(recoveryErr, errScreenRecoveryGenerationChanged) {
 		return 0, nil
 	}
+
 	if err := s.lockScreenRecoveryState(ctx); err != nil {
 		return 0, err
 	}
 	defer s.mu.Unlock()
+
 	if s.closed || !s.screenRecoveryPending {
 		return 0, nil
 	}
+
 	now := s.screenRecoveryTime()
 	if s.screenRecoveryNext.After(now) {
 		return s.screenRecoveryNext.Sub(now), nil
@@ -1188,6 +1292,7 @@ func (s *Session) noteAsyncScreenRecoveryFailure(ctx context.Context) {
 	if s.lockScreenRecoveryState(ctx) != nil {
 		return
 	}
+
 	if !s.closed && s.screenRecoveryPending {
 		s.noteScreenRecoveryFailureLocked()
 	}
@@ -1214,6 +1319,7 @@ func lockWithContext(ctx context.Context, tryLock func() bool) error {
 		if tryLock() {
 			return nil
 		}
+
 		timer := time.NewTimer(screenRecoveryLockPoll)
 		select {
 		case <-timer.C:
@@ -1229,17 +1335,22 @@ func writeTerminalChunksContext(ctx context.Context, term Terminal, p []byte) er
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+
 		chunk := p[:min(len(p), terminalWriteChunkBytes)]
+
 		n, err := term.Write(chunk)
 		if err != nil {
 			return err
 		}
+
 		if n != len(chunk) {
 			return io.ErrShortWrite
 		}
+
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+
 		p = p[n:]
 	}
 
@@ -1399,6 +1510,7 @@ func (s *Session) lockInputWriter() error {
 		if s.upgradeInputBlocked.Load() {
 			return errSessionIOQuiesced
 		}
+
 		time.Sleep(time.Millisecond)
 	}
 	if s.upgradeInputBlocked.Load() {
@@ -1451,6 +1563,7 @@ func (s *Session) WaitForUserIdle(idleTimeout, maxWait time.Duration) bool {
 // the complete task tree rather than waiting for the two-minute idle bound.
 func (s *Session) WaitForUserIdleContext(ctx context.Context, idleTimeout, maxWait time.Duration) bool {
 	deadline := time.Now().Add(maxWait)
+
 	stopCancelWake := context.AfterFunc(ctx, func() {
 		s.userInputCond.L.Lock()
 		s.userInputCond.Broadcast()
@@ -1503,11 +1616,13 @@ func (s *Session) WaitForUserIdleContext(ctx context.Context, idleTimeout, maxWa
 func (s *Session) Resize(rows, cols uint16) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if s.closed {
 		return os.ErrClosed
 	}
 
 	var screenErr error
+
 	if s.screenInitializing {
 		// Recovery owns derived-screen construction. Resize only advances the
 		// desired generation and the kernel PTY geometry while initialization is
@@ -1522,10 +1637,12 @@ func (s *Session) Resize(rows, cols uint16) error {
 			screenErr = errors.Join(screenErr, s.replaceScreenAtSizeLocked(int(cols), int(rows), true))
 		}
 	}
+
 	setSize := s.setSize
 	if setSize == nil {
 		setSize = pty.Setsize
 	}
+
 	ptyErr := setSize(s.Ptmx, &pty.Winsize{Rows: rows, Cols: cols})
 
 	return errors.Join(screenErr, ptyErr)
@@ -1621,11 +1738,13 @@ func (s *Session) ForceKill() error {
 func (s *Session) Close() {
 	s.closeOnce.Do(func() {
 		s.mu.Lock()
+
 		s.closed = true
 		if s.Ptmx != nil {
 			_ = s.Ptmx.Close()
 		}
 		s.mu.Unlock()
+
 		if s.readDone != nil {
 			<-s.readDone
 		}

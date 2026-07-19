@@ -34,6 +34,7 @@ func preserveLifecyclePolicy(t *testing.T) {
 		connectionNow, connectionSleep, probeDaemonIdentityFn, dialLocalDaemon = oldNow, oldSleep, oldProbe, oldDial
 		upgradeNegotiationFloor, upgradeReadinessFloor = oldNegotiationFloor, oldReadinessFloor
 	})
+
 	upgradeNegotiationFloor = 0
 	upgradeReadinessFloor = 0
 }
@@ -155,19 +156,24 @@ func TestUpgradeReadinessFloorCoversHealthyPostAckWork(t *testing.T) {
 	}}
 
 	calls := 0
+
 	var aggregateDeadline time.Time
+
 	probeDaemonIdentityFn = func(deadline time.Time) (string, string) {
 		calls++
 		aggregateDeadline = deadline
+
 		if calls < 46 {
 			return "0.69.1-new", "old-gen"
 		}
 
 		return "0.69.1-new", "new-gen"
 	}
+
 	if _, ready := waitForNewLocalDaemonGeneration("0.69.1-new", "old-gen"); !ready {
 		t.Fatal("healthy replacement after 45 seconds exceeded upgrade readiness budget")
 	}
+
 	if want := started.Add(60 * time.Second); !aggregateDeadline.Equal(want) {
 		t.Fatalf("aggregate upgrade readiness deadline = %v, want %v", aggregateDeadline, want)
 	}

@@ -30,24 +30,29 @@ func (g *daemonTaskGroup) Go(fn func(context.Context)) bool {
 	if fn == nil {
 		return false
 	}
+
 	g.mu.Lock()
 	if g.draining {
 		g.mu.Unlock()
 		return false
 	}
+
 	g.wg.Add(1)
 	g.mu.Unlock()
 
 	go func() {
 		defer g.wg.Done()
+
 		select {
 		case <-g.start:
 		case <-g.ctx.Done():
 			return
 		}
+
 		if g.ctx.Err() != nil {
 			return
 		}
+
 		fn(g.ctx)
 	}()
 
@@ -69,6 +74,7 @@ func (g *daemonTaskGroup) BeginDrain() {
 
 func (g *daemonTaskGroup) Wait(ctx context.Context) error {
 	done := make(chan struct{})
+
 	go func() {
 		g.wg.Wait()
 		close(done)
@@ -85,9 +91,11 @@ func (g *daemonTaskGroup) Wait(ctx context.Context) error {
 func (sm *SessionManager) installBackgroundTasks(group *daemonTaskGroup) bool {
 	sm.backgroundTasksMu.Lock()
 	defer sm.backgroundTasksMu.Unlock()
+
 	if sm.backgroundTasks != nil {
 		return false
 	}
+
 	sm.backgroundManaged = true
 	sm.backgroundTasks = group
 
@@ -106,9 +114,11 @@ func (sm *SessionManager) finishBackgroundPublication(published bool, after func
 	if !published {
 		return
 	}
+
 	if hook := sm.afterBackgroundPublication; hook != nil {
 		hook()
 	}
+
 	if after != nil {
 		after()
 	}
@@ -123,10 +133,12 @@ func (sm *SessionManager) startBackgroundTask(ctx context.Context, fn func(conte
 	group := sm.backgroundTasks
 	managed := sm.backgroundManaged
 	sm.backgroundTasksMu.Unlock()
+
 	if group == nil {
 		if managed {
 			return false
 		}
+
 		go fn(ctx)
 
 		return true
@@ -137,12 +149,15 @@ func (sm *SessionManager) startBackgroundTask(ctx context.Context, fn func(conte
 			fn(groupCtx)
 			return
 		}
+
 		combined, cancel := context.WithCancel(groupCtx)
+
 		stop := context.AfterFunc(ctx, cancel)
 		defer func() {
 			stop()
 			cancel()
 		}()
+
 		fn(combined)
 	})
 }

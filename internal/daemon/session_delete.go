@@ -28,6 +28,7 @@ func (sm *SessionManager) Delete(id string) error {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q not found", id)
 	}
+
 	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
 		sm.mu.Unlock()
 

@@ -86,6 +86,7 @@ func (sm *SessionManager) startGCXPollTask(ctx context.Context, name string) {
 	}) {
 		return
 	}
+
 	sm.triggers.mu.Lock()
 	if binding := sm.triggers.gcxBindings[name]; binding != nil {
 		binding.inFlight = false

@@ -98,7 +98,7 @@ func (m *MCPManager) Connect(serverName, proxyID string, vars config.TemplateVar
 	m.mu.Lock()
 	if m.frozen {
 		m.mu.Unlock()
-		return nil, fmt.Errorf("MCP connections are frozen for daemon upgrade")
+		return nil, errors.New("MCP connections are frozen for daemon upgrade")
 	}
 
 	serverCfg, ok := m.servers[serverName]
@@ -110,10 +110,12 @@ func (m *MCPManager) Connect(serverName, proxyID string, vars config.TemplateVar
 	if current := m.processes[proxyID]; current != nil && !current.isRunning() {
 		delete(m.processes, proxyID)
 	}
+
 	if _, exists := m.processes[proxyID]; exists || m.pending[proxyID] {
 		m.mu.Unlock()
 		return nil, fmt.Errorf("proxy %q already connected", proxyID)
 	}
+
 	m.pending[proxyID] = true
 	m.creating++
 	serverCfg = cloneMCPServerConfig(serverCfg)
@@ -126,15 +128,20 @@ func (m *MCPManager) Connect(serverName, proxyID string, vars config.TemplateVar
 		m.finishMCPCreate(proxyID)
 		return nil, fmt.Errorf("start MCP server %q: %w", serverName, err)
 	}
+
 	m.mu.Lock()
 	currentCfg, configured := m.servers[serverName]
+
 	stale := m.generation != generation || !configured || !reflect.DeepEqual(currentCfg, serverCfg)
 	if m.frozen || stale {
 		frozen := m.frozen
 		m.mu.Unlock()
+
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		killErr := m.killProcessContext(ctx, proc)
+
 		cancel()
+
 		if killErr == nil || !proc.isRunning() {
 			m.finishMCPCreate(proxyID)
 		} else {
@@ -143,15 +150,18 @@ func (m *MCPManager) Connect(serverName, proxyID string, vars config.TemplateVar
 				m.finishMCPCreate(proxyID)
 			}()
 		}
+
 		if frozen {
-			return nil, fmt.Errorf("MCP connections are frozen for daemon upgrade")
+			return nil, errors.New("MCP connections are frozen for daemon upgrade")
 		}
+
 		return nil, fmt.Errorf("MCP server %q configuration changed while starting", serverName)
 	}
 	m.processes[proxyID] = proc
 	delete(m.pending, proxyID)
 	m.creating--
 	m.signalChangedLocked()
+
 	m.mu.Unlock()
 	go m.removeMCPProcessWhenDone(proxyID, proc)
 	m.log.Info("MCP server started", "server", serverName, "proxy_id", proxyID, "pid", proc.cmd.Process.Pid)
@@ -291,10 +301,12 @@ func (m *MCPManager) FreezeAndDrain(ctx context.Context) error {
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
+
 	m.frozen = true
 	for m.creating > 0 {
 		changed := m.changed
 		m.mu.Unlock()
+
 		select {
 		case <-changed:
 			for !m.mu.TryLock() {
@@ -323,6 +335,7 @@ func (m *MCPManager) Thaw() {
 func (m *MCPManager) drain(reason string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
 	_ = m.drainContext(ctx, reason)
 }
 
@@ -338,14 +351,17 @@ func (m *MCPManager) drainContext(ctx context.Context, reason string) error {
 	m.mu.Unlock()
 
 	var result error
+
 	unresolved := make(map[string]*MCPProcess)
 	for proxyID, proc := range procs {
 		if err := m.killProcessContext(ctx, proc); err != nil {
 			result = errors.Join(result, err)
 			unresolved[proxyID] = proc
 		}
+
 		m.log.Info("MCP server stopped", "reason", reason, "proxy_id", proxyID)
 	}
+
 	if len(unresolved) > 0 {
 		m.mu.Lock()
 		for proxyID, proc := range unresolved {
@@ -829,6 +845,7 @@ func mapsEqual(a, b map[string]string) bool {
 
 func cloneMCPServerConfig(source config.MCPServerConfig) config.MCPServerConfig {
 	result := source
+
 	result.Args = append([]string(nil), source.Args...)
 	if source.Env != nil {
 		result.Env = make(map[string]string, len(source.Env))
@@ -836,14 +853,17 @@ func cloneMCPServerConfig(source config.MCPServerConfig) config.MCPServerConfig 
 			result.Env[key] = value
 		}
 	}
+
 	if source.Sandbox != nil {
 		value := *source.Sandbox
 		result.Sandbox = &value
 	}
+
 	if source.SandboxConfig != nil {
 		value := cloneSandboxConfig(*source.SandboxConfig)
 		result.SandboxConfig = &value
 	}
+
 	return result
 }
 
@@ -853,22 +873,26 @@ func cloneSandboxConfig(source config.SandboxConfig) config.SandboxConfig {
 		value := *source.Disabled
 		result.Disabled = &value
 	}
+
 	result.Features = append([]string(nil), source.Features...)
 	result.ReadDirs = append([]string(nil), source.ReadDirs...)
 	result.WriteDirs = append([]string(nil), source.WriteDirs...)
 	result.ReadFiles = append([]string(nil), source.ReadFiles...)
+
 	result.WriteFiles = append([]string(nil), source.WriteFiles...)
 	if source.Network != nil {
 		network := *source.Network
 		network.AllowDomains = append([]string(nil), source.Network.AllowDomains...)
 		result.Network = &network
 	}
+
 	return result
 }
 
 func (m *MCPManager) killProcess(proc *MCPProcess) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
 	_ = m.killProcessContext(ctx, proc)
 }
 
@@ -892,6 +916,7 @@ func (m *MCPManager) killProcessContext(ctx context.Context, proc *MCPProcess) e
 			_ = proc.cmd.Process.Kill()
 			return ctx.Err()
 		}
+
 		select {
 		case <-proc.done:
 			return nil

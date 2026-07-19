@@ -155,6 +155,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 		// frame. Early returns release through the connection defer above.
 		if mutationLease {
 			sm.endMutationRequest()
+
 			mutationLease = false
 		}
 		select {
@@ -218,11 +219,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				sendControl("error", protocol.ErrorMsg{Message: "not authorized over remote connection"})
 				continue
 			}
+
 			if mutatingControlMessage(msg) {
 				if err := sm.beginMutationRequest(); err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 					continue
 				}
+
 				mutationLease = true
 			}
 
@@ -332,13 +335,16 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				if err := sm.beginMutationRequest(); err != nil {
 					sm.cancelPendingPairing(rid)
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+
 					continue
 				}
 
 				go func() {
 					defer sm.endMutationRequest()
+
 					cancelUndelivered := func() {
 						sm.cancelPendingPairing(rid)
+
 						select {
 						case approval := <-waitCh:
 							if err := sm.rollbackPairingDelivery(approval); err != nil {
@@ -1038,17 +1044,21 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					sendControl("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
 					continue
 				}
+
 				if upgradeTicket != nil {
 					sendControl("error", protocol.ErrorMsg{Message: "upgrade preflight already completed on this connection"})
 					continue
 				}
+
 				var u protocol.UpgradeMsg
 				if err := protocol.DecodePayload(msg, &u); err != nil || u.ExecPath == "" ||
 					!filepath.IsAbs(u.ExecPath) || u.ClientVersion == "" {
 					sendControl("error", protocol.ErrorMsg{Message: "invalid upgrade preflight request"})
 					continue
 				}
+
 				upgradeTicket = &u
+
 				sendControl("upgrade_preflight_ok", struct{}{})
 
 			case "upgrade":
@@ -1064,20 +1074,24 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					sendControl("error", protocol.ErrorMsg{Message: "invalid upgrade request"})
 					continue
 				}
+
 				if ticket == nil || *ticket != u {
 					sendControl("error", protocol.ErrorMsg{Message: "upgrade request does not match a same-connection preflight"})
 					continue
 				}
+
 				if !sm.beginUpgradeAttempt() {
 					sendControl("error", protocol.ErrorMsg{Message: "upgrade already in progress"})
 					continue
 				}
+
 				request := newUpgradeRequest(u.ExecPath)
 				select {
 				case sm.upgradeCh <- request:
 				default:
 					sm.endUpgradeAttempt()
 					sendControl("error", protocol.ErrorMsg{Message: "upgrade already in progress"})
+
 					continue
 				}
 
@@ -1098,6 +1112,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 					return
 				}
+
 				close(request.proceed)
 
 				return
@@ -1111,6 +1126,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				continue
 			}
+
 			mutationLease = true
 			if origin.Remote && !sm.remoteDataAllowed(origin, poppedDeviceID) {
 				sendControl("error", protocol.ErrorMsg{Message: "not authorized to send remote input"})

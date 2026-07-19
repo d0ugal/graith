@@ -19,16 +19,20 @@ func TestResolvedUpgradeSnapshotPathsDoesNotRetainRemovedDataDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	running := defaults.WithDataDir(filepath.Join(t.TempDir(), "croft-custom-data"))
 	snapshot := config.Default() // data_dir deliberately removed
+
 	got, err := resolvedUpgradeSnapshotPaths(snapshot, defaults.ConfigFile)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	want := makeUpgradePathDescriptor(defaults, defaults.ConfigFile)
 	if got != want {
 		t.Fatalf("fresh snapshot paths = %+v, want replacement defaults %+v", got, want)
 	}
+
 	if got == makeUpgradePathDescriptor(running, defaults.ConfigFile) {
 		t.Fatal("removed data_dir inherited the running daemon's custom paths")
 	}
@@ -95,14 +99,18 @@ func TestRunControlLoopKeepsServingAfterUpgradeError(t *testing.T) {
 			if request.execPath != "/tmp/new-gr" {
 				t.Errorf("upgrade callback path = %q", request.execPath)
 			}
+
 			callback <- struct{}{}
 			return wantErr
 		})
 	}()
 
 	upgrades <- newUpgradeRequest("/tmp/new-gr")
+
 	<-callback
+
 	signals <- syscall.SIGTERM
+
 	<-shutdown
 
 	if got := <-done; got != nil {
@@ -128,11 +136,13 @@ func TestRunControlLoopFailsClosedAfterUnsafeDescriptorRollback(t *testing.T) {
 	}()
 
 	upgrades <- newUpgradeRequest("/tmp/new-gr")
+
 	select {
 	case <-shutdown:
 	case <-time.After(time.Second):
 		t.Fatal("unsafe rollback did not shut down the daemon")
 	}
+
 	var unsafeErr *upgradeDescriptorSafetyError
 	if err := <-done; !errors.As(err, &unsafeErr) {
 		t.Fatalf("runControlLoop error = %v, want unsafe descriptor error", err)

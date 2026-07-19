@@ -616,6 +616,7 @@ func LoadState(path string) (*State, error) {
 	if state.TriggerRuntime == nil {
 		state.TriggerRuntime = make(map[string]*TriggerRuntimeState)
 	}
+
 	if state.UpgradeCleanup == nil {
 		state.UpgradeCleanup = make(map[string]UpgradeCleanupState)
 	}
@@ -672,28 +673,36 @@ func LoadStateSnapshotForAdoption(data []byte) (*State, int, error) {
 	if err := json.Unmarshal(data, &state); err != nil {
 		return nil, 0, fmt.Errorf("decode state for adoption: %w", err)
 	}
+
 	originalVersion := state.Version
 	if state.Version > CurrentStateVersion {
 		return nil, originalVersion, &StateVersionError{FileVersion: state.Version, BinaryVersion: CurrentStateVersion}
 	}
+
 	if err := migrateState(&state); err != nil {
 		return nil, originalVersion, fmt.Errorf("migrate state for adoption: %w", err)
 	}
+
 	if state.Sessions == nil {
 		state.Sessions = make(map[string]*SessionState)
 	}
+
 	if state.Scenarios == nil {
 		state.Scenarios = make(map[string]*ScenarioState)
 	}
+
 	if state.PairedDevices == nil {
 		state.PairedDevices = make(map[string]*PairedDevice)
 	}
+
 	if state.TriggerRuntime == nil {
 		state.TriggerRuntime = make(map[string]*TriggerRuntimeState)
 	}
+
 	if state.UpgradeCleanup == nil {
 		state.UpgradeCleanup = make(map[string]UpgradeCleanupState)
 	}
+
 	if state.PRWatchPromptedAuthors == nil {
 		state.PRWatchPromptedAuthors = make(map[string]bool)
 	}

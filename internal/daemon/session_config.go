@@ -436,8 +436,10 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 
 		// autoReleaseNewlyTrusted reads the current config itself (sm.cfg was set
 		// above), so a later reload that tightens trust wins over this worker.
+		// Trust re-evaluation is daemon-owned and intentionally survives the
+		// config reload request that scheduled it.
 		sm.startBackgroundTask(context.Background(), func(context.Context) {
-			sm.autoReleaseNewlyTrusted()
+			sm.autoReleaseNewlyTrusted() //nolint:contextcheck // trust re-evaluation is intentionally daemon-owned
 		})
 	}
 

@@ -259,7 +259,9 @@ func (sm *SessionManager) createPRRefWatcher(ctx context.Context, id, worktree s
 	}
 
 	if startRepo {
-		if !sm.startBackgroundTask(repo.ctx, func(context.Context) {
+		// repo.ctx is the repository watcher's lifetime context; the task and
+		// watcher deliberately share that owner rather than a joining request.
+		if !sm.startBackgroundTask(repo.ctx, func(context.Context) { //nolint:contextcheck // repo-owned lifetime is propagated explicitly
 			sm.runPRRefRepoWatcher(repo)
 		}) {
 			repo.stop()

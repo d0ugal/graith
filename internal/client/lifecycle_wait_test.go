@@ -102,12 +102,15 @@ func TestWaitForNewDaemonGenerationUsesUpgradeReadinessFloor(t *testing.T) {
 	daemonStartTimeout = 10 * time.Millisecond
 	daemonStartPollInterval = time.Millisecond
 	upgradeReadinessFloor = 100 * time.Millisecond
+
 	t.Cleanup(func() {
 		daemonStartTimeout = originalStart
 		daemonStartPollInterval = originalPoll
 		upgradeReadinessFloor = originalFloor
 	})
+
 	started := time.Now()
+
 	stubDialLocalDaemon(t, func() (net.Conn, error) {
 		instanceID := "old-gen"
 		if time.Since(started) >= 30*time.Millisecond {
@@ -116,6 +119,7 @@ func TestWaitForNewDaemonGenerationUsesUpgradeReadinessFloor(t *testing.T) {
 
 		return handshakeReplyConn(t, version.Version, instanceID), nil
 	})
+
 	if !waitForNewDaemonGeneration("unused.sock", config.Paths{}, version.Version, "old-gen") {
 		t.Fatal("healthy replacement inside upgrade floor was reported unavailable")
 	}

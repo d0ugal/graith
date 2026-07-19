@@ -352,7 +352,9 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 		sm.runBinding(taskCtx, t.Name, b, matcher)
 	}) {
 		cancel()
+
 		_ = watcher.Close()
+
 		sm.triggers.mu.Lock()
 		if sm.triggers.bindings[key] == b {
 			delete(sm.triggers.bindings, key)

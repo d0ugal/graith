@@ -89,6 +89,7 @@ func (sm *SessionManager) notifyFromDaemon(sessionID, body string) error {
 		sm.log.Error("failed to publish daemon notification", "session", sessionID, "err", err)
 		return err
 	}
+
 	sm.startBackgroundTask(context.Background(), func(ctx context.Context) {
 		sm.notifyInboxContext(ctx, sessionID, systemSenderID, systemSenderName, false)
 	})
@@ -118,6 +119,7 @@ func (sm *SessionManager) notifyInboxContext(ctx context.Context, targetID, send
 		timing := sm.Config().Notifications.Timing
 		waitForUserIdleContext(ctx, ptySess, timing.InboxIdleTimeoutDuration(), timing.InboxMaxWaitDuration())
 	}
+
 	if ctx.Err() != nil {
 		return
 	}
@@ -240,9 +242,11 @@ func (sm *SessionManager) notifyUnreadInboxContext(ctx context.Context, sessionI
 				default:
 				}
 			}
+
 			return
 		}
 	}
+
 	if ctx.Err() != nil {
 		return
 	}
@@ -273,7 +277,7 @@ func (sm *SessionManager) notifyUnreadInboxContext(ctx context.Context, sessionI
 
 func waitForUserIdleContext(ctx context.Context, session SessionDriver, idleTimeout, maxWait time.Duration) bool {
 	if waiter, ok := session.(interface {
-		WaitForUserIdleContext(context.Context, time.Duration, time.Duration) bool
+		WaitForUserIdleContext(ctx context.Context, idleTimeout, maxWait time.Duration) bool
 	}); ok {
 		return waiter.WaitForUserIdleContext(ctx, idleTimeout, maxWait)
 	}
@@ -360,6 +364,7 @@ func (sm *SessionManager) sendNotification(sessionName, status, command string) 
 
 	if runtime.GOOS == "darwin" {
 		script := fmt.Sprintf(`display notification %q with title %q`, message, title)
+
 		sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) {
 			if err := exec.CommandContext(taskCtx, tools.OSAScript(), "-e", script).Run(); err != nil {
 				sm.log.Error("osascript notification failed", "err", err)

@@ -48,6 +48,7 @@ func (sm *SessionManager) ConvertToInteractive(id string, rows, cols uint16) (Se
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session %q not found", id)
 	}
+
 	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
 		sm.mu.Unlock()
 
@@ -287,6 +288,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session %q not found", id)
 	}
+
 	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
 		sm.mu.Unlock()
 
@@ -901,6 +903,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 
 		return SessionState{}, fmt.Errorf("resume cancelled before process launch: %w", err)
 	}
+
 	if err := sm.lifecyclePreSpawnBarrier(); err != nil {
 		slot.release()
 		rollbackState()
@@ -990,6 +993,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		Agent:         agent,
 		SandboxConfig: sandboxMerged,
 	}
+
 	if scrapesID(sessAgent) && sessAgentSessionID == "" {
 		captureStartedAt := startedAt.UTC()
 		sessState.NativeStateRoot = env["CODEX_HOME"]
@@ -1089,7 +1093,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		"scrollback_path", logPath)
 
 	sm.startWatcher(id, ptySess)
-	sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) {
+	sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) { //nolint:contextcheck // unread notification is daemon-owned after resume commits
 		sm.notifyUnreadInboxContext(taskCtx, id)
 	})
 
@@ -1097,7 +1101,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	// to its empty-id behaviour; scrape the id now so the *next* resume is
 	// deterministic. Skipped when an id is already known.
 	if scrapesID(sessAgent) && sessAgentSessionID == "" {
-		sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) {
+		sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) { //nolint:contextcheck // native-ID capture is daemon-owned after resume commits
 			sm.captureNativeSessionIDContext(taskCtx, id, sessAgent, sessWorktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
 		})
 	}

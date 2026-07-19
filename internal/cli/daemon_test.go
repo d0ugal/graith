@@ -108,6 +108,7 @@ func (f *fakeUpgradeConn) SendControl(msgType string, _ any) error {
 	if f.sendErr != nil && (f.sendErrAt == 0 || f.sendErrAt == len(f.sent)) {
 		return f.sendErr
 	}
+
 	return nil
 }
 
@@ -135,6 +136,7 @@ func setupUpgradeTest(t *testing.T) *fakeConnClock {
 		dialUpgradeClient, probeDaemonIdentityFn, out, paths = origDial, origProbe, origOut, origPaths
 		upgradeNegotiationFloor, upgradeReadinessFloor = origNegotiationFloor, origReadinessFloor
 	})
+
 	upgradeNegotiationFloor = 0
 	upgradeReadinessFloor = 0
 
@@ -207,6 +209,7 @@ func TestExecUpgradeInstallsConfiguredHandshakeDeadline(t *testing.T) {
 
 func TestExecUpgradeNegotiationFloorCoversServerAdmission(t *testing.T) {
 	setupUpgradeTest(t)
+
 	upgradeNegotiationFloor = 30 * time.Second
 	cfg.Connection.HandshakeTimeout = "1s"
 	fixedNow := time.Unix(1_700_000, 0)
@@ -223,6 +226,7 @@ func TestExecUpgradeNegotiationFloorCoversServerAdmission(t *testing.T) {
 	if err := execUpgrade("done"); err == nil {
 		t.Fatal("expected injected refusal")
 	}
+
 	if want := fixedNow.Add(30 * time.Second); !fake.deadline.Equal(want) {
 		t.Fatalf("upgrade negotiation deadline = %v, want %v", fake.deadline, want)
 	}

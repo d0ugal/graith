@@ -4727,7 +4727,6 @@ func Load(path string) (*Config, error) {
 // relative semantics. Upgrade adoption uses it to avoid reopening a path that
 // may have changed after the old daemon's final pre-exec validation.
 func LoadBytes(path string, data []byte) (*Config, error) {
-
 	cfg := Default()
 
 	defaultAgents := cfg.Agents
