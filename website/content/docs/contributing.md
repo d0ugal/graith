@@ -19,7 +19,7 @@ Or directly:
 go build -v -ldflags="-s -w" -o gr ./cmd/graith
 ```
 
-The entry point is `cmd/graith/main.go`. The binary's named `gr`, but the Go module path is `cmd/graith`.
+Entry point `cmd/graith/main.go`; the binary's named `gr` but the module path is `cmd/graith`.
 
 ## Tests
 
@@ -31,21 +31,17 @@ go test -race ./...        # with race detector (CI runs this)
 go test ./internal/daemon/ # single package
 ```
 
-Unit tests live next to the code using the plain `<file>_test.go` convention.
-Use `t.TempDir()` for fixtures -- never hardcode paths.
-
+Unit tests live next to the code as `<file>_test.go`. Use `t.TempDir()` for fixtures -- never hardcode paths.
 
 ### Integration tests
 
-Integration tests spawn a real daemon and exercise the full client-daemon-PTY pipeline:
+These spawn a real daemon, exercising the full client-daemon-PTY pipeline:
 
 ```bash
 go test -v -race -tags=integration ./internal/integration/...
 ```
 
-They're gated behind the `integration` build tag, so `go test ./...` skips them. CI runs them separately on Ubuntu and macOS.
-
-The harness (`internal/integration/integration_test.go`) creates a temporary git repo, starts a `SessionManager` with `config.Paths` pointing at temp directories, and connects over a real Unix socket.
+The `integration` build tag keeps them out of `go test ./...`; CI runs them separately on Ubuntu and macOS. The harness (`internal/integration/integration_test.go`) makes a temp git repo, starts a `SessionManager` with `config.Paths` in temp dirs, and connects over a real Unix socket.
 
 ### Fuzz tests
 
@@ -61,9 +57,7 @@ go test -fuzz=FuzzStripANSI ./internal/detector/
 
 ### Coverage
 
-CI measures Go and Swift coverage on every PR and posts a summary comment
-(overall % plus a Go delta vs the base branch) via the `Coverage` workflow — no
-third-party service. Generate the Go report locally:
+The `Coverage` workflow measures Go and Swift coverage per PR, posting a comment (overall % plus a Go delta vs base) — no third-party service. Go report locally:
 
 ```bash
 go test -coverprofile=coverage.txt ./...
@@ -71,7 +65,7 @@ go tool cover -func=coverage.txt   # overall % (total: line)
 go tool cover -html=coverage.txt   # browsable HTML report
 ```
 
-Swift coverage for the shared package:
+Swift, shared package:
 
 ```bash
 swift test --package-path gui/shared --enable-code-coverage
@@ -88,18 +82,18 @@ make lint-only  # lint without fixing
 make fmt        # format only
 ```
 
-Locally, at minimum:
+Locally:
 
 ```bash
 gofmt -w path/to/modified.go  # format modified Go files
 go vet ./...    # static analysis
 ```
 
-`.golangci.yml` enables `govet`, `staticcheck`, `ineffassign`, `unused`, `gocritic`, `misspell`, plus `gofmt` formatting. CI fails on violations.
+`.golangci.yml` enables `govet`, `staticcheck`, `ineffassign`, `unused`, `gocritic`, `misspell`, and `gofmt`. CI fails on violations.
 
 ## Commit messages
 
-Commits must follow [Conventional Commits](https://www.conventionalcommits.org/). CI enforces it with [commitsar](https://github.com/aevea/commitsar).
+Commits must follow [Conventional Commits](https://www.conventionalcommits.org/), enforced by [commitsar](https://github.com/aevea/commitsar).
 
 ```
 feat: add idle timeout configuration
@@ -111,7 +105,7 @@ test: add fuzz test for frame decoder
 
 ## CI pipeline
 
-CI (`ci.yml`) runs on every push to `main` and every pull request:
+CI (`ci.yml`) runs on every push to `main` and every PR:
 
 | Job | What it does |
 |-----|-------------|
@@ -122,12 +116,11 @@ CI (`ci.yml`) runs on every push to `main` and every pull request:
 | Vulnerability Check | `govulncheck ./...` on Ubuntu |
 | Conventional Commits | Validates PR commit messages |
 
-A separate `coverage.yml` workflow runs on pull requests only and posts the
-coverage summary comment above — informational, not a required check.
+The separate `coverage.yml` workflow (PRs only) posts that summary comment — informational, not required.
 
 ## Profiles (`GRAITH_PROFILE`)
 
-Profiles let you run multiple independent graith instances on one machine. Set the `GRAITH_PROFILE` environment variable to isolate config, data, state, and the daemon socket.
+Set `GRAITH_PROFILE` to run multiple independent graith instances on one machine. Each gets its own:
 
 ```bash
 GRAITH_PROFILE=dev gr daemon start
@@ -135,28 +128,18 @@ GRAITH_PROFILE=dev gr new my-session --repo ~/Code/project
 GRAITH_PROFILE=dev gr list
 ```
 
-Each profile gets its own:
 - Config file: `~/.config/graith-<profile>/config.toml`
 - Data directory: `~/.local/share/graith-<profile>/`
 - Runtime directory and socket: `$XDG_RUNTIME_DIR/graith-<profile>/graith.sock`
 - State, logs, messages database, and tmp directory
 
-Profile names must be lowercase alphanumeric with hyphens (no leading hyphen), at most 32 characters. `"default"` is reserved. `gr list` shows the active profile name when one is set.
+Names must be lowercase alphanumeric with hyphens (no leading hyphen), at most 32 characters; `"default"` is reserved. `gr list` shows the active profile when set; with none, graith uses the base name `graith` for all paths. The daemon propagates it to child sessions.
 
-With no profile set, graith uses the base app name `graith` for all paths.
-
-**Use cases:**
-- Running a development build alongside a stable release
-- Testing config changes without affecting your main sessions
-- CI environments that need isolated daemon instances
-
-The daemon propagates `GRAITH_PROFILE` to child sessions via the environment, so sessions created under a profile stay within it.
+**Use cases:** a dev build alongside a stable release; config changes isolated from your main sessions; CI needing isolated daemons.
 
 ## Demo recording
 
-The demo GIF (`demo/graith.gif`, embedded in the repo README) is recorded with
-[VHS](https://github.com/charmbracelet/vhs), a declarative terminal recorder — a
-dev-only dependency. Install it once:
+The demo GIF (`demo/graith.gif`, embedded in the README) is recorded with [VHS](https://github.com/charmbracelet/vhs), a dev-only dependency. Install once:
 
 ```bash
 brew install vhs
@@ -164,28 +147,20 @@ brew install vhs
 go install github.com/charmbracelet/vhs@latest
 ```
 
-Re-record from the repo root:
+From the repo root:
 
 ```bash
 make demo         # build gr, set up an isolated demo env, record, tear down
 make demo-clean   # tear down the demo env if a run is interrupted
 ```
 
-`make demo` runs against a dedicated `GRAITH_PROFILE=demo` instance, fully
-isolated from your real sessions and config. It uses your real local agents
-(`claude`/`codex`) under your real sandbox configuration — both copied from your
-default config — and the tape attaches and types real prompts, so the demo's the
-genuine article (it spends a little API token budget). The whole setup lives in
-`demo/`; see
-[`demo/README.md`](https://github.com/d0ugal/graith/blob/main/demo/README.md)
-for the tape format and how to tweak the recording.
+`make demo` uses a dedicated, isolated `GRAITH_PROFILE=demo` instance with your real local agents (`claude`/`codex`) and sandbox config, copied from your default config. The tape types real prompts, so it spends some API budget. Setup lives in `demo/`; see [`demo/README.md`](https://github.com/d0ugal/graith/blob/main/demo/README.md) for the tape format.
 
-Recording must run **locally and unsandboxed**: VHS needs a real TTY, the daemon
-binds a unix socket, and sessions create git worktrees — so it's not a CI step.
+Recording must run **locally and unsandboxed** (VHS needs a real TTY, the daemon binds a unix socket, sessions create git worktrees), so it's not a CI step.
 
 ## Project layout
 
-All packages live under `internal/` -- there's no public Go API.
+Packages live under `internal/`; no public Go API.
 
 ```
 cmd/graith/              Entry point (main.go)
@@ -210,16 +185,14 @@ internal/
 
 ## Development workflow
 
-After rebuilding, pick up the new binary in the running daemon:
+After rebuilding, refresh the running daemon:
 
 ```bash
 make build
 gr daemon restart    # preserves live sessions
 ```
 
-The client binary in your shell also needs a fresh build. `gr daemon restart` replaces the daemon binary via exec.
-
-For protocol or handler changes, integration tests are the most reliable check -- they exercise the full wire protocol path:
+Rebuild your shell's client binary too. For protocol/handler changes, integration tests are the best check:
 
 ```bash
 go test -v -race -tags=integration ./internal/integration/...
@@ -227,4 +200,4 @@ go test -v -race -tags=integration ./internal/integration/...
 
 ## Errors
 
-Return `fmt.Errorf(...)` from library code. Don't use `log.Fatal` in packages under `internal/` -- only `main.go` should exit the process. The daemon logs via `slog` in JSON to `~/.local/share/graith/daemon.log`.
+Return `fmt.Errorf(...)` from library code. Don't use `log.Fatal` under `internal/` -- only `main.go` exits. The daemon logs JSON via `slog` to `~/.local/share/graith/daemon.log`.

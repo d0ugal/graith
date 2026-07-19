@@ -7,16 +7,14 @@ toc: true
 draft: false
 ---
 
-The `gr remote` namespace covers both sides of device pairing and connections to
-daemons over a Tailscale tailnet. Configure the listener first; see
-[Orchestrator & remote access]({{< relref "/docs/configuration/access.md#remote-access" >}}).
+Pair devices and connect to daemons over a Tailscale tailnet. Configure the
+listener first — see [Orchestrator & remote access]({{< relref "/docs/configuration/access.md#remote-access" >}}).
 
 ## Pair a client
 
 ### `gr remote pair <host>`
 
-Request pairing with a remote daemon. The command waits while a local human on
-the daemon host approves the request with
+Request pairing with a remote daemon; blocks until a local human on the host runs
 `gr remote pairings approve <request-id>`.
 
 | Flag | Description |
@@ -27,30 +25,29 @@ the daemon host approves the request with
 
 ## Administer paired devices
 
-These commands always connect through the local Unix socket and require the
-local-human credential. The daemon rejects the same administrative messages over
-a remote connection.
+These connect through the local Unix socket and need the local-human credential;
+the daemon rejects them remotely.
 
 ### `gr remote pairings list`
 
-List pending requests and paired devices. With `--json`, the existing
-`pending` and `paired` arrays are emitted for machine consumers.
+List pending requests and paired devices. `--json` emits `pending` and `paired`
+arrays.
 
 ### `gr remote pairings approve <request-id>`
 
-Approve a pending request and return the device ID and TLS SPKI pin. The waiting
-client receives its credential over the pairing connection.
+Approve a pending request, returning the device ID and TLS SPKI pin. The waiting
+client receives its credential.
 
 ### `gr remote pairings revoke <device-id>`
 
-Revoke a paired device. Revocation force-closes that device's live connections.
+Revoke a paired device, force-closing its live connections.
 
 ## List and attach
 
 ### `gr remote list`
 
-List remote hosts paired by this client. Deliberately separate from
-`gr remote pairings list`, which administers devices trusted by the local host.
+List remote hosts paired by this client — the client-side counterpart to
+`gr remote pairings list`.
 
 ### `gr remote attach <host>/<session>`
 

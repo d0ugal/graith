@@ -17,8 +17,8 @@ gr config diff     # show changes from defaults
 gr config reset    # write built-in defaults to config file
 ```
 
-The daemon reloads config on `gr daemon reload` without restarting. It also
-watches `config.toml` and reloads in place when you save it:
+The daemon reloads config on `gr daemon reload` without restarting, and also
+watches `config.toml` to reload in place when you save it:
 
 ```toml
 [config]
@@ -26,33 +26,29 @@ reload_debounce = "200ms"  # quiet period after the last write before reloading
 ```
 
 `reload_debounce` coalesces an editor's write-truncate-write burst into a single
-reload. It's read when the daemon starts, so a change to `reload_debounce`
-itself only takes effect after a `gr daemon restart` (every other setting
-re-reads on reload).
+reload. Read at daemon start, so changing it takes effect only after a
+`gr daemon restart` (every other setting re-reads on reload).
 
 A reload is applied as one config generation. If a runtime change can't be
-applied, the command or automatic watcher logs an error and keeps the previous
-generation visible. Remote listener replacement is stricter and fail-closed:
-graith closes the old remote listener before attempting the new bind,
-so a failed remote transport reload keeps the previous config but leaves remote
-access closed until a corrected reload or restart succeeds. See
+applied, the command or watcher logs an error and keeps the previous generation
+visible. Remote listener replacement is stricter and fail-closed: graith closes
+the old listener before the new bind, so a failed remote-transport reload keeps
+the previous config but leaves remote access closed until a corrected reload or
+restart succeeds. See
 [Orchestrator & remote access]({{< relref "access.md#hot-reload-and-revocation" >}}).
 
-> **Full default config.** The complete, annotated set of defaults lives in
+> **Full default config.** The complete, annotated defaults live in
 > [`internal/config/default_config.toml`](https://github.com/d0ugal/graith/blob/main/internal/config/default_config.toml)
-> — the same file `gr config reset` writes. Run `gr config reset` to drop a copy
-> into `~/.config/graith/config.toml`, `gr config show` to print the effective
-> merged config, or `gr config diff` to see only what you've changed. The pages
-> below document each block; the file is the authoritative reference.
+> — the file `gr config reset` writes, and the authoritative reference.
 
 This reference is organized by area:
 
-- **[Agents & repositories]({{< relref "agents.md" >}})** — agent definitions, template variables, MCP servers, per-agent sandbox, and per-repo settings.
-- **[Session behavior]({{< relref "sessions.md" >}})** — headless sessions, delete retention, the launch throttle, and periodic git pull.
-- **[Notifications & messages]({{< relref "notifications.md" >}})** — the status bar, desktop/push notifications, and messages.
-- **[Automation & PR awareness]({{< relref "automation.md" >}})** — PR/CI watching, the comment author-trust gate, and triggers.
-- **[TUI & input]({{< relref "interface.md" >}})** — keybindings, the overlay, and input handling.
-- **[Orchestrator & remote access]({{< relref "access.md" >}})** — the orchestrator session and the tailnet remote listener.
+- **[Agents & repositories]({{< relref "agents.md" >}})** — agents, template variables, MCP servers, sandbox, per-repo settings.
+- **[Session behavior]({{< relref "sessions.md" >}})** — headless sessions, delete retention, launch throttle, git pull.
+- **[Notifications & messages]({{< relref "notifications.md" >}})** — status bar, notifications, messages.
+- **[Automation & PR awareness]({{< relref "automation.md" >}})** — PR/CI watching, author-trust gate, triggers.
+- **[TUI & input]({{< relref "interface.md" >}})** — keybindings, overlay, input handling.
+- **[Orchestrator & remote access]({{< relref "access.md" >}})** — orchestrator session, tailnet remote listener.
 
 ## Global settings
 
@@ -67,13 +63,13 @@ allowed_repo_paths = []                   # restrict which repo paths the daemon
 
 ### `agent_prompt`
 
-A multiline string injected into the agent's environment. For Claude, it's passed via `--append-system-prompt`. For Cursor, it's written to `.cursor/rules/graith.mdc`. For Codex, it's passed as a per-session `-c developer_instructions=...` config override (never written to a repository `AGENTS.md`). Other agents (OpenCode, Agy) and custom agents get no prompt injection by default, but can opt in by setting `prompt_injection` to one of `append_system_prompt`, `cursor_rules`, or `developer_instructions` under `[agents.<name>]` (see [Agents]({{< relref "agents.md" >}})). It teaches agents how to use `gr status`, `gr msg`, `gr store`, and other graith primitives. Set `inject_prompt = false` per-agent to disable.
+A multiline string injected into the agent's environment, teaching agents to use `gr status`, `gr msg`, `gr store`, and other graith primitives. Claude gets it via `--append-system-prompt`; Cursor via `.cursor/rules/graith.mdc`; Codex via a per-session `-c developer_instructions=...` override (never written to a repository `AGENTS.md`). Other agents (OpenCode, Agy) and custom agents get no injection by default but can opt in via `prompt_injection` under `[agents.<name>]` (see [Agents]({{< relref "agents.md" >}})). Set `inject_prompt = false` per-agent to disable.
 
-For Codex specifically, `developer_instructions` is a single-valued config key, so graith's override **replaces** (doesn't append to) any `developer_instructions` you've set in `~/.codex/config.toml`, a project `.codex/config.toml`, or a selected profile — the CLI override is the highest-precedence layer. If you rely on your own Codex `developer_instructions`, set `inject_prompt = false` under `[agents.codex]` to keep them and skip graith's injection.
+For Codex, `developer_instructions` is single-valued, so graith's override **replaces** (not appends to) any set in `~/.codex/config.toml`, a project `.codex/config.toml`, or a selected profile — the CLI override is highest-precedence. To keep your own, set `inject_prompt = false` under `[agents.codex]`.
 
 ### `allowed_repo_paths`
 
-When non-empty, the daemon rejects `--repo` / `-C` paths that aren't under one of these prefixes. Paths support `~` expansion and resolve to absolute paths before comparison. These paths also feed the repo autocomplete in the create-session form (`ctrl+b c` or `n` in the overlay) — each is scanned one level deep for git repositories.
+When non-empty, the daemon rejects `--repo` / `-C` paths not under one of these prefixes. Paths support `~` expansion and resolve to absolute before comparison. They also feed the repo autocomplete in the create-session form (`ctrl+b c` or `n` in the overlay) — each is scanned one level deep for git repositories.
 
 ```toml
 allowed_repo_paths = ["~/Code", "~/Work"]
@@ -81,7 +77,7 @@ allowed_repo_paths = ["~/Code", "~/Work"]
 
 ## File locations
 
-graith follows the XDG base directory spec:
+graith follows the XDG base directory spec (override `data_dir` to change the base data directory):
 
 | Path | Contents |
 |------|----------|
@@ -95,5 +91,3 @@ graith follows the XDG base directory spec:
 | `~/.local/share/graith/tmp/<repo-name>/<hash>/` | Per-repo temp directories |
 | `$XDG_RUNTIME_DIR/graith/graith.sock` | Unix control socket |
 | `$XDG_RUNTIME_DIR/graith/graith.pid` | Daemon PID file |
-
-Override `data_dir` in config to change the base data directory.

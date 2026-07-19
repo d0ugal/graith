@@ -9,7 +9,7 @@ draft: false
 
 ## Overview
 
-graith is a daemon/client system. A long-lived daemon (`graithd`) owns PTY sessions and persists state; a stateless CLI client (`gr`) connects over a Unix socket.
+A long-lived daemon (`graithd`) owns PTY sessions and persists state; a stateless CLI client (`gr`) connects over a Unix socket.
 
 ```mermaid
 graph LR
@@ -20,7 +20,7 @@ graph LR
 
 ## Wire protocol
 
-The protocol uses 5-byte framed multiplexing:
+5-byte framed multiplexing:
 
 ```
 [channel:1 byte][length:4 bytes big-endian][payload:N bytes]
@@ -40,7 +40,7 @@ Control messages use a JSON envelope:
 {"type": "create", "payload": {"name": "fix-bug", "agent": "claude", ...}}
 ```
 
-The client sends a message type; the daemon responds with a matching response type or `error`. The protocol is versioned (currently `1.0`) and checked during handshake.
+The client sends a message type; the daemon responds with a matching response type or `error`. The protocol is versioned (`1.0`) and checked during handshake.
 
 ### Message types
 
@@ -103,109 +103,75 @@ The daemon (`SessionManager`) is the central component:
 - **Session lifecycle:** create, stop, resume, restart, delete, fork
 - **PTY management:** spawning, resizing, I/O multiplexing
 - **State persistence:** `state.json` loaded on start, saved on mutations
-- **Worktree management:** creating, removing git worktrees and branches
+- **Worktree management:** git worktrees and branches
 - **Client handling:** connection acceptance, frame demuxing, message dispatch
-- **Hook reporting:** tracking agent status from hook reports
-- **Command policy:** bounded synchronous shell checks that can only deny before normal agent execution
+- **Hook reporting:** agent status from hook reports
+- **Command policy:** bounded synchronous shell checks that can only deny before agent execution
 - **MCP management:** proxying MCP connections for sessions
 - **Git pull:** periodic background pulls (when enabled)
-- **Idle timeout:** automatic session stopping after inactivity
+- **Idle timeout:** auto-stop after inactivity
 
 ### State persistence
 
-`state.json` stores session metadata: ID, name, agent type, repo path, worktree path, branch, status, parent ID, starred flag, and timestamps. It's loaded on daemon start and written synchronously on every mutation.
+`state.json` stores session metadata: ID, name, agent type, repo path, worktree path, branch, status, parent ID, starred flag, and timestamps. It's loaded on daemon start and written synchronously on every mutation. Runtime-only state — hook reports, attached clients, in-memory caches — isn't persisted; it's rebuilt from PTY state on restart.
 
-Runtime-only state — hook reports, attached clients, and in-memory caches — isn't persisted; it's rebuilt from PTY state on restart.
-
-**State-version backups.** The state file carries a schema version, and a newer daemon migrates an older `state.json` forward in place. Since a downgraded (older) binary won't start against forward-migrated state, the daemon writes a crash-safe copy of the pre-migration file to `state.json.v<oldVersion>.bak` (alongside `state.json`) *before* migrating. Only the most recent pre-migration backup is kept — an earlier one is removed once the new backup is durable. To recover a downgrade, stop the daemon, restore the backup over `state.json` (e.g. `mv state.json.v16.bak state.json`), and start the older binary. `gr doctor` lists any available backups.
+**State-version backups.** The state file carries a schema version; a newer daemon migrates an older `state.json` forward in place. Since a downgraded binary won't start against forward-migrated state, the daemon *first* writes a crash-safe copy of the pre-migration file to `state.json.v<oldVersion>.bak` (alongside `state.json`). Only the most recent backup is kept — an earlier one is removed once the new one is durable. To recover a downgrade: stop the daemon, restore the backup over `state.json` (e.g. `mv state.json.v16.bak state.json`), and start the older binary. `gr doctor` lists available backups.
 
 ### Session manager locking
 
-The `SessionManager` uses a `sync.RWMutex` for concurrent access. Reads (list, info) take a read lock; mutations (create, delete, stop) take a write lock. The handler dispatches all control messages through the session manager.
+`SessionManager` uses a `sync.RWMutex`: reads (list, info) take a read lock; mutations (create, delete, stop) take a write lock. The handler dispatches all control messages through it.
 
 ## Client
 
-The client is stateless. On each command, it:
+The client is stateless. Each command connects to the Unix socket, sends a handshake (version, terminal size, working directory) then the command-specific control message, reads the response, and disconnects.
 
-1. Connects to the Unix socket
-2. Sends a handshake (version, terminal size, working directory)
-3. Sends the command-specific control message
-4. Reads the response
-5. Disconnects
-
-For `attach`, the client enters a loop:
+For `attach`, the client loops between three modes, switching on prefix key commands and overlay actions:
 
 1. **Passthrough mode:** raw terminal I/O forwarded to/from the daemon
 2. **Overlay mode:** session picker TUI (Bubble Tea)
 3. **Shell mode:** interactive shell in the worktree
 
-The client switches between these modes on prefix key commands and overlay actions.
-
 ### Passthrough
 
-In passthrough mode:
-
 - Terminal is set to raw mode
-- stdin is read in a goroutine and forwarded to the daemon on channel `0x01`
-- Daemon output on channel `0x01` is written to stdout
+- stdin is read in a goroutine and forwarded to the daemon on channel `0x01`; daemon output on `0x01` is written to stdout
 - Control messages on channel `0x00` are processed (detach, status updates, screen snapshots)
 - The prefix key intercepts the next keystroke for commands
 - SIGWINCH signals trigger PTY resize messages
 
 ### Overlay
 
-The overlay is a full-screen TUI built with [Bubble Tea](https://github.com/charmbracelet/bubbletea). It renders session lists with filtering, view modes, and a live preview panel. The preview uses [vt10x](https://github.com/hinshun/vt10x) to parse terminal output into a rendered screen.
+A full-screen TUI built with [Bubble Tea](https://github.com/charmbracelet/bubbletea), rendering session lists with filtering, view modes, and a live preview panel. The preview uses [vt10x](https://github.com/hinshun/vt10x) to parse terminal output into a rendered screen.
 
 
 ## PTY management
 
-Each session has a PTY session (`pty/session.go`) that:
-
-- Spawns the agent process with a pseudoterminal
-- Multiplexes PTY output to: the attached client (if any) and the scrollback file
-- Handles resize signals
-- Manages process lifecycle (start, stop, restart)
+Each session's PTY (`pty/session.go`) spawns the agent process with a pseudoterminal, multiplexes output to the attached client (if any) and the scrollback file, handles resize signals, and manages process lifecycle (start, stop, restart).
 
 ### Scrollback
 
-PTY output is appended to a scrollback file (`pty/scrollback.go`). The file supports:
-
-- Append-only writes (concurrent-safe)
-- Tail reads (for `gr logs --lines N`)
-- Follow reads (for `gr logs --follow`)
+PTY output is appended to a scrollback file (`pty/scrollback.go`) supporting append-only writes (concurrent-safe), tail reads (`gr logs --lines N`), and follow reads (`gr logs --follow`).
 
 ## Messaging
 
-The messaging system (`daemon/msgstore.go`) uses SQLite:
-
-- Messages are stored with stream name, body, sender info, thread ID, reply-to, and timestamp
-- Subscriber positions are tracked per-stream for unread counting
-- `--wait` and `--follow` use polling with notification channels
-- Retention is enforced by `max_age` and `max_per_stream`
+The messaging system (`daemon/msgstore.go`) uses SQLite. Messages carry stream name, body, sender info, thread ID, reply-to, and timestamp; subscriber positions are tracked per-stream for unread counting. `--wait` and `--follow` poll with notification channels. Retention is enforced by `max_age` and `max_per_stream`.
 
 ## Document store
 
-The store (`store/store.go`) operates directly on disk:
-
-- Each store is a git repository (initialized with `git init`)
-- Writes are committed with `git add` + `git commit`
-- Deletes are committed with `git rm` + `git commit`
-- Keys are validated against a strict set of rules (no path traversal, no special characters)
-- Per-repo stores are named `<repo-name>-<hash>` using the canonical repo path
-- The shared store uses a fixed `shared` directory
+The store (`store/store.go`) operates directly on disk. Each store is a git repository (`git init`): writes commit with `git add` + `git commit`, deletes with `git rm` + `git commit`. Keys are strictly validated (no path traversal, no special characters). Per-repo stores are named `<repo-name>-<hash>` from the canonical repo path; the shared store uses a fixed `shared` directory.
 
 ## Sandbox
 
-When sandbox is enabled (`sandbox/sandbox.go`), the backend is pluggable — selected with `[sandbox] backend` (`safehouse` = macOS `sandbox-exec`; `nono` = Landlock+seccomp on Linux / Seatbelt on macOS). `backend` is required when the sandbox is enabled; an unset backend fails closed.
+When sandbox is enabled (`sandbox/sandbox.go`), the backend is pluggable — selected with `[sandbox] backend` (`safehouse` = macOS `sandbox-exec`; `nono` = Landlock+seccomp on Linux / Seatbelt on macOS). `backend` is required when enabled; an unset backend fails closed.
 
 1. The daemon resolves the merged sandbox config (global + per-agent)
 2. `~` paths and globs are expanded to absolute
-3. The selected backend wraps the command — either `safehouse wrap` (`sandbox/safehouse.go`) or a generated per-session nono JSON profile run via `nono run --profile` (`sandbox/nono.go`)
+3. The backend wraps the command — either `safehouse wrap` (`sandbox/safehouse.go`) or a generated per-session nono JSON profile run via `nono run --profile` (`sandbox/nono.go`)
 4. Before session creation, the daemon checks the backend can enforce (binary present, kernel/version adequate, network policy supported); if not, creation fails closed
 
 ## Agent detection
 
-The `agent/agent.go` module detects AI agent environments by checking environment variables: `GRAITH_SESSION_ID`, `CLAUDECODE`, `CLAUDE_CODE`, `CURSOR_AGENT`, `GITHUB_COPILOT`, `AMAZON_Q`, `OPENCODE`. When detected, JSON output is auto-enabled. Override with `GR_AGENT_MODE=0` or `GR_AGENT_MODE=1`.
+`agent/agent.go` detects AI agent environments from environment variables: `GRAITH_SESSION_ID`, `CLAUDECODE`, `CLAUDE_CODE`, `CURSOR_AGENT`, `GITHUB_COPILOT`, `AMAZON_Q`, `OPENCODE`. When detected, JSON output is auto-enabled. Override with `GR_AGENT_MODE=0` or `GR_AGENT_MODE=1`.
 
 ## Package layout
 

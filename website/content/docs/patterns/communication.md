@@ -7,11 +7,11 @@ toc: true
 draft: false
 ---
 
-Coordinating running agents through graith's messaging primitives.
+Coordinating running agents via messaging.
 
 ## Publish/subscribe broadcast
 
-One agent publishes findings; many react:
+One publishes; many react:
 
 ```bash
 # Scanner agent
@@ -23,7 +23,7 @@ gr msg sub --topic vulnerabilities --follow --ack
 
 ## Request/reply
 
-A structured request with a designated reply channel:
+A request with a dedicated reply channel:
 
 ```bash
 # Requester
