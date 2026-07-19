@@ -1065,9 +1065,18 @@ func adoptGhosttySession(
 		t.Fatal(err)
 	}
 
+	cleanupBeforeAdoption := func() {
+		_ = unix.Close(ptyFD)
+		_ = writeEnd.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}
+
 	if len(initial) > 0 {
 		if _, err := scrollback.Write(initial); err != nil {
 			_ = scrollback.Close()
+
+			cleanupBeforeAdoption()
 
 			t.Fatal(err)
 		}
@@ -1077,6 +1086,8 @@ func adoptGhosttySession(
 	_ = scrollback.Close()
 
 	if err != nil {
+		cleanupBeforeAdoption()
+
 		t.Fatal(err)
 	}
 
