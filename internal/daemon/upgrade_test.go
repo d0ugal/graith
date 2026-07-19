@@ -2421,6 +2421,44 @@ func TestWaitForExactChildTreatsReapedExitedHelperAsResolved(t *testing.T) {
 	}
 }
 
+func TestWaitForProcessGroupGoneUntilRetriesReadOnlyProbe(t *testing.T) {
+	const pgid = 4242
+
+	probes := 0
+
+	if !waitForProcessGroupGoneUntil(pgid, time.Now().Add(time.Second), func(got int) bool {
+		if got != pgid {
+			t.Fatalf("process group probe = %d, want %d", got, pgid)
+		}
+
+		probes++
+
+		return probes == 3
+	}) {
+		t.Fatal("delayed process group disappearance was not observed")
+	}
+
+	if probes != 3 {
+		t.Fatalf("process group probes = %d, want 3", probes)
+	}
+}
+
+func TestWaitForProcessGroupGoneUntilHonorsExpiredDeadline(t *testing.T) {
+	probes := 0
+
+	if waitForProcessGroupGoneUntil(4242, time.Now().Add(-time.Second), func(int) bool {
+		probes++
+
+		return false
+	}) {
+		t.Fatal("live process group was accepted after the cleanup deadline")
+	}
+
+	if probes != 1 {
+		t.Fatalf("process group probes = %d, want one final read-only check", probes)
+	}
+}
+
 func TestUpgradeOwnershipGuardRetainsHelperOnIndeterminateIdentity(t *testing.T) {
 	startTime, err := grpty.ProcessStartTime(os.Getpid())
 	if err != nil {
