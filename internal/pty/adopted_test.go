@@ -61,7 +61,7 @@ func TestDegradedAdoptionDoesNotEnterBlockedScreenFactory(t *testing.T) {
 			factoryOnce.Do(func() { close(factoryEntered) })
 			<-releaseFactory
 
-			return newCharmTerminal(cols, rows), nil
+			return &terminalChunkRecorder{}, nil
 		},
 	})
 	if err != nil {

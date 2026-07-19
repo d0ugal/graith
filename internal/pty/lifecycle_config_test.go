@@ -336,7 +336,7 @@ func TestAdoptSessionDrainsRawPTYBeforeScreenFactoryReturns(t *testing.T) {
 				close(factoryStarted)
 				<-releaseFactory
 
-				return newCharmTerminal(cols, rows), nil
+				return &terminalChunkRecorder{}, nil
 			},
 		})
 		resultCh <- result{session: session, err: adoptErr}
@@ -433,7 +433,7 @@ func TestAdoptSessionOneShotFactoryFailureReplaysRetainedScreen(t *testing.T) {
 				return nil, errors.New("injected one-shot helper failure")
 			}
 
-			return newCharmTerminal(cols, rows), nil
+			return newTerminal(cols, rows)
 		},
 	})
 	if err != nil {
@@ -489,9 +489,10 @@ func TestDegradedScreenRecoveryBackoffPreservesAndReplaysRawOutput(t *testing.T)
 				return nil, errors.New("injected persistent helper failure")
 			}
 
-			return newCharmTerminal(cols, rows), nil
+			return newTerminal(cols, rows)
 		},
 	}
+	t.Cleanup(s.Close)
 
 	if got := s.ScreenPreview(); got != "" {
 		t.Fatalf("preview during outage = %q, want empty", got)
@@ -554,7 +555,7 @@ func TestAdoptSessionKthScreenFailurePreservesAllPTYsAndRecovers(t *testing.T) {
 			return nil, errors.New("injected terminal construction failure")
 		}
 
-		return newCharmTerminal(cols, rows), nil
+		return newTerminal(cols, rows)
 	}
 
 	type adoptedFixture struct {

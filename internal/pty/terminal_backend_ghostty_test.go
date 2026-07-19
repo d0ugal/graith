@@ -8,9 +8,9 @@ func ghosttyTerminalBackendExpectations() terminalBackendExpectations {
 	expectations.resizePreviews = []string{
 		"canny brae bide\n\n\n",
 		"ae b\nide",
-		"canny bra\ne bide\n",
-		" bide\n",
-		"canny brae b\nide\n\n",
+		"ae bide\n\n",
+		"ae bi\nde",
+		"ae bide\n\n\n",
 	}
 	// Ghostty implements all three alternate modes and clears the screen, but
 	// retains the main screen's cursor column on entry.

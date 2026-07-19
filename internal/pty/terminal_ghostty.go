@@ -26,6 +26,7 @@ var (
 // process; the daemon never owns a native terminal handle.
 type ghosttyTerminal struct {
 	terminal    *libghostty.Terminal
+	modeSet     func(libghostty.Mode, bool) error
 	renderState *libghostty.RenderState
 	rowIterator *libghostty.RenderStateRowIterator
 	rowCells    *libghostty.RenderStateRowCells
@@ -76,9 +77,15 @@ func newGhosttyTerminal(cols, rows int) (gt *ghosttyTerminal, err error) {
 		return nil, fmt.Errorf("create go-libghostty terminal: %w", err)
 	}
 
-	gt = &ghosttyTerminal{terminal: terminal, cols: cols, rows: rows, dirty: true}
+	gt = &ghosttyTerminal{
+		terminal: terminal,
+		modeSet:  terminal.ModeSet,
+		cols:     cols,
+		rows:     rows,
+		dirty:    true,
+	}
 
-	if err = terminal.ModeSet(libghostty.ModeGraphemeCluster, true); err != nil {
+	if err = gt.modeSet(libghostty.ModeGraphemeCluster, true); err != nil {
 		return nil, fmt.Errorf("enable go-libghostty grapheme clustering: %w", err)
 	}
 
@@ -141,7 +148,7 @@ func (gt *ghosttyTerminal) Write(p []byte) (n int, err error) {
 			gt.dirty = true
 
 			gt.previousByteWasESC = false
-			if err := gt.terminal.ModeSet(libghostty.ModeGraphemeCluster, true); err != nil {
+			if err := gt.modeSet(libghostty.ModeGraphemeCluster, true); err != nil {
 				return i + 1, fmt.Errorf("restore go-libghostty grapheme clustering after RIS: %w", err)
 			}
 
