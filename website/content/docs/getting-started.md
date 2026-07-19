@@ -24,13 +24,13 @@ for details. Once enabled, graith won't start or resume an agent if the backend
 can't enforce. Until you enable it, agents run under their own native controls
 only.
 
-The daemon starts automatically on your first command. Create a session:
+The daemon starts on your first command. Create a session:
 
 ```bash
 gr new fix-auth-bug
 ```
 
-Fetches from origin, creates a worktree on a new branch, starts a Claude agent there, and attaches your terminal. The agent gets an isolated copy of the repo; your main checkout is untouched.
+Fetches origin, creates a worktree on a new branch, starts a Claude agent, and attaches. The agent works in an isolated repo copy — your checkout is untouched.
 
 ## Detach and reattach
 
@@ -43,8 +43,6 @@ gr attach fix-auth-bug
 Or `gr attach` with no arguments opens the picker.
 
 ## Multiple sessions
-
-Create more sessions for parallel work:
 
 ```bash
 gr new refactor-api
@@ -77,14 +75,14 @@ Cycle views with `h`/`l` or left/right arrows:
 
 ## Sending prompts
 
-Start a session with an initial prompt:
+Start with an initial prompt:
 
 ```bash
 gr new fix-tests --prompt "the auth tests are flaky, find out why"
 gr new migration --prompt-file ./migration-plan.md
 ```
 
-Or type into a running session from outside:
+Or type into a running session:
 
 ```bash
 gr type fix-tests "please also check the integration tests"
@@ -115,13 +113,13 @@ gr update important-session --starred=false # remove deletion protection
 
 ## Forking
 
-Fork a session to branch off from a conversation:
+Branch off from a conversation:
 
 ```bash
 gr fork fix-auth-bug auth-approach-2
 ```
 
-This copies the source worktree into a new one and starts a fresh agent process. With `fork_args` configured, the new agent inherits the source's conversation history. The source session is unaffected.
+Copies the source worktree and starts a fresh agent. With `fork_args` configured, the new agent inherits the source's conversation history. The source session is unaffected.
 
 ## Monitoring
 
@@ -135,8 +133,6 @@ gr info                    # info for current session (auto-detected from cwd)
 ```
 
 ## Batch operations
-
-Stop or delete multiple sessions at once:
 
 ```bash
 gr stop --repo myproject                    # all sessions for a repo

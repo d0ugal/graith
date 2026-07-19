@@ -27,37 +27,35 @@ Restart the daemon, preserving live sessions via exec.
 
 After rebuilding `gr`, run `gr daemon restart` to pick up the new daemon binary.
 Crossing from the approval-era protocol to the non-interactive Graith protocol is
-an intentional breaking restart: graith gracefully stops the old daemon and all
-its PTY and headless sessions rather than asking that daemon to preserve them.
-It confirms the exact old socket peer has exited and its socket has disappeared
-before starting the replacement; if either check fails, no competing daemon
-starts. Resume stopped sessions to relaunch them under the new security model.
-Live adoption is allowed only when persisted state and the handoff manifest
-prove the exact process identity. Whether that process uses Graith's sandbox or
-the agent's native approval TUI is preserved, not treated as an adoption
-requirement. Sessions from releases before this security-model transition are
-terminated and marked stopped during upgrade; resume them to launch under the
-current configuration.
-Headless sessions have no adoptable PTY, so they're likewise identity-checked,
-terminated, and marked stopped rather than left unmanaged.
-The handoff manifest records every live process, not just transferable PTYs.
-The replacement process arms cleanup before loading configuration, paths, state,
-or authentication, so an early startup failure still identity-checks and
-terminates inherited agents.
-If the preserve request is accepted but the replacement still isn't ready after
-the configured startup wait, graith rechecks the live daemon. It only falls back
-to a clean start after proving the exact process that answered the pre-upgrade
-socket handshake has exited — a stale PID file alone isn't enough. The clean
-result is then checked for the requested version and a fresh daemon generation.
-Otherwise graith leaves the possible in-progress replacement alone. Retry once
-startup finishes, or use `--force` when killing the sessions is intentional.
+an intentional breaking restart: rather than preserving them, graith gracefully
+stops the old daemon and all its PTY and headless sessions once it confirms the
+exact old socket peer has exited and its socket has disappeared — if either check
+fails, no competing daemon starts. Resume stopped sessions to relaunch under the
+new security model.
+
+Live adoption requires persisted state and the handoff manifest to prove the
+exact process identity; the manifest records every live process, not just
+transferable PTYs. Whether that process uses Graith's sandbox or the agent's
+native approval TUI is preserved, not an adoption requirement. Sessions from
+pre-transition releases — and headless sessions, which have no adoptable PTY —
+are identity-checked, terminated, and marked stopped rather than left unmanaged.
+
+The replacement arms cleanup before loading configuration, paths, state, or
+authentication, so an early failure still identity-checks and terminates
+inherited agents. If preserve is accepted but the replacement isn't ready after
+the configured startup wait, graith rechecks the live daemon and falls back to a
+clean start only after proving the exact process that answered the pre-upgrade
+handshake has exited — a stale PID file isn't enough — then checks that result
+for the requested version and a fresh daemon generation. Otherwise it leaves the
+possible in-progress replacement alone: retry once startup finishes, or use
+`--force` to kill the sessions intentionally.
 
 ### `gr daemon reload`
 
 Reload configuration without restarting the daemon. Invalid settings or a
-runtime apply failure return an error and leave the previous config generation
-in place. Remote transport replacement closes the old listener first and stays
-closed if the replacement fails; fix the setting and reload again through the
+runtime apply failure return an error and leave the previous config generation in
+place. Remote transport replacement closes the old listener first and stays
+closed if the replacement fails — fix the setting and reload again through the
 local socket. See [remote hot reload]({{< relref "/docs/configuration/access.md#hot-reload-and-revocation" >}}).
 
 ## Other commands
@@ -82,8 +80,7 @@ Write built-in defaults to the config file.
 
 Run graith as an MCP (Model Context Protocol) server over stdio. See [MCP Server]({{< relref "/docs/mcp.md" >}}).
 
-Subcommands inspect and control the daemon-managed MCP servers declared under
-`[[mcp_servers]]`:
+Subcommands manage the daemon's MCP servers declared under `[[mcp_servers]]`:
 
 | Command | Description |
 |---------|-------------|

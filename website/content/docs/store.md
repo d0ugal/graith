@@ -11,13 +11,11 @@ The document store persists artifacts across sessions. It's a flat-file, git-bac
 
 ## Overview
 
-Documents are plain files on disk, organized in a git repository. Every changed write is committed, so the full history is available via `git log` in the store directory. No-op writes (identical content) are skipped. Files are browsable and greppable with standard tools.
-
-Store operations go straight to disk (not through the daemon), so there's no latency or availability dependency on the daemon process.
+Documents are plain files in a git repository. Every changed write is committed, so full history is available via `git log` in the store directory; no-op writes (identical content) are skipped. Files are browsable and greppable with standard tools. Operations go straight to disk, not through the daemon, so there's no latency or availability dependency on it.
 
 ## Scoping
 
-By default, documents are scoped to the current repo. Sessions on the same repo share a store namespace. The repo path is canonicalized (symlinks resolved), so different path spellings for the same repo resolve to the same namespace.
+By default documents are scoped to the current repo, and sessions on the same repo share a namespace. The repo path is canonicalized (symlinks resolved), so different spellings of the same repo resolve to the same namespace.
 
 Use `--shared` to access a global store that isn't scoped to any repo:
 
@@ -27,18 +25,18 @@ gr store get --shared prompts/review.md
 gr store ls --shared
 ```
 
-Use `--repo` to name the repo explicitly (handy when running outside a session).
-It accepts **either** a filesystem path **or** a repo ID — the `<name>-<hash>`
-identifier that `gr store ls -a` prints in its `repo` column — so a value
-discovered via `ls -a` round-trips straight back into `--repo`:
+Use `--repo` to name the repo explicitly (handy outside a session). It accepts
+**either** a filesystem path **or** a repo ID — the `<name>-<hash>` identifier
+`gr store ls -a` prints in its `repo` column — so a value from `ls -a`
+round-trips straight back into `--repo`:
 
 ```bash
 gr store list --repo ~/Code/my-project      # filesystem path
 gr store get notes/example.txt --repo my-project-a1b2c3d4   # repo ID from `ls -a`
 ```
 
-An unresolvable `--repo` value (neither a repo path nor a known ID) fails with a
-clear `unknown repo` error instead of a misleading `document not found`.
+An unresolvable `--repo` value (neither a path nor a known ID) fails with a clear
+`unknown repo` error instead of a misleading `document not found`.
 
 ## Operations
 
@@ -80,7 +78,7 @@ echo '{"run":2}' | gr store append logs/builds.jsonl
 gr store append logs/builds.jsonl --file ./result.json
 ```
 
-Creates the document if it doesn't exist, then appends the content followed by a newline. Useful for JSONL-style log data where each entry is one JSON line.
+Creates the document if absent, then appends the content plus a newline — useful for JSONL logs where each entry is one JSON line.
 
 ### Remove
 
@@ -170,7 +168,7 @@ The macOS and iOS apps include a read-only **document store browser**. Open it
 from the toolbar (the document icon): it lists every document the connected
 daemon knows about — per-repo stores plus the shared store — grouped by store,
 and shows a selected document's body. On macOS with more than one paired host,
-pick the host from the store browser's Host selector.
+pick the host from its Host selector.
 
-The browser is read-only for now — use `gr store put` / `rm` / `append` from the
-CLI to write. Writing from the apps is a planned follow-up.
+It's read-only for now — write via `gr store put` / `rm` / `append` from the CLI.
+Writing from the apps is a planned follow-up.

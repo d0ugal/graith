@@ -7,7 +7,7 @@ toc: true
 draft: false
 ---
 
-graith can run as a [Model Context Protocol](https://modelcontextprotocol.io) server, exposing session management as tools an AI agent can call.
+graith can run as a [Model Context Protocol](https://modelcontextprotocol.io) server, exposing session management as agent-callable tools.
 
 ## Usage
 
@@ -15,7 +15,7 @@ graith can run as a [Model Context Protocol](https://modelcontextprotocol.io) se
 gr mcp
 ```
 
-This starts an MCP server over stdin/stdout using the stdio transport. Configure it as an MCP server in an agent's configuration (e.g. Claude's `.claude/settings.json`).
+Starts an MCP server on stdio. Configure it in an agent's config (e.g. Claude's `.claude/settings.json`).
 
 ## Exposed tools
 
@@ -28,13 +28,12 @@ This starts an MCP server over stdin/stdout using the stdio transport. Configure
 | `read_messages` | Read messages from a topic |
 | `subscribe` | Wait for the next message on a topic |
 
-`publish_message` accepts `no_reply: true` for a one-way message. This metadata
-is stored and returned by message reads; it's distinct from `reply_to`, which
-only identifies a reply stream.
+`publish_message` accepts `no_reply: true` for a one-way message — stored and
+returned by reads, distinct from `reply_to`, which only identifies a reply stream.
 
 ## Configuration example
 
-Add graith as an MCP server in Claude Code's settings:
+Add graith to Claude Code's settings:
 
 ```json
 {
@@ -47,11 +46,9 @@ Add graith as an MCP server in Claude Code's settings:
 }
 ```
 
-This gives Claude access to graith session management as part of its tool set: the agent can create sessions, check status, and coordinate with other agents through the MCP interface.
-
 ## MCP proxy
 
-graith also includes an MCP proxy (`gr mcp-proxy`) used internally for session-scoped MCP connections. When a session needs to connect to an MCP server, the daemon can proxy the connection through the control socket, multiplexing MCP traffic alongside PTY data on separate channels.
+The MCP proxy (`gr mcp-proxy`) handles session-scoped connections: the daemon proxies through the control socket, multiplexing MCP traffic alongside PTY data on separate channels.
 
 Global and per-agent MCP servers are configured in `config.toml`:
 
@@ -63,7 +60,7 @@ args    = ["--port", "8080"]
 env     = { API_KEY = "..." }
 ```
 
-Per-agent overrides can disable or reconfigure global servers:
+Per-agent overrides disable or reconfigure global servers:
 
 ```toml
 [agents.claude.mcp_servers.my-tools]
@@ -75,36 +72,33 @@ command = "/path/to/extra-tools"
 
 ### How servers reach each agent
 
-graith injects the resolved server set (the auto-injected `graith` server plus
-your global and per-agent servers) into the agent at launch, pointing each one
-at `gr mcp-proxy <name>` so the daemon supervises the real process:
+At launch graith injects the resolved server set — the auto-injected `graith`
+server plus your global and per-agent servers — pointing each at
+`gr mcp-proxy <name>` so the daemon supervises the real process:
 
 - **Claude** — a generated `--mcp-config` file.
 - **Codex** — per-session `-c mcp_servers.<name>.command=…` / `.args=…`
-  config overrides. Because these override only `command` and `args` (not a full
-  config file), any extra Codex per-server controls you set for a matching
-  stdio server in `~/.codex/config.toml` — such as `startup_timeout_sec`,
-  `tool_timeout_sec`, `enabled`, or enabled/disabled tools — are preserved and
-  merged. (If a same-named server in your Codex config is a remote/HTTP
-  transport, the injected stdio `command`/`args` will conflict with it — pick a
-  distinct name to avoid the clash.)
+  overrides. Since these set only `command` and `args`, other Codex per-server
+  controls for a matching stdio server in `~/.codex/config.toml` —
+  `startup_timeout_sec`, `tool_timeout_sec`, `enabled`, or enabled/disabled
+  tools — are preserved and merged. (If a same-named server in your Codex config
+  is a remote/HTTP transport, the injected stdio `command`/`args` conflict — pick
+  a distinct name.)
 
-  Codex identifies servers by a dotted config-key path, so a server name must be
-  a TOML bare key (`A–Z`, `a–z`, `0–9`, `_`, `-`) to be injectable. A name
-  containing a `.`, space, or other special character is skipped for Codex
-  (with a daemon-log warning) rather than emitted, since an un-representable
-  name would otherwise stop Codex from starting. The auto-injected `graith`
-  server and ordinary names are always fine; the Claude path has no such
-  restriction.
+  Codex identifies servers by a dotted config-key path, so a name must be a TOML
+  bare key (`A–Z`, `a–z`, `0–9`, `_`, `-`) to be injectable. A name with a `.`,
+  space, or other special character is skipped for Codex (with a daemon-log
+  warning), since an un-representable name would stop it starting. Ordinary names
+  and the `graith` server are fine; Claude has no such restriction.
 
 Agents without MCP injection support (e.g. `cursor`, `opencode`) don't receive
-these servers automatically.
+them automatically.
 
 ## Managing MCP servers
 
 The daemon supervises one MCP server process per proxy connection, started
-lazily when a session first connects. Because these processes are daemon-owned,
-you can inspect and control them without touching the agents:
+lazily on first connect. Being daemon-owned, you can inspect and control them
+without touching agents:
 
 ```bash
 # List configured servers with sandbox state, source, live connections, uptime
@@ -119,7 +113,6 @@ gr mcp logs my-tools
 gr mcp logs my-tools -n 50
 ```
 
-Each server's stderr is captured to `<state-dir>/mcp/<name>-<proxy-id>.log`, and
-`gr mcp logs` reads those files. `gr mcp list` and `gr mcp logs` are read-only.
-`gr mcp restart` is a management action, restricted to the human, the
-orchestrator, or its descendant sessions.
+Each server's stderr is captured to `<state-dir>/mcp/<name>-<proxy-id>.log`.
+`gr mcp list` and `gr mcp logs` are read-only; `gr mcp restart` is restricted to
+the human, the orchestrator, or its descendant sessions.

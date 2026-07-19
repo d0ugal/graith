@@ -7,11 +7,11 @@ toc: true
 draft: false
 ---
 
-These patterns compose graith's primitives (sessions, messaging, store, forking, mirrored worktrees) into structured multi-agent workflows. They're generic -- adapt them to your codebase and agents.
+These compose graith's primitives -- sessions, messaging, store, forking, mirrored worktrees -- into structured workflows; adapt to your codebase and agents.
 
 ## Devil's advocate
 
-One agent proposes a solution; a second attacks it with counterarguments, edge cases, and failure modes -- forcing the proposer to defend or revise.
+One agent proposes; a second attacks it, forcing a defense or revision.
 
 Use when: validating designs, stress-testing plans, surfacing hidden assumptions.
 
@@ -32,9 +32,9 @@ gr msg inbox --wait --ack
 
 ## Judge panel (tribunal)
 
-Multiple independent agents review the same code or proposal at once, with no visibility into each other's findings. Results are collected and triaged by convergence.
+Independent agents review the same target at once, blind to each other; results are triaged by convergence.
 
-Use when: high-stakes code review, security audit, architectural decisions. Findings that converge across judges are high-confidence; a finding from only one judge warrants investigation.
+Use when: high-stakes code review, security audit, architectural decisions. Findings converging across judges are high-confidence; lone ones warrant investigation.
 
 ```bash
 # Launch 3 independent reviewers sharing the same worktree
@@ -54,13 +54,13 @@ gr msg sub --topic review-perf --wait --ack
 gr store put reviews/2026-06-17.md --file /tmp/synthesized-review.md
 ```
 
-Using a different model per judge (via `--agent cursor --model <model>`) maximizes perspective diversity -- each model has different blind spots.
+A different model per judge (via `--agent cursor --model <model>`) maximizes diversity -- models have different blind spots.
 
 ## Red team / blue team
 
-Adversarial pairing. The red team tries to break the system; the blue team defends and patches. Iterate until the red team runs dry.
+Adversarial pairing: red attacks, blue patches, iterating until red runs dry.
 
-Use when: security hardening, robustness testing, finding edge cases in error handling.
+Use when: security hardening, robustness testing, error-handling edge cases.
 
 ```bash
 gr new red-team --mirror app --background \
@@ -75,9 +75,9 @@ gr new blue-team --repo ~/Code/api \
 
 ## RALPH loop (Read, Analyze, Learn, Plan, Help)
 
-An iterative refinement cycle. The agent reads its prior output and external feedback, analyzes what worked and what didn't, learns from errors, plans the next iteration, and asks for help when stuck. Each cycle stores structured output for the next.
+An iterative refinement cycle; each cycle stores structured output for the next.
 
-Use when: complex tasks that benefit from iteration, or when the first attempt is expected to be incomplete.
+Use when: complex tasks benefiting from iteration, or when the first attempt is likely incomplete.
 
 ```bash
 gr new ralph --repo ~/Code/api \
@@ -93,7 +93,7 @@ gr store append progress/ralph.jsonl '{"cycle":2,"tests_passing":44,"tests_faili
 
 ## Assembly line (pipeline)
 
-Sequential handoffs between specialized agents. Each completes a phase and signals the next -- one agent's output is the next one's input.
+Sequential handoffs between specialized agents -- one's output is the next's input.
 
 Use when: multi-phase work with clear handoff points (design, implement, test, document).
 
@@ -115,9 +115,9 @@ gr msg send tester "implementation complete, begin testing"
 
 ## Consensus building
 
-Multiple agents propose solutions independently, then a synthesizer finds common ground and produces a unified approach.
+Agents propose independently; a synthesizer finds common ground and produces a unified approach.
 
-Use when: design decisions with multiple valid approaches, or when you want diverse perspectives to converge.
+Use when: design decisions with multiple valid approaches, or to converge diverse perspectives.
 
 ```bash
 # Three independent proposals
@@ -140,7 +140,7 @@ gr new synthesizer --no-repo \
 
 ## Swarm audit
 
-Many agents scan different parts of a codebase in parallel, each reporting findings independently. Results are aggregated.
+Many agents scan a codebase in parallel, reporting findings independently for aggregation.
 
 Use when: large codebases, security audits, dependency reviews, batch linting across modules.
 
@@ -162,9 +162,9 @@ gr delete --repo api --stopped -f
 
 ## Supervisor / worker hierarchy
 
-A supervisor creates workers, assigns tasks, monitors progress, and handles failures. Workers report status and results upward.
+A supervisor spawns workers, assigns tasks, monitors progress, and handles failures; workers report upward.
 
-Use when: dynamic task allocation, long-running operations that need coordination, fault-tolerant workflows.
+Use when: dynamic task allocation, coordinated long-running operations, fault-tolerant workflows.
 
 ```bash
 # Supervisor manages the fleet
@@ -186,7 +186,7 @@ gr msg send --children "rebase on main before pushing"
 
 ## Continuous reviewer
 
-A monitoring agent watches a primary agent's work in real time via a mirrored worktree and sends ongoing feedback through messages.
+A monitor watches a primary agent live via a mirrored worktree, sending feedback through messages.
 
 Use when: long implementation tasks, mentoring, real-time quality gates.
 
@@ -204,12 +204,12 @@ gr msg inbox --all --ack
 
 ## Composing patterns
 
-These patterns compose freely. Common combinations:
+These compose freely. Common combinations:
 
-**Explore-then-tribunal:** An explorer maps the problem space, you fork promising directions, and a judge panel evaluates each fork.
+**Explore-then-tribunal:** an explorer maps the space, you fork promising directions, a judge panel evaluates each.
 
-**Red/blue with supervisor:** A supervisor spawns red and blue teams, monitors the adversarial cycle, and stops on diminishing returns.
+**Red/blue with supervisor:** a supervisor spawns both teams, monitors the cycle, and stops on diminishing returns.
 
-**Pipeline with consensus:** Each pipeline stage uses consensus building internally -- three architects propose designs, and the best passes to the implementer stage.
+**Pipeline with consensus:** each stage uses consensus internally -- three architects propose designs, the best passes to the implementer.
 
-**Swarm with RALPH:** Each swarm agent runs its own RALPH loop; the supervisor collects final results once every agent has iterated to convergence.
+**Swarm with RALPH:** each swarm agent runs its own RALPH loop; the supervisor collects results once all have converged.

@@ -7,11 +7,9 @@ toc: true
 draft: false
 ---
 
-Practical patterns for using graith's primitives together.
-
 ## Parallel feature development
 
-Run multiple agents on different features of the same repo at once:
+Multiple agents on different features of one repo:
 
 ```bash
 gr new auth-rewrite --repo ~/Code/api --prompt "rewrite the auth middleware to use JWT"
@@ -19,11 +17,11 @@ gr new add-pagination --repo ~/Code/api --prompt "add cursor-based pagination to
 gr new fix-n-plus-one --repo ~/Code/api --prompt "find and fix N+1 queries in the user endpoints"
 ```
 
-Each agent works in its own worktree and branch -- no working-tree conflicts. Switch between them with `ctrl+b n/p` or the session picker (`ctrl+b w`).
+Each agent gets its own worktree and branch -- no conflicts. Switch with `ctrl+b n/p` or the session picker (`ctrl+b w`).
 
 ## Explore-then-fork
 
-Start an exploratory session, then fork when you find a promising direction:
+Fork once a direction looks promising:
 
 ```bash
 gr new explore-auth --prompt "investigate the auth middleware, find all the issues"
@@ -32,7 +30,7 @@ gr fork explore-auth fix-token-refresh
 gr fork explore-auth fix-session-handling
 ```
 
-Each fork inherits the git state. With `fork_args` configured, the new agent also gets the source session's conversation history. The original session is unaffected.
+Each fork inherits the git state; with `fork_args`, it also inherits the source's conversation history. The original is unaffected.
 
 ## Code review pipeline
 
@@ -43,7 +41,7 @@ gr new implement-feature --prompt "implement the user profile endpoint"
 gr new review-feature --mirror implement-feature --prompt "review the code changes in this worktree"
 ```
 
-The reviewer shares the implementer's worktree (read-only) and sees changes as they happen. Coordinate via messaging:
+The reviewer shares the worktree read-only, seeing changes live. Coordinate via messaging:
 
 ```bash
 # From implement-feature:
@@ -55,13 +53,12 @@ gr msg send implement-feature "found an issue in handler.go:45, missing error ch
 
 ## Automated triggers
 
-The [code review pipeline](#code-review-pipeline) above is set up by hand. A
-**[trigger]({{< relref "triggers" >}})** makes the daemon do it automatically — no attached
-orchestrator, and it survives terminal close.
+The [code review pipeline](#code-review-pipeline) above is manual. A
+**[trigger]({{< relref "triggers" >}})** automates it in the daemon — no attached
+orchestrator, survives terminal close.
 
-**Continuous reviewer** — keep a reviewer reacting to an implementer's changes.
-A watch trigger with a `session` action (`ensure = true`) messages the owned
-reviewer if it exists (auto-resuming a stopped one), or else spawns one mirroring
+**Continuous reviewer.** A watch trigger's `session` action with `ensure = true`
+messages the owned reviewer (resuming it if stopped), else spawns one mirroring
 the implementer's worktree read-only:
 
 ```toml
@@ -78,8 +75,7 @@ agent  = "claude"
 prompt = "Review the changes since your last look; send feedback via gr msg."
 ```
 
-**Tests on change** — run the suite when source changes, with results to the
-session's inbox:
+**Tests on change** — run the suite when source changes:
 
 ```toml
 [[trigger]]
@@ -94,7 +90,7 @@ command = "go test ./..."
 inbox = "{session_name}"
 ```
 
-**Scheduled report** — a daily PR summary posted to the orchestrator:
+**Scheduled report** — a daily PR summary to the orchestrator:
 
 ```toml
 [[trigger]]
@@ -110,13 +106,13 @@ agent  = "claude"
 inbox = "orchestrator"
 ```
 
-Inspect and control them with `gr trigger list/status/run/pause/resume`. See the
+Inspect and control with `gr trigger list/status/run/pause/resume`; see the
 [triggers docs]({{< relref "triggers" >}}) for the full model.
 
 
 ## Orchestrated multi-agent workflow
 
-Use the orchestrator to manage a fleet of agents:
+Enable the orchestrator:
 
 ```toml
 [orchestrator]
@@ -140,7 +136,7 @@ gr msg send --children "rebase on main before pushing"
 
 ## Declarative multi-repo scenario
 
-For a known topology of sessions across multiple repos, use a scenario file instead of imperative `gr new` commands:
+For a known topology across repos, use a scenario file instead of imperative `gr new`:
 
 ```toml
 # integration-test.toml
@@ -195,13 +191,13 @@ gr scenario status integration-tests
 gr scenario stop integration-tests
 ```
 
-Each session receives a manifest with the full scenario topology — the siblings, their roles, and how to message them. Sessions coordinate via `gr msg send <sibling-name> "message"`.
+Each session gets a manifest with the full topology — siblings, roles, and how to message them — and coordinates via `gr msg send <sibling-name> "message"`.
 
-Scenarios are reproducible — the same TOML file always creates the same fleet. See [Scenarios]({{< relref "scenarios" >}}) for the full reference.
+Scenarios are reproducible: the same TOML always creates the same fleet. See [Scenarios]({{< relref "scenarios" >}}) for the full reference.
 
 ## Background batch processing
 
-Create sessions in the background and check on them later:
+Create sessions in the background, check later:
 
 ```bash
 for repo in ~/Code/api ~/Code/web ~/Code/cli; do
@@ -220,7 +216,7 @@ gr logs cli-audit
 
 ## Persistent research notes
 
-Use the store to persist findings across sessions:
+Persist findings across sessions with the store:
 
 ```bash
 # Agent stores research
@@ -236,7 +232,7 @@ gr store append metrics/complexity.jsonl '{"file":"handler.go","cyclomatic":8}'
 
 ## Cross-repo work
 
-Use `includes` for projects that span multiple repositories:
+Use `includes` for projects spanning multiple repos:
 
 ```toml
 [[repos]]
@@ -244,7 +240,7 @@ path     = "~/Code/api"
 includes = ["~/Code/shared-lib", "~/Code/proto"]
 ```
 
-Creating a session for `~/Code/api` also creates worktrees for the included repos:
+A session for `~/Code/api` also creates worktrees for the included repos:
 
 ```bash
 gr new cross-repo-fix --repo ~/Code/api
@@ -256,7 +252,7 @@ gr new cross-repo-fix --repo ~/Code/api
 
 ## Cleanup stale sessions
 
-Remove sessions that have been idle for a week:
+Remove sessions idle for a week:
 
 ```bash
 gr delete --repo my-project --stale 7d -f
@@ -288,15 +284,15 @@ gr delete ci-run -f
 
 ## In-place sessions
 
-For quick one-off tasks that don't need worktree isolation:
+For quick one-off tasks without worktree isolation:
 
 ```bash
 gr new quick-check --in-place --prompt "run the tests and tell me if anything fails"
 ```
 
-No worktree is created -- the agent runs directly in the repo. Useful for read-only tasks, or when you want the agent to see uncommitted changes.
+No worktree -- the agent runs directly in the repo. Good for read-only tasks or seeing uncommitted changes.
 
-Allow multiple in-place sessions on the same repo:
+Allow multiple in-place sessions on one repo:
 
 ```bash
 gr new check-1 --in-place --allow-concurrent
@@ -321,7 +317,7 @@ gr logs my-session -f
 
 ## Status-driven workflows
 
-Agents update their status for visibility:
+Agents update status for visibility:
 
 ```bash
 gr status "Phase 1: analyzing codebase"
@@ -333,4 +329,4 @@ gr status "Phase 3: running tests"
 gr status "Done - all tests passing"
 ```
 
-The orchestrator or user watches progress in the session picker (`ctrl+b w`), which shows status summaries for all sessions.
+The orchestrator or user follows progress in the session picker (`ctrl+b w`), which shows all sessions' status summaries.

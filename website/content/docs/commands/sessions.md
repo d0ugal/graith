@@ -31,22 +31,21 @@ Create a new agent session.
 | `--headless` | Run the agent headless (stream-json) instead of an interactive PTY, for fire-and-forget sessions (experimental; Claude only) |
 | `--no-fetch` | Skip `git fetch origin` and create the worktree from local repo state |
 
-`--no-fetch` skips the `git fetch origin` that normally runs before the worktree is created, overriding `fetch_on_create` for that session. Use it when SSH auth is unavailable (e.g. a biometric/Secretive agent that can't sign non-interactively) or when you're offline — the worktree is then built from whatever the local repo already has.
+`--no-fetch` overrides `fetch_on_create` for that session. Use it when SSH auth
+is unavailable (e.g. a biometric agent that can't sign non-interactively) or when
+you're offline.
 
 ### Codex options
 
-For `--agent codex`, graith passes typed per-session options through to the Codex
-CLI, so you don't have to override the whole agent `args` array in config.
+For `--agent codex`, graith passes typed per-session options to the Codex CLI.
 `--model` becomes `codex --model <name>`; reasoning effort and service tier ride
-`-c model_reasoning_effort=…` / `-c service_tier=…` config overrides; profile
-and web search map to `--profile` and `--search`. Each is passed only when set, so
-an unset option leaves Codex's own default untouched. They're persisted, so a
-resume or fork replays the same flags. The `--codex-*` flags are Codex-specific —
-using one with another agent is an error. Their *values* (e.g. the reasoning-effort
-or service-tier level) are validated by Codex itself, not graith, since those sets
-are version- and model-dependent; an unrecognised value surfaces as a Codex startup
-error. Don't also template `{model}` into the codex `args` in config — use
-`--model` (or `-m`); doing both passes `--model` twice. Example:
+`-c model_reasoning_effort=…` / `-c service_tier=…`; profile and web search map to
+`--profile` and `--search`. Each is passed only when set (unset leaves Codex's
+default), and all persist so resume or fork replays them. The `--codex-*` flags
+are Codex-specific — using one with another agent is an error. Their *values* are
+validated by Codex, not graith, so an unrecognised value surfaces as a Codex
+startup error. Don't also template `{model}` into the codex `args` — use
+`--model` (or `-m`), or `--model` is passed twice. Example:
 
 ```bash
 gr new review --agent codex \
@@ -55,7 +54,16 @@ gr new review --agent codex \
   --codex-web-search
 ```
 
-The `--headless` flag runs the agent in Claude Code's stream-json mode rather than an interactive terminal — suited to fire-and-forget work like review judges and one-shot helpers. graith parses the typed event stream, so `gr logs -f` shows rendered output and the run's cost/token usage is captured from the result envelope. It's **experimental** and inert unless `[headless] experimental = true` is set in config; it's Claude-only in v1, requires a prompt (`-p`), and runs one-shot (one prompt, run to completion, exit). Headless sessions use the same optional Graith sandbox setting as PTY sessions. Asking for `--headless` on an agent that can't do it is an error, not a silent downgrade to PTY. Because a headless session starts without a PTY, `--headless` implies `--background`; attaching later converts it to interactive. See [Configuration → Headless sessions]({{< relref "/docs/configuration/sessions.md#headless-sessions" >}}) and [Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}}).
+graith parses the typed event stream, so `gr logs -f` shows rendered output and
+the result envelope captures cost/token usage. `--headless` is inert unless
+`[headless] experimental = true`, requires a prompt (`-p`), and runs one-shot
+(one prompt to completion, then exit). Headless sessions use the same optional
+sandbox setting as PTY sessions. Requesting `--headless` on an agent that can't do
+it errors rather than silently downgrading to PTY. Starting without a PTY,
+`--headless` implies
+`--background`; attaching later converts it to interactive. See [Configuration → Headless
+sessions]({{< relref "/docs/configuration/sessions.md#headless-sessions" >}}) and
+[Session Lifecycle → Headless sessions]({{< relref "/docs/sessions.md#headless-sessions" >}}).
 
 When a session is created:
 
@@ -76,27 +84,22 @@ Attach to a session. If no name is given, opens the session picker overlay.
 
 ### Read-only attach
 
-`gr attach --read-only <name>` attaches as an **observer**: output streams to
-your terminal, but keystrokes are never forwarded to the agent — so you can watch
-a session work without risk of an accidental keypress. A persistent
-`🔒 READ-ONLY` indicator shows the mode. The prefix key (default `ctrl+b`) still
-works, so you can detach, open the session picker, or switch sessions; only agent
-input is blocked. Input is gated both in the client and, as a backstop, in the
-daemon, so a read-only attach can't inject input even if the client misbehaves.
-Read-only mode applies for the whole attach session, including any sessions you
-switch to via the picker.
+`gr attach --read-only <name>` observes with a persistent `🔒 READ-ONLY`
+indicator. The prefix key (default `ctrl+b`) still works — detach, open the
+picker, switch sessions — only agent input is blocked. Input is gated in the
+client and, as a backstop, the daemon. The mode covers the whole attach session,
+including picker-switched sessions.
 
-A **headless** session has no PTY to stream, so `gr attach` on one **converts it
-to interactive**: graith stops the headless process and relaunches the session
-in a real PTY via `claude --resume <session-id>`, preserving the conversation,
-worktree, branch, and env. Because this restarts the agent (any in-flight tool
-call is cancelled, not resumed), attach prompts for confirmation first; pass
-`-y`/`--yes` to skip it. To watch a headless session read-only *without*
-converting it, use `gr logs -f <name>` instead.
+A **headless** session has no PTY, so `gr attach` **converts it to interactive**:
+graith stops the headless process and relaunches via `claude --resume
+<session-id>`, preserving the conversation, worktree, branch, and env. Since this
+restarts the agent (any in-flight tool call is cancelled, not resumed), attach
+prompts for confirmation; pass `-y`/`--yes` to skip. To watch it read-only
+*without* converting, use `gr logs -f <name>`.
 
 ## `gr stop <name-or-id>`
 
-Stop a running session. The agent process is killed, but the worktree and branch are kept for later resumption.
+Stop a running session. The agent process is killed, but the worktree and branch are kept.
 
 | Flag | Description |
 |------|-------------|
@@ -107,13 +110,17 @@ Stop a running session. The agent process is killed, but the worktree and branch
 | `--stale <duration>` | Match sessions not attached for this duration, e.g. `7d`, `24h` (batch mode) |
 | `-f, --force` | Skip confirmation prompt (batch mode) |
 
-Used without a positional argument inside a graith session, `--children` auto-resolves the current session from `GRAITH_SESSION_ID` and excludes it from the stop.
+Without a positional argument inside a graith session, `--children` auto-resolves
+the current session from `GRAITH_SESSION_ID` and excludes it from the stop.
 
-`--self` targets the session it's run from — handy for an agent that wants to stop itself without knowing its own name (`gr stop --self`). It takes no positional argument and can't be combined with `--children` or the batch filters; outside a graith session (no `GRAITH_SESSION_ID`/`GRAITH_SESSION_NAME`) it errors.
+`--self` targets the session it's run from (`gr stop --self`). It takes no
+positional argument, can't be combined with `--children` or the batch filters,
+and errors outside a graith session (no
+`GRAITH_SESSION_ID`/`GRAITH_SESSION_NAME`).
 
 ## `gr restart <name-or-id>`
 
-Restart a stopped session. The agent process is restarted in the existing worktree using the agent's `resume_args`.
+Restart a stopped session in the existing worktree using the agent's `resume_args`.
 
 | Flag | Description |
 |------|-------------|
@@ -134,19 +141,27 @@ branch, and state for the configured retention window. Recover it with
 | `--stopped` | Match stopped and errored sessions (batch mode) |
 | `--stale <duration>` | Match sessions not attached for this duration (batch mode) |
 
-`--self` targets the session it's run from, so an agent can clean itself up after its work is merged with `gr delete --self` — no need to interpolate `$GRAITH_SESSION_NAME`. It takes no positional argument and can't be combined with `--children` or the batch filters; outside a graith session it errors. `gr purge --self` does the same for an immediate, irrecoverable purge.
+`--self` targets the session it's run from (`gr delete --self`), so an agent can
+clean itself up without interpolating `$GRAITH_SESSION_NAME`. As with `gr stop`,
+it takes no positional argument, can't combine with `--children` or the batch
+filters, and errors outside a graith session. `gr purge --self` does the same for
+an immediate, irrecoverable purge.
 
 The config-managed orchestrator is an exception to recoverable deletion:
-`gr delete orchestrator` immediately discards its current context, then the
-daemon creates a fresh replacement when `[orchestrator] enabled = true`. Use
-`gr stop orchestrator` when it should remain stopped. To purge it permanently,
-disable it in config first.
+`gr delete orchestrator` discards its current context, then the daemon creates a
+fresh replacement when `[orchestrator] enabled = true`. Use `gr stop orchestrator`
+to keep it stopped; to purge it permanently, disable it in config first.
 
 ## `gr fork <source-session> <new-name>`
 
-Fork a session. Creates a new worktree, branch, and agent process while the original keeps running. If the agent has `fork_args` configured, the new agent inherits the source agent's conversation history.
+Fork a session. Creates a new worktree, branch, and agent process while the original keeps running. If the agent has `fork_args` configured, the new agent inherits the source's conversation history.
 
-With `--agent <target>` this becomes a **cross-agent fork**: the source's conversation is rendered to a neutral context file (reusing the migration reader/renderer) and the new agent — a *different* agent type — is seeded with it. Unlike `gr migrate` (which swaps the agent in place, keeping the worktree), a fork creates a new worktree branched from the base branch, so the source's changes — **uncommitted edits and any commits on its branch — aren't carried over**. Claude and Codex are supported as fork *sources*; any configured agent can be a *target*.
+With `--agent <target>` this becomes a **cross-agent fork**: the source's
+conversation is rendered to a neutral context file to seed a *different* agent
+type. Unlike `gr migrate` (which swaps the agent in place, keeping the worktree),
+a fork branches a new worktree from the base branch, so the source's changes —
+**uncommitted edits and any commits on its branch — aren't carried over**. Claude
+and Codex work as fork *sources*; any configured agent can be a *target*.
 
 | Flag | Description |
 |------|-------------|
@@ -156,9 +171,17 @@ With `--agent <target>` this becomes a **cross-agent fork**: the source's conver
 
 ## `gr migrate <name-or-id>`
 
-Migrate a session to a different agent **in place** — for example, switch from Claude to Codex during a provider outage without losing your work. The current agent's conversation is rendered to a neutral context file, the agent is stopped, and the target agent is started **in the same worktree** seeded with that history. The session keeps its id, name, worktree, and branch, so all code state (commits and uncommitted edits) carries over with no branching.
+Migrate a session to a different agent **in place** — e.g. switch from Claude to
+Codex during a provider outage. The conversation is rendered to a neutral context
+file, the agent is stopped, and the target starts **in the same worktree** seeded
+with that history. The session keeps its id, name, worktree, and branch, so all
+code state (commits and uncommitted edits) carries over with no branching.
 
-This is a lossy reseed, not a native resume: reasoning/thinking and exact tool-call replay aren't carried over, and the agent process is restarted (attached clients re-attach to the new agent). If the target agent fails to start, the original agent is restored. Claude and Codex are supported as migration *sources*; any configured agent can be a *target*.
+This is a lossy reseed, not a native resume: reasoning/thinking and exact
+tool-call replay aren't carried over, and the process is restarted (attached
+clients re-attach to the new agent). If the target fails to start, the original
+is restored. Claude and Codex work as migration *sources*; any configured agent
+can be a *target*.
 
 | Flag | Description |
 |------|-------------|
@@ -168,41 +191,26 @@ This is a lossy reseed, not a native resume: reasoning/thinking and exact tool-c
 
 ## `gr update <name-or-id>`
 
-Update a session's mutable properties in place. A name-only update keeps the
-session ID, worktree, branch, ownership, scenario membership, and parent
-relationship unchanged.
+Update one or more mutable session properties atomically. At least one flag is
+required; omitted properties are left unchanged, and re-setting the current value
+succeeds. A rename leaves everything else — session ID, worktree, branch,
+ownership, scenario membership, parent relationship — untouched. Soft-deleted
+sessions must be restored first.
 
 | Flag | Description |
 |------|-------------|
-| `--name <new-name>` | Set a new session name |
-| `--parent <name-or-id>` | Set a new parent session; pass an empty string to orphan the session |
-
-At least one flag is required. Session names may be duplicated, so use the
-session ID when a name is ambiguous. Soft-deleted sessions must be restored
-before they can be updated. With `--json` or agent mode, success is emitted as a
-JSON object containing `session_id` and the changed properties.
-
-## `gr update <name-or-id>`
-
-Update one or more session properties atomically. At least one flag is required.
-The target and a non-empty parent may be a unique session name or an ID; an
-ambiguous name is rejected. Human output reports each requested property's
-resulting value. `--json` and agent mode return one object with `session_id`,
-`name`, `parent_id`, and the explicit `starred` boolean.
-
-| Flag | Description |
-|------|-------------|
-| `--name <name>` | Set the session name |
+| `--name <new-name>` | Set the session name |
 | `--parent <name-or-id>` | Set the parent session; pass an empty string to orphan |
 | `--starred[=true\|false]` | Set deletion protection and Starred-view membership; a bare flag means true |
 
-Flags can be combined in one persisted update:
+The target and a non-empty parent may be a unique session name or an ID; an
+ambiguous name is rejected. Flags can be combined in one persisted update:
 
 ```bash
 gr update important-session --name release-watch --parent orchestrator --starred
 gr update release-watch --starred=false
 ```
 
-Starred sessions are protected from accidental deletion and appear in the
-Starred view. Omitted properties are left unchanged, and re-setting the current
-value succeeds.
+Human output reports each requested property's resulting value; `--json` and
+agent mode return one object with `session_id`, `name`, `parent_id`, and the
+explicit `starred` boolean.

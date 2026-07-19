@@ -7,26 +7,24 @@ toc: true
 draft: false
 ---
 
-graith has three frontends — the `gr` **CLI**, the **iOS** app, and the
-**macOS** app — all clients of one daemon over the same wire protocol. This page
-tracks which capabilities each surface supports, so a gap between them is an
-explicit, reviewable fact rather than something you discover by hand.
+graith has three frontends — the `gr` **CLI**, **iOS**, and **macOS** apps — all
+clients of one daemon over the same wire protocol. This page tracks each
+surface's capabilities, making any gap explicit and reviewable.
 
 ## Source of truth
 
-The matrix below is **generated** from a machine-readable manifest,
-[`internal/capabilities/capabilities.json`](https://github.com/d0ugal/graith/blob/main/internal/capabilities/capabilities.json).
-The manifest is the source of truth; this page is rendered from it, and a Go
-test (`TestDocMatchesManifest`) fails if the two ever disagree. To change the
-matrix, edit the manifest and regenerate:
+The matrix is **generated** from a machine-readable manifest,
+[`internal/capabilities/capabilities.json`](https://github.com/d0ugal/graith/blob/main/internal/capabilities/capabilities.json)
+— the source of truth. A Go test (`TestDocMatchesManifest`) fails if the two
+disagree. To change it, edit the manifest and regenerate:
 
 ```bash
 go test ./internal/capabilities -run TestDocMatchesManifest -update
 ```
 
-A `planned` cell is a targeted gap we mean to close; `n/a` marks a surface
-deliberately excluded by the linked platform decision — for example, CLI
-scripting primitives the GUIs express as live state instead.
+A `planned` cell is a gap we mean to close; `n/a` marks a surface excluded by
+the linked platform decision — e.g. CLI scripting primitives the GUIs express
+as live state.
 
 ## Matrix
 

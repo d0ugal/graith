@@ -21,7 +21,7 @@ brew install d0ugal/tap/graith
 {{% /tab %}}
 {{% tab tabName="apt (Debian/Ubuntu)" %}}
 
-Add the signing key and repository once, then install with `apt-get`:
+One-time setup, then install:
 
 ```bash
 # add the signing key
@@ -37,7 +37,7 @@ sudo apt-get update
 sudo apt-get install graith
 ```
 
-`apt-get upgrade` then picks up new releases automatically.
+`apt-get upgrade` then picks up new releases.
 
 {{% /tab %}}
 {{% tab tabName="dnf (Fedora/RHEL)" %}}
@@ -61,9 +61,9 @@ sudo dnf install graith
 {{% /tab %}}
 {{% tab tabName="Prebuilt binary" %}}
 
-Download a binary for your platform from the [releases page](https://github.com/d0ugal/graith/releases), extract it, and place `gr` on your `$PATH`.
+Download your platform's binary from the [releases page](https://github.com/d0ugal/graith/releases), extract it, and put `gr` on your `$PATH`.
 
-On Debian/Ubuntu, Fedora/RHEL and Alpine you can instead grab a prebuilt `.deb`, `.rpm` or `.apk` package (linux `amd64` and `arm64`; package name `graith`, binary `gr`, with shell completions) — also from the [releases page](https://github.com/d0ugal/graith/releases) — and install it manually:
+Debian/Ubuntu, Fedora/RHEL and Alpine users can instead grab a prebuilt `.deb`, `.rpm` or `.apk` from the [releases page](https://github.com/d0ugal/graith/releases) (linux `amd64`/`arm64`; package `graith`, binary `gr`, with shell completions):
 
 ```bash
 # Debian / Ubuntu
@@ -83,7 +83,7 @@ sudo apk add --allow-untrusted graith_*_linux_amd64.apk
 go install github.com/d0ugal/graith/cmd/graith@latest
 ```
 
-`go install` names the binary after the package directory (`graith`), so rename or symlink it to `gr`:
+`go install` names the binary `graith`; rename or symlink it to `gr`:
 
 ```bash
 mv "$(go env GOPATH)/bin/graith" "$(go env GOPATH)/bin/gr"
@@ -102,8 +102,6 @@ make build    # produces ./gr
 {{< /tabs >}}
 
 ## Shell completion
-
-Generate completion scripts for your shell:
 
 ```bash
 # bash
@@ -126,4 +124,4 @@ gr version
 gr doctor      # health checks, verifies dependencies
 ```
 
-{{% alert context="info" text="`gr doctor --autofix` tries to fix common issues: truncate oversized logs, clean stale PID files, and remove orphaned worktrees." /%}}
+{{% alert context="info" text="`gr doctor --autofix` fixes common issues: truncates oversized logs, cleans stale PID files, and removes orphaned worktrees." /%}}

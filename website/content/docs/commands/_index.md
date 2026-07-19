@@ -26,4 +26,4 @@ All commands accept:
 | `--json` | Output in JSON format |
 | `--agent-mode` | Force agent mode (auto-enables JSON output) |
 
-Agent mode is auto-detected inside a graith session or other AI agent environment (Claude Code, Cursor, Copilot, Amazon Q, OpenCode). Override with `GR_AGENT_MODE=0` to disable or `GR_AGENT_MODE=1` to force.
+Agent mode is auto-detected inside a graith session or other AI agent environment (Claude Code, Cursor, Copilot, Amazon Q, OpenCode). `GR_AGENT_MODE=0` disables it; `GR_AGENT_MODE=1` forces it.
