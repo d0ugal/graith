@@ -62,6 +62,9 @@ func setup(t *testing.T) *testEnv {
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
+	// The synthetic echo agent has no sandbox backend. Tests that exercise
+	// sandbox enforcement provide an explicit backend instead.
+	cfg.Sandbox.Enabled = false
 	cfg.Agents["echo"] = config.Agent{
 		Command:    "sh",
 		Args:       []string{"-c", "echo 'ready'; exec cat"},

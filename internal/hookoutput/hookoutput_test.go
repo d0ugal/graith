@@ -6,13 +6,13 @@ import (
 	"testing"
 )
 
-func TestCommandPolicyNeverDefersToNativePrompt(t *testing.T) {
+func TestCommandPolicyAllowsContinueOrDenies(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		agent, decision, want string
 	}{
-		{"claude", "allow", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}`},
+		{"claude", "allow", ``},
 		{"claude", "ask", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}`},
 		{"claude", "unknown", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}`},
 		{"codex", "allow", ``},

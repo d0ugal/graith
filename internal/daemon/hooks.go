@@ -102,6 +102,10 @@ func grBinReadDir(grBin string) (string, bool) {
 // generateClaudeSettings writes a Claude Code settings JSON file that registers
 // lifecycle hooks and, independently, the optional Bash command-policy hook.
 func (sm *SessionManager) generateClaudeSettings(sessionID string, lifecycle, policy bool) (string, error) {
+	return sm.generateClaudeSettingsWithTimeout(sessionID, lifecycle, policy, sm.Config().CommandPolicy.TimeoutDuration())
+}
+
+func (sm *SessionManager) generateClaudeSettingsWithTimeout(sessionID string, lifecycle, policy bool, policyTimeout time.Duration) (string, error) {
 	dir := sm.hookDir(sessionID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create hook dir: %w", err)
@@ -151,8 +155,8 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, lifecycle, po
 	for _, event := range events {
 		var handlers []hookHandler
 
-		// Default to a match-all (empty) matcher; PreToolUse narrows it to
-		// exclude the known read-only tools (fail-closed — see preToolUseMatcher).
+		// Default to a match-all (empty) matcher. Command policy is scoped to the
+		// verified shell transport by an exact Bash matcher.
 		matcher := ""
 
 		switch event {
@@ -165,7 +169,7 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, lifecycle, po
 			handlers = []hookHandler{
 				{
 					Type: "command", Command: commandPolicyHookCommand(quoted),
-					Timeout: commandPolicyHookTimeout(sm.cfg.CommandPolicy.TimeoutDuration()),
+					Timeout: commandPolicyHookTimeout(policyTimeout),
 				},
 			}
 		case "SessionStart":
@@ -260,7 +264,11 @@ func (sm *SessionManager) generateMCPConfig(sessionID string, mcpServers []confi
 // typed stream is its status/lifecycle feed) but still needs its MCP servers, so
 // the two concerns must not ride the same branch. See issue #1135.
 func (sm *SessionManager) injectClaudeHooks(sessionID string, lifecycle, policy bool) (extraArgs []string, extraEnv map[string]string, err error) {
-	settingsPath, err := sm.generateClaudeSettings(sessionID, lifecycle, policy)
+	return sm.injectClaudeHooksWithTimeout(sessionID, lifecycle, policy, sm.Config().CommandPolicy.TimeoutDuration())
+}
+
+func (sm *SessionManager) injectClaudeHooksWithTimeout(sessionID string, lifecycle, policy bool, policyTimeout time.Duration) (extraArgs []string, extraEnv map[string]string, err error) {
+	settingsPath, err := sm.generateClaudeSettingsWithTimeout(sessionID, lifecycle, policy, policyTimeout)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -407,6 +415,10 @@ type codexHookGroup struct {
 // MCP-server wiring is NOT handled here — it rides the separate injectMCPConfig
 // path (issue #1135), so a headless codex session gets MCP without hooks.
 func (sm *SessionManager) injectCodexHooks(sessionID string, lifecycle, policy bool) (extraArgs []string, extraEnv map[string]string, err error) {
+	return sm.injectCodexHooksWithTimeout(sessionID, lifecycle, policy, sm.Config().CommandPolicy.TimeoutDuration())
+}
+
+func (sm *SessionManager) injectCodexHooksWithTimeout(sessionID string, lifecycle, policy bool, policyTimeout time.Duration) (extraArgs []string, extraEnv map[string]string, err error) {
 	grBin := shellQuote(resolveGrBin())
 
 	var events []codexHookEvent
@@ -441,7 +453,7 @@ func (sm *SessionManager) injectCodexHooks(sessionID string, lifecycle, policy b
 		preToolGroups = append(preToolGroups, codexHookGroup{
 			matcher:  "^Bash$",
 			commands: []string{commandPolicyHookCommand(grBin)},
-			timeout:  commandPolicyHookTimeout(sm.cfg.CommandPolicy.TimeoutDuration()),
+			timeout:  commandPolicyHookTimeout(policyTimeout),
 		})
 	}
 
@@ -1077,12 +1089,12 @@ func (sm *SessionManager) removeGeneratedCursorHooks(sessionID, worktreePath str
 // implementation. It does NOT handle MCP config — that is injectMCPConfig's job,
 // kept separate so MCP can be injected without hooks (see issue #1135). Returns
 // nil for agents that don't support hooks.
-func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string, lifecycle, policy bool) (extraArgs []string, extraEnv map[string]string, err error) {
+func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string, lifecycle, policy bool, policyTimeout time.Duration) (extraArgs []string, extraEnv map[string]string, err error) {
 	switch agentName {
 	case "claude":
-		return sm.injectClaudeHooks(sessionID, lifecycle, policy)
+		return sm.injectClaudeHooksWithTimeout(sessionID, lifecycle, policy, policyTimeout)
 	case "codex":
-		return sm.injectCodexHooks(sessionID, lifecycle, policy)
+		return sm.injectCodexHooksWithTimeout(sessionID, lifecycle, policy, policyTimeout)
 	case "cursor":
 		return sm.injectCursorHooks(sessionID, worktreePath, lifecycle, policy)
 	default:

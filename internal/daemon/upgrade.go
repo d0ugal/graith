@@ -35,7 +35,7 @@ type UpgradeSession struct {
 // UpgradeFailureGuard is armed by the CLI before configuration loading for an
 // exec-replacement start. If any pre-Run/bootstrap error returns to main, the
 // guard identity-checks and terminates every process the old daemon recorded.
-// Cleanup is idempotent because Run also owns a guard after it begins.
+// Run disarms it only after installing its own manifest cleanup defer.
 type UpgradeFailureGuard struct {
 	manifest *UpgradeManifest
 	once     sync.Once
@@ -64,6 +64,17 @@ func (g *UpgradeFailureGuard) Cleanup() error {
 	})
 
 	return g.err
+}
+
+// Disarm transfers cleanup ownership to Run. Cleanup calls after this point are
+// no-ops, so a later unrelated daemon error cannot terminate processes from the
+// startup manifest.
+func (g *UpgradeFailureGuard) Disarm() {
+	if g == nil {
+		return
+	}
+
+	g.once.Do(func() {})
 }
 
 func clearCloseOnExec(fd int) error {

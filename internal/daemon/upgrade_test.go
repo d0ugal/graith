@@ -160,6 +160,36 @@ func TestCleanupUpgradeManifestTerminatesRecordedHeadlessProcess(t *testing.T) {
 	}
 }
 
+func TestUpgradeFailureGuardDisarmPreservesTransferredProcess(t *testing.T) {
+	pid := spawnReapableSleeper(t)
+
+	start, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	manifestPath, err := WriteManifest(t.TempDir(), &UpgradeManifest{Sessions: []UpgradeSession{{
+		ID: "canny-transferred", Fd: -1, PID: pid, PIDStartTime: start,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	guard, err := ArmUpgradeFailureGuard(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	guard.Disarm()
+	if err := guard.Cleanup(); err != nil {
+		t.Fatalf("Cleanup after Disarm: %v", err)
+	}
+
+	if err := syscall.Kill(-pid, 0); err != nil {
+		t.Fatalf("transferred process was terminated by disarmed startup guard: %v", err)
+	}
+}
+
 func TestReadManifestNonExistent(t *testing.T) {
 	_, err := ReadManifest("/nonexistent/manifest.json")
 	if err == nil {

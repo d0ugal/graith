@@ -13,9 +13,11 @@ issue: https://github.com/d0ugal/graith/issues/1075
 > **Security amendment (2026-07-18):** The permission-control portions of this
 > design are superseded by
 > [Non-interactive agents with sandbox-enforced policy](2026-07-18-non-interactive-sandbox-policy.md).
-> Headless sessions now run non-interactively in the mandatory OS sandbox;
-> unexpected native permission requests are runtime errors, never workflow
-> states waiting for a human.
+> Headless sessions use the bundled non-interactive agent arguments. Graith's
+> OS sandbox remains default-on but may be explicitly disabled with a startup
+> warning and doctor diagnostic; external isolation may provide the boundary.
+> Unexpected native permission requests are denied runtime errors, never
+> workflow states waiting for a human.
 
 graith runs **every** Claude Code session as an interactive PTY, even sessions
 no human will ever attach to — tribunal judges, trigger-spawned briefings,

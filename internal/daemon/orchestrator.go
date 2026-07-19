@@ -202,7 +202,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	}
 
 	if policyEnabled {
-		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, scratchDir, false, true)
+		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, scratchDir, false, true, cfgSnap.CommandPolicy.TimeoutDuration())
 		if err != nil {
 			sm.rollbackOrchestratorCreate(id)
 			return SessionState{}, fmt.Errorf("inject orchestrator command-policy hook: %w", err)

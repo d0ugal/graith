@@ -265,7 +265,9 @@ func (s *Session) handleLine(line []byte) {
 		s.deliverControlResponse(ev.Response)
 	case "control_request":
 		if controlSubtypeOf(ev.Request) == "can_use_tool" {
-			go s.handlePermission(ev)
+			// Apply backpressure in the single stream reader. A goroutine per
+			// request can grow without bound if the child stops reading stdin.
+			s.handlePermission(ev)
 		}
 	}
 }

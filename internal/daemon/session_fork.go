@@ -192,7 +192,8 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 
 	sourceAgentSessionID := source.AgentSessionID
 	sourceAgentHooks := source.AgentHooks
-	policyEnabled := sm.cfg.CommandPolicy.Enabled()
+	policyEnabled := cfgSnapshot.CommandPolicy.Enabled()
+	policyTimeout := cfgSnapshot.CommandPolicy.TimeoutDuration()
 	hookFilesNeeded := sourceAgentHooks || policyEnabled
 	// MCP config injection is decided separately from hooks (see #1135). Fork is
 	// PTY-only, so the two coincide here.
@@ -514,7 +515,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	}
 
 	if hookFilesNeeded {
-		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, sourceAgentHooks, policyEnabled)
+		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, sourceAgentHooks, policyEnabled, policyTimeout)
 		if err != nil {
 			forkCleanup()
 			rollbackState()

@@ -70,7 +70,7 @@ func cleanupLegacyDaemonDirs(
 
 // Run starts the daemon: acquires PID file, listens on the Unix socket,
 // serves connections, and blocks until SIGTERM/SIGINT or an upgrade signal.
-func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) (runErr error) {
+func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string, earlyUpgradeGuard *UpgradeFailureGuard) (runErr error) {
 	var manifest *UpgradeManifest
 
 	cleanupPending := false
@@ -84,6 +84,9 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) (
 		}
 
 		cleanupPending = true
+		// The CLI guard covers failures before Run. From here this defer owns the
+		// same manifest, including every return and panic during daemon bootstrap.
+		earlyUpgradeGuard.Disarm()
 		defer func() {
 			if !cleanupPending {
 				return
@@ -177,16 +180,15 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) (
 			return fmt.Errorf("initialize human authentication: %w", err)
 		}
 
-		// AdoptSessions now owns every manifest process and inherited PTY; stop
-		// the outer fallback before handing it raw fds so a failed adoption
-		// cannot make the defer close an fd number that has since been reused.
-		cleanupPending = false
-
 		if err := sm.AdoptSessions(manifest); err != nil {
 			_ = l.Close()
 
 			return fmt.Errorf("securely adopt upgraded sessions: %w", err)
 		}
+
+		// Adoption succeeded and SessionManager now owns every manifest process.
+		// Keep the fallback armed through the call so a panic cannot strand them.
+		cleanupPending = false
 
 		log.Info("daemon upgraded", "adopted_sessions", len(manifest.Sessions), "pid", os.Getpid())
 	} else {

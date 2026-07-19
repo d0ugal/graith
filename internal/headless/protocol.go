@@ -4,12 +4,13 @@
 // envelope. See docs/design/2026-07-13-headless-stream-json-design.md (#1075).
 //
 // v1 runs the one-shot control-channel form: `claude -p --output-format
-// stream-json --input-format stream-json --verbose --permission-prompt-tool
-// stdio`. The prompt is delivered as an initial stdin user message (not a
-// positional arg), the stdin channel stays open for the turn so graith can
-// issue an `interrupt` control request and answer inbound `can_use_tool`
-// permission asks, and stdin is closed on the terminal `result` so the process
-// exits (preserving one-shot semantics). See issue #1136 (Phase 4).
+// stream-json --input-format stream-json --verbose`. The prompt is delivered as
+// an initial stdin user message (not a positional arg), and stdin stays open so
+// graith can issue an `interrupt` control request. Graith does not request or
+// service native approvals; an unexpected inbound `can_use_tool` request is
+// diagnosed and denied immediately because headless mode has no agent TUI.
+// Stdin closes on the terminal `result` so the process exits, preserving
+// one-shot semantics. See issue #1136 (Phase 4).
 //
 // The control protocol is an SDK-internal contract, not a documented CLI API,
 // so everything is written defensively (unknown message types ignored,

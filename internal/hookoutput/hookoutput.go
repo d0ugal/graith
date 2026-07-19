@@ -40,6 +40,14 @@ type claudeHookSpecificOutput struct {
 func CommandPolicy(agent, decision, reason string) string {
 	switch agent {
 	case "claude":
+		// An allow is deliberately no hook opinion: Claude continues through its
+		// native permission system and any remaining containment. Emitting an
+		// explicit permissionDecision:"allow" would suppress a native Bash prompt
+		// and turn this subtractive policy into a capability grant.
+		if decision == "allow" {
+			return ""
+		}
+
 		return marshalString(claudeCommandPolicyResponse{
 			HookSpecificOutput: claudeHookSpecificOutput{
 				HookEventName:            "PreToolUse",
@@ -49,10 +57,9 @@ func CommandPolicy(agent, decision, reason string) string {
 		})
 	case "codex":
 		// Codex runs command policy as a PreToolUse hook independently of its
-		// native approval setting. An allow deliberately emits no hook opinion:
-		// Codex continues through its normal execution path, under any configured
-		// Graith sandbox, native policy, or external isolation. Current Codex
-		// rejects permissionDecision:"allow" on PreToolUse, but accepts a deny.
+		// native approval setting. As with Claude, an allow deliberately emits no
+		// hook opinion. Current Codex also rejects permissionDecision:"allow" on
+		// PreToolUse, but accepts a deny.
 		if decision == "allow" {
 			return ""
 		}

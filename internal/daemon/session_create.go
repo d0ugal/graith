@@ -347,6 +347,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	// Snapshot config values needed for Phase 2.
 	cfgSnapshot := sm.cfg
+	policyTimeout := cfgSnapshot.CommandPolicy.TimeoutDuration()
 	sandboxMerged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
 
 	// Reserve the session with StatusCreating so concurrent operations
@@ -709,7 +710,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	// Headless sessions skip lifecycle hooks because their typed stream reports
 	// status, but still receive a configured synchronous command-policy hook.
 	if hookFilesNeeded {
-		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, hooksEnabled && driverKind != DriverHeadless, policyEnabled)
+		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, hooksEnabled && driverKind != DriverHeadless, policyEnabled, policyTimeout)
 		if err != nil {
 			cleanupOnError()
 			rollbackState()
