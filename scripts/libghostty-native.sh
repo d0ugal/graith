@@ -22,6 +22,14 @@ readonly ZIG_SOURCE_URL="https://ziglang.org/download/0.15.2/zig-0.15.2.tar.xz"
 readonly ZIG_SOURCE_SHA256="d9b30c7aa983fcff5eed2084d54ae83eaafe7ff3a84d8fb754d854165a6e521c"
 readonly ZIG_LINUX_X86_64_URL="https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz"
 readonly ZIG_LINUX_X86_64_SHA256="02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239"
+readonly ZIG_LINUX_X86_64_SIZE="53733924"
+readonly ZIG_LINUX_X86_64_ARCHIVE="zig-x86_64-linux-$REQUIRED_ZIG.tar.xz"
+readonly ZIG_LINUX_X86_64_ROOT="zig-x86_64-linux-$REQUIRED_ZIG"
+readonly ZIG_DOWNLOAD_CONNECT_TIMEOUT_SECONDS="15"
+readonly ZIG_DOWNLOAD_ATTEMPT_TIMEOUT_SECONDS="180"
+readonly ZIG_DOWNLOAD_ATTEMPTS="3"
+readonly ZIG_DOWNLOAD_RETRY_DELAY_SECONDS="5"
+readonly ZIG_DOWNLOAD_JOB_TIMEOUT_SECONDS="900"
 readonly ZIG_LICENSE_SHA256="5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177"
 
 readonly UUCODE_VERSION="0.2.0"
@@ -115,6 +123,15 @@ sha256_value() {
     fi
 }
 
+file_size_value() {
+    local file_name="$1"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        /usr/bin/stat -f '%z' "$file_name"
+    else
+        stat -c '%s' "$file_name"
+    fi
+}
+
 sha256_check() {
     local expected="$1"
     local file_name="$2"
@@ -162,6 +179,154 @@ download_checked() {
         die "download checksum mismatch for $url"
     fi
     mv "$partial" "$output"
+}
+
+verify_zig_download_retry_policy() {
+    local retry_bound
+    retry_bound=$((
+        ZIG_DOWNLOAD_ATTEMPTS * ZIG_DOWNLOAD_ATTEMPT_TIMEOUT_SECONDS +
+        ZIG_DOWNLOAD_RETRY_DELAY_SECONDS *
+            ZIG_DOWNLOAD_ATTEMPTS * (ZIG_DOWNLOAD_ATTEMPTS - 1) / 2
+    ))
+    [[ "$retry_bound" -lt "$ZIG_DOWNLOAD_JOB_TIMEOUT_SECONDS" ]] || {
+        die "Zig retry policy exceeds the workflow timeout"
+        return 1
+    }
+}
+
+download_zig_checked() {
+    local output="$1"
+    local partial="${output}.partial"
+
+    if [[ -f "$output" ]] &&
+        [[ "$(file_size_value "$output")" == "$ZIG_LINUX_X86_64_SIZE" ]] &&
+        sha256_check "$ZIG_LINUX_X86_64_SHA256" "$output"; then
+        return
+    fi
+
+    if ! verify_zig_download_retry_policy; then
+        return 1
+    fi
+    rm -f -- "$partial"
+    local attempt
+    for ((attempt = 1; attempt <= ZIG_DOWNLOAD_ATTEMPTS; attempt++)); do
+        rm -f -- "$partial"
+        if curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --fail --location --silent --show-error \
+            --connect-timeout "$ZIG_DOWNLOAD_CONNECT_TIMEOUT_SECONDS" \
+            --max-time "$ZIG_DOWNLOAD_ATTEMPT_TIMEOUT_SECONDS" \
+            --max-filesize "$ZIG_LINUX_X86_64_SIZE" \
+            "$ZIG_LINUX_X86_64_URL" --output "$partial" &&
+            [[ "$(file_size_value "$partial")" == "$ZIG_LINUX_X86_64_SIZE" ]] &&
+            sha256_check "$ZIG_LINUX_X86_64_SHA256" "$partial"; then
+            mv "$partial" "$output"
+            return
+        fi
+        rm -f -- "$partial"
+        if ((attempt < ZIG_DOWNLOAD_ATTEMPTS)); then
+            sleep $((attempt * ZIG_DOWNLOAD_RETRY_DELAY_SECONDS))
+        fi
+    done
+    die "bounded Zig download failed exact size/checksum validation: $ZIG_LINUX_X86_64_URL"
+    return 1
+}
+
+verify_zig_archive_file() {
+    local archive="${1:-}"
+    local expected_name="${2:-}"
+    local expected_sha="${3:-}"
+    local expected_root="${4:-}"
+    local expected_size="${5:-}"
+    [[ -n "$archive" && -n "$expected_name" && -n "$expected_sha" &&
+        -n "$expected_root" && -n "$expected_size" ]] || {
+        die "Zig archive verification requires file, name, checksum, root, and size"
+        return 1
+    }
+    [[ -f "$archive" && ! -L "$archive" ]] || {
+        die "Zig archive is not a regular file: $archive"
+        return 1
+    }
+    [[ "$(basename "$archive")" == "$expected_name" ]] || {
+        die "Zig archive has an unexpected name: $(basename "$archive")"
+        return 1
+    }
+    [[ "$(file_size_value "$archive")" == "$expected_size" ]] || {
+        die "Zig host archive has an unexpected byte length"
+        return 1
+    }
+    if ! assert_sha256 "$expected_sha" "$archive" "Zig host archive"; then
+        return 1
+    fi
+    require_command python3
+    if ! python3 - "$archive" "$expected_root" <<'PY'
+import sys
+import tarfile
+
+archive_path, expected_root = sys.argv[1:]
+required = {
+    f"{expected_root}/zig": False,
+    f"{expected_root}/LICENSE": False,
+}
+with tarfile.open(archive_path, mode="r:*") as archive:
+    members = archive.getmembers()
+    if not members:
+        raise SystemExit("archive is empty")
+    seen = set()
+    for member in members:
+        name = member.name
+        if not name or name.startswith("/") or "//" in name:
+            raise SystemExit(f"unsafe archive member name: {name!r}")
+        if any(ord(character) < 32 or ord(character) == 127 for character in name):
+            raise SystemExit(f"control character in archive member name: {name!r}")
+        normalized = name[:-1] if name.endswith("/") else name
+        parts = normalized.split("/")
+        if not parts or parts[0] != expected_root:
+            raise SystemExit(f"archive member is outside expected root: {name!r}")
+        if any(part in ("", ".", "..") for part in parts):
+            raise SystemExit(f"noncanonical archive member name: {name!r}")
+        if normalized in seen:
+            raise SystemExit(f"duplicate archive member: {name!r}")
+        seen.add(normalized)
+        if not (member.isdir() or member.isreg()):
+            raise SystemExit(f"unsupported archive member type: {name!r}")
+        if normalized in required:
+            if not member.isreg():
+                raise SystemExit(f"required archive member is not regular: {name!r}")
+            required[normalized] = True
+if not all(required.values()):
+    missing = sorted(name for name, present in required.items() if not present)
+    raise SystemExit(f"missing required archive members: {missing}")
+PY
+    then
+        die "Zig host archive failed canonical member validation"
+        return 1
+    fi
+}
+
+resolve_zig_archive_directory() {
+    local directory="${1:-}"
+    local expected_name="${2:-$ZIG_LINUX_X86_64_ARCHIVE}"
+    [[ -d "$directory" ]] || {
+        die "Zig artifact directory does not exist: $directory"
+        return 1
+    }
+    if path_has_symlink_component "$directory"; then
+        die "Zig artifact directory traverses a symlink: $directory"
+        return 1
+    fi
+
+    local actual
+    actual="$(find "$directory" -mindepth 1 -maxdepth 1 -exec basename {} \; | sort)"
+    [[ "$actual" == "$expected_name" ]] || {
+        die "Zig artifact must contain only $expected_name"
+        return 1
+    }
+    local archive="$directory/$expected_name"
+    [[ -f "$archive" && ! -L "$archive" ]] || {
+        die "Zig artifact member is not a regular file"
+        return 1
+    }
+    printf '%s\n' "$archive"
 }
 
 write_pkg_config() {
@@ -509,12 +674,645 @@ verify_macho_archive_deployment_target() {
     fi
 }
 
+path_has_symlink_component() {
+    local path="$1"
+    while [[ "$path" != "/" && "$path" != "." ]]; do
+        [[ -L "$path" ]] && return 0
+        path="$(dirname "$path")"
+    done
+    return 1
+}
+
+archive_magic_hex() {
+    od -An -tx1 -N8 "$1" | tr -d '[:space:]'
+}
+
+expected_static_archive_members() {
+    printf '%s\n' \
+        abort.o base64.o codepoint_width.o compiler_rt.o index_of.o \
+        libghostty-vt-static_zcu.o libhighway_zcu.o per_target.o \
+        simdutf.o targets.o vt.o | sort
+}
+
+resolve_thin_archive_member() {
+    local input="${1:-}"
+    local member="${2:-}"
+    shift 2 || true
+    [[ -f "$input" && -n "$member" && "$#" -gt 0 ]] || {
+        die "thin member resolution requires archive, member, and allowed roots"
+        return 1
+    }
+    local check_path="/${member#/}/"
+    case "$check_path" in
+        *//*|*/../*|*/./*)
+            die "thin archive member is noncanonical: $member"
+            return 1
+            ;;
+    esac
+    [[ ! "$member" =~ [[:cntrl:]] ]] || {
+        die "thin archive member contains control characters"
+        return 1
+    }
+    local candidate
+    case "$member" in
+        /*) candidate="$member" ;;
+        *) candidate="$(dirname "$input")/$member" ;;
+    esac
+    [[ -f "$candidate" && ! -L "$candidate" ]] || {
+        die "thin archive member is not a regular non-symlink file: $member"
+        return 1
+    }
+    if path_has_symlink_component "$candidate"; then
+        die "thin archive member traverses a symlink: $member"
+        return 1
+    fi
+    local resolved
+    resolved="$(realpath "$candidate")"
+    local root canonical_root allowed=0
+    for root in "$@"; do
+        [[ -d "$root" && ! -L "$root" ]] || continue
+        canonical_root="$(realpath "$root")"
+        case "$resolved" in
+            "$canonical_root"/*) allowed=1; break ;;
+        esac
+    done
+    [[ "$allowed" == "1" ]] || {
+        die "thin archive member is outside the script-owned roots: $member"
+        return 1
+    }
+    [[ -s "$resolved" ]] || {
+        die "thin archive member is empty: $member"
+        return 1
+    }
+    local name="${member##*/}"
+    [[ "$name" =~ ^[A-Za-z0-9._+-]+$ ]] || {
+        die "thin archive member has an unsafe normalized name: $member"
+        return 1
+    }
+    local format
+    format="$(file -b "$resolved")"
+    [[ "$format" == *ELF*relocatable* ]] || {
+        die "thin archive member is not a supported ELF object: $member ($format)"
+        return 1
+    }
+    printf '%s\t%s\n' "$name" "$resolved"
+}
+
+materialize_thin_archive() (
+    local input="${1:-}"
+    local output="${2:-}"
+    local output_parent=""
+    local staging=""
+    local output_temp_directory=""
+    # shellcheck disable=SC2329 # Invoked indirectly by the scoped EXIT trap.
+    cleanup_archive_materialization() {
+        set +e
+        if [[ -n "$staging" &&
+            "$staging" == "$NATIVE_WORK"/regular-archive.* ]]; then
+            rm -rf -- "$staging"
+        fi
+        if [[ -n "$output_temp_directory" && -n "$output_parent" &&
+            "$output_temp_directory" == "$output_parent"/.libghostty-archive.* ]]; then
+            rm -rf -- "$output_temp_directory"
+        fi
+    }
+    trap cleanup_archive_materialization EXIT
+
+    shift 2 || true
+    [[ -f "$input" && -n "$output" && "$#" -gt 0 ]] || {
+        die "thin archive materialization requires input, output, and allowed roots"
+        return 1
+    }
+    require_command file
+    require_command od
+    require_command realpath
+    require_exact_zig
+    [[ -f "$input" && ! -L "$input" &&
+        "$(archive_magic_hex "$input")" == "213c7468696e3e0a" ]] || {
+        die "Zig source build did not produce the expected thin archive"
+        return 1
+    }
+    if path_has_symlink_component "$input"; then
+        die "thin archive input traverses a symlink"
+        return 1
+    fi
+    [[ ! -e "$output" && ! -L "$output" ]] || {
+        die "regular archive output already exists: $output"
+        return 1
+    }
+
+    output_parent="$(dirname "$output")"
+    [[ -d "$output_parent" ]] || {
+        die "regular archive output requires an existing parent directory"
+        return 1
+    }
+    if path_has_symlink_component "$output_parent"; then
+        die "regular archive output parent traverses a symlink"
+        return 1
+    fi
+    output_parent="$(realpath "$output_parent")"
+    output="$output_parent/$(basename "$output")"
+
+    local -a allowed_roots=()
+    local root canonical_root
+    for root in "$@"; do
+        [[ -d "$root" && ! -L "$root" ]] || {
+            die "thin archive allowed root is not a regular directory: $root"
+            return 1
+        }
+        if path_has_symlink_component "$root"; then
+            die "thin archive allowed root traverses a symlink: $root"
+            return 1
+        fi
+        canonical_root="$(realpath "$root")"
+        allowed_roots+=("$canonical_root")
+    done
+
+    staging="$(mktemp -d "$NATIVE_WORK/regular-archive.XXXXXX")"
+    local listing
+    if ! listing="$(zig ar t "$input")"; then
+        die "exact Zig archiver could not list the thin archive"
+        return 1
+    fi
+    local member resolved_record resolved name seen_names=""
+    local checked_name checked_source pre_source_sha post_source_sha staged_sha
+    local -a source_names=()
+    local -a source_paths=()
+    local -a source_shas=()
+    while IFS= read -r member; do
+        [[ -n "$member" ]] || {
+            die "thin archive contains an empty member name"
+            return 1
+        }
+        if ! resolved_record="$(resolve_thin_archive_member \
+            "$input" "$member" "${allowed_roots[@]}")"; then
+            return 1
+        fi
+        IFS=$'\t' read -r name resolved <<<"$resolved_record"
+        if grep -Fqx "$name" <<<"$seen_names"; then
+            die "thin archive members collide after path normalization: $name"
+            return 1
+        fi
+        seen_names+="${seen_names:+$'\n'}$name"
+        pre_source_sha="$(sha256_value "$resolved")"
+        cp "$resolved" "$staging/$name"
+        if ! resolved_record="$(resolve_thin_archive_member \
+            "$input" "$member" "${allowed_roots[@]}")"; then
+            return 1
+        fi
+        IFS=$'\t' read -r checked_name checked_source <<<"$resolved_record"
+        [[ "$checked_name" == "$name" && "$checked_source" == "$resolved" ]] || {
+            die "thin archive member identity changed while staging: $name"
+            return 1
+        }
+        post_source_sha="$(sha256_value "$checked_source")"
+        staged_sha="$(sha256_value "$staging/$name")"
+        [[ "$pre_source_sha" == "$post_source_sha" &&
+            "$post_source_sha" == "$staged_sha" ]] || {
+            die "thin archive member changed while staging: $name"
+            return 1
+        }
+        source_names+=("$name")
+        source_paths+=("$checked_source")
+        source_shas+=("$pre_source_sha")
+    done <<<"$listing"
+    [[ -n "$seen_names" ]] || {
+        die "thin archive does not contain any objects"
+        return 1
+    }
+
+    local expected_members actual_members
+    expected_members="$(expected_static_archive_members)"
+    actual_members="$(printf '%s\n' "$seen_names" | sort)"
+    [[ "$actual_members" == "$expected_members" ]] || {
+        die "thin archive does not match the exact audited 11-member closure"
+        return 1
+    }
+
+    local -a objects=()
+    while IFS= read -r name; do
+        objects+=("$staging/$name")
+    done <<<"$expected_members"
+    output_temp_directory="$(mktemp -d "$output_parent/.libghostty-archive.XXXXXX")"
+    chmod 700 "$output_temp_directory"
+    local temporary="$output_temp_directory/libghostty-vt.a"
+    zig ar rcsD "$temporary" "${objects[@]}"
+    [[ "$(archive_magic_hex "$temporary")" == "213c617263683e0a" ]] || {
+        die "materialized archive is not a self-contained regular archive"
+        return 1
+    }
+    if ! actual_members="$(zig ar t "$temporary")"; then
+        die "exact Zig archiver could not list the regular archive"
+        return 1
+    fi
+    [[ "$actual_members" == "$expected_members" ]] || {
+        die "regular archive member names differ from the audited thin input"
+        return 1
+    }
+
+    local expected_sha actual_sha extracted_member source_path source_index
+    local current_source_sha current_staged_sha found_source
+    for resolved in "${objects[@]}"; do
+        name="$(basename "$resolved")"
+        found_source=0
+        for source_index in "${!source_names[@]}"; do
+            if [[ "${source_names[$source_index]}" == "$name" ]]; then
+                source_path="${source_paths[$source_index]}"
+                expected_sha="${source_shas[$source_index]}"
+                found_source=1
+                break
+            fi
+        done
+        [[ "$found_source" == "1" ]] || {
+            die "regular archive member lost its canonical source mapping: $name"
+            return 1
+        }
+        if ! resolved_record="$(resolve_thin_archive_member \
+            "$input" "$source_path" "${allowed_roots[@]}")"; then
+            return 1
+        fi
+        IFS=$'\t' read -r checked_name checked_source <<<"$resolved_record"
+        [[ "$checked_name" == "$name" && "$checked_source" == "$source_path" ]] || {
+            die "thin archive member identity changed before publication: $name"
+            return 1
+        }
+        current_source_sha="$(sha256_value "$checked_source")"
+        current_staged_sha="$(sha256_value "$resolved")"
+        [[ "$current_source_sha" == "$expected_sha" &&
+            "$current_staged_sha" == "$expected_sha" ]] || {
+            die "thin archive source or staged bytes changed before publication: $name"
+            return 1
+        }
+        extracted_member="$staging/extracted-$name"
+        if ! zig ar p "$temporary" "$name" >"$extracted_member"; then
+            die "exact Zig archiver could not extract $name from regular archive"
+            return 1
+        fi
+        actual_sha="$(sha256_value "$extracted_member")"
+        [[ "$actual_sha" == "$expected_sha" ]] || {
+            die "regular archive changed the bytes for $name"
+            return 1
+        }
+    done
+    # Run the final verifier in a fresh process. Bash suppresses errexit through
+    # nested functions when this materializer is itself used as an if-condition.
+    if ! "$REPO_DIR/scripts/libghostty-native.sh" \
+        verify-static-archive "$temporary"; then
+        die "materialized regular archive failed final verification"
+        return 1
+    fi
+    mv "$temporary" "$output"
+)
+
+assert_no_archive_materialization_temps() {
+    local output_root="${1:-}"
+    [[ -d "$output_root" ]] || {
+        die "archive materialization temp check requires an output root"
+        return 1
+    }
+    local residue
+    residue="$(find "$NATIVE_WORK" -maxdepth 1 -type d \
+        -name 'regular-archive.*' -print -quit)"
+    [[ -z "$residue" ]] || {
+        die "archive materialization left a staging directory"
+        return 1
+    }
+    residue="$(find "$output_root" -type d \
+        -name '.libghostty-archive.*' -print -quit)"
+    [[ -z "$residue" ]] || {
+        die "archive materialization left an output temp directory"
+        return 1
+    }
+}
+
+test_thin_archive_materialization() {
+    [[ "$(uname -s)" == "Linux" ]] || return 0
+    require_exact_zig
+    require_command cc
+    local test_root="$NATIVE_WORK/thin-archive-materialization-test"
+    ensure_empty_directory "$test_root"
+    local source_root="$test_root/source"
+    local local_cache="$test_root/zig-local"
+    local global_cache="$test_root/zig-global"
+    local outside="$test_root/outside"
+    mkdir -p "$source_root" "$local_cache" "$global_cache" "$outside"
+    local members name identifier source
+    members="$(expected_static_archive_members)"
+    local -a objects=()
+    while IFS= read -r name; do
+        source="$source_root/${name%.o}.c"
+        case "$name" in
+            libghostty-vt-static_zcu.o)
+                printf '%s\n' \
+                    'void *ghostty_terminal_new(void) { return 0; }' \
+                    'const char graith_zig_version[] = "zig 0.15.2";' >"$source"
+                ;;
+            simdutf.o)
+                printf '%s\n' \
+                    'void simdutf_braw(void) __asm__("_ZN7simdutf4brawEv");' \
+                    'void simdutf_braw(void) {}' >"$source"
+                ;;
+            libhighway_zcu.o)
+                printf '%s\n' \
+                    'void highway_braw(void) __asm__("_ZN3hwy4brawEv");' \
+                    'void highway_braw(void) {}' >"$source"
+                ;;
+            compiler_rt.o)
+                printf '%s\n' 'void __ubsan_handle_braw(void) {}' >"$source"
+                ;;
+            *)
+                identifier="${name//[^A-Za-z0-9]/_}"
+                printf 'void braw_%s(void) {}\n' "$identifier" >"$source"
+                ;;
+        esac
+        cc -c -o "$local_cache/$name" "$source"
+        objects+=("$local_cache/$name")
+    done <<<"$members"
+    printf 'int dreich(void) { return 9; }\n' >"$outside/dreich.c"
+    cc -c -o "$outside/dreich.o" "$outside/dreich.c"
+
+    local thin="$test_root/input-thin.a"
+    zig ar rcsT "$thin" "${objects[@]}"
+    [[ "$(archive_magic_hex "$thin")" == "213c7468696e3e0a" ]] || {
+        die "thin archive regression did not create exact thin magic"
+        return 1
+    }
+    local regular_one="$test_root/output-one.a"
+    local regular_two="$test_root/output-two.a"
+    materialize_thin_archive "$thin" "$regular_one" \
+        "$source_root" "$local_cache" "$global_cache"
+    materialize_thin_archive "$thin" "$regular_two" \
+        "$source_root" "$local_cache" "$global_cache"
+    [[ "$(sha256_value "$regular_one")" == "$(sha256_value "$regular_two")" ]] || {
+        die "regular archive materialization is not byte-deterministic"
+        return 1
+    }
+    local equality_bytes="$test_root/equality-member"
+    while IFS= read -r name; do
+        if ! zig ar p "$regular_one" "$name" >"$equality_bytes"; then
+            die "all-member equality fixture could not extract $name"
+            return 1
+        fi
+        [[ "$(sha256_value "$local_cache/$name")" == \
+            "$(sha256_value "$equality_bytes")" ]] || {
+            die "all-member equality fixture changed source bytes for $name"
+            return 1
+        }
+    done <<<"$members"
+    assert_no_archive_materialization_temps "$test_root"
+
+    local mutation_cache="$test_root/mutation-cache"
+    mkdir -p "$mutation_cache"
+    local -a mutation_objects=()
+    while IFS= read -r name; do
+        cp "$local_cache/$name" "$mutation_cache/$name"
+        mutation_objects+=("$mutation_cache/$name")
+    done <<<"$members"
+    local mutation_thin="$test_root/mutation-thin.a"
+    local mutation_output="$test_root/mutation-output.a"
+    local mutation_source="$mutation_cache/base64.o"
+    zig ar rcsT "$mutation_thin" "${mutation_objects[@]}"
+    local mutation_bin="$test_root/mutation-bin"
+    local system_cp
+    system_cp="$(command -v cp)"
+    mkdir -p "$mutation_bin"
+    # shellcheck disable=SC2016 # These expressions belong to the generated shim.
+    printf '%s\n' \
+        '#!/usr/bin/env bash' \
+        'set -euo pipefail' \
+        '"$GRAITH_TEST_SYSTEM_CP" "$@"' \
+        'if [[ "${1:-}" == "$GRAITH_TEST_MUTATION_SOURCE" ]]; then' \
+        '    printf "\0" >>"$GRAITH_TEST_MUTATION_SOURCE"' \
+        'fi' >"$mutation_bin/cp"
+    chmod 700 "$mutation_bin/cp"
+    if GRAITH_TEST_SYSTEM_CP="$system_cp" \
+        GRAITH_TEST_MUTATION_SOURCE="$mutation_source" \
+        PATH="$mutation_bin:$PATH" \
+        materialize_thin_archive "$mutation_thin" "$mutation_output" \
+        "$mutation_cache" >/dev/null 2>&1; then
+        die "thin archive materialization accepted a changing source member"
+        return 1
+    fi
+    [[ ! -e "$mutation_output" && ! -L "$mutation_output" ]] || {
+        die "failed thin archive materialization published an output"
+        return 1
+    }
+    assert_no_archive_materialization_temps "$test_root"
+
+    local failure_bin="$test_root/failure-bin"
+    local system_zig
+    system_zig="$(command -v zig)"
+    mkdir -p "$failure_bin"
+    # shellcheck disable=SC2016 # These expressions belong to the generated shim.
+    printf '%s\n' \
+        '#!/usr/bin/env bash' \
+        'set -euo pipefail' \
+        'if [[ "${1:-}" == "ar" && "${2:-}" == "p" ]]; then' \
+        '    exit 1' \
+        'fi' \
+        'exec "$GRAITH_TEST_SYSTEM_ZIG" "$@"' >"$failure_bin/zig"
+    chmod 700 "$failure_bin/zig"
+    local late_failure_output="$test_root/late-failure-output.a"
+    if GRAITH_TEST_SYSTEM_ZIG="$system_zig" \
+        PATH="$failure_bin:$PATH" \
+        materialize_thin_archive "$thin" "$late_failure_output" \
+        "$source_root" "$local_cache" "$global_cache" >/dev/null 2>&1; then
+        die "thin archive materialization accepted an extraction failure"
+        return 1
+    fi
+    [[ ! -e "$late_failure_output" && ! -L "$late_failure_output" ]] || {
+        die "late thin archive failure published an output"
+        return 1
+    }
+    assert_no_archive_materialization_temps "$test_root"
+
+    local verifier_failure_bin="$test_root/verifier-failure-bin"
+    mkdir -p "$verifier_failure_bin"
+    printf '%s\n' \
+        '#!/usr/bin/env bash' \
+        'exit 1' >"$verifier_failure_bin/ar"
+    chmod 700 "$verifier_failure_bin/ar"
+    local verifier_failure_output="$test_root/verifier-failure-output.a"
+    if PATH="$verifier_failure_bin:$PATH" \
+        materialize_thin_archive "$thin" "$verifier_failure_output" \
+        "$source_root" "$local_cache" "$global_cache" >/dev/null 2>&1; then
+        die "thin archive materialization ignored final verifier failure"
+        return 1
+    fi
+    [[ ! -e "$verifier_failure_output" && ! -L "$verifier_failure_output" ]] || {
+        die "final verifier failure published an output"
+        return 1
+    }
+    assert_no_archive_materialization_temps "$test_root"
+
+    local thin_listing first_thin_member
+    if ! thin_listing="$(zig ar t "$thin")"; then
+        die "exact Zig archiver could not list the thin regression archive"
+        return 1
+    fi
+    first_thin_member="$(head -n 1 <<<"$thin_listing")"
+    mv "$local_cache" "$test_root/removed-local-cache"
+    if ! zig ar t "$thin" >/dev/null; then
+        die "thin archive listing unexpectedly required member bytes"
+        return 1
+    fi
+    local missing_thin_bytes="$test_root/missing-thin-member"
+    if zig ar p "$thin" "$first_thin_member" >"$missing_thin_bytes" 2>/dev/null &&
+        [[ -s "$missing_thin_bytes" ]]; then
+        die "thin archive unexpectedly retained member bytes after cache removal"
+        return 1
+    fi
+    verify_static_archive "$regular_one"
+    local retained_regular_bytes="$test_root/retained-regular-member"
+    zig ar p "$regular_one" abort.o >"$retained_regular_bytes" || {
+        die "regular archive did not retain extracted member bytes"
+        return 1
+    }
+    [[ -s "$retained_regular_bytes" ]] || {
+        die "regular archive retained an empty member"
+        return 1
+    }
+    printf '%s\n' \
+        'void *ghostty_terminal_new(void);' \
+        'int main(void) { return ghostty_terminal_new() == 0 ? 0 : 1; }' \
+        >"$test_root/main.c"
+    if cc -o "$test_root/thin-should-not-link" "$test_root/main.c" "$thin" \
+        >/dev/null 2>&1; then
+        die "thin archive unexpectedly linked after removing its cache objects"
+        return 1
+    fi
+    cc -o "$test_root/braw" "$test_root/main.c" "$regular_one"
+    "$test_root/braw" || {
+        die "regular archive did not link after removing thin members"
+        return 1
+    }
+
+    local removed_cache="$test_root/removed-local-cache"
+    local traversal="$removed_cache/../outside/dreich.o"
+    if resolve_thin_archive_member "$thin" "$traversal" "$removed_cache" \
+        >/dev/null 2>&1; then
+        die "thin archive member policy accepted traversal"
+        return 1
+    fi
+    local sibling="$test_root/removed-local-cache-sibling"
+    mkdir -p "$sibling"
+    cp "$outside/dreich.o" "$sibling/dreich.o"
+    if resolve_thin_archive_member "$thin" "$sibling/dreich.o" "$removed_cache" \
+        >/dev/null 2>&1; then
+        die "thin archive member policy accepted a root-prefix sibling"
+        return 1
+    fi
+    cp "$outside/dreich.o" "$outside/base64.o"
+    local -a outside_objects=()
+    while IFS= read -r name; do
+        if [[ "$name" == "base64.o" ]]; then
+            outside_objects+=("$outside/base64.o")
+        else
+            outside_objects+=("$removed_cache/$name")
+        fi
+    done <<<"$members"
+    local outside_archive="$test_root/outside-thin.a"
+    zig ar rcsT "$outside_archive" "${outside_objects[@]}"
+    if materialize_thin_archive "$outside_archive" "$test_root/outside-regular.a" \
+        "$removed_cache" >/dev/null 2>&1; then
+        die "thin archive materialization accepted an outside member"
+        return 1
+    fi
+    local symlink_root="$test_root/symlink-root"
+    mkdir -p "$symlink_root"
+    ln -s "$outside/dreich.o" "$symlink_root/dreich.o"
+    if resolve_thin_archive_member "$thin" "$symlink_root/dreich.o" \
+        "$symlink_root" >/dev/null 2>&1; then
+        die "thin archive member policy accepted a symlink"
+        return 1
+    fi
+    if resolve_thin_archive_member "$thin" $'dreich\tmember.o' "$removed_cache" \
+        >/dev/null 2>&1; then
+        die "thin archive member policy accepted a control character"
+        return 1
+    fi
+
+    local valid_after_move="$test_root/valid-after-move.a"
+    objects=()
+    while IFS= read -r name; do objects+=("$removed_cache/$name"); done <<<"$members"
+    zig ar rcsT "$valid_after_move" "${objects[@]}"
+    ln -s "$test_root/never-created" "$test_root/dangling-output.a"
+    if materialize_thin_archive "$valid_after_move" "$test_root/dangling-output.a" \
+        "$removed_cache" >/dev/null 2>&1; then
+        die "thin archive materialization followed a dangling output symlink"
+        return 1
+    fi
+    mkdir -p "$test_root/real-output-parent"
+    ln -s "$test_root/real-output-parent" "$test_root/symlink-output-parent"
+    if materialize_thin_archive "$valid_after_move" \
+        "$test_root/symlink-output-parent/output.a" "$removed_cache" \
+        >/dev/null 2>&1; then
+        die "thin archive materialization accepted a symlinked output parent"
+        return 1
+    fi
+
+    cp "$outside/dreich.o" "$outside/abort.o"
+    local collision="$test_root/collision-thin.a"
+    zig ar rcsT "$collision" "${objects[@]}" "$outside/abort.o"
+    if materialize_thin_archive "$collision" "$test_root/collision-regular.a" \
+        "$removed_cache" "$outside" >/dev/null 2>&1; then
+        die "thin archive materialization accepted colliding normalized names"
+        return 1
+    fi
+
+    local -a missing_objects=("${objects[@]:0:10}")
+    local missing="$test_root/missing-thin.a"
+    zig ar rcsT "$missing" "${missing_objects[@]}"
+    if materialize_thin_archive "$missing" "$test_root/missing-regular.a" \
+        "$removed_cache" >/dev/null 2>&1; then
+        die "thin archive materialization accepted a missing member"
+        return 1
+    fi
+    cp "$outside/dreich.o" "$removed_cache/extra.o"
+    local extra="$test_root/extra-thin.a"
+    zig ar rcsT "$extra" "${objects[@]}" "$removed_cache/extra.o"
+    if materialize_thin_archive "$extra" "$test_root/extra-regular.a" \
+        "$removed_cache" >/dev/null 2>&1; then
+        die "thin archive materialization accepted an extra member"
+        return 1
+    fi
+
+    local invalid_root="$test_root/invalid-root"
+    mkdir -p "$invalid_root"
+    local invalid_kind invalid_archive
+    for invalid_kind in empty unsupported; do
+        if [[ "$invalid_kind" == "empty" ]]; then
+            : >"$invalid_root/vt.o"
+        else
+            printf 'dreich non-object\n' >"$invalid_root/vt.o"
+        fi
+        local -a invalid_objects=()
+        while IFS= read -r name; do
+            if [[ "$name" == "vt.o" ]]; then
+                invalid_objects+=("$invalid_root/vt.o")
+            else
+                invalid_objects+=("$removed_cache/$name")
+            fi
+        done <<<"$members"
+        invalid_archive="$test_root/$invalid_kind-thin.a"
+        zig ar rcsT "$invalid_archive" "${invalid_objects[@]}"
+        if materialize_thin_archive "$invalid_archive" \
+            "$test_root/$invalid_kind-regular.a" "$removed_cache" "$invalid_root" \
+            >/dev/null 2>&1; then
+            die "thin archive materialization accepted an $invalid_kind member"
+            return 1
+        fi
+    done
+    assert_no_archive_materialization_temps "$test_root"
+}
+
 verify_static_archive() {
     local library="${1:-}"
     [[ -f "$library" ]] || die "usage: $0 verify-static-archive <library>"
     require_command ar
     require_command file
     require_command nm
+    require_command od
     require_command strings
 
     local -a archives=("$library")
@@ -529,18 +1327,24 @@ verify_static_archive() {
     fi
 
     local expected_members
-    expected_members="$(printf '%s\n' \
-        abort.o base64.o codepoint_width.o compiler_rt.o index_of.o \
-        libghostty-vt-static_zcu.o libhighway_zcu.o per_target.o \
-        simdutf.o targets.o vt.o | sort)"
+    expected_members="$(expected_static_archive_members)"
 
     local archive
     for archive in "${archives[@]}"; do
+        [[ "$(archive_magic_hex "$archive")" == "213c617263683e0a" ]] || {
+            die "static archive verification requires a self-contained regular archive"
+            return 1
+        }
+        local listing
+        if ! listing="$(ar -t "$archive")"; then
+            die "static archive member listing failed"
+            return 1
+        fi
         local actual_members member symbols member_count
         actual_members="$({
             while IFS= read -r member; do
                 printf '%s\n' "${member##*/}"
-            done < <(ar -t "$archive")
+            done <<<"$listing"
         } | grep -v '^__.SYMDEF' | sort)"
         [[ "$actual_members" == "$expected_members" ]] || {
             printf 'expected archive members:\n%s\nactual archive members:\n%s\n' \
@@ -552,7 +1356,7 @@ verify_static_archive() {
         local object_member="" object_format
         while IFS= read -r object_member; do
             [[ "${object_member##*/}" == "__.SYMDEF"* ]] || break
-        done < <(ar -t "$archive")
+        done <<<"$listing"
         [[ -n "$object_member" ]] || die "static archive does not contain an object"
         object_format="$(ar -p "$archive" "$object_member" | file -b -)"
 
@@ -639,8 +1443,8 @@ source_build() {
 
     local built_library="$source/zig-out/lib/libghostty-vt.a"
     [[ -f "$built_library" ]] || die "Ghostty build did not produce $built_library"
-    mkdir -p "$(dirname "$output")"
-    cp "$built_library" "$output"
+    materialize_thin_archive "$built_library" "$output" \
+        "$source" "$NATIVE_WORK/zig-local" "$NATIVE_WORK/zig-global"
     verify_static_archive "$output"
     write_pkg_config "$output" >/dev/null
 }
@@ -2083,18 +2887,318 @@ package_candidate() {
     [[ "$actual" == "$expected" ]] || die "candidate artifact contents are incomplete or unexpected"
 }
 
-install_zig() {
-    local destination="${1:-}"
-    [[ -n "$destination" ]] || die "usage: $0 install-zig <empty-directory>"
+verify_zig_host_platform() {
     [[ "$(uname -s)-$(uname -m)" == "Linux-x86_64" ]] ||
         die "install-zig currently pins the Linux x86_64 CI host distribution only"
-    ensure_empty_directory "$destination"
-    local archive="$NATIVE_WORK/zig-x86_64-linux-$REQUIRED_ZIG.tar.xz"
-    download_checked "$ZIG_LINUX_X86_64_URL" "$ZIG_LINUX_X86_64_SHA256" "$archive"
-    tar -xf "$archive" -C "$destination" --strip-components=1
-    [[ "$("$destination/zig" version)" == "$REQUIRED_ZIG" ]] ||
+}
+
+extract_zig_archive() (
+    local archive="$1"
+    local destination="$2"
+    local install_root=""
+    trap 'if [[ -n "$install_root" && -d "$install_root" ]]; then rm -rf -- "$install_root"; fi' EXIT
+    [[ -f "$archive" && ! -L "$archive" ]] || {
+        die "Zig installation source is not a regular archive"
+        return 1
+    }
+    local destination_parent destination_name
+    destination_parent="$(dirname "$destination")"
+    destination_name="$(basename "$destination")"
+    [[ -d "$destination_parent" && "$destination_name" != "." &&
+        "$destination_name" != ".." ]] || {
+        die "Zig installation destination requires an existing safe parent"
+        return 1
+    }
+    if path_has_symlink_component "$destination_parent"; then
+        die "Zig installation destination traverses a symlink"
+        return 1
+    fi
+    destination_parent="$(realpath "$destination_parent")"
+    destination="$destination_parent/$destination_name"
+    [[ ! -e "$destination" && ! -L "$destination" ]] || {
+        die "Zig installation destination already exists: $destination"
+        return 1
+    }
+
+    install_root="$(mktemp -d "$destination_parent/.zig-install.XXXXXX")"
+    chmod 700 "$install_root"
+    [[ -d "$install_root" && ! -L "$install_root" ]] || {
+        die "Zig installation staging directory is unsafe"
+        return 1
+    }
+    local staged_archive="$install_root/$ZIG_LINUX_X86_64_ARCHIVE"
+    cp "$archive" "$staged_archive"
+    chmod 600 "$staged_archive"
+    if ! verify_zig_archive_file "$staged_archive" "$ZIG_LINUX_X86_64_ARCHIVE" \
+        "$ZIG_LINUX_X86_64_SHA256" "$ZIG_LINUX_X86_64_ROOT" \
+        "$ZIG_LINUX_X86_64_SIZE"; then
+        return 1
+    fi
+
+    local extracted="$install_root/extracted"
+    mkdir -m 700 "$extracted"
+    if ! python3 - "$staged_archive" "$ZIG_LINUX_X86_64_ROOT" "$extracted" <<'PY'
+import os
+import pathlib
+import shutil
+import sys
+import tarfile
+
+archive_path, expected_root, destination = sys.argv[1:]
+destination_path = pathlib.Path(destination).resolve(strict=True)
+seen = set()
+with tarfile.open(archive_path, mode="r:*") as archive:
+    for member in archive.getmembers():
+        name = member.name
+        if not name or name.startswith("/") or "//" in name:
+            raise SystemExit(f"unsafe archive member name: {name!r}")
+        if any(ord(character) < 32 or ord(character) == 127 for character in name):
+            raise SystemExit(f"control character in archive member name: {name!r}")
+        normalized = name[:-1] if name.endswith("/") else name
+        parts = normalized.split("/")
+        if not parts or parts[0] != expected_root or any(
+            part in ("", ".", "..") for part in parts
+        ):
+            raise SystemExit(f"noncanonical archive member name: {name!r}")
+        if normalized in seen:
+            raise SystemExit(f"duplicate archive member: {name!r}")
+        seen.add(normalized)
+        if not (member.isdir() or member.isreg()):
+            raise SystemExit(f"unsupported archive member type: {name!r}")
+        relative_parts = parts[1:]
+        if not relative_parts:
+            if not member.isdir():
+                raise SystemExit("archive root is not a directory")
+            continue
+        target = destination_path.joinpath(*relative_parts)
+        if member.isdir():
+            target.mkdir(parents=True, exist_ok=True)
+            if not target.is_dir() or target.is_symlink():
+                raise SystemExit(f"unsafe extraction directory: {name!r}")
+            os.chmod(target, 0o755)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        source = archive.extractfile(member)
+        if source is None:
+            raise SystemExit(f"unable to read archive member: {name!r}")
+        descriptor = os.open(target, flags, 0o600)
+        with source, os.fdopen(descriptor, "wb") as output:
+            shutil.copyfileobj(source, output)
+        os.chmod(target, member.mode & 0o755)
+PY
+    then
+        die "safe Zig extraction failed"
+        return 1
+    fi
+
+    local installed_zig="$extracted/zig"
+    local installed_license="$extracted/LICENSE"
+    [[ -f "$installed_zig" && ! -L "$installed_zig" &&
+        -f "$installed_license" && ! -L "$installed_license" ]] || {
+        die "installed Zig tree is missing regular zig/LICENSE files"
+        return 1
+    }
+    case "$(realpath "$installed_zig")" in
+        "$extracted"/*) ;;
+        *) die "installed Zig executable escaped its staging directory"; return 1 ;;
+    esac
+    case "$(realpath "$installed_license")" in
+        "$extracted"/*) ;;
+        *) die "installed Zig license escaped its staging directory"; return 1 ;;
+    esac
+    [[ "$("$installed_zig" version)" == "$REQUIRED_ZIG" ]] || {
         die "installed Zig executable has an unexpected version"
+        return 1
+    }
+    chmod 755 "$extracted"
+    mv "$extracted" "$destination"
     printf '%s\n' "$destination/zig"
+)
+
+download_zig_archive() {
+    local destination="${1:-}"
+    [[ -n "$destination" ]] || {
+        die "usage: $0 download-zig-archive <empty-directory>"
+        return 1
+    }
+    if ! verify_zig_host_platform; then
+        return 1
+    fi
+    ensure_empty_directory "$destination"
+    local archive="$destination/$ZIG_LINUX_X86_64_ARCHIVE"
+    if ! download_zig_checked "$archive"; then
+        return 1
+    fi
+    if ! verify_zig_archive_file "$archive" "$ZIG_LINUX_X86_64_ARCHIVE" \
+        "$ZIG_LINUX_X86_64_SHA256" "$ZIG_LINUX_X86_64_ROOT" \
+        "$ZIG_LINUX_X86_64_SIZE"; then
+        return 1
+    fi
+    printf '%s\n' "$archive"
+}
+
+install_zig_archive() {
+    local archive_directory="${1:-}"
+    local destination="${2:-}"
+    [[ -n "$archive_directory" && -n "$destination" ]] || {
+        die "usage: $0 install-zig-archive <artifact-directory> <new-directory>"
+        return 1
+    }
+    if ! verify_zig_host_platform; then
+        return 1
+    fi
+    local archive
+    if ! archive="$(resolve_zig_archive_directory "$archive_directory")"; then
+        return 1
+    fi
+    extract_zig_archive "$archive" "$destination"
+}
+
+install_zig() {
+    local destination="${1:-}"
+    [[ -n "$destination" ]] || {
+        die "usage: $0 install-zig <new-directory>"
+        return 1
+    }
+    if ! verify_zig_host_platform; then
+        return 1
+    fi
+    local archive="$NATIVE_WORK/$ZIG_LINUX_X86_64_ARCHIVE"
+    if ! download_zig_checked "$archive"; then
+        return 1
+    fi
+    extract_zig_archive "$archive" "$destination"
+}
+
+test_zig_archive_policy() {
+    verify_zig_download_retry_policy
+    local test_root="$NATIVE_WORK/zig-archive-policy-test"
+    ensure_empty_directory "$test_root"
+    local expected_root="zig-x86_64-linux-braw"
+    local expected_name="$expected_root.tar.xz"
+    local payload="$test_root/payload"
+    mkdir -p "$payload/$expected_root"
+    printf '#!/bin/sh\nprintf braw\\n\n' >"$payload/$expected_root/zig"
+    chmod +x "$payload/$expected_root/zig"
+    printf 'braw license\n' >"$payload/$expected_root/LICENSE"
+
+    local artifact_directory="$test_root/artifact"
+    mkdir -p "$artifact_directory"
+    local archive="$artifact_directory/$expected_name"
+    COPYFILE_DISABLE=1 tar -cJf "$archive" -C "$payload" "$expected_root"
+    local expected_sha expected_size
+    expected_sha="$(sha256_value "$archive")"
+    expected_size="$(file_size_value "$archive")"
+    verify_zig_archive_file "$archive" "$expected_name" "$expected_sha" \
+        "$expected_root" "$expected_size"
+    [[ "$(resolve_zig_archive_directory "$artifact_directory" "$expected_name")" == "$archive" ]] || {
+        die "Zig artifact directory did not resolve its exact archive"
+        return 1
+    }
+
+    local corrupt="$test_root/corrupt/$expected_name"
+    mkdir -p "$(dirname "$corrupt")"
+    cp "$archive" "$corrupt"
+    printf 'thrawn' >>"$corrupt"
+    if verify_zig_archive_file "$corrupt" "$expected_name" "$expected_sha" \
+        "$expected_root" "$expected_size" >/dev/null 2>&1; then
+        die "Zig archive policy accepted corrupt bytes"
+        return 1
+    fi
+
+    local wrong_name="$test_root/dreich.tar.xz"
+    cp "$archive" "$wrong_name"
+    if verify_zig_archive_file "$wrong_name" "$expected_name" "$expected_sha" \
+        "$expected_root" "$expected_size" >/dev/null 2>&1; then
+        die "Zig archive policy accepted the wrong archive name"
+        return 1
+    fi
+
+    printf 'blether\n' >"$payload/blether"
+    local unexpected="$test_root/unexpected/$expected_name"
+    mkdir -p "$(dirname "$unexpected")"
+    COPYFILE_DISABLE=1 tar -cJf "$unexpected" -C "$payload" "$expected_root" blether
+    local unexpected_sha unexpected_size
+    unexpected_sha="$(sha256_value "$unexpected")"
+    unexpected_size="$(file_size_value "$unexpected")"
+    if verify_zig_archive_file "$unexpected" "$expected_name" "$unexpected_sha" \
+        "$expected_root" "$unexpected_size" >/dev/null 2>&1; then
+        die "Zig archive policy accepted content outside its expected root"
+        return 1
+    fi
+
+    local malicious_kind malicious malicious_sha malicious_size
+    for malicious_kind in traversal dot duplicate symlink hardlink; do
+        malicious="$test_root/$malicious_kind/$expected_name"
+        mkdir -p "$(dirname "$malicious")"
+        python3 - "$malicious" "$expected_root" "$malicious_kind" <<'PY'
+import io
+import sys
+import tarfile
+
+archive_path, root, kind = sys.argv[1:]
+with tarfile.open(archive_path, mode="w:xz") as archive:
+    directory = tarfile.TarInfo(root)
+    directory.type = tarfile.DIRTYPE
+    directory.mode = 0o755
+    archive.addfile(directory)
+    for name, contents, mode in (
+        (f"{root}/zig", b"#!/bin/sh\n", 0o755),
+        (f"{root}/LICENSE", b"braw\n", 0o644),
+    ):
+        member = tarfile.TarInfo(name)
+        member.size = len(contents)
+        member.mode = mode
+        archive.addfile(member, io.BytesIO(contents))
+    if kind in ("traversal", "dot"):
+        unsafe_name = f"{root}/../escape" if kind == "traversal" else f"{root}/./escape"
+        member = tarfile.TarInfo(unsafe_name)
+        contents = b"dreich\n"
+        member.size = len(contents)
+        archive.addfile(member, io.BytesIO(contents))
+    elif kind == "duplicate":
+        member = tarfile.TarInfo(f"{root}/LICENSE")
+        contents = b"duplicate\n"
+        member.size = len(contents)
+        archive.addfile(member, io.BytesIO(contents))
+    elif kind == "symlink":
+        member = tarfile.TarInfo(f"{root}/thrawn")
+        member.type = tarfile.SYMTYPE
+        member.linkname = "../../escape"
+        archive.addfile(member)
+    else:
+        member = tarfile.TarInfo(f"{root}/thrawn")
+        member.type = tarfile.LNKTYPE
+        member.linkname = f"{root}/zig"
+        archive.addfile(member)
+PY
+        malicious_sha="$(sha256_value "$malicious")"
+        malicious_size="$(file_size_value "$malicious")"
+        if verify_zig_archive_file "$malicious" "$expected_name" \
+            "$malicious_sha" "$expected_root" "$malicious_size" \
+            >/dev/null 2>&1; then
+            die "Zig archive policy accepted a $malicious_kind member"
+            return 1
+        fi
+    done
+
+    printf 'canny\n' >"$artifact_directory/canny"
+    if resolve_zig_archive_directory "$artifact_directory" "$expected_name" \
+        >/dev/null 2>&1; then
+        die "Zig artifact policy accepted an extra file"
+        return 1
+    fi
+    if download_zig_archive >/dev/null 2>&1; then
+        die "Zig archive download accepted a missing destination"
+        return 1
+    fi
+    if install_zig_archive "$artifact_directory" >/dev/null 2>&1; then
+        die "Zig archive installation accepted a missing destination"
+        return 1
+    fi
 }
 
 install_spdx_validator() {
@@ -2145,7 +3249,11 @@ usage: $0 test|race|fuzz|bench|memory|all
        $0 verify-candidate-binding <binary> <goos> <goarch> <spdx>
        $0 verify-selectors
        $0 package-candidate <binary> <goos> <goarch> <empty-directory> <spdx-jar>
-       $0 install-zig <empty-directory>
+       $0 download-zig-archive <empty-directory>
+       $0 install-zig-archive <artifact-directory> <new-directory>
+       $0 install-zig <new-directory>
+       $0 test-zig-archive-policy
+       $0 test-thin-archive-materialization
        $0 install-spdx-validator <empty-directory>
        $0 validate-spdx <tools-java-jar>
 
@@ -2227,8 +3335,20 @@ case "${1:-}" in
     package-candidate)
         package_candidate "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}"
         ;;
+    download-zig-archive)
+        download_zig_archive "${2:-}"
+        ;;
+    install-zig-archive)
+        install_zig_archive "${2:-}" "${3:-}"
+        ;;
     install-zig)
         install_zig "${2:-}"
+        ;;
+    test-zig-archive-policy)
+        test_zig_archive_policy
+        ;;
+    test-thin-archive-materialization)
+        test_thin_archive_materialization
         ;;
     install-spdx-validator)
         install_spdx_validator "${2:-}"

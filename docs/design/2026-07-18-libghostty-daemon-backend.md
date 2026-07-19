@@ -338,6 +338,32 @@ The path-scoped native workflow performs these checks:
   target-specific SPDX document bound to that binary, and the complete notice
   file.
 
+The Linux lanes share one same-run Zig host archive so two matrix jobs do not
+place concurrent load on the official download origin. A bounded preparation
+job downloads the exact official archive with HTTPS-only transport, connection
+and three finite whole-transfer attempts, verifies its pinned 53,733,924-byte
+length and SHA-256, and uploads only that archive. The strict worst-case curl
+budget is 555 seconds including backoff, below the preparation job's 15-minute
+limit. Each Linux candidate downloads the immutable artifact ID produced by
+that job and independently verifies the same checksum, length, exact archive
+name, single-file artifact shape, and canonical tar contents before extraction.
+The direct `install-zig` command retains the same bounded, checksum-pinned path
+for local development. It requires Python 3 to validate and copy only regular
+archive members into a private, current-user-owned staging tree without tar
+link or ownership semantics, then atomically publishes a new mode-0755
+toolchain directory and cleans private staging on every exit. PR/ref-scoped
+workflow concurrency cancels stale runs so successive pushes cannot recreate
+parallel origin downloads.
+
+Zig emits its Linux library as a GNU thin archive whose members refer to cache
+objects. Before the library leaves the script-owned build area, packaging
+resolves every member within only the fresh source, local-cache, and
+global-cache roots,
+rejects traversal, symlinks, non-objects, and normalized-name collisions, and
+copies the exact bytes into a deterministic regular archive. Verification and
+linking use that self-contained archive, so removing the source/cache tree
+cannot invalidate the candidate input.
+
 An explicit tagged build without cgo, or on an unsupported OS, returns a
 configuration error rather than silently changing emulator. Ordinary
 GoReleaser remains pure Go during soak. Production promotion therefore needs a
