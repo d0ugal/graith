@@ -87,6 +87,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string, e
 		// The CLI guard covers failures before Run. From here this defer owns the
 		// same manifest, including every return and panic during daemon bootstrap.
 		earlyUpgradeGuard.Disarm()
+
 		defer func() {
 			if !cleanupPending {
 				return
