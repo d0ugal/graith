@@ -182,6 +182,10 @@ type SessionManager struct {
 	pushLog      []time.Time
 	pushCoalesce map[string]time.Time
 	pushDispatch func(backend, title, message, priority string) error // overridable in tests
+	// statusDispatch overrides the native macOS status-notification dispatch in
+	// tests. Production leaves it nil and sendNotification uses the same
+	// dispatchMacNotification path as proactive notifications.
+	statusDispatch func(title, message, priority string, timeout time.Duration) error
 
 	// watchers tracks in-flight watchSession goroutines. StopAll waits on it so
 	// that post-exit state writes and status publishes complete before the

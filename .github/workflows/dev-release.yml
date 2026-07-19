@@ -22,7 +22,10 @@ concurrency:
 
 jobs:
   dev-release:
-    runs-on: ubuntu-latest
+    # The native notification helper needs swiftc, lipo, and codesign. The Go
+    # binaries remain pure-Go cross-compiles, so this macOS runner also produces
+    # the Linux archives without making Linux consumers expect the app bundle.
+    runs-on: macos-latest
     permissions:
       contents: write
     steps:
@@ -41,6 +44,39 @@ jobs:
         with:
           version: "~> v2"
           args: release --snapshot --skip=publish --clean -f .goreleaser-dev.yaml
+
+      - name: Verify dev archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          darwin_archives=(dist/graith-dev_darwin_*.tar.gz)
+          linux_archives=(dist/graith-dev_linux_*.tar.gz)
+          if [ "${#darwin_archives[@]}" -ne 2 ] || [ "${#linux_archives[@]}" -ne 2 ]; then
+            echo "::error::Expected two Darwin and two Linux dev archives"
+            exit 1
+          fi
+
+          for archive in "${darwin_archives[@]}"; do
+            unpacked="$(mktemp -d)"
+            tar -xzf "$archive" -C "$unpacked"
+            app="$unpacked/GraithNotifier.app"
+            notifier="$app/Contents/MacOS/graith-notifier"
+
+            test -d "$app"
+            test -x "$notifier"
+            lipo "$notifier" -verify_arch arm64 x86_64
+            codesign --verify --deep --strict "$app"
+          done
+
+          for archive in "${linux_archives[@]}"; do
+            contents="$(tar -tzf "$archive")"
+            if grep -q 'GraithNotifier.app' <<< "$contents"; then
+              echo "::error::Linux dev archive unexpectedly contains GraithNotifier.app: $archive"
+              exit 1
+            fi
+          done
 
       - name: Upload dev release
         env:
@@ -73,10 +109,10 @@ jobs:
           # filter fails the step closed on missing/empty/non-string version
           # rather than writing `version "null"` into the formula.
           VERSION=$(jq -er '.version | select(type == "string" and length > 0)' dist/metadata.json)
-          DARWIN_AMD64_SHA=$(sha256sum dist/graith-dev_darwin_amd64.tar.gz | cut -d' ' -f1)
-          DARWIN_ARM64_SHA=$(sha256sum dist/graith-dev_darwin_arm64.tar.gz | cut -d' ' -f1)
-          LINUX_AMD64_SHA=$(sha256sum dist/graith-dev_linux_amd64.tar.gz | cut -d' ' -f1)
-          LINUX_ARM64_SHA=$(sha256sum dist/graith-dev_linux_arm64.tar.gz | cut -d' ' -f1)
+          DARWIN_AMD64_SHA=$(shasum -a 256 dist/graith-dev_darwin_amd64.tar.gz | awk '{print $1}')
+          DARWIN_ARM64_SHA=$(shasum -a 256 dist/graith-dev_darwin_arm64.tar.gz | awk '{print $1}')
+          LINUX_AMD64_SHA=$(shasum -a 256 dist/graith-dev_linux_amd64.tar.gz | awk '{print $1}')
+          LINUX_ARM64_SHA=$(shasum -a 256 dist/graith-dev_linux_arm64.tar.gz | awk '{print $1}')
           TAG="dev"
           REPO="d0ugal/graith"
 
@@ -115,12 +151,12 @@ jobs:
 
             def install
               bin.install "gr-dev"
+              if OS.mac?
+                (libexec/"graith").install "GraithNotifier.app"
+              end
             end
           end
           FORMULA
-
-          # Remove leading whitespace from heredoc
-          sed -i 's/^          //' /tmp/graith-dev.rb
 
           # Push to tap repo
           cd "$(mktemp -d)"

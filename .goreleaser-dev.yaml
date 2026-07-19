@@ -1,22 +1,70 @@
 version: 2
 
+before:
+  hooks:
+    # Build the same universal, signed native notifier shipped by production.
+    # macos/notifier/build.sh removes stale output and exits successfully on
+    # non-Darwin hosts, so Linux snapshot builds need no Swift/macOS tooling.
+    - sh -c 'make notifier'
+    # GoReleaser accepts an empty archive glob. Fail closed on the real macOS
+    # dev-release runner if the bundle build did not produce its executable.
+    - sh -c 'test "$(uname -s)" != Darwin || test -x macos/build/GraithNotifier.app/Contents/MacOS/graith-notifier'
+
+# Split builds and archives by OS so only Darwin artifacts can carry the macOS
+# app bundle. Both builds retain the gr-dev binary name used by the dev formula.
 builds:
-  - main: ./cmd/graith
+  - id: gr-dev-linux
+    main: ./cmd/graith
     binary: gr-dev
+    env:
+      - CGO_ENABLED=0
     ldflags:
       - -s -w
       - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
       - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
     goos:
       - linux
+    goarch:
+      - amd64
+      - arm64
+  - id: gr-dev-darwin
+    main: ./cmd/graith
+    binary: gr-dev
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
+      - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
+    goos:
       - darwin
     goarch:
       - amd64
       - arm64
 
 archives:
-  - format: tar.gz
+  - id: linux
+    ids:
+      - gr-dev-linux
+    format: tar.gz
     name_template: "graith-dev_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+  - id: darwin
+    ids:
+      - gr-dev-darwin
+    format: tar.gz
+    name_template: "graith-dev_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+      # Keep the bundle layout identical to production. GoReleaser strips the
+      # common Contents/ prefix from this glob before applying dst.
+      - src: macos/build/GraithNotifier.app/**/*
+        dst: GraithNotifier.app/Contents
 
 checksum:
   name_template: checksums.txt

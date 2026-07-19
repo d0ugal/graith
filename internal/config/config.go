@@ -2690,7 +2690,7 @@ type Notifications struct {
 	OnStopped bool   `toml:"on_stopped"`
 	Command   string `toml:"command"`
 	// Backend selects how proactive `gr notify` push notifications are delivered:
-	// "macos" (osascript desktop notification; the default when unset) or
+	// "macos" (GraithNotifier.app, with osascript fallback; the default when unset) or
 	// "command" (run [notifications] command with GRAITH_NOTIFY_* env vars). Other
 	// backends (ntfy/pushover/slack) are planned follow-ups and rejected for now.
 	Backend string `toml:"backend"`
