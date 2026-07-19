@@ -11,7 +11,7 @@ require (
 	github.com/aymanbagabas/go-udiff v0.4.1
 	github.com/charmbracelet/ultraviolet v0.0.0-20260713092251-4bee1914c0cf
 	github.com/charmbracelet/x/ansi v0.11.7
-	github.com/charmbracelet/x/vt v0.0.0-20260713092006-0d683c34c74b
+	github.com/charmbracelet/x/vt v0.0.0-20260719004043-bb9a97036f23
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-git/go-billy/v5 v5.9.0
