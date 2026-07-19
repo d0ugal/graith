@@ -16,15 +16,9 @@
 	<dict>
 		<key>GRAITH_PROFILE</key>
 		<string>identity-spike-slot-b</string>
-		<key>PATH</key>
-		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
 	</dict>
 	<key>LimitLoadToSessionType</key>
 	<string>Aqua</string>
-	<key>StandardOutPath</key>
-	<string>/tmp/net.graith.design-spike.daemon.profile.01.stdout.log</string>
-	<key>StandardErrorPath</key>
-	<string>/tmp/net.graith.design-spike.daemon.profile.01.stderr.log</string>
 	<key>ThrottleInterval</key>
 	<integer>1</integer>
 </dict>

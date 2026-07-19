@@ -2,9 +2,9 @@
 title: "Design Doc: macOS app identity for the graith daemon"
 authors: Dougal Matthews
 created: 2026-07-19
-status: Draft
-reviewers: issue-1473-daemon-service
-informed: (TBD)
+status: Accepted
+reviewers: issue-1473-daemon-service, independent architecture review
+informed: release maintainers, issue-1473-daemon-service
 issue: https://github.com/d0ugal/graith/issues/1472
 ---
 
@@ -156,11 +156,16 @@ separate product channel. `GraithNotifier.app` also stays independent because
 notification authorization and background-service ownership are different
 identities and lifecycles.
 
+The notifier's older identifier is `com.graith.notifier`, while the GUI already
+uses `net.graith.macos`. The new service standardizes on the `net.graith`
+namespace; renaming the notifier would break a separate notification identity
+and is not part of this design.
+
 #### Service identity and profiles
 
 The default profile uses the signed embedded plist and
-`SMAppService.agent(plistName:)`. Its launchd label is `net.graith.daemon` and
-its `BundleProgram` is `Contents/MacOS/gr`.
+`SMAppService.agent(plistName:)`. Its launchd label is
+`net.graith.service.daemon` and its `BundleProgram` is `Contents/MacOS/gr`.
 
 `SMAppService` can only register plists already sealed inside the app. Both the
 plist contents and launchd label are therefore static. Registering that job for
@@ -169,8 +174,9 @@ cannot work concurrently. The release therefore seals a bounded pool of static
 agents into the same signed app:
 
 ```
-default: net.graith.daemon
-slots:   net.graith.daemon.profile.00 ... net.graith.daemon.profile.63
+default: net.graith.service.daemon
+slots:   net.graith.service.daemon.profile.00 ...
+         net.graith.service.daemon.profile.63
 ```
 
 Every job uses `BundleProgram=Contents/MacOS/gr` and is independently registered
@@ -202,7 +208,15 @@ processes. The 65th allocation returns an actionable error directing the user
 to `gr daemon service status --all-profiles` and
 `GRAITH_PROFILE=<name> gr daemon service remove`. Existing direct-spawn daemons
 remain usable while live during migration, then acquire a slot on their next
-managed start; a profile that cannot acquire a slot is not direct-spawned.
+managed start; a profile that cannot acquire a slot is not direct-spawned. This
+is an intentional availability cliff rather than a misleading partially managed
+mode: bypassing the cap would also bypass Graith ownership and macOS disablement.
+`gr doctor` warns once 56 slots are leased and every status/capacity error lists
+the dormant leases that can be removed. A clean stop/restart of a live unmanaged
+profile first reserves a slot; if none is available, it cancels before stopping
+the working daemon. An unexpected exit at capacity can still leave the profile
+unavailable until a lease is explicitly removed, which migration documentation
+calls out.
 
 No agent sets `RunAtLoad`, `KeepAlive`, `Sockets`, or a Mach service. Login
 loads registered definitions but starts no daemon. The first CLI command writes
@@ -264,9 +278,10 @@ environment. Production plists contain no persistent `EnvironmentVariables`.
 Instead their immutable arguments identify only their trusted entry point:
 
 ```
-default: gr daemon start --internal-service-label=net.graith.daemon \
+default: gr daemon start --internal-service-label=net.graith.service.daemon \
             --internal-service-slot=default
-slot 00: gr daemon start --internal-service-label=net.graith.daemon.profile.00 \
+slot 00: gr daemon start \
+            --internal-service-label=net.graith.service.daemon.profile.00 \
             --internal-service-slot=00
 ```
 
@@ -275,8 +290,18 @@ The hidden marker is parsed in `executeWithArgs` before Cobra's
 `--adopt-from` failure guard is armed early. A marker-free manual
 `gr daemon start` and the older-OS direct-spawn path retain their current flow.
 Before kickstart, an eligible human CLI writes one short-lived request per
-service label under a service-control root fixed from the effective UID and its
-user-database home, never from the request, `HOME`, XDG variables, or config:
+service label under `<_CS_DARWIN_USER_TEMP_DIR>/Graith/service-control`.
+The `CGO_ENABLED=0` release cannot call `confstr` directly, so the implementation
+may execute the fixed absolute helper `/usr/bin/getconf DARWIN_USER_TEMP_DIR`
+with an empty environment, no user-controlled arguments, a short timeout, and a
+small output limit. It trims exactly one trailing newline, requires one clean
+absolute path, resolves it to a directory owned by the effective UID with
+owner-only permissions, and uses descriptor-relative no-symlink operations for
+the Graith children. A missing helper, non-zero exit, timeout, malformed output,
+ownership or permission mismatch, or unsafe child fails closed. An equivalent
+future pure-Go OS API is permitted if it returns and validates the same
+OS-defined value. The root is never taken from the request, `HOME`, `TMPDIR`,
+XDG variables, or config:
 
 ```
 schema version, profile, slot, label, config file, resolved Paths,
@@ -320,6 +345,16 @@ explicitly opt additional names such as `SSH_AUTH_SOCK` or an agent API key into
 the daemon/agent base environment. Documentation calls out that this grants the
 service and eligible agent processes access to those values.
 
+This is a deliberate macOS 13+ packaged-install migration. Credentials and
+socket endpoints that agents currently inherit implicitly, including
+`SSH_AUTH_SOCK` and API tokens, disappear unless they are explicitly opted in.
+The user documentation, upgrade notes, and `gr doctor` show the effective
+projection before enablement and list common variables without printing values.
+macOS 11/12, unbundled macOS, and Linux keep the full direct-spawn environment:
+tightening those fallbacks would be a separate cross-platform behavior change,
+so the same configuration can intentionally produce different agent
+environments on managed and unmanaged installations.
+
 `GRAITH_SESSION_ID`, `GRAITH_SESSION_NAME`, `GRAITH_TOKEN`,
 `GRAITH_WORKTREE_PATH`, `GRAITH_REPO_PATH`, `GRAITH_AGENT_TYPE`, every other
 Graith session-only variable, dynamic-loader variables (`DYLD_*`, `LD_*`), and
@@ -330,7 +365,11 @@ no longer flow into every future session without an explicit setting. Any
 opted-in values are still sensitive, so the request is never logged or retained
 as durable service state. The bootstrap clears launchd's inherited environment,
 installs the OS-derived identity plus the validated projection, and removes any
-reserved names before config or agent process setup.
+reserved names before config or agent process setup. Opted-in values do touch an
+owner-only file in the OS-derived per-user temporary directory until it is
+consumed and unlinked. macOS offers no secure-delete guarantee, so documentation
+treats that transient disk exposure as part of the explicit opt-in rather than
+claiming it is equivalent to an inherited environment.
 
 An explicit `--config` is recorded exactly as current direct auto-start does
 outside an agent session. The early parser installs that validated path into
@@ -373,7 +412,8 @@ only after explicit user confirmation.
 
 | Operation | Managed behavior |
 |-----------|------------------|
-| First ordinary CLI command / internal `daemon start` | Register or reconcile the dormant job, write startup intent, kickstart, and use the existing bounded readiness probe. |
+| First ordinary CLI command | The client registers or reconciles the dormant job, writes startup intent, kickstarts it, and uses the existing bounded readiness probe. |
+| Internal service `daemon start` payload | launchd invokes the foreground daemon exactly once with the trusted marker. It consumes bootstrap state and enters `daemon.Run`; it never calls `EnsureDaemon` or recursively kickstarts itself. |
 | `daemon stop` | Identify the daemon from the authenticated Unix peer/PID identity, send SIGTERM, wait for that identity and socket to disappear, and leave the job registered but dormant. No restart occurs. |
 | `daemon restart` | Prepare the existing manifest and `exec` a validated newer bundled payload in the same PID. The launchd job remains active around exec and PTY adoption keeps its current fail-closed checks. |
 | `daemon restart --force` | Stop the exact process and its sessions, reconcile registration while down, write fresh intent, and kickstart. |
@@ -490,6 +530,13 @@ registration, all profile-slot bijections, pending operations, registered and
 running app generations, and monotonically increasing transaction generation.
 Corruption or loss never causes an empty map to replace known ownership.
 
+The receipt and its previous generation are deliberately the only authoritative
+profile-to-slot sources because a static signed plist cannot contain a dynamic
+profile. If both are deleted or unusable, dormant slots cannot be reconstructed
+from launchd metadata and may all be quarantined. This recoverability cost is a
+known trade-off of sealed slots; repair favors keeping unknown sessions safe
+over automatic availability, and tests cover simultaneous loss of both copies.
+
 `gr daemon service repair` first tries the valid backup, then enumerates only
 the 65 compiled exact labels and securely enumerates controller-owned cached
 apps. For every candidate it validates directory ownership/modes, app signature,
@@ -519,6 +566,37 @@ rather than each foreground daemon, one label would conflate profile lifecycle,
 and a new privileged control plane would be required to transfer environments,
 config, sockets, upgrades, and stop intent. It violates the existing foreground
 daemon invariant and is much larger than the bounded static slot pool.
+
+## Consensus
+
+The implementation owner approved the architecture after reviewing the actual
+auto-start, config/profile, lifecycle, adoption, and packaging constraints. The
+review replaced an earlier modern-default/dynamic-legacy hybrid with the signed
+64-slot pool because a generated legacy plist's app attribution could not be
+established. It also changed full environment capture to an explicit projection,
+added the fixed pre-config bootstrap, made profile allocation a global
+crash-recoverable transaction, retained old controllers through registration
+rotation, corrected Homebrew Formula removal semantics, and made stable release
+signing fail closed.
+
+Independent review verified the cited current behavior and found no remaining
+architecture blocker. Its robustness findings made the managed/unmanaged
+environment divergence, 64-slot availability cliff, total-receipt-loss
+quarantine, and transient secret-file exposure explicit. It also caused the
+spike to use nested-code-first signing, omit a fixed `PATH` and predictable log
+paths, document lifecycle reproduction, and script its two-copy controller
+check. The lifecycle table now separates the ordinary CLI launcher from
+launchd's internal foreground payload so `daemon start` cannot recurse through
+`EnsureDaemon`.
+
+Reviewers disagreed only on whether missing visual evidence should block design
+acceptance. This record accepts the architecture on the captured
+Service Management parent-bundle and independent-job evidence, but does **not**
+claim an Activity Monitor result. A signed production candidate may not be
+enabled or #1473 completed until manual Activity Monitor and Login Items checks
+show Graith ownership for the default and two concurrent named slots. A contrary
+result invalidates the central premise and returns this record to Draft rather
+than permitting a direct-spawn fallback.
 
 ## Other Notes
 
@@ -574,8 +652,10 @@ manifest and validated with `plutil` before signing. Launchd calls use exact
 The startup request is a new pre-config bootstrap boundary similar in risk to
 the early upgrade guard. Parsing, ownership/mode validation, environment install,
 config/path verification, and guaranteed cleanup should be isolated and unit
-tested before `daemon.Run`. Slow Service Management, codesign, copy, launchctl,
-or filesystem work must not occur under the session-manager lock.
+tested before `daemon.Run`. The design spike deliberately does not prototype
+this security boundary, so phase 2 cannot enable it until its failure-mode and
+race tests pass. Slow Service Management, codesign, copy, launchctl, or
+filesystem work must not occur under the session-manager lock.
 
 ### Alternatives considered
 
@@ -663,10 +743,11 @@ command-line attribution evidence is Service Management's parent bundle on all
 three independently controlled jobs. Parent PID and plist contents were not used
 as substitutes for observed launchd state.
 
-A second copy/sign test registered version 1 from one app path, then queried and
-unregistered it using a version 2 copy with the same bundle identifier at a
-different path. The new controller saw `enabled`; after its unregister call,
-both controllers reported `not-registered` and the launchd service was absent.
+A second copy/sign test, reproducible with the committed `cross-copy.sh`,
+registered version 1 from one app path, then queried and unregistered it using a
+version 2 copy with the same bundle identifier at a different path. The new
+controller saw `enabled`; after its unregister call, both controllers reported
+`not-registered` and the launchd service was absent.
 This proves cross-copy control on the current OS, but the production design still
 retains and invokes the registered generation's validated controller so it does
 not depend on undocumented cross-version behavior.
@@ -690,22 +771,26 @@ Unit and focused tests in #1473 must cover:
   pending-before-register crash recovery, stop-retained leases, concurrent
   allocation, safe release, and never-direct-spawn capacity failure;
 - primary/backup receipt atomicity, schema/checksum failures, registered/running
-  generation references, repair from backup, dormant-orphan recovery, and
-  quarantine of live or indeterminate unknown slots;
+  generation references, simultaneous loss of both copies, repair from backup,
+  dormant-orphan recovery, and quarantine of live or indeterminate unknown
+  slots;
 - service states not registered, enabled, requires approval, disabled, missing,
   stale, and registration rollback failure;
 - pre-config marker parsing for fresh starts and same-PID adoption; fixed
-  OS-derived control root; startup request schema, lease agreement, ownership,
-  permissions, symlink rejection, expiry, nonce, one-creator contention,
-  environment projection/reserved-name rejection, secrecy/cleanup, custom
-  `--config`, XDG paths, and `data_dir`;
+  OS-derived control root; bounded `/usr/bin/getconf DARWIN_USER_TEMP_DIR`
+  execution and every failure mode; startup request schema, lease agreement,
+  ownership, permissions, symlink rejection, expiry, nonce, one-creator
+  contention, environment projection/reserved-name rejection, secrecy/cleanup,
+  custom `--config`, XDG paths, and `data_dir`;
 - concurrent first clients, stale/foreign sockets, stuck handshakes, and exact
   preservation of configured dial/handshake/start/poll budgets;
 - stop staying dormant, force restart, reload-while-down, crash then demand
   recovery, logout/login dormancy, disabled-service non-bypass, and uninstall;
 - preserve exec of a valid new cached generation, rejection of arbitrary client
   paths, same-version generations, registration rotation only while down, old
-  bundle retention, failed rotation rollback, and state-version downgrade guard;
+  bundle retention, failed rotation rollback, state-version downgrade guard,
+  and a macOS test that the registered old job tolerates same-PID exec into the
+  validated new cached payload until later down-state rotation;
 - profile separation across labels, requests, socket, PID, state, config,
   auth/token, stop/restart, and concurrent default/profile daemons;
 - agent sandbox behavior and the service environment contract: built-in
