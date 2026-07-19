@@ -36,7 +36,6 @@ func TestDefaultOverlayKeybindings(t *testing.T) {
 	cases := map[string]string{
 		"up":                ov.Up,
 		"down":              ov.Down,
-		"list_watch_attach": ov.ListWatchAttach,
 		"message_pin":       ov.MessagePin,
 		"message_next_conv": ov.MessageNextConv,
 	}
@@ -58,7 +57,7 @@ func TestOverlayKeybindingPartialOverride(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.toml")
 	toml := `
 [keybindings.overlay]
-list_watch_attach = "enter"
+message_pin = "space"
 `
 
 	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
@@ -70,13 +69,13 @@ list_watch_attach = "enter"
 		t.Fatalf("Load: %v", err)
 	}
 
-	if cfg.Keybindings.Overlay.ListWatchAttach != "enter" {
-		t.Errorf("list_watch_attach = %q, want overridden %q", cfg.Keybindings.Overlay.ListWatchAttach, "enter")
+	if cfg.Keybindings.Overlay.MessagePin != "space" {
+		t.Errorf("message_pin = %q, want overridden %q", cfg.Keybindings.Overlay.MessagePin, "space")
 	}
 
 	// An unspecified key keeps its default from the embedded config.
-	if cfg.Keybindings.Overlay.ListWatchStop != "s" {
-		t.Errorf("list_watch_stop = %q, want default %q (partial table must not zero other keys)", cfg.Keybindings.Overlay.ListWatchStop, "s")
+	if cfg.Keybindings.Overlay.MessageExpandAll != "O" {
+		t.Errorf("message_expand_all = %q, want default %q (partial table must not zero other keys)", cfg.Keybindings.Overlay.MessageExpandAll, "O")
 	}
 }
 

@@ -129,7 +129,6 @@ gr list --tree             # show parent-child hierarchy
 gr list --starred          # starred sessions only
 gr logs fix-auth-bug       # show recent output
 gr logs fix-auth-bug -f    # follow output live
-gr ls --watch              # live TUI with inline controls
 gr info                    # info for current session (auto-detected from cwd)
 ```
 

@@ -3,14 +3,12 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/d0ugal/graith/internal/client"
-	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
@@ -103,190 +101,11 @@ func TestSessionInfoLessBreaksDuplicateNameTiesByID(t *testing.T) {
 	}
 }
 
-func TestListWatchRejectsNonInteractiveModesBeforeConnect(t *testing.T) {
-	origWatch := listWatch
-	origJSON := jsonOutput
-	origQuiet := listQuiet
-	origDeleted := listDeleted
-	origTokens := listTokens
-	origTTY := listWatchTerminalFn
-	origConnect := listConnectFn
-
-	t.Cleanup(func() {
-		listWatch = origWatch
-		jsonOutput = origJSON
-		listQuiet = origQuiet
-		listDeleted = origDeleted
-		listTokens = origTokens
-		listWatchTerminalFn = origTTY
-		listConnectFn = origConnect
-	})
-
-	listWatch = true
-	listWatchTerminalFn = func(*cobra.Command) bool { return true }
-	connectCalled := false
-	listConnectFn = func(*config.Config, config.Paths, string) (listConn, error) {
-		connectCalled = true
-		return nil, errors.New("unexpected daemon connection")
-	}
-
-	tests := []struct {
-		name    string
-		json    bool
-		quiet   bool
-		deleted bool
-		tokens  bool
-		want    string
-	}{
-		{name: "JSON and agent output", json: true, want: "--json or --agent-mode"},
-		{name: "quiet", quiet: true, want: "--quiet"},
-		{name: "deleted", deleted: true, want: "--deleted"},
-		{name: "token projection", tokens: true, want: "--tokens"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			jsonOutput, listQuiet, listDeleted, listTokens = tt.json, tt.quiet, tt.deleted, tt.tokens
-
-			err := runList(&cobra.Command{}, nil)
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("runList error = %v, want %q", err, tt.want)
-			}
-		})
-	}
-
-	if connectCalled {
-		t.Error("invalid watch options reached daemon connection")
-	}
-}
-
-func TestListWatchRequiresTerminalInputAndOutput(t *testing.T) {
-	origWatch := listWatch
-	origJSON := jsonOutput
-	origQuiet := listQuiet
-	origDeleted := listDeleted
-	origTokens := listTokens
-	origTTY := listWatchTerminalFn
-
-	t.Cleanup(func() {
-		listWatch = origWatch
-		jsonOutput = origJSON
-		listQuiet = origQuiet
-		listDeleted = origDeleted
-		listTokens = origTokens
-		listWatchTerminalFn = origTTY
-	})
-
-	listWatch, jsonOutput, listQuiet, listDeleted, listTokens = true, false, false, false, false
-	cmd := &cobra.Command{}
-	cmd.SetIn(strings.NewReader(""))
-	cmd.SetOut(&bytes.Buffer{})
-
-	listWatchTerminalFn = listWatchTerminal
-
-	err := validateListWatch(cmd)
-	if err == nil || !strings.Contains(err.Error(), "stdin and stdout") {
-		t.Fatalf("validateListWatch error = %v, want terminal requirement", err)
-	}
-
-	listWatchTerminalFn = func(*cobra.Command) bool { return true }
-
-	if err := validateListWatch(cmd); err != nil {
-		t.Fatalf("terminal watch unexpectedly rejected: %v", err)
-	}
-}
-
-func TestListSessionFilterIsSharedAcrossRefreshes(t *testing.T) {
-	origRepo := listRepo
-	origChildren := listChildren
-	origStarred := listStarred
-
-	t.Cleanup(func() {
-		listRepo = origRepo
-		listChildren = origChildren
-		listStarred = origStarred
-	})
-
-	listRepo = "croft"
-	listChildren = "ben"
-	listStarred = true
-	initial := []protocol.SessionInfo{
-		{ID: "ben", Name: "hame", RepoName: "croft"},
-		{ID: "bairn", ParentID: "ben", Name: "bairn", RepoName: "croft", Starred: true},
-		{ID: "canny", ParentID: "ben", Name: "canny", RepoName: "bothy", Starred: true},
-	}
-
-	filter, err := newListSessionFilter(initial)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// The parent need not remain in a later daemon response: the resolved ID is
-	// stable and the same repo/starred filters are reapplied.
-	refresh := []protocol.SessionInfo{
-		{ID: "bairn", ParentID: "ben", Name: "bairn", RepoName: "croft", Starred: true},
-		{ID: "wee", ParentID: "bairn", Name: "wee", RepoName: "croft"},
-		{ID: "canny", ParentID: "ben", Name: "canny", RepoName: "bothy", Starred: true},
-	}
-
-	got := filter.apply(refresh)
-	if len(got) != 1 || got[0].ID != "bairn" {
-		t.Fatalf("filtered refresh = %+v, want only bairn", got)
-	}
-}
-
-func TestListWatchDeleteUsesRecoverableDeleteAction(t *testing.T) {
-	origRun := listWatchRunFn
-	origFetch := listWatchFetchFn
-	origAction := listWatchActionFn
-	origCfg := cfg
-
-	t.Cleanup(func() {
-		listWatchRunFn = origRun
-		listWatchFetchFn = origFetch
-		listWatchActionFn = origAction
-		cfg = origCfg
-	})
-
-	cfg = &config.Config{}
-
-	runs := 0
-	listWatchRunFn = func(_ []protocol.SessionInfo, _ client.ListWatchKeys, _ client.ListWatchOptions, _ func() []protocol.SessionInfo) (*client.ListWatchResult, error) {
-		runs++
-		if runs == 1 {
-			return &client.ListWatchResult{Action: "delete", SessionID: "braw-id"}, nil
-		}
-
-		return nil, nil
-	}
-	listWatchFetchFn = func(bool) ([]protocol.SessionInfo, error) { return nil, nil }
-
-	actionCalled := false
-	listWatchActionFn = func(msgType string, payload any) error {
-		actionCalled = true
-
-		msg, ok := payload.(protocol.DeleteMsg)
-		if msgType != "delete" || !ok || msg.SessionID != "braw-id" {
-			t.Fatalf("action = %q %+v, want recoverable DeleteMsg for braw-id", msgType, payload)
-		}
-
-		return nil
-	}
-
-	if err := runListWatch(nil, listSessionFilter{}); err != nil {
-		t.Fatal(err)
-	}
-
-	if !actionCalled || runs != 2 {
-		t.Fatalf("actionCalled=%v runs=%d, want true/2", actionCalled, runs)
-	}
-}
-
-func TestListCommandExposesWatchAndRemovesDashboard(t *testing.T) {
+func TestListAndDashboardHaveNoInteractiveCommands(t *testing.T) {
 	registerCommands()
 
-	if listCmd.Flags().Lookup("watch") == nil {
-		t.Fatal("list command is missing --watch")
+	if listCmd.Flags().Lookup("watch") != nil {
+		t.Fatal("list command still exposes --watch")
 	}
 
 	for _, command := range rootCmd.Commands() {
@@ -301,8 +120,8 @@ func TestListCommandExposesWatchAndRemovesDashboard(t *testing.T) {
 	}
 
 	generated := completion.String()
-	if !strings.Contains(generated, "--watch") {
-		t.Error("generated completion does not include list --watch")
+	if strings.Contains(generated, "--watch") {
+		t.Error("generated completion still contains list --watch")
 	}
 
 	if strings.Contains(generated, "gr_dashboard") {

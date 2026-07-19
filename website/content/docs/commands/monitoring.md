@@ -24,7 +24,6 @@ List all sessions with status.
 | `--tokens` | Show the detailed token-usage projection and aggregate totals |
 | `--no-color` | Disable coloured status output |
 | `--deleted` | Show recoverably deleted sessions and their expiry |
-| `--watch` | Open a live-updating interactive view |
 
 The `--wide` view adds a **Tokens** column with the compact total token usage
 for each session's current agent (a trailing `~` marks an approximate count).
@@ -40,24 +39,9 @@ canny    graith  codex   69,131  3,517   756,224    0        0      828,872    1
 TOTAL                     81,562  51,726  1,961,106  96,004   0      2,190,398  2/2 known
 ```
 
-`gr ls --watch` opens the session list in an alternate-screen TUI and refreshes
-it at the configured `terminal.refresh_interval`. The `--repo`, `--children`,
-and `--starred` filters continue to apply on every refresh; `--tree`, `--wide`,
-and `--no-color` control the live display just as they control the snapshot.
-Use `j`/`k` or the arrow keys to move, Enter/`a` to attach, `s` to stop, `r` to
-resume, and `x`/`d` to delete. Stop and delete ask for confirmation, and delete
-uses graith's normal recoverable soft-delete path.
-
-Watch mode requires terminal input and output. It rejects `--json` (including
-JSON implied by agent mode), `--quiet`, `--tokens`, and `--deleted`, so scripts
-and agents always receive a finite non-interactive snapshot rather than terminal
-control sequences or an unbounded stream. Press `q`, Escape, or `ctrl+c` to exit
-cleanly.
-
-This is a breaking replacement for the removed `gr dashboard` command; there
-is no forwarding alias. Replace dashboard invocations with `gr ls --watch` and
-rename any `overlay.dashboard_*` keybinding settings to
-`overlay.list_watch_*`.
+The former `gr dashboard` command has been removed without a forwarding alias.
+Use `gr ls` for finite snapshots or the attached-session picker (`ctrl+b w`) for
+an interactive view.
 
 The detailed projection composes with the normal list selection flags, including
 `--repo`, `--children`, `--starred`, `--deleted`, and `--tree`. `--quiet` and
