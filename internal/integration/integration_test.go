@@ -78,6 +78,9 @@ func setupAtWithState(t *testing.T, tmpDir string, initialState *daemon.State, m
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
+	// Synthetic integration agents run without a sandbox backend. Individual
+	// sandbox tests opt back in with their purpose-built fake backend.
+	cfg.Sandbox.Enabled = false
 	cfg.Agents["echo"] = config.Agent{
 		Command:    "sh",
 		Args:       []string{"-c", "echo 'ready'; exec cat"},

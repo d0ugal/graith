@@ -35,6 +35,11 @@ func TestRunCleansUpgradeProcessesWhenBootstrapFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	earlyGuard, err := ArmUpgradeFailureGuard(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	blocker := filepath.Join(dir, "not-a-directory")
 	if err := os.WriteFile(blocker, []byte("dreich"), 0o600); err != nil {
 		t.Fatal(err)
@@ -48,7 +53,7 @@ func TestRunCleansUpgradeProcessesWhenBootstrapFails(t *testing.T) {
 		TmpDir:     filepath.Join(dir, "tmp"),
 	}
 
-	err = Run(config.Default(), paths, "", manifestPath)
+	err = Run(config.Default(), paths, "", manifestPath, earlyGuard)
 	if err == nil || !strings.Contains(err.Error(), "create directory") {
 		t.Fatalf("Run error = %v, want pre-initialization directory failure", err)
 	}

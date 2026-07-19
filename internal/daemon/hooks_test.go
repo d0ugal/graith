@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/d0ugal/graith/internal/config"
@@ -39,6 +40,34 @@ func TestCommandPolicyHookCommandBlocksSupervisorSpawnFailure(t *testing.T) {
 	if !strings.Contains(string(output), "failed before returning a decision") {
 		t.Fatalf("hook command output = %q, want useful fail-closed diagnostic", output)
 	}
+}
+
+func TestHookGenerationSnapshotsPolicyTimeoutDuringReload(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+
+	var reloads sync.WaitGroup
+	reloads.Add(1)
+	go func() {
+		defer reloads.Done()
+		for i := 0; i < 500; i++ {
+			sm.mu.Lock()
+			next := *sm.cfg
+			if i%2 == 0 {
+				next.CommandPolicy.Timeout = "1s"
+			} else {
+				next.CommandPolicy.Timeout = "2s"
+			}
+			sm.cfg = &next
+			sm.mu.Unlock()
+		}
+	}()
+
+	for i := 0; i < 500; i++ {
+		if _, _, err := sm.injectCodexHooks("canny-reload", false, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reloads.Wait()
 }
 
 func TestGenerateClaudeSettings(t *testing.T) {
@@ -738,7 +767,7 @@ func TestInjectHooksSupported(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	sm := newTestSessionManagerWithDataDir(t)
 
-	args, env, err := sm.injectHooks("claude", "kirk-claude", "", true, false)
+	args, env, err := sm.injectHooks("claude", "kirk-claude", "", true, false, sm.Config().CommandPolicy.TimeoutDuration())
 	if err != nil {
 		t.Fatalf("injectHooks(claude) error = %v", err)
 	}
@@ -751,7 +780,7 @@ func TestInjectHooksSupported(t *testing.T) {
 		t.Errorf("injectHooks(claude) returned unexpected env: %v", env)
 	}
 
-	args, env, err = sm.injectHooks("codex", "kirk-codex", "", true, false)
+	args, env, err = sm.injectHooks("codex", "kirk-codex", "", true, false, sm.Config().CommandPolicy.TimeoutDuration())
 	if err != nil {
 		t.Fatalf("injectHooks(codex) error = %v", err)
 	}
@@ -775,7 +804,7 @@ func TestInjectHooksSupported(t *testing.T) {
 
 	worktree := t.TempDir()
 
-	args, env, err = sm.injectHooks("cursor", "kirk-cursor-sup", worktree, true, false)
+	args, env, err = sm.injectHooks("cursor", "kirk-cursor-sup", worktree, true, false, sm.Config().CommandPolicy.TimeoutDuration())
 	if err != nil {
 		t.Fatalf("injectHooks(cursor) error = %v", err)
 	}
@@ -798,7 +827,7 @@ func TestInjectHooksUnsupportedIsNoop(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
 	for _, agent := range []string{"agy", "opencode", "custom-agent"} {
-		args, env, err := sm.injectHooks(agent, "haar-unsupported", "", true, false)
+		args, env, err := sm.injectHooks(agent, "haar-unsupported", "", true, false, sm.Config().CommandPolicy.TimeoutDuration())
 		if err != nil {
 			t.Errorf("injectHooks(%q) unexpected error: %v", agent, err)
 		}

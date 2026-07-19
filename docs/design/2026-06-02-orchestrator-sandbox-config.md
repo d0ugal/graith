@@ -10,7 +10,13 @@ informed: TBD
 
 ## Background
 
-The graith orchestrator runs as a sandboxed agent session that coordinates other agent sessions. Sandboxing is mandatory for the orchestrator — it cannot be disabled. The sandbox configuration is derived by merging the global `[sandbox]` config with the agent-specific `[agents.claude.sandbox]` config, plus a few hardcoded extra write directories added during orchestrator creation (scratch dir, tmp dir, shared store).
+> **Security amendment (2026-07-18):** Graith's sandbox is default-on but may be
+> explicitly disabled, including for the orchestrator, with a startup warning
+> and doctor diagnostic. The effective boundary may instead be an external
+> sandbox, container, or VM. See
+> [Non-interactive agents with sandbox-enforced policy](2026-07-18-non-interactive-sandbox-policy.md).
+
+The graith orchestrator coordinates other agent sessions. When Graith sandboxing is enabled, its configuration is derived by merging the global `[sandbox]` config with the agent-specific `[agents.claude.sandbox]` config, plus orchestrator-specific extra write directories added during creation (scratch dir, tmp dir, shared store).
 
 The existing sandbox merge pattern (`SandboxConfig.Merge()`) already supports layered overrides: global config provides baseline dirs, agent config adds agent-specific dirs, and the merge deduplicates and combines them.
 

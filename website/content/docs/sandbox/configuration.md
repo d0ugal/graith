@@ -135,7 +135,7 @@ Native agent prompting is a third independent control:
 | `non_interactive_args` | Native behavior | Graith behavior |
 |---|---|---|
 | Bundled value retained | Starts the agent in its non-prompting/unattended mode. | Does not create an approval workflow. |
-| Set to `[]` or omitted | The agent may pause in its own approval TUI. | Treats the session as ordinarily running; the agent renders and resolves the prompt. |
+| Explicitly set to `[]` | The agent may pause in its own approval TUI. | Treats the session as ordinarily running; the agent renders and resolves the prompt. |
 
 The generated `PreToolUse` hooks are independent of both sandbox selection and
 native prompting. “Lifecycle” below means the session's Graith lifecycle hooks

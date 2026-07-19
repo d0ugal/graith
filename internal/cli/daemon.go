@@ -36,7 +36,8 @@ var daemonStartCmd = &cobra.Command{
 	Short:  "Start the daemon",
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return daemon.Run(cfg, paths, cfgFile, adoptFrom)
+		guard, _ := cmd.Context().Value(upgradeGuardContextKey{}).(*daemon.UpgradeFailureGuard)
+		return daemon.Run(cfg, paths, cfgFile, adoptFrom, guard)
 	},
 }
 

@@ -499,7 +499,8 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	sessModel := sessState.Model
 	sessCodex := cloneCodexOptions(sessState.Codex)
 	sessAgentHooks := sessState.AgentHooks
-	policyEnabled := sm.cfg.CommandPolicy.Enabled()
+	policyEnabled := commandPolicy.Enabled()
+	policyTimeout := commandPolicy.TimeoutDuration()
 	hookFilesNeeded := sessAgentHooks || policyEnabled
 	// MCP config injection is decided separately from hooks (see #1135). Resume is
 	// PTY-only, so the two coincide here.
@@ -712,7 +713,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	}
 
 	if hookFilesNeeded {
-		hookArgs, hookEnv, err := sm.injectHooks(sessAgent, id, sessWorktreePath, sessAgentHooks, policyEnabled)
+		hookArgs, hookEnv, err := sm.injectHooks(sessAgent, id, sessWorktreePath, sessAgentHooks, policyEnabled, policyTimeout)
 		if err != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)

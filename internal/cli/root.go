@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -16,6 +17,8 @@ import (
 	"github.com/d0ugal/graith/internal/version"
 	"github.com/spf13/cobra"
 )
+
+type upgradeGuardContextKey struct{}
 
 var (
 	cfgFile    string
@@ -171,6 +174,11 @@ func executeWithArgs(args []string) (err error) {
 	}
 
 	registerCommands()
+	rootCtx := context.Background()
+	if upgradeGuard != nil {
+		rootCtx = context.WithValue(rootCtx, upgradeGuardContextKey{}, upgradeGuard)
+	}
+	rootCmd.SetContext(rootCtx)
 	rootCmd.SetArgs(args)
 
 	err = rootCmd.Execute()
