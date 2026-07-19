@@ -104,16 +104,15 @@ merge_timeout = "0s"
 
 func TestToolsResolvedCopiesFields(t *testing.T) {
 	tc := ToolsConfig{
-		Git:       "g",
-		GH:        "h",
-		GCX:       "x",
-		Shell:     "s",
-		OSAScript: "o",
-		PS:        "p",
-		Lsof:      "l",
+		Git:   "g",
+		GH:    "h",
+		GCX:   "x",
+		Shell: "s",
+		PS:    "p",
+		Lsof:  "l",
 	}
 
-	want := tools.Config{Git: "g", GH: "h", GCX: "x", Shell: "s", OSAScript: "o", PS: "p", Lsof: "l"}
+	want := tools.Config{Git: "g", GH: "h", GCX: "x", Shell: "s", PS: "p", Lsof: "l"}
 	if got := tc.Resolved(""); got != want {
 		t.Errorf("Resolved() = %+v, want %+v", got, want)
 	}
@@ -242,9 +241,7 @@ git = "`+missing+`"
 
 func TestDefaultConfigLeavesToolsUnset(t *testing.T) {
 	// The embedded default config documents [tools] only as comments, so a fresh
-	// default keeps the executable overrides unset. This keeps validation from
-	// rejecting the macOS-only default names (e.g. "osascript") on Linux and
-	// keeps the tools.Defaults() lazy PATH-lookup semantics for unset entries.
+	// default keeps the executable overrides unset and preserves lazy PATH lookup.
 	cfg := Default()
 
 	if cfg.Tools != (ToolsConfig{}) {

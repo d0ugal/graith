@@ -7,10 +7,9 @@
 #     Contents/MacOS/graith-notifier   (compiled from main.swift)
 #
 # The bundle carries CFBundleIdentifier = com.graith.notifier so `gr notify`
-# notifications appear under "Graith" in System Settings > Notifications instead
-# of "Script Editor" (osascript). The daemon discovers the bundle at runtime
-# and falls back to osascript if it isn't installed — see
-# internal/daemon/pushnotify.go.
+# notifications appear under "Graith" in System Settings > Notifications. The
+# daemon discovers the bundle at runtime and reports an error if it isn't
+# installed — see internal/daemon/pushnotify.go.
 #
 # This is macOS-only: it needs `swiftc`. It is written for POSIX sh (no
 # bashisms, no `set -o pipefail`) so `make notifier` — which invokes it via

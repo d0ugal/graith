@@ -1,11 +1,8 @@
 // graith-notifier — a minimal macOS notification helper.
 //
-// `gr notify` used to post notifications via `osascript -e 'display
-// notification …'`, which makes them appear under "Script Editor" in System
-// Settings > Notifications — users could never find or configure graith's
-// notification preferences (issue #1094). This helper instead posts via
-// UNUserNotificationCenter from inside a proper .app bundle whose Info.plist
-// carries CFBundleIdentifier = com.graith.notifier, so notifications show up
+// graith posts via UNUserNotificationCenter from inside a proper .app bundle
+// whose Info.plist carries CFBundleIdentifier = com.graith.notifier, so
+// notifications show up
 // under "Graith" and can be configured per-app like any other application.
 //
 // Usage: graith-notifier <title> <message> [priority]
@@ -15,10 +12,9 @@
 //   0  success
 //   2  usage error
 //   3  the user has explicitly disabled notifications for Graith — the caller
-//      MUST honour this and must NOT fall back to osascript (which would route
-//      the notification around the user's opt-out via "Script Editor")
+//      MUST honour this as a suppressed notification
 //   1  any other failure (permission not yet determined, delivery error,
-//      timeout) — the caller may fall back to osascript
+//      timeout) — the caller reports the dispatch failure
 
 import Foundation
 import UserNotifications
@@ -52,8 +48,7 @@ center.requestAuthorization(options: [.alert, .sound]) { granted, error in
     }
     guard granted else {
         // Distinguish an explicit user opt-out (.denied) from a merely
-        // not-yet-determined state so the Go caller can honour the former
-        // instead of falling back to osascript.
+        // not-yet-determined state so the Go caller can honour the former.
         center.getNotificationSettings { settings in
             if settings.authorizationStatus == .denied {
                 failure = ("notifications are disabled for Graith", exitDenied)

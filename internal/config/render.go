@@ -117,7 +117,6 @@ func resolveRenderedDefaults(cfg *Config) *Config {
 	fillToolDefault(&c.Tools.GH, toolDefaults.GH)
 	fillToolDefault(&c.Tools.GCX, toolDefaults.GCX)
 	fillToolDefault(&c.Tools.Shell, toolDefaults.Shell)
-	fillToolDefault(&c.Tools.OSAScript, toolDefaults.OSAScript)
 	fillToolDefault(&c.Tools.PS, toolDefaults.PS)
 	fillToolDefault(&c.Tools.Lsof, toolDefaults.Lsof)
 

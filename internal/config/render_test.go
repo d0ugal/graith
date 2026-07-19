@@ -82,7 +82,6 @@ func TestEffectiveTOMLMaterializesRuntimeDefaults(t *testing.T) {
 		{"gh", renderedTools.GH, tools.GH()},
 		{"gcx", renderedTools.GCX, tools.GCX()},
 		{"shell", renderedTools.Shell, tools.Shell()},
-		{"osascript", renderedTools.OSAScript, tools.OSAScript()},
 		{"ps", renderedTools.PS, tools.PS()},
 		{"lsof", renderedTools.Lsof, tools.Lsof()},
 	} {
@@ -108,13 +107,12 @@ func TestDiffFromDefaultsIgnoresExplicitRuntimeDefaults(t *testing.T) {
 
 	toolDefaults := tools.Defaults()
 	cfg.Tools = ToolsConfig{
-		Git:       toolDefaults.Git,
-		GH:        toolDefaults.GH,
-		GCX:       toolDefaults.GCX,
-		Shell:     toolDefaults.Shell,
-		OSAScript: toolDefaults.OSAScript,
-		PS:        toolDefaults.PS,
-		Lsof:      toolDefaults.Lsof,
+		Git:   toolDefaults.Git,
+		GH:    toolDefaults.GH,
+		GCX:   toolDefaults.GCX,
+		Shell: toolDefaults.Shell,
+		PS:    toolDefaults.PS,
+		Lsof:  toolDefaults.Lsof,
 	}
 	cfg.CommandPolicy.Timeout = cfg.CommandPolicy.TimeoutDuration().String()
 
