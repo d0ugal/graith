@@ -28,6 +28,10 @@ type Session struct {
 	mu        sync.RWMutex
 	writeMu   sync.Mutex
 	upgradeMu sync.Mutex
+	// screenRecoveryMu admits one off-lock helper reconstruction at a time.
+	// The potentially blocking factory must never hold mu, which raw PTY
+	// drainage needs for each authoritative scrollback append.
+	screenRecoveryMu sync.Mutex
 	// upgradePause coordinates a bounded safe point in readLoop while writeMu
 	// separately drains and bars input. ack closes only when no PTY read is in
 	// flight and every returned byte has reached scrollback and the screen.
@@ -61,6 +65,10 @@ type Session struct {
 	screenRecoveryPending bool
 	screenRecoveryCols    int
 	screenRecoveryRows    int
+	// screenRecoveryGeneration changes whenever raw output or requested geometry
+	// changes while an off-lock recovery is in flight. A replacement may publish
+	// only against the exact generation whose scrollback tail it hydrated.
+	screenRecoveryGeneration uint64
 	// screenRecoveryNext bounds repeated helper launches when the backend is
 	// unavailable. Raw PTY bytes continue into scrollback while reconstruction
 	// attempts back off per session.
@@ -354,8 +362,12 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 
 	if opts.DegradedScreen {
 		s.mu.Lock()
-		s.screenInitializing = false
-		s.noteScreenRecoveryFailureLocked()
+		// Keep screenInitializing set until the daemon-owned post-commit recovery
+		// task installs a derived screen. Raw PTY bytes continue straight into
+		// scrollback without letting a slow factory block readLoop.
+		s.screenRecoveryPending = true
+		s.screenRecoveryCols = cols
+		s.screenRecoveryRows = rows
 		s.mu.Unlock()
 		if !opts.DeferWait {
 			s.StartAdoptedWaiter()
@@ -370,7 +382,10 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 	if screenErr != nil {
 		log.Warn("terminal screen unavailable during adoption; preserving PTY with degraded screen",
 			"session", opts.ID, "error", screenErr)
-		s.noteScreenRecoveryFailureLocked()
+		// The first ordinary screen access gets one immediate recovery attempt.
+		// Backoff begins only if that retry also fails; otherwise a transient
+		// constructor failure can make the adopted screen appear blank for an
+		// arbitrary scheduler-dependent interval.
 	} else {
 		if hydrate > 0 {
 			if tail, tailErr := sb.TailBytes(int64(hydrate)); tailErr == nil && len(tail) > 0 {
@@ -400,6 +415,32 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 // StartAdoptedWaiter starts the adopted process waiter exactly once.
 func (s *Session) StartAdoptedWaiter() {
 	s.adoptedWaitOnce.Do(func() { go s.adoptedWaitLoop() })
+}
+
+// RejectAdoption terminates an adopted exact child and waits for readLoop to
+// finish its final PTY drain before closing either transferred descriptor. It
+// must be called before StartAdoptedWaiter: retaining the daemon's sole waiter
+// keeps the PID reserved between the identity check and process-group signal.
+func (s *Session) RejectAdoption(ctx context.Context) error {
+	if s.adoptedPID <= 1 || s.adoptedStartTime <= 0 {
+		return errors.New("adopted process identity is unavailable")
+	}
+	startTime, err := ProcessStartTime(s.adoptedPID)
+	if err != nil || startTime != s.adoptedStartTime {
+		return errors.New("adopted process identity changed before rejection")
+	}
+	if err := syscall.Kill(-s.adoptedPID, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return errors.New("terminate rejected adopted process group")
+	}
+
+	s.StartAdoptedWaiter()
+	select {
+	case <-s.Done():
+		s.Close()
+		return nil
+	case <-ctx.Done():
+		return errors.New("rejected adopted process final drain exceeded deadline")
+	}
 }
 
 const maxTransferredPTYDrainBytes = 1024 * 1024
@@ -457,8 +498,10 @@ func DrainTransferredPTY(ptmx *os.File, scrollback *Scrollback) error {
 const defaultScreenHydrationBytes = 128 * 1024
 
 const (
-	minScreenRecoveryBackoff = 100 * time.Millisecond
-	maxScreenRecoveryBackoff = 5 * time.Second
+	minScreenRecoveryBackoff    = 100 * time.Millisecond
+	maxScreenRecoveryBackoff    = 5 * time.Second
+	screenRecoveryBatchAttempts = 3
+	screenRecoveryLockPoll      = 5 * time.Millisecond
 )
 
 // adoptedPollTimeout is the built-in safety deadline for the adopted-PTY babysit
@@ -801,6 +844,7 @@ func (s *Session) QuiesceIOForUpgrade(ctx context.Context) (func(), error) {
 // Scrollback and must hold s.mu.
 func (s *Session) writeScreenLocked(chunk []byte) error {
 	if s.screenInitializing {
+		s.screenRecoveryGeneration++
 		return nil
 	}
 	n, err := s.screen.Write(chunk)
@@ -837,6 +881,8 @@ func (s *Session) replaceScreenAtSizeLocked(cols, rows int, explicitResize bool)
 				s.screenRecoveryRows = rows
 			}
 			s.screenRecoveryPending = true
+			s.screenInitializing = true
+			s.screenRecoveryGeneration++
 			return
 		}
 		if returnErr != nil {
@@ -921,23 +967,283 @@ func (s *Session) noteScreenRecoveryFailureLocked() {
 	s.screenRecoveryNext = s.screenRecoveryTime().Add(delay)
 }
 
-// RecoverTerminalAfterUpgrade reconstructs a screen that failed while helper
-// generation was frozen. It is called only after a failed exec has thawed the
-// registry; raw PTY bytes were already persisted while replacement was barred.
-func (s *Session) RecoverTerminalAfterUpgrade() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+var errScreenRecoveryGenerationChanged = errors.New("terminal recovery input changed")
 
+// RecoverTerminalAfterUpgrade reconstructs a screen that failed while helper
+// generation was frozen. Its daemon-owned retry loop yields between bounded,
+// backed-off batches so a transient helper failure cannot leave an adopted
+// session permanently blank.
+func (s *Session) RecoverTerminalAfterUpgrade() error {
+	return s.RecoverTerminalAfterUpgradeContext(context.Background())
+}
+
+// RecoverTerminalAfterUpgradeContext is the daemon-owned, cancellation-aware
+// recovery path. Slow helper requests remain outside the session mutex so raw
+// PTY drainage is never coupled to reconstruction.
+func (s *Session) RecoverTerminalAfterUpgradeContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	attempts := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := s.recoverTerminalAfterUpgradeAttempt(ctx)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return errors.Join(err, ctx.Err())
+		}
+		delay, delayErr := s.screenRecoveryRetryDelay(ctx, err)
+		if delayErr != nil {
+			return errors.Join(err, delayErr)
+		}
+		attempts++
+		if attempts >= screenRecoveryBatchAttempts {
+			// Yield between bounded batches, but keep this daemon-owned job alive.
+			// Continuous output can invalidate any one candidate; eventual quiet
+			// must still publish without requiring a client resize or snapshot.
+			attempts = 0
+			delay = max(delay, minScreenRecoveryBackoff)
+		}
+		if delay <= 0 {
+			continue
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return errors.Join(err, ctx.Err())
+		}
+	}
+}
+
+// RecoverTerminalSessionsAfterUpgrade owns a concurrent recovery generation.
+// It joins every started session operation before returning, so cancellation
+// cannot strand helper factories or candidate terminals in detached goroutines.
+func RecoverTerminalSessionsAfterUpgrade(ctx context.Context, sessions []*Session) []error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	results := make([]error, len(sessions))
+	var recoveries sync.WaitGroup
+	for i, session := range sessions {
+		if err := ctx.Err(); err != nil {
+			results[i] = err
+			continue
+		}
+		if session == nil {
+			continue
+		}
+		recoveries.Add(1)
+		go func() {
+			defer recoveries.Done()
+			results[i] = session.RecoverTerminalAfterUpgradeContext(ctx)
+		}()
+	}
+	recoveries.Wait()
+
+	return results
+}
+
+func (s *Session) recoverTerminalAfterUpgradeAttempt(ctx context.Context) error {
+	if err := lockWithContext(ctx, s.screenRecoveryMu.TryLock); err != nil {
+		return err
+	}
+	defer s.screenRecoveryMu.Unlock()
+
+	if err := s.lockScreenRecoveryState(ctx); err != nil {
+		return err
+	}
 	if s.closed || !s.screenRecoveryPending {
+		s.mu.Unlock()
 		return nil
 	}
+	if !s.screenRecoveryNext.IsZero() && s.screenRecoveryTime().Before(s.screenRecoveryNext) {
+		s.mu.Unlock()
+		return errTerminalUnavailable
+	}
 
+	generation := s.screenRecoveryGeneration
 	cols, rows := s.screenRecoveryCols, s.screenRecoveryRows
 	if cols <= 0 || rows <= 0 {
 		cols, rows = s.screen.Size()
 	}
+	factory := s.screenFactory
+	if factory == nil {
+		factory = newTerminal
+	}
+	hydrationBytes := s.screenHydrationBytes
+	scrollback := s.Scrollback
+	log := s.log
+	if log == nil {
+		log = slog.Default()
+	}
+	s.mu.Unlock()
 
-	return s.replaceScreenAtSizeLocked(cols, rows, false)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	replacement, err := factory(cols, rows)
+	if err != nil {
+		s.noteAsyncScreenRecoveryFailure(ctx)
+		return fmt.Errorf("create replacement terminal: %w", err)
+	}
+	closeReplacement := func(cause error) error {
+		return errors.Join(cause, replacement.Close())
+	}
+	if err := ctx.Err(); err != nil {
+		return closeReplacement(err)
+	}
+	if hydrationBytes > 0 && scrollback != nil {
+		tail, tailErr := scrollback.TailBytes(int64(hydrationBytes))
+		if tailErr != nil {
+			result := closeReplacement(fmt.Errorf("read terminal recovery scrollback: %w", tailErr))
+			s.noteAsyncScreenRecoveryFailure(ctx)
+			return result
+		}
+		if err := ctx.Err(); err != nil {
+			return closeReplacement(err)
+		}
+		if len(tail) > 0 {
+			if writeErr := writeTerminalChunksContext(ctx, replacement, tail); writeErr != nil {
+				_ = replacement.Close()
+				if ctx.Err() != nil {
+					return errors.Join(writeErr, ctx.Err())
+				}
+				log.Warn("terminal recovery hydration failed; using empty screen",
+					"session", s.ID, "error", writeErr)
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				replacement, err = factory(cols, rows)
+				if err != nil {
+					s.noteAsyncScreenRecoveryFailure(ctx)
+					return errors.Join(
+						fmt.Errorf("hydrate replacement terminal: %w", writeErr),
+						fmt.Errorf("create empty replacement terminal: %w", err),
+					)
+				}
+				if err := ctx.Err(); err != nil {
+					return errors.Join(err, replacement.Close())
+				}
+			}
+		}
+	}
+
+	if err := s.lockScreenRecoveryState(ctx); err != nil {
+		return errors.Join(err, replacement.Close())
+	}
+	if s.closed || !s.screenRecoveryPending {
+		s.mu.Unlock()
+		_ = replacement.Close()
+		return nil
+	}
+	if generation != s.screenRecoveryGeneration ||
+		cols != s.screenRecoveryCols || rows != s.screenRecoveryRows {
+		s.mu.Unlock()
+		_ = replacement.Close()
+
+		return errScreenRecoveryGenerationChanged
+	}
+	failed := s.screen
+	s.screen = replacement
+	s.screenRecoveryPending = false
+	s.screenRecoveryCols = 0
+	s.screenRecoveryRows = 0
+	s.screenRecoveryNext = time.Time{}
+	s.screenRecoveryDelay = 0
+	s.screenInitializing = false
+	s.mu.Unlock()
+	if failed != nil {
+		_ = failed.Close()
+	}
+
+	return nil
+}
+
+func (s *Session) screenRecoveryRetryDelay(ctx context.Context, recoveryErr error) (time.Duration, error) {
+	if errors.Is(recoveryErr, errScreenRecoveryGenerationChanged) {
+		return 0, nil
+	}
+	if err := s.lockScreenRecoveryState(ctx); err != nil {
+		return 0, err
+	}
+	defer s.mu.Unlock()
+	if s.closed || !s.screenRecoveryPending {
+		return 0, nil
+	}
+	now := s.screenRecoveryTime()
+	if s.screenRecoveryNext.After(now) {
+		return s.screenRecoveryNext.Sub(now), nil
+	}
+
+	return 0, nil
+}
+
+func (s *Session) noteAsyncScreenRecoveryFailure(ctx context.Context) {
+	if s.lockScreenRecoveryState(ctx) != nil {
+		return
+	}
+	if !s.closed && s.screenRecoveryPending {
+		s.noteScreenRecoveryFailureLocked()
+	}
+	s.mu.Unlock()
+}
+
+func (s *Session) lockScreenRecoveryState(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// An ordinary writer lock participates in RWMutex fairness; polling TryLock
+	// can starve forever behind readLoop's short recurring poll read locks.
+	s.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+
+	return nil
+}
+
+func lockWithContext(ctx context.Context, tryLock func() bool) error {
+	for {
+		if tryLock() {
+			return nil
+		}
+		timer := time.NewTimer(screenRecoveryLockPoll)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		}
+	}
+}
+
+func writeTerminalChunksContext(ctx context.Context, term Terminal, p []byte) error {
+	for len(p) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		chunk := p[:min(len(p), terminalWriteChunkBytes)]
+		n, err := term.Write(chunk)
+		if err != nil {
+			return err
+		}
+		if n != len(chunk) {
+			return io.ErrShortWrite
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		p = p[n:]
+	}
+
+	return nil
 }
 
 func (s *Session) waitLoop() {
@@ -1201,9 +1507,20 @@ func (s *Session) Resize(rows, cols uint16) error {
 		return os.ErrClosed
 	}
 
-	screenErr := s.screen.Resize(int(cols), int(rows))
-	if screenErr != nil {
-		screenErr = errors.Join(screenErr, s.replaceScreenAtSizeLocked(int(cols), int(rows), true))
+	var screenErr error
+	if s.screenInitializing {
+		// Recovery owns derived-screen construction. Resize only advances the
+		// desired generation and the kernel PTY geometry while initialization is
+		// in flight; it must never invoke a competing factory under s.mu.
+		s.screenRecoveryPending = true
+		s.screenRecoveryCols = int(cols)
+		s.screenRecoveryRows = int(rows)
+		s.screenRecoveryGeneration++
+	} else {
+		screenErr = s.screen.Resize(int(cols), int(rows))
+		if screenErr != nil {
+			screenErr = errors.Join(screenErr, s.replaceScreenAtSizeLocked(int(cols), int(rows), true))
+		}
 	}
 	setSize := s.setSize
 	if setSize == nil {

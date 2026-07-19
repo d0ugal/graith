@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
@@ -139,6 +140,9 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 	if _, err := sm.AdoptSessions(manifest); err != nil {
 		t.Fatalf("AdoptSessions: %v", err)
 	}
+	// Run normally schedules derived-screen reconstruction in its owned
+	// post-commit background generation. Exercise that phase explicitly here.
+	sm.recoverTerminalScreensAfterUpgrade(context.Background())
 
 	bad, _ := sm.Get("thrawn-fash")
 	if bad.Status != StatusRunning {
@@ -166,7 +170,7 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 	for _, line := range bytes.Split([]byte(logBuf.String()), []byte("\n")) {
 		var record map[string]any
 		if json.Unmarshal(line, &record) == nil &&
-			record["msg"] == "terminal hydration failed during adoption; preserving PTY with empty screen" {
+			record["msg"] == "terminal recovery hydration failed; using empty screen" {
 			failureLog = record
 			break
 		}

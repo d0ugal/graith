@@ -2404,27 +2404,55 @@ func TestPostListenerConversionFailureDrainsAndReapsTransferredSession(t *testin
 	}
 }
 
-func TestAdoptSessionsUsesOneDeadlineAndDegradesLaterScreens(t *testing.T) {
+func TestListenerConversionFailureConsumesOwnershipBeforeFDReuse(t *testing.T) {
+	source, peer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = peer.Close() })
+	listenerFD := duplicateTransferredFileFD(t, source)
+	manifest := &UpgradeManifest{ListenerFd: listenerFD}
+	guard := newUpgradeOwnershipGuard(manifest)
+	listener, err := adoptUpgradeListener(manifest, guard, nil)
+	if listener != nil || err == nil || !strings.Contains(err.Error(), "conversion") {
+		t.Fatalf("non-listener conversion = (%v, %v), want closed conversion refusal", listener, err)
+	}
+	if _, err := descriptorFlags(listenerFD); !errors.Is(err, syscall.EBADF) {
+		t.Fatalf("converted source descriptor remained live: %v", err)
+	}
+
+	reuseRead, reuseWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reuseRead.Close() })
+	t.Cleanup(func() { _ = reuseWrite.Close() })
+	if int(reuseRead.Fd()) != listenerFD {
+		if err := unix.Dup2(int(reuseRead.Fd()), listenerFD); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = syscall.Close(listenerFD) })
+	}
+	if err := guard.Cleanup(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := descriptorFlags(listenerFD); err != nil {
+		t.Fatalf("guard cleanup closed reused listener number: %v", err)
+	}
+}
+
+func TestAdoptSessionsUsesRawFirstDeadlineAndOwnsScreenRecovery(t *testing.T) {
 	sm := sleeperSM(t)
-	sm.adoptionScreenBudget = 25 * time.Millisecond
-	firstReaderActive := make(chan struct{})
-	releaseFirst := make(chan struct{})
 	var seamMu sync.Mutex
 	var degraded []bool
 	sm.adoptSession = func(opts grpty.AdoptOpts) (*grpty.Session, error) {
 		session, err := grpty.AdoptSession(opts)
 		seamMu.Lock()
 		degraded = append(degraded, opts.DegradedScreen)
-		call := len(degraded)
 		seamMu.Unlock()
-		if call == 1 && err == nil {
-			close(firstReaderActive)
-			<-releaseFirst
-		}
 
 		return session, err
 	}
-
 	type fixture struct {
 		id      string
 		path    string
@@ -2433,7 +2461,7 @@ func TestAdoptSessionsUsesOneDeadlineAndDegradesLaterScreens(t *testing.T) {
 		command *exec.Cmd
 	}
 	fixtures := make([]fixture, 0, 3)
-	manifest := &UpgradeManifest{adoptionDeadline: time.Now().Add(6 * time.Second)}
+	manifest := &UpgradeManifest{}
 	for _, id := range []string{"canny", "dreich", "thrawn"} {
 		cmd := exec.Command("sleep", "30")
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -2475,61 +2503,58 @@ func TestAdoptSessionsUsesOneDeadlineAndDegradesLaterScreens(t *testing.T) {
 		}
 	})
 
-	type adoptResult struct {
-		result UpgradeAdoptionResult
-		err    error
-	}
-	resultCh := make(chan adoptResult, 1)
+	manifest.adoptionDeadline = time.Now().Add(150 * time.Millisecond)
 	started := time.Now()
-	go func() {
-		result, err := sm.adoptSessions(manifest, nil, nil, nil, false)
-		resultCh <- adoptResult{result: result, err: err}
-	}()
-	select {
-	case <-firstReaderActive:
-	case <-time.After(time.Second):
-		t.Fatal("first adoption did not reach the active raw reader")
+	adopted, err := sm.adoptSessions(manifest, nil, nil, nil, false)
+	if err != nil || len(adopted.UnresolvedSessions) != 0 {
+		t.Fatalf("adoption result = (%+v, %v)", adopted, err)
 	}
-	if _, err := fixtures[0].writer.Write(fixtures[0].marker); err != nil {
-		t.Fatal(err)
+	if time.Now().After(manifest.adoptionDeadline) {
+		t.Fatalf("raw-first adoption exceeded its absolute deadline after %v", time.Since(started))
 	}
-	readDeadline := time.Now().Add(time.Second)
-	for {
-		data, err := os.ReadFile(fixtures[0].path)
-		if err == nil && bytes.Contains(data, fixtures[0].marker) {
-			break
-		}
-		if time.Now().After(readDeadline) {
-			t.Fatalf("first reader did not drain while screen attempt was held: %q, err=%v", data, err)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	time.Sleep(30 * time.Millisecond)
-	close(releaseFirst)
-	for _, item := range fixtures[1:] {
+	for _, item := range fixtures {
 		if _, err := item.writer.Write(item.marker); err != nil {
 			t.Fatal(err)
 		}
 	}
-	var adopted adoptResult
-	select {
-	case adopted = <-resultCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("adoption multiplied the slow-screen budget across sessions")
-	}
-	if adopted.err != nil || len(adopted.result.UnresolvedSessions) != 0 {
-		t.Fatalf("adoption result = (%+v, %v)", adopted.result, adopted.err)
-	}
-	if time.Now().After(manifest.adoptionDeadline) {
-		t.Fatalf("adoption exceeded its absolute deadline after %v", time.Since(started))
-	}
 	seamMu.Lock()
 	gotDegraded := slices.Clone(degraded)
 	seamMu.Unlock()
-	if !slices.Equal(gotDegraded, []bool{false, true, true}) {
-		t.Fatalf("degraded screen attempts = %v, want [false true true]", gotDegraded)
+	if !slices.Equal(gotDegraded, []bool{true, true, true}) {
+		t.Fatalf("raw-first screen modes = %v, want [true true true]", gotDegraded)
+	}
+	for _, item := range fixtures {
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			data, readErr := os.ReadFile(item.path)
+			if readErr == nil && bytes.Contains(data, item.marker) {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s raw reader did not drain promptly: %q, err=%v", item.id, data, readErr)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 
+	group := newDaemonTaskGroup()
+	if !sm.installBackgroundTasks(group) {
+		t.Fatal("could not install owned recovery task group")
+	}
+	group.Go(sm.recoverTerminalScreensAfterUpgrade)
+	group.Activate()
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), 7*time.Second)
+	if err := group.Wait(drainCtx); err != nil {
+		cancelDrain()
+		t.Fatalf("owned screen recovery generation did not finish: %v", err)
+	}
+	cancelDrain()
+	group.BeginDrain()
+	sm.clearBackgroundTasks(group)
+
+	for _, session := range adopted.adoptedSessions {
+		session.StartAdoptedWaiter()
+	}
 	for _, item := range fixtures {
 		_ = item.writer.Close()
 	}
