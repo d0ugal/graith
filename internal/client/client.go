@@ -96,7 +96,7 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 		var hsErr protocol.HandshakeErrMsg
 
 		_ = protocol.DecodePayload(resp, &hsErr)
-		if serverProtocol, ok := olderServerProtocolFromHandshakeError(hsErr.Reason); ok && autoUpgrade && version.Version != "dev" {
+		if serverProtocol, ok := OlderServerProtocolFromHandshakeError(hsErr.Reason); ok && autoUpgrade && version.Version != "dev" {
 			return c.restartAcrossProtocolBoundary(paths, cfg, configFile, serverProtocol)
 		}
 
@@ -160,12 +160,14 @@ func connect(cfg *config.Config, paths config.Paths, configFile string, autoUpgr
 	return c, nil
 }
 
-// olderServerProtocolFromHandshakeError recognizes the exact rejection emitted
+// OlderServerProtocolFromHandshakeError recognizes the exact rejection emitted
 // by older graith daemons. Protocol 1 rejects a protocol-2 client before it can
 // report handshake_ok, so this is the only safe point at which the new client
 // can choose a clean, non-preserving transition. Only an older numeric major is
 // accepted; arbitrary handshake failures never trigger process lifecycle work.
-func olderServerProtocolFromHandshakeError(reason string) (string, bool) {
+// Exported so the `gr daemon restart` path (internal/cli) can recognize the same
+// boundary and fall through to a clean stop/start instead of aborting.
+func OlderServerProtocolFromHandshakeError(reason string) (string, bool) {
 	marker := "protocol version mismatch: client=" + protocol.Version + ", server="
 	if !strings.HasPrefix(reason, marker) {
 		return "", false

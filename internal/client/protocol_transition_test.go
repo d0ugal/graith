@@ -130,7 +130,7 @@ func TestOlderServerProtocolFromHandshakeError(t *testing.T) {
 		{reason: "profile mismatch: client is braw"},
 	}
 	for _, tc := range tests {
-		got, ok := olderServerProtocolFromHandshakeError(tc.reason)
+		got, ok := OlderServerProtocolFromHandshakeError(tc.reason)
 		if got != tc.want || ok != (tc.want != "") {
 			t.Errorf("older protocol from %q = %q, %v; want %q", tc.reason, got, ok, tc.want)
 		}

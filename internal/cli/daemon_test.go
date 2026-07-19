@@ -196,6 +196,119 @@ func TestExecUpgradeInstallsConfiguredHandshakeDeadline(t *testing.T) {
 	}
 }
 
+// TestExecUpgradeClassifiesHandshakeErr proves the pre-upgrade handshake_err is
+// classified by its reason: an older-protocol rejection (a protocol-1 daemon
+// still running after the binary upgraded to protocol 2) becomes a
+// protocolBoundaryRestartError so the caller can cleanly stop/start, while any
+// other rejection (e.g. a profile mismatch to the wrong daemon) is a generic
+// failure that must NOT trigger process lifecycle work.
+func TestExecUpgradeClassifiesHandshakeErr(t *testing.T) {
+	tests := []struct {
+		name         string
+		reason       string
+		wantBoundary string // non-empty => expect a protocolBoundaryRestartError with this server protocol
+		wantErrSub   string // otherwise the generic error must contain this substring
+	}{
+		{
+			name:         "older protocol triggers clean restart",
+			reason:       "protocol version mismatch: client=" + protocol.Version + ", server=1.0; try upgrading the client and running: gr daemon restart",
+			wantBoundary: "1.0",
+		},
+		{
+			name:       "profile mismatch stays a generic failure",
+			reason:     "profile mismatch: client is \"braw\" but daemon is \"canny\"",
+			wantErrSub: "daemon rejected upgrade handshake",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			setupUpgradeTest(t)
+
+			fake := &fakeUpgradeConn{
+				responses: []protocol.Envelope{
+					payloadEnv("handshake_err", protocol.HandshakeErrMsg{Reason: tc.reason}),
+				},
+			}
+			dialUpgradeClient = func() (upgradeExchangeConn, error) { return fake, nil }
+
+			err := execUpgrade("done")
+			if err == nil {
+				t.Fatal("execUpgrade must fail on a handshake_err reply")
+			}
+
+			var boundary *protocolBoundaryRestartError
+			if tc.wantBoundary != "" {
+				if !errors.As(err, &boundary) {
+					t.Fatalf("error = %v, want *protocolBoundaryRestartError", err)
+				}
+
+				if boundary.serverProtocol != tc.wantBoundary {
+					t.Fatalf("server protocol = %q, want %q", boundary.serverProtocol, tc.wantBoundary)
+				}
+			} else {
+				if errors.As(err, &boundary) {
+					t.Fatalf("error = %v, must not be a protocol-boundary restart", err)
+				}
+
+				if !strings.Contains(err.Error(), tc.wantErrSub) {
+					t.Fatalf("error = %q, want substring %q", err, tc.wantErrSub)
+				}
+			}
+
+			if len(fake.sent) != 0 {
+				t.Fatalf("sent %v to the daemon; a rejected handshake must send no upgrade request", fake.sent)
+			}
+
+			if !fake.closed {
+				t.Error("execUpgrade did not close the connection")
+			}
+		})
+	}
+}
+
+// TestRestartPreserveCleanlyCrossesProtocolBoundary is the regression for the
+// protocol 1->2 upgrade: `gr daemon restart` against a still-running protocol-1
+// daemon must recognize the handshake_err rejection and do a clean, non-preserving
+// stop/start automatically, instead of aborting with "no preserve request was
+// safely initiated". Sessions cannot survive the protocol security boundary, so
+// no preserve/exec request is ever sent.
+func TestRestartPreserveCleanlyCrossesProtocolBoundary(t *testing.T) {
+	setupUpgradeTest(t)
+
+	// A non-existent PID file: StopDaemon reports "not running" (a warning), and
+	// the clean start still runs. This keeps the test off real process signalling.
+	paths.PIDFile = filepath.Join(t.TempDir(), "absent.pid")
+
+	fake := &fakeUpgradeConn{
+		responses: []protocol.Envelope{
+			payloadEnv("handshake_err", protocol.HandshakeErrMsg{
+				Reason: "protocol version mismatch: client=" + protocol.Version + ", server=1.0; try upgrading the client and running: gr daemon restart",
+			}),
+		},
+	}
+	dialUpgradeClient = func() (upgradeExchangeConn, error) { return fake, nil }
+
+	cleanCalled := false
+
+	err := restartDaemonPreservingSessions(func() error {
+		cleanCalled = true
+
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("protocol-boundary restart should succeed via clean start, got: %v", err)
+	}
+
+	if !cleanCalled {
+		t.Fatal("clean start did not run for the incompatible-protocol daemon")
+	}
+
+	if len(fake.sent) != 0 {
+		t.Fatalf("sent %v to a protocol-1 daemon; the boundary crossing must send no preserve/upgrade request", fake.sent)
+	}
+}
+
 // TestExecUpgradeWaitsForNewGenerationDespiteInheritedListener is the #1319
 // round-4 scenario: after the upgrade is requested the inherited old listener
 // keeps answering (right version, SAME instance ID) during a deliberately
