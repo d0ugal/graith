@@ -11,8 +11,8 @@ draft: false
 
 ```toml
 [sandbox]
-enabled     = true            # default; false relies on native/external isolation
-backend     = "nono"          # required when enabled: "safehouse" | "nono"
+enabled     = false           # default (no backend assumed); true is strongly recommended once a backend is installed
+backend     = "nono"          # no default — required when enabled: "safehouse" | "nono"
 command     = "nono"          # path/name of the backend binary (default: backend name)
 features    = ["ssh"]         # feature gates (see caveats below)
 read_dirs   = ["~/Code"]      # additional read-only paths (directories)
@@ -134,8 +134,8 @@ Native agent prompting is a third independent control:
 
 | `non_interactive_args` | Native behavior | Graith behavior |
 |---|---|---|
-| Bundled value retained | Starts the agent in its non-prompting/unattended mode. | Doesn't create an approval workflow. |
-| Explicitly set to `[]` | The agent can pause in its own approval TUI. | Treats the session as ordinarily running; the agent renders and resolves the prompt. |
+| Empty (bundled default) | The agent can pause in its own approval TUI. | Treats the session as ordinarily running; the agent renders and resolves the prompt. |
+| Set to the agent's unattended flag(s) | Starts the agent in its non-prompting/unattended mode. | Doesn't create an approval workflow. |
 
 The generated `PreToolUse` hooks are independent of both sandbox selection and
 native prompting. “Lifecycle” below means the session's Graith lifecycle hooks

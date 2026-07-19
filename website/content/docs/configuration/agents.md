@@ -33,7 +33,7 @@ command        = "claude"
 args           = ["--session-id", "{agent_session_id}"]
 resume_args    = ["--resume", "{agent_session_id}"]
 fork_args      = ["--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"]
-non_interactive_args = ["--dangerously-skip-permissions"]
+non_interactive_args = []       # empty: keep the agent's native approval TUI (see below)
 env            = {}             # extra environment variables
 idle_timeout   = ""             # auto-stop after idle (default: 1h when resume_args is set, 0 otherwise)
 inject_prompt  = true           # inject agent_prompt into the session
@@ -48,8 +48,8 @@ headless_args  = []             # argv prefix prepended in headless mode (see be
 
 Every agent-specific flag graith appends is defined here — a custom agent can adopt (or drop) each pattern from config alone, without waiting on a graith release:
 
-- **`add_dir_args`** — the flag template graith uses to grant the agent an extra directory (each [included repo](#includes)'s co-located worktree). It's expanded once per directory, with `{dir}` bound to that path. Leave it unset for an agent whose CLI has no such flag; those agents rely on the `GRAITH_INCLUDE_*_PATH` environment variables instead.
-- **`non_interactive_args`** — optional argv prepended on every create, resume, and fork. The bundled agents use it to disable native prompts for unattended operation. Set it to `[]` (or omit it on a custom agent) to keep the agent's native permission TUI; Graith treats time spent there as ordinary running state and never answers on your behalf. These flags are independent of `[sandbox]` and `[command_policy]`.
+- **`add_dir_args`** — the flag template graith uses to grant the agent an extra directory (each [included repo](#includes)'s co-located worktree). It is expanded once per directory with `{dir}` bound to that path. Leave it unset for an agent whose CLI has no such flag; those agents rely on the `GRAITH_INCLUDE_*_PATH` environment variables instead.
+- **`non_interactive_args`** — optional argv prepended on every create, resume, and fork. It is **empty by default** for every bundled agent, so each keeps its own approval TUI (and, for Codex, its own sandbox) out of the box; Graith treats time spent in that TUI as ordinary running state and never answers on your behalf. Set it to the agent's unattended flag(s) — e.g. `["--dangerously-skip-permissions"]` for Claude, `["--ask-for-approval", "never", "--sandbox", "danger-full-access"]` for Codex, `["--force"]` for Cursor, `["--auto"]` for OpenCode — to run without those prompts. Doing so disables the agent's native safeguards, so only enable it behind a boundary you control (Graith's `[sandbox]`, an external sandbox, or a VM). These flags are independent of `[sandbox]` and `[command_policy]`.
 - **`headless_args`** — the control-channel argv prefix graith prepends when launching the agent in [headless mode]({{< relref "sessions.md#headless-sessions" >}}); the agent's own args follow it. Claude's default is `["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose"]`.
 - **`option_args`** — conditional flag groups appended on every launch. Each group is emitted only when its `when` template variable is set, so an unset option leaves the agent's own default untouched (see [Conditional option flags](#conditional-option-flags)).
 
@@ -208,7 +208,7 @@ command, args, and resume/fork settings.
 ```toml
 [agents.claude]
 command      = "claude"
-non_interactive_args = ["--dangerously-skip-permissions"]
+non_interactive_args = []   # keep Claude's approval TUI; set ["--dangerously-skip-permissions"] to run unattended
 args         = ["--session-id", "{agent_session_id}"]
 resume_args  = ["--resume", "{agent_session_id}"]
 fork_args    = ["--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"]
@@ -221,7 +221,9 @@ headless_args = ["-p", "--output-format", "stream-json", "--input-format", "stre
 ```toml
 [agents.codex]
 command      = "codex"
-non_interactive_args = ["--ask-for-approval", "never", "--sandbox", "danger-full-access"]
+# Empty by default: Codex keeps its own approvals AND its own sandbox. Setting
+# these flags disables both, so only do it behind a guaranteed outer boundary.
+non_interactive_args = []   # e.g. ["--ask-for-approval", "never", "--sandbox", "danger-full-access"] to run unattended
 args         = []
 resume_args  = ["resume", "{agent_session_id}"]
 fork_args    = ["fork", "{fork_source_agent_session_id}"]
@@ -241,21 +243,21 @@ args = ["--model", "{model}"]
 ```toml
 [agents.opencode]
 command     = "opencode"
-non_interactive_args = ["--auto"]
+non_interactive_args = []   # keep OpenCode's prompts; set ["--auto"] to run unattended
 args        = []
 resume_args = ["--session", "{agent_session_id}"]
 ```
 
-OpenCode's TUI uses `--auto` to approve requests that would otherwise ask.
-Explicit OpenCode deny rules still apply. Set `non_interactive_args = []` to
-keep its native prompt behavior instead.
+OpenCode's TUI keeps its native prompts by default. Set
+`non_interactive_args = ["--auto"]` to approve requests that would otherwise
+ask; explicit OpenCode deny rules still apply.
 
 ### Cursor
 
 ```toml
 [agents.cursor]
 command        = "agent"
-non_interactive_args = ["--force"]
+non_interactive_args = []   # keep Cursor's prompts; set ["--force"] to run unattended
 args           = []
 resume_args    = ["resume"]
 validate_model = "agent --list-models"
@@ -275,7 +277,7 @@ sessions.
 ```toml
 [agents.agy]
 command     = "agy"
-non_interactive_args = ["--dangerously-skip-permissions"]
+non_interactive_args = []   # keep Agy's prompts; set ["--dangerously-skip-permissions"] to run unattended
 args        = []
 resume_args = ["--conversation", "{agent_session_id}"]
 ```

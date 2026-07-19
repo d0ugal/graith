@@ -9,6 +9,9 @@ import (
 
 func TestDisabledGraithSandboxAgents(t *testing.T) {
 	cfg := config.Default()
+	// The global sandbox is off by default; this case exercises per-agent
+	// disables while the global sandbox is enabled, so turn it on explicitly.
+	cfg.Sandbox.Enabled = true
 	disabled := true
 
 	braw := cfg.Agents["claude"]

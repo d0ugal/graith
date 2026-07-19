@@ -9,18 +9,20 @@ draft: false
 
 ## First session
 
-By default, agents run inside an OS sandbox. The default backend is `nono`, so
-install it before starting a session:
+Running agents inside graith's OS sandbox is strongly recommended, but it is
+**off by default** — graith does not assume a backend is installed. To enable
+it, install a backend and turn the sandbox on:
 
 ```bash
 brew install nono # macOS or Linuxbrew
 gr doctor
 ```
 
-On macOS you can instead install safehouse and set
-`[sandbox] backend = "safehouse"` — see [sandbox setup]({{< relref
-"sandbox/_index.md#setup" >}}). Graith won't start or resume an agent if the
-backend can't enforce.
+Then set `[sandbox] enabled = true` and pick a `backend` (`nono`, or on macOS
+`safehouse`). See the [sandbox setup]({{< relref "sandbox/_index.md#setup" >}})
+for details. Once enabled, graith won't start or resume an agent if the backend
+can't enforce. Until you enable it, agents run under their own native controls
+only.
 
 The daemon starts automatically on your first command. Create a session:
 
