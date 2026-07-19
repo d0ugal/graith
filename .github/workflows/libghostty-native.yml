@@ -12,6 +12,7 @@ on:
       - go.sum
       - internal/cli/**
       - internal/daemon/**
+      - internal/integration/**
       - internal/pty/**
       - libghostty-native.spdx.json
       - scripts/libghostty-native.sh
@@ -67,6 +68,11 @@ jobs:
           GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/libghostty-native
         run: scripts/libghostty-native.sh test
+      - name: Run the external daemon lifecycle and bounded soak
+        env:
+          GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/libghostty-native
+        run: scripts/libghostty-native.sh daemon-test
       - name: Verify and link both release architectures
         env:
           LIBRARY: ${{ runner.temp }}/libghostty-native/libghostty-vt.xcframework/macos-arm64_x86_64/libghostty-vt.a
@@ -96,6 +102,10 @@ jobs:
 
   linux-adapter:
     name: Adapter source build (${{ matrix.target }})
+    # Native Linux rollout is tracked separately in #1475. Keep the exact
+    # source-build matrix available for explicit Linux-host validation without
+    # making the macOS candidate PR claim or gate on unverified Linux support.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:

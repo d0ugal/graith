@@ -218,6 +218,35 @@ run_go() {
     esac
 }
 
+run_daemon_validation() {
+    local cycles="${1:-12}"
+    local test_pattern="${2:-^TestLibghosttyDaemon}"
+    local workload_timeout="${3:-3m}"
+    local go_timeout="${4:-5m}"
+    local long_soak="${5:-0}"
+    local library
+    local binary="$NATIVE_WORK/gr-libghostty-daemon-race"
+    local daemon_gocache="${GRAITH_LIBGHOSTTY_GOCACHE:-$NATIVE_WORK/go-cache}"
+
+    library="$(apple_library)"
+    PKG_CONFIG_PATH="$(write_pkg_config "$library")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+    export PKG_CONFIG_PATH
+    mkdir -p "$daemon_gocache"
+
+    verify_metadata
+    cd "$REPO_DIR"
+    GOCACHE="$daemon_gocache" CGO_ENABLED=1 \
+        go build -race -trimpath -tags='libghostty' \
+        -o "$binary" ./cmd/graith
+    GRAITH_LIBGHOSTTY_DAEMON_BINARY="$binary" \
+        GRAITH_LIBGHOSTTY_SOAK_CYCLES="$cycles" \
+        GRAITH_LIBGHOSTTY_SOAK_TIMEOUT="$workload_timeout" \
+        GRAITH_LIBGHOSTTY_LONG_SOAK="$long_soak" \
+        GOCACHE="$daemon_gocache" \
+        CGO_ENABLED=1 go test -v -race -count=1 -tags='integration libghostty' \
+            -timeout="$go_timeout" -run "$test_pattern" ./internal/integration
+}
+
 source_build() {
     local target="${1:-}"
     local output="${2:-}"
@@ -295,12 +324,14 @@ source_test() {
 
 usage() {
     cat <<EOF
-usage: $0 test|race|fuzz|bench|memory|all
+usage: $0 test|race|fuzz|bench|memory|daemon-test|soak [cycles [timeout]]|all
        $0 source-build <zig-target> <output-library>
        $0 source-test <zig-target>
        $0 verify-metadata [ghostty-source]
 
 test/bench/memory use the checksum-pinned universal Apple artifact.
+daemon-test runs the external daemon lifecycle and bounded 12-cycle soak.
+soak defaults to 1,000 cycles bounded by one hour.
 source-build checks out Ghostty $GHOSTTY_SHA and requires Zig $REQUIRED_ZIG.
 EOF
 }
@@ -308,6 +339,15 @@ EOF
 case "${1:-}" in
     test|race|fuzz|bench|memory)
         run_go "$1"
+        ;;
+    daemon-test)
+        run_daemon_validation 12 \
+            '^(TestLibghosttyDaemonLifecycle|TestLibghosttyDaemonSoak|TestNativeProcessObservation|TestIsolatedNativeEnvironmentAllowlist)$' \
+            '3m' '5m' '0'
+        ;;
+    soak)
+        run_daemon_validation "${2:-1000}" '^TestLibghosttyDaemonSoak$' \
+            "${3:-1h}" '65m' '1'
         ;;
     all)
         run_go test
