@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -148,6 +150,198 @@ func TestUpgradeOwnershipCapsuleRoundTripScrubsPrivateEnvironment(t *testing.T) 
 
 	if !upgradeOwnershipResourcesMatch(manifest, owned) {
 		t.Fatalf("decoded capsule resources = %+v, want %+v", owned, manifest)
+	}
+}
+
+func TestUpgradeOwnershipRejectsUnsignedIdentityAliasesBeforeCleanup(t *testing.T) {
+	seamCalls := 0
+	originalAdoptClose := adoptCloseDescriptor
+	originalRollbackClose := rollbackCloseDescriptor
+	originalWait4 := upgradePreSignalWait4
+	originalSignal := upgradeSessionSignal
+
+	adoptCloseDescriptor = func(int) error {
+		seamCalls++
+
+		return errors.New("unexpected close seam")
+	}
+	rollbackCloseDescriptor = func(int) error {
+		seamCalls++
+
+		return errors.New("unexpected rollback close seam")
+	}
+	upgradePreSignalWait4 = func(int, *syscall.WaitStatus, int, *syscall.Rusage) (int, error) {
+		seamCalls++
+
+		return 0, errors.New("unexpected wait seam")
+	}
+	upgradeSessionSignal = func(int, syscall.Signal) error {
+		seamCalls++
+
+		return errors.New("unexpected signal seam")
+	}
+
+	t.Cleanup(func() {
+		adoptCloseDescriptor = originalAdoptClose
+		rollbackCloseDescriptor = originalRollbackClose
+		upgradePreSignalWait4 = originalWait4
+		upgradeSessionSignal = originalSignal
+	})
+
+	type identityField struct {
+		name        string
+		currentOnly bool
+		capsuleAt   int
+		setHeader   func(*upgradeOwnershipHeader, int)
+		setManifest func(*UpgradeManifest, int)
+	}
+
+	fields := []identityField{
+		{
+			name: "listener_fd", capsuleAt: 16,
+			setHeader:   func(header *upgradeOwnershipHeader, value int) { header.ListenerFD = value },
+			setManifest: func(manifest *UpgradeManifest, value int) { manifest.ListenerFd = value },
+		},
+		{
+			name: "session_fd", capsuleAt: 68,
+			setHeader:   func(header *upgradeOwnershipHeader, value int) { header.Sessions[0].Fd = value },
+			setManifest: func(manifest *UpgradeManifest, value int) { manifest.Sessions[0].Fd = value },
+		},
+		{
+			name: "scrollback_fd", capsuleAt: 72,
+			setHeader: func(header *upgradeOwnershipHeader, value int) {
+				header.Sessions[0].ScrollbackFd = value
+			},
+			setManifest: func(manifest *UpgradeManifest, value int) {
+				manifest.Sessions[0].ScrollbackFd = value
+			},
+		},
+		{
+			name: "session_pid", capsuleAt: 76,
+			setHeader:   func(header *upgradeOwnershipHeader, value int) { header.Sessions[0].PID = value },
+			setManifest: func(manifest *UpgradeManifest, value int) { manifest.Sessions[0].PID = value },
+		},
+		{
+			name: "helper_pid", currentOnly: true, capsuleAt: 88,
+			setHeader:   func(header *upgradeOwnershipHeader, value int) { header.Helpers[0].PID = value },
+			setManifest: func(manifest *UpgradeManifest, value int) { manifest.Helpers[0].PID = value },
+		},
+	}
+
+	newHeader := func(current bool) *upgradeOwnershipHeader {
+		var helpers []UpgradeHelper
+
+		version := 0
+		startTime := int64(0)
+
+		if current {
+			version = upgradeManifestVersion
+			startTime = 5678
+			helpers = []UpgradeHelper{{PID: 4321, StartTime: 8765}}
+		}
+
+		return &upgradeOwnershipHeader{
+			Version: version, ListenerFD: 7,
+			Sessions: []UpgradeSession{{
+				ID: "canny", Fd: 9, ScrollbackFd: 10, PID: 1234, PIDStartTime: startTime,
+			}},
+			Helpers: helpers,
+		}
+	}
+
+	newManifest := func(current bool) *UpgradeManifest {
+		if !current {
+			return &UpgradeManifest{
+				ListenerFd: 7,
+				Sessions:   []UpgradeSession{{ID: "canny", Fd: 9, ScrollbackFd: 10, PID: 1234}},
+			}
+		}
+
+		manifest := validUpgradeManifestForBoundaryTest(t, 7, []UpgradeSession{{
+			ID: "canny", Fd: 9, ScrollbackFd: 10, PID: 1234, PIDStartTime: 5678,
+		}})
+		manifest.Helpers = []UpgradeHelper{{PID: 4321, StartTime: 8765}}
+
+		return manifest
+	}
+
+	oversized := []uint32{0x80000000, 0xffffffff}
+	versions := []struct {
+		name    string
+		current bool
+	}{
+		{name: "current", current: true},
+		{name: "legacy", current: false},
+	}
+
+	for _, value := range oversized {
+		for _, version := range versions {
+			for _, field := range fields {
+				if field.currentOnly && !version.current {
+					continue
+				}
+
+				t.Run(fmt.Sprintf("header/%s/%s/%08x", version.name, field.name, value), func(t *testing.T) {
+					before := seamCalls
+					header := newHeader(version.current)
+					field.setHeader(header, int(value))
+
+					if err := validateUpgradeOwnershipHeader(header); err == nil {
+						t.Fatal("oversized signed identity was accepted")
+					}
+
+					if seamCalls != before {
+						t.Fatal("header rejection reached a cleanup seam")
+					}
+				})
+
+				t.Run(fmt.Sprintf("manifest/%s/%s/%08x", version.name, field.name, value), func(t *testing.T) {
+					before := seamCalls
+					manifest := newManifest(version.current)
+					field.setManifest(manifest, int(value))
+
+					if err := validateUpgradeManifestStructure(manifest); err == nil {
+						t.Fatal("oversized signed identity was accepted")
+					}
+
+					if seamCalls != before {
+						t.Fatal("manifest rejection reached a cleanup seam")
+					}
+				})
+			}
+		}
+	}
+
+	for _, value := range oversized {
+		for _, field := range fields {
+			t.Run(fmt.Sprintf("capsule/%s/%08x", field.name, value), func(t *testing.T) {
+				before := seamCalls
+				manifest := newManifest(true)
+				manifest.journalSHA256 = sha256.Sum256([]byte("braw journal"))
+
+				if err := prepareOwnershipCapsule(manifest); err != nil {
+					t.Fatal(err)
+				}
+
+				data, err := base64.RawURLEncoding.DecodeString(manifest.ownershipCapsule)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				binary.BigEndian.PutUint32(data[field.capsuleAt:field.capsuleAt+4], value)
+				digestAt := len(data) - sha256.Size
+				digest := sha256.Sum256(data[:digestAt])
+				copy(data[digestAt:], digest[:])
+
+				if _, err := readInheritedOwnershipCapsule(base64.RawURLEncoding.EncodeToString(data)); err == nil {
+					t.Fatal("oversized capsule identity was accepted")
+				}
+
+				if seamCalls != before {
+					t.Fatal("capsule rejection reached a cleanup seam")
+				}
+			})
+		}
 	}
 }
 
@@ -3718,7 +3912,7 @@ func TestReadManifestRejectsSymlinkAndInsecureMode(t *testing.T) {
 		t.Fatal("ReadManifest followed a symlink")
 	}
 
-	if err := os.Chmod(realPath, 0o644); err != nil { //nolint:gosec // G302: deliberately removes execute permission from the fixture
+	if err := os.Chmod(realPath, 0o644); err != nil { //nolint:gosec // G302: deliberately makes the fixture group/world-readable
 		t.Fatal(err)
 	}
 

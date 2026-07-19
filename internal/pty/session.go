@@ -1394,7 +1394,7 @@ func extractPeakRSS(ps *os.ProcessState) int64 {
 	}
 
 	if ru, ok := ps.SysUsage().(*syscall.Rusage); ok && ru != nil {
-		rss := ru.Maxrss
+		rss := int64(ru.Maxrss) //nolint:unconvert // Maxrss is int32 on Linux/386 and int64 on Darwin/amd64.
 		if runtime.GOOS != "darwin" {
 			rss *= 1024 // Linux reports KB; macOS already reports bytes.
 		}

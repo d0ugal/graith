@@ -2191,7 +2191,7 @@ func splitUpgradeManifestData(data []byte) (*upgradeOwnershipHeader, []byte, err
 }
 
 func validateUpgradeOwnershipHeader(header *upgradeOwnershipHeader) error {
-	if header == nil || header.ListenerFD <= 2 || header.ListenerFD > math.MaxUint32 ||
+	if header == nil || header.ListenerFD <= 2 || header.ListenerFD > math.MaxInt32 ||
 		len(header.Sessions) > upgradeManifestMaxSessions || len(header.Helpers) > upgradeManifestMaxHelpers {
 		return errors.New("upgrade ownership header resource bounds are invalid")
 	}
@@ -2205,10 +2205,10 @@ func validateUpgradeOwnershipHeader(header *upgradeOwnershipHeader) error {
 
 	ids := make(map[string]struct{}, len(header.Sessions))
 	for _, session := range header.Sessions {
-		if session.ID == "" || session.Fd <= 2 || session.Fd > math.MaxUint32 ||
-			session.PID <= 1 || session.PID > math.MaxUint32 ||
+		if session.ID == "" || session.Fd <= 2 || session.Fd > math.MaxInt32 ||
+			session.PID <= 1 || session.PID > math.MaxInt32 || session.ScrollbackFd > math.MaxInt32 ||
 			(header.Version == upgradeManifestVersion &&
-				(session.ScrollbackFd <= 2 || session.ScrollbackFd > math.MaxUint32 || session.PIDStartTime <= 0)) {
+				(session.ScrollbackFd <= 2 || session.PIDStartTime <= 0)) {
 			return errors.New("upgrade ownership header session identity is invalid")
 		}
 
@@ -2239,7 +2239,7 @@ func validateUpgradeOwnershipHeader(header *upgradeOwnershipHeader) error {
 
 	for _, helper := range header.Helpers {
 		if header.Version != upgradeManifestVersion || helper.PID <= 1 ||
-			helper.PID > math.MaxUint32 || helper.StartTime <= 0 {
+			helper.PID > math.MaxInt32 || helper.StartTime <= 0 {
 			return errors.New("upgrade ownership header helper identity is invalid")
 		}
 
@@ -2725,7 +2725,8 @@ func validateUpgradeManifestStructure(m *UpgradeManifest) error {
 		return errors.New("legacy upgrade manifest cannot hand off helpers")
 	}
 
-	if m.ListenerFd <= 2 || len(m.Sessions) > upgradeManifestMaxSessions || len(m.Helpers) > upgradeManifestMaxHelpers {
+	if m.ListenerFd <= 2 || m.ListenerFd > math.MaxInt32 ||
+		len(m.Sessions) > upgradeManifestMaxSessions || len(m.Helpers) > upgradeManifestMaxHelpers {
 		return errors.New("upgrade manifest resource bounds are invalid")
 	}
 
@@ -2766,7 +2767,9 @@ func validateUpgradeManifestStructure(m *UpgradeManifest) error {
 
 	pids := make(map[int]struct{}, len(m.Sessions)+len(m.Helpers))
 	for _, session := range m.Sessions {
-		if session.ID == "" || session.Fd <= 2 || session.PID <= 1 || session.PID == os.Getpid() {
+		if session.ID == "" || session.Fd <= 2 || session.Fd > math.MaxInt32 ||
+			session.PID <= 1 || session.PID > math.MaxInt32 || session.PID == os.Getpid() ||
+			session.ScrollbackFd > math.MaxInt32 {
 			return errors.New("upgrade manifest session identity is invalid")
 		}
 
@@ -2800,7 +2803,7 @@ func validateUpgradeManifestStructure(m *UpgradeManifest) error {
 	}
 
 	for _, helper := range m.Helpers {
-		if helper.PID <= 1 || helper.PID == os.Getpid() || helper.StartTime <= 0 {
+		if helper.PID <= 1 || helper.PID > math.MaxInt32 || helper.PID == os.Getpid() || helper.StartTime <= 0 {
 			return errors.New("upgrade manifest helper identity is invalid")
 		}
 
