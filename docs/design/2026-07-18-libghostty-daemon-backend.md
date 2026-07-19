@@ -250,10 +250,23 @@ Ordinary builds compile and test the Charm rollback. Production
 `libghostty` builds compile only the native backend and exclude x/vt and
 Ultraviolet from the `internal/pty` terminal-screen dependency graph and its
 isolated binary. The full `gr` binary legitimately retains Ultraviolet through
-its Bubble Tea/Lip Gloss UI, but no longer retains x/vt. The explicit
+its Bubble Tea/Lip Gloss UI, but no longer retains x/vt. Default and
+comparison-only graphs and binaries contain no go-libghostty module; the native
+and dual-backend variants contain it. The explicit
 `libghostty,libghostty_compare` tag pair compiles both backends for this shared
 corpus and its comparative benchmarks. `libghostty_compare` alone does not
 select the native backend and intentionally remains a default Charm build.
+
+The native helper retains zero historical rows. Persistent raw `Scrollback` is
+the authority for reconstruction; the helper owns only the visible viewport.
+The corpus therefore measures grow, shrink, alternate-screen, and hydrated
+reconstruction behavior with `WithMaxScrollback(0)`. Strict adoption tests
+transfer both the PTY and append-writer descriptors, kill or poison the helper,
+and prove pre/post markers remain in the raw log while a replacement screen is
+reconstructed and subsequent PTY output remains serviceable. Hydration poison
+falls back to an empty screen at the inherited geometry without losing the PTY
+or raw bytes. Replays, including the 4 MiB benchmark/RSS fixture, use the shared
+512 KiB chunk path below the helper's 1 MiB request limit.
 
 Current intentional differences are explicit assertions rather than hidden
 normalization:
@@ -261,13 +274,17 @@ normalization:
 | Behavior | Charm rollback | Native candidate | Decision |
 |----------|----------------|------------------|----------|
 | `e` plus combining acute | Drops the combining mark | Returns one `é` grapheme | Ghostty matches the interface and is preferred. |
-| Shrink `20x2` to `4x2` after `keep me canny` | Truncates to `keep` | Reflows and retains newer rows (`cann`) | Accept Ghostty reflow. |
+| Repeated grow/shrink after `canny brae bide` | First `4x2` shrink leaves `cann`; later grows keep that truncated viewport | First `4x2` shrink reflows to `ae b` / `ide`; later resizes retain only that visible subset because native scrollback is zero | Accept measured Ghostty reflow while reconstructing history only from raw Graith scrollback. |
 | Enter alternate screen at column 11 | Homes the cursor | Retains the column | Preserve Ghostty semantics and characterize them. |
+| ZWJ, VS16, and regional indicators fragmented byte-by-byte | Commits completed codepoints before later writes extend the cluster, changing cells/cursor and dropping fragmented VS16 | Preserves grapheme assembly across writes | Prefer Ghostty's cluster-accurate cells, cursor, and preview; whole-write semantics match. |
 | Reduced #1430 bytes | Contained Go panic | Consumed; subsequent writes continue | Ghostty removes the known failure class. |
 
-The full tagged PTY suite passes with backend-specific expectations. No fixture
-contains captured output; the #1430 input remains a reduced 12-byte hexadecimal
-sequence.
+No additional differences were found for margins/scroll regions, erase,
+tabs/wrap, malformed control strings and device queries, whole-write ZWJ/VS16,
+wide cells, represented styles, or background-only palette/RGB cells. The full
+tagged PTY suite passes with backend-specific expectations. Every fixture is
+small, deterministic, generic old Scots data rather than captured output; the
+#1430 input remains a reduced 12-byte hexadecimal sequence.
 
 ### Performance evidence
 

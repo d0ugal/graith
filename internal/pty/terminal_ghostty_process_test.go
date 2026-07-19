@@ -199,6 +199,56 @@ func TestGhosttyTerminalApplicationGraphemeModePolicy(t *testing.T) {
 	assertGhosttyGraphemeMode(t, term, true)
 }
 
+func TestGhosttyTerminalRISModeFailureReturnsConsumedPrefix(t *testing.T) {
+	injected := errors.New("injected mode failure")
+	payload := []byte("braw\x1bccanny")
+	consumedThroughRIS := len("braw\x1bc")
+
+	for _, test := range []struct {
+		name  string
+		mode  func(libghostty.Mode, bool) error
+		wantN int
+		want  error
+	}{
+		{
+			name: "error",
+			mode: func(libghostty.Mode, bool) error {
+				return injected
+			},
+			wantN: consumedThroughRIS,
+			want:  injected,
+		},
+		{
+			name: "panic",
+			mode: func(libghostty.Mode, bool) error {
+				panic("injected mode panic")
+			},
+			wantN: 0,
+			want:  errGhosttyBindingPanic,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			term, err := newGhosttyTerminal(20, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			t.Cleanup(func() { _ = term.Close() })
+
+			term.modeSet = test.mode
+
+			n, err := term.Write(payload)
+			if n != test.wantN || !errors.Is(err, test.want) {
+				t.Fatalf("Write after RIS mode failure = (%d,%v), want (%d,%v)", n, err, test.wantN, test.want)
+			}
+
+			if n >= len(payload) {
+				t.Fatalf("mode failure reported complete write: %d bytes", n)
+			}
+		})
+	}
+}
+
 func assertGhosttyGraphemeMode(t *testing.T, term *ghosttyTerminal, want bool) {
 	t.Helper()
 
@@ -778,62 +828,356 @@ func TestGhosttyWriteRequestLimitDoesNotPoisonHelper(t *testing.T) {
 	}
 }
 
-func TestGhosttyHelperCrashReconstructsFromScrollback(t *testing.T) {
-	scrollback, err := NewScrollback(filepath.Join(t.TempDir(), "bothy.log"), 1024*1024)
-	if err != nil {
+func TestGhosttyAdoptedHelperCrashReconstructsTransferredScrollback(t *testing.T) {
+	initial := []byte("braw before helper crash\r\n")
+	fixture := adoptGhosttySession(t, initial, nil)
+
+	fixture.session.mu.RLock()
+	failed, ok := fixture.session.screen.(*ghosttyProcessTerminal)
+	fixture.session.mu.RUnlock()
+
+	if !ok {
+		t.Fatalf("adopted screen type = %T, want process-isolated helper", fixture.session.screen)
+	}
+
+	if err := failed.cmd.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
 
-	term, err := newGhosttyProcessTerminal(40, 4)
-	if err != nil {
-		t.Fatal(err)
-	}
-	session := &Session{
-		ID:                   "canny-helper",
-		Scrollback:           scrollback,
-		screen:               term,
-		screenHydrationBytes: defaultScreenHydrationBytes,
-		log:                  slog.New(slog.NewTextHandler(io.Discard, nil)),
-	}
-	t.Cleanup(func() {
-		_ = session.screen.Close()
-		_ = scrollback.Close()
-	})
-
-	initial := []byte("braw before crash\r\n")
-	if _, err := scrollback.Write(initial); err != nil {
-		t.Fatal(err)
-	}
-	if err := session.writeScreenLocked(initial); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := term.cmd.Process.Kill(); err != nil {
-		t.Fatal(err)
-	}
 	select {
-	case <-term.waitDone:
+	case <-failed.waitDone:
 	case <-time.After(5 * time.Second):
 		t.Fatal("helper did not exit after kill")
 	}
 
-	afterCrash := []byte("canny after crash")
-	if _, err := scrollback.Write(afterCrash); err != nil {
-		t.Fatal(err)
-	}
-	if err := session.writeScreenLocked(afterCrash); err == nil {
-		t.Fatal("write after helper crash returned nil error")
+	afterCrash := []byte("canny after helper crash")
+	if _, err := fixture.writer.Write(afterCrash); err != nil {
+		t.Fatalf("write live PTY after helper crash: %v", err)
 	}
 
-	preview, err := renderPreviewErr(session.screen)
+	wantRaw := append(append([]byte(nil), initial...), afterCrash...)
+
+	waitForGhosttySession(t, func() bool {
+		raw, err := os.ReadFile(fixture.logPath)
+		if err != nil || !bytes.Equal(raw, wantRaw) {
+			return false
+		}
+
+		preview := fixture.session.ScreenPreview()
+
+		return strings.Contains(preview, "braw before helper crash") &&
+			strings.Contains(preview, "canny after helper crash")
+	})
+
+	fixture.session.mu.RLock()
+	replacement := fixture.session.screen
+	fixture.session.mu.RUnlock()
+
+	if replacement == failed {
+		t.Fatal("crashed helper was not replaced")
+	}
+
+	tail, err := fixture.session.Scrollback.TailBytes(int64(len(wantRaw)))
+	if err != nil || !bytes.Equal(tail, wantRaw) {
+		t.Fatalf("authoritative transferred scrollback = %q, err=%v", tail, err)
+	}
+}
+
+func TestGhosttyAdoptHydrationFailureKeepsEmptyScreenAndLivePTY(t *testing.T) {
+	initial := []byte("dreich retained hydration bytes")
+	factoryCalls := 0
+	factory := func(cols, rows int) (Terminal, error) {
+		factoryCalls++
+
+		terminal, err := newGhosttyProcessTerminal(cols, rows)
+		if err != nil {
+			return nil, err
+		}
+
+		if factoryCalls == 1 {
+			if err := terminal.cmd.Process.Kill(); err != nil {
+				_ = terminal.Close()
+
+				return nil, err
+			}
+
+			<-terminal.waitDone
+		}
+
+		return terminal, nil
+	}
+
+	fixture := adoptGhosttySession(t, initial, factory)
+	if factoryCalls != 2 {
+		t.Fatalf("screen factories = %d, want failed hydration plus empty replacement", factoryCalls)
+	}
+
+	if cols, rows := fixture.session.screen.Size(); cols != 48 || rows != 4 {
+		t.Fatalf("empty recovery geometry = (%d,%d), want (48,4)", cols, rows)
+	}
+
+	if got := fixture.session.ScreenPreview(); strings.TrimSpace(got) != "" {
+		t.Fatalf("screen after hydration poison = %q, want empty", got)
+	}
+
+	raw, err := os.ReadFile(fixture.logPath)
+	if err != nil || !bytes.Equal(raw, initial) {
+		t.Fatalf("raw scrollback after hydration poison = %q, err=%v", raw, err)
+	}
+
+	afterFailure := []byte("canny after empty-screen recovery")
+	if _, err := fixture.writer.Write(afterFailure); err != nil {
+		t.Fatalf("write PTY after hydration failure: %v", err)
+	}
+
+	wantRaw := append(append([]byte(nil), initial...), afterFailure...)
+
+	waitForGhosttySession(t, func() bool {
+		raw, err := os.ReadFile(fixture.logPath)
+
+		return err == nil && bytes.Equal(raw, wantRaw) &&
+			strings.Contains(fixture.session.ScreenPreview(), string(afterFailure))
+	})
+}
+
+func TestGhosttyAdoptedNativeFailureReconstructsPersistedShortWrite(t *testing.T) {
+	initial := []byte("dreich before native mode failure\r\n")
+
+	var (
+		failed     *ghosttyProcessTerminal
+		received   chan []byte
+		serverDone chan error
+		calls      int
+	)
+
+	factory := func(cols, rows int) (Terminal, error) {
+		calls++
+		if calls > 1 {
+			return newGhosttyProcessTerminal(cols, rows)
+		}
+
+		failed, received, serverDone = newNativeFailureProtocolTerminal(cols, rows)
+
+		return failed, nil
+	}
+
+	fixture := adoptGhosttySession(t, initial, factory)
+
+	afterFailure := []byte("\x1bcbraw after native mode failure")
+	if _, err := fixture.writer.Write(afterFailure); err != nil {
+		t.Fatal(err)
+	}
+
+	wantRaw := append(append([]byte(nil), initial...), afterFailure...)
+
+	waitForGhosttySession(t, func() bool {
+		raw, err := os.ReadFile(fixture.logPath)
+
+		return err == nil && bytes.Equal(raw, wantRaw) &&
+			strings.Contains(fixture.session.ScreenPreview(), "braw after native mode failure")
+	})
+
+	if err := <-serverDone; err != nil {
+		t.Fatal(err)
+	}
+
+	if got := <-received; !bytes.Equal(got, initial) {
+		t.Fatalf("hydration request = %q, want %q", got, initial)
+	}
+
+	if got := <-received; !bytes.Equal(got, afterFailure) {
+		t.Fatalf("failing request = %q, want %q", got, afterFailure)
+	}
+
+	if !errors.Is(failed.currentError(), errGhosttyHelperNative) {
+		t.Fatalf("helper error after native status = %v, want poisoned native failure", failed.currentError())
+	}
+
+	fixture.session.mu.RLock()
+	replacement := fixture.session.screen
+	fixture.session.mu.RUnlock()
+
+	if replacement == failed {
+		t.Fatal("native failure did not install reconstructed helper")
+	}
+
+	tail, err := fixture.session.Scrollback.TailBytes(int64(len(wantRaw)))
+	if err != nil || !bytes.Equal(tail, wantRaw) {
+		t.Fatalf("native short-write recovery lost persisted bytes: %q, err=%v", tail, err)
+	}
+}
+
+type ghosttyAdoptionFixture struct {
+	session *Session
+	writer  *os.File
+	cmd     *exec.Cmd
+	logPath string
+}
+
+func adoptGhosttySession(
+	t *testing.T,
+	initial []byte,
+	factory func(cols, rows int) (Terminal, error),
+) *ghosttyAdoptionFixture {
+	t.Helper()
+
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	startTime, err := ProcessStartTime(cmd.Process.Pid)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+
+		t.Fatal(err)
+	}
+
+	readEnd, writeEnd, err := os.Pipe()
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+
+		t.Fatal(err)
+	}
+
+	ptyFD, err := unix.Dup(int(readEnd.Fd()))
+
+	_ = readEnd.Close()
+	if err != nil {
+		_ = writeEnd.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+
+		t.Fatal(err)
+	}
+
+	logPath := filepath.Join(t.TempDir(), "canny-adopted.log")
+
+	scrollback, err := NewScrollback(logPath, 4*1024*1024)
+	if err != nil {
+		_ = unix.Close(ptyFD)
+		_ = writeEnd.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+
+		t.Fatal(err)
+	}
+
+	if len(initial) > 0 {
+		if _, err := scrollback.Write(initial); err != nil {
+			_ = scrollback.Close()
+
+			t.Fatal(err)
+		}
+	}
+
+	scrollbackFD, err := scrollback.DuplicateFD()
+	_ = scrollback.Close()
+
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(preview, "braw before crash") || !strings.Contains(preview, "canny after crash") {
-		t.Fatalf("reconstructed preview = %q", preview)
+
+	session, err := AdoptSession(AdoptOpts{
+		ID:                   "canny-native-adopt",
+		Fd:                   uintptr(ptyFD),
+		ScrollbackFd:         uintptr(scrollbackFD),
+		PID:                  cmd.Process.Pid,
+		ExpectedPIDStartTime: startTime,
+		LogPath:              logPath,
+		MaxLogSize:           4 * 1024 * 1024,
+		DefaultRows:          4,
+		DefaultCols:          48,
+		HydrationBytes:       2 * 1024 * 1024,
+		DeferWait:            true,
+		Logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
+		screenFactory:        factory,
+	})
+	if err != nil {
+		_ = writeEnd.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+
+		t.Fatal(err)
 	}
-	if session.screen == term {
-		t.Fatal("crashed helper was not replaced")
+
+	fixture := &ghosttyAdoptionFixture{
+		session: session,
+		writer:  writeEnd,
+		cmd:     cmd,
+		logPath: logPath,
+	}
+
+	t.Cleanup(func() {
+		_ = fixture.writer.Close()
+		fixture.session.Close()
+		_ = fixture.cmd.Process.Kill()
+		_ = fixture.cmd.Wait()
+	})
+
+	return fixture
+}
+
+func newNativeFailureProtocolTerminal(
+	cols, rows int,
+) (*ghosttyProcessTerminal, chan []byte, chan error) {
+	parent, child := net.Pipe()
+	received := make(chan []byte, 2)
+	done := make(chan error, 1)
+	terminal := &ghosttyProcessTerminal{
+		conn: parent, cols: cols, rows: rows, dirty: true,
+		rpcTimeout: 2 * time.Second,
+	}
+
+	go func() {
+		defer func() { _ = child.Close() }()
+
+		for request := 0; request < 2; request++ {
+			op, payload, err := readGhosttyRequest(child)
+			if err != nil {
+				done <- err
+
+				return
+			}
+
+			if op != ghosttyOpWrite {
+				done <- errors.New("scripted native failure received non-write request")
+
+				return
+			}
+
+			received <- append([]byte(nil), payload...)
+
+			status := byte(ghosttyStatusOK)
+			if request == 1 {
+				status = ghosttyStatusNative
+			}
+
+			if _, err := child.Write(ghosttyTestReply(op, status, nil)); err != nil {
+				done <- err
+
+				return
+			}
+		}
+
+		done <- nil
+	}()
+
+	return terminal, received, done
+}
+
+func waitForGhosttySession(t *testing.T, ready func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for !ready() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for adopted terminal state")
+		}
+
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

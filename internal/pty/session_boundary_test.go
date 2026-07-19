@@ -273,6 +273,7 @@ func TestAsyncScreenRecoveryPublishesOnlyCoherentRawGeneration(t *testing.T) {
 		setSize: func(*os.File, *creackpty.Winsize) error { return nil },
 		log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
+	t.Cleanup(session.Close)
 	session.screenFactory = func(cols, rows int) (Terminal, error) {
 		factoryMu.Lock()
 		defer factoryMu.Unlock()
@@ -397,6 +398,7 @@ func TestAsyncScreenRecoveryRequeuesAfterExhaustedStaleBatch(t *testing.T) {
 		setSize: func(*os.File, *creackpty.Winsize) error { return nil },
 		log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
+	t.Cleanup(session.Close)
 	session.screenFactory = func(cols, rows int) (Terminal, error) {
 		factoryMu.Lock()
 		defer factoryMu.Unlock()
@@ -405,7 +407,13 @@ func TestAsyncScreenRecoveryRequeuesAfterExhaustedStaleBatch(t *testing.T) {
 		factoryCalls++
 
 		if call >= invalidations {
-			final = &recordingRecoveryTerminal{Terminal: newCharmTerminal(cols, rows)}
+			base, err := newTerminal(cols, rows)
+			if err != nil {
+				return nil, err
+			}
+
+			final = &recordingRecoveryTerminal{Terminal: base}
+
 			return final, nil
 		}
 

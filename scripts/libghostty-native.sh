@@ -166,8 +166,10 @@ run_go() {
             ;;
         race)
             verify_metadata
+            go test -race -count=1 -tags=libghostty ./internal/pty \
+                -run 'TestGhostty'
             go test -race -count=1 -tags=libghostty,libghostty_compare ./internal/pty \
-                -run 'TestTerminalBackendCompatibilityCorpus|TestGhostty'
+                -run '^TestTerminalBackendCompatibilityCorpus$'
             go test -race -count=1 -tags=libghostty ./internal/daemon \
                 -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
             ;;

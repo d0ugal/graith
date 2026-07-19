@@ -14,6 +14,7 @@ import (
 const (
 	charmVTModule          = "github.com/charmbracelet/x/vt"
 	charmUltravioletModule = "github.com/charmbracelet/ultraviolet"
+	ghosttyModule          = "go.mitchellh.com/libghostty"
 )
 
 // TestTerminalBackendBuildMetadata guards the terminal backend's production
@@ -32,8 +33,9 @@ func TestTerminalBackendBuildMetadata(t *testing.T) {
 		tags        string
 		environment []string
 		wantCharm   bool
+		wantGhostty bool
 	}{
-		{name: "production_native", tags: "libghostty", wantCharm: false},
+		{name: "production_native", tags: "libghostty", wantGhostty: true},
 		{
 			name:        "production_without_cgo",
 			tags:        "libghostty",
@@ -41,9 +43,10 @@ func TestTerminalBackendBuildMetadata(t *testing.T) {
 			wantCharm:   false,
 		},
 		{
-			name:      "dual_backend_comparison",
-			tags:      "libghostty,libghostty_compare",
-			wantCharm: true,
+			name:        "dual_backend_comparison",
+			tags:        "libghostty,libghostty_compare",
+			wantCharm:   true,
+			wantGhostty: true,
 		},
 		{name: "comparison_tag_only", tags: "libghostty_compare", wantCharm: true},
 		{name: "default", wantCharm: true},
@@ -54,6 +57,13 @@ func TestTerminalBackendBuildMetadata(t *testing.T) {
 			listArgs := taggedGoArgs("list", variant.tags, "-deps", "./internal/pty")
 			packages := runGoCommandWithEnvironment(t, repository, variant.environment, listArgs...)
 			assertCharmDependencies(t, strings.Fields(packages), variant.wantCharm, "go list")
+			assertDependency(
+				t,
+				strings.Fields(packages),
+				ghosttyModule,
+				variant.wantGhostty,
+				"PTY go list",
+			)
 
 			binary := filepath.Join(t.TempDir(), "pty-build-probe")
 			buildArgs := taggedGoArgs(
@@ -66,17 +76,53 @@ func TestTerminalBackendBuildMetadata(t *testing.T) {
 			)
 			runGoCommandWithEnvironment(t, repository, variant.environment, buildArgs...)
 
-			info, err := buildinfo.ReadFile(binary)
-			if err != nil {
-				t.Fatalf("read binary build metadata: %v", err)
-			}
-
-			modules := make([]string, 0, len(info.Deps))
-			for _, dependency := range info.Deps {
-				modules = append(modules, dependency.Path)
-			}
-
+			modules := readBuildInfoModules(t, binary)
 			assertCharmDependencies(t, modules, variant.wantCharm, "binary metadata")
+			assertDependency(t, modules, ghosttyModule, variant.wantGhostty, "PTY binary metadata")
+
+			commandPackages := runGoCommandWithEnvironment(
+				t,
+				repository,
+				variant.environment,
+				taggedGoArgs("list", variant.tags, "-deps", "./cmd/graith")...,
+			)
+			assertDependency(
+				t,
+				strings.Fields(commandPackages),
+				charmVTModule,
+				variant.wantCharm,
+				"command go list (Ultraviolet remains UI-only via Bubble Tea/Lip Gloss)",
+			)
+			assertDependency(
+				t,
+				strings.Fields(commandPackages),
+				ghosttyModule,
+				variant.wantGhostty,
+				"command go list",
+			)
+
+			commandBinary := filepath.Join(t.TempDir(), "graith-build-probe")
+			runGoCommandWithEnvironment(
+				t,
+				repository,
+				variant.environment,
+				taggedGoArgs("build", variant.tags, "-trimpath", "-o", commandBinary, "./cmd/graith")...,
+			)
+			commandModules := readBuildInfoModules(t, commandBinary)
+			assertDependency(
+				t,
+				commandModules,
+				charmVTModule,
+				variant.wantCharm,
+				"command binary metadata (Ultraviolet remains UI-only via Bubble Tea/Lip Gloss)",
+			)
+			assertDependency(
+				t,
+				commandModules,
+				ghosttyModule,
+				variant.wantGhostty,
+				"command binary metadata",
+			)
 		})
 	}
 
@@ -103,22 +149,22 @@ func TestTerminalBackendBuildMetadata(t *testing.T) {
 			"./internal/pty",
 		)...,
 	)
+}
 
-	// Other CLI dependencies use Ultraviolet independently of the screen
-	// emulator. x/vt is unique to the rollback terminal and must still disappear
-	// from the complete production command graph.
-	packages := runGoCommand(
-		t,
-		repository,
-		taggedGoArgs("list", "libghostty", "-deps", "./cmd/graith")...,
-	)
-	assertDependency(
-		t,
-		strings.Fields(packages),
-		charmVTModule,
-		false,
-		"production command go list (Ultraviolet remains UI-only via Bubble Tea/Lip Gloss)",
-	)
+func readBuildInfoModules(t *testing.T, binary string) []string {
+	t.Helper()
+
+	info, err := buildinfo.ReadFile(binary)
+	if err != nil {
+		t.Fatalf("read binary build metadata: %v", err)
+	}
+
+	modules := make([]string, 0, len(info.Deps))
+	for _, dependency := range info.Deps {
+		modules = append(modules, dependency.Path)
+	}
+
+	return modules
 }
 
 func taggedGoArgs(command, tags string, args ...string) []string {
