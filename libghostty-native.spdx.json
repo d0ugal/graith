@@ -11,17 +11,6 @@
   "name": "graith-libghostty-native-dependencies",
   "packages": [
     {
-      "SPDXID": "SPDXRef-Package-GraithNativeCandidate",
-      "copyrightText": "Copyright (c) 2025 Dougal Matthews",
-      "downloadLocation": "NOASSERTION",
-      "filesAnalyzed": false,
-      "licenseConcluded": "MIT",
-      "licenseDeclared": "MIT",
-      "name": "graith-native-libghostty-candidate",
-      "supplier": "Person: Dougal Matthews",
-      "versionInfo": "NOASSERTION"
-    },
-    {
       "SPDXID": "SPDXRef-Package-GoLibghostty",
       "copyrightText": "Copyright (c) 2026 Mitchell Hashimoto",
       "downloadLocation": "https://tangled.org/mitchellh.com/go-libghostty",
@@ -30,15 +19,10 @@
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceLocator": "pkg:golang/go.mitchellh.com/libghostty@v0.0.0-20260527181217-e9e1010f80b1",
           "referenceType": "purl"
-        },
-        {
-          "referenceCategory": "OTHER",
-          "referenceLocator": "e9e1010f80b1ced0b7efcdb300f4838513c0816e",
-          "referenceType": "vcs"
         }
       ],
       "filesAnalyzed": false,
-      "licenseComments": "The exact module license has SHA-256 fdf9b4ad7b61687fd3d4b1e3efa63cbc10743e6b733a62669b53a324251357b9.",
+      "licenseComments": "Exact revision e9e1010f80b1ced0b7efcdb300f4838513c0816e; module sum h1:XAiToY/9BPUvzfTHSmhHRjPprV5JfwjWE6BGT7ojEQ8=; LICENSE SHA-256 fdf9b4ad7b61687fd3d4b1e3efa63cbc10743e6b733a62669b53a324251357b9.",
       "licenseConcluded": "MIT",
       "licenseDeclared": "MIT",
       "name": "go-libghostty",
@@ -54,21 +38,16 @@
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceLocator": "pkg:github/ghostty-org/ghostty@91f66da24527fa02d92b5fd0b41cd020f553a64c",
           "referenceType": "purl"
-        },
-        {
-          "referenceCategory": "OTHER",
-          "referenceLocator": "91f66da24527fa02d92b5fd0b41cd020f553a64c",
-          "referenceType": "vcs"
         }
       ],
       "filesAnalyzed": false,
-      "licenseComments": "The exact source license has SHA-256 386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1. Graith builds libghostty-vt statically with SIMD enabled.",
+      "licenseComments": "Exact source LICENSE SHA-256 386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1. The Apple archive SHA-256 is 25c1620e63311cc687637c8e3bdfae1fe3e070892966c07d0d91065ccda541c0.",
       "licenseConcluded": "MIT",
       "licenseDeclared": "MIT",
       "name": "Ghostty libghostty-vt",
-      "sourceInfo": "Built from the exact Git commit with Zig 0.15.2 and -Demit-lib-vt=true -Demit-xcframework=false -Doptimize=ReleaseFast.",
+      "sourceInfo": "Built from exact commit 91f66da24527fa02d92b5fd0b41cd020f553a64c with Zig 0.15.2 and -Demit-lib-vt=true -Demit-xcframework=false -Doptimize=ReleaseFast -Dsimd=true.",
       "supplier": "Organization: Ghostty contributors",
-      "versionInfo": "1.3.2-dev+91f66da24527"
+      "versionInfo": "1.3.2-dev+91f66da24527fa02d92b5fd0b41cd020f553a64c"
     },
     {
       "SPDXID": "SPDXRef-Package-Uucode",
@@ -88,11 +67,11 @@
         }
       ],
       "filesAnalyzed": false,
-      "licenseComments": "The package is MIT; its compiled UTF-8 decoder and Unicode data additionally carry the MIT-compatible Bjoern Hoehrmann notice and Unicode License v3.",
+      "licenseComments": "LICENSE SHA-256 312e901e142be2477b4ca859e9311f9e3f80d33372991759b7921c1893605f33; Bjoern Hoehrmann decoder notice SHA-256 de219cece932aad5a817bf763393d8d149d378a15d2ad5320e3331eac07626dd; Unicode notice SHA-256 1eda5a3b026870c737b22e8bcd4954338612c790db688242e003f41a4fa95175.",
       "licenseConcluded": "MIT AND Unicode-3.0",
       "licenseDeclared": "MIT AND Unicode-3.0",
       "name": "uucode",
-      "sourceInfo": "Ghostty pins Zig content hash uucode-0.2.0-ZZjBPqZVVABQepOqZHR7vV_NcaN-wats0IB6o-Exj6m9 and compiles the configured Unicode tables into libghostty-vt.",
+      "sourceInfo": "Ghostty pins Zig content hash uucode-0.2.0-ZZjBPqZVVABQepOqZHR7vV_NcaN-wats0IB6o-Exj6m9 and compiles the UTF-8 decoder and Unicode tables into libghostty-vt.",
       "supplier": "Person: Jacob Sandlund",
       "versionInfo": "0.2.0"
     },
@@ -114,50 +93,71 @@
         }
       ],
       "filesAnalyzed": false,
-      "licenseComments": "The exact source is dual-licensed. Graith elects BSD-3-Clause for binary distribution.",
+      "licenseComments": "The source is dual-licensed. Graith elects BSD-3-Clause for binary distribution. The elected LICENSE-BSD SHA-256 is d25e82e26acd42ca3ccc9993622631163425b869b9e16284226d534cff6470f2.",
       "licenseConcluded": "BSD-3-Clause",
       "licenseDeclared": "Apache-2.0 OR BSD-3-Clause",
       "name": "Highway",
       "sourceInfo": "Ghostty package version 1.2.0, exact upstream commit 66486a10623fa0d72fe91260f96c892e41aceb06, Zig content hash N-V-__8AAGmZhABbsPJLfbqrh6JTHsXhY6qCaLAQyx25e0XE.",
       "supplier": "Organization: The Highway Project Authors",
-      "versionInfo": "1.2.0+66486a10623f"
+      "versionInfo": "1.2.0+66486a10623fa0d72fe91260f96c892e41aceb06"
     },
     {
       "SPDXID": "SPDXRef-Package-Simdutf",
-      "copyrightText": "Copyright 2021 The simdutf authors",
+      "copyrightText": "Copyright 2021 The simdutf authors; Facebook, Inc.; Idiap Research Institute; Deepmind Technologies; NEC Laboratories America; NYU; Google Fuchsia contributors",
       "downloadLocation": "https://github.com/ghostty-org/ghostty/tree/91f66da24527fa02d92b5fd0b41cd020f553a64c/pkg/simdutf/vendor",
       "externalRefs": [
         {
           "referenceCategory": "PACKAGE-MANAGER",
-          "referenceLocator": "pkg:github/simdutf/simdutf@v5.2.8",
+          "referenceLocator": "pkg:github/simdutf/simdutf@ca7acbcea967b5dcbab490066e99e3a6e6925539",
           "referenceType": "purl"
         }
       ],
       "filesAnalyzed": false,
-      "licenseComments": "The vendored amalgamation is dual-licensed. Graith elects MIT for binary distribution. At the Ghostty pin, simdutf.cpp has SHA-256 38dc5481dc4b7eef95cea8056b84d940419288100f317ecaff683bd89f163263 and simdutf.h has SHA-256 d3501fc2143f0edc5c84e6bb013a7fdb8ccd95514f7fd0816669248e62676301.",
-      "licenseConcluded": "MIT",
-      "licenseDeclared": "Apache-2.0 OR MIT",
-      "name": "simdutf",
-      "sourceInfo": "Ghostty vendors the v5.2.8 amalgamation inside its exact source commit.",
+      "licenseComments": "The simdutf project license is Apache-2.0 OR MIT; Graith elects MIT. Its amalgamation embeds BSD-3-Clause ISA detection derived from PyTorch and an Apache-2.0 UTF-8 validator derived from Google Fuchsia, so those licenses additionally apply. Upstream MIT LICENSE SHA-256 is fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f.",
+      "licenseConcluded": "MIT AND BSD-3-Clause AND Apache-2.0",
+      "licenseDeclared": "(Apache-2.0 OR MIT) AND BSD-3-Clause AND Apache-2.0",
+      "name": "simdutf vendored amalgamation",
+      "sourceInfo": "The compiled headers identify v9.0.0 and correspond to upstream commit ca7acbcea967b5dcbab490066e99e3a6e6925539. Ghostty's package manifest is stale at 5.2.8. Exact vendored simdutf.cpp SHA-256: 38dc5481dc4b7eef95cea8056b84d940419288100f317ecaff683bd89f163263. Exact vendored simdutf.h SHA-256: d3501fc2143f0edc5c84e6bb013a7fdb8ccd95514f7fd0816669248e62676301.",
       "supplier": "Organization: The simdutf authors",
-      "versionInfo": "5.2.8"
+      "versionInfo": "9.0.0+ca7acbcea967b5dcbab490066e99e3a6e6925539"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-ZigRuntime",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "d9b30c7aa983fcff5eed2084d54ae83eaafe7ff3a84d8fb754d854165a6e521c"
+        }
+      ],
+      "copyrightText": "Copyright (c) Zig contributors; Copyright (c) 2011-2020 Rich Felker et al.; LLVM Project contributors",
+      "downloadLocation": "https://ziglang.org/download/0.15.2/zig-0.15.2.tar.xz",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:generic/zig-runtime@0.15.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseComments": "Ghostty explicitly bundles Zig compiler_rt and UBSan runtime objects. Zig's root LICENSE SHA-256 is 5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177. The runtime closure includes MIT code (including musl-derived code) and LLVM-derived code under Apache-2.0 WITH LLVM-exception.",
+      "licenseConcluded": "MIT AND (Apache-2.0 WITH LLVM-exception)",
+      "licenseDeclared": "MIT AND (Apache-2.0 WITH LLVM-exception)",
+      "name": "Zig bundled compiler and UBSan runtime",
+      "sourceInfo": "Built from Zig 0.15.2 source archive SHA-256 d9b30c7aa983fcff5eed2084d54ae83eaafe7ff3a84d8fb754d854165a6e521c. Archive-member and symbol inspection confirms compiler_rt and UBSan runtime code in libghostty-vt.",
+      "supplier": "Organization: Zig contributors",
+      "versionInfo": "0.15.2"
     }
   ],
   "relationships": [
     {
-      "relatedSpdxElement": "SPDXRef-Package-GraithNativeCandidate",
+      "relatedSpdxElement": "SPDXRef-Package-GoLibghostty",
       "relationshipType": "DESCRIBES",
       "spdxElementId": "SPDXRef-DOCUMENT"
     },
     {
-      "relatedSpdxElement": "SPDXRef-Package-GoLibghostty",
-      "relationshipType": "DEPENDS_ON",
-      "spdxElementId": "SPDXRef-Package-GraithNativeCandidate"
-    },
-    {
       "relatedSpdxElement": "SPDXRef-Package-Ghostty",
-      "relationshipType": "STATIC_LINK",
-      "spdxElementId": "SPDXRef-Package-GraithNativeCandidate"
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
     },
     {
       "relatedSpdxElement": "SPDXRef-Package-Uucode",
@@ -171,6 +171,11 @@
     },
     {
       "relatedSpdxElement": "SPDXRef-Package-Simdutf",
+      "relationshipType": "STATIC_LINK",
+      "spdxElementId": "SPDXRef-Package-Ghostty"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-ZigRuntime",
       "relationshipType": "STATIC_LINK",
       "spdxElementId": "SPDXRef-Package-Ghostty"
     }

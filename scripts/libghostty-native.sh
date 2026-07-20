@@ -12,11 +12,21 @@ readonly GHOSTTY_ARTIFACT_SHA256="25c1620e63311cc687637c8e3bdfae1fe3e070892966c0
 readonly REQUIRED_ZIG="0.15.2"
 readonly GO_LIBGHOSTTY_SHA="e9e1010f80b1ced0b7efcdb300f4838513c0816e"
 readonly GO_LIBGHOSTTY_VERSION="v0.0.0-20260527181217-e9e1010f80b1"
+readonly GO_LIBGHOSTTY_SUM="h1:XAiToY/9BPUvzfTHSmhHRjPprV5JfwjWE6BGT7ojEQ8="
 readonly UUCODE_VERSION="0.2.0"
 readonly UUCODE_HASH="uucode-0.2.0-ZZjBPqZVVABQepOqZHR7vV_NcaN-wats0IB6o-Exj6m9"
 readonly HIGHWAY_VERSION="1.2.0"
 readonly HIGHWAY_SHA="66486a10623fa0d72fe91260f96c892e41aceb06"
-readonly SIMDUTF_VERSION="5.2.8"
+readonly SIMDUTF_VERSION="9.0.0"
+readonly SIMDUTF_MANIFEST_VERSION="5.2.8"
+readonly SIMDUTF_UPSTREAM_SHA="ca7acbcea967b5dcbab490066e99e3a6e6925539"
+readonly SIMDUTF_CPP_SHA256="38dc5481dc4b7eef95cea8056b84d940419288100f317ecaff683bd89f163263"
+readonly SIMDUTF_HEADER_SHA256="d3501fc2143f0edc5c84e6bb013a7fdb8ccd95514f7fd0816669248e62676301"
+readonly ZIG_SOURCE_SHA256="d9b30c7aa983fcff5eed2084d54ae83eaafe7ff3a84d8fb754d854165a6e521c"
+readonly SPDX_TOOLS_VERSION="2.0.7"
+readonly SPDX_TOOLS_URL="https://github.com/spdx/tools-java/releases/download/v2.0.7/tools-java-2.0.7.zip"
+readonly SPDX_TOOLS_SHA256="2dc63c3399c5178058b1be8a3de6f13b9f24981cd86c4292ef98f4a7e90de36d"
+readonly SPDX_NAMESPACE="https://github.com/d0ugal/graith/sbom/libghostty-native/$GHOSTTY_SHA/$GO_LIBGHOSTTY_SHA"
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 NATIVE_WORK="${GRAITH_LIBGHOSTTY_WORK:-}"
@@ -35,6 +45,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
+cleanup_candidate_staging() {
+    local staging="${1:-}"
+
+    if [[ -n "$staging" && -d "$staging" ]]; then
+        rm -rf "$staging"
+    fi
+}
+
 sha256_check() {
     local expected="$1"
     local path="$2"
@@ -47,6 +65,16 @@ sha256_check() {
     fi
 
     [[ "$actual" == "$expected" ]]
+}
+
+sha256_value() {
+    local path="$1"
+
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        shasum -a 256 "$path" | awk '{print $1}'
+    else
+        sha256sum "$path" | awk '{print $1}'
+    fi
 }
 
 write_pkg_config() {
@@ -68,6 +96,10 @@ apple_library() {
         echo "error: the pinned GUI artifact contains Apple slices only; use source-build on Linux" >&2
         return 1
     fi
+    if [[ "$(uname -m)" != "arm64" ]]; then
+        echo "error: the native libghostty daemon backend supports macOS arm64 only" >&2
+        return 1
+    fi
 
     local archive="$NATIVE_WORK/libghostty-vt.xcframework.zip"
     local framework="$NATIVE_WORK/libghostty-vt.xcframework"
@@ -86,7 +118,7 @@ apple_library() {
     unzip -q "$archive" -d "$NATIVE_WORK"
 
     if [[ ! -f "$library" ]]; then
-        echo "error: pinned artifact does not contain the universal macOS library" >&2
+        echo "error: pinned artifact does not contain the supported macOS arm64 slice" >&2
         return 1
     fi
     printf '%s\n' "$library"
@@ -94,6 +126,7 @@ apple_library() {
 
 verify_metadata() {
     local source="${1:-}"
+    local actual_sum
     local actual_version
 
     cd "$REPO_DIR"
@@ -107,25 +140,48 @@ verify_metadata() {
         echo "error: go-libghostty version is $actual_version; want $GO_LIBGHOSTTY_VERSION" >&2
         return 1
     fi
+    actual_sum="$(go mod download -json go.mitchellh.com/libghostty | jq -r .Sum)"
+    if [[ "$actual_sum" != "$GO_LIBGHOSTTY_SUM" ]]; then
+        echo "error: go-libghostty module sum is $actual_sum; want $GO_LIBGHOSTTY_SUM" >&2
+        return 1
+    fi
 
     jq -e \
         --arg ghostty "$GHOSTTY_SHA" \
-        --arg go_libghostty "$GO_LIBGHOSTTY_SHA" \
+        --arg go_libghostty "$GO_LIBGHOSTTY_VERSION" \
         --arg uucode "$UUCODE_VERSION" \
         --arg highway "$HIGHWAY_VERSION+$HIGHWAY_SHA" \
-        --arg simdutf "$SIMDUTF_VERSION" '
+        --arg simdutf "$SIMDUTF_VERSION+$SIMDUTF_UPSTREAM_SHA" \
+        --arg simdutf_cpp "$SIMDUTF_CPP_SHA256" \
+        --arg simdutf_h "$SIMDUTF_HEADER_SHA256" \
+        --arg zig "$REQUIRED_ZIG" \
+        --arg zig_sha "$ZIG_SOURCE_SHA256" '
+        def package($id): first(.packages[] | select(.SPDXID == $id));
+        def has_sha($package; $sha): any($package.checksums[]?;
+            .algorithm == "SHA256" and .checksumValue == $sha);
+        def relates($from; $type; $to): any(.relationships[];
+            .spdxElementId == $from and .relationshipType == $type and .relatedSpdxElement == $to);
         .spdxVersion == "SPDX-2.3" and
-        any(.packages[]; .SPDXID == "SPDXRef-Package-Ghostty" and
-            any(.externalRefs[]; .referenceLocator == $ghostty)) and
-        any(.packages[]; .SPDXID == "SPDXRef-Package-GoLibghostty" and
-            any(.externalRefs[]; .referenceLocator == $go_libghostty)) and
-        any(.packages[]; .SPDXID == "SPDXRef-Package-Uucode" and .versionInfo == $uucode) and
-        any(.packages[]; .SPDXID == "SPDXRef-Package-Highway" and
-            (.versionInfo | startswith($highway[0:12]))) and
-        any(.packages[]; .SPDXID == "SPDXRef-Package-Simdutf" and .versionInfo == $simdutf)
+        (.packages | length) == 6 and
+        (package("SPDXRef-Package-Ghostty").versionInfo | contains($ghostty)) and
+        package("SPDXRef-Package-GoLibghostty").versionInfo == $go_libghostty and
+        package("SPDXRef-Package-Uucode").versionInfo == $uucode and
+        package("SPDXRef-Package-Highway").versionInfo == $highway and
+        package("SPDXRef-Package-Simdutf").versionInfo == $simdutf and
+        (package("SPDXRef-Package-Simdutf").sourceInfo | contains($simdutf_cpp)) and
+        (package("SPDXRef-Package-Simdutf").sourceInfo | contains($simdutf_h)) and
+        package("SPDXRef-Package-ZigRuntime").versionInfo == $zig and
+        has_sha(package("SPDXRef-Package-ZigRuntime"); $zig_sha) and
+        relates("SPDXRef-Package-Ghostty"; "STATIC_LINK"; "SPDXRef-Package-Simdutf") and
+        relates("SPDXRef-Package-Ghostty"; "STATIC_LINK"; "SPDXRef-Package-ZigRuntime")
         ' libghostty-native.spdx.json >/dev/null
 
-    for required in "$GHOSTTY_SHA" "$GO_LIBGHOSTTY_SHA" "$UUCODE_HASH" "$HIGHWAY_SHA" "$SIMDUTF_VERSION"; do
+    for required in \
+        "$GHOSTTY_SHA" "$GHOSTTY_ARTIFACT_URL" "$GHOSTTY_ARTIFACT_SHA256" \
+        "$GO_LIBGHOSTTY_SHA" "$GO_LIBGHOSTTY_SUM" "$UUCODE_HASH" \
+        "$HIGHWAY_SHA" "$SIMDUTF_VERSION" "$SIMDUTF_UPSTREAM_SHA" \
+        "$SIMDUTF_CPP_SHA256" "$SIMDUTF_HEADER_SHA256" \
+        "$REQUIRED_ZIG" "$ZIG_SOURCE_SHA256"; do
         if ! grep -Fq "$required" THIRD_PARTY_NOTICES.libghostty.md; then
             echo "error: native notice inventory is missing $required" >&2
             return 1
@@ -143,7 +199,11 @@ verify_metadata() {
         grep -Fq "$UUCODE_HASH" "$source/build.zig.zon"
     grep -Fq ".version = \"$HIGHWAY_VERSION\"" "$source/pkg/highway/build.zig.zon"
     grep -Fq "$HIGHWAY_SHA" "$source/pkg/highway/build.zig.zon"
-    grep -Fq ".version = \"$SIMDUTF_VERSION\"" "$source/pkg/simdutf/build.zig.zon"
+    grep -Fq ".version = \"$SIMDUTF_MANIFEST_VERSION\"" "$source/pkg/simdutf/build.zig.zon"
+    grep -Fq "#define SIMDUTF_VERSION \"$SIMDUTF_VERSION\"" \
+        "$source/pkg/simdutf/vendor/simdutf.h"
+    sha256_check "$SIMDUTF_CPP_SHA256" "$source/pkg/simdutf/vendor/simdutf.cpp"
+    sha256_check "$SIMDUTF_HEADER_SHA256" "$source/pkg/simdutf/vendor/simdutf.h"
 }
 
 run_go() {
@@ -322,14 +382,313 @@ source_test() {
     )
 }
 
+verify_default_binary() {
+    local binary="${1:-}"
+    local build_info
+
+    if [[ ! -f "$binary" ]]; then
+        echo "usage: $0 verify-default-binary <binary>" >&2
+        return 2
+    fi
+
+    build_info="$(go version -m "$binary")"
+    if grep -Fq 'go.mitchellh.com/libghostty' <<<"$build_info"; then
+        echo "error: ordinary rollback binary contains go-libghostty" >&2
+        return 1
+    fi
+    if grep -Fq 'tags=libghostty' <<<"$build_info"; then
+        echo "error: ordinary rollback binary contains the libghostty build tag" >&2
+        return 1
+    fi
+    if grep -Fq 'ghostty_terminal_new' < <(strings "$binary"); then
+        echo "error: ordinary rollback binary contains a native Ghostty symbol" >&2
+        return 1
+    fi
+}
+
+candidate_revision() {
+    local revision
+
+    cd "$REPO_DIR"
+    if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
+        echo "error: candidate packaging requires a clean Git worktree" >&2
+        return 1
+    fi
+
+    revision="$(git rev-parse HEAD)"
+    if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
+        echo "error: candidate source is not at a full Git revision" >&2
+        return 1
+    fi
+    printf '%s\n' "$revision"
+}
+
+candidate_identity() {
+    local binary="${1:-}"
+    local expected_revision="${2:-}"
+    local build_info
+    local runtime_revision
+
+    if [[ ! -f "$binary" || ! "$expected_revision" =~ ^[0-9a-f]{40}$ ]]; then
+        echo "usage: $0 verify-darwin-arm64-candidate <binary> <revision>" >&2
+        return 2
+    fi
+
+    build_info="$(go version -m "$binary")"
+    for required in \
+        $'\tdep\tgo.mitchellh.com/libghostty\t'"$GO_LIBGHOSTTY_VERSION"$'\t'"$GO_LIBGHOSTTY_SUM" \
+        $'\tbuild\t-tags=libghostty' \
+        $'\tbuild\tCGO_ENABLED=1' \
+        $'\tbuild\tGOARCH=arm64' \
+        $'\tbuild\tGOOS=darwin'; do
+        if ! grep -Fq "$required" <<<"$build_info"; then
+            echo "error: candidate build metadata is missing $required" >&2
+            return 1
+        fi
+    done
+    if grep -Fq $'\tdep\tgithub.com/charmbracelet/x/vt\t' <<<"$build_info"; then
+        echo "error: native candidate contains the rollback terminal dependency" >&2
+        return 1
+    fi
+    if ! lipo "$binary" -verify_arch arm64; then
+        echo "error: native candidate is not a macOS arm64 executable" >&2
+        return 1
+    fi
+    if ! nm "$binary" | awk '$NF == "_ghostty_terminal_new" { found = 1 } END { exit !found }'; then
+        echo "error: candidate does not define ghostty_terminal_new" >&2
+        return 1
+    fi
+
+    runtime_revision="$("$binary" --json version | jq -r .commit)"
+    if [[ "$runtime_revision" != "$expected_revision" ]]; then
+        echo "error: candidate runtime revision is $runtime_revision; want $expected_revision" >&2
+        return 1
+    fi
+    if grep -Eq '/home/runner|/Users/|/private/var/folders/|/runner/work/' \
+        < <(strings "$binary"); then
+        echo "error: candidate contains a local or CI build path" >&2
+        return 1
+    fi
+}
+
+materialize_candidate_spdx() {
+    local binary="${1:-}"
+    local revision="${2:-}"
+    local output="${3:-}"
+    local binary_sha
+    local namespace
+
+    if [[ ! -f "$binary" || ! "$revision" =~ ^[0-9a-f]{40}$ || -z "$output" ]]; then
+        echo "usage: $0 materialize-spdx <binary> <revision> <output>" >&2
+        return 2
+    fi
+
+    binary_sha="$(sha256_value "$binary")"
+    namespace="$SPDX_NAMESPACE/candidate/$revision/darwin/arm64/$binary_sha"
+    jq \
+        --arg binary_sha "$binary_sha" \
+        --arg namespace "$namespace" \
+        --arg revision "$revision" '
+        .name = ("graith-libghostty-darwin-arm64-" + $revision) |
+        .documentNamespace = $namespace |
+        .packages = ([.packages[] | select(.SPDXID != "SPDXRef-Package-GraithNativeCandidate")] + [{
+            "SPDXID": "SPDXRef-Package-GraithNativeCandidate",
+            "checksums": [{"algorithm": "SHA256", "checksumValue": $binary_sha}],
+            "copyrightText": "Copyright (c) 2025 Dougal Matthews",
+            "downloadLocation": "NOASSERTION",
+            "externalRefs": [{
+                "referenceCategory": "PACKAGE-MANAGER",
+                "referenceLocator": ("pkg:github/d0ugal/graith@" + $revision),
+                "referenceType": "purl"
+            }],
+            "filesAnalyzed": false,
+            "licenseConcluded": "MIT",
+            "licenseDeclared": "MIT",
+            "name": "graith-libghostty-darwin-arm64",
+            "packageFileName": "gr",
+            "sourceInfo": ("Graith revision " + $revision + "; target GOOS=darwin GOARCH=arm64; packaged binary SHA-256 " + $binary_sha + "."),
+            "supplier": "Person: Dougal Matthews",
+            "versionInfo": $revision
+        }]) |
+        .relationships = ([.relationships[] | select(
+            .spdxElementId != "SPDXRef-DOCUMENT" and
+            .spdxElementId != "SPDXRef-Package-GraithNativeCandidate"
+        )] + [
+            {
+                "relatedSpdxElement": "SPDXRef-Package-GraithNativeCandidate",
+                "relationshipType": "DESCRIBES",
+                "spdxElementId": "SPDXRef-DOCUMENT"
+            },
+            {
+                "relatedSpdxElement": "SPDXRef-Package-GoLibghostty",
+                "relationshipType": "STATIC_LINK",
+                "spdxElementId": "SPDXRef-Package-GraithNativeCandidate"
+            },
+            {
+                "relatedSpdxElement": "SPDXRef-Package-Ghostty",
+                "relationshipType": "STATIC_LINK",
+                "spdxElementId": "SPDXRef-Package-GraithNativeCandidate"
+            }
+        ])
+        ' "$REPO_DIR/libghostty-native.spdx.json" >"$output"
+}
+
+verify_candidate_spdx() {
+    local binary="${1:-}"
+    local revision="${2:-}"
+    local document="${3:-}"
+    local binary_sha
+    local namespace
+
+    if [[ ! -f "$binary" || ! -f "$document" || ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
+        echo "usage: $0 verify-candidate-spdx <binary> <revision> <document>" >&2
+        return 2
+    fi
+
+    binary_sha="$(sha256_value "$binary")"
+    namespace="$SPDX_NAMESPACE/candidate/$revision/darwin/arm64/$binary_sha"
+    jq -e \
+        --arg binary_sha "$binary_sha" \
+        --arg namespace "$namespace" \
+        --arg revision "$revision" '
+        def package($id): first(.packages[] | select(.SPDXID == $id));
+        def relates($from; $type; $to): any(.relationships[];
+            .spdxElementId == $from and .relationshipType == $type and .relatedSpdxElement == $to);
+        .spdxVersion == "SPDX-2.3" and
+        .documentNamespace == $namespace and
+        ([.packages[] | select(.SPDXID == "SPDXRef-Package-GraithNativeCandidate")] | length) == 1 and
+        package("SPDXRef-Package-GraithNativeCandidate").versionInfo == $revision and
+        package("SPDXRef-Package-GraithNativeCandidate").packageFileName == "gr" and
+        package("SPDXRef-Package-GraithNativeCandidate").checksums ==
+            [{"algorithm": "SHA256", "checksumValue": $binary_sha}] and
+        relates("SPDXRef-DOCUMENT"; "DESCRIBES"; "SPDXRef-Package-GraithNativeCandidate") and
+        relates("SPDXRef-Package-GraithNativeCandidate"; "STATIC_LINK"; "SPDXRef-Package-GoLibghostty") and
+        relates("SPDXRef-Package-GraithNativeCandidate"; "STATIC_LINK"; "SPDXRef-Package-Ghostty")
+        ' "$document" >/dev/null
+}
+
+install_spdx_validator() {
+    local destination="${1:-}"
+    local archive
+    local jar
+
+    if [[ -z "$destination" ]]; then
+        echo "usage: $0 install-spdx-validator <empty-directory>" >&2
+        return 2
+    fi
+    mkdir -p "$destination"
+    if find "$destination" -mindepth 1 -print -quit | grep -q .; then
+        echo "error: SPDX validator destination is not empty" >&2
+        return 1
+    fi
+
+    archive="$NATIVE_WORK/tools-java-$SPDX_TOOLS_VERSION.zip"
+    curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+        "$SPDX_TOOLS_URL" --output "$archive"
+    if ! sha256_check "$SPDX_TOOLS_SHA256" "$archive"; then
+        echo "error: SPDX validator checksum mismatch" >&2
+        return 1
+    fi
+    unzip -q "$archive" -d "$destination"
+    jar="$destination/tools-java-$SPDX_TOOLS_VERSION-jar-with-dependencies.jar"
+    if [[ ! -f "$jar" ]]; then
+        echo "error: SPDX archive did not contain the expected validator" >&2
+        return 1
+    fi
+    printf '%s\n' "$jar"
+}
+
+validate_spdx() {
+    local jar="${1:-}"
+    local document="${2:-$REPO_DIR/libghostty-native.spdx.json}"
+    local output
+
+    if [[ ! -f "$jar" || ! -f "$document" ]]; then
+        echo "usage: $0 validate-spdx <tools-java-jar> [document]" >&2
+        return 2
+    fi
+    output="$(java -jar "$jar" Verify "$document")"
+    printf '%s\n' "$output"
+    if ! grep -Fq 'This SPDX Document is valid.' <<<"$output"; then
+        echo "error: official SPDX validator rejected $document" >&2
+        return 1
+    fi
+}
+
+package_darwin_arm64_candidate() (
+    local binary="${1:-}"
+    local destination="${2:-}"
+    local spdx_jar="${3:-}"
+    local destination_parent
+    local revision
+    local staging=""
+    local tampered
+
+    trap 'cleanup_candidate_staging "$staging"' EXIT
+
+    if [[ ! -f "$binary" || -z "$destination" || ! -f "$spdx_jar" ]]; then
+        echo "usage: $0 package-darwin-arm64 <binary> <destination> <spdx-jar>" >&2
+        return 2
+    fi
+    if [[ -e "$destination" ]]; then
+        echo "error: candidate destination already exists" >&2
+        return 1
+    fi
+
+    revision="$(candidate_revision)"
+    candidate_identity "$binary" "$revision"
+    destination_parent="$(dirname "$destination")"
+    mkdir -p "$destination_parent"
+    staging="$(mktemp -d "$destination_parent/.graith-native-candidate.XXXXXX")"
+
+    cp "$binary" "$staging/gr"
+    cp "$REPO_DIR/THIRD_PARTY_NOTICES.libghostty.md" "$staging/"
+    candidate_identity "$staging/gr" "$revision"
+    materialize_candidate_spdx \
+        "$staging/gr" "$revision" "$staging/libghostty-native.spdx.json"
+    verify_candidate_spdx \
+        "$staging/gr" "$revision" "$staging/libghostty-native.spdx.json"
+    validate_spdx "$spdx_jar" "$staging/libghostty-native.spdx.json"
+
+    tampered="$staging/gr.tampered"
+    cp "$staging/gr" "$tampered"
+    printf '\0' >>"$tampered"
+    if verify_candidate_spdx \
+        "$tampered" "$revision" "$staging/libghostty-native.spdx.json"; then
+        echo "error: candidate SPDX accepted changed binary bytes" >&2
+        return 1
+    fi
+    rm "$tampered"
+
+    if grep -Eq '/home/runner|/Users/|/private/var/folders/|/runner/work/' \
+        "$staging/libghostty-native.spdx.json" \
+        "$staging/THIRD_PARTY_NOTICES.libghostty.md"; then
+        echo "error: candidate metadata contains a local or CI path" >&2
+        return 1
+    fi
+    if [[ "$(find "$staging" -mindepth 1 -maxdepth 1 -type f -exec basename {} \; | sort)" != \
+        "$(printf '%s\n' gr libghostty-native.spdx.json THIRD_PARTY_NOTICES.libghostty.md | sort)" ]]; then
+        echo "error: candidate artifact contents are incomplete or unexpected" >&2
+        return 1
+    fi
+
+    mv "$staging" "$destination"
+    staging=""
+)
+
 usage() {
     cat <<EOF
 usage: $0 test|race|fuzz|bench|memory|daemon-test|soak [cycles [timeout]]|all
        $0 source-build <zig-target> <output-library>
        $0 source-test <zig-target>
        $0 verify-metadata [ghostty-source]
+       $0 verify-default-binary <binary>
+       $0 verify-darwin-arm64-candidate <binary> <revision>
+       $0 install-spdx-validator <empty-directory>
+       $0 validate-spdx <tools-java-jar> [document]
+       $0 package-darwin-arm64 <binary> <destination> <tools-java-jar>
 
-test/bench/memory use the checksum-pinned universal Apple artifact.
+test/bench/memory use the checksum-pinned Apple artifact on macOS arm64.
 daemon-test runs the external daemon lifecycle and bounded 12-cycle soak.
 soak defaults to 1,000 cycles bounded by one hour.
 source-build checks out Ghostty $GHOSTTY_SHA and requires Zig $REQUIRED_ZIG.
@@ -364,6 +723,21 @@ case "${1:-}" in
         ;;
     verify-metadata)
         verify_metadata "${2:-}"
+        ;;
+    verify-default-binary)
+        verify_default_binary "${2:-}"
+        ;;
+    verify-darwin-arm64-candidate)
+        candidate_identity "${2:-}" "${3:-}"
+        ;;
+    install-spdx-validator)
+        install_spdx_validator "${2:-}"
+        ;;
+    validate-spdx)
+        validate_spdx "${2:-}" "${3:-$REPO_DIR/libghostty-native.spdx.json}"
+        ;;
+    package-darwin-arm64)
+        package_darwin_arm64_candidate "${2:-}" "${3:-}" "${4:-}"
         ;;
     *)
         usage >&2

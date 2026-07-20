@@ -50,11 +50,13 @@ jobs:
           CGO_ENABLED: "0"
           GOARCH: ${{ matrix.goarch }}
           GOOS: ${{ matrix.goos }}
-        run: go build -trimpath -o "${RUNNER_TEMP}/gr" ./cmd/graith
+        run: |
+          go build -trimpath -o "${RUNNER_TEMP}/gr" ./cmd/graith
+          scripts/libghostty-native.sh verify-default-binary "${RUNNER_TEMP}/gr"
 
   apple-adapter:
-    name: Adapter and universal artifact (macOS)
-    runs-on: macos-latest
+    name: Adapter and pinned artifact (macOS arm64)
+    runs-on: macos-15
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -63,6 +65,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      - name: Verify the native runner architecture
+        run: test "$(uname -m)" = arm64
       - name: Run the shared corpus with the pinned GUI artifact
         env:
           GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
@@ -73,31 +77,51 @@ jobs:
           GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/libghostty-native
         run: scripts/libghostty-native.sh daemon-test
-      - name: Verify and link both release architectures
+      - name: Verify and link the supported native architecture
         env:
           LIBRARY: ${{ runner.temp }}/libghostty-native/libghostty-vt.xcframework/macos-arm64_x86_64/libghostty-vt.a
           PKG_CONFIG_PATH: ${{ runner.temp }}/libghostty-native/pkgconfig
         run: |
           set -euo pipefail
-          lipo "$LIBRARY" -verify_arch arm64 x86_64
-          mkdir -p "${RUNNER_TEMP}/native-binaries"
-          for arch in arm64 amd64; do
-            compiler_arch="$arch"
-            if [ "$arch" = "amd64" ]; then compiler_arch="x86_64"; fi
-            GOOS=darwin GOARCH="$arch" CGO_ENABLED=1 CC="clang -arch $compiler_arch" \
-              go test -c -tags=libghostty -o "${RUNNER_TEMP}/pty-${arch}.test" \
-              ./internal/pty
-            GOOS=darwin GOARCH="$arch" CGO_ENABLED=1 CC="clang -arch $compiler_arch" \
-              go build -trimpath -tags=libghostty \
-              -o "${RUNNER_TEMP}/native-binaries/gr-darwin-${arch}" ./cmd/graith
-          done
-          cp THIRD_PARTY_NOTICES.libghostty.md libghostty-native.spdx.json \
-            "${RUNNER_TEMP}/native-binaries/"
-      - name: Upload Darwin testing binaries
+          lipo "$LIBRARY" -verify_arch arm64
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 CC="clang -arch arm64" \
+            go test -c -tags=libghostty -o "${RUNNER_TEMP}/pty-arm64.test" \
+            ./internal/pty
+          revision="$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 CC="clang -arch arm64" \
+            go build -buildvcs=false -trimpath -tags=libghostty \
+            -ldflags="-X github.com/d0ugal/graith/internal/version.CommitSHA=$revision" \
+            -o "${RUNNER_TEMP}/gr-darwin-arm64" ./cmd/graith
+      - name: Prove tagged Darwin amd64 fails closed without native linkage
+        run: |
+          set -euo pipefail
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 CC="clang -arch x86_64" \
+            go test -c -tags=libghostty \
+            -o "${RUNNER_TEMP}/pty-darwin-amd64-unsupported.test" ./internal/pty
+          go tool nm "${RUNNER_TEMP}/pty-darwin-amd64-unsupported.test" | \
+            awk '$NF ~ /TestLibghosttyBackendRejectsUnsupportedPlatform$/ { found = 1 } END { exit !found }'
+          if GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 CC="clang -arch x86_64" \
+            go list -tags=libghostty -deps ./cmd/graith | \
+            awk '$0 == "go.mitchellh.com/libghostty" { found = 1 } END { exit !found }'; then
+            echo "error: tagged Darwin amd64 unexpectedly selected go-libghostty" >&2
+            exit 1
+          fi
+      - name: Bind provenance and package the native candidate
+        run: |
+          set -euo pipefail
+          java -version
+          spdx_jar="$(scripts/libghostty-native.sh install-spdx-validator \
+            "${RUNNER_TEMP}/spdx-validator")"
+          scripts/libghostty-native.sh validate-spdx "$spdx_jar"
+          scripts/libghostty-native.sh package-darwin-arm64 \
+            "${RUNNER_TEMP}/gr-darwin-arm64" \
+            "${RUNNER_TEMP}/native-candidate" "$spdx_jar"
+      - name: Upload the Darwin arm64 testing candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: gr-libghostty-darwin
-          path: ${{ runner.temp }}/native-binaries/
+          name: gr-libghostty-darwin-arm64
+          path: ${{ runner.temp }}/native-candidate/
           if-no-files-found: error
 
   linux-adapter:

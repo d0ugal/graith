@@ -1,4 +1,4 @@
-//go:build !libghostty || (libghostty_compare && (!cgo || (!darwin && !linux)))
+//go:build !libghostty || (libghostty_compare && (!cgo || (!linux && (!darwin || !arm64))))
 
 package pty
 

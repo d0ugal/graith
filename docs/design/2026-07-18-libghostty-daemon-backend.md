@@ -26,7 +26,7 @@ Callers depend on the backend-neutral `Terminal` interface in
 The existing model wraps `github.com/charmbracelet/x/vt`. Graith also already
 ships `libghostty-vt` to its native clients. The shared build pins Ghostty
 commit `91f66da24527fa02d92b5fd0b41cd020f553a64c`, Zig 0.15.2, committed public
-headers, and a checksum-verified universal Apple archive.
+headers, and the arm64 slice of a checksum-verified Apple XCFramework.
 
 The original spike proved that Ghostty fits the narrow interface and showed
 large parse and reconstruction gains, but recommended no-go because native
@@ -58,8 +58,8 @@ keep rollback independent of terminal state or protocol migrations.
 - Make construction, write, resize, snapshot, timeout, protocol, and exit
   failures observable and recoverable.
 - Use the same synthetic corpus and operational workloads for both models.
-- Produce exact-pin Darwin/Linux amd64/arm64 testing artifacts with native
-  licensing and SBOM data.
+- Produce an exact-pin macOS arm64 testing artifact with native licensing and
+  SBOM data. Linux-native validation is deferred to #1475.
 - Retain a simple rollback until native soak and opt-in observation gates pass.
 
 ### Non-Goals
@@ -78,7 +78,9 @@ keep rollback independent of terminal state or protocol migrations.
 
 | Surface | Decision | Rationale |
 |---------|----------|-----------|
-| CLI/daemon on macOS and Linux | Targeted, staged | Explicit `libghostty` builds use the native helper candidate; ordinary releases remain the rollback until promotion. |
+| CLI/daemon on macOS arm64 | Targeted, staged | Explicit `libghostty` builds use the native helper candidate; ordinary releases remain the rollback until promotion. |
+| CLI/daemon on macOS amd64 | Rollback only | Native libghostty is not a supported target; ordinary pure-Go builds remain supported. |
+| CLI/daemon on Linux | Deferred | The selector and source-build tooling remain available, but native validation and promotion are tracked in #1475. |
 | iOS app | No behavior change | It already uses the shared Ghostty pin through its native renderer; daemon selection does not change the app renderer. |
 | macOS app | No behavior change | The app renderer is independent, while a local daemon may use the tagged candidate. |
 
@@ -311,25 +313,28 @@ The path-scoped native workflow performs these checks:
 
 - ordinary `CGO_ENABLED=0` builds for Darwin/Linux amd64/arm64, proving the
   rollback build does not select cgo or require a native archive;
-- tagged Darwin arm64 execution and amd64/arm64 linking against the
-  checksum-pinned universal archive;
-- exact-source Linux amd64 execution and arm64 cross-link using Zig 0.15.2;
+- tagged Darwin arm64 execution and linking against the arm64 slice of the
+  checksum-pinned Apple archive;
+- fail-closed tagged Darwin amd64 selection without native linkage;
+- an explicit, non-gating exact-source Linux amd64/arm64 matrix for later #1475
+  validation using Zig 0.15.2;
 - committed-header diff against the exact Ghostty checkout;
 - upstream `go-libghostty` tests against Graith's newer Ghostty pin;
 - tagged PTY, focused race, and candidate executable builds; and
 - testing artifacts that include the native SPDX and notice inventory.
 
-An explicit tagged build without cgo, or on an unsupported OS, returns a
-configuration error rather than silently changing emulator. Ordinary
+An explicit tagged build without cgo, on macOS amd64, or on an unsupported OS,
+returns a configuration error rather than silently changing emulator. Ordinary
 GoReleaser remains pure Go during soak. Production promotion therefore needs a
 native build matrix or promotion of the already-proven candidate workflow into
 release packaging; it cannot use the current single-host pure-Go cross-build.
 
-Local macOS development can use the checksum-pinned universal archive. An exact
-source rebuild on the current macOS 26 host is blocked by Zig linking its build
-runner against that SDK, while the archive links and runs. Linux source builds
-are reproduced in CI. This is a documented local toolchain limitation, not a
-claim that the library is unsupported on macOS.
+Local Apple Silicon development uses the arm64 slice of the checksum-pinned
+Apple archive. An exact source rebuild on the current macOS 26 host is blocked
+by Zig linking its build runner against that SDK, while the archive links and
+runs. Linux source builds remain an explicit manual workflow for #1475. This is
+a documented local toolchain limitation, not a claim that the library is
+unsupported on macOS arm64.
 
 ### Pinning, licensing, security, and SBOM
 
@@ -341,11 +346,22 @@ useful for tooling. Its API is not yet version-stable, so upgrades are reviewed
 changes rather than floating module updates.
 
 `libghostty-native.spdx.json` records the native closure that Go tooling cannot
-see: Ghostty, uucode 0.2.0, Highway 1.2.0 at exact upstream commit, and the
-vendored simdutf 5.2.8 amalgamation. `THIRD_PARTY_NOTICES.libghostty.md` carries
-the elected MIT/BSD-3-Clause/Unicode notices. The helper script checks the Go
-module, SPDX entries, notice pins, source manifests, Git commit, toolchain,
-headers, and Apple checksum as one unit.
+see: Ghostty, uucode 0.2.0, Highway 1.2.0 at exact upstream commit, the vendored
+simdutf 9.0.0 amalgamation, and the bundled Zig compiler/UBSan runtime. Ghostty's
+simdutf package manifest still says 5.2.8, so the inventory verifies the
+compiled header version and exact source hashes rather than trusting that stale
+field. `THIRD_PARTY_NOTICES.libghostty.md` carries the elected
+MIT/BSD-3-Clause/Unicode/Apache notices. The helper script checks the Go module
+sum, SPDX entries and relationships, notice pins, source manifests and hashes,
+Git commit, toolchain, headers, and Apple checksum as one unit.
+
+The macOS arm64 workflow does not upload the generic dependency inventory as if
+it described a particular executable. It materializes a candidate-specific
+SPDX document containing the clean Git revision, target, and exact binary
+SHA-256; verifies the same copied bytes still contain the pinned wrapper and
+static Ghostty symbols; rejects a tampered-byte binding; validates the document
+with checksum-pinned official SPDX Java tooling; and uploads exactly `gr`, the
+bound SPDX document, and the notice file.
 
 A pin rotation is atomic:
 
@@ -355,7 +371,7 @@ A pin rotation is atomic:
 4. update `go.mod`, artifact digests, script constants, SPDX entries, licenses,
    and notices in one review;
 5. run Ghostty lib-vt tests, the complete wrapper suite, shared compatibility,
-   fuzz/race, benchmarks, and the four-target workflow; and
+   fuzz/race, benchmarks, and every supported native workflow target; and
 6. publish candidate archives only after provenance and binary linkage checks.
 
 Native advisories are not visible to Go vulnerability scanners. Dependency
@@ -376,8 +392,9 @@ artifacts; changing only `go.mod` is insufficient.
    native-attributed daemon crashes, successful bounded recovery for every
    injected helper failure, and resource/latency metrics within the documented
    benchmark envelope.
-4. Make native the supported default for macOS/Linux and keep one tested
-   pure-Go rollback release available.
+4. Make native the supported default for macOS arm64 and keep one tested
+   pure-Go rollback release available. macOS amd64 remains pure Go; Linux
+   promotion requires #1475.
 5. After that rollback window closes, remove Charm, its selector, and
    backend-specific expectations. Keep the backend-neutral interface and
    persistent reconstruction path.
@@ -416,8 +433,8 @@ treated as stable performance claims.
   reaping tests
 - default `go test -race ./...`, `go vet ./...`, repository lint, actionlint,
   shell validation, generated-file checks, and integration tests
-- Darwin/Linux amd64/arm64 candidate linkage plus native execution where the
-  runner architecture permits it
+- macOS arm64 candidate linkage and execution, tagged macOS amd64 fail-closed
+  selection, and the deferred manual Linux source-build checks from #1475
 - full diff scan for binaries, captured output, identifiers, credentials,
   machine paths, and native build directories
 

@@ -1,4 +1,4 @@
-//go:build libghostty && cgo && (darwin || linux)
+//go:build libghostty && cgo && ((darwin && arm64) || linux)
 
 package pty
 
