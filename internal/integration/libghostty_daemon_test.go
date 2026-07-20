@@ -23,6 +23,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/version"
+	"github.com/pelletier/go-toml/v2"
 )
 
 const (
@@ -501,9 +502,12 @@ func startNativeDaemon(t *testing.T) *nativeDaemonHarness {
 		ResumeArgs: []string{"-c", "printf '" + nativeResumeText + "\\r\\n'; exec cat"},
 	}
 
-	configData, err := config.EffectiveTOML(cfg)
+	// EffectiveTOML is a display renderer that materializes optional tool
+	// defaults. Preserve unset tools here so validation does not depend on
+	// developer-only CLIs that this hermetic test never invokes.
+	configData, err := toml.Marshal(cfg)
 	if err != nil {
-		t.Fatal("render native validation config failed")
+		t.Fatal("marshal native validation config failed")
 	}
 
 	if err := os.WriteFile(configFile, configData, 0o600); err != nil {
