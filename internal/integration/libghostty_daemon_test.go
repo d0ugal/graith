@@ -237,8 +237,13 @@ func TestLibghosttyDaemonLifecycle(t *testing.T) {
 	}
 
 	upgradeResponse, err := client.readControl()
-	if err != nil || upgradeResponse.Type != "upgrading" {
-		t.Fatal("daemon did not accept preserving restart")
+	if err != nil {
+		t.Fatalf("read preserving restart response failed (%T)", err)
+	}
+
+	if upgradeResponse.Type != "upgrading" {
+		t.Fatalf("daemon did not accept preserving restart: %s; daemon: %s",
+			h.redactedControlResponse(upgradeResponse), h.redactedStderr())
 	}
 
 	client.close()
@@ -896,13 +901,31 @@ func (h *nativeDaemonHarness) cleanup() {
 }
 
 func (h *nativeDaemonHarness) redactedStderr() string {
-	message := strings.TrimSpace(h.stderr.String())
-	for _, private := range h.private {
-		message = strings.ReplaceAll(message, private, "<isolated>")
-	}
-
+	message := h.redactDiagnostic(h.stderr.String())
 	if message == "" {
 		return "no diagnostic output"
+	}
+
+	return message
+}
+
+func (h *nativeDaemonHarness) redactedControlResponse(envelope protocol.Envelope) string {
+	if envelope.Type != "error" {
+		return fmt.Sprintf("response type %q", envelope.Type)
+	}
+
+	var response protocol.ErrorMsg
+	if err := protocol.DecodePayload(envelope, &response); err != nil || response.Message == "" {
+		return "unclassified error response"
+	}
+
+	return h.redactDiagnostic(response.Message)
+}
+
+func (h *nativeDaemonHarness) redactDiagnostic(value string) string {
+	message := strings.TrimSpace(value)
+	for _, private := range h.private {
+		message = strings.ReplaceAll(message, private, "<isolated>")
 	}
 
 	return message
