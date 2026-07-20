@@ -13,172 +13,264 @@ issue: https://github.com/d0ugal/graith/issues/1444
 This record measures the accepted process-isolated `go-libghostty` backend,
 including helper startup, RPC, public-wrapper iteration, coherent snapshot
 serialization, and helper shutdown. Charm receives the same synthetic bytes and
-remains the rollback comparison. The earlier in-process spike results are not
-used here because they measured a different failure and IPC boundary.
+remains the rollback comparison. The superseded in-process spike and all
+pre-integration measurements are excluded because they exercised different
+failure, compatibility, chunking, and IPC boundaries.
 
 ## Reproducible inputs
 
-The measurements were executed on this host without another workload started
-by this session:
+The measurements were taken on 2026-07-20 from the tree containing this
+document, based directly on feature commit `1cd612d`. No later main-branch
+integration is included.
 
 | Property | Value |
 |----------|-------|
-| Hardware | MacBook Pro `Mac17,2`, Apple M5, 10 physical/logical CPUs, 32 GiB RAM |
-| OS | macOS 26.5.2, build 25F84, Darwin arm64 25.5.0 |
+| Hardware | MacBook Pro `Mac17,2`, Apple M5, 10 cores (4 performance, 6 efficiency), 32 GiB RAM |
+| OS | macOS 26.5.2, build 25F84, Darwin `arm64` 25.5.0 |
 | Go | Go 1.26.5, `darwin/arm64`, cgo enabled, standard compiler optimization |
-| Benchmark concurrency | `runtime.NumCPU=10`; parent explicitly pinned to `GOMAXPROCS=10`; the sanitized helper receives no `GOMAXPROCS` override and uses the same 10-CPU host default; parent confirmed by the `-10` benchmark suffix |
+| Benchmark concurrency | `runtime.NumCPU=10`; parent pinned to `GOMAXPROCS=10`; the sanitized helper receives no `GOMAXPROCS` override and uses the 10-CPU host default; benchmark suffix `-10` confirms the parent setting |
 | Native compiler/linker | Apple clang 21.0.0 (`clang-2100.1.1.101`), pkg-config 3.0.3 |
 | Ghostty | `91f66da24527fa02d92b5fd0b41cd020f553a64c` |
 | Native artifact | ReleaseFast universal Apple archive, SHA-256 `25c1620e63311cc687637c8e3bdfae1fe3e070892966c07d0d91065ccda541c0` |
 | `go-libghostty` wrapper | `v0.0.0-20260527181217-e9e1010f80b1`, commit `e9e1010f80b1ced0b7efcdb300f4838513c0816e` |
-| Timing samples | Five independent Go benchmark samples, `-benchtime=1s`, `-benchmem` |
-| RSS samples | Five fresh test-process executions per backend |
+| Timing samples | Five Go benchmark samples, `-benchtime=1s`, `-benchmem`, fixed `GOMAXPROCS=10` |
+| RSS samples | Five fresh test processes for each backend/workload pair, fixed `GOMAXPROCS=10` |
 
-`scripts/libghostty-native.sh` verifies the artifact checksum, module version,
-SPDX pins, and notice pins before native tests. Its benchmark and memory modes
-compile throwaway test binaries under a temporary directory; no library, binary,
-build cache, or raw benchmark stream is committed.
+Before the retained run, exact-name process checks found no unrelated `go`,
+benchmark-test, or native-daemon test process. Consecutive one-second `iostat`
+observations were stable at 64–72% CPU idle. No values from earlier contended
+runs were retained.
 
-The exact reproduction commands are:
+`scripts/libghostty-native.sh` verifies the artifact and dependency pins. Its
+benchmark mode uses `libghostty_compare` so the production native backend and
+Charm rollback coexist only in the comparison binary; exact production checks
+continue to use `-tags=libghostty`. Temporary native libraries, binaries, build
+caches, and raw benchmark streams are not committed.
+
+The reproduction commands are:
 
 ```bash
 scripts/libghostty-native.sh test
+scripts/libghostty-native.sh race
 scripts/libghostty-native.sh bench
 scripts/libghostty-native.sh memory
 ```
 
-The `bench` mode expands to:
+The timing command expands to:
 
 ```bash
-GOMAXPROCS=10 go test -run '^$' -tags=libghostty ./internal/pty \
-  -bench '^BenchmarkTerminalBackends$' -benchmem -benchtime=1s -count=5
+GOMAXPROCS=10 go test -run '^$' \
+  -tags=libghostty,libghostty_compare ./internal/pty \
+  -bench '^BenchmarkTerminalBackends$' -benchmem \
+  -benchtime=1s -count=5
 ```
 
-For every reported metric, the median is the third value after sorting the five
-samples numerically. This selection is mechanical; no outliers were discarded.
-Linux performance was not executed and no Linux performance claim is made. The
-native workflow compiles and tests exact-pin Linux candidates, but that is build
-validation rather than performance evidence.
+The RSS mode builds fresh disposable Charm and comparison test binaries plus a
+repository-owned macOS current-RSS probe, then runs each pair as:
 
-## Workload and validity
+```bash
+/usr/bin/time -l env GOMAXPROCS=10 \
+  GRAITH_TERMINAL_MEMORY_BACKEND=<backend> \
+  GRAITH_TERMINAL_MEMORY_WORKLOAD=<workload> \
+  GRAITH_TERMINAL_RSS_PROBE=<temporary-probe> \
+  <temporary-test-binary> \
+  -test.run '^TestTerminalBackendPeakMemoryWorkload$' -test.v
+```
 
-Both factories receive one reduced, generated stream containing numbered text,
-SGR colors, a combining grapheme, a wide character, and an emoji. The 64 KiB
-parse input is exactly 65,564 bytes (886 lines); the 4 MiB reconstruction input
-is exactly 4,194,320 bytes (56,680 lines). It contains no captured terminal
-output, identifiers, paths, or session data.
+For every metric, `median [min–max]` is the third value after sorting all five
+samples numerically. Selection was mechanical and no outlier was discarded.
+Linux performance was not executed and no Linux performance claim is made.
+
+## Workloads and validity
+
+Both factories receive the same reduced, generated stream containing numbered
+text, SGR colors, a combining grapheme, a wide character, and an emoji. The
+64 KiB parse input is exactly 65,550 bytes (1,425 lines); the 4 MiB input is
+exactly 4,194,326 bytes (91,181 lines). It contains no captured output,
+identifiers, paths, or session data.
 
 The operations have these boundaries:
 
-- `start_close` constructs a `120x40` terminal and closes it. For the native
-  candidate this includes socketpair creation, executable resolution, process
-  start, the create RPC, close RPC, and child reap.
-- `parse` creates one terminal outside the wall timer, then repeatedly writes
-  the identical 65,564-byte stream. The final coherent snapshot, checksum, and
-  close validate output but are outside the wall and parent-allocation timer.
-- `dirty_snapshot_120x40` first populates the screen outside the timer. Each
-  operation alternates a fixed visible content/color mutation and then requests
-  one coherent snapshot. It therefore measures the operational dirtying write
-  RPC plus snapshot RPC, native render iteration, serialization, transport, and
-  parent decode—not a cached `Cell` read.
+- `start_close` constructs a `120x40` terminal and closes it. The native sample
+  includes socketpair creation, executable pinning/resolution, process start,
+  create RPC, close RPC, and child reap.
+- `parse` constructs one terminal outside the timer, then repeatedly writes the
+  identical 65,550-byte stream. The validation snapshot, checksum, and close
+  occur outside the wall and parent-allocation timer.
+- `dirty_snapshot_120x40` populates the screen outside the timer. Every timed
+  operation alternates a visible first-cell content/color mutation and requests
+  a coherent snapshot. It includes the dirtying write RPC, snapshot RPC, native
+  render iteration, serialization, transport, and parent decode; it cannot use
+  the clean snapshot cache.
 - `resize` populates the terminal outside the timer, then alternates `80x24` and
-  `120x40`. A final coherent snapshot and checksum validate the resulting size
-  outside the timer.
-- `reconstruct_4MiB` includes terminal construction, one 4,194,320-byte write,
-  coherent `120x40` snapshot extraction, and close/reap in every timed operation.
+  `120x40`. Final geometry and a coherent snapshot are validated outside the
+  timer.
+- `reconstruct_4MiB` includes terminal construction, production
+  `writeTerminalChunks` replay in 512 KiB requests below the helper's 1 MiB RPC
+  maximum, coherent `120x40` extraction, and close/reap in every operation.
 
-Every write checks its returned byte count. Dirty snapshots immediately assert
-the alternating first-cell value. Final snapshots check geometry and cell count
-and feed every cell's content, foreground/background kind and value, style bits,
-cursor, and geometry into a stable FNV-1a checksum stored in a package-level
-sink. Unit tests prove content, style, cursor, and visibility changes alter the
-checksum. Tagged tests also prove that a write invalidates the helper parent's
-snapshot cache and that the next snapshot refreshes visible content. These
-checks keep compiler elimination or a cached-cell shortcut from creating a
-valid-looking sample.
+The process-level RSS matrix repeats reconstruction and adds 12,000- and
+24,000-line scrolling at `240x40`, with one terminal and three terminals. Each
+line uses the same reduced grapheme/color vocabulary. The scrolling chunks are
+948,000 and 1,896,000 bytes per terminal; the three-terminal writes run
+concurrently. Ghostty uses the production `WithMaxScrollback(0)` setting because
+Graith's raw log is authoritative. The 4 MiB reconstruction case keeps its
+fixture live in the parent as a representative retained raw tail; the scrolling
+cases intentionally isolate derived-screen retention so 12k versus 24k exposes
+whether helper memory plateaus.
 
-## Measured medians
+Every write checks either its exact returned byte count or the production
+chunker's short-write error. Dirty snapshots immediately assert the alternating
+first-cell value. Final snapshots check geometry and cell count and feed every
+cell's content, foreground/background kind and value, style bits, cursor, and
+geometry into a stable FNV-1a checksum stored in a package-level sink. Unit tests
+prove content, style, cursor, and visibility changes alter the checksum, and a
+separate test proves aggregate RSS is selected from one checkpoint rather than
+by adding unrelated parent/helper maxima. These checks resist compiler
+elimination, clean-cache shortcuts, and invalid aggregate accounting.
 
-These tables contain measurements only. `ns/op` is wall time. `parent CPU` is
-the parent test process's `RUSAGE_SELF` user plus system time over the timed
-region. Go allocation counters likewise describe only the parent Go runtime;
-they cannot see helper Go allocations or native allocations.
+## Measured timing medians
+
+These tables contain measurements only. Wall time and throughput are reported
+separately from CPU. All brackets show the full five-sample range.
 
 | Operation | Charm wall | Native helper wall | Charm throughput | Native throughput |
 |-----------|-----------:|-------------------:|-----------------:|------------------:|
-| Start + close | 176.1 µs | 4.951 ms | n/a | n/a |
-| Parse 65,564 bytes | 16.67 ms | 319.96 µs | 3.93 MB/s | 204.92 MB/s |
-| Dirty coherent `120x40` snapshot | 66.91 µs | 1.353 ms | n/a | n/a |
-| Alternating resize | 21.50 µs | 597.96 µs | n/a | n/a |
-| Reconstruct 4,194,320 bytes + snapshot | 1.124 s | 24.19 ms | 3.73 MB/s | 173.42 MB/s |
+| Start + close | 288.589 µs [263.327–294.990] | 30.617 ms [29.793–31.775] | n/a | n/a |
+| Parse 65,550 bytes | 45.336 ms [44.802–45.776] | 838.151 µs [800.507–1,055.610] | 1.45 MB/s [1.43–1.46] | 78.21 MB/s [62.10–81.89] |
+| Dirty coherent `120x40` snapshot | 117.529 µs [112.772–118.812] | 2.585 ms [2.524–2.609] | n/a | n/a |
+| Alternating resize | 25.070 µs [24.968–28.985] | 71.468 µs [64.540–78.982] | n/a | n/a |
+| Reconstruct 4,194,326 bytes + snapshot | 2.962 s [2.937–3.011] | 88.146 ms [83.764–88.286] | 1.42 MB/s [1.39–1.43] | 47.58 MB/s [47.51–50.07] |
+
+Parent CPU is `RUSAGE_SELF` user plus system time over the timed region. Helper
+CPU is the reaped process's user plus system time. For parse, helper lifetime
+CPU also contains the one-time create, validation snapshot, and close amortized
+over the timed writes. Live-child CPU is unavailable for dirty snapshot and
+resize, so no helper value is claimed for those operations.
 
 | Operation | Charm parent CPU | Native parent CPU | Native helper lifetime CPU |
 |-----------|-----------------:|------------------:|---------------------------:|
-| Start + close | 370.13 µs/op | 511.05 µs/op | 3.362 ms/op |
-| Parse 65,564 bytes | 17.09 ms/op | 67.80 µs/op | 278.53 µs/op |
-| Dirty coherent `120x40` snapshot | 87.33 µs/op | 151.40 µs/op | unavailable while child is live |
-| Alternating resize | 47.17 µs/op | 18.98 µs/op | unavailable while child is live |
-| Reconstruct 4,194,320 bytes + snapshot | 1.146 s/op | 3.243 ms/op | 21.58 ms/op |
+| Start + close | 616.581 µs [590.068–628.324] | 21.071 ms [20.967–21.458] | 6.853 ms [6.817–6.901] |
+| Parse 65,550 bytes | 45.231 ms [45.010–45.912] | 112.617 µs [103.932–125.053] | 787.428 µs [779.469–825.360] |
+| Dirty coherent `120x40` snapshot | 142.968 µs [142.773–144.030] | 286.278 µs [274.363–290.785] | unavailable while child is live |
+| Alternating resize | 62.201 µs [61.975–62.720] | 26.612 µs [23.069–26.781] | unavailable while child is live |
+| Reconstruct 4,194,326 bytes + snapshot | 2.964 s [2.960–2.971] | 26.592 ms [26.580–27.098] | 58.212 ms [57.863–58.504] |
 
-`helper lifetime CPU` is measured from the exited helper's `ProcessState` and
-divided by the benchmark operation count. It is exact for start/close and for
-reconstruction, where every operation owns one helper. For parse it also
-contains the one-time create, validation snapshot, and close, amortized over
-thousands of timed writes; it is therefore a conservative lifetime-amortized
-number rather than a pure VT-parser CPU counter. Portable live-child CPU
-sampling is unavailable, so no helper CPU number is claimed for snapshot or
-resize. Total CPU can exceed wall time because rusage sums work across threads.
+Go allocation counters describe only the parent Go runtime. They do not include
+the helper Go heap or native allocations.
 
 | Operation | Charm parent B/op | Charm parent allocs/op | Native parent B/op | Native parent allocs/op |
 |-----------|------------------:|-----------------------:|-------------------:|------------------------:|
-| Start + close | 5,421,632 | 349 | 3,269 | 55 |
-| Parse 65,564 bytes | 6,003,321 | 51,388 | 16 | 1 |
-| Dirty coherent `120x40` snapshot | 196,612 | 2 | 279,024 | 121 |
-| Alternating resize | 222,117 | 19 | 16 | 2 |
-| Reconstruct 4,194,320 bytes + snapshot | 389,899,656 | 3,287,806 | 283,083 | 176 |
+| Start + close | 5,422,642 [5,422,557–5,422,775] | 350 [350–350] | 139,667 [139,472–139,699] | 95 [95–95] |
+| Parse 65,550 bytes | 5,130,998 [5,130,293–5,131,252] | 42,750 [42,750–42,750] | 16 [16–16] | 1 [1–1] |
+| Dirty coherent `120x40` snapshot | 196,612 [196,612–196,612] | 2 [2–2] | 279,024 [279,024–279,024] | 121 [121–121] |
+| Alternating resize | 222,121 [222,120–222,126] | 19 [19–19] | 16 [16–16] | 2 [2–2] |
+| Reconstruct 4,194,326 bytes + snapshot | 333,202,408 [333,202,104–333,202,472] | 2,735,797 [2,735,795–2,735,798] | 419,926 [419,912–421,086] | 225 [225–225] |
 
-Peak RSS uses the same 4 MiB reconstruction and full snapshot checksum. Parent
-RSS comes from `getrusage(RUSAGE_SELF)` immediately after the workload. Native
-helper RSS comes independently from the reaped child's `ProcessState`. Values
-are bytes as reported by macOS and converted to MiB below.
+## Measured RSS medians
 
-| Backend | Parent peak RSS | Helper peak RSS |
-|---------|----------------:|----------------:|
-| Charm rollback | 160,694,272 bytes (153.25 MiB) | n/a |
-| Native helper | 21,970,944 bytes (20.95 MiB) | 19,300,352 bytes (18.41 MiB) |
+The macOS probe calls `proc_pid_rusage(RUSAGE_INFO_V2)` for the parent and every
+live helper in one short invocation. It samples at baseline, after each 512 KiB
+reconstruction chunk or approximately every 2,048 scroll lines, and after final
+snapshot validation plus parent GC. Reconstruction has 11 checkpoints; 12k and
+24k scrolling have 8 and 14. The values below are the greatest aggregate from
+one checkpoint in each run, with its contemporaneous parent/helper components.
+They are measured aggregate RSS, not sums of lifetime peaks. The calls within a
+checkpoint are sequential rather than kernel-atomic, which is the residual
+sampling limitation.
 
-BSD `/usr/bin/time -l` wrapped each process as an independent cross-check; its
-median parent maximum RSS was within 0.1 MiB of self-rusage. Parent and helper
-peaks are not guaranteed to occur simultaneously, and neither rusage source
-reports a sampled process-tree peak. Adding 20.95 MiB and 18.41 MiB gives a
-39.36 MiB upper-bound estimate, not a measured combined-RSS result.
+In every retained run the greatest sampled aggregate was the final checkpoint,
+so its parent and helper components also equal the sampled component peaks.
+
+| Workload | Backend | Sampled parent peak | Sampled helper peak total | Measured same-checkpoint aggregate peak |
+|----------|---------|--------------------:|--------------------------:|----------------------------------------:|
+| Reconstruct 4 MiB, 1 terminal | Charm | 93.17 MiB [92.83–93.48] | n/a | 93.17 MiB [92.83–93.48] |
+| Reconstruct 4 MiB, 1 terminal | Native | 21.92 MiB [21.73–22.33] | 16.61 MiB [16.41–16.83] | 38.75 MiB [38.14–38.98] |
+| Scroll 12k, `240x40`, 1 terminal | Charm | 110.81 MiB [109.09–111.50] | n/a | 110.81 MiB [109.09–111.50] |
+| Scroll 12k, `240x40`, 1 terminal | Native | 15.84 MiB [15.75–16.05] | 16.52 MiB [16.16–16.89] | 32.45 MiB [32.05–32.64] |
+| Scroll 24k, `240x40`, 1 terminal | Charm | 178.11 MiB [177.30–180.50] | n/a | 178.11 MiB [177.30–180.50] |
+| Scroll 24k, `240x40`, 1 terminal | Native | 16.88 MiB [16.61–17.17] | 16.62 MiB [16.41–16.83] | 33.58 MiB [33.12–33.81] |
+| Scroll 12k, `240x40`, 3 concurrent terminals | Charm | 312.03 MiB [307.98–317.06] | n/a | 312.03 MiB [307.98–317.06] |
+| Scroll 12k, `240x40`, 3 concurrent terminals | Native | 17.41 MiB [17.09–17.58] | 49.19 MiB [48.58–49.83] | 66.58 MiB [65.98–67.12] |
+| Scroll 24k, `240x40`, 3 concurrent terminals | Charm | 534.06 MiB [531.12–548.61] | n/a | 534.06 MiB [531.12–548.61] |
+| Scroll 24k, `240x40`, 3 concurrent terminals | Native | 17.62 MiB [17.39–17.89] | 49.86 MiB [49.59–50.20] | 67.42 MiB [67.00–68.09] |
+
+For the key 4 MiB native case, the exact measured aggregate median is
+40,632,320 bytes: 22,986,752 parent bytes plus 17,416,192 helper bytes in the
+same checkpoint.
+
+The next table reports process-lifetime peaks instead. Parent values come from
+`getrusage(RUSAGE_SELF)` and helper values from each reaped child's
+`ProcessState`. These peaks can occur at different times. Their sum is therefore
+an explicitly labelled estimate, included only alongside the measured
+same-checkpoint aggregate above. `/usr/bin/time -l` independently wrapped every
+fresh parent process; its median was within 0.04 MiB of self-rusage in every row.
+
+| Workload | Backend | Parent lifetime peak | Helper independent peak sum | Independent peak-sum estimate |
+|----------|---------|---------------------:|----------------------------:|------------------------------:|
+| Reconstruct 4 MiB, 1 terminal | Charm | 93.20 MiB [92.88–93.53] | n/a | 93.20 MiB [92.88–93.53] |
+| Reconstruct 4 MiB, 1 terminal | Native | 21.92 MiB [21.73–22.33] | 16.62 MiB [16.42–16.84] | 38.77 MiB [38.16–39.00] |
+| Scroll 12k, `240x40`, 1 terminal | Charm | 110.86 MiB [109.14–111.55] | n/a | 110.86 MiB [109.14–111.55] |
+| Scroll 12k, `240x40`, 1 terminal | Native | 15.88 MiB [15.75–16.05] | 16.53 MiB [16.17–16.91] | 32.47 MiB [32.09–32.66] |
+| Scroll 24k, `240x40`, 1 terminal | Charm | 178.16 MiB [177.33–180.55] | n/a | 178.16 MiB [177.33–180.55] |
+| Scroll 24k, `240x40`, 1 terminal | Native | 16.88 MiB [16.61–17.22] | 16.64 MiB [16.42–16.84] | 33.59 MiB [33.14–33.88] |
+| Scroll 12k, `240x40`, 3 concurrent terminals | Charm | 312.08 MiB [308.05–317.11] | n/a | 312.08 MiB [308.05–317.11] |
+| Scroll 12k, `240x40`, 3 concurrent terminals | Native | 17.42 MiB [17.12–17.58] | 49.23 MiB [48.62–49.88] | 66.66 MiB [66.05–67.17] |
+| Scroll 24k, `240x40`, 3 concurrent terminals | Charm | 534.14 MiB [531.17–548.69] | n/a | 534.14 MiB [531.17–548.69] |
+| Scroll 24k, `240x40`, 3 concurrent terminals | Native | 17.64 MiB [17.39–17.89] | 49.91 MiB [49.64–50.25] | 67.48 MiB [67.08–68.14] |
+
+Across the three-helper runs, median individual helper lifetime peaks ranged
+from 16.19 to 16.73 MiB at 12k lines and from 16.53 to 16.75 MiB at 24k lines.
 
 ## Derived analysis, not measurements
 
-Ratios below are calculated from the measured medians and should not be read as
-additional samples or universal performance claims:
+The ratios and deltas below are calculated from the measured medians. They are
+not additional samples and are not universal performance claims:
 
-- Helper start/close is about 28.1x slower than Charm construction/close. That
-  fixed isolation cost is material for short-lived terminals and is why it is
-  reported separately from steady-state parsing.
-- The isolated helper parses this stream about 52.1x faster by wall time. Adding
-  measured native parent CPU to lifetime-amortized helper CPU gives an estimated
-  346.3 µs total CPU per 65,564-byte write, about 49.4x below Charm's measured
-  parent CPU on this host. The native value remains an estimate because its
-  helper component includes amortized lifecycle and validation work.
-- The dirty update plus coherent snapshot path is about 20.2x slower, and resize
-  is about 27.8x slower. These costs include the selected helper RPC/public
-  wrapper path and must not be replaced with the old in-process shim numbers.
-- Full 4 MiB reconstruction is about 46.5x faster by wall time despite paying
-  helper startup, snapshot transport, and close in every operation.
-- Treating the separately observed parent/helper RSS peaks as an upper bound
-  gives 39.36 MiB, about 3.9x below the Charm parent peak. This is an estimate;
-  the only measured RSS claims are the separate values in the table above.
+- Process isolation makes helper start/close about 106.1x slower than Charm.
+  This 30.6 ms fixed cost is material for short-lived terminals and is reported
+  separately from steady-state parse, snapshot, and reconstruction.
+- The native helper parses the reduced stream about 54.1x faster by wall time.
+  Adding native parent CPU to lifetime-amortized helper CPU gives an estimated
+  900.0 µs total CPU per write, about 50.3x below Charm parent CPU. The native
+  total remains an estimate because its helper component includes lifecycle and
+  validation work.
+- Dirty update plus coherent extraction is about 22.0x slower for the helper,
+  while resize is about 2.85x slower. These are operational IPC/public-wrapper
+  costs, not the superseded in-process shim.
+- Full 4 MiB reconstruction is about 33.6x faster by wall time despite paying
+  helper start, nine production-size write RPCs, snapshot transport, and close.
+- The measured native 4 MiB same-checkpoint aggregate is about 2.40x below the
+  Charm parent aggregate (38.75 versus 93.17 MiB). This comparison does not use
+  independent process peaks.
+- Doubling sustained scroll from 12k to 24k changes current native helper RSS by
+  0.10 MiB for one helper and 0.67 MiB total for three helpers. The measured
+  three-terminal aggregate changes by 0.84 MiB, while Charm grows by 222.03 MiB.
+  This supports the claim that `WithMaxScrollback(0)` removes retained helper
+  scrollback growth; Graith's separately bounded raw log remains authoritative.
 
-The result supports staged adoption for parsing and recovery workloads but also
-shows why helper lifetime and dirty-frame frequency matter operationally. Charm
-remains the compiled and tested rollback until the accepted design's soak and
+The results support staged adoption for parsing and recovery workloads but show
+why helper lifetime and dirty-frame frequency matter operationally. Charm stays
+compiled and tested as the rollback until the accepted design's soak and
 promotion gates are satisfied.
+
+## Restart/adoption validation, not benchmark results
+
+Final-head adoption does not synchronously construct or hydrate helpers before
+service. It adopts raw PTY/log ownership with `DegradedScreen=true` and
+`DeferWait=true`, then performs derived-screen recovery in an owned background
+task. A helper-construction latency number would therefore not be a
+time-to-listener measurement.
+
+The deterministic daemon test creates three retained sessions under one 150 ms
+absolute adoption deadline, asserts all three take the degraded raw-first path,
+then writes unique markers and proves every raw reader drains them. A separate
+test blocks the screen factory, proves degraded adoption never enters it, and
+proves raw output continues draining while asynchronous recovery is blocked.
+The exact native tagged exec-upgrade test then reconstructs a real libghostty
+screen using the production 1 MiB hydration bound. The 150 ms and drain
+deadlines are test thresholds, not measured medians, so they are deliberately
+excluded from the tables above.
 
 ## References
 

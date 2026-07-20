@@ -293,16 +293,20 @@ small, deterministic, generic old Scots data rather than captured output; the
 The [focused benchmark evidence](2026-07-18-libghostty-daemon-backend-benchmarks.md)
 measures the accepted helper process and public `go-libghostty` wrapper, not the
 superseded in-process shim. On the representative Apple M5 host, five-sample
-medians show a 4.95 ms helper start/close cost, 319.96 µs per 65,564-byte parse,
-1.35 ms per dirty coherent `120x40` snapshot, 597.96 µs per alternating resize,
-and 24.19 ms for full 4 MiB reconstruction plus snapshot and close.
+medians show a 30.62 ms helper start/close cost, 838.15 µs per 65,550-byte
+parse, 2.58 ms per dirty coherent `120x40` snapshot, 71.47 µs per alternating
+resize, and 88.15 ms for production-chunked 4 MiB reconstruction plus snapshot
+and close.
 
 The same record separates parent Go allocations from helper/native memory and
-reports median peak RSS of 20.95 MiB in the parent and 18.41 MiB in the helper;
-Charm's rollback process measured 153.25 MiB for the identical 4 MiB workload.
-It pins the host, toolchain, revisions, ReleaseFast artifact, sample count,
-benchtime, commands, validation checksum, and measurement limitations. Raw
-captured output and machine-local paths are deliberately not committed.
+reports a measured same-checkpoint 4 MiB aggregate of 38.75 MiB (21.92 MiB
+parent and 16.61 MiB helper), versus 93.17 MiB for Charm. At `240x40`, doubling
+three concurrent helpers from 12,000 to 24,000 scrolled lines changes their
+total current RSS by only 0.67 MiB with `WithMaxScrollback(0)`, while Charm's
+three-terminal process grows by 222.03 MiB. It pins the host, toolchain,
+revisions, ReleaseFast artifact, sample count, benchtime, commands, validation
+checksum, spread, and measurement limitations. Raw captured output and
+machine-local paths are deliberately not committed.
 
 ### Build and release consequences
 

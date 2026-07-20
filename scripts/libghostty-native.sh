@@ -255,12 +255,14 @@ run_go() {
                 -fuzz '^FuzzGhosttyHelperWrite$' -fuzztime="$helper_fuzztime"
             ;;
         bench)
+            verify_metadata
             GOMAXPROCS="$MEASUREMENT_GOMAXPROCS" \
                 go test -run '^$' -tags=libghostty,libghostty_compare ./internal/pty \
                 -bench '^BenchmarkTerminalBackends$' -benchmem \
                 -benchtime="$BENCHTIME" -count="$BENCH_SAMPLES"
             ;;
         memory)
+            verify_metadata
             local charm_test="$NATIVE_WORK/pty-charm.test"
             local ghostty_test="$NATIVE_WORK/pty-libghostty.test"
             local rss_probe="$NATIVE_WORK/pty-current-rss"

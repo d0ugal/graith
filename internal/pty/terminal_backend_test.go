@@ -14,6 +14,8 @@ import (
 
 var terminalBenchmarkSink uint64
 
+var terminalBenchmarkCurrentRSSFn = terminalBenchmarkCurrentRSS
+
 const (
 	terminalBenchmarkScrollCols  = 240
 	terminalBenchmarkScrollRows  = 40
@@ -127,18 +129,21 @@ func BenchmarkTerminalBackends(b *testing.B) {
 					if err != nil {
 						b.Fatal(err)
 					}
+
 					if n != len(parseWorkload) {
 						b.Fatalf("parsed %d bytes, want %d", n, len(parseWorkload))
 					}
 				}
 
 				parentCPUEnd, parentCPUEndOK := stopTerminalBenchmark(b)
+
 				snapshot, err := snapshotTerminal(term)
 				if err != nil {
 					b.Fatal(err)
 				}
 
 				validateTerminalBenchmarkSnapshot(b, snapshot, 120, 40)
+
 				if err := term.Close(); err != nil {
 					b.Fatal(err)
 				}
@@ -163,10 +168,12 @@ func BenchmarkTerminalBackends(b *testing.B) {
 
 				for i := 0; i < b.N; i++ {
 					mutation := dirtyMutations[i%len(dirtyMutations)]
+
 					n, err := term.Write(mutation.input)
 					if err != nil {
 						b.Fatal(err)
 					}
+
 					if n != len(mutation.input) {
 						b.Fatalf("wrote %d dirtying bytes, want %d", n, len(mutation.input))
 					}
@@ -175,9 +182,11 @@ func BenchmarkTerminalBackends(b *testing.B) {
 					if err != nil {
 						b.Fatal(err)
 					}
+
 					if len(snapshot.Cells) == 0 {
 						b.Fatal("dirty snapshot contained no cells")
 					}
+
 					if snapshot.Cells[0].Content != mutation.content {
 						b.Fatalf("dirty snapshot cell = %q, want %q", snapshot.Cells[0].Content, mutation.content)
 					}
@@ -210,10 +219,12 @@ func BenchmarkTerminalBackends(b *testing.B) {
 				}
 
 				parentCPUEnd, parentCPUEndOK := stopTerminalBenchmark(b)
+
 				wantCols, wantRows := 80, 24
 				if b.N%2 == 1 {
 					wantCols, wantRows = 120, 40
 				}
+
 				if cols, rows := term.Size(); cols != wantCols || rows != wantRows {
 					b.Fatalf("resized geometry = %dx%d, want %dx%d", cols, rows, wantCols, wantRows)
 				}
@@ -245,6 +256,7 @@ func BenchmarkTerminalBackends(b *testing.B) {
 					if err != nil {
 						b.Fatal(err)
 					}
+
 					if err := writeTerminalChunks(term, reconstructionWorkload); err != nil {
 						_ = term.Close()
 
@@ -257,6 +269,7 @@ func BenchmarkTerminalBackends(b *testing.B) {
 
 						b.Fatal(err)
 					}
+
 					if err := term.Close(); err != nil {
 						b.Fatal(err)
 					}
@@ -313,6 +326,7 @@ func reportTerminalBenchmarkCPU(
 	if parentStartOK && parentEndOK && parentEnd >= parentStart {
 		b.ReportMetric(float64(parentEnd-parentStart)/float64(b.N), "parent-cpu-ns/op")
 	}
+
 	if helperCPUOK {
 		b.ReportMetric(float64(helperCPU)/float64(b.N), "helper-lifetime-cpu-ns/op")
 	}
@@ -344,6 +358,7 @@ func validateTerminalBenchmarkSnapshot(
 	if snapshot.Cols != wantCols || snapshot.Rows != wantRows {
 		t.Fatalf("snapshot geometry = %dx%d, want %dx%d", snapshot.Cols, snapshot.Rows, wantCols, wantRows)
 	}
+
 	if len(snapshot.Cells) != wantCols*wantRows {
 		t.Fatalf("snapshot cells = %d, want %d", len(snapshot.Cells), wantCols*wantRows)
 	}
@@ -449,6 +464,7 @@ func TestTerminalBackendPeakMemoryWorkload(t *testing.T) {
 			break
 		}
 	}
+
 	if selected == nil {
 		t.Fatalf("unknown terminal backend %q", name)
 	}
@@ -505,6 +521,7 @@ func TestTerminalBackendPeakMemoryWorkload(t *testing.T) {
 	}
 
 	closed = true
+
 	reportTerminalPeakRSS(t, terms)
 
 	var (
@@ -518,6 +535,7 @@ func TestTerminalBackendPeakMemoryWorkload(t *testing.T) {
 			measuredHelperCPU = true
 		}
 	}
+
 	if measuredHelperCPU {
 		t.Logf("helper_lifetime_cpu_total_ns=%d", helperCPU.Nanoseconds())
 	}
@@ -593,12 +611,14 @@ func runTerminalMemoryScenario(
 	}
 
 	fixtureBytes := 0
+
 	for firstLine := 0; firstLine < scenario.scrollLines; firstLine += terminalBenchmarkScrollBatch {
 		lineCount := min(terminalBenchmarkScrollBatch, scenario.scrollLines-firstLine)
 		chunk := syntheticTerminalScrollLines(firstLine, lineCount)
 
 		fixtureBytes += len(chunk)
 		writeTerminalMemoryChunk(t, terms, chunk)
+
 		if firstLine+lineCount == scenario.scrollLines ||
 			(firstLine+lineCount)%2048 == 0 {
 			checkpoint()
@@ -611,8 +631,10 @@ func runTerminalMemoryScenario(
 func writeTerminalMemoryChunk(t testing.TB, terms []Terminal, chunk []byte) {
 	t.Helper()
 
-	errs := make([]error, len(terms))
-	var wait sync.WaitGroup
+	var (
+		errs = make([]error, len(terms))
+		wait sync.WaitGroup
+	)
 
 	for i, term := range terms {
 		wait.Add(1)
@@ -625,6 +647,7 @@ func writeTerminalMemoryChunk(t testing.TB, terms []Terminal, chunk []byte) {
 	}
 
 	wait.Wait()
+
 	for _, err := range errs {
 		if err != nil {
 			t.Fatal(err)
@@ -685,12 +708,13 @@ func (s *terminalRSSSampler) sample(t testing.TB) {
 		return
 	}
 
-	rss, ok := terminalBenchmarkCurrentRSS(s.pids)
+	rss, ok := terminalBenchmarkCurrentRSSFn(s.pids)
 	if !ok {
 		s.available = false
 
 		return
 	}
+
 	if len(rss) != len(s.pids) || rss[0] <= 0 {
 		t.Fatalf("current RSS samples = %v for %d processes", rss, len(s.pids))
 	}
@@ -701,13 +725,16 @@ func (s *terminalRSSSampler) sample(t testing.TB) {
 	}
 
 	s.samples++
+
 	s.latest = checkpoint
 	if checkpoint.parent > s.maxParent {
 		s.maxParent = checkpoint.parent
 	}
+
 	if checkpoint.helperTotal > s.maxHelper {
 		s.maxHelper = checkpoint.helperTotal
 	}
+
 	if checkpoint.total > s.maxAggregate.total {
 		s.maxAggregate = checkpoint
 		s.maxAggregateIndex = s.samples
@@ -725,17 +752,21 @@ func (s *terminalRSSSampler) report(t testing.TB) {
 
 	t.Logf("rss_checkpoint_samples=%d", s.samples)
 	t.Logf("parent_current_rss_bytes=%d", s.latest.parent)
+
 	if s.helperCount > 0 {
 		t.Logf(
 			"helper_current_rss_count=%d helper_current_rss_total_bytes=%d",
 			s.helperCount, s.latest.helperTotal,
 		)
 	}
+
 	t.Logf("aggregate_current_rss_bytes=%d", s.latest.total)
 	t.Logf("parent_sampled_peak_rss_bytes=%d", s.maxParent)
+
 	if s.helperCount > 0 {
 		t.Logf("helper_sampled_peak_total_rss_bytes=%d", s.maxHelper)
 	}
+
 	t.Logf(
 		"aggregate_sampled_peak_rss_bytes=%d aggregate_peak_parent_rss_bytes=%d aggregate_peak_helper_total_rss_bytes=%d aggregate_peak_sample=%d",
 		s.maxAggregate.total, s.maxAggregate.parent, s.maxAggregate.helperTotal,
@@ -752,6 +783,7 @@ func reportTerminalPeakRSS(t testing.TB, terms []Terminal) {
 
 		return
 	}
+
 	if parentPeakRSS <= 0 {
 		t.Fatal("parent peak RSS is unavailable")
 	}
@@ -771,6 +803,7 @@ func reportTerminalPeakRSS(t testing.TB, terms []Terminal) {
 	helperTotal, helperMin, helperMax := terminalRSSSummary(helperPeaks)
 
 	t.Logf("parent_lifetime_peak_rss_bytes=%d", parentPeakRSS)
+
 	if len(helperPeaks) > 0 {
 		t.Logf(
 			"helper_lifetime_peak_count=%d helper_independent_peak_sum_bytes=%d helper_peak_min_bytes=%d helper_peak_max_bytes=%d",
@@ -789,12 +822,65 @@ func terminalRSSSummary(values []int64) (total, minimum, maximum int64) {
 		if i == 0 || value < minimum {
 			minimum = value
 		}
+
 		if value > maximum {
 			maximum = value
 		}
 	}
 
 	return total, minimum, maximum
+}
+
+func TestTerminalRSSSamplerTracksSameSampleAggregatePeak(t *testing.T) {
+	samples := [][]int64{
+		{100, 10, 20},
+		{80, 40, 50},
+		{120, 5, 5},
+	}
+	sampleIndex := 0
+	previous := terminalBenchmarkCurrentRSSFn
+	terminalBenchmarkCurrentRSSFn = func(pids []int) ([]int64, bool) {
+		if len(pids) != 3 || sampleIndex >= len(samples) {
+			return nil, false
+		}
+
+		rss := samples[sampleIndex]
+		sampleIndex++
+
+		return rss, true
+	}
+
+	t.Cleanup(func() {
+		terminalBenchmarkCurrentRSSFn = previous
+	})
+
+	sampler := terminalRSSSampler{
+		pids: []int{1, 2, 3}, helperCount: 2, available: true,
+	}
+	for range samples {
+		sampler.sample(t)
+	}
+
+	if sampler.samples != 3 {
+		t.Fatalf("RSS sample count = %d, want 3", sampler.samples)
+	}
+
+	if sampler.latest != (terminalRSSCheckpoint{parent: 120, helperTotal: 10, total: 130}) {
+		t.Fatalf("latest RSS checkpoint = %+v", sampler.latest)
+	}
+
+	if sampler.maxParent != 120 || sampler.maxHelper != 90 {
+		t.Fatalf("independent sampled peaks = parent %d, helpers %d", sampler.maxParent, sampler.maxHelper)
+	}
+
+	wantAggregate := terminalRSSCheckpoint{parent: 80, helperTotal: 90, total: 170}
+
+	if sampler.maxAggregate != wantAggregate || sampler.maxAggregateIndex != 2 {
+		t.Fatalf(
+			"same-sample aggregate peak = %+v at %d, want %+v at 2",
+			sampler.maxAggregate, sampler.maxAggregateIndex, wantAggregate,
+		)
+	}
 }
 
 func TestTerminalSnapshotChecksumCoversRenderedOutput(t *testing.T) {
