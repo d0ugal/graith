@@ -35,6 +35,7 @@ const (
 	nativeReadyText      = "braw-ready"
 	nativeResumeText     = "canny-resumed"
 	nativeOpTimeout      = 8 * time.Second
+	nativeUpgradeTimeout = protocol.UpgradeReadinessTimeout
 )
 
 type nativeDaemonHarness struct {
@@ -743,7 +744,11 @@ func (h *nativeDaemonHarness) tryConnect() (*nativeControlClient, error) {
 func (h *nativeDaemonHarness) connectNewGeneration(previous string) *nativeControlClient {
 	h.t.Helper()
 
-	deadline := time.Now().Add(nativeOpTimeout)
+	// Upgrade acknowledgement precedes the daemon's bounded background, MCP,
+	// and session-I/O drains. Match the production client's protocol floor so
+	// the integration harness does not kill a valid transition after an ordinary
+	// per-request timeout.
+	deadline := time.Now().Add(nativeUpgradeTimeout)
 	for time.Now().Before(deadline) {
 		client, err := h.tryConnect()
 		if err == nil {
