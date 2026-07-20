@@ -117,6 +117,42 @@ func TestNativeProcessObservation(t *testing.T) {
 	if exists || !errors.Is(err, syscall.EPERM) {
 		t.Fatal("native process existence observation error was not preserved")
 	}
+
+	child := exec.Command("/bin/sleep", "30")
+
+	child.Env = []string{}
+
+	if err := child.Start(); err != nil {
+		t.Fatal("start synthetic child process failed")
+	}
+
+	t.Cleanup(func() {
+		_ = child.Process.Kill()
+		_ = child.Wait()
+	})
+
+	parentStart, parentExists, err := nativeProcessStartTime(os.Getpid())
+	if err != nil || !parentExists {
+		t.Fatal("observe test process identity failed")
+	}
+
+	children, err := nativeChildPIDs(nativeProcessIdentity{PID: os.Getpid(), StartTime: parentStart})
+	if err != nil {
+		t.Fatal("list synthetic child process failed")
+	}
+
+	found := false
+
+	for _, pid := range children {
+		if pid == child.Process.Pid {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Fatal("synthetic child process was not listed")
+	}
 }
 
 func TestIsolatedNativeEnvironmentAllowlist(t *testing.T) {

@@ -151,11 +151,14 @@ func nativeProcessIsCurrent(identity nativeProcessIdentity) (bool, error) {
 	return nativeProcessIdentityMatchesStart(identity, startTime, nil)
 }
 
-func nativeChildCount(parent int, operation string) (int, error) {
-	var count C.int
+// nativeChildCapacity returns the buffer size recommended by
+// proc_listchildpids. Darwin does not guarantee that the sizing call is the
+// current child count; only the populated call returns that count.
+func nativeChildCapacity(parent int, operation string) (int, error) {
+	var capacity C.int
 	var errorNumber C.int
 
-	status := C.graith_child_count(C.int(parent), &count, &errorNumber)
+	status := C.graith_child_count(C.int(parent), &capacity, &errorNumber)
 	if status != 0 {
 		if errorNumber != 0 {
 			return 0, fmt.Errorf("%s: %w", operation, syscall.Errno(errorNumber))
@@ -164,7 +167,7 @@ func nativeChildCount(parent int, operation string) (int, error) {
 		return 0, errors.New(operation)
 	}
 
-	return int(count), nil
+	return int(capacity), nil
 }
 
 func nativeListChildren(parent int, children []C.int) (int, error) {
@@ -199,12 +202,14 @@ func nativeChildPIDs(parent nativeProcessIdentity) ([]int, error) {
 	}
 
 	const attempts = 4
+	minimumCapacity := 0
 	for range attempts {
-		count, countErr := nativeChildCount(parent.PID, "count daemon child processes")
-		if countErr != nil {
-			return nil, countErr
+		capacity, capacityErr := nativeChildCapacity(parent.PID, "size daemon child process buffer")
+		if capacityErr != nil {
+			return nil, capacityErr
 		}
-		if count == 0 {
+		capacity = max(capacity, minimumCapacity)
+		if capacity == 0 {
 			current, currentErr := nativeProcessIsCurrent(parent)
 			if currentErr != nil {
 				return nil, currentErr
@@ -213,31 +218,27 @@ func nativeChildPIDs(parent nativeProcessIdentity) ([]int, error) {
 				return nil, errors.New("daemon process identity changed during child inspection")
 			}
 
-			recount, recountErr := nativeChildCount(parent.PID, "recount daemon child processes")
-			if recountErr != nil {
-				return nil, recountErr
+			resized, resizeErr := nativeChildCapacity(parent.PID, "resize daemon child process buffer")
+			if resizeErr != nil {
+				return nil, resizeErr
 			}
-			if recount != 0 {
+			if resized != 0 {
 				continue
 			}
 
 			return nil, nil
 		}
 
-		children := make([]C.int, count)
+		children := make([]C.int, capacity)
 		got, listErr := nativeListChildren(parent.PID, children)
 		if listErr != nil {
 			return nil, listErr
 		}
 		if got > len(children) {
-			continue
+			return nil, errors.New("daemon child process count exceeds its buffer")
 		}
-
-		currentCount, recountErr := nativeChildCount(parent.PID, "recount daemon child processes")
-		if recountErr != nil {
-			return nil, recountErr
-		}
-		if currentCount > got {
+		if got == len(children) {
+			minimumCapacity = len(children) * 2
 			continue
 		}
 
