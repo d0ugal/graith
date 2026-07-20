@@ -11,6 +11,9 @@ This graph shows the Go packages compiled into the `gr`/`graith` executable and
 their direct internal imports. An arrow from package A to package B means that A
 imports and uses B.
 
+Use the toolbar, mouse wheel, trackpad, or touch gestures to zoom and pan the
+graph. The full-screen view is useful when tracing longer dependency paths.
+
 {{< package-dependencies >}}
 
 The graph is generated for the canonical `linux/amd64` build with CGO disabled.

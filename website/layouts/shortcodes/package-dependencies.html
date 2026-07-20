@@ -3,6 +3,28 @@
     {{- errorf "package dependency data is missing; build the site with `make docs` or `make docs-serve`" -}}
 {{- end -}}
 {{- .Page.Store.Set "hasMermaid" true -}}
+{{- $script := resources.Get "js/package-graph.mjs" -}}
+{{- if hugo.IsProduction -}}
+    {{- $script = $script | minify | fingerprint "sha384" -}}
+{{- end -}}
+<div class="package-graph" data-package-graph role="group" aria-label="Package dependency graph, zoom 100%">
+    <div class="package-graph__toolbar" role="toolbar" aria-label="Package dependency graph controls">
+        <button type="button" data-package-graph-zoom-out aria-label="Zoom out" title="Zoom out">
+            <span class="material-icons" aria-hidden="true">zoom_out</span>
+        </button>
+        <output data-package-graph-zoom aria-label="Current zoom">100%</output>
+        <button type="button" data-package-graph-zoom-in aria-label="Zoom in" title="Zoom in">
+            <span class="material-icons" aria-hidden="true">zoom_in</span>
+        </button>
+        <button type="button" data-package-graph-reset aria-label="Reset view" title="Reset view">
+            <span class="material-icons" aria-hidden="true">restart_alt</span>
+        </button>
+        <button type="button" data-package-graph-fullscreen aria-label="View full screen" title="View full screen">
+            <span class="material-icons" aria-hidden="true">fullscreen</span>
+        </button>
+    </div>
+    <div id="package-dependency-graph" class="package-graph__viewport" data-package-graph-viewport
+         role="region" tabindex="0" aria-label="Interactive package dependency graph">
 <pre class="mermaid">
 flowchart LR
     subgraph entrypoint["Entry point"]
@@ -15,3 +37,7 @@ flowchart LR
 {{ end }}    classDef entry fill:#7c3aed,color:#fff,stroke:#5b21b6,stroke-width:2px
 {{ range where $graph.packages "group" "entry" }}    class {{ .id }} entry
 {{ end }}</pre>
+    </div>
+    <p class="package-graph__help">Scroll or pinch to zoom, drag to pan, or focus the graph and use <kbd>+</kbd>, <kbd>−</kbd>, arrow keys, and <kbd>0</kbd>.</p>
+</div>
+<script type="module" src="{{ $script.RelPermalink }}" {{ if hugo.IsProduction }}integrity="{{ $script.Data.Integrity }}" crossorigin="anonymous"{{ end }}></script>

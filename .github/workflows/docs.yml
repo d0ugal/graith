@@ -56,7 +56,9 @@ jobs:
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - name: Test docs tooling
         working-directory: website
-        run: go test ./...
+        run: |
+          go test ./...
+          node --test tests/*.test.mjs
       - name: Generate package dependency data
         working-directory: website
         run: go run ./cmd/packagegraph -repo ..

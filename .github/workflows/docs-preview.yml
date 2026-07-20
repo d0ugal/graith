@@ -150,7 +150,8 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           BASECOUNT: ${{ steps.changed.outputs.basecount }}
         run: |
-          (cd website && go test ./... && go run ./cmd/packagegraph -repo ..)
+          (cd website && go test ./... && node --test tests/*.test.mjs && \
+            go run ./cmd/packagegraph -repo ..)
           hugo --gc --minify --baseURL "${BASE_URL}/" \
             --source website --destination "$PWD/site-head"
           if [ "$BASECOUNT" != "0" ]; then

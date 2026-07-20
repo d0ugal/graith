@@ -32,9 +32,10 @@ From the repository root, run:
 
 ```bash
 make docs
+node --test website/tests/*.test.mjs
 ```
 
 This generates the ignored package-dependency data before invoking Hugo and
-removes it afterward. Use `make docs-serve` for a local live preview. The
-extended Hugo version and Dart Sass used by CI are defined in
-`.github/workflows/docs.yml`.
+removes it afterward. The Node test covers interactive documentation assets.
+Use `make docs-serve` for a local live preview. The extended Hugo version and
+Dart Sass used by CI are defined in `.github/workflows/docs.yml`.
