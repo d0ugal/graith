@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - 'website/**'
+      - 'cmd/**/*.go'
+      - 'internal/**/*.go'
+      - 'go.mod'
+      - 'go.sum'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -44,10 +48,18 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: website/go.mod
+          # The docs graph inspects the root module; the newer root toolchain
+          # also builds the website's nested Go module.
+          go-version-file: go.mod
       - name: Setup Pages
         id: pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - name: Test docs tooling
+        working-directory: website
+        run: go test ./...
+      - name: Generate package dependency data
+        working-directory: website
+        run: go run ./cmd/packagegraph -repo ..
       - name: Build site
         working-directory: website
         run: hugo --gc --minify --baseURL "${{ steps.pages.outputs.base_url }}/"

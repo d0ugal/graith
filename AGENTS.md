@@ -169,7 +169,7 @@ Subsystem-specific details and design links live in the scoped guides.
 
 ## Documentation pointers
 
-- [Contributing](website/content/docs/contributing.md) — builds, tests, lint,
+- [Contributing](website/content/docs/contributing/_index.md) — builds, tests, lint,
   coverage, and development workflow.
 - [Architecture](website/content/docs/architecture.md) — daemon/client/protocol
   overview.

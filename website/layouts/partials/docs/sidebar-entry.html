@@ -1,0 +1,33 @@
+{{- $page := .page -}}
+{{- $current := .current -}}
+{{- $depth := .depth -}}
+{{- $icons := .icons -}}
+{{- $children := $page.Pages.ByWeight -}}
+{{- $hasChildren := gt (len $children) 0 -}}
+{{- $active := in $current.RelPermalink $page.RelPermalink -}}
+{{- $currentExact := eq $current.RelPermalink $page.RelPermalink -}}
+{{- $nested := gt $depth 0 -}}
+{{- $linkClass := cond $nested "sidebar-nested-link" "sidebar-root-link" -}}
+{{- if $hasChildren }}
+<li class="sidebar-dropdown{{ if $nested }} nested{{ end }}{{ if not $icons }} no-icon{{ end }}{{ if $currentExact }} current{{ end }}{{ if $active }} active{{ end }}" style="position: relative;">
+    <a class="{{ $linkClass }} sidebar-section-link" href="{{ $page.Permalink }}" style="padding-right: 52px;">
+        {{ if and $icons (not $nested) }}<i class="material-icons me-2">{{ $page.Params.icon | default "notes" }}</i>{{ end }}
+        {{- $page.Title }}
+    </a>
+    <button class="btn sidebar-section-toggle" type="button" aria-label="Toggle {{ $page.Title }} subpages" style="position: absolute; z-index: 2; top: {{ if $nested }}1px{{ else }}4px{{ end }}; right: 0; width: 48px; height: {{ if $nested }}30px{{ else }}44px{{ end }}; margin: 0; padding: 0;"></button>
+    <div class="sidebar-submenu {{ if $active }}d-block{{ end }}">
+        <ul>
+            {{ range $children }}
+                {{ partial "docs/sidebar-entry.html" (dict "page" . "current" $current "depth" (add $depth 1) "icons" $icons) }}
+            {{ end }}
+        </ul>
+    </div>
+</li>
+{{- else }}
+<li class="{{ if $currentExact }}current {{ end }}{{ if not $icons }}no-icon{{ end }}">
+    <a class="{{ $linkClass }}" href="{{ $page.Permalink }}">
+        {{ if and $icons (not $nested) }}<i class="material-icons me-2">{{ $page.Params.icon | default "notes" }}</i>{{ end }}
+        {{- $page.Title }}
+    </a>
+</li>
+{{- end }}
