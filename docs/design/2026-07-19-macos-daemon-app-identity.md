@@ -266,8 +266,10 @@ before signing and report the same version/commit after signing. It runs strict
 `codesign`, Gatekeeper, and staple validation on the assembled app, in each
 archive, and after installation into the cache. Homebrew and tarball packaging
 tests fail when the app, generated slot set, signature, staple, or expected
-payload is absent. The current Linux-built `dev` release remains unmanaged
-until a macOS job builds an ad-hoc or development-signed matching app; source
+payload is absent. The macOS-built `dev` release uses the same Developer ID
+requirement and notarization gate as stable Graith, then registers only its
+isolated `dev` profile. Globally unique bundle build numbers prevent stable and
+dev generations from becoming ambiguous in the shared service receipt. Source
 `make build` remains the explicit direct-spawn development path.
 
 #### Startup intent and environment
@@ -834,7 +836,7 @@ The integration/release matrix is:
 | macOS 13 minimum | default + named | API availability, registration approval/status, demand kickstart, custom config/data dir, profile isolation. |
 | macOS 11/12 | default + named | No service API call; explicit direct-spawn fallback and unchanged CLI/notifier behavior. |
 | Current macOS source/`go install` | default + named | Explicit tested direct fallback; no generated unsigned production app. |
-| Development release | isolated named profile | Matching app when built by the macOS dev channel, otherwise diagnosed direct fallback; no collision with stable default. |
+| Development release | isolated named profile | Developer ID-signed matching app from the macOS dev channel; no collision with stable default. |
 | Linux amd64/arm64 | default + named | Existing direct start/stop/restart and release artifacts unchanged. |
 
 Run focused client/CLI/daemon/release tests under `-race`, tagged lifecycle

@@ -15,8 +15,14 @@ type devReleaseConfig struct {
 		Hooks []string `yaml:"hooks"`
 	} `yaml:"before"`
 	Builds []struct {
-		ID     string   `yaml:"id"`
-		Binary string   `yaml:"binary"`
+		ID      string   `yaml:"id"`
+		Binary  string   `yaml:"binary"`
+		Ldflags []string `yaml:"ldflags"`
+		Hooks   struct {
+			Post []struct {
+				Cmd string `yaml:"cmd"`
+			} `yaml:"post"`
+		} `yaml:"hooks"`
 		Goos   []string `yaml:"goos"`
 		Goarch []string `yaml:"goarch"`
 	} `yaml:"builds"`
@@ -47,7 +53,7 @@ func loadDevReleaseConfig(t *testing.T) devReleaseConfig {
 	return cfg
 }
 
-func TestDevGoReleaserBuildsNotifierOnlyIntoDarwinArchives(t *testing.T) {
+func TestDevGoReleaserBuildsMacAppsOnlyIntoDarwinArchives(t *testing.T) {
 	cfg := loadDevReleaseConfig(t)
 
 	hasBuildHook := false
@@ -94,6 +100,26 @@ func TestDevGoReleaserBuildsNotifierOnlyIntoDarwinArchives(t *testing.T) {
 			if !slices.Equal(build.Goarch, []string{"amd64", "arm64"}) {
 				t.Errorf("build %q goarch = %v, want amd64+arm64", id, build.Goarch)
 			}
+
+			flags := strings.Join(build.Ldflags, "\n")
+			if id == "gr-dev-darwin" {
+				for _, required := range []string{
+					"daemonservice.ManagedBuild=true",
+					"daemonservice.DevelopmentBuild=false",
+					"daemonservice.ExpectedTeamID={{ .Env.GRAITH_SIGNING_TEAM_ID }}",
+					"daemonservice.ExpectedRequirementBase64={{ .Env.GRAITH_SIGNING_REQUIREMENT_B64 }}",
+				} {
+					if !strings.Contains(flags, required) {
+						t.Errorf("Darwin dev ldflags missing %q", required)
+					}
+				}
+
+				if len(build.Hooks.Post) != 1 || !strings.Contains(build.Hooks.Post[0].Cmd, "macos/service/release-hook.sh") {
+					t.Errorf("Darwin dev build has no service release hook: %#v", build.Hooks.Post)
+				}
+			} else if strings.Contains(flags, "daemonservice.ManagedBuild=true") || len(build.Hooks.Post) != 0 {
+				t.Errorf("Linux dev build unexpectedly enables the macOS service: flags=%q hooks=%#v", flags, build.Hooks.Post)
+			}
 		}
 
 		if !found {
@@ -119,22 +145,28 @@ func TestDevGoReleaserBuildsNotifierOnlyIntoDarwinArchives(t *testing.T) {
 					t.Fatalf("archive %q ids = %v, want [%s]", tc.archiveID, archive.IDs, tc.buildID)
 				}
 
-				hasApp := false
+				hasNotifier := false
+				hasService := false
 
 				for _, file := range archive.Files {
-					if !strings.Contains(file.path(), "GraithNotifier.app") {
-						continue
-					}
+					switch {
+					case strings.Contains(file.path(), "GraithNotifier.app"):
+						hasNotifier = true
 
-					hasApp = true
+						if file.Src != "macos/build/GraithNotifier.app/**/*" || file.Dst != "GraithNotifier.app/Contents" {
+							t.Errorf("notifier archive mapping = src %q dst %q", file.Src, file.Dst)
+						}
+					case strings.Contains(file.path(), "Graith.app"):
+						hasService = true
 
-					if file.Src != "macos/build/GraithNotifier.app/**/*" || file.Dst != "GraithNotifier.app/Contents" {
-						t.Errorf("notifier archive mapping = src %q dst %q", file.Src, file.Dst)
+						if file.Src != "macos/build/service-release-{{ .Arch }}/Graith.app/**/*" || file.Dst != "Graith.app/Contents" {
+							t.Errorf("service archive mapping = src %q dst %q", file.Src, file.Dst)
+						}
 					}
 				}
 
-				if hasApp != tc.wantApp {
-					t.Errorf("archive %q contains notifier = %v, want %v", tc.archiveID, hasApp, tc.wantApp)
+				if hasNotifier != tc.wantApp || hasService != tc.wantApp {
+					t.Errorf("archive %q apps: notifier=%v service=%v, want both=%v", tc.archiveID, hasNotifier, hasService, tc.wantApp)
 				}
 
 				return
@@ -151,7 +183,9 @@ type devReleaseWorkflow struct {
 		Steps  []struct {
 			Name string            `yaml:"name"`
 			Uses string            `yaml:"uses"`
+			If   string            `yaml:"if"`
 			Run  string            `yaml:"run"`
+			Env  map[string]string `yaml:"env"`
 			With map[string]string `yaml:"with"`
 		} `yaml:"steps"`
 	} `yaml:"jobs"`
@@ -185,7 +219,10 @@ func TestDevReleaseWorkflowValidatesNativeArchives(t *testing.T) {
 		t.Fatalf("dev-release runner = %q, want macos-latest for Swift notifier build", job.RunsOn)
 	}
 
-	var goreleaserArgs, verifyScript string
+	var (
+		goreleaserArgs, signingScript, verifyScript, cleanupScript, cleanupIf string
+		signingEnv                                                            map[string]string
+	)
 
 	for _, step := range job.Steps {
 		if strings.Contains(step.Uses, "goreleaser/goreleaser-action") {
@@ -194,6 +231,16 @@ func TestDevReleaseWorkflowValidatesNativeArchives(t *testing.T) {
 
 		if step.Name == "Verify dev archives" {
 			verifyScript = step.Run
+		}
+
+		if step.Name == "Configure fail-closed macOS service signing" {
+			signingScript = step.Run
+			signingEnv = step.Env
+		}
+
+		if step.Name == "Remove temporary macOS signing keychain" {
+			cleanupScript = step.Run
+			cleanupIf = step.If
 		}
 	}
 
@@ -205,20 +252,46 @@ func TestDevReleaseWorkflowValidatesNativeArchives(t *testing.T) {
 		t.Fatal("dev-release workflow has no archive verification step")
 	}
 
+	for _, secret := range []string{
+		"MACOS_SIGNING_CERTIFICATE", "MACOS_SIGNING_CERTIFICATE_PASSWORD", "MACOS_SIGNING_IDENTITY",
+		"MACOS_SIGNING_TEAM_ID", "MACOS_SIGNING_REQUIREMENT", "APPLE_NOTARY_PRIVATE_KEY",
+		"APPLE_NOTARY_KEY_ID", "APPLE_NOTARY_ISSUER_ID",
+	} {
+		if !strings.Contains(signingEnv[secret], "secrets."+secret) {
+			t.Errorf("dev signing step does not map %s from its repository secret", secret)
+		}
+	}
+
+	for _, want := range []string{
+		"Darwin dev artifacts require signing and notarization", "security import", "notarytool store-credentials",
+		"GRAITH_SIGNING_REQUIREMENT_B64", "GRAITH_SIGNED_SNAPSHOT=true",
+	} {
+		if !strings.Contains(signingScript, want) {
+			t.Errorf("dev signing setup missing %q", want)
+		}
+	}
+
 	for _, want := range []string{
 		"test -x \"$notifier\"",
 		"lipo \"$notifier\" -verify_arch arm64 x86_64",
-		"codesign --verify --deep --strict \"$app\"",
+		"codesign --verify --deep --strict \"$notifier_app\"",
 		"GraithNotifier.app",
-		"Linux dev archive unexpectedly contains",
+		"Graith.app",
+		"cmp \"$unpacked/gr-dev\" \"$service_app/Contents/MacOS/gr\"",
+		"macos/service/verify-release-archive.sh",
+		"Linux dev archive unexpectedly contains a macOS app",
 	} {
 		if !strings.Contains(verifyScript, want) {
 			t.Errorf("archive verification step missing %q", want)
 		}
 	}
+
+	if cleanupIf != "always()" || !strings.Contains(cleanupScript, `security delete-keychain "$GRAITH_RELEASE_KEYCHAIN"`) {
+		t.Errorf("dev signing keychain cleanup is not fail-safe: if=%q run=%q", cleanupIf, cleanupScript)
+	}
 }
 
-func TestDevHomebrewFormulaInstallsNotifierOnlyOnMacOS(t *testing.T) {
+func TestDevHomebrewFormulaInstallsMacAppsOnlyOnMacOS(t *testing.T) {
 	workflow := loadDevReleaseWorkflow(t)
 	job := workflow.Jobs["dev-release"]
 
@@ -271,17 +344,27 @@ func TestDevHomebrewFormulaInstallsNotifierOnlyOnMacOS(t *testing.T) {
 	installScript := formula[installAt:]
 	macGuardAt := strings.Index(installScript, "if OS.mac?")
 
-	appInstallAt := strings.Index(installScript, `(libexec/"graith").install "GraithNotifier.app"`)
-	if macGuardAt < 0 || appInstallAt < 0 {
-		t.Fatalf("generated formula is missing the macOS notifier install:\n%s", formula)
+	for _, app := range []string{"GraithNotifier.app", "Graith.app"} {
+		install := `(libexec/"graith").install "` + app + `"`
+
+		appInstallAt := strings.Index(installScript, install)
+		if macGuardAt < 0 || appInstallAt < 0 {
+			t.Fatalf("generated formula is missing the macOS %s install:\n%s", app, formula)
+		}
+
+		if macGuardAt > appInstallAt {
+			t.Fatalf("generated formula installs %s outside its OS.mac? guard", app)
+		}
+
+		if strings.Count(formula, install) != 1 {
+			t.Fatalf("generated formula must contain exactly one %s install", app)
+		}
 	}
 
-	if macGuardAt > appInstallAt {
-		t.Fatal("generated formula installs GraithNotifier.app outside its OS.mac? guard")
-	}
-
-	if strings.Count(formula, `(libexec/"graith").install "GraithNotifier.app"`) != 1 {
-		t.Fatal("generated formula must contain exactly one notifier install")
+	for _, caveat := range []string{"gr-dev daemon restart", "gr-dev daemon service remove", "Before uninstalling on macOS"} {
+		if !strings.Contains(formula, caveat) {
+			t.Errorf("generated formula caveats missing %q", caveat)
+		}
 	}
 }
 

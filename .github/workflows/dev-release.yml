@@ -37,6 +37,66 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # graith and graith-dev share one per-user Service Management registry.
+      # Sign both channels with the same fixed Developer ID requirement so a
+      # stable CLI can authenticate and reconcile the isolated dev profile.
+      - name: Configure fail-closed macOS service signing
+        env:
+          MACOS_SIGNING_CERTIFICATE: ${{ secrets.MACOS_SIGNING_CERTIFICATE }}
+          MACOS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGNING_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          MACOS_SIGNING_TEAM_ID: ${{ secrets.MACOS_SIGNING_TEAM_ID }}
+          MACOS_SIGNING_REQUIREMENT: ${{ secrets.MACOS_SIGNING_REQUIREMENT }}
+          APPLE_NOTARY_PRIVATE_KEY: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          missing=""
+          for name in MACOS_SIGNING_CERTIFICATE MACOS_SIGNING_CERTIFICATE_PASSWORD \
+            MACOS_SIGNING_IDENTITY MACOS_SIGNING_TEAM_ID MACOS_SIGNING_REQUIREMENT \
+            APPLE_NOTARY_PRIVATE_KEY APPLE_NOTARY_KEY_ID APPLE_NOTARY_ISSUER_ID; do
+            [ -n "${!name}" ] || missing="${missing:+${missing} }${name}"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Darwin dev artifacts require signing and notarization; missing: $missing"
+            exit 1
+          fi
+
+          keychain="$RUNNER_TEMP/graith-dev-release.keychain-db"
+          certificate="$RUNNER_TEMP/graith-dev-release.p12"
+          notary_key="$RUNNER_TEMP/AuthKey-dev.p8"
+          keychain_password="$(openssl rand -hex 24)"
+          printf '%s' "$MACOS_SIGNING_CERTIFICATE" | base64 --decode > "$certificate"
+          printf '%s' "$APPLE_NOTARY_PRIVATE_KEY" > "$notary_key"
+          chmod 600 "$certificate" "$notary_key"
+
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -k "$keychain" \
+            -P "$MACOS_SIGNING_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security default-keychain -d user -s "$keychain"
+
+          xcrun notarytool store-credentials graith-dev-release \
+            --key "$notary_key" \
+            --key-id "$APPLE_NOTARY_KEY_ID" \
+            --issuer "$APPLE_NOTARY_ISSUER_ID"
+
+          requirement_b64="$(printf '%s' "$MACOS_SIGNING_REQUIREMENT" | base64 | tr -d '\n')"
+          {
+            echo "GRAITH_RELEASE_KEYCHAIN=$keychain"
+            echo "GRAITH_MACOS_SIGNING_IDENTITY=$MACOS_SIGNING_IDENTITY"
+            echo "GRAITH_SIGNING_TEAM_ID=$MACOS_SIGNING_TEAM_ID"
+            echo "GRAITH_SIGNING_REQUIREMENT=$MACOS_SIGNING_REQUIREMENT"
+            echo "GRAITH_SIGNING_REQUIREMENT_B64=$requirement_b64"
+            echo "GRAITH_NOTARY_PROFILE=graith-dev-release"
+            echo "GRAITH_SIGNED_SNAPSHOT=true"
+          } >> "$GITHUB_ENV"
+
       - name: Remove dev tag so GoReleaser sees the last semver tag
         run: git tag -d dev 2>/dev/null || true
 
@@ -61,19 +121,25 @@ jobs:
           for archive in "${darwin_archives[@]}"; do
             unpacked="$(mktemp -d)"
             tar -xzf "$archive" -C "$unpacked"
-            app="$unpacked/GraithNotifier.app"
-            notifier="$app/Contents/MacOS/graith-notifier"
+            notifier_app="$unpacked/GraithNotifier.app"
+            notifier="$notifier_app/Contents/MacOS/graith-notifier"
+            service_app="$unpacked/Graith.app"
 
-            test -d "$app"
+            test -d "$notifier_app"
             test -x "$notifier"
             lipo "$notifier" -verify_arch arm64 x86_64
-            codesign --verify --deep --strict "$app"
+            codesign --verify --deep --strict "$notifier_app"
+            test -d "$service_app"
+            test -x "$service_app/Contents/MacOS/gr"
+            cmp "$unpacked/gr-dev" "$service_app/Contents/MacOS/gr"
+            macos/service/verify-release-archive.sh \
+              "$archive" "$archive.service-verified.txt" true
           done
 
           for archive in "${linux_archives[@]}"; do
             contents="$(tar -tzf "$archive")"
-            if grep -q 'GraithNotifier.app' <<< "$contents"; then
-              echo "::error::Linux dev archive unexpectedly contains GraithNotifier.app: $archive"
+            if grep -Eq 'Graith(Notifier)?\.app' <<< "$contents"; then
+              echo "::error::Linux dev archive unexpectedly contains a macOS app: $archive"
               exit 1
             fi
           done
@@ -153,7 +219,18 @@ jobs:
               bin.install "gr-dev"
               if OS.mac?
                 (libexec/"graith").install "GraithNotifier.app"
+                (libexec/"graith").install "Graith.app"
               end
+            end
+
+            def caveats
+              <<~EOS
+                To restart the graith-dev daemon after upgrading:
+                  gr-dev daemon restart
+
+                Before uninstalling on macOS, remove its registered user service:
+                  gr-dev daemon service remove
+              EOS
             end
           end
           FORMULA
@@ -167,3 +244,10 @@ jobs:
           git add graith-dev.rb
           git diff --cached --quiet || git commit -m "chore: update graith-dev to ${VERSION}"
           git push
+
+      - name: Remove temporary macOS signing keychain
+        if: always()
+        run: |
+          if [ -n "${GRAITH_RELEASE_KEYCHAIN:-}" ]; then
+            security delete-keychain "$GRAITH_RELEASE_KEYCHAIN" || true
+          fi

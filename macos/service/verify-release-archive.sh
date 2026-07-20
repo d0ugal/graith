@@ -8,9 +8,11 @@ set -euo pipefail
 archive="$1"
 verification="$2"
 snapshot="$3"
+signed_snapshot="${GRAITH_SIGNED_SNAPSHOT:-false}"
 
 [ -f "$archive" ] || { echo "Darwin release archive is missing: $archive" >&2; exit 1; }
 case "$snapshot" in true|false) ;; *) echo "invalid snapshot marker: $snapshot" >&2; exit 1 ;; esac
+case "$signed_snapshot" in true|false) ;; *) echo "invalid signed snapshot marker: $signed_snapshot" >&2; exit 1 ;; esac
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
@@ -24,8 +26,8 @@ info_files="$(find "$scratch" -type f -path '*/Graith.app/Contents/Info.plist' -
 info="$info_files"
 app="$(dirname "$(dirname "$info")")"
 
-standalone_files="$(find "$scratch" -type f -name gr ! -path '*/Graith.app/*' -print)"
-[ "$(printf '%s\n' "$standalone_files" | grep -c .)" -eq 1 ] || { echo "$archive has an ambiguous standalone gr" >&2; exit 1; }
+standalone_files="$(find "$scratch" -type f \( -name gr -o -name gr-dev \) ! -path '*/Graith.app/*' -print)"
+[ "$(printf '%s\n' "$standalone_files" | grep -c .)" -eq 1 ] || { echo "$archive has an ambiguous standalone Graith CLI" >&2; exit 1; }
 standalone="$standalone_files"
 
 [ "$(find "$app/Contents/Library/LaunchAgents" -type f -name '*.plist' | wc -l | tr -d ' ')" -eq 65 ] || { echo "$archive does not contain the complete signed service slot set" >&2; exit 1; }
@@ -34,7 +36,7 @@ cmp "$standalone" "$app/Contents/MacOS/gr"
 codesign --verify --deep --strict --verbose=2 "$app"
 
 verification_kind="development-structure"
-if [ "$snapshot" = false ]; then
+if [ "$snapshot" = false ] || [ "$signed_snapshot" = true ]; then
 	: "${GRAITH_SIGNING_TEAM_ID:?missing GRAITH_SIGNING_TEAM_ID}"
 	: "${GRAITH_SIGNING_REQUIREMENT:?missing GRAITH_SIGNING_REQUIREMENT}"
 
