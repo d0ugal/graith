@@ -1,6 +1,7 @@
 package release
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -280,7 +281,7 @@ func TestServiceReleaseHookSeparatesSignedSnapshotsAndBuildIdentities(t *testing
 
 	text := string(data)
 	for _, required := range []string{
-		"GRAITH_SIGNED_SNAPSHOT", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT",
+		"GRAITH_SIGNED_SNAPSHOT", "include_service", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT",
 		"GRAITH_BUNDLE_BUILD_NUMBER", "GRAITH_MACOS_SIGNING_IDENTITY",
 	} {
 		if !strings.Contains(text, required) {
@@ -290,6 +291,58 @@ func TestServiceReleaseHookSeparatesSignedSnapshotsAndBuildIdentities(t *testing
 
 	if !strings.Contains(text, `[ "$snapshot" = true ] && [ "$signed_snapshot" = false ]`) {
 		t.Fatal("service release hook no longer limits ad-hoc signing to unsigned snapshots")
+	}
+}
+
+func TestServiceReleaseHookCanOmitDevServiceBundle(t *testing.T) {
+	root := serviceRepoRoot(t)
+
+	hook, err := os.ReadFile(filepath.Join(root, "macos", "service", "release-hook.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	work := t.TempDir()
+	hookPath := filepath.Join(work, "release-hook.sh")
+	writeTestExecutable(t, hookPath, hook)
+
+	buildMarker := filepath.Join(work, "build-ran")
+	writeTestExecutable(t, filepath.Join(work, "build.sh"), []byte("#!/bin/sh\ntouch \"$BUILD_MARKER\"\n"))
+
+	staleOutput := filepath.Join(work, "macos", "build", "service-release-arm64")
+	if err := os.MkdirAll(staleOutput, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(staleOutput, "Graith.app"), []byte("dreich\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	artifact := filepath.Join(work, "gr-dev")
+	writeTestExecutable(t, artifact, []byte("canny\n"))
+	command := exec.Command(hookPath, artifact, "darwin_arm64", "0.70.0-dev.1", "braw", "true", "false")
+	command.Dir = work
+	command.Env = []string{"PATH=" + os.Getenv("PATH"), "BUILD_MARKER=" + buildMarker}
+
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("release hook: %v: %s", err, output)
+	}
+
+	if _, err := os.Stat(buildMarker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy release unexpectedly ran service build: %v", err)
+	}
+
+	if _, err := os.Stat(staleOutput); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy release retained stale service output: %v", err)
+	}
+
+	data, err := os.ReadFile(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(data) != "canny\n" {
+		t.Fatalf("legacy release changed standalone artifact: %q", data)
 	}
 }
 

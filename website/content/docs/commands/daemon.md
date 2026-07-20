@@ -84,11 +84,14 @@ registered at once (running or dormant); remove a dormant profile service to
 free a slot. A supported package at capacity fails instead of falling back to a
 directly spawned daemon.
 
-The Homebrew `graith-dev` package uses the same signed service identity but an
-isolated `dev` profile and service slot, so it can coexist with stable Graith.
-After upgrading it, run `gr-dev daemon restart`; before uninstalling it, run
-`gr-dev daemon service remove`. macOS 11/12, source builds, `go install`, and
-Linux keep the direct-spawn behavior. `gr doctor` reports which mode is active.
+A Homebrew `graith-dev` package that includes the signed `Graith.app` uses the
+same service identity but an isolated `dev` profile and service slot, so it can
+coexist with stable Graith. A transitional dev package without that bundle
+retains the previous direct-spawn behavior rather than installing an unsigned
+service app. After upgrading a managed dev package, run `gr-dev daemon restart`;
+before uninstalling it, run `gr-dev daemon service remove`. macOS 11/12, source
+builds, `go install`, and Linux keep the direct-spawn behavior. `gr doctor`
+reports which mode is active.
 
 ### `gr daemon service status`
 

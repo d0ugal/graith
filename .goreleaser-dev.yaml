@@ -36,17 +36,17 @@ builds:
       - -s -w
       - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
       - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
-      - -X github.com/d0ugal/graith/internal/daemonservice.ManagedBuild=true
+      - -X github.com/d0ugal/graith/internal/daemonservice.ManagedBuild={{ if eq (index .Env "GRAITH_MANAGED_DEV_RELEASE") "true" }}true{{ else }}false{{ end }}
       - -X github.com/d0ugal/graith/internal/daemonservice.DevelopmentBuild=false
-      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedTeamID={{ .Env.GRAITH_SIGNING_TEAM_ID }}
-      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedRequirementBase64={{ .Env.GRAITH_SIGNING_REQUIREMENT_B64 }}
-    # Dev artifacts use the same Developer ID requirement as stable Graith so
-    # their isolated `dev` profile can safely share the global service registry.
-    # GRAITH_SIGNED_SNAPSHOT makes this snapshot take the distribution-signed
-    # path in the common hook instead of producing a local ad-hoc app.
+      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedTeamID={{ if eq (index .Env "GRAITH_MANAGED_DEV_RELEASE") "true" }}{{ index .Env "GRAITH_SIGNING_TEAM_ID" }}{{ end }}
+      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedRequirementBase64={{ if eq (index .Env "GRAITH_MANAGED_DEV_RELEASE") "true" }}{{ index .Env "GRAITH_SIGNING_REQUIREMENT_B64" }}{{ end }}
+    # Provisioned dev artifacts use the same Developer ID requirement as stable
+    # Graith so their isolated `dev` profile can safely share the global service
+    # registry. Without the complete credential set, the workflow stamps this
+    # binary as unmanaged and the hook omits Graith.app entirely.
     hooks:
       post:
-        - cmd: macos/service/release-hook.sh "{{ .Path }}" "{{ .Target }}" "{{ .Version }}" "{{ .Commit }}" "{{ .IsSnapshot }}"
+        - cmd: macos/service/release-hook.sh "{{ .Path }}" "{{ .Target }}" "{{ .Version }}" "{{ .Commit }}" "{{ .IsSnapshot }}" "{{ if eq (index .Env "GRAITH_MANAGED_DEV_RELEASE") "true" }}true{{ else }}false{{ end }}"
           output: true
     goos:
       - darwin
@@ -73,8 +73,9 @@ archives:
       - LICENSE
       - README.md
       - CHANGELOG.md
-      # Keep the bundle layout identical to production. GoReleaser strips the
-      # common Contents/ prefix from this glob before applying dst.
+      # Keep the managed bundle layout identical to production. GoReleaser
+      # accepts this empty glob when signing is not yet provisioned and the
+      # release hook deliberately omits the service app.
       - src: macos/build/GraithNotifier.app/**/*
         dst: GraithNotifier.app/Contents
       - src: macos/build/service-release-{{ .Arch }}/Graith.app/**/*
