@@ -481,6 +481,7 @@ func requestUpgrade(ctx context.Context, c *Client) (bool, bool, error) {
 
 	if preflight.Type != "upgrade_preflight_ok" {
 		message := "daemon rejected upgrade preflight"
+
 		if preflight.Type == "error" {
 			var preflightErr protocol.ErrorMsg
 			if protocol.DecodePayload(preflight, &preflightErr) == nil && preflightErr.Message != "" {

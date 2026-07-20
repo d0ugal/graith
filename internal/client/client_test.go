@@ -289,6 +289,7 @@ func TestRequestUpgradeUsesExactPreflightBeforeMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !requested {
 		t.Fatal("upgrade was acknowledged but not reported as requested")
 	}
@@ -343,6 +344,7 @@ func TestRequestUpgradeNegotiationFloorCoversHealthyAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("healthy delayed upgrade negotiation failed: %v", err)
 	}
+
 	if !requested {
 		t.Fatal("healthy delayed upgrade was not reported as requested")
 	}
@@ -384,6 +386,7 @@ func TestRequestUpgradeRefusalNeverSendsMutatingRequest(t *testing.T) {
 	if err == nil {
 		t.Fatal("preflight refusal was accepted")
 	}
+
 	if requested {
 		t.Fatal("preflight refusal was reported as a requested upgrade")
 	}
@@ -1030,6 +1033,7 @@ func TestRequestUpgradeReportsDaemonOutcomes(t *testing.T) {
 				if err == nil {
 					err = protocol.NewFrameWriter(serverConn).WriteFrame(protocol.ChannelControl, preflightOK)
 				}
+
 				if err != nil {
 					serverErr <- err
 

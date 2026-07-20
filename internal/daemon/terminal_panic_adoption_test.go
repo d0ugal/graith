@@ -63,6 +63,7 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := badR.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +83,7 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := goodR.Close(); err != nil {
 		t.Fatal(err)
 	}

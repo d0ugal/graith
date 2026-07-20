@@ -19,7 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 23
+const CurrentStateVersion = 24
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -745,6 +745,7 @@ var migrations = map[int]func(*State) error{
 	20: migrateV20ToV21,
 	21: migrateV21ToV22,
 	22: migrateV22ToV23,
+	23: migrateV23ToV24,
 }
 
 func generateToken() (string, error) {
@@ -970,15 +971,22 @@ func migrateV20ToV21(state *State) error {
 // render metadata; their persisted runtime names remain authoritative.
 func migrateV21ToV22(_ *State) error { return nil }
 
-// migrateV22ToV23 clears persisted agent status from the approval-era format
-// and initializes exact process identities awaiting post-upgrade cleanup.
+// migrateV22ToV23 clears persisted agent status from the approval-era format.
 // Agent status is runtime-only in the new model and will be rebuilt from fresh
-// hook reports or PTY state. The cleanup map prevents an older daemon from
-// ignoring that ownership field and erasing it on its next save.
+// hook reports or PTY state.
 func migrateV22ToV23(state *State) error {
 	for _, s := range state.Sessions {
 		s.AgentStatus = ""
 	}
+
+	return nil
+}
+
+// migrateV23ToV24 initializes exact process identities awaiting post-upgrade
+// cleanup. This must remain a distinct version from main's v23 agent-status
+// migration so a v23 binary refuses the state instead of loading and erasing
+// cleanup ownership it does not understand.
+func migrateV23ToV24(state *State) error {
 	if state.UpgradeCleanup == nil {
 		state.UpgradeCleanup = make(map[string]UpgradeCleanupState)
 	}

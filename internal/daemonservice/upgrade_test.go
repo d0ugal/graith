@@ -95,6 +95,39 @@ func newManagedUpgradeFixture(t *testing.T, profile, slot string) managedUpgrade
 	}
 }
 
+func (fixture managedUpgradeFixture) retainedEnvironment() retainedAdoptionEnvironment {
+	return retainedAdoptionEnvironment{
+		uid: fixture.environment.uid, receiptRoot: fixture.environment.receiptRoot,
+		pid: fixture.environment.pid, validate: fixture.validate,
+	}
+}
+
+func bundlePayload(bundle ValidatedBundle) string {
+	return filepath.Join(bundle.AppPath, "Contents", "MacOS", DaemonExecutable)
+}
+
+func assertFixtureRunningGeneration(t *testing.T, fixture managedUpgradeFixture, want string) {
+	t.Helper()
+
+	receipt, err := fixture.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fixture.profile == "" {
+		if receipt.Default.RunningGeneration != want || receipt.Default.RunningPID != fixture.environment.pid {
+			t.Fatalf("default running state = %#v", receipt.Default)
+		}
+
+		return
+	}
+
+	lease := receipt.Leases[fixture.profile]
+	if lease.RunningGeneration != want || lease.RunningPID != fixture.environment.pid {
+		t.Fatalf("named running state = %#v", lease)
+	}
+}
+
 func TestManagedUpgradeChangesAndRollsBackOnlyItsProfile(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -174,12 +207,15 @@ func TestRunningManagedProcessRejectsStaleOrForeignIdentity(t *testing.T) {
 
 	retainedExecutable := filepath.Join(t.TempDir(), "gr")
 	auldPayload := filepath.Join(fixture.auld.AppPath, "Contents", "MacOS", DaemonExecutable)
+
 	auldContents, err := os.ReadFile(auldPayload)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(retainedExecutable, auldContents, 0o755); err != nil { // #nosec G306 -- retained executable identity fixture.
+	// retainedExecutable is rooted in t.TempDir and deliberately executable so
+	// the path-identity fixture matches a retained upgrade image.
+	if err := os.WriteFile(retainedExecutable, auldContents, 0o755); err != nil { //nolint:gosec // G306,G703: private test fixture.
 		t.Fatal(err)
 	}
 
@@ -221,6 +257,128 @@ func TestRetainedAdoptedServiceAcceptsValidatedCandidateWithoutCurrentPathMatch(
 			if err != nil || got != fixture.definition {
 				t.Fatalf("validateRetainedAdoptedService() = (%#v, %v)", got, err)
 			}
+		})
+	}
+}
+
+func TestPrepareRetainedManagedUpgradeStagesNextGenerationAndRollsBack(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		profile string
+		slot    string
+	}{
+		{name: "default", slot: DefaultSlot},
+		{name: "named", profile: "canny", slot: "07"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newManagedUpgradeFixture(t, test.profile, test.slot)
+
+			definition, rollback, err := prepareRetainedManagedUpgrade(
+				fixture.definition.Label,
+				fixture.definition.Slot,
+				fixture.profile,
+				bundlePayload(fixture.auld),
+				bundlePayload(fixture.newer),
+				fixture.retainedEnvironment(),
+			)
+			if err != nil || rollback == nil || definition != fixture.definition {
+				t.Fatalf("prepareRetainedManagedUpgrade() = (%#v, rollback set %t, %v)", definition, rollback != nil, err)
+			}
+
+			assertFixtureRunningGeneration(t, fixture, fixture.newer.Generation.ID)
+
+			if err := rollback(); err != nil {
+				t.Fatal(err)
+			}
+
+			assertFixtureRunningGeneration(t, fixture, fixture.auld.Generation.ID)
+		})
+	}
+}
+
+func TestPrepareRetainedManagedUpgradeFailsClosed(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(
+			t *testing.T,
+			fixture managedUpgradeFixture,
+			environment *retainedAdoptionEnvironment,
+			label, slot, profile, current, next *string,
+		)
+		want string
+	}{
+		{
+			name: "wrong marker",
+			edit: func(_ *testing.T, _ managedUpgradeFixture, _ *retainedAdoptionEnvironment, label, _, _, _, _ *string) {
+				*label = "net.graith.daemon.profile.08"
+			},
+			want: "does not match slot",
+		},
+		{
+			name: "wrong profile",
+			edit: func(_ *testing.T, _ managedUpgradeFixture, _ *retainedAdoptionEnvironment, _, _, profile, _, _ *string) {
+				*profile = "dreich"
+			},
+			want: "lease does not match",
+		},
+		{
+			name: "wrong pid",
+			edit: func(_ *testing.T, _ managedUpgradeFixture, environment *retainedAdoptionEnvironment, _, _, _, _, _ *string) {
+				environment.pid++
+			},
+			want: "running PID",
+		},
+		{
+			name: "wrong current path",
+			edit: func(_ *testing.T, fixture managedUpgradeFixture, _ *retainedAdoptionEnvironment, _, _, _, current, _ *string) {
+				*current = bundlePayload(fixture.newer)
+			},
+			want: "not the validated running",
+		},
+		{
+			name: "wrong next candidate",
+			edit: func(t *testing.T, _ managedUpgradeFixture, _ *retainedAdoptionEnvironment, _, _, _, _, next *string) {
+				path := filepath.Join(t.TempDir(), "gr")
+				if err := os.WriteFile(path, []byte("thrawn payload"), 0o755); err != nil { //nolint:gosec // G306,G703: private rejection fixture.
+					t.Fatal(err)
+				}
+
+				*next = path
+			},
+			want: "not a recorded cached",
+		},
+		{
+			name: "missing receipt",
+			edit: func(t *testing.T, _ managedUpgradeFixture, environment *retainedAdoptionEnvironment, _, _, _, _, _ *string) {
+				environment.receiptRoot = func(int) (string, error) {
+					return filepath.Join(t.TempDir(), "missing"), nil
+				}
+			},
+			want: "load managed daemon service receipt",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newManagedUpgradeFixture(t, "canny", "07")
+			environment := fixture.retainedEnvironment()
+			label, slot, profile := fixture.definition.Label, fixture.definition.Slot, fixture.profile
+			current, next := bundlePayload(fixture.auld), bundlePayload(fixture.newer)
+
+			test.edit(t, fixture, &environment, &label, &slot, &profile, &current, &next)
+
+			definition, rollback, err := prepareRetainedManagedUpgrade(
+				label, slot, profile, current, next, environment,
+			)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("prepareRetainedManagedUpgrade() error = %v, want containing %q", err, test.want)
+			}
+
+			if definition != (Definition{}) || rollback != nil {
+				t.Fatalf("failed retained preparation returned definition %#v or rollback=%t", definition, rollback != nil)
+			}
+
+			assertFixtureRunningGeneration(t, fixture, fixture.auld.Generation.ID)
 		})
 	}
 }
@@ -430,7 +588,6 @@ func TestRunningGenerationRemainsProfileIsolated(t *testing.T) {
 	if receipt.Default.RunningGeneration != "" || receipt.Leases["canny"].RunningGeneration != "2-canny" {
 		t.Fatalf("running generations crossed profiles: %#v", receipt)
 	}
-
 }
 
 func TestSourceUpgradeCandidateKeepsDirectSpawnPath(t *testing.T) {

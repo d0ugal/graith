@@ -80,6 +80,7 @@ var daemonStartCmd = &cobra.Command{
 			if !ok {
 				return errors.New("daemon adoption is missing its scoped service identity")
 			}
+
 			if identity == (daemon.AdoptedServiceIdentity{}) {
 				return errors.New("daemon adoption has an invalid scoped service identity")
 			}

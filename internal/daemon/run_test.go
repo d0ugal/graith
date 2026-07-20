@@ -45,9 +45,11 @@ func TestResolvedUpgradeSnapshotPathsDoesNotRetainRemovedDataDir(t *testing.T) {
 
 func TestValidateAdoptedServiceIdentity(t *testing.T) {
 	original := validateRetainedAdoptedService
+
 	t.Cleanup(func() { validateRetainedAdoptedService = original })
 
 	var calls int
+
 	validateRetainedAdoptedService = func(label, slot, profile, candidatePath string) (daemonservice.Definition, error) {
 		calls++
 
@@ -139,14 +141,17 @@ func TestRunCleansUpgradeProcessesWhenBootstrapFails(t *testing.T) {
 		ScrollbackFd: openUpgradeScrollbackFD(t, filepath.Join(dir, "thrawn.log")),
 		PID:          pid, PIDStartTime: start,
 	}})
+
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	executableInfo, err := os.Stat(executable)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	manifest.Target = UpgradeTargetDescriptor{
 		ResolvedPath: executable,
 		Size:         executableInfo.Size(),

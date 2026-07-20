@@ -962,6 +962,7 @@ func (sm *SessionManager) adoptSessions(
 				current.StatusChangedAt = time.Now()
 				if cleaned {
 					current.PID = 0
+
 					current.PIDStartTime = 0
 					if !current.IsSoftDeleted() {
 						current.Status = StatusStopped

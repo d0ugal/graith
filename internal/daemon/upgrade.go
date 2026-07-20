@@ -264,12 +264,30 @@ type preparedUpgradeRollback struct {
 	err  error
 }
 
+// retainedManagedUpgradeOrigin is authenticated during post-exec adoption and
+// kept only for the lifetime of that daemon generation. It lets a daemon whose
+// Darwin image is a private retained copy stage the next managed generation
+// without weakening path-strict validation for fresh service processes.
+type retainedManagedUpgradeOrigin struct {
+	label                string
+	slot                 string
+	currentCandidatePath string
+}
+
 var (
-	prepareManagedUpgradeForExec = daemonservice.PrepareManagedUpgrade
-	execProcessForUpgrade        = syscall.Exec
+	prepareManagedUpgradeForExec         = daemonservice.PrepareManagedUpgrade
+	prepareRetainedManagedUpgradeForExec = daemonservice.PrepareRetainedManagedUpgrade
+	execProcessForUpgrade                = syscall.Exec
 )
 
 func prepareExecUpgrade(profile, clientExecPath string) (preparedExecUpgrade, error) {
+	return prepareExecUpgradeWithOrigin(profile, clientExecPath, nil)
+}
+
+func prepareExecUpgradeWithOrigin(
+	profile, clientExecPath string,
+	origin *retainedManagedUpgradeOrigin,
+) (preparedExecUpgrade, error) {
 	execPath := clientExecPath
 	if execPath != "" {
 		if _, err := os.Stat(execPath); err != nil {
@@ -286,10 +304,26 @@ func prepareExecUpgrade(profile, clientExecPath string) (preparedExecUpgrade, er
 		}
 	}
 
-	definition, rollback, managed, err := prepareManagedUpgradeForExec(profile, execPath)
+	var (
+		definition daemonservice.Definition
+		rollback   func() error
+		managed    bool
+		err        error
+	)
+
+	if origin == nil {
+		definition, rollback, managed, err = prepareManagedUpgradeForExec(profile, execPath)
+	} else {
+		definition, rollback, err = prepareRetainedManagedUpgradeForExec(
+			origin.label, origin.slot, profile, origin.currentCandidatePath, execPath,
+		)
+		managed = true
+	}
+
 	if err != nil {
 		return preparedExecUpgrade{}, fmt.Errorf("validate managed upgrade: %w", err)
 	}
+
 	if managed {
 		if rollback == nil {
 			return preparedExecUpgrade{}, errors.New("validate managed upgrade: rollback is missing")
@@ -810,6 +844,7 @@ func (sm *SessionManager) prepareUpgrade(
 	}
 
 	activeTerminals := 0
+
 	for _, item := range candidates {
 		if item.driver.Exited() {
 			continue
@@ -871,6 +906,7 @@ func (sm *SessionManager) prepareUpgrade(
 	fds := make([]int, 0, len(manifest.Sessions)*2+1)
 
 	fds = append(fds, int(listenerFd))
+
 	for _, session := range manifest.Sessions {
 		if !upgradeSessionHasPTY(session) {
 			continue
@@ -900,6 +936,7 @@ func (sm *SessionManager) prepareUpgrade(
 	sm.mu.RLock()
 
 	unchanged := !requireReservation || sm.upgradePending
+
 	for _, item := range candidates {
 		if item.driver.Exited() {
 			continue
@@ -1014,6 +1051,7 @@ func (sm *SessionManager) preflightUpgradeSessions(maxSessions int) error {
 
 	identities := make([]UpgradeSession, 0, len(candidates))
 	terminalCount := 0
+
 	for _, item := range candidates {
 		if item.driver.Exited() {
 			continue
@@ -2616,6 +2654,7 @@ func readInheritedOwnershipCapsule(raw string) (*UpgradeManifest, error) {
 
 		fdWord := binary.BigEndian.Uint32(data[offset : offset+4])
 		fd := -1
+
 		hasPTY := fdWord != math.MaxUint32
 		if hasPTY {
 			fd = int(fdWord)
@@ -3019,9 +3058,11 @@ func (g *upgradeOwnershipGuard) refine(manifest *UpgradeManifest) error {
 
 	terminalCount := 0
 	scrollbackCount := 0
+
 	for _, session := range manifest.Sessions {
 		if upgradeSessionHasPTY(session) {
 			terminalCount++
+
 			if session.ScrollbackFd > 2 {
 				scrollbackCount++
 			}
@@ -3054,12 +3095,14 @@ func (g *upgradeOwnershipGuard) refine(manifest *UpgradeManifest) error {
 		if upgradeSessionHasPTY(session) {
 			nextFDs[session.ID] = session.Fd
 		}
+
 		nextSessions[upgradeCleanupKey(session)] = session
 	}
 
 	g.sessionFDs = nextFDs
 
 	nextScrollbackFDs := make(map[string]int, terminalCount)
+
 	for _, session := range manifest.Sessions {
 		if upgradeSessionHasPTY(session) && session.ScrollbackFd > 2 {
 			nextScrollbackFDs[session.ID] = session.ScrollbackFd
@@ -3838,6 +3881,7 @@ func validateAdoptionCapacity(manifest *UpgradeManifest) error {
 	}
 
 	terminalCount := 0
+
 	for _, session := range manifest.Sessions {
 		if upgradeSessionHasPTY(session) {
 			terminalCount++

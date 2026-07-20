@@ -81,6 +81,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) (
 	if adoptFrom != "" {
 		return errors.New("upgrade adoption requires an explicit service identity")
 	}
+
 	defer func() {
 		if err := daemonservice.MarkCurrentProcessStopped(paths.Profile); err != nil {
 			returnErr = errors.Join(returnErr, fmt.Errorf("clear daemon service running generation: %w", err))
@@ -98,7 +99,7 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) (
 
 	defer grpty.ClosePinnedTerminalExecutable()
 
-	return run(cfg, paths, effectiveConfigFile, adoptFrom, nil, nil)
+	return run(cfg, paths, effectiveConfigFile, adoptFrom, nil, nil, nil)
 }
 
 type adoptedServiceIdentityKind uint8
@@ -243,7 +244,15 @@ func runAdoptBootstrap(configFile, adoptFrom string, serviceIdentity AdoptedServ
 		paths = paths.WithDataDir(cfg.DataDir)
 	}
 
-	return run(cfg, paths, configFile, adoptFrom, manifest, ownership)
+	var managedOrigin *retainedManagedUpgradeOrigin
+	if serviceIdentity.kind == adoptedServiceIdentityManaged {
+		managedOrigin = &retainedManagedUpgradeOrigin{
+			label: serviceIdentity.label, slot: serviceIdentity.slot,
+			currentCandidatePath: manifest.Target.ResolvedPath,
+		}
+	}
+
+	return run(cfg, paths, configFile, adoptFrom, manifest, ownership, managedOrigin)
 }
 
 func validateAdoptedServiceIdentity(identity AdoptedServiceIdentity, profile, candidatePath string) error {
@@ -309,6 +318,7 @@ func run(
 	configFile, adoptFrom string,
 	manifest *UpgradeManifest,
 	ownership *upgradeOwnershipGuard,
+	managedOrigin *retainedManagedUpgradeOrigin,
 ) (returnErr error) {
 	defer grpty.ClosePinnedTerminalExecutable()
 
@@ -886,7 +896,7 @@ func run(
 			returnErr = errors.Join(returnErr, target.pin.close())
 		}()
 
-		preparedService, err := prepareExecUpgrade(paths.Profile, target.path)
+		preparedService, err := prepareExecUpgradeWithOrigin(paths.Profile, target.path, managedOrigin)
 		if err != nil {
 			return fail(err.Error(), err)
 		}

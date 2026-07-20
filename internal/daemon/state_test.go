@@ -961,7 +961,7 @@ func TestMigrateV22ToV23ClearsRuntimeAgentStatus(t *testing.T) {
 			"braw":  {ID: "braw", AgentStatus: "ready"},
 		},
 	}
-	if err := migrateState(state); err != nil {
+	if err := migrateV22ToV23(state); err != nil {
 		t.Fatal(err)
 	}
 
@@ -972,6 +972,22 @@ func TestMigrateV22ToV23ClearsRuntimeAgentStatus(t *testing.T) {
 	if got := state.Sessions["braw"].AgentStatus; got != "" {
 		t.Fatalf("migrated ready status = %q, want empty", got)
 	}
+
+	if state.UpgradeCleanup != nil {
+		t.Fatal("v22 to v23 migration initialized v24 upgrade cleanup state")
+	}
+}
+
+func TestMigrateV23ToV24InitializesUpgradeCleanup(t *testing.T) {
+	state := &State{Version: 23}
+	if err := migrateState(state); err != nil {
+		t.Fatal(err)
+	}
+
+	if state.Version != 24 {
+		t.Fatalf("migrated version = %d, want 24", state.Version)
+	}
+
 	if state.UpgradeCleanup == nil {
 		t.Fatal("migrated upgrade cleanup registry is nil")
 	}
@@ -980,8 +996,65 @@ func TestMigrateV22ToV23ClearsRuntimeAgentStatus(t *testing.T) {
 	if err := migrateState(state); err != nil {
 		t.Fatalf("repeat migrateState: %v", err)
 	}
+
 	if got := state.UpgradeCleanup["croft"]; got.PID != 42 || got.PIDStartTime != 84 {
 		t.Fatalf("repeat migration changed upgrade cleanup identity: %+v", got)
+	}
+}
+
+func TestMigrateV23ToV24PreservesPopulatedUpgradeCleanup(t *testing.T) {
+	want := UpgradeCleanupState{ID: "bothy", PID: 42, PIDStartTime: 84}
+
+	state := &State{
+		Version:        23,
+		UpgradeCleanup: map[string]UpgradeCleanupState{"bothy": want},
+	}
+	if err := migrateState(state); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := state.UpgradeCleanup["bothy"]; got != want {
+		t.Fatalf("populated v23 cleanup identity = %+v, want %+v", got, want)
+	}
+}
+
+func TestMigrateV22ToCurrentAppliesBothMigrations(t *testing.T) {
+	state := &State{
+		Version: 22,
+		Sessions: map[string]*SessionState{
+			"thrawn": {ID: "thrawn", AgentStatus: "active"},
+		},
+	}
+	if err := migrateState(state); err != nil {
+		t.Fatal(err)
+	}
+
+	if state.Version != CurrentStateVersion {
+		t.Fatalf("migrated version = %d, want %d", state.Version, CurrentStateVersion)
+	}
+
+	if got := state.Sessions["thrawn"].AgentStatus; got != "" {
+		t.Fatalf("migrated agent status = %q, want empty", got)
+	}
+
+	if state.UpgradeCleanup == nil {
+		t.Fatal("full migration chain left upgrade cleanup registry nil")
+	}
+}
+
+func TestStateMigrationsRegisteredSequentially(t *testing.T) {
+	if CurrentStateVersion != 24 {
+		t.Fatalf("CurrentStateVersion = %d, want 24", CurrentStateVersion)
+	}
+
+	if len(migrations) != CurrentStateVersion {
+		t.Fatalf("registered migrations = %d, want %d", len(migrations), CurrentStateVersion)
+	}
+
+	for version := range CurrentStateVersion {
+		if migrations[version] == nil {
+			t.Fatalf("migration v%d to v%d is not registered", version, version+1)
+		}
 	}
 }
 

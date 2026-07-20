@@ -263,6 +263,7 @@ func TestPreparedUpgradeAddsManagedIdentityAndRollsBackExecFailure(t *testing.T)
 	}
 
 	target := &upgradeTarget{path: executable, pin: &upgradeTargetPin{execPath: executable}}
+
 	err = prepared.rollbackError(execUpgradeTarget(
 		target, "/bothy/manifest.json", "/bothy/config.toml", -1, "", prepared,
 	))
@@ -285,6 +286,7 @@ func TestPreparedUpgradeAddsManagedIdentityAndRollsBackExecFailure(t *testing.T)
 	}
 
 	_ = prepared.rollbackError(errors.New("second failure"))
+
 	if rollbackCalls != 1 {
 		t.Fatalf("idempotent rollback calls = %d, want 1", rollbackCalls)
 	}
@@ -323,6 +325,81 @@ func TestPrepareExecUpgradeRejectsBeforeExec(t *testing.T) {
 
 	if validatedCandidate == "" || validatedCandidate == missing {
 		t.Fatalf("missing client candidate did not fall back to the daemon executable: %q", validatedCandidate)
+	}
+}
+
+func TestPrepareExecUpgradeUsesRetainedManagedOrigin(t *testing.T) {
+	originalPrepare := prepareManagedUpgradeForExec
+	originalRetained := prepareRetainedManagedUpgradeForExec
+
+	t.Cleanup(func() {
+		prepareManagedUpgradeForExec = originalPrepare
+		prepareRetainedManagedUpgradeForExec = originalRetained
+	})
+
+	ordinaryCalls := 0
+	prepareManagedUpgradeForExec = func(string, string) (daemonservice.Definition, func() error, bool, error) {
+		ordinaryCalls++
+
+		return daemonservice.Definition{}, nil, false, errors.New("ordinary preparation must not run")
+	}
+
+	executable := filepath.Join(t.TempDir(), "gr")
+	if err := os.WriteFile(executable, []byte("braw"), 0o755); err != nil { // #nosec G306 -- executable upgrade fixture.
+		t.Fatal(err)
+	}
+
+	definition, err := daemonservice.DefinitionForSlot("01")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	origin := &retainedManagedUpgradeOrigin{
+		label: definition.Label, slot: definition.Slot,
+		currentCandidatePath: "/bothy/current/Graith.app/Contents/MacOS/graith",
+	}
+	rollbackCalls := 0
+
+	prepareRetainedManagedUpgradeForExec = func(label, slot, profile, current, next string) (daemonservice.Definition, func() error, error) {
+		if label != origin.label || slot != origin.slot || profile != "canny" ||
+			current != origin.currentCandidatePath || next != executable {
+			t.Fatalf("retained preparation = (%q, %q, %q, %q, %q)", label, slot, profile, current, next)
+		}
+
+		return definition, func() error {
+			rollbackCalls++
+
+			return nil
+		}, nil
+	}
+
+	prepared, err := prepareExecUpgradeWithOrigin("canny", executable, origin)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !prepared.managed || prepared.definition != definition || ordinaryCalls != 0 {
+		t.Fatalf("prepared retained upgrade = %+v, ordinary calls = %d", prepared, ordinaryCalls)
+	}
+
+	_ = prepared.rollbackError(errors.New("dreich"))
+	_ = prepared.rollbackError(errors.New("second"))
+
+	if rollbackCalls != 1 {
+		t.Fatalf("retained rollback calls = %d, want 1", rollbackCalls)
+	}
+
+	wantErr := errors.New("receipt mismatch")
+	prepareRetainedManagedUpgradeForExec = func(string, string, string, string, string) (daemonservice.Definition, func() error, error) {
+		return daemonservice.Definition{}, nil, wantErr
+	}
+
+	if _, err := prepareExecUpgradeWithOrigin("canny", executable, origin); !errors.Is(err, wantErr) {
+		t.Fatalf("retained preparation error = %v, want %v", err, wantErr)
+	}
+
+	if ordinaryCalls != 0 {
+		t.Fatalf("failed retained preparation fell back to ordinary path %d times", ordinaryCalls)
 	}
 }
 

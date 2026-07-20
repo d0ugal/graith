@@ -196,6 +196,7 @@ func executeWithArgs(args []string) (err error) {
 	}
 
 	adoptManifestPath := adoptFromArgument(args)
+
 	var serviceBootstrap *daemonservice.Bootstrap
 
 	if serviceMarker && adoptManifestPath == "" {
@@ -225,6 +226,7 @@ func executeWithArgs(args []string) (err error) {
 	applyServiceBootstrapConfig(serviceBootstrap)
 
 	rootCtx := context.Background()
+
 	if adoptManifestPath != "" {
 		identity := daemon.NewUnmanagedAdoptedServiceIdentity()
 		if serviceMarker {

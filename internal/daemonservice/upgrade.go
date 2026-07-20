@@ -309,6 +309,29 @@ func ValidateRetainedAdoptedService(label, slot, profile, candidatePath string) 
 	})
 }
 
+// PrepareRetainedManagedUpgrade validates a previously adopted managed daemon
+// whose running image is an immutable retained copy, then stages the exact next
+// cached generation. currentCandidatePath is the manifest-bound original
+// payload for the running generation; the daemon layer remains responsible for
+// binding the retained running image to that manifest before calling here.
+//
+// Unlike PrepareManagedUpgrade, this function is always fail-closed: it is used
+// only after the caller has explicitly selected managed adoption, so missing or
+// mismatched receipt state is an error rather than an unmanaged fallback.
+func PrepareRetainedManagedUpgrade(
+	label, slot, profile, currentCandidatePath, nextCandidatePath string,
+) (Definition, func() error, error) {
+	return prepareRetainedManagedUpgrade(
+		label, slot, profile, currentCandidatePath, nextCandidatePath,
+		retainedAdoptionEnvironment{
+			uid:         os.Geteuid(),
+			receiptRoot: ReceiptRoot,
+			pid:         os.Getpid(),
+			validate:    validateRecordedGeneration,
+		},
+	)
+}
+
 type retainedAdoptionEnvironment struct {
 	uid         int
 	receiptRoot func(int) (string, error)
@@ -317,24 +340,60 @@ type retainedAdoptionEnvironment struct {
 }
 
 func validateRetainedAdoptedService(label, slot, profile, candidatePath string, environment retainedAdoptionEnvironment) (Definition, error) {
-	definition, err := ValidateMarker(label, slot)
+	process, err := retainedAdoptedManagedProcess(label, slot, profile, candidatePath, environment)
 	if err != nil {
 		return Definition{}, err
 	}
 
+	return process.Definition, nil
+}
+
+func prepareRetainedManagedUpgrade(
+	label, slot, profile, currentCandidatePath, nextCandidatePath string,
+	environment retainedAdoptionEnvironment,
+) (Definition, func() error, error) {
+	process, err := retainedAdoptedManagedProcess(label, slot, profile, currentCandidatePath, environment)
+	if err != nil {
+		return Definition{}, nil, err
+	}
+
+	definition, rollback, managed, err := prepareManagedUpgrade(
+		process, profile, nextCandidatePath, environment.validate, environment.pid,
+	)
+	if err != nil {
+		return Definition{}, nil, err
+	}
+
+	if !managed || rollback == nil {
+		return Definition{}, nil, errors.New("retained managed daemon upgrade transaction is incomplete")
+	}
+
+	return definition, rollback, nil
+}
+
+func retainedAdoptedManagedProcess(
+	label, slot, profile, candidatePath string,
+	environment retainedAdoptionEnvironment,
+) (ManagedProcess, error) {
+	definition, err := ValidateMarker(label, slot)
+	if err != nil {
+		return ManagedProcess{}, err
+	}
+
 	if err := ProfileForDefinition(definition, profile); err != nil {
-		return Definition{}, err
+		return ManagedProcess{}, err
 	}
 
 	root, err := environment.receiptRoot(environment.uid)
 	if err != nil {
-		return Definition{}, err
+		return ManagedProcess{}, err
 	}
 
 	store := ReceiptStore{Root: root, UID: environment.uid}
+
 	receipt, err := store.Load()
 	if err != nil {
-		return Definition{}, fmt.Errorf("load managed daemon service receipt for adoption: %w", err)
+		return ManagedProcess{}, fmt.Errorf("load managed daemon service receipt for adoption: %w", err)
 	}
 
 	var (
@@ -345,7 +404,7 @@ func validateRetainedAdoptedService(label, slot, profile, candidatePath string, 
 	if profile == "" {
 		registration := receipt.Default
 		if registration == nil || registration.Slot != definition.Slot || registration.Label != definition.Label {
-			return Definition{}, errors.New("managed daemon service default registration does not match adoption marker")
+			return ManagedProcess{}, errors.New("managed daemon service default registration does not match adoption marker")
 		}
 
 		generationID = registration.RunningGeneration
@@ -353,7 +412,7 @@ func validateRetainedAdoptedService(label, slot, profile, candidatePath string, 
 	} else {
 		lease, ok := receipt.Leases[profile]
 		if !ok || lease.Profile != profile || lease.Slot != definition.Slot {
-			return Definition{}, errors.New("managed daemon service lease does not match adoption marker and profile")
+			return ManagedProcess{}, errors.New("managed daemon service lease does not match adoption marker and profile")
 		}
 
 		generationID = lease.RunningGeneration
@@ -361,31 +420,37 @@ func validateRetainedAdoptedService(label, slot, profile, candidatePath string, 
 	}
 
 	if runningPID != environment.pid {
-		return Definition{}, errors.New("managed daemon service receipt running PID does not match current process")
+		return ManagedProcess{}, errors.New("managed daemon service receipt running PID does not match current process")
 	}
 
 	if generationID == "" {
-		return Definition{}, errors.New("managed daemon service receipt has no running generation")
+		return ManagedProcess{}, errors.New("managed daemon service receipt has no running generation")
 	}
 
 	generation, ok := receipt.Generations[generationID]
 	if !ok {
-		return Definition{}, fmt.Errorf("running daemon service generation %s is absent from receipt", generationID)
+		return ManagedProcess{}, fmt.Errorf("running daemon service generation %s is absent from receipt", generationID)
 	}
 
 	validated, err := environment.validate(generation)
 	if err != nil {
-		return Definition{}, fmt.Errorf("validate retained daemon service generation: %w", err)
+		return ManagedProcess{}, fmt.Errorf("validate retained daemon service generation: %w", err)
 	}
 
 	if !generationMatchesReceipt(generation, validated.Generation) {
-		return Definition{}, errors.New("validated retained daemon service generation does not match its receipt")
+		return ManagedProcess{}, errors.New("validated retained daemon service generation does not match its receipt")
 	}
 
 	payloadPath := filepath.Join(validated.AppPath, "Contents", "MacOS", DaemonExecutable)
 	if !sameExecutable(candidatePath, payloadPath) {
-		return Definition{}, errors.New("upgrade manifest candidate is not the validated running daemon service payload")
+		return ManagedProcess{}, errors.New("upgrade manifest candidate is not the validated running daemon service payload")
 	}
 
-	return definition, nil
+	return ManagedProcess{
+		Definition: definition,
+		Profile:    profile,
+		Generation: validated.Generation,
+		PID:        runningPID,
+		Store:      store,
+	}, nil
 }

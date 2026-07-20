@@ -25,7 +25,9 @@ func TestExecuteAdoptPassesScopedServiceIdentityWithoutLeakage(t *testing.T) {
 		adoptFrom = originalAdoptFrom
 		internalServiceLabel = originalLabel
 		internalServiceSlot = originalSlot
+
 		rootCmd.SetContext(originalRootContext)
+
 		daemonStartCmd.Flags().Lookup("adopt-from").Changed = originalAdoptChanged
 		daemonStartCmd.Flags().Lookup("internal-service-label").Changed = originalLabelChanged
 		daemonStartCmd.Flags().Lookup("internal-service-slot").Changed = originalSlotChanged
@@ -37,6 +39,7 @@ func TestExecuteAdoptPassesScopedServiceIdentityWithoutLeakage(t *testing.T) {
 	}
 
 	var invocations []invocation
+
 	runAdoptBootstrapForCLI = func(_ string, manifest string, identity daemon.AdoptedServiceIdentity) error {
 		invocations = append(invocations, invocation{manifest: manifest, identity: identity})
 
@@ -47,10 +50,12 @@ func TestExecuteAdoptPassesScopedServiceIdentityWithoutLeakage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	wantManaged, err := daemon.NewManagedAdoptedServiceIdentity(definition.Label, definition.Slot)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	wantUnmanaged := daemon.NewUnmanagedAdoptedServiceIdentity()
 
 	if err := executeWithArgs([]string{
