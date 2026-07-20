@@ -9,7 +9,7 @@ require (
 	github.com/adhocore/gronx v1.20.0
 	github.com/adrg/xdg v0.5.3
 	github.com/aymanbagabas/go-udiff v0.4.1
-	github.com/charmbracelet/ultraviolet v0.0.0-20260713092251-4bee1914c0cf
+	github.com/charmbracelet/ultraviolet v0.0.0-20260720091822-7cc6674724ac
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/charmbracelet/x/vt v0.0.0-20260720091843-3eef36eaaa28
 	github.com/creack/pty v1.1.24
