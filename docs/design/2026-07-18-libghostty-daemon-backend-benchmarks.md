@@ -19,9 +19,14 @@ failure, compatibility, chunking, and IPC boundaries.
 
 ## Reproducible inputs
 
-The measurements were taken on 2026-07-20 from the tree containing this
-document, based directly on feature commit `1cd612d`. No later main-branch
-integration is included.
+The measurements were taken on 2026-07-20 from held candidate `b7b7108`, based
+directly on feature commit `1cd612d`. The evidence was then rebased without
+resampling onto the frozen macOS-arm64 feature checkpoint
+`bac11ea6accc6ede93454c3671025f23d4589c08`. Inspection of the intervening
+changes found only target selection, packaging, SBOM, and design updates: the
+selected XCFramework input path and checksum, native helper implementation,
+production chunking, and benchmark/RSS harness are unchanged. The retained
+samples therefore exercise the same macOS-arm64 helper path as this tree.
 
 | Property | Value |
 |----------|-------|
@@ -31,7 +36,7 @@ integration is included.
 | Benchmark concurrency | `runtime.NumCPU=10`; parent pinned to `GOMAXPROCS=10`; the sanitized helper receives no `GOMAXPROCS` override and uses the 10-CPU host default; benchmark suffix `-10` confirms the parent setting |
 | Native compiler/linker | Apple clang 21.0.0 (`clang-2100.1.1.101`), pkg-config 3.0.3 |
 | Ghostty | `91f66da24527fa02d92b5fd0b41cd020f553a64c` |
-| Native artifact | ReleaseFast universal Apple archive, SHA-256 `25c1620e63311cc687637c8e3bdfae1fe3e070892966c07d0d91065ccda541c0` |
+| Native artifact | ReleaseFast Apple XCFramework archive (arm64 slice selected), SHA-256 `25c1620e63311cc687637c8e3bdfae1fe3e070892966c07d0d91065ccda541c0` |
 | `go-libghostty` wrapper | `v0.0.0-20260527181217-e9e1010f80b1`, commit `e9e1010f80b1ced0b7efcdb300f4838513c0816e` |
 | Timing samples | Five Go benchmark samples, `-benchtime=1s`, `-benchmem`, fixed `GOMAXPROCS=10` |
 | RSS samples | Five fresh test processes for each backend/workload pair, fixed `GOMAXPROCS=10` |
