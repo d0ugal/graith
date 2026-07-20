@@ -2,6 +2,7 @@ package release
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -104,17 +105,19 @@ func TestDevGoReleaserBuildsMacAppsOnlyIntoDarwinArchives(t *testing.T) {
 			flags := strings.Join(build.Ldflags, "\n")
 			if id == "gr-dev-darwin" {
 				for _, required := range []string{
-					"daemonservice.ManagedBuild=true",
+					"daemonservice.ManagedBuild={{ if eq (index .Env \"GRAITH_MANAGED_DEV_RELEASE\") \"true\" }}true{{ else }}false{{ end }}",
 					"daemonservice.DevelopmentBuild=false",
-					"daemonservice.ExpectedTeamID={{ .Env.GRAITH_SIGNING_TEAM_ID }}",
-					"daemonservice.ExpectedRequirementBase64={{ .Env.GRAITH_SIGNING_REQUIREMENT_B64 }}",
+					"daemonservice.ExpectedTeamID={{ if eq (index .Env \"GRAITH_MANAGED_DEV_RELEASE\") \"true\" }}{{ index .Env \"GRAITH_SIGNING_TEAM_ID\" }}{{ end }}",
+					"daemonservice.ExpectedRequirementBase64={{ if eq (index .Env \"GRAITH_MANAGED_DEV_RELEASE\") \"true\" }}{{ index .Env \"GRAITH_SIGNING_REQUIREMENT_B64\" }}{{ end }}",
 				} {
 					if !strings.Contains(flags, required) {
 						t.Errorf("Darwin dev ldflags missing %q", required)
 					}
 				}
 
-				if len(build.Hooks.Post) != 1 || !strings.Contains(build.Hooks.Post[0].Cmd, "macos/service/release-hook.sh") {
+				if len(build.Hooks.Post) != 1 ||
+					!strings.Contains(build.Hooks.Post[0].Cmd, "macos/service/release-hook.sh") ||
+					!strings.Contains(build.Hooks.Post[0].Cmd, "GRAITH_MANAGED_DEV_RELEASE") {
 					t.Errorf("Darwin dev build has no service release hook: %#v", build.Hooks.Post)
 				}
 			} else if strings.Contains(flags, "daemonservice.ManagedBuild=true") || len(build.Hooks.Post) != 0 {
@@ -177,6 +180,62 @@ func TestDevGoReleaserBuildsMacAppsOnlyIntoDarwinArchives(t *testing.T) {
 	}
 }
 
+func TestDevReleaseSigningModeRequiresAllOrNoCredentials(t *testing.T) {
+	script := releaseRootPath("macos", "service", "release-signing-mode.sh")
+	secretNames := []string{
+		"MACOS_SIGNING_CERTIFICATE", "MACOS_SIGNING_CERTIFICATE_PASSWORD", "MACOS_SIGNING_IDENTITY",
+		"MACOS_SIGNING_TEAM_ID", "MACOS_SIGNING_REQUIREMENT", "APPLE_NOTARY_PRIVATE_KEY",
+		"APPLE_NOTARY_KEY_ID", "APPLE_NOTARY_ISSUER_ID",
+	}
+
+	completeCredentials := make([]string, 0, len(secretNames))
+	for _, name := range secretNames {
+		completeCredentials = append(completeCredentials, name+"=braw")
+	}
+
+	for _, test := range []struct {
+		name        string
+		environment []string
+		wantOutput  string
+		wantError   string
+	}{
+		{name: "absent credentials use legacy packaging", wantOutput: "disabled\n"},
+		{
+			name:        "complete credentials enable managed packaging",
+			environment: completeCredentials,
+			wantOutput:  "enabled\n",
+		},
+		{
+			name:        "partial credentials fail closed",
+			environment: []string{"MACOS_SIGNING_IDENTITY=braw"},
+			wantError:   "partial macOS release-signing credentials; missing: MACOS_SIGNING_CERTIFICATE",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			command := exec.Command(script)
+
+			command.Env = append([]string{"PATH=" + os.Getenv("PATH")}, test.environment...)
+
+			output, err := command.CombinedOutput()
+			if test.wantError != "" {
+				if err == nil || !strings.Contains(string(output), test.wantError) {
+					t.Fatalf("signing mode error = %v, output = %q, want %q", err, output, test.wantError)
+				}
+
+				if strings.Contains(string(output), "=braw") {
+					t.Fatalf("signing mode leaked a credential value: %q", output)
+				}
+
+				return
+			}
+
+			if err != nil || string(output) != test.wantOutput {
+				t.Fatalf("signing mode error = %v, output = %q, want %q", err, output, test.wantOutput)
+			}
+		})
+	}
+}
+
 type devReleaseWorkflow struct {
 	Jobs map[string]struct {
 		RunsOn string `yaml:"runs-on"`
@@ -233,7 +292,7 @@ func TestDevReleaseWorkflowValidatesNativeArchives(t *testing.T) {
 			verifyScript = step.Run
 		}
 
-		if step.Name == "Configure fail-closed macOS service signing" {
+		if step.Name == "Configure optional macOS service signing" {
 			signingScript = step.Run
 			signingEnv = step.Env
 		}
@@ -263,8 +322,9 @@ func TestDevReleaseWorkflowValidatesNativeArchives(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"Darwin dev artifacts require signing and notarization", "security import", "notarytool store-credentials",
-		"GRAITH_SIGNING_REQUIREMENT_B64", "GRAITH_SIGNED_SNAPSHOT=true",
+		"release-signing-mode.sh", "publishing the legacy direct-spawn dev package",
+		"GRAITH_MANAGED_DEV_RELEASE=false", "security import", "notarytool store-credentials",
+		"GRAITH_SIGNING_REQUIREMENT_B64", "GRAITH_MANAGED_DEV_RELEASE=true", "GRAITH_SIGNED_SNAPSHOT=true",
 	} {
 		if !strings.Contains(signingScript, want) {
 			t.Errorf("dev signing setup missing %q", want)
@@ -272,6 +332,7 @@ func TestDevReleaseWorkflowValidatesNativeArchives(t *testing.T) {
 	}
 
 	for _, want := range []string{
+		`case "${GRAITH_MANAGED_DEV_RELEASE:-false}"`,
 		"test -x \"$notifier\"",
 		"lipo \"$notifier\" -verify_arch arm64 x86_64",
 		"codesign --verify --deep --strict \"$notifier_app\"",
@@ -279,6 +340,7 @@ func TestDevReleaseWorkflowValidatesNativeArchives(t *testing.T) {
 		"Graith.app",
 		"cmp \"$unpacked/gr-dev\" \"$service_app/Contents/MacOS/gr\"",
 		"macos/service/verify-release-archive.sh",
+		"Legacy dev archive unexpectedly contains Graith.app",
 		"Linux dev archive unexpectedly contains a macOS app",
 	} {
 		if !strings.Contains(verifyScript, want) {
@@ -361,10 +423,21 @@ func TestDevHomebrewFormulaInstallsMacAppsOnlyOnMacOS(t *testing.T) {
 		}
 	}
 
+	serviceGuardAt := strings.Index(installScript, `(buildpath/"Graith.app").directory?`)
+
+	serviceInstallAt := strings.Index(installScript, `(libexec/"graith").install "Graith.app"`)
+	if serviceGuardAt < 0 || serviceGuardAt > serviceInstallAt {
+		t.Fatal("generated formula does not gate the service app on archive presence")
+	}
+
 	for _, caveat := range []string{"gr-dev daemon restart", "gr-dev daemon service remove", "Before uninstalling on macOS"} {
 		if !strings.Contains(formula, caveat) {
 			t.Errorf("generated formula caveats missing %q", caveat)
 		}
+	}
+
+	if !strings.Contains(formula, `return unless (libexec/"graith/Graith.app").directory?`) {
+		t.Fatal("generated formula shows managed-service caveats for legacy dev packages")
 	}
 }
 

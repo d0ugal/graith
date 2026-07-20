@@ -3,17 +3,22 @@
 # archive's standalone gr with the byte-identical signed embedded payload.
 set -euo pipefail
 
-[ "$#" -eq 5 ] || { echo "usage: release-hook.sh ARTIFACT TARGET VERSION COMMIT IS_SNAPSHOT" >&2; exit 2; }
+[ "$#" -ge 5 ] && [ "$#" -le 6 ] || { echo "usage: release-hook.sh ARTIFACT TARGET VERSION COMMIT IS_SNAPSHOT [INCLUDE_SERVICE]" >&2; exit 2; }
 artifact="$1"
 target="$2"
 version="$3"
 commit="$4"
 snapshot="$5"
+include_service="${6:-true}"
 
 signed_snapshot="${GRAITH_SIGNED_SNAPSHOT:-false}"
 case "$signed_snapshot" in
 	true|false) ;;
 	*) echo "invalid signed snapshot marker: $signed_snapshot" >&2; exit 1 ;;
+esac
+case "$include_service" in
+	true|false) ;;
+	*) echo "invalid service inclusion marker: $include_service" >&2; exit 1 ;;
 esac
 
 case "$target" in
@@ -29,6 +34,15 @@ esac
 build_number="${GRAITH_BUNDLE_BUILD_NUMBER:-${GITHUB_RUN_ID:-${GITHUB_RUN_NUMBER:-1}}.${GITHUB_RUN_ATTEMPT:-1}}"
 output="macos/build/service-release-$arch"
 here="$(cd "$(dirname "$0")" && pwd)"
+
+# The unprovisioned dev channel must match its pre-service behavior: no app
+# bundle and a binary compiled for direct spawn.
+# Remove stale local output because GoReleaser deliberately accepts this empty
+# archive glob.
+if [ "$include_service" = false ]; then
+	rm -rf "$output"
+	exit 0
+fi
 
 if [ "$snapshot" = true ] && [ "$signed_snapshot" = false ]; then
 	sh "$here/build.sh" \

@@ -37,10 +37,11 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # graith and graith-dev share one per-user Service Management registry.
-      # Sign both channels with the same fixed Developer ID requirement so a
-      # stable CLI can authenticate and reconcile the isolated dev profile.
-      - name: Configure fail-closed macOS service signing
+      # Once provisioned, graith and graith-dev share one per-user Service
+      # Management registry and must use the same fixed Developer ID
+      # requirement. Until then, an entirely absent credential set preserves
+      # the legacy direct-spawn dev package. A partial set fails closed.
+      - name: Configure optional macOS service signing
         env:
           MACOS_SIGNING_CERTIFICATE: ${{ secrets.MACOS_SIGNING_CERTIFICATE }}
           MACOS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGNING_CERTIFICATE_PASSWORD }}
@@ -52,15 +53,14 @@ jobs:
           APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
         run: |
           set -euo pipefail
-          missing=""
-          for name in MACOS_SIGNING_CERTIFICATE MACOS_SIGNING_CERTIFICATE_PASSWORD \
-            MACOS_SIGNING_IDENTITY MACOS_SIGNING_TEAM_ID MACOS_SIGNING_REQUIREMENT \
-            APPLE_NOTARY_PRIVATE_KEY APPLE_NOTARY_KEY_ID APPLE_NOTARY_ISSUER_ID; do
-            [ -n "${!name}" ] || missing="${missing:+${missing} }${name}"
-          done
-          if [ -n "$missing" ]; then
-            echo "::error::Darwin dev artifacts require signing and notarization; missing: $missing"
-            exit 1
+          signing_mode="$(macos/service/release-signing-mode.sh)"
+          if [ "$signing_mode" = disabled ]; then
+            echo "::notice::macOS release signing is not provisioned; publishing the legacy direct-spawn dev package"
+            {
+              echo "GRAITH_MANAGED_DEV_RELEASE=false"
+              echo "GRAITH_SIGNED_SNAPSHOT=false"
+            } >> "$GITHUB_ENV"
+            exit 0
           fi
 
           keychain="$RUNNER_TEMP/graith-dev-release.keychain-db"
@@ -94,6 +94,7 @@ jobs:
             echo "GRAITH_SIGNING_REQUIREMENT=$MACOS_SIGNING_REQUIREMENT"
             echo "GRAITH_SIGNING_REQUIREMENT_B64=$requirement_b64"
             echo "GRAITH_NOTARY_PROFILE=graith-dev-release"
+            echo "GRAITH_MANAGED_DEV_RELEASE=true"
             echo "GRAITH_SIGNED_SNAPSHOT=true"
           } >> "$GITHUB_ENV"
 
@@ -110,6 +111,11 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
+
+          case "${GRAITH_MANAGED_DEV_RELEASE:-false}" in
+            true|false) ;;
+            *) echo "::error::Invalid managed dev release marker: $GRAITH_MANAGED_DEV_RELEASE"; exit 1 ;;
+          esac
 
           darwin_archives=(dist/graith-dev_darwin_*.tar.gz)
           linux_archives=(dist/graith-dev_linux_*.tar.gz)
@@ -129,11 +135,16 @@ jobs:
             test -x "$notifier"
             lipo "$notifier" -verify_arch arm64 x86_64
             codesign --verify --deep --strict "$notifier_app"
-            test -d "$service_app"
-            test -x "$service_app/Contents/MacOS/gr"
-            cmp "$unpacked/gr-dev" "$service_app/Contents/MacOS/gr"
-            macos/service/verify-release-archive.sh \
-              "$archive" "$archive.service-verified.txt" true
+            if [ "$GRAITH_MANAGED_DEV_RELEASE" = true ]; then
+              test -d "$service_app"
+              test -x "$service_app/Contents/MacOS/gr"
+              cmp "$unpacked/gr-dev" "$service_app/Contents/MacOS/gr"
+              macos/service/verify-release-archive.sh \
+                "$archive" "$archive.service-verified.txt" true
+            elif [ -e "$service_app" ]; then
+              echo "::error::Legacy dev archive unexpectedly contains Graith.app: $archive"
+              exit 1
+            fi
           done
 
           for archive in "${linux_archives[@]}"; do
@@ -219,11 +230,15 @@ jobs:
               bin.install "gr-dev"
               if OS.mac?
                 (libexec/"graith").install "GraithNotifier.app"
-                (libexec/"graith").install "Graith.app"
+                if (buildpath/"Graith.app").directory?
+                  (libexec/"graith").install "Graith.app"
+                end
               end
             end
 
             def caveats
+              return unless (libexec/"graith/Graith.app").directory?
+
               <<~EOS
                 To restart the graith-dev daemon after upgrading:
                   gr-dev daemon restart
