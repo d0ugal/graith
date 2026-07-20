@@ -130,7 +130,8 @@ private let swiftDecoders: [String: DecodeProbe] = [
     "ForkMsg": probe(ForkMsg.self),
     "MigrateMsg": probe(MigrateMsg.self),
     "AttachMsg": probe(AttachMsg.self),
-    "RenameMsg": probe(RenameMsg.self),
+    "UpdateMsg": probe(UpdateMsg.self),
+    "UpdateResultMsg": probe(UpdateResultMsg.self),
     "SetStatusMsg": probe(SetStatusMsg.self),
     "ResizeMsg": probe(ResizeMsg.self),
     "LogsMsg": probe(LogsMsg.self),
@@ -144,8 +145,6 @@ private let swiftDecoders: [String: DecodeProbe] = [
     // Bare {session_id} requests → SessionIDMsg.
     "InterruptMsg": probe(SessionIDMsg.self),
     "ResumeMsg": probe(SessionIDMsg.self),
-    "StarMsg": probe(SessionIDMsg.self),
-    "UnstarMsg": probe(SessionIDMsg.self),
     "StatusRequestMsg": probe(SessionIDMsg.self),
     "ScreenPreviewMsg": probe(SessionIDMsg.self),
     "ScreenSnapshotMsg": probe(SessionIDMsg.self),

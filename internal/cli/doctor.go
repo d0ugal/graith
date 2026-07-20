@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -8,14 +9,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/d0ugal/graith/internal/approvals"
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
+	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/version"
@@ -117,6 +120,7 @@ var doctorCmd = &cobra.Command{
 
 		dc.checkVersion(probe)
 		dc.checkEnvironment()
+		dc.checkDaemonService()
 		dc.checkHumanToken()
 
 		diag := dc.checkDaemon(probe)
@@ -432,11 +436,15 @@ func (dc *doctorContext) checkEnvironment() {
 	if cfg.Sandbox.Enabled {
 		dc.checkSandboxBackend()
 		dc.checkSandboxPaths()
-	} else {
-		dc.warnf("environment", "Sandbox disabled")
-	}
 
-	dc.checkApprovalsBackend()
+		if disabled := disabledGraithSandboxAgents(cfg); len(disabled) > 0 {
+			dc.warnf("environment", "Graith sandbox disabled for agent(s): %s", strings.Join(disabled, ", "))
+			dc.hintf("Remove the per-agent sandbox opt-out or confirm those agents run inside an external sandbox or VM")
+		}
+	} else {
+		dc.warnf("environment", "Sandbox disabled: Graith will not constrain agent filesystem, process, signal, or network access")
+		dc.hintf("Enable [sandbox] or confirm the agent runs inside an external sandbox or VM")
+	}
 
 	switch {
 	case cfg.AgentPrompt == "":
@@ -446,6 +454,112 @@ func (dc *doctorContext) checkEnvironment() {
 	default:
 		dc.passf("environment", "Agent prompt: default")
 	}
+}
+
+func (dc *doctorContext) checkDaemonService() {
+	// Linux and the other direct-spawn platforms deliberately retain their
+	// existing doctor output. This section describes only the macOS ownership
+	// model introduced for packaged builds.
+	if runtime.GOOS != "darwin" {
+		return
+	}
+
+	const section = "daemon_service"
+
+	dc.section("macOS Daemon Service")
+
+	mode, reason, err := daemonservice.DetectMode()
+	if err != nil {
+		dc.failf(section, "Cannot determine daemon service mode: %v", err)
+		return
+	}
+
+	if mode != daemonservice.ModeManaged {
+		dc.warnf(section, "Direct-spawn fallback: %s", reason)
+		dc.hintf("A signed packaged build on macOS 13 or newer runs the daemon as a Graith-associated user service")
+
+		return
+	}
+
+	executable, err := os.Executable()
+	if err != nil {
+		dc.failf(section, "Cannot locate this Graith executable: %v", err)
+		return
+	}
+
+	if err := daemonservice.ValidateManagedInstallationContext(context.Background(), executable, version.Version, version.CommitSHA); err != nil {
+		dc.failf(section, "Managed daemon service package is invalid: %v", err)
+		dc.hintf("Reinstall the same Graith release before starting or restarting the daemon")
+
+		return
+	}
+
+	dc.passf(section, "Managed user service package verified (%s)", reason)
+
+	inherited := make(map[string]bool)
+
+	projected := append([]string(nil), daemonservice.BuiltInEnvironmentNames...)
+
+	if cfg != nil {
+		for _, name := range cfg.DaemonService.InheritEnv {
+			inherited[name] = true
+			projected = append(projected, name)
+		}
+	}
+
+	dc.passf(section, "Startup environment projects variable names only: %s", strings.Join(projected, ", "))
+
+	var omitted []string
+
+	for _, name := range []string{"SSH_AUTH_SOCK", "AWS_PROFILE", "GOOGLE_APPLICATION_CREDENTIALS", "KUBECONFIG"} {
+		if os.Getenv(name) != "" && !inherited[name] {
+			omitted = append(omitted, name)
+		}
+	}
+
+	if len(omitted) > 0 {
+		dc.warnf(section, "Current shell variables are not projected to the daemon: %s", strings.Join(omitted, ", "))
+		dc.hintf("Add only the required variable names to [daemon_service] inherit_env; values remain transient")
+	}
+
+	receipt, err := daemonservice.ReadReceipt(os.Getuid())
+	if errors.Is(err, daemonservice.ErrReceiptMissing) {
+		dc.passf(section, "No service registrations yet; the first eligible command will register one")
+		return
+	}
+
+	if err != nil {
+		dc.failf(section, "Cannot validate the daemon service receipt: %v", err)
+		dc.hintf("Run: gr daemon service repair")
+
+		return
+	}
+
+	used := len(receipt.Leases)
+	if used >= 56 {
+		dc.warnf(section, "%d of 64 named-profile service slots are leased", used)
+		dc.hintf("Remove dormant profile services before the fixed slot pool reaches capacity")
+	} else {
+		dc.passf(section, "%d of 64 named-profile service slots are leased", used)
+	}
+}
+
+func disabledGraithSandboxAgents(c *config.Config) []string {
+	if c == nil || !c.Sandbox.Enabled {
+		return nil
+	}
+
+	var disabled []string
+
+	for name, agent := range c.Agents {
+		if !c.Sandbox.Merge(agent.Sandbox).Enabled {
+			disabled = append(disabled, name)
+		}
+	}
+
+	sort.Strings(disabled)
+
+	return disabled
 }
 
 // checkConfigKeys warns about config keys graith doesn't recognise — typos or
@@ -525,81 +639,6 @@ func (dc *doctorContext) checkSandboxBackend() {
 		case len(cfg.Sandbox.Network.AllowDomains) > 0:
 			dc.passf("environment", "Sandbox network policy: proxy allowlist of %d domain(s)", len(cfg.Sandbox.Network.AllowDomains))
 		}
-	}
-}
-
-// checkApprovalsBackend reports whether the configured approvals backend can
-// enforce with the current config. This mirrors the daemon's fail-closed
-// validateApprovalsBackend check, which rejects an unenforceable backend at
-// session-create — a rejection that otherwise surfaces only as a bare "Crashed
-// exit 1" session with zero scrollback and a reason buried in daemon.log (see
-// issue #738). Surfacing it here means the reason is visible from a channel a
-// user can read, including from inside a sandboxed session.
-func (dc *doctorContext) checkApprovalsBackend() {
-	backend, deprecation, err := cfg.Approvals.ResolveBackend()
-	if err != nil {
-		dc.failf("environment", "Approvals backend invalid: %v", err)
-
-		return
-	}
-
-	if deprecation != "" {
-		dc.warnf("environment", "Approvals config deprecated: %s", deprecation)
-	}
-
-	// The prompt backend (the default) always defers to the human and needs no
-	// external dependency, so it can never fail closed.
-	if backend == "" || backend == approvals.BackendPrompt {
-		dc.passf("environment", "Approvals backend: prompt (manual)")
-
-		return
-	}
-
-	be, err := approvals.BackendByName(backend)
-	if err != nil {
-		dc.failf("environment", "Approvals backend invalid: %v", err)
-
-		return
-	}
-
-	acfg := approvals.Config{
-		Backend:       backend,
-		Command:       cfg.Approvals.Command,
-		BuiltinConfig: config.ExpandPathRelative(cfg.Approvals.Builtin.Config, approvalsConfigDir()),
-	}
-
-	// Mirror the daemon's approvalsBackendConfig: render inline
-	// [approvals.builtin] rules to localmost JSON so an inline-only config is
-	// judged enforceable here exactly as it is at session-create, rather than
-	// being reported as a missing external config.
-	if cfg.Approvals.Builtin.HasInline() {
-		inline, err := cfg.Approvals.Builtin.InlineJSON()
-		if err != nil {
-			dc.failf("environment", "Approvals inline rules invalid: %v", err)
-
-			return
-		}
-
-		acfg.BuiltinInline = inline
-	}
-
-	av := be.Availability(acfg)
-	if !av.CanEnforce {
-		dc.failf("environment", "Approvals backend %q cannot enforce: %s", backend, av.Detail)
-		dc.hintf("Sessions will fail to start until this is fixed; set [approvals] backend = \"prompt\" or correct the backend config")
-
-		return
-	}
-
-	dc.passf("environment", "Approvals backend %q available", backend)
-
-	// Surface the effective deadline hierarchy so a mismatch (a backend
-	// execution timeout approaching the enclosing approval timeout) is visible
-	// rather than latent (see #1251/#244). Only the subprocess-spawning backends
-	// have an execution timeout.
-	if execTimeout, ok := cfg.Approvals.BackendExecTimeout(backend); ok {
-		dc.passf("environment", "Approvals deadlines: %s backend execution %s < approval timeout %s",
-			backend, execTimeout, cfg.Approvals.TimeoutDuration())
 	}
 }
 
@@ -851,10 +890,6 @@ func (dc *doctorContext) checkSessions(diag *protocol.DiagnosticsMsg) {
 	parts := []string{}
 	if f.Active > 0 {
 		parts = append(parts, fmt.Sprintf("%d active", f.Active))
-	}
-
-	if f.Approval > 0 {
-		parts = append(parts, fmt.Sprintf("%d approval", f.Approval))
 	}
 
 	if f.Ready > 0 {

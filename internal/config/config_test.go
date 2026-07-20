@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/d0ugal/graith/internal/approvals/localmost"
 )
+
+func boolPtr(v bool) *bool { return &v }
 
 func TestLoadConfig(t *testing.T) {
 	dir := t.TempDir()
@@ -185,250 +185,56 @@ func TestIdleTimeoutDuration(t *testing.T) {
 	}
 }
 
-func TestApprovalTimeoutDuration(t *testing.T) {
+func TestCommandPolicyTimeoutDuration(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name, raw string
+		want      time.Duration
+	}{
+		{name: "default", want: 5 * time.Second},
+		{name: "configured", raw: "12s", want: 12 * time.Second},
+		{name: "invalid fallback", raw: "dreich", want: 5 * time.Second},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := (CommandPolicy{Timeout: tt.raw}).TimeoutDuration(); got != tt.want {
+				t.Fatalf("TimeoutDuration() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCommandPolicyValidate(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
-		a    Approvals
-		want time.Duration
+		cfg  CommandPolicy
+		err  bool
 	}{
-		{
-			name: "default when empty",
-			a:    Approvals{},
-			want: 10 * time.Minute,
-		},
-		{
-			name: "explicit duration",
-			a:    Approvals{Timeout: "30m"},
-			want: 30 * time.Minute,
-		},
-		{
-			name: "days",
-			a:    Approvals{Timeout: "1d"},
-			want: 24 * time.Hour,
-		},
-		{
-			name: "negative falls back to default",
-			a:    Approvals{Timeout: "-7d"},
-			want: 10 * time.Minute,
-		},
+		{name: "disabled"},
+		{name: "builtin", cfg: CommandPolicy{Backend: "builtin", Builtin: CommandPolicyBuiltin{Allow: []any{"echo @*"}}}},
+		{name: "native", cfg: CommandPolicy{Backend: "localmost", Command: "/opt/localmost", Timeout: "10s"}},
+		{name: "unknown backend", cfg: CommandPolicy{Backend: "prompt"}, err: true},
+		{name: "allow all removed", cfg: CommandPolicy{Backend: "auto"}, err: true},
+		{name: "arbitrary command removed", cfg: CommandPolicy{Backend: "command", Command: "braw"}, err: true},
+		{name: "builtin needs rules", cfg: CommandPolicy{Backend: "builtin"}, err: true},
+		{name: "command only native", cfg: CommandPolicy{Backend: "builtin", Command: "braw", Builtin: CommandPolicyBuiltin{Allow: []any{"echo @*"}}}, err: true},
+		{name: "inline and file conflict", cfg: CommandPolicy{Backend: "builtin", Builtin: CommandPolicyBuiltin{Config: "croft.json", Allow: []any{"echo @*"}}}, err: true},
+		{name: "invalid rule", cfg: CommandPolicy{Backend: "builtin", Builtin: CommandPolicyBuiltin{Allow: []any{"echo @("}}}, err: true},
+		{name: "timeout invalid", cfg: CommandPolicy{Backend: "localmost", Timeout: "soon"}, err: true},
+		{name: "timeout over bound", cfg: CommandPolicy{Backend: "localmost", Timeout: "2m"}, err: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.a.TimeoutDuration()
-			if got != tt.want {
-				t.Errorf("TimeoutDuration() = %v, want %v", got, tt.want)
+			t.Parallel()
+
+			if got := tt.cfg.Validate(); (got != nil) != tt.err {
+				t.Fatalf("Validate() error = %v, want error=%v", got, tt.err)
 			}
 		})
-	}
-}
-
-func TestApprovalsBackendExecTimeoutDuration(t *testing.T) {
-	tests := []struct {
-		name         string
-		a            Approvals
-		wantCommand  time.Duration
-		wantLocalmst time.Duration
-	}{
-		{
-			name:         "defaults when unset",
-			a:            Approvals{},
-			wantCommand:  defaultBackendExecTimeout,
-			wantLocalmst: defaultBackendExecTimeout,
-		},
-		{
-			name:         "explicit values",
-			a:            Approvals{CommandTimeout: "8s", LocalmostTimeout: "12s"},
-			wantCommand:  8 * time.Second,
-			wantLocalmst: 12 * time.Second,
-		},
-		{
-			name:         "invalid falls back to default",
-			a:            Approvals{CommandTimeout: "dreich", LocalmostTimeout: "-1s"},
-			wantCommand:  defaultBackendExecTimeout,
-			wantLocalmst: defaultBackendExecTimeout,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.a.CommandTimeoutDuration(); got != tt.wantCommand {
-				t.Errorf("CommandTimeoutDuration() = %v, want %v", got, tt.wantCommand)
-			}
-
-			if got := tt.a.LocalmostTimeoutDuration(); got != tt.wantLocalmst {
-				t.Errorf("LocalmostTimeoutDuration() = %v, want %v", got, tt.wantLocalmst)
-			}
-		})
-	}
-}
-
-func TestApprovalsBackendExecTimeout(t *testing.T) {
-	if d, ok := (Approvals{CommandTimeout: "7s"}).BackendExecTimeout("command"); !ok || d != 7*time.Second {
-		t.Errorf("BackendExecTimeout(command) = %v, %v; want 7s, true", d, ok)
-	}
-
-	if d, ok := (Approvals{CommandTimeout: "7s"}).BackendExecTimeout("external"); !ok || d != 7*time.Second {
-		t.Errorf("BackendExecTimeout(external) = %v, %v; want 7s, true", d, ok)
-	}
-
-	if d, ok := (Approvals{LocalmostTimeout: "9s"}).BackendExecTimeout("localmost"); !ok || d != 9*time.Second {
-		t.Errorf("BackendExecTimeout(localmost) = %v, %v; want 9s, true", d, ok)
-	}
-
-	for _, backend := range []string{"prompt", "builtin", "auto", ""} {
-		if _, ok := (Approvals{}).BackendExecTimeout(backend); ok {
-			t.Errorf("BackendExecTimeout(%q) reported a subprocess timeout; want none", backend)
-		}
-	}
-}
-
-func TestApprovalsResolveBackend(t *testing.T) {
-	tests := []struct {
-		name        string
-		a           Approvals
-		wantBackend string
-		wantDeprec  bool
-		wantErr     bool
-	}{
-		{"empty -> prompt", Approvals{}, "prompt", false, false},
-		{"explicit prompt", Approvals{Backend: "prompt"}, "prompt", false, false},
-		{"explicit command", Approvals{Backend: "command", Command: "x"}, "command", false, false},
-		{"explicit builtin", Approvals{Backend: "builtin"}, "builtin", false, false},
-		{"explicit native localmost", Approvals{Backend: "localmost"}, "localmost", false, false},
-		{"explicit auto", Approvals{Backend: "auto"}, "auto", false, false},
-		{"unknown backend errors", Approvals{Backend: "thrawn"}, "", false, true},
-
-		// auto is a first-class value in the deprecated Mode field too: it maps
-		// straight to the "auto" backend (not "command") with a deprecation nudge.
-		{"legacy mode=auto -> auto (warn)", Approvals{Mode: "auto"}, "auto", true, false},
-		{"both agree (auto)", Approvals{Backend: "auto", Mode: "auto"}, "auto", true, false},
-		{"conflict: auto + mode=localmost", Approvals{Backend: "auto", Mode: "localmost"}, "", false, true},
-
-		// Back-compat: legacy mode maps to the command backend with a warning.
-		{"legacy mode=localmost -> command (warn)", Approvals{Mode: "localmost"}, "command", true, false},
-		{"legacy mode=command -> command (warn)", Approvals{Mode: "command"}, "command", true, false},
-		{"legacy mode=external -> command (warn)", Approvals{Mode: "external"}, "command", true, false},
-		{"unknown mode ignored -> prompt", Approvals{Mode: "haar"}, "prompt", false, false},
-
-		// mode-only stays a warning even for localmost; never an error.
-		{"mode=localmost alone is not an error", Approvals{Mode: "localmost", Command: "x"}, "command", true, false},
-
-		// both set: agree is fine (with a redundant-mode nudge), disagree errors.
-		{"both agree (command)", Approvals{Backend: "command", Mode: "command"}, "command", true, false},
-		{"external+command agree", Approvals{Backend: "external", Mode: "localmost"}, "external", true, false},
-		{"conflict: builtin + mode=localmost", Approvals{Backend: "builtin", Mode: "localmost"}, "", false, true},
-		{"conflict: native localmost + mode=localmost", Approvals{Backend: "localmost", Mode: "localmost"}, "", false, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			backend, deprec, err := tt.a.ResolveBackend()
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
-			}
-
-			if tt.wantErr {
-				return
-			}
-
-			if backend != tt.wantBackend {
-				t.Errorf("backend = %q, want %q", backend, tt.wantBackend)
-			}
-
-			if (deprec != "") != tt.wantDeprec {
-				t.Errorf("deprecation = %q, wantDeprec %v", deprec, tt.wantDeprec)
-			}
-		})
-	}
-}
-
-func TestApprovalsResolveBackendValidatedByConfig(t *testing.T) {
-	c := Default()
-	c.Approvals = Approvals{Backend: "builtin", Mode: "localmost"}
-
-	if err := c.Validate(); err == nil {
-		t.Error("Validate() should reject a conflicting approvals backend+mode")
-	}
-}
-
-func boolPtr(b bool) *bool { return &b }
-
-func TestApprovalsValidate(t *testing.T) {
-	tests := []struct {
-		name    string
-		a       Approvals
-		wantErr bool
-	}{
-		{"empty is fine", Approvals{}, false},
-		{"command backend with command", Approvals{Backend: "command", Command: "graith-approver"}, false},
-		{"external backend with command", Approvals{Backend: "external", Command: "graith-approver"}, false},
-		{"localmost backend with binary override", Approvals{Backend: "localmost", Command: "/opt/localmost"}, false},
-		{"legacy mode=localmost with command", Approvals{Mode: "localmost", Command: "graith-approver"}, false},
-
-		// The #740 case: command set for a backend that ignores it.
-		{"command ignored by prompt", Approvals{Command: "graith-approver"}, true},
-		{"command ignored by explicit prompt", Approvals{Backend: "prompt", Command: "graith-approver"}, true},
-		{"command ignored by builtin", Approvals{Backend: "builtin", Command: "graith-approver"}, true},
-		{"auto backend is fine", Approvals{Backend: "auto"}, false},
-		{"command ignored by auto", Approvals{Backend: "auto", Command: "graith-approver"}, true},
-
-		// Conflicts from ResolveBackend still surface.
-		{"unknown backend", Approvals{Backend: "thrawn"}, true},
-		{"conflicting backend+mode", Approvals{Backend: "builtin", Mode: "localmost"}, true},
-
-		// Inline builtin ruleset (#737).
-		{"inline allow rules ok", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{"echo @*"}}}, false},
-		{"inline flag only ok", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{AskNoninteractive: boolPtr(false)}}, false},
-		{"inline invalid rule rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{"foo @("}}}, true},
-		{"inline + external file conflict", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Config: "/tmp/approvals.json", Allow: []any{"echo @*"}}}, true},
-
-		// Per-rule table validation (#737 hardening).
-		{"inline rule table ok", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{map[string]any{"rule": "find @*", "unless": []any{"-delete"}}}}}, false},
-		{"inline rule table unknown key rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{map[string]any{"rule": "find @*", "unles": []any{"-delete"}}}}}, true},
-		// The localmost #781 guard rejects an unless term matching the empty
-		// command; inline rules compile through localmost.Parse so they get it too.
-		{"inline empty unless rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Deny: []any{map[string]any{"rule": "rm @arg*", "unless": []any{""}}}}}, true},
-		{"inline rule table missing rule rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{map[string]any{"unless": []any{"-delete"}}}}}, true},
-		{"inline rule table empty rule rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Deny: []any{map[string]any{"rule": "  "}}}}, true},
-		{"inline non-string non-table rejected", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Allow: []any{42}}}, true},
-		// Empty inline array is not "inline" and does not conflict with a file.
-		{"empty inline array not a conflict", Approvals{Backend: "builtin", Builtin: ApprovalsBuiltin{Config: "/tmp/approvals.json", Allow: []any{}}}, false},
-
-		// Per-backend execution timeouts (#1251).
-		{"command_timeout unset ok", Approvals{Backend: "command", Command: "x"}, false},
-		{"command_timeout valid ok", Approvals{Backend: "command", Command: "x", CommandTimeout: "10s"}, false},
-		{"localmost_timeout valid ok", Approvals{Backend: "localmost", LocalmostTimeout: "10s"}, false},
-		{"command_timeout invalid duration", Approvals{Backend: "command", Command: "x", CommandTimeout: "soon"}, true},
-		{"command_timeout non-positive", Approvals{Backend: "command", Command: "x", CommandTimeout: "0s"}, true},
-		{"command_timeout negative", Approvals{Backend: "command", Command: "x", CommandTimeout: "-1s"}, true},
-		{"command_timeout over max", Approvals{Backend: "command", Command: "x", CommandTimeout: "2m"}, true},
-		{"localmost_timeout over max", Approvals{Backend: "localmost", LocalmostTimeout: "90s"}, true},
-		// A backend timeout at or above the enclosing approval timeout is incoherent.
-		{"command_timeout >= enclosing", Approvals{Backend: "command", Command: "x", Timeout: "5s", CommandTimeout: "5s"}, true},
-		{"command_timeout above enclosing", Approvals{Backend: "command", Command: "x", Timeout: "3s", CommandTimeout: "10s"}, true},
-		// Timeout fields are validated for their syntax even when the resolved
-		// backend does not use them.
-		{"localmost_timeout invalid under command backend", Approvals{Backend: "command", Command: "x", LocalmostTimeout: "soon"}, true},
-		// A deliberately tiny enclosing timeout is caught against the default 5s
-		// backend timeout even with no explicit per-backend field.
-		{"tiny enclosing vs default backend timeout", Approvals{Backend: "command", Command: "x", Timeout: "2s"}, true},
-		// A non-subprocess backend has no execution timeout, so a tiny enclosing
-		// timeout is fine on its own.
-		{"tiny enclosing ok for prompt backend", Approvals{Timeout: "1s"}, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if err := tt.a.Validate(); (err != nil) != tt.wantErr {
-				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestApprovalsCommandIgnoredRejectedByConfig(t *testing.T) {
-	c := Default()
-	c.Approvals = Approvals{Backend: "builtin", Command: "graith-approver"}
-
-	if err := c.Validate(); err == nil {
-		t.Error("Validate() should reject a command set for a backend that ignores it")
 	}
 }
 
@@ -557,43 +363,33 @@ idle_timeout = "0"
 	}
 }
 
-// TestLoadConfigApprovalTimeouts loads a real TOML through Load() so the per-
-// backend timeout keys are exercised end-to-end, and confirms the embedded
-// default config leaves them unset so the 5s Go default still applies (guards
-// the #1228-class trap where an embedded value would defeat the Go fallback).
-func TestLoadConfigApprovalTimeouts(t *testing.T) {
+func TestLoadCommandPolicy(t *testing.T) {
 	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.toml")
+	path := filepath.Join(dir, "config.toml")
 
-	toml := `
-[approvals]
-backend = "command"
-command = "graith-approver"
-command_timeout = "8s"
-localmost_timeout = "12s"
+	data := `
+[command_policy]
+backend = "builtin"
+timeout = "8s"
+[command_policy.builtin]
+allow = ["echo @*"]
+deny = ["rm @*"]
 `
-
-	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(cfgPath)
+	loaded, err := Load(path)
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatal(err)
 	}
 
-	if got := cfg.Approvals.CommandTimeoutDuration(); got != 8*time.Second {
-		t.Errorf("command timeout = %v, want 8s", got)
+	if !loaded.CommandPolicy.Enabled() || loaded.CommandPolicy.TimeoutDuration() != 8*time.Second {
+		t.Fatalf("command policy = %+v", loaded.CommandPolicy)
 	}
 
-	if got := cfg.Approvals.LocalmostTimeoutDuration(); got != 12*time.Second {
-		t.Errorf("localmost timeout = %v, want 12s", got)
-	}
-
-	// The embedded default config must NOT set these keys, so an out-of-the-box
-	// config still falls back to the 5s Go default.
-	if got := Default().Approvals.CommandTimeoutDuration(); got != defaultBackendExecTimeout {
-		t.Errorf("default command timeout = %v, want %v", got, defaultBackendExecTimeout)
+	if len(loaded.CommandPolicy.Builtin.Allow) != 1 || len(loaded.CommandPolicy.Builtin.Deny) != 1 {
+		t.Fatalf("builtin rules = %+v", loaded.CommandPolicy.Builtin)
 	}
 }
 
@@ -846,10 +642,10 @@ func TestExpandPathRelative(t *testing.T) {
 		{"whitespace-only stays empty", "   ", "/etc/graith", ""},
 		{"tilde expanded ignoring baseDir", "~/glen.json", "/etc/graith", filepath.Join(home, "glen.json")},
 		{"leading whitespace trimmed then expanded", "  ~/glen.json  ", "/etc/graith", filepath.Join(home, "glen.json")},
-		{"relative joined against baseDir", "approvals.json", "/etc/graith", "/etc/graith/approvals.json"},
-		{"nested relative joined and cleaned", "rules/../approvals.json", "/etc/graith", "/etc/graith/approvals.json"},
-		{"absolute path untouched", "/opt/graith/approvals.json", "/etc/graith", "/opt/graith/approvals.json"},
-		{"relative with empty baseDir left relative", "approvals.json", "", "approvals.json"},
+		{"relative joined against baseDir", "policy.json", "/etc/graith", "/etc/graith/policy.json"},
+		{"nested relative joined and cleaned", "rules/../policy.json", "/etc/graith", "/etc/graith/policy.json"},
+		{"absolute path untouched", "/opt/graith/policy.json", "/etc/graith", "/opt/graith/policy.json"},
+		{"relative with empty baseDir left relative", "policy.json", "", "policy.json"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1175,6 +971,16 @@ func TestMergeAgent(t *testing.T) {
 		got := mergeAgent(def, usr)
 		if got.IdleTimeout != "30m" {
 			t.Errorf("IdleTimeout = %q, want 30m", got.IdleTimeout)
+		}
+	})
+
+	t.Run("explicit empty non_interactive_args keeps native prompts", func(t *testing.T) {
+		withUnattendedDefault := def
+		withUnattendedDefault.NonInteractiveArgs = []string{"--unattended"}
+
+		got := mergeAgent(withUnattendedDefault, Agent{NonInteractiveArgs: []string{}})
+		if got.NonInteractiveArgs == nil || len(got.NonInteractiveArgs) != 0 {
+			t.Fatalf("NonInteractiveArgs = %#v, want explicit empty slice", got.NonInteractiveArgs)
 		}
 	})
 
@@ -2837,224 +2643,88 @@ func TestOrchestratorSandboxBackwardCompat(t *testing.T) {
 	}
 }
 
-func TestApprovalsHookEnabled(t *testing.T) {
-	no := false
-	yes := true
-
-	tests := []struct {
-		name    string
-		enabled *bool
-		want    bool
-	}{
-		{"unset defaults to disabled", nil, false},
-		{"explicitly enabled", &yes, true},
-		{"explicitly disabled", &no, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			a := Approvals{Enabled: tt.enabled}
-			if got := a.HookEnabled(); got != tt.want {
-				t.Errorf("HookEnabled() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestApprovalsDefaultConfigDisablesHook(t *testing.T) {
-	// The shipped default must leave approval gating off so unattended agents
-	// aren't gated on a human who may never answer.
-	if Default().Approvals.HookEnabled() {
-		t.Error("Default() approvals hook is enabled, want disabled by default")
-	}
-}
-
-func TestApprovalsEnabledParsedFromTOML(t *testing.T) {
+func TestLoadCommandPolicyRejectsUnknownBuiltinKeys(t *testing.T) {
 	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.toml")
-	toml := `
-[approvals]
-enabled = false
-`
+	path := filepath.Join(dir, "config.toml")
 
-	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	cfg, err := Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-
-	if cfg.Approvals.Enabled == nil {
-		t.Fatal("Approvals.Enabled is nil, want explicit false")
-	}
-
-	if *cfg.Approvals.Enabled {
-		t.Error("Approvals.Enabled = true, want false")
-	}
-
-	if cfg.Approvals.HookEnabled() {
-		t.Error("HookEnabled() = true, want false when disabled in TOML")
-	}
-}
-
-// TestLoadConfigInlineApprovalsBareStrings verifies the bare-string array form
-// of inline builtin rules decodes and compiles (#737).
-func TestLoadConfigInlineApprovalsBareStrings(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.toml")
-	toml := `
-[approvals]
+	data := `
+[command_policy]
 backend = "builtin"
-
-[approvals.builtin]
-allow = ["echo @*", "ls @*"]
-deny = ["rm @arg*"]
-allowSafeXargs = true
-askNoninteractive = false
+[command_policy.builtin]
+dney = ["rm @*"]
 `
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
-
-	cfg, err := Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
 	}
 
-	b := cfg.Approvals.Builtin
-	if !b.HasInline() {
-		t.Fatal("HasInline() = false, want true")
-	}
-
-	if len(b.Allow) != 2 || len(b.Deny) != 1 {
-		t.Errorf("allow=%v deny=%v", b.Allow, b.Deny)
-	}
-
-	if b.AskNoninteractive == nil || *b.AskNoninteractive {
-		t.Errorf("askNoninteractive = %v, want false", b.AskNoninteractive)
-	}
-
-	data, err := b.InlineJSON()
-	if err != nil {
-		t.Fatalf("InlineJSON: %v", err)
-	}
-
-	if _, err := localmost.Parse(data); err != nil {
-		t.Fatalf("inline rules should compile: %v", err)
+	if _, err := Load(path); err == nil {
+		t.Fatal("Load should reject a misspelled command-policy key")
 	}
 }
 
-// TestLoadConfigInlineApprovalsTables verifies the array-of-tables form (with
-// per-rule keys like unless) decodes and compiles (#737).
-func TestLoadConfigInlineApprovalsTables(t *testing.T) {
+func TestLoadRejectsRemovedApprovalsConfig(t *testing.T) {
 	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.toml")
-	toml := `
-[approvals]
-backend = "builtin"
+	path := filepath.Join(dir, "config.toml")
 
-[[approvals.builtin.allow]]
+	data := `
+[approvals]
+backend = "auto"
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "[approvals] was removed") {
+		t.Fatalf("Load removed config = %v, want explicit breaking-transition error", err)
+	}
+}
+
+func TestLoadCommandPolicyRejectsUnknownTopLevelKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	data := `
+[command_policy]
+backend = "localmost"
+commnad = "localmost"
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "commnad") {
+		t.Fatalf("Load misspelled policy key = %v, want strict security-namespace error", err)
+	}
+}
+
+func TestLoadCommandPolicyRuleTables(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	data := `
+[command_policy]
+backend = "builtin"
+[[command_policy.builtin.allow]]
 rule = "find @*"
-unless = ["-exec", "-delete"]
-
-[[approvals.builtin.deny]]
+unless = ["-delete"]
+[[command_policy.builtin.deny]]
 rule = "rm @arg*"
 `
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
-	cfg, err := Load(cfgPath)
+	loaded, err := Load(path)
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatal(err)
 	}
 
-	b := cfg.Approvals.Builtin
-	if len(b.Allow) != 1 || len(b.Deny) != 1 {
-		t.Fatalf("allow=%v deny=%v", b.Allow, b.Deny)
-	}
-
-	data, err := b.InlineJSON()
-	if err != nil {
-		t.Fatalf("InlineJSON: %v", err)
-	}
-
-	engine, err := localmost.Parse(data)
-	if err != nil {
-		t.Fatalf("inline rules should compile: %v", err)
-	}
-
-	// The unless clause should exempt find -delete from the allow rule.
-	if pol, _ := engine.Evaluate("find . -name x"); pol != localmost.PolicyAllow {
-		t.Errorf("find without unless term: policy = %q, want allow", pol)
-	}
-
-	if pol, _ := engine.Evaluate("find . -delete"); pol == localmost.PolicyAllow {
-		t.Errorf("find -delete should not be allowed (unless clause), got %q", pol)
+	if len(loaded.CommandPolicy.Builtin.Allow) != 1 || len(loaded.CommandPolicy.Builtin.Deny) != 1 {
+		t.Fatalf("rules = %+v", loaded.CommandPolicy.Builtin)
 	}
 }
-
-// TestLoadConfigInlineApprovalsConflict verifies the external file + inline
-// conflict is rejected at load (#737).
-func TestLoadConfigInlineApprovalsConflict(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.toml")
-	toml := `
-[approvals]
-backend = "builtin"
-
-[approvals.builtin]
-config = "~/.config/graith/approvals.json"
-allow = ["echo @*"]
-`
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
-
-	if _, err := Load(cfgPath); err == nil {
-		t.Fatal("Load should reject both config path and inline rules being set")
-	}
-}
-
-// TestLoadConfigInlineApprovalsUnknownTopKey verifies a misspelled top-level key
-// under [approvals.builtin] is rejected at load rather than silently dropped —
-// a fail-open guard, since a typo'd "deny" would otherwise leave an allow-all
-// base rule in force (#737 hardening).
-func TestLoadConfigInlineApprovalsUnknownTopKey(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.toml")
-	toml := `
-[approvals]
-backend = "builtin"
-
-[approvals.builtin]
-allow = ["@arg @*"]
-dney  = ["rm @arg*"]
-`
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
-
-	if _, err := Load(cfgPath); err == nil {
-		t.Fatal("Load should reject an unknown [approvals.builtin] key (dney)")
-	}
-}
-
-// TestLoadConfigInlineApprovalsUnknownRuleKey verifies a misspelled per-rule key
-// (e.g. "unles" for "unless") is rejected at load. Without this, localmost's
-// rule decoder silently drops the unknown JSON field and the intended
-// constraint vanishes, broadening the rule (#737 hardening).
-func TestLoadConfigInlineApprovalsUnknownRuleKey(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.toml")
-	toml := `
-[approvals]
-backend = "builtin"
-
-[[approvals.builtin.allow]]
-rule  = "find @*"
-unles = ["-delete"]
-`
-	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
-
-	if _, err := Load(cfgPath); err == nil {
-		t.Fatal("Load should reject an unknown per-rule key (unles)")
-	}
-}
-
 func TestParsePairRequestRate(t *testing.T) {
 	tests := []struct {
 		in        string

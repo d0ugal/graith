@@ -18,7 +18,7 @@
 #   {fork_source_agent_session_id}  - Source session's agent ID (fork only)
 #   {model}                         - Requested model (option_args only)
 #   {dir}                           - A granted directory (add_dir_args only)
-#   {profile} {reasoning_effort} {service_tier} {approval_policy} {web_search}
+#   {profile} {reasoning_effort} {service_tier} {web_search}
 #                                   - Codex option_args gates/values (issue #1236)
 
 # Agent type used by `gr new` when --agent is not given (must match an [agents.*] key).
@@ -159,7 +159,7 @@ max_log_bytes = 104857600          # per-session scrollback log cap in bytes (< 
 
 # Detection & status-classification policy: the timing that governs how the
 # daemon scans PTY scrollback, refreshes remote refs, and decides agent status
-# (active/ready/approval). Empty or non-positive values fall back to the
+# (active/ready/error). Empty or non-positive values fall back to the
 # defaults shown. Hook reports stay authoritative over PTY scraping for the
 # matching hook_* window. See issue #1241.
 [detection]
@@ -171,16 +171,16 @@ adopted_grace = "60s"          # after daemon-upgrade adoption, keep prior statu
 recent_output_window = "3s"    # recent PTY output alone implies "active" when scraping is inconclusive ("0" disables)
 hook_start_window = "5s"       # SessionStart hook stays authoritative for this long
 hook_activity_window = "30s"   # tool-use hooks (prompt/pre/post) stay authoritative for this long
-hook_terminal_window = "30m"   # ready/approval hooks (Stop, idle, permission) stay authoritative for this long
+hook_terminal_window = "30m"   # ready/error hooks stay authoritative for this long
 
 # Token accounting: the daemon periodically re-derives per-session token usage
-# from each supported agent's on-disk transcript (surfaced by `gr tokens`). A
+# from each supported agent's on-disk transcript (surfaced by `gr ls --tokens`). A
 # fingerprint cache means an idle fleet does almost no work between ticks. Empty
 # or non-positive durations fall back to the defaults shown; batch_size < 1 uses
 # the default. See issue #1244.
 [token_accounting]
 poll_interval = "30s"   # how often per-session token usage is re-derived from transcripts
-startup_delay = "5s"    # first-tick delay after a daemon (re)start so `gr tokens` isn't blank ("0" polls immediately)
+startup_delay = "5s"    # first-tick delay after restart so token columns aren't blank ("0" polls immediately)
 batch_size = 8          # max sessions (re)parsed per tick (bounds work on a large fleet with big transcripts)
 
 # Resource monitor: the daemon periodically snapshots each live session's
@@ -201,7 +201,6 @@ log_lines             = 300      # default trailing lines for `gr logs`, `gr mcp
 wait_scan_lines       = 500      # scrollback lines `gr wait --contains` scans for an already-present match
 wait_buffer_bytes     = 65536    # partial-line buffer cap in the live `gr wait` matcher (64 KiB)
 mcp_log_read_bytes    = 1048576  # max trailing bytes read from an MCP log file before splitting into lines (1 MiB)
-approval_display_bytes = 500     # tool input shown in the approval overlay (full input still evaluated by backends)
 last_message_runes    = 2000     # agent's final Stop message the status hook forwards (counted in runes)
 inbox_preview_bytes   = 1000     # unread-inbox preview injected into a session's SessionStart hook context
 
@@ -212,7 +211,7 @@ inbox_preview_bytes   = 1000     # unread-inbox preview injected into a session'
 # (column arithmetic, wrap widths, frame rates) are deliberately NOT configurable
 # — they must match render logic. Empty or non-positive values fall back below.
 [terminal]
-refresh_interval = "2s"   # how often the session picker/dashboard/status bar re-poll for state ("0"/non-positive => 2s)
+refresh_interval = "2s"   # how often the picker/status bar/message viewer re-poll for state ("0"/non-positive => 2s)
 summary_width = 40        # max visible width of a `gr status` summary in the picker before truncation
 
 # Update check: `gr list` and `gr doctor` query GitHub for a newer graith release
@@ -237,7 +236,6 @@ timeout = "5s"              # HTTP request timeout for the release check
 # gh        = "gh"             # GitHub CLI executable
 # gcx       = "gcx"            # Grafana Cloud CLI executable (gcx trigger source)
 # shell     = "sh"             # shell for notification/trigger commands (`<shell> -c ...`)
-# osascript = "osascript"      # macOS desktop-notification helper
 # ps        = "/bin/ps"        # process-listing binary
 # lsof      = "/usr/sbin/lsof" # open-files listing binary (macOS FD sampling)
 
@@ -266,6 +264,13 @@ reconnect_interval = "250ms"      # how often the attach recovery loop re-probes
 remote_dial_timeout = "10s"       # bounds the TCP dial to a paired remote daemon
 remote_handshake_timeout = "15s"  # bounds the remote handshake + proof-of-possession
 remote_pairing_timeout = "11m"    # how long to wait for the remote human to approve pairing
+
+# Extra terminal variables copied into the one-shot startup request for the
+# app-associated daemon on supported macOS packages. PATH, SHELL, TMPDIR,
+# locale, and absolute XDG base directories are projected automatically.
+# Values named here become available to the daemon and eligible agents.
+[daemon_service]
+inherit_env = []
 
 # Cross-agent conversation migration (`gr migrate`). health_window is how long
 # the daemon waits after starting the target agent to confirm it survived startup
@@ -411,13 +416,13 @@ position = "bottom"  # where to render it: "top" or "bottom"
 [status]
 ttl = "5m"  # how long a `gr status` value stays current before it expires
 
-# Desktop notifications for agent status changes (approval, stopped) and for
+# Desktop notifications for agent status changes and for
 # proactive `gr notify` push notifications sent by the orchestrator or triggers.
 [notifications]
 enabled = true      # master switch for status-change and push notifications
-on_approval = true  # notify when a session enters the "approval" (waiting-for-human) state
 # backend selects how `gr notify` push notifications are delivered:
-#   "macos"   osascript desktop notification (default; high priority plays a sound)
+#   "macos"   GraithNotifier.app desktop notification
+#             (default; high priority plays a sound; helper is required)
 #   "command" run the [notifications] command with GRAITH_NOTIFY_{TITLE,MESSAGE,PRIORITY}
 # (ntfy/pushover/slack backends are planned follow-ups.)
 backend = "macos"
@@ -433,31 +438,23 @@ max_per_hour = 12
 # override to tune coalescing, dispatch, and PTY-injection pacing.
 [notifications.timing]
 coalesce_window = "30s"       # drop an identical push within this window ("0" disables coalescing)
-dispatch_timeout = "15s"      # per-backend dispatch timeout (osascript/notifier/command)
+dispatch_timeout = "15s"      # per-backend dispatch timeout (notifier/command)
 inbox_idle_timeout = "10s"    # wait before inbox notifications or `gr type` inject into an attached PTY
 inbox_max_wait = "2m"         # cap that user-idle wait before injecting anyway
 inbox_cooldown = "30s"        # minimum interval between unread-inbox nudges to one session ("0" disables)
 inbox_detached_delay = "5s"   # settle delay before notifying a session with no attached client ("0" is immediate)
 
-[approvals]
-# enabled controls whether the PreToolUse approve-request gating hook is
-# installed. Defaults to false: the status/lifecycle hooks still run but the
-# approval gate does not, because unattended agents otherwise see their own
-# tool calls as human-rejected and the OS sandbox is the intended guardrail.
-# Set to true to opt back into human approval gating.
-# enabled = true
-# backend selects who makes the automated decision: "" (none — always prompt the
-# human), "command"/"external" (delegate to a command over graith's JSON contract),
-# "localmost" (the real localmost binary over its native protocol), "builtin"
-# (graith's built-in localmost-compatible engine), or "auto".
+[command_policy]
+# Optional synchronous restriction layer for shell commands. Empty disables it.
+# An allow only continues to the OS sandbox; it never grants access. A deny,
+# ask, malformed response, timeout, or evaluation error blocks immediately.
+# Supported backends: "builtin" and "localmost".
 backend = ""
-timeout = "10m"  # how long to wait for an approval decision before it times out
-# Per-backend subprocess execution timeouts. These bound a single automated
-# backend invocation and must be positive, at most 60s, and strictly shorter
-# than timeout above (a backend decision runs inside the approval deadline).
-# Both default to 5s when unset — leave them commented to keep that default.
-# command_timeout   = "5s"  # bounds the "command"/"external" backend
-# localmost_timeout = "5s"  # bounds the "localmost" binary check
+timeout = "5s"
+# command = "localmost" # optional binary override for backend="localmost"
+# [command_policy.builtin]
+# allow = ["git status", "go test @*"]
+# deny = ["rm @*"]
 
 [overlay]
 # Keys that jump straight to the Nth session in the picker (1st key → session 1, …).
@@ -466,7 +463,7 @@ shortcut_keys = "1234567890"
 # Prefix key plus a command key trigger these actions while attached.
 # NOTE: all keys below are read from config (passthrough keys via
 # cli/attach.go passthroughKeysFromConfig, picker keys via overlayKeysFromConfig).
-# The messages/approvals/restart passthrough keys (m/a/r) have no config field
+# The messages/restart passthrough keys have no config field
 # yet and stay literal.
 # Each command key is a single literal character (only prefix accepts "ctrl+…").
 [keybindings]
@@ -486,11 +483,10 @@ scroll_mode = "["            # open a scrollable pager over the session's histor
 shell = "s"                  # open a shell in the session's worktree
 orchestrator_session = "o"   # jump to the orchestrator session
 messages = "m"               # open the message viewer for the current session
-approvals = "a"              # open the pending-approvals prompt
 restart_session = "r"        # restart (resume) the current session
 
-# Keys used inside the full-screen terminal overlays (dashboard, approval
-# prompt, message viewer, scroll pager). Each value is a space-separated list of
+# Keys used inside the full-screen terminal overlays (message viewer and scroll
+# pager). Each value is a space-separated list of
 # bubbletea key names (single letters, "up", "down", "enter", "esc", "pgup",
 # "ctrl+d", ...); pressing any listed key triggers the action. A partial table
 # only overrides the keys it names — unset keys keep these defaults.
@@ -502,17 +498,7 @@ page_up = "pgup ctrl+u ctrl+b"           # scroll up one page
 page_down = "pgdown space ctrl+d ctrl+f" # scroll down one page
 top = "g home"                           # jump to the first item / top
 bottom = "G end"                         # jump to the last item / bottom
-confirm = "enter y"                      # confirm a prompt (e.g. delete/stop)
-cancel = "q esc"                         # close the overlay / cancel
-# Dashboard (gr dashboard) actions.
-dashboard_attach = "enter a"             # attach to the selected session
-dashboard_stop = "s"                     # stop the selected running session
-dashboard_delete = "x d"                 # delete the selected session
-dashboard_resume = "r"                   # resume the selected stopped session
-# Approval prompt actions.
-approval_allow = "y enter"               # allow the selected request
-approval_deny = "n x"                    # deny the selected request
-approval_allow_all = "a"                 # allow every pending request
+cancel = "q esc ctrl+c"                  # close the overlay / cancel
 # Message viewer actions.
 message_pin = "enter"                    # pin/unpin the focused message
 message_expand_all = "O"                 # expand (pin) every message in the thread
@@ -617,13 +603,18 @@ require_pairing = true    # require per-device pairing for human-level rights; f
 # read_dirs = []
 # write_dirs = ["~/.config/graith"]
 
-# [sandbox]
-# OS-level sandbox for agent processes. Disabled by default. When enabled a
-# `backend` MUST be chosen — there is no default; an unset backend fails closed.
-#   backend = "safehouse"  # macOS Seatbelt (sandbox-exec)
-#   backend = "nono"       # Landlock+seccomp on Linux, Seatbelt on macOS
-# enabled = true
-# backend = "nono"
+[sandbox]
+# OS-level sandbox for agent processes. Off by default: graith does not assume a
+# sandbox backend (nono or safehouse) is installed on your machine. Enabling it
+# is strongly recommended — it confines the agent's filesystem, environment,
+# process, signal, socket, and (backend permitting) network access regardless of
+# what the agent believes it may do, and isolates sessions from each other.
+# Turn it on and pick an installed backend below. When enabled, a session fails
+# to start if the selected backend cannot enforce the configured policy; a
+# disabled session starts with a warning and is reported by `gr doctor`.
+enabled = false
+# backend = "nono"       # Landlock+seccomp on Linux, Seatbelt on macOS
+# backend = "safehouse"  # macOS Seatbelt (sandbox-exec)
 # read_dirs  = ["~/Code/shared"]
 # write_dirs = ["~/.cache/agent"]
 # features   = ["ssh"]      # ssh -> $SSH_AUTH_SOCK; process-control -> signals
@@ -660,8 +651,8 @@ require_pairing = true    # require per-device pairing for human-level rights; f
 # fire-and-forget sessions (tribunal judges, trigger briefings) can run a
 # headless Claude process (`claude -p --output-format stream-json`) instead of an
 # interactive PTY; graith parses the typed event stream for status and captures
-# the run's cost/token usage. v1 is one-shot, requires a prompt, and is
-# incompatible with the sandbox. Inert unless experimental = true. Per-agent
+# the run's cost/token usage. v1 is one-shot, requires a prompt, and uses the
+# same configured sandbox setting as PTY sessions. Inert unless experimental = true. Per-agent
 # support is `headless_capable`. The processing limits (issue #1250) rarely need
 # tuning; a zero/non-positive value falls back to the default shown.
 [headless]
@@ -676,11 +667,12 @@ preview_bytes = 16384       # scrollback tail rendered by the overlay/screen_pre
 # Each agent needs at minimum: command, args
 # Optional: resume_args, fork_args, env, idle_timeout, sandbox, mcp_servers,
 #   validate_model, interrupt_count, interrupt_delay_ms, inject_prompt,
-#   pre_trust_workspace, headless_capable, add_dir_args, headless_args,
+#   pre_trust_workspace, headless_capable, non_interactive_args, add_dir_args, headless_args,
 #   option_args (conditional [[agents.<name>.option_args]] groups)
 
 [agents.claude]
 command = "claude"                                    # binary to launch
+non_interactive_args = [] # keep Claude's native approval TUI. Set ["--dangerously-skip-permissions"] to run fully unattended (skips all of Claude's approvals)
 args = ["--session-id", "{agent_session_id}"]        # args for a fresh session (templates expanded)
 resume_args = ["--resume", "{agent_session_id}"]     # args to resume an existing session
 # args to fork from a source session (used by ctrl+b f)
@@ -704,7 +696,7 @@ headless_capable = true
 add_dir_args = ["--add-dir", "{dir}"]
 # Control-channel argv prefix prepended in headless stream-json mode; the agent's
 # own args follow. Pinned to what was verified against claude 2.1.211. (#1236)
-headless_args = ["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"]
+headless_args = ["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose"]
 
 # Extra sandbox grants for this agent, merged on top of the global [sandbox]
 # config. Only take effect when the sandbox is enabled. "write" means read+write.
@@ -714,6 +706,7 @@ write_dirs = ["~/.claude"]
 
 [agents.codex]
 command = "codex"
+non_interactive_args = [] # keep Codex's native approvals + sandbox; graith's OS sandbox is the outer boundary. Set e.g. ["--ask-for-approval", "never", "--sandbox", "danger-full-access"] to run fully unattended (see docs; this removes Codex's own safeguards, so only do it behind a guaranteed outer boundary)
 args = []
 # Codex mints its own session id; graith captures it from the rollout on disk
 # after start (captureNativeSessionID). Resume pins to that id when known; when
@@ -748,16 +741,13 @@ args = ["-c", "service_tier={service_tier}"]
 [[agents.codex.option_args]]
 when = "web_search"                              # boolean: emitted when true
 args = ["--search"]
-[[agents.codex.option_args]]
-when = "approval_policy"
-args = ["--ask-for-approval", "{approval_policy}"]
-
 [agents.codex.sandbox]
 read_dirs = ["~/.codex"]
 write_dirs = ["~/.codex"]
 
 [agents.opencode]
 command = "opencode"
+non_interactive_args = [] # keep OpenCode's native prompts. Set ["--auto"] to run unattended (auto-approves what would otherwise ask; explicit denies still apply)
 args = []
 resume_args = ["--session", "{agent_session_id}"]
 idle_timeout        = "1h"     # auto-stop after this long idle (0 disables)
@@ -767,6 +757,7 @@ pre_trust_workspace = true     # pre-trust the worktree so the agent skips its t
 
 [agents.cursor]
 command = "agent"           # the Cursor CLI binary is named `agent`
+non_interactive_args = [] # keep Cursor's native prompts. Set ["--force"] to run unattended
 args = []
 resume_args = ["resume"]
 # Command listing valid model IDs ("id - description" per line); a requested
@@ -784,6 +775,7 @@ write_dirs = ["~/.cursor"]
 
 [agents.agy]
 command = "agy"
+non_interactive_args = [] # keep Agy's native prompts. Set ["--dangerously-skip-permissions"] to run fully unattended
 args = []
 resume_args = ["--conversation", "{agent_session_id}"]
 idle_timeout        = "1h"     # auto-stop after this long idle (0 disables)

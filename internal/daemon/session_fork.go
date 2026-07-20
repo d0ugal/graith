@@ -106,6 +106,11 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		return SessionState{}, err
 	}
 
+	// The pre-lock snapshot was used only for slow username/model discovery.
+	// Capture the launch generation again under the lock so command-policy hook
+	// installation and the persisted CreationConfig describe the same config.
+	cfgSnapshot = sm.cfg
+
 	source, ok := sm.state.Sessions[sourceSessionID]
 	if !ok {
 		sm.mu.Unlock()
@@ -197,10 +202,10 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	sourceCodex := codexOptsForAgent(agentName, cloneCodexOptions(source.Codex))
 
 	sourceAgentSessionID := source.AgentSessionID
-	sourceYolo := source.Yolo
-	// Yolo forces agent hooks on (see Create) so a forked yolo session always
-	// installs the approval hook, even if the source had hooks disabled.
-	sourceAgentHooks := source.AgentHooks || sourceYolo
+	sourceAgentHooks := source.AgentHooks
+	policyEnabled := cfgSnapshot.CommandPolicy.Enabled()
+	policyTimeout := cfgSnapshot.CommandPolicy.TimeoutDuration()
+	hookFilesNeeded := sourceAgentHooks || policyEnabled
 	// MCP config injection is decided separately from hooks (see #1135). Fork is
 	// PTY-only, so the two coincide here.
 	sourceMCPEnabled := sourceAgentHooks
@@ -230,7 +235,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		return SessionState{}, err
 	}
 
-	if err := sm.validateApprovalsBackend(sourceYolo); err != nil {
+	if err := sm.validateCommandPolicy(agentName); err != nil {
 		sm.mu.Unlock()
 		return SessionState{}, err
 	}
@@ -257,7 +262,6 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		Model:           effectiveModel,
 		Codex:           sourceCodex,
 		AgentHooks:      sourceAgentHooks,
-		Yolo:            sourceYolo,
 		Status:          StatusCreating,
 		CreatedAt:       time.Now().UTC(),
 		StatusChangedAt: time.Now().UTC(),
@@ -448,6 +452,16 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		return SessionState{}, fmt.Errorf("expand fork args: %w", err)
 	}
 
+	nonInteractiveArgs, err := config.ExpandSlice(agent.NonInteractiveArgs, vars)
+	if err != nil {
+		forkCleanup()
+		rollbackState()
+
+		return SessionState{}, fmt.Errorf("expand non-interactive args: %w", err)
+	}
+
+	expandedArgs = append(nonInteractiveArgs, expandedArgs...)
+
 	// Replay the conditional option flags after the fork/args (issue #1186); the
 	// agent's option_args config decides which are emitted (issue #1236). Codex
 	// accepts these on its `fork` subcommand too.
@@ -511,8 +525,8 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 	}
 
-	if sourceAgentHooks {
-		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, sourceYolo)
+	if hookFilesNeeded {
+		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, sourceAgentHooks, policyEnabled, policyTimeout)
 		if err != nil {
 			forkCleanup()
 			rollbackState()
@@ -589,7 +603,14 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 			envKeys = append(envKeys, k)
 		}
 
-		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, sourceAgentHooks || sourceMCPEnabled)
+		opts, err := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, hookFilesNeeded || sourceMCPEnabled)
+		if err != nil {
+			forkCleanup()
+			rollbackState()
+
+			return SessionState{}, fmt.Errorf("configure sandbox: %w", err)
+		}
+
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
@@ -601,6 +622,13 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
 		if len(forkIncludes) > 0 {
 			opts.WriteDirs = append(opts.WriteDirs, sm.deriveSandboxIncludesWriteDirs(forkIncludes)...)
+		}
+
+		if err := sm.validateAutomaticSandboxGrants(opts, merged); err != nil {
+			forkCleanup()
+			rollbackState()
+
+			return SessionState{}, fmt.Errorf("validate sandbox grants: %w", err)
 		}
 
 		var wrapErr error
@@ -707,6 +735,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	sessState.CreationCfg = &CreationConfig{
 		Agent:         agent,
 		SandboxConfig: cfgSnapshot.Sandbox.Merge(agent.Sandbox),
+		CommandPolicy: cfgSnapshot.CommandPolicy,
 	}
 
 	if scrapesID(agentName) && agentSessionID == "" {
@@ -764,6 +793,10 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		"id", id, "name", name, "agent", agentName, "forked", true,
 		"pid", result.PID, "pgid", ptySess.Pgid(), "sandboxed", sandboxed,
 		"scrollback_path", logPath)
+
+	if !sandboxed {
+		sm.logUnsandboxedStart(id, name, agentName)
+	}
 
 	sm.startWatcher(id, ptySess)
 

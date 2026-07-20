@@ -165,7 +165,6 @@ func TestPassthroughKeysFromConfig(t *testing.T) {
 			ForkSession:         "f",
 			OrchestratorSession: "o",
 			Messages:            "m",
-			Approvals:           "a",
 			RestartSession:      "r",
 		},
 	}
@@ -184,7 +183,6 @@ func TestPassthroughKeysFromConfig(t *testing.T) {
 		ForkSession:         'f',
 		OrchestratorSession: 'o',
 		Messages:            'm',
-		Approvals:           'a',
 		RestartSession:      'r',
 	}
 	if keys != want {
@@ -203,25 +201,9 @@ func TestOverlayKeysFromConfigOverrideAndDefault(t *testing.T) {
 	cfg = &config.Config{
 		Keybindings: config.Keybindings{
 			Overlay: config.OverlayKeybindings{
-				DashboardAttach: "z",
-				ApprovalAllow:   "Y",
-				MessagePin:      "P",
+				MessagePin: "P",
 			},
 		},
-	}
-
-	dash := dashboardKeysFromConfig()
-	if len(dash.Attach) != 1 || dash.Attach[0] != "z" {
-		t.Errorf("dashboard attach = %v, want [z]", dash.Attach)
-	}
-	// Unset dashboard_stop keeps the built-in default.
-	if want := client.DefaultDashboardKeys().Stop; len(dash.Stop) != len(want) || dash.Stop[0] != want[0] {
-		t.Errorf("dashboard stop = %v, want default %v", dash.Stop, want)
-	}
-
-	appr := approvalKeysFromConfig()
-	if len(appr.Allow) != 1 || appr.Allow[0] != "Y" {
-		t.Errorf("approval allow = %v, want [Y]", appr.Allow)
 	}
 
 	msg := messageKeysFromConfig()

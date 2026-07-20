@@ -15,8 +15,8 @@ import (
 )
 
 // RemoteHost is a paired remote graith daemon reachable over the tailnet
-// (design §A/§B, #615). Credentials are minted by the remote daemon's `gr pair
-// approve` and delivered in pair_response.
+// (design §A/§B, #615). Credentials are minted by the remote daemon's
+// `gr remote pairings approve` and delivered in pair_response.
 type RemoteHost struct {
 	Host    string `json:"host"`           // MagicDNS name / tailnet address
 	Port    int    `json:"port"`           // remote listener port

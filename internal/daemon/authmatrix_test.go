@@ -74,32 +74,27 @@ func TestRemoteAllowed(t *testing.T) {
 		{"none cannot create", roleNone, "create", false},
 		{"none cannot msg_pub", roleNone, "msg_pub", false},
 		{"none cannot scenario_stop", roleNone, "scenario_stop", false},
-		{"none cannot approval_list", roleNone, "approval_list", false},
 		{"none cannot upgrade", roleNone, "upgrade", false},
 
 		// roleRemoteGuest: read-only.
 		{"guest can list", roleRemoteGuest, "list", true},
 		{"guest can logs", roleRemoteGuest, "logs", true},
-		{"guest can approval_list", roleRemoteGuest, "approval_list", true},
 		{"guest can screen_snapshot", roleRemoteGuest, "screen_snapshot", true},
 		{"guest cannot attach", roleRemoteGuest, "attach", false},
 		{"guest cannot create", roleRemoteGuest, "create", false},
 		{"guest cannot msg_pub", roleRemoteGuest, "msg_pub", false},
-		{"guest cannot approval_respond", roleRemoteGuest, "approval_respond", false},
 		{"guest cannot scenario_stop", roleRemoteGuest, "scenario_stop", false},
 		{"guest cannot upgrade", roleRemoteGuest, "upgrade", false},
 		// Tightened: these sensitive reads are NOT guest-visible.
 		{"guest cannot read DMs", roleRemoteGuest, "msg_conversation", false},
 		{"guest cannot scenario_status", roleRemoteGuest, "scenario_status", false},
 		{"guest cannot wait", roleRemoteGuest, "wait", false},
-		{"guest cannot approval_request", roleRemoteGuest, "approval_request", false},
+		{"guest cannot command_policy_check", roleRemoteGuest, "command_policy_check", false},
 
 		// roleRemoteHuman: everything except local-only.
 		{"human can list", roleRemoteHuman, "list", true},
 		{"human can attach", roleRemoteHuman, "attach", true},
 		{"human can create", roleRemoteHuman, "create", true},
-		{"human can approval_respond", roleRemoteHuman, "approval_respond", true},
-		{"human can approval_subscribe", roleRemoteHuman, "approval_subscribe", true},
 		{"human can msg_pub", roleRemoteHuman, "msg_pub", true},
 		{"human can scenario_stop", roleRemoteHuman, "scenario_stop", true},
 		{"human cannot upgrade", roleRemoteHuman, "upgrade", false},
@@ -111,7 +106,7 @@ func TestRemoteAllowed(t *testing.T) {
 		{"guest cannot diagnostics", roleRemoteGuest, "diagnostics", false},
 		{"guest cannot config", roleRemoteGuest, "config", false},
 		// Session-originated: a human must NOT be able to impersonate a session.
-		{"human cannot approval_request", roleRemoteHuman, "approval_request", false},
+		{"human cannot command_policy_check", roleRemoteHuman, "command_policy_check", false},
 		{"human cannot status_report", roleRemoteHuman, "status_report", false},
 		{"human cannot publish scenario result", roleRemoteHuman, "scenario_result_publish", false},
 		{"human can read DMs", roleRemoteHuman, "msg_conversation", true},
@@ -119,7 +114,7 @@ func TestRemoteAllowed(t *testing.T) {
 
 		// Remote sessions: everything except local-only (self/descendant applied later).
 		{"session can attach", roleSession, "attach", true},
-		{"session can approval_request", roleSession, "approval_request", true},
+		{"session can command_policy_check", roleSession, "command_policy_check", true},
 		{"session can status_report", roleSession, "status_report", true},
 		{"session can publish own scenario result", roleSession, "scenario_result_publish", true},
 		{"session cannot upgrade", roleSession, "upgrade", false},

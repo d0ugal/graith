@@ -28,31 +28,14 @@ func FuzzDetect(f *testing.F) {
 		// None of these should panic regardless of input.
 		status := d.Detect(content, -1)
 		busy := d.IsBusy(content)
-		approval := d.NeedsApproval(content)
 		ready := d.IsReady(content)
 
-		// Approval status is intentionally not inferred from PTY text.
-		if approval {
-			t.Error("NeedsApproval returned true for terminal content")
-		}
-
-		// Verify invariants:
-		// 1. If busy, NeedsApproval must be false (busy takes priority)
-		if busy && approval {
-			t.Error("IsBusy and NeedsApproval both true — busy should take priority")
-		}
-
-		// 2. If busy, IsReady must be false
+		// If busy, IsReady must be false.
 		if busy && ready {
 			t.Error("IsBusy and IsReady both true — busy should take priority")
 		}
 
-		// 3. If NeedsApproval, IsReady must be false
-		if approval && ready {
-			t.Error("NeedsApproval and IsReady both true — approval should take priority")
-		}
-
-		// 4. Detect result must match the individual checks
+		// Detect result must match the individual checks.
 		switch status {
 		case StatusActive:
 			if !busy {
@@ -63,7 +46,7 @@ func FuzzDetect(f *testing.F) {
 				t.Error("Detect returned ready but IsReady is false")
 			}
 		case StatusUnknown:
-			if busy || approval || ready {
+			if busy || ready {
 				t.Error("Detect returned unknown but one of the checks is true")
 			}
 		}

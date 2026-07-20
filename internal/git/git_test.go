@@ -443,6 +443,10 @@ func TestWorktreeGitDirsCov(t *testing.T) {
 		t.Errorf("gitDir and commonDir should differ for a linked worktree: both %q", gitDir)
 	}
 
+	if !filepath.IsAbs(gitDir) || !filepath.IsAbs(commonDir) {
+		t.Fatalf("WorktreeGitDirs() returned relative security-sensitive paths: git=%q common=%q", gitDir, commonDir)
+	}
+
 	wantCommon := resolveT(t, filepath.Join(repo, ".git"))
 	if resolveT(t, commonDir) != wantCommon {
 		t.Errorf("commonDir = %q, want the repo .git %q", commonDir, wantCommon)

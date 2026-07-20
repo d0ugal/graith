@@ -34,7 +34,7 @@ var reservedSessionNames = map[string]bool{
 }
 
 // ValidateSessionName checks that a session name is safe for use in git branch
-// names, shell commands, osascript, template expansion, and environment variables.
+// names, shell commands, template expansion, and environment variables.
 func ValidateSessionName(name string) error {
 	return validateSessionName(name, false)
 }

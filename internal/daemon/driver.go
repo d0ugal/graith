@@ -86,10 +86,9 @@ const (
 // constraints (returns DriverPTY, no error), because a global default is a soft
 // preference, not a demand.
 //
-// v1 constraints: headless requires the experimental gate, an agent flagged
-// headless_capable, and a non-sandboxed session (headless + sandbox is not
-// supported yet — see the design doc).
-func resolveDriverKind(explicit bool, agent config.Agent, hc config.HeadlessConfig, sandboxed bool) (string, error) {
+// Headless requires the experimental gate and an explicitly capable agent. It
+// uses the same optional Graith sandbox setting as PTY sessions.
+func resolveDriverKind(explicit bool, agent config.Agent, hc config.HeadlessConfig, _ bool) (string, error) {
 	if !explicit && !hc.Default {
 		return DriverPTY, nil
 	}
@@ -107,8 +106,6 @@ func resolveDriverKind(explicit bool, agent config.Agent, hc config.HeadlessConf
 		return reject("[headless] experimental is not enabled")
 	case !agent.HeadlessCapableEnabled():
 		return reject("agent is not headless_capable")
-	case sandboxed:
-		return reject("headless is not supported with the sandbox in v1")
 	default:
 		return DriverHeadless, nil
 	}
@@ -119,13 +116,14 @@ func resolveDriverKind(explicit bool, agent config.Agent, hc config.HeadlessConf
 // agent's headless_args config (issue #1236); for Claude it is:
 //
 //	claude -p --output-format stream-json --input-format stream-json \
-//	       --verbose --permission-prompt-tool stdio <agentArgs...>
+//	       --verbose <agentArgs...>
 //
 // --input-format stream-json turns stdin into the message/control channel:
 // graith delivers the prompt as an initial user message (not a positional arg),
-// issues `interrupt` control requests, and answers inbound `can_use_tool`
-// permission asks routed by --permission-prompt-tool stdio. The CLI still runs
-// one turn to a terminal result; graith closes stdin on that result so the
+// issues `interrupt` control requests. A bundled non_interactive_args prefix
+// normally prevents native prompts; if one arrives, the headless driver must
+// deny it because there is no TUI in which a human can respond. The CLI still
+// runs one turn to a terminal result; graith closes stdin on that result so the
 // process exits (one-shot semantics preserved). agentArgs carries the agent's
 // own template-expanded args (e.g. --session-id <id>) and follows the prefix.
 // The Claude defaults are pinned to what was verified against claude 2.1.211

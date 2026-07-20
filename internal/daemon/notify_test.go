@@ -11,22 +11,8 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-func TestOnAgentStatusChange_NotifiesOnApproval(t *testing.T) {
-	sm := &SessionManager{
-		cfg: &config.Config{
-			Notifications: config.Notifications{
-				Enabled:    true,
-				OnApproval: true,
-			},
-		},
-		log: slog.Default(),
-	}
-
-	// Should not panic with nil messages store
-	sm.onAgentStatusChange("braw-id", "bonnie-session", "active", "approval")
-}
-
 func TestOnAgentStatusChange_DisabledNotifications(t *testing.T) {
+	dispatched := make(chan struct{}, 1)
 	sm := &SessionManager{
 		cfg: &config.Config{
 			Notifications: config.Notifications{
@@ -34,42 +20,85 @@ func TestOnAgentStatusChange_DisabledNotifications(t *testing.T) {
 			},
 		},
 		log: slog.Default(),
+		statusDispatch: func(_, _, _ string, _ time.Duration) error {
+			dispatched <- struct{}{}
+			return nil
+		},
 	}
 
-	sm.onAgentStatusChange("braw-id", "bonnie-session", "active", "approval")
+	sm.onAgentStatusChange("braw-id", "bonnie-session", "active", "stopped")
+
+	select {
+	case <-dispatched:
+		t.Fatal("disabled notifications must not reach any desktop dispatch")
+	case <-time.After(100 * time.Millisecond):
+	}
 }
 
-func TestOnAgentStatusChange_SkipsNonApprovalWhenOnlyApprovalEnabled(t *testing.T) {
+func TestOnAgentStatusChange_DefaultUsesNativeDispatchAndConfiguredTimeout(t *testing.T) {
+	type dispatchCall struct {
+		title    string
+		message  string
+		priority string
+		timeout  time.Duration
+	}
+
+	calls := make(chan dispatchCall, 1)
 	sm := &SessionManager{
 		cfg: &config.Config{
 			Notifications: config.Notifications{
-				Enabled:    true,
-				OnApproval: true,
-				OnStopped:  false,
+				Enabled:   true,
+				OnStopped: true,
+				Timing: config.NotificationTiming{
+					DispatchTimeout: "37ms",
+				},
 			},
 		},
 		log: slog.Default(),
+		statusDispatch: func(title, message, priority string, timeout time.Duration) error {
+			calls <- dispatchCall{title: title, message: message, priority: priority, timeout: timeout}
+			return nil
+		},
 	}
 
-	// "active" transitions should not trigger notifications
-	sm.onAgentStatusChange("braw-id", "bonnie-session", "unknown", "active")
+	sm.onAgentStatusChange("canny-id", "canny-session", "active", "stopped")
+
+	select {
+	case got := <-calls:
+		want := dispatchCall{
+			title:    "graith",
+			message:  "canny-session has stopped",
+			priority: config.NotifyPriorityNormal,
+			timeout:  37 * time.Millisecond,
+		}
+		if got != want {
+			t.Fatalf("dispatch = %#v, want %#v", got, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for native status notification dispatch")
+	}
 }
 
 func TestSendNotification_CommandUsesEnvVars(t *testing.T) {
 	outFile := filepath.Join(t.TempDir(), "out.txt")
+	nativeDispatch := make(chan struct{}, 1)
 
 	sm := &SessionManager{
 		cfg: &config.Config{
 			Notifications: config.Notifications{
-				Enabled:    true,
-				OnApproval: true,
-				Command:    "printf '%s|%s|%s' \"$GRAITH_SESSION_NAME\" \"$GRAITH_STATUS\" \"$GRAITH_MESSAGE\" > " + outFile,
+				Enabled:   true,
+				OnStopped: true,
+				Command:   "printf '%s|%s|%s' \"$GRAITH_SESSION_NAME\" \"$GRAITH_STATUS\" \"$GRAITH_MESSAGE\" > " + outFile,
 			},
 		},
 		log: slog.Default(),
+		statusDispatch: func(_, _, _ string, _ time.Duration) error {
+			nativeDispatch <- struct{}{}
+			return nil
+		},
 	}
 
-	sm.sendNotification("braw-kirk", "approval", sm.cfg.Notifications.Command)
+	sm.sendNotification("braw-kirk", "stopped", sm.cfg.Notifications.Command)
 
 	deadline := time.After(5 * time.Second)
 
@@ -78,9 +107,15 @@ func TestSendNotification_CommandUsesEnvVars(t *testing.T) {
 		if err == nil && len(data) > 0 {
 			got := string(data)
 
-			want := "braw-kirk|approval|braw-kirk needs approval"
+			want := "braw-kirk|stopped|braw-kirk has stopped"
 			if got != want {
 				t.Errorf("got %q, want %q", got, want)
+			}
+
+			select {
+			case <-nativeDispatch:
+				t.Fatal("custom command must replace the native status dispatch")
+			default:
 			}
 
 			return
@@ -101,8 +136,8 @@ func TestSendNotification_CommandInjectionPrevented(t *testing.T) {
 	sm := &SessionManager{
 		cfg: &config.Config{
 			Notifications: config.Notifications{
-				Enabled:    true,
-				OnApproval: true,
+				Enabled:   true,
+				OnStopped: true,
 				// Use $GRAITH_SESSION_NAME so the value reaches the shell;
 				// under the old {name} interpolation a malicious name would
 				// have been executed as a subshell.
@@ -113,7 +148,7 @@ func TestSendNotification_CommandInjectionPrevented(t *testing.T) {
 	}
 
 	malicious := "$(touch " + markerFile + ")"
-	sm.sendNotification(malicious, "approval", sm.cfg.Notifications.Command)
+	sm.sendNotification(malicious, "stopped", sm.cfg.Notifications.Command)
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -306,7 +341,7 @@ func TestOnAgentStatusChange_PublishesToMessageStore(t *testing.T) {
 		messages: ms,
 	}
 
-	sm.onAgentStatusChange("braw-sess", "braw-kirk", "active", "approval")
+	sm.onAgentStatusChange("braw-sess", "braw-kirk", "active", "error")
 
 	msgs, err := ms.Read("_system.status", "", false, "")
 	if err != nil {

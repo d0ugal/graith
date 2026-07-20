@@ -20,7 +20,6 @@ struct NewSessionView: View {
 
     // Advanced options (mirror `gr new` flags).
     @State private var base: String = ""
-    @State private var yolo = false
     @State private var inPlace = false
     @State private var agentHooks = true
 
@@ -71,20 +70,12 @@ struct NewSessionView: View {
                     TextField("Base branch (optional)", text: $base)
                         .textFieldStyleCompat()
                         .disabled(inPlace)
-                    Toggle("Yolo mode", isOn: $yolo)
                     Toggle("Run in place", isOn: $inPlace)
                     Toggle("Agent hooks", isOn: $agentHooks)
-                        .disabled(yolo)
-                    if yolo {
-                        Text("Yolo mode requires agent hooks, so they stay on.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
                 }
                 // Base doesn't apply in-place (no branch created); clear the stale
                 // value rather than leaving it to fail validation on Create.
                 .onChange(of: inPlace) { on in if on { base = "" } }
-                // Yolo forces agent hooks on daemon-side; mirror that in the UI.
-                .onChange(of: yolo) { on in if on { agentHooks = true } }
                 if let error {
                     Text(error).foregroundStyle(.red).font(.footnote)
                 }
@@ -158,10 +149,8 @@ struct NewSessionView: View {
             repoPath: selectedRepo,
             base: trimmedBase.isEmpty ? nil : trimmedBase,
             prompt: prompt.isEmpty ? nil : prompt,
-            // Yolo forces agent hooks on daemon-side; send the effective value.
-            agentHooks: agentHooks || yolo,
-            inPlace: inPlace ? true : nil,
-            yolo: yolo ? true : nil
+            agentHooks: agentHooks,
+            inPlace: inPlace ? true : nil
         )
         if await conn.create(req) {
             dismiss()

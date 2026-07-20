@@ -9,16 +9,15 @@ draft: false
 
 ## Passthrough mode
 
-When attached to a session, your terminal is in raw passthrough mode. All input goes directly to the agent's PTY except when intercepted by the prefix key.
+When attached, your terminal is in raw passthrough mode: all input goes straight to the agent's PTY unless the prefix key intercepts it.
 
 ### Prefix key
 
-Default: `ctrl+b` (configurable via `keybindings.prefix` in config).
+Default `ctrl+b`, configurable via `keybindings.prefix`.
 
-Press the prefix key to show a help bar, then press one of the following:
-
-Every prefix-action key is configurable via the matching `keybindings.*` field
-(the defaults are shown below):
+Press the prefix key to show a help bar at the bottom of the screen (it clears
+after the next keypress), then press one of these. Each key is configurable via
+the matching `keybindings.*` field (defaults shown):
 
 | Key | Action | Config key |
 |-----|--------|-----------|
@@ -34,28 +33,23 @@ Every prefix-action key is configurable via the matching `keybindings.*` field
 | `,` | Rename the current session | `rename_session` |
 | `[` | Open the scrollback pager | `scroll_mode` |
 | `m` | Open the message viewer | `messages` |
-| `a` | Open the approvals overlay | `approvals` |
 | `r` | Restart/resume the current session | `restart_session` |
 | `ctrl+b` | Send a literal prefix byte to the agent | -- |
 
-The help bar appears at the bottom of the screen when the prefix key is pressed,
-showing the currently-configured commands. It disappears after the next keypress.
-
-If two prefix commands are bound to the same key, graith starts anyway but prints
-a warning at load time (only the first command in the passthrough order would
-fire), so pick distinct keys.
+If two prefix commands share a key, graith starts but warns at load time and
+only the first in passthrough order fires — pick distinct keys.
 
 ### Literal prefix
 
-Press the prefix key twice (`ctrl+b ctrl+b`) to send a single `ctrl+b` to the agent. This is necessary when the agent or a program inside the session needs to receive the prefix byte.
+Press the prefix key twice (`ctrl+b ctrl+b`) to send a single `ctrl+b` to the agent — for when a program inside the session needs the prefix byte itself.
 
 ### Kitty protocol
 
-graith handles both raw control bytes and Kitty keyboard protocol CSI u sequences. Terminals that use the extended protocol (e.g. Ghostty) send `ESC [ <codepoint> ; 5 u` for ctrl+key combinations. graith normalizes these to raw control bytes for prefix detection, and strips release events.
+graith also understands the Kitty keyboard protocol: extended terminals (e.g. Ghostty) send `ESC [ <codepoint> ; 5 u` for ctrl+key combinations, which graith normalizes to raw control bytes for prefix detection, stripping release events.
 
 ## Session picker overlay
 
-The overlay is a full-screen TUI (built with Bubble Tea) that shows all sessions. Open it with `ctrl+b w` or by running `gr attach` with no arguments.
+The overlay is a full-screen TUI showing all sessions. Open it with `ctrl+b w`, or run `gr attach` with no arguments.
 
 ### Navigation
 
@@ -73,12 +67,12 @@ The overlay is a full-screen TUI (built with Bubble Tea) that shows all sessions
 
 ### View modes
 
-Cycle with `h`/`l` or left/right arrow keys:
+Cycle with `h`/`l` or arrows:
 
 | View | Description |
 |------|-------------|
 | All | Every session, grouped by repo. Starred first, then running, then by name |
-| Needs Attention | Sessions needing user action: waiting for approval, errored, idle (running but ready), or stopped with dirty/unpushed changes. Sorted oldest-first by time in current state |
+| Needs Attention | Errored sessions, agent runtime errors, idle sessions (running but ready), or stopped sessions with dirty/unpushed changes. Sorted oldest-first by time in current state |
 | Active | Running sessions only, sorted newest-first by creation time |
 | Starred | Starred sessions only |
 
@@ -88,7 +82,7 @@ Cycle with `h`/`l` or left/right arrow keys:
 |-----|--------|
 | `n` | Create a new session (opens a form with name and repo fields) |
 | `x` | Delete session (prompts for confirmation with `y`) |
-| `s` | Star/unstar session |
+| `s` | Toggle starred state |
 | `r` | Restart session (prompts for confirmation) |
 | `R` | Restart all sessions in current view (prompts for confirmation) |
 | Space | Fold/unfold children of a parent session |
@@ -96,7 +90,7 @@ Cycle with `h`/`l` or left/right arrow keys:
 | `/` | Enter filter mode (type to search by name or repo) |
 | Esc (in filter) | Clear filter and return to list |
 
-There is no stop, resume, or rename action in the overlay. Use `gr stop`, `gr restart`, or `gr rename` from the CLI.
+The overlay has no stop, resume, or rename action — use `gr stop`, `gr restart`, or `gr update <session> --name <new-name>` from the CLI.
 
 ### Preview panel
 
@@ -111,35 +105,19 @@ Each session row shows:
 | Column | Content |
 |--------|---------|
 | Name | Session name (with star indicator if starred) |
-| Status | Running, stopped, errored, or agent status (e.g. approval) |
+| Status | Running, stopped, errored, or agent status (`active`, `ready`, or `error`) |
 | Summary | Status text, tool name from hooks, or auto-derived activity |
 | Git | Branch name (or "(in-place)"), dirty indicator, unpushed commit count |
 | Output | Age of most recent output |
 
-## Dashboard
+## Message viewer and scroll pager
 
-The dashboard (`gr dashboard`) is a live-updating TUI similar to the session picker but designed for monitoring.
-
-| Key | Action | Config key |
-|-----|--------|-----------|
-| `j` / Down | Move cursor down | `overlay.down` |
-| `k` / Up | Move cursor up | `overlay.up` |
-| Enter / `a` | Attach to session | `overlay.dashboard_attach` |
-| `s` | Stop session (with confirmation) | `overlay.dashboard_stop` |
-| `x` / `d` | Delete session (with confirmation) | `overlay.dashboard_delete` |
-| `r` | Resume a stopped session | `overlay.dashboard_resume` |
-| `q` / `ctrl+c` | Quit | `overlay.cancel` |
-
-## Message viewer, approvals, and scroll pager
-
-The message viewer (`ctrl+b m`), approvals overlay (`ctrl+b a`), and scrollback
-pager (`ctrl+b [`) share a configurable navigation vocabulary and add their own
-action keys.
+The message viewer (`ctrl+b m`) and scrollback pager (`ctrl+b [`) share a
+configurable navigation vocabulary and add their own action keys.
 
 | Overlay | Keys | Config keys |
 |---------|------|-------------|
 | Message viewer | `j`/`k` move · `pgdn`/`pgup` scroll · `g`/`G` first/last · `h`/`l` conversation · `enter` pin · `O`/`C` expand/collapse all · `q` close | `overlay.up`/`down`, `overlay.page_down`/`page_up`, `overlay.top`/`bottom`, `overlay.message_prev_conversation`/`message_next_conversation`, `overlay.message_pin`, `overlay.message_expand_all`/`message_collapse_all`, `overlay.cancel` |
-| Approvals | `y` allow · `n`/`x` deny · `a` allow-all · `q` cancel | `overlay.approval_allow`, `overlay.approval_deny`, `overlay.approval_allow_all`, `overlay.cancel` |
 | Scroll pager | `g`/`G` top/bottom · `q` quit (up/down/page keys are handled by the pager) | `overlay.top`/`bottom`, `overlay.cancel` |
 
 ## Configuring overlay keys
@@ -147,11 +125,11 @@ action keys.
 The full-screen overlays read their keys from the `[keybindings.overlay]` config
 table. Each value is a space-separated list of [Bubble Tea](https://github.com/charmbracelet/bubbletea)
 key names (single letters, `up`, `down`, `enter`, `esc`, `pgup`, `ctrl+d`, …);
-pressing any listed key triggers the action. A partial table overrides only the
-keys it names — every other key keeps its default. See the
-[interface configuration]({{< relref "configuration/interface.md" >}}) page for
-the full list of keys and their defaults.
+any listed key triggers the action. A partial table overrides only the keys it
+names — the rest keep their defaults. See
+[interface configuration]({{< relref "configuration/interface.md" >}}) for the
+full list and defaults.
 
 ## Shell
 
-Press `ctrl+b s` to open an interactive shell in the current session's worktree. The shell runs as a child process with `GRAITH_WORKTREE` set to the worktree path. When you exit the shell, the terminal is reset (alternate screen buffer cleared, mouse tracking disabled, cursor shown) and you return to the agent session.
+Press `ctrl+b s` to open an interactive shell in the current session's worktree, as a child process with `GRAITH_WORKTREE` set to that path. On exit, the terminal resets (alternate screen buffer cleared, mouse tracking disabled, cursor shown) and you return to the agent session.

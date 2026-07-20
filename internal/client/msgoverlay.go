@@ -22,6 +22,30 @@ type msgConversation struct {
 	lastAt   time.Time
 }
 
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+
+	return s
+}
+
+func truncate(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+
+	if len(s) <= maxLen {
+		return s
+	}
+
+	if maxLen < 4 {
+		return s[:maxLen]
+	}
+
+	return s[:maxLen-3] + "..."
+}
+
 // msgEntry is a single rendered message in a thread.
 type msgEntry struct {
 	id        string // stable message id (for collapse state across refreshes)
@@ -64,8 +88,8 @@ type messageOverlayModel struct {
 	keys     MessageKeys
 	// refresh is the daemon re-poll cadence, snapshotted from the shared
 	// configurable refreshInterval (issue #1315) when the overlay opens so the
-	// message viewer tracks terminal.refresh_interval like the picker,
-	// dashboard, and status bar rather than a private hard-coded cadence.
+	// message viewer tracks terminal.refresh_interval like the picker and status
+	// bar rather than a private hard-coded cadence.
 	refresh time.Duration
 }
 
@@ -774,8 +798,8 @@ func sanitizeMessageBody(s string) string {
 // RunMessageOverlay displays the chatroom-style message viewer for sessionID,
 // showing direct messages to and from that session grouped by peer. It is
 // read-only in v1 and re-polls the daemon at the configured shared refresh
-// interval (terminal.refresh_interval), matching the picker, dashboard, and
-// status bar. fetch returns the conversation and ok=false on a transient error
+// interval (terminal.refresh_interval), matching the picker and status bar.
+// fetch returns the conversation and ok=false on a transient error
 // (so the last good snapshot is kept).
 // Returns when the user closes the overlay; the caller then reattaches.
 func RunMessageOverlay(sessionID string, keys MessageKeys, fetch func() ([]protocol.ConversationMessage, bool), names map[string]string) {

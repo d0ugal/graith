@@ -78,6 +78,9 @@ func setupAtWithState(t *testing.T, tmpDir string, initialState *daemon.State, m
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
+	// Synthetic integration agents run without a sandbox backend. Individual
+	// sandbox tests opt back in with their purpose-built fake backend.
+	cfg.Sandbox.Enabled = false
 	cfg.Agents["echo"] = config.Agent{
 		Command:    "sh",
 		Args:       []string{"-c", "echo 'ready'; exec cat"},
@@ -238,7 +241,7 @@ func readControl(t *testing.T, r *protocol.FrameReader) protocol.Envelope {
 func handshake(t *testing.T, r *protocol.FrameReader, w *protocol.FrameWriter) {
 	t.Helper()
 	sendControl(t, w, "handshake", protocol.HandshakeMsg{
-		Version: "1.0", ClientID: "test", TerminalSize: [2]uint16{80, 24},
+		Version: "2.0", ClientID: "test", TerminalSize: [2]uint16{80, 24},
 	})
 
 	resp := readControl(t, r)
@@ -579,7 +582,7 @@ func TestResumeInvalidatesPreviousSessionToken(t *testing.T) {
 	}
 }
 
-func TestRename(t *testing.T) {
+func TestUpdateName(t *testing.T) {
 	env := setup(t)
 	defer env.teardown()
 
@@ -595,14 +598,15 @@ func TestRename(t *testing.T) {
 
 	_ = protocol.DecodePayload(createResp, &info)
 
-	sendControl(t, w, "rename", protocol.RenameMsg{SessionID: info.ID, NewName: "bonnie"})
+	newName := "bonnie"
+	sendControl(t, w, "update", protocol.UpdateMsg{SessionID: info.ID, Name: &newName})
 
-	renameResp := readControl(t, r)
-	if renameResp.Type == "error" {
+	updateResp := readControl(t, r)
+	if updateResp.Type == "error" {
 		var e protocol.ErrorMsg
 
-		_ = protocol.DecodePayload(renameResp, &e)
-		t.Fatalf("rename error: %s", e.Message)
+		_ = protocol.DecodePayload(updateResp, &e)
+		t.Fatalf("update error: %s", e.Message)
 	}
 
 	sendControl(t, w, "list", struct{}{})
@@ -625,7 +629,87 @@ func TestRename(t *testing.T) {
 	}
 
 	if !found {
-		t.Error("session not found after rename")
+		t.Error("session not found after name update")
+	}
+}
+
+func TestUpdateStarredPersistsAndProtectsDeletion(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	r, w := env.connect(t)
+	handshake(t, r, w)
+
+	sendControl(t, w, "create", protocol.CreateMsg{
+		Name: "auld", Agent: "echo", RepoPath: env.repo, Base: "main",
+	})
+
+	var created protocol.SessionInfo
+
+	_ = protocol.DecodePayload(readControl(t, r), &created)
+
+	name := "bonnie"
+	starred := true
+	sendControl(t, w, "update", protocol.UpdateMsg{
+		SessionID: created.ID,
+		Name:      &name,
+		Starred:   &starred,
+	})
+
+	updatedEnv := readControl(t, r)
+	if updatedEnv.Type != "updated" {
+		var e protocol.ErrorMsg
+
+		_ = protocol.DecodePayload(updatedEnv, &e)
+		t.Fatalf("update error: %s", e.Message)
+	}
+
+	var updated protocol.UpdateResultMsg
+	if err := protocol.DecodePayload(updatedEnv, &updated); err != nil {
+		t.Fatalf("decode update result: %v", err)
+	}
+
+	if updated.SessionID != created.ID || updated.Name != "bonnie" || !updated.Starred {
+		t.Fatalf("updated = %+v, want combined persisted state", updated)
+	}
+
+	loaded, err := daemon.LoadState(filepath.Join(env.tmpDir, "state.json"))
+	if err != nil {
+		t.Fatalf("load persisted state: %v", err)
+	}
+
+	if persisted := loaded.Sessions[created.ID]; persisted == nil || persisted.Name != "bonnie" || !persisted.Starred {
+		t.Fatalf("persisted = %+v, want combined update", persisted)
+	}
+
+	sendControl(t, w, "list", protocol.ListMsg{})
+
+	var list protocol.SessionListMsg
+
+	_ = protocol.DecodePayload(readControl(t, r), &list)
+
+	if len(list.Sessions) != 1 || list.Sessions[0].ID != created.ID || !list.Sessions[0].Starred {
+		t.Fatalf("list = %+v, want starred session", list.Sessions)
+	}
+
+	sendControl(t, w, "delete", protocol.DeleteMsg{SessionID: created.ID})
+
+	if resp := readControl(t, r); resp.Type != "error" {
+		t.Fatalf("delete starred session response = %q, want error", resp.Type)
+	}
+
+	starred = false
+
+	sendControl(t, w, "update", protocol.UpdateMsg{SessionID: created.ID, Starred: &starred})
+
+	if resp := readControl(t, r); resp.Type != "updated" {
+		t.Fatalf("clear starred response = %q, want updated", resp.Type)
+	}
+
+	sendControl(t, w, "delete", protocol.DeleteMsg{SessionID: created.ID})
+
+	if resp := readControl(t, r); resp.Type != "deleted" {
+		t.Fatalf("delete unstarred response = %q, want deleted", resp.Type)
 	}
 }
 

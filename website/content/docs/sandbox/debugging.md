@@ -20,24 +20,22 @@ draft: false
 
 ## Debugging the sandbox
 
-When an agent hits a confusing "permission denied", there are two different
-questions you might be asking — and `gr sandbox` has a subcommand for each:
+A confusing "permission denied" raises one of two questions, each with a
+`gr sandbox` subcommand:
 
 | Question | Command | Needs |
 |----------|---------|-------|
 | *Would* this access be allowed? (predictive) | `gr sandbox explain` | a policy **oracle** → `nono` |
 | What *did* the sandbox actually deny? (retrospective) | `gr sandbox watch` | an OS **denial log** → macOS |
 
-Neither launches an agent or changes anything. The split is by capability, not
-by backend: a future backend with an oracle joins `explain`, and a future OS
-audit log joins `watch`.
+Neither launches an agent or changes anything; the split is by capability, not
+backend.
 
 ### `gr sandbox explain` — the policy oracle (predictive)
 
-`explain` tells you whether a given access *would* be allowed or denied under
-your configured policy, before you run anything. It builds the exact profile
-graith would generate from your config and asks the backend's policy oracle,
-then renders the decision.
+`explain` tells you whether an access *would* be allowed or denied under your
+configured policy: it builds the exact profile graith would generate, asks the
+backend's policy oracle, and renders the decision.
 
 ```bash
 # Would the agent be able to read your SSH key? (no — deny_credentials)
@@ -57,26 +55,23 @@ gr sandbox explain --agent codex --path /etc/hosts --op read
 machine-readable decision (`allowed`, `status`, `reason`, `details`, `source`,
 `suggested_flag`).
 
-`explain` needs a **policy oracle**, which today only the `nono` backend
-provides. On a `safehouse` config it errors and points you at `gr sandbox
-watch`, since a Seatbelt policy can only be inspected by observing what it
-actually blocked.
+`explain` needs a **policy oracle**, which today only `nono` provides. On
+`safehouse` it errors and points you at `gr sandbox watch` — a Seatbelt policy
+can only be inspected by observing what it blocked.
 
 The answer reflects graith's generated profile (including the
-`environment.allow_vars` allowlist), so it is a faithful preview of what a real
-session would enforce. Note that a read-only `read_dirs`/`read_files` grant
-at or under `/tmp` or `$TMPDIR` is rejected up front (see the
-[default-writable caveat]({{< relref "how-it-works.md#the-tmp-default-writable-caveat" >}})), so `gr sandbox
-explain` returns that config error rather than a decision — another reason to
-keep read-only sandbox paths outside `/tmp`.
+`environment.allow_vars` allowlist) — a faithful preview of what a real session
+enforces. A read-only `read_dirs`/`read_files` grant at or under `/tmp` or
+`$TMPDIR` is rejected up front (see the
+[default-writable caveat]({{< relref "how-it-works.md#the-tmp-default-writable-caveat" >}})), so `explain`
+returns that config error, not a decision.
 
 ### `gr sandbox watch` — the denial log (retrospective)
 
-`watch` shows the denials the OS actually recorded. The macOS Seatbelt sandbox
-logs every denial to the unified log; `watch` taps it and shows you exactly
-which paths and operations were blocked. This is the practical way to debug a
-confusing "permission denied", and the **only** way under `safehouse` (which has
-no oracle).
+`watch` shows the denials the OS actually recorded: macOS Seatbelt logs every
+denial to the unified log, and `watch` taps it to show exactly which paths and
+operations were blocked — the **only** way to debug under `safehouse` (no
+oracle).
 
 ```bash
 # Live-tail denials as they happen (Ctrl-C to stop) — the default
@@ -98,48 +93,44 @@ gr sandbox watch my-session
 gr sandbox watch --proc node
 ```
 
-`watch` **live-tails by default on a terminal**; `--recent` switches to an
-aggregated window view (identical denials collapse into one row with a repeat
-count, so a loop hammering the same blocked path reads as `  42× file-read-data
-/path [node]` rather than 42 lines). Passing `--since` implies `--recent`. Add
-`--json` for machine-readable output: live mode emits one NDJSON object per
-denial as it arrives; `--recent` emits the aggregate.
+On a terminal `watch` **live-tails by default**; when output isn't a terminal
+(piped, `--json`, or agent mode) it defaults to `--recent`, so a non-interactive
+caller can't tail forever with no way to stop. `--recent` shows an aggregated
+window where identical denials collapse into one row with a repeat count (a loop
+hammering one blocked path reads as `  42× file-read-data /path [node]`, not 42
+lines); `--since` implies it. `--follow` (`-f`) forces a live tail anywhere.
+`--json` emits one NDJSON object per denial live, or the aggregate under
+`--recent`.
 
-When output is **not a terminal** (piped, or in `--json`/agent mode), `watch`
-defaults to `--recent` instead of live — otherwise a non-interactive caller
-would tail forever with no way to stop it. Pass `--follow` (`-f`) to force a
-live tail there.
+A **session name** scopes denials to that session's process tree:
 
-Passing a **session name** scopes denials to that session's process tree:
-
-- Live (the default on a terminal), membership is re-checked against a
-  short-lived process-tree snapshot, so a subprocess the agent spawns *after*
-  you start watching is attributed once the snapshot catches it. This scopes
-  more reliably than `--recent`, but it isn't perfect: a child that is denied
-  and exits before the snapshot sees it can't be attributed (the macOS log
-  carries no session identity), and over a long watch a recycled PID could be
-  misattributed.
-- With `--recent`, graith can only match against the process tree as it exists
-  **now**. Denials from children that have since exited are therefore missing,
-  and a recycled PID can be misattributed. `gr sandbox watch <session> --recent`
-  prints a note to this effect; prefer `--proc` (or a live `watch`) when scoping
+- Live (the terminal default) re-checks membership against a short-lived
+  process-tree snapshot, so a subprocess spawned *after* you start watching is
+  attributed once the snapshot catches it — more reliable than `--recent`.
+- `--recent` matches only the tree as it exists **now**, so denials from
+  children that have since exited are missing; `gr sandbox watch <session>
+  --recent` prints a note. Prefer `--proc` (or a live `watch`) when scoping
   matters.
 
-`watch` is **macOS-only** — it relies on Seatbelt and unified logging. On Linux,
-where `safehouse` isn't available at all, use `gr sandbox explain` (the `nono`
-oracle) instead. The denial log reflects what the kernel *actually* blocked, so
-`watch` is also useful under `nono` on macOS (which uses Seatbelt underneath).
+Neither is perfect: the macOS log carries no session identity, so a child that
+exited before attribution can't be scoped, and over a long watch a recycled PID
+can be misattributed.
+
+`watch` is **macOS-only** — it relies on Seatbelt and unified logging; on Linux
+(no `safehouse`) use `gr sandbox explain` (the `nono` oracle). The denial log
+reflects what the kernel *actually* blocked, so `watch` also helps under `nono`
+on macOS (Seatbelt underneath).
 
 > **Note:** `watch` reads the unified log via `/usr/bin/log`, which refuses to
 > run *inside* a sandbox (`log: Cannot run while sandboxed`). Run it from your
-> normal shell, not from within a sandboxed agent session.
+> normal shell, not a sandboxed agent session.
 
 ## Limitations
 
-- `safehouse`: macOS only; requires safehouse installed separately; cannot
-  filter network egress.
+- `safehouse`: macOS only; requires safehouse installed separately; can't filter
+  network egress.
 - `nono`: requires the nono binary installed separately; Linux needs kernel
   5.13+ (Landlock) for filesystem enforcement and **6.7+ (Landlock ABI v4)** for
-  network filtering. Credential injection is not wired up yet.
-- `process-control` is a no-op under nono unless `signal_mode = "isolated"` is
-  set (see [feature caveats]({{< relref "configuration.md#feature-gate-caveats" >}})).
+  network filtering. Credential injection isn't wired up yet.
+- `process-control` is a no-op under nono unless `signal_mode = "isolated"`
+  (see [feature caveats]({{< relref "configuration.md#feature-gate-caveats" >}})).

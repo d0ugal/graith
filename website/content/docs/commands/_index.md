@@ -7,12 +7,13 @@ toc: true
 draft: false
 ---
 
-The complete `gr` command-line reference, grouped by area:
+The `gr` command-line reference, grouped by area:
 
 - **[Session management]({{< relref "sessions.md" >}})** — create, attach, stop, fork, migrate, and delete sessions.
-- **[Monitoring & interaction]({{< relref "monitoring.md" >}})** — list, logs, tokens, doctor, and driving a running session.
+- **[Monitoring & interaction]({{< relref "monitoring.md" >}})** — session lists, token usage, logs, doctor, and driving a running session.
 - **[Messaging & store]({{< relref "messaging-store.md" >}})** — inter-agent messaging and the document store.
 - **[Scenarios, triggers & todos]({{< relref "orchestration.md" >}})** — multi-session scenarios, daemon-fired triggers, and the shared todo list.
+- **[Remote access]({{< relref "remote.md" >}})** — pair, administer, list, and attach to remote daemons.
 - **[Daemon & other commands]({{< relref "daemon.md" >}})** — daemon lifecycle, config, MCP, completion, and internal commands.
 
 ## Global flags
@@ -25,4 +26,4 @@ All commands accept:
 | `--json` | Output in JSON format |
 | `--agent-mode` | Force agent mode (auto-enables JSON output) |
 
-Agent mode is auto-detected when running inside a graith session or other AI agent environment (Claude Code, Cursor, Copilot, Amazon Q, OpenCode). Override with `GR_AGENT_MODE=0` to disable or `GR_AGENT_MODE=1` to force.
+Agent mode is auto-detected inside a graith session or other AI agent environment (Claude Code, Cursor, Copilot, Amazon Q, OpenCode). `GR_AGENT_MODE=0` disables it; `GR_AGENT_MODE=1` forces it.

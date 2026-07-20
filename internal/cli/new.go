@@ -26,15 +26,13 @@ var (
 	newInPlace             bool
 	newAllowConcurrent     bool
 	newSkipModelValidation bool
-	newYolo                bool
 	newHeadless            bool
 	newNoFetch             bool
 
-	newCodexProfile        string
-	newCodexReasoning      string
-	newCodexServiceTier    string
-	newCodexWebSearch      bool
-	newCodexApprovalPolicy string
+	newCodexProfile     string
+	newCodexReasoning   string
+	newCodexServiceTier string
+	newCodexWebSearch   bool
 )
 
 var newCmd = &cobra.Command{
@@ -98,7 +96,6 @@ var newCmd = &cobra.Command{
 			ReasoningEffort: newCodexReasoning,
 			ServiceTier:     newCodexServiceTier,
 			WebSearch:       newCodexWebSearch,
-			ApprovalPolicy:  newCodexApprovalPolicy,
 		}
 
 		var codexPtr *config.CodexOptions
@@ -126,7 +123,6 @@ var newCmd = &cobra.Command{
 			InPlace:             newInPlace,
 			AllowConcurrent:     newAllowConcurrent,
 			SkipModelValidation: newSkipModelValidation,
-			Yolo:                newYolo,
 			Headless:            newHeadless,
 			NoFetch:             newNoFetch,
 			Codex:               codexPtr,
@@ -148,6 +144,7 @@ var newCmd = &cobra.Command{
 		var info protocol.SessionInfo
 
 		_ = protocol.DecodePayload(resp, &info)
+		warnUnsandboxedStart(info)
 
 		if jsonOutput {
 			return out.JSON(info)
@@ -189,14 +186,12 @@ func registerNewCmd() {
 	newCmd.Flags().BoolVar(&newInPlace, "in-place", false, "run agent directly in the repo without creating a worktree")
 	newCmd.Flags().BoolVar(&newAllowConcurrent, "allow-concurrent", false, "allow multiple in-place sessions on the same repo")
 	newCmd.Flags().BoolVar(&newSkipModelValidation, "skip-model-validation", false, "skip validate_model check (use models not in the validation list)")
-	newCmd.Flags().BoolVar(&newYolo, "yolo", false, "auto-approve all tool requests for this session (no approval prompts)")
 	newCmd.Flags().BoolVar(&newHeadless, "headless", false, "run as a headless stream-json session instead of an interactive PTY (experimental; Claude only)")
 	newCmd.Flags().BoolVar(&newNoFetch, "no-fetch", false, "skip git fetch origin and create the worktree from local repo state (use when SSH auth is unavailable or offline)")
 	newCmd.Flags().StringVar(&newCodexProfile, "codex-profile", "", "Codex config profile to layer on top (codex --profile)")
 	newCmd.Flags().StringVar(&newCodexReasoning, "codex-reasoning-effort", "", "Codex model reasoning effort: minimal, low, medium, high, xhigh")
 	newCmd.Flags().StringVar(&newCodexServiceTier, "codex-service-tier", "", "Codex service tier: auto, default, flex, priority")
 	newCmd.Flags().BoolVar(&newCodexWebSearch, "codex-web-search", false, "enable Codex live web search (codex --search)")
-	newCmd.Flags().StringVar(&newCodexApprovalPolicy, "codex-approval-policy", "", "Codex approval policy: untrusted, on-request, never")
 	_ = newCmd.RegisterFlagCompletionFunc("agent", completeAgentNames)
 	_ = newCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	_ = newCmd.RegisterFlagCompletionFunc("base", completeBranchNames)

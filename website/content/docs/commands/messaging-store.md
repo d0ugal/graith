@@ -9,11 +9,11 @@ draft: false
 
 ## Messaging
 
-See [Inter-Agent Messaging]({{< relref "/docs/messaging.md" >}}) for full details.
+See [Inter-Agent Messaging]({{< relref "/docs/messaging.md" >}}) for details.
 
 ### `gr msg pub <body>`
 
-Publish a message to a stream.
+Publish to a stream.
 
 | Flag | Description |
 |------|-------------|
@@ -25,7 +25,7 @@ Publish a message to a stream.
 
 ### `gr msg send <session> [body]`
 
-Send a message to a session's inbox. By default, also types a notification into the session's PTY.
+Send a message to a session's inbox; also types a PTY notification by default.
 
 | Flag | Description |
 |------|-------------|
@@ -39,7 +39,7 @@ Send a message to a session's inbox. By default, also types a notification into 
 
 ### `gr msg sub`
 
-Read messages from a stream.
+Read from a stream.
 
 | Flag | Description |
 |------|-------------|
@@ -80,7 +80,7 @@ Show a single quarantined comment, including its body.
 
 ### `gr msg jail release [id]`
 
-Release a quarantined comment — deliver its content to the target session's inbox. **Restricted to the human or the orchestrator**; a plain agent session is rejected.
+Release a quarantined comment — deliver it to the target session's inbox. **Human or orchestrator only**; plain agent sessions are rejected.
 
 | Flag | Description |
 |------|-------------|
@@ -89,11 +89,11 @@ Release a quarantined comment — deliver its content to the target session's in
 
 ## Document store
 
-See [Document Store]({{< relref "/docs/store.md" >}}) for full details.
+See [Document Store]({{< relref "/docs/store.md" >}}) for details.
 
 ### `gr store put <key> [body]`
 
-Store a document. Reads from stdin if no body or `--file` is given.
+Store a document. Reads stdin if no body or `--file`.
 
 | Flag | Description |
 |------|-------------|
@@ -101,7 +101,7 @@ Store a document. Reads from stdin if no body or `--file` is given.
 
 ### `gr store get <key>`
 
-Retrieve a document. Outputs the raw body.
+Retrieve a document's raw body.
 
 ### `gr store list [prefix]` (alias: `ls`)
 
@@ -113,7 +113,7 @@ List documents, optionally filtered by key prefix.
 
 ### `gr store append <key> [line]`
 
-Append a line to a document. Creates the document if it does not exist. Reads from stdin if no body or `--file` is given.
+Append a line to a document, creating it if absent. Reads stdin if no body or `--file`.
 
 | Flag | Description |
 |------|-------------|
@@ -121,7 +121,7 @@ Append a line to a document. Creates the document if it does not exist. Reads fr
 
 ### `gr store rm <key>`
 
-Remove a document from the store.
+Remove a document.
 
 ### Store persistent flags
 

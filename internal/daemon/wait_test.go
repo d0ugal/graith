@@ -117,14 +117,14 @@ func TestMatchWriterMaxBufZeroFallsBackToDefault(t *testing.T) {
 }
 
 func TestIsIdleAgentStatus(t *testing.T) {
-	idle := []string{"ready", "unknown", ""}
+	idle := []string{"ready", "error", "unknown", ""}
 	for _, s := range idle {
 		if !isIdleAgentStatus(s) {
 			t.Errorf("isIdleAgentStatus(%q) = false, want true", s)
 		}
 	}
 
-	busy := []string{"active", "approval"}
+	busy := []string{"active"}
 	for _, s := range busy {
 		if isIdleAgentStatus(s) {
 			t.Errorf("isIdleAgentStatus(%q) = true, want false", s)

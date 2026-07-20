@@ -29,7 +29,7 @@ struct RealHostClientTests {
     private func handshake(_ d: MockDaemon) async throws {
         let hs = try await d.readControl()
         #expect(hs.type == "handshake")
-        try await d.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+        try await d.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
     }
 
     @Test func connectThenListSessions() async throws {
@@ -56,14 +56,14 @@ struct RealHostClientTests {
             try await self.handshake(d)
             _ = try await d.readControl()
             try await d.writeControl("session_list", SessionListMsg(sessions: [
-                makeSession(id: "x", name: "braw", status: "running", agentStatus: "approval"),
+                makeSession(id: "x", name: "braw", status: "running", agentStatus: "error"),
             ]))
         }
         try await client.connect()
         let status = try await client.status(sessionID: "x")
         #expect(status.session.name == "braw")
         #expect(status.fleet.total == 1)
-        #expect(status.fleet.approval == 1)
+        #expect(status.fleet.errored == 1)
         _ = await server.result
         await client.disconnect()
     }
@@ -159,13 +159,24 @@ struct RealHostClientTests {
     }
 
     @Test func lifecycleMutationsRoundTrip() async throws {
-        let expected = ["resume", "restart", "interrupt", "delete", "rename", "star", "unstar"]
+        let expected = ["resume", "restart", "interrupt", "delete", "update"]
         let (client, server) = make { d in
             try await self.handshake(d)
             for want in expected {
                 let req = try await d.readControl()
                 #expect(req.type == want)
-                try await d.writeControl("ok", EmptyMsg())
+                if want == "update" {
+                    let update = try decodePayload(req, as: UpdateMsg.self)
+                    #expect(update.sessionID == "x")
+                    #expect(update.name == "renamed")
+                    #expect(update.parentID == nil)
+                    try await d.writeControl(
+                        "updated",
+                        UpdateResultMsg(sessionID: "x", name: "renamed", parentID: "", starred: false)
+                    )
+                } else {
+                    try await d.writeControl("ok", EmptyMsg())
+                }
             }
         }
         try await client.connect()
@@ -174,8 +185,25 @@ struct RealHostClientTests {
         try await client.interrupt(sessionID: "x")
         try await client.delete(sessionID: "x")
         try await client.rename(sessionID: "x", newName: "renamed")
-        try await client.star(sessionID: "x")
-        try await client.unstar(sessionID: "x")
+        _ = await server.result
+        await client.disconnect()
+    }
+
+    @Test func updateReturnsPersistedState() async throws {
+        let (client, server) = make { d in
+            try await self.handshake(d)
+            let req = try await d.readControl()
+            #expect(req.type == "update")
+            let update = try decodePayload(req, as: UpdateMsg.self)
+            #expect(update.starred == false)
+            try await d.writeControl(
+                "updated",
+                UpdateResultMsg(sessionID: "x", name: "braw", parentID: "", starred: false)
+            )
+        }
+        try await client.connect()
+        let result = try await client.update(sessionID: "x", name: nil, parentID: nil, starred: false)
+        #expect(result.starred == false)
         _ = await server.result
         await client.disconnect()
     }

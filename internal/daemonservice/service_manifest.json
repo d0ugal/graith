@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "bundle_identifier": "net.graith.service",
+  "default_label": "net.graith.service.daemon",
+  "named_label_prefix": "net.graith.service.daemon.profile.",
+  "profile_slots": 64
+}

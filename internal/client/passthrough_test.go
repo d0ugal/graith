@@ -827,7 +827,6 @@ var prefixKeyOpts = PassthroughOpts{
 		RenameSession:       ',',
 		ScrollMode:          '[',
 		Messages:            'm',
-		Approvals:           'a',
 		RestartSession:      'r',
 	},
 }
@@ -877,7 +876,6 @@ func TestPrefixKeyActions2(t *testing.T) {
 		want PassthroughResult
 	}{
 		{"messages", 'm', ResultMessageOverlay},
-		{"approvals", 'a', ResultApprovalOverlay},
 		{"restart", 'r', ResultRestart},
 		{"next", 'n', ResultNextSession},
 		{"prev", 'p', ResultPrevSession},
@@ -997,12 +995,11 @@ func TestShowHelpBarReflectsConfiguredKeys(t *testing.T) {
 		RenameSession:       'M',
 		ScrollMode:          'B',
 		Messages:            'G',
-		Approvals:           'A',
 		RestartSession:      'R',
 	})
 
 	got := buf.String()
-	for _, want := range []string{"Q detach", "Z sessions", "V shell", "O orch", "L last", "N/P next/prev", "C new", "F fork", "M rename", "B scroll", "G messages", "A approvals", "R restart"} {
+	for _, want := range []string{"Q detach", "Z sessions", "V shell", "O orch", "L last", "N/P next/prev", "C new", "F fork", "M rename", "B scroll", "G messages", "R restart"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("help bar missing %q; got %q", want, got)
 		}

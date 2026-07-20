@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/adrg/xdg"
@@ -71,7 +72,7 @@ func ResolvePaths() (Paths, error) {
 	}
 
 	configFile := filepath.Join(configHome(), appName, "config.toml")
-	dataDir := filepath.Join(xdg.DataHome, appName)
+	dataDir := filepath.Join(dataHome(), appName)
 	runtimeDir := runtimeDirForApp(appName)
 
 	return Paths{
@@ -93,11 +94,35 @@ func ResolvePaths() (Paths, error) {
 }
 
 func runtimeDirForApp(appName string) string {
+	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
+		return filepath.Join(d, appName)
+	}
+
 	if d := xdg.RuntimeDir; d != "" {
 		return filepath.Join(d, appName)
 	}
 
-	return filepath.Join(xdg.DataHome, appName, "run")
+	return filepath.Join(dataHome(), appName, "run")
+}
+
+func dataHome() string {
+	if value := os.Getenv("XDG_DATA_HOME"); value != "" {
+		return value
+	}
+
+	if home, err := os.UserHomeDir(); err == nil {
+		return defaultDataHome(runtime.GOOS, home)
+	}
+
+	return xdg.DataHome
+}
+
+func defaultDataHome(goos, home string) string {
+	if goos == "darwin" {
+		return filepath.Join(home, "Library", "Application Support")
+	}
+
+	return filepath.Join(home, ".local", "share")
 }
 
 func (p Paths) WithDataDir(dataDir string) Paths {

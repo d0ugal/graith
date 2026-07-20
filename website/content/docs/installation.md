@@ -7,7 +7,7 @@ toc: true
 draft: false
 ---
 
-The binary is called `gr`.
+The binary's called `gr`.
 
 ## Install
 
@@ -18,10 +18,15 @@ The binary is called `gr`.
 brew install d0ugal/tap/graith
 ```
 
+On macOS 13 or newer the formula also installs the signed, notarized headless
+`Graith.app` used for the per-user daemon. Installation does not register or
+start a background item; the first eligible `gr` command does that in the
+logged-in user session. No root/system service or visible app UI is installed.
+
 {{% /tab %}}
 {{% tab tabName="apt (Debian/Ubuntu)" %}}
 
-Add the signing key and repository once, then install with `apt-get`:
+One-time setup, then install:
 
 ```bash
 # add the signing key
@@ -37,7 +42,7 @@ sudo apt-get update
 sudo apt-get install graith
 ```
 
-`apt-get upgrade` then picks up new releases automatically.
+`apt-get upgrade` then picks up new releases.
 
 {{% /tab %}}
 {{% tab tabName="dnf (Fedora/RHEL)" %}}
@@ -61,9 +66,15 @@ sudo dnf install graith
 {{% /tab %}}
 {{% tab tabName="Prebuilt binary" %}}
 
-Download a binary for your platform from the [releases page](https://github.com/d0ugal/graith/releases), extract it, and place `gr` on your `$PATH`.
+Download your platform's binary from the [releases page](https://github.com/d0ugal/graith/releases), extract it, and put `gr` on your `$PATH`.
 
-On Debian/Ubuntu, Fedora/RHEL and Alpine you can instead grab a prebuilt `.deb`, `.rpm` or `.apk` package (linux `amd64` and `arm64`; package name `graith`, binary `gr`, with shell completions), also from the [releases page](https://github.com/d0ugal/graith/releases), and install it manually:
+For a Darwin tarball, keep `Graith.app` beside `gr`. The first command validates
+the matching signature/version/payload and copies the untouched app to a
+versioned user cache, so deleting the extracted directory later does not break
+an already registered daemon generation. A present but invalid or mismatched
+app fails closed; it is not treated as a source-build fallback.
+
+Debian/Ubuntu, Fedora/RHEL and Alpine users can instead grab a prebuilt `.deb`, `.rpm` or `.apk` from the [releases page](https://github.com/d0ugal/graith/releases) (linux `amd64`/`arm64`; package `graith`, binary `gr`, with shell completions):
 
 ```bash
 # Debian / Ubuntu
@@ -83,7 +94,7 @@ sudo apk add --allow-untrusted graith_*_linux_amd64.apk
 go install github.com/d0ugal/graith/cmd/graith@latest
 ```
 
-`go install` names the binary after the package directory (`graith`). Rename or symlink it to `gr`:
+`go install` names the binary `graith`; rename or symlink it to `gr`:
 
 ```bash
 mv "$(go env GOPATH)/bin/graith" "$(go env GOPATH)/bin/gr"
@@ -98,12 +109,38 @@ cd graith
 make build    # produces ./gr
 ```
 
+Source and `go install` builds do not manufacture or register an unsigned app;
+on macOS they explicitly use the existing direct-spawn fallback.
+
 {{% /tab %}}
 {{< /tabs >}}
 
-## Shell completion
+## macOS upgrade, rollback, and uninstall
 
-Generate completion scripts for your shell:
+Normal Homebrew and tarball upgrades preserve service registrations. The new
+CLI validates and caches its matching signed app before a preserved restart;
+registration moves to that generation only while the job is down. The previous
+registered generation remains cached for rollback. If an older release cannot
+read newer persisted state, the existing state-version guard stops the
+downgrade and `gr doctor` lists the state backup to restore.
+
+Before uninstalling, remove all per-user registrations while the signed package
+is still available:
+
+```bash
+gr daemon service status --all-profiles
+gr daemon service remove --all-profiles
+brew uninstall graith            # or remove the tarball files
+```
+
+Removal preserves all user data. Homebrew has no supported pre-uninstall hook,
+so it cannot do the logged-in user's Service Management cleanup automatically.
+If the package was removed first, reinstall the same or a newer signed release
+and run `gr daemon service repair`, then `remove --all-profiles`. Do not use a
+wildcard `launchctl` command: named profiles are independent exact jobs and an
+unknown live job is intentionally quarantined.
+
+## Shell completion
 
 ```bash
 # bash
@@ -126,4 +163,4 @@ gr version
 gr doctor      # health checks, verifies dependencies
 ```
 
-{{% alert context="info" text="`gr doctor --autofix` will attempt to fix common issues: truncate oversized logs, clean stale PID files, and remove orphaned worktrees." /%}}
+{{% alert context="info" text="`gr doctor --autofix` fixes common issues: truncates oversized logs, cleans stale PID files, and removes orphaned worktrees." /%}}

@@ -9,8 +9,8 @@ import (
 )
 
 // RunDetectionLoop periodically scans PTY scrollback to detect low-risk agent
-// status (active/ready) for all running sessions. Approval status comes from
-// hooks or the daemon approval queue, not PTY text.
+// status (active/ready) for all running sessions. Permission prompts are
+// reported as runtime errors by hooks, never inferred from PTY text.
 func (sm *SessionManager) RunDetectionLoop(ctx context.Context) {
 	sm.mu.RLock()
 	det := sm.cfg.Detection

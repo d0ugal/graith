@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/sandbox"
 )
 
@@ -25,10 +27,21 @@ func newSandboxTestManager(t *testing.T, cfg *config.Config) *SessionManager {
 	}, slog.Default())
 }
 
+func requireSandboxOpts(t *testing.T, sm *SessionManager, merged config.SandboxConfig, sessionID, worktreePath, agentCommand string, envKeys []string, grantHookDir bool) sandbox.WrapOpts {
+	t.Helper()
+
+	opts, err := sm.sandboxOptsFromConfig(merged, sessionID, worktreePath, agentCommand, envKeys, grantHookDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return opts
+}
+
 func TestResolveSandboxRequiresBackend(t *testing.T) {
 	cfg := config.Default()
 	cfg.Sandbox = config.SandboxConfig{Enabled: true}
-	cfg.Agents["claude"] = config.Agent{Command: "claude"}
+	cfg.Agents["claude"] = config.Agent{NonInteractiveArgs: []string{}, Command: "claude"}
 
 	sm := newSandboxTestManager(t, cfg)
 
@@ -50,7 +63,7 @@ func TestResolveSandboxRequiresBackend(t *testing.T) {
 	}
 }
 
-func TestResolveSandboxDisabledNoBackendNeeded(t *testing.T) {
+func TestResolveSandboxDisabledIsAllowed(t *testing.T) {
 	cfg := config.Default()
 	cfg.Sandbox = config.SandboxConfig{Enabled: false}
 	cfg.Agents["canny"] = config.Agent{Command: "claude"}
@@ -63,10 +76,36 @@ func TestResolveSandboxDisabledNoBackendNeeded(t *testing.T) {
 	}
 }
 
+func TestCreateAllowsDisabledSandboxAndNativePrompts(t *testing.T) {
+	cfg := config.Default()
+	cfg.Sandbox = config.SandboxConfig{Enabled: false}
+	cfg.Agents["canny"] = config.Agent{
+		Command: "sleep", Args: []string{"60"}, ResumeArgs: []string{"60"},
+	}
+	sm := newSandboxTestManager(t, cfg)
+
+	sess, err := sm.Create(CreateOpts{
+		Name: "braw-create", AgentName: "canny", NoRepo: true, Rows: 24, Cols: 80,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if sess.Sandboxed {
+		t.Fatal("session with disabled sandbox reported sandboxed")
+	}
+
+	if sess.CreationCfg == nil || sess.CreationCfg.Agent.NonInteractiveArgs != nil {
+		t.Fatalf("creation config = %+v, want native prompt behavior preserved", sess.CreationCfg)
+	}
+
+	stopAndClosePTY(sm, sess.ID)
+}
+
 func TestResolveSandboxUnknownBackend(t *testing.T) {
 	cfg := config.Default()
 	cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "thrawn"}
-	cfg.Agents["dreich"] = config.Agent{Command: "claude"}
+	cfg.Agents["dreich"] = config.Agent{NonInteractiveArgs: []string{}, Command: "claude"}
 
 	sm := newSandboxTestManager(t, cfg)
 
@@ -87,7 +126,7 @@ func TestSandboxOptsCarryBackend(t *testing.T) {
 	sm := newSandboxTestManager(t, cfg)
 
 	merged := cfg.Sandbox
-	opts := sm.sandboxOptsFromConfig(merged, "braw123", "/tmp/bothy", "claude", []string{"TERM"}, false)
+	opts := requireSandboxOpts(t, sm, merged, "braw123", "/tmp/bothy", "claude", []string{"TERM"}, false)
 
 	if opts.Backend != "nono" {
 		t.Errorf("opts.Backend = %q, want nono", opts.Backend)
@@ -115,7 +154,7 @@ func TestSandboxOptsGrantDaemonSocket(t *testing.T) {
 
 	sm := newSandboxTestManager(t, cfg)
 
-	opts := sm.sandboxOptsFromConfig(cfg.Sandbox, "braw123", "/tmp/bothy", "claude", []string{"TERM"}, false)
+	opts := requireSandboxOpts(t, sm, cfg.Sandbox, "braw123", "/tmp/bothy", "claude", []string{"TERM"}, false)
 
 	// The granted path is symlink-resolved (Seatbelt/Landlock match canonical
 	// paths); under a symlinked temp dir it may differ from the raw SocketPath.
@@ -160,6 +199,140 @@ func TestSandboxOptsGrantDaemonSocket(t *testing.T) {
 	}
 }
 
+func TestSandboxOptsNeverAutoGrantDaemonServiceControl(t *testing.T) {
+	oldProtectedRoot := protectedDaemonServiceControlRoot
+
+	t.Cleanup(func() { protectedDaemonServiceControlRoot = oldProtectedRoot })
+
+	root := t.TempDir()
+	services := filepath.Join(root, "Library", "Application Support", "Graith", "services")
+	control := filepath.Join(services, "control")
+	protectedDaemonServiceControlRoot = func() (string, error) { return control, nil }
+
+	cfg := config.Default()
+	cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "safehouse"}
+	sm := newSandboxTestManager(t, cfg)
+	sm.paths.ConfigFile = filepath.Join(control, "bootstrap", "config.toml")
+	sm.paths.RuntimeDir = filepath.Join(control, "runtime")
+	sm.paths.SocketPath = filepath.Join(sm.paths.RuntimeDir, "graith.sock")
+
+	opts := requireSandboxOpts(t, sm, cfg.Sandbox, "canny123", filepath.Join(root, "bothy"), "/usr/bin/true", nil, false)
+	for _, grant := range opts.ReadDirs {
+		overlaps, err := daemonservice.CanonicalPathsOverlap(grant, control)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if overlaps {
+			t.Fatalf("automatic read grant %q exposes protected control root %q", grant, control)
+		}
+	}
+
+	if !slices.Contains(opts.UnixSockets, filepath.Join(control, "runtime", "graith.sock")) {
+		t.Fatalf("exact socket-connect grant was unexpectedly removed: %v", opts.UnixSockets)
+	}
+}
+
+func TestSandboxOptsNeverAutoGrantSymlinkToDaemonServiceControl(t *testing.T) {
+	oldProtectedRoot := protectedDaemonServiceControlRoot
+
+	t.Cleanup(func() { protectedDaemonServiceControlRoot = oldProtectedRoot })
+
+	root := t.TempDir()
+
+	control := filepath.Join(root, "services", "control")
+	if err := os.MkdirAll(control, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	alias := filepath.Join(root, "croft")
+	if err := os.Symlink(control, alias); err != nil {
+		t.Fatal(err)
+	}
+
+	protectedDaemonServiceControlRoot = func() (string, error) { return control, nil }
+
+	cfg := config.Default()
+	cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "safehouse"}
+	sm := newSandboxTestManager(t, cfg)
+	sm.paths.ConfigFile = filepath.Join(alias, "config", "config.toml")
+	sm.paths.RuntimeDir = filepath.Join(alias, "runtime")
+	sm.paths.SocketPath = filepath.Join(sm.paths.RuntimeDir, "graith.sock")
+
+	opts := requireSandboxOpts(t, sm, cfg.Sandbox, "canny123", filepath.Join(root, "bothy"), filepath.Join(alias, "bin", "claude"), nil, false)
+	for _, grant := range opts.ReadDirs {
+		overlaps, err := daemonservice.CanonicalPathsOverlap(grant, control)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if overlaps {
+			t.Fatalf("symlinked automatic read grant %q exposes protected control root %q", grant, control)
+		}
+	}
+}
+
+func TestSandboxOptsFailClosedWhenProtectedControlRootCannotBeResolved(t *testing.T) {
+	oldProtectedRoot := protectedDaemonServiceControlRoot
+
+	t.Cleanup(func() { protectedDaemonServiceControlRoot = oldProtectedRoot })
+
+	protectedDaemonServiceControlRoot = func() (string, error) {
+		return "", errors.New("dreich home")
+	}
+
+	cfg := config.Default()
+	cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "nono"}
+	sm := newSandboxTestManager(t, cfg)
+
+	_, err := sm.sandboxOptsFromConfig(cfg.Sandbox, "thrawn123", "/tmp/bothy", "/opt/agents/claude", nil, false)
+	if err == nil || !strings.Contains(err.Error(), "resolve protected daemon service control root: dreich home") {
+		t.Fatalf("sandbox options error = %v", err)
+	}
+}
+
+func TestValidateAutomaticSandboxGrantsProtectsControlAliases(t *testing.T) {
+	oldProtectedRoot := protectedDaemonServiceControlRoot
+
+	t.Cleanup(func() { protectedDaemonServiceControlRoot = oldProtectedRoot })
+
+	root := t.TempDir()
+
+	control := filepath.Join(root, "services", "control")
+	if err := os.MkdirAll(control, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	alias := filepath.Join(root, "croft")
+	if err := os.Symlink(control, alias); err != nil {
+		t.Fatal(err)
+	}
+
+	protectedDaemonServiceControlRoot = func() (string, error) { return control, nil }
+	sm := newSandboxTestManager(t, config.Default())
+	explicit := config.SandboxConfig{Enabled: true, Backend: "nono"}
+
+	for _, test := range []struct {
+		name string
+		opts sandbox.WrapOpts
+	}{
+		{name: "read", opts: sandbox.WrapOpts{ReadDirs: []string{alias}}},
+		{name: "write", opts: sandbox.WrapOpts{WriteDirs: []string{alias}}},
+		{name: "worktree", opts: sandbox.WrapOpts{WorktreeDir: alias}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := sm.validateAutomaticSandboxGrants(test.opts, explicit); err == nil || !strings.Contains(err.Error(), "would expose") {
+				t.Fatalf("automatic %s grant error = %v", test.name, err)
+			}
+		})
+	}
+
+	explicit.WriteDirs = []string{root}
+	if err := sm.validateAutomaticSandboxGrants(sandbox.WrapOpts{WriteDirs: []string{alias}}, explicit); err != nil {
+		t.Fatalf("operator-explicit broad write grant was not preserved: %v", err)
+	}
+}
+
 func TestAgentBackendOverridesGlobal(t *testing.T) {
 	global := config.SandboxConfig{Enabled: true, Backend: "safehouse"}
 	agent := config.SandboxConfig{Backend: "nono"}
@@ -183,7 +356,7 @@ func TestSandboxOptsCarryNetworkAndSignalMode(t *testing.T) {
 
 	sm := newSandboxTestManager(t, cfg)
 
-	opts := sm.sandboxOptsFromConfig(cfg.Sandbox, "braw123", "/tmp/bothy", "claude", []string{"TERM"}, false)
+	opts := requireSandboxOpts(t, sm, cfg.Sandbox, "braw123", "/tmp/bothy", "claude", []string{"TERM"}, false)
 
 	if opts.SignalMode != "isolated" {
 		t.Errorf("opts.SignalMode = %q, want isolated", opts.SignalMode)
@@ -206,7 +379,7 @@ func TestSandboxOptsEmptyNetworkIsNil(t *testing.T) {
 
 	sm := newSandboxTestManager(t, cfg)
 
-	opts := sm.sandboxOptsFromConfig(cfg.Sandbox, "canny123", "/tmp/bothy", "claude", nil, false)
+	opts := requireSandboxOpts(t, sm, cfg.Sandbox, "canny123", "/tmp/bothy", "claude", nil, false)
 	if opts.Network != nil {
 		t.Errorf("opts.Network should be nil when no policy is set, got %+v", opts.Network)
 	}
@@ -220,7 +393,7 @@ func TestSandboxOptsInjectsPathAndHome(t *testing.T) {
 
 	sm := newSandboxTestManager(t, cfg)
 
-	opts := sm.sandboxOptsFromConfig(cfg.Sandbox, "braw123", "/tmp/bothy", "claude", []string{"TERM"}, false)
+	opts := requireSandboxOpts(t, sm, cfg.Sandbox, "braw123", "/tmp/bothy", "claude", []string{"TERM"}, false)
 
 	hasPath, hasHome := false, false
 
@@ -247,7 +420,7 @@ func TestSandboxOptsGrantsAgentBinaryDir(t *testing.T) {
 	sm := newSandboxTestManager(t, cfg)
 
 	// Use an absolute agent path so resolution is deterministic on any host.
-	opts := sm.sandboxOptsFromConfig(cfg.Sandbox, "braw123", "/tmp/bothy", "/opt/agents/claude", []string{"TERM"}, false)
+	opts := requireSandboxOpts(t, sm, cfg.Sandbox, "braw123", "/tmp/bothy", "/opt/agents/claude", []string{"TERM"}, false)
 
 	found := false
 

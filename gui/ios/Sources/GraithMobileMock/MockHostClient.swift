@@ -208,18 +208,25 @@ public actor MockHostClient: GraithHostClient {
     }
 
     public func rename(sessionID: String, newName: String) async throws {
-        try check(ControlType.rename)
+        try check(ControlType.update)
         mutate(sessionID) { $0 = $0.with(name: newName) }
     }
 
-    public func star(sessionID: String) async throws {
-        try check(ControlType.star)
-        mutate(sessionID) { $0 = $0.with(starred: true) }
-    }
-
-    public func unstar(sessionID: String) async throws {
-        try check(ControlType.unstar)
-        mutate(sessionID) { $0 = $0.with(starred: false) }
+    public func update(sessionID: String, name: String?, parentID: String?, starred: Bool?) async throws -> UpdateResultMsg {
+        try check(ControlType.update)
+        mutate(sessionID) {
+            let parentOverride: String?? = parentID.map { $0.isEmpty ? nil : $0 }
+            $0 = $0.with(parentID: parentOverride, name: name, starred: starred)
+        }
+        guard let updated = sessions.first(where: { $0.id == sessionID }) else {
+            throw GraithClientError.daemon("session not found: \(sessionID)")
+        }
+        return UpdateResultMsg(
+            sessionID: updated.id,
+            name: updated.name,
+            parentID: updated.parentID ?? "",
+            starred: updated.starred ?? false
+        )
     }
 
     public func fork(name: String, sourceSessionID: String) async throws {
@@ -294,9 +301,8 @@ public actor MockHostClient: GraithHostClient {
         FleetSummary(
             total: sessions.count,
             active: sessions.filter { $0.agentStatus == "active" }.count,
-            approval: sessions.filter { $0.agentStatus == "approval" }.count,
             ready: sessions.filter { $0.agentStatus == "ready" }.count,
-            errored: sessions.filter { $0.isErrored }.count,
+            errored: sessions.filter { $0.isErrored || $0.agentStatus == "error" }.count,
             stopped: sessions.filter { $0.isStopped }.count
         )
     }
@@ -314,7 +320,7 @@ extension MockHostClient {
                     ci: CIInfo(state: "passing")),
         SessionInfo(id: "canny002", name: "canny", repoPath: "/Users/x/Code/croft", repoName: "croft",
                     branch: "user/graith/canny-canny002", agent: "codex", status: "running",
-                    agentStatus: "approval", summaryText: "awaiting tool approval"),
+                    agentStatus: "error", summaryText: "unexpected native permission prompt"),
         SessionInfo(id: "bide0003", name: "bide", repoPath: "/Users/x/Code/glen", repoName: "glen",
                     branch: "user/graith/bide-bide0003", agent: "claude", status: "stopped",
                     agentStatus: "ready", exitCode: 0, summaryText: "task done"),
@@ -378,20 +384,21 @@ extension SessionInfo {
     func with(
         status: String? = nil,
         agentStatus: String? = nil,
+        parentID: String?? = nil,
         name: String? = nil,
         agent: String? = nil,
         starred: Bool? = nil,
         summaryText: String?? = nil
     ) -> SessionInfo {
         SessionInfo(
-            id: id, parentID: parentID, name: name ?? self.name, repoPath: repoPath, repoName: repoName,
+            id: id, parentID: parentID ?? self.parentID, name: name ?? self.name, repoPath: repoPath, repoName: repoName,
             worktreePath: worktreePath, branch: branch, baseBranch: baseBranch, agent: agent ?? self.agent,
             agentSessionID: agentSessionID, status: status ?? self.status,
             agentStatus: agentStatus ?? self.agentStatus,
             exitCode: exitCode, exitSignal: exitSignal, createdAt: createdAt,
             lastAttachedAt: lastAttachedAt, statusChangedAt: statusChangedAt, dirty: dirty,
             unpushedCount: unpushedCount, sandboxed: sandboxed, mirror: mirror,
-            inPlace: inPlace, yolo: yolo, model: model, toolName: toolName, includes: includes,
+            inPlace: inPlace, model: model, toolName: toolName, includes: includes,
             configStale: configStale, starred: starred ?? self.starred, systemKind: systemKind,
             summaryText: summaryText ?? self.summaryText,
             summaryFaded: summaryFaded, lastOutputAt: lastOutputAt, migratedFrom: migratedFrom,

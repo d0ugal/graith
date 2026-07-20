@@ -170,11 +170,11 @@ func (sm *SessionManager) waitStatusMet(w protocol.WaitMsg) (status string, matc
 }
 
 // isIdleAgentStatus reports whether an agent status counts as idle: the agent
-// is at rest ("ready") or its state cannot be determined ("unknown"/unset),
-// as opposed to actively working or awaiting approval.
+// is at rest ("ready"), has stopped at a diagnosable runtime error, or its
+// state cannot be determined ("unknown"/unset), as opposed to actively working.
 func isIdleAgentStatus(status string) bool {
 	switch status {
-	case "ready", "unknown", "":
+	case "ready", "error", "unknown", "":
 		return true
 	default:
 		return false

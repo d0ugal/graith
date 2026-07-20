@@ -6,7 +6,7 @@ import (
 )
 
 func FuzzDecodeControl(f *testing.F) {
-	f.Add([]byte(`{"type":"handshake","payload":{"version":"1.0","client_id":"brig","terminal_size":[80,24],"cwd":"/tmp"}}`))
+	f.Add([]byte(`{"type":"handshake","payload":{"version":"2.0","client_id":"brig","terminal_size":[80,24],"cwd":"/tmp"}}`))
 	f.Add([]byte(`{"type":"list"}`))
 	f.Add([]byte(`{"type":"create","payload":{"name":"braw","agent":"claude","repo_path":"/croft"}}`))
 	f.Add([]byte(`{}`))
@@ -111,7 +111,7 @@ func FuzzReadFrame(f *testing.F) {
 }
 
 func FuzzDecodePayload(f *testing.F) {
-	f.Add([]byte(`handshake`), []byte(`{"version":"1.0","client_id":"brig","terminal_size":[80,24],"cwd":"/tmp"}`))
+	f.Add([]byte(`handshake`), []byte(`{"version":"2.0","client_id":"brig","terminal_size":[80,24],"cwd":"/tmp"}`))
 	f.Add([]byte(`create`), []byte(`{"name":"braw","agent":"claude"}`))
 	f.Add([]byte(`attach`), []byte(`{"session_id":"abc123"}`))
 	f.Add([]byte(`resize`), []byte(`{"cols":120,"rows":40}`))

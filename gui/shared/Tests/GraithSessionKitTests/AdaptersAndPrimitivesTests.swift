@@ -93,7 +93,7 @@ struct FactoryTests {
 @Suite("Model value types")
 struct ModelTypeTests {
     @Test func fleetSummaryAndStatusResponse() {
-        let fleet = FleetSummary(total: 3, active: 1, approval: 1, ready: 0, errored: 0, stopped: 1)
+        let fleet = FleetSummary(total: 3, active: 1, ready: 0, errored: 1, stopped: 1)
         #expect(fleet.total == 3)
         let status = StatusResponse(session: makeSession(id: "1", name: "kirk"), unreadCount: 2, fleet: fleet)
         #expect(status.unreadCount == 2)

@@ -352,23 +352,20 @@ public actor GraithProtocolClient {
         _ = try await conn.request("interrupt", payload: SessionIDMsg(sessionID: sessionID))
     }
 
-    public func rename(sessionID: String, newName: String) async throws {
+    /// Atomically update any combination of mutable session metadata. Nil fields
+    /// are omitted; explicit `starred: false` clears the persisted star.
+    public func update(
+        sessionID: String,
+        name: String? = nil,
+        parentID: String? = nil,
+        starred: Bool? = nil
+    ) async throws -> UpdateResultMsg {
         let conn = try await controlConnection()
-        _ = try await conn.request("rename", payload: RenameMsg(sessionID: sessionID, newName: newName))
-    }
-
-    /// `star` — mark a session as starred. The daemon replies `starred`.
-    /// `StarMsg` is wire-identical to `SessionIDMsg` (`{session_id}`), so the
-    /// latter is reused.
-    public func star(sessionID: String) async throws {
-        let conn = try await controlConnection()
-        _ = try await conn.request("star", payload: SessionIDMsg(sessionID: sessionID))
-    }
-
-    /// `unstar` — clear a session's star. The daemon replies `unstarred`.
-    public func unstar(sessionID: String) async throws {
-        let conn = try await controlConnection()
-        _ = try await conn.request("unstar", payload: SessionIDMsg(sessionID: sessionID))
+        let reply = try await conn.request(
+            "update",
+            payload: UpdateMsg(sessionID: sessionID, name: name, parentID: parentID, starred: starred)
+        )
+        return try decodePayload(reply, as: UpdateResultMsg.self)
     }
 
     /// `fork` — create a new session cloning `sourceSessionID`'s worktree and
@@ -458,8 +455,8 @@ public actor GraithProtocolClient {
     ///
     /// This opens a fresh (token-less) remote connection. The daemon surfaces a
     /// pending pairing to the local human; this call resolves once that human
-    /// runs `gr pair approve` (or the daemon errors). On success the returned
-    /// token is adopted for subsequent connections.
+    /// runs `gr remote pairings approve` (or the daemon errors). On success the
+    /// returned token is adopted for subsequent connections.
     ///
     /// > Note: The daemon's `pair_request` handler is landing under Phase 1
     /// > Task 6; the blocking-until-approved semantics assumed here must be

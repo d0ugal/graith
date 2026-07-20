@@ -15,15 +15,10 @@ struct SessionInfoConvenienceTests {
         #expect(makeSession(id: "1", name: "braw", status: "running").isRunning)
         #expect(makeSession(id: "2", name: "bide", status: "stopped").isStopped)
         #expect(makeSession(id: "3", name: "dreich", status: "errored").isErrored)
-        #expect(makeSession(id: "4", name: "fash", agentStatus: "approval").needsApproval)
     }
 
     @Test func shortBranchTrimsPrefix() {
         #expect(makeSession(id: "abc", name: "canny").shortBranch == "canny-abc")
-    }
-
-    @Test func flags() {
-        #expect(makeSession(id: "1", name: "bonnie", yolo: true).isYolo)
     }
 
     @Test func repoEntryRecentDefaultsFalse() throws {

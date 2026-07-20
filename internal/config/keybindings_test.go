@@ -8,18 +8,16 @@ import (
 )
 
 // TestDefaultKeybindingsIncludePrefixCommands verifies the embedded default
-// config wires the previously-hardcoded m/a/r prefix commands (issue #1233).
+// config wires the previously-hardcoded m/r prefix commands (issue #1233).
 func TestDefaultKeybindingsIncludePrefixCommands(t *testing.T) {
 	cfg := Default()
 
 	cases := map[string]string{
 		"messages":        cfg.Keybindings.Messages,
-		"approvals":       cfg.Keybindings.Approvals,
 		"restart_session": cfg.Keybindings.RestartSession,
 	}
 	want := map[string]string{
 		"messages":        "m",
-		"approvals":       "a",
 		"restart_session": "r",
 	}
 
@@ -38,8 +36,6 @@ func TestDefaultOverlayKeybindings(t *testing.T) {
 	cases := map[string]string{
 		"up":                ov.Up,
 		"down":              ov.Down,
-		"dashboard_attach":  ov.DashboardAttach,
-		"approval_allow":    ov.ApprovalAllow,
 		"message_pin":       ov.MessagePin,
 		"message_next_conv": ov.MessageNextConv,
 	}
@@ -47,6 +43,10 @@ func TestDefaultOverlayKeybindings(t *testing.T) {
 		if got == "" {
 			t.Errorf("Keybindings.Overlay.%s is empty; expected a default", name)
 		}
+	}
+
+	if !strings.Contains(ov.Cancel, "ctrl+c") {
+		t.Errorf("Keybindings.Overlay.cancel = %q, want ctrl+c clean-exit binding", ov.Cancel)
 	}
 }
 
@@ -57,7 +57,7 @@ func TestOverlayKeybindingPartialOverride(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.toml")
 	toml := `
 [keybindings.overlay]
-dashboard_attach = "enter"
+message_pin = "space"
 `
 
 	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
@@ -69,13 +69,13 @@ dashboard_attach = "enter"
 		t.Fatalf("Load: %v", err)
 	}
 
-	if cfg.Keybindings.Overlay.DashboardAttach != "enter" {
-		t.Errorf("dashboard_attach = %q, want overridden %q", cfg.Keybindings.Overlay.DashboardAttach, "enter")
+	if cfg.Keybindings.Overlay.MessagePin != "space" {
+		t.Errorf("message_pin = %q, want overridden %q", cfg.Keybindings.Overlay.MessagePin, "space")
 	}
 
 	// An unspecified key keeps its default from the embedded config.
-	if cfg.Keybindings.Overlay.DashboardStop != "s" {
-		t.Errorf("dashboard_stop = %q, want default %q (partial table must not zero other keys)", cfg.Keybindings.Overlay.DashboardStop, "s")
+	if cfg.Keybindings.Overlay.MessageExpandAll != "O" {
+		t.Errorf("message_expand_all = %q, want default %q (partial table must not zero other keys)", cfg.Keybindings.Overlay.MessageExpandAll, "O")
 	}
 }
 
@@ -103,7 +103,7 @@ func TestKeybindingsConflicts(t *testing.T) {
 	})
 
 	t.Run("empty bindings are not conflicts", func(t *testing.T) {
-		k := Keybindings{Messages: "", Approvals: ""}
+		k := Keybindings{Messages: ""}
 		if got := k.Conflicts(); len(got) != 0 {
 			t.Errorf("empty bindings reported as conflicting: %v", got)
 		}

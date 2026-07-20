@@ -40,12 +40,6 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 
 	sm.log = slog.New(slog.NewJSONHandler(&logBuf, nil))
 
-	for _, id := range []string{"thrawn-fash", "canny-braw"} {
-		sm.state.Sessions[id] = &SessionState{
-			ID: id, Name: id, Agent: "sleeper", Status: StatusRunning,
-		}
-	}
-
 	badScrollback := append(terminalParserPanicFixture(t), []byte("dreich-payload-must-not-be-logged")...)
 	if err := os.WriteFile(filepath.Join(sm.paths.LogDir, "thrawn-fash.log"), badScrollback, 0o600); err != nil {
 		t.Fatal(err)
@@ -69,6 +63,9 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := badR.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := setDescriptorFlags(badFD, syscall.FD_CLOEXEC); err != nil {
 		t.Fatal(err)
@@ -83,6 +80,9 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 
 	goodFD, err := syscall.Dup(int(goodR.Fd()))
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := goodR.Close(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -120,8 +120,11 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 		"thrawn-fash": {badCmd.Process.Pid, badStart},
 		"canny-braw":  {goodCmd.Process.Pid, goodStart},
 	} {
-		sm.state.Sessions[id].PID = identity.pid
-		sm.state.Sessions[id].PIDStartTime = identity.start
+		sm.state.Sessions[id] = &SessionState{
+			ID: id, Name: id, Agent: "sleeper", Status: StatusRunning,
+			PID: identity.pid, PIDStartTime: identity.start, Sandboxed: true,
+			CreationCfg: &CreationConfig{Agent: sm.cfg.Agents["sleeper"]},
+		}
 	}
 
 	t.Cleanup(func() {
@@ -200,7 +203,7 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 		t.Fatal("adoption failure log exposed scrollback contents")
 	}
 
-	if _, err := badW.Write([]byte("\x1b[2J\x1b[Hcanny-live-after-fallback")); err != nil {
+	if _, err := badW.Write([]byte("\x1b[2J\x1b[Hcanny-live-after-fallback\n")); err != nil {
 		t.Fatalf("write after hydration fallback: %v", err)
 	}
 
@@ -210,7 +213,9 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 	}
 
 	if got := badPTY.ScreenPreview(); !strings.Contains(got, "canny-live-after-fallback") {
-		t.Fatalf("adopted screen did not remain serviceable: %q", got)
+		tail, tailErr := badPTY.ScrollbackFile().TailBytes(256 * 1024)
+		t.Fatalf("adopted screen did not remain serviceable: preview=%q tail=%q tail_err=%v logs=%s",
+			got, tail, tailErr, logBuf.String())
 	}
 
 	tail, err := badPTY.ScrollbackFile().TailBytes(256 * 1024)

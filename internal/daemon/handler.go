@@ -52,9 +52,9 @@ func mutatingControlMessage(msg protocol.Envelope) bool {
 	case "msg_sub":
 		var payload protocol.MsgSubMsg
 		return protocol.DecodePayload(msg, &payload) != nil || payload.Ack
-	case "handshake", "auth_proof", "approval_subscribe", "repo_list", "store_list", "store_get", "list",
+	case "handshake", "auth_proof", "repo_list", "store_list", "store_get", "list",
 		"logs", "wait", "msg_topics", "msg_conversation", "msg_jail_list",
-		"msg_jail_show", "approval_list", "screen_preview", "screen_snapshot", "status",
+		"msg_jail_show", "screen_preview", "screen_snapshot", "status",
 		"diagnostics", "config", "agent_catalog", "mcp_connect", "mcp_list", "mcp_logs", "scenario_status", "trigger_list",
 		"trigger_status", "todo_list", "scenario_list", "upgrade_preflight", "upgrade":
 		return false
@@ -74,7 +74,7 @@ func mutatingControlMessage(msg protocol.Envelope) bool {
 // handler_messaging.go / handler_scenario.go / handler_trigger.go /
 // handler_todo.go / handler_query.go. Cases that mutate connection-local state
 // (attach/detach/resize/handshake), block the read loop, or return from the
-// loop (logs --follow, wait, msg_inbox/sub, approval_request, mcp_connect,
+// loop (logs --follow, wait, msg_inbox/sub, mcp_connect,
 // upgrade, pair_request) stay inline here because they are coupled to this
 // connection's lifecycle.
 func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm *SessionManager, log *slog.Logger) {
@@ -113,7 +113,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 	connDone := make(chan struct{})
 
 	// Centralized cleanup: runs exactly once on every return path (read error,
-	// or an early return from logs --follow / wait / msg_sub / approval_request
+	// or an early return from logs --follow / wait / msg_sub / command_policy_check
 	// / upgrade), so per-connection registrations never leak.
 	defer func() {
 		if mutationLease {
@@ -133,18 +133,28 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 		if poppedDeviceID != "" {
 			sm.UnregisterDeviceConn(poppedDeviceID, conn)
 		}
-
-		sm.RemoveApprovalSubscriber(conn)
 	}()
 
 	sendControlResult := func(msgType string, payload any) error {
 		data, err := protocol.EncodeControl(msgType, payload)
 		if err != nil {
 			log.Error("encode control", "err", err)
+
+			_ = conn.Close()
+
 			return err
 		}
 
-		return writer.WriteFrame(protocol.ChannelControl, data)
+		if err := writer.WriteFrame(protocol.ChannelControl, data); err != nil {
+			log.Error("write control", "type", msgType, "err", err)
+			// A response that cannot be written must terminate the connection so
+			// clients waiting in ReadControlResponse observe EOF instead of hanging.
+			_ = conn.Close()
+
+			return err
+		}
+
+		return nil
 	}
 	sendControl := func(msgType string, payload any) {
 		_ = sendControlResult(msgType, payload)
@@ -392,9 +402,6 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			case "pair_revoke":
 				handlePairRevoke(sm, auth, sendControl, msg, log)
 
-			case "approval_subscribe":
-				handleApprovalSubscribe(sm, auth, sendControl, conn)
-
 			case "repo_list":
 				handleRepoList(sm, sendControl)
 
@@ -572,17 +579,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					lifecycleRequest{SessionID: s.SessionID, Children: s.Children, ExcludeRoot: s.ExcludeRoot},
 					"stopped", "stopped", sm.StopWithChildren, sm.Stop)
 
-			case "rename":
-				handleRename(sm, auth, sendControl, msg)
-
 			case "update":
 				handleUpdate(sm, auth, sendControl, msg)
-
-			case "star":
-				handleStar(sm, auth, sendControl, msg)
-
-			case "unstar":
-				handleUnstar(sm, auth, sendControl, msg)
 
 			case "set_status":
 				handleSetStatus(sm, auth, sendControl, msg)
@@ -745,8 +743,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
 				handleMsgJailRelease(sm, auth, sendControl, msg)
 
-			case "approval_request":
-				req, ok := decodePayload[protocol.ApprovalRequestMsg](msg, sendControl, "invalid approval_request")
+			case "command_policy_check":
+				req, ok := decodePayload[protocol.CommandPolicyCheckMsg](msg, sendControl, "invalid command_policy_check")
 				if !ok {
 					continue
 				}
@@ -759,38 +757,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				log.Info("approval request received", "request_id", req.RequestID, "session_id", req.SessionID, "tool", req.ToolName)
-				// Monitor connection close so we can cancel if the hook dies.
-				connCtx, connCancel := context.WithCancel(ctx)
-
-				go func() {
-					for {
-						f, err := reader.ReadFrame()
-						if err != nil {
-							connCancel()
-							return
-						}
-
-						if f.Channel == protocol.ChannelControl {
-							ctrl, _ := protocol.DecodeControl(f.Payload)
-							if ctrl.Type == "detach" {
-								connCancel()
-								return
-							}
-						}
-					}
-				}()
-
-				decision := sm.SubmitApproval(connCtx, req)
-				sendControl("approval_decision", decision)
+				decision := sm.CheckCommandPolicy(ctx, req)
+				sendControl("command_policy_decision", decision)
 
 				return
-
-			case "approval_respond":
-				handleApprovalRespond(sm, auth, sendControl, msg)
-
-			case "approval_list":
-				handleApprovalList(sm, sendControl)
 
 			case "type":
 				handleType(sm, auth, sendControl, msg, log)
@@ -1314,7 +1284,6 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 		Sandboxed:       s.Sandboxed,
 		Mirror:          s.Mirror,
 		InPlace:         s.InPlace,
-		Yolo:            s.Yolo,
 		Model:           s.Model,
 		ToolName:        s.HookToolName,
 		ConfigStale:     isConfigStale(s, cfg),
@@ -1417,6 +1386,16 @@ func isConfigStale(s SessionState, cfg *config.Config) bool {
 	current.InterruptCount, current.InterruptDelayMs = nil, nil
 
 	if !reflect.DeepEqual(created, current) {
+		return true
+	}
+
+	// Command-policy hooks are generated at launch. A live config reload can
+	// change the rules the daemon evaluates, but enabling or disabling the layer
+	// also changes whether an agent hook exists; mark that launch stale so the
+	// operator knows a restart is required to establish the new enforcement
+	// path. Comparing the full config also surfaces changed external rule paths
+	// and inline rules consistently with agent/sandbox changes.
+	if !reflect.DeepEqual(s.CreationCfg.CommandPolicy, cfg.CommandPolicy) {
 		return true
 	}
 

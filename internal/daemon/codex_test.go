@@ -56,7 +56,6 @@ func TestOptionArgs(t *testing.T) {
 				ReasoningEffort: "high",
 				ServiceTier:     "flex",
 				WebSearch:       true,
-				ApprovalPolicy:  "never",
 			},
 			want: []string{
 				"--model", "gpt-5.1-codex",
@@ -64,7 +63,6 @@ func TestOptionArgs(t *testing.T) {
 				"-c", "model_reasoning_effort=high",
 				"-c", "service_tier=flex",
 				"--search",
-				"--ask-for-approval", "never",
 			},
 		},
 		{
@@ -143,7 +141,7 @@ func TestCodexOptsFromMsg(t *testing.T) {
 		t.Errorf("codexOptsFromMsg(nil) = %+v, want zero", got)
 	}
 
-	in := &config.CodexOptions{ApprovalPolicy: "never"}
+	in := &config.CodexOptions{Profile: "canny"}
 	if got := codexOptsFromMsg(in); got != *in {
 		t.Errorf("codexOptsFromMsg(%+v) = %+v, want %+v", in, got, *in)
 	}
@@ -271,13 +269,14 @@ func newCodexRecorderManager(t *testing.T, repoDir string) (*SessionManager, str
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
 	cfg.Agents["codex"] = config.Agent{
-		Command:    "sh",
-		Args:       []string{"-c", script},
-		ResumeArgs: []string{"-c", script},
-		ForkArgs:   []string{"-c", script},
-		Env:        map[string]string{"GRAITH_ARGS_RECORD": recordPath},
-		OptionArgs: cfg.Agents["codex"].OptionArgs,
-		AddDirArgs: cfg.Agents["codex"].AddDirArgs,
+		NonInteractiveArgs: []string{},
+		Command:            "sh",
+		Args:               []string{"-c", script},
+		ResumeArgs:         []string{"-c", script},
+		ForkArgs:           []string{"-c", script},
+		Env:                map[string]string{"GRAITH_ARGS_RECORD": recordPath},
+		OptionArgs:         cfg.Agents["codex"].OptionArgs,
+		AddDirArgs:         cfg.Agents["codex"].AddDirArgs,
 	}
 	cfg.Repos = []config.RepoConfig{{Path: repoDir}}
 
@@ -288,6 +287,7 @@ func newCodexRecorderManager(t *testing.T, repoDir string) (*SessionManager, str
 		RuntimeDir: dir,
 		TmpDir:     filepath.Join(dir, "tmp"),
 	}, slog.Default())
+	sm.sandboxResolver = func(string) (bool, error) { return false, nil }
 
 	return sm, recordPath
 }

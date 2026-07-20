@@ -102,7 +102,7 @@ destroyed. Concretely:
   possible future optimisation, not part of this design.
 - **Recovering after the window.** Once purged, a session is gone. The window is
   the only recovery mechanism; we are not adding a separate long-term archive.
-- **A general-purpose undo for other operations** (stop, rename, fork). This is
+- **A general-purpose undo for other operations** (stop, update, fork). This is
   scoped to delete.
 - **Changing scenario teardown.** `gr scenario stop/delete` and internal
   rollback call `SessionManager.Delete` directly and must stay hard deletes —
@@ -215,7 +215,7 @@ one-to-one to the `gr purge` verb.
 **Hiding is not the same as unreachability.** Filtering `list` (below) removes
 soft-deleted sessions from *client-side* name resolution, but the daemon protocol
 acts on raw session IDs, so hiding alone does **not** stop a soft-deleted session
-from being resumed, restarted, renamed, or attached. The daemon must therefore
+from being resumed, restarted, updated, or attached. The daemon must therefore
 carry explicit `IsSoftDeleted()` guards on the ID-addressable lifecycle/metadata
 operations — see [Daemon-side guards](#daemon-side-guards-on-id-addressable-operations).
 
@@ -452,8 +452,8 @@ operation that would otherwise act on a stopped session:
 - **Reject**: `Resume`, `Restart`, the attach auto-resume branch, `scenario_resume`
   (skip soft-deleted members), `fork` (a `fork` acts on a raw `SourceSessionID`; a
   soft-deleted source has `Status=stopped` and would otherwise fork fine —
-  violating "only restore/purge act on the trash"), `rename`, `star`/`unstar`,
-  `update`, `type`/shell input, and `--mirror` sourcing.
+  violating "only restore/purge act on the trash"), `update`, `star`/`unstar`,
+  `type`/shell input, and `--mirror` sourcing.
 - **Allow** (these are the only ways to act on a soft-deleted session): `restore`,
   `purge`, `list --deleted`, and read-only `logs`/`wait`/`info`. Because
   CLI name resolution is live-only, these read-only ops reach a soft-deleted
@@ -872,12 +872,13 @@ Reconcile.
   the CLI `delete` path. This is enforced by routing: only the delete handler
   consults retention; internal callers invoke `Delete` explicitly.
 - **Direct-ID operations on a soft-deleted session.** `gr info` / `gr path` /
-  `gr resume` / `gr restart` / `gr rename` / `gr stop` / `star` / `update` /
-  `type` all report "not found" via live-only name resolution *and* are rejected
-  by the daemon-side `IsSoftDeleted()` guards even when addressed by raw ID (see
-  [Daemon-side guards](#daemon-side-guards-on-id-addressable-operations)). To act
-  on a soft-deleted session you first `gr restore` (then it's a normal stopped
-  session) or `gr purge` (to finish deleting).
+  `gr resume` / `gr restart` / `gr stop` / `star` / `update` /
+  `type` are rejected by the daemon-side `IsSoftDeleted()` guards even when
+  addressed by raw ID (see [Daemon-side guards](#daemon-side-guards-on-id-addressable-operations)).
+  Most are hidden by live-only name resolution; `gr update` also checks the
+  deleted list so it can explicitly recommend `gr restore`. To act on a
+  soft-deleted session you first restore it (then it's a normal stopped session)
+  or purge it permanently.
 - **Overlay has no trash view.** The interactive session picker (`ctrl+b w`)
   offers no way to see or restore soft-deleted sessions — `gr list --deleted` and
   `gr restore` are CLI-only. This is a deliberate scoping decision for v1 (keep the
@@ -908,7 +909,7 @@ Reconcile.
   not-found/not-deleted, and **errors when the window has expired** (restore-after-
   expiry). `SoftDeleteWithChildren`/restore-with-children mark/clear the subtree.
 - **Unit — daemon guards.** `Resume`, `Restart`, the attach auto-resume path,
-  `fork` (by raw `SourceSessionID`), `rename`, `star`/`unstar`, `update`, and
+  `fork` (by raw `SourceSessionID`), `star`/`unstar`, `update`, and
   `--mirror` sourcing all reject a soft-deleted session by raw ID;
   `scenario_resume` skips soft-deleted members.
 - **Unit — CLI verbs.** `gr delete` soft-deletes with **no prompt** even with

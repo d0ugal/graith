@@ -3,7 +3,7 @@ package client
 import "strings"
 
 // This file carries the configurable keybindings for the full-screen terminal
-// overlays (dashboard, approval prompt, message viewer, scroll pager). Each
+// overlays (message viewer and scroll pager). Each
 // action holds a list of bubbletea key names; pressing any listed key triggers
 // it. The cli layer builds these from the [keybindings.overlay] config table,
 // falling back to the Default*Keys() values below when a key is unset. See #1233.
@@ -43,55 +43,6 @@ func primaryKey(bound []string) string {
 	}
 
 	return bound[0]
-}
-
-// DashboardKeys are the keys the `gr dashboard` TUI listens for.
-type DashboardKeys struct {
-	Up      []string
-	Down    []string
-	Attach  []string
-	Stop    []string
-	Delete  []string
-	Resume  []string
-	Confirm []string
-	Cancel  []string
-}
-
-// DefaultDashboardKeys returns the built-in dashboard bindings. They mirror the
-// [keybindings.overlay] defaults in default_config.toml.
-func DefaultDashboardKeys() DashboardKeys {
-	return DashboardKeys{
-		Up:      []string{"k", "up"},
-		Down:    []string{"j", "down"},
-		Attach:  []string{"enter", "a"},
-		Stop:    []string{"s"},
-		Delete:  []string{"x", "d"},
-		Resume:  []string{"r"},
-		Confirm: []string{"enter", "y"},
-		Cancel:  []string{"q", "ctrl+c"},
-	}
-}
-
-// ApprovalKeys are the keys the pending-approvals overlay listens for.
-type ApprovalKeys struct {
-	Up       []string
-	Down     []string
-	Allow    []string
-	Deny     []string
-	AllowAll []string
-	Cancel   []string
-}
-
-// DefaultApprovalKeys returns the built-in approval-overlay bindings.
-func DefaultApprovalKeys() ApprovalKeys {
-	return ApprovalKeys{
-		Up:       []string{"k", "up"},
-		Down:     []string{"j", "down"},
-		Allow:    []string{"y", "enter"},
-		Deny:     []string{"n", "x"},
-		AllowAll: []string{"a"},
-		Cancel:   []string{"q", "esc"},
-	}
 }
 
 // MessageKeys are the keys the message-viewer overlay listens for.

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -25,11 +27,7 @@ func newTestSessionManager(t *testing.T) *SessionManager {
 	t.Helper()
 	testutil.IsolateGit(t)
 
-	// Approval gating is opt-in (disabled by default). These tests exercise
-	// the hook-generation and approval-queue mechanics, so enable it here.
 	cfg := config.Default()
-	enabled := true
-	cfg.Approvals.Enabled = &enabled
 
 	return newSMWithConfig(t, cfg)
 }
@@ -119,13 +117,14 @@ func stopAndClosePTY(sm *SessionManager, id string) {
 }
 
 // newSMWithConfig builds a SessionManager with the given config and paths
-// rooted at a single fresh temp dir. Unlike newTestSessionManager it does not
-// force approvals on, so callers control the whole config.
+// rooted at a single fresh temp dir. The test-only resolver keeps ordinary
+// lifecycle tests independent of the host sandbox binary; sandbox enforcement
+// itself is covered by the focused sandbox tests.
 func newSMWithConfig(t *testing.T, cfg *config.Config) *SessionManager {
 	t.Helper()
 	dir := t.TempDir()
 
-	return NewSessionManager(cfg, config.Paths{
+	sm := NewSessionManager(cfg, config.Paths{
 		StateFile:  filepath.Join(dir, "state.json"),
 		DataDir:    dir,
 		LogDir:     dir,
@@ -136,6 +135,9 @@ func newSMWithConfig(t *testing.T, cfg *config.Config) *SessionManager {
 		// checkout and fails "operation not permitted" in a read-only one.
 		TmpDir: filepath.Join(dir, "tmp"),
 	}, slog.Default())
+	sm.sandboxResolver = func(string) (bool, error) { return false, nil }
+
+	return sm
 }
 
 func TestGenerateID(t *testing.T) {
@@ -265,52 +267,48 @@ func TestNewSessionManagerPRWatchKickChannelBoundary(t *testing.T) {
 	}
 }
 
-func TestRename(t *testing.T) {
-	t.Run("happy path", func(t *testing.T) {
-		sm := newTestSessionManager(t)
-		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "auld-name", Status: StatusRunning,
-		}
-
-		if err := sm.Rename("sess1", "bonnie-name"); err != nil {
-			t.Fatalf("Rename() error = %v", err)
-		}
-
-		s, ok := sm.state.Sessions["sess1"]
-		if !ok {
-			t.Fatal("session not found after rename")
-		}
-
-		if s.Name != "bonnie-name" {
-			t.Errorf("Name = %q, want %q", s.Name, "bonnie-name")
-		}
-	})
-
-	t.Run("not found", func(t *testing.T) {
-		sm := newTestSessionManager(t)
-
-		err := sm.Rename("nonexistent", "bonnie-name")
-		if err == nil {
-			t.Fatal("expected error for nonexistent session")
-		}
-	})
-}
-
 func TestUpdate(t *testing.T) {
 	strPtr := func(s string) *string { return &s }
+	update := func(sm *SessionManager, id string, name, parentID *string) error {
+		_, err := sm.Update(id, name, parentID, nil)
+
+		return err
+	}
 
 	t.Run("rename via update", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "auld-name", Status: StatusRunning,
+			ID: "sess1", ParentID: "ben", Name: "auld-name", Status: StatusRunning,
+			WorktreePath: "/bothy/sess1", Branch: "user/auld-name-sess1", Token: "tok-sess1",
+			ScenarioID: "sc-strath", ScenarioName: "strath", ScenarioRole: "implementer",
 		}
 
-		if err := sm.Update("sess1", strPtr("bonnie-name"), nil); err != nil {
+		if err := update(sm, "sess1", strPtr("bonnie-name"), nil); err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
 
 		if sm.state.Sessions["sess1"].Name != "bonnie-name" {
 			t.Errorf("Name = %q, want %q", sm.state.Sessions["sess1"].Name, "bonnie-name")
+		}
+
+		got := sm.state.Sessions["sess1"]
+		if got.ID != "sess1" || got.ParentID != "ben" || got.WorktreePath != "/bothy/sess1" ||
+			got.Branch != "user/auld-name-sess1" || got.Token != "tok-sess1" ||
+			got.ScenarioID != "sc-strath" || got.ScenarioName != "strath" || got.ScenarioRole != "implementer" {
+			t.Errorf("name-only update changed stable session identity or relationships: %+v", got)
+		}
+
+		persisted, err := LoadState(sm.paths.StateFile)
+		if err != nil {
+			t.Fatalf("LoadState() after name update: %v", err)
+		}
+
+		reloaded := persisted.Sessions["sess1"]
+		if reloaded == nil || reloaded.Name != "bonnie-name" || reloaded.ParentID != "ben" ||
+			reloaded.WorktreePath != "/bothy/sess1" || reloaded.Branch != "user/auld-name-sess1" ||
+			reloaded.Token != "tok-sess1" || reloaded.ScenarioID != "sc-strath" ||
+			reloaded.ScenarioName != "strath" || reloaded.ScenarioRole != "implementer" {
+			t.Errorf("persisted name update changed stable session identity or relationships: %+v", reloaded)
 		}
 	})
 
@@ -323,7 +321,7 @@ func TestUpdate(t *testing.T) {
 			ID: "bairn", Name: "bairn", ParentID: "ben", Status: StatusRunning,
 		}
 
-		if err := sm.Update("bairn", nil, strPtr("")); err != nil {
+		if err := update(sm, "bairn", nil, strPtr("")); err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
 
@@ -344,7 +342,7 @@ func TestUpdate(t *testing.T) {
 			ID: "bairn", Name: "bairn", ParentID: "p1", Status: StatusRunning,
 		}
 
-		if err := sm.Update("bairn", nil, strPtr("p2")); err != nil {
+		if err := update(sm, "bairn", nil, strPtr("p2")); err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
 
@@ -359,7 +357,7 @@ func TestUpdate(t *testing.T) {
 			ID: "sess1", Name: "braw-sess", Status: StatusRunning,
 		}
 
-		err := sm.Update("sess1", nil, strPtr("sess1"))
+		err := update(sm, "sess1", nil, strPtr("sess1"))
 		if err == nil {
 			t.Fatal("expected error for self-parent")
 		}
@@ -377,7 +375,7 @@ func TestUpdate(t *testing.T) {
 			ID: "bairn", Name: "bairn", ParentID: "ben", Status: StatusRunning,
 		}
 
-		err := sm.Update("grandparent", nil, strPtr("bairn"))
+		err := update(sm, "grandparent", nil, strPtr("bairn"))
 		if err == nil {
 			t.Fatal("expected error for cycle")
 		}
@@ -389,7 +387,7 @@ func TestUpdate(t *testing.T) {
 			ID: "sess1", Name: "braw-sess", Status: StatusRunning,
 		}
 
-		err := sm.Update("sess1", nil, strPtr("nonexistent"))
+		err := update(sm, "sess1", nil, strPtr("nonexistent"))
 		if err == nil {
 			t.Fatal("expected error for nonexistent parent")
 		}
@@ -398,21 +396,39 @@ func TestUpdate(t *testing.T) {
 	t.Run("not found", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 
-		err := sm.Update("nonexistent", strPtr("bonnie-name"), nil)
+		err := update(sm, "nonexistent", strPtr("bonnie-name"), nil)
 		if err == nil {
 			t.Fatal("expected error for nonexistent session")
+		}
+	})
+
+	t.Run("duplicate display name remains allowed", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["sess1"] = &SessionState{ID: "sess1", Name: "dreich", Status: StatusRunning}
+		sm.state.Sessions["sess2"] = &SessionState{ID: "sess2", Name: "canny", Status: StatusRunning}
+
+		if _, err := sm.Update("sess2", strPtr("dreich"), nil, nil); err != nil {
+			t.Fatalf("Update() duplicate display name error = %v", err)
+		}
+
+		if got := sm.state.Sessions["sess2"].Name; got != "dreich" {
+			t.Fatalf("Name = %q, want dreich", got)
 		}
 	})
 
 	t.Run("no changes is no-op", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "braw-sess", Status: StatusRunning,
+			ID: "sess1", Name: "braw-sess", Status: StatusRunning, Starred: true,
 		}
 
-		err := sm.Update("sess1", nil, nil)
+		result, err := sm.Update("sess1", nil, nil, nil)
 		if err != nil {
 			t.Fatalf("Update() with no changes should succeed, got: %v", err)
+		}
+
+		if !result.Starred {
+			t.Error("omitted starred field changed true to false")
 		}
 	})
 
@@ -423,9 +439,11 @@ func TestUpdate(t *testing.T) {
 			SystemKind: SystemKindOrchestrator,
 		}
 
-		err := sm.Update("sys", strPtr("bonnie-name"), nil)
-		if err == nil {
-			t.Fatal("expected error for system session")
+		starred := true
+
+		_, err := sm.Update("sys", nil, nil, &starred)
+		if err == nil || !strings.Contains(err.Error(), "cannot update system session") {
+			t.Fatalf("expected explicit error for system session, got %v", err)
 		}
 	})
 
@@ -441,7 +459,7 @@ func TestUpdate(t *testing.T) {
 			ID: "bairn", Name: "auld-name", ParentID: "p1", Status: StatusRunning,
 		}
 
-		if err := sm.Update("bairn", strPtr("bonnie-name"), strPtr("p2")); err != nil {
+		if err := update(sm, "bairn", strPtr("bonnie-name"), strPtr("p2")); err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
 
@@ -461,13 +479,129 @@ func TestUpdate(t *testing.T) {
 			ID: "sess1", Name: "auld-name", Status: StatusRunning,
 		}
 
-		err := sm.Update("sess1", strPtr("bonnie-name"), strPtr("nonexistent"))
+		err := update(sm, "sess1", strPtr("bonnie-name"), strPtr("nonexistent"))
 		if err == nil {
 			t.Fatal("expected error for nonexistent parent")
 		}
 
 		if sm.state.Sessions["sess1"].Name != "auld-name" {
 			t.Errorf("Name = %q, want %q (should not have changed)", sm.state.Sessions["sess1"].Name, "auld-name")
+		}
+	})
+
+	t.Run("combined name parent and starred persist", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		putSession(sm, &SessionState{ID: "ben", Name: "ben", Status: StatusRunning})
+		putSession(sm, &SessionState{ID: "bairn", Name: "auld", Status: StatusRunning})
+
+		starred := true
+
+		updated, err := sm.Update("bairn", strPtr("bonnie"), strPtr("ben"), &starred)
+		if err != nil {
+			t.Fatalf("Update() error = %v", err)
+		}
+
+		if updated.Name != "bonnie" || updated.ParentID != "ben" || !updated.Starred {
+			t.Fatalf("updated = {Name:%q ParentID:%q Starred:%t}, want bonnie/ben/true",
+				updated.Name, updated.ParentID, updated.Starred)
+		}
+
+		loaded, err := LoadState(sm.paths.StateFile)
+		if err != nil {
+			t.Fatalf("LoadState() error = %v", err)
+		}
+
+		persisted := loaded.Sessions["bairn"]
+		if persisted == nil || persisted.Name != "bonnie" || persisted.ParentID != "ben" || !persisted.Starred {
+			t.Fatalf("persisted = %+v, want combined update", persisted)
+		}
+	})
+
+	t.Run("idempotent starred values", func(t *testing.T) {
+		for _, initial := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%t to %t", initial, initial), func(t *testing.T) {
+				sm := newTestSessionManager(t)
+				putSession(sm, &SessionState{
+					ID: "croft", Name: "croft", Status: StatusStopped, Starred: initial,
+				})
+
+				updated, err := sm.Update("croft", nil, nil, &initial)
+				if err != nil {
+					t.Fatalf("Update() error = %v", err)
+				}
+
+				if updated.Starred != initial {
+					t.Errorf("Starred = %t, want %t", updated.Starred, initial)
+				}
+			})
+		}
+	})
+
+	t.Run("scenario-owned session can be starred", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		putSession(sm, &SessionState{
+			ID: "bothy", Name: "bothy", Status: StatusRunning, ScenarioID: "scenario-croft",
+		})
+
+		starred := true
+
+		updated, err := sm.Update("bothy", nil, nil, &starred)
+		if err != nil {
+			t.Fatalf("Update() error = %v", err)
+		}
+
+		if !updated.Starred || updated.ScenarioID != "scenario-croft" {
+			t.Errorf("updated = %+v, want starred scenario membership preserved", updated)
+		}
+	})
+
+	t.Run("deleting session rejected", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		putSession(sm, &SessionState{ID: "thrawn", Name: "thrawn", Status: StatusDeleting})
+
+		starred := true
+		if _, err := sm.Update("thrawn", nil, nil, &starred); err == nil {
+			t.Fatal("expected deleting session update to fail")
+		}
+	})
+
+	t.Run("concurrent partial updates retain both fields", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		putSession(sm, &SessionState{ID: "strath", Name: "auld", Status: StatusRunning})
+
+		name := "bonnie"
+		starred := true
+		errs := make(chan error, 2)
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+
+			_, err := sm.Update("strath", &name, nil, nil)
+			errs <- err
+		}()
+
+		go func() {
+			defer wg.Done()
+
+			_, err := sm.Update("strath", nil, nil, &starred)
+			errs <- err
+		}()
+
+		wg.Wait()
+		close(errs)
+
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("concurrent Update() error = %v", err)
+			}
+		}
+
+		got, ok := sm.Get("strath")
+		if !ok || got.Name != "bonnie" || !got.Starred {
+			t.Fatalf("session = %+v, ok=%t; want name and star updates retained", got, ok)
 		}
 	})
 }
@@ -782,9 +916,10 @@ func TestToSessionInfoNilExitCode(t *testing.T) {
 
 func TestIsConfigStale(t *testing.T) {
 	agent := config.Agent{
-		Command: "claude",
-		Args:    []string{"--model", "opus"},
-		Sandbox: config.SandboxConfig{Enabled: true, ReadDirs: []string{"/tmp"}},
+		NonInteractiveArgs: []string{},
+		Command:            "claude",
+		Args:               []string{"--model", "opus"},
+		Sandbox:            config.SandboxConfig{Enabled: true, ReadDirs: []string{"/tmp"}},
 	}
 	cfg := &config.Config{
 		Agents:  map[string]config.Agent{"claude": agent},
@@ -815,7 +950,7 @@ func TestIsConfigStale(t *testing.T) {
 		sess := SessionState{
 			Agent: "claude",
 			CreationCfg: &CreationConfig{
-				Agent:         config.Agent{Command: "claude", Args: []string{"--model", "sonnet"}},
+				Agent:         config.Agent{NonInteractiveArgs: []string{}, Command: "claude", Args: []string{"--model", "sonnet"}},
 				SandboxConfig: cfg.Sandbox.Merge(agent.Sandbox),
 			},
 		}
@@ -855,11 +990,31 @@ func TestIsConfigStale(t *testing.T) {
 		}
 	})
 
+	t.Run("changed command policy is stale", func(t *testing.T) {
+		sess := SessionState{
+			Agent: "claude",
+			CreationCfg: &CreationConfig{
+				Agent:         agent,
+				SandboxConfig: cfg.Sandbox.Merge(agent.Sandbox),
+			},
+		}
+
+		changedCfg := *cfg
+
+		changedCfg.CommandPolicy = config.CommandPolicy{
+			Backend: "builtin",
+			Builtin: config.CommandPolicyBuiltin{Deny: []any{"git push"}},
+		}
+		if !isConfigStale(sess, &changedCfg) {
+			t.Error("expected stale when command policy config differs")
+		}
+	})
+
 	t.Run("removed agent is stale", func(t *testing.T) {
 		sess := SessionState{
 			Agent: "codex",
 			CreationCfg: &CreationConfig{
-				Agent: config.Agent{Command: "codex"},
+				Agent: config.Agent{NonInteractiveArgs: []string{}, Command: "codex"},
 			},
 		}
 		if !isConfigStale(sess, cfg) {
@@ -870,9 +1025,10 @@ func TestIsConfigStale(t *testing.T) {
 
 func TestIsConfigStaleOrchestrator(t *testing.T) {
 	agent := config.Agent{
-		Command: "claude",
-		Args:    []string{"--model", "opus"},
-		Sandbox: config.SandboxConfig{Enabled: true, ReadDirs: []string{"/tmp"}},
+		NonInteractiveArgs: []string{},
+		Command:            "claude",
+		Args:               []string{"--model", "opus"},
+		Sandbox:            config.SandboxConfig{Enabled: true, ReadDirs: []string{"/tmp"}},
 	}
 	cfg := &config.Config{
 		Agents:  map[string]config.Agent{"claude": agent},
@@ -941,8 +1097,9 @@ func TestResolveSandboxIgnoresOrchestratorLayer(t *testing.T) {
 		cfg := config.Default()
 		cfg.Sandbox = config.SandboxConfig{Enabled: true}
 		cfg.Agents["claude"] = config.Agent{
-			Command: "claude",
-			Sandbox: config.SandboxConfig{ReadDirs: []string{"/agent-dir"}},
+			NonInteractiveArgs: []string{},
+			Command:            "claude",
+			Sandbox:            config.SandboxConfig{ReadDirs: []string{"/agent-dir"}},
 		}
 
 		smWithout := newSMWithConfig(t, cfg)
@@ -950,8 +1107,9 @@ func TestResolveSandboxIgnoresOrchestratorLayer(t *testing.T) {
 		cfgWith := config.Default()
 		cfgWith.Sandbox = config.SandboxConfig{Enabled: true}
 		cfgWith.Agents["claude"] = config.Agent{
-			Command: "claude",
-			Sandbox: config.SandboxConfig{ReadDirs: []string{"/agent-dir"}},
+			NonInteractiveArgs: []string{},
+			Command:            "claude",
+			Sandbox:            config.SandboxConfig{ReadDirs: []string{"/agent-dir"}},
 		}
 		cfgWith.Orchestrator = config.OrchestratorConfig{
 			Sandbox: config.OrchestratorSandboxConfig{
@@ -981,7 +1139,7 @@ func TestResolveSandboxIgnoresOrchestratorLayer(t *testing.T) {
 	t.Run("orchestrator sandbox cannot enable sandboxing", func(t *testing.T) {
 		cfg := config.Default()
 		cfg.Sandbox = config.SandboxConfig{Enabled: false}
-		cfg.Agents["claude"] = config.Agent{Command: "claude"}
+		cfg.Agents["claude"] = config.Agent{NonInteractiveArgs: []string{}, Command: "claude"}
 		cfg.Orchestrator = config.OrchestratorConfig{
 			Sandbox: config.OrchestratorSandboxConfig{
 				WriteDirs: []string{"/orch-write"},
@@ -989,6 +1147,8 @@ func TestResolveSandboxIgnoresOrchestratorLayer(t *testing.T) {
 		}
 
 		sm := newSMWithConfig(t, cfg)
+		// This test specifically covers the production sandbox resolution path.
+		sm.sandboxResolver = nil
 
 		result, _ := sm.resolveSandbox("claude")
 		if result {
@@ -999,8 +1159,9 @@ func TestResolveSandboxIgnoresOrchestratorLayer(t *testing.T) {
 
 func TestIsConfigStaleOrchestratorGlobalChange(t *testing.T) {
 	agent := config.Agent{
-		Command: "claude",
-		Sandbox: config.SandboxConfig{ReadDirs: []string{"/agent"}},
+		NonInteractiveArgs: []string{},
+		Command:            "claude",
+		Sandbox:            config.SandboxConfig{ReadDirs: []string{"/agent"}},
 	}
 	cfg := &config.Config{
 		Agents:  map[string]config.Agent{"claude": agent},
@@ -1110,9 +1271,10 @@ func TestIdleTracking(t *testing.T) {
 	t.Run("returns true when idle exceeds timeout", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.cfg.Agents["claude"] = config.Agent{
-			Command:     "claude",
-			ResumeArgs:  []string{"--resume"},
-			IdleTimeout: "100ms",
+			NonInteractiveArgs: []string{},
+			Command:            "claude",
+			ResumeArgs:         []string{"--resume"},
+			IdleTimeout:        "100ms",
 		}
 		past := time.Now().Add(-200 * time.Millisecond)
 		s := &SessionState{
@@ -1131,9 +1293,10 @@ func TestIdleTracking(t *testing.T) {
 	t.Run("returns false when idle within timeout", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.cfg.Agents["claude"] = config.Agent{
-			Command:     "claude",
-			ResumeArgs:  []string{"--resume"},
-			IdleTimeout: "1h",
+			NonInteractiveArgs: []string{},
+			Command:            "claude",
+			ResumeArgs:         []string{"--resume"},
+			IdleTimeout:        "1h",
 		}
 		now := time.Now()
 		s := &SessionState{
@@ -1152,8 +1315,9 @@ func TestIdleTracking(t *testing.T) {
 	t.Run("disabled timeout never stops", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.cfg.Agents["codex"] = config.Agent{
-			Command:     "codex",
-			IdleTimeout: "0",
+			NonInteractiveArgs: []string{},
+			Command:            "codex",
+			IdleTimeout:        "0",
 		}
 		past := time.Now().Add(-24 * time.Hour)
 		s := &SessionState{
@@ -1266,10 +1430,10 @@ func TestHandleHookReport(t *testing.T) {
 		}
 	})
 
-	t.Run("approval event", func(t *testing.T) {
+	t.Run("native permission prompt leaves status unchanged", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
-			ID: "sess1", Name: "braw", Status: StatusRunning,
+			ID: "sess1", Name: "braw", Status: StatusRunning, AgentStatus: "active",
 		}
 
 		sm.HandleHookReport(protocol.StatusReportMsg{
@@ -1279,32 +1443,38 @@ func TestHandleHookReport(t *testing.T) {
 		})
 
 		sm.mu.RLock()
-		report, ok := sm.hookReports["sess1"]
+		_, ok := sm.hookReports["sess1"]
+		agentStatus := sm.state.Sessions["sess1"].AgentStatus
 		sm.mu.RUnlock()
 
-		if !ok {
-			t.Fatal("hookReport not found for sess1")
+		if ok {
+			t.Fatal("native permission prompt must not create a Graith hook status")
 		}
 
-		if report.Status != "approval" {
-			t.Errorf("Status = %q, want %q", report.Status, "approval")
-		}
-		// AuthoritativeUntil should be ~30 minutes in the future (sticky)
-		untilDelta := time.Until(report.AuthoritativeUntil)
-		if untilDelta < 29*time.Minute || untilDelta > 31*time.Minute {
-			t.Errorf("AuthoritativeUntil delta = %v, want ~30m", untilDelta)
+		if agentStatus != "active" {
+			t.Errorf("AgentStatus = %q, want unchanged active", agentStatus)
 		}
 	})
 
-	// PermissionRequest is Codex's approval hook and must keep mapping to
-	// approval (it carries no subtype).
-	t.Run("PermissionRequest maps to approval", func(t *testing.T) {
-		report := recordHookReport(t, "speir", protocol.StatusReportMsg{
-			Event: "PermissionRequest",
-		})
+	t.Run("PermissionRequest leaves status unchanged", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		sm.state.Sessions["speir"] = &SessionState{
+			ID: "speir", Name: "speir", Status: StatusRunning, AgentStatus: "active",
+		}
 
-		if report.Status != "approval" {
-			t.Errorf("Status = %q, want %q", report.Status, "approval")
+		sm.HandleHookReport(protocol.StatusReportMsg{SessionID: "speir", Event: "PermissionRequest"})
+
+		sm.mu.RLock()
+		_, ok := sm.hookReports["speir"]
+		agentStatus := sm.state.Sessions["speir"].AgentStatus
+		sm.mu.RUnlock()
+
+		if ok {
+			t.Fatal("PermissionRequest must not create a Graith hook status")
+		}
+
+		if agentStatus != "active" {
+			t.Errorf("AgentStatus = %q, want unchanged active", agentStatus)
 		}
 	})
 
@@ -1409,11 +1579,8 @@ func TestHandleHookReport(t *testing.T) {
 		}
 	})
 
-	// Notification is now subtype-aware: idle_prompt -> ready, permission_prompt
-	// -> approval, and every other subtype (including empty/unparsed) leaves the
-	// status untouched. The empty case is the regression guard — the pre-subtype
-	// code mapped every Notification to approval, so a timed-out/unparsed hook
-	// spuriously flagged a session as needing attention.
+	// Notification is subtype-aware: idle_prompt -> ready; permission_prompt and
+	// every other subtype (including empty/unparsed) leave status untouched.
 	t.Run("notification idle_prompt maps to ready", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["ken"] = &SessionState{
@@ -1449,7 +1616,7 @@ func TestHandleHookReport(t *testing.T) {
 		}
 	})
 
-	t.Run("notification permission_prompt maps to approval", func(t *testing.T) {
+	t.Run("notification permission_prompt leaves status unchanged", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["haar"] = &SessionState{
 			ID: "haar", Name: "haar", Status: StatusRunning, AgentStatus: "active",
@@ -1465,8 +1632,8 @@ func TestHandleHookReport(t *testing.T) {
 		agentStatus := sm.state.Sessions["haar"].AgentStatus
 		sm.mu.RUnlock()
 
-		if agentStatus != "approval" {
-			t.Errorf("AgentStatus = %q, want %q", agentStatus, "approval")
+		if agentStatus != "active" {
+			t.Errorf("AgentStatus = %q, want %q", agentStatus, "active")
 		}
 	})
 
@@ -1507,10 +1674,10 @@ func TestHandleHookReport(t *testing.T) {
 	}
 
 	// Regression: a timed-out/unparsed Notification arrives with an empty
-	// subtype. It must NOT become approval (the old code path mapped every
-	// Notification to approval, so an idle session with a slow hook flipped to
+	// subtype. It must NOT become an error (the old code path mapped every
+	// Notification to a permission state, so an idle session with a slow hook flipped to
 	// "needs attention").
-	t.Run("empty notification does not become approval (regression)", func(t *testing.T) {
+	t.Run("empty notification does not become an error (regression)", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["dreich"] = &SessionState{
 			ID: "dreich", Name: "dreich", Status: StatusRunning, AgentStatus: "ready",
@@ -1526,8 +1693,8 @@ func TestHandleHookReport(t *testing.T) {
 		agentStatus := sm.state.Sessions["dreich"].AgentStatus
 		sm.mu.RUnlock()
 
-		if agentStatus == "approval" {
-			t.Fatal("empty Notification became approval; regressed to pre-subtype behaviour")
+		if agentStatus == "error" {
+			t.Fatal("empty Notification became an error; regressed to pre-subtype behaviour")
 		}
 
 		if agentStatus != "ready" {
@@ -1579,7 +1746,7 @@ func TestHandleHookReportContextPressure(t *testing.T) {
 		sm := newTestSessionManager(t)
 		sm.state.Sessions["sess1"] = &SessionState{
 			ID: "sess1", Name: "braw", Status: StatusRunning,
-			AgentStatus:     "approval",
+			AgentStatus:     "error",
 			ContextPressure: true,
 		}
 
@@ -1600,9 +1767,9 @@ func TestHandleHookReportContextPressure(t *testing.T) {
 			t.Error("ContextPressure = true, want false after PostCompact")
 		}
 
-		// PostCompact must not clobber a pending approval.
-		if agentStatus != "approval" {
-			t.Errorf("AgentStatus = %q, want approval (PostCompact must not change it)", agentStatus)
+		// PostCompact must not clobber a runtime error.
+		if agentStatus != "error" {
+			t.Errorf("AgentStatus = %q, want error (PostCompact must not change it)", agentStatus)
 		}
 	})
 
@@ -2081,7 +2248,7 @@ func TestDetectAgentStatusesHookAuthority(t *testing.T) {
 	t.Run("authoritative hook is trusted", func(t *testing.T) {
 		sm.mu.Lock()
 		sm.hookReports["s1"] = hookReport{
-			Status:             "approval",
+			Status:             "error",
 			Event:              "Notification",
 			ReportedAt:         time.Now(),
 			AuthoritativeUntil: time.Now().Add(30 * time.Minute),
@@ -2096,8 +2263,8 @@ func TestDetectAgentStatusesHookAuthority(t *testing.T) {
 			t.Fatal("hookReport not found")
 		}
 
-		if hr.Status != "approval" {
-			t.Errorf("Status = %q, want %q", hr.Status, "approval")
+		if hr.Status != "error" {
+			t.Errorf("Status = %q, want %q", hr.Status, "error")
 		}
 
 		if !time.Now().Before(hr.AuthoritativeUntil) {
@@ -2231,7 +2398,7 @@ func TestApplyConfig(t *testing.T) {
 
 	newCfg := config.Default()
 	newCfg.DefaultAgent = "codex"
-	newCfg.Agents["newagent"] = config.Agent{Command: "newagent"}
+	newCfg.Agents["newagent"] = config.Agent{NonInteractiveArgs: []string{}, Command: "newagent"}
 
 	_ = sm.applyConfig(newCfg)
 
@@ -2618,8 +2785,9 @@ func TestCreateRollsBackOnSaveStateFailure(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.Agents["sleeper"] = config.Agent{
-		Command: "sleep",
-		Args:    []string{"60"},
+		NonInteractiveArgs: []string{},
+		Command:            "sleep",
+		Args:               []string{"60"},
 	}
 
 	sm := NewSessionManager(cfg, config.Paths{
@@ -2627,6 +2795,7 @@ func TestCreateRollsBackOnSaveStateFailure(t *testing.T) {
 		DataDir:   tmpDir,
 		LogDir:    tmpDir,
 	}, slog.Default())
+	sm.sandboxResolver = func(string) (bool, error) { return false, nil }
 
 	_, err := sm.Create(CreateOpts{Name: "braw-sess", AgentName: "sleeper", NoRepo: true, Rows: 24, Cols: 80})
 	if err == nil {
@@ -2656,8 +2825,9 @@ func TestResumeRollsBackOnSaveStateFailure(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.Agents["sleeper"] = config.Agent{
-		Command: "sleep",
-		Args:    []string{"60"},
+		NonInteractiveArgs: []string{},
+		Command:            "sleep",
+		Args:               []string{"60"},
 	}
 
 	sm := newSMWithConfig(t, cfg)
@@ -2834,11 +3004,13 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 			ReadDirs: []string{updatedDir},
 		}
 		cfg.Agents["sleeper"] = config.Agent{
-			Command: "sleep",
-			Args:    []string{"60"},
+			NonInteractiveArgs: []string{},
+			Command:            "sleep",
+			Args:               []string{"60"},
 		}
 
 		sm := newSMWithConfig(t, cfg)
+		sm.sandboxResolver = nil
 
 		sm.state.Sessions["s1"] = &SessionState{
 			ID:           "s1",
@@ -2949,8 +3121,9 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 		cfg := config.Default()
 		cfg.Sandbox = config.SandboxConfig{Enabled: false}
 		cfg.Agents["sleeper"] = config.Agent{
-			Command: "sleep",
-			Args:    []string{"60"},
+			NonInteractiveArgs: []string{},
+			Command:            "sleep",
+			Args:               []string{"60"},
 		}
 
 		sm := newSMWithConfig(t, cfg)
@@ -3202,10 +3375,11 @@ func TestResumeResetsIdleSince(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.Agents["claude"] = config.Agent{
-		Command:     "true",
-		Args:        []string{},
-		ResumeArgs:  []string{},
-		IdleTimeout: "5m",
+		NonInteractiveArgs: []string{},
+		Command:            "true",
+		Args:               []string{},
+		ResumeArgs:         []string{},
+		IdleTimeout:        "5m",
 	}
 
 	sm := NewSessionManager(cfg, config.Paths{
@@ -3213,6 +3387,7 @@ func TestResumeResetsIdleSince(t *testing.T) {
 		DataDir:   tmpDir,
 		LogDir:    tmpDir,
 	}, slog.Default())
+	sm.sandboxResolver = func(string) (bool, error) { return false, nil }
 
 	past := time.Now().Add(-10 * time.Minute)
 	id := "sess-idle"
@@ -3382,8 +3557,9 @@ func TestCreateNoFetchSkipsFetch(t *testing.T) {
 	cfg := config.Default()
 	cfg.FetchOnCreate = true // fetch is on; only --no-fetch should suppress it
 	cfg.Agents["sleeper"] = config.Agent{
-		Command: "sleep",
-		Args:    []string{"60"},
+		NonInteractiveArgs: []string{},
+		Command:            "sleep",
+		Args:               []string{"60"},
 	}
 
 	t.Run("no-fetch skips the failing fetch", func(t *testing.T) {
@@ -3522,8 +3698,9 @@ func TestForkUsesSourceBaseBranch(t *testing.T) {
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
 	cfg.Agents["sleeper"] = config.Agent{
-		Command: "sleep",
-		Args:    []string{"60"},
+		NonInteractiveArgs: []string{},
+		Command:            "sleep",
+		Args:               []string{"60"},
 	}
 
 	sm := newSMWithConfig(t, cfg)
@@ -3569,60 +3746,6 @@ func TestForkUsesSourceBaseBranch(t *testing.T) {
 
 	if forked.BaseBranch == "feat/my-feature" {
 		t.Error("Fork() incorrectly used source Branch as BaseBranch")
-	}
-}
-
-// TestForkInheritsYolo verifies a fork of a yolo session is itself yolo, so the
-// auto-approve mode propagates and the fork doesn't silently start prompting.
-func TestForkInheritsYolo(t *testing.T) {
-	repoDir := initTempGitRepo(t)
-
-	cfg := config.Default()
-	cfg.FetchOnCreate = false
-	cfg.Agents["sleeper"] = config.Agent{
-		Command: "sleep",
-		Args:    []string{"60"},
-	}
-
-	sm := newSMWithConfig(t, cfg)
-
-	sm.state.Sessions["src1"] = &SessionState{
-		ID:           "src1",
-		Name:         "braw-source-session",
-		RepoPath:     repoDir,
-		RepoName:     "testrepo",
-		WorktreePath: repoDir,
-		Branch:       "feat/my-feature",
-		BaseBranch:   "main",
-		Agent:        "sleeper",
-		Status:       StatusRunning,
-		Yolo:         true,
-	}
-
-	forked, err := sm.Fork("braw-fork", "src1", 24, 80)
-	if err != nil {
-		t.Fatalf("Fork() unexpected error: %v", err)
-	}
-
-	t.Cleanup(func() {
-		sm.mu.RLock()
-		sess, ok := sm.sessions[forked.ID]
-		sm.mu.RUnlock()
-
-		if ok {
-			_ = sess.Kill()
-			sess.Close()
-		}
-
-		if forked.WorktreePath != "" {
-			cmd := testutil.GitCommand("worktree", "remove", "--force", forked.WorktreePath)
-			cmd.Dir = repoDir
-			_ = cmd.Run()
-		}
-	})
-
-	if !forked.Yolo {
-		t.Error("Fork() of a yolo session did not inherit Yolo")
 	}
 }
 
@@ -3960,11 +4083,12 @@ func newRecorderManager(t *testing.T, repoDir string, includes []string) (*Sessi
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
 	cfg.Agents["cursor"] = config.Agent{
-		Command:    "sh",
-		Args:       []string{"-c", script},
-		ResumeArgs: []string{"-c", script},
-		ForkArgs:   []string{"-c", script},
-		Env:        map[string]string{"GRAITH_ARGS_RECORD": recordPath},
+		NonInteractiveArgs: []string{},
+		Command:            "sh",
+		Args:               []string{"-c", script},
+		ResumeArgs:         []string{"-c", script},
+		ForkArgs:           []string{"-c", script},
+		Env:                map[string]string{"GRAITH_ARGS_RECORD": recordPath},
 		// Carry over the add_dir_args template so the recorder still exercises the
 		// include add-dir path (issue #1236); only the command is swapped.
 		AddDirArgs: cfg.Agents["cursor"].AddDirArgs,
@@ -3978,6 +4102,7 @@ func newRecorderManager(t *testing.T, repoDir string, includes []string) (*Sessi
 		RuntimeDir: dir,
 		TmpDir:     filepath.Join(dir, "tmp"),
 	}, slog.Default())
+	sm.sandboxResolver = func(string) (bool, error) { return false, nil }
 
 	return sm, recordPath
 }
@@ -4176,11 +4301,12 @@ func newClaudeRecorderManager(t *testing.T, repoDir string) (*SessionManager, st
 	// hook/MCP flags — no --append-system-prompt noise to reason about.
 	cfg.AgentPrompt = ""
 	cfg.Agents["claude"] = config.Agent{
-		Command:    "sh",
-		Args:       []string{"-c", script},
-		ResumeArgs: []string{"-c", script},
-		ForkArgs:   []string{"-c", script},
-		Env:        map[string]string{"GRAITH_ARGS_RECORD": recordPath},
+		NonInteractiveArgs: []string{},
+		Command:            "sh",
+		Args:               []string{"-c", script},
+		ResumeArgs:         []string{"-c", script},
+		ForkArgs:           []string{"-c", script},
+		Env:                map[string]string{"GRAITH_ARGS_RECORD": recordPath},
 	}
 	cfg.Repos = []config.RepoConfig{{Path: repoDir}}
 
@@ -4191,6 +4317,7 @@ func newClaudeRecorderManager(t *testing.T, repoDir string) (*SessionManager, st
 		RuntimeDir: dir,
 		TmpDir:     filepath.Join(dir, "tmp"),
 	}, slog.Default())
+	sm.sandboxResolver = func(string) (bool, error) { return false, nil }
 
 	return sm, recordPath
 }
@@ -4378,7 +4505,7 @@ func TestResumeInjectsSettingsAndMCP(t *testing.T) {
 }
 
 // TestClaudeSessionHooksDisabledSkipsInjection verifies the other side of the
-// gate: with hooks disabled (and not yolo), a PTY Claude session gets neither
+// gate: with hooks disabled (with no command policy), a PTY Claude session gets neither
 // --settings nor --mcp-config — MCP still tracks the hook gate for PTY, so this
 // stays a pure refactor of the pre-#1135 behaviour.
 func TestClaudeSessionHooksDisabledSkipsInjection(t *testing.T) {
@@ -4950,7 +5077,7 @@ func TestNonoProfilePathMatchesWrapOpts(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.paths.RuntimeDir = t.TempDir()
 
-	opts := sm.sandboxOptsFromConfig(config.SandboxConfig{}, "braw1", "/nonexistent/worktree", "claude", nil, true)
+	opts := requireSandboxOpts(t, sm, config.SandboxConfig{}, "braw1", "/nonexistent/worktree", "claude", nil, true)
 
 	if opts.ProfilePath != sm.nonoProfilePath("braw1") {
 		t.Errorf("write path %q != cleanup path %q", opts.ProfilePath, sm.nonoProfilePath("braw1"))
@@ -4970,7 +5097,7 @@ func TestSafehouseFragmentPathMatchesWrapOpts(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.paths.RuntimeDir = t.TempDir()
 
-	opts := sm.sandboxOptsFromConfig(config.SandboxConfig{}, "braw1", "/nonexistent/worktree", "claude", nil, true)
+	opts := requireSandboxOpts(t, sm, config.SandboxConfig{}, "braw1", "/nonexistent/worktree", "claude", nil, true)
 
 	if opts.SafehouseFragmentPath != sm.safehouseFragmentPath("braw1") {
 		t.Errorf("fragment write path %q != cleanup path %q", opts.SafehouseFragmentPath, sm.safehouseFragmentPath("braw1"))
@@ -5973,83 +6100,8 @@ func TestReconcileWritesLifecycleSummaries(t *testing.T) {
 }
 
 // TestConcurrentConfigReadWrite verifies that concurrent config reads via
-// notify, approvals, and Config() do not race with applyConfig writes.
+// notify, command policy, and Config() do not race with applyConfig writes.
 // Run with -race to detect data races.
-func TestConcurrentConfigReadWrite(t *testing.T) {
-	dir := t.TempDir()
-
-	ms, err := NewMsgStore(filepath.Join(dir, "msg.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = ms.Close() }()
-
-	sm := newTestSessionManager(t)
-	sm.messages = ms
-	sm.mu.Lock()
-	sm.state.Sessions["sess1"] = &SessionState{
-		ID: "sess1", Name: "braw", Status: StatusRunning, Agent: "claude",
-	}
-	sm.mu.Unlock()
-
-	done := make(chan struct{})
-
-	// Writer: swap config repeatedly via applyConfig.
-	go func() {
-		defer func() { done <- struct{}{} }()
-
-		for i := 0; i < 200; i++ {
-			cfg := config.Default()
-			cfg.Notifications.Enabled = i%2 == 0
-			cfg.Notifications.OnApproval = true
-			cfg.Notifications.OnStopped = true
-			cfg.Notifications.Command = "true"
-			cfg.Approvals.Timeout = "1s"
-			_ = sm.applyConfig(cfg)
-		}
-	}()
-
-	// Reader 1: onAgentStatusChange reads notification config.
-	go func() {
-		defer func() { done <- struct{}{} }()
-
-		for i := 0; i < 200; i++ {
-			sm.onAgentStatusChange("sess1", "braw", "active", "approval")
-		}
-	}()
-
-	// Reader 2: Config() snapshots the config.
-	go func() {
-		defer func() { done <- struct{}{} }()
-
-		for i := 0; i < 200; i++ {
-			cfg := sm.Config()
-			_ = cfg.DefaultAgent
-			_ = cfg.Notifications.Enabled
-			_ = cfg.Approvals.TimeoutDuration()
-		}
-	}()
-
-	// Reader 3: SubmitApproval reads approvals config.
-	go func() {
-		defer func() { done <- struct{}{} }()
-
-		for i := 0; i < 50; i++ {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
-			sm.SubmitApproval(ctx, protocol.ApprovalRequestMsg{
-				RequestID: fmt.Sprintf("r-%d", i),
-				SessionID: "sess1",
-				ToolName:  "Bash",
-			})
-			cancel()
-		}
-	}()
-
-	for i := 0; i < 4; i++ {
-		<-done
-	}
-}
-
 func TestRecordExit_MassExitDetection(t *testing.T) {
 	sm := newTestSessionManager(t)
 
@@ -6161,46 +6213,6 @@ func spawnContainedSleeper(t *testing.T) int {
 	return pid
 }
 
-func TestCovStarUnstarLifecycle(t *testing.T) {
-	sm := newTestSessionManager(t)
-	putSession(sm, &SessionState{ID: "braw1", Name: "braw", Status: StatusStopped})
-
-	if err := sm.Star("braw1"); err != nil {
-		t.Fatalf("Star: %v", err)
-	}
-
-	if s, _ := sm.Get("braw1"); !s.Starred {
-		t.Fatal("expected session to be starred")
-	}
-
-	if err := sm.Unstar("braw1"); err != nil {
-		t.Fatalf("Unstar: %v", err)
-	}
-
-	if s, _ := sm.Get("braw1"); s.Starred {
-		t.Fatal("expected session to be unstarred")
-	}
-
-	if err := sm.Star("haar-missing"); err == nil {
-		t.Fatal("expected error starring unknown session")
-	}
-
-	if err := sm.Unstar("haar-missing"); err == nil {
-		t.Fatal("expected error unstarring unknown session")
-	}
-
-	// A session being deleted rejects both operations.
-	putSession(sm, &SessionState{ID: "thrawn1", Name: "thrawn", Status: StatusDeleting})
-
-	if err := sm.Star("thrawn1"); err == nil {
-		t.Fatal("expected error starring a deleting session")
-	}
-
-	if err := sm.Unstar("thrawn1"); err == nil {
-		t.Fatal("expected error unstarring a deleting session")
-	}
-}
-
 func TestCovStarBlocksDelete(t *testing.T) {
 	sm := newTestSessionManager(t)
 
@@ -6213,16 +6225,18 @@ func TestCovStarBlocksDelete(t *testing.T) {
 
 	putSession(sm, &SessionState{ID: "canny1", Name: "canny", Status: StatusStopped, WorktreePath: dir})
 
-	if err := sm.Star("canny1"); err != nil {
-		t.Fatalf("Star: %v", err)
+	starred := true
+	if _, err := sm.Update("canny1", nil, nil, &starred); err != nil {
+		t.Fatalf("Update(starred=true): %v", err)
 	}
 
 	if err := sm.Delete("canny1"); err == nil {
 		t.Fatal("expected starred session to reject Delete")
 	}
 
-	if err := sm.Unstar("canny1"); err != nil {
-		t.Fatalf("Unstar: %v", err)
+	starred = false
+	if _, err := sm.Update("canny1", nil, nil, &starred); err != nil {
+		t.Fatalf("Update(starred=false): %v", err)
 	}
 
 	if err := sm.Delete("canny1"); err != nil {
@@ -6242,7 +6256,7 @@ func TestCovFleetSummaryCounts(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	putSession(sm, &SessionState{ID: "s1", Status: StatusRunning, AgentStatus: "active"})
-	putSession(sm, &SessionState{ID: "s2", Status: StatusRunning, AgentStatus: "approval"})
+	putSession(sm, &SessionState{ID: "s2", Status: StatusRunning, AgentStatus: "error"})
 	putSession(sm, &SessionState{ID: "s3", Status: StatusRunning, AgentStatus: "ready"})
 	putSession(sm, &SessionState{ID: "s4", Status: StatusRunning, AgentStatus: ""}) // default -> active
 	putSession(sm, &SessionState{ID: "s5", Status: StatusCreating})                 // counts as active
@@ -6259,10 +6273,6 @@ func TestCovFleetSummaryCounts(t *testing.T) {
 		t.Errorf("Active = %d, want 3 (active + default-running + creating)", f.Active)
 	}
 
-	if f.Approval != 1 {
-		t.Errorf("Approval = %d, want 1", f.Approval)
-	}
-
 	if f.Ready != 1 {
 		t.Errorf("Ready = %d, want 1", f.Ready)
 	}
@@ -6271,8 +6281,8 @@ func TestCovFleetSummaryCounts(t *testing.T) {
 		t.Errorf("Stopped = %d, want 1", f.Stopped)
 	}
 
-	if f.Errored != 1 {
-		t.Errorf("Errored = %d, want 1", f.Errored)
+	if f.Errored != 2 {
+		t.Errorf("Errored = %d, want 2", f.Errored)
 	}
 }
 
@@ -6666,7 +6676,7 @@ func sleeperSM(t *testing.T) *SessionManager {
 	t.Helper()
 
 	cfg := config.Default()
-	cfg.Agents["sleeper"] = config.Agent{Command: "sleep", Args: []string{"300"}}
+	cfg.Agents["sleeper"] = config.Agent{NonInteractiveArgs: []string{}, Command: "sleep", Args: []string{"300"}}
 
 	return newSMWithConfig(t, cfg)
 }
@@ -6944,8 +6954,9 @@ func TestAdoptSessionsCov2(t *testing.T) {
 	sm := sleeperSM(t)
 
 	sm.state.Sessions["bide1"] = &SessionState{
-		ID: "bide1", Name: "bide", Agent: "sleeper", Status: StatusRunning,
+		ID: "bide1", Name: "bide", Agent: "sleeper", Status: StatusRunning, Sandboxed: true,
 		PID: 1 << 30, PIDStartTime: 99,
+		CreationCfg: &CreationConfig{Agent: sm.cfg.Agents["sleeper"]},
 	}
 
 	manifest := &UpgradeManifest{
@@ -6976,6 +6987,119 @@ func TestAdoptSessionsCov2(t *testing.T) {
 
 	if _, ok := sm.Get("ghaist1"); ok {
 		t.Error("unknown manifest session should not have been created")
+	}
+}
+
+func TestUpgradeAdoptionAllowsUnsandboxedNativePromptSession(t *testing.T) {
+	sm := sleeperSM(t)
+	cmd := exec.Command("sleep", "30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	start, err := grpty.ProcessStartTime(cmd.Process.Pid)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	readEnd, writeEnd, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fd, err := syscall.Dup(int(readEnd.Fd()))
+	_ = readEnd.Close()
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		_ = writeEnd.Close()
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+		sm.watchers.Wait()
+	})
+
+	sm.state.Sessions["dreich-old"] = &SessionState{
+		ID: "dreich-old", Name: "dreich-old", Agent: "sleeper", Status: StatusRunning,
+		PID: cmd.Process.Pid, PIDStartTime: start, Sandboxed: false, CreationCfg: nil,
+	}
+
+	result, err := sm.AdoptSessions(&UpgradeManifest{Sessions: []UpgradeSession{{
+		ID: "dreich-old", Fd: fd,
+		ScrollbackFd: openUpgradeScrollbackFD(t, filepath.Join(sm.paths.LogDir, "dreich-old.log")),
+		PID:          cmd.Process.Pid, PIDStartTime: start,
+	}}})
+	if err != nil {
+		t.Fatalf("AdoptSessions: %v", err)
+	}
+
+	if len(result.ResolvedSessions) != 1 || len(result.UnresolvedSessions) != 0 {
+		t.Fatalf("adoption result = %+v, want one resolved session", result)
+	}
+
+	if _, ok := sm.GetPTY("dreich-old"); !ok {
+		t.Fatal("identity-valid unsandboxed native prompt session was not adopted")
+	}
+
+	if err := writeEnd.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if session, ok := sm.GetPTY("dreich-old"); ok {
+		session.Close()
+	}
+}
+
+func TestAdoptSessionsTerminatesOmittedHeadlessProcess(t *testing.T) {
+	sm := sleeperSM(t)
+	pid := spawnReapableSleeper(t)
+
+	start, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	sm.state.Sessions["canny-headless"] = &SessionState{
+		ID: "canny-headless", Name: "canny-headless", Agent: "sleeper",
+		Status: StatusRunning, DriverKind: DriverHeadless,
+		PID: pid, PIDStartTime: start, Sandboxed: true,
+		CreationCfg: &CreationConfig{Agent: sm.cfg.Agents["sleeper"]},
+	}
+
+	result, err := sm.AdoptSessions(&UpgradeManifest{Sessions: []UpgradeSession{{
+		ID: "canny-headless", Fd: -1, HasPTY: false,
+		PID: pid, PIDStartTime: start,
+	}}})
+	if err != nil {
+		t.Fatalf("AdoptSessions: %v", err)
+	}
+
+	if len(result.ResolvedSessions) != 1 || len(result.UnresolvedSessions) != 0 {
+		t.Fatalf("adoption result = %+v, want one resolved cleanup-only session", result)
+	}
+
+	sess, ok := sm.Get("canny-headless")
+	if !ok {
+		t.Fatal("headless session disappeared")
+	}
+
+	if sess.Status != StatusStopped || sess.PID != 0 || sess.PIDStartTime != 0 {
+		t.Fatalf("headless session = status %q pid %d start %d, want stopped with cleared identity", sess.Status, sess.PID, sess.PIDStartTime)
+	}
+
+	if !strings.Contains(sess.SummaryText, "Headless session stopped") {
+		t.Fatalf("summary = %q, want headless upgrade diagnostic", sess.SummaryText)
+	}
+
+	if err := syscall.Kill(-pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("headless process group remains after upgrade: %v", err)
 	}
 }
 
@@ -7088,7 +7212,7 @@ func TestApplyConfigChangesCov2(t *testing.T) {
 	newCfg.Sandbox.ReadFiles = []string{"/tmp/skelf.txt"}
 	newCfg.Sandbox.WriteFiles = []string{"/tmp/wynd.txt"}
 	newCfg.Sandbox.Features = []string{"process-control"}
-	newCfg.Agents["neep"] = config.Agent{Command: "sleep"}
+	newCfg.Agents["neep"] = config.Agent{NonInteractiveArgs: []string{}, Command: "sleep"}
 	delete(newCfg.Agents, "claude") // exercise the "removed" branch
 
 	_ = sm.applyConfig(newCfg)

@@ -76,6 +76,10 @@ func attachWithConvert(c controlConn, sessionID string) (protocol.SessionInfo, b
 				return info, false, fmt.Errorf("decode attach response: %w", err)
 			}
 
+			if converted {
+				warnUnsandboxedStart(info)
+			}
+
 			return info, true, nil
 
 		default:

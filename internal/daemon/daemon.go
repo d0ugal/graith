@@ -64,21 +64,18 @@ type SessionManager struct {
 	stopAttempts      map[string]*stopAttempt
 	attachedClients   map[string]*attachedClient
 	hookReports       map[string]hookReport
-	pendingApprovals  map[string]*pendingApproval
-	headlessEscalated map[string]bool                // session ID → orchestrator already escalated once (headless non-blocking deny)
-	tokenIndex        map[string]string              // token → session ID (reverse lookup)
-	humanToken        string                         // local human credential, loaded at startup
-	saveStateFault    func() error                   // test-only saveState fault injection; nil in production
-	sandboxResolver   func(string) (bool, error)     // test-only sandbox-availability override; nil in production
-	pendingPairings   map[string]*pendingPairing     // requestID → pending device pairing (in-memory; not persisted)
-	pairWaiters       map[string]chan pairApproval   // requestID → waiter for a blocked pair_request connection
-	approvalSubs      map[net.Conn]func(string, any) // conn → sendControl for approval subscribers (no attach)
-	remoteTLSPin      string                         // SPKI pin of the active remote generation; guarded by mu
-	remoteGeneration  uint64                         // active remote runtime generation; 0 means no production listener
-	remote            *remoteController              // owned under configReloadMu; nil for bare SessionManagers used outside Run
-	deviceTokenIndex  map[string]string              // client-token HMAC → device ID (reverse lookup)
-	connsByDevice     map[string][]net.Conn          // device ID → live remote connections (for revocation)
-	pairReqTimes      []time.Time                    // recent pair_request timestamps (rate limiting)
+	tokenIndex        map[string]string            // token → session ID (reverse lookup)
+	humanToken        string                       // local human credential, loaded at startup
+	saveStateFault    func() error                 // test-only saveState fault injection; nil in production
+	sandboxResolver   func(string) (bool, error)   // test-only sandbox-availability override; nil in production
+	pendingPairings   map[string]*pendingPairing   // requestID → pending device pairing (in-memory; not persisted)
+	pairWaiters       map[string]chan pairApproval // requestID → waiter for a blocked pair_request connection
+	remoteTLSPin      string                       // SPKI pin of the active remote generation; guarded by mu
+	remoteGeneration  uint64                       // active remote runtime generation; 0 means no production listener
+	remote            *remoteController            // owned under configReloadMu; nil for bare SessionManagers used outside Run
+	deviceTokenIndex  map[string]string            // client-token HMAC → device ID (reverse lookup)
+	connsByDevice     map[string][]net.Conn        // device ID → live remote connections (for revocation)
+	pairReqTimes      []time.Time                  // recent pair_request timestamps (rate limiting)
 	cfg               *config.Config
 	paths             config.Paths
 	log               *slog.Logger
@@ -216,10 +213,10 @@ type SessionManager struct {
 	pushLog      []time.Time
 	pushCoalesce map[string]time.Time
 	pushDispatch func(backend, title, message, priority string) error // overridable in tests
-
-	// approvalsWarnOnce guards the one-time [approvals] mode deprecation warning
-	// so it fires once per daemon lifetime, not per approval request.
-	approvalsWarnOnce sync.Once
+	// statusDispatch overrides the native macOS status-notification dispatch in
+	// tests. Production leaves it nil and sendNotification uses the same
+	// dispatchMacNotification path as proactive notifications.
+	statusDispatch func(title, message, priority string, timeout time.Duration) error
 
 	// watchers tracks in-flight watchSession goroutines. StopAll waits on it so
 	// that post-exit state writes and status publishes complete before the
@@ -254,12 +251,9 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		stopAttempts:       make(map[string]*stopAttempt),
 		attachedClients:    make(map[string]*attachedClient),
 		hookReports:        make(map[string]hookReport),
-		pendingApprovals:   make(map[string]*pendingApproval),
-		headlessEscalated:  make(map[string]bool),
 		tokenIndex:         make(map[string]string),
 		pendingPairings:    make(map[string]*pendingPairing),
 		pairWaiters:        make(map[string]chan pairApproval),
-		approvalSubs:       make(map[net.Conn]func(string, any)),
 		deviceTokenIndex:   make(map[string]string),
 		connsByDevice:      make(map[string][]net.Conn),
 		orchestratorExitCh: make(chan string, 4),
@@ -336,7 +330,7 @@ func (sm *SessionManager) SetMCPManager(mm *MCPManager) {
 func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 	// Context-pressure and sub-agent events are runtime signals that must NOT
 	// change AgentStatus — a compacting agent, or one that spawned a sub-agent,
-	// is still active, and clobbering an approval/ready status here would be a
+	// is still active, and clobbering a ready status here would be a
 	// regression. They update runtime-only fields and return early (issue #1073).
 	switch sr.Event {
 	case "PreCompact", "PostCompact", "SubagentStart", "SubagentStop":
@@ -395,19 +389,21 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 	case "Notification":
 		// A Claude Notification's meaning is in its subtype. The CLI forwards
 		// the raw notification_type (empty when stdin didn't parse); the daemon
-		// decides. Only idle_prompt (agent awaiting input) and permission_prompt
-		// (approval needed) change status. Everything else — auth_success,
-		// elicitation_*, and crucially an empty/unknown/unparsed subtype — is
-		// logged without touching AgentStatus, so a parse timeout can no longer
-		// spuriously flag a session as needing attention (the pre-subtype code
-		// mapped every Notification to approval).
+		// decides. Only idle_prompt (agent awaiting input) changes status. A
+		// permission_prompt belongs entirely to the agent's native TUI and is an
+		// ordinary running state from Graith's perspective. Everything else —
+		// auth_success, elicitation_*, and crucially an empty/unknown/unparsed
+		// subtype — is logged without touching AgentStatus.
 		switch sr.NotificationType {
 		case "idle_prompt":
 			status = "ready"
 			staleness = hookTerminalWindow
 		case "permission_prompt":
-			status = "approval"
-			staleness = hookTerminalWindow
+			sm.log.Info("agent entered native permission prompt",
+				"event", sr.Event, "notification_type", sr.NotificationType,
+				"session_id", sr.SessionID)
+
+			return
 		default:
 			sm.log.Info("ignoring notification subtype",
 				"event", sr.Event, "notification_type", sr.NotificationType,
@@ -416,9 +412,11 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 			return
 		}
 	case "PermissionRequest":
-		// Codex's PreToolUse approval hook; not subtype-carrying.
-		status = "approval"
-		staleness = hookTerminalWindow
+		// Agent-native approval prompts are not Graith workflow states. The
+		// agent's own TUI remains responsible for rendering and resolving them.
+		sm.log.Info("agent entered native PermissionRequest", "session_id", sr.SessionID)
+
+		return
 	case "Stop":
 		status = "ready"
 		staleness = hookTerminalWindow
@@ -516,7 +514,7 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 // SubagentStart/SubagentStop hook events (issue #1073). These update runtime-only
 // signals on the session and deliberately do NOT touch AgentStatus: a compacting
 // agent, or one that has spawned a sub-agent, is still whatever it was before
-// (active / approval / ready). The SubAgents map is replaced, never mutated in
+// (active / error / ready). The SubAgents map is replaced, never mutated in
 // place, so an off-lock cloneSessionState reading len() is race-free.
 func (sm *SessionManager) handleContextSubagentReport(sr protocol.StatusReportMsg) {
 	sm.mu.Lock()
@@ -771,6 +769,10 @@ func (sm *SessionManager) adoptSessions(
 	slices.SortFunc(sessions, func(a, b UpgradeSession) int { return strings.Compare(a.ID, b.ID) })
 
 	closeRejectedDescriptors := func(session UpgradeSession) error {
+		if !upgradeSessionHasPTY(session) {
+			return nil
+		}
+
 		ptmx := os.NewFile(uintptr(session.Fd), "rejected-upgrade-pty")
 		if ptmx == nil {
 			scrollbackCloseErr := adoptCloseDescriptor(session.ScrollbackFd)
@@ -812,6 +814,10 @@ func (sm *SessionManager) adoptSessions(
 	var descriptorValidationErr error
 
 	for _, session := range sessions {
+		if !upgradeSessionHasPTY(session) {
+			continue
+		}
+
 		if err := secureTransferredDescriptor(session.Fd); err != nil {
 			descriptorValidationErr = errors.New("secure inherited session descriptor")
 			break
@@ -934,6 +940,43 @@ func (sm *SessionManager) adoptSessions(
 
 			sm.log.Warn("manifest session is not adoptable", "id", us.ID,
 				"cleanup_error", errors.Join(cleanupErr, drainErr))
+
+			continue
+		}
+
+		// Headless and other non-PTY drivers cannot transfer their in-memory
+		// protocol state across exec. Their exact process identity is still part
+		// of the ownership manifest, so resolve it under the same fail-closed
+		// cleanup registry before the replacement daemon begins serving.
+		if !upgradeSessionHasPTY(us) {
+			cleaned, cleanupErr := terminateFailedUpgradeSession(us)
+			if cleaned {
+				result.ResolvedSessions = append(result.ResolvedSessions, us)
+			} else {
+				addUnresolved(us)
+			}
+
+			sm.mu.Lock()
+			if current := sm.state.Sessions[us.ID]; current != nil && current.PID == us.PID &&
+				current.PIDStartTime == us.PIDStartTime {
+				current.StatusChangedAt = time.Now()
+				if cleaned {
+					current.PID = 0
+					current.PIDStartTime = 0
+					if !current.IsSoftDeleted() {
+						current.Status = StatusStopped
+					}
+
+					applyLifecycleSummaryLocked(current, "Headless session stopped during daemon upgrade")
+				} else {
+					current.Status = StatusErrored
+					applyLifecycleSummaryLocked(current, "Daemon upgrade non-PTY process cleanup unresolved")
+				}
+			}
+			sm.mu.Unlock()
+
+			sm.log.Info("resolved non-PTY session during daemon upgrade", "id", us.ID,
+				"cleaned", cleaned, "cleanup_error", cleanupErr)
 
 			continue
 		}
@@ -1320,7 +1363,6 @@ type CreateOpts struct {
 	InPlace             bool
 	AllowConcurrent     bool
 	SkipModelValidation bool
-	Yolo                bool
 	// Headless requests a headless stream-json session instead of an
 	// interactive PTY (issue #1075). Honoured only when the agent is
 	// headless_capable and [headless] experimental is enabled; otherwise Create

@@ -14,9 +14,14 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemonservice"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/tools"
 )
+
+var errUpgradeRejected = errors.New("upgrade rejected before daemon state mutation")
+
+var validateRetainedAdoptedService = daemonservice.ValidateRetainedAdoptedService
 
 // cleanupLegacyDaemon stops an old daemon that may be listening on the
 // pre-v0.11 socket path ($TMPDIR or /tmp). Without this, upgrading would
@@ -74,8 +79,13 @@ func cleanupLegacyDaemonDirs(
 // serves connections, and blocks until SIGTERM/SIGINT or an upgrade signal.
 func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) (returnErr error) {
 	if adoptFrom != "" {
-		return RunAdoptBootstrap(configFile, adoptFrom)
+		return errors.New("upgrade adoption requires an explicit service identity")
 	}
+	defer func() {
+		if err := daemonservice.MarkCurrentProcessStopped(paths.Profile); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("clear daemon service running generation: %w", err))
+		}
+	}()
 
 	effectiveConfigFile, _, err := config.ResolveConfigPath(configFile)
 	if err != nil {
@@ -91,11 +101,59 @@ func Run(cfg *config.Config, paths config.Paths, configFile, adoptFrom string) (
 	return run(cfg, paths, effectiveConfigFile, adoptFrom, nil, nil)
 }
 
-// RunAdoptBootstrap establishes post-exec ownership before config loading or
-// path derivation. The hidden CLI adoption path bypasses Cobra's ordinary root
-// pre-run and enters here directly so even a missing or invalid replacement
-// config cannot strand transferred descriptors or processes.
-func RunAdoptBootstrap(configFile, adoptFrom string) (returnErr error) {
+type adoptedServiceIdentityKind uint8
+
+const (
+	adoptedServiceIdentityInvalid adoptedServiceIdentityKind = iota
+	adoptedServiceIdentityUnmanaged
+	adoptedServiceIdentityManaged
+)
+
+// AdoptedServiceIdentity records whether an upgrade originated from the
+// managed daemon service or an explicitly unmanaged source build. Its fields
+// are private so callers cannot forge a managed identity or accidentally treat
+// the zero value as unmanaged. Profile is deliberately absent: the only trusted
+// profile comes from the capsule-bound manifest.
+type AdoptedServiceIdentity struct {
+	kind  adoptedServiceIdentityKind
+	label string
+	slot  string
+}
+
+// NewUnmanagedAdoptedServiceIdentity explicitly selects source-build adoption.
+func NewUnmanagedAdoptedServiceIdentity() AdoptedServiceIdentity {
+	return AdoptedServiceIdentity{kind: adoptedServiceIdentityUnmanaged}
+}
+
+// NewManagedAdoptedServiceIdentity binds adoption to a staged service label and
+// slot. Partial or empty service identity is never downgraded to unmanaged.
+func NewManagedAdoptedServiceIdentity(label, slot string) (AdoptedServiceIdentity, error) {
+	if label == "" || slot == "" {
+		return AdoptedServiceIdentity{}, errors.New("managed daemon adoption requires both service label and slot")
+	}
+
+	return AdoptedServiceIdentity{kind: adoptedServiceIdentityManaged, label: label, slot: slot}, nil
+}
+
+// RunAdoptBootstrap establishes post-exec ownership with an explicit service
+// identity before config loading or path derivation. The hidden CLI adoption
+// path bypasses Cobra's ordinary root pre-run and enters here directly so even a
+// missing or invalid replacement config cannot strand transferred resources.
+// Managed identity validation occurs only after the immutable capsule,
+// ownership header, and manifest body have been bound, and before config loading
+// or state mutation. Supplying either field makes both mandatory and fail-closed.
+func RunAdoptBootstrap(configFile, adoptFrom string, identity AdoptedServiceIdentity) error {
+	return runAdoptBootstrap(configFile, adoptFrom, identity)
+}
+
+// runUnmanagedAdoptBootstrap is the explicit test/internal entry point for an
+// unbundled source-build upgrade. Production adopt-from dispatch must always
+// carry an explicitly constructed AdoptedServiceIdentity.
+func runUnmanagedAdoptBootstrap(configFile, adoptFrom string) error {
+	return runAdoptBootstrap(configFile, adoptFrom, NewUnmanagedAdoptedServiceIdentity())
+}
+
+func runAdoptBootstrap(configFile, adoptFrom string, serviceIdentity AdoptedServiceIdentity) (returnErr error) {
 	capsuleRaw, ownershipFDRaw := captureUpgradeBootstrapEnvironment()
 
 	owned, capsuleErr := readInheritedOwnershipCapsule(capsuleRaw)
@@ -141,6 +199,25 @@ func RunAdoptBootstrap(configFile, adoptFrom string) (returnErr error) {
 	}
 
 	manifest.adoptionDeadline = adoptionDeadline
+	if manifest.Version == upgradeManifestVersion {
+		// The managed-service validator deliberately accepts the immutable private
+		// copy used for Darwin exec upgrades. First bind the running image to the
+		// authenticated manifest descriptor, then anchor the descriptor's original
+		// candidate path to the exact recorded service generation.
+		if err := validateUpgradeTargetDescriptor(manifest.Target); err != nil {
+			return err
+		}
+	}
+
+	if err := validateAdoptedServiceIdentity(serviceIdentity, manifest.Profile, manifest.Target.ResolvedPath); err != nil {
+		return fmt.Errorf("validate adopted daemon service identity: %w", err)
+	}
+
+	defer func() {
+		if err := daemonservice.MarkCurrentProcessStopped(manifest.Profile); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("clear daemon service running generation: %w", err))
+		}
+	}()
 
 	if err := grpty.PreparePinnedTerminalExecutable(); err != nil {
 		return fmt.Errorf("prepare terminal helper executable: %w", err)
@@ -167,6 +244,19 @@ func RunAdoptBootstrap(configFile, adoptFrom string) (returnErr error) {
 	}
 
 	return run(cfg, paths, configFile, adoptFrom, manifest, ownership)
+}
+
+func validateAdoptedServiceIdentity(identity AdoptedServiceIdentity, profile, candidatePath string) error {
+	switch identity.kind {
+	case adoptedServiceIdentityUnmanaged:
+		return nil
+	case adoptedServiceIdentityManaged:
+		_, err := validateRetainedAdoptedService(identity.label, identity.slot, profile, candidatePath)
+
+		return err
+	default:
+		return errors.New("daemon adoption service identity was not explicitly selected")
+	}
 }
 
 func adoptUpgradeListener(
@@ -796,6 +886,18 @@ func run(
 			returnErr = errors.Join(returnErr, target.pin.close())
 		}()
 
+		preparedService, err := prepareExecUpgrade(paths.Profile, target.path)
+		if err != nil {
+			return fail(err.Error(), err)
+		}
+		// The managed service generation is staged before the reservation closes
+		// mutations or any inheritable descriptor is exposed. Rollback is
+		// idempotent because execPreparedUpgrade also owns failure cleanup at its
+		// deeper validation boundaries.
+		defer func() {
+			returnErr = preparedService.rollbackError(returnErr)
+		}()
+
 		if err := sm.beginUpgradeReservation(); err != nil {
 			return fail(err.Error(), err)
 		}
@@ -1032,7 +1134,7 @@ func run(
 			return fmt.Errorf("upgrade session I/O drain failed: %w", err)
 		}
 
-		execErr := sm.execPreparedUpgrade(target, manifest, manifestPath, configFile)
+		execErr := sm.execPreparedUpgrade(target, manifest, manifestPath, configFile, preparedService)
 		// Even fail-closed shutdown must let the PTY reader reach readDone;
 		// otherwise StopAll can wait forever on a read loop paused at the
 		// upgrade safe point. The manager reservation remains closed and every

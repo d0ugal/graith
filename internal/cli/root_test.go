@@ -11,9 +11,23 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
-	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemonservice"
 )
+
+func TestServiceBootstrapConfigSurvivesFlagRegistration(t *testing.T) {
+	original := cfgFile
+
+	t.Cleanup(func() { cfgFile = original })
+
+	cfgFile = ""
+
+	applyServiceBootstrapConfig(&daemonservice.Bootstrap{Request: daemonservice.StartupRequest{ConfigFile: "/bothy/graith.toml"}})
+
+	if cfgFile != "/bothy/graith.toml" {
+		t.Fatalf("bootstrap config = %q, want canonical request config", cfgFile)
+	}
+}
 
 func TestExecuteJSONErrorFormat(t *testing.T) {
 	origOut := out
@@ -154,7 +168,7 @@ func TestConfigFlagAllowedOutsideSession(t *testing.T) {
 	configFile := filepath.Join(t.TempDir(), "dreich.toml")
 	connectErr := errors.New("dreich daemon unavailable")
 	origListConnectFn := listConnectFn
-	listConnectFn = func(*config.Config, config.Paths, string) (*client.Client, error) {
+	listConnectFn = func(*config.Config, config.Paths, string) (listConn, error) {
 		return nil, connectErr
 	}
 
@@ -215,6 +229,23 @@ func TestConfigFlagBlockedWhenSetEmpty(t *testing.T) {
 	}
 }
 
+func TestCanonicalConfigFileMakesRelativePathLaunchdStable(t *testing.T) {
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := canonicalConfigFile(filepath.Join("bothy", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := filepath.Join(dir, "bothy", "config.toml")
+	if got != want || !filepath.IsAbs(got) {
+		t.Fatalf("canonicalConfigFile() = %q, want %q", got, want)
+	}
+}
+
 func TestExecuteCobraSilencesOwnErrors(t *testing.T) {
 	origOut := out
 	origJSON := jsonOutput
@@ -255,7 +286,7 @@ func TestRegisterCommandsIdempotent(t *testing.T) {
 	registerCommands()
 	registerCommands()
 
-	want := []string{"new", "list", "msg", "scenario", "sandbox", "store", "daemon", "config"}
+	want := []string{"new", "list", "update", "msg", "scenario", "sandbox", "store", "daemon", "config"}
 	for _, name := range want {
 		found := false
 
@@ -268,6 +299,12 @@ func TestRegisterCommandsIdempotent(t *testing.T) {
 
 		if !found {
 			t.Errorf("subcommand %q not registered on rootCmd", name)
+		}
+	}
+
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "rename" {
+			t.Fatal("removed rename command is still registered")
 		}
 	}
 
@@ -286,5 +323,64 @@ func TestRegisterCommandsIdempotent(t *testing.T) {
 		if n > 1 {
 			t.Errorf("subcommand %q registered %d times, want 1", name, n)
 		}
+	}
+
+	if seen["tokens"] != 0 {
+		t.Error("obsolete tokens subcommand is still registered")
+	}
+
+	if listCmd.Flags().Lookup("tokens") == nil {
+		t.Error("list --tokens flag is not registered")
+	}
+}
+
+func TestCompletionOmitsTokensCommandAndIncludesListFlag(t *testing.T) {
+	registerCommands()
+
+	var buf bytes.Buffer
+	if err := rootCmd.GenBashCompletion(&buf); err != nil {
+		t.Fatalf("generate bash completion: %v", err)
+	}
+
+	script := buf.String()
+	if strings.Contains(script, "_gr_tokens()") {
+		t.Error("completion still contains the obsolete standalone token command")
+	}
+
+	if !strings.Contains(script, "--tokens") {
+		t.Error("completion does not contain gr list --tokens flag")
+	}
+}
+
+func TestListTokenProjectionFlagsAreExclusive(t *testing.T) {
+	registerCommands()
+
+	tokens := listCmd.Flags().Lookup("tokens")
+	quiet := listCmd.Flags().Lookup("quiet")
+	wide := listCmd.Flags().Lookup("wide")
+
+	origTokensChanged := tokens.Changed
+	origQuietChanged := quiet.Changed
+	origWideChanged := wide.Changed
+
+	t.Cleanup(func() {
+		tokens.Changed = origTokensChanged
+		quiet.Changed = origQuietChanged
+		wide.Changed = origWideChanged
+	})
+
+	tokens.Changed = true
+	quiet.Changed = true
+	wide.Changed = false
+
+	if err := listCmd.ValidateFlagGroups(); err == nil {
+		t.Error("--tokens and --quiet should be mutually exclusive")
+	}
+
+	quiet.Changed = false
+	wide.Changed = true
+
+	if err := listCmd.ValidateFlagGroups(); err == nil {
+		t.Error("--tokens and --wide should be mutually exclusive")
 	}
 }

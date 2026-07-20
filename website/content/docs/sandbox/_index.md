@@ -7,9 +7,12 @@ toc: true
 draft: false
 ---
 
-graith can wrap agent processes in a deny-by-default OS sandbox that restricts
-file access, environment, and — depending on backend — the network. There are
-two backends:
+graith can wrap agent processes in an enforceable OS sandbox that restricts
+file access, environment, processes, signals, and — depending on backend — the
+network. It is **off by default** because graith does not assume a sandbox
+backend is installed on your machine; enabling it is strongly recommended once
+you have a backend. When it's disabled you rely on agent-native controls, an
+external sandbox, or a VM. Two backends:
 
 | Backend | Platforms | Primitive |
 |---------|-----------|-----------|
@@ -23,19 +26,22 @@ sub-pages for [how it works]({{< relref "how-it-works.md" >}}),
 
 ## Why sandbox
 
-AI coding agents often request broad permissions (e.g.
-`--dangerously-skip-permissions` for Claude,
-`--dangerously-bypass-approvals-and-sandbox` for Codex). Sandboxing lets you
-grant those agent-level permissions while confining the process at the OS level.
-The agent thinks it has full access; the kernel enforces boundaries. This also
-isolates sessions from each other — without a sandbox, one agent can read
-graith's `state.json` and impersonate another session.
+The bundled agent definitions keep their native permission prompts (and, for
+Codex, its native sandbox) by default; graith never disables an agent's own
+safeguards out of the box. Set `non_interactive_args` to an agent's unattended
+flags to run without those prompts — do that only behind a boundary you control.
+Graith won't proxy or track those prompts. When enabled, Graith's OS sandbox
+confines the process regardless of what the agent thinks it can do — the kernel
+enforces that boundary. It also isolates sessions from each other: without a
+sandbox, one agent can read graith's `state.json` and impersonate another
+session.
 
 ## Choosing a backend
 
-The `backend` field is **required** when the sandbox is enabled — there is no
-default. If you enable the sandbox without choosing a backend, session creation
-fails closed with an actionable error. Pick:
+The `backend` field is required whenever the sandbox is enabled — graith ships
+no default backend, so you must pick one that is installed. If the selected
+backend is absent, unsupported, or can't enforce the requested policy, creation
+and resume fail closed with an actionable error.
 
 - `backend = "safehouse"` on macOS if you already use safehouse.
 - `backend = "nono"` on Linux (the only cross-platform option) or on macOS.
@@ -48,10 +54,11 @@ read_dirs  = ["~/Code"]
 write_dirs = []
 ```
 
-> **Migration (pre-1.0 breaking change).** Earlier versions defaulted to
-> safehouse implicitly. `backend` is now required when `sandbox.enabled = true`.
-> **To keep your current behaviour, add `backend = "safehouse"` to your
-> `[sandbox]` block.** `gr doctor` flags a missing backend.
+`enabled = false` or a per-agent `disabled = true` starts the session without
+Graith's sandbox. Graith prints a one-time startup warning, logs the launch, and
+reports it in `gr doctor`; it can't verify an external sandbox or VM. An empty,
+unsupported, or unavailable backend still fails closed whenever the merged
+sandbox is enabled.
 
 ## Setup
 
@@ -75,9 +82,19 @@ gr doctor            # checks the nono binary, its version, and Landlock support
 ```
 
 nono needs Linux kernel **5.13+** for Landlock filesystem enforcement (its
-practical floor is **5.14+**, which it uses for the seccomp supervisor-notify
-layer); network filtering, when graith grows it, needs 6.7+. On macOS, nono uses
-Seatbelt, which is always present. graith requires a minimum nono version and
-refuses to run below it (see `gr doctor`).
+practical floor is **5.14+**, for the seccomp supervisor-notify layer); network
+filtering, when graith grows it, needs 6.7+. On macOS, nono uses Seatbelt, which
+is always present. graith requires a minimum nono version and refuses to run
+below it (see `gr doctor`).
 
-Then enable in config with a backend, as above.
+The sandbox is off by default and ships no backend. Install a backend and set
+`[sandbox] enabled = true` with a `backend` before creating or resuming
+sandboxed sessions.
+
+## Command policy is subtractive
+
+The optional `[command_policy]` layer can synchronously deny shell commands
+before execution, whether Graith's sandbox is enabled or disabled. An allow just
+continues normal agent execution; it never grants a capability or bypasses an
+enabled Graith sandbox, agent-native policy, or external isolation. With no
+command policy configured, Graith adds no shell-command restriction.

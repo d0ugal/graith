@@ -206,7 +206,7 @@ func TestHandshake(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sendControl(t, "handshake", protocol.HandshakeMsg{
-		Version:      "1.0",
+		Version:      "2.0",
 		ClientID:     "test-client",
 		TerminalSize: [2]uint16{120, 40},
 		Cwd:          "/tmp",
@@ -313,7 +313,7 @@ func TestHandshakeCompatibleMinorVersion(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sendControl(t, "handshake", protocol.HandshakeMsg{
-		Version:      "1.99",
+		Version:      "2.99",
 		ClientID:     "test-client",
 		TerminalSize: [2]uint16{80, 24},
 		Cwd:          "/tmp",
@@ -442,7 +442,7 @@ func TestStopInvalidPayload(t *testing.T) {
 	h.expectType(t, "error")
 }
 
-func TestRenameSession(t *testing.T) {
+func TestUpdateSessionName(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sm.mu.Lock()
@@ -452,9 +452,10 @@ func TestRenameSession(t *testing.T) {
 	}
 	h.sm.mu.Unlock()
 
-	h.sendControl(t, "rename", protocol.RenameMsg{SessionID: "auld1", NewName: "bonnie-kirk"})
+	newName := "bonnie-kirk"
+	h.sendControl(t, "update", protocol.UpdateMsg{SessionID: "auld1", Name: &newName})
 
-	h.expectType(t, "renamed")
+	h.expectType(t, "updated")
 
 	h.sm.mu.RLock()
 	name := h.sm.state.Sessions["auld1"].Name
@@ -465,18 +466,19 @@ func TestRenameSession(t *testing.T) {
 	}
 }
 
-func TestRenameSessionNotFound(t *testing.T) {
+func TestUpdateSessionNotFound(t *testing.T) {
 	h := newTestHarness(t)
 
-	h.sendControl(t, "rename", protocol.RenameMsg{SessionID: "haar", NewName: "x"})
+	newName := "x"
+	h.sendControl(t, "update", protocol.UpdateMsg{SessionID: "haar", Name: &newName})
 
 	h.expectType(t, "error")
 }
 
-func TestRenameInvalidPayload(t *testing.T) {
+func TestUpdateInvalidPayload(t *testing.T) {
 	h := newTestHarness(t)
 
-	raw := []byte(`{"type":"rename","payload":{bad}`)
+	raw := []byte(`{"type":"update","payload":{bad}`)
 	_ = h.writer.WriteFrame(protocol.ChannelControl, raw)
 
 	h.expectType(t, "error")
@@ -514,7 +516,7 @@ func TestResizeWhileAttached(t *testing.T) {
 
 	// Handshake + attach
 	h.sendControl(t, "handshake", protocol.HandshakeMsg{
-		Version: "1.0", ClientID: "c1",
+		Version: "2.0", ClientID: "c1",
 		TerminalSize: [2]uint16{80, 24}, Cwd: "/tmp",
 	})
 	h.readControlMsg(t) // handshake_ok
@@ -2150,7 +2152,7 @@ func TestMsgPubWithThread(t *testing.T) {
 	}
 }
 
-func TestMsgPubUsesCurrentNameAfterRename(t *testing.T) {
+func TestMsgPubUsesCurrentNameAfterUpdate(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sm.mu.Lock()
@@ -2160,15 +2162,16 @@ func TestMsgPubUsesCurrentNameAfterRename(t *testing.T) {
 	}
 	h.sm.mu.Unlock()
 
-	if err := h.sm.Rename("s1", "new-name"); err != nil {
-		t.Fatalf("Rename() error = %v", err)
+	newName := "new-name"
+	if _, err := h.sm.Update("s1", &newName, nil, nil); err != nil {
+		t.Fatalf("Update() error = %v", err)
 	}
 
 	h.sendControl(t, "msg_pub", protocol.MsgPubMsg{
 		Stream:     "test-topic",
 		SenderID:   "s1",
 		SenderName: "old-name",
-		Body:       "hello after rename",
+		Body:       "hello after name update",
 	})
 
 	env := h.expectType(t, "msg_published")
@@ -2411,7 +2414,7 @@ func TestNullPayloadRejected(t *testing.T) {
 		{"attach", "invalid attach message"},
 		{"delete", "invalid delete message"},
 		{"stop", "invalid stop message"},
-		{"rename", "invalid rename message"},
+		{"update", "invalid update message"},
 		{"resume", "invalid resume message"},
 		{"logs", "invalid logs message"},
 		{"type", "invalid type message"},
@@ -2424,10 +2427,7 @@ func TestNullPayloadRejected(t *testing.T) {
 		{"screen_snapshot", "invalid screen_snapshot message"},
 		{"status", "invalid status message"},
 		{"status_report", "invalid status_report"},
-		{"approval_request", "invalid approval_request"},
-		{"approval_respond", "invalid approval_respond"},
-		{"star", "invalid star message"},
-		{"unstar", "invalid unstar message"},
+		{"command_policy_check", "invalid command_policy_check"},
 	}
 
 	for _, tt := range types {
@@ -2435,7 +2435,7 @@ func TestNullPayloadRejected(t *testing.T) {
 			h := newTestHarness(t)
 
 			h.sendControl(t, "handshake", protocol.HandshakeMsg{
-				Version:      "1.0",
+				Version:      "2.0",
 				ClientID:     "test",
 				TerminalSize: [2]uint16{80, 24},
 				Cwd:          "/tmp",
@@ -2644,12 +2644,14 @@ func assertAttachAutoResumes(t *testing.T, name string, status SessionStatus) {
 
 	cfg := config.Default()
 	cfg.Agents["test"] = config.Agent{
-		Command:    "sleep",
-		Args:       []string{"300"},
-		ResumeArgs: []string{"300"},
+		NonInteractiveArgs: []string{},
+		Command:            "sleep",
+		Args:               []string{"300"},
+		ResumeArgs:         []string{"300"},
 	}
 
 	h := newTestHarnessWithConfig(t, cfg)
+	h.sm.sandboxResolver = func(string) (bool, error) { return false, nil }
 	workDir := t.TempDir()
 
 	h.sm.mu.Lock()
@@ -3230,7 +3232,7 @@ func TestUpdateAllowsHumanReparent(t *testing.T) {
 }
 
 // This file adds handler-dispatch tests for control messages that were not
-// otherwise exercised: repo listing, status summaries, star/unstar, session
+// otherwise exercised: repo listing, status summaries, session metadata, session
 // status queries, hook reports, restart/interrupt, conversation reads, fork /
 // migrate payload validation, config reload, MCP connect guards, the scenario
 // lifecycle messages, and the unsupported-message fallthrough. Each test drives
@@ -3291,11 +3293,13 @@ func (h *testHarness) expectType(t *testing.T, want string) protocol.Envelope {
 // --- unsupported / fallthrough -------------------------------------------
 
 func TestCoverUnsupportedMessage(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "wheesht_unknown", struct{}{})
-
-	h.expectError(t, "unsupported control message")
+	for _, msgType := range []string{"wheesht_unknown", "star", "unstar"} {
+		t.Run(msgType, func(t *testing.T) {
+			h := newTestHarness(t)
+			h.sendControl(t, msgType, struct{}{})
+			h.expectError(t, "unsupported control message")
+		})
+	}
 }
 
 // --- repo_list ------------------------------------------------------------
@@ -3326,62 +3330,16 @@ func TestCoverDiagnostics(t *testing.T) {
 	}
 }
 
-// --- approval_list / approval_subscribe / approval_respond ----------------
-
-func TestCoverApprovalList(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "approval_list", struct{}{})
-
-	h.expectType(t, "approval_notification")
-}
-
-func TestCoverApprovalSubscribeLocalHuman(t *testing.T) {
-	h := newTestHarness(t)
-
-	// Local Unix socket (no token) resolves to the local human operator, who is
-	// allowed to subscribe and immediately receives the current pending set.
-	h.sendControl(t, "approval_subscribe", struct{}{})
-
-	h.expectType(t, "approval_notification")
-}
-
-func TestCoverApprovalSubscribeRejectsAgent(t *testing.T) {
-	h := newTestHarness(t)
-	h.addAuthenticatedSession(t, "thrawn-sess", "thrawn", "tok-thrawn")
-
-	h.sendControlWithToken(t, "approval_subscribe", struct{}{}, "tok-thrawn")
-
-	h.expectError(t, "human operator")
-}
-
-func TestCoverApprovalRespondRejectsAgent(t *testing.T) {
-	h := newTestHarness(t)
-	h.addAuthenticatedSession(t, "fash-sess", "fash", "tok-fash")
-
-	h.sendControlWithToken(t, "approval_respond", protocol.ApprovalRespondMsg{
-		RequestID: "req-1", Decision: "allow",
-	}, "tok-fash")
-
-	h.expectError(t, "not permitted for agent sessions")
-}
-
-// TestInvalidPayloads exercises the per-case DecodePayload branch for every
-// control message that reports a specific "invalid <type>" error. Each row
-// sends a wrong-shape (but syntactically valid) payload as the local human so
-// it reaches the DecodePayload branch rather than an earlier auth short-circuit.
 func TestInvalidPayloads(t *testing.T) {
 	cases := []struct {
 		msgType string
 		wantErr string
 	}{
-		{"approval_respond", "invalid approval_respond"},
-		{"approval_request", "invalid approval_request"},
+		{"command_policy_check", "invalid command_policy_check"},
 		{"set_status", "invalid set_status message"},
 		{"status", "invalid status message"},
 		{"status_report", "invalid status_report"},
-		{"star", "invalid star message"},
-		{"unstar", "invalid unstar message"},
+		{"update", "invalid update message"},
 		{"interrupt", "invalid interrupt message"},
 		{"restart", "invalid restart message"},
 		{"msg_conversation", "invalid msg_conversation message"},
@@ -3426,12 +3384,10 @@ func TestNotFounds(t *testing.T) {
 		payload any
 		wantErr string
 	}{
-		{"approval_respond", "approval_respond", protocol.ApprovalRespondMsg{RequestID: "haar-missing", Decision: "deny"}, "not found"},
 		{"set_status", "set_status", protocol.SetStatusMsg{SessionID: "haar", Text: "nae session"}, "not found"},
 		{"set_status_clear", "set_status", protocol.SetStatusMsg{SessionID: "haar", Clear: true}, "not found"},
 		{"status", "status", protocol.StatusRequestMsg{SessionID: "haar"}, "not found"},
-		{"star", "star", protocol.StarMsg{SessionID: "haar"}, "not found"},
-		{"unstar", "unstar", protocol.UnstarMsg{SessionID: "haar"}, "not found"},
+		{"update", "update", protocol.UpdateMsg{SessionID: "haar"}, "not found"},
 		{"interrupt", "interrupt", protocol.InterruptMsg{SessionID: "haar"}, "no live process to interrupt"},
 		{"restart", "restart", protocol.RestartMsg{SessionID: "haar"}, "not found"},
 		{"restart_children", "restart", protocol.RestartMsg{SessionID: "haar", Children: true}, "not found"},
@@ -3574,9 +3530,9 @@ func TestCoverStatusReport(t *testing.T) {
 	}
 }
 
-// --- star / unstar --------------------------------------------------------
+// --- starred update -------------------------------------------------------
 
-func TestCoverStarUnstar(t *testing.T) {
+func TestCoverUpdateStarred(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sm.mu.Lock()
@@ -3586,28 +3542,19 @@ func TestCoverStarUnstar(t *testing.T) {
 	}
 	h.sm.mu.Unlock()
 
-	h.sendControl(t, "star", protocol.StarMsg{SessionID: "bonnie-star"})
+	for _, starred := range []bool{true, false} {
+		h.sendControl(t, "update", protocol.UpdateMsg{SessionID: "bonnie-star", Starred: &starred})
 
-	h.expectType(t, "starred")
+		env := h.expectType(t, "updated")
 
-	h.sm.mu.RLock()
-	starred := h.sm.state.Sessions["bonnie-star"].Starred
-	h.sm.mu.RUnlock()
+		var result protocol.UpdateResultMsg
+		if err := protocol.DecodePayload(env, &result); err != nil {
+			t.Fatalf("DecodePayload() error = %v", err)
+		}
 
-	if !starred {
-		t.Error("expected session to be starred")
-	}
-
-	h.sendControl(t, "unstar", protocol.UnstarMsg{SessionID: "bonnie-star"})
-
-	h.expectType(t, "unstarred")
-
-	h.sm.mu.RLock()
-	starred = h.sm.state.Sessions["bonnie-star"].Starred
-	h.sm.mu.RUnlock()
-
-	if starred {
-		t.Error("expected session to be unstarred")
+		if result.SessionID != "bonnie-star" || result.Name != "bonnie" || result.ParentID != "" || result.Starred != starred {
+			t.Errorf("result = %+v, want persisted starred=%t state", result, starred)
+		}
 	}
 }
 
@@ -3727,6 +3674,41 @@ func TestCoverScenarioList(t *testing.T) {
 
 	if len(resp.Scenarios) != 0 {
 		t.Errorf("expected no scenarios, got %d", len(resp.Scenarios))
+	}
+}
+
+func TestOversizedControlResponseClosesConnection(t *testing.T) {
+	h := newTestHarness(t)
+	prompt := strings.Repeat("p", protocol.MaxScenarioPromptBytes)
+	memberCount := protocol.MaxPayload/protocol.MaxScenarioPromptBytes + 1
+
+	sessions := make([]ScenarioSession, memberCount)
+	for i := range sessions {
+		sessions[i] = ScenarioSession{Name: fmt.Sprintf("canny-%d", i), Prompt: prompt}
+	}
+
+	h.sm.mu.Lock()
+	h.sm.state.Scenarios["sc-oversized"] = &ScenarioState{
+		ID: "sc-oversized", Name: "strath-oversized", Sessions: sessions,
+	}
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "scenario_status", protocol.ScenarioStatusMsg{Name: "strath-oversized"})
+
+	errCh := make(chan error, 1)
+
+	go func() {
+		_, err := h.reader.ReadFrame()
+		errCh <- err
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("oversized response unexpectedly produced a frame")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("client remained blocked after oversized response write failed")
 	}
 }
 
@@ -3964,7 +3946,7 @@ func TestCoverSessionCannotTargetForeignSession(t *testing.T) {
 	const callerToken = "tok-bairn"
 
 	msgTypes := []string{
-		"rename", "star", "unstar", "resume", "restart",
+		"update", "resume", "restart",
 		"logs", "wait", "stop", "delete",
 	}
 
@@ -3983,7 +3965,7 @@ func TestCoverSessionCannotTargetForeignSession(t *testing.T) {
 
 			// A generic payload carrying only session_id; every targeted message
 			// type decodes this into its SessionID field.
-			payload := map[string]any{"session_id": "ben-foreign", "new_name": "scunner"}
+			payload := map[string]any{"session_id": "ben-foreign"}
 			h.sendControlWithToken(t, mt, payload, callerToken)
 			h.expectError(t, "not authorized")
 		})

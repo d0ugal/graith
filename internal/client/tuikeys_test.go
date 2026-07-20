@@ -1,7 +1,6 @@
 package client
 
 import (
-	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -68,89 +67,6 @@ func TestKeyHintAndPrimaryKey(t *testing.T) {
 
 	if got := primaryKey(nil); got != "" {
 		t.Errorf("primaryKey(nil) = %q, want empty", got)
-	}
-}
-
-// TestDashboardKeysRemapped confirms the dashboard honours a remapped attach key
-// and ignores the old default once rebound (issue #1233).
-func TestDashboardKeysRemapped(t *testing.T) {
-	sessions := dashboardTestSessions()
-
-	keys := DefaultDashboardKeys()
-	keys.Attach = []string{"z"}
-
-	m := NewDashboardModel(sessions, nil)
-	m.keys = keys
-	m.width = 120
-	m.height = 40
-
-	// The old default 'a' no longer attaches.
-	dm := updateDash(m, "a")
-	if dm.result != nil {
-		t.Fatalf("old attach key 'a' should be inert after remap, got %+v", dm.result)
-	}
-
-	// The remapped 'z' attaches.
-	dm = updateDash(dm, "z")
-	if dm.result == nil || dm.result.Action != "attach" {
-		t.Fatalf("remapped attach key 'z' did not attach: %+v", dm.result)
-	}
-}
-
-func TestDashboardFooterReflectsConfiguredKeys(t *testing.T) {
-	keys := DefaultDashboardKeys()
-	keys.Delete = []string{"z"}
-
-	m := NewDashboardModel(dashboardTestSessions(), nil)
-	m.keys = keys
-	m.width = 120
-	m.height = 40
-
-	view := m.View().Content
-	if !strings.Contains(view, "z delete") {
-		t.Errorf("dashboard footer should show remapped delete key; got:\n%s", view)
-	}
-}
-
-// TestApprovalKeysRemapped confirms the approval overlay honours a remapped
-// allow key.
-func TestApprovalKeysRemapped(t *testing.T) {
-	keys := DefaultApprovalKeys()
-	keys.Allow = []string{"z"}
-
-	m := newApprovalModel(approvalTestList())
-	m.keys = keys
-
-	// Old default 'y' no longer allows.
-	res, _ := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
-	got := res.(approvalModel)
-
-	if len(got.results) != 0 {
-		t.Fatalf("old allow key 'y' should be inert after remap: %+v", got.results)
-	}
-
-	// Remapped 'z' allows.
-	res, _ = got.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
-	got = res.(approvalModel)
-
-	if len(got.results) != 1 || got.results[0].Decision != "allow" {
-		t.Fatalf("remapped allow key 'z' did not allow: %+v", got.results)
-	}
-}
-
-func TestApprovalFooterReflectsConfiguredKeys(t *testing.T) {
-	keys := DefaultApprovalKeys()
-	keys.AllowAll = []string{"z"}
-
-	m := newApprovalModel(approvalTestList())
-	m.keys = keys
-
-	res, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = res.(approvalModel)
-
-	view := m.View().Content
-	if !strings.Contains(view, "z allow-all") {
-		t.Errorf("approval footer should show remapped allow-all key; got:\n%s", view)
 	}
 }
 

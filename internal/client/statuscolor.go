@@ -20,12 +20,9 @@ func StatusColor(status string) color.Color {
 }
 
 // AgentStatusColor returns the palette color for an agent activity status,
-// mirroring the overlay's status-column mapping: approval is red, active/running
-// is green, ready is blue, and anything else is dimmed.
+// mirroring the overlay's status-column mapping.
 func AgentStatusColor(agentStatus string) color.Color {
 	switch agentStatus {
-	case "approval":
-		return colorRed
 	case "active", "running":
 		return colorGreen
 	case "ready":

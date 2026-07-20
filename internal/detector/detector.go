@@ -103,21 +103,9 @@ func (d *Detector) IsBusy(content string) bool {
 	return false
 }
 
-// NeedsApproval intentionally does not infer approval from terminal text.
-// Approval state is too high-impact for PTY scraping: short strings like
-// selected menu choices are indistinguishable from ordinary prompt history.
-// Real approval status comes from hooks and the daemon approval queue.
-func (*Detector) NeedsApproval(string) bool {
-	return false
-}
-
 // IsReady returns true if the terminal shows an input prompt (agent waiting for input).
 func (d *Detector) IsReady(content string) bool {
 	if d.IsBusy(content) {
-		return false
-	}
-
-	if d.NeedsApproval(content) {
 		return false
 	}
 

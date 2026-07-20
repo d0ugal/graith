@@ -26,15 +26,20 @@ func withScriptedControl(t *testing.T, resp ...scriptedResp) *scriptedConn {
 }
 
 func TestToggleStar(t *testing.T) {
-	t.Run("star sends star", func(t *testing.T) {
+	t.Run("star sends update true", func(t *testing.T) {
 		c := withScriptedControl(t, okResp(typeEnv("ok")))
 
 		if err := toggleStar("braw", true); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if got := c.sentTypes(); len(got) != 1 || got[0] != "star" {
-			t.Errorf("sent = %v, want [star]", got)
+		if got := c.sentTypes(); len(got) != 1 || got[0] != "update" {
+			t.Fatalf("sent = %v, want [update]", got)
+		}
+
+		msg, ok := c.sends[0].Payload.(protocol.UpdateMsg)
+		if !ok || msg.SessionID != "braw" || msg.Starred == nil || !*msg.Starred {
+			t.Errorf("payload = %#v, want starred update for braw", c.sends[0].Payload)
 		}
 
 		if c.closed != 1 {
@@ -42,15 +47,20 @@ func TestToggleStar(t *testing.T) {
 		}
 	})
 
-	t.Run("unstar sends unstar", func(t *testing.T) {
+	t.Run("unstar sends update false", func(t *testing.T) {
 		c := withScriptedControl(t, okResp(typeEnv("ok")))
 
 		if err := toggleStar("braw", false); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if got := c.sentTypes(); len(got) != 1 || got[0] != "unstar" {
-			t.Errorf("sent = %v, want [unstar]", got)
+		if got := c.sentTypes(); len(got) != 1 || got[0] != "update" {
+			t.Fatalf("sent = %v, want [update]", got)
+		}
+
+		msg, ok := c.sends[0].Payload.(protocol.UpdateMsg)
+		if !ok || msg.Starred == nil || *msg.Starred {
+			t.Errorf("payload = %#v, want explicit starred=false", c.sends[0].Payload)
 		}
 	})
 
@@ -113,21 +123,21 @@ func TestSimpleSessionOps(t *testing.T) {
 	}
 }
 
-func TestRenameSession(t *testing.T) {
-	t.Run("valid name sends rename with payload", func(t *testing.T) {
+func TestUpdateSessionName(t *testing.T) {
+	t.Run("valid name sends update with payload", func(t *testing.T) {
 		c := withScriptedControl(t, okResp(typeEnv("ok")))
 
-		if err := renameSession("braw", "bonnie"); err != nil {
+		if err := updateSessionName("braw", "bonnie"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if len(c.sends) != 1 || c.sends[0].Type != "rename" {
-			t.Fatalf("sent = %v, want [rename]", c.sentTypes())
+		if len(c.sends) != 1 || c.sends[0].Type != "update" {
+			t.Fatalf("sent = %v, want [update]", c.sentTypes())
 		}
 
-		pl, ok := c.sends[0].Payload.(protocol.RenameMsg)
-		if !ok || pl.SessionID != "braw" || pl.NewName != "bonnie" {
-			t.Errorf("payload = %+v, want RenameMsg{braw, bonnie}", c.sends[0].Payload)
+		pl, ok := c.sends[0].Payload.(protocol.UpdateMsg)
+		if !ok || pl.SessionID != "braw" || pl.Name == nil || *pl.Name != "bonnie" || pl.ParentID != nil {
+			t.Errorf("payload = %+v, want name-only UpdateMsg for braw to bonnie", c.sends[0].Payload)
 		}
 	})
 
@@ -142,12 +152,12 @@ func TestRenameSession(t *testing.T) {
 
 		t.Cleanup(func() { newControlConn = orig })
 
-		if err := renameSession("braw", "has spaces and/slashes"); err == nil {
+		if err := updateSessionName("braw", "has spaces and/slashes"); err == nil {
 			t.Fatal("expected a validation error for an invalid name")
 		}
 
 		if dialed {
-			t.Error("renameSession dialed the daemon despite an invalid name")
+			t.Error("updateSessionName dialed the daemon despite an invalid name")
 		}
 	})
 }

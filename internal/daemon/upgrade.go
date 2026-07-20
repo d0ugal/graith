@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemonservice"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"golang.org/x/sys/unix"
 )
@@ -45,6 +46,7 @@ type UpgradeManifest struct {
 	descriptorFlags  map[int]int
 	ownedDescriptors map[int]struct{}
 	planSessions     map[string]*grpty.Session
+	planDrivers      map[string]SessionDriver
 	ownershipFD      int
 	ownershipCapsule string
 	adoptionDeadline time.Time
@@ -56,9 +58,31 @@ type UpgradeManifest struct {
 type UpgradeSession struct {
 	ID           string `json:"id"`
 	Fd           int    `json:"fd"`
+	HasPTY       bool   `json:"has_pty"`
 	ScrollbackFd int    `json:"scrollback_fd,omitempty"`
 	PID          int    `json:"pid"`
 	PIDStartTime int64  `json:"pid_start_time"`
+}
+
+func upgradeSessionHasPTY(session UpgradeSession) bool {
+	// Version 2 writers set HasPTY explicitly. Treat a valid transferred PTY
+	// descriptor as authoritative as well so manifests written before this
+	// field was introduced remain adoptable.
+	return session.HasPTY || session.Fd > 2
+}
+
+func plannedUpgradeDriver(manifest *UpgradeManifest, id string) SessionDriver {
+	if manifest.planDrivers != nil {
+		if driver := manifest.planDrivers[id]; driver != nil {
+			return driver
+		}
+	}
+
+	if manifest.planSessions != nil {
+		return manifest.planSessions[id]
+	}
+
+	return nil
 }
 
 type UpgradeHelper struct {
@@ -222,6 +246,108 @@ type upgradeTarget struct {
 	fileModNanos         int64
 	sha256               string
 	helperHandoffVersion int
+}
+
+// preparedExecUpgrade records the managed-service generation staged before
+// any session state or descriptor is mutated. Direct-source installs remain
+// unmanaged and carry no marker or rollback.
+type preparedExecUpgrade struct {
+	execPath   string
+	definition daemonservice.Definition
+	rollback   *preparedUpgradeRollback
+	managed    bool
+}
+
+type preparedUpgradeRollback struct {
+	once sync.Once
+	fn   func() error
+	err  error
+}
+
+var (
+	prepareManagedUpgradeForExec = daemonservice.PrepareManagedUpgrade
+	execProcessForUpgrade        = syscall.Exec
+)
+
+func prepareExecUpgrade(profile, clientExecPath string) (preparedExecUpgrade, error) {
+	execPath := clientExecPath
+	if execPath != "" {
+		if _, err := os.Stat(execPath); err != nil {
+			execPath = ""
+		}
+	}
+
+	if execPath == "" {
+		var err error
+
+		execPath, err = resolveExecutable()
+		if err != nil {
+			return preparedExecUpgrade{}, fmt.Errorf("resolve executable: %w", err)
+		}
+	}
+
+	definition, rollback, managed, err := prepareManagedUpgradeForExec(profile, execPath)
+	if err != nil {
+		return preparedExecUpgrade{}, fmt.Errorf("validate managed upgrade: %w", err)
+	}
+	if managed {
+		if rollback == nil {
+			return preparedExecUpgrade{}, errors.New("validate managed upgrade: rollback is missing")
+		}
+
+		if _, err := daemonservice.ValidateMarker(definition.Label, definition.Slot); err != nil {
+			return preparedExecUpgrade{}, errors.Join(
+				fmt.Errorf("validate managed upgrade marker: %w", err), rollback(),
+			)
+		}
+	}
+
+	prepared := preparedExecUpgrade{execPath: execPath, definition: definition, managed: managed}
+	if rollback != nil {
+		prepared.rollback = &preparedUpgradeRollback{fn: rollback}
+	}
+
+	return prepared, nil
+}
+
+func (prepared preparedExecUpgrade) rollbackError(cause error) error {
+	if prepared.rollback == nil {
+		return cause
+	}
+
+	prepared.rollback.once.Do(func() {
+		prepared.rollback.err = prepared.rollback.fn()
+	})
+
+	return errors.Join(cause, prepared.rollback.err)
+}
+
+func (prepared preparedExecUpgrade) validateTarget(target *upgradeTarget) error {
+	if !prepared.managed {
+		return nil
+	}
+
+	if target == nil || canonicalUpgradePath(prepared.execPath) != canonicalUpgradePath(target.path) {
+		return refuseUpgrade("managed upgrade target changed after service preparation")
+	}
+
+	return nil
+}
+
+func upgradeExecArgs(targetPath, manifestPath, configFile string, prepared preparedExecUpgrade) []string {
+	args := []string{targetPath, "daemon", "start", "--adopt-from", manifestPath}
+	if prepared.managed {
+		args = append(args,
+			"--internal-service-label", prepared.definition.Label,
+			"--internal-service-slot", prepared.definition.Slot,
+		)
+	}
+
+	if configFile != "" {
+		args = append(args, "--config", configFile)
+	}
+
+	return args
 }
 
 type upgradeProbeExpectation struct {
@@ -558,6 +684,10 @@ func secureUpgradeManifestDescriptors(manifest *UpgradeManifest) error {
 	}
 
 	for _, session := range manifest.Sessions {
+		if !upgradeSessionHasPTY(session) {
+			continue
+		}
+
 		if err := secureTransferredDescriptor(session.Fd); err != nil {
 			return fmt.Errorf("secure inherited session descriptor: %w", err)
 		}
@@ -612,6 +742,7 @@ func (sm *SessionManager) prepareUpgrade(
 
 	type candidate struct {
 		id        string
+		driver    SessionDriver
 		session   *grpty.Session
 		statePID  int
 		startTime int64
@@ -623,11 +754,6 @@ func (sm *SessionManager) prepareUpgrade(
 
 	candidates := make([]candidate, 0, len(sm.sessions))
 	for id, driver := range sm.sessions {
-		session, ok := driver.(*grpty.Session)
-		if !ok {
-			continue
-		}
-
 		state := sm.state.Sessions[id]
 		if state == nil {
 			sm.mu.RUnlock()
@@ -636,13 +762,13 @@ func (sm *SessionManager) prepareUpgrade(
 		}
 
 		candidates = append(candidates, candidate{
-			id: id, session: session, statePID: state.PID, startTime: state.PIDStartTime,
+			id: id, driver: driver, statePID: state.PID, startTime: state.PIDStartTime,
 		})
+		candidates[len(candidates)-1].session, _ = driver.(*grpty.Session)
 	}
 
 	sm.mu.RUnlock()
 	slices.SortFunc(candidates, func(a, b candidate) int { return strings.Compare(a.id, b.id) })
-
 	manifest := &UpgradeManifest{
 		Version:          upgradeManifestVersion,
 		ListenerFd:       int(listenerFd),
@@ -652,6 +778,7 @@ func (sm *SessionManager) prepareUpgrade(
 		descriptorFlags:  make(map[int]int, len(candidates)+1),
 		ownedDescriptors: make(map[int]struct{}, len(candidates)),
 		planSessions:     make(map[string]*grpty.Session, len(candidates)),
+		planDrivers:      make(map[string]SessionDriver, len(candidates)),
 	}
 	// The caller retains the *os.File returned by net.UnixListener.File. Keep
 	// that wrapper as the listener duplicate's sole closer: a raw close here
@@ -682,13 +809,13 @@ func (sm *SessionManager) prepareUpgrade(
 		}
 	}
 
-	active := make([]candidate, 0, len(candidates))
+	activeTerminals := 0
 	for _, item := range candidates {
-		if item.session.Exited() {
+		if item.driver.Exited() {
 			continue
 		}
 
-		pid := item.session.ProcessPID()
+		pid := item.driver.ProcessPID()
 		if item.startTime <= 0 || item.statePID != pid {
 			return nil, refuseUpgrade("session process identity is incomplete")
 		}
@@ -696,6 +823,15 @@ func (sm *SessionManager) prepareUpgrade(
 		currentStart, err := grpty.ProcessStartTime(pid)
 		if err != nil || currentStart != item.startTime {
 			return nil, refuseUpgrade("session process identity changed during upgrade preparation")
+		}
+
+		manifest.planDrivers[item.id] = item.driver
+		if item.session == nil {
+			manifest.Sessions = append(manifest.Sessions, UpgradeSession{
+				ID: item.id, Fd: -1, PID: pid, PIDStartTime: item.startTime,
+			})
+
+			continue
 		}
 
 		if item.session.Scrollback == nil || item.session.Scrollback.ValidatePathIdentity() != nil {
@@ -722,13 +858,13 @@ func (sm *SessionManager) prepareUpgrade(
 
 		manifest.ownedDescriptors[scrollbackFD] = struct{}{}
 		manifest.Sessions = append(manifest.Sessions, UpgradeSession{
-			ID: item.id, Fd: fd, ScrollbackFd: scrollbackFD, PID: pid, PIDStartTime: item.startTime,
+			ID: item.id, Fd: fd, HasPTY: true, ScrollbackFd: scrollbackFD, PID: pid, PIDStartTime: item.startTime,
 		})
 		manifest.planSessions[item.id] = item.session
-		active = append(active, item)
+		activeTerminals++
 	}
 
-	if maxSessions > 0 && len(active) > maxSessions {
+	if maxSessions > 0 && activeTerminals > maxSessions {
 		return nil, refuseUpgrade("upgrade target terminal capacity is too small")
 	}
 
@@ -736,6 +872,10 @@ func (sm *SessionManager) prepareUpgrade(
 
 	fds = append(fds, int(listenerFd))
 	for _, session := range manifest.Sessions {
+		if !upgradeSessionHasPTY(session) {
+			continue
+		}
+
 		fds = append(fds, session.Fd, session.ScrollbackFd)
 	}
 
@@ -760,9 +900,13 @@ func (sm *SessionManager) prepareUpgrade(
 	sm.mu.RLock()
 
 	unchanged := !requireReservation || sm.upgradePending
-	for _, item := range active {
+	for _, item := range candidates {
+		if item.driver.Exited() {
+			continue
+		}
+
 		state := sm.state.Sessions[item.id]
-		if sm.sessions[item.id] != item.session || state == nil ||
+		if sm.sessions[item.id] != item.driver || state == nil ||
 			state.PID != item.statePID || state.PIDStartTime != item.startTime {
 			unchanged = false
 			break
@@ -835,7 +979,8 @@ func (sm *SessionManager) upgradePTYSessionIDsLocked() []string {
 func (sm *SessionManager) preflightUpgradeSessions(maxSessions int) error {
 	type candidate struct {
 		id        string
-		session   *grpty.Session
+		driver    SessionDriver
+		hasPTY    bool
 		statePID  int
 		startTime int64
 	}
@@ -850,19 +995,8 @@ func (sm *SessionManager) preflightUpgradeSessions(maxSessions int) error {
 		}
 	}
 
-	for _, driver := range sm.sessions {
-		if _, ok := driver.(*grpty.Session); !ok && !driver.Exited() {
-			sm.mu.RUnlock()
-			return refuseUpgrade("a live session driver cannot be preserved by daemon upgrade")
-		}
-	}
-
-	ids := sm.upgradePTYSessionIDsLocked()
-
-	candidates := make([]candidate, 0, len(ids))
-	for _, id := range ids {
-		sess := sm.sessions[id].(*grpty.Session)
-
+	candidates := make([]candidate, 0, len(sm.sessions))
+	for id, driver := range sm.sessions {
 		state := sm.state.Sessions[id]
 		if state == nil {
 			sm.mu.RUnlock()
@@ -871,24 +1005,29 @@ func (sm *SessionManager) preflightUpgradeSessions(maxSessions int) error {
 		}
 
 		candidates = append(candidates, candidate{
-			id: id, session: sess, statePID: state.PID, startTime: state.PIDStartTime,
+			id: id, driver: driver, statePID: state.PID, startTime: state.PIDStartTime,
 		})
+		_, candidates[len(candidates)-1].hasPTY = driver.(*grpty.Session)
 	}
 
 	sm.mu.RUnlock()
 
 	identities := make([]UpgradeSession, 0, len(candidates))
+	terminalCount := 0
 	for _, item := range candidates {
-		if item.session.Exited() {
+		if item.driver.Exited() {
 			continue
 		}
 
 		identities = append(identities, UpgradeSession{
-			ID: item.id, PID: item.session.ProcessPID(), PIDStartTime: item.startTime,
+			ID: item.id, HasPTY: item.hasPTY, PID: item.driver.ProcessPID(), PIDStartTime: item.startTime,
 		})
+		if item.hasPTY {
+			terminalCount++
+		}
 	}
 
-	if maxSessions > 0 && len(identities) > maxSessions {
+	if maxSessions > 0 && terminalCount > maxSessions {
 		return refuseUpgrade("upgrade target terminal capacity is too small")
 	}
 
@@ -1216,7 +1355,7 @@ func (sm *SessionManager) persistFrozenUpgradeState(manifest *UpgradeManifest) e
 
 	for _, session := range manifest.Sessions {
 		state := sm.state.Sessions[session.ID]
-		if sm.sessions[session.ID] != manifest.planSessions[session.ID] || state == nil ||
+		if sm.sessions[session.ID] != plannedUpgradeDriver(manifest, session.ID) || state == nil ||
 			state.PID != session.PID || state.PIDStartTime != session.PIDStartTime {
 			sm.mu.Unlock()
 
@@ -1247,7 +1386,7 @@ func (sm *SessionManager) persistFrozenUpgradeState(manifest *UpgradeManifest) e
 	unchanged := sm.upgradePending && err == nil && bytes.Equal(data, current)
 	for _, session := range manifest.Sessions {
 		state := sm.state.Sessions[session.ID]
-		if sm.sessions[session.ID] != manifest.planSessions[session.ID] || state == nil ||
+		if sm.sessions[session.ID] != plannedUpgradeDriver(manifest, session.ID) || state == nil ||
 			state.PID != session.PID || state.PIDStartTime != session.PIDStartTime {
 			unchanged = false
 			break
@@ -1276,7 +1415,7 @@ func (sm *SessionManager) persistFrozenUpgradeState(manifest *UpgradeManifest) e
 func (sm *SessionManager) validateUpgradePlan(manifest *UpgradeManifest) error {
 	type candidate struct {
 		id        string
-		session   *grpty.Session
+		driver    SessionDriver
 		statePID  int
 		startTime int64
 	}
@@ -1285,11 +1424,6 @@ func (sm *SessionManager) validateUpgradePlan(manifest *UpgradeManifest) error {
 
 	candidates := make([]candidate, 0, len(sm.sessions))
 	for id, driver := range sm.sessions {
-		session, ok := driver.(*grpty.Session)
-		if !ok {
-			continue
-		}
-
 		state := sm.state.Sessions[id]
 		if state == nil {
 			sm.mu.RUnlock()
@@ -1298,7 +1432,7 @@ func (sm *SessionManager) validateUpgradePlan(manifest *UpgradeManifest) error {
 		}
 
 		candidates = append(candidates, candidate{
-			id: id, session: session, statePID: state.PID, startTime: state.PIDStartTime,
+			id: id, driver: driver, statePID: state.PID, startTime: state.PIDStartTime,
 		})
 	}
 
@@ -1312,7 +1446,7 @@ func (sm *SessionManager) validateUpgradePlan(manifest *UpgradeManifest) error {
 	active := 0
 
 	for _, item := range candidates {
-		exited := item.session.Exited()
+		exited := item.driver.Exited()
 
 		entry, exists := planned[item.id]
 		if exited {
@@ -1325,8 +1459,8 @@ func (sm *SessionManager) validateUpgradePlan(manifest *UpgradeManifest) error {
 
 		active++
 
-		if !exists || manifest.planSessions[item.id] != item.session ||
-			entry.PID != item.session.ProcessPID() || entry.PID != item.statePID ||
+		if !exists || plannedUpgradeDriver(manifest, item.id) != item.driver ||
+			entry.PID != item.driver.ProcessPID() || entry.PID != item.statePID ||
 			entry.PIDStartTime != item.startTime {
 			return refuseUpgrade("session lifecycle changed after upgrade planning")
 		}
@@ -2195,23 +2329,28 @@ func validateUpgradeOwnershipHeader(header *upgradeOwnershipHeader) error {
 
 	ids := make(map[string]struct{}, len(header.Sessions))
 	for _, session := range header.Sessions {
-		if session.ID == "" || session.Fd <= 2 || session.Fd > math.MaxInt32 ||
-			session.PID <= 1 || session.PID > math.MaxInt32 || session.ScrollbackFd > math.MaxInt32 ||
-			(header.Version == upgradeManifestVersion &&
-				(session.ScrollbackFd <= 2 || session.PIDStartTime <= 0)) {
+		hasPTY := upgradeSessionHasPTY(session)
+		if session.ID == "" || session.PID <= 1 || session.PID > math.MaxInt32 ||
+			((header.Version == upgradeManifestVersion || !hasPTY) && session.PIDStartTime <= 0) ||
+			(hasPTY && (session.Fd <= 2 || session.Fd > math.MaxInt32 || session.ScrollbackFd > math.MaxInt32 ||
+				(header.Version == upgradeManifestVersion && session.ScrollbackFd <= 2))) ||
+			(!hasPTY && (session.Fd != -1 || session.ScrollbackFd != 0)) {
 			return errors.New("upgrade ownership header session identity is invalid")
 		}
 
-		if _, exists := fds[session.Fd]; exists {
-			return errors.New("upgrade ownership header descriptors are not unique")
-		}
-
-		if session.ScrollbackFd > 2 {
-			if _, exists := fds[session.ScrollbackFd]; exists {
+		if hasPTY {
+			if _, exists := fds[session.Fd]; exists {
 				return errors.New("upgrade ownership header descriptors are not unique")
 			}
 
-			fds[session.ScrollbackFd] = struct{}{}
+			fds[session.Fd] = struct{}{}
+			if session.ScrollbackFd > 2 {
+				if _, exists := fds[session.ScrollbackFd]; exists {
+					return errors.New("upgrade ownership header descriptors are not unique")
+				}
+
+				fds[session.ScrollbackFd] = struct{}{}
+			}
 		}
 
 		if _, exists := pids[session.PID]; exists {
@@ -2222,7 +2361,6 @@ func validateUpgradeOwnershipHeader(header *upgradeOwnershipHeader) error {
 			return errors.New("upgrade ownership header session IDs are not unique")
 		}
 
-		fds[session.Fd] = struct{}{}
 		pids[session.PID] = struct{}{}
 		ids[session.ID] = struct{}{}
 	}
@@ -2351,7 +2489,12 @@ func prepareOwnershipCapsule(manifest *UpgradeManifest) error {
 
 	data = append(data, manifest.journalSHA256[:]...)
 	for _, session := range manifest.Sessions {
-		data = binary.BigEndian.AppendUint32(data, uint32(session.Fd))           //nolint:gosec // G115: header validation bounds descriptors to uint32
+		fd := uint32(math.MaxUint32)
+		if upgradeSessionHasPTY(session) {
+			fd = uint32(session.Fd) //nolint:gosec // G115: header validation bounds descriptors to uint32
+		}
+
+		data = binary.BigEndian.AppendUint32(data, fd)
 		data = binary.BigEndian.AppendUint32(data, uint32(session.ScrollbackFd)) //nolint:gosec // G115: header validation bounds descriptors to uint32
 		data = binary.BigEndian.AppendUint32(data, uint32(session.PID))          //nolint:gosec // G115: header validation bounds process IDs to uint32
 		data = binary.BigEndian.AppendUint64(data, uint64(session.PIDStartTime)) //nolint:gosec // G115: header validation requires a positive int64
@@ -2471,9 +2614,17 @@ func readInheritedOwnershipCapsule(raw string) (*UpgradeManifest, error) {
 			return nil, errors.New("inherited upgrade ownership capsule session identity is invalid")
 		}
 
+		fdWord := binary.BigEndian.Uint32(data[offset : offset+4])
+		fd := -1
+		hasPTY := fdWord != math.MaxUint32
+		if hasPTY {
+			fd = int(fdWord)
+		}
+
 		owned.Sessions = append(owned.Sessions, UpgradeSession{
 			ID:           "capsule-" + strconv.Itoa(i),
-			Fd:           int(binary.BigEndian.Uint32(data[offset : offset+4])),
+			Fd:           fd,
+			HasPTY:       hasPTY,
 			ScrollbackFd: int(binary.BigEndian.Uint32(data[offset+4 : offset+8])),
 			PID:          int(binary.BigEndian.Uint32(data[offset+8 : offset+12])),
 			PIDStartTime: pidStartTime,
@@ -2522,7 +2673,8 @@ func upgradeOwnershipResourcesMatch(a, b *UpgradeManifest) bool {
 
 	for i := range a.Sessions {
 		left, right := a.Sessions[i], b.Sessions[i]
-		if left.Fd != right.Fd || left.ScrollbackFd != right.ScrollbackFd || left.PID != right.PID ||
+		if upgradeSessionHasPTY(left) != upgradeSessionHasPTY(right) ||
+			left.Fd != right.Fd || left.ScrollbackFd != right.ScrollbackFd || left.PID != right.PID ||
 			left.PIDStartTime != right.PIDStartTime {
 			return false
 		}
@@ -2757,13 +2909,15 @@ func validateUpgradeManifestStructure(m *UpgradeManifest) error {
 
 	pids := make(map[int]struct{}, len(m.Sessions)+len(m.Helpers))
 	for _, session := range m.Sessions {
-		if session.ID == "" || session.Fd <= 2 || session.Fd > math.MaxInt32 ||
-			session.PID <= 1 || session.PID > math.MaxInt32 || session.PID == os.Getpid() ||
-			session.ScrollbackFd > math.MaxInt32 {
+		hasPTY := upgradeSessionHasPTY(session)
+		if session.ID == "" || session.PID <= 1 || session.PID > math.MaxInt32 || session.PID == os.Getpid() ||
+			(hasPTY && (session.Fd <= 2 || session.Fd > math.MaxInt32 || session.ScrollbackFd > math.MaxInt32 ||
+				(m.Version == upgradeManifestVersion && session.ScrollbackFd <= 2))) ||
+			(!hasPTY && (session.Fd != -1 || session.ScrollbackFd != 0)) {
 			return errors.New("upgrade manifest session identity is invalid")
 		}
 
-		if m.Version == upgradeManifestVersion && (session.ScrollbackFd <= 2 || session.PIDStartTime <= 0) {
+		if (m.Version == upgradeManifestVersion || !hasPTY) && session.PIDStartTime <= 0 {
 			return errors.New("upgrade manifest session process identity is incomplete")
 		}
 
@@ -2771,16 +2925,19 @@ func validateUpgradeManifestStructure(m *UpgradeManifest) error {
 			return errors.New("upgrade manifest session IDs are not unique")
 		}
 
-		if _, exists := fds[session.Fd]; exists {
-			return errors.New("upgrade manifest descriptors are not unique")
-		}
-
-		if session.ScrollbackFd > 2 {
-			if _, exists := fds[session.ScrollbackFd]; exists {
+		if hasPTY {
+			if _, exists := fds[session.Fd]; exists {
 				return errors.New("upgrade manifest descriptors are not unique")
 			}
 
-			fds[session.ScrollbackFd] = struct{}{}
+			fds[session.Fd] = struct{}{}
+			if session.ScrollbackFd > 2 {
+				if _, exists := fds[session.ScrollbackFd]; exists {
+					return errors.New("upgrade manifest descriptors are not unique")
+				}
+
+				fds[session.ScrollbackFd] = struct{}{}
+			}
 		}
 
 		if _, exists := pids[session.PID]; exists {
@@ -2788,7 +2945,6 @@ func validateUpgradeManifestStructure(m *UpgradeManifest) error {
 		}
 
 		ids[session.ID] = struct{}{}
-		fds[session.Fd] = struct{}{}
 		pids[session.PID] = struct{}{}
 	}
 
@@ -2836,9 +2992,11 @@ func newUpgradeOwnershipGuard(manifest *UpgradeManifest, deadlines ...time.Time)
 	}
 
 	for _, session := range manifest.Sessions {
-		guard.sessionFDs[session.ID] = session.Fd
-		if session.ScrollbackFd > 2 {
-			guard.scrollbackFDs[session.ID] = session.ScrollbackFd
+		if upgradeSessionHasPTY(session) {
+			guard.sessionFDs[session.ID] = session.Fd
+			if session.ScrollbackFd > 2 {
+				guard.scrollbackFDs[session.ID] = session.ScrollbackFd
+			}
 		}
 
 		guard.sessions[upgradeCleanupKey(session)] = session
@@ -2855,36 +3013,57 @@ func (g *upgradeOwnershipGuard) refine(manifest *UpgradeManifest) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	if manifest == nil || g.listenerFD != manifest.ListenerFd ||
-		len(g.sessionFDs) != len(manifest.Sessions) || len(g.scrollbackFDs) != len(manifest.Sessions) ||
+	if manifest == nil {
+		return errors.New("upgrade ownership guard refinement differs from cleanup capsule")
+	}
+
+	terminalCount := 0
+	scrollbackCount := 0
+	for _, session := range manifest.Sessions {
+		if upgradeSessionHasPTY(session) {
+			terminalCount++
+			if session.ScrollbackFd > 2 {
+				scrollbackCount++
+			}
+		}
+	}
+
+	if g.listenerFD != manifest.ListenerFd ||
+		len(g.sessionFDs) != terminalCount || len(g.scrollbackFDs) != scrollbackCount ||
+		len(g.sessions) != len(manifest.Sessions) ||
 		len(g.helpers) != len(manifest.Helpers) {
 		return errors.New("upgrade ownership guard refinement differs from cleanup capsule")
 	}
 
-	currentByFD := make(map[int]UpgradeSession, len(g.sessions))
+	currentByPID := make(map[int]UpgradeSession, len(g.sessions))
 	for _, session := range g.sessions {
-		currentByFD[session.Fd] = session
+		currentByPID[session.PID] = session
 	}
 
-	nextFDs := make(map[string]int, len(manifest.Sessions))
+	nextFDs := make(map[string]int, terminalCount)
 
 	nextSessions := make(map[string]UpgradeSession, len(manifest.Sessions))
 	for _, session := range manifest.Sessions {
-		current, ok := currentByFD[session.Fd]
-		if !ok || current.ScrollbackFd != session.ScrollbackFd || current.PID != session.PID ||
+		current, ok := currentByPID[session.PID]
+		if !ok || upgradeSessionHasPTY(current) != upgradeSessionHasPTY(session) ||
+			current.Fd != session.Fd || current.ScrollbackFd != session.ScrollbackFd ||
 			current.PIDStartTime != session.PIDStartTime {
 			return errors.New("upgrade ownership guard session refinement differs from cleanup capsule")
 		}
 
-		nextFDs[session.ID] = session.Fd
+		if upgradeSessionHasPTY(session) {
+			nextFDs[session.ID] = session.Fd
+		}
 		nextSessions[upgradeCleanupKey(session)] = session
 	}
 
 	g.sessionFDs = nextFDs
 
-	nextScrollbackFDs := make(map[string]int, len(manifest.Sessions))
+	nextScrollbackFDs := make(map[string]int, terminalCount)
 	for _, session := range manifest.Sessions {
-		nextScrollbackFDs[session.ID] = session.ScrollbackFd
+		if upgradeSessionHasPTY(session) && session.ScrollbackFd > 2 {
+			nextScrollbackFDs[session.ID] = session.ScrollbackFd
+		}
 	}
 
 	g.scrollbackFDs = nextScrollbackFDs
@@ -3658,7 +3837,14 @@ func validateAdoptionCapacity(manifest *UpgradeManifest) error {
 		return errors.New("terminal backend is unavailable for upgrade adoption")
 	}
 
-	if maxSessions > 0 && len(manifest.Sessions) > maxSessions {
+	terminalCount := 0
+	for _, session := range manifest.Sessions {
+		if upgradeSessionHasPTY(session) {
+			terminalCount++
+		}
+	}
+
+	if maxSessions > 0 && terminalCount > maxSessions {
 		return errors.New("upgrade manifest exceeds terminal adoption capacity")
 	}
 
@@ -3682,24 +3868,38 @@ func (sm *SessionManager) execPreparedUpgrade(
 	manifest *UpgradeManifest,
 	manifestPath string,
 	configFile string,
+	preparedService ...preparedExecUpgrade,
 ) error {
+	var prepared preparedExecUpgrade
+	if len(preparedService) > 0 {
+		prepared = preparedService[0]
+	}
+
+	fail := func(err error) error {
+		return prepared.rollbackError(err)
+	}
+
 	// Slow process and executable validation happens before the commit barrier.
 	// The barrier below then prevents an accepted state mutation/save from being
 	// stranded when syscall.Exec replaces the process image.
 	if err := sm.validateUpgradePlan(manifest); err != nil {
-		return err
+		return fail(err)
+	}
+
+	if err := prepared.validateTarget(target); err != nil {
+		return fail(err)
 	}
 
 	if err := target.validateFileIdentity(); err != nil {
-		return err
+		return fail(err)
 	}
 
-	if err := validateUpgradeExecBudget(target, manifestPath, configFile, manifest.ownershipFD, manifest.ownershipCapsule); err != nil {
-		return err
+	if err := validateUpgradeExecBudget(target, manifestPath, configFile, manifest.ownershipFD, manifest.ownershipCapsule, prepared); err != nil {
+		return fail(err)
 	}
 
 	if err := grpty.ReleasePinnedTerminalExecutablePathForExec(); err != nil {
-		return refuseUpgrade("terminal helper executable pin could not be released for exec")
+		return fail(refuseUpgrade("terminal helper executable pin could not be released for exec"))
 	}
 
 	err := sm.withFinalUpgradeBarrier(manifest, func() error {
@@ -3717,7 +3917,7 @@ func (sm *SessionManager) execPreparedUpgrade(
 			return rollbackUpgradeDescriptorsBeforeForkUnlock(manifest, err)
 		}
 
-		if err := execUpgradeTarget(target, manifestPath, configFile, manifest.ownershipFD, manifest.ownershipCapsule); err != nil {
+		if err := execUpgradeTarget(target, manifestPath, configFile, manifest.ownershipFD, manifest.ownershipCapsule, prepared); err != nil {
 			return rollbackUpgradeDescriptorsBeforeForkUnlock(manifest, err)
 		}
 
@@ -3725,11 +3925,13 @@ func (sm *SessionManager) execPreparedUpgrade(
 	})
 	if err != nil {
 		if restoreErr := grpty.RestorePinnedTerminalExecutableAfterExec(); restoreErr != nil {
-			return errors.Join(err, fmt.Errorf("restore terminal helper executable pin: %w", restoreErr))
+			return fail(errors.Join(err, fmt.Errorf("restore terminal helper executable pin: %w", restoreErr)))
 		}
+
+		return fail(err)
 	}
 
-	return err
+	return nil
 }
 
 func (sm *SessionManager) withFinalUpgradeBarrier(manifest *UpgradeManifest, commit func() error) error {
@@ -3754,7 +3956,7 @@ func (sm *SessionManager) withFinalUpgradeBarrier(manifest *UpgradeManifest, com
 
 	for _, planned := range manifest.Sessions {
 		state := sm.state.Sessions[planned.ID]
-		if sm.sessions[planned.ID] != manifest.planSessions[planned.ID] || state == nil ||
+		if sm.sessions[planned.ID] != plannedUpgradeDriver(manifest, planned.ID) || state == nil ||
 			state.PID != planned.PID || state.PIDStartTime != planned.PIDStartTime {
 			return refuseUpgrade("upgrade plan changed at the exec boundary")
 		}
@@ -3763,11 +3965,19 @@ func (sm *SessionManager) withFinalUpgradeBarrier(manifest *UpgradeManifest, com
 	return commit()
 }
 
-func execUpgradeTarget(target *upgradeTarget, manifestPath, configFile string, ownershipFD int, ownershipCapsule string) error {
-	args := []string{target.path, "daemon", "start", "--adopt-from", manifestPath}
-	if configFile != "" {
-		args = append(args, "--config", configFile)
+func execUpgradeTarget(
+	target *upgradeTarget,
+	manifestPath, configFile string,
+	ownershipFD int,
+	ownershipCapsule string,
+	preparedService ...preparedExecUpgrade,
+) error {
+	var prepared preparedExecUpgrade
+	if len(preparedService) > 0 {
+		prepared = preparedService[0]
 	}
+
+	args := upgradeExecArgs(target.path, manifestPath, configFile, prepared)
 
 	env := os.Environ()
 	ownershipPrefix := upgradeOwnershipFDEnv + "="
@@ -3789,7 +3999,7 @@ func execUpgradeTarget(target *upgradeTarget, manifestPath, configFile string, o
 		env = append(env, capsulePrefix+ownershipCapsule)
 	}
 
-	return syscall.Exec(target.pin.execPath, args, env)
+	return execProcessForUpgrade(target.pin.execPath, args, env)
 }
 
 func validateUpgradeExecBudget(
@@ -3797,11 +4007,14 @@ func validateUpgradeExecBudget(
 	manifestPath, configFile string,
 	ownershipFD int,
 	ownershipCapsule string,
+	preparedService ...preparedExecUpgrade,
 ) error {
-	args := []string{target.path, "daemon", "start", "--adopt-from", manifestPath}
-	if configFile != "" {
-		args = append(args, "--config", configFile)
+	var prepared preparedExecUpgrade
+	if len(preparedService) > 0 {
+		prepared = preparedService[0]
 	}
+
+	args := upgradeExecArgs(target.path, manifestPath, configFile, prepared)
 
 	ownershipPrefix := upgradeOwnershipFDEnv + "="
 	capsulePrefix := upgradeOwnershipCapsuleEnv + "="
@@ -3956,8 +4169,25 @@ func StopDaemon(pidFile string) error {
 		return fmt.Errorf("pid %d is not a graith daemon, removing stale pid file", pid)
 	}
 
+	return stopVerifiedDaemonPID(pid)
+}
+
+// StopDaemonPID stops one previously authenticated daemon peer identity. The
+// caller obtains pid from Unix peer credentials, not from a mutable PID file.
+func StopDaemonPID(pid int) error {
+	if pid <= 1 {
+		return fmt.Errorf("refusing to signal invalid pid %d", pid)
+	}
+
+	if !IsGraithDaemon(pid) {
+		return fmt.Errorf("pid %d is not a graith daemon", pid)
+	}
+
+	return stopVerifiedDaemonPID(pid)
+}
+
+func stopVerifiedDaemonPID(pid int) error {
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
-		_ = os.Remove(pidFile)
 		return fmt.Errorf("send SIGTERM to pid %d: %w", pid, err)
 	}
 

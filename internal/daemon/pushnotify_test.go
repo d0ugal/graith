@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -495,6 +496,55 @@ func TestDispatchViaNotifierApp_DeniedExitCode(t *testing.T) {
 	}
 }
 
+func TestDispatchMacNotificationWith_RequiresNativeHelper(t *testing.T) {
+	dispatchErr := errors.New("dreich delivery failure")
+
+	tests := []struct {
+		name          string
+		found         bool
+		notifierError error
+		wantError     string
+		wantCalls     int
+	}{
+		{name: "missing helper fails", found: false, wantError: "native notifier GraithNotifier.app not found"},
+		{name: "success", found: true, wantCalls: 1},
+		{name: "explicit denial is suppressed", found: true, notifierError: errNotifierPermissionDenied, wantCalls: 1},
+		{name: "delivery failure is returned", found: true, notifierError: dispatchErr, wantError: dispatchErr.Error(), wantCalls: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+
+			err := dispatchMacNotificationWith(
+				"Braw title", "canny message", config.NotifyPriorityNormal, 73*time.Millisecond,
+				func() (string, bool) { return "/bothy/GraithNotifier.app/graith-notifier", tt.found },
+				func(exe, title, message, priority string, timeout time.Duration) error {
+					calls++
+
+					if exe != "/bothy/GraithNotifier.app/graith-notifier" || title != "Braw title" || message != "canny message" || priority != config.NotifyPriorityNormal || timeout != 73*time.Millisecond {
+						t.Fatalf("unexpected notifier dispatch: exe=%q title=%q message=%q priority=%q timeout=%s", exe, title, message, priority, timeout)
+					}
+
+					return tt.notifierError
+				},
+			)
+
+			if calls != tt.wantCalls {
+				t.Errorf("notifier calls = %d, want %d", calls, tt.wantCalls)
+			}
+
+			if tt.wantError == "" && err != nil {
+				t.Fatalf("dispatch error = %v, want nil", err)
+			}
+
+			if tt.wantError != "" && (err == nil || !strings.Contains(err.Error(), tt.wantError)) {
+				t.Fatalf("dispatch error = %v, want containing %q", err, tt.wantError)
+			}
+		})
+	}
+}
+
 func TestDispatchViaNotifierApp_GenericFailure(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	stub := notifierStub(t, 1, argsFile)
@@ -596,24 +646,6 @@ func TestFindMacNotifierApp_OverrideMissingFallsThrough(t *testing.T) {
 		// returned the missing override path.
 		if got == filepath.Join(missing, macNotifierExecutable) {
 			t.Errorf("missing override should not resolve, got %q", got)
-		}
-	}
-}
-
-func TestOsaQuote(t *testing.T) {
-	cases := []struct {
-		in   string
-		want string
-	}{
-		{"hello", `"hello"`},
-		{`say "hi"`, `"say \"hi\""`},
-		{`back\slash`, `"back\\slash"`},
-		{"line1\nline2", `"line1 line2"`}, // newline folded to space
-		{"a\tb\rc", `"a b c"`},            // tab + CR folded to spaces
-	}
-	for _, c := range cases {
-		if got := osaQuote(c.in); got != c.want {
-			t.Errorf("osaQuote(%q) = %s, want %s", c.in, got, c.want)
 		}
 	}
 }

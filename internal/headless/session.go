@@ -30,7 +30,7 @@ const defaultMaxLineBytes = 16 * 1024 * 1024
 const defaultControlTimeout = 30 * time.Second
 
 // Opts configures a headless session launch. It mirrors the fields
-// pty.SessionOpts needs, plus the initial prompt and approval callback.
+// pty.SessionOpts needs, plus the initial prompt.
 type Opts struct {
 	ID         string
 	Command    string
@@ -66,14 +66,6 @@ type Opts struct {
 	// `interrupt` control request and stdin is closed on the terminal result so
 	// the one-shot process exits; when false, Interrupt falls back to SIGINT.
 	Control bool
-
-	// OnPermission is invoked for each inbound can_use_tool request. If nil,
-	// every tool request is denied (fail-closed — a headless session must not
-	// block on a human that will never answer). It runs on a dedicated goroutine
-	// per request (not the read loop), so a slow backend can't stall reading —
-	// but it still must not block indefinitely, as the CLI blocks its turn on the
-	// decision.
-	OnPermission func(PermissionRequest) PermissionDecision
 }
 
 // Session is a headless stream-json agent process. It satisfies the daemon's
@@ -86,7 +78,6 @@ type Session struct {
 	scrollback *grpty.Scrollback
 
 	controlEnabled bool // launched with the stdin control channel
-	onPermission   func(PermissionRequest) PermissionDecision
 
 	// Resolved processing limits (issue #1250); set once in New from Opts with
 	// package-default fallbacks, then read-only.
@@ -192,7 +183,6 @@ func New(opts Opts) (*Session, error) {
 		stdin:          stdin,
 		scrollback:     sb,
 		controlEnabled: opts.Control,
-		onPermission:   opts.OnPermission,
 		maxLineBytes:   intOrDefault(opts.MaxLineBytes, defaultMaxLineBytes),
 		controlTimeout: durationOrDefault(opts.ControlTimeout, defaultControlTimeout),
 		interruptTimeout: durationOrDefault(
@@ -268,20 +258,23 @@ func (s *Session) handleLine(line []byte) {
 	case "result":
 		s.setResult(ev)
 		// One-shot: the terminal result ends the turn. With the control channel
-		// stdin was held open for interrupt/approvals; close it now so the CLI
+		// stdin was held open for control messages; close it now so the CLI
 		// sees EOF and exits (verified against claude 2.1.211).
 		s.closeStdinAfterResult()
 	case "control_response":
 		s.deliverControlResponse(ev.Response)
 	case "control_request":
 		if controlSubtypeOf(ev.Request) == "can_use_tool" {
-			go s.handlePermission(ev)
+			// Apply backpressure in the single stream reader. A goroutine per
+			// request can grow without bound if the child stops reading stdin.
+			s.handlePermission(ev)
 		}
 	}
 }
 
-// handlePermission answers an inbound can_use_tool request via the approval
-// callback (fail-closed deny if none), writing a control_response on stdin.
+// handlePermission diagnoses and immediately denies a native permission prompt.
+// Headless sessions have no agent TUI in which a user could respond, so they
+// never enter a workflow state or wait for a human.
 //
 // The reply shape is the nested control_response form verified against claude
 // 2.1.211: the protocol-level subtype ("success") and request_id wrap an inner
@@ -296,28 +289,12 @@ func (s *Session) handlePermission(ev event) {
 		s.scrollbackBanner("[graith] malformed can_use_tool request body: " + err.Error())
 	}
 
-	decision := PermissionDecision{Allow: false, Reason: "headless: no approval backend"}
-	if s.onPermission != nil {
-		decision = s.onPermission(PermissionRequest{
-			RequestID: ev.RequestID,
-			ToolName:  controlToolName(ev.Request),
-			Input:     body.Input,
-		})
-	}
+	s.markDegraded()
+	s.scrollbackBanner("[graith] headless session cannot service a native permission prompt; request denied")
 
-	inner := map[string]any{}
-	if decision.Allow {
-		inner["behavior"] = "allow"
-		// updatedInput is required on allow; echo the original input back
-		// unchanged (graith does not rewrite tool arguments).
-		if len(body.Input) > 0 {
-			inner["updatedInput"] = body.Input
-		} else {
-			inner["updatedInput"] = map[string]any{}
-		}
-	} else {
-		inner["behavior"] = "deny"
-		inner["message"] = decision.Reason
+	inner := map[string]any{
+		"behavior": "deny",
+		"message":  "headless session cannot service native permission prompts; request denied",
 	}
 
 	resp := map[string]any{

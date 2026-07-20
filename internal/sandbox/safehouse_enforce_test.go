@@ -151,6 +151,108 @@ func TestSafehouseEnforcesFilesystemBoundary(t *testing.T) {
 	}
 }
 
+// TestDaemonServiceControlIsOutsideAgentSandbox proves the #1473 control
+// boundary with real macOS enforcement. The fixture mirrors the production
+// services/control/bootstrap suffix under an otherwise ungranted home path.
+// This suite is the real Seatbelt check for the safehouse backend. Generated
+// policy tests cover the same protected-path filtering shared with nono.
+func TestDaemonServiceControlIsOutsideAgentSandbox(t *testing.T) {
+	mustEnforceSafehouse(t)
+
+	home, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Keep the representative home subtree outside the wrapped process's
+	// worktree grant. Using the package directory as the test's fake home also
+	// lets the test run when its outer CI/agent sandbox cannot create arbitrary
+	// top-level directories in the real account home.
+	fixtureHome, err := os.MkdirTemp(home, ".graith-1473-control-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(fixtureHome) })
+
+	bootstrap := filepath.Join(fixtureHome, "Library", "Application Support", "Graith", "services", "control", "bootstrap")
+	if err := os.MkdirAll(bootstrap, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	request := filepath.Join(bootstrap, "start-default.json")
+	want := []byte(`{"profile":"canny","nonce":"braw"}`)
+	if err := os.WriteFile(request, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The unsandboxed CLI/controller/bootstrap identity can operate on the
+	// protected directory before the same-UID sandboxed child is attempted.
+	if got, err := os.ReadFile(request); err != nil || string(got) != string(want) {
+		t.Fatalf("controller read = %q, %v", got, err)
+	}
+
+	probe := filepath.Join(bootstrap, ".controller-probe")
+	probeMoved := filepath.Join(bootstrap, ".controller-probe-moved")
+	if err := os.WriteFile(probe, []byte("canny"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(probe, probeMoved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(probeMoved); err != nil {
+		t.Fatal(err)
+	}
+
+	worktree := filepath.Join(t.TempDir(), "bothy")
+	if err := os.Mkdir(worktree, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	replacement := filepath.Join(worktree, "replacement-safehouse")
+	if err := os.WriteFile(replacement, []byte("thrawn"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := WrapOpts{
+		Backend:     BackendSafehouse,
+		WorktreeDir: worktree,
+		EnvKeys:     []string{"PATH", "HOME"},
+	}
+
+	run := func(command string, args ...string) error {
+		wrapped, wrappedArgs, wrapErr := Wrap(command, args, opts)
+		if wrapErr != nil {
+			t.Fatalf("wrap safehouse: %v", wrapErr)
+		}
+
+		_, runErr := exec.Command(wrapped, wrappedArgs...).CombinedOutput() //nolint:gosec // fixed test commands and paths
+
+		return runErr
+	}
+
+	operations := []struct {
+		name    string
+		command string
+		args    []string
+	}{
+		{name: "read", command: "/bin/cat", args: []string{request}},
+		{name: "modify", command: "/bin/sh", args: []string{"-c", `printf thrawn > "$1"`, "sh", request}},
+		{name: "delete", command: "/bin/rm", args: []string{"-f", request}},
+		{name: "replace", command: "/bin/mv", args: []string{"-f", replacement, request}},
+	}
+
+	for _, operation := range operations {
+		if err := run(operation.command, operation.args...); err == nil {
+			t.Errorf("sandboxed %s unexpectedly succeeded", operation.name)
+		}
+
+		got, readErr := os.ReadFile(request)
+		if readErr != nil || string(got) != string(want) {
+			t.Fatalf("request changed after denied %s: %q, %v", operation.name, got, readErr)
+		}
+	}
+}
+
 // TestSafehouseEnforcesUnixSocketConnect is the kernel-level regression test for
 // the daemon-socket bug: a sandboxed agent could not connect() to the daemon
 // socket, so `gr msg`/`gr status` failed. It proves (1) safehouse's default

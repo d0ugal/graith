@@ -19,7 +19,6 @@ func makeSession(
     repoName: String = "croft",
     parentID: String? = nil,
     starred: Bool? = nil,
-    yolo: Bool? = nil,
     dirty: Bool? = nil,
     unpushedCount: Int? = nil,
     mirror: Bool? = nil
@@ -39,7 +38,6 @@ func makeSession(
     if let agentStatus { fields["\"agent_status\""] = "\"\(agentStatus)\"" }
     if let parentID { fields["\"parent_id\""] = "\"\(parentID)\"" }
     if let starred { fields["\"starred\""] = starred ? "true" : "false" }
-    if let yolo { fields["\"yolo\""] = yolo ? "true" : "false" }
     if let dirty { fields["\"dirty\""] = dirty ? "true" : "false" }
     if let unpushedCount { fields["\"unpushed_count\""] = "\(unpushedCount)" }
     if let mirror { fields["\"mirror\""] = mirror ? "true" : "false" }
@@ -81,7 +79,7 @@ actor MockHostClient: GraithHostClient {
     /// Records the last `migrate` call so tests can assert the model is forwarded.
     private(set) var lastMigrate: (agent: String, model: String?)?
     /// Records the last `create` request so tests can assert the advanced options
-    /// (base/yolo/in-place/agent-hooks) are forwarded to the wire message.
+    /// (base/in-place/agent-hooks) are forwarded to the wire message.
     private(set) var lastCreate: CreateRequest?
     /// Records the last `set_status` call so tests can assert the text/clear flag.
     private(set) var lastSetStatus: (text: String, ttlSeconds: Int?, clear: Bool)?
@@ -224,8 +222,9 @@ actor MockHostClient: GraithHostClient {
         lastSetStatus = (text, ttlSeconds, clear)
     }
     func rename(sessionID: String, newName: String) async throws {}
-    func star(sessionID: String) async throws {}
-    func unstar(sessionID: String) async throws {}
+    func update(sessionID: String, name: String?, parentID: String?, starred: Bool?) async throws -> UpdateResultMsg {
+        UpdateResultMsg(sessionID: sessionID, name: name ?? "braw", parentID: parentID ?? "", starred: starred ?? false)
+    }
     func fork(name: String, sourceSessionID: String) async throws {}
     func migrate(sessionID: String, agent: String, model: String?) async throws {
         lastMigrate = (agent, model)

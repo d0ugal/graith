@@ -161,12 +161,12 @@ func TestStatusBarInfoFromSession(t *testing.T) {
 		Name:          "braw-session",
 		Agent:         "claude",
 		Status:        "running",
-		AgentStatus:   "approval",
+		AgentStatus:   "error",
 		Branch:        "user/graith/braw-abc",
 		Dirty:         true,
 		UnpushedCount: 2,
 	}
-	fleet := protocol.FleetSummary{Total: 3, Active: 1, Approval: 1, Stopped: 1}
+	fleet := protocol.FleetSummary{Total: 3, Active: 1, Errored: 1, Stopped: 1}
 
 	info := newStatusBarInfo(session, 5, fleet)
 	if info.name != "braw-session" {
@@ -177,8 +177,8 @@ func TestStatusBarInfoFromSession(t *testing.T) {
 		t.Errorf("expected unread 5, got %d", info.unread)
 	}
 
-	if info.agentStatus != "approval" {
-		t.Errorf("expected agentStatus approval, got %s", info.agentStatus)
+	if info.agentStatus != "error" {
+		t.Errorf("expected agentStatus error, got %s", info.agentStatus)
 	}
 
 	if info.fleet.Total != 3 {
@@ -192,12 +192,12 @@ func TestFormatStatusLineFleetSummary(t *testing.T) {
 		agent:       "claude",
 		status:      "running",
 		agentStatus: "active",
-		fleet:       protocol.FleetSummary{Total: 5, Active: 3, Approval: 2},
+		fleet:       protocol.FleetSummary{Total: 5, Active: 3, Errored: 2},
 	}
 
 	line := formatStatusLine(info, 120)
-	if !strings.Contains(line, "2 approval") {
-		t.Errorf("expected line to contain approval count, got %q", line)
+	if !strings.Contains(line, "2 error") {
+		t.Errorf("expected line to contain error count, got %q", line)
 	}
 
 	if !strings.Contains(line, "3 active") {
@@ -217,37 +217,6 @@ func TestFormatStatusLineFleetHiddenWhenSolo(t *testing.T) {
 	line := formatStatusLine(info, 120)
 	if strings.Contains(line, "active") && strings.Contains(line, "1 active") {
 		t.Errorf("fleet summary should be hidden when only 1 session, got %q", line)
-	}
-}
-
-func TestFormatStatusLineApprovalProminence(t *testing.T) {
-	info := statusBarInfo{
-		name:        "braw-session",
-		agent:       "claude",
-		status:      "running",
-		agentStatus: "active",
-		fleet:       protocol.FleetSummary{Total: 4, Active: 2, Approval: 1, Errored: 1},
-	}
-
-	line := formatStatusLine(info, 120)
-	approvalIdx := strings.Index(line, "approval")
-	errorIdx := strings.Index(line, "error")
-	activeIdx := strings.LastIndex(line, "active")
-
-	if approvalIdx < 0 {
-		t.Fatal("expected approval in fleet summary")
-	}
-
-	if errorIdx < 0 {
-		t.Fatal("expected error in fleet summary")
-	}
-	// Approval should appear before error and active in the fleet section
-	if approvalIdx > errorIdx {
-		t.Errorf("approval should appear before error in fleet summary")
-	}
-	// activeIdx here is from fleet section (last occurrence), should be after approval
-	if activeIdx < approvalIdx {
-		t.Errorf("fleet active count should appear after approval")
 	}
 }
 
@@ -344,16 +313,15 @@ func TestFormatPRSection_States(t *testing.T) {
 
 func TestFormatFleetSection_AllBuckets(t *testing.T) {
 	fleet := protocol.FleetSummary{
-		Total:    12,
-		Approval: 1,
-		Errored:  2,
-		Active:   3,
-		Ready:    4,
-		Stopped:  2,
+		Total:   11,
+		Errored: 2,
+		Active:  3,
+		Ready:   4,
+		Stopped: 2,
 	}
 
 	got := formatFleetSection(fleet, accentBg)
-	for _, want := range []string{"approval", "error", "active", "ready", "stopped"} {
+	for _, want := range []string{"error", "active", "ready", "stopped"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("fleet section %q missing %q", got, want)
 		}
@@ -381,8 +349,7 @@ func TestFormatFleetMinimal(t *testing.T) {
 		fleet   protocol.FleetSummary
 		wantSub string
 	}{
-		{"solo", protocol.FleetSummary{Total: 1, Approval: 1}, ""},
-		{"approval-wins", protocol.FleetSummary{Total: 5, Approval: 2, Errored: 3}, "approval"},
+		{"solo", protocol.FleetSummary{Total: 1, Errored: 1}, ""},
 		{"errored", protocol.FleetSummary{Total: 5, Errored: 2}, "error"},
 		{"neither", protocol.FleetSummary{Total: 5, Active: 4}, ""},
 	}
@@ -415,7 +382,6 @@ func TestStyledStatus_Branches(t *testing.T) {
 	}{
 		{"active", colorGreen, false},
 		{"running", colorGreen, false},
-		{"approval", colorRed, true},
 		{"ready", colorBlue, false},
 		{"errored", colorRed, false},
 		{"stopped", colorDim, false},
@@ -519,19 +485,6 @@ func TestStatusBarState_Teardown(t *testing.T) {
 }
 
 // --- statusBarState: mutators are reflected in render ---
-
-func TestStatusBarState_PendingApprovalsInRender(t *testing.T) {
-	sb := &statusBarState{rows: 24, cols: 120, position: "bottom"}
-	sb.updateInfo(statusBarInfo{name: "thrawn", agent: "claude", status: "running"})
-	sb.updatePendingApprovals(3)
-
-	var buf bytes.Buffer
-	sb.render(&buf)
-
-	if !strings.Contains(buf.String(), "3 pending") {
-		t.Errorf("render should reflect pending approvals, got %q", buf.String())
-	}
-}
 
 func TestStatusBarState_UpdateSize(t *testing.T) {
 	sb := &statusBarState{position: "bottom"}

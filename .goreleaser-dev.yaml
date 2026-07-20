@@ -1,22 +1,85 @@
 version: 2
 
+before:
+  hooks:
+    # Build the same universal, signed native notifier shipped by production.
+    # macos/notifier/build.sh removes stale output and exits successfully on
+    # non-Darwin hosts, so Linux snapshot builds need no Swift/macOS tooling.
+    - sh -c 'make notifier'
+    # GoReleaser accepts an empty archive glob. Fail closed on the real macOS
+    # dev-release runner if the bundle build did not produce its executable.
+    - sh -c 'test "$(uname -s)" != Darwin || test -x macos/build/GraithNotifier.app/Contents/MacOS/graith-notifier'
+
+# Split builds and archives by OS so only Darwin artifacts can carry the macOS
+# app bundle. Both builds retain the gr-dev binary name used by the dev formula.
 builds:
-  - main: ./cmd/graith
+  - id: gr-dev-linux
+    main: ./cmd/graith
     binary: gr-dev
+    env:
+      - CGO_ENABLED=0
     ldflags:
       - -s -w
       - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
       - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
     goos:
       - linux
+    goarch:
+      - amd64
+      - arm64
+  - id: gr-dev-darwin
+    main: ./cmd/graith
+    binary: gr-dev
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
+      - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
+      - -X github.com/d0ugal/graith/internal/daemonservice.ManagedBuild={{ if eq (index .Env "GRAITH_MANAGED_DEV_RELEASE") "true" }}true{{ else }}false{{ end }}
+      - -X github.com/d0ugal/graith/internal/daemonservice.DevelopmentBuild=false
+      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedTeamID={{ if eq (index .Env "GRAITH_MANAGED_DEV_RELEASE") "true" }}{{ index .Env "GRAITH_SIGNING_TEAM_ID" }}{{ end }}
+      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedRequirementBase64={{ if eq (index .Env "GRAITH_MANAGED_DEV_RELEASE") "true" }}{{ index .Env "GRAITH_SIGNING_REQUIREMENT_B64" }}{{ end }}
+    # Provisioned dev artifacts use the same Developer ID requirement as stable
+    # Graith so their isolated `dev` profile can safely share the global service
+    # registry. Without the complete credential set, the workflow stamps this
+    # binary as unmanaged and the hook omits Graith.app entirely.
+    hooks:
+      post:
+        - cmd: macos/service/release-hook.sh "{{ .Path }}" "{{ .Target }}" "{{ .Version }}" "{{ .Commit }}" "{{ .IsSnapshot }}" "{{ if eq (index .Env "GRAITH_MANAGED_DEV_RELEASE") "true" }}true{{ else }}false{{ end }}"
+          output: true
+    goos:
       - darwin
     goarch:
       - amd64
       - arm64
 
 archives:
-  - format: tar.gz
+  - id: linux
+    ids:
+      - gr-dev-linux
+    format: tar.gz
     name_template: "graith-dev_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+  - id: darwin
+    ids:
+      - gr-dev-darwin
+    format: tar.gz
+    name_template: "graith-dev_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+      # Keep the managed bundle layout identical to production. GoReleaser
+      # accepts this empty glob when signing is not yet provisioned and the
+      # release hook deliberately omits the service app.
+      - src: macos/build/GraithNotifier.app/**/*
+        dst: GraithNotifier.app/Contents
+      - src: macos/build/service-release-{{ .Arch }}/Graith.app/**/*
+        dst: Graith.app/Contents
 
 checksum:
   name_template: checksums.txt

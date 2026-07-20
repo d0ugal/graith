@@ -49,8 +49,9 @@ func crossAgentForkSM(t *testing.T) (*SessionManager, string) {
 	// Target agent: sh -c 'sleep 60' tolerates the appended seed positional (it
 	// becomes $0) and stays alive so the fork commits cleanly.
 	cfg.Agents["bide-agent"] = config.Agent{
-		Command: "sh",
-		Args:    []string{"-c", "sleep 60"},
+		NonInteractiveArgs: []string{},
+		Command:            "sh",
+		Args:               []string{"-c", "sleep 60"},
 	}
 
 	sm := newSMWithConfig(t, cfg)
@@ -183,7 +184,7 @@ func TestForkSameAgentIsNativeFork(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
-	cfg.Agents["bide-agent"] = config.Agent{Command: "sh", Args: []string{"-c", "sleep 60"}}
+	cfg.Agents["bide-agent"] = config.Agent{NonInteractiveArgs: []string{}, Command: "sh", Args: []string{"-c", "sleep 60"}}
 	sm := newSMWithConfig(t, cfg)
 
 	sm.state.Sessions["src1"] = &SessionState{
@@ -221,8 +222,8 @@ func TestForkWithAgentUnsupportedSource(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
-	cfg.Agents["bide-agent"] = config.Agent{Command: "sh", Args: []string{"-c", "sleep 60"}}
-	cfg.Agents["haar-agent"] = config.Agent{Command: "sh", Args: []string{"-c", "sleep 60"}}
+	cfg.Agents["bide-agent"] = config.Agent{NonInteractiveArgs: []string{}, Command: "sh", Args: []string{"-c", "sleep 60"}}
+	cfg.Agents["haar-agent"] = config.Agent{NonInteractiveArgs: []string{}, Command: "sh", Args: []string{"-c", "sleep 60"}}
 	sm := newSMWithConfig(t, cfg)
 
 	sm.state.Sessions["src1"] = &SessionState{
@@ -282,7 +283,7 @@ func TestForkWithAgentEmptyTranscript(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
-	cfg.Agents["bide-agent"] = config.Agent{Command: "sh", Args: []string{"-c", "sleep 60"}}
+	cfg.Agents["bide-agent"] = config.Agent{NonInteractiveArgs: []string{}, Command: "sh", Args: []string{"-c", "sleep 60"}}
 	sm := newSMWithConfig(t, cfg)
 
 	sm.state.Sessions["src1"] = &SessionState{

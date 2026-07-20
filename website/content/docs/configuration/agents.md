@@ -9,7 +9,7 @@ draft: false
 
 ## MCP servers
 
-Define global MCP servers that are available to all agent sessions:
+Global MCP servers available to all agent sessions:
 
 ```toml
 [[mcp_servers]]
@@ -33,6 +33,7 @@ command        = "claude"
 args           = ["--session-id", "{agent_session_id}"]
 resume_args    = ["--resume", "{agent_session_id}"]
 fork_args      = ["--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"]
+non_interactive_args = []       # empty: keep the agent's native approval TUI (see below)
 env            = {}             # extra environment variables
 idle_timeout   = ""             # auto-stop after idle (default: 1h when resume_args is set, 0 otherwise)
 inject_prompt  = true           # inject agent_prompt into the session
@@ -43,15 +44,16 @@ add_dir_args   = ["--add-dir", "{dir}"]  # flag for granting an extra directory 
 headless_args  = []             # argv prefix prepended in headless mode (see below)
 ```
 
-`headless_capable` marks whether an agent supports [headless mode]({{< relref "sessions.md#headless-sessions" >}}). Only Claude supports it in v1; a session can't be asked to go headless on an agent that isn't capable.
+`headless_capable` marks whether an agent supports [headless mode]({{< relref "sessions.md#headless-sessions" >}}). Only Claude supports it in v1; you can't ask a session to go headless on an agent that isn't capable.
 
-Every agent-specific flag graith appends is defined here, so a custom agent can adopt (or drop) each pattern from config alone rather than waiting on a graith release:
+Every agent-specific flag graith appends is defined here — a custom agent can adopt (or drop) each pattern from config alone, without waiting on a graith release:
 
 - **`add_dir_args`** — the flag template graith uses to grant the agent an extra directory (each [included repo](#includes)'s co-located worktree). It is expanded once per directory with `{dir}` bound to that path. Leave it unset for an agent whose CLI has no such flag; those agents rely on the `GRAITH_INCLUDE_*_PATH` environment variables instead.
-- **`headless_args`** — the control-channel argv prefix graith prepends when launching the agent in [headless mode]({{< relref "sessions.md#headless-sessions" >}}); the agent's own args follow it. Claude's default is `["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"]`.
+- **`non_interactive_args`** — optional argv prepended on every create, resume, and fork. It is **empty by default** for every bundled agent, so each keeps its own approval TUI (and, for Codex, its own sandbox) out of the box; Graith treats time spent in that TUI as ordinary running state and never answers on your behalf. Set it to the agent's unattended flag(s) — e.g. `["--dangerously-skip-permissions"]` for Claude, `["--ask-for-approval", "never", "--sandbox", "danger-full-access"]` for Codex, `["--force"]` for Cursor, `["--auto"]` for OpenCode — to run without those prompts. Doing so disables the agent's native safeguards, so only enable it behind a boundary you control (Graith's `[sandbox]`, an external sandbox, or a VM). These flags are independent of `[sandbox]` and `[command_policy]`.
+- **`headless_args`** — the control-channel argv prefix graith prepends when launching the agent in [headless mode]({{< relref "sessions.md#headless-sessions" >}}); the agent's own args follow it. Claude's default is `["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose"]`.
 - **`option_args`** — conditional flag groups appended on every launch. Each group is emitted only when its `when` template variable is set, so an unset option leaves the agent's own default untouched (see [Conditional option flags](#conditional-option-flags)).
 
-`inject_prompt` is the on/off switch for prompt injection; `prompt_injection` selects the *mechanism*. When `prompt_injection` is empty (the default), graith picks the mechanism from the agent name — `claude` → `append_system_prompt`, `cursor` → `cursor_rules`, `codex` → `developer_instructions`, and any other name → `none`. Set it explicitly to override that mapping or, most usefully, to give a [custom agent](#custom-agents) a mechanism it would otherwise not get. The values are:
+`inject_prompt` is the on/off switch for prompt injection; `prompt_injection` selects the *mechanism*. When `prompt_injection` is empty (the default), graith picks the mechanism from the agent name — `claude` → `append_system_prompt`, `cursor` → `cursor_rules`, `codex` → `developer_instructions`, and any other name → `none`. Set it explicitly to override that mapping, or — most usefully — to give a [custom agent](#custom-agents) a mechanism it wouldn't otherwise get. The values are:
 
 | Value | Mechanism |
 |-------|-----------|
@@ -60,11 +62,11 @@ Every agent-specific flag graith appends is defined here, so a custom agent can 
 | `developer_instructions` | Pass the prompt as Codex's `-c developer_instructions=...` override |
 | `none` | Do not inject a prompt |
 
-An unknown value is rejected at config load. Both `inject_prompt` and `prompt_injection` apply to ordinary sessions and to the [orchestrator]({{< relref "/docs/orchestrator.md" >}}) alike: a Codex, Cursor, or custom orchestrator agent gets the right mechanism instead of an unsupported Claude flag, and setting `inject_prompt = false` opts the orchestrator out entirely — it launches with no injected role prompt and no Cursor rule file, just like an ordinary session.
+An unknown value is rejected at config load. Both `inject_prompt` and `prompt_injection` apply to ordinary sessions and the [orchestrator]({{< relref "/docs/orchestrator.md" >}}) alike: a Codex, Cursor, or custom orchestrator agent gets the right mechanism instead of an unsupported Claude flag, and `inject_prompt = false` opts the orchestrator out entirely — it launches with no injected role prompt and no Cursor rule file, just like an ordinary session.
 
 ### Template variables
 
-These are substituted in `args`, `resume_args`, `fork_args`, and `headless_args`:
+These are substituted in `args`, `resume_args`, `fork_args`, `non_interactive_args`, and `headless_args`:
 
 | Variable | Expands to |
 |----------|-----------|
@@ -78,11 +80,11 @@ These are substituted in `args`, `resume_args`, `fork_args`, and `headless_args`
 
 Only `{username}` is available in `branch_prefix`.
 
-Two more variables are scoped to specific fields. `{dir}` is available only in `add_dir_args`, bound to each granted directory in turn. The Codex option values — `{profile}`, `{reasoning_effort}`, `{service_tier}`, `{approval_policy}`, and `{web_search}` (a boolean rendering as `true`/empty) — are available in `option_args`, alongside `{model}`.
+Two more variables are scoped to specific fields. `{dir}` is available only in `add_dir_args`, bound to each granted directory in turn. The Codex option values — `{profile}`, `{reasoning_effort}`, `{service_tier}`, and `{web_search}` (a boolean rendering as `true`/empty) — are available in `option_args`, alongside `{model}`.
 
 ### Conditional option flags
 
-`option_args` moves the per-session flags that used to be hard-coded (Codex's `--model`, `--profile`, reasoning-effort, service-tier, `--search`, and `--ask-for-approval`) into config, so a custom agent can define its own. Each group lists the argv to append and a `when` template variable that gates it — the group is emitted only when that variable resolves to a non-empty value (`true` for a boolean such as `web_search`). An empty `when` emits the group unconditionally.
+`option_args` moves per-session choices (Codex's `--model`, `--profile`, reasoning-effort, service-tier, and `--search`) into config, so a custom agent can define its own. Each group lists the argv to append and a `when` template variable that gates it — the group is emitted only when that variable resolves to a non-empty value (`true` for a boolean such as `web_search`). An empty `when` emits the group unconditionally. Non-interactive launch flags belong in `non_interactive_args`, not here.
 
 ```toml
 [[agents.codex.option_args]]
@@ -98,21 +100,19 @@ when = "web_search"                # boolean: emitted when true
 args = ["--search"]
 ```
 
-This is why an unset option can't just be a `{model}` template inside `args`: an empty model would expand to a literal `--model ""`. The groups are appended after the base args on create, resume, and fork alike. A `when` that names an unknown template variable, or a group with no `args`, is rejected at config load.
+This is why an unset option can't just be a `{model}` template inside `args`: an empty model would expand to a literal `--model ""`. The groups are appended after the base args on create, resume, and fork alike. A `when` naming an unknown template variable, or a group with no `args`, is rejected at config load.
 
 ### Per-agent sandbox
 
 ```toml
 [agents.claude.sandbox]
-enabled    = true        # enable sandbox for this agent (merged with global)
-disabled   = false       # force-disable even if global sandbox is enabled
 read_dirs  = ["~/.claude"]
 write_dirs = ["~/.claude"]
 write_files = ["~/.claude.json", "~/.claude.json.lock", "~/.claude.lock"]  # login file (read+write)
 features   = ["clipboard"]
 ```
 
-Features, directories, and files (`read_files`/`write_files`, for single files that can't be a directory grant without over-sharing — e.g. Claude's `~/.claude.json` login file) are merged with the global sandbox config. Setting `disabled = true` overrides `enabled = true` on the global config. See the [Sandbox]({{< relref "/docs/sandbox/how-it-works.md#file-grants" >}}) page for file grants.
+Features, directories, and files (`read_files`/`write_files`, for single files that can't be a directory grant without over-sharing — e.g. Claude's `~/.claude.json` login file) merge with the global sandbox config. Per-agent settings can choose a backend, add grants, or explicitly disable Graith's sandbox for that agent. Disabled sessions start with a warning; `gr doctor` reports the missing Graith boundary. See the [Sandbox]({{< relref "/docs/sandbox/how-it-works.md#file-grants" >}}) page for file grants.
 
 ### Per-agent MCP overrides
 
@@ -127,7 +127,7 @@ command = "/path/to/extra-tools"
 args    = ["--codex-mode"]
 ```
 
-A per-agent MCP entry with `disabled = true` removes the global server for that agent. Entries that override `command`, `args`, or `env` are merged with the global definition.
+A per-agent MCP entry with `disabled = true` removes the global server for that agent. Entries that override `command`, `args`, or `env` merge with the global definition.
 
 ### Custom agents
 
@@ -147,7 +147,7 @@ read_dirs  = ["~/.my-agent"]
 write_dirs = ["~/.my-agent"]
 ```
 
-Use with `gr new my-task --agent my-agent`. Because a custom agent's name matches none of the built-ins, set `prompt_injection` if you want it to receive `agent_prompt` — otherwise the name-based default is `none` and no prompt is injected.
+Use with `gr new my-task --agent my-agent`. Since a custom agent's name matches none of the built-ins, set `prompt_injection` if you want it to receive `agent_prompt` — otherwise the name-based default is `none` and no prompt is injected.
 
 ## Repository configuration
 
@@ -173,20 +173,20 @@ GRAITH_INCLUDE_<BASENAME>_PATH=/path/to/included/worktree
 
 The basename is uppercased, with `-` and `.` replaced by `_`. For example, `~/Code/shared-lib` becomes `GRAITH_INCLUDE_SHARED_LIB_PATH`.
 
-The daemon also grants each included worktree to the agent via its [`add_dir_args`](#agent-definitions) flag when launching, so it can access the sibling worktrees without an extra prompt to grant them. This is applied only for agents that define `add_dir_args` — `claude`, `codex`, and `cursor` ship with `["--add-dir", "{dir}"]`; other agents rely on the environment variables above. The flags are re-added on resume and fork, so they survive restarts.
+On launch, the daemon also grants each included worktree to the agent via its [`add_dir_args`](#agent-definitions) flag, so it can reach the sibling worktrees without an extra grant prompt. This applies only to agents that define `add_dir_args` — `claude`, `codex`, and `cursor` ship with `["--add-dir", "{dir}"]`; other agents rely on the environment variables above. The flags are re-added on resume and fork, so they survive restarts.
 
 #### Config path rewriting
 
-Relative references between repos (`../shared-lib`) resolve correctly because the worktrees are arranged as siblings. Absolute references (`~/Code/shared-lib` or `/Users/you/Code/shared-lib`) do not — they still point at your main checkout, not the session's worktree.
+Relative references between repos (`../shared-lib`) resolve correctly because the worktrees are arranged as siblings. Absolute references (`~/Code/shared-lib` or `/Users/you/Code/shared-lib`) don't — they still point at your main checkout, not the session's worktree.
 
 To help, after creating the worktrees (on both create and fork) the daemon rewrites known orchestrator config files in each worktree, substituting each source repo path with its session worktree path:
 
 - `.env.local`
 - `docker-compose.override.yml`
 
-Both the resolved absolute path and its `~/`-relative form are matched, at path boundaries only — so `~/Code/grafana` is rewritten while a sibling such as `~/Code/grafana-enterprise` (or `grafana.bak`, `grafana@next`) is left untouched. A path that continues into the repo (`~/Code/grafana/conf`) keeps its suffix, and when one included repo is nested under another the more specific path wins.
+Both the resolved absolute path and its `~/`-relative form are matched, at path boundaries only — so `~/Code/grafana` is rewritten while a sibling like `~/Code/grafana-enterprise` (or `grafana.bak`, `grafana@next`) is left untouched. A path that continues into the repo (`~/Code/grafana/conf`) keeps its suffix, and when one included repo is nested under another the more specific path wins.
 
-Only files present in the worktree are touched; a file that is gitignored (and so absent from a fresh checkout) is skipped, and the `GRAITH_INCLUDE_*_PATH` env vars remain the mitigation for those cases. Symlinks are never read or replaced (a config symlink could otherwise pull an external file's contents into the worktree). When a *tracked* file is rewritten it is marked `--skip-worktree` so the session-specific path is not reported as a change or committed by accident. Rewriting is best-effort — a read or write failure is logged, never fatal to session creation.
+Only files present in the worktree are touched; a gitignored file (absent from a fresh checkout) is skipped, and the `GRAITH_INCLUDE_*_PATH` env vars remain the mitigation there. Symlinks are never read or replaced — a config symlink could otherwise pull an external file's contents into the worktree. When a *tracked* file is rewritten it's marked `--skip-worktree`, so the session-specific path isn't reported as a change or committed by accident. Rewriting is best-effort — a read or write failure is logged, never fatal to session creation.
 
 Validation rules:
 - A repo cannot include itself
@@ -195,7 +195,7 @@ Validation rules:
 
 ## Default agent configurations
 
-Every built-in agent also sets the shared lifecycle and prompt-delivery policy
+Every built-in agent also sets the shared lifecycle and prompt-delivery
 defaults explicitly, so they show up in `gr config show`: `idle_timeout = "1h"`,
 `inject_prompt = true`, and `pre_trust_workspace = true`. Each also sets
 `prompt_injection` to its native mechanism — `append_system_prompt` (Claude),
@@ -208,11 +208,12 @@ command, args, and resume/fork settings.
 ```toml
 [agents.claude]
 command      = "claude"
+non_interactive_args = []   # keep Claude's approval TUI; set ["--dangerously-skip-permissions"] to run unattended
 args         = ["--session-id", "{agent_session_id}"]
 resume_args  = ["--resume", "{agent_session_id}"]
 fork_args    = ["--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"]
 add_dir_args = ["--add-dir", "{dir}"]
-headless_args = ["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"]
+headless_args = ["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose"]
 ```
 
 ### Codex
@@ -220,18 +221,21 @@ headless_args = ["-p", "--output-format", "stream-json", "--input-format", "stre
 ```toml
 [agents.codex]
 command      = "codex"
+# Empty by default: Codex keeps its own approvals AND its own sandbox. Setting
+# these flags disables both, so only do it behind a guaranteed outer boundary.
+non_interactive_args = []   # e.g. ["--ask-for-approval", "never", "--sandbox", "danger-full-access"] to run unattended
 args         = []
 resume_args  = ["resume", "{agent_session_id}"]
 fork_args    = ["fork", "{fork_source_agent_session_id}"]
 add_dir_args = ["--add-dir", "{dir}"]
 
 # The model and typed Codex options (--model, --profile, reasoning effort,
-# service tier, --search, --ask-for-approval) are emitted via option_args groups
+# service tier, --search) are emitted via option_args groups
 # gated on the matching template variable. See "Conditional option flags" above.
 [[agents.codex.option_args]]
 when = "model"
 args = ["--model", "{model}"]
-# … profile, reasoning_effort, service_tier, web_search, approval_policy …
+# … profile, reasoning_effort, service_tier, web_search …
 ```
 
 ### OpenCode
@@ -239,15 +243,21 @@ args = ["--model", "{model}"]
 ```toml
 [agents.opencode]
 command     = "opencode"
+non_interactive_args = []   # keep OpenCode's prompts; set ["--auto"] to run unattended
 args        = []
 resume_args = ["--session", "{agent_session_id}"]
 ```
+
+OpenCode's TUI keeps its native prompts by default. Set
+`non_interactive_args = ["--auto"]` to approve requests that would otherwise
+ask; explicit OpenCode deny rules still apply.
 
 ### Cursor
 
 ```toml
 [agents.cursor]
 command        = "agent"
+non_interactive_args = []   # keep Cursor's prompts; set ["--force"] to run unattended
 args           = []
 resume_args    = ["resume"]
 validate_model = "agent --list-models"
@@ -256,8 +266,8 @@ add_dir_args   = ["--add-dir", "{dir}"]
 
 When lifecycle hooks are enabled, graith publishes `.cursor/hooks.json` in the
 worktree and records an ownership marker in its per-session data. An existing
-file that graith does not own causes the session launch to fail instead of being
-overwritten; move that file aside before retrying. Cleanup removes only the
+file graith doesn't own fails the session launch rather than being
+overwritten; move it aside before retrying. Cleanup removes only the
 unchanged file object graith published, so a file you edit or replace is
 preserved. This protection applies equally to ordinary and `--in-place`
 sessions.
@@ -267,6 +277,7 @@ sessions.
 ```toml
 [agents.agy]
 command     = "agy"
+non_interactive_args = []   # keep Agy's prompts; set ["--dangerously-skip-permissions"] to run unattended
 args        = []
 resume_args = ["--conversation", "{agent_session_id}"]
 ```

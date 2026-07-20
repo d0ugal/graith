@@ -7,15 +7,13 @@ toc: true
 draft: false
 ---
 
-Practical patterns for using graith's primitives together. This section is split
-into three parts:
+Composing graith's primitives:
 
 - **[Everyday recipes]({{< relref "recipes.md" >}})** — parallel development,
-  explore-then-fork, review pipelines, batch processing, and other day-to-day
-  workflows built from a session or two.
+  explore-then-fork, review pipelines, batch processing, and other
+  one- or two-session workflows.
 - **[Agent-to-agent communication]({{< relref "communication.md" >}})** —
-  publish/subscribe broadcast, request/reply, and hierarchical coordination
-  between running agents.
+  publish/subscribe broadcast, request/reply, hierarchical coordination.
 - **[Multi-agent patterns]({{< relref "multi-agent.md" >}})** — structured
-  workflows like devil's advocate, judge panels, red/blue teams, and swarms that
-  compose sessions, messaging, and mirrored worktrees.
+  workflows (devil's advocate, judge panels, red/blue teams, swarms) composing
+  sessions, messaging, and mirrored worktrees.

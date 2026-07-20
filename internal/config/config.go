@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	"github.com/d0ugal/graith/internal/approvals/localmost"
+	"github.com/d0ugal/graith/internal/commandpolicy/localmost"
 	"github.com/d0ugal/graith/internal/tools"
 	"github.com/pelletier/go-toml/v2"
 )
@@ -24,49 +24,50 @@ import (
 var defaultConfigTOML []byte
 
 type Config struct {
-	DefaultAgent     string             `toml:"default_agent"`
-	GitHubUsername   string             `toml:"github_username"`
-	BranchPrefix     string             `toml:"branch_prefix"`
-	DataDir          string             `toml:"data_dir"`
-	FetchOnCreate    bool               `toml:"fetch_on_create"`
-	AgentPrompt      string             `toml:"agent_prompt"`
-	AllowedRepoPaths []string           `toml:"allowed_repo_paths"`
-	Repos            []RepoConfig       `toml:"repos"`
-	StatusBar        StatusBar          `toml:"status_bar"`
-	Keybindings      Keybindings        `toml:"keybindings"`
-	Notifications    Notifications      `toml:"notifications"`
-	Messages         Messages           `toml:"messages"`
-	Delete           Delete             `toml:"delete"`
-	GC               GCConfig           `toml:"gc"`
-	Todo             TodoConfig         `toml:"todo"`
-	Sandbox          SandboxConfig      `toml:"sandbox"`
-	Approvals        Approvals          `toml:"approvals"`
-	Status           StatusConfig       `toml:"status"`
-	GitPull          GitPullConfig      `toml:"git_pull"`
-	Launch           LaunchConfig       `toml:"launch"`
-	PRWatch          PRWatchConfig      `toml:"pr_watch"`
-	MCPServers       []MCPServerConfig  `toml:"mcp_servers"`
-	Overlay          Overlay            `toml:"overlay"`
-	Orchestrator     OrchestratorConfig `toml:"orchestrator"`
-	Remote           RemoteConfig       `toml:"remote"`
-	Input            InputConfig        `toml:"input"`
-	Agents           map[string]Agent   `toml:"agents"`
-	Triggers         []TriggerConfig    `toml:"trigger"`          // [[trigger]] array
-	TriggersRuntime  TriggersRuntime    `toml:"triggers"`         // [triggers] table (daemon-wide settings)
-	Headless         HeadlessConfig     `toml:"headless"`         // [headless] table (issue #1075)
-	Updates          UpdatesConfig      `toml:"updates"`          // [updates] table (issue #1253)
-	Detection        DetectionConfig    `toml:"detection"`        // [detection] table (issue #1241)
-	ConfigReload     ConfigReload       `toml:"config"`           // [config] table (issue #1237)
-	Tools            ToolsConfig        `toml:"tools"`            // [tools] table (issue #1238)
-	Git              GitConfig          `toml:"git"`              // [git] table (issue #1238)
-	Connection       ConnectionConfig   `toml:"connection"`       // [connection] table (issue #1242)
-	TokenAccounting  TokenAccounting    `toml:"token_accounting"` // [token_accounting] table (issue #1244)
-	ResourceMonitor  ResourceMonitor    `toml:"resource_monitor"` // [resource_monitor] table (issue #1244)
-	Migration        MigrationConfig    `toml:"migration"`        // [migration] table (issue #1250)
-	Transcript       TranscriptConfig   `toml:"transcript"`       // [transcript] table (issue #1250)
-	Limits           LimitsConfig       `toml:"limits"`           // [limits] table (issue #1252)
-	Lifecycle        LifecycleConfig    `toml:"lifecycle"`        // [lifecycle] table (issue #1243)
-	Terminal         TerminalConfig     `toml:"terminal"`         // [terminal] table (issue #1254)
+	DefaultAgent     string              `toml:"default_agent"`
+	GitHubUsername   string              `toml:"github_username"`
+	BranchPrefix     string              `toml:"branch_prefix"`
+	DataDir          string              `toml:"data_dir"`
+	FetchOnCreate    bool                `toml:"fetch_on_create"`
+	AgentPrompt      string              `toml:"agent_prompt"`
+	AllowedRepoPaths []string            `toml:"allowed_repo_paths"`
+	Repos            []RepoConfig        `toml:"repos"`
+	StatusBar        StatusBar           `toml:"status_bar"`
+	Keybindings      Keybindings         `toml:"keybindings"`
+	Notifications    Notifications       `toml:"notifications"`
+	Messages         Messages            `toml:"messages"`
+	Delete           Delete              `toml:"delete"`
+	GC               GCConfig            `toml:"gc"`
+	Todo             TodoConfig          `toml:"todo"`
+	Sandbox          SandboxConfig       `toml:"sandbox"`
+	CommandPolicy    CommandPolicy       `toml:"command_policy"`
+	Status           StatusConfig        `toml:"status"`
+	GitPull          GitPullConfig       `toml:"git_pull"`
+	Launch           LaunchConfig        `toml:"launch"`
+	PRWatch          PRWatchConfig       `toml:"pr_watch"`
+	MCPServers       []MCPServerConfig   `toml:"mcp_servers"`
+	Overlay          Overlay             `toml:"overlay"`
+	Orchestrator     OrchestratorConfig  `toml:"orchestrator"`
+	Remote           RemoteConfig        `toml:"remote"`
+	Input            InputConfig         `toml:"input"`
+	Agents           map[string]Agent    `toml:"agents"`
+	Triggers         []TriggerConfig     `toml:"trigger"`          // [[trigger]] array
+	TriggersRuntime  TriggersRuntime     `toml:"triggers"`         // [triggers] table (daemon-wide settings)
+	Headless         HeadlessConfig      `toml:"headless"`         // [headless] table (issue #1075)
+	Updates          UpdatesConfig       `toml:"updates"`          // [updates] table (issue #1253)
+	Detection        DetectionConfig     `toml:"detection"`        // [detection] table (issue #1241)
+	ConfigReload     ConfigReload        `toml:"config"`           // [config] table (issue #1237)
+	Tools            ToolsConfig         `toml:"tools"`            // [tools] table (issue #1238)
+	Git              GitConfig           `toml:"git"`              // [git] table (issue #1238)
+	Connection       ConnectionConfig    `toml:"connection"`       // [connection] table (issue #1242)
+	DaemonService    DaemonServiceConfig `toml:"daemon_service"`   // [daemon_service] table (issue #1473)
+	TokenAccounting  TokenAccounting     `toml:"token_accounting"` // [token_accounting] table (issue #1244)
+	ResourceMonitor  ResourceMonitor     `toml:"resource_monitor"` // [resource_monitor] table (issue #1244)
+	Migration        MigrationConfig     `toml:"migration"`        // [migration] table (issue #1250)
+	Transcript       TranscriptConfig    `toml:"transcript"`       // [transcript] table (issue #1250)
+	Limits           LimitsConfig        `toml:"limits"`           // [limits] table (issue #1252)
+	Lifecycle        LifecycleConfig     `toml:"lifecycle"`        // [lifecycle] table (issue #1243)
+	Terminal         TerminalConfig      `toml:"terminal"`         // [terminal] table (issue #1254)
 
 	// Warnings collects non-fatal configuration problems detected at load time
 	// (e.g. conflicting keybindings). They are surfaced to the user but do not
@@ -182,9 +183,6 @@ type ToolsConfig struct {
 	// Shell runs notification and trigger commands as `<shell> -c <cmd>`
 	// (default "sh").
 	Shell string `toml:"shell"`
-	// OSAScript is the macOS osascript executable used for desktop
-	// notifications (default "osascript").
-	OSAScript string `toml:"osascript"`
 	// PS is the process-listing executable (default "/bin/ps").
 	PS string `toml:"ps"`
 	// Lsof is the open-files listing executable (default "/usr/sbin/lsof").
@@ -199,13 +197,12 @@ type ToolsConfig struct {
 // validation and for execution regardless of the later exec.Cmd.Dir (#1293).
 func (t ToolsConfig) Resolved(baseDir string) tools.Config {
 	return tools.Config{
-		Git:       resolveToolPath(baseDir, t.Git),
-		GH:        resolveToolPath(baseDir, t.GH),
-		GCX:       resolveToolPath(baseDir, t.GCX),
-		Shell:     resolveToolPath(baseDir, t.Shell),
-		OSAScript: resolveToolPath(baseDir, t.OSAScript),
-		PS:        resolveToolPath(baseDir, t.PS),
-		Lsof:      resolveToolPath(baseDir, t.Lsof),
+		Git:   resolveToolPath(baseDir, t.Git),
+		GH:    resolveToolPath(baseDir, t.GH),
+		GCX:   resolveToolPath(baseDir, t.GCX),
+		Shell: resolveToolPath(baseDir, t.Shell),
+		PS:    resolveToolPath(baseDir, t.PS),
+		Lsof:  resolveToolPath(baseDir, t.Lsof),
 	}
 }
 
@@ -315,9 +312,80 @@ type ConnectionConfig struct {
 	// proof-of-possession exchange (default "15s").
 	RemoteHandshakeTimeout string `toml:"remote_handshake_timeout"`
 	// RemotePairingTimeout bounds how long the CLI waits for the remote human to
-	// approve `gr pair`, and should sit just past the daemon's pending-pairing
-	// TTL (default "11m").
+	// approve `gr remote pairings approve`, and should sit just past the daemon's
+	// pending-pairing TTL (default "11m").
 	RemotePairingTimeout string `toml:"remote_pairing_timeout"`
+}
+
+// DaemonServiceConfig controls the deliberately small environment projection
+// used by the app-associated daemon on supported macOS packages. Direct-spawn
+// platforms keep their existing full inherited environment.
+type DaemonServiceConfig struct {
+	// InheritEnv names additional caller variables to include in the one-shot
+	// startup request. Values are never retained in the durable service receipt.
+	InheritEnv []string `toml:"inherit_env"`
+}
+
+// Validate rejects names that could change service identity, profile routing,
+// loader behavior, or launch-services behavior. The launcher validates values
+// separately because it is the boundary that knows the calling environment.
+func (d DaemonServiceConfig) Validate() error {
+	seen := make(map[string]struct{}, len(d.InheritEnv))
+
+	for _, name := range d.InheritEnv {
+		if !validEnvironmentName(name) {
+			return fmt.Errorf("daemon_service.inherit_env contains invalid environment name %q", name)
+		}
+
+		if DaemonServiceEnvironmentReserved(name) {
+			return fmt.Errorf("daemon_service.inherit_env cannot include reserved variable %q", name)
+		}
+
+		if _, exists := seen[name]; exists {
+			return fmt.Errorf("daemon_service.inherit_env contains duplicate variable %q", name)
+		}
+
+		seen[name] = struct{}{}
+	}
+
+	return nil
+}
+
+func validEnvironmentName(name string) bool {
+	if name == "" || !validEnvironmentNameStart(name[0]) {
+		return false
+	}
+
+	for i := 1; i < len(name); i++ {
+		if !validEnvironmentNameContinue(name[i]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func validEnvironmentNameStart(ch byte) bool {
+	return ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z' || ch == '_'
+}
+
+func validEnvironmentNameContinue(ch byte) bool {
+	return validEnvironmentNameStart(ch) || ch >= '0' && ch <= '9'
+}
+
+// DaemonServiceEnvironmentReserved reports whether a variable can alter the
+// managed daemon's identity, routing, loader, or launch-services boundary.
+func DaemonServiceEnvironmentReserved(name string) bool {
+	switch name {
+	case "HOME", "USER", "LOGNAME", "GRAITH_PROFILE":
+		return true
+	}
+
+	return strings.HasPrefix(name, "GRAITH_") ||
+		strings.HasPrefix(name, "DYLD_") ||
+		strings.HasPrefix(name, "LD_") ||
+		strings.HasPrefix(name, "XPC_") ||
+		strings.HasPrefix(name, "__CF")
 }
 
 // Connection timing defaults. Each mirrors the fixed value that governed the
@@ -1389,9 +1457,9 @@ type DetectionConfig struct {
 	// PreToolUse, PostToolUse) stays authoritative. Empty uses the default
 	// (DetectionHookActivityWindowDefault).
 	HookActivityWindow string `toml:"hook_activity_window"`
-	// HookTerminalWindow is how long a terminal hook report (ready/approval:
-	// Stop, idle_prompt, permission_prompt, PermissionRequest) stays
-	// authoritative. Empty uses the default (DetectionHookTerminalWindowDefault).
+	// HookTerminalWindow is how long a terminal hook report (Stop or idle_prompt)
+	// stays authoritative. Agent-native permission prompts do not alter Graith
+	// status. Empty uses the default (DetectionHookTerminalWindowDefault).
 	HookTerminalWindow string `toml:"hook_terminal_window"`
 }
 
@@ -1458,7 +1526,7 @@ func (d DetectionConfig) HookActivityWindowDuration() time.Duration {
 	return positiveDurationOrDefault(d.HookActivityWindow, DetectionHookActivityWindowDefault)
 }
 
-// HookTerminalWindowDuration returns the ready/approval hook-authority window,
+// HookTerminalWindowDuration returns the ready/error hook-authority window,
 // or the default when unset, unparseable, or non-positive.
 func (d DetectionConfig) HookTerminalWindowDuration() time.Duration {
 	return positiveDurationOrDefault(d.HookTerminalWindow, DetectionHookTerminalWindowDefault)
@@ -1492,7 +1560,7 @@ type TokenAccounting struct {
 	// default (TokenPollIntervalDefault); a zero cadence would busy-loop.
 	PollInterval string `toml:"poll_interval"`
 	// StartupDelay is the short first-tick delay after a daemon (re)start so
-	// `gr tokens` isn't blank for a full interval. Empty or unparseable uses the
+	// token columns aren't blank for a full interval. Empty or unparseable uses the
 	// default (TokenStartupDelayDefault); an explicit "0" polls immediately.
 	StartupDelay string `toml:"startup_delay"`
 	// BatchSize bounds how many sessions are (re)parsed per tick so a large fleet
@@ -1596,11 +1664,6 @@ type LimitsConfig struct {
 	// are read before splitting into lines, keeping a huge log from being loaded
 	// whole. Values < 1 fall back to the default (LimitsMCPLogReadBytesDefault).
 	MCPLogReadBytes int `toml:"mcp_log_read_bytes"`
-	// ApprovalDisplayBytes caps the tool input shown in the approval overlay and
-	// broadcast to attached clients (the full input is still what backends
-	// evaluate). Values < 1 fall back to the default
-	// (LimitsApprovalDisplayBytesDefault).
-	ApprovalDisplayBytes int `toml:"approval_display_bytes"`
 	// LastMessageRunes bounds the agent's final Stop message the status hook
 	// forwards to the daemon, so a large final output never becomes an unbounded
 	// control frame. Counted in runes (never splits a multi-byte character).
@@ -1615,13 +1678,12 @@ type LimitsConfig struct {
 // Limits defaults mirror the fixed constants and literals that governed each
 // surface before issue #1252 unified them.
 const (
-	LimitsLogLinesDefault             = 300
-	LimitsWaitScanLinesDefault        = 500
-	LimitsWaitBufferBytesDefault      = 64 * 1024
-	LimitsMCPLogReadBytesDefault      = 1 << 20 // 1 MiB
-	LimitsApprovalDisplayBytesDefault = 500
-	LimitsLastMessageRunesDefault     = 2000
-	LimitsInboxPreviewBytesDefault    = 1000
+	LimitsLogLinesDefault          = 300
+	LimitsWaitScanLinesDefault     = 500
+	LimitsWaitBufferBytesDefault   = 64 * 1024
+	LimitsMCPLogReadBytesDefault   = 1 << 20 // 1 MiB
+	LimitsLastMessageRunesDefault  = 2000
+	LimitsInboxPreviewBytesDefault = 1000
 )
 
 // LogLinesOrDefault returns the default log-tail line count, clamped to a
@@ -1664,16 +1726,6 @@ func (l LimitsConfig) MCPLogReadBytesOrDefault() int {
 	return l.MCPLogReadBytes
 }
 
-// ApprovalDisplayBytesOrDefault returns the approval-overlay display cap,
-// clamped to a sensible minimum. A value < 1 means "use the default".
-func (l LimitsConfig) ApprovalDisplayBytesOrDefault() int {
-	if l.ApprovalDisplayBytes < 1 {
-		return LimitsApprovalDisplayBytesDefault
-	}
-
-	return l.ApprovalDisplayBytes
-}
-
 // LastMessageRunesOrDefault returns the hook last-message rune cap, clamped to
 // a sensible minimum. A value < 1 means "use the default".
 func (l LimitsConfig) LastMessageRunesOrDefault() int {
@@ -1696,7 +1748,7 @@ func (l LimitsConfig) InboxPreviewBytesOrDefault() int {
 
 // TerminalConfig is the [terminal] block: user-tunable interactive-TUI
 // presentation preferences that were previously fixed literals in the client
-// (issue #1254) — how often the picker/dashboard/status bar refresh, and how
+// (issue #1254) — how often interactive session views refresh, and how
 // wide a `gr status` summary may grow in the picker before truncation.
 //
 // Session-lifecycle presentation (the fallback terminal geometry and the
@@ -1707,8 +1759,8 @@ func (l LimitsConfig) InboxPreviewBytesOrDefault() int {
 // are also excluded — they must match render logic and stay as documented
 // constants. Every field is optional and falls back to its default constant.
 type TerminalConfig struct {
-	// RefreshInterval is the cadence at which the session picker, the dashboard,
-	// and an attached status bar re-poll the daemon for fresh session state.
+	// RefreshInterval is the cadence at which the session picker, attached
+	// status bar, and message viewer re-poll the daemon for fresh session state.
 	// Empty, unparseable, or non-positive uses the default
 	// (TerminalRefreshIntervalDefault); a zero cadence would busy-loop.
 	RefreshInterval string `toml:"refresh_interval"`
@@ -2614,12 +2666,11 @@ type Keybindings struct {
 	Shell               string `toml:"shell"`
 	OrchestratorSession string `toml:"orchestrator_session"`
 	// Prefix-action commands issued from an attached session (prefix key then
-	// one of these). Previously hard-coded as m/a/r (issue #1233).
+	// one of these). Previously hard-coded as m/r (issue #1233).
 	Messages       string `toml:"messages"`
-	Approvals      string `toml:"approvals"`
 	RestartSession string `toml:"restart_session"`
 	// Overlay holds the keys used inside the full-screen terminal overlays
-	// (dashboard, approval prompt, message viewer, scroll pager). See #1233.
+	// (message viewer and scroll pager). See #1233.
 	Overlay OverlayKeybindings `toml:"overlay"`
 }
 
@@ -2645,7 +2696,6 @@ func (k Keybindings) Conflicts() []string {
 		{"rename_session", k.RenameSession},
 		{"scroll_mode", k.ScrollMode},
 		{"messages", k.Messages},
-		{"approvals", k.Approvals},
 		{"restart_session", k.RestartSession},
 	}
 
@@ -2694,17 +2744,7 @@ type OverlayKeybindings struct {
 	PageDown string `toml:"page_down"`
 	Top      string `toml:"top"`
 	Bottom   string `toml:"bottom"`
-	Confirm  string `toml:"confirm"`
 	Cancel   string `toml:"cancel"`
-	// Dashboard actions.
-	DashboardAttach string `toml:"dashboard_attach"`
-	DashboardStop   string `toml:"dashboard_stop"`
-	DashboardDelete string `toml:"dashboard_delete"`
-	DashboardResume string `toml:"dashboard_resume"`
-	// Approval prompt actions.
-	ApprovalAllow    string `toml:"approval_allow"`
-	ApprovalDeny     string `toml:"approval_deny"`
-	ApprovalAllowAll string `toml:"approval_allow_all"`
 	// Message viewer actions.
 	MessagePin         string `toml:"message_pin"`
 	MessageExpandAll   string `toml:"message_expand_all"`
@@ -2714,12 +2754,11 @@ type OverlayKeybindings struct {
 }
 
 type Notifications struct {
-	Enabled    bool   `toml:"enabled"`
-	OnApproval bool   `toml:"on_approval"`
-	OnStopped  bool   `toml:"on_stopped"`
-	Command    string `toml:"command"`
+	Enabled   bool   `toml:"enabled"`
+	OnStopped bool   `toml:"on_stopped"`
+	Command   string `toml:"command"`
 	// Backend selects how proactive `gr notify` push notifications are delivered:
-	// "macos" (osascript desktop notification; the default when unset) or
+	// "macos" (GraithNotifier.app; the default when unset) or
 	// "command" (run [notifications] command with GRAITH_NOTIFY_* env vars). Other
 	// backends (ntfy/pushover/slack) are planned follow-ups and rejected for now.
 	Backend string `toml:"backend"`
@@ -2750,8 +2789,8 @@ type NotificationTiming struct {
 	// notification is dropped as a duplicate, coalescing rapid-fire events. Empty
 	// uses the default (NotifyCoalesceWindowDefault); "0" disables coalescing.
 	CoalesceWindow string `toml:"coalesce_window"`
-	// DispatchTimeout bounds a single backend dispatch (osascript / notifier app /
-	// command) so a hung helper can't block the caller. Empty or non-positive uses
+	// DispatchTimeout bounds a single backend dispatch (notifier app / command) so
+	// a hung helper can't block the caller. Empty or non-positive uses
 	// the default (NotifyDispatchTimeoutDefault).
 	DispatchTimeout string `toml:"dispatch_timeout"`
 	// InboxIdleTimeout is how long an attached session's PTY must be free of user
@@ -2979,121 +3018,61 @@ func (n Notifications) Validate() error {
 	return nil
 }
 
-type Approvals struct {
-	// Enabled controls whether the PreToolUse approve-request gating hook is
-	// installed. nil (unset) means disabled: the status/lifecycle hooks are
-	// still installed but the approval gate is not, because unattended agents
-	// otherwise see their own tool calls as human-rejected and the OS sandbox
-	// is the intended guardrail. Set to true to opt back into human approval
-	// gating.
-	Enabled *bool `toml:"enabled"`
-	// Backend selects who makes the automated decision: "" (none — always
-	// prompt the human), "command"/"external" (delegate to a command over
-	// graith's JSON contract), "localmost" (the real localmost binary over its
-	// native protocol), or "builtin" (graith's built-in localmost-compatible
-	// engine). It is the canonical selector; Mode is the deprecated predecessor.
-	Backend string           `toml:"backend"`
-	Mode    string           `toml:"mode"`
-	AutoPop bool             `toml:"auto_pop"`
-	Timeout string           `toml:"timeout"`
-	Command string           `toml:"command"`
-	Builtin ApprovalsBuiltin `toml:"builtin"`
-
-	// CommandTimeout bounds a single external "command"/"external" backend
-	// invocation; LocalmostTimeout bounds a single "localmost" binary check.
-	// Both default to defaultBackendExecTimeout (5s) when unset (see
-	// CommandTimeoutDuration/LocalmostTimeoutDuration). Each must be positive,
-	// no larger than maxBackendExecTimeout, and strictly shorter than the
-	// enclosing human/headless approval Timeout so a hung backend cannot outlive
-	// the deadline that encloses it — a class of bug that previously caused
-	// approval-behaviour glitches (see #244). Validate enforces this hierarchy.
-	CommandTimeout   string `toml:"command_timeout"`
-	LocalmostTimeout string `toml:"localmost_timeout"`
+type CommandPolicy struct {
+	// Backend enables the optional command restriction layer. Empty disables it.
+	// Supported values are "builtin" and "localmost".
+	Backend string               `toml:"backend"`
+	Timeout string               `toml:"timeout"`
+	Command string               `toml:"command"`
+	Builtin CommandPolicyBuiltin `toml:"builtin"`
 }
 
-// Backend execution timeout bounds. A backend's automated decision runs *inside*
-// the enclosing approval deadline (the human queue wait, or the headless
-// caller-side ctx), so the backend's own subprocess timeout must be shorter than
-// that enclosing deadline to stay coherent. defaultBackendExecTimeout preserves
-// the historical fixed 5s; maxBackendExecTimeout caps how long a single backend
-// invocation may be configured to block.
 const (
-	defaultBackendExecTimeout = 5 * time.Second
-	maxBackendExecTimeout     = 60 * time.Second
+	defaultCommandPolicyTimeout = 5 * time.Second
+	maxCommandPolicyTimeout     = 60 * time.Second
 )
 
-// ApprovalsBuiltin configures the built-in localmost-compatible engine. Rules
-// can be supplied either as a path to an external localmost-format config.json
-// (Config), or inline in config.toml via Allow/Deny/AllowSafeXargs/
-// AskNoninteractive. The two forms are mutually exclusive (see Approvals.Validate).
-type ApprovalsBuiltin struct {
-	// Config is the path to a localmost-format config.json (allow/deny rules).
-	Config string `toml:"config"`
-
-	// Allow and Deny are the inline allow/deny rulesets. Each element is either
-	// a bare rule string ("@arg @*") or a table with per-rule keys
-	// (rule/unless/redirect/pipe). They are decoded as []any so both TOML forms
-	// — an array of strings and an array of tables ([[approvals.builtin.allow]])
-	// — are accepted, then converted to the localmost schema (see InlineJSON).
-	Allow []any `toml:"allow"`
-	Deny  []any `toml:"deny"`
-
-	// AllowSafeXargs and AskNoninteractive mirror the localmost top-level flags.
-	// nil means unset (the engine's default of true applies).
-	AllowSafeXargs    *bool `toml:"allowSafeXargs"`
-	AskNoninteractive *bool `toml:"askNoninteractive"`
+// CommandPolicyBuiltin configures the built-in localmost-compatible parser and
+// rule engine. Rules may come from an external localmost config or inline TOML.
+type CommandPolicyBuiltin struct {
+	Config         string `toml:"config"`
+	Allow          []any  `toml:"allow"`
+	Deny           []any  `toml:"deny"`
+	AllowSafeXargs *bool  `toml:"allowSafeXargs"`
 }
 
-// HasInline reports whether any inline ruleset field is set. When true, the
-// rules are read from config.toml rather than an external Config file. An empty
-// array (allow = []) defines no rules and does not count as inline, so it does
-// not spuriously conflict with an external Config path.
-func (b ApprovalsBuiltin) HasInline() bool {
-	return len(b.Allow) > 0 || len(b.Deny) > 0 || b.AllowSafeXargs != nil || b.AskNoninteractive != nil
+func (b CommandPolicyBuiltin) HasInline() bool {
+	return len(b.Allow) > 0 || len(b.Deny) > 0 || b.AllowSafeXargs != nil
 }
 
-// builtinRuleKeys is the set of keys a per-rule table may contain, mirroring the
-// localmost rule schema (see localmost.Rule). Any other key is a typo (e.g.
-// "unles" for "unless") that localmost would silently drop, so we reject it up
-// front rather than let an allow rule be silently broadened.
 var builtinRuleKeys = map[string]struct{}{
 	"rule": {}, "unless": {}, "redirect": {}, "pipe": {},
 }
 
-// validateInlineRules checks each element of an inline allow/deny ruleset. A
-// rule is either a bare string or a table; a table must carry a non-empty
-// "rule" key and no unknown keys. This closes the fail-open where a misspelled
-// per-rule key (unless/redirect/pipe) is silently ignored, broadening the rule.
 func validateInlineRules(list string, rules []any) error {
 	for i, elem := range rules {
 		switch v := elem.(type) {
 		case string:
-			// Bare rule string — always valid shape (localmost validates content).
 		case map[string]any:
 			if rule, ok := v["rule"].(string); !ok || strings.TrimSpace(rule) == "" {
-				return fmt.Errorf("[approvals.builtin] %s rule %d: table form requires a non-empty \"rule\" key", list, i)
+				return fmt.Errorf("[command_policy.builtin] %s rule %d: table form requires a non-empty \"rule\" key", list, i)
 			}
 
-			for k := range v {
-				if _, ok := builtinRuleKeys[k]; !ok {
-					return fmt.Errorf("[approvals.builtin] %s rule %d: unknown key %q (valid: rule, unless, redirect, pipe)", list, i, k)
+			for key := range v {
+				if _, ok := builtinRuleKeys[key]; !ok {
+					return fmt.Errorf("[command_policy.builtin] %s rule %d: unknown key %q (valid: rule, unless, redirect, pipe)", list, i, key)
 				}
 			}
 		default:
-			return fmt.Errorf("[approvals.builtin] %s rule %d: must be a string or a table, got %T", list, i, elem)
+			return fmt.Errorf("[command_policy.builtin] %s rule %d: must be a string or a table, got %T", list, i, elem)
 		}
 	}
 
 	return nil
 }
 
-// InlineJSON renders the inline ruleset as localmost-format config.json bytes,
-// so the existing (tested) localmost parser can compile it. The TOML keys map
-// 1:1 to the localmost JSON schema (allow/deny/allowSafeXargs/askNoninteractive,
-// and per-rule rule/unless/redirect/pipe), so a plain JSON re-encode suffices.
-func (b ApprovalsBuiltin) InlineJSON() ([]byte, error) {
+func (b CommandPolicyBuiltin) InlineJSON() ([]byte, error) {
 	payload := map[string]any{}
-
 	if b.Allow != nil {
 		payload["allow"] = b.Allow
 	}
@@ -3106,244 +3085,77 @@ func (b ApprovalsBuiltin) InlineJSON() ([]byte, error) {
 		payload["allowSafeXargs"] = *b.AllowSafeXargs
 	}
 
-	if b.AskNoninteractive != nil {
-		payload["askNoninteractive"] = *b.AskNoninteractive
-	}
-
 	return json.Marshal(payload)
 }
 
-// legacyModeBackend maps a deprecated [approvals] mode value to its effective
-// backend. The command/external/localmost modes all map to the "command"
-// backend — for mode="localmost" this preserves the historical behaviour
-// (graith's own JSON contract, NOT the native-protocol "localmost" backend).
-// mode="auto" maps straight to the "auto" backend.
-func legacyModeBackend(mode string) (string, bool) {
-	switch mode {
-	case "command", "external", "localmost":
-		return "command", true
-	case "auto":
-		// mode="auto" is the deprecated spelling of backend="auto"; it maps
-		// straight through rather than to the "command" backend.
-		return "auto", true
-	default:
-		return "", false
-	}
+func (p CommandPolicy) Enabled() bool {
+	return strings.TrimSpace(p.Backend) != ""
 }
 
-func knownApprovalsBackend(name string) bool {
-	switch name {
-	case "prompt", "command", "external", "localmost", "builtin", "auto":
-		return true
-	default:
-		return false
-	}
-}
-
-func canonicalApprovalsBackend(name string) string {
-	if name == "external" {
-		return "command"
-	}
-
-	return name
-}
-
-// ResolveBackend resolves the effective approvals backend, applying back-compat
-// for the deprecated Mode field. It returns the backend name, a non-empty
-// deprecation message when a legacy Mode value was used (callers log it once),
-// and an error for an unknown backend or a conflicting Mode+Backend pair.
-//
-// Resolution order:
-//  1. If Backend is set, use it. If a legacy Mode is ALSO set and maps to a
-//     different backend, that is a hard error (refuse to guess intent).
-//  2. Else if Mode is one of command/external/localmost, map it to the
-//     "command" backend (historical behaviour) and return a deprecation
-//     message. A Mode with no Backend is always a warning, never an error.
-//  3. Else, the "prompt" backend (no automation).
-func (a Approvals) ResolveBackend() (backend, deprecation string, err error) {
-	legacy, isLegacy := legacyModeBackend(a.Mode)
-
-	if a.Backend != "" {
-		if !knownApprovalsBackend(a.Backend) {
-			return "", "", fmt.Errorf("[approvals] backend %q is not recognised (want one of prompt, command, external, localmost, builtin, auto)", a.Backend)
-		}
-
-		if isLegacy && canonicalApprovalsBackend(a.Backend) != legacy {
-			return "", "", fmt.Errorf(
-				"[approvals] backend=%q conflicts with the deprecated mode=%q; remove mode (mode=%q maps to backend=%q)",
-				a.Backend, a.Mode, a.Mode, legacy)
-		}
-
-		if isLegacy {
-			// mode agrees with backend but is now redundant — nudge removal.
-			return a.Backend, fmt.Sprintf(
-				"[approvals] mode=%q is deprecated and redundant now that backend=%q is set; remove mode.",
-				a.Mode, a.Backend), nil
-		}
-
-		return a.Backend, "", nil
-	}
-
-	if isLegacy {
-		return legacy, legacyDeprecationMessage(a.Mode), nil
-	}
-
-	return "prompt", "", nil
-}
-
-func legacyDeprecationMessage(mode string) string {
-	if mode == "auto" {
-		return `[approvals] mode="auto" is deprecated; set backend="auto" instead.`
-	}
-
-	if mode == "localmost" {
-		return `[approvals] mode="localmost" is deprecated. It maps to backend="command" ` +
-			`(graith's JSON contract — unchanged behaviour); set backend="command" to silence this. ` +
-			`To instead run the real localmost binary over its native protocol, set backend="localmost".`
-	}
-
-	return fmt.Sprintf(`[approvals] mode=%q is deprecated; set backend="command" instead.`, mode)
-}
-
-// backendUsesCommand reports whether the [approvals] command key is meaningful
-// for the given resolved backend. The command/external backend requires it (the
-// approver command invoked over graith's JSON contract); the native localmost
-// backend uses it as an optional override for the "localmost" binary path. The
-// prompt and builtin backends ignore it entirely.
-func backendUsesCommand(backend string) bool {
+func (p CommandPolicy) Validate() error {
+	backend := strings.TrimSpace(p.Backend)
 	switch backend {
-	case "command", "external", "localmost":
-		return true
+	case "", "builtin", "localmost":
 	default:
-		return false
-	}
-}
-
-// Validate checks the [approvals] config for static contradictions that would
-// otherwise only surface as an opaque fail-closed session crash at create time
-// (see #740). It rejects an unknown or conflicting backend/mode (via
-// ResolveBackend) and a command key set for a resolved backend that ignores it.
-// Backend *availability* (command present, localmost binary on PATH, builtin
-// config loadable) is still deferred to session-create by the daemon.
-func (a Approvals) Validate() error {
-	backend, _, err := a.ResolveBackend()
-	if err != nil {
-		return err
+		return fmt.Errorf("[command_policy] backend %q is not recognised (want builtin or localmost)", backend)
 	}
 
-	if strings.TrimSpace(a.Command) != "" && !backendUsesCommand(backend) {
-		return fmt.Errorf(
-			"[approvals] command=%q is set but the resolved backend %q ignores it "+
-				`(command is only used by backend="command"/"external" as the external approver, `+
-				`or by backend="localmost" as the binary override); `+
-				`set backend="command" to use it as an external approver, or remove command`,
-			a.Command, backend)
+	if strings.TrimSpace(p.Command) != "" && backend != "localmost" {
+		return errors.New("[command_policy] command is only valid with backend=\"localmost\"")
 	}
 
-	// The builtin engine's rules come from either an external file (Config) or
-	// inline TOML — never both. A conflict is a hard error (mirrors mode vs
-	// backend) rather than a silent precedence rule.
-	if strings.TrimSpace(a.Builtin.Config) != "" && a.Builtin.HasInline() {
-		return errors.New("[approvals.builtin] config (external file) and inline rules " +
-			"(allow/deny/allowSafeXargs/askNoninteractive) are both set; " +
-			"use one or the other")
+	if strings.TrimSpace(p.Builtin.Config) != "" && p.Builtin.HasInline() {
+		return errors.New("[command_policy.builtin] config and inline rules are mutually exclusive")
 	}
 
-	// Compile the inline ruleset now so a malformed rule fails at config-load
-	// with a clear message instead of an opaque fail-closed session crash. This
-	// is a pure static check (no file IO); the external-file path is deferred to
-	// session-create availability, mirroring the other backends.
-	if a.Builtin.HasInline() {
-		// Reject typo'd per-rule keys before compiling: localmost's rule decoder
-		// silently ignores unknown JSON fields, so a misspelled unless/redirect/
-		// pipe would otherwise pass validation while quietly broadening the rule.
-		if err := validateInlineRules("allow", a.Builtin.Allow); err != nil {
+	if backend == "builtin" && strings.TrimSpace(p.Builtin.Config) == "" && !p.Builtin.HasInline() {
+		return errors.New("[command_policy] backend=\"builtin\" requires [command_policy.builtin] rules or config")
+	}
+
+	if p.Builtin.HasInline() {
+		if err := validateInlineRules("allow", p.Builtin.Allow); err != nil {
 			return err
 		}
 
-		if err := validateInlineRules("deny", a.Builtin.Deny); err != nil {
+		if err := validateInlineRules("deny", p.Builtin.Deny); err != nil {
 			return err
 		}
 
-		data, err := a.Builtin.InlineJSON()
+		data, err := p.Builtin.InlineJSON()
 		if err != nil {
-			return fmt.Errorf("[approvals.builtin] encode inline rules: %w", err)
+			return fmt.Errorf("[command_policy.builtin] encode inline rules: %w", err)
 		}
 
 		if _, err := localmost.Parse(data); err != nil {
-			return fmt.Errorf("[approvals.builtin] inline rules are invalid: %w", err)
+			return fmt.Errorf("[command_policy.builtin] inline rules are invalid: %w", err)
 		}
 	}
 
-	if err := a.validateBackendTimeouts(backend); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// validateBackendTimeouts checks the per-backend execution timeouts for static
-// contradictions: a syntactically invalid or non-positive value, a value beyond
-// maxBackendExecTimeout, or a value that is not strictly shorter than the
-// enclosing approval Timeout. The last check enforces the deadline hierarchy — a
-// backend decision runs inside the human/headless approval deadline, so a
-// backend timeout at or above it is incoherent and can cause the approval
-// glitches #244 tracked. Explicitly-set fields are always checked; the resolved
-// backend's effective timeout (including the 5s default) is also checked so a
-// deliberately tiny [approvals] timeout is caught against the default backend
-// bound too.
-func (a Approvals) validateBackendTimeouts(backend string) error {
-	enclosing := a.TimeoutDuration()
-
-	for _, f := range []struct{ key, raw string }{
-		{"command_timeout", a.CommandTimeout},
-		{"localmost_timeout", a.LocalmostTimeout},
-	} {
-		if strings.TrimSpace(f.raw) == "" {
-			continue
-		}
-
-		d, err := ParseDurationWithDays(f.raw)
+	if strings.TrimSpace(p.Timeout) != "" {
+		d, err := ParseDurationWithDays(p.Timeout)
 		if err != nil {
-			return fmt.Errorf("[approvals] %s=%q is not a valid duration: %w", f.key, f.raw, err)
+			return fmt.Errorf("[command_policy] timeout=%q is not a valid duration: %w", p.Timeout, err)
 		}
 
-		if d <= 0 {
-			return fmt.Errorf("[approvals] %s=%q must be a positive duration", f.key, f.raw)
+		if d <= 0 || d > maxCommandPolicyTimeout {
+			return fmt.Errorf("[command_policy] timeout must be positive and no greater than %s", maxCommandPolicyTimeout)
 		}
-
-		if d > maxBackendExecTimeout {
-			return fmt.Errorf(
-				"[approvals] %s=%q exceeds the maximum backend execution timeout of %s",
-				f.key, f.raw, maxBackendExecTimeout)
-		}
-
-		if d >= enclosing {
-			return fmt.Errorf(
-				"[approvals] %s=%q must be shorter than the enclosing approval timeout=%s "+
-					"so a hung backend cannot outlive the approval deadline (see #244)",
-				f.key, f.raw, enclosing)
-		}
-	}
-
-	// Also guard the resolved backend's effective timeout (which may be the 5s
-	// default when the field is unset) against a deliberately tiny enclosing
-	// timeout, so the executing hierarchy is coherent even without an explicit
-	// per-backend value.
-	if execTimeout, ok := a.BackendExecTimeout(backend); ok && execTimeout >= enclosing {
-		return fmt.Errorf(
-			"[approvals] the effective %s backend execution timeout (%s) must be shorter than "+
-				"the enclosing approval timeout=%s; raise [approvals] timeout or lower the backend timeout (see #244)",
-			backend, execTimeout, enclosing)
 	}
 
 	return nil
 }
 
-// HookEnabled reports whether the approve-request PreToolUse hook should be
-// installed. Defaults to false when unset — approval gating is opt-in.
-func (a Approvals) HookEnabled() bool {
-	return a.Enabled != nil && *a.Enabled
+func (p CommandPolicy) TimeoutDuration() time.Duration {
+	if strings.TrimSpace(p.Timeout) == "" {
+		return defaultCommandPolicyTimeout
+	}
+
+	d, err := ParseDurationWithDays(p.Timeout)
+	if err != nil || d <= 0 {
+		return defaultCommandPolicyTimeout
+	}
+
+	return d
 }
 
 type StatusConfig struct {
@@ -3361,65 +3173,6 @@ func (s StatusConfig) TTLDuration() time.Duration {
 	}
 
 	return d
-}
-
-func (a Approvals) TimeoutDuration() time.Duration {
-	if a.Timeout == "" {
-		return 10 * time.Minute
-	}
-
-	d, err := ParseDurationWithDays(a.Timeout)
-	if err != nil {
-		return 10 * time.Minute
-	}
-
-	return d
-}
-
-// CommandTimeoutDuration is the effective execution timeout for the
-// command/external backend, falling back to defaultBackendExecTimeout when
-// unset or unparseable. Validate rejects a set-but-invalid value up front, so a
-// fallback here only happens for an unset field.
-func (a Approvals) CommandTimeoutDuration() time.Duration {
-	return backendExecTimeoutOrDefault(a.CommandTimeout)
-}
-
-// LocalmostTimeoutDuration is the effective execution timeout for the localmost
-// backend, falling back to defaultBackendExecTimeout when unset or unparseable.
-func (a Approvals) LocalmostTimeoutDuration() time.Duration {
-	return backendExecTimeoutOrDefault(a.LocalmostTimeout)
-}
-
-// backendExecTimeoutOrDefault parses a per-backend execution timeout string,
-// returning defaultBackendExecTimeout for an empty, unparseable, or non-positive
-// value so a misconfigured field degrades to the historical 5s rather than to
-// an unbounded (0 => no timeout) subprocess.
-func backendExecTimeoutOrDefault(s string) time.Duration {
-	if strings.TrimSpace(s) == "" {
-		return defaultBackendExecTimeout
-	}
-
-	d, err := ParseDurationWithDays(s)
-	if err != nil || d <= 0 {
-		return defaultBackendExecTimeout
-	}
-
-	return d
-}
-
-// BackendExecTimeout returns the effective execution timeout for a resolved
-// backend name and whether that backend runs a bounded subprocess at all. Only
-// the command/external and localmost backends spawn a child process; the others
-// (prompt/builtin/auto) decide in-process and have no execution timeout.
-func (a Approvals) BackendExecTimeout(backend string) (time.Duration, bool) {
-	switch backend {
-	case "command", "external":
-		return a.CommandTimeoutDuration(), true
-	case "localmost":
-		return a.LocalmostTimeoutDuration(), true
-	default:
-		return 0, false
-	}
 }
 
 type MCPServerConfig struct {
@@ -3474,6 +3227,11 @@ type Agent struct {
 	// custom agent can opt in from config alone (issue #1236). Built-in
 	// claude/codex/cursor set ["--add-dir", "{dir}"].
 	AddDirArgs []string `json:"add_dir_args,omitempty" toml:"add_dir_args"`
+	// NonInteractiveArgs is an optional argv prefix for disabling the agent's
+	// native permission prompts. Nil or empty leaves the agent's native behavior
+	// unchanged; Graith does not participate in those prompts. Bundled agents set
+	// this for unattended operation, and users may clear it for manual approval.
+	NonInteractiveArgs []string `json:"non_interactive_args" toml:"non_interactive_args"`
 	// HeadlessArgs is the argv prefix graith prepends when launching this agent in
 	// headless stream-json mode (issue #1075); the agent's own template-expanded
 	// args follow it. Only consulted for a headless session. Moving it here (from
@@ -3487,7 +3245,7 @@ type Agent struct {
 	// unset option leaves the agent's own default untouched — e.g. codex's
 	// ["--model", "{model}"] gated on `when = "model"`. This moves the formerly
 	// hard-coded codex adapter (model / profile / reasoning-effort / service-tier
-	// / search / approval flags) into config so custom agents can define their own
+	// / search flags) into config so custom agents can define their own
 	// conditional flags (issue #1236).
 	OptionArgs []AgentOptionArg `json:"option_args,omitempty" toml:"option_args"`
 }
@@ -3572,13 +3330,12 @@ func (a Agent) OptionArgsFor(vars TemplateVars) ([]string, error) {
 // here. These are Codex-specific: setting any against a non-codex agent is an
 // error rather than a silent no-op. Reasoning effort and service tier are passed
 // as `-c model_reasoning_effort=…` / `-c service_tier=…` because Codex has no
-// dedicated flag for them; profile, web search, and approval policy have flags.
+// dedicated flag for them; profile and web search have flags.
 type CodexOptions struct {
 	Profile         string `json:"profile,omitempty"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	ServiceTier     string `json:"service_tier,omitempty"`
 	WebSearch       bool   `json:"web_search,omitempty"`
-	ApprovalPolicy  string `json:"approval_policy,omitempty"`
 }
 
 // IsZero reports whether no Codex option is set.
@@ -3587,7 +3344,7 @@ func (o CodexOptions) IsZero() bool {
 }
 
 // Note: graith deliberately does NOT validate the *values* of these options
-// (reasoning effort, service tier, approval policy). Codex owns those enums and
+// (reasoning effort and service tier). Codex owns those enums and
 // they are version- and model-dependent — e.g. reasoning effort has grown to
 // include `none`/`max`/`ultra` and service tier accepts a legacy `fast` alias
 // across Codex releases. A closed graith allowlist would both reject values
@@ -3689,9 +3446,9 @@ type SandboxConfig struct {
 	Enabled  bool  `json:"enabled"            toml:"enabled"`
 	Disabled *bool `json:"disabled,omitempty" toml:"disabled,omitempty"`
 	// Backend selects the sandbox backend: "safehouse" (macOS only) or "nono"
-	// (Linux + macOS). It has NO default — when the sandbox is enabled and
-	// Backend is unset the daemon fails closed with an actionable error. This
-	// is a deliberate pre-1.0 behaviour change (see the nono sandbox design doc).
+	// (Linux + macOS). The embedded configuration explicitly selects nono; an
+	// empty value in any loaded configuration fails closed rather than choosing
+	// an implicit platform fallback.
 	Backend string `json:"backend,omitempty" toml:"backend"`
 	Command string `json:"command,omitempty" toml:"command"`
 	// Profile (nono only) is the base profile graith's generated profile
@@ -3947,7 +3704,7 @@ func ExpandPath(p string) string {
 // ExpandPathRelative resolves a configured path deterministically: it expands a
 // leading ~/, and resolves a still-relative path against baseDir (the directory
 // holding the config file) rather than the process working directory, then
-// cleans the result. This keeps a value like [approvals.builtin] config
+// cleans the result. This keeps a value like [command_policy.builtin] config
 // resolving to the same absolute path regardless of which directory the daemon
 // or CLI happens to run from. An empty (or whitespace-only) path stays empty so
 // callers can distinguish "unset" from a resolved path.
@@ -4181,17 +3938,18 @@ func (c *Config) Validate() error {
 		errs = append(errs, err)
 	}
 
-	// Validate the approvals backend name, mode/backend conflict, and ignored
-	// command key here (pure static checks). Backend *availability* (command
-	// present, localmost binary on PATH, builtin config loadable) is enforced at
-	// session-create by the daemon, mirroring the sandbox availability check — so
-	// a missing dependency fails the session loudly without bricking daemon
-	// startup.
-	if err := c.Approvals.Validate(); err != nil {
+	// Static command-policy validation happens at config load. Backend
+	// availability is enforced at session start so a missing dependency fails
+	// the affected session without bricking daemon startup.
+	if err := c.CommandPolicy.Validate(); err != nil {
 		errs = append(errs, err)
 	}
 
 	if err := c.Notifications.Validate(); err != nil {
+		errs = append(errs, err)
+	}
+
+	if err := c.DaemonService.Validate(); err != nil {
 		errs = append(errs, err)
 	}
 
@@ -4748,11 +4506,11 @@ func LoadBytes(path string, data []byte) (*Config, error) {
 
 	applyPRWatchCommentCompat(cfg, data)
 
-	// go-toml/v2's default Unmarshal silently ignores unknown keys, so a typo'd
-	// key under [approvals.builtin] (e.g. "dney" for "deny") would be dropped —
-	// a fail-open for an approvals deny-list. Reject unknown keys in that subtree
-	// specifically (scoped, so the rest of the config keeps its leniency).
-	if err := checkApprovalsBuiltinKeys(data); err != nil {
+	// go-toml/v2's default Unmarshal silently ignores unknown keys. Reject the
+	// removed interactive configuration and unknown keys throughout the new
+	// security-sensitive command-policy namespace so neither a stale backend nor
+	// a misspelled deny rule can be silently dropped.
+	if err := checkCommandPolicyKeys(data); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
 	}
 
@@ -4814,34 +4572,47 @@ func tomlHasKey(data []byte, table, key string) bool {
 	return ok
 }
 
-// approvalsBuiltinKeys is the set of valid keys under [approvals.builtin].
-var approvalsBuiltinKeys = map[string]struct{}{
-	"config": {}, "allow": {}, "deny": {}, "allowSafeXargs": {}, "askNoninteractive": {},
+var commandPolicyKeys = map[string]struct{}{
+	"backend": {}, "timeout": {}, "command": {}, "builtin": {},
 }
 
-// checkApprovalsBuiltinKeys rejects unknown keys under [approvals.builtin] so a
-// misspelled key can't be silently dropped (a fail-open for a deny-list). It
-// does a targeted generic decode rather than DisallowUnknownFields on the whole
-// document, keeping the rest of the config forwards-compatible.
-func checkApprovalsBuiltinKeys(data []byte) error {
+var commandPolicyBuiltinKeys = map[string]struct{}{
+	"config": {}, "allow": {}, "deny": {}, "allowSafeXargs": {},
+}
+
+// checkCommandPolicyKeys rejects removed interactive configuration and unknown
+// command-policy keys. It uses a targeted generic decode rather than
+// DisallowUnknownFields on the whole document, keeping unrelated configuration
+// forwards-compatible while making the security namespace strict.
+func checkCommandPolicyKeys(data []byte) error {
 	var raw map[string]any
 	if err := toml.Unmarshal(data, &raw); err != nil {
 		return nil // structural errors surface from the typed Unmarshal instead
 	}
 
-	approvals, ok := raw["approvals"].(map[string]any)
+	if _, ok := raw["approvals"]; ok {
+		return errors.New("[approvals] was removed; use optional [command_policy] rules, which can only restrict shell commands and never grant capabilities")
+	}
+
+	policy, ok := raw["command_policy"].(map[string]any)
 	if !ok {
 		return nil
 	}
 
-	builtin, ok := approvals["builtin"].(map[string]any)
+	for k := range policy {
+		if _, ok := commandPolicyKeys[k]; !ok {
+			return fmt.Errorf("[command_policy] unknown key %q (valid: backend, timeout, command, builtin)", k)
+		}
+	}
+
+	builtin, ok := policy["builtin"].(map[string]any)
 	if !ok {
 		return nil
 	}
 
 	for k := range builtin {
-		if _, ok := approvalsBuiltinKeys[k]; !ok {
-			return fmt.Errorf("[approvals.builtin] unknown key %q (valid: config, allow, deny, allowSafeXargs, askNoninteractive)", k)
+		if _, ok := commandPolicyBuiltinKeys[k]; !ok {
+			return fmt.Errorf("[command_policy.builtin] unknown key %q (valid: config, allow, deny, allowSafeXargs)", k)
 		}
 	}
 
@@ -5178,6 +4949,10 @@ func mergeAgent(def, usr Agent) Agent {
 
 	if usr.HeadlessArgs != nil {
 		def.HeadlessArgs = usr.HeadlessArgs
+	}
+
+	if usr.NonInteractiveArgs != nil {
+		def.NonInteractiveArgs = usr.NonInteractiveArgs
 	}
 
 	if usr.OptionArgs != nil {

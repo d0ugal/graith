@@ -7,17 +7,14 @@ toc: true
 draft: false
 ---
 
-Triggers let the daemon run actions **on its own** — on a time schedule, when
-files change in a session worktree, when a Grafana Cloud event appears, or when
-a scenario completes — so automation survives terminal close and needs no
-attached orchestrator. A trigger is `(source) → (action)`.
+A trigger is `(source) → (action)`: the daemon runs actions **on its own**, so
+automation survives terminal close and needs no attached orchestrator.
 
-Triggers are defined as `[[trigger]]` blocks — in `config.toml` for global
-automation, or inside a scenario TOML for
-[scenario-embedded triggers]({{< relref "scenarios.md#trigger-blocks-scenario-embedded-triggers" >}})
-that activate with the scenario. Each block has exactly one **source**
-(`[trigger.schedule]`, `[trigger.watch]`, `[trigger.gcx]`, or the scenario-only
-`[trigger.completion]`) and one **action**
+Triggers are `[[trigger]]` blocks — in `config.toml` for global automation, or
+inside a scenario TOML for
+[scenario-embedded triggers]({{< relref "scenarios.md#trigger-blocks-scenario-embedded-triggers" >}}).
+Each block has exactly one **source** (`[trigger.schedule]`, `[trigger.watch]`,
+`[trigger.gcx]`, or the scenario-only `[trigger.completion]`) and one **action**
 (`[trigger.action]`).
 
 ## Sources
@@ -33,16 +30,15 @@ timezone = "Europe/London"
 ```
 
 - Exactly one of `cron` or `every`. `timezone` applies to `cron` only.
-- Cron is timezone/DST-aware. Missed fires while the daemon was down are **not**
+- Cron is timezone/DST-aware. Missed fires while the daemon was down aren't
   backfilled unless `policy.catch_up = true` (which fires at most once on
   startup).
 
 #### Cron grammar
 
-graith accepts a **five-field** expression, or one of four descriptors —
-nothing else. Config validation and the daemon share a single parser
-(`internal/cronx`), so what config validation accepts is exactly what the
-runtime can fire.
+graith accepts a **five-field** expression or one of four descriptors. Config
+validation and the daemon share one parser (`internal/cronx`), so what validation
+accepts is exactly what the runtime can fire.
 
 ```
 ┌───────────── minute        (0-59)
@@ -56,13 +52,12 @@ runtime can fire.
 
 Each field supports `*` (any), lists (`1,15`), ranges (`1-5`), and steps
 (`*/15`, `0-30/10`). Month and day-of-week accept three-letter English names.
-When both day-of-month and day-of-week are restricted they combine with **OR**
-(the standard cron union).
+Restricted day-of-month and day-of-week combine with **OR** (the standard cron
+union).
 
 Descriptors: `@hourly`, `@daily`, `@weekly`, `@monthly`.
 
-Deliberately **not** accepted (some parsers allow these; graith rejects them
-with a clear error):
+Deliberately **not** accepted — rejected with a clear error:
 
 - seconds or year fields (six/seven-field forms)
 - `@yearly`, `@annually`, `@midnight`, `@reboot`, `@every <duration>` — use
@@ -81,38 +76,33 @@ debounce = "30s"             # quiet-window; lower for fast commands
 ```
 
 - A watch trigger is a **policy selector** by `repo` or `role` — never a live
-  session name. It binds to matching running sessions and watches their
-  worktrees.
-- A `role` selector matches any running session with that scenario role. It is
-  also how a scenario ships its own automation: a
+  session name — binding to matching running sessions and watching their worktrees.
+- A `role` selector matches any running session with that scenario role, and is how
+  a scenario ships its own automation: a
   [scenario-embedded trigger]({{< relref "scenarios.md#trigger-blocks-scenario-embedded-triggers" >}})
   uses a `role` its scenario defines and binds only inside that scenario.
-- `.gitignore` is always honoured (ignored directories are pruned from the watch
-  set, so `node_modules/` etc. don't exhaust the watcher). Matching follows Git's
-  own rules — the repository `.gitignore`, nested per-directory `.gitignore`
-  files, and `.git/info/exclude` are all applied, with `*`, `**`, `?`, and
-  character-class patterns behaving exactly as `git check-ignore` does. In a
-  linked worktree (graith's normal setup, where `.git` is a pointer file) the
-  shared `.git/info/exclude` in the common git directory is resolved and applied
-  too.
-- Editing, adding, or removing a `.gitignore` takes effect live: the watcher
-  rebuilds its ignore rules and reconciles the watched directories on the next
-  change to that file — newly-ignored directories are pruned and newly-un-ignored
-  ones are picked up, without restarting the session. (A change to
-  `.git/info/exclude` is re-read on the next `.gitignore` edit or when the binding
-  is recreated, since the `.git` directory itself is never watched.)
-- A burst of edits is coalesced by the `debounce` quiet-window into one fire.
-- If a binding can't register its watch (e.g. the OS watch limit
-  `fs.inotify.max_user_watches` is exhausted) it is marked **degraded** and
-  retried on an exponential backoff (5s, 10s, 20s, … capped at 5m). It recovers
-  on its own once the limit clears — no session restart needed.
-  `gr trigger status <name>` and `gr doctor` surface the degraded state and the
+- `.gitignore` is always honoured — ignored directories (`node_modules/` etc.) are
+  pruned from the watch set. Matching behaves exactly as
+  `git check-ignore` (`*`, `**`, `?`, character classes), applying the repository
+  `.gitignore`, nested per-directory `.gitignore` files, and `.git/info/exclude`.
+  In a linked worktree (graith's normal setup, where `.git` is a pointer file) the
+  shared `.git/info/exclude` in the common git directory applies too.
+- Editing, adding, or removing a `.gitignore` takes effect live without a session
+  restart: on the next change to that file the watcher rebuilds its rules, pruning
+  newly-ignored directories and picking up newly-un-ignored ones. (A
+  `.git/info/exclude` change is re-read on the next `.gitignore` edit or binding
+  recreation, since the `.git` directory itself is never watched.)
+- A burst of edits is coalesced into one fire by the `debounce` quiet-window.
+- If a binding can't register its watch (e.g. `fs.inotify.max_user_watches`
+  exhausted) it's marked **degraded** and retried on exponential backoff (5s, 10s,
+  20s, … capped at 5m), recovering on its own once the limit clears — no restart
+  needed. `gr trigger status <name>` and `gr doctor` surface the degraded state and
   next retry time.
 
 ### GCX (Grafana Cloud events)
 
-The gcx source polls Grafana Cloud through an existing authenticated gcx
-context. V1 supports newly observed Grafana IRM OnCall alert groups:
+The gcx source polls Grafana Cloud through an existing authenticated gcx context.
+V1 supports newly-observed Grafana IRM OnCall alert groups:
 
 ```toml
 [[trigger]]
@@ -139,13 +129,13 @@ auto_cleanup = true
 ```
 
 Configure and test the gcx context separately before starting graith. Graith
-stores only its name and invokes the `gcx` executable; credentials and tokens
-remain in gcx configuration. A long-lived service-account context is suitable
-even though `oncall_user_id` names a human—the two identities are intentionally
-separate. Do not use `--mine` semantics for this setup because that would refer
-to the service account, not the human whose shift gates the trigger.
+stores only the context name and invokes the `gcx` executable, so credentials and
+tokens stay in gcx configuration. A long-lived service-account context works even
+though `oncall_user_id` names a human: the identities are separate, so `--mine`
+semantics would wrongly target the service account, not the human whose shift gates
+the trigger.
 
-Use gcx to discover stable IDs without copying credentials into graith:
+Discover stable IDs with gcx, without copying credentials into graith:
 
 ```bash
 gcx irm oncall users list -o json
@@ -153,26 +143,24 @@ gcx irm oncall schedules list \
   --json metadata.name,spec.name,spec.on_call_now -o json
 ```
 
-`oncall_user_id` and `schedule_ids` must be configured together. The source
-checks whether that user is in `spec.on_call_now` for **any** selected schedule.
-If the schedule read fails or a configured schedule is absent, it fails closed:
-no action fires and `gr trigger status` records the error. Omitting both fields
-disables the on-call gate.
+`oncall_user_id` and `schedule_ids` must be configured together; omitting both
+disables the on-call gate. The source checks whether that user is in
+`spec.on_call_now` for **any** selected schedule. If the schedule read fails or a
+configured schedule is absent, it fails closed: no action fires and `gr trigger
+status` records the error.
 
-The gate answers “is this user on call when the poll runs?”, not “was this user
-on call when the alert began?” On a transition from off call to on call, graith
-records the current alert set without firing it. That prevents alerts handled by
-the previous person from becoming a handoff burst. Team and integration filters
-are strongly recommended so schedule membership closely matches the route that
-would page the user; polling cannot prove that a personal notification was sent.
-`max_age` must be at least as long as `every`; shorter retention could make a
-long-lived group appear new again between polls.
+The gate answers "is this user on call when the poll runs?", not "when the alert
+began?" — an off-call → on-call transition primes without firing (see below), so
+the previous person's alerts don't become a handoff burst. Team and integration
+filters are strongly recommended, since polling can't prove a personal
+notification was sent. `max_age` must be at least as long as `every`, or a
+long-lived group could appear new again between polls.
 
 #### Cursor and restart behavior
 
-Alert-group IDs are persisted in the daemon's trigger runtime before actions are
-dispatched. The cursor contains IDs and observation timestamps only—never alert
-titles, labels, or annotations—and is pruned after `max_age`.
+Alert-group IDs are persisted before actions dispatch. The cursor holds IDs and
+observation timestamps only — never titles, labels, or annotations — and is pruned
+after `max_age`.
 
 | Situation | `catch_up = false` (default) | `catch_up = true` |
 |-----------|------------------------------|-------------------|
@@ -181,29 +169,22 @@ titles, labels, or annotations—and is pruned after `max_age`.
 | Off-call → on-call | Prime current groups; fire none | Prime current groups; fire none |
 | Normal complete poll | Fire once per unseen group | Fire once per unseen group |
 
-The save-before-dispatch ordering is at-most-once: a crash after saving but
-before an action completes can miss that action, but restarting cannot duplicate
-it. With the default policy, alerts that appeared while the daemon was stopped
-are intentionally baselined rather than replayed.
+The save-before-dispatch ordering is at-most-once: a crash between save and
+completion can miss an action, but restart can't duplicate it.
 
-Rate-limited events and events blocked by the daemon-wide `max_concurrent` cap
+Rate-limited events, and events blocked by the daemon-wide `max_concurrent` cap,
 are left out of the cursor and retried by later complete polls while they still
-match `states` and `max_age`. A gate error deliberately fails closed and forces
-the next successful poll to baseline, because graith cannot prove that a shift
-handoff did not occur while the gate was unreadable.
+match `states` and `max_age`. A gate error forces the next successful poll to
+baseline. A result containing `limit` items is assumed incomplete, so graith leaves
+the cursor unchanged — narrow `team_ids`/`integration_ids` or raise `limit`
+(maximum 100). Poll errors also leave the cursor unchanged.
 
-A result containing `limit` items is assumed incomplete. Graith does not advance
-or prime the cursor, because doing so could silently miss groups beyond the cap;
-narrow `team_ids`/`integration_ids` or raise `limit` (maximum 100). Poll errors
-also leave the cursor unchanged.
-
-Available gcx event template variables are `{gcx_event_id}`,
-`{gcx_event_kind}`, `{gcx_event_state}`, `{gcx_event_url}`, `{gcx_team_id}`,
-`{gcx_integration_id}`, and `{gcx_started_at}`. Raw title, subject, labels, and
-annotations are deliberately unavailable because alert text is external,
-potentially attacker-controlled input. An agent may fetch the group by ID, but
-its prompt should explicitly treat fetched content as untrusted.
-`{gcx_started_at}` is an RFC3339 timestamp.
+The gcx event template variables are `{gcx_event_id}`, `{gcx_event_kind}`,
+`{gcx_event_state}`, `{gcx_event_url}`, `{gcx_team_id}`, `{gcx_integration_id}`,
+and `{gcx_started_at}` (an RFC3339 timestamp). Raw title, subject, labels, and
+annotations are deliberately unavailable — alert text is external, potentially
+attacker-controlled input. An agent can fetch the group by ID, so its prompt must
+treat fetched content as untrusted.
 
 ### Completion (scenario todo edge)
 
@@ -215,16 +196,15 @@ event = "complete"       # optional in v1; complete is the only event
 session = "reporter"     # non-shared member used as worktree/mirror context
 ```
 
-The daemon treats todo mutation events as hints, rereads the authoritative
-scenario todo state, and fires once when the scenario transitions from not
-complete to complete. If any assigned item is reopened, the scenario reopens;
-finishing it again creates the next monotonically increasing completion epoch.
-Duplicate todo events do not duplicate actions. Epoch and action state survive
-a daemon restart.
+The daemon treats todo events as hints and rereads the authoritative scenario todo
+state, firing once on the not-complete → complete transition. Reopening any
+assigned item reopens the scenario; refinishing creates the next monotonically
+increasing completion epoch. Duplicate todo events don't duplicate actions; epoch
+and action state survive a daemon restart.
 
-`session` is required for `command` and `session` actions. A command runs
-read-only in that member's worktree; a spawned session mirrors the same worktree
-read-only. The member must be non-shared and belong to the scenario.
+`session` is required for `command` and `session` actions, and must be a non-shared
+member of the scenario. A command runs read-only in that member's worktree; a
+spawned session mirrors the same worktree read-only.
 
 ## Actions
 
@@ -260,8 +240,8 @@ Watch commands are read-only on the worktree in v1 (`mutating` is rejected).
 
 ### Auto-cleanup (session)
 
-A `session` action can soft-delete the session it spawns once that session
-stops, so finished briefing/report sessions don't accumulate in `gr list`:
+A `session` action can soft-delete the session it spawns once it stops, so finished
+sessions don't accumulate in `gr list`:
 
 ```toml
 [trigger.action]
@@ -279,27 +259,24 @@ auto_cleanup = true            # delete the session once it stops
 | `true` / `"always"` | Soft-delete on any stop, clean exit or crash. |
 | `"on_success"` | Soft-delete only on a clean stop (agent exit code 0). |
 
-`"on_success"` means the agent completed and exited **on its own** with code 0.
-A session ended by `gr stop`, an idle timeout, a daemon shutdown, or a crash is
-never a success — not even if it happens to exit 0 (the stop reason, not just
-the exit code, decides) — so it is left in place.
+`"on_success"` means the agent exited **on its own** with code 0. A `gr stop`, idle
+timeout, daemon shutdown, or crash is never a success — even at exit 0, since the
+stop reason decides, not the exit code — so the session is left in place.
 
-Cleanup is a **soft delete**, so the session stays recoverable with `gr restore`
-within the `[delete] retention` window before it is purged. It only applies to
-trigger-spawned sessions — never a manually created one — and is incompatible
-with `ensure = true` (a reused reactor is deliberately long-lived). If soft
-delete is disabled (`[delete] retention = "0"`) auto-cleanup is skipped rather
-than turned into an immediate hard delete, and a session interrupted by a daemon
-shutdown is preserved so `gr daemon restart` can resume it.
+Cleanup is a **soft delete**: the session stays recoverable with `gr restore`
+within the `[delete] retention` window before purge. It applies only to
+trigger-spawned sessions (never a manual one) and is incompatible with
+`ensure = true` (a reused reactor is deliberately long-lived). With soft delete
+disabled (`[delete] retention = "0"`), auto-cleanup is skipped rather than
+hard-deleting, and a shutdown-interrupted session is preserved so
+`gr daemon restart` can resume it.
 
 #### Reaping the session promptly (`idle_timeout`)
 
-Cleanup only fires once the session actually stops. An interactive agent (e.g.
-Claude's TUI) doesn't exit when it finishes — it sits idle at its prompt — so
-the daemon has to idle-stop it first. To make that prompt, `auto_cleanup =
-true` / `"always"` gives the spawned session a **1-minute idle timeout** by
-default, so the chain runs quickly: finish → idle-stop → soft-delete. Override
-it with `idle_timeout` (a Go duration):
+Cleanup fires only once the session stops, but an interactive agent (e.g. Claude's
+TUI) sits idle at its prompt instead of exiting. So `auto_cleanup = true` /
+`"always"` gives the spawned session a **1-minute idle timeout** by default —
+finish → idle-stop → soft-delete. Override with `idle_timeout` (a Go duration):
 
 ```toml
 [trigger.action]
@@ -310,18 +287,15 @@ auto_cleanup = true
 idle_timeout = "2m"            # override the 1m auto_cleanup default
 ```
 
-`idle_timeout` works on any `session` action (not just with `auto_cleanup`),
-must be at least `1s`, and overrides the agent's default idle window. The
-1-minute default is only applied for `"always"`: an `"on_success"` session is
-never auto-idled, because an idle-stop is not a success and so wouldn't be
-cleaned up — idling it would just leave stopped clutter. Setting `idle_timeout`
-explicitly on an `"on_success"` session still only *stops* it; it does not clean
-it up (only a clean self-exit does).
+`idle_timeout` works on any `session` action (not just `auto_cleanup`), must be at
+least `1s`, and overrides the agent's default idle window. The 1-minute default
+applies only to `"always"`; an `"on_success"` session is never auto-idled, since an
+idle-stop isn't a success. Setting `idle_timeout` on an `"on_success"` session
+still only *stops* it — only a clean self-exit cleans it up.
 
 ### Ensure-reviewer (watch + session)
 
-The flagship pattern — keep a reviewer reacting to an implementer's changes,
-idempotently:
+Keep a reviewer reacting idempotently to an implementer's changes:
 
 ```toml
 [trigger.action]
@@ -334,13 +308,11 @@ prompt = "Review the changes since your last look; send feedback via gr msg."
 
 ### Tracker (issue-tracker sync)
 
-A `tracker` action keeps live sessions in sync with an issue tracker. On each
-scheduled poll it fetches the tracker's **active** issues and reconciles sessions
-against them: it spawns one session per active issue (seeded from the issue body)
-and reaps the session when its issue leaves the active state. The tracker is the
-source of truth — the daemon drives the live session set toward it every tick.
-It requires a `[schedule]` source and an enabled `[orchestrator]` (which owns the
-spawned sessions). GitHub Issues is the only provider in v1.
+The tracker is the source of truth: on each scheduled poll the daemon drives the
+live session set toward its **active** issues, spawning one session per active
+issue (seeded from the issue body). It needs a `[schedule]` source and an enabled
+`[orchestrator]` (which owns the spawned sessions). GitHub Issues is the only
+provider in v1.
 
 ```toml
 [[trigger]]
@@ -375,37 +347,35 @@ usual `{name}`/`{date}`/`{datetime}`/`{fire_time}`).
 
 **Reconciliation semantics:**
 
-- **Idempotent.** Sessions are deduplicated by a durable per-issue tag, so a
-  session is never respawned while a live (running or stopped) one for the same
-  issue exists — even across a daemon restart.
+- **Idempotent.** Sessions are deduplicated by a durable per-issue tag, so one is
+  never respawned while a live (running or stopped) session for the same issue
+  exists — even across a daemon restart.
 - **Grace window.** An issue must stay inactive for `grace` before its session is
-  reaped, so a brief mislabel or column bounce doesn't kill in-flight work. An
-  issue that becomes active again clears the grace clock; a stopped session for a
-  re-activated issue is resumed rather than duplicated.
+  reaped, so a brief mislabel or column bounce doesn't kill in-flight work.
+  Becoming active again clears the grace clock and resumes a stopped session
+  instead of duplicating it.
 - **Reap policy.** `stop` (default) stops the agent (recover with `gr resume`);
   `delete` soft-deletes the session (recover with `gr restore` within the
   retention window); `none` leaves it and only reports. Starred and system
   sessions are never reaped.
-- **Concurrency.** `max_concurrent` caps how many tracker sessions run at once, so
-  a large backlog can't spawn dozens of agents in one poll; the rest are deferred
-  to later ticks.
+- **Concurrency.** `max_concurrent` caps live tracker sessions; a large backlog
+  defers the rest to later ticks.
 
-The tracker is **read-only** — graith never writes back to it (no closing issues,
-no comments). Reaping never hard-deletes.
+The tracker is **read-only** — graith never writes back (no closing issues, no
+comments), and reaping never hard-deletes.
 
-The per-poll `gh issue list` call reuses the PR-watch reader's configured
-per-command timeout, [`pr_watch.advanced.gh_timeout`]({{< relref
-"/docs/configuration/automation.md" >}}) (default `5s`); raising it there also
-gives the tracker poll more time, and the change applies on the next poll.
+The per-poll `gh issue list` call reuses the PR-watch reader's per-command timeout,
+[`pr_watch.advanced.gh_timeout`]({{< relref
+"/docs/configuration/automation.md" >}}) (default `5s`); raising it there gives the
+tracker poll more time too, from the next poll.
 
-**Security — issue text is fed to an autonomous agent.** The issue title and body
-are expanded verbatim into the spawned agent's prompt. On a public repo, anyone
-who can open or edit an issue can therefore inject instructions into an agent
-that has write access to a worktree. Unlike PR comments (which graith jails
-behind an author-trust gate), issue bodies have **no trust gate** in v1. Only run
-the tracker against repos/issues you trust, scope it tightly with `active_labels`
-and/or `assignee` to a trusted set, and keep the agent sandbox enabled. An
-author-trust gate for issues is a possible follow-up.
+**Security — issue text is fed to an autonomous agent.** Title and body expand
+verbatim into the spawned agent's prompt, so on a public repo anyone who can open
+or edit an issue can inject instructions into an agent with worktree write access.
+Unlike PR comments (jailed behind an author-trust gate), issue bodies have **no
+trust gate** in v1. Only run the tracker against repos/issues you trust, scope it
+with `active_labels` and/or `assignee`, and keep the agent sandbox enabled. An
+author-trust gate is a possible follow-up.
 
 ## Delivery
 
@@ -427,12 +397,11 @@ required = false                # fail the action if any route fails
 `inbox` auto-resumes the orchestrator (or any target with `wake = true`), and
 never wakes a soft-deleted session.
 
-Delivery remains best-effort by default for backward compatibility. Set
-`required = true` when lifecycle cleanup must wait for a durable result. Command
-and message routes complete synchronously; a completion `session` action stays
-running until its spawned agent exits cleanly, and its prompt requires delivery
-before exit. A failed required route makes the action `failed` and blocks
-`on_success` cleanup.
+Delivery is best-effort by default. Set `required = true` when lifecycle cleanup
+must wait for a durable result. Command and message routes complete synchronously;
+a completion `session` action runs until its spawned agent exits cleanly, its
+prompt requiring delivery first. A failed required route makes the action `failed`
+and blocks `on_success` cleanup.
 
 ## Policy
 
@@ -452,7 +421,7 @@ max_concurrent = 4
 
 ## CLI
 
-Triggers are defined in config; `gr trigger` observes and controls them:
+Triggers are defined in config; `gr trigger` observes and controls them.
 
 ```bash
 gr trigger list                 # all triggers: source, action, cadence/scope, state
@@ -462,8 +431,8 @@ gr trigger pause <name>         # pause (persists across restart)
 gr trigger resume <name>
 ```
 
-`list`/`status` are read-only; `run`/`pause`/`resume` require the orchestrator or
-a descendant.
+`list`/`status` are read-only; `run`/`pause`/`resume` need the orchestrator or a
+descendant.
 
 ## Examples
 

@@ -234,7 +234,7 @@ struct HostsSettings: View {
             }
             .padding(12)
             Text("Remote hosts are reached over Tailscale. Adding one runs a one-time "
-                 + "device pairing — approve it on the host with `gr pair approve`.")
+                 + "device pairing — approve it on the host with `gr remote pairings approve`.")
                 .font(.caption)
                 .foregroundStyle(Theme.overlay0)
                 .padding(.horizontal, 12)

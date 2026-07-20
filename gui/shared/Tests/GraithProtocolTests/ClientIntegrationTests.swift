@@ -19,7 +19,7 @@ struct ClientIntegrationTests {
             #expect(hs.type == "handshake")
             let hsMsg = try decodePayload(hs, as: HandshakeMsg.self)
             #expect(hsMsg.terminalSize == [80, 24])
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
 
             try await daemon.writeControl("auth_challenge", AuthChallengeMsg(nonce: nonce))
             let proofEnv = try await daemon.readControl()
@@ -54,7 +54,7 @@ struct ClientIntegrationTests {
             handshake: HandshakeMsg(clientID: "1", terminalSize: [80, 24], cwd: "", profile: ""),
             signer: signer
         )
-        #expect(ok.version == "1.0")
+        #expect(ok.version == "2.0")
 
         let reply = try await conn.request("list")
         let list = try decodePayload(reply, as: SessionListMsg.self)
@@ -81,7 +81,7 @@ struct ClientIntegrationTests {
             #expect(hs.token == "human-canny")
             try await daemon.writeControl(
                 "handshake_ok",
-                HandshakeOkMsg(version: "1.0", daemonVersion: "dev")
+                HandshakeOkMsg(version: "2.0", daemonVersion: "dev")
             )
             let listReq = try await daemon.readControl()
             #expect(listReq.type == "list")
@@ -98,7 +98,7 @@ struct ClientIntegrationTests {
             #expect(hs.token == "human-braw")
             try await daemon.writeControl(
                 "handshake_ok",
-                HandshakeOkMsg(version: "1.0", daemonVersion: "dev")
+                HandshakeOkMsg(version: "2.0", daemonVersion: "dev")
             )
             let listReq = try await daemon.readControl()
             #expect(listReq.type == "list")
@@ -138,7 +138,7 @@ struct ClientIntegrationTests {
 
         let server = Task {
             _ = try await daemon.readControl()
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             _ = try await daemon.readControl()
             try await daemon.writeControl("error", ErrorMsg(message: "session not found"))
         }
@@ -160,7 +160,7 @@ struct ClientIntegrationTests {
 
         let server = Task { () -> Data in
             _ = try await daemon.readControl()
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             let attach = try await daemon.readControl()
             #expect(attach.type == "attach")
             try await daemon.writeControl("attached", makeSession(id: "braw", name: "braw"))
@@ -187,25 +187,27 @@ struct ClientIntegrationTests {
         await attach.close()
     }
 
-    /// `star`/`unstar` send `{session_id}` and complete on the daemon's
-    /// `starred`/`unstarred` acks (issue #899).
-    @Test func starAndUnstarRoundTrip() async throws {
+    /// `update` preserves optional fields and explicit false, and returns the
+    /// daemon's resulting persisted metadata.
+    @Test func updateRoundTrip() async throws {
         let (clientStream, serverStream) = InMemoryByteStream.makePair()
         let daemon = MockDaemon(stream: serverStream)
 
         let server = Task {
             _ = try await daemon.readControl() // handshake
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
 
-            let starReq = try await daemon.readControl()
-            #expect(starReq.type == "star")
-            #expect(try decodePayload(starReq, as: SessionIDMsg.self).sessionID == "braw")
-            try await daemon.writeControl("starred", SessionIDMsg(sessionID: "braw"))
-
-            let unstarReq = try await daemon.readControl()
-            #expect(unstarReq.type == "unstar")
-            #expect(try decodePayload(unstarReq, as: SessionIDMsg.self).sessionID == "braw")
-            try await daemon.writeControl("unstarred", SessionIDMsg(sessionID: "braw"))
+            let updateReq = try await daemon.readControl()
+            #expect(updateReq.type == "update")
+            let update = try decodePayload(updateReq, as: UpdateMsg.self)
+            #expect(update.sessionID == "braw")
+            #expect(update.name == "bonnie")
+            #expect(update.parentID == "ben")
+            #expect(update.starred == false)
+            try await daemon.writeControl(
+                "updated",
+                UpdateResultMsg(sessionID: "braw", name: "bonnie", parentID: "ben", starred: false)
+            )
         }
 
         let stream = clientStream
@@ -214,8 +216,10 @@ struct ClientIntegrationTests {
             profile: "", clientID: "app", token: nil, signer: nil,
             streamFactory: { _ in stream }
         )
-        try await client.star(sessionID: "braw")
-        try await client.unstar(sessionID: "braw")
+        let result = try await client.update(
+            sessionID: "braw", name: "bonnie", parentID: "ben", starred: false
+        )
+        #expect(result == UpdateResultMsg(sessionID: "braw", name: "bonnie", parentID: "ben", starred: false))
 
         _ = await server.result
         await client.close()
@@ -229,7 +233,7 @@ struct ClientIntegrationTests {
 
         let server = Task {
             _ = try await daemon.readControl() // handshake
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             let forkReq = try await daemon.readControl()
             #expect(forkReq.type == "fork")
             let f = try decodePayload(forkReq, as: ForkMsg.self)
@@ -260,7 +264,7 @@ struct ClientIntegrationTests {
 
         let server = Task {
             _ = try await daemon.readControl() // handshake
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             let migReq = try await daemon.readControl()
             #expect(migReq.type == "migrate")
             let m = try decodePayload(migReq, as: MigrateMsg.self)
@@ -291,7 +295,7 @@ struct ClientIntegrationTests {
 
         let server = Task {
             _ = try await daemon.readControl() // handshake
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             _ = try await daemon.readControl() // fork
             try await daemon.writeControl("error", ErrorMsg(message: "source not found"))
         }
@@ -323,7 +327,7 @@ struct ClientIntegrationTests {
         let daemon = MockDaemon(stream: serverStream)
         let server = Task {
             _ = try await daemon.readControl()
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             let req = try await daemon.readControl()
             #expect(req.type == "list")
             #expect(try decodePayload(req, as: ListProbe.self).deleted == true)
@@ -347,7 +351,7 @@ struct ClientIntegrationTests {
         let daemon = MockDaemon(stream: serverStream)
         let server = Task {
             _ = try await daemon.readControl()
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             let req = try await daemon.readControl()
             #expect(req.type == "restore")
             let scope = try decodePayload(req, as: SessionScopeMsg.self)
@@ -372,7 +376,7 @@ struct ClientIntegrationTests {
         let daemon = MockDaemon(stream: serverStream)
         let server = Task {
             _ = try await daemon.readControl()
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             let req = try await daemon.readControl()
             #expect(req.type == "delete")
             let scope = try decodePayload(req, as: SessionScopeMsg.self)
@@ -397,7 +401,7 @@ struct ClientIntegrationTests {
         let daemon = MockDaemon(stream: serverStream)
         let server = Task {
             _ = try await daemon.readControl()
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             let req = try await daemon.readControl()
             #expect(req.type == "set_status")
             let msg = try decodePayload(req, as: SetStatusMsg.self)
@@ -433,7 +437,7 @@ struct ClientIntegrationTests {
         let server = Task {
             let hs = try await daemon.readControl()
             #expect(hs.type == "handshake")
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             // Unsolicited challenge issued to EVERY remote connection, before the
             // client has even sent pair_request.
             try await daemon.writeControl("auth_challenge", AuthChallengeMsg(nonce: "haar-nonce"))
@@ -470,7 +474,7 @@ struct ClientIntegrationTests {
 
         let server = Task {
             _ = try await daemon.readControl()
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             try await daemon.writeControl("auth_challenge", AuthChallengeMsg(nonce: "haar"))
             _ = try await daemon.readControl()
             // Daemon reports a pin that does NOT match the presented cert.
@@ -500,7 +504,7 @@ struct ClientIntegrationTests {
 
         let server = Task {
             _ = try await daemon.readControl()
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             try await daemon.writeControl("auth_challenge", AuthChallengeMsg(nonce: "haar"))
             _ = try await daemon.readControl()
             try await daemon.writeControl("pair_response", PairResponseMsg(
@@ -530,7 +534,7 @@ struct ClientIntegrationTests {
 
         let server = Task {
             _ = try await daemon.readControl() // handshake
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
             for _ in 0..<2 {
                 let env = try await daemon.readControl()
                 // Reply type echoes the request type so mis-routing is detectable.
@@ -560,7 +564,7 @@ struct ClientIntegrationTests {
 
         let server = Task {
             _ = try await daemon.readControl() // handshake
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
 
             let logsReq = try await daemon.readControl()
             #expect(logsReq.type == "logs")
@@ -594,7 +598,7 @@ struct ClientIntegrationTests {
 
         let server = Task {
             _ = try await daemon.readControl() // handshake
-            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "1.0", daemonVersion: "dev"))
+            try await daemon.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
 
             let logsReq = try await daemon.readControl()
             #expect(logsReq.type == "logs")

@@ -33,7 +33,7 @@ public enum GraithDesign {
     public static let accent = blue
     /// Running / healthy.
     public static let success = green
-    /// Needs attention / approvals.
+    /// Needs attention / warnings.
     public static let warning = yellow
     /// Errored / destructive.
     public static let danger = red

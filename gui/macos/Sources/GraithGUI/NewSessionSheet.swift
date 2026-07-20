@@ -21,7 +21,6 @@ struct NewSessionSheet: View {
     // Advanced options (mirror `gr new` flags; hidden behind a disclosure group).
     @State private var showAdvanced = false
     @State private var base = ""
-    @State private var yolo = false
     @State private var inPlace = false
     @State private var agentHooks = true
     @State private var createInBackground = false
@@ -240,15 +239,10 @@ struct NewSessionSheet: View {
                         .opacity(inPlace ? 0.5 : 1)
                 }
 
-                advancedToggle("Yolo mode", isOn: $yolo,
-                               help: "Auto-approve all tool requests (no approval prompts)")
                 advancedToggle("Run in place", isOn: $inPlace,
                                help: "Run the agent directly in the repo without creating a worktree")
                 advancedToggle("Agent hooks", isOn: $agentHooks,
-                               help: yolo
-                                   ? "Yolo mode requires agent hooks, so they're always on for a yolo session"
-                                   : "Enable agent hooks (check-inbox, etc.)")
-                    .disabled(yolo)
+                               help: "Enable agent hooks (check-inbox, etc.)")
                 advancedToggle("Create in background", isOn: $createInBackground,
                                help: "Create the session without switching to it")
             }
@@ -257,9 +251,6 @@ struct NewSessionSheet: View {
             // so clear any stale value rather than leaving it in the now-disabled
             // field to fail validation later.
             .onChange(of: inPlace) { _, isOn in if isOn { base = "" } }
-            // Yolo forces agent hooks on daemon-side; reflect that in the UI so the
-            // toggle isn't showing a state the session won't actually run with.
-            .onChange(of: yolo) { _, isOn in if isOn { agentHooks = true } }
         } label: {
             Text("ADVANCED")
                 .font(.system(.caption2, design: .monospaced))
@@ -345,7 +336,6 @@ struct NewSessionSheet: View {
             model: model,
             prompt: prompt,
             base: base,
-            yolo: yolo,
             inPlace: inPlace,
             agentHooks: agentHooks,
             hostID: selectedHostID

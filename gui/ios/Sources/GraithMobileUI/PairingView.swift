@@ -7,8 +7,8 @@ import UIKit
 
 /// The add-host + pairing flow (design §B.2). The user enters a MagicDNS host
 /// and a label; the app sends `pair_request`; the local human approves with
-/// `gr pair approve`; on success the SPKI fingerprint is shown for TOFU
-/// confirmation against `gr pair`'s local output.
+/// `gr remote pairings approve`; on success the SPKI fingerprint is shown for
+/// TOFU confirmation against that local command's output.
 struct PairingView: View {
     @ObservedObject var model: FleetModel
     @Environment(\.dismiss) private var dismiss
@@ -78,7 +78,7 @@ struct PairingView: View {
                 TextField("Device label", text: $deviceLabel)
             }
             Section {
-                Text("Approve this device on the daemon host with `gr pair approve <id>`.")
+                Text("Approve this device on the daemon host with `gr remote pairings approve <request-id>`.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
         }
@@ -90,7 +90,7 @@ struct PairingView: View {
                 ProgressView()
                 VStack(alignment: .leading) {
                     Text("Waiting for approval…").font(.headline)
-                    Text("On the daemon host, run `gr pair list` then `gr pair approve <id>`.")
+                    Text("On the daemon host, run `gr remote pairings list` then `gr remote pairings approve <request-id>`.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
@@ -98,12 +98,13 @@ struct PairingView: View {
     }
 
     // Shown once the daemon replies, BEFORE anything is persisted: the user
-    // eyeballs the SPKI fingerprint against `gr pair`'s local output and either
-    // trusts it (persists the token/pin) or rejects it (discards, nothing
-    // written). This is the TOFU gate — see PairingCoordinator.confirmPairing.
+    // eyeballs the SPKI fingerprint against `gr remote pairings approve`'s
+    // local output and either trusts it (persists the token/pin) or rejects it
+    // (discards, nothing written). This is the TOFU gate — see
+    // PairingCoordinator.confirmPairing.
     private func confirmationSection(_ entry: Host) -> some View {
         Section("Confirm the daemon's key") {
-            Text("\(entry.label) replied. Before trusting it, check this TLS key fingerprint matches what `gr pair` printed on the daemon host.")
+            Text("\(entry.label) replied. Before trusting it, check this TLS key fingerprint matches what `gr remote pairings approve` printed on the daemon host.")
                 .font(.footnote).foregroundStyle(.secondary)
             if let fp = pairing.spkiFingerprint {
                 VStack(alignment: .leading, spacing: 4) {

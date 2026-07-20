@@ -9,7 +9,7 @@ draft: false
 
 ## States
 
-A session is always in one of these lifecycle states:
+A session is always in one lifecycle state:
 
 | State | Meaning |
 |-------|---------|
@@ -19,7 +19,10 @@ A session is always in one of these lifecycle states:
 | `creating` | Session is being set up (transient) |
 | `deleting` | Session is being torn down (transient) |
 
-Running sessions also have an **agent status** that reflects the agent's current activity (e.g. `approval` when waiting for an approval decision, tool names from hook reports). This is separate from the session lifecycle state and is not persisted.
+Running sessions also carry an **agent status** for current activity (`active`,
+`ready`, or `error`, plus tool names from hook reports) — separate from lifecycle
+state and not persisted. An agent waiting in its own permission TUI stays
+`running`; Graith doesn't create or answer an approval status.
 
 ## Creation
 
@@ -29,44 +32,39 @@ gr new fix-auth-bug
 
 Steps:
 
-1. **Fetch** -- runs `git fetch origin` (when `fetch_on_create = true`; skipped by `--no-fetch`, e.g. when SSH auth is unavailable or offline)
-2. **Branch** -- creates `<branch_prefix>/<session-name>-<session-id>` from the base branch (default: repo's default branch, override with `--base`)
-3. **Worktree** -- creates a git worktree at `<data_dir>/worktrees/<repo-name>/<repo-hash>/<session-id>/`
+1. **Fetch** -- `git fetch origin` when `fetch_on_create = true`; `--no-fetch` skips (offline or no SSH auth)
+2. **Branch** -- `<branch_prefix>/<session-name>-<session-id>` from the base branch (default: repo default, override `--base`)
+3. **Worktree** -- git worktree at `<data_dir>/worktrees/<repo-name>/<repo-hash>/<session-id>/`
 4. **Environment** -- sets `GRAITH_SESSION_ID`, `GRAITH_SESSION_NAME`, `GRAITH_AGENT_TYPE`, `GRAITH_WORKTREE_PATH`, `GRAITH_REPO_PATH`, `GRAITH_TMPDIR`, `TMPDIR`
-5. **Sandbox** (if enabled) -- wraps the command with the configured backend (`safehouse wrap` or `nono run --profile`); fails closed if no `backend` is set or it can't enforce
-6. **Agent** -- starts the agent process with configured `command` and `args`
-7. **Prompt** (if `--prompt` or `--prompt-file`) -- types the prompt into the agent's stdin after startup
+5. **Sandbox** -- when enabled, requires a configured backend and wraps the command (`safehouse wrap` or `nono run --profile`); explicitly disabled starts with a warning
+6. **Agent** -- starts with optional `non_interactive_args` then `args`; clear the prefix to keep the native approval TUI
+7. **Prompt** (`--prompt`/`--prompt-file`) -- typed into stdin after startup
 8. **Attach** (unless `--background`) -- enters passthrough mode
 
 ### Variants
 
-**No repo:** `gr new scratch --no-repo` creates a session in a scratch directory without a git repo or worktree.
+**No repo:** `gr new scratch --no-repo` — a scratch directory, no git repo or worktree.
 
-**In-place:** `gr new quick --in-place` runs the agent directly in the repo without creating a worktree. No branch is created. Use `--allow-concurrent` to permit multiple in-place sessions on the same repo.
+**In-place:** `gr new quick --in-place` runs the agent directly in the repo, no worktree or branch. `--allow-concurrent` permits multiple in-place sessions on one repo.
 
-**Mirror:** `gr new observer --mirror my-session` creates a session that mounts another session's worktree read-only. Useful for observation or review. Requires sandbox to be enabled (`sandbox.enabled = true` in config).
+**Mirror:** `gr new observer --mirror my-session` mounts another session's worktree read-only, for observation or review. Requires Graith's enforceable sandbox for the read-only guarantee.
 
 ### Headless sessions
 
-**Experimental.** `gr new watcher --headless -p "…"` runs the agent in Claude Code's stream-json mode instead of an interactive PTY. Headless sessions are **non-interactive**: they are meant for fire-and-forget work such as review judges and one-shot helpers. graith parses the typed event stream (so `gr logs -f` renders it and the run's cost/token usage is captured from the result envelope). v1 is Claude-only, one-shot (one prompt, run to completion, exit), requires a prompt, is **incompatible with the sandbox**, and implies `--background`; the whole path is inert unless `[headless] experimental = true` is set. A headless session is one-shot, so once it exits it cannot be resumed as headless. See [Configuration → Headless sessions]({{< relref "configuration/sessions.md#headless-sessions" >}}).
+**Experimental.** `gr new watcher --headless -p "…"` runs the agent in Claude Code's stream-json mode instead of a PTY — **non-interactive**, for fire-and-forget work like review judges and one-shot helpers. graith parses the typed event stream, so `gr logs -f` renders it and cost/token usage comes from the result envelope. v1 is Claude-only, one-shot (one prompt, run to completion, exit), requires a prompt, uses the same optional Graith sandbox setting as PTY sessions, and implies `--background`. It's inert unless `[headless] experimental = true`, and can't be resumed as headless once it exits. See [Configuration → Headless sessions]({{< relref "configuration/sessions.md#headless-sessions" >}}).
 
-Because there is no PTY to stream, `gr attach` on a headless session
-**converts it to interactive**: it stops the headless process and relaunches
-the session in a real PTY via `claude --resume <session-id>`, preserving the
-conversation, worktree, branch, and env. Because this restarts the agent, attach
-prompts you to confirm first (any in-flight tool call is cancelled, not resumed);
-pass `-y`/`--yes` to skip the prompt. To watch a headless session read-only
-*without* converting it, use `gr logs -f` instead.
+With no PTY to stream, `gr attach` **converts a headless session to
+interactive**: it stops the headless process and relaunches via
+`claude --resume <session-id>`, preserving conversation, worktree, branch, and
+env. This restarts the agent, so attach confirms first (in-flight tool calls are
+cancelled, not resumed); `-y`/`--yes` skips. To watch read-only *without*
+converting, use `gr logs -f`.
 
-**Interrupts and approvals.** A headless session runs over Claude Code's stdin
-control protocol, so graith can cleanly `interrupt` an in-flight turn (rather
-than firing terminal signals) and answer tool-permission prompts inline. Because
-a headless session has no human to answer, its approval policy must be
-**non-blocking**: a `yolo` session auto-allows, a non-blocking `[approvals]`
-backend (`auto`/`external`/`builtin`/`localmost`) decides, and any policy that
-would otherwise wait for a human is **denied** — with a one-time notice posted to
-the orchestrator inbox. Set a non-blocking backend (or run it `--yolo`) for a
-headless session that needs to use gated tools.
+**Interrupts and permission errors.** Over Claude Code's stdin control protocol,
+graith cleanly `interrupt`s an in-flight turn instead of firing terminal signals.
+Native tool-permission requests are denied immediately and mark the driver
+degraded — no native TUI or human-response channel. The optional synchronous
+`[command_policy]` applies the same shell restrictions as PTY sessions.
 
 ## Attachment
 
@@ -74,13 +72,13 @@ headless session that needs to use gated tools.
 gr attach fix-auth-bug
 ```
 
-Attaching connects your terminal's stdin/stdout to the session's PTY through the daemon. Multiple clients cannot attach to the same session simultaneously; the previous client is kicked when a new one attaches.
+Attaching connects your terminal's stdin/stdout to the session's PTY through the daemon. Only one client attaches at a time; a new client kicks the previous.
 
-The attach loop handles transitions between passthrough mode (raw terminal I/O) and the overlay (session picker). Detaching (`ctrl+b d`) or switching sessions (`ctrl+b n/p/l`) cycles through these states without dropping the daemon connection.
+The attach loop transitions between passthrough mode (raw terminal I/O) and the overlay (session picker), cycling without dropping the daemon connection: detach with `ctrl+b d`, switch sessions with `ctrl+b n/p/l`.
 
 ## Detachment
 
-Press `ctrl+b d` to detach. The agent process continues running. The daemon maintains the PTY and buffers output to a scrollback file.
+Press `ctrl+b d` to detach. The agent keeps running; the daemon maintains the PTY and buffers output to a scrollback file.
 
 ## Stop and resume
 
@@ -89,9 +87,9 @@ gr stop fix-auth-bug       # kill agent process, keep worktree
 gr restart fix-auth-bug    # restart with resume_args in existing worktree
 ```
 
-Stopping sends SIGTERM to the agent process. The worktree and branch are preserved. Restarting uses the agent's `resume_args` to continue the previous conversation.
+Stopping sends SIGTERM (worktree and branch preserved); restarting resumes the previous conversation via `resume_args`.
 
-Agents with `resume_args` configured default to a 1-hour idle timeout. After the timeout, the daemon stops the session automatically. It can be resumed later.
+Agents with `resume_args` default to a 1-hour idle timeout, after which the daemon stops the session automatically — resume it later.
 
 ## Fork
 
@@ -99,14 +97,12 @@ Agents with `resume_args` configured default to a 1-hour idle timeout. After the
 gr fork fix-auth-bug auth-approach-2
 ```
 
-Forking:
+Forking explores alternative approaches from the same git state:
 
 1. Creates a new worktree from the source session's current branch
 2. Creates a new branch
-3. Starts a new agent process using `fork_args` (if configured for the agent), which typically passes the source agent's session ID so the new agent can inherit the conversation history. If the agent has no `fork_args`, graith forks only the git/worktree state and starts the agent with its regular `args`
+3. Starts a new agent using `fork_args` (if configured) — typically passing the source's session ID so it inherits conversation history. Without `fork_args`, only git/worktree state is forked and the agent starts with its regular `args`
 4. The source session is unaffected
-
-Use forking to explore alternative approaches from the same git state.
 
 ### Cross-agent fork
 
@@ -114,18 +110,16 @@ Use forking to explore alternative approaches from the same git state.
 gr fork fix-auth-bug auth-codex --agent codex
 ```
 
-Pass `--agent <target>` to fork into a **different agent**. Because the target
+Pass `--agent <target>` to fork into a **different agent**. Since the target
 can't natively resume the source's conversation, graith renders the source's
-history to a neutral context file (the same reader/renderer `gr migrate` uses)
-and seeds the new agent with it. The original session keeps running, so both
-agents work in parallel.
+history to a neutral context file (the renderer `gr migrate` uses) and seeds the
+new agent with it. The original keeps running, so both work in parallel.
 
-Unlike `gr migrate` (which keeps the worktree in place), a fork branches a new
-worktree from the base branch — so the source's changes (**uncommitted edits and
-any commits on its branch**) are not carried over. Re-apply any code changes you
-still need in the new session.
-Claude and Codex are supported as fork *sources*; any configured agent can be a
-*target*. Use `--model` to override the target agent's model.
+Unlike `gr migrate` (worktree in place), a fork branches a new worktree from the
+base branch — so the source's changes (**uncommitted edits and any commits on its
+branch**) don't carry over; re-apply any you need. Claude and Codex are supported
+as fork *sources*; any configured agent can be a *target*. Use `--model` to
+override the target's model.
 
 ## Migrate to a different agent
 
@@ -133,19 +127,19 @@ Claude and Codex are supported as fork *sources*; any configured agent can be a
 gr migrate fix-auth-bug --agent codex
 ```
 
-Migration swaps the agent on an existing session **in place** — most useful during a provider outage (e.g. the Claude API is down and you want to keep working in Codex). Unlike fork, it does **not** create a new worktree or branch: the session keeps its id, name, worktree, and branch.
+Migration swaps the agent on a session **in place** — most useful during a provider outage (e.g. Claude API down, keep working in Codex). Unlike fork, it creates **no** new worktree or branch; the session keeps its id, name, worktree, and branch.
 
 Migrating:
 
-1. Renders the current agent's conversation to a neutral Markdown context file (fail-fast: if the transcript is missing or empty, nothing is changed)
+1. Renders the current conversation to a neutral Markdown context file (fail-fast: missing or empty transcript changes nothing)
 2. Stops the current agent
 3. Switches the session's agent type (and model, via `--model`)
-4. Starts the target agent **in the same worktree**, seeded with the rendered context so it can continue the work
-5. Runs a short health check; if the target agent fails to start, the **original agent is restored**
+4. Starts the target agent **in the same worktree**, seeded with the rendered context
+5. Runs a health check; if the target fails to start, the **original agent is restored**
 
-Because the worktree is retained, all code state — commits and uncommitted edits — carries over with no branching. The handoff is a lossy reseed, not a native resume: hidden reasoning/thinking and exact tool-call replay are not transferred, and the agent process restarts (attached clients re-attach to the new agent).
+The retained worktree carries over all code state (commits and uncommitted edits), no branching. The handoff is a lossy reseed, not a native resume: hidden reasoning/thinking and exact tool-call replay aren't transferred, and the process restarts (attached clients re-attach).
 
-Claude and Codex are supported as migration *sources* (the transcript formats graith can read); any configured agent can be a *target*. System sessions such as the orchestrator can be migrated too. The migration is soft-reversible — `gr list` records the agent it was migrated from, so you can `gr migrate ... --agent <original>` to hand the work back.
+Claude and Codex are supported as migration *sources* (transcript formats graith can read); any configured agent can be a *target*, including system sessions like the orchestrator. Migration is soft-reversible — `gr list` records the agent migrated from, so `gr migrate ... --agent <original>` hands the work back.
 
 ## Deletion
 
@@ -160,11 +154,11 @@ Deletion:
 3. Deletes the branch
 4. Removes the session from state
 
-If the worktree has uncommitted changes or unpushed commits, graith prompts for confirmation. Use `-f` to skip.
+With uncommitted changes or unpushed commits, graith prompts for confirmation; `-f` skips.
 
 ## Parent-child relationships
 
-When a session creates child sessions (e.g. an orchestrator spawning workers), graith tracks the parent-child relationship via `parent_id`.
+When a session spawns children (e.g. an orchestrator and its workers), graith tracks the link via `parent_id`.
 
 ```bash
 gr list --tree                    # show hierarchy
@@ -175,7 +169,7 @@ gr msg send --children "rebase"   # message all descendants
 gr msg send --parent "done"       # message the parent
 ```
 
-When `--children` is used without a positional argument inside a graith session, the current session is auto-detected from `GRAITH_SESSION_ID` and excluded from the operation.
+Without a positional argument inside a graith session, `--children` auto-detects the current session from `GRAITH_SESSION_ID` and excludes it.
 
 ## Environment variables
 
@@ -199,33 +193,33 @@ When includes are configured:
 
 ## State persistence
 
-Session state is stored in `state.json` in the data directory. The file is loaded on daemon start and saved on every mutation. Sessions survive daemon restarts.
-
-Runtime-only state (hook reports, attached clients, pending approvals) is not persisted and is rebuilt on restart.
+Session state lives in `state.json` in the data directory, loaded on daemon start and saved on every mutation, so sessions survive restarts. Runtime-only state (hook reports, attached clients) isn't persisted — it's rebuilt on restart.
 
 ## Scrollback
 
-Each session's PTY output is appended to a scrollback file at `<data_dir>/logs/<session-id>.log`. The scrollback supports tail reads for the `gr logs` command and preview rendering in the overlay.
+Each session's PTY output is appended to `<data_dir>/logs/<session-id>.log`, for tail reads by `gr logs` and preview rendering in the overlay.
 
-`gr doctor` warns when scrollback files are oversized. `gr doctor --autofix` truncates them.
+`gr doctor` warns on oversized scrollback files; `gr doctor --autofix` truncates them.
 
 ## Starring
 
 ```bash
-gr star important-session
-gr unstar important-session
+gr update important-session --starred
+gr update important-session --starred=false
 ```
 
 Starred sessions:
-- Cannot be deleted. Unstar first, then delete
+- Can't be deleted — set `--starred=false` first
 - Are skipped by batch `stop`/`delete` operations (e.g. `--stale`, `--stopped`)
-- Can still be stopped directly with `gr stop <session>`
+- Can still be stopped directly (`gr stop <session>`)
 - Appear in the Starred view in the session picker
 - Show a star indicator in the session list
 
+`--starred` combines with `--name` and `--parent`; the daemon validates and persists them as one update. Repeating the same true/false value is safe.
+
 ## Status summaries
 
-Agents (or users) can set a status summary visible in the session picker:
+Agents or users can set a status summary shown in the session picker:
 
 ```bash
 gr status "Exploring code"
@@ -233,6 +227,6 @@ gr status --ttl 30m "Waiting for CI"
 gr status --clear
 ```
 
-The status auto-expires when the agent produces output without updating it (default TTL: 5 minutes). When the agent is idle, the status fades but persists visually.
+The status auto-expires when the agent produces output without updating it (default TTL: 5 minutes); while idle it fades but persists visually.
 
-The session picker also auto-derives activity summaries from hook reports (e.g. "Using Bash", "Using Edit") when no explicit status is set.
+With no explicit status, the picker auto-derives activity summaries from hook reports (e.g. "Using Bash", "Using Edit").

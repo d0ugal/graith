@@ -270,6 +270,13 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		return nil, fmt.Errorf("invalid fd %d for session %s", opts.Fd, opts.ID)
 	}
 
+	owned := true
+	defer func() {
+		if owned {
+			_ = ptmx.Close()
+		}
+	}()
+
 	log := opts.Logger
 	if log == nil {
 		log = slog.Default()
@@ -381,6 +388,8 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 			s.StartAdoptedWaiter()
 		}
 
+		owned = false
+
 		return s, nil
 	}
 
@@ -422,6 +431,8 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 	if !opts.DeferWait {
 		s.StartAdoptedWaiter()
 	}
+
+	owned = false
 
 	return s, nil
 }

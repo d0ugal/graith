@@ -24,11 +24,12 @@ var (
 	remotePairPort    int
 	remotePairProfile string
 	remotePairLabel   string
+	remotePairFn      = client.PairRemote
 )
 
 var remotePairCmd = &cobra.Command{
 	Use:   "pair <host>",
-	Short: "Pair this device with a remote daemon (approve with `gr pair approve` on the host)",
+	Short: "Pair this device with a remote daemon (approve with `gr remote pairings approve` on the host)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(_ *cobra.Command, args []string) error {
 		host := args[0]
@@ -46,9 +47,9 @@ var remotePairCmd = &cobra.Command{
 			label, _ = os.Hostname()
 		}
 
-		out.Printf("Requesting pairing with %s:%d as %q — approve on the remote host: gr pair approve <id>\n", host, remotePairPort, label)
+		out.Printf("Requesting pairing with %s:%d as %q — approve on the remote host: gr remote pairings approve <request-id>\n", host, remotePairPort, label)
 
-		rh, err := client.PairRemote(paths, host, remotePairPort, remotePairProfile, label, pubB64)
+		rh, err := remotePairFn(paths, host, remotePairPort, remotePairProfile, label, pubB64)
 		if err != nil {
 			return err
 		}
@@ -214,7 +215,6 @@ func runRemoteAttach(rh *client.RemoteHost, signer ed25519.PrivateKey, sessionAr
 		_ = protocol.DecodePayload(resp, &info)
 
 		opts := client.PassthroughOpts{Keys: keys, SessionID: sessionID, Info: &info}
-		opts.AutoPopApproval = cfg.Approvals.AutoPop
 		opts.DragArrowKeys = cfg.Input.DragArrowKeys
 		opts.DragArrowThreshold = cfg.Input.DragArrowThreshold
 
@@ -240,6 +240,7 @@ func registerRemoteCmd() {
 	remotePairCmd.Flags().StringVar(&remotePairLabel, "label", "", "device label shown to the remote human (default: hostname)")
 
 	remoteCmd.AddCommand(remotePairCmd)
+	registerRemotePairingsCmd()
 	remoteCmd.AddCommand(remoteListCmd)
 	remoteCmd.AddCommand(remoteAttachCmd)
 	rootCmd.AddCommand(remoteCmd)

@@ -21,9 +21,9 @@ import (
 var sandboxCmd = &cobra.Command{
 	Use:   "sandbox",
 	Short: "Inspect and debug the sandbox",
-	Long: `Inspect and debug graith's OS sandbox.
+	Long: `Inspect and debug graith's OS sandbox and optional command policy.
 
-Two questions, two subcommands:
+Three related tools:
 
   gr sandbox explain   Would a given access be allowed? (predictive)
                        Asks the backend's policy oracle against the profile
@@ -35,7 +35,10 @@ Two questions, two subcommands:
                        → macOS (Seatbelt), which covers both the "safehouse"
                        and "nono" backends on macOS.
 
-Neither launches an agent or changes anything.`,
+  gr sandbox policy    Check or validate the optional synchronous shell-command
+                       deny layer. An allow still proceeds through the sandbox.
+
+None launches an agent or changes anything.`,
 }
 
 // --- gr sandbox explain (the policy oracle) ---
@@ -719,6 +722,7 @@ func whySource(res sandbox.WhyResult) string {
 
 // registerSandboxCmd registers this command on rootCmd. Called from registerCommands.
 func registerSandboxCmd() {
+	registerSandboxPolicyCmd()
 	sandboxExplainCmd.Flags().StringVar(&explainPath, "path", "", "filesystem path to check")
 	sandboxExplainCmd.Flags().StringVar(&explainOp, "op", "", "operation for --path: read, write, or readwrite")
 	sandboxExplainCmd.Flags().StringVar(&explainHost, "host", "", "network host to check (e.g. github.com)")

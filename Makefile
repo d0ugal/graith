@@ -1,6 +1,6 @@
 GOLANGCI_LINT_VERSION := v2.12.2
 
-.PHONY: build test lint lint-only lint-darwin fmt clean notifier demo demo-clean
+.PHONY: build test lint lint-only lint-darwin fmt clean notifier service-app demo demo-clean
 
 build:
 	go build -v -ldflags="-s -w" -o gr ./cmd/graith
@@ -11,6 +11,22 @@ build:
 # macos/build/GraithNotifier.app.
 notifier:
 	sh macos/notifier/build.sh
+
+# Local ad-hoc Graith.app for lifecycle/manual verification. Production release
+# packaging invokes the same script with Developer ID + notarization inputs.
+service-app:
+	@commit=$$(git rev-parse --short HEAD); arch=$$(go env GOARCH); \
+		mkdir -p macos/build; \
+		go build -v -trimpath -ldflags="-s -w \
+			-X github.com/d0ugal/graith/internal/version.Version=0.0.0 \
+			-X github.com/d0ugal/graith/internal/version.CommitSHA=$$commit \
+			-X github.com/d0ugal/graith/internal/daemonservice.ManagedBuild=true \
+			-X github.com/d0ugal/graith/internal/daemonservice.DevelopmentBuild=true" \
+			-o macos/build/service-payload-$$arch ./cmd/graith; \
+		sh macos/service/build.sh --development --arch $$arch \
+			--version 0.0.0 --commit $$commit \
+			--payload macos/build/service-payload-$$arch \
+			--output macos/build/service-$$arch
 
 test:
 	go test -v -race ./...

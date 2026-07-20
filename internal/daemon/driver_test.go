@@ -67,9 +67,9 @@ func TestResolveDriverKind(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:     "explicit but sandboxed -> error",
+			name:     "explicit and sandboxed -> headless",
 			explicit: true, agent: capable, hc: on, sandboxed: true,
-			wantErr: true,
+			want: DriverHeadless,
 		},
 		{
 			name:  "default preference, experimental off -> pty (soft yield, no error)",
@@ -87,9 +87,9 @@ func TestResolveDriverKind(t *testing.T) {
 			want: DriverHeadless,
 		},
 		{
-			name:  "default preference, sandboxed -> pty (soft yield, no error)",
+			name:  "default preference and sandboxed -> headless",
 			agent: capable, hc: onByDefault, sandboxed: true,
-			want: DriverPTY,
+			want: DriverHeadless,
 		},
 	}
 
@@ -146,7 +146,6 @@ func TestHeadlessArgs(t *testing.T) {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--permission-prompt-tool", "stdio",
 		"--session-id", "canny",
 	}
 
@@ -154,13 +153,8 @@ func TestHeadlessArgs(t *testing.T) {
 		t.Fatalf("headlessArgs = %v, want %v", got, want)
 	}
 
-	// The control channel and stdio permission routing are load-bearing for
-	// Phase 4 (interrupt + approvals): assert both flags are present.
+	// The stdin control channel remains load-bearing for interrupts.
 	if !slices.Contains(got, "--input-format") {
 		t.Fatal("headlessArgs must enable the stdin control channel (--input-format stream-json)")
-	}
-
-	if !slices.Contains(got, "--permission-prompt-tool") {
-		t.Fatal("headlessArgs must route permissions over stdio (--permission-prompt-tool stdio)")
 	}
 }

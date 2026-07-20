@@ -23,6 +23,24 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
+// commandPolicyHookCommand turns failure to start or run the bounded policy
+// supervisor into the exit-2 blocking contract shared by Claude and Codex
+// PreToolUse hooks. The supervisor itself emits a valid native deny for worker
+// crashes, malformed output, signals, and its shorter internal timeout.
+func commandPolicyHookCommand(quotedGr string) string {
+	return quotedGr + " command-policy-check || { printf '%s\\n' " +
+		"'graith command policy hook failed before returning a decision' >&2; exit 2; }"
+}
+
+// The agent hook runner must outlive the policy supervisor's own deadline. The
+// config caps policy evaluation at 60 seconds; ten seconds covers the worker's
+// transport slack and process startup/teardown without leaving a human-facing
+// prompt or an unbounded hook.
+func commandPolicyHookTimeout(timeout time.Duration) int {
+	const runnerSlack = 10 * time.Second
+	return int((timeout + runnerSlack + time.Second - 1) / time.Second)
+}
+
 // hookDir returns the directory for hook files for a session.
 func (sm *SessionManager) hookDir(sessionID string) string {
 	return filepath.Join(sm.paths.DataDir, "hooks", sessionID)
@@ -81,49 +99,13 @@ func grBinReadDir(grBin string) (string, bool) {
 	return "", false
 }
 
-// preToolUseExemptTools is the explicit set of read-only Claude tools excluded
-// from the PreToolUse approval hook. Keep it small and known-safe.
-var preToolUseExemptTools = []string{"Read", "Glob", "Grep", "LS", "NotebookRead"}
-
-// preToolUseMatcher builds the Claude hook matcher for the PreToolUse group.
-//
-// It is an anchored negative lookahead that fires the hook for every tool
-// EXCEPT preToolUseExemptTools. This is deliberately an EXCLUSION, not an
-// allowlist, so it fails CLOSED: any tool not named here — a new or renamed
-// Claude tool, every mutating tool (Bash/Write/Edit/MultiEdit/NotebookEdit/
-// WebFetch/WebSearch/Task), and every MCP tool (mcp__*) — still routes to the
-// daemon's approve-request round-trip, keeping the approval backend and the
-// yolo dangerous-command blocklist in force for anything unrecognised.
-// TodoWrite is NOT exempt: it mutates state.
-//
-// The leading ^ anchor and trailing . are both load-bearing. Claude evaluates
-// the matcher as a JS regex with search-anywhere (.test) semantics, not a
-// full-string anchored match. The ^ pins the negative lookahead to position 0,
-// and the trailing . forces the match to consume the first character there — so
-// the only strings that fail to match are exactly the exempt names (the
-// lookahead rejects them). Without the anchor the zero-width lookahead would
-// succeed at a later offset and fire (fail-open) even for an exempt tool.
-//
-// SAFETY: this scoping is correct only while approval policy is tool-name
-// based. If a backend ever grows path-aware rules (e.g. "deny Read of
-// ~/.ssh/**"), excluding Read here would silently bypass them — revisit the
-// exclusion set if approval policy becomes path-aware.
-//
-// No *Claude* hook sends a PreToolUse report-status (Claude's PreToolUse only
-// runs approve-request), so scoping loses no Claude "active" signal —
-// PostToolUse drives the per-tool active heartbeat. (Codex DOES send a
-// pre-tool-use report-status, and HandleHookReport is agent-agnostic, so that
-// mapping stays live for Codex.) Don't "restore" a match-all matcher thinking
-// status needs it.
-func preToolUseMatcher() string {
-	return "^(?!(" + strings.Join(preToolUseExemptTools, "|") + ")$)."
+// generateClaudeSettings writes a Claude Code settings JSON file that registers
+// lifecycle hooks and, independently, the optional Bash command-policy hook.
+func (sm *SessionManager) generateClaudeSettings(sessionID string, lifecycle, policy bool) (string, error) {
+	return sm.generateClaudeSettingsWithTimeout(sessionID, lifecycle, policy, sm.Config().CommandPolicy.TimeoutDuration())
 }
 
-// generateClaudeSettings writes a Claude Code settings JSON file that registers
-// hooks for all relevant lifecycle events. Returns the path to the settings file.
-// All supported hooks are generated including PreToolUse (approve-request) and
-// SessionStart (check-inbox). Only called when agent hooks are enabled.
-func (sm *SessionManager) generateClaudeSettings(sessionID string, yolo bool) (string, error) {
+func (sm *SessionManager) generateClaudeSettingsWithTimeout(sessionID string, lifecycle, policy bool, policyTimeout time.Duration) (string, error) {
 	dir := sm.hookDir(sessionID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create hook dir: %w", err)
@@ -132,11 +114,6 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, yolo bool) (s
 	settingsPath := filepath.Join(dir, "settings.json")
 
 	quoted := shellQuote(resolveGrBin())
-
-	// A yolo session always installs the PreToolUse approval hook so its tool
-	// calls route through the daemon's auto-approve backend (and any future
-	// dangerous-command blocklist), even when global approval gating is off.
-	hookEnabled := sm.cfg.Approvals.HookEnabled() || yolo
 
 	events := []string{
 		"SessionStart",
@@ -159,6 +136,7 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, yolo bool) (s
 	type hookHandler struct {
 		Type    string `json:"type"`
 		Command string `json:"command"`
+		Timeout int    `json:"timeout,omitempty"`
 	}
 
 	type matcherGroup struct {
@@ -177,26 +155,37 @@ func (sm *SessionManager) generateClaudeSettings(sessionID string, yolo bool) (s
 	for _, event := range events {
 		var handlers []hookHandler
 
-		// Default to a match-all (empty) matcher; PreToolUse narrows it to
-		// exclude the known read-only tools (fail-closed — see preToolUseMatcher).
+		// Default to a match-all (empty) matcher. Command policy is scoped to the
+		// verified shell transport by an exact Bash matcher.
 		matcher := ""
 
 		switch event {
 		case "PreToolUse":
-			if !hookEnabled {
+			if !policy {
 				continue
 			}
 
-			matcher = preToolUseMatcher()
+			matcher = "^Bash$"
 			handlers = []hookHandler{
-				{Type: "command", Command: quoted + " approve-request"},
+				{
+					Type: "command", Command: commandPolicyHookCommand(quoted),
+					Timeout: commandPolicyHookTimeout(policyTimeout),
+				},
 			}
 		case "SessionStart":
+			if !lifecycle {
+				continue
+			}
+
 			handlers = []hookHandler{
 				{Type: "command", Command: fmt.Sprintf("%s report-status --event %s", quoted, event)},
 				{Type: "command", Command: quoted + " check-inbox"},
 			}
 		default:
+			if !lifecycle {
+				continue
+			}
+
 			handlers = []hookHandler{
 				{Type: "command", Command: fmt.Sprintf("%s report-status --event %s", quoted, event)},
 			}
@@ -272,10 +261,14 @@ func (sm *SessionManager) generateMCPConfig(sessionID string, mcpServers []confi
 // MCP `--mcp-config` generation is deliberately NOT bundled here — it lives in
 // injectMCPConfig so MCP availability can be decided independently of whether
 // generated hooks are installed. A headless session skips generated hooks (the
-// typed stream is its status/approval feed) but still needs its MCP servers, so
+// typed stream is its status/lifecycle feed) but still needs its MCP servers, so
 // the two concerns must not ride the same branch. See issue #1135.
-func (sm *SessionManager) injectClaudeHooks(sessionID string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
-	settingsPath, err := sm.generateClaudeSettings(sessionID, yolo)
+func (sm *SessionManager) injectClaudeHooks(sessionID string, lifecycle, policy bool) (extraArgs []string, extraEnv map[string]string, err error) {
+	return sm.injectClaudeHooksWithTimeout(sessionID, lifecycle, policy, sm.Config().CommandPolicy.TimeoutDuration())
+}
+
+func (sm *SessionManager) injectClaudeHooksWithTimeout(sessionID string, lifecycle, policy bool, policyTimeout time.Duration) (extraArgs []string, extraEnv map[string]string, err error) {
+	settingsPath, err := sm.generateClaudeSettingsWithTimeout(sessionID, lifecycle, policy, policyTimeout)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -351,7 +344,7 @@ var codexBareKeyRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // --mcp-config which sets the same two fields). Using `-c` overrides rather
 // than writing a full config file leaves any user-supplied per-server Codex
 // controls — `startup_timeout_sec`, `tool_timeout_sec`, `enabled`,
-// enabled/disabled tools, per-tool approval mode — intact and merged, rather
+// enabled/disabled tools, per-tool execution mode — intact and merged, rather
 // than flattening every server to graith's command/args/env shape.
 //
 // Values are JSON-encoded, which is also valid TOML for a string
@@ -391,17 +384,19 @@ func codexMCPServerArgs(mcpServers []config.MCPServerConfig) (args, skipped []st
 	return args, skipped, nil
 }
 
-// codexHookEvent describes one Codex lifecycle hook: the Codex event name and
-// the shell commands graith runs for it, in order.
+// codexHookEvent describes one Codex hook event and its independently matched
+// command groups.
 type codexHookEvent struct {
 	// event is the Codex hook event name. It must match a key the current Codex
 	// CLI recognises in its HookEventsToml schema (PascalCase, e.g. SessionStart).
-	event string
-	// commands are the shell command strings run for the event, in order.
+	event  string
+	groups []codexHookGroup
+}
+
+type codexHookGroup struct {
+	matcher  string
 	commands []string
-	// approval marks the PermissionRequest hook, which bridges to the daemon's
-	// approval backend and is only installed when the approval gate (or yolo) is on.
-	approval bool
+	timeout  int
 }
 
 // injectCodexHooks builds the Codex session-config overrides that register
@@ -412,49 +407,63 @@ type codexHookEvent struct {
 // [hooks] config, and accepts hooks per-invocation as trusted session config via
 // repeatable `-c hooks.<Event>=<toml>` overrides. Each override's value is
 // parsed by Codex as TOML (codex-rs/utils/cli config_override), so graith emits
-// a TOML array of matcher groups — [{hooks=[{type="command",command="..."}]}] —
-// with no matcher (match-all). `--dangerously-bypass-hook-trust` skips Codex's
-// interactive hook-trust review, safe here because graith generated and vetted
-// these hooks and no human is watching the TUI to approve them.
+// a TOML array of matcher groups. Lifecycle groups have no matcher (match all),
+// while command policy matches Bash only. `--dangerously-bypass-hook-trust`
+// skips Codex's hook-trust review because graith generated and vetted these
+// hooks; it does not disable the agent's separate native tool approvals.
 //
 // MCP-server wiring is NOT handled here — it rides the separate injectMCPConfig
 // path (issue #1135), so a headless codex session gets MCP without hooks.
-func (sm *SessionManager) injectCodexHooks(sessionID string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
-	grBin := shellQuote(resolveGrBin())
-	hookEnabled := sm.cfg.Approvals.HookEnabled() || yolo
+func (sm *SessionManager) injectCodexHooks(sessionID string, lifecycle, policy bool) (extraArgs []string, extraEnv map[string]string, err error) {
+	return sm.injectCodexHooksWithTimeout(sessionID, lifecycle, policy, sm.Config().CommandPolicy.TimeoutDuration())
+}
 
-	events := []codexHookEvent{
-		{event: "SessionStart", commands: []string{
-			grBin + " report-status --event SessionStart",
-			grBin + " check-inbox",
-		}},
-		{event: "UserPromptSubmit", commands: []string{
-			grBin + " report-status --event UserPromptSubmit",
-		}},
-		{event: "PreToolUse", commands: []string{
-			grBin + " report-status --event PreToolUse",
-		}},
-		{event: "PostToolUse", commands: []string{
-			grBin + " report-status --event PostToolUse",
-		}},
-		{event: "PermissionRequest", approval: true, commands: []string{
-			grBin + " approve-request",
-		}},
-		{event: "Stop", commands: []string{
-			grBin + " report-status --event Stop",
-		}},
+func (sm *SessionManager) injectCodexHooksWithTimeout(sessionID string, lifecycle, policy bool, policyTimeout time.Duration) (extraArgs []string, extraEnv map[string]string, err error) {
+	grBin := shellQuote(resolveGrBin())
+
+	var events []codexHookEvent
+	if lifecycle {
+		events = append(events,
+			codexHookEvent{event: "SessionStart", groups: []codexHookGroup{{commands: []string{
+				grBin + " report-status --event SessionStart",
+				grBin + " check-inbox",
+			}}}},
+			codexHookEvent{event: "UserPromptSubmit", groups: []codexHookGroup{{commands: []string{
+				grBin + " report-status --event UserPromptSubmit",
+			}}}},
+			codexHookEvent{event: "PostToolUse", groups: []codexHookGroup{{commands: []string{
+				grBin + " report-status --event PostToolUse",
+			}}}},
+			codexHookEvent{event: "Stop", groups: []codexHookGroup{{commands: []string{
+				grBin + " report-status --event Stop",
+			}}}},
+		)
 	}
 
-	installed := 0
+	var preToolGroups []codexHookGroup
+	if lifecycle {
+		preToolGroups = append(preToolGroups, codexHookGroup{commands: []string{
+			grBin + " report-status --event PreToolUse",
+		}})
+	}
+
+	if policy {
+		// PreToolUse runs independently of Codex's native approval policy, so
+		// command policy remains enforceable whether the agent prompts or not.
+		preToolGroups = append(preToolGroups, codexHookGroup{
+			matcher:  "^Bash$",
+			commands: []string{commandPolicyHookCommand(grBin)},
+			timeout:  commandPolicyHookTimeout(policyTimeout),
+		})
+	}
+
+	if len(preToolGroups) > 0 {
+		events = append(events, codexHookEvent{event: "PreToolUse", groups: preToolGroups})
+	}
 
 	for _, e := range events {
-		if e.approval && !hookEnabled {
-			continue
-		}
-
-		value := codexHookOverrideValue(e.commands)
+		value := codexHookOverrideGroups(e.groups)
 		extraArgs = append(extraArgs, "-c", fmt.Sprintf("hooks.%s=%s", e.event, value))
-		installed++
 	}
 
 	// NOTE: --dangerously-bypass-hook-trust is process-wide, not scoped to the
@@ -467,7 +476,7 @@ func (sm *SessionManager) injectCodexHooks(sessionID string, yolo bool) (extraAr
 	// trust only the session-config hooks without bypassing trust globally.
 	extraArgs = append(extraArgs, "--dangerously-bypass-hook-trust")
 
-	sm.log.Info("injected codex hooks", "session_id", sessionID, "events", installed)
+	sm.log.Info("injected codex hooks", "session_id", sessionID, "events", len(events))
 
 	return extraArgs, nil, nil
 }
@@ -477,12 +486,31 @@ func (sm *SessionManager) injectCodexHooks(sessionID string, yolo bool) (extraAr
 // the given shell commands in order. The shape mirrors Codex's HookEventsToml
 // matcher-group schema ([{hooks=[{type="command",command="..."}]}]).
 func codexHookOverrideValue(commands []string) string {
-	handlers := make([]string, len(commands))
-	for i, c := range commands {
-		handlers[i] = fmt.Sprintf(`{type="command",command=%s}`, tomlBasicString(c))
+	return codexHookOverrideGroups([]codexHookGroup{{commands: commands}})
+}
+
+func codexHookOverrideGroups(groups []codexHookGroup) string {
+	encodedGroups := make([]string, len(groups))
+	for i, group := range groups {
+		handlers := make([]string, len(group.commands))
+		for j, command := range group.commands {
+			timeout := ""
+			if group.timeout > 0 {
+				timeout = fmt.Sprintf(`,timeout=%d`, group.timeout)
+			}
+
+			handlers[j] = fmt.Sprintf(`{type="command",command=%s%s}`, tomlBasicString(command), timeout)
+		}
+
+		matcher := ""
+		if group.matcher != "" {
+			matcher = fmt.Sprintf(`matcher=%s,`, tomlBasicString(group.matcher))
+		}
+
+		encodedGroups[i] = fmt.Sprintf(`{%shooks=[%s]}`, matcher, strings.Join(handlers, ","))
 	}
 
-	return fmt.Sprintf(`[{hooks=[%s]}]`, strings.Join(handlers, ","))
+	return fmt.Sprintf(`[%s]`, strings.Join(encodedGroups, ","))
 }
 
 // tomlBasicString encodes s as a TOML basic (double-quoted) string, escaping the
@@ -614,7 +642,7 @@ func preTrustCursorWorkspace(worktreePath string) error {
 // injectCursorHooks generates a .cursor/hooks.json in the worktree for a
 // Cursor session. Returns no extra args or env — cursor reads hooks from the
 // project directory automatically.
-func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
+func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, lifecycle, policy bool) (extraArgs []string, extraEnv map[string]string, err error) {
 	if worktreePath == "" {
 		return nil, nil, nil
 	}
@@ -660,9 +688,9 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, yolo
 		Hooks   map[string][]hookEntry `json:"hooks"`
 	}
 
-	hooks := hooksFile{
-		Version: 1,
-		Hooks: map[string][]hookEntry{
+	hooks := hooksFile{Version: 1, Hooks: map[string][]hookEntry{}}
+	if lifecycle {
+		hooks.Hooks = map[string][]hookEntry{
 			"sessionStart": {
 				{Command: quoted + " report-status --event SessionStart"},
 				{Command: quoted + " check-inbox"},
@@ -673,12 +701,12 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, yolo
 			"stop": {
 				{Command: quoted + " report-status --event Stop"},
 			},
-		},
+		}
 	}
 
-	if sm.cfg.Approvals.HookEnabled() || yolo {
+	if policy {
 		hooks.Hooks["preToolUse"] = []hookEntry{
-			{Command: quoted + " approve-request"},
+			{Command: quoted + " command-policy-check"},
 		}
 	}
 
@@ -1061,14 +1089,14 @@ func (sm *SessionManager) removeGeneratedCursorHooks(sessionID, worktreePath str
 // implementation. It does NOT handle MCP config — that is injectMCPConfig's job,
 // kept separate so MCP can be injected without hooks (see issue #1135). Returns
 // nil for agents that don't support hooks.
-func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string, yolo bool) (extraArgs []string, extraEnv map[string]string, err error) {
+func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string, lifecycle, policy bool, policyTimeout time.Duration) (extraArgs []string, extraEnv map[string]string, err error) {
 	switch agentName {
 	case "claude":
-		return sm.injectClaudeHooks(sessionID, yolo)
+		return sm.injectClaudeHooksWithTimeout(sessionID, lifecycle, policy, policyTimeout)
 	case "codex":
-		return sm.injectCodexHooks(sessionID, yolo)
+		return sm.injectCodexHooksWithTimeout(sessionID, lifecycle, policy, policyTimeout)
 	case "cursor":
-		return sm.injectCursorHooks(sessionID, worktreePath, yolo)
+		return sm.injectCursorHooks(sessionID, worktreePath, lifecycle, policy)
 	default:
 		sm.log.Info("agent does not support hooks, skipping", "agent", agentName, "session_id", sessionID)
 		return nil, nil, nil

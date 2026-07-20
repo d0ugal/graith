@@ -2,7 +2,7 @@ import Foundation
 
 /// The graith control-protocol version. Compatibility is by major version,
 /// matching `protocol.Version` / `VersionCompatible` in Go.
-public let protocolVersion = "1.0"
+public let protocolVersion = "2.0"
 
 /// Reports whether a peer's version string is compatible with ours (same
 /// major version), mirroring `protocol.VersionCompatible`.

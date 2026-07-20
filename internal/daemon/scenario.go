@@ -463,6 +463,9 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		return nil, err
 	}
 
+	msg.Sessions = append([]protocol.ScenarioSessionInput(nil), msg.Sessions...)
+	scenariofile.NormalizeSessionContracts(msg.Sessions)
+
 	normalizedPolicy, err := normalizeProtocolScenarioPolicy(msg, sm.scenarioTodoTitleLimit())
 	if err != nil {
 		return nil, err
@@ -645,9 +648,9 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	cfg := sm.Config()
 	repoRoots := make([]string, len(msg.Sessions))
 
-	// Validate agents, sandbox enforcement, and explicitly supplied repos before
-	// reserving anything. Mirrored members have no repo path to validate: their
-	// effective repo/worktree is derived from the target during reservation.
+	// Validate agents, mirror sandbox enforcement, and explicitly supplied repos
+	// before reserving anything. Mirrored members have no repo path to validate:
+	// their effective repo/worktree is derived from the target during reservation.
 	for i, s := range msg.Sessions {
 		agentName := s.Agent
 		if agentName == "" {
@@ -1654,7 +1657,12 @@ func (sm *SessionManager) ListScenarios() []protocol.ScenarioRecord {
 
 	records := make([]protocol.ScenarioRecord, 0, len(sm.state.Scenarios))
 	for _, sc := range sm.state.Scenarios {
-		records = append(records, *sm.buildScenarioRecord(sc))
+		record := *sm.buildScenarioRecord(sc)
+		for i := range record.Sessions {
+			record.Sessions[i].Prompt = ""
+		}
+
+		records = append(records, record)
 	}
 
 	return records
@@ -1839,11 +1847,13 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		return nil, errors.New("repo is required")
 	}
 
-	if err := scenariofile.ValidateSessionContracts(
-		[]protocol.ScenarioSessionInput{input}, sm.scenarioTodoTitleLimit(),
-	); err != nil {
+	validatedInput := []protocol.ScenarioSessionInput{input}
+	if err := scenariofile.ValidateSessionContracts(validatedInput, sm.scenarioTodoTitleLimit()); err != nil {
 		return nil, err
 	}
+
+	scenariofile.NormalizeSessionContracts(validatedInput)
+	input = validatedInput[0]
 
 	if err := validateScenarioResultDeclarations(name, []protocol.ScenarioSessionInput{input}); err != nil {
 		return nil, err
@@ -1876,6 +1886,39 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 
 	unlock := sm.lockScenarioPolicy(resolvedID)
 	defer unlock()
+
+	// Scenario policy locking serializes add/start/stop/delete operations. Copy
+	// the existing contracts under the state lock, then perform the potentially
+	// multi-megabyte encoding outside it before any new member is created.
+	sm.mu.RLock()
+
+	var (
+		existingScenario  = sm.state.Scenarios[resolvedID]
+		scenarioFound     = existingScenario != nil && existingScenario.Name == name
+		existingContracts = make([]protocol.ScenarioSessionInput, 0)
+	)
+
+	if scenarioFound {
+		existingContracts = make([]protocol.ScenarioSessionInput, len(existingScenario.Sessions), len(existingScenario.Sessions)+1)
+		for i, member := range existingScenario.Sessions {
+			existingContracts[i] = protocol.ScenarioSessionInput{
+				Prompt: member.Prompt,
+				Task:   member.Task,
+				Shared: member.Shared,
+			}
+		}
+	}
+
+	sm.mu.RUnlock()
+
+	if !scenarioFound {
+		return nil, fmt.Errorf("scenario %q not found", name)
+	}
+
+	existingContracts = append(existingContracts, input)
+	if err := scenariofile.ValidateScenarioContractPayload(existingContracts); err != nil {
+		return nil, err
+	}
 
 	sm.mu.Lock()
 

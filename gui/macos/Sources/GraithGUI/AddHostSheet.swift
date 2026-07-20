@@ -7,9 +7,10 @@ import GraithRemoteKit
 ///
 ///   1. The user enters the daemon's MagicDNS name + a label and taps Pair.
 ///   2. The app sends `pair_request` and waits — the local human approves
-///      out-of-band with `gr pair approve <id>` on the host.
+///      out-of-band with `gr remote pairings approve <request-id>` on the host.
 ///   3. The daemon returns a token + TLS pin; the user confirms the SPKI
-///      fingerprint matches what `gr pair` printed (TOFU), then it is trusted.
+///      fingerprint matches what `gr remote pairings approve` printed (TOFU),
+///      then it is trusted.
 struct AddHostSheet: View {
     @EnvironmentObject var pairing: PairingCoordinator
     @Environment(\.dismiss) private var dismiss
@@ -79,7 +80,7 @@ struct AddHostSheet: View {
             FormField(label: "Port") {
                 pairingTextField(String(GraithTransport.defaultRemotePort), text: $port)
             }
-            FormField(label: "This device's name (shown in gr pair list)") {
+            FormField(label: "This device's name (shown in gr remote pairings list)") {
                 pairingTextField("my-mac", text: $deviceLabel)
             }
             FormField(label: "Daemon profile (optional)") {
@@ -135,13 +136,13 @@ struct AddHostSheet: View {
                 Text("On \(magicDNSName), run:")
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(Theme.overlay0)
-                Text("gr pair approve <request-id>")
+                Text("gr remote pairings approve <request-id>")
                     .font(.system(.body, design: .monospaced))
                     .foregroundStyle(Theme.green)
                     .padding(8)
                     .background(Theme.crust)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
-                Text("List pending requests with `gr pair list`.")
+                Text("List pending requests with `gr remote pairings list`.")
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(Theme.overlay0)
             }
@@ -160,7 +161,7 @@ struct AddHostSheet: View {
             Text("Confirm the fingerprint")
                 .font(.system(.title3, design: .monospaced))
                 .foregroundStyle(Theme.text)
-            Text("Check this matches the SPKI pin `gr pair approve` printed on the host.")
+            Text("Check this matches the SPKI pin `gr remote pairings approve` printed on the host.")
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(Theme.overlay0)
                 .multilineTextAlignment(.center)

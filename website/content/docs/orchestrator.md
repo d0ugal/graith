@@ -7,17 +7,23 @@ toc: true
 draft: false
 ---
 
-The orchestrator is a special system session that coordinates other agent sessions. It has no repository or worktree of its own; its power comes from the graith control plane.
+The orchestrator is a special system session that coordinates other agent sessions. It has no repository or worktree of its own — its power comes from the graith control plane.
 
 ## Prerequisites
 
-The orchestrator requires sandbox to be enabled. If sandbox is not available (safehouse not installed or `sandbox.enabled = false`), orchestrator creation fails with an error.
+The orchestrator uses the same independent sandbox, native-prompt, and command-
+policy settings as ordinary sessions. Enabling the sandbox is strongly
+recommended because the orchestrator can create and control descendants; it is
+off until you configure a backend. If an enabled backend or configured command
+policy is unavailable, creation fails; an explicitly disabled sandbox is
+allowed, with the usual startup warning and `gr doctor` diagnostic.
 
 ## Enabling
 
 ```toml
 [sandbox]
 enabled = true
+backend = "nono"       # or "safehouse" on macOS
 
 [orchestrator]
 enabled      = true
@@ -28,9 +34,9 @@ prompt       = "..."       # custom prompt (optional)
 prompt_file  = ""          # or read from file
 ```
 
-When `[orchestrator] agent` is left empty, the orchestrator inherits the top-level `default_agent` (falling back to `claude` only if that is unset too). Set it explicitly to run the orchestrator as a different agent than your session default.
+When `[orchestrator] agent` is empty, the orchestrator inherits the top-level `default_agent` (falling back to `claude` only if that's also unset). Set it explicitly to run the orchestrator as a different agent than your session default.
 
-When enabled, the orchestrator session is created automatically and accessible via `ctrl+b o`.
+When enabled, the orchestrator session is created automatically and reachable via `ctrl+b o`.
 
 ## Starting fresh
 
@@ -41,11 +47,11 @@ from the current configuration:
 gr delete orchestrator
 ```
 
-Unlike ordinary sessions, this is an immediate reset rather than a recoverable
-soft delete. When `[orchestrator] enabled = true`, the daemon recreates a fresh
+Unlike ordinary sessions, this is an immediate reset, not a recoverable soft
+delete. With `[orchestrator] enabled = true`, the daemon recreates a fresh
 orchestrator within a few seconds, using the currently configured agent, model,
-and prompt. Use `gr stop orchestrator` when you want it to remain stopped.
-To remove it permanently with `gr purge`, disable it in config first.
+and prompt. Use `gr stop orchestrator` to keep it stopped. To remove it
+permanently with `gr purge`, disable it in config first.
 
 ## Capabilities
 
@@ -70,7 +76,7 @@ gr status "message"               # set status visible in picker
 gr type <session> "text"          # type into another session
 ```
 
-For reproducible, multi-repo session fleets, use [scenarios](scenarios.md) — they define sessions declaratively in a TOML file and create them atomically with rollback on failure.
+For reproducible, multi-repo session fleets, use [scenarios](scenarios.md) — they define sessions declaratively in a TOML file and create them atomically, rolling back on failure.
 
 ## Important constraints
 
@@ -80,9 +86,9 @@ For reproducible, multi-repo session fleets, use [scenarios](scenarios.md) — t
 
 ## Default prompt
 
-The built-in orchestrator prompt teaches the agent about its capabilities, constraints, and the graith control plane. Override with a custom `prompt` or `prompt_file` in config.
+The built-in orchestrator prompt teaches the agent about its capabilities, constraints, and the graith control plane. Override it with a custom `prompt` or `prompt_file` in config.
 
-Prompt injection fails closed on both create and resume: if the configured prompt cannot be assembled or injected (for example a Cursor rules file that cannot be written), the orchestrator is not started and the operation returns an error, rather than launching a privileged orchestrator without its role prompt.
+Prompt injection fails closed on both create and resume: if the configured prompt can't be assembled or injected (say, a Cursor rules file that can't be written), the orchestrator doesn't start and the operation returns an error — graith won't launch a privileged orchestrator without its role prompt.
 
 ## Workflow example
 

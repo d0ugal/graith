@@ -35,7 +35,7 @@ func errorMessage(resp protocol.Envelope) string {
 // payload, reads the reply, and maps an "error" envelope to a Go error. A send
 // failure is intentionally ignored (matching the historical session-op
 // behaviour) — the subsequent read surfaces the broken connection. Used by the
-// one-shot session operations (star, stop, restart, rename, delete, restore).
+// one-shot session operations (update, stop, restart, delete, restore).
 //
 // An "error" envelope is reported as an error regardless of its message text,
 // so an (unexpected) empty-message error still fails the operation.

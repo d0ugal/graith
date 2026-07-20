@@ -7,28 +7,24 @@ toc: true
 draft: false
 ---
 
-graith has three frontends — the `gr` **CLI**, the **iOS** app, and the
-**macOS** app — and all three are clients of one daemon over the same wire
-protocol. This page tracks which capabilities each surface supports, so a gap
-between them is an explicit, reviewable fact rather than something discovered by
-hand.
+graith has three frontends — the `gr` **CLI**, **iOS**, and **macOS** apps — all
+clients of one daemon over the same wire protocol. This page tracks each
+surface's capabilities, making any gap explicit and reviewable.
 
 ## Source of truth
 
-The matrix below is **generated** from a machine-readable manifest,
-[`internal/capabilities/capabilities.json`](https://github.com/d0ugal/graith/blob/main/internal/capabilities/capabilities.json).
-The manifest is the source of truth; this page is rendered from it and a Go
-test (`TestDocMatchesManifest`) fails if the two ever disagree. To change the
-matrix, edit the manifest and regenerate:
+The matrix is **generated** from a machine-readable manifest,
+[`internal/capabilities/capabilities.json`](https://github.com/d0ugal/graith/blob/main/internal/capabilities/capabilities.json)
+— the source of truth. A Go test (`TestDocMatchesManifest`) fails if the two
+disagree. To change it, edit the manifest and regenerate:
 
 ```bash
 go test ./internal/capabilities -run TestDocMatchesManifest -update
 ```
 
-A `planned` cell is an intentional statement of intent — a targeted gap we mean
-to close — while `n/a` marks a surface deliberately excluded by the linked
-platform decision (for example, CLI scripting primitives that the GUIs express
-as live state instead).
+A `planned` cell is a gap we mean to close; `n/a` marks a surface excluded by
+the linked platform decision — e.g. CLI scripting primitives the GUIs express
+as live state.
 
 ## Matrix
 
@@ -56,7 +52,7 @@ as live state instead).
 | Restore a soft-deleted session | ✅ | ✅ | ✅ |
 | Purge (hard delete) | ✅ | ✅ | ✅ |
 | Rename session | ✅ | ✅ | ✅ |
-| Star / unstar session | ✅ | ✅ | ✅ |
+| Update starred state | ✅ | ✅ | ✅ |
 | Fork session | ✅ | ✅ | ✅ |
 | Migrate session to another agent | ✅ | ✅ | ✅ |
 | Set session status summary | ✅ | ✅ | ✅ |
@@ -79,18 +75,14 @@ as live state instead).
 
 <sup>1</sup> Type into another session remotely: An attached GUI types directly; the standalone remote-type command is a CLI convenience. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-platform-scope-policy.md#platform-support)
 
-### Approvals & pairing
+### Pairing
 
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
-| View pending tool approvals <sup>1</sup> | ✅ | — | — |
-| Respond to a tool approval <sup>2</sup> | ✅ | — | — |
 | Request device pairing | ✅ | ✅ | ✅ |
-| List / approve / revoke paired devices <sup>3</sup> | ✅ | — | — |
+| List / approve / revoke paired devices <sup>1</sup> | ✅ | — | — |
 
-<sup>1</sup> View pending tool approvals: Native approval queues are removed in preparation for eliminating interactive approvals entirely under [issue #1392](https://github.com/d0ugal/graith/issues/1392). [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
-<sup>2</sup> Respond to a tool approval: Native approval responses are removed in preparation for eliminating interactive approvals entirely under [issue #1392](https://github.com/d0ugal/graith/issues/1392). [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
-<sup>3</sup> List / approve / revoke paired devices: Device-list administration is local-human-only and remote-denied. Native apps pair with a daemon but deliberately do not manage its trust list. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
+<sup>1</sup> List / approve / revoke paired devices: Device-list administration is local-human-only and remote-denied. Native apps pair with a daemon but deliberately do not manage its trust list. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
 
 ### Messaging
 

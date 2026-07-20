@@ -54,9 +54,7 @@ public enum ControlType {
     public static let restore = "restore"
     public static let setStatus = "set_status"
     public static let interrupt = "interrupt"
-    public static let rename = "rename"
-    public static let star = "star"
-    public static let unstar = "unstar"
+    public static let update = "update"
     public static let fork = "fork"
     public static let migrate = "migrate"
     public static let logs = "logs"
@@ -155,8 +153,7 @@ public protocol GraithHostClient: Actor {
     /// Set (or clear) a session's status summary (`gr status`).
     func setStatus(sessionID: String, text: String, ttlSeconds: Int?, clear: Bool) async throws
     func rename(sessionID: String, newName: String) async throws
-    func star(sessionID: String) async throws
-    func unstar(sessionID: String) async throws
+    func update(sessionID: String, name: String?, parentID: String?, starred: Bool?) async throws -> UpdateResultMsg
     /// Fork `sourceSessionID` into a new session named `name`.
     func fork(name: String, sourceSessionID: String) async throws
     /// Migrate `sessionID` to a different `agent` (and optionally `model`).

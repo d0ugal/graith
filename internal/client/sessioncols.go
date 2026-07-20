@@ -12,21 +12,21 @@ import (
 )
 
 // SessionColumn is the single source of truth for one column shown in the
-// session picker (the TUI overlay) and/or the `gr ls` table (the CLI). A column
-// is defined exactly once here, so adding a new column makes it appear in both
-// surfaces — flip ShowCLI/ShowTUI to control where it shows up and the two
-// views stay in sync automatically.
+// session picker (the TUI overlay) and/or the `gr ls` snapshot. A column is
+// defined exactly once here, so adding a new column makes
+// it appear in every enabled surface — flip ShowCLI/ShowTUI to control where it
+// shows up and the views stay in sync automatically.
 //
-// The two surfaces render very differently: the CLI aligns plain-text cells
-// (optionally colorised) by visible width, while the TUI uses lipgloss
-// fixed-width cells with unicode glyphs and per-cell styling. So each column
-// carries a value formatter (and styling) for each surface rather than a single
-// shared string.
+// The list snapshot table and picker render differently: the list aligns
+// plain-text cells (optionally colourised) by visible width, while the picker
+// uses fixed-width cells with unicode glyphs and per-cell styling. So each
+// column carries a value formatter (and styling) for each kind of surface
+// rather than a single shared string.
 //
 // The NAME/Session column is deliberately NOT part of this registry: both
-// surfaces render it specially (star prefix and tree indentation in the CLI,
-// collapse indicators and tree prefixes in the TUI), so it is handled inline by
-// each renderer. This registry covers only the trailing columns.
+// surfaces render it specially (star prefix and tree indentation in list,
+// collapse indicators and tree prefixes in the picker), so it is handled
+// inline by each renderer. This registry covers only the trailing columns.
 type SessionColumn struct {
 	// Key is a stable identifier used for TUI width lookups.
 	Key string
@@ -34,7 +34,7 @@ type SessionColumn struct {
 	// the TUI uses it verbatim ("Status").
 	Header string
 
-	// ShowCLI includes the column in `gr ls`.
+	// ShowCLI includes the column in `gr ls` snapshot mode.
 	ShowCLI bool
 	// ShowTUI includes the column in the TUI session picker.
 	ShowTUI bool
@@ -62,9 +62,10 @@ type SessionColumn struct {
 }
 
 // SessionColumns returns every trailing column in a single display order. Each
-// surface filters by ShowCLI/ShowTUI (the CLI additionally hides Wide columns
-// unless --wide is set) and renders the survivors in this order. The order is
-// chosen so that the two filtered subsets each match their historical layout:
+// surface filters by ShowCLI/ShowTUI (list snapshot/watch additionally hide
+// Wide columns unless --wide is set) and renders the survivors in this order.
+// The order is chosen so that the two filtered subsets each match their
+// historical layout:
 //
 //	CLI: Repo Agent Status Activity [Model Branch] Git PR Review Age [Attached]
 //	TUI: Status Summary Git PR Review Output
@@ -163,7 +164,7 @@ func SessionColumns() []SessionColumn {
 }
 
 // displayStatus is the merged status shown in the TUI status column: the agent
-// status takes over while the session is running (e.g. "thinking", "approval").
+// status takes over while the session is running (e.g. "thinking").
 func displayStatus(s protocol.SessionInfo) string {
 	if s.AgentStatus != "" && s.Status == "running" {
 		return s.AgentStatus
@@ -172,14 +173,11 @@ func displayStatus(s protocol.SessionInfo) string {
 	return s.Status
 }
 
-// statusStyle colours the TUI status cell by its meaning; approval is bolded so
-// it stands out as needing attention.
+// statusStyle colours the TUI status cell by its meaning.
 func statusStyle(s protocol.SessionInfo) lipgloss.Style {
 	switch displayStatus(s) {
 	case "active", "running":
 		return lipgloss.NewStyle().Foreground(colorGreen)
-	case "approval":
-		return lipgloss.NewStyle().Foreground(colorRed).Bold(true)
 	case "ready":
 		return lipgloss.NewStyle().Foreground(colorBlue)
 	case "errored":
@@ -219,15 +217,13 @@ func tuiGitStyle(s protocol.SessionInfo) lipgloss.Style {
 }
 
 // cliActivity is the plain-text agent-activity cell for `gr ls`: empty unless
-// the session is running, with the approval glyph and active-tool annotation.
+// the session is running, with the active-tool annotation.
 func cliActivity(s protocol.SessionInfo) string {
 	if s.Status != "running" || s.AgentStatus == "" {
 		return ""
 	}
 
 	switch {
-	case s.AgentStatus == "approval":
-		return "⚠ approval"
 	case s.AgentStatus == "active" && s.ToolName != "":
 		return fmt.Sprintf("active (%s)", s.ToolName)
 	default:

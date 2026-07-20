@@ -17,7 +17,7 @@ public typealias Host = GraithRemoteKit.Host
 // MARK: - Aliases onto the canonical wire types
 
 /// Parameters for `create`. The canonical `CreateMsg` is a superset of the
-/// old boundary `CreateRequest` (adds base/parentID/yolo/…), so the alias keeps
+/// old boundary `CreateRequest` (adds base/parentID/…), so the alias keeps
 /// existing `CreateRequest(...)` call sites compiling.
 public typealias CreateRequest = GraithProtocol.CreateMsg
 
@@ -53,8 +53,6 @@ public extension SessionInfo {
     var isRunning: Bool { status == "running" }
     var isStopped: Bool { status == "stopped" }
     var isErrored: Bool { status == "errored" }
-    var needsApproval: Bool { agentStatus == "approval" }
-    var isYolo: Bool { yolo == true }
     var isSandboxed: Bool { sandboxed == true }
     var isConfigStale: Bool { configStale == true }
 

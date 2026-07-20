@@ -45,7 +45,6 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	inPlace := opts.InPlace
 	allowConcurrent := opts.AllowConcurrent
 	skipModelValidation := opts.SkipModelValidation
-	yolo := opts.Yolo
 	rows := opts.Rows
 	cols := opts.Cols
 	envExtra := opts.EnvExtra
@@ -328,8 +327,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, err
 	}
 
-	// Fail closed if the configured approvals backend can't enforce.
-	if err := sm.validateApprovalsBackend(yolo); err != nil {
+	if err := sm.validateCommandPolicy(agentName); err != nil {
 		if noRepo {
 			_ = os.RemoveAll(worktreePath)
 		}
@@ -343,18 +341,12 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, errors.New("--mirror requires sandbox to be enabled so the mirrored worktree can be mounted read-only; set sandbox.enabled = true in config and ensure safehouse is installed (gr doctor)")
 	}
 
-	// Yolo requires the PreToolUse approval hook to function, so it forces agent
-	// hooks on regardless of the requested value — otherwise a Yolo session with
-	// hooks disabled would auto-mark itself yolo but never install the hook that
-	// routes tool calls to the auto backend.
-	hooksEnabled := agentHooks || yolo
+	hooksEnabled := agentHooks
+	policyEnabled := sm.cfg.CommandPolicy.Enabled()
+	hookFilesNeeded := hooksEnabled || policyEnabled
 
-	// MCP config injection is now a mechanism distinct from lifecycle-hook
-	// injection (injectMCPConfig vs injectHooks — see issue #1135). The policy
-	// gates still coincide (mcpEnabled == hooksEnabled), so PTY behaviour is
-	// unchanged and yolo still transitively governs MCP for now; the separate
-	// variable is the seam a later headless phase widens to inject MCP without
-	// generated hooks.
+	// MCP config injection is distinct from command-policy hooks. Lifecycle hooks
+	// continue to gate PTY MCP injection; headless MCP uses its own path.
 	mcpEnabled := hooksEnabled
 
 	// Resolve MCP servers under the lock (reads config).
@@ -365,6 +357,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	// Snapshot config values needed for Phase 2.
 	cfgSnapshot := sm.cfg
+	policyTimeout := cfgSnapshot.CommandPolicy.TimeoutDuration()
 	sandboxMerged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
 
 	// Reserve the session with StatusCreating so concurrent operations
@@ -386,7 +379,6 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		MirrorSourceID:       mirrorSourceID,
 		InPlace:              inPlace,
 		AgentHooks:           hooksEnabled,
-		Yolo:                 yolo,
 		TriggerID:            opts.TriggerID,
 		TriggerReactor:       opts.TriggerReactor,
 		TrackerIssue:         opts.TrackerIssue,
@@ -588,6 +580,16 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, fmt.Errorf("expand agent args: %w", err)
 	}
 
+	nonInteractiveArgs, err := config.ExpandSlice(agent.NonInteractiveArgs, vars)
+	if err != nil {
+		cleanupOnError()
+		rollbackState()
+
+		return SessionState{}, fmt.Errorf("expand non-interactive args: %w", err)
+	}
+
+	expandedArgs = append(nonInteractiveArgs, expandedArgs...)
+
 	driverKind := DriverPTY
 	if !opts.ForcePTY {
 		driverKind, err = resolveDriverKind(opts.Headless, agent, cfgSnapshot.Headless, sandboxed)
@@ -715,10 +717,10 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		}
 	}
 
-	// Headless sessions skip graith's generated status/approval hooks: the typed
-	// stream is the status/approval feed.
-	if hooksEnabled && driverKind != DriverHeadless {
-		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, yolo)
+	// Headless sessions skip lifecycle hooks because their typed stream reports
+	// status, but still receive a configured synchronous command-policy hook.
+	if hookFilesNeeded {
+		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, hooksEnabled && driverKind != DriverHeadless, policyEnabled, policyTimeout)
 		if err != nil {
 			cleanupOnError()
 			rollbackState()
@@ -803,7 +805,14 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			envKeys = append(envKeys, k)
 		}
 
-		opts := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, hooksEnabled || mcpEnabled)
+		opts, err := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, hookFilesNeeded || mcpEnabled)
+		if err != nil {
+			cleanupOnError()
+			rollbackState()
+
+			return SessionState{}, fmt.Errorf("configure sandbox: %w", err)
+		}
+
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}
@@ -832,6 +841,18 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			}
 
 			opts.WorktreeDir = scratchDir
+		}
+
+		if err := sm.validateAutomaticSandboxGrants(opts, merged); err != nil {
+			cleanupOnError()
+
+			if scratchDir != "" {
+				_ = os.RemoveAll(scratchDir)
+			}
+
+			rollbackState()
+
+			return SessionState{}, fmt.Errorf("validate sandbox grants: %w", err)
 		}
 
 		var wrapErr error
@@ -903,7 +924,6 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			MaxLogSize:       lc.MaxLogBytesOrDefault(),
 			Prompt:           prompt,
 			Control:          true,
-			OnPermission:     sm.headlessPermissionFunc(id),
 			MaxLineBytes:     cfgSnapshot.Headless.MaxLineBytesOrDefault(),
 			ControlTimeout:   cfgSnapshot.Headless.ControlTimeoutDuration(),
 			InterruptTimeout: cfgSnapshot.Headless.InterruptTimeoutDuration(),
@@ -1005,6 +1025,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	sessState.CreationCfg = &CreationConfig{
 		Agent:         agent,
 		SandboxConfig: cfgSnapshot.Sandbox.Merge(agent.Sandbox),
+		CommandPolicy: cfgSnapshot.CommandPolicy,
 	}
 
 	sm.sessions[id] = ptySess
@@ -1048,6 +1069,10 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		"id", id, "name", name, "agent", agentName,
 		"pid", result.PID, "pgid", ptySess.Pgid(), "sandboxed", sandboxed,
 		"scrollback_path", logPath)
+
+	if !sandboxed {
+		sm.logUnsandboxedStart(id, name, agentName)
+	}
 
 	sm.startWatcher(id, ptySess)
 

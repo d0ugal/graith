@@ -231,7 +231,7 @@ This is the security core. The matrix must cover **every** `case` in the
 
 - [ ] **Step 1: Enumerate every `case`.** Produce the full list from the switch
   (includes `handshake, list, create, fork, migrate, attach, detach, delete, stop,
-  rename, update, star, unstar, set_status, resume, restart, logs, msg_pub,
+  rename, update, set_status, resume, restart, logs, msg_pub,
   msg_inbox, msg_sub, msg_ack, msg_topics, msg_conversation, approval_request,
   approval_respond, approval_list, approval_subscribe, type, resize,
   screen_preview, screen_snapshot, reload, status, status_report, diagnostics,
@@ -290,7 +290,8 @@ wired into Task 9's listeners
   (persist the key), expose the **SPKI fingerprint** for TOFU. `tsnet` mode: use
   `ts.ListenTLS` (tailnet HTTPS cert) — document the MagicDNS/HTTPS-certs
   precondition; pin SPKI there too. The fingerprint is returned in
-  `PairResponseMsg.TLSPinSPKI` and shown by `gr pair` for local confirmation.
+  `PairResponseMsg.TLSPinSPKI` and shown by `gr remote pairings approve` for
+  local confirmation.
 
 **Verify:** `go test ./internal/daemon/ -run TLS`.
 
@@ -349,16 +350,16 @@ wired into Task 9's listeners
 `go test -race ./internal/daemon/...`. Manual: `mode="interface"`, `gr list` over
 the tailnet IP.
 
-### Task 10: `gr pair` CLI + `gr doctor` surfacing
+### Task 10: `gr remote pairings` CLI + `gr doctor` surfacing
 
 **Files:** `internal/cli/pair.go` (new), `internal/cli/pair_test.go` (new),
 `internal/cli/doctor.go`, `internal/cli/root.go`
 
-- [ ] **Step 1: Tests first.** `gr pair list` renders pending + paired;
-  approve/revoke send the right messages; JSON in agent mode.
-- [ ] **Step 2:** Implement `gr pair list|approve <id>|revoke <id>` over the
-  **local socket** (local-only ops). Show the TLS SPKI fingerprint for TOFU
-  confirmation on approve.
+- [ ] **Step 1: Tests first.** `gr remote pairings list` renders pending +
+  paired; approve/revoke send the right messages; JSON in agent mode.
+- [ ] **Step 2:** Implement `gr remote pairings list|approve <id>|revoke <id>`
+  over the **local socket** (local-only ops). Show the TLS SPKI fingerprint for
+  TOFU confirmation on approve.
 - [ ] **Step 3:** `gr doctor` reports remote enabled/mode/listen addr, paired
   device count, and WhoIs/cert provisioning problems.
 
@@ -475,8 +476,8 @@ no-child-process behaviour.*
 - [ ] Universal SwiftUI shell (host→repo→session tree), `HostRegistry` persisted
   with tokens in Keychain, device keypair generation, "not connected to tailnet"
   state.
-- [ ] Pairing: `pair_request` → local human `gr pair approve` → store token + SPKI
-  pin + daemon profile; PoP challenge/response on every reconnect.
+- [ ] Pairing: `pair_request` → local human `gr remote pairings approve` → store
+  token + SPKI pin + daemon profile; PoP challenge/response on every reconnect.
 
 ### Task 19: Read + approvals (no attach)
 

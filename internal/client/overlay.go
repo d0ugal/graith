@@ -72,9 +72,9 @@ func filterNeedsAttention(sessions []protocol.SessionInfo) []protocol.SessionInf
 
 	for _, s := range sessions {
 		switch {
-		case s.AgentStatus == "approval":
-			result = append(result, s)
 		case s.Status == "errored":
+			result = append(result, s)
+		case s.Status == "running" && s.AgentStatus == "error":
 			result = append(result, s)
 		case s.Status == "running" && s.AgentStatus == "ready":
 			result = append(result, s)

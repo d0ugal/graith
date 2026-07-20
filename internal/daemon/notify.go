@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/tools"
 )
 
@@ -35,10 +36,6 @@ func (sm *SessionManager) onAgentStatusChange(sessionID, sessionName, oldStatus,
 	}
 
 	switch newStatus {
-	case "approval":
-		if !notifCfg.OnApproval {
-			return
-		}
 	case "stopped":
 		if !notifCfg.OnStopped {
 			return
@@ -332,8 +329,6 @@ func (sm *SessionManager) sendNotification(sessionName, status, command string) 
 	var message string
 
 	switch status {
-	case "approval":
-		message = sessionName + " needs approval"
 	case "stopped":
 		message = sessionName + " has stopped"
 	default:
@@ -362,13 +357,24 @@ func (sm *SessionManager) sendNotification(sessionName, status, command string) 
 		return
 	}
 
-	if runtime.GOOS == "darwin" {
-		script := fmt.Sprintf(`display notification %q with title %q`, message, title)
+	dispatch := sm.statusDispatch
+	if dispatch == nil {
+		if runtime.GOOS != "darwin" {
+			return
+		}
 
-		sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) {
-			if err := exec.CommandContext(taskCtx, tools.OSAScript(), "-e", script).Run(); err != nil {
-				sm.log.Error("osascript notification failed", "err", err)
-			}
-		})
+		dispatch = dispatchMacNotification
 	}
+
+	timeout := sm.Config().Notifications.Timing.DispatchTimeoutDuration()
+
+	sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) {
+		if taskCtx.Err() != nil {
+			return
+		}
+
+		if err := dispatch(title, message, config.NotifyPriorityNormal, timeout); err != nil {
+			sm.log.Error("desktop notification failed", "err", err)
+		}
+	})
 }

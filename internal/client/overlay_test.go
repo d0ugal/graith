@@ -3359,7 +3359,7 @@ func TestColumnWidths_TotalWidth(t *testing.T) {
 func TestFilterNeedsAttention(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{ID: "s1", Name: "braw-session", Status: "running", AgentStatus: "active"},
-		{ID: "s2", Name: "thrawn-approval", Status: "running", AgentStatus: "approval"},
+		{ID: "s2", Name: "thrawn-error", Status: "running", AgentStatus: "error"},
 		{ID: "s3", Name: "thrawn-errored", Status: "errored"},
 		{ID: "s4", Name: "canny-ready", Status: "running", AgentStatus: "ready"},
 		{ID: "s5", Name: "neep-clean", Status: "stopped"},
@@ -3372,13 +3372,13 @@ func TestFilterNeedsAttention(t *testing.T) {
 	for i, s := range result {
 		names[i] = s.Name
 	}
-	// Should include: thrawn-approval, thrawn-errored, canny-ready (running+ready), thrawn-dirty, thrawn-unpushed
+	// Should include: thrawn-error, thrawn-errored, canny-ready (running+ready), thrawn-dirty, thrawn-unpushed
 	// Should exclude: braw-session (working fine), neep-clean (nothing to save)
 	if len(result) != 5 {
 		t.Fatalf("got %d sessions %v, want 5", len(result), names)
 	}
 
-	for _, name := range []string{"thrawn-approval", "thrawn-errored", "canny-ready", "thrawn-dirty", "thrawn-unpushed"} {
+	for _, name := range []string{"thrawn-error", "thrawn-errored", "canny-ready", "thrawn-dirty", "thrawn-unpushed"} {
 		found := false
 
 		for _, n := range names {
@@ -3446,7 +3446,7 @@ func TestFilterActive(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{ID: "s1", Name: "braw-session", Status: "running", AgentStatus: "active",
 			CreatedAt: time.Now().Add(-10 * time.Minute).Format(time.RFC3339)},
-		{ID: "s2", Name: "thrawn-approval", Status: "running", AgentStatus: "approval",
+		{ID: "s2", Name: "thrawn-error", Status: "running", AgentStatus: "error",
 			CreatedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339)},
 		{ID: "s3", Name: "neep-stopped", Status: "stopped",
 			CreatedAt: time.Now().Format(time.RFC3339)},
@@ -3664,7 +3664,7 @@ func TestOverlay_NeedsAttentionFiltersCorrectly(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{ID: "s1", Name: "braw-working", RepoName: "repo", Status: "running", AgentStatus: "active",
 			CreatedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s2", Name: "thrawn-blocked", RepoName: "repo", Status: "running", AgentStatus: "approval",
+		{ID: "s2", Name: "thrawn-blocked", RepoName: "repo", Status: "running", AgentStatus: "error",
 			CreatedAt:       time.Now().Format(time.RFC3339),
 			StatusChangedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339)},
 		{ID: "s3", Name: "neep-idle", RepoName: "repo", Status: "stopped",
@@ -3716,10 +3716,10 @@ func TestOverlay_FilterRespectsView(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{ID: "s1", Name: "braw-api", RepoName: "repo", Status: "running", AgentStatus: "active",
 			CreatedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s2", Name: "thrawn-api", RepoName: "repo", Status: "running", AgentStatus: "approval",
+		{ID: "s2", Name: "thrawn-api", RepoName: "repo", Status: "running", AgentStatus: "error",
 			CreatedAt:       time.Now().Format(time.RFC3339),
 			StatusChangedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s3", Name: "thrawn-ui", RepoName: "repo", Status: "running", AgentStatus: "approval",
+		{ID: "s3", Name: "thrawn-ui", RepoName: "repo", Status: "running", AgentStatus: "error",
 			CreatedAt:       time.Now().Format(time.RFC3339),
 			StatusChangedAt: time.Now().Format(time.RFC3339)},
 	}
@@ -3754,7 +3754,7 @@ func TestOverlay_FilterEscRebuildsView(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{ID: "s1", Name: "braw-working", RepoName: "repo", Status: "running", AgentStatus: "active",
 			CreatedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s2", Name: "thrawn-blocked", RepoName: "repo", Status: "running", AgentStatus: "approval",
+		{ID: "s2", Name: "thrawn-blocked", RepoName: "repo", Status: "running", AgentStatus: "error",
 			CreatedAt:       time.Now().Format(time.RFC3339),
 			StatusChangedAt: time.Now().Format(time.RFC3339)},
 	}
@@ -5009,17 +5009,5 @@ func TestSortByStatusAgeOrdersByAge2(t *testing.T) {
 
 	if sessions[0].Name != "older" {
 		t.Fatalf("older status change should sort first, got %q", sessions[0].Name)
-	}
-}
-
-func TestRunApprovalOverlayEmptyReturnsNil2(t *testing.T) {
-	// The empty-input guard must return nil without ever launching a program
-	// (which would require a real terminal).
-	if got := RunApprovalOverlay(nil, DefaultApprovalKeys()); got != nil {
-		t.Errorf("RunApprovalOverlay(nil) = %v, want nil", got)
-	}
-
-	if got := RunApprovalOverlay([]protocol.ApprovalInfo{}, DefaultApprovalKeys()); got != nil {
-		t.Errorf("RunApprovalOverlay(empty) = %v, want nil", got)
 	}
 }

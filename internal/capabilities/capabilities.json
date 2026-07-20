@@ -74,7 +74,7 @@
     {
       "id": "session.star",
       "category": "Session lifecycle",
-      "name": "Star / unstar session",
+      "name": "Update starred state",
       "cli": "supported", "ios": "supported", "macos": "supported"
     },
     {
@@ -154,30 +154,14 @@
       "notes": "An attached GUI types directly; the standalone remote-type command is a CLI convenience."
     },
     {
-      "id": "approvals.subscribe",
-      "category": "Approvals & pairing",
-      "name": "View pending tool approvals",
-      "cli": "supported", "ios": "n/a", "macos": "n/a",
-      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",
-      "notes": "Native approval queues are removed in preparation for eliminating interactive approvals entirely under [issue #1392](https://github.com/d0ugal/graith/issues/1392)."
-    },
-    {
-      "id": "approvals.respond",
-      "category": "Approvals & pairing",
-      "name": "Respond to a tool approval",
-      "cli": "supported", "ios": "n/a", "macos": "n/a",
-      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",
-      "notes": "Native approval responses are removed in preparation for eliminating interactive approvals entirely under [issue #1392](https://github.com/d0ugal/graith/issues/1392)."
-    },
-    {
       "id": "pairing.request",
-      "category": "Approvals & pairing",
+      "category": "Pairing",
       "name": "Request device pairing",
       "cli": "supported", "ios": "supported", "macos": "supported"
     },
     {
       "id": "pairing.manage",
-      "category": "Approvals & pairing",
+      "category": "Pairing",
       "name": "List / approve / revoke paired devices",
       "cli": "supported", "ios": "n/a", "macos": "n/a",
       "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",

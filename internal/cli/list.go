@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/version"
 	"github.com/spf13/cobra"
@@ -25,12 +26,21 @@ var (
 	listStarred  bool
 	listQuiet    bool
 	listWide     bool
+	listTokens   bool
 	listNoColor  bool
 	listDeleted  bool
 )
 
-// listConnectFn lets command-validation tests fail before daemon auto-start.
-var listConnectFn = client.Connect
+type listConn interface {
+	controlConn
+	Close()
+}
+
+// listConnectFn lets command-validation and rendering tests run without daemon
+// auto-start.
+var listConnectFn = func(cfg *config.Config, paths config.Paths, cfgFile string) (listConn, error) {
+	return client.Connect(cfg, paths, cfgFile)
+}
 
 // colorize wraps text in the given foreground color for terminal output. When
 // coloring is disabled (or the text is empty) it returns the text unchanged.
@@ -72,107 +82,136 @@ var listCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls"},
 	Short:   "List all sessions",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		updateCh := make(chan *version.UpdateResult, 1)
-		// Snapshot the data dir before the goroutine so it doesn't read the
-		// mutable package-global `paths` after RunE returns (data race under -race).
-		updateDataDir := paths.DataDir
-		updateCfg := updateSettings(cfg)
+	RunE:    runList,
+}
 
-		go func() {
-			updateCh <- version.CheckForUpdate(updateDataDir, updateCfg)
-		}()
+func runList(cmd *cobra.Command, _ []string) error {
+	updateCh := make(chan *version.UpdateResult, 1)
+	// Snapshot the data dir before the goroutine so it doesn't read the
+	// mutable package-global `paths` after RunE returns (data race under -race).
+	updateDataDir := paths.DataDir
+	updateCfg := updateSettings(cfg)
 
-		c, err := listConnectFn(cfg, paths, cfgFile)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
+	go func() {
+		updateCh <- version.CheckForUpdate(updateDataDir, updateCfg)
+	}()
 
-		_ = c.SendControl("list", protocol.ListMsg{Deleted: listDeleted})
+	sessions, err := fetchListSessions(listDeleted)
+	if err != nil {
+		return err
+	}
 
-		resp, err := c.ReadControlResponse()
-		if err != nil {
-			return err
-		}
+	sessions, err = applyListFilters(sessions, listChildren, listRepo, listStarred)
+	if err != nil {
+		return err
+	}
 
-		var list protocol.SessionListMsg
-		if err := protocol.DecodePayload(resp, &list); err != nil {
-			return err
-		}
+	list := protocol.SessionListMsg{Sessions: sessions}
+	if listQuiet {
+		return printQuiet(cmd, list.Sessions)
+	}
 
-		if listChildren != "" {
-			parent := findSession(list.Sessions, listChildren)
-			if parent == nil {
-				return fmt.Errorf("session %q not found", listChildren)
-			}
+	if jsonOutput {
+		return out.JSON(list)
+	}
 
-			list.Sessions = descendantsOf(list.Sessions, parent.ID)
-		}
+	if paths.Profile != "" {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Profile: %s\n\n", paths.Profile)
+	}
 
-		if listRepo != "" {
-			filtered := list.Sessions[:0]
-			for _, s := range list.Sessions {
-				if matchesRepo(s, listRepo) {
-					filtered = append(filtered, s)
-				}
-			}
-
-			list.Sessions = filtered
-		}
-
-		if listStarred {
-			filtered := list.Sessions[:0]
-			for _, s := range list.Sessions {
-				if s.Starred {
-					filtered = append(filtered, s)
-				}
-			}
-
-			list.Sessions = filtered
-		}
-
-		if listQuiet {
-			return printQuiet(cmd, list.Sessions)
-		}
-
-		if jsonOutput {
-			return out.JSON(list)
-		}
-
-		if paths.Profile != "" {
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Profile: %s\n\n", paths.Profile)
-		}
-
-		if len(list.Sessions) == 0 {
-			if listDeleted {
-				out.Printf("No deleted sessions.\n")
-			} else {
-				out.Printf("No sessions. Create one with: gr new <name>\n")
-			}
-
-			return nil
-		}
-
-		now := time.Now()
-
-		if listTree {
-			printTree(cmd, list.Sessions, now)
+	if len(list.Sessions) == 0 {
+		if listDeleted {
+			out.Printf("No deleted sessions.\n")
 		} else {
-			printFlat(cmd, list.Sessions, now)
-		}
-
-		select {
-		case result := <-updateCh:
-			if result != nil {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nUpdate available: %s → %s (brew upgrade graith)\n",
-					result.CurrentVersion, result.LatestVersion)
-			}
-		default:
+			out.Printf("No sessions. Create one with: gr new <name>\n")
 		}
 
 		return nil
-	},
+	}
+
+	now := time.Now()
+	if listTokens {
+		printTokenProjection(cmd, list.Sessions, now, listTree)
+	} else if listTree {
+		printTree(cmd, list.Sessions, now)
+	} else {
+		printFlat(cmd, list.Sessions, now)
+	}
+
+	select {
+	case result := <-updateCh:
+		if result != nil {
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nUpdate available: %s → %s (brew upgrade graith)\n",
+				result.CurrentVersion, result.LatestVersion)
+		}
+	default:
+	}
+
+	return nil
+}
+
+func fetchListSessions(deleted bool) ([]protocol.SessionInfo, error) {
+	c, err := listConnectFn(cfg, paths, cfgFile)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+
+	if err := c.SendControl("list", protocol.ListMsg{Deleted: deleted}); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return nil, err
+	}
+
+	var list protocol.SessionListMsg
+	if err := protocol.DecodePayload(resp, &list); err != nil {
+		return nil, err
+	}
+
+	return list.Sessions, nil
+}
+
+// applyListFilters applies the normal session-list filters in command order.
+// Keeping selection separate from rendering ensures every projection, including
+// --tokens, sees exactly the same sessions.
+func applyListFilters(sessions []protocol.SessionInfo, children, repo string, starred bool) ([]protocol.SessionInfo, error) {
+	filtered := sessions
+
+	if children != "" {
+		parent := findSession(filtered, children)
+		if parent == nil {
+			return nil, fmt.Errorf("session %q not found", children)
+		}
+
+		filtered = descendantsOf(filtered, parent.ID)
+	}
+
+	if repo != "" {
+		byRepo := make([]protocol.SessionInfo, 0, len(filtered))
+		for _, s := range filtered {
+			if matchesRepo(s, repo) {
+				byRepo = append(byRepo, s)
+			}
+		}
+
+		filtered = byRepo
+	}
+
+	if starred {
+		starredSessions := make([]protocol.SessionInfo, 0, len(filtered))
+		for _, s := range filtered {
+			if s.Starred {
+				starredSessions = append(starredSessions, s)
+			}
+		}
+
+		filtered = starredSessions
+	}
+
+	return filtered, nil
 }
 
 // printQuiet emits bare session names, one per line (or a JSON array of session
@@ -181,17 +220,7 @@ func printQuiet(cmd *cobra.Command, sessions []protocol.SessionInfo) error {
 	sorted := make([]protocol.SessionInfo, len(sessions))
 	copy(sorted, sessions)
 	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].RepoName != sorted[j].RepoName {
-			return sorted[i].RepoName < sorted[j].RepoName
-		}
-
-		if sorted[i].Name != sorted[j].Name {
-			return sorted[i].Name < sorted[j].Name
-		}
-
-		// Tie-break on ID so output ordering is deterministic even when two
-		// sessions share a repo and name (names are not globally unique).
-		return sorted[i].ID < sorted[j].ID
+		return sessionInfoLess(sorted[i], sorted[j])
 	})
 
 	if jsonOutput {
@@ -392,11 +421,7 @@ func renderRows(w io.Writer, rows [][]string) {
 
 func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Time) {
 	sort.Slice(sessions, func(i, j int) bool {
-		if sessions[i].RepoName != sessions[j].RepoName {
-			return sessions[i].RepoName < sessions[j].RepoName
-		}
-
-		return sessions[i].Name < sessions[j].Name
+		return sessionInfoLess(sessions[i], sessions[j])
 	})
 
 	colorOn := listColorEnabled(cmd)
@@ -437,11 +462,7 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 
 	sortSessions := func(ss []protocol.SessionInfo) {
 		sort.Slice(ss, func(i, j int) bool {
-			if ss[i].RepoName != ss[j].RepoName {
-				return ss[i].RepoName < ss[j].RepoName
-			}
-
-			return ss[i].Name < ss[j].Name
+			return sessionInfoLess(ss[i], ss[j])
 		})
 	}
 	sortSessions(roots)
@@ -480,6 +501,20 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 	}
 
 	renderRows(cmd.OutOrStdout(), rows)
+}
+
+// sessionInfoLess is the canonical ordering for human session-list projections.
+// IDs break repo/name ties so duplicate session names remain deterministic.
+func sessionInfoLess(a, b protocol.SessionInfo) bool {
+	if a.RepoName != b.RepoName {
+		return a.RepoName < b.RepoName
+	}
+
+	if a.Name != b.Name {
+		return a.Name < b.Name
+	}
+
+	return a.ID < b.ID
 }
 
 func findSession(sessions []protocol.SessionInfo, nameOrID string) *protocol.SessionInfo {
@@ -529,10 +564,12 @@ func registerListCmd() {
 	listCmd.Flags().StringVar(&listChildren, "children", "", "filter to descendants of a session")
 	listCmd.Flags().BoolVar(&listStarred, "starred", false, "show only starred sessions")
 	listCmd.Flags().BoolVarP(&listQuiet, "quiet", "q", false, "output only session names (or IDs as JSON with --json)")
-	listCmd.Flags().BoolVar(&listWide, "wide", false, "show all columns (model, branch, attached)")
+	listCmd.Flags().BoolVar(&listWide, "wide", false, "show all columns, including compact token totals")
+	listCmd.Flags().BoolVar(&listTokens, "tokens", false, "show detailed per-session token usage and totals")
 	listCmd.Flags().BoolVar(&listNoColor, "no-color", false, "disable colored status output")
 	listCmd.Flags().BoolVar(&listDeleted, "deleted", false, "show soft-deleted sessions with their expiry time")
-
+	listCmd.MarkFlagsMutuallyExclusive("quiet", "tokens")
+	listCmd.MarkFlagsMutuallyExclusive("wide", "tokens")
 	_ = listCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	_ = listCmd.RegisterFlagCompletionFunc("children", completeSessionNames)
 }

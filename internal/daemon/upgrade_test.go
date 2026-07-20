@@ -23,6 +23,7 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemonservice"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"golang.org/x/sys/unix"
 )
@@ -35,6 +36,14 @@ func closeUpgradeTestFile(t *testing.T, file *os.File) {
 	}
 }
 
+type upgradeHeadlessDriver struct {
+	*wedgeDriver
+
+	pid int
+}
+
+func (d *upgradeHeadlessDriver) ProcessPID() int { return d.pid }
+
 func TestWriteAndReadManifest(t *testing.T) {
 	dir := t.TempDir()
 
@@ -42,8 +51,8 @@ func TestWriteAndReadManifest(t *testing.T) {
 		ListenerFd: 5,
 		ConfigFile: "/home/user/.config/graith/config.toml",
 		Sessions: []UpgradeSession{
-			{ID: "abc123", Fd: 10, PID: 1234},
-			{ID: "def456", Fd: 11, PID: 5678},
+			{ID: "abc123", Fd: 10, HasPTY: true, PID: 1234, PIDStartTime: 111},
+			{ID: "def456", Fd: -1, PID: 5678, PIDStartTime: 222},
 		},
 	}
 
@@ -76,7 +85,7 @@ func TestWriteAndReadManifest(t *testing.T) {
 
 	for i, s := range loaded.Sessions {
 		orig := original.Sessions[i]
-		if s.ID != orig.ID || s.Fd != orig.Fd || s.PID != orig.PID {
+		if s.ID != orig.ID || s.Fd != orig.Fd || s.HasPTY != orig.HasPTY || s.PID != orig.PID || s.PIDStartTime != orig.PIDStartTime {
 			t.Errorf("Sessions[%d] = %+v, want %+v", i, s, orig)
 		}
 	}
@@ -110,6 +119,223 @@ func TestWriteManifestEmptySessions(t *testing.T) {
 	}
 }
 
+func TestPrepareUpgradeRecordsNonPTYProcessIdentity(t *testing.T) {
+	sm := sleeperSM(t)
+	pid := spawnReapableSleeper(t)
+
+	start, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	t.Cleanup(func() { _ = syscall.Kill(-pid, syscall.SIGKILL) })
+
+	driver := &upgradeHeadlessDriver{wedgeDriver: newWedgeDriver(false), pid: pid}
+	sm.sessions["canny-headless"] = driver
+	sm.state.Sessions["canny-headless"] = &SessionState{
+		ID: "canny-headless", Name: "canny-headless", Agent: "sleeper",
+		Status: StatusRunning, DriverKind: DriverHeadless,
+		PID: driver.ProcessPID(), PIDStartTime: start,
+	}
+
+	listener, listenerPeer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		_ = listener.Close()
+		_ = listenerPeer.Close()
+	})
+
+	manifest, err := sm.PrepareUpgrade(listener.Fd(), "")
+	if err != nil {
+		t.Fatalf("PrepareUpgrade: %v", err)
+	}
+
+	if len(manifest.Sessions) != 1 {
+		t.Fatalf("manifest sessions = %+v, want one recorded headless process", manifest.Sessions)
+	}
+
+	got := manifest.Sessions[0]
+	if got.ID != "canny-headless" || got.HasPTY || got.Fd != -1 ||
+		got.PID != driver.ProcessPID() || got.PIDStartTime != start {
+		t.Fatalf("headless manifest entry = %+v, want identity without PTY handoff", got)
+	}
+}
+
+func TestUpgradeOwnershipGuardTerminatesRecordedHeadlessProcess(t *testing.T) {
+	pid := spawnReapableSleeper(t)
+
+	start, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	manifest := &UpgradeManifest{ListenerFd: -1, Sessions: []UpgradeSession{{
+		ID: "dreich-headless", Fd: -1, PID: pid, PIDStartTime: start,
+	}}}
+	if err := newUpgradeOwnershipGuard(manifest).Cleanup(); err != nil {
+		t.Fatalf("cleanup inherited headless identity: %v", err)
+	}
+
+	if err := syscall.Kill(-pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("headless process group remains after replacement startup failure: %v", err)
+	}
+}
+
+func TestUpgradeOwnershipGuardDisarmPreservesTransferredHeadlessProcess(t *testing.T) {
+	pid := spawnReapableSleeper(t)
+
+	start, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	manifest := &UpgradeManifest{ListenerFd: -1, Sessions: []UpgradeSession{{
+		ID: "canny-transferred", Fd: -1, PID: pid, PIDStartTime: start,
+	}}}
+	guard := newUpgradeOwnershipGuard(manifest)
+
+	guard.disarmSession(manifest.Sessions[0])
+
+	if err := guard.Cleanup(); err != nil {
+		t.Fatalf("Cleanup after ownership transfer: %v", err)
+	}
+
+	if err := syscall.Kill(-pid, 0); err != nil {
+		t.Fatalf("transferred process was terminated by disarmed ownership guard: %v", err)
+	}
+}
+
+func TestPreparedUpgradeAddsManagedIdentityAndRollsBackExecFailure(t *testing.T) {
+	originalPrepare := prepareManagedUpgradeForExec
+	originalExec := execProcessForUpgrade
+
+	t.Cleanup(func() {
+		prepareManagedUpgradeForExec = originalPrepare
+		execProcessForUpgrade = originalExec
+	})
+
+	executable := filepath.Join(t.TempDir(), "gr")
+	if err := os.WriteFile(executable, []byte("canny"), 0o755); err != nil { // #nosec G306 -- executable upgrade fixture.
+		t.Fatal(err)
+	}
+
+	definition, err := daemonservice.DefinitionForSlot("07")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rollbackCalls := 0
+	prepareManagedUpgradeForExec = func(profile, candidate string) (daemonservice.Definition, func() error, bool, error) {
+		if profile != "canny" || candidate != executable {
+			t.Fatalf("managed preparation = profile %q candidate %q", profile, candidate)
+		}
+
+		return definition, func() error {
+			rollbackCalls++
+
+			return nil
+		}, true, nil
+	}
+
+	var (
+		gotPath string
+		gotArgs []string
+	)
+
+	execProcessForUpgrade = func(path string, args []string, environment []string) error {
+		gotPath = path
+
+		gotArgs = append([]string(nil), args...)
+
+		if len(environment) == 0 {
+			t.Fatal("exec upgrade discarded the daemon environment")
+		}
+
+		return errors.New("dreich exec")
+	}
+
+	prepared, err := prepareExecUpgrade("canny", executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target := &upgradeTarget{path: executable, pin: &upgradeTargetPin{execPath: executable}}
+	err = prepared.rollbackError(execUpgradeTarget(
+		target, "/bothy/manifest.json", "/bothy/config.toml", -1, "", prepared,
+	))
+	if err == nil || !strings.Contains(err.Error(), "dreich exec") {
+		t.Fatalf("execUpgradeTarget() error = %v", err)
+	}
+
+	wantArgs := []string{
+		executable, "daemon", "start", "--adopt-from", "/bothy/manifest.json",
+		"--internal-service-label", definition.Label,
+		"--internal-service-slot", definition.Slot,
+		"--config", "/bothy/config.toml",
+	}
+	if gotPath != executable || strings.Join(gotArgs, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("exec = path %q args %q, want path %q args %q", gotPath, gotArgs, executable, wantArgs)
+	}
+
+	if rollbackCalls != 1 {
+		t.Fatalf("rollback calls = %d, want 1", rollbackCalls)
+	}
+
+	_ = prepared.rollbackError(errors.New("second failure"))
+	if rollbackCalls != 1 {
+		t.Fatalf("idempotent rollback calls = %d, want 1", rollbackCalls)
+	}
+}
+
+func TestPrepareExecUpgradeRejectsBeforeExec(t *testing.T) {
+	originalPrepare := prepareManagedUpgradeForExec
+
+	t.Cleanup(func() { prepareManagedUpgradeForExec = originalPrepare })
+
+	executable := filepath.Join(t.TempDir(), "gr")
+	if err := os.WriteFile(executable, []byte("braw"), 0o755); err != nil { // #nosec G306 -- executable upgrade fixture.
+		t.Fatal(err)
+	}
+
+	var validatedCandidate string
+
+	prepareManagedUpgradeForExec = func(_ string, candidate string) (daemonservice.Definition, func() error, bool, error) {
+		validatedCandidate = candidate
+
+		return daemonservice.Definition{}, nil, true, errors.New("thrawn candidate")
+	}
+
+	if _, err := prepareExecUpgrade("", executable); err == nil || !strings.Contains(err.Error(), "validate managed upgrade") {
+		t.Fatalf("prepareExecUpgrade() error = %v", err)
+	}
+
+	if validatedCandidate != executable {
+		t.Fatalf("validated candidate = %q, want %q", validatedCandidate, executable)
+	}
+
+	missing := filepath.Join(t.TempDir(), "missing")
+	if _, err := prepareExecUpgrade("", missing); err == nil || !strings.Contains(err.Error(), "validate managed upgrade") {
+		t.Fatalf("missing executable error = %v", err)
+	}
+
+	if validatedCandidate == "" || validatedCandidate == missing {
+		t.Fatalf("missing client candidate did not fall back to the daemon executable: %q", validatedCandidate)
+	}
+}
+
+func TestStopDaemonPIDRejectsUnauthenticatedIdentity(t *testing.T) {
+	if err := StopDaemonPID(1); err == nil || !strings.Contains(err.Error(), "invalid pid") {
+		t.Fatalf("StopDaemonPID(1) = %v", err)
+	}
+
+	if err := StopDaemonPID(os.Getpid()); err == nil || !strings.Contains(err.Error(), "not a graith daemon") {
+		t.Fatalf("StopDaemonPID(test process) = %v", err)
+	}
+}
+
 func TestReadManifestNonExistent(t *testing.T) {
 	_, err := ReadManifest("/nonexistent/manifest.json")
 	if err == nil {
@@ -121,8 +347,11 @@ func TestUpgradeOwnershipCapsuleRoundTripScrubsPrivateEnvironment(t *testing.T) 
 	manifest := &UpgradeManifest{
 		Version: upgradeManifestVersion, ListenerFd: 7,
 		StateSnapshot: []byte(`{"version":23,"sessions":{}}`),
-		Sessions:      []UpgradeSession{{ID: "canny", Fd: 9, ScrollbackFd: 10, PID: 1234, PIDStartTime: 5678}},
-		Helpers:       []UpgradeHelper{{PID: 4321, StartTime: 8765}},
+		Sessions: []UpgradeSession{
+			{ID: "canny", Fd: 9, HasPTY: true, ScrollbackFd: 10, PID: 1234, PIDStartTime: 5678},
+			{ID: "dreich", Fd: -1, PID: 2345, PIDStartTime: 6789},
+		},
+		Helpers: []UpgradeHelper{{PID: 4321, StartTime: 8765}},
 	}
 
 	manifest.journalSHA256 = sha256.Sum256([]byte("braw journal"))
@@ -435,7 +664,7 @@ func TestRunAdoptBootstrapSecuresCapsuleDescriptorsBeforeManifestRead(t *testing
 
 	t.Cleanup(func() { upgradePread = originalPread })
 
-	if err := RunAdoptBootstrap("", path); err == nil {
+	if err := RunAdoptBootstrap("", path, AdoptedServiceIdentity{}); err == nil {
 		t.Fatal("injected manifest read failure was ignored")
 	}
 
@@ -2998,7 +3227,7 @@ func TestAdoptSessionsPreflightRejectionDrainsEveryValidPTY(t *testing.T) {
 	}
 
 	manifest.Sessions = append(manifest.Sessions, UpgradeSession{
-		ID: "thrawn", Fd: -1,
+		ID: "thrawn", Fd: -1, HasPTY: true,
 		ScrollbackFd: openUpgradeScrollbackFD(t, filepath.Join(sm.paths.LogDir, "thrawn.log")),
 		PID:          1 << 29, PIDStartTime: 2,
 	})

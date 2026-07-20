@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -206,6 +207,11 @@ func TestListScenarios(t *testing.T) {
 	sm.state.Scenarios["sc-braw"] = &ScenarioState{
 		ID:   "sc-braw",
 		Name: "strath-neep",
+		Sessions: []ScenarioSession{{
+			Name: "canny", Prompt: "Inspect the croft in detail.", Task: "report the findings",
+		}, {
+			Name: "dreich", Shared: true, Task: "track shared findings",
+		}},
 	}
 	sm.mu.Unlock()
 
@@ -216,6 +222,23 @@ func TestListScenarios(t *testing.T) {
 
 	if records[0].Name != "strath-neep" {
 		t.Errorf("name = %q, want %q", records[0].Name, "strath-neep")
+	}
+
+	if records[0].Sessions[0].Prompt != "" || records[0].Sessions[0].Task != "report the findings" {
+		t.Fatalf("list prompt/task = %q/%q, want omitted prompt and retained task", records[0].Sessions[0].Prompt, records[0].Sessions[0].Task)
+	}
+
+	status, err := sm.ScenarioStatus("strath-neep")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if status.Sessions[0].Prompt != "Inspect the croft in detail." {
+		t.Fatalf("status prompt = %q, want full effective prompt", status.Sessions[0].Prompt)
+	}
+
+	if status.Sessions[1].Prompt != "" || status.Sessions[1].Task != "track shared findings" {
+		t.Fatalf("shared status prompt/task = %q/%q", status.Sessions[1].Prompt, status.Sessions[1].Task)
 	}
 }
 
@@ -376,6 +399,17 @@ func TestStartScenarioValidation(t *testing.T) {
 			wantErr: "prompt is too large",
 		},
 		{
+			name: "startup prompt contains NUL",
+			msg: protocol.ScenarioStartMsg{
+				CallerSessionID: "ben-orch",
+				Name:            "strath-neep",
+				Sessions: []protocol.ScenarioSessionInput{{
+					Name: "braw-a", Repo: "/glen", Prompt: "inspect\x00croft",
+				}},
+			},
+			wantErr: "prompt contains a NUL byte",
+		},
+		{
 			name: "shared startup prompt",
 			msg: protocol.ScenarioStartMsg{
 				CallerSessionID: "ben-orch",
@@ -527,6 +561,22 @@ func TestBuildManifest(t *testing.T) {
 	}
 }
 
+func TestBuildManifestSharedMemberHasNoStartupPrompt(t *testing.T) {
+	sm := newTestSessionManager(t)
+	msg := protocol.ScenarioStartMsg{
+		CallerSessionID: "ben-1",
+		Name:            "strath-shared",
+		Sessions: []protocol.ScenarioSessionInput{{
+			Name: "canny", Shared: true, Task: "tracked shared work",
+		}},
+	}
+
+	manifest := sm.buildManifest("sc-shared", msg, []string{"croft"}, []string{"canny-id"}, 0, nil)
+	if manifest.You.Prompt != "" || manifest.You.Task != "tracked shared work" {
+		t.Fatalf("shared manifest prompt/task = %q/%q", manifest.You.Prompt, manifest.You.Task)
+	}
+}
+
 // TestScenarioProgressDerivedFromTodos verifies scenario member progress is
 // derived from assigned todo items (the task-done replacement, issue #591): a
 // completed assigned item shows as done/total, and a member with no assigned
@@ -636,6 +686,38 @@ func TestAddToScenarioValidation(t *testing.T) {
 	}, 24, 80)
 	if err == nil || !strings.Contains(err.Error(), "does not support mirror") {
 		t.Fatalf("error = %v, want scenario-add mirror rejection", err)
+	}
+}
+
+func TestAddToScenarioRejectsAggregatePromptPayload(t *testing.T) {
+	sm := newTestSessionManager(t)
+	repo := initTempGitRepo(t)
+	prompt := strings.Repeat("p", protocol.MaxScenarioPromptBytes)
+	existingCount := protocol.MaxScenarioContractPayloadBytes/protocol.MaxScenarioPromptBytes - 1
+	existing := make([]ScenarioSession, existingCount)
+	contractInputs := make([]protocol.ScenarioSessionInput, existingCount)
+
+	for i := range existing {
+		name := fmt.Sprintf("canny-%d", i)
+		existing[i] = ScenarioSession{Name: name, Prompt: prompt}
+		contractInputs[i] = protocol.ScenarioSessionInput{Name: name, Prompt: prompt}
+	}
+
+	if err := scenariofile.ValidateScenarioContractPayload(contractInputs); err != nil {
+		t.Fatalf("existing prompt payload should fit: %v", err)
+	}
+
+	sm.mu.Lock()
+	sm.state.Scenarios["sc-braw"] = &ScenarioState{
+		ID: "sc-braw", Name: "strath-neep", Sessions: existing,
+	}
+	sm.mu.Unlock()
+
+	_, err := sm.AddToScenario("strath-neep", protocol.ScenarioSessionInput{
+		Name: "thrawn-new", Repo: repo, Prompt: prompt,
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "scenario prompt/task payload is too large") {
+		t.Fatalf("error = %v, want aggregate prompt payload rejection", err)
 	}
 }
 
@@ -2086,7 +2168,7 @@ func newScenarioOrchestrator(t *testing.T) (*SessionManager, string) {
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
 	cfg.DefaultAgent = "sleeper"
-	cfg.Agents["sleeper"] = config.Agent{Command: "sh", Args: []string{"-c", "exec sleep 60"}}
+	cfg.Agents["sleeper"] = config.Agent{NonInteractiveArgs: []string{}, Command: "sh", Args: []string{"-c", "exec sleep 60"}}
 
 	sm := newSMWithConfig(t, cfg)
 
@@ -2128,9 +2210,10 @@ func newScenarioOrchestrator(t *testing.T) (*SessionManager, string) {
 func configureScenarioPromptRecorder(sm *SessionManager, recordPath string) {
 	sm.mu.Lock()
 	sm.cfg.Agents["recorder"] = config.Agent{
-		Command: "sh",
-		Args:    []string{"-c", `printf %s "$0" > "$GRAITH_PROMPT_RECORD"; exec sleep 60`},
-		Env:     map[string]string{"GRAITH_PROMPT_RECORD": recordPath},
+		NonInteractiveArgs: []string{},
+		Command:            "sh",
+		Args:               []string{"-c", `printf %s "$0" > "$GRAITH_PROMPT_RECORD"; exec sleep 60`},
+		Env:                map[string]string{"GRAITH_PROMPT_RECORD": recordPath},
 	}
 	sm.mu.Unlock()
 }
@@ -2303,7 +2386,7 @@ func newMirroredScenarioOrchestrator(t *testing.T) (*SessionManager, string) {
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
 	cfg.DefaultAgent = "sleeper"
-	cfg.Agents["sleeper"] = config.Agent{Command: "sleep", Args: []string{"60"}}
+	cfg.Agents["sleeper"] = config.Agent{NonInteractiveArgs: []string{}, Command: "sleep", Args: []string{"60"}}
 	cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "safehouse", Command: backend}
 
 	sm := newSMWithConfig(t, cfg)
@@ -2752,7 +2835,7 @@ func TestStartScenarioMirrorFailureRollsBackReaders(t *testing.T) {
 	sm, orchID := newMirroredScenarioOrchestrator(t)
 	repo := initScenarioGitRepo(t)
 
-	badAgent := config.Agent{Command: "sleep", Args: []string{"60"}}
+	badAgent := config.Agent{NonInteractiveArgs: []string{}, Command: "sleep", Args: []string{"60"}}
 	badAgent.Sandbox.Command = filepath.Join(t.TempDir(), "missing-safehouse")
 
 	sm.mu.Lock()
@@ -3145,7 +3228,7 @@ func TestAddToScenarioCommitSaveFailureRollsBackPolicyAndContract(t *testing.T) 
 	repo := initScenarioGitRepo(t)
 
 	sm.mu.Lock()
-	sm.cfg.Agents["sleeper"] = config.Agent{Command: "sh", Args: []string{"-c", "sleep 60", "--"}}
+	sm.cfg.Agents["sleeper"] = config.Agent{NonInteractiveArgs: []string{}, Command: "sh", Args: []string{"-c", "sleep 60", "--"}}
 	sm.state.Sessions["braw-old"] = &SessionState{ID: "braw-old", Name: "braw-old", Status: StatusStopped}
 	sm.state.Scenarios["sc-add"] = &ScenarioState{
 		ID: "sc-add", Name: "strath-add", OrchestratorID: orchID,
@@ -3207,7 +3290,8 @@ func TestScenarioRetryPolicyForcesPTYUnderHeadlessDefault(t *testing.T) {
 	sm.cfg.Headless.Experimental = true
 	sm.cfg.Headless.Default = true
 	sm.cfg.Agents["sleeper"] = config.Agent{
-		Command: "sh", Args: []string{"-c", "sleep 60", "--"}, HeadlessCapable: &capable,
+		NonInteractiveArgs: []string{},
+		Command:            "sh", Args: []string{"-c", "sleep 60", "--"}, HeadlessCapable: &capable,
 	}
 	sm.mu.Unlock()
 

@@ -19,32 +19,64 @@ List all sessions with status.
 | `--tree` | Show parent-child hierarchy |
 | `--children <name-or-id>` | Filter to descendants of a session |
 | `--starred` | Show only starred sessions |
+| `-q`, `--quiet` | Output session names only (or IDs with `--json`) |
 | `--wide` | Show all columns, including per-session token usage |
+| `--tokens` | Show the detailed token-usage projection and aggregate totals |
+| `--no-color` | Disable coloured status output |
+| `--deleted` | Show recoverably deleted sessions and their expiry |
 
-The `--wide` view adds a **Tokens** column with the compact total token usage
-for each session's current agent (a trailing `~` marks an approximate count).
-See `gr tokens` for the full breakdown.
+`--wide` adds a **Tokens** column with the current agent's compact total;
+`--tokens` breaks out per-category counts:
 
-### `gr tokens [session]`
-
-Show per-session token usage — input, output, and cache tokens — extracted from
-each agent's on-disk transcript. With no argument it lists every session and a
-grand total; with a session name or ID it shows just that session.
-
-Counts reflect the session's **current agent** and are updated by a background
-poll, so they lag by up to ~30 seconds. Agents without a transcript reader
-(currently anything other than Claude Code and Codex) show `—` / `(unsupported)`;
-a session that hasn't been observed yet shows `(unknown)`, distinct from a real
-zero. USD cost is not shown (a planned opt-in via a user-supplied price table).
-
-```
-$ gr tokens
-SESSION   AGENT   INPUT    OUTPUT   CACHE-R    CACHE-W   OTHER   TOTAL
-braw      claude  12,431   48,209   1,204,882  96,004    0       1,361,526
-canny     codex   69,131   3,517    756,224    0         0       828,872
+```console
+$ gr ls --tokens
+SESSION  REPO    AGENT   INPUT   OUTPUT  CACHE-R    CACHE-W  OTHER  TOTAL      COUNTED
+braw     graith  claude  12,431  48,209  1,204,882  96,004   0      1,361,526  8s ago
+canny    graith  codex   69,131  3,517   756,224    0        0      828,872    11s ago
+TOTAL                     81,562  51,726  1,961,106  96,004   0      2,190,398  2/2 known
 ```
 
-Use `--json` (implied in agent mode) for a structured per-session projection.
+`gr dashboard` was removed with no forwarding alias — use `gr ls` for snapshots
+or the attached-session picker (`ctrl+b w`) for an interactive view.
+
+`--tokens` composes with the selection flags (`--repo`, `--children`,
+`--starred`, `--deleted`, `--tree`) but is mutually exclusive with `--quiet` and
+`--wide`.
+
+Counts reflect the **current agent** from a background poll, lagging by up to the
+poll interval (default 30 seconds). **Counted** is the age of the last successful
+observation; if a later poll can't read a transcript, the last count is kept and
+its age grows rather than falling to a false zero. Agents without a transcript
+reader (anything but Claude Code and Codex) show `(unsupported)`; a supported but
+unobserved session shows `(unknown)`. An all-zero row is a genuine observed zero;
+a trailing `~` marks an approximate/degraded count.
+
+The input, output, cache-read, cache-write, and other categories are mutually
+exclusive, so **Total** doesn't double-count cache or reasoning fields. The
+aggregate counts known rows only; its **Counted** cell reports coverage (e.g.
+`2/4 known`) so a partial total isn't shown as fleet-wide.
+
+`gr ls --json` is the canonical structured form; token data nests under each
+session's `tokens` field with `counted_at` and the optional `degraded` marker:
+
+```console
+$ gr ls --json | jq '.sessions[] | {name, tokens}'
+{
+  "name": "braw",
+  "tokens": {
+    "input": 12431,
+    "output": 48209,
+    "cache_creation": 96004,
+    "cache_read": 1204882,
+    "total": 1361526,
+    "counted_at": "2026-07-18T12:00:00Z"
+  }
+}
+```
+
+`--json` and agent mode always use this full `SessionInfo` shape, even with
+`--tokens` — there's no separate flat token schema. USD cost isn't shown, a
+planned opt-in via a user-supplied price table.
 
 ### `gr logs <name-or-id>` (alias: `l`)
 
@@ -57,32 +89,35 @@ Show session output without attaching.
 
 ### `gr info`
 
-Show info for the current session. Auto-detects the session by matching the current working directory against session worktree paths.
-
-### `gr dashboard`
-
-Live-updating TUI dashboard of all sessions. Supports inline attach, stop, delete, and resume.
-
-### `gr approvals`
-
-List sessions waiting for approval.
+Show info for the current session, auto-detected by matching the working directory against session worktree paths.
 
 ### `gr doctor` (alias: `doc`)
 
-Run health checks and diagnostics. Checks daemon status, safehouse availability, orphaned worktrees, oversized scrollback files, and stale PID files.
+Run health checks and diagnostics: daemon status, safehouse availability, orphaned worktrees, oversized scrollback files, and stale PID files.
 
-When the daemon is reachable, plain output includes a **Purge** section with the effective startup delay and sweep interval, plus the last and next sweep times. Before the daemon's first sweep, the section says `Last sweep: not yet run` and `Next sweep: awaiting first sweep`. The same values remain available under `diagnostics.purge` in `--json` output.
+When the daemon is reachable, plain output adds a **Purge** section with the effective startup delay, sweep interval, and last/next sweep times; before the first sweep it shows `Last sweep: not yet run` and `Next sweep: awaiting first sweep`. The same values appear under `diagnostics.purge` in `--json`.
 
-By default `gr doctor` avoids walking the data dir to measure on-disk sizes — that walk can take tens of seconds on a large install (worktrees full of `node_modules` and `.git` objects), so it's opt-in. Pass `--disk` to report the size of the data dir, tmp repos, and orphaned worktrees. When it finds leftover artifacts whose size is worth knowing (orphaned worktrees, a legacy directory), the default run recommends re-running with `--disk`. In `--json` output, the `disk_measured` field indicates whether sizes were computed.
+The on-disk size walk is opt-in — it can take tens of seconds on a large install (worktrees full of `node_modules` and `.git` objects). Pass `--disk` to size the data dir, tmp repos, and orphaned worktrees; when the default run finds leftover artifacts worth sizing (orphaned worktrees, a legacy directory) it recommends re-running with `--disk`. In `--json`, `disk_measured` indicates whether sizes were computed.
 
 | Flag | Description |
 |------|-------------|
 | `--autofix` | Automatically fix issues |
 | `--disk` | Measure on-disk sizes (walks the data dir; can be slow on large installs) |
 
+### `gr sandbox policy`
+
+Inspect the optional shell command restriction layer without launching an agent.
+`check` reads a command from stdin; `validate` checks the configured built-in
+rules.
+
+```bash
+printf '%s\n' 'git status' | gr sandbox policy check
+gr sandbox policy validate
+```
+
 ### `gr sandbox explain`
 
-Explain, predictively, whether the configured sandbox would allow or deny a filesystem or network access, without launching an agent. Builds the profile graith would generate from config and queries the backend's policy oracle. Needs an oracle → the `nono` backend (on a `safehouse` config it errors and points at `gr sandbox watch`).
+Predict whether the configured sandbox would allow or deny a filesystem or network access, without launching an agent. Builds the profile graith would generate and queries the backend's policy oracle, which needs the `nono` backend (on a `safehouse` config it errors and points at `gr sandbox watch`).
 
 | Flag | Description |
 |------|-------------|
@@ -99,7 +134,7 @@ gr sandbox explain --host github.com --port 443
 
 ### `gr sandbox watch [session]`
 
-Show the sandbox denials the OS actually recorded — live-tail by default, or a recent window with `--recent`. Reads the macOS unified log (Seatbelt), so it works for both the `safehouse` and `nono` backends on macOS. macOS-only; run it from your normal shell (not inside a sandboxed session — `/usr/bin/log` refuses to run sandboxed).
+Show the sandbox denials the OS actually recorded. It reads the macOS unified log (Seatbelt), covering both the `safehouse` and `nono` backends. macOS-only; run it from your normal shell, not a sandboxed session — `/usr/bin/log` refuses to run sandboxed.
 
 | Flag | Description |
 |------|-------------|
@@ -108,9 +143,7 @@ Show the sandbox denials the OS actually recorded — live-tail by default, or a
 | `--since <dur>` | Window for `--recent` (a `log show --last` duration, e.g. `5m`, `1h`); implies `--recent` |
 | `--proc <substr>` | Filter denials to processes whose name contains this substring |
 
-Live-tail is the default on a terminal; when output is piped or in `--json` (agent) mode it defaults to `--recent` so it can't hang — pass `--follow` to override.
-
-An optional `[session]` positional scopes denials to that session's process tree. See [Diagnostics & limitations]({{< relref "/docs/sandbox/debugging.md" >}}) for the full guide.
+On a terminal live-tail is the default; piped or `--json` (agent) mode defaults to `--recent` so it can't hang. An optional `[session]` positional scopes denials to that session's process tree. See [Diagnostics & limitations]({{< relref "/docs/sandbox/debugging.md" >}}) for the full guide.
 
 ```bash
 gr sandbox watch                 # live-tail
@@ -124,10 +157,10 @@ gr sandbox watch my-session --proc node
 
 Type text into a session's PTY stdin. Appends a newline by default.
 
-When a user is attached to the target session, graith waits for their input to
-go idle before injecting. The shared `inbox_idle_timeout` and `inbox_max_wait`
-settings under `[notifications.timing]` control that wait; after the maximum,
-graith warns in the daemon log and injects anyway. See
+When a user is attached, graith waits for their input to go idle before
+injecting. The `inbox_idle_timeout` and `inbox_max_wait` settings under
+`[notifications.timing]` control that wait; past the maximum it warns in the
+daemon log and injects anyway. See
 [Notification timing]({{< relref "/docs/configuration/notifications.md#timing" >}}).
 
 | Flag | Description |
@@ -136,7 +169,7 @@ graith warns in the daemon log and injects anyway. See
 
 ### `gr status [session] <message>`
 
-Set a status summary for a session, visible in the session picker overlay and `gr list`. When run inside a graith session, the session is auto-detected.
+Set a status summary, shown in the session picker overlay and `gr list`. Run inside a graith session, it auto-detects the session.
 
 | Flag | Description |
 |------|-------------|
@@ -145,7 +178,7 @@ Set a status summary for a session, visible in the session picker overlay and `g
 
 ### `gr notify <message>`
 
-Send a proactive desktop/push notification via the configured `[notifications]` backend. Unlike an inbox message, a notification proactively gets the human's attention. Only the orchestrator session and the human may send notifications (plain agent sessions are rejected).
+Send a desktop/push notification via the configured `[notifications]` backend — unlike an inbox message, it grabs the human's attention. Only the orchestrator session and the human can send them; plain agent sessions are rejected.
 
 | Flag | Description |
 |------|-------------|

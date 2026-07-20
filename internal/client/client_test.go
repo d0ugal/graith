@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/version"
 	"golang.org/x/sys/unix"
 )
 
@@ -190,7 +192,7 @@ func TestReadControlResponse(t *testing.T) {
 	serverWriter := protocol.NewFrameWriter(serverConn)
 
 	ctrlBytes, err := protocol.EncodeControl("handshake_ok", protocol.HandshakeOkMsg{
-		Version:       "1.0",
+		Version:       "2.0",
 		DaemonVersion: "0.1.0",
 	})
 	if err != nil {
@@ -283,8 +285,12 @@ func TestRequestUpgradeUsesExactPreflightBeforeMutation(t *testing.T) {
 		errCh <- serverWriter.WriteFrame(protocol.ChannelControl, ack)
 	}()
 
-	if err := requestUpgrade(c); err != nil {
+	requested, _, err := requestUpgrade(context.Background(), c)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !requested {
+		t.Fatal("upgrade was acknowledged but not reported as requested")
 	}
 
 	if err := <-errCh; err != nil {
@@ -333,8 +339,12 @@ func TestRequestUpgradeNegotiationFloorCoversHealthyAdmission(t *testing.T) {
 		errCh <- serverWriter.WriteFrame(protocol.ChannelControl, ack)
 	}()
 
-	if err := requestUpgrade(c); err != nil {
+	requested, _, err := requestUpgrade(context.Background(), c)
+	if err != nil {
 		t.Fatalf("healthy delayed upgrade negotiation failed: %v", err)
+	}
+	if !requested {
+		t.Fatal("healthy delayed upgrade was not reported as requested")
 	}
 
 	if err := <-errCh; err != nil {
@@ -370,8 +380,12 @@ func TestRequestUpgradeRefusalNeverSendsMutatingRequest(t *testing.T) {
 		close(seen)
 	}()
 
-	if err := requestUpgrade(c); err == nil {
+	requested, _, err := requestUpgrade(context.Background(), c)
+	if err == nil {
 		t.Fatal("preflight refusal was accepted")
+	}
+	if requested {
+		t.Fatal("preflight refusal was reported as a requested upgrade")
 	}
 
 	var got []string
@@ -405,28 +419,6 @@ func TestReadControlResponseWithDataFrame(t *testing.T) {
 	want := "expected control frame, got channel 1"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
-	}
-}
-
-func TestApprovalDeadline(t *testing.T) {
-	tests := []struct {
-		name    string
-		timeout time.Duration
-		want    time.Duration
-	}{
-		{"normal 10m", 10 * time.Minute, 11 * time.Minute},
-		{"large 30m", 30 * time.Minute, 31 * time.Minute},
-		{"zero", 0, time.Minute},
-		{"negative clamped", -5 * time.Minute, time.Minute},
-		{"small negative", -30 * time.Second, time.Minute},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := approvalDeadline(tt.timeout)
-			if got != tt.want {
-				t.Errorf("approvalDeadline(%v) = %v, want %v", tt.timeout, got, tt.want)
-			}
-		})
 	}
 }
 
@@ -511,36 +503,25 @@ func TestConnectFastClearsDeadline(t *testing.T) {
 	}
 }
 
-func TestConnectForApprovalClearsDeadline(t *testing.T) {
+func TestConnectForPolicyRetainsEndToEndDeadline(t *testing.T) {
 	socketPath, serverReady := startMockDaemon(t)
 
-	c, err := ConnectForApproval(config.Paths{SocketPath: socketPath}, 5*time.Minute)
+	c, err := ConnectForPolicy(config.Paths{SocketPath: socketPath}, 250*time.Millisecond)
 	if err != nil {
-		t.Fatalf("ConnectForApproval: %v", err)
+		t.Fatalf("ConnectForPolicy: %v", err)
 	}
 	defer c.Close()
 
 	serverConn := <-serverReady
 	defer func() { _ = serverConn.Close() }()
 
-	// Same check: send after the ConnectFast deadline (2s) would have fired.
-	// ConnectForApproval uses a longer deadline, but if it wasn't cleared,
-	// the connection would still have a fixed expiry.
-	go func() {
-		time.Sleep(2500 * time.Millisecond)
+	// Unlike long-lived attach/subscription clients, the policy connection must
+	// retain an aggregate deadline so a daemon that handshakes and then stalls
+	// can never strand the agent hook.
+	time.Sleep(300 * time.Millisecond)
 
-		resp, _ := protocol.EncodeControl("ping", struct{}{})
-		serverWriter := protocol.NewFrameWriter(serverConn)
-		_ = serverWriter.WriteFrame(protocol.ChannelControl, resp)
-	}()
-
-	env, err := c.ReadControlResponse()
-	if err != nil {
-		t.Fatalf("ReadControlResponse after deadline window: %v (deadline was not cleared)", err)
-	}
-
-	if env.Type != "ping" {
-		t.Errorf("expected ping, got %s", env.Type)
+	if _, err := c.ReadControlResponse(); err == nil {
+		t.Fatal("ReadControlResponse succeeded after the policy deadline")
 	}
 }
 
@@ -604,10 +585,10 @@ func TestConnectFastRejectsIncompatibleVersion(t *testing.T) {
 	}
 }
 
-func TestConnectForApprovalRejectsIncompatibleVersion(t *testing.T) {
+func TestConnectForPolicyRejectsIncompatibleVersion(t *testing.T) {
 	socketPath, _ := startMockDaemonWithVersion(t, "999.0")
 
-	_, err := ConnectForApproval(config.Paths{SocketPath: socketPath}, 5*time.Minute)
+	_, err := ConnectForPolicy(config.Paths{SocketPath: socketPath}, 5*time.Minute)
 	if err == nil {
 		t.Fatal("expected error for incompatible protocol version")
 	}
@@ -683,10 +664,10 @@ func TestConnectFastUsesConfiguredDialTimeout(t *testing.T) {
 	}
 }
 
-// TestConnectForApprovalUsesConfiguredDialTimeout proves the approval fast path
-// dials with the configured [connection].dial_timeout. The long approval
+// TestConnectForPolicyUsesConfiguredDialTimeout proves the policy fast path
+// dials with the configured [connection].dial_timeout. The long policy
 // deadline stays independent of the dial timeout. See issue #1286.
-func TestConnectForApprovalUsesConfiguredDialTimeout(t *testing.T) {
+func TestConnectForPolicyUsesConfiguredDialTimeout(t *testing.T) {
 	saveConnectionTimeouts(t)
 
 	const canny = 274 * time.Millisecond
@@ -695,14 +676,14 @@ func TestConnectForApprovalUsesConfiguredDialTimeout(t *testing.T) {
 
 	captured := captureDialTimeout(t)
 
-	c, err := ConnectForApproval(config.Paths{SocketPath: "/bothy/approval.sock"}, 5*time.Minute)
+	c, err := ConnectForPolicy(config.Paths{SocketPath: "/bothy/policy.sock"}, 5*time.Minute)
 	if err != nil {
-		t.Fatalf("ConnectForApproval: %v", err)
+		t.Fatalf("ConnectForPolicy: %v", err)
 	}
 	defer c.Close()
 
 	if *captured != canny {
-		t.Errorf("ConnectForApproval dial timeout = %v, want the configured %v", *captured, canny)
+		t.Errorf("ConnectForPolicy dial timeout = %v, want the configured %v", *captured, canny)
 	}
 }
 
@@ -942,5 +923,303 @@ func TestFetchConversation_ErrorWhenDaemonUnreachable(t *testing.T) {
 
 	if msgs != nil {
 		t.Errorf("FetchConversation should return nil messages on error, got %+v", msgs)
+	}
+}
+
+func TestUpgradeMessageUsesResolvedManagedCandidate(t *testing.T) {
+	originalResolver := resolveUpgradeCandidateForClient
+	originalVersion := version.Version
+	originalCommit := version.CommitSHA
+
+	t.Cleanup(func() {
+		resolveUpgradeCandidateForClient = originalResolver
+		version.Version = originalVersion
+		version.CommitSHA = originalCommit
+	})
+
+	version.Version = "2.0.0"
+	version.CommitSHA = "canny"
+	wantPath := "/bothy/Graith.app/Contents/MacOS/gr"
+
+	resolveUpgradeCandidateForClient = func(_ context.Context, currentPath, gotVersion, gotCommit string, uid int) (string, bool, error) {
+		if currentPath == "" || gotVersion != version.Version || gotCommit != version.CommitSHA || uid != os.Getuid() {
+			t.Fatalf("resolver inputs = (%q, %q, %q, %d)", currentPath, gotVersion, gotCommit, uid)
+		}
+
+		return wantPath, true, nil
+	}
+
+	msg, managed, err := upgradeMessageForClient(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if msg.ExecPath != wantPath || msg.ClientVersion != version.Version || !managed {
+		t.Fatalf("upgrade message = %#v, managed = %t", msg, managed)
+	}
+}
+
+func TestRequestUpgradeReportsDaemonOutcomes(t *testing.T) {
+	originalResolver := resolveUpgradeCandidateForClient
+
+	t.Cleanup(func() { resolveUpgradeCandidateForClient = originalResolver })
+
+	const wantPath = "/bothy/Graith.app/Contents/MacOS/gr"
+
+	resolveUpgradeCandidateForClient = func(context.Context, string, string, string, int) (string, bool, error) {
+		return wantPath, true, nil
+	}
+
+	tests := []struct {
+		name          string
+		responseType  string
+		response      any
+		drop          bool
+		wantRequested bool
+		wantError     string
+	}{
+		{name: "accepted", responseType: "upgrading", response: struct{}{}, wantRequested: true},
+		{name: "connection drop after exec", drop: true, wantRequested: true},
+		{name: "rejected", responseType: "error", response: protocol.ErrorMsg{Message: "thrawn candidate"}, wantError: "thrawn candidate"},
+		{name: "empty rejection", responseType: "error", response: protocol.ErrorMsg{}, wantError: "daemon rejected exec upgrade"},
+		{name: "unexpected response", responseType: "blether", response: struct{}{}, wantError: `unexpected daemon upgrade response "blether"`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			c, serverConn := setupTestClient(t)
+			serverErr := make(chan error, 1)
+
+			go func() {
+				reader := protocol.NewFrameReader(serverConn)
+
+				preflightFrame, err := reader.ReadFrame()
+				if err != nil {
+					serverErr <- err
+
+					return
+				}
+
+				preflight, err := protocol.DecodeControl(preflightFrame.Payload)
+				if err != nil {
+					serverErr <- err
+
+					return
+				}
+
+				if preflight.Type != "upgrade_preflight" {
+					serverErr <- errors.New("client sent a non-preflight request")
+
+					return
+				}
+
+				var preflightMsg protocol.UpgradeMsg
+				if err := protocol.DecodePayload(preflight, &preflightMsg); err != nil {
+					serverErr <- err
+
+					return
+				}
+
+				if preflightMsg.ExecPath != wantPath || preflightMsg.ClientVersion != version.Version {
+					serverErr <- errors.New("client sent the wrong preflight identity")
+
+					return
+				}
+
+				preflightOK, err := protocol.EncodeControl("upgrade_preflight_ok", struct{}{})
+				if err == nil {
+					err = protocol.NewFrameWriter(serverConn).WriteFrame(protocol.ChannelControl, preflightOK)
+				}
+				if err != nil {
+					serverErr <- err
+
+					return
+				}
+
+				frame, err := reader.ReadFrame()
+				if err != nil {
+					serverErr <- err
+
+					return
+				}
+
+				envelope, err := protocol.DecodeControl(frame.Payload)
+				if err != nil {
+					serverErr <- err
+
+					return
+				}
+
+				if envelope.Type != "upgrade" {
+					serverErr <- errors.New("client sent a non-upgrade request")
+
+					return
+				}
+
+				var msg protocol.UpgradeMsg
+				if err := protocol.DecodePayload(envelope, &msg); err != nil {
+					serverErr <- err
+
+					return
+				}
+
+				if msg.ExecPath != wantPath || msg.ClientVersion != version.Version {
+					serverErr <- errors.New("client sent the wrong upgrade identity")
+
+					return
+				}
+
+				if msg != preflightMsg {
+					serverErr <- errors.New("upgrade request differed from preflight")
+
+					return
+				}
+
+				if test.drop {
+					serverErr <- serverConn.Close()
+
+					return
+				}
+
+				data, err := protocol.EncodeControl(test.responseType, test.response)
+				if err == nil {
+					err = protocol.NewFrameWriter(serverConn).WriteFrame(protocol.ChannelControl, data)
+				}
+
+				serverErr <- err
+			}()
+
+			requested, managed, err := requestUpgrade(context.Background(), c)
+			if requested != test.wantRequested || !managed {
+				t.Fatalf("requestUpgrade() = (requested %t, managed %t), want (%t, true)", requested, managed, test.wantRequested)
+			}
+
+			if test.wantError == "" && err != nil {
+				t.Fatalf("requestUpgrade() error = %v", err)
+			}
+
+			if test.wantError != "" && (err == nil || !strings.Contains(err.Error(), test.wantError)) {
+				t.Fatalf("requestUpgrade() error = %v, want %q", err, test.wantError)
+			}
+
+			if err := <-serverErr; err != nil {
+				t.Fatalf("daemon side: %v", err)
+			}
+		})
+	}
+}
+
+func TestRequestUpgradeRejectsCandidateResolutionFailure(t *testing.T) {
+	originalResolver := resolveUpgradeCandidateForClient
+
+	t.Cleanup(func() { resolveUpgradeCandidateForClient = originalResolver })
+
+	resolveUpgradeCandidateForClient = func(context.Context, string, string, string, int) (string, bool, error) {
+		return "", true, errors.New("dreich cache")
+	}
+
+	c, _ := setupTestClient(t)
+
+	requested, managed, err := requestUpgrade(context.Background(), c)
+	if requested || managed || err == nil || !strings.Contains(err.Error(), "dreich cache") {
+		t.Fatalf("requestUpgrade() = (%t, %t, %v)", requested, managed, err)
+	}
+}
+
+func TestConnectExistingHandshakeLifecycle(t *testing.T) {
+	originalDial := dialLocalDaemon
+
+	t.Cleanup(func() { dialLocalDaemon = originalDial })
+
+	tests := []struct {
+		name         string
+		responseType string
+		drop         bool
+		wantError    string
+	}{
+		{name: "connected", responseType: "handshake_ok"},
+		{name: "rejected", responseType: "error", wantError: "handshake rejected"},
+		{name: "daemon drops handshake", drop: true, wantError: "EOF"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clientConn, serverConn := net.Pipe()
+
+			t.Cleanup(func() {
+				_ = clientConn.Close()
+				_ = serverConn.Close()
+			})
+
+			dialLocalDaemon = func(network, address string, timeout time.Duration) (net.Conn, error) {
+				if network != "unix" || address != "/bothy/daemon.sock" || timeout != daemonDialTimeout {
+					t.Fatalf("dial = (%q, %q, %v)", network, address, timeout)
+				}
+
+				return clientConn, nil
+			}
+
+			serverErr := make(chan error, 1)
+
+			go func() {
+				frame, err := protocol.NewFrameReader(serverConn).ReadFrame()
+				if err != nil {
+					serverErr <- err
+
+					return
+				}
+
+				envelope, err := protocol.DecodeControl(frame.Payload)
+				if err != nil || envelope.Type != "handshake" {
+					if err == nil {
+						err = errors.New("client sent a non-handshake request")
+					}
+
+					serverErr <- err
+
+					return
+				}
+
+				if test.drop {
+					serverErr <- serverConn.Close()
+
+					return
+				}
+
+				data, err := protocol.EncodeControl(test.responseType, struct{}{})
+				if err == nil {
+					err = protocol.NewFrameWriter(serverConn).WriteFrame(protocol.ChannelControl, data)
+				}
+
+				serverErr <- err
+			}()
+
+			c, err := ConnectExisting(config.Default(), config.Paths{SocketPath: "/bothy/daemon.sock"})
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatalf("ConnectExisting() error = %v", err)
+				}
+
+				if c == nil {
+					t.Fatal("ConnectExisting() returned a nil client")
+				}
+
+				c.Close()
+			} else if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("ConnectExisting() error = %v, want %q", err, test.wantError)
+			}
+
+			if err := <-serverErr; err != nil {
+				t.Fatalf("daemon side: %v", err)
+			}
+		})
+	}
+
+	dialLocalDaemon = func(string, string, time.Duration) (net.Conn, error) {
+		return nil, errors.New("canny socket")
+	}
+
+	if _, err := ConnectExisting(config.Default(), config.Paths{SocketPath: "/bothy/daemon.sock"}); err == nil || !strings.Contains(err.Error(), "canny socket") {
+		t.Fatalf("dial error = %v", err)
 	}
 }

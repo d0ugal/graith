@@ -4,12 +4,13 @@
 // envelope. See docs/design/2026-07-13-headless-stream-json-design.md (#1075).
 //
 // v1 runs the one-shot control-channel form: `claude -p --output-format
-// stream-json --input-format stream-json --verbose --permission-prompt-tool
-// stdio`. The prompt is delivered as an initial stdin user message (not a
-// positional arg), the stdin channel stays open for the turn so graith can
-// issue an `interrupt` control request and answer inbound `can_use_tool`
-// permission asks, and stdin is closed on the terminal `result` so the process
-// exits (preserving one-shot semantics). See issue #1136 (Phase 4).
+// stream-json --input-format stream-json --verbose`. The prompt is delivered as
+// an initial stdin user message (not a positional arg), and stdin stays open so
+// graith can issue an `interrupt` control request. Graith does not request or
+// service native approvals; an unexpected inbound `can_use_tool` request is
+// diagnosed and denied immediately because headless mode has no agent TUI.
+// Stdin closes on the terminal `result` so the process exits, preserving
+// one-shot semantics. See issue #1136 (Phase 4).
 //
 // The control protocol is an SDK-internal contract, not a documented CLI API,
 // so everything is written defensively (unknown message types ignored,
@@ -30,10 +31,9 @@ import (
 type Status string
 
 const (
-	StatusActive   Status = "active"
-	StatusApproval Status = "approval"
-	StatusReady    Status = "ready"
-	StatusStopped  Status = "stopped"
+	StatusActive  Status = "active"
+	StatusReady   Status = "ready"
+	StatusStopped Status = "stopped"
 )
 
 // event is a single stream-json line. Only the fields graith consumes are
@@ -82,8 +82,9 @@ type controlResponse struct {
 	Error     string          `json:"error"`
 }
 
-// canUseToolRequest is the body of an inbound can_use_tool control request: the
-// CLI asking graith to approve a tool call.
+// canUseToolRequest is retained only to fail closed on an unexpected native
+// permission prompt. A headless session has no native TUI in which a user can
+// respond, so the driver diagnoses and denies it synchronously.
 type canUseToolRequest struct {
 	Subtype  string          `json:"subtype"`
 	ToolName string          `json:"tool_name"`
@@ -139,22 +140,6 @@ type controlSubtype struct {
 	Subtype string `json:"subtype"`
 }
 
-// PermissionRequest is an inbound can_use_tool control request: the CLI asking
-// graith to approve a tool call.
-type PermissionRequest struct {
-	RequestID string
-	ToolName  string
-	// Input is the raw tool input JSON, passed through to the approval backend.
-	Input json.RawMessage
-}
-
-// PermissionDecision is graith's answer to a PermissionRequest.
-type PermissionDecision struct {
-	Allow bool
-	// Reason is surfaced to the agent on deny.
-	Reason string
-}
-
 // userMessage is the SDKUserMessage graith writes to feed a prompt/turn.
 type userMessage struct {
 	Type    string `json:"type"` // "user"
@@ -171,12 +156,6 @@ func statusForEvent(ev event) (Status, bool) {
 		return StatusActive, true
 	case "result":
 		return StatusReady, true
-	case "control_request":
-		// An inbound control_request from the CLI is (in v1) a can_use_tool
-		// permission ask — the agent is blocked awaiting a decision.
-		if controlSubtypeOf(ev.Request) == "can_use_tool" {
-			return StatusApproval, true
-		}
 	}
 
 	return "", false

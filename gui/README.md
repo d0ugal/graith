@@ -167,9 +167,9 @@ the host.
 gr remote pair graith-ben            # sends a pair_request over the tailnet
 
 # On the host (local human):
-gr pair list                         # show pending requests + paired devices
-gr pair approve <request-id>         # mint a client token, return the TLS SPKI pin
-# gr pair revoke <device-id>         # revoke a device (force-closes its connections)
+gr remote pairings list                         # show pending requests + paired devices
+gr remote pairings approve <request-id>         # mint a client token, return the TLS SPKI pin
+# gr remote pairings revoke <device-id>         # revoke a device (force-closes its connections)
 ```
 
 In the app, "Add Host" runs the same flow via the pairing sheet. On approval the
@@ -189,17 +189,17 @@ gr remote attach graith-ben/my-session   # attach a session over the tailnet (#6
 ```
 
 The app connects to **all** paired hosts and shows their sessions in one
-sidebar. Interactive approvals are intentionally not exposed in the native
-apps; issue #1392 tracks removing that mechanism from graith entirely.
+sidebar.
 
 ## Status & deferred work
 
 Done: shared core (protocol + terminal + tests), macOS app (`GraithGUI`, builds
-and runs), iOS app (`GraithMobileApp`, **launches in the simulator** with the
-live Ghostty terminal adapter), remote daemon substrate + auth/pairing,
-`gr remote`/`gr pair` CLI, and the Makefile/build tooling. The shared package
-uses a checksum-pinned, multi-platform libghostty-vt `.xcframework`; rebuild it
-with `shared/build-libghostty.sh` when rotating the Ghostty pin.
+and runs), iOS app (`GraithMobileApp`, **launches in the simulator** against
+real identity/registry/reachability with mock hosts and the live Ghostty
+terminal adapter), remote daemon substrate + auth/pairing, the `gr remote` CLI,
+and the Makefile/build tooling. The shared package uses a checksum-pinned,
+multi-platform libghostty-vt `.xcframework`; rebuild it with
+`shared/build-libghostty.sh` when rotating the Ghostty pin.
 
 Deferred / not yet done:
 

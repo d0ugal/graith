@@ -1,15 +1,19 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
+	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/version"
 	"github.com/spf13/cobra"
@@ -20,9 +24,37 @@ func upgradeMsg() protocol.UpgradeMsg {
 	return protocol.UpgradeMsg{ExecPath: execPath, ClientVersion: version.Version}
 }
 
+func managedUpgradeMsg() (protocol.UpgradeMsg, error) {
+	msg := upgradeMsg()
+
+	// Bundle discovery, signature validation, and the first immutable cache copy
+	// happen before the socket exchange. Keep that work bounded, but do not force
+	// it through a deliberately tiny dial/handshake test or user setting.
+	preparationTimeout := localDaemonStartTimeout() + localDaemonHandshakeTimeout() + 2*time.Second
+	if preparationTimeout < 15*time.Second {
+		preparationTimeout = 15 * time.Second
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), preparationTimeout)
+	defer cancel()
+
+	execPath, _, err := daemonservice.ResolveUpgradeCandidateContext(ctx, msg.ExecPath, version.Version, version.CommitSHA, os.Getuid())
+	if err != nil {
+		return protocol.UpgradeMsg{}, err
+	}
+
+	msg.ExecPath = execPath
+
+	return msg, nil
+}
+
 var (
-	adoptFrom  string
-	forceClean bool
+	adoptFrom               string
+	forceClean              bool
+	internalServiceLabel    string
+	internalServiceSlot     string
+	serviceAllProfiles      bool
+	runAdoptBootstrapForCLI = daemon.RunAdoptBootstrap
 )
 
 var daemonCmd = &cobra.Command{
@@ -44,7 +76,15 @@ var daemonStartCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if adoptFrom != "" {
-			return daemon.RunAdoptBootstrap(cfgFile, adoptFrom)
+			identity, ok := cmd.Context().Value(adoptedServiceContextKey{}).(daemon.AdoptedServiceIdentity)
+			if !ok {
+				return errors.New("daemon adoption is missing its scoped service identity")
+			}
+			if identity == (daemon.AdoptedServiceIdentity{}) {
+				return errors.New("daemon adoption has an invalid scoped service identity")
+			}
+
+			return runAdoptBootstrapForCLI(cfgFile, adoptFrom, identity)
 		}
 
 		return daemon.Run(cfg, paths, cfgFile, adoptFrom)
@@ -77,14 +117,218 @@ var daemonStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := daemon.StopDaemon(paths.PIDFile); err != nil {
+		c, err := connectExistingForCLI(cfg, paths)
+		if err != nil {
+			return fmt.Errorf("daemon not running: %w", err)
+		}
+
+		identity, err := c.DaemonIdentity()
+		c.Close()
+
+		if err != nil {
+			return fmt.Errorf("identify daemon peer: %w", err)
+		}
+
+		if err := stopDaemonIdentityForCLI(identity); err != nil {
 			return err
+		}
+
+		if !waitForDaemonSocketGoneForCLI(paths.SocketPath) {
+			return fmt.Errorf("daemon socket %s remained after PID %d exited", paths.SocketPath, identity.PID)
+		}
+
+		manager, resolveErr := currentServiceManager(false)
+		if resolveErr != nil {
+			return fmt.Errorf("daemon stopped but managed-service state could not be resolved: %w", resolveErr)
+		}
+
+		if manager != nil {
+			if markErr := manager.MarkStopped(paths.Profile, identity.PID); markErr != nil {
+				return fmt.Errorf("record dormant daemon service: %w", markErr)
+			}
 		}
 
 		out.Printf("Daemon stopped\n")
 
 		return nil
 	},
+}
+
+var daemonServiceCmd = &cobra.Command{
+	Use:   "service",
+	Short: "Inspect and remove the macOS per-user daemon service",
+}
+
+var daemonServiceStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show the per-user daemon service state",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		manager, err := currentServiceManager(false)
+		if err != nil {
+			return err
+		}
+
+		if manager == nil {
+			self, _ := os.Executable()
+
+			resolution, resolveErr := daemonservice.Resolve(self, version.Version, version.CommitSHA, os.Getuid())
+			if resolveErr != nil {
+				return resolveErr
+			}
+
+			status := map[string]any{"mode": resolution.Mode, "reason": resolution.Reason, "profile": paths.Profile}
+			if out.IsJSON() {
+				return out.JSON(status)
+			}
+
+			out.Printf("Mode: %s\nReason: %s\n", resolution.Mode, resolution.Reason)
+
+			return nil
+		}
+
+		reports, err := manager.Reports(cmd.Context(), paths.Profile, serviceAllProfiles)
+		if err != nil {
+			return err
+		}
+
+		if out.IsJSON() {
+			return out.JSON(map[string]any{"mode": daemonservice.ModeManaged, "services": reports})
+		}
+
+		for _, report := range reports {
+			profile := report.Profile
+			if profile == "" {
+				profile = "default"
+			}
+
+			out.Printf("%s: label=%s slot=%s status=%s job_running=%t pid=%d registered=%s running=%s lease=%s\n",
+				profile, report.Label, report.Slot, report.Status, report.JobRunning,
+				report.PID, report.RegisteredGeneration, report.RunningGeneration, report.LeaseState)
+
+			if report.QuarantineReason != "" {
+				out.Printf("  quarantine: %s\n", report.QuarantineReason)
+			}
+		}
+
+		return nil
+	},
+}
+
+var daemonServiceRemoveCmd = &cobra.Command{
+	Use:   "remove",
+	Short: "Stop and unregister the per-user daemon service without deleting user data",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		manager, err := currentServiceManager(false)
+		if err != nil {
+			return err
+		}
+
+		if manager == nil {
+			return errors.New("this installation does not manage a macOS daemon service")
+		}
+
+		if err := manager.Remove(cmd.Context(), paths.Profile, serviceAllProfiles, stopManagedServiceDaemon); err != nil {
+			return err
+		}
+
+		out.Printf("Daemon service registration removed; config, state, worktrees, tokens, and logs were preserved.\n")
+
+		return nil
+	},
+}
+
+func stopManagedServiceDaemon(report daemonservice.ServiceReport) error {
+	if report.Paths.SocketPath == "" {
+		return fmt.Errorf("cannot authenticate running daemon service %s without its recorded socket path", report.Label)
+	}
+
+	c, err := connectExistingForCLI(cfg, report.Paths)
+	if err != nil {
+		return fmt.Errorf("authenticate running daemon service %s: %w", report.Label, err)
+	}
+
+	identity, err := c.DaemonIdentity()
+	c.Close()
+
+	if err != nil {
+		return fmt.Errorf("identify running daemon service %s: %w", report.Label, err)
+	}
+
+	expectedPID := report.PID
+	identitySource := "launchd"
+
+	if expectedPID <= 1 {
+		expectedPID = report.RecordedPID
+		identitySource = "receipt"
+	}
+
+	if expectedPID <= 1 {
+		return fmt.Errorf("daemon service %s has no usable launchd or receipt PID", report.Label)
+	}
+
+	if identity.PID != expectedPID {
+		return fmt.Errorf("daemon service %s %s PID %d does not match authenticated socket peer PID %d", report.Label, identitySource, expectedPID, identity.PID)
+	}
+
+	if err := stopDaemonIdentityForCLI(identity); err != nil {
+		return err
+	}
+
+	if !waitForDaemonSocketGoneForCLI(report.Paths.SocketPath) {
+		return fmt.Errorf("daemon service %s socket remained after PID %d exited", report.Label, identity.PID)
+	}
+
+	return nil
+}
+
+var daemonServiceRepairCmd = &cobra.Command{
+	Use:   "repair",
+	Short: "Diagnose and repair safe dormant service-registration state",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		manager, err := currentServiceManager(true)
+		if err != nil {
+			return err
+		}
+
+		if manager == nil {
+			return errors.New("this installation does not carry a managed macOS daemon service")
+		}
+
+		actions, err := manager.Repair(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		if out.IsJSON() {
+			return out.JSON(map[string]any{"actions": actions})
+		}
+
+		for _, action := range actions {
+			out.Printf("%s\n", action)
+		}
+
+		return nil
+	},
+}
+
+func currentServiceManager(repair bool) (*daemonservice.Manager, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+
+	var resolution daemonservice.Resolution
+	if repair {
+		resolution, err = daemonservice.ResolveForRepair(self, version.Version, version.CommitSHA, os.Getuid())
+	} else {
+		resolution, err = daemonservice.Resolve(self, version.Version, version.CommitSHA, os.Getuid())
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return resolution.Manager, nil
 }
 
 var daemonRestartCmd = &cobra.Command{
@@ -109,7 +353,7 @@ var daemonReloadCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := client.Connect(cfg, paths, cfgFile)
 		if err != nil {
-			conn, startErr := client.EnsureDaemon(paths, cfgFile)
+			conn, startErr := client.EnsureDaemonConfigured(cfg, paths, cfgFile)
 			if startErr != nil {
 				return fmt.Errorf("start daemon: %w", startErr)
 			}
@@ -190,12 +434,56 @@ func (e *preserveRestartRejectedError) Error() string { return e.cause.Error() }
 
 func (e *preserveRestartRejectedError) Unwrap() error { return e.cause }
 
-const preserveRestartSuccessMsg = "Daemon restarted (sessions preserved)"
+// protocolBoundaryRestartError means the running daemon speaks an older,
+// incompatible wire protocol (e.g. a protocol-1 daemon still running after the
+// binary upgraded to protocol 2) and rejected the preserve handshake before any
+// upgrade request could be sent. Sessions are never preserved across this
+// protocol security boundary by design, so the restart must fall through to a
+// clean stop/start — mirroring the client connect() path's
+// restartAcrossProtocolBoundary — rather than aborting with a confusing error.
+type protocolBoundaryRestartError struct {
+	serverProtocol string
+	priorPID       int
+}
 
-func restartDaemonPreservingSessions(_ func() error) error {
+func (e *protocolBoundaryRestartError) Error() string {
+	return fmt.Sprintf(
+		"daemon speaks incompatible protocol %s; sessions cannot be preserved across the protocol boundary",
+		e.serverProtocol,
+	)
+}
+
+var daemonProcessAlive = func(pid int) bool {
+	err := syscall.Kill(pid, 0)
+
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+const (
+	preserveRestartSuccessMsg = "Daemon restarted (sessions preserved)"
+	cleanRestartSuccessMsg    = "Daemon restarted after preserve process exited (sessions not preserved)"
+)
+
+func restartDaemonPreservingSessions(startAfterDeadPreserve func() error) error {
 	err := execUpgrade(preserveRestartSuccessMsg)
 	if err == nil {
 		return nil
+	}
+
+	// A protocol-incompatible daemon rejects the preserve handshake before any
+	// upgrade request is sent, so no session is ever at risk from a fallback here.
+	// Preservation across the protocol security boundary is impossible by design,
+	// so do the clean stop/start automatically instead of forcing the user to
+	// re-run with --force.
+	var boundary *protocolBoundaryRestartError
+	if errors.As(err, &boundary) {
+		fmt.Fprintf(
+			os.Stderr,
+			"Daemon protocol changed (daemon=%s, cli=%s); stopping old daemon and its sessions before clean restart...\n",
+			boundary.serverProtocol, protocol.Version,
+		)
+
+		return restartAfterProtocolBoundary(boundary.priorPID, startAfterDeadPreserve)
 	}
 
 	var rejected *preserveRestartRejectedError
@@ -227,17 +515,62 @@ func restartDaemonPreservingSessions(_ func() error) error {
 		return nil
 	}
 
-	// Once a mutating preserve request was sent, a vanished peer PID is not proof
-	// that the replacement failed: the acknowledgement or readiness response may
-	// have been lost after exec. Never convert this uncertainty into an automatic
-	// clean start. Destructive restart remains an explicit --force operation.
+	// The PID comes from the peer credentials of the same Unix socket that
+	// supplied priorInstanceID, not from the independently mutable PID file. If
+	// that exact process has exited, it cannot later exec into the replacement.
+	// A reused PID or a zombie conservatively blocks fallback as still alive.
+	if preserveProcessExited(unconfirmed.priorPID) {
+		startErr := startAfterDeadPreserve()
+
+		// A concurrent client can start or reach the requested version while the
+		// clean start is checking the socket. Validate the generation after both
+		// success and failure so neither a wrong-version daemon nor a contradictory
+		// "daemon is still running" error can be reported as restart success.
+		return reconcileCleanStart(startErr, unconfirmed.priorInstanceID)
+	}
+
+	// Once the request was accepted, the old and new generation can be the same
+	// PID. There is no race-free way for a subsequent PID signal to prove which
+	// generation it will hit, so leave clean restart as an explicit --force
+	// choice instead of risking the sessions the preserve path was meant to keep.
 	return fmt.Errorf(
-		"%w; automatic clean fallback skipped because preserve restart completion is unconfirmed (use --force for an intentional clean restart)",
+		"%w; automatic clean fallback skipped because the daemon process that received the preserve request may still be serving or restarting (use --force for an intentional clean restart)",
 		err,
 	)
 }
 
+func preserveProcessExited(priorPID int) bool {
+	return priorPID > 1 && !daemonProcessAlive(priorPID)
+}
+
+func reconcileCleanStart(startErr error, priorInstanceID string) error {
+	v, id := probeDaemonIdentityFn(time.Time{})
+	if isNewDaemonGeneration(v, id, version.Version, priorInstanceID) {
+		out.Printf("%s\n", cleanRestartSuccessMsg)
+
+		return nil
+	}
+
+	if startErr != nil {
+		return startErr
+	}
+
+	if v != "" && v != version.Version {
+		return fmt.Errorf("clean restart presented daemon version %s instead of %s", v, version.Version)
+	}
+
+	return fmt.Errorf("clean restart did not present a new %s generation", version.Version)
+}
+
 func execUpgrade(successMsg string) error {
+	// Resolve and cache the managed candidate before the socket deadline starts;
+	// codesign and the first immutable bundle copy can legitimately outlive a
+	// single handshake exchange.
+	msg, err := managedUpgradeMsg()
+	if err != nil {
+		return fmt.Errorf("prepare managed upgrade candidate: %w", err)
+	}
+
 	c, err := dialUpgradeClient()
 	if err != nil {
 		return fmt.Errorf("connect to daemon: %w", err)
@@ -275,6 +608,30 @@ func execUpgrade(successMsg string) error {
 		return fmt.Errorf("read daemon handshake before upgrade: %w", err)
 	}
 
+	// An older-protocol daemon rejects the protocol-2 handshake with handshake_err
+	// before it can report handshake_ok. Recognize that exact rejection (the same
+	// one the client connect() path routes into restartAcrossProtocolBoundary) and
+	// signal a clean, non-preserving restart rather than a generic failure.
+	if hsResp.Type == "handshake_err" {
+		var hsErr protocol.HandshakeErrMsg
+
+		_ = protocol.DecodePayload(hsResp, &hsErr)
+		if serverProtocol, ok := client.OlderServerProtocolFromHandshakeError(hsErr.Reason); ok {
+			priorPID, pidErr := c.DaemonPID()
+			c.Close()
+
+			if pidErr != nil {
+				return fmt.Errorf("identify incompatible daemon peer: %w", pidErr)
+			}
+
+			return &protocolBoundaryRestartError{serverProtocol: serverProtocol, priorPID: priorPID}
+		}
+
+		c.Close()
+
+		return fmt.Errorf("daemon rejected upgrade handshake: %s", hsErr.Reason)
+	}
+
 	if hsResp.Type != "handshake_ok" {
 		c.Close()
 		return fmt.Errorf("unexpected pre-upgrade handshake response %q", hsResp.Type)
@@ -299,7 +656,7 @@ func execUpgrade(successMsg string) error {
 	// state-changing UpgradeMsg. A legacy daemon rejects the unknown message and
 	// remains fully live, giving the first native rollout an explicit clean
 	// stop/start migration path instead of a destructive hot handoff.
-	if err := c.SendControl("upgrade_preflight", upgradeMsg()); err != nil {
+	if err := c.SendControl("upgrade_preflight", msg); err != nil {
 		c.Close()
 		return &preserveRestartRejectedError{cause: fmt.Errorf("daemon does not support safe preserve-restart preflight: %w", err)}
 	}
@@ -323,7 +680,7 @@ func execUpgrade(successMsg string) error {
 	// Propagate a send failure rather than waiting for the readiness of an upgrade
 	// that was not confirmed. A failed write does not prove the daemon received no
 	// complete frame, so keep the fallback guarded just as for a readiness timeout.
-	if err := c.SendControl("upgrade", upgradeMsg()); err != nil {
+	if err := c.SendControl("upgrade", msg); err != nil {
 		c.Close()
 
 		return &preserveRestartUnconfirmedError{
@@ -455,9 +812,40 @@ func probeDaemonIdentityWithDeadline(aggregateDeadline time.Time) (daemonVersion
 	return hsOk.DaemonVersion, hsOk.DaemonInstanceID
 }
 
+// restartAfterProtocolBoundary performs the clean stop/start when the running
+// daemon speaks an incompatible older protocol. StopDaemon signals the old PID
+// and waits for it to exit (its graceful StopAll terminates protocol-1 sessions
+// the new daemon cannot adopt); startAfterStop then acquires the freed socket via
+// EnsureDaemon, which owns stale-socket and PID-file reconciliation. A stop error
+// is a warning, not fatal: the old daemon may already be gone, and startAfterStop
+// still fails closed if the socket is not actually free.
+func restartAfterProtocolBoundary(priorPID int, startAfterStop func() error) error {
+	if err := prepareCleanRestart(); err != nil {
+		return fmt.Errorf("reserve managed service before protocol-boundary stop: %w", err)
+	}
+
+	if err := stopDaemonPIDForCLI(priorPID); err != nil {
+		if daemonProcessAlive(priorPID) {
+			return fmt.Errorf("stop incompatible daemon peer: %w", err)
+		}
+	}
+
+	if err := startAfterStop(); err != nil {
+		return err
+	}
+
+	out.Printf("%s\n", cleanRestartSuccessMsg)
+
+	return nil
+}
+
 func restartClean() error {
-	if err := daemon.StopDaemon(paths.PIDFile); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	if err := prepareCleanRestart(); err != nil {
+		return fmt.Errorf("reserve managed service before clean restart: %w", err)
+	}
+
+	if err := stopExistingDaemon(); err != nil {
+		return err
 	}
 
 	if err := startCleanDaemon(); err != nil {
@@ -469,12 +857,72 @@ func restartClean() error {
 	return nil
 }
 
+var (
+	prepareDaemonCleanRestartForCLI = client.PrepareDaemonCleanRestart
+	stopDaemonPIDForCLI             = daemon.StopDaemonPID
+	stopDaemonIdentityForCLI        = client.StopDaemonIdentity
+	waitForDaemonSocketGoneForCLI   = client.WaitForDaemonSocketGone
+	connectExistingForCLI           = func(cfg *config.Config, paths config.Paths) (existingDaemonConnection, error) {
+		return client.ConnectExisting(cfg, paths)
+	}
+)
+
+type existingDaemonConnection interface {
+	DaemonIdentity() (client.DaemonIdentity, error)
+	Close()
+}
+
+func prepareCleanRestart() error {
+	ctx, cancel := context.WithTimeout(context.Background(), localDaemonStartTimeout())
+	defer cancel()
+
+	return prepareDaemonCleanRestartForCLI(ctx, paths)
+}
+
+func stopExistingDaemon() error {
+	if _, err := os.Stat(paths.SocketPath); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect daemon socket before clean restart: %w", err)
+	}
+
+	c, err := connectExistingForCLI(cfg, paths)
+	if err != nil {
+		var rejected *client.ExistingDaemonHandshakeError
+		if errors.As(err, &rejected) {
+			return fmt.Errorf("authenticate daemon before clean restart: %w", err)
+		}
+
+		// A stale or foreign socket cannot supply an authenticated daemon
+		// identity. Leave it in place for EnsureDaemon's existing fail-closed
+		// ownership/reconciliation path instead of making --force unrecoverable.
+		return nil
+	}
+
+	identity, err := c.DaemonIdentity()
+	c.Close()
+
+	if err != nil {
+		return fmt.Errorf("identify daemon before clean restart: %w", err)
+	}
+
+	if err := stopDaemonIdentityForCLI(identity); err != nil {
+		return fmt.Errorf("stop daemon peer: %w", err)
+	}
+
+	if !waitForDaemonSocketGoneForCLI(paths.SocketPath) {
+		return fmt.Errorf("daemon socket %s remained after PID %d exited", paths.SocketPath, identity.PID)
+	}
+
+	return nil
+}
+
 // startCleanDaemon completes a clean restart after the old daemon is known to
 // have stopped. Keeping this separate lets preserve fallback avoid signalling a
 // PID that was proven dead. EnsureDaemon owns stale-socket and PID-file
 // reconciliation: doing either unlink here would race a concurrent starter.
 func startCleanDaemon() error {
-	conn, err := client.EnsureDaemon(paths, cfgFile)
+	conn, err := client.EnsureDaemonConfigured(cfg, paths, cfgFile)
 	if err != nil {
 		return fmt.Errorf("restart daemon: %w", err)
 	}
@@ -492,8 +940,18 @@ func registerDaemonCmd() {
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonReloadCmd)
+	daemonCmd.AddCommand(daemonServiceCmd)
+	daemonServiceCmd.AddCommand(daemonServiceStatusCmd)
+	daemonServiceCmd.AddCommand(daemonServiceRemoveCmd)
+	daemonServiceCmd.AddCommand(daemonServiceRepairCmd)
+	daemonServiceStatusCmd.Flags().BoolVar(&serviceAllProfiles, "all-profiles", false, "show every registered profile and quarantined slot")
+	daemonServiceRemoveCmd.Flags().BoolVar(&serviceAllProfiles, "all-profiles", false, "remove every registered profile service")
 	daemonStartCmd.Flags().StringVar(&adoptFrom, "adopt-from", "", "")
 	_ = daemonStartCmd.Flags().MarkHidden("adopt-from")
+	daemonStartCmd.Flags().StringVar(&internalServiceLabel, "internal-service-label", "", "")
+	daemonStartCmd.Flags().StringVar(&internalServiceSlot, "internal-service-slot", "", "")
+	_ = daemonStartCmd.Flags().MarkHidden("internal-service-label")
+	_ = daemonStartCmd.Flags().MarkHidden("internal-service-slot")
 
 	daemonRestartCmd.Flags().BoolVar(&forceClean, "force", false, "Kill sessions and do a clean stop/start")
 }

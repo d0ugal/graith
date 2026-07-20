@@ -117,16 +117,11 @@ func resolveRenderedDefaults(cfg *Config) *Config {
 	fillToolDefault(&c.Tools.GH, toolDefaults.GH)
 	fillToolDefault(&c.Tools.GCX, toolDefaults.GCX)
 	fillToolDefault(&c.Tools.Shell, toolDefaults.Shell)
-	fillToolDefault(&c.Tools.OSAScript, toolDefaults.OSAScript)
 	fillToolDefault(&c.Tools.PS, toolDefaults.PS)
 	fillToolDefault(&c.Tools.Lsof, toolDefaults.Lsof)
 
-	if strings.TrimSpace(c.Approvals.CommandTimeout) == "" {
-		c.Approvals.CommandTimeout = c.Approvals.CommandTimeoutDuration().String()
-	}
-
-	if strings.TrimSpace(c.Approvals.LocalmostTimeout) == "" {
-		c.Approvals.LocalmostTimeout = c.Approvals.LocalmostTimeoutDuration().String()
+	if strings.TrimSpace(c.CommandPolicy.Timeout) == "" {
+		c.CommandPolicy.Timeout = c.CommandPolicy.TimeoutDuration().String()
 	}
 
 	return &c

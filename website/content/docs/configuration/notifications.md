@@ -1,7 +1,7 @@
 ---
 weight: 330
-title: "Notifications & approvals"
-description: "Status bar, desktop/push notifications, approvals, and messages."
+title: "Notifications & messages"
+description: "Status bar, desktop/push notifications, and messages."
 icon: "notifications"
 toc: true
 draft: false
@@ -15,31 +15,34 @@ enabled  = true      # show a status bar while attached
 position = "bottom"  # "bottom" or "top"
 ```
 
-The status bar shows the session name, status, agent type, branch, git status, unread messages, and fleet summary. It updates in real time.
+The status bar shows session name, status, agent type, branch, git status, unread messages, and fleet summary, updating in real time.
 
 ## Notifications
 
 ```toml
 [notifications]
-enabled     = true   # desktop notifications (status changes AND `gr notify`)
-on_approval = true   # notify when a session needs approval
-on_stopped  = false  # notify when a session stops
-command     = ""     # custom notification command (optional)
+enabled    = true   # desktop notifications (status changes AND `gr notify`)
+on_stopped = false  # notify when a session stops
+command    = ""     # custom notification command (optional)
 
 # Proactive `gr notify` push notifications:
-backend           = "macos"   # "macos" (helper app, falls back to osascript) or "command"; default "macos"
+backend           = "macos"   # "macos" (required helper app) or "command"; default "macos"
 max_per_hour      = 12         # rolling-hour cap on low/normal pushes (high bypasses)
 quiet_hours_start = "22:00"    # suppress low/normal pushes in this window (24h "HH:MM")
 quiet_hours_end   = "07:00"    # window may wrap past midnight; high priority bypasses
 ```
 
-When `command` is set, graith executes it via `sh -c` instead of using the system notification API. For status-change notifications the command receives `GRAITH_SESSION_NAME`, `GRAITH_STATUS`, and `GRAITH_MESSAGE`; for `gr notify` push notifications (`backend = "command"`) it receives `GRAITH_NOTIFY_TITLE`, `GRAITH_NOTIFY_MESSAGE`, and `GRAITH_NOTIFY_PRIORITY`.
+When `command` is set, status-change notifications run it via `sh -c` instead
+of the system notification API and pass `GRAITH_SESSION_NAME`, `GRAITH_STATUS`,
+and `GRAITH_MESSAGE`. `gr notify` push notifications use the command only when
+`backend = "command"`; they pass `GRAITH_NOTIFY_TITLE`,
+`GRAITH_NOTIFY_MESSAGE`, and `GRAITH_NOTIFY_PRIORITY`.
 
 ### Proactive push notifications (`gr notify`)
 
 The orchestrator (and triggers) can proactively get your attention — a morning
-briefing, a CI failure, a review needed — rather than leaving it sitting silently
-in an inbox:
+briefing, a CI failure, a review needed — rather than leaving it silently in an
+inbox:
 
 ```bash
 gr notify "Morning briefing ready" --priority low
@@ -48,31 +51,33 @@ gr notify "CI failing on main after 3 retries" --priority high
 
 Priority levels: `low`, `normal` (default), and `high`. `high` plays a sound and
 **bypasses quiet hours and the rate limit**; `low`/`normal` are subject to both.
-Only the orchestrator session and the human may send notifications — plain agent
+Only the orchestrator session and the human can send notifications — plain agent
 sessions are rejected to prevent spam. Identical notifications within the
 [coalesce window](#timing) (30s by default) are coalesced. Other backends (ntfy,
-Pushover, Slack) are planned follow-ups.
+Pushover, Slack) are planned.
 
-#### The `macos` backend
+#### Native macOS notifications
 
-The `macos` backend prefers a small bundled helper app (`GraithNotifier.app`,
+Both default session-status notifications (such as `on_stopped`) and the
+`macos` push backend prefer a small bundled helper app (`GraithNotifier.app`,
 bundle identifier `com.graith.notifier`) that posts via
-`UNUserNotificationCenter`. This makes graith appear as **"Graith"** in *System
-Settings > Notifications*, so you can configure its notification style, sounds,
-and Do-Not-Disturb behaviour like any other app.
+`UNUserNotificationCenter`. They therefore appear as **"Graith"** in *System
+Settings > Notifications*, where you can configure their style, sounds, and
+Do-Not-Disturb behavior like any other app. Stable and `graith-dev` Homebrew
+installations install this helper automatically on macOS; Linux packages do not
+contain it.
 
 Build the helper with `make notifier` (macOS only — a no-op on Linux) and place
 the resulting `macos/build/GraithNotifier.app` where graith can find it:
 alongside the `gr` binary, under `<prefix>/libexec/graith/` or
 `<prefix>/share/graith/`, in `/Applications`, or in `~/Applications`. Set
-`GRAITH_NOTIFIER_APP` to override the location explicitly.
+`GRAITH_NOTIFIER_APP` to override the location.
 
-If the helper isn't installed — or is installed but fails to launch — graith
-falls back to `osascript`, whose notifications work but appear under "Script
-Editor" (and can't be configured per-app) — the reason the helper exists. The
-one exception is when you've explicitly turned off notifications for "Graith" in
-System Settings: graith honours that and does **not** route around it via
-`osascript`.
+The helper is required for native macOS delivery. If it isn't installed or
+can't launch, the dispatch fails and graith logs/reports the failure; it does
+not route the notification through another application. If you've explicitly
+turned off notifications for "Graith" in System Settings, graith honours that
+choice as a suppressed notification.
 
 Triggers can fire a notification when their action completes:
 
@@ -86,16 +91,16 @@ notify_priority    = "low"                        # low|normal|high; optional
 
 ### Timing
 
-Low-level notification pacing. These were formerly fixed constants; override them
-to tune coalescing, backend dispatch, and PTY injection. The idle timeout and
-maximum wait are deliberately shared by inbox notifications and `gr type`, so
-both paths avoid colliding with an attached user's typing under one policy.
-Every key is optional — leave the table out and the defaults below apply.
+Low-level notification pacing — override to tune coalescing, backend dispatch,
+and PTY injection. The idle timeout and max wait are shared by inbox
+notifications and `gr type`, so both avoid colliding with an attached user's
+typing under one policy. Every key is optional; leave the table out for the
+defaults below.
 
 ```toml
 [notifications.timing]
 coalesce_window      = "30s"   # drop an identical push within this window ("0" disables coalescing)
-dispatch_timeout     = "15s"   # per-backend dispatch timeout (osascript / helper app / command)
+dispatch_timeout     = "15s"   # per-backend dispatch timeout (helper app / command)
 inbox_idle_timeout   = "10s"   # wait before inbox notifications or `gr type` inject into an attached PTY
 inbox_max_wait       = "2m"    # cap that user-idle wait before injecting anyway
 inbox_cooldown       = "30s"   # minimum interval between unread-inbox nudges to one session ("0" disables)
@@ -103,43 +108,9 @@ inbox_detached_delay = "5s"    # settle delay before notifying a session with no
 ```
 
 `coalesce_window`, `inbox_cooldown`, and `inbox_detached_delay` accept `"0"` to
-disable that behaviour. `dispatch_timeout`, `inbox_idle_timeout`, and
-`inbox_max_wait` fall back to their default when set to zero or a negative value
-(they have no sensible zero). An unparseable value always falls back to the
-default.
-
-## Approvals
-
-```toml
-[approvals]
-backend  = ""        # who decides (see below); default "" = always prompt the human
-timeout  = "10m"     # how long to wait for a human decision
-auto_pop = false     # auto-open the approval overlay when a request is queued
-command  = ""        # required for backend "command"/"external"; path override for "localmost"
-
-command_timeout   = "5s"  # bounds one "command"/"external" backend invocation
-localmost_timeout = "5s"  # bounds one "localmost" binary check
-
-[approvals.builtin]
-config   = ""        # localmost-format config.json (backend "builtin")
-```
-
-The approval system integrates with agent hooks. When an agent requests approval (e.g. for a dangerous tool call), the `backend` decides who resolves it:
-
-| `backend` | Who decides |
-|-----------|-------------|
-| `""` (default, equivalent to `"prompt"`) | Always prompt the human via the overlay |
-| `"command"` / `"external"` | Delegate to `command` over graith's JSON contract (one JSON object on stdin — `{tool_name,tool_input,session_id,session_name}` — and one on stdout — `{decision:allow\|block\|deny\|defer,reason}`) |
-| `"localmost"` | Delegate to the real localmost binary via its native protocol (`command` optionally overrides the binary path) |
-| `"builtin"` | graith's built-in localmost-compatible engine — configured via `[approvals.builtin] config` (a localmost-format `config.json` path) **or** inline rules (`allow`, `deny`, `allowSafeXargs`, `askNoninteractive`) |
-
-`mode` is deprecated. With no `backend` set, legacy `mode = "command"`, `mode = "external"`, and `mode = "localmost"` all resolve to `backend = "command"` (graith's JSON contract) for compatibility — `mode = "localmost"` does **not** select the native-protocol `backend = "localmost"`. Set `backend = "localmost"` explicitly to run the real localmost binary. See `ResolveBackend` in `internal/config/config.go` for the full resolution order.
-
-### Backend execution timeouts
-
-An automated backend's decision runs *inside* the enclosing approval deadline: for an interactive session that decision precedes the human-queue wait; for a headless session it is bounded by the caller-side `timeout`. The `command`/`external` and `localmost` backends spawn a subprocess to make that decision, and `command_timeout` / `localmost_timeout` bound a single such invocation.
-
-Both default to `5s` when unset. Each must be a positive duration, at most `60s`, and **strictly shorter** than the enclosing `timeout` — a backend timeout at or above the approval deadline is rejected at config load, because a hung backend that outlives its enclosing deadline is exactly the kind of mismatch that has caused approval-behaviour bugs in the past. The other backends (`prompt`, `builtin`, `auto`) decide in-process and have no execution timeout. `gr doctor` prints the effective hierarchy (`backend execution <timeout> < approval timeout <timeout>`) so a tight configuration is visible before it bites.
+disable. `dispatch_timeout`, `inbox_idle_timeout`, and `inbox_max_wait` fall back
+to their default when zero or negative (they have no sensible zero). An
+unparseable value always falls back to the default.
 
 ## Messages
 
@@ -158,4 +129,4 @@ Duration strings support days: `7d`, `30d`, `1d12h`.
 ttl = "5m"  # default TTL for status updates
 ```
 
-When an agent sets a status via `gr status`, it auto-expires after this TTL if the agent produces new output without updating the status. Override per-update with `gr status --ttl <duration>`.
+A status set via `gr status` auto-expires after this TTL if the agent produces new output without updating it. Override per-update with `gr status --ttl <duration>`.

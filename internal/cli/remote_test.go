@@ -76,6 +76,55 @@ func TestRemotePairPortDefault(t *testing.T) {
 	}
 }
 
+func TestRemotePairPromptNamesPairingsApprovalCommand(t *testing.T) {
+	dir := writeRemoteHosts(t, nil)
+	buf := setOutBufForRemote(t, false)
+
+	origPairFn := remotePairFn
+	origPort := remotePairPort
+	origProfile := remotePairProfile
+	origLabel := remotePairLabel
+
+	t.Cleanup(func() {
+		remotePairFn = origPairFn
+		remotePairPort = origPort
+		remotePairProfile = origProfile
+		remotePairLabel = origLabel
+	})
+
+	remotePairPort = 4823
+	remotePairProfile = "kirk"
+	remotePairLabel = "canny phone"
+	remotePairFn = func(gotPaths config.Paths, host string, port int, profile, label, pubKey string) (*client.RemoteHost, error) {
+		if gotPaths.DataDir != dir || host != "ben.tailnet.ts.net" || port != 4823 || profile != "kirk" || label != "canny phone" {
+			t.Errorf("pair request args = paths=%+v host=%q port=%d profile=%q label=%q", gotPaths, host, port, profile, label)
+		}
+
+		if pubKey == "" {
+			t.Error("pair request received an empty device public key")
+		}
+
+		return &client.RemoteHost{
+			Host: host, Port: port, Profile: profile, Token: "tok-braw", TLSPin: "pin-canny",
+		}, nil
+	}
+
+	if err := remotePairCmd.RunE(remotePairCmd, []string{"ben.tailnet.ts.net"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	got := buf.String()
+
+	wantPrompt := "approve on the remote host: gr remote pairings approve <request-id>"
+	if !strings.Contains(got, wantPrompt) {
+		t.Errorf("output = %q, want prompt %q", got, wantPrompt)
+	}
+
+	if strings.Contains(got, "gr pair approve") {
+		t.Errorf("output retains removed approval command: %q", got)
+	}
+}
+
 // TestRemoteListEmpty verifies the list command prints the pairing hint when no
 // remote hosts are stored.
 func TestRemoteListEmpty(t *testing.T) {

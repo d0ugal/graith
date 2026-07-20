@@ -39,7 +39,7 @@ jobs:
       K6_IMAGE: grafana/k6:1.8.0-with-browser
       BASE_URL: http://localhost:8080
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           # Screenshots are pushed via github-script (its own GITHUB_TOKEN),
@@ -363,7 +363,7 @@ jobs:
       # write-scoped token and then executes the checked-out script, so it must
       # run the trusted base version, never PR-controlled code from the default
       # merge ref (the workflow YAML itself is already taken from the base).
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
@@ -386,7 +386,7 @@ jobs:
       # Only the helper script is needed — see the cleanup job's checkout note.
       # No `ref` pin needed here: the schedule trigger checks out the default
       # branch (trusted), never PR-controlled content.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
           sparse-checkout: .github/workflows/scripts

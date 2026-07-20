@@ -29,7 +29,6 @@ func createOptsFromMsg(c protocol.CreateMsg, agentName string, rows, cols uint16
 		InPlace:             c.InPlace,
 		AllowConcurrent:     c.AllowConcurrent,
 		SkipModelValidation: c.SkipModelValidation,
-		Yolo:                c.Yolo,
 		Headless:            c.Headless,
 		NoFetch:             c.NoFetch,
 		Rows:                rows,
@@ -123,27 +122,6 @@ func handleAttachConvert(sm *SessionManager, auth authContext, send func(string,
 	}
 }
 
-// handleRename renames a session.
-func handleRename(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
-	r, ok := decodePayload[protocol.RenameMsg](msg, send, "invalid rename message")
-	if !ok {
-		return
-	}
-
-	if !auth.authorizeTarget(sm, r.SessionID, authSelfOrDescendant, send) {
-		return
-	}
-
-	if err := sm.Rename(r.SessionID, r.NewName); err != nil {
-		send("error", protocol.ErrorMsg{Message: err.Error()})
-	} else {
-		send("renamed", struct {
-			SessionID string `json:"session_id"`
-			NewName   string `json:"new_name"`
-		}{r.SessionID, r.NewName})
-	}
-}
-
 // authorizeUpdate checks that the caller may update the target session — and,
 // when adopting a new parent, over that parent too — under sm.mu. Clearing the
 // parent ("") is a privileged reparent: only the orchestrator and the human CLI
@@ -167,8 +145,8 @@ func authorizeUpdate(sm *SessionManager, auth authContext, u protocol.UpdateMsg)
 	return authErr
 }
 
-// handleUpdate renames and/or reparents a session, guarding the reparent so a
-// session can't manufacture a descendant relationship to bypass the auth model.
+// handleUpdate changes session metadata, guarding a reparent so a session can't
+// manufacture a descendant relationship to bypass the auth model.
 func handleUpdate(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
 	u, ok := decodePayload[protocol.UpdateMsg](msg, send, "invalid update message")
 	if !ok {
@@ -181,52 +159,16 @@ func handleUpdate(sm *SessionManager, auth authContext, send func(string, any), 
 		return
 	}
 
-	if err := sm.Update(u.SessionID, u.Name, u.ParentID); err != nil {
+	updated, err := sm.Update(u.SessionID, u.Name, u.ParentID, u.Starred)
+	if err != nil {
 		send("error", protocol.ErrorMsg{Message: err.Error()})
 	} else {
-		send("updated", struct {
-			SessionID string `json:"session_id"`
-		}{u.SessionID})
-	}
-}
-
-// handleStar stars a session (protecting it from a manual gr delete).
-func handleStar(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
-	s, ok := decodePayload[protocol.StarMsg](msg, send, "invalid star message")
-	if !ok {
-		return
-	}
-
-	if !auth.authorizeTarget(sm, s.SessionID, authSelfOrDescendant, send) {
-		return
-	}
-
-	if err := sm.Star(s.SessionID); err != nil {
-		send("error", protocol.ErrorMsg{Message: err.Error()})
-	} else {
-		send("starred", struct {
-			SessionID string `json:"session_id"`
-		}{s.SessionID})
-	}
-}
-
-// handleUnstar unstars a session.
-func handleUnstar(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
-	u, ok := decodePayload[protocol.UnstarMsg](msg, send, "invalid unstar message")
-	if !ok {
-		return
-	}
-
-	if !auth.authorizeTarget(sm, u.SessionID, authSelfOrDescendant, send) {
-		return
-	}
-
-	if err := sm.Unstar(u.SessionID); err != nil {
-		send("error", protocol.ErrorMsg{Message: err.Error()})
-	} else {
-		send("unstarred", struct {
-			SessionID string `json:"session_id"`
-		}{u.SessionID})
+		send("updated", protocol.UpdateResultMsg{
+			SessionID: updated.ID,
+			Name:      updated.Name,
+			ParentID:  updated.ParentID,
+			Starred:   updated.Starred,
+		})
 	}
 }
 
