@@ -242,8 +242,8 @@ func TestLibghosttyDaemonLifecycle(t *testing.T) {
 	}
 
 	if upgradeResponse.Type != "upgrading" {
-		t.Fatalf("daemon did not accept preserving restart: %s; daemon: %s",
-			h.redactedControlResponse(upgradeResponse), h.redactedStderr())
+		t.Fatalf("daemon did not accept preserving restart: %s",
+			h.redactedControlResponse(upgradeResponse))
 	}
 
 	client.close()
