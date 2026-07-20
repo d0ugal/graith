@@ -1,6 +1,6 @@
 GOLANGCI_LINT_VERSION := v2.12.2
 
-.PHONY: build test lint lint-only lint-darwin fmt clean notifier service-app demo demo-clean
+.PHONY: build test lint lint-only lint-darwin fmt clean notifier service-app docs docs-serve demo demo-clean
 
 build:
 	go build -v -ldflags="-s -w" -o gr ./cmd/graith
@@ -48,6 +48,20 @@ fmt:
 clean:
 	rm -f gr
 	rm -rf macos/build
+
+# Generate the package graph as ephemeral Hugo data, then remove it when Hugo
+# exits. The docs workflow runs the same generator before its production build.
+docs:
+	@trap 'rm -f "$(CURDIR)/website/data/package_dependencies.json"' EXIT; \
+		cd website && \
+		go run ./cmd/packagegraph -repo .. && \
+		hugo --gc --minify
+
+docs-serve:
+	@trap 'rm -f "$(CURDIR)/website/data/package_dependencies.json"' EXIT; \
+		cd website && \
+		go run ./cmd/packagegraph -repo .. && \
+		hugo server
 
 # Record the demo GIF (demo/graith.gif) with VHS. Runs unsandboxed on your own
 # machine: it stands up an isolated `demo` profile with a mix of running/stopped

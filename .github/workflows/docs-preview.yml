@@ -55,7 +55,9 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: website/go.mod
+          # The generated graph inspects the root module; this toolchain also
+          # builds the website's nested Go module.
+          go-version-file: go.mod
 
       - name: Determine changed pages
         id: changed
@@ -83,6 +85,9 @@ jobs:
             rel="${f#website/content/docs/}"; rel="${rel%.md}"
             if [ "$rel" = "_index" ]; then
               url="/docs/"; name="docs-home"
+            elif [[ "$rel" == */_index ]]; then
+              rel="${rel%/_index}"
+              url="/docs/${rel}/"; name="${rel//\//-}"
             else
               # Flatten any nested path so the screenshot/diff filenames stay in
               # a single flat dir (screenshot.js writes /out/<name>-<vp>.png and
@@ -116,7 +121,15 @@ jobs:
                 fi
               done
             fi
-          } | jq -s '.' > pages.json
+          } | jq -s '
+            group_by(.url) |
+            map({
+              url: .[0].url,
+              name: .[0].name,
+              hasBase: (map(.hasBase) | any),
+              deleted: (map(.deleted) | all)
+            })
+          ' > pages.json
 
           count="$(jq 'length' pages.json)"
           basecount="$(jq '[.[] | select(.hasBase)] | length' pages.json)"
@@ -137,10 +150,13 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           BASECOUNT: ${{ steps.changed.outputs.basecount }}
         run: |
+          (cd website && go test ./... && go run ./cmd/packagegraph -repo ..)
           hugo --gc --minify --baseURL "${BASE_URL}/" \
             --source website --destination "$PWD/site-head"
           if [ "$BASECOUNT" != "0" ]; then
             git worktree add --detach /tmp/base-tree "$BASE_SHA"
+            (cd website && go run ./cmd/packagegraph -repo /tmp/base-tree \
+              -output /tmp/base-tree/website/data/package_dependencies.json)
             hugo --gc --minify --baseURL "${BASE_URL}/" \
               --source /tmp/base-tree/website --destination "$PWD/site-base"
           fi

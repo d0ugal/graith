@@ -28,11 +28,13 @@ the generated region by hand.
 
 ## Verify
 
-From `website/`, run:
+From the repository root, run:
 
 ```bash
-hugo --gc --minify
+make docs
 ```
 
-The extended Hugo version and Dart Sass used by CI are defined in
+This generates the ignored package-dependency data before invoking Hugo and
+removes it afterward. Use `make docs-serve` for a local live preview. The
+extended Hugo version and Dart Sass used by CI are defined in
 `.github/workflows/docs.yml`.
