@@ -39,7 +39,7 @@ done
 [ "$(uname -s)" = Darwin ] || { echo "Graith.app must be built on macOS" >&2; exit 1; }
 [ -n "$arch" ] && [ -n "$version" ] && [ -n "$commit" ] && [ -n "$payload" ] && [ -n "$output" ] || usage
 [ -x "$payload" ] || { echo "payload is not executable: $payload" >&2; exit 1; }
-case "$build_number" in *[!0-9]*|'') echo "build number must be numeric" >&2; exit 1 ;; esac
+[[ "$build_number" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo "build number must contain one to three numeric components" >&2; exit 1; }
 case "$arch" in
 	arm64) swift_arch=arm64 ;;
 	amd64|x86_64) arch=amd64; swift_arch=x86_64 ;;

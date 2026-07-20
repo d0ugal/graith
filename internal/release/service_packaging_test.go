@@ -2,6 +2,7 @@ package release
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -271,14 +272,144 @@ func TestServiceBundleBuildContract(t *testing.T) {
 	}
 }
 
-func TestDevelopmentReleaseRemainsExplicitlyUnmanaged(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join(serviceRepoRoot(t), ".goreleaser-dev.yaml"))
+func TestServiceReleaseHookSeparatesSignedSnapshotsAndBuildIdentities(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(serviceRepoRoot(t), "macos", "service", "release-hook.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	text := string(data)
-	if strings.Contains(text, "ManagedBuild=true") || strings.Contains(text, "Graith.app") {
-		t.Fatal("Linux-built development release silently claims managed macOS service support")
+	for _, required := range []string{
+		"GRAITH_SIGNED_SNAPSHOT", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT",
+		"GRAITH_BUNDLE_BUILD_NUMBER", "GRAITH_MACOS_SIGNING_IDENTITY",
+	} {
+		if !strings.Contains(text, required) {
+			t.Errorf("service release hook missing %q", required)
+		}
+	}
+
+	if !strings.Contains(text, `[ "$snapshot" = true ] && [ "$signed_snapshot" = false ]`) {
+		t.Fatal("service release hook no longer limits ad-hoc signing to unsigned snapshots")
+	}
+}
+
+func TestServiceReleaseHookRoutesSnapshotSigningAndUniqueBuildNumber(t *testing.T) {
+	root := serviceRepoRoot(t)
+
+	hook, err := os.ReadFile(filepath.Join(root, "macos", "service", "release-hook.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name        string
+		environment []string
+		wantArgs    []string
+		forbidArgs  []string
+		wantError   string
+	}{
+		{
+			name: "local snapshot stays ad hoc",
+			environment: []string{
+				"GRAITH_SIGNED_SNAPSHOT=false", "GITHUB_RUN_ID=1473", "GITHUB_RUN_ATTEMPT=2",
+			},
+			wantArgs: []string{"--build-number\n1473.2\n", "--development\n"},
+		},
+		{
+			name: "channel snapshot uses distribution identity",
+			environment: []string{
+				"GRAITH_SIGNED_SNAPSHOT=true", "GITHUB_RUN_ID=1478", "GITHUB_RUN_ATTEMPT=3",
+				"GRAITH_MACOS_SIGNING_IDENTITY=Developer ID Application: Braw",
+				"GRAITH_NOTARY_PROFILE=canny", "GRAITH_SIGNING_TEAM_ID=BRAWTEAM",
+				"GRAITH_SIGNING_REQUIREMENT=identifier net.graith.service",
+			},
+			wantArgs:   []string{"--build-number\n1478.3\n", "--identity\nDeveloper ID Application: Braw\n", "--notary-profile\ncanny\n"},
+			forbidArgs: []string{"--development\n"},
+		},
+		{
+			name:        "signed snapshot fails closed without credentials",
+			environment: []string{"GRAITH_SIGNED_SNAPSHOT=true"},
+			wantError:   "missing GRAITH_MACOS_SIGNING_IDENTITY",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			work := t.TempDir()
+			hookPath := filepath.Join(work, "release-hook.sh")
+
+			writeTestExecutable(t, hookPath, hook)
+
+			argsPath := filepath.Join(work, "braw-args")
+
+			mock := `#!/bin/sh
+set -eu
+printf '%s\n' "$@" > "$HOOK_ARGS"
+payload=""
+output=""
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		--payload) payload="$2"; shift 2 ;;
+		--output) output="$2"; shift 2 ;;
+		*) shift ;;
+	esac
+done
+mkdir -p "$output/Graith.app/Contents/MacOS"
+cp "$payload" "$output/gr"
+cp "$payload" "$output/Graith.app/Contents/MacOS/gr"
+`
+			writeTestExecutable(t, filepath.Join(work, "build.sh"), []byte(mock))
+
+			artifact := filepath.Join(work, "gr-dev")
+
+			writeTestExecutable(t, artifact, []byte("dreich\n"))
+
+			command := exec.Command(hookPath, artifact, "darwin_arm64", "0.70.0-dev.1", "canny", "true")
+			command.Dir = work
+
+			command.Env = append([]string{"PATH=" + os.Getenv("PATH"), "HOOK_ARGS=" + argsPath}, test.environment...)
+
+			output, runErr := command.CombinedOutput()
+			if test.wantError != "" {
+				if runErr == nil || !strings.Contains(string(output), test.wantError) {
+					t.Fatalf("release hook error = %v, output = %q, want %q", runErr, output, test.wantError)
+				}
+
+				return
+			}
+
+			if runErr != nil {
+				t.Fatalf("release hook: %v: %s", runErr, output)
+			}
+
+			args, err := os.ReadFile(argsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			for _, want := range test.wantArgs {
+				if !strings.Contains(string(args), want) {
+					t.Errorf("build args %q missing %q", args, want)
+				}
+			}
+
+			for _, forbidden := range test.forbidArgs {
+				if strings.Contains(string(args), forbidden) {
+					t.Errorf("build args %q contain forbidden %q", args, forbidden)
+				}
+			}
+		})
+	}
+}
+
+func writeTestExecutable(t *testing.T, path string, data []byte) {
+	t.Helper()
+
+	// #nosec G703 -- callers provide paths rooted in the test's t.TempDir().
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// #nosec G302 -- test-only executables are isolated inside t.TempDir().
+	if err := os.Chmod(path, 0o700); err != nil {
+		t.Fatal(err)
 	}
 }

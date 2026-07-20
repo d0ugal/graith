@@ -36,6 +36,18 @@ builds:
       - -s -w
       - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
       - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
+      - -X github.com/d0ugal/graith/internal/daemonservice.ManagedBuild=true
+      - -X github.com/d0ugal/graith/internal/daemonservice.DevelopmentBuild=false
+      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedTeamID={{ .Env.GRAITH_SIGNING_TEAM_ID }}
+      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedRequirementBase64={{ .Env.GRAITH_SIGNING_REQUIREMENT_B64 }}
+    # Dev artifacts use the same Developer ID requirement as stable Graith so
+    # their isolated `dev` profile can safely share the global service registry.
+    # GRAITH_SIGNED_SNAPSHOT makes this snapshot take the distribution-signed
+    # path in the common hook instead of producing a local ad-hoc app.
+    hooks:
+      post:
+        - cmd: macos/service/release-hook.sh "{{ .Path }}" "{{ .Target }}" "{{ .Version }}" "{{ .Commit }}" "{{ .IsSnapshot }}"
+          output: true
     goos:
       - darwin
     goarch:
@@ -65,6 +77,8 @@ archives:
       # common Contents/ prefix from this glob before applying dst.
       - src: macos/build/GraithNotifier.app/**/*
         dst: GraithNotifier.app/Contents
+      - src: macos/build/service-release-{{ .Arch }}/Graith.app/**/*
+        dst: Graith.app/Contents
 
 checksum:
   name_template: checksums.txt
