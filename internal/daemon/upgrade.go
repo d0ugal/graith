@@ -4099,19 +4099,40 @@ func validateUpgradeExecBudget(
 }
 
 func currentOpenDescriptorCount(limit uint64) (int, error) {
+	return currentOpenDescriptorCountWith(limit, openDescriptorDirectoryCount, descriptorFlags)
+}
+
+func openDescriptorDirectoryCount(path string) (int, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return 0, err
+	}
+
+	return len(entries), nil
+}
+
+func currentOpenDescriptorCountWith(
+	limit uint64,
+	directoryCount func(string) (int, error),
+	flags func(int) (int, error),
+) (int, error) {
 	for _, path := range []string{"/dev/fd", "/proc/self/fd"} {
-		entries, err := os.ReadDir(path)
+		count, err := directoryCount(path)
 		if err == nil {
-			return len(entries), nil
+			if count < 0 {
+				return 0, errors.New("cannot inspect open descriptor budget")
+			}
+
+			return count, nil
 		}
 	}
 
 	maxInt := uint64(^uint(0) >> 1)
-	if limit == 0 || limit > maxInt {
+	if limit == 0 || limit == unix.RLIM_INFINITY || limit > maxInt {
 		return 0, errors.New("cannot inspect open descriptor budget")
 	}
 
-	return countOpenDescriptorsByFlags(int(limit), descriptorFlags)
+	return countOpenDescriptorsByFlags(int(limit), flags)
 }
 
 func countOpenDescriptorsByFlags(limit int, flags func(int) (int, error)) (int, error) {

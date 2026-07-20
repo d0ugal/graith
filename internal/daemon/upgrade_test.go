@@ -837,6 +837,63 @@ func TestCountOpenDescriptorsByFlagsFailsClosed(t *testing.T) {
 	}
 }
 
+func TestCurrentOpenDescriptorCountFallsBackToFlags(t *testing.T) {
+	var paths []string
+
+	count, err := currentOpenDescriptorCountWith(8, func(path string) (int, error) {
+		paths = append(paths, path)
+
+		return 0, errors.New("dreich directory")
+	}, func(fd int) (int, error) {
+		if fd == 2 || fd == 7 {
+			return syscall.FD_CLOEXEC, nil
+		}
+
+		return 0, syscall.EBADF
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if count != 2 {
+		t.Fatalf("fallback open descriptor count = %d, want 2", count)
+	}
+
+	if got := strings.Join(paths, ","); got != "/dev/fd,/proc/self/fd" {
+		t.Fatalf("descriptor directory attempts = %q", got)
+	}
+}
+
+func TestCurrentOpenDescriptorCountUsesDirectoryFastPath(t *testing.T) {
+	count, err := currentOpenDescriptorCountWith(8, func(string) (int, error) {
+		return 4, nil
+	}, func(int) (int, error) {
+		t.Fatal("descriptor flags were inspected after directory success")
+
+		return 0, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if count != 4 {
+		t.Fatalf("directory open descriptor count = %d, want 4", count)
+	}
+}
+
+func TestCurrentOpenDescriptorCountRejectsInfiniteLimit(t *testing.T) {
+	_, err := currentOpenDescriptorCountWith(unix.RLIM_INFINITY, func(string) (int, error) {
+		return 0, errors.New("dreich directory")
+	}, func(int) (int, error) {
+		t.Fatal("descriptor flags were inspected with an infinite limit")
+
+		return 0, nil
+	})
+	if err == nil {
+		t.Fatal("infinite descriptor limit was accepted")
+	}
+}
+
 func TestWriteManifestDirectorySyncFailureRemovesJournal(t *testing.T) {
 	dir := t.TempDir()
 	originalSync := syncUpgradeManifestDirectory
