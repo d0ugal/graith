@@ -6,10 +6,9 @@ import (
 )
 
 // This file defines the narrow terminal-screen surface graith relies on and the
-// backend-neutral cell/color model the renderer consumes. The concrete emulator
-// (github.com/charmbracelet/x/vt) lives behind the Terminal interface in
-// terminal_charm.go so the backend can be swapped without touching render.go or
-// session.go (issue #1211).
+// backend-neutral cell/color model the renderer consumes. Concrete emulators
+// remain behind Terminal so the screen backend can change without touching
+// render.go or session.go (issue #1211).
 
 // ColorKind identifies how a Color's Value should be interpreted.
 type ColorKind uint8

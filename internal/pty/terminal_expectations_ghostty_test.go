@@ -2,7 +2,5 @@
 
 package pty
 
-const selectedBackendParserPanic = false
-
 func selectedBackendAlternateLine() string { return "           in the bo" }
 func selectedBackendShrinkLine() string    { return "cann" }

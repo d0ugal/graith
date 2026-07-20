@@ -20,9 +20,8 @@ import (
 // interface, never the concrete charm-vt type, so it doubles as the contract
 // any replacement backend must satisfy.
 
-// newCharTestTerm builds a Terminal and registers cleanup for the drain
-// goroutine.
-func newCharTestTerm(t *testing.T, cols, rows int) Terminal {
+// newTerminalTestTerm builds the selected Terminal and registers cleanup.
+func newTerminalTestTerm(t *testing.T, cols, rows int) Terminal {
 	t.Helper()
 
 	term, err := newTerminal(cols, rows)
@@ -121,7 +120,7 @@ func line(t *testing.T, term Terminal, y int) string {
 }
 
 func TestNormalAndAlternateScreen(t *testing.T) {
-	term := newCharTestTerm(t, 20, 3)
+	term := newTerminalTestTerm(t, 20, 3)
 
 	write(t, term, "on the brae")
 
@@ -151,7 +150,7 @@ func TestNormalAndAlternateScreen(t *testing.T) {
 }
 
 func TestCursorMovement(t *testing.T) {
-	term := newCharTestTerm(t, 20, 5)
+	term := newTerminalTestTerm(t, 20, 5)
 
 	// CUP: move to row 3, column 5 (1-based) → zero-based (4, 2).
 	write(t, term, "\x1b[3;5H")
@@ -175,7 +174,7 @@ func TestCursorMovement(t *testing.T) {
 }
 
 func TestCursorVisibilityTracking(t *testing.T) {
-	term := newCharTestTerm(t, 10, 2)
+	term := newTerminalTestTerm(t, 10, 2)
 
 	if _, _, visible := term.Cursor(); !visible {
 		t.Fatal("cursor should start visible")
@@ -195,7 +194,7 @@ func TestCursorVisibilityTracking(t *testing.T) {
 }
 
 func TestCursorSaveRestore(t *testing.T) {
-	term := newCharTestTerm(t, 20, 5)
+	term := newTerminalTestTerm(t, 20, 5)
 
 	write(t, term, "\x1b[3;5H")  // move to (4, 2)
 	write(t, term, "\x1b7")      // DECSC save
@@ -214,7 +213,7 @@ func TestCursorSaveRestore(t *testing.T) {
 
 func TestEraseOperations(t *testing.T) {
 	t.Run("erase to end of line", func(t *testing.T) {
-		term := newCharTestTerm(t, 20, 2)
+		term := newTerminalTestTerm(t, 20, 2)
 		write(t, term, "dreich haar day")
 		write(t, term, "\x1b[1;7H") // to column 7 (the space before "haar")
 		write(t, term, "\x1b[K")    // EL: erase to end of line
@@ -225,7 +224,7 @@ func TestEraseOperations(t *testing.T) {
 	})
 
 	t.Run("erase entire display", func(t *testing.T) {
-		term := newCharTestTerm(t, 20, 2)
+		term := newTerminalTestTerm(t, 20, 2)
 		write(t, term, "scunner\r\nfash")
 		write(t, term, "\x1b[2J") // ED: erase whole display
 
@@ -240,7 +239,7 @@ func TestEraseOperations(t *testing.T) {
 }
 
 func TestScrollingRegion(t *testing.T) {
-	term := newCharTestTerm(t, 10, 5)
+	term := newTerminalTestTerm(t, 10, 5)
 	write(t, term, "L1\r\nL2\r\nL3\r\nL4\r\nL5")
 
 	// DECSTBM: restrict scrolling to rows 2-4, then scroll up from the bottom
@@ -264,7 +263,7 @@ func TestScrollingRegion(t *testing.T) {
 
 func TestInsertAndDeleteCharacter(t *testing.T) {
 	t.Run("replace mode is the default", func(t *testing.T) {
-		term := newCharTestTerm(t, 20, 2)
+		term := newTerminalTestTerm(t, 20, 2)
 		write(t, term, "abcdef")
 		write(t, term, "\x1b[1;1HXY") // overwrite from home
 
@@ -274,7 +273,7 @@ func TestInsertAndDeleteCharacter(t *testing.T) {
 	})
 
 	t.Run("insert character shifts right", func(t *testing.T) {
-		term := newCharTestTerm(t, 20, 2)
+		term := newTerminalTestTerm(t, 20, 2)
 		write(t, term, "abcdef")
 		write(t, term, "\x1b[1;1H\x1b[2@") // ICH: insert 2 blanks at home
 
@@ -284,7 +283,7 @@ func TestInsertAndDeleteCharacter(t *testing.T) {
 	})
 
 	t.Run("delete character shifts left", func(t *testing.T) {
-		term := newCharTestTerm(t, 20, 2)
+		term := newTerminalTestTerm(t, 20, 2)
 		write(t, term, "abcdef")
 		write(t, term, "\x1b[1;1H\x1b[2P") // DCH: delete 2 chars at home
 
@@ -295,7 +294,7 @@ func TestInsertAndDeleteCharacter(t *testing.T) {
 }
 
 func TestResizePreservesAndTruncates(t *testing.T) {
-	term := newCharTestTerm(t, 20, 2)
+	term := newTerminalTestTerm(t, 20, 2)
 	write(t, term, "keep me canny")
 
 	if err := term.Resize(40, 4); err != nil {
@@ -324,7 +323,7 @@ func TestResizePreservesAndTruncates(t *testing.T) {
 }
 
 func TestResizeClampsToMinimum(t *testing.T) {
-	term := newCharTestTerm(t, 10, 3)
+	term := newTerminalTestTerm(t, 10, 3)
 
 	// A zero/negative size must not panic; it clamps to at least 1×1.
 	if err := term.Resize(0, 0); err != nil {
@@ -354,7 +353,7 @@ func TestSGRAttributes(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			term := newCharTestTerm(t, 10, 2)
+			term := newTerminalTestTerm(t, 10, 2)
 			write(t, term, tc.seq+"Z")
 
 			if !tc.want(term.Cell(0, 0).Style) {
@@ -378,7 +377,7 @@ func TestSGRColors(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			term := newCharTestTerm(t, 10, 2)
+			term := newTerminalTestTerm(t, 10, 2)
 			write(t, term, tc.seq+"Z")
 
 			if got := term.Cell(0, 0).Style.FG; got != tc.want {
@@ -389,7 +388,7 @@ func TestSGRColors(t *testing.T) {
 }
 
 func TestSGRBackgroundColor(t *testing.T) {
-	term := newCharTestTerm(t, 10, 2)
+	term := newTerminalTestTerm(t, 10, 2)
 	write(t, term, "\x1b[44mZ")
 
 	if got := term.Cell(0, 0).Style.BG; got != (Color{Kind: ColorIndexed, Value: 4}) {
@@ -398,7 +397,7 @@ func TestSGRBackgroundColor(t *testing.T) {
 }
 
 func TestSGRResetClearsStyle(t *testing.T) {
-	term := newCharTestTerm(t, 10, 2)
+	term := newTerminalTestTerm(t, 10, 2)
 	write(t, term, "\x1b[1;31mA\x1b[0mB")
 
 	if styled := term.Cell(0, 0).Style; !styled.Bold || styled.FG.Kind != ColorIndexed {
@@ -411,7 +410,7 @@ func TestSGRResetClearsStyle(t *testing.T) {
 }
 
 func TestUTF8SplitWrites(t *testing.T) {
-	term := newCharTestTerm(t, 20, 2)
+	term := newTerminalTestTerm(t, 20, 2)
 
 	// A multi-byte UTF-8 string split mid-rune across writes must reassemble.
 	full := []byte("café €uro")
@@ -425,7 +424,7 @@ func TestUTF8SplitWrites(t *testing.T) {
 }
 
 func TestWideCharacters(t *testing.T) {
-	term := newCharTestTerm(t, 20, 2)
+	term := newTerminalTestTerm(t, 20, 2)
 	write(t, term, "A你B") // 你 is double-width
 
 	if got := term.Cell(0, 0).Content; got != "A" {
@@ -452,7 +451,7 @@ func TestWideCharacters(t *testing.T) {
 }
 
 func TestEmojiCharacter(t *testing.T) {
-	term := newCharTestTerm(t, 20, 2)
+	term := newTerminalTestTerm(t, 20, 2)
 	write(t, term, "😀x")
 
 	if got := term.Cell(0, 0).Content; got != "😀" {
@@ -496,7 +495,7 @@ func TestRenderFrameSGREmission(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			term := newCharTestTerm(t, 10, 2)
+			term := newTerminalTestTerm(t, 10, 2)
 			write(t, term, tc.seq+"Z")
 
 			frame := renderFrame(term)
@@ -511,7 +510,7 @@ func TestRenderFrameSGREmission(t *testing.T) {
 // default-styled cells emits no color/attribute SGR before the final reset —
 // the run-length suppression that keeps snapshots compact.
 func TestRenderFrameDefaultColorsEmitNoSGR(t *testing.T) {
-	term := newCharTestTerm(t, 10, 2)
+	term := newTerminalTestTerm(t, 10, 2)
 	write(t, term, "plain")
 
 	frame := renderFrame(term)
@@ -526,7 +525,7 @@ func TestRenderFrameDefaultColorsEmitNoSGR(t *testing.T) {
 }
 
 func TestIncompleteEscapeSequence(t *testing.T) {
-	term := newCharTestTerm(t, 20, 2)
+	term := newTerminalTestTerm(t, 20, 2)
 
 	// An escape sequence split across writes must be buffered and applied once
 	// the terminator arrives — the "B" ends up red.
@@ -543,7 +542,7 @@ func TestIncompleteEscapeSequence(t *testing.T) {
 }
 
 func TestTrailingEscapeDoesNotCorrupt(t *testing.T) {
-	term := newCharTestTerm(t, 20, 2)
+	term := newTerminalTestTerm(t, 20, 2)
 
 	// A lone trailing ESC (no terminator) must not eat printable text or panic.
 	write(t, term, "haar\x1b")
@@ -555,7 +554,7 @@ func TestTrailingEscapeDoesNotCorrupt(t *testing.T) {
 
 func TestControlCharacters(t *testing.T) {
 	t.Run("tab", func(t *testing.T) {
-		term := newCharTestTerm(t, 20, 2)
+		term := newTerminalTestTerm(t, 20, 2)
 		write(t, term, "a\tb")
 
 		if got := line(t, term, 0); got != "a       b" {
@@ -564,7 +563,7 @@ func TestControlCharacters(t *testing.T) {
 	})
 
 	t.Run("backspace", func(t *testing.T) {
-		term := newCharTestTerm(t, 20, 2)
+		term := newTerminalTestTerm(t, 20, 2)
 		write(t, term, "abc\b\bX")
 
 		if got := line(t, term, 0); got != "aXc" {
@@ -573,7 +572,7 @@ func TestControlCharacters(t *testing.T) {
 	})
 
 	t.Run("carriage return", func(t *testing.T) {
-		term := newCharTestTerm(t, 20, 2)
+		term := newTerminalTestTerm(t, 20, 2)
 		write(t, term, "hello\rHE")
 
 		if got := line(t, term, 0); got != "HEllo" {
@@ -588,7 +587,7 @@ func TestControlCharacters(t *testing.T) {
 // final teardown. It asserts the rendered screen is sensible and that graith's
 // snapshot/preview renderers produce clean output. No real session data is used.
 func TestRepresentativeTUIOutput(t *testing.T) {
-	term := newCharTestTerm(t, 40, 6)
+	term := newTerminalTestTerm(t, 40, 6)
 
 	var b strings.Builder
 	b.WriteString("\x1b[?1049h")                         // enter alt screen
@@ -648,7 +647,7 @@ func TestRepresentativeTUIOutput(t *testing.T) {
 // internal pipe, and if nothing drains it Write blocks forever. A burst of
 // queries must complete promptly.
 func TestDeviceQueriesDoNotBlockWrite(t *testing.T) {
-	term := newCharTestTerm(t, 80, 24)
+	term := newTerminalTestTerm(t, 80, 24)
 
 	done := make(chan struct{})
 
@@ -674,7 +673,7 @@ func TestDeviceQueriesDoNotBlockWrite(t *testing.T) {
 // serialized by an external lock. Run under -race this catches unguarded shared
 // state in the adapter.
 func TestConcurrentWriteAndSnapshot(t *testing.T) {
-	term := newCharTestTerm(t, 40, 10)
+	term := newTerminalTestTerm(t, 40, 10)
 
 	var mu sync.Mutex
 

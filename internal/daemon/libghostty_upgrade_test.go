@@ -111,21 +111,21 @@ func runOldLibghosttyUpgradeStage(t *testing.T) {
 	}
 	defer listenerW.Close()
 	listenerFD := duplicateTransferredFileFD(t, listenerR)
-	if err := clearCloseOnExec(listenerFD); err != nil {
+	if err := setDescriptorFlags(listenerFD, 0); err != nil {
 		t.Fatal(err)
 	}
 	handoffFD, err := session.DuplicateFD()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := clearCloseOnExec(handoffFD); err != nil {
+	if err := setDescriptorFlags(handoffFD, 0); err != nil {
 		t.Fatal(err)
 	}
 	scrollbackFD, err := session.Scrollback.DuplicateFD()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := clearCloseOnExec(scrollbackFD); err != nil {
+	if err := setDescriptorFlags(scrollbackFD, 0); err != nil {
 		t.Fatal(err)
 	}
 	executable, err := os.Executable()
@@ -192,7 +192,7 @@ func runNewLibghosttyUpgradeStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := reapInheritedHelpers(manifest); err != nil {
+	if err := newUpgradeOwnershipGuard(manifest).reapHelpers(); err != nil {
 		t.Fatal(err)
 	}
 	for _, helper := range manifest.Helpers {

@@ -499,16 +499,6 @@ func validateUpgradeTargetDescriptor(target UpgradeTargetDescriptor) (returnErr 
 	return nil
 }
 
-//nolint:unused // Used by the libghostty-tagged exec handoff regression.
-func clearCloseOnExec(fd int) error {
-	_, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_SETFD, 0)
-	if errno != 0 {
-		return errno
-	}
-
-	return nil
-}
-
 func descriptorFlags(fd int) (int, error) {
 	flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_GETFD, 0)
 	if errno != 0 {
@@ -3401,11 +3391,6 @@ func (sm *SessionManager) RunUpgradeCleanupLoop(ctx context.Context) {
 			sm.reconcileUpgradeCleanup()
 		}
 	}
-}
-
-//nolint:unused // Used by the libghostty-tagged inherited-helper regression.
-func reapInheritedHelpers(manifest *UpgradeManifest) error {
-	return newUpgradeOwnershipGuard(manifest).reapHelpers()
 }
 
 var (
