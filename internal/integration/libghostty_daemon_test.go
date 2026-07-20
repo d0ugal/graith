@@ -662,7 +662,7 @@ func (h *nativeDaemonHarness) tryConnect() (*nativeControlClient, error) {
 		token:  strings.TrimSpace(string(token)),
 	}
 	if err := client.send("handshake", protocol.HandshakeMsg{
-		Version: "1.0", ClientID: "native-validation", Profile: nativeProfile,
+		Version: protocol.Version, ClientID: "native-validation", Profile: nativeProfile,
 		TerminalSize: [2]uint16{80, 24},
 	}); err != nil {
 		client.close()
