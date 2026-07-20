@@ -39,7 +39,7 @@ jobs:
       # when nothing is configured (issue #768).
       has_gpg_key: ${{ steps.gpg_check.outputs.has_key }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -190,7 +190,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Check out graith (for the publish-push helper)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # Only the scripts/ helper is needed here; no push, so drop creds.
           persist-credentials: false
@@ -202,7 +202,7 @@ jobs:
             aptly createrepo-c gnupg rpm
 
       - name: Check out graith (for the signing helper script)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
           path: graith
@@ -214,7 +214,7 @@ jobs:
           path: packages
 
       - name: Check out the Pages repo (graith-repo)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: d0ugal/graith-repo
           # graith-repo is a separate repo; the default GITHUB_TOKEN can't push
