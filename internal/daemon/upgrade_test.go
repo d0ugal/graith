@@ -800,6 +800,43 @@ func TestUpgradeDescriptorBudgetAccountsForTwoFDsPerSession(t *testing.T) {
 	}
 }
 
+func TestCountOpenDescriptorsByFlags(t *testing.T) {
+	open := map[int]bool{0: true, 2: true, 7: true}
+
+	count, err := countOpenDescriptorsByFlags(8, func(fd int) (int, error) {
+		if open[fd] {
+			return syscall.FD_CLOEXEC, nil
+		}
+
+		return 0, syscall.EBADF
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if count != len(open) {
+		t.Fatalf("open descriptor count = %d, want %d", count, len(open))
+	}
+}
+
+func TestCountOpenDescriptorsByFlagsFailsClosed(t *testing.T) {
+	dreich := errors.New("dreich descriptor inspection")
+
+	if _, err := countOpenDescriptorsByFlags(8, func(fd int) (int, error) {
+		if fd == 3 {
+			return 0, dreich
+		}
+
+		return 0, syscall.EBADF
+	}); err == nil {
+		t.Fatal("indeterminate descriptor inspection was accepted")
+	}
+
+	if _, err := countOpenDescriptorsByFlags(0, descriptorFlags); err == nil {
+		t.Fatal("zero descriptor limit was accepted")
+	}
+}
+
 func TestWriteManifestDirectorySyncFailureRemovesJournal(t *testing.T) {
 	dir := t.TempDir()
 	originalSync := syncUpgradeManifestDirectory

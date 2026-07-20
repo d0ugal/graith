@@ -4098,7 +4098,7 @@ func validateUpgradeExecBudget(
 	return nil
 }
 
-func currentOpenDescriptorCount() (int, error) {
+func currentOpenDescriptorCount(limit uint64) (int, error) {
 	for _, path := range []string{"/dev/fd", "/proc/self/fd"} {
 		entries, err := os.ReadDir(path)
 		if err == nil {
@@ -4106,7 +4106,30 @@ func currentOpenDescriptorCount() (int, error) {
 		}
 	}
 
-	return 0, errors.New("cannot inspect open descriptor budget")
+	maxInt := uint64(^uint(0) >> 1)
+	if limit == 0 || limit > maxInt {
+		return 0, errors.New("cannot inspect open descriptor budget")
+	}
+
+	return countOpenDescriptorsByFlags(int(limit), descriptorFlags)
+}
+
+func countOpenDescriptorsByFlags(limit int, flags func(int) (int, error)) (int, error) {
+	if limit <= 0 || flags == nil {
+		return 0, errors.New("cannot inspect open descriptor budget")
+	}
+
+	count := 0
+
+	for fd := 0; fd < limit; fd++ {
+		if _, err := flags(fd); err == nil {
+			count++
+		} else if !errors.Is(err, syscall.EBADF) {
+			return 0, errors.New("cannot inspect open descriptor budget")
+		}
+	}
+
+	return count, nil
 }
 
 func validateUpgradeDescriptorBudget(sessionCount int) error {
@@ -4115,7 +4138,7 @@ func validateUpgradeDescriptorBudget(sessionCount int) error {
 		return refuseUpgrade("upgrade descriptor limit could not be inspected")
 	}
 
-	openCount, err := currentOpenDescriptorCount()
+	openCount, err := currentOpenDescriptorCount(limit.Cur)
 	if err != nil {
 		return refuseUpgrade("upgrade open descriptor count could not be inspected")
 	}
