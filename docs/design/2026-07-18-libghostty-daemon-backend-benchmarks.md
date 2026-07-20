@@ -184,19 +184,19 @@ so its parent and helper components also equal the sampled component peaks.
 
 | Workload | Backend | Sampled parent peak | Sampled helper peak total | Measured same-checkpoint aggregate peak |
 |----------|---------|--------------------:|--------------------------:|----------------------------------------:|
-| Reconstruct 4 MiB, 1 terminal | Charm | 93.17 MiB [92.83–93.48] | n/a | 93.17 MiB [92.83–93.48] |
-| Reconstruct 4 MiB, 1 terminal | Native | 21.92 MiB [21.73–22.33] | 16.61 MiB [16.41–16.83] | 38.75 MiB [38.14–38.98] |
-| Scroll 12k, `240x40`, 1 terminal | Charm | 110.81 MiB [109.09–111.50] | n/a | 110.81 MiB [109.09–111.50] |
-| Scroll 12k, `240x40`, 1 terminal | Native | 15.84 MiB [15.75–16.05] | 16.52 MiB [16.16–16.89] | 32.45 MiB [32.05–32.64] |
-| Scroll 24k, `240x40`, 1 terminal | Charm | 178.11 MiB [177.30–180.50] | n/a | 178.11 MiB [177.30–180.50] |
-| Scroll 24k, `240x40`, 1 terminal | Native | 16.88 MiB [16.61–17.17] | 16.62 MiB [16.41–16.83] | 33.58 MiB [33.12–33.81] |
-| Scroll 12k, `240x40`, 3 concurrent terminals | Charm | 312.03 MiB [307.98–317.06] | n/a | 312.03 MiB [307.98–317.06] |
-| Scroll 12k, `240x40`, 3 concurrent terminals | Native | 17.41 MiB [17.09–17.58] | 49.19 MiB [48.58–49.83] | 66.58 MiB [65.98–67.12] |
-| Scroll 24k, `240x40`, 3 concurrent terminals | Charm | 534.06 MiB [531.12–548.61] | n/a | 534.06 MiB [531.12–548.61] |
-| Scroll 24k, `240x40`, 3 concurrent terminals | Native | 17.62 MiB [17.39–17.89] | 49.86 MiB [49.59–50.20] | 67.42 MiB [67.00–68.09] |
+| Reconstruct 4 MiB, 1 terminal | Charm | 93.36 MiB [89.48–97.56] | n/a | 93.36 MiB [89.48–97.56] |
+| Reconstruct 4 MiB, 1 terminal | Native | 22.25 MiB [21.66–22.66] | 16.61 MiB [16.22–16.84] | 38.86 MiB [38.41–39.14] |
+| Scroll 12k, `240x40`, 1 terminal | Charm | 111.22 MiB [111.08–111.31] | n/a | 111.22 MiB [111.08–111.31] |
+| Scroll 12k, `240x40`, 1 terminal | Native | 15.95 MiB [15.80–16.12] | 16.30 MiB [16.09–16.78] | 32.28 MiB [31.89–32.69] |
+| Scroll 24k, `240x40`, 1 terminal | Charm | 171.06 MiB [166.39–182.36] | n/a | 171.06 MiB [166.39–182.36] |
+| Scroll 24k, `240x40`, 1 terminal | Native | 16.94 MiB [16.91–17.50] | 16.59 MiB [16.42–16.75] | 33.62 MiB [33.33–34.06] |
+| Scroll 12k, `240x40`, 3 concurrent terminals | Charm | 299.78 MiB [294.25–317.09] | n/a | 299.78 MiB [294.25–317.09] |
+| Scroll 12k, `240x40`, 3 concurrent terminals | Native | 17.05 MiB [16.86–17.38] | 49.92 MiB [49.53–50.03] | 66.89 MiB [66.62–67.30] |
+| Scroll 24k, `240x40`, 3 concurrent terminals | Charm | 532.67 MiB [531.17–548.86] | n/a | 532.67 MiB [531.17–548.86] |
+| Scroll 24k, `240x40`, 3 concurrent terminals | Native | 17.50 MiB [17.12–17.75] | 49.98 MiB [49.52–50.41] | 67.31 MiB [66.81–68.16] |
 
 For the key 4 MiB native case, the exact measured aggregate median is
-40,632,320 bytes: 22,986,752 parent bytes plus 17,416,192 helper bytes in the
+40,747,008 bytes: 23,330,816 parent bytes plus 17,416,192 helper bytes in the
 same checkpoint.
 
 The next table reports process-lifetime peaks instead. Parent values come from
@@ -204,23 +204,23 @@ The next table reports process-lifetime peaks instead. Parent values come from
 `ProcessState`. These peaks can occur at different times. Their sum is therefore
 an explicitly labelled estimate, included only alongside the measured
 same-checkpoint aggregate above. `/usr/bin/time -l` independently wrapped every
-fresh parent process; its median was within 0.04 MiB of self-rusage in every row.
+fresh parent process; its median was within 0.07 MiB of self-rusage in every row.
 
 | Workload | Backend | Parent lifetime peak | Helper independent peak sum | Independent peak-sum estimate |
 |----------|---------|---------------------:|----------------------------:|------------------------------:|
-| Reconstruct 4 MiB, 1 terminal | Charm | 93.20 MiB [92.88–93.53] | n/a | 93.20 MiB [92.88–93.53] |
-| Reconstruct 4 MiB, 1 terminal | Native | 21.92 MiB [21.73–22.33] | 16.62 MiB [16.42–16.84] | 38.77 MiB [38.16–39.00] |
-| Scroll 12k, `240x40`, 1 terminal | Charm | 110.86 MiB [109.14–111.55] | n/a | 110.86 MiB [109.14–111.55] |
-| Scroll 12k, `240x40`, 1 terminal | Native | 15.88 MiB [15.75–16.05] | 16.53 MiB [16.17–16.91] | 32.47 MiB [32.09–32.66] |
-| Scroll 24k, `240x40`, 1 terminal | Charm | 178.16 MiB [177.33–180.55] | n/a | 178.16 MiB [177.33–180.55] |
-| Scroll 24k, `240x40`, 1 terminal | Native | 16.88 MiB [16.61–17.22] | 16.64 MiB [16.42–16.84] | 33.59 MiB [33.14–33.88] |
-| Scroll 12k, `240x40`, 3 concurrent terminals | Charm | 312.08 MiB [308.05–317.11] | n/a | 312.08 MiB [308.05–317.11] |
-| Scroll 12k, `240x40`, 3 concurrent terminals | Native | 17.42 MiB [17.12–17.58] | 49.23 MiB [48.62–49.88] | 66.66 MiB [66.05–67.17] |
-| Scroll 24k, `240x40`, 3 concurrent terminals | Charm | 534.14 MiB [531.17–548.69] | n/a | 534.14 MiB [531.17–548.69] |
-| Scroll 24k, `240x40`, 3 concurrent terminals | Native | 17.64 MiB [17.39–17.89] | 49.91 MiB [49.64–50.25] | 67.48 MiB [67.08–68.14] |
+| Reconstruct 4 MiB, 1 terminal | Charm | 93.41 MiB [89.53–97.61] | n/a | 93.41 MiB [89.53–97.61] |
+| Reconstruct 4 MiB, 1 terminal | Native | 22.28 MiB [21.66–22.66] | 16.62 MiB [16.23–16.86] | 38.91 MiB [38.45–39.16] |
+| Scroll 12k, `240x40`, 1 terminal | Charm | 111.27 MiB [111.16–111.39] | n/a | 111.27 MiB [111.16–111.39] |
+| Scroll 12k, `240x40`, 1 terminal | Native | 15.97 MiB [15.80–16.12] | 16.31 MiB [16.11–16.80] | 32.31 MiB [31.91–32.70] |
+| Scroll 24k, `240x40`, 1 terminal | Charm | 171.11 MiB [166.44–182.41] | n/a | 171.11 MiB [166.44–182.41] |
+| Scroll 24k, `240x40`, 1 terminal | Native | 16.94 MiB [16.91–17.50] | 16.61 MiB [16.44–16.77] | 33.64 MiB [33.34–34.08] |
+| Scroll 12k, `240x40`, 3 concurrent terminals | Charm | 299.83 MiB [294.30–317.14] | n/a | 299.83 MiB [294.30–317.14] |
+| Scroll 12k, `240x40`, 3 concurrent terminals | Native | 17.05 MiB [16.88–17.39] | 49.97 MiB [49.58–50.08] | 66.95 MiB [66.72–67.36] |
+| Scroll 24k, `240x40`, 3 concurrent terminals | Charm | 532.75 MiB [531.22–548.91] | n/a | 532.75 MiB [531.22–548.91] |
+| Scroll 24k, `240x40`, 3 concurrent terminals | Native | 17.50 MiB [17.12–17.75] | 50.03 MiB [49.56–50.45] | 67.36 MiB [66.86–68.20] |
 
 Across the three-helper runs, median individual helper lifetime peaks ranged
-from 16.19 to 16.73 MiB at 12k lines and from 16.53 to 16.75 MiB at 24k lines.
+from 16.42 to 16.78 MiB at 12k lines and from 16.55 to 16.75 MiB at 24k lines.
 
 ## Derived analysis, not measurements
 
@@ -241,11 +241,11 @@ not additional samples and are not universal performance claims:
 - Full 4 MiB reconstruction is about 33.6x faster by wall time despite paying
   helper start, nine production-size write RPCs, snapshot transport, and close.
 - The measured native 4 MiB same-checkpoint aggregate is about 2.40x below the
-  Charm parent aggregate (38.75 versus 93.17 MiB). This comparison does not use
+  Charm parent aggregate (38.86 versus 93.36 MiB). This comparison does not use
   independent process peaks.
 - Doubling sustained scroll from 12k to 24k changes current native helper RSS by
-  0.10 MiB for one helper and 0.67 MiB total for three helpers. The measured
-  three-terminal aggregate changes by 0.84 MiB, while Charm grows by 222.03 MiB.
+  0.29 MiB for one helper and 0.06 MiB total for three helpers. The measured
+  three-terminal aggregate changes by 0.42 MiB, while Charm grows by 232.89 MiB.
   This supports the claim that `WithMaxScrollback(0)` removes retained helper
   scrollback growth; Graith's separately bounded raw log remains authoritative.
 

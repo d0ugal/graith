@@ -299,11 +299,11 @@ resize, and 88.15 ms for production-chunked 4 MiB reconstruction plus snapshot
 and close.
 
 The same record separates parent Go allocations from helper/native memory and
-reports a measured same-checkpoint 4 MiB aggregate of 38.75 MiB (21.92 MiB
-parent and 16.61 MiB helper), versus 93.17 MiB for Charm. At `240x40`, doubling
+reports a measured same-checkpoint 4 MiB aggregate of 38.86 MiB (22.25 MiB
+parent and 16.61 MiB helper), versus 93.36 MiB for Charm. At `240x40`, doubling
 three concurrent helpers from 12,000 to 24,000 scrolled lines changes their
-total current RSS by only 0.67 MiB with `WithMaxScrollback(0)`, while Charm's
-three-terminal process grows by 222.03 MiB. It pins the host, toolchain,
+total current RSS by only 0.06 MiB with `WithMaxScrollback(0)`, while Charm's
+three-terminal process grows by 232.89 MiB. It pins the host, toolchain,
 revisions, ReleaseFast artifact, sample count, benchtime, commands, validation
 checksum, spread, and measurement limitations. Raw captured output and
 machine-local paths are deliberately not committed.

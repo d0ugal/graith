@@ -512,6 +512,7 @@ func TestTerminalBackendPeakMemoryWorkload(t *testing.T) {
 	consumeTerminalBenchmarkChecksum(t, checksum)
 	runtime.GC()
 	rssSampler.sample(t)
+	runtime.KeepAlive(scenario.fixture)
 	rssSampler.report(t)
 
 	for _, term := range terms {
