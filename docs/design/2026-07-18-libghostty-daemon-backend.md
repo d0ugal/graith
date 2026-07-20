@@ -313,7 +313,9 @@ machine-local paths are deliberately not committed.
 The candidate statically links Ghostty. Static linkage avoids loader paths,
 side-by-side `.dylib`/`.so` version skew, and a second signed payload. Dynamic
 linking adds operational failure modes without changing the crash boundary and
-is rejected.
+is rejected. The verified macOS arm64 candidate has no Ghostty dylib dependency;
+its remaining platform dependencies are `/usr/lib/libresolv.9.dylib`,
+CoreFoundation, Security, and `/usr/lib/libSystem.B.dylib`.
 
 The path-scoped native workflow performs these checks:
 
@@ -361,13 +363,18 @@ MIT/BSD-3-Clause/Unicode/Apache notices. The helper script checks the Go module
 sum, SPDX entries and relationships, notice pins, source manifests and hashes,
 Git commit, toolchain, headers, and Apple checksum as one unit.
 
-The macOS arm64 workflow does not upload the generic dependency inventory as if
+The dependency inventory records the pinned Apple build's actual
+`emit-lib-vt=true`, `emit-xcframework=true`, and `ReleaseFast` inputs without
+inventing a SIMD override. The macOS arm64 workflow does not upload the generic
+dependency inventory as if
 it described a particular executable. It materializes a candidate-specific
 SPDX document containing the clean Git revision, target, and exact binary
 SHA-256; verifies the same copied bytes still contain the pinned wrapper and
-static Ghostty symbols; rejects a tampered-byte binding; validates the document
-with checksum-pinned official SPDX Java tooling; and uploads exactly `gr`, the
-bound SPDX document, and the notice file.
+defined Ghostty symbol, rejects Ghostty dylib linkage, and rejects a
+tampered-byte binding; validates the document with checksum-pinned official
+SPDX Java tooling; publishes the package directory with a Darwin atomic
+no-replace rename; and uploads exactly `gr`, the bound SPDX document, and the
+notice file.
 
 A pin rotation is atomic:
 

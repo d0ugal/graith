@@ -130,6 +130,8 @@ apple_library() {
 
 verify_metadata() {
     local source="${1:-}"
+    local document="${2:-$REPO_DIR/libghostty-native.spdx.json}"
+    local notices="${3:-$REPO_DIR/THIRD_PARTY_NOTICES.libghostty.md}"
     local actual_sum
     local actual_version
 
@@ -150,7 +152,7 @@ verify_metadata() {
         return 1
     fi
 
-    jq -e \
+    if ! jq -e \
         --arg ghostty "$GHOSTTY_SHA" \
         --arg go_libghostty "$GO_LIBGHOSTTY_VERSION" \
         --arg uucode "$UUCODE_VERSION" \
@@ -168,6 +170,9 @@ verify_metadata() {
         .spdxVersion == "SPDX-2.3" and
         (.packages | length) == 6 and
         (package("SPDXRef-Package-Ghostty").versionInfo | contains($ghostty)) and
+        (package("SPDXRef-Package-Ghostty").sourceInfo |
+            contains("-Demit-lib-vt=true -Demit-xcframework=true -Doptimize=ReleaseFast")) and
+        (package("SPDXRef-Package-Ghostty").sourceInfo | contains("simd=") | not) and
         package("SPDXRef-Package-GoLibghostty").versionInfo == $go_libghostty and
         package("SPDXRef-Package-Uucode").versionInfo == $uucode and
         package("SPDXRef-Package-Highway").versionInfo == $highway and
@@ -178,7 +183,10 @@ verify_metadata() {
         has_sha(package("SPDXRef-Package-ZigRuntime"); $zig_sha) and
         relates("SPDXRef-Package-Ghostty"; "STATIC_LINK"; "SPDXRef-Package-Simdutf") and
         relates("SPDXRef-Package-Ghostty"; "STATIC_LINK"; "SPDXRef-Package-ZigRuntime")
-        ' libghostty-native.spdx.json >/dev/null
+        ' "$document" >/dev/null; then
+        echo "error: native SPDX inventory does not match the pinned dependency unit" >&2
+        return 1
+    fi
 
     for required in \
         "$GHOSTTY_SHA" "$GHOSTTY_ARTIFACT_URL" "$GHOSTTY_ARTIFACT_SHA256" \
@@ -186,7 +194,7 @@ verify_metadata() {
         "$HIGHWAY_SHA" "$SIMDUTF_VERSION" "$SIMDUTF_UPSTREAM_SHA" \
         "$SIMDUTF_CPP_SHA256" "$SIMDUTF_HEADER_SHA256" \
         "$REQUIRED_ZIG" "$ZIG_SOURCE_SHA256"; do
-        if ! grep -Fq "$required" THIRD_PARTY_NOTICES.libghostty.md; then
+        if ! grep -Fq "$required" "$notices"; then
             echo "error: native notice inventory is missing $required" >&2
             return 1
         fi
@@ -446,6 +454,97 @@ candidate_revision() {
     printf '%s\n' "$revision"
 }
 
+verify_darwin_native_linkage() {
+    local binary="${1:-}"
+
+    if [[ ! -f "$binary" ]]; then
+        echo "usage: $0 verify-darwin-native-linkage <binary>" >&2
+        return 2
+    fi
+    if ! lipo "$binary" -verify_arch arm64; then
+        echo "error: native candidate is not a macOS arm64 binary" >&2
+        return 1
+    fi
+    if ! nm "$binary" | awk '
+        NF >= 3 && $NF == "_ghostty_terminal_new" && $(NF - 1) !~ /^[Uu]$/ { found = 1 }
+        END { exit !found }
+    '; then
+        echo "error: candidate does not define ghostty_terminal_new" >&2
+        return 1
+    fi
+    if grep -Eqi '(lib)?ghostty[^[:space:]]*\.dylib' < <(otool -L "$binary"); then
+        echo "error: candidate dynamically links a Ghostty library" >&2
+        return 1
+    fi
+}
+
+test_darwin_linkage_policy() {
+    local root
+
+    if [[ "$(uname -s)-$(uname -m)" != "Darwin-arm64" ]]; then
+        echo "error: Darwin linkage policy tests require macOS arm64" >&2
+        return 1
+    fi
+
+    root="$(mktemp -d "$NATIVE_WORK/linkage-policy.XXXXXX")"
+    cat >"$root/defined.c" <<'EOF'
+void *ghostty_terminal_new(void) { return 0; }
+int main(void) { return ghostty_terminal_new() != 0; }
+EOF
+    clang -arch arm64 -o "$root/defined" "$root/defined.c"
+    verify_darwin_native_linkage "$root/defined"
+
+    cat >"$root/undefined.c" <<'EOF'
+extern void *ghostty_terminal_new(void);
+void *use_ghostty(void) { return ghostty_terminal_new(); }
+EOF
+    clang -arch arm64 -dynamiclib -undefined dynamic_lookup \
+        -o "$root/undefined.dylib" "$root/undefined.c"
+    if verify_darwin_native_linkage "$root/undefined.dylib" >/dev/null 2>&1; then
+        echo "error: linkage policy accepted an undefined Ghostty symbol" >&2
+        return 1
+    fi
+
+    cat >"$root/dependency.c" <<'EOF'
+int ghostty_fixture_dependency(void) { return 0; }
+EOF
+    clang -arch arm64 -dynamiclib \
+        -install_name @rpath/libghostty-vt.dylib \
+        -o "$root/libghostty-vt.dylib" "$root/dependency.c"
+    cat >"$root/dynamic.c" <<'EOF'
+extern int ghostty_fixture_dependency(void);
+void *ghostty_terminal_new(void) { return 0; }
+int main(void) { return ghostty_fixture_dependency(); }
+EOF
+    clang -arch arm64 -L"$root" -lghostty-vt \
+        -o "$root/dynamic" "$root/dynamic.c"
+    if verify_darwin_native_linkage "$root/dynamic" >/dev/null 2>&1; then
+        echo "error: linkage policy accepted a Ghostty dylib dependency" >&2
+        return 1
+    fi
+
+    rm -rf "$root"
+}
+
+test_metadata_policy() {
+    local root
+    local invalid
+
+    root="$(mktemp -d "$NATIVE_WORK/metadata-policy.XXXXXX")"
+    invalid="$root/invalid.spdx.json"
+    verify_metadata
+    jq '
+        (.packages[] | select(.SPDXID == "SPDXRef-Package-Ghostty") | .sourceInfo) |=
+            sub("-Demit-xcframework=true"; "-Demit-xcframework=false")
+        ' "$REPO_DIR/libghostty-native.spdx.json" >"$invalid"
+    if verify_metadata "" "$invalid" \
+        "$REPO_DIR/THIRD_PARTY_NOTICES.libghostty.md" >/dev/null 2>&1; then
+        echo "error: metadata policy accepted the wrong Apple build configuration" >&2
+        return 1
+    fi
+    rm -rf "$root"
+}
+
 candidate_identity() {
     local binary="${1:-}"
     local expected_revision="${2:-}"
@@ -473,12 +572,7 @@ candidate_identity() {
         echo "error: native candidate contains the rollback terminal dependency" >&2
         return 1
     fi
-    if ! lipo "$binary" -verify_arch arm64; then
-        echo "error: native candidate is not a macOS arm64 executable" >&2
-        return 1
-    fi
-    if ! nm "$binary" | awk '$NF == "_ghostty_terminal_new" { found = 1 } END { exit !found }'; then
-        echo "error: candidate does not define ghostty_terminal_new" >&2
+    if ! verify_darwin_native_linkage "$binary"; then
         return 1
     fi
 
@@ -638,6 +732,58 @@ validate_spdx() {
     fi
 }
 
+publish_directory_exclusive() {
+    local source="${1:-}"
+    local destination="${2:-}"
+    local helper="$NATIVE_WORK/rename-excl"
+
+    if [[ ! -d "$source" || -z "$destination" ]]; then
+        echo "usage: publish_directory_exclusive <source> <destination>" >&2
+        return 2
+    fi
+    if [[ ! -x "$helper" ]]; then
+        go build -buildvcs=false -trimpath -o "$helper" \
+            "$REPO_DIR/internal/pty/testdata/renameexcl"
+    fi
+    if ! "$helper" "$source" "$destination"; then
+        echo "error: candidate destination appeared before atomic publication" >&2
+        return 1
+    fi
+}
+
+test_exclusive_publication() {
+    local root
+    local source
+    local destination
+
+    root="$(mktemp -d "$NATIVE_WORK/exclusive-publish.XXXXXX")"
+    source="$root/source-success"
+    destination="$root/candidate-success"
+    mkdir "$source"
+    printf 'braw\n' >"$source/payload"
+    publish_directory_exclusive "$source" "$destination"
+    if [[ -e "$source" || "$(cat "$destination/payload")" != "braw" ]]; then
+        echo "error: exclusive publication did not move the complete directory" >&2
+        return 1
+    fi
+
+    source="$root/source-collision"
+    destination="$root/candidate-collision"
+    mkdir "$source" "$destination"
+    printf 'canny\n' >"$source/payload"
+    printf 'dreich\n' >"$destination/sentinel"
+    if publish_directory_exclusive "$source" "$destination" >/dev/null 2>&1; then
+        echo "error: exclusive publication accepted an existing destination" >&2
+        return 1
+    fi
+    if [[ ! -d "$source" || "$(cat "$destination/sentinel")" != "dreich" || \
+        -e "$destination/source-collision" ]]; then
+        echo "error: failed exclusive publication changed the source or destination" >&2
+        return 1
+    fi
+    rm -rf "$root"
+}
+
 package_darwin_arm64_candidate() (
     local binary="${1:-}"
     local destination="${2:-}"
@@ -695,7 +841,9 @@ package_darwin_arm64_candidate() (
         return 1
     fi
 
-    mv "$staging" "$destination"
+    if ! publish_directory_exclusive "$staging" "$destination"; then
+        return 1
+    fi
     staging=""
 )
 
@@ -707,8 +855,11 @@ usage: $0 test|race|fuzz|bench|memory|daemon-test|soak [cycles [timeout]]|all
        $0 verify-metadata [ghostty-source]
        $0 verify-default-binary <binary>
        $0 verify-darwin-arm64-candidate <binary> <revision>
+       $0 test-darwin-linkage-policy
+       $0 test-metadata-policy
        $0 install-spdx-validator <empty-directory>
        $0 validate-spdx <tools-java-jar> [document]
+       $0 test-exclusive-publish
        $0 package-darwin-arm64 <binary> <destination> <tools-java-jar>
 
 test/bench/memory use the checksum-pinned Apple artifact on macOS arm64.
@@ -753,11 +904,20 @@ case "${1:-}" in
     verify-darwin-arm64-candidate)
         candidate_identity "${2:-}" "${3:-}"
         ;;
+    test-darwin-linkage-policy)
+        test_darwin_linkage_policy
+        ;;
+    test-metadata-policy)
+        test_metadata_policy
+        ;;
     install-spdx-validator)
         install_spdx_validator "${2:-}"
         ;;
     validate-spdx)
         validate_spdx "${2:-}" "${3:-$REPO_DIR/libghostty-native.spdx.json}"
+        ;;
+    test-exclusive-publish)
+        test_exclusive_publication
         ;;
     package-darwin-arm64)
         package_darwin_arm64_candidate "${2:-}" "${3:-}" "${4:-}"

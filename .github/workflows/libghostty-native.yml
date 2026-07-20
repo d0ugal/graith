@@ -110,6 +110,9 @@ jobs:
       - name: Bind provenance and package the native candidate
         run: |
           set -euo pipefail
+          scripts/libghostty-native.sh test-metadata-policy
+          scripts/libghostty-native.sh test-darwin-linkage-policy
+          scripts/libghostty-native.sh test-exclusive-publish
           java -version
           spdx_jar="$(scripts/libghostty-native.sh install-spdx-validator \
             "${RUNNER_TEMP}/spdx-validator")"

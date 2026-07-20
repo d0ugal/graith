@@ -45,7 +45,7 @@
       "licenseConcluded": "MIT",
       "licenseDeclared": "MIT",
       "name": "Ghostty libghostty-vt",
-      "sourceInfo": "Built from exact commit 91f66da24527fa02d92b5fd0b41cd020f553a64c with Zig 0.15.2 and -Demit-lib-vt=true -Demit-xcframework=false -Doptimize=ReleaseFast -Dsimd=true.",
+      "sourceInfo": "Built from exact commit 91f66da24527fa02d92b5fd0b41cd020f553a64c with Zig 0.15.2 and -Demit-lib-vt=true -Demit-xcframework=true -Doptimize=ReleaseFast. No explicit SIMD override is passed by the pinned Apple build.",
       "supplier": "Organization: Ghostty contributors",
       "versionInfo": "1.3.2-dev+91f66da24527fa02d92b5fd0b41cd020f553a64c"
     },
