@@ -1,0 +1,172 @@
+/* Mermaid — overrides the pinned LotusDocs partial and keeps its base styles. */
+
+.docs-content .main-content pre {
+    &.mermaid {
+        background-color: transparent !important;
+        text-align: center !important;
+
+        .messageText,
+        text {
+            fill: var(--text-default) !important;
+        }
+
+        .messageLine0,
+        .messageLine1,
+        .edgePaths path,
+        .marker,
+        line {
+            stroke: var(--text-default) !important;
+        }
+
+        #arrowhead path,
+        #crosshead path,
+        .marker {
+            fill: var(--text-default) !important;
+        }
+
+        .grid .tick {
+            stroke: var(--text-default) !important;
+
+            text {
+                fill: var(--text-default) !important;
+            }
+        }
+
+        #sequencenumber circle {
+            fill: var(--bg-mermaid) !important;
+            stroke: var(--text-default) !important;
+        }
+
+        .sequenceNumber {
+            fill: var(--text-default) !important;
+        }
+    }
+}
+
+.package-graph {
+    --package-graph-border: var(--sidebar-border-color);
+    --package-graph-surface: var(--sidebar-icon-bg);
+
+    margin: 1.5rem 0;
+    overflow: hidden;
+    border: 1px solid var(--package-graph-border);
+    border-radius: 0.5rem;
+    background: var(--bs-body-bg);
+
+    &__toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.25rem;
+        min-height: 3rem;
+        padding: 0.35rem 0.5rem;
+        border-bottom: 1px solid var(--package-graph-border);
+        background: var(--package-graph-surface);
+
+        button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 2.25rem;
+            height: 2.25rem;
+            padding: 0;
+            color: var(--text-default);
+            border: 0;
+            border-radius: 0.35rem;
+            background: transparent;
+
+            &:hover,
+            &:focus-visible {
+                color: var(--primary);
+                background: var(--sidebar-menu-active-bg);
+            }
+
+            &:disabled {
+                opacity: 0.35;
+            }
+        }
+
+        output {
+            min-width: 3.5rem;
+            color: var(--text-default);
+            font-variant-numeric: tabular-nums;
+            text-align: center;
+        }
+    }
+
+    &__viewport {
+        display: flex;
+        align-items: stretch;
+        justify-content: stretch;
+        width: 100%;
+        height: 70vh;
+        max-height: 52rem;
+        min-height: 32rem;
+        overflow: hidden;
+        cursor: grab;
+        outline: none;
+        overscroll-behavior: contain;
+        touch-action: none;
+
+        &:focus-visible {
+            box-shadow: inset 0 0 0 3px var(--primary);
+        }
+
+        &.is-panning {
+            cursor: grabbing;
+        }
+
+        pre.mermaid {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+            min-height: 0;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+
+            svg {
+                width: 100% !important;
+                max-width: none !important;
+                height: 100% !important;
+            }
+        }
+    }
+
+    &__help {
+        margin: 0;
+        padding: 0.5rem 0.75rem;
+        color: var(--text-muted);
+        border-top: 1px solid var(--package-graph-border);
+        background: var(--package-graph-surface);
+        font-size: 0.8rem;
+        text-align: center;
+    }
+
+    &:fullscreen {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        border: 0;
+        border-radius: 0;
+        background: var(--bs-body-bg);
+
+        .package-graph__viewport {
+            flex: 1;
+            height: auto;
+            max-height: none;
+            min-height: 0;
+        }
+    }
+}
+
+@media (max-width: 767.98px) {
+    .package-graph__viewport {
+        height: 65vh;
+        min-height: 26rem;
+    }
+}
