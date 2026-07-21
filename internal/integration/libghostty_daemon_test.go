@@ -38,6 +38,8 @@ const (
 	nativeUpgradeTimeout = protocol.UpgradeReadinessTimeout
 )
 
+const nativeDiagnosticTailBytes = 8 * 1024
+
 type nativeDaemonHarness struct {
 	t          *testing.T
 	binary     string
@@ -47,14 +49,15 @@ type nativeDaemonHarness struct {
 	tokenFile  string
 	pidFile    string
 	cmd        *exec.Cmd
-	done       chan error
+	done       chan struct{}
 	identity   nativeProcessIdentity
 	stderr     nativeLockedBuffer
 	private    []string
 
-	mu      sync.Mutex
-	clients []*nativeControlClient
-	stopped bool
+	mu         sync.Mutex
+	clients    []*nativeControlClient
+	stopped    bool
+	completion string
 }
 
 type nativeLockedBuffer struct {
@@ -598,7 +601,7 @@ func startNativeDaemon(t *testing.T) *nativeDaemonHarness {
 		tokenFile:  filepath.Join(dataHome, "human.token"),
 		pidFile:    filepath.Join(runtimeHome, appName, "graith.pid"),
 		cmd:        cmd,
-		done:       make(chan error, 1),
+		done:       make(chan struct{}),
 		private:    []string{root, binary},
 	}
 
@@ -609,8 +612,14 @@ func startNativeDaemon(t *testing.T) *nativeDaemonHarness {
 
 	h.identity.PID = cmd.Process.Pid
 	go func() {
-		h.done <- cmd.Wait()
+		completion := "clean-exit"
+		if cmd.Wait() != nil {
+			completion = "exit-error"
+		}
 
+		h.mu.Lock()
+		h.completion = completion
+		h.mu.Unlock()
 		close(h.done)
 	}()
 
@@ -747,7 +756,7 @@ func (h *nativeDaemonHarness) tryConnect() (*nativeControlClient, error) {
 		if envelope.Type == "handshake_err" {
 			var response protocol.HandshakeErrMsg
 			if protocol.DecodePayload(envelope, &response) == nil {
-				return nil, fmt.Errorf("handshake rejected: %s", response.Reason)
+				return nil, errors.New("handshake rejected")
 			}
 		}
 
@@ -773,6 +782,8 @@ func (h *nativeDaemonHarness) connectNewGeneration(previous string) *nativeContr
 	// the integration harness does not kill a valid transition after an ordinary
 	// per-request timeout.
 	deadline := time.Now().Add(nativeUpgradeTimeout)
+	observation := nativeRestartTimeoutObservation{}
+
 	for time.Now().Before(deadline) {
 		client, err := h.tryConnect()
 		if err == nil {
@@ -784,13 +795,20 @@ func (h *nativeDaemonHarness) connectNewGeneration(previous string) *nativeContr
 				return client
 			}
 
+			if client.instance == previous {
+				observation.sameGenerationHandshakes++
+			}
+
 			client.close()
+		} else {
+			observation.failedHandshakes++
+			observation.lastHandshakeErrorClass = nativeHandshakeErrorClass(err)
 		}
 
 		time.Sleep(25 * time.Millisecond)
 	}
 
-	h.t.Fatal("restarted tagged daemon did not present a new generation")
+	h.failNewGenerationTimeout(observation)
 
 	return nil
 }
@@ -853,6 +871,17 @@ func (h *nativeDaemonHarness) daemonDone() bool {
 	default:
 		return false
 	}
+}
+
+func (h *nativeDaemonHarness) daemonCompletionClass() string {
+	if !h.daemonDone() {
+		return "running"
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	return h.completion
 }
 
 func (h *nativeDaemonHarness) waitForDaemonDone(timeout time.Duration) bool {
@@ -927,6 +956,30 @@ func (h *nativeDaemonHarness) stop() error {
 
 func (h *nativeDaemonHarness) cleanup() {
 	_ = h.stop()
+}
+
+func (h *nativeDaemonHarness) failNewGenerationTimeout(observation nativeRestartTimeoutObservation) {
+	h.t.Helper()
+
+	observation.daemonDone = h.daemonDone()
+	observation.daemonCompletionClass = h.daemonCompletionClass()
+
+	current, currentErr := nativeProcessIsCurrent(h.identity)
+	switch {
+	case currentErr != nil:
+		observation.daemonCurrent = "unknown"
+	case current:
+		observation.daemonCurrent = "current"
+	default:
+		observation.daemonCurrent = "exited"
+	}
+
+	cleanupErr := h.stop()
+	logTail, logReadErr := readBoundedNativeTail(filepath.Join(filepath.Dir(h.tokenFile), "daemon.log"), nativeDiagnosticTailBytes)
+	evidence := classifyNativeRestartLog(logTail)
+
+	h.t.Fatalf("restarted tagged daemon did not present a new generation: %s",
+		nativeRestartTimeoutSummary(observation, evidence, cleanupErr, logReadErr))
 }
 
 func (h *nativeDaemonHarness) redactedStderr() string {
