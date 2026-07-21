@@ -209,7 +209,31 @@ public final class HostConnection: ObservableObject, Identifiable {
     public func toggleStar(_ session: SessionInfo) async {
         let starred = session.starred != true
         await run {
-            _ = try await self.client.update(sessionID: session.id, name: nil, parentID: nil, starred: starred)
+            _ = try await self.client.update(
+                sessionID: session.id, name: nil, parentID: nil, starred: starred,
+                addLabels: nil, removeLabels: nil
+            )
+        }
+    }
+
+    /// Replace a session's labels using one atomic add/remove metadata update.
+    /// Identity is case-insensitive; unchanged labels retain daemon spelling.
+    public func setLabels(_ session: SessionInfo, labels: [String]) async {
+        let requested = labels.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let current = session.labels ?? []
+        let add = requested.filter { wanted in
+            !current.contains { SidebarFilter.labelsEqual($0, wanted) }
+        }
+        let remove = current.filter { existing in
+            !requested.contains { SidebarFilter.labelsEqual($0, existing) }
+        }
+        guard !add.isEmpty || !remove.isEmpty else { return }
+        await run {
+            _ = try await self.client.update(
+                sessionID: session.id, name: nil, parentID: nil, starred: nil,
+                addLabels: add.isEmpty ? nil : add,
+                removeLabels: remove.isEmpty ? nil : remove
+            )
         }
     }
 

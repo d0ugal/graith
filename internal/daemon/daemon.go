@@ -1380,6 +1380,7 @@ type CreateOpts struct {
 	// Create generates the ID as before.
 	ID         string
 	Name       string
+	Labels     []string
 	AgentName  string
 	RepoPath   string
 	BaseBranch string

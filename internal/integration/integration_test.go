@@ -633,6 +633,96 @@ func TestUpdateName(t *testing.T) {
 	}
 }
 
+func TestLabelsCreateUpdateListAndRestore(t *testing.T) {
+	env := setup(t)
+	defer env.teardown()
+
+	r, w := env.connect(t)
+	handshake(t, r, w)
+
+	sendControl(t, w, "create", protocol.CreateMsg{
+		Name: "canny", Agent: "echo", NoRepo: true,
+		Labels: []string{" Urgent ", "urgent", "release"},
+	})
+
+	var created protocol.SessionInfo
+
+	createResp := readControl(t, r)
+	if createResp.Type != "created" {
+		t.Fatalf("create response = %q, want created", createResp.Type)
+	}
+
+	if err := protocol.DecodePayload(createResp, &created); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := strings.Join(created.Labels, ","); got != "Urgent,release" {
+		t.Fatalf("created labels = %q, want %q", got, "Urgent,release")
+	}
+
+	sendControl(t, w, "update", protocol.UpdateMsg{
+		SessionID: created.ID, AddLabels: []string{"urgent", "customer:Brae"}, RemoveLabels: []string{"RELEASE"},
+	})
+
+	var updated protocol.UpdateResultMsg
+
+	updateResp := readControl(t, r)
+	if updateResp.Type != "updated" {
+		t.Fatalf("update response = %q, want updated", updateResp.Type)
+	}
+
+	if err := protocol.DecodePayload(updateResp, &updated); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := strings.Join(updated.Labels, ","); got != "Urgent,customer:Brae" {
+		t.Fatalf("updated labels = %q, want %q", got, "Urgent,customer:Brae")
+	}
+
+	loaded, err := daemon.LoadState(filepath.Join(env.tmpDir, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := strings.Join(loaded.Sessions[created.ID].Labels, ","); got != "Urgent,customer:Brae" {
+		t.Fatalf("persisted labels = %q, want %q", got, "Urgent,customer:Brae")
+	}
+
+	sendControl(t, w, "delete", protocol.DeleteMsg{SessionID: created.ID})
+
+	if resp := readControl(t, r); resp.Type != "deleted" {
+		t.Fatalf("delete response = %q, want deleted", resp.Type)
+	}
+
+	sendControl(t, w, "list", protocol.ListMsg{Deleted: true})
+
+	var deleted protocol.SessionListMsg
+	if err := protocol.DecodePayload(readControl(t, r), &deleted); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(deleted.Sessions) != 1 || strings.Join(deleted.Sessions[0].Labels, ",") != "Urgent,customer:Brae" {
+		t.Fatalf("deleted session labels = %+v", deleted.Sessions)
+	}
+
+	sendControl(t, w, "restore", protocol.RestoreMsg{SessionID: created.ID})
+
+	if resp := readControl(t, r); resp.Type != "restored" {
+		t.Fatalf("restore response = %q, want restored", resp.Type)
+	}
+
+	sendControl(t, w, "list", protocol.ListMsg{})
+
+	var restored protocol.SessionListMsg
+	if err := protocol.DecodePayload(readControl(t, r), &restored); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(restored.Sessions) != 1 || strings.Join(restored.Sessions[0].Labels, ",") != "Urgent,customer:Brae" {
+		t.Fatalf("restored session labels = %+v", restored.Sessions)
+	}
+}
+
 func TestUpdateStarredPersistsAndProtectsDeletion(t *testing.T) {
 	env := setup(t)
 	defer env.teardown()

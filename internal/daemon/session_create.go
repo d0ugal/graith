@@ -13,6 +13,7 @@ import (
 	"github.com/d0ugal/graith/internal/headless"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/sandbox"
+	"github.com/d0ugal/graith/internal/sessionlabel"
 	"github.com/d0ugal/graith/internal/store"
 )
 
@@ -50,6 +51,11 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	envExtra := opts.EnvExtra
 
 	if err := ValidateSessionName(name); err != nil {
+		return SessionState{}, err
+	}
+
+	labels, err := sessionlabel.Normalize(opts.Labels)
+	if err != nil {
 		return SessionState{}, err
 	}
 
@@ -371,6 +377,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		ID:                   id,
 		ParentID:             parentID,
 		Name:                 name,
+		Labels:               labels,
 		RepoPath:             repoRoot,
 		RepoName:             repoName,
 		WorktreePath:         worktreePath,

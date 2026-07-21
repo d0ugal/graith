@@ -36,3 +36,25 @@ func TestNewPromptAndPromptFileMutuallyExclusive(t *testing.T) {
 		t.Errorf("error = %q, want it to mention 'mutually exclusive'", err)
 	}
 }
+
+func TestNewRejectsInvalidLabelBeforeConnecting(t *testing.T) {
+	oldLabels, oldCfg := newLabels, cfg
+
+	t.Cleanup(func() { newLabels, cfg = oldLabels, oldCfg })
+
+	cfg = config.Default()
+	newLabels = []string{"   "}
+
+	if err := newCmd.RunE(newCmd, []string{"braw"}); err == nil || !strings.Contains(err.Error(), "must not be empty") {
+		t.Fatalf("new with empty label error = %v", err)
+	}
+}
+
+func TestNewLabelFlagIsRepeatable(t *testing.T) {
+	registerCommands()
+
+	flag := newCmd.Flags().Lookup("label")
+	if flag == nil || flag.Value.Type() != "stringArray" {
+		t.Fatalf("new --label = %#v, want repeatable stringArray", flag)
+	}
+}

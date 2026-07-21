@@ -19,6 +19,7 @@ List all sessions with status.
 | `--tree` | Show parent-child hierarchy |
 | `--children <name-or-id>` | Filter to descendants of a session |
 | `--starred` | Show only starred sessions |
+| `--label <label>` | Filter by exact label; repeat for AND matching |
 | `-q`, `--quiet` | Output session names only (or IDs with `--json`) |
 | `--wide` | Show all columns, including per-session token usage |
 | `--tokens` | Show the detailed token-usage projection and aggregate totals |
@@ -39,8 +40,12 @@ TOTAL                     81,562  51,726  1,961,106  96,004   0      2,190,398  
 `gr dashboard` was removed with no forwarding alias — use `gr ls` for snapshots
 or the attached-session picker (`ctrl+b w`) for an interactive view.
 
+`--label` compares case-insensitively and composes with `--repo`, `--children`,
+`--starred`, and `--deleted`. Repeating it requires every requested label; it
+never consults GitHub or infers labels from session content.
+
 `--tokens` composes with the selection flags (`--repo`, `--children`,
-`--starred`, `--deleted`, `--tree`) but is mutually exclusive with `--quiet` and
+`--starred`, `--label`, `--deleted`, `--tree`) but is mutually exclusive with `--quiet` and
 `--wide`.
 
 Counts reflect the **current agent** from a background poll, lagging by up to the
@@ -60,9 +65,10 @@ aggregate counts known rows only; its **Counted** cell reports coverage (e.g.
 session's `tokens` field with `counted_at` and the optional `degraded` marker:
 
 ```console
-$ gr ls --json | jq '.sessions[] | {name, tokens}'
+$ gr ls --json | jq '.sessions[] | {name, labels, tokens}'
 {
   "name": "braw",
+  "labels": ["Urgent", "release"],
   "tokens": {
     "input": 12431,
     "output": 48209,
@@ -77,8 +83,9 @@ $ gr ls --json | jq '.sessions[] | {name, tokens}'
 `--json` and agent mode always use this full `SessionInfo` shape, even with
 `--tokens` — there's no separate flat token schema. Each row's `cwd` is the
 persisted working directory assigned to the agent; `worktree_path` remains the
-Git worktree/source path and can differ for mirrors and system sessions. USD
-cost isn't shown, a planned opt-in via a user-supplied price table.
+Git worktree/source path and can differ for mirrors and system sessions. Its
+`labels` field is always the complete array (including `[]` for an unlabelled
+session). USD cost isn't shown, a planned opt-in via a user-supplied price table.
 
 ### `gr logs <name-or-id>` (alias: `l`)
 

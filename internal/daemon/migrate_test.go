@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -100,6 +101,7 @@ func TestMigrateInPlaceSwap(t *testing.T) {
 		ID: "m1", Name: "braw-bothy", Agent: "claude",
 		AgentSessionID: sid, Status: StatusStopped,
 		WorktreePath: repo, RepoPath: repo, CreatedAt: time.Now(),
+		Labels: []string{"Urgent", "release"},
 	}
 
 	res, err := sm.Migrate("m1", "codex", "", 24, 80)
@@ -121,6 +123,10 @@ func TestMigrateInPlaceSwap(t *testing.T) {
 		t.Errorf("result agent = %q, want codex", res.Agent)
 	}
 
+	if !reflect.DeepEqual(res.Labels, []string{"Urgent", "release"}) {
+		t.Fatalf("result labels = %#v, want labels preserved", res.Labels)
+	}
+
 	sm.mu.RLock()
 	s := sm.state.Sessions["m1"]
 	sm.mu.RUnlock()
@@ -135,6 +141,10 @@ func TestMigrateInPlaceSwap(t *testing.T) {
 
 	if s.WorktreePath != repo {
 		t.Errorf("worktree changed: %q, want %q (in-place migrate retains worktree)", s.WorktreePath, repo)
+	}
+
+	if !reflect.DeepEqual(s.Labels, []string{"Urgent", "release"}) {
+		t.Fatalf("session labels after migrate = %#v, want labels preserved", s.Labels)
 	}
 
 	if s.MigratedFrom == nil || s.MigratedFrom.Agent != "claude" {

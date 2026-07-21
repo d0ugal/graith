@@ -17,6 +17,7 @@ func makeSession(
     status: String = "running",
     agentStatus: String? = nil,
     repoName: String = "croft",
+    labels: [String] = [],
     parentID: String? = nil,
     starred: Bool? = nil,
     dirty: Bool? = nil,
@@ -42,6 +43,9 @@ func makeSession(
     if let dirty { fields["\"dirty\""] = dirty ? "true" : "false" }
     if let unpushedCount { fields["\"unpushed_count\""] = "\(unpushedCount)" }
     if let mirror { fields["\"mirror\""] = mirror ? "true" : "false" }
+    if !labels.isEmpty {
+        fields["\"labels\""] = "[\(labels.map { "\"\($0)\"" }.joined(separator: ","))]"
+    }
     let body = fields.map { "\($0.key): \($0.value)" }.joined(separator: ", ")
     let json = "{ \(body) }"
     // swiftlint:disable:next force_try
@@ -223,8 +227,26 @@ actor MockHostClient: GraithHostClient {
         lastSetStatus = (text, ttlSeconds, clear)
     }
     func rename(sessionID: String, newName: String) async throws {}
-    func update(sessionID: String, name: String?, parentID: String?, starred: Bool?) async throws -> UpdateResultMsg {
-        UpdateResultMsg(sessionID: sessionID, name: name ?? "braw", parentID: parentID ?? "", starred: starred ?? false)
+    func update(
+        sessionID: String, name: String?, parentID: String?, starred: Bool?,
+        addLabels: [String]? = nil, removeLabels: [String]? = nil
+    ) async throws -> UpdateResultMsg {
+        var labels = sessions.first(where: { $0.id == sessionID })?.labels ?? []
+        labels.removeAll { existing in
+            (removeLabels ?? []).contains { $0.caseInsensitiveCompare(existing) == .orderedSame }
+        }
+        for label in addLabels ?? [] where !labels.contains(where: { $0.caseInsensitiveCompare(label) == .orderedSame }) {
+            labels.append(label)
+        }
+        if let index = sessions.firstIndex(where: { $0.id == sessionID }) {
+            sessions[index].labels = labels
+            if let name { sessions[index].name = name }
+            if let starred { sessions[index].starred = starred }
+        }
+        return UpdateResultMsg(
+            sessionID: sessionID, name: name ?? "braw", parentID: parentID ?? "",
+            starred: starred ?? false, labels: labels
+        )
     }
     func fork(name: String, sourceSessionID: String) async throws {}
     func migrate(sessionID: String, agent: String, model: String?) async throws {

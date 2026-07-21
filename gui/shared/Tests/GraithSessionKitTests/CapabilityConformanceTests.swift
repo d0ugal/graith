@@ -121,6 +121,10 @@ private func sharedAffordances() -> Set<String> {
     wire("session.list") { _ = \FleetModel.sessions }
     // Sidebar filtering/search (#906) — shared filter state + pure logic.
     wire("session.filter") { _ = FleetModel.filtered }
+    wire("session.labels") {
+        _ = \FleetModel.availableLabels
+        _ = FleetModel.setLabels
+    }
     wire("session.create") { _ = FleetModel.createSession }
     wire("session.stop") { _ = FleetModel.stopSession }
     wire("session.resume") { _ = FleetModel.resumeSession }

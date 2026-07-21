@@ -118,19 +118,21 @@ const (
 	createFieldName = iota
 	createFieldRepo
 	createFieldAgent
+	createFieldLabels
 )
 
 type createSessionModel struct {
-	nameInput textinput.Model
-	repoInput textinput.Model
-	repos     []RepoSuggestion
-	filtered  []RepoSuggestion
-	agents    []string
-	agentIdx  int
-	focus     int
-	done      bool
-	width     int
-	height    int
+	nameInput   textinput.Model
+	repoInput   textinput.Model
+	labelsInput textinput.Model
+	repos       []RepoSuggestion
+	filtered    []RepoSuggestion
+	agents      []string
+	agentIdx    int
+	focus       int
+	done        bool
+	width       int
+	height      int
 
 	showDropdown bool
 	dropdownIdx  int
@@ -148,6 +150,11 @@ func newCreateSessionModel(defaultRepo string, repos []RepoSuggestion, agents []
 	ri.CharLimit = 256
 	ri.SetWidth(40)
 
+	li := textinput.New()
+	li.Placeholder = "bugfix, urgent"
+	li.CharLimit = 512
+	li.SetWidth(40)
+
 	if defaultRepo != "" {
 		ri.SetValue(defaultRepo)
 	}
@@ -162,26 +169,17 @@ func newCreateSessionModel(defaultRepo string, repos []RepoSuggestion, agents []
 	}
 
 	m := createSessionModel{
-		nameInput: ni,
-		repoInput: ri,
-		repos:     repos,
-		agents:    agents,
-		agentIdx:  agentIdx,
-		focus:     createFieldName,
+		nameInput:   ni,
+		repoInput:   ri,
+		labelsInput: li,
+		repos:       repos,
+		agents:      agents,
+		agentIdx:    agentIdx,
+		focus:       createFieldName,
 	}
 	m.updateFiltered()
 
 	return &m
-}
-
-// lastField returns the index of the final focusable field. The agent field is
-// only present when there are agents to choose from.
-func (m *createSessionModel) lastField() int {
-	if len(m.agents) == 0 {
-		return createFieldRepo
-	}
-
-	return createFieldAgent
 }
 
 // setFocus moves focus to the given field, updating text input focus and the
@@ -190,6 +188,7 @@ func (m *createSessionModel) setFocus(f int) tea.Cmd {
 	m.focus = f
 	m.nameInput.Blur()
 	m.repoInput.Blur()
+	m.labelsInput.Blur()
 	m.showDropdown = false
 
 	switch f {
@@ -199,6 +198,8 @@ func (m *createSessionModel) setFocus(f int) tea.Cmd {
 		m.repoInput.Focus()
 		m.showDropdown = len(m.filtered) > 0
 		m.dropdownIdx = -1
+	case createFieldLabels:
+		m.labelsInput.Focus()
 	}
 
 	return textinput.Blink
@@ -225,6 +226,54 @@ func (m *createSessionModel) selectedAgent() string {
 	}
 
 	return m.agents[m.agentIdx]
+}
+
+func (m *createSessionModel) selectedLabels() []string {
+	value := strings.TrimSpace(m.labelsInput.Value())
+	if value == "" {
+		return []string{}
+	}
+
+	parts := strings.Split(value, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+
+	return parts
+}
+
+func (m *createSessionModel) nextField() (int, bool) {
+	switch m.focus {
+	case createFieldName:
+		return createFieldRepo, true
+	case createFieldRepo:
+		if len(m.agents) > 0 {
+			return createFieldAgent, true
+		}
+
+		return createFieldLabels, true
+	case createFieldAgent:
+		return createFieldLabels, true
+	default:
+		return 0, false
+	}
+}
+
+func (m *createSessionModel) previousField() (int, bool) {
+	switch m.focus {
+	case createFieldRepo:
+		return createFieldName, true
+	case createFieldAgent:
+		return createFieldRepo, true
+	case createFieldLabels:
+		if len(m.agents) > 0 {
+			return createFieldAgent, true
+		}
+
+		return createFieldRepo, true
+	default:
+		return 0, false
+	}
 }
 
 func (m *createSessionModel) updateFiltered() {
@@ -266,16 +315,16 @@ func (m *createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "tab":
-			if m.focus < m.lastField() {
-				cmd := m.setFocus(m.focus + 1)
+			if next, ok := m.nextField(); ok {
+				cmd := m.setFocus(next)
 				return m, cmd
 			}
 
 			return m, nil
 
 		case "shift+tab":
-			if m.focus > createFieldName {
-				cmd := m.setFocus(m.focus - 1)
+			if previous, ok := m.previousField(); ok {
+				cmd := m.setFocus(previous)
 				return m, cmd
 			}
 
@@ -316,6 +365,9 @@ func (m *createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				return m, cmd
 			case createFieldAgent:
+				cmd := m.trySubmit()
+				return m, cmd
+			case createFieldLabels:
 				cmd := m.trySubmit()
 				return m, cmd
 			}
@@ -395,6 +447,8 @@ func (m *createSessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showDropdown = len(m.filtered) > 0
 			m.dropdownIdx = -1
 		}
+	case createFieldLabels:
+		m.labelsInput, cmd = m.labelsInput.Update(msg)
 	}
 
 	return m, cmd
@@ -480,13 +534,21 @@ func (m *createSessionModel) View() tea.View {
 	}
 
 	content.WriteString("\n\n")
+	content.WriteString(labelStyle.Render("Labels: "))
+	content.WriteString(m.labelsInput.View())
+	content.WriteString("\n")
+	content.WriteString(dimStyle.Render("comma-separated; tab here before confirming to add labels"))
+
+	content.WriteString("\n\n")
 
 	var hint string
 
 	switch {
 	case m.focus == createFieldAgent:
 		// On the agent field both ↑↓ and ←→ cycle the selection.
-		hint = "tab next field  ↑↓ ←→ cycle agent  enter confirm  esc cancel"
+		hint = "tab labels  ↑↓ ←→ cycle agent  enter confirm  esc cancel"
+	case m.focus == createFieldLabels:
+		hint = "shift+tab previous field  enter confirm  esc cancel"
 	case len(m.agents) > 0:
 		hint = "tab next field  ↑↓ suggestions  ←→ agent  enter confirm  esc cancel"
 	default:
@@ -549,19 +611,19 @@ func (m *createSessionModel) View() tea.View {
 }
 
 // RunCreateInput launches a bubbletea prompt for creating a session.
-// Returns (name, repoPath, agent) or ("", "", "") on cancel.
-func RunCreateInput(defaultRepo string, repos []RepoSuggestion, agents []string, defaultAgent string) (string, string, string) {
+// Returns (name, repoPath, agent, labels) or empty values on cancel.
+func RunCreateInput(defaultRepo string, repos []RepoSuggestion, agents []string, defaultAgent string) (string, string, string, []string) {
 	m := newCreateSessionModel(defaultRepo, repos, agents, defaultAgent)
 	p := tea.NewProgram(m)
 
 	final, err := p.Run()
 	if err != nil {
-		return "", "", ""
+		return "", "", "", nil
 	}
 
 	result, ok := final.(*createSessionModel)
 	if !ok || !result.done {
-		return "", "", ""
+		return "", "", "", nil
 	}
 
 	name := strings.TrimSpace(result.nameInput.Value())
@@ -571,5 +633,5 @@ func RunCreateInput(defaultRepo string, repos []RepoSuggestion, agents []string,
 		repo = expandPath(repo)
 	}
 
-	return name, repo, result.selectedAgent()
+	return name, repo, result.selectedAgent(), result.selectedLabels()
 }

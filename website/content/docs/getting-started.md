@@ -70,6 +70,7 @@ Cycle views with `h`/`l` or left/right arrows:
 |------|-------|
 | All | Every session, grouped by repo |
 | Starred | Starred sessions only |
+| Labels | Sessions grouped by label across repositories |
 | Scenarios | Every session grouped by scenario, with unassigned sessions kept together |
 | Deleted | Recently deleted sessions available to restore |
 

@@ -3,6 +3,7 @@ package daemon
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -67,6 +68,7 @@ func crossAgentForkSM(t *testing.T) (*SessionManager, string) {
 		Agent:          "claude",
 		AgentSessionID: "braw-agent-id",
 		Model:          "claude-opus-4-8",
+		Labels:         []string{"incident:7", "Urgent"},
 		Status:         StatusRunning,
 	}
 
@@ -89,6 +91,15 @@ func TestForkWithAgentCrossAgent(t *testing.T) {
 
 	if forked.ID == "src1" {
 		t.Error("cross-agent fork reused the source id")
+	}
+
+	if !reflect.DeepEqual(forked.Labels, []string{"incident:7", "Urgent"}) {
+		t.Fatalf("cross-agent fork labels = %#v", forked.Labels)
+	}
+
+	forked.Labels[0] = "changed"
+	if sm.state.Sessions["src1"].Labels[0] != "incident:7" {
+		t.Fatal("fork labels alias source labels")
 	}
 
 	if forked.WorktreePath == repoDir {
@@ -208,6 +219,7 @@ func TestForkSameAgentIsNativeFork(t *testing.T) {
 		Branch:       "feat/bothy",
 		BaseBranch:   "main",
 		Agent:        "bide-agent",
+		Labels:       []string{"release", "customer:Brae"},
 		Status:       StatusRunning,
 	}
 
@@ -224,6 +236,10 @@ func TestForkSameAgentIsNativeFork(t *testing.T) {
 
 	if forked.Agent != "bide-agent" {
 		t.Errorf("forked Agent = %q, want bide-agent", forked.Agent)
+	}
+
+	if !reflect.DeepEqual(forked.Labels, []string{"release", "customer:Brae"}) {
+		t.Fatalf("same-agent fork labels = %#v", forked.Labels)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -473,6 +474,51 @@ func TestUpdateSessionNotFound(t *testing.T) {
 	h.sendControl(t, "update", protocol.UpdateMsg{SessionID: "haar", Name: &newName})
 
 	h.expectType(t, "error")
+}
+
+func TestUpdateSessionLabels(t *testing.T) {
+	h := newTestHarness(t)
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["braw-label"] = &SessionState{
+		ID: "braw-label", Name: "braw", Status: StatusRunning,
+		Agent: "claude", CreatedAt: time.Now().UTC(), Labels: []string{"Urgent", "release"},
+	}
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "update", protocol.UpdateMsg{
+		SessionID: "braw-label", AddLabels: []string{"urgent", "customer:Brae"}, RemoveLabels: []string{"RELEASE"},
+	})
+
+	env := h.expectType(t, "updated")
+
+	var result protocol.UpdateResultMsg
+	if err := protocol.DecodePayload(env, &result); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"Urgent", "customer:Brae"}
+	if !reflect.DeepEqual(result.Labels, want) {
+		t.Fatalf("updated labels = %#v, want %#v", result.Labels, want)
+	}
+}
+
+func TestSessionInfoJSONAlwaysIncludesCompleteLabelsArray(t *testing.T) {
+	state := SessionState{ID: "canny-id", Name: "canny", Status: StatusStopped}
+
+	info := toSessionInfo(state, config.Default(), nil)
+	if info.Labels == nil {
+		t.Fatal("unlabelled SessionInfo has nil labels, want explicit empty array")
+	}
+
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Contains(data, []byte(`"labels":[]`)) {
+		t.Fatalf("SessionInfo JSON omits complete empty labels: %s", data)
+	}
 }
 
 func TestUpdateInvalidPayload(t *testing.T) {

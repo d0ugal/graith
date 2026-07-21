@@ -153,7 +153,10 @@ public protocol GraithHostClient: Actor {
     /// Set (or clear) a session's status summary (`gr status`).
     func setStatus(sessionID: String, text: String, ttlSeconds: Int?, clear: Bool) async throws
     func rename(sessionID: String, newName: String) async throws
-    func update(sessionID: String, name: String?, parentID: String?, starred: Bool?) async throws -> UpdateResultMsg
+    func update(
+        sessionID: String, name: String?, parentID: String?, starred: Bool?,
+        addLabels: [String]?, removeLabels: [String]?
+    ) async throws -> UpdateResultMsg
     /// Fork `sourceSessionID` into a new session named `name`.
     func fork(name: String, sourceSessionID: String) async throws
     /// Migrate `sessionID` to a different `agent` (and optionally `model`).

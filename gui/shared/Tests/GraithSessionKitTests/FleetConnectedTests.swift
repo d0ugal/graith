@@ -61,6 +61,8 @@ struct FleetConnectedTests {
         let other = conn.sessions.first { $0.id == "canny002" }!
         await conn.stop(other); await conn.resume(other); await conn.restart(other)
         await conn.interrupt(other); await conn.rename(other, to: "renamed"); await conn.toggleStar(other)
+        await conn.setLabels(other, labels: ["Urgent", "ios"])
+        #expect(conn.sessions.first { $0.id == "canny002" }?.labels == ["Urgent", "ios"])
         await conn.fork(other, name: "forked")
         #expect(conn.lastError == nil)
     }
@@ -116,7 +118,7 @@ struct FleetConnectedTests {
         await fleet.connectAll()
         await withCheckedContinuation { cont in
             fleet.createSession(name: "canny", agent: "claude", repoPath: "/tmp/croft",
-                                model: "", prompt: "", base: "  auld-main  ",
+                                model: "", prompt: "", labels: ["Urgent", "release"], base: "  auld-main  ",
                                 inPlace: false, agentHooks: false, hostID: "ben") { _ in
                 cont.resume()
             }
@@ -124,6 +126,7 @@ struct FleetConnectedTests {
         let req = await mock.lastCreate
         #expect(req?.base == "auld-main")  // trimmed before it goes on the wire
         #expect(req?.inPlace == nil)       // false collapses to nil (omitted)
+        #expect(req?.labels == ["Urgent", "release"])
         // agentHooks is always sent explicitly (false is meaningful — Go's
         // omitempty can't distinguish absent from false).
         #expect(req?.agentHooks == false)
@@ -154,6 +157,12 @@ struct FleetConnectedTests {
         #expect(FleetModel.validateCreateOptions(base: "  ", inPlace: true) == nil)
         #expect(FleetModel.validateCreateOptions(base: "main", inPlace: false) == nil)
         #expect(FleetModel.validateCreateOptions(base: "", inPlace: false) == nil)
+    }
+
+    @Test func parseLabelsMatchesNativeAndTUIFormSemantics() {
+        #expect(FleetModel.parseLabels("  ").isEmpty)
+        #expect(FleetModel.parseLabels(" Urgent, release ") == ["Urgent", "release"])
+        #expect(FleetModel.parseLabels("braw,,canny") == ["braw", "", "canny"])
     }
 
     @Test func createSessionUnknownHostFails() async {

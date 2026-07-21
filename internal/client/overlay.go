@@ -16,6 +16,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/sessionlabel"
 )
 
 type overlayState int
@@ -36,11 +37,12 @@ type viewMode int
 const (
 	viewAll viewMode = iota
 	viewStarred
+	viewLabels
 	viewScenario
 	viewDeleted
 )
 
-var viewNames = []string{"All", "Starred", "Scenarios", "Deleted"}
+var viewNames = []string{"All", "Starred", "Labels", "Scenarios", "Deleted"}
 
 // sortDeleted orders soft-deleted sessions most-recently-deleted first.
 func sortDeleted(sessions []protocol.SessionInfo) []protocol.SessionInfo {
@@ -97,6 +99,7 @@ var (
 
 type sessionItem struct {
 	info            protocol.SessionInfo
+	labelGroup      string
 	treePrefix      string
 	hasChildren     bool
 	collapsed       bool
@@ -119,6 +122,14 @@ func assignSessionIndices(items []list.Item) {
 func (s sessionItem) Title() string       { return s.info.Name }
 func (s sessionItem) Description() string { return "" }
 func (s sessionItem) FilterValue() string { return s.info.Name + " " + s.info.RepoName }
+
+func (s sessionItem) displayName() string {
+	if s.labelGroup != "" && s.info.RepoName != "" {
+		return s.info.RepoName + "/" + s.info.Name
+	}
+
+	return s.info.Name
+}
 
 type groupHeader struct {
 	name  string
@@ -448,6 +459,10 @@ func buildMatchString(s protocol.SessionInfo) string {
 		strings.ToLower(s.Agent),
 		strings.ToLower(s.SummaryText),
 	}
+	for _, label := range s.Labels {
+		parts = append(parts, strings.ToLower(label))
+	}
+
 	if !s.Mirror {
 		parts = append(parts, strings.ToLower(s.Branch))
 		if s.Dirty {
@@ -604,7 +619,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		}
 	}
 
-	nameText := si.info.Name + childSuffix
+	nameText := si.displayName() + childSuffix
 	nameWidth := d.cols.treeIndent + d.cols.name - lipgloss.Width(si.treePrefix) - lipgloss.Width(collapseIndicator)
 	name := collapseIndicator + pad(nameText, nameWidth)
 
@@ -776,6 +791,7 @@ type overlayModel struct {
 	createName      string
 	createRepoPath  string
 	createAgent     string
+	createLabels    []string
 	createDone      bool
 	repoSuggestions []RepoSuggestion
 	agents          []string
@@ -839,6 +855,7 @@ type OverlayResult struct {
 	CreateName     string
 	CreateRepoPath string
 	CreateAgent    string
+	CreateLabels   []string
 	Collapsed      map[string]bool
 }
 
@@ -1108,6 +1125,67 @@ func buildScenarioGroupedItems(sessions []protocol.SessionInfo, collapsed map[st
 	return items
 }
 
+// buildLabelGroupedItems groups sessions by case-insensitive label identity.
+// A multi-labelled session deliberately appears once in each label group; each
+// group spans repositories because labels, rather than repos, are the axis.
+func buildLabelGroupedItems(sessions []protocol.SessionInfo) []list.Item {
+	type labelGroup struct {
+		name     string
+		sessions []protocol.SessionInfo
+		seen     map[string]bool
+	}
+
+	var groups []*labelGroup
+
+	for _, s := range sessions {
+		for _, label := range s.Labels {
+			var group *labelGroup
+
+			for _, candidate := range groups {
+				if sessionlabel.Equal(candidate.name, label) {
+					group = candidate
+					break
+				}
+			}
+
+			if group == nil {
+				group = &labelGroup{name: label, seen: make(map[string]bool)}
+				groups = append(groups, group)
+			}
+
+			if !group.seen[s.ID] {
+				group.seen[s.ID] = true
+				group.sessions = append(group.sessions, s)
+			}
+		}
+	}
+
+	sort.Slice(groups, func(i, j int) bool {
+		left := strings.ToLower(groups[i].name)
+		right := strings.ToLower(groups[j].name)
+
+		if left == right {
+			return groups[i].name < groups[j].name
+		}
+
+		return left < right
+	})
+
+	var items []list.Item
+
+	for _, group := range groups {
+		SortSessions(group.sessions)
+
+		items = append(items, groupHeader{name: group.name, count: len(group.sessions)})
+
+		for _, s := range group.sessions {
+			items = append(items, sessionItem{info: s, labelGroup: group.name})
+		}
+	}
+
+	return items
+}
+
 func maxTreeIndentFromItems(items []list.Item) int {
 	maxIndent := 0
 
@@ -1120,6 +1198,20 @@ func maxTreeIndentFromItems(items []list.Item) int {
 	}
 
 	return maxIndent
+}
+
+func maxSessionNameWidthFromItems(items []list.Item, minimum int) int {
+	maxWidth := minimum
+
+	for _, item := range items {
+		if si, ok := item.(sessionItem); ok {
+			if width := lipgloss.Width(si.displayName()); width > maxWidth {
+				maxWidth = width
+			}
+		}
+	}
+
+	return maxWidth
 }
 
 func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error, collapsed map[string]bool, shortcutKeys []rune) *overlayModel {
@@ -1323,6 +1415,8 @@ func (m *overlayModel) rebuildForView() {
 	switch m.view {
 	case viewAll:
 		items = buildGroupedItems(filtered, m.collapsed)
+	case viewLabels:
+		items = buildLabelGroupedItems(filtered)
 	case viewScenario:
 		items = buildScenarioGroupedItems(filtered, m.collapsed)
 	default:
@@ -1334,6 +1428,8 @@ func (m *overlayModel) rebuildForView() {
 	assignSessionIndices(items)
 
 	m.cols = computeColumnWidths(filtered, m.currentSessionID)
+	m.cols.name = maxSessionNameWidthFromItems(items, m.cols.name)
+
 	if m.view == viewAll || m.view == viewScenario {
 		m.cols.treeIndent = maxTreeIndentFromItems(items)
 	}
@@ -1351,10 +1447,25 @@ func (m *overlayModel) rebuildForView() {
 }
 
 func (m *overlayModel) selectSessionByID(id string) {
+	m.selectSessionByIDAndLabel(id, "")
+}
+
+func (m *overlayModel) selectSessionByIDAndLabel(id, label string) {
 	for i, item := range m.list.Items() {
-		if si, ok := item.(sessionItem); ok && si.info.ID == id {
+		if si, ok := item.(sessionItem); ok && si.info.ID == id && (label == "" || sessionlabel.Equal(si.labelGroup, label)) {
 			m.list.Select(i)
 			return
+		}
+	}
+	// If a refresh removed the selected label but the session still appears in
+	// another label group, preserve the session selection before falling back to
+	// its visible parent.
+	if label != "" {
+		for i, item := range m.list.Items() {
+			if si, ok := item.(sessionItem); ok && si.info.ID == id {
+				m.list.Select(i)
+				return
+			}
 		}
 	}
 	// ID not visible — walk up the parent chain to find a visible ancestor.
@@ -1414,6 +1525,15 @@ func (m *overlayModel) sessionsForView() []protocol.SessionInfo {
 		return filterStarred(m.allSessions)
 	case viewDeleted:
 		return sortDeleted(m.deletedSessions)
+	case viewLabels:
+		result := make([]protocol.SessionInfo, 0, len(m.allSessions))
+		for _, s := range m.allSessions {
+			if len(s.Labels) > 0 {
+				result = append(result, s)
+			}
+		}
+
+		return result
 	default:
 		return m.allSessions
 	}
@@ -1589,8 +1709,11 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		curSID := ""
+		curLabel := ""
+
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			curSID = item.info.ID
+			curLabel = item.labelGroup
 		}
 
 		m.allSessions = msg.sessions
@@ -1599,7 +1722,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resizeList()
 
 		if curSID != "" {
-			m.selectSessionByID(curSID)
+			m.selectSessionByIDAndLabel(curSID, curLabel)
 		}
 
 		return m, tea.Batch(m.fetchPreviewCmd(), m.refreshTickCmd())
@@ -1639,6 +1762,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			m.createAgent = cm.selectedAgent()
+			m.createLabels = cm.selectedLabels()
 			m.createDone = true
 
 			return m, tea.Quit
@@ -1691,6 +1815,8 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				switch m.view {
 				case viewAll:
 					items = buildGroupedItems(filtered, m.collapsed)
+				case viewLabels:
+					items = buildLabelGroupedItems(filtered)
 				case viewScenario:
 					items = buildScenarioGroupedItems(filtered, m.collapsed)
 				default:
@@ -2203,6 +2329,8 @@ func (m *overlayModel) View() tea.View {
 		switch m.view {
 		case viewStarred:
 			emptyMsg = "No starred sessions"
+		case viewLabels:
+			emptyMsg = "No labelled sessions"
 		case viewScenario:
 			emptyMsg = "No sessions"
 		case viewDeleted:
@@ -2576,6 +2704,7 @@ func RunOverlay(opts RunOverlayOpts) *OverlayResult {
 		overlayResult.CreateName = result.createName
 		overlayResult.CreateRepoPath = result.createRepoPath
 		overlayResult.CreateAgent = result.createAgent
+		overlayResult.CreateLabels = append([]string{}, result.createLabels...)
 
 		return overlayResult
 	}

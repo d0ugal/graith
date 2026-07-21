@@ -50,6 +50,9 @@ func TestValidateUpdateOptions(t *testing.T) {
 		{name: "valid name", opts: updateOptions{name: strptr("bonnie")}},
 		{name: "valid orphan", opts: updateOptions{parent: strptr("")}},
 		{name: "valid starred false", opts: updateOptions{starred: boolptr(false)}},
+		{name: "valid labels", opts: updateOptions{addLabels: []string{"Urgent"}, removeLabels: []string{"release"}}},
+		{name: "empty label", opts: updateOptions{addLabels: []string{""}}, wantErr: "must not be empty"},
+		{name: "conflicting label", opts: updateOptions{addLabels: []string{"Urgent"}, removeLabels: []string{"urgent"}}, wantErr: "both added and removed"},
 		{name: "invalid name", opts: updateOptions{name: strptr("bad name/slash")}, wantErr: "invalid"},
 		{name: "reserved name", opts: updateOptions{name: strptr("orchestrator")}, wantErr: "reserved for system use"},
 	}
@@ -69,6 +72,32 @@ func TestValidateUpdateOptions(t *testing.T) {
 				t.Fatalf("error = %v, want text %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestRunUpdateLabels(t *testing.T) {
+	buf := captureUpdateOutput(t, false)
+	c := &scriptedConn{responses: []scriptedResp{
+		okResp(payloadEnv("session_list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{
+			{ID: "id-braw", Name: "braw", Labels: []string{"Urgent", "release"}},
+		}})),
+		okResp(payloadEnv("updated", protocol.UpdateResultMsg{
+			SessionID: "id-braw", Name: "braw", Labels: []string{"Urgent", "customer:Brae"},
+		})),
+	}}
+
+	opts := updateOptions{addLabels: []string{"urgent", "customer:Brae"}, removeLabels: []string{"RELEASE"}}
+	if err := runUpdate(c, "id-braw", opts); err != nil {
+		t.Fatalf("runUpdate: %v", err)
+	}
+
+	msg := c.sends[1].Payload.(protocol.UpdateMsg)
+	if len(msg.AddLabels) != 2 || len(msg.RemoveLabels) != 1 || msg.RemoveLabels[0] != "RELEASE" {
+		t.Fatalf("label delta payload = %+v", msg)
+	}
+
+	if got := buf.String(); got != "Labels: Urgent, customer:Brae\n" {
+		t.Fatalf("output = %q", got)
 	}
 }
 

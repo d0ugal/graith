@@ -24,6 +24,12 @@
       "cli": "supported", "ios": "supported", "macos": "supported"
     },
     {
+      "id": "session.labels",
+      "category": "Session lifecycle",
+      "name": "Create, update, and filter by session labels",
+      "cli": "supported", "ios": "supported", "macos": "supported"
+    },
+    {
       "id": "session.create",
       "category": "Session lifecycle",
       "name": "Create session",

@@ -88,6 +88,36 @@ func TestDescendantsOfOrphans(t *testing.T) {
 	}
 }
 
+func TestApplyListFiltersLabelsUseANDAndCompose(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "braw", Name: "braw", RepoPath: "/croft", Starred: true, Labels: []string{"Urgent", "release"}},
+		{ID: "canny", Name: "canny", RepoPath: "/bothy", Starred: true, Labels: []string{"urgent"}},
+		{ID: "dreich", Name: "dreich", RepoPath: "/croft", Starred: false, Labels: []string{"release", "urgent"}},
+	}
+
+	got, err := applyListFilters(sessions, "", "/croft", true, []string{"urgent", "RELEASE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got) != 1 || got[0].ID != "braw" {
+		t.Fatalf("filtered sessions = %+v, want only braw", got)
+	}
+
+	if _, err := applyListFilters(sessions, "", "", false, []string{""}); err == nil {
+		t.Fatal("empty label filter should be rejected")
+	}
+}
+
+func TestListLabelFlagIsRepeatable(t *testing.T) {
+	registerCommands()
+
+	flag := listCmd.Flags().Lookup("label")
+	if flag == nil || flag.Value.Type() != "stringArray" {
+		t.Fatalf("list --label = %#v, want repeatable stringArray", flag)
+	}
+}
+
 func TestSessionInfoLessBreaksDuplicateNameTiesByID(t *testing.T) {
 	a := protocol.SessionInfo{ID: "braw", Name: "canny", RepoName: "croft"}
 	b := protocol.SessionInfo{ID: "thrawn", Name: "canny", RepoName: "croft"}

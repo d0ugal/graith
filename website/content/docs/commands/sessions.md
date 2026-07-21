@@ -16,6 +16,7 @@ Create a new agent session.
 | `--agent <name>` | Agent to run (default: `default_agent` from config) |
 | `--base <branch>` | Base branch to fork the worktree from (default: repo default branch) |
 | `-C, --repo <path>` | Path to git repo (default: current directory) |
+| `--label <label>` | Add a session label; repeat the flag for multiple labels |
 | `--no-repo` | Create session without a git repo or worktree |
 | `--in-place` | Run agent directly in the repo without creating a worktree |
 | `--allow-concurrent` | Allow multiple in-place sessions on the same repo (requires `--in-place`) |
@@ -179,7 +180,7 @@ to keep it stopped; to purge it permanently, disable it in config first.
 
 ## `gr fork <source-session> <new-name>`
 
-Fork a session. Creates a new worktree, branch, and agent process while the original keeps running. If the agent has `fork_args` configured, the new agent inherits the source's conversation history.
+Fork a session. Creates a new worktree, branch, and agent process while the original keeps running. If the agent has `fork_args` configured, the new agent inherits the source's conversation history. A fork also inherits a snapshot of every source label; later label changes on either session are independent. Creating a session with `--parent` does not inherit labels.
 
 With `--agent <target>` this becomes a **cross-agent fork**: the source's
 conversation is rendered to a neutral context file to seed a *different* agent
@@ -227,6 +228,8 @@ sessions must be restored first.
 | `--name <new-name>` | Set the session name |
 | `--parent <name-or-id>` | Set the parent session; pass an empty string to orphan |
 | `--starred[=true\|false]` | Set deletion protection and Starred-view membership; a bare flag means true |
+| `--add-label <label>` | Add one label; repeat for multiple additions |
+| `--remove-label <label>` | Remove one label; repeat for multiple removals |
 
 The target and a non-empty parent may be a unique session name or an ID; an
 ambiguous name is rejected. Flags can be combined in one persisted update:
@@ -234,8 +237,15 @@ ambiguous name is rejected. Flags can be combined in one persisted update:
 ```bash
 gr update important-session --name release-watch --parent orchestrator --starred
 gr update release-watch --starred=false
+gr update release-watch --add-label urgent --add-label release
+gr update release-watch --remove-label urgent
 ```
 
 Human output reports each requested property's resulting value; `--json` and
 agent mode return one object with `session_id`, `name`, `parent_id`, and the
-explicit `starred` boolean.
+explicit `starred` boolean plus the complete resulting `labels` array. Label
+additions and removals are applied in the same persisted metadata update as
+name, parent, and starred changes, so concurrent updates do not replace the
+whole label set or lose unrelated fields. Adding an existing label or removing
+an absent label succeeds without changing the set; one request cannot add and
+remove the same case-insensitive label.

@@ -19,7 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 25
+const CurrentStateVersion = 26
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -53,12 +53,13 @@ type CreationConfig struct {
 }
 
 type SessionState struct {
-	ID           string `json:"id"`
-	ParentID     string `json:"parent_id,omitempty"`
-	Name         string `json:"name"`
-	RepoPath     string `json:"repo_path"`
-	RepoName     string `json:"repo_name"`
-	WorktreePath string `json:"worktree_path"`
+	ID           string   `json:"id"`
+	ParentID     string   `json:"parent_id,omitempty"`
+	Name         string   `json:"name"`
+	Labels       []string `json:"labels"`
+	RepoPath     string   `json:"repo_path"`
+	RepoName     string   `json:"repo_name"`
+	WorktreePath string   `json:"worktree_path"`
 	// CWD is the authoritative working directory assigned to the agent process.
 	// It is deliberately independent of WorktreePath: mirrors own a writable
 	// scratch cwd while WorktreePath continues to identify their read-only source.
@@ -290,6 +291,8 @@ type TokenStats struct {
 
 func cloneSessionState(s *SessionState) SessionState {
 	c := *s
+
+	c.Labels = append([]string{}, s.Labels...)
 	if len(s.Includes) > 0 {
 		c.Includes = make([]IncludedRepoState, len(s.Includes))
 		copy(c.Includes, s.Includes)
@@ -751,6 +754,7 @@ var migrations = map[int]func(*State) error{
 	22: migrateV22ToV23,
 	23: migrateV23ToV24,
 	24: migrateV24ToV25,
+	25: migrateV25ToV26,
 }
 
 func generateToken() (string, error) {
@@ -1007,6 +1011,19 @@ func migrateV24ToV25(state *State) error {
 	for _, s := range state.Sessions {
 		if s.CWD == "" && !s.Mirror && !IsSystemSession(s) {
 			s.CWD = s.WorktreePath
+		}
+	}
+
+	return nil
+}
+
+// migrateV25ToV26 initializes the complete label set for every existing
+// session. Labels are stored without omitempty so subsequent saves project an
+// explicit [] rather than null or an absent field.
+func migrateV25ToV26(state *State) error {
+	for _, s := range state.Sessions {
+		if s.Labels == nil {
+			s.Labels = []string{}
 		}
 	}
 

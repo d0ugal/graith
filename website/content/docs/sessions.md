@@ -195,6 +195,38 @@ When includes are configured:
 
 Session state lives in `state.json` in the data directory, loaded on daemon start and saved on every mutation, so sessions survive restarts. This includes the authoritative cwd assigned at launch, which can differ from the Git worktree for mirror and system sessions and is reused on resume. Runtime-only state (hook reports, attached clients) isn't persisted — it's rebuilt on restart.
 
+## Labels
+
+Labels are durable organizational metadata for relating sessions across
+repositories. Add them at creation or update them individually:
+
+```bash
+gr new api-fix --label urgent --label customer:Brae
+gr update api-fix --add-label release --remove-label urgent
+gr list --label release
+gr list --label release --label customer:brae  # AND matching
+```
+
+Leading and trailing Unicode whitespace is trimmed. A label must be non-empty,
+at most 64 UTF-8 bytes, contain no control characters or commas, and each
+session may have at most 32 distinct labels. Commas delimit labels in the TUI
+and native forms. Identity uses locale-independent Unicode simple case
+folding (`Urgent` and `urgent` are the same label), while the first stored display
+spelling is retained. No Unicode canonical normalization is applied, so canonically
+equivalent but differently encoded text remains distinct. Duplicate input is
+deduplicated in order.
+
+Labels persist through daemon restart, in-place agent migration, and soft
+delete/restore. Existing state is migrated to an empty set. Forks inherit a
+snapshot of the source labels; ordinary parented creation does not. Labels never
+grant access: creation and update use the same local-human, remote-human,
+session/descendant, and system-session boundaries as the rest of session metadata.
+
+The CLI picker has a **Labels** view, grouping matching sessions across repository
+boundaries and displaying each match as `repo/session`. Search also matches label
+text. The macOS and iOS sidebars use the same shared label filter and expose label
+fields when creating or editing a session.
+
 ## Scrollback
 
 Each session's PTY output is appended to `<data_dir>/logs/<session-id>.log`, for tail reads by `gr logs` and preview rendering in the overlay.

@@ -17,6 +17,7 @@ import (
 func TestCreateOptsFromMsgMapsEveryField(t *testing.T) {
 	c := protocol.CreateMsg{
 		Name:                "braw",
+		Labels:              []string{"urgent", "release"},
 		ParentID:            "ben-id",
 		Agent:               "ignored-here", // agentName is resolved by the caller
 		RepoPath:            "/croft/graith",
@@ -41,6 +42,7 @@ func TestCreateOptsFromMsgMapsEveryField(t *testing.T) {
 		ok    bool
 	}{
 		{"Name", got.Name == "braw"},
+		{"Labels", len(got.Labels) == 2 && got.Labels[0] == "urgent" && got.Labels[1] == "release"},
 		{"AgentName(resolved)", got.AgentName == "codex"},
 		{"RepoPath", got.RepoPath == "/croft/graith"},
 		{"BaseBranch", got.BaseBranch == "main"},
@@ -325,5 +327,29 @@ func TestAuthorizeUpdateReparentRequiresAuthorityOverNewParent(t *testing.T) {
 	humanAuth := authContext{role: roleLocalHuman}
 	if err := authorizeUpdate(h.sm, humanAuth, protocol.UpdateMsg{SessionID: "bairn-id", ParentID: &stranger}); err != nil {
 		t.Fatalf("human CLI should be allowed to reparent, got %v", err)
+	}
+}
+
+func TestAuthorizeUpdateLabelsUseMetadataTargetBoundaries(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "ben-id", "ben", "tok-ben")
+	h.addAuthenticatedSession(t, "bairn-id", "bairn", "tok-bairn")
+	h.addAuthenticatedSession(t, "stranger-id", "stranger", "tok-stranger")
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["bairn-id"].ParentID = "ben-id"
+	h.sm.mu.Unlock()
+
+	auth := authContext{role: roleSession, authenticated: true, sessionID: "ben-id"}
+	if err := authorizeUpdate(h.sm, auth, protocol.UpdateMsg{
+		SessionID: "bairn-id", AddLabels: []string{"urgent"},
+	}); err != nil {
+		t.Fatalf("ancestor label update denied: %v", err)
+	}
+
+	if err := authorizeUpdate(h.sm, auth, protocol.UpdateMsg{
+		SessionID: "stranger-id", AddLabels: []string{"urgent"},
+	}); err == nil {
+		t.Fatal("label update on unrelated session should be denied")
 	}
 }

@@ -135,7 +135,7 @@ func TestApplyListFiltersComposeForTokenProjection(t *testing.T) {
 		{ID: "wee", ParentID: "bairn", Name: "wee", RepoName: "croft", RepoPath: "/src/croft"},
 	}
 
-	got, err := applyListFilters(sessions, "ben", "croft", true)
+	got, err := applyListFilters(sessions, "ben", "croft", true, nil)
 	if err != nil {
 		t.Fatalf("applyListFilters: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestApplyListFiltersComposeForTokenProjection(t *testing.T) {
 		t.Fatalf("composed children/repo/starred filters = %+v, want bairn only", got)
 	}
 
-	if _, err := applyListFilters(sessions, "haar", "", false); err == nil {
+	if _, err := applyListFilters(sessions, "haar", "", false, nil); err == nil {
 		t.Fatal("missing --children session should fail")
 	}
 }

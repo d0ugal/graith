@@ -44,6 +44,7 @@ as live state.
 |------------|:---:|:---:|:---:|
 | List sessions | ✅ | ✅ | ✅ |
 | Filter and search sessions | ✅ | ✅ | ✅ |
+| Create, update, and filter by session labels | ✅ | ✅ | ✅ |
 | Create session | ✅ | ✅ | ✅ |
 | Stop session | ✅ | ✅ | ✅ |
 | Resume session | ✅ | ✅ | ✅ |

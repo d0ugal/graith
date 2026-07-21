@@ -18,9 +18,22 @@ struct SidebarFilterPureTests {
         #expect(SidebarFilter.matchesSearch(s, query: "BONN")) // case-insensitive
     }
 
+    @Test func labelIdentityMatchesDaemonSimpleFoldWithoutCanonicalNormalization() {
+        #expect(SidebarFilter.labelsEqual("K", "K"))
+        #expect(SidebarFilter.labelsEqual("Σ", "ς"))
+        #expect(!SidebarFilter.labelsEqual("é", "e\u{301}"))
+        #expect(!SidebarFilter.labelsEqual("ß", "ss"))
+    }
+
     @Test func searchMatchesRepo() {
         let s = makeSession(id: "bonnie02", name: "bonnie", status: "running", repoName: "glen")
         #expect(SidebarFilter.matchesSearch(s, query: "gle"))
+    }
+
+    @Test func searchMatchesLabel() {
+        let s = makeSession(id: "bonnie03", name: "bonnie", status: "running", labels: ["Urgent", "release"])
+        #expect(SidebarFilter.matchesSearch(s, query: "urge"))
+        #expect(SidebarFilter.matchesSearch(s, query: "RELEASE"))
     }
 
     @Test func searchEmptyMatchesEverything() {
@@ -38,10 +51,10 @@ struct SidebarFilterPureTests {
 
     private func mixed() -> [SessionInfo] {
         [
-            makeSession(id: "braw0001", name: "braw", status: "running", agentStatus: "active", repoName: "croft", starred: true),
+            makeSession(id: "braw0001", name: "braw", status: "running", agentStatus: "active", repoName: "croft", labels: ["Urgent", "release"], starred: true),
             makeSession(id: "canny001", name: "canny", status: "running", agentStatus: "ready", repoName: "croft"),
             makeSession(id: "dreich01", name: "dreich", status: "errored", repoName: "glen"),
-            makeSession(id: "bide0001", name: "bide", status: "stopped", repoName: "glen", starred: true),
+            makeSession(id: "bide0001", name: "bide", status: "stopped", repoName: "glen", labels: ["urgent"], starred: true),
             makeSession(id: "scunner1", name: "scunner", status: "stopped", repoName: "bothy", dirty: true),
         ]
     }
@@ -62,7 +75,7 @@ struct SidebarFilterPureTests {
     }
 
     @Test func applyComposedFilters() {
-        let criteria = SidebarFilter.Criteria(searchQuery: "braw", starredOnly: true, repo: "croft")
+        let criteria = SidebarFilter.Criteria(searchQuery: "braw", starredOnly: true, repo: "croft", label: "URGENT")
         let out = SidebarFilter.apply(mixed(), criteria)
         #expect(out.map(\.id) == ["braw0001"])
     }
@@ -78,6 +91,7 @@ struct SidebarFilterPureTests {
         #expect(!SidebarFilter.Criteria(searchQuery: "  ").isActive)
         #expect(SidebarFilter.Criteria(starredOnly: true).isActive)
         #expect(SidebarFilter.Criteria(repo: "glen").isActive)
+        #expect(SidebarFilter.Criteria(label: "urgent").isActive)
     }
 }
 
@@ -86,9 +100,9 @@ struct SidebarFilterPureTests {
 struct FleetModelFilterTests {
     private func sample() -> [SessionInfo] {
         [
-            makeSession(id: "braw0001", name: "braw", status: "running", agentStatus: "active", repoName: "croft", starred: true),
+            makeSession(id: "braw0001", name: "braw", status: "running", agentStatus: "active", repoName: "croft", labels: ["Urgent", "release"], starred: true),
             makeSession(id: "canny001", name: "canny", status: "errored", repoName: "croft"),
-            makeSession(id: "bide0001", name: "bide", status: "stopped", repoName: "glen"),
+            makeSession(id: "bide0001", name: "bide", status: "stopped", repoName: "glen", labels: ["urgent"]),
         ]
     }
 
@@ -129,16 +143,27 @@ struct FleetModelFilterTests {
         #expect(fleet.availableRepos == ["croft", "glen"])
     }
 
+    @Test func labelFilterSpansReposAndAvailableLabelsDeduplicateCase() async {
+        let (fleet, _) = makeFleetWithRemote(sessions: sample())
+        await fleet.connectAll()
+        fleet.labelFilter = "URGENT"
+        let ids = fleet.sessionsByRepo.flatMap { $0.sessions }.map(\.id)
+        #expect(Set(ids) == ["braw0001", "bide0001"])
+        #expect(fleet.availableLabels == ["release", "Urgent"])
+    }
+
     @Test func clearFiltersResetsEverything() async {
         let (fleet, _) = makeFleetWithRemote(sessions: sample())
         await fleet.connectAll()
         fleet.searchQuery = "braw"
         fleet.starredOnly = true
         fleet.repoFilter = "croft"
+        fleet.labelFilter = "urgent"
         fleet.clearFilters()
         #expect(fleet.searchQuery.isEmpty)
         #expect(!fleet.starredOnly)
         #expect(fleet.repoFilter == nil)
+        #expect(fleet.labelFilter == nil)
         #expect(!fleet.isFilterActive)
     }
 

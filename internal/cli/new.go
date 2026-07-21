@@ -10,6 +10,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/sessionlabel"
 	"github.com/spf13/cobra"
 )
 
@@ -28,6 +29,7 @@ var (
 	newSkipModelValidation bool
 	newHeadless            bool
 	newNoFetch             bool
+	newLabels              []string
 
 	newCodexProfile     string
 	newCodexReasoning   string
@@ -43,6 +45,11 @@ var newCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		if err := daemon.ValidateSessionName(name); err != nil {
+			return err
+		}
+
+		labels, err := sessionlabel.Normalize(newLabels)
+		if err != nil {
 			return err
 		}
 
@@ -111,6 +118,7 @@ var newCmd = &cobra.Command{
 
 		_ = c.SendControl("create", protocol.CreateMsg{
 			Name:                name,
+			Labels:              labels,
 			ParentID:            os.Getenv("GRAITH_SESSION_ID"),
 			Agent:               agent,
 			RepoPath:            repoPath,
@@ -188,6 +196,7 @@ func registerNewCmd() {
 	newCmd.Flags().BoolVar(&newSkipModelValidation, "skip-model-validation", false, "skip validate_model check (use models not in the validation list)")
 	newCmd.Flags().BoolVar(&newHeadless, "headless", false, "run as a headless stream-json session instead of an interactive PTY (experimental; Claude only)")
 	newCmd.Flags().BoolVar(&newNoFetch, "no-fetch", false, "skip git fetch origin and create the worktree from local repo state (use when SSH auth is unavailable or offline)")
+	newCmd.Flags().StringArrayVar(&newLabels, "label", nil, "session label (repeatable)")
 	newCmd.Flags().StringVar(&newCodexProfile, "codex-profile", "", "Codex config profile to layer on top (codex --profile)")
 	newCmd.Flags().StringVar(&newCodexReasoning, "codex-reasoning-effort", "", "Codex model reasoning effort: minimal, low, medium, high, xhigh")
 	newCmd.Flags().StringVar(&newCodexServiceTier, "codex-service-tier", "", "Codex service tier: auto, default, flex, priority")
