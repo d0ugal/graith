@@ -53,7 +53,8 @@ an unrelated session credential.
 - Strip the daemon's ambient Graith session bearer token from every MCP child.
 - Keep the delegated token out of protocol messages, configuration, template
   variables, persisted state, status output, and logs.
-- Preserve lock discipline by copying the current token before process launch.
+- Preserve lock discipline by copying the exact validated request credential
+  before process launch, never a later replacement token.
 
 ### Non-Goals
 
@@ -81,10 +82,13 @@ startup history, so it is not acceptable.
 
 ### Proposal 1: Internal Launch-Only Delegation (Recommended)
 
-After authentication forces the proxy's session ID, the handler reads that
-same session's current token from daemon state. It copies the ID and token into
-a private launch identity passed to `MCPManager.Connect`; process launch remains
-outside the session-manager lock.
+Authentication snapshots the exact request token while resolving the proxy's
+session ID. After forcing that ID onto `mcp_connect`, the handler copies the
+validated ID and token into a private launch identity passed to
+`MCPManager.Connect`; process launch remains outside the session-manager lock.
+It deliberately does not re-read the mutable session token. If resume rotates
+the credential after request authentication, the in-flight request may fail,
+but it can never be upgraded to the replacement token's authority.
 
 The MCP manager records provenance for auto-injected servers separately from
 their public `MCPServerConfig`. Only the built-in `graith` registration is

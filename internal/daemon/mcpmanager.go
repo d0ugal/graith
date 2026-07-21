@@ -47,23 +47,36 @@ type mcpCallerIdentity struct {
 	token     string
 }
 
+// managedMCPCallerIdentity returns the credential snapshot that authenticated
+// this request. It deliberately never reads the session's mutable current
+// token: rotation may invalidate an in-flight request, but must not upgrade it
+// to the replacement credential.
+func (ac authContext) managedMCPCallerIdentity() mcpCallerIdentity {
+	if !ac.authenticated {
+		return mcpCallerIdentity{}
+	}
+
+	return mcpCallerIdentity{sessionID: ac.sessionID, token: ac.sessionToken}
+}
+
 // MCPManager manages MCP server processes. Each proxy connection gets its own
 // dedicated MCP server process, started lazily on connect.
 type MCPManager struct {
-	mu         sync.Mutex
-	servers    map[string]config.MCPServerConfig // server name -> config
-	delegates  map[string]bool                   // effective built-in servers allowed to receive caller identity
-	processes  map[string]*MCPProcess            // proxyID -> process
-	pending    map[string]bool
-	creating   int
-	changed    chan struct{}
-	extraSvrs  []injectedMCPServer // auto-injected servers (e.g. graith), with private provenance
-	logDir     string
-	globalSbx  config.SandboxConfig
-	limits     config.LimitsConfig // output/log display caps (issue #1252)
-	log        *slog.Logger
-	frozen     bool
-	generation uint64
+	mu           sync.Mutex
+	servers      map[string]config.MCPServerConfig // server name -> config
+	delegates    map[string]bool                   // effective built-in servers allowed to receive caller identity
+	autoInjected map[string]bool                   // effective servers supplied by daemon injection rather than config
+	processes    map[string]*MCPProcess            // proxyID -> process
+	pending      map[string]bool
+	creating     int
+	changed      chan struct{}
+	extraSvrs    []injectedMCPServer // auto-injected servers (e.g. graith), with private provenance
+	logDir       string
+	globalSbx    config.SandboxConfig
+	limits       config.LimitsConfig // output/log display caps (issue #1252)
+	log          *slog.Logger
+	frozen       bool
+	generation   uint64
 
 	startProcessBeforeStart func()
 	startProcessAfterStart  func(*MCPProcess)
@@ -94,25 +107,30 @@ func NewManagedMCPManager(cfg *config.Config, logDir string, log *slog.Logger) *
 }
 
 func newMCPManager(cfg *config.Config, extraServers []injectedMCPServer, logDir string, log *slog.Logger) *MCPManager {
-	servers, delegates := effectiveMCPServers(cfg, extraServers)
+	servers, delegates, autoInjected := effectiveMCPServers(cfg, extraServers)
 
 	return &MCPManager{
-		servers:   servers,
-		delegates: delegates,
-		processes: make(map[string]*MCPProcess),
-		pending:   make(map[string]bool),
-		changed:   make(chan struct{}),
-		extraSvrs: extraServers,
-		logDir:    logDir,
-		globalSbx: cfg.Sandbox,
-		limits:    cfg.Limits,
-		log:       log,
+		servers:      servers,
+		delegates:    delegates,
+		autoInjected: autoInjected,
+		processes:    make(map[string]*MCPProcess),
+		pending:      make(map[string]bool),
+		changed:      make(chan struct{}),
+		extraSvrs:    extraServers,
+		logDir:       logDir,
+		globalSbx:    cfg.Sandbox,
+		limits:       cfg.Limits,
+		log:          log,
 	}
 }
 
-func effectiveMCPServers(cfg *config.Config, extraServers []injectedMCPServer) (map[string]config.MCPServerConfig, map[string]bool) {
+func effectiveMCPServers(
+	cfg *config.Config,
+	extraServers []injectedMCPServer,
+) (map[string]config.MCPServerConfig, map[string]bool, map[string]bool) {
 	servers := make(map[string]config.MCPServerConfig, len(cfg.MCPServers)+len(extraServers))
 	delegates := make(map[string]bool)
+	autoInjected := make(map[string]bool)
 
 	for _, injected := range extraServers {
 		server := injected.config
@@ -121,6 +139,8 @@ func effectiveMCPServers(cfg *config.Config, extraServers []injectedMCPServer) (
 		}
 
 		servers[server.Name] = server
+
+		autoInjected[server.Name] = true
 		if injected.delegateCallerIdentity {
 			delegates[server.Name] = true
 		}
@@ -130,6 +150,7 @@ func effectiveMCPServers(cfg *config.Config, extraServers []injectedMCPServer) (
 		// A configured entry always removes built-in delegation authority,
 		// whether it replaces or disables the same-named server.
 		delete(delegates, server.Name)
+		delete(autoInjected, server.Name)
 
 		if server.Disabled {
 			delete(servers, server.Name)
@@ -138,7 +159,7 @@ func effectiveMCPServers(cfg *config.Config, extraServers []injectedMCPServer) (
 		}
 	}
 
-	return servers, delegates
+	return servers, delegates, autoInjected
 }
 
 // Connect starts a new MCP server process for the given proxy and returns
@@ -289,7 +310,7 @@ func (m *MCPManager) Disconnect(proxyID string, proc *MCPProcess) {
 func (m *MCPManager) Reload(cfg *config.Config) {
 	m.mu.Lock()
 
-	newServers, newDelegates := effectiveMCPServers(cfg, m.extraSvrs)
+	newServers, newDelegates, newAutoInjected := effectiveMCPServers(cfg, m.extraSvrs)
 
 	var toKill []string
 
@@ -325,6 +346,7 @@ func (m *MCPManager) Reload(cfg *config.Config) {
 
 	m.servers = newServers
 	m.delegates = newDelegates
+	m.autoInjected = newAutoInjected
 	m.globalSbx = cfg.Sandbox
 	m.limits = cfg.Limits
 	m.generation++
@@ -457,11 +479,6 @@ func (m *MCPManager) List() []protocol.MCPServerStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	autoInjected := make(map[string]bool, len(m.extraSvrs))
-	for _, s := range m.extraSvrs {
-		autoInjected[s.config.Name] = true
-	}
-
 	// Group live processes by server name.
 	byServer := make(map[string][]protocol.MCPConnectionInfo)
 
@@ -503,7 +520,7 @@ func (m *MCPManager) List() []protocol.MCPServerStatus {
 		statuses = append(statuses, protocol.MCPServerStatus{
 			Name:         name,
 			Sandboxed:    sandboxed,
-			AutoInjected: autoInjected[name],
+			AutoInjected: m.autoInjected[name],
 			Connections:  conns,
 		})
 	}

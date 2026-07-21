@@ -61,9 +61,10 @@ The `gr` CLI handles this transparently:
 
 - **Inside a session**, `GRAITH_TOKEN` takes precedence — the caller is that session.
 - **Outside a session** (human at a terminal), `gr` reads and sends `human.token` — the caller is the human.
-- **Inside the managed graith MCP backend**, the daemon injects the authenticated
-  proxy session's token and disables human-token fallback if that delegation is
-  absent.
+- **Inside the managed graith MCP backend**, the daemon injects the exact token
+  that authenticated the proxy request and disables human-token fallback if
+  that delegation is absent. Concurrent rotation can invalidate the request but
+  never upgrades it to the replacement credential.
 
 The macOS app uses the same credential for its **This Mac** connection,
 resolving `human.token` from the active profile's data directory and re-reading

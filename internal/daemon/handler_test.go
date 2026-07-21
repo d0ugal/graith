@@ -3654,7 +3654,7 @@ func TestCoverMCPConnectNoManager(t *testing.T) {
 	h.expectError(t, "MCP manager not initialized")
 }
 
-func TestMCPConnectForcesCallerAndDelegatesCurrentToken(t *testing.T) {
+func TestMCPConnectForcesCallerAndDelegatesAuthenticatedToken(t *testing.T) {
 	h := newTestHarness(t)
 	h.addAuthenticatedSession(t, "canny-caller", "canny", "tok-canny-current")
 
@@ -3689,6 +3689,36 @@ func TestMCPConnectForcesCallerAndDelegatesCurrentToken(t *testing.T) {
 
 	if err := h.writer.WriteFrame(protocol.ChannelControl, data); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManagedMCPDelegationDoesNotUpgradeTokenAfterAuthentication(t *testing.T) {
+	oldToken := "tok-canny-old" //nolint:gosec // Deliberately recognizable test-only credential.
+	newToken := "tok-canny-new" //nolint:gosec // Deliberately recognizable test-only credential.
+
+	sm := newTestSMWithSessions(map[string]*SessionState{
+		"canny-caller": {ID: "canny-caller", Token: oldToken},
+	})
+
+	sm.mu.RLock()
+	auth, err := resolveAuth(sm, oldToken, ConnOrigin{}, "")
+	sm.mu.RUnlock()
+
+	if err != nil {
+		t.Fatalf("resolve old caller token: %v", err)
+	}
+
+	// Model resume rotating the session after this frame authenticated but
+	// before mcp_connect launches its managed child.
+	sm.mu.Lock()
+	delete(sm.tokenIndex, oldToken)
+	sm.state.Sessions["canny-caller"].Token = newToken
+	sm.tokenIndex[newToken] = "canny-caller"
+	sm.mu.Unlock()
+
+	identity := auth.managedMCPCallerIdentity()
+	if identity.sessionID != "canny-caller" || identity.token != oldToken {
+		t.Fatalf("delegated identity = %+v, want exact credential that authenticated the request", identity)
 	}
 }
 

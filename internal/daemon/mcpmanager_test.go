@@ -147,6 +147,12 @@ func TestConfiguredGraithNameCannotSelectDelegation(t *testing.T) {
 	if got := mgr.servers["graith"].Command; got != "cat" {
 		t.Fatalf("effective graith command = %q, want configured command", got)
 	}
+
+	for _, status := range mgr.List() {
+		if status.Name == "graith" && status.AutoInjected {
+			t.Fatal("user-configured graith server reported auto-injected provenance")
+		}
+	}
 }
 
 func TestMCPManagerReloadAppliesDelegationProvenance(t *testing.T) {
