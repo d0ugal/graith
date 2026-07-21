@@ -3,7 +3,10 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/adrg/xdg"
 )
 
 func TestLoadOrDefaultEmptyPath(t *testing.T) {
@@ -83,6 +86,38 @@ func TestLoadOrDefaultPermissionDenied(t *testing.T) {
 	_, err := LoadOrDefault(cfgPath)
 	if err == nil {
 		t.Fatal("expected error for unreadable config, got nil")
+	}
+}
+
+func TestLoadOrDefaultRejectsInvalidLegacyDefaultAgent(t *testing.T) {
+	oldXDGConfigHome := xdg.ConfigHome
+
+	t.Cleanup(func() { xdg.ConfigHome = oldXDGConfigHome })
+
+	// Leave the current XDG config absent and provide only a legacy config,
+	// matching the migration fallback used by an unprofiled macOS startup.
+	t.Setenv("GRAITH_PROFILE", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	legacyDir := t.TempDir()
+	xdg.ConfigHome = legacyDir
+
+	legacyConfig := filepath.Join(legacyDir, "graith", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(legacyConfig), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(legacyConfig, []byte(`default_agent = "thrawn"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadOrDefault("")
+	if err == nil {
+		t.Fatal("LoadOrDefault: expected error for unknown legacy default agent, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "default_agent") || !strings.Contains(err.Error(), "thrawn") {
+		t.Errorf("error %q must name the field and value", err)
 	}
 }
 

@@ -5013,8 +5013,17 @@ func LoadOrDefault(path string) (*Config, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			if profile == "" {
 				if legacy := legacyConfigFile(); legacy != "" {
-					if lcfg, lerr := Load(legacy); lerr == nil {
+					lcfg, lerr := Load(legacy)
+					if lerr == nil {
 						return lcfg, nil
+					}
+
+					// A missing legacy file means there is no user config and the
+					// embedded defaults apply. Any other error belongs to a config the
+					// user actually has, so surface it instead of silently discarding
+					// malformed or invalid settings during startup (#1288).
+					if !errors.Is(lerr, os.ErrNotExist) {
+						return nil, fmt.Errorf("loading legacy config: %w", lerr)
 					}
 				}
 			}
