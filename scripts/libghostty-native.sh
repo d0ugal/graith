@@ -592,11 +592,13 @@ materialize_candidate_spdx() {
     local binary="${1:-}"
     local revision="${2:-}"
     local output="${3:-}"
+    local package_filename="${4:-gr}"
     local binary_sha
     local namespace
 
-    if [[ ! -f "$binary" || ! "$revision" =~ ^[0-9a-f]{40}$ || -z "$output" ]]; then
-        echo "usage: $0 materialize-spdx <binary> <revision> <output>" >&2
+    if [[ ! -f "$binary" || ! "$revision" =~ ^[0-9a-f]{40}$ || -z "$output" ||
+        ! "$package_filename" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+        echo "usage: $0 materialize-spdx <binary> <revision> <output> [package-filename]" >&2
         return 2
     fi
 
@@ -605,6 +607,7 @@ materialize_candidate_spdx() {
     jq \
         --arg binary_sha "$binary_sha" \
         --arg namespace "$namespace" \
+        --arg package_filename "$package_filename" \
         --arg revision "$revision" '
         .name = ("graith-libghostty-darwin-arm64-" + $revision) |
         .documentNamespace = $namespace |
@@ -622,8 +625,8 @@ materialize_candidate_spdx() {
             "licenseConcluded": "MIT",
             "licenseDeclared": "MIT",
             "name": "graith-libghostty-darwin-arm64",
-            "packageFileName": "gr",
-            "sourceInfo": ("Graith revision " + $revision + "; target GOOS=darwin GOARCH=arm64; packaged binary SHA-256 " + $binary_sha + "."),
+            "packageFileName": $package_filename,
+            "sourceInfo": ("Graith revision " + $revision + "; target GOOS=darwin GOARCH=arm64; packaged binary " + $package_filename + " SHA-256 " + $binary_sha + "."),
             "supplier": "Person: Dougal Matthews",
             "versionInfo": $revision
         }]) |
@@ -654,11 +657,13 @@ verify_candidate_spdx() {
     local binary="${1:-}"
     local revision="${2:-}"
     local document="${3:-}"
+    local package_filename="${4:-gr}"
     local binary_sha
     local namespace
 
-    if [[ ! -f "$binary" || ! -f "$document" || ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
-        echo "usage: $0 verify-candidate-spdx <binary> <revision> <document>" >&2
+    if [[ ! -f "$binary" || ! -f "$document" || ! "$revision" =~ ^[0-9a-f]{40}$ ||
+        ! "$package_filename" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+        echo "usage: $0 verify-candidate-spdx <binary> <revision> <document> [package-filename]" >&2
         return 2
     fi
 
@@ -667,6 +672,7 @@ verify_candidate_spdx() {
     jq -e \
         --arg binary_sha "$binary_sha" \
         --arg namespace "$namespace" \
+        --arg package_filename "$package_filename" \
         --arg revision "$revision" '
         def package($id): first(.packages[] | select(.SPDXID == $id));
         def relates($from; $type; $to): any(.relationships[];
@@ -675,7 +681,7 @@ verify_candidate_spdx() {
         .documentNamespace == $namespace and
         ([.packages[] | select(.SPDXID == "SPDXRef-Package-GraithNativeCandidate")] | length) == 1 and
         package("SPDXRef-Package-GraithNativeCandidate").versionInfo == $revision and
-        package("SPDXRef-Package-GraithNativeCandidate").packageFileName == "gr" and
+        package("SPDXRef-Package-GraithNativeCandidate").packageFileName == $package_filename and
         package("SPDXRef-Package-GraithNativeCandidate").checksums ==
             [{"algorithm": "SHA256", "checksumValue": $binary_sha}] and
         relates("SPDXRef-DOCUMENT"; "DESCRIBES"; "SPDXRef-Package-GraithNativeCandidate") and
@@ -788,6 +794,7 @@ package_darwin_arm64_candidate() (
     local binary="${1:-}"
     local destination="${2:-}"
     local spdx_jar="${3:-}"
+    local package_filename="${4:-gr}"
     local destination_parent
     local revision
     local staging=""
@@ -795,8 +802,9 @@ package_darwin_arm64_candidate() (
 
     trap 'cleanup_candidate_staging "$staging"' EXIT
 
-    if [[ ! -f "$binary" || -z "$destination" || ! -f "$spdx_jar" ]]; then
-        echo "usage: $0 package-darwin-arm64 <binary> <destination> <spdx-jar>" >&2
+    if [[ ! -f "$binary" || -z "$destination" || ! -f "$spdx_jar" ||
+        ! "$package_filename" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+        echo "usage: $0 package-darwin-arm64 <binary> <destination> <spdx-jar> [package-filename]" >&2
         return 2
     fi
     if [[ -e "$destination" ]]; then
@@ -810,20 +818,23 @@ package_darwin_arm64_candidate() (
     mkdir -p "$destination_parent"
     staging="$(mktemp -d "$destination_parent/.graith-native-candidate.XXXXXX")"
 
-    cp "$binary" "$staging/gr"
+    cp "$binary" "$staging/$package_filename"
     cp "$REPO_DIR/THIRD_PARTY_NOTICES.libghostty.md" "$staging/"
-    candidate_identity "$staging/gr" "$revision"
+    candidate_identity "$staging/$package_filename" "$revision"
     materialize_candidate_spdx \
-        "$staging/gr" "$revision" "$staging/libghostty-native.spdx.json"
+        "$staging/$package_filename" "$revision" \
+        "$staging/libghostty-native.spdx.json" "$package_filename"
     verify_candidate_spdx \
-        "$staging/gr" "$revision" "$staging/libghostty-native.spdx.json"
+        "$staging/$package_filename" "$revision" \
+        "$staging/libghostty-native.spdx.json" "$package_filename"
     validate_spdx "$spdx_jar" "$staging/libghostty-native.spdx.json"
 
-    tampered="$staging/gr.tampered"
-    cp "$staging/gr" "$tampered"
+    tampered="$staging/$package_filename.tampered"
+    cp "$staging/$package_filename" "$tampered"
     printf '\0' >>"$tampered"
     if verify_candidate_spdx \
-        "$tampered" "$revision" "$staging/libghostty-native.spdx.json"; then
+        "$tampered" "$revision" "$staging/libghostty-native.spdx.json" \
+        "$package_filename"; then
         echo "error: candidate SPDX accepted changed binary bytes" >&2
         return 1
     fi
@@ -836,7 +847,7 @@ package_darwin_arm64_candidate() (
         return 1
     fi
     if [[ "$(find "$staging" -mindepth 1 -maxdepth 1 -type f -exec basename {} \; | sort)" != \
-        "$(printf '%s\n' gr libghostty-native.spdx.json THIRD_PARTY_NOTICES.libghostty.md | sort)" ]]; then
+        "$(printf '%s\n' "$package_filename" libghostty-native.spdx.json THIRD_PARTY_NOTICES.libghostty.md | sort)" ]]; then
         echo "error: candidate artifact contents are incomplete or unexpected" >&2
         return 1
     fi
@@ -855,12 +866,13 @@ usage: $0 test|race|fuzz|bench|memory|daemon-test|soak [cycles [timeout]]|all
        $0 verify-metadata [ghostty-source]
        $0 verify-default-binary <binary>
        $0 verify-darwin-arm64-candidate <binary> <revision>
+       $0 verify-candidate-spdx <binary> <revision> <document> [package-filename]
        $0 test-darwin-linkage-policy
        $0 test-metadata-policy
        $0 install-spdx-validator <empty-directory>
        $0 validate-spdx <tools-java-jar> [document]
        $0 test-exclusive-publish
-       $0 package-darwin-arm64 <binary> <destination> <tools-java-jar>
+       $0 package-darwin-arm64 <binary> <destination> <tools-java-jar> [package-filename]
 
 test/bench/memory use the checksum-pinned Apple artifact on macOS arm64.
 daemon-test runs the external daemon lifecycle and bounded 12-cycle soak.
@@ -904,6 +916,9 @@ case "${1:-}" in
     verify-darwin-arm64-candidate)
         candidate_identity "${2:-}" "${3:-}"
         ;;
+    verify-candidate-spdx)
+        verify_candidate_spdx "${2:-}" "${3:-}" "${4:-}" "${5:-gr}"
+        ;;
     test-darwin-linkage-policy)
         test_darwin_linkage_policy
         ;;
@@ -920,7 +935,7 @@ case "${1:-}" in
         test_exclusive_publication
         ;;
     package-darwin-arm64)
-        package_darwin_arm64_candidate "${2:-}" "${3:-}" "${4:-}"
+        package_darwin_arm64_candidate "${2:-}" "${3:-}" "${4:-}" "${5:-gr}"
         ;;
     *)
         usage >&2

@@ -140,6 +140,50 @@ and run `gr daemon service repair`, then `remove --all-profiles`. Do not use a
 wildcard `launchctl` command: named profiles are independent exact jobs and an
 unknown live job is intentionally quarantined.
 
+### macOS arm64 `graith-dev` canary and rollback
+
+The moving `dev` release uses the isolated libghostty backend only in
+`graith-dev_darwin_arm64.tar.gz`. Stable `graith`, Intel macOS dev builds, and
+both Linux dev builds remain on the pure-Go Charm backend. The native archive
+includes its binary-bound `libghostty-native.spdx.json` and
+`THIRD_PARTY_NOTICES.libghostty.md` inventories.
+
+Each dev release also publishes a verified pure-Go Apple Silicon rollback as
+`graith-dev_darwin_arm64_charm.tar.gz`. To leave the managed canary and restart
+the existing `dev` profile with that exact asset:
+
+```bash
+gr-dev daemon service remove
+rollback_dir="${XDG_DATA_HOME:-$HOME/.local/share}/graith-dev/rollback"
+mkdir -p "$rollback_dir"
+curl -fsSL -o "$rollback_dir/graith-dev_darwin_arm64_charm.tar.gz" \
+  https://github.com/d0ugal/graith/releases/download/dev/graith-dev_darwin_arm64_charm.tar.gz
+curl -fsSL -o "$rollback_dir/checksums.txt" \
+  https://github.com/d0ugal/graith/releases/download/dev/checksums.txt
+(
+  cd "$rollback_dir"
+  grep '  graith-dev_darwin_arm64_charm.tar.gz$' checksums.txt > rollback-checksum.txt
+  test "$(wc -l < rollback-checksum.txt)" -eq 1
+  shasum -a 256 -c rollback-checksum.txt
+  tar -xzf graith-dev_darwin_arm64_charm.tar.gz
+)
+GRAITH_PROFILE=dev "$rollback_dir/gr-dev" daemon restart
+```
+
+Keep the extracted `GraithNotifier.app` beside `gr-dev`. The `dev` tag moves on
+every successful main build, so retain the tarball and its published checksum
+for a fixed observation window. Rollback needs no state conversion: the
+pure-Go daemon reconstructs screens from the same persistent scrollback.
+
+To return to the Homebrew canary, stop the direct-spawn rollback first, then
+reinstall and restart the managed package:
+
+```bash
+GRAITH_PROFILE=dev "$rollback_dir/gr-dev" daemon stop
+brew reinstall d0ugal/tap/graith-dev
+gr-dev daemon restart
+```
+
 ## Shell completion
 
 ```bash

@@ -23,9 +23,9 @@ concurrency:
 jobs:
   dev-release:
     # The native notification helper needs swiftc, lipo, and codesign. The Go
-    # binaries remain pure-Go cross-compiles, so this macOS runner also produces
-    # the Linux archives without making Linux consumers expect the app bundle.
-    runs-on: macos-latest
+    # release matrix also needs an Apple Silicon host to link and execute the
+    # pinned libghostty canary. Linux and Intel macOS remain pure-Go builds.
+    runs-on: macos-26
     permissions:
       contents: write
     steps:
@@ -36,6 +36,27 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+
+      - name: Prepare and validate the pinned macOS arm64 backend
+        env:
+          GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/libghostty-native
+        run: |
+          set -euo pipefail
+          test "$(uname -s)-$(uname -m)" = Darwin-arm64
+          scripts/libghostty-native.sh test
+          scripts/libghostty-native.sh test-metadata-policy
+          scripts/libghostty-native.sh test-darwin-linkage-policy
+          scripts/libghostty-native.sh test-exclusive-publish
+          java -version
+          spdx_jar="$(scripts/libghostty-native.sh install-spdx-validator \
+            "${RUNNER_TEMP}/spdx-validator")"
+          scripts/libghostty-native.sh validate-spdx "$spdx_jar"
+          {
+            echo "GRAITH_LIBGHOSTTY_WORK=$GRAITH_LIBGHOSTTY_WORK"
+            echo "PKG_CONFIG_PATH=$GRAITH_LIBGHOSTTY_WORK/pkgconfig"
+            echo "GRAITH_SPDX_VALIDATOR_JAR=$spdx_jar"
+          } >> "$GITHUB_ENV"
 
       # Once provisioned, graith and graith-dev share one per-user Service
       # Management registry and must use the same fixed Developer ID
@@ -117,14 +138,19 @@ jobs:
             *) echo "::error::Invalid managed dev release marker: $GRAITH_MANAGED_DEV_RELEASE"; exit 1 ;;
           esac
 
-          darwin_archives=(dist/graith-dev_darwin_*.tar.gz)
+          darwin_amd64_archive=dist/graith-dev_darwin_amd64.tar.gz
+          darwin_arm64_archive=dist/graith-dev_darwin_arm64.tar.gz
+          darwin_arm64_charm_archive=dist/graith-dev_darwin_arm64_charm.tar.gz
           linux_archives=(dist/graith-dev_linux_*.tar.gz)
-          if [ "${#darwin_archives[@]}" -ne 2 ] || [ "${#linux_archives[@]}" -ne 2 ]; then
-            echo "::error::Expected two Darwin and two Linux dev archives"
+          all_archives=(dist/graith-dev_*.tar.gz)
+          if [ "${#all_archives[@]}" -ne 5 ] || [ "${#linux_archives[@]}" -ne 2 ] || \
+             [ ! -f "$darwin_amd64_archive" ] || [ ! -f "$darwin_arm64_archive" ] || \
+             [ ! -f "$darwin_arm64_charm_archive" ]; then
+            echo "::error::Expected native arm64, Charm arm64 rollback, Intel macOS, and two Linux dev archives"
             exit 1
           fi
 
-          for archive in "${darwin_archives[@]}"; do
+          for archive in "$darwin_amd64_archive" "$darwin_arm64_archive" "$darwin_arm64_charm_archive"; do
             unpacked="$(mktemp -d)"
             tar -xzf "$archive" -C "$unpacked"
             notifier_app="$unpacked/GraithNotifier.app"
@@ -135,7 +161,12 @@ jobs:
             test -x "$notifier"
             lipo "$notifier" -verify_arch arm64 x86_64
             codesign --verify --deep --strict "$notifier_app"
-            if [ "$GRAITH_MANAGED_DEV_RELEASE" = true ]; then
+            if [ "$archive" = "$darwin_arm64_charm_archive" ]; then
+              if [ -e "$service_app" ]; then
+                echo "::error::Charm rollback archive unexpectedly contains Graith.app: $archive"
+                exit 1
+              fi
+            elif [ "$GRAITH_MANAGED_DEV_RELEASE" = true ]; then
               test -d "$service_app"
               test -x "$service_app/Contents/MacOS/gr"
               cmp "$unpacked/gr-dev" "$service_app/Contents/MacOS/gr"
@@ -143,6 +174,35 @@ jobs:
                 "$archive" "$archive.service-verified.txt" true
             elif [ -e "$service_app" ]; then
               echo "::error::Legacy dev archive unexpectedly contains Graith.app: $archive"
+              exit 1
+            fi
+          done
+
+          revision="$(git rev-parse HEAD)"
+          native_unpacked="$(mktemp -d)"
+          tar -xzf "$darwin_arm64_archive" -C "$native_unpacked"
+          scripts/libghostty-native.sh verify-darwin-arm64-candidate \
+            "$native_unpacked/gr-dev" "$revision"
+          scripts/libghostty-native.sh verify-candidate-spdx \
+            "$native_unpacked/gr-dev" "$revision" \
+            "$native_unpacked/libghostty-native.spdx.json" gr-dev
+          scripts/libghostty-native.sh validate-spdx \
+            "$GRAITH_SPDX_VALIDATOR_JAR" \
+            "$native_unpacked/libghostty-native.spdx.json"
+          cmp "$native_unpacked/libghostty-native.spdx.json" \
+            macos/build/libghostty-native-arm64/libghostty-native.spdx.json
+          cmp "$native_unpacked/THIRD_PARTY_NOTICES.libghostty.md" \
+            macos/build/libghostty-native-arm64/THIRD_PARTY_NOTICES.libghostty.md
+
+          rollback_archives=("$darwin_amd64_archive" "$darwin_arm64_charm_archive" "${linux_archives[@]}")
+          for archive in "${rollback_archives[@]}"; do
+            rollback_unpacked="$(mktemp -d)"
+            tar -xzf "$archive" -C "$rollback_unpacked"
+            scripts/libghostty-native.sh verify-default-binary "$rollback_unpacked/gr-dev"
+            if find "$rollback_unpacked" -maxdepth 1 -type f \
+                \( -name libghostty-native.spdx.json -o -name THIRD_PARTY_NOTICES.libghostty.md \) \
+                -print -quit | grep -q .; then
+              echo "::error::Rollback archive unexpectedly contains native metadata: $archive"
               exit 1
             fi
           done

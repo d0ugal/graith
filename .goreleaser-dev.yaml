@@ -9,15 +9,22 @@ before:
     # GoReleaser accepts an empty archive glob. Fail closed on the real macOS
     # dev-release runner if the bundle build did not produce its executable.
     - sh -c 'test "$(uname -s)" != Darwin || test -x macos/build/GraithNotifier.app/Contents/MacOS/graith-notifier'
+    # The native canary is intentionally restricted to the Apple Silicon dev
+    # artifact. Its static archive and pkg-config file must have been prepared
+    # by scripts/libghostty-native.sh, which owns the exact pin and checksum.
+    - sh -c 'test "$(uname -s)-$(uname -m)" != Darwin-arm64 || { test -n "${GRAITH_LIBGHOSTTY_WORK:-}" && test -f "$GRAITH_LIBGHOSTTY_WORK/pkgconfig/libghostty-vt-static.pc"; }'
 
-# Split builds and archives by OS so only Darwin artifacts can carry the macOS
-# app bundle. Both builds retain the gr-dev binary name used by the dev formula.
+# Keep Linux and Intel macOS on the pure-Go rollback backend. Apple Silicon gets
+# the native canary plus a separately named pure-Go rollback artifact. Every
+# build retains the gr-dev binary name used by the dev formula.
 builds:
   - id: gr-dev-linux
     main: ./cmd/graith
     binary: gr-dev
     env:
       - CGO_ENABLED=0
+    flags:
+      - -trimpath
     ldflags:
       - -s -w
       - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
@@ -27,11 +34,13 @@ builds:
     goarch:
       - amd64
       - arm64
-  - id: gr-dev-darwin
+  - id: gr-dev-darwin-amd64
     main: ./cmd/graith
     binary: gr-dev
     env:
       - CGO_ENABLED=0
+    flags:
+      - -trimpath
     ldflags:
       - -s -w
       - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
@@ -52,6 +61,52 @@ builds:
       - darwin
     goarch:
       - amd64
+  - id: gr-dev-darwin-arm64
+    main: ./cmd/graith
+    binary: gr-dev
+    env:
+      - CGO_ENABLED=1
+    flags:
+      - -trimpath
+    tags:
+      - libghostty
+    ldflags:
+      - -s -w
+      - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
+      - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
+      - -X github.com/d0ugal/graith/internal/daemonservice.ManagedBuild={{ if eq (index .Env "GRAITH_MANAGED_DEV_RELEASE") "true" }}true{{ else }}false{{ end }}
+      - -X github.com/d0ugal/graith/internal/daemonservice.DevelopmentBuild=false
+      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedTeamID={{ if eq (index .Env "GRAITH_MANAGED_DEV_RELEASE") "true" }}{{ index .Env "GRAITH_SIGNING_TEAM_ID" }}{{ end }}
+      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedRequirementBase64={{ if eq (index .Env "GRAITH_MANAGED_DEV_RELEASE") "true" }}{{ index .Env "GRAITH_SIGNING_REQUIREMENT_B64" }}{{ end }}
+    hooks:
+      post:
+        # Sign first so the packaged SPDX checksum binds the final standalone
+        # and service-app payload bytes, not the unsigned GoReleaser output.
+        - cmd: macos/service/release-hook.sh "{{ .Path }}" "{{ .Target }}" "{{ .Version }}" "{{ .Commit }}" "{{ .IsSnapshot }}" "{{ if eq (index .Env "GRAITH_MANAGED_DEV_RELEASE") "true" }}true{{ else }}false{{ end }}"
+          output: true
+        - cmd: scripts/libghostty-native.sh package-darwin-arm64 "{{ .Path }}" "macos/build/libghostty-native-arm64" "{{ index .Env "GRAITH_SPDX_VALIDATOR_JAR" }}" gr-dev
+          output: true
+    goos:
+      - darwin
+    goarch:
+      - arm64
+  # This is an explicit emergency rollback payload, not the Homebrew-selected
+  # canary. It remains unmanaged so it cannot overwrite the native build's
+  # architecture-specific service-app staging directory.
+  - id: gr-dev-darwin-arm64-charm
+    main: ./cmd/graith
+    binary: gr-dev
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
+      - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
+    goos:
+      - darwin
+    goarch:
       - arm64
 
 archives:
@@ -64,9 +119,9 @@ archives:
       - LICENSE
       - README.md
       - CHANGELOG.md
-  - id: darwin
+  - id: darwin-amd64
     ids:
-      - gr-dev-darwin
+      - gr-dev-darwin-amd64
     format: tar.gz
     name_template: "graith-dev_{{ .Os }}_{{ .Arch }}"
     files:
@@ -80,6 +135,36 @@ archives:
         dst: GraithNotifier.app/Contents
       - src: macos/build/service-release-{{ .Arch }}/Graith.app/**/*
         dst: Graith.app/Contents
+  - id: darwin-arm64
+    ids:
+      - gr-dev-darwin-arm64
+    format: tar.gz
+    name_template: "graith-dev_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+      - src: macos/build/GraithNotifier.app/**/*
+        dst: GraithNotifier.app/Contents
+      - src: macos/build/service-release-{{ .Arch }}/Graith.app/**/*
+        dst: Graith.app/Contents
+      # These are materialized and verified by the canonical native packaging
+      # script after any signing has changed the final executable bytes.
+      - src: macos/build/libghostty-native-arm64/libghostty-native.spdx.json
+        dst: libghostty-native.spdx.json
+      - src: macos/build/libghostty-native-arm64/THIRD_PARTY_NOTICES.libghostty.md
+        dst: THIRD_PARTY_NOTICES.libghostty.md
+  - id: darwin-arm64-charm
+    ids:
+      - gr-dev-darwin-arm64-charm
+    format: tar.gz
+    name_template: "graith-dev_{{ .Os }}_{{ .Arch }}_charm"
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+      - src: macos/build/GraithNotifier.app/**/*
+        dst: GraithNotifier.app/Contents
 
 checksum:
   name_template: checksums.txt
