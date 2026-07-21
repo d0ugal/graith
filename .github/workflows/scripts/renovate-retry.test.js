@@ -33,6 +33,14 @@ const DETERMINISTIC_LOG = JSON.stringify({
   },
 });
 
+const WARNING_LOG = JSON.stringify({
+  level: 40,
+  msg: 'dreich warning unrelated to the failed lookup',
+});
+
+const TRANSIENT_WITH_WARNING_LOG = `${WARNING_LOG}\n${TRANSIENT_LOG}`;
+const MIXED_ERROR_LOG = `${TRANSIENT_LOG}\n${DETERMINISTIC_LOG}`;
+
 const nativeDeps = [
   'Ghostty',
   'Highway',
@@ -145,8 +153,40 @@ test('retries the tangled.org GnuTLS termination and accepts a later success', (
   assert.match(result.stdout, /detected and grouped all seven native dependency fixtures/);
 });
 
+test('ignores warning-level noise when classifying the transient failure', () => {
+  const result = runVerifier([
+    { log: TRANSIENT_WITH_WARNING_LOG, status: 1 },
+    { log: SUCCESS_LOG, status: 0 },
+  ]);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.count, 2);
+  assert.match(result.stderr, /retrying Renovate lookup \(attempt 2 of 3\)/);
+});
+
 test('does not retry a deterministic lookup failure from the same repository', () => {
   const result = runVerifier([{ log: DETERMINISTIC_LOG, status: 1 }]);
+
+  assert.equal(result.status, 1);
+  assert.equal(result.count, 1);
+  assert.doesNotMatch(result.stderr, /retrying Renovate lookup/);
+  assert.match(result.stderr, /requested URL returned error: 403/);
+});
+
+test('stops retrying when a later attempt changes to a deterministic failure', () => {
+  const result = runVerifier([
+    { log: TRANSIENT_LOG, status: 1 },
+    { log: DETERMINISTIC_LOG, status: 1 },
+  ]);
+
+  assert.equal(result.status, 1);
+  assert.equal(result.count, 2);
+  assert.doesNotMatch(result.stderr, /attempt 3 of 3/);
+  assert.match(result.stderr, /requested URL returned error: 403/);
+});
+
+test('does not retry a lookup log containing transient and deterministic errors', () => {
+  const result = runVerifier([{ log: MIXED_ERROR_LOG, status: 1 }]);
 
   assert.equal(result.status, 1);
   assert.equal(result.count, 1);

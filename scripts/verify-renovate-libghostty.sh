@@ -37,7 +37,8 @@ git -C "$fixture" commit -qm "test: add dreich dependency fixture"
 
 is_transient_tangled_tls_failure() {
     jq -se '
-        [.[] | select(.level >= 40)] as $errors |
+        # Level 40 is warning; unrelated warnings must not suppress a retry.
+        [.[] | select(.level >= 50)] as $errors |
         ($errors | length) > 0 and
         all($errors[];
             .msg == "lookupUpdates error" and
