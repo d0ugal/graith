@@ -19,6 +19,7 @@ func TestStopDaemonByPIDSignalsVerifiedProcess(t *testing.T) {
 	}
 
 	var signals []syscall.Signal
+
 	stopped := stopDaemonByPIDWith(pidFile, func(pid int) bool {
 		if pid != 4242 {
 			t.Errorf("identity check PID = %d, want 4242", pid)
@@ -49,6 +50,7 @@ func TestStopDaemonByPIDSignalsVerifiedProcess(t *testing.T) {
 
 func TestStopDaemonByPIDRefusesForeignProcess(t *testing.T) {
 	process := startDaemonStopHelper(t)
+
 	pidFile := filepath.Join(t.TempDir(), "bothy.pid")
 	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(process.Pid)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -65,6 +67,7 @@ func TestStopDaemonByPIDRefusesForeignProcess(t *testing.T) {
 
 func TestStopDaemonByPIDRefusesStaleProcess(t *testing.T) {
 	process := startDaemonStopHelper(t)
+
 	pid := process.Pid
 	if err := process.Kill(); err != nil {
 		t.Fatal(err)
@@ -98,6 +101,7 @@ func startDaemonStopHelper(t *testing.T) *os.Process {
 	}
 
 	command := exec.Command(executable, "-test.run=^TestStopDaemonByPIDHelperProcess$")
+
 	command.Env = append(os.Environ(), daemonStopHelperEnv+"=1")
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
