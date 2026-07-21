@@ -72,9 +72,9 @@ Cycle with `h`/`l` or arrows:
 | View | Description |
 |------|-------------|
 | All | Every session, grouped by repo. Starred first, then running, then by name |
-| Needs Attention | Errored sessions, agent runtime errors, idle sessions (running but ready), or stopped sessions with dirty/unpushed changes. Sorted oldest-first by time in current state |
-| Active | Running sessions only, sorted newest-first by creation time |
 | Starred | Starred sessions only |
+| Scenarios | Every session grouped by scenario, with unassigned sessions in a separate group |
+| Deleted | Recently deleted sessions; press `enter` to restore the highlighted session |
 
 ### Actions
 

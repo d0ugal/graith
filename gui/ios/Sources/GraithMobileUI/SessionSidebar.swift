@@ -9,9 +9,9 @@ struct SessionSidebar: View {
 
     var body: some View {
         List(selection: $model.selection) {
-            // View-mode + quick filters (#906). Search is the navigation-bar
-            // search field below; the mode/starred/repo controls live inline so
-            // they're reachable without a toolbar overflow menu.
+            // Quick filters (#906). Search is the navigation-bar search field
+            // below; starred/repo controls live inline so they're reachable
+            // without a toolbar overflow menu.
             SidebarFilterControls(model: model)
 
             ForEach(model.connections) { conn in
@@ -28,21 +28,13 @@ struct SessionSidebar: View {
     }
 }
 
-/// Inline view-mode segmented picker plus starred and repo quick filters (#906).
-/// All state lives on the shared `FleetModel`.
+/// Inline starred and repo quick filters (#906). All state lives on the shared
+/// `FleetModel`.
 private struct SidebarFilterControls: View {
     @ObservedObject var model: FleetModel
 
     var body: some View {
         Section {
-            Picker("View", selection: $model.viewMode) {
-                ForEach(SidebarViewMode.allCases) { mode in
-                    Text(mode.displayName).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .listRowBackground(Color.clear)
-
             HStack {
                 Toggle(isOn: $model.starredOnly) {
                     Label("Starred only", systemImage: "star")

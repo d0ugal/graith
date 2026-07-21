@@ -4,55 +4,12 @@ import GraithProtocol
 import GraithRemoteKit
 @testable import GraithSessionKit
 
-// Exercises the shared sidebar filter/search/view-mode logic (#906): the pure
+// Exercises the shared sidebar filter/search logic (#906): the pure
 // `SidebarFilter` predicates and the `FleetModel` filter state that drives both
 // GUIs' grouping helpers.
 
 @Suite("SidebarFilter — pure predicates (#906)")
 struct SidebarFilterPureTests {
-    // MARK: - Needs-attention (mirrors overlay.filterNeedsAttention)
-
-    @Test func needsAttentionMatchesAgentError() {
-        let s = makeSession(id: "fash0001", name: "fash", status: "running", agentStatus: "error")
-        #expect(SidebarFilter.needsAttention(s))
-    }
-
-    @Test func needsAttentionMatchesErrored() {
-        let s = makeSession(id: "dreich01", name: "dreich", status: "errored")
-        #expect(SidebarFilter.needsAttention(s))
-    }
-
-    @Test func needsAttentionMatchesRunningReady() {
-        let s = makeSession(id: "thrawn01", name: "thrawn", status: "running", agentStatus: "ready")
-        #expect(SidebarFilter.needsAttention(s))
-    }
-
-    @Test func needsAttentionMatchesStoppedDirty() {
-        let s = makeSession(id: "scunner1", name: "scunner", status: "stopped", dirty: true)
-        #expect(SidebarFilter.needsAttention(s))
-    }
-
-    @Test func needsAttentionMatchesStoppedUnpushed() {
-        let s = makeSession(id: "scunner2", name: "scunner", status: "stopped", unpushedCount: 3)
-        #expect(SidebarFilter.needsAttention(s))
-    }
-
-    @Test func needsAttentionExcludesMirrorEvenWhenDirty() {
-        // A mirror session's dirty/unpushed state isn't the human's to action.
-        let s = makeSession(id: "haar0001", name: "haar", status: "stopped", dirty: true, mirror: true)
-        #expect(!SidebarFilter.needsAttention(s))
-    }
-
-    @Test func needsAttentionExcludesQuietRunning() {
-        let s = makeSession(id: "braw0001", name: "braw", status: "running", agentStatus: "active")
-        #expect(!SidebarFilter.needsAttention(s))
-    }
-
-    @Test func needsAttentionExcludesCleanStopped() {
-        let s = makeSession(id: "bide0001", name: "bide", status: "stopped")
-        #expect(!SidebarFilter.needsAttention(s))
-    }
-
     // MARK: - Search
 
     @Test func searchMatchesName() {
@@ -89,20 +46,9 @@ struct SidebarFilterPureTests {
         ]
     }
 
-    @Test func applyAllReturnsEverything() {
-        let out = SidebarFilter.apply(mixed(), .init(viewMode: .all))
+    @Test func applyDefaultReturnsEverything() {
+        let out = SidebarFilter.apply(mixed(), .init())
         #expect(out.count == 5)
-    }
-
-    @Test func applyActiveReturnsRunningOnly() {
-        let out = SidebarFilter.apply(mixed(), .init(viewMode: .active))
-        #expect(out.map(\.id).sorted() == ["braw0001", "canny001"])
-    }
-
-    @Test func applyNeedsAttention() {
-        let out = SidebarFilter.apply(mixed(), .init(viewMode: .needsAttention))
-        // canny (running+ready), dreich (errored), scunner (stopped+dirty).
-        #expect(Set(out.map(\.id)) == ["canny001", "dreich01", "scunner1"])
     }
 
     @Test func applyStarredOnly() {
@@ -115,10 +61,10 @@ struct SidebarFilterPureTests {
         #expect(Set(out.map(\.id)) == ["dreich01", "bide0001"])
     }
 
-    @Test func applyComposedModeAndSearch() {
-        // Active + search "can" → only canny.
-        let out = SidebarFilter.apply(mixed(), .init(viewMode: .active, searchQuery: "can"))
-        #expect(out.map(\.id) == ["canny001"])
+    @Test func applyComposedFilters() {
+        let criteria = SidebarFilter.Criteria(searchQuery: "braw", starredOnly: true, repo: "croft")
+        let out = SidebarFilter.apply(mixed(), criteria)
+        #expect(out.map(\.id) == ["braw0001"])
     }
 
     @Test func applyPreservesInputOrder() {
@@ -128,17 +74,10 @@ struct SidebarFilterPureTests {
 
     @Test func criteriaIsActive() {
         #expect(!SidebarFilter.Criteria().isActive)
-        #expect(SidebarFilter.Criteria(viewMode: .active).isActive)
         #expect(SidebarFilter.Criteria(searchQuery: "x").isActive)
         #expect(!SidebarFilter.Criteria(searchQuery: "  ").isActive)
         #expect(SidebarFilter.Criteria(starredOnly: true).isActive)
         #expect(SidebarFilter.Criteria(repo: "glen").isActive)
-    }
-
-    @Test func viewModeDisplayNamesMatchOverlay() {
-        #expect(SidebarViewMode.all.displayName == "All")
-        #expect(SidebarViewMode.needsAttention.displayName == "Needs Attention")
-        #expect(SidebarViewMode.active.displayName == "Active")
     }
 }
 
@@ -156,18 +95,8 @@ struct FleetModelFilterTests {
     @Test func defaultsAreInactive() async {
         let (fleet, _) = makeFleetWithRemote(sessions: sample())
         await fleet.connectAll()
-        #expect(fleet.viewMode == .all)
         #expect(!fleet.isFilterActive)
         #expect(fleet.filtered(fleet.sessions).count == 3)
-    }
-
-    @Test func viewModeNarrowsGrouping() async {
-        let (fleet, _) = makeFleetWithRemote(sessions: sample())
-        await fleet.connectAll()
-        fleet.viewMode = .needsAttention
-        #expect(fleet.isFilterActive)
-        let ids = fleet.sessionsByRepo.flatMap { $0.sessions }.map(\.id)
-        #expect(ids == ["canny001"]) // only the errored session
     }
 
     @Test func searchNarrowsGrouping() async {
@@ -203,12 +132,10 @@ struct FleetModelFilterTests {
     @Test func clearFiltersResetsEverything() async {
         let (fleet, _) = makeFleetWithRemote(sessions: sample())
         await fleet.connectAll()
-        fleet.viewMode = .active
         fleet.searchQuery = "braw"
         fleet.starredOnly = true
         fleet.repoFilter = "croft"
         fleet.clearFilters()
-        #expect(fleet.viewMode == .all)
         #expect(fleet.searchQuery.isEmpty)
         #expect(!fleet.starredOnly)
         #expect(fleet.repoFilter == nil)
@@ -218,7 +145,7 @@ struct FleetModelFilterTests {
     @Test func allSessionsByRepoIgnoresFilter() async {
         let (fleet, _) = makeFleetWithRemote(sessions: sample())
         await fleet.connectAll()
-        fleet.viewMode = .active
+        fleet.starredOnly = true
         // Filtered view has one repo group entry (croft/braw); the raw grouping
         // keeps all sessions regardless of the active filter.
         #expect(fleet.allSessionsByRepo.flatMap { $0.sessions }.count == 3)

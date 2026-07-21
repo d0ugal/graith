@@ -34,8 +34,6 @@ open class FleetModel: ObservableObject {
     // view rebuilds and drives the same grouping helpers the sidebars already
     // bind to. The actual filtering is the pure `SidebarFilter`.
 
-    /// Selected view mode (All / Needs Attention / Active).
-    @Published public var viewMode: SidebarViewMode = .all
     /// Free-text search over session name + repo.
     @Published public var searchQuery: String = ""
     /// Quick filter: show starred sessions only.
@@ -265,7 +263,6 @@ open class FleetModel: ObservableObject {
     /// filter state. Passed to the pure `SidebarFilter`.
     public var filterCriteria: SidebarFilter.Criteria {
         SidebarFilter.Criteria(
-            viewMode: viewMode,
             searchQuery: searchQuery,
             starredOnly: starredOnly,
             repo: repoFilter
@@ -294,7 +291,6 @@ open class FleetModel: ObservableObject {
 
     /// Reset every filter to its default (used by a "clear filters" action).
     public func clearFilters() {
-        viewMode = .all
         searchQuery = ""
         starredOnly = false
         repoFilter = nil

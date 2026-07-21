@@ -3354,68 +3354,6 @@ func TestColumnWidths_TotalWidth(t *testing.T) {
 	}
 }
 
-// --- filterNeedsAttention ---
-
-func TestFilterNeedsAttention(t *testing.T) {
-	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "braw-session", Status: "running", AgentStatus: "active"},
-		{ID: "s2", Name: "thrawn-error", Status: "running", AgentStatus: "error"},
-		{ID: "s3", Name: "thrawn-errored", Status: "errored"},
-		{ID: "s4", Name: "canny-ready", Status: "running", AgentStatus: "ready"},
-		{ID: "s5", Name: "neep-clean", Status: "stopped"},
-		{ID: "s6", Name: "thrawn-dirty", Status: "stopped", Dirty: true},
-		{ID: "s7", Name: "thrawn-unpushed", Status: "stopped", UnpushedCount: 2},
-	}
-	result := filterNeedsAttention(sessions)
-
-	names := make([]string, len(result))
-	for i, s := range result {
-		names[i] = s.Name
-	}
-	// Should include: thrawn-error, thrawn-errored, canny-ready (running+ready), thrawn-dirty, thrawn-unpushed
-	// Should exclude: braw-session (working fine), neep-clean (nothing to save)
-	if len(result) != 5 {
-		t.Fatalf("got %d sessions %v, want 5", len(result), names)
-	}
-
-	for _, name := range []string{"thrawn-error", "thrawn-errored", "canny-ready", "thrawn-dirty", "thrawn-unpushed"} {
-		found := false
-
-		for _, n := range names {
-			if n == name {
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			t.Errorf("missing expected session %q in result %v", name, names)
-		}
-	}
-}
-
-func TestFilterNeedsAttention_ExcludesMirror(t *testing.T) {
-	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "ben-dirty", Status: "stopped", Dirty: true},
-		{ID: "s2", Name: "braw-shared-dirty", Status: "stopped", Dirty: true, Mirror: true},
-		{ID: "s3", Name: "braw-shared-unpushed", Status: "stopped", UnpushedCount: 3, Mirror: true},
-	}
-
-	result := filterNeedsAttention(sessions)
-	if len(result) != 1 {
-		names := make([]string, len(result))
-		for i, s := range result {
-			names[i] = s.Name
-		}
-
-		t.Fatalf("got %d sessions %v, want 1 (only ben-dirty)", len(result), names)
-	}
-
-	if result[0].Name != "ben-dirty" {
-		t.Errorf("got %q, want ben-dirty", result[0].Name)
-	}
-}
-
 func TestView_MirrorDeleteNoUnsavedWarning(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
@@ -3440,70 +3378,18 @@ func TestView_MirrorDeleteNoUnsavedWarning(t *testing.T) {
 	}
 }
 
-// --- filterActive ---
-
-func TestFilterActive(t *testing.T) {
-	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "braw-session", Status: "running", AgentStatus: "active",
-			CreatedAt: time.Now().Add(-10 * time.Minute).Format(time.RFC3339)},
-		{ID: "s2", Name: "thrawn-error", Status: "running", AgentStatus: "error",
-			CreatedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339)},
-		{ID: "s3", Name: "neep-stopped", Status: "stopped",
-			CreatedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s4", Name: "canny-running", Status: "running", AgentStatus: "unknown",
-			CreatedAt: time.Now().Add(-1 * time.Minute).Format(time.RFC3339)},
-	}
-
-	result := filterActive(sessions)
-	if len(result) != 3 {
-		names := make([]string, len(result))
-		for i, s := range result {
-			names[i] = s.Name
-		}
-
-		t.Fatalf("got %d sessions %v, want 3 (all running)", len(result), names)
-	}
-	// Should be sorted newest first
-	if result[0].Name != "canny-running" {
-		t.Errorf("first session = %q, want canny-running (newest)", result[0].Name)
-	}
-}
-
-// --- sortByStatusAge ---
-
-func TestSortByStatusAge(t *testing.T) {
-	now := time.Now()
-	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "braw-recent", StatusChangedAt: now.Add(-1 * time.Minute).Format(time.RFC3339)},
-		{ID: "s2", Name: "thrawn-old", StatusChangedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
-		{ID: "s3", Name: "canny-medium", StatusChangedAt: now.Add(-10 * time.Minute).Format(time.RFC3339)},
-	}
-	sortByStatusAge(sessions)
-
-	if sessions[0].Name != "thrawn-old" || sessions[1].Name != "canny-medium" || sessions[2].Name != "braw-recent" {
-		t.Errorf("got order [%s, %s, %s], want [thrawn-old, canny-medium, braw-recent]",
-			sessions[0].Name, sessions[1].Name, sessions[2].Name)
-	}
-}
-
 // --- viewMode cycling ---
 
 func TestViewModeCycling(t *testing.T) {
+	if got := strings.Join(viewNames, ","); got != "All,Starred,Scenarios,Deleted" {
+		t.Fatalf("viewNames = %q, want All / Starred / Scenarios / Deleted", got)
+	}
+
 	v := viewAll
 
 	v = v.next()
-	if v != viewNeedsAttention {
-		t.Errorf("All.next() = %d, want viewNeedsAttention", v)
-	}
-
-	v = v.next()
-	if v != viewActive {
-		t.Errorf("NeedsAttention.next() = %d, want viewActive", v)
-	}
-
-	v = v.next()
 	if v != viewStarred {
-		t.Errorf("Active.next() = %d, want viewStarred", v)
+		t.Errorf("All.next() = %d, want viewStarred", v)
 	}
 
 	v = v.next()
@@ -3544,43 +3430,29 @@ func TestOverlay_RightArrowCyclesView(t *testing.T) {
 	updated, _ = sendKey(updated, "right")
 
 	om = asOverlay(updated)
-	if om.view != viewNeedsAttention {
-		t.Errorf("after right: view = %d, want viewNeedsAttention", om.view)
-	}
-
-	updated, _ = sendKey(updated, "right")
-
-	om = asOverlay(updated)
-	if om.view != viewActive {
-		t.Errorf("after 2x right: view = %d, want viewActive", om.view)
-	}
-
-	updated, _ = sendKey(updated, "right")
-
-	om = asOverlay(updated)
 	if om.view != viewStarred {
-		t.Errorf("after 3x right: view = %d, want viewStarred", om.view)
+		t.Errorf("after right: view = %d, want viewStarred", om.view)
 	}
 
 	updated, _ = sendKey(updated, "right")
 
 	om = asOverlay(updated)
 	if om.view != viewScenario {
-		t.Errorf("after 4x right: view = %d, want viewScenario", om.view)
+		t.Errorf("after 2x right: view = %d, want viewScenario", om.view)
 	}
 
 	updated, _ = sendKey(updated, "right")
 
 	om = asOverlay(updated)
 	if om.view != viewDeleted {
-		t.Errorf("after 5x right: view = %d, want viewDeleted", om.view)
+		t.Errorf("after 3x right: view = %d, want viewDeleted", om.view)
 	}
 
 	updated, _ = sendKey(updated, "right")
 
 	om = asOverlay(updated)
 	if om.view != viewAll {
-		t.Errorf("after 6x right: view = %d, want viewAll (wrap)", om.view)
+		t.Errorf("after 4x right: view = %d, want viewAll (wrap)", om.view)
 	}
 }
 
@@ -3660,80 +3532,26 @@ func TestOverlay_LeftArrowCyclesViewBackward(t *testing.T) {
 	}
 }
 
-func TestOverlay_NeedsAttentionFiltersCorrectly(t *testing.T) {
-	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "braw-working", RepoName: "repo", Status: "running", AgentStatus: "active",
-			CreatedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s2", Name: "thrawn-blocked", RepoName: "repo", Status: "running", AgentStatus: "error",
-			CreatedAt:       time.Now().Format(time.RFC3339),
-			StatusChangedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339)},
-		{ID: "s3", Name: "neep-idle", RepoName: "repo", Status: "stopped",
-			CreatedAt: time.Now().Format(time.RFC3339)},
-	}
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
-
-	var updated tea.Model
-
-	updated, _ = sendWindowSize(m, 120, 40)
-
-	updated, _ = sendKey(updated, "right")
-	om := asOverlay(updated)
-
-	sessionCount := countSessionItems(om)
-
-	if sessionCount != 1 {
-		t.Errorf("needs attention view has %d sessions, want 1", sessionCount)
-	}
-}
-
-func TestOverlay_ActiveViewShowsOnlyRunning(t *testing.T) {
-	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "braw-running", RepoName: "repo", Status: "running", AgentStatus: "active",
-			CreatedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s2", Name: "neep-stopped", RepoName: "repo", Status: "stopped",
-			CreatedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s3", Name: "canny-running", RepoName: "repo", Status: "running", AgentStatus: "ready",
-			CreatedAt: time.Now().Add(-10 * time.Minute).Format(time.RFC3339)},
-	}
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
-
-	var updated tea.Model
-
-	updated, _ = sendWindowSize(m, 120, 40)
-
-	updated, _ = sendKey(updated, "right")
-	updated, _ = sendKey(updated, "right")
-	om := asOverlay(updated)
-
-	sessionCount := countSessionItems(om)
-
-	if sessionCount != 2 {
-		t.Errorf("active view has %d sessions, want 2", sessionCount)
-	}
-}
-
 func TestOverlay_FilterRespectsView(t *testing.T) {
 	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "braw-api", RepoName: "repo", Status: "running", AgentStatus: "active",
+		{ID: "s1", Name: "braw-api", RepoName: "repo", Status: "running", Starred: true,
 			CreatedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s2", Name: "thrawn-api", RepoName: "repo", Status: "running", AgentStatus: "error",
-			CreatedAt:       time.Now().Format(time.RFC3339),
-			StatusChangedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s3", Name: "thrawn-ui", RepoName: "repo", Status: "running", AgentStatus: "error",
-			CreatedAt:       time.Now().Format(time.RFC3339),
-			StatusChangedAt: time.Now().Format(time.RFC3339)},
+		{ID: "s2", Name: "thrawn-api", RepoName: "repo", Status: "running",
+			CreatedAt: time.Now().Format(time.RFC3339)},
+		{ID: "s3", Name: "thrawn-ui", RepoName: "repo", Status: "running", Starred: true,
+			CreatedAt: time.Now().Format(time.RFC3339)},
 	}
 
 	var updated tea.Model
 
 	updated, _ = sendWindowSize(newOverlayModel(sessions, "", nil, nil, nil, nil), 120, 40)
 
-	// Switch to Needs Attention
+	// Switch to Starred.
 	updated, _ = sendKey(updated, "right")
 
 	om := asOverlay(updated)
-	if om.view != viewNeedsAttention {
-		t.Fatalf("view = %d, want viewNeedsAttention", om.view)
+	if om.view != viewStarred {
+		t.Fatalf("view = %d, want viewStarred", om.view)
 	}
 
 	// Enter filter mode and type "api"
@@ -3744,26 +3562,25 @@ func TestOverlay_FilterRespectsView(t *testing.T) {
 
 	om = asOverlay(updated)
 	sessionCount := countSessionItems(om)
-	// Should only show thrawn-api (braw-api is active, not needing attention)
+	// Only the starred braw-api session matches both filters.
 	if sessionCount != 1 {
-		t.Errorf("filtered needs-attention has %d sessions, want 1", sessionCount)
+		t.Errorf("filtered starred view has %d sessions, want 1", sessionCount)
 	}
 }
 
 func TestOverlay_FilterEscRebuildsView(t *testing.T) {
 	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "braw-working", RepoName: "repo", Status: "running", AgentStatus: "active",
+		{ID: "s1", Name: "braw-working", RepoName: "repo", Status: "running", Starred: true,
 			CreatedAt: time.Now().Format(time.RFC3339)},
-		{ID: "s2", Name: "thrawn-blocked", RepoName: "repo", Status: "running", AgentStatus: "error",
-			CreatedAt:       time.Now().Format(time.RFC3339),
-			StatusChangedAt: time.Now().Format(time.RFC3339)},
+		{ID: "s2", Name: "thrawn-working", RepoName: "repo", Status: "running",
+			CreatedAt: time.Now().Format(time.RFC3339)},
 	}
 
 	var updated tea.Model
 
 	updated, _ = sendWindowSize(newOverlayModel(sessions, "", nil, nil, nil, nil), 120, 40)
 
-	// Switch to Needs Attention
+	// Switch to Starred.
 	updated, _ = sendKey(updated, "right")
 
 	// Enter filter, type something, then cancel
@@ -3772,43 +3589,15 @@ func TestOverlay_FilterEscRebuildsView(t *testing.T) {
 	updated, _ = sendKey(updated, "esc")
 
 	om := asOverlay(updated)
-	// Should be back to the full needs-attention view, not the "all" view
-	if om.view != viewNeedsAttention {
-		t.Errorf("view = %d after filter cancel, want viewNeedsAttention", om.view)
+	// The text filter clears without changing the selected picker view.
+	if om.view != viewStarred {
+		t.Errorf("view = %d after filter cancel, want viewStarred", om.view)
 	}
 
 	sessionCount := countSessionItems(om)
 
 	if sessionCount != 1 {
-		t.Errorf("after filter cancel: %d sessions, want 1 (only thrawn-blocked)", sessionCount)
-	}
-}
-
-func TestOverlay_EmptyNeedsAttentionView(t *testing.T) {
-	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "braw-working", RepoName: "repo", Status: "running", AgentStatus: "active",
-			CreatedAt: time.Now().Format(time.RFC3339)},
-	}
-	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
-
-	var updated tea.Model
-
-	updated, _ = sendWindowSize(m, 120, 40)
-
-	updated, _ = sendKey(updated, "right")
-
-	om := asOverlay(updated)
-	if om.view != viewNeedsAttention {
-		t.Fatalf("view = %d, want viewNeedsAttention", om.view)
-	}
-
-	if len(om.list.Items()) != 0 {
-		t.Errorf("expected empty list for needs attention view, got %d items", len(om.list.Items()))
-	}
-
-	view := om.View().Content
-	if !strings.Contains(view, "Nothing needs your attention") {
-		t.Error("expected empty state message in view output")
+		t.Errorf("after filter cancel: %d sessions, want 1 starred session", sessionCount)
 	}
 }
 
@@ -4286,35 +4075,6 @@ func TestFilterStarred_None(t *testing.T) {
 	sessions := []protocol.SessionInfo{{ID: "s1", Starred: false}}
 	if got := filterStarred(sessions); got != nil {
 		t.Errorf("no starred sessions should return nil, got %v", got)
-	}
-}
-
-// --- sortByStatusAge: zero-time handling ---
-
-func TestSortByStatusAge_ZeroTimesStable(t *testing.T) {
-	// Both zero → keep order (return false).
-	sessions := []protocol.SessionInfo{
-		{ID: "a", Name: "first"},
-		{ID: "b", Name: "second"},
-	}
-	sortByStatusAge(sessions)
-
-	if sessions[0].ID != "a" || sessions[1].ID != "b" {
-		t.Errorf("zero-time entries should keep their order, got %v", sessions)
-	}
-}
-
-func TestSortByStatusAge_ZeroSortsBeforeNonZero(t *testing.T) {
-	old := time.Now().Add(-time.Hour).Format(time.RFC3339)
-	sessions := []protocol.SessionInfo{
-		{ID: "hasTime", StatusChangedAt: old},
-		{ID: "zero"},
-	}
-	sortByStatusAge(sessions)
-
-	// A zero StatusChangedAt is treated as oldest (sorts first).
-	if sessions[0].ID != "zero" {
-		t.Errorf("zero-time entry should sort first, got %q", sessions[0].ID)
 	}
 }
 
@@ -4817,7 +4577,7 @@ func TestUpdate_StarResultUpdatesSession(t *testing.T) {
 	}
 }
 
-// --- View: starred and scenario empty states ---
+// --- View: filtered-view empty states ---
 
 func TestView_StarredEmptyState(t *testing.T) {
 	m := sizedModel(t, overlayTestSessions(), "")
@@ -4830,17 +4590,25 @@ func TestView_StarredEmptyState(t *testing.T) {
 	}
 }
 
-func TestView_ActiveEmptyState(t *testing.T) {
-	sessions := []protocol.SessionInfo{
-		{ID: "s1", Name: "neep", RepoName: "repo", Status: "stopped", CreatedAt: time.Now().Format(time.RFC3339)},
-	}
-	m := sizedModel(t, sessions, "")
-	m.view = viewActive
+func TestView_ScenarioEmptyState(t *testing.T) {
+	m := sizedModel(t, nil, "")
+	m.view = viewScenario
 	m.rebuildForView()
 
 	out := m.View().Content
-	if !strings.Contains(out, "No active sessions") {
-		t.Errorf("empty active view should show its empty message:\n%s", out)
+	if !strings.Contains(out, "No sessions") {
+		t.Errorf("empty scenario view should show its empty message:\n%s", out)
+	}
+}
+
+func TestView_DeletedEmptyState(t *testing.T) {
+	m := sizedModel(t, overlayTestSessions(), "")
+	m.view = viewDeleted
+	m.rebuildForView()
+
+	out := m.View().Content
+	if !strings.Contains(out, "No deleted sessions") {
+		t.Errorf("empty deleted view should show its empty message:\n%s", out)
 	}
 }
 
@@ -4970,44 +4738,5 @@ func TestPRColorTerminalAndConflict2(t *testing.T) {
 	}
 	if got := prColor(pending); got != colorYellow {
 		t.Errorf("pending CI color should be yellow, got %v", got)
-	}
-}
-
-func TestSortByStatusAgeMixedZero2(t *testing.T) {
-	now := time.Now()
-	sessions := []protocol.SessionInfo{
-		{Name: "has-time", StatusChangedAt: now.Format(time.RFC3339)},
-		{Name: "no-time"}, // zero — should sort ahead of the timestamped one
-	}
-
-	sortByStatusAge(sessions)
-
-	if sessions[0].Name != "no-time" {
-		t.Fatalf("zero StatusChangedAt should sort first, got %q first", sessions[0].Name)
-	}
-
-	// Reverse input order to exercise the j-is-zero branch too.
-	sessions = []protocol.SessionInfo{
-		{Name: "no-time"},
-		{Name: "has-time", StatusChangedAt: now.Format(time.RFC3339)},
-	}
-	sortByStatusAge(sessions)
-
-	if sessions[0].Name != "no-time" {
-		t.Fatalf("zero StatusChangedAt should remain first, got %q", sessions[0].Name)
-	}
-}
-
-func TestSortByStatusAgeOrdersByAge2(t *testing.T) {
-	now := time.Now()
-	sessions := []protocol.SessionInfo{
-		{Name: "newer", StatusChangedAt: now.Format(time.RFC3339)},
-		{Name: "older", StatusChangedAt: now.Add(-time.Hour).Format(time.RFC3339)},
-	}
-
-	sortByStatusAge(sessions)
-
-	if sessions[0].Name != "older" {
-		t.Fatalf("older status change should sort first, got %q", sessions[0].Name)
 	}
 }
