@@ -359,7 +359,14 @@ Only the orchestrator session can start scenarios. The success output always sho
 gr scenario status tracing-pipeline
 ```
 
-Output includes session names, IDs, status, agent, role, each member's `done/total` task progress, and compact `name=status` result summaries. JSON adds each result's format, required flag, resolved destination, size, publication time, error, and one of these states:
+Human output uses a labeled block for each member, with session names, IDs,
+status, agent, role, each member's `done/total` task progress, and `name=status`
+result summaries. Lines adapt to the terminal width; long identifiers retain
+their distinguishing suffix after a middle ellipsis, and result entries stay on
+separate lines. Redirected output uses `lifecycle.default_cols` (80 by default)
+as its deterministic width. JSON is unchanged and adds each result's format,
+required flag, resolved destination, size, publication time, error, and one of
+these states:
 
 - `pending` — no successful publication has occurred
 - `available` — validated content is stored at the declared destination
