@@ -10,11 +10,13 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/scenariofile"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 type scenarioFile = scenariofile.File
@@ -22,8 +24,7 @@ type scenarioFileMeta = scenariofile.Meta
 type scenarioFileSession = scenariofile.Session
 
 const (
-	scenarioStatusTableHeader = "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tPROGRESS\tWAITING ON\tMIRROR\tRESULTS\tSHARED\tREQUIRED\tATTEMPT\tDEADLINE\tPOLICY RESULT\n"
-	scenarioListTableHeader   = "  NAME\tID\tSTATUS\tSESSIONS\tGOAL\tPOLICY PROGRESS\n"
+	scenarioListTableHeader = "  NAME\tID\tSTATUS\tSESSIONS\tGOAL\tPOLICY PROGRESS\n"
 )
 
 func scenariosDir() string {
@@ -481,97 +482,218 @@ var scenarioStatusCmd = &cobra.Command{
 			return out.JSON(statusResp)
 		}
 
-		sc := statusResp.Scenario
-		out.Printf("Scenario: %s (%s) — %s\n", sc.Name, sc.ID, sc.Status)
-		out.Printf("Goal: %s\n", sc.Goal)
-
-		if sc.Render != nil {
-			out.Printf("Authored name: %s\n", sc.Render.AuthoredName)
-			out.Printf("Render context: caller=%s parent=%s initiator=%s at %s\n",
-				sc.Render.Caller.Name, sc.Render.Parent.Name, sc.Render.Initiator.Name, sc.Render.RenderedAt)
-		}
-
-		if sc.Policy != nil {
-			out.Printf("Policy: %s\n", formatScenarioPolicySummary(sc.Policy))
-
-			if sc.Policy.OutcomeReason != "" {
-				out.Printf("Outcome: %s\n", sc.Policy.OutcomeReason)
-			}
-		}
-
-		out.Printf("\n")
-
-		tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		_, _ = fmt.Fprint(tw, scenarioStatusTableHeader)
-
-		for _, s := range sc.Sessions {
-			// Progress is derived from the member's assigned todo items (issue
-			// #591): done/total, or "—" when the member has no tracked work.
-			progress := "—"
-			if s.TodoTotal > 0 {
-				progress = fmt.Sprintf("%d/%d", s.TodoDone, s.TodoTotal)
-			}
-
-			shared := ""
-			if s.Shared {
-				shared = "yes"
-			}
-
-			required, attempt, deadline, policyResult := formatScenarioMemberPolicy(s.Policy)
-
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				s.Name, s.SessionID, s.Status, s.Agent, s.Role, progress,
-				strings.Join(s.BlockedBy, ","), s.Mirror, formatScenarioResultStatus(s.Results), shared,
-				required, attempt, deadline, policyResult)
-		}
-
-		_ = tw.Flush()
-
-		if sc.CompletionEpoch > 0 {
-			out.Printf("\nCompletion epoch: %d\n", sc.CompletionEpoch)
-
-			for _, action := range sc.CompletionActions {
-				detail := action.Result
-				if action.Error != "" {
-					detail = action.Error
-				}
-
-				out.Printf("  %s: %s", action.Name, action.State)
-
-				if detail != "" {
-					out.Printf(" — %s", detail)
-				}
-
-				out.Printf("\n")
-			}
-
-			if sc.Cleanup != nil {
-				out.Printf("Cleanup: %s (%s)", sc.Cleanup.State, sc.Cleanup.Policy)
-
-				if sc.Cleanup.ScheduledAt != "" {
-					out.Printf(" at %s", sc.Cleanup.ScheduledAt)
-				}
-
-				if sc.Cleanup.Error != "" {
-					out.Printf(" — %s", sc.Cleanup.Error)
-				}
-
-				out.Printf("\n")
-			}
-		}
+		statusOut := cmd.OutOrStdout()
+		renderScenarioStatus(statusOut, statusResp.Scenario, scenarioStatusWidth(statusOut))
 
 		return nil
 	},
 }
 
-func formatScenarioResultStatus(results []protocol.ScenarioResultInfo) string {
-	if len(results) == 0 {
+const scenarioStatusLabelWidth = 14
+
+// scenarioStatusWidth uses the real terminal width when stdout is a TTY. Pipes,
+// redirected output, and terminal-probe failures use the configured lifecycle
+// fallback geometry (80 columns by default), so human output never assumes that
+// a terminal is present.
+func scenarioStatusWidth(w io.Writer) int {
+	fallbackCols, _ := client.FallbackGeometry()
+	fallback := int(fallbackCols)
+	if fallback < 1 {
+		fallback = config.DefaultColsDefault
+	}
+
+	f, ok := w.(*os.File)
+	if !ok || !term.IsTerminal(int(f.Fd())) {
+		return fallback
+	}
+
+	width, _, err := term.GetSize(int(f.Fd()))
+	if err != nil || width < 1 {
+		return fallback
+	}
+
+	return width
+}
+
+// renderScenarioStatus deliberately uses vertical member blocks instead of a
+// wide table. Every physical line is bounded by width, and identifiers use a
+// display-width-aware middle ellipsis so members with a shared templated prefix
+// remain distinguishable by their suffix. Result entries get one line each so
+// a terminal can never split a name=status pair away from its member.
+func renderScenarioStatus(w io.Writer, sc protocol.ScenarioRecord, width int) {
+	writeScenarioStatusHeading(w, width, "SCENARIO")
+	writeScenarioStatusField(w, width, "NAME", []string{sc.Name}, true)
+	writeScenarioStatusField(w, width, "ID", []string{sc.ID}, true)
+	writeScenarioStatusField(w, width, "STATUS", []string{sc.Status}, false)
+	writeScenarioStatusField(w, width, "GOAL", []string{sc.Goal}, false)
+
+	if sc.Render != nil {
+		writeScenarioStatusField(w, width, "AUTHORED NAME", []string{sc.Render.AuthoredName}, true)
+		writeScenarioStatusField(w, width, "RENDER CONTEXT", []string{fmt.Sprintf("caller=%s parent=%s initiator=%s at %s",
+			sc.Render.Caller.Name, sc.Render.Parent.Name, sc.Render.Initiator.Name, sc.Render.RenderedAt)}, false)
+	}
+
+	if sc.Policy != nil {
+		writeScenarioStatusField(w, width, "POLICY", []string{formatScenarioPolicySummary(sc.Policy)}, false)
+		if sc.Policy.OutcomeReason != "" {
+			writeScenarioStatusField(w, width, "OUTCOME", []string{sc.Policy.OutcomeReason}, false)
+		}
+	}
+
+	_, _ = fmt.Fprintln(w)
+	writeScenarioStatusHeading(w, width, fmt.Sprintf("MEMBERS (%d)", len(sc.Sessions)))
+
+	for i, s := range sc.Sessions {
+		if i > 0 {
+			_, _ = fmt.Fprintln(w)
+		}
+
+		writeScenarioStatusHeading(w, width, fmt.Sprintf("MEMBER %d/%d", i+1, len(sc.Sessions)))
+		renderScenarioStatusMember(w, width, s)
+	}
+
+	if sc.CompletionEpoch > 0 {
+		_, _ = fmt.Fprintln(w)
+		writeScenarioStatusHeading(w, width, "COMPLETION")
+		writeScenarioStatusField(w, width, "EPOCH", []string{fmt.Sprintf("%d", sc.CompletionEpoch)}, false)
+
+		for _, action := range sc.CompletionActions {
+			detail := action.Result
+			if action.Error != "" {
+				detail = action.Error
+			}
+
+			value := action.Name + ": " + action.State
+			if detail != "" {
+				value += " — " + detail
+			}
+
+			writeScenarioStatusField(w, width, "ACTION", []string{value}, false)
+		}
+
+		if sc.Cleanup != nil {
+			value := fmt.Sprintf("%s (%s)", sc.Cleanup.State, sc.Cleanup.Policy)
+			if sc.Cleanup.ScheduledAt != "" {
+				value += " at " + sc.Cleanup.ScheduledAt
+			}
+			if sc.Cleanup.Error != "" {
+				value += " — " + sc.Cleanup.Error
+			}
+
+			writeScenarioStatusField(w, width, "CLEANUP", []string{value}, false)
+		}
+	}
+}
+
+func renderScenarioStatusMember(w io.Writer, width int, s protocol.ScenarioSessionInfo) {
+	// Progress is derived from the member's assigned todo items (issue #591):
+	// done/total, or "—" when the member has no tracked work.
+	progress := "—"
+	if s.TodoTotal > 0 {
+		progress = fmt.Sprintf("%d/%d", s.TodoDone, s.TodoTotal)
+	}
+
+	shared := "no"
+	if s.Shared {
+		shared = "yes"
+	}
+
+	required, attempt, deadline, policyResult := formatScenarioMemberPolicy(s.Policy)
+
+	writeScenarioStatusField(w, width, "NAME", []string{s.Name}, true)
+	writeScenarioStatusField(w, width, "SESSION", []string{s.SessionID}, true)
+	writeScenarioStatusField(w, width, "STATUS", []string{s.Status}, false)
+	writeScenarioStatusField(w, width, "AGENT", []string{s.Agent}, false)
+	writeScenarioStatusField(w, width, "ROLE", []string{s.Role}, false)
+	writeScenarioStatusField(w, width, "PROGRESS", []string{progress}, false)
+	writeScenarioStatusField(w, width, "WAITING ON", s.BlockedBy, true)
+	writeScenarioStatusField(w, width, "MIRROR", []string{s.Mirror}, true)
+	writeScenarioStatusField(w, width, "RESULTS", formatScenarioResultStatuses(s.Results), true)
+	writeScenarioStatusField(w, width, "SHARED", []string{shared}, false)
+	writeScenarioStatusField(w, width, "REQUIRED", []string{required}, false)
+	writeScenarioStatusField(w, width, "ATTEMPT", []string{attempt}, false)
+	writeScenarioStatusField(w, width, "DEADLINE", []string{deadline}, false)
+	writeScenarioStatusField(w, width, "POLICY RESULT", []string{policyResult}, false)
+}
+
+func writeScenarioStatusHeading(w io.Writer, width int, heading string) {
+	_, _ = fmt.Fprintln(w, truncateScenarioStatusValue(heading, width, false))
+}
+
+func writeScenarioStatusField(w io.Writer, width int, label string, values []string, middle bool) {
+	if len(values) == 0 {
+		values = []string{"—"}
+	}
+
+	for i, value := range values {
+		value = emptyScenarioStatusValue(value)
+
+		fieldLabel := label
+		if i > 0 {
+			fieldLabel = ""
+		}
+
+		prefix := fmt.Sprintf("  %-*s  ", scenarioStatusLabelWidth, fieldLabel)
+		valueWidth := width - ansi.StringWidth(prefix)
+		if valueWidth < 1 {
+			_, _ = fmt.Fprintln(w, truncateScenarioStatusValue(strings.TrimSpace(prefix)+" "+value, width, false))
+
+			continue
+		}
+
+		_, _ = fmt.Fprintf(w, "%s%s\n", prefix, truncateScenarioStatusValue(value, valueWidth, middle))
+	}
+}
+
+func emptyScenarioStatusValue(value string) string {
+	value = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ", "\t", " ").Replace(value)
+	if value == "" {
 		return "—"
+	}
+
+	return value
+}
+
+func truncateScenarioStatusValue(value string, width int, middle bool) string {
+	value = emptyScenarioStatusValue(value)
+	if width < 1 {
+		return ""
+	}
+	if ansi.StringWidth(value) <= width {
+		return value
+	}
+	if !middle {
+		return ansi.Truncate(value, width, "…")
+	}
+	if width == 1 {
+		return "…"
+	}
+
+	contentWidth := width - 1
+	leftWidth := (contentWidth + 1) / 2
+	rightWidth := contentWidth - leftWidth
+	totalWidth := ansi.StringWidth(value)
+
+	return ansi.Cut(value, 0, leftWidth) + "…" + ansi.Cut(value, totalWidth-rightWidth, totalWidth)
+}
+
+func formatScenarioResultStatuses(results []protocol.ScenarioResultInfo) []string {
+	if len(results) == 0 {
+		return nil
 	}
 
 	parts := make([]string, len(results))
 	for i, result := range results {
 		parts[i] = result.Name + "=" + result.Status
+	}
+
+	return parts
+}
+
+func formatScenarioResultStatus(results []protocol.ScenarioResultInfo) string {
+	parts := formatScenarioResultStatuses(results)
+	if len(parts) == 0 {
+		return "—"
 	}
 
 	return strings.Join(parts, ",")

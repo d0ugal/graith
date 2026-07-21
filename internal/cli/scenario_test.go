@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/protocol"
@@ -549,13 +552,133 @@ func TestFormatScenarioPolicyStatus(t *testing.T) {
 	}
 }
 
-func TestScenarioPolicyColumnsAppendToLegacyHumanOutput(t *testing.T) {
-	if !strings.HasPrefix(scenarioStatusTableHeader, "NAME\tSESSION\tSTATUS\tAGENT\tROLE\tPROGRESS\tWAITING ON\tMIRROR\tRESULTS\tSHARED\t") {
-		t.Fatalf("status header moved legacy columns: %q", scenarioStatusTableHeader)
-	}
-
+func TestScenarioPolicyColumnsAppendToLegacyListOutput(t *testing.T) {
 	if !strings.HasPrefix(scenarioListTableHeader, "  NAME\tID\tSTATUS\tSESSIONS\tGOAL\t") {
 		t.Fatalf("list header moved legacy columns: %q", scenarioListTableHeader)
+	}
+}
+
+func TestRenderScenarioStatusBoundsLongMemberBlocksAtCommonWidths(t *testing.T) {
+	longScenario := "incident-response-2026-07-21T14-45-00-production-eu-west-observability-a1b2c3d4"
+	memberPrefix := longScenario + "-review-streaming-ingestion-and-storage-correctness-"
+	longResultName := strings.Repeat("correctness-evidence-", 4) + "verdict"
+	sc := protocol.ScenarioRecord{
+		ID:     "sc-a1b2c3d4e5f6071829304",
+		Name:   longScenario,
+		Status: "running",
+		Goal:   strings.Repeat("Trace the realistic multi-region failure without losing member attribution. ", 3),
+		Sessions: []protocol.ScenarioSessionInfo{
+			{
+				Name: memberPrefix + "correctness", SessionID: "sess-correctness-a1b2c3d4e5f6", Status: "running", Agent: "claude",
+				Role:   strings.Repeat("Validate ordering, retries, and durable state across every ingestion boundary. ", 3),
+				Mirror: longScenario + "-implementation-coordinator-primary-mirror", TodoDone: 2, TodoTotal: 5,
+				Results: []protocol.ScenarioResultInfo{
+					{Name: longResultName, Status: "pending"},
+					{Name: "review-notes", Status: "available"},
+					{Name: "trace-evidence", Status: "invalid"},
+					{Name: "archived-report", Status: "failed"},
+				},
+				Policy: &protocol.ScenarioMemberPolicyInfo{Required: true, Attempt: 2, MaxAttempts: 3, Deadline: "2026-07-21T15:45:00Z"},
+			},
+			{
+				Name: memberPrefix + "security", SessionID: "sess-security-b2c3d4e5f607", Status: "stopped", Agent: "codex",
+				Role:   strings.Repeat("Review trust boundaries and authenticated result publication behavior. ", 3),
+				Mirror: longScenario + "-implementation-coordinator-secondary-mirror", TodoDone: 1, TodoTotal: 3,
+				BlockedBy: []string{memberPrefix + "correctness"},
+			},
+			{
+				Name: memberPrefix + "operability", SessionID: "sess-operability-c3d4e5f60718", Status: "errored", Agent: "cursor",
+				Role:   strings.Repeat("Check diagnostics, restart behavior, and operator-readable output. ", 3),
+				Mirror: longScenario + "-implementation-coordinator-tertiary-mirror", Shared: true,
+			},
+		},
+	}
+
+	for _, width := range []int{80, 120, 160, 200} {
+		t.Run(fmt.Sprintf("%d_columns", width), func(t *testing.T) {
+			var buf bytes.Buffer
+			renderScenarioStatus(&buf, sc, width)
+
+			got := buf.String()
+			for lineNumber, line := range strings.Split(strings.TrimSuffix(got, "\n"), "\n") {
+				if lineWidth := ansi.StringWidth(line); lineWidth > width {
+					t.Errorf("line %d width = %d, want <= %d: %q", lineNumber+1, lineWidth, width, line)
+				}
+			}
+
+			for i, want := range []struct {
+				nameSuffix   string
+				mirrorSuffix string
+			}{
+				{"correctness", "primary-mirror"},
+				{"security", "secondary-mirror"},
+				{"operability", "tertiary-mirror"},
+			} {
+				blockStart := fmt.Sprintf("MEMBER %d/3\n", i+1)
+				start := strings.Index(got, blockStart)
+				if start < 0 {
+					t.Fatalf("missing attributable member boundary %q:\n%s", blockStart, got)
+				}
+
+				end := strings.Index(got[start+len(blockStart):], "\nMEMBER ")
+				block := got[start:]
+				if end >= 0 {
+					block = got[start : start+len(blockStart)+end]
+				}
+				if !strings.Contains(block, want.nameSuffix) {
+					t.Errorf("member %d block lost distinguishing suffix %q:\n%s", i+1, want.nameSuffix, block)
+				}
+				if !strings.Contains(block, want.mirrorSuffix) {
+					t.Errorf("member %d block lost mirror suffix %q:\n%s", i+1, want.mirrorSuffix, block)
+				}
+			}
+
+			for _, result := range []string{
+				"review-notes=available",
+				"trace-evidence=invalid",
+				"archived-report=failed",
+			} {
+				if !strings.Contains(got, result) {
+					t.Errorf("result state %q was split, truncated, or omitted:\n%s", result, got)
+				}
+			}
+
+			pendingLine := ""
+			for _, line := range strings.Split(got, "\n") {
+				if strings.HasSuffix(line, "=pending") {
+					pendingLine = line
+					break
+				}
+			}
+			if pendingLine == "" {
+				t.Errorf("long pending result lost or split from its state:\n%s", got)
+			} else if width == 80 && !strings.Contains(pendingLine, "…") {
+				t.Errorf("80-column pending result was not deterministically truncated: %q", pendingLine)
+			}
+		})
+	}
+}
+
+func TestScenarioStatusWidthUsesConfiguredFallbackForNonTTY(t *testing.T) {
+	oldCols, oldRows := client.FallbackGeometry()
+	t.Cleanup(func() {
+		client.ConfigurePresentation(client.PresentationPrefs{DefaultCols: int(oldCols), DefaultRows: int(oldRows)})
+	})
+
+	client.ConfigurePresentation(client.PresentationPrefs{DefaultCols: 97})
+
+	if got := scenarioStatusWidth(&bytes.Buffer{}); got != 97 {
+		t.Fatalf("non-TTY width = %d, want configured fallback 97", got)
+	}
+}
+
+func TestTruncateScenarioStatusValueUsesDisplayWidthAndKeepsSuffix(t *testing.T) {
+	got := truncateScenarioStatusValue("incident-编辑-observability-correctness", 24, true)
+	if width := ansi.StringWidth(got); width > 24 {
+		t.Fatalf("display width = %d, want <= 24: %q", width, got)
+	}
+	if !strings.Contains(got, "…") || !strings.HasSuffix(got, "correctness") {
+		t.Fatalf("middle truncation = %q, want ellipsis and distinguishing suffix", got)
 	}
 }
 

@@ -29,8 +29,12 @@ cat tracing.toml | gr scenario start -
 
 ### `gr scenario status <name>`
 
-Show each session's lifecycle, todo progress, and declared result status; JSON
-adds resolved shared-store destinations and validation errors.
+Show each session's lifecycle, todo progress, and declared result status in
+width-aware, labeled member blocks. Long identifiers use a middle ellipsis so
+templated suffixes remain visible, and each declared result occupies its own
+line. When output is redirected, the command uses `lifecycle.default_cols`
+(80 by default) instead of assuming a terminal is present. JSON output is
+unchanged and adds resolved shared-store destinations and validation errors.
 
 ### `gr scenario result put <name> [body]`
 
