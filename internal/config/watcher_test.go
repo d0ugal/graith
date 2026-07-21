@@ -14,7 +14,7 @@ import (
 
 func TestWatcherDoesNotReportReloadWhenApplyFails(t *testing.T) {
 	configFile := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(configFile, []byte("default_agent = \"canny\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(configFile, []byte("default_agent = \"codex\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

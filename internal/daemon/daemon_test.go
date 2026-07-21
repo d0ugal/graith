@@ -2496,6 +2496,50 @@ func TestReloadConfig(t *testing.T) {
 	}
 }
 
+func TestReloadConfigRejectsRemovedDefaultAgent(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+
+	initial := `
+default_agent = "thrawn"
+[agents.thrawn]
+command = "thrawn"
+`
+	if err := os.WriteFile(cfgPath, []byte(initial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm := newTestSessionManager(t)
+	sm.configFile = cfgPath
+
+	if err := sm.ReloadConfig(); err != nil {
+		t.Fatalf("initial ReloadConfig() error = %v", err)
+	}
+
+	if got := sm.Config().DefaultAgent; got != "thrawn" {
+		t.Fatalf("initial DefaultAgent = %q, want thrawn", got)
+	}
+
+	// Keep the default reference but remove its custom definition. The reload
+	// must fail before applyConfig publishes the candidate generation.
+	if err := os.WriteFile(cfgPath, []byte(`default_agent = "thrawn"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := sm.ReloadConfig()
+	assertErrContains(t, err, "default_agent")
+	assertErrContains(t, err, "thrawn")
+
+	retained := sm.Config()
+	if retained.DefaultAgent != "thrawn" {
+		t.Errorf("DefaultAgent after rejected reload = %q, want retained thrawn", retained.DefaultAgent)
+	}
+
+	if _, ok := retained.Agents["thrawn"]; !ok {
+		t.Error("custom default agent was removed from the retained config")
+	}
+}
+
 func TestReloadConfigRejectsDataDirChange(t *testing.T) {
 	dir := t.TempDir()
 

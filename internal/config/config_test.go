@@ -143,6 +143,62 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
+func TestDefaultAgentValidation(t *testing.T) {
+	write := func(t *testing.T, body string) string {
+		t.Helper()
+
+		cfgPath := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		return cfgPath
+	}
+
+	t.Run("unknown agent is rejected at load", func(t *testing.T) {
+		_, err := Load(write(t, `default_agent = "thrawn"`))
+		if err == nil {
+			t.Fatal("Load: expected error for unknown default agent, got nil")
+		}
+
+		if !strings.Contains(err.Error(), "default_agent") || !strings.Contains(err.Error(), "thrawn") {
+			t.Errorf("error %q must name the field and value", err)
+		}
+	})
+
+	t.Run("custom agent loads", func(t *testing.T) {
+		cfg, err := Load(write(t, `
+default_agent = "thrawn"
+[agents.thrawn]
+command = "thrawn"
+`))
+		if err != nil {
+			t.Fatalf("Load: unexpected error: %v", err)
+		}
+
+		if cfg.DefaultAgent != "thrawn" {
+			t.Errorf("DefaultAgent = %q, want thrawn", cfg.DefaultAgent)
+		}
+	})
+
+	t.Run("empty agent loads", func(t *testing.T) {
+		cfg, err := Load(write(t, `default_agent = ""`))
+		if err != nil {
+			t.Fatalf("Load: unexpected error: %v", err)
+		}
+
+		if cfg.DefaultAgent != "" {
+			t.Errorf("DefaultAgent = %q, want empty", cfg.DefaultAgent)
+		}
+	})
+
+	t.Run("default config remains valid", func(t *testing.T) {
+		if err := Default().Validate(); err != nil {
+			t.Fatalf("Default().Validate(): unexpected error: %v", err)
+		}
+	})
+}
+
 func TestIdleTimeoutDuration(t *testing.T) {
 	tests := []struct {
 		name  string
