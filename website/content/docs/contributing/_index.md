@@ -103,6 +103,53 @@ docs: add contributing guide
 test: add fuzz test for frame decoder
 ```
 
+## Native libghostty dependency updates
+
+`libghostty-native.lock.json` is the canonical record for the complete native
+dependency unit. Do not separately edit the generated inventory in
+`libghostty-native.spdx.json` or the marked dependency table in
+`THIRD_PARTY_NOTICES.libghostty.md`. Regenerate and verify the unit with:
+
+```bash
+scripts/libghostty-native.sh generate-dependency-unit
+scripts/libghostty-native.sh verify-dependency-unit
+```
+
+Renovate detects go-libghostty, Ghostty, Zig, uucode, Highway, simdutf, and the
+SPDX Java validator from exact fields in the lock. It groups them as
+`libghostty-native`, disables automerge, and disables the ordinary Go manager
+for go-libghostty so a wrapper-only module PR cannot merge. The repository's
+regeneration workflow is a fallback when the hosted Renovate service cannot run
+the post-upgrade command. Validate the config and its deliberately stale update
+fixture locally with:
+
+```bash
+scripts/verify-renovate-libghostty.sh
+```
+
+go-libghostty is commit-pinned from its canonical Tangled repository. Its
+`CMakeLists.txt` exact `GIT_TAG` is the default tested Ghostty revision. Ghostty
+is also commit-pinned because its C API is not released independently. A newer
+Ghostty commit can be proposed through Renovate's dependency dashboard, but it
+needs explicit approval and the complete native compatibility suite.
+
+Zig, uucode, Highway, and simdutf are discovered from their upstream release
+feeds, but compatibility comes from the selected Ghostty source tree. The
+generator reads Ghostty's root and package `build.zig.zon` declarations and the
+vendored simdutf header, then derives the exact compiled versions, commits, Zig
+content hashes, source archives, and license hashes. A transitive-only “latest”
+proposal fails until a selected Ghostty commit actually consumes it; reviewers
+use those dashboard entries to discover upstream changes rather than overriding
+Ghostty's tested graph.
+
+Before generation can succeed, the checksum-reviewed Apple xcframework for the
+selected Ghostty commit must already be published at the exact URL derived by
+the lock tool. Review any changed source or license hashes and confirm the
+recorded license conclusions still apply; generation never weakens or guesses
+those conclusions. Every generated PR must pass `verify-metadata` and the
+existing exact-pin wrapper, compatibility, race/fuzz, packaging, SPDX, linkage,
+privacy, and supported-platform native checks.
+
 ## CI pipeline
 
 CI (`ci.yml`) runs on every push to `main` and every PR:

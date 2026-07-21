@@ -22,7 +22,7 @@
         }
       ],
       "filesAnalyzed": false,
-      "licenseComments": "Exact revision e9e1010f80b1ced0b7efcdb300f4838513c0816e; module sum h1:XAiToY/9BPUvzfTHSmhHRjPprV5JfwjWE6BGT7ojEQ8=; LICENSE SHA-256 fdf9b4ad7b61687fd3d4b1e3efa63cbc10743e6b733a62669b53a324251357b9.",
+      "licenseComments": "Exact revision e9e1010f80b1ced0b7efcdb300f4838513c0816e; module sum h1:XAiToY/9BPUvzfTHSmhHRjPprV5JfwjWE6BGT7ojEQ8=; wrapper build tests pin Ghostty 6d089a544db53f3457374c2c406bccee80722cdf; LICENSE SHA-256 fdf9b4ad7b61687fd3d4b1e3efa63cbc10743e6b733a62669b53a324251357b9.",
       "licenseConcluded": "MIT",
       "licenseDeclared": "MIT",
       "name": "go-libghostty",
@@ -41,7 +41,7 @@
         }
       ],
       "filesAnalyzed": false,
-      "licenseComments": "Exact source LICENSE SHA-256 386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1. The Apple archive SHA-256 is 25c1620e63311cc687637c8e3bdfae1fe3e070892966c07d0d91065ccda541c0.",
+      "licenseComments": "Exact source LICENSE SHA-256 386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1. The committed header tree SHA-256 is 44c382b4d1bd3d48451f91da190109e082921405bd0e86ce635ae4f32ccea0cf. The Apple archive SHA-256 is 25c1620e63311cc687637c8e3bdfae1fe3e070892966c07d0d91065ccda541c0.",
       "licenseConcluded": "MIT",
       "licenseDeclared": "MIT",
       "name": "Ghostty libghostty-vt",

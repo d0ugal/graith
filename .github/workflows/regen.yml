@@ -1,8 +1,11 @@
 # Auto-regenerate committed generated artifacts on a PR.
 #
 # Two files in this repo are mechanical outputs of `go test ... -update`:
-#   - internal/protocol/.../Fixtures/protocol_manifest.json  (from messages.go)
+#   - gui/shared/Tests/GraithProtocolTests/Fixtures/protocol_manifest.json
+#     (from internal/protocol/messages.go)
 #   - website/content/docs/capabilities.md                   (from capabilities.json)
+# Native dependency PRs additionally project `libghostty-native.lock.json` into
+# the Go module, headers, Apple artifact pin, SPDX inventory, and notices.
 #
 # `TestManifestUpToDate` / `TestDocMatchesManifest` in the normal Test job already
 # FAIL when either is stale — that gate stays the source of truth. This workflow is
@@ -49,6 +52,7 @@ jobs:
           # commit lands back on the branch, and keep the persisted GITHUB_TOKEN
           # credentials so `git push` authenticates.
           ref: ${{ github.head_ref }}
+          fetch-depth: 0
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -59,12 +63,34 @@ jobs:
           go test ./internal/protocol -run TestManifestUpToDate -update
           go test ./internal/capabilities -run TestDocMatchesManifest -update
 
+      - name: Detect a native dependency lock update
+        id: native-lock
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet "$BASE_SHA...HEAD" -- libghostty-native.lock.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Rotate the complete native dependency unit
+        if: steps.native-lock.outputs.changed == 'true'
+        env:
+          # The PR lock is already committed, so tell the generator which
+          # revision to compare when deciding whether Ghostty owns transitive
+          # version selection for this update.
+          GRAITH_LIBGHOSTTY_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: scripts/libghostty-native.sh generate-dependency-unit
+
       - name: Verify regenerated content
         # Prove the outputs are consistent within this job, since the commit-back
         # below won't re-trigger the full suite on the bot commit.
         run: |
           go test ./internal/protocol -run TestManifestUpToDate
           go test ./internal/capabilities -run 'TestDocMatchesManifest|TestManifestLoads'
+          scripts/libghostty-native.sh verify-dependency-unit
 
       - name: Commit back if changed
         # HEAD_REF is passed via env, never interpolated into the script body:
@@ -74,12 +100,22 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
-          if git diff --quiet; then
+          # Stage only known mechanical outputs. In particular, -A is needed
+          # below the header directory so a Ghostty update can add or remove
+          # public headers instead of silently omitting new files.
+          git add -A -- \
+            gui/shared/Tests/GraithProtocolTests/Fixtures/protocol_manifest.json \
+            website/content/docs/capabilities.md \
+            go.mod go.sum gui/shared/Package.swift \
+            gui/shared/Sources/CGhosttyVT/include \
+            libghostty-native.lock.json libghostty-native.spdx.json \
+            THIRD_PARTY_NOTICES.libghostty.md
+          if git diff --cached --quiet; then
             echo "Generated files already up to date — nothing to commit."
             exit 0
           fi
           echo "Generated files were stale; committing regenerated output."
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "chore(generated): regenerate manifest + capabilities doc [skip ci]"
+          git commit -m "chore(generated): refresh generated dependency metadata [skip ci]"
           git push origin "HEAD:$HEAD_REF"

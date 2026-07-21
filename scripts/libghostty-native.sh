@@ -5,34 +5,40 @@
 # cross-build verification.
 set -euo pipefail
 
-readonly GHOSTTY_SHA="91f66da24527fa02d92b5fd0b41cd020f553a64c"
-readonly GHOSTTY_REPO="https://github.com/ghostty-org/ghostty.git"
-readonly GHOSTTY_ARTIFACT_URL="https://github.com/d0ugal/graith/releases/download/libghostty-vt-91f66da/libghostty-vt.xcframework.zip"
-readonly GHOSTTY_ARTIFACT_SHA256="25c1620e63311cc687637c8e3bdfae1fe3e070892966c07d0d91065ccda541c0"
-readonly REQUIRED_ZIG="0.15.2"
-readonly GO_LIBGHOSTTY_SHA="e9e1010f80b1ced0b7efcdb300f4838513c0816e"
-readonly GO_LIBGHOSTTY_VERSION="v0.0.0-20260527181217-e9e1010f80b1"
-readonly GO_LIBGHOSTTY_SUM="h1:XAiToY/9BPUvzfTHSmhHRjPprV5JfwjWE6BGT7ojEQ8="
-readonly UUCODE_VERSION="0.2.0"
-readonly UUCODE_HASH="uucode-0.2.0-ZZjBPqZVVABQepOqZHR7vV_NcaN-wats0IB6o-Exj6m9"
-readonly HIGHWAY_VERSION="1.2.0"
-readonly HIGHWAY_SHA="66486a10623fa0d72fe91260f96c892e41aceb06"
-readonly SIMDUTF_VERSION="9.0.0"
-readonly SIMDUTF_MANIFEST_VERSION="5.2.8"
-readonly SIMDUTF_UPSTREAM_SHA="ca7acbcea967b5dcbab490066e99e3a6e6925539"
-readonly SIMDUTF_CPP_SHA256="38dc5481dc4b7eef95cea8056b84d940419288100f317ecaff683bd89f163263"
-readonly SIMDUTF_HEADER_SHA256="d3501fc2143f0edc5c84e6bb013a7fdb8ccd95514f7fd0816669248e62676301"
-readonly ZIG_SOURCE_SHA256="d9b30c7aa983fcff5eed2084d54ae83eaafe7ff3a84d8fb754d854165a6e521c"
-readonly SPDX_TOOLS_VERSION="2.0.7"
-readonly SPDX_TOOLS_URL="https://github.com/spdx/tools-java/releases/download/v2.0.7/tools-java-2.0.7.zip"
-readonly SPDX_TOOLS_SHA256="2dc63c3399c5178058b1be8a3de6f13b9f24981cd86c4292ef98f4a7e90de36d"
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+DEPENDENCY_LOCK="$REPO_DIR/libghostty-native.lock.json"
+if ! command -v jq >/dev/null 2>&1; then
+    echo "error: jq is required to load the native dependency lock" >&2
+    exit 1
+fi
+
+readonly GHOSTTY_SHA="$(jq -er '.ghostty.commit' "$DEPENDENCY_LOCK")"
+readonly GHOSTTY_REPO="$(jq -er '.ghostty.repository' "$DEPENDENCY_LOCK")"
+readonly GHOSTTY_ARTIFACT_URL="$(jq -er '.ghostty.appleArtifact.url' "$DEPENDENCY_LOCK")"
+readonly GHOSTTY_ARTIFACT_SHA256="$(jq -er '.ghostty.appleArtifact.sha256' "$DEPENDENCY_LOCK")"
+readonly REQUIRED_ZIG="$(jq -er '.zig.version' "$DEPENDENCY_LOCK")"
+readonly GO_LIBGHOSTTY_SHA="$(jq -er '.goLibghostty.commit' "$DEPENDENCY_LOCK")"
+readonly GO_LIBGHOSTTY_VERSION="$(jq -er '.goLibghostty.version' "$DEPENDENCY_LOCK")"
+readonly GO_LIBGHOSTTY_SUM="$(jq -er '.goLibghostty.moduleSum' "$DEPENDENCY_LOCK")"
+readonly UUCODE_VERSION="$(jq -er '.uucode.version' "$DEPENDENCY_LOCK")"
+readonly UUCODE_HASH="$(jq -er '.uucode.zigHash' "$DEPENDENCY_LOCK")"
+readonly HIGHWAY_VERSION="$(jq -er '.highway.version' "$DEPENDENCY_LOCK")"
+readonly HIGHWAY_SHA="$(jq -er '.highway.commit' "$DEPENDENCY_LOCK")"
+readonly SIMDUTF_VERSION="$(jq -er '.simdutf.version' "$DEPENDENCY_LOCK")"
+readonly SIMDUTF_MANIFEST_VERSION="$(jq -er '.simdutf.manifestVersion' "$DEPENDENCY_LOCK")"
+readonly SIMDUTF_UPSTREAM_SHA="$(jq -er '.simdutf.commit' "$DEPENDENCY_LOCK")"
+readonly SIMDUTF_CPP_SHA256="$(jq -er '.simdutf.cppSHA256' "$DEPENDENCY_LOCK")"
+readonly SIMDUTF_HEADER_SHA256="$(jq -er '.simdutf.headerSHA256' "$DEPENDENCY_LOCK")"
+readonly ZIG_SOURCE_SHA256="$(jq -er '.zig.sourceSHA256' "$DEPENDENCY_LOCK")"
+readonly SPDX_TOOLS_VERSION="$(jq -er '.spdxTools.version' "$DEPENDENCY_LOCK")"
+readonly SPDX_TOOLS_URL="$(jq -er '.spdxTools.url' "$DEPENDENCY_LOCK")"
+readonly SPDX_TOOLS_SHA256="$(jq -er '.spdxTools.sha256' "$DEPENDENCY_LOCK")"
 readonly SPDX_NAMESPACE="https://github.com/d0ugal/graith/sbom/libghostty-native/$GHOSTTY_SHA/$GO_LIBGHOSTTY_SHA"
 readonly BENCH_SAMPLES="5"
 readonly BENCHTIME="1s"
 readonly MEASUREMENT_GOMAXPROCS="10"
 readonly MEMORY_SAMPLES="5"
 
-REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 NATIVE_WORK="${GRAITH_LIBGHOSTTY_WORK:-}"
 OWN_WORK=0
 if [[ -z "$NATIVE_WORK" ]]; then
@@ -79,6 +85,16 @@ sha256_value() {
     else
         sha256sum "$path" | awk '{print $1}'
     fi
+}
+
+verify_dependency_unit() {
+    cd "$REPO_DIR"
+    go run ./internal/libghosttydeps/cmd verify "$REPO_DIR"
+}
+
+generate_dependency_unit() {
+    cd "$REPO_DIR"
+    go run ./internal/libghosttydeps/cmd generate "$REPO_DIR"
 }
 
 write_pkg_config() {
@@ -135,6 +151,7 @@ verify_metadata() {
     local actual_sum
     local actual_version
 
+    verify_dependency_unit
     cd "$REPO_DIR"
     if ! command -v jq >/dev/null 2>&1; then
         echo "error: jq is required to verify the native SPDX inventory" >&2
@@ -863,6 +880,8 @@ usage() {
 usage: $0 test|race|fuzz|bench|memory|daemon-test|soak [cycles [timeout]]|all
        $0 source-build <zig-target> <output-library>
        $0 source-test <zig-target>
+       $0 verify-dependency-unit
+       $0 generate-dependency-unit
        $0 verify-metadata [ghostty-source]
        $0 verify-default-binary <binary>
        $0 verify-darwin-arm64-candidate <binary> <revision>
@@ -878,6 +897,8 @@ test/bench/memory use the checksum-pinned Apple artifact on macOS arm64.
 daemon-test runs the external daemon lifecycle and bounded 12-cycle soak.
 soak defaults to 1,000 cycles bounded by one hour.
 source-build checks out Ghostty $GHOSTTY_SHA and requires Zig $REQUIRED_ZIG.
+generate-dependency-unit rotates the complete lock, Go module, headers, SPDX,
+notice inventory, and Apple artifact metadata; verify-dependency-unit is offline.
 EOF
 }
 
@@ -906,6 +927,12 @@ case "${1:-}" in
         ;;
     source-test)
         source_test "${2:-}"
+        ;;
+    verify-dependency-unit)
+        verify_dependency_unit
+        ;;
+    generate-dependency-unit)
+        generate_dependency_unit
         ;;
     verify-metadata)
         verify_metadata "${2:-}"

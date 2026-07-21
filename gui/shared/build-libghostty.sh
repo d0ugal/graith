@@ -14,12 +14,16 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # PINNED VERSION
 # ─────────────────────────────────────────────────────────────────────────────
-# Ghostty commit (repo default branch tip at the time this was written):
-GHOSTTY_SHA="91f66da24527fa02d92b5fd0b41cd020f553a64c"
-GHOSTTY_REPO="https://github.com/ghostty-org/ghostty.git"
-# Ghostty pins its Zig toolchain in build.zig.zon: `minimum_zig_version`.
-# At the pinned SHA this is:
-REQUIRED_ZIG="0.15.2"
+# The repository lock is the only update source. Renovate changes its reviewed
+# pins and scripts/libghostty-native.sh generate-dependency-unit rotates the
+# artifact, headers, SPDX inventory, and notices together.
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"           # gui/shared/
+REPO_ROOT="$(cd "$REPO_DIR/../.." && pwd)"
+DEPENDENCY_LOCK="$REPO_ROOT/libghostty-native.lock.json"
+command -v jq >/dev/null || { echo "error: jq not found"; exit 1; }
+GHOSTTY_SHA="$(jq -er '.ghostty.commit' "$DEPENDENCY_LOCK")"
+GHOSTTY_REPO="$(jq -er '.ghostty.repository' "$DEPENDENCY_LOCK")"
+REQUIRED_ZIG="$(jq -er '.zig.version' "$DEPENDENCY_LOCK")"
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # REQUIREMENTS (see gui/NEEDS-MAC-VALIDATION.md for the environment gaps that
@@ -34,7 +38,6 @@ REQUIRED_ZIG="0.15.2"
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"             # gui/shared/ (this script lives here)
 WORK="${WORK:-$(mktemp -d)}"
 OUT="$REPO_DIR/Libraries/libghostty-vt.xcframework"
 

@@ -1,11 +1,13 @@
 # Third-party notices for Graith native libghostty builds
 
+<!-- BEGIN GENERATED LIBGHOSTTY DEPENDENCY INVENTORY -->
 This file applies only to Graith testing candidates built with the
 `libghostty` build tag. Ordinary pure-Go rollback builds do not contain this
 native dependency closure. The committed `libghostty-native.spdx.json` is the
 machine-readable dependency inventory; candidate packaging materializes from it
 a document with the same filename that is bound to the binary's exact revision,
-target, and SHA-256. The script, inventory, and this file must be rotated as one
+target, and SHA-256. `libghostty-native.lock.json` is the canonical update
+source. The script, generated inventory, and this file must be rotated as one
 dependency unit.
 
 ## Exact dependency and provenance inventory
@@ -29,10 +31,12 @@ build-only tool.
 The exact verified inputs are:
 
 - go-libghostty module sum
-  `h1:XAiToY/9BPUvzfTHSmhHRjPprV5JfwjWE6BGT7ojEQ8=` and LICENSE SHA-256
+  `h1:XAiToY/9BPUvzfTHSmhHRjPprV5JfwjWE6BGT7ojEQ8=`, wrapper-tested Ghostty commit
+  `6d089a544db53f3457374c2c406bccee80722cdf`, and LICENSE SHA-256
   `fdf9b4ad7b61687fd3d4b1e3efa63cbc10743e6b733a62669b53a324251357b9`;
 - Ghostty LICENSE SHA-256
-  `386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1`;
+  `386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1` and committed-header tree SHA-256
+  `44c382b4d1bd3d48451f91da190109e082921405bd0e86ce635ae4f32ccea0cf`;
 - Apple testing archive
   `https://github.com/d0ugal/graith/releases/download/libghostty-vt-91f66da/libghostty-vt.xcframework.zip`
   SHA-256
@@ -42,7 +46,7 @@ The exact verified inputs are:
   `d9b30c7aa983fcff5eed2084d54ae83eaafe7ff3a84d8fb754d854165a6e521c`,
   and LICENSE SHA-256
   `5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177`;
-- uucode archive SHA-256
+- uucode archive `https://deps.files.ghostty.org/uucode-0.2.0-ZZjBPqZVVABQepOqZHR7vV_NcaN-wats0IB6o-Exj6m9.tar.gz` SHA-256
   `d0abee0f4f8bd6eae3c051777e16e7c42d8964aaaa015591c4e565703f465f95`,
   LICENSE SHA-256
   `312e901e142be2477b4ca859e9311f9e3f80d33372991759b7921c1893605f33`,
@@ -50,9 +54,8 @@ The exact verified inputs are:
   `de219cece932aad5a817bf763393d8d149d378a15d2ad5320e3331eac07626dd`,
   and Unicode notice SHA-256
   `1eda5a3b026870c737b22e8bcd4954338612c790db688242e003f41a4fa95175`;
-- Highway archive SHA-256
-  `87d4f8893ef4e08f224973608ffebf94268a81380ba79c12e8841968c80aa212`
-  and elected BSD license SHA-256
+- Highway archive `https://deps.files.ghostty.org/highway-66486a10623fa0d72fe91260f96c892e41aceb06.tar.gz` SHA-256
+  `87d4f8893ef4e08f224973608ffebf94268a81380ba79c12e8841968c80aa212` and elected BSD license SHA-256
   `d25e82e26acd42ca3ccc9993622631163425b869b9e16284226d534cff6470f2`;
 - vendored simdutf.cpp SHA-256
   `38dc5481dc4b7eef95cea8056b84d940419288100f317ecaff683bd89f163263`,
@@ -66,6 +69,7 @@ The uucode comparison resources excluded by that package's
 UTF-8 decoder, and Unicode tables that are compiled. System frameworks and C
 runtime libraries reported by executable-format inspection remain dynamically
 provided by the operating system and are not copied into the candidate.
+<!-- END GENERATED LIBGHOSTTY DEPENDENCY INVENTORY -->
 
 ## MIT-licensed components
 

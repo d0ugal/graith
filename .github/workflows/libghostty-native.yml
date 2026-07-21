@@ -42,7 +42,7 @@ jobs:
             echo "Could not list PR files; running native jobs to be safe."
             exit 0
           fi
-          if grep -Eq '^\.github/workflows/libghostty-native\.yml$|^docs/design/2026-07-18-libghostty-daemon-backend.*\.md$|^gui/shared/Package\.swift$|^gui/shared/Sources/CGhosttyVT/include/|^go\.(mod|sum)$|^internal/(cli|daemon|integration|pty)/|^libghostty-native\.spdx\.json$|^scripts/libghostty-native\.sh$|^THIRD_PARTY_NOTICES\.libghostty\.md$' <<<"$files"; then
+          if grep -Eq '^\.github/workflows/libghostty-native\.yml$|^docs/design/2026-07-18-libghostty-daemon-backend.*\.md$|^gui/shared/Package\.swift$|^gui/shared/Sources/CGhosttyVT/include/|^go\.(mod|sum)$|^internal/(cli|daemon|integration|libghosttydeps|pty)/|^libghostty-native\.(lock|spdx)\.json$|^scripts/libghostty-native\.sh$|^THIRD_PARTY_NOTICES\.libghostty\.md$' <<<"$files"; then
             echo "native=true" >> "$GITHUB_OUTPUT"
             echo "libghostty-relevant files changed: running native jobs."
           else
@@ -188,18 +188,19 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - name: Install checksum-verified Zig 0.15.2
-        env:
-          ZIG_SHA256: 02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239
-          ZIG_URL: https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz
+      - name: Install checksum-verified Zig from the native dependency lock
         run: |
           set -euo pipefail
+          zig_version="$(jq -er '.zig.version' libghostty-native.lock.json)"
+          zig_url="$(jq -er '.zig.linuxX8664URL' libghostty-native.lock.json)"
+          zig_sha256="$(jq -er '.zig.linuxX8664SHA256' libghostty-native.lock.json)"
           mkdir -p "${RUNNER_TEMP}/zig"
           curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
-            "$ZIG_URL" --output "${RUNNER_TEMP}/zig.tar.xz"
-          printf '%s  %s\n' "$ZIG_SHA256" "${RUNNER_TEMP}/zig.tar.xz" | sha256sum --check --status
+            "$zig_url" --output "${RUNNER_TEMP}/zig.tar.xz"
+          printf '%s  %s\n' "$zig_sha256" "${RUNNER_TEMP}/zig.tar.xz" | sha256sum --check --status
           tar -xf "${RUNNER_TEMP}/zig.tar.xz" -C "${RUNNER_TEMP}/zig" --strip-components=1
           echo "${RUNNER_TEMP}/zig" >> "$GITHUB_PATH"
+          test "$("${RUNNER_TEMP}/zig/zig" version)" = "$zig_version"
       - name: Build the exact Ghostty source pin
         env:
           GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
