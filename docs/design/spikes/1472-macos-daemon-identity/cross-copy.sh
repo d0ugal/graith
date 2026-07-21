@@ -8,7 +8,7 @@ if [ "$(uname -s)" != "Darwin" ]; then
 	exit 1
 fi
 
-spike_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+spike_dir=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 first_root=$(mktemp -d "${TMPDIR:-/tmp}/graith-identity-spike-v1.XXXXXX")
 second_root=$(mktemp -d "${TMPDIR:-/tmp}/graith-identity-spike-v2.XXXXXX")
 first_app=$("$spike_dir/build.sh" "$first_root")

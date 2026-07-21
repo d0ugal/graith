@@ -79,6 +79,7 @@ CI runs `golangci-lint` via Docker:
 ```bash
 make lint       # lint and autofix
 make lint-only  # lint without fixing
+make shellcheck # lint every tracked shell script (all optional warning/error checks)
 make fmt        # format only
 ```
 
