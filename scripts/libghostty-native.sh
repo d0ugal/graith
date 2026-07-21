@@ -265,7 +265,7 @@ run_go() {
             go test -count=1 go.mitchellh.com/libghostty
             go test -count=1 -tags=libghostty ./internal/pty
             go test -count=1 -tags=libghostty ./internal/daemon \
-                -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
+                -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff|TestDiagnostics|TestLogTerminalBackendSelectionFields'
             go test -count=1 -tags=libghostty,libghostty_compare ./internal/pty \
                 -run '^TestTerminalBackendCompatibilityCorpus$'
             ;;
@@ -276,7 +276,7 @@ run_go() {
             go test -race -count=1 -tags=libghostty,libghostty_compare ./internal/pty \
                 -run '^TestTerminalBackendCompatibilityCorpus$'
             go test -race -count=1 -tags=libghostty ./internal/daemon \
-                -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
+                -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff|TestDiagnostics|TestLogTerminalBackendSelectionFields'
             ;;
         fuzz)
             verify_metadata
