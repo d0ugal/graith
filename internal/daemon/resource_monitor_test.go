@@ -35,16 +35,18 @@ func TestReadProcessResources(t *testing.T) {
 
 	t.Cleanup(func() { processListOutput = original })
 
-	processListOutput = func() ([]byte, error) { return []byte("42 42 1024 3.5 agent\n"), nil }
+	processListOutput = func(context.Context) ([]byte, error) {
+		return []byte("42 42 1024 3.5 agent\n"), nil
+	}
 
-	got, err := readProcessResources()
+	got, err := readProcessResources(t.Context())
 	if err != nil || len(got) != 1 || got[0].pid != 42 {
 		t.Fatalf("readProcessResources = %#v, %v", got, err)
 	}
 
-	processListOutput = func() ([]byte, error) { return nil, errors.New("denied") }
+	processListOutput = func(context.Context) ([]byte, error) { return nil, errors.New("denied") }
 
-	if _, err := readProcessResources(); err == nil {
+	if _, err := readProcessResources(t.Context()); err == nil {
 		t.Fatal("readProcessResources accepted command failure")
 	}
 }
@@ -67,16 +69,16 @@ func TestSampleSessionResourcesAggregatesProcessGroup(t *testing.T) {
 
 	t.Cleanup(func() { processListOutput, fdCountReader = originalList, originalFDs })
 
-	processListOutput = func() ([]byte, error) {
+	processListOutput = func(context.Context) ([]byte, error) {
 		return []byte(
 			strconv.Itoa(sess.ProcessPID()) + " " + strconv.Itoa(pgid) + " 2048 1.5 wrapper\n" +
 				"999 " + strconv.Itoa(pgid) + " 16384 22.5 agent\n"), nil
 	}
-	fdCountReader = func(_ []int) map[int]int {
+	fdCountReader = func(context.Context, []int) map[int]int {
 		return map[int]int{sess.ProcessPID(): 8, 999: 40}
 	}
 
-	sm.sampleSessionResources()
+	sm.sampleSessionResources(t.Context())
 
 	samples := sm.resourceSamples[id]
 	if len(samples) != 1 {
@@ -111,14 +113,16 @@ func TestSampleSessionResourcesRetainsPartialFDCountAndCapsHistory(t *testing.T)
 
 	t.Cleanup(func() { processListOutput, fdCountReader = originalList, originalFDs })
 
-	processListOutput = func() ([]byte, error) {
+	processListOutput = func(context.Context) ([]byte, error) {
 		return []byte(strconv.Itoa(sess.ProcessPID()) + " " + strconv.Itoa(pgid) + " 1024 1 agent\n" +
 			"999 " + strconv.Itoa(pgid) + " 512 1 transient\n"), nil
 	}
-	fdCountReader = func(_ []int) map[int]int { return map[int]int{sess.ProcessPID(): 12} }
+	fdCountReader = func(context.Context, []int) map[int]int {
+		return map[int]int{sess.ProcessPID(): 12}
+	}
 
 	for range config.ResourceSampleHistoryDefault + 2 {
-		sm.sampleSessionResources()
+		sm.sampleSessionResources(t.Context())
 		sm.resourceMu.Lock()
 		history := sm.resourceSamples[id]
 		history[len(history)-1].At = time.Now().Add(-config.ResourceSampleIntervalDefault)
@@ -205,6 +209,107 @@ func TestResourceMonitorStopsWithContext(t *testing.T) {
 	}
 }
 
+func TestResourceMonitorTaskGroupDrainCancelsProcessSampling(t *testing.T) {
+	sm, _ := newLogCapturingManager(t)
+	id := "braw-blocked-process-sample"
+	sess := newTestPTYSession(t, "sleep", "100")
+	t.Cleanup(func() {
+		_ = sess.Kill()
+		<-sess.Done()
+		sess.Close()
+	})
+
+	sm.state.Sessions[id] = &SessionState{ID: id, Name: "braw", Status: StatusRunning}
+	sm.sessions[id] = sess
+
+	original := processListOutput
+
+	t.Cleanup(func() { processListOutput = original })
+
+	started := make(chan struct{})
+	processListOutput = func(ctx context.Context) ([]byte, error) {
+		close(started)
+		<-ctx.Done()
+
+		return nil, ctx.Err()
+	}
+
+	group := newDaemonTaskGroup()
+	if !group.Go(sm.RunResourceMonitorLoop) {
+		t.Fatal("resource monitor task was rejected")
+	}
+
+	group.Activate()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("process sampling did not start")
+	}
+
+	group.BeginDrain()
+
+	drainCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	if err := group.Wait(drainCtx); err != nil {
+		t.Fatalf("resource monitor task group did not drain: %v", err)
+	}
+}
+
+func TestResourceMonitorTaskGroupDrainCancelsFDSampling(t *testing.T) {
+	sm, _ := newLogCapturingManager(t)
+	id := "canny-blocked-fd-sample"
+	sess := newTestPTYSession(t, "sleep", "100")
+	t.Cleanup(func() {
+		_ = sess.Kill()
+		<-sess.Done()
+		sess.Close()
+	})
+
+	pgid := sess.Pgid()
+	sm.state.Sessions[id] = &SessionState{ID: id, Name: "canny", Status: StatusRunning}
+	sm.sessions[id] = sess
+
+	originalList, originalFDs := processListOutput, fdCountReader
+
+	t.Cleanup(func() { processListOutput, fdCountReader = originalList, originalFDs })
+
+	processListOutput = func(context.Context) ([]byte, error) {
+		return []byte(strconv.Itoa(sess.ProcessPID()) + " " + strconv.Itoa(pgid) + " 1024 1 agent\n"), nil
+	}
+
+	started := make(chan struct{})
+	fdCountReader = func(ctx context.Context, _ []int) map[int]int {
+		close(started)
+		<-ctx.Done()
+
+		return nil
+	}
+
+	group := newDaemonTaskGroup()
+	if !group.Go(sm.RunResourceMonitorLoop) {
+		t.Fatal("resource monitor task was rejected")
+	}
+
+	group.Activate()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("file-descriptor sampling did not start")
+	}
+
+	group.BeginDrain()
+
+	drainCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	if err := group.Wait(drainCtx); err != nil {
+		t.Fatalf("resource monitor task group did not drain: %v", err)
+	}
+}
+
 func TestTakeResourceSamplesFiltersOldProcessGeneration(t *testing.T) {
 	sm, _ := newLogCapturingManager(t)
 	sm.resourceSamples["braw"] = []ResourceSample{
@@ -270,13 +375,15 @@ func TestSampleSessionResourcesHonoursConfiguredHistory(t *testing.T) {
 
 	t.Cleanup(func() { processListOutput, fdCountReader = originalList, originalFDs })
 
-	processListOutput = func() ([]byte, error) {
+	processListOutput = func(context.Context) ([]byte, error) {
 		return []byte(strconv.Itoa(sess.ProcessPID()) + " " + strconv.Itoa(pgid) + " 1024 1 agent\n"), nil
 	}
-	fdCountReader = func(_ []int) map[int]int { return map[int]int{sess.ProcessPID(): 4} }
+	fdCountReader = func(context.Context, []int) map[int]int {
+		return map[int]int{sess.ProcessPID(): 4}
+	}
 
 	for range wantHistory + 3 {
-		sm.sampleSessionResources()
+		sm.sampleSessionResources(t.Context())
 		sm.resourceMu.Lock()
 		history := sm.resourceSamples[id]
 		history[len(history)-1].At = time.Now().Add(-config.ResourceSampleIntervalDefault)

@@ -12,8 +12,8 @@ import (
 	"github.com/d0ugal/graith/internal/tools"
 )
 
-var processListOutput = func() ([]byte, error) {
-	cmd := exec.Command(tools.PS(), "-axo", "pid=,pgid=,rss=,%cpu=,comm=")
+var processListOutput = func(ctx context.Context) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, tools.PS(), "-axo", "pid=,pgid=,rss=,%cpu=,comm=")
 	cmd.Env = append(cmd.Environ(), "LC_ALL=C")
 
 	return cmd.Output()
@@ -52,7 +52,7 @@ type processResource struct {
 // RunResourceMonitorLoop periodically snapshots every live session. Sampling
 // failures are debug-only and never affect session operation.
 func (sm *SessionManager) RunResourceMonitorLoop(ctx context.Context) {
-	sm.sampleSessionResources()
+	sm.sampleSessionResources(ctx)
 
 	sm.mu.RLock()
 	interval := sm.cfg.ResourceMonitor.SampleIntervalDuration()
@@ -66,14 +66,18 @@ func (sm *SessionManager) RunResourceMonitorLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-sm.resourceKick:
-			sm.sampleSessionResources()
+			sm.sampleSessionResources(ctx)
 		case <-ticker.C:
-			sm.sampleSessionResources()
+			sm.sampleSessionResources(ctx)
 		}
 	}
 }
 
-func (sm *SessionManager) sampleSessionResources() {
+func (sm *SessionManager) sampleSessionResources(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+
 	now := time.Now()
 
 	sm.mu.RLock()
@@ -109,7 +113,7 @@ func (sm *SessionManager) sampleSessionResources() {
 		return
 	}
 
-	procs, err := readProcessResources()
+	procs, err := readProcessResources(ctx)
 	if err != nil {
 		sm.log.Debug("session resource sampling failed", "err", err)
 		return
@@ -126,7 +130,10 @@ func (sm *SessionManager) sampleSessionResources() {
 		}
 	}
 
-	fdCounts := fdCountReader(pids)
+	fdCounts := fdCountReader(ctx, pids)
+	if ctx.Err() != nil {
+		return
+	}
 
 	for pgid, target := range targets {
 		members := groups[pgid]
@@ -354,8 +361,8 @@ func classifyExit(exitCode int, signal syscall.Signal, request *signalRequest) (
 	return "exit-clean", "none"
 }
 
-func readProcessResources() ([]processResource, error) {
-	out, err := processListOutput()
+func readProcessResources(ctx context.Context) ([]processResource, error) {
+	out, err := processListOutput(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ps: %w", err)
 	}
