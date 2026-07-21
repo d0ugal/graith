@@ -185,12 +185,31 @@ assert_refuses_teardown_mismatch() {
 assert_owned_teardown_is_idempotent() {
 	new_fake_fixture "teardown-owned"
 	write_owned_profile "$fixture" "$OWNER_A"
-	run_teardown "$fixture" >/dev/null
+	GRAITH_DEMO_TEST_ACTIVE_SESSIONS="croft" \
+		GRAITH_DEMO_TEST_DELETED_SESSIONS="bothy" run_teardown "$fixture" >/dev/null
+	grep -q '^purge croft -y -f$' "$fixture/gr.log" || fail "teardown did not purge a live session"
+	grep -q '^purge bothy -y -f$' "$fixture/gr.log" || fail "teardown did not purge a deleted session"
 	[ ! -e "$fixture/config/graith-demo" ] &&
 		[ ! -e "$fixture/home/.graith-demo" ] &&
 		[ ! -e "$fixture/runtime/graith-demo" ] ||
 		fail "owned teardown left profile directories"
 	run_teardown "$fixture" >/dev/null
+}
+
+assert_refuses_on_active_list_failure() {
+	new_fake_fixture "teardown-active-list-failure"
+	write_owned_profile "$fixture" "$OWNER_A"
+	if GRAITH_DEMO_TEST_LIST_STATUS=1 run_teardown "$fixture" >/dev/null 2>&1; then
+		fail "teardown ignored live-session enumeration failure"
+	fi
+	grep -q '^list -q$' "$fixture/gr.log" || fail "teardown did not attempt live-session enumeration"
+	if grep -q '^purge ' "$fixture/gr.log"; then
+		fail "teardown purged after live-session enumeration failed"
+	fi
+	[ -d "$fixture/config/graith-demo" ] &&
+		[ -d "$fixture/home/.graith-demo" ] &&
+		[ -d "$fixture/runtime/graith-demo" ] ||
+		fail "teardown removed state after live-session enumeration failed"
 }
 
 assert_refuses_before_any_purge() {
@@ -209,6 +228,34 @@ assert_refuses_before_any_purge() {
 		[ -d "$fixture/home/.graith-demo" ] &&
 		[ -d "$fixture/runtime/graith-demo" ] ||
 		fail "teardown removed state after pre-purge refusal"
+}
+
+assert_refuses_after_purge_or_stop_failure() {
+	new_fake_fixture "teardown-purge-failure"
+	write_owned_profile "$fixture" "$OWNER_A"
+	if GRAITH_DEMO_TEST_ACTIVE_SESSIONS="strath" \
+		GRAITH_DEMO_TEST_PURGE_STATUS=1 run_teardown "$fixture" >/dev/null 2>&1; then
+		fail "teardown ignored purge failure"
+	fi
+	grep -q '^purge strath -y -f$' "$fixture/gr.log" || fail "teardown did not attempt the failing purge"
+	if grep -q '^daemon stop$' "$fixture/gr.log"; then
+		fail "teardown stopped the daemon after purge failed"
+	fi
+	[ -d "$fixture/config/graith-demo" ] &&
+		[ -d "$fixture/home/.graith-demo" ] &&
+		[ -d "$fixture/runtime/graith-demo" ] ||
+		fail "teardown removed state after purge failed"
+
+	new_fake_fixture "teardown-stop-failure"
+	write_owned_profile "$fixture" "$OWNER_A"
+	if GRAITH_DEMO_TEST_STOP_STATUS=1 run_teardown "$fixture" >/dev/null 2>&1; then
+		fail "teardown ignored daemon-stop failure"
+	fi
+	grep -q '^daemon stop$' "$fixture/gr.log" || fail "teardown did not attempt to stop the daemon"
+	[ -d "$fixture/config/graith-demo" ] &&
+		[ -d "$fixture/home/.graith-demo" ] &&
+		[ -d "$fixture/runtime/graith-demo" ] ||
+		fail "teardown removed state after daemon stop failed"
 }
 
 assert_setup_reruns_after_runtime_cleanup() {
@@ -311,7 +358,9 @@ for target in config data runtime; do
 done
 assert_refuses_present_runtime_mismatch
 assert_owned_teardown_is_idempotent
+assert_refuses_on_active_list_failure
 assert_refuses_before_any_purge
+assert_refuses_after_purge_or_stop_failure
 assert_setup_reruns_after_runtime_cleanup
 if [ "${GRAITH_DEMO_TEST_SKIP_REAL:-0}" -eq 1 ]; then
 	echo "skipping real-CLI demo tests (GRAITH_DEMO_TEST_SKIP_REAL=1)"
