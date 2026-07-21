@@ -674,7 +674,30 @@ func truncateScenarioStatusValue(value string, width int, middle bool) string {
 	rightWidth := contentWidth - leftWidth
 	totalWidth := ansi.StringWidth(value)
 
-	return ansi.Cut(value, 0, leftWidth) + "…" + ansi.Cut(value, totalWidth-rightWidth, totalWidth)
+	left := ansi.Cut(value, 0, leftWidth)
+	right := scenarioStatusRight(value, totalWidth, rightWidth)
+
+	return left + "…" + right
+}
+
+// scenarioStatusRight returns the largest suffix beginning near the requested
+// display-cell boundary that fits within width. ansi.Cut preserves whole
+// grapheme clusters, so a two-cell cluster crossing a one-cell boundary can be
+// wider than requested; advancing the boundary drops that cluster while
+// retaining the distinguishing suffix that follows it.
+func scenarioStatusRight(value string, totalWidth, width int) string {
+	if width < 1 {
+		return ""
+	}
+
+	for left := totalWidth - width; left <= totalWidth; left++ {
+		right := ansi.Cut(value, left, totalWidth)
+		if ansi.StringWidth(right) <= width {
+			return right
+		}
+	}
+
+	return ""
 }
 
 func formatScenarioResultStatuses(results []protocol.ScenarioResultInfo) []string {
@@ -688,15 +711,6 @@ func formatScenarioResultStatuses(results []protocol.ScenarioResultInfo) []strin
 	}
 
 	return parts
-}
-
-func formatScenarioResultStatus(results []protocol.ScenarioResultInfo) string {
-	parts := formatScenarioResultStatuses(results)
-	if len(parts) == 0 {
-		return "—"
-	}
-
-	return strings.Join(parts, ",")
 }
 
 var (

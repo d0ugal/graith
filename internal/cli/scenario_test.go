@@ -563,10 +563,30 @@ func TestRenderScenarioStatusBoundsLongMemberBlocksAtCommonWidths(t *testing.T) 
 	memberPrefix := longScenario + "-review-streaming-ingestion-and-storage-correctness-"
 	longResultName := strings.Repeat("correctness-evidence-", 4) + "verdict"
 	sc := protocol.ScenarioRecord{
-		ID:     "sc-a1b2c3d4e5f6071829304",
-		Name:   longScenario,
-		Status: "running",
-		Goal:   strings.Repeat("Trace the realistic multi-region failure without losing member attribution. ", 3),
+		ID:              "sc-a1b2c3d4e5f6071829304",
+		Name:            longScenario,
+		Status:          "running",
+		Goal:            strings.Repeat("Trace the realistic multi-region failure without losing member attribution. ", 3),
+		CompletionEpoch: 7,
+		Render: &protocol.ScenarioRenderInfo{
+			AuthoredName: strings.Repeat("authored-incident-response-", 5),
+			RenderedAt:   "2026-07-21T14:45:00Z",
+			Caller:       protocol.ScenarioRenderIdentityInfo{Name: strings.Repeat("caller-observability-", 5)},
+			Parent:       protocol.ScenarioRenderIdentityInfo{Name: strings.Repeat("parent-orchestrator-", 5)},
+			Initiator:    protocol.ScenarioRenderIdentityInfo{Name: strings.Repeat("initiator-operator-", 5)},
+		},
+		Policy: &protocol.ScenarioPolicyInfo{
+			Completion: "quorum", Quorum: 2, OnExhausted: "fail", Successful: 1, RequiredSuccessful: 1, RequiredTotal: 3,
+			OutcomeReason: strings.Repeat("required member attempt exhausted after immutable deadline; ", 4),
+		},
+		CompletionActions: []protocol.ScenarioCompletionActionInfo{{
+			Name: strings.Repeat("publish-incident-summary-", 4), State: "failed",
+			Error: strings.Repeat("completion webhook rejected the rendered incident report; ", 4),
+		}},
+		Cleanup: &protocol.ScenarioCleanupInfo{
+			State: "scheduled", Policy: "after_15m", ScheduledAt: "2026-07-21T16:00:00Z",
+			Error: strings.Repeat("cleanup remains scheduled while durable results are inspected; ", 4),
+		},
 		Sessions: []protocol.ScenarioSessionInfo{
 			{
 				Name: memberPrefix + "correctness", SessionID: "sess-correctness-a1b2c3d4e5f6", Status: "running", Agent: "claude",
@@ -592,6 +612,10 @@ func TestRenderScenarioStatusBoundsLongMemberBlocksAtCommonWidths(t *testing.T) 
 				Mirror: longScenario + "-implementation-coordinator-tertiary-mirror", Shared: true,
 			},
 		},
+	}
+	jsonBefore, err := json.Marshal(protocol.ScenarioStatusResponse{Scenario: sc})
+	if err != nil {
+		t.Fatalf("marshal JSON fixture: %v", err)
 	}
 
 	for _, width := range []int{80, 120, 160, 200} {
@@ -657,6 +681,14 @@ func TestRenderScenarioStatusBoundsLongMemberBlocksAtCommonWidths(t *testing.T) 
 			}
 		})
 	}
+
+	jsonAfter, err := json.Marshal(protocol.ScenarioStatusResponse{Scenario: sc})
+	if err != nil {
+		t.Fatalf("marshal rendered JSON fixture: %v", err)
+	}
+	if !bytes.Equal(jsonAfter, jsonBefore) {
+		t.Fatalf("human renderer mutated JSON response\nbefore: %s\nafter:  %s", jsonBefore, jsonAfter)
+	}
 }
 
 func TestScenarioStatusWidthUsesConfiguredFallbackForNonTTY(t *testing.T) {
@@ -679,6 +711,37 @@ func TestTruncateScenarioStatusValueUsesDisplayWidthAndKeepsSuffix(t *testing.T)
 	}
 	if !strings.Contains(got, "…") || !strings.HasSuffix(got, "correctness") {
 		t.Fatalf("middle truncation = %q, want ellipsis and distinguishing suffix", got)
+	}
+}
+
+func TestTruncateScenarioStatusValueBoundsWideGraphemes(t *testing.T) {
+	for _, value := range []string{"我们中国人", "🚀🚀🚀🚀🚀", "アカサタナ"} {
+		for width := 1; width <= 9; width++ {
+			got := truncateScenarioStatusValue(value, width, true)
+			if gotWidth := ansi.StringWidth(got); gotWidth > width {
+				t.Errorf("truncate %q to %d cells = %q (%d cells)", value, width, got, gotWidth)
+			}
+		}
+	}
+}
+
+func TestRenderScenarioStatusBoundsVeryNarrowWideValues(t *testing.T) {
+	sc := protocol.ScenarioRecord{
+		Name: "我们中国人",
+		Sessions: []protocol.ScenarioSessionInfo{{
+			Name: "🚀🚀🚀🚀🚀", Mirror: "アカサタナ", Results: []protocol.ScenarioResultInfo{{Name: "結果結果結果", Status: "pending"}},
+		}},
+	}
+
+	for _, width := range []int{1, 4, 18} {
+		var buf bytes.Buffer
+		renderScenarioStatus(&buf, sc, width)
+
+		for lineNumber, line := range strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n") {
+			if lineWidth := ansi.StringWidth(line); lineWidth > width {
+				t.Errorf("width %d line %d = %d cells, want <= %d: %q", width, lineNumber+1, lineWidth, width, line)
+			}
+		}
 	}
 }
 
@@ -1330,20 +1393,4 @@ func TestScenarioResultPutCommandErrors(t *testing.T) {
 			t.Fatal("oversized body should be rejected before connecting")
 		}
 	})
-}
-
-func TestFormatScenarioResultStatus(t *testing.T) {
-	if got := formatScenarioResultStatus(nil); got != "—" {
-		t.Fatalf("empty status = %q", got)
-	}
-
-	got := formatScenarioResultStatus([]protocol.ScenarioResultInfo{
-		{Name: "notes", Status: "pending"},
-		{Name: "review", Status: "available"},
-		{Name: "facts", Status: "invalid"},
-		{Name: "archive", Status: "failed"},
-	})
-	if got != "notes=pending,review=available,facts=invalid,archive=failed" {
-		t.Fatalf("status = %q", got)
-	}
 }
