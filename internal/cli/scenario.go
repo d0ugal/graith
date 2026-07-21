@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -497,6 +498,7 @@ const scenarioStatusLabelWidth = 14
 // a terminal is present.
 func scenarioStatusWidth(w io.Writer) int {
 	fallbackCols, _ := client.FallbackGeometry()
+
 	fallback := int(fallbackCols)
 	if fallback < 1 {
 		fallback = config.DefaultColsDefault
@@ -535,6 +537,7 @@ func renderScenarioStatus(w io.Writer, sc protocol.ScenarioRecord, width int) {
 
 	if sc.Policy != nil {
 		writeScenarioStatusField(w, width, "POLICY", []string{formatScenarioPolicySummary(sc.Policy)}, false)
+
 		if sc.Policy.OutcomeReason != "" {
 			writeScenarioStatusField(w, width, "OUTCOME", []string{sc.Policy.OutcomeReason}, false)
 		}
@@ -555,7 +558,7 @@ func renderScenarioStatus(w io.Writer, sc protocol.ScenarioRecord, width int) {
 	if sc.CompletionEpoch > 0 {
 		_, _ = fmt.Fprintln(w)
 		writeScenarioStatusHeading(w, width, "COMPLETION")
-		writeScenarioStatusField(w, width, "EPOCH", []string{fmt.Sprintf("%d", sc.CompletionEpoch)}, false)
+		writeScenarioStatusField(w, width, "EPOCH", []string{strconv.Itoa(sc.CompletionEpoch)}, false)
 
 		for _, action := range sc.CompletionActions {
 			detail := action.Result
@@ -573,9 +576,11 @@ func renderScenarioStatus(w io.Writer, sc protocol.ScenarioRecord, width int) {
 
 		if sc.Cleanup != nil {
 			value := fmt.Sprintf("%s (%s)", sc.Cleanup.State, sc.Cleanup.Policy)
+
 			if sc.Cleanup.ScheduledAt != "" {
 				value += " at " + sc.Cleanup.ScheduledAt
 			}
+
 			if sc.Cleanup.Error != "" {
 				value += " — " + sc.Cleanup.Error
 			}
@@ -634,6 +639,7 @@ func writeScenarioStatusField(w io.Writer, width int, label string, values []str
 		}
 
 		prefix := fmt.Sprintf("  %-*s  ", scenarioStatusLabelWidth, fieldLabel)
+
 		valueWidth := width - ansi.StringWidth(prefix)
 		if valueWidth < 1 {
 			_, _ = fmt.Fprintln(w, truncateScenarioStatusValue(strings.TrimSpace(prefix)+" "+value, width, false))
@@ -656,15 +662,19 @@ func emptyScenarioStatusValue(value string) string {
 
 func truncateScenarioStatusValue(value string, width int, middle bool) string {
 	value = emptyScenarioStatusValue(value)
+
 	if width < 1 {
 		return ""
 	}
+
 	if ansi.StringWidth(value) <= width {
 		return value
 	}
+
 	if !middle {
 		return ansi.Truncate(value, width, "…")
 	}
+
 	if width == 1 {
 		return "…"
 	}
