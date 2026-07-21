@@ -86,7 +86,7 @@ jobs:
           fi
           # here-string (not a pipe) so an early grep match can't SIGPIPE-fail an
           # upstream command under pipefail.
-          if grep -Eq '^gui/|^internal/protocol/|^internal/capabilities/|^internal/pty/|^internal/sandbox/|^go\.mod$|^go\.sum$|\.swift$|^\.github/workflows/ci\.yml$' <<<"$files"; then
+          if grep -Eq '^gui/|^demo/|^internal/protocol/|^internal/capabilities/|^internal/pty/|^internal/sandbox/|^Makefile$|^go\.mod$|^go\.sum$|\.swift$|^\.github/workflows/ci\.yml$' <<<"$files"; then
             echo "macos=true" >> "$GITHUB_OUTPUT"
             echo "macOS-relevant files changed: running macOS jobs."
           else
@@ -168,6 +168,7 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go test -v -race -count=1 ./...
+      - run: make demo-test
 
   integration:
     name: Integration (ubuntu-latest)
