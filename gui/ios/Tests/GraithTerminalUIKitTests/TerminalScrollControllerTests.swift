@@ -12,6 +12,30 @@ final class TerminalScrollControllerTests: XCTestCase {
         TerminalScrollController(cellHeight: 16)
     }
 
+    private func assertSettles(_ config: TerminalGestureConfig,
+                               name: String,
+                               file: StaticString = #filePath,
+                               line: UInt = #line) {
+        var momentum = TerminalScrollController(config: config)
+        momentum.beginDrag()
+        momentum.endDrag(velocityY: -(config.scrollMomentumCutoff + 1_200))
+        for _ in 0..<600 where momentum.isSettling {
+            _ = momentum.tick(dt: 1.0 / 60.0)
+        }
+        XCTAssertFalse(momentum.isSettling, "\(name) left momentum settling", file: file, line: line)
+        XCTAssertEqual(momentum.phase, .idle, "\(name) momentum did not reach idle", file: file, line: line)
+
+        var spring = TerminalScrollController(config: config)
+        spring.beginDrag()
+        spring.absorbOverscroll(rows: 6)
+        spring.endDrag(velocityY: 0)
+        for _ in 0..<600 where spring.isSettling {
+            _ = spring.tick(dt: 1.0 / 60.0)
+        }
+        XCTAssertFalse(spring.isSettling, "\(name) left spring settling", file: file, line: line)
+        XCTAssertEqual(spring.phase, .idle, "\(name) spring did not reach idle", file: file, line: line)
+    }
+
     // MARK: - Drag → rows
 
     func testDragDownScrollsUpIntoHistory() {
@@ -153,6 +177,91 @@ final class TerminalScrollControllerTests: XCTestCase {
         XCTAssertEqual(c.drag(translationDelta: -3), 3, "3pt / 1pt cell ⇒ 3 rows")
     }
 
+    func testDirectInitNormalizesInvalidPhysics() {
+        let c = TerminalScrollController(
+            friction: 0,
+            momentumCutoff: -.infinity,
+            springStiffness: .nan,
+            springDamping: -1)
+        XCTAssertEqual(c.friction, 1)
+        XCTAssertEqual(c.momentumCutoff, TerminalGestureConfig.default.scrollMomentumCutoff)
+        XCTAssertEqual(c.springStiffness, TerminalGestureConfig.default.scrollSpringStiffness)
+        XCTAssertEqual(c.springDamping, 4)
+    }
+
+    func testInvalidPhysicsOverridesConvergeWithinBound() {
+        let invalidValues: [(String, CGFloat)] = [
+            ("zero", 0),
+            ("negative", -10),
+            ("nan", .nan),
+            ("positive infinity", .infinity),
+            ("negative infinity", -.infinity),
+        ]
+
+        for (name, value) in invalidValues {
+            let config = TerminalGestureConfig(
+                scrollFriction: value,
+                scrollMomentumCutoff: value,
+                scrollSpringStiffness: value,
+                scrollSpringDamping: value)
+            assertSettles(config, name: name)
+        }
+    }
+
+    func testAcceptedPhysicsRangeEdgesConvergeWithinBound() {
+        let edgeConfigurations: [(String, TerminalGestureConfig)] = [
+            ("positive floors", TerminalGestureConfig(
+                scrollFriction: 1,
+                scrollMomentumCutoff: 1,
+                scrollSpringStiffness: 30,
+                scrollSpringDamping: 4)),
+            ("slow overdamped spring", TerminalGestureConfig(
+                scrollFriction: 1,
+                scrollMomentumCutoff: 1,
+                scrollSpringStiffness: 30,
+                scrollSpringDamping: 29)),
+            ("stiff lightly damped spring", TerminalGestureConfig(
+                scrollFriction: 60,
+                scrollMomentumCutoff: 10_000,
+                scrollSpringStiffness: 400,
+                scrollSpringDamping: 4)),
+            ("stability ceiling", TerminalGestureConfig(
+                scrollFriction: 60,
+                scrollMomentumCutoff: 10_000,
+                scrollSpringStiffness: 400,
+                scrollSpringDamping: 29)),
+        ]
+
+        for (name, config) in edgeConfigurations {
+            assertSettles(config, name: name)
+        }
+    }
+
+    func testExtremeFiniteMomentumFailsSafeToIdle() {
+        var c = TerminalScrollController(
+            friction: 1,
+            momentumCutoff: 1,
+            springStiffness: 30,
+            springDamping: 4)
+        c.beginDrag()
+        c.endDrag(velocityY: -1_000_000_000)
+
+        for _ in 0..<600 where c.isSettling {
+            _ = c.tick(dt: 1.0 / 60.0)
+        }
+        XCTAssertFalse(c.isSettling)
+        XCTAssertEqual(c.phase, .idle)
+    }
+
+    func testNonFiniteTickFailsSafeToIdle() {
+        var c = makeController()
+        c.beginDrag()
+        c.endDrag(velocityY: -1200)
+        _ = c.tick(dt: .nan)
+        XCTAssertEqual(c.phase, .idle)
+        XCTAssertFalse(c.isSettling)
+    }
+
     // MARK: - Indicator thumb
 
     func testThumbNilWithoutHistory() {
@@ -200,7 +309,7 @@ final class TerminalScrollControllerTests: XCTestCase {
         XCTAssertEqual(c.friction, 6)
         XCTAssertEqual(c.momentumCutoff, 40)
         XCTAssertEqual(c.springStiffness, 300)
-        XCTAssertEqual(c.springDamping, 30)
+        XCTAssertEqual(c.springDamping, 29, "damping is normalized to the stable ceiling")
         XCTAssertEqual(c.cellHeight, 20)
         XCTAssertEqual(c.rubberBandConstant, 0.55, accuracy: 0.0001,
                        "rubber-band constant is an invariant, not sourced from config")
