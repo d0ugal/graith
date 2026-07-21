@@ -72,6 +72,7 @@ func TestProcessCommandUsesConfiguredPSContract(t *testing.T) {
 
 	output, err := processCommand(4242, func(gotName string, gotArgs ...string) ([]byte, error) {
 		name = gotName
+
 		args = append([]string(nil), gotArgs...)
 
 		return []byte("gr\n"), nil
