@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -48,11 +49,12 @@ func managedUpgradeMsg() (protocol.UpgradeMsg, error) {
 }
 
 var (
-	adoptFrom            string
-	forceClean           bool
-	internalServiceLabel string
-	internalServiceSlot  string
-	serviceAllProfiles   bool
+	adoptFrom               string
+	forceClean              bool
+	internalServiceLabel    string
+	internalServiceSlot     string
+	serviceAllProfiles      bool
+	runAdoptBootstrapForCLI = daemon.RunAdoptBootstrap
 )
 
 var daemonCmd = &cobra.Command{
@@ -65,9 +67,50 @@ var daemonStartCmd = &cobra.Command{
 	Use:    "start",
 	Short:  "Start the daemon",
 	Hidden: true,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if adoptFrom != "" {
+			return nil
+		}
+
+		return rootCmd.PersistentPreRunE(cmd, args)
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		guard, _ := cmd.Context().Value(upgradeGuardContextKey{}).(*daemon.UpgradeFailureGuard)
-		return daemon.Run(cfg, paths, cfgFile, adoptFrom, guard)
+		if adoptFrom != "" {
+			identity, ok := cmd.Context().Value(adoptedServiceContextKey{}).(daemon.AdoptedServiceIdentity)
+			if !ok {
+				return errors.New("daemon adoption is missing its scoped service identity")
+			}
+
+			if identity == (daemon.AdoptedServiceIdentity{}) {
+				return errors.New("daemon adoption has an invalid scoped service identity")
+			}
+
+			return runAdoptBootstrapForCLI(cfgFile, adoptFrom, identity)
+		}
+
+		return daemon.Run(cfg, paths, cfgFile, adoptFrom)
+	},
+}
+
+var daemonAdoptionCapacityCmd = &cobra.Command{
+	Use:    "adoption-capacity",
+	Hidden: true,
+	// This private exec-upgrade probe must not read ordinary configuration or
+	// resolve profile paths: a broken replacement config must not make backend
+	// capability discovery hang or report an unrelated failure.
+	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
+	Args:              cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if !daemon.IsUpgradeCapacityProbeMarker(args[0]) {
+			return errors.New("invalid private upgrade probe marker")
+		}
+
+		probe, err := daemon.CurrentUpgradeCapacityProbeForConfig(cfgFile)
+		if err != nil {
+			return err
+		}
+
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(probe)
 	},
 }
 
@@ -540,7 +583,7 @@ func execUpgrade(successMsg string) error {
 	// configured local handshake deadline — distinct from the post-exec startup
 	// budget the readiness wait uses (issue #1242). A connection that can't accept
 	// the deadline can't be safely bounded, so fail rather than proceed unbounded.
-	if err := c.SetDeadline(connectionNow().Add(localDaemonHandshakeTimeout())); err != nil {
+	if err := c.SetDeadline(connectionNow().Add(localUpgradeNegotiationTimeout())); err != nil {
 		c.Close()
 		return fmt.Errorf("set upgrade handshake deadline: %w", err)
 	}
@@ -608,6 +651,31 @@ func execUpgrade(successMsg string) error {
 		c.Close()
 
 		return fmt.Errorf("identify daemon process before upgrade: %w", err)
+	}
+
+	// Capability negotiation is deliberately a separate round trip before the
+	// state-changing UpgradeMsg. A legacy daemon rejects the unknown message and
+	// remains fully live, giving the first native rollout an explicit clean
+	// stop/start migration path instead of a destructive hot handoff.
+	if err := c.SendControl("upgrade_preflight", msg); err != nil {
+		c.Close()
+		return &preserveRestartRejectedError{cause: fmt.Errorf("daemon does not support safe preserve-restart preflight: %w", err)}
+	}
+
+	preflight, err := c.ReadControlResponse()
+	if err != nil || preflight.Type != "upgrade_preflight_ok" {
+		c.Close()
+
+		message := "daemon does not support safe preserve restart; use --force for an intentional clean stop/start migration"
+
+		if err == nil && preflight.Type == "error" {
+			var response protocol.ErrorMsg
+			if protocol.DecodePayload(preflight, &response) == nil && response.Message != "" {
+				message = message + ": " + response.Message
+			}
+		}
+
+		return &preserveRestartRejectedError{cause: errors.New(message)}
 	}
 
 	// Propagate a send failure rather than waiting for the readiness of an upgrade
@@ -869,6 +937,7 @@ func startCleanDaemon() error {
 func registerDaemonCmd() {
 	rootCmd.AddCommand(daemonCmd)
 	daemonCmd.AddCommand(daemonStartCmd)
+	daemonCmd.AddCommand(daemonAdoptionCapacityCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonReloadCmd)

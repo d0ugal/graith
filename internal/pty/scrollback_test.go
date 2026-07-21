@@ -1,11 +1,14 @@
 package pty
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestScrollbackWrite(t *testing.T) {
@@ -229,5 +232,162 @@ func TestScrollbackStopsAtMaxSize(t *testing.T) {
 
 	if !sb.saturated {
 		t.Error("expected saturated=true after exceeding maxSize")
+	}
+}
+
+func TestNewScrollbackRejectsUnsafeExistingPaths(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*testing.T, string)
+	}{
+		{name: "symlink", setup: func(t *testing.T, path string) {
+			t.Helper()
+
+			target := filepath.Join(filepath.Dir(path), "canny-target")
+			if err := os.WriteFile(target, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.Symlink(target, path); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "fifo", setup: func(t *testing.T, path string) {
+			t.Helper()
+
+			if err := unix.Mkfifo(path, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "wide_mode", setup: func(t *testing.T, path string) {
+			t.Helper()
+
+			if err := os.WriteFile(path, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.Chmod(path, 0o644); err != nil { //nolint:gosec // G302: deliberately makes the fixture unsafe
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "bothy.log")
+			tt.setup(t, path)
+
+			if scrollback, err := NewScrollback(path, 1024); err == nil {
+				closePTYTestResource(t, scrollback)
+				t.Fatal("unsafe scrollback path was accepted")
+			}
+		})
+	}
+}
+
+func TestTailFileRejectsUnsafeReplacementWithoutBlocking(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*testing.T, string)
+	}{
+		{name: "symlink", setup: func(t *testing.T, path string) {
+			t.Helper()
+
+			target := filepath.Join(filepath.Dir(path), "croft-target")
+			if err := os.WriteFile(target, []byte("canny"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.Symlink(target, path); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "fifo", setup: func(t *testing.T, path string) {
+			t.Helper()
+
+			if err := unix.Mkfifo(path, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "wide_mode", setup: func(t *testing.T, path string) {
+			t.Helper()
+
+			if err := os.WriteFile(path, []byte("canny"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.Chmod(path, 0o644); err != nil { //nolint:gosec // G302: deliberately makes the fixture unsafe
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "dreich.log")
+			tt.setup(t, path)
+
+			if _, err := TailFile(path, 10); err == nil {
+				t.Fatal("unsafe stopped-session log was accepted")
+			}
+		})
+	}
+}
+
+func TestAdoptedScrollbackReadsExactInodeAndPreservesReplacementOnRemove(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "strath.log")
+
+	scrollback, err := NewScrollback(path, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := scrollback.Write([]byte("canny-owned\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	fd, err := scrollback.DuplicateFD()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := scrollback.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	adopted, err := AdoptScrollback(uintptr(fd), path, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = adopted.Close() })
+
+	ownedPath := filepath.Join(dir, "strath-owned.log")
+	if err := os.Rename(path, ownedPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(path, []byte("foreign replacement\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tail, err := adopted.Tail(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(tail) != "canny-owned\n" {
+		t.Fatalf("adopted tail = %q, want exact inherited inode", tail)
+	}
+
+	if err := adopted.Remove(); err == nil {
+		t.Fatal("Remove accepted a replacement pathname")
+	}
+
+	if got, err := os.ReadFile(path); err != nil || string(got) != "foreign replacement\n" {
+		t.Fatalf("replacement after Remove = %q, %v", got, err)
+	}
+
+	if _, err := os.Stat(ownedPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
 	}
 }

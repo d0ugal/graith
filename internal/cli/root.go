@@ -21,8 +21,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type upgradeGuardContextKey struct{}
 type serviceBootstrapContextKey struct{}
+type adoptedServiceContextKey struct{}
 
 var (
 	cfgFile    string
@@ -195,9 +195,11 @@ func executeWithArgs(args []string) (err error) {
 		return markerErr
 	}
 
+	adoptManifestPath := adoptFromArgument(args)
+
 	var serviceBootstrap *daemonservice.Bootstrap
 
-	if serviceMarker && adoptFromArgument(args) == "" {
+	if serviceMarker && adoptManifestPath == "" {
 		bootstrap, bootstrapErr := daemonservice.BootstrapFreshService(label, slot, time.Now())
 		if bootstrapErr != nil {
 			out = output.New(false)
@@ -220,52 +222,21 @@ func executeWithArgs(args []string) (err error) {
 		}()
 	}
 
-	var upgradeGuard *daemon.UpgradeFailureGuard
-	if manifestPath := adoptFromArgument(args); manifestPath != "" {
-		upgradeGuard, err = daemon.ArmUpgradeFailureGuard(manifestPath)
-		if err != nil {
-			out = output.New(false)
-			out.Error(err)
-
-			return err
-		}
-		defer func() {
-			if err == nil {
-				return
-			}
-
-			if cleanupErr := upgradeGuard.Cleanup(); cleanupErr != nil {
-				wrapped := fmt.Errorf("clean up inherited sessions after CLI bootstrap failure: %w", cleanupErr)
-
-				if out == nil {
-					out = output.New(false)
-				}
-
-				out.Error(wrapped)
-				err = errors.Join(err, wrapped)
-			}
-
-			// Exec preserves the PID, so a failure before daemon.Run installs its
-			// ordinary exit defer would otherwise leave the new generation marked
-			// as running in the managed-service receipt.
-			if markErr := daemonservice.MarkCurrentProcessStopped(upgradeGuard.Profile()); markErr != nil {
-				err = errors.Join(err, fmt.Errorf("clear failed managed upgrade marker: %w", markErr))
-			}
-		}()
-
-		if serviceMarker {
-			if _, validateErr := daemonservice.ValidateAdoptedService(label, slot, upgradeGuard.Profile(), os.Getpid()); validateErr != nil {
-				return validateErr
-			}
-		}
-	}
-
 	registerCommands()
 	applyServiceBootstrapConfig(serviceBootstrap)
 
 	rootCtx := context.Background()
-	if upgradeGuard != nil {
-		rootCtx = context.WithValue(rootCtx, upgradeGuardContextKey{}, upgradeGuard)
+
+	if adoptManifestPath != "" {
+		identity := daemon.NewUnmanagedAdoptedServiceIdentity()
+		if serviceMarker {
+			identity, err = daemon.NewManagedAdoptedServiceIdentity(label, slot)
+			if err != nil {
+				return err
+			}
+		}
+
+		rootCtx = context.WithValue(rootCtx, adoptedServiceContextKey{}, identity)
 	}
 
 	if serviceBootstrap != nil {
@@ -273,6 +244,10 @@ func executeWithArgs(args []string) (err error) {
 	}
 
 	rootCmd.SetContext(rootCtx)
+	// Cobra caches the selected child command's inherited context after its first
+	// execution. Refresh the hidden adoption command explicitly so repeated
+	// executeWithArgs calls cannot reuse a prior managed-service identity.
+	daemonStartCmd.SetContext(rootCtx)
 	rootCmd.SetArgs(args)
 
 	err = rootCmd.Execute()

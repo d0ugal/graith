@@ -1,0 +1,229 @@
+name: libghostty-vt native backend
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/libghostty-native.yml
+      - docs/design/2026-07-18-libghostty-daemon-backend*.md
+      - gui/shared/Package.swift
+      - gui/shared/Sources/CGhosttyVT/include/**
+      - go.mod
+      - go.sum
+      - internal/cli/**
+      - internal/daemon/**
+      - internal/integration/**
+      - internal/pty/**
+      - libghostty-native.spdx.json
+      - scripts/libghostty-native.sh
+      - THIRD_PARTY_NOTICES.libghostty.md
+
+permissions:
+  contents: read
+
+jobs:
+  default-builds:
+    name: Default build (${{ matrix.goos }}/${{ matrix.goarch }}, no cgo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Build the rollback binary without the native backend or cgo
+        env:
+          CGO_ENABLED: "0"
+          GOARCH: ${{ matrix.goarch }}
+          GOOS: ${{ matrix.goos }}
+        run: |
+          go build -trimpath -o "${RUNNER_TEMP}/gr" ./cmd/graith
+          scripts/libghostty-native.sh verify-default-binary "${RUNNER_TEMP}/gr"
+
+  apple-adapter:
+    name: Adapter and pinned artifact (macOS arm64)
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Verify the native runner architecture
+        run: test "$(uname -m)" = arm64
+      - name: Run the shared corpus with the pinned GUI artifact
+        env:
+          GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/libghostty-native
+        run: scripts/libghostty-native.sh test
+      - name: Run the external daemon lifecycle and bounded soak
+        env:
+          GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/libghostty-native
+        run: scripts/libghostty-native.sh daemon-test
+      - name: Verify and link the supported native architecture
+        env:
+          LIBRARY: ${{ runner.temp }}/libghostty-native/libghostty-vt.xcframework/macos-arm64_x86_64/libghostty-vt.a
+          PKG_CONFIG_PATH: ${{ runner.temp }}/libghostty-native/pkgconfig
+        run: |
+          set -euo pipefail
+          lipo "$LIBRARY" -verify_arch arm64
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 CC="clang -arch arm64" \
+            go test -c -tags=libghostty -o "${RUNNER_TEMP}/pty-arm64.test" \
+            ./internal/pty
+          revision="$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 CC="clang -arch arm64" \
+            go build -buildvcs=false -trimpath -tags=libghostty \
+            -ldflags="-X github.com/d0ugal/graith/internal/version.CommitSHA=$revision" \
+            -o "${RUNNER_TEMP}/gr-darwin-arm64" ./cmd/graith
+      - name: Prove tagged Darwin amd64 fails closed without native linkage
+        run: |
+          set -euo pipefail
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 CC="clang -arch x86_64" \
+            go test -c -tags=libghostty \
+            -o "${RUNNER_TEMP}/pty-darwin-amd64-unsupported.test" ./internal/pty
+          go tool nm "${RUNNER_TEMP}/pty-darwin-amd64-unsupported.test" | \
+            awk '$NF ~ /TestLibghosttyBackendRejectsUnsupportedPlatform$/ { found = 1 } END { exit !found }'
+          if GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 CC="clang -arch x86_64" \
+            go list -tags=libghostty -deps ./cmd/graith | \
+            awk '$0 == "go.mitchellh.com/libghostty" { found = 1 } END { exit !found }'; then
+            echo "error: tagged Darwin amd64 unexpectedly selected go-libghostty" >&2
+            exit 1
+          fi
+      - name: Bind provenance and package the native candidate
+        run: |
+          set -euo pipefail
+          scripts/libghostty-native.sh test-metadata-policy
+          scripts/libghostty-native.sh test-darwin-linkage-policy
+          scripts/libghostty-native.sh test-exclusive-publish
+          java -version
+          spdx_jar="$(scripts/libghostty-native.sh install-spdx-validator \
+            "${RUNNER_TEMP}/spdx-validator")"
+          scripts/libghostty-native.sh validate-spdx "$spdx_jar"
+          scripts/libghostty-native.sh package-darwin-arm64 \
+            "${RUNNER_TEMP}/gr-darwin-arm64" \
+            "${RUNNER_TEMP}/native-candidate" "$spdx_jar"
+      - name: Upload the Darwin arm64 testing candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: gr-libghostty-darwin-arm64
+          path: ${{ runner.temp }}/native-candidate/
+          if-no-files-found: error
+
+  linux-adapter:
+    name: Adapter source build (${{ matrix.target }})
+    # Native Linux rollout is tracked separately in #1475. Keep the exact
+    # source-build matrix available for explicit Linux-host validation without
+    # making the macOS candidate PR claim or gate on unverified Linux support.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-linux-gnu
+            goarch: amd64
+            run_tests: true
+          - target: aarch64-linux-gnu
+            goarch: arm64
+            run_tests: false
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Install checksum-verified Zig 0.15.2
+        env:
+          ZIG_SHA256: 02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239
+          ZIG_URL: https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/zig"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            "$ZIG_URL" --output "${RUNNER_TEMP}/zig.tar.xz"
+          printf '%s  %s\n' "$ZIG_SHA256" "${RUNNER_TEMP}/zig.tar.xz" | sha256sum --check --status
+          tar -xf "${RUNNER_TEMP}/zig.tar.xz" -C "${RUNNER_TEMP}/zig" --strip-components=1
+          echo "${RUNNER_TEMP}/zig" >> "$GITHUB_PATH"
+      - name: Build the exact Ghostty source pin
+        env:
+          GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}
+          LIBRARY: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}.a
+          PKG_CONFIG_PATH: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}/pkgconfig
+          TARGET: ${{ matrix.target }}
+        run: scripts/libghostty-native.sh source-build "$TARGET" "$LIBRARY"
+      - name: Verify committed headers match the source pin
+        env:
+          SOURCE: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}/ghostty/include/ghostty
+        run: diff -ru "$SOURCE" gui/shared/Sources/CGhosttyVT/include/ghostty
+      - name: Compile and optionally run the isolated backend
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}
+          PKG_CONFIG_PATH: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}/pkgconfig
+          RUN_TESTS: ${{ matrix.run_tests }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          if [ "$RUN_TESTS" = "true" ]; then
+            scripts/libghostty-native.sh source-test "$TARGET"
+            go test -count=1 go.mitchellh.com/libghostty
+            go test -count=1 -tags=libghostty ./internal/pty
+            go test -count=1 -tags=libghostty ./internal/daemon \
+              -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
+            go test -race -count=1 -tags=libghostty ./internal/pty \
+              -run 'TestGhostty'
+            go test -race -count=1 -tags=libghostty,libghostty_compare ./internal/pty \
+              -run '^TestTerminalBackendCompatibilityCorpus$'
+            go test -race -count=1 -tags=libghostty ./internal/daemon \
+              -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
+            # Fixed budgets avoid the wall-clock deadline path affected by
+            # golang/go#75804. Snapshot CI reached 494,054 executions; local
+            # request/helper calibration reached 789,507-829,186 and 341-747.
+            go test -tags=libghostty ./internal/pty -run '^$' -parallel=4 \
+              -fuzz '^FuzzGhosttySnapshotDecoder$' -fuzztime=500000x
+            go test -tags=libghostty ./internal/pty -run '^$' -parallel=4 \
+              -fuzz '^FuzzGhosttyRequestDecoder$' -fuzztime=830000x
+            go test -tags=libghostty ./internal/pty -run '^$' -parallel=4 \
+              -fuzz '^FuzzGhosttyHelperWrite$' -fuzztime=750x
+          else
+            CGO_ENABLED=1 GOOS=linux CC="zig cc -target $TARGET" \
+              go test -c -tags=libghostty -o "${RUNNER_TEMP}/pty-${GOARCH}.test" \
+              ./internal/pty
+            CGO_ENABLED=1 GOOS=linux CC="zig cc -target $TARGET" \
+              go test -c -tags=libghostty -o "${RUNNER_TEMP}/daemon-${GOARCH}.test" \
+              ./internal/daemon
+          fi
+          mkdir -p "${RUNNER_TEMP}/native-binaries"
+          CGO_ENABLED=1 GOOS=linux CC="zig cc -target $TARGET" \
+            go build -trimpath -tags=libghostty \
+              -o "${RUNNER_TEMP}/native-binaries/gr-linux-${GOARCH}" ./cmd/graith
+          cp THIRD_PARTY_NOTICES.libghostty.md libghostty-native.spdx.json \
+            "${RUNNER_TEMP}/native-binaries/"
+      - name: Upload Linux testing binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: gr-libghostty-linux-${{ matrix.goarch }}
+          path: ${{ runner.temp }}/native-binaries/
+          if-no-files-found: error

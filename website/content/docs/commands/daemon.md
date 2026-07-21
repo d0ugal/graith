@@ -36,6 +36,13 @@ exact old socket peer has exited and its socket has disappeared — if either ch
 fails, no competing daemon starts. Resume stopped sessions to relaunch under the
 new security model.
 
+Before it hands off any live terminal, graith checks that the exact replacement
+binary can adopt every session and understands the current helper handoff. It
+refuses the attempt while session creation or another lifecycle launch is in
+progress. Such a refusal leaves the existing daemon and agents running; retry
+after the reported work finishes. If preparation or exec fails, inheritable
+terminal descriptors are restored and the existing daemon continues serving.
+
 Live adoption requires persisted state and the handoff manifest to prove the
 exact process identity; the manifest records every live process, not just
 transferable PTYs. Whether that process uses Graith's sandbox or the agent's

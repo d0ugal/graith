@@ -16,12 +16,23 @@ import (
 // Git teardown is attempted before removing the session from state; if teardown
 // fails the session is kept for retry and the error is returned.
 func (sm *SessionManager) Delete(id string) error {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return err
+	}
+	defer sm.endLifecycleOperation()
+
 	sm.mu.Lock()
 
 	sessState, ok := sm.state.Sessions[id]
 	if !ok {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q not found", id)
+	}
+
+	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
+		sm.mu.Unlock()
+
+		return err
 	}
 
 	// The orchestrator is declarative: deleting it is a request to discard the
@@ -609,6 +620,11 @@ func (sm *SessionManager) restoreLiveDriverForRetry(id string, driver SessionDri
 // whose teardown fails are kept for retry. Returns the list of deleted session
 // IDs and an error if any teardowns failed.
 func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]string, error) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return nil, err
+	}
+	defer sm.endLifecycleOperation()
+
 	sm.mu.Lock()
 
 	sess, ok := sm.state.Sessions[id]
@@ -1236,11 +1252,7 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 	var candidates []orphanCandidate
 
 	for id, sess := range sm.state.Sessions {
-		if sess.Status != StatusRunning || sess.PID <= 0 {
-			continue
-		}
-
-		if !isProcessAlive(sess.PID) {
+		if (sess.Status != StatusRunning && sess.Status != StatusErrored) || sess.PID <= 0 {
 			continue
 		}
 
@@ -1257,6 +1269,23 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 	grace := sm.Config().Lifecycle.ProcessKillGraceDuration()
 
 	for _, c := range candidates {
+		if !isProcessAlive(c.pid) {
+			sm.mu.Lock()
+			if sess := sm.state.Sessions[c.id]; sess != nil && sess.PID == c.pid &&
+				sess.PIDStartTime == c.pidStartTime &&
+				(sess.Status == StatusRunning || sess.Status == StatusErrored) {
+				sess.Status = StatusStopped
+				sess.StatusChangedAt = time.Now()
+				sess.PID = 0
+				sess.PIDStartTime = 0
+				sm.setStopReasonLocked(c.id, sess, StopReasonCrash)
+				applyLifecycleSummaryLocked(sess, "Orphaned process had already exited")
+			}
+			sm.mu.Unlock()
+
+			continue
+		}
+
 		verified := c.pidStartTime != 0
 		if verified {
 			current, err := grpty.ProcessStartTime(c.pid)
@@ -1271,7 +1300,8 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 			err := killProcessGroup(c.pid, grace)
 
 			sm.mu.Lock()
-			if sess := sm.state.Sessions[c.id]; sess != nil {
+			if sess := sm.state.Sessions[c.id]; sess != nil && sess.PID == c.pid &&
+				sess.PIDStartTime == c.pidStartTime {
 				if err != nil {
 					sess.Status = StatusErrored
 					sess.StatusChangedAt = time.Now()
@@ -1290,12 +1320,12 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 			}
 			sm.mu.Unlock()
 		} else {
+			sm.log.Warn("cannot verify orphaned process identity",
+				"id", c.id, "pid", c.pid,
+				"recorded_start_time", c.pidStartTime)
 			sm.mu.Lock()
-			if sess := sm.state.Sessions[c.id]; sess != nil {
-				sm.log.Warn("cannot verify orphaned process identity",
-					"id", c.id, "pid", c.pid,
-					"recorded_start_time", c.pidStartTime)
-
+			if sess := sm.state.Sessions[c.id]; sess != nil && sess.PID == c.pid &&
+				sess.PIDStartTime == c.pidStartTime {
 				sess.Status = StatusErrored
 				sess.StatusChangedAt = time.Now()
 				sm.setStopReasonLocked(c.id, sess, StopReasonCrash)
@@ -1308,9 +1338,7 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 	}
 
 	if len(candidates) > 0 {
-		sm.mu.Lock()
-		_ = sm.saveState()
-		sm.mu.Unlock()
+		_ = sm.persistLatestUpgradeState()
 	}
 }
 

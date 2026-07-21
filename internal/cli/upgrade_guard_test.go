@@ -1,85 +1,136 @@
 package cli
 
 import (
-	"errors"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
-	"syscall"
+	"context"
 	"testing"
 
 	"github.com/d0ugal/graith/internal/daemon"
-	grpty "github.com/d0ugal/graith/internal/pty"
+	"github.com/d0ugal/graith/internal/daemonservice"
 )
 
-func TestUpgradeGuardCleansProcessWhenConfigFailsBeforeDaemonRun(t *testing.T) {
-	originalSessionID, hadSessionID := os.LookupEnv("GRAITH_SESSION_ID")
+func TestExecuteAdoptPassesScopedServiceIdentityWithoutLeakage(t *testing.T) {
+	registerCommands()
 
-	if err := os.Unsetenv("GRAITH_SESSION_ID"); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(func() {
-		if hadSessionID {
-			_ = os.Setenv("GRAITH_SESSION_ID", originalSessionID)
-		} else {
-			_ = os.Unsetenv("GRAITH_SESSION_ID")
-		}
-	})
-
-	cmd := exec.Command("sh", "-c", "exec sleep 30")
-
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-
-	pid := cmd.Process.Pid
-	done := make(chan struct{})
-
-	go func() {
-		_ = cmd.Wait()
-
-		close(done)
-	}()
+	originalRun := runAdoptBootstrapForCLI
+	originalAdoptFrom := adoptFrom
+	originalLabel := internalServiceLabel
+	originalSlot := internalServiceSlot
+	originalRootContext := rootCmd.Context()
+	originalAdoptChanged := daemonStartCmd.Flags().Lookup("adopt-from").Changed
+	originalLabelChanged := daemonStartCmd.Flags().Lookup("internal-service-label").Changed
+	originalSlotChanged := daemonStartCmd.Flags().Lookup("internal-service-slot").Changed
 
 	t.Cleanup(func() {
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		runAdoptBootstrapForCLI = originalRun
+		adoptFrom = originalAdoptFrom
+		internalServiceLabel = originalLabel
+		internalServiceSlot = originalSlot
 
-		<-done
+		rootCmd.SetContext(originalRootContext)
+
+		daemonStartCmd.Flags().Lookup("adopt-from").Changed = originalAdoptChanged
+		daemonStartCmd.Flags().Lookup("internal-service-label").Changed = originalLabelChanged
+		daemonStartCmd.Flags().Lookup("internal-service-slot").Changed = originalSlotChanged
 	})
 
-	start, err := grpty.ProcessStartTime(pid)
-	if err != nil {
-		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	type invocation struct {
+		manifest string
+		identity daemon.AdoptedServiceIdentity
 	}
 
-	dir := t.TempDir()
+	var invocations []invocation
 
-	manifestPath, err := daemon.WriteManifest(dir, &daemon.UpgradeManifest{
-		Sessions: []daemon.UpgradeSession{{
-			ID: "dreich-headless", Fd: -1, PID: pid, PIDStartTime: start,
-		}},
-	})
+	runAdoptBootstrapForCLI = func(_ string, manifest string, identity daemon.AdoptedServiceIdentity) error {
+		invocations = append(invocations, invocation{manifest: manifest, identity: identity})
+
+		return nil
+	}
+
+	definition, err := daemonservice.DefinitionForSlot("07")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	badConfig := filepath.Join(dir, "bad.toml")
-	if err := os.WriteFile(badConfig, []byte("this is not = toml"), 0o600); err != nil {
+	wantManaged, err := daemon.NewManagedAdoptedServiceIdentity(definition.Label, definition.Slot)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = executeWithArgs([]string{"daemon", "start", "--adopt-from", manifestPath, "--config", badConfig})
-	if err == nil || !strings.Contains(err.Error(), "loading config") {
-		t.Fatalf("executeWithArgs error = %v, want pre-Run config failure", err)
+	wantUnmanaged := daemon.NewUnmanagedAdoptedServiceIdentity()
+
+	if err := executeWithArgs([]string{
+		"daemon", "start", "--adopt-from", "/bothy/manifest.json",
+		"--internal-service-label", definition.Label,
+		"--internal-service-slot", definition.Slot,
+	}); err != nil {
+		t.Fatalf("managed adoption: %v", err)
 	}
 
-	<-done
+	if err := executeWithArgs([]string{
+		"daemon", "start", "--adopt-from", "/croft/manifest.json",
+	}); err != nil {
+		t.Fatalf("unmanaged adoption: %v", err)
+	}
 
-	if err := syscall.Kill(-pid, 0); !errors.Is(err, syscall.ESRCH) {
-		t.Fatalf("inherited process remains after pre-Run config failure: %v", err)
+	if len(invocations) != 2 {
+		t.Fatalf("adoption invocations = %d, want 2", len(invocations))
+	}
+
+	if got := invocations[0]; got.manifest != "/bothy/manifest.json" || got.identity != wantManaged {
+		t.Fatalf("managed adoption = %#v", got)
+	}
+
+	if got := invocations[1]; got.manifest != "/croft/manifest.json" || got.identity != wantUnmanaged {
+		t.Fatalf("unmanaged adoption inherited managed identity: %#v", got)
+	}
+}
+
+func TestDaemonStartRejectsAdoptionWithoutScopedIdentity(t *testing.T) {
+	originalRun := runAdoptBootstrapForCLI
+	originalAdoptFrom := adoptFrom
+
+	t.Cleanup(func() {
+		runAdoptBootstrapForCLI = originalRun
+		adoptFrom = originalAdoptFrom
+	})
+
+	runAdoptBootstrapForCLI = func(string, string, daemon.AdoptedServiceIdentity) error {
+		t.Fatal("adoption bootstrap ran without a scoped identity")
+
+		return nil
+	}
+	adoptFrom = "/strath/manifest.json"
+
+	cmd := *daemonStartCmd
+	cmd.SetContext(context.Background())
+
+	if err := cmd.RunE(&cmd, nil); err == nil {
+		t.Fatal("adoption without scoped service identity was accepted")
+	}
+}
+
+func TestDaemonStartRejectsZeroScopedIdentity(t *testing.T) {
+	originalRun := runAdoptBootstrapForCLI
+	originalAdoptFrom := adoptFrom
+
+	t.Cleanup(func() {
+		runAdoptBootstrapForCLI = originalRun
+		adoptFrom = originalAdoptFrom
+	})
+
+	runAdoptBootstrapForCLI = func(string, string, daemon.AdoptedServiceIdentity) error {
+		t.Fatal("adoption bootstrap ran with a zero scoped identity")
+
+		return nil
+	}
+	adoptFrom = "/strath/manifest.json"
+
+	ctx := context.WithValue(context.Background(), adoptedServiceContextKey{}, daemon.AdoptedServiceIdentity{})
+	cmd := *daemonStartCmd
+	cmd.SetContext(ctx)
+
+	if err := cmd.RunE(&cmd, nil); err == nil {
+		t.Fatal("adoption with a zero scoped service identity was accepted")
 	}
 }
 

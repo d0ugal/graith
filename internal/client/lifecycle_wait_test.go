@@ -95,6 +95,36 @@ func TestWaitForNewDaemonGenerationSucceedsOnChangedInstance(t *testing.T) {
 	}
 }
 
+func TestWaitForNewDaemonGenerationUsesUpgradeReadinessFloor(t *testing.T) {
+	originalStart := daemonStartTimeout
+	originalPoll := daemonStartPollInterval
+	originalFloor := upgradeReadinessFloor
+	daemonStartTimeout = 10 * time.Millisecond
+	daemonStartPollInterval = time.Millisecond
+	upgradeReadinessFloor = 100 * time.Millisecond
+
+	t.Cleanup(func() {
+		daemonStartTimeout = originalStart
+		daemonStartPollInterval = originalPoll
+		upgradeReadinessFloor = originalFloor
+	})
+
+	started := time.Now()
+
+	stubDialLocalDaemon(t, func() (net.Conn, error) {
+		instanceID := "old-gen"
+		if time.Since(started) >= 30*time.Millisecond {
+			instanceID = "new-gen"
+		}
+
+		return handshakeReplyConn(t, version.Version, instanceID), nil
+	})
+
+	if !waitForNewDaemonGeneration("unused.sock", config.Paths{}, version.Version, "old-gen") {
+		t.Fatal("healthy replacement inside upgrade floor was reported unavailable")
+	}
+}
+
 // TestWaitForNewDaemonGenerationRejectsInheritedListener is the core #1319
 // regression: a listener that keeps answering with the SAME version AND the SAME
 // instance ID (the inherited socket / a same-version restart before exec) must

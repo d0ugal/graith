@@ -1,3 +1,5 @@
+//go:build !libghostty || libghostty_compare
+
 package pty
 
 import (
@@ -93,9 +95,11 @@ func writeTerminalOutput(emu *cvt.Emulator, p []byte) (n int, err error) {
 	return emu.Write(p)
 }
 
-func (ct *charmTerminal) Resize(cols, rows int) {
+func (ct *charmTerminal) Resize(cols, rows int) error {
 	cols, rows = clampSize(cols, rows)
 	ct.emu.Resize(cols, rows)
+
+	return nil
 }
 
 func (ct *charmTerminal) Size() (int, int) {
@@ -121,6 +125,27 @@ func (ct *charmTerminal) Cell(x, y int) Cell {
 	return convertCell(c)
 }
 
+func (ct *charmTerminal) Snapshot() (TerminalSnapshot, error) {
+	cols, rows := ct.Size()
+	cursorX, cursorY, cursorVisible := ct.Cursor()
+
+	cells := make([]Cell, cols*rows)
+	for y := 0; y < rows; y++ {
+		for x := 0; x < cols; x++ {
+			cells[y*cols+x] = ct.Cell(x, y)
+		}
+	}
+
+	return TerminalSnapshot{
+		Cells:         cells,
+		CursorX:       cursorX,
+		CursorY:       cursorY,
+		CursorVisible: cursorVisible,
+		Cols:          cols,
+		Rows:          rows,
+	}, nil
+}
+
 func (ct *charmTerminal) Close() error {
 	ct.closeOnce.Do(func() {
 		// Closing the response pipe's write end makes the drain goroutine's
@@ -134,18 +159,6 @@ func (ct *charmTerminal) Close() error {
 	})
 
 	return nil
-}
-
-func clampSize(cols, rows int) (int, int) {
-	if cols < 1 {
-		cols = 1
-	}
-
-	if rows < 1 {
-		rows = 1
-	}
-
-	return cols, rows
 }
 
 // convertCell maps an ultraviolet cell to graith's backend-neutral Cell.

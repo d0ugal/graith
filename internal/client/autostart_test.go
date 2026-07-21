@@ -468,9 +468,14 @@ func shortenStartTimeout(t *testing.T, d time.Duration) {
 	t.Helper()
 
 	orig := daemonStartTimeout
+	origUpgrade := upgradeReadinessFloor
 	daemonStartTimeout = d
+	upgradeReadinessFloor = 0
 
-	t.Cleanup(func() { daemonStartTimeout = orig })
+	t.Cleanup(func() {
+		daemonStartTimeout = orig
+		upgradeReadinessFloor = origUpgrade
+	})
 }
 
 func TestEnsureDaemonStartsFreshWhenSocketStale(t *testing.T) {

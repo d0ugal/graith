@@ -82,6 +82,24 @@ func waitForScrollback(t *testing.T, sm *SessionManager, id, want string) {
 	t.Fatalf("timed out waiting for %q in scrollback of session %s", want, id)
 }
 
+// waitForScreen polls the derived terminal model independently of the raw
+// scrollback. The read loop persists bytes before parsing them, so observing
+// scrollback alone does not guarantee that a subsequent screen sample is ready.
+func waitForScreen(t *testing.T, sm *SessionManager, id, want string) {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if ptySess, ok := sm.GetPTY(id); ok && strings.Contains(ptySess.ScreenPreview(), want) {
+			return
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	t.Fatalf("timed out waiting for %q in terminal screen of session %s", want, id)
+}
+
 // TestRestartCapturesScrollback is a regression test for issue #1087: a stopped
 // session that is restarted produced no visible output on attach because the
 // restart lifecycle did not reliably reconnect the scrollback pipeline. The
@@ -151,13 +169,7 @@ func TestRestartCapturesScrollback(t *testing.T) {
 	// This is the terminal state a fresh attach replays, so asserting it here
 	// (not just the raw scrollback bytes) exercises the actual blank-screen
 	// surface from #1087 rather than only the on-disk log.
-	if ptySess, ok := sm.GetPTY(id); ok {
-		if screen := ptySess.ScreenPreview(); !strings.Contains(screen, "RESUME-OUTPUT") {
-			t.Errorf("rendered screen missing post-restart output; got:\n%s", screen)
-		}
-	} else {
-		t.Fatal("no live PTY after restart")
-	}
+	waitForScreen(t, sm, id, "RESUME-OUTPUT")
 
 	// The on-disk scrollback log (what `gr logs` reads for a session) must also
 	// contain the post-restart output.

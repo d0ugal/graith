@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -165,6 +166,45 @@ func TestCaptureNativeSessionIDCodex(t *testing.T) {
 
 	if got := sm.state.Sessions["bide"].AgentSessionID; got != "braw-native-id" {
 		t.Fatalf("AgentSessionID = %q; want braw-native-id", got)
+	}
+}
+
+func TestCaptureNativeSessionIDReconstructsAfterExecCancellation(t *testing.T) {
+	sm := newMigrateTestManager(t)
+	root := t.TempDir()
+	cwd := t.TempDir()
+	since := time.Now().Add(-time.Minute).UTC()
+	state := &SessionState{
+		ID: "canny-exec", Name: "canny-exec", Agent: "codex",
+		Status: StatusRunning, WorktreePath: cwd, PID: 4242, PIDStartTime: 111,
+		NativeStateRoot: root, NativeCaptureStartedAt: &since,
+	}
+	sm.state.Sessions[state.ID] = state
+
+	oldCtx, cancelOld := context.WithCancel(context.Background())
+	cancelOld()
+	sm.captureNativeSessionIDContext(oldCtx, state.ID, state.Agent, state.WorktreePath,
+		state.NativeStateRoot, *state.NativeCaptureStartedAt, state.PID, state.PIDStartTime)
+
+	if state.AgentSessionID != "" {
+		t.Fatal("canceled pre-exec capture mutated state")
+	}
+
+	writeCodexRollout(t, root, "dreich-exact-id", cwd, time.Now())
+	sm.captureNativeSessionIDContext(context.Background(), state.ID, state.Agent, state.WorktreePath,
+		state.NativeStateRoot, *state.NativeCaptureStartedAt, state.PID, state.PIDStartTime)
+
+	if state.AgentSessionID != "dreich-exact-id" {
+		t.Fatalf("reconstructed AgentSessionID = %q", state.AgentSessionID)
+	}
+
+	if state.NativeStateRoot != "" || state.NativeCaptureStartedAt != nil {
+		t.Fatalf("capture restart metadata was not cleared: %+v", state)
+	}
+
+	args, _ := resolveResumeArgs(config.Agent{ResumeArgs: []string{"resume", "{agent_session_id}"}}, "codex", state.AgentSessionID, false)
+	if reflect.DeepEqual(args, []string{"resume", "--last"}) {
+		t.Fatal("reconstructed capture still selected resume --last")
 	}
 }
 

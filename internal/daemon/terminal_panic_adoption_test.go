@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -62,6 +64,14 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := badR.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := setDescriptorFlags(badFD, syscall.FD_CLOEXEC); err != nil {
+		t.Fatal(err)
+	}
+
 	goodR, goodW, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -74,61 +84,89 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	badPID := spawnReapableSleeper(t)
-	goodPID := spawnReapableSleeper(t)
-
-	badStart, err := grpty.ProcessStartTime(badPID)
-	if err != nil {
-		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	if err := goodR.Close(); err != nil {
+		t.Fatal(err)
 	}
 
-	goodStart, err := grpty.ProcessStartTime(goodPID)
-	if err != nil {
-		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	if err := setDescriptorFlags(goodFD, syscall.FD_CLOEXEC); err != nil {
+		t.Fatal(err)
 	}
 
-	for id, process := range map[string]struct {
+	badCmd := exec.Command("sleep", "30")
+	if err := badCmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	goodCmd := exec.Command("sleep", "30")
+	if err := goodCmd.Start(); err != nil {
+		_ = badCmd.Process.Kill()
+		_ = badCmd.Wait()
+
+		t.Fatal(err)
+	}
+
+	badStart, err := grpty.ProcessStartTime(badCmd.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	goodStart, err := grpty.ProcessStartTime(goodCmd.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for id, identity := range map[string]struct {
 		pid   int
 		start int64
 	}{
-		"thrawn-fash": {pid: badPID, start: badStart},
-		"canny-braw":  {pid: goodPID, start: goodStart},
+		"thrawn-fash": {badCmd.Process.Pid, badStart},
+		"canny-braw":  {goodCmd.Process.Pid, goodStart},
 	} {
 		sm.state.Sessions[id] = &SessionState{
 			ID: id, Name: id, Agent: "sleeper", Status: StatusRunning,
-			PID: process.pid, PIDStartTime: process.start, Sandboxed: true,
+			PID: identity.pid, PIDStartTime: identity.start, Sandboxed: true,
 			CreationCfg: &CreationConfig{Agent: sm.cfg.Agents["sleeper"]},
 		}
 	}
 
 	t.Cleanup(func() {
 		_ = goodW.Close()
-		_ = syscall.Kill(-goodPID, syscall.SIGKILL)
-		_ = syscall.Kill(-badPID, syscall.SIGKILL)
-
+		_ = badW.Close()
+		_ = badCmd.Process.Kill()
+		_ = badCmd.Wait()
+		_ = goodCmd.Process.Kill()
+		_ = goodCmd.Wait()
 		sm.watchers.Wait()
 	})
 
 	manifest := &UpgradeManifest{Sessions: []UpgradeSession{
-		{ID: "thrawn-fash", Fd: badFD, HasPTY: true, PID: badPID, PIDStartTime: badStart},
-		{ID: "canny-braw", Fd: goodFD, HasPTY: true, PID: goodPID, PIDStartTime: goodStart},
+		{ID: "thrawn-fash", Fd: badFD,
+			ScrollbackFd: openUpgradeScrollbackFD(t, filepath.Join(sm.paths.LogDir, "thrawn-fash.log")),
+			PID:          badCmd.Process.Pid, PIDStartTime: badStart},
+		{ID: "canny-braw", Fd: goodFD,
+			ScrollbackFd: openUpgradeScrollbackFD(t, filepath.Join(sm.paths.LogDir, "canny-braw.log")),
+			PID:          goodCmd.Process.Pid, PIDStartTime: goodStart},
 	}}
 
-	if err := sm.AdoptSessions(manifest); err != nil {
+	if _, err := sm.AdoptSessions(manifest); err != nil {
 		t.Fatalf("AdoptSessions: %v", err)
 	}
+	// Run normally schedules derived-screen reconstruction in its owned
+	// post-commit background generation. Exercise that phase explicitly here.
+	sm.recoverTerminalScreensAfterUpgrade(context.Background())
 
 	bad, _ := sm.Get("thrawn-fash")
-	if bad.Status != StatusStopped {
-		t.Errorf("failed hydration status = %q, want %q", bad.Status, StatusStopped)
+	if bad.Status != StatusRunning {
+		t.Errorf("failed hydration status = %q, want %q", bad.Status, StatusRunning)
 	}
 
-	if bad.SummaryText != "Lost during daemon upgrade" {
-		t.Errorf("failed hydration summary = %q, want lost-upgrade summary", bad.SummaryText)
+	badPTY, ok := sm.GetPTY("thrawn-fash")
+	if !ok {
+		t.Fatal("failed hydration did not retain the live PTY")
 	}
 
-	if _, ok := sm.GetPTY("thrawn-fash"); ok {
-		t.Error("failed hydration retained a live PTY")
+	if err := badCmd.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Fatalf("failed hydration killed the running agent: %v", err)
 	}
 
 	if _, ok := sm.GetPTY("canny-braw"); !ok {
@@ -144,7 +182,8 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 
 	for _, line := range bytes.Split([]byte(logBuf.String()), []byte("\n")) {
 		var record map[string]any
-		if json.Unmarshal(line, &record) == nil && record["msg"] == "failed to adopt session" {
+		if json.Unmarshal(line, &record) == nil &&
+			record["msg"] == "terminal recovery hydration failed; using empty screen" {
 			failureLog = record
 			break
 		}
@@ -154,22 +193,44 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 		t.Fatalf("missing adoption failure log: %s", logBuf.String())
 	}
 
-	if failureLog["id"] != "thrawn-fash" {
-		t.Errorf("adoption failure id = %v, want thrawn-fash", failureLog["id"])
+	if failureLog["session"] != "thrawn-fash" {
+		t.Errorf("adoption fallback session = %v, want thrawn-fash", failureLog["session"])
 	}
 
-	if failureLog["err"] != "hydrate terminal screen: terminal parser panic" {
-		t.Errorf("adoption failure error = %v, want sanitized parser failure", failureLog["err"])
+	if failureLog["error"] != "terminal parser panic" {
+		t.Errorf("adoption fallback error = %v, want sanitized parser failure", failureLog["error"])
 	}
 
 	if strings.Contains(logBuf.String(), "dreich-payload-must-not-be-logged") {
 		t.Fatal("adoption failure log exposed scrollback contents")
 	}
 
+	if _, err := badW.Write([]byte("\x1b[2J\x1b[Hcanny-live-after-fallback\n")); err != nil {
+		t.Fatalf("write after hydration fallback: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(badPTY.ScreenPreview(), "canny-live-after-fallback") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if got := badPTY.ScreenPreview(); !strings.Contains(got, "canny-live-after-fallback") {
+		tail, tailErr := badPTY.ScrollbackFile().TailBytes(256 * 1024)
+		t.Fatalf("adopted screen did not remain serviceable: preview=%q tail=%q tail_err=%v logs=%s",
+			got, tail, tailErr, logBuf.String())
+	}
+
+	tail, err := badPTY.ScrollbackFile().TailBytes(256 * 1024)
+	if err != nil || !bytes.Contains(tail, badScrollback) {
+		t.Fatalf("raw scrollback was not preserved: bytes=%d err=%v", len(tail), err)
+	}
+
 	_ = badW.Close()
 	_ = goodW.Close()
-	_ = syscall.Kill(-badPID, syscall.SIGKILL)
-	_ = syscall.Kill(-goodPID, syscall.SIGKILL)
+	_ = badCmd.Process.Kill()
+	_ = badCmd.Wait()
+	_ = goodCmd.Process.Kill()
+	_ = goodCmd.Wait()
 
 	watchersDone := make(chan struct{})
 

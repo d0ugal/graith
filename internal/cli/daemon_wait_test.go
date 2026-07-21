@@ -27,11 +27,16 @@ func preserveLifecyclePolicy(t *testing.T) {
 
 	oldCfg := cfg
 	oldNow, oldSleep, oldProbe, oldDial := connectionNow, connectionSleep, probeDaemonIdentityFn, dialLocalDaemon
+	oldNegotiationFloor, oldReadinessFloor := upgradeNegotiationFloor, upgradeReadinessFloor
 
 	t.Cleanup(func() {
 		cfg = oldCfg
 		connectionNow, connectionSleep, probeDaemonIdentityFn, dialLocalDaemon = oldNow, oldSleep, oldProbe, oldDial
+		upgradeNegotiationFloor, upgradeReadinessFloor = oldNegotiationFloor, oldReadinessFloor
 	})
+
+	upgradeNegotiationFloor = 0
+	upgradeReadinessFloor = 0
 }
 
 func installFakeClock(t *testing.T) *fakeConnClock {
@@ -137,6 +142,40 @@ func TestWaitForNewLocalDaemonGenerationReportsReady(t *testing.T) {
 
 	if got != "0.69.1-new" {
 		t.Fatalf("last version = %q, want 0.69.1-new", got)
+	}
+}
+
+func TestUpgradeReadinessFloorCoversHealthyPostAckWork(t *testing.T) {
+	preserveLifecyclePolicy(t)
+	clk := installFakeClock(t)
+	started := clk.Now()
+	upgradeReadinessFloor = 60 * time.Second
+	cfg = &config.Config{Connection: config.ConnectionConfig{
+		StartTimeout:      "5s",
+		StartPollInterval: "1s",
+	}}
+
+	calls := 0
+
+	var aggregateDeadline time.Time
+
+	probeDaemonIdentityFn = func(deadline time.Time) (string, string) {
+		calls++
+		aggregateDeadline = deadline
+
+		if calls < 46 {
+			return "0.69.1-new", "old-gen"
+		}
+
+		return "0.69.1-new", "new-gen"
+	}
+
+	if _, ready := waitForNewLocalDaemonGeneration("0.69.1-new", "old-gen"); !ready {
+		t.Fatal("healthy replacement after 45 seconds exceeded upgrade readiness budget")
+	}
+
+	if want := started.Add(60 * time.Second); !aggregateDeadline.Equal(want) {
+		t.Fatalf("aggregate upgrade readiness deadline = %v, want %v", aggregateDeadline, want)
 	}
 }
 

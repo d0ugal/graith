@@ -8,16 +8,127 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemonservice"
 	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
+func TestResolvedUpgradeSnapshotPathsDoesNotRetainRemovedDataDir(t *testing.T) {
+	defaults, err := config.ResolvePaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	running := defaults.WithDataDir(filepath.Join(t.TempDir(), "croft-custom-data"))
+	snapshot := config.Default() // data_dir deliberately removed
+
+	got, err := resolvedUpgradeSnapshotPaths(snapshot, defaults.ConfigFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := makeUpgradePathDescriptor(defaults, defaults.ConfigFile)
+	if got != want {
+		t.Fatalf("fresh snapshot paths = %+v, want replacement defaults %+v", got, want)
+	}
+
+	if got == makeUpgradePathDescriptor(running, defaults.ConfigFile) {
+		t.Fatal("removed data_dir inherited the running daemon's custom paths")
+	}
+}
+
+func TestValidateAdoptedServiceIdentity(t *testing.T) {
+	original := validateRetainedAdoptedService
+
+	t.Cleanup(func() { validateRetainedAdoptedService = original })
+
+	var calls int
+
+	validateRetainedAdoptedService = func(label, slot, profile, candidatePath string) (daemonservice.Definition, error) {
+		calls++
+
+		if label != "net.graith.daemon.profile.01" || slot != "01" || profile != "croft" || candidatePath != "/bothy/Graith.app/Contents/MacOS/graith" {
+			return daemonservice.Definition{}, fmt.Errorf("unexpected validation arguments: label=%q slot=%q profile=%q candidate=%q", label, slot, profile, candidatePath)
+		}
+
+		return daemonservice.Definition{Slot: "01"}, nil
+	}
+
+	if err := validateAdoptedServiceIdentity(NewUnmanagedAdoptedServiceIdentity(), "croft", ""); err != nil {
+		t.Fatalf("explicit unmanaged identity: %v", err)
+	}
+
+	if calls != 0 {
+		t.Fatalf("unmanaged validation calls = %d, want 0", calls)
+	}
+
+	if err := validateAdoptedServiceIdentity(AdoptedServiceIdentity{}, "croft", ""); err == nil ||
+		!strings.Contains(err.Error(), "not explicitly selected") {
+		t.Fatalf("zero identity error = %v, want explicit-selection failure", err)
+	}
+
+	if calls != 0 {
+		t.Fatalf("zero identity reached service validator %d times, want 0", calls)
+	}
+
+	for _, fields := range [][2]string{
+		{"", ""},
+		{"net.graith.daemon.profile.01", ""},
+		{"", "01"},
+	} {
+		if _, err := NewManagedAdoptedServiceIdentity(fields[0], fields[1]); err == nil ||
+			!strings.Contains(err.Error(), "both service label and slot") {
+			t.Fatalf("managed constructor (%q, %q) error = %v, want fail-closed error", fields[0], fields[1], err)
+		}
+	}
+
+	identity, err := NewManagedAdoptedServiceIdentity("net.graith.daemon.profile.01", "01")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := validateAdoptedServiceIdentity(identity, "croft", "/bothy/Graith.app/Contents/MacOS/graith"); err != nil {
+		t.Fatalf("valid managed identity: %v", err)
+	}
+
+	if calls != 1 {
+		t.Fatalf("managed validation calls = %d, want 1", calls)
+	}
+
+	wantErr := errors.New("profile mismatch")
+	validateRetainedAdoptedService = func(_, _, _, _ string) (daemonservice.Definition, error) {
+		return daemonservice.Definition{}, wantErr
+	}
+
+	if err := validateAdoptedServiceIdentity(identity, "dreich", "/bothy/Graith.app/Contents/MacOS/graith"); !errors.Is(err, wantErr) {
+		t.Fatalf("bad bound profile error = %v, want %v", err, wantErr)
+	}
+}
+
 func TestRunCleansUpgradeProcessesWhenBootstrapFails(t *testing.T) {
+	dir := t.TempDir()
+
+	listenerR, listenerW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeUpgradeTestFile(t, listenerW)
+
+	listenerFD := duplicateTransferredFileFD(t, listenerR)
+
+	sessionR, sessionW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeUpgradeTestFile(t, sessionW)
+
+	sessionFD := duplicateTransferredFileFD(t, sessionR)
 	pid := spawnReapableSleeper(t)
 
 	start, err := grpty.ProcessStartTime(pid)
@@ -25,48 +136,72 @@ func TestRunCleansUpgradeProcessesWhenBootstrapFails(t *testing.T) {
 		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
 	}
 
-	t.Cleanup(func() { _ = syscall.Kill(-pid, syscall.SIGKILL) })
+	manifest := validUpgradeManifestForBoundaryTest(t, listenerFD, []UpgradeSession{{
+		ID: "thrawn-headless", Fd: sessionFD,
+		ScrollbackFd: openUpgradeScrollbackFD(t, filepath.Join(dir, "thrawn.log")),
+		PID:          pid, PIDStartTime: start,
+	}})
 
-	dir := t.TempDir()
-
-	manifestPath, err := WriteManifest(dir, &UpgradeManifest{Sessions: []UpgradeSession{{
-		ID: "thrawn-headless", Fd: -1, PID: pid, PIDStartTime: start,
-	}}})
+	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	earlyGuard, err := ArmUpgradeFailureGuard(manifestPath)
+	executableInfo, err := os.Stat(executable)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	blocker := filepath.Join(dir, "not-a-directory")
-	if err := os.WriteFile(blocker, []byte("dreich"), 0o600); err != nil {
+	manifest.Target = UpgradeTargetDescriptor{
+		ResolvedPath: executable,
+		Size:         executableInfo.Size(),
+		Mode:         uint32(executableInfo.Mode()),
+		ModTimeNanos: executableInfo.ModTime().UnixNano(),
+		SHA256:       mustDigestUpgradeFile(t, executable),
+	}
+	manifest.ConfigPresent = true
+	manifest.ConfigSnapshot = []byte("dreich = [")
+
+	manifestPath, err := WriteManifest(dir, manifest)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	paths := config.Paths{
-		ConfigFile: filepath.Join(blocker, "config.toml"),
-		DataDir:    filepath.Join(dir, "data"),
-		RuntimeDir: filepath.Join(dir, "run"),
-		LogDir:     filepath.Join(dir, "logs"),
-		TmpDir:     filepath.Join(dir, "tmp"),
+	if err := prepareManifestHandoff(manifestPath, manifest); err != nil {
+		t.Fatal(err)
 	}
 
-	err = Run(config.Default(), paths, "", manifestPath, earlyGuard)
-	if err == nil || !strings.Contains(err.Error(), "create directory") {
-		t.Fatalf("Run error = %v, want pre-initialization directory failure", err)
+	if err := prepareOwnershipCapsule(manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv(upgradeOwnershipCapsuleEnv, manifest.ownershipCapsule)
+	t.Setenv(upgradeOwnershipFDEnv, strconv.Itoa(manifest.ownershipFD))
+
+	err = runUnmanagedAdoptBootstrap("", manifestPath)
+	if err == nil || !strings.Contains(err.Error(), "loading exact upgrade config snapshot") {
+		t.Fatalf("RunAdoptBootstrap error = %v, want config bootstrap failure", err)
 	}
 
 	if err := syscall.Kill(-pid, 0); !errors.Is(err, syscall.ESRCH) {
-		t.Fatalf("inherited process remains after Run bootstrap failure: %v", err)
+		t.Fatalf("inherited process remains after bootstrap failure: %v", err)
 	}
+}
+
+func mustDigestUpgradeFile(t *testing.T, path string) string {
+	t.Helper()
+
+	digest, err := digestFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return digest
 }
 
 func TestRunControlLoopReloadsThenShutsDown(t *testing.T) {
 	signals := make(chan os.Signal)
-	upgrades := make(chan string)
+	upgrades := make(chan *upgradeRequest)
 	wantReloadErr := errors.New("invalid config")
 	reloaded := make(chan struct{}, 1)
 	shutdown := make(chan struct{}, 1)
@@ -79,7 +214,7 @@ func TestRunControlLoopReloadsThenShutsDown(t *testing.T) {
 			return wantReloadErr
 		}, func() {
 			shutdown <- struct{}{}
-		}, func(string) error {
+		}, func(*upgradeRequest) error {
 			unexpected <- "upgrade callback ran"
 			return nil
 		})
@@ -108,52 +243,89 @@ func TestRunControlLoopReloadsThenShutsDown(t *testing.T) {
 	assertNoUnexpectedCallback(t, unexpected)
 }
 
-func TestRunControlLoopReturnsUpgradeResult(t *testing.T) {
+func TestRunControlLoopKeepsServingAfterUpgradeError(t *testing.T) {
 	signals := make(chan os.Signal)
-	upgrades := make(chan string)
+	upgrades := make(chan *upgradeRequest)
 	wantErr := errors.New("upgrade failed")
-	unexpected := make(chan string, 2)
+	callback := make(chan struct{}, 1)
+	shutdown := make(chan struct{}, 1)
 	done := make(chan error, 1)
 
 	go func() {
 		done <- runControlLoop(signals, upgrades, discardLogger(), func() error {
-			unexpected <- "reload callback ran"
 			return nil
 		}, func() {
-			unexpected <- "shutdown callback ran"
-		}, func(path string) error {
-			if path != "/tmp/new-gr" {
-				unexpected <- "upgrade callback received wrong path"
+			shutdown <- struct{}{}
+		}, func(request *upgradeRequest) error {
+			if request.execPath != "/tmp/new-gr" {
+				t.Errorf("upgrade callback path = %q", request.execPath)
 			}
+
+			callback <- struct{}{}
 
 			return wantErr
 		})
 	}()
 
-	upgrades <- "/tmp/new-gr"
+	upgrades <- newUpgradeRequest("/tmp/new-gr")
 
-	if got := <-done; !errors.Is(got, wantErr) {
-		t.Fatalf("runControlLoop error = %v, want %v", got, wantErr)
+	<-callback
+
+	signals <- syscall.SIGTERM
+
+	<-shutdown
+
+	if got := <-done; got != nil {
+		t.Fatalf("runControlLoop error = %v, want nil", got)
+	}
+}
+
+func TestRunControlLoopFailsClosedAfterUnsafeDescriptorRollback(t *testing.T) {
+	signals := make(chan os.Signal)
+	upgrades := make(chan *upgradeRequest)
+	shutdown := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	wantErr := unsafeUpgradeDescriptor(errors.New("descriptor flags remain inheritable"))
+
+	go func() {
+		done <- runControlLoop(signals, upgrades, discardLogger(), func() error {
+			return nil
+		}, func() {
+			shutdown <- struct{}{}
+		}, func(*upgradeRequest) error {
+			return wantErr
+		})
+	}()
+
+	upgrades <- newUpgradeRequest("/tmp/new-gr")
+
+	select {
+	case <-shutdown:
+	case <-time.After(time.Second):
+		t.Fatal("unsafe rollback did not shut down the daemon")
 	}
 
-	assertNoUnexpectedCallback(t, unexpected)
+	var unsafeErr *upgradeDescriptorSafetyError
+	if err := <-done; !errors.As(err, &unsafeErr) {
+		t.Fatalf("runControlLoop error = %v, want unsafe descriptor error", err)
+	}
 }
 
 func TestRunControlLoopContinuesAfterPreMutationUpgradeRejection(t *testing.T) {
 	signals := make(chan os.Signal)
-	upgrades := make(chan string)
+	upgrades := make(chan *upgradeRequest)
 	shutdown := make(chan struct{}, 1)
 	done := make(chan error, 1)
 
 	go func() {
 		done <- runControlLoop(signals, upgrades, discardLogger(), func() error { return nil }, func() {
 			shutdown <- struct{}{}
-		}, func(string) error {
+		}, func(*upgradeRequest) error {
 			return fmt.Errorf("%w: dreich candidate", errUpgradeRejected)
 		})
 	}()
 
-	upgrades <- "/bothy/unrecorded-gr"
+	upgrades <- newUpgradeRequest("/bothy/unrecorded-gr")
 
 	select {
 	case err := <-done:
@@ -178,7 +350,7 @@ func TestRunControlLoopTerminalSignalsShutDown(t *testing.T) {
 	for _, signal := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT} {
 		t.Run(signal.String(), func(t *testing.T) {
 			signals := make(chan os.Signal)
-			upgrades := make(chan string)
+			upgrades := make(chan *upgradeRequest)
 			shutdown := make(chan struct{}, 1)
 			unexpected := make(chan string, 2)
 			done := make(chan error, 1)
@@ -190,7 +362,7 @@ func TestRunControlLoopTerminalSignalsShutDown(t *testing.T) {
 					return nil
 				}, func() {
 					shutdown <- struct{}{}
-				}, func(string) error {
+				}, func(*upgradeRequest) error {
 					unexpected <- "upgrade callback ran"
 
 					return nil

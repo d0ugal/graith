@@ -6474,7 +6474,7 @@ func TestCovCleanupOrphanedProcesses(t *testing.T) {
 	// the test runner.
 	sleeper := spawnContainedSleeper(t)
 	putSession(sm, &SessionState{ID: "scunner1", Name: "scunner", Status: StatusRunning, PID: sleeper, PIDStartTime: 0})
-	// Dead pid: not a candidate, left untouched.
+	// Dead pid: reconcile the stale running state without signalling anything.
 	putSession(sm, &SessionState{ID: "whin1", Name: "whin", Status: StatusRunning, PID: 1 << 30})
 	// Not running: ignored.
 	putSession(sm, &SessionState{ID: "neep1", Name: "neep", Status: StatusStopped, PID: sleeper})
@@ -6489,8 +6489,8 @@ func TestCovCleanupOrphanedProcesses(t *testing.T) {
 		t.Errorf("scunner1 status = %q, want errored (unverifiable orphan)", s.Status)
 	}
 
-	if s, _ := sm.Get("whin1"); s.Status != StatusRunning {
-		t.Errorf("whin1 status = %q, want running (dead pid, not a candidate)", s.Status)
+	if s, _ := sm.Get("whin1"); s.Status != StatusStopped || s.PID != 0 {
+		t.Errorf("whin1 = %+v, want stopped with cleared dead pid", s)
 	}
 
 	if s, _ := sm.Get("neep1"); s.Status != StatusStopped {
@@ -6946,14 +6946,16 @@ func TestCleanupOrphanedProcessesVerifiedKillCov2(t *testing.T) {
 	}
 }
 
-// TestAdoptSessionsCov2 covers AdoptSessions handling both a manifest entry for a
-// session it doesn't know about (fail closed) and one it knows about but cannot
-// re-attach to (adoption fails → session marked stopped).
+// TestAdoptSessionsCov2 covers the fail-closed legacy identity path. A v0
+// manifest without a process start time must not be adopted or persisted when
+// exact child ownership cannot be recovered. Startup retains the outer
+// ownership guard and aborts instead of serving ambiguous process ownership.
 func TestAdoptSessionsCov2(t *testing.T) {
 	sm := sleeperSM(t)
 
 	sm.state.Sessions["bide1"] = &SessionState{
 		ID: "bide1", Name: "bide", Agent: "sleeper", Status: StatusRunning, Sandboxed: true,
+		PID: 1 << 30, PIDStartTime: 99,
 		CreationCfg: &CreationConfig{Agent: sm.cfg.Agents["sleeper"]},
 	}
 
@@ -6966,8 +6968,8 @@ func TestAdoptSessionsCov2(t *testing.T) {
 		},
 	}
 
-	if err := sm.AdoptSessions(manifest); err == nil || !strings.Contains(err.Error(), "unknown session") {
-		t.Fatalf("AdoptSessions error = %v, want unknown-session rejection", err)
+	if _, err := sm.AdoptSessions(manifest); err == nil {
+		t.Fatal("legacy unknown session identity did not remain under cleanup ownership")
 	}
 
 	s, ok := sm.Get("bide1")
@@ -6975,8 +6977,12 @@ func TestAdoptSessionsCov2(t *testing.T) {
 		t.Fatal("known session vanished after adopt")
 	}
 
-	if s.Status != StatusStopped {
-		t.Errorf("un-adoptable session status = %q, want stopped", s.Status)
+	if s.Status != StatusRunning {
+		t.Errorf("un-adoptable session status = %q, want unchanged running state", s.Status)
+	}
+
+	if len(sm.state.UpgradeCleanup) != 0 {
+		t.Fatalf("ambiguous zero-start ownership was persisted: %+v", sm.state.UpgradeCleanup)
 	}
 
 	if _, ok := sm.Get("ghaist1"); ok {
@@ -6985,18 +6991,69 @@ func TestAdoptSessionsCov2(t *testing.T) {
 }
 
 func TestUpgradeAdoptionAllowsUnsandboxedNativePromptSession(t *testing.T) {
-	sess := &SessionState{
-		ID: "dreich-old", PID: 123, PIDStartTime: 456,
-		Sandboxed: false, CreationCfg: nil,
+	sm := sleeperSM(t)
+	cmd := exec.Command("sleep", "30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
 	}
 
-	if reason := invalidUpgradeAdoptionReason(sess); reason != "" {
-		t.Fatalf("identity-valid session rejected: %s", reason)
+	start, err := grpty.ProcessStartTime(cmd.Process.Pid)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
 	}
 
-	sess.PIDStartTime = 0
-	if reason := invalidUpgradeAdoptionReason(sess); !strings.Contains(reason, "process identity") {
-		t.Fatalf("missing identity reason = %q", reason)
+	readEnd, writeEnd, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fd, err := syscall.Dup(int(readEnd.Fd()))
+	_ = readEnd.Close()
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		_ = writeEnd.Close()
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+		sm.watchers.Wait()
+	})
+
+	sm.state.Sessions["dreich-old"] = &SessionState{
+		ID: "dreich-old", Name: "dreich-old", Agent: "sleeper", Status: StatusRunning,
+		PID: cmd.Process.Pid, PIDStartTime: start, Sandboxed: false, CreationCfg: nil,
+	}
+
+	result, err := sm.AdoptSessions(&UpgradeManifest{Sessions: []UpgradeSession{{
+		ID: "dreich-old", Fd: fd,
+		ScrollbackFd: openUpgradeScrollbackFD(t, filepath.Join(sm.paths.LogDir, "dreich-old.log")),
+		PID:          cmd.Process.Pid, PIDStartTime: start,
+	}}})
+	if err != nil {
+		t.Fatalf("AdoptSessions: %v", err)
+	}
+
+	if len(result.ResolvedSessions) != 1 || len(result.UnresolvedSessions) != 0 {
+		t.Fatalf("adoption result = %+v, want one resolved session", result)
+	}
+
+	if _, ok := sm.GetPTY("dreich-old"); !ok {
+		t.Fatal("identity-valid unsandboxed native prompt session was not adopted")
+	}
+
+	if err := writeEnd.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if session, ok := sm.GetPTY("dreich-old"); ok {
+		session.Close()
 	}
 }
 
@@ -7016,11 +7073,16 @@ func TestAdoptSessionsTerminatesOmittedHeadlessProcess(t *testing.T) {
 		CreationCfg: &CreationConfig{Agent: sm.cfg.Agents["sleeper"]},
 	}
 
-	// Headless drivers have no PTY fd and are intentionally omitted from the
-	// handoff manifest. The replacement daemon must still identity-check and
-	// terminate their process rather than leaving it unmanaged.
-	if err := sm.AdoptSessions(&UpgradeManifest{}); err != nil {
+	result, err := sm.AdoptSessions(&UpgradeManifest{Sessions: []UpgradeSession{{
+		ID: "canny-headless", Fd: -1, HasPTY: false,
+		PID: pid, PIDStartTime: start,
+	}}})
+	if err != nil {
 		t.Fatalf("AdoptSessions: %v", err)
+	}
+
+	if len(result.ResolvedSessions) != 1 || len(result.UnresolvedSessions) != 0 {
+		t.Fatalf("adoption result = %+v, want one resolved cleanup-only session", result)
 	}
 
 	sess, ok := sm.Get("canny-headless")

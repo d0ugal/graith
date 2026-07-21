@@ -40,6 +40,11 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 // See docs/design/2026-06-24-cross-agent-conversation-migration-design.md
 // ("Future: cross-agent fork").
 func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targetModel string, rows, cols uint16) (SessionState, error) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return SessionState{}, err
+	}
+	defer sm.endLifecycleOperation()
+
 	if err := ValidateSessionName(name); err != nil {
 		return SessionState{}, err
 	}
@@ -95,6 +100,12 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 
 	// --- Phase 1: Lock, validate, reserve ---
 	sm.mu.Lock()
+	if err := sm.rejectLaunchDuringUpgradeLocked(); err != nil {
+		sm.mu.Unlock()
+
+		return SessionState{}, err
+	}
+
 	// The pre-lock snapshot was used only for slow username/model discovery.
 	// Capture the launch generation again under the lock so command-policy hook
 	// installation and the persisted CreationConfig describe the same config.
@@ -645,6 +656,14 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		return SessionState{}, fmt.Errorf("acquire launch slot: %w", err)
 	}
 
+	if err := sm.lifecyclePreSpawnBarrier(); err != nil {
+		slot.release()
+		forkCleanup()
+		rollbackState()
+
+		return SessionState{}, err
+	}
+
 	// Pre-spawn time for native session-id capture (see Create).
 	startedAt := time.Now()
 
@@ -675,6 +694,18 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 
 	// --- Phase 3: Lock, commit ---
 	sm.mu.Lock()
+	if err := sm.rejectLaunchDuringUpgradeLocked(); err != nil {
+		sm.mu.Unlock()
+		sm.logStopping(id, name, "rollback", "fork-rollback", ptySess)
+		_ = ptySess.Kill()
+		ptySess.Close()
+		forkCleanup()
+		rollbackState()
+
+		_ = os.Remove(logPath)
+
+		return SessionState{}, err
+	}
 
 	if _, ok := sm.state.Sessions[id]; !ok {
 		sm.mu.Unlock()
@@ -705,6 +736,12 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		Agent:         agent,
 		SandboxConfig: cfgSnapshot.Sandbox.Merge(agent.Sandbox),
 		CommandPolicy: cfgSnapshot.CommandPolicy,
+	}
+
+	if scrapesID(agentName) && agentSessionID == "" {
+		captureStartedAt := startedAt.UTC()
+		sessState.NativeStateRoot = env["CODEX_HOME"]
+		sessState.NativeCaptureStartedAt = &captureStartedAt
 	}
 
 	// Record cross-agent provenance (surfaced via SessionInfo.MigratedFrom) and,
@@ -767,7 +804,9 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	// fork mints a new conversation graith didn't choose, so read it from disk
 	// for deterministic later resume. Skipped when the id was forced (Claude).
 	if scrapesID(agentName) && agentSessionID == "" {
-		go sm.captureNativeSessionID(id, agentName, worktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
+		sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) {
+			sm.captureNativeSessionIDContext(taskCtx, id, agentName, worktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
+		})
 	}
 
 	return result, nil

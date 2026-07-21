@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 // in-memory pipe, for exercising the pairing / proof-of-possession / Gate-A
 // flow end to end at the handler level.
 type remoteConn struct {
+	conn   net.Conn
 	reader *protocol.FrameReader
 	writer *protocol.FrameWriter
 }
@@ -49,8 +51,115 @@ func newRemoteConn(t *testing.T, sm *SessionManager, identity TailnetIdentity) *
 	})
 
 	return &remoteConn{
+		conn:   client,
 		reader: protocol.NewFrameReader(client),
 		writer: protocol.NewFrameWriter(client),
+	}
+}
+
+func TestPairResponseWriteIsOwnedByMutationDrain(t *testing.T) {
+	sm := newPairingSM(t)
+	pub, _, _ := ed25519.GenerateKey(nil)
+	rc := newRemoteConn(t, sm, TailnetIdentity{User: "speir@example.com", Node: "ben"})
+	rc.handshake(t, sm)
+	rc.send(t, "pair_request", protocol.PairRequestMsg{
+		DeviceLabel: "bairn", DevicePubKey: base64.StdEncoding.EncodeToString(pub),
+	}, "")
+
+	var requestID string
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if pending, _ := sm.ListPairings(); len(pending) == 1 {
+			requestID = pending[0].RequestID
+			break
+		}
+
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if requestID == "" {
+		t.Fatal("pending pairing never appeared")
+	}
+
+	if _, _, err := sm.ApprovePairing(requestID, false, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	// net.Pipe has no buffering: until the client reads, pair_response remains
+	// inside the tracked writer and the delivery mutation must stay admitted.
+	if err := sm.beginUpgradeReservation(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(sm.endUpgradeReservation)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	err := sm.waitMutationIdle(ctx)
+
+	cancel()
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("mutation drain crossed blocked pair_response write: %v", err)
+	}
+
+	if env := rc.read(t); env.Type != "pair_response" {
+		t.Fatalf("response type = %q", env.Type)
+	}
+
+	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := sm.waitMutationIdle(ctx); err != nil {
+		t.Fatalf("delivery mutation did not release after response write: %v", err)
+	}
+}
+
+func TestPairResponseWriteFailureRollsBackPersistedDevice(t *testing.T) {
+	sm := newPairingSM(t)
+	pub, _, _ := ed25519.GenerateKey(nil)
+	rc := newRemoteConn(t, sm, TailnetIdentity{User: "speir@example.com", Node: "ben"})
+	rc.handshake(t, sm)
+	rc.send(t, "pair_request", protocol.PairRequestMsg{
+		DeviceLabel: "bairn", DevicePubKey: base64.StdEncoding.EncodeToString(pub),
+	}, "")
+
+	var requestID string
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if pending, _ := sm.ListPairings(); len(pending) == 1 {
+			requestID = pending[0].RequestID
+			break
+		}
+
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if requestID == "" {
+		t.Fatal("pending pairing never appeared")
+	}
+
+	deviceID, token, err := sm.ApprovePairing(requestID, false, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = rc.conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := sm.waitMutationIdle(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.mu.RLock()
+	device := sm.DeviceForToken(token)
+	_, persisted := sm.state.PairedDevices[deviceID]
+	sm.mu.RUnlock()
+
+	if device != nil || persisted {
+		t.Fatal("failed pair_response left an unusable persisted device")
 	}
 }
 

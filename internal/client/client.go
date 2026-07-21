@@ -431,7 +431,9 @@ func probeDaemonIdentity(sockPath string, paths config.Paths, aggregateDeadline 
 // the new one; only a changed instance ID proves the replacement generation is
 // actually serving (issue #1319). Bounded by the effective start policy.
 func waitForNewDaemonGeneration(sockPath string, paths config.Paths, wantVersion, priorInstanceID string) bool {
-	return pollDaemonReady(func(deadline time.Time) bool {
+	budget := maxDuration(daemonStartTimeout, upgradeReadinessFloor)
+
+	return pollDaemonReadyWithin(budget, func(deadline time.Time) bool {
 		v, id := probeDaemonIdentity(sockPath, paths, deadline)
 
 		return v == wantVersion && id != "" && id != priorInstanceID
@@ -459,6 +461,35 @@ func requestUpgrade(ctx context.Context, c *Client) (bool, bool, error) {
 	msg, managed, err := upgradeMessageForClient(ctx)
 	if err != nil {
 		return false, managed, err
+	}
+
+	negotiationTimeout := maxDuration(daemonHandshakeTimeout, upgradeNegotiationFloor)
+	if err := c.conn.SetDeadline(time.Now().Add(negotiationTimeout)); err != nil {
+		return false, managed, errors.New("set upgrade negotiation deadline")
+	}
+
+	defer func() { _ = c.conn.SetDeadline(time.Time{}) }()
+
+	if err := c.SendControl("upgrade_preflight", msg); err != nil {
+		return false, managed, errors.New("send upgrade preflight")
+	}
+
+	preflight, err := c.ReadControlResponse()
+	if err != nil {
+		return false, managed, errors.New("read upgrade preflight response")
+	}
+
+	if preflight.Type != "upgrade_preflight_ok" {
+		message := "daemon rejected upgrade preflight"
+
+		if preflight.Type == "error" {
+			var preflightErr protocol.ErrorMsg
+			if protocol.DecodePayload(preflight, &preflightErr) == nil && preflightErr.Message != "" {
+				message += ": " + preflightErr.Message
+			}
+		}
+
+		return false, managed, errors.New(message)
 	}
 
 	if err := c.SendControl("upgrade", msg); err != nil {
@@ -503,6 +534,10 @@ func pollDaemonReady(ready func(deadline time.Time) bool) bool {
 	return pollDaemonReadyBefore(time.Now().Add(daemonStartTimeout), ready)
 }
 
+func pollDaemonReadyWithin(timeout time.Duration, ready func(deadline time.Time) bool) bool {
+	return pollDaemonReadyBefore(time.Now().Add(timeout), ready)
+}
+
 func pollDaemonReadyBefore(deadline time.Time, ready func(deadline time.Time) bool) bool {
 	for {
 		remaining := time.Until(deadline)
@@ -528,6 +563,14 @@ func pollDaemonReadyBefore(deadline time.Time, ready func(deadline time.Time) bo
 
 		time.Sleep(sleep)
 	}
+}
+
+func maxDuration(a, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+
+	return b
 }
 
 func stopDaemonByPID(pidFile string) bool {

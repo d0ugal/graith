@@ -19,7 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 23
+const CurrentStateVersion = 24
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -63,6 +63,11 @@ type SessionState struct {
 	BaseBranch     string `json:"base_branch"`
 	Agent          string `json:"agent"`
 	AgentSessionID string `json:"agent_session_id,omitempty"`
+	// NativeStateRoot and NativeCaptureStartedAt make an interrupted
+	// self-minted session-ID capture reconstructible after exec. They are
+	// cleared once AgentSessionID is durably recorded.
+	NativeStateRoot        string     `json:"native_state_root,omitempty"`
+	NativeCaptureStartedAt *time.Time `json:"native_capture_started_at,omitempty"`
 	// DriverKind is the session's transport: DriverPTY (interactive PTY) or
 	// DriverHeadless (headless stream-json, issue #1075). Resolved once at
 	// creation and never re-derived from config. Empty is treated as DriverPTY.
@@ -476,6 +481,11 @@ type State struct {
 	Version   int                       `json:"version"`
 	Sessions  map[string]*SessionState  `json:"sessions"`
 	Scenarios map[string]*ScenarioState `json:"scenarios,omitempty"`
+	// UpgradeCleanup is durable ownership of agent process generations which
+	// could not be adopted or synchronously reaped across an exec upgrade. More
+	// than one generation can exist for an ID after state/manifest mismatch, so
+	// the exact identity key is independent of Sessions.
+	UpgradeCleanup map[string]UpgradeCleanupState `json:"upgrade_cleanup,omitempty"`
 	// PairedDevices holds remote client devices authorized via pairing for the
 	// optional network control surface (design §B.2), keyed by device ID.
 	PairedDevices map[string]*PairedDevice `json:"paired_devices,omitempty"`
@@ -495,6 +505,12 @@ type State struct {
 	// guarantee survives a daemon restart. Bounded (see PRWatchConfig.MaxPromptedAuthors)
 	// so it can't grow without limit on a busy public repo.
 	PRWatchPromptedAuthors map[string]bool `json:"pr_watch_prompted_authors,omitempty"`
+}
+
+type UpgradeCleanupState struct {
+	ID           string `json:"id"`
+	PID          int    `json:"pid"`
+	PIDStartTime int64  `json:"pid_start_time,omitempty"`
 }
 
 // TriggerRuntimeState is the persisted, per-definition runtime state for a
@@ -564,6 +580,7 @@ func NewState() *State {
 		Scenarios:              make(map[string]*ScenarioState),
 		PairedDevices:          make(map[string]*PairedDevice),
 		TriggerRuntime:         make(map[string]*TriggerRuntimeState),
+		UpgradeCleanup:         make(map[string]UpgradeCleanupState),
 		PRWatchPromptedAuthors: make(map[string]bool),
 	}
 }
@@ -600,6 +617,10 @@ func LoadState(path string) (*State, error) {
 		state.TriggerRuntime = make(map[string]*TriggerRuntimeState)
 	}
 
+	if state.UpgradeCleanup == nil {
+		state.UpgradeCleanup = make(map[string]UpgradeCleanupState)
+	}
+
 	if state.PRWatchPromptedAuthors == nil {
 		state.PRWatchPromptedAuthors = make(map[string]bool)
 	}
@@ -626,6 +647,67 @@ func LoadState(path string) (*State, error) {
 	}
 
 	return &state, nil
+}
+
+// LoadStateForAdoption is the fail-closed variant used after an exec handoff.
+// Missing, malformed, or unmigratable durable state is an ownership error: the
+// daemon must not substitute NewState and then classify every transferred
+// session as unknown. Unlike ordinary cold-start recovery, this function makes
+// no backup or repair writes before the full file has been validated.
+func LoadStateForAdoption(path string) (*State, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read state for adoption: %w", err)
+	}
+
+	state, _, err := LoadStateSnapshotForAdoption(data)
+
+	return state, err
+}
+
+// LoadStateSnapshotForAdoption validates and migrates an exact pre-exec state
+// snapshot without performing backup, repair, or persistence writes. The
+// caller commits the migrated state only after transferred ownership is live.
+func LoadStateSnapshotForAdoption(data []byte) (*State, int, error) {
+	var state State
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, 0, fmt.Errorf("decode state for adoption: %w", err)
+	}
+
+	originalVersion := state.Version
+	if state.Version > CurrentStateVersion {
+		return nil, originalVersion, &StateVersionError{FileVersion: state.Version, BinaryVersion: CurrentStateVersion}
+	}
+
+	if err := migrateState(&state); err != nil {
+		return nil, originalVersion, fmt.Errorf("migrate state for adoption: %w", err)
+	}
+
+	if state.Sessions == nil {
+		state.Sessions = make(map[string]*SessionState)
+	}
+
+	if state.Scenarios == nil {
+		state.Scenarios = make(map[string]*ScenarioState)
+	}
+
+	if state.PairedDevices == nil {
+		state.PairedDevices = make(map[string]*PairedDevice)
+	}
+
+	if state.TriggerRuntime == nil {
+		state.TriggerRuntime = make(map[string]*TriggerRuntimeState)
+	}
+
+	if state.UpgradeCleanup == nil {
+		state.UpgradeCleanup = make(map[string]UpgradeCleanupState)
+	}
+
+	if state.PRWatchPromptedAuthors == nil {
+		state.PRWatchPromptedAuthors = make(map[string]bool)
+	}
+
+	return &state, originalVersion, nil
 }
 
 func SaveState(path string, state *State) error {
@@ -663,6 +745,7 @@ var migrations = map[int]func(*State) error{
 	20: migrateV20ToV21,
 	21: migrateV21ToV22,
 	22: migrateV22ToV23,
+	23: migrateV23ToV24,
 }
 
 func generateToken() (string, error) {
@@ -894,6 +977,18 @@ func migrateV21ToV22(_ *State) error { return nil }
 func migrateV22ToV23(state *State) error {
 	for _, s := range state.Sessions {
 		s.AgentStatus = ""
+	}
+
+	return nil
+}
+
+// migrateV23ToV24 initializes exact process identities awaiting post-upgrade
+// cleanup. This must remain a distinct version from main's v23 agent-status
+// migration so a v23 binary refuses the state instead of loading and erasing
+// cleanup ownership it does not understand.
+func migrateV23ToV24(state *State) error {
+	if state.UpgradeCleanup == nil {
+		state.UpgradeCleanup = make(map[string]UpgradeCleanupState)
 	}
 
 	return nil

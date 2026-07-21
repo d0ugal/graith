@@ -1,8 +1,9 @@
+//go:build !libghostty || libghostty_compare
+
 package pty
 
 import (
 	"bytes"
-	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -15,22 +16,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	cvt "github.com/charmbracelet/x/vt"
 )
-
-func terminalParserPanicFixture(t *testing.T) []byte {
-	t.Helper()
-
-	encoded, err := os.ReadFile(filepath.Join("testdata", "scrollup-delete-line-area-panic.hex"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fixture, err := hex.DecodeString(strings.TrimSpace(string(encoded)))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return fixture
-}
 
 // TestScrollUpDeleteLineAreaFixtureReproducesUpstreamPanic pins the reduced,
 // synthetic sequence behind the production failure. An oversized DECSTBM
@@ -113,13 +98,14 @@ func TestReadLoopContainsParserPanicAndResetsScreen(t *testing.T) {
 	var logBuf syncBuf
 
 	s := &Session{
-		ID:         "canny-live",
-		Ptmx:       r,
-		Scrollback: sb,
-		screen:     newTerminal(80, 24),
-		readDone:   make(chan struct{}),
-		createdAt:  time.Now(),
-		log:        slog.New(slog.NewJSONHandler(&logBuf, nil)),
+		ID:                   "canny-live",
+		Ptmx:                 r,
+		Scrollback:           sb,
+		screen:               newCharmTerminal(80, 24),
+		screenHydrationBytes: defaultScreenHydrationBytes,
+		readDone:             make(chan struct{}),
+		createdAt:            time.Now(),
+		log:                  slog.New(slog.NewJSONHandler(&logBuf, nil)),
 	}
 
 	go s.readLoop()

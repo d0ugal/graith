@@ -450,6 +450,11 @@ func validateScenarioMirrorIncludes(memberName, targetName string, includes []sc
 }
 
 func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, cols uint16) (*ScenarioState, error) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return nil, err
+	}
+	defer sm.endLifecycleOperation()
+
 	if len(msg.Sessions) == 0 {
 		return nil, errors.New("scenario must define at least one session")
 	}
@@ -757,6 +762,11 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 	// --- Reserve phase: lock, validate no collisions, create scenario + placeholders ---
 	sm.mu.Lock()
+	if err := sm.rejectLaunchDuringUpgradeLocked(); err != nil {
+		sm.mu.Unlock()
+
+		return nil, err
+	}
 
 	// Check scenario name uniqueness.
 	for _, sc := range sm.state.Scenarios {
@@ -1362,6 +1372,11 @@ func (sm *SessionManager) StopScenario(name string) ([]string, error) {
 }
 
 func (sm *SessionManager) StopScenarioContext(ctx context.Context, name string) ([]string, error) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return nil, err
+	}
+	defer sm.endLifecycleOperation()
+
 	resolvedID, ok := sm.scenarioIDByName(name)
 	if !ok {
 		return nil, fmt.Errorf("scenario %q not found", name)
@@ -1461,6 +1476,11 @@ func (sm *SessionManager) DeleteScenario(name string) ([]string, error) {
 }
 
 func (sm *SessionManager) DeleteScenarioContext(ctx context.Context, name string) ([]string, error) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return nil, err
+	}
+	defer sm.endLifecycleOperation()
+
 	resolvedID, ok := sm.scenarioIDByName(name)
 	if !ok {
 		return nil, fmt.Errorf("scenario %q not found", name)
@@ -1649,6 +1669,11 @@ func (sm *SessionManager) ListScenarios() []protocol.ScenarioRecord {
 }
 
 func (sm *SessionManager) ResumeScenario(name string, rows, cols uint16) ([]string, error) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return nil, err
+	}
+	defer sm.endLifecycleOperation()
+
 	resolvedID, ok := sm.scenarioIDByName(name)
 	if !ok {
 		return nil, fmt.Errorf("scenario %q not found", name)
@@ -1805,6 +1830,11 @@ func (sm *SessionManager) ResumeScenario(name string, rows, cols uint16) ([]stri
 }
 
 func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSessionInput, rows, cols uint16) (*SessionState, error) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return nil, err
+	}
+	defer sm.endLifecycleOperation()
+
 	if err := ValidateSessionName(input.Name); err != nil {
 		return nil, err
 	}

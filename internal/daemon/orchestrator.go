@@ -115,6 +115,11 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	}
 
 	sm.mu.Lock()
+	if err := sm.rejectLaunchDuringUpgradeLocked(); err != nil {
+		sm.mu.Unlock()
+
+		return SessionState{}, err
+	}
 
 	if !sm.cfg.Orchestrator.Enabled {
 		sm.mu.Unlock()
@@ -329,7 +334,8 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	result := cloneSessionState(sess)
 	sm.mu.Unlock()
 
-	go sm.watchSession(id, ptySess)
+	// The watcher owns the new session's lifetime and must outlive this create call.
+	sm.startWatcher(id, ptySess) //nolint:contextcheck // intentionally session-owned, not request-owned
 
 	sm.log.Info("orchestrator session created",
 		"id", id, "pid", result.PID, "pgid", ptySess.Pgid(), "sandboxed", sandboxed)

@@ -58,6 +58,11 @@ func (s orchestratorRuntimeSnapshot) live() bool {
 
 // ReloadConfig loads the config from disk and swaps it in, logging what changed.
 func (sm *SessionManager) ReloadConfig() error {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return err
+	}
+	defer sm.endLifecycleOperation()
+
 	// Serialize the read as well as the apply. Otherwise an older disk snapshot
 	// can finish after and overwrite a newer reload generation.
 	sm.configReloadMu.Lock()
@@ -441,14 +446,18 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 
 		// autoReleaseNewlyTrusted reads the current config itself (sm.cfg was set
 		// above), so a later reload that tightens trust wins over this worker.
-		go sm.autoReleaseNewlyTrusted()
+		// Trust re-evaluation is daemon-owned and intentionally survives the
+		// config reload request that scheduled it.
+		sm.startBackgroundTask(context.Background(), func(context.Context) {
+			sm.autoReleaseNewlyTrusted() //nolint:contextcheck // trust re-evaluation is intentionally daemon-owned
+		})
 	}
 
 	if old.Orchestrator.Enabled != newCfg.Orchestrator.Enabled {
 		sm.log.Info("config changed", "key", "orchestrator.enabled", "old", old.Orchestrator.Enabled, "new", newCfg.Orchestrator.Enabled)
 
 		if newCfg.Orchestrator.Enabled {
-			go sm.ensureOrchestrator(context.Background())
+			sm.startBackgroundTask(context.Background(), sm.ensureOrchestrator)
 		}
 	}
 

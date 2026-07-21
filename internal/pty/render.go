@@ -16,7 +16,22 @@ type ScreenCapture struct {
 
 func (s *Session) ScreenSnapshot() ScreenCapture {
 	s.mu.Lock()
-	snap := renderFrame(s.screen)
+	if s.closed || s.screenInitializing {
+		s.mu.Unlock()
+
+		return ScreenCapture{}
+	}
+
+	snap, err := renderFrameErr(s.screen)
+	if err != nil {
+		recoveryErr := s.replaceScreenLocked()
+		s.log.Warn("terminal snapshot failed; screen reconstructed",
+			"session", s.ID, "error", err, "recovery_error", recoveryErr)
+
+		if recoveryErr == nil {
+			snap, _ = renderFrameErr(s.screen)
+		}
+	}
 	s.mu.Unlock()
 
 	return snap
@@ -24,7 +39,22 @@ func (s *Session) ScreenSnapshot() ScreenCapture {
 
 func (s *Session) ScreenPreview() string {
 	s.mu.Lock()
-	preview := renderPreview(s.screen)
+	if s.closed || s.screenInitializing {
+		s.mu.Unlock()
+
+		return ""
+	}
+
+	preview, err := renderPreviewErr(s.screen)
+	if err != nil {
+		recoveryErr := s.replaceScreenLocked()
+		s.log.Warn("terminal preview failed; screen reconstructed",
+			"session", s.ID, "error", err, "recovery_error", recoveryErr)
+
+		if recoveryErr == nil {
+			preview, _ = renderPreviewErr(s.screen)
+		}
+	}
 	s.mu.Unlock()
 
 	return preview
@@ -37,8 +67,18 @@ func (s *Session) ScreenPreview() string {
 // initial "previous" style is the zero CellStyle (terminal default), so a
 // leading run of default-styled cells emits no SGR at all.
 func renderFrame(vt Terminal) ScreenCapture {
-	cols, rows := vt.Size()
-	curX, curY, visible := vt.Cursor()
+	frame, _ := renderFrameErr(vt)
+
+	return frame
+}
+
+func renderFrameErr(vt Terminal) (ScreenCapture, error) {
+	snapshot, err := snapshotTerminal(vt)
+	if err != nil {
+		return ScreenCapture{}, err
+	}
+
+	cols, rows := snapshot.Cols, snapshot.Rows
 
 	var buf strings.Builder
 	buf.Grow(cols * rows * 8)
@@ -51,7 +91,7 @@ func renderFrame(vt Terminal) ScreenCapture {
 		}
 
 		for x := 0; x < cols; x++ {
-			cell := vt.Cell(x, y)
+			cell := snapshot.Cells[y*cols+x]
 			if cell.Style != prevStyle {
 				writeSGR(&buf, cell.Style)
 				prevStyle = cell.Style
@@ -72,12 +112,12 @@ func renderFrame(vt Terminal) ScreenCapture {
 
 	return ScreenCapture{
 		Frame:         buf.String(),
-		CursorX:       curX,
-		CursorY:       curY,
-		CursorVisible: visible,
+		CursorX:       snapshot.CursorX,
+		CursorY:       snapshot.CursorY,
+		CursorVisible: snapshot.CursorVisible,
 		Cols:          cols,
 		Rows:          rows,
-	}
+	}, nil
 }
 
 func writeSGR(buf *strings.Builder, style CellStyle) {
@@ -164,7 +204,18 @@ func writeIndexedColor(buf *strings.Builder, v uint32, bg bool) {
 // separated by "\n" with trailing spaces trimmed, for the session-picker
 // preview.
 func renderPreview(vt Terminal) string {
-	cols, rows := vt.Size()
+	preview, _ := renderPreviewErr(vt)
+
+	return preview
+}
+
+func renderPreviewErr(vt Terminal) (string, error) {
+	snapshot, err := snapshotTerminal(vt)
+	if err != nil {
+		return "", err
+	}
+
+	cols, rows := snapshot.Cols, snapshot.Rows
 
 	var result strings.Builder
 	result.Grow(cols * rows)
@@ -177,7 +228,7 @@ func renderPreview(vt Terminal) string {
 		var line strings.Builder
 
 		for x := 0; x < cols; x++ {
-			cell := vt.Cell(x, y)
+			cell := snapshot.Cells[y*cols+x]
 			// Skip wide-grapheme continuation columns (empty Content).
 			if cell.Content == "" {
 				continue
@@ -189,5 +240,5 @@ func renderPreview(vt Terminal) string {
 		result.WriteString(strings.TrimRight(line.String(), " "))
 	}
 
-	return result.String()
+	return result.String(), nil
 }

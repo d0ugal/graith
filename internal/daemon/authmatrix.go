@@ -133,13 +133,14 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"todo_export":     remoteHumanRW,
 
 	// Local-only — never over the network, for any remote role.
-	"upgrade":      remoteDenied,
-	"reload":       remoteDenied,
-	"gc":           remoteDenied, // host-level data-dir maintenance; local Unix socket only
-	"mcp_connect":  remoteDenied,
-	"pair_approve": remoteDenied, // pairing approval is an out-of-band local human action
-	"pair_list":    remoteDenied,
-	"pair_revoke":  remoteDenied,
+	"upgrade":           remoteDenied,
+	"upgrade_preflight": remoteDenied,
+	"reload":            remoteDenied,
+	"gc":                remoteDenied, // host-level data-dir maintenance; local Unix socket only
+	"mcp_connect":       remoteDenied,
+	"pair_approve":      remoteDenied, // pairing approval is an out-of-band local human action
+	"pair_list":         remoteDenied,
+	"pair_revoke":       remoteDenied,
 }
 
 // remoteAllowed reports whether a control message of type msgType may be

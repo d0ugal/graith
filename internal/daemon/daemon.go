@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -10,8 +11,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -55,33 +58,61 @@ type SessionManager struct {
 	// scenarioResultMu serializes store-write + state-commit publication. Store
 	// I/O never holds mu, while the separate lock prevents two publications from
 	// leaving artifact content and metadata describing different attempts.
-	scenarioResultMu sync.Mutex
-	state            *State
-	sessions         map[string]SessionDriver
-	stopAttempts     map[string]*stopAttempt
-	attachedClients  map[string]*attachedClient
-	hookReports      map[string]hookReport
-	tokenIndex       map[string]string            // token → session ID (reverse lookup)
-	humanToken       string                       // local human credential, loaded at startup
-	saveStateFault   func() error                 // test-only saveState fault injection; nil in production
-	sandboxResolver  func(string) (bool, error)   // test-only sandbox-availability override; nil in production
-	pendingPairings  map[string]*pendingPairing   // requestID → pending device pairing (in-memory; not persisted)
-	pairWaiters      map[string]chan pairApproval // requestID → waiter for a blocked pair_request connection
-	remoteTLSPin     string                       // SPKI pin of the active remote generation; guarded by mu
-	remoteGeneration uint64                       // active remote runtime generation; 0 means no production listener
-	remote           *remoteController            // owned under configReloadMu; nil for bare SessionManagers used outside Run
-	deviceTokenIndex map[string]string            // client-token HMAC → device ID (reverse lookup)
-	connsByDevice    map[string][]net.Conn        // device ID → live remote connections (for revocation)
-	pairReqTimes     []time.Time                  // recent pair_request timestamps (rate limiting)
-	cfg              *config.Config
-	paths            config.Paths
-	log              *slog.Logger
-	configFile       string
-	upgradeCh        chan string
-	messages         *MsgStore
-	todos            *TodoStore
-	mcpManager       *MCPManager
-	startedAt        time.Time
+	scenarioResultMu  sync.Mutex
+	state             *State
+	sessions          map[string]SessionDriver
+	stopAttempts      map[string]*stopAttempt
+	attachedClients   map[string]*attachedClient
+	hookReports       map[string]hookReport
+	tokenIndex        map[string]string            // token → session ID (reverse lookup)
+	humanToken        string                       // local human credential, loaded at startup
+	saveStateFault    func() error                 // test-only saveState fault injection; nil in production
+	sandboxResolver   func(string) (bool, error)   // test-only sandbox-availability override; nil in production
+	pendingPairings   map[string]*pendingPairing   // requestID → pending device pairing (in-memory; not persisted)
+	pairWaiters       map[string]chan pairApproval // requestID → waiter for a blocked pair_request connection
+	remoteTLSPin      string                       // SPKI pin of the active remote generation; guarded by mu
+	remoteGeneration  uint64                       // active remote runtime generation; 0 means no production listener
+	remote            *remoteController            // owned under configReloadMu; nil for bare SessionManagers used outside Run
+	deviceTokenIndex  map[string]string            // client-token HMAC → device ID (reverse lookup)
+	connsByDevice     map[string][]net.Conn        // device ID → live remote connections (for revocation)
+	pairReqTimes      []time.Time                  // recent pair_request timestamps (rate limiting)
+	cfg               *config.Config
+	paths             config.Paths
+	log               *slog.Logger
+	configFile        string
+	upgradeCh         chan *upgradeRequest
+	upgradeAttempt    bool
+	upgradePending    bool
+	shutdownPending   bool
+	lifecycleInFlight int
+	mutationInFlight  int
+	// beforeLifecycleSpawn is a deterministic test seam for the final shared
+	// Create/Fork/Resume admission barrier. Production leaves it nil.
+	beforeLifecycleSpawn func()
+	// adoptSession is a private startup test seam. Production uses
+	// pty.AdoptSession. Every adoption starts in raw-drain mode so derived-screen
+	// construction cannot consume or multiply the batch's absolute deadline.
+	adoptSession      func(grpty.AdoptOpts) (*grpty.Session, error)
+	backgroundTasksMu sync.Mutex
+	backgroundTasks   *daemonTaskGroup
+	backgroundManaged bool
+	// afterBackgroundPublication is a deterministic test barrier between
+	// replacement-generation publication and the rollback completion callback.
+	// Production leaves it nil.
+	afterBackgroundPublication func()
+	upgradeCleanupMu           sync.Mutex
+	upgradeCleanup             map[string]upgradeCleanupEntry
+	upgradeCleanupTry          func(UpgradeSession) (bool, error)
+	statePersistMu             sync.Mutex
+	statePersistGen            atomic.Uint64
+	// persistLatestStateBeforeLock is a deterministic test seam for the
+	// snapshot-to-file-lock interleaving. Production leaves it nil.
+	persistLatestStateBeforeLock func()
+	persistUpgradeBeforeLock     func()
+	messages                     *MsgStore
+	todos                        *TodoStore
+	mcpManager                   *MCPManager
+	startedAt                    time.Time
 	// instanceID is a nonce generated once per daemon process start (including
 	// after an exec upgrade, which re-runs main and constructs a fresh
 	// SessionManager). It is returned in handshake_ok/auth_ok so an upgrade
@@ -193,6 +224,25 @@ type SessionManager struct {
 	watchers sync.WaitGroup
 }
 
+type upgradeRequest struct {
+	execPath   string
+	ready      chan error
+	proceed    chan struct{}
+	canceled   chan struct{}
+	cancelOnce sync.Once
+}
+
+func newUpgradeRequest(execPath string) *upgradeRequest {
+	return &upgradeRequest{
+		execPath: execPath,
+		ready:    make(chan error, 1),
+		proceed:  make(chan struct{}),
+		canceled: make(chan struct{}),
+	}
+}
+
+func (r *upgradeRequest) cancel() { r.cancelOnce.Do(func() { close(r.canceled) }) }
+
 // NewSessionManager creates a SessionManager with the given config and paths.
 func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger) *SessionManager {
 	sm := &SessionManager{
@@ -210,6 +260,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		orchestratorKickCh: make(chan struct{}, 1),
 		lastInboxNotifyAt:  make(map[string]time.Time),
 		silentWarned:       make(map[string]bool),
+		upgradeCleanup:     make(map[string]upgradeCleanupEntry),
 		prWatch:            newPRWatchState(cfg.PRWatch.KickChannelSize()),
 		prRefWatch:         newPRRefWatchState(),
 		triggers:           newTriggerState(),
@@ -584,6 +635,21 @@ func (sm *SessionManager) LoadState() error {
 	return sm.saveState()
 }
 
+func (sm *SessionManager) loadStateSnapshotForAdoption(data []byte) (int, error) {
+	state, originalVersion, err := LoadStateSnapshotForAdoption(data)
+	if err != nil {
+		return 0, err
+	}
+
+	state.Reconcile()
+	recoverInterruptedScenarioStarts(state, time.Now().UTC())
+	sm.state = state
+	sm.rebuildTokenIndex()
+	sm.rebuildDeviceTokenIndex()
+
+	return originalVersion, nil
+}
+
 // loadOrCreateHumanToken loads the stable local-human credential, creating it
 // crash-safely on first startup. It must never silently replace an existing
 // credential, even when that credential cannot be read.
@@ -673,307 +739,408 @@ func (sm *SessionManager) SessionForToken(token string) string {
 	return sm.tokenIndex[token]
 }
 
-func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) error {
-	sm.mu.Lock()
+type UpgradeAdoptionResult struct {
+	ResolvedSessions   []UpgradeSession
+	UnresolvedSessions []UpgradeSession
+	adoptedSessions    []*grpty.Session
+}
 
-	// sm.mu is held, so sm.cfg is read directly rather than via Config() (which
-	// would take the read lock and deadlock).
+func (sm *SessionManager) AdoptSessions(manifest *UpgradeManifest) (UpgradeAdoptionResult, error) {
+	return sm.adoptSessions(manifest, nil, nil, nil, true)
+}
+
+func (sm *SessionManager) adoptSessions(
+	manifest *UpgradeManifest,
+	onDescriptorClosed func(string, bool, error) error,
+	onDescriptorsMoved func(string) error,
+	onIdentityResolved func(UpgradeSession, UpgradeSession),
+	persist bool,
+) (UpgradeAdoptionResult, error) {
+	sm.mu.RLock()
 	lc := sm.cfg.Lifecycle
+	adoptSession := sm.adoptSession
+	sm.mu.RUnlock()
 
-	type terminationCandidate struct {
-		stateID, label, summary string
-		pid                     int
-		startTime               int64
+	if adoptSession == nil {
+		adoptSession = grpty.AdoptSession
 	}
 
-	type adoptedSession struct {
-		id     string
-		driver SessionDriver
+	sessions := slices.Clone(manifest.Sessions)
+	slices.SortFunc(sessions, func(a, b UpgradeSession) int { return strings.Compare(a.ID, b.ID) })
+
+	closeRejectedDescriptors := func(session UpgradeSession) error {
+		if !upgradeSessionHasPTY(session) {
+			return nil
+		}
+
+		ptmx := os.NewFile(uintptr(session.Fd), "rejected-upgrade-pty")
+		if ptmx == nil {
+			scrollbackCloseErr := adoptCloseDescriptor(session.ScrollbackFd)
+			if onDescriptorClosed != nil {
+				scrollbackCloseErr = errors.Join(scrollbackCloseErr,
+					onDescriptorClosed(session.ID, true, scrollbackCloseErr))
+			}
+
+			return errors.Join(errors.New("invalid inherited session descriptor"), scrollbackCloseErr)
+		}
+
+		scrollback, err := grpty.AdoptScrollback(uintptr(session.ScrollbackFd), "", lc.MaxLogBytesOrDefault())
+		if err != nil {
+			ptyCloseErr := ptmx.Close()
+
+			scrollbackCloseErr := adoptCloseDescriptor(session.ScrollbackFd)
+			if onDescriptorClosed != nil {
+				err = errors.Join(err,
+					onDescriptorClosed(session.ID, false, ptyCloseErr),
+					onDescriptorClosed(session.ID, true, scrollbackCloseErr))
+			}
+
+			return errors.Join(errors.New("adopt rejected-session scrollback"), err)
+		}
+
+		drainErr := grpty.DrainTransferredPTY(ptmx, scrollback)
+		ptyCloseErr := ptmx.Close()
+
+		scrollbackCloseErr := scrollback.Close()
+		if onDescriptorClosed != nil {
+			drainErr = errors.Join(drainErr,
+				onDescriptorClosed(session.ID, false, ptyCloseErr),
+				onDescriptorClosed(session.ID, true, scrollbackCloseErr))
+		}
+
+		return drainErr
 	}
+
+	var descriptorValidationErr error
+
+	for _, session := range sessions {
+		if !upgradeSessionHasPTY(session) {
+			continue
+		}
+
+		if err := secureTransferredDescriptor(session.Fd); err != nil {
+			descriptorValidationErr = errors.New("secure inherited session descriptor")
+			break
+		}
+
+		if err := secureTransferredDescriptor(session.ScrollbackFd); err != nil {
+			descriptorValidationErr = errors.New("secure inherited scrollback descriptor")
+			break
+		}
+
+		if err := grpty.ValidateTransferredScrollbackFD(uintptr(session.ScrollbackFd)); err != nil {
+			descriptorValidationErr = errors.New("inherited scrollback descriptor validation failed")
+			break
+		}
+	}
+
+	if descriptorValidationErr != nil {
+		for _, session := range sessions {
+			descriptorValidationErr = errors.Join(descriptorValidationErr, closeRejectedDescriptors(session))
+		}
+
+		return UpgradeAdoptionResult{}, descriptorValidationErr
+	}
+
+	adoptedDrivers := make(map[string]SessionDriver)
 
 	var (
-		adopted       []adoptedSession
-		adoptedIDs    = make(map[string]struct{})
-		adoptedPIDs   = make(map[int]struct{})
-		candidates    []terminationCandidate
-		candidateKeys = make(map[string]struct{})
-		adoptionErrs  []error
-		closedFDs     = make(map[int]struct{})
-		preflightBad  bool
+		result      UpgradeAdoptionResult
+		identityErr error
 	)
 
-	closeFD := func(us UpgradeSession) {
-		if !us.HasPTY || us.Fd < 0 {
-			return
-		}
-
-		if _, closed := closedFDs[us.Fd]; closed {
-			return
-		}
-
-		closedFDs[us.Fd] = struct{}{}
-		if f := os.NewFile(uintptr(us.Fd), "rejected-upgrade-session"); f != nil {
-			_ = f.Close()
-		}
-	}
-	schedule := func(stateID, label string, pid int, startTime int64, summary string) {
-		key := fmt.Sprintf("%s:%d", stateID, pid)
-		if stateID == "" {
-			key = fmt.Sprintf("manifest:%s:%d", label, pid)
-		}
-
-		if _, exists := candidateKeys[key]; exists {
-			return
-		}
-
-		candidateKeys[key] = struct{}{}
-
-		candidates = append(candidates, terminationCandidate{
-			stateID: stateID, label: label, summary: summary, pid: pid, startTime: startTime,
-		})
-	}
-	scheduleState := func(id, summary string) {
-		if sess := sm.state.Sessions[id]; sess != nil && sess.PID > 1 {
-			schedule(id, id, sess.PID, sess.PIDStartTime, summary)
-		}
+	unresolved := make(map[string]UpgradeSession)
+	addUnresolved := func(session UpgradeSession) {
+		unresolved[upgradeCleanupKey(session)] = session
 	}
 
-	// Preflight the entire manifest before attaching any PTY. If one entry
-	// cannot be authenticated, no process is adopted into a daemon that will
-	// immediately abort; every verifiable process is instead terminated below.
-	for _, us := range manifest.Sessions {
-		sessState, ok := sm.state.Sessions[us.ID]
-		if !ok {
-			closeFD(us)
-			schedule("", us.ID, us.PID, us.PIDStartTime, "")
-			adoptionErrs = append(adoptionErrs, fmt.Errorf("upgrade manifest references unknown session %q", us.ID))
-			preflightBad = true
+	for _, us := range sessions {
+		legacyAlreadyReaped := false
 
-			continue
-		}
+		if us.PIDStartTime == 0 {
+			original := us
 
-		if sessState.PID <= 1 || sessState.PID != us.PID {
-			closeFD(us)
-			scheduleState(us.ID, "Stopped after invalid daemon-upgrade process identity")
+			resolved, reaped, resolveErr := resolveUpgradeCleanupIdentity(us)
+			if resolveErr == nil {
+				us = resolved
+				legacyAlreadyReaped = reaped
 
-			manifestStateID := ""
-			if sessState.PID <= 1 {
-				manifestStateID = us.ID
-			}
-
-			schedule(manifestStateID, us.ID, us.PID, us.PIDStartTime, "Stopped after invalid daemon-upgrade process identity")
-			adoptionErrs = append(adoptionErrs, fmt.Errorf("upgrade session %q PID mismatch: state has %d, manifest has %d", us.ID, sessState.PID, us.PID))
-			preflightBad = true
-
-			continue
-		}
-
-		if us.PIDStartTime != 0 && sessState.PIDStartTime != 0 && us.PIDStartTime != sessState.PIDStartTime {
-			closeFD(us)
-			scheduleState(us.ID, "Stopped after invalid daemon-upgrade process identity")
-			adoptionErrs = append(adoptionErrs, fmt.Errorf("upgrade session %q process start-time mismatch", us.ID))
-			preflightBad = true
-
-			continue
-		}
-
-		if reason := invalidUpgradeAdoptionReason(sessState); reason != "" {
-			closeFD(us)
-			scheduleState(us.ID, "Stopped during incompatible process-identity upgrade")
-			sm.log.Warn("terminating upgrade session that lacks process identity", "id", us.ID, "pid", us.PID, "reason", reason)
-
-			continue
-		}
-
-		currentStart, err := grpty.ProcessStartTime(us.PID)
-		if err != nil || currentStart != sessState.PIDStartTime {
-			closeFD(us)
-			scheduleState(us.ID, "Stopped after invalid daemon-upgrade process identity")
-			adoptionErrs = append(adoptionErrs, fmt.Errorf("upgrade session %q process identity cannot be verified (recorded=%d, current=%d, err=%w)", us.ID, sessState.PIDStartTime, currentStart, err))
-			preflightBad = true
-		}
-	}
-
-	if preflightBad {
-		for _, us := range manifest.Sessions {
-			closeFD(us)
-			scheduleState(us.ID, "Stopped because secure daemon upgrade preflight failed")
-		}
-	} else {
-		for _, us := range manifest.Sessions {
-			if !us.HasPTY {
-				continue
-			}
-
-			sessState := sm.state.Sessions[us.ID]
-			if invalidUpgradeAdoptionReason(sessState) != "" {
-				continue
-			}
-
-			logPath := filepath.Join(sm.paths.LogDir, us.ID+".log")
-
-			ptySess, err := grpty.AdoptSession(grpty.AdoptOpts{
-				ID: us.ID, Fd: uintptr(us.Fd), PID: us.PID, LogPath: logPath,
-				MaxLogSize: lc.MaxLogBytesOrDefault(), DefaultRows: lc.DefaultRowsOrDefault(),
-				DefaultCols: lc.DefaultColsOrDefault(), HydrationBytes: lc.ScrollbackHydrationBytesOrDefault(),
-				PollTimeout: lc.AdoptedTimeoutDuration(), PollInterval: lc.AdoptedPollIntervalDuration(), Logger: sm.log,
-			})
-			if err != nil {
-				sm.log.Warn("failed to adopt session", "id", us.ID, "err", err, "action", "terminate process")
-				scheduleState(us.ID, "Lost during daemon upgrade")
+				if onIdentityResolved != nil {
+					onIdentityResolved(original, resolved)
+				}
+			} else {
+				drainErr := closeRejectedDescriptors(us)
+				identityErr = errors.Join(identityErr,
+					errors.New("legacy upgrade process identity could not be verified"), drainErr)
 
 				continue
 			}
-
-			sm.sessions[us.ID] = ptySess
-			adopted = append(adopted, adoptedSession{id: us.ID, driver: ptySess})
-			adoptedIDs[us.ID] = struct{}{}
-			adoptedPIDs[us.PID] = struct{}{}
-			sm.log.Info("adopted session", "id", us.ID, "pid", us.PID)
-		}
-	}
-
-	// Headless drivers have no PTY to hand off, and a PTY may also have been
-	// omitted after an old-daemon fd error. Neither may survive unmanaged.
-	for id, sess := range sm.state.Sessions {
-		if sess.Status != StatusRunning || sess.PID <= 1 {
-			continue
 		}
 
-		if _, ok := adoptedIDs[id]; ok {
-			continue
+		sm.mu.RLock()
+		state := sm.state.Sessions[us.ID]
+
+		persistedCleanup := UpgradeSession{ID: us.ID}
+		if state != nil && state.PID > 1 && state.PIDStartTime > 0 &&
+			(state.PID != us.PID || state.PIDStartTime != us.PIDStartTime) {
+			persistedCleanup.PID = state.PID
+			persistedCleanup.PIDStartTime = state.PIDStartTime
 		}
 
-		summary := "Stopped during daemon upgrade"
-		if reason := invalidUpgradeAdoptionReason(sess); reason != "" {
-			summary = "Stopped during incompatible process-identity upgrade"
-		} else if sess.DriverKind == DriverHeadless {
-			summary = "Headless session stopped during daemon upgrade"
-		}
+		adoptable := state != nil && state.PID == us.PID && state.PIDStartTime == us.PIDStartTime &&
+			us.PIDStartTime > 0 && state.Status == StatusRunning && !state.IsSoftDeleted()
 
-		scheduleState(id, summary)
-	}
+		sm.mu.RUnlock()
 
-	sm.mu.Unlock()
+		if !adoptable {
+			drainErr := closeRejectedDescriptors(us)
 
-	type terminationResult struct {
-		candidate terminationCandidate
-		err       error
-	}
+			cleaned, cleanupErr := legacyAlreadyReaped, error(nil)
+			if !cleaned {
+				cleaned, cleanupErr = terminateFailedUpgradeSession(us)
+			}
 
-	results := make([]terminationResult, 0, len(candidates))
-	for _, candidate := range candidates {
-		if _, inUse := adoptedPIDs[candidate.pid]; inUse {
-			results = append(results, terminationResult{candidate: candidate, err: fmt.Errorf("PID %d is shared with an adopted session", candidate.pid)})
-			continue
-		}
+			if cleaned {
+				result.ResolvedSessions = append(result.ResolvedSessions, us)
+			} else {
+				addUnresolved(us)
+			}
 
-		_, err := sm.killVerifiedProcess(candidate.pid, candidate.startTime)
-
-		results = append(results, terminationResult{candidate: candidate, err: err})
-		if err != nil {
-			adoptionErrs = append(adoptionErrs, fmt.Errorf("terminate unadopted upgrade session %q: %w", candidate.label, err))
-		}
-	}
-
-	sm.mu.Lock()
-	for _, result := range results {
-		candidate := result.candidate
-		if candidate.stateID == "" {
-			continue
-		}
-
-		sess := sm.state.Sessions[candidate.stateID]
-		if sess == nil || (sess.PID > 1 && sess.PID != candidate.pid) {
-			continue
-		}
-
-		sess.StatusChangedAt = time.Now()
-		if result.err != nil {
-			sess.Status = StatusErrored
-			applyLifecycleSummaryLocked(sess, fmt.Sprintf("Daemon upgrade could not terminate PID %d: %v", candidate.pid, result.err))
-
-			continue
-		}
-
-		sess.Status = StatusStopped
-		sess.PID = 0
-		sess.PIDStartTime = 0
-		applyLifecycleSummaryLocked(sess, candidate.summary)
-	}
-
-	saveErr := sm.saveState()
-	sm.mu.Unlock()
-
-	if saveErr != nil {
-		adoptionErrs = append(adoptionErrs, saveErr)
-	}
-
-	if len(adoptionErrs) > 0 {
-		// A daemon that aborts startup cannot retain ownership of partially
-		// adopted processes. Tear them down before returning the fatal error.
-		for _, session := range adopted {
-			teardownErr := sm.teardownLiveDriver(session.driver)
 			sm.mu.Lock()
-			if sess := sm.state.Sessions[session.id]; sess != nil {
-				sess.StatusChangedAt = time.Now()
+			if current := sm.state.Sessions[us.ID]; current != nil && current.PID == us.PID &&
+				current.PIDStartTime == us.PIDStartTime && us.PIDStartTime > 0 {
+				current.StatusChangedAt = time.Now()
+				if cleaned {
+					current.PID = 0
 
-				if teardownErr == nil {
-					delete(sm.sessions, session.id)
+					current.PIDStartTime = 0
+					if !current.IsSoftDeleted() {
+						current.Status = StatusStopped
+					}
 
-					sess.Status = StatusStopped
-					sess.PID = 0
-					sess.PIDStartTime = 0
-					applyLifecycleSummaryLocked(sess, "Stopped because secure daemon upgrade failed")
+					applyLifecycleSummaryLocked(current, "Stopped because upgrade state was not adoptable")
 				} else {
-					sess.Status = StatusErrored
-					applyLifecycleSummaryLocked(sess, fmt.Sprintf("Secure daemon upgrade failed and PID %d could not be terminated: %v", sess.PID, teardownErr))
+					current.Status = StatusErrored
+					applyLifecycleSummaryLocked(current, "Daemon upgrade state mismatch; process cleanup unresolved")
 				}
 			}
 			sm.mu.Unlock()
 
-			if teardownErr != nil {
-				adoptionErrs = append(adoptionErrs, fmt.Errorf("terminate adopted session %q after upgrade failure: %w", session.id, teardownErr))
+			if persistedCleanup.PID > 1 {
+				sm.mu.Lock()
+				if current := sm.state.Sessions[us.ID]; current != nil &&
+					current.PID == persistedCleanup.PID && current.PIDStartTime == persistedCleanup.PIDStartTime {
+					current.Status = StatusErrored
+					current.StatusChangedAt = time.Now()
+					applyLifecycleSummaryLocked(current, "Persisted process had no adoptable upgrade handoff")
+				}
+				sm.mu.Unlock()
+				addUnresolved(persistedCleanup)
+			}
+
+			sm.log.Warn("manifest session is not adoptable", "id", us.ID,
+				"cleanup_error", errors.Join(cleanupErr, drainErr))
+
+			continue
+		}
+
+		// Headless and other non-PTY drivers cannot transfer their in-memory
+		// protocol state across exec. Their exact process identity is still part
+		// of the ownership manifest, so resolve it under the same fail-closed
+		// cleanup registry before the replacement daemon begins serving.
+		if !upgradeSessionHasPTY(us) {
+			cleaned, cleanupErr := terminateFailedUpgradeSession(us)
+			if cleaned {
+				result.ResolvedSessions = append(result.ResolvedSessions, us)
+			} else {
+				addUnresolved(us)
+			}
+
+			sm.mu.Lock()
+			if current := sm.state.Sessions[us.ID]; current != nil && current.PID == us.PID &&
+				current.PIDStartTime == us.PIDStartTime {
+				current.StatusChangedAt = time.Now()
+				if cleaned {
+					current.PID = 0
+
+					current.PIDStartTime = 0
+					if !current.IsSoftDeleted() {
+						current.Status = StatusStopped
+					}
+
+					applyLifecycleSummaryLocked(current, "Headless session stopped during daemon upgrade")
+				} else {
+					current.Status = StatusErrored
+					applyLifecycleSummaryLocked(current, "Daemon upgrade non-PTY process cleanup unresolved")
+				}
+			}
+			sm.mu.Unlock()
+
+			sm.log.Info("resolved non-PTY session during daemon upgrade", "id", us.ID,
+				"cleaned", cleaned, "cleanup_error", cleanupErr)
+
+			continue
+		}
+
+		if onDescriptorsMoved != nil {
+			if err := onDescriptorsMoved(us.ID); err != nil {
+				return UpgradeAdoptionResult{}, err
 			}
 		}
 
-		sm.mu.Lock()
-		if err := sm.saveState(); err != nil {
-			adoptionErrs = append(adoptionErrs, err)
+		logPath := filepath.Join(sm.paths.LogDir, us.ID+".log")
+
+		ptySess, adoptErr := adoptSession(grpty.AdoptOpts{
+			ID:                   us.ID,
+			Fd:                   uintptr(us.Fd),
+			ScrollbackFd:         uintptr(us.ScrollbackFd),
+			PID:                  us.PID,
+			ExpectedPIDStartTime: us.PIDStartTime,
+			LogPath:              logPath,
+			MaxLogSize:           lc.MaxLogBytesOrDefault(),
+			DefaultRows:          lc.DefaultRowsOrDefault(),
+			DefaultCols:          lc.DefaultColsOrDefault(),
+			HydrationBytes:       lc.ScrollbackHydrationBytesOrDefault(),
+			PollTimeout:          lc.AdoptedTimeoutDuration(),
+			PollInterval:         lc.AdoptedPollIntervalDuration(),
+			Logger:               sm.log,
+			DegradedScreen:       true,
+			DeferWait:            true,
+		})
+		if adoptErr != nil {
+			cleaned, cleanupErr := terminateFailedUpgradeSession(us)
+			sm.log.Warn("failed to adopt session", "id", us.ID, "err", adoptErr, "cleanup_error", cleanupErr)
+
+			sm.mu.Lock()
+			if state := sm.state.Sessions[us.ID]; state != nil && state.PID == us.PID &&
+				state.PIDStartTime == us.PIDStartTime {
+				state.StatusChangedAt = time.Now()
+				if cleaned {
+					state.Status = StatusStopped
+					state.PID = 0
+					state.PIDStartTime = 0
+					applyLifecycleSummaryLocked(state, "Stopped after failed daemon upgrade adoption")
+				} else {
+					state.Status = StatusErrored
+					state.PID = us.PID
+					state.PIDStartTime = us.PIDStartTime
+					applyLifecycleSummaryLocked(state, "Daemon upgrade adoption failed; process cleanup unresolved")
+				}
+			}
+			sm.mu.Unlock()
+
+			if cleaned {
+				result.ResolvedSessions = append(result.ResolvedSessions, us)
+			} else {
+				addUnresolved(us)
+			}
+
+			continue
 		}
+
+		sm.mu.Lock()
+
+		state = sm.state.Sessions[us.ID]
+		if state == nil || state.PID != us.PID || state.PIDStartTime != us.PIDStartTime ||
+			state.Status != StatusRunning || state.IsSoftDeleted() {
+			sm.mu.Unlock()
+
+			cleanupDeadline := manifest.adoptionDeadline
+			if cleanupDeadline.IsZero() {
+				cleanupTimeout := lc.AdoptedTimeoutDuration()
+				if cleanupTimeout <= 0 {
+					cleanupTimeout = 5 * time.Second
+				}
+
+				cleanupDeadline = time.Now().Add(cleanupTimeout)
+			}
+
+			cleanupCtx, cancelCleanup := context.WithDeadline(context.Background(), cleanupDeadline)
+			cleanupErr := ptySess.RejectAdoption(cleanupCtx)
+
+			cancelCleanup()
+
+			cleaned := cleanupErr == nil
+			if cleaned {
+				result.ResolvedSessions = append(result.ResolvedSessions, us)
+			} else {
+				addUnresolved(us)
+			}
+
+			sm.log.Warn("adopted session failed final publication check", "id", us.ID,
+				"cleanup_error", cleanupErr)
+
+			continue
+		}
+
+		state.PID = us.PID
+		state.PIDStartTime = us.PIDStartTime
+		sm.sessions[us.ID] = ptySess
+		adoptedDrivers[us.ID] = ptySess
 		sm.mu.Unlock()
 
-		return errors.Join(adoptionErrs...)
+		result.adoptedSessions = append(result.adoptedSessions, ptySess)
+		result.ResolvedSessions = append(result.ResolvedSessions, us)
+		sm.log.Info("adopted session", "id", us.ID, "pid", us.PID)
 	}
 
-	for _, session := range adopted {
-		sm.startWatcher(session.id, session.driver)
-		go sm.notifyUnreadInbox(session.id)
+	sm.mu.Lock()
+	if sm.state.UpgradeCleanup == nil {
+		sm.state.UpgradeCleanup = make(map[string]UpgradeCleanupState)
 	}
 
-	return nil
-}
-
-func invalidUpgradeAdoptionReason(sess *SessionState) string {
-	if sess.PID <= 1 {
-		return "session has no recorded process ID"
+	for key, session := range unresolved {
+		sm.state.UpgradeCleanup[key] = UpgradeCleanupState{
+			ID: session.ID, PID: session.PID, PIDStartTime: session.PIDStartTime,
+		}
 	}
 
-	if sess.PIDStartTime == 0 {
-		return "session has no recorded process identity"
+	stateData, err := sm.snapshotUpgradeStateLocked()
+	sm.mu.Unlock()
+
+	if err == nil && persist {
+		err = sm.persistUpgradeStateSnapshot(stateData)
 	}
 
-	return ""
+	err = errors.Join(err, identityErr)
+
+	if persist {
+		for _, session := range result.adoptedSessions {
+			session.StartAdoptedWaiter()
+		}
+
+		for id, driver := range adoptedDrivers {
+			sm.startWatcher(id, driver)
+		}
+	}
+
+	for _, session := range unresolved {
+		result.UnresolvedSessions = append(result.UnresolvedSessions, session)
+	}
+
+	slices.SortFunc(result.UnresolvedSessions, func(a, b UpgradeSession) int {
+		return strings.Compare(upgradeCleanupKey(a), upgradeCleanupKey(b))
+	})
+
+	return result, err
 }
 
 func (sm *SessionManager) saveState() error {
+	sm.statePersistMu.Lock()
+	defer sm.statePersistMu.Unlock()
+
 	if sm.saveStateFault != nil {
 		if err := sm.saveStateFault(); err != nil {
 			return err
 		}
 	}
 
-	return SaveState(sm.paths.StateFile, sm.state)
+	err := SaveState(sm.paths.StateFile, sm.state)
+	if err == nil {
+		sm.statePersistGen.Add(1)
+	}
+
+	return err
 }
 
 // availableRepos returns the distinct repositories the daemon can offer a

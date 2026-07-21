@@ -107,11 +107,42 @@ type pairApproval struct {
 	TLSPin   string
 }
 
-// unregisterPairWaiter removes a pair_request waiter (on timeout/disconnect).
-func (sm *SessionManager) unregisterPairWaiter(requestID string) {
+func (sm *SessionManager) cancelPendingPairing(requestID string) {
 	sm.mu.Lock()
 	delete(sm.pairWaiters, requestID)
+	delete(sm.pendingPairings, requestID)
 	sm.mu.Unlock()
+}
+
+// rollbackPairingDelivery removes the exact device generation whose one-time
+// plaintext token could not be written to its requesting connection. It never
+// accepts only a device ID: the token HMAC binds rollback to the credentials
+// produced for this delivery and prevents deleting a later replacement.
+func (sm *SessionManager) rollbackPairingDelivery(approval pairApproval) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	device := sm.state.PairedDevices[approval.DeviceID]
+	if device == nil || sm.state.PairingHMACKey == "" {
+		return nil
+	}
+
+	hash := hmacToken(sm.state.PairingHMACKey, approval.Token)
+	if device.TokenHash != hash || sm.deviceTokenIndex[hash] != approval.DeviceID {
+		return nil
+	}
+
+	delete(sm.state.PairedDevices, approval.DeviceID)
+	delete(sm.deviceTokenIndex, hash)
+
+	if err := sm.saveState(); err != nil {
+		sm.state.PairedDevices[approval.DeviceID] = device
+		sm.deviceTokenIndex[hash] = approval.DeviceID
+
+		return err
+	}
+
+	return nil
 }
 
 // rebuildDeviceTokenIndex rebuilds the client-token → device-ID reverse lookup
@@ -162,7 +193,7 @@ func (sm *SessionManager) expirePendingLocked(now time.Time) {
 // The returned channel is the waiter for this request: it is registered under
 // the same lock that creates the pending entry, so an approval can never race
 // ahead of the waiter and drop the delivery. The caller reads it (with its own
-// timeout / disconnect handling) and must unregisterPairWaiter when done.
+// timeout / disconnect handling) and must cancelPendingPairing when done.
 // The returned deadline is the request's immutable expiry: the caller must time
 // its waiter out against this exact value (not the live TTL) so the waiter,
 // cleanup, and approval never disagree about when the request expires (#1299).

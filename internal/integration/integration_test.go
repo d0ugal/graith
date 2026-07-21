@@ -1265,14 +1265,20 @@ func TestTypeWakesSleepingAgent(t *testing.T) {
 	// The sleeper only reads stdin in its SIGWINCH trap. If the Poke
 	// didn't send SIGWINCH, the input would never appear in output.
 	found := false
+	logPath := filepath.Join(env.tmpDir, "logs", info.ID+".log")
 
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if tail, err := ptySess.ScrollbackFile().TailBytes(4096); err == nil {
-			if strings.Contains(string(tail), "got:bothy-input") {
-				found = true
-				break
-			}
+		tail, err := ptySess.ScrollbackFile().TailBytes(4096)
+		if err != nil {
+			// The exit watcher may close the live scrollback between prompt exit
+			// and this observation. Its test-owned log remains authoritative.
+			tail, err = os.ReadFile(logPath)
+		}
+
+		if err == nil && strings.Contains(string(tail), "got:bothy-input") {
+			found = true
+			break
 		}
 
 		time.Sleep(50 * time.Millisecond)

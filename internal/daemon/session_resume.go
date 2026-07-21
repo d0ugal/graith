@@ -37,11 +37,22 @@ import (
 // session is a no-op that returns the current state.
 func (sm *SessionManager) ConvertToInteractive(id string, rows, cols uint16) (SessionState, error) {
 	sm.mu.Lock()
+	if err := sm.rejectLaunchDuringUpgradeLocked(); err != nil {
+		sm.mu.Unlock()
+
+		return SessionState{}, err
+	}
 
 	sessState, ok := sm.state.Sessions[id]
 	if !ok {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session %q not found", id)
+	}
+
+	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
+		sm.mu.Unlock()
+
+		return SessionState{}, err
 	}
 
 	// A soft-deleted session is hidden; ID-addressable lifecycle ops reject it.
@@ -196,6 +207,11 @@ func (sm *SessionManager) resumeWithSummary(id string, rows, cols uint16, lifecy
 }
 
 func (sm *SessionManager) resumeWithSummaryContext(ctx context.Context, id string, rows, cols uint16, lifecycleSummary string) (SessionState, error) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return SessionState{}, err
+	}
+	defer sm.endLifecycleOperation()
+
 	unlock, err := sm.lockSessionLaunchContext(ctx, id)
 	if err != nil {
 		return SessionState{}, err
@@ -212,6 +228,11 @@ func (sm *SessionManager) resumeWithSummaryContext(ctx context.Context, id strin
 // start (uses agent.Args, not resume_args) and clears FreshStart afterwards so
 // subsequent resumes use the new agent's native resume.
 func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint16, lifecycleSummary, seedPrompt string) (SessionState, error) {
+	if err := sm.beginLifecycleOperation(); err != nil {
+		return SessionState{}, err
+	}
+	defer sm.endLifecycleOperation()
+
 	unlock := sm.lockSessionLaunch(id)
 	defer unlock()
 
@@ -256,11 +277,22 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 
 	// --- Phase 1: Lock, validate, prepare, mark creating ---
 	sm.mu.Lock()
+	if err := sm.rejectLaunchDuringUpgradeLocked(); err != nil {
+		sm.mu.Unlock()
+
+		return SessionState{}, err
+	}
 
 	sessState, ok := sm.state.Sessions[id]
 	if !ok {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session %q not found", id)
+	}
+
+	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
+		sm.mu.Unlock()
+
+		return SessionState{}, err
 	}
 
 	if sessState.SystemKind == SystemKindOrchestrator && !sm.cfg.Orchestrator.Enabled {
@@ -413,6 +445,8 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	prevSummaryTTL := sessState.SummaryTTL
 	prevToken := sessState.Token
 	prevAgentSessionID := sessState.AgentSessionID
+	prevNativeStateRoot := sessState.NativeStateRoot
+	prevNativeCaptureStartedAt := sessState.NativeCaptureStartedAt
 	prevFreshStart := sessState.FreshStart
 	prevLaunchGeneration := sessState.LaunchGeneration
 
@@ -478,6 +512,8 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		// FreshStart), so undo it here too — otherwise memory holds the minted id
 		// while disk still has the original, and a later restart re-wedges.
 		sessState.AgentSessionID = prevAgentSessionID
+		sessState.NativeStateRoot = prevNativeStateRoot
+		sessState.NativeCaptureStartedAt = prevNativeCaptureStartedAt
 		sessState.FreshStart = prevFreshStart
 
 		delete(sm.tokenIndex, newToken)
@@ -880,6 +916,13 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		return SessionState{}, fmt.Errorf("resume cancelled before process launch: %w", err)
 	}
 
+	if err := sm.lifecyclePreSpawnBarrier(); err != nil {
+		slot.release()
+		rollbackState()
+
+		return SessionState{}, err
+	}
+
 	// Pre-spawn time for native session-id capture (see Create).
 	startedAt := time.Now()
 
@@ -909,6 +952,15 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 
 	// --- Phase 3: Lock, commit to running ---
 	sm.mu.Lock()
+	if err := sm.rejectLaunchDuringUpgradeLocked(); err != nil {
+		sm.mu.Unlock()
+		sm.logStopping(id, sm.sessionName(id), "rollback", "resume-rollback", ptySess)
+		_ = ptySess.Kill()
+		ptySess.Close()
+		rollbackState()
+
+		return SessionState{}, err
+	}
 
 	if _, ok := sm.state.Sessions[id]; !ok {
 		sm.mu.Unlock()
@@ -954,6 +1006,16 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		SandboxConfig: sandboxMerged,
 		CommandPolicy: commandPolicy,
 	}
+
+	if scrapesID(sessAgent) && sessAgentSessionID == "" {
+		captureStartedAt := startedAt.UTC()
+		sessState.NativeStateRoot = env["CODEX_HOME"]
+		sessState.NativeCaptureStartedAt = &captureStartedAt
+	} else if sessAgentSessionID != "" {
+		sessState.NativeStateRoot = ""
+		sessState.NativeCaptureStartedAt = nil
+	}
+
 	if isOrchestrator {
 		sessState.LastStartedAt = time.Now()
 	}
@@ -1048,14 +1110,18 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		sm.logUnsandboxedStart(id, result.Name, sessAgent)
 	}
 
-	sm.startWatcher(id, ptySess)
-	go sm.notifyUnreadInbox(id)
+	sm.startWatcher(id, ptySess)                                                 //nolint:contextcheck // The committed session owns its exit watcher beyond the resume request lifetime.
+	sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) { //nolint:contextcheck // unread notification is daemon-owned after resume commits
+		sm.notifyUnreadInboxContext(taskCtx, id)
+	})
 
 	// If a self-minting agent (Codex) had no captured id, this resume fell back
 	// to its empty-id behaviour; scrape the id now so the *next* resume is
 	// deterministic. Skipped when an id is already known.
 	if scrapesID(sessAgent) && sessAgentSessionID == "" {
-		go sm.captureNativeSessionID(id, sessAgent, sessWorktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
+		sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) { //nolint:contextcheck // native-ID capture is daemon-owned after resume commits
+			sm.captureNativeSessionIDContext(taskCtx, id, sessAgent, sessWorktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
+		})
 	}
 
 	if scenarioIDForRepublish != "" {
