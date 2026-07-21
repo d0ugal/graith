@@ -112,7 +112,7 @@ const (
 	upgradeManifestVersion       = 2
 	upgradeHelperHandoffVersion  = 2
 	upgradeCapacityProbeMaxBytes = 1024
-	upgradeCapacityProbeTimeout  = 3 * time.Second
+	upgradeCapacityProbeTimeout  = 5 * time.Second
 	upgradeManifestMaxBytes      = 4 * 1024 * 1024
 	upgradeManifestMaxSessions   = 4096
 	upgradeManifestMaxHelpers    = 256
@@ -3694,18 +3694,7 @@ func waitForProcessGroupGoneUntil(
 }
 
 func reapInheritedHelperUntil(helper UpgradeHelper, deadline time.Time) error {
-	grace := remainingCleanupDuration(deadline, 250*time.Millisecond)
-
-	reaped, err := waitForExactChild(helper.PID, helper.StartTime, grace)
-	if err != nil {
-		return err
-	}
-
-	if reaped {
-		return nil
-	}
-
-	startTime, startErr := grpty.ProcessStartTime(helper.PID)
+	startTime, startErr := upgradeProcessStartTime(helper.PID)
 	if startErr != nil || startTime != helper.StartTime {
 		if errors.Is(syscall.Kill(helper.PID, 0), syscall.ESRCH) {
 			return nil
@@ -3718,7 +3707,7 @@ func reapInheritedHelperUntil(helper UpgradeHelper, deadline time.Time) error {
 	_ = syscall.Kill(-helper.PID, syscall.SIGKILL)
 	_ = syscall.Kill(helper.PID, syscall.SIGKILL)
 
-	reaped, err = waitForExactChild(helper.PID, helper.StartTime, remainingCleanupDuration(deadline, 0))
+	reaped, err := waitForExactChild(helper.PID, helper.StartTime, remainingCleanupDuration(deadline, 0))
 	if err != nil || !reaped {
 		return errors.New("inherited terminal helper did not exit within cleanup deadline")
 	}
@@ -4103,12 +4092,17 @@ func currentOpenDescriptorCount(limit uint64) (int, error) {
 }
 
 func openDescriptorDirectoryCount(path string) (int, error) {
-	entries, err := os.ReadDir(path)
+	directory, err := os.Open(path)
 	if err != nil {
 		return 0, err
 	}
 
-	return len(entries), nil
+	names, readErr := directory.Readdirnames(-1)
+	if err := errors.Join(readErr, directory.Close()); err != nil {
+		return 0, err
+	}
+
+	return len(names), nil
 }
 
 func currentOpenDescriptorCountWith(

@@ -429,6 +429,17 @@ exact-source Linux workflow runs the same targets for ten seconds and repeats
 the resource-limit tests on that kernel; execution counts are intentionally not
 treated as stable performance claims.
 
+A final integrated audit on 2026-07-21 found and corrected five narrow edge
+cases: Darwin `/dev/fd` enumeration, inherited-helper group reaping, failed
+scrollback-descriptor adoption, helper-stall lock amplification, and a capacity
+probe bound that was too close to measured race-build latency. Each correction
+has a focused normal and race regression. The same pass aligned the native SPDX
+copyright notice and preview-delivery wording. An unrestricted macOS arm64
+exercise then ran real sessions under `GRAITH_PROFILE=dev` successfully. The
+operator's report that sessions felt more responsive agrees with the measured
+parse/reconstruction results, but remains qualitative rather than an additional
+benchmark claim.
+
 - `go test ./internal/pty`
 - `scripts/libghostty-native.sh test`
 - `scripts/libghostty-native.sh race`

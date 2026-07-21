@@ -89,13 +89,15 @@ type Session struct {
 	readDone         chan struct{}
 	exitCode         int
 	exitSignal       syscall.Signal
-	peakRSSBytes     int64
+	peakRSSBytes     atomic.Int64
 	bytesRead        int64
-	exited           bool
+	exited           atomic.Bool
 	adoptedPID       int
 	adoptedStartTime int64
-	lastOutputAt     time.Time
-	lastUserInputAt  time.Time
+	// Keep timestamp observation independent from mu, which may cover helper IPC.
+	lastOutputMu    sync.Mutex
+	lastOutputAt    time.Time
+	lastUserInputAt time.Time
 	// inputDelay is the pause (in nanoseconds) between typed text and the submit
 	// CR in WriteInputAndSubmit. Seeded at construction from SessionOpts.InputDelay
 	// (or the typeInputDelay default) and updated live by SetInputDelay when the
@@ -296,6 +298,9 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 
 	if err != nil {
 		_ = ptmx.Close()
+		if opts.ScrollbackFd > 0 && opts.ScrollbackFd != opts.Fd {
+			_ = unix.Close(int(opts.ScrollbackFd))
+		}
 
 		return nil, fmt.Errorf("adopt scrollback: %w", err)
 	}
@@ -616,8 +621,8 @@ done:
 
 	<-s.readDone
 	s.mu.Lock()
-	s.exited = true
 	s.exitCode = exitCode
+	s.exited.Store(true)
 	s.mu.Unlock()
 
 	if s.userInputCond != nil {
@@ -746,7 +751,9 @@ func (s *Session) readLoop() {
 			}
 
 			screenErr := s.writeScreenLocked(chunk)
+			s.lastOutputMu.Lock()
 			s.lastOutputAt = time.Now()
+			s.lastOutputMu.Unlock()
 			first := s.bytesRead == 0
 			s.bytesRead += int64(n)
 			writers := make([]io.Writer, len(s.writers))
@@ -1381,7 +1388,6 @@ func (s *Session) waitLoop() {
 	<-s.readDone
 	s.mu.Lock()
 
-	s.exited = true
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
@@ -1390,13 +1396,15 @@ func (s *Session) waitLoop() {
 				s.exitSignal = ws.Signal()
 			}
 
-			s.peakRSSBytes = extractPeakRSS(exitErr.ProcessState)
+			s.peakRSSBytes.Store(extractPeakRSS(exitErr.ProcessState))
 		} else {
 			s.exitCode = -1
 		}
 	} else if s.Cmd.ProcessState != nil {
-		s.peakRSSBytes = extractPeakRSS(s.Cmd.ProcessState)
+		s.peakRSSBytes.Store(extractPeakRSS(s.Cmd.ProcessState))
 	}
+
+	s.exited.Store(true)
 	s.mu.Unlock()
 
 	if s.userInputCond != nil {
@@ -1540,11 +1548,7 @@ func (s *Session) lockInputWriter() error {
 }
 
 func (s *Session) writeInputLocked(data []byte) error {
-	s.mu.RLock()
-	exited := s.exited
-	s.mu.RUnlock()
-
-	if exited {
+	if s.exited.Load() {
 		return errors.New("session process has exited")
 	}
 
@@ -1597,11 +1601,7 @@ func (s *Session) WaitForUserIdleContext(ctx context.Context, idleTimeout, maxWa
 			return false
 		}
 
-		s.mu.RLock()
-		exited := s.exited
-		s.mu.RUnlock()
-
-		if exited {
+		if s.exited.Load() {
 			return true
 		}
 
@@ -1699,8 +1699,13 @@ func (s *Session) DetachWriter(w io.Writer) {
 	}
 	s.mu.Unlock()
 }
-func (s *Session) Done() <-chan struct{}   { return s.done }
-func (s *Session) LastOutputAt() time.Time { s.mu.RLock(); defer s.mu.RUnlock(); return s.lastOutputAt }
+func (s *Session) Done() <-chan struct{} { return s.done }
+func (s *Session) LastOutputAt() time.Time {
+	s.lastOutputMu.Lock()
+	defer s.lastOutputMu.Unlock()
+
+	return s.lastOutputAt
+}
 
 // BytesRead returns the total number of PTY output bytes read this session
 // lifetime. Zero on a running session that has been up for a while is the
@@ -1724,9 +1729,9 @@ func (s *Session) RecentlyAdopted(grace time.Duration) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	return !s.adoptedAt.IsZero() && s.lastOutputAt.IsZero() && time.Since(s.adoptedAt) < grace
+	return !s.adoptedAt.IsZero() && s.LastOutputAt().IsZero() && time.Since(s.adoptedAt) < grace
 }
-func (s *Session) Exited() bool  { s.mu.RLock(); defer s.mu.RUnlock(); return s.exited }
+func (s *Session) Exited() bool  { return s.exited.Load() }
 func (s *Session) ExitCode() int { s.mu.RLock(); defer s.mu.RUnlock(); return s.exitCode }
 func (s *Session) ExitSignal() syscall.Signal {
 	s.mu.RLock()
@@ -1734,7 +1739,7 @@ func (s *Session) ExitSignal() syscall.Signal {
 
 	return s.exitSignal
 }
-func (s *Session) PeakRSSBytes() int64 { s.mu.RLock(); defer s.mu.RUnlock(); return s.peakRSSBytes }
+func (s *Session) PeakRSSBytes() int64 { return s.peakRSSBytes.Load() }
 
 func (s *Session) Kill() error {
 	pid := s.ProcessPID()

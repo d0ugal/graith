@@ -129,7 +129,7 @@
           "checksumValue": "d9b30c7aa983fcff5eed2084d54ae83eaafe7ff3a84d8fb754d854165a6e521c"
         }
       ],
-      "copyrightText": "Copyright (c) Zig contributors; Copyright (c) 2011-2020 Rich Felker et al.; LLVM Project contributors",
+      "copyrightText": "Copyright (c) Zig contributors; Copyright (c) 2005-2020 Rich Felker et al.; LLVM Project contributors",
       "downloadLocation": "https://ziglang.org/download/0.15.2/zig-0.15.2.tar.xz",
       "externalRefs": [
         {

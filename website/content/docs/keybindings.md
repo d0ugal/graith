@@ -95,8 +95,8 @@ The overlay has no stop, resume, or rename action — use `gr stop`, `gr restart
 ### Preview panel
 
 The right side of the overlay shows a live preview of the selected session's
-terminal screen. The daemon maintains the screen model and sends snapshots as
-the session produces output.
+terminal screen. The daemon maintains the screen model, and clients request
+snapshots while the session produces output.
 
 ### Session display
 
