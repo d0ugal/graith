@@ -93,7 +93,7 @@ struct SessionSidebar: View {
                 FleetSummaryBar(sessions: store.sessions)
             }
 
-            // Filter / search / view-mode controls (#906)
+            // Filter and search controls (#906)
             if !store.sessions.isEmpty {
                 SidebarFilterBar()
             }
@@ -389,11 +389,6 @@ struct FleetSummaryBar: View {
     let sessions: [Session]
 
     var running: Int { sessions.filter { $0.isRunning }.count }
-    // Reuse the canonical shared predicate so the summary count can't drift
-    // from what the "Needs Attention" view mode actually lists (#906).
-    var needsAttention: Int {
-        sessions.filter(SidebarFilter.needsAttention).count
-    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -403,14 +398,6 @@ struct FleetSummaryBar: View {
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(Theme.overlay0)
             }
-            if needsAttention > 0 {
-                HStack(spacing: 4) {
-                    Circle().fill(Theme.yellow).frame(width: 6, height: 6)
-                    Text("\(needsAttention) need attention")
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(Theme.yellow)
-                }
-            }
             Spacer()
         }
         .padding(.horizontal, 16)
@@ -419,9 +406,8 @@ struct FleetSummaryBar: View {
     }
 }
 
-/// Search + view-mode + quick-filter controls for the sidebar (#906). All
-/// state lives on the shared `FleetModel`, so the same filtering drives macOS
-/// and iOS.
+/// Search + quick-filter controls for the sidebar (#906). All state lives on
+/// the shared `FleetModel`, so the same filtering drives macOS and iOS.
 struct SidebarFilterBar: View {
     @EnvironmentObject var store: SessionStore
 
@@ -451,15 +437,8 @@ struct SidebarFilterBar: View {
             .background(Theme.crust)
             .clipShape(RoundedRectangle(cornerRadius: 6))
 
-            // View-mode segmented control + quick filters
+            // Quick filters
             HStack(spacing: 6) {
-                ForEach(SidebarViewMode.allCases) { mode in
-                    ViewModeChip(
-                        mode: mode,
-                        isSelected: store.viewMode == mode
-                    ) { store.viewMode = mode }
-                }
-
                 Spacer(minLength: 0)
 
                 // Starred-only toggle
@@ -504,36 +483,6 @@ struct SidebarFilterBar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(Theme.mantle)
-    }
-}
-
-/// A single view-mode toggle chip in the sidebar filter bar.
-private struct ViewModeChip: View {
-    let mode: SidebarViewMode
-    let isSelected: Bool
-    let action: () -> Void
-
-    /// Compact label — the full names are long for a narrow sidebar.
-    private var shortLabel: String {
-        switch mode {
-        case .all: return "All"
-        case .needsAttention: return "Attn"
-        case .active: return "Active"
-        }
-    }
-
-    var body: some View {
-        Button(action: action) {
-            Text(shortLabel)
-                .font(.system(size: 10, weight: isSelected ? .semibold : .regular, design: .monospaced))
-                .foregroundStyle(isSelected ? Theme.text : Theme.overlay0)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(isSelected ? Theme.surface1 : Theme.surface0.opacity(0.4))
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-        }
-        .buttonStyle(.plain)
-        .help(mode.displayName)
     }
 }
 

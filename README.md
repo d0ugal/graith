@@ -19,7 +19,7 @@ Running several agents at once shouldn't mean juggling terminal tabs and steppin
 - **Isolation** — every agent gets its own git worktree and branch, so parallel work never collides
 - **Persistence** — a daemon owns the PTYs; sessions survive terminal closures, daemon restarts, and SSH drops
 - **Switching** — hop between agents instantly with a tmux-style prefix key
-- **Visibility** — see every session at a glance, with a "Needs Attention" view for blocked work and `gr ls --tokens` for per-session token usage
+- **Visibility** — see every session at a glance, group the picker by repository or scenario, and use `gr ls --tokens` for per-session token usage
 - **Coordination** — agents message each other over pub/sub, and you drive them remotely with `type`, `logs`, and the attached-session picker
 
 It owns the PTY, manages the worktrees, and otherwise gets out of your way.

@@ -69,9 +69,9 @@ Cycle views with `h`/`l` or left/right arrows:
 | View | Shows |
 |------|-------|
 | All | Every session, grouped by repo |
-| Needs Attention | Errored sessions, agent runtime errors, idle sessions (running but ready), or stopped sessions with uncommitted/unpushed changes. Sorted oldest-first by time in current state |
-| Active | Running sessions only, newest first |
 | Starred | Starred sessions only |
+| Scenarios | Every session grouped by scenario, with unassigned sessions kept together |
+| Deleted | Recently deleted sessions available to restore |
 
 ## Sending prompts
 

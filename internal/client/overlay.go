@@ -35,14 +35,12 @@ type viewMode int
 
 const (
 	viewAll viewMode = iota
-	viewNeedsAttention
-	viewActive
 	viewStarred
 	viewScenario
 	viewDeleted
 )
 
-var viewNames = []string{"All", "Needs Attention", "Active", "Starred", "Scenarios", "Deleted"}
+var viewNames = []string{"All", "Starred", "Scenarios", "Deleted"}
 
 // sortDeleted orders soft-deleted sessions most-recently-deleted first.
 func sortDeleted(sessions []protocol.SessionInfo) []protocol.SessionInfo {
@@ -67,46 +65,6 @@ func (v viewMode) prev() viewMode {
 	return (v + viewMode(len(viewNames)) - 1) % viewMode(len(viewNames))
 }
 
-func filterNeedsAttention(sessions []protocol.SessionInfo) []protocol.SessionInfo {
-	var result []protocol.SessionInfo
-
-	for _, s := range sessions {
-		switch {
-		case s.Status == "errored":
-			result = append(result, s)
-		case s.Status == "running" && s.AgentStatus == "error":
-			result = append(result, s)
-		case s.Status == "running" && s.AgentStatus == "ready":
-			result = append(result, s)
-		case s.Status == "stopped" && !s.Mirror && (s.Dirty || s.UnpushedCount > 0):
-			result = append(result, s)
-		}
-	}
-
-	sortByStatusAge(result)
-
-	return result
-}
-
-func filterActive(sessions []protocol.SessionInfo) []protocol.SessionInfo {
-	var result []protocol.SessionInfo
-
-	for _, s := range sessions {
-		if s.Status == "running" {
-			result = append(result, s)
-		}
-	}
-
-	sort.SliceStable(result, func(i, j int) bool {
-		ti, _ := time.Parse(time.RFC3339, result[i].CreatedAt)
-		tj, _ := time.Parse(time.RFC3339, result[j].CreatedAt)
-
-		return ti.After(tj)
-	})
-
-	return result
-}
-
 func filterStarred(sessions []protocol.SessionInfo) []protocol.SessionInfo {
 	var result []protocol.SessionInfo
 
@@ -117,27 +75,6 @@ func filterStarred(sessions []protocol.SessionInfo) []protocol.SessionInfo {
 	}
 
 	return result
-}
-
-func sortByStatusAge(sessions []protocol.SessionInfo) {
-	sort.SliceStable(sessions, func(i, j int) bool {
-		ti, _ := time.Parse(time.RFC3339, sessions[i].StatusChangedAt)
-
-		tj, _ := time.Parse(time.RFC3339, sessions[j].StatusChangedAt)
-		if ti.IsZero() && tj.IsZero() {
-			return false
-		}
-
-		if ti.IsZero() {
-			return true
-		}
-
-		if tj.IsZero() {
-			return false
-		}
-
-		return ti.Before(tj)
-	})
 }
 
 var (
@@ -154,7 +91,7 @@ var (
 	// colorSelectBg is the background of the highlighted row in the picker, so
 	// the whole selected line stands out rather than just the "> " cursor. Dark
 	// and purple-tinted to echo the accent used for the selected name and the
-	// active view label.
+	// selected view label.
 	colorSelectBg = lipgloss.Color("#2f2b45")
 )
 
@@ -1473,10 +1410,6 @@ func (m *overlayModel) parentsWithChildren() []string {
 
 func (m *overlayModel) sessionsForView() []protocol.SessionInfo {
 	switch m.view {
-	case viewNeedsAttention:
-		return filterNeedsAttention(m.allSessions)
-	case viewActive:
-		return filterActive(m.allSessions)
 	case viewStarred:
 		return filterStarred(m.allSessions)
 	case viewDeleted:
@@ -2268,12 +2201,12 @@ func (m *overlayModel) View() tea.View {
 		emptyMsg := ""
 
 		switch m.view {
-		case viewNeedsAttention:
-			emptyMsg = "Nothing needs your attention"
-		case viewActive:
-			emptyMsg = "No active sessions"
 		case viewStarred:
 			emptyMsg = "No starred sessions"
+		case viewScenario:
+			emptyMsg = "No sessions"
+		case viewDeleted:
+			emptyMsg = "No deleted sessions"
 		}
 
 		panelContent.WriteString("\n  ")

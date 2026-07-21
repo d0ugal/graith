@@ -125,7 +125,7 @@ Enter
 Sleep 3s
 Down@700ms 2
 Sleep 2s
-# Cycle view modes: All -> Needs Attention -> Active -> back.
+# Cycle view modes: All -> Starred -> Scenarios -> Starred.
 Type "l"
 Sleep 2.5s
 Type "l"

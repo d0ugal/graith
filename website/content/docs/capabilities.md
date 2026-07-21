@@ -43,7 +43,7 @@ as live state.
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
 | List sessions | ✅ | ✅ | ✅ |
-| Filter, search & view-mode sessions | ✅ | ✅ | ✅ |
+| Filter and search sessions | ✅ | ✅ | ✅ |
 | Create session | ✅ | ✅ | ✅ |
 | Stop session | ✅ | ✅ | ✅ |
 | Resume session | ✅ | ✅ | ✅ |

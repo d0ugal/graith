@@ -793,8 +793,7 @@ func migrateV2ToV3(_ *State) error {
 func migrateV3ToV4(_ *State) error { return nil }
 
 // migrateV4ToV5 backfills StatusChangedAt from CreatedAt for existing sessions
-// that predate the field. This gives a conservative "last changed at" of session
-// creation, meaning these sessions will sort oldest in "Needs Attention" views.
+// that predate the field, giving them a conservative "last changed at" value.
 func migrateV4ToV5(state *State) error {
 	for _, s := range state.Sessions {
 		if s.StatusChangedAt.IsZero() {
