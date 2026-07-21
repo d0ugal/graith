@@ -49,7 +49,7 @@ require (
 	github.com/dblohm7/wingoes v0.0.0-20260526185140-fb298caac7ca // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
-	github.com/gaissmai/bart v0.28.2 // indirect
+	github.com/gaissmai/bart v0.29.0 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 // indirect
 	github.com/go-quicktest/qt v1.102.0 // indirect
