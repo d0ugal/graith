@@ -7,6 +7,52 @@
     { matchManagers: ['gomod'], postUpdateOptions: ['gomodTidy'] },
     { matchManagers: ['gomod'], commitMessagePrefix: 'fix:', commitMessageAction: 'update' },
     {
+      // go-libghostty is only safe to update through the native lock manager
+      // below. A gomod-only branch would omit the matching Ghostty archive,
+      // headers, checksums, licenses, SPDX inventory, and native validation.
+      matchManagers: ['gomod'],
+      matchPackageNames: ['go.mitchellh.com/libghostty'],
+      enabled: false,
+      automerge: false,
+    },
+    {
+      matchDepTypes: ['libghostty-native'],
+      groupName: 'libghostty native dependency unit',
+      groupSlug: 'libghostty-native',
+      automerge: false,
+      rangeStrategy: 'replace',
+      commitMessagePrefix: 'fix:',
+      commitMessageAction: 'update',
+      commitMessageTopic: 'native libghostty dependency unit',
+      prBodyNotes: [
+        'This group is an exact native dependency unit and must never be automerged.',
+        'The generation task rotates go.mod/go.sum, Ghostty and wrapper revisions, the Apple artifact, Zig/transitive source and license hashes, committed headers, SPDX, and notices. A red generation check means the selected releases are not present in the selected Ghostty commit or the reviewed Apple artifact has not been published yet.',
+        'Review license conclusions and run every required libghostty native check before merge. See the contributing guide for commit-pinned and vendored discovery rules.',
+      ],
+      postUpgradeTasks: {
+        commands: ['scripts/libghostty-native.sh generate-dependency-unit'],
+        executionMode: 'branch',
+        fileFilters: [
+          'go.mod',
+          'go.sum',
+          'gui/shared/Package.swift',
+          'gui/shared/Sources/CGhosttyVT/include/**',
+          'libghostty-native.lock.json',
+          'libghostty-native.spdx.json',
+          'THIRD_PARTY_NOTICES.libghostty.md',
+        ],
+      },
+    },
+    {
+      // The wrapper's CMakeLists.txt is the compatibility authority for the
+      // normal unit update. Newer Ghostty/transitive releases stay visible on
+      // the dependency dashboard, but require explicit approval before they
+      // can propose a graph that differs from the wrapper-tested closure.
+      matchDepTypes: ['libghostty-native'],
+      matchDepNames: ['Ghostty', 'Zig', 'uucode', 'Highway', 'simdutf'],
+      dependencyDashboardApproval: true,
+    },
+    {
       // config:best-practices enables docker:pinDigests, but the golangci-lint
       // image tag lives in a Makefile variable (GOLANGCI_LINT_VERSION := vX.Y.Z)
       // and is referenced as golangci/golangci-lint:$(GOLANGCI_LINT_VERSION) in
@@ -50,6 +96,86 @@
     },
   ],
   customManagers: [
+    {
+      // Commit-only repositories follow the selected branch digest. The update
+      // command resolves go-libghostty's digest to its Go pseudo-version.
+      customType: 'regex',
+      managerFilePatterns: ['/^libghostty-native\\.lock\\.json$/'],
+      matchStrings: [
+        '"goLibghostty":\\s*\\{\\s*"repository":\\s*"(?<packageName>[^"]+)",\\s*"renovateRef":\\s*"(?<currentValue>[^"]+)",\\s*"commit":\\s*"(?<currentDigest>[0-9a-f]{40})"',
+      ],
+      datasourceTemplate: 'git-refs',
+      depNameTemplate: 'go-libghostty',
+      depTypeTemplate: 'libghostty-native',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^libghostty-native\\.lock\\.json$/'],
+      matchStrings: [
+        '"ghostty":\\s*\\{\\s*"repository":\\s*"(?<packageName>[^"]+)",\\s*"renovateRef":\\s*"(?<currentValue>[^"]+)",\\s*"commit":\\s*"(?<currentDigest>[0-9a-f]{40})"',
+      ],
+      datasourceTemplate: 'git-refs',
+      depNameTemplate: 'Ghostty',
+      depTypeTemplate: 'libghostty-native',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^libghostty-native\\.lock\\.json$/'],
+      matchStrings: [
+        '"zig":\\s*\\{\\s*"repository":\\s*"(?<packageName>[^"]+)",\\s*"version":\\s*"(?<currentValue>[^"]+)"',
+      ],
+      datasourceTemplate: 'github-tags',
+      depNameTemplate: 'Zig',
+      depTypeTemplate: 'libghostty-native',
+      versioningTemplate: 'semver',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^libghostty-native\\.lock\\.json$/'],
+      matchStrings: [
+        '"uucode":\\s*\\{\\s*"repository":\\s*"(?<packageName>[^"]+)",\\s*"version":\\s*"(?<currentValue>[^"]+)"',
+      ],
+      datasourceTemplate: 'github-tags',
+      depNameTemplate: 'uucode',
+      depTypeTemplate: 'libghostty-native',
+      extractVersionTemplate: '^v(?<version>.+)$',
+      versioningTemplate: 'semver',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^libghostty-native\\.lock\\.json$/'],
+      matchStrings: [
+        '"highway":\\s*\\{\\s*"repository":\\s*"(?<packageName>[^"]+)",\\s*"version":\\s*"(?<currentValue>[^"]+)"',
+      ],
+      datasourceTemplate: 'github-tags',
+      depNameTemplate: 'Highway',
+      depTypeTemplate: 'libghostty-native',
+      versioningTemplate: 'semver',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^libghostty-native\\.lock\\.json$/'],
+      matchStrings: [
+        '"simdutf":\\s*\\{\\s*"repository":\\s*"(?<packageName>[^"]+)",\\s*"version":\\s*"(?<currentValue>[^"]+)"',
+      ],
+      datasourceTemplate: 'github-tags',
+      depNameTemplate: 'simdutf',
+      depTypeTemplate: 'libghostty-native',
+      extractVersionTemplate: '^v(?<version>.+)$',
+      versioningTemplate: 'semver',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^libghostty-native\\.lock\\.json$/'],
+      matchStrings: [
+        '"spdxTools":\\s*\\{\\s*"repository":\\s*"(?<packageName>[^"]+)",\\s*"version":\\s*"(?<currentValue>[^"]+)"',
+      ],
+      datasourceTemplate: 'github-releases',
+      depNameTemplate: 'SPDX tools-java',
+      depTypeTemplate: 'libghostty-native',
+      extractVersionTemplate: '^v(?<version>.+)$',
+      versioningTemplate: 'semver',
+    },
     {
       customType: 'regex',
       managerFilePatterns: ['/Makefile/'],

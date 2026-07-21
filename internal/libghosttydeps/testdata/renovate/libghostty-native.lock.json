@@ -1,0 +1,32 @@
+{
+  "goLibghostty": {
+    "repository": "https://tangled.org/mitchellh.com/go-libghostty",
+    "renovateRef": "main",
+    "commit": "cb51984a39023b4f3010f8e9a9e1ec26941f178b"
+  },
+  "ghostty": {
+    "repository": "https://github.com/ghostty-org/ghostty.git",
+    "renovateRef": "main",
+    "commit": "91f66da24527fa02d92b5fd0b41cd020f553a64c"
+  },
+  "zig": {
+    "repository": "ziglang/zig",
+    "version": "0.14.1"
+  },
+  "uucode": {
+    "repository": "jacobsandlund/uucode",
+    "version": "0.1.0"
+  },
+  "highway": {
+    "repository": "google/highway",
+    "version": "1.1.0"
+  },
+  "simdutf": {
+    "repository": "simdutf/simdutf",
+    "version": "8.0.0"
+  },
+  "spdxTools": {
+    "repository": "spdx/tools-java",
+    "version": "2.0.6"
+  }
+}

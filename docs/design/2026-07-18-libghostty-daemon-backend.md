@@ -353,15 +353,16 @@ Graith pins `go.mitchellh.com/libghostty` to pseudo-version
 useful for tooling. Its API is not yet version-stable, so upgrades are reviewed
 changes rather than floating module updates.
 
-`libghostty-native.spdx.json` records the native closure that Go tooling cannot
-see: Ghostty, uucode 0.2.0, Highway 1.2.0 at exact upstream commit, the vendored
-simdutf 9.0.0 amalgamation, and the bundled Zig compiler/UBSan runtime. Ghostty's
-simdutf package manifest still says 5.2.8, so the inventory verifies the
-compiled header version and exact source hashes rather than trusting that stale
-field. `THIRD_PARTY_NOTICES.libghostty.md` carries the elected
+`libghostty-native.lock.json` is the canonical machine-readable dependency
+record. `libghostty-native.spdx.json` records the native closure that Go tooling
+cannot see: Ghostty, uucode 0.2.0, Highway 1.2.0 at exact upstream commit, the
+vendored simdutf 9.0.0 amalgamation, and the bundled Zig compiler/UBSan runtime.
+Ghostty's simdutf package manifest still says 5.2.8, so the inventory verifies
+the compiled header version and exact source hashes rather than trusting that
+stale field. `THIRD_PARTY_NOTICES.libghostty.md` carries the elected
 MIT/BSD-3-Clause/Unicode/Apache notices. The helper script checks the Go module
-sum, SPDX entries and relationships, notice pins, source manifests and hashes,
-Git commit, toolchain, headers, and Apple checksum as one unit.
+sum, lock projections, SPDX entries and relationships, source manifests and
+hashes, Git commit, toolchain, headers, and Apple checksum as one unit.
 
 The dependency inventory records the pinned Apple build's actual
 `emit-lib-vt=true`, `emit-xcframework=true`, and `ReleaseFast` inputs without
@@ -376,13 +377,14 @@ SPDX Java tooling; publishes the package directory with a Darwin atomic
 no-replace rename; and uploads exactly `gr`, the bound SPDX document, and the
 notice file.
 
-A pin rotation is atomic:
+A pin rotation is generated and reviewed as one unit:
 
-1. select the Ghostty and `go-libghostty` commits together;
+1. select `go-libghostty`; its exact CMake Ghostty pin is the default tested
+   pair, while a newer Ghostty requires explicit dashboard approval;
 2. rebuild every static target with the exact required Zig version;
 3. synchronize and diff the public headers;
-4. update `go.mod`, artifact digests, script constants, SPDX entries, licenses,
-   and notices in one review;
+4. generate `go.mod`, artifact digests, source and license hashes, SPDX entries,
+   committed headers, and the notice inventory from the lock in one review;
 5. run Ghostty lib-vt tests, the complete wrapper suite, shared compatibility,
    fuzz/race, benchmarks, and every supported native workflow target; and
 6. publish candidate archives only after provenance and binary linkage checks.

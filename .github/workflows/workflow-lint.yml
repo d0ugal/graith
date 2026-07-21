@@ -11,15 +11,42 @@ on:
     paths:
       - '.github/workflows/**'
       - '.github/zizmor.yml'
+      - 'internal/libghosttydeps/testdata/renovate/**'
+      - 'libghostty-native.lock.json'
+      - 'renovate.json5'
+      - 'scripts/verify-renovate-libghostty.sh'
   pull_request:
     paths:
       - '.github/workflows/**'
       - '.github/zizmor.yml'
+      - 'internal/libghosttydeps/testdata/renovate/**'
+      - 'libghostty-native.lock.json'
+      - 'renovate.json5'
+      - 'scripts/verify-renovate-libghostty.sh'
 
 permissions:
   contents: read
 
 jobs:
+  renovate:
+    name: Renovate native dependency fixtures
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.11.0
+      - name: Install the pinned Renovate validator and dry-run tooling
+        run: npm install --global renovate@43.272.6
+      - name: Validate config and update every native dependency fixture
+        env:
+          RENOVATE_GITHUB_COM_TOKEN: ${{ github.token }}
+        run: scripts/verify-renovate-libghostty.sh
+
   actionlint:
     name: actionlint
     runs-on: ubuntu-latest
