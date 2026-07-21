@@ -2,8 +2,8 @@
 title: "Design Doc: Authoritative Session Working Directories"
 authors: Codex
 created: 2026-07-21
-status: Accepted
-reviewers: Implementation review pending
+status: Implemented
+reviewers: Independent implementation review
 informed: Graith maintainers
 issue: https://github.com/d0ugal/graith/issues/1398
 ---
