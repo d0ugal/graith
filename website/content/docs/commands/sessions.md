@@ -97,6 +97,31 @@ restarts the agent (any in-flight tool call is cancelled, not resumed), attach
 prompts for confirmation; pass `-y`/`--yes` to skip. To watch it read-only
 *without* converting, use `gr logs -f <name>`.
 
+## `gr path [name-or-id]`
+
+Print the authoritative working directory assigned to a session. The output has
+no trailing newline, so it can be used directly with a shell:
+
+```bash
+cd "$(gr path braw)"
+cd "$(gr path --self)"
+```
+
+| Flag | Description |
+|------|-------------|
+| `--self` | Resolve the calling session from `GRAITH_SESSION_ID`, falling back to `GRAITH_SESSION_NAME` |
+
+`--self` takes no positional argument and reports an error outside a Graith
+session. Named and ID lookup always use the cwd persisted by the daemon; they do
+not depend on the shell's current directory. Worktree and in-place sessions
+return their repository directory, repo-less sessions return their managed
+scratch directory, and mirror and orchestrator sessions return the writable
+scratch directory where their agent launches. A missing, relative, deleted, or
+non-directory saved cwd is rejected rather than emitting a path that `cd` would
+interpret relative to the caller.
+
+With `--json`, the result contains `session_id`, `name`, and `cwd`.
+
 ## `gr stop <name-or-id>`
 
 Stop a running session. The agent process is killed, but the worktree and branch are kept.

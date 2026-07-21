@@ -193,7 +193,7 @@ When includes are configured:
 
 ## State persistence
 
-Session state lives in `state.json` in the data directory, loaded on daemon start and saved on every mutation, so sessions survive restarts. Runtime-only state (hook reports, attached clients) isn't persisted — it's rebuilt on restart.
+Session state lives in `state.json` in the data directory, loaded on daemon start and saved on every mutation, so sessions survive restarts. This includes the authoritative cwd assigned at launch, which can differ from the Git worktree for mirror and system sessions and is reused on resume. Runtime-only state (hook reports, attached clients) isn't persisted — it's rebuilt on restart.
 
 ## Scrollback
 

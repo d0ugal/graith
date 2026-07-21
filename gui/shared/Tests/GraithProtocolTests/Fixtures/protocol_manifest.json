@@ -3790,6 +3790,13 @@
           "optional": false
         },
         {
+          "name": "cwd",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
           "name": "branch",
           "type": {
             "kind": "string"

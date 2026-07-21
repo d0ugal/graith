@@ -642,7 +642,7 @@ private final class LockedBox<Value>: @unchecked Sendable {
 func makeSession(id: String, name: String) -> SessionInfo {
     let json = """
     {"id":"\(id)","name":"\(name)","repo_path":"/croft","repo_name":"croft",\
-    "worktree_path":"/bothy","branch":"b","base_branch":"main","agent":"claude",\
+    "worktree_path":"/bothy","cwd":"/bothy","branch":"b","base_branch":"main","agent":"claude",\
     "status":"running","created_at":"2026-07-08T00:00:00Z"}
     """
     return try! JSONDecoder().decode(SessionInfo.self, from: Data(json.utf8))

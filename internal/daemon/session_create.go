@@ -157,13 +157,13 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	}
 
 	var (
-		repoRoot, repoName, worktreePath, branchName string
-		isMirror                                     bool
-		mirrorSourceID                               string
-		fetchOnCreate                                bool
-		rcIncludes                                   []string
-		sourceIncludes                               []IncludedRepoState
-		exactMirrorSnapshot                          scenarioSharedSource
+		repoRoot, repoName, worktreePath, cwd, branchName string
+		isMirror                                          bool
+		mirrorSourceID                                    string
+		fetchOnCreate                                     bool
+		rcIncludes                                        []string
+		sourceIncludes                                    []IncludedRepoState
+		exactMirrorSnapshot                               scenarioSharedSource
 	)
 
 	switch {
@@ -311,6 +311,11 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		fetchOnCreate = sm.cfg.FetchOnCreate && !opts.NoFetch
 	}
 
+	cwd = worktreePath
+	if isMirror {
+		cwd = filepath.Join(sm.paths.DataDir, "scratch", id)
+	}
+
 	agentSessionID := ""
 	if forcesID(agentName) {
 		agentSessionID = newAgentSessionID()
@@ -369,6 +374,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		RepoPath:             repoRoot,
 		RepoName:             repoName,
 		WorktreePath:         worktreePath,
+		CWD:                  cwd,
 		Branch:               branchName,
 		BaseBranch:           baseBranch,
 		Agent:                agentName,
@@ -805,7 +811,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			envKeys = append(envKeys, k)
 		}
 
-		opts, err := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, hookFilesNeeded || mcpEnabled)
+		opts, err := sm.sandboxOptsFromConfig(merged, id, cwd, agent.Command, envKeys, hookFilesNeeded || mcpEnabled)
 		if err != nil {
 			cleanupOnError()
 			rollbackState()
@@ -827,7 +833,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		}
 
 		if isMirror {
-			scratchDir = filepath.Join(sm.paths.DataDir, "scratch", id)
+			scratchDir = cwd
 			if err := os.MkdirAll(scratchDir, 0o700); err != nil {
 				cleanupOnError()
 				rollbackState()
@@ -918,7 +924,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			ID:               id,
 			Command:          command,
 			Args:             finalArgs,
-			Dir:              worktreePath,
+			Dir:              cwd,
 			Env:              env,
 			LogPath:          logPath,
 			MaxLogSize:       lc.MaxLogBytesOrDefault(),
@@ -934,7 +940,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			ID:         id,
 			Command:    command,
 			Args:       finalArgs,
-			Dir:        worktreePath,
+			Dir:        cwd,
 			Env:        env,
 			Rows:       rows,
 			Cols:       cols,
@@ -1082,7 +1088,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	// non-empty). Uses the session's effective state root (e.g. CODEX_HOME).
 	if scrapesID(agentName) && agentSessionID == "" {
 		sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) {
-			sm.captureNativeSessionIDContext(taskCtx, id, agentName, worktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
+			sm.captureNativeSessionIDContext(taskCtx, id, agentName, cwd, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
 		})
 	}
 

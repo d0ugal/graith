@@ -628,6 +628,7 @@ func (sm *SessionManager) LoadState() error {
 
 	state.Reconcile()
 	recoverInterruptedScenarioStarts(state, time.Now().UTC())
+	sm.reconcileSessionCWDs(state)
 	sm.state = state
 	sm.rebuildTokenIndex()
 	sm.rebuildDeviceTokenIndex()
@@ -643,11 +644,41 @@ func (sm *SessionManager) loadStateSnapshotForAdoption(data []byte) (int, error)
 
 	state.Reconcile()
 	recoverInterruptedScenarioStarts(state, time.Now().UTC())
+	sm.reconcileSessionCWDs(state)
 	sm.state = state
 	sm.rebuildTokenIndex()
 	sm.rebuildDeviceTokenIndex()
 
 	return originalVersion, nil
+}
+
+// sessionCWD returns the persisted cwd, or the one authoritative legacy layout
+// can reconstruct. It never consults the daemon process's own cwd.
+func (sm *SessionManager) sessionCWD(s *SessionState) string {
+	if s.CWD != "" {
+		return s.CWD
+	}
+
+	switch {
+	case s.SystemKind == SystemKindOrchestrator:
+		return sm.orchestratorScratchDir()
+	case s.Mirror:
+		return filepath.Join(sm.paths.DataDir, "scratch", s.ID)
+	default:
+		return s.WorktreePath
+	}
+}
+
+// reconcileSessionCWDs upgrades layout-dependent legacy sessions after state
+// decoding. The state migration itself cannot derive these paths because it has
+// no configured data directory. LoadState persists the reconciled values before
+// the daemon begins serving requests.
+func (sm *SessionManager) reconcileSessionCWDs(state *State) {
+	for _, s := range state.Sessions {
+		if s.CWD == "" {
+			s.CWD = sm.sessionCWD(s)
+		}
+	}
 }
 
 // loadOrCreateHumanToken loads the stable local-human credential, creating it

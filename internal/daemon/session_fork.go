@@ -255,6 +255,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		RepoPath:        repoRoot,
 		RepoName:        repoName,
 		WorktreePath:    worktreePath,
+		CWD:             worktreePath,
 		Branch:          branchName,
 		BaseBranch:      baseBranch,
 		Agent:           agentName,

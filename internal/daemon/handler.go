@@ -1267,6 +1267,7 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 		RepoPath:        s.RepoPath,
 		RepoName:        s.RepoName,
 		WorktreePath:    s.WorktreePath,
+		CWD:             s.CWD,
 		Branch:          s.Branch,
 		BaseBranch:      s.BaseBranch,
 		Agent:           s.Agent,

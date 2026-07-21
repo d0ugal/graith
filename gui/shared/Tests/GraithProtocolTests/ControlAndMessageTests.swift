@@ -24,7 +24,7 @@ struct ControlAndMessageTests {
     }
 
     @Test func payloadKeptAsRawJSON() throws {
-        let go = #"{"type":"attached","payload":{"id":"canny","name":"canny","repo_path":"/croft","repo_name":"croft","worktree_path":"/bothy","branch":"b","base_branch":"main","agent":"claude","status":"running","created_at":"2026-07-08T00:00:00Z"}}"#
+        let go = #"{"type":"attached","payload":{"id":"canny","name":"canny","repo_path":"/croft","repo_name":"croft","worktree_path":"/bothy","cwd":"/bothy","branch":"b","base_branch":"main","agent":"claude","status":"running","created_at":"2026-07-08T00:00:00Z"}}"#
         let env = try decodeControl(Data(go.utf8))
         #expect(env.type == "attached")
         let info = try decodePayload(env, as: SessionInfo.self)
@@ -51,7 +51,7 @@ struct ControlAndMessageTests {
     @Test func sessionInfoIgnoresRetiredFieldsKeepsPRCI() throws {
         // cost_usd/context_percent are NOT on the wire model; a payload
         // carrying them must still decode (extra keys ignored). PR/CI decode.
-        let json = #"{"id":"skelf","name":"skelf","repo_path":"/croft","repo_name":"croft","worktree_path":"/w","branch":"b","base_branch":"main","agent":"codex","status":"stopped","created_at":"t","cost_usd":1.5,"context_percent":80,"pull_request":{"number":7,"state":"open"},"ci":{"state":"failing","failing_checks":["build"]}}"#
+        let json = #"{"id":"skelf","name":"skelf","repo_path":"/croft","repo_name":"croft","worktree_path":"/w","cwd":"/w","branch":"b","base_branch":"main","agent":"codex","status":"stopped","created_at":"t","cost_usd":1.5,"context_percent":80,"pull_request":{"number":7,"state":"open"},"ci":{"state":"failing","failing_checks":["build"]}}"#
         let info = try JSONDecoder().decode(SessionInfo.self, from: Data(json.utf8))
         #expect(info.pullRequest?.number == 7)
         #expect(info.ci?.failingChecks == ["build"])

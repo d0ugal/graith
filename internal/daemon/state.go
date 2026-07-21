@@ -19,7 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 24
+const CurrentStateVersion = 25
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -53,12 +53,16 @@ type CreationConfig struct {
 }
 
 type SessionState struct {
-	ID             string `json:"id"`
-	ParentID       string `json:"parent_id,omitempty"`
-	Name           string `json:"name"`
-	RepoPath       string `json:"repo_path"`
-	RepoName       string `json:"repo_name"`
-	WorktreePath   string `json:"worktree_path"`
+	ID           string `json:"id"`
+	ParentID     string `json:"parent_id,omitempty"`
+	Name         string `json:"name"`
+	RepoPath     string `json:"repo_path"`
+	RepoName     string `json:"repo_name"`
+	WorktreePath string `json:"worktree_path"`
+	// CWD is the authoritative working directory assigned to the agent process.
+	// It is deliberately independent of WorktreePath: mirrors own a writable
+	// scratch cwd while WorktreePath continues to identify their read-only source.
+	CWD            string `json:"cwd"`
 	Branch         string `json:"branch"`
 	BaseBranch     string `json:"base_branch"`
 	Agent          string `json:"agent"`
@@ -746,6 +750,7 @@ var migrations = map[int]func(*State) error{
 	21: migrateV21ToV22,
 	22: migrateV22ToV23,
 	23: migrateV23ToV24,
+	24: migrateV24ToV25,
 }
 
 func generateToken() (string, error) {
@@ -988,6 +993,21 @@ func migrateV22ToV23(state *State) error {
 func migrateV23ToV24(state *State) error {
 	if state.UpgradeCleanup == nil {
 		state.UpgradeCleanup = make(map[string]UpgradeCleanupState)
+	}
+
+	return nil
+}
+
+// migrateV24ToV25 introduces the authoritative session cwd. For ordinary
+// sessions the worktree path was also the launch directory, so it can be copied
+// directly. Mirror and system-session cwd layouts depend on the manager's data
+// directory; SessionManager.LoadState reconciles those after this schema-only
+// migration, when the configured paths are available.
+func migrateV24ToV25(state *State) error {
+	for _, s := range state.Sessions {
+		if s.CWD == "" && !s.Mirror && !IsSystemSession(s) {
+			s.CWD = s.WorktreePath
+		}
 	}
 
 	return nil

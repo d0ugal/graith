@@ -29,6 +29,7 @@ func makeSession(
         "\"repo_path\"": "\"/tmp/\(repoName)\"",
         "\"repo_name\"": "\"\(repoName)\"",
         "\"worktree_path\"": "\"/tmp/\(repoName)/wt\"",
+        "\"cwd\"": "\"/tmp/\(repoName)/wt\"",
         "\"branch\"": "\"user/graith/\(name)-\(id)\"",
         "\"base_branch\"": "\"main\"",
         "\"agent\"": "\"claude\"",

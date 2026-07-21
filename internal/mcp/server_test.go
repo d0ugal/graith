@@ -723,6 +723,15 @@ func TestTodoItemToOutputIncludesDependencyExplanation(t *testing.T) {
 	}
 }
 
+func TestSessionInfoToOutputIncludesCWD(t *testing.T) {
+	want := "/hame/bothy"
+	out := sessionInfoToOutput(protocol.SessionInfo{ID: "braw", Name: "braw", CWD: want})
+
+	if out.CWD != want {
+		t.Errorf("cwd = %q, want %q", out.CWD, want)
+	}
+}
+
 func TestPublishMessageWithThread(t *testing.T) {
 	env := setup(t)
 	defer env.teardown()

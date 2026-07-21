@@ -833,6 +833,7 @@ func TestToSessionInfo(t *testing.T) {
 		RepoPath:       "/home/user/croft",
 		RepoName:       "croft",
 		WorktreePath:   "/home/user/.local/share/graith/worktrees/abc123",
+		CWD:            "/home/user/.local/share/graith/worktrees/abc123",
 		Branch:         "user/graith/braw-abc123",
 		Agent:          "claude",
 		AgentSessionID: "session-id-123",
@@ -863,6 +864,10 @@ func TestToSessionInfo(t *testing.T) {
 
 	if info.WorktreePath != sess.WorktreePath {
 		t.Errorf("WorktreePath = %q, want %q", info.WorktreePath, sess.WorktreePath)
+	}
+
+	if info.CWD != sess.CWD {
+		t.Errorf("CWD = %q, want %q", info.CWD, sess.CWD)
 	}
 
 	if info.Branch != sess.Branch {
@@ -2861,6 +2866,110 @@ func TestCreateRollsBackOnSaveStateFailure(t *testing.T) {
 	matches, _ := filepath.Glob(filepath.Join(tmpDir, "scratch", "*"))
 	if len(matches) != 0 {
 		t.Errorf("orphaned scratch dirs not cleaned up: %v", matches)
+	}
+}
+
+func TestCreateAssignsAndPersistsCWDForOrdinarySessionTypes(t *testing.T) {
+	tests := []struct {
+		name    string
+		options func(*testing.T, *config.Config) CreateOpts
+	}{
+		{
+			name: "worktree",
+			options: func(t *testing.T, _ *config.Config) CreateOpts {
+				return CreateOpts{Name: "braw", AgentName: "sleeper", RepoPath: initTempGitRepo(t), BaseBranch: "main", Rows: 24, Cols: 80}
+			},
+		},
+		{
+			name: "in-place",
+			options: func(t *testing.T, cfg *config.Config) CreateOpts {
+				repo := initTempGitRepo(t)
+				cfg.Repos = []config.RepoConfig{{Path: repo}}
+
+				return CreateOpts{Name: "canny", AgentName: "sleeper", RepoPath: repo, InPlace: true, Rows: 24, Cols: 80}
+			},
+		},
+		{
+			name: "repo-less scratch",
+			options: func(_ *testing.T, _ *config.Config) CreateOpts {
+				return CreateOpts{Name: "dreich", AgentName: "sleeper", NoRepo: true, Rows: 24, Cols: 80}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.FetchOnCreate = false
+			cfg.Agents["sleeper"] = config.Agent{Command: "sleep", Args: []string{"60"}, ResumeArgs: []string{"60"}}
+			opts := tt.options(t, cfg)
+			sm := newSMWithConfig(t, cfg)
+
+			created, err := sm.Create(opts)
+			if err != nil {
+				t.Fatalf("Create() error = %v", err)
+			}
+
+			t.Cleanup(func() { stopAndClosePTY(sm, created.ID) })
+
+			if created.CWD == "" || created.CWD != created.WorktreePath {
+				t.Fatalf("created cwd/worktree = %q/%q, want the same authoritative path", created.CWD, created.WorktreePath)
+			}
+
+			if info, statErr := os.Stat(created.CWD); statErr != nil || !info.IsDir() {
+				t.Fatalf("created cwd is not a directory: info=%v err=%v", info, statErr)
+			}
+
+			persisted, err := LoadState(sm.paths.StateFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if got := persisted.Sessions[created.ID].CWD; got != created.CWD {
+				t.Errorf("persisted cwd = %q, want %q", got, created.CWD)
+			}
+
+			if got := toSessionInfo(created, cfg, nil).CWD; got != created.CWD {
+				t.Errorf("protocol cwd = %q, want %q", got, created.CWD)
+			}
+		})
+	}
+}
+
+func TestResumePreservesRepoLessSessionCWD(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agents["sleeper"] = config.Agent{Command: "sleep", Args: []string{"60"}, ResumeArgs: []string{"60"}}
+	sm := newSMWithConfig(t, cfg)
+
+	created, err := sm.Create(CreateOpts{Name: "bothy", AgentName: "sleeper", NoRepo: true, Rows: 24, Cols: 80})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, created.ID) })
+
+	if err := sm.Stop(created.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	waitForStatus(t, sm, created.ID, StatusStopped)
+
+	resumed, err := sm.Resume(created.ID, 24, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resumed.CWD != created.CWD {
+		t.Errorf("resumed cwd = %q, want persisted %q", resumed.CWD, created.CWD)
+	}
+
+	persisted, err := LoadState(sm.paths.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := persisted.Sessions[created.ID].CWD; got != created.CWD {
+		t.Errorf("cwd after resume = %q, want %q", got, created.CWD)
 	}
 }
 
