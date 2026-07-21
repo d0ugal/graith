@@ -7,6 +7,7 @@ REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 readonly REPO_DIR
 readonly RENOVATE_BIN="${RENOVATE_BIN:-renovate}"
 readonly RENOVATE_CONFIG_VALIDATOR_BIN="${RENOVATE_CONFIG_VALIDATOR_BIN:-renovate-config-validator}"
+readonly RENOVATE_LOOKUP_ATTEMPTS=3
 
 for required in "$RENOVATE_BIN" "$RENOVATE_CONFIG_VALIDATOR_BIN" git jq; do
     if ! command -v "$required" >/dev/null 2>&1; then
@@ -34,12 +35,44 @@ git -C "$fixture" config user.email "renovate-fixture@example.invalid"
 git -C "$fixture" add renovate.json5 libghostty-native.lock.json
 git -C "$fixture" commit -qm "test: add dreich dependency fixture"
 
-if ! (
-    cd "$fixture"
-    LOG_FORMAT=json LOG_LEVEL=debug \
-        "$RENOVATE_BIN" --platform=local --dry-run=lookup --require-config=required \
-        >"$log"
-); then
+is_transient_tangled_tls_failure() {
+    jq -se '
+        [.[] | select(.level >= 40)] as $errors |
+        ($errors | length) > 0 and
+        all($errors[];
+            .msg == "lookupUpdates error" and
+            ((.err.message // .err // "") | tostring |
+                contains("fatal: unable to access '\''https://tangled.org/mitchellh.com/go-libghostty/'\''")) and
+            ((.err.message // .err // "") | tostring |
+                contains("gnutls_handshake() failed: The TLS connection was non-properly terminated.")))
+        ' "$log" >/dev/null
+}
+
+run_renovate_lookup() {
+    local attempt=1
+
+    while true; do
+        : >"$log"
+        if (
+            cd "$fixture"
+            LOG_FORMAT=json LOG_LEVEL=debug \
+                "$RENOVATE_BIN" --platform=local --dry-run=lookup --require-config=required \
+                >"$log"
+        ); then
+            return 0
+        fi
+
+        if ((attempt >= RENOVATE_LOOKUP_ATTEMPTS)) || ! is_transient_tangled_tls_failure; then
+            return 1
+        fi
+
+        attempt=$((attempt + 1))
+        echo "warning: transient tangled.org TLS failure; retrying Renovate lookup (attempt $attempt of $RENOVATE_LOOKUP_ATTEMPTS)" >&2
+        sleep "$((attempt - 1))"
+    done
+}
+
+if ! run_renovate_lookup; then
     echo "error: Renovate lookup dry run failed" >&2
     jq -r 'select(.level >= 40) | [.msg, (.err.message // .err // "")] | @tsv' "$log" >&2 || true
     exit 1
