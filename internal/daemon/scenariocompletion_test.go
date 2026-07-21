@@ -62,6 +62,51 @@ func completionCommandTrigger(name string) config.TriggerConfig {
 	}
 }
 
+func TestAuthoritativeScenarioCompletionTodoReadFailure(t *testing.T) {
+	t.Run("policy outcome remains authoritative", func(t *testing.T) {
+		sm, _ := newScenarioCompletionTestSM(t, completionCommandTrigger("archive"), config.ScenarioLifecycleConfig{
+			Cleanup: config.ScenarioCleanupOnSuccess,
+		})
+
+		sm.mu.Lock()
+		sm.state.Scenarios["sc-braw"].Policy = &ScenarioPolicyState{Outcome: scenarioOutcomeComplete}
+		sm.mu.Unlock()
+
+		if err := sm.todos.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := sm.reconcileScenarioCompletion("sc-braw"); err != nil {
+			t.Fatalf("reconcile completed policy scenario: %v", err)
+		}
+
+		sm.mu.RLock()
+		defer sm.mu.RUnlock()
+
+		completion := sm.state.Scenarios["sc-braw"].Completion
+		if !completion.Complete || completion.Epoch != 1 || len(completion.Actions) != 1 ||
+			completion.Actions[0].State != CompletionActionPending {
+			t.Fatalf("completed policy scenario = %+v", completion)
+		}
+
+		if completion.Cleanup == nil || completion.Cleanup.State != ScenarioCleanupPending {
+			t.Fatalf("completed policy cleanup = %+v", completion.Cleanup)
+		}
+	})
+
+	t.Run("legacy scenario still queries todo progress", func(t *testing.T) {
+		sm, _ := newScenarioCompletionTestSM(t, config.TriggerConfig{}, config.ScenarioLifecycleConfig{})
+
+		if err := sm.todos.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := sm.authoritativeScenarioComplete("sc-braw"); err == nil || !strings.Contains(err.Error(), "assignee progress") {
+			t.Fatalf("legacy completion error = %v, want assignee progress error", err)
+		}
+	})
+}
+
 func TestScenarioCompletionEpochIdempotentAndRecompletion(t *testing.T) {
 	sm, item := newScenarioCompletionTestSM(t, completionCommandTrigger("archive"), config.ScenarioLifecycleConfig{
 		Cleanup: config.ScenarioCleanupOnSuccess, Delay: "1h",

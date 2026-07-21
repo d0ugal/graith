@@ -191,17 +191,6 @@ func (sm *SessionManager) saveScenarioCompletionState(operation string) {
 // authoritativeScenarioComplete rereads todo state outside sm.mu and result
 // state under sm.mu. Event payloads are only hints and never establish an edge.
 func (sm *SessionManager) authoritativeScenarioComplete(id string) (bool, error) {
-	var progress map[string][2]int
-
-	if sm.todos != nil {
-		var err error
-
-		progress, err = sm.todos.AssigneeProgress("scenario:" + id)
-		if err != nil {
-			return false, err
-		}
-	}
-
 	sm.mu.RLock()
 
 	sc := sm.state.Scenarios[id]
@@ -219,6 +208,27 @@ func (sm *SessionManager) authoritativeScenarioComplete(id string) (bool, error)
 		sm.mu.RUnlock()
 
 		return complete, nil
+	}
+
+	sm.mu.RUnlock()
+
+	var progress map[string][2]int
+
+	if sm.todos != nil {
+		var err error
+
+		progress, err = sm.todos.AssigneeProgress("scenario:" + id)
+		if err != nil {
+			return false, err
+		}
+	}
+
+	sm.mu.RLock()
+
+	sc = sm.state.Scenarios[id]
+	if sc == nil {
+		sm.mu.RUnlock()
+		return false, nil
 	}
 
 	type completionMember struct {
