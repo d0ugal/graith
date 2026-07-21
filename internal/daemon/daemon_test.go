@@ -3660,6 +3660,7 @@ func TestCreateUnbornRepository(t *testing.T) {
 			}
 
 			sm := newSMWithConfig(t, cfg)
+
 			sess, err := sm.Create(CreateOpts{
 				Name:      "braw-bootstrap",
 				AgentName: "sleeper",
