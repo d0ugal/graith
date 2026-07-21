@@ -27,6 +27,10 @@ type authContext struct {
 	role authRole
 	// sessionID is set for roleSession/roleOrchestrator (empty otherwise).
 	sessionID string
+	// sessionToken is the exact credential that resolved this request to
+	// sessionID. Keeping the validated snapshot prevents later token rotation
+	// from upgrading an in-flight request to the replacement credential.
+	sessionToken string
 	// deviceID is set for roleRemoteHuman/roleRemoteGuest (empty otherwise).
 	deviceID string
 	// authenticated is true when a valid session token was presented. Retained
@@ -91,7 +95,13 @@ func resolveAuth(sm *SessionManager, token string, origin ConnOrigin, poppedDevi
 	// either transport; the self/descendant limits are enforced downstream.
 	if token != "" {
 		if sid := sm.SessionForToken(token); sid != "" {
-			ac := authContext{role: roleSession, sessionID: sid, authenticated: true, origin: origin}
+			ac := authContext{
+				role:          roleSession,
+				sessionID:     sid,
+				sessionToken:  token,
+				authenticated: true,
+				origin:        origin,
+			}
 			if ac.isOrchestrator(sm) {
 				ac.role = roleOrchestrator
 			}

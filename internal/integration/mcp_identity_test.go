@@ -159,13 +159,15 @@ func setupManagedMCP(t *testing.T) *managedMCPTestEnv {
 	t.Helper()
 
 	root := t.TempDir()
-	// Keep the socket both short enough for Darwin and inside the repository's
-	// writable test boundary. Some enforced agent sandboxes intentionally deny
-	// creating new Unix sockets under the otherwise world-writable /tmp.
-	runtimeRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	// Keep the socket independent of checkout depth and below Darwin's sun_path
+	// limit. The integration suite already uses short /tmp roots for real Unix
+	// listeners; enforced agent sandboxes that deny listeners cannot run it.
+	runtimeRoot, err := os.MkdirTemp("/tmp", "graith-mcp-*")
 	if err != nil {
-		t.Fatalf("resolve short runtime root: %v", err)
+		t.Fatalf("create short runtime root: %v", err)
 	}
+
+	t.Cleanup(func() { _ = os.RemoveAll(runtimeRoot) })
 
 	t.Setenv(managedMCPHelperEnvName, "1")
 	t.Setenv("GRAITH_PROFILE", fmt.Sprintf("mcpid-%d", os.Getpid()))

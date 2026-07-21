@@ -845,9 +845,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					mcpVars.SessionName = sess.Name
 					mcpVars.WorktreePath = sess.WorktreePath
 
-					if auth.authenticated {
-						callerIdentity = mcpCallerIdentity{sessionID: sess.ID, token: sess.Token}
-					}
+					callerIdentity = auth.managedMCPCallerIdentity()
 
 					allowed := sm.resolveMCPServersFromConfig(sm.Config(), sess.Agent)
 					found := false

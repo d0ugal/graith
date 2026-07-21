@@ -101,8 +101,8 @@ them automatically.
 
 The auto-injected `graith` server preserves the identity of the session using
 it. The outer proxy authenticates as that session, and the daemon delegates the
-same current session credential only to its built-in `gr mcp` child. As a
-result:
+exact credential that authenticated the request only to its built-in `gr mcp`
+child. As a result:
 
 - `create_session` creates a child of the calling session;
 - message sender names and IDs are forced to the calling session, even when a
@@ -115,6 +115,10 @@ It then injects the caller token only for the effective built-in `graith`
 backend. A configured server called `graith` is still user configuration and
 does not gain delegation merely from its name. The built-in backend refuses to
 fall back to local-human credentials if its delegated identity is missing.
+
+The launch snapshot is tied to the request that passed authentication. If a
+resume rotates the session token concurrently, that in-flight MCP connection
+may fail; it is never upgraded to the replacement token.
 
 Running `gr mcp` directly is unmanaged and follows the normal CLI credential
 rules: inside a session it uses that session's `GRAITH_TOKEN`; outside a session
