@@ -177,6 +177,7 @@ func TestPullIfClean_UnbornHead(t *testing.T) {
 	gitRun(t, repo, "remote", "add", "origin", remote)
 
 	sm := newTestSM(t)
+
 	pulled, err := sm.pullIfClean(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("pullIfClean on unborn repo: %v", err)

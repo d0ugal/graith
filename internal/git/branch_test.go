@@ -330,6 +330,7 @@ func TestSetupAndTeardownSessionUnborn(t *testing.T) {
 			}
 
 			writeFile(t, filepath.Join(worktreePath, "README.md"), "braw")
+
 			if _, err := RunOutput(worktreePath, "add", "README.md"); err != nil {
 				t.Fatalf("git add first file: %v", err)
 			}
@@ -385,6 +386,7 @@ func TestSetupSessionUnbornWorktreeFailureCleansUp(t *testing.T) {
 	writeFile(t, clash, "neep")
 
 	branch := "graith/glen-rollback"
+
 	err := SetupSession(context.Background(), repo, clash, branch, "main", false)
 	if err == nil {
 		t.Fatal("expected SetupSession to fail creating the orphan worktree")
