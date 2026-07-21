@@ -41,6 +41,13 @@ Steps:
 7. **Prompt** (`--prompt`/`--prompt-file`) -- typed into stdin after startup
 8. **Attach** (unless `--background`) -- enters passthrough mode
 
+For a freshly initialized repository with no commits, Graith uses the unborn
+`HEAD` branch as the base and creates the generated session branch in an empty,
+isolated orphan worktree. The first commit therefore belongs to the session
+branch; Graith does not create a bootstrap commit or change the source checkout.
+If `--base` is supplied, it must name the unborn `HEAD` branch. This workflow
+requires Git 2.42 or newer.
+
 ### Variants
 
 **No repo:** `gr new scratch --no-repo` — a scratch directory, no git repo or worktree.

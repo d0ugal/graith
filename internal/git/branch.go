@@ -27,7 +27,28 @@ func DiscoverDefaultBranch(repoPath string) (string, error) {
 		}
 	}
 
+	// A freshly initialized repository has a symbolic HEAD but no branch ref
+	// until its first commit. Preserve that initial branch name so callers can
+	// create an isolated orphan worktree instead of requiring a synthetic
+	// bootstrap commit in the source checkout.
+	if branch, ok := unbornBranch(repoPath); ok {
+		return branch, nil
+	}
+
 	return "", errors.New("cannot determine default branch; use --base to specify one")
+}
+
+func unbornBranch(repoPath string) (string, bool) {
+	if RefExists(repoPath, "HEAD") {
+		return "", false
+	}
+
+	branch, err := RunOutput(repoPath, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil || branch == "" {
+		return "", false
+	}
+
+	return branch, true
 }
 
 func CreateBranch(repoPath, branchName, fromRef string) error {

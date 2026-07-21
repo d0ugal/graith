@@ -3749,6 +3749,85 @@ func TestCreateNoFetchSkipsFetch(t *testing.T) {
 	})
 }
 
+func TestCreateUnbornRepository(t *testing.T) {
+	for _, initialBranch := range []string{"main", "canny-wynd"} {
+		t.Run(initialBranch, func(t *testing.T) {
+			repoDir := t.TempDir()
+			gitRun(t, repoDir, "init", "-b", initialBranch)
+
+			sourceFile := filepath.Join(repoDir, "source-neep.txt")
+			if err := os.WriteFile(sourceFile, []byte("dreich"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			cfg := config.Default()
+			cfg.GitHubUsername = "canny"
+			cfg.Agents["sleeper"] = config.Agent{
+				NonInteractiveArgs: []string{},
+				Command:            "sleep",
+				Args:               []string{"60"},
+			}
+
+			sm := newSMWithConfig(t, cfg)
+			sess, err := sm.Create(CreateOpts{
+				Name:      "braw-bootstrap",
+				AgentName: "sleeper",
+				RepoPath:  repoDir,
+				NoFetch:   true,
+				Rows:      24,
+				Cols:      80,
+			})
+			if err != nil {
+				t.Fatalf("Create in unborn %s repo: %v", initialBranch, err)
+			}
+
+			t.Cleanup(func() {
+				stopAndClosePTY(sm, sess.ID)
+				_ = git.TeardownSession(repoDir, sess.WorktreePath, sess.Branch)
+			})
+
+			if sess.WorktreePath == repoDir {
+				t.Fatal("session used the source checkout instead of an isolated worktree")
+			}
+
+			if sess.BaseBranch != initialBranch {
+				t.Errorf("BaseBranch = %q, want %q", sess.BaseBranch, initialBranch)
+			}
+
+			if got := gitOut(t, sess.WorktreePath, "symbolic-ref", "--short", "HEAD"); got != sess.Branch {
+				t.Errorf("session HEAD = %q, want %q", got, sess.Branch)
+			}
+
+			if got := gitOut(t, repoDir, "symbolic-ref", "--short", "HEAD"); got != initialBranch {
+				t.Errorf("source HEAD = %q, want %q", got, initialBranch)
+			}
+
+			if _, statErr := os.Stat(filepath.Join(sess.WorktreePath, filepath.Base(sourceFile))); !os.IsNotExist(statErr) {
+				t.Fatalf("source checkout file leaked into session worktree: %v", statErr)
+			}
+
+			if err := os.WriteFile(filepath.Join(sess.WorktreePath, "README.md"), []byte("braw"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			gitRun(t, sess.WorktreePath, "add", "README.md")
+			gitRun(t, sess.WorktreePath, "commit", "-m", "first real commit")
+
+			if !git.RefExists(repoDir, sess.Branch) {
+				t.Fatal("first commit did not create the generated session branch")
+			}
+
+			if git.RefExists(repoDir, "HEAD") {
+				t.Fatal("first session commit advanced the source checkout")
+			}
+
+			if _, statErr := os.Stat(sourceFile); statErr != nil {
+				t.Fatalf("source checkout was mutated: %v", statErr)
+			}
+		})
+	}
+}
+
 func TestDeleteInPlaceLeavesState(t *testing.T) {
 	sm := newTestSessionManager(t)
 

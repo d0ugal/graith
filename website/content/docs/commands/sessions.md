@@ -35,6 +35,12 @@ Create a new agent session.
 is unavailable (e.g. a biometric agent that can't sign non-interactively) or when
 you're offline.
 
+In a repository with no commits, the default base is its unborn `HEAD` branch.
+Graith creates an empty orphan worktree on the generated session branch, leaving
+the source checkout and its unborn branch unchanged. An explicit `--base` must
+name that unborn branch. Creating this kind of session requires Git 2.42 or
+newer.
+
 ### Codex options
 
 For `--agent codex`, graith passes typed per-session options to the Codex CLI.
