@@ -156,6 +156,28 @@ func TestNativeProcessObservation(t *testing.T) {
 	}
 }
 
+func TestDaemonFDGrowthExceeded(t *testing.T) {
+	tests := []struct {
+		name              string
+		baseline, current int
+		want              bool
+	}{
+		{name: "stable lower runner baseline", baseline: 22, current: 22},
+		{name: "stable higher runner baseline", baseline: 25, current: 25},
+		{name: "descriptor count fell", baseline: 25, current: 24},
+		{name: "injected descriptor growth", baseline: 25, current: 26, want: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := daemonFDGrowthExceeded(test.baseline, test.current); got != test.want {
+				t.Fatalf("daemonFDGrowthExceeded(%d, %d) = %v, want %v",
+					test.baseline, test.current, got, test.want)
+			}
+		})
+	}
+}
+
 func TestIsolatedNativeEnvironmentAllowlist(t *testing.T) {
 	values := map[string]string{
 		"PATH": "/bothy/bin", "HOME": "/croft", "TMPDIR": "/tmp/braw",
@@ -191,7 +213,6 @@ func TestLibghosttyDaemonLifecycle(t *testing.T) {
 	h := startNativeDaemon(t)
 	defer h.cleanup()
 
-	baselineFD := daemonFDCount(t, h.identity)
 	if helpers := h.helperProcesses(); len(helpers) != 0 {
 		t.Fatalf("native daemon started with %d unexpected screen helpers", len(helpers))
 	}
@@ -276,6 +297,10 @@ func TestLibghosttyDaemonLifecycle(t *testing.T) {
 	purgeNativeSession(t, client, info.ID)
 	waitForProcessExit(t, newHelpers[0])
 	waitForHelperCount(t, h, 0)
+	// Compare cleanup within the replacement daemon generation. Its runtime
+	// baseline can legitimately differ from the process before exec, while the
+	// open control connection is held constant across this observation window.
+	baselineFD := daemonFDCount(t, h.identity)
 
 	const concurrentSessions = 3
 
@@ -335,9 +360,8 @@ func TestLibghosttyDaemonLifecycle(t *testing.T) {
 		waitForProcessExit(t, helper)
 	}
 
+	waitForNoFDGrowth(t, h.identity, baselineFD)
 	client.close()
-
-	waitForFDLimit(t, h.identity, baselineFD+1)
 
 	shutdownClient := h.connect()
 	shutdownSession := createNativeSession(t, shutdownClient, "strath-shutdown")
@@ -450,13 +474,13 @@ func TestLibghosttyDaemonSoak(t *testing.T) {
 	}
 
 	waitForHelperCountResult(h, helperBefore, nativeOpTimeout)
-	waitForFDLimit(t, h.identity, fdBefore+1)
+	waitForNoFDGrowth(t, h.identity, fdBefore)
 	fdAfter := daemonFDCount(t, h.identity)
 	helperAfter := len(h.helperProcesses())
 	rssAfter := daemonRSSBytes(t, h.identity)
 	fdGrowth := fdAfter - fdBefore
 
-	if fdGrowth > 1 {
+	if fdGrowth > 0 {
 		failures["fd-growth"]++
 	}
 
@@ -1184,13 +1208,17 @@ func daemonRSSBytes(t *testing.T, identity nativeProcessIdentity) int64 {
 	return bytes
 }
 
-func waitForFDLimit(t *testing.T, identity nativeProcessIdentity, limit int) {
+func daemonFDGrowthExceeded(baseline, current int) bool {
+	return current > baseline
+}
+
+func waitForNoFDGrowth(t *testing.T, identity nativeProcessIdentity, baseline int) {
 	t.Helper()
 
 	deadline := time.Now().Add(nativeOpTimeout)
 	for time.Now().Before(deadline) {
 		count := daemonFDCount(t, identity)
-		if count <= limit {
+		if !daemonFDGrowthExceeded(baseline, count) {
 			return
 		}
 
@@ -1198,8 +1226,9 @@ func waitForFDLimit(t *testing.T, identity nativeProcessIdentity, limit int) {
 	}
 
 	count := daemonFDCount(t, identity)
-	if count > limit {
-		t.Fatalf("tagged daemon file descriptors = %d, want at most %d after cleanup", count, limit)
+	if daemonFDGrowthExceeded(baseline, count) {
+		t.Fatalf("tagged daemon file-descriptor growth = %d after cleanup (baseline=%d current=%d, want no growth)",
+			count-baseline, baseline, count)
 	}
 }
 

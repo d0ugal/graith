@@ -875,7 +875,7 @@ case "${1:-}" in
         ;;
     daemon-test)
         run_daemon_validation 12 \
-            '^(TestLibghosttyDaemonLifecycle|TestLibghosttyDaemonSoak|TestNativeProcessObservation|TestIsolatedNativeEnvironmentAllowlist)$' \
+            '^(TestLibghosttyDaemonLifecycle|TestLibghosttyDaemonSoak|TestNativeProcessObservation|TestDaemonFDGrowthExceeded|TestIsolatedNativeEnvironmentAllowlist)$' \
             '3m' '5m' '0'
         ;;
     soak)
