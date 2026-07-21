@@ -31,6 +31,14 @@ func cleanupLegacyDaemon(log *slog.Logger) {
 	cleanupLegacyDaemonDirs(config.LegacyRuntimeDirs(), log, net.DialTimeout, processidentity.IsGraithDaemon, syscall.Kill)
 }
 
+// logTerminalBackendSelection emits one path-free, session-free record for
+// each successfully bootstrapped daemon generation. Per-session helper
+// failures have their own records; this line proves the healthy build-time
+// selection without requiring a live PTY or process-table access.
+func logTerminalBackendSelection(log *slog.Logger) {
+	log.Info("terminal backend selected", "terminal_backend", grpty.TerminalBackend())
+}
+
 type legacyDialer func(network, address string, timeout time.Duration) (net.Conn, error)
 type legacyProcessChecker func(pid int) bool
 type legacyKiller func(pid int, signal syscall.Signal) error
@@ -607,6 +615,8 @@ func run(
 
 		log.Info("daemon started", logAttrs...)
 	}
+
+	logTerminalBackendSelection(log)
 
 	defer func() { _ = l.Close() }()
 

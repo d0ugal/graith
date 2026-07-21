@@ -608,6 +608,13 @@
           "optional": false
         },
         {
+          "name": "terminal_backend",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
           "name": "fleet",
           "type": {
             "kind": "object",

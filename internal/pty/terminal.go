@@ -5,6 +5,14 @@ import (
 	"io"
 )
 
+// Stable terminal-screen backend identifiers exposed through daemon
+// diagnostics and lifecycle logs. Keep these values independent of concrete
+// implementation type names so operators can rely on them across releases.
+const (
+	TerminalBackendCharm            = "charm"
+	TerminalBackendLibghosttyHelper = "libghostty-helper"
+)
+
 // This file defines the narrow terminal-screen surface graith relies on and the
 // backend-neutral cell/color model the renderer consumes. Concrete emulators
 // remain behind Terminal so the screen backend can change without touching

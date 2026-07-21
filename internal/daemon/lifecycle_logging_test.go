@@ -9,6 +9,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
+	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
 // newLogCapturingManager builds a SessionManager whose logger writes JSON
@@ -62,6 +63,31 @@ func findRecord(records []map[string]any, msg string) map[string]any {
 	}
 
 	return nil
+}
+
+func TestLogTerminalBackendSelectionFields(t *testing.T) {
+	sm, buf := newLogCapturingManager(t)
+
+	logTerminalBackendSelection(sm.log)
+
+	records := logRecords(t, buf)
+	if len(records) != 1 {
+		t.Fatalf("backend selection records = %d, want 1: %+v", len(records), records)
+	}
+
+	rec := records[0]
+	if rec["msg"] != "terminal backend selected" {
+		t.Fatalf("message = %v, want terminal backend selected", rec["msg"])
+	}
+	if rec["terminal_backend"] != grpty.TerminalBackend() {
+		t.Errorf("terminal_backend = %v, want %q", rec["terminal_backend"], grpty.TerminalBackend())
+	}
+
+	for _, forbidden := range []string{"session", "session_id", "path", "output"} {
+		if _, ok := rec[forbidden]; ok {
+			t.Errorf("backend selection record unexpectedly contains %q: %+v", forbidden, rec)
+		}
+	}
 }
 
 func TestAuthContextDescribe(t *testing.T) {

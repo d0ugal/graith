@@ -46,9 +46,10 @@ type doctorCheck struct {
 }
 
 type doctorReport struct {
-	CLIVersion    string `json:"cli_version"`
-	DaemonVersion string `json:"daemon_version,omitempty"`
-	OK            bool   `json:"ok"`
+	CLIVersion      string `json:"cli_version"`
+	DaemonVersion   string `json:"daemon_version,omitempty"`
+	TerminalBackend string `json:"terminal_backend,omitempty"`
+	OK              bool   `json:"ok"`
 	// DiskMeasured reports whether on-disk sizes were computed (the --disk
 	// flag). When false, size figures are omitted from the check messages, so
 	// JSON consumers can tell sizes were skipped rather than assumed zero.
@@ -127,6 +128,7 @@ var doctorCmd = &cobra.Command{
 		diag := dc.checkDaemon(probe)
 		if diag != nil {
 			report.Diagnostics = diag
+			report.TerminalBackend = diag.TerminalBackend
 
 			dc.checkSessions(diag)
 			dc.checkStorage(diag)
@@ -857,6 +859,9 @@ func (dc *doctorContext) checkDaemon(probe daemonProbe) *protocol.DiagnosticsMsg
 	}
 
 	dc.passf("daemon", "Running (PID %d, uptime %s)", probe.diag.DaemonPID, probe.diag.DaemonUptime)
+	if probe.diag.TerminalBackend != "" {
+		dc.passf("daemon", "Terminal backend: %s", probe.diag.TerminalBackend)
+	}
 
 	return probe.diag
 }

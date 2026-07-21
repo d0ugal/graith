@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/protocol"
+	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
 func sanitizeSummaryText(text string) string {
@@ -306,6 +307,7 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 	return protocol.DiagnosticsMsg{
 		DaemonPID:         os.Getpid(),
 		DaemonUptime:      now.Sub(sm.startedAt).Truncate(time.Second).String(),
+		TerminalBackend:   grpty.TerminalBackend(),
 		Fleet:             fleet,
 		Sessions:          sessions,
 		DeletedSessionIDs: deletedSessionIDs,

@@ -11,6 +11,9 @@ func newTerminal(cols, rows int) (Terminal, error) {
 	return newGhosttyProcessTerminal(cols, rows)
 }
 
+// TerminalBackend reports the terminal-screen backend selected by this build.
+func TerminalBackend() string { return TerminalBackendLibghosttyHelper }
+
 // TerminalAdoptionCapacity reports the private helper-process capacity to the
 // daemon's cross-binary upgrade preflight.
 func TerminalAdoptionCapacity() (maxSessions int, available bool) {

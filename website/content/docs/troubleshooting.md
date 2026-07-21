@@ -20,7 +20,7 @@ It checks:
 - **Version:** CLI and daemon version match, update availability
 - **Environment:** config file, data dir, daemon log size, state file, messages DB, sandbox availability, agent prompt
 - **macOS daemon service:** managed/fallback mode, projected variable names, receipt health, and named-profile slot usage
-- **Daemon:** connectivity, PID file freshness, uptime
+- **Daemon:** connectivity, PID file freshness, uptime, active terminal-screen backend
 - **Sessions:** zombie processes (PID not alive but status running), missing worktrees, config drift, scrollback saturation
 - **Storage:** scrollback files, orphaned scrollback logs, orphaned worktree directories, tmp dir size, legacy share dir
 
@@ -313,6 +313,31 @@ tail -f ~/.local/share/graith/daemon.log | jq .
 ```
 
 If it grows large, `gr doctor --autofix` truncates it to ~1 MB.
+
+#### Verify the terminal backend
+
+`gr doctor` reports `Terminal backend: charm` for the pure-Go implementation or
+`Terminal backend: libghostty-helper` for the process-isolated native
+implementation. The supported machine-readable check is:
+
+```bash
+gr doctor --json | jq -r .terminal_backend
+```
+
+Each daemon generation also emits exactly one `terminal backend selected` JSON
+record with the same `terminal_backend` value. That record deliberately has no
+session ID, filesystem path, or captured terminal output; it proves build-time
+selection even when no PTY session is running.
+
+Backend or helper failures remain visible in the existing session-scoped log
+records. `terminal screen unavailable during adoption; preserving PTY with
+degraded screen` means the live PTY survived but its derived screen could not be
+created. `terminal hydration failed during adoption; preserving PTY with empty
+screen` and `terminal recovery hydration failed; using empty screen` mean
+scrollback replay failed and Graith kept an empty replacement. Runtime parser,
+snapshot, and preview failures use `terminal parser failed; screen reset`,
+`terminal snapshot failed; screen reconstructed`, and `terminal preview failed;
+screen reconstructed`; inspect their `error` and `recovery_error` fields.
 
 #### Diagnosing why a session stopped
 

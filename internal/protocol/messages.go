@@ -808,11 +808,14 @@ type AgentCatalogResponseMsg struct {
 // Diagnostics types (daemon -> client, in response to "diagnostics" message)
 
 type DiagnosticsMsg struct {
-	DaemonPID     int                 `json:"daemon_pid"`
-	DaemonVersion string              `json:"daemon_version,omitempty"`
-	DaemonUptime  string              `json:"daemon_uptime"`
-	Fleet         FleetSummary        `json:"fleet"`
-	Sessions      []SessionDiagnostic `json:"sessions"`
+	DaemonPID     int    `json:"daemon_pid"`
+	DaemonVersion string `json:"daemon_version,omitempty"`
+	DaemonUptime  string `json:"daemon_uptime"`
+	// TerminalBackend is the stable identifier for the daemon binary's selected
+	// terminal-screen implementation. It is omitted only by older daemons.
+	TerminalBackend string              `json:"terminal_backend,omitempty"`
+	Fleet           FleetSummary        `json:"fleet"`
+	Sessions        []SessionDiagnostic `json:"sessions"`
 	// DeletedSessionIDs identifies soft-deleted sessions without mixing them
 	// into the live fleet diagnostics. Doctor uses these IDs to preserve their
 	// recoverable on-disk resources when cleaning true orphans.

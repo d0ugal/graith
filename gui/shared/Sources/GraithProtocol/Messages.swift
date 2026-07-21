@@ -842,6 +842,7 @@ public struct DiagnosticsMsg: Codable, Sendable {
     public var daemonPID: Int
     public var daemonVersion: String?
     public var daemonUptime: String
+    public var terminalBackend: String?
     public var fleet: FleetSummary
     public var sessions: [SessionDiagnostic]
     public var deletedSessionIDs: [String]?
@@ -849,12 +850,14 @@ public struct DiagnosticsMsg: Codable, Sendable {
     public var messages: MessagesDiagnostic
 
     public init(daemonPID: Int, daemonVersion: String? = nil, daemonUptime: String,
+                terminalBackend: String? = nil,
                 fleet: FleetSummary, sessions: [SessionDiagnostic],
                 deletedSessionIDs: [String]? = nil,
                 scrollback: ScrollbackDiagnostic, messages: MessagesDiagnostic) {
         self.daemonPID = daemonPID
         self.daemonVersion = daemonVersion
         self.daemonUptime = daemonUptime
+        self.terminalBackend = terminalBackend
         self.fleet = fleet
         self.sessions = sessions
         self.deletedSessionIDs = deletedSessionIDs
@@ -866,6 +869,7 @@ public struct DiagnosticsMsg: Codable, Sendable {
         case daemonPID = "daemon_pid"
         case daemonVersion = "daemon_version"
         case daemonUptime = "daemon_uptime"
+        case terminalBackend = "terminal_backend"
         case fleet
         case sessions
         case deletedSessionIDs = "deleted_session_ids"
