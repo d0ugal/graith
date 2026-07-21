@@ -30,9 +30,13 @@ your default config (not triggers, repos, or MCP servers); set
 posture it detected and rejects a copied config that leaves agents unsandboxed.
 If no sandbox config is found, it
 uses the mandatory platform sandbox (`safehouse` on macOS, `nono` on Linux) and
-the built-in non-interactive agent definitions. Safety guardrails: the fixed `demo` profile is
-protected by an ownership marker, so the harness refuses to purge or delete a
-`~/.config/graith-demo` it didn't create.
+the built-in non-interactive agent definitions. Safety guardrails: the fixed
+`demo` profile's config, data, and runtime directories carry matching per-run
+ownership markers. Setup and teardown refuse before contacting `gr` if any
+present target is unmarked or mismatched, so an existing `demo` profile or
+daemon cannot be adopted or purged. The runtime directory is ephemeral: if it
+alone disappears after a reboot, matching durable config/data markers authorize
+the harness to reconstruct it before any daemon or session operation.
 
 ## Re-recording
 
@@ -68,6 +72,18 @@ vhs demo/demo.tape              # record (uses GRAITH_PROFILE=demo)
 ```
 
 `vhs -p demo/demo.tape` shows a live preview while iterating.
+
+## Testing
+
+Run the ownership and teardown regressions with:
+
+```bash
+make demo-test
+```
+
+The tests isolate `HOME`, `XDG_CONFIG_HOME`, and `XDG_RUNTIME_DIR` under a
+temporary directory. They also exercise runtime-directory recreation with the
+real `gr` binary while replacing demo agent launches with inert test commands.
 
 ## Notes & gotchas
 
