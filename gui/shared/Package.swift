@@ -95,8 +95,8 @@ let package = Package(
         // build-libghostty.sh and bump the url/checksum to move the pin.
         .binaryTarget(
             name: "GhosttyVt",
-            url: "https://github.com/d0ugal/graith/releases/download/libghostty-vt-91f66da/libghostty-vt.xcframework.zip",
-            checksum: "25c1620e63311cc687637c8e3bdfae1fe3e070892966c07d0d91065ccda541c0"
+            url: "https://github.com/d0ugal/graith/releases/download/libghostty-vt-d4ac93a/libghostty-vt.xcframework.zip",
+            checksum: "bb5a200f65cbb3d0f626d5c37a011940f9a730a7fd74730d25d176e71c7f5564"
         ),
     ]
 )

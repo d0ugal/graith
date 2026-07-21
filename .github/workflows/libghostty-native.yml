@@ -198,56 +198,6 @@ jobs:
           path: ${{ runner.temp }}/native-candidate/
           if-no-files-found: error
 
-  # Temporary producer for the separately reviewed dependency-unit artifact.
-  # Removed after the d4ac93a archive has been inspected and published.
-  apple-artifact-build:
-    name: Build reviewed Apple dependency artifact
-    needs: changes
-    if: needs.changes.outputs.dependency-unit == 'true'
-    runs-on: macos-15
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - name: Install the exact Zig toolchain
-        run: |
-          set -euo pipefail
-          archive="${RUNNER_TEMP}/zig.tar.xz"
-          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
-            https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz \
-            --output "$archive"
-          printf '%s  %s\n' \
-            3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b \
-            "$archive" | shasum -a 256 --check
-          mkdir -p "${RUNNER_TEMP}/zig"
-          tar -xf "$archive" -C "${RUNNER_TEMP}/zig" --strip-components=1
-          echo "${RUNNER_TEMP}/zig" >> "$GITHUB_PATH"
-      - name: Build and inspect the xcframework
-        env:
-          WORK: ${{ runner.temp }}/libghostty-build
-        run: |
-          set -euo pipefail
-          test "$(zig version)" = 0.15.2
-          gui/shared/build-libghostty.sh
-          framework=gui/shared/Libraries/libghostty-vt.xcframework
-          test -d "$framework"
-          lipo "$framework/macos-arm64_x86_64/libghostty-vt.a" \
-            -verify_arch arm64 x86_64
-          archive="${RUNNER_TEMP}/libghostty-vt.xcframework.zip"
-          (
-            cd gui/shared/Libraries
-            /usr/bin/zip -qry "$archive" libghostty-vt.xcframework
-          )
-          shasum -a 256 "$archive"
-          swift package compute-checksum "$archive"
-      - name: Upload the reviewed dependency artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: libghostty-vt-d4ac93a
-          path: ${{ runner.temp }}/libghostty-vt.xcframework.zip
-          if-no-files-found: error
-
   linux-adapter:
     name: Adapter source build (${{ matrix.target }})
     # Native Linux rollout is tracked separately in #1475. Keep the exact
