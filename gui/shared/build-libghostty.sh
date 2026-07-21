@@ -75,9 +75,9 @@ echo "==> Building universal libghostty-vt.xcframework (macos + ios + ios-sim)"
 )
 
 echo "==> Installing xcframework -> $OUT"
-FRAMEWORK="$(find "$WORK/ghostty/zig-out" -maxdepth 3 -name 'libghostty-vt.xcframework' -type d | head -1)"
+FRAMEWORK="$(find "$WORK/ghostty/zig-out" -maxdepth 3 -name '*ghostty-vt.xcframework' -type d | head -1)"
 if [[ -z "$FRAMEWORK" ]]; then
-    echo "error: no libghostty-vt.xcframework produced under zig-out" >&2
+    echo "error: no Ghostty VT xcframework produced under zig-out" >&2
     exit 1
 fi
 rm -rf "$OUT"
