@@ -11,6 +11,8 @@ REAL_GR="$TEST_ROOT/gr-real"
 REAL_FIXTURES="$TEST_ROOT/real-fixtures"
 OWNER_A="baddcafebaddcafebaddcafebaddcafe"
 OWNER_B="decafbaddecafbaddecafbaddecafbad"
+SESSION_A="baddcafe"
+SESSION_B="decafbad"
 
 fail() {
 	echo "FAIL: $*" >&2
@@ -64,17 +66,31 @@ if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
 	mkdir -p "$XDG_RUNTIME_DIR/graith-demo"
 fi
 case "${1:-}" in
+	--config) shift 2 ;;
+esac
+case "${1:-}" in
 	list)
 		deleted=false
+		json=false
 		for arg in "$@"; do
 			[ "$arg" != "--deleted" ] || deleted=true
+			[ "$arg" != "--json" ] || json=true
 		done
 		if $deleted; then
 			[ "${GRAITH_DEMO_TEST_DELETED_LIST_STATUS:-0}" -eq 0 ] || exit "$GRAITH_DEMO_TEST_DELETED_LIST_STATUS"
-			[ -z "${GRAITH_DEMO_TEST_DELETED_SESSIONS:-}" ] || printf '%s\n' "$GRAITH_DEMO_TEST_DELETED_SESSIONS"
+			sessions="${GRAITH_DEMO_TEST_DELETED_SESSIONS:-}"
 		else
 			[ "${GRAITH_DEMO_TEST_LIST_STATUS:-0}" -eq 0 ] || exit "$GRAITH_DEMO_TEST_LIST_STATUS"
-			[ -z "${GRAITH_DEMO_TEST_ACTIVE_SESSIONS:-}" ] || printf '%s\n' "$GRAITH_DEMO_TEST_ACTIVE_SESSIONS"
+			sessions="${GRAITH_DEMO_TEST_ACTIVE_SESSIONS:-}"
+		fi
+		if $json; then
+			if [ -n "$sessions" ]; then
+				printf '["%s"]\n' "$(printf '%s' "$sessions" | sed 's/,/","/g')"
+			else
+				printf '[]\n'
+			fi
+		elif [ -n "$sessions" ]; then
+			printf '%s\n' "$sessions" | tr ',' '\n'
 		fi
 		;;
 	purge) exit "${GRAITH_DEMO_TEST_PURGE_STATUS:-0}" ;;
@@ -91,6 +107,13 @@ new_real_fixture() {
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${GRAITH_DEMO_TEST_GR_LOG:?}"
 case "${1:-}" in
+	--config)
+		config_file="$2"
+		shift 2
+		case "${1:-}" in
+			list|daemon) exec "${GRAITH_DEMO_REAL_GR:?}" --config "$config_file" "$@" ;;
+		esac
+		;;
 	list|daemon) exec "${GRAITH_DEMO_REAL_GR:?}" "$@" ;;
 	*) exit 0 ;;
 esac
@@ -113,6 +136,20 @@ run_teardown() {
 		"$fixture/repo/demo/teardown.sh"
 }
 
+run_setup_without_runtime() {
+	fixture="$1"
+	env -u XDG_RUNTIME_DIR HOME="$fixture/home" XDG_CONFIG_HOME="$fixture/config" \
+		GRAITH_DEMO_TEST_GR_LOG="$fixture/gr.log" GRAITH_DEMO_REAL_GR="$REAL_GR" \
+		GRAITH_DEMO_SRC_CONFIG="$fixture/missing-config.toml" "$fixture/repo/demo/setup.sh"
+}
+
+run_teardown_without_runtime() {
+	fixture="$1"
+	env -u XDG_RUNTIME_DIR HOME="$fixture/home" XDG_CONFIG_HOME="$fixture/config" \
+		GRAITH_DEMO_TEST_GR_LOG="$fixture/gr.log" GRAITH_DEMO_REAL_GR="$REAL_GR" \
+		"$fixture/repo/demo/teardown.sh"
+}
+
 write_owned_profile() {
 	fixture="$1" owner="$2" runtime="${3:-present}"
 	config_dir="$fixture/config/graith-demo"
@@ -125,6 +162,7 @@ write_owned_profile() {
 	printf '%s\n' "$owner" > "$config_dir/.graith-demo-owner"
 	printf '%s\n' "$owner" > "$data_dir/.graith-demo-owner"
 	[ "$runtime" != "present" ] || printf '%s\n' "$owner" > "$runtime_dir/.graith-demo-owner"
+	printf '%s %s\n' "$owner" "$(LC_ALL=C cksum < "$config_dir/config.toml")" > "$config_dir/.graith-demo-config-proof"
 }
 
 write_unowned_config() {
@@ -185,10 +223,10 @@ assert_refuses_teardown_mismatch() {
 assert_owned_teardown_is_idempotent() {
 	new_fake_fixture "teardown-owned"
 	write_owned_profile "$fixture" "$OWNER_A"
-	GRAITH_DEMO_TEST_ACTIVE_SESSIONS="croft" \
-		GRAITH_DEMO_TEST_DELETED_SESSIONS="bothy" run_teardown "$fixture" >/dev/null
-	grep -q '^purge croft -y -f$' "$fixture/gr.log" || fail "teardown did not purge a live session"
-	grep -q '^purge bothy -y -f$' "$fixture/gr.log" || fail "teardown did not purge a deleted session"
+	GRAITH_DEMO_TEST_ACTIVE_SESSIONS="$SESSION_A" \
+		GRAITH_DEMO_TEST_DELETED_SESSIONS="$SESSION_B" run_teardown "$fixture" >/dev/null
+	grep -q " purge $SESSION_A -y -f$" "$fixture/gr.log" || fail "teardown did not purge a live session by ID"
+	grep -q " purge $SESSION_B -y -f$" "$fixture/gr.log" || fail "teardown did not purge a deleted session by ID"
 	[ ! -e "$fixture/config/graith-demo" ] &&
 		[ ! -e "$fixture/home/.graith-demo" ] &&
 		[ ! -e "$fixture/runtime/graith-demo" ] ||
@@ -202,8 +240,8 @@ assert_refuses_on_active_list_failure() {
 	if GRAITH_DEMO_TEST_LIST_STATUS=1 run_teardown "$fixture" >/dev/null 2>&1; then
 		fail "teardown ignored live-session enumeration failure"
 	fi
-	grep -q '^list -q$' "$fixture/gr.log" || fail "teardown did not attempt live-session enumeration"
-	if grep -q '^purge ' "$fixture/gr.log"; then
+	grep -q ' list -q --json$' "$fixture/gr.log" || fail "teardown did not attempt live-session enumeration"
+	if grep -q ' purge ' "$fixture/gr.log"; then
 		fail "teardown purged after live-session enumeration failed"
 	fi
 	[ -d "$fixture/config/graith-demo" ] &&
@@ -215,30 +253,40 @@ assert_refuses_on_active_list_failure() {
 assert_refuses_before_any_purge() {
 	new_fake_fixture "teardown-list-failure"
 	write_owned_profile "$fixture" "$OWNER_A"
-	if GRAITH_DEMO_TEST_ACTIVE_SESSIONS="croft" \
+	if GRAITH_DEMO_TEST_ACTIVE_SESSIONS="$SESSION_A" \
 		GRAITH_DEMO_TEST_DELETED_LIST_STATUS=1 run_teardown "$fixture" >/dev/null 2>&1; then
 		fail "teardown ignored deleted-session enumeration failure"
 	fi
-	grep -q '^list -q$' "$fixture/gr.log" || fail "teardown did not enumerate live sessions"
-	grep -q '^list --deleted -q$' "$fixture/gr.log" || fail "teardown did not enumerate deleted sessions"
-	if grep -q '^purge ' "$fixture/gr.log"; then
+	grep -q ' list -q --json$' "$fixture/gr.log" || fail "teardown did not enumerate live sessions"
+	grep -q ' list --deleted -q --json$' "$fixture/gr.log" || fail "teardown did not enumerate deleted sessions"
+	if grep -q ' purge ' "$fixture/gr.log"; then
 		fail "teardown purged before all refusal decisions completed"
 	fi
 	[ -d "$fixture/config/graith-demo" ] &&
 		[ -d "$fixture/home/.graith-demo" ] &&
 		[ -d "$fixture/runtime/graith-demo" ] ||
 		fail "teardown removed state after pre-purge refusal"
+
+	new_fake_fixture "teardown-invalid-deleted-id"
+	write_owned_profile "$fixture" "$OWNER_A"
+	if GRAITH_DEMO_TEST_ACTIVE_SESSIONS="$SESSION_A" \
+		GRAITH_DEMO_TEST_DELETED_SESSIONS="croft" run_teardown "$fixture" >/dev/null 2>&1; then
+		fail "teardown accepted an invalid deleted-session enumeration"
+	fi
+	if grep -q ' purge ' "$fixture/gr.log"; then
+		fail "teardown purged before validating every listed session ID"
+	fi
 }
 
 assert_refuses_after_purge_or_stop_failure() {
 	new_fake_fixture "teardown-purge-failure"
 	write_owned_profile "$fixture" "$OWNER_A"
-	if GRAITH_DEMO_TEST_ACTIVE_SESSIONS="strath" \
+	if GRAITH_DEMO_TEST_ACTIVE_SESSIONS="$SESSION_A" \
 		GRAITH_DEMO_TEST_PURGE_STATUS=1 run_teardown "$fixture" >/dev/null 2>&1; then
 		fail "teardown ignored purge failure"
 	fi
-	grep -q '^purge strath -y -f$' "$fixture/gr.log" || fail "teardown did not attempt the failing purge"
-	if grep -q '^daemon stop$' "$fixture/gr.log"; then
+	grep -q " purge $SESSION_A -y -f$" "$fixture/gr.log" || fail "teardown did not attempt the failing purge"
+	if grep -q ' daemon stop$' "$fixture/gr.log"; then
 		fail "teardown stopped the daemon after purge failed"
 	fi
 	[ -d "$fixture/config/graith-demo" ] &&
@@ -251,7 +299,7 @@ assert_refuses_after_purge_or_stop_failure() {
 	if GRAITH_DEMO_TEST_STOP_STATUS=1 run_teardown "$fixture" >/dev/null 2>&1; then
 		fail "teardown ignored daemon-stop failure"
 	fi
-	grep -q '^daemon stop$' "$fixture/gr.log" || fail "teardown did not attempt to stop the daemon"
+	grep -q ' daemon stop$' "$fixture/gr.log" || fail "teardown did not attempt to stop the daemon"
 	[ -d "$fixture/config/graith-demo" ] &&
 		[ -d "$fixture/home/.graith-demo" ] &&
 		[ -d "$fixture/runtime/graith-demo" ] ||
@@ -286,6 +334,75 @@ assert_refuses_present_runtime_mismatch() {
 	[ ! -s "$fixture/gr.log" ] || fail "setup contacted gr for mismatched runtime state"
 }
 
+assert_refuses_rebound_config() {
+	new_fake_fixture "teardown-rebound-config"
+	write_owned_profile "$fixture" "$OWNER_A"
+	unrelated="$fixture/home/unrelated-graith-data"
+	mkdir -p "$unrelated"
+	printf 'canny\n' > "$unrelated/sentinel"
+	printf '%s\n' "# Generated by demo/setup.sh owner=$OWNER_A — safe to delete. Isolated GRAITH_PROFILE=demo." > "$fixture/config/graith-demo/config.toml"
+	printf 'data_dir = "%s"\n' "$unrelated" >> "$fixture/config/graith-demo/config.toml"
+	if run_teardown "$fixture" >/dev/null 2>&1; then
+		fail "teardown accepted a config rebound to unrelated data"
+	fi
+	[ "$(cat "$unrelated/sentinel")" = "canny" ] || fail "teardown changed rebound data"
+	[ ! -s "$fixture/gr.log" ] || fail "teardown contacted gr for rebound config"
+	if run_setup "$fixture" >/dev/null 2>&1; then
+		fail "setup accepted a config rebound to unrelated data"
+	fi
+	[ "$(cat "$unrelated/sentinel")" = "canny" ] || fail "setup changed rebound data"
+	[ ! -s "$fixture/gr.log" ] || fail "setup contacted gr for rebound config"
+}
+
+assert_linux_refuses_untracked_runtime_fallback() {
+	new_fake_fixture "unset-runtime-setup"
+	mkdir -p "$fixture/bin"
+	cat > "$fixture/bin/uname" <<'EOF'
+#!/usr/bin/env bash
+printf 'Linux\n'
+EOF
+	chmod +x "$fixture/bin/uname"
+	if PATH="$fixture/bin:$PATH" run_setup_without_runtime "$fixture" >/dev/null 2>&1; then
+		fail "Linux setup accepted an unset XDG_RUNTIME_DIR"
+	fi
+	[ ! -e "$fixture/config/graith-demo" ] || fail "unset-runtime setup created config state"
+	[ ! -e "$fixture/home/.graith-demo" ] || fail "unset-runtime setup created data state"
+	[ ! -s "$fixture/gr.log" ] || fail "unset-runtime setup contacted gr"
+
+	new_fake_fixture "unset-runtime-teardown"
+	write_owned_profile "$fixture" "$OWNER_A"
+	add_sentinels "$fixture"
+	mkdir -p "$fixture/bin"
+	cp "$TEST_ROOT/unset-runtime-setup/bin/uname" "$fixture/bin/uname"
+	if PATH="$fixture/bin:$PATH" run_teardown_without_runtime "$fixture" >/dev/null 2>&1; then
+		fail "Linux teardown accepted an unset XDG_RUNTIME_DIR"
+	fi
+	assert_sentinels "$fixture"
+	[ ! -s "$fixture/gr.log" ] || fail "unset-runtime teardown contacted gr"
+}
+
+assert_replacement_at_remove_boundary_is_preserved() {
+	new_fake_fixture "teardown-remove-race"
+	write_owned_profile "$fixture" "$OWNER_A"
+	mkdir -p "$fixture/bin"
+	cat > "$fixture/bin/mv" <<'EOF'
+#!/usr/bin/env bash
+/bin/mv "$@" || exit
+if [ "${1:-}" = "./graith-demo" ]; then
+	mkdir ./graith-demo
+	printf 'thrawn\n' > ./graith-demo/replacement-sentinel
+fi
+EOF
+	chmod +x "$fixture/bin/mv"
+	if PATH="$fixture/bin:$PATH" run_teardown "$fixture" >/dev/null 2>&1; then
+		fail "teardown ignored a replacement at the removal boundary"
+	fi
+	[ "$(cat "$fixture/config/graith-demo/replacement-sentinel")" = "thrawn" ] ||
+		fail "teardown removed the replacement config directory"
+	[ -d "$fixture/home/.graith-demo" ] || fail "teardown continued after the removal race"
+	[ -d "$fixture/runtime/graith-demo" ] || fail "teardown removed runtime after the removal race"
+}
+
 build_real_gr() {
 	[ -x "$REAL_GR" ] || (cd "$REPO_ROOT" && go build -o "$REAL_GR" ./cmd/graith)
 }
@@ -318,7 +435,7 @@ assert_real_cli_runtime_recreation_and_rerun() {
 	: > "$fixture/gr.log"
 	run_setup "$fixture" >/dev/null 2>&1 ||
 		fail "real-CLI setup rerun failed after runtime recreation"
-	grep -q '^list -q$' "$fixture/gr.log" || fail "rerun did not exercise real gr list"
+	grep -q ' list -q --json$' "$fixture/gr.log" || fail "rerun did not exercise real gr list"
 	[ -f "$fixture/runtime/graith-demo/.graith-demo-owner" ] ||
 		fail "real-CLI rerun left runtime state unowned"
 	[ "$(cat "$fixture/config/graith-demo/.graith-demo-owner")" != "$first_owner" ] ||
@@ -333,6 +450,7 @@ assert_real_unowned_daemon_is_never_contacted() {
 	new_real_fixture "real-unowned"
 	write_unowned_config "$fixture"
 	run_real_gr "$fixture" list -q >/dev/null 2>&1 || fail "could not start unowned real demo daemon"
+	daemon_pid="$(cat "$fixture/runtime/graith-demo/graith.pid")"
 	add_sentinels "$fixture"
 	: > "$fixture/gr.log"
 
@@ -345,6 +463,9 @@ assert_real_unowned_daemon_is_never_contacted() {
 	assert_sentinels "$fixture"
 	[ ! -s "$fixture/gr.log" ] ||
 		fail "harness contacted gr before refusing an unowned running daemon"
+	[ "$(cat "$fixture/runtime/graith-demo/graith.pid")" = "$daemon_pid" ] ||
+		fail "unowned daemon PID changed during refusal"
+	kill -0 "$daemon_pid" 2>/dev/null || fail "unowned daemon stopped during refusal"
 
 	# The real daemon still answers, proving the refusal did not stop or replace it.
 	run_real_gr "$fixture" list -q >/dev/null 2>&1 || fail "unowned daemon was disturbed"
@@ -357,10 +478,13 @@ for target in config data runtime; do
 	assert_refuses_teardown_mismatch "$target"
 done
 assert_refuses_present_runtime_mismatch
+assert_refuses_rebound_config
+assert_linux_refuses_untracked_runtime_fallback
 assert_owned_teardown_is_idempotent
 assert_refuses_on_active_list_failure
 assert_refuses_before_any_purge
 assert_refuses_after_purge_or_stop_failure
+assert_replacement_at_remove_boundary_is_preserved
 assert_setup_reruns_after_runtime_cleanup
 if [ "${GRAITH_DEMO_TEST_SKIP_REAL:-0}" -eq 1 ]; then
 	echo "skipping real-CLI demo tests (GRAITH_DEMO_TEST_SKIP_REAL=1)"

@@ -85,6 +85,16 @@ The tests isolate `HOME`, `XDG_CONFIG_HOME`, and `XDG_RUNTIME_DIR` under a
 temporary directory. They also exercise runtime-directory recreation with the
 real `gr` binary while replacing demo agent launches with inert test commands.
 
+On Linux, `XDG_RUNTIME_DIR` must be set. Graith otherwise falls back to a
+separate `/run/user/<uid>` location that the harness cannot safely associate
+with its fixed demo paths, so setup and teardown fail closed instead of
+contacting an untracked daemon. macOS safely folds its unset-XDG runtime
+fallback into the owned demo data directory.
+
+The generated config is covered by an ownership checksum. Editing it after
+setup—including changing `data_dir`—makes both setup and teardown refuse; clean
+up such a deliberately modified profile manually after checking its paths.
+
 ## Notes & gotchas
 
 - **Run it locally, unsandboxed.** Recording needs a real TTY (VHS spawns its
