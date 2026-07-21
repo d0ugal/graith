@@ -79,6 +79,7 @@ func TestLogTerminalBackendSelectionFields(t *testing.T) {
 	if rec["msg"] != "terminal backend selected" {
 		t.Fatalf("message = %v, want terminal backend selected", rec["msg"])
 	}
+
 	if rec["terminal_backend"] != grpty.TerminalBackend() {
 		t.Errorf("terminal_backend = %v, want %q", rec["terminal_backend"], grpty.TerminalBackend())
 	}
