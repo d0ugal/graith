@@ -32,6 +32,8 @@ jobs:
   #   - darwin-only-compiled Go: internal/pty (procstart_darwin.go) and
   #     internal/sandbox (safehouse/Seatbelt) — a Linux build never compiles
   #     these, so they'd otherwise get zero pre-merge coverage;
+  #   - integration tests, which may explicitly exercise Darwin runtime
+  #     behaviour and need their macOS leg to validate the change itself;
   #   - the protocol/capability packages whose shapes the Swift conformance
   #     tests under gui/ validate, plus any Swift/GUI code;
   #   - the module graph (go.mod/go.sum) — a dependency or toolchain bump can
@@ -86,7 +88,7 @@ jobs:
           fi
           # here-string (not a pipe) so an early grep match can't SIGPIPE-fail an
           # upstream command under pipefail.
-          if grep -Eq '^gui/|^demo/|^internal/protocol/|^internal/capabilities/|^internal/pty/|^internal/sandbox/|^Makefile$|^go\.mod$|^go\.sum$|\.swift$|^\.github/workflows/ci\.yml$' <<<"$files"; then
+          if grep -Eq '^gui/|^demo/|^internal/integration/|^internal/protocol/|^internal/capabilities/|^internal/pty/|^internal/sandbox/|^Makefile$|^go\.mod$|^go\.sum$|\.swift$|^\.github/workflows/ci\.yml$' <<<"$files"; then
             echo "macos=true" >> "$GITHUB_OUTPUT"
             echo "macOS-relevant files changed: running macOS jobs."
           else
