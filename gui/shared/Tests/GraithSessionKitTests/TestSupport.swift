@@ -233,9 +233,9 @@ actor MockHostClient: GraithHostClient {
     ) async throws -> UpdateResultMsg {
         var labels = sessions.first(where: { $0.id == sessionID })?.labels ?? []
         labels.removeAll { existing in
-            (removeLabels ?? []).contains { $0.caseInsensitiveCompare(existing) == .orderedSame }
+            (removeLabels ?? []).contains { SidebarFilter.labelsEqual($0, existing) }
         }
-        for label in addLabels ?? [] where !labels.contains(where: { $0.caseInsensitiveCompare(label) == .orderedSame }) {
+        for label in addLabels ?? [] where !labels.contains(where: { SidebarFilter.labelsEqual($0, label) }) {
             labels.append(label)
         }
         if let index = sessions.firstIndex(where: { $0.id == sessionID }) {

@@ -21,6 +21,7 @@ struct SidebarFilterPureTests {
     @Test func labelIdentityMatchesDaemonSimpleFoldWithoutCanonicalNormalization() {
         #expect(SidebarFilter.labelsEqual("K", "K"))
         #expect(SidebarFilter.labelsEqual("Σ", "ς"))
+        #expect(SidebarFilter.labelsEqual("µ", "μ"))
         #expect(!SidebarFilter.labelsEqual("é", "e\u{301}"))
         #expect(!SidebarFilter.labelsEqual("ß", "ss"))
     }

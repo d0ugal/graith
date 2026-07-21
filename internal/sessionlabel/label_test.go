@@ -94,6 +94,10 @@ func TestEqualUsesUnicodeSimpleFoldingWithoutCanonicalNormalization(t *testing.T
 		t.Fatal("Kelvin sign should compare equal under Unicode simple folding")
 	}
 
+	if !Equal("µ", "μ") {
+		t.Fatal("micro sign and Greek mu should compare equal in a multi-member fold orbit")
+	}
+
 	if Equal("é", "e\u0301") {
 		t.Fatal("canonically equivalent spellings must remain distinct without normalization")
 	}
