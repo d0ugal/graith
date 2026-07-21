@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"os/exec"
 	"strconv"
@@ -11,13 +12,13 @@ import (
 	"github.com/d0ugal/graith/internal/tools"
 )
 
-var lsofOutput = func(pids string) ([]byte, error) {
-	return exec.Command(tools.Lsof(), "-nP", "-a", "-p", pids, "-Fpf").Output()
+var lsofOutput = func(ctx context.Context, pids string) ([]byte, error) {
+	return exec.CommandContext(ctx, tools.Lsof(), "-nP", "-a", "-p", pids, "-Fpf").Output()
 }
 
 // macOS does not expose per-process descriptors through /proc. One lsof call
 // covers every process in all session groups for the sampling pass.
-func openFDCounts(pids []int) map[int]int {
+func openFDCounts(ctx context.Context, pids []int) map[int]int {
 	counts := make(map[int]int, len(pids))
 	if len(pids) == 0 {
 		return counts
@@ -28,7 +29,7 @@ func openFDCounts(pids []int) map[int]int {
 		parts[i] = strconv.Itoa(pid)
 	}
 
-	out, err := lsofOutput(strings.Join(parts, ","))
+	out, err := lsofOutput(ctx, strings.Join(parts, ","))
 	// lsof exits 1 when any requested PID vanished, while still returning
 	// useful records for the live PIDs. Preserve that partial snapshot. Other
 	// execution failures (or an empty result) leave counts unknown.

@@ -3,12 +3,13 @@
 package daemon
 
 import (
+	"context"
 	"os"
 	"testing"
 )
 
 func TestOpenFDCounts(t *testing.T) {
-	got := openFDCounts([]int{os.Getpid(), 4_000_000})
+	got := openFDCounts(context.Background(), []int{os.Getpid(), 4_000_000})
 	if got[os.Getpid()] <= 0 {
 		t.Fatalf("openFDCounts(self) = %#v", got)
 	}
