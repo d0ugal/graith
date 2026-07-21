@@ -16,6 +16,7 @@ import (
 func createOptsFromMsg(c protocol.CreateMsg, agentName string, rows, cols uint16) CreateOpts {
 	return CreateOpts{
 		Name:                c.Name,
+		Labels:              c.Labels,
 		AgentName:           agentName,
 		RepoPath:            c.RepoPath,
 		BaseBranch:          c.Base,
@@ -159,7 +160,13 @@ func handleUpdate(sm *SessionManager, auth authContext, send func(string, any), 
 		return
 	}
 
-	updated, err := sm.Update(u.SessionID, u.Name, u.ParentID, u.Starred)
+	updated, err := sm.UpdateMetadata(u.SessionID, SessionUpdate{
+		Name:         u.Name,
+		ParentID:     u.ParentID,
+		Starred:      u.Starred,
+		AddLabels:    u.AddLabels,
+		RemoveLabels: u.RemoveLabels,
+	})
 	if err != nil {
 		send("error", protocol.ErrorMsg{Message: err.Error()})
 	} else {
@@ -168,6 +175,7 @@ func handleUpdate(sm *SessionManager, auth authContext, send func(string, any), 
 			Name:      updated.Name,
 			ParentID:  updated.ParentID,
 			Starred:   updated.Starred,
+			Labels:    append([]string{}, updated.Labels...),
 		})
 	}
 }

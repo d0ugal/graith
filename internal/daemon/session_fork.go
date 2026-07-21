@@ -202,6 +202,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	sourceCodex := codexOptsForAgent(agentName, cloneCodexOptions(source.Codex))
 
 	sourceAgentSessionID := source.AgentSessionID
+	sourceLabels := append([]string{}, source.Labels...)
 	sourceAgentHooks := source.AgentHooks
 	policyEnabled := cfgSnapshot.CommandPolicy.Enabled()
 	policyTimeout := cfgSnapshot.CommandPolicy.TimeoutDuration()
@@ -252,6 +253,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		ID:              id,
 		ParentID:        sourceSessionID,
 		Name:            name,
+		Labels:          sourceLabels,
 		RepoPath:        repoRoot,
 		RepoName:        repoName,
 		WorktreePath:    worktreePath,

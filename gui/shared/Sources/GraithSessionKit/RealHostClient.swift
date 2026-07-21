@@ -162,9 +162,15 @@ public actor RealHostClient: GraithHostClient {
     public func rename(sessionID: String, newName: String) async throws {
         try await run { _ = try await self.inner.update(sessionID: sessionID, name: newName) }
     }
-    public func update(sessionID: String, name: String?, parentID: String?, starred: Bool?) async throws -> UpdateResultMsg {
+    public func update(
+        sessionID: String, name: String?, parentID: String?, starred: Bool?,
+        addLabels: [String]? = nil, removeLabels: [String]? = nil
+    ) async throws -> UpdateResultMsg {
         do {
-            return try await inner.update(sessionID: sessionID, name: name, parentID: parentID, starred: starred)
+            return try await inner.update(
+                sessionID: sessionID, name: name, parentID: parentID, starred: starred,
+                addLabels: addLabels, removeLabels: removeLabels
+            )
         } catch {
             throw RealClientError.map(error)
         }

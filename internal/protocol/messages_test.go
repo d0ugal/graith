@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -156,7 +157,7 @@ func TestSessionInfoRoundTrip(t *testing.T) {
 	session := SessionInfo{
 		ID: "a3f2b1c9", Name: "braw-auth-fix", RepoPath: "/home/user/croft",
 		RepoName: "croft", Branch: "d0ugal/graith/braw-auth-fix-a3f2b1c9",
-		Agent: "claude", Status: "running",
+		Agent: "claude", Status: "running", Labels: []string{"Urgent", "release"},
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 
@@ -172,7 +173,8 @@ func TestSessionInfoRoundTrip(t *testing.T) {
 		t.Fatalf("DecodePayload: %v", err)
 	}
 
-	if got.ID != "a3f2b1c9" || got.Name != "braw-auth-fix" {
+	if got.ID != "a3f2b1c9" || got.Name != "braw-auth-fix" ||
+		!reflect.DeepEqual(got.Labels, []string{"Urgent", "release"}) {
 		t.Errorf("session = %+v", got)
 	}
 }

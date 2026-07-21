@@ -151,6 +151,7 @@ public actor MockHostClient: GraithHostClient {
         let new = SessionInfo(
             id: String(UUID().uuidString.prefix(8)),
             name: request.name,
+            labels: request.labels,
             repoPath: request.repoPath,
             repoName: (request.repoPath as NSString).lastPathComponent,
             agent: request.agent,
@@ -212,11 +213,21 @@ public actor MockHostClient: GraithHostClient {
         mutate(sessionID) { $0 = $0.with(name: newName) }
     }
 
-    public func update(sessionID: String, name: String?, parentID: String?, starred: Bool?) async throws -> UpdateResultMsg {
+    public func update(
+        sessionID: String, name: String?, parentID: String?, starred: Bool?,
+        addLabels: [String]? = nil, removeLabels: [String]? = nil
+    ) async throws -> UpdateResultMsg {
         try check(ControlType.update)
         mutate(sessionID) {
             let parentOverride: String?? = parentID.map { $0.isEmpty ? nil : $0 }
-            $0 = $0.with(parentID: parentOverride, name: name, starred: starred)
+            var labels = $0.labels ?? []
+            for removed in removeLabels ?? [] {
+                labels.removeAll { SidebarFilter.labelsEqual($0, removed) }
+            }
+            for added in addLabels ?? [] where !labels.contains(where: { SidebarFilter.labelsEqual($0, added) }) {
+                labels.append(added)
+            }
+            $0 = $0.with(parentID: parentOverride, name: name, labels: labels, starred: starred)
         }
         guard let updated = sessions.first(where: { $0.id == sessionID }) else {
             throw GraithClientError.daemon("session not found: \(sessionID)")
@@ -225,7 +236,8 @@ public actor MockHostClient: GraithHostClient {
             sessionID: updated.id,
             name: updated.name,
             parentID: updated.parentID ?? "",
-            starred: updated.starred ?? false
+            starred: updated.starred ?? false,
+            labels: updated.labels ?? []
         )
     }
 
@@ -237,6 +249,7 @@ public actor MockHostClient: GraithHostClient {
         let new = SessionInfo(
             id: String(UUID().uuidString.prefix(8)),
             name: name,
+            labels: source.labels,
             repoPath: source.repoPath,
             repoName: source.repoName,
             agent: source.agent,
@@ -312,16 +325,16 @@ public actor MockHostClient: GraithHostClient {
 
 extension MockHostClient {
     public static let defaultSessions: [SessionInfo] = [
-        SessionInfo(id: "braw0001", name: "braw", repoPath: "/Users/x/Code/croft", repoName: "croft",
+        SessionInfo(id: "braw0001", name: "braw", labels: ["Urgent", "release"], repoPath: "/Users/x/Code/croft", repoName: "croft",
                     branch: "user/graith/braw-braw0001", agent: "claude", status: "running",
                     agentStatus: "active", model: "claude-opus-4-8",
                     summaryText: "implementing the bonnie feature",
                     pullRequest: PRInfo(number: 42, state: "open", reviewDecision: "review_required"),
                     ci: CIInfo(state: "passing")),
-        SessionInfo(id: "canny002", name: "canny", repoPath: "/Users/x/Code/croft", repoName: "croft",
+        SessionInfo(id: "canny002", name: "canny", labels: ["urgent"], repoPath: "/Users/x/Code/croft", repoName: "croft",
                     branch: "user/graith/canny-canny002", agent: "codex", status: "running",
                     agentStatus: "error", summaryText: "unexpected native permission prompt"),
-        SessionInfo(id: "bide0003", name: "bide", repoPath: "/Users/x/Code/glen", repoName: "glen",
+        SessionInfo(id: "bide0003", name: "bide", labels: ["docs"], repoPath: "/Users/x/Code/glen", repoName: "glen",
                     branch: "user/graith/bide-bide0003", agent: "claude", status: "stopped",
                     agentStatus: "ready", exitCode: 0, summaryText: "task done"),
     ]
@@ -386,12 +399,14 @@ extension SessionInfo {
         agentStatus: String? = nil,
         parentID: String?? = nil,
         name: String? = nil,
+        labels: [String]? = nil,
         agent: String? = nil,
         starred: Bool? = nil,
         summaryText: String?? = nil
     ) -> SessionInfo {
         SessionInfo(
-            id: id, parentID: parentID ?? self.parentID, name: name ?? self.name, repoPath: repoPath, repoName: repoName,
+            id: id, parentID: parentID ?? self.parentID, name: name ?? self.name,
+            labels: labels ?? self.labels, repoPath: repoPath, repoName: repoName,
             worktreePath: worktreePath, branch: branch, baseBranch: baseBranch, agent: agent ?? self.agent,
             agentSessionID: agentSessionID, status: status ?? self.status,
             agentStatus: agentStatus ?? self.agentStatus,

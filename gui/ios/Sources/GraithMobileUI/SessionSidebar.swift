@@ -65,6 +65,26 @@ private struct SidebarFilterControls: View {
                 }
                 .disabled(model.availableRepos.isEmpty)
 
+                Menu {
+                    Button("All labels") { model.labelFilter = nil }
+                    Divider()
+                    ForEach(model.availableLabels, id: \.self) { label in
+                        Button {
+                            model.labelFilter = label
+                        } label: {
+                            if model.labelFilter.map({ SidebarFilter.labelsEqual($0, label) }) == true {
+                                Label(label, systemImage: "checkmark")
+                            } else {
+                                Text(label)
+                            }
+                        }
+                    }
+                } label: {
+                    Label(model.labelFilter ?? "All labels", systemImage: "tag")
+                        .lineLimit(1)
+                }
+                .disabled(model.availableLabels.isEmpty)
+
                 if model.isFilterActive {
                     Button {
                         model.clearFilters()
@@ -159,6 +179,8 @@ struct SessionRow: View {
     // Action sheets / confirmation.
     @State private var showRename = false
     @State private var renameText = ""
+    @State private var showLabels = false
+    @State private var labelsText = ""
     @State private var showFork = false
     @State private var forkName = ""
     @State private var showMigrate = false
@@ -258,6 +280,13 @@ struct SessionRow: View {
                 placeholder: session.name, confirmLabel: "Rename", text: $renameText
             ) { newName in Task { await connection.rename(session, to: newName) } }
         }
+        .sheet(isPresented: $showLabels) {
+            SessionTextPromptSheet(
+                title: "Edit Labels", fieldLabel: "Comma-separated labels",
+                placeholder: "bugfix, urgent", confirmLabel: "Save", text: $labelsText,
+                allowsEmpty: true
+            ) { value in Task { await connection.setLabels(session, labels: FleetModel.parseLabels(value)) } }
+        }
         .sheet(isPresented: $showFork) {
             SessionTextPromptSheet(
                 title: "Fork Session", fieldLabel: "New session name",
@@ -282,6 +311,10 @@ struct SessionRow: View {
         }
         Divider()
         Button { renameText = session.name; showRename = true } label: { Label("Rename…", systemImage: "pencil") }
+        Button {
+            labelsText = (session.labels ?? []).joined(separator: ", ")
+            showLabels = true
+        } label: { Label("Edit Labels…", systemImage: "tag") }
         Button { Task { await connection.toggleStar(session) } } label: {
             Label(session.starred == true ? "Unstar" : "Star",
                   systemImage: session.starred == true ? "star.slash" : "star")
@@ -321,6 +354,7 @@ struct SessionTextPromptSheet: View {
     let placeholder: String
     let confirmLabel: String
     @Binding var text: String
+    var allowsEmpty: Bool = false
     let onConfirm: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -342,14 +376,14 @@ struct SessionTextPromptSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(confirmLabel, action: confirm).disabled(trimmed.isEmpty)
+                    Button(confirmLabel, action: confirm).disabled(trimmed.isEmpty && !allowsEmpty)
                 }
             }
         }
     }
 
     private func confirm() {
-        guard !trimmed.isEmpty else { return }
+        guard allowsEmpty || !trimmed.isEmpty else { return }
         onConfirm(trimmed)
         dismiss()
     }

@@ -12,6 +12,7 @@ struct NewSessionView: View {
     @State private var name: String = ""
     @State private var agent: String = ""
     @State private var prompt: String = ""
+    @State private var labels: String = ""
     @State private var repos: [RepoEntry] = []
     @State private var selectedRepo: String = ""
     @State private var loadingRepos = false
@@ -65,6 +66,8 @@ struct NewSessionView: View {
                     }
                     TextField("Prompt (optional)", text: $prompt, axis: .vertical)
                         .lineLimit(3, reservesSpace: true)
+                    TextField("Labels (comma-separated)", text: $labels)
+                        .textFieldStyleCompat()
                 }
                 Section("Advanced") {
                     TextField("Base branch (optional)", text: $base)
@@ -145,6 +148,7 @@ struct NewSessionView: View {
         defer { submitting = false }
         let req = CreateRequest(
             name: name.trimmingCharacters(in: .whitespaces),
+            labels: FleetModel.parseLabels(labels),
             agent: agent,
             repoPath: selectedRepo,
             base: trimmedBase.isEmpty ? nil : trimmedBase,

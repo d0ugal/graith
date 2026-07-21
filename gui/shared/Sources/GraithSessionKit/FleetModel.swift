@@ -34,12 +34,14 @@ open class FleetModel: ObservableObject {
     // view rebuilds and drives the same grouping helpers the sidebars already
     // bind to. The actual filtering is the pure `SidebarFilter`.
 
-    /// Free-text search over session name + repo.
+    /// Free-text search over session name + repo + labels.
     @Published public var searchQuery: String = ""
     /// Quick filter: show starred sessions only.
     @Published public var starredOnly: Bool = false
     /// Quick filter: restrict to a single repo (`repoName`); nil = all repos.
     @Published public var repoFilter: String?
+    /// Quick filter: restrict to one label across repositories; nil = all labels.
+    @Published public var labelFilter: String?
 
     /// Forward each connection's changes up so views bound to derived,
     /// cross-connection state (`sessions`, `allSessions`, `error`, …) refresh.
@@ -265,7 +267,8 @@ open class FleetModel: ObservableObject {
         SidebarFilter.Criteria(
             searchQuery: searchQuery,
             starredOnly: starredOnly,
-            repo: repoFilter
+            repo: repoFilter,
+            label: labelFilter
         )
     }
 
@@ -289,11 +292,23 @@ open class FleetModel: ObservableObject {
         Set(allSessions.map(\.session.repoName)).sorted()
     }
 
+    /// Distinct labels across every host, preserving the first display spelling
+    /// while de-duplicating with the daemon's case-insensitive identity rule.
+    public var availableLabels: [String] {
+        var byIdentity: [[UInt32]: String] = [:]
+        for label in allSessions.flatMap({ $0.session.labels ?? [] }) {
+            let key = SidebarFilter.labelIdentity(label)
+            if byIdentity[key] == nil { byIdentity[key] = label }
+        }
+        return byIdentity.values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
     /// Reset every filter to its default (used by a "clear filters" action).
     public func clearFilters() {
         searchQuery = ""
         starredOnly = false
         repoFilter = nil
+        labelFilter = nil
     }
 
     // MARK: - Sidebar grouping
@@ -364,6 +379,7 @@ open class FleetModel: ObservableObject {
     }
     public func renameSession(_ session: SessionInfo, to newName: String) { act(session) { await $0.rename(session, to: newName) } }
     public func toggleStar(_ session: SessionInfo) { act(session) { await $0.toggleStar(session) } }
+    public func setLabels(_ session: SessionInfo, labels: [String]) { act(session) { await $0.setLabels(session, labels: labels) } }
     public func forkSession(_ session: SessionInfo, name: String) { act(session) { await $0.fork(session, name: name) } }
     public func migrateSession(_ session: SessionInfo, agent: String, model: String? = nil) {
         let trimmed = model?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -450,6 +466,16 @@ open class FleetModel: ObservableObject {
         return nil
     }
 
+    /// Parse the comma-separated label field used by both native forms. Empty
+    /// input means no labels; internal empty entries are retained so the daemon
+    /// can reject them with the canonical validation error.
+    public static func parseLabels(_ value: String) -> [String] {
+        if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return [] }
+        return value.split(separator: ",", omittingEmptySubsequences: false).map {
+            String($0).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
     /// Create a session on `hostID` and report the created session (found by
     /// name after the connection refreshes) so the caller can select it.
     ///
@@ -461,6 +487,7 @@ open class FleetModel: ObservableObject {
         repoPath: String,
         model: String,
         prompt: String,
+        labels: [String] = [],
         base: String = "",
         inPlace: Bool = false,
         agentHooks: Bool = true,
@@ -481,6 +508,7 @@ open class FleetModel: ObservableObject {
         }
         let request = CreateRequest(
             name: name,
+            labels: labels,
             agent: agent,
             repoPath: repoPath,
             base: trimmedBase.isEmpty ? nil : trimmedBase,

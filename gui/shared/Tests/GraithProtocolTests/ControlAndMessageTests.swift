@@ -57,6 +57,17 @@ struct ControlAndMessageTests {
         #expect(info.ci?.failingChecks == ["build"])
     }
 
+    @Test func sessionLabelsDecodeAndCreateLabelsEncode() throws {
+        let json = #"{"id":"skelf","name":"skelf","labels":["Urgent","release"],"repo_path":"/croft","repo_name":"croft","worktree_path":"/w","branch":"b","base_branch":"main","agent":"codex","status":"running","created_at":"t"}"#
+        let info = try JSONDecoder().decode(SessionInfo.self, from: Data(json.utf8))
+        #expect(info.labels == ["Urgent", "release"])
+
+        let create = CreateMsg(name: "canny", labels: ["ios", "urgent"], agent: "codex", repoPath: "/croft")
+        let encoded = try JSONEncoder().encode(create)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        #expect(object["labels"] as? [String] == ["ios", "urgent"])
+    }
+
     @Test func pairRequestSnakeCase() throws {
         let msg = PairRequestMsg(deviceLabel: "bairn", devicePubKey: "AAAA")
         let json = String(decoding: try JSONEncoder().encode(msg), as: UTF8.self)

@@ -983,6 +983,91 @@ func TestGroupHeaderFilterValue(t *testing.T) {
 	}
 }
 
+func TestBuildLabelGroupedItemsCrossesReposAndDuplicatesMultiLabelSessions(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "braw", Name: "braw", RepoName: "croft", Status: "running", Labels: []string{"Urgent", "release"}},
+		{ID: "canny", Name: "canny", RepoName: "bothy", Status: "stopped", Labels: []string{"urgent"}},
+		{ID: "dreich", Name: "dreich", RepoName: "glen", Status: "running"},
+	}
+
+	items := buildLabelGroupedItems(sessions)
+	groups := map[string][]string{}
+	current := ""
+
+	for _, item := range items {
+		switch item := item.(type) {
+		case groupHeader:
+			current = item.name
+		case sessionItem:
+			groups[current] = append(groups[current], item.info.ID)
+			if item.labelGroup != current {
+				t.Fatalf("session label group = %q, want %q", item.labelGroup, current)
+			}
+		}
+	}
+
+	if got := groups["Urgent"]; len(got) != 2 || got[0] != "braw" || got[1] != "canny" {
+		t.Fatalf("Urgent group = %v, want braw and canny across repos", got)
+	}
+
+	if got := groups["release"]; len(got) != 1 || got[0] != "braw" {
+		t.Fatalf("release group = %v, want braw", got)
+	}
+
+	if len(groups) != 2 {
+		t.Fatalf("groups = %v, unlabelled session should be absent", groups)
+	}
+
+	labelled := items[1].(sessionItem)
+	if got := labelled.displayName(); got != "croft/braw" {
+		t.Fatalf("label view display name = %q, want repository-qualified name", got)
+	}
+
+	if width := maxSessionNameWidthFromItems(items, 0); width < lipgloss.Width("croft/braw") {
+		t.Fatalf("label view name width = %d, want at least %d", width, lipgloss.Width("croft/braw"))
+	}
+}
+
+func TestLabelViewSearchAndRefreshPreserveLabelSelection(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "braw", Name: "braw", RepoName: "croft", Status: "running", Labels: []string{"alpha", "beta"}},
+		{ID: "canny", Name: "canny", RepoName: "bothy", Status: "running", Labels: []string{"beta"}},
+	}
+	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m.view = viewLabels
+	m.rebuildForView()
+
+	if got := filterSessions(sessions, "BETA"); len(got) != 2 {
+		t.Fatalf("label search returned %d sessions, want 2", len(got))
+	}
+
+	m.selectSessionByIDAndLabel("braw", "beta")
+
+	selected, ok := m.list.SelectedItem().(sessionItem)
+	if !ok || selected.info.ID != "braw" || selected.labelGroup != "beta" {
+		t.Fatalf("selected = %+v, ok=%t", selected, ok)
+	}
+
+	updated, _ := m.Update(refreshSessionsMsg{sessions: []protocol.SessionInfo{sessions[1], sessions[0]}, deleted: []protocol.SessionInfo{}})
+	m = asOverlay(updated)
+
+	selected, ok = m.list.SelectedItem().(sessionItem)
+	if !ok || selected.info.ID != "braw" || selected.labelGroup != "beta" {
+		t.Fatalf("selection after refresh = %+v, ok=%t", selected, ok)
+	}
+}
+
+func TestLabelViewEmptyState(t *testing.T) {
+	m := newOverlayModel([]protocol.SessionInfo{{ID: "braw", Name: "braw", Status: "running"}}, "", nil, nil, nil, nil)
+	m.view = viewLabels
+	m.rebuildForView()
+	updated, _ := sendWindowSize(m, 100, 30)
+
+	if got := asOverlay(updated).View().Content; !strings.Contains(got, "No labelled sessions") {
+		t.Fatalf("Labels empty view missing guidance:\n%s", got)
+	}
+}
+
 // --- newOverlayModel ---
 
 func TestNewOverlayModel_CursorOnCurrentSession(t *testing.T) {
@@ -3381,8 +3466,8 @@ func TestView_MirrorDeleteNoUnsavedWarning(t *testing.T) {
 // --- viewMode cycling ---
 
 func TestViewModeCycling(t *testing.T) {
-	if got := strings.Join(viewNames, ","); got != "All,Starred,Scenarios,Deleted" {
-		t.Fatalf("viewNames = %q, want All / Starred / Scenarios / Deleted", got)
+	if got := strings.Join(viewNames, ","); got != "All,Starred,Labels,Scenarios,Deleted" {
+		t.Fatalf("viewNames = %q, want All / Starred / Labels / Scenarios / Deleted", got)
 	}
 
 	v := viewAll
@@ -3393,8 +3478,13 @@ func TestViewModeCycling(t *testing.T) {
 	}
 
 	v = v.next()
+	if v != viewLabels {
+		t.Errorf("Starred.next() = %d, want viewLabels", v)
+	}
+
+	v = v.next()
 	if v != viewScenario {
-		t.Errorf("Starred.next() = %d, want viewScenario", v)
+		t.Errorf("Labels.next() = %d, want viewScenario", v)
 	}
 
 	v = v.next()
@@ -3437,22 +3527,29 @@ func TestOverlay_RightArrowCyclesView(t *testing.T) {
 	updated, _ = sendKey(updated, "right")
 
 	om = asOverlay(updated)
+	if om.view != viewLabels {
+		t.Errorf("after 2x right: view = %d, want viewLabels", om.view)
+	}
+
+	updated, _ = sendKey(updated, "right")
+
+	om = asOverlay(updated)
 	if om.view != viewScenario {
-		t.Errorf("after 2x right: view = %d, want viewScenario", om.view)
+		t.Errorf("after 3x right: view = %d, want viewScenario", om.view)
 	}
 
 	updated, _ = sendKey(updated, "right")
 
 	om = asOverlay(updated)
 	if om.view != viewDeleted {
-		t.Errorf("after 3x right: view = %d, want viewDeleted", om.view)
+		t.Errorf("after 4x right: view = %d, want viewDeleted", om.view)
 	}
 
 	updated, _ = sendKey(updated, "right")
 
 	om = asOverlay(updated)
 	if om.view != viewAll {
-		t.Errorf("after 4x right: view = %d, want viewAll (wrap)", om.view)
+		t.Errorf("after 5x right: view = %d, want viewAll (wrap)", om.view)
 	}
 }
 

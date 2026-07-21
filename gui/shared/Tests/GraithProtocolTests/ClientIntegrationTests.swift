@@ -204,9 +204,14 @@ struct ClientIntegrationTests {
             #expect(update.name == "bonnie")
             #expect(update.parentID == "ben")
             #expect(update.starred == false)
+            #expect(update.addLabels == ["urgent"])
+            #expect(update.removeLabels == ["backlog"])
             try await daemon.writeControl(
                 "updated",
-                UpdateResultMsg(sessionID: "braw", name: "bonnie", parentID: "ben", starred: false)
+                UpdateResultMsg(
+                    sessionID: "braw", name: "bonnie", parentID: "ben",
+                    starred: false, labels: ["urgent"]
+                )
             )
         }
 
@@ -217,9 +222,13 @@ struct ClientIntegrationTests {
             streamFactory: { _ in stream }
         )
         let result = try await client.update(
-            sessionID: "braw", name: "bonnie", parentID: "ben", starred: false
+            sessionID: "braw", name: "bonnie", parentID: "ben", starred: false,
+            addLabels: ["urgent"], removeLabels: ["backlog"]
         )
-        #expect(result == UpdateResultMsg(sessionID: "braw", name: "bonnie", parentID: "ben", starred: false))
+        #expect(result == UpdateResultMsg(
+            sessionID: "braw", name: "bonnie", parentID: "ben", starred: false,
+            labels: ["urgent"]
+        ))
 
         _ = await server.result
         await client.close()

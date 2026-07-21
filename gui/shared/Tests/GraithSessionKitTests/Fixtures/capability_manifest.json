@@ -12,6 +12,11 @@
       "macos": "supported"
     },
     {
+      "id": "session.labels",
+      "ios": "supported",
+      "macos": "supported"
+    },
+    {
       "id": "session.create",
       "ios": "supported",
       "macos": "supported"

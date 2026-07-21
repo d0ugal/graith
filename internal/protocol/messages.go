@@ -79,20 +79,21 @@ type HandshakeMsg struct {
 }
 
 type CreateMsg struct {
-	Name                string `json:"name"`
-	ParentID            string `json:"parent_id,omitempty"`
-	Agent               string `json:"agent"`
-	RepoPath            string `json:"repo_path"`
-	Base                string `json:"base,omitempty"`
-	Prompt              string `json:"prompt,omitempty"`
-	Model               string `json:"model,omitempty"`
-	NoRepo              bool   `json:"no_repo,omitempty"`
-	Mirror              string `json:"mirror,omitempty"`
-	AgentHooks          bool   `json:"agent_hooks,omitempty"`
-	InPlace             bool   `json:"in_place,omitempty"`
-	AllowConcurrent     bool   `json:"allow_concurrent,omitempty"`
-	SkipModelValidation bool   `json:"skip_model_validation,omitempty"`
-	Headless            bool   `json:"headless,omitempty"`
+	Name                string   `json:"name"`
+	Labels              []string `json:"labels,omitempty"`
+	ParentID            string   `json:"parent_id,omitempty"`
+	Agent               string   `json:"agent"`
+	RepoPath            string   `json:"repo_path"`
+	Base                string   `json:"base,omitempty"`
+	Prompt              string   `json:"prompt,omitempty"`
+	Model               string   `json:"model,omitempty"`
+	NoRepo              bool     `json:"no_repo,omitempty"`
+	Mirror              string   `json:"mirror,omitempty"`
+	AgentHooks          bool     `json:"agent_hooks,omitempty"`
+	InPlace             bool     `json:"in_place,omitempty"`
+	AllowConcurrent     bool     `json:"allow_concurrent,omitempty"`
+	SkipModelValidation bool     `json:"skip_model_validation,omitempty"`
+	Headless            bool     `json:"headless,omitempty"`
 	// NoFetch skips the `git fetch origin` that normally runs before the
 	// worktree is created (issue #1012). Lets sessions be created from local
 	// repo state when SSH auth is unavailable (Secretive/biometric, offline).
@@ -236,20 +237,23 @@ type GCResultMsg struct {
 }
 
 type UpdateMsg struct {
-	SessionID string  `json:"session_id"`
-	Name      *string `json:"name,omitempty"`
-	ParentID  *string `json:"parent_id,omitempty"`
-	Starred   *bool   `json:"starred,omitempty"`
+	SessionID    string   `json:"session_id"`
+	Name         *string  `json:"name,omitempty"`
+	ParentID     *string  `json:"parent_id,omitempty"`
+	Starred      *bool    `json:"starred,omitempty"`
+	AddLabels    []string `json:"add_labels,omitempty"`
+	RemoveLabels []string `json:"remove_labels,omitempty"`
 }
 
 // UpdateResultMsg reports the persisted metadata after an update. Starred and
 // parent_id deliberately do not use omitempty so false and orphaned state remain
 // explicit for JSON and remote clients.
 type UpdateResultMsg struct {
-	SessionID string `json:"session_id"`
-	Name      string `json:"name"`
-	ParentID  string `json:"parent_id"`
-	Starred   bool   `json:"starred"`
+	SessionID string   `json:"session_id"`
+	Name      string   `json:"name"`
+	ParentID  string   `json:"parent_id"`
+	Starred   bool     `json:"starred"`
+	Labels    []string `json:"labels"`
 }
 
 type SetStatusMsg struct {
@@ -528,6 +532,7 @@ type SessionInfo struct {
 	ID              string             `json:"id"`
 	ParentID        string             `json:"parent_id,omitempty"`
 	Name            string             `json:"name"`
+	Labels          []string           `json:"labels"`
 	RepoPath        string             `json:"repo_path"`
 	RepoName        string             `json:"repo_name"`
 	WorktreePath    string             `json:"worktree_path"`

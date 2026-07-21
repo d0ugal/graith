@@ -59,6 +59,7 @@ public struct HandshakeErrMsg: Codable, Sendable {
 
 public struct CreateMsg: Codable, Sendable {
     public var name: String
+    public var labels: [String]?
     public var parentID: String?
     public var agent: String
     public var repoPath: String
@@ -72,10 +73,11 @@ public struct CreateMsg: Codable, Sendable {
     public var allowConcurrent: Bool?
     public var skipModelValidation: Bool?
 
-    public init(name: String, agent: String, repoPath: String, base: String? = nil,
+    public init(name: String, labels: [String]? = nil, agent: String, repoPath: String, base: String? = nil,
                 prompt: String? = nil, model: String? = nil, parentID: String? = nil,
                 noRepo: Bool? = nil, agentHooks: Bool? = nil, inPlace: Bool? = nil) {
         self.name = name
+        self.labels = labels
         self.agent = agent
         self.repoPath = repoPath
         self.base = base
@@ -89,6 +91,7 @@ public struct CreateMsg: Codable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case name
+        case labels
         case parentID = "parent_id"
         case agent
         case repoPath = "repo_path"
@@ -169,17 +172,24 @@ public struct UpdateMsg: Codable, Sendable {
     public var name: String?
     public var parentID: String?
     public var starred: Bool?
-    public init(sessionID: String, name: String? = nil, parentID: String? = nil, starred: Bool? = nil) {
+    public var addLabels: [String]?
+    public var removeLabels: [String]?
+    public init(sessionID: String, name: String? = nil, parentID: String? = nil,
+                starred: Bool? = nil, addLabels: [String]? = nil, removeLabels: [String]? = nil) {
         self.sessionID = sessionID
         self.name = name
         self.parentID = parentID
         self.starred = starred
+        self.addLabels = addLabels
+        self.removeLabels = removeLabels
     }
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
         case name
         case parentID = "parent_id"
         case starred
+        case addLabels = "add_labels"
+        case removeLabels = "remove_labels"
     }
 }
 
@@ -189,17 +199,20 @@ public struct UpdateResultMsg: Codable, Sendable, Equatable {
     public var name: String
     public var parentID: String
     public var starred: Bool
-    public init(sessionID: String, name: String, parentID: String, starred: Bool) {
+    public var labels: [String]
+    public init(sessionID: String, name: String, parentID: String, starred: Bool, labels: [String] = []) {
         self.sessionID = sessionID
         self.name = name
         self.parentID = parentID
         self.starred = starred
+        self.labels = labels
     }
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
         case name
         case parentID = "parent_id"
         case starred
+        case labels
     }
 }
 
@@ -266,6 +279,7 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
     public var id: String
     public var parentID: String?
     public var name: String
+    public var labels: [String]?
     public var repoPath: String
     public var repoName: String
     public var worktreePath: String
@@ -306,7 +320,7 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
     // fixtures by hand (the synthesized memberwise init is internal). The daemon
     // path decodes these from JSON and never calls this.
     public init(
-        id: String, parentID: String? = nil, name: String, repoPath: String = "",
+        id: String, parentID: String? = nil, name: String, labels: [String]? = nil, repoPath: String = "",
         repoName: String = "", worktreePath: String = "", cwd: String = "", branch: String = "",
         baseBranch: String = "", agent: String = "claude", agentSessionID: String? = nil,
         status: String, agentStatus: String? = nil, exitCode: Int? = nil,
@@ -319,7 +333,7 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
         summaryText: String? = nil, summaryFaded: Bool? = nil, lastOutputAt: String? = nil,
         migratedFrom: String? = nil, pullRequest: PRInfo? = nil, ci: CIInfo? = nil
     ) {
-        self.id = id; self.parentID = parentID; self.name = name; self.repoPath = repoPath
+        self.id = id; self.parentID = parentID; self.name = name; self.labels = labels; self.repoPath = repoPath
         self.repoName = repoName; self.worktreePath = worktreePath; self.cwd = cwd; self.branch = branch
         self.baseBranch = baseBranch; self.agent = agent; self.agentSessionID = agentSessionID
         self.status = status; self.agentStatus = agentStatus; self.exitCode = exitCode
@@ -337,6 +351,7 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
         case id
         case parentID = "parent_id"
         case name
+        case labels
         case repoPath = "repo_path"
         case repoName = "repo_name"
         case worktreePath = "worktree_path"

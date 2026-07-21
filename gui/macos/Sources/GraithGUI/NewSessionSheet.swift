@@ -14,6 +14,7 @@ struct NewSessionSheet: View {
     @State private var agent = ""
     @State private var model = ""
     @State private var prompt = ""
+    @State private var labels = ""
     @State private var isCreating = false
     @State private var error: String?
     @State private var selectedHostID = "local"
@@ -168,6 +169,15 @@ struct NewSessionSheet: View {
                         .buttonStyle(.plain)
                         .help("Read the initial prompt from a file (--prompt-file)")
                     }
+                }
+
+                FormField(label: "Labels (comma-separated)") {
+                    TextField("bugfix, urgent", text: $labels)
+                        .textFieldStyle(.plain)
+                        .font(.system(.body, design: .monospaced))
+                        .padding(8)
+                        .background(Theme.crust)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
 
                 advancedSection
@@ -335,6 +345,7 @@ struct NewSessionSheet: View {
             repoPath: repoPath,
             model: model,
             prompt: prompt,
+            labels: FleetModel.parseLabels(labels),
             base: base,
             inPlace: inPlace,
             agentHooks: agentHooks,

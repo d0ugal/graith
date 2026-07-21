@@ -238,6 +238,7 @@ func (l *attachLoop) overlayCreate(nc attachConn, overlayResult *client.OverlayR
 		Name:     overlayResult.CreateName,
 		RepoPath: overlayResult.CreateRepoPath,
 		Agent:    overlayResult.CreateAgent,
+		Labels:   overlayResult.CreateLabels,
 	})
 
 	createResp, err := nc.ReadControlResponse()
@@ -452,7 +453,7 @@ func (l *attachLoop) onNewSession() (bool, error) {
 	repos := client.DiscoverRepos(cfg.AllowedRepoPaths, newSessionList.Sessions)
 	agents, defaultAgent := agentChoices()
 
-	name, repoPath, agent := client.RunCreateInput(l.info.RepoPath, repos, agents, defaultAgent)
+	name, repoPath, agent, labels := client.RunCreateInput(l.info.RepoPath, repos, agents, defaultAgent)
 	if name == "" {
 		l.restoreAndAdopt(nc)
 		return false, nil
@@ -462,6 +463,7 @@ func (l *attachLoop) onNewSession() (bool, error) {
 		Name:     name,
 		RepoPath: repoPath,
 		Agent:    agent,
+		Labels:   labels,
 	})
 
 	createResp, err := nc.ReadControlResponse()

@@ -117,6 +117,7 @@ func runAttachFromOverlay(c *client.Client, sessions []protocol.SessionInfo) err
 			Name:     result.CreateName,
 			RepoPath: result.CreateRepoPath,
 			Agent:    result.CreateAgent,
+			Labels:   result.CreateLabels,
 		})
 
 		createResp, err := c.ReadControlResponse()

@@ -478,6 +478,32 @@ struct SidebarFilterBar: View {
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .help("Filter by repository")
+
+                // Cross-repository label quick filter.
+                Menu {
+                    Button("All labels") { store.labelFilter = nil }
+                    Divider()
+                    ForEach(store.availableLabels, id: \.self) { label in
+                        Button(action: { store.labelFilter = label }) {
+                            if store.labelFilter.map({ SidebarFilter.labelsEqual($0, label) }) == true {
+                                Label(label, systemImage: "checkmark")
+                            } else {
+                                Text(label)
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "tag")
+                        .font(.system(size: 10))
+                        .foregroundStyle(store.labelFilter == nil ? Theme.overlay0 : Theme.blue)
+                        .frame(width: 20, height: 18)
+                        .background(store.labelFilter == nil ? Color.clear : Theme.surface0)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Filter by label across repositories")
             }
         }
         .padding(.horizontal, 12)
@@ -562,6 +588,8 @@ struct SessionRow: View {
     // Action sheets / confirmation.
     @State private var showRename = false
     @State private var renameText = ""
+    @State private var showLabels = false
+    @State private var labelsText = ""
     @State private var showFork = false
     @State private var forkName = ""
     @State private var showMigrate = false
@@ -639,6 +667,17 @@ struct SessionRow: View {
                 confirmLabel: "Rename",
                 text: $renameText
             ) { store.renameSession(session, to: $0) }
+        }
+        .sheet(isPresented: $showLabels) {
+            SessionTextPromptSheet(
+                title: "Edit Labels",
+                fieldLabel: "Comma-separated labels",
+                placeholder: "bugfix, urgent",
+                initialText: (session.labels ?? []).joined(separator: ", "),
+                confirmLabel: "Save",
+                text: $labelsText,
+                allowsEmpty: true
+            ) { store.setLabels(session, labels: FleetModel.parseLabels($0)) }
         }
         .sheet(isPresented: $showFork) {
             SessionTextPromptSheet(
@@ -890,6 +929,10 @@ struct SessionRow: View {
                 renameText = session.name
                 showRename = true
             }
+            Button("Edit Labels…") {
+                labelsText = (session.labels ?? []).joined(separator: ", ")
+                showLabels = true
+            }
             Button((session.starred ?? false) ? "Unstar" : "Star") {
                 store.toggleStar(session)
             }
@@ -1016,6 +1059,7 @@ struct SessionTextPromptSheet: View {
     let initialText: String
     let confirmLabel: String
     @Binding var text: String
+    var allowsEmpty: Bool = false
     let onConfirm: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -1059,7 +1103,7 @@ struct SessionTextPromptSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button(confirmLabel, action: confirm)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(trimmed.isEmpty)
+                    .disabled(trimmed.isEmpty && !allowsEmpty)
             }
             .padding(20)
         }
@@ -1069,7 +1113,7 @@ struct SessionTextPromptSheet: View {
     }
 
     private func confirm() {
-        guard !trimmed.isEmpty else { return }
+        guard allowsEmpty || !trimmed.isEmpty else { return }
         onConfirm(trimmed)
         dismiss()
     }

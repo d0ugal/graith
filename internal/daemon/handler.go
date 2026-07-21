@@ -1269,6 +1269,7 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 		ID:              s.ID,
 		ParentID:        s.ParentID,
 		Name:            s.Name,
+		Labels:          append([]string{}, s.Labels...),
 		RepoPath:        s.RepoPath,
 		RepoName:        s.RepoName,
 		WorktreePath:    s.WorktreePath,

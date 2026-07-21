@@ -14,6 +14,7 @@ import (
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/sessionlabel"
 	"github.com/d0ugal/graith/internal/version"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -29,6 +30,7 @@ var (
 	listTokens   bool
 	listNoColor  bool
 	listDeleted  bool
+	listLabels   []string
 )
 
 type listConn interface {
@@ -101,7 +103,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	sessions, err = applyListFilters(sessions, listChildren, listRepo, listStarred)
+	sessions, err = applyListFilters(sessions, listChildren, listRepo, listStarred, listLabels)
 	if err != nil {
 		return err
 	}
@@ -177,8 +179,13 @@ func fetchListSessions(deleted bool) ([]protocol.SessionInfo, error) {
 // applyListFilters applies the normal session-list filters in command order.
 // Keeping selection separate from rendering ensures every projection, including
 // --tokens, sees exactly the same sessions.
-func applyListFilters(sessions []protocol.SessionInfo, children, repo string, starred bool) ([]protocol.SessionInfo, error) {
+func applyListFilters(sessions []protocol.SessionInfo, children, repo string, starred bool, labels []string) ([]protocol.SessionInfo, error) {
 	filtered := sessions
+
+	requestedLabels, err := sessionlabel.Normalize(labels)
+	if err != nil {
+		return nil, err
+	}
 
 	if children != "" {
 		parent := findSession(filtered, children)
@@ -209,6 +216,17 @@ func applyListFilters(sessions []protocol.SessionInfo, children, repo string, st
 		}
 
 		filtered = starredSessions
+	}
+
+	if len(requestedLabels) > 0 {
+		labelledSessions := make([]protocol.SessionInfo, 0, len(filtered))
+		for _, s := range filtered {
+			if sessionlabel.ContainsAll(s.Labels, requestedLabels) {
+				labelledSessions = append(labelledSessions, s)
+			}
+		}
+
+		filtered = labelledSessions
 	}
 
 	return filtered, nil
@@ -568,6 +586,7 @@ func registerListCmd() {
 	listCmd.Flags().BoolVar(&listTokens, "tokens", false, "show detailed per-session token usage and totals")
 	listCmd.Flags().BoolVar(&listNoColor, "no-color", false, "disable colored status output")
 	listCmd.Flags().BoolVar(&listDeleted, "deleted", false, "show soft-deleted sessions with their expiry time")
+	listCmd.Flags().StringArrayVar(&listLabels, "label", nil, "filter by session label; repeat for AND matching")
 	listCmd.MarkFlagsMutuallyExclusive("quiet", "tokens")
 	listCmd.MarkFlagsMutuallyExclusive("wide", "tokens")
 	_ = listCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)

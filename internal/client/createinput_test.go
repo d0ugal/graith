@@ -588,6 +588,45 @@ func TestCreateSessionModel_NoAgentsEnterOnRepoSubmits(t *testing.T) {
 	}
 }
 
+func TestCreateSessionModel_LabelsAreOptionalAndSubmitted(t *testing.T) {
+	m := newCreateSessionModel("/tmp/repo", nil, nil, "")
+	m.nameInput.SetValue("braw-session")
+	m = updateModel(m, keyPress("tab")) // name -> repo
+	m = updateModel(m, keyPress("tab")) // repo -> labels (optional path)
+
+	if m.focus != createFieldLabels {
+		t.Fatalf("expected labels focus, got %d", m.focus)
+	}
+
+	m.labelsInput.SetValue(" Urgent , release ")
+	m = updateModel(m, keyPress("enter"))
+
+	if !m.done {
+		t.Fatal("enter on labels should submit valid required fields")
+	}
+
+	got := m.selectedLabels()
+	if len(got) != 2 || got[0] != "Urgent" || got[1] != "release" {
+		t.Fatalf("selected labels = %#v", got)
+	}
+}
+
+func TestCreateSessionModel_LabelsFollowAgentAndShiftTabReturns(t *testing.T) {
+	m := newCreateSessionModel("/tmp/repo", nil, []string{"claude", "codex"}, "claude")
+	m = updateModel(m, keyPress("tab")) // name -> repo
+	m = updateModel(m, keyPress("tab")) // repo -> agent
+	m = updateModel(m, keyPress("tab")) // agent -> labels
+
+	if m.focus != createFieldLabels {
+		t.Fatalf("expected labels focus, got %d", m.focus)
+	}
+
+	m = updateModel(m, keyPress("shift+tab"))
+	if m.focus != createFieldAgent {
+		t.Fatalf("expected shift+tab from labels to return to agent, got %d", m.focus)
+	}
+}
+
 func TestCreateSessionModel_WindowSizeUpdates(t *testing.T) {
 	m := newCreateSessionModel("", nil, nil, "")
 

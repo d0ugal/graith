@@ -73,6 +73,7 @@ Cycle with `h`/`l` or arrows:
 |------|-------------|
 | All | Every session, grouped by repo. Starred first, then running, then by name |
 | Starred | Starred sessions only |
+| Labels | Sessions grouped by label across all repositories; a multi-labelled session appears in each matching group |
 | Scenarios | Every session grouped by scenario, with unassigned sessions in a separate group |
 | Deleted | Recently deleted sessions; press `enter` to restore the highlighted session |
 
@@ -80,17 +81,23 @@ Cycle with `h`/`l` or arrows:
 
 | Key | Action |
 |-----|--------|
-| `n` | Create a new session (opens a form with name and repo fields) |
+| `n` | Create a new session (opens a form with name, repo, agent, and optional comma-separated labels) |
 | `x` | Delete session (prompts for confirmation with `y`) |
 | `s` | Toggle starred state |
 | `r` | Restart session (prompts for confirmation) |
 | `R` | Restart all sessions in current view (prompts for confirmation) |
 | Space | Fold/unfold children of a parent session |
 | `C` | Fold/unfold all parent sessions |
-| `/` | Enter filter mode (type to search by name or repo) |
+| `/` | Enter filter mode (type to search by name, repo, or label) |
 | Esc (in filter) | Clear filter and return to list |
 
-The overlay has no stop, resume, or rename action — use `gr stop`, `gr restart`, or `gr update <session> --name <new-name>` from the CLI.
+Text search narrows the selected view, so searching while in **Labels** keeps the
+cross-repository label grouping. Refresh preserves the selected label group when
+the session still belongs to it. An empty Labels view says that there are no
+labelled sessions.
+
+The overlay has no stop, resume, rename, or label-edit action — use `gr stop`,
+`gr restart`, or `gr update` from the CLI.
 
 ### Preview panel
 

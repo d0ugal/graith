@@ -12,6 +12,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
+	"github.com/d0ugal/graith/internal/sessionlabel"
 )
 
 func sanitizeSummaryText(text string) string {
@@ -81,9 +82,26 @@ func (sm *SessionManager) ClearSummary(sessionID string) error {
 	return sm.saveState()
 }
 
-// Update atomically validates, applies, and persists the requested session
-// metadata fields. Nil fields are left unchanged.
+// SessionUpdate is an atomic delta over mutable session metadata. Nil scalar
+// fields are left unchanged; labels are individual add/remove operations so a
+// stale client never replaces another client's complete set.
+type SessionUpdate struct {
+	Name         *string
+	ParentID     *string
+	Starred      *bool
+	AddLabels    []string
+	RemoveLabels []string
+}
+
+// Update preserves the pre-label call shape for internal lifecycle callers.
 func (sm *SessionManager) Update(id string, name *string, parentID *string, starred *bool) (SessionState, error) {
+	return sm.UpdateMetadata(id, SessionUpdate{Name: name, ParentID: parentID, Starred: starred})
+}
+
+// UpdateMetadata atomically validates, applies, and persists the requested
+// session metadata fields. A failed save restores the complete in-memory
+// snapshot, so callers never observe a mutation that exists only in RAM.
+func (sm *SessionManager) UpdateMetadata(id string, update SessionUpdate) (SessionState, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -104,16 +122,27 @@ func (sm *SessionManager) Update(id string, name *string, parentID *string, star
 		return SessionState{}, errSoftDeleted(s.Name)
 	}
 
-	if name != nil {
-		if err := ValidateSessionName(*name); err != nil {
+	if update.Name != nil {
+		if err := ValidateSessionName(*update.Name); err != nil {
+			return SessionState{}, err
+		}
+	}
+
+	labels := s.Labels
+
+	if len(update.AddLabels) > 0 || len(update.RemoveLabels) > 0 {
+		var err error
+
+		labels, err = sessionlabel.Apply(s.Labels, update.AddLabels, update.RemoveLabels)
+		if err != nil {
 			return SessionState{}, err
 		}
 	}
 
 	newParentValue := s.ParentID
 
-	if parentID != nil {
-		newParent := *parentID
+	if update.ParentID != nil {
+		newParent := *update.ParentID
 		if newParent == "" {
 			newParentValue = ""
 		} else {
@@ -136,16 +165,23 @@ func (sm *SessionManager) Update(id string, name *string, parentID *string, star
 		}
 	}
 
-	if name != nil {
-		s.Name = *name
+	before := cloneSessionState(s)
+
+	if update.Name != nil {
+		s.Name = *update.Name
 	}
 
 	s.ParentID = newParentValue
-	if starred != nil {
-		s.Starred = *starred
+	if update.Starred != nil {
+		s.Starred = *update.Starred
+	}
+
+	if len(update.AddLabels) > 0 || len(update.RemoveLabels) > 0 {
+		s.Labels = labels
 	}
 
 	if err := sm.saveState(); err != nil {
+		*s = before
 		return SessionState{}, err
 	}
 

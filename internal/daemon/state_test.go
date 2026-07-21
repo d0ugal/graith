@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1118,7 +1119,32 @@ func TestMigrateV23ToV24PreservesPopulatedUpgradeCleanup(t *testing.T) {
 	}
 }
 
-func TestMigrateV22ToCurrentAppliesBothMigrations(t *testing.T) {
+func TestMigrateV25ToV26InitializesSessionLabels(t *testing.T) {
+	state := &State{
+		Version: 25,
+		Sessions: map[string]*SessionState{
+			"braw":  {ID: "braw"},
+			"canny": {ID: "canny", Labels: []string{"release"}},
+		},
+	}
+	if err := migrateState(state); err != nil {
+		t.Fatal(err)
+	}
+
+	if state.Version != 26 {
+		t.Fatalf("migrated version = %d, want 26", state.Version)
+	}
+
+	if state.Sessions["braw"].Labels == nil || len(state.Sessions["braw"].Labels) != 0 {
+		t.Fatalf("existing session labels = %#v, want explicit empty set", state.Sessions["braw"].Labels)
+	}
+
+	if !reflect.DeepEqual(state.Sessions["canny"].Labels, []string{"release"}) {
+		t.Fatalf("populated labels changed: %#v", state.Sessions["canny"].Labels)
+	}
+}
+
+func TestMigrateV22ToCurrentAppliesAllMigrations(t *testing.T) {
 	state := &State{
 		Version: 22,
 		Sessions: map[string]*SessionState{
@@ -1140,11 +1166,15 @@ func TestMigrateV22ToCurrentAppliesBothMigrations(t *testing.T) {
 	if state.UpgradeCleanup == nil {
 		t.Fatal("full migration chain left upgrade cleanup registry nil")
 	}
+
+	if state.Sessions["thrawn"].Labels == nil {
+		t.Fatal("full migration chain left session labels nil")
+	}
 }
 
 func TestStateMigrationsRegisteredSequentially(t *testing.T) {
-	if CurrentStateVersion != 25 {
-		t.Fatalf("CurrentStateVersion = %d, want 25", CurrentStateVersion)
+	if CurrentStateVersion != 26 {
+		t.Fatalf("CurrentStateVersion = %d, want 26", CurrentStateVersion)
 	}
 
 	if len(migrations) != CurrentStateVersion {

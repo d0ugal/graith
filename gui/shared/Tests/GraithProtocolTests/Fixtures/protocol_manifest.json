@@ -373,6 +373,16 @@
           "optional": false
         },
         {
+          "name": "labels",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
+        },
+        {
           "name": "parent_id",
           "type": {
             "kind": "string"
@@ -3776,6 +3786,16 @@
           "optional": false
         },
         {
+          "name": "labels",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": false
+        },
+        {
           "name": "repo_path",
           "type": {
             "kind": "string"
@@ -5262,6 +5282,26 @@
             "kind": "bool"
           },
           "optional": true
+        },
+        {
+          "name": "add_labels",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "remove_labels",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
         }
       ]
     },
@@ -5295,6 +5335,16 @@
           "name": "starred",
           "type": {
             "kind": "bool"
+          },
+          "optional": false
+        },
+        {
+          "name": "labels",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
           },
           "optional": false
         }

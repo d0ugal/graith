@@ -358,12 +358,17 @@ public actor GraithProtocolClient {
         sessionID: String,
         name: String? = nil,
         parentID: String? = nil,
-        starred: Bool? = nil
+        starred: Bool? = nil,
+        addLabels: [String]? = nil,
+        removeLabels: [String]? = nil
     ) async throws -> UpdateResultMsg {
         let conn = try await controlConnection()
         let reply = try await conn.request(
             "update",
-            payload: UpdateMsg(sessionID: sessionID, name: name, parentID: parentID, starred: starred)
+            payload: UpdateMsg(
+                sessionID: sessionID, name: name, parentID: parentID, starred: starred,
+                addLabels: addLabels, removeLabels: removeLabels
+            )
         )
         return try decodePayload(reply, as: UpdateResultMsg.self)
     }
