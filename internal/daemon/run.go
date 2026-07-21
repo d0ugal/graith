@@ -15,6 +15,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemonservice"
+	"github.com/d0ugal/graith/internal/processidentity"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/tools"
 )
@@ -27,7 +28,7 @@ var validateRetainedAdoptedService = daemonservice.ValidateRetainedAdoptedServic
 // pre-v0.11 socket path ($TMPDIR or /tmp). Without this, upgrading would
 // leave an orphaned daemon since the new CLI can't reach the old socket.
 func cleanupLegacyDaemon(log *slog.Logger) {
-	cleanupLegacyDaemonDirs(config.LegacyRuntimeDirs(), log, net.DialTimeout, IsGraithDaemon, syscall.Kill)
+	cleanupLegacyDaemonDirs(config.LegacyRuntimeDirs(), log, net.DialTimeout, processidentity.IsGraithDaemon, syscall.Kill)
 }
 
 type legacyDialer func(network, address string, timeout time.Duration) (net.Conn, error)
