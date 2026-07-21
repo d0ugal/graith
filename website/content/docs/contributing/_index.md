@@ -227,7 +227,7 @@ make demo-clean   # tear down the demo env if a run is interrupted
 
 `make demo` uses a dedicated, isolated `GRAITH_PROFILE=demo` instance with your real local agents (`claude`/`codex`) and sandbox config, copied from your default config. The tape types real prompts, so it spends some API budget. Setup lives in `demo/`; see [`demo/README.md`](https://github.com/d0ugal/graith/blob/main/demo/README.md) for the tape format.
 
-Setup and teardown require matching ownership proofs on the demo config, data, and runtime paths. They refuse changed or pre-existing state rather than adopting or deleting it; a deliberately edited demo config must be checked and removed manually. On Linux, `XDG_RUNTIME_DIR` must be set so the harness and CLI agree on the runtime target. Removing only an owned runtime directory is safe: the next setup reconstructs it from the durable config and data proofs.
+Setup and teardown require matching ownership proofs on the demo config, data, and runtime paths. They refuse changed or pre-existing state rather than adopting or deleting it; a deliberately edited demo config must be checked and removed manually. On Linux, `XDG_RUNTIME_DIR` must be set so the harness and CLI agree on the runtime target. macOS also requires it when `XDG_DATA_HOME` is customized. Removing only an owned runtime directory is safe: the next setup reconstructs it from the durable config and data proofs.
 
 Recording must run **locally and unsandboxed** (VHS needs a real TTY, the daemon binds a unix socket, sessions create git worktrees), so it's not a CI step.
 

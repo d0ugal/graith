@@ -354,7 +354,7 @@ assert_refuses_rebound_config() {
 	[ ! -s "$fixture/gr.log" ] || fail "setup contacted gr for rebound config"
 }
 
-assert_linux_refuses_untracked_runtime_fallback() {
+assert_refuses_untracked_runtime_fallback() {
 	new_fake_fixture "unset-runtime-setup"
 	mkdir -p "$fixture/bin"
 	cat > "$fixture/bin/uname" <<'EOF'
@@ -379,6 +379,33 @@ EOF
 	fi
 	assert_sentinels "$fixture"
 	[ ! -s "$fixture/gr.log" ] || fail "unset-runtime teardown contacted gr"
+
+	new_fake_fixture "darwin-custom-data-unset-runtime-setup"
+	mkdir -p "$fixture/bin"
+	cat > "$fixture/bin/uname" <<'EOF'
+#!/usr/bin/env bash
+printf 'Darwin\n'
+EOF
+	chmod +x "$fixture/bin/uname"
+	if XDG_DATA_HOME="$fixture/custom-data" PATH="$fixture/bin:$PATH" \
+		run_setup_without_runtime "$fixture" >/dev/null 2>&1; then
+		fail "macOS setup accepted custom XDG data with an unset runtime"
+	fi
+	[ ! -e "$fixture/config/graith-demo" ] || fail "macOS unset-runtime setup created config state"
+	[ ! -e "$fixture/home/.graith-demo" ] || fail "macOS unset-runtime setup created data state"
+	[ ! -s "$fixture/gr.log" ] || fail "macOS unset-runtime setup contacted gr"
+
+	new_fake_fixture "darwin-custom-data-unset-runtime-teardown"
+	write_owned_profile "$fixture" "$OWNER_A"
+	add_sentinels "$fixture"
+	mkdir -p "$fixture/bin"
+	cp "$TEST_ROOT/darwin-custom-data-unset-runtime-setup/bin/uname" "$fixture/bin/uname"
+	if XDG_DATA_HOME="$fixture/custom-data" PATH="$fixture/bin:$PATH" \
+		run_teardown_without_runtime "$fixture" >/dev/null 2>&1; then
+		fail "macOS teardown accepted custom XDG data with an unset runtime"
+	fi
+	assert_sentinels "$fixture"
+	[ ! -s "$fixture/gr.log" ] || fail "macOS unset-runtime teardown contacted gr"
 }
 
 assert_replacement_at_remove_boundary_is_preserved() {
@@ -401,6 +428,39 @@ EOF
 		fail "teardown removed the replacement config directory"
 	[ -d "$fixture/home/.graith-demo" ] || fail "teardown continued after the removal race"
 	[ -d "$fixture/runtime/graith-demo" ] || fail "teardown removed runtime after the removal race"
+}
+
+assert_quarantine_swap_is_inode_bound() {
+	new_fake_fixture "teardown-quarantine-race"
+	write_owned_profile "$fixture" "$OWNER_A"
+	mkdir -p "$fixture/bin"
+	cat > "$fixture/bin/cat" <<'EOF'
+#!/usr/bin/env bash
+output="$(/bin/cat "$@")" || exit
+printf '%s\n' "$output"
+case "$PWD" in
+	*.graith-removing-*)
+		if [ ! -e "${GRAITH_DEMO_TEST_SWAP_ONCE:?}" ]; then
+			: > "$GRAITH_DEMO_TEST_SWAP_ONCE"
+			parent="${PWD%/*}"
+			base="${PWD##*/}"
+			/bin/mv "$PWD" "$parent/$base-owned"
+			mkdir "$PWD"
+			printf 'canny\n' > "$PWD/quarantine-replacement-sentinel"
+		fi
+		;;
+esac
+EOF
+	chmod +x "$fixture/bin/cat"
+	if GRAITH_DEMO_TEST_SWAP_ONCE="$fixture/swap-once" PATH="$fixture/bin:$PATH" \
+		run_teardown "$fixture" >/dev/null 2>&1; then
+		fail "teardown ignored a swapped quarantine target"
+	fi
+	quarantine="$fixture/config/.graith-demo.graith-removing-$OWNER_A"
+	[ "$(/bin/cat "$quarantine/quarantine-replacement-sentinel")" = "canny" ] ||
+		fail "teardown recursively deleted a swapped quarantine target"
+	[ -d "$fixture/home/.graith-demo" ] || fail "teardown continued after the quarantine race"
+	[ -d "$fixture/runtime/graith-demo" ] || fail "teardown removed runtime after the quarantine race"
 }
 
 build_real_gr() {
@@ -479,12 +539,13 @@ for target in config data runtime; do
 done
 assert_refuses_present_runtime_mismatch
 assert_refuses_rebound_config
-assert_linux_refuses_untracked_runtime_fallback
+assert_refuses_untracked_runtime_fallback
 assert_owned_teardown_is_idempotent
 assert_refuses_on_active_list_failure
 assert_refuses_before_any_purge
 assert_refuses_after_purge_or_stop_failure
 assert_replacement_at_remove_boundary_is_preserved
+assert_quarantine_swap_is_inode_bound
 assert_setup_reruns_after_runtime_cleanup
 if [ "${GRAITH_DEMO_TEST_SKIP_REAL:-0}" -eq 1 ]; then
 	echo "skipping real-CLI demo tests (GRAITH_DEMO_TEST_SKIP_REAL=1)"

@@ -89,7 +89,8 @@ On Linux, `XDG_RUNTIME_DIR` must be set. Graith otherwise falls back to a
 separate `/run/user/<uid>` location that the harness cannot safely associate
 with its fixed demo paths, so setup and teardown fail closed instead of
 contacting an untracked daemon. macOS safely folds its unset-XDG runtime
-fallback into the owned demo data directory.
+fallback into the owned demo data directory only with the default data home;
+when `XDG_DATA_HOME` is customized, set `XDG_RUNTIME_DIR` explicitly too.
 
 The generated config is covered by an ownership checksum. Editing it after
 setup—including changing `data_dir`—makes both setup and teardown refuse; clean
