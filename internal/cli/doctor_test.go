@@ -567,6 +567,7 @@ func TestDoctorJSONReportsTerminalBackend(t *testing.T) {
 	daemonGCFetch = func(bool) ([]protocol.GCOrphanInfo, error) { return nil, nil }
 
 	var buf bytes.Buffer
+
 	out = output.NewWithWriter(true, &buf)
 	doctorDaemonProbe = func(*doctorContext) daemonProbe {
 		return daemonProbe{
@@ -589,9 +590,11 @@ func TestDoctorJSONReportsTerminalBackend(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &report); err != nil {
 		t.Fatalf("decode doctor JSON: %v\n%s", err, buf.String())
 	}
+
 	if report.TerminalBackend != grpty.TerminalBackend() {
 		t.Errorf("terminal_backend = %q, want %q", report.TerminalBackend, grpty.TerminalBackend())
 	}
+
 	if report.Diagnostics == nil || report.Diagnostics.TerminalBackend != grpty.TerminalBackend() {
 		t.Errorf("diagnostics.terminal_backend = %v, want %q", report.Diagnostics, grpty.TerminalBackend())
 	}

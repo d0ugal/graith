@@ -859,6 +859,7 @@ func (dc *doctorContext) checkDaemon(probe daemonProbe) *protocol.DiagnosticsMsg
 	}
 
 	dc.passf("daemon", "Running (PID %d, uptime %s)", probe.diag.DaemonPID, probe.diag.DaemonUptime)
+
 	if probe.diag.TerminalBackend != "" {
 		dc.passf("daemon", "Terminal backend: %s", probe.diag.TerminalBackend)
 	}
