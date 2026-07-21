@@ -2,28 +2,60 @@ name: libghostty-vt native backend
 
 on:
   workflow_dispatch:
+  # This workflow deliberately has no workflow-level path filter. The final
+  # `Native backend gate` job is intended to be required in branch protection,
+  # so it must report on every pull request. The `changes` job keeps the costly
+  # native matrix off unrelated changes by skipping it at job level instead.
   pull_request:
-    paths:
-      - .github/workflows/libghostty-native.yml
-      - docs/design/2026-07-18-libghostty-daemon-backend*.md
-      - gui/shared/Package.swift
-      - gui/shared/Sources/CGhosttyVT/include/**
-      - go.mod
-      - go.sum
-      - internal/cli/**
-      - internal/daemon/**
-      - internal/integration/**
-      - internal/pty/**
-      - libghostty-native.spdx.json
-      - scripts/libghostty-native.sh
-      - THIRD_PARTY_NOTICES.libghostty.md
 
 permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Detect libghostty-relevant changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      native: ${{ steps.filter.outputs.native }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # Manual dispatch exists to exercise the complete native matrix.
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "native=true" >> "$GITHUB_OUTPUT"
+            echo "Non-PR event ($EVENT): running native jobs."
+            exit 0
+          fi
+          # Fail safe toward running the native jobs if GitHub cannot provide
+          # the authoritative PR file list.
+          if ! files="$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')"; then
+            echo "native=true" >> "$GITHUB_OUTPUT"
+            echo "Could not list PR files; running native jobs to be safe."
+            exit 0
+          fi
+          if grep -Eq '^\.github/workflows/libghostty-native\.yml$|^docs/design/2026-07-18-libghostty-daemon-backend.*\.md$|^gui/shared/Package\.swift$|^gui/shared/Sources/CGhosttyVT/include/|^go\.(mod|sum)$|^internal/(cli|daemon|integration|pty)/|^libghostty-native\.spdx\.json$|^scripts/libghostty-native\.sh$|^THIRD_PARTY_NOTICES\.libghostty\.md$' <<<"$files"; then
+            echo "native=true" >> "$GITHUB_OUTPUT"
+            echo "libghostty-relevant files changed: running native jobs."
+          else
+            echo "native=false" >> "$GITHUB_OUTPUT"
+            echo "No libghostty-relevant files changed: skipping native jobs."
+          fi
+
   default-builds:
     name: Default build (${{ matrix.goos }}/${{ matrix.goarch }}, no cgo)
+    needs: changes
+    if: >-
+      !cancelled() &&
+      (needs.changes.result != 'success' || needs.changes.outputs.native == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -56,6 +88,10 @@ jobs:
 
   apple-adapter:
     name: Adapter and pinned artifact (macOS arm64)
+    needs: changes
+    if: >-
+      !cancelled() &&
+      (needs.changes.result != 'success' || needs.changes.outputs.native == 'true')
     runs-on: macos-26
     timeout-minutes: 15
     steps:
@@ -227,3 +263,36 @@ jobs:
           name: gr-libghostty-linux-${{ matrix.goarch }}
           path: ${{ runner.temp }}/native-binaries/
           if-no-files-found: error
+
+  native-gate:
+    name: Native backend gate
+    if: always()
+    needs:
+      - changes
+      - default-builds
+      - apple-adapter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require relevant native jobs to pass
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          NATIVE_RELEVANT: ${{ needs.changes.outputs.native }}
+          DEFAULT_BUILDS_RESULT: ${{ needs.default-builds.result }}
+          APPLE_ADAPTER_RESULT: ${{ needs.apple-adapter.result }}
+        run: |
+          set -euo pipefail
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "Change detection did not succeed: $CHANGES_RESULT" >&2
+            exit 1
+          fi
+          if [ "$NATIVE_RELEVANT" != "true" ]; then
+            echo "No libghostty-relevant files changed; native gate passes."
+            exit 0
+          fi
+          if [ "$DEFAULT_BUILDS_RESULT" != "success" ] || [ "$APPLE_ADAPTER_RESULT" != "success" ]; then
+            echo "Required native jobs did not pass:" >&2
+            echo "  default builds: $DEFAULT_BUILDS_RESULT" >&2
+            echo "  macOS arm64 adapter: $APPLE_ADAPTER_RESULT" >&2
+            exit 1
+          fi
+          echo "Required native jobs passed."
