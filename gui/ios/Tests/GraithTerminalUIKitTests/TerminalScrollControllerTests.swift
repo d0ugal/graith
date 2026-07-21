@@ -237,7 +237,7 @@ final class TerminalScrollControllerTests: XCTestCase {
         }
     }
 
-    func testExtremeFiniteMomentumFailsSafeToIdle() {
+    func testElapsedDurationFailsSafeToIdle() {
         var c = TerminalScrollController(
             friction: 1,
             momentumCutoff: 1,
@@ -246,20 +246,63 @@ final class TerminalScrollControllerTests: XCTestCase {
         c.beginDrag()
         c.endDrag(velocityY: -1_000_000_000)
 
-        for _ in 0..<600 where c.isSettling {
-            _ = c.tick(dt: 1.0 / 60.0)
+        for _ in 0..<10 where c.isSettling {
+            _ = c.tick(dt: 1)
         }
         XCTAssertFalse(c.isSettling)
         XCTAssertEqual(c.phase, .idle)
     }
 
-    func testNonFiniteTickFailsSafeToIdle() {
-        var c = makeController()
+    func testNonProgressingAndNonFiniteTicksFailSafeToIdle() {
+        let invalidDeltas: [CGFloat] = [0, -1, .nan, .infinity, -.infinity]
+        for dt in invalidDeltas {
+            var c = makeController()
+            c.beginDrag()
+            c.endDrag(velocityY: -1200)
+            _ = c.tick(dt: dt)
+            XCTAssertEqual(c.phase, .idle, "dt \(dt) did not reach idle")
+            XCTAssertFalse(c.isSettling, "dt \(dt) left the controller settling")
+        }
+    }
+
+    func testLargeFrameDeltaUsesStableIntegrationStep() {
+        let config = TerminalGestureConfig(
+            scrollSpringStiffness: 400,
+            scrollSpringDamping: 29)
+        var c = TerminalScrollController(config: config)
         c.beginDrag()
-        c.endDrag(velocityY: -1200)
-        _ = c.tick(dt: .nan)
-        XCTAssertEqual(c.phase, .idle)
+        c.absorbOverscroll(rows: 6)
+        c.endDrag(velocityY: 0)
+
+        for _ in 0..<100 where c.isSettling {
+            _ = c.tick(dt: 0.06)
+        }
         XCTAssertFalse(c.isSettling)
+        XCTAssertEqual(c.phase, .idle)
+    }
+
+    func testUnrepresentableMotionFailsSafeInsteadOfTrapping() {
+        let releaseVelocities: [CGFloat] = [
+            .greatestFiniteMagnitude,
+            -.greatestFiniteMagnitude,
+            .infinity,
+            -.infinity,
+        ]
+
+        for releaseVelocity in releaseVelocities {
+            var momentum = makeController()
+            momentum.beginDrag()
+            momentum.endDrag(velocityY: releaseVelocity)
+            _ = momentum.tick(dt: 1.0 / 60.0)
+            XCTAssertFalse(momentum.isSettling, "velocity \(releaseVelocity) left momentum settling")
+
+            var spring = makeController()
+            spring.beginDrag()
+            spring.absorbOverscroll(rows: 6)
+            spring.endDrag(velocityY: releaseVelocity)
+            _ = spring.tick(dt: 1.0 / 60.0)
+            XCTAssertFalse(spring.isSettling, "velocity \(releaseVelocity) left spring settling")
+        }
     }
 
     // MARK: - Indicator thumb

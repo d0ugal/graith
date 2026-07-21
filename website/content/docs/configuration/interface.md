@@ -98,8 +98,9 @@ Only genuine preferences are configurable here. Layout invariants — the picker
 ## iOS terminal gesture physics
 
 The iOS terminal reads its touch-scroll feel from namespaced `UserDefaults`
-keys. Missing keys use the shipped default, non-finite values also fall back to
-that default, and finite values outside the accepted range are clamped.
+keys. For the settle-critical scroll keys below, missing or non-finite values
+use the shipped default, and finite values outside the accepted range are
+clamped.
 
 | `UserDefaults` key | Default | Accepted range |
 |--------------------|---------|----------------|

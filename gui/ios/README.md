@@ -48,9 +48,9 @@ select — read their **feel** knobs from `TerminalGestureConfig`
 (`shared/GraithSessionKit`). Defaults match the previously hard-coded values, and
 `BaseTerminalUIView` loads overrides from `UserDefaults.standard` at view
 creation, so the feel can be retuned without rebuilding (e.g. via `defaults
-write` on a key below, or a future settings screen). Non-finite values fall back
-to the shipped default. Finite values are clamped; settle-critical ranges are
-friction `1...60`, cutoff `1...10000`, stiffness `30...400`, and damping
+write` on a key below, or a future settings screen). Non-finite settle-critical
+scroll values fall back to the shipped default. Finite values are clamped;
+settle-critical ranges are friction `1...60`, cutoff `1...10000`, stiffness `30...400`, and damping
 `4...29`. The spring maxima satisfy the controller's semi-implicit integration
 stability bound at its 50 ms maximum step, and the controller snaps safely idle
 after ten seconds as a final fail-safe.

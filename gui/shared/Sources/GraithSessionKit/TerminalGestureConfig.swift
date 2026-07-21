@@ -107,8 +107,8 @@ public struct TerminalGestureConfig: Equatable, Sendable {
 
     /// Memberwise init with finite, stability-safe clamping so an out-of-range
     /// value (from user defaults or a caller) can't wedge the physics. Non-finite
-    /// values fall back to their shipped values instead of leaking NaN through
-    /// comparisons. Bounds mirror the per-component clamps so
+    /// settle-critical scroll values fall back to their shipped values instead
+    /// of leaking NaN through comparisons. Bounds mirror the per-component clamps so
     /// `TerminalGestureConfig` is self-consistent regardless of source.
     public init(scrollFriction: CGFloat = TerminalGestureConfig.default.scrollFriction,
                 scrollMomentumCutoff: CGFloat = TerminalGestureConfig.default.scrollMomentumCutoff,
@@ -127,16 +127,11 @@ public struct TerminalGestureConfig: Equatable, Sendable {
                                                     fallback: Shipped.scrollSpringStiffness)
         self.scrollSpringDamping = Self.normalize(scrollSpringDamping, to: Range.scrollSpringDamping,
                                                   fallback: Shipped.scrollSpringDamping)
-        self.spaceActivationThreshold = Self.normalize(spaceActivationThreshold, minimum: 1,
-                                                       fallback: Shipped.spaceActivationThreshold)
-        self.spaceInitialRepeatDelay = Self.normalize(spaceInitialRepeatDelay, minimum: 0,
-                                                      fallback: Shipped.spaceInitialRepeatDelay)
-        self.spaceRepeatInterval = Self.normalize(spaceRepeatInterval, minimum: 0.001,
-                                                  fallback: Shipped.spaceRepeatInterval)
-        self.spaceDirectionHysteresis = Self.normalize(spaceDirectionHysteresis, minimum: 1,
-                                                       fallback: Shipped.spaceDirectionHysteresis)
-        self.selectionLongPressDuration = Self.normalize(selectionLongPressDuration, minimum: 0,
-                                                         fallback: Shipped.selectionLongPressDuration)
+        self.spaceActivationThreshold = max(1, spaceActivationThreshold)
+        self.spaceInitialRepeatDelay = max(0, spaceInitialRepeatDelay)
+        self.spaceRepeatInterval = max(0.001, spaceRepeatInterval)
+        self.spaceDirectionHysteresis = max(1, spaceDirectionHysteresis)
+        self.selectionLongPressDuration = max(0, selectionLongPressDuration)
     }
 
     private static func normalize<T: BinaryFloatingPoint>(_ value: T,
@@ -145,14 +140,6 @@ public struct TerminalGestureConfig: Equatable, Sendable {
         guard value.isFinite else { return fallback }
         return min(range.upperBound, max(range.lowerBound, value))
     }
-
-    private static func normalize<T: BinaryFloatingPoint>(_ value: T,
-                                                           minimum: T,
-                                                           fallback: T) -> T {
-        guard value.isFinite else { return fallback }
-        return max(minimum, value)
-    }
-
     // MARK: - UserDefaults
 
     /// The `UserDefaults` keys each tunable is read from. Namespaced under
