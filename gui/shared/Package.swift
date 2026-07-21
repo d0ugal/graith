@@ -88,11 +88,11 @@ let package = Package(
                 .define("GHOSTTY_STATIC"),
             ]
         ),
-        // Not a committed artifact: a checksummed remote binaryTarget pinned to
-        // Ghostty @ 91f66da. SPM downloads it once, caches it, and verifies the
-        // checksum on every resolve, so the ~10 MB xcframework stays out of git
-        // while the build remains reproducible. Rebuild + re-upload via
-        // build-libghostty.sh and bump the url/checksum to move the pin.
+        // Not a committed artifact: a checksummed remote binaryTarget. SPM
+        // downloads it once, caches it, and verifies the checksum on every
+        // resolve, so the ~10 MB xcframework stays out of git while the build
+        // remains reproducible. The dependency-unit generator projects the
+        // reviewed artifact URL and checksum from the canonical lock.
         .binaryTarget(
             name: "GhosttyVt",
             url: "https://github.com/d0ugal/graith/releases/download/libghostty-vt-d4ac93a/libghostty-vt.xcframework.zip",

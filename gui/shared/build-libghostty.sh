@@ -61,6 +61,9 @@ if [[ ! -d "$WORK/ghostty/.git" ]]; then
 fi
 git -C "$WORK/ghostty" fetch --depth 1 origin "$GHOSTTY_SHA" 2>/dev/null || true
 git -C "$WORK/ghostty" checkout -q "$GHOSTTY_SHA"
+# WORK may be reused across pin rotations. Remove the previous install tree so
+# an output renamed by Ghostty cannot remain beside and shadow the fresh one.
+rm -rf "$WORK/ghostty/zig-out"
 
 echo "==> Building universal libghostty-vt.xcframework (macos + ios + ios-sim)"
 # Ghostty emits the xcframework itself when both flags are set on a Darwin host.
