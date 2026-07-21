@@ -881,6 +881,35 @@ func TestCurrentOpenDescriptorCountUsesDirectoryFastPath(t *testing.T) {
 	}
 }
 
+func TestOpenDescriptorDirectoryCountWithActiveDescriptors(t *testing.T) {
+	const opened = 64
+
+	files := make([]*os.File, 0, opened)
+	for range opened {
+		file, err := os.Open(os.DevNull)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		files = append(files, file)
+	}
+
+	t.Cleanup(func() {
+		for _, file := range files {
+			closeUpgradeTestFile(t, file)
+		}
+	})
+
+	count, err := openDescriptorDirectoryCount("/dev/fd")
+	if err != nil {
+		t.Fatalf("count active descriptors: %v", err)
+	}
+
+	if count < opened {
+		t.Fatalf("open descriptor count = %d, want at least %d", count, opened)
+	}
+}
+
 func TestCurrentOpenDescriptorCountRejectsInfiniteLimit(t *testing.T) {
 	_, err := currentOpenDescriptorCountWith(unix.RLIM_INFINITY, func(string) (int, error) {
 		return 0, errors.New("dreich directory")
@@ -1809,7 +1838,7 @@ func TestProbeUpgradeTargetBoundsOutputAndTime(t *testing.T) {
 		script string
 	}{
 		{"oversized", "#!/bin/sh\nhead -c 1025 /dev/zero\n"},
-		{"timeout", "#!/bin/sh\nsleep 3\n"},
+		{"timeout", "#!/bin/sh\nsleep 10\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1820,11 +1849,16 @@ func TestProbeUpgradeTargetBoundsOutputAndTime(t *testing.T) {
 
 			started := time.Now()
 
-			if _, err := probeUpgradeTarget(path); err == nil {
+			_, err := probeUpgradeTarget(path)
+			if err == nil {
 				t.Fatal("probeUpgradeTarget succeeded")
 			}
 
-			if time.Since(started) > 4*time.Second {
+			if tt.name == "timeout" && !strings.Contains(err.Error(), "timed out") {
+				t.Fatalf("probeUpgradeTarget error = %v, want timeout", err)
+			}
+
+			if time.Since(started) > upgradeCapacityProbeTimeout+time.Second {
 				t.Fatal("capacity probe was not bounded")
 			}
 		})
@@ -2859,14 +2893,80 @@ func TestWaitForProcessGroupGoneUntilHonorsExpiredDeadline(t *testing.T) {
 	}
 }
 
+func TestReapInheritedHelperKillsGroupBeforeReapingLeader(t *testing.T) {
+	readyRead, readyWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeUpgradeTestFile(t, readyRead)
+
+	cmd := exec.Command("sh", "-c", "sleep 30 & printf x >&3; sleep 0.1")
+	cmd.ExtraFiles = []*os.File{readyWrite}
+
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		closeUpgradeTestFile(t, readyWrite)
+		t.Fatal(err)
+	}
+
+	closeUpgradeTestFile(t, readyWrite)
+
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+
+	startTime, err := grpty.ProcessStartTime(cmd.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := readyRead.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	var marker [1]byte
+	if n, err := readyRead.Read(marker[:]); err != nil || n != len(marker) || marker[0] != 'x' {
+		t.Fatalf("read helper descendant marker = (%q, %v)", marker[:n], err)
+	}
+
+	err = reapInheritedHelperUntil(
+		UpgradeHelper{PID: cmd.Process.Pid, StartTime: startTime},
+		time.Now().Add(2*time.Second),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !exactProcessGroupGone(cmd.Process.Pid) {
+		t.Fatal("inherited helper descendant survived leader cleanup")
+	}
+}
+
 func TestUpgradeOwnershipGuardRetainsHelperOnIndeterminateIdentity(t *testing.T) {
-	startTime, err := grpty.ProcessStartTime(os.Getpid())
+	cmd := exec.Command("sleep", "30")
+
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+
+	startTime, err := grpty.ProcessStartTime(cmd.Process.Pid)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	original := upgradeProcessStartTime
 	upgradeProcessStartTime = func(pid int) (int64, error) {
+		if pid != cmd.Process.Pid {
+			return original(pid)
+		}
+
 		return 0, syscall.EACCES
 	}
 
@@ -2874,18 +2974,22 @@ func TestUpgradeOwnershipGuardRetainsHelperOnIndeterminateIdentity(t *testing.T)
 
 	guard := newUpgradeOwnershipGuard(&UpgradeManifest{
 		ListenerFd: -1,
-		Helpers:    []UpgradeHelper{{PID: os.Getpid(), StartTime: startTime}},
+		Helpers:    []UpgradeHelper{{PID: cmd.Process.Pid, StartTime: startTime}},
 	})
 	if err := guard.reapHelpers(); err == nil {
 		t.Fatal("indeterminate live helper identity was accepted")
 	}
 
 	guard.mu.Lock()
-	_, retained := guard.helpers[os.Getpid()]
+	_, retained := guard.helpers[cmd.Process.Pid]
 	guard.mu.Unlock()
 
 	if !retained {
 		t.Fatal("indeterminate live helper identity was disarmed")
+	}
+
+	if err := syscall.Kill(cmd.Process.Pid, 0); err != nil {
+		t.Fatalf("indeterminate helper was signalled: %v", err)
 	}
 }
 

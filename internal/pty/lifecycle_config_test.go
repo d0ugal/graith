@@ -718,3 +718,46 @@ func TestAdoptSessionClosesTransferredFDWhenScrollbackOpenFails(t *testing.T) {
 		t.Errorf("transferred PTY fd remains usable after scrollback failure: %v", err)
 	}
 }
+
+func TestAdoptSessionClosesTransferredDescriptorsWhenScrollbackFDIsInvalid(t *testing.T) {
+	ptyRead, ptyWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closePTYTestResource(t, ptyWrite)
+
+	ptyFD, err := syscall.Dup(int(ptyRead.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	closePTYTestResource(t, ptyRead)
+
+	scrollbackRead, scrollbackWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closePTYTestResource(t, scrollbackWrite)
+
+	scrollbackFD, err := syscall.Dup(int(scrollbackRead.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	closePTYTestResource(t, scrollbackRead)
+
+	session, err := AdoptSession(AdoptOpts{
+		ID: "canny-invalid-scrollback", Fd: uintptr(ptyFD), ScrollbackFd: uintptr(scrollbackFD), PID: 4242,
+		LogPath: filepath.Join(t.TempDir(), "canny-invalid-scrollback.log"),
+	})
+	if err == nil || session != nil {
+		t.Fatalf("AdoptSession = (%v, %v), want transferred scrollback error", session, err)
+	}
+
+	for name, fd := range map[string]int{"PTY": ptyFD, "scrollback": scrollbackFD} {
+		var stat syscall.Stat_t
+		if err := syscall.Fstat(fd, &stat); !errors.Is(err, syscall.EBADF) {
+			t.Errorf("transferred %s fd remains usable after scrollback rejection: %v", name, err)
+		}
+	}
+}

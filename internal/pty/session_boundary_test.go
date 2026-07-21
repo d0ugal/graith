@@ -764,6 +764,71 @@ func TestReadLoopSerializesAppendAndScreenApplication(t *testing.T) {
 	_ = scrollback.Close()
 }
 
+func TestSessionObservationsDoNotWaitForTerminalWrite(t *testing.T) {
+	ptmx, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = writer.Close() })
+
+	scrollback, err := NewScrollback(filepath.Join(t.TempDir(), "croft.log"), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	term := newBlockingSessionTerminal(false)
+	term.blockWrite = true
+
+	lastOutputAt := time.Now().Add(-time.Minute)
+	session := &Session{
+		ID: "canny-observations", Ptmx: ptmx, Scrollback: scrollback,
+		screen: term, readDone: make(chan struct{}), log: slog.Default(),
+	}
+	session.exited.Store(true)
+	session.lastOutputAt = lastOutputAt
+	session.peakRSSBytes.Store(42)
+
+	go session.readLoop()
+
+	t.Cleanup(session.Close)
+	t.Cleanup(func() { term.releaseOnce.Do(func() { close(term.release) }) })
+
+	if _, err := writer.Write([]byte("dreich output")); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-term.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("terminal write did not block")
+	}
+
+	type observations struct {
+		exited       bool
+		lastOutputAt time.Time
+		peakRSSBytes int64
+	}
+
+	observed := make(chan observations, 1)
+	go func() {
+		observed <- observations{
+			exited:       session.Exited(),
+			lastOutputAt: session.LastOutputAt(),
+			peakRSSBytes: session.PeakRSSBytes(),
+		}
+	}()
+
+	select {
+	case got := <-observed:
+		if !got.exited || !got.lastOutputAt.Equal(lastOutputAt) || got.peakRSSBytes != 42 {
+			t.Fatalf("observations = %+v, want exited with timestamp %v and peak RSS 42", got, lastOutputAt)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("session observations blocked behind terminal write")
+	}
+}
+
 func TestQuiesceRefusesAfterScrollbackAppendFailure(t *testing.T) {
 	ptmx, writer, err := os.Pipe()
 	if err != nil {
@@ -1014,6 +1079,7 @@ func (t *recordingRecoveryTerminal) bytes() []byte {
 
 type blockingSessionTerminal struct {
 	blockResize bool
+	blockWrite  bool
 	entered     chan struct{}
 	release     chan struct{}
 	closeCalled chan struct{}
@@ -1036,7 +1102,13 @@ func (t *blockingSessionTerminal) block() {
 	<-t.release
 }
 
-func (t *blockingSessionTerminal) Write(p []byte) (int, error) { return len(p), nil }
+func (t *blockingSessionTerminal) Write(p []byte) (int, error) {
+	if t.blockWrite {
+		t.block()
+	}
+
+	return len(p), nil
+}
 
 func (t *blockingSessionTerminal) Resize(_, _ int) error {
 	if t.blockResize {
