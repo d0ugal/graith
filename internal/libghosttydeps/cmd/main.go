@@ -13,14 +13,17 @@ func main() {
 	if len(os.Args) < 2 || len(os.Args) > 3 {
 		usage()
 	}
+
 	root := "."
 	if len(os.Args) == 3 {
 		root = os.Args[2]
 	}
+
 	absolute, err := filepath.Abs(root)
 	if err != nil {
 		fatal(err)
 	}
+
 	switch os.Args[1] {
 	case "verify":
 		err = libghosttydeps.Verify(absolute)
@@ -29,6 +32,7 @@ func main() {
 	default:
 		usage()
 	}
+
 	if err != nil {
 		fatal(err)
 	}

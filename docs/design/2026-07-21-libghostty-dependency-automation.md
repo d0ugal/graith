@@ -2,7 +2,7 @@
 title: "Design Doc: Native libghostty Dependency Automation"
 authors: Dougal Matthews
 created: 2026-07-21
-status: Accepted
+status: Implemented
 reviewers: (pending implementation review)
 informed: Graith maintainers
 issue: https://github.com/d0ugal/graith/issues/1496

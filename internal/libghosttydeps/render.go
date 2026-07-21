@@ -2,6 +2,7 @@ package libghosttydeps
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -100,12 +101,15 @@ provided by the operating system and are not copied into the candidate.
 
 func ReplaceNoticesInventory(document string, lock Lock) (string, error) {
 	begin := strings.Index(document, NoticesBeginMarker)
+
 	end := strings.Index(document, NoticesEndMarker)
 	if begin < 0 || end < 0 || begin >= end {
-		return "", fmt.Errorf("notice inventory markers are missing or out of order")
+		return "", errors.New("notice inventory markers are missing or out of order")
 	}
+
 	prefix := document[:begin+len(NoticesBeginMarker)]
 	suffix := document[end:]
+
 	return prefix + "\n" + RenderNoticesInventory(lock) + suffix, nil
 }
 
@@ -228,10 +232,12 @@ func RenderSPDX(lock Lock) ([]byte, error) {
 		},
 		"spdxVersion": "SPDX-2.3",
 	}
+
 	data, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("render native SPDX inventory: %w", err)
 	}
+
 	return append(data, '\n'), nil
 }
 
