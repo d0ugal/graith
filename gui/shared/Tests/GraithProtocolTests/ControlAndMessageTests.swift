@@ -58,7 +58,7 @@ struct ControlAndMessageTests {
     }
 
     @Test func sessionLabelsDecodeAndCreateLabelsEncode() throws {
-        let json = #"{"id":"skelf","name":"skelf","labels":["Urgent","release"],"repo_path":"/croft","repo_name":"croft","worktree_path":"/w","branch":"b","base_branch":"main","agent":"codex","status":"running","created_at":"t"}"#
+        let json = #"{"id":"skelf","name":"skelf","labels":["Urgent","release"],"repo_path":"/croft","repo_name":"croft","worktree_path":"/w","cwd":"/w","branch":"b","base_branch":"main","agent":"codex","status":"running","created_at":"t"}"#
         let info = try JSONDecoder().decode(SessionInfo.self, from: Data(json.utf8))
         #expect(info.labels == ["Urgent", "release"])
 
