@@ -2478,6 +2478,15 @@ func TestStartScenarioMirrorsSharedSourceLifecycle(t *testing.T) {
 			t.Errorf("reader %d worktree/branch = %q/%q, want source path and no branch", i, reader.WorktreePath, reader.Branch)
 		}
 
+		wantCWD := filepath.Join(sm.paths.DataDir, "scratch", id)
+		if reader.CWD != wantCWD || reader.CWD == reader.WorktreePath {
+			t.Errorf("reader %d cwd = %q, want independent scratch %q", i, reader.CWD, wantCWD)
+		}
+
+		if info, statErr := os.Stat(reader.CWD); statErr != nil || !info.IsDir() {
+			t.Errorf("reader %d cwd is not a live directory: info=%v err=%v", i, info, statErr)
+		}
+
 		body, readErr := os.ReadFile(filepath.Join(reader.WorktreePath, "dreich-uncommitted.txt"))
 		if readErr != nil || string(body) != "visible before commit\n" {
 			t.Errorf("reader %d cannot see source's uncommitted file: body=%q err=%v", i, body, readErr)
@@ -2521,6 +2530,13 @@ func TestStartScenarioMirrorsSharedSourceLifecycle(t *testing.T) {
 		t.Error("mirror relationships did not survive state reload")
 	}
 
+	for _, id := range scenario.SessionIDs[1:] {
+		wantCWD := filepath.Join(sm.paths.DataDir, "scratch", id)
+		if got := persisted.Sessions[id].CWD; got != wantCWD {
+			t.Errorf("persisted mirror %q cwd = %q, want %q", id, got, wantCWD)
+		}
+	}
+
 	stopped, err := sm.StopScenario("strath-readers")
 	if err != nil || len(stopped) != 3 {
 		t.Fatalf("StopScenario = %v, err=%v, want three readers", stopped, err)
@@ -2537,6 +2553,15 @@ func TestStartScenarioMirrorsSharedSourceLifecycle(t *testing.T) {
 	resumed, err := sm.ResumeScenario("strath-readers", 24, 80)
 	if err != nil || len(resumed) != 3 {
 		t.Fatalf("ResumeScenario = %v, err=%v, want three readers", resumed, err)
+	}
+
+	for _, id := range scenario.SessionIDs[1:] {
+		reader, ok := sm.Get(id)
+
+		wantCWD := filepath.Join(sm.paths.DataDir, "scratch", id)
+		if !ok || reader.CWD != wantCWD {
+			t.Errorf("resumed mirror %q cwd = %q, want persisted %q", id, reader.CWD, wantCWD)
+		}
 	}
 
 	deleted, err := sm.DeleteScenario("strath-readers")

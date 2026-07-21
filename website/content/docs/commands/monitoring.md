@@ -75,8 +75,10 @@ $ gr ls --json | jq '.sessions[] | {name, tokens}'
 ```
 
 `--json` and agent mode always use this full `SessionInfo` shape, even with
-`--tokens` — there's no separate flat token schema. USD cost isn't shown, a
-planned opt-in via a user-supplied price table.
+`--tokens` — there's no separate flat token schema. Each row's `cwd` is the
+persisted working directory assigned to the agent; `worktree_path` remains the
+Git worktree/source path and can differ for mirrors and system sessions. USD
+cost isn't shown, a planned opt-in via a user-supplied price table.
 
 ### `gr logs <name-or-id>` (alias: `l`)
 

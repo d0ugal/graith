@@ -269,6 +269,7 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
     public var repoPath: String
     public var repoName: String
     public var worktreePath: String
+    public var cwd: String
     public var branch: String
     public var baseBranch: String
     public var agent: String
@@ -306,7 +307,7 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
     // path decodes these from JSON and never calls this.
     public init(
         id: String, parentID: String? = nil, name: String, repoPath: String = "",
-        repoName: String = "", worktreePath: String = "", branch: String = "",
+        repoName: String = "", worktreePath: String = "", cwd: String = "", branch: String = "",
         baseBranch: String = "", agent: String = "claude", agentSessionID: String? = nil,
         status: String, agentStatus: String? = nil, exitCode: Int? = nil,
         exitSignal: String? = nil, createdAt: String = "", lastAttachedAt: String? = nil,
@@ -319,7 +320,7 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
         migratedFrom: String? = nil, pullRequest: PRInfo? = nil, ci: CIInfo? = nil
     ) {
         self.id = id; self.parentID = parentID; self.name = name; self.repoPath = repoPath
-        self.repoName = repoName; self.worktreePath = worktreePath; self.branch = branch
+        self.repoName = repoName; self.worktreePath = worktreePath; self.cwd = cwd; self.branch = branch
         self.baseBranch = baseBranch; self.agent = agent; self.agentSessionID = agentSessionID
         self.status = status; self.agentStatus = agentStatus; self.exitCode = exitCode
         self.exitSignal = exitSignal; self.createdAt = createdAt; self.lastAttachedAt = lastAttachedAt
@@ -339,6 +340,7 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
         case repoPath = "repo_path"
         case repoName = "repo_name"
         case worktreePath = "worktree_path"
+        case cwd
         case branch
         case baseBranch = "base_branch"
         case agent

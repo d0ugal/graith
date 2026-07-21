@@ -984,8 +984,8 @@ func TestMigrateV23ToV24InitializesUpgradeCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if state.Version != 24 {
-		t.Fatalf("migrated version = %d, want 24", state.Version)
+	if state.Version != CurrentStateVersion {
+		t.Fatalf("migrated version = %d, want %d", state.Version, CurrentStateVersion)
 	}
 
 	if state.UpgradeCleanup == nil {
@@ -999,6 +999,106 @@ func TestMigrateV23ToV24InitializesUpgradeCleanup(t *testing.T) {
 
 	if got := state.UpgradeCleanup["croft"]; got.PID != 42 || got.PIDStartTime != 84 {
 		t.Fatalf("repeat migration changed upgrade cleanup identity: %+v", got)
+	}
+}
+
+func TestMigrateV24ToV25BackfillsOrdinarySessionCWD(t *testing.T) {
+	state := &State{Sessions: map[string]*SessionState{
+		"braw": {
+			ID: "braw", WorktreePath: "/hame/bothy",
+		},
+		"canny-mirror": {
+			ID: "canny-mirror", WorktreePath: "/hame/source", Mirror: true,
+		},
+		"dreich-orch": {
+			ID: "dreich-orch", SystemKind: SystemKindOrchestrator,
+		},
+		"croft-explicit": {
+			ID: "croft-explicit", WorktreePath: "/hame/auld", CWD: "/hame/preserved",
+		},
+	}}
+
+	if err := migrateV24ToV25(state); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := state.Sessions["braw"].CWD; got != "/hame/bothy" {
+		t.Errorf("ordinary cwd = %q, want worktree path", got)
+	}
+
+	if got := state.Sessions["canny-mirror"].CWD; got != "" {
+		t.Errorf("mirror cwd = %q, want manager-dependent migration deferred", got)
+	}
+
+	if got := state.Sessions["dreich-orch"].CWD; got != "" {
+		t.Errorf("orchestrator cwd = %q, want manager-dependent migration deferred", got)
+	}
+
+	if got := state.Sessions["croft-explicit"].CWD; got != "/hame/preserved" {
+		t.Errorf("explicit cwd = %q, want preserved value", got)
+	}
+}
+
+func TestSessionManagerLoadStateReconcilesAndPersistsLegacyCWDs(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	ordinary := filepath.Join(t.TempDir(), "bothy")
+	explicit := filepath.Join(t.TempDir(), "preserved")
+	legacy := &State{
+		Version: 24,
+		Sessions: map[string]*SessionState{
+			"braw": {
+				ID: "braw", Name: "braw", WorktreePath: ordinary, Status: StatusStopped,
+			},
+			"canny-mirror": {
+				ID: "canny-mirror", Name: "canny", WorktreePath: ordinary,
+				Mirror: true, Status: StatusStopped,
+			},
+			"dreich-orch": {
+				ID: "dreich-orch", Name: OrchestratorSessionName,
+				SystemKind: SystemKindOrchestrator, Status: StatusStopped,
+			},
+			"croft-explicit": {
+				ID: "croft-explicit", Name: "croft", WorktreePath: ordinary,
+				CWD: explicit, Status: StatusStopped,
+			},
+		},
+	}
+
+	data, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeFileAtomic(sm.paths.StateFile, data); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := sm.LoadState(); err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]string{
+		"braw":           ordinary,
+		"canny-mirror":   filepath.Join(sm.paths.DataDir, "scratch", "canny-mirror"),
+		"dreich-orch":    sm.orchestratorScratchDir(),
+		"croft-explicit": explicit,
+	}
+	for id, wantCWD := range want {
+		if got := sm.state.Sessions[id].CWD; got != wantCWD {
+			t.Errorf("session %s cwd = %q, want %q", id, got, wantCWD)
+		}
+	}
+
+	persisted, err := LoadState(sm.paths.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for id, wantCWD := range want {
+		if got := persisted.Sessions[id].CWD; got != wantCWD {
+			t.Errorf("persisted session %s cwd = %q, want %q", id, got, wantCWD)
+		}
 	}
 }
 
@@ -1043,8 +1143,8 @@ func TestMigrateV22ToCurrentAppliesBothMigrations(t *testing.T) {
 }
 
 func TestStateMigrationsRegisteredSequentially(t *testing.T) {
-	if CurrentStateVersion != 24 {
-		t.Fatalf("CurrentStateVersion = %d, want 24", CurrentStateVersion)
+	if CurrentStateVersion != 25 {
+		t.Fatalf("CurrentStateVersion = %d, want 25", CurrentStateVersion)
 	}
 
 	if len(migrations) != CurrentStateVersion {

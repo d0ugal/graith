@@ -531,6 +531,7 @@ type SessionInfo struct {
 	RepoPath        string             `json:"repo_path"`
 	RepoName        string             `json:"repo_name"`
 	WorktreePath    string             `json:"worktree_path"`
+	CWD             string             `json:"cwd"`
 	Branch          string             `json:"branch"`
 	BaseBranch      string             `json:"base_branch"`
 	Agent           string             `json:"agent"`

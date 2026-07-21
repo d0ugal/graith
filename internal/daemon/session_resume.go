@@ -362,6 +362,15 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		return SessionState{}, fmt.Errorf("mirror session %q requires sandbox but sandbox is not enabled in current config; enable sandbox to resume", id)
 	}
 
+	if sessState.CWD == "" {
+		sessState.CWD = sm.sessionCWD(sessState)
+	}
+
+	if sessState.CWD == "" {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("session %q has no configured cwd", id)
+	}
+
 	if sessState.RepoPath != "" {
 		if rc, ok := sm.cfg.FindRepo(sessState.RepoPath); ok && rc.Singleton {
 			canonicalRoot := config.ResolvePath(sessState.RepoPath)
@@ -462,7 +471,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	if forcesID(sessState.Agent) && sessState.AgentSessionID != "" {
 		oldID := sessState.AgentSessionID
 		oldFresh := sessState.FreshStart
-		newID, fresh, fellBack := resolveForcedIDResume(sessState.Agent, oldID, sessState.WorktreePath, oldFresh, newAgentSessionID)
+		newID, fresh, fellBack := resolveForcedIDResume(sessState.Agent, oldID, sessState.CWD, oldFresh, newAgentSessionID)
 
 		// For a forced-id agent the helper returns fresh=false only via the
 		// conversation-exists branch, so !fresh is exactly "conversation exists".
@@ -531,6 +540,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	sessAgent := sessState.Agent
 	sessRepoPath := sessState.RepoPath
 	sessWorktreePath := sessState.WorktreePath
+	sessCWD := sessState.CWD
 	sessAgentSessionID := sessState.AgentSessionID
 	sessModel := sessState.Model
 	sessCodex := cloneCodexOptions(sessState.Codex)
@@ -644,10 +654,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 
 	isOrchestrator := sessSystemKind == SystemKindOrchestrator
 
-	ptyCWD := sessWorktreePath
-	if isOrchestrator {
-		ptyCWD = sm.orchestratorScratchDir()
-	}
+	ptyCWD := sessCWD
 
 	env := make(map[string]string, len(agent.Env)+6)
 	for k, v := range agent.Env {
@@ -700,12 +707,14 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 
 	var resumeStoreDir string
 
-	if isOrchestrator {
+	if isOrchestrator || sessMirror {
 		if err := os.MkdirAll(ptyCWD, 0o700); err != nil {
 			rollbackState()
-			return SessionState{}, fmt.Errorf("create orchestrator scratch dir: %w", err)
+			return SessionState{}, fmt.Errorf("create managed session cwd: %w", err)
 		}
+	}
 
+	if isOrchestrator {
 		tmpDir := sm.orchestratorTmpDir()
 		if err := os.MkdirAll(tmpDir, 0o700); err != nil {
 			rollbackState()
@@ -785,7 +794,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		// distinguish it from an ordinary agent. On failure roll back to the
 		// prior stopped/resumable state and surface the error rather than
 		// silently relaunching an under-privileged orchestrator (issue #1306).
-		promptArgs, err := sm.buildOrchestratorPrompt(sessAgent, orchCfg, repoPaths, notifyEnabled, sm.orchestratorScratchDir())
+		promptArgs, err := sm.buildOrchestratorPrompt(sessAgent, orchCfg, repoPaths, notifyEnabled, sessCWD)
 		if err != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("build orchestrator prompt: %w", err)
@@ -860,7 +869,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 
 		opts.WriteDirs = append(opts.WriteDirs, store.SharedStorePath(sm.paths.DataDir))
 		if isOrchestrator {
-			opts.WriteDirs = append(opts.WriteDirs, sm.orchestratorScratchDir())
+			opts.WriteDirs = append(opts.WriteDirs, sessCWD)
 		}
 
 		if len(sessIncludes) > 0 {
@@ -868,18 +877,12 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		}
 
 		if sessMirror {
-			scratchDir := filepath.Join(sm.paths.DataDir, "scratch", id)
-			if err := os.MkdirAll(scratchDir, 0o700); err != nil {
-				rollbackState()
-				return SessionState{}, fmt.Errorf("create scratch dir for mirror resume: %w", err)
-			}
-
 			opts.ReadDirs = append(opts.ReadDirs, sessWorktreePath)
 			for _, inc := range sharedSourceIncludes {
 				opts.ReadDirs = append(opts.ReadDirs, inc.WorktreePath)
 			}
 
-			opts.WorktreeDir = scratchDir
+			opts.WorktreeDir = sessCWD
 		}
 
 		if err := sm.validateAutomaticSandboxGrants(opts, merged); err != nil {
@@ -1120,7 +1123,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	// deterministic. Skipped when an id is already known.
 	if scrapesID(sessAgent) && sessAgentSessionID == "" {
 		sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) { //nolint:contextcheck // native-ID capture is daemon-owned after resume commits
-			sm.captureNativeSessionIDContext(taskCtx, id, sessAgent, sessWorktreePath, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
+			sm.captureNativeSessionIDContext(taskCtx, id, sessAgent, sessCWD, env["CODEX_HOME"], startedAt, result.PID, result.PIDStartTime)
 		})
 	}
 

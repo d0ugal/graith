@@ -37,7 +37,7 @@ func (bf *batchFlags) active() bool {
 }
 
 // selfSessionRef returns a name-or-id reference for the current session from the
-// environment, backing the `--self` flag on gr delete/stop/purge. It prefers
+// environment, backing the `--self` flag on gr path/delete/stop/purge. It prefers
 // the canonical GRAITH_SESSION_ID and falls back to GRAITH_SESSION_NAME. It
 // errors when neither is set — i.e. `--self` was used outside a graith session.
 func selfSessionRef() (string, error) {
@@ -56,7 +56,7 @@ func selfSessionRef() (string, error) {
 // set it discards any positional args (the Args validator has already rejected
 // them) and substitutes the current session reference from the environment, so
 // the caller's normal name-or-id resolution targets the calling session. When
-// self is unset it returns args unchanged. Shared by gr delete/stop/purge so
+// self is unset it returns args unchanged. Shared by gr path/delete/stop/purge so
 // the substitution — and its outside-a-session error — lives in one tested spot.
 func selfArgs(self bool, args []string) ([]string, error) {
 	if !self {

@@ -95,6 +95,18 @@ func TestForkWithAgentCrossAgent(t *testing.T) {
 		t.Error("cross-agent fork reused the source worktree (should branch a new one)")
 	}
 
+	if forked.CWD != forked.WorktreePath {
+		t.Errorf("forked CWD = %q, want worktree path %q", forked.CWD, forked.WorktreePath)
+	}
+
+	sm.mu.RLock()
+	persistedCWD := sm.state.Sessions[forked.ID].CWD
+	sm.mu.RUnlock()
+
+	if persistedCWD != forked.WorktreePath {
+		t.Errorf("persisted fork CWD = %q, want worktree path %q", persistedCWD, forked.WorktreePath)
+	}
+
 	// Source session must be untouched — the fork is a new session, the original
 	// keeps running its original agent.
 	sm.mu.RLock()

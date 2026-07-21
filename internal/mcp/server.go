@@ -119,6 +119,7 @@ type SessionInfoOutput struct {
 	RepoPath       string `json:"repo_path,omitempty"`
 	RepoName       string `json:"repo_name,omitempty"`
 	WorktreePath   string `json:"worktree_path,omitempty"`
+	CWD            string `json:"cwd,omitempty"`
 	Branch         string `json:"branch,omitempty"`
 	Agent          string `json:"agent"`
 	AgentSessionID string `json:"agent_session_id,omitempty"`
@@ -818,6 +819,7 @@ func sessionInfoToOutput(si protocol.SessionInfo) SessionInfoOutput {
 		RepoPath:       si.RepoPath,
 		RepoName:       si.RepoName,
 		WorktreePath:   si.WorktreePath,
+		CWD:            si.CWD,
 		Branch:         si.Branch,
 		Agent:          si.Agent,
 		AgentSessionID: si.AgentSessionID,
