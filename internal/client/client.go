@@ -574,6 +574,14 @@ func maxDuration(a, b time.Duration) time.Duration {
 }
 
 func stopDaemonByPID(pidFile string) bool {
+	return stopDaemonByPIDWith(pidFile, processidentity.IsGraithDaemon, syscall.Kill)
+}
+
+func stopDaemonByPIDWith(
+	pidFile string,
+	isDaemon func(int) bool,
+	signal func(int, syscall.Signal) error,
+) bool {
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
 		return false
@@ -584,17 +592,17 @@ func stopDaemonByPID(pidFile string) bool {
 		return false
 	}
 
-	if !processidentity.IsGraithDaemon(pid) {
+	if !isDaemon(pid) {
 		return false
 	}
 
-	_ = syscall.Kill(pid, syscall.SIGTERM)
+	_ = signal(pid, syscall.SIGTERM)
 
 	// Wait for the process to actually exit, bounded by the same effective start
 	// policy as the other lifecycle waits rather than a fixed 50×100ms retry
 	// count (issue #1319).
 	return pollDaemonReady(func(time.Time) bool {
-		return syscall.Kill(pid, 0) != nil
+		return signal(pid, 0) != nil
 	})
 }
 

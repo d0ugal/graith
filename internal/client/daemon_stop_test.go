@@ -12,6 +12,41 @@ import (
 
 const daemonStopHelperEnv = "GRAITH_DAEMON_STOP_HELPER"
 
+func TestStopDaemonByPIDSignalsVerifiedProcess(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "canny.pid")
+	if err := os.WriteFile(pidFile, []byte("4242\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var signals []syscall.Signal
+	stopped := stopDaemonByPIDWith(pidFile, func(pid int) bool {
+		if pid != 4242 {
+			t.Errorf("identity check PID = %d, want 4242", pid)
+		}
+
+		return true
+	}, func(pid int, signal syscall.Signal) error {
+		if pid != 4242 {
+			t.Errorf("signal PID = %d, want 4242", pid)
+		}
+
+		signals = append(signals, signal)
+		if signal == 0 {
+			return syscall.ESRCH
+		}
+
+		return nil
+	})
+
+	if !stopped {
+		t.Fatal("stopDaemonByPIDWith did not report stopping a verified process")
+	}
+
+	if len(signals) != 2 || signals[0] != syscall.SIGTERM || signals[1] != 0 {
+		t.Fatalf("signals = %v, want [SIGTERM signal-0]", signals)
+	}
+}
+
 func TestStopDaemonByPIDRefusesForeignProcess(t *testing.T) {
 	process := startDaemonStopHelper(t)
 	pidFile := filepath.Join(t.TempDir(), "bothy.pid")
