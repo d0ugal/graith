@@ -35,6 +35,8 @@ jobs:
     # graph, rather than resolving an npm tree during the workflow run.
     container:
       image: renovate/renovate:43.268.6@sha256:e89b5a9d54d40d9a345df9bf666a9c05ef1e512a471841b6a5fe704cf58e4f63
+      # GitHub's checkout action writes runner command files mounted as root.
+      options: --user 0
     permissions:
       contents: read
     steps:
