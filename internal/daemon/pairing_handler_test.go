@@ -81,6 +81,10 @@ func TestPairResponseWriteIsOwnedByMutationDrain(t *testing.T) {
 	if requestID == "" {
 		t.Fatal("pending pairing never appeared")
 	}
+	// Seeing the pending request alone is insufficient: AddPendingPairing runs
+	// before the handler admits the background delivery mutation. A subsequent
+	// handshake proves pair_request dispatch completed and the read loop resumed.
+	rc.handshake(t, sm)
 
 	if _, _, err := sm.ApprovePairing(requestID, false, time.Now()); err != nil {
 		t.Fatal(err)
