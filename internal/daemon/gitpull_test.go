@@ -166,6 +166,27 @@ func TestPullIfClean_DetachedHead(t *testing.T) {
 	}
 }
 
+func TestPullIfClean_UnbornHead(t *testing.T) {
+	testutil.IsolateGit(t)
+	tmp := t.TempDir()
+	remote := filepath.Join(tmp, "croft.git")
+	repo := filepath.Join(tmp, "bothy")
+
+	gitRun(t, "", "init", "--bare", "--initial-branch=main", remote)
+	gitRun(t, "", "init", "--initial-branch=main", repo)
+	gitRun(t, repo, "remote", "add", "origin", remote)
+
+	sm := newTestSM(t)
+	pulled, err := sm.pullIfClean(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("pullIfClean on unborn repo: %v", err)
+	}
+
+	if pulled {
+		t.Fatal("expected skip for an unborn HEAD")
+	}
+}
+
 func TestPullIfClean_LocalAhead(t *testing.T) {
 	_, cloneDir := setupTestRepo(t)
 
