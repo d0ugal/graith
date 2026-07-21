@@ -1,6 +1,6 @@
 GOLANGCI_LINT_VERSION := v2.12.2
 
-.PHONY: build test lint lint-only lint-darwin fmt clean notifier service-app docs docs-serve demo demo-clean
+.PHONY: build test lint lint-only lint-darwin fmt clean notifier service-app docs docs-serve demo demo-clean demo-test
 
 build:
 	go build -v -ldflags="-s -w" -o gr ./cmd/graith
@@ -81,3 +81,8 @@ demo: build
 # Tear down the isolated demo environment (safe to run any time).
 demo-clean:
 	./demo/teardown.sh
+
+# Exercise demo-profile ownership with isolated HOME/XDG paths. This includes a
+# real-CLI regression for runtime-directory recreation without launching agents.
+demo-test:
+	./demo/test.sh
