@@ -320,6 +320,10 @@ func (sm *SessionManager) SetMsgStore(ms *MsgStore) {
 	sm.messages = ms
 }
 
+func (sm *SessionManager) SetTodoStore(ts *TodoStore) {
+	sm.todos = ts
+}
+
 func (sm *SessionManager) SetMCPManager(mm *MCPManager) {
 	sm.mcpManager = mm
 }

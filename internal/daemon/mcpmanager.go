@@ -34,16 +34,30 @@ type MCPProcess struct {
 	done       chan struct{}
 }
 
+// injectedMCPServer carries daemon-internal provenance that must never be
+// expressible through MCPServerConfig. In particular, delegateCallerIdentity
+// is authority to receive a session bearer token at launch.
+type injectedMCPServer struct {
+	config                 config.MCPServerConfig
+	delegateCallerIdentity bool
+}
+
+type mcpCallerIdentity struct {
+	sessionID string
+	token     string
+}
+
 // MCPManager manages MCP server processes. Each proxy connection gets its own
 // dedicated MCP server process, started lazily on connect.
 type MCPManager struct {
 	mu         sync.Mutex
 	servers    map[string]config.MCPServerConfig // server name -> config
+	delegates  map[string]bool                   // effective built-in servers allowed to receive caller identity
 	processes  map[string]*MCPProcess            // proxyID -> process
 	pending    map[string]bool
 	creating   int
 	changed    chan struct{}
-	extraSvrs  []config.MCPServerConfig // auto-injected servers (e.g. graith)
+	extraSvrs  []injectedMCPServer // auto-injected servers (e.g. graith), with private provenance
 	logDir     string
 	globalSbx  config.SandboxConfig
 	limits     config.LimitsConfig // output/log display caps (issue #1252)
@@ -60,23 +74,31 @@ type MCPManager struct {
 // (like the graith MCP server) that aren't in the config file but must be
 // available for proxy connections.
 func NewMCPManager(cfg *config.Config, extraServers []config.MCPServerConfig, logDir string, log *slog.Logger) *MCPManager {
-	servers := make(map[string]config.MCPServerConfig, len(cfg.MCPServers)+len(extraServers))
-	for _, s := range extraServers {
-		if !s.Disabled {
-			servers[s.Name] = s
-		}
+	injected := make([]injectedMCPServer, len(extraServers))
+	for i, server := range extraServers {
+		injected[i].config = server
 	}
 
-	for _, s := range cfg.MCPServers {
-		if s.Disabled {
-			delete(servers, s.Name)
-		} else {
-			servers[s.Name] = s
-		}
-	}
+	return newMCPManager(cfg, injected, logDir, log)
+}
+
+// NewManagedMCPManager creates the production MCP manager, including the
+// trusted built-in graith backend. Keeping this registration separate from
+// NewMCPManager makes caller-token delegation depend on provenance rather than
+// the user-controlled server name.
+func NewManagedMCPManager(cfg *config.Config, logDir string, log *slog.Logger) *MCPManager {
+	return newMCPManager(cfg, []injectedMCPServer{{
+		config:                 graithMCPServer(),
+		delegateCallerIdentity: true,
+	}}, logDir, log)
+}
+
+func newMCPManager(cfg *config.Config, extraServers []injectedMCPServer, logDir string, log *slog.Logger) *MCPManager {
+	servers, delegates := effectiveMCPServers(cfg, extraServers)
 
 	return &MCPManager{
 		servers:   servers,
+		delegates: delegates,
 		processes: make(map[string]*MCPProcess),
 		pending:   make(map[string]bool),
 		changed:   make(chan struct{}),
@@ -88,6 +110,37 @@ func NewMCPManager(cfg *config.Config, extraServers []config.MCPServerConfig, lo
 	}
 }
 
+func effectiveMCPServers(cfg *config.Config, extraServers []injectedMCPServer) (map[string]config.MCPServerConfig, map[string]bool) {
+	servers := make(map[string]config.MCPServerConfig, len(cfg.MCPServers)+len(extraServers))
+	delegates := make(map[string]bool)
+
+	for _, injected := range extraServers {
+		server := injected.config
+		if server.Disabled {
+			continue
+		}
+
+		servers[server.Name] = server
+		if injected.delegateCallerIdentity {
+			delegates[server.Name] = true
+		}
+	}
+
+	for _, server := range cfg.MCPServers {
+		// A configured entry always removes built-in delegation authority,
+		// whether it replaces or disables the same-named server.
+		delete(delegates, server.Name)
+
+		if server.Disabled {
+			delete(servers, server.Name)
+		} else {
+			servers[server.Name] = server
+		}
+	}
+
+	return servers, delegates
+}
+
 // Connect starts a new MCP server process for the given proxy and returns
 // the process's stdin (for writing JSON-RPC) and stdout reader (for reading
 // JSON-RPC). The caller owns the I/O loop. vars supplies the per-session
@@ -95,6 +148,10 @@ func NewMCPManager(cfg *config.Config, extraServers []config.MCPServerConfig, lo
 // the server's args and env, giving each session an isolated process — e.g. a
 // per-session Chrome profile dir for chrome-devtools-mcp.
 func (m *MCPManager) Connect(serverName, proxyID string, vars config.TemplateVars) (*MCPProcess, error) {
+	return m.connect(serverName, proxyID, vars, mcpCallerIdentity{})
+}
+
+func (m *MCPManager) connect(serverName, proxyID string, vars config.TemplateVars, caller mcpCallerIdentity) (*MCPProcess, error) {
 	m.mu.Lock()
 	if m.frozen {
 		m.mu.Unlock()
@@ -105,6 +162,12 @@ func (m *MCPManager) Connect(serverName, proxyID string, vars config.TemplateVar
 	if !ok {
 		m.mu.Unlock()
 		return nil, fmt.Errorf("unknown MCP server %q", serverName)
+	}
+
+	delegateCaller := m.delegates[serverName]
+	if delegateCaller && (caller.sessionID == "" || caller.token == "" || caller.sessionID != vars.SessionID) {
+		m.mu.Unlock()
+		return nil, errors.New("managed graith MCP requires an authenticated session identity")
 	}
 
 	if current := m.processes[proxyID]; current != nil && !current.isRunning() {
@@ -123,7 +186,7 @@ func (m *MCPManager) Connect(serverName, proxyID string, vars config.TemplateVar
 	generation := m.generation
 	m.mu.Unlock()
 
-	proc, err := m.startProcess(serverCfg, globalSbx, proxyID, vars)
+	proc, err := m.startProcess(serverCfg, globalSbx, proxyID, vars, delegateCaller, caller.token)
 	if err != nil {
 		m.finishMCPCreate(proxyID)
 		return nil, fmt.Errorf("start MCP server %q: %w", serverName, err)
@@ -226,20 +289,7 @@ func (m *MCPManager) Disconnect(proxyID string, proc *MCPProcess) {
 func (m *MCPManager) Reload(cfg *config.Config) {
 	m.mu.Lock()
 
-	newServers := make(map[string]config.MCPServerConfig, len(cfg.MCPServers)+len(m.extraSvrs))
-	for _, s := range m.extraSvrs {
-		if !s.Disabled {
-			newServers[s.Name] = s
-		}
-	}
-
-	for _, s := range cfg.MCPServers {
-		if s.Disabled {
-			delete(newServers, s.Name)
-		} else {
-			newServers[s.Name] = s
-		}
-	}
+	newServers, newDelegates := effectiveMCPServers(cfg, m.extraSvrs)
 
 	var toKill []string
 
@@ -248,7 +298,9 @@ func (m *MCPManager) Reload(cfg *config.Config) {
 	// every running MCP server so a *tightened* policy actually applies to
 	// already-running processes — the launch path reads sandbox config only at
 	// start (see #788).
-	configChanged := len(newServers) != len(m.servers) || !reflect.DeepEqual(m.globalSbx, cfg.Sandbox)
+	configChanged := len(newServers) != len(m.servers) ||
+		!reflect.DeepEqual(m.globalSbx, cfg.Sandbox) ||
+		!reflect.DeepEqual(m.delegates, newDelegates)
 	if !configChanged {
 		for name, newCfg := range newServers {
 			oldCfg, ok := m.servers[name]
@@ -272,6 +324,7 @@ func (m *MCPManager) Reload(cfg *config.Config) {
 	}
 
 	m.servers = newServers
+	m.delegates = newDelegates
 	m.globalSbx = cfg.Sandbox
 	m.limits = cfg.Limits
 	m.generation++
@@ -406,7 +459,7 @@ func (m *MCPManager) List() []protocol.MCPServerStatus {
 
 	autoInjected := make(map[string]bool, len(m.extraSvrs))
 	for _, s := range m.extraSvrs {
-		autoInjected[s.Name] = true
+		autoInjected[s.config.Name] = true
 	}
 
 	// Group live processes by server name.
@@ -633,6 +686,8 @@ func (m *MCPManager) startProcess(
 	globalSbx config.SandboxConfig,
 	proxyID string,
 	vars config.TemplateVars,
+	delegateCaller bool,
+	callerToken string,
 ) (*MCPProcess, error) {
 	if m.startProcessBeforeStart != nil {
 		m.startProcessBeforeStart()
@@ -758,12 +813,7 @@ func (m *MCPManager) startProcess(
 	cmd.Dir = os.TempDir()
 
 	cmd.Stderr = stderrFile
-	if len(serverEnv) > 0 {
-		cmd.Env = os.Environ()
-		for k, v := range serverEnv {
-			cmd.Env = append(cmd.Env, k+"="+v)
-		}
-	}
+	cmd.Env = mcpChildEnvironment(os.Environ(), serverEnv, delegateCaller, callerToken)
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
@@ -808,6 +858,52 @@ func (m *MCPManager) startProcess(
 	}()
 
 	return proc, nil
+}
+
+const managedGraithMCPEnv = "GRAITH_MANAGED_MCP"
+
+// mcpChildEnvironment removes ambient session authority from the daemon's
+// environment before applying explicit server configuration. Only a trusted
+// built-in launch receives the authenticated proxy caller's token.
+func mcpChildEnvironment(base []string, configured map[string]string, delegateCaller bool, callerToken string) []string {
+	reserved := map[string]bool{
+		"GRAITH_TOKEN":      true,
+		managedGraithMCPEnv: true,
+	}
+	for key := range configured {
+		reserved[key] = true
+	}
+
+	env := make([]string, 0, len(base)+len(configured)+2)
+	for _, entry := range base {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok || reserved[key] {
+			continue
+		}
+
+		env = append(env, entry)
+	}
+
+	keys := make([]string, 0, len(configured))
+	for key := range configured {
+		keys = append(keys, key)
+	}
+
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		if delegateCaller && (key == "GRAITH_TOKEN" || key == managedGraithMCPEnv) {
+			continue
+		}
+
+		env = append(env, key+"="+configured[key])
+	}
+
+	if delegateCaller {
+		env = append(env, "GRAITH_TOKEN="+callerToken, managedGraithMCPEnv+"=1")
+	}
+
+	return env
 }
 
 func slicesEqual(a, b []string) bool {

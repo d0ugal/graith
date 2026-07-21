@@ -830,6 +830,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				// Verify the requesting session's agent is allowed to use this
 				// server, and gather its template vars for per-session isolation.
 				mcpVars := config.TemplateVars{SessionID: mc.SessionID}
+				callerIdentity := mcpCallerIdentity{}
+
 				if mc.SessionID != "" {
 					sess, ok := sm.Get(mc.SessionID)
 					if !ok {
@@ -842,6 +844,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 					mcpVars.SessionName = sess.Name
 					mcpVars.WorktreePath = sess.WorktreePath
+
+					if auth.authenticated {
+						callerIdentity = mcpCallerIdentity{sessionID: sess.ID, token: sess.Token}
+					}
+
 					allowed := sm.resolveMCPServersFromConfig(sm.Config(), sess.Agent)
 					found := false
 
@@ -865,7 +872,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 				proxyID := fmt.Sprintf("%s-%s", mc.SessionID, mc.Server)
 
-				proc, err := sm.mcpManager.Connect(mc.Server, proxyID, mcpVars) //nolint:contextcheck // The manager owns bounded process cleanup across client disconnects.
+				proc, err := sm.mcpManager.connect(mc.Server, proxyID, mcpVars, callerIdentity) //nolint:contextcheck // The manager owns bounded process cleanup across client disconnects.
 				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 					return

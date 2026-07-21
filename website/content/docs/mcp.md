@@ -25,8 +25,11 @@ Starts an MCP server on stdio. Configure it in an agent's config (e.g. Claude's 
 | `session_status` | Get detailed status of a specific session |
 | `create_session` | Create a new session |
 | `publish_message` | Publish a message to a topic |
+| `read_inbox` | Read the calling session's inbox |
 | `read_messages` | Read messages from a topic |
 | `subscribe` | Wait for the next message on a topic |
+| `todo_list`, `todo_add`, `todo_claim` | Read, add, and claim caller-scoped todo work |
+| `todo_done`, `todo_block`, `todo_reopen`, `todo_update` | Update todo items |
 
 `publish_message` accepts `no_reply: true` for a one-way message — stored and
 returned by reads, distinct from `reply_to`, which only identifies a reply stream.
@@ -93,6 +96,29 @@ server plus your global and per-agent servers — pointing each at
 
 Agents without MCP injection support (e.g. `cursor`, `opencode`) don't receive
 them automatically.
+
+### Caller identity and credentials
+
+The auto-injected `graith` server preserves the identity of the session using
+it. The outer proxy authenticates as that session, and the daemon delegates the
+same current session credential only to its built-in `gr mcp` child. As a
+result:
+
+- `create_session` creates a child of the calling session;
+- message sender names and IDs are forced to the calling session, even when a
+  tool input supplies another sender;
+- `read_inbox` and todo tools use the calling session's own context; and
+- normal self/descendant authorization applies to every tool connection.
+
+The daemon removes any ambient `GRAITH_TOKEN` from all MCP child environments.
+It then injects the caller token only for the effective built-in `graith`
+backend. A configured server called `graith` is still user configuration and
+does not gain delegation merely from its name. The built-in backend refuses to
+fall back to local-human credentials if its delegated identity is missing.
+
+Running `gr mcp` directly is unmanaged and follows the normal CLI credential
+rules: inside a session it uses that session's `GRAITH_TOKEN`; outside a session
+it acts as the local human.
 
 ## Managing MCP servers
 

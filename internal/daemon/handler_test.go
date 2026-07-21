@@ -3654,6 +3654,44 @@ func TestCoverMCPConnectNoManager(t *testing.T) {
 	h.expectError(t, "MCP manager not initialized")
 }
 
+func TestMCPConnectForcesCallerAndDelegatesCurrentToken(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "canny-caller", "canny", "tok-canny-current")
+
+	outPath := filepath.Join(t.TempDir(), "caller.txt")
+	sandboxed := false
+	mm := newMCPManager(&config.Config{}, []injectedMCPServer{{
+		config: config.MCPServerConfig{
+			Name:    "graith",
+			Command: "sh",
+			Args:    []string{"-c", `printf '%s' "$GRAITH_TOKEN" > "$1"; exec cat`, "sh", outPath},
+			Sandbox: &sandboxed,
+		},
+		delegateCallerIdentity: true,
+	}}, h.sm.paths.LogDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	t.Cleanup(mm.Shutdown)
+	h.sm.SetMCPManager(mm)
+
+	h.sendControlWithToken(t, "mcp_connect", protocol.MCPConnectMsg{
+		Server:    "graith",
+		SessionID: "spoofed-session",
+	}, "tok-canny-current")
+	h.expectType(t, "mcp_connect_ok")
+
+	if got := waitForFileContent(t, outPath); got != "tok-canny-current" {
+		t.Fatalf("managed child token = %q, want authenticated caller token", got)
+	}
+
+	data, err := protocol.EncodeControl("detach", struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := h.writer.WriteFrame(protocol.ChannelControl, data); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // --- scenario lifecycle ---------------------------------------------------
 
 func TestCoverScenarioStartRequiresAuth(t *testing.T) {
@@ -4027,7 +4065,7 @@ func setupMCPHarness(t *testing.T, h *testHarness, servers []config.MCPServerCon
 	t.Helper()
 
 	cfg := &config.Config{MCPServers: servers}
-	mm := NewMCPManager(cfg, []config.MCPServerConfig{graithMCPServer()}, h.sm.paths.LogDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mm := NewManagedMCPManager(cfg, h.sm.paths.LogDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	t.Cleanup(mm.Shutdown)
 	h.sm.SetMCPManager(mm)
 

@@ -6808,13 +6808,19 @@ func TestCovSetStores(t *testing.T) {
 	// Assign non-nil sentinels and assert the pointers round-trip, so a no-op
 	// setter would fail (the fields default to nil after NewSessionManager).
 	ms := &MsgStore{}
+	ts := &TodoStore{}
 	mm := &MCPManager{}
 
 	sm.SetMsgStore(ms)
+	sm.SetTodoStore(ts)
 	sm.SetMCPManager(mm)
 
 	if sm.messages != ms {
 		t.Error("SetMsgStore did not assign the given pointer")
+	}
+
+	if sm.todos != ts {
+		t.Error("SetTodoStore did not assign the given pointer")
 	}
 
 	if sm.mcpManager != mm {

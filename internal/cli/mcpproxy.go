@@ -94,7 +94,8 @@ func isPermanentError(err error) bool {
 
 	return strings.Contains(msg, "unknown MCP server") ||
 		strings.Contains(msg, "MCP manager not initialized") ||
-		strings.Contains(msg, "is not enabled for agent")
+		strings.Contains(msg, "is not enabled for agent") ||
+		strings.Contains(msg, "requires an authenticated session identity")
 }
 
 func mcpProxySession(serverName, sessionID string, stdinCh <-chan stdinChunk) error {

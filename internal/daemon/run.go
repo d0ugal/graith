@@ -418,7 +418,7 @@ func run(
 
 	sm.todos = todoStore
 
-	mcpMgr := NewMCPManager(cfg, []config.MCPServerConfig{graithMCPServer()}, paths.LogDir, log)
+	mcpMgr := NewManagedMCPManager(cfg, paths.LogDir, log)
 
 	sm.mcpManager = mcpMgr
 	defer mcpMgr.Shutdown()
