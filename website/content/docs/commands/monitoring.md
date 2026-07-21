@@ -95,6 +95,18 @@ Show info for the current session, auto-detected by matching the working directo
 
 Run health checks and diagnostics: daemon status, safehouse availability, orphaned worktrees, oversized scrollback files, and stale PID files.
 
+The **Daemon** section reports the active terminal-screen backend. The stable
+values are `charm` for the pure-Go backend and `libghostty-helper` for the
+process-isolated native backend. For scripts, use the top-level
+`terminal_backend` field:
+
+```bash
+gr doctor --json | jq -r .terminal_backend
+```
+
+The daemon-owned value is also present at `diagnostics.terminal_backend` in the
+same JSON document.
+
 When the daemon is reachable, plain output adds a **Purge** section with the effective startup delay, sweep interval, and last/next sweep times; before the first sweep it shows `Last sweep: not yet run` and `Next sweep: awaiting first sweep`. The same values appear under `diagnostics.purge` in `--json`.
 
 The on-disk size walk is opt-in — it can take tens of seconds on a large install (worktrees full of `node_modules` and `.git` objects). Pass `--disk` to size the data dir, tmp repos, and orphaned worktrees; when the default run finds leftover artifacts worth sizing (orphaned worktrees, a legacy directory) it recommends re-running with `--disk`. In `--json`, `disk_measured` indicates whether sizes were computed.

@@ -148,6 +148,18 @@ both Linux dev builds remain on the pure-Go Charm backend. The native archive
 includes its binary-bound `libghostty-native.spdx.json` and
 `THIRD_PARTY_NOTICES.libghostty.md` inventories.
 
+After restarting the `dev` daemon, verify the selected canary without relying
+on a live helper process:
+
+```bash
+gr-dev doctor
+gr-dev doctor --json | jq -r .terminal_backend
+```
+
+The native archive reports `libghostty-helper`; the rollback archive reports
+`charm`. See [Troubleshooting]({{< relref "/docs/troubleshooting.md#verify-the-terminal-backend" >}})
+for the matching startup and failure log records.
+
 Each dev release also publishes a verified pure-Go Apple Silicon rollback as
 `graith-dev_darwin_arm64_charm.tar.gz`. To leave the managed canary and restart
 the existing `dev` profile with that exact asset:

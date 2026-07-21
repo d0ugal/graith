@@ -5,6 +5,10 @@ package pty
 import "testing"
 
 func TestDefaultTerminalBackendIsCharm(t *testing.T) {
+	if got := TerminalBackend(); got != TerminalBackendCharm {
+		t.Fatalf("terminal backend identifier = %q, want %q", got, TerminalBackendCharm)
+	}
+
 	term, err := newTerminal(12, 3)
 	if err != nil {
 		t.Fatal(err)

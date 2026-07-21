@@ -2525,6 +2525,10 @@ func TestDiagnostics(t *testing.T) {
 		t.Error("expected non-empty daemon version")
 	}
 
+	if diag.TerminalBackend != grpty.TerminalBackend() {
+		t.Errorf("terminal backend = %q, want %q", diag.TerminalBackend, grpty.TerminalBackend())
+	}
+
 	if diag.Fleet.Total != 2 {
 		t.Errorf("fleet total = %d, want 2", diag.Fleet.Total)
 	}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/protocol"
+	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/version"
 )
 
@@ -499,9 +501,10 @@ func TestDoctorPlainOutputRendersPurgeDiagnostic(t *testing.T) {
 			reach:         daemonReachOK,
 			daemonVersion: version.Version,
 			diag: &protocol.DiagnosticsMsg{
-				DaemonPID:     777,
-				DaemonVersion: version.Version,
-				DaemonUptime:  "3m",
+				DaemonPID:       777,
+				DaemonVersion:   version.Version,
+				DaemonUptime:    "3m",
+				TerminalBackend: grpty.TerminalBackend(),
 				Purge: &protocol.PurgeDiagnostic{
 					StartupDelay: "45s",
 					Interval:     "7m0s",
@@ -518,6 +521,7 @@ func TestDoctorPlainOutputRendersPurgeDiagnostic(t *testing.T) {
 
 	rendered := buf.String()
 	for _, want := range []string{
+		"Terminal backend: " + grpty.TerminalBackend(),
 		"Purge",
 		"Startup delay: 45s",
 		"Interval: 7m0s",
@@ -527,6 +531,69 @@ func TestDoctorPlainOutputRendersPurgeDiagnostic(t *testing.T) {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("expected doctor output to contain %q, got:\n%s", want, rendered)
 		}
+	}
+}
+
+func TestDoctorJSONReportsTerminalBackend(t *testing.T) {
+	oldCfg, oldCfgFile, oldPaths := cfg, cfgFile, paths
+	oldOut, oldJSON := out, jsonOutput
+	oldAutofix, oldDisk := doctorAutofix, doctorDisk
+	oldProbe, oldGCFetch := doctorDaemonProbe, daemonGCFetch
+
+	t.Cleanup(func() {
+		cfg, cfgFile, paths = oldCfg, oldCfgFile, oldPaths
+		out, jsonOutput = oldOut, oldJSON
+		doctorAutofix, doctorDisk = oldAutofix, oldDisk
+		doctorDaemonProbe = oldProbe
+		daemonGCFetch = oldGCFetch
+	})
+
+	dataDir := t.TempDir()
+	paths = config.Paths{
+		DataDir:        dataDir,
+		SocketPath:     filepath.Join(dataDir, "d.sock"),
+		PIDFile:        filepath.Join(dataDir, "d.pid"),
+		StateFile:      filepath.Join(dataDir, "state.json"),
+		HumanTokenFile: filepath.Join(dataDir, "human.token"),
+		LogDir:         filepath.Join(dataDir, "logs"),
+		DaemonLog:      filepath.Join(dataDir, "daemon.log"),
+		MessagesDB:     filepath.Join(dataDir, "messages.sqlite"),
+		TmpDir:         filepath.Join(dataDir, "tmp"),
+	}
+	cfgFile = filepath.Join(dataDir, "canny.toml")
+	cfg = config.Default()
+	cfg.Updates.Enabled = false
+	doctorAutofix, doctorDisk, jsonOutput = false, false, true
+	daemonGCFetch = func(bool) ([]protocol.GCOrphanInfo, error) { return nil, nil }
+
+	var buf bytes.Buffer
+	out = output.NewWithWriter(true, &buf)
+	doctorDaemonProbe = func(*doctorContext) daemonProbe {
+		return daemonProbe{
+			reach:         daemonReachOK,
+			daemonVersion: version.Version,
+			diag: &protocol.DiagnosticsMsg{
+				DaemonPID:       777,
+				DaemonVersion:   version.Version,
+				DaemonUptime:    "3m",
+				TerminalBackend: grpty.TerminalBackend(),
+			},
+		}
+	}
+
+	if err := doctorCmd.RunE(doctorCmd, nil); err != nil {
+		t.Fatalf("doctor command failed: %v\n%s", err, buf.String())
+	}
+
+	var report doctorReport
+	if err := json.Unmarshal(buf.Bytes(), &report); err != nil {
+		t.Fatalf("decode doctor JSON: %v\n%s", err, buf.String())
+	}
+	if report.TerminalBackend != grpty.TerminalBackend() {
+		t.Errorf("terminal_backend = %q, want %q", report.TerminalBackend, grpty.TerminalBackend())
+	}
+	if report.Diagnostics == nil || report.Diagnostics.TerminalBackend != grpty.TerminalBackend() {
+		t.Errorf("diagnostics.terminal_backend = %v, want %q", report.Diagnostics, grpty.TerminalBackend())
 	}
 }
 
