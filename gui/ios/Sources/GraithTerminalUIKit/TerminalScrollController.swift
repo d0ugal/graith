@@ -23,8 +23,9 @@ public struct TerminalScrollController {
 
     /// The accepted spring ranges are stable at this step. Keeping the clamp in
     /// the pure controller also protects direct callers that do not go through
-    /// `BaseTerminalUIView`'s display-link clamp. The duration cap is a final
-    /// fail-safe so unexpected finite input can never run a display link forever.
+    /// `BaseTerminalUIView`'s display-link clamp. The elapsed-duration cap and
+    /// finite-state checks are final fail-safes against a display link running
+    /// forever.
     private static let maximumIntegrationStep: CGFloat = 0.05
     private static let maximumSettlingDuration: CGFloat = 10
 
@@ -163,15 +164,14 @@ public struct TerminalScrollController {
     /// spring bounce. Read `contentTranslation(viewportHeight:)` each tick for the
     /// visual offset, and stop ticking once `isSettling` is false.
     public mutating func tick(dt: CGFloat) -> Int {
-        guard dt.isFinite else {
-            stop()
+        guard dt.isFinite, dt > 0 else {
+            if isSettling { stop() }
             return 0
         }
-        guard dt > 0 else { return 0 }
         let step = min(dt, Self.maximumIntegrationStep)
         if isSettling {
-            settlingDuration += step
-            if settlingDuration >= Self.maximumSettlingDuration {
+            settlingDuration += dt
+            if !settlingDuration.isFinite || settlingDuration >= Self.maximumSettlingDuration {
                 stop()
                 return 0
             }
@@ -186,19 +186,38 @@ public struct TerminalScrollController {
                 return 0
             }
             velocity *= CGFloat(exp(-Double(friction) * Double(step)))
+            guard velocity.isFinite else {
+                stop()
+                return 0
+            }
             if abs(velocity) < momentumCutoff {
                 velocity = 0
                 phase = .idle
                 return 0
             }
-            rowRemainder += (velocity * step) / cellHeight
+            let nextRemainder = rowRemainder + (velocity * step) / cellHeight
+            guard nextRemainder.isFinite,
+                  nextRemainder > CGFloat(Int.min),
+                  nextRemainder < CGFloat(Int.max) else {
+                stop()
+                return 0
+            }
+            rowRemainder = nextRemainder
             let whole = Int(rowRemainder)
             rowRemainder -= CGFloat(whole)
             return whole
         case .springing:
             let accel = -springStiffness * overscroll - springDamping * springVelocity
             springVelocity += accel * step
+            guard springVelocity.isFinite else {
+                stop()
+                return 0
+            }
             overscroll += springVelocity * step
+            guard overscroll.isFinite else {
+                stop()
+                return 0
+            }
             // Physical invariant (not tunable): "close enough to rest" epsilons
             // that end the bounce — a convergence detail, not a feel knob.
             if abs(overscroll) < 0.5, abs(springVelocity) < 8 {
