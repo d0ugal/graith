@@ -4,12 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
-
-	"github.com/d0ugal/graith/internal/tools"
 )
 
 var ErrDaemonRunning = errors.New("daemon already running")
@@ -45,23 +41,4 @@ func ReleasePIDFile(path string) {
 
 func isPIDAlive(pid int) bool {
 	return isProcessAlive(pid)
-}
-
-func IsGraithDaemon(pid int) bool {
-	if pid <= 1 {
-		return false
-	}
-
-	if !isPIDAlive(pid) {
-		return false
-	}
-
-	out, err := exec.Command(tools.PS(), "-p", strconv.Itoa(pid), "-o", "comm=").Output()
-	if err != nil {
-		return false
-	}
-
-	base := filepath.Base(strings.TrimSpace(string(out)))
-
-	return base == "gr" || base == "graith"
 }

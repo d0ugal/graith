@@ -19,6 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/daemonservice"
+	"github.com/d0ugal/graith/internal/processidentity"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/version"
@@ -871,7 +872,7 @@ func (dc *doctorContext) checkStalePID() {
 		return
 	}
 
-	if !daemon.IsGraithDaemon(pid) {
+	if !processidentity.IsGraithDaemon(pid) {
 		dc.failf("daemon", "PID file is stale (PID %d is not a graith daemon)", pid)
 
 		if doctorAutofix {

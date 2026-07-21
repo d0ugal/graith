@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
-	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/daemonservice"
+	"github.com/d0ugal/graith/internal/processidentity"
 	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/version"
@@ -584,7 +584,7 @@ func stopDaemonByPID(pidFile string) bool {
 		return false
 	}
 
-	if !daemon.IsGraithDaemon(pid) {
+	if !processidentity.IsGraithDaemon(pid) {
 		return false
 	}
 

@@ -25,6 +25,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemonservice"
+	"github.com/d0ugal/graith/internal/processidentity"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"golang.org/x/sys/unix"
 )
@@ -4246,7 +4247,7 @@ func StopDaemon(pidFile string) error {
 		return fmt.Errorf("refusing to signal invalid pid %d", pid)
 	}
 
-	if !IsGraithDaemon(pid) {
+	if !processidentity.IsGraithDaemon(pid) {
 		_ = os.Remove(pidFile)
 		return fmt.Errorf("pid %d is not a graith daemon, removing stale pid file", pid)
 	}
@@ -4261,7 +4262,7 @@ func StopDaemonPID(pid int) error {
 		return fmt.Errorf("refusing to signal invalid pid %d", pid)
 	}
 
-	if !IsGraithDaemon(pid) {
+	if !processidentity.IsGraithDaemon(pid) {
 		return fmt.Errorf("pid %d is not a graith daemon", pid)
 	}
 
