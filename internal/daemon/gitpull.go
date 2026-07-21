@@ -152,6 +152,13 @@ func (sm *SessionManager) pullIfCleanWith(ctx context.Context, repoPath string, 
 		return false, nil
 	}
 
+	// Maintenance can discover the symbolic initial branch in a repository
+	// without commits, but there is no HEAD to compare or fast-forward yet.
+	if !git.RefExists(repoPath, "HEAD") {
+		sm.log.Debug("git-pull: skipping unborn HEAD", "repo", repoPath, "branch", branch)
+		return false, nil
+	}
+
 	defaultBranch, err := git.DiscoverDefaultBranch(repoPath)
 	if err != nil {
 		sm.log.Warn("git-pull: cannot determine default branch", "repo", repoPath, "err", err)

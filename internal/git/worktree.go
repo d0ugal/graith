@@ -14,6 +14,9 @@ func CreateWorktree(repoPath, worktreePath, branchName string) error {
 	return err
 }
 
+// An orphan branch has no ref to roll back before its first commit, so setup is
+// intentionally a single worktree-add operation rather than CreateBranch plus
+// CreateWorktree like the commit-backed path below.
 func createOrphanWorktree(repoPath, worktreePath, branchName string) error {
 	_, err := RunOutput(repoPath, "worktree", "add", "--orphan", "-b", branchName, worktreePath)
 	return err

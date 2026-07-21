@@ -6,6 +6,9 @@ import (
 	"strings"
 )
 
+// DiscoverDefaultBranch returns the preferred branch name for repoPath. In a
+// repository without commits, it returns the symbolic initial HEAD branch even
+// though no corresponding branch ref exists yet.
 func DiscoverDefaultBranch(repoPath string) (string, error) {
 	hasOrigin := HasRemote(repoPath, "origin")
 	if hasOrigin {
