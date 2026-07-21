@@ -19,6 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemon"
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/pelletier/go-toml/v2"
 )
 
 const (
@@ -32,7 +33,6 @@ const (
 type managedMCPTestEnv struct {
 	*testEnv
 
-	cliPath    string
 	mcpManager *daemon.MCPManager
 	messages   *daemon.MsgStore
 }
@@ -44,7 +44,7 @@ func TestManagedGraithMCPPreservesCallerIdentity(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	cmd := exec.Command(env.cliPath, "mcp-proxy", "graith")
+	cmd := exec.Command(os.Args[0], "mcp-proxy", "graith") //nolint:gosec // Re-executes this fixed integration test binary through the real CLI entrypoint.
 	cmd.Env = replaceProcessEnv(os.Environ(), map[string]string{
 		managedMCPHelperEnvName: "1",
 		"GRAITH_TOKEN":          managedMCPCallerToken,
@@ -177,13 +177,6 @@ func setupManagedMCP(t *testing.T) *managedMCPTestEnv {
 
 	t.Cleanup(func() { _ = os.RemoveAll(runtimeRoot) })
 
-	// Both proxy layers re-execute the integration test binary through the
-	// production CLI. Give resolveGrBin a stable, absolute PATH entry so nested
-	// execution does not depend on the runner-specific spelling of os.Args[0].
-	// In particular, Darwin test runners may use a relative or symlinked argv[0]
-	// that is not reusable from the managed process's temporary working dir.
-	cliPath := installManagedMCPTestBinary(t, runtimeRoot)
-
 	t.Setenv(managedMCPHelperEnvName, "1")
 	t.Setenv("GRAITH_PROFILE", fmt.Sprintf("mcpid-%d", os.Getpid()))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
@@ -213,7 +206,10 @@ func setupManagedMCP(t *testing.T) *managedMCPTestEnv {
 		ResumeArgs: []string{"-c", "echo resumed; exec cat"},
 	}
 
-	configData, err := config.EffectiveTOML(cfg)
+	// EffectiveTOML is a display renderer that materializes optional tool
+	// defaults. Preserve unset tools here so re-executing the CLI does not make
+	// this hermetic test depend on developer-only binaries such as gcx.
+	configData, err := toml.Marshal(cfg)
 	if err != nil {
 		t.Fatalf("render managed MCP config: %v", err)
 	}
@@ -282,33 +278,9 @@ func setupManagedMCP(t *testing.T) *managedMCPTestEnv {
 
 	return &managedMCPTestEnv{
 		testEnv:    &testEnv{sm: sm, srv: srv, cancel: cancel, socket: paths.SocketPath, tmpDir: root},
-		cliPath:    cliPath,
 		mcpManager: mcpManager,
 		messages:   msgStore,
 	}
-}
-
-func installManagedMCPTestBinary(t *testing.T, runtimeRoot string) string {
-	t.Helper()
-
-	testBinary, err := os.Executable()
-	if err != nil {
-		t.Fatalf("resolve integration test binary: %v", err)
-	}
-
-	binDir := filepath.Join(runtimeRoot, "bin")
-	if err := os.MkdirAll(binDir, 0o700); err != nil {
-		t.Fatalf("create managed MCP test bin dir: %v", err)
-	}
-
-	cliPath := filepath.Join(binDir, filepath.Base(os.Args[0]))
-	if err := os.Symlink(testBinary, cliPath); err != nil {
-		t.Fatalf("link managed MCP test binary: %v", err)
-	}
-
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	return cliPath
 }
 
 func callManagedMCPTool(t *testing.T, ctx context.Context, session *gomcp.ClientSession, name string, arguments any) *gomcp.CallToolResult {
