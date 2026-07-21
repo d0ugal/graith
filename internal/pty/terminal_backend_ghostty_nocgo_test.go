@@ -8,6 +8,10 @@ import (
 )
 
 func TestLibghosttyBackendRequiresCGO(t *testing.T) {
+	if got := TerminalBackend(); got != TerminalBackendLibghosttyHelper {
+		t.Fatalf("TerminalBackend() = %q, want %q", got, TerminalBackendLibghosttyHelper)
+	}
+
 	term, err := newTerminal(12, 3)
 	if term != nil {
 		_ = term.Close()

@@ -337,7 +337,8 @@ screen` and `terminal recovery hydration failed; using empty screen` mean
 scrollback replay failed and Graith kept an empty replacement. Runtime parser,
 snapshot, and preview failures use `terminal parser failed; screen reset`,
 `terminal snapshot failed; screen reconstructed`, and `terminal preview failed;
-screen reconstructed`; inspect their `error` and `recovery_error` fields.
+screen reconstructed`. Each includes `error`; the snapshot and preview records
+also include `recovery_error` when reconstruction fails.
 
 #### Diagnosing why a session stopped
 
