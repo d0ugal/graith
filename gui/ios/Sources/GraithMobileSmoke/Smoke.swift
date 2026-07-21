@@ -320,7 +320,7 @@ func testRealAdapters() async throws {
     // shared conveniences.
     let sessionJSON = """
     {"id":"braw0001","name":"braw","repo_path":"/Users/x/Code/croft","repo_name":"croft",
-     "worktree_path":"/wt","branch":"user/graith/braw-braw0001","base_branch":"main",
+     "worktree_path":"/wt","cwd":"/wt","branch":"user/graith/braw-braw0001","base_branch":"main",
      "agent":"claude","status":"running","agent_status":"active","created_at":"2026-07-08T07:00:00Z",
      "pull_request":{"number":7,"state":"open"},"ci":{"state":"passing"}}
     """

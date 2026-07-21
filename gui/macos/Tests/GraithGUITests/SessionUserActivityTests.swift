@@ -6,7 +6,7 @@ final class SessionUserActivityTests: XCTestCase {
     func testConfigurationClearsWebpageURLAndReplacesMetadata() throws {
         let session = try JSONDecoder().decode(SessionInfo.self, from: Data("""
         {"id":"braw","name":"Braw","repo_path":"/croft","repo_name":"croft",
-         "worktree_path":"/bothy","branch":"b","base_branch":"main","agent":"codex",
+         "worktree_path":"/bothy","cwd":"/bothy","branch":"b","base_branch":"main","agent":"codex",
          "status":"running","created_at":"now"}
         """.utf8))
         let activity = NSUserActivity(activityType: SessionUserActivity.activityType)
