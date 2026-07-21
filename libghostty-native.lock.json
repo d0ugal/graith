@@ -4,9 +4,9 @@
     "repository": "https://tangled.org/mitchellh.com/go-libghostty",
     "renovateRef": "main",
     "commit": "102a50836ce678a876e5deb1288276eaad1e3bf7",
-    "version": "v0.0.0-20260527181217-e9e1010f80b1",
-    "moduleSum": "h1:XAiToY/9BPUvzfTHSmhHRjPprV5JfwjWE6BGT7ojEQ8=",
-    "testedGhosttyCommit": "6d089a544db53f3457374c2c406bccee80722cdf",
+    "version": "v0.0.0-20260710165742-102a50836ce6",
+    "moduleSum": "h1:IChRpD6xn1EWuRNlSH3RitYjxQiWNg3CQSn2ygJ+y0w=",
+    "testedGhosttyCommit": "d4ac93a0395d321b043ee0116dc8a1a384f0fb83",
     "licenseSHA256": "fdf9b4ad7b61687fd3d4b1e3efa63cbc10743e6b733a62669b53a324251357b9",
     "licenseConclusion": "MIT",
     "licenseReview": "4eba7523ffff230d7a348f6aa21dffaaa0922bfccc3e3f902a5fe9a3c79bd244"
@@ -16,13 +16,13 @@
     "renovateRef": "main",
     "commit": "d4ac93a0395d321b043ee0116dc8a1a384f0fb83",
     "version": "1.3.2-dev",
-    "headersSHA256": "44c382b4d1bd3d48451f91da190109e082921405bd0e86ce635ae4f32ccea0cf",
+    "headersSHA256": "b694feb2b7526875a356c4d6c7b5c07d09030d1cd4507f86a37b2d1d49c42fe7",
     "licenseSHA256": "386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1",
     "licenseConclusion": "MIT",
     "licenseReview": "97036f38b4ac624f105099d931c8a9f8d09c5dc1153e1bf5cda801613733c2a5",
     "appleArtifact": {
       "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-d4ac93a/libghostty-vt.xcframework.zip",
-      "sha256": "25c1620e63311cc687637c8e3bdfae1fe3e070892966c07d0d91065ccda541c0"
+      "sha256": "bb5a200f65cbb3d0f626d5c37a011940f9a730a7fd74730d25d176e71c7f5564"
     }
   },
   "zig": {

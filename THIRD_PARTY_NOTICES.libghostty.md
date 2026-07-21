@@ -14,8 +14,8 @@ dependency unit.
 
 | Component | Exact compiled pin | Distributed license conclusion |
 |-----------|--------------------|--------------------------------|
-| go-libghostty | `v0.0.0-20260527181217-e9e1010f80b1` / `e9e1010f80b1ced0b7efcdb300f4838513c0816e` | MIT |
-| Ghostty libghostty-vt | `1.3.2-dev` / `91f66da24527fa02d92b5fd0b41cd020f553a64c` | MIT |
+| go-libghostty | `v0.0.0-20260710165742-102a50836ce6` / `102a50836ce678a876e5deb1288276eaad1e3bf7` | MIT |
+| Ghostty libghostty-vt | `1.3.2-dev` / `d4ac93a0395d321b043ee0116dc8a1a384f0fb83` | MIT |
 | uucode | `0.2.0`, Zig hash `uucode-0.2.0-ZZjBPqZVVABQepOqZHR7vV_NcaN-wats0IB6o-Exj6m9` | MIT AND Unicode-3.0 |
 | Highway | `1.2.0`, upstream `66486a10623fa0d72fe91260f96c892e41aceb06`, Zig hash `N-V-__8AAGmZhABbsPJLfbqrh6JTHsXhY6qCaLAQyx25e0XE` | BSD-3-Clause, elected from Apache-2.0 OR BSD-3-Clause |
 | simdutf amalgamation | compiled version `9.0.0`, corresponding upstream `ca7acbcea967b5dcbab490066e99e3a6e6925539` | MIT AND BSD-3-Clause AND Apache-2.0 |
@@ -31,16 +31,16 @@ build-only tool.
 The exact verified inputs are:
 
 - go-libghostty module sum
-  `h1:XAiToY/9BPUvzfTHSmhHRjPprV5JfwjWE6BGT7ojEQ8=`, wrapper-tested Ghostty commit
-  `6d089a544db53f3457374c2c406bccee80722cdf`, and LICENSE SHA-256
+  `h1:IChRpD6xn1EWuRNlSH3RitYjxQiWNg3CQSn2ygJ+y0w=`, wrapper-tested Ghostty commit
+  `d4ac93a0395d321b043ee0116dc8a1a384f0fb83`, and LICENSE SHA-256
   `fdf9b4ad7b61687fd3d4b1e3efa63cbc10743e6b733a62669b53a324251357b9`;
 - Ghostty LICENSE SHA-256
   `386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1` and committed-header tree SHA-256
-  `44c382b4d1bd3d48451f91da190109e082921405bd0e86ce635ae4f32ccea0cf`;
+  `b694feb2b7526875a356c4d6c7b5c07d09030d1cd4507f86a37b2d1d49c42fe7`;
 - Apple testing archive
-  `https://github.com/d0ugal/graith/releases/download/libghostty-vt-91f66da/libghostty-vt.xcframework.zip`
+  `https://github.com/d0ugal/graith/releases/download/libghostty-vt-d4ac93a/libghostty-vt.xcframework.zip`
   SHA-256
-  `25c1620e63311cc687637c8e3bdfae1fe3e070892966c07d0d91065ccda541c0`;
+  `bb5a200f65cbb3d0f626d5c37a011940f9a730a7fd74730d25d176e71c7f5564`;
 - Zig source URL `https://ziglang.org/download/0.15.2/zig-0.15.2.tar.xz`,
   source SHA-256
   `d9b30c7aa983fcff5eed2084d54ae83eaafe7ff3a84d8fb754d854165a6e521c`,
