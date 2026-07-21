@@ -9,8 +9,8 @@ if [ "$(uname -s)" != "Darwin" ]; then
 	exit 1
 fi
 
-spike_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
-repo_dir=$(CDPATH= cd -- "$spike_dir/../../../.." && pwd)
+spike_dir=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+repo_dir=$(CDPATH='' cd -- "$spike_dir/../../../.." && pwd)
 output_root=${1:-$(mktemp -d "${TMPDIR:-/tmp}/graith-identity-spike.XXXXXX")}
 app="$output_root/Graith.app"
 

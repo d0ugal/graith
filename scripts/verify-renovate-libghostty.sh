@@ -3,7 +3,8 @@
 # non-automerge libghostty dependency unit using deliberately stale fixtures.
 set -euo pipefail
 
-readonly REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+readonly REPO_DIR
 readonly RENOVATE_BIN="${RENOVATE_BIN:-renovate}"
 readonly RENOVATE_CONFIG_VALIDATOR_BIN="${RENOVATE_CONFIG_VALIDATOR_BIN:-renovate-config-validator}"
 

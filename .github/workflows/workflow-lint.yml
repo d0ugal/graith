@@ -1,8 +1,9 @@
 name: Workflow Lint
 
-# Static analysis of the GitHub Actions workflows themselves: actionlint
-# (YAML + shellcheck of `run:` blocks) and zizmor (Actions SAST — template
-# injection, over-broad permissions, unpinned actions, dangerous triggers).
+# Static analysis of shell scripts and GitHub Actions workflows: ShellCheck for
+# tracked scripts, actionlint (YAML + shellcheck of `run:` blocks), and zizmor
+# (Actions SAST — template injection, over-broad permissions, unpinned actions,
+# dangerous triggers).
 # This is the regression gate for the supply-chain hardening in #697.
 
 on:
@@ -14,6 +15,9 @@ on:
       - 'internal/libghosttydeps/testdata/renovate/**'
       - 'libghostty-native.lock.json'
       - 'renovate.json5'
+      - '**/*.sh'
+      - '*.sh'
+      - 'Makefile'
       - 'scripts/verify-renovate-libghostty.sh'
   pull_request:
     paths:
@@ -22,12 +26,27 @@ on:
       - 'internal/libghosttydeps/testdata/renovate/**'
       - 'libghostty-native.lock.json'
       - 'renovate.json5'
+      - '**/*.sh'
+      - '*.sh'
+      - 'Makefile'
       - 'scripts/verify-renovate-libghostty.sh'
 
 permissions:
   contents: read
 
 jobs:
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Lint tracked shell scripts
+        run: |
+          shellcheck --version
+          make shellcheck
+
   renovate:
     name: Renovate native dependency fixtures
     runs-on: ubuntu-latest
