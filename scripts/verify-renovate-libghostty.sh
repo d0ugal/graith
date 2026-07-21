@@ -82,8 +82,7 @@ if ! jq -se '
         .matchDepTypes == ["libghostty-native"] and
         .groupSlug == "libghostty-native" and
         .automerge == false and
-        .postUpgradeTasks.commands == ["scripts/libghostty-native.sh generate-dependency-unit"] and
-        .postUpgradeTasks.executionMode == "branch") and
+        .postUpgradeTasks == null) and
     any($config.packageRules[];
         .matchDepTypes == ["libghostty-native"] and
         .matchDepNames == ["Ghostty", "Zig", "uucode", "Highway", "simdutf"] and
