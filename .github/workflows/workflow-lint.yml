@@ -31,19 +31,16 @@ jobs:
   renovate:
     name: Renovate native dependency fixtures
     runs-on: ubuntu-latest
+    # Pin the complete Renovate runtime, including its transitive dependency
+    # graph, rather than resolving an npm tree during the workflow run.
+    container:
+      image: renovate/renovate:43.268.6@sha256:e89b5a9d54d40d9a345df9bf666a9c05ef1e512a471841b6a5fe704cf58e4f63
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: 24.11.0
-      - name: Install the pinned Renovate validator and dry-run tooling
-        # Keep registry artifacts outside the initial 72-hour publication
-        # window and block dependency lifecycle scripts in this CI runner.
-        run: npm install --global --ignore-scripts renovate@43.268.6
       - name: Validate config and update every native dependency fixture
         env:
           RENOVATE_GITHUB_COM_TOKEN: ${{ github.token }}
