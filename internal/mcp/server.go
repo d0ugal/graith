@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/d0ugal/graith/internal/client"
@@ -106,6 +107,10 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 func (s *Server) connect(ctx context.Context) (*client.Client, error) {
+	if os.Getenv("GRAITH_MANAGED_MCP") != "" && os.Getenv("GRAITH_TOKEN") == "" {
+		return nil, errors.New("managed graith MCP has no delegated session identity")
+	}
+
 	return client.ConnectPassiveContext(ctx, s.cfg, s.paths, s.configFile)
 }
 

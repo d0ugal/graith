@@ -185,6 +185,16 @@ func TestListSessionsEmpty(t *testing.T) {
 	}
 }
 
+func TestManagedMCPConnectFailsClosedWithoutDelegatedToken(t *testing.T) {
+	t.Setenv("GRAITH_MANAGED_MCP", "1")
+	t.Setenv("GRAITH_TOKEN", "")
+
+	srv := NewServer(config.Default(), config.Paths{}, "")
+	if _, err := srv.connect(context.Background()); err == nil || !strings.Contains(err.Error(), "no delegated session identity") {
+		t.Fatalf("connect error = %v, want missing delegated identity", err)
+	}
+}
+
 func TestCreateAndListSessions(t *testing.T) {
 	env := setup(t)
 	defer env.teardown()

@@ -47,6 +47,157 @@ func TestMCPManagerConnectDisconnect(t *testing.T) {
 	}
 }
 
+func TestManagedMCPReceivesDelegatedCallerToken(t *testing.T) {
+	outPath := filepath.Join(t.TempDir(), "caller.txt")
+	sandboxed := false
+
+	mgr := newMCPManager(&config.Config{}, []injectedMCPServer{{
+		config: config.MCPServerConfig{
+			Name:    "graith",
+			Command: "sh",
+			Args:    []string{"-c", `printf '%s\n%s\n' "$GRAITH_TOKEN" "$GRAITH_MANAGED_MCP" > "$1"; exec cat`, "sh", outPath},
+			Sandbox: &sandboxed,
+		},
+		delegateCallerIdentity: true,
+	}}, t.TempDir(), slog.Default())
+	defer mgr.Shutdown()
+
+	t.Setenv("GRAITH_TOKEN", "ambient-dreich-token")
+
+	proc, err := mgr.connect(
+		"graith",
+		"canny-graith",
+		config.TemplateVars{SessionID: "canny"},
+		mcpCallerIdentity{sessionID: "canny", token: "delegated-braw-token"}, //nolint:gosec // Deliberately recognizable test-only credential.
+	)
+	if err != nil {
+		t.Fatalf("connect managed graith MCP: %v", err)
+	}
+	defer mgr.Disconnect("canny-graith", proc)
+
+	got := waitForFileContent(t, outPath)
+	if got != "delegated-braw-token\n1\n" {
+		t.Fatalf("managed MCP environment = %q, want delegated token and marker", got)
+	}
+}
+
+func TestManagedMCPRequiresMatchingCallerIdentity(t *testing.T) {
+	mgr := newMCPManager(&config.Config{}, []injectedMCPServer{{
+		config:                 config.MCPServerConfig{Name: "graith", Command: "cat"},
+		delegateCallerIdentity: true,
+	}}, t.TempDir(), slog.Default())
+	defer mgr.Shutdown()
+
+	for _, tc := range []struct {
+		name   string
+		caller mcpCallerIdentity
+	}{
+		{name: "missing"},
+		{name: "missing token", caller: mcpCallerIdentity{sessionID: "canny"}},
+		{name: "different session", caller: mcpCallerIdentity{sessionID: "dreich", token: "tok-dreich"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := mgr.connect("graith", "canny-graith", config.TemplateVars{SessionID: "canny"}, tc.caller)
+			if err == nil || !strings.Contains(err.Error(), "authenticated session identity") {
+				t.Fatalf("connect error = %v, want authenticated identity rejection", err)
+			}
+		})
+	}
+}
+
+func TestConfiguredMCPDoesNotInheritAmbientToken(t *testing.T) {
+	outPath := filepath.Join(t.TempDir(), "caller.txt")
+	sandboxed := false
+	cfg := &config.Config{MCPServers: []config.MCPServerConfig{{
+		Name:    "canny",
+		Command: "sh",
+		Args:    []string{"-c", `printf '<%s>\n' "$GRAITH_TOKEN" > "$1"; exec cat`, "sh", outPath},
+		Sandbox: &sandboxed,
+	}}}
+
+	mgr := NewMCPManager(cfg, nil, t.TempDir(), slog.Default())
+	defer mgr.Shutdown()
+
+	t.Setenv("GRAITH_TOKEN", "ambient-dreich-token")
+
+	proc, err := mgr.Connect("canny", "canny-proxy", config.TemplateVars{SessionID: "canny"})
+	if err != nil {
+		t.Fatalf("connect configured MCP: %v", err)
+	}
+	defer mgr.Disconnect("canny-proxy", proc)
+
+	if got := waitForFileContent(t, outPath); got != "<>\n" {
+		t.Fatalf("configured MCP token environment = %q, want ambient token removed", got)
+	}
+}
+
+func TestConfiguredGraithNameCannotSelectDelegation(t *testing.T) {
+	mgr := newMCPManager(&config.Config{MCPServers: []config.MCPServerConfig{{
+		Name: "graith", Command: "cat",
+	}}}, []injectedMCPServer{{
+		config:                 config.MCPServerConfig{Name: "graith", Command: "managed-graith"},
+		delegateCallerIdentity: true,
+	}}, t.TempDir(), slog.Default())
+	defer mgr.Shutdown()
+
+	if mgr.delegates["graith"] {
+		t.Fatal("user-configured graith server retained built-in delegation authority")
+	}
+
+	if got := mgr.servers["graith"].Command; got != "cat" {
+		t.Fatalf("effective graith command = %q, want configured command", got)
+	}
+}
+
+func TestMCPManagerReloadAppliesDelegationProvenance(t *testing.T) {
+	server := config.MCPServerConfig{Name: "graith", Command: "cat"}
+
+	mgr := newMCPManager(&config.Config{MCPServers: []config.MCPServerConfig{server}}, []injectedMCPServer{{
+		config:                 server,
+		delegateCallerIdentity: true,
+	}}, t.TempDir(), slog.Default())
+	defer mgr.Shutdown()
+
+	proc, err := mgr.Connect("graith", "canny-graith", config.TemplateVars{SessionID: "canny"})
+	if err != nil {
+		t.Fatalf("connect configured same-name server: %v", err)
+	}
+
+	// Removing the byte-for-byte-identical configured override changes only
+	// provenance: the effective server becomes the trusted built-in. Reload must
+	// still reap the untrusted process and enforce delegation on its replacement.
+	mgr.Reload(&config.Config{})
+
+	select {
+	case <-proc.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reload did not stop process after delegation provenance changed")
+	}
+
+	if _, err := mgr.Connect("graith", "canny-graith", config.TemplateVars{SessionID: "canny"}); err == nil ||
+		!strings.Contains(err.Error(), "authenticated session identity") {
+		t.Fatalf("post-reload connect error = %v, want delegated identity requirement", err)
+	}
+}
+
+func waitForFileContent(t *testing.T, path string) string {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil && len(data) > 0 {
+			return string(data)
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("timed out waiting for %s", path)
+
+	return ""
+}
+
 func TestMCPManagerUpgradeFreezeDrainsAndBarsConnect(t *testing.T) {
 	cfg := &config.Config{MCPServers: []config.MCPServerConfig{{Name: "canny", Command: "cat"}}}
 

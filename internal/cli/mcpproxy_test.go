@@ -18,6 +18,7 @@ func TestIsPermanentErrorClassification(t *testing.T) {
 		{name: "unknown server is permanent", err: errors.New("unknown MCP server \"blether\""), want: true},
 		{name: "manager not initialized is permanent", err: errors.New("MCP manager not initialized"), want: true},
 		{name: "not enabled for agent is permanent", err: errors.New("server \"loch\" is not enabled for agent claude"), want: true},
+		{name: "missing managed identity is permanent", err: errors.New("managed graith MCP requires an authenticated session identity"), want: true},
 		{name: "connect failure is transient", err: errors.New("connect to daemon: dial unix: no such file"), want: false},
 		{name: "generic error is transient", err: errors.New("dreich"), want: false},
 	}
