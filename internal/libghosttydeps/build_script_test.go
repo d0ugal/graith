@@ -14,6 +14,7 @@ func TestAppleBuildScriptReplacesStaleFrameworkInReusableWorkdir(t *testing.T) {
 	}
 
 	root := t.TempDir()
+
 	shared := filepath.Join(root, "gui", "shared")
 	if err := os.MkdirAll(shared, 0o750); err != nil {
 		t.Fatal(err)
@@ -23,6 +24,7 @@ func TestAppleBuildScriptReplacesStaleFrameworkInReusableWorkdir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	buildScript := filepath.Join(shared, "build-libghostty.sh")
 	if err := os.WriteFile(buildScript, script, 0o755); err != nil { //nolint:gosec // executable test fixture
 		t.Fatal(err)
@@ -37,6 +39,7 @@ func TestAppleBuildScriptReplacesStaleFrameworkInReusableWorkdir(t *testing.T) {
 	if err := os.MkdirAll(fakeBin, 0o750); err != nil {
 		t.Fatal(err)
 	}
+
 	writeExecutable := func(name, content string) {
 		t.Helper()
 
@@ -71,32 +74,39 @@ exit 1
 	if err := os.MkdirAll(filepath.Join(work, "ghostty", ".git"), 0o750); err != nil {
 		t.Fatal(err)
 	}
+
 	stale := filepath.Join(work, "ghostty", "zig-out", "libghostty-vt.xcframework")
 	if err := os.MkdirAll(stale, 0o750); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(stale, "marker"), []byte("dreich\n"), 0o644); err != nil { //nolint:gosec // test fixture
 		t.Fatal(err)
 	}
 
-	cmd := exec.Command("bash", buildScript) //nolint:gosec // fixed executable and test-only script path
+	cmd := exec.Command("bash", buildScript)
+
 	cmd.Env = append(os.Environ(),
 		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"WORK="+work,
 	)
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("build script failed: %v\n%s", err, output)
 	}
 
 	marker := filepath.Join(shared, "Libraries", "libghostty-vt.xcframework", "marker")
+
 	data, err := os.ReadFile(marker)
 	if err != nil {
 		t.Fatalf("read copied framework marker: %v\n%s", err, output)
 	}
+
 	if string(data) != "canny\n" {
 		t.Fatalf("copied framework marker = %q, want fresh output", data)
 	}
+
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Fatalf("stale framework survived reusable build: %v", err)
 	}
