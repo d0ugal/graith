@@ -88,13 +88,29 @@ The command resolves the wrapper commit to its Go pseudo-version and sum,
 checks out the selected Ghostty commit, hashes exact sources and licenses,
 synchronizes committed headers, refreshes the Apple artifact URL/checksum,
 updates `go.mod`/`go.sum`, and renders the SPDX and generated notice inventory.
-It fails if the exact Apple artifact has not yet been published. Those failures
-are review signals, not a reason to weaken verification.
+It fails if the exact Apple artifact has not yet been published. The release
+metadata must name the full Ghostty commit and checksum, and the bytes must match
+GitHub's release-asset digest. This is an explicit trust boundary: the update
+consumes a separately built and reviewed artifact and does not rebuild or
+publish it. Those failures are review signals, not a reason to weaken
+verification.
+
+License conclusions are never inferred from a version string. Each conclusion
+is bound to the exact license and embedded-notice hashes by a review fingerprint.
+Generation can expose changed evidence in a reviewable PR, but the merge gate
+stays red until a maintainer inspects it and explicitly refreshes that binding.
+The SPDX validator is the one automatic exception to dashboard approval because
+it is update tooling, not compiled content; it remains in the same non-automerge
+unit and its GitHub release digest and official validation are checked.
 
 An offline verification mode compares all projections to the lock on every
-native-relevant PR. The existing native workflow remains the required gate for
-wrapper tests, compatibility, race/fuzz, packaging, SPDX, linkage, privacy, and
-supported platforms.
+native-relevant PR. Generation rolls all managed files back after a late error,
+so it never leaves a partially rotated worktree. The existing native workflow
+remains the required gate for wrapper tests, compatibility, race/fuzz,
+packaging, SPDX, linkage, privacy, and supported platforms. When the fallback
+workflow creates a generated commit, it explicitly dispatches every protected
+workflow at that exact branch head rather than relying on statuses from the
+pre-generation SHA.
 
 The trade-off is that a Renovate proposal for a transitive release can remain
 red until a compatible Ghostty commit and reviewed Apple artifact exist. That

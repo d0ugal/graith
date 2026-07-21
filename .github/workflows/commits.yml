@@ -2,6 +2,7 @@ name: Commits
 
 on:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,3 +17,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: aevea/commitsar@909c3ab676c9af63cb84f2e38f395c7e89829b04 # v1.0.3
+        env:
+          # Commitsar otherwise defaults to origin/master when a dispatch has
+          # no GITHUB_BASE_REF. Use its supported GitLab-compatible variable
+          # so the exact generated branch SHA is compared with main.
+          CI_MERGE_REQUEST_TARGET_BRANCH_NAME: ${{ github.event_name == 'workflow_dispatch' && 'main' || '' }}

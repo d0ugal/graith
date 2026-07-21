@@ -7,7 +7,7 @@
   "ghostty": {
     "repository": "https://github.com/ghostty-org/ghostty.git",
     "renovateRef": "main",
-    "commit": "91f66da24527fa02d92b5fd0b41cd020f553a64c"
+    "commit": "facda0c3fb1310c7698fc77ba193165ef38cd58e"
   },
   "zig": {
     "repository": "ziglang/zig",

@@ -92,9 +92,19 @@ verify_dependency_unit() {
     go run ./internal/libghosttydeps/cmd verify "$REPO_DIR"
 }
 
+verify_generated_dependency_unit() {
+    cd "$REPO_DIR"
+    go run ./internal/libghosttydeps/cmd verify-generated "$REPO_DIR"
+}
+
 generate_dependency_unit() {
     cd "$REPO_DIR"
     go run ./internal/libghosttydeps/cmd generate "$REPO_DIR"
+}
+
+accept_license_reviews() {
+    cd "$REPO_DIR"
+    go run ./internal/libghosttydeps/cmd accept-license-reviews "$REPO_DIR"
 }
 
 write_pkg_config() {
@@ -881,7 +891,9 @@ usage: $0 test|race|fuzz|bench|memory|daemon-test|soak [cycles [timeout]]|all
        $0 source-build <zig-target> <output-library>
        $0 source-test <zig-target>
        $0 verify-dependency-unit
+       $0 verify-generated-dependency-unit
        $0 generate-dependency-unit
+       $0 accept-license-reviews
        $0 verify-metadata [ghostty-source]
        $0 verify-default-binary <binary>
        $0 verify-darwin-arm64-candidate <binary> <revision>
@@ -899,6 +911,8 @@ soak defaults to 1,000 cycles bounded by one hour.
 source-build checks out Ghostty $GHOSTTY_SHA and requires Zig $REQUIRED_ZIG.
 generate-dependency-unit rotates the complete lock, Go module, headers, SPDX,
 notice inventory, and Apple artifact metadata; verify-dependency-unit is offline.
+accept-license-reviews explicitly binds reviewed conclusions to current license
+and embedded-notice hashes; run it only after inspecting the changed evidence.
 EOF
 }
 
@@ -931,8 +945,14 @@ case "${1:-}" in
     verify-dependency-unit)
         verify_dependency_unit
         ;;
+    verify-generated-dependency-unit)
+        verify_generated_dependency_unit
+        ;;
     generate-dependency-unit)
         generate_dependency_unit
+        ;;
+    accept-license-reviews)
+        accept_license_reviews
         ;;
     verify-metadata)
         verify_metadata "${2:-}"

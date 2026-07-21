@@ -1,6 +1,7 @@
 package libghosttydeps
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,6 +80,13 @@ func TestValidateShortGhosttyCommitDoesNotPanic(t *testing.T) {
 	}
 }
 
+func TestDecodeLockRejectsTrailingJSON(t *testing.T) {
+	_, err := DecodeLock([]byte(`{} {}`))
+	if err == nil || !strings.Contains(err.Error(), "trailing JSON") {
+		t.Fatalf("trailing JSON error = %v", err)
+	}
+}
+
 func TestFollowWrapperGhosttyPin(t *testing.T) {
 	const (
 		previous = "1111111111111111111111111111111111111111"
@@ -144,11 +152,170 @@ func TestPrimaryDependencyDiffers(t *testing.T) {
 	}
 }
 
-func TestVerifyRejectsStaleNoticeProjection(t *testing.T) {
+func TestLicenseReviewBindsEvidenceAndConclusion(t *testing.T) {
+	lock := Lock{
+		GoLibghostty: GoDependency{LicenseSHA256: strings.Repeat("1", 64), LicenseConclusion: "MIT"},
+		Ghostty:      Ghostty{LicenseSHA256: strings.Repeat("2", 64), LicenseConclusion: "MIT"},
+		Zig:          Zig{LicenseSHA256: strings.Repeat("3", 64), LicenseConclusion: "MIT"},
+		Uucode: Uucode{
+			LicenseSHA256: strings.Repeat("4", 64), DecoderNoticeSHA256: strings.Repeat("5", 64),
+			UnicodeNoticeSHA256: strings.Repeat("6", 64), LicenseConclusion: "MIT AND Unicode-3.0",
+		},
+		Highway: Highway{
+			LicenseSHA256: strings.Repeat("7", 64), LicenseConclusion: "BSD-3-Clause", LicenseDeclared: "Apache-2.0 OR BSD-3-Clause",
+		},
+		Simdutf: Simdutf{
+			LicenseSHA256: strings.Repeat("8", 64), LicenseConclusion: "MIT", LicenseDeclared: "Apache-2.0 OR MIT",
+		},
+	}
+	AcceptLicenseReviews(&lock)
+
+	if err := VerifyLicenseReviews(lock); err != nil {
+		t.Fatal(err)
+	}
+
+	lock.Uucode.UnicodeNoticeSHA256 = strings.Repeat("9", 64)
+
+	lock.Highway.LicenseConclusion = "Apache-2.0"
+	if err := VerifyLicenseReviews(lock); err == nil || !strings.Contains(err.Error(), "uucode") || !strings.Contains(err.Error(), "Highway") {
+		t.Fatalf("changed license review error = %v", err)
+	}
+}
+
+func TestGeneratedUnitRollbackRestoresEveryManagedPath(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range generatedUnitFiles {
+		writeTestFile(t, filepath.Join(root, name), "old "+name)
+	}
+
+	writeTestFile(t, filepath.Join(root, generatedHeaders, "braw.h"), "canny")
+
+	wantErr := errors.New("dreich late failure")
+
+	err := withGeneratedUnitRollback(root, func() error {
+		for _, name := range generatedUnitFiles {
+			writeTestFile(t, filepath.Join(root, name), "changed "+name)
+		}
+
+		if removeErr := os.RemoveAll(filepath.Join(root, generatedHeaders)); removeErr != nil {
+			t.Fatal(removeErr)
+		}
+
+		writeTestFile(t, filepath.Join(root, generatedHeaders, "thrawn.h"), "blether")
+
+		return wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("rollback error = %v, want %v", err, wantErr)
+	}
+
+	for _, name := range generatedUnitFiles {
+		data, readErr := os.ReadFile(filepath.Join(root, name))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+
+		if string(data) != "old "+name {
+			t.Fatalf("restored %s = %q", name, data)
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, generatedHeaders, "braw.h"))
+	if err != nil || string(data) != "canny" {
+		t.Fatalf("restored header = %q, %v", data, err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, generatedHeaders, "thrawn.h")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("new header survived rollback: %v", err)
+	}
+}
+
+func TestVerifyRejectsEveryStaleProjection(t *testing.T) {
 	sourceRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	lock, err := LoadLock(filepath.Join(sourceRoot, LockFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name      string
+		path      string
+		old       string
+		replace   string
+		wantError string
+	}{
+		{"notice", NoticesFilename, "wrapper-tested Ghostty commit", "stale wrapper-tested Ghostty commit", "notice inventory is stale"},
+		{"SPDX", SPDXFilename, `"spdxVersion": "SPDX-2.3"`, `"spdxVersion": "SPDX-2.2"`, "generated SPDX inventory is stale"},
+		{"go.mod", "go.mod", lock.GoLibghostty.Version, "v0.0.0-20000101000000-111111111111", "go-libghostty requirement does not match"},
+		{"go.sum", "go.sum", lock.GoLibghostty.ModuleSum, "h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "module sum does not match"},
+		{"Swift checksum", "gui/shared/Package.swift", lock.Ghostty.AppleArtifact.SHA256, strings.Repeat("a", 64), "checksum does not uniquely match"},
+		{"header", filepath.Join(generatedHeaders, "vt.h"), "#define", "#define STALE 1\n#define", "header tree SHA-256"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := copyCommittedUnit(t, sourceRoot)
+			path := filepath.Join(root, test.path)
+
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+
+			stale := strings.Replace(string(data), test.old, test.replace, 1)
+			if stale == string(data) {
+				t.Fatalf("stale fixture pattern %q not found in %s", test.old, test.path)
+			}
+
+			if writeErr := os.WriteFile(path, []byte(stale), 0o644); writeErr != nil { //nolint:gosec // test fixture
+				t.Fatal(writeErr)
+			}
+
+			if verifyErr := Verify(root); verifyErr == nil || !strings.Contains(verifyErr.Error(), test.wantError) {
+				t.Fatalf("stale %s verification error = %v", test.name, verifyErr)
+			}
+		})
+	}
+}
+
+func TestGeneratedProjectionAllowsPendingLicenseReviewButMergeGateRejectsIt(t *testing.T) {
+	sourceRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	root := copyCommittedUnit(t, sourceRoot)
+
+	lockPath := filepath.Join(root, LockFilename)
+
+	lock, err := LoadLock(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lock.Ghostty.LicenseSHA256 = strings.Repeat("a", 64)
+	if err := WriteLock(lockPath, lock); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeGeneratedMetadata(root, lock); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := VerifyGenerated(root); err != nil {
+		t.Fatalf("mechanical projection with pending review = %v", err)
+	}
+
+	if err := Verify(root); err == nil || !strings.Contains(err.Error(), "Ghostty license evidence or conclusion changed") {
+		t.Fatalf("pending license review merge-gate error = %v", err)
+	}
+}
+
+func copyCommittedUnit(t *testing.T, sourceRoot string) string {
+	t.Helper()
 
 	root := t.TempDir()
 
@@ -181,26 +348,24 @@ func TestVerifyRejectsStaleNoticeProjection(t *testing.T) {
 		}
 	}
 
-	fromHeaders := filepath.Join(sourceRoot, "gui/shared/Sources/CGhosttyVT/include/ghostty")
+	fromHeaders := filepath.Join(sourceRoot, generatedHeaders)
 
-	toHeaders := filepath.Join(root, "gui/shared/Sources/CGhosttyVT/include/ghostty")
+	toHeaders := filepath.Join(root, generatedHeaders)
 	if err := copyTree(fromHeaders, toHeaders); err != nil {
 		t.Fatal(err)
 	}
 
-	noticesPath := filepath.Join(root, NoticesFilename)
+	return root
+}
 
-	notices, err := os.ReadFile(noticesPath)
-	if err != nil {
+func writeTestFile(t *testing.T, path, content string) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		t.Fatal(err)
 	}
 
-	stale := strings.Replace(string(notices), "wrapper-tested Ghostty commit", "stale wrapper-tested Ghostty commit", 1)
-	if err := os.WriteFile(noticesPath, []byte(stale), 0o644); err != nil { //nolint:gosec // test fixture
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil { //nolint:gosec // test fixture
 		t.Fatal(err)
-	}
-
-	if err := Verify(root); err == nil || !strings.Contains(err.Error(), "notice inventory is stale") {
-		t.Fatalf("stale notice verification error = %v", err)
 	}
 }

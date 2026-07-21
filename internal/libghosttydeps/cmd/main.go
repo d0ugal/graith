@@ -27,8 +27,12 @@ func main() {
 	switch os.Args[1] {
 	case "verify":
 		err = libghosttydeps.Verify(absolute)
+	case "verify-generated":
+		err = libghosttydeps.VerifyGenerated(absolute)
 	case "generate":
 		err = libghosttydeps.Generate(context.Background(), absolute)
+	case "accept-license-reviews":
+		err = acceptLicenseReviews(absolute)
 	default:
 		usage()
 	}
@@ -39,8 +43,21 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: go run ./internal/libghosttydeps/cmd verify|generate [repository-root]")
+	fmt.Fprintln(os.Stderr, "usage: go run ./internal/libghosttydeps/cmd verify|verify-generated|generate|accept-license-reviews [repository-root]")
 	os.Exit(2)
+}
+
+func acceptLicenseReviews(root string) error {
+	path := filepath.Join(root, libghosttydeps.LockFilename)
+
+	lock, err := libghosttydeps.LoadLock(path)
+	if err != nil {
+		return err
+	}
+
+	libghosttydeps.AcceptLicenseReviews(&lock)
+
+	return libghosttydeps.WriteLock(path, lock)
 }
 
 func fatal(err error) {
