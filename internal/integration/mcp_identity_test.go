@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -31,7 +32,9 @@ const (
 type managedMCPTestEnv struct {
 	*testEnv
 
-	messages *daemon.MsgStore
+	cliPath    string
+	mcpManager *daemon.MCPManager
+	messages   *daemon.MsgStore
 }
 
 func TestManagedGraithMCPPreservesCallerIdentity(t *testing.T) {
@@ -41,7 +44,7 @@ func TestManagedGraithMCPPreservesCallerIdentity(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	cmd := exec.Command(os.Args[0], "mcp-proxy", "graith") //nolint:gosec // Re-executes this fixed integration test binary through the real CLI entrypoint.
+	cmd := exec.Command(env.cliPath, "mcp-proxy", "graith")
 	cmd.Env = replaceProcessEnv(os.Environ(), map[string]string{
 		managedMCPHelperEnvName: "1",
 		"GRAITH_TOKEN":          managedMCPCallerToken,
@@ -50,11 +53,16 @@ func TestManagedGraithMCPPreservesCallerIdentity(t *testing.T) {
 		"GRAITH_SESSION_ID": "spoofed-session",
 	})
 
+	var proxyStderr bytes.Buffer
+
+	cmd.Stderr = &proxyStderr
+
 	client := gomcp.NewClient(&gomcp.Implementation{Name: "identity-regression", Version: "1"}, nil)
 
 	session, err := client.Connect(ctx, &gomcp.CommandTransport{Command: cmd}, nil)
 	if err != nil {
-		t.Fatalf("connect through managed mcp-proxy: %v", err)
+		logs, logErr := env.mcpManager.LogFiles("graith", 100)
+		t.Fatalf("connect through managed mcp-proxy: %v; proxy stderr: %q; managed logs: %+v; read logs: %v", err, proxyStderr.String(), logs, logErr)
 	}
 
 	defer func() { _ = session.Close() }()
@@ -169,6 +177,13 @@ func setupManagedMCP(t *testing.T) *managedMCPTestEnv {
 
 	t.Cleanup(func() { _ = os.RemoveAll(runtimeRoot) })
 
+	// Both proxy layers re-execute the integration test binary through the
+	// production CLI. Give resolveGrBin a stable, absolute PATH entry so nested
+	// execution does not depend on the runner-specific spelling of os.Args[0].
+	// In particular, Darwin test runners may use a relative or symlinked argv[0]
+	// that is not reusable from the managed process's temporary working dir.
+	cliPath := installManagedMCPTestBinary(t, runtimeRoot)
+
 	t.Setenv(managedMCPHelperEnvName, "1")
 	t.Setenv("GRAITH_PROFILE", fmt.Sprintf("mcpid-%d", os.Getpid()))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
@@ -266,9 +281,34 @@ func setupManagedMCP(t *testing.T) *managedMCPTestEnv {
 	go sm.RunDetectionLoop(ctx)
 
 	return &managedMCPTestEnv{
-		testEnv:  &testEnv{sm: sm, srv: srv, cancel: cancel, socket: paths.SocketPath, tmpDir: root},
-		messages: msgStore,
+		testEnv:    &testEnv{sm: sm, srv: srv, cancel: cancel, socket: paths.SocketPath, tmpDir: root},
+		cliPath:    cliPath,
+		mcpManager: mcpManager,
+		messages:   msgStore,
 	}
+}
+
+func installManagedMCPTestBinary(t *testing.T, runtimeRoot string) string {
+	t.Helper()
+
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve integration test binary: %v", err)
+	}
+
+	binDir := filepath.Join(runtimeRoot, "bin")
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatalf("create managed MCP test bin dir: %v", err)
+	}
+
+	cliPath := filepath.Join(binDir, filepath.Base(os.Args[0]))
+	if err := os.Symlink(testBinary, cliPath); err != nil {
+		t.Fatalf("link managed MCP test binary: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	return cliPath
 }
 
 func callManagedMCPTool(t *testing.T, ctx context.Context, session *gomcp.ClientSession, name string, arguments any) *gomcp.CallToolResult {
