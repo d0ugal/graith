@@ -565,6 +565,11 @@ func startNativeDaemon(t *testing.T) *nativeDaemonHarness {
 	cfg.DataDir = dataHome
 	cfg.DefaultAgent = "echo"
 	cfg.FetchOnCreate = false
+	// The lifecycle tests own every session mutation. Keep the unrelated status
+	// detector from changing LastOutputAt or AgentStatus while an upgrade takes
+	// its transactional state snapshot; detection-loop behavior is covered by
+	// dedicated daemon tests.
+	cfg.Detection.ScanInterval = "1h"
 	cfg.Agents["echo"] = config.Agent{
 		Command:    "sh",
 		Args:       []string{"-c", "printf '" + nativeReadyText + "\\r\\n'; exec cat"},
