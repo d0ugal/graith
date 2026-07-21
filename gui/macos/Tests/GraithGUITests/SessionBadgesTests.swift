@@ -17,7 +17,7 @@ final class SessionBadgesTests: XCTestCase {
 
     private let braw = """
     {"id":"braw","name":"braw","repo_path":"/croft","repo_name":"croft",
-     "worktree_path":"/bothy","branch":"b","base_branch":"main","agent":"claude",
+     "worktree_path":"/bothy","cwd":"/bothy","branch":"b","base_branch":"main","agent":"claude",
      "status":"running","created_at":"now"}
     """
 
@@ -32,7 +32,7 @@ final class SessionBadgesTests: XCTestCase {
     func testModeHelpersReflectWireFlags() throws {
         let s = try session("""
         {"id":"canny","name":"canny","repo_path":"/croft","repo_name":"croft",
-         "worktree_path":"/bothy","branch":"b","base_branch":"main","agent":"codex",
+         "worktree_path":"/bothy","cwd":"/bothy","branch":"b","base_branch":"main","agent":"codex",
          "status":"running","created_at":"now","sandboxed":true,
          "config_stale":true}
         """)
