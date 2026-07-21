@@ -4,10 +4,26 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/d0ugal/graith/internal/testutil"
 )
+
+func setupUnbornTestRepo(t *testing.T, initialBranch string) string {
+	t.Helper()
+	testutil.IsolateGit(t)
+
+	dir := t.TempDir()
+	cmd := testutil.GitCommand("init", "-b", initialBranch)
+	cmd.Dir = dir
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init -b %s: %v\n%s", initialBranch, err, out)
+	}
+
+	return dir
+}
 
 func TestRepoRootPath(t *testing.T) {
 	dir := setupTestRepo(t)
@@ -98,6 +114,23 @@ func TestDiscoverDefaultBranchLocalMaster(t *testing.T) {
 
 	if branch != "master" {
 		t.Errorf("DiscoverDefaultBranch = %q, want %q", branch, "master")
+	}
+}
+
+func TestDiscoverDefaultBranchUnborn(t *testing.T) {
+	for _, initialBranch := range []string{"main", "canny-wynd"} {
+		t.Run(initialBranch, func(t *testing.T) {
+			dir := setupUnbornTestRepo(t, initialBranch)
+
+			branch, err := DiscoverDefaultBranch(dir)
+			if err != nil {
+				t.Fatalf("DiscoverDefaultBranch: %v", err)
+			}
+
+			if branch != initialBranch {
+				t.Errorf("DiscoverDefaultBranch = %q, want %q", branch, initialBranch)
+			}
+		})
 	}
 }
 
@@ -259,6 +292,115 @@ func TestSetupAndTeardownSession(t *testing.T) {
 				t.Error("worktree directory should be removed after TeardownSession")
 			}
 		})
+	}
+}
+
+func TestSetupAndTeardownSessionUnborn(t *testing.T) {
+	for _, initialBranch := range []string{"main", "canny-wynd"} {
+		t.Run(initialBranch, func(t *testing.T) {
+			repo := setupUnbornTestRepo(t, initialBranch)
+			sourceFile := filepath.Join(repo, "source-neep.txt")
+			writeFile(t, sourceFile, "dreich")
+
+			worktreePath := filepath.Join(t.TempDir(), "bothy-braw")
+			sessionBranch := "graith/glen-braw-session"
+
+			if err := SetupSession(context.Background(), repo, worktreePath, sessionBranch, initialBranch, false); err != nil {
+				t.Fatalf("SetupSession: %v", err)
+			}
+
+			if got, err := RunOutput(repo, "symbolic-ref", "--short", "HEAD"); err != nil || got != initialBranch {
+				t.Fatalf("source HEAD = %q, %v; want unborn %q", got, err, initialBranch)
+			}
+
+			if got, err := RunOutput(worktreePath, "symbolic-ref", "--short", "HEAD"); err != nil || got != sessionBranch {
+				t.Fatalf("session HEAD = %q, %v; want unborn %q", got, err, sessionBranch)
+			}
+
+			if RefExists(repo, "HEAD") || RefExists(repo, sessionBranch) {
+				t.Fatal("setting up an unborn session must not create a commit-backed ref")
+			}
+
+			if _, err := os.Stat(sourceFile); err != nil {
+				t.Fatalf("source checkout was changed: %v", err)
+			}
+
+			if _, err := os.Stat(filepath.Join(worktreePath, filepath.Base(sourceFile))); !os.IsNotExist(err) {
+				t.Fatalf("source checkout file leaked into isolated worktree: %v", err)
+			}
+
+			writeFile(t, filepath.Join(worktreePath, "README.md"), "braw")
+			if _, err := RunOutput(worktreePath, "add", "README.md"); err != nil {
+				t.Fatalf("git add first file: %v", err)
+			}
+
+			if _, err := RunOutput(worktreePath, "commit", "-m", "first real commit"); err != nil {
+				t.Fatalf("git commit first real commit: %v", err)
+			}
+
+			if !RefExists(repo, sessionBranch) {
+				t.Fatal("first commit did not create the session branch")
+			}
+
+			if RefExists(repo, "HEAD") {
+				t.Fatal("first session commit must not advance the source checkout")
+			}
+
+			if err := TeardownSession(repo, worktreePath, sessionBranch); err != nil {
+				t.Fatalf("TeardownSession: %v", err)
+			}
+
+			if RefExists(repo, sessionBranch) {
+				t.Fatal("session branch still exists after teardown")
+			}
+
+			if _, err := os.Stat(sourceFile); err != nil {
+				t.Fatalf("source checkout changed during teardown: %v", err)
+			}
+		})
+	}
+}
+
+func TestSetupSessionUnbornRejectsDifferentBase(t *testing.T) {
+	repo := setupUnbornTestRepo(t, "canny-wynd")
+	worktreePath := filepath.Join(t.TempDir(), "bothy-thrawn")
+
+	err := SetupSession(context.Background(), repo, worktreePath, "graith/glen-thrawn", "main", false)
+	if err == nil {
+		t.Fatal("expected an invalid base to fail")
+	}
+
+	if !strings.Contains(err.Error(), `repository HEAD is unborn branch "canny-wynd"`) {
+		t.Fatalf("error does not explain the usable unborn base: %v", err)
+	}
+
+	if _, statErr := os.Stat(worktreePath); !os.IsNotExist(statErr) {
+		t.Fatalf("failed setup left a worktree path behind: %v", statErr)
+	}
+}
+
+func TestSetupSessionUnbornWorktreeFailureCleansUp(t *testing.T) {
+	repo := setupUnbornTestRepo(t, "main")
+	clash := filepath.Join(t.TempDir(), "skelf")
+	writeFile(t, clash, "neep")
+
+	branch := "graith/glen-rollback"
+	err := SetupSession(context.Background(), repo, clash, branch, "main", false)
+	if err == nil {
+		t.Fatal("expected SetupSession to fail creating the orphan worktree")
+	}
+
+	if IsRegisteredWorktree(repo, clash) {
+		t.Fatal("failed setup left a worktree registration behind")
+	}
+
+	if RefExists(repo, branch) || RefExists(repo, "HEAD") {
+		t.Fatal("failed setup created a commit-backed branch")
+	}
+
+	data, readErr := os.ReadFile(clash)
+	if readErr != nil || string(data) != "neep" {
+		t.Fatalf("failed setup changed the existing target: data %q, err %v", data, readErr)
 	}
 }
 

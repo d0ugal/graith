@@ -14,6 +14,11 @@ func CreateWorktree(repoPath, worktreePath, branchName string) error {
 	return err
 }
 
+func createOrphanWorktree(repoPath, worktreePath, branchName string) error {
+	_, err := RunOutput(repoPath, "worktree", "add", "--orphan", "-b", branchName, worktreePath)
+	return err
+}
+
 func RemoveWorktree(repoPath, worktreePath string) error {
 	_, err := RunOutput(repoPath, "worktree", "remove", "--force", worktreePath)
 	return err
@@ -29,6 +34,20 @@ func SetupSession(ctx context.Context, repoPath, worktreePath, branchName, baseB
 	startRef := "origin/" + baseBranch
 	if !RefExists(repoPath, startRef) {
 		startRef = baseBranch
+	}
+
+	if !RefExists(repoPath, startRef) {
+		if initialBranch, ok := unbornBranch(repoPath); ok {
+			if baseBranch != initialBranch {
+				return fmt.Errorf("base branch %q does not resolve to a commit; repository HEAD is unborn branch %q (omit --base or use --base %q)", baseBranch, initialBranch, initialBranch)
+			}
+
+			if err := createOrphanWorktree(repoPath, worktreePath, branchName); err != nil {
+				return fmt.Errorf("create orphan worktree (repositories without commits require Git 2.42 or newer): %w", err)
+			}
+
+			return nil
+		}
 	}
 
 	if err := CreateBranch(repoPath, branchName, startRef); err != nil {
