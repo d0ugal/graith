@@ -1,6 +1,7 @@
 # Binary
 /gr
 /graith
+/dist/
 
 # Built macOS notifier .app bundle (issue #1094)
 /macos/build/
