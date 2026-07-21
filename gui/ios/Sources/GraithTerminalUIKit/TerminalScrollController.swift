@@ -21,6 +21,13 @@ import GraithSessionKit
 ///   the live bottom, negative = pulled past the top of history**.
 public struct TerminalScrollController {
 
+    /// The accepted spring ranges are stable at this step. Keeping the clamp in
+    /// the pure controller also protects direct callers that do not go through
+    /// `BaseTerminalUIView`'s display-link clamp. The duration cap is a final
+    /// fail-safe so unexpected finite input can never run a display link forever.
+    private static let maximumIntegrationStep: CGFloat = 0.05
+    private static let maximumSettlingDuration: CGFloat = 10
+
     // MARK: - Tunables
 
     /// Point height of one terminal row; keep in sync with the renderer's cell
@@ -54,6 +61,7 @@ public struct TerminalScrollController {
     /// Momentum velocity in viewport space (points/s, + = toward the live bottom).
     private var velocity: CGFloat = 0
     private var springVelocity: CGFloat = 0
+    private var settlingDuration: CGFloat = 0
 
     public init(cellHeight: CGFloat = 16,
                 friction: CGFloat = 4.5,
@@ -61,11 +69,16 @@ public struct TerminalScrollController {
                 springStiffness: CGFloat = 220,
                 springDamping: CGFloat = 26,
                 rubberBandConstant: CGFloat = 0.55) {
-        self.cellHeight = max(1, cellHeight)
-        self.friction = friction
-        self.momentumCutoff = momentumCutoff
-        self.springStiffness = springStiffness
-        self.springDamping = springDamping
+        let normalized = TerminalGestureConfig(
+            scrollFriction: friction,
+            scrollMomentumCutoff: momentumCutoff,
+            scrollSpringStiffness: springStiffness,
+            scrollSpringDamping: springDamping)
+        self.cellHeight = cellHeight.isFinite ? max(1, cellHeight) : 16
+        self.friction = normalized.scrollFriction
+        self.momentumCutoff = normalized.scrollMomentumCutoff
+        self.springStiffness = normalized.scrollSpringStiffness
+        self.springDamping = normalized.scrollSpringDamping
         self.rubberBandConstant = rubberBandConstant
     }
 
@@ -93,6 +106,7 @@ public struct TerminalScrollController {
         velocity = 0
         springVelocity = 0
         rowRemainder = 0
+        settlingDuration = 0
     }
 
     /// Feed an incremental finger translation (points; +y downward). Any active
@@ -136,6 +150,7 @@ public struct TerminalScrollController {
             rowRemainder = 0
         } else {
             phase = .idle
+            settlingDuration = 0
         }
     }
 
@@ -148,7 +163,19 @@ public struct TerminalScrollController {
     /// spring bounce. Read `contentTranslation(viewportHeight:)` each tick for the
     /// visual offset, and stop ticking once `isSettling` is false.
     public mutating func tick(dt: CGFloat) -> Int {
+        guard dt.isFinite else {
+            stop()
+            return 0
+        }
         guard dt > 0 else { return 0 }
+        let step = min(dt, Self.maximumIntegrationStep)
+        if isSettling {
+            settlingDuration += step
+            if settlingDuration >= Self.maximumSettlingDuration {
+                stop()
+                return 0
+            }
+        }
         switch phase {
         case .momentum:
             if overscroll != 0 {
@@ -158,20 +185,20 @@ public struct TerminalScrollController {
                 phase = .springing
                 return 0
             }
-            velocity *= CGFloat(exp(-Double(friction) * Double(dt)))
+            velocity *= CGFloat(exp(-Double(friction) * Double(step)))
             if abs(velocity) < momentumCutoff {
                 velocity = 0
                 phase = .idle
                 return 0
             }
-            rowRemainder += (velocity * dt) / cellHeight
+            rowRemainder += (velocity * step) / cellHeight
             let whole = Int(rowRemainder)
             rowRemainder -= CGFloat(whole)
             return whole
         case .springing:
             let accel = -springStiffness * overscroll - springDamping * springVelocity
-            springVelocity += accel * dt
-            overscroll += springVelocity * dt
+            springVelocity += accel * step
+            overscroll += springVelocity * step
             // Physical invariant (not tunable): "close enough to rest" epsilons
             // that end the bounce — a convergence detail, not a feel knob.
             if abs(overscroll) < 0.5, abs(springVelocity) < 8 {
@@ -193,6 +220,7 @@ public struct TerminalScrollController {
         springVelocity = 0
         overscroll = 0
         rowRemainder = 0
+        settlingDuration = 0
     }
 
     // MARK: - Visual

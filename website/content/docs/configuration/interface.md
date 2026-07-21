@@ -94,3 +94,21 @@ The `[terminal]` block holds the interactive client's presentation preferences t
 The fallback terminal geometry (used when graith can't read the real size, e.g. piped output) and the per-session scrollback cap are session-lifecycle settings — see [`[lifecycle]`]({{< relref "/docs/configuration/sessions.md" >}}) (`default_cols`, `default_rows`, `max_log_bytes`). The client's not-a-TTY fallback follows the same `[lifecycle]` defaults, for a single source of truth.
 
 Only genuine preferences are configurable here. Layout invariants — the picker's column-width arithmetic, wrap widths, the minimum name column, and the GUI's 60 fps redraw rate — stay as fixed constants matching the render logic.
+
+## iOS terminal gesture physics
+
+The iOS terminal reads its touch-scroll feel from namespaced `UserDefaults`
+keys. Missing keys use the shipped default, non-finite values also fall back to
+that default, and finite values outside the accepted range are clamped.
+
+| `UserDefaults` key | Default | Accepted range |
+|--------------------|---------|----------------|
+| `graith.gesture.scrollFriction` | `4.5` | `1...60` |
+| `graith.gesture.scrollMomentumCutoff` | `24` | `1...10000` points/s |
+| `graith.gesture.scrollSpringStiffness` | `220` | `30...400` |
+| `graith.gesture.scrollSpringDamping` | `26` | `4...29` |
+
+These ranges keep momentum decaying and keep the overscroll spring stable at
+the controller's maximum 50 ms integration step. Settling also has a ten-second
+fail-safe, after which the terminal snaps to idle instead of running display-link
+physics indefinitely.

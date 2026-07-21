@@ -35,15 +35,43 @@ import Foundation
 /// - **Display-link rate `60` fps** — hardware frame cadence, not a preference.
 public struct TerminalGestureConfig: Equatable, Sendable {
 
+    private enum Shipped {
+        static let scrollFriction: CGFloat = 4.5
+        static let scrollMomentumCutoff: CGFloat = 24
+        static let scrollSpringStiffness: CGFloat = 220
+        static let scrollSpringDamping: CGFloat = 26
+        static let spaceActivationThreshold: CGFloat = 22
+        static let spaceInitialRepeatDelay: Double = 0.5
+        static let spaceRepeatInterval: Double = 0.1
+        static let spaceDirectionHysteresis: CGFloat = 1.5
+        static let selectionLongPressDuration: Double = 0.3
+    }
+
+    /// The scroll ranges are paired with the controller's 50 ms maximum
+    /// integration step. For the semi-implicit Euler spring, the independent
+    /// maxima satisfy `stiffness * dt² + 2 * damping * dt < 4`: at 400, 29,
+    /// and 0.05 seconds the left side is 3.9. Positive minima keep both
+    /// momentum and overscroll progressing toward their stop thresholds.
+    private enum Range {
+        static let scrollFriction: ClosedRange<CGFloat> = 1...60
+        static let scrollMomentumCutoff: ClosedRange<CGFloat> = 1...10_000
+        static let scrollSpringStiffness: ClosedRange<CGFloat> = 30...400
+        static let scrollSpringDamping: ClosedRange<CGFloat> = 4...29
+    }
+
     // MARK: - Scrollback physics (TerminalScrollController)
 
     /// Exponential momentum decay rate (1/s): higher stops a flick sooner.
+    /// Normalized to the finite range `1...60`.
     public var scrollFriction: CGFloat
     /// Momentum halts once |velocity| drops below this (points/s).
+    /// Normalized to the finite range `1...10_000`.
     public var scrollMomentumCutoff: CGFloat
     /// Overscroll spring constant (points/s² per point): higher snaps back harder.
+    /// Normalized to the finite range `30...400`.
     public var scrollSpringStiffness: CGFloat
     /// Overscroll spring damping (points/s² per point/s): higher settles flatter.
+    /// Normalized to the finite range `4...29`.
     public var scrollSpringDamping: CGFloat
 
     // MARK: - Space-key drag → arrow keys (SpaceDragTracker)
@@ -66,20 +94,22 @@ public struct TerminalGestureConfig: Equatable, Sendable {
     /// The built-in defaults — the values the app previously hard-coded. These
     /// are the feel the terminal ships with when nothing overrides them.
     public static let `default` = TerminalGestureConfig(
-        scrollFriction: 4.5,
-        scrollMomentumCutoff: 24,
-        scrollSpringStiffness: 220,
-        scrollSpringDamping: 26,
-        spaceActivationThreshold: 22,
-        spaceInitialRepeatDelay: 0.5,
-        spaceRepeatInterval: 0.1,
-        spaceDirectionHysteresis: 1.5,
-        selectionLongPressDuration: 0.3
+        scrollFriction: Shipped.scrollFriction,
+        scrollMomentumCutoff: Shipped.scrollMomentumCutoff,
+        scrollSpringStiffness: Shipped.scrollSpringStiffness,
+        scrollSpringDamping: Shipped.scrollSpringDamping,
+        spaceActivationThreshold: Shipped.spaceActivationThreshold,
+        spaceInitialRepeatDelay: Shipped.spaceInitialRepeatDelay,
+        spaceRepeatInterval: Shipped.spaceRepeatInterval,
+        spaceDirectionHysteresis: Shipped.spaceDirectionHysteresis,
+        selectionLongPressDuration: Shipped.selectionLongPressDuration
     )
 
-    /// Memberwise init with clamping so an out-of-range value (from user defaults
-    /// or a caller) can't wedge the physics. Bounds mirror the per-component
-    /// clamps so `TerminalGestureConfig` is self-consistent regardless of source.
+    /// Memberwise init with finite, stability-safe clamping so an out-of-range
+    /// value (from user defaults or a caller) can't wedge the physics. Non-finite
+    /// values fall back to their shipped values instead of leaking NaN through
+    /// comparisons. Bounds mirror the per-component clamps so
+    /// `TerminalGestureConfig` is self-consistent regardless of source.
     public init(scrollFriction: CGFloat = TerminalGestureConfig.default.scrollFriction,
                 scrollMomentumCutoff: CGFloat = TerminalGestureConfig.default.scrollMomentumCutoff,
                 scrollSpringStiffness: CGFloat = TerminalGestureConfig.default.scrollSpringStiffness,
@@ -89,15 +119,38 @@ public struct TerminalGestureConfig: Equatable, Sendable {
                 spaceRepeatInterval: Double = TerminalGestureConfig.default.spaceRepeatInterval,
                 spaceDirectionHysteresis: CGFloat = TerminalGestureConfig.default.spaceDirectionHysteresis,
                 selectionLongPressDuration: Double = TerminalGestureConfig.default.selectionLongPressDuration) {
-        self.scrollFriction = max(0, scrollFriction)
-        self.scrollMomentumCutoff = max(0, scrollMomentumCutoff)
-        self.scrollSpringStiffness = max(0, scrollSpringStiffness)
-        self.scrollSpringDamping = max(0, scrollSpringDamping)
-        self.spaceActivationThreshold = max(1, spaceActivationThreshold)
-        self.spaceInitialRepeatDelay = max(0, spaceInitialRepeatDelay)
-        self.spaceRepeatInterval = max(0.001, spaceRepeatInterval)
-        self.spaceDirectionHysteresis = max(1, spaceDirectionHysteresis)
-        self.selectionLongPressDuration = max(0, selectionLongPressDuration)
+        self.scrollFriction = Self.normalize(scrollFriction, to: Range.scrollFriction,
+                                             fallback: Shipped.scrollFriction)
+        self.scrollMomentumCutoff = Self.normalize(scrollMomentumCutoff, to: Range.scrollMomentumCutoff,
+                                                   fallback: Shipped.scrollMomentumCutoff)
+        self.scrollSpringStiffness = Self.normalize(scrollSpringStiffness, to: Range.scrollSpringStiffness,
+                                                    fallback: Shipped.scrollSpringStiffness)
+        self.scrollSpringDamping = Self.normalize(scrollSpringDamping, to: Range.scrollSpringDamping,
+                                                  fallback: Shipped.scrollSpringDamping)
+        self.spaceActivationThreshold = Self.normalize(spaceActivationThreshold, minimum: 1,
+                                                       fallback: Shipped.spaceActivationThreshold)
+        self.spaceInitialRepeatDelay = Self.normalize(spaceInitialRepeatDelay, minimum: 0,
+                                                      fallback: Shipped.spaceInitialRepeatDelay)
+        self.spaceRepeatInterval = Self.normalize(spaceRepeatInterval, minimum: 0.001,
+                                                  fallback: Shipped.spaceRepeatInterval)
+        self.spaceDirectionHysteresis = Self.normalize(spaceDirectionHysteresis, minimum: 1,
+                                                       fallback: Shipped.spaceDirectionHysteresis)
+        self.selectionLongPressDuration = Self.normalize(selectionLongPressDuration, minimum: 0,
+                                                         fallback: Shipped.selectionLongPressDuration)
+    }
+
+    private static func normalize<T: BinaryFloatingPoint>(_ value: T,
+                                                           to range: ClosedRange<T>,
+                                                           fallback: T) -> T {
+        guard value.isFinite else { return fallback }
+        return min(range.upperBound, max(range.lowerBound, value))
+    }
+
+    private static func normalize<T: BinaryFloatingPoint>(_ value: T,
+                                                           minimum: T,
+                                                           fallback: T) -> T {
+        guard value.isFinite else { return fallback }
+        return max(minimum, value)
     }
 
     // MARK: - UserDefaults
