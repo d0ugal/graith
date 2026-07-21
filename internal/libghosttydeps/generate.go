@@ -70,7 +70,11 @@ const generatedHeaders = "gui/shared/Sources/CGhosttyVT/include/ghostty"
 func Generate(ctx context.Context, root string) error {
 	lockPath := filepath.Join(root, LockFilename)
 
-	lock, err := LoadLock(lockPath)
+	// Renovate changes canonical versions and commits before this command runs,
+	// so derived URLs may temporarily describe the previous unit. Generation
+	// still requires a structurally complete lock and writes only a fully
+	// consistent result; normal verification continues to reject this drift.
+	lock, err := loadLockForGeneration(lockPath)
 	if err != nil {
 		return err
 	}

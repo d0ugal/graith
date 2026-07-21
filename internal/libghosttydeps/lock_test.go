@@ -1,6 +1,7 @@
 package libghosttydeps
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -84,6 +85,41 @@ func TestDecodeLockRejectsTrailingJSON(t *testing.T) {
 	_, err := DecodeLock([]byte(`{} {}`))
 	if err == nil || !strings.Contains(err.Error(), "trailing JSON") {
 		t.Fatalf("trailing JSON error = %v", err)
+	}
+}
+
+func TestGenerationDecodeAllowsStaleDerivedURLs(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, LockFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lock, err := DecodeLock(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lock.Ghostty.Commit = strings.Repeat("a", 40)
+	lock.SPDXTools.Version += "-next"
+
+	stale, err := json.Marshal(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := DecodeLock(stale); err == nil ||
+		!strings.Contains(err.Error(), "Apple artifact URL") ||
+		!strings.Contains(err.Error(), "SPDX tools URL") {
+		t.Fatalf("strict stale-projection error = %v", err)
+	}
+
+	if _, err := decodeLock(stale, false); err != nil {
+		t.Fatalf("generation decode rejected stale derived URLs: %v", err)
 	}
 }
 

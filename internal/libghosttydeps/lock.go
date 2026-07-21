@@ -124,15 +124,27 @@ type SPDXTools struct {
 }
 
 func LoadLock(path string) (Lock, error) {
+	return loadLock(path, true)
+}
+
+func loadLockForGeneration(path string) (Lock, error) {
+	return loadLock(path, false)
+}
+
+func loadLock(path string, requireProjectionConsistency bool) (Lock, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Lock{}, fmt.Errorf("read native dependency lock: %w", err)
 	}
 
-	return DecodeLock(data)
+	return decodeLock(data, requireProjectionConsistency)
 }
 
 func DecodeLock(data []byte) (Lock, error) {
+	return decodeLock(data, true)
+}
+
+func decodeLock(data []byte, requireProjectionConsistency bool) (Lock, error) {
 	var lock Lock
 
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
@@ -146,7 +158,7 @@ func DecodeLock(data []byte) (Lock, error) {
 		return Lock{}, errors.New("decode native dependency lock: trailing JSON value")
 	}
 
-	if err := lock.Validate(); err != nil {
+	if err := lock.validate(requireProjectionConsistency); err != nil {
 		return Lock{}, err
 	}
 
@@ -172,6 +184,10 @@ func WriteLock(path string, lock Lock) error {
 }
 
 func (lock Lock) Validate() error {
+	return lock.validate(true)
+}
+
+func (lock Lock) validate(requireProjectionConsistency bool) error {
 	if lock.SchemaVersion != 1 {
 		return fmt.Errorf("native dependency lock schemaVersion = %d, want 1", lock.SchemaVersion)
 	}
@@ -233,13 +249,15 @@ func (lock Lock) Validate() error {
 		check(value != "", "missing %s", name)
 	}
 
-	if len(lock.Ghostty.Commit) >= 7 {
+	if requireProjectionConsistency && len(lock.Ghostty.Commit) >= 7 {
 		check(strings.Contains(lock.Ghostty.AppleArtifact.URL, lock.Ghostty.Commit[:7]),
 			"Apple artifact URL does not contain the Ghostty short commit")
 	}
 
-	check(strings.Contains(lock.SPDXTools.URL, lock.SPDXTools.Version),
-		"SPDX tools URL does not contain its version")
+	if requireProjectionConsistency {
+		check(strings.Contains(lock.SPDXTools.URL, lock.SPDXTools.Version),
+			"SPDX tools URL does not contain its version")
+	}
 
 	return errors.Join(problems...)
 }

@@ -132,9 +132,9 @@ hashes. Do not run the acceptance command as a mechanical update step.
 Renovate detects go-libghostty, Ghostty, Zig, uucode, Highway, simdutf, and the
 SPDX Java validator from exact fields in the lock. It groups them as
 `libghostty-native`, disables automerge, and disables the ordinary Go manager
-for go-libghostty so a wrapper-only module PR cannot merge. The repository's
-regeneration workflow is a fallback when the hosted Renovate service cannot run
-the post-upgrade command. A fallback-generated commit explicitly dispatches all
+for go-libghostty so a wrapper-only module PR cannot merge. The hosted Renovate
+service cannot run repository-defined post-upgrade commands, so the repository's
+regeneration workflow projects every proposed lock update. A generated commit explicitly dispatches all
 required workflows at its new branch SHA because a normal `GITHUB_TOKEN` push
 does not create a second pull-request run. Validate the config and its
 deliberately stale update fixture locally with:
