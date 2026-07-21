@@ -6,16 +6,39 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
+)
+
+var (
+	swiftArtifactURLPattern      = regexp.MustCompile(`url: "(https://github\.com/d0ugal/graith/releases/download/libghostty-vt-[^"]+/libghostty-vt\.xcframework\.zip)"`)
+	swiftArtifactChecksumPattern = regexp.MustCompile(`checksum: "([0-9a-f]{64})"`)
 )
 
 func Verify(root string) error {
+	return verify(root, true)
+}
+
+// VerifyGenerated checks every mechanical projection without accepting new
+// license evidence. Generation uses this mode so it can produce a reviewable,
+// deliberately red PR when a license or required notice changed; the normal
+// Verify path remains the merge gate and requires explicit review bindings.
+func VerifyGenerated(root string) error {
+	return verify(root, false)
+}
+
+func verify(root string, requireLicenseReviews bool) error {
 	lock, err := LoadLock(filepath.Join(root, LockFilename))
 	if err != nil {
 		return err
 	}
 
 	var problems []error
+
+	if requireLicenseReviews {
+		if reviewErr := VerifyLicenseReviews(lock); reviewErr != nil {
+			problems = append(problems, reviewErr)
+		}
+	}
 
 	checkFile := func(name string, check func([]byte) error) {
 		data, readErr := os.ReadFile(filepath.Join(root, name))
@@ -70,13 +93,15 @@ func Verify(root string) error {
 		return nil
 	})
 	checkFile("gui/shared/Package.swift", func(data []byte) error {
-		for label, want := range map[string]string{
-			"Apple artifact URL":      `url: "` + lock.Ghostty.AppleArtifact.URL + `"`,
-			"Apple artifact checksum": `checksum: "` + lock.Ghostty.AppleArtifact.SHA256 + `"`,
-		} {
-			if !bytes.Contains(data, []byte(want)) {
-				return fmt.Errorf("%s does not match the lock", label)
-			}
+		urlMatches := swiftArtifactURLPattern.FindAllSubmatch(data, -1)
+		checksumMatches := swiftArtifactChecksumPattern.FindAllSubmatch(data, -1)
+
+		if len(urlMatches) != 1 || string(urlMatches[0][1]) != lock.Ghostty.AppleArtifact.URL {
+			return errors.New("apple artifact URL does not uniquely match the lock")
+		}
+
+		if len(checksumMatches) != 1 || string(checksumMatches[0][1]) != lock.Ghostty.AppleArtifact.SHA256 {
+			return errors.New("apple artifact checksum does not uniquely match the lock")
 		}
 
 		return nil
@@ -107,9 +132,23 @@ func Verify(root string) error {
 	})
 	checkFile(".github/workflows/libghostty-native.yml", func(data []byte) error {
 		content := string(data)
-		for _, field := range []string{".zig.version", ".zig.linuxX8664URL", ".zig.linuxX8664SHA256"} {
-			if !strings.Contains(content, field) {
-				return fmt.Errorf("native workflow does not read lock field %s", field)
+		for description, expression := range map[string]string{
+			"Zig version":         `zig_version="\$\(jq -er '\.zig\.version' libghostty-native\.lock\.json\)"`,
+			"Zig archive URL":     `zig_url="\$\(jq -er '\.zig\.linuxX8664URL' libghostty-native\.lock\.json\)"`,
+			"Zig archive SHA-256": `zig_sha256="\$\(jq -er '\.zig\.linuxX8664SHA256' libghostty-native\.lock\.json\)"`,
+		} {
+			if !regexp.MustCompile(expression).MatchString(content) {
+				return fmt.Errorf("native workflow does not use the lock-derived %s", description)
+			}
+		}
+
+		for _, expression := range []string{
+			`curl [^\n]*\n[^\n]*"\$zig_url" --output`,
+			`printf [^\n]*"\$zig_sha256"`,
+			`zig" version\)" = "\$zig_version"`,
+		} {
+			if !regexp.MustCompile(expression).MatchString(content) {
+				return errors.New("native workflow does not consume the lock-derived Zig values")
 			}
 		}
 

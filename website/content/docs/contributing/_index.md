@@ -115,13 +115,29 @@ scripts/libghostty-native.sh generate-dependency-unit
 scripts/libghostty-native.sh verify-dependency-unit
 ```
 
+Generation may produce a complete but deliberately red review branch when a
+license or embedded-notice hash changes. Inspect the exact changed evidence,
+confirm the conclusions and declared-license choice in the lock, then record
+that explicit review and regenerate:
+
+```bash
+scripts/libghostty-native.sh accept-license-reviews
+scripts/libghostty-native.sh generate-dependency-unit
+scripts/libghostty-native.sh verify-dependency-unit
+```
+
+The review fingerprint binds each conclusion to its exact license and notice
+hashes. Do not run the acceptance command as a mechanical update step.
+
 Renovate detects go-libghostty, Ghostty, Zig, uucode, Highway, simdutf, and the
 SPDX Java validator from exact fields in the lock. It groups them as
 `libghostty-native`, disables automerge, and disables the ordinary Go manager
 for go-libghostty so a wrapper-only module PR cannot merge. The repository's
 regeneration workflow is a fallback when the hosted Renovate service cannot run
-the post-upgrade command. Validate the config and its deliberately stale update
-fixture locally with:
+the post-upgrade command. A fallback-generated commit explicitly dispatches all
+required workflows at its new branch SHA because a normal `GITHUB_TOKEN` push
+does not create a second pull-request run. Validate the config and its
+deliberately stale update fixture locally with:
 
 ```bash
 scripts/verify-renovate-libghostty.sh
@@ -142,13 +158,21 @@ proposal fails until a selected Ghostty commit actually consumes it; reviewers
 use those dashboard entries to discover upstream changes rather than overriding
 Ghostty's tested graph.
 
+The SPDX validator is update tooling rather than compiled native content, so it
+may open automatically in the same non-automerge group. It remains
+checksum-pinned, GitHub's release-asset digest is independently checked, and its
+official validation result is still required.
+
 Before generation can succeed, the checksum-reviewed Apple xcframework for the
 selected Ghostty commit must already be published at the exact URL derived by
-the lock tool. Review any changed source or license hashes and confirm the
-recorded license conclusions still apply; generation never weakens or guesses
-those conclusions. Every generated PR must pass `verify-metadata` and the
-existing exact-pin wrapper, compatibility, race/fuzz, packaging, SPDX, linkage,
-privacy, and supported-platform native checks.
+the lock tool. Its release notes must bind the archive to the full Ghostty commit
+and checksum, and the downloaded bytes must match GitHub's release-asset digest.
+This verifies the separately built and reviewed artifact; the dependency update
+does not rebuild or publish it. Review any changed source or license hashes and
+confirm the recorded license conclusions still apply; generation never weakens
+or guesses those conclusions. Every generated PR must pass `verify-metadata`
+and the existing exact-pin wrapper, compatibility, race/fuzz, packaging, SPDX,
+linkage, privacy, and supported-platform native checks at its final head SHA.
 
 ## CI pipeline
 

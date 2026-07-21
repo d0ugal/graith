@@ -8,7 +8,8 @@
     "moduleSum": "h1:XAiToY/9BPUvzfTHSmhHRjPprV5JfwjWE6BGT7ojEQ8=",
     "testedGhosttyCommit": "6d089a544db53f3457374c2c406bccee80722cdf",
     "licenseSHA256": "fdf9b4ad7b61687fd3d4b1e3efa63cbc10743e6b733a62669b53a324251357b9",
-    "licenseConclusion": "MIT"
+    "licenseConclusion": "MIT",
+    "licenseReview": "4eba7523ffff230d7a348f6aa21dffaaa0922bfccc3e3f902a5fe9a3c79bd244"
   },
   "ghostty": {
     "repository": "https://github.com/ghostty-org/ghostty.git",
@@ -18,6 +19,7 @@
     "headersSHA256": "44c382b4d1bd3d48451f91da190109e082921405bd0e86ce635ae4f32ccea0cf",
     "licenseSHA256": "386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1",
     "licenseConclusion": "MIT",
+    "licenseReview": "97036f38b4ac624f105099d931c8a9f8d09c5dc1153e1bf5cda801613733c2a5",
     "appleArtifact": {
       "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-91f66da/libghostty-vt.xcframework.zip",
       "sha256": "25c1620e63311cc687637c8e3bdfae1fe3e070892966c07d0d91065ccda541c0"
@@ -31,7 +33,8 @@
     "linuxX8664URL": "https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz",
     "linuxX8664SHA256": "02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239",
     "licenseSHA256": "5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177",
-    "licenseConclusion": "MIT AND (Apache-2.0 WITH LLVM-exception)"
+    "licenseConclusion": "MIT AND (Apache-2.0 WITH LLVM-exception)",
+    "licenseReview": "5acab21bdcc96631ae8aa40ce2dcd42d9b3c1d02fb534f4158adf66a6170e229"
   },
   "uucode": {
     "repository": "jacobsandlund/uucode",
@@ -42,7 +45,8 @@
     "licenseSHA256": "312e901e142be2477b4ca859e9311f9e3f80d33372991759b7921c1893605f33",
     "decoderNoticeSHA256": "de219cece932aad5a817bf763393d8d149d378a15d2ad5320e3331eac07626dd",
     "unicodeNoticeSHA256": "1eda5a3b026870c737b22e8bcd4954338612c790db688242e003f41a4fa95175",
-    "licenseConclusion": "MIT AND Unicode-3.0"
+    "licenseConclusion": "MIT AND Unicode-3.0",
+    "licenseReview": "6613d420ceb398433e7af1535bb5947379f7f6d4d4c6d76c81963c607596eec6"
   },
   "highway": {
     "repository": "google/highway",
@@ -53,7 +57,8 @@
     "archiveSHA256": "87d4f8893ef4e08f224973608ffebf94268a81380ba79c12e8841968c80aa212",
     "licenseSHA256": "d25e82e26acd42ca3ccc9993622631163425b869b9e16284226d534cff6470f2",
     "licenseConclusion": "BSD-3-Clause",
-    "licenseDeclared": "Apache-2.0 OR BSD-3-Clause"
+    "licenseDeclared": "Apache-2.0 OR BSD-3-Clause",
+    "licenseReview": "6653ed4d6bf9e0a54ddf70c2576c373acb20ad046f4428106916e4232c5501bc"
   },
   "simdutf": {
     "repository": "simdutf/simdutf",
@@ -64,7 +69,8 @@
     "headerSHA256": "d3501fc2143f0edc5c84e6bb013a7fdb8ccd95514f7fd0816669248e62676301",
     "licenseSHA256": "fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f",
     "licenseConclusion": "MIT AND BSD-3-Clause AND Apache-2.0",
-    "licenseDeclared": "(Apache-2.0 OR MIT) AND BSD-3-Clause AND Apache-2.0"
+    "licenseDeclared": "(Apache-2.0 OR MIT) AND BSD-3-Clause AND Apache-2.0",
+    "licenseReview": "84fabc5c846750312ef88db83f955f60ff5338d7a48c630567a2df102d7fd947"
   },
   "spdxTools": {
     "repository": "spdx/tools-java",

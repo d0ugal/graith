@@ -45,6 +45,7 @@ type GoDependency struct {
 	TestedGhosttyCommit string `json:"testedGhosttyCommit"`
 	LicenseSHA256       string `json:"licenseSHA256"`
 	LicenseConclusion   string `json:"licenseConclusion"`
+	LicenseReview       string `json:"licenseReview"`
 }
 
 type Ghostty struct {
@@ -55,6 +56,7 @@ type Ghostty struct {
 	HeadersSHA256     string        `json:"headersSHA256"`
 	LicenseSHA256     string        `json:"licenseSHA256"`
 	LicenseConclusion string        `json:"licenseConclusion"`
+	LicenseReview     string        `json:"licenseReview"`
 	AppleArtifact     AppleArtifact `json:"appleArtifact"`
 }
 
@@ -72,6 +74,7 @@ type Zig struct {
 	LinuxX8664SHA256  string `json:"linuxX8664SHA256"`
 	LicenseSHA256     string `json:"licenseSHA256"`
 	LicenseConclusion string `json:"licenseConclusion"`
+	LicenseReview     string `json:"licenseReview"`
 }
 
 type Uucode struct {
@@ -84,6 +87,7 @@ type Uucode struct {
 	DecoderNoticeSHA256 string `json:"decoderNoticeSHA256"`
 	UnicodeNoticeSHA256 string `json:"unicodeNoticeSHA256"`
 	LicenseConclusion   string `json:"licenseConclusion"`
+	LicenseReview       string `json:"licenseReview"`
 }
 
 type Highway struct {
@@ -96,6 +100,7 @@ type Highway struct {
 	LicenseSHA256     string `json:"licenseSHA256"`
 	LicenseConclusion string `json:"licenseConclusion"`
 	LicenseDeclared   string `json:"licenseDeclared"`
+	LicenseReview     string `json:"licenseReview"`
 }
 
 type Simdutf struct {
@@ -108,6 +113,7 @@ type Simdutf struct {
 	LicenseSHA256     string `json:"licenseSHA256"`
 	LicenseConclusion string `json:"licenseConclusion"`
 	LicenseDeclared   string `json:"licenseDeclared"`
+	LicenseReview     string `json:"licenseReview"`
 }
 
 type SPDXTools struct {
@@ -134,6 +140,10 @@ func DecodeLock(data []byte) (Lock, error) {
 
 	if err := decoder.Decode(&lock); err != nil {
 		return Lock{}, fmt.Errorf("decode native dependency lock: %w", err)
+	}
+
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return Lock{}, errors.New("decode native dependency lock: trailing JSON value")
 	}
 
 	if err := lock.Validate(); err != nil {
@@ -180,23 +190,29 @@ func (lock Lock) Validate() error {
 	check(fullSHAPattern.MatchString(lock.Simdutf.Commit), "invalid simdutf commit")
 
 	for name, value := range map[string]string{
-		"go-libghostty license": lock.GoLibghostty.LicenseSHA256,
-		"Ghostty headers":       lock.Ghostty.HeadersSHA256,
-		"Ghostty license":       lock.Ghostty.LicenseSHA256,
-		"Apple artifact":        lock.Ghostty.AppleArtifact.SHA256,
-		"Zig source":            lock.Zig.SourceSHA256,
-		"Zig Linux archive":     lock.Zig.LinuxX8664SHA256,
-		"Zig license":           lock.Zig.LicenseSHA256,
-		"uucode archive":        lock.Uucode.ArchiveSHA256,
-		"uucode license":        lock.Uucode.LicenseSHA256,
-		"uucode decoder notice": lock.Uucode.DecoderNoticeSHA256,
-		"uucode Unicode notice": lock.Uucode.UnicodeNoticeSHA256,
-		"Highway archive":       lock.Highway.ArchiveSHA256,
-		"Highway license":       lock.Highway.LicenseSHA256,
-		"simdutf source":        lock.Simdutf.CppSHA256,
-		"simdutf header":        lock.Simdutf.HeaderSHA256,
-		"simdutf license":       lock.Simdutf.LicenseSHA256,
-		"SPDX tools archive":    lock.SPDXTools.SHA256,
+		"go-libghostty license":        lock.GoLibghostty.LicenseSHA256,
+		"Ghostty headers":              lock.Ghostty.HeadersSHA256,
+		"Ghostty license":              lock.Ghostty.LicenseSHA256,
+		"Apple artifact":               lock.Ghostty.AppleArtifact.SHA256,
+		"Zig source":                   lock.Zig.SourceSHA256,
+		"Zig Linux archive":            lock.Zig.LinuxX8664SHA256,
+		"Zig license":                  lock.Zig.LicenseSHA256,
+		"uucode archive":               lock.Uucode.ArchiveSHA256,
+		"uucode license":               lock.Uucode.LicenseSHA256,
+		"uucode decoder notice":        lock.Uucode.DecoderNoticeSHA256,
+		"uucode Unicode notice":        lock.Uucode.UnicodeNoticeSHA256,
+		"Highway archive":              lock.Highway.ArchiveSHA256,
+		"Highway license":              lock.Highway.LicenseSHA256,
+		"simdutf source":               lock.Simdutf.CppSHA256,
+		"simdutf header":               lock.Simdutf.HeaderSHA256,
+		"simdutf license":              lock.Simdutf.LicenseSHA256,
+		"SPDX tools archive":           lock.SPDXTools.SHA256,
+		"go-libghostty license review": lock.GoLibghostty.LicenseReview,
+		"Ghostty license review":       lock.Ghostty.LicenseReview,
+		"Zig license review":           lock.Zig.LicenseReview,
+		"uucode license review":        lock.Uucode.LicenseReview,
+		"Highway license review":       lock.Highway.LicenseReview,
+		"simdutf license review":       lock.Simdutf.LicenseReview,
 	} {
 		check(sha256Pattern.MatchString(value), "invalid %s SHA-256", name)
 	}
@@ -226,6 +242,64 @@ func (lock Lock) Validate() error {
 		"SPDX tools URL does not contain its version")
 
 	return errors.Join(problems...)
+}
+
+// AcceptLicenseReviews binds the current license conclusions to the exact
+// license and embedded-notice hashes in the lock. It is deliberately separate
+// from generation: a dependency update that changes legal evidence stays red
+// until a reviewer inspects the new material and explicitly accepts it.
+func AcceptLicenseReviews(lock *Lock) {
+	lock.GoLibghostty.LicenseReview = licenseReviewFingerprint(
+		"go-libghostty", lock.GoLibghostty.LicenseSHA256, lock.GoLibghostty.LicenseConclusion)
+	lock.Ghostty.LicenseReview = licenseReviewFingerprint(
+		"Ghostty", lock.Ghostty.LicenseSHA256, lock.Ghostty.LicenseConclusion)
+	lock.Zig.LicenseReview = licenseReviewFingerprint(
+		"Zig", lock.Zig.LicenseSHA256, lock.Zig.LicenseConclusion)
+	lock.Uucode.LicenseReview = licenseReviewFingerprint(
+		"uucode", lock.Uucode.LicenseSHA256, lock.Uucode.DecoderNoticeSHA256,
+		lock.Uucode.UnicodeNoticeSHA256, lock.Uucode.LicenseConclusion)
+	lock.Highway.LicenseReview = licenseReviewFingerprint(
+		"Highway", lock.Highway.LicenseSHA256, lock.Highway.LicenseConclusion,
+		lock.Highway.LicenseDeclared)
+	lock.Simdutf.LicenseReview = licenseReviewFingerprint(
+		"simdutf", lock.Simdutf.LicenseSHA256, lock.Simdutf.LicenseConclusion,
+		lock.Simdutf.LicenseDeclared)
+}
+
+func VerifyLicenseReviews(lock Lock) error {
+	expected := lock
+	AcceptLicenseReviews(&expected)
+
+	var problems []error
+
+	for name, pair := range map[string][2]string{
+		"go-libghostty": {lock.GoLibghostty.LicenseReview, expected.GoLibghostty.LicenseReview},
+		"Ghostty":       {lock.Ghostty.LicenseReview, expected.Ghostty.LicenseReview},
+		"Zig":           {lock.Zig.LicenseReview, expected.Zig.LicenseReview},
+		"uucode":        {lock.Uucode.LicenseReview, expected.Uucode.LicenseReview},
+		"Highway":       {lock.Highway.LicenseReview, expected.Highway.LicenseReview},
+		"simdutf":       {lock.Simdutf.LicenseReview, expected.Simdutf.LicenseReview},
+	} {
+		if pair[0] != pair[1] {
+			problems = append(problems, fmt.Errorf("%s license evidence or conclusion changed; review it and run scripts/libghostty-native.sh accept-license-reviews", name))
+		}
+	}
+
+	return errors.Join(problems...)
+}
+
+func licenseReviewFingerprint(component string, evidence ...string) string {
+	hash := sha256.New()
+
+	_, _ = io.WriteString(hash, component)
+	_, _ = hash.Write([]byte{0})
+
+	for _, value := range evidence {
+		_, _ = io.WriteString(hash, value)
+		_, _ = hash.Write([]byte{0})
+	}
+
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 // TreeSHA256 binds a generated header tree to both relative paths and bytes.

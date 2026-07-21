@@ -41,7 +41,9 @@ jobs:
         with:
           node-version: 24.11.0
       - name: Install the pinned Renovate validator and dry-run tooling
-        run: npm install --global renovate@43.272.6
+        # Keep registry artifacts outside the initial 72-hour publication
+        # window and block dependency lifecycle scripts in this CI runner.
+        run: npm install --global --ignore-scripts renovate@43.268.6
       - name: Validate config and update every native dependency fixture
         env:
           RENOVATE_GITHUB_COM_TOKEN: ${{ github.token }}

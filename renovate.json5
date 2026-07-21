@@ -27,7 +27,7 @@
       prBodyNotes: [
         'This group is an exact native dependency unit and must never be automerged.',
         'The generation task rotates go.mod/go.sum, Ghostty and wrapper revisions, the Apple artifact, Zig/transitive source and license hashes, committed headers, SPDX, and notices. A red generation check means the selected releases are not present in the selected Ghostty commit or the reviewed Apple artifact has not been published yet.',
-        'Review license conclusions and run every required libghostty native check before merge. See the contributing guide for commit-pinned and vendored discovery rules.',
+        'If license or embedded-notice hashes changed, inspect the exact evidence and run scripts/libghostty-native.sh accept-license-reviews before regenerating. Run every required libghostty native check before merge. See the contributing guide for commit-pinned and vendored discovery rules.',
       ],
       postUpgradeTasks: {
         commands: ['scripts/libghostty-native.sh generate-dependency-unit'],

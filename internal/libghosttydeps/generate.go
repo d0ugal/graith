@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -45,6 +46,26 @@ type zigRelease struct {
 	Source     zigIndexEntry `json:"src"`
 	LinuxX8664 zigIndexEntry `json:"x86_64-linux"`
 }
+
+type githubRelease struct {
+	Body   string `json:"body"`
+	Assets []struct {
+		Name               string `json:"name"`
+		Digest             string `json:"digest"`
+		BrowserDownloadURL string `json:"browser_download_url"`
+	} `json:"assets"`
+}
+
+var generatedUnitFiles = []string{
+	LockFilename,
+	SPDXFilename,
+	NoticesFilename,
+	"go.mod",
+	"go.sum",
+	"gui/shared/Package.swift",
+}
+
+const generatedHeaders = "gui/shared/Sources/CGhosttyVT/include/ghostty"
 
 func Generate(ctx context.Context, root string) error {
 	lockPath := filepath.Join(root, LockFilename)
@@ -98,31 +119,33 @@ func Generate(ctx context.Context, root string) error {
 		return err
 	}
 
-	if err := updateGoModule(ctx, root, lock.GoLibghostty.Version); err != nil {
-		return err
-	}
+	return withGeneratedUnitRollback(root, func() error {
+		if err := updateGoModule(ctx, root, lock.GoLibghostty.Version); err != nil {
+			return err
+		}
 
-	if err := synchronizeHeaders(ghosttySource, root, &lock); err != nil {
-		return err
-	}
+		if err := synchronizeHeaders(ghosttySource, root, &lock); err != nil {
+			return err
+		}
 
-	if err := WriteLock(lockPath, lock); err != nil {
-		return err
-	}
+		if err := WriteLock(lockPath, lock); err != nil {
+			return err
+		}
 
-	if err := writeGeneratedMetadata(root, lock); err != nil {
-		return err
-	}
+		if err := writeGeneratedMetadata(root, lock); err != nil {
+			return err
+		}
 
-	if err := updateSwiftPackage(root, lock); err != nil {
-		return err
-	}
+		if err := updateSwiftPackage(root, lock); err != nil {
+			return err
+		}
 
-	if err := Verify(root); err != nil {
-		return fmt.Errorf("verify generated native dependency unit: %w", err)
-	}
+		if err := VerifyGenerated(root); err != nil {
+			return fmt.Errorf("verify generated native dependency unit: %w", err)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 func validateRepositories(lock Lock) error {
@@ -313,7 +336,7 @@ func refreshGhosttyClosure(ctx context.Context, source string, lock *Lock, deriv
 		return fmt.Errorf("resolve simdutf release commit: %w", err)
 	}
 
-	simdutfLicense, err := download(ctx, fmt.Sprintf("https://raw.githubusercontent.com/%s/v%s/LICENSE-MIT", lock.Simdutf.Repository, lock.Simdutf.Version))
+	simdutfLicense, err := download(ctx, fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/LICENSE-MIT", lock.Simdutf.Repository, lock.Simdutf.Commit))
 	if err != nil {
 		return fmt.Errorf("download simdutf license: %w", err)
 	}
@@ -399,6 +422,16 @@ func primaryDependencyChanged(ctx context.Context, root string, current Lock) (b
 		if _, err := run(ctx, root, "git", "rev-parse", "--verify", ref+"^{commit}"); err != nil {
 			return false, fmt.Errorf("resolve native dependency base %s: %w", ref, err)
 		}
+
+		mergeBase, err := run(ctx, root, "git", "merge-base", ref, "HEAD")
+		if err != nil {
+			return false, fmt.Errorf("find native dependency merge base for %s: %w", ref, err)
+		}
+
+		ref = strings.TrimSpace(string(mergeBase))
+		if !fullSHAPattern.MatchString(ref) {
+			return false, fmt.Errorf("invalid native dependency merge base %q", ref)
+		}
 	}
 
 	output, err := run(ctx, root, "git", "show", ref+":"+LockFilename)
@@ -469,6 +502,24 @@ func refreshZig(ctx context.Context, lock *Lock) error {
 		return fmt.Errorf("Zig %s download index is missing source or x86_64-linux artifacts", lock.Zig.Version)
 	}
 
+	if !sha256Pattern.MatchString(source.Shasum) || !sha256Pattern.MatchString(linux.Shasum) {
+		return fmt.Errorf("Zig %s download index has an invalid source or x86_64-linux SHA-256", lock.Zig.Version)
+	}
+
+	for name, artifact := range map[string]zigIndexEntry{
+		"source":       source,
+		"x86_64-linux": linux,
+	} {
+		archive, downloadErr := download(ctx, artifact.Tarball)
+		if downloadErr != nil {
+			return fmt.Errorf("download Zig %s %s archive: %w", lock.Zig.Version, name, downloadErr)
+		}
+
+		if actual := bytesSHA256(archive); actual != artifact.Shasum {
+			return fmt.Errorf("Zig %s %s archive SHA-256 = %s, want index digest %s", lock.Zig.Version, name, actual, artifact.Shasum)
+		}
+	}
+
 	lock.Zig.SourceURL = source.Tarball
 	lock.Zig.SourceSHA256 = source.Shasum
 	lock.Zig.LinuxX8664URL = linux.Tarball
@@ -485,27 +536,35 @@ func refreshZig(ctx context.Context, lock *Lock) error {
 }
 
 func refreshSPDXTools(ctx context.Context, lock *Lock) error {
-	lock.SPDXTools.URL = fmt.Sprintf("https://github.com/spdx/tools-java/releases/download/v%[1]s/tools-java-%[1]s.zip", lock.SPDXTools.Version)
+	tag := "v" + lock.SPDXTools.Version
+	assetName := fmt.Sprintf("tools-java-%s.zip", lock.SPDXTools.Version)
 
-	archive, err := download(ctx, lock.SPDXTools.URL)
+	archive, assetURL, _, err := verifiedGitHubReleaseAsset(ctx, "spdx/tools-java", tag, assetName)
 	if err != nil {
 		return fmt.Errorf("download SPDX validation tools: %w", err)
 	}
 
+	lock.SPDXTools.URL = assetURL
 	lock.SPDXTools.SHA256 = bytesSHA256(archive)
 
 	return nil
 }
 
 func refreshAppleArtifact(ctx context.Context, lock *Lock) error {
-	lock.Ghostty.AppleArtifact.URL = fmt.Sprintf("https://github.com/d0ugal/graith/releases/download/libghostty-vt-%s/libghostty-vt.xcframework.zip", lock.Ghostty.Commit[:7])
+	tag := "libghostty-vt-" + lock.Ghostty.Commit[:7]
 
-	archive, err := download(ctx, lock.Ghostty.AppleArtifact.URL)
+	archive, assetURL, releaseBody, err := verifiedGitHubReleaseAsset(ctx, "d0ugal/graith", tag, "libghostty-vt.xcframework.zip")
 	if err != nil {
 		return fmt.Errorf("download Apple artifact for Ghostty %s (publish the reviewed artifact before regenerating): %w", lock.Ghostty.Commit, err)
 	}
 
-	lock.Ghostty.AppleArtifact.SHA256 = bytesSHA256(archive)
+	digest := bytesSHA256(archive)
+	if !strings.Contains(releaseBody, lock.Ghostty.Commit) || !strings.Contains(releaseBody, "SPM checksum: "+digest) {
+		return fmt.Errorf("apple artifact release %s is not bound to full Ghostty commit %s and checksum %s", tag, lock.Ghostty.Commit, digest)
+	}
+
+	lock.Ghostty.AppleArtifact.URL = assetURL
+	lock.Ghostty.AppleArtifact.SHA256 = digest
 
 	return nil
 }
@@ -569,11 +628,8 @@ func updateSwiftPackage(root string, lock Lock) error {
 		return fmt.Errorf("read Swift package: %w", err)
 	}
 
-	urlPattern := regexp.MustCompile(`url: "https://github\.com/d0ugal/graith/releases/download/libghostty-vt-[^"]+/libghostty-vt\.xcframework\.zip"`)
-	checksumPattern := regexp.MustCompile(`checksum: "[0-9a-f]{64}"`)
-
-	updated := checksumPattern.ReplaceAllString(
-		urlPattern.ReplaceAllString(string(data), `url: "`+lock.Ghostty.AppleArtifact.URL+`"`),
+	updated := swiftArtifactChecksumPattern.ReplaceAllString(
+		swiftArtifactURLPattern.ReplaceAllString(string(data), `url: "`+lock.Ghostty.AppleArtifact.URL+`"`),
 		`checksum: "`+lock.Ghostty.AppleArtifact.SHA256+`"`,
 	)
 	if updated == string(data) && (!strings.Contains(updated, lock.Ghostty.AppleArtifact.URL) || !strings.Contains(updated, lock.Ghostty.AppleArtifact.SHA256)) {
@@ -654,12 +710,87 @@ func requireDependencyURL(rawURL, prefix string) error {
 	return nil
 }
 
+func verifiedGitHubReleaseAsset(ctx context.Context, repository, tag, assetName string) ([]byte, string, string, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases/tags/%s", repository, url.PathEscape(tag))
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	request.Header.Set("Accept", "application/vnd.github+json")
+	request.Header.Set("User-Agent", "graith-libghostty-dependency-generator")
+
+	if token := firstNonempty(os.Getenv("GITHUB_TOKEN"), os.Getenv("RENOVATE_GITHUB_COM_TOKEN")); token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	metadata, err := downloadRequest(request)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("read GitHub release %s/%s: %w", repository, tag, err)
+	}
+
+	var release githubRelease
+	if err := json.Unmarshal(metadata, &release); err != nil {
+		return nil, "", "", fmt.Errorf("decode GitHub release %s/%s: %w", repository, tag, err)
+	}
+
+	var assetURL, expectedDigest string
+
+	for _, asset := range release.Assets {
+		if asset.Name != assetName {
+			continue
+		}
+
+		if assetURL != "" {
+			return nil, "", "", fmt.Errorf("GitHub release %s/%s has duplicate asset %s", repository, tag, assetName)
+		}
+
+		assetURL = asset.BrowserDownloadURL
+		expectedDigest = strings.TrimPrefix(asset.Digest, "sha256:")
+	}
+
+	if assetURL == "" || !sha256Pattern.MatchString(expectedDigest) {
+		return nil, "", "", fmt.Errorf("GitHub release %s/%s has no SHA-256-bound asset %s", repository, tag, assetName)
+	}
+
+	wantURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repository, tag, assetName)
+	if assetURL != wantURL {
+		return nil, "", "", fmt.Errorf("GitHub release asset URL = %s, want %s", assetURL, wantURL)
+	}
+
+	archive, err := download(ctx, assetURL)
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	if actual := bytesSHA256(archive); actual != expectedDigest {
+		return nil, "", "", fmt.Errorf("GitHub release asset %s SHA-256 = %s, want API digest %s", assetName, actual, expectedDigest)
+	}
+
+	return archive, assetURL, release.Body, nil
+}
+
+func firstNonempty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+
+	return ""
+}
+
 func download(ctx context.Context, rawURL string) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
 
+	return downloadRequest(request)
+}
+
+func downloadRequest(request *http.Request) ([]byte, error) {
 	response, err := httpClient.Do(request)
 	if err != nil {
 		return nil, err
@@ -670,7 +801,7 @@ func download(ctx context.Context, rawURL string) ([]byte, error) {
 	}()
 
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: %s", rawURL, response.Status)
+		return nil, fmt.Errorf("GET %s: %s", request.URL, response.Status)
 	}
 
 	reader := io.LimitReader(response.Body, maxDependencyDownload+1)
@@ -681,7 +812,7 @@ func download(ctx context.Context, rawURL string) ([]byte, error) {
 	}
 
 	if len(data) > maxDependencyDownload {
-		return nil, fmt.Errorf("GET %s exceeded %d bytes", rawURL, maxDependencyDownload)
+		return nil, fmt.Errorf("GET %s exceeded %d bytes", request.URL, maxDependencyDownload)
 	}
 
 	return data, nil
@@ -696,6 +827,8 @@ func tarGzipMember(archive []byte, suffix string) ([]byte, error) {
 		_ = gzipReader.Close()
 	}()
 
+	var matched []byte
+
 	tarReader := tar.NewReader(gzipReader)
 	for {
 		header, err := tarReader.Next()
@@ -707,16 +840,33 @@ func tarGzipMember(archive []byte, suffix string) ([]byte, error) {
 			return nil, fmt.Errorf("read tar archive: %w", err)
 		}
 
-		if header.Typeflag != tar.TypeReg || !strings.HasSuffix(header.Name, suffix) {
+		cleanName := path.Clean(header.Name)
+		if cleanName == "." || cleanName == ".." || strings.HasPrefix(cleanName, "../") || path.IsAbs(cleanName) {
+			return nil, fmt.Errorf("archive contains unsafe path %q", header.Name)
+		}
+
+		if header.Typeflag != tar.TypeReg || !strings.HasSuffix(cleanName, suffix) {
 			continue
 		}
 
-		data, err := io.ReadAll(io.LimitReader(tarReader, 4<<20))
+		if matched != nil {
+			return nil, fmt.Errorf("archive contains more than one member ending in %s", suffix)
+		}
+
+		data, err := io.ReadAll(io.LimitReader(tarReader, (4<<20)+1))
 		if err != nil {
 			return nil, err
 		}
 
-		return data, nil
+		if len(data) > 4<<20 {
+			return nil, fmt.Errorf("archive member %s exceeded 4 MiB", cleanName)
+		}
+
+		matched = data
+	}
+
+	if matched != nil {
+		return matched, nil
 	}
 
 	return nil, fmt.Errorf("archive does not contain %s", suffix)
@@ -788,6 +938,72 @@ func copyTree(source, destination string) error {
 
 		return nil
 	})
+}
+
+// withGeneratedUnitRollback keeps local and Renovate runs transaction-like:
+// any late generation or verification error restores every managed file and
+// the complete committed header tree. A successful run leaves the reviewed
+// diff visible for one commit; an interrupted process is the only case this
+// in-process rollback cannot cover.
+func withGeneratedUnitRollback(root string, mutate func() error) (returnErr error) {
+	backup, err := os.MkdirTemp("", "graith-libghostty-deps-backup-")
+	if err != nil {
+		return fmt.Errorf("create native dependency backup: %w", err)
+	}
+	defer func() {
+		_ = os.RemoveAll(backup)
+	}()
+
+	for _, name := range generatedUnitFiles {
+		if err := copyFile(filepath.Join(root, name), filepath.Join(backup, name)); err != nil {
+			return fmt.Errorf("back up %s: %w", name, err)
+		}
+	}
+
+	if err := copyTree(filepath.Join(root, generatedHeaders), filepath.Join(backup, generatedHeaders)); err != nil {
+		return fmt.Errorf("back up committed Ghostty headers: %w", err)
+	}
+
+	mutationErr := mutate()
+	if mutationErr == nil {
+		return nil
+	}
+
+	returnErr = mutationErr
+
+	var restoreProblems []error
+
+	for _, name := range generatedUnitFiles {
+		if err := copyFile(filepath.Join(backup, name), filepath.Join(root, name)); err != nil {
+			restoreProblems = append(restoreProblems, fmt.Errorf("restore %s: %w", name, err))
+		}
+	}
+
+	headerRoot := filepath.Join(root, generatedHeaders)
+	if err := os.RemoveAll(headerRoot); err != nil {
+		restoreProblems = append(restoreProblems, fmt.Errorf("remove changed Ghostty headers: %w", err))
+	} else if err := copyTree(filepath.Join(backup, generatedHeaders), headerRoot); err != nil {
+		restoreProblems = append(restoreProblems, fmt.Errorf("restore committed Ghostty headers: %w", err))
+	}
+
+	if restoreErr := errors.Join(restoreProblems...); restoreErr != nil {
+		return errors.Join(returnErr, fmt.Errorf("restore native dependency unit after failure: %w", restoreErr))
+	}
+
+	return returnErr
+}
+
+func copyFile(source, destination string) error {
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(destination), 0o750); err != nil {
+		return err
+	}
+
+	return os.WriteFile(destination, data, 0o644) //nolint:gosec // generated dependency metadata is public
 }
 
 func run(ctx context.Context, directory, name string, args ...string) ([]byte, error) {

@@ -22,8 +22,9 @@
 #     (same guard the docs-preview workflow uses). Forks still get the failing gate
 #     in the Test job, just no auto-fix.
 #   - A push made with GITHUB_TOKEN does not itself re-trigger workflows, so there is
-#     no loop. The job verifies the regenerated content in-place before pushing, so
-#     the bot commit is correct-by-construction even though it won't get its own run.
+#     no loop. When this job commits generated output, it explicitly dispatches every
+#     required workflow at that branch head so the final generated SHA—not its stale
+#     predecessor—owns the merge-gate results.
 name: Regenerate
 
 on:
@@ -44,6 +45,7 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -85,14 +87,20 @@ jobs:
         run: scripts/libghostty-native.sh generate-dependency-unit
 
       - name: Verify regenerated content
-        # Prove the outputs are consistent within this job, since the commit-back
-        # below won't re-trigger the full suite on the bot commit.
+        # Prove mechanical projections are consistent before commit. License
+        # review bindings deliberately stay pending when evidence changed; the
+        # dispatched native gate below remains red until a reviewer accepts them.
         run: |
           go test ./internal/protocol -run TestManifestUpToDate
           go test ./internal/capabilities -run 'TestDocMatchesManifest|TestManifestLoads'
-          scripts/libghostty-native.sh verify-dependency-unit
+          if [ "${{ steps.native-lock.outputs.changed }}" = "true" ]; then
+            scripts/libghostty-native.sh verify-generated-dependency-unit
+          else
+            scripts/libghostty-native.sh verify-dependency-unit
+          fi
 
       - name: Commit back if changed
+        id: commit
         # HEAD_REF is passed via env, never interpolated into the script body:
         # a branch name is attacker-controllable, so `${{ github.head_ref }}`
         # inline in a run block is a template-injection sink (zizmor, medium+).
@@ -112,10 +120,36 @@ jobs:
             THIRD_PARTY_NOTICES.libghostty.md
           if git diff --cached --quiet; then
             echo "Generated files already up to date — nothing to commit."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "Generated files were stale; committing regenerated output."
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore(generated): refresh generated dependency metadata [skip ci]"
+          git commit -m "chore(generated): refresh generated dependency metadata"
           git push origin "HEAD:$HEAD_REF"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Run required checks on the generated branch head
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GENERATED_SHA: ${{ steps.commit.outputs.sha }}
+          HEAD_REF: ${{ github.head_ref }}
+          NATIVE_LOCK_CHANGED: ${{ steps.native-lock.outputs.changed }}
+        run: |
+          set -euo pipefail
+          remote_sha="$(git ls-remote origin "refs/heads/$HEAD_REF" | awk '{print $1}')"
+          if [ "$remote_sha" != "$GENERATED_SHA" ]; then
+            echo "Branch advanced before generated checks were dispatched." >&2
+            echo "generated=$GENERATED_SHA remote=$remote_sha" >&2
+            exit 1
+          fi
+          gh workflow run ci.yml --ref "$HEAD_REF"
+          gh workflow run commits.yml --ref "$HEAD_REF"
+          gh workflow run sandbox.yml --ref "$HEAD_REF"
+          gh workflow run libghostty-native.yml --ref "$HEAD_REF" \
+            -f run_native="$NATIVE_LOCK_CHANGED" \
+            -f dependency_unit="$NATIVE_LOCK_CHANGED" \
+            -f include_linux=false

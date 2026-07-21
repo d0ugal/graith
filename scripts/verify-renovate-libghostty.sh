@@ -33,12 +33,16 @@ git -C "$fixture" config user.email "renovate-fixture@example.invalid"
 git -C "$fixture" add renovate.json5 libghostty-native.lock.json
 git -C "$fixture" commit -qm "test: add dreich dependency fixture"
 
-(
+if ! (
     cd "$fixture"
     LOG_FORMAT=json LOG_LEVEL=debug \
         "$RENOVATE_BIN" --platform=local --dry-run=lookup --require-config=required \
         >"$log"
-)
+); then
+    echo "error: Renovate lookup dry run failed" >&2
+    jq -r 'select(.level >= 40) | [.msg, (.err.message // .err // "")] | @tsv' "$log" >&2 || true
+    exit 1
+fi
 
 expected='["Ghostty","Highway","SPDX tools-java","Zig","go-libghostty","simdutf","uucode"]'
 actual="$(jq -sc '
