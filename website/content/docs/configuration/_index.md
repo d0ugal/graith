@@ -61,6 +61,10 @@ data_dir           = ""                   # override data directory (default: XD
 allowed_repo_paths = []                   # restrict which repo paths the daemon accepts
 ```
 
+`default_agent` may be empty or must match a configured `[agents.<name>]` key,
+including a built-in agent. An unknown name is rejected during startup and
+reload; a rejected reload keeps the previous configuration active.
+
 ### `agent_prompt`
 
 A multiline string injected into the agent's environment, teaching agents to use `gr status`, `gr msg`, `gr store`, and other graith primitives. Claude gets it via `--append-system-prompt`; Cursor via `.cursor/rules/graith.mdc`; Codex via a per-session `-c developer_instructions=...` override (never written to a repository `AGENTS.md`). Other agents (OpenCode, Agy) and custom agents get no injection by default but can opt in via `prompt_injection` under `[agents.<name>]` (see [Agents]({{< relref "agents.md" >}})). Set `inject_prompt = false` per-agent to disable.

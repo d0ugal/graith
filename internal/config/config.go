@@ -4104,6 +4104,17 @@ func (c *Config) Validate() error {
 		))
 	}
 
+	// default_agent is resolved when a caller omits --agent and is also inherited
+	// by an orchestrator without an explicit agent. Validate the reference while
+	// loading the complete, merged agent map so a typo or removed custom agent
+	// cannot become a delayed session-creation failure (#1288). Empty remains
+	// valid for directly constructed and explicitly empty configurations.
+	if name := c.DefaultAgent; name != "" {
+		if _, ok := c.Agents[name]; !ok {
+			errs = append(errs, fmt.Errorf("default_agent %q: not a configured agent (define it under [agents.%s] or choose a configured agent)", name, name))
+		}
+	}
+
 	// [orchestrator] agent: an explicit agent must name a configured agent
 	// (built-in or user-defined). By the time Validate runs in Load the built-in
 	// and user agents are already merged into c.Agents, so this checks the final
