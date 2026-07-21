@@ -80,6 +80,7 @@ if [[ -z "$FRAMEWORK" ]]; then
     echo "error: no Ghostty VT xcframework produced under zig-out" >&2
     exit 1
 fi
+mkdir -p "$(dirname "$OUT")"
 rm -rf "$OUT"
 cp -R "$FRAMEWORK" "$OUT"
 
