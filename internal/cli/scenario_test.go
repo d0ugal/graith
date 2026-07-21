@@ -613,6 +613,7 @@ func TestRenderScenarioStatusBoundsLongMemberBlocksAtCommonWidths(t *testing.T) 
 			},
 		},
 	}
+
 	jsonBefore, err := json.Marshal(protocol.ScenarioStatusResponse{Scenario: sc})
 	if err != nil {
 		t.Fatalf("marshal JSON fixture: %v", err)
@@ -639,19 +640,23 @@ func TestRenderScenarioStatusBoundsLongMemberBlocksAtCommonWidths(t *testing.T) 
 				{"operability", "tertiary-mirror"},
 			} {
 				blockStart := fmt.Sprintf("MEMBER %d/3\n", i+1)
+
 				start := strings.Index(got, blockStart)
 				if start < 0 {
 					t.Fatalf("missing attributable member boundary %q:\n%s", blockStart, got)
 				}
 
 				end := strings.Index(got[start+len(blockStart):], "\nMEMBER ")
+
 				block := got[start:]
 				if end >= 0 {
 					block = got[start : start+len(blockStart)+end]
 				}
+
 				if !strings.Contains(block, want.nameSuffix) {
 					t.Errorf("member %d block lost distinguishing suffix %q:\n%s", i+1, want.nameSuffix, block)
 				}
+
 				if !strings.Contains(block, want.mirrorSuffix) {
 					t.Errorf("member %d block lost mirror suffix %q:\n%s", i+1, want.mirrorSuffix, block)
 				}
@@ -668,12 +673,14 @@ func TestRenderScenarioStatusBoundsLongMemberBlocksAtCommonWidths(t *testing.T) 
 			}
 
 			pendingLine := ""
+
 			for _, line := range strings.Split(got, "\n") {
 				if strings.HasSuffix(line, "=pending") {
 					pendingLine = line
 					break
 				}
 			}
+
 			if pendingLine == "" {
 				t.Errorf("long pending result lost or split from its state:\n%s", got)
 			} else if width == 80 && !strings.Contains(pendingLine, "…") {
@@ -686,6 +693,7 @@ func TestRenderScenarioStatusBoundsLongMemberBlocksAtCommonWidths(t *testing.T) 
 	if err != nil {
 		t.Fatalf("marshal rendered JSON fixture: %v", err)
 	}
+
 	if !bytes.Equal(jsonAfter, jsonBefore) {
 		t.Fatalf("human renderer mutated JSON response\nbefore: %s\nafter:  %s", jsonBefore, jsonAfter)
 	}
@@ -693,6 +701,7 @@ func TestRenderScenarioStatusBoundsLongMemberBlocksAtCommonWidths(t *testing.T) 
 
 func TestScenarioStatusWidthUsesConfiguredFallbackForNonTTY(t *testing.T) {
 	oldCols, oldRows := client.FallbackGeometry()
+
 	t.Cleanup(func() {
 		client.ConfigurePresentation(client.PresentationPrefs{DefaultCols: int(oldCols), DefaultRows: int(oldRows)})
 	})
@@ -709,6 +718,7 @@ func TestTruncateScenarioStatusValueUsesDisplayWidthAndKeepsSuffix(t *testing.T)
 	if width := ansi.StringWidth(got); width > 24 {
 		t.Fatalf("display width = %d, want <= 24: %q", width, got)
 	}
+
 	if !strings.Contains(got, "…") || !strings.HasSuffix(got, "correctness") {
 		t.Fatalf("middle truncation = %q, want ellipsis and distinguishing suffix", got)
 	}
