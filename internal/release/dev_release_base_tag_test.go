@@ -94,6 +94,24 @@ func TestDevReleaseBaseTagUsesDeterministicVersionOrder(t *testing.T) {
 	}
 }
 
+func TestDevReleaseBaseTagIgnoresUnreachableHigherVersion(t *testing.T) {
+	dir := newTagRepository(t)
+	git(t, dir, "tag", "v0.69.6")
+	git(t, dir, "checkout", "-b", "croft")
+	commitTagHistory(t, dir, "dreich")
+	git(t, dir, "tag", "v9.0.0")
+	git(t, dir, "checkout", "main")
+
+	output, err := runDevReleaseBaseTag(t, dir)
+	if err != nil {
+		t.Fatalf("select dev release base: %v\n%s", err, output)
+	}
+
+	if output != "v0.69.6\n" {
+		t.Fatalf("dev release base = %q, want reachable v0.69.6", output)
+	}
+}
+
 func TestDevReleaseBaseTagFailsWithoutStableSemver(t *testing.T) {
 	dir := newTagRepository(t)
 
