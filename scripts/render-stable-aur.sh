@@ -11,6 +11,11 @@ if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ||
     exit 2
 fi
 
+# Arch's pkgver field does not permit hyphens. Keep the upstream release
+# version intact for GitHub tag, filename, and checksum lookup purposes, while
+# using Arch's prescribed underscore representation in package metadata.
+pkgver="${version//-/_}"
+
 checksum_for() {
     local filename="$1"
     local matches
@@ -30,7 +35,7 @@ trap 'rm -f "$pkgbuild" "$srcinfo"' EXIT
 
 cat >"$pkgbuild" <<EOF
 pkgname=graith-bin
-pkgver=${version}
+pkgver=${pkgver}
 pkgrel=1
 pkgdesc='Terminal session manager for AI coding agents'
 arch=('x86_64' 'aarch64')
@@ -61,7 +66,7 @@ EOF
 cat >"$srcinfo" <<EOF
 pkgbase = graith-bin
 	pkgdesc = Terminal session manager for AI coding agents
-	pkgver = ${version}
+	pkgver = ${pkgver}
 	pkgrel = 1
 	url = https://github.com/d0ugal/graith
 	arch = x86_64
