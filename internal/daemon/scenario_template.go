@@ -156,7 +156,7 @@ func renderScenarioTemplate(input, field string, values map[string]string, allow
 func renderScenarioStart(authored protocol.ScenarioStartMsg, state *ScenarioRenderState) (protocol.ScenarioStartMsg, error) {
 	rendered := authored
 	rendered.Sessions = make([]protocol.ScenarioSessionInput, len(authored.Sessions))
-	rendered.Triggers = make([]config.TriggerConfig, len(authored.Triggers))
+	rendered.Triggers = make([]protocol.TriggerConfig, len(authored.Triggers))
 
 	baseValues := scenarioRenderValues(state, "")
 

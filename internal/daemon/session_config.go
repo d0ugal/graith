@@ -18,6 +18,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/git"
+	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/tools"
 )
@@ -590,12 +591,17 @@ func codexStatePtr(opts config.CodexOptions) *config.CodexOptions {
 
 // codexOptsFromMsg flattens the wire pointer to a value for CreateOpts, treating
 // nil as "no options set".
-func codexOptsFromMsg(opts *config.CodexOptions) config.CodexOptions {
+func codexOptsFromMsg(opts *protocol.CodexOptions) config.CodexOptions {
 	if opts == nil {
 		return config.CodexOptions{}
 	}
 
-	return *opts
+	return config.CodexOptions{
+		Profile:         opts.Profile,
+		ReasoningEffort: opts.ReasoningEffort,
+		ServiceTier:     opts.ServiceTier,
+		WebSearch:       opts.WebSearch,
+	}
 }
 
 // optionArgs builds an agent's conditional launch flags from its option_args

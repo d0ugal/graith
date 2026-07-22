@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/d0ugal/graith/internal/config"
 )
 
 // Version 2 removes the interactive approval wire protocol. The major bump is
@@ -78,6 +76,16 @@ type HandshakeMsg struct {
 	Profile      string    `json:"profile,omitempty"`
 }
 
+// CodexOptions is the wire representation of typed per-session Codex CLI
+// options. Validation and option expansion belong to the config/domain model;
+// this DTO only fixes the serialized compatibility contract.
+type CodexOptions struct {
+	Profile         string `json:"profile,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	ServiceTier     string `json:"service_tier,omitempty"`
+	WebSearch       bool   `json:"web_search,omitempty"`
+}
+
 type CreateMsg struct {
 	Name                string   `json:"name"`
 	Labels              []string `json:"labels,omitempty"`
@@ -101,7 +109,7 @@ type CreateMsg struct {
 	// Codex carries typed per-session Codex CLI options (profile, reasoning
 	// effort, service tier, and web search — issue #1186). Nil when
 	// none were set; only meaningful for `--agent codex`.
-	Codex *config.CodexOptions `json:"codex,omitempty"`
+	Codex *CodexOptions `json:"codex,omitempty"`
 }
 
 type ForkMsg struct {
@@ -903,6 +911,151 @@ type StatusResponseMsg struct {
 
 // Scenario messages
 
+// The trigger DTOs below deliberately retain their legacy PascalCase JSON
+// names. ScenarioStartMsg originally embedded config structs without JSON
+// tags, so encoding/json used the exported Go field names on the wire. Making
+// those names explicit preserves protocol v2 byte compatibility while
+// preventing future config/TOML refactors from changing them accidentally.
+
+// TriggerConfig is the wire representation of one scenario-embedded trigger.
+// Exactly one source is valid; that invariant remains config/domain behavior.
+type TriggerConfig struct {
+	Name       string            `json:"Name"`
+	Enabled    *bool             `json:"Enabled"`
+	Schedule   *ScheduleConfig   `json:"Schedule"`
+	Watch      *WatchConfig      `json:"Watch"`
+	GCX        *GCXConfig        `json:"GCX"`
+	Completion *CompletionConfig `json:"Completion"`
+	Action     ActionConfig      `json:"Action"`
+	Policy     TriggerPolicy     `json:"Policy"`
+}
+
+// ScheduleConfig is the wire representation of a time-driven trigger source.
+type ScheduleConfig struct {
+	Cron     string `json:"Cron"`
+	Every    string `json:"Every"`
+	Timezone string `json:"Timezone"`
+}
+
+// WatchConfig is the wire representation of a file-event trigger source.
+type WatchConfig struct {
+	Repo     string   `json:"Repo"`
+	Role     string   `json:"Role"`
+	Paths    []string `json:"Paths"`
+	Ignore   []string `json:"Ignore"`
+	Debounce string   `json:"Debounce"`
+}
+
+// GCXConfig is the wire representation of a Grafana Cloud trigger source.
+type GCXConfig struct {
+	Event          string   `json:"Event"`
+	Context        string   `json:"Context"`
+	Every          string   `json:"Every"`
+	Timeout        string   `json:"Timeout"`
+	OnCallUserID   string   `json:"OnCallUserID"`
+	ScheduleIDs    []string `json:"ScheduleIDs"`
+	TeamIDs        []string `json:"TeamIDs"`
+	IntegrationIDs []string `json:"IntegrationIDs"`
+	States         []string `json:"States"`
+	MaxAge         string   `json:"MaxAge"`
+	Limit          int      `json:"Limit"`
+}
+
+// CompletionConfig is the wire representation of a scenario-completion source.
+type CompletionConfig struct {
+	Event   string `json:"Event"`
+	Session string `json:"Session"`
+}
+
+// ActionConfig is the wire representation of a trigger action. Action-specific
+// field validation and defaults remain on config.ActionConfig.
+type ActionConfig struct {
+	Type          string         `json:"Type"`
+	Command       string         `json:"Command"`
+	Repo          string         `json:"Repo"`
+	Timeout       string         `json:"Timeout"`
+	Mutating      bool           `json:"Mutating"`
+	Sandbox       *bool          `json:"Sandbox"`
+	SandboxConfig *SandboxConfig `json:"SandboxConfig"`
+
+	Prompt string `json:"Prompt"`
+	Agent  string `json:"Agent"`
+	Model  string `json:"Model"`
+	Ensure bool   `json:"Ensure"`
+	// AutoCleanup retains the historical bool|string|null JSON union without
+	// moving normalization or validation out of the config/domain model.
+	AutoCleanup json.RawMessage `json:"AutoCleanup"`
+	IdleTimeout string          `json:"IdleTimeout"`
+
+	Scenario string         `json:"Scenario"`
+	Tracker  *TrackerConfig `json:"Tracker"`
+	Body     string         `json:"Body"`
+
+	NotifyOnComplete bool          `json:"NotifyOnComplete"`
+	NotifyMessage    string        `json:"NotifyMessage"`
+	NotifyPriority   string        `json:"NotifyPriority"`
+	Deliver          DeliverConfig `json:"Deliver"`
+}
+
+// DeliverConfig is the wire representation of trigger output routing.
+type DeliverConfig struct {
+	Inbox    string `json:"Inbox"`
+	Topic    string `json:"Topic"`
+	Store    string `json:"Store"`
+	Wake     bool   `json:"Wake"`
+	Required bool   `json:"Required"`
+}
+
+// TrackerConfig is the wire representation of tracker reconciliation options.
+type TrackerConfig struct {
+	Provider      string   `json:"Provider"`
+	Repo          string   `json:"Repo"`
+	ActiveState   string   `json:"ActiveState"`
+	ActiveLabels  []string `json:"ActiveLabels"`
+	Assignee      string   `json:"Assignee"`
+	Grace         string   `json:"Grace"`
+	MaxConcurrent int      `json:"MaxConcurrent"`
+	Reap          string   `json:"Reap"`
+	Limit         int      `json:"Limit"`
+}
+
+// TriggerPolicy is the wire representation of trigger scheduling policy.
+type TriggerPolicy struct {
+	CatchUp   bool   `json:"CatchUp"`
+	Overlap   string `json:"Overlap"`
+	RateLimit string `json:"RateLimit"`
+}
+
+// SandboxConfig is the wire representation of action-specific sandbox grants.
+// Its lowercase keys were already explicit on the former config-backed shape.
+type SandboxConfig struct {
+	Enabled    bool                  `json:"enabled"`
+	Disabled   *bool                 `json:"disabled,omitempty"`
+	Backend    string                `json:"backend,omitempty"`
+	Command    string                `json:"command,omitempty"`
+	Profile    string                `json:"profile,omitempty"`
+	Features   []string              `json:"features,omitempty"`
+	ReadDirs   []string              `json:"read_dirs,omitempty"`
+	WriteDirs  []string              `json:"write_dirs,omitempty"`
+	ReadFiles  []string              `json:"read_files,omitempty"`
+	WriteFiles []string              `json:"write_files,omitempty"`
+	SignalMode string                `json:"signal_mode,omitempty"`
+	Network    *SandboxNetworkConfig `json:"network,omitempty"`
+}
+
+// SandboxNetworkConfig is the wire representation of sandbox egress policy.
+type SandboxNetworkConfig struct {
+	Block        bool     `json:"block,omitempty"`
+	AllowDomains []string `json:"allow_domains,omitempty"`
+}
+
+// ScenarioLifecycleConfig is the wire representation of post-completion
+// cleanup. CleanupMode, DelayDuration, and validation remain domain behavior.
+type ScenarioLifecycleConfig struct {
+	Cleanup string `json:"cleanup,omitempty"`
+	Delay   string `json:"delay,omitempty"`
+}
+
 type ScenarioStartMsg struct {
 	CallerSessionID string `json:"caller_session_id"`
 	// ParentSessionID is the orchestrator session that owns the scenario and
@@ -923,8 +1076,8 @@ type ScenarioStartMsg struct {
 	// scenario once its two-phase start succeeds. See issue #1027 and
 	// docs/design/2026-07-11-triggers-design.md §"Scenario-embedded trigger
 	// lifecycle".
-	Triggers  []config.TriggerConfig         `json:"triggers,omitempty"`
-	Lifecycle config.ScenarioLifecycleConfig `json:"lifecycle,omitempty"`
+	Triggers  []TriggerConfig         `json:"triggers,omitempty"`
+	Lifecycle ScenarioLifecycleConfig `json:"lifecycle,omitempty"`
 }
 
 type ScenarioPolicyInput struct {

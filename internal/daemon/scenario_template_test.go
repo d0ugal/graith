@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -30,17 +29,17 @@ func TestRenderScenarioStartRendersNamesAndReferencesOnce(t *testing.T) {
 			{Name: "{scenario}-reviewer", Mirror: "{initiator}"},
 			{Name: "{scenario}-writer", Repo: "/croft", Task: "write", DependsOn: []string{"{scenario}-reviewer"}},
 		},
-		Triggers: []config.TriggerConfig{
+		Triggers: []protocol.TriggerConfig{
 			{
 				Name:       "complete-review",
-				Completion: &config.CompletionConfig{Session: "{scenario}-reviewer"},
-				Action: config.ActionConfig{Deliver: config.DeliverConfig{
+				Completion: &protocol.CompletionConfig{Session: "{scenario}-reviewer"},
+				Action: protocol.ActionConfig{Deliver: protocol.DeliverConfig{
 					Inbox: "{scenario}-reviewer",
 				}},
 			},
 			{
 				Name: "watch-review",
-				Action: config.ActionConfig{Deliver: config.DeliverConfig{
+				Action: protocol.ActionConfig{Deliver: protocol.DeliverConfig{
 					Inbox: "{scenario}-{session_name}",
 				}},
 			},
@@ -123,7 +122,7 @@ func TestRenderScenarioStartRejectsUnknownUnavailableAndMalformedTemplates(t *te
 			msg: protocol.ScenarioStartMsg{
 				Name:     "braw",
 				Sessions: []protocol.ScenarioSessionInput{{Name: "canny"}},
-				Triggers: []config.TriggerConfig{{Action: config.ActionConfig{Deliver: config.DeliverConfig{Inbox: "{dreich}"}}}},
+				Triggers: []protocol.TriggerConfig{{Action: protocol.ActionConfig{Deliver: protocol.DeliverConfig{Inbox: "{dreich}"}}}},
 			},
 			want: `unknown scenario name template variable "dreich"`,
 		},

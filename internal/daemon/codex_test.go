@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 // TestOptionArgs locks the #1186 fix as re-expressed through config-driven
@@ -141,9 +142,15 @@ func TestCodexOptsFromMsg(t *testing.T) {
 		t.Errorf("codexOptsFromMsg(nil) = %+v, want zero", got)
 	}
 
-	in := &config.CodexOptions{Profile: "canny"}
-	if got := codexOptsFromMsg(in); got != *in {
-		t.Errorf("codexOptsFromMsg(%+v) = %+v, want %+v", in, got, *in)
+	in := &protocol.CodexOptions{
+		Profile: "canny", ReasoningEffort: "high", ServiceTier: "fast", WebSearch: true,
+	}
+
+	want := config.CodexOptions{
+		Profile: "canny", ReasoningEffort: "high", ServiceTier: "fast", WebSearch: true,
+	}
+	if got := codexOptsFromMsg(in); got != want {
+		t.Errorf("codexOptsFromMsg(%+v) = %+v, want %+v", in, got, want)
 	}
 }
 

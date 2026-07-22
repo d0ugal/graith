@@ -270,6 +270,11 @@ The source can be:
 			return err
 		}
 
+		triggers, err := scenariofile.TriggersToProtocol(sf.Triggers)
+		if err != nil {
+			return fmt.Errorf("encode scenario triggers: %w", err)
+		}
+
 		callerID := os.Getenv("GRAITH_SESSION_ID")
 		if callerID == "" {
 			return errors.New("GRAITH_SESSION_ID is not set — scenarios must be started from within a graith session")
@@ -287,8 +292,8 @@ The source can be:
 			Goal:            sf.Scenario.Goal,
 			Sessions:        sessions,
 			Policy:          scenarioPolicyInput(sf.Scenario.Policy),
-			Triggers:        sf.Triggers,
-			Lifecycle:       sf.Scenario.Lifecycle,
+			Triggers:        triggers,
+			Lifecycle:       scenariofile.LifecycleToProtocol(sf.Scenario.Lifecycle),
 		}); err != nil {
 			return err
 		}

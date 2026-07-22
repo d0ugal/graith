@@ -505,6 +505,11 @@ func (sm *SessionManager) actionScenario(ctx context.Context, t *config.TriggerC
 		return "", err
 	}
 
+	triggers, err := scenariofile.TriggersToProtocol(sf.Triggers)
+	if err != nil {
+		return "", fmt.Errorf("encode scenario triggers: %w", err)
+	}
+
 	initiatorID := orchestratorID
 	if fc.sessionID != "" {
 		initiatorID = fc.sessionID
@@ -518,8 +523,8 @@ func (sm *SessionManager) actionScenario(ctx context.Context, t *config.TriggerC
 		Goal:               sf.Scenario.Goal,
 		Sessions:           inputs,
 		Policy:             scenariofile.PolicyInput(sf.Scenario.Policy),
-		Triggers:           sf.Triggers,
-		Lifecycle:          sf.Scenario.Lifecycle,
+		Triggers:           triggers,
+		Lifecycle:          scenariofile.LifecycleToProtocol(sf.Scenario.Lifecycle),
 	}
 	lc := sm.Config().Lifecycle
 	//nolint:contextcheck // StartScenario runs its own session lifecycle, detached from the fire ctx.
