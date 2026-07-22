@@ -608,6 +608,7 @@ func TestCreateOrchestratorFiltersInheritedMCPAliases(t *testing.T) {
 	cfg := config.Default()
 	cfg.Orchestrator.Enabled = true
 	cfg.Sandbox.Enabled = false
+	cfg.Sandbox.Command = writeExecutable(t, filepath.Join(dir, "safehouse-bin"))
 	agent := cfg.Agents["claude"]
 	agent.Command = "sh"
 	agent.Args = []string{"-c", "exec cat", "--"}
@@ -681,6 +682,7 @@ func TestCreateOrchestratorDoesNotDuplicateCodexHookTrustFlag(t *testing.T) {
 	cfg.Orchestrator.Enabled = true
 	cfg.Orchestrator.Agent = "codex"
 	cfg.Sandbox.Enabled = false
+	cfg.Sandbox.Command = writeExecutable(t, filepath.Join(dir, "safehouse-bin"))
 	cfg.CommandPolicy = config.CommandPolicy{
 		Backend: "builtin",
 		Builtin: config.CommandPolicyBuiltin{Allow: []any{"echo @*"}},
