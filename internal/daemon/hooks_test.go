@@ -673,9 +673,10 @@ func TestTOMLBasicString(t *testing.T) {
 	}
 }
 
-// TestCodexMCPServerArgs verifies the helper emits a `-c` override pair per
-// server pointing command/args at `gr mcp-proxy <name>`, JSON-encoded so the
-// values are valid TOML, and in stable slice order.
+// TestCodexMCPServerArgs verifies the helper points command/args at
+// `gr mcp-proxy <name>` and asks Codex to inherit only the proxy's required
+// graith identity/path context. Values are JSON-encoded so they are valid TOML
+// and emitted in stable slice order.
 func TestCodexMCPServerArgs(t *testing.T) {
 	if args, skipped, err := codexMCPServerArgs(nil); err != nil || args != nil || skipped != nil {
 		t.Fatalf("codexMCPServerArgs(nil) = (%v, %v, %v), want (nil, nil, nil)", args, skipped, err)
@@ -705,8 +706,10 @@ func TestCodexMCPServerArgs(t *testing.T) {
 	want := []string{
 		"-c", "mcp_servers.graith.command=" + string(cmdVal),
 		"-c", `mcp_servers.graith.args=["mcp-proxy","graith"]`,
+		"-c", `mcp_servers.graith.env_vars=["GRAITH_SESSION_ID","GRAITH_TOKEN","GRAITH_PROFILE","XDG_CONFIG_HOME","XDG_DATA_HOME","XDG_RUNTIME_DIR"]`,
 		"-c", "mcp_servers.chrome-devtools.command=" + string(cmdVal),
 		"-c", `mcp_servers.chrome-devtools.args=["mcp-proxy","chrome-devtools"]`,
+		"-c", `mcp_servers.chrome-devtools.env_vars=["GRAITH_SESSION_ID","GRAITH_TOKEN","GRAITH_PROFILE","XDG_CONFIG_HOME","XDG_DATA_HOME","XDG_RUNTIME_DIR"]`,
 	}
 
 	if len(args) != len(want) {
@@ -716,6 +719,25 @@ func TestCodexMCPServerArgs(t *testing.T) {
 	for i := range want {
 		if args[i] != want[i] {
 			t.Errorf("args[%d] = %q, want %q", i, args[i], want[i])
+		}
+	}
+
+	// env_vars contains names only. A live credential must never be copied into
+	// argv, even when the helper runs in an authenticated session environment.
+	t.Setenv("GRAITH_TOKEN", "dreich-secret-token-value")
+	args, _, err = codexMCPServerArgs(servers[:1])
+	if err != nil {
+		t.Fatalf("codexMCPServerArgs() with token environment error = %v", err)
+	}
+
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "dreich-secret-token-value") {
+		t.Fatal("codex MCP args exposed the GRAITH_TOKEN value")
+	}
+
+	for _, unexpected := range []string{"GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "DISPLAY"} {
+		if strings.Contains(joined, unexpected) {
+			t.Errorf("codex MCP args inherit unnecessary or configured server variable %q: %v", unexpected, args)
 		}
 	}
 }
@@ -750,9 +772,9 @@ func TestCodexMCPServerArgsSkipsUnrepresentableNames(t *testing.T) {
 		}
 	}
 
-	// Only the two representable names emit overrides: 2 servers × 4 args each.
-	if len(args) != 8 {
-		t.Fatalf("args = %v, want 8 (graith + under_score-ok)", args)
+	// Only the two representable names emit overrides: 2 servers × 6 args each.
+	if len(args) != 12 {
+		t.Fatalf("args = %v, want 12 (graith + under_score-ok)", args)
 	}
 
 	joined := strings.Join(args, " ")
@@ -1090,6 +1112,10 @@ func TestInjectMCPConfigCodex(t *testing.T) {
 
 		if !strings.Contains(joined, `mcp_servers.`+name+`.args=["mcp-proxy","`+name+`"]`) {
 			t.Errorf("args missing args override for %q: %v", name, args)
+		}
+
+		if !strings.Contains(joined, `mcp_servers.`+name+`.env_vars=["GRAITH_SESSION_ID","GRAITH_TOKEN","GRAITH_PROFILE","XDG_CONFIG_HOME","XDG_DATA_HOME","XDG_RUNTIME_DIR"]`) {
+			t.Errorf("args missing proxy environment whitelist for %q: %v", name, args)
 		}
 	}
 }

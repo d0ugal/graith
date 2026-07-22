@@ -80,13 +80,22 @@ server plus your global and per-agent servers — pointing each at
 `gr mcp-proxy <name>` so the daemon supervises the real process:
 
 - **Claude** — a generated `--mcp-config` file.
-- **Codex** — per-session `-c mcp_servers.<name>.command=…` / `.args=…`
-  overrides. Since these set only `command` and `args`, other Codex per-server
-  controls for a matching stdio server in `~/.codex/config.toml` —
-  `startup_timeout_sec`, `tool_timeout_sec`, `enabled`, or enabled/disabled
-  tools — are preserved and merged. (If a same-named server in your Codex config
-  is a remote/HTTP transport, the injected stdio `command`/`args` conflict — pick
-  a distinct name.)
+- **Codex** — per-session `-c mcp_servers.<name>.command=…`, `.args=…`, and
+  `.env_vars=…` overrides. Codex starts stdio MCP children with a clean
+  environment, so graith names the minimum variables each proxy may inherit:
+  `GRAITH_SESSION_ID`, `GRAITH_TOKEN`, `GRAITH_PROFILE`, `XDG_CONFIG_HOME`,
+  `XDG_DATA_HOME`, and `XDG_RUNTIME_DIR`. Missing optional profile/XDG variables
+  stay absent. Only variable names appear in the launch arguments; credential
+  values remain in the process environment.
+
+  The injected `env_vars` list replaces a same-named Codex server's own
+  environment-variable whitelist because that child is now the graith proxy,
+  not the original server. Other per-server controls for a matching stdio
+  server in `~/.codex/config.toml` — including `startup_timeout_sec`,
+  `tool_timeout_sec`, `enabled`, literal `env` entries, or enabled/disabled tools
+  — are preserved and merged. (If a same-named server in your Codex config is a
+  remote/HTTP transport, the injected stdio fields conflict — pick a distinct
+  name.)
 
   Codex identifies servers by a dotted config-key path, so a name must be a TOML
   bare key (`A–Z`, `a–z`, `0–9`, `_`, `-`) to be injectable. A name with a `.`,

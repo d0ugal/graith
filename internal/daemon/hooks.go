@@ -338,17 +338,40 @@ func (sm *SessionManager) injectMCPConfig(agentName, sessionID string, mcpServer
 // JSON map key, so this restriction is Codex-specific.)
 var codexBareKeyRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
+// codexMCPProxyEnvVars is the minimum parent-process context a Codex-launched
+// gr mcp-proxy needs to reconnect to the same daemon as the owning session.
+// Codex starts stdio MCP servers with a cleared environment and copies only its
+// fixed portable defaults plus names listed in `env_vars`; GRAITH_* variables
+// are not defaults. The values stay in the process environment: only these
+// names are emitted in argv/config, so the session bearer token is never
+// exposed in a process listing or persisted config.
+//
+// The XDG variables are connection context, not authority. When present they
+// select the same config, data, and runtime directories as the parent; absent
+// variables are simply omitted by Codex. HOME is already in Codex's fixed
+// stdio environment set.
+var codexMCPProxyEnvVars = []string{
+	"GRAITH_SESSION_ID",
+	"GRAITH_TOKEN",
+	"GRAITH_PROFILE",
+	"XDG_CONFIG_HOME",
+	"XDG_DATA_HOME",
+	"XDG_RUNTIME_DIR",
+}
+
 // codexMCPServerArgs builds the per-session `-c` config overrides that point
 // each daemon-managed MCP server at `gr mcp-proxy <name>` for a Codex session.
 // It returns the args plus the names of any servers skipped because their name
 // can't be represented as a Codex override key (see codexBareKeyRe).
 //
-// It deliberately overrides only `command` and `args` (mirroring the Claude
-// --mcp-config which sets the same two fields). Using `-c` overrides rather
-// than writing a full config file leaves any user-supplied per-server Codex
-// controls — `startup_timeout_sec`, `tool_timeout_sec`, `enabled`,
-// enabled/disabled tools, per-tool execution mode — intact and merged, rather
-// than flattening every server to graith's command/args/env shape.
+// It deliberately overrides only `command`, `args`, and `env_vars`. The last is
+// required because Codex clears stdio MCP child environments; it replaces any
+// same-name Codex env-var whitelist with the proxy's minimum identity/context
+// names. Using `-c` overrides rather than writing a full config file leaves
+// other user-supplied per-server Codex controls — `startup_timeout_sec`,
+// `tool_timeout_sec`, `enabled`, enabled/disabled tools, per-tool execution
+// mode, and literal `env` entries — intact and merged rather than flattening
+// every server to graith's command/args/env shape.
 //
 // Values are JSON-encoded, which is also valid TOML for a string
 // (`"…"`) and a string array (`["…","…"]`), the two value kinds Codex's
@@ -365,7 +388,12 @@ func codexMCPServerArgs(mcpServers []config.MCPServerConfig) (args, skipped []st
 		return nil, nil, fmt.Errorf("marshal mcp command: %w", err)
 	}
 
-	args = make([]string, 0, len(mcpServers)*4)
+	proxyEnvVars, err := json.Marshal(codexMCPProxyEnvVars)
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal mcp proxy env vars: %w", err)
+	}
+
+	args = make([]string, 0, len(mcpServers)*6)
 
 	for _, s := range mcpServers {
 		if !codexBareKeyRe.MatchString(s.Name) {
@@ -381,6 +409,7 @@ func codexMCPServerArgs(mcpServers []config.MCPServerConfig) (args, skipped []st
 		args = append(args,
 			"-c", fmt.Sprintf("mcp_servers.%s.command=%s", s.Name, cmdVal),
 			"-c", fmt.Sprintf("mcp_servers.%s.args=%s", s.Name, proxyArgs),
+			"-c", fmt.Sprintf("mcp_servers.%s.env_vars=%s", s.Name, proxyEnvVars),
 		)
 	}
 

@@ -256,6 +256,70 @@ func TestCodexModelPassedOnLaunchAndResume(t *testing.T) {
 	assertContiguousPair(t, argv, "--model", model)
 }
 
+// TestCodexMCPProxyEnvWhitelistAcrossLifecycle is the daemon-level regression
+// for Codex MCP proxies losing the owning session's identity. Codex clears the
+// environment of stdio MCP children unless variable names are listed in the
+// server's env_vars config, so create, fork, and resume must all inject the
+// whitelist alongside the command/args overrides.
+func TestCodexMCPProxyEnvWhitelistAcrossLifecycle(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh not available")
+	}
+
+	repoDir := initTempGitRepo(t)
+	sm, recordPath := newCodexRecorderManager(t, repoDir)
+
+	created, err := sm.Create(CreateOpts{
+		Name: "canny", AgentName: "codex", RepoPath: repoDir, BaseBranch: "main",
+		AgentHooks: true, SkipModelValidation: true, Rows: 24, Cols: 80,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, created.ID) })
+
+	waitForCodexMCPProxyEnvOverride(t, recordPath)
+
+	if err := os.Remove(recordPath); err != nil {
+		t.Fatalf("remove record before fork: %v", err)
+	}
+
+	forked, err := sm.Fork("bairn", created.ID, 24, 80)
+	if err != nil {
+		t.Fatalf("Fork() error = %v", err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, forked.ID) })
+
+	waitForCodexMCPProxyEnvOverride(t, recordPath)
+
+	if err := os.Remove(recordPath); err != nil {
+		t.Fatalf("remove record before resume: %v", err)
+	}
+
+	if err := sm.Stop(created.ID); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+
+	waitForStatus(t, sm, created.ID, StatusStopped)
+
+	if _, err := sm.Restart(created.ID, 24, 80); err != nil {
+		t.Fatalf("Restart() error = %v", err)
+	}
+
+	waitForCodexMCPProxyEnvOverride(t, recordPath)
+}
+
+func waitForCodexMCPProxyEnvOverride(t *testing.T, recordPath string) {
+	t.Helper()
+
+	// Wait on an override that predated the fix so a regression fails
+	// immediately on the missing env_vars assertion, rather than by timeout.
+	argv := waitForRecordedArgv(t, recordPath, `mcp_servers.graith.args=["mcp-proxy","graith"]`)
+	assertContiguousPair(t, argv, "-c", `mcp_servers.graith.env_vars=["GRAITH_SESSION_ID","GRAITH_TOKEN","GRAITH_PROFILE","XDG_CONFIG_HOME","XDG_DATA_HOME","XDG_RUNTIME_DIR"]`)
+}
+
 // newCodexRecorderManager builds a SessionManager whose "codex" agent is a shell
 // script that records its launch argv to recordPath (mirrors newRecorderManager
 // but keyed on codex). The option_args groups carry over from the embedded

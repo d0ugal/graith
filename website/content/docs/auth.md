@@ -24,6 +24,10 @@ For the auto-injected [graith MCP server]({{< relref "mcp" >}}), the daemon
 also carries the authenticated proxy caller into its private `gr mcp` child
 environment. Each MCP tool connection therefore authenticates as the calling
 session, not as the daemon's ambient process identity or the local human.
+Codex launches stdio MCP children with a restricted environment, so graith's
+per-session Codex overrides explicitly allow the proxy to inherit the session
+ID and token by name (plus optional profile/XDG path context). The token value
+is never written into launch arguments or Codex configuration.
 
 No configuration needed. Existing sessions receive tokens when the daemon upgrades to an auth-supporting version (state migration v9 to v10).
 
