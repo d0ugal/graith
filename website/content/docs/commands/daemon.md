@@ -42,6 +42,11 @@ refuses the attempt while session creation or another lifecycle launch is in
 progress. Such a refusal leaves the existing daemon and agents running; retry
 after the reported work finishes. If preparation or exec fails, inheritable
 terminal descriptors are restored and the existing daemon continues serving.
+The replacement may use a newer state schema when it has the forward migrations
+needed to load the running daemon's exact snapshot. A replacement with an older
+state schema is rejected as a downgrade, while manifest and adoption protocol
+versions must still match exactly. Compatibility errors report the bounded
+numeric target and running versions for each mismatched boundary.
 
 Live adoption requires persisted state and the handoff manifest to prove the
 exact process identity; the manifest records every live process, not just
