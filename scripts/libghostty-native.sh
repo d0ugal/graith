@@ -627,7 +627,7 @@ expected_static_archive_members() {
     printf '%s\n' \
         abort.o base64.o codepoint_width.o compiler_rt.o index_of.o \
         libghostty-vt-static_zcu.o libhighway_zcu.o per_target.o \
-        simdutf.o targets.o vt.o | sort
+        simdutf.o targets.o vt.o | LC_ALL=C sort
 }
 
 file_identity() {
@@ -1133,8 +1133,9 @@ materialize_static_archive() (
     if ! roots="$(canonical_allowed_roots "$@")" || [[ -z "$roots" ]]; then
         return 1
     fi
+    local root_line
     local -a allowed_roots=()
-    while IFS= read -r output_name; do allowed_roots+=("$output_name"); done <<<"$roots"
+    while IFS= read -r root_line; do allowed_roots+=("$root_line"); done <<<"$roots"
 
     local staging="" output_temp_directory="" published=0 succeeded=0
     # shellcheck disable=SC2317,SC2329
@@ -1181,7 +1182,7 @@ materialize_static_archive() (
         fi
         normalized_names+="${normalized_names:+$'\n'}$normalized_name"
     done <<<"$listing"
-    if ! actual_members="$(printf '%s\n' "$normalized_names" | sort)" ||
+    if ! actual_members="$(printf '%s\n' "$normalized_names" | LC_ALL=C sort)" ||
         [[ -z "$actual_members" ]]; then
         die "could not normalize thin archive member names"
         return 1
@@ -1568,36 +1569,69 @@ test_source_archive_policy() {
     done <<<"$members"
 
     local thin="$local_cache/libghostty-vt-thin.a"
-    if ! zig ar rcsT "$thin" "${objects[@]}"; then return 1; fi
+    local regular_input="$local_cache/libghostty-vt-regular.a"
+    if ! zig ar rcsT "$thin" "${objects[@]}" ||
+        ! zig ar rcsD "$regular_input" "${objects[@]}"; then
+        return 1
+    fi
     local published_dir="$source_root/zig-out/lib"
     if ! mkdir -p "$published_dir" ||
         ! ln -s ../../../zig-local/libghostty-vt-thin.a \
-            "$published_dir/libghostty-vt.a"; then
+            "$published_dir/libghostty-vt-thin.a" ||
+        ! ln -s ../../../zig-local/libghostty-vt-regular.a \
+            "$published_dir/libghostty-vt-regular.a"; then
         return 1
     fi
-    local published="$published_dir/libghostty-vt.a"
+    local published="$published_dir/libghostty-vt-thin.a"
+    local regular_published="$published_dir/libghostty-vt-regular.a"
 
-    local snapshot="$output_root/snapshot.a" regular="$output_root/regular.a"
+    local snapshot="$output_root/snapshot-thin.a"
+    local regular_snapshot="$output_root/snapshot-regular.a"
+    local regular="$output_root/regular-from-thin.a"
+    local regular_from_regular="$output_root/regular-from-regular.a"
     if ! snapshot_zig_build_archive "$published" "$snapshot" \
-        "$source_root" "$local_cache" "$global_cache"; then
+        "$source_root" "$local_cache" "$global_cache" ||
+        ! snapshot_zig_build_archive "$regular_published" "$regular_snapshot" \
+            "$source_root" "$local_cache" "$global_cache"; then
         return 1
     fi
     if ! materialize_static_archive "$snapshot" "$regular" \
-        "$source_root" "$local_cache" "$global_cache"; then
+        "$source_root" "$local_cache" "$global_cache" ||
+        ! materialize_static_archive "$regular_snapshot" "$regular_from_regular" \
+            "$source_root" "$local_cache" "$global_cache"; then
         return 1
     fi
-    if ! verify_static_archive "$regular"; then return 1; fi
-    local regular_sha
-    if ! regular_sha="$(sha256_value "$regular")" || [[ -z "$regular_sha" ]]; then
+    if ! verify_static_archive "$regular" ||
+        ! verify_static_archive "$regular_from_regular"; then
         return 1
     fi
-    local second="$output_root/regular-second.a"
+    local regular_sha regular_from_regular_sha
+    if ! regular_sha="$(sha256_value "$regular")" || [[ -z "$regular_sha" ]] ||
+        ! regular_from_regular_sha="$(sha256_value "$regular_from_regular")" ||
+        [[ -z "$regular_from_regular_sha" ]]; then
+        return 1
+    fi
+    local second="$output_root/regular-from-thin-second.a"
+    local regular_second="$output_root/regular-from-regular-second.a"
     if ! materialize_static_archive "$snapshot" "$second" \
         "$source_root" "$local_cache" "$global_cache" ||
-        [[ "$(sha256_value "$second")" != "$regular_sha" ]]; then
+        ! materialize_static_archive "$regular_snapshot" "$regular_second" \
+            "$source_root" "$local_cache" "$global_cache"; then
+        return 1
+    fi
+    local second_sha regular_second_sha
+    if ! second_sha="$(sha256_value "$second")" || [[ -z "$second_sha" ]] ||
+        ! regular_second_sha="$(sha256_value "$regular_second")" ||
+        [[ -z "$regular_second_sha" ]] ||
+        [[ "$second_sha" != "$regular_sha" ]] ||
+        [[ "$regular_second_sha" != "$regular_from_regular_sha" ]]; then
         die "regular archive materialization is not deterministic"
         return 1
     fi
+
+    local -a archive_forms=(thin regular)
+    local -a published_archives=("$published" "$regular_published")
+    local -a archive_snapshots=("$snapshot" "$regular_snapshot")
 
     local shim_dir="$root/shims" original_path="$PATH" system_command
     if ! mkdir -p "$shim_dir"; then return 1; fi
@@ -1607,11 +1641,13 @@ test_source_archive_policy() {
             [[ -z "$system_command" ]]; then
             return 1
         fi
-        printf '%s\n' \
+        if ! printf '%s\n' \
             '#!/usr/bin/env bash' \
-            'exit 1' >"$shim_dir/$command_name"
-        chmod 700 "$shim_dir/$command_name"
-        printf '%s\n' "$system_command"
+            'exit 1' >"$shim_dir/$command_name" ||
+            ! chmod 700 "$shim_dir/$command_name" ||
+            ! printf '%s\n' "$system_command"; then
+            return 1
+        fi
     }
     make_delegating_shim() {
         local command_name="$1" body="$2"
@@ -1619,130 +1655,195 @@ test_source_archive_policy() {
             [[ -z "$system_command" ]]; then
             return 1
         fi
-        printf '%s\n' \
+        if ! printf '%s\n' \
             '#!/usr/bin/env bash' \
             'set -euo pipefail' \
             "$body" \
-            'exec "$GRAITH_TEST_SYSTEM_COMMAND" "$@"' >"$shim_dir/$command_name"
-        chmod 700 "$shim_dir/$command_name"
-        printf '%s\n' "$system_command"
+            'exec "$GRAITH_TEST_SYSTEM_COMMAND" "$@"' >"$shim_dir/$command_name" ||
+            ! chmod 700 "$shim_dir/$command_name" ||
+            ! printf '%s\n' "$system_command"; then
+            return 1
+        fi
     }
     clear_shims() {
-        find "$shim_dir" -mindepth 1 -maxdepth 1 -type f -delete
+        if ! find "$shim_dir" -mindepth 1 -maxdepth 1 -type f -delete; then
+            return 1
+        fi
     }
 
-    local failure output command_name
-    for command_name in dirname basename realpath stat sha256sum od mktemp cp; do
-        clear_shims
-        if ! system_command="$(make_failure_shim "$command_name")"; then return 1; fi
-        output="$output_root/snapshot-$command_name.a"
-        if GRAITH_TEST_SYSTEM_COMMAND="$system_command" PATH="$shim_dir:$original_path" \
-            snapshot_zig_build_archive "$published" "$output" \
-            "$source_root" "$local_cache" "$global_cache" >/dev/null 2>&1; then
-            die "snapshot accepted injected $command_name failure"
+    local failure output command_name archive_index archive_form archive_published
+    local archive_snapshot
+    for archive_index in "${!archive_forms[@]}"; do
+        archive_form="${archive_forms[$archive_index]}"
+        archive_published="${published_archives[$archive_index]}"
+        for command_name in dirname basename realpath stat sha256sum od mktemp cp; do
+            if ! clear_shims; then return 1; fi
+            if ! system_command="$(make_failure_shim "$command_name")"; then return 1; fi
+            output="$output_root/snapshot-$archive_form-$command_name.a"
+            if GRAITH_TEST_SYSTEM_COMMAND="$system_command" PATH="$shim_dir:$original_path" \
+                snapshot_zig_build_archive "$archive_published" "$output" \
+                "$source_root" "$local_cache" "$global_cache" >/dev/null 2>&1; then
+                die "$archive_form snapshot accepted injected $command_name failure"
+                return 1
+            fi
+            assert_source_archive_failure_clean "$output" "$root" || return 1
+        done
+
+        if ! clear_shims; then return 1; fi
+        if ! system_command="$(make_delegating_shim stat \
+            'last="${!#}"; if [[ "$last" == "$GRAITH_TEST_FAIL_PATH" ]]; then exit 1; fi')"; then
             return 1
         fi
-        assert_source_archive_failure_clean "$output" "$root" || return 1
-    done
-
-    clear_shims
-    system_command="$(make_delegating_shim stat \
-        'last="${!#}"; if [[ "$last" == "$GRAITH_TEST_FAIL_PATH" ]]; then exit 1; fi')"
-    output="$output_root/snapshot-post-publish.a"
-    if GRAITH_TEST_FAIL_PATH="$output" GRAITH_TEST_SYSTEM_COMMAND="$system_command" \
-        PATH="$shim_dir:$original_path" snapshot_zig_build_archive \
-        "$published" "$output" "$source_root" "$local_cache" "$global_cache" \
-        >/dev/null 2>&1; then
-        die "snapshot retained output after a post-publication stat failure"
-        return 1
-    fi
-    assert_source_archive_failure_clean "$output" "$root" || return 1
-
-    for failure in fail noop move_then_fail; do
-        clear_shims
-        case "$failure" in
-            fail) system_command="$(make_failure_shim mv)" ;;
-            noop)
-                system_command="$(make_delegating_shim mv 'exit 0')"
-                ;;
-            move_then_fail)
-                system_command="$(make_delegating_shim mv \
-                    '"$GRAITH_TEST_SYSTEM_COMMAND" "$@"; exit 1')"
-                ;;
-        esac
-        output="$output_root/snapshot-mv-$failure.a"
-        if GRAITH_TEST_SYSTEM_COMMAND="$system_command" PATH="$shim_dir:$original_path" \
-            snapshot_zig_build_archive "$published" "$output" \
-            "$source_root" "$local_cache" "$global_cache" >/dev/null 2>&1; then
-            die "snapshot accepted injected final move $failure"
-            return 1
-        fi
-        assert_source_archive_failure_clean "$output" "$root" || return 1
-    done
-
-    for command_name in file mktemp cp; do
-        clear_shims
-        system_command="$(make_failure_shim "$command_name")"
-        output="$output_root/materialize-$command_name.a"
-        if GRAITH_TEST_SYSTEM_COMMAND="$system_command" PATH="$shim_dir:$original_path" \
-            materialize_static_archive "$snapshot" "$output" \
-            "$source_root" "$local_cache" "$global_cache" >/dev/null 2>&1; then
-            die "materializer accepted injected $command_name failure"
-            return 1
-        fi
-        assert_source_archive_failure_clean "$output" "$root" || return 1
-    done
-
-    for failure in t rcsD p; do
-        clear_shims
-        system_command="$(make_delegating_shim zig \
-            'if [[ "${1:-}" == "ar" && "${2:-}" == "$GRAITH_TEST_ZIG_OPERATION" ]]; then exit 1; fi')"
-        output="$output_root/materialize-zig-$failure.a"
-        if GRAITH_TEST_ZIG_OPERATION="$failure" GRAITH_TEST_SYSTEM_COMMAND="$system_command" \
-            PATH="$shim_dir:$original_path" materialize_static_archive "$snapshot" \
-            "$output" "$source_root" "$local_cache" "$global_cache" \
+        output="$output_root/snapshot-$archive_form-post-publish.a"
+        if GRAITH_TEST_FAIL_PATH="$output" GRAITH_TEST_SYSTEM_COMMAND="$system_command" \
+            PATH="$shim_dir:$original_path" snapshot_zig_build_archive \
+            "$archive_published" "$output" "$source_root" "$local_cache" "$global_cache" \
             >/dev/null 2>&1; then
-            die "materializer accepted injected Zig ar $failure failure"
+            die "$archive_form snapshot retained output after a post-publication stat failure"
             return 1
         fi
         assert_source_archive_failure_clean "$output" "$root" || return 1
+
+        for failure in fail noop move_then_fail; do
+            if ! clear_shims; then return 1; fi
+            case "$failure" in
+                fail)
+                    if ! system_command="$(make_failure_shim mv)"; then return 1; fi
+                    ;;
+                noop)
+                    if ! system_command="$(make_delegating_shim mv 'exit 0')"; then return 1; fi
+                    ;;
+                move_then_fail)
+                    if ! system_command="$(make_delegating_shim mv \
+                        '"$GRAITH_TEST_SYSTEM_COMMAND" "$@"; exit 1')"; then
+                        return 1
+                    fi
+                    ;;
+            esac
+            output="$output_root/snapshot-$archive_form-mv-$failure.a"
+            if GRAITH_TEST_SYSTEM_COMMAND="$system_command" PATH="$shim_dir:$original_path" \
+                snapshot_zig_build_archive "$archive_published" "$output" \
+                "$source_root" "$local_cache" "$global_cache" >/dev/null 2>&1; then
+                die "$archive_form snapshot accepted injected final move $failure"
+                return 1
+            fi
+            assert_source_archive_failure_clean "$output" "$root" || return 1
+        done
     done
 
-    clear_shims
-    system_command="$(make_failure_shim nm)"
-    output="$output_root/materialize-verifier.a"
-    if GRAITH_TEST_SYSTEM_COMMAND="$system_command" PATH="$shim_dir:$original_path" \
-        materialize_static_archive "$snapshot" "$output" \
+    for archive_index in "${!archive_forms[@]}"; do
+        archive_form="${archive_forms[$archive_index]}"
+        archive_snapshot="${archive_snapshots[$archive_index]}"
+        for command_name in dirname basename realpath stat sha256sum od file mktemp; do
+            if ! clear_shims; then return 1; fi
+            if ! system_command="$(make_failure_shim "$command_name")"; then return 1; fi
+            output="$output_root/materialize-$archive_form-$command_name.a"
+            if GRAITH_TEST_SYSTEM_COMMAND="$system_command" PATH="$shim_dir:$original_path" \
+                materialize_static_archive "$archive_snapshot" "$output" \
+                "$source_root" "$local_cache" "$global_cache" >/dev/null 2>&1; then
+                die "$archive_form materializer accepted injected $command_name failure"
+                return 1
+            fi
+            assert_source_archive_failure_clean "$output" "$root" || return 1
+        done
+
+        # Only the thin branch copies external members; the regular branch
+        # extracts each member through the exact Zig archiver below.
+        if [[ "$archive_form" == "thin" ]]; then
+            if ! clear_shims; then return 1; fi
+            if ! system_command="$(make_failure_shim cp)"; then return 1; fi
+            output="$output_root/materialize-thin-cp.a"
+            if GRAITH_TEST_SYSTEM_COMMAND="$system_command" PATH="$shim_dir:$original_path" \
+                materialize_static_archive "$archive_snapshot" "$output" \
+                "$source_root" "$local_cache" "$global_cache" >/dev/null 2>&1; then
+                die "thin materializer accepted injected copy failure"
+                return 1
+            fi
+            assert_source_archive_failure_clean "$output" "$root" || return 1
+        fi
+
+        for failure in t rcsD p; do
+            if ! clear_shims; then return 1; fi
+            if ! system_command="$(make_delegating_shim zig \
+                'if [[ "${1:-}" == "ar" && "${2:-}" == "$GRAITH_TEST_ZIG_OPERATION" ]]; then exit 1; fi')"; then
+                return 1
+            fi
+            output="$output_root/materialize-$archive_form-zig-$failure.a"
+            if GRAITH_TEST_ZIG_OPERATION="$failure" GRAITH_TEST_SYSTEM_COMMAND="$system_command" \
+                PATH="$shim_dir:$original_path" materialize_static_archive \
+                "$archive_snapshot" "$output" "$source_root" "$local_cache" \
+                "$global_cache" >/dev/null 2>&1; then
+                die "$archive_form materializer accepted injected Zig ar $failure failure"
+                return 1
+            fi
+            assert_source_archive_failure_clean "$output" "$root" || return 1
+        done
+
+        if ! clear_shims; then return 1; fi
+        if ! system_command="$(make_failure_shim nm)"; then return 1; fi
+        output="$output_root/materialize-$archive_form-verifier.a"
+        if GRAITH_TEST_SYSTEM_COMMAND="$system_command" PATH="$shim_dir:$original_path" \
+            materialize_static_archive "$archive_snapshot" "$output" \
+            "$source_root" "$local_cache" "$global_cache" >/dev/null 2>&1; then
+            die "$archive_form materializer accepted injected final verifier failure"
+            return 1
+        fi
+        assert_source_archive_failure_clean "$output" "$root" || return 1
+
+        for failure in fail noop move_then_fail; do
+            if ! clear_shims; then return 1; fi
+            case "$failure" in
+                fail)
+                    if ! system_command="$(make_failure_shim mv)"; then return 1; fi
+                    ;;
+                noop)
+                    if ! system_command="$(make_delegating_shim mv 'exit 0')"; then return 1; fi
+                    ;;
+                move_then_fail)
+                    if ! system_command="$(make_delegating_shim mv \
+                        '"$GRAITH_TEST_SYSTEM_COMMAND" "$@"; exit 1')"; then
+                        return 1
+                    fi
+                    ;;
+            esac
+            output="$output_root/materialize-$archive_form-mv-$failure.a"
+            if GRAITH_TEST_SYSTEM_COMMAND="$system_command" PATH="$shim_dir:$original_path" \
+                materialize_static_archive "$archive_snapshot" "$output" \
+                "$source_root" "$local_cache" "$global_cache" >/dev/null 2>&1; then
+                die "$archive_form materializer accepted injected final move $failure"
+                return 1
+            fi
+            assert_source_archive_failure_clean "$output" "$root" || return 1
+        done
+    done
+
+    if ! clear_shims; then return 1; fi
+    if ! system_command="$(make_delegating_shim zig \
+        'if [[ "${1:-}" == "ar" && "${2:-}" == "rcsD" ]]; then
+            "$GRAITH_TEST_SYSTEM_COMMAND" "$@" || exit 1
+            staged_file=""
+            if ! staged_file="$(find "$GRAITH_TEST_STAGING_ROOT" -path "$GRAITH_TEST_STAGING_ROOT/regular-archive.*/abort.o" -type f -print -quit)" || [[ -z "$staged_file" ]]; then exit 1; fi
+            printf "changed\\n" >>"$staged_file" || exit 1
+            exit 0
+        fi')"; then
+        return 1
+    fi
+    output="$output_root/materialize-regular-staged-mutation.a"
+    if GRAITH_TEST_STAGING_ROOT="$NATIVE_WORK" \
+        GRAITH_TEST_SYSTEM_COMMAND="$system_command" PATH="$shim_dir:$original_path" \
+        materialize_static_archive "$regular_snapshot" "$output" \
         "$source_root" "$local_cache" "$global_cache" >/dev/null 2>&1; then
-        die "materializer accepted injected final verifier failure"
+        die "regular materializer accepted staged member mutation"
         return 1
     fi
     assert_source_archive_failure_clean "$output" "$root" || return 1
-
-    for failure in fail noop move_then_fail; do
-        clear_shims
-        case "$failure" in
-            fail) system_command="$(make_failure_shim mv)" ;;
-            noop) system_command="$(make_delegating_shim mv 'exit 0')" ;;
-            move_then_fail)
-                system_command="$(make_delegating_shim mv \
-                    '"$GRAITH_TEST_SYSTEM_COMMAND" "$@"; exit 1')"
-                ;;
-        esac
-        output="$output_root/materialize-mv-$failure.a"
-        if GRAITH_TEST_SYSTEM_COMMAND="$system_command" PATH="$shim_dir:$original_path" \
-            materialize_static_archive "$snapshot" "$output" \
-            "$source_root" "$local_cache" "$global_cache" >/dev/null 2>&1; then
-            die "materializer accepted injected final move $failure"
-            return 1
-        fi
-        assert_source_archive_failure_clean "$output" "$root" || return 1
-    done
 
     if ! rm -f "$NATIVE_WORK/pkgconfig/libghostty-vt-static.pc"; then return 1; fi
-    clear_shims
-    system_command="$(make_delegating_shim sha256sum \
-        'last="${!#}"; if [[ "$last" == "$GRAITH_TEST_FAIL_PATH" ]]; then exit 1; fi')"
+    if ! clear_shims; then return 1; fi
+    if ! system_command="$(make_delegating_shim sha256sum \
+        'last="${!#}"; if [[ "$last" == "$GRAITH_TEST_FAIL_PATH" ]]; then exit 1; fi')"; then
+        return 1
+    fi
     local pc="$NATIVE_WORK/pkgconfig/libghostty-vt-static.pc"
     if GRAITH_TEST_FAIL_PATH="$pc" GRAITH_TEST_SYSTEM_COMMAND="$system_command" \
         PATH="$shim_dir:$original_path" write_pkg_config "$regular" >/dev/null 2>&1; then
@@ -1756,13 +1857,19 @@ test_source_archive_policy() {
     assert_source_archive_failure_clean "$output_root/never-created.a" "$root" || return 1
 
     for failure in fail noop move_then_fail; do
-        clear_shims
+        if ! clear_shims; then return 1; fi
         case "$failure" in
-            fail) system_command="$(make_failure_shim mv)" ;;
-            noop) system_command="$(make_delegating_shim mv 'exit 0')" ;;
+            fail)
+                if ! system_command="$(make_failure_shim mv)"; then return 1; fi
+                ;;
+            noop)
+                if ! system_command="$(make_delegating_shim mv 'exit 0')"; then return 1; fi
+                ;;
             move_then_fail)
-                system_command="$(make_delegating_shim mv \
-                    '"$GRAITH_TEST_SYSTEM_COMMAND" "$@"; exit 1')"
+                if ! system_command="$(make_delegating_shim mv \
+                    '"$GRAITH_TEST_SYSTEM_COMMAND" "$@"; exit 1')"; then
+                    return 1
+                fi
                 ;;
         esac
         if GRAITH_TEST_SYSTEM_COMMAND="$system_command" PATH="$shim_dir:$original_path" \
@@ -1778,44 +1885,61 @@ test_source_archive_policy() {
             "$output_root/never-created.a" "$root" || return 1
     done
 
-    clear_shims
-    system_command="$(make_delegating_shim stat \
-        'last="${!#}"; if [[ "$last" == "$GRAITH_TEST_FAIL_PATH"* ]]; then printf "0\n"; exit 0; fi')"
-    output="$output_root/finalizer-private-dir.a"
-    if GRAITH_TEST_FAIL_PATH="$NATIVE_WORK/source-archive." \
-        GRAITH_TEST_SYSTEM_COMMAND="$system_command" PATH="$shim_dir:$original_path" \
-        finalize_source_build_archive "$published" "$output" "$source_root" \
-        "$local_cache" "$global_cache" >/dev/null 2>&1; then
-        die "finalizer accepted invalid private-directory evidence"
+    if ! clear_shims; then return 1; fi
+    if ! system_command="$(make_delegating_shim stat \
+        'last="${!#}"; if [[ "$last" == "$GRAITH_TEST_FAIL_PATH"* ]]; then printf "0\n"; exit 0; fi')"; then
         return 1
     fi
-    assert_source_archive_failure_clean "$output" "$root" || return 1
+    for archive_index in "${!archive_forms[@]}"; do
+        archive_form="${archive_forms[$archive_index]}"
+        archive_published="${published_archives[$archive_index]}"
+        output="$output_root/finalizer-$archive_form-private-dir.a"
+        if GRAITH_TEST_FAIL_PATH="$NATIVE_WORK/source-archive." \
+            GRAITH_TEST_SYSTEM_COMMAND="$system_command" PATH="$shim_dir:$original_path" \
+            finalize_source_build_archive "$archive_published" "$output" "$source_root" \
+            "$local_cache" "$global_cache" >/dev/null 2>&1; then
+            die "$archive_form finalizer accepted invalid private-directory evidence"
+            return 1
+        fi
+        assert_source_archive_failure_clean "$output" "$root" || return 1
+    done
 
-    clear_shims
-    system_command="$(make_delegating_shim sha256sum \
-        'last="${!#}"; if [[ "$last" == "$GRAITH_TEST_FAIL_PATH" && -f "$GRAITH_TEST_PC" ]]; then exit 1; fi')"
-    output="$output_root/finalizer-after-pc.a"
-    if GRAITH_TEST_FAIL_PATH="$output" GRAITH_TEST_PC="$pc" \
-        GRAITH_TEST_SYSTEM_COMMAND="$system_command" PATH="$shim_dir:$original_path" \
-        finalize_source_build_archive "$published" "$output" "$source_root" \
-        "$local_cache" "$global_cache" >/dev/null 2>&1; then
-        die "finalizer accepted failure after pkg-config publication"
+    if ! clear_shims; then return 1; fi
+    if ! system_command="$(make_delegating_shim sha256sum \
+        'last="${!#}"; if [[ "$last" == "$GRAITH_TEST_FAIL_PATH" && -f "$GRAITH_TEST_PC" ]]; then exit 1; fi')"; then
         return 1
     fi
-    [[ ! -e "$pc" && ! -L "$pc" ]] || {
-        die "finalizer retained pkg-config metadata after later failure"
-        return 1
-    }
-    assert_source_archive_failure_clean "$output" "$root" || return 1
+    for archive_index in "${!archive_forms[@]}"; do
+        archive_form="${archive_forms[$archive_index]}"
+        archive_published="${published_archives[$archive_index]}"
+        output="$output_root/finalizer-$archive_form-after-pc.a"
+        if GRAITH_TEST_FAIL_PATH="$output" GRAITH_TEST_PC="$pc" \
+            GRAITH_TEST_SYSTEM_COMMAND="$system_command" PATH="$shim_dir:$original_path" \
+            finalize_source_build_archive "$archive_published" "$output" "$source_root" \
+            "$local_cache" "$global_cache" >/dev/null 2>&1; then
+            die "$archive_form finalizer accepted failure after pkg-config publication"
+            return 1
+        fi
+        [[ ! -e "$pc" && ! -L "$pc" ]] || {
+            die "$archive_form finalizer retained pkg-config metadata after later failure"
+            return 1
+        }
+        assert_source_archive_failure_clean "$output" "$root" || return 1
+    done
 
-    clear_shims
-    printf '%s\n' \
+    if ! clear_shims; then return 1; fi
+    if ! printf '%s\n' \
         'void *ghostty_terminal_new(void);' \
         'int main(void) { return ghostty_terminal_new() == 0 ? 0 : 1; }' \
-        >"$source_root/link.c"
+        >"$source_root/link.c"; then
+        return 1
+    fi
     if ! mv "$local_cache" "$root/removed-zig-local"; then return 1; fi
     if cc -o "$output_root/linked" "$source_root/link.c" "$regular"; then
-        "$output_root/linked"
+        if ! "$output_root/linked"; then
+            die "materialized archive link test failed at runtime"
+            return 1
+        fi
     else
         die "materialized archive did not link after deleting thin members"
         return 1
