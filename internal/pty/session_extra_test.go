@@ -207,7 +207,7 @@ func envMap(env []string) map[string]string {
 }
 
 func TestBuildEnvSetsTERM(t *testing.T) {
-	env := envMap(buildEnv(nil))
+	env := envMap(buildEnv(nil, nil))
 	if got := env["TERM"]; got != "xterm-256color" {
 		t.Errorf("TERM = %q, want xterm-256color", got)
 	}
@@ -219,7 +219,7 @@ func TestBuildEnvOverridesParent(t *testing.T) {
 
 	env := envMap(buildEnv(map[string]string{
 		"GRAITH_TEST_VAR": "braw",
-	}))
+	}, nil))
 
 	if got := env["TERM"]; got != "xterm-256color" {
 		t.Errorf("TERM = %q, want xterm-256color (should override parent)", got)
@@ -233,7 +233,7 @@ func TestBuildEnvOverridesParent(t *testing.T) {
 func TestBuildEnvExtraOverridesTERM(t *testing.T) {
 	env := envMap(buildEnv(map[string]string{
 		"TERM": "screen",
-	}))
+	}, nil))
 	if got := env["TERM"]; got != "screen" {
 		t.Errorf("TERM = %q, want screen (extra should override default)", got)
 	}
@@ -242,7 +242,7 @@ func TestBuildEnvExtraOverridesTERM(t *testing.T) {
 func TestBuildEnvPreservesParentVars(t *testing.T) {
 	t.Setenv("GRAITH_PASSTHROUGH", "bide-wi-me")
 
-	env := envMap(buildEnv(nil))
+	env := envMap(buildEnv(nil, nil))
 	if got := env["GRAITH_PASSTHROUGH"]; got != "bide-wi-me" {
 		t.Errorf("GRAITH_PASSTHROUGH = %q, want bide-wi-me (parent vars should be preserved)", got)
 	}
@@ -255,7 +255,7 @@ func TestBuildEnvNoDuplicateKeys(t *testing.T) {
 	env := buildEnv(map[string]string{
 		"TERM":              "screen",
 		"GRAITH_SESSION_ID": "braw-id",
-	})
+	}, nil)
 
 	for _, key := range []string{"TERM", "GRAITH_SESSION_ID"} {
 		count := 0
@@ -269,6 +269,37 @@ func TestBuildEnvNoDuplicateKeys(t *testing.T) {
 		if count != 1 {
 			t.Errorf("found %d %s entries, want exactly 1", count, key)
 		}
+	}
+}
+
+func TestBuildEnvFiltersDeniedInheritedPrefixes(t *testing.T) {
+	t.Setenv("GRAITH_MCP_AULD_TOKEN", "parent-secret")
+	t.Setenv("GRAITH_PASSTHROUGH", "bide-wi-me")
+	if got := envMap(buildEnv(nil, nil))["GRAITH_MCP_AULD_TOKEN"]; got != "parent-secret" {
+		t.Fatalf("raw PTY inheritance changed: MCP alias = %q, want parent-secret", got)
+	}
+
+	env := envMap(buildEnv(map[string]string{
+		"GRAITH_MCP_BRAW_TOKEN": "launch-secret",
+	}, []string{"GRAITH_MCP_"}))
+
+	if _, ok := env["GRAITH_MCP_AULD_TOKEN"]; ok {
+		t.Error("denied inherited MCP alias survived")
+	}
+	if got := env["GRAITH_MCP_BRAW_TOKEN"]; got != "launch-secret" {
+		t.Errorf("explicit MCP alias = %q, want launch-secret", got)
+	}
+	if got := env["GRAITH_PASSTHROUGH"]; got != "bide-wi-me" {
+		t.Errorf("unrelated inherited variable = %q, want bide-wi-me", got)
+	}
+}
+
+func TestBuildEnvIgnoresEmptyDenyPrefix(t *testing.T) {
+	t.Setenv("GRAITH_PASSTHROUGH", "bide-wi-me")
+
+	env := envMap(buildEnv(nil, []string{""}))
+	if got := env["GRAITH_PASSTHROUGH"]; got != "bide-wi-me" {
+		t.Errorf("empty deny prefix filtered parent environment: got %q", got)
 	}
 }
 

@@ -57,6 +57,7 @@ var rootCmd = &cobra.Command{
 	SilenceUsage:  true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		commandPolicyStartupError = nil
+		mcpProxyInvocation := cmd == mcpProxyCmd
 
 		if agentMode {
 			if err := os.Setenv("GR_AGENT_MODE", "1"); err != nil {
@@ -64,13 +65,17 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
-		if err := rejectConfigInsideSession(cmd); err != nil {
-			return err
+		if !mcpProxyInvocation {
+			if err := rejectConfigInsideSession(cmd); err != nil {
+				return err
+			}
+		} else if cmd.Flags().Changed("config") {
+			return errors.New("--config is not supported by mcp-proxy")
 		}
 
 		var err error
 
-		if cmd == mcpProxyCmd {
+		if mcpProxyInvocation {
 			// The managed proxy's explicitly named aliases are its complete
 			// bootstrap context. Do not load configuration or resolve paths from
 			// canonical GRAITH_* variables: Codex deep-merges lower-layer literal
@@ -160,7 +165,7 @@ var rootCmd = &cobra.Command{
 			SummaryWidth:    cfg.Terminal.SummaryWidthValue(),
 		})
 
-		if !jsonOutput && (agentMode || agent.Detected()) {
+		if !jsonOutput && (agentMode || (!mcpProxyInvocation && agent.Detected())) {
 			jsonOutput = true
 		}
 

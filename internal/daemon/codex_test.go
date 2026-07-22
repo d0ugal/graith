@@ -269,6 +269,10 @@ func TestCodexMCPProxyEnvAliasesAcrossLifecycle(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("/bin/sh not available")
 	}
+	t.Setenv("GRAITH_MCP_FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF_TOKEN", "stale-parent-token")
+	t.Setenv("GRAITH_MCP_FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF_PROFILE", "stale-parent-profile")
+	t.Setenv("GRAITH_MCP_UNRELATED", "stale-parent-context")
+	t.Setenv("GRAITH_INHERITED_CONTEXT", "bide-wi-me")
 
 	repoDir := initTempGitRepo(t)
 	sm, recordPath := newCodexRecorderManager(t, repoDir)
@@ -363,8 +367,14 @@ func waitForCodexMCPProxyEnvOverride(t *testing.T, sm *SessionManager, sessionID
 	env := make(map[string]string, len(ptySession.Cmd.Env))
 	for _, entry := range ptySession.Cmd.Env {
 		if name, value, ok := strings.Cut(entry, "="); ok {
+			if _, duplicate := env[name]; duplicate {
+				t.Fatalf("session %q environment contains duplicate key %q", sessionID, name)
+			}
 			env[name] = value
 		}
+	}
+	if got := env["GRAITH_INHERITED_CONTEXT"]; got != "bide-wi-me" {
+		t.Fatalf("session %q unrelated inherited context = %q, want bide-wi-me", sessionID, got)
 	}
 
 	wantValues := []string{sessionID, env["GRAITH_TOKEN"], sm.paths.Profile, sm.paths.SocketPath}

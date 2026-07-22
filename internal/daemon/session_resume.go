@@ -930,17 +930,18 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	lc := sm.Config().Lifecycle
 
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
-		ID:         id,
-		Command:    command,
-		Args:       finalArgs,
-		Dir:        ptyCWD,
-		Env:        env,
-		Rows:       rows,
-		Cols:       cols,
-		LogPath:    logPath,
-		MaxLogSize: lc.MaxLogBytesOrDefault(),
-		InputDelay: lc.InputDelayDuration(),
-		Logger:     sm.log,
+		ID:                       id,
+		Command:                  command,
+		Args:                     finalArgs,
+		Dir:                      ptyCWD,
+		Env:                      env,
+		InheritedEnvDenyPrefixes: managedAgentInheritedEnvDenyPrefixes(),
+		Rows:                     rows,
+		Cols:                     cols,
+		LogPath:                  logPath,
+		MaxLogSize:               lc.MaxLogBytesOrDefault(),
+		InputDelay:               lc.InputDelayDuration(),
+		Logger:                   sm.log,
 	})
 	if err != nil {
 		slot.release()

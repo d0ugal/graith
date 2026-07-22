@@ -268,17 +268,18 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	lc := sm.Config().Lifecycle
 
 	ptySess, err := grpty.NewSession(grpty.SessionOpts{
-		ID:         id,
-		Command:    command,
-		Args:       finalArgs,
-		Dir:        scratchDir,
-		Env:        env,
-		Rows:       lc.DefaultRowsOrDefault(),
-		Cols:       lc.DefaultColsOrDefault(),
-		LogPath:    logPath,
-		MaxLogSize: lc.MaxLogBytesOrDefault(),
-		InputDelay: lc.InputDelayDuration(),
-		Logger:     sm.log,
+		ID:                       id,
+		Command:                  command,
+		Args:                     finalArgs,
+		Dir:                      scratchDir,
+		Env:                      env,
+		InheritedEnvDenyPrefixes: managedAgentInheritedEnvDenyPrefixes(),
+		Rows:                     lc.DefaultRowsOrDefault(),
+		Cols:                     lc.DefaultColsOrDefault(),
+		LogPath:                  logPath,
+		MaxLogSize:               lc.MaxLogBytesOrDefault(),
+		InputDelay:               lc.InputDelayDuration(),
+		Logger:                   sm.log,
 	})
 	if err != nil {
 		sm.rollbackOrchestratorCreate(id)

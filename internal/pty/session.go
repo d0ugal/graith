@@ -122,14 +122,18 @@ type Session struct {
 }
 
 type SessionOpts struct {
-	ID         string
-	Command    string
-	Args       []string
-	Dir        string
-	Env        map[string]string
-	Rows, Cols uint16
-	LogPath    string
-	MaxLogSize int64
+	ID      string
+	Command string
+	Args    []string
+	Dir     string
+	Env     map[string]string
+	// InheritedEnvDenyPrefixes excludes matching variables from the parent
+	// process environment. Explicit Env entries remain authoritative even when
+	// they match a denied prefix.
+	InheritedEnvDenyPrefixes []string
+	Rows, Cols               uint16
+	LogPath                  string
+	MaxLogSize               int64
 	// InputDelay is the pause WriteInputAndSubmit inserts between the typed text
 	// and the submit carriage return. Non-positive falls back to typeInputDelay,
 	// the built-in default (the daemon passes the [lifecycle] input_delay policy).
@@ -153,7 +157,7 @@ func newSessionWithTerminalFactory(
 
 	cmd := exec.Command(opts.Command, opts.Args...)
 	cmd.Dir = opts.Dir
-	cmd.Env = buildEnv(opts.Env)
+	cmd.Env = buildEnv(opts.Env, opts.InheritedEnvDenyPrefixes)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid: true,
 	}
@@ -1788,7 +1792,7 @@ func (s *Session) Close() {
 	})
 }
 
-func buildEnv(extra map[string]string) []string {
+func buildEnv(extra map[string]string, inheritedEnvDenyPrefixes []string) []string {
 	overrides := make(map[string]string, len(extra)+1)
 
 	overrides["TERM"] = "xterm-256color"
@@ -1808,10 +1812,23 @@ func buildEnv(extra map[string]string) []string {
 			if _, overridden := overrides[k]; overridden {
 				continue
 			}
+			if hasAnyPrefix(k, inheritedEnvDenyPrefixes) {
+				continue
+			}
 		}
 
 		env = append(env, e)
 	}
 
 	return env
+}
+
+func hasAnyPrefix(value string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if prefix != "" && strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+
+	return false
 }

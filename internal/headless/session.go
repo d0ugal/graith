@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -32,13 +33,17 @@ const defaultControlTimeout = 30 * time.Second
 // Opts configures a headless session launch. It mirrors the fields
 // pty.SessionOpts needs, plus the initial prompt.
 type Opts struct {
-	ID         string
-	Command    string
-	Args       []string
-	Dir        string
-	Env        map[string]string
-	LogPath    string
-	MaxLogSize int64
+	ID      string
+	Command string
+	Args    []string
+	Dir     string
+	Env     map[string]string
+	// InheritedEnvDenyPrefixes excludes matching variables from the parent
+	// process environment. Explicit Env entries remain authoritative even when
+	// they match a denied prefix.
+	InheritedEnvDenyPrefixes []string
+	LogPath                  string
+	MaxLogSize               int64
 
 	// Processing limits (issue #1250). Each is optional: a zero/non-positive
 	// value falls back to the matching package default, so direct callers and
@@ -123,7 +128,7 @@ type Session struct {
 func New(opts Opts) (*Session, error) {
 	cmd := exec.Command(opts.Command, opts.Args...)
 	cmd.Dir = opts.Dir
-	cmd.Env = buildEnv(opts.Env)
+	cmd.Env = buildEnv(opts.Env, opts.InheritedEnvDenyPrefixes)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	// Track pipes/scrollback acquired so far so any pre-start failure closes
@@ -833,13 +838,31 @@ func (s *Session) waitLoop() {
 }
 
 // buildEnv mirrors pty.buildEnv: overlay the extra vars on the parent env.
-func buildEnv(extra map[string]string) []string {
-	env := os.Environ()
+func buildEnv(extra map[string]string, inheritedEnvDenyPrefixes []string) []string {
+	parent := os.Environ()
+	env := make([]string, 0, len(parent)+len(extra))
+	for _, entry := range parent {
+		name, _, ok := strings.Cut(entry, "=")
+		if ok && hasAnyPrefix(name, inheritedEnvDenyPrefixes) {
+			continue
+		}
+		env = append(env, entry)
+	}
 	for k, v := range extra {
 		env = append(env, k+"="+v)
 	}
 
 	return env
+}
+
+func hasAnyPrefix(value string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if prefix != "" && strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func intOr(p *int) int {

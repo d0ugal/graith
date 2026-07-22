@@ -117,6 +117,12 @@ server plus your global and per-agent servers — pointing each at
   warning), since an un-representable name would stop it starting. Ordinary names
   and the `graith` server are fine; Claude has no such restriction.
 
+For every managed agent launch, graith removes reserved `GRAITH_MCP_*` aliases
+inherited from the daemon process before applying the launch's explicit
+environment. A daemon started from inside another agent session therefore
+cannot forward stale proxy credentials. This filter applies only to managed
+agent launches; unrelated inherited variables are unaffected.
+
 Agents without MCP injection support (e.g. `cursor`, `opencode`) don't receive
 them automatically.
 

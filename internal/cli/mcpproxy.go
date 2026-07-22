@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -117,18 +118,19 @@ func runMCPProxy(serverName string, identity mcpProxyIdentity) error {
 	for {
 		start := time.Now()
 
-		err := mcpProxySession(serverName, identity.sessionID, identity.token, proxyPaths, stdinCh)
+		err := mcpProxySession(serverName, identity, proxyPaths, stdinCh)
 		if err == nil {
 			return nil
 		}
 
 		if isPermanentError(err) {
-			return err
+			return errors.New(redactMCPProxyDiagnostic(err.Error(), identity))
 		}
 
 		// Emit JSON-RPC error so agents don't hang waiting for a response.
 		writeJSONRPCError(os.Stdout, nil, -32603, fmt.Sprintf("MCP server %q temporarily unavailable", serverName))
-		fmt.Fprintf(os.Stderr, "mcp-proxy: connection lost: %v, reconnecting in %s\n", err, backoff)
+		safeDiagnostic := redactMCPProxyDiagnostic(err.Error(), identity)
+		fmt.Fprintf(os.Stderr, "mcp-proxy: connection lost: %s, reconnecting in %s\n", safeDiagnostic, backoff)
 
 		time.Sleep(backoff)
 
@@ -141,6 +143,19 @@ func runMCPProxy(serverName string, identity mcpProxyIdentity) error {
 			}
 		}
 	}
+}
+
+func redactMCPProxyDiagnostic(message string, identity mcpProxyIdentity) string {
+	values := []string{identity.sessionID, identity.token, identity.profile, identity.socketPath}
+	sort.Slice(values, func(i, j int) bool { return len(values[i]) > len(values[j]) })
+
+	for _, value := range values {
+		if value != "" {
+			message = strings.ReplaceAll(message, value, "[redacted]")
+		}
+	}
+
+	return message
 }
 
 func isPermanentError(err error) bool {
@@ -168,11 +183,11 @@ func mcpProxyConnectionPaths(base config.Paths, profile, socketPath string) (con
 	return base, nil
 }
 
-func mcpProxySession(serverName, sessionID, token string, proxyPaths config.Paths, stdinCh <-chan stdinChunk) error {
+func mcpProxySession(serverName string, identity mcpProxyIdentity, proxyPaths config.Paths, stdinCh <-chan stdinChunk) error {
 	// A proxy is owned by an already-running daemon. Never auto-start a daemon
 	// from this credential-bearing helper: on restart the outer retry loop waits
 	// for the exact socket to return.
-	c, err := client.ConnectExistingWithToken(cfg, proxyPaths, token)
+	c, err := client.ConnectExistingWithToken(cfg, proxyPaths, identity.token)
 	if err != nil {
 		return fmt.Errorf("connect to daemon: %w", err)
 	}
@@ -180,7 +195,7 @@ func mcpProxySession(serverName, sessionID, token string, proxyPaths config.Path
 
 	if err := c.SendControl("mcp_connect", protocol.MCPConnectMsg{
 		Server:    serverName,
-		SessionID: sessionID,
+		SessionID: identity.sessionID,
 	}); err != nil {
 		return fmt.Errorf("send mcp_connect: %w", err)
 	}
@@ -194,9 +209,14 @@ func mcpProxySession(serverName, sessionID, token string, proxyPaths config.Path
 		var e protocol.ErrorMsg
 
 		_ = protocol.DecodePayload(resp, &e)
-		writeJSONRPCError(os.Stdout, nil, -32603, fmt.Sprintf("MCP server %q: %s", serverName, e.Message))
+		safeMessage := redactMCPProxyDiagnostic(e.Message, identity)
+		writeJSONRPCError(os.Stdout, nil, -32603, fmt.Sprintf("MCP server %q: %s", serverName, safeMessage))
 
-		return fmt.Errorf("%s", e.Message)
+		// Keep the raw message in-process until runMCPProxy has classified it as
+		// permanent or transient. That avoids a profile or session value which is
+		// also an ordinary word changing the classification during redaction. The
+		// outer boundary redacts it before returning or logging it.
+		return errors.New(e.Message)
 	}
 
 	if resp.Type != "mcp_connect_ok" {

@@ -34,6 +34,12 @@ four-alias set and never falls back to canonical `GRAITH_*` variables or a human
 token. Graith also forces this credential-bearing proxy to execute in Codex's
 local environment.
 
+Before every managed agent launch, graith removes any reserved
+`GRAITH_MCP_*` aliases inherited from the daemon process, then applies the
+authoritative environment for that launch. This prevents a daemon started from
+inside an older agent session from forwarding stale identity credentials;
+unrelated inherited variables and the fresh four-alias set are preserved.
+
 No configuration needed. Existing sessions receive tokens when the daemon upgrades to an auth-supporting version (state migration v9 to v10).
 
 ## Authorization rules
@@ -127,7 +133,7 @@ $ gr doctor
 
 ## Environment variables
 
-The daemon sets these in every agent process:
+The daemon sets these in managed agent processes as applicable:
 
 | Variable | Description |
 |----------|-------------|
@@ -137,5 +143,7 @@ The daemon sets these in every agent process:
 | `GRAITH_AGENT_TYPE` | Agent type (e.g. `claude`, `codex`) |
 | `GRAITH_WORKTREE_PATH` | Absolute path to the session worktree |
 | `GRAITH_REPO_PATH` | Absolute path to the source repository |
+| `GRAITH_PROFILE` | Daemon profile selected for the session; empty for the default profile |
+| `GRAITH_SOCKET_PATH` | Exact Unix socket path for the daemon that owns the session |
 
 The `gr` CLI reads `GRAITH_TOKEN` automatically; agents and tools using `gr` needn't handle it.

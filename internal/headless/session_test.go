@@ -68,6 +68,53 @@ func waitDone(t *testing.T, s *Session, d time.Duration) {
 	}
 }
 
+func TestBuildEnvFiltersDeniedInheritedPrefixes(t *testing.T) {
+	t.Setenv("GRAITH_MCP_AULD_TOKEN", "parent-secret")
+	t.Setenv("GRAITH_PASSTHROUGH", "bide-wi-me")
+	rawInherited := false
+	for _, entry := range buildEnv(nil, nil) {
+		if entry == "GRAITH_MCP_AULD_TOKEN=parent-secret" {
+			rawInherited = true
+			break
+		}
+	}
+	if !rawInherited {
+		t.Fatal("raw headless inheritance dropped MCP alias")
+	}
+
+	env := buildEnv(map[string]string{
+		"GRAITH_MCP_BRAW_TOKEN": "launch-secret",
+	}, []string{"GRAITH_MCP_"})
+
+	values := make(map[string]string, len(env))
+	for _, entry := range env {
+		if name, value, ok := strings.Cut(entry, "="); ok {
+			values[name] = value
+		}
+	}
+
+	if _, ok := values["GRAITH_MCP_AULD_TOKEN"]; ok {
+		t.Error("denied inherited MCP alias survived")
+	}
+	if got := values["GRAITH_MCP_BRAW_TOKEN"]; got != "launch-secret" {
+		t.Errorf("explicit MCP alias = %q, want launch-secret", got)
+	}
+	if got := values["GRAITH_PASSTHROUGH"]; got != "bide-wi-me" {
+		t.Errorf("unrelated inherited variable = %q, want bide-wi-me", got)
+	}
+}
+
+func TestBuildEnvIgnoresEmptyDenyPrefix(t *testing.T) {
+	t.Setenv("GRAITH_PASSTHROUGH", "bide-wi-me")
+
+	for _, entry := range buildEnv(nil, []string{""}) {
+		if entry == "GRAITH_PASSTHROUGH=bide-wi-me" {
+			return
+		}
+	}
+	t.Fatal("empty deny prefix filtered parent environment")
+}
+
 // --- unit tests on the state helpers ----------------------------------------
 
 func TestSetStatusKeepsToolName(t *testing.T) {

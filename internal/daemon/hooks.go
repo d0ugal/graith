@@ -354,6 +354,10 @@ const (
 	mcpProxyIdentityEntropyBytes = 16
 )
 
+func managedAgentInheritedEnvDenyPrefixes() []string {
+	return []string{mcpProxyIdentityEnvPrefix}
+}
+
 type mcpProxyIdentityEnv struct {
 	SessionID  string
 	Token      string

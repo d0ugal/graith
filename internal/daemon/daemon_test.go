@@ -4548,6 +4548,7 @@ func newClaudeRecorderManager(t *testing.T, repoDir string) (*SessionManager, st
 		DataDir:    dir,
 		LogDir:     dir,
 		RuntimeDir: dir,
+		SocketPath: filepath.Join(dir, "graith.sock"),
 		TmpDir:     filepath.Join(dir, "tmp"),
 	}, slog.Default())
 	sm.sandboxResolver = func(string) (bool, error) { return false, nil }

@@ -194,6 +194,28 @@ func TestMCPProxyIdentityFromEnvFailsClosed(t *testing.T) {
 	}
 }
 
+func TestRedactMCPProxyDiagnosticPreservesOnlyNonIdentityContext(t *testing.T) {
+	identity := mcpProxyIdentity{
+		sessionID:  "canny-session",
+		token:      "dreich-secret-token",
+		profile:    "bothy-profile",
+		socketPath: "/private/canny/graith.sock",
+	}
+	message := "dial unix /private/canny/graith.sock for canny-session in bothy-profile using dreich-secret-token: connection refused"
+
+	got := redactMCPProxyDiagnostic(message, identity)
+	for _, value := range []string{identity.sessionID, identity.token, identity.profile, identity.socketPath} {
+		if strings.Contains(got, value) {
+			t.Fatalf("redacted diagnostic exposed identity value %q: %q", value, got)
+		}
+	}
+	for _, want := range []string{"dial unix", "connection refused"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("redaction removed useful diagnostic context %q: %q", want, got)
+		}
+	}
+}
+
 func TestMCPProxyPreRunUsesOnlyAliasedBootstrapContext(t *testing.T) {
 	names := testMCPProxyIdentityEnvNames()
 	socketPath := filepath.Join(t.TempDir(), "graith.sock")

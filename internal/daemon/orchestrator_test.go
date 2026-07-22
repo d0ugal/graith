@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -596,6 +597,64 @@ func TestCreateOrchestratorAllowsNativePromptAgent(t *testing.T) {
 
 	if id := sm.findOrchestratorID(); id != "" {
 		t.Fatalf("disabled orchestrator persisted session %q", id)
+	}
+}
+
+func TestCreateOrchestratorFiltersInheritedMCPAliases(t *testing.T) {
+	t.Setenv("GRAITH_MCP_FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF_TOKEN", "stale-parent-token")
+	t.Setenv("GRAITH_INHERITED_CONTEXT", "bide-wi-me")
+
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Orchestrator.Enabled = true
+	cfg.Sandbox.Enabled = false
+	agent := cfg.Agents["claude"]
+	agent.Command = "sh"
+	agent.Args = []string{"-c", "exec cat", "--"}
+	agent.NonInteractiveArgs = nil
+	cfg.Agents["claude"] = agent
+
+	sm := NewSessionManager(cfg, config.Paths{
+		StateFile:  filepath.Join(dir, "state.json"),
+		DataDir:    dir,
+		LogDir:     dir,
+		RuntimeDir: dir,
+		SocketPath: filepath.Join(dir, "graith.sock"),
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sm.sandboxResolver = func(string) (bool, error) { return false, nil }
+
+	created, err := sm.createOrchestrator(context.Background())
+	if err != nil {
+		t.Fatalf("createOrchestrator() error = %v", err)
+	}
+	t.Cleanup(func() { stopAndClosePTY(sm, created.ID) })
+
+	sm.mu.RLock()
+	driver := sm.sessions[created.ID]
+	sm.mu.RUnlock()
+	ptySession, ok := driver.(*grpty.Session)
+	if !ok {
+		t.Fatalf("orchestrator driver = %T, want *pty.Session", driver)
+	}
+
+	contextFound := false
+	for _, entry := range ptySession.Cmd.Env {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(name, mcpProxyIdentityEnvPrefix) {
+			t.Fatalf("orchestrator inherited reserved MCP alias %q", name)
+		}
+		if name == "GRAITH_INHERITED_CONTEXT" && value != "bide-wi-me" {
+			t.Fatalf("unrelated inherited context = %q, want bide-wi-me", value)
+		}
+		if name == "GRAITH_INHERITED_CONTEXT" {
+			contextFound = true
+		}
+	}
+	if !contextFound {
+		t.Fatal("orchestrator dropped unrelated inherited context")
 	}
 }
 
