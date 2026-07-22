@@ -18,7 +18,10 @@ import (
 	"time"
 )
 
-const preToolServerRemovalRevision = "3fdb037103f6f32ef9d35210a7d920d44d2d18b7"
+const (
+	preToolServerRemovalRevision = "3fdb037103f6f32ef9d35210a7d920d44d2d18b7"
+	exactRevisionFetchURL        = "https://github.com/d0ugal/graith.git"
+)
 
 // TestToolServerRemovalUpgradeFromExactMain exercises the real exec handoff from the
 // exact pre-removal main commit. It proves cleanup is performed by the old
@@ -233,6 +236,54 @@ func TestToolServerRemovalUpgradeFromExactMain(t *testing.T) {
 	}
 }
 
+func TestEnsureGitRevisionFromShallowRepository(t *testing.T) {
+	remote := t.TempDir()
+	runFixtureGit(t, remote, "init", "--initial-branch=main")
+	runFixtureGit(t, remote, "-c", "user.name=Graith Tests", "-c", "user.email=tests@graith.invalid", "commit", "--allow-empty", "-m", "braw")
+
+	wanted := runFixtureGit(t, remote, "rev-parse", "HEAD")
+	runFixtureGit(t, remote, "-c", "user.name=Graith Tests", "-c", "user.email=tests@graith.invalid", "commit", "--allow-empty", "-m", "canny")
+
+	cloneParent := t.TempDir()
+	shallow := filepath.Join(cloneParent, "shallow")
+	clone := exec.Command("git", "clone", "--depth=1", "file://"+remote, shallow)
+	if out, err := clone.CombinedOutput(); err != nil {
+		t.Fatalf("create shallow fixture repository: %v\n%s", err, out)
+	}
+
+	if _, err := resolveGitCommit(shallow, wanted); err == nil {
+		t.Fatalf("pinned commit %s unexpectedly present in shallow fixture", wanted)
+	}
+
+	if err := ensureGitRevision(shallow, "file://"+remote, wanted); err != nil {
+		t.Fatalf("fetch pinned commit into shallow fixture: %v", err)
+	}
+
+	resolved, err := resolveGitCommit(shallow, wanted)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resolved != wanted {
+		t.Fatalf("resolved commit = %s, want %s", resolved, wanted)
+	}
+
+	t.Run("identity mismatch", func(t *testing.T) {
+		err := ensureGitRevision(shallow, "file://"+remote, strings.ToUpper(wanted))
+		if err == nil || !strings.Contains(err.Error(), "exact revision resolved") {
+			t.Fatalf("identity mismatch error = %v", err)
+		}
+	})
+
+	t.Run("missing object", func(t *testing.T) {
+		missing := strings.Repeat("0", 40)
+		err := ensureGitRevision(shallow, "file://"+remote, missing)
+		if err == nil || !strings.Contains(err.Error(), "fetch exact revision "+missing) {
+			t.Fatalf("missing object error = %v", err)
+		}
+	})
+}
+
 func removalUpgradeConfig(recordPath, childPIDPath string, includeToolServer bool) string {
 	agentScript := `printf '%s\n' "$0" "$@" > "$GRAITH_ARGS_RECORD"; exec cat`
 
@@ -316,6 +367,10 @@ func integrationRepoRoot(t *testing.T) string {
 
 func buildRevisionBinary(t *testing.T, repoRoot, revision, name string) string {
 	t.Helper()
+	if err := ensureGitRevision(repoRoot, exactRevisionFetchURL, revision); err != nil {
+		t.Fatal(err)
+	}
+
 	parent := t.TempDir()
 	source := filepath.Join(parent, "source")
 	cmd := exec.Command("git", "worktree", "add", "--detach", source, revision)
@@ -332,6 +387,63 @@ func buildRevisionBinary(t *testing.T, repoRoot, revision, name string) string {
 	})
 
 	return buildGoBinary(t, source, filepath.Join(parent, name))
+}
+
+func ensureGitRevision(repoRoot, fetchURL, revision string) error {
+	resolved, err := resolveGitCommit(repoRoot, revision)
+	if err == nil {
+		if resolved != revision {
+			return fmt.Errorf("exact revision resolved to %s, want %s", resolved, revision)
+		}
+
+		return nil
+	}
+
+	// actions/checkout uses a shallow clone, so the pinned pre-removal commit
+	// may not be present. Fetch that exact object without changing the user's
+	// configured remotes or accepting a moving branch as the fixture source.
+	fetch := exec.Command("git", "fetch", "--no-tags", "--depth=1", fetchURL, revision)
+	fetch.Dir = repoRoot
+	if out, err := fetch.CombinedOutput(); err != nil {
+		return fmt.Errorf("fetch exact revision %s: %w\n%s", revision, err, out)
+	}
+
+	resolved, err = resolveGitCommit(repoRoot, revision)
+	if err != nil {
+		return fmt.Errorf("verify exact revision %s after fetch: %w", revision, err)
+	}
+
+	if resolved != revision {
+		return fmt.Errorf("fetched revision resolved to %s, want %s", resolved, revision)
+	}
+
+	return nil
+}
+
+func resolveGitCommit(repoRoot, revision string) (string, error) {
+	verify := exec.Command("git", "rev-parse", "--verify", revision+"^{commit}")
+	verify.Dir = repoRoot
+
+	out, err := verify.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("resolve commit: %w: %s", err, out)
+	}
+
+	return strings.TrimSpace(string(out)), nil
+}
+
+func runFixtureGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+
+	return strings.TrimSpace(string(out))
 }
 
 func buildCurrentBinary(t *testing.T, repoRoot, name string) string {
