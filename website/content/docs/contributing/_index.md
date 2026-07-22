@@ -281,7 +281,6 @@ internal/
   git/                   Git operations (fetch, worktree, branch)
   hookoutput/            Agent-specific hook response formatting
   integration/           Integration tests (build tag: integration)
-  mcp/                   MCP server implementation
   output/                Structured output helpers (text/JSON)
   protocol/              Wire protocol: framing, control messages, encoding
   pty/                   PTY session management, scrollback buffer

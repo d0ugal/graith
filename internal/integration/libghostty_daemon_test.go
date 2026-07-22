@@ -782,8 +782,8 @@ func (h *nativeDaemonHarness) tryConnect() (*nativeControlClient, error) {
 func (h *nativeDaemonHarness) connectNewGeneration(previous string) *nativeControlClient {
 	h.t.Helper()
 
-	// Upgrade acknowledgement precedes the daemon's bounded background, MCP,
-	// and session-I/O drains. Match the production client's protocol floor so
+	// Upgrade acknowledgement precedes the daemon's bounded background and
+	// session-I/O drains. Match the production client's protocol floor so
 	// the integration harness does not kill a valid transition after an ordinary
 	// per-request timeout.
 	deadline := time.Now().Add(nativeUpgradeTimeout)

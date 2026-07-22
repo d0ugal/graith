@@ -255,13 +255,6 @@ func (sm *SessionManager) takeResourceSamples(id string, pid int) []ResourceSamp
 	return matching
 }
 
-type mcpCrashStatus struct {
-	Server  string `json:"server"`
-	ProxyID string `json:"proxy_id"`
-	PID     int    `json:"pid"`
-	Running bool   `json:"running"`
-}
-
 // logAbnormalExitReport emits the high-density diagnostic record intended for
 // post-mortems. wait(2) reports the terminating signal but not its sender, so a
 // matching PID-bound graith request is reported as intent, never as proof of
@@ -302,22 +295,6 @@ func (sm *SessionManager) logAbnormalExitReport(
 		unread = sm.messages.TotalUnread(id)
 	}
 
-	var mcpStatuses []mcpCrashStatus
-
-	if sm.mcpManager != nil {
-		prefix := id + "-"
-
-		for _, server := range sm.mcpManager.List() {
-			for _, conn := range server.Connections {
-				if strings.HasPrefix(conn.ProxyID, prefix) {
-					mcpStatuses = append(mcpStatuses, mcpCrashStatus{
-						Server: server.Name, ProxyID: conn.ProxyID, PID: conn.PID, Running: conn.Running,
-					})
-				}
-			}
-		}
-	}
-
 	sandboxDiagnostic := "not-sandboxed"
 	if sandboxed {
 		sandboxDiagnostic = "no wrapper exit-reason API"
@@ -342,7 +319,7 @@ func (sm *SessionManager) logAbnormalExitReport(
 		"sandboxed", sandboxed, "sandbox_backend", sandboxBackend,
 		"sandbox_diagnostic", sandboxDiagnostic,
 		"attached", attached,
-		"unread_messages", unread, "mcp_processes", mcpStatuses)
+		"unread_messages", unread)
 }
 
 func classifyExit(exitCode int, signal syscall.Signal, request *signalRequest) (category, signalSource string) {

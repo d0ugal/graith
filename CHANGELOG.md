@@ -166,7 +166,6 @@
 * **config:** clamp inherited page size when lowering conversation_max_limit ([#1314](https://github.com/d0ugal/graith/issues/1314)) ([01501a8](https://github.com/d0ugal/graith/commit/01501a8090d1f1465c7ded46f316dd9f429f5483))
 * **config:** derive rendered pairing durations ([66cb13e](https://github.com/d0ugal/graith/commit/66cb13ec33295ab24a5e6d4edab3fa8f39623a8d))
 * **config:** fall back to defaults for non-positive advanced cadences ([8c15d44](https://github.com/d0ugal/graith/commit/8c15d441cc142b888d4fcc0719eab9d001d8d286)), closes [#1285](https://github.com/d0ugal/graith/issues/1285)
-* **config:** redact nested agent MCP env secrets ([#1329](https://github.com/d0ugal/graith/issues/1329)) ([1ef79cf](https://github.com/d0ugal/graith/commit/1ef79cf9536d39a7d367f33b6958539f7711c4d6))
 * **config:** reject invalid messages.max_age instead of silently retaining forever ([8fb1dda](https://github.com/d0ugal/graith/commit/8fb1ddabe31d8d8f9c2346efc4e6a6e847332819)), closes [#1321](https://github.com/d0ugal/graith/issues/1321)
 * **config:** reject non-positive/non-finite orchestrator restart policy ([7e092b4](https://github.com/d0ugal/graith/commit/7e092b41131c79f17fa4da59ebf3a5368548f266)), closes [#1303](https://github.com/d0ugal/graith/issues/1303)
 * **config:** reject sub-millisecond SQLite busy timeouts that collapse to zero ([e2d219e](https://github.com/d0ugal/graith/commit/e2d219e86ecc37539c2a834565eb8d8b06ea7090)), closes [#1322](https://github.com/d0ugal/graith/issues/1322)
@@ -324,8 +323,6 @@
 
 * **daemon:** inject codex hooks via -c overrides, not CODEX_HOOKS_DIR ([c35f544](https://github.com/d0ugal/graith/commit/c35f54441b42cabeb00176885940de76105b928b))
 * **daemon:** inject graith prompt into Codex sessions ([#1185](https://github.com/d0ugal/graith/issues/1185)) ([cea47bf](https://github.com/d0ugal/graith/commit/cea47bfbc53133d5d1a3c642a440d991ddb8b080))
-* **daemon:** inject MCP servers into Codex sessions ([#1184](https://github.com/d0ugal/graith/issues/1184)) ([ed1a611](https://github.com/d0ugal/graith/commit/ed1a6119cc53bfa8f08034d65615632bc5bee3e2))
-* **daemon:** skip codex mcp servers with unrepresentable names ([6b4bf47](https://github.com/d0ugal/graith/commit/6b4bf4752ba19861ddbac0aa2eccc7ea47490416))
 * **headless:** address review — fail-closed approvals, close-on-result deadlock, control-response hardening ([dcc8d90](https://github.com/d0ugal/graith/commit/dcc8d907b7b066e2796d3917dc0938b90e56f78e))
 * **headless:** address tribunal review findings on convert-on-attach ([332b6be](https://github.com/d0ugal/graith/commit/332b6bec3e42e141841d5f7f22f3abe84e220782))
 * **scenario:** address review findings for includes/star ([#1046](https://github.com/d0ugal/graith/issues/1046)) ([ac4fb00](https://github.com/d0ugal/graith/commit/ac4fb00bba254969965b79aa5fff2df0f0b5ea50))
@@ -336,12 +333,10 @@
 
 ### Code Refactoring
 
-* **daemon:** decouple MCP-config injection from lifecycle hooks ([6c78a27](https://github.com/d0ugal/graith/commit/6c78a27f7128eec3c436b67700249570f80c55b0)), closes [#1135](https://github.com/d0ugal/graith/issues/1135)
 
 
 ### Tests
 
-* **daemon:** lock MCP/hook decoupling on Fork and Resume; fix comment wording ([24510eb](https://github.com/d0ugal/graith/commit/24510eb638fe23f8c885d0aa2c8226ab42253334))
 * **daemon:** validate Codex prompt value as TOML; document replace semantics ([71bb1d8](https://github.com/d0ugal/graith/commit/71bb1d8eb9ef8cdd3d4237fad7548183eefaffa7))
 * **overlay:** lock the row-highlight reset-reopen; fix helper comments ([fe79c22](https://github.com/d0ugal/graith/commit/fe79c22f4fd68d2c5956fe5d6bb3a8563b972045))
 
@@ -662,13 +657,11 @@
 
 ### Features
 
-* **mcp:** add gr mcp list/restart/logs management commands ([4b80b6c](https://github.com/d0ugal/graith/commit/4b80b6c3d191232fcf4b73b43ccc12c902d3334d))
 
 
 ### Bug Fixes
 
 * **auth:** let the tokenless liveness probe reach a fail-closed daemon ([bf6bf87](https://github.com/d0ugal/graith/commit/bf6bf8724f2871913cbd428d8b6ffd317af75551))
-* **mcp:** address review findings for management commands ([9de5e26](https://github.com/d0ugal/graith/commit/9de5e26a490ac742108ca5f38119c0d4ae417bc7))
 
 ## [0.67.2](https://github.com/d0ugal/graith/compare/v0.67.1...v0.67.2) (2026-07-11)
 
@@ -1228,7 +1221,6 @@
 * **cli:** reject gr resume --attach with --json ([8f1ce31](https://github.com/d0ugal/graith/commit/8f1ce319b7981636d6d69559974e7803207fb5b3))
 * **cli:** reject non-positive and overflowing stale durations ([a5cea9e](https://github.com/d0ugal/graith/commit/a5cea9e520b6f335c8178490657e9af5e65f403f))
 * **daemon:** widen codex session ID capture window to 10s ([eaee1f7](https://github.com/d0ugal/graith/commit/eaee1f7550e3d10eb6eb53d60726c0006afeff0d)), closes [#840](https://github.com/d0ugal/graith/issues/840)
-* **mcp:** respect context cancellation in readMessages ([7fce9d1](https://github.com/d0ugal/graith/commit/7fce9d1f24399c480478919b84879ef9f695d511)), closes [#261](https://github.com/d0ugal/graith/issues/261)
 
 
 ### Dependencies
@@ -1288,11 +1280,9 @@
 * **sandbox:** clean up nono profile on create/fork failure + harden temp path ([f74a5be](https://github.com/d0ugal/graith/commit/f74a5bed03949fd58a5525eca562d24ca733b092))
 * **sandbox:** clean up nono profile on orchestrator create failure ([28b2ff5](https://github.com/d0ugal/graith/commit/28b2ff54e79d4aa53a09f725ae8ff8a3fd3d2461))
 * **sandbox:** error on unknown --agent in 'gr sandbox why' ([b235565](https://github.com/d0ugal/graith/commit/b23556508003fa11daa7cae22ee3f203d793a438)), closes [#791](https://github.com/d0ugal/graith/issues/791)
-* **sandbox:** fail closed when MCP sandbox has no backend selected ([8b38f47](https://github.com/d0ugal/graith/commit/8b38f47a0e2c925a8aa221ce16ce64578a90b6f0)), closes [#787](https://github.com/d0ugal/graith/issues/787)
 * **sandbox:** pass --workdir in nono.Wrap for --share-worktree read-only ([0fb29b2](https://github.com/d0ugal/graith/commit/0fb29b21e1ef7ee612a853f88cc25dc304504626)), closes [#786](https://github.com/d0ugal/graith/issues/786)
 * **sandbox:** reject read-only nono grants under /tmp instead of re-denying ([854d012](https://github.com/d0ugal/graith/commit/854d012e540239ad3b3b8295bc4f4a1ce9296b01)), closes [#789](https://github.com/d0ugal/graith/issues/789)
 * **sandbox:** remove per-session nono profile on session delete ([8d3682d](https://github.com/d0ugal/graith/commit/8d3682dd329426466951973bb525087bc8e20329)), closes [#797](https://github.com/d0ugal/graith/issues/797)
-* **sandbox:** restart MCP processes when only sandbox policy changes ([b47ac5a](https://github.com/d0ugal/graith/commit/b47ac5a8f44b49cd477d81d83d1dfc0f61faaf82)), closes [#788](https://github.com/d0ugal/graith/issues/788)
 * **sandbox:** treat whitespace-only agent profile as unset in mergeAgent ([4084812](https://github.com/d0ugal/graith/commit/408481244f5f62a5296ffc2bcf548d548d2c0f47))
 * **sandbox:** trim profile at merge time so whitespace can't clobber global ([2b984ba](https://github.com/d0ugal/graith/commit/2b984bacd00377e1d97b13e656654bd8d540e08c))
 * **scenario:** decode lifecycle response per-field and surface errors ([3452644](https://github.com/d0ugal/graith/commit/345264444a2a231902d51ee01170a178eaf642a5)), closes [#785](https://github.com/d0ugal/graith/issues/785)
@@ -1318,7 +1308,6 @@
 * **doctor:** make approvals command-backend test honest about PATH ([083e5f7](https://github.com/d0ugal/graith/commit/083e5f7d91e99c9751ffc5b282e5668081145135))
 * **man:** check os.Unsetenv error to satisfy errcheck ([b70e0fa](https://github.com/d0ugal/graith/commit/b70e0fa17e9c176622d76a86de387701dfd3a4f9))
 * **sandbox:** build read-only nono fixtures outside /tmp in newly-run tests ([a92c3fd](https://github.com/d0ugal/graith/commit/a92c3fdf83fdd17d5b4e60c39b0904efe8554a23))
-* **sandbox:** fix wsl_v5 lint in MCP backend test ([e3b359a](https://github.com/d0ugal/graith/commit/e3b359a67014ec63fa50a30315de69694eaac488))
 * **sandbox:** match nono's DENIED verb in TestNonoWhyPolicyDecisions ([adddae2](https://github.com/d0ugal/graith/commit/adddae2c8eb9d77ec7b05de5c239b0cfca361e9e))
 * **sandbox:** satisfy wsl_v5 whitespace lint in nono profile tests ([adf050a](https://github.com/d0ugal/graith/commit/adf050aaa74e27d50fc9ad8d40d4d2c1462ad414))
 
@@ -1602,10 +1591,8 @@
 
 ### Bug Fixes
 
-* address tribunal review of MCP isolation ([c806a6a](https://github.com/d0ugal/graith/commit/c806a6ae7e62d563053396f0779a518484410a9f))
 * authorize the update handler to prevent reparenting bypass ([264090c](https://github.com/d0ugal/graith/commit/264090c8187eae01588ba4b2e0ca38c71ab83d98)), closes [#568](https://github.com/d0ugal/graith/issues/568)
 * grant orchestrator elevated privileges to manage all sessions ([ac9f039](https://github.com/d0ugal/graith/commit/ac9f0392d1682de2b91b8ba2aed3b71ef37737b6)), closes [#566](https://github.com/d0ugal/graith/issues/566)
-* isolate per-session MCP processes via template expansion ([d6203a6](https://github.com/d0ugal/graith/commit/d6203a60902447af8356f98ac3a4d501cbe1a6bc)), closes [#571](https://github.com/d0ugal/graith/issues/571)
 * restrict parent-clearing to orchestrator and human CLI ([35f6edb](https://github.com/d0ugal/graith/commit/35f6edb497cdc3324ef79ebebe96508470030d71))
 
 ## [0.56.1](https://github.com/d0ugal/graith/compare/v0.56.0...v0.56.1) (2026-06-24)
@@ -1642,7 +1629,6 @@
 
 ### Bug Fixes
 
-* set explicit cwd for MCP server processes to survive worktree deletion ([6670fb5](https://github.com/d0ugal/graith/commit/6670fb58cfda0bcfeb9edd2f1ac763ae3bad4d27))
 
 ## [0.54.0](https://github.com/d0ugal/graith/compare/v0.53.1...v0.54.0) (2026-06-21)
 
@@ -1899,7 +1885,6 @@
 * address tribunal review findings for share→tmp rename ([e71aa54](https://github.com/d0ugal/graith/commit/e71aa54dab00d27895d51eb09515bc9e0fc07988))
 * address tribunal review findings for shared store ([a2b7bc5](https://github.com/d0ugal/graith/commit/a2b7bc57edd2845e040489d15fe522f9598262d2))
 * error when --shared and --repo are both provided ([769fe70](https://github.com/d0ugal/graith/commit/769fe7038272653b3a2aa8344aa141d5340a5161))
-* prevent stale mcp-proxy and mcp server from killing daemon on restart ([89b50c2](https://github.com/d0ugal/graith/commit/89b50c2be739fef8f527c733286afa90ce765fa7))
 
 ## [0.39.0](https://github.com/d0ugal/graith/compare/v0.38.0...v0.39.0) (2026-05-27)
 
@@ -2101,7 +2086,6 @@
 * address review tribunal findings in cursor cleanup ([10f8899](https://github.com/d0ugal/graith/commit/10f88997e20395a67a6626ceb9867e7477ff5e9b))
 * clean up stale message cursors during cleanup ([34561c3](https://github.com/d0ugal/graith/commit/34561c333f102231fc0f61c8ba334549ef1a3686)), closes [#254](https://github.com/d0ugal/graith/issues/254)
 * clear stale preview when filter yields no matching sessions ([57cf4b5](https://github.com/d0ugal/graith/commit/57cf4b5f290a81e1e222bab228396eecf8f8b821))
-* fall back to default agent in MCP createSession ([d52859b](https://github.com/d0ugal/graith/commit/d52859b09416a28741dad09a30e08411a06f332c)), closes [#232](https://github.com/d0ugal/graith/issues/232)
 * make git tests hermetic against user signing config ([d58fb8d](https://github.com/d0ugal/graith/commit/d58fb8d8cddfdb1afff687bb1cbbf21c99d43bbc)), closes [#228](https://github.com/d0ugal/graith/issues/228)
 * migrate approvals_enabled to agent_hooks in state ([f41a057](https://github.com/d0ugal/graith/commit/f41a057f9c00dcb261855d1f28410f6904b5f51d)), closes [#208](https://github.com/d0ugal/graith/issues/208)
 * re-read cleanup config each iteration to respect hot-reload ([9ea5a92](https://github.com/d0ugal/graith/commit/9ea5a92ec1548915d16d5c1b4464fe3db29d23b6))
@@ -2195,7 +2179,6 @@
 
 ### Bug Fixes
 
-* add saveState in Restart stop path, fix flaky MCP stderr test ([d23348a](https://github.com/d0ugal/graith/commit/d23348a7fd29d70fbe7ac5a97e04b49af679860f))
 * don't block agents without hook support, add cursor hooks ([75e9fb0](https://github.com/d0ugal/graith/commit/75e9fb005b214ffcd0b7a9436e0dd3474d329255)), closes [#389](https://github.com/d0ugal/graith/issues/389)
 
 ## [0.25.0](https://github.com/d0ugal/graith/compare/v0.24.3...v0.25.0) (2026-05-09)
@@ -2210,8 +2193,6 @@
 
 ### Bug Fixes
 
-* allow user config to disable auto-injected MCP servers ([4a211a3](https://github.com/d0ugal/graith/commit/4a211a3a699512b0dbe7bd0a79c65e65f13a1af0))
-* register auto-injected graith MCP server with MCPManager ([3b8a29c](https://github.com/d0ugal/graith/commit/3b8a29cd0cf539c666164c671027582aa9209b8a))
 
 ## [0.24.2](https://github.com/d0ugal/graith/compare/v0.24.1...v0.24.2) (2026-05-09)
 
@@ -2226,8 +2207,6 @@
 
 ### Bug Fixes
 
-* clean up unused param, add mcp_config to log, add integration test ([35b9a1e](https://github.com/d0ugal/graith/commit/35b9a1e850798168093ffc3d8fdcdb15dbcfcaf0))
-* use --mcp-config instead of --settings for Claude Code MCP servers ([d3e00de](https://github.com/d0ugal/graith/commit/d3e00debba571dbeed98e82b38b6136e458f8be6))
 
 ## [0.24.0](https://github.com/d0ugal/graith/compare/v0.23.1...v0.24.0) (2026-05-08)
 
@@ -2240,7 +2219,6 @@
 ### Bug Fixes
 
 * map hook decision values to agent-specific schemas ([79269df](https://github.com/d0ugal/graith/commit/79269dfb852ae5395f9287dfc12a040e87d611bb))
-* persist model in session state for resume/fork, add to MCP ([f28df0e](https://github.com/d0ugal/graith/commit/f28df0e0713701a3125067ebcf3123ecfea0937a))
 * show requested model in session info when hook model is empty ([d7e5bed](https://github.com/d0ugal/graith/commit/d7e5bedbd852a83f63b5f77ebefd93a91cd3097c))
 
 ## [0.23.1](https://github.com/d0ugal/graith/compare/v0.23.0...v0.23.1) (2026-05-07)
@@ -2256,13 +2234,10 @@
 
 ### Features
 
-* implement daemon-managed MCP proxy (Proposal 2) ([e1adc92](https://github.com/d0ugal/graith/commit/e1adc9200bce151ea8bb998b4944a39575cff845))
 
 
 ### Bug Fixes
 
-* address lint issues in MCPServerConfig ([7fdb520](https://github.com/d0ugal/graith/commit/7fdb5207320d68f582baf3087041d92e257d28e2))
-* address review tribunal findings for MCP injection ([f01d1f3](https://github.com/d0ugal/graith/commit/f01d1f3ccd134e3d05c5f2118c7383b40dc2f3c3))
 * eliminate stdout write race between PTY data and status bar ticker ([8cde424](https://github.com/d0ugal/graith/commit/8cde4249135de6fabdd90c3d66938e4301585f9c))
 
 ## [0.22.0](https://github.com/d0ugal/graith/compare/v0.21.0...v0.22.0) (2026-05-07)
@@ -2270,23 +2245,19 @@
 
 ### Features
 
-* add MCP server injection for agent sessions ([5d5d321](https://github.com/d0ugal/graith/commit/5d5d321122646cee05b1f9d57f8904bad516a8d2))
 * refresh sandbox config from current settings on resume and fork ([ff614e0](https://github.com/d0ugal/graith/commit/ff614e0cd946fabfbdf04a56ce486f0dba17df80)), closes [#361](https://github.com/d0ugal/graith/issues/361)
 * start Chrome with remote debugging for sandboxed agents ([33a8d34](https://github.com/d0ugal/graith/commit/33a8d34ffa8b18c9988996baa8a5a49e6763c8a8)), closes [#359](https://github.com/d0ugal/graith/issues/359)
 
 
 ### Bug Fixes
 
-* address lint issues in MCPServerConfig ([d318c10](https://github.com/d0ugal/graith/commit/d318c10176ff7e8166cf2f54bc0c15d19af83dab))
 * address review tribunal findings for Chrome remote debugging ([570828f](https://github.com/d0ugal/graith/commit/570828f59077b348efb47246509d0792a49bc3a8))
-* address review tribunal findings for MCP injection ([eb31c07](https://github.com/d0ugal/graith/commit/eb31c07efd323eb0b4a0a99c8d13b135a6bdd79d))
 * clean up leaked process in sandbox resume test ([cd50907](https://github.com/d0ugal/graith/commit/cd50907b984a1fe6574df3e74e12f09a136c1bf9))
 * wait for PTY exit in sandbox resume tests to prevent TempDir cleanup race ([19a1ab6](https://github.com/d0ugal/graith/commit/19a1ab666c5901c5b871eab75937407353923010))
 
 
 ### Reverts
 
-* remove Chrome-specific code in favor of MCP injection ([f3bb77f](https://github.com/d0ugal/graith/commit/f3bb77f56e5728d50a7c57fbe537f4e24c9dd163))
 
 ## [0.21.0](https://github.com/d0ugal/graith/compare/v0.20.1...v0.21.0) (2026-05-04)
 
@@ -2381,7 +2352,6 @@
 
 * address Codex review findings for GRAITH_PROFILE ([558d4bf](https://github.com/d0ugal/graith/commit/558d4bfd79a17904787cc004fc7089cb5e8b757a))
 * address Codex review findings for in-place sessions ([ddafeba](https://github.com/d0ugal/graith/commit/ddafebab6c9cd12a25a3cf59a6b69c690277269c))
-* align struct tags in MCP CreateSessionInput to satisfy tagalign linter ([bf22bc3](https://github.com/d0ugal/graith/commit/bf22bc3f6a6ab9e658535531a1dfaf73e2ae92b7))
 * resolve profile independently of --config path in LoadOrDefault ([a56195f](https://github.com/d0ugal/graith/commit/a56195f0fbfdd136ff25c5bde26e6b94e055d89b))
 
 ## [0.17.0](https://github.com/d0ugal/graith/compare/v0.16.7...v0.17.0) (2026-04-30)
@@ -2733,7 +2703,6 @@
 * add confirmation prompt for destructive gr delete ([356c8eb](https://github.com/d0ugal/graith/commit/356c8eb9714fe0a5b1b53e477c8884a4e0a50e83)), closes [#49](https://github.com/d0ugal/graith/issues/49)
 * add dev release workflow for pre-release builds ([852c4a9](https://github.com/d0ugal/graith/commit/852c4a9e9895d930007b0c3f7817b4c43ee48376))
 * add live-updating dashboard command ([925a897](https://github.com/d0ugal/graith/commit/925a8970d4d1f7aa95d336204c9efb1e649a870c)), closes [#24](https://github.com/d0ugal/graith/issues/24)
-* add MCP server mode for programmatic session management ([8fdac1c](https://github.com/d0ugal/graith/commit/8fdac1cad4d5db4d2df56c6fad2948964b759df3)), closes [#32](https://github.com/d0ugal/graith/issues/32)
 * add message retention/cleanup to prevent unbounded SQLite growth ([f98de76](https://github.com/d0ugal/graith/commit/f98de76170f360327e89002d76a5d18c3475fa5e)), closes [#20](https://github.com/d0ugal/graith/issues/20)
 * add shell completions for flag values ([b5b4dca](https://github.com/d0ugal/graith/commit/b5b4dca6c21f2efd738928cf475db4bcf4bfa4dc)), closes [#45](https://github.com/d0ugal/graith/issues/45)
 * add status bar renderer ([2683921](https://github.com/d0ugal/graith/commit/2683921403e8e0e0c08248d0361cb5203758ed60))

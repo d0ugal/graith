@@ -1,8 +1,8 @@
 import Foundation
 
 /// The graith wire frame: a 1-byte channel + big-endian uint32 length + payload,
-/// mirroring `internal/protocol/frame.go` exactly. Channels: `0x00` control
-/// (JSON envelope), `0x01` raw PTY data, `0x02` MCP. `MaxPayload` is 4 MiB.
+/// mirroring `internal/protocol/frame.go` exactly. Channels: `0x00` control and
+/// `0x01` raw PTY data. `MaxPayload` is 4 MiB.
 ///
 /// This is a reference codec so the framing can be validated here and reused by
 /// the transport; the macOS `GraithProtocolClient` may adopt it or keep its own
@@ -10,7 +10,6 @@ import Foundation
 public struct GraithFrame: Equatable, Sendable {
     public static let channelControl: UInt8 = 0x00
     public static let channelData: UInt8 = 0x01
-    public static let channelMCP: UInt8 = 0x02
     public static let maxPayload = 4 * 1024 * 1024
     public static let headerSize = 5
 

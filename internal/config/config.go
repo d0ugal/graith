@@ -45,7 +45,6 @@ type Config struct {
 	GitPull          GitPullConfig       `toml:"git_pull"`
 	Launch           LaunchConfig        `toml:"launch"`
 	PRWatch          PRWatchConfig       `toml:"pr_watch"`
-	MCPServers       []MCPServerConfig   `toml:"mcp_servers"`
 	Overlay          Overlay             `toml:"overlay"`
 	Orchestrator     OrchestratorConfig  `toml:"orchestrator"`
 	Remote           RemoteConfig        `toml:"remote"`
@@ -1641,16 +1640,16 @@ func (r ResourceMonitor) SampleHistoryOrDefault() int {
 
 // LimitsConfig is the [limits] block gathering the user-visible output, log,
 // wait, and display truncation caps that were previously duplicated as
-// unrelated Go constants and literals across the daemon, CLI, and MCP manager
-// (issue #1252). Unifying them means changing one place updates every surface.
+// unrelated Go constants and literals across the daemon and CLI (issue #1252).
+// Unifying them means changing one place updates every surface.
 // Every field is optional: a value < 1 falls back to the matching default
 // constant, preserving the historical behaviour. Units are stated in each field
 // name (lines, bytes, runes) so a single number is unambiguous.
 type LimitsConfig struct {
 	// LogLines is the default number of trailing output lines shown when a
-	// `lines`/`-n` count is not given: `gr logs`, `gr mcp logs`, the scrollback
-	// replayed to a client on attach, and the MCP log reader all share it. Values
-	// < 1 fall back to the default (LimitsLogLinesDefault).
+	// `lines`/`-n` count is not given: `gr logs` and the scrollback replayed to a
+	// client on attach share it. Values < 1 fall back to the default
+	// (LimitsLogLinesDefault).
 	LogLines int `toml:"log_lines"`
 	// WaitScanLines bounds how much existing scrollback `gr wait --contains`
 	// scans for an already-present match before it starts following live output.
@@ -1660,10 +1659,6 @@ type LimitsConfig struct {
 	// matcher so a long stream without a newline can't grow the buffer without
 	// limit. Values < 1 fall back to the default (LimitsWaitBufferBytesDefault).
 	WaitBufferBytes int `toml:"wait_buffer_bytes"`
-	// MCPLogReadBytes bounds how many trailing bytes of an MCP server log file
-	// are read before splitting into lines, keeping a huge log from being loaded
-	// whole. Values < 1 fall back to the default (LimitsMCPLogReadBytesDefault).
-	MCPLogReadBytes int `toml:"mcp_log_read_bytes"`
 	// LastMessageRunes bounds the agent's final Stop message the status hook
 	// forwards to the daemon, so a large final output never becomes an unbounded
 	// control frame. Counted in runes (never splits a multi-byte character).
@@ -1681,7 +1676,6 @@ const (
 	LimitsLogLinesDefault          = 300
 	LimitsWaitScanLinesDefault     = 500
 	LimitsWaitBufferBytesDefault   = 64 * 1024
-	LimitsMCPLogReadBytesDefault   = 1 << 20 // 1 MiB
 	LimitsLastMessageRunesDefault  = 2000
 	LimitsInboxPreviewBytesDefault = 1000
 )
@@ -1714,16 +1708,6 @@ func (l LimitsConfig) WaitBufferBytesOrDefault() int {
 	}
 
 	return l.WaitBufferBytes
-}
-
-// MCPLogReadBytesOrDefault returns the MCP log read cap, clamped to a sensible
-// minimum. A value < 1 means "use the default".
-func (l LimitsConfig) MCPLogReadBytesOrDefault() int {
-	if l.MCPLogReadBytes < 1 {
-		return LimitsMCPLogReadBytesDefault
-	}
-
-	return l.MCPLogReadBytes
 }
 
 // LastMessageRunesOrDefault returns the hook last-message rune cap, clamped to
@@ -3175,16 +3159,6 @@ func (s StatusConfig) TTLDuration() time.Duration {
 	return d
 }
 
-type MCPServerConfig struct {
-	Name          string            `json:"-"              toml:"name"`
-	Command       string            `json:"command"        toml:"command"`
-	Args          []string          `json:"args,omitempty" toml:"args,omitempty"`
-	Env           map[string]string `json:"env,omitempty"  toml:"env,omitempty"`
-	Disabled      bool              `json:"-"              toml:"disabled,omitempty"`
-	Sandbox       *bool             `json:"-"              toml:"sandbox,omitempty"`
-	SandboxConfig *SandboxConfig    `json:"-"              toml:"sandbox_config,omitempty"`
-}
-
 type Agent struct {
 	Command      string            `json:"command"                 toml:"command"`
 	Args         []string          `json:"args,omitempty"          toml:"args"`
@@ -3200,11 +3174,10 @@ type Agent struct {
 	// cursor, and codex agents work without explicit config; a custom agent
 	// must set this to receive a prompt at all. Validated in Config.Validate.
 	// See issue #1232.
-	PromptInjection   string                     `json:"prompt_injection,omitempty"    toml:"prompt_injection"`
-	PreTrustWorkspace *bool                      `json:"pre_trust_workspace,omitempty" toml:"pre_trust_workspace"`
-	Sandbox           SandboxConfig              `json:"sandbox"                       toml:"sandbox"`
-	MCPServers        map[string]MCPServerConfig `json:"mcp_servers,omitempty"         toml:"mcp_servers"`
-	ValidateModel     string                     `json:"validate_model,omitempty"      toml:"validate_model"`
+	PromptInjection   string        `json:"prompt_injection,omitempty"    toml:"prompt_injection"`
+	PreTrustWorkspace *bool         `json:"pre_trust_workspace,omitempty" toml:"pre_trust_workspace"`
+	Sandbox           SandboxConfig `json:"sandbox"                       toml:"sandbox"`
+	ValidateModel     string        `json:"validate_model,omitempty"      toml:"validate_model"`
 	// InterruptCount is how many times the interrupt byte (Ctrl-C, 0x03) is sent
 	// to interrupt this agent, and InterruptDelayMs is the pause in milliseconds
 	// between successive sends. Some agent TUIs ignore a single Ctrl-C and need
@@ -3522,66 +3495,6 @@ type SandboxNetworkConfig struct {
 // A nil or empty config requests nothing (matches nono's allow-by-default).
 func (n *SandboxNetworkConfig) IsSet() bool {
 	return n != nil && (n.Block || len(n.AllowDomains) > 0)
-}
-
-func MergeMCPServers(global []MCPServerConfig, overrides map[string]MCPServerConfig) []MCPServerConfig {
-	byName := make(map[string]MCPServerConfig, len(global))
-
-	var order []string
-
-	for _, s := range global {
-		if _, exists := byName[s.Name]; !exists {
-			order = append(order, s.Name)
-		}
-
-		byName[s.Name] = s
-	}
-
-	names := make([]string, 0, len(overrides))
-	for name := range overrides {
-		names = append(names, name)
-	}
-
-	sort.Strings(names)
-
-	for _, name := range names {
-		ovr := overrides[name]
-		if _, exists := byName[name]; exists {
-			if ovr.Disabled {
-				delete(byName, name)
-				continue
-			}
-
-			base := byName[name]
-			if ovr.Command != "" {
-				base.Command = ovr.Command
-			}
-
-			if ovr.Args != nil {
-				base.Args = ovr.Args
-			}
-
-			if ovr.Env != nil {
-				base.Env = ovr.Env
-			}
-
-			byName[name] = base
-		} else if !ovr.Disabled {
-			ovr.Name = name
-			byName[name] = ovr
-			order = append(order, name)
-		}
-	}
-
-	var result []MCPServerConfig
-
-	for _, name := range order {
-		if s, ok := byName[name]; ok && !s.Disabled {
-			result = append(result, s)
-		}
-	}
-
-	return result
 }
 
 func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
@@ -3978,35 +3891,6 @@ func (c *Config) Validate() error {
 
 			if opt.When != "" && !IsTemplateVar(opt.When) {
 				errs = append(errs, fmt.Errorf("agents.%s.option_args[%d].when %q: not a known template variable", agentName, i, opt.When))
-			}
-		}
-	}
-
-	seen := make(map[string]bool, len(c.MCPServers))
-	for _, s := range c.MCPServers {
-		switch {
-		case s.Name == "":
-			errs = append(errs, errors.New("mcp_servers: entry with empty name"))
-		case seen[s.Name]:
-			errs = append(errs, fmt.Errorf("mcp_servers: duplicate name %q", s.Name))
-		default:
-			seen[s.Name] = true
-		}
-
-		if !s.Disabled && s.Command == "" {
-			errs = append(errs, fmt.Errorf("mcp_servers: %q has no command", s.Name))
-		}
-	}
-
-	globalNames := make(map[string]bool, len(c.MCPServers))
-	for _, s := range c.MCPServers {
-		globalNames[s.Name] = true
-	}
-
-	for agentName, agent := range c.Agents {
-		for name, s := range agent.MCPServers {
-			if !s.Disabled && s.Command == "" && !globalNames[name] {
-				errs = append(errs, fmt.Errorf("agents.%s.mcp_servers: %q has no command (not overriding a global server)", agentName, name))
 			}
 		}
 	}
@@ -4503,6 +4387,10 @@ func LoadBytes(path string, data []byte) (*Config, error) {
 		return nil, fmt.Errorf("parsing config %s: %w", path, err)
 	}
 
+	if err := rejectRemovedToolServerConfig(data); err != nil {
+		return nil, fmt.Errorf("config validation: %w", err)
+	}
+
 	cfg.Agents = mergeAgents(defaultAgents, cfg.Agents)
 
 	// Record the absolute directory of the config file so relative [tools] paths
@@ -4540,6 +4428,61 @@ func LoadBytes(path string, data []byte) (*Config, error) {
 	cfg.Warnings = append(cfg.Warnings, cfg.Keybindings.Conflicts()...)
 
 	return cfg, nil
+}
+
+// rejectRemovedToolServerConfig detects former Graith-owned tool-server keys after
+// they have left the typed schema. go-toml otherwise ignores unknown keys,
+// which would make security and process-management policy appear active after
+// upgrading. Native integration configuration supplied directly to an agent
+// runtime is outside this schema and is not inspected here.
+func rejectRemovedToolServerConfig(data []byte) error {
+	var raw map[string]any
+	if err := toml.Unmarshal(data, &raw); err != nil {
+		return nil // the typed decode above reports structural TOML errors
+	}
+
+	var removed []string
+
+	for key, value := range raw {
+		switch strings.ToLower(key) {
+		case "mcp_servers":
+			removed = append(removed, "mcp_servers")
+		case "limits":
+			if table, ok := value.(map[string]any); ok && mapHasKeyFold(table, "mcp_log_read_bytes") {
+				removed = append(removed, "limits.mcp_log_read_bytes")
+			}
+		case "agents":
+			agents, ok := value.(map[string]any)
+			if !ok {
+				continue
+			}
+
+			for name, agentValue := range agents {
+				agent, ok := agentValue.(map[string]any)
+				if ok && mapHasKeyFold(agent, "mcp_servers") {
+					removed = append(removed, "agents."+name+".mcp_servers")
+				}
+			}
+		}
+	}
+
+	if len(removed) == 0 {
+		return nil
+	}
+
+	sort.Strings(removed)
+
+	return fmt.Errorf("graith tool-server management was removed; delete obsolete config key(s): %s; configure native integrations in the agent runtime instead", strings.Join(removed, ", "))
+}
+
+func mapHasKeyFold(table map[string]any, want string) bool {
+	for key := range table {
+		if strings.EqualFold(key, want) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // applyPRWatchCommentCompat preserves the pre-split meaning of
@@ -4932,10 +4875,6 @@ func mergeAgent(def, usr Agent) Agent {
 
 	if usr.PreTrustWorkspace != nil {
 		def.PreTrustWorkspace = usr.PreTrustWorkspace
-	}
-
-	if usr.MCPServers != nil {
-		def.MCPServers = usr.MCPServers
 	}
 
 	if usr.ValidateModel != "" {

@@ -207,9 +207,6 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	policyEnabled := cfgSnapshot.CommandPolicy.Enabled()
 	policyTimeout := cfgSnapshot.CommandPolicy.TimeoutDuration()
 	hookFilesNeeded := sourceAgentHooks || policyEnabled
-	// MCP config injection is decided separately from hooks (see #1135). Fork is
-	// PTY-only, so the two coincide here.
-	sourceMCPEnabled := sourceAgentHooks
 	sourceForkIncludes := make([]IncludedRepoState, len(source.Includes))
 	copy(sourceForkIncludes, source.Includes)
 
@@ -239,11 +236,6 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	if err := sm.validateCommandPolicy(agentName); err != nil {
 		sm.mu.Unlock()
 		return SessionState{}, err
-	}
-
-	var mcpServers []config.MCPServerConfig
-	if sourceMCPEnabled {
-		mcpServers = sm.resolveMCPServers(agentName)
 	}
 
 	sandboxMerged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
@@ -544,18 +536,6 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		}
 	}
 
-	if sourceMCPEnabled {
-		mcpArgs, err := sm.injectMCPConfig(agentName, id, mcpServers)
-		if err != nil {
-			forkCleanup()
-			rollbackState()
-
-			return SessionState{}, fmt.Errorf("inject mcp config: %w", err)
-		}
-
-		expandedArgs = append(expandedArgs, mcpArgs...)
-	}
-
 	if agent.PromptInjectionEnabled() {
 		promptArgs, err := sm.injectPrompt(agentName, worktreePath)
 		if err != nil {
@@ -606,7 +586,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 			envKeys = append(envKeys, k)
 		}
 
-		opts, err := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, hookFilesNeeded || sourceMCPEnabled)
+		opts, err := sm.sandboxOptsFromConfig(merged, id, worktreePath, agent.Command, envKeys, hookFilesNeeded)
 		if err != nil {
 			forkCleanup()
 			rollbackState()

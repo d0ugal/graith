@@ -110,67 +110,6 @@ func TestCoverNotifyInvalidPayload(t *testing.T) {
 	h.expectError(t, "invalid notify")
 }
 
-// --- mcp dispatch ---------------------------------------------------------
-
-// TestCoverMCPListNoManager verifies mcp_list returns an empty listing when the
-// MCP manager is not initialized (the harness has none).
-func TestCoverMCPListNoManager(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "mcp_list", struct{}{})
-
-	env := h.expectType(t, "mcp_list")
-
-	var resp protocol.MCPListResponse
-	if err := protocol.DecodePayload(env, &resp); err != nil {
-		t.Fatal(err)
-	}
-
-	if len(resp.Servers) != 0 {
-		t.Errorf("expected no servers, got %d", len(resp.Servers))
-	}
-}
-
-// TestCoverMCPRestartNoManager verifies mcp_restart passes the human auth gate
-// then errors because no MCP manager is initialized.
-func TestCoverMCPRestartNoManager(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "mcp_restart", protocol.MCPRestartMsg{Name: "blether"})
-
-	h.expectError(t, "MCP manager not initialized")
-}
-
-// TestCoverMCPRestartRejectsForeignSession verifies mcp_restart is gated by the
-// trigger-op auth (a plain session with no orchestrator is denied).
-func TestCoverMCPRestartRejectsForeignSession(t *testing.T) {
-	h := newTestHarness(t)
-	h.addAuthenticatedSession(t, "thrawn-id", "thrawn", "tok-thrawn")
-
-	h.sendControlWithToken(t, "mcp_restart", protocol.MCPRestartMsg{Name: "blether"}, "tok-thrawn")
-
-	h.expectError(t, "not authorized")
-}
-
-// TestCoverMCPLogsNoManager verifies mcp_logs errors when no MCP manager exists.
-func TestCoverMCPLogsNoManager(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendControl(t, "mcp_logs", protocol.MCPLogsMsg{Name: "blether"})
-
-	h.expectError(t, "MCP manager not initialized")
-}
-
-// TestCoverMCPLogsInvalidPayload verifies a malformed mcp_logs payload is
-// rejected before touching the manager.
-func TestCoverMCPLogsInvalidPayload(t *testing.T) {
-	h := newTestHarness(t)
-
-	h.sendWrongShapePayload(t, "mcp_logs")
-
-	h.expectError(t, "invalid mcp_logs")
-}
-
 // --- scenario dispatch ----------------------------------------------------
 
 // TestCoverScenarioStatusNotFound verifies scenario_status errors on an unknown

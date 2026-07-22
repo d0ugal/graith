@@ -141,8 +141,8 @@ agent  = "claude"
 prompt = "Review the changes since your last look; send feedback via gr msg."
 ```
 
-Actions: `command` (sandboxed by default; `sandbox`/`sandbox_config` mirror
-MCP-server config), `session`, `scenario`, `message`, `tracker`. Delivery routes to
+Actions: `command` (sandboxed by default; `sandbox`/`sandbox_config` control its
+boundary), `session`, `scenario`, `message`, `tracker`. Delivery routes to
 `inbox`/`topic`/`store`. Policy: `catch_up` (default false), `overlap` (default
 `skip`), `rate_limit` (default `5/30m`). See [Triggers]({{< relref "/docs/triggers.md" >}}) for the full reference.
 

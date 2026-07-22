@@ -432,11 +432,6 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 		sm.log.Info("config changed", "key", "todo.max_note", "old", oldLimit, "new", newLimit)
 	}
 
-	if sm.mcpManager != nil {
-		sm.mcpManager.Reload(newCfg)
-		sm.log.Info("MCP manager config reloaded")
-	}
-
 	// If the PR-comment author-trust config changed, re-evaluate jailed comments
 	// against the new config and auto-release any whose author is now trusted
 	// (issue #1082). A config reload is a local-human action, so this release is
@@ -757,11 +752,9 @@ func (sm *SessionManager) resolveSandboxFromConfig(cfg *config.Config, agentName
 // validateSandboxBackend enforces the explicit-backend rule and availability
 // check for an already-enabled merged sandbox config, returning the resolved
 // availability on success. subject names the process being sandboxed (e.g.
-// `agent "claude"` or `MCP server chrome`) and is interpolated into the
-// fail-closed errors. It is shared by the session (resolveSandboxFromConfig)
-// and MCP-server (MCPManager.startProcess) startup paths so both fail closed
-// identically — in particular, neither may silently fall back to safehouse
-// when no backend is selected (see #787). sandbox.Wrap keeps its empty-backend
+// `agent "claude"`) and is interpolated into the fail-closed errors. In
+// particular, session startup may not silently fall back to safehouse when no
+// backend is selected (see #787). sandbox.Wrap keeps its empty-backend
 // compatibility only for low-level helpers that don't represent user config.
 func validateSandboxBackend(merged config.SandboxConfig, subject string) (sandbox.Availability, error) {
 	// Backend must be chosen explicitly — there is no default. Fail closed with
@@ -832,8 +825,8 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 	readFiles := expandFilePaths(merged.ReadFiles, sm.log, "read")
 	writeFiles := expandFilePaths(merged.WriteFiles, sm.log, "write")
 
-	// The hook dir holds both the generated settings (hooks) file and the MCP
-	// config file, so grant it read whenever either was injected (see #1135).
+	// The hook dir holds generated lifecycle and policy settings, so grant it
+	// read whenever those settings were injected.
 	controlRoot := ""
 
 	if merged.Enabled {

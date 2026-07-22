@@ -198,12 +198,6 @@
       "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support"
     },
     {
-      "id": "mcp.manage",
-      "ios": "n/a",
-      "macos": "n/a",
-      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support"
-    },
-    {
       "id": "store.access",
       "ios": "n/a",
       "macos": "n/a",

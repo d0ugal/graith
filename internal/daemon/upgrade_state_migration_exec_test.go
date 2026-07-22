@@ -204,6 +204,10 @@ func runNewExecStateMigrationStage(t *testing.T) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 
+	if _, err := backupStateSnapshotBeforeMigration(paths.StateFile, manifest.StateSnapshot); err != nil {
+		t.Fatal(err)
+	}
+
 	originalVersion, err := sm.loadStateSnapshotForAdoption(manifest.StateSnapshot)
 	if err != nil {
 		t.Fatal(err)
@@ -238,10 +242,6 @@ func runNewExecStateMigrationStage(t *testing.T) {
 	if len(result.ResolvedSessions) != 1 || len(result.UnresolvedSessions) != 0 ||
 		len(result.adoptedSessions) != 1 {
 		t.Fatalf("adoption result = %+v, want one resolved live PTY", result)
-	}
-
-	if err := backupStateBeforeMigration(paths.StateFile, originalVersion, manifest.StateSnapshot); err != nil {
-		t.Fatal(err)
 	}
 
 	if err := sm.saveState(); err != nil {

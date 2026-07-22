@@ -26,13 +26,12 @@ graph LR
 [channel:1 byte][length:4 bytes big-endian][payload:N bytes]
 ```
 
-Three channels:
+Two channels:
 
 | Channel | Purpose |
 |---------|---------|
 | `0x00` | JSON control messages |
 | `0x01` | Raw PTY data |
-| `0x02` | MCP proxy traffic |
 
 Control messages use a JSON envelope:
 
@@ -70,7 +69,6 @@ The client sends a message type; the daemon responds with a matching response ty
 | `set_status` | Set session status summary |
 | `status_report` | Report agent hook status |
 | `command_policy_check` | Synchronously evaluate an optional shell command restriction |
-| `mcp_connect` | Connect to an MCP server |
 | `reload` | Reload config |
 | `diagnostics` | Request diagnostics |
 | `screen_preview` | Request screen preview |
@@ -92,7 +90,6 @@ The client sends a message type; the daemon responds with a matching response ty
 | `status_set` | Status set confirmation |
 | `screen_preview_response` | Screen preview data |
 | `screen_snapshot_response` | Full screen snapshot |
-| `mcp_connect_ok` | MCP connection established |
 | `status_response` | Status query response |
 | `diagnostics` | Diagnostics data |
 
@@ -107,7 +104,6 @@ The daemon (`SessionManager`) is the central component:
 - **Client handling:** connection acceptance, frame demuxing, message dispatch
 - **Hook reporting:** agent status from hook reports
 - **Command policy:** bounded synchronous shell checks that can only deny before agent execution
-- **MCP management:** proxying MCP connections for sessions
 - **Git pull:** periodic background pulls (when enabled)
 - **Idle timeout:** auto-stop after inactivity
 
@@ -115,7 +111,7 @@ The daemon (`SessionManager`) is the central component:
 
 `state.json` stores session metadata: ID, name, agent type, repo path, worktree path, branch, status, parent ID, starred flag, and timestamps. It's loaded on daemon start and written synchronously on every mutation. Runtime-only state — hook reports, attached clients, in-memory caches — isn't persisted; it's rebuilt from PTY state on restart.
 
-**State-version backups.** The state file carries a schema version; a newer daemon migrates an older `state.json` forward in place. Since a downgraded binary won't start against forward-migrated state, the daemon *first* writes a crash-safe copy of the pre-migration file to `state.json.v<oldVersion>.bak` (alongside `state.json`). Only the most recent backup is kept — an earlier one is removed once the new one is durable. To recover a downgrade: stop the daemon, restore the backup over `state.json` (e.g. `mv state.json.v16.bak state.json`), and start the older binary. `gr doctor` lists available backups.
+**State-version backups.** The state file carries a schema version; a newer daemon migrates an older `state.json` forward in place. Since a downgraded binary won't start against forward-migrated state, the daemon *first* writes a crash-safe copy of the pre-migration file to `state.json.v<oldVersion>.bak` (alongside `state.json`). If that backup cannot be made, startup fails before migration and leaves the old state unchanged. Only the most recent backup is kept — an earlier one is removed once the new one is durable. To recover a downgrade: stop the daemon, restore the backup over `state.json` (e.g. `mv state.json.v16.bak state.json`), and start the older binary. `gr doctor` lists available backups.
 
 ### Session manager locking
 
@@ -184,12 +180,11 @@ internal/
   cli/                   Cobra command definitions (one file per command)
   client/                Client: connection, passthrough, overlay, shell, status bar
   config/                TOML config loading, defaults, XDG paths
-  daemon/                Daemon: session manager, handler, state, server, messaging, MCP manager
+  daemon/                Daemon: session manager, handler, state, server, messaging
   detector/              Agent type detection from running processes
   git/                   Git operations (fetch, worktree, branch)
   hookoutput/            Agent-specific hook response formatting
   integration/           Integration tests (spawn real daemon)
-  mcp/                   MCP server implementation
   output/                Structured output helpers (text/JSON)
   protocol/              Wire protocol: framing, control messages, encoding
   pty/                   PTY session management, scrollback buffer

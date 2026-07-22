@@ -105,10 +105,6 @@ you rarely pass a scope flag; `--session <id>` overrides the auto-anchor for a
 sub-list at the agent itself. Inside an agent, `gr todo` auto-enables `--json`
 (see [agent mode]({{< relref "/docs/commands/_index.md" >}})).
 
-Agents can drive the same operations over [MCP]({{< relref "mcp.md" >}})
-(`todo_list`, `todo_add`, `todo_claim`, `todo_update`, `todo_done`, `todo_block`,
-`todo_reopen`).
-
 ## Dependencies
 
 Dependencies form a directed acyclic graph inside one scope. Adding or replacing

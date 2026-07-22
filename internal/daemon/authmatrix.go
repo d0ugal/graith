@@ -73,9 +73,6 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"trigger_status":   remoteHumanRW,
 	"trigger_run":      remoteHumanRW,
 	"trigger_pause":    remoteHumanRW,
-	"mcp_list":         remoteHumanRW, // daemon-level MCP management: human + sessions, not guests
-	"mcp_restart":      remoteHumanRW, // mutating; the handler re-checks via authorizeTriggerOp
-	"mcp_logs":         remoteHumanRW, // MCP stderr may carry sensitive output
 	"notify":           remoteHumanRW, // orchestrator/human only; the handler re-checks
 
 	// Read-only host introspection for the paired human/sessions only (not a
@@ -137,7 +134,6 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"upgrade_preflight": remoteDenied,
 	"reload":            remoteDenied,
 	"gc":                remoteDenied, // host-level data-dir maintenance; local Unix socket only
-	"mcp_connect":       remoteDenied,
 	"pair_approve":      remoteDenied, // pairing approval is an out-of-band local human action
 	"pair_list":         remoteDenied,
 	"pair_revoke":       remoteDenied,

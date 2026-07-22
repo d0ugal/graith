@@ -237,18 +237,22 @@ denies credentials/shell history via nono's default deny groups. The
 `~/.claude.json` (a file next to the `~/.claude` directory), which the
 `deny_credentials` group would otherwise block — see [File grants]({{< relref "how-it-works.md#file-grants" >}}).
 
-## Per-MCP-server sandbox
+## Browser automation
 
-Individual MCP servers can override the sandbox setting. When the global sandbox
-is enabled, MCP servers are wrapped with the same backend and also fail closed
-if it can't enforce:
+Use `agent-browser` for browser automation from a sandboxed agent. Inside a
+Graith/Safehouse sandbox on macOS, Chrome's nested sandbox must be disabled while
+Graith remains the outer OS boundary:
 
-```toml
-[[mcp_servers]]
-name    = "my-tools"
-command = "/usr/local/bin/my-mcp-server"
-sandbox = false    # run this MCP server outside the sandbox
+```bash
+agent-browser --session docs-check --args '--no-sandbox' open https://example.com
+agent-browser --session docs-check snapshot -i -u
+agent-browser --session docs-check close
 ```
+
+`--args '--no-sandbox'` is a Chrome launch argument; don't use it outside an
+existing OS sandbox. Reuse one named session for a task and close it when done.
+Graith does not translate this workflow into agent-runtime configuration or
+manage unrelated native integrations.
 
 ## Network egress
 

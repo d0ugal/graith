@@ -167,15 +167,14 @@ graith truncates output in several user-visible places so a huge log or long fin
 
 ```toml
 [limits]
-log_lines              = 300      # default trailing lines for `gr logs`, `gr mcp logs`, attach replay, and MCP log reads (when no -n)
+log_lines              = 300      # default trailing lines for `gr logs` and attach replay (when no -n)
 wait_scan_lines        = 500      # scrollback lines `gr wait --contains` scans for an already-present match
 wait_buffer_bytes      = 65536    # partial-line buffer cap in the live `gr wait` matcher (64 KiB)
-mcp_log_read_bytes     = 1048576  # max trailing bytes read from an MCP log file before splitting into lines (1 MiB)
 last_message_runes     = 2000     # agent's final Stop message the status hook forwards (counted in runes)
 inbox_preview_bytes    = 1000     # unread-inbox preview injected into a session's SessionStart hook context
 ```
 
-`log_lines` is the shared default when a `--lines`/`-n` count is omitted: `gr logs`, `gr mcp logs`, and attach scroll mode send `0`, so the daemon applies its current value per request — reconnecting attach sessions and graphical clients' log peeks pick up the same server-side default after a reload. `last_message_runes` and `inbox_preview_bytes` cap what's shown; the full message stays available via `gr msg inbox --all`. Byte caps never split a multi-byte character mid-rune, and `last_message_runes` is counted in whole runes.
+`log_lines` is the shared default when a `--lines`/`-n` count is omitted: `gr logs` and attach scroll mode send `0`, so the daemon applies its current value per request — reconnecting attach sessions and graphical clients' log peeks pick up the same server-side default after a reload. `last_message_runes` and `inbox_preview_bytes` cap what's shown; the full message stays available via `gr msg inbox --all`. Byte caps never split a multi-byte character mid-rune, and `last_message_runes` is counted in whole runes.
 
 ## Update check
 

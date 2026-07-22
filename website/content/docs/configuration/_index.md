@@ -43,7 +43,7 @@ restart succeeds. See
 
 This reference is organized by area:
 
-- **[Agents & repositories]({{< relref "agents.md" >}})** — agents, template variables, MCP servers, sandbox, per-repo settings.
+- **[Agents & repositories]({{< relref "agents.md" >}})** — agents, template variables, sandbox, per-repo settings.
 - **[Session behavior]({{< relref "sessions.md" >}})** — headless sessions, delete retention, launch throttle, git pull.
 - **[Notifications & messages]({{< relref "notifications.md" >}})** — status bar, notifications, messages.
 - **[Automation & PR awareness]({{< relref "automation.md" >}})** — PR/CI watching, author-trust gate, triggers.

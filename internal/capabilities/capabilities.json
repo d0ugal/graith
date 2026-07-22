@@ -259,14 +259,6 @@
       "notes": "Trigger lifecycle is an automation control plane kept in the CLI and orchestrator."
     },
     {
-      "id": "mcp.manage",
-      "category": "MCP servers",
-      "name": "List / restart / inspect MCP servers",
-      "cli": "supported", "ios": "n/a", "macos": "n/a",
-      "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",
-      "notes": "MCP server inspection and restart are developer operations kept in the CLI."
-    },
-    {
       "id": "store.access",
       "category": "Document store",
       "name": "Put / append / remove documents",

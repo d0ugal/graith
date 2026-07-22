@@ -131,14 +131,6 @@ as live state.
 
 <sup>1</sup> List / status / run / pause / resume triggers: Trigger lifecycle is an automation control plane kept in the CLI and orchestrator. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
 
-### MCP servers
-
-| Capability | CLI | iOS | macOS |
-|------------|:---:|:---:|:---:|
-| List / restart / inspect MCP servers <sup>1</sup> | ✅ | — | — |
-
-<sup>1</sup> List / restart / inspect MCP servers: MCP server inspection and restart are developer operations kept in the CLI. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
-
 ### Document store
 
 | Capability | CLI | iOS | macOS |

@@ -79,7 +79,7 @@ DEMO_REPO_PARENT="$(cd "$DEMO_REPO/.." && pwd)"
 # from $1. Only a well-formed table header ([name] / [[name]], optional trailing
 # comment) resets the keep flag — array-continuation lines that start with '['
 # (e.g. a multi-line array element) are NOT treated as headers. A header that
-# isn't sandbox/agents (triggers, repos, mcp_servers, orchestrator …) turns
+# isn't sandbox/agents (triggers, repos, orchestrator …) turns
 # copying off, so those never leak in.
 extract_agents_and_sandbox() {
 	awk '
@@ -258,7 +258,7 @@ EOF
 )
 
 # Mirror your real setup: copy the [agents.*] and [sandbox]/[sandbox.*] tables
-# straight out of your default graith config. Triggers, repos, mcp_servers and
+# straight out of your default graith config. Triggers, repos and
 # the orchestrator are deliberately left out.
 agents_sandbox=""
 if [ -f "$SRC_CONFIG" ]; then

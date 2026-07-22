@@ -8,6 +8,6 @@ import "time"
 const UpgradeNegotiationTimeout = 30 * time.Second
 
 // UpgradeReadinessTimeout covers all post-ack work before the replacement can
-// answer: background and MCP drains, PTY quiescence, exec, and the replacement
+// answer: background drains, PTY quiescence, exec, and the replacement
 // daemon's 15-second adoption window, with margin for startup I/O.
 const UpgradeReadinessTimeout = 60 * time.Second

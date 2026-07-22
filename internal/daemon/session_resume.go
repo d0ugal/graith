@@ -416,13 +416,6 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		}
 	}
 
-	// MCP is a separate injection mechanism (see #1135), but resume is PTY-only
-	// so it retains the lifecycle-hook gate.
-	var mcpServers []config.MCPServerConfig
-	if sessState.AgentHooks {
-		mcpServers = sm.resolveMCPServers(sessState.Agent)
-	}
-
 	// Snapshot mirror source includes under lock.
 	var sharedSourceIncludes []IncludedRepoState
 
@@ -548,9 +541,6 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	policyEnabled := commandPolicy.Enabled()
 	policyTimeout := commandPolicy.TimeoutDuration()
 	hookFilesNeeded := sessAgentHooks || policyEnabled
-	// MCP config injection is decided separately from hooks (see #1135). Resume is
-	// PTY-only, so the two coincide here.
-	sessMCPEnabled := sessAgentHooks
 	sessIncludes := make([]IncludedRepoState, len(sessState.Includes))
 	copy(sessIncludes, sessState.Includes)
 	sessInPlace := sessState.InPlace
@@ -771,16 +761,6 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		}
 	}
 
-	if sessMCPEnabled {
-		mcpArgs, err := sm.injectMCPConfig(sessAgent, id, mcpServers)
-		if err != nil {
-			rollbackState()
-			return SessionState{}, fmt.Errorf("inject mcp config: %w", err)
-		}
-
-		expandedArgs = append(expandedArgs, mcpArgs...)
-	}
-
 	if isOrchestrator {
 		sm.mu.RLock()
 		orchCfg := sm.cfg.Orchestrator
@@ -852,7 +832,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 			envKeys = append(envKeys, k)
 		}
 
-		opts, err := sm.sandboxOptsFromConfig(merged, id, ptyCWD, agent.Command, envKeys, hookFilesNeeded || sessMCPEnabled)
+		opts, err := sm.sandboxOptsFromConfig(merged, id, ptyCWD, agent.Command, envKeys, hookFilesNeeded)
 		if err != nil {
 			rollbackState()
 

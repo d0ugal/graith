@@ -25,6 +25,42 @@ var errUpgradeRejected = errors.New("upgrade rejected before daemon state mutati
 
 var validateRetainedAdoptedService = daemonservice.ValidateRetainedAdoptedService
 
+// stateLoadRefusal classifies cold-start state errors that must stop the daemon
+// before it opens a listener or runs lifecycle recovery.
+func stateLoadRefusal(err error) error {
+	var versionErr *StateVersionError
+	if errors.As(err, &versionErr) {
+		return fmt.Errorf("refusing to start: %w (downgrade would discard the newer state)", err)
+	}
+
+	var backupErr *StateMigrationBackupError
+	if errors.As(err, &backupErr) {
+		return fmt.Errorf(
+			"refusing to start: %w (migration requires a durable recovery backup; fix storage permissions or free space, then retry)",
+			err,
+		)
+	}
+
+	return nil
+}
+
+func adoptionStateLoadRefusal(err error) error {
+	var versionErr *StateVersionError
+	if errors.As(err, &versionErr) {
+		return fmt.Errorf("refusing to start: %w (downgrade would discard the newer state)", err)
+	}
+
+	var backupErr *StateMigrationBackupError
+	if errors.As(err, &backupErr) {
+		return fmt.Errorf(
+			"refusing upgrade adoption: %w (migration requires a durable recovery backup; fix storage permissions or free space, then retry)",
+			err,
+		)
+	}
+
+	return fmt.Errorf("refusing upgrade adoption with unreadable durable state: %w", err)
+}
+
 // cleanupLegacyDaemon stops an old daemon that may be listening on the
 // pre-v0.11 socket path ($TMPDIR or /tmp). Without this, upgrading would
 // leave an orphaned daemon since the new CLI can't reach the old socket.
@@ -205,7 +241,7 @@ func runAdoptBootstrap(configFile, adoptFrom string, serviceIdentity AdoptedServ
 	defer func() { returnErr = errors.Join(returnErr, ownership.Cleanup()) }()
 	// The immutable capsule is the first trustworthy enumeration of every
 	// transferred resource. Restore CLOEXEC before reading the manifest or
-	// touching config, paths, MCP, or any other subsystem that could fork.
+	// touching config, paths, or any other subsystem that could fork.
 	if err := secureUpgradeManifestDescriptors(owned); err != nil {
 		return err
 	}
@@ -404,8 +440,42 @@ func run(
 		return err
 	}
 
+	var (
+		coldState    *State
+		coldStateErr error
+	)
+
+	if adoptFrom == "" {
+		if err := AcquirePIDFile(paths.PIDFile); err != nil {
+			return err
+		}
+
+		coldState, coldStateErr = LoadState(paths.StateFile)
+		if refusal := stateLoadRefusal(coldStateErr); refusal != nil {
+			ReleasePIDFile(paths.PIDFile)
+			return refusal
+		}
+	} else {
+		// Validate capacity and preserve the exact old state before opening logs,
+		// databases, listeners, or transferred session descriptors. A backup
+		// failure therefore cannot cause any daemon lifecycle mutation.
+		if manifest.Version == upgradeManifestVersion {
+			if err := validateAdoptionCapacity(manifest); err != nil {
+				return err
+			}
+		}
+
+		if _, err := backupStateSnapshotBeforeMigration(paths.StateFile, manifest.StateSnapshot); err != nil {
+			return adoptionStateLoadRefusal(err)
+		}
+	}
+
 	logFile, err := os.OpenFile(paths.DaemonLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
+		if adoptFrom == "" {
+			ReleasePIDFile(paths.PIDFile)
+		}
+
 		return fmt.Errorf("open daemon log: %w", err)
 	}
 	defer func() { _ = logFile.Close() }()
@@ -427,6 +497,10 @@ func run(
 		JailListLimit:    cfg.Messages.JailListLimitOrDefault(),
 	})
 	if err != nil {
+		if adoptFrom == "" {
+			ReleasePIDFile(paths.PIDFile)
+		}
+
 		return fmt.Errorf("open message store: %w", err)
 	}
 	defer func() { _ = msgStore.Close() }()
@@ -440,16 +514,15 @@ func run(
 		ListLimit:   cfg.Todo.ListLimitOrDefault(),
 	})
 	if err != nil {
+		if adoptFrom == "" {
+			ReleasePIDFile(paths.PIDFile)
+		}
+
 		return fmt.Errorf("open todo store: %w", err)
 	}
 	defer func() { _ = todoStore.Close() }()
 
 	sm.todos = todoStore
-
-	mcpMgr := NewManagedMCPManager(cfg, paths.LogDir, log)
-
-	sm.mcpManager = mcpMgr
-	defer mcpMgr.Shutdown()
 
 	var l net.Listener
 	defer func() {
@@ -459,24 +532,9 @@ func run(
 	}()
 
 	if adoptFrom != "" {
-		// Current manifests were preflighted against this binary, but validate
-		// again before any state migration or write. Legacy v0 manifests have no
-		// capacity contract; preserve their live PTYs with degraded screens when
-		// helper construction reaches the native limit.
-		if manifest.Version == upgradeManifestVersion {
-			if err := validateAdoptionCapacity(manifest); err != nil {
-				return err
-			}
-		}
-
-		originalStateVersion, err := sm.loadStateSnapshotForAdoption(manifest.StateSnapshot)
+		_, err := sm.loadStateSnapshotForAdoption(manifest.StateSnapshot)
 		if err != nil {
-			var ve *StateVersionError
-			if errors.As(err, &ve) {
-				return fmt.Errorf("refusing to start: %w (downgrade would discard the newer state)", err)
-			}
-
-			return fmt.Errorf("refusing upgrade adoption with unreadable durable state: %w", err)
+			return adoptionStateLoadRefusal(err)
 		}
 
 		if err := sm.restoreUpgradeCleanup(); err != nil {
@@ -517,12 +575,6 @@ func run(
 
 		if len(adoption.UnresolvedSessions) > 0 {
 			return errors.New("upgrade adoption process cleanup remains unresolved")
-		}
-
-		if originalStateVersion < CurrentStateVersion {
-			if err := backupStateBeforeMigration(paths.StateFile, originalStateVersion, manifest.StateSnapshot); err != nil {
-				return fmt.Errorf("persist pre-migration upgrade state backup: %w", err)
-			}
 		}
 
 		if err := sm.saveState(); err != nil {
@@ -578,14 +630,17 @@ func run(
 
 		log.Info("daemon upgraded", "adopted_sessions", len(manifest.Sessions), "pid", os.Getpid())
 	} else {
-		if paths.Profile == "" {
-			if err := cleanupLegacyDaemon(log); err != nil {
-				return err
-			}
+		if coldStateErr != nil {
+			log.Warn("failed to load state", "err", coldStateErr)
+		} else if err := sm.installLoadedState(coldState); err != nil {
+			log.Warn("failed to install state", "err", err)
 		}
 
-		if err := AcquirePIDFile(paths.PIDFile); err != nil {
-			return err
+		if paths.Profile == "" {
+			if err := cleanupLegacyDaemon(log); err != nil {
+				ReleasePIDFile(paths.PIDFile)
+				return err
+			}
 		}
 
 		if err := recoverPendingUpgradeJournals(paths.RuntimeDir); err != nil {
@@ -600,16 +655,6 @@ func run(
 		if listenErr != nil {
 			ReleasePIDFile(paths.PIDFile)
 			return listenErr
-		}
-
-		if err := sm.LoadState(); err != nil {
-			var ve *StateVersionError
-			if errors.As(err, &ve) {
-				ReleasePIDFile(paths.PIDFile)
-				return fmt.Errorf("refusing to start: %w (downgrade would discard the newer state)", err)
-			}
-
-			log.Warn("failed to load state", "err", err)
 		}
 
 		if err := sm.loadOrCreateHumanToken(); err != nil {
@@ -1137,32 +1182,8 @@ func run(
 
 		backgroundCancel()
 
-		// Defers do not run across syscall.Exec. Stop lazy MCP children only
-		// after every reversible preflight; if Exec returns the manager remains
-		// usable and proxy clients can reconnect on demand.
-		mcpCtx, mcpCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		mcpDone := make(chan struct{})
-
-		go func() {
-			select {
-			case <-request.canceled:
-				mcpCancel()
-			case <-mcpDone:
-			}
-		}()
-
-		err = mcpMgr.FreezeAndDrain(mcpCtx)
-
-		close(mcpDone)
-		mcpCancel()
-
-		if err != nil {
-			mcpMgr.Thaw()
-			return fmt.Errorf("upgrade MCP drain failed: %w", err)
-		}
-
 		// Stop PTY reads and input only at the last reversible moment, after
-		// acknowledgement and every potentially slow child drain. This keeps
+		// acknowledgement and every potentially slow background drain. This keeps
 		// terminal I/O flowing throughout preflight and bounds the final gap.
 		ioCtx, ioCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		ioComplete := make(chan struct{})
@@ -1181,7 +1202,6 @@ func run(
 		ioCancel()
 
 		if err != nil {
-			mcpMgr.Thaw()
 			return fmt.Errorf("upgrade session I/O drain failed: %w", err)
 		}
 
@@ -1191,10 +1211,6 @@ func run(
 		// upgrade safe point. The manager reservation remains closed and every
 		// child-creating surface stays frozen on the unsafe path.
 		releaseSessionIO()
-
-		if !hasUnsafeUpgradeDescriptor(execErr) {
-			mcpMgr.Thaw()
-		}
 
 		if execErr != nil {
 			return fmt.Errorf("upgrade exec failed: %w", execErr)

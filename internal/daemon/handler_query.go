@@ -52,7 +52,7 @@ func configFileExists(statErr error) bool {
 
 // handleConfig returns the daemon's effective config as TOML plus a diff from
 // the built-in defaults. Env-map secrets are redacted before rendering so raw
-// MCP/agent env values never leave the daemon.
+// Agent env values never leave the daemon.
 func handleConfig(sm *SessionManager, send func(string, any)) {
 	cfg := config.RedactSecrets(sm.Config())
 

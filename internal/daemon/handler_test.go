@@ -3284,7 +3284,7 @@ func TestUpdateAllowsHumanReparent(t *testing.T) {
 // This file adds handler-dispatch tests for control messages that were not
 // otherwise exercised: repo listing, status summaries, session metadata, session
 // status queries, hook reports, restart/interrupt, conversation reads, fork /
-// migrate payload validation, config reload, MCP connect guards, the scenario
+// migrate payload validation, config reload, the scenario
 // lifecycle messages, and the unsupported-message fallthrough. Each test drives
 // HandleConnection through the net.Pipe harness with a constructed protocol
 // message and asserts the reply type, so it protects the real success and
@@ -3343,7 +3343,10 @@ func (h *testHarness) expectType(t *testing.T, want string) protocol.Envelope {
 // --- unsupported / fallthrough -------------------------------------------
 
 func TestCoverUnsupportedMessage(t *testing.T) {
-	for _, msgType := range []string{"wheesht_unknown", "star", "unstar"} {
+	for _, msgType := range []string{
+		"wheesht_unknown", "star", "unstar",
+		"mcp_connect", "mcp_list", "mcp_restart", "mcp_logs",
+	} {
 		t.Run(msgType, func(t *testing.T) {
 			h := newTestHarness(t)
 			h.sendControl(t, msgType, struct{}{})
@@ -3395,7 +3398,6 @@ func TestInvalidPayloads(t *testing.T) {
 		{"msg_conversation", "invalid msg_conversation message"},
 		{"fork", "invalid fork message"},
 		{"migrate", "invalid migrate message"},
-		{"mcp_connect", "invalid mcp_connect"},
 		{"scenario_start", "invalid scenario_start message"},
 		{"scenario_status", "invalid scenario_status message"},
 		{"scenario_stop", "invalid scenario_stop message"},
@@ -3687,85 +3689,6 @@ func TestCoverReloadRejectsAgent(t *testing.T) {
 	h.sendControlWithToken(t, "reload", struct{}{}, "tok-rl")
 
 	h.expectError(t, "not permitted for agent sessions")
-}
-
-// --- mcp_connect guards ---------------------------------------------------
-
-func TestCoverMCPConnectNoManager(t *testing.T) {
-	h := newTestHarness(t)
-
-	// The harness has no MCP manager configured, so a connect must fail closed.
-	h.sendControl(t, "mcp_connect", protocol.MCPConnectMsg{Server: "chrome"})
-
-	h.expectError(t, "MCP manager not initialized")
-}
-
-func TestMCPConnectForcesCallerAndDelegatesAuthenticatedToken(t *testing.T) {
-	h := newTestHarness(t)
-	h.addAuthenticatedSession(t, "canny-caller", "canny", "tok-canny-current")
-
-	outPath := filepath.Join(t.TempDir(), "caller.txt")
-	sandboxed := false
-	mm := newMCPManager(&config.Config{}, []injectedMCPServer{{
-		config: config.MCPServerConfig{
-			Name:    "graith",
-			Command: "sh",
-			Args:    []string{"-c", `printf '%s' "$GRAITH_TOKEN" > "$1"; exec cat`, "sh", outPath},
-			Sandbox: &sandboxed,
-		},
-		delegateCallerIdentity: true,
-	}}, h.sm.paths.LogDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	t.Cleanup(mm.Shutdown)
-	h.sm.SetMCPManager(mm)
-
-	h.sendControlWithToken(t, "mcp_connect", protocol.MCPConnectMsg{
-		Server:    "graith",
-		SessionID: "spoofed-session",
-	}, "tok-canny-current")
-	h.expectType(t, "mcp_connect_ok")
-
-	if got := waitForFileContent(t, outPath); got != "tok-canny-current" {
-		t.Fatalf("managed child token = %q, want authenticated caller token", got)
-	}
-
-	data, err := protocol.EncodeControl("detach", struct{}{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := h.writer.WriteFrame(protocol.ChannelControl, data); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestManagedMCPDelegationDoesNotUpgradeTokenAfterAuthentication(t *testing.T) {
-	oldToken := "tok-canny-old" //nolint:gosec // Deliberately recognizable test-only credential.
-	newToken := "tok-canny-new" //nolint:gosec // Deliberately recognizable test-only credential.
-
-	sm := newTestSMWithSessions(map[string]*SessionState{
-		"canny-caller": {ID: "canny-caller", Token: oldToken},
-	})
-
-	sm.mu.RLock()
-	auth, err := resolveAuth(sm, oldToken, ConnOrigin{}, "")
-	sm.mu.RUnlock()
-
-	if err != nil {
-		t.Fatalf("resolve old caller token: %v", err)
-	}
-
-	// Model resume rotating the session after this frame authenticated but
-	// before mcp_connect launches its managed child.
-	sm.mu.Lock()
-	delete(sm.tokenIndex, oldToken)
-	sm.state.Sessions["canny-caller"].Token = newToken
-	sm.tokenIndex[newToken] = "canny-caller"
-	sm.mu.Unlock()
-
-	identity := auth.managedMCPCallerIdentity()
-	if identity.sessionID != "canny-caller" || identity.token != oldToken {
-		t.Fatalf("delegated identity = %+v, want exact credential that authenticated the request", identity)
-	}
 }
 
 // --- scenario lifecycle ---------------------------------------------------
@@ -4132,136 +4055,5 @@ func TestCoverExitDescriptionSignalPrecedence(t *testing.T) {
 
 	if got != "killed by signal SIGTERM" {
 		t.Errorf("describeSessionExit precedence = %q, want signal to win", got)
-	}
-}
-
-// setupMCPHarness attaches an MCPManager (config server + auto-injected graith)
-// to the harness's SessionManager for the mcp_* control-message tests.
-func setupMCPHarness(t *testing.T, h *testHarness, servers []config.MCPServerConfig) *MCPManager {
-	t.Helper()
-
-	cfg := &config.Config{MCPServers: servers}
-	mm := NewManagedMCPManager(cfg, h.sm.paths.LogDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	t.Cleanup(mm.Shutdown)
-	h.sm.SetMCPManager(mm)
-
-	return mm
-}
-
-func TestHandlerMCPList(t *testing.T) {
-	h := newTestHarness(t)
-	setupMCPHarness(t, h, []config.MCPServerConfig{{Name: "braw", Command: "cat"}})
-
-	h.sendControl(t, "mcp_list", protocol.MCPListMsg{})
-
-	env := h.readControlMsg(t)
-	if env.Type != "mcp_list" {
-		t.Fatalf("response type = %q, want mcp_list", env.Type)
-	}
-
-	var resp protocol.MCPListResponse
-
-	_ = protocol.DecodePayload(env, &resp)
-
-	names := make(map[string]bool)
-	for _, s := range resp.Servers {
-		names[s.Name] = true
-	}
-
-	if !names["braw"] || !names["graith"] {
-		t.Errorf("expected braw + graith in list, got %+v", resp.Servers)
-	}
-}
-
-func TestHandlerMCPListNoManager(t *testing.T) {
-	h := newTestHarness(t)
-	// Do not set an MCP manager.
-
-	h.sendControl(t, "mcp_list", protocol.MCPListMsg{})
-
-	env := h.readControlMsg(t)
-	if env.Type != "mcp_list" {
-		t.Fatalf("response type = %q, want mcp_list", env.Type)
-	}
-
-	var resp protocol.MCPListResponse
-
-	_ = protocol.DecodePayload(env, &resp)
-
-	if len(resp.Servers) != 0 {
-		t.Errorf("expected empty list with no manager, got %+v", resp.Servers)
-	}
-}
-
-func TestHandlerMCPRestart(t *testing.T) {
-	h := newTestHarness(t)
-	setupMCPHarness(t, h, []config.MCPServerConfig{{Name: "thrawn", Command: "cat"}})
-
-	h.sendControl(t, "mcp_restart", protocol.MCPRestartMsg{Name: "thrawn"})
-
-	env := h.readControlMsg(t)
-	if env.Type != "mcp_restart" {
-		t.Fatalf("response type = %q, want mcp_restart", env.Type)
-	}
-
-	var resp protocol.MCPRestartResponse
-
-	_ = protocol.DecodePayload(env, &resp)
-
-	if resp.Name != "thrawn" || resp.Stopped != 0 {
-		t.Errorf("restart of idle server: got %+v, want {thrawn 0}", resp)
-	}
-}
-
-func TestHandlerMCPRestartUnknown(t *testing.T) {
-	h := newTestHarness(t)
-	setupMCPHarness(t, h, nil)
-
-	h.sendControl(t, "mcp_restart", protocol.MCPRestartMsg{Name: "dreich"})
-
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("response type = %q, want error", env.Type)
-	}
-}
-
-func TestHandlerMCPLogs(t *testing.T) {
-	h := newTestHarness(t)
-	setupMCPHarness(t, h, []config.MCPServerConfig{{Name: "ken", Command: "cat"}})
-
-	mcpDir := filepath.Join(h.sm.paths.LogDir, "mcp")
-	if err := os.MkdirAll(mcpDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(filepath.Join(mcpDir, "ken-sess1-ken.log"), []byte("speir the daemon\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	h.sendControl(t, "mcp_logs", protocol.MCPLogsMsg{Name: "ken"})
-
-	env := h.readControlMsg(t)
-	if env.Type != "mcp_logs" {
-		t.Fatalf("response type = %q, want mcp_logs", env.Type)
-	}
-
-	var resp protocol.MCPLogsResponse
-
-	_ = protocol.DecodePayload(env, &resp)
-
-	if len(resp.Files) != 1 || !strings.Contains(resp.Files[0].Content, "speir the daemon") {
-		t.Errorf("unexpected logs response: %+v", resp)
-	}
-}
-
-func TestHandlerMCPLogsUnknown(t *testing.T) {
-	h := newTestHarness(t)
-	setupMCPHarness(t, h, nil)
-
-	h.sendControl(t, "mcp_logs", protocol.MCPLogsMsg{Name: "fash"})
-
-	env := h.readControlMsg(t)
-	if env.Type != "error" {
-		t.Fatalf("response type = %q, want error", env.Type)
 	}
 }

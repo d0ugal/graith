@@ -14,7 +14,7 @@ The `gr` command-line reference, grouped by area:
 - **[Messaging & store]({{< relref "messaging-store.md" >}})** — inter-agent messaging and the document store.
 - **[Scenarios, triggers & todos]({{< relref "orchestration.md" >}})** — multi-session scenarios, daemon-fired triggers, and the shared todo list.
 - **[Remote access]({{< relref "remote.md" >}})** — pair, administer, list, and attach to remote daemons.
-- **[Daemon & other commands]({{< relref "daemon.md" >}})** — daemon lifecycle, config, MCP, completion, and internal commands.
+- **[Daemon & other commands]({{< relref "daemon.md" >}})** — daemon lifecycle, config, completion, and internal commands.
 
 ## Global flags
 

@@ -20,7 +20,6 @@ func TestLimitsAccessorsFallBackToDefault(t *testing.T) {
 		{"log_lines", LimitsConfig.LogLinesOrDefault, func(l *LimitsConfig, v int) { l.LogLines = v }, LimitsLogLinesDefault},
 		{"wait_scan_lines", LimitsConfig.WaitScanLinesOrDefault, func(l *LimitsConfig, v int) { l.WaitScanLines = v }, LimitsWaitScanLinesDefault},
 		{"wait_buffer_bytes", LimitsConfig.WaitBufferBytesOrDefault, func(l *LimitsConfig, v int) { l.WaitBufferBytes = v }, LimitsWaitBufferBytesDefault},
-		{"mcp_log_read_bytes", LimitsConfig.MCPLogReadBytesOrDefault, func(l *LimitsConfig, v int) { l.MCPLogReadBytes = v }, LimitsMCPLogReadBytesDefault},
 		{"last_message_runes", LimitsConfig.LastMessageRunesOrDefault, func(l *LimitsConfig, v int) { l.LastMessageRunes = v }, LimitsLastMessageRunesDefault},
 		{"inbox_preview_bytes", LimitsConfig.InboxPreviewBytesOrDefault, func(l *LimitsConfig, v int) { l.InboxPreviewBytes = v }, LimitsInboxPreviewBytesDefault},
 	}
@@ -67,7 +66,6 @@ func TestEmbeddedLimitsCarryPolicyValues(t *testing.T) {
 		{"log_lines", l.LogLines, LimitsLogLinesDefault},
 		{"wait_scan_lines", l.WaitScanLines, LimitsWaitScanLinesDefault},
 		{"wait_buffer_bytes", l.WaitBufferBytes, LimitsWaitBufferBytesDefault},
-		{"mcp_log_read_bytes", l.MCPLogReadBytes, LimitsMCPLogReadBytesDefault},
 		{"last_message_runes", l.LastMessageRunes, LimitsLastMessageRunesDefault},
 		{"inbox_preview_bytes", l.InboxPreviewBytes, LimitsInboxPreviewBytesDefault},
 	}
