@@ -56,8 +56,6 @@ var rootCmd = &cobra.Command{
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		commandPolicyStartupError = nil
-
 		if agentMode {
 			if err := os.Setenv("GR_AGENT_MODE", "1"); err != nil {
 				return fmt.Errorf("enable explicit agent mode: %w", err)
@@ -79,23 +77,12 @@ var rootCmd = &cobra.Command{
 
 		cfg, err = config.LoadOrDefault(cfgFile)
 		if err != nil {
-			if cmd != commandPolicyCheckCmd {
-				return fmt.Errorf("loading config: %w", err)
-			}
-			// A hook must always emit an agent-native deny response. Falling out
-			// through Cobra with a plain exit error has agent-specific semantics
-			// and could be treated as a non-blocking hook failure.
-			commandPolicyStartupError = fmt.Errorf("loading config: %w", err)
-			cfg = config.Default()
+			return fmt.Errorf("loading config: %w", err)
 		}
 
 		paths, err = config.ResolvePaths()
 		if err != nil {
-			if cmd != commandPolicyCheckCmd {
-				return err
-			}
-
-			commandPolicyStartupError = errors.Join(commandPolicyStartupError, fmt.Errorf("resolving paths: %w", err))
+			return err
 		}
 
 		if cfg.DataDir != "" && paths.DataDir != "" {
@@ -386,7 +373,6 @@ func registerCommands() {
 		rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "JSON output")
 		rootCmd.PersistentFlags().BoolVar(&agentMode, "agent-mode", false, "force agent mode (auto-enables JSON output)")
 
-		registerCommandPolicyCheckCmd()
 		registerAttachCmd()
 		registerCheckInboxCmd()
 		registerCompletionCmd()

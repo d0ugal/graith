@@ -107,8 +107,8 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	}
 
 	// The pre-lock snapshot was used only for slow username/model discovery.
-	// Capture the launch generation again under the lock so command-policy hook
-	// installation and the persisted CreationConfig describe the same config.
+	// Capture the launch generation again under the lock so hook installation
+	// and the persisted CreationConfig describe the same config.
 	cfgSnapshot = sm.cfg
 
 	source, ok := sm.state.Sessions[sourceSessionID]
@@ -204,9 +204,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	sourceAgentSessionID := source.AgentSessionID
 	sourceLabels := append([]string{}, source.Labels...)
 	sourceAgentHooks := source.AgentHooks
-	policyEnabled := cfgSnapshot.CommandPolicy.Enabled()
-	policyTimeout := cfgSnapshot.CommandPolicy.TimeoutDuration()
-	hookFilesNeeded := sourceAgentHooks || policyEnabled
+	hookFilesNeeded := sourceAgentHooks
 	sourceForkIncludes := make([]IncludedRepoState, len(source.Includes))
 	copy(sourceForkIncludes, source.Includes)
 
@@ -229,11 +227,6 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 
 	sandboxed, err := sm.resolveSandbox(agentName)
 	if err != nil {
-		sm.mu.Unlock()
-		return SessionState{}, err
-	}
-
-	if err := sm.validateCommandPolicy(agentName); err != nil {
 		sm.mu.Unlock()
 		return SessionState{}, err
 	}
@@ -521,7 +514,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	}
 
 	if hookFilesNeeded {
-		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, sourceAgentHooks, policyEnabled, policyTimeout)
+		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, true)
 		if err != nil {
 			forkCleanup()
 			rollbackState()
@@ -718,7 +711,6 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	sessState.CreationCfg = &CreationConfig{
 		Agent:         agent,
 		SandboxConfig: cfgSnapshot.Sandbox.Merge(agent.Sandbox),
-		CommandPolicy: cfgSnapshot.CommandPolicy,
 	}
 
 	if scrapesID(agentName) && agentSessionID == "" {

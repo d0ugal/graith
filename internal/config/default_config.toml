@@ -443,18 +443,6 @@ inbox_max_wait = "2m"         # cap that user-idle wait before injecting anyway
 inbox_cooldown = "30s"        # minimum interval between unread-inbox nudges to one session ("0" disables)
 inbox_detached_delay = "5s"   # settle delay before notifying a session with no attached client ("0" is immediate)
 
-[command_policy]
-# Optional synchronous restriction layer for shell commands. Empty disables it.
-# An allow only continues to the OS sandbox; it never grants access. A deny,
-# ask, malformed response, timeout, or evaluation error blocks immediately.
-# Supported backends: "builtin" and "localmost".
-backend = ""
-timeout = "5s"
-# command = "localmost" # optional binary override for backend="localmost"
-# [command_policy.builtin]
-# allow = ["git status", "go test @*"]
-# deny = ["rm @*"]
-
 [overlay]
 # Keys that jump straight to the Nth session in the picker (1st key → session 1, …).
 shortcut_keys = "1234567890"

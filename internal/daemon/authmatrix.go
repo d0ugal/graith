@@ -28,7 +28,7 @@ const (
 	// sessions, but not a read-only guest.
 	remoteHumanRW
 	// remoteSessionOnly: session-originated messages (a session acting on
-	// itself — e.g. checking command policy or reporting hook status). Allowed for
+	// itself — e.g. reporting hook status). Allowed for
 	// sessions/orchestrator only; NOT paired humans (who could otherwise
 	// impersonate a session) or guests.
 	remoteSessionOnly
@@ -56,8 +56,7 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"screen_snapshot": remoteReadOnly,
 
 	// Session-originated (a session acting on itself); not humans/guests.
-	"command_policy_check": remoteSessionOnly,
-	"status_report":        remoteSessionOnly,
+	"status_report": remoteSessionOnly,
 	// Result publication derives the member from the authenticated session; a
 	// remote human must not gain a path that can claim a member's success.
 	"scenario_result_publish": remoteSessionOnly,

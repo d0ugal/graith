@@ -6,31 +6,6 @@ import (
 	"testing"
 )
 
-func TestCommandPolicyAllowsContinueOrDenies(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		agent, decision, want string
-	}{
-		{"claude", "allow", ``},
-		{"claude", "ask", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}`},
-		{"claude", "unknown", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}`},
-		{"codex", "allow", ``},
-		{"codex", "defer", `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"command policy denied execution"}}`},
-		{"cursor", "allow", `{"permission":"allow"}`},
-		{"cursor", "ask", `{"permission":"deny"}`},
-	}
-	for _, tt := range tests {
-		t.Run(tt.agent+"/"+tt.decision, func(t *testing.T) {
-			t.Parallel()
-
-			if got := CommandPolicy(tt.agent, tt.decision, ""); got != tt.want {
-				t.Fatalf("CommandPolicy() = %s, want %s", got, tt.want)
-			}
-		})
-	}
-}
-
 // inbox context must go through hookSpecificOutput.additionalContext (which
 // reaches the model), not a top-level systemMessage (which is user-facing only).
 func TestInboxContextClaude(t *testing.T) {

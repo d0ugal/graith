@@ -562,25 +562,6 @@ func TestCreateOrchestratorAllowsNativePromptAgent(t *testing.T) {
 	}
 }
 
-func TestCreateOrchestratorRejectsUnavailableCommandPolicy(t *testing.T) {
-	sm := newOrchTestSM(t)
-	cfg := config.Default()
-	cfg.CommandPolicy = config.CommandPolicy{
-		Backend: "localmost", Command: filepath.Join(t.TempDir(), "missing-localmost"),
-	}
-	sm.cfg = cfg
-	sm.sandboxResolver = func(string) (bool, error) { return true, nil }
-
-	_, err := sm.createOrchestrator(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "cannot enforce") {
-		t.Fatalf("createOrchestrator error = %v, want command-policy availability failure", err)
-	}
-
-	if id := sm.findOrchestratorID(); id != "" {
-		t.Fatalf("failed command-policy validation persisted session %q", id)
-	}
-}
-
 // TestEnsureOrchestratorDisabled_Cov2 asserts the boot hook is a no-op when the
 // feature is disabled in config.
 func TestEnsureOrchestratorDisabled_Cov2(t *testing.T) {

@@ -26,24 +26,6 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
-// commandPolicyHookCommand turns failure to start or run the bounded policy
-// supervisor into the exit-2 blocking contract shared by Claude and Codex
-// PreToolUse hooks. The supervisor itself emits a valid native deny for worker
-// crashes, malformed output, signals, and its shorter internal timeout.
-func commandPolicyHookCommand(quotedGr string) string {
-	return quotedGr + " command-policy-check || { printf '%s\\n' " +
-		"'graith command policy hook failed before returning a decision' >&2; exit 2; }"
-}
-
-// The agent hook runner must outlive the policy supervisor's own deadline. The
-// config caps policy evaluation at 60 seconds; ten seconds covers the worker's
-// transport slack and process startup/teardown without leaving a human-facing
-// prompt or an unbounded hook.
-func commandPolicyHookTimeout(timeout time.Duration) int {
-	const runnerSlack = 10 * time.Second
-	return int((timeout + runnerSlack + time.Second - 1) / time.Second)
-}
-
 // hookDir returns the directory for hook files for a session.
 func (sm *SessionManager) hookDir(sessionID string) string {
 	return filepath.Join(sm.paths.DataDir, "hooks", sessionID)
@@ -103,12 +85,8 @@ func grBinReadDir(grBin string) (string, bool) {
 }
 
 // generateClaudeSettings writes a Claude Code settings JSON file that registers
-// lifecycle hooks and, independently, the optional Bash command-policy hook.
-func (sm *SessionManager) generateClaudeSettings(sessionID string, lifecycle, policy bool) (string, error) {
-	return sm.generateClaudeSettingsWithTimeout(sessionID, lifecycle, policy, sm.Config().CommandPolicy.TimeoutDuration())
-}
-
-func (sm *SessionManager) generateClaudeSettingsWithTimeout(sessionID string, lifecycle, policy bool, policyTimeout time.Duration) (string, error) {
+// Graith's generic lifecycle hooks.
+func (sm *SessionManager) generateClaudeSettings(sessionID string) (string, error) {
 	dir := sm.hookDir(sessionID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create hook dir: %w", err)
@@ -122,7 +100,6 @@ func (sm *SessionManager) generateClaudeSettingsWithTimeout(sessionID string, li
 		"SessionStart",
 		"SessionEnd",
 		"UserPromptSubmit",
-		"PreToolUse",
 		"PostToolUse",
 		"Notification",
 		"Stop",
@@ -158,37 +135,13 @@ func (sm *SessionManager) generateClaudeSettingsWithTimeout(sessionID string, li
 	for _, event := range events {
 		var handlers []hookHandler
 
-		// Default to a match-all (empty) matcher. Command policy is scoped to the
-		// verified shell transport by an exact Bash matcher.
-		matcher := ""
-
 		switch event {
-		case "PreToolUse":
-			if !policy {
-				continue
-			}
-
-			matcher = "^Bash$"
-			handlers = []hookHandler{
-				{
-					Type: "command", Command: commandPolicyHookCommand(quoted),
-					Timeout: commandPolicyHookTimeout(policyTimeout),
-				},
-			}
 		case "SessionStart":
-			if !lifecycle {
-				continue
-			}
-
 			handlers = []hookHandler{
 				{Type: "command", Command: fmt.Sprintf("%s report-status --event %s", quoted, event)},
 				{Type: "command", Command: quoted + " check-inbox"},
 			}
 		default:
-			if !lifecycle {
-				continue
-			}
-
 			handlers = []hookHandler{
 				{Type: "command", Command: fmt.Sprintf("%s report-status --event %s", quoted, event)},
 			}
@@ -196,7 +149,7 @@ func (sm *SessionManager) generateClaudeSettingsWithTimeout(sessionID string, li
 
 		settings.Hooks[event] = []matcherGroup{
 			{
-				Matcher: matcher,
+				Matcher: "",
 				Hooks:   handlers,
 			},
 		}
@@ -216,12 +169,8 @@ func (sm *SessionManager) generateClaudeSettingsWithTimeout(sessionID string, li
 
 // injectClaudeHooks generates the Claude Code settings (lifecycle hook) file for
 // a session and returns the extra args to add to the agent launch.
-func (sm *SessionManager) injectClaudeHooks(sessionID string, lifecycle, policy bool) (extraArgs []string, extraEnv map[string]string, err error) {
-	return sm.injectClaudeHooksWithTimeout(sessionID, lifecycle, policy, sm.Config().CommandPolicy.TimeoutDuration())
-}
-
-func (sm *SessionManager) injectClaudeHooksWithTimeout(sessionID string, lifecycle, policy bool, policyTimeout time.Duration) (extraArgs []string, extraEnv map[string]string, err error) {
-	settingsPath, err := sm.generateClaudeSettingsWithTimeout(sessionID, lifecycle, policy, policyTimeout)
+func (sm *SessionManager) injectClaudeHooks(sessionID string) (extraArgs []string, extraEnv map[string]string, err error) {
+	settingsPath, err := sm.generateClaudeSettings(sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -241,9 +190,7 @@ type codexHookEvent struct {
 }
 
 type codexHookGroup struct {
-	matcher  string
 	commands []string
-	timeout  int
 }
 
 // injectCodexHooks builds the Codex session-config overrides that register
@@ -254,55 +201,34 @@ type codexHookGroup struct {
 // [hooks] config, and accepts hooks per-invocation as trusted session config via
 // repeatable `-c hooks.<Event>=<toml>` overrides. Each override's value is
 // parsed by Codex as TOML (codex-rs/utils/cli config_override), so graith emits
-// a TOML array of matcher groups. Lifecycle groups have no matcher (match all),
-// while command policy matches Bash only. `--dangerously-bypass-hook-trust`
+// a TOML array of matcher groups. Lifecycle groups have no matcher (match all).
+// `--dangerously-bypass-hook-trust`
 // skips Codex's hook-trust review because graith generated and vetted these
 // hooks; it does not disable the agent's separate native tool approvals.
-func (sm *SessionManager) injectCodexHooks(sessionID string, lifecycle, policy bool) (extraArgs []string, extraEnv map[string]string, err error) {
-	return sm.injectCodexHooksWithTimeout(sessionID, lifecycle, policy, sm.Config().CommandPolicy.TimeoutDuration())
-}
+func (sm *SessionManager) injectCodexHooks(sessionID string, lifecycle bool) (extraArgs []string, extraEnv map[string]string, err error) {
+	if !lifecycle {
+		return nil, nil, nil
+	}
 
-func (sm *SessionManager) injectCodexHooksWithTimeout(sessionID string, lifecycle, policy bool, policyTimeout time.Duration) (extraArgs []string, extraEnv map[string]string, err error) {
 	grBin := shellQuote(resolveGrBin())
 
-	var events []codexHookEvent
-	if lifecycle {
-		events = append(events,
-			codexHookEvent{event: "SessionStart", groups: []codexHookGroup{{commands: []string{
-				grBin + " report-status --event SessionStart",
-				grBin + " check-inbox",
-			}}}},
-			codexHookEvent{event: "UserPromptSubmit", groups: []codexHookGroup{{commands: []string{
-				grBin + " report-status --event UserPromptSubmit",
-			}}}},
-			codexHookEvent{event: "PostToolUse", groups: []codexHookGroup{{commands: []string{
-				grBin + " report-status --event PostToolUse",
-			}}}},
-			codexHookEvent{event: "Stop", groups: []codexHookGroup{{commands: []string{
-				grBin + " report-status --event Stop",
-			}}}},
-		)
-	}
-
-	var preToolGroups []codexHookGroup
-	if lifecycle {
-		preToolGroups = append(preToolGroups, codexHookGroup{commands: []string{
+	events := []codexHookEvent{
+		{event: "SessionStart", groups: []codexHookGroup{{commands: []string{
+			grBin + " report-status --event SessionStart",
+			grBin + " check-inbox",
+		}}}},
+		{event: "UserPromptSubmit", groups: []codexHookGroup{{commands: []string{
+			grBin + " report-status --event UserPromptSubmit",
+		}}}},
+		{event: "PreToolUse", groups: []codexHookGroup{{commands: []string{
 			grBin + " report-status --event PreToolUse",
-		}})
-	}
-
-	if policy {
-		// PreToolUse runs independently of Codex's native approval policy, so
-		// command policy remains enforceable whether the agent prompts or not.
-		preToolGroups = append(preToolGroups, codexHookGroup{
-			matcher:  "^Bash$",
-			commands: []string{commandPolicyHookCommand(grBin)},
-			timeout:  commandPolicyHookTimeout(policyTimeout),
-		})
-	}
-
-	if len(preToolGroups) > 0 {
-		events = append(events, codexHookEvent{event: "PreToolUse", groups: preToolGroups})
+		}}}},
+		{event: "PostToolUse", groups: []codexHookGroup{{commands: []string{
+			grBin + " report-status --event PostToolUse",
+		}}}},
+		{event: "Stop", groups: []codexHookGroup{{commands: []string{
+			grBin + " report-status --event Stop",
+		}}}},
 	}
 
 	for _, e := range events {
@@ -338,20 +264,10 @@ func codexHookOverrideGroups(groups []codexHookGroup) string {
 	for i, group := range groups {
 		handlers := make([]string, len(group.commands))
 		for j, command := range group.commands {
-			timeout := ""
-			if group.timeout > 0 {
-				timeout = fmt.Sprintf(`,timeout=%d`, group.timeout)
-			}
-
-			handlers[j] = fmt.Sprintf(`{type="command",command=%s%s}`, tomlBasicString(command), timeout)
+			handlers[j] = fmt.Sprintf(`{type="command",command=%s}`, tomlBasicString(command))
 		}
 
-		matcher := ""
-		if group.matcher != "" {
-			matcher = fmt.Sprintf(`matcher=%s,`, tomlBasicString(group.matcher))
-		}
-
-		encodedGroups[i] = fmt.Sprintf(`{%shooks=[%s]}`, matcher, strings.Join(handlers, ","))
+		encodedGroups[i] = fmt.Sprintf(`{hooks=[%s]}`, strings.Join(handlers, ","))
 	}
 
 	return fmt.Sprintf(`[%s]`, strings.Join(encodedGroups, ","))
@@ -457,7 +373,11 @@ func preTrustCursorWorkspace(worktreePath string) error {
 // injectCursorHooks generates a .cursor/hooks.json in the worktree for a
 // Cursor session. Returns no extra args or env — cursor reads hooks from the
 // project directory automatically.
-func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, lifecycle, policy bool) (extraArgs []string, extraEnv map[string]string, err error) {
+func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string) (extraArgs []string, extraEnv map[string]string, err error) {
+	return sm.injectCursorHooksWithGrBin(sessionID, worktreePath, resolveGrBin())
+}
+
+func (sm *SessionManager) injectCursorHooksWithGrBin(sessionID, worktreePath, grBin string) (extraArgs []string, extraEnv map[string]string, err error) {
 	if worktreePath == "" {
 		return nil, nil, nil
 	}
@@ -474,7 +394,7 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, life
 	}
 
 	hooksPath := filepath.Join(cursorDir, "hooks.json")
-	quoted := shellQuote(resolveGrBin())
+	quoted := shellQuote(grBin)
 
 	type hookEntry struct {
 		Command string `json:"command"`
@@ -485,27 +405,18 @@ func (sm *SessionManager) injectCursorHooks(sessionID, worktreePath string, life
 		Hooks   map[string][]hookEntry `json:"hooks"`
 	}
 
-	hooks := hooksFile{Version: 1, Hooks: map[string][]hookEntry{}}
-	if lifecycle {
-		hooks.Hooks = map[string][]hookEntry{
-			"sessionStart": {
-				{Command: quoted + " report-status --event SessionStart"},
-				{Command: quoted + " check-inbox"},
-			},
-			"postToolUse": {
-				{Command: quoted + " report-status --event PostToolUse"},
-			},
-			"stop": {
-				{Command: quoted + " report-status --event Stop"},
-			},
-		}
-	}
-
-	if policy {
-		hooks.Hooks["preToolUse"] = []hookEntry{
-			{Command: quoted + " command-policy-check"},
-		}
-	}
+	hooks := hooksFile{Version: 1, Hooks: map[string][]hookEntry{
+		"sessionStart": {
+			{Command: quoted + " report-status --event SessionStart"},
+			{Command: quoted + " check-inbox"},
+		},
+		"postToolUse": {
+			{Command: quoted + " report-status --event PostToolUse"},
+		},
+		"stop": {
+			{Command: quoted + " report-status --event Stop"},
+		},
+	}}
 
 	data, err := json.MarshalIndent(hooks, "", "  ")
 	if err != nil {
@@ -1284,14 +1195,18 @@ func (sm *SessionManager) removeGeneratedCursorHooks(sessionID, worktreePath str
 
 // injectHooks dispatches lifecycle-hook injection to the agent-specific
 // implementation. It returns nil for agents that don't support hooks.
-func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string, lifecycle, policy bool, policyTimeout time.Duration) (extraArgs []string, extraEnv map[string]string, err error) {
+func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string, lifecycle bool) (extraArgs []string, extraEnv map[string]string, err error) {
+	if !lifecycle {
+		return nil, nil, nil
+	}
+
 	switch agentName {
 	case "claude":
-		return sm.injectClaudeHooksWithTimeout(sessionID, lifecycle, policy, policyTimeout)
+		return sm.injectClaudeHooks(sessionID)
 	case "codex":
-		return sm.injectCodexHooksWithTimeout(sessionID, lifecycle, policy, policyTimeout)
+		return sm.injectCodexHooks(sessionID, true)
 	case "cursor":
-		return sm.injectCursorHooks(sessionID, worktreePath, lifecycle, policy)
+		return sm.injectCursorHooks(sessionID, worktreePath)
 	default:
 		sm.log.Info("agent does not support hooks, skipping", "agent", agentName, "session_id", sessionID)
 		return nil, nil, nil
@@ -1312,4 +1227,95 @@ func (sm *SessionManager) cleanupHooks(sessionID, agentName, worktreePath string
 	}
 
 	cleanupCursorRule(worktreePath)
+}
+
+type removedHookCleanupCandidate struct {
+	id           string
+	agent        string
+	worktreePath string
+	pid          int
+}
+
+// completeRemovedHookCleanup retires generated hook artifacts only after the
+// removed-feature migration has resolved the session's exact process identity.
+// It deliberately leaves unrelated files, prompt rules, user hooks, and native
+// agent configuration untouched.
+func (sm *SessionManager) completeRemovedHookCleanup(persist bool) error {
+	sm.mu.RLock()
+
+	var candidates []removedHookCleanupCandidate
+	for id, session := range sm.state.Sessions {
+		if !session.RemovedHookCleanupPending {
+			continue
+		}
+
+		candidates = append(candidates, removedHookCleanupCandidate{
+			id:           id,
+			agent:        session.Agent,
+			worktreePath: session.WorktreePath,
+			pid:          session.PID,
+		})
+	}
+
+	sm.mu.RUnlock()
+	slices.SortFunc(candidates, func(a, b removedHookCleanupCandidate) int {
+		return strings.Compare(a.id, b.id)
+	})
+
+	var (
+		cleaned []string
+		errs    []error
+	)
+
+	for _, candidate := range candidates {
+		if candidate.pid != 0 {
+			errs = append(errs, fmt.Errorf("session %s still has unresolved process identity PID %d", candidate.id, candidate.pid))
+			continue
+		}
+
+		if candidate.agent == "cursor" {
+			sm.removeGeneratedCursorHooks(candidate.id, candidate.worktreePath)
+			if _, err := os.Lstat(sm.cursorHooksOwnershipPath(candidate.id)); err == nil {
+				errs = append(errs, fmt.Errorf("session %s cursor hook ownership cleanup remains unresolved", candidate.id))
+				continue
+			} else if !errors.Is(err, os.ErrNotExist) {
+				errs = append(errs, fmt.Errorf("verify session %s cursor hook ownership cleanup: %w", candidate.id, err))
+				continue
+			}
+		}
+
+		if candidate.agent == "claude" {
+			settingsPath := filepath.Join(sm.hookDir(candidate.id), "settings.json")
+			if err := os.Remove(settingsPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				errs = append(errs, fmt.Errorf("remove session %s generated Claude settings: %w", candidate.id, err))
+				continue
+			}
+		}
+
+		// Remove the private directory only when no unrelated artifact remains.
+		if err := os.Remove(sm.hookDir(candidate.id)); err != nil &&
+			!errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ENOTEMPTY) {
+			errs = append(errs, fmt.Errorf("remove empty session %s hook directory: %w", candidate.id, err))
+			continue
+		}
+
+		cleaned = append(cleaned, candidate.id)
+	}
+
+	if len(cleaned) > 0 {
+		sm.mu.Lock()
+		for _, id := range cleaned {
+			if session := sm.state.Sessions[id]; session != nil && session.PID == 0 {
+				session.RemovedHookCleanupPending = false
+			}
+		}
+		if persist {
+			if err := sm.saveState(); err != nil {
+				errs = append(errs, fmt.Errorf("persist removed-hook cleanup: %w", err))
+			}
+		}
+		sm.mu.Unlock()
+	}
+
+	return errors.Join(errs...)
 }

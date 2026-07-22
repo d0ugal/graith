@@ -661,20 +661,6 @@ type ScreenPreviewResponseMsg struct {
 	Preview   string `json:"preview"`
 }
 
-// CommandPolicyCheckMsg is the bounded synchronous hook-to-daemon policy
-// request. The daemon always replies immediately with allow or deny.
-type CommandPolicyCheckMsg struct {
-	SessionID   string `json:"session_id"`
-	ToolName    string `json:"tool_name"`
-	ToolInput   string `json:"tool_input,omitempty"`
-	HookPayload string `json:"hook_payload,omitempty"`
-}
-
-type CommandPolicyDecisionMsg struct {
-	Decision string `json:"decision"`
-	Reason   string `json:"reason,omitempty"`
-}
-
 type ScreenSnapshotMsg struct {
 	SessionID string `json:"session_id"`
 }

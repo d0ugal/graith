@@ -169,8 +169,6 @@ var registeredTypes = []any{
 	ErrorMsg{},
 	ScreenPreviewMsg{},
 	ScreenPreviewResponseMsg{},
-	CommandPolicyCheckMsg{},
-	CommandPolicyDecisionMsg{},
 	ScreenSnapshotMsg{},
 	ScreenSnapshotResponseMsg{},
 	StatusRequestMsg{},
@@ -425,19 +423,17 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"TriggerStatusResponse": {SwiftNA, ""},
 
 	// --- Not applicable: a GUI/remote client never decodes these. ---
-	"StatusReportMsg":          {SwiftNA, ""},                           // hook CLI -> daemon
-	"CommandPolicyCheckMsg":    {SwiftNA, ""},                           // hook CLI -> daemon
-	"CommandPolicyDecisionMsg": {SwiftNA, ""},                           // daemon -> hook CLI
-	"UpgradeMsg":               {SwiftNA, ""},                           // local-only
-	"GCMsg":                    {SwiftNA, ""},                           // local-only (doctor)
-	"GCOrphanInfo":             {SwiftNA, ""},                           // local-only (doctor)
-	"GCResultMsg":              {SwiftNA, ""},                           // local-only (doctor)
-	"DiagnosticsMsg":           {SwiftRequired, "DiagnosticsMsg"},       // GUI diagnostics panel (#904)
-	"SessionDiagnostic":        {SwiftRequired, "SessionDiagnostic"},    // GUI diagnostics panel (#904)
-	"TriggerDiagnostic":        {SwiftNA, ""},                           // local-only (doctor)
-	"PurgeDiagnostic":          {SwiftNA, ""},                           // local-only (doctor)
-	"ScrollbackDiagnostic":     {SwiftRequired, "ScrollbackDiagnostic"}, // GUI diagnostics panel (#904)
-	"MessagesDiagnostic":       {SwiftRequired, "MessagesDiagnostic"},   // GUI diagnostics panel (#904)
+	"StatusReportMsg":      {SwiftNA, ""},                           // hook CLI -> daemon
+	"UpgradeMsg":           {SwiftNA, ""},                           // local-only
+	"GCMsg":                {SwiftNA, ""},                           // local-only (doctor)
+	"GCOrphanInfo":         {SwiftNA, ""},                           // local-only (doctor)
+	"GCResultMsg":          {SwiftNA, ""},                           // local-only (doctor)
+	"DiagnosticsMsg":       {SwiftRequired, "DiagnosticsMsg"},       // GUI diagnostics panel (#904)
+	"SessionDiagnostic":    {SwiftRequired, "SessionDiagnostic"},    // GUI diagnostics panel (#904)
+	"TriggerDiagnostic":    {SwiftNA, ""},                           // local-only (doctor)
+	"PurgeDiagnostic":      {SwiftNA, ""},                           // local-only (doctor)
+	"ScrollbackDiagnostic": {SwiftRequired, "ScrollbackDiagnostic"}, // GUI diagnostics panel (#904)
+	"MessagesDiagnostic":   {SwiftRequired, "MessagesDiagnostic"},   // GUI diagnostics panel (#904)
 
 	// Scenarios are an orchestrator/CLI feature. Native apps still see member
 	// sessions through SessionInfo but do not decode or operate the scenario

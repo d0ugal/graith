@@ -1144,7 +1144,7 @@ func TestMigrateV25ToV26InitializesSessionLabels(t *testing.T) {
 	}
 }
 
-func TestMigrateV26ToV27DropsToolServerConfigAndPreservesBackup(t *testing.T) {
+func TestMigrateV26ToCurrentDropsToolServerConfigAndPreservesBackup(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "state.json")
 	secret := "dreich-secret-token"
@@ -1180,8 +1180,8 @@ func TestMigrateV26ToV27DropsToolServerConfigAndPreservesBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if state.Version != 27 {
-		t.Fatalf("migrated version = %d, want 27", state.Version)
+	if state.Version != CurrentStateVersion {
+		t.Fatalf("migrated version = %d, want %d", state.Version, CurrentStateVersion)
 	}
 
 	if state.Sessions["braw"].CreationCfg == nil {
@@ -1222,6 +1222,65 @@ func TestMigrateV26ToV27DropsToolServerConfigAndPreservesBackup(t *testing.T) {
 	}
 }
 
+func TestMigrateV27ToV28MarksOnlyPolicyEnabledSessionsForCleanRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	data := []byte(`{
+  "version": 27,
+  "sessions": {
+    "braw": {
+      "id": "braw", "name": "braw", "agent": "claude", "status": "running",
+      "pid": 4242, "pid_start_time": 84,
+      "creation_config": {"agent": {}, "sandbox_config": {}, "command_policy": {"backend": "builtin", "builtin": {"deny": ["croft-secret"]}}}
+    },
+    "canny": {
+      "id": "canny", "name": "canny", "agent": "codex", "status": "running",
+      "pid": 4343, "pid_start_time": 85,
+      "creation_config": {"agent": {}, "sandbox_config": {}, "command_policy": {"backend": "", "timeout": "5s"}}
+    }
+  }
+}`)
+	if err := writeFileAtomic(path, data); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	policySession := loaded.Sessions["braw"]
+	if !policySession.RemovedHookCleanupPending || policySession.Status != StatusErrored {
+		t.Fatalf("policy session = status %q pending %v, want errored pending cleanup", policySession.Status, policySession.RemovedHookCleanupPending)
+	}
+	if policySession.PID != 4242 || policySession.PIDStartTime != 84 {
+		t.Fatalf("policy process identity = %d/%d, want retained 4242/84", policySession.PID, policySession.PIDStartTime)
+	}
+
+	unaffected := loaded.Sessions["canny"]
+	if unaffected.RemovedHookCleanupPending || unaffected.Status != StatusRunning {
+		t.Fatalf("disabled-policy session = status %q pending %v, want running without cleanup", unaffected.Status, unaffected.RemovedHookCleanupPending)
+	}
+
+	if err := SaveState(path, loaded); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(persisted, []byte(`"command_policy"`)) || bytes.Contains(persisted, []byte("croft-secret")) {
+		t.Fatalf("migrated state retained removed creation configuration: %s", persisted)
+	}
+
+	backup, err := os.ReadFile(StateBackupPath(path, 27))
+	if err != nil {
+		t.Fatalf("read v27 backup: %v", err)
+	}
+	if !bytes.Equal(backup, data) {
+		t.Fatal("pre-migration backup does not contain the exact v27 state")
+	}
+}
+
 func TestMigrateV22ToCurrentAppliesAllMigrations(t *testing.T) {
 	state := &State{
 		Version: 22,
@@ -1251,8 +1310,8 @@ func TestMigrateV22ToCurrentAppliesAllMigrations(t *testing.T) {
 }
 
 func TestStateMigrationsRegisteredSequentially(t *testing.T) {
-	if CurrentStateVersion != 27 {
-		t.Fatalf("CurrentStateVersion = %d, want 27", CurrentStateVersion)
+	if CurrentStateVersion != 28 {
+		t.Fatalf("CurrentStateVersion = %d, want 28", CurrentStateVersion)
 	}
 
 	if len(migrations) != CurrentStateVersion {

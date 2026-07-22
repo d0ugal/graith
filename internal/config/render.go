@@ -96,10 +96,6 @@ func resolveRenderedDefaults(cfg *Config) *Config {
 	fillToolDefault(&c.Tools.PS, toolDefaults.PS)
 	fillToolDefault(&c.Tools.Lsof, toolDefaults.Lsof)
 
-	if strings.TrimSpace(c.CommandPolicy.Timeout) == "" {
-		c.CommandPolicy.Timeout = c.CommandPolicy.TimeoutDuration().String()
-	}
-
 	return &c
 }
 

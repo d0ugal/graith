@@ -586,6 +586,9 @@ func run(
 			return errors.New("upgrade adoption process cleanup remains unresolved")
 		}
 
+		if err := sm.completeRemovedHookCleanup(false); err != nil {
+			return fmt.Errorf("complete removed command policy cleanup: %w", err)
+		}
 		if err := sm.saveState(); err != nil {
 			return fmt.Errorf("persist adopted upgrade state: %w", err)
 		}
@@ -691,6 +694,13 @@ func run(
 
 		sm.reconcileSoftDeletedOrphans()
 		sm.cleanupOrphanedProcesses()
+		if err := sm.completeRemovedHookCleanup(true); err != nil {
+			_ = l.Close()
+
+			ReleasePIDFile(paths.PIDFile)
+
+			return fmt.Errorf("complete removed command policy cleanup: %w", err)
+		}
 
 		logAttrs := []any{"socket", paths.SocketPath, "pid", os.Getpid()}
 		if paths.Profile != "" {

@@ -85,12 +85,6 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		return SessionState{}, fmt.Errorf("orchestrator sandbox: %w", err)
 	}
 
-	if err := sm.validateCommandPolicyFromConfig(cfgSnap, agentName); err != nil {
-		return SessionState{}, fmt.Errorf("orchestrator command policy: %w", err)
-	}
-
-	policyEnabled := cfgSnap.CommandPolicy.Enabled()
-
 	scratchDir := sm.orchestratorScratchDir()
 	tmpDir := sm.orchestratorTmpDir()
 
@@ -207,20 +201,6 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		env["GRAITH_PROFILE"] = sm.paths.Profile
 	}
 
-	if policyEnabled {
-		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, scratchDir, false, true, cfgSnap.CommandPolicy.TimeoutDuration())
-		if err != nil {
-			sm.rollbackOrchestratorCreate(id)
-			return SessionState{}, fmt.Errorf("inject orchestrator command-policy hook: %w", err)
-		}
-
-		expandedArgs = append(expandedArgs, hookArgs...)
-
-		for key, value := range hookEnv {
-			env[key] = value
-		}
-	}
-
 	merged := sandboxMerged
 	merged.ReadDirs = expandPaths(merged.ReadDirs, sm.log, "read")
 	merged.WriteDirs = expandPaths(merged.WriteDirs, sm.log, "write")
@@ -239,7 +219,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		envKeys = append(envKeys, k)
 	}
 
-	opts, err := sm.sandboxOptsFromConfig(merged, id, scratchDir, agent.Command, envKeys, policyEnabled)
+	opts, err := sm.sandboxOptsFromConfig(merged, id, scratchDir, agent.Command, envKeys, false)
 	if err != nil {
 		sm.rollbackOrchestratorCreate(id)
 
@@ -313,7 +293,6 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	sess.CreationCfg = &CreationConfig{
 		Agent:         agent,
 		SandboxConfig: sandboxMerged,
-		CommandPolicy: cfgSnap.CommandPolicy,
 	}
 
 	sm.sessions[id] = ptySess

@@ -338,27 +338,15 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, err
 	}
 
-	if err := sm.validateCommandPolicy(agentName); err != nil {
-		if noRepo {
-			_ = os.RemoveAll(worktreePath)
-		}
-		sm.mu.Unlock()
-
-		return SessionState{}, err
-	}
-
 	if isMirror && !sandboxed {
 		sm.mu.Unlock()
 		return SessionState{}, errors.New("--mirror requires sandbox to be enabled so the mirrored worktree can be mounted read-only; set sandbox.enabled = true in config and ensure safehouse is installed (gr doctor)")
 	}
 
 	hooksEnabled := agentHooks
-	policyEnabled := sm.cfg.CommandPolicy.Enabled()
-	hookFilesNeeded := hooksEnabled || policyEnabled
-
+	hookFilesNeeded := hooksEnabled
 	// Snapshot config values needed for Phase 2.
 	cfgSnapshot := sm.cfg
-	policyTimeout := cfgSnapshot.CommandPolicy.TimeoutDuration()
 	sandboxMerged := sm.cfg.Sandbox.Merge(sm.cfg.Agents[agentName].Sandbox)
 
 	// Reserve the session with StatusCreating so concurrent operations
@@ -721,9 +709,9 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	}
 
 	// Headless sessions skip lifecycle hooks because their typed stream reports
-	// status, but still receive a configured synchronous command-policy hook.
-	if hookFilesNeeded {
-		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, hooksEnabled && driverKind != DriverHeadless, policyEnabled, policyTimeout)
+	// status directly.
+	if hookFilesNeeded && driverKind != DriverHeadless {
+		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, true)
 		if err != nil {
 			cleanupOnError()
 			rollbackState()
@@ -1010,7 +998,6 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	sessState.CreationCfg = &CreationConfig{
 		Agent:         agent,
 		SandboxConfig: cfgSnapshot.Sandbox.Merge(agent.Sandbox),
-		CommandPolicy: cfgSnapshot.CommandPolicy,
 	}
 
 	sm.sessions[id] = ptySess

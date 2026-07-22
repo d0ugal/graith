@@ -995,26 +995,6 @@ func TestIsConfigStale(t *testing.T) {
 		}
 	})
 
-	t.Run("changed command policy is stale", func(t *testing.T) {
-		sess := SessionState{
-			Agent: "claude",
-			CreationCfg: &CreationConfig{
-				Agent:         agent,
-				SandboxConfig: cfg.Sandbox.Merge(agent.Sandbox),
-			},
-		}
-
-		changedCfg := *cfg
-
-		changedCfg.CommandPolicy = config.CommandPolicy{
-			Backend: "builtin",
-			Builtin: config.CommandPolicyBuiltin{Deny: []any{"git push"}},
-		}
-		if !isConfigStale(sess, &changedCfg) {
-			t.Error("expected stale when command policy config differs")
-		}
-	})
-
 	t.Run("removed agent is stale", func(t *testing.T) {
 		sess := SessionState{
 			Agent: "codex",
@@ -4676,8 +4656,8 @@ func TestResumePreservesNativeArgsWithoutToolServerInjection(t *testing.T) {
 }
 
 // TestClaudeSessionHooksDisabledSkipsInjection verifies the other side of the
-// gate: with hooks disabled (with no command policy), a PTY Claude session gets
-// no Graith-generated settings.
+// gate: with lifecycle hooks disabled, a PTY Claude session gets no
+// Graith-generated settings.
 func TestClaudeSessionHooksDisabledSkipsInjection(t *testing.T) {
 	repoDir := initTempGitRepo(t)
 	sm, recordPath := newClaudeRecorderManager(t, repoDir)
@@ -6270,7 +6250,7 @@ func TestReconcileWritesLifecycleSummaries(t *testing.T) {
 }
 
 // TestConcurrentConfigReadWrite verifies that concurrent config reads via
-// notify, command policy, and Config() do not race with applyConfig writes.
+// notification and Config() reads do not race with applyConfig writes.
 // Run with -race to detect data races.
 func TestRecordExit_MassExitDetection(t *testing.T) {
 	sm := newTestSessionManager(t)

@@ -2473,7 +2473,7 @@ func TestNullPayloadRejected(t *testing.T) {
 		{"screen_snapshot", "invalid screen_snapshot message"},
 		{"status", "invalid status message"},
 		{"status_report", "invalid status_report"},
-		{"command_policy_check", "invalid command_policy_check"},
+		{"command_policy_check", "unsupported control message: command_policy_check"},
 	}
 
 	for _, tt := range types {
@@ -3388,7 +3388,7 @@ func TestInvalidPayloads(t *testing.T) {
 		msgType string
 		wantErr string
 	}{
-		{"command_policy_check", "invalid command_policy_check"},
+		{"command_policy_check", "unsupported control message: command_policy_check"},
 		{"set_status", "invalid set_status message"},
 		{"status", "invalid status message"},
 		{"status_report", "invalid status_report"},
