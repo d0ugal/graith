@@ -119,8 +119,13 @@ jobs:
             echo "GRAITH_SIGNED_SNAPSHOT=true"
           } >> "$GITHUB_ENV"
 
-      - name: Remove dev tag so GoReleaser sees the last semver tag
-        run: git tag -d dev 2>/dev/null || true
+      - name: Select the stable release base for the dev snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_tag="$(scripts/dev-release-base-tag.sh)"
+          echo "GORELEASER_CURRENT_TAG=$base_tag" >> "$GITHUB_ENV"
+          echo "Using $base_tag as the dev snapshot base."
 
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
