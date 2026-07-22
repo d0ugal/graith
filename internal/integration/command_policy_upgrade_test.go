@@ -61,6 +61,9 @@ func TestCommandPolicyRemovalUpgradeFromExactBaseline(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
 	oldSource := filepath.Join(root, "old-source")
+	if err := ensureGitRevision(repoRoot, exactRevisionFetchURL, commandPolicyBaselineCommit); err != nil {
+		t.Fatal(err)
+	}
 	runGit(t, repoRoot, "worktree", "add", "--detach", oldSource, commandPolicyBaselineCommit)
 	t.Cleanup(func() {
 		cmd := exec.Command("git", "worktree", "remove", "--force", oldSource)
