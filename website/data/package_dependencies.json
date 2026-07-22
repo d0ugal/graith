@@ -35,116 +35,106 @@
     },
     {
       "id": "package_6",
-      "label": "internal/commandpolicy",
-      "group": "internal"
-    },
-    {
-      "id": "package_7",
-      "label": "internal/commandpolicy/localmost",
-      "group": "internal"
-    },
-    {
-      "id": "package_8",
       "label": "internal/config",
       "group": "internal"
     },
     {
-      "id": "package_9",
+      "id": "package_7",
       "label": "internal/cronx",
       "group": "internal"
     },
     {
-      "id": "package_10",
+      "id": "package_8",
       "label": "internal/daemon",
       "group": "internal"
     },
     {
-      "id": "package_11",
+      "id": "package_9",
       "label": "internal/daemonservice",
       "group": "internal"
     },
     {
-      "id": "package_12",
+      "id": "package_10",
       "label": "internal/detector",
       "group": "internal"
     },
     {
-      "id": "package_13",
+      "id": "package_11",
       "label": "internal/executablepin",
       "group": "internal"
     },
     {
-      "id": "package_14",
+      "id": "package_12",
       "label": "internal/git",
       "group": "internal"
     },
     {
-      "id": "package_15",
+      "id": "package_13",
       "label": "internal/headless",
       "group": "internal"
     },
     {
-      "id": "package_16",
+      "id": "package_14",
       "label": "internal/hookoutput",
       "group": "internal"
     },
     {
-      "id": "package_17",
+      "id": "package_15",
       "label": "internal/ignore",
       "group": "internal"
     },
     {
-      "id": "package_18",
+      "id": "package_16",
       "label": "internal/output",
       "group": "internal"
     },
     {
-      "id": "package_19",
+      "id": "package_17",
       "label": "internal/processidentity",
       "group": "internal"
     },
     {
-      "id": "package_20",
+      "id": "package_18",
       "label": "internal/protocol",
       "group": "internal"
     },
     {
-      "id": "package_21",
+      "id": "package_19",
       "label": "internal/pty",
       "group": "internal"
     },
     {
-      "id": "package_22",
+      "id": "package_20",
       "label": "internal/sandbox",
       "group": "internal"
     },
     {
-      "id": "package_23",
+      "id": "package_21",
       "label": "internal/scenariofile",
       "group": "internal"
     },
     {
-      "id": "package_24",
+      "id": "package_22",
       "label": "internal/sessionlabel",
       "group": "internal"
     },
     {
-      "id": "package_25",
+      "id": "package_23",
       "label": "internal/store",
       "group": "internal"
     },
     {
-      "id": "package_26",
+      "id": "package_24",
       "label": "internal/testprocess",
       "group": "internal"
     },
     {
-      "id": "package_27",
+      "id": "package_25",
       "label": "internal/tools",
       "group": "internal"
     },
     {
-      "id": "package_28",
+      "id": "package_26",
       "label": "internal/version",
       "group": "internal"
     }
@@ -156,7 +146,7 @@
     },
     {
       "from": "package_0",
-      "to": "package_21"
+      "to": "package_19"
     },
     {
       "from": "package_4",
@@ -172,7 +162,7 @@
     },
     {
       "from": "package_4",
-      "to": "package_7"
+      "to": "package_6"
     },
     {
       "from": "package_4",
@@ -180,11 +170,11 @@
     },
     {
       "from": "package_4",
-      "to": "package_10"
+      "to": "package_9"
     },
     {
       "from": "package_4",
-      "to": "package_11"
+      "to": "package_12"
     },
     {
       "from": "package_4",
@@ -196,15 +186,19 @@
     },
     {
       "from": "package_4",
+      "to": "package_17"
+    },
+    {
+      "from": "package_4",
       "to": "package_18"
     },
     {
       "from": "package_4",
-      "to": "package_19"
+      "to": "package_20"
     },
     {
       "from": "package_4",
-      "to": "package_20"
+      "to": "package_21"
     },
     {
       "from": "package_4",
@@ -227,24 +221,24 @@
       "to": "package_26"
     },
     {
-      "from": "package_4",
-      "to": "package_27"
-    },
-    {
-      "from": "package_4",
-      "to": "package_28"
-    },
-    {
       "from": "package_5",
       "to": "package_1"
     },
     {
       "from": "package_5",
-      "to": "package_8"
+      "to": "package_6"
     },
     {
       "from": "package_5",
-      "to": "package_11"
+      "to": "package_9"
+    },
+    {
+      "from": "package_5",
+      "to": "package_17"
+    },
+    {
+      "from": "package_5",
+      "to": "package_18"
     },
     {
       "from": "package_5",
@@ -252,11 +246,7 @@
     },
     {
       "from": "package_5",
-      "to": "package_20"
-    },
-    {
-      "from": "package_5",
-      "to": "package_21"
+      "to": "package_22"
     },
     {
       "from": "package_5",
@@ -265,16 +255,28 @@
     {
       "from": "package_5",
       "to": "package_26"
-    },
-    {
-      "from": "package_5",
-      "to": "package_28"
     },
     {
       "from": "package_6",
       "to": "package_7"
     },
     {
+      "from": "package_6",
+      "to": "package_25"
+    },
+    {
+      "from": "package_8",
+      "to": "package_2"
+    },
+    {
+      "from": "package_8",
+      "to": "package_3"
+    },
+    {
+      "from": "package_8",
+      "to": "package_6"
+    },
+    {
       "from": "package_8",
       "to": "package_7"
     },
@@ -284,139 +286,111 @@
     },
     {
       "from": "package_8",
-      "to": "package_27"
+      "to": "package_10"
     },
     {
-      "from": "package_10",
-      "to": "package_2"
-    },
-    {
-      "from": "package_10",
-      "to": "package_3"
-    },
-    {
-      "from": "package_10",
-      "to": "package_6"
-    },
-    {
-      "from": "package_10",
-      "to": "package_8"
-    },
-    {
-      "from": "package_10",
-      "to": "package_9"
-    },
-    {
-      "from": "package_10",
+      "from": "package_8",
       "to": "package_11"
     },
     {
-      "from": "package_10",
+      "from": "package_8",
       "to": "package_12"
     },
     {
-      "from": "package_10",
+      "from": "package_8",
       "to": "package_13"
     },
     {
-      "from": "package_10",
-      "to": "package_14"
-    },
-    {
-      "from": "package_10",
+      "from": "package_8",
       "to": "package_15"
     },
     {
-      "from": "package_10",
+      "from": "package_8",
       "to": "package_17"
     },
     {
-      "from": "package_10",
+      "from": "package_8",
+      "to": "package_18"
+    },
+    {
+      "from": "package_8",
       "to": "package_19"
     },
     {
-      "from": "package_10",
+      "from": "package_8",
       "to": "package_20"
     },
     {
-      "from": "package_10",
+      "from": "package_8",
       "to": "package_21"
     },
     {
-      "from": "package_10",
+      "from": "package_8",
       "to": "package_22"
     },
     {
-      "from": "package_10",
+      "from": "package_8",
       "to": "package_23"
     },
     {
-      "from": "package_10",
+      "from": "package_8",
       "to": "package_24"
     },
     {
-      "from": "package_10",
+      "from": "package_8",
       "to": "package_25"
     },
     {
-      "from": "package_10",
+      "from": "package_8",
       "to": "package_26"
     },
     {
-      "from": "package_10",
-      "to": "package_27"
-    },
-    {
-      "from": "package_10",
-      "to": "package_28"
-    },
-    {
-      "from": "package_11",
+      "from": "package_9",
       "to": "package_1"
     },
     {
-      "from": "package_11",
-      "to": "package_8"
+      "from": "package_9",
+      "to": "package_6"
     },
     {
-      "from": "package_11",
-      "to": "package_21"
+      "from": "package_9",
+      "to": "package_19"
     },
     {
-      "from": "package_11",
-      "to": "package_26"
+      "from": "package_9",
+      "to": "package_24"
     },
     {
-      "from": "package_14",
-      "to": "package_27"
+      "from": "package_12",
+      "to": "package_25"
     },
     {
-      "from": "package_15",
-      "to": "package_21"
+      "from": "package_13",
+      "to": "package_19"
     },
     {
-      "from": "package_19",
-      "to": "package_27"
+      "from": "package_17",
+      "to": "package_25"
     },
     {
-      "from": "package_22",
-      "to": "package_27"
+      "from": "package_20",
+      "to": "package_25"
+    },
+    {
+      "from": "package_21",
+      "to": "package_6"
+    },
+    {
+      "from": "package_21",
+      "to": "package_18"
     },
     {
       "from": "package_23",
-      "to": "package_8"
-    },
-    {
-      "from": "package_23",
-      "to": "package_20"
-    },
-    {
-      "from": "package_25",
       "to": "package_3"
     },
     {
-      "from": "package_25",
-      "to": "package_27"
+      "from": "package_23",
+      "to": "package_25"
     }
   ]
 }

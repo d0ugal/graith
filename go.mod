@@ -24,7 +24,6 @@ require (
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 	modernc.org/sqlite v1.54.0
-	mvdan.cc/sh/v3 v3.13.1
 	tailscale.com v1.100.0
 )
 
@@ -51,7 +50,6 @@ require (
 	github.com/gaissmai/bart v0.29.0 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 // indirect
-	github.com/go-quicktest/qt v1.102.0 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/google/btree v1.1.3 // indirect

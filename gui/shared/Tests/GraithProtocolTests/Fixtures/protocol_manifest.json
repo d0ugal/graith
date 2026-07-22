@@ -345,60 +345,6 @@
       ]
     },
     {
-      "name": "CommandPolicyCheckMsg",
-      "swift": "na",
-      "fields": [
-        {
-          "name": "session_id",
-          "type": {
-            "kind": "string"
-          },
-          "optional": false
-        },
-        {
-          "name": "tool_name",
-          "type": {
-            "kind": "string"
-          },
-          "optional": false
-        },
-        {
-          "name": "tool_input",
-          "type": {
-            "kind": "string"
-          },
-          "optional": true
-        },
-        {
-          "name": "hook_payload",
-          "type": {
-            "kind": "string"
-          },
-          "optional": true
-        }
-      ]
-    },
-    {
-      "name": "CommandPolicyDecisionMsg",
-      "swift": "na",
-      "fields": [
-        {
-          "name": "decision",
-          "type": {
-            "kind": "string"
-          },
-          "optional": false
-        },
-        {
-          "name": "reason",
-          "type": {
-            "kind": "string"
-          },
-          "optional": true
-        }
-      ]
-    },
-    {
       "name": "CompletionConfig",
       "swift": "na",
       "fields": [
