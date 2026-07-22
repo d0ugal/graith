@@ -1,6 +1,7 @@
 package release
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -386,9 +387,47 @@ func TestCandidateSPDXBindsLinuxTargetAndExactBytes(t *testing.T) {
 		t.Fatalf("materialize Linux candidate SPDX: %v: %s", err, output)
 	}
 
+	materialized, err := os.ReadFile(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{
+		"-Demit-lib-vt=true -Demit-xcframework=false -Doptimize=ReleaseFast -Dtarget=aarch64-linux-gnu",
+		"no Apple archive is used",
+	} {
+		if !strings.Contains(string(materialized), want) {
+			t.Errorf("Linux candidate SPDX does not describe %q", want)
+		}
+	}
+
+	for _, unwanted := range []string{"-Demit-xcframework=true", "The Apple archive SHA-256"} {
+		if strings.Contains(string(materialized), unwanted) {
+			t.Errorf("Linux candidate SPDX retains Apple build metadata %q", unwanted)
+		}
+	}
+
 	command = exec.Command(script, "verify-target-candidate-spdx", binary, revision, "linux", "arm64", document, "gr-dev")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("verify Linux candidate SPDX: %v: %s", err, output)
+	}
+
+	appleMetadata := filepath.Join(work, "apple-metadata.spdx.json")
+
+	changedMetadata := strings.Replace(
+		string(materialized),
+		"-Demit-xcframework=false",
+		"-Demit-xcframework=true",
+		1,
+	)
+	// #nosec G703 -- appleMetadata is confined to the test's t.TempDir.
+	if err := os.WriteFile(appleMetadata, []byte(changedMetadata), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	command = exec.Command(script, "verify-target-candidate-spdx", binary, revision, "linux", "arm64", appleMetadata, "gr-dev")
+	if output, err := command.CombinedOutput(); err == nil {
+		t.Fatalf("Linux candidate SPDX accepted Apple build metadata: %s", output)
 	}
 
 	file, err := os.OpenFile(binary, os.O_APPEND|os.O_WRONLY, 0)
@@ -457,6 +496,7 @@ type devReleaseWorkflowStep struct {
 type devReleaseWorkflowJob struct {
 	RunsOn      string            `yaml:"runs-on"`
 	If          string            `yaml:"if"`
+	Needs       workflowNeeds     `yaml:"needs"`
 	Permissions map[string]string `yaml:"permissions"`
 	Strategy    struct {
 		Matrix struct {
@@ -466,7 +506,33 @@ type devReleaseWorkflowJob struct {
 	Steps []devReleaseWorkflowStep `yaml:"steps"`
 }
 
+type workflowNeeds []string
+
+func (needs *workflowNeeds) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		var value string
+		if err := node.Decode(&value); err != nil {
+			return err
+		}
+
+		*needs = []string{value}
+
+		return nil
+	case yaml.SequenceNode:
+		return node.Decode((*[]string)(needs))
+	default:
+		return fmt.Errorf("workflow needs must be a scalar or sequence, got YAML kind %d", node.Kind)
+	}
+}
+
 type devReleaseWorkflow struct {
+	Events      map[string]any    `yaml:"on"`
+	Permissions map[string]string `yaml:"permissions"`
+	Concurrency struct {
+		Group            string `yaml:"group"`
+		CancelInProgress string `yaml:"cancel-in-progress"`
+	} `yaml:"concurrency"`
 	Jobs map[string]devReleaseWorkflowJob `yaml:"jobs"`
 }
 
@@ -498,9 +564,43 @@ func workflowStep(job devReleaseWorkflowJob, name string) devReleaseWorkflowStep
 
 func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 	workflow := loadDevReleaseWorkflow(t)
+	if len(workflow.Events) != 2 {
+		t.Errorf("dev release events = %#v, want only push and pull_request", workflow.Events)
+	}
+
+	for _, event := range []string{"push", "pull_request"} {
+		if _, ok := workflow.Events[event]; !ok {
+			t.Errorf("dev release workflow has no %q event", event)
+		}
+	}
+
+	if len(workflow.Permissions) != 1 || workflow.Permissions["contents"] != "read" {
+		t.Errorf("dev release top-level permissions are not read-only: %#v", workflow.Permissions)
+	}
+
+	if workflow.Concurrency.Group != "dev-release-${{ github.event_name == 'push' && 'publish' || github.event.pull_request.number }}" ||
+		workflow.Concurrency.CancelInProgress != "${{ github.event_name == 'pull_request' }}" {
+		t.Errorf("dev release concurrency policy = %#v", workflow.Concurrency)
+	}
+
 	for _, name := range []string{"release-context", "build-darwin", "build-linux", "attest-linux", "execute-linux", "assemble-dev", "publish-dev"} {
 		if _, ok := workflow.Jobs[name]; !ok {
 			t.Errorf("dev-release workflow has no %q job", name)
+		}
+	}
+
+	wantNeeds := map[string]workflowNeeds{
+		"release-context": nil,
+		"build-darwin":    {"release-context"},
+		"build-linux":     {"release-context"},
+		"execute-linux":   {"release-context", "build-linux"},
+		"attest-linux":    {"release-context", "build-linux", "execute-linux"},
+		"assemble-dev":    {"release-context", "build-darwin", "build-linux", "execute-linux"},
+		"publish-dev":     {"release-context", "assemble-dev", "attest-linux"},
+	}
+	for jobName, needs := range wantNeeds {
+		if actual := workflow.Jobs[jobName].Needs; !slices.Equal(actual, needs) {
+			t.Errorf("%s needs = %#v, want %#v", jobName, actual, needs)
 		}
 	}
 
@@ -675,6 +775,12 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 		t.Errorf("Linux attestation is not isolated to push with required permissions: if=%q permissions=%#v", attestJob.If, attestJob.Permissions)
 	}
 
+	for _, need := range []string{"release-context", "build-linux", "execute-linux"} {
+		if !slices.Contains(attestJob.Needs, need) {
+			t.Errorf("Linux attestation does not wait for %q: needs=%#v", need, attestJob.Needs)
+		}
+	}
+
 	executeJob := workflow.Jobs["execute-linux"]
 
 	wantRunners := map[string]string{"amd64": "ubuntu-24.04", "arm64": "ubuntu-24.04-arm"}
@@ -697,9 +803,25 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 		}
 	}
 
+	nativeVerifier := string(mustReadReleaseFile(t, "scripts/libghostty-native.sh"))
+	if !strings.Contains(nativeVerifier, `"$binary" --graith-internal-libghostty-self-test`) {
+		t.Error("Linux archive execution does not invoke the final binary's native terminal self-test")
+	}
+
+	nativeSelfTest := string(mustReadReleaseFile(t, "internal/pty/terminal_selftest.go"))
+	for _, want := range []string{"newTerminal", "term.Write", "snapshotTerminal", "term.Resize", "term.Close"} {
+		if !strings.Contains(nativeSelfTest, want) {
+			t.Errorf("native terminal self-test does not exercise %q", want)
+		}
+	}
+
 	assembleJob := workflow.Jobs["assemble-dev"]
 	if assembleJob.Permissions["contents"] != "read" {
 		t.Errorf("pull-request aggregation has mutation permissions: %#v", assembleJob.Permissions)
+	}
+
+	if !slices.Contains(assembleJob.Needs, "execute-linux") {
+		t.Errorf("release aggregation does not wait for actual-architecture execution: needs=%#v", assembleJob.Needs)
 	}
 
 	aggregateScript := workflowStep(assembleJob, "Verify the complete same-commit release set").Run
@@ -720,9 +842,15 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 	}
 
 	provenanceScript := workflowStep(publishJob, "Verify Linux build provenance").Run
-	for _, want := range []string{"gh attestation verify", "--signer-workflow", "--source-ref refs/heads/main"} {
+	for _, want := range []string{"gh attestation verify", "--signer-workflow", `--source-digest "$RELEASE_REVISION"`, "--source-ref refs/heads/main"} {
 		if !strings.Contains(provenanceScript, want) {
 			t.Errorf("publisher provenance verification missing %q", want)
+		}
+	}
+
+	for _, need := range []string{"release-context", "assemble-dev", "attest-linux"} {
+		if !slices.Contains(publishJob.Needs, need) {
+			t.Errorf("publisher does not wait for %q: needs=%#v", need, publishJob.Needs)
 		}
 	}
 
@@ -731,16 +859,40 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 		t.Fatal("publisher uses an open archive glob or rollback asset")
 	}
 
-	for _, want := range []string{"--target \"$RELEASE_REVISION\"", "checksums.txt", "gh release view dev --json assets"} {
+	for _, want := range []string{"--target \"$RELEASE_REVISION\"", "checksums.txt", "gh release view dev --json assets", "git/ref/heads/main", `"$current_main" != "$RELEASE_REVISION"`} {
 		if !strings.Contains(publishScript, want) {
 			t.Errorf("publisher final release step missing %q", want)
 		}
 	}
 
+	var (
+		mainGuardAt       = strings.Index(publishScript, "git/ref/heads/main")
+		releaseMutationAt = strings.Index(publishScript, "gh release delete dev")
+	)
+
+	if mainGuardAt < 0 || releaseMutationAt < 0 || mainGuardAt > releaseMutationAt {
+		t.Error("publisher does not verify the current main tip before release mutation")
+	}
+
 	workflowText := string(mustReadReleaseFile(t, ".github/workflows/dev-release.yml"))
-	for _, want := range []string{"pull_request:", "cancel-in-progress: ${{ github.event_name == 'pull_request' }}"} {
+	for _, want := range []string{"pull_request:", "cancel-in-progress: ${{ github.event_name == 'pull_request' }}", "github.run_id"} {
 		if !strings.Contains(workflowText, want) {
 			t.Errorf("dev release workflow policy missing %q", want)
+		}
+	}
+
+	if strings.Contains(workflowText, "github.run_attempt") {
+		t.Error("dev release artifact names change across partial workflow retries")
+	}
+
+	for jobName, stepName := range map[string]string{
+		"build-darwin": "Upload verified Darwin archives",
+		"build-linux":  "Upload verified Linux archive",
+		"assemble-dev": "Upload assembled dev release for verification",
+	} {
+		uploadStep := workflowStep(workflow.Jobs[jobName], stepName)
+		if uploadStep.With["overwrite"] != "true" {
+			t.Errorf("%s artifact upload is not safe to rerun: with=%#v", jobName, uploadStep.With)
 		}
 	}
 }
@@ -894,7 +1046,24 @@ func TestStableReleaseRemainsPureGoDuringDevCanary(t *testing.T) {
 }
 
 func TestReleaseConfigsDoNotPublishSeparatelyNamedRollbackArchives(t *testing.T) {
-	for _, name := range []string{".goreleaser-dev.yaml", ".goreleaser.yaml"} {
+	tests := []struct {
+		name         string
+		wantBuilds   []string
+		wantArchives []string
+	}{
+		{
+			name:         ".goreleaser-dev.yaml",
+			wantBuilds:   []string{"gr-dev-darwin-amd64", "gr-dev-darwin-arm64"},
+			wantArchives: []string{"darwin-amd64", "darwin-arm64"},
+		},
+		{
+			name:         ".goreleaser.yaml",
+			wantBuilds:   []string{"gr-linux", "gr-darwin"},
+			wantArchives: []string{"linux", "darwin"},
+		},
+	}
+
+	for _, test := range tests {
 		var config struct {
 			Builds []struct {
 				ID string `yaml:"id"`
@@ -904,21 +1073,37 @@ func TestReleaseConfigsDoNotPublishSeparatelyNamedRollbackArchives(t *testing.T)
 				NameTemplate string `yaml:"name_template"`
 			} `yaml:"archives"`
 		}
-		if err := yaml.Unmarshal(mustReadReleaseFile(t, name), &config); err != nil {
-			t.Fatalf("parse %s: %v", name, err)
+		if err := yaml.Unmarshal(mustReadReleaseFile(t, test.name), &config); err != nil {
+			t.Fatalf("parse %s: %v", test.name, err)
+		}
+
+		if len(config.Builds) != len(test.wantBuilds) {
+			t.Errorf("%s builds = %d, want exact set %#v", test.name, len(config.Builds), test.wantBuilds)
+		}
+
+		if len(config.Archives) != len(test.wantArchives) {
+			t.Errorf("%s archives = %d, want exact set %#v", test.name, len(config.Archives), test.wantArchives)
 		}
 
 		for _, build := range config.Builds {
+			if !slices.Contains(test.wantBuilds, build.ID) {
+				t.Errorf("%s declares unexpected alternate build %q", test.name, build.ID)
+			}
+
 			lower := strings.ToLower(build.ID)
 			if strings.Contains(lower, "charm") || strings.Contains(lower, "rollback") {
-				t.Errorf("%s declares separately named rollback build %q", name, build.ID)
+				t.Errorf("%s declares separately named rollback build %q", test.name, build.ID)
 			}
 		}
 
 		for _, archive := range config.Archives {
+			if !slices.Contains(test.wantArchives, archive.ID) {
+				t.Errorf("%s declares unexpected alternate archive %q", test.name, archive.ID)
+			}
+
 			identity := strings.ToLower(archive.ID + " " + archive.NameTemplate)
 			if strings.Contains(identity, "charm") || strings.Contains(identity, "rollback") {
-				t.Errorf("%s declares separately named rollback archive %q (%q)", name, archive.ID, archive.NameTemplate)
+				t.Errorf("%s declares separately named rollback archive %q (%q)", test.name, archive.ID, archive.NameTemplate)
 			}
 		}
 	}

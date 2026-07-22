@@ -2,7 +2,7 @@
 
 <!-- BEGIN GENERATED LIBGHOSTTY DEPENDENCY INVENTORY -->
 This file applies only to Graith testing candidates built with the
-`libghostty` build tag. Ordinary pure-Go rollback builds do not contain this
+`libghostty` build tag. Ordinary pure-Go builds do not contain this
 native dependency closure. The committed `libghostty-native.spdx.json` is the
 machine-readable dependency inventory; candidate packaging materializes from it
 a document with the same filename that is bound to the binary's exact revision,
@@ -37,7 +37,11 @@ The exact verified inputs are:
 - Ghostty LICENSE SHA-256
   `386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1` and committed-header tree SHA-256
   `b694feb2b7526875a356c4d6c7b5c07d09030d1cd4507f86a37b2d1d49c42fe7`;
-- Apple testing archive
+- Linux source-build configuration `-Demit-lib-vt=true`,
+  `-Demit-xcframework=false`, `-Doptimize=ReleaseFast`, and the
+  target-specific `-Dtarget=x86_64-linux-gnu` or
+  `-Dtarget=aarch64-linux-gnu`; no Apple archive is used for Linux;
+- Apple testing archive used by the macOS native candidate
   `https://github.com/d0ugal/graith/releases/download/libghostty-vt-d4ac93a/libghostty-vt.xcframework.zip`
   SHA-256
   `bb5a200f65cbb3d0f626d5c37a011940f9a730a7fd74730d25d176e71c7f5564`;

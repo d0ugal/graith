@@ -16,6 +16,8 @@ GHOSTTY_SHA="$(jq -er '.ghostty.commit' "$DEPENDENCY_LOCK")"
 GHOSTTY_REPO="$(jq -er '.ghostty.repository' "$DEPENDENCY_LOCK")"
 GHOSTTY_ARTIFACT_URL="$(jq -er '.ghostty.appleArtifact.url' "$DEPENDENCY_LOCK")"
 GHOSTTY_ARTIFACT_SHA256="$(jq -er '.ghostty.appleArtifact.sha256' "$DEPENDENCY_LOCK")"
+GHOSTTY_HEADERS_SHA256="$(jq -er '.ghostty.headersSHA256' "$DEPENDENCY_LOCK")"
+GHOSTTY_LICENSE_SHA256="$(jq -er '.ghostty.licenseSHA256' "$DEPENDENCY_LOCK")"
 REQUIRED_ZIG="$(jq -er '.zig.version' "$DEPENDENCY_LOCK")"
 GO_LIBGHOSTTY_SHA="$(jq -er '.goLibghostty.commit' "$DEPENDENCY_LOCK")"
 GO_LIBGHOSTTY_VERSION="$(jq -er '.goLibghostty.version' "$DEPENDENCY_LOCK")"
@@ -34,6 +36,7 @@ SPDX_TOOLS_VERSION="$(jq -er '.spdxTools.version' "$DEPENDENCY_LOCK")"
 SPDX_TOOLS_URL="$(jq -er '.spdxTools.url' "$DEPENDENCY_LOCK")"
 SPDX_TOOLS_SHA256="$(jq -er '.spdxTools.sha256' "$DEPENDENCY_LOCK")"
 readonly GHOSTTY_SHA GHOSTTY_REPO GHOSTTY_ARTIFACT_URL GHOSTTY_ARTIFACT_SHA256
+readonly GHOSTTY_HEADERS_SHA256 GHOSTTY_LICENSE_SHA256
 readonly REQUIRED_ZIG GO_LIBGHOSTTY_SHA GO_LIBGHOSTTY_VERSION GO_LIBGHOSTTY_SUM
 readonly UUCODE_VERSION UUCODE_HASH HIGHWAY_VERSION HIGHWAY_SHA
 readonly SIMDUTF_VERSION SIMDUTF_MANIFEST_VERSION SIMDUTF_UPSTREAM_SHA
@@ -2342,9 +2345,54 @@ verify_linux_candidate() {
             echo "error: candidate runtime revision is ${runtime_revision:-unreadable}; want $expected_revision" >&2
             return 1
         fi
+        if ! "$binary" --graith-internal-libghostty-self-test; then
+            echo "error: candidate native terminal lifecycle self-test failed" >&2
+            return 1
+        fi
         ldd "$binary"
     fi
     verify_candidate_privacy "$binary"
+}
+
+candidate_ghostty_source_info() {
+    local goos="${1:-}"
+    local goarch="${2:-}"
+    local target
+
+    if [[ "$goos" == linux ]]; then
+        case "$goarch" in
+            amd64) target=x86_64-linux-gnu ;;
+            arm64) target=aarch64-linux-gnu ;;
+            *) return 2 ;;
+        esac
+        printf 'Built from exact commit %s with Zig %s and -Demit-lib-vt=true -Demit-xcframework=false -Doptimize=ReleaseFast -Dtarget=%s. No explicit SIMD override is passed by the pinned Linux build.\n' \
+            "$GHOSTTY_SHA" "$REQUIRED_ZIG" "$target"
+        return
+    fi
+
+    printf 'Built from exact commit %s with Zig %s and -Demit-lib-vt=true -Demit-xcframework=true -Doptimize=ReleaseFast. No explicit SIMD override is passed by the pinned Apple build.\n' \
+        "$GHOSTTY_SHA" "$REQUIRED_ZIG"
+}
+
+candidate_ghostty_license_comments() {
+    local goos="${1:-}"
+    local goarch="${2:-}"
+    local target
+
+    if [[ "$goos" == linux ]]; then
+        case "$goarch" in
+            amd64) target=x86_64-linux-gnu ;;
+            arm64) target=aarch64-linux-gnu ;;
+            *) return 2 ;;
+        esac
+        printf 'Exact source LICENSE SHA-256 %s. The committed header tree SHA-256 is %s. Built directly from the pinned source commit for target %s; no Apple archive is used.\n' \
+            "$GHOSTTY_LICENSE_SHA256" "$GHOSTTY_HEADERS_SHA256" "$target"
+        return
+    fi
+
+    printf 'Exact source LICENSE SHA-256 %s. The committed header tree SHA-256 is %s. The Apple archive SHA-256 is %s.\n' \
+        "$GHOSTTY_LICENSE_SHA256" "$GHOSTTY_HEADERS_SHA256" \
+        "$GHOSTTY_ARTIFACT_SHA256"
 }
 
 materialize_candidate_spdx() {
@@ -2357,6 +2405,8 @@ materialize_candidate_spdx() {
     local binary_sha
     local namespace
     local package_name
+    local ghostty_license_comments
+    local ghostty_source_info
 
     if [[ ! -f "$binary" || ! "$revision" =~ ^[0-9a-f]{40}$ || -z "$output" ||
         ! "$goos" =~ ^(darwin|linux)$ || ! "$goarch" =~ ^(amd64|arm64)$ ||
@@ -2368,8 +2418,12 @@ materialize_candidate_spdx() {
     binary_sha="$(sha256_value "$binary")"
     namespace="$SPDX_NAMESPACE/candidate/$revision/$goos/$goarch/$binary_sha"
     package_name="graith-libghostty-$goos-$goarch"
+    ghostty_source_info="$(candidate_ghostty_source_info "$goos" "$goarch")"
+    ghostty_license_comments="$(candidate_ghostty_license_comments "$goos" "$goarch")"
     jq \
         --arg binary_sha "$binary_sha" \
+        --arg ghostty_license_comments "$ghostty_license_comments" \
+        --arg ghostty_source_info "$ghostty_source_info" \
         --arg goarch "$goarch" \
         --arg goos "$goos" \
         --arg namespace "$namespace" \
@@ -2378,6 +2432,12 @@ materialize_candidate_spdx() {
         --arg revision "$revision" '
         .name = ($package_name + "-" + $revision) |
         .documentNamespace = $namespace |
+        .packages |= map(
+            if .SPDXID == "SPDXRef-Package-Ghostty" then
+                .licenseComments = $ghostty_license_comments |
+                .sourceInfo = $ghostty_source_info
+            else . end
+        ) |
         .packages = ([.packages[] | select(.SPDXID != "SPDXRef-Package-GraithNativeCandidate")] + [{
             "SPDXID": "SPDXRef-Package-GraithNativeCandidate",
             "checksums": [{"algorithm": "SHA256", "checksumValue": $binary_sha}],
@@ -2431,6 +2491,8 @@ verify_candidate_spdx() {
     local namespace
     local package_name
     local source_info
+    local ghostty_license_comments
+    local ghostty_source_info
 
     if [[ ! -f "$binary" || ! -f "$document" || ! "$revision" =~ ^[0-9a-f]{40}$ ||
         ! "$goos" =~ ^(darwin|linux)$ || ! "$goarch" =~ ^(amd64|arm64)$ ||
@@ -2443,8 +2505,12 @@ verify_candidate_spdx() {
     namespace="$SPDX_NAMESPACE/candidate/$revision/$goos/$goarch/$binary_sha"
     package_name="graith-libghostty-$goos-$goarch"
     source_info="Graith revision $revision; target GOOS=$goos GOARCH=$goarch; packaged binary $package_filename SHA-256 $binary_sha."
+    ghostty_source_info="$(candidate_ghostty_source_info "$goos" "$goarch")"
+    ghostty_license_comments="$(candidate_ghostty_license_comments "$goos" "$goarch")"
     jq -e \
         --arg binary_sha "$binary_sha" \
+        --arg ghostty_license_comments "$ghostty_license_comments" \
+        --arg ghostty_source_info "$ghostty_source_info" \
         --arg namespace "$namespace" \
         --arg package_name "$package_name" \
         --arg package_filename "$package_filename" \
@@ -2457,6 +2523,8 @@ verify_candidate_spdx() {
         .name == ($package_name + "-" + $revision) and
         .documentNamespace == $namespace and
         ([.packages[] | select(.SPDXID == "SPDXRef-Package-GraithNativeCandidate")] | length) == 1 and
+        package("SPDXRef-Package-Ghostty").sourceInfo == $ghostty_source_info and
+        package("SPDXRef-Package-Ghostty").licenseComments == $ghostty_license_comments and
         package("SPDXRef-Package-GraithNativeCandidate").name == $package_name and
         package("SPDXRef-Package-GraithNativeCandidate").versionInfo == $revision and
         package("SPDXRef-Package-GraithNativeCandidate").packageFileName == $package_filename and

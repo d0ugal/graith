@@ -785,6 +785,12 @@ func TestGhosttyProcessTerminalLifecycle(t *testing.T) {
 	}
 }
 
+func TestNativeTerminalSelfTest(t *testing.T) {
+	if err := RunNativeTerminalSelfTest(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestGhosttyProcessTerminalConcurrentClose(t *testing.T) {
 	term, err := newGhosttyProcessTerminal(20, 3)
 	if err != nil {
