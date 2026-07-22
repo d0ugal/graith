@@ -46,12 +46,12 @@ func describeSessionExit(s SessionState) string {
 // barrier transition itself.
 func mutatingControlMessage(msg protocol.Envelope) bool {
 	switch msg.Type {
-	case "msg_inbox":
-		var payload protocol.MsgInboxMsg
-		return protocol.DecodePayload(msg, &payload) != nil || payload.Ack
-	case "msg_sub":
-		var payload protocol.MsgSubMsg
-		return protocol.DecodePayload(msg, &payload) != nil || payload.Ack
+	case "msg_inbox", "msg_sub":
+		// Reading, waiting, and following are observational. ACK persistence
+		// acquires its own narrowly scoped lease after a message is delivered.
+		// Keeping these requests out of the connection lease is essential for
+		// idle readers: --wait/--follow may block across an upgrade attempt.
+		return false
 	case "handshake", "auth_proof", "repo_list", "store_list", "store_get", "list",
 		"logs", "wait", "msg_topics", "msg_conversation", "msg_jail_list",
 		"msg_jail_show", "screen_preview", "screen_snapshot", "status",
@@ -699,7 +699,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 				stream := "inbox:" + auth.sessionID
-				if sm.handleMsgStreamRead(ctx, sendControl, reader, stream, auth.sessionID, m.OnlyUnread, m.ThreadID, m.Wait, m.Follow, m.Ack) {
+				if sm.handleMsgStreamRead(ctx, sendControl, sendControlResult, reader, stream, auth.sessionID, auth.mutationCaller(), m.OnlyUnread, m.ThreadID, m.Wait, m.Follow, m.Ack) {
 					return
 				}
 
@@ -720,7 +720,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					}
 				}
 
-				if sm.handleMsgStreamRead(ctx, sendControl, reader, m.Stream, m.Subscriber, m.OnlyUnread, m.ThreadID, m.Wait, m.Follow, m.Ack) {
+				if sm.handleMsgStreamRead(ctx, sendControl, sendControlResult, reader, m.Stream, m.Subscriber, auth.mutationCaller(), m.OnlyUnread, m.ThreadID, m.Wait, m.Follow, m.Ack) {
 					return
 				}
 

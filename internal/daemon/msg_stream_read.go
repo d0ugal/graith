@@ -2,9 +2,34 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/d0ugal/graith/internal/protocol"
 )
+
+// persistMsgStreamAck admits only the durable acknowledgement operation. The
+// stream itself may be idle for an arbitrary amount of time and must remain
+// observational while it waits for delivery.
+func (sm *SessionManager) persistMsgStreamAck(stream, caller, subscriber string, seqs []int64, perMessage bool) error {
+	lease, err := sm.beginMutationRequest("msg_ack", caller)
+	if err != nil {
+		return fmt.Errorf("message delivered but acknowledgement was not persisted; retry the read: %w", err)
+	}
+
+	defer sm.endMutationRequest(lease)
+
+	if perMessage {
+		err = sm.messages.AckMessages(stream, subscriber, seqs)
+	} else {
+		err = sm.messages.Ack(stream, subscriber, seqs[len(seqs)-1])
+	}
+
+	if err != nil {
+		return fmt.Errorf("message delivered but acknowledgement was not persisted; retry the read: %w", err)
+	}
+
+	return nil
+}
 
 // handleMsgStreamRead encapsulates the full read/subscribe/ack/follow/wait/detach
 // loop shared by msg_sub and msg_inbox handlers. Returns true if the caller
@@ -12,8 +37,10 @@ import (
 func (sm *SessionManager) handleMsgStreamRead(
 	ctx context.Context,
 	sendControl func(string, any),
+	sendControlResult func(string, any) error,
 	reader *protocol.FrameReader,
 	stream, subscriber string,
+	caller string,
 	onlyUnread bool, threadID string,
 	wait, follow, ack bool,
 ) bool {
@@ -39,19 +66,34 @@ func (sm *SessionManager) handleMsgStreamRead(
 	}
 
 	for _, msg := range msgs {
-		sendControl("msg_message", msg)
+		if err := sendControlResult("msg_message", msg); err != nil {
+			if unsub != nil {
+				unsub()
+			}
+
+			return false
+		}
 	}
 
 	if ack && subscriber != "" && len(msgs) > 0 {
+		var seqs []int64
 		if threadID != "" {
-			seqs := make([]int64, len(msgs))
+			seqs = make([]int64, len(msgs))
 			for i, msg := range msgs {
 				seqs[i] = msg.Seq
 			}
-
-			_ = sm.messages.AckMessages(stream, subscriber, seqs)
 		} else {
-			_ = sm.messages.Ack(stream, subscriber, msgs[len(msgs)-1].Seq)
+			seqs = []int64{msgs[len(msgs)-1].Seq}
+		}
+
+		if err := sm.persistMsgStreamAck(stream, caller, subscriber, seqs, threadID != ""); err != nil {
+			sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+
+			if unsub != nil {
+				unsub()
+			}
+
+			return false
 		}
 	}
 
@@ -104,13 +146,15 @@ func (sm *SessionManager) handleMsgStreamRead(
 					continue
 				}
 
-				sendControl("msg_message", tmsg)
+				if err := sendControlResult("msg_message", tmsg); err != nil {
+					return
+				}
 
 				if ack && subscriber != "" {
-					if threadID != "" {
-						_ = sm.messages.AckMessages(stream, subscriber, []int64{tmsg.Seq})
-					} else {
-						_ = sm.messages.Ack(stream, subscriber, tmsg.Seq)
+					seqs := []int64{tmsg.Seq}
+					if err := sm.persistMsgStreamAck(stream, caller, subscriber, seqs, threadID != ""); err != nil {
+						sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+						return
 					}
 				}
 
