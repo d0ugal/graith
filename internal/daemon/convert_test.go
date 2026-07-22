@@ -51,6 +51,27 @@ func startConvertFake(t *testing.T, sm *SessionManager, id, script string) *head
 	return s
 }
 
+func waitForConvertFakeOutput(t *testing.T, driver *headless.Session, want string) {
+	t.Helper()
+
+	deadline := time.NewTimer(3 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer deadline.Stop()
+	defer ticker.Stop()
+
+	for {
+		if strings.Contains(driver.ScreenPreview(), want) {
+			return
+		}
+
+		select {
+		case <-ticker.C:
+		case <-deadline.C:
+			t.Fatalf("headless process did not report readiness %q", want)
+		}
+	}
+}
+
 func TestConvertToInteractiveNotFound(t *testing.T) {
 	t.Parallel()
 
@@ -157,11 +178,15 @@ func TestConvertGuardSaveFailureRollsBack(t *testing.T) {
 // to SIGTERM/SIGKILL.
 func TestStopDriverForConvertSettlesOnInterrupt(t *testing.T) {
 	const settle = 5 * time.Second
+	const ready = "canny-signal-ready"
 
 	sm := convertTestManager(t)
 	sm.cfg.Lifecycle.ConvertSettleTimeout = settle.String()
 
-	driver := startConvertFake(t, sm, "bonnie", "trap 'exit 0' INT; sleep 30")
+	// The foreground child installs its own trap, emits readiness, and then
+	// blocks in a shell builtin. No later child spawn can miss the group signal.
+	driver := startConvertFake(t, sm, "bonnie", `trap 'exit 0' INT; sh -c 'trap "exit 0" INT; printf "canny-signal-ready\n"; IFS= read -r _'`)
+	waitForConvertFakeOutput(t, driver, ready)
 
 	start := time.Now()
 	done := make(chan struct{})
