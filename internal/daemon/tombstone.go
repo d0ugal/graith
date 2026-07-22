@@ -195,11 +195,27 @@ func (sm *SessionManager) resumeTombstones() {
 			continue
 		}
 
+		sm.mu.RLock()
+		stateSession := sm.state.Sessions[t.ID]
+		removedHookCleanupPending := stateSession != nil && stateSession.RemovedHookCleanupPending
+		processStillRecorded := stateSession == nil ||
+			(stateSession.PID == t.PID && stateSession.PIDStartTime == t.PIDStartTime)
+		sm.mu.RUnlock()
+
+		// Removed-hook ownership is reconciled before tombstones during normal
+		// cold startup. Keep this defense at the destructive boundary so a direct
+		// or reordered call cannot signal or erase a still-pending generation.
+		if removedHookCleanupPending {
+			sm.log.Warn("deferring interrupted delete while removed-hook cleanup is pending",
+				"id", t.ID, "pid", t.PID)
+			continue
+		}
+
 		sm.log.Info("resuming interrupted delete", "id", t.ID, "name", t.Name)
 
 		// Reap a leftover orphan process (verified by start time) before removing
 		// the worktree it may still be running in.
-		if t.PID > 0 {
+		if t.PID > 0 && processStillRecorded {
 			if _, err := sm.killVerifiedProcess(t.PID, t.PIDStartTime); err != nil {
 				sm.log.Warn("could not reap orphan during delete-resume",
 					"id", t.ID, "pid", t.PID, "err", err)

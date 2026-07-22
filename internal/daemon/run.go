@@ -677,6 +677,23 @@ func run(
 		}
 
 		sm.reconcileUpgradeCleanup()
+		// Resolve removed-hook process ownership before interrupted-delete,
+		// soft-delete, or generic orphan cleanup can reach a non-child PID. A
+		// matching live generation aborts startup without receiving a signal.
+		if err := sm.reconcileRemovedHookProcesses(); err != nil {
+			_ = l.Close()
+
+			ReleasePIDFile(paths.PIDFile)
+
+			return fmt.Errorf("reconcile removed-hook processes: %w", err)
+		}
+		if err := sm.completeRemovedHookCleanup(true); err != nil {
+			_ = l.Close()
+
+			ReleasePIDFile(paths.PIDFile)
+
+			return fmt.Errorf("complete removed command policy cleanup: %w", err)
+		}
 
 		// Finish any deletes interrupted mid-flight (crash/kill/power loss)
 		// before reaping orphaned processes, so a half-deleted session's
@@ -685,13 +702,6 @@ func run(
 
 		sm.reconcileSoftDeletedOrphans()
 		sm.cleanupOrphanedProcesses()
-		if err := sm.completeRemovedHookCleanup(true); err != nil {
-			_ = l.Close()
-
-			ReleasePIDFile(paths.PIDFile)
-
-			return fmt.Errorf("complete removed command policy cleanup: %w", err)
-		}
 
 		logAttrs := []any{"socket", paths.SocketPath, "pid", os.Getpid()}
 		if paths.Profile != "" {

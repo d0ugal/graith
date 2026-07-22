@@ -1240,11 +1240,100 @@ func (sm *SessionManager) killVerifiedProcess(pid int, startTime int64) (killed 
 	return err == nil, err
 }
 
+type removedHookProcessCandidate struct {
+	id           string
+	pid          int
+	pidStartTime int64
+}
+
+// reconcileRemovedHookProcesses resolves the migration's durable process
+// ownership marker before any generic tombstone, soft-delete, or orphan
+// cleanup can signal a numeric process group. A cold restart has no child
+// handle that reserves the recorded PID/PGID generation, so a matching live
+// process stays quarantined for manual cleanup. A dead or reused PID is safe to
+// clear without signalling; completeRemovedHookCleanup can then retire only
+// Graith-owned hook artifacts.
+func (sm *SessionManager) reconcileRemovedHookProcesses() error {
+	sm.mu.RLock()
+
+	var candidates []removedHookProcessCandidate
+	for id, session := range sm.state.Sessions {
+		if !session.RemovedHookCleanupPending || session.PID <= 0 {
+			continue
+		}
+
+		candidates = append(candidates, removedHookProcessCandidate{
+			id: id, pid: session.PID, pidStartTime: session.PIDStartTime,
+		})
+	}
+
+	sm.mu.RUnlock()
+
+	changed := false
+
+	for _, candidate := range candidates {
+		alive := isProcessAlive(candidate.pid)
+		currentStartTime, identityErr := grpty.ProcessStartTime(candidate.pid)
+		resolved := !alive || (candidate.pidStartTime > 0 && identityErr == nil && currentStartTime != candidate.pidStartTime)
+
+		if resolved {
+			sm.log.Warn("recorded removed-hook process generation is gone; leaving any replacement unsignaled",
+				"id", candidate.id, "pid", candidate.pid,
+				"recorded_start_time", candidate.pidStartTime,
+				"current_start_time", currentStartTime,
+				"identity_error", identityErr)
+		} else {
+			sm.log.Warn("cannot safely signal removed-hook process after cold restart",
+				"id", candidate.id, "pid", candidate.pid,
+				"recorded_start_time", candidate.pidStartTime,
+				"identity_error", identityErr)
+		}
+
+		sm.mu.Lock()
+		session := sm.state.Sessions[candidate.id]
+		if session != nil && session.PID == candidate.pid &&
+			session.PIDStartTime == candidate.pidStartTime && session.RemovedHookCleanupPending {
+			if resolved {
+				session.StatusChangedAt = time.Now()
+				sm.setStopReasonLocked(candidate.id, session, StopReasonCrash)
+				session.Status = StatusStopped
+				session.PID = 0
+				session.PIDStartTime = 0
+				applyLifecycleSummaryLocked(session,
+					"Recorded removed-hook process generation is gone; any replacement PID was left untouched")
+				changed = true
+			} else {
+				summary := truncateToBytes(sanitizeSummaryText(fmt.Sprintf(
+					"Removed-hook process (PID %d) — cold-start identity cannot be reserved; manual cleanup needed",
+					candidate.pid)), 100)
+				if session.Status != StatusErrored || session.StopReason != StopReasonCrash ||
+					session.SummaryText != summary {
+					session.Status = StatusErrored
+					session.StatusChangedAt = time.Now()
+					sm.setStopReasonLocked(candidate.id, session, StopReasonCrash)
+					applyLifecycleSummaryLocked(session, summary)
+					changed = true
+				}
+			}
+		}
+		sm.mu.Unlock()
+	}
+
+	if !changed {
+		return nil
+	}
+
+	if err := sm.persistLatestUpgradeState(); err != nil {
+		return fmt.Errorf("persist removed-hook process reconciliation: %w", err)
+	}
+
+	return nil
+}
+
 type orphanCandidate struct {
-	id                        string
-	pid                       int
-	pidStartTime              int64
-	removedHookCleanupPending bool
+	id           string
+	pid          int
+	pidStartTime int64
 }
 
 func (sm *SessionManager) cleanupOrphanedProcesses() {
@@ -1253,7 +1342,8 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 	var candidates []orphanCandidate
 
 	for id, sess := range sm.state.Sessions {
-		if (sess.Status != StatusRunning && sess.Status != StatusErrored) || sess.PID <= 0 {
+		if (sess.Status != StatusRunning && sess.Status != StatusErrored) || sess.PID <= 0 ||
+			sess.RemovedHookCleanupPending {
 			continue
 		}
 
@@ -1263,7 +1353,6 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 
 		candidates = append(candidates, orphanCandidate{
 			id: id, pid: sess.PID, pidStartTime: sess.PIDStartTime,
-			removedHookCleanupPending: sess.RemovedHookCleanupPending,
 		})
 	}
 	sm.mu.Unlock()
@@ -1282,55 +1371,6 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 				sess.PIDStartTime = 0
 				sm.setStopReasonLocked(c.id, sess, StopReasonCrash)
 				applyLifecycleSummaryLocked(sess, "Orphaned process had already exited")
-			}
-			sm.mu.Unlock()
-
-			continue
-		}
-
-		// A cold restart has no child handle that reserves this PID/PGID
-		// generation. Even after a matching start-time check, the leader could
-		// exit and its numeric process group could be reused before either the
-		// first signal or a later escalation. Removed-hook cleanup must therefore
-		// stay unresolved for a live non-child instead of risking a signal to an
-		// unrelated process group. The exec-upgrade path owns the child and
-		// resolves it before clearing this durable marker.
-		if c.removedHookCleanupPending {
-			currentStartTime, identityErr := grpty.ProcessStartTime(c.pid)
-			if c.pidStartTime > 0 && identityErr == nil && currentStartTime != c.pidStartTime {
-				sm.log.Warn("recorded removed-hook process generation is gone; leaving replacement unsignaled",
-					"id", c.id, "pid", c.pid,
-					"recorded_start_time", c.pidStartTime,
-					"current_start_time", currentStartTime)
-				sm.mu.Lock()
-				if sess := sm.state.Sessions[c.id]; sess != nil && sess.PID == c.pid &&
-					sess.PIDStartTime == c.pidStartTime && sess.RemovedHookCleanupPending {
-					sess.Status = StatusStopped
-					sess.StatusChangedAt = time.Now()
-					sess.PID = 0
-					sess.PIDStartTime = 0
-					sm.setStopReasonLocked(c.id, sess, StopReasonCrash)
-					applyLifecycleSummaryLocked(sess,
-						"Recorded removed-hook process generation is gone; replacement PID was left untouched")
-				}
-				sm.mu.Unlock()
-
-				continue
-			}
-
-			sm.log.Warn("cannot safely signal removed-hook process after cold restart",
-				"id", c.id, "pid", c.pid,
-				"recorded_start_time", c.pidStartTime,
-				"identity_error", identityErr)
-			sm.mu.Lock()
-			if sess := sm.state.Sessions[c.id]; sess != nil && sess.PID == c.pid &&
-				sess.PIDStartTime == c.pidStartTime && sess.RemovedHookCleanupPending {
-				sess.Status = StatusErrored
-				sess.StatusChangedAt = time.Now()
-				sm.setStopReasonLocked(c.id, sess, StopReasonCrash)
-				applyLifecycleSummaryLocked(sess, fmt.Sprintf(
-					"Removed-hook process (PID %d) — cold-start identity cannot be reserved; manual cleanup needed",
-					c.pid))
 			}
 			sm.mu.Unlock()
 
