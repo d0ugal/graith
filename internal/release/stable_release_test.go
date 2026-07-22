@@ -225,10 +225,18 @@ func TestStableLinuxArchiveAndPackagesCarryNativeEvidence(t *testing.T) {
 		"verify_linux_release_bundle", "cmp \"$archive_root/gr\" \"$binary_path\"",
 		"package payload is incomplete or outside its allowlist",
 		"verify_candidate_privacy", "verify_candidate_spdx",
+		"rpm_payload=\"$staging/rpm-payload.cpio\"",
+		"cpio -it --quiet --absolute-filenames <\"$rpm_payload\"",
+		"cpio -idm --quiet --no-absolute-filenames <\"$rpm_payload\"",
+		"stable Linux rpm contains a non-canonical member",
 	} {
 		if !strings.Contains(verifier, required) {
 			t.Errorf("stable Linux final-byte verifier missing %q", required)
 		}
+	}
+
+	if strings.Contains(verifier, "rpm2cpio \"$rpm\" | cpio") {
+		t.Fatal("stable Linux verifier trusts rpm2cpio's unsigned-package pipeline status")
 	}
 }
 
@@ -251,6 +259,19 @@ func TestReleasePleaseCreatesStableTagsAsDrafts(t *testing.T) {
 
 	if !config.Packages["."].ForceTagCreation {
 		t.Fatal("release-please drafts must still create the tag that triggers the stable workflow")
+	}
+}
+
+func TestStableWorkflowDoesNotCoalesceDistinctTags(t *testing.T) {
+	const perRefConcurrency = "group: stable-release-${{ github.event_name == 'push' && github.ref || github.event.pull_request.number }}"
+
+	data := string(mustReadReleaseFile(t, ".github/workflows/goreleaser.yml"))
+	if !strings.Contains(data, perRefConcurrency) {
+		t.Fatal("stable workflow must keep distinct tag builds in distinct top-level concurrency groups")
+	}
+
+	if strings.Contains(data, "github.event_name == 'push' && 'publish'") {
+		t.Fatal("stable workflow coalesces distinct tag builds before the serialized publisher")
 	}
 }
 

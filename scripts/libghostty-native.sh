@@ -2831,6 +2831,7 @@ verify_linux_release_bundle() (
     local archive_files expected_archive_files man_files package_man_files
     local tree tree_files expected_tree_files artifact runtime_identity
     local package_listing package_kind package_path
+    local rpm_payload rpm_errors rpm_status
 
     trap 'cleanup_candidate_staging "$staging"' EXIT
 
@@ -2893,6 +2894,21 @@ verify_linux_release_bundle() (
     rpm_root="$staging/rpm"
     apk_root="$staging/apk"
     mkdir -p "$archive_root" "$deb_root" "$rpm_root" "$apk_root"
+    rpm_payload="$staging/rpm-payload.cpio"
+    rpm_errors="$staging/rpm2cpio.stderr"
+    set +e
+    LC_ALL=C rpm2cpio "$rpm" >"$rpm_payload" 2>"$rpm_errors"
+    rpm_status=$?
+    set -e
+    # Ubuntu's rpm2cpio returns 1 for valid unsigned nfpm packages while
+    # emitting a complete CPIO stream and no diagnostic. The tag path signs
+    # the RPM later, so accept only that exact shape; cpio integrity, member
+    # safety, the payload allowlist, and byte equality are still checked below.
+    if [[ "$rpm_status" -ne 0 && "$rpm_status" -ne 1 ]] ||
+        [[ ! -s "$rpm_payload" || -s "$rpm_errors" ]]; then
+        echo "error: could not materialize the stable Linux RPM payload" >&2
+        return 1
+    fi
     for package_kind in deb rpm apk; do
         case "$package_kind" in
             deb)
@@ -2901,7 +2917,15 @@ verify_linux_release_bundle() (
                 ;;
             rpm)
                 package_path="$rpm"
-                package_listing="$(rpm2cpio "$package_path" | cpio -it --quiet)"
+                package_listing="$(
+                    cpio -it --quiet --absolute-filenames <"$rpm_payload"
+                )"
+                if grep -Ev '^/[^/]' <<<"$package_listing" | grep -q .; then
+                    echo "error: stable Linux rpm contains a non-canonical member" >&2
+                    return 1
+                fi
+                package_listing="${package_listing#/}"
+                package_listing="${package_listing//$'\n/'/$'\n'}"
                 ;;
             apk)
                 package_path="$apk"
@@ -2916,10 +2940,13 @@ verify_linux_release_bundle() (
     done
     tar -xzf "$archive" --no-same-owner --no-same-permissions -C "$archive_root"
     dpkg-deb -x "$deb" "$deb_root"
-    (cd "$rpm_root" && rpm2cpio "$rpm" | cpio -idm --quiet --no-absolute-filenames)
+    (
+        cd "$rpm_root"
+        cpio -idm --quiet --no-absolute-filenames <"$rpm_payload"
+    )
     tar -xzf "$apk" --no-same-owner --no-same-permissions -C "$apk_root"
 
-    package_man_files="$(sed 's#^man/#usr/share/man/man1/#' <<<"$man_files")"
+    package_man_files="${man_files//man\//usr/share/man/man1/}"
     expected_tree_files="$(
         printf '%s\n' usr/bin/gr \
             usr/share/bash-completion/completions/gr \

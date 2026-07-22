@@ -14,7 +14,7 @@ import (
 	yaml "go.yaml.in/yaml/v3"
 )
 
-// requiredSecrets are the three secrets publish-repo consumes: GPG_PRIVATE_KEY
+// requiredSecrets are the three secrets publish-stable consumes: GPG_PRIVATE_KEY
 // and GPG_PASSPHRASE sign the rpm/apt packages + metadata, RELEASE_TOKEN checks
 // out and pushes the cross-repo graith-repo Pages tree. The gate must map all
 // three (issue #768).
@@ -26,10 +26,10 @@ func goreleaserWorkflowPath() string {
 	return filepath.Join("..", "..", ".github", "workflows", "goreleaser.yml")
 }
 
-// gpgCheckStep locates the publishing secret gate and returns
+// publishingSecretsStep locates the publishing secret gate and returns
 // its `run:` script plus the env map it declares. This is the gate that decides
 // whether the apt/yum publish job runs (issue #768).
-func gpgCheckStep(t *testing.T) (script string, env map[string]string) {
+func publishingSecretsStep(t *testing.T) (script string, env map[string]string) {
 	t.Helper()
 
 	data, err := os.ReadFile(goreleaserWorkflowPath())
@@ -63,8 +63,8 @@ func gpgCheckStep(t *testing.T) (script string, env map[string]string) {
 	return "", nil
 }
 
-// runGate executes the gpg_check shell with the given secret values (empty
-// string == unset) and returns the has_key output and whether the step failed
+// runGate executes the publishing_secrets shell with the given secret values
+// (empty string == unset) and returns the has_gpg output and whether the step failed
 // (non-zero exit).
 func runGate(t *testing.T, script string, secrets map[string]string) (hasKey string, failed bool) {
 	t.Helper()
@@ -110,12 +110,12 @@ func runGate(t *testing.T, script string, secrets map[string]string) (hasKey str
 // RELEASE_TOKEN, so the step must map each one from the matching secret — not
 // just declare an env var of the right name (issue #768).
 func TestPublishGateMapsAllThreeSecrets(t *testing.T) {
-	_, env := gpgCheckStep(t)
+	_, env := publishingSecretsStep(t)
 
 	for _, name := range requiredSecrets {
 		want := "${{ secrets." + name + " }}"
 		if got := env[name]; got != want {
-			t.Errorf("gpg_check env[%s] = %q, want %q", name, got, want)
+			t.Errorf("publishing_secrets env[%s] = %q, want %q", name, got, want)
 		}
 	}
 }
@@ -130,7 +130,7 @@ func TestPublishGateBehaviour(t *testing.T) {
 		t.Skip("bash not available; skipping gate execution test")
 	}
 
-	script, _ := gpgCheckStep(t)
+	script, _ := publishingSecretsStep(t)
 
 	const set = "x"
 
@@ -195,7 +195,7 @@ func TestPublishGateBehaviour(t *testing.T) {
 			hasKey, failed := runGate(t, script, tc.secrets)
 
 			if hasKey != tc.wantHasKey {
-				t.Errorf("has_key = %q, want %q", hasKey, tc.wantHasKey)
+				t.Errorf("has_gpg = %q, want %q", hasKey, tc.wantHasKey)
 			}
 
 			if failed != tc.wantFailed {
