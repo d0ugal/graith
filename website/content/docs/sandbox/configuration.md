@@ -87,6 +87,13 @@ upgrade from a release which supported it:
 3. Explicitly resume the session. Graith regenerates any generic lifecycle
    hooks still configured, without the removed policy hook.
 
+After a cold daemon restart, Graith will not signal a live non-child process
+group whose generation it cannot reserve atomically. Startup fails closed with
+cleanup pending and reports the affected session and PID. Inspect that PID and
+stop it externally only after verifying it is the old agent process, then start
+Graith again. If the PID belongs to a newer, unrelated process, Graith detects
+the generation mismatch on retry and leaves that process untouched.
+
 The state migration writes the usual pre-migration `state.json.v<version>.bak`.
 An older binary refuses the migrated state. A downgrade therefore requires
 stopping the daemon and restoring both the matching state backup and the
