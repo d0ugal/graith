@@ -219,6 +219,9 @@ func renderScenarioStart(authored protocol.ScenarioStartMsg, state *ScenarioRend
 	}
 
 	for i, authoredTrigger := range authored.Triggers {
+		// Completion.Session and Action.Deliver.Inbox are the only name-bearing
+		// nested fields. Other nested DTO values remain shared because rendering
+		// treats them as immutable.
 		trigger := authoredTrigger
 		if authoredTrigger.Completion != nil {
 			completion := *authoredTrigger.Completion
