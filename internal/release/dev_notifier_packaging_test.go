@@ -870,24 +870,33 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		`gh release delete dev --yes --repo "$GITHUB_REPOSITORY"`,
+		`gh api --paginate --slurp`,
+		`repos/$GITHUB_REPOSITORY/releases?per_page=100`,
+		`repos/$GITHUB_REPOSITORY/git/matching-refs/tags/dev`,
+		`-f ref=refs/tags/dev -f sha="$RELEASE_REVISION"`,
 		`gh release create dev --repo "$GITHUB_REPOSITORY"`,
+		`--verify-tag`,
 		`gh release view dev --repo "$GITHUB_REPOSITORY"`,
+		`repos/$GITHUB_REPOSITORY/git/ref/tags/dev`,
+		`test "$published_tag_sha" = "$RELEASE_REVISION"`,
 	} {
 		if !strings.Contains(publishScript, want) {
-			t.Errorf("checkout-free publisher does not explicitly select its repository with %q", want)
+			t.Errorf("checkout-free publisher does not fail closed with %q", want)
 		}
 	}
 
-	for _, want := range []string{"--target \"$RELEASE_REVISION\"", "checksums.txt", "--json assets", "git/ref/heads/main", `"$current_main" != "$RELEASE_REVISION"`} {
+	for _, want := range []string{"checksums.txt", "--json assets", "git/ref/heads/main", `"$current_main" != "$RELEASE_REVISION"`} {
 		if !strings.Contains(publishScript, want) {
 			t.Errorf("publisher final release step missing %q", want)
 		}
 	}
+	if strings.Contains(publishScript, "|| true") || strings.Contains(publishScript, "2>/dev/null") {
+		t.Error("publisher suppresses release or tag mutation errors")
+	}
 
 	var (
 		mainGuardAt       = strings.Index(publishScript, "git/ref/heads/main")
-		releaseMutationAt = strings.Index(publishScript, "gh release delete dev")
+		releaseMutationAt = strings.Index(publishScript, "gh api --method DELETE")
 	)
 
 	if mainGuardAt < 0 || releaseMutationAt < 0 || mainGuardAt > releaseMutationAt {

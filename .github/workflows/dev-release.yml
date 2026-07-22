@@ -644,16 +644,40 @@ jobs:
             echo "::error::Refusing to publish stale revision $RELEASE_REVISION; main is $current_main"
             exit 1
           fi
-          gh release delete dev --yes --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
-          gh api --method DELETE \
-            "repos/$GITHUB_REPOSITORY/git/refs/tags/dev" 2>/dev/null || true
+
+          release_ids="$(gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" | \
+            jq -er '[.[][] | select(.tag_name == "dev") | .id] | @tsv')"
+          if [[ "$release_ids" == *$'\t'* ]]; then
+            echo "::error::Refusing to replace multiple dev releases"
+            exit 1
+          fi
+          if [[ -n "$release_ids" ]]; then
+            gh api --method DELETE \
+              "repos/$GITHUB_REPOSITORY/releases/$release_ids" --silent
+          fi
+
+          tag_shas="$(gh api \
+            "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/dev" \
+            --jq '[.[] | select(.ref == "refs/tags/dev") | .object.sha] | @tsv')"
+          if [[ "$tag_shas" == *$'\t'* ]]; then
+            echo "::error::Refusing to replace multiple exact dev tags"
+            exit 1
+          fi
+          if [[ -n "$tag_shas" ]]; then
+            gh api --method DELETE \
+              "repos/$GITHUB_REPOSITORY/git/refs/tags/dev" --silent
+          fi
+
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref=refs/tags/dev -f sha="$RELEASE_REVISION" --silent
           gh release create dev --repo "$GITHUB_REPOSITORY" \
             dist/graith-dev_darwin_amd64.tar.gz \
             dist/graith-dev_darwin_arm64.tar.gz \
             dist/graith-dev_linux_amd64.tar.gz \
             dist/graith-dev_linux_arm64.tar.gz \
             dist/checksums.txt \
-            --target "$RELEASE_REVISION" \
+            --verify-tag \
             --prerelease \
             --title "Dev Build ($(date -u +%Y-%m-%d))" \
             --notes "Built from main at ${RELEASE_REVISION:0:7}. Install: \`brew install d0ugal/tap/graith-dev\`"
@@ -664,6 +688,9 @@ jobs:
           actual="$(gh release view dev --repo "$GITHUB_REPOSITORY" \
             --json assets --jq '.assets[].name' | sort)"
           test "$actual" = "$expected"
+          published_tag_sha="$(gh api \
+            "repos/$GITHUB_REPOSITORY/git/ref/tags/dev" --jq '.object.sha')"
+          test "$published_tag_sha" = "$RELEASE_REVISION"
 
       - name: Update Homebrew tap
         env:
