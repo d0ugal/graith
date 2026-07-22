@@ -890,6 +890,7 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 			t.Errorf("publisher final release step missing %q", want)
 		}
 	}
+
 	if strings.Contains(publishScript, "|| true") || strings.Contains(publishScript, "2>/dev/null") {
 		t.Error("publisher suppresses release or tag mutation errors")
 	}
