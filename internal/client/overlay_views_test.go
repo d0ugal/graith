@@ -304,6 +304,7 @@ func TestPickerStateRestoresViewAndSelection(t *testing.T) {
 			if view != PickerViewDeleted {
 				state.SessionID = "labelled"
 			}
+
 			if view == PickerViewLabels {
 				state.LabelGroup = "braw"
 			}
@@ -320,6 +321,7 @@ func TestPickerStateRestoresViewAndSelection(t *testing.T) {
 				if !ok || item.info.ID != "labelled" {
 					t.Fatalf("selected item = %#v, want session labelled", m.list.SelectedItem())
 				}
+
 				if view == PickerViewLabels && item.labelGroup != "braw" {
 					t.Fatalf("label group = %q, want braw", item.labelGroup)
 				}
@@ -335,6 +337,7 @@ func TestPickerStateFallsBackWhenSelectionDisappears(t *testing.T) {
 	if m.view != viewLabels {
 		t.Fatalf("view = %v, want labels", m.view)
 	}
+
 	if _, ok := m.list.SelectedItem().(groupHeader); ok {
 		t.Fatal("fallback selected a label header")
 	}
