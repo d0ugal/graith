@@ -43,10 +43,6 @@ readonly SIMDUTF_VERSION SIMDUTF_MANIFEST_VERSION SIMDUTF_UPSTREAM_SHA
 readonly SIMDUTF_CPP_SHA256 SIMDUTF_HEADER_SHA256 ZIG_SOURCE_SHA256
 readonly SPDX_TOOLS_VERSION SPDX_TOOLS_URL SPDX_TOOLS_SHA256
 readonly SPDX_NAMESPACE="https://github.com/d0ugal/graith/sbom/libghostty-native/$GHOSTTY_SHA/$GO_LIBGHOSTTY_SHA"
-readonly BENCH_SAMPLES="5"
-readonly BENCHTIME="1s"
-readonly MEASUREMENT_GOMAXPROCS="10"
-readonly MEMORY_SAMPLES="5"
 
 NATIVE_WORK="${GRAITH_LIBGHOSTTY_WORK:-}"
 OWN_WORK=0
@@ -455,14 +451,12 @@ run_go() {
             go test -count=1 -tags=libghostty ./internal/pty
             go test -count=1 -tags=libghostty ./internal/daemon \
                 -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff|TestDiagnostics|TestLogTerminalBackendSelectionFields'
-            go test -count=1 -tags=libghostty,libghostty_compare ./internal/pty \
-                -run '^TestTerminalBackendCompatibilityCorpus$'
             ;;
         race)
             verify_metadata
             go test -race -count=1 -tags=libghostty ./internal/pty \
                 -run 'TestGhostty'
-            go test -race -count=1 -tags=libghostty,libghostty_compare ./internal/pty \
+            go test -race -count=1 -tags=libghostty ./internal/pty \
                 -run '^TestTerminalBackendCompatibilityCorpus$'
             go test -race -count=1 -tags=libghostty ./internal/daemon \
                 -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff|TestDiagnostics|TestLogTerminalBackendSelectionFields'
@@ -483,50 +477,6 @@ run_go() {
                 -fuzz '^FuzzGhosttyRequestDecoder$' -fuzztime="$request_fuzztime"
             go test -tags=libghostty ./internal/pty -run '^$' -parallel="$parallel" \
                 -fuzz '^FuzzGhosttyHelperWrite$' -fuzztime="$helper_fuzztime"
-            ;;
-        bench)
-            verify_metadata
-            GOMAXPROCS="$MEASUREMENT_GOMAXPROCS" \
-                go test -run '^$' -tags=libghostty,libghostty_compare ./internal/pty \
-                -bench '^BenchmarkTerminalBackends$' -benchmem \
-                -benchtime="$BENCHTIME" -count="$BENCH_SAMPLES"
-            ;;
-        memory)
-            verify_metadata
-            local charm_test="$NATIVE_WORK/pty-charm.test"
-            local ghostty_test="$NATIVE_WORK/pty-libghostty.test"
-            local rss_probe="$NATIVE_WORK/pty-current-rss"
-            go test -c -o "$charm_test" ./internal/pty
-            go test -c -tags=libghostty,libghostty_compare \
-                -o "$ghostty_test" ./internal/pty
-            go build -o "$rss_probe" ./internal/pty/testdata/currentrss
-
-            local workloads=(
-                reconstruct_4MiB_1term
-                scroll_12000_1term
-                scroll_24000_1term
-                scroll_12000_3term
-                scroll_24000_3term
-            )
-            for backend in charm libghostty-helper; do
-                local test_binary="$charm_test"
-                if [[ "$backend" == "libghostty-helper" ]]; then
-                    test_binary="$ghostty_test"
-                fi
-                local workload
-                for workload in "${workloads[@]}"; do
-                    local sample
-                    for ((sample = 1; sample <= MEMORY_SAMPLES; sample++)); do
-                        printf 'backend=%s workload=%s sample=%d/%d\n' \
-                            "$backend" "$workload" "$sample" "$MEMORY_SAMPLES"
-                        /usr/bin/time -l env GOMAXPROCS="$MEASUREMENT_GOMAXPROCS" \
-                            GRAITH_TERMINAL_MEMORY_BACKEND="$backend" \
-                            GRAITH_TERMINAL_MEMORY_WORKLOAD="$workload" \
-                            GRAITH_TERMINAL_RSS_PROBE="$rss_probe" \
-                            "$test_binary" -test.run '^TestTerminalBackendPeakMemoryWorkload$' -test.v
-                    done
-                done
-            done
             ;;
     esac
 }
@@ -2040,15 +1990,15 @@ verify_default_binary() {
 
     build_info="$(go version -m "$binary")"
     if grep -Fq 'go.mitchellh.com/libghostty' <<<"$build_info"; then
-        echo "error: ordinary rollback binary contains go-libghostty" >&2
+        echo "error: ordinary pure-Go binary contains go-libghostty" >&2
         return 1
     fi
     if grep -Fq 'tags=libghostty' <<<"$build_info"; then
-        echo "error: ordinary rollback binary contains the libghostty build tag" >&2
+        echo "error: ordinary pure-Go binary contains the libghostty build tag" >&2
         return 1
     fi
     if grep -Fq 'ghostty_terminal_new' < <(strings "$binary"); then
-        echo "error: ordinary rollback binary contains a native Ghostty symbol" >&2
+        echo "error: ordinary pure-Go binary contains a native Ghostty symbol" >&2
         return 1
     fi
 }
@@ -2190,7 +2140,7 @@ verify_candidate_build_metadata() {
         fi
     done
     if grep -Fq $'\tdep\tgithub.com/charmbracelet/x/vt\t' <<<"$build_info"; then
-        echo "error: native candidate contains the Charm terminal dependency" >&2
+        echo "error: native candidate contains the x/vt terminal dependency" >&2
         return 1
     fi
 }
@@ -2868,7 +2818,7 @@ verify_linux_dev_archive() (
 
 usage() {
     cat <<EOF
-usage: $0 test|race|fuzz|bench|memory|daemon-test|soak [cycles [timeout]]|all
+usage: $0 test|race|fuzz|daemon-test|soak [cycles [timeout]]|all
        $0 source-build <zig-target> <output-library>
        $0 source-test <zig-target>
        $0 test-source-archive-policy
@@ -2894,7 +2844,7 @@ usage: $0 test|race|fuzz|bench|memory|daemon-test|soak [cycles [timeout]]|all
        $0 package-darwin-arm64 <binary> <destination> <tools-java-jar> [package-filename]
        $0 package-linux <binary> <destination> <tools-java-jar> <amd64|arm64> [package-filename]
 
-test/bench/memory use the checksum-pinned Apple artifact on macOS arm64.
+test/race/fuzz use the checksum-pinned Apple artifact on macOS arm64.
 daemon-test runs the external daemon lifecycle and bounded 12-cycle soak.
 soak defaults to 1,000 cycles bounded by one hour.
 source-build checks out Ghostty $GHOSTTY_SHA and requires Zig $REQUIRED_ZIG.
@@ -2906,7 +2856,7 @@ EOF
 }
 
 case "${1:-}" in
-    test|race|fuzz|bench|memory)
+    test|race|fuzz)
         run_go "$1"
         ;;
     daemon-test)
@@ -2922,8 +2872,6 @@ case "${1:-}" in
         run_go test
         run_go race
         run_go fuzz
-        run_go bench
-        run_go memory
         ;;
     source-build)
         source_build "${2:-}" "${3:-}"

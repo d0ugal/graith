@@ -19,9 +19,10 @@ const (
 
 // TestTerminalBackendBuildMetadata guards the terminal backend's production
 // packaging boundary, not merely backend selection at runtime. The production
-// native tag must omit the rollback parser packages from both the package
+// native tag must omit the pure-Go parser packages from both the package
 // dependency graph and the linked PTY probe binary's module metadata. The
-// explicit comparison tag and the default build intentionally retain them.
+// default build retains them until every supported platform has a native path
+// or an explicit support decision.
 func TestTerminalBackendBuildMetadata(t *testing.T) {
 	repository, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -42,13 +43,6 @@ func TestTerminalBackendBuildMetadata(t *testing.T) {
 			environment: []string{"CGO_ENABLED=0"},
 			wantCharm:   false,
 		},
-		{
-			name:        "dual_backend_comparison",
-			tags:        "libghostty,libghostty_compare",
-			wantCharm:   true,
-			wantGhostty: true,
-		},
-		{name: "comparison_tag_only", tags: "libghostty_compare", wantCharm: true},
 		{name: "default", wantCharm: true},
 	}
 
@@ -135,17 +129,6 @@ func TestTerminalBackendBuildMetadata(t *testing.T) {
 			"libghostty",
 			"-count=1",
 			"-run=^TestLibghosttyBackendRequiresCGO$",
-			"./internal/pty",
-		)...,
-	)
-	runGoCommand(
-		t,
-		repository,
-		taggedGoArgs(
-			"test",
-			"libghostty_compare",
-			"-count=1",
-			"-run=^TestDefaultTerminalBackendIsCharm$",
 			"./internal/pty",
 		)...,
 	)

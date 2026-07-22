@@ -2,7 +2,7 @@
 title: "Evidence: Operational libghostty daemon benchmarks"
 authors: Dougal Matthews
 created: 2026-07-18
-status: Implemented
+status: Implemented (historical evidence; comparison harness retired)
 reviewers: (none yet)
 informed: (TBD)
 issue: https://github.com/d0ugal/graith/issues/1444
@@ -12,8 +12,9 @@ issue: https://github.com/d0ugal/graith/issues/1444
 
 This record measures the accepted process-isolated `go-libghostty` backend,
 including helper startup, RPC, public-wrapper iteration, coherent snapshot
-serialization, and helper shutdown. Charm receives the same synthetic bytes and
-remains the rollback comparison. The superseded in-process spike and all
+serialization, and helper shutdown. At the measurement checkpoint, Charm
+received the same synthetic bytes as the comparison implementation. The
+superseded in-process spike and all
 pre-integration measurements are excluded because they exercised different
 failure, compatibility, chunking, and IPC boundaries.
 
@@ -26,7 +27,8 @@ resampling onto the frozen macOS-arm64 feature checkpoint
 changes found only target selection, packaging, SBOM, and design updates: the
 selected XCFramework input path and checksum, native helper implementation,
 production chunking, and benchmark/RSS harness are unchanged. The retained
-samples therefore exercise the same macOS-arm64 helper path as this tree.
+samples therefore exercise the same macOS-arm64 helper path retained in this
+tree.
 
 | Property | Value |
 |----------|-------|
@@ -46,41 +48,12 @@ benchmark-test, or native-daemon test process. Consecutive one-second `iostat`
 observations were stable at 64–72% CPU idle. No values from earlier contended
 runs were retained.
 
-`scripts/libghostty-native.sh` verifies the artifact and dependency pins. Its
-benchmark mode uses `libghostty_compare` so the production native backend and
-Charm rollback coexist only in the comparison binary; exact production checks
-continue to use `-tags=libghostty`. Temporary native libraries, binaries, build
-caches, and raw benchmark streams are not committed.
-
-The reproduction commands are:
-
-```bash
-scripts/libghostty-native.sh test
-scripts/libghostty-native.sh race
-scripts/libghostty-native.sh bench
-scripts/libghostty-native.sh memory
-```
-
-The timing command expands to:
-
-```bash
-GOMAXPROCS=10 go test -run '^$' \
-  -tags=libghostty,libghostty_compare ./internal/pty \
-  -bench '^BenchmarkTerminalBackends$' -benchmem \
-  -benchtime=1s -count=5
-```
-
-The RSS mode builds fresh disposable Charm and comparison test binaries plus a
-repository-owned macOS current-RSS probe, then runs each pair as:
-
-```bash
-/usr/bin/time -l env GOMAXPROCS=10 \
-  GRAITH_TERMINAL_MEMORY_BACKEND=<backend> \
-  GRAITH_TERMINAL_MEMORY_WORKLOAD=<workload> \
-  GRAITH_TERMINAL_RSS_PROBE=<temporary-probe> \
-  <temporary-test-binary> \
-  -test.run '^TestTerminalBackendPeakMemoryWorkload$' -test.v
-```
+The temporary dual-backend tag, benchmark/RSS modes, and repository-owned
+current-RSS probe were rollout instrumentation. Issue #1495 retired them after
+this evidence was accepted so production-like test binaries no longer link two
+terminal emulators. The exact harness remains recoverable from the immutable
+`bac11ea6accc6ede93454c3671025f23d4589c08` checkpoint named above; the current
+script intentionally exposes only production native validation modes.
 
 For every metric, `median [min–max]` is the third value after sorting all five
 samples numerically. Selection was mechanical and no outlier was discarded.
@@ -255,9 +228,9 @@ not additional samples and are not universal performance claims:
   scrollback growth; Graith's separately bounded raw log remains authoritative.
 
 The results support staged adoption for parsing and recovery workloads but show
-why helper lifetime and dirty-frame frequency matter operationally. Charm stays
-compiled and tested as the rollback until the accepted design's soak and
-promotion gates are satisfied.
+why helper lifetime and dirty-frame frequency matter operationally. Residual
+Charm compilation is now limited by retained-platform promotion and support
+decisions, not by a separately published rollback artifact.
 
 ## Restart/adoption validation, not benchmark results
 

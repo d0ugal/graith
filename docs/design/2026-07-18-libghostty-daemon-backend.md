@@ -2,7 +2,7 @@
 title: "Design Doc: Native libghostty daemon backend"
 authors: Dougal Matthews
 created: 2026-07-18
-status: Accepted (native dev rollout; stable promotion pending observation)
+status: Accepted (native dev rollout; staged removal in progress)
 reviewers: (none yet)
 informed: (TBD)
 issue: https://github.com/d0ugal/graith/issues/1432
@@ -14,8 +14,9 @@ Graith will adopt `libghostty-vt` as its daemon terminal-screen model through
 the public `go-libghostty` API and a restartable helper-process boundary. The
 decision is **GO for staged adoption**: the native candidate is promoted through
 platform-specific dev artifacts before any stable release changes. The current
-Go model remains in source for platforms without a native-backend decision, but
-promoted targets do not publish separately named rollback archives.
+Go model remains in source for platforms without a native-backend decision.
+Issue #1495 has retired comparison-only machinery ahead of final Charm deletion,
+and promoted targets do not publish separately named rollback archives.
 
 ## Background
 
@@ -48,7 +49,7 @@ Calling Ghostty directly from `graithd` is not acceptable either. Go `recover`
 cannot contain a C/Zig abort, segmentation fault, or memory corruption. A
 native replacement must preserve daemon availability, make every fallible
 operation observable, remain reproducibly buildable for supported targets, and
-keep rollback independent of terminal state or protocol migrations.
+keep backend transitions independent of terminal state or protocol migrations.
 
 ## Goals
 
@@ -222,9 +223,9 @@ improvement. The local shim has been removed.
 
 The result is **GO** for `libghostty-vt` through the isolated architecture. The
 build tag is a rollout gate, not uncertainty about the chosen backend.
-Production promotion follows the gates below. Charm remains available in source
-for targets without a native-backend decision and for shared comparison tests;
-it is not shipped as a separately named rollback artifact for promoted targets.
+Production promotion follows the gates below. Charm remains in source only
+while a retained supported target still depends on the pure-Go backend; it is
+not shipped as a separately named rollback artifact for promoted targets.
 
 ### API fit
 
@@ -243,23 +244,25 @@ available to untrusted terminal input.
 
 ### Compatibility evidence
 
-`TestTerminalBackendCompatibilityCorpus` drives both factories with identical
-generic data. It covers the default 128 KiB hydration size, grow/shrink resize,
-cursor visibility, wide characters, emoji, combining graphemes, represented
-styles, palette/RGB colors, alternate screen, device queries, and the reduced
-#1430 sequence. #1446 expands fragmented control strings, margins, erase/wrap,
-ZWJ/variation sequences, and background-only cells before handoff.
+`TestTerminalBackendCompatibilityCorpus` drives each build's selected backend
+with identical generic data. Default and tagged jobs cover the pure-Go model
+and isolated native helper separately, so production-like binaries never link
+both emulators. The corpus covers the default 128 KiB hydration size,
+grow/shrink resize, cursor visibility, wide characters, emoji, combining
+graphemes, represented styles, palette/RGB colors, alternate screen, device
+queries, and the reduced #1430 sequence. #1446 expanded fragmented control
+strings, margins, erase/wrap, ZWJ/variation sequences, and background-only
+cells before handoff.
 
-Ordinary builds compile and test the Charm rollback. Production
+Ordinary builds compile and test the pure-Go Charm backend. Production
 `libghostty` builds compile only the native backend and exclude x/vt and
 Ultraviolet from the `internal/pty` terminal-screen dependency graph and its
 isolated binary. The full `gr` binary legitimately retains Ultraviolet through
-its Bubble Tea/Lip Gloss UI, but no longer retains x/vt. Default and
-comparison-only graphs and binaries contain no go-libghostty module; the native
-and dual-backend variants contain it. The explicit
-`libghostty,libghostty_compare` tag pair compiles both backends for this shared
-corpus and its comparative benchmarks. `libghostty_compare` alone does not
-select the native backend and intentionally remains a default Charm build.
+its Bubble Tea/Lip Gloss UI, but no longer retains x/vt. Default graphs and
+binaries contain no go-libghostty module; native variants contain it. The
+temporary dual-backend tag, comparative benchmarks, RSS harness, and associated
+current-RSS probe were retired once the rollout decision had accepted their
+recorded evidence.
 
 The native helper retains zero historical rows. Persistent raw `Scrollback` is
 the authority for reconstruction; the helper owns only the visible viewport.
@@ -275,7 +278,7 @@ or raw bytes. Replays, including the 4 MiB benchmark/RSS fixture, use the shared
 Current intentional differences are explicit assertions rather than hidden
 normalization:
 
-| Behavior | Charm rollback | Native candidate | Decision |
+| Behavior | Pure-Go Charm | Native candidate | Decision |
 |----------|----------------|------------------|----------|
 | `e` plus combining acute | Drops the combining mark | Returns one `é` grapheme | Ghostty matches the interface and is preferred. |
 | Repeated grow/shrink after `canny brae bide` | First `4x2` shrink leaves `cann`; later grows keep that truncated viewport | First `4x2` shrink reflows to `ae b` / `ide`; later resizes retain only that visible subset because native scrollback is zero | Accept measured Ghostty reflow while reconstructing history only from raw Graith scrollback. |
@@ -294,7 +297,10 @@ small, deterministic, generic old Scots data rather than captured output; the
 
 The [focused benchmark evidence](2026-07-18-libghostty-daemon-backend-benchmarks.md)
 measures the accepted helper process and public `go-libghostty` wrapper, not the
-superseded in-process shim. On the representative Apple M5 host, five-sample
+superseded in-process shim. The comparison harness was temporary rollout
+instrumentation and has now been retired; the immutable evidence record keeps
+the exact source checkpoint and methodology. On the representative Apple M5
+host, five-sample
 medians show a 30.62 ms helper start/close cost, 838.15 µs per 65,550-byte
 parse, 2.58 ms per dirty coherent `120x40` snapshot, 71.47 µs per alternating
 resize, and 88.15 ms for production-chunked 4 MiB reconstruction plus snapshot
@@ -411,7 +417,8 @@ A pin rotation is generated and reviewed as one unit:
 4. generate `go.mod`, artifact digests, source and license hashes, SPDX entries,
    committed headers, and the notice inventory from the lock in one review;
 5. run Ghostty lib-vt tests, the complete wrapper suite, shared compatibility,
-   fuzz/race, benchmarks, and every supported native workflow target; and
+   fuzz/race, lifecycle/soak checks, and every supported native workflow target;
+   and
 6. publish candidate archives only after provenance and binary linkage checks.
 
 Native advisories are not visible to Go vulnerability scanners. Dependency
@@ -435,9 +442,10 @@ artifacts; changing only `go.mod` is insufficient.
 4. Make native the supported stable default for each accepted platform only in
    a separate reviewed release change. Do not publish an alternate rollback
    archive; stable native artifacts ship only after the preceding gates pass.
-   macOS amd64 remains pure Go, and Linux stable promotion remains observation-gated.
-5. After every retained-platform decision closes, remove Charm, its selector, and
-   backend-specific expectations. Keep the backend-neutral interface and
+   macOS amd64 remains pure Go until its explicit backend or support decision,
+   and Linux stable promotion remains observation-gated under #1475.
+5. After every retained-platform decision closes, remove Charm, its selector,
+   and backend-specific expectations. Keep the backend-neutral interface and
    persistent reconstruction path.
 
 No backend transition converts state. Sessions, PTYs, protocol messages, and
@@ -475,8 +483,6 @@ benchmark claim.
 - `scripts/libghostty-native.sh test`
 - `scripts/libghostty-native.sh race`
 - `scripts/libghostty-native.sh fuzz`
-- `scripts/libghostty-native.sh bench`
-- `scripts/libghostty-native.sh memory`
 - `scripts/libghostty-native.sh verify-metadata`
 - `scripts/libghostty-native.sh test-source-archive-policy`
 - tagged helper protocol fuzz targets and targeted `-race` tests
