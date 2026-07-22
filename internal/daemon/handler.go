@@ -104,7 +104,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 		// preflight on this connection. It is single-use even when preparation
 		// later refuses, so callers cannot replay stale authority or parameters.
 		upgradeTicket *protocol.UpgradeMsg
-		mutationLease bool
+		mutationLease *mutationLease
 	)
 
 	// connDone is closed when this connection's handler returns (for any
@@ -116,9 +116,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 	// or an early return from logs --follow / wait / msg_sub / command_policy_check
 	// / upgrade), so per-connection registrations never leak.
 	defer func() {
-		if mutationLease {
-			sm.endMutationRequest()
-		}
+		sm.endMutationRequest(mutationLease)
 
 		close(connDone)
 
@@ -164,10 +162,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 		// The prior synchronous dispatch, including its response write, has
 		// completed. Release its generation lease before blocking for another
 		// frame. Early returns release through the connection defer above.
-		if mutationLease {
-			sm.endMutationRequest()
+		if mutationLease != nil {
+			sm.endMutationRequest(mutationLease)
 
-			mutationLease = false
+			mutationLease = nil
 		}
 
 		select {
@@ -233,12 +231,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			}
 
 			if mutatingControlMessage(msg) {
-				if err := sm.beginMutationRequest(); err != nil {
+				lease, err := sm.beginMutationRequest(msg.Type, auth.mutationCaller())
+				if err != nil {
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 					continue
 				}
 
-				mutationLease = true
+				mutationLease = lease
 			}
 
 			switch msg.Type {
@@ -344,7 +343,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				// Transfer ownership of token delivery beyond this dispatch's
 				// connection lease. Upgrade/shutdown may not cross until the response
 				// write completes or a failed delivery has rolled back persistence.
-				if err := sm.beginMutationRequest(); err != nil {
+				lease, err := sm.beginMutationRequest("pair_request", auth.mutationCaller())
+				if err != nil {
 					sm.cancelPendingPairing(rid)
 					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 
@@ -352,7 +352,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 				go func() {
-					defer sm.endMutationRequest()
+					defer sm.endMutationRequest(lease)
 
 					cancelUndelivered := func() {
 						sm.cancelPendingPairing(rid)
@@ -958,12 +958,19 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			}
 
 		case protocol.ChannelData:
-			if err := sm.beginMutationRequest(); err != nil {
+			caller := "connection-data"
+
+			if attachedSessionID != "" {
+				caller = "session(" + boundedMutationIdentity(attachedSessionID) + ")"
+			}
+
+			lease, err := sm.beginMutationRequest("data", caller)
+			if err != nil {
 				sendControl("error", protocol.ErrorMsg{Message: err.Error()})
 				continue
 			}
 
-			mutationLease = true
+			mutationLease = lease
 
 			if origin.Remote && !sm.remoteDataAllowed(origin, poppedDeviceID) {
 				sendControl("error", protocol.ErrorMsg{Message: "not authorized to send remote input"})

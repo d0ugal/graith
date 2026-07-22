@@ -79,6 +79,12 @@ for the requested version and a fresh daemon generation. Otherwise it leaves the
 possible in-progress replacement alone: retry once startup finishes, or use
 `--force` to kill the sessions intentionally.
 
+If a preserve restart cannot drain accepted daemon mutations before its
+deadline, the error and daemon log identify every active holder by an opaque
+lease ID, operation, bounded caller identity, and age. Payloads, tokens, and
+message contents are never included. Wait for the named work to finish and
+retry; use `--force` only when intentionally interrupting it.
+
 ### `gr daemon reload`
 
 Reload configuration without restarting the daemon. Invalid settings or a

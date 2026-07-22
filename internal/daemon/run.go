@@ -23,6 +23,15 @@ import (
 
 var errUpgradeRejected = errors.New("upgrade rejected before daemon state mutation")
 
+func publicUpgradeFailure(public string, err error) error {
+	var drainErr *mutationDrainError
+	if errors.As(err, &drainErr) {
+		return fmt.Errorf("%s: %w", public, drainErr)
+	}
+
+	return errors.New(public)
+}
+
 var validateRetainedAdoptedService = daemonservice.ValidateRetainedAdoptedService
 
 // stateLoadRefusal classifies cold-start state errors that must stop the daemon
@@ -958,7 +967,7 @@ func run(
 		log.Info("preparing upgrade")
 
 		fail := func(public string, err error) error {
-			request.ready <- errors.New(public)
+			request.ready <- publicUpgradeFailure(public, err)
 
 			return err
 		}
