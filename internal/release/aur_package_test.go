@@ -34,6 +34,7 @@ func renderedAURFiles(t *testing.T, version string) (string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	srcinfo, err := os.ReadFile(filepath.Join(work, ".SRCINFO"))
 	if err != nil {
 		t.Fatal(err)
@@ -46,6 +47,7 @@ func renderedAURPackage(t *testing.T) string {
 	t.Helper()
 
 	pkgbuild, _ := renderedAURFiles(t, "0.70.0")
+
 	return pkgbuild
 }
 
@@ -105,10 +107,12 @@ func TestAURPackageNormalizesPrereleasePkgver(t *testing.T) {
 			strings.Contains(data, "pkgver = 0.70.0-rc.1") {
 			t.Errorf("%s retains a hyphen in pkgver", name)
 		}
+
 		if !strings.Contains(data, "pkgver=0.70.0_rc.1") &&
 			!strings.Contains(data, "pkgver = 0.70.0_rc.1") {
 			t.Errorf("%s does not normalize the prerelease pkgver", name)
 		}
+
 		for _, required := range []string{
 			"graith_0.70.0-rc.1_linux_amd64.tar.gz",
 			"graith_0.70.0-rc.1_linux_arm64.tar.gz",
