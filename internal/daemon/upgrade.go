@@ -1160,30 +1160,170 @@ func (sm *SessionManager) beginLifecycleOperation() error {
 	return nil
 }
 
-func (sm *SessionManager) beginMutationRequest() error {
+// mutationLease is an opaque, idempotent handle for one admitted mutation.
+// Callers must retain the handle and pass it to endMutationRequest exactly
+// when that mutation's work is complete. The registry deliberately stores no
+// request payloads or credentials.
+type mutationLease struct {
+	id string
+}
+
+type mutationLeaseRecord struct {
+	operation string
+	caller    string
+	startedAt time.Time
+}
+
+type mutationLeaseSummary struct {
+	ID        string
+	Operation string
+	Caller    string
+	Age       time.Duration
+}
+
+func (sm *SessionManager) mutationClock() time.Time {
+	if sm.mutationNow != nil {
+		return sm.mutationNow()
+	}
+
+	return time.Now()
+}
+
+func (sm *SessionManager) beginMutationRequest(operation, caller string) (*mutationLease, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	if sm.upgradePending {
-		return errors.New("daemon upgrade is pending")
+		return nil, errors.New("daemon upgrade is pending")
 	}
 
 	if sm.shutdownPending {
-		return errors.New("daemon shutdown is pending")
+		return nil, errors.New("daemon shutdown is pending")
 	}
 
-	sm.mutationInFlight++
+	if sm.mutationLeases == nil {
+		sm.mutationLeases = make(map[string]mutationLeaseRecord)
+	}
 
-	return nil
+	sm.mutationNextID++
+	id := fmt.Sprintf("mutation-%d", sm.mutationNextID)
+	sm.mutationLeases[id] = mutationLeaseRecord{
+		operation: safeMutationOperation(operation),
+		caller:    safeMutationCaller(caller),
+		startedAt: sm.mutationClock(),
+	}
+
+	return &mutationLease{id: id}, nil
 }
 
-func (sm *SessionManager) endMutationRequest() {
-	sm.mu.Lock()
-	if sm.mutationInFlight > 0 {
-		sm.mutationInFlight--
+func (sm *SessionManager) endMutationRequest(lease *mutationLease) {
+	if lease == nil || lease.id == "" {
+		return
 	}
+
+	sm.mu.Lock()
+	delete(sm.mutationLeases, lease.id)
 	sm.mu.Unlock()
 }
+
+func boundedMutationIdentity(identity string) string {
+	const maxIdentityLength = 96
+
+	var safe strings.Builder
+
+	for _, r := range identity {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' {
+			safe.WriteRune(r)
+		}
+
+		if safe.Len() >= maxIdentityLength {
+			break
+		}
+	}
+
+	return safe.String()
+}
+
+func safeMutationCaller(caller string) string {
+	const maxCallerLength = 112
+
+	if caller == "local-human" || caller == "remote-human" || caller == "remote-guest" ||
+		caller == "unauthenticated" || caller == "unknown" || caller == "connection-data" {
+		return caller
+	}
+
+	for _, prefix := range []string{"session(", "orchestrator("} {
+		if strings.HasPrefix(caller, prefix) && strings.HasSuffix(caller, ")") && len(caller) <= maxCallerLength {
+			id := boundedMutationIdentity(strings.TrimSuffix(strings.TrimPrefix(caller, prefix), ")"))
+			if id != "" {
+				return prefix + id + ")"
+			}
+		}
+	}
+
+	return "unknown"
+}
+
+func safeMutationOperation(operation string) string {
+	if operation == "" || len(operation) > 64 {
+		return "unknown"
+	}
+
+	for _, r := range operation {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') &&
+			(r < '0' || r > '9') && r != '_' && r != '-' {
+			return "unknown"
+		}
+	}
+
+	return operation
+}
+
+func (sm *SessionManager) mutationLeaseSnapshot() []mutationLeaseSummary {
+	sm.mu.RLock()
+	now := sm.mutationClock()
+	summaries := make([]mutationLeaseSummary, 0, len(sm.mutationLeases))
+
+	for id, lease := range sm.mutationLeases {
+		age := now.Sub(lease.startedAt)
+
+		if age < 0 {
+			age = 0
+		}
+
+		summaries = append(summaries, mutationLeaseSummary{
+			ID:        id,
+			Operation: lease.operation,
+			Caller:    lease.caller,
+			Age:       age,
+		})
+	}
+
+	sm.mu.RUnlock()
+
+	slices.SortFunc(summaries, func(a, b mutationLeaseSummary) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+
+	return summaries
+}
+
+type mutationDrainError struct {
+	cause   error
+	holders []mutationLeaseSummary
+}
+
+func (e *mutationDrainError) Error() string {
+	parts := make([]string, 0, len(e.holders))
+	for _, holder := range e.holders {
+		parts = append(parts, fmt.Sprintf("%s op=%s caller=%s age=%s", holder.ID, holder.Operation, holder.Caller, holder.Age.Truncate(time.Millisecond)))
+	}
+
+	return fmt.Sprintf("mutation drain timed out; active holders=%d [%s]", len(e.holders), strings.Join(parts, "; "))
+}
+
+func (e *mutationDrainError) Unwrap() error { return e.cause }
 
 func (sm *SessionManager) endLifecycleOperation() {
 	sm.mu.Lock()
@@ -1204,7 +1344,7 @@ func (sm *SessionManager) waitMutationIdle(ctx context.Context) error {
 
 	for {
 		sm.mu.RLock()
-		busy := sm.mutationInFlight > 0
+		busy := len(sm.mutationLeases) > 0
 		sm.mu.RUnlock()
 
 		if !busy {
@@ -1213,7 +1353,7 @@ func (sm *SessionManager) waitMutationIdle(ctx context.Context) error {
 
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return &mutationDrainError{cause: ctx.Err(), holders: sm.mutationLeaseSnapshot()}
 		case <-ticker.C:
 		}
 	}

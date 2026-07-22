@@ -78,6 +78,27 @@ func (ac authContext) describe() string {
 	}
 }
 
+// mutationCaller returns the deliberately bounded identity allowed in mutation
+// lease metadata. It excludes device IDs and all request-derived fields.
+func (ac authContext) mutationCaller() string {
+	switch ac.role {
+	case roleLocalHuman:
+		return "local-human"
+	case roleRemoteHuman:
+		return "remote-human"
+	case roleRemoteGuest:
+		return "remote-guest"
+	case roleOrchestrator:
+		return "orchestrator(" + boundedMutationIdentity(ac.sessionID) + ")"
+	case roleSession:
+		return "session(" + boundedMutationIdentity(ac.sessionID) + ")"
+	case roleNone:
+		return "unauthenticated"
+	default:
+		return "unknown"
+	}
+}
+
 // resolveAuth resolves the connection's role from its token, origin, and — for
 // remote connections — the device ID proven via proof-of-possession on this
 // connection (poppedDeviceID, empty until a valid auth_proof).

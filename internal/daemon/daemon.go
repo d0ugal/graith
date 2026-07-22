@@ -89,7 +89,10 @@ type SessionManager struct {
 	upgradePending    bool
 	shutdownPending   bool
 	lifecycleInFlight int
-	mutationInFlight  int
+	mutationLeases    map[string]mutationLeaseRecord
+	mutationNextID    uint64
+	// mutationNow is a test seam for deterministic lease-age assertions.
+	mutationNow func() time.Time
 	// beforeLifecycleSpawn is a deterministic test seam for the final shared
 	// Create/Fork/Resume admission barrier. Production leaves it nil.
 	beforeLifecycleSpawn func()
@@ -264,6 +267,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		lastInboxNotifyAt:  make(map[string]time.Time),
 		silentWarned:       make(map[string]bool),
 		upgradeCleanup:     make(map[string]upgradeCleanupEntry),
+		mutationLeases:     make(map[string]mutationLeaseRecord),
 		prWatch:            newPRWatchState(cfg.PRWatch.KickChannelSize()),
 		prRefWatch:         newPRRefWatchState(),
 		triggers:           newTriggerState(),
