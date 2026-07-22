@@ -622,7 +622,7 @@ func TestOverlay_SpaceTogglesCollapse(t *testing.T) {
 	}
 	m := sizedModel(t, sessions, "")
 
-	// Cursor should be on root (index 1, after header)
+	// Cursor should be on the global-tree root.
 	item := m.list.SelectedItem().(sessionItem)
 	if item.info.ID != "root" {
 		t.Fatalf("expected cursor on root, got %s", item.info.ID)
@@ -635,9 +635,9 @@ func TestOverlay_SpaceTogglesCollapse(t *testing.T) {
 	if !m.collapsed["root"] {
 		t.Fatal("root should be collapsed after space")
 	}
-	// Should only have header + root
-	if len(m.list.Items()) != 2 {
-		t.Errorf("expected 2 items after collapse, got %d", len(m.list.Items()))
+	// The global All tree has no group header, so only the root remains.
+	if len(m.list.Items()) != 1 {
+		t.Errorf("expected 1 item after collapse, got %d", len(m.list.Items()))
 	}
 
 	// Press space again to expand
@@ -648,8 +648,8 @@ func TestOverlay_SpaceTogglesCollapse(t *testing.T) {
 		t.Fatal("root should be expanded after second space")
 	}
 
-	if len(m.list.Items()) != 4 {
-		t.Errorf("expected 4 items after expand, got %d", len(m.list.Items()))
+	if len(m.list.Items()) != 3 {
+		t.Errorf("expected 3 items after expand, got %d", len(m.list.Items()))
 	}
 }
 
@@ -689,9 +689,9 @@ func TestOverlay_CollapseAllExpandAll(t *testing.T) {
 	if !m.collapsed["root1"] || !m.collapsed["c1"] || !m.collapsed["root2"] {
 		t.Fatal("all parents should be collapsed")
 	}
-	// header + root1 + root2 + leaf = 4
-	if len(m.list.Items()) != 4 {
-		t.Errorf("expected 4 items after collapse all, got %d", len(m.list.Items()))
+	// The global All tree has no header: root1 + root2 + leaf = 3.
+	if len(m.list.Items()) != 3 {
+		t.Errorf("expected 3 items after collapse all, got %d", len(m.list.Items()))
 	}
 
 	// Press C again to expand all
@@ -701,9 +701,9 @@ func TestOverlay_CollapseAllExpandAll(t *testing.T) {
 	if m.collapsed["root1"] || m.collapsed["c1"] || m.collapsed["root2"] {
 		t.Fatal("all parents should be expanded")
 	}
-	// header + 6 sessions = 7
-	if len(m.list.Items()) != 7 {
-		t.Errorf("expected 7 items after expand all, got %d", len(m.list.Items()))
+
+	if len(m.list.Items()) != 6 {
+		t.Errorf("expected 6 items after expand all, got %d", len(m.list.Items()))
 	}
 }
 
@@ -717,11 +717,11 @@ func TestOverlay_CollapsedStatePersists(t *testing.T) {
 	m := newOverlayModel(sessions, "", nil, nil, collapsed, nil)
 
 	// Should start with root collapsed
-	if len(m.list.Items()) != 2 {
-		t.Errorf("expected 2 items with pre-collapsed root, got %d", len(m.list.Items()))
+	if len(m.list.Items()) != 1 {
+		t.Errorf("expected 1 item with pre-collapsed root, got %d", len(m.list.Items()))
 	}
 
-	si := m.list.Items()[1].(sessionItem)
+	si := m.list.Items()[0].(sessionItem)
 	if !si.collapsed {
 		t.Error("root should be marked collapsed from initial state")
 	}
@@ -1175,6 +1175,7 @@ func TestLabelViewCollapseRetainsGroupSelection(t *testing.T) {
 	m.selectSessionByIDAndLabel("root", "beta")
 
 	updated, _ := sendKey(m, " ")
+
 	m = asOverlay(updated)
 
 	selected, ok := m.list.SelectedItem().(sessionItem)
@@ -1355,6 +1356,7 @@ func TestFilteredTreeViewsRefreshRetainsNestedSelection(t *testing.T) {
 			m.selectSessionByID("child")
 
 			updated, _ := m.Update(refreshSessionsMsg{sessions: []protocol.SessionInfo{base[1], base[0]}})
+
 			m = asOverlay(updated)
 
 			selected, ok := m.list.SelectedItem().(sessionItem)
@@ -1422,9 +1424,11 @@ func TestNewOverlayModel_CursorOnCurrentSession(t *testing.T) {
 	}
 }
 
-func TestNewOverlayModel_CursorSkipsGroupHeader(t *testing.T) {
+func TestRepoView_CursorSkipsGroupHeader(t *testing.T) {
 	sessions := overlayTestSessions()
 	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m.view = viewRepo
+	m.rebuildForView()
 
 	item := m.list.SelectedItem()
 	if _, ok := item.(groupHeader); ok {
@@ -2127,9 +2131,11 @@ func TestUpdate_Stop_Current_SetsFlag(t *testing.T) {
 }
 
 func TestUpdate_Stop_OnGroupHeader_NoOp(t *testing.T) {
-	// In the All view the first item is a group header; pressing S on it
+	// In the Repo view the first item is a group header; pressing S on it
 	// should not enter the confirm-stop state.
 	m := sizedModel(t, overlayTestSessions(), "")
+	m.view = viewRepo
+	m.rebuildForView()
 	m.list.Select(0) // group header
 
 	if _, ok := m.list.SelectedItem().(groupHeader); !ok {
@@ -2295,6 +2301,8 @@ func TestUpdate_EnterOnGroupHeader_NoSelection(t *testing.T) {
 		{ID: "s1", Name: "only", RepoName: "repo", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
 	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m.view = viewRepo
+	m.rebuildForView()
 	// Force cursor to group header
 	m.list.Select(0)
 
@@ -2364,6 +2372,8 @@ func TestUpdate_JKNavigation(t *testing.T) {
 func TestUpdate_NavigationSkipsGroupHeaders(t *testing.T) {
 	sessions := overlayTestSessions()
 	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m.view = viewRepo
+	m.rebuildForView()
 
 	// Navigate down through all items to reach graith group
 	// Start is on bonnie-feature (croft), j→braw-fix (graith, skips header)
@@ -2384,6 +2394,8 @@ func TestUpdate_NavigationSkipsGroupHeaders(t *testing.T) {
 func TestUpdate_NavigationUpSkipsGroupHeaders(t *testing.T) {
 	sessions := overlayTestSessions()
 	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m.view = viewRepo
+	m.rebuildForView()
 
 	// Navigate to a graith item (j from croft skips graith header)
 	updated, _ := sendKey(m, "j")
@@ -2453,6 +2465,8 @@ func TestUpdate_NavigationFetchesPreview(t *testing.T) {
 func TestUpdate_TabJumpsToNextGroup(t *testing.T) {
 	sessions := overlayTestSessions() // croft (1) + graith (2)
 	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m.view = viewRepo
+	m.rebuildForView()
 
 	// Should start in croft group (alphabetically first)
 	initial := m.list.SelectedItem().(sessionItem)
@@ -2475,6 +2489,9 @@ func TestUpdate_ShiftTabJumpsToPrevGroup(t *testing.T) {
 	sessions := overlayTestSessions()
 	// Start on the croft session (s3)
 	m := newOverlayModel(sessions, "s3", nil, nil, nil, nil)
+	m.view = viewRepo
+	m.rebuildForView()
+	m.selectSessionByID("s3")
 
 	initial := m.list.SelectedItem().(sessionItem)
 	if initial.info.RepoName != "croft" {
@@ -2960,6 +2977,8 @@ func TestView_PreviewPanelCICounts(t *testing.T) {
 
 func TestView_ShowsGroupHeaders(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m.view = viewRepo
+	m.rebuildForView()
 	updated, _ := sendWindowSize(m, 120, 40)
 	om := asOverlay(updated)
 	view := om.View().Content
@@ -2987,6 +3006,8 @@ func TestView_ShowsColumnHeaders(t *testing.T) {
 
 func TestView_ShowsHelpBar(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m.view = viewRepo
+	m.rebuildForView()
 	updated, _ := sendWindowSize(m, 150, 40)
 	view := asOverlay(updated).View().Content
 
@@ -3302,6 +3323,8 @@ func TestFetchPreviewCmd_NilFetchPreview(t *testing.T) {
 func TestFetchPreviewCmd_GroupHeaderSelected(t *testing.T) {
 	sessions := overlayTestSessions()
 	m := newOverlayModel(sessions, "", noopFetchPreview, nil, nil, nil)
+	m.view = viewRepo
+	m.rebuildForView()
 	// Force cursor onto a group header
 	m.list.Select(0)
 
@@ -3803,15 +3826,20 @@ func TestView_MirrorDeleteNoUnsavedWarning(t *testing.T) {
 // --- viewMode cycling ---
 
 func TestViewModeCycling(t *testing.T) {
-	if got := strings.Join(viewNames, ","); got != "All,Starred,Labels,Scenarios,Deleted" {
-		t.Fatalf("viewNames = %q, want All / Starred / Labels / Scenarios / Deleted", got)
+	if got := strings.Join(viewNames, ","); got != "All,Repo,Starred,Labels,Scenarios,Deleted" {
+		t.Fatalf("viewNames = %q, want All / Repo / Starred / Labels / Scenarios / Deleted", got)
 	}
 
 	v := viewAll
 
 	v = v.next()
+	if v != viewRepo {
+		t.Errorf("All.next() = %d, want viewRepo", v)
+	}
+
+	v = v.next()
 	if v != viewStarred {
-		t.Errorf("All.next() = %d, want viewStarred", v)
+		t.Errorf("Repo.next() = %d, want viewStarred", v)
 	}
 
 	v = v.next()
@@ -3857,36 +3885,43 @@ func TestOverlay_RightArrowCyclesView(t *testing.T) {
 	updated, _ = sendKey(updated, "right")
 
 	om = asOverlay(updated)
+	if om.view != viewRepo {
+		t.Errorf("after right: view = %d, want viewRepo", om.view)
+	}
+
+	updated, _ = sendKey(updated, "right")
+
+	om = asOverlay(updated)
 	if om.view != viewStarred {
-		t.Errorf("after right: view = %d, want viewStarred", om.view)
+		t.Errorf("after 2x right: view = %d, want viewStarred", om.view)
 	}
 
 	updated, _ = sendKey(updated, "right")
 
 	om = asOverlay(updated)
 	if om.view != viewLabels {
-		t.Errorf("after 2x right: view = %d, want viewLabels", om.view)
+		t.Errorf("after 3x right: view = %d, want viewLabels", om.view)
 	}
 
 	updated, _ = sendKey(updated, "right")
 
 	om = asOverlay(updated)
 	if om.view != viewScenario {
-		t.Errorf("after 3x right: view = %d, want viewScenario", om.view)
+		t.Errorf("after 4x right: view = %d, want viewScenario", om.view)
 	}
 
 	updated, _ = sendKey(updated, "right")
 
 	om = asOverlay(updated)
 	if om.view != viewDeleted {
-		t.Errorf("after 4x right: view = %d, want viewDeleted", om.view)
+		t.Errorf("after 5x right: view = %d, want viewDeleted", om.view)
 	}
 
 	updated, _ = sendKey(updated, "right")
 
 	om = asOverlay(updated)
 	if om.view != viewAll {
-		t.Errorf("after 5x right: view = %d, want viewAll (wrap)", om.view)
+		t.Errorf("after 6x right: view = %d, want viewAll (wrap)", om.view)
 	}
 }
 
@@ -3982,6 +4017,7 @@ func TestOverlay_FilterRespectsView(t *testing.T) {
 
 	// Switch to Starred.
 	updated, _ = sendKey(updated, "right")
+	updated, _ = sendKey(updated, "right")
 
 	om := asOverlay(updated)
 	if om.view != viewStarred {
@@ -4015,6 +4051,7 @@ func TestOverlay_FilterEscRebuildsView(t *testing.T) {
 	updated, _ = sendWindowSize(newOverlayModel(sessions, "", nil, nil, nil, nil), 120, 40)
 
 	// Switch to Starred.
+	updated, _ = sendKey(updated, "right")
 	updated, _ = sendKey(updated, "right")
 
 	// Enter filter, type something, then cancel

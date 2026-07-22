@@ -36,13 +36,14 @@ type viewMode int
 
 const (
 	viewAll viewMode = iota
+	viewRepo
 	viewStarred
 	viewLabels
 	viewScenario
 	viewDeleted
 )
 
-var viewNames = []string{"All", "Starred", "Labels", "Scenarios", "Deleted"}
+var viewNames = []string{"All", "Repo", "Starred", "Labels", "Scenarios", "Deleted"}
 
 // sortDeleted orders soft-deleted sessions most-recently-deleted first.
 func sortDeleted(sessions []protocol.SessionInfo) []protocol.SessionInfo {
@@ -100,6 +101,7 @@ var (
 type sessionItem struct {
 	info            protocol.SessionInfo
 	labelGroup      string
+	showRepo        bool
 	treePrefix      string
 	hasChildren     bool
 	collapsed       bool
@@ -121,14 +123,32 @@ func assignSessionIndices(items []list.Item) {
 
 func (s sessionItem) Title() string       { return s.info.Name }
 func (s sessionItem) Description() string { return "" }
-func (s sessionItem) FilterValue() string { return s.info.Name + " " + s.info.RepoName }
+func (s sessionItem) FilterValue() string {
+	return s.info.Name + " " + sessionRepositoryLabel(s.info)
+}
 
 func (s sessionItem) displayName() string {
+	if s.showRepo {
+		return sessionRepositoryLabel(s.info) + "/" + s.info.Name
+	}
+
 	if s.labelGroup != "" && s.info.RepoName != "" {
 		return s.info.RepoName + "/" + s.info.Name
 	}
 
 	return s.info.Name
+}
+
+func sessionRepositoryLabel(s protocol.SessionInfo) string {
+	if s.SystemKind != "" {
+		return "System"
+	}
+
+	if s.RepoName != "" {
+		return s.RepoName
+	}
+
+	return "(no repo)"
 }
 
 type groupHeader struct {
@@ -453,7 +473,7 @@ func filterSessions(sessions []protocol.SessionInfo, query string) []protocol.Se
 func buildMatchString(s protocol.SessionInfo) string {
 	parts := []string{
 		strings.ToLower(s.Name),
-		strings.ToLower(s.RepoName),
+		strings.ToLower(sessionRepositoryLabel(s)),
 		strings.ToLower(s.Status),
 		strings.ToLower(s.AgentStatus),
 		strings.ToLower(s.Agent),
@@ -1219,6 +1239,16 @@ func buildLabelGroupedItems(sessions []protocol.SessionInfo, collapsed map[strin
 func buildViewItems(view viewMode, sessions []protocol.SessionInfo, collapsed map[string]bool) []list.Item {
 	switch view {
 	case viewAll:
+		items := buildTreeItems(sessions, collapsed)
+		for i, item := range items {
+			if item, ok := item.(sessionItem); ok {
+				item.showRepo = true
+				items[i] = item
+			}
+		}
+
+		return items
+	case viewRepo:
 		return buildGroupedItems(sessions, collapsed)
 	case viewStarred:
 		return buildTreeItems(sessions, collapsed)
@@ -1255,7 +1285,12 @@ func maxSessionNameWidthFromItems(items []list.Item, minimum int) int {
 
 	for _, item := range items {
 		if si, ok := item.(sessionItem); ok {
-			if width := lipgloss.Width(si.displayName()); width > maxWidth {
+			name := si.displayName()
+			if si.collapsed {
+				name += fmt.Sprintf(" (%d)", si.descendantCount)
+			}
+
+			if width := lipgloss.Width(name); width > maxWidth {
 				maxWidth = width
 			}
 		}
@@ -1269,10 +1304,11 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 		collapsed = make(map[string]bool)
 	}
 
-	items := buildGroupedItems(sessions, collapsed)
+	items := buildViewItems(viewAll, sessions, collapsed)
 	assignSessionIndices(items)
 
 	cols := computeColumnWidths(sessions, currentSessionID)
+	cols.name = maxSessionNameWidthFromItems(items, cols.name)
 	cols.treeIndent = maxTreeIndentFromItems(items)
 	contentWidth := cols.totalWidth()
 
@@ -1470,6 +1506,7 @@ func (m *overlayModel) rebuildForView() {
 	m.cols.treeIndent = maxTreeIndentFromItems(items)
 
 	m.contentWidth = m.cols.totalWidth()
+	m.filterInput.SetWidth(m.contentWidth)
 	m.list.SetItems(items)
 	m.list.SetDelegate(compactDelegate{cols: m.cols, currentSessionID: m.currentSessionID, shortcutKeys: m.shortcutKeys})
 	m.list.Select(0)
@@ -1478,6 +1515,23 @@ func (m *overlayModel) rebuildForView() {
 		if _, ok := m.list.SelectedItem().(groupHeader); ok {
 			m.list.CursorDown()
 		}
+	}
+
+	m.resizeList()
+}
+
+func (m *overlayModel) switchView(view viewMode) {
+	selectedID, selectedLabel := "", ""
+	if item, ok := m.list.SelectedItem().(sessionItem); ok {
+		selectedID = item.info.ID
+		selectedLabel = item.labelGroup
+	}
+
+	m.view = view
+	m.rebuildForView()
+
+	if selectedID != "" {
+		m.selectSessionByIDAndLabel(selectedID, selectedLabel)
 	}
 }
 
@@ -1848,20 +1902,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				var cmd tea.Cmd
 
 				m.filterInput, cmd = m.filterInput.Update(msg)
-				viewFiltered := m.sessionsForView()
-				filtered := filterSessions(viewFiltered, m.filterInput.Value())
-
-				items := buildViewItems(m.view, filtered, m.collapsed)
-
-				assignSessionIndices(items)
-				m.list.SetItems(items)
-				m.list.Select(0)
-
-				if len(items) > 0 {
-					if _, ok := m.list.SelectedItem().(groupHeader); ok {
-						m.list.CursorDown()
-					}
-				}
+				m.rebuildForView()
 
 				if _, ok := m.list.SelectedItem().(sessionItem); !ok {
 					m.previewContent = ""
@@ -1973,14 +2014,12 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 
 			case "left", "h":
-				m.view = m.view.prev()
-				m.rebuildForView()
+				m.switchView(m.view.prev())
 
 				return m, m.fetchPreviewCmd()
 
 			case "right", "l":
-				m.view = m.view.next()
-				m.rebuildForView()
+				m.switchView(m.view.next())
 
 				return m, m.fetchPreviewCmd()
 
@@ -2353,17 +2392,15 @@ func (m *overlayModel) View() tea.View {
 	panelContent.WriteString(dim.Render(sepLine))
 	panelContent.WriteString("\n")
 
-	if len(m.list.Items()) == 0 && m.view != viewAll {
+	if len(m.list.Items()) == 0 {
 		emptyStyle := lipgloss.NewStyle().Foreground(colorDim).Italic(true)
-		emptyMsg := ""
+		emptyMsg := "No sessions"
 
 		switch m.view {
 		case viewStarred:
 			emptyMsg = "No starred sessions"
 		case viewLabels:
 			emptyMsg = "No labelled sessions"
-		case viewScenario:
-			emptyMsg = "No sessions"
 		case viewDeleted:
 			emptyMsg = "No deleted sessions"
 		}
@@ -2573,7 +2610,12 @@ func (m *overlayModel) View() tea.View {
 			// The Deleted view offers only restore.
 			helpParts = append(helpParts, "enter restore", "◂▸ view", m.keySearch+" filter", "q quit")
 		} else {
-			helpParts = append(helpParts, "enter attach", "n new", "◂▸ view", m.keySearch+" filter", "tab group", "s star", "space fold", "C fold-all", m.keyDelete+" delete", "S stop", "r/"+m.keyResume+" restart", "q quit")
+			helpParts = append(helpParts, "enter attach", "n new", "◂▸ view", m.keySearch+" filter")
+			if m.view == viewRepo || m.view == viewLabels || m.view == viewScenario {
+				helpParts = append(helpParts, "tab group")
+			}
+
+			helpParts = append(helpParts, "s star", "space fold", "C fold-all", m.keyDelete+" delete", "S stop", "r/"+m.keyResume+" restart", "q quit")
 		}
 
 		panelContent.WriteString(helpStyle.Render(strings.Join(helpParts, "  ")))

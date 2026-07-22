@@ -61,7 +61,7 @@ The overlay is a full-screen TUI showing all sessions. Open it with `ctrl+b w`, 
 | `G` / End | Jump to bottom |
 | `h` / Left | Previous view mode |
 | `l` / Right | Next view mode |
-| Tab | Jump to next group header |
+| Tab | Jump to the next group in grouped views |
 | Enter | Attach to the highlighted session |
 | `q` / Esc | Close the overlay |
 
@@ -71,7 +71,8 @@ Cycle with `h`/`l` or arrows:
 
 | View | Description |
 |------|-------------|
-| All | Every session, grouped by repo, with parent/child trees inside each repo |
+| All | Every session in one global parent/child tree; rows include repository names and preserve cross-repository edges |
+| Repo | Every session grouped by repository, with a separate tree in each group. Starred first, then running, then by name |
 | Starred | Starred sessions in a parent/child tree |
 | Labels | Sessions grouped by label across all repositories, with a parent/child tree inside each label; a multi-labelled session appears in each matching group |
 | Scenarios | Every session grouped by scenario, with a parent/child tree inside each scenario and unassigned sessions in a separate group |
