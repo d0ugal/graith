@@ -5,15 +5,145 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/adrg/xdg"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemonservice"
 )
+
+const (
+	cliIsolationWorkerEnv   = "GRAITH_TEST_CLI_ISOLATION_WORKER"
+	cliIsolationHostRootEnv = "GRAITH_TEST_CLI_ISOLATION_HOST_ROOT"
+	cliIsolationSocketEnv   = "GRAITH_TEST_CLI_ISOLATION_HOST_SOCKET"
+)
+
+func TestCLISuiteIsolationKeepsLifecycleOffHostSocket(t *testing.T) {
+	hostRoot := t.TempDir()
+	hostProfile := "sentinel-host"
+	// Unix socket addresses are short on macOS, while t.TempDir is deeply
+	// nested in Graith worktrees. Use a short fixture name in the session's
+	// writable temp root (or the system temp root outside a Graith session).
+	socketFixtureRoot := os.Getenv("GRAITH_TMPDIR")
+	if socketFixtureRoot == "" {
+		socketFixtureRoot = os.TempDir()
+	}
+
+	hostRuntime, err := os.MkdirTemp(socketFixtureRoot, "g")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		_ = os.RemoveAll(hostRuntime) //nolint:gosec // G703: hostRuntime was created by os.MkdirTemp for this test.
+	})
+
+	hostSocket := filepath.Join(hostRuntime, "graith-"+hostProfile, "graith.sock")
+	if err := os.MkdirAll(filepath.Dir(hostSocket), 0o700); err != nil { //nolint:gosec // G703: hostSocket is beneath the test-owned temp directory.
+		t.Fatal(err)
+	}
+
+	listener, err := net.Listen("unix", hostSocket)
+	if err != nil {
+		if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
+			t.Skipf("cannot bind sentinel Unix socket in this sandbox: %v", err)
+		}
+
+		t.Fatal(err)
+	}
+
+	contacted := make(chan bool, 1)
+
+	go func() {
+		connection, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			contacted <- false
+
+			return
+		}
+
+		_ = connection.Close()
+
+		contacted <- true
+	}()
+
+	//nolint:gosec // G702: the executable is this test process and every argument is a fixed test-runner flag.
+	command := exec.Command(os.Args[0], "-test.run=^TestCLISuiteIsolationWorker$", "-test.count=1")
+
+	command.Env = append(os.Environ(),
+		cliIsolationWorkerEnv+"=1",
+		cliIsolationHostRootEnv+"="+hostRoot,
+		cliIsolationSocketEnv+"="+hostSocket,
+		"XDG_CONFIG_HOME="+filepath.Join(hostRoot, "config"),
+		"XDG_DATA_HOME="+filepath.Join(hostRoot, "data"),
+		"XDG_RUNTIME_DIR="+hostRuntime,
+		"GRAITH_PROFILE="+hostProfile,
+		"GRAITH_TOKEN=sentinel-host-token",
+	)
+
+	output, commandErr := command.CombinedOutput()
+	_ = listener.Close()
+
+	if commandErr != nil {
+		t.Fatalf("isolated CLI worker failed: %v\n%s", commandErr, output)
+	}
+
+	if <-contacted {
+		t.Fatal("CLI lifecycle command contacted the sentinel host socket")
+	}
+}
+
+func TestCLISuiteIsolationWorker(t *testing.T) {
+	if os.Getenv(cliIsolationWorkerEnv) == "" {
+		return
+	}
+
+	hostRoot := os.Getenv(cliIsolationHostRootEnv)
+
+	hostSocket := os.Getenv(cliIsolationSocketEnv)
+	if hostRoot == "" || hostSocket == "" {
+		t.Fatal("missing sentinel host paths")
+	}
+
+	originalCfg, originalCfgFile, originalPaths := cfg, cfgFile, paths
+	originalOut, originalJSON, originalAgentMode := out, jsonOutput, agentMode
+
+	t.Cleanup(func() {
+		cfg, cfgFile, paths = originalCfg, originalCfgFile, originalPaths
+		out, jsonOutput, agentMode = originalOut, originalJSON, originalAgentMode
+	})
+
+	if err := executeWithArgs([]string{"version"}); err != nil {
+		t.Fatalf("execute full CLI command: %v", err)
+	}
+
+	if pathWithinRoot(hostRoot, paths.ConfigFile) || paths.SocketPath == hostSocket || pathWithinRoot(hostRoot, paths.HumanTokenFile) {
+		t.Fatalf("full CLI command retained sentinel host paths: %#v", paths)
+	}
+
+	if token := os.Getenv("GRAITH_TOKEN"); token != "" {
+		t.Fatalf("GRAITH_TOKEN = %q, want isolated empty credential", token)
+	}
+
+	if err := daemonStopCmd.RunE(daemonStopCmd, nil); err == nil {
+		t.Fatal("daemon stop unexpectedly found an isolated daemon")
+	}
+}
+
+func pathWithinRoot(root, path string) bool {
+	relative, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+
+	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+}
 
 func TestServiceBootstrapConfigSurvivesFlagRegistration(t *testing.T) {
 	original := cfgFile
@@ -122,7 +252,23 @@ func TestExecutePlainTextErrorFormat(t *testing.T) {
 	}
 }
 
+func restoreConfigFlag(t *testing.T) {
+	t.Helper()
+	registerCommands()
+
+	configFlag := rootCmd.PersistentFlags().Lookup("config")
+	originalValue := configFlag.Value.String()
+	originalChanged := configFlag.Changed
+
+	t.Cleanup(func() {
+		_ = configFlag.Value.Set(originalValue)
+		configFlag.Changed = originalChanged
+	})
+}
+
 func TestConfigFlagBlockedInsideSession(t *testing.T) {
+	restoreConfigFlag(t)
+
 	origOut := out
 	origJSON := jsonOutput
 
@@ -145,6 +291,8 @@ func TestConfigFlagBlockedInsideSession(t *testing.T) {
 }
 
 func TestConfigFlagAllowedOutsideSession(t *testing.T) {
+	restoreConfigFlag(t)
+
 	origOut := out
 	origJSON := jsonOutput
 
@@ -184,6 +332,8 @@ func TestConfigFlagAllowedOutsideSession(t *testing.T) {
 }
 
 func TestConfigFlagBlockedForConfigSubcommand(t *testing.T) {
+	restoreConfigFlag(t)
+
 	origOut := out
 	origJSON := jsonOutput
 
@@ -206,6 +356,8 @@ func TestConfigFlagBlockedForConfigSubcommand(t *testing.T) {
 }
 
 func TestConfigFlagBlockedWhenSetEmpty(t *testing.T) {
+	restoreConfigFlag(t)
+
 	origOut := out
 	origJSON := jsonOutput
 

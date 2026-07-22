@@ -8,5 +8,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	os.Exit(testutil.RunWithIsolatedGit(m))
+	code := testutil.RunWithIsolatedGraith(func() int {
+		return testutil.RunWithIsolatedGit(m)
+	})
+
+	os.Exit(code)
 }
