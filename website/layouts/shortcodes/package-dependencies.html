@@ -1,6 +1,6 @@
 {{- $graph := site.Data.package_dependencies -}}
 {{- if not $graph -}}
-    {{- errorf "package dependency data is missing; build the site with `make docs` or `make docs-serve`" -}}
+    {{- errorf "committed package dependency data is missing; run `make package-graph` from the repository root" -}}
 {{- end -}}
 {{- .Page.Store.Set "hasMermaid" true -}}
 {{- $script := resources.Get "js/package-graph.mjs" -}}
