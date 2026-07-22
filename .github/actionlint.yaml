@@ -1,0 +1,9 @@
+# actionlint v1.7.12 predates GitHub's concurrency `queue` schema. Keep this
+# waiver scoped to the stable workflow until upstream support is released:
+# https://github.com/rhysd/actionlint/pull/654
+# The release policy tests parse and require the exact queue value and its
+# fail-closed pairing with cancel-in-progress: false.
+paths:
+  .github/workflows/goreleaser.yml:
+    ignore:
+      - 'unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"'

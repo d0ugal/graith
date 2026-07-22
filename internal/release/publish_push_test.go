@@ -286,6 +286,7 @@ func TestGoreleaserWorkflowHasPublishGuards(t *testing.T) {
 	for _, want := range []string{
 		"group: stable-publisher",
 		"cancel-in-progress: false",
+		"queue: max",
 		"scripts/publish-push.sh",
 	} {
 		if !strings.Contains(yaml, want) {
@@ -307,12 +308,12 @@ func TestGoreleaserWorkflowHasPublishGuards(t *testing.T) {
 }
 
 // hasJobScopedConcurrency reports whether goreleaser.yml declares a
-// `concurrency:` block (with group + cancel-in-progress) inside the
+// `concurrency:` block (with group + cancel-in-progress + queue) inside the
 // `publish-stable:` job — i.e. as a real job key, not a comment or top-level key.
 func hasJobScopedConcurrency(yaml string) bool {
 	lines := strings.Split(yaml, "\n")
 	inPublishJob := false
-	sawConcurrency, sawGroup, sawCancel := false, false, false
+	sawConcurrency, sawGroup, sawCancel, sawQueue := false, false, false, false
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -341,8 +342,10 @@ func hasJobScopedConcurrency(yaml string) bool {
 			sawGroup = true
 		case sawConcurrency && trimmed == "cancel-in-progress: false":
 			sawCancel = true
+		case sawConcurrency && trimmed == "queue: max":
+			sawQueue = true
 		}
 	}
 
-	return sawConcurrency && sawGroup && sawCancel
+	return sawConcurrency && sawGroup && sawCancel && sawQueue
 }

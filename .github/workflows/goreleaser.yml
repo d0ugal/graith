@@ -656,6 +656,7 @@ jobs:
     concurrency:
       group: stable-publisher
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: write
       attestations: read
