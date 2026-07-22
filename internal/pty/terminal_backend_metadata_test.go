@@ -159,12 +159,6 @@ func taggedGoArgs(command, tags string, args ...string) []string {
 	return append(result, args...)
 }
 
-func runGoCommand(t *testing.T, directory string, args ...string) string {
-	t.Helper()
-
-	return runGoCommandWithEnvironment(t, directory, nil, args...)
-}
-
 func runGoCommandWithEnvironment(
 	t *testing.T,
 	directory string,

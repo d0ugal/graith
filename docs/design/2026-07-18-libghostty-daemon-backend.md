@@ -59,7 +59,8 @@ keep backend transitions independent of terminal state or protocol migrations.
   resize, alternate screen, and bounded scrollback reconstruction.
 - Make construction, write, resize, snapshot, timeout, protocol, and exit
   failures observable and recoverable.
-- Use the same synthetic corpus and operational workloads for both models.
+- Evaluate both models against the same synthetic corpus and operational
+  workloads before promotion.
 - Produce exact-pin macOS arm64 and Linux validation artifacts with native
   licensing and SBOM data. Linux release promotion remains tracked in #1475.
 - Preserve compatible persisted state and the retained-platform implementation
@@ -272,8 +273,8 @@ transfer both the PTY and append-writer descriptors, kill or poison the helper,
 and prove pre/post markers remain in the raw log while a replacement screen is
 reconstructed and subsequent PTY output remains serviceable. Hydration poison
 falls back to an empty screen at the inherited geometry without losing the PTY
-or raw bytes. Replays, including the 4 MiB benchmark/RSS fixture, use the shared
-512 KiB chunk path below the helper's 1 MiB request limit.
+or raw bytes. Replays use the shared 512 KiB chunk path below the helper's 1 MiB
+request limit.
 
 Current intentional differences are explicit assertions rather than hidden
 normalization:
