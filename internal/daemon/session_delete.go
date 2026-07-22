@@ -1296,9 +1296,32 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 		// unrelated process group. The exec-upgrade path owns the child and
 		// resolves it before clearing this durable marker.
 		if c.removedHookCleanupPending {
+			currentStartTime, identityErr := grpty.ProcessStartTime(c.pid)
+			if c.pidStartTime > 0 && identityErr == nil && currentStartTime != c.pidStartTime {
+				sm.log.Warn("recorded removed-hook process generation is gone; leaving replacement unsignaled",
+					"id", c.id, "pid", c.pid,
+					"recorded_start_time", c.pidStartTime,
+					"current_start_time", currentStartTime)
+				sm.mu.Lock()
+				if sess := sm.state.Sessions[c.id]; sess != nil && sess.PID == c.pid &&
+					sess.PIDStartTime == c.pidStartTime && sess.RemovedHookCleanupPending {
+					sess.Status = StatusStopped
+					sess.StatusChangedAt = time.Now()
+					sess.PID = 0
+					sess.PIDStartTime = 0
+					sm.setStopReasonLocked(c.id, sess, StopReasonCrash)
+					applyLifecycleSummaryLocked(sess,
+						"Recorded removed-hook process generation is gone; replacement PID was left untouched")
+				}
+				sm.mu.Unlock()
+
+				continue
+			}
+
 			sm.log.Warn("cannot safely signal removed-hook process after cold restart",
 				"id", c.id, "pid", c.pid,
-				"recorded_start_time", c.pidStartTime)
+				"recorded_start_time", c.pidStartTime,
+				"identity_error", identityErr)
 			sm.mu.Lock()
 			if sess := sm.state.Sessions[c.id]; sess != nil && sess.PID == c.pid &&
 				sess.PIDStartTime == c.pidStartTime && sess.RemovedHookCleanupPending {
