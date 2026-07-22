@@ -134,10 +134,10 @@ func runAttachFromOverlay(c *client.Client, sessions []protocol.SessionInfo) err
 
 		_ = protocol.DecodePayload(createResp, &newInfo)
 
-		return runAttachByID(c, newInfo.ID, result.Collapsed)
+		return runAttachByID(c, newInfo.ID, result.Collapsed, result.PickerState)
 	}
 
-	return runAttachByID(c, result.SessionID, result.Collapsed)
+	return runAttachByID(c, result.SessionID, result.Collapsed, result.PickerState)
 }
 
 // terminalResetSequence is the escape-sequence blob that undoes terminal state

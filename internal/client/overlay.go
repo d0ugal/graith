@@ -45,6 +45,27 @@ const (
 
 var viewNames = []string{"All", "Repo", "Starred", "Labels", "Scenarios", "Deleted"}
 
+// PickerView identifies the session-picker view to restore within one attach
+// client. It is deliberately a client-local value; it is never persisted.
+type PickerView int
+
+const (
+	PickerViewAll PickerView = iota
+	PickerViewRepo
+	PickerViewStarred
+	PickerViewLabels
+	PickerViewScenario
+	PickerViewDeleted
+)
+
+// PickerState is the minimal navigation state carried between overlay opens.
+// Search and other transient overlay modes are intentionally excluded.
+type PickerState struct {
+	View       PickerView
+	SessionID  string
+	LabelGroup string
+}
+
 // sortDeleted orders soft-deleted sessions most-recently-deleted first.
 func sortDeleted(sessions []protocol.SessionInfo) []protocol.SessionInfo {
 	result := make([]protocol.SessionInfo, len(sessions))
@@ -877,6 +898,7 @@ type OverlayResult struct {
 	CreateAgent    string
 	CreateLabels   []string
 	Collapsed      map[string]bool
+	PickerState    PickerState
 }
 
 func SortSessions(sessions []protocol.SessionInfo) {
@@ -1533,6 +1555,32 @@ func (m *overlayModel) switchView(view viewMode) {
 	if selectedID != "" {
 		m.selectSessionByIDAndLabel(selectedID, selectedLabel)
 	}
+}
+
+func (m *overlayModel) restorePickerState(state PickerState) {
+	view := viewMode(state.View)
+	if view < viewAll || view > viewDeleted {
+		view = viewAll
+	}
+
+	m.view = view
+	m.rebuildForView()
+
+	if state.SessionID != "" {
+		m.selectSessionByIDAndLabel(state.SessionID, state.LabelGroup)
+	} else if m.currentSessionID != "" {
+		m.selectSessionByID(m.currentSessionID)
+	}
+}
+
+func (m *overlayModel) pickerState() PickerState {
+	state := PickerState{View: PickerView(m.view)}
+	if item, ok := m.list.SelectedItem().(sessionItem); ok {
+		state.SessionID = item.info.ID
+		state.LabelGroup = item.labelGroup
+	}
+
+	return state
 }
 
 func (m *overlayModel) selectSessionByID(id string) {
@@ -2730,6 +2778,9 @@ type RunOverlayOpts struct {
 	Profile string
 	// Collapsed is the initial fold state, keyed by session ID.
 	Collapsed map[string]bool
+	// PickerState restores navigation from an earlier overlay opening in the
+	// same attach client. Zero value starts in the All view.
+	PickerState PickerState
 	// RepoSuggestions seeds the create-session repo picker.
 	RepoSuggestions []RepoSuggestion
 	// ShortcutKeys is the set of quick-jump shortcut runes.
@@ -2745,6 +2796,7 @@ type RunOverlayOpts struct {
 // RunOverlay launches the bubbletea session picker.
 func RunOverlay(opts RunOverlayOpts) *OverlayResult {
 	m := newOverlayModel(opts.Sessions, opts.CurrentSessionID, opts.FetchPreview, opts.DeleteSession, opts.Collapsed, []rune(opts.ShortcutKeys))
+	m.restorePickerState(opts.PickerState)
 	m.refreshSessions = opts.RefreshSessions
 	m.refreshDeleted = opts.RefreshDeleted
 	m.restartSession = opts.RestartSession
@@ -2769,7 +2821,8 @@ func RunOverlay(opts RunOverlayOpts) *OverlayResult {
 	}
 
 	overlayResult := &OverlayResult{
-		Collapsed: result.collapsed,
+		Collapsed:   result.collapsed,
+		PickerState: result.pickerState(),
 	}
 
 	if result.createDone {
