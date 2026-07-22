@@ -76,7 +76,8 @@ func TestCommandPolicyRemovalUpgradeFromExactBaseline(t *testing.T) {
 	buildGraithBinary(t, oldSource, oldBinary)
 	buildGraithBinary(t, repoRoot, currentBinary)
 
-	configDir := filepath.Join(root, "config")
+	configHome := filepath.Join(root, "config")
+	configDir := filepath.Join(configHome, "graith")
 	dataDir := filepath.Join(root, "data")
 	runtimeDir, err := os.MkdirTemp(repoRoot, "r-")
 	if err != nil {
@@ -100,7 +101,7 @@ func TestCommandPolicyRemovalUpgradeFromExactBaseline(t *testing.T) {
 	}
 
 	t.Setenv("HOME", root)
-	t.Setenv("XDG_CONFIG_HOME", configDir)
+	t.Setenv("XDG_CONFIG_HOME", configHome)
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, "xdg-data"))
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	t.Setenv("GRAITH_FIXTURE_ARGS", argsPath)
@@ -111,6 +112,13 @@ func TestCommandPolicyRemovalUpgradeFromExactBaseline(t *testing.T) {
 		}
 	}
 	env = append(env, "GRAITH_FIXTURE_ARGS="+argsPath)
+	defaultPaths, err := config.ResolvePaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaultPaths.ConfigFile != configPath {
+		t.Fatalf("fixture config path = %q, generated hook default = %q", configPath, defaultPaths.ConfigFile)
+	}
 
 	writeCommandPolicyFixtureConfig(t, configPath, dataDir, agentScript, true)
 
@@ -210,7 +218,10 @@ func TestCommandPolicyRemovalUpgradeFromExactBaseline(t *testing.T) {
 	// replacement daemon; it cannot silently allow, hang, or reach a handler.
 	hookCtx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
-	hook := exec.CommandContext(hookCtx, oldBinary, "--config", configPath, "command-policy-check") //nolint:gosec // Exact test-owned baseline binary.
+	// Invoke the same command the generated hook contains. The hook inherits the
+	// session's config environment; adding --config would be rejected inside a
+	// Graith session and would not exercise the removed daemon message.
+	hook := exec.CommandContext(hookCtx, oldBinary, "command-policy-check") //nolint:gosec // Exact test-owned baseline binary.
 	hook.Env = append(env,
 		"GRAITH_SESSION_ID="+oldSession.ID,
 		"GRAITH_SESSION_NAME="+oldSession.Name,
