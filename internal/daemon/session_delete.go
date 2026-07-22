@@ -1302,18 +1302,6 @@ func (sm *SessionManager) reconcileRemovedHookProcesses() error {
 				applyLifecycleSummaryLocked(session,
 					"Recorded removed-hook process generation is gone; any replacement PID was left untouched")
 				changed = true
-			} else {
-				summary := truncateToBytes(sanitizeSummaryText(fmt.Sprintf(
-					"Removed-hook process (PID %d) — cold-start identity cannot be reserved; manual cleanup needed",
-					candidate.pid)), 100)
-				if session.Status != StatusErrored || session.StopReason != StopReasonCrash ||
-					session.SummaryText != summary {
-					session.Status = StatusErrored
-					session.StatusChangedAt = time.Now()
-					sm.setStopReasonLocked(candidate.id, session, StopReasonCrash)
-					applyLifecycleSummaryLocked(session, summary)
-					changed = true
-				}
 			}
 		}
 		sm.mu.Unlock()

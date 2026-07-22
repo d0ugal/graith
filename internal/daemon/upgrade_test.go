@@ -4234,11 +4234,24 @@ func TestReconcileRemovedHookProcessesDoesNotSignalAfterColdRestart(t *testing.T
 		return syscall.Kill(target, signal)
 	})
 
+	statusChangedAt := time.Date(2026, time.July, 22, 12, 30, 0, 0, time.UTC)
+	summarySetAt := statusChangedAt.Add(time.Minute)
 	sm.state.Sessions["canny"] = &SessionState{
 		ID: "canny", Status: StatusErrored, PID: pid, PIDStartTime: start,
-		RemovedHookCleanupPending: true,
+		RemovedHookCleanupPending: true, StatusChangedAt: statusChangedAt,
+		SummaryText:  "Restart required because Graith command policy was removed",
+		SummarySetAt: &summarySetAt,
 	}
-	var firstReconciliation SessionState
+	sm.mu.Lock()
+	if err := sm.saveState(); err != nil {
+		sm.mu.Unlock()
+		t.Fatal(err)
+	}
+	sm.mu.Unlock()
+	originalStateBytes, err := os.ReadFile(sm.paths.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for attempt := 1; attempt <= 2; attempt++ {
 		if err := sm.reconcileRemovedHookProcesses(); err != nil {
 			t.Fatalf("startup attempt %d process reconciliation: %v", attempt, err)
@@ -4251,12 +4264,17 @@ func TestReconcileRemovedHookProcessesDoesNotSignalAfterColdRestart(t *testing.T
 			t.Fatalf("startup attempt %d cleanup error = %v, want actionable unresolved-process refusal", attempt, err)
 		}
 		got, _ := sm.Get("canny")
-		if attempt == 1 {
-			firstReconciliation = got
-		} else if !got.StatusChangedAt.Equal(firstReconciliation.StatusChangedAt) ||
-			got.SummarySetAt == nil || firstReconciliation.SummarySetAt == nil ||
-			!got.SummarySetAt.Equal(*firstReconciliation.SummarySetAt) {
-			t.Fatalf("repeat reconciliation changed durable lifecycle timestamps: first=%+v second=%+v", firstReconciliation, got)
+		if got.Status != StatusErrored || !got.StatusChangedAt.Equal(statusChangedAt) ||
+			got.SummaryText != "Restart required because Graith command policy was removed" ||
+			got.SummarySetAt == nil || !got.SummarySetAt.Equal(summarySetAt) {
+			t.Fatalf("startup attempt %d changed unresolved lifecycle evidence: %+v", attempt, got)
+		}
+		stateBytes, readErr := os.ReadFile(sm.paths.StateFile)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if !bytes.Equal(stateBytes, originalStateBytes) {
+			t.Fatalf("startup attempt %d rewrote unresolved durable state", attempt)
 		}
 	}
 
