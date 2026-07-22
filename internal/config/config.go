@@ -3174,10 +3174,10 @@ type Agent struct {
 	// cursor, and codex agents work without explicit config; a custom agent
 	// must set this to receive a prompt at all. Validated in Config.Validate.
 	// See issue #1232.
-	PromptInjection   string                     `json:"prompt_injection,omitempty"    toml:"prompt_injection"`
-	PreTrustWorkspace *bool                      `json:"pre_trust_workspace,omitempty" toml:"pre_trust_workspace"`
-	Sandbox           SandboxConfig              `json:"sandbox"                       toml:"sandbox"`
-	ValidateModel     string                     `json:"validate_model,omitempty"      toml:"validate_model"`
+	PromptInjection   string        `json:"prompt_injection,omitempty"    toml:"prompt_injection"`
+	PreTrustWorkspace *bool         `json:"pre_trust_workspace,omitempty" toml:"pre_trust_workspace"`
+	Sandbox           SandboxConfig `json:"sandbox"                       toml:"sandbox"`
+	ValidateModel     string        `json:"validate_model,omitempty"      toml:"validate_model"`
 	// InterruptCount is how many times the interrupt byte (Ctrl-C, 0x03) is sent
 	// to interrupt this agent, and InterruptDelayMs is the pause in milliseconds
 	// between successive sends. Some agent TUIs ignore a single Ctrl-C and need
@@ -4442,6 +4442,7 @@ func rejectRemovedMCPConfig(data []byte) error {
 	}
 
 	var removed []string
+
 	for key, value := range raw {
 		switch strings.ToLower(key) {
 		case "mcp_servers":
@@ -4471,7 +4472,7 @@ func rejectRemovedMCPConfig(data []byte) error {
 
 	sort.Strings(removed)
 
-	return fmt.Errorf("Graith MCP support was removed; delete obsolete config key(s): %s; configure native MCP integrations in the agent runtime instead", strings.Join(removed, ", "))
+	return fmt.Errorf("graith MCP support was removed; delete obsolete config key(s): %s; configure native MCP integrations in the agent runtime instead", strings.Join(removed, ", "))
 }
 
 func mapHasKeyFold(table map[string]any, want string) bool {

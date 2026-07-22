@@ -191,7 +191,6 @@ func TestRedactSecretsMasksEnvValues(t *testing.T) {
 	if strings.Contains(string(data), envVal) {
 		t.Errorf("redacted TOML still leaked the value:\n%s", data)
 	}
-
 }
 
 func TestRedactSecretsHandlesEmpty(t *testing.T) {

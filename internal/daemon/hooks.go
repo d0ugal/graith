@@ -258,7 +258,6 @@ type codexHookGroup struct {
 // while command policy matches Bash only. `--dangerously-bypass-hook-trust`
 // skips Codex's hook-trust review because graith generated and vetted these
 // hooks; it does not disable the agent's separate native tool approvals.
-//
 func (sm *SessionManager) injectCodexHooks(sessionID string, lifecycle, policy bool) (extraArgs []string, extraEnv map[string]string, err error) {
 	return sm.injectCodexHooksWithTimeout(sessionID, lifecycle, policy, sm.Config().CommandPolicy.TimeoutDuration())
 }

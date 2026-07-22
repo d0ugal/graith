@@ -1547,6 +1547,7 @@ func TestLoadRejectsRemovedMCPConfig(t *testing.T) {
 				!strings.Contains(message, "configure native MCP integrations in the agent runtime instead") {
 				t.Fatalf("error lacks precise migration guidance: %v", err)
 			}
+
 			if strings.Contains(message, "dreich-secret") {
 				t.Fatalf("error leaked an obsolete configuration value: %v", err)
 			}

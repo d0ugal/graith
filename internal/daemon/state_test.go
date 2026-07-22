@@ -1187,6 +1187,7 @@ func TestMigrateV26ToV27DropsMCPConfigAndPreservesBackup(t *testing.T) {
 	if state.Sessions["braw"].CreationCfg == nil {
 		t.Fatal("creation config was dropped")
 	}
+
 	agent := state.Sessions["braw"].CreationCfg.Agent
 	if !reflect.DeepEqual(agent.Args, []string{"--native-runtime-setting", "canny"}) {
 		t.Fatalf("native agent args changed: %#v", agent.Args)
@@ -1196,6 +1197,7 @@ func TestMigrateV26ToV27DropsMCPConfigAndPreservesBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !bytes.Equal(backup, before) {
 		t.Fatal("v26 backup does not contain the exact pre-migration bytes")
 	}
@@ -1208,11 +1210,13 @@ func TestMigrateV26ToV27DropsMCPConfigAndPreservesBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for _, obsolete := range []string{"mcp_servers", "legacy-server", secret} {
 		if bytes.Contains(after, []byte(obsolete)) {
 			t.Errorf("migrated state retained obsolete value %q", obsolete)
 		}
 	}
+
 	if !bytes.Contains(after, []byte("--native-runtime-setting")) {
 		t.Fatal("migrated state dropped native agent configuration")
 	}
