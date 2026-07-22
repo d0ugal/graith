@@ -140,21 +140,22 @@ and run `gr daemon service repair`, then `remove --all-profiles`. Do not use a
 wildcard `launchctl` command: named profiles are independent exact jobs and an
 unknown live job is intentionally quarantined.
 
-### Native `graith-dev` canary
+### Native stable and `graith-dev` releases
 
-The moving `dev` release uses the isolated libghostty backend in the macOS
-arm64, Linux amd64, and Linux arm64 archives. Intel macOS `graith-dev` remains
-pure Go. Stable artifacts are unchanged and remain pure Go until each native
-platform completes its observation gate and receives a separate reviewed
-promotion.
+The normal stable release and moving `dev` release use the isolated libghostty
+backend on macOS arm64 and Linux amd64/arm64. The normal Intel macOS artifact
+remains the supported pure-Go Charm build; it is not a rollback artifact.
 
-Homebrew selects `graith-dev_darwin_arm64.tar.gz`,
+For stable installations, Homebrew and the package repositories select the
+matching `graith_<version>_darwin_arm64.tar.gz` or Linux tar/deb/rpm/apk asset.
+For the moving channel, Homebrew selects `graith-dev_darwin_arm64.tar.gz`,
 `graith-dev_linux_amd64.tar.gz`, or `graith-dev_linux_arm64.tar.gz` for those
-native targets. Each archive contains the final `gr-dev` executable, normal
-release metadata, its executable-bound `libghostty-native.spdx.json`, and
-`THIRD_PARTY_NOTICES.libghostty.md`. The published `checksums.txt` binds the
-archive bytes, and Linux archives also have GitHub build provenance that can be
-verified after download:
+native targets. Each native archive contains its final executable, normal
+release metadata, executable-bound `libghostty-native.spdx.json`, and
+`THIRD_PARTY_NOTICES.libghostty.md`. Stable Linux deb/rpm/apk packages carry the
+same executable bytes and native evidence. The published `checksums.txt` binds
+every archive/package, and GitHub build provenance can be verified after
+download:
 
 ```bash
 gh attestation verify graith-dev_linux_amd64.tar.gz --repo d0ugal/graith
@@ -163,10 +164,19 @@ test "$(wc -l < archive-checksum.txt)" -eq 1
 sha256sum --check archive-checksum.txt
 ```
 
+For a stable download, substitute its exact versioned filename, for example
+`graith_0.70.0_linux_amd64.tar.gz`; the same attestation and checksum commands
+apply. Verify a downloaded deb/rpm/apk by selecting its exact line from the same
+ten-entry stable `checksums.txt`.
+
 Use `graith-dev_linux_arm64.tar.gz` on arm64. The release workflow builds each
-Linux archive from the exact pinned Ghostty/Zig dependency unit on Linux,
-re-verifies its final package, and executes those same archive bytes on the
-target architecture before publication.
+Linux artifact from the exact pinned Ghostty/Zig dependency unit on Linux,
+compares the executable across tar/deb/rpm/apk, and executes those final bytes
+on the target architecture before publication. Stable releases remain drafts
+until the complete same-revision set, checksums, provenance, configured signing,
+and downstream metadata have been prepared and validated. The complete GitHub
+release is exposed before that metadata is pushed, so its URLs never point at
+private draft assets; interrupted channel pushes are safe to retry.
 
 After restarting the `dev` daemon, verify the selected canary without relying
 on a live helper process:
@@ -176,17 +186,16 @@ gr-dev doctor
 gr-dev doctor --json | jq -r .terminal_backend
 ```
 
-Native archives report `libghostty-helper`; Intel macOS dev and current stable
+Native stable/dev artifacts report `libghostty-helper`; Intel macOS stable/dev
 artifacts report `charm`. See
 [Troubleshooting]({{< relref "/docs/troubleshooting.md#verify-the-terminal-backend" >}})
 for the matching startup and failure log records.
 
 The dev and stable releases do not publish separately named rollback archives.
-A stable native artifact will be published only after its canary is accepted;
-until then, use the ordinary stable channel if you need to leave the moving dev
-channel. Persistent scrollback remains backend-neutral, so switching compatible
-channels does not require a state conversion. On macOS, remove the `dev` service
-registration before uninstalling its package as described above.
+Persistent scrollback remains backend-neutral, so a fresh native start,
+Charm-to-native upgrade, or native-to-native upgrade needs no state conversion.
+On macOS, remove the relevant service registration before uninstalling its
+package as described above.
 
 ## Shell completion
 

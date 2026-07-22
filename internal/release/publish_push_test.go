@@ -273,7 +273,7 @@ func TestPublishPushScriptIsExecutable(t *testing.T) {
 }
 
 // TestGoreleaserWorkflowHasPublishGuards locks in the workflow-level fixes for
-// issue #769: a serializing concurrency guard scoped to the publish-repo job and
+// issue #769: a serializing concurrency guard scoped to the stable publisher and
 // use of the rebase+retry helper for the push.
 func TestGoreleaserWorkflowHasPublishGuards(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), ".github", "workflows", "goreleaser.yml"))
@@ -284,7 +284,7 @@ func TestGoreleaserWorkflowHasPublishGuards(t *testing.T) {
 	yaml := string(data)
 
 	for _, want := range []string{
-		"group: publish-repo",
+		"group: stable-publisher",
 		"cancel-in-progress: false",
 		"scripts/publish-push.sh",
 	} {
@@ -298,17 +298,17 @@ func TestGoreleaserWorkflowHasPublishGuards(t *testing.T) {
 		t.Error("goreleaser.yml still contains an unguarded `git push origin main`")
 	}
 
-	// The concurrency guard must be scoped to the publish-repo job (indented as
+	// The concurrency guard must be scoped to the publish-stable job (indented as
 	// a job key), not sitting in a comment or on the wrong job. Assert the guard
 	// keys appear after the `publish-repo:` job header at job-body indentation.
 	if !hasJobScopedConcurrency(yaml) {
-		t.Error("concurrency guard is not scoped to the publish-repo job body")
+		t.Error("concurrency guard is not scoped to the publish-stable job body")
 	}
 }
 
 // hasJobScopedConcurrency reports whether goreleaser.yml declares a
 // `concurrency:` block (with group + cancel-in-progress) inside the
-// `publish-repo:` job — i.e. as a real job key, not a comment or top-level key.
+// `publish-stable:` job — i.e. as a real job key, not a comment or top-level key.
 func hasJobScopedConcurrency(yaml string) bool {
 	lines := strings.Split(yaml, "\n")
 	inPublishJob := false
@@ -320,13 +320,13 @@ func hasJobScopedConcurrency(yaml string) bool {
 			continue // ignore comments
 		}
 		// Job headers sit at two-space indentation under `jobs:`.
-		if line == "  publish-repo:" {
+		if line == "  publish-stable:" {
 			inPublishJob = true
 			continue
 		}
 
 		if inPublishJob && strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "   ") && strings.HasSuffix(trimmed, ":") {
-			// A new two-space job header ends the publish-repo job.
+			// A new two-space job header ends the publish-stable job.
 			break
 		}
 
@@ -337,7 +337,7 @@ func hasJobScopedConcurrency(yaml string) bool {
 		switch {
 		case line == "    concurrency:":
 			sawConcurrency = true
-		case sawConcurrency && trimmed == "group: publish-repo":
+		case sawConcurrency && trimmed == "group: stable-publisher":
 			sawGroup = true
 		case sawConcurrency && trimmed == "cancel-in-progress: false":
 			sawCancel = true

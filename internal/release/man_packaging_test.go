@@ -9,10 +9,9 @@ import (
 	yaml "go.yaml.in/yaml/v3"
 )
 
-// goreleaserConfigPath returns the path to the repo-root .goreleaser.yaml,
-// relative to this test file (internal/release).
+// goreleaserConfigPath returns the stable Linux packaging configuration.
 func goreleaserConfigPath() string {
-	return filepath.Join("..", "..", ".goreleaser.yaml")
+	return filepath.Join("..", "..", ".goreleaser-linux.yaml")
 }
 
 // archiveFile models a single entry of an archive's `files:` list. GoReleaser
@@ -100,12 +99,12 @@ func loadGoreleaserConfig(t *testing.T) goreleaserConfig {
 
 	data, err := os.ReadFile(goreleaserConfigPath())
 	if err != nil {
-		t.Fatalf("reading .goreleaser.yaml: %v", err)
+		t.Fatalf("reading .goreleaser-linux.yaml: %v", err)
 	}
 
 	var cfg goreleaserConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		t.Fatalf("parsing .goreleaser.yaml: %v", err)
+		t.Fatalf("parsing .goreleaser-linux.yaml: %v", err)
 	}
 
 	return cfg

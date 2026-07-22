@@ -1,0 +1,141 @@
+version: 2
+
+# Each stable Linux job selects exactly one architecture through the templated
+# build skips below. The final archive and all three package formats are made
+# from the same native executable and verified again after packaging.
+before:
+  hooks:
+    - mkdir -p completions
+    - sh -c 'env CGO_ENABLED=0 CC=cc go run ./cmd/graith completion bash > completions/gr.bash'
+    - sh -c 'env CGO_ENABLED=0 CC=cc go run ./cmd/graith completion zsh > completions/gr.zsh'
+    - sh -c 'env CGO_ENABLED=0 CC=cc go run ./cmd/graith completion fish > completions/gr.fish'
+    - rm -rf man
+    - mkdir -p man
+    - sh -c 'SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) && export SOURCE_DATE_EPOCH && env CGO_ENABLED=0 CC=cc go run ./cmd/graith man man'
+    - sh -c 'gzip -9 -n -f man/*.1'
+    - sh -c 'test "$(uname -s)" = Linux && test -n "${GRAITH_RELEASE_GOARCH:-}" && test -n "${GRAITH_LIBGHOSTTY_WORK:-}" && test -f "$GRAITH_LIBGHOSTTY_WORK/pkgconfig/libghostty-vt-static.pc"'
+
+builds:
+  - id: gr-linux-amd64
+    skip: '{{ ne (index .Env "GRAITH_RELEASE_GOARCH") "amd64" }}'
+    main: ./cmd/graith
+    binary: gr
+    env:
+      - CGO_ENABLED=1
+    flags:
+      - -trimpath
+    tags:
+      - libghostty
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w
+      - -extldflags=-Wl,--strip-debug
+      - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
+      - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
+    hooks:
+      post:
+        - cmd: scripts/libghostty-native.sh package-linux "{{ .Path }}" "dist/libghostty-native-{{ .Arch }}" "{{ index .Env "GRAITH_SPDX_VALIDATOR_JAR" }}" "{{ .Arch }}" gr
+          output: true
+    goos:
+      - linux
+    goarch:
+      - amd64
+  - id: gr-linux-arm64
+    skip: '{{ ne (index .Env "GRAITH_RELEASE_GOARCH") "arm64" }}'
+    main: ./cmd/graith
+    binary: gr
+    env:
+      - CGO_ENABLED=1
+    flags:
+      - -trimpath
+    tags:
+      - libghostty
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w
+      - -extldflags=-Wl,--strip-debug
+      - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
+      - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
+    hooks:
+      post:
+        - cmd: scripts/libghostty-native.sh package-linux "{{ .Path }}" "dist/libghostty-native-{{ .Arch }}" "{{ index .Env "GRAITH_SPDX_VALIDATOR_JAR" }}" "{{ .Arch }}" gr
+          output: true
+    goos:
+      - linux
+    goarch:
+      - arm64
+
+archives:
+  - id: linux
+    ids:
+      - gr-linux-amd64
+      - gr-linux-arm64
+    formats:
+      - tar.gz
+    name_template: "graith_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+      - completions/gr.bash
+      - completions/gr.zsh
+      - completions/gr.fish
+      - man/*.1.gz
+      - src: dist/libghostty-native-{{ .Arch }}/libghostty-native.spdx.json
+        dst: libghostty-native.spdx.json
+      - src: dist/libghostty-native-{{ .Arch }}/THIRD_PARTY_NOTICES.libghostty.md
+        dst: THIRD_PARTY_NOTICES.libghostty.md
+
+nfpms:
+  - id: graith
+    package_name: graith
+    ids:
+      - gr-linux-amd64
+      - gr-linux-arm64
+    vendor: Dougal Matthews
+    homepage: https://github.com/d0ugal/graith
+    maintainer: Dougal Matthews <dougal@dougalmatthews.com>
+    description: Terminal session manager for AI coding agents
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/bin
+    mtime: "{{ .CommitDate }}"
+    rpm:
+      buildhost: reproducible
+    contents:
+      - src: ./completions/gr.bash
+        dst: /usr/share/bash-completion/completions/gr
+        file_info: {mtime: "{{ .CommitDate }}"}
+      - src: ./completions/gr.zsh
+        dst: /usr/share/zsh/vendor-completions/_gr
+        file_info: {mtime: "{{ .CommitDate }}"}
+      - src: ./completions/gr.fish
+        dst: /usr/share/fish/vendor_completions.d/gr.fish
+        file_info: {mtime: "{{ .CommitDate }}"}
+      - src: ./man/*.1.gz
+        dst: /usr/share/man/man1/
+        file_info: {mtime: "{{ .CommitDate }}"}
+      - src: ./LICENSE
+        dst: /usr/share/doc/graith/copyright
+        file_info: {mtime: "{{ .CommitDate }}"}
+      - src: ./README.md
+        dst: /usr/share/doc/graith/README.md
+        file_info: {mtime: "{{ .CommitDate }}"}
+      - src: ./dist/libghostty-native-{{ .Arch }}/libghostty-native.spdx.json
+        dst: /usr/share/doc/graith/libghostty-native.spdx.json
+        file_info: {mtime: "{{ .CommitDate }}"}
+      - src: ./dist/libghostty-native-{{ .Arch }}/THIRD_PARTY_NOTICES.libghostty.md
+        dst: /usr/share/doc/graith/THIRD_PARTY_NOTICES.libghostty.md
+        file_info: {mtime: "{{ .CommitDate }}"}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  disable: true
+
+snapshot:
+  version_template: '{{ index .Env "GRAITH_RELEASE_VERSION" }}'

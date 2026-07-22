@@ -1214,9 +1214,16 @@ func TestDevHomebrewFormulaInstallsMacAppsOnlyOnMacOS(t *testing.T) {
 }
 
 func TestProductionNotifierPackagingRemainsSeparated(t *testing.T) {
-	cfg := loadGoreleaserConfig(t)
-	linuxFiles := archiveByID(t, cfg, "linux")
-	darwinFiles := archiveByID(t, cfg, "darwin")
+	linuxCfg := loadGoreleaserConfig(t)
+	linuxFiles := archiveByID(t, linuxCfg, "linux")
+
+	var darwinCfg goreleaserConfig
+
+	if err := yaml.Unmarshal(mustReadReleaseFile(t, ".goreleaser.yaml"), &darwinCfg); err != nil {
+		t.Fatal(err)
+	}
+
+	darwinFiles := archiveByID(t, darwinCfg, "darwin-arm64")
 
 	for _, file := range linuxFiles {
 		if strings.Contains(file.path(), "GraithNotifier.app") {
@@ -1233,43 +1240,59 @@ func TestProductionNotifierPackagingRemainsSeparated(t *testing.T) {
 	t.Fatal("production Darwin archive no longer carries GraithNotifier.app in the expected layout")
 }
 
-func TestStableReleaseRemainsPureGoDuringDevCanary(t *testing.T) {
-	data, err := os.ReadFile(releaseRootPath(".goreleaser.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var config struct {
+func TestStableReleaseSelectsNativeBackendsAndRetainsIntelCharm(t *testing.T) {
+	type configShape struct {
 		Builds []struct {
-			ID   string   `yaml:"id"`
-			Env  []string `yaml:"env"`
-			Tags []string `yaml:"tags"`
+			ID     string   `yaml:"id"`
+			Env    []string `yaml:"env"`
+			Tags   []string `yaml:"tags"`
+			Goarch []string `yaml:"goarch"`
 		} `yaml:"builds"`
 	}
-	if err := yaml.Unmarshal(data, &config); err != nil {
+
+	var darwin configShape
+
+	if err := yaml.Unmarshal(mustReadReleaseFile(t, ".goreleaser.yaml"), &darwin); err != nil {
 		t.Fatal(err)
 	}
 
-	want := map[string]bool{"gr-linux": false, "gr-darwin": false}
-	for _, build := range config.Builds {
-		if _, ok := want[build.ID]; !ok {
+	var linux configShape
+
+	if err := yaml.Unmarshal(mustReadReleaseFile(t, ".goreleaser-linux.yaml"), &linux); err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]struct {
+		arch   string
+		cgo    string
+		native bool
+	}{
+		"gr-darwin-amd64": {arch: "amd64", cgo: "CGO_ENABLED=0"},
+		"gr-darwin-arm64": {arch: "arm64", cgo: "CGO_ENABLED=1", native: true},
+		"gr-linux-amd64":  {arch: "amd64", cgo: "CGO_ENABLED=1", native: true},
+		"gr-linux-arm64":  {arch: "arm64", cgo: "CGO_ENABLED=1", native: true},
+	}
+
+	for _, build := range append(darwin.Builds, linux.Builds...) {
+		expected, ok := want[build.ID]
+		if !ok {
+			t.Errorf("unexpected stable build %q", build.ID)
 			continue
 		}
 
-		want[build.ID] = true
-		if !slices.Contains(build.Env, "CGO_ENABLED=0") {
-			t.Errorf("stable build %q is not explicitly pure Go: %v", build.ID, build.Env)
+		delete(want, build.ID)
+
+		if !slices.Equal(build.Goarch, []string{expected.arch}) || !slices.Contains(build.Env, expected.cgo) {
+			t.Errorf("stable build %q architecture/env = %v/%v", build.ID, build.Goarch, build.Env)
 		}
 
-		if slices.Contains(build.Tags, "libghostty") {
-			t.Errorf("stable build %q unexpectedly selects libghostty", build.ID)
+		if slices.Contains(build.Tags, "libghostty") != expected.native {
+			t.Errorf("stable build %q native selection = %v, want %v", build.ID, build.Tags, expected.native)
 		}
 	}
 
-	for id, found := range want {
-		if !found {
-			t.Errorf("stable GoReleaser config has no %q build", id)
-		}
+	if len(want) != 0 {
+		t.Errorf("missing stable builds: %#v", want)
 	}
 }
 
@@ -1286,8 +1309,13 @@ func TestReleaseConfigsDoNotPublishSeparatelyNamedRollbackArchives(t *testing.T)
 		},
 		{
 			name:         ".goreleaser.yaml",
-			wantBuilds:   []string{"gr-linux", "gr-darwin"},
-			wantArchives: []string{"linux", "darwin"},
+			wantBuilds:   []string{"gr-darwin-amd64", "gr-darwin-arm64"},
+			wantArchives: []string{"darwin-amd64", "darwin-arm64"},
+		},
+		{
+			name:         ".goreleaser-linux.yaml",
+			wantBuilds:   []string{"gr-linux-amd64", "gr-linux-arm64"},
+			wantArchives: []string{"linux"},
 		},
 	}
 

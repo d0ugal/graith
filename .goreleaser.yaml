@@ -1,72 +1,25 @@
 version: 2
 
+# Stable Darwin releases are built on Apple Silicon. Linux uses the separate
+# .goreleaser-linux.yaml platform builder and all outputs meet in one publisher.
 before:
   hooks:
-    # Completions are produced by the binary itself and are host-arch
-    # independent, so we generate them once (via `go run`) and reuse the same
-    # files for every packaged arch. See docs/design/2026-07-01-apt-yum-packaging-design.md.
     - mkdir -p completions
     - sh -c 'go run ./cmd/graith completion bash > completions/gr.bash'
-    - sh -c 'go run ./cmd/graith completion zsh  > completions/gr.zsh'
+    - sh -c 'go run ./cmd/graith completion zsh > completions/gr.zsh'
     - sh -c 'go run ./cmd/graith completion fish > completions/gr.fish'
-    # The man page is likewise generated once by the binary itself (cobra's
-    # GenManTree) and is arch independent, so it is emitted here and gzipped for
-    # /usr/share/man/man1 per convention. The hidden `gr man <outdir>` command
-    # writes gr.1 plus a page per subcommand (gr-attach.1, gr-msg.1, …), and the
-    # root gr.1's SEE ALSO section cross-references those subcommand pages, so we
-    # gzip and ship the whole tree — otherwise `man gr` links to pages that were
-    # never installed (issue #779). The man dir is wiped first so a non-clean
-    # rerun (e.g. a local release after a command was renamed) can't leave a
-    # stale gr-*.1.gz behind for the packaging glob to pick up.
-    # SOURCE_DATE_EPOCH is pinned to the commit date so the embedded .TH date is
-    # deterministic (see internal/cli/man.go) — otherwise rebuilds of the same
-    # commit in different months yield different gr.1.gz bytes and break
-    # byte-for-byte reproducibility (issue #778). The command fails closed if
-    # git log yields nothing rather than silently stamping wall-clock time.
     - rm -rf man
     - mkdir -p man
     - sh -c 'SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) && export SOURCE_DATE_EPOCH && go run ./cmd/graith man man'
     - sh -c 'gzip -9 -n -f man/*.1'
-    # Build the macOS notification helper .app bundle (issue #1101). The release
-    # runs on a macOS runner (see .github/workflows/goreleaser.yml) so swiftc is
-    # available and this produces macos/build/GraithNotifier.app, which the
-    # Darwin archive below bundles. The script is a no-op on non-macOS hosts, so
-    # this hook stays harmless on a Linux `--snapshot` run — note that on Linux
-    # the bundle isn't produced, so a Linux snapshot can't build the darwin
-    # archive; real releases run on macOS.
     - sh -c 'make notifier'
-    # Fail closed if the darwin release runner didn't actually produce the
-    # notifier bundle the darwin archive globs for: GoReleaser treats an empty
-    # file glob as non-fatal, so without this a drift between build output and
-    # the archive src would silently ship a darwin tarball with no helper (issue
-    # #1101 review). No-op on non-macOS, where the bundle isn't built.
     - sh -c 'test "$(uname -s)" != Darwin || test -x macos/build/GraithNotifier.app/Contents/MacOS/graith-notifier'
+    - sh -c 'test "$(uname -s)-$(uname -m)" != Darwin-arm64 || { test -n "${GRAITH_LIBGHOSTTY_WORK:-}" && test -f "$GRAITH_LIBGHOSTTY_WORK/pkgconfig/libghostty-vt-static.pc"; }'
 
-# The build is split by OS into two ids (gr-linux / gr-darwin) producing the
-# same `gr` binary, so the archives below can be split too: only the Darwin
-# archive bundles the macOS notification helper .app (issue #1101), keeping it
-# out of the Linux tarball. Reproducible builds: strip local paths, pure-Go
-# static binary, and stamp object timestamps from the commit rather than
-# wall-clock time.
 builds:
-  - id: gr-linux
-    main: ./cmd/graith
-    binary: gr
-    env:
-      - CGO_ENABLED=0
-    flags:
-      - -trimpath
-    mod_timestamp: "{{ .CommitTimestamp }}"
-    ldflags:
-      - -s -w
-      - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
-      - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
-    goos:
-      - linux
-    goarch:
-      - amd64
-      - arm64
-  - id: gr-darwin
+  # Intel macOS remains the supported pure-Go Charm artifact. It is not a
+  # rollback artifact and deliberately carries no native metadata.
+  - id: gr-darwin-amd64
     main: ./cmd/graith
     binary: gr
     env:
@@ -82,9 +35,6 @@ builds:
       - -X github.com/d0ugal/graith/internal/daemonservice.DevelopmentBuild={{ .IsSnapshot }}
       - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedTeamID={{ if not .IsSnapshot }}{{ .Env.GRAITH_SIGNING_TEAM_ID }}{{ end }}
       - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedRequirementBase64={{ if not .IsSnapshot }}{{ .Env.GRAITH_SIGNING_REQUIREMENT_B64 }}{{ end }}
-    # GoReleaser exposes the completed artifact to post-build hooks. The hook
-    # signs/notarizes the matching architecture's Graith.app, then replaces this
-    # artifact with the signed embedded gr so the two payloads are byte-identical.
     hooks:
       post:
         - cmd: macos/service/release-hook.sh "{{ .Path }}" "{{ .Target }}" "{{ .Version }}" "{{ .Commit }}" "{{ .IsSnapshot }}"
@@ -93,23 +43,44 @@ builds:
       - darwin
     goarch:
       - amd64
+  - id: gr-darwin-arm64
+    main: ./cmd/graith
+    binary: gr
+    env:
+      - CGO_ENABLED=1
+    flags:
+      - -trimpath
+    tags:
+      - libghostty
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w
+      - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
+      - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
+      - -X github.com/d0ugal/graith/internal/daemonservice.ManagedBuild=true
+      - -X github.com/d0ugal/graith/internal/daemonservice.DevelopmentBuild={{ .IsSnapshot }}
+      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedTeamID={{ if not .IsSnapshot }}{{ .Env.GRAITH_SIGNING_TEAM_ID }}{{ end }}
+      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedRequirementBase64={{ if not .IsSnapshot }}{{ .Env.GRAITH_SIGNING_REQUIREMENT_B64 }}{{ end }}
+    hooks:
+      post:
+        # The service hook signs first. SPDX therefore binds the final standalone
+        # bytes, which are identical to the executable inside Graith.app.
+        - cmd: macos/service/release-hook.sh "{{ .Path }}" "{{ .Target }}" "{{ .Version }}" "{{ .Commit }}" "{{ .IsSnapshot }}"
+          output: true
+        - cmd: scripts/libghostty-native.sh package-darwin-arm64 "{{ .Path }}" "macos/build/libghostty-native-arm64" "{{ index .Env "GRAITH_SPDX_VALIDATOR_JAR" }}" gr
+          output: true
+    goos:
+      - darwin
+    goarch:
       - arm64
 
-# Two archives, one per OS build id, so the Darwin tarball can bundle the macOS
-# notification helper .app without it leaking into the Linux tarball (issue
-# #1101). Both ship the generated completions and man page inside the archive so
-# the AUR `package()` (below) can install them: graith-bin is a `-bin` package
-# that builds from these prebuilt binary tarballs, not from source. Specifying
-# `files` replaces GoReleaser's default set, so the LICENSE, README, and
-# CHANGELOG that used to be included implicitly are re-listed explicitly (issue
-# #777). The man `files` entry ships the whole gzipped man tree (gr.1.gz plus
-# every gr-*.1.gz subcommand page) so the root page's SEE ALSO cross-references
-# resolve for AUR users too, matching the nfpm contents glob (issue #779).
 archives:
-  - id: linux
+  - id: darwin-amd64
     ids:
-      - gr-linux
-    format: tar.gz
+      - gr-darwin-amd64
+    formats:
+      - tar.gz
+    name_template: "graith_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
       - README.md
@@ -118,192 +89,38 @@ archives:
       - completions/gr.zsh
       - completions/gr.fish
       - man/*.1.gz
-  - id: darwin
-    ids:
-      - gr-darwin
-    format: tar.gz
-    files:
-      - LICENSE
-      - README.md
-      - CHANGELOG.md
-      - completions/gr.bash
-      - completions/gr.zsh
-      - completions/gr.fish
-      - man/*.1.gz
-      # The macOS notification helper bundle (issue #1094/#1101), Darwin-only.
-      # Built by the `make notifier` before-hook on the macOS release runner and
-      # bundled at the archive root as GraithNotifier.app/Contents/… (tree + exec
-      # bit preserved) so the Homebrew formula below can install it where the
-      # daemon looks for it.
-      #
-      # dst is GraithNotifier.app/Contents (not …/GraithNotifier.app): GoReleaser
-      # strips the longest common directory prefix of the matched files before
-      # applying dst, and every file in a .app lives under Contents/, so that
-      # prefix is Contents/. Pointing dst one level deeper restores the required
-      # GraithNotifier.app/Contents/{Info.plist,MacOS/…,_CodeSignature/…} layout;
-      # verified with `goreleaser release --snapshot`.
       - src: macos/build/GraithNotifier.app/**/*
         dst: GraithNotifier.app/Contents
-      # Signed, notarized app-associated daemon service bundle. The build hook
-      # writes one architecture-specific tree before archive creation.
       - src: macos/build/service-release-{{ .Arch }}/Graith.app/**/*
         dst: Graith.app/Contents
-
-nfpms:
-  - id: graith
-    package_name: graith
-    # Package only the Linux build's binaries; the darwin build id has no linux
-    # artifacts, but pin it explicitly now that the build is split (issue #1101).
+  - id: darwin-arm64
     ids:
-      - gr-linux
-    vendor: Dougal Matthews
-    homepage: https://github.com/d0ugal/graith
-    maintainer: Dougal Matthews <dougal@dougalmatthews.com>
-    description: Terminal session manager for AI coding agents
-    license: MIT
+      - gr-darwin-arm64
     formats:
-      - deb
-      - rpm
-      - apk
-    # linux amd64 + arm64 come from the existing builds matrix; nfpm emits one
-    # package per (format, goarch). darwin builds are skipped automatically.
-    # apk files attach to the GitHub Release like deb/rpm; users can install them
-    # directly with `apk add --allow-untrusted graith_*.apk`. Standing up a signed
-    # Alpine *repository* (abuild signing key + APKINDEX + repo layout) is a
-    # follow-up needing infra, mirroring how the apt/yum repo was provisioned. See
-    # docs/design/2026-07-01-apt-yum-packaging-design.md.
-    bindir: /usr/bin
-    # Reproducible packages: pin the package and its file times to the commit
-    # date rather than build time.
-    mtime: "{{ .CommitDate }}"
-    rpm:
-      # Otherwise nfpm records the (ephemeral) build machine's hostname in the
-      # RPM header, which varies per CI run and breaks byte-for-byte reproducibility.
-      buildhost: reproducible
-    contents:
-      - src: ./completions/gr.bash
-        dst: /usr/share/bash-completion/completions/gr
-        file_info:
-          mtime: "{{ .CommitDate }}"
-      - src: ./completions/gr.zsh
-        dst: /usr/share/zsh/vendor-completions/_gr
-        file_info:
-          mtime: "{{ .CommitDate }}"
-      - src: ./completions/gr.fish
-        dst: /usr/share/fish/vendor_completions.d/gr.fish
-        file_info:
-          mtime: "{{ .CommitDate }}"
-      # Ship the whole man tree (gr.1.gz plus every gr-*.1.gz subcommand page)
-      # so the root page's SEE ALSO cross-references resolve on the target
-      # system. nfpm expands the glob and drops each match into the man1 dir
-      # (issue #779).
-      - src: ./man/*.1.gz
-        dst: /usr/share/man/man1/
-        file_info:
-          mtime: "{{ .CommitDate }}"
-      - src: ./LICENSE
-        dst: /usr/share/doc/graith/copyright
-        file_info:
-          mtime: "{{ .CommitDate }}"
-      - src: ./README.md
-        dst: /usr/share/doc/graith/README.md
-        file_info:
-          mtime: "{{ .CommitDate }}"
+      - tar.gz
+    name_template: "graith_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+      - completions/gr.bash
+      - completions/gr.zsh
+      - completions/gr.fish
+      - man/*.1.gz
+      - src: macos/build/GraithNotifier.app/**/*
+        dst: GraithNotifier.app/Contents
+      - src: macos/build/service-release-{{ .Arch }}/Graith.app/**/*
+        dst: Graith.app/Contents
+      - src: macos/build/libghostty-native-arm64/libghostty-native.spdx.json
+        dst: libghostty-native.spdx.json
+      - src: macos/build/libghostty-native-arm64/THIRD_PARTY_NOTICES.libghostty.md
+        dst: THIRD_PARTY_NOTICES.libghostty.md
 
 checksum:
   name_template: checksums.txt
 
-# Use GoReleaser's archive-signing pipe as an OSS before-publish verification
-# hook. It runs over the exact completed Darwin archives after checksums are
-# assembled and before any GitHub/Homebrew/AUR publisher. The small verification
-# record is uploaded alongside its archive and contains the verified SHA-256.
-signs:
-  - id: verify-darwin-service
-    cmd: macos/service/verify-release-archive.sh
-    args:
-      - "${artifact}"
-      - "${signature}"
-      - "{{ .IsSnapshot }}"
-    signature: "${artifact}.service-verified.txt"
-    artifacts: archive
-    ids:
-      - darwin
-    output: true
-
 changelog:
   disable: true
 
-brews:
-  - repository:
-      owner: d0ugal
-      name: homebrew-tap
-      # homebrew-tap is a separate repo; the default GITHUB_TOKEN can't push to
-      # it, so use a PAT with contents:write on homebrew-tap.
-      token: "{{ .Env.RELEASE_TOKEN }}"
-    # Keep both OS archives in the formula (don't pin ids to darwin) so
-    # Homebrew-on-Linux still works; only the macOS archive carries the .app, and
-    # the install guards on macOS accordingly (issue #1101).
-    homepage: https://github.com/d0ugal/graith
-    description: Terminal session manager for AI coding agents
-    license: MIT
-    install: |
-      bin.install "gr"
-      # Install the macOS notification helper so `gr notify` appears under
-      # "Graith" in System Settings > Notifications (issue #1094/#1101). It lands
-      # in libexec/graith, one of the locations the daemon's findMacNotifierApp
-      # searches relative to the resolved gr binary. Guarded with `if OS.mac?`
-      # (not the `on_macos` DSL, which the Homebrew Cookbook says not to use
-      # inside `def install`) — the Linux archive doesn't carry the bundle.
-      if OS.mac?
-        (libexec/"graith").install "GraithNotifier.app"
-        (libexec/"graith").install "Graith.app"
-      end
-    caveats: |
-      To restart the graith daemon after upgrading:
-        gr daemon restart
-
-      Before uninstalling on macOS, remove every registered Graith user service:
-        gr daemon service remove --all-profiles
-
-aurs:
-  - name: graith-bin
-    # Build from the Linux archive now that archives are split by OS (issue
-    # #1101); the AUR -bin package installs the prebuilt Linux binary + assets.
-    ids:
-      - linux
-    homepage: https://github.com/d0ugal/graith
-    description: Terminal session manager for AI coding agents
-    license: MIT
-    # GUARD: this whole block is disabled until the AUR infra is provisioned, so a
-    # release stays green before the AUR account + package + AUR_KEY secret exist.
-    # Same idea as the GPG-guarded publish job in goreleaser.yml. The workflow sets
-    # AUR_KEY (empty when the secret is unset); `index .Env "AUR_KEY"` tolerates a
-    # missing key, and when empty we disable the block so the SSH push never runs
-    # and the `private_key` template below is never evaluated.
-    #
-    # To actually publish, an operator must provision (see PR description):
-    #   1. an AUR account with an SSH public key registered,
-    #   2. a registered AUR package named `graith-bin` (git_url below),
-    #   3. an AUR_KEY repo/org secret holding that account's SSH private key.
-    disable: '{{ if eq (index .Env "AUR_KEY") "" }}true{{ else }}false{{ end }}'
-    # The SSH private key GoReleaser uses to commit to the AUR git repo. Only read
-    # when the block is enabled (i.e. AUR_KEY is non-empty).
-    private_key: "{{ .Env.AUR_KEY }}"
-    # AUR clone URL for the registered package. `-bin` suffix is the AUR convention
-    # for packages that install a prebuilt binary rather than building from source.
-    git_url: "ssh://aur@aur.archlinux.org/graith-bin.git"
-    maintainers:
-      - "Dougal Matthews <dougal@dougalmatthews.com>"
-    package: |-
-      # bin
-      install -Dm755 "./gr" "${pkgdir}/usr/bin/gr"
-      # license (Arch convention: under the pkgname, graith-bin)
-      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/graith-bin/LICENSE"
-      # completions
-      install -Dm644 "./completions/gr.bash" "${pkgdir}/usr/share/bash-completion/completions/gr"
-      install -Dm644 "./completions/gr.zsh" "${pkgdir}/usr/share/zsh/site-functions/_gr"
-      install -Dm644 "./completions/gr.fish" "${pkgdir}/usr/share/fish/vendor_completions.d/gr.fish"
-      # man pages: install the whole tree (gr.1.gz plus every gr-*.1.gz subcommand
-      # page) so the root page's SEE ALSO cross-references resolve (issue #779).
-      install -dm755 "${pkgdir}/usr/share/man/man1"
-      install -m644 ./man/*.1.gz "${pkgdir}/usr/share/man/man1/"
+snapshot:
+  version_template: '{{ index .Env "GRAITH_RELEASE_VERSION" }}'
