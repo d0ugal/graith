@@ -549,6 +549,13 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		return nil, err
 	}
 
+	scenarioTriggers, err := scenariofile.TriggersFromProtocol(msg.Triggers)
+	if err != nil {
+		return nil, fmt.Errorf("decode scenario triggers: %w", err)
+	}
+
+	scenarioLifecycle := scenariofile.LifecycleFromProtocol(msg.Lifecycle)
+
 	if err := ValidateScenarioName(msg.Name); err != nil {
 		return nil, err
 	}
@@ -633,11 +640,11 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		}
 	}
 
-	if err := scenariofile.ValidateScenarioTriggers(msg.Triggers, definedRoles, definedMembers, definedOwnedMembers); err != nil {
+	if err := scenariofile.ValidateScenarioTriggers(scenarioTriggers, definedRoles, definedMembers, definedOwnedMembers); err != nil {
 		return nil, err
 	}
 
-	if err := config.ValidateScenarioLifecycle(msg.Lifecycle); err != nil {
+	if err := config.ValidateScenarioLifecycle(scenarioLifecycle); err != nil {
 		return nil, err
 	}
 
@@ -914,7 +921,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		SessionIDs:     sessionIDs,
 		Sessions:       scenarioSessions,
 		CreatedAt:      now,
-		Lifecycle:      msg.Lifecycle,
+		Lifecycle:      scenarioLifecycle,
 		Policy:         newScenarioPolicyState(normalizedPolicy),
 		Render:         renderState,
 	}
@@ -1151,7 +1158,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		return nil, fmt.Errorf("scenario %q was deleted during todo seeding", msg.Name)
 	}
 
-	scenario.Triggers = msg.Triggers
+	scenario.Triggers = scenarioTriggers
 	activateScenarioPolicy(scenario, sm.scenarioPolicyTime())
 
 	if err := sm.saveState(); err != nil {

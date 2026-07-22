@@ -32,7 +32,7 @@ func TestCreateOptsFromMsgMapsEveryField(t *testing.T) {
 		SkipModelValidation: true,
 		Headless:            true,
 		NoFetch:             true,
-		Codex:               &config.CodexOptions{Profile: "canny"},
+		Codex:               &protocol.CodexOptions{Profile: "canny"},
 	}
 
 	got := createOptsFromMsg(c, "codex", 40, 120)

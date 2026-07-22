@@ -105,11 +105,6 @@ var newCmd = &cobra.Command{
 			WebSearch:       newCodexWebSearch,
 		}
 
-		var codexPtr *config.CodexOptions
-		if !codexOpts.IsZero() {
-			codexPtr = &codexOpts
-		}
-
 		c, err := client.Connect(cfg, paths, cfgFile)
 		if err != nil {
 			return err
@@ -133,7 +128,7 @@ var newCmd = &cobra.Command{
 			SkipModelValidation: newSkipModelValidation,
 			Headless:            newHeadless,
 			NoFetch:             newNoFetch,
-			Codex:               codexPtr,
+			Codex:               codexOptionsToProtocol(codexOpts),
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -177,6 +172,21 @@ var newCmd = &cobra.Command{
 
 		return runAttachByID(c, info.ID, nil)
 	},
+}
+
+// codexOptionsToProtocol converts the CLI/config model to the protocol-owned
+// wire DTO. The config type retains IsZero and launch-option behavior.
+func codexOptionsToProtocol(options config.CodexOptions) *protocol.CodexOptions {
+	if options.IsZero() {
+		return nil
+	}
+
+	return &protocol.CodexOptions{
+		Profile:         options.Profile,
+		ReasoningEffort: options.ReasoningEffort,
+		ServiceTier:     options.ServiceTier,
+		WebSearch:       options.WebSearch,
+	}
 }
 
 // registerNewCmd registers this command on rootCmd. Called from registerCommands.

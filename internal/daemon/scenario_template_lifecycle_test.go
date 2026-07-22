@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/store"
 )
@@ -47,12 +46,12 @@ func TestStartScenarioTemplatesRenderSharedInitiatorReferencesResultsAndRestart(
 				}},
 			},
 		},
-		Triggers: []config.TriggerConfig{{
+		Triggers: []protocol.TriggerConfig{{
 			Name:       "publish-review",
-			Completion: &config.CompletionConfig{Event: "complete", Session: "{scenario}-reviewer"},
-			Action: config.ActionConfig{
+			Completion: &protocol.CompletionConfig{Event: "complete", Session: "{scenario}-reviewer"},
+			Action: protocol.ActionConfig{
 				Type: "message", Body: "review complete",
-				Deliver: config.DeliverConfig{Inbox: "{scenario}-reviewer"},
+				Deliver: protocol.DeliverConfig{Inbox: "{scenario}-reviewer"},
 			},
 		}},
 	}
