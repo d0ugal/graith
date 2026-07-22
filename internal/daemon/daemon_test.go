@@ -4568,9 +4568,9 @@ func assertArgvContains(t *testing.T, argv []string, want string) {
 	t.Errorf("argv missing %q; got %v", want, argv)
 }
 
-// assertLaunchHasHooksWithoutMCP asserts that lifecycle hooks and arbitrary
-// agent-native arguments survive while Graith contributes no MCP settings.
-func assertLaunchHasHooksWithoutMCP(t *testing.T, argv []string) {
+// assertLaunchHasHooksWithoutToolServerConfig asserts that lifecycle hooks and
+// arbitrary agent-native arguments survive without Graith integration settings.
+func assertLaunchHasHooksWithoutToolServerConfig(t *testing.T, argv []string) {
 	t.Helper()
 
 	assertArgvContains(t, argv, "--settings")
@@ -4579,12 +4579,12 @@ func assertLaunchHasHooksWithoutMCP(t *testing.T, argv []string) {
 
 	for _, arg := range argv {
 		if arg == "--mcp-config" || strings.Contains(arg, "mcp_servers.") || strings.Contains(arg, "mcp-proxy") {
-			t.Errorf("Graith injected obsolete MCP argument %q; argv %v", arg, argv)
+			t.Errorf("Graith injected obsolete integration argument %q; argv %v", arg, argv)
 		}
 	}
 }
 
-func TestClaudeSessionPreservesNativeArgsWithoutMCPInjection(t *testing.T) {
+func TestClaudeSessionPreservesNativeArgsWithoutToolServerInjection(t *testing.T) {
 	repoDir := initTempGitRepo(t)
 	sm, recordPath := newClaudeRecorderManager(t, repoDir)
 
@@ -4602,10 +4602,10 @@ func TestClaudeSessionPreservesNativeArgsWithoutMCPInjection(t *testing.T) {
 
 	argv := waitForRecordedArgv(t, recordPath, "--settings")
 
-	assertLaunchHasHooksWithoutMCP(t, argv)
+	assertLaunchHasHooksWithoutToolServerConfig(t, argv)
 }
 
-func TestForkPreservesNativeArgsWithoutMCPInjection(t *testing.T) {
+func TestForkPreservesNativeArgsWithoutToolServerInjection(t *testing.T) {
 	repoDir := initTempGitRepo(t)
 	sm, recordPath := newClaudeRecorderManager(t, repoDir)
 
@@ -4635,10 +4635,10 @@ func TestForkPreservesNativeArgsWithoutMCPInjection(t *testing.T) {
 
 	argv := waitForRecordedArgv(t, recordPath, "--settings")
 
-	assertLaunchHasHooksWithoutMCP(t, argv)
+	assertLaunchHasHooksWithoutToolServerConfig(t, argv)
 }
 
-func TestResumePreservesNativeArgsWithoutMCPInjection(t *testing.T) {
+func TestResumePreservesNativeArgsWithoutToolServerInjection(t *testing.T) {
 	repoDir := initTempGitRepo(t)
 	sm, recordPath := newClaudeRecorderManager(t, repoDir)
 
@@ -4672,7 +4672,7 @@ func TestResumePreservesNativeArgsWithoutMCPInjection(t *testing.T) {
 
 	argv := waitForRecordedArgv(t, recordPath, "--settings")
 
-	assertLaunchHasHooksWithoutMCP(t, argv)
+	assertLaunchHasHooksWithoutToolServerConfig(t, argv)
 }
 
 // TestClaudeSessionHooksDisabledSkipsInjection verifies the other side of the

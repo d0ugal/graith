@@ -3,7 +3,7 @@ title: "Design Doc: MCP Server Injection"
 authors: Dougal Matthews
 created: 2026-06-11
 updated: 2026-06-12
-status: Superseded by 2026-07-22-mcp-removal.md
+status: Draft
 reviewers: (none yet)
 informed: (TBD)
 ---

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,72 @@ import (
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/testprocess"
 )
+
+func TestRunBackupFailureStopsBeforeDaemonInitialization(t *testing.T) {
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data")
+	runtimeDir := filepath.Join(root, "run")
+	logDir := filepath.Join(root, "log")
+	tmpDir := filepath.Join(root, "tmp")
+
+	paths := config.Paths{
+		Profile: "braw", AppName: "graith-braw",
+		ConfigFile: filepath.Join(root, "config.toml"),
+		DataDir:    dataDir, RuntimeDir: runtimeDir, LogDir: logDir, TmpDir: tmpDir,
+		StateFile:  filepath.Join(dataDir, "state.json"),
+		PIDFile:    filepath.Join(runtimeDir, "graith.pid"),
+		SocketPath: filepath.Join(runtimeDir, "graith.sock"),
+		DaemonLog:  filepath.Join(logDir, "daemon.log"),
+		MessagesDB: filepath.Join(dataDir, "messages.db"),
+		TodosDB:    filepath.Join(dataDir, "todos.db"),
+	}
+
+	for _, dir := range []string{
+		filepath.Dir(paths.ConfigFile), dataDir, runtimeDir, logDir, tmpDir,
+		filepath.Join(dataDir, "store", "shared"),
+	} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	before := oldStateData(t, CurrentStateVersion-1)
+
+	if err := writeFileAtomic(paths.StateFile, before); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chmod(dataDir, 0o500); err != nil { //nolint:gosec // G302: force the recovery-backup failure.
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = os.Chmod(dataDir, 0o700) }) //nolint:gosec // G302: restore traversal for cleanup.
+
+	err := run(config.Default(), paths, paths.ConfigFile, "", nil, nil, nil)
+
+	var backupErr *StateMigrationBackupError
+
+	if !errors.As(err, &backupErr) {
+		t.Fatalf("run error = %v, want *StateMigrationBackupError", err)
+	}
+
+	after, readErr := os.ReadFile(paths.StateFile)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+
+	if !bytes.Equal(after, before) {
+		t.Fatal("startup backup failure changed the original state bytes")
+	}
+
+	for _, path := range []string{
+		paths.PIDFile, paths.SocketPath, paths.DaemonLog, paths.MessagesDB, paths.TodosDB,
+	} {
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Errorf("startup backup failure created %s: %v", path, statErr)
+		}
+	}
+}
 
 func TestResolvedUpgradeSnapshotPathsDoesNotRetainRemovedDataDir(t *testing.T) {
 	defaults, err := config.ResolvePaths()

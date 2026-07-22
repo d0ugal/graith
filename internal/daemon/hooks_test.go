@@ -850,7 +850,7 @@ func TestInjectClaudeHooksEmitsOnlySettings(t *testing.T) {
 
 	for _, a := range args {
 		if a == "--mcp-config" {
-			t.Errorf("injectClaudeHooks must not emit --mcp-config; args = %v", args)
+			t.Errorf("injectClaudeHooks emitted an obsolete integration argument; args = %v", args)
 		}
 	}
 }

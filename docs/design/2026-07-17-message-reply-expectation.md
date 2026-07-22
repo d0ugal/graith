@@ -10,10 +10,6 @@ issue: https://github.com/d0ugal/graith/issues/1374
 
 # Message Reply Expectation
 
-> **MCP removal amendment (2026-07-22):** MCP client-shape references below are
-> historical and superseded by
-> [Remove Graith-Owned MCP Support](2026-07-22-mcp-removal.md).
-
 Graith messages may explicitly declare that no reply is expected, allowing
 one-way reports and hand-offs to avoid presenting a misleading reply command.
 The declaration is durable message metadata and is separate from reply routing,

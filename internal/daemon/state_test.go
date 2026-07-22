@@ -1144,7 +1144,7 @@ func TestMigrateV25ToV26InitializesSessionLabels(t *testing.T) {
 	}
 }
 
-func TestMigrateV26ToV27DropsMCPConfigAndPreservesBackup(t *testing.T) {
+func TestMigrateV26ToV27DropsToolServerConfigAndPreservesBackup(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "state.json")
 	secret := "dreich-secret-token"
@@ -1266,18 +1266,21 @@ func TestStateMigrationsRegisteredSequentially(t *testing.T) {
 	}
 }
 
-func TestLoadStateBackupFailureNonFatal(t *testing.T) {
+func TestLoadStateBackupFailureFailsClosed(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "state.json")
 
 	oldVersion := CurrentStateVersion - 1
-	if err := writeFileAtomic(path, oldStateData(t, oldVersion)); err != nil {
+
+	before := oldStateData(t, oldVersion)
+
+	if err := writeFileAtomic(path, before); err != nil {
 		t.Fatal(err)
 	}
 
 	// A read-only data dir lets LoadState read state.json but makes the sibling
 	// backup write fail (atomicfile can't create its temp file). LoadState must
-	// still migrate and return successfully — the backup is best-effort.
+	// refuse before migration because recovery requires the exact old bytes.
 	if err := os.Chmod(dir, 0o500); err != nil { //nolint:gosec // G302: read-only dir is the point of this failure test
 		t.Fatal(err)
 	}
@@ -1285,20 +1288,64 @@ func TestLoadStateBackupFailureNonFatal(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o750) }) //nolint:gosec // G302: restore perms so t.TempDir cleanup can traverse
 
 	state, err := LoadState(path)
-	if err != nil {
-		t.Fatalf("LoadState must not fail when the backup can't be written: %v", err)
+	if err == nil {
+		t.Fatal("LoadState succeeded without a pre-migration backup")
 	}
 
-	if state.Version != CurrentStateVersion {
-		t.Errorf("version = %d, want %d — migration must still run", state.Version, CurrentStateVersion)
+	if state != nil {
+		t.Fatalf("LoadState returned state after backup failure: %+v", state)
 	}
 
-	if s, ok := state.Sessions["braw1"]; !ok || s.Name != "auld-kirk" {
-		t.Error("session lost when backup failed")
+	var backupErr *StateMigrationBackupError
+	if !errors.As(err, &backupErr) {
+		t.Fatalf("error %v is not a *StateMigrationBackupError", err)
+	}
+	if backupErr.Version != oldVersion {
+		t.Errorf("backup error version = %d, want %d", backupErr.Version, oldVersion)
+	}
+	if strings.Contains(err.Error(), "auld-kirk") {
+		t.Fatalf("backup error leaked state contents: %v", err)
 	}
 
 	if backups := ListStateBackups(path); len(backups) != 0 {
 		t.Errorf("no backup expected after a failed backup write, got %v", backups)
+	}
+
+	after, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+
+	if !bytes.Equal(after, before) {
+		t.Fatal("backup failure changed the original state bytes")
+	}
+
+	if _, adoptionErr := backupStateSnapshotBeforeMigration(path, before); adoptionErr == nil {
+		t.Fatal("adoption preparation succeeded without a pre-migration backup")
+	} else if !errors.As(adoptionErr, &backupErr) {
+		t.Fatalf("adoption error %v is not a *StateMigrationBackupError", adoptionErr)
+	}
+}
+
+func TestStateLoadRefusalRejectsMigrationBackupFailure(t *testing.T) {
+	sentinel := errors.New("disk is dreich")
+	err := &StateMigrationBackupError{Version: CurrentStateVersion - 1, Err: sentinel}
+
+	refusal := stateLoadRefusal(err)
+	if refusal == nil {
+		t.Fatal("stateLoadRefusal accepted a migration backup failure")
+	}
+
+	if !errors.Is(refusal, sentinel) {
+		t.Fatalf("stateLoadRefusal did not preserve the backup cause: %v", refusal)
+	}
+
+	if !strings.Contains(refusal.Error(), "fix storage permissions or free space") {
+		t.Fatalf("stateLoadRefusal is not actionable: %v", refusal)
+	}
+
+	if got := stateLoadRefusal(errors.New("unrelated state error")); got != nil {
+		t.Fatalf("stateLoadRefusal rejected a recoverable error: %v", got)
 	}
 }
 

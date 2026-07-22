@@ -1,9 +1,5 @@
 # Agent Token Authentication
 
-> **MCP removal amendment (2026-07-22):** The MCP authorization rows and proxy
-> discussion below are historical and superseded by
-> [Remove Graith-Owned MCP Support](2026-07-22-mcp-removal.md).
-
 **Author:** Dougal Matthews
 **Date:** 2026-06-22
 **Status:** Draft (revised after independent review)

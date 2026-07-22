@@ -1519,7 +1519,7 @@ func TestDefaultAgentSandboxPaths(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsRemovedMCPConfig(t *testing.T) {
+func TestLoadRejectsRemovedToolServerConfig(t *testing.T) {
 	tests := []struct {
 		name string
 		toml string
@@ -1539,12 +1539,12 @@ func TestLoadRejectsRemovedMCPConfig(t *testing.T) {
 
 			_, err := Load(path)
 			if err == nil {
-				t.Fatal("Load accepted removed MCP configuration")
+				t.Fatal("Load accepted removed tool-server configuration")
 			}
 
 			message := err.Error()
 			if !strings.Contains(message, tt.key) ||
-				!strings.Contains(message, "configure native MCP integrations in the agent runtime instead") {
+				!strings.Contains(message, "configure native integrations in the agent runtime instead") {
 				t.Fatalf("error lacks precise migration guidance: %v", err)
 			}
 

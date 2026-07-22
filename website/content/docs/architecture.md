@@ -111,7 +111,7 @@ The daemon (`SessionManager`) is the central component:
 
 `state.json` stores session metadata: ID, name, agent type, repo path, worktree path, branch, status, parent ID, starred flag, and timestamps. It's loaded on daemon start and written synchronously on every mutation. Runtime-only state — hook reports, attached clients, in-memory caches — isn't persisted; it's rebuilt from PTY state on restart.
 
-**State-version backups.** The state file carries a schema version; a newer daemon migrates an older `state.json` forward in place. Since a downgraded binary won't start against forward-migrated state, the daemon *first* writes a crash-safe copy of the pre-migration file to `state.json.v<oldVersion>.bak` (alongside `state.json`). Only the most recent backup is kept — an earlier one is removed once the new one is durable. To recover a downgrade: stop the daemon, restore the backup over `state.json` (e.g. `mv state.json.v16.bak state.json`), and start the older binary. `gr doctor` lists available backups.
+**State-version backups.** The state file carries a schema version; a newer daemon migrates an older `state.json` forward in place. Since a downgraded binary won't start against forward-migrated state, the daemon *first* writes a crash-safe copy of the pre-migration file to `state.json.v<oldVersion>.bak` (alongside `state.json`). If that backup cannot be made, startup fails before migration and leaves the old state unchanged. Only the most recent backup is kept — an earlier one is removed once the new one is durable. To recover a downgrade: stop the daemon, restore the backup over `state.json` (e.g. `mv state.json.v16.bak state.json`), and start the older binary. `gr doctor` lists available backups.
 
 ### Session manager locking
 

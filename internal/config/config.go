@@ -4387,7 +4387,7 @@ func LoadBytes(path string, data []byte) (*Config, error) {
 		return nil, fmt.Errorf("parsing config %s: %w", path, err)
 	}
 
-	if err := rejectRemovedMCPConfig(data); err != nil {
+	if err := rejectRemovedToolServerConfig(data); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
 	}
 
@@ -4430,12 +4430,12 @@ func LoadBytes(path string, data []byte) (*Config, error) {
 	return cfg, nil
 }
 
-// rejectRemovedMCPConfig detects former Graith-owned MCP lifecycle keys after
+// rejectRemovedToolServerConfig detects former Graith-owned tool-server keys after
 // they have left the typed schema. go-toml otherwise ignores unknown keys,
 // which would make security and process-management policy appear active after
-// upgrading. Native MCP configuration supplied directly to an agent runtime is
-// outside this schema and is not inspected here.
-func rejectRemovedMCPConfig(data []byte) error {
+// upgrading. Native integration configuration supplied directly to an agent
+// runtime is outside this schema and is not inspected here.
+func rejectRemovedToolServerConfig(data []byte) error {
 	var raw map[string]any
 	if err := toml.Unmarshal(data, &raw); err != nil {
 		return nil // the typed decode above reports structural TOML errors
@@ -4472,7 +4472,7 @@ func rejectRemovedMCPConfig(data []byte) error {
 
 	sort.Strings(removed)
 
-	return fmt.Errorf("graith MCP support was removed; delete obsolete config key(s): %s; configure native MCP integrations in the agent runtime instead", strings.Join(removed, ", "))
+	return fmt.Errorf("graith tool-server management was removed; delete obsolete config key(s): %s; configure native integrations in the agent runtime instead", strings.Join(removed, ", "))
 }
 
 func mapHasKeyFold(table map[string]any, want string) bool {

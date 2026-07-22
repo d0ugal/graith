@@ -10,11 +10,6 @@ issue: https://github.com/d0ugal/graith/issues/641
 
 # Todo Dependency Graph
 
-> **MCP removal amendment (2026-07-22):** MCP API and test references below are
-> historical and superseded by
-> [Remove Graith-Owned MCP Support](2026-07-22-mcp-removal.md). CLI todo graph
-> behavior remains current.
-
 Todo items gain durable same-scope dependency edges. An item whose declared
 dependencies are not all done is reported as blocked and cannot be claimed;
 completing the final dependency makes it claimable in the same SQLite

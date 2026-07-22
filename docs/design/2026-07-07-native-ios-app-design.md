@@ -10,10 +10,6 @@ issue: 628
 
 # Universal (iOS + macOS) App with Tailscale Remote Control
 
-> **MCP removal amendment (2026-07-22):** MCP messages, channels, and client
-> exclusions below are historical and superseded by
-> [Remove Graith-Owned MCP Support](2026-07-22-mcp-removal.md).
-
 > **Security amendment (2026-07-18):** The mobile approval milestones and wire
 > types in this historical proposal are superseded by
 > [Non-interactive agents with sandbox-enforced policy](2026-07-18-non-interactive-sandbox-policy.md).

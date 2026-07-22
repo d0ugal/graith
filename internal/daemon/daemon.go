@@ -629,6 +629,10 @@ func (sm *SessionManager) LoadState() error {
 		return err
 	}
 
+	return sm.installLoadedState(state)
+}
+
+func (sm *SessionManager) installLoadedState(state *State) error {
 	state.Reconcile()
 	recoverInterruptedScenarioStarts(state, time.Now().UTC())
 	sm.reconcileSessionCWDs(state)

@@ -18,15 +18,15 @@ import (
 	"time"
 )
 
-const preMCPRemovalRevision = "3fdb037103f6f32ef9d35210a7d920d44d2d18b7"
+const preToolServerRemovalRevision = "3fdb037103f6f32ef9d35210a7d920d44d2d18b7"
 
-// TestMCPRemovalUpgradeFromExactMain exercises the real exec handoff from the
+// TestToolServerRemovalUpgradeFromExactMain exercises the real exec handoff from the
 // exact pre-removal main commit. It proves cleanup is performed by the old
 // daemon before the replacement runs, rather than relying on deleted manager
 // code in the new binary.
-func TestMCPRemovalUpgradeFromExactMain(t *testing.T) {
+func TestToolServerRemovalUpgradeFromExactMain(t *testing.T) {
 	repoRoot := integrationRepoRoot(t)
-	oldBinary := buildRevisionBinary(t, repoRoot, preMCPRemovalRevision, "old-gr")
+	oldBinary := buildRevisionBinary(t, repoRoot, preToolServerRemovalRevision, "old-gr")
 	newBinary := buildCurrentBinary(t, repoRoot, "new-gr")
 
 	root := t.TempDir()
@@ -48,7 +48,7 @@ func TestMCPRemovalUpgradeFromExactMain(t *testing.T) {
 	})
 
 	home := filepath.Join(root, "home")
-	profile := "mcpup"
+	profile := "toolup"
 	appName := "graith-" + profile
 	configDir := filepath.Join(configHome, appName)
 	configPath := filepath.Join(configDir, "config.toml")
@@ -101,7 +101,7 @@ func TestMCPRemovalUpgradeFromExactMain(t *testing.T) {
 
 	oldArgs := waitForFile(t, recordPath)
 	if !strings.Contains(oldArgs, "--mcp-config") {
-		t.Fatalf("pre-removal launch did not contain the expected MCP injection:\n%s", oldArgs)
+		t.Fatalf("pre-removal launch did not contain the expected legacy tool-server injection:\n%s", oldArgs)
 	}
 
 	oldState := readRemovalUpgradeState(t, statePath)
@@ -141,7 +141,7 @@ func TestMCPRemovalUpgradeFromExactMain(t *testing.T) {
 		t.Fatalf("managed child PID = %q: %v", waitForFile(t, childPIDPath), err)
 	}
 
-	mcpLogPath := waitForMCPLog(t, filepath.Join(dataHome, appName, "logs", "mcp"))
+	legacyLogPath := waitForLegacyToolLog(t, filepath.Join(dataHome, appName, "logs", "mcp"))
 
 	// Replace the file without reloading the old daemon. The target preflight
 	// sees valid post-removal config while the old in-memory manager still owns
@@ -154,24 +154,24 @@ func TestMCPRemovalUpgradeFromExactMain(t *testing.T) {
 	waitForProcessExit(t, managedPID)
 	waitForCommandExit(t, proxy, &proxyOutput)
 
-	logAfterDrain, err := os.ReadFile(mcpLogPath)
+	logAfterDrain, err := os.ReadFile(legacyLogPath)
 	if err != nil {
-		t.Fatalf("read drained MCP stderr log: %v", err)
+		t.Fatalf("read drained legacy tool-server stderr log: %v", err)
 	}
 
 	if !bytes.Contains(logAfterDrain, []byte("managed-stderr")) {
-		t.Fatalf("drained MCP stderr log did not contain child output: %q", logAfterDrain)
+		t.Fatalf("drained legacy tool-server stderr log did not contain child output: %q", logAfterDrain)
 	}
 
 	time.Sleep(100 * time.Millisecond)
 
-	logAfterWait, err := os.ReadFile(mcpLogPath)
+	logAfterWait, err := os.ReadFile(legacyLogPath)
 	if err != nil {
-		t.Fatalf("reread drained MCP stderr log: %v", err)
+		t.Fatalf("reread drained legacy tool-server stderr log: %v", err)
 	}
 
 	if !bytes.Equal(logAfterWait, logAfterDrain) {
-		t.Fatal("MCP stderr log changed after its child and pipe were drained")
+		t.Fatal("legacy tool-server stderr log changed after its child and pipe were drained")
 	}
 
 	newState := readRemovalUpgradeState(t, statePath)
@@ -189,7 +189,7 @@ func TestMCPRemovalUpgradeFromExactMain(t *testing.T) {
 	}
 
 	if !bytes.Contains(backup, []byte("mcp_servers")) {
-		t.Fatal("v26 backup lost the pre-removal per-agent MCP field")
+		t.Fatal("v26 backup lost the pre-removal per-agent legacy tool-server field")
 	}
 
 	migrated, err := os.ReadFile(statePath)
@@ -198,7 +198,7 @@ func TestMCPRemovalUpgradeFromExactMain(t *testing.T) {
 	}
 
 	if bytes.Contains(migrated, []byte("mcp_servers")) {
-		t.Fatal("v27 state retained the removed per-agent MCP field")
+		t.Fatal("v27 state retained the removed per-agent legacy tool-server field")
 	}
 
 	// An injected proxy from the adopted process can no longer reconnect: even
@@ -233,7 +233,7 @@ func TestMCPRemovalUpgradeFromExactMain(t *testing.T) {
 	}
 }
 
-func removalUpgradeConfig(recordPath, childPIDPath string, includeMCP bool) string {
+func removalUpgradeConfig(recordPath, childPIDPath string, includeToolServer bool) string {
 	agentScript := `printf '%s\n' "$0" "$@" > "$GRAITH_ARGS_RECORD"; exec cat`
 
 	configText := fmt.Sprintf(`fetch_on_create = false
@@ -249,7 +249,7 @@ fork_args = ["-c", %s, "--native-runtime-setting", "canny"]
 non_interactive_args = []
 env = { GRAITH_ARGS_RECORD = %s }
 `, strconv.Quote(agentScript), strconv.Quote(agentScript), strconv.Quote(agentScript), strconv.Quote(recordPath))
-	if !includeMCP {
+	if !includeToolServer {
 		return configText
 	}
 
@@ -401,7 +401,7 @@ func waitForFile(t *testing.T, path string) string {
 	return ""
 }
 
-func waitForMCPLog(t *testing.T, dir string) string {
+func waitForLegacyToolLog(t *testing.T, dir string) string {
 	t.Helper()
 
 	deadline := time.Now().Add(15 * time.Second)
@@ -421,7 +421,7 @@ func waitForMCPLog(t *testing.T, dir string) string {
 		time.Sleep(25 * time.Millisecond)
 	}
 
-	t.Fatalf("timed out waiting for MCP stderr log in %s", dir)
+	t.Fatalf("timed out waiting for legacy tool-server stderr log in %s", dir)
 
 	return ""
 }

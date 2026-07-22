@@ -251,8 +251,8 @@ agent-browser --session docs-check close
 
 `--args '--no-sandbox'` is a Chrome launch argument; don't use it outside an
 existing OS sandbox. Reuse one named session for a task and close it when done.
-Graith does not translate this workflow into MCP configuration and does not
-manage unrelated native integrations configured directly in an agent runtime.
+Graith does not translate this workflow into agent-runtime configuration or
+manage unrelated native integrations.
 
 ## Network egress
 

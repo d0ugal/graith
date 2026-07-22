@@ -9,10 +9,6 @@ informed: (TBD)
 
 # Design Doc: Hide Git Info for Shared Worktree Sessions
 
-> **MCP removal amendment (2026-07-22):** MCP-related scope and code references
-> below are historical and superseded by
-> [Remove Graith-Owned MCP Support](2026-07-22-mcp-removal.md).
-
 ## Background
 
 Graith supports "shared worktree" sessions — sessions that reuse the worktree

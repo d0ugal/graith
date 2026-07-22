@@ -120,17 +120,11 @@ Use with `gr new my-task --agent my-agent`. Since a custom agent's name matches 
 
 ### Agent-owned native integrations
 
-Graith does not configure, inject, supervise, proxy, or inspect MCP servers.
-Delete former Graith keys (`[[mcp_servers]]`,
-`[agents.<name>.mcp_servers.*]`, and `limits.mcp_log_read_bytes`) before
-upgrading; startup and reload reject them with migration guidance so obsolete
-security or lifecycle settings cannot become inert accidentally.
-
-An agent runtime may still support MCP through its own configuration. Keep that
-configuration in the runtime's native files or flags, outside Graith's schema;
-Graith preserves ordinary configured agent arguments but does not interpret or
-secure native MCP integrations. For browser automation in a sandboxed session,
-use [`agent-browser`]({{< relref "/docs/sandbox/configuration.md#browser-automation" >}}).
+Graith preserves ordinary configured agent arguments but does not configure,
+inject, supervise, proxy, inspect, or secure unrelated integrations supplied by
+an agent runtime. Keep those settings in the runtime's native files or flags,
+outside Graith's schema. For browser automation in a sandboxed session, use
+[`agent-browser`]({{< relref "/docs/sandbox/configuration.md#browser-automation" >}}).
 
 ## Repository configuration
 

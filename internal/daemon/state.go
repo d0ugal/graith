@@ -34,6 +34,23 @@ func (e *StateVersionError) Error() string {
 	return fmt.Sprintf("state file version %d is newer than this binary supports (%d) — upgrade graith", e.FileVersion, e.BinaryVersion)
 }
 
+// StateMigrationBackupError is returned when an older state file cannot be
+// backed up before migration. Migration must fail closed in this case: without
+// the exact old bytes, an interrupted migration or binary downgrade would have
+// no safe recovery path.
+type StateMigrationBackupError struct {
+	Version int
+	Err     error
+}
+
+func (e *StateMigrationBackupError) Error() string {
+	return fmt.Sprintf("cannot back up state version %d before migration: %v", e.Version, e.Err)
+}
+
+func (e *StateMigrationBackupError) Unwrap() error {
+	return e.Err
+}
+
 type SessionStatus string
 
 const (
@@ -640,11 +657,10 @@ func LoadState(path string) (*State, error) {
 		// Back up the pre-migration state before overwriting it in place, so a
 		// binary downgrade (whose older daemon can't read forward-migrated
 		// state) or a state-corrupting migration can be recovered. The backup
-		// is a recovery aid, not required for correctness — a failure to write
-		// it must not stop the daemon from starting, so we log and continue.
+		// is required for correctness: fail before running any migration when
+		// the exact old bytes cannot be preserved.
 		if err := backupStateBeforeMigration(path, state.Version, data); err != nil {
-			slog.Warn("failed to back up state before migration",
-				"path", path, "old_version", state.Version, "err", err)
+			return nil, &StateMigrationBackupError{Version: state.Version, Err: err}
 		}
 	}
 
@@ -670,6 +686,42 @@ func LoadStateForAdoption(path string) (*State, error) {
 	state, _, err := LoadStateSnapshotForAdoption(data)
 
 	return state, err
+}
+
+// stateSnapshotVersion validates the JSON envelope and returns only its state
+// version. Upgrade adoption uses this before migration so it can durably back
+// up the exact handed-off bytes before mutating the in-memory manager state.
+func stateSnapshotVersion(data []byte) (int, error) {
+	var header struct {
+		Version int `json:"version"`
+	}
+
+	if err := json.Unmarshal(data, &header); err != nil {
+		return 0, fmt.Errorf("decode state version for adoption: %w", err)
+	}
+
+	return header.Version, nil
+}
+
+// backupStateSnapshotBeforeMigration preserves an exact handed-off snapshot
+// before any adoption code migrates it or mutates manager state.
+func backupStateSnapshotBeforeMigration(statePath string, data []byte) (int, error) {
+	version, err := stateSnapshotVersion(data)
+	if err != nil {
+		return 0, err
+	}
+
+	if version > CurrentStateVersion {
+		return 0, &StateVersionError{FileVersion: version, BinaryVersion: CurrentStateVersion}
+	}
+
+	if version < CurrentStateVersion {
+		if err := backupStateBeforeMigration(statePath, version, data); err != nil {
+			return 0, &StateMigrationBackupError{Version: version, Err: err}
+		}
+	}
+
+	return version, nil
 }
 
 // LoadStateSnapshotForAdoption validates and migrates an exact pre-exec state
@@ -1031,10 +1083,10 @@ func migrateV25ToV26(state *State) error {
 	return nil
 }
 
-// migrateV26ToV27 removes the former Graith-owned MCP configuration nested in
-// CreationConfig.Agent. JSON decoding into the current typed Agent shape has
-// already projected those legacy fields out, so the migration itself is a
-// no-op. Saving the migrated state makes that removal durable; the pre-v27
+// migrateV26ToV27 removes the former Graith-owned tool-server configuration
+// nested in CreationConfig.Agent. JSON decoding into the current typed Agent
+// shape has already projected those legacy fields out, so the migration itself
+// is a no-op. Saving the migrated state makes that removal durable; the pre-v27
 // bytes remain available in the standard v26 backup.
 func migrateV26ToV27(_ *State) error { return nil }
 

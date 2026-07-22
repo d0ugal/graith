@@ -1,9 +1,5 @@
 # GRAITH_PROFILE — Isolated Dev/Test Environments
 
-> **MCP removal amendment (2026-07-22):** MCP-related examples below are
-> historical and superseded by
-> [Remove Graith-Owned MCP Support](2026-07-22-mcp-removal.md).
-
 **Date:** 2026-06-10
 **Status:** Draft
 

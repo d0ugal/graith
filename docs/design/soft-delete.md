@@ -9,11 +9,6 @@ informed: (TBD)
 
 # Soft Delete with Recovery Window
 
-> **MCP removal amendment (2026-07-22):** MCP list-path references below are
-> historical and superseded by
-> [Remove Graith-Owned MCP Support](2026-07-22-mcp-removal.md). CLI and daemon
-> soft-delete behavior remains current.
-
 ## Background
 
 `gr delete` (alias `gr rm`) is destructive and immediate. Today the CLI sends a

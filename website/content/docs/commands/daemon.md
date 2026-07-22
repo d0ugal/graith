@@ -48,14 +48,19 @@ state schema is rejected as a downgrade, while manifest and adoption protocol
 versions must still match exactly. Compatibility errors report the bounded
 numeric target and running versions for each mismatched boundary.
 
-When upgrading from a release with Graith-owned MCP support, first remove
-`[[mcp_servers]]`, `[agents.<name>.mcp_servers.*]`, and
-`limits.mcp_log_read_bytes` from `config.toml`; the new daemon rejects these
-obsolete lifecycle and security keys instead of silently ignoring them. The old
-daemon drains its managed MCP children, sockets, stderr pipes, and reconnect
+When upgrading from a release with Graith-owned external-tool management,
+remove the obsolete lifecycle and security keys identified by the new config
+validation error. The daemon rejects them instead of silently ignoring them.
+The old daemon drains its managed children, sockets, stderr pipes, and reconnect
 loops before exec. A live PTY can still be adopted, but any proxy injected into
 that already-running agent is permanently unavailable. Restart or resume the
-session to relaunch it without Graith-generated MCP arguments or files.
+session to relaunch it without Graith-generated integration arguments or files.
+
+Before migrating older durable state, the replacement writes an exact versioned
+backup beside `state.json`. If permissions, disk capacity, or another storage
+failure prevents that backup, startup and exec adoption stop before migration or
+session handoff and leave the old state bytes unchanged. Fix the reported storage
+problem and retry; do not remove the old state file to bypass this safeguard.
 
 Live adoption requires persisted state and the handoff manifest to prove the
 exact process identity; the manifest records every live process, not just
