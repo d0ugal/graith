@@ -874,7 +874,11 @@ func SortSessions(sessions []protocol.SessionInfo) {
 			return ri
 		}
 
-		return si.Name < sj.Name
+		if si.Name != sj.Name {
+			return si.Name < sj.Name
+		}
+
+		return si.ID < sj.ID
 	})
 }
 
@@ -982,13 +986,27 @@ func buildTreeItems(sessions []protocol.SessionInfo, collapsed map[string]bool) 
 		}
 
 		visited[s.ID] = true
-		kids := children[s.ID]
+
+		var kids []protocol.SessionInfo
+
+		for _, kid := range children[s.ID] {
+			if !visited[kid.ID] {
+				kids = append(kids, kid)
+			}
+		}
+
 		hasKids := len(kids) > 0
 		isCollapsed := collapsed[s.ID] && hasKids
 
 		desc := 0
+
 		if hasKids {
-			desc = countDescendants(s.ID, map[string]bool{s.ID: true})
+			seen := make(map[string]bool, len(visited))
+			for id := range visited {
+				seen[id] = true
+			}
+
+			desc = countDescendants(s.ID, seen)
 		}
 
 		items = append(items, sessionItem{
@@ -1499,6 +1517,7 @@ func (m *overlayModel) selectSessionByIDAndLabel(id, label string) {
 	cur := parentOf[id]
 	for cur != "" && !seen[cur] {
 		seen[cur] = true
+
 		if label != "" {
 			for i, item := range m.list.Items() {
 				if si, ok := item.(sessionItem); ok && si.info.ID == cur && sessionlabel.Equal(si.labelGroup, label) {
@@ -1528,7 +1547,10 @@ func (m *overlayModel) parentsWithChildren() []string {
 
 	var parents []string
 
-	for _, item := range m.list.Items() {
+	// Build the current view without applying collapse state so nested parents
+	// hidden behind a folded ancestor remain part of the fold-all target set.
+	items := buildViewItems(m.view, m.visibleSessions(), nil)
+	for _, item := range items {
 		if item, ok := item.(sessionItem); ok && item.hasChildren && !seen[item.info.ID] {
 			seen[item.info.ID] = true
 			parents = append(parents, item.info.ID)
@@ -2057,6 +2079,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if item, ok := m.list.SelectedItem().(sessionItem); ok && item.hasChildren {
 					sid := item.info.ID
 					label := item.labelGroup
+
 					if m.collapsed[sid] {
 						delete(m.collapsed, sid)
 					} else {
