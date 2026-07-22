@@ -265,12 +265,17 @@ add_dir_args   = ["--add-dir", "{dir}"]
 ```
 
 When lifecycle hooks are enabled, graith publishes `.cursor/hooks.json` in the
-worktree and records an ownership marker in its per-session data. An existing
-file graith doesn't own fails the session launch rather than being
-overwritten; move it aside before retrying. Cleanup removes only the
-unchanged file object graith published, so a file you edit or replace is
-preserved. This protection applies equally to ordinary and `--in-place`
-sessions.
+worktree and records an ownership marker in its per-session data. Concurrent
+sessions that intentionally share a worktree also share this file when their
+generated hook definitions are identical. The file remains until the last
+owning session is deleted. A session that requires a different definition
+fails before launch while another owner remains.
+
+An existing file graith doesn't own fails the session launch rather than being
+overwritten; move it aside before retrying. Cleanup removes only the unchanged
+file object graith published, so a file you edit or replace is preserved. This
+protection applies equally to ordinary and `--in-place` sessions and survives a
+daemon restart.
 
 ### Agy
 

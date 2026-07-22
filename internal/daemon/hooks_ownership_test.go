@@ -2,10 +2,13 @@ package daemon
 
 import (
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/d0ugal/graith/internal/config"
 )
 
 func testCursorHooksPath(worktree string) string {
@@ -261,10 +264,381 @@ func TestCursorHooksSuccessfulRepublication(t *testing.T) {
 			}
 
 			marker := readCursorHooks(t, sm.cursorHooksOwnershipPath(sessionID))
-			if string(marker) != sha256Hex(after) {
-				t.Fatalf("ownership marker = %q, want hash of republished file", marker)
+
+			ownership, err := decodeCursorHooksOwnership(marker, "")
+			if err != nil {
+				t.Fatalf("decode ownership marker: %v", err)
+			}
+
+			if ownership.SHA256 != sha256Hex(after) {
+				t.Fatalf("ownership hash = %q, want hash of republished file", ownership.SHA256)
+			}
+
+			if ownership.WorktreePath != canonicalCursorHooksWorktree(worktree) {
+				t.Fatalf("ownership worktree = %q, want %q", ownership.WorktreePath, worktree)
 			}
 		})
+	}
+}
+
+func TestInjectCursorHooksSharesIdenticalDefinition(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sm := newTestSessionManagerWithDataDir(t)
+	worktree := t.TempDir()
+
+	for _, id := range []string{"braw-owner", "canny-owner"} {
+		sm.state.Sessions[id] = &SessionState{
+			ID: id, Agent: "cursor", WorktreePath: worktree, Status: StatusCreating,
+		}
+	}
+
+	if _, _, err := sm.injectCursorHooks("braw-owner", worktree, true, false); err != nil {
+		t.Fatalf("inject first owner: %v", err)
+	}
+
+	want := readCursorHooks(t, testCursorHooksPath(worktree))
+	if _, _, err := sm.injectCursorHooks("canny-owner", worktree, true, false); err != nil {
+		t.Fatalf("inject second owner: %v", err)
+	}
+
+	if got := readCursorHooks(t, testCursorHooksPath(worktree)); string(got) != string(want) {
+		t.Fatalf("shared hooks changed: got %q, want %q", got, want)
+	}
+
+	for _, id := range []string{"braw-owner", "canny-owner"} {
+		marker := readCursorHooks(t, sm.cursorHooksOwnershipPath(id))
+
+		ownership, err := decodeCursorHooksOwnership(marker, "")
+		if err != nil {
+			t.Fatalf("decode %s ownership: %v", id, err)
+		}
+
+		if ownership.SHA256 != sha256Hex(want) {
+			t.Errorf("%s ownership hash = %q, want %q", id, ownership.SHA256, sha256Hex(want))
+		}
+	}
+}
+
+func TestInjectCursorHooksRejectsIncompatibleSharedDefinition(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sm := newTestSessionManagerWithDataDir(t)
+	worktree := t.TempDir()
+
+	for _, id := range []string{"braw-owner", "dreich-owner"} {
+		sm.state.Sessions[id] = &SessionState{
+			ID: id, Agent: "cursor", WorktreePath: worktree, Status: StatusCreating,
+		}
+	}
+
+	if _, _, err := sm.injectCursorHooks("braw-owner", worktree, true, false); err != nil {
+		t.Fatalf("inject first owner: %v", err)
+	}
+
+	want := readCursorHooks(t, testCursorHooksPath(worktree))
+
+	_, _, err := sm.injectCursorHooks("dreich-owner", worktree, true, true)
+	if err == nil || !strings.Contains(err.Error(), "shared by session(s) braw-owner") || !strings.Contains(err.Error(), "different hook definition") {
+		t.Fatalf("incompatible injection error = %v, want shared-definition refusal", err)
+	}
+
+	if got := readCursorHooks(t, testCursorHooksPath(worktree)); string(got) != string(want) {
+		t.Fatalf("incompatible injection changed hooks: got %q, want %q", got, want)
+	}
+
+	if _, err := os.Stat(sm.cursorHooksOwnershipPath("dreich-owner")); !os.IsNotExist(err) {
+		t.Fatalf("incompatible injection left ownership marker: %v", err)
+	}
+}
+
+func TestInjectCursorHooksRecoversStaleStructuredOwner(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sm := newTestSessionManagerWithDataDir(t)
+	worktree := t.TempDir()
+
+	if _, _, err := sm.injectCursorHooks("stale-owner", worktree, true, false); err != nil {
+		t.Fatalf("inject stale owner: %v", err)
+	}
+
+	// The direct injection has no matching persisted session, modelling a crash
+	// after state removal but before hook cleanup.
+	if _, _, err := sm.injectCursorHooks("bairn-owner", worktree, true, false); err != nil {
+		t.Fatalf("recover stale ownership: %v", err)
+	}
+
+	if _, err := os.Stat(sm.cursorHooksOwnershipPath("stale-owner")); !os.IsNotExist(err) {
+		t.Fatalf("stale ownership marker still exists: %v", err)
+	}
+
+	sm.cleanupHooks("bairn-owner", "cursor", worktree)
+
+	if _, err := os.Stat(testCursorHooksPath(worktree)); !os.IsNotExist(err) {
+		t.Fatalf("last recovered owner did not remove hooks: %v", err)
+	}
+}
+
+func TestSharedCursorHooksCleanupPreservesUserModification(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sm := newTestSessionManagerWithDataDir(t)
+	worktree := t.TempDir()
+
+	for _, id := range []string{"braw-owner", "canny-owner"} {
+		sm.state.Sessions[id] = &SessionState{
+			ID: id, Agent: "cursor", WorktreePath: worktree, Status: StatusRunning,
+		}
+
+		if _, _, err := sm.injectCursorHooks(id, worktree, true, false); err != nil {
+			t.Fatalf("inject %s: %v", id, err)
+		}
+	}
+
+	userContent := []byte(`{"version":1,"hooks":{"stop":[{"command":"blether shared user edit"}]}}`)
+	replaceCursorHooks(t, testCursorHooksPath(worktree), userContent)
+
+	delete(sm.state.Sessions, "braw-owner")
+	sm.cleanupHooks("braw-owner", "cursor", worktree)
+	delete(sm.state.Sessions, "canny-owner")
+	sm.cleanupHooks("canny-owner", "cursor", worktree)
+
+	if got := readCursorHooks(t, testCursorHooksPath(worktree)); string(got) != string(userContent) {
+		t.Fatalf("shared cleanup changed user modification: got %q", got)
+	}
+}
+
+func TestInjectCursorHooksReadsLegacyOwnershipMarker(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sm := newTestSessionManagerWithDataDir(t)
+	worktree := t.TempDir()
+	sessionID := "legacy-owner"
+
+	if _, _, err := sm.injectCursorHooks(sessionID, worktree, true, false); err != nil {
+		t.Fatalf("inject owner: %v", err)
+	}
+
+	hooks := readCursorHooks(t, testCursorHooksPath(worktree))
+	if err := os.WriteFile(sm.cursorHooksOwnershipPath(sessionID), []byte(sha256Hex(hooks)), 0o600); err != nil {
+		t.Fatalf("write legacy marker: %v", err)
+	}
+
+	if _, _, err := sm.injectCursorHooks(sessionID, worktree, true, false); err != nil {
+		t.Fatalf("reinject with legacy marker: %v", err)
+	}
+
+	marker := readCursorHooks(t, sm.cursorHooksOwnershipPath(sessionID))
+	if !strings.HasPrefix(string(marker), "{\"") {
+		t.Fatalf("legacy marker was not upgraded: %q", marker)
+	}
+}
+
+func TestInjectCursorHooksRefusesByteIdenticalUnownedFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sm := newTestSessionManagerWithDataDir(t)
+	generatedWorktree := t.TempDir()
+
+	if _, _, err := sm.injectCursorHooks("source-owner", generatedWorktree, true, false); err != nil {
+		t.Fatalf("generate hooks fixture: %v", err)
+	}
+
+	generated := readCursorHooks(t, testCursorHooksPath(generatedWorktree))
+	userWorktree := t.TempDir()
+
+	userHooksPath := testCursorHooksPath(userWorktree)
+	if err := os.MkdirAll(filepath.Dir(userHooksPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(userHooksPath, generated, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := sm.injectCursorHooks("unowned-bothy", userWorktree, true, false); err == nil || !strings.Contains(err.Error(), "not owned by graith") {
+		t.Fatalf("byte-identical unowned injection error = %v, want refusal", err)
+	}
+
+	sm.cleanupHooks("unowned-bothy", "cursor", userWorktree)
+
+	if got := readCursorHooks(t, userHooksPath); string(got) != string(generated) {
+		t.Fatalf("byte-identical user hooks changed: got %q", got)
+	}
+}
+
+func cursorHooksLifecyclePaths(dataDir string) config.Paths {
+	return config.Paths{
+		StateFile:  filepath.Join(dataDir, "state.json"),
+		DataDir:    dataDir,
+		LogDir:     dataDir,
+		RuntimeDir: dataDir,
+		TmpDir:     filepath.Join(dataDir, "tmp"),
+	}
+}
+
+func newCursorHooksLifecycleManager(t *testing.T, repoDir, dataDir, command string) *SessionManager {
+	t.Helper()
+
+	disabled := false
+	cfg := config.Default()
+	cfg.FetchOnCreate = false
+	cfg.AgentPrompt = ""
+	cfg.Agents["cursor"] = config.Agent{
+		Command: command, Args: []string{"-c", "exec cat"}, ResumeArgs: []string{"-c", "exec cat"},
+		NonInteractiveArgs: []string{}, InjectPrompt: &disabled, PreTrustWorkspace: &disabled,
+	}
+	cfg.Repos = []config.RepoConfig{{Path: repoDir, AllowConcurrent: true}}
+
+	sm := NewSessionManager(cfg, cursorHooksLifecyclePaths(dataDir), slog.Default())
+	sm.sandboxResolver = func(string) (bool, error) { return false, nil }
+
+	return sm
+}
+
+func createConcurrentCursorSession(t *testing.T, sm *SessionManager, id, name, repoDir string) SessionState {
+	t.Helper()
+
+	created, err := sm.Create(CreateOpts{
+		ID: id, Name: name, AgentName: "cursor", RepoPath: repoDir,
+		InPlace: true, AllowConcurrent: true, AgentHooks: true,
+		SkipModelValidation: true, Rows: 24, Cols: 80,
+	})
+	if err != nil {
+		t.Fatalf("Create(%s): %v", name, err)
+	}
+
+	return created
+}
+
+func TestConcurrentCursorHooksCreateDeleteBothOrders(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		firstDelete int
+	}{
+		{name: "first owner then second", firstDelete: 0},
+		{name: "second owner then first", firstDelete: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			repoDir := initTempGitRepo(t)
+			sm := newCursorHooksLifecycleManager(t, repoDir, t.TempDir(), "sh")
+			sessions := []SessionState{
+				createConcurrentCursorSession(t, sm, "c0ffee01", "braw", repoDir),
+				createConcurrentCursorSession(t, sm, "c0ffee02", "canny", repoDir),
+			}
+
+			hooksPath := testCursorHooksPath(repoDir)
+			if _, err := os.Stat(hooksPath); err != nil {
+				t.Fatalf("shared hooks missing after create: %v", err)
+			}
+
+			first := sessions[tc.firstDelete]
+			last := sessions[1-tc.firstDelete]
+
+			if err := sm.Delete(first.ID); err != nil {
+				t.Fatalf("Delete(%s): %v", first.Name, err)
+			}
+
+			if _, err := os.Stat(hooksPath); err != nil {
+				t.Fatalf("first delete removed shared hooks: %v", err)
+			}
+
+			if err := sm.Delete(last.ID); err != nil {
+				t.Fatalf("Delete(%s): %v", last.Name, err)
+			}
+
+			if _, err := os.Stat(hooksPath); !os.IsNotExist(err) {
+				t.Fatalf("last delete left shared hooks: %v", err)
+			}
+		})
+	}
+}
+
+func TestConcurrentCursorHooksSurviveDaemonRestart(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := initTempGitRepo(t)
+	dataDir := t.TempDir()
+	sm := newCursorHooksLifecycleManager(t, repoDir, dataDir, "sh")
+	first := createConcurrentCursorSession(t, sm, "c0ffee03", "dreich", repoDir)
+
+	if err := sm.Stop(first.ID); err != nil {
+		t.Fatalf("Stop(first): %v", err)
+	}
+
+	waitForStatus(t, sm, first.ID, StatusStopped)
+
+	restarted := newCursorHooksLifecycleManager(t, repoDir, dataDir, "sh")
+	if err := restarted.LoadState(); err != nil {
+		t.Fatalf("LoadState after restart: %v", err)
+	}
+
+	second := createConcurrentCursorSession(t, restarted, "c0ffee04", "thrawn", repoDir)
+	if err := restarted.Stop(second.ID); err != nil {
+		t.Fatalf("Stop(second): %v", err)
+	}
+
+	waitForStatus(t, restarted, second.ID, StatusStopped)
+
+	// Restart again with both owner records persisted. Deletion after this point
+	// exercises refcount reconstruction without any in-memory ownership state.
+	restarted = newCursorHooksLifecycleManager(t, repoDir, dataDir, "sh")
+	if err := restarted.LoadState(); err != nil {
+		t.Fatalf("LoadState with two owners: %v", err)
+	}
+
+	hooksPath := testCursorHooksPath(repoDir)
+
+	if err := restarted.Delete(first.ID); err != nil {
+		t.Fatalf("Delete(first) after restart: %v", err)
+	}
+
+	if _, err := os.Stat(hooksPath); err != nil {
+		t.Fatalf("restart owner delete removed shared hooks: %v", err)
+	}
+
+	if err := restarted.Delete(second.ID); err != nil {
+		t.Fatalf("Delete(second) after restart: %v", err)
+	}
+
+	if _, err := os.Stat(hooksPath); !os.IsNotExist(err) {
+		t.Fatalf("last owner after restart left hooks: %v", err)
+	}
+}
+
+func TestConcurrentCursorHooksFailedLaunchReleasesOnlyJoiningOwner(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := initTempGitRepo(t)
+	sm := newCursorHooksLifecycleManager(t, repoDir, t.TempDir(), "sh")
+	first := createConcurrentCursorSession(t, sm, "c0ffee05", "croft", repoDir)
+
+	sm.mu.Lock()
+	broken := sm.cfg.Agents["cursor"]
+	broken.Command = filepath.Join(t.TempDir(), "missing-cursor")
+	sm.cfg.Agents["cursor"] = broken
+	sm.mu.Unlock()
+
+	_, err := sm.Create(CreateOpts{
+		ID: "c0ffee06", Name: "bothy", AgentName: "cursor", RepoPath: repoDir,
+		InPlace: true, AllowConcurrent: true, AgentHooks: true,
+		SkipModelValidation: true, Rows: 24, Cols: 80,
+	})
+	if err == nil || !strings.Contains(err.Error(), "start pty session") {
+		t.Fatalf("failed joining launch error = %v, want PTY start failure", err)
+	}
+
+	if _, err := os.Stat(testCursorHooksPath(repoDir)); err != nil {
+		t.Fatalf("failed joining launch removed first owner's hooks: %v", err)
+	}
+
+	if _, err := os.Stat(sm.cursorHooksOwnershipPath("c0ffee06")); !os.IsNotExist(err) {
+		t.Fatalf("failed joining launch left marker: %v", err)
+	}
+
+	if _, ok := sm.Get("c0ffee06"); ok {
+		t.Fatal("failed joining launch remained in session state")
+	}
+
+	if err := sm.Delete(first.ID); err != nil {
+		t.Fatalf("Delete(first): %v", err)
+	}
+
+	if _, err := os.Stat(testCursorHooksPath(repoDir)); !os.IsNotExist(err) {
+		t.Fatalf("last owner after failed launch left hooks: %v", err)
 	}
 }
 
