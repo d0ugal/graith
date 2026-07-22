@@ -239,17 +239,79 @@ jobs:
           test "$("${RUNNER_TEMP}/zig/zig" version)" = "$zig_version"
       - name: Build the exact Ghostty source pin
         env:
+          GOARCH: ${{ matrix.goarch }}
           GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}
           LIBRARY: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}.a
           PKG_CONFIG_PATH: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}/pkgconfig
           TARGET: ${{ matrix.target }}
-        run: scripts/libghostty-native.sh source-build "$TARGET" "$LIBRARY"
+        run: |
+          set -euo pipefail
+          evidence="${RUNNER_TEMP}/source-build-${GOARCH}.time"
+          uname -a
+          cat /etc/os-release
+          lscpu
+          free -b
+          go version
+          zig version
+          zig cc --version
+          zig ld.lld --version
+          cc --version
+          ld --version
+          ldd --version
+          if ! /usr/bin/time -v -o "$evidence" \
+            scripts/libghostty-native.sh source-build "$TARGET" "$LIBRARY"; then
+            cat "$evidence"
+            exit 1
+          fi
+          cat "$evidence"
+          source_revision=""
+          expected_revision=""
+          if ! source_revision="$(git -C "$GRAITH_LIBGHOSTTY_WORK/ghostty" rev-parse HEAD)" ||
+            [[ -z "$source_revision" ]] ||
+            ! expected_revision="$(jq -er '.ghostty.commit' libghostty-native.lock.json)" ||
+            [[ -z "$expected_revision" || "$source_revision" != "$expected_revision" ]]; then
+            echo "Ghostty source revision evidence does not match the lock" >&2
+            exit 1
+          fi
+          echo "ghostty_revision=$source_revision"
+          sha256sum "$LIBRARY" libghostty-native.lock.json "${RUNNER_TEMP}/zig.tar.xz"
+          stat --printf='archive_size=%s archive_mode=%a archive_uid=%u\n' "$LIBRARY"
+          file "$LIBRARY"
+          zig ar t "$LIBRARY"
       - name: Prove fail-closed archive snapshot and publication
         env:
+          GOARCH: ${{ matrix.goarch }}
           GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/archive-policy-${{ matrix.goarch }}
-        run: scripts/libghostty-native.sh test-source-archive-policy
+        run: |
+          set -euo pipefail
+          evidence="${RUNNER_TEMP}/archive-policy-${GOARCH}.time"
+          if ! /usr/bin/time -v -o "$evidence" \
+            scripts/libghostty-native.sh test-source-archive-policy; then
+            cat "$evidence"
+            exit 1
+          fi
+          cat "$evidence"
+          output="$GRAITH_LIBGHOSTTY_WORK/source-archive-policy-test/output"
+          sha256sum \
+            "$output/regular-from-thin.a" \
+            "$output/regular-from-thin-second.a" \
+            "$output/regular-from-regular.a" \
+            "$output/regular-from-regular-second.a"
+          residue=""
+          if ! residue="$(find "$GRAITH_LIBGHOSTTY_WORK" \
+            \( -name 'regular-archive.*' -o -name 'source-archive.*' -o \
+            -name '.zig-archive-snapshot.*' -o -name '.libghostty-pkgconfig.*' -o \
+            -name '.libghostty-archive.*' \) -print -quit)"; then
+            echo "could not inspect archive-policy residue" >&2
+            exit 1
+          fi
+          if [ -n "$residue" ]; then
+            echo "archive-policy residue survived: $residue" >&2
+            exit 1
+          fi
+          echo "archive_policy_residue=none"
       - name: Verify committed headers match the source pin
         env:
           SOURCE: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}/ghostty/include/ghostty
@@ -259,47 +321,152 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}
+          LIBRARY: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}.a
           PKG_CONFIG_PATH: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}/pkgconfig
           RUN_TESTS: ${{ matrix.run_tests }}
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
+          run_timed() {
+            if [[ "$#" -lt 2 || ! "$1" =~ ^[a-z0-9-]+$ ]]; then
+              echo "run_timed requires a safe label and command" >&2
+              return 2
+            fi
+            local label="$1"
+            shift
+            local evidence="${RUNNER_TEMP}/${label}-${GOARCH}.time"
+            if ! /usr/bin/time -v -o "$evidence" "$@"; then
+              cat "$evidence" || true
+              return 1
+            fi
+            cat "$evidence"
+          }
           if [ "$RUN_TESTS" = "true" ]; then
-            scripts/libghostty-native.sh source-test "$TARGET"
-            go test -count=1 go.mitchellh.com/libghostty
-            go test -count=1 -tags=libghostty ./internal/pty
-            go test -count=1 -tags=libghostty ./internal/daemon \
+            run_timed source-test scripts/libghostty-native.sh source-test "$TARGET"
+            run_timed wrapper go test -count=1 go.mitchellh.com/libghostty
+            run_timed pty go test -count=1 -tags=libghostty ./internal/pty
+            run_timed daemon go test -count=1 -tags=libghostty ./internal/daemon \
               -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
-            go test -race -count=1 -tags=libghostty ./internal/pty \
+            run_timed pty-race go test -race -count=1 -tags=libghostty ./internal/pty \
               -run 'TestGhostty'
-            go test -race -count=1 -tags=libghostty,libghostty_compare ./internal/pty \
+            run_timed compatibility-race go test -race -count=1 \
+              -tags=libghostty,libghostty_compare ./internal/pty \
               -run '^TestTerminalBackendCompatibilityCorpus$'
-            go test -race -count=1 -tags=libghostty ./internal/daemon \
+            run_timed daemon-race go test -race -count=1 -tags=libghostty ./internal/daemon \
               -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
-            scripts/libghostty-native.sh daemon-test
+            run_timed daemon-lifecycle scripts/libghostty-native.sh daemon-test
             # Fixed budgets avoid the wall-clock deadline path affected by
             # golang/go#75804. Snapshot CI reached 494,054 executions; local
             # request/helper calibration reached 789,507-829,186 and 341-747.
-            go test -tags=libghostty ./internal/pty -run '^$' -parallel=4 \
+            run_timed fuzz-snapshot go test -tags=libghostty ./internal/pty \
+              -run '^$' -parallel=4 \
               -fuzz '^FuzzGhosttySnapshotDecoder$' -fuzztime=500000x
-            go test -tags=libghostty ./internal/pty -run '^$' -parallel=4 \
+            run_timed fuzz-request go test -tags=libghostty ./internal/pty \
+              -run '^$' -parallel=4 \
               -fuzz '^FuzzGhosttyRequestDecoder$' -fuzztime=830000x
-            go test -tags=libghostty ./internal/pty -run '^$' -parallel=4 \
+            run_timed fuzz-helper go test -tags=libghostty ./internal/pty \
+              -run '^$' -parallel=4 \
               -fuzz '^FuzzGhosttyHelperWrite$' -fuzztime=750x
           else
-            CGO_ENABLED=1 GOOS=linux CC="zig cc -target $TARGET" \
+            run_timed pty-cross env CGO_ENABLED=1 GOOS=linux \
+              CC="zig cc -target $TARGET" \
               go test -c -tags=libghostty -o "${RUNNER_TEMP}/pty-${GOARCH}.test" \
               ./internal/pty
-            CGO_ENABLED=1 GOOS=linux CC="zig cc -target $TARGET" \
+            run_timed daemon-cross env CGO_ENABLED=1 GOOS=linux \
+              CC="zig cc -target $TARGET" \
               go test -c -tags=libghostty -o "${RUNNER_TEMP}/daemon-${GOARCH}.test" \
               ./internal/daemon
           fi
-          mkdir -p "${RUNNER_TEMP}/native-binaries"
-          CGO_ENABLED=1 GOOS=linux CC="zig cc -target $TARGET" \
+          package_dir="${RUNNER_TEMP}/native-binaries"
+          binary="$package_dir/gr-linux-${GOARCH}"
+          mkdir -p "$package_dir"
+          run_timed binary-build env CGO_ENABLED=1 GOOS=linux \
+            CC="zig cc -target $TARGET" \
             go build -trimpath -tags=libghostty \
-              -o "${RUNNER_TEMP}/native-binaries/gr-linux-${GOARCH}" ./cmd/graith
+              -o "$binary" ./cmd/graith
           cp THIRD_PARTY_NOTICES.libghostty.md libghostty-native.spdx.json \
-            "${RUNNER_TEMP}/native-binaries/"
+            "$package_dir/"
+
+          build_info=""
+          if ! build_info="$(go version -m "$binary")" || [[ -z "$build_info" ]]; then
+            echo "could not read the tagged binary build metadata" >&2
+            exit 1
+          fi
+          printf '%s\n' "$build_info"
+          if grep -Fq $'\tdep\tgithub.com/charmbracelet/x/vt\t' <<<"$build_info"; then
+            echo "tagged Linux binary contains the Charm rollback dependency" >&2
+            exit 1
+          fi
+          sha256sum "$binary" "$LIBRARY" \
+            "$package_dir/THIRD_PARTY_NOTICES.libghostty.md" \
+            "$package_dir/libghostty-native.spdx.json"
+          stat --printf='binary_size=%s binary_mode=%a binary_uid=%u\n' "$binary"
+          file "$binary"
+          readelf -h "$binary"
+          readelf -d "$binary"
+          if readelf -d "$binary" | \
+            grep -Ei 'NEEDED.*(ghostty|simdutf|highway)' >/dev/null; then
+            echo "tagged Linux binary has an unexpected native shared dependency" >&2
+            exit 1
+          fi
+          if ! nm -g --defined-only "$binary" | \
+            grep -E '[[:space:]]ghostty_terminal_new$' >/dev/null; then
+            echo "tagged Linux binary does not define ghostty_terminal_new" >&2
+            exit 1
+          fi
+
+          package_files=""
+          expected_package_files=""
+          if ! package_files="$(find "$package_dir" -mindepth 1 -maxdepth 1 \
+            -type f -exec basename {} \; | LC_ALL=C sort)" ||
+            [[ -z "$package_files" ]] ||
+            ! expected_package_files="$(printf '%s\n' \
+              "gr-linux-${GOARCH}" THIRD_PARTY_NOTICES.libghostty.md \
+              libghostty-native.spdx.json | LC_ALL=C sort)" ||
+            [[ -z "$expected_package_files" || \
+              "$package_files" != "$expected_package_files" ]]; then
+            echo "Linux testing artifact contents are incomplete or unexpected" >&2
+            exit 1
+          fi
+          printf 'package_files=%s\n' "$package_files"
+          if grep -aEq '/home/runner|/Users/|/private/var/folders/|/runner/work/' \
+            "$binary" "$package_dir/THIRD_PARTY_NOTICES.libghostty.md" \
+            "$package_dir/libghostty-native.spdx.json"; then
+            echo "Linux testing artifact contains a local or CI path" >&2
+            exit 1
+          fi
+          echo "package_privacy_scan=pass"
+
+          if [ "$RUN_TESTS" = "true" ]; then
+            link_source="${RUNNER_TEMP}/libghostty-link.c"
+            link_binary="${RUNNER_TEMP}/libghostty-link"
+            if ! printf '%s\n' \
+              'extern void ghostty_terminal_new(void);' \
+              'int main(void) {' \
+              '    void (*volatile terminal_new)(void) = ghostty_terminal_new;' \
+              '    return terminal_new == 0;' \
+              '}' >"$link_source"; then
+              exit 1
+            fi
+            run_timed archive-link cc -o "$link_binary" "$link_source" \
+              "$LIBRARY"
+            run_timed archive-link-run "$link_binary"
+            run_timed binary-version "$binary" --json version
+            ldd "$binary"
+            scripts/libghostty-native.sh verify-dependency-unit
+            scripts/libghostty-native.sh verify-generated-dependency-unit
+            scripts/libghostty-native.sh verify-metadata \
+              "$GRAITH_LIBGHOSTTY_WORK/ghostty"
+            validator_dir="${RUNNER_TEMP}/spdx-validator"
+            spdx_jar=""
+            if ! spdx_jar="$(scripts/libghostty-native.sh \
+              install-spdx-validator "$validator_dir")" || [[ -z "$spdx_jar" ]]; then
+              echo "could not install the checksum-verified SPDX validator" >&2
+              exit 1
+            fi
+            scripts/libghostty-native.sh validate-spdx "$spdx_jar" \
+              "$package_dir/libghostty-native.spdx.json"
+          fi
       - name: Upload Linux testing binary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
