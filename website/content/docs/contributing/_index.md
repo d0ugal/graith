@@ -237,7 +237,9 @@ Recording must run **locally and unsandboxed** (VHS needs a real TTY, the daemon
 Packages live under `internal/`; no public Go API.
 
 The [package dependency graph]({{< relref "/docs/contributing/package-dependencies.md" >}})
-is generated from the current source tree during every documentation build.
+is generated from the current source tree and committed for review. Run
+`make package-graph` after changing packages or their import relationships;
+CI rejects stale graph data.
 
 ```
 cmd/graith/              Entry point (main.go)

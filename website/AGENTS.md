@@ -31,11 +31,13 @@ the generated region by hand.
 From the repository root, run:
 
 ```bash
+make package-graph-check
 make docs
 node --test website/tests/*.test.mjs
 ```
 
-This generates the ignored package-dependency data before invoking Hugo and
-removes it afterward. The Node test covers interactive documentation assets.
-Use `make docs-serve` for a local live preview. The extended Hugo version and
-Dart Sass used by CI are defined in `.github/workflows/docs.yml`.
+The package-dependency data is committed. `make docs` consumes it without
+modifying the worktree; use `make package-graph` only when the graph inputs
+change. The Node test covers interactive documentation assets. Use
+`make docs-serve` for a local live preview. The extended Hugo version and Dart
+Sass used by CI are defined in `.github/workflows/docs.yml`.

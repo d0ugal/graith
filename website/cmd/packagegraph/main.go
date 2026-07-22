@@ -1,6 +1,5 @@
-// Command packagegraph generates the Hugo data used by the contributing
-// package-dependencies page. The output is intentionally ephemeral: the docs
-// build recreates it from the Go packages in the commit being rendered.
+// Command packagegraph generates and verifies the committed Hugo data used by
+// the contributing package-dependencies page.
 package main
 
 import (
@@ -20,9 +19,12 @@ import (
 )
 
 const (
-	graphGOOS   = "linux"
-	graphGOARCH = "amd64"
+	graphGOOS              = "linux"
+	graphGOARCH            = "amd64"
+	regenerateGraphCommand = "make package-graph"
 )
+
+var errGraphStale = errors.New("package dependency graph is stale")
 
 type listedPackage struct {
 	ImportPath string
@@ -63,6 +65,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	flags.SetOutput(stderr)
 	repo := flags.String("repo", "..", "path to the graith repository root")
 	output := flags.String("output", "data/package_dependencies.json", "Hugo data file to write")
+	check := flags.Bool("check", false, "check that the output matches the current package graph")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -72,6 +75,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 	graph, err := inspectRepository(ctx, *repo)
 	if err != nil {
+		return err
+	}
+	if *check {
+		if err := checkGraph(*output, graph); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(stdout, "%s is up to date (%d packages, %d relationships)\n", *output, len(graph.Packages), len(graph.Relations))
 		return err
 	}
 	if err := writeGraph(*output, graph); err != nil {
@@ -214,11 +224,10 @@ func buildGraph(module, entry string, listed []listedPackage) (graphData, error)
 }
 
 func writeGraph(path string, graph graphData) error {
-	data, err := json.MarshalIndent(graph, "", "  ")
+	data, err := encodeGraph(graph)
 	if err != nil {
-		return fmt.Errorf("encode graph: %w", err)
+		return err
 	}
-	data = append(data, '\n')
 
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -231,6 +240,10 @@ func writeGraph(path string, graph graphData) error {
 	temporaryPath := temporary.Name()
 	defer os.Remove(temporaryPath)
 
+	if err := temporary.Chmod(0o644); err != nil {
+		temporary.Close()
+		return fmt.Errorf("set temporary output permissions: %w", err)
+	}
 	if _, err := temporary.Write(data); err != nil {
 		temporary.Close()
 		return fmt.Errorf("write temporary output: %w", err)
@@ -242,4 +255,34 @@ func writeGraph(path string, graph graphData) error {
 		return fmt.Errorf("replace output: %w", err)
 	}
 	return nil
+}
+
+func checkGraph(path string, graph graphData) error {
+	want, err := encodeGraph(graph)
+	if err != nil {
+		return err
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("read committed graph: %w", err)
+		}
+		return staleGraphError(path)
+	}
+	if !bytes.Equal(got, want) {
+		return staleGraphError(path)
+	}
+	return nil
+}
+
+func staleGraphError(path string) error {
+	return fmt.Errorf("%w: %s does not match the current source; run `%s` from the repository root and commit the result", errGraphStale, path, regenerateGraphCommand)
+}
+
+func encodeGraph(graph graphData) ([]byte, error) {
+	data, err := json.MarshalIndent(graph, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("encode graph: %w", err)
+	}
+	return append(data, '\n'), nil
 }

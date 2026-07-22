@@ -55,8 +55,7 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          # The generated graph inspects the root module; this toolchain also
-          # builds the website's nested Go module.
+          # Use the repository toolchain for the website's nested Go module.
           go-version-file: go.mod
 
       - name: Determine changed pages
@@ -150,14 +149,19 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           BASECOUNT: ${{ steps.changed.outputs.basecount }}
         run: |
-          (cd website && go test ./... && node --test tests/*.test.mjs && \
-            go run ./cmd/packagegraph -repo ..)
+          (cd website && go test ./... && node --test tests/*.test.mjs)
           hugo --gc --minify --baseURL "${BASE_URL}/" \
             --source website --destination "$PWD/site-head"
           if [ "$BASECOUNT" != "0" ]; then
             git worktree add --detach /tmp/base-tree "$BASE_SHA"
-            (cd website && go run ./cmd/packagegraph -repo /tmp/base-tree \
-              -output /tmp/base-tree/website/data/package_dependencies.json)
+            # Keep previews working when comparing this rollout with a base
+            # from before the generated data was committed. Newer bases always
+            # render their own checked-in artifact.
+            if [ ! -f /tmp/base-tree/website/data/package_dependencies.json ]; then
+              mkdir -p /tmp/base-tree/website/data
+              cp website/data/package_dependencies.json \
+                /tmp/base-tree/website/data/package_dependencies.json
+            fi
             hugo --gc --minify --baseURL "${BASE_URL}/" \
               --source /tmp/base-tree/website --destination "$PWD/site-base"
           fi

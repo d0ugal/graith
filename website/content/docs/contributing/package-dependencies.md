@@ -24,18 +24,23 @@ in the main [architecture overview]({{< relref "/docs/architecture.md" >}}).
 
 ## Generation
 
-The documentation build runs `go list` against `cmd/graith`, writes temporary
-Hugo data, and renders that data as Mermaid. The data file is ignored by Git and
-is recreated from the commit being built; there is no generated diagram to
-commit or keep in sync.
+The canonical Hugo data is committed at
+`website/data/package_dependencies.json` so package-structure changes have a
+reviewable diff. Regenerate it from the repository root whenever packages or
+their imports change:
 
-Build the documentation locally from the repository root:
+```bash
+make package-graph
+```
+
+CI runs `make package-graph-check` and rejects stale output without modifying
+the tracked file. Documentation builds consume the committed data as-is:
 
 ```bash
 make docs
 ```
 
-For a live preview that regenerates the graph once before starting Hugo:
+For a live preview:
 
 ```bash
 make docs-serve

@@ -1,0 +1,426 @@
+{
+  "module": "github.com/d0ugal/graith",
+  "entry": "cmd/graith",
+  "platform": "linux/amd64",
+  "packages": [
+    {
+      "id": "package_0",
+      "label": "cmd/graith",
+      "group": "entry"
+    },
+    {
+      "id": "package_1",
+      "label": "internal/agent",
+      "group": "internal"
+    },
+    {
+      "id": "package_2",
+      "label": "internal/agent/transcript",
+      "group": "internal"
+    },
+    {
+      "id": "package_3",
+      "label": "internal/atomicfile",
+      "group": "internal"
+    },
+    {
+      "id": "package_4",
+      "label": "internal/cli",
+      "group": "internal"
+    },
+    {
+      "id": "package_5",
+      "label": "internal/client",
+      "group": "internal"
+    },
+    {
+      "id": "package_6",
+      "label": "internal/commandpolicy",
+      "group": "internal"
+    },
+    {
+      "id": "package_7",
+      "label": "internal/commandpolicy/localmost",
+      "group": "internal"
+    },
+    {
+      "id": "package_8",
+      "label": "internal/config",
+      "group": "internal"
+    },
+    {
+      "id": "package_9",
+      "label": "internal/cronx",
+      "group": "internal"
+    },
+    {
+      "id": "package_10",
+      "label": "internal/daemon",
+      "group": "internal"
+    },
+    {
+      "id": "package_11",
+      "label": "internal/daemonservice",
+      "group": "internal"
+    },
+    {
+      "id": "package_12",
+      "label": "internal/detector",
+      "group": "internal"
+    },
+    {
+      "id": "package_13",
+      "label": "internal/executablepin",
+      "group": "internal"
+    },
+    {
+      "id": "package_14",
+      "label": "internal/git",
+      "group": "internal"
+    },
+    {
+      "id": "package_15",
+      "label": "internal/headless",
+      "group": "internal"
+    },
+    {
+      "id": "package_16",
+      "label": "internal/hookoutput",
+      "group": "internal"
+    },
+    {
+      "id": "package_17",
+      "label": "internal/ignore",
+      "group": "internal"
+    },
+    {
+      "id": "package_18",
+      "label": "internal/mcp",
+      "group": "internal"
+    },
+    {
+      "id": "package_19",
+      "label": "internal/output",
+      "group": "internal"
+    },
+    {
+      "id": "package_20",
+      "label": "internal/processidentity",
+      "group": "internal"
+    },
+    {
+      "id": "package_21",
+      "label": "internal/protocol",
+      "group": "internal"
+    },
+    {
+      "id": "package_22",
+      "label": "internal/pty",
+      "group": "internal"
+    },
+    {
+      "id": "package_23",
+      "label": "internal/sandbox",
+      "group": "internal"
+    },
+    {
+      "id": "package_24",
+      "label": "internal/scenariofile",
+      "group": "internal"
+    },
+    {
+      "id": "package_25",
+      "label": "internal/sessionlabel",
+      "group": "internal"
+    },
+    {
+      "id": "package_26",
+      "label": "internal/store",
+      "group": "internal"
+    },
+    {
+      "id": "package_27",
+      "label": "internal/tools",
+      "group": "internal"
+    },
+    {
+      "id": "package_28",
+      "label": "internal/version",
+      "group": "internal"
+    }
+  ],
+  "relations": [
+    {
+      "from": "package_0",
+      "to": "package_4"
+    },
+    {
+      "from": "package_4",
+      "to": "package_1"
+    },
+    {
+      "from": "package_4",
+      "to": "package_2"
+    },
+    {
+      "from": "package_4",
+      "to": "package_5"
+    },
+    {
+      "from": "package_4",
+      "to": "package_7"
+    },
+    {
+      "from": "package_4",
+      "to": "package_8"
+    },
+    {
+      "from": "package_4",
+      "to": "package_10"
+    },
+    {
+      "from": "package_4",
+      "to": "package_11"
+    },
+    {
+      "from": "package_4",
+      "to": "package_14"
+    },
+    {
+      "from": "package_4",
+      "to": "package_16"
+    },
+    {
+      "from": "package_4",
+      "to": "package_18"
+    },
+    {
+      "from": "package_4",
+      "to": "package_19"
+    },
+    {
+      "from": "package_4",
+      "to": "package_20"
+    },
+    {
+      "from": "package_4",
+      "to": "package_21"
+    },
+    {
+      "from": "package_4",
+      "to": "package_23"
+    },
+    {
+      "from": "package_4",
+      "to": "package_24"
+    },
+    {
+      "from": "package_4",
+      "to": "package_25"
+    },
+    {
+      "from": "package_4",
+      "to": "package_26"
+    },
+    {
+      "from": "package_4",
+      "to": "package_27"
+    },
+    {
+      "from": "package_4",
+      "to": "package_28"
+    },
+    {
+      "from": "package_5",
+      "to": "package_1"
+    },
+    {
+      "from": "package_5",
+      "to": "package_8"
+    },
+    {
+      "from": "package_5",
+      "to": "package_11"
+    },
+    {
+      "from": "package_5",
+      "to": "package_20"
+    },
+    {
+      "from": "package_5",
+      "to": "package_21"
+    },
+    {
+      "from": "package_5",
+      "to": "package_22"
+    },
+    {
+      "from": "package_5",
+      "to": "package_25"
+    },
+    {
+      "from": "package_5",
+      "to": "package_28"
+    },
+    {
+      "from": "package_6",
+      "to": "package_7"
+    },
+    {
+      "from": "package_8",
+      "to": "package_7"
+    },
+    {
+      "from": "package_8",
+      "to": "package_9"
+    },
+    {
+      "from": "package_8",
+      "to": "package_27"
+    },
+    {
+      "from": "package_10",
+      "to": "package_2"
+    },
+    {
+      "from": "package_10",
+      "to": "package_3"
+    },
+    {
+      "from": "package_10",
+      "to": "package_6"
+    },
+    {
+      "from": "package_10",
+      "to": "package_8"
+    },
+    {
+      "from": "package_10",
+      "to": "package_9"
+    },
+    {
+      "from": "package_10",
+      "to": "package_11"
+    },
+    {
+      "from": "package_10",
+      "to": "package_12"
+    },
+    {
+      "from": "package_10",
+      "to": "package_13"
+    },
+    {
+      "from": "package_10",
+      "to": "package_14"
+    },
+    {
+      "from": "package_10",
+      "to": "package_15"
+    },
+    {
+      "from": "package_10",
+      "to": "package_17"
+    },
+    {
+      "from": "package_10",
+      "to": "package_20"
+    },
+    {
+      "from": "package_10",
+      "to": "package_21"
+    },
+    {
+      "from": "package_10",
+      "to": "package_22"
+    },
+    {
+      "from": "package_10",
+      "to": "package_23"
+    },
+    {
+      "from": "package_10",
+      "to": "package_24"
+    },
+    {
+      "from": "package_10",
+      "to": "package_25"
+    },
+    {
+      "from": "package_10",
+      "to": "package_26"
+    },
+    {
+      "from": "package_10",
+      "to": "package_27"
+    },
+    {
+      "from": "package_10",
+      "to": "package_28"
+    },
+    {
+      "from": "package_11",
+      "to": "package_1"
+    },
+    {
+      "from": "package_11",
+      "to": "package_8"
+    },
+    {
+      "from": "package_11",
+      "to": "package_22"
+    },
+    {
+      "from": "package_14",
+      "to": "package_27"
+    },
+    {
+      "from": "package_15",
+      "to": "package_22"
+    },
+    {
+      "from": "package_18",
+      "to": "package_5"
+    },
+    {
+      "from": "package_18",
+      "to": "package_8"
+    },
+    {
+      "from": "package_18",
+      "to": "package_21"
+    },
+    {
+      "from": "package_18",
+      "to": "package_28"
+    },
+    {
+      "from": "package_20",
+      "to": "package_27"
+    },
+    {
+      "from": "package_21",
+      "to": "package_8"
+    },
+    {
+      "from": "package_23",
+      "to": "package_27"
+    },
+    {
+      "from": "package_24",
+      "to": "package_8"
+    },
+    {
+      "from": "package_24",
+      "to": "package_21"
+    },
+    {
+      "from": "package_26",
+      "to": "package_3"
+    },
+    {
+      "from": "package_26",
+      "to": "package_27"
+    }
+  ]
+}

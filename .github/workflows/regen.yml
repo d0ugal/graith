@@ -1,17 +1,18 @@
 # Auto-regenerate committed generated artifacts on a PR.
 #
-# Two files in this repo are mechanical outputs of `go test ... -update`:
+# Three files in this repo are mechanical generated outputs:
 #   - gui/shared/Tests/GraithProtocolTests/Fixtures/protocol_manifest.json
 #     (from internal/protocol/messages.go)
 #   - website/content/docs/capabilities.md                   (from capabilities.json)
+#   - website/data/package_dependencies.json                 (from Go package imports)
 # Native dependency PRs additionally project `libghostty-native.lock.json` into
 # the Go module, headers, Apple artifact pin, SPDX inventory, and notices.
 #
-# `TestManifestUpToDate` / `TestDocMatchesManifest` in the normal Test job already
-# FAIL when either is stale — that gate stays the source of truth. This workflow is
-# a convenience layer on top: when a PR changes the inputs but forgets the `-update`
-# step, it regenerates the outputs and commits them back to the PR branch, so a
-# contributor never has to re-run the command by hand.
+# `TestManifestUpToDate`, `TestDocMatchesManifest`, and `make package-graph-check`
+# in the normal Test job already FAIL when their outputs are stale — those gates
+# stay the source of truth. This workflow is a convenience layer on top: when a
+# PR changes inputs but forgets an update command, it regenerates the outputs and
+# commits them back to the PR branch.
 #
 # Notes:
 #   - The hand-authored inputs are NOT touched here. A newly added wire struct that
@@ -64,6 +65,7 @@ jobs:
         run: |
           go test ./internal/protocol -run TestManifestUpToDate -update
           go test ./internal/capabilities -run TestDocMatchesManifest -update
+          make package-graph
 
       - name: Detect a native dependency lock update
         id: native-lock
@@ -93,6 +95,7 @@ jobs:
         run: |
           go test ./internal/protocol -run TestManifestUpToDate
           go test ./internal/capabilities -run 'TestDocMatchesManifest|TestManifestLoads'
+          make package-graph-check
           if [ "${{ steps.native-lock.outputs.changed }}" = "true" ]; then
             scripts/libghostty-native.sh verify-generated-dependency-unit
           else
@@ -114,6 +117,7 @@ jobs:
           git add -A -- \
             gui/shared/Tests/GraithProtocolTests/Fixtures/protocol_manifest.json \
             website/content/docs/capabilities.md \
+            website/data/package_dependencies.json \
             go.mod go.sum gui/shared/Package.swift \
             gui/shared/Sources/CGhosttyVT/include \
             libghostty-native.lock.json libghostty-native.spdx.json \

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -45,6 +46,42 @@ func TestBuildGraph(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("graph mismatch\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestBuildGraphDeterministic(t *testing.T) {
+	first, err := buildGraph("example.com/braw", "example.com/braw/cmd/croft", []listedPackage{
+		{ImportPath: "example.com/braw/internal/strath"},
+		{
+			ImportPath: "example.com/braw/cmd/croft",
+			Imports:    []string{"example.com/braw/internal/strath", "example.com/braw/internal/bothy"},
+		},
+		{ImportPath: "example.com/braw/internal/bothy"},
+	})
+	if err != nil {
+		t.Fatalf("build first graph: %v", err)
+	}
+	second, err := buildGraph("example.com/braw", "example.com/braw/cmd/croft", []listedPackage{
+		{ImportPath: "example.com/braw/internal/bothy"},
+		{
+			ImportPath: "example.com/braw/cmd/croft",
+			Imports:    []string{"example.com/braw/internal/bothy", "example.com/braw/internal/strath"},
+		},
+		{ImportPath: "example.com/braw/internal/strath"},
+	})
+	if err != nil {
+		t.Fatalf("build second graph: %v", err)
+	}
+	firstJSON, err := encodeGraph(first)
+	if err != nil {
+		t.Fatalf("encode first graph: %v", err)
+	}
+	secondJSON, err := encodeGraph(second)
+	if err != nil {
+		t.Fatalf("encode second graph: %v", err)
+	}
+	if !bytes.Equal(firstJSON, secondJSON) {
+		t.Fatalf("graph output changed with input ordering\nfirst:\n%s\nsecond:\n%s", firstJSON, secondJSON)
 	}
 }
 
@@ -108,6 +145,48 @@ func TestWriteGraph(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("graph = %#v, want %#v", got, want)
 	}
+}
+
+func TestCheckGraph(t *testing.T) {
+	graph := graphData{
+		Module:   "example.com/braw",
+		Entry:    "cmd/croft",
+		Platform: "linux/amd64",
+		Packages: []graphNode{{ID: "package_0", Label: "cmd/croft", Group: "entry"}},
+	}
+
+	t.Run("current", func(t *testing.T) {
+		output := filepath.Join(t.TempDir(), "package_dependencies.json")
+		if err := writeGraph(output, graph); err != nil {
+			t.Fatalf("writeGraph: %v", err)
+		}
+		if err := checkGraph(output, graph); err != nil {
+			t.Fatalf("checkGraph: %v", err)
+		}
+	})
+
+	t.Run("stale", func(t *testing.T) {
+		output := filepath.Join(t.TempDir(), "package_dependencies.json")
+		stale := []byte("{\"module\":\"example.com/dreich\"}\n")
+		if err := os.WriteFile(output, stale, 0o644); err != nil {
+			t.Fatalf("write stale fixture: %v", err)
+		}
+
+		err := checkGraph(output, graph)
+		if !errors.Is(err, errGraphStale) {
+			t.Fatalf("error = %v, want errGraphStale", err)
+		}
+		if !strings.Contains(err.Error(), regenerateGraphCommand) {
+			t.Fatalf("error = %q, want regeneration command", err)
+		}
+		got, readErr := os.ReadFile(output)
+		if readErr != nil {
+			t.Fatalf("read stale fixture: %v", readErr)
+		}
+		if !bytes.Equal(got, stale) {
+			t.Fatalf("stale check modified output\n got: %q\nwant: %q", got, stale)
+		}
+	})
 }
 
 func TestRunRejectsUnexpectedArguments(t *testing.T) {
