@@ -91,7 +91,10 @@ func TestCommandPolicyRemovalUpgradeFromExactBaseline(t *testing.T) {
 
 	configPath := filepath.Join(configDir, "config.toml")
 	argsPath := filepath.Join(root, "agent-args")
-	agentScript := filepath.Join(root, "agent.sh")
+	// The exact baseline deliberately refuses command-policy enforcement for an
+	// executable whose basename is not the supported agent name. Give the
+	// fixture its real CLI basename while keeping the implementation test-owned.
+	agentScript := filepath.Join(root, "claude")
 	if err := os.WriteFile(agentScript, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$GRAITH_FIXTURE_ARGS\"\nprintf 'braw-ready\\n'\nexec sleep 600\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -310,13 +313,13 @@ fetch_on_create = false
 enabled = false
 
 [agents.claude]
-command = "/bin/sh"
-args = [%q]
-resume_args = [%q]
+command = %q
+args = []
+resume_args = []
 non_interactive_args = []
 inject_prompt = false
 prompt_injection = "none"
-`, dataDir, agentScript, agentScript)
+`, dataDir, agentScript)
 	if policy {
 		contents += `
 [command_policy]
