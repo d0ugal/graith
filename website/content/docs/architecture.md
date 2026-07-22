@@ -68,7 +68,6 @@ The client sends a message type; the daemon responds with a matching response ty
 | `msg_topics` | List message topics |
 | `set_status` | Set session status summary |
 | `status_report` | Report agent hook status |
-| `command_policy_check` | Synchronously evaluate an optional shell command restriction |
 | `reload` | Reload config |
 | `diagnostics` | Request diagnostics |
 | `screen_preview` | Request screen preview |
@@ -86,7 +85,6 @@ The client sends a message type; the daemon responds with a matching response ty
 | `msg_message` | Message data |
 | `msg_done` | Message streaming complete |
 | `msg_following` | Following mode active |
-| `command_policy_decision` | Immediate allow/deny command-policy result |
 | `status_set` | Status set confirmation |
 | `screen_preview_response` | Screen preview data |
 | `screen_snapshot_response` | Full screen snapshot |
@@ -103,7 +101,6 @@ The daemon (`SessionManager`) is the central component:
 - **Worktree management:** git worktrees and branches
 - **Client handling:** connection acceptance, frame demuxing, message dispatch
 - **Hook reporting:** agent status from hook reports
-- **Command policy:** bounded synchronous shell checks that can only deny before agent execution
 - **Git pull:** periodic background pulls (when enabled)
 - **Idle timeout:** auto-stop after inactivity
 

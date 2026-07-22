@@ -29,7 +29,7 @@ With a valid token, the daemon enforces:
 | Rule | Message types | Effect |
 |------|--------------|--------|
 | Always allowed | `handshake`, `list`, `diagnostics`, `config`, `detach`, `resize` | No restriction |
-| Self only | `set_status`, `status_report`, `command_policy_check` | Agent can only target its own session |
+| Self only | `set_status`, `status_report` | Agent can only target its own session |
 | Self or descendant | `fork`, `attach`, `stop`, `delete`, `type`, `resume`, `restart`, `update`, `logs`, `screen_preview`, `screen_snapshot`, `status` | Agent can target itself or any session it created (including transitive children) |
 | Human only | `reload`, `upgrade` | Rejected when a token is present; reserved for human operators |
 

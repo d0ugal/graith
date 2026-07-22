@@ -201,4 +201,3 @@ Used by graith internally, not intended for direct use:
 |---------|---------|
 | `gr report-status` | Report agent status (used by hooks) |
 | `gr check-inbox` | Check unread inbox messages (used by hooks) |
-| `gr command-policy-check` | Perform a bounded synchronous shell-policy check |
