@@ -72,6 +72,24 @@ func waitForConvertFakeOutput(t *testing.T, driver *headless.Session, want strin
 	}
 }
 
+type recordingConvertDriver struct {
+	*headless.Session
+	killCalls      int
+	forceKillCalls int
+}
+
+func (d *recordingConvertDriver) Kill() error {
+	d.killCalls++
+
+	return d.Session.Kill()
+}
+
+func (d *recordingConvertDriver) ForceKill() error {
+	d.forceKillCalls++
+
+	return d.Session.ForceKill()
+}
+
 func TestConvertToInteractiveNotFound(t *testing.T) {
 	t.Parallel()
 
@@ -174,8 +192,7 @@ func TestConvertGuardSaveFailureRollsBack(t *testing.T) {
 
 // TestStopDriverForConvertSettlesOnInterrupt: a process that exits on SIGINT is
 // stopped by the first (gentlest) step. It must return well before the settle
-// timeout would fire, proving it settled on the interrupt rather than escalating
-// to SIGTERM/SIGKILL.
+// timeout would fire without calling the SIGTERM/SIGKILL escalation methods.
 func TestStopDriverForConvertSettlesOnInterrupt(t *testing.T) {
 	const settle = 5 * time.Second
 	const ready = "canny-signal-ready"
@@ -185,8 +202,8 @@ func TestStopDriverForConvertSettlesOnInterrupt(t *testing.T) {
 
 	// The foreground child installs its own trap, emits readiness, and then
 	// blocks in a shell builtin. No later child spawn can miss the group signal.
-	driver := startConvertFake(t, sm, "bonnie", `trap 'exit 0' INT; sh -c 'trap "exit 0" INT; printf "canny-signal-ready\n"; IFS= read -r _'`)
-	waitForConvertFakeOutput(t, driver, ready)
+	driver := &recordingConvertDriver{Session: startConvertFake(t, sm, "bonnie", `trap 'exit 0' INT; sh -c 'trap "exit 0" INT; printf "canny-signal-ready\n"; IFS= read -r _'`)}
+	waitForConvertFakeOutput(t, driver.Session, ready)
 
 	start := time.Now()
 	done := make(chan struct{})
@@ -204,6 +221,10 @@ func TestStopDriverForConvertSettlesOnInterrupt(t *testing.T) {
 
 	if elapsed := time.Since(start); elapsed >= settle {
 		t.Fatalf("settled after %v (>= settle timeout %v): it escalated instead of settling", elapsed, settle)
+	}
+
+	if driver.killCalls != 0 || driver.forceKillCalls != 0 {
+		t.Fatalf("escalation calls: Kill=%d, ForceKill=%d; want both zero", driver.killCalls, driver.forceKillCalls)
 	}
 
 	if !driver.Exited() {
