@@ -285,7 +285,7 @@ func TestRequestUpgradeUsesExactPreflightBeforeMutation(t *testing.T) {
 		errCh <- serverWriter.WriteFrame(protocol.ChannelControl, ack)
 	}()
 
-	requested, _, err := requestUpgrade(context.Background(), c)
+	requested, _, err := requestUpgradeWithGuard(context.Background(), c, allowDaemonLifecycleMutation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +340,7 @@ func TestRequestUpgradeNegotiationFloorCoversHealthyAdmission(t *testing.T) {
 		errCh <- serverWriter.WriteFrame(protocol.ChannelControl, ack)
 	}()
 
-	requested, _, err := requestUpgrade(context.Background(), c)
+	requested, _, err := requestUpgradeWithGuard(context.Background(), c, allowDaemonLifecycleMutation)
 	if err != nil {
 		t.Fatalf("healthy delayed upgrade negotiation failed: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestRequestUpgradeRefusalNeverSendsMutatingRequest(t *testing.T) {
 		close(seen)
 	}()
 
-	requested, _, err := requestUpgrade(context.Background(), c)
+	requested, _, err := requestUpgradeWithGuard(context.Background(), c, allowDaemonLifecycleMutation)
 	if err == nil {
 		t.Fatal("preflight refusal was accepted")
 	}
@@ -1093,7 +1093,7 @@ func TestRequestUpgradeReportsDaemonOutcomes(t *testing.T) {
 				serverErr <- err
 			}()
 
-			requested, managed, err := requestUpgrade(context.Background(), c)
+			requested, managed, err := requestUpgradeWithGuard(context.Background(), c, allowDaemonLifecycleMutation)
 			if requested != test.wantRequested || !managed {
 				t.Fatalf("requestUpgrade() = (requested %t, managed %t), want (%t, true)", requested, managed, test.wantRequested)
 			}
@@ -1124,7 +1124,7 @@ func TestRequestUpgradeRejectsCandidateResolutionFailure(t *testing.T) {
 
 	c, _ := setupTestClient(t)
 
-	requested, managed, err := requestUpgrade(context.Background(), c)
+	requested, managed, err := requestUpgradeWithGuard(context.Background(), c, allowDaemonLifecycleMutation)
 	if requested || managed || err == nil || !strings.Contains(err.Error(), "dreich cache") {
 		t.Fatalf("requestUpgrade() = (%t, %t, %v)", requested, managed, err)
 	}

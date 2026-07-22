@@ -7,8 +7,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -17,6 +15,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/testprocess"
 	"github.com/d0ugal/graith/internal/version"
 )
 
@@ -276,6 +275,14 @@ func startDaemon(ctx context.Context, cfg *config.Config, paths config.Paths, co
 // PrepareDaemonCleanRestart reserves the managed service identity before a
 // destructive stop. Fallback installations have nothing to reserve.
 func PrepareDaemonCleanRestart(ctx context.Context, paths config.Paths) error {
+	return prepareDaemonCleanRestartWithGuard(ctx, paths, testprocess.RefuseDaemonLifecycleMutation)
+}
+
+func prepareDaemonCleanRestartWithGuard(ctx context.Context, paths config.Paths, guard func(string) error) error {
+	if err := guard("prepare clean daemon restart"); err != nil {
+		return err
+	}
+
 	mode, _, err := detectDaemonServiceModeForCleanRestart()
 	if err != nil {
 		return err
@@ -339,7 +346,7 @@ func launchDaemon(executable string, args []string) error {
 }
 
 func validateDaemonExecutable(path string, runningUnderGoTest bool) error {
-	if runningUnderGoTest || strings.HasSuffix(filepath.Base(path), ".test") {
+	if testprocess.IsGoTestBinary(path, runningUnderGoTest) {
 		return fmt.Errorf("refusing to start daemon by re-executing Go test binary %q", path)
 	}
 

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/d0ugal/graith/internal/testprocess"
 )
 
 // ResolveUpgradeCandidateContext returns the immutable cached service payload
@@ -197,6 +199,10 @@ func PrepareManagedUpgrade(profile, candidatePath string) (Definition, func() er
 		return Definition{}, nil, false, nil
 	}
 
+	if err := testprocess.RefuseDaemonLifecycleMutation("prepare managed daemon exec upgrade"); err != nil {
+		return Definition{}, nil, false, err
+	}
+
 	process, managed, err := RunningManagedProcess(profile)
 	if err != nil || !managed {
 		return Definition{}, nil, managed, err
@@ -321,6 +327,10 @@ func ValidateRetainedAdoptedService(label, slot, profile, candidatePath string) 
 func PrepareRetainedManagedUpgrade(
 	label, slot, profile, currentCandidatePath, nextCandidatePath string,
 ) (Definition, func() error, error) {
+	if err := testprocess.RefuseDaemonLifecycleMutation("prepare retained managed daemon exec upgrade"); err != nil {
+		return Definition{}, nil, err
+	}
+
 	return prepareRetainedManagedUpgrade(
 		label, slot, profile, currentCandidatePath, nextCandidatePath,
 		retainedAdoptionEnvironment{

@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/d0ugal/graith/internal/testprocess"
 )
 
 type DarwinController struct{}
@@ -78,18 +80,34 @@ func (controller DarwinController) Status(ctx context.Context, path string, defi
 }
 
 func (controller DarwinController) Register(ctx context.Context, path string, definition Definition) (ServiceStatus, error) {
+	if err := testprocess.RefuseDaemonLifecycleMutation("register managed daemon service"); err != nil {
+		return "", err
+	}
+
 	return controller.invoke(ctx, path, definition, "register")
 }
 
 func (controller DarwinController) RegisterFresh(ctx context.Context, path string, definition Definition) (ServiceStatus, error) {
+	if err := testprocess.RefuseDaemonLifecycleMutation("register fresh managed daemon service"); err != nil {
+		return "", err
+	}
+
 	return controller.invoke(ctx, path, definition, "register-fresh")
 }
 
 func (controller DarwinController) Unregister(ctx context.Context, path string, definition Definition) (ServiceStatus, error) {
+	if err := testprocess.RefuseDaemonLifecycleMutation("unregister managed daemon service"); err != nil {
+		return "", err
+	}
+
 	return controller.invoke(ctx, path, definition, "unregister")
 }
 
 func (DarwinController) Kickstart(ctx context.Context, uid int, definition Definition) error {
+	if err := testprocess.RefuseDaemonLifecycleMutation("kickstart managed daemon service"); err != nil {
+		return err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, serviceOperationTimeout)
 	defer cancel()
 

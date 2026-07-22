@@ -24,6 +24,7 @@ import (
 	"github.com/adrg/xdg"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemonservice"
+	"github.com/d0ugal/graith/internal/processidentity"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"golang.org/x/sys/unix"
 )
@@ -404,11 +405,11 @@ func TestPrepareExecUpgradeUsesRetainedManagedOrigin(t *testing.T) {
 }
 
 func TestStopDaemonPIDRejectsUnauthenticatedIdentity(t *testing.T) {
-	if err := StopDaemonPID(1); err == nil || !strings.Contains(err.Error(), "invalid pid") {
+	if err := stopDaemonPIDWithGuard(1, allowDaemonLifecycleMutation, processidentity.IsGraithDaemon, stopVerifiedDaemonPIDWith); err == nil || !strings.Contains(err.Error(), "invalid pid") {
 		t.Fatalf("StopDaemonPID(1) = %v", err)
 	}
 
-	if err := StopDaemonPID(os.Getpid()); err == nil || !strings.Contains(err.Error(), "not a graith daemon") {
+	if err := stopDaemonPIDWithGuard(os.Getpid(), allowDaemonLifecycleMutation, processidentity.IsGraithDaemon, stopVerifiedDaemonPIDWith); err == nil || !strings.Contains(err.Error(), "not a graith daemon") {
 		t.Fatalf("StopDaemonPID(test process) = %v", err)
 	}
 }
@@ -4536,7 +4537,10 @@ func TestReadManifestRejectsSymlinkAndInsecureMode(t *testing.T) {
 }
 
 func TestStopDaemonNonExistentPidFile(t *testing.T) {
-	err := StopDaemon(filepath.Join(t.TempDir(), "nonexistent.pid"))
+	err := stopDaemonWithGuard(
+		filepath.Join(t.TempDir(), "nonexistent.pid"), allowDaemonLifecycleMutation,
+		processidentity.IsGraithDaemon, os.Remove, stopVerifiedDaemonPIDWith,
+	)
 	if err == nil {
 		t.Fatal("expected error for nonexistent pid file")
 	}
@@ -4568,7 +4572,10 @@ func TestStopDaemonInvalidPID(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			err := StopDaemon(pidFile)
+			err := stopDaemonWithGuard(
+				pidFile, allowDaemonLifecycleMutation,
+				processidentity.IsGraithDaemon, os.Remove, stopVerifiedDaemonPIDWith,
+			)
 			if err == nil {
 				t.Fatal("expected error")
 			}

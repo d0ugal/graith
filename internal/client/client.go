@@ -17,6 +17,7 @@ import (
 	"github.com/d0ugal/graith/internal/processidentity"
 	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
+	"github.com/d0ugal/graith/internal/testprocess"
 	"github.com/d0ugal/graith/internal/version"
 	"golang.org/x/term"
 )
@@ -244,7 +245,12 @@ func connect(ctx context.Context, cfg *config.Config, paths config.Paths, config
 				c.Close()
 			}
 
-			if stopDaemonByPID(paths.PIDFile) {
+			stopped, stopErr := stopDaemonByPID(paths.PIDFile)
+			if stopErr != nil {
+				return nil, stopErr
+			}
+
+			if stopped {
 				waitForSocketGone(paths.SocketPath)
 			}
 
@@ -458,6 +464,14 @@ func upgradeMessageForClient(ctx context.Context) (protocol.UpgradeMsg, bool, er
 }
 
 func requestUpgrade(ctx context.Context, c *Client) (bool, bool, error) {
+	return requestUpgradeWithGuard(ctx, c, testprocess.RefuseDaemonLifecycleMutation)
+}
+
+func requestUpgradeWithGuard(ctx context.Context, c *Client, guard func(string) error) (bool, bool, error) {
+	if err := guard("initiate preserved daemon restart"); err != nil {
+		return false, false, err
+	}
+
 	msg, managed, err := upgradeMessageForClient(ctx)
 	if err != nil {
 		return false, managed, err
@@ -573,8 +587,12 @@ func maxDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-func stopDaemonByPID(pidFile string) bool {
-	return stopDaemonByPIDWith(pidFile, processidentity.IsGraithDaemon, syscall.Kill)
+func stopDaemonByPID(pidFile string) (bool, error) {
+	if err := testprocess.RefuseDaemonLifecycleMutation("stop daemon from PID file"); err != nil {
+		return false, err
+	}
+
+	return stopDaemonByPIDWith(pidFile, processidentity.IsGraithDaemon, syscall.Kill), nil
 }
 
 func stopDaemonByPIDWith(
@@ -627,13 +645,35 @@ func WaitForDaemonSocketGone(sockPath string) bool {
 // Unix-socket handshake and only while its start time still matches. It waits
 // for that exact identity to disappear before a new daemon may start.
 func stopDaemonIdentity(pid int, startTime int64) error {
+	return stopDaemonIdentityWith(
+		pid,
+		startTime,
+		testprocess.RefuseDaemonLifecycleMutation,
+		grpty.ProcessStartTime,
+		syscall.Kill,
+		pollDaemonReady,
+	)
+}
+
+func stopDaemonIdentityWith(
+	pid int,
+	startTime int64,
+	guard func(string) error,
+	processStartTime func(int) (int64, error),
+	signal func(int, syscall.Signal) error,
+	wait func(func(time.Time) bool) bool,
+) error {
+	if err := guard("stop daemon identity"); err != nil {
+		return err
+	}
+
 	if pid <= 1 || startTime == 0 {
 		return fmt.Errorf("invalid daemon identity pid=%d start=%d", pid, startTime)
 	}
 
-	current, err := grpty.ProcessStartTime(pid)
+	current, err := processStartTime(pid)
 	if err != nil {
-		if killErr := syscall.Kill(pid, 0); errors.Is(killErr, syscall.ESRCH) {
+		if killErr := signal(pid, 0); errors.Is(killErr, syscall.ESRCH) {
 			return nil
 		}
 
@@ -644,7 +684,7 @@ func stopDaemonIdentity(pid int, startTime int64) error {
 		return fmt.Errorf("daemon PID %d identity changed before SIGTERM (recorded=%d, current=%d)", pid, startTime, current)
 	}
 
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+	if err := signal(pid, syscall.SIGTERM); err != nil {
 		if errors.Is(err, syscall.ESRCH) {
 			return nil
 		}
@@ -652,12 +692,12 @@ func stopDaemonIdentity(pid int, startTime int64) error {
 		return fmt.Errorf("SIGTERM daemon PID %d: %w", pid, err)
 	}
 
-	if pollDaemonReady(func(time.Time) bool {
-		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+	if wait(func(time.Time) bool {
+		if err := signal(pid, 0); errors.Is(err, syscall.ESRCH) {
 			return true
 		}
 
-		observed, err := grpty.ProcessStartTime(pid)
+		observed, err := processStartTime(pid)
 
 		return err == nil && observed != startTime
 	}) {

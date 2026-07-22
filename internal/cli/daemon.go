@@ -15,6 +15,7 @@ import (
 	"github.com/d0ugal/graith/internal/daemon"
 	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/testprocess"
 	"github.com/d0ugal/graith/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -466,7 +467,14 @@ const (
 )
 
 func restartDaemonPreservingSessions(startAfterDeadPreserve func() error) error {
-	err := execUpgrade(preserveRestartSuccessMsg)
+	return restartDaemonPreservingSessionsWith(execUpgrade, startAfterDeadPreserve)
+}
+
+func restartDaemonPreservingSessionsWith(
+	upgrade func(string) error,
+	startAfterDeadPreserve func() error,
+) error {
+	err := upgrade(preserveRestartSuccessMsg)
 	if err == nil {
 		return nil
 	}
@@ -564,6 +572,14 @@ func reconcileCleanStart(startErr error, priorInstanceID string) error {
 }
 
 func execUpgrade(successMsg string) error {
+	return execUpgradeWithGuard(successMsg, testprocess.RefuseDaemonLifecycleMutation)
+}
+
+func execUpgradeWithGuard(successMsg string, guard func(string) error) error {
+	if err := guard("initiate preserved daemon restart"); err != nil {
+		return err
+	}
+
 	// Resolve and cache the managed candidate before the socket deadline starts;
 	// codesign and the first immutable bundle copy can legitimately outlive a
 	// single handshake exchange.
