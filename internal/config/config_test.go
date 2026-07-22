@@ -241,59 +241,6 @@ func TestIdleTimeoutDuration(t *testing.T) {
 	}
 }
 
-func TestCommandPolicyTimeoutDuration(t *testing.T) {
-	t.Parallel()
-
-	for _, tt := range []struct {
-		name, raw string
-		want      time.Duration
-	}{
-		{name: "default", want: 5 * time.Second},
-		{name: "configured", raw: "12s", want: 12 * time.Second},
-		{name: "invalid fallback", raw: "dreich", want: 5 * time.Second},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			if got := (CommandPolicy{Timeout: tt.raw}).TimeoutDuration(); got != tt.want {
-				t.Fatalf("TimeoutDuration() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestCommandPolicyValidate(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		cfg  CommandPolicy
-		err  bool
-	}{
-		{name: "disabled"},
-		{name: "builtin", cfg: CommandPolicy{Backend: "builtin", Builtin: CommandPolicyBuiltin{Allow: []any{"echo @*"}}}},
-		{name: "native", cfg: CommandPolicy{Backend: "localmost", Command: "/opt/localmost", Timeout: "10s"}},
-		{name: "unknown backend", cfg: CommandPolicy{Backend: "prompt"}, err: true},
-		{name: "allow all removed", cfg: CommandPolicy{Backend: "auto"}, err: true},
-		{name: "arbitrary command removed", cfg: CommandPolicy{Backend: "command", Command: "braw"}, err: true},
-		{name: "builtin needs rules", cfg: CommandPolicy{Backend: "builtin"}, err: true},
-		{name: "command only native", cfg: CommandPolicy{Backend: "builtin", Command: "braw", Builtin: CommandPolicyBuiltin{Allow: []any{"echo @*"}}}, err: true},
-		{name: "inline and file conflict", cfg: CommandPolicy{Backend: "builtin", Builtin: CommandPolicyBuiltin{Config: "croft.json", Allow: []any{"echo @*"}}}, err: true},
-		{name: "invalid rule", cfg: CommandPolicy{Backend: "builtin", Builtin: CommandPolicyBuiltin{Allow: []any{"echo @("}}}, err: true},
-		{name: "timeout invalid", cfg: CommandPolicy{Backend: "localmost", Timeout: "soon"}, err: true},
-		{name: "timeout over bound", cfg: CommandPolicy{Backend: "localmost", Timeout: "2m"}, err: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			if got := tt.cfg.Validate(); (got != nil) != tt.err {
-				t.Fatalf("Validate() error = %v, want error=%v", got, tt.err)
-			}
-		})
-	}
-}
-
 func TestParseDurationWithDays(t *testing.T) {
 	tests := []struct {
 		input   string
@@ -419,33 +366,37 @@ idle_timeout = "0"
 	}
 }
 
-func TestLoadCommandPolicy(t *testing.T) {
+func TestLoadRejectsRemovedCommandPolicyWithoutLeakingContents(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 
+	const secret = "croft-secret-should-not-leak"
 	data := `
 [command_policy]
 backend = "builtin"
 timeout = "8s"
 [command_policy.builtin]
 allow = ["echo @*"]
-deny = ["rm @*"]
+deny = ["` + secret + `"]
 `
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	loaded, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load should reject removed command_policy configuration")
 	}
 
-	if !loaded.CommandPolicy.Enabled() || loaded.CommandPolicy.TimeoutDuration() != 8*time.Second {
-		t.Fatalf("command policy = %+v", loaded.CommandPolicy)
+	got := err.Error()
+	for _, want := range []string{"[command_policy] was removed", "agent-native hook or external policy tool", "Graith [sandbox]"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Load error = %q, want %q", got, want)
+		}
 	}
 
-	if len(loaded.CommandPolicy.Builtin.Allow) != 1 || len(loaded.CommandPolicy.Builtin.Deny) != 1 {
-		t.Fatalf("builtin rules = %+v", loaded.CommandPolicy.Builtin)
+	if strings.Contains(got, secret) || strings.Contains(got, "echo @*") {
+		t.Fatalf("Load error leaked policy contents: %q", got)
 	}
 }
 
@@ -2400,25 +2351,6 @@ func TestOrchestratorSandboxBackwardCompat(t *testing.T) {
 	}
 }
 
-func TestLoadCommandPolicyRejectsUnknownBuiltinKeys(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.toml")
-
-	data := `
-[command_policy]
-backend = "builtin"
-[command_policy.builtin]
-dney = ["rm @*"]
-`
-	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := Load(path); err == nil {
-		t.Fatal("Load should reject a misspelled command-policy key")
-	}
-}
-
 func TestLoadRejectsRemovedApprovalsConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
@@ -2437,51 +2369,45 @@ backend = "auto"
 	}
 }
 
-func TestLoadCommandPolicyRejectsUnknownTopLevelKey(t *testing.T) {
+func TestLoadReportsAllRemovedNamespacesWithoutLeakingValues(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 
+	const secret = "dreich-mixed-secret"
 	data := `
+[approvals]
+command = "` + secret + `"
+
 [command_policy]
-backend = "localmost"
-commnad = "localmost"
+backend = "builtin"
+
+[command_policy.builtin]
+deny = ["` + secret + `"]
+
+[[mcp_servers]]
+name = "croft"
+command = "` + secret + `"
 `
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	_, err := Load(path)
-	if err == nil || !strings.Contains(err.Error(), "commnad") {
-		t.Fatalf("Load misspelled policy key = %v, want strict security-namespace error", err)
+	if err == nil {
+		t.Fatal("Load should report all removed namespaces")
+	}
+
+	got := err.Error()
+	for _, want := range []string{"[approvals] was removed", "[command_policy] was removed", "graith tool-server management was removed", "mcp_servers"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Load error = %q, want %q", got, want)
+		}
+	}
+	if strings.Contains(got, secret) || strings.Contains(got, "deny") {
+		t.Fatalf("Load error leaked removed configuration contents: %q", got)
 	}
 }
 
-func TestLoadCommandPolicyRuleTables(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.toml")
-
-	data := `
-[command_policy]
-backend = "builtin"
-[[command_policy.builtin.allow]]
-rule = "find @*"
-unless = ["-delete"]
-[[command_policy.builtin.deny]]
-rule = "rm @arg*"
-`
-	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	loaded, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(loaded.CommandPolicy.Builtin.Allow) != 1 || len(loaded.CommandPolicy.Builtin.Deny) != 1 {
-		t.Fatalf("rules = %+v", loaded.CommandPolicy.Builtin)
-	}
-}
 func TestParsePairRequestRate(t *testing.T) {
 	tests := []struct {
 		in        string

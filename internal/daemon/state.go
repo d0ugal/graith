@@ -19,7 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 27
+const CurrentStateVersion = 28
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -66,7 +66,43 @@ const (
 type CreationConfig struct {
 	Agent         config.Agent         `json:"agent"`
 	SandboxConfig config.SandboxConfig `json:"sandbox_config"`
-	CommandPolicy config.CommandPolicy `json:"command_policy,omitempty"`
+
+	removedCommandPolicyEnabled bool
+}
+
+// UnmarshalJSON recognizes the removed command_policy creation snapshot only
+// long enough for the state migration to establish a clean process boundary.
+// The removed field is never written by this binary.
+func (c *CreationConfig) UnmarshalJSON(data []byte) error {
+	type creationConfigWire struct {
+		Agent         config.Agent         `json:"agent"`
+		SandboxConfig config.SandboxConfig `json:"sandbox_config"`
+		CommandPolicy json.RawMessage      `json:"command_policy"`
+	}
+
+	var wire creationConfigWire
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+
+	c.Agent = wire.Agent
+	c.SandboxConfig = wire.SandboxConfig
+	c.removedCommandPolicyEnabled = false
+
+	if len(wire.CommandPolicy) == 0 || string(wire.CommandPolicy) == "null" {
+		return nil
+	}
+
+	var removed struct {
+		Backend string `json:"backend"`
+	}
+	if err := json.Unmarshal(wire.CommandPolicy, &removed); err != nil {
+		return fmt.Errorf("decode removed command policy creation snapshot: %w", err)
+	}
+
+	c.removedCommandPolicyEnabled = strings.TrimSpace(removed.Backend) != ""
+
+	return nil
 }
 
 type SessionState struct {
@@ -158,11 +194,15 @@ type SessionState struct {
 	InPlace              bool                `json:"in_place,omitempty"`
 	Includes             []IncludedRepoState `json:"includes,omitempty"`
 	AgentHooks           bool                `json:"agent_hooks,omitempty"`
-	Starred              bool                `json:"starred,omitempty"`
-	SystemKind           string              `json:"system_kind,omitempty"`
-	StopReason           string              `json:"stop_reason,omitempty"`
-	BackoffLevel         int                 `json:"backoff_level,omitempty"`
-	FreshStart           bool                `json:"fresh_start,omitempty"`
+	// RemovedHookCleanupPending is a one-way migration marker. It prevents a
+	// policy-enabled process from being adopted and remains durable until exact
+	// process cleanup and Graith-owned generated-hook cleanup have completed.
+	RemovedHookCleanupPending bool   `json:"removed_hook_cleanup_pending,omitempty"`
+	Starred                   bool   `json:"starred,omitempty"`
+	SystemKind                string `json:"system_kind,omitempty"`
+	StopReason                string `json:"stop_reason,omitempty"`
+	BackoffLevel              int    `json:"backoff_level,omitempty"`
+	FreshStart                bool   `json:"fresh_start,omitempty"`
 	// StuckRestarts counts consecutive startup-watchdog restarts for this session
 	// (#1092). It caps restart storms for a permanently-broken session and is
 	// reset to 0 once the session produces output. Runtime-recovery state, but
@@ -808,6 +848,7 @@ var migrations = map[int]func(*State) error{
 	24: migrateV24ToV25,
 	25: migrateV25ToV26,
 	26: migrateV26ToV27,
+	27: migrateV27ToV28,
 }
 
 func generateToken() (string, error) {
@@ -1089,6 +1130,30 @@ func migrateV25ToV26(state *State) error {
 // is a no-op. Saving the migrated state makes that removal durable; the pre-v27
 // bytes remain available in the standard v26 backup.
 func migrateV26ToV27(_ *State) error { return nil }
+
+// migrateV27ToV28 establishes the breaking compatibility boundary for removed
+// command policy hooks. A running process launched from a policy-enabled
+// creation snapshot must not be adopted by the replacement daemon: its old
+// generated hook can only speak the removed protocol. The durable cleanup bit
+// survives crashes until the manager has terminated that exact process
+// generation and retired only Graith-owned hook artifacts.
+func migrateV27ToV28(state *State) error {
+	for _, s := range state.Sessions {
+		if s.CreationCfg == nil || !s.CreationCfg.removedCommandPolicyEnabled {
+			continue
+		}
+
+		s.RemovedHookCleanupPending = true
+		if s.Status == StatusRunning || s.Status == StatusCreating {
+			s.Status = StatusErrored
+			applyLifecycleSummaryLocked(s, "Restart required because Graith command policy was removed")
+		}
+
+		s.CreationCfg.removedCommandPolicyEnabled = false
+	}
+
+	return nil
+}
 
 // writeFileAtomic writes state to disk crash-safely (temp + fsync + rename +
 // dir fsync). It delegates to the shared atomicfile helper so every state

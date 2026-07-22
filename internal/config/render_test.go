@@ -26,7 +26,6 @@ func TestEffectiveTOMLRendersConfig(t *testing.T) {
 
 func TestEffectiveTOMLMaterializesRuntimeDefaults(t *testing.T) {
 	cfg := Default()
-	cfg.CommandPolicy.Timeout = ""
 	tools.Configure(cfg.Tools.Resolved(cfg.SourceDir))
 	t.Cleanup(tools.Reset)
 
@@ -57,7 +56,6 @@ func TestEffectiveTOMLMaterializesRuntimeDefaults(t *testing.T) {
 	}{
 		{"remote.pending_pairing_ttl", rendered.Remote.PendingPairingTTL, "10m", RemotePendingPairingTTLDefault},
 		{"remote.pair_fallback_window", rendered.Remote.PairFallbackWindow, "1m", RemotePairFallbackWindowDefault},
-		{"command_policy.timeout", rendered.CommandPolicy.Timeout, "", cfg.CommandPolicy.TimeoutDuration()},
 	} {
 		if check.canonical != "" && check.raw != check.canonical {
 			t.Errorf("%s rendered as %q, want canonical spelling %q", check.name, check.raw, check.canonical)
@@ -92,7 +90,7 @@ func TestEffectiveTOMLMaterializesRuntimeDefaults(t *testing.T) {
 
 	if cfg.Remote.MaxPendingPairings != 0 || cfg.Remote.PendingPairingTTL != "" ||
 		cfg.Remote.PairFallbackCount != 0 || cfg.Remote.PairFallbackWindow != "" ||
-		cfg.Tools != (ToolsConfig{}) || cfg.CommandPolicy.Timeout != "" {
+		cfg.Tools != (ToolsConfig{}) {
 		t.Fatal("EffectiveTOML mutated its input config")
 	}
 }
@@ -114,8 +112,6 @@ func TestDiffFromDefaultsIgnoresExplicitRuntimeDefaults(t *testing.T) {
 		PS:    toolDefaults.PS,
 		Lsof:  toolDefaults.Lsof,
 	}
-	cfg.CommandPolicy.Timeout = cfg.CommandPolicy.TimeoutDuration().String()
-
 	diff, err := DiffFromDefaults(cfg, "effective")
 	if err != nil {
 		t.Fatal(err)

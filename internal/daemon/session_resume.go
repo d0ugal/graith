@@ -352,11 +352,6 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		return SessionState{}, err
 	}
 
-	if err := sm.validateCommandPolicy(sessState.Agent); err != nil {
-		sm.mu.Unlock()
-		return SessionState{}, err
-	}
-
 	if sessState.Mirror && !sandboxed {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("mirror session %q requires sandbox but sandbox is not enabled in current config; enable sandbox to resume", id)
@@ -430,7 +425,6 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		sandboxMerged = sm.cfg.OrchestratorSandboxMerged(sessState.Agent)
 	}
 
-	commandPolicy := sm.cfg.CommandPolicy
 	// Save previous state for rollback.
 	prevStatus := sessState.Status
 	prevExitCode := sessState.ExitCode
@@ -538,9 +532,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	sessModel := sessState.Model
 	sessCodex := cloneCodexOptions(sessState.Codex)
 	sessAgentHooks := sessState.AgentHooks
-	policyEnabled := commandPolicy.Enabled()
-	policyTimeout := commandPolicy.TimeoutDuration()
-	hookFilesNeeded := sessAgentHooks || policyEnabled
+	hookFilesNeeded := sessAgentHooks
 	sessIncludes := make([]IncludedRepoState, len(sessState.Includes))
 	copy(sessIncludes, sessState.Includes)
 	sessInPlace := sessState.InPlace
@@ -748,7 +740,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	}
 
 	if hookFilesNeeded {
-		hookArgs, hookEnv, err := sm.injectHooks(sessAgent, id, sessWorktreePath, sessAgentHooks, policyEnabled, policyTimeout)
+		hookArgs, hookEnv, err := sm.injectHooks(sessAgent, id, sessWorktreePath, true)
 		if err != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)
@@ -987,7 +979,6 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	sessState.CreationCfg = &CreationConfig{
 		Agent:         agent,
 		SandboxConfig: sandboxMerged,
-		CommandPolicy: commandPolicy,
 	}
 
 	if scrapesID(sessAgent) && sessAgentSessionID == "" {

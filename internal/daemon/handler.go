@@ -113,7 +113,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 	connDone := make(chan struct{})
 
 	// Centralized cleanup: runs exactly once on every return path (read error,
-	// or an early return from logs --follow / wait / msg_sub / command_policy_check
+	// or an early return from logs --follow / wait / msg_sub
 	// / upgrade), so per-connection registrations never leak.
 	defer func() {
 		if mutationLease {
@@ -743,25 +743,6 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
 				handleMsgJailRelease(sm, auth, sendControl, msg)
 
-			case "command_policy_check":
-				req, ok := decodePayload[protocol.CommandPolicyCheckMsg](msg, sendControl, "invalid command_policy_check")
-				if !ok {
-					continue
-				}
-
-				if auth.authenticated {
-					req.SessionID = auth.sessionID
-				}
-
-				if !auth.authorizeTarget(sm, req.SessionID, authSelfOnly, sendControl) {
-					continue
-				}
-
-				decision := sm.CheckCommandPolicy(ctx, req)
-				sendControl("command_policy_decision", decision)
-
-				return
-
 			case "type":
 				handleType(sm, auth, sendControl, msg, log)
 
@@ -1251,16 +1232,6 @@ func isConfigStale(s SessionState, cfg *config.Config) bool {
 	current.InterruptCount, current.InterruptDelayMs = nil, nil
 
 	if !reflect.DeepEqual(created, current) {
-		return true
-	}
-
-	// Command-policy hooks are generated at launch. A live config reload can
-	// change the rules the daemon evaluates, but enabling or disabling the layer
-	// also changes whether an agent hook exists; mark that launch stale so the
-	// operator knows a restart is required to establish the new enforcement
-	// path. Comparing the full config also surfaces changed external rule paths
-	// and inline rules consistently with agent/sandbox changes.
-	if !reflect.DeepEqual(s.CreationCfg.CommandPolicy, cfg.CommandPolicy) {
 		return true
 	}
 

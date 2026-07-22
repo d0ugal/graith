@@ -57,10 +57,6 @@ func TestDurationAccessorsWhitespaceConsistency(t *testing.T) {
 		t.Errorf("RetentionDuration(%q) = %v, want 72h", "3d ", got)
 	}
 
-	if got := (CommandPolicy{Timeout: " 9s "}).TimeoutDuration(); got != 9*time.Second {
-		t.Errorf("CommandPolicy.TimeoutDuration(%q) = %v, want 9s", " 9s ", got)
-	}
-
 	if got := (StatusConfig{TTL: "2m "}).TTLDuration(); got != 2*time.Minute {
 		t.Errorf("TTLDuration(%q) = %v, want 2m", "2m ", got)
 	}

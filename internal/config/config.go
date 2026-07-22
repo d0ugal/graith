@@ -2,7 +2,6 @@ package config
 
 import (
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -15,7 +14,6 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	"github.com/d0ugal/graith/internal/commandpolicy/localmost"
 	"github.com/d0ugal/graith/internal/tools"
 	"github.com/pelletier/go-toml/v2"
 )
@@ -40,7 +38,6 @@ type Config struct {
 	GC               GCConfig            `toml:"gc"`
 	Todo             TodoConfig          `toml:"todo"`
 	Sandbox          SandboxConfig       `toml:"sandbox"`
-	CommandPolicy    CommandPolicy       `toml:"command_policy"`
 	Status           StatusConfig        `toml:"status"`
 	GitPull          GitPullConfig       `toml:"git_pull"`
 	Launch           LaunchConfig        `toml:"launch"`
@@ -3002,146 +2999,6 @@ func (n Notifications) Validate() error {
 	return nil
 }
 
-type CommandPolicy struct {
-	// Backend enables the optional command restriction layer. Empty disables it.
-	// Supported values are "builtin" and "localmost".
-	Backend string               `toml:"backend"`
-	Timeout string               `toml:"timeout"`
-	Command string               `toml:"command"`
-	Builtin CommandPolicyBuiltin `toml:"builtin"`
-}
-
-const (
-	defaultCommandPolicyTimeout = 5 * time.Second
-	maxCommandPolicyTimeout     = 60 * time.Second
-)
-
-// CommandPolicyBuiltin configures the built-in localmost-compatible parser and
-// rule engine. Rules may come from an external localmost config or inline TOML.
-type CommandPolicyBuiltin struct {
-	Config         string `toml:"config"`
-	Allow          []any  `toml:"allow"`
-	Deny           []any  `toml:"deny"`
-	AllowSafeXargs *bool  `toml:"allowSafeXargs"`
-}
-
-func (b CommandPolicyBuiltin) HasInline() bool {
-	return len(b.Allow) > 0 || len(b.Deny) > 0 || b.AllowSafeXargs != nil
-}
-
-var builtinRuleKeys = map[string]struct{}{
-	"rule": {}, "unless": {}, "redirect": {}, "pipe": {},
-}
-
-func validateInlineRules(list string, rules []any) error {
-	for i, elem := range rules {
-		switch v := elem.(type) {
-		case string:
-		case map[string]any:
-			if rule, ok := v["rule"].(string); !ok || strings.TrimSpace(rule) == "" {
-				return fmt.Errorf("[command_policy.builtin] %s rule %d: table form requires a non-empty \"rule\" key", list, i)
-			}
-
-			for key := range v {
-				if _, ok := builtinRuleKeys[key]; !ok {
-					return fmt.Errorf("[command_policy.builtin] %s rule %d: unknown key %q (valid: rule, unless, redirect, pipe)", list, i, key)
-				}
-			}
-		default:
-			return fmt.Errorf("[command_policy.builtin] %s rule %d: must be a string or a table, got %T", list, i, elem)
-		}
-	}
-
-	return nil
-}
-
-func (b CommandPolicyBuiltin) InlineJSON() ([]byte, error) {
-	payload := map[string]any{}
-	if b.Allow != nil {
-		payload["allow"] = b.Allow
-	}
-
-	if b.Deny != nil {
-		payload["deny"] = b.Deny
-	}
-
-	if b.AllowSafeXargs != nil {
-		payload["allowSafeXargs"] = *b.AllowSafeXargs
-	}
-
-	return json.Marshal(payload)
-}
-
-func (p CommandPolicy) Enabled() bool {
-	return strings.TrimSpace(p.Backend) != ""
-}
-
-func (p CommandPolicy) Validate() error {
-	backend := strings.TrimSpace(p.Backend)
-	switch backend {
-	case "", "builtin", "localmost":
-	default:
-		return fmt.Errorf("[command_policy] backend %q is not recognised (want builtin or localmost)", backend)
-	}
-
-	if strings.TrimSpace(p.Command) != "" && backend != "localmost" {
-		return errors.New("[command_policy] command is only valid with backend=\"localmost\"")
-	}
-
-	if strings.TrimSpace(p.Builtin.Config) != "" && p.Builtin.HasInline() {
-		return errors.New("[command_policy.builtin] config and inline rules are mutually exclusive")
-	}
-
-	if backend == "builtin" && strings.TrimSpace(p.Builtin.Config) == "" && !p.Builtin.HasInline() {
-		return errors.New("[command_policy] backend=\"builtin\" requires [command_policy.builtin] rules or config")
-	}
-
-	if p.Builtin.HasInline() {
-		if err := validateInlineRules("allow", p.Builtin.Allow); err != nil {
-			return err
-		}
-
-		if err := validateInlineRules("deny", p.Builtin.Deny); err != nil {
-			return err
-		}
-
-		data, err := p.Builtin.InlineJSON()
-		if err != nil {
-			return fmt.Errorf("[command_policy.builtin] encode inline rules: %w", err)
-		}
-
-		if _, err := localmost.Parse(data); err != nil {
-			return fmt.Errorf("[command_policy.builtin] inline rules are invalid: %w", err)
-		}
-	}
-
-	if strings.TrimSpace(p.Timeout) != "" {
-		d, err := ParseDurationWithDays(p.Timeout)
-		if err != nil {
-			return fmt.Errorf("[command_policy] timeout=%q is not a valid duration: %w", p.Timeout, err)
-		}
-
-		if d <= 0 || d > maxCommandPolicyTimeout {
-			return fmt.Errorf("[command_policy] timeout must be positive and no greater than %s", maxCommandPolicyTimeout)
-		}
-	}
-
-	return nil
-}
-
-func (p CommandPolicy) TimeoutDuration() time.Duration {
-	if strings.TrimSpace(p.Timeout) == "" {
-		return defaultCommandPolicyTimeout
-	}
-
-	d, err := ParseDurationWithDays(p.Timeout)
-	if err != nil || d <= 0 {
-		return defaultCommandPolicyTimeout
-	}
-
-	return d
-}
-
 type StatusConfig struct {
 	TTL string `toml:"ttl"`
 }
@@ -3617,9 +3474,9 @@ func ExpandPath(p string) string {
 // ExpandPathRelative resolves a configured path deterministically: it expands a
 // leading ~/, and resolves a still-relative path against baseDir (the directory
 // holding the config file) rather than the process working directory, then
-// cleans the result. This keeps a value like [command_policy.builtin] config
-// resolving to the same absolute path regardless of which directory the daemon
-// or CLI happens to run from. An empty (or whitespace-only) path stays empty so
+// cleans the result. This keeps configured relative paths resolving to the same
+// absolute path regardless of which directory the daemon or CLI happens to run
+// from. An empty (or whitespace-only) path stays empty so
 // callers can distinguish "unset" from a resolved path.
 func ExpandPathRelative(p, baseDir string) string {
 	p = strings.TrimSpace(p)
@@ -3848,13 +3705,6 @@ func (c *Config) Validate() error {
 	}
 
 	if err := c.Sandbox.validateSignalMode("sandbox"); err != nil {
-		errs = append(errs, err)
-	}
-
-	// Static command-policy validation happens at config load. Backend
-	// availability is enforced at session start so a missing dependency fails
-	// the affected session without bricking daemon startup.
-	if err := c.CommandPolicy.Validate(); err != nil {
 		errs = append(errs, err)
 	}
 
@@ -4387,7 +4237,10 @@ func LoadBytes(path string, data []byte) (*Config, error) {
 		return nil, fmt.Errorf("parsing config %s: %w", path, err)
 	}
 
-	if err := rejectRemovedToolServerConfig(data); err != nil {
+	// Compose every removed security/process namespace from the same raw
+	// snapshot so a mixed legacy configuration reports all required migration
+	// work without ever rendering its values.
+	if err := errors.Join(rejectRemovedToolServerConfig(data), checkRemovedConfigKeys(data)); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
 	}
 
@@ -4404,14 +4257,6 @@ func LoadBytes(path string, data []byte) (*Config, error) {
 	}
 
 	applyPRWatchCommentCompat(cfg, data)
-
-	// go-toml/v2's default Unmarshal silently ignores unknown keys. Reject the
-	// removed interactive configuration and unknown keys throughout the new
-	// security-sensitive command-policy namespace so neither a stale backend nor
-	// a misspelled deny rule can be silently dropped.
-	if err := checkCommandPolicyKeys(data); err != nil {
-		return nil, fmt.Errorf("config validation: %w", err)
-	}
 
 	// Raw-data-aware: only an explicit page-size override that contradicts the
 	// (possibly lowered) max fails; lowering the max alone is clamped, not
@@ -4526,51 +4371,26 @@ func tomlHasKey(data []byte, table, key string) bool {
 	return ok
 }
 
-var commandPolicyKeys = map[string]struct{}{
-	"backend": {}, "timeout": {}, "command": {}, "builtin": {},
-}
-
-var commandPolicyBuiltinKeys = map[string]struct{}{
-	"config": {}, "allow": {}, "deny": {}, "allowSafeXargs": {},
-}
-
-// checkCommandPolicyKeys rejects removed interactive configuration and unknown
-// command-policy keys. It uses a targeted generic decode rather than
-// DisallowUnknownFields on the whole document, keeping unrelated configuration
-// forwards-compatible while making the security namespace strict.
-func checkCommandPolicyKeys(data []byte) error {
+// checkRemovedConfigKeys rejects security-adjacent namespaces which no longer
+// have an enforcement path. It checks table presence only and never formats a
+// child key or value, so a migration diagnostic cannot disclose policy rules,
+// paths, commands, or embedded secrets.
+func checkRemovedConfigKeys(data []byte) error {
 	var raw map[string]any
 	if err := toml.Unmarshal(data, &raw); err != nil {
 		return nil // structural errors surface from the typed Unmarshal instead
 	}
 
+	var errs []error
 	if _, ok := raw["approvals"]; ok {
-		return errors.New("[approvals] was removed; use optional [command_policy] rules, which can only restrict shell commands and never grant capabilities")
+		errs = append(errs, errors.New("[approvals] was removed; use agent-native approvals and sandboxing, or configure Graith [sandbox] for OS isolation"))
 	}
 
-	policy, ok := raw["command_policy"].(map[string]any)
-	if !ok {
-		return nil
+	if _, ok := raw["command_policy"]; ok {
+		errs = append(errs, errors.New("[command_policy] was removed; use an agent-native hook or external policy tool for semantic command filtering, and Graith [sandbox] for OS isolation"))
 	}
 
-	for k := range policy {
-		if _, ok := commandPolicyKeys[k]; !ok {
-			return fmt.Errorf("[command_policy] unknown key %q (valid: backend, timeout, command, builtin)", k)
-		}
-	}
-
-	builtin, ok := policy["builtin"].(map[string]any)
-	if !ok {
-		return nil
-	}
-
-	for k := range builtin {
-		if _, ok := commandPolicyBuiltinKeys[k]; !ok {
-			return fmt.Errorf("[command_policy.builtin] unknown key %q (valid: config, allow, deny, allowSafeXargs)", k)
-		}
-	}
-
-	return nil
+	return errors.Join(errs...)
 }
 
 // UnknownKey is a config key that graith's schema does not recognise. It is a

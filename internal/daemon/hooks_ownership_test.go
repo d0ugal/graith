@@ -107,7 +107,7 @@ func TestInjectCursorHooksRefusesPreExistingUserFile(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			_, _, err := sm.injectCursorHooks("unowned-bothy", worktree, true, false)
+			_, _, err := sm.injectCursorHooks("unowned-bothy", worktree)
 			if err == nil || !strings.Contains(err.Error(), "refusing to overwrite") {
 				t.Fatalf("injectCursorHooks() error = %v, want refusal", err)
 			}
@@ -148,7 +148,7 @@ func TestCursorHooksFirstPublicationRacePreservesReplacement(t *testing.T) {
 				replaceCursorHooks(t, hooksPath, userContent)
 			})
 
-			_, _, err := sm.injectCursorHooks("first-racer", worktree, true, false)
+			_, _, err := sm.injectCursorHooks("first-racer", worktree)
 			if !errors.Is(err, errCursorHooksRaced) {
 				t.Fatalf("injectCursorHooks() error = %v, want %v", err, errCursorHooksRaced)
 			}
@@ -195,7 +195,7 @@ func TestCursorHooksRepublicationRacePreservesReplacement(t *testing.T) {
 				}
 			}
 
-			if _, _, err := sm.injectCursorHooks(sessionID, worktree, true, false); err != nil {
+			if _, _, err := sm.injectCursorHooksWithGrBin(sessionID, worktree, "/opt/braw/gr"); err != nil {
 				t.Fatalf("first injectCursorHooks(): %v", err)
 			}
 
@@ -204,9 +204,9 @@ func TestCursorHooksRepublicationRacePreservesReplacement(t *testing.T) {
 				replaceCursorHooks(t, hooksPath, userContent)
 			})
 
-			// Command policy adds preToolUse, forcing a real replacement rather than the
+			// A changed Graith binary path forces a real replacement rather than the
 			// byte-identical no-op reinjection path.
-			_, _, err := sm.injectCursorHooks(sessionID, worktree, true, true)
+			_, _, err := sm.injectCursorHooksWithGrBin(sessionID, worktree, "/opt/canny/gr")
 			if !errors.Is(err, errCursorHooksRaced) {
 				t.Fatalf("re-inject error = %v, want %v", err, errCursorHooksRaced)
 			}
@@ -253,22 +253,22 @@ func TestCursorHooksSuccessfulRepublication(t *testing.T) {
 				t.Cleanup(func() { linkCursorHooksFile = original })
 			}
 
-			if _, _, err := sm.injectCursorHooks(sessionID, worktree, true, false); err != nil {
+			if _, _, err := sm.injectCursorHooksWithGrBin(sessionID, worktree, "/opt/braw/gr"); err != nil {
 				t.Fatalf("first injectCursorHooks(): %v", err)
 			}
 
 			before := readCursorHooks(t, testCursorHooksPath(worktree))
-			if strings.Contains(string(before), "preToolUse") {
-				t.Fatal("first publication unexpectedly contains preToolUse")
+			if !strings.Contains(string(before), "/opt/braw/gr") {
+				t.Fatal("first publication does not contain original Graith binary")
 			}
 
-			if _, _, err := sm.injectCursorHooks(sessionID, worktree, true, true); err != nil {
+			if _, _, err := sm.injectCursorHooksWithGrBin(sessionID, worktree, "/opt/canny/gr"); err != nil {
 				t.Fatalf("re-injectCursorHooks(): %v", err)
 			}
 
 			after := readCursorHooks(t, testCursorHooksPath(worktree))
-			if !strings.Contains(string(after), "preToolUse") {
-				t.Fatal("republication did not install preToolUse")
+			if !strings.Contains(string(after), "/opt/canny/gr") {
+				t.Fatal("republication did not install updated Graith binary")
 			}
 
 			marker := readCursorHooks(t, sm.cursorHooksOwnershipPath(sessionID))
@@ -300,12 +300,12 @@ func TestInjectCursorHooksSharesIdenticalDefinition(t *testing.T) {
 		}
 	}
 
-	if _, _, err := sm.injectCursorHooks("braw-owner", worktree, true, false); err != nil {
+	if _, _, err := sm.injectCursorHooks("braw-owner", worktree); err != nil {
 		t.Fatalf("inject first owner: %v", err)
 	}
 
 	want := readCursorHooks(t, testCursorHooksPath(worktree))
-	if _, _, err := sm.injectCursorHooks("canny-owner", worktree, true, false); err != nil {
+	if _, _, err := sm.injectCursorHooks("canny-owner", worktree); err != nil {
 		t.Fatalf("inject second owner: %v", err)
 	}
 
@@ -338,13 +338,13 @@ func TestInjectCursorHooksRejectsIncompatibleSharedDefinition(t *testing.T) {
 		}
 	}
 
-	if _, _, err := sm.injectCursorHooks("braw-owner", worktree, true, false); err != nil {
+	if _, _, err := sm.injectCursorHooks("braw-owner", worktree); err != nil {
 		t.Fatalf("inject first owner: %v", err)
 	}
 
 	want := readCursorHooks(t, testCursorHooksPath(worktree))
 
-	_, _, err := sm.injectCursorHooks("dreich-owner", worktree, true, true)
+	_, _, err := sm.injectCursorHooksWithGrBin("dreich-owner", worktree, "/opt/dreich/gr")
 	if err == nil || !strings.Contains(err.Error(), "shared by session(s) braw-owner") || !strings.Contains(err.Error(), "different hook definition") {
 		t.Fatalf("incompatible injection error = %v, want shared-definition refusal", err)
 	}
@@ -361,12 +361,12 @@ func TestInjectCursorHooksRejectsIncompatibleSharedDefinition(t *testing.T) {
 func TestInjectCursorHooksReconcilesMissingSharedArtifact(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
-		policy     bool
+		different  bool
 		wantErr    bool
 		wantAbsent bool
 	}{
 		{name: "republish compatible definition"},
-		{name: "reject incompatible definition", policy: true, wantErr: true, wantAbsent: true},
+		{name: "reject incompatible definition", different: true, wantErr: true, wantAbsent: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
@@ -380,7 +380,7 @@ func TestInjectCursorHooksReconcilesMissingSharedArtifact(t *testing.T) {
 				}
 			}
 
-			if _, _, err := sm.injectCursorHooks("braw-owner", worktree, true, false); err != nil {
+			if _, _, err := sm.injectCursorHooksWithGrBin("braw-owner", worktree, "/opt/braw/gr"); err != nil {
 				t.Fatalf("inject first owner: %v", err)
 			}
 
@@ -388,7 +388,12 @@ func TestInjectCursorHooksReconcilesMissingSharedArtifact(t *testing.T) {
 				t.Fatalf("remove generated hooks: %v", err)
 			}
 
-			_, _, err := sm.injectCursorHooks("dreich-owner", worktree, true, tc.policy)
+			grBin := "/opt/braw/gr"
+			if tc.different {
+				grBin = "/opt/dreich/gr"
+			}
+
+			_, _, err := sm.injectCursorHooksWithGrBin("dreich-owner", worktree, grBin)
 			if tc.wantErr {
 				if err == nil || !strings.Contains(err.Error(), "braw-owner") || !strings.Contains(err.Error(), "different hook definition") {
 					t.Fatalf("incompatible injection error = %v, want durable-owner refusal", err)
@@ -424,7 +429,7 @@ func TestInjectCursorHooksRefusesStaleStructuredOwner(t *testing.T) {
 	worktree := t.TempDir()
 	hooksPath := testCursorHooksPath(worktree)
 
-	if _, _, err := sm.injectCursorHooks("stale-owner", worktree, true, false); err != nil {
+	if _, _, err := sm.injectCursorHooks("stale-owner", worktree); err != nil {
 		t.Fatalf("inject stale owner: %v", err)
 	}
 
@@ -443,13 +448,12 @@ func TestInjectCursorHooksRefusesStaleStructuredOwner(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		sessionID string
-		policy    bool
 	}{
 		{name: "identical definition", sessionID: "bairn-owner"},
-		{name: "different definition", sessionID: "thrawn-owner", policy: true},
+		{name: "another session", sessionID: "thrawn-owner"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := sm.injectCursorHooks(tc.sessionID, worktree, true, tc.policy)
+			_, _, err := sm.injectCursorHooks(tc.sessionID, worktree)
 			if err == nil || !strings.Contains(err.Error(), "not owned by graith") {
 				t.Fatalf("inject with stale owner error = %v, want ownership refusal", err)
 			}
@@ -487,7 +491,7 @@ func TestInjectCursorHooksRejectsMalformedSharedOwnership(t *testing.T) {
 		}
 	}
 
-	if _, _, err := sm.injectCursorHooks("braw-owner", worktree, true, false); err != nil {
+	if _, _, err := sm.injectCursorHooks("braw-owner", worktree); err != nil {
 		t.Fatalf("inject valid owner: %v", err)
 	}
 
@@ -502,7 +506,7 @@ func TestInjectCursorHooksRejectsMalformedSharedOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, err := sm.injectCursorHooks("canny-owner", worktree, true, false)
+	_, _, err := sm.injectCursorHooks("canny-owner", worktree)
 	if err == nil || !strings.Contains(err.Error(), "ownership metadata is unreadable") {
 		t.Fatalf("identical join with malformed peer error = %v, want fail-closed refusal", err)
 	}
@@ -538,7 +542,7 @@ func TestInjectCursorHooksRejectsBlockingOwnershipMarker(t *testing.T) {
 				}
 			}
 
-			if _, _, err := sm.injectCursorHooks("braw-owner", worktree, true, false); err != nil {
+			if _, _, err := sm.injectCursorHooks("braw-owner", worktree); err != nil {
 				t.Fatalf("inject valid owner: %v", err)
 			}
 
@@ -565,7 +569,7 @@ func TestInjectCursorHooksRejectsBlockingOwnershipMarker(t *testing.T) {
 			done := make(chan error, 1)
 
 			go func() {
-				_, _, err := sm.injectCursorHooks("canny-owner", worktree, true, false)
+				_, _, err := sm.injectCursorHooks("canny-owner", worktree)
 				done <- err
 			}()
 
@@ -591,7 +595,7 @@ func TestSharedCursorHooksCleanupPreservesUserModification(t *testing.T) {
 			ID: id, Agent: "cursor", WorktreePath: worktree, Status: StatusRunning,
 		}
 
-		if _, _, err := sm.injectCursorHooks(id, worktree, true, false); err != nil {
+		if _, _, err := sm.injectCursorHooks(id, worktree); err != nil {
 			t.Fatalf("inject %s: %v", id, err)
 		}
 	}
@@ -618,7 +622,7 @@ func TestInjectCursorHooksReadsLegacyOwnershipMarker(t *testing.T) {
 		ID: sessionID, Agent: "cursor", WorktreePath: worktree, Status: StatusRunning,
 	}
 
-	if _, _, err := sm.injectCursorHooks(sessionID, worktree, true, false); err != nil {
+	if _, _, err := sm.injectCursorHooks(sessionID, worktree); err != nil {
 		t.Fatalf("inject owner: %v", err)
 	}
 
@@ -627,7 +631,7 @@ func TestInjectCursorHooksReadsLegacyOwnershipMarker(t *testing.T) {
 		t.Fatalf("write legacy marker: %v", err)
 	}
 
-	if _, _, err := sm.injectCursorHooks(sessionID, worktree, true, false); err != nil {
+	if _, _, err := sm.injectCursorHooks(sessionID, worktree); err != nil {
 		t.Fatalf("reinject with legacy marker: %v", err)
 	}
 
@@ -642,7 +646,7 @@ func TestInjectCursorHooksRefusesByteIdenticalUnownedFile(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	generatedWorktree := t.TempDir()
 
-	if _, _, err := sm.injectCursorHooks("source-owner", generatedWorktree, true, false); err != nil {
+	if _, _, err := sm.injectCursorHooks("source-owner", generatedWorktree); err != nil {
 		t.Fatalf("generate hooks fixture: %v", err)
 	}
 
@@ -658,7 +662,7 @@ func TestInjectCursorHooksRefusesByteIdenticalUnownedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, err := sm.injectCursorHooks("unowned-bothy", userWorktree, true, false); err == nil || !strings.Contains(err.Error(), "not owned by graith") {
+	if _, _, err := sm.injectCursorHooks("unowned-bothy", userWorktree); err == nil || !strings.Contains(err.Error(), "not owned by graith") {
 		t.Fatalf("byte-identical unowned injection error = %v, want refusal", err)
 	}
 
@@ -874,7 +878,7 @@ func TestCursorHooksCleanupRacePreservesReplacement(t *testing.T) {
 				}
 			}
 
-			if _, _, err := sm.injectCursorHooks(sessionID, worktree, true, false); err != nil {
+			if _, _, err := sm.injectCursorHooks(sessionID, worktree); err != nil {
 				t.Fatalf("injectCursorHooks(): %v", err)
 			}
 
@@ -909,7 +913,7 @@ func TestCursorHooksCleanupPreservesUserModification(t *testing.T) {
 	sessionID := "modified-bairn"
 	hooksPath := testCursorHooksPath(worktree)
 
-	if _, _, err := sm.injectCursorHooks(sessionID, worktree, true, false); err != nil {
+	if _, _, err := sm.injectCursorHooks(sessionID, worktree); err != nil {
 		t.Fatalf("injectCursorHooks(): %v", err)
 	}
 
