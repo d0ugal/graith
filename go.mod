@@ -84,7 +84,7 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/tailscale/certstore v0.1.1-0.20260409135935-3638fb84b77d // indirect
 	github.com/tailscale/go-winio v0.0.0-20231025203758-c4f33415bf55 // indirect
-	github.com/tailscale/hujson v0.0.0-20260718110524-10d7940d4c87 // indirect
+	github.com/tailscale/hujson v0.0.0-20260722022634-78b5b162ee49 // indirect
 	github.com/tailscale/peercred v0.0.0-20250107143737-35a0c7bd7edc // indirect
 	github.com/tailscale/web-client-prebuilt v0.0.0-20251127225136-f19339b67368 // indirect
 	github.com/tailscale/wireguard-go v0.0.0-20260527010701-b48af7099cad // indirect
