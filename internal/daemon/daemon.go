@@ -55,6 +55,10 @@ type hookReport struct {
 type SessionManager struct {
 	mu             sync.RWMutex
 	configReloadMu sync.Mutex
+	// cursorHooksMu serializes ownership joins, definition replacements, and
+	// last-owner cleanup for Cursor's worktree-scoped hooks.json. Filesystem I/O
+	// stays outside mu while this narrower lock protects the cross-file decision.
+	cursorHooksMu sync.Mutex
 	// scenarioResultMu serializes store-write + state-commit publication. Store
 	// I/O never holds mu, while the separate lock prevents two publications from
 	// leaving artifact content and metadata describing different attempts.
