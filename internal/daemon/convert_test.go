@@ -56,6 +56,7 @@ func waitForConvertFakeOutput(t *testing.T, driver *headless.Session, want strin
 
 	deadline := time.NewTimer(3 * time.Second)
 	ticker := time.NewTicker(10 * time.Millisecond)
+
 	defer deadline.Stop()
 	defer ticker.Stop()
 
@@ -74,6 +75,7 @@ func waitForConvertFakeOutput(t *testing.T, driver *headless.Session, want strin
 
 type recordingConvertDriver struct {
 	*headless.Session
+
 	killCalls      int
 	forceKillCalls int
 }
@@ -194,8 +196,10 @@ func TestConvertGuardSaveFailureRollsBack(t *testing.T) {
 // stopped by the first (gentlest) step. It must return well before the settle
 // timeout would fire without calling the SIGTERM/SIGKILL escalation methods.
 func TestStopDriverForConvertSettlesOnInterrupt(t *testing.T) {
-	const settle = 5 * time.Second
-	const ready = "canny-signal-ready"
+	const (
+		settle = 5 * time.Second
+		ready  = "canny-signal-ready"
+	)
 
 	sm := convertTestManager(t)
 	sm.cfg.Lifecycle.ConvertSettleTimeout = settle.String()
