@@ -133,12 +133,14 @@ func TestAllRepoSwitchPreservesSelectionAndCollapseState(t *testing.T) {
 
 	m.selectSessionByID("ben")
 	updated, _ = sendKey(m, " ")
+
 	m = asOverlay(updated)
 	if !m.collapsed["ben"] {
 		t.Fatal("system parent should be collapsed in All")
 	}
 
 	updated, _ = sendKey(m, "right")
+
 	m = asOverlay(updated)
 	if !m.collapsed["ben"] {
 		t.Fatal("collapse state should survive switching to Repo")
@@ -194,6 +196,7 @@ func TestAllViewSearchPromotesMatchingChildAndResizesColumns(t *testing.T) {
 	}
 
 	updated, _ := sendKey(m, "right")
+
 	m = asOverlay(updated)
 	if m.cols.name >= wantNameWidth {
 		t.Errorf("Repo name width = %d, should be recomputed without repeated repo identity", m.cols.name)
@@ -255,6 +258,7 @@ func TestAllAndRepoCollapseAll(t *testing.T) {
 	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
 
 	updated, _ := sendKey(m, "C")
+
 	m = asOverlay(updated)
 	if !m.collapsed["ben"] {
 		t.Fatal("C should collapse parents in All")
@@ -263,6 +267,7 @@ func TestAllAndRepoCollapseAll(t *testing.T) {
 	updated, _ = sendKey(m, "right")
 	m = asOverlay(updated)
 	updated, _ = sendKey(m, "C")
+
 	m = asOverlay(updated)
 	if m.collapsed["ben"] {
 		t.Fatal("C should expand parents in Repo when all are collapsed")
