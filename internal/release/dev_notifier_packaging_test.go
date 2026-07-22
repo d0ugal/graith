@@ -397,8 +397,8 @@ func TestDevReleaseWorkflowValidatesNativeArchives(t *testing.T) {
 	}
 
 	var (
-		goreleaserArgs, prepareScript, signingScript, verifyScript, cleanupScript, cleanupIf string
-		prepareEnv, signingEnv                                                               map[string]string
+		goreleaserArgs, prepareScript, signingScript, baseTagScript, verifyScript, cleanupScript, cleanupIf string
+		prepareEnv, signingEnv                                                                              map[string]string
 	)
 
 	for _, step := range job.Steps {
@@ -420,6 +420,10 @@ func TestDevReleaseWorkflowValidatesNativeArchives(t *testing.T) {
 			signingEnv = step.Env
 		}
 
+		if step.Name == "Select the stable release base for the dev snapshot" {
+			baseTagScript = step.Run
+		}
+
 		if step.Name == "Remove temporary macOS signing keychain" {
 			cleanupScript = step.Run
 			cleanupIf = step.If
@@ -428,6 +432,16 @@ func TestDevReleaseWorkflowValidatesNativeArchives(t *testing.T) {
 
 	if !strings.Contains(goreleaserArgs, "-f .goreleaser-dev.yaml") {
 		t.Fatalf("GoReleaser action does not use the dev config: %q", goreleaserArgs)
+	}
+
+	for _, want := range []string{"scripts/dev-release-base-tag.sh", "GORELEASER_CURRENT_TAG=", `>> "$GITHUB_ENV"`} {
+		if !strings.Contains(baseTagScript, want) {
+			t.Errorf("dev release base-tag selection missing %q", want)
+		}
+	}
+
+	if strings.Contains(baseTagScript, "git tag -d") {
+		t.Error("dev release base-tag selection still deletes operational tags")
 	}
 
 	if verifyScript == "" {
