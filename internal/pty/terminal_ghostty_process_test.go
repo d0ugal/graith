@@ -1415,6 +1415,69 @@ func TestGhosttyPeakRSSConcurrentClose(t *testing.T) {
 	readers.Wait()
 }
 
+// TestGhosttySustainedScrollDoesNotRetainHistory guards WithMaxScrollback(0)
+// across native dependency updates. Accepted measurements put both workloads
+// below 17 MiB with less than 1 MiB growth; these wider bounds tolerate runner
+// and allocator variation while still detecting material row retention.
+func TestGhosttySustainedScrollDoesNotRetainHistory(t *testing.T) {
+	const (
+		maxHelperPeak   = 64 * 1024 * 1024
+		maxHelperGrowth = 16 * 1024 * 1024
+	)
+
+	baseline := ghosttySustainedScrollPeakRSS(t, 12_000)
+	extended := ghosttySustainedScrollPeakRSS(t, 24_000)
+	if baseline > maxHelperPeak || extended > maxHelperPeak {
+		t.Fatalf(
+			"helper peak RSS = (%d,%d) bytes for 12k/24k lines; want each <= %d",
+			baseline,
+			extended,
+			maxHelperPeak,
+		)
+	}
+	if growth := extended - baseline; growth > maxHelperGrowth {
+		t.Fatalf(
+			"helper peak RSS grew by %d bytes when scroll input doubled (%d to %d); want growth <= %d",
+			growth,
+			baseline,
+			extended,
+			maxHelperGrowth,
+		)
+	}
+	t.Logf("helper peak RSS for 12k/24k lines = %d/%d bytes", baseline, extended)
+}
+
+func ghosttySustainedScrollPeakRSS(t testing.TB, lines int) int64 {
+	t.Helper()
+
+	terminal, err := newGhosttyProcessTerminal(240, 40)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	line := "\x1b[31mcanny scrolling line on the wide brae with e\u0301, 你, and 😀\x1b[0m\r\n"
+	if err := writeTerminalChunks(terminal, []byte(strings.Repeat(line, lines))); err != nil {
+		_ = terminal.Close()
+
+		t.Fatal(err)
+	}
+	if _, err := snapshotTerminal(terminal); err != nil {
+		_ = terminal.Close()
+
+		t.Fatal(err)
+	}
+	if err := terminal.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	peak := terminal.PeakRSSBytes()
+	if peak <= 0 {
+		t.Fatal("helper peak RSS is unavailable")
+	}
+
+	return peak
+}
+
 func TestGhosttyPoisonReplayFallsBackOnceAndKeepsLogsPrivate(t *testing.T) {
 	poison := []byte("dreich-poison-terminal-secret")
 	scrollback, err := NewScrollback(filepath.Join(t.TempDir(), "croft.log"), 1024*1024)
