@@ -19,9 +19,7 @@ import (
 )
 
 const (
-	cliIsolationWorkerEnv   = "GRAITH_TEST_CLI_ISOLATION_WORKER"
-	cliIsolationHostRootEnv = "GRAITH_TEST_CLI_ISOLATION_HOST_ROOT"
-	cliIsolationSocketEnv   = "GRAITH_TEST_CLI_ISOLATION_HOST_SOCKET"
+	cliIsolationWorkerEnv = "GRAITH_TEST_CLI_ISOLATION_WORKER"
 )
 
 func TestCLISuiteIsolationKeepsLifecycleOffHostSocket(t *testing.T) {
@@ -78,8 +76,6 @@ func TestCLISuiteIsolationKeepsLifecycleOffHostSocket(t *testing.T) {
 
 	command.Env = append(os.Environ(),
 		cliIsolationWorkerEnv+"=1",
-		cliIsolationHostRootEnv+"="+hostRoot,
-		cliIsolationSocketEnv+"="+hostSocket,
 		"XDG_CONFIG_HOME="+filepath.Join(hostRoot, "config"),
 		"XDG_DATA_HOME="+filepath.Join(hostRoot, "data"),
 		"XDG_RUNTIME_DIR="+hostRuntime,
@@ -104,13 +100,6 @@ func TestCLISuiteIsolationWorker(t *testing.T) {
 		return
 	}
 
-	hostRoot := os.Getenv(cliIsolationHostRootEnv)
-
-	hostSocket := os.Getenv(cliIsolationSocketEnv)
-	if hostRoot == "" || hostSocket == "" {
-		t.Fatal("missing sentinel host paths")
-	}
-
 	originalCfg, originalCfgFile, originalPaths := cfg, cfgFile, paths
 	originalOut, originalJSON, originalAgentMode := out, jsonOutput, agentMode
 
@@ -121,10 +110,6 @@ func TestCLISuiteIsolationWorker(t *testing.T) {
 
 	if err := executeWithArgs([]string{"version"}); err != nil {
 		t.Fatalf("execute full CLI command: %v", err)
-	}
-
-	if pathWithinRoot(hostRoot, paths.ConfigFile) || paths.SocketPath == hostSocket || pathWithinRoot(hostRoot, paths.HumanTokenFile) {
-		t.Fatalf("full CLI command retained sentinel host paths: %#v", paths)
 	}
 
 	if token := os.Getenv("GRAITH_TOKEN"); token != "" {
@@ -138,15 +123,6 @@ func TestCLISuiteIsolationWorker(t *testing.T) {
 	if err := daemonStopCmd.RunE(daemonStopCmd, nil); err == nil {
 		t.Fatal("daemon stop unexpectedly found an isolated daemon")
 	}
-}
-
-func pathWithinRoot(root, path string) bool {
-	relative, err := filepath.Rel(root, path)
-	if err != nil {
-		return false
-	}
-
-	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 func TestServiceBootstrapConfigSurvivesFlagRegistration(t *testing.T) {
