@@ -117,6 +117,45 @@ func countSessionItems(m *overlayModel) int {
 	return count
 }
 
+func sessionItemsForGroup(t *testing.T, items []list.Item, headerPrefix string) []sessionItem {
+	t.Helper()
+
+	var result []sessionItem
+	inGroup := false
+
+	for _, item := range items {
+		switch item := item.(type) {
+		case groupHeader:
+			if inGroup {
+				return result
+			}
+
+			inGroup = strings.HasPrefix(item.name, headerPrefix)
+		case sessionItem:
+			if inGroup {
+				result = append(result, item)
+			}
+		}
+	}
+
+	if !inGroup {
+		t.Fatalf("group %q not found", headerPrefix)
+	}
+
+	return result
+}
+
+func sessionItemsByID(items []list.Item) map[string]sessionItem {
+	result := make(map[string]sessionItem)
+	for _, item := range items {
+		if item, ok := item.(sessionItem); ok {
+			result[item.info.ID] = item
+		}
+	}
+
+	return result
+}
+
 // renderItem builds a compactDelegate for the given sessions and renders the
 // item at index into a string, using the standard 120x10 list dimensions.
 func renderItem(sessions []protocol.SessionInfo, current string, index int) string {
@@ -355,6 +394,34 @@ func TestBuildGroupedItems_CyclicParents(t *testing.T) {
 
 	if sessionCount != 2 {
 		t.Errorf("expected 2 sessions rendered from cycle, got %d", sessionCount)
+	}
+}
+
+func TestBuildTreeItems_CycleOrderingStable(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "a", Name: "canny", ParentID: "b", Status: "running"},
+		{ID: "b", Name: "braw", ParentID: "a", Status: "running"},
+	}
+
+	order := func(items []list.Item) string {
+		var rows []string
+		for _, item := range items {
+			if item, ok := item.(sessionItem); ok {
+				rows = append(rows, item.info.ID+":"+item.treePrefix)
+			}
+		}
+
+		return strings.Join(rows, ",")
+	}
+
+	forward := order(buildTreeItems(sessions, nil))
+	reversed := order(buildTreeItems([]protocol.SessionInfo{sessions[1], sessions[0]}, nil))
+	if forward != reversed {
+		t.Fatalf("cycle order changed with input order: %q vs %q", forward, reversed)
+	}
+
+	if forward != "b:,a:└── " {
+		t.Fatalf("cycle order = %q, want stable name order with one connector", forward)
 	}
 }
 
@@ -990,7 +1057,7 @@ func TestBuildLabelGroupedItemsCrossesReposAndDuplicatesMultiLabelSessions(t *te
 		{ID: "dreich", Name: "dreich", RepoName: "glen", Status: "running"},
 	}
 
-	items := buildLabelGroupedItems(sessions)
+	items := buildLabelGroupedItems(sessions, nil)
 	groups := map[string][]string{}
 	current := ""
 
@@ -1025,6 +1092,230 @@ func TestBuildLabelGroupedItemsCrossesReposAndDuplicatesMultiLabelSessions(t *te
 
 	if width := maxSessionNameWidthFromItems(items, 0); width < lipgloss.Width("croft/braw") {
 		t.Fatalf("label view name width = %d, want at least %d", width, lipgloss.Width("croft/braw"))
+	}
+}
+
+func TestBuildLabelGroupedItemsPreservesNestedCrossRepoTrees(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "root", Name: "ben", RepoName: "croft", Status: "running", Labels: []string{"Urgent", "release"}},
+		{ID: "child", Name: "bairn", ParentID: "root", RepoName: "bothy", Status: "running", Labels: []string{"urgent", "release"}},
+		{ID: "grandchild", Name: "wee-bairn", ParentID: "child", RepoName: "glen", Status: "running", Labels: []string{"URGENT"}},
+	}
+
+	items := buildLabelGroupedItems(sessions, nil)
+	urgent := sessionItemsForGroup(t, items, "Urgent")
+	if len(urgent) != 3 {
+		t.Fatalf("Urgent group has %d sessions, want 3", len(urgent))
+	}
+
+	wantIDs := []string{"root", "child", "grandchild"}
+	wantPrefixes := []string{"", "└── ", "    └── "}
+	for i := range urgent {
+		if urgent[i].info.ID != wantIDs[i] || urgent[i].treePrefix != wantPrefixes[i] {
+			t.Errorf("Urgent[%d] = %q prefix %q, want %q prefix %q", i, urgent[i].info.ID, urgent[i].treePrefix, wantIDs[i], wantPrefixes[i])
+		}
+	}
+
+	if !urgent[0].hasChildren || urgent[0].descendantCount != 2 {
+		t.Errorf("Urgent root children=%t descendants=%d, want true/2", urgent[0].hasChildren, urgent[0].descendantCount)
+	}
+
+	release := sessionItemsForGroup(t, items, "release")
+	if len(release) != 2 || release[0].info.ID != "root" || release[1].info.ID != "child" || release[1].treePrefix != "└── " {
+		t.Fatalf("release group = %+v, want root with child", release)
+	}
+}
+
+func TestLabelViewCollapseRetainsGroupSelection(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "root", Name: "ben", RepoName: "croft", Status: "running", Labels: []string{"alpha", "beta"}},
+		{ID: "child", Name: "bairn", ParentID: "root", RepoName: "bothy", Status: "running", Labels: []string{"alpha", "beta"}},
+	}
+
+	m := sizedModel(t, sessions, "")
+	m.view = viewLabels
+	m.rebuildForView()
+	m.selectSessionByIDAndLabel("root", "beta")
+
+	updated, _ := sendKey(m, " ")
+	m = asOverlay(updated)
+	selected, ok := m.list.SelectedItem().(sessionItem)
+	if !ok || selected.info.ID != "root" || selected.labelGroup != "beta" {
+		t.Fatalf("selection after collapse = %+v, ok=%t; want root in beta", selected, ok)
+	}
+
+	if !selected.collapsed || selected.descendantCount != 1 {
+		t.Errorf("collapsed root = %+v, want one hidden descendant", selected)
+	}
+}
+
+func TestStarredViewPreservesVisibleTreeAndExcludedParentBecomesRoot(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "root", Name: "ben", RepoName: "croft", Status: "running", Starred: true},
+		{ID: "child", Name: "bairn", ParentID: "root", RepoName: "bothy", Status: "running", Starred: true},
+		{ID: "grandchild", Name: "wee-bairn", ParentID: "child", RepoName: "glen", Status: "running", Starred: true},
+		{ID: "hidden-parent", Name: "auld", RepoName: "croft", Status: "running"},
+		{ID: "visible-orphan", Name: "thrawn", ParentID: "hidden-parent", RepoName: "bothy", Status: "running", Starred: true},
+	}
+
+	m := sizedModel(t, sessions, "")
+	m.view = viewStarred
+	m.rebuildForView()
+	byID := sessionItemsByID(m.list.Items())
+
+	if got := byID["child"].treePrefix; got != "└── " {
+		t.Errorf("cross-repo child prefix = %q, want tree connector", got)
+	}
+
+	if got := byID["grandchild"].treePrefix; got != "    └── " {
+		t.Errorf("grandchild prefix = %q, want nested connector", got)
+	}
+
+	if root := byID["root"]; !root.hasChildren || root.descendantCount != 2 {
+		t.Errorf("starred root = %+v, want two descendants", root)
+	}
+
+	if got := byID["visible-orphan"].treePrefix; got != "" {
+		t.Errorf("child of excluded parent prefix = %q, want root", got)
+	}
+
+	if _, ok := byID["hidden-parent"]; ok {
+		t.Error("unstarred parent must not be rendered")
+	}
+}
+
+func TestFilteredTreeViewsHandleOrphansAndCycles(t *testing.T) {
+	base := []protocol.SessionInfo{
+		{ID: "orphan", Name: "thrawn", ParentID: "missing", Status: "running", Starred: true, Labels: []string{"braw"}, ScenarioID: "strath", ScenarioName: "strath"},
+		{ID: "a", Name: "canny", ParentID: "b", Status: "running", Starred: true, Labels: []string{"braw"}, ScenarioID: "strath", ScenarioName: "strath"},
+		{ID: "b", Name: "dreich", ParentID: "a", Status: "running", Starred: true, Labels: []string{"braw"}, ScenarioID: "strath", ScenarioName: "strath"},
+	}
+
+	for _, tc := range []struct {
+		name string
+		view viewMode
+	}{
+		{name: "starred", view: viewStarred},
+		{name: "labels", view: viewLabels},
+		{name: "scenarios", view: viewScenario},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := sizedModel(t, base, "")
+			m.view = tc.view
+			m.rebuildForView()
+			byID := sessionItemsByID(m.list.Items())
+			if len(byID) != 3 {
+				t.Fatalf("rendered %d distinct sessions, want 3", len(byID))
+			}
+
+			if got := byID["orphan"].treePrefix; got != "" {
+				t.Errorf("orphan prefix = %q, want root", got)
+			}
+
+			if byID["a"].treePrefix == "" && byID["b"].treePrefix == "" {
+				t.Error("cycle was flattened; want one cycle member rendered below the other")
+			}
+
+			m.collapsed["a"] = true
+			m.rebuildForView()
+			if got := countSessionItems(m); got != 2 {
+				t.Errorf("collapsed cycle rendered %d sessions, want orphan plus one cycle member", got)
+			}
+		})
+	}
+}
+
+func TestFilteredTreeSearchDoesNotExpandBulkActionTargets(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "parent", Name: "ben", Status: "running", Starred: true},
+		{ID: "child", Name: "bairn", ParentID: "parent", Status: "running", Starred: true},
+		{ID: "other", Name: "dreich", Status: "running", Starred: true},
+		{ID: "unstarred", Name: "bairn-hidden", Status: "running"},
+	}
+
+	m := sizedModel(t, sessions, "")
+	m.view = viewStarred
+	m.filterInput.SetValue("bairn")
+	m.restartSession = func(string) error { return nil }
+	m.rebuildForView()
+	items := sessionItemsByID(m.list.Items())
+	if len(items) != 1 || items["child"].treePrefix != "" {
+		t.Fatalf("filtered items = %+v, want matching child promoted to root", items)
+	}
+
+	visible := m.visibleSessions()
+	if len(visible) != 1 || visible[0].ID != "child" {
+		t.Fatalf("visible sessions = %+v, want only matching starred child", visible)
+	}
+
+	updated, _ := sendKey(m, "R")
+	updated, _ = sendKey(updated, "a")
+	m = asOverlay(updated)
+	if len(m.restartQueue) != 1 || m.restartQueue[0] != "child" {
+		t.Fatalf("restart queue = %v, want only matching child", m.restartQueue)
+	}
+}
+
+func TestFilteredTreeViewsCollapseAll(t *testing.T) {
+	base := []protocol.SessionInfo{
+		{ID: "root", Name: "ben", Status: "running", Starred: true, Labels: []string{"braw"}, ScenarioID: "strath", ScenarioName: "strath"},
+		{ID: "child", Name: "bairn", ParentID: "root", Status: "running", Starred: true, Labels: []string{"braw"}, ScenarioID: "strath", ScenarioName: "strath"},
+	}
+
+	for _, tc := range []struct {
+		name string
+		view viewMode
+	}{
+		{name: "starred", view: viewStarred},
+		{name: "labels", view: viewLabels},
+		{name: "scenarios", view: viewScenario},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := sizedModel(t, base, "")
+			m.view = tc.view
+			m.rebuildForView()
+
+			updated, _ := sendKey(m, "C")
+			m = asOverlay(updated)
+			if !m.collapsed["root"] || countSessionItems(m) != 1 {
+				t.Fatalf("collapse-all state=%v sessions=%d, want root collapsed and one row", m.collapsed, countSessionItems(m))
+			}
+
+			updated, _ = sendKey(m, "C")
+			m = asOverlay(updated)
+			if m.collapsed["root"] || countSessionItems(m) != 2 {
+				t.Fatalf("expand-all state=%v sessions=%d, want expanded two-row tree", m.collapsed, countSessionItems(m))
+			}
+		})
+	}
+}
+
+func TestFilteredTreeViewsRefreshRetainsNestedSelection(t *testing.T) {
+	base := []protocol.SessionInfo{
+		{ID: "root", Name: "ben", Status: "running", Starred: true, Labels: []string{"braw"}, ScenarioID: "strath", ScenarioName: "strath"},
+		{ID: "child", Name: "bairn", ParentID: "root", Status: "running", Starred: true, Labels: []string{"braw"}, ScenarioID: "strath", ScenarioName: "strath"},
+	}
+
+	for _, tc := range []struct {
+		name string
+		view viewMode
+	}{
+		{name: "starred", view: viewStarred},
+		{name: "scenarios", view: viewScenario},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := sizedModel(t, base, "")
+			m.view = tc.view
+			m.rebuildForView()
+			m.selectSessionByID("child")
+
+			updated, _ := m.Update(refreshSessionsMsg{sessions: []protocol.SessionInfo{base[1], base[0]}})
+			m = asOverlay(updated)
+			selected, ok := m.list.SelectedItem().(sessionItem)
+			if !ok || selected.info.ID != "child" || selected.treePrefix != "└── " {
+				t.Fatalf("selection after refresh = %+v, ok=%t; want nested child", selected, ok)
+			}
+		})
 	}
 }
 
@@ -4374,6 +4665,34 @@ func TestBuildScenarioGroupedItems_FallsBackToScenarioID(t *testing.T) {
 	gh := items[0].(groupHeader)
 	if !strings.HasPrefix(gh.name, "sc-xyz") {
 		t.Errorf("header should fall back to scenario id, got %q", gh.name)
+	}
+}
+
+func TestBuildScenarioGroupedItemsPreservesNestedCrossRepoTree(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "root", Name: "ben", RepoName: "croft", Status: "running", ScenarioID: "sc", ScenarioName: "strath"},
+		{ID: "child", Name: "bairn", ParentID: "root", RepoName: "bothy", Status: "running", ScenarioID: "sc", ScenarioName: "strath"},
+		{ID: "grandchild", Name: "wee-bairn", ParentID: "child", RepoName: "glen", Status: "running", ScenarioID: "sc", ScenarioName: "strath"},
+	}
+
+	items := buildScenarioGroupedItems(sessions, nil)
+	group := sessionItemsForGroup(t, items, "strath")
+	if len(group) != 3 {
+		t.Fatalf("scenario group has %d sessions, want 3", len(group))
+	}
+
+	wantIDs := []string{"root", "child", "grandchild"}
+	wantPrefixes := []string{"", "└── ", "    └── "}
+	for i := range group {
+		if group[i].info.ID != wantIDs[i] || group[i].treePrefix != wantPrefixes[i] {
+			t.Errorf("scenario[%d] = %q prefix %q, want %q prefix %q", i, group[i].info.ID, group[i].treePrefix, wantIDs[i], wantPrefixes[i])
+		}
+	}
+
+	collapsed := buildScenarioGroupedItems(sessions, map[string]bool{"root": true})
+	collapsedGroup := sessionItemsForGroup(t, collapsed, "strath")
+	if len(collapsedGroup) != 1 || !collapsedGroup[0].collapsed || collapsedGroup[0].descendantCount != 2 {
+		t.Fatalf("collapsed scenario group = %+v, want root with two descendants", collapsedGroup)
 	}
 }
 

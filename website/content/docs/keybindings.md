@@ -71,10 +71,10 @@ Cycle with `h`/`l` or arrows:
 
 | View | Description |
 |------|-------------|
-| All | Every session, grouped by repo. Starred first, then running, then by name |
-| Starred | Starred sessions only |
-| Labels | Sessions grouped by label across all repositories; a multi-labelled session appears in each matching group |
-| Scenarios | Every session grouped by scenario, with unassigned sessions in a separate group |
+| All | Every session, grouped by repo, with parent/child trees inside each repo |
+| Starred | Starred sessions in a parent/child tree |
+| Labels | Sessions grouped by label across all repositories, with a parent/child tree inside each label; a multi-labelled session appears in each matching group |
+| Scenarios | Every session grouped by scenario, with a parent/child tree inside each scenario and unassigned sessions in a separate group |
 | Deleted | Recently deleted sessions; press `enter` to restore the highlighted session |
 
 ### Actions
@@ -94,7 +94,8 @@ Cycle with `h`/`l` or arrows:
 Text search narrows the selected view, so searching while in **Labels** keeps the
 cross-repository label grouping. Refresh preserves the selected label group when
 the session still belongs to it. An empty Labels view says that there are no
-labelled sessions.
+labelled sessions. Trees contain only sessions matched by the selected view and
+search: when a parent is absent, its visible child is shown as a root.
 
 The overlay has no stop, resume, rename, or label-edit action — use `gr stop`,
 `gr restart`, or `gr update` from the CLI.

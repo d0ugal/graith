@@ -230,9 +230,11 @@ grant access: creation and update use the same local-human, remote-human,
 session/descendant, and system-session boundaries as the rest of session metadata.
 
 The CLI picker has a **Labels** view, grouping matching sessions across repository
-boundaries and displaying each match as `repo/session`. Search also matches label
-text. The macOS and iOS sidebars use the same shared label filter and expose label
-fields when creating or editing a session.
+boundaries and displaying each match as `repo/session`. Each label group preserves
+parent/child relationships, including those crossing repositories. Search also
+matches label text; if filtering removes a parent, its matching child becomes a
+tree root. The macOS and iOS sidebars use the same shared label filter and expose
+label fields when creating or editing a session.
 
 ## Scrollback
 
