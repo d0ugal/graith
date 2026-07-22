@@ -104,7 +104,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - name: Build the rollback binary without the native backend or cgo
+      - name: Build the pure-Go compatibility binary without native code or cgo
         env:
           CGO_ENABLED: "0"
           GOARCH: ${{ matrix.goarch }}
@@ -350,7 +350,7 @@ jobs:
             run_timed pty-race go test -race -count=1 -tags=libghostty ./internal/pty \
               -run 'TestGhostty'
             run_timed compatibility-race go test -race -count=1 \
-              -tags=libghostty,libghostty_compare ./internal/pty \
+              -tags=libghostty ./internal/pty \
               -run '^TestTerminalBackendCompatibilityCorpus$'
             run_timed daemon-race go test -race -count=1 -tags=libghostty ./internal/daemon \
               -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
@@ -395,7 +395,7 @@ jobs:
           fi
           printf '%s\n' "$build_info"
           if [[ "$build_info" == *$'\tdep\tgithub.com/charmbracelet/x/vt\t'* ]]; then
-            echo "tagged Linux binary contains the Charm rollback dependency" >&2
+            echo "tagged Linux binary contains the pure-Go terminal dependency" >&2
             exit 1
           fi
           sha256sum "$binary" "$LIBRARY" \

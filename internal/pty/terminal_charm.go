@@ -1,4 +1,4 @@
-//go:build !libghostty || libghostty_compare
+//go:build !libghostty
 
 package pty
 

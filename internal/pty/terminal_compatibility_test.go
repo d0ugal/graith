@@ -1,8 +1,9 @@
-//go:build !libghostty || libghostty_compare
+//go:build !libghostty || (libghostty && cgo && ((darwin && arm64) || linux))
 
 package pty
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -20,98 +21,78 @@ type terminalAlternateExpectation struct {
 }
 
 type terminalBackendExpectations struct {
-	contains1430Panic bool
-	resizePreviews    []string
-	alternateScreens  map[int]terminalAlternateExpectation
-	graphemes         map[string]terminalGraphemeExpectation
-	fragmented        map[string]terminalGraphemeExpectation
+	issue1430Error   error
+	resizePreviews   []string
+	alternateScreens map[int]terminalAlternateExpectation
+	graphemes        map[string]terminalGraphemeExpectation
+	fragmented       map[string]terminalGraphemeExpectation
 }
 
-func charmTerminalBackendExpectations() terminalBackendExpectations {
+func commonTerminalBackendExpectations() terminalBackendExpectations {
 	return terminalBackendExpectations{
-		contains1430Panic: true,
 		resizePreviews: []string{
 			"canny brae bide\n\n\n",
-			"cann\n",
-			"cann\n\n",
-			"cann\n",
-			"cann\n\n\n",
+			"ae b\nide",
+			"ae bide\n\n",
+			"ae bi\nde",
+			"ae bide\n\n\n",
 		},
 		alternateScreens: map[int]terminalAlternateExpectation{
-			// Charm ignores mode 47, while 1047 and 1049 clear, home, and
-			// restore the main screen.
-			47:   {active: "braebothy", restored: "braebothy"},
-			1047: {active: "bothy", restored: "brae"},
-			1049: {active: "bothy", restored: "brae"},
+			47:   {active: "    bothy", restored: "brae"},
+			1047: {active: "    bothy", restored: "brae"},
+			1049: {active: "    bothy", restored: "brae"},
 		},
 		graphemes: map[string]terminalGraphemeExpectation{
-			// Charm drops a combining mark, but clusters the remaining
-			// multi-codepoint graphemes into one wide cell.
-			"combining":          {cells: []string{"e", "b"}, cursorX: 2, preview: "eb"},
+			"combining":          {cells: []string{"e\u0301", "b"}, cursorX: 2, preview: "e\u0301b"},
 			"zwj":                {cells: []string{"👩‍💻", "", "b"}, cursorX: 3, preview: "👩‍💻b"},
 			"variation_selector": {cells: []string{"♥️", "", "b"}, cursorX: 3, preview: "♥️b"},
 			"regional_indicator": {cells: []string{"🇬🇧", "", "b"}, cursorX: 3, preview: "🇬🇧b"},
 			"wide":               {cells: []string{"你", "", "b"}, cursorX: 3, preview: "你b"},
 		},
-		fragmented: map[string]terminalGraphemeExpectation{
-			// Charm's parser preserves incomplete UTF-8 between writes, but
-			// commits each completed codepoint before a later write can extend
-			// it into these multi-codepoint clusters.
-			"zwj": {
-				cells: []string{"👩", "", "💻", "", "b"}, cursorX: 5, preview: "👩💻b",
-			},
-			"variation_selector": {
-				cells: []string{"♥", "b"}, cursorX: 2, preview: "♥b",
-			},
-			"regional_indicator": {
-				cells: []string{"🇬", "", "🇧", "", "b"}, cursorX: 5, preview: "🇬🇧b",
-			},
-		},
 	}
 }
 
-// TestTerminalBackendCompatibilityCorpus drives Charm and the tagged,
-// process-isolated libghostty helper with the same reduced synthetic inputs.
-// Backend differences are named and asserted in the expectation tables above;
-// no captured output, paths, or identifiers belong in this corpus.
+// TestTerminalBackendCompatibilityCorpus drives the build's selected backend
+// with the same reduced synthetic inputs. Default and tagged test runs cover
+// Charm and the process-isolated helper without linking them into one binary.
+// No captured output, paths, or identifiers belong in this corpus.
 func TestTerminalBackendCompatibilityCorpus(t *testing.T) {
-	for _, factory := range terminalBackendFactories() {
-		t.Run(factory.name, func(t *testing.T) {
-			t.Run("scrollback_hydration", func(t *testing.T) {
-				testTerminalScrollbackHydration(t, factory)
-			})
-			t.Run("repeated_grow_shrink_resize", func(t *testing.T) {
-				testTerminalRepeatedResize(t, factory)
-			})
-			t.Run("cursor_save_restore_and_visibility", func(t *testing.T) {
-				testTerminalCursorState(t, factory)
-			})
-			t.Run("scroll_region", func(t *testing.T) {
-				testTerminalScrollRegion(t, factory)
-			})
-			t.Run("alternate_screen_modes", func(t *testing.T) {
-				testTerminalAlternateScreens(t, factory)
-			})
-			t.Run("erase_tabs_and_wrap", func(t *testing.T) {
-				testTerminalEraseTabsAndWrap(t, factory)
-			})
-			t.Run("fragmented_control_strings_and_queries", func(t *testing.T) {
-				testTerminalFragmentedControls(t, factory)
-			})
-			t.Run("graphemes_and_width", func(t *testing.T) {
-				testTerminalGraphemes(t, factory)
-			})
-			t.Run("ris_and_grapheme_mode", func(t *testing.T) {
-				testTerminalRISGraphemes(t, factory)
-			})
-			t.Run("styles_and_colors", func(t *testing.T) {
-				testTerminalStylesAndColors(t, factory)
-			})
-			t.Run("issue_1430_reduced_regression", func(t *testing.T) {
-				testTerminalIssue1430(t, factory)
-			})
+	factory := selectedTerminalBackendFactory()
+	t.Run(factory.name, func(t *testing.T) {
+		t.Run("scrollback_hydration", func(t *testing.T) {
+			testTerminalScrollbackHydration(t, factory)
 		})
-	}
+		t.Run("repeated_grow_shrink_resize", func(t *testing.T) {
+			testTerminalRepeatedResize(t, factory)
+		})
+		t.Run("cursor_save_restore_and_visibility", func(t *testing.T) {
+			testTerminalCursorState(t, factory)
+		})
+		t.Run("scroll_region", func(t *testing.T) {
+			testTerminalScrollRegion(t, factory)
+		})
+		t.Run("alternate_screen_modes", func(t *testing.T) {
+			testTerminalAlternateScreens(t, factory)
+		})
+		t.Run("erase_tabs_and_wrap", func(t *testing.T) {
+			testTerminalEraseTabsAndWrap(t, factory)
+		})
+		t.Run("fragmented_control_strings_and_queries", func(t *testing.T) {
+			testTerminalFragmentedControls(t, factory)
+		})
+		t.Run("graphemes_and_width", func(t *testing.T) {
+			testTerminalGraphemes(t, factory)
+		})
+		t.Run("ris_and_grapheme_mode", func(t *testing.T) {
+			testTerminalRISGraphemes(t, factory)
+		})
+		t.Run("styles_and_colors", func(t *testing.T) {
+			testTerminalStylesAndColors(t, factory)
+		})
+		t.Run("issue_1430_reduced_regression", func(t *testing.T) {
+			testTerminalIssue1430(t, factory)
+		})
+	})
 }
 
 func testTerminalScrollbackHydration(t *testing.T, factory terminalBackendFactory) {
@@ -535,9 +516,9 @@ func testTerminalIssue1430(t *testing.T, factory terminalBackendFactory) {
 
 	n, err := term.Write(fixture)
 
-	if factory.expectations.contains1430Panic {
-		if n != 0 || err != errTerminalParserPanic {
-			t.Fatalf("contained result = (%d,%v), want (0,%v)", n, err, errTerminalParserPanic)
+	if wantErr := factory.expectations.issue1430Error; wantErr != nil {
+		if n != 0 || !errors.Is(err, wantErr) {
+			t.Fatalf("contained result = (%d,%v), want (0,%v)", n, err, wantErr)
 		}
 
 		return
