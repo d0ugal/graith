@@ -63,7 +63,7 @@ The following capability scope is intentional:
 
 | Capability | CLI | iOS | macOS | Rationale |
 |------------|-----|-----|-------|-----------|
-| Interactive Graith approval queue and responses | Removed | Removed | Removed | Issue [#1392](https://github.com/d0ugal/graith/issues/1392) removed Graith's queue; native agent approval TUIs remain agent-owned, while sandbox and command policy are independent configuration. |
+| Interactive Graith approval queue and responses | Removed | Removed | Removed | Issue [#1392](https://github.com/d0ugal/graith/issues/1392) removed Graith's queue; native agent approval TUIs remain agent-owned. Issue [#1576](https://github.com/d0ugal/graith/issues/1576) subsequently removed command policy; Graith's OS sandbox remains independent configuration. |
 | Manage paired devices | Targeted | Excluded | Excluded | Management is local-human-only and remote-denied; apps pair with a daemon but do not administer its trust list. |
 | Direct messages | Targeted | Targeted | Targeted | A focused human-to-session conversation fits both native apps. |
 | Topic publish/subscribe | Targeted | Excluded | Excluded | Topics are an agent/orchestrator coordination primitive rather than a human chat UI. |
@@ -99,7 +99,8 @@ This decision originally removed the queue, response actions, subscriptions,
 and Swift wire models only from the native apps. Issue
 [#1392](https://github.com/d0ugal/graith/issues/1392) subsequently removed the
 same workflow from the CLI, daemon, and protocol, replacing it with mandatory
-sandbox enforcement and an optional subtractive command policy.
+sandbox enforcement. Graith's former command policy was subsequently removed
+by [Remove Command Policy](2026-07-22-command-policy-removal.md).
 
 Reclassify Swift protocol expectations from `planned` or `required` to `na` when
 the corresponding wire type has no remaining native consumer. Delete now-unused
