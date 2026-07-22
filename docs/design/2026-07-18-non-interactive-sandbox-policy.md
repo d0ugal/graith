@@ -2,18 +2,13 @@
 title: "Design Doc: Remove Graith interactive approvals"
 authors: Dougal Matthews
 created: 2026-07-18
-status: Superseded by 2026-07-22-command-policy-removal.md
+status: Implemented
 reviewers: (none yet)
 informed: (TBD)
 issue: https://github.com/d0ugal/graith/issues/1392
 ---
 
 # Remove Graith interactive approvals
-
-> This design is retained as historical context. Its decision to preserve an
-> optional command-policy layer was superseded by
-> [Remove Command Policy](2026-07-22-command-policy-removal.md). Agent-native
-> controls and Graith's independently configured OS sandbox remain.
 
 Graith removes its human tool-approval loop. Agent-native approval prompts remain
 available and are owned entirely by the agent's TUI. Graith's OS sandbox is
