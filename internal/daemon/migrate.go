@@ -161,6 +161,19 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		sm.mu.Unlock()
 	}
 
+	// Transcript rendering and source shutdown are intentionally outside the
+	// manager lock. Recheck the durable cleanup boundary before touching hooks
+	// or agent metadata so a future lifecycle change cannot turn that unlocked
+	// interval into a pending-cleanup bypass.
+	sm.mu.RLock()
+	pendingErr := sm.rejectPendingUpgradeCleanupLocked(id)
+	sm.mu.RUnlock()
+	if pendingErr != nil {
+		_ = os.RemoveAll(contextDir)
+
+		return SessionState{}, pendingErr
+	}
+
 	// --- clean up the old agent's hooks (e.g. cursor's in-worktree files) ---
 	sm.cleanupHooks(id, srcAgent, worktreePath)
 
@@ -172,7 +185,12 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session %q deleted during migrate", id)
 	}
+	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
+		sm.mu.Unlock()
+		_ = os.RemoveAll(contextDir)
 
+		return SessionState{}, err
+	}
 	// Overwriting MigratedFrom drops the only pointer to any previously-staged
 	// context dir (e.g. a cross-agent fork's fork-<id> dir, whose path differs
 	// from this migrate's migrate-<id> dir). Remove the prior one first so it

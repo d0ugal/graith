@@ -90,24 +90,34 @@ upgrade from a release which supported it:
 
 After a cold daemon restart, Graith will not signal a live non-child process
 group whose generation it cannot reserve atomically. Startup fails closed with
-cleanup pending and reports the affected session and PID. Inspect that PID and
-stop it externally only after verifying it is the old agent process, then start
-Graith again. If the PID belongs to a newer, unrelated process, Graith detects
-the generation mismatch on retry and leaves that process untouched.
+cleanup pending and reports the affected session and PID. At that check Graith
+has matched the process to its stored kernel start identity, but it cannot keep
+ownership across a cold restart. Locate the supervisor which owns the old job,
+stop it there, then start Graith again. If the PID belongs to a newer, unrelated
+process on retry, Graith detects the generation mismatch and leaves that process
+untouched.
 
-Use the reported PID to inspect both the executable and working directory; do
-not stop it based on the number alone:
+Use the reported PID only to locate the process while diagnosing which
+supervisor or terminal owns it. Include its process group, executable, and
+working directory in that inspection:
 
 ```sh
-ps -p <PID> -o pid=,ppid=,lstart=,command=
+ps -p <PID> -o pid=,ppid=,pgid=,lstart=,command=
 lsof -a -p <PID> -d cwd -Fn  # optional, when lsof is installed
 ```
 
-They must match the old agent and the session worktree. If the process has
-disappeared, changed, or cannot be identified, do not signal that PID or its
-process group; retry Graith startup so it can re-check the recorded generation.
-Once identity is confirmed, stop that process through the operating system or
-the supervisor which launched it, confirm it has exited, and retry startup.
+These observations should match the old agent and session worktree, but they do
+not prove the process generation: an unrelated replacement can have the same
+command and directory, and the displayed wall-clock start time is less precise
+than Graith's stored kernel identity. Do not send a signal to the PID or PGID
+from these observations. Stop the old job through the terminal, service
+manager, or other supervisor which still owns that exact job and its process
+group, then confirm it has exited and retry startup. If no such ownership
+channel is available, leave the process untouched and use a platform
+administrator's identity-safe recovery procedure. On every retry Graith
+compares the current kernel start identity with its stored value; a disappeared
+process or reused PID clears the pending migration without signalling the
+replacement.
 
 The state migration writes the usual pre-migration `state.json.v<version>.bak`.
 An older binary refuses the migrated state. A downgrade therefore requires
