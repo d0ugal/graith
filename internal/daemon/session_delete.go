@@ -642,6 +642,11 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 	if excludeRoot {
 		toDelete = filterExcludeRoot(toDelete, id)
 	}
+	if err := sm.rejectPendingUpgradeCleanupForIDsLocked(toDelete); err != nil {
+		sm.mu.Unlock()
+
+		return nil, err
+	}
 
 	snaps := make([]bulkDeleteSnapshot, 0, len(toDelete))
 

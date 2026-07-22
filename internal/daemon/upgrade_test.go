@@ -4313,8 +4313,36 @@ func TestReconcileRemovedHookProcessesDoesNotSignalAfterColdRestart(t *testing.T
 			_, err := sm.ConvertToInteractive("canny", 24, 80)
 			return err
 		},
-		"stop":   func() error { return sm.Stop("canny") },
+		"migrate": func() error {
+			_, err := sm.Migrate("canny", "codex", "", 24, 80)
+			return err
+		},
+		"soft-delete": func() error {
+			_, err := sm.SoftDelete("canny")
+			return err
+		},
+		"soft-delete-children": func() error {
+			_, err := sm.SoftDeleteWithChildren("canny", false)
+			return err
+		},
+		"restore": func() error {
+			_, err := sm.Restore("canny")
+			return err
+		},
+		"restore-children": func() error {
+			_, err := sm.RestoreWithChildren("canny")
+			return err
+		},
+		"stop": func() error { return sm.Stop("canny") },
+		"stop-children": func() error {
+			_, err := sm.StopWithChildren("canny", false)
+			return err
+		},
 		"delete": func() error { return sm.Delete("canny") },
+		"delete-children": func() error {
+			_, err := sm.DeleteWithChildren("canny", false)
+			return err
+		},
 	} {
 		if err := run(); err == nil || !strings.Contains(err.Error(), "removed-hook cleanup is still pending") {
 			t.Errorf("%s error = %v, want pending-cleanup refusal", operation, err)
@@ -4333,6 +4361,13 @@ func TestReconcileRemovedHookProcessesDoesNotSignalAfterColdRestart(t *testing.T
 	if persistedState.Status != StatusErrored || persistedState.PID != pid ||
 		!persistedState.RemovedHookCleanupPending {
 		t.Fatalf("blocked lifecycle operations changed durable cleanup evidence: %+v", persistedState)
+	}
+	persistedBytes, err := os.ReadFile(sm.paths.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(persistedBytes, originalStateBytes) {
+		t.Fatal("blocked lifecycle operations rewrote unresolved durable state")
 	}
 }
 
@@ -4400,6 +4435,111 @@ func TestReconcileRemovedHookProcessesRecoversReusedPIDWithoutSignal(t *testing.
 	persistedState := persisted.Sessions["dreich"]
 	if persistedState.PID != 0 || persistedState.RemovedHookCleanupPending {
 		t.Fatalf("safe reused-PID recovery was not persisted: %+v", persistedState)
+	}
+}
+
+func TestBulkLifecyclePreflightRejectsPendingRemovedHookDescendant(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(root, child *SessionState)
+		run     func(*SessionManager) error
+	}{
+		{
+			name: "soft delete",
+			run: func(sm *SessionManager) error {
+				_, err := sm.SoftDeleteWithChildren("braw", false)
+				return err
+			},
+		},
+		{
+			name: "hard delete",
+			run: func(sm *SessionManager) error {
+				_, err := sm.DeleteWithChildren("braw", false)
+				return err
+			},
+		},
+		{
+			name: "stop",
+			run: func(sm *SessionManager) error {
+				_, err := sm.StopWithChildren("braw", false)
+				return err
+			},
+		},
+		{
+			name: "restore",
+			prepare: func(root, child *SessionState) {
+				now := time.Now()
+				expires := now.Add(24 * time.Hour)
+				root.DeletedAt, root.ExpiresAt = &now, &expires
+				child.DeletedAt, child.ExpiresAt = &now, &expires
+			},
+			run: func(sm *SessionManager) error {
+				_, err := sm.RestoreWithChildren("braw")
+				return err
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sm := newTestSessionManagerWithDataDir(t)
+			cmd := startSleeperGroup(t)
+			pid := cmd.Process.Pid
+
+			start, err := grpty.ProcessStartTime(pid)
+			if err != nil {
+				t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+			}
+
+			var groupCalls int
+			withProcKill(t, func(target int, signal syscall.Signal) error {
+				if target == -pid {
+					groupCalls++
+					return syscall.EPERM
+				}
+
+				return syscall.Kill(target, signal)
+			})
+
+			root := &SessionState{ID: "braw", Name: "braw", Status: StatusRunning}
+			child := &SessionState{
+				ID: "dreich", Name: "dreich", ParentID: "braw", Status: StatusErrored,
+				PID: pid, PIDStartTime: start, RemovedHookCleanupPending: true,
+			}
+			if tc.prepare != nil {
+				tc.prepare(root, child)
+			}
+			sm.state.Sessions[root.ID] = root
+			sm.state.Sessions[child.ID] = child
+
+			sm.mu.Lock()
+			if err := sm.saveState(); err != nil {
+				sm.mu.Unlock()
+				t.Fatal(err)
+			}
+			sm.mu.Unlock()
+			before, err := os.ReadFile(sm.paths.StateFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			err = tc.run(sm)
+			if err == nil || !strings.Contains(err.Error(), "session \"dreich\"") ||
+				!strings.Contains(err.Error(), "removed-hook cleanup is still pending") {
+				t.Fatalf("operation error = %v, want pending descendant refusal", err)
+			}
+			if groupCalls != 0 || !isProcessAlive(pid) {
+				t.Fatalf("pending descendant was touched: group calls = %d, alive = %v", groupCalls, isProcessAlive(pid))
+			}
+
+			after, err := os.ReadFile(sm.paths.StateFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(after, before) {
+				t.Fatal("bulk refusal rewrote durable subtree state")
+			}
+		})
 	}
 }
 

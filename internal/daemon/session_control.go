@@ -242,6 +242,11 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 	if excludeRoot {
 		toStop = filterExcludeRoot(toStop, rootID)
 	}
+	if err := sm.rejectPendingUpgradeCleanupForIDsLocked(toStop); err != nil {
+		sm.mu.Unlock()
+
+		return nil, err
+	}
 
 	sm.mu.Unlock()
 
