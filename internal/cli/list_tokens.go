@@ -123,8 +123,8 @@ func formatTokenCountedAt(countedAt string, now time.Time) string {
 	return client.ShortDuration(age) + " ago"
 }
 
-// orderTokenProjectionSessions applies the normal list ordering and, when
-// requested, the same parent/child hierarchy used by gr list --tree.
+// orderTokenProjectionSessions applies the selected normal list ordering. Tree
+// mode reuses the hierarchy used by the default gr list table.
 func orderTokenProjectionSessions(sessions []protocol.SessionInfo, tree bool) []tokenProjectionSession {
 	if !tree {
 		ordered := append([]protocol.SessionInfo(nil), sessions...)
@@ -138,48 +138,12 @@ func orderTokenProjectionSessions(sessions []protocol.SessionInfo, tree bool) []
 		return rows
 	}
 
-	byID := make(map[string]protocol.SessionInfo, len(sessions))
-	children := make(map[string][]protocol.SessionInfo)
-
-	var roots []protocol.SessionInfo
-
-	for _, s := range sessions {
-		byID[s.ID] = s
-	}
-
-	for _, s := range sessions {
-		if s.ParentID == "" || byID[s.ParentID].ID == "" {
-			roots = append(roots, s)
-		} else {
-			children[s.ParentID] = append(children[s.ParentID], s)
-		}
-	}
-
-	sortTokenProjectionSessions(roots)
-
-	for id := range children {
-		sortTokenProjectionSessions(children[id])
-	}
-
 	rows := make([]tokenProjectionSession, 0, len(sessions))
-
-	var walk func(protocol.SessionInfo, string, string)
-
-	walk = func(s protocol.SessionInfo, prefix, childPrefix string) {
-		rows = append(rows, tokenProjectionSession{session: s, name: tokenProjectionName(s, prefix)})
-
-		kids := children[s.ID]
-		for i, kid := range kids {
-			if i == len(kids)-1 {
-				walk(kid, childPrefix+"\x60-- ", childPrefix+"    ")
-			} else {
-				walk(kid, childPrefix+"|-- ", childPrefix+"|   ")
-			}
-		}
-	}
-
-	for _, root := range roots {
-		walk(root, "", "")
+	for _, item := range orderSessionTree(sessions) {
+		rows = append(rows, tokenProjectionSession{
+			session: item.session,
+			name:    tokenProjectionName(item.session, item.prefix),
+		})
 	}
 
 	return rows

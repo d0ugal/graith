@@ -125,8 +125,8 @@ Copies the source worktree and starts a fresh agent. With `fork_args` configured
 ## Monitoring
 
 ```bash
-gr list                    # all sessions with status
-gr list --tree             # show parent-child hierarchy
+gr list                    # all sessions in parent-child hierarchy
+gr list --flat             # use flat repo/name ordering
 gr list --starred          # starred sessions only
 gr logs fix-auth-bug       # show recent output
 gr logs fix-auth-bug -f    # follow output live
