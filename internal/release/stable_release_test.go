@@ -273,6 +273,38 @@ func TestStableWorkflowDoesNotCoalesceDistinctTags(t *testing.T) {
 	if strings.Contains(data, "github.event_name == 'push' && 'publish'") {
 		t.Fatal("stable workflow coalesces distinct tag builds before the serialized publisher")
 	}
+
+	if !strings.Contains(data, "group: stable-publisher\n      cancel-in-progress: false\n      queue: max") {
+		t.Fatal("stable publisher must retain every distinct tag in its serialized queue")
+	}
+
+	var workflow struct {
+		Jobs map[string]struct {
+			Concurrency struct {
+				Group            string `yaml:"group"`
+				CancelInProgress bool   `yaml:"cancel-in-progress"`
+				Queue            string `yaml:"queue"`
+			} `yaml:"concurrency"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal([]byte(data), &workflow); err != nil {
+		t.Fatal(err)
+	}
+
+	publisher := workflow.Jobs["publish-stable"].Concurrency
+	if publisher.Group != "stable-publisher" || publisher.CancelInProgress || publisher.Queue != "max" {
+		t.Fatalf("stable publisher concurrency policy = %#v", publisher)
+	}
+
+	actionlintConfig := string(mustReadReleaseFile(t, ".github/actionlint.yaml"))
+	if strings.Count(actionlintConfig, "ignore:") != 1 || strings.Count(actionlintConfig, "unexpected key \"queue\"") != 1 {
+		t.Fatal("actionlint's queue-schema waiver must remain single and narrowly scoped")
+	}
+
+	if !strings.Contains(actionlintConfig, ".github/workflows/goreleaser.yml:") ||
+		!strings.Contains(actionlintConfig, "https://github.com/rhysd/actionlint/pull/654") {
+		t.Fatal("actionlint's queue-schema waiver must stay scoped and linked to its upstream removal condition")
+	}
 }
 
 func TestStableRenderersRejectIncompleteChecksums(t *testing.T) {
