@@ -505,6 +505,8 @@ func (sm *SessionManager) actionScenario(ctx context.Context, t *config.TriggerC
 		return "", err
 	}
 
+	// StartScenario uses one protocol-shaped entry point for both daemon
+	// handlers and in-process trigger actions, then normalizes to domain config.
 	triggers, err := scenariofile.TriggersToProtocol(sf.Triggers)
 	if err != nil {
 		return "", fmt.Errorf("encode scenario triggers: %w", err)
