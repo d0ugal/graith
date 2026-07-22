@@ -51,7 +51,7 @@ func TestCLISuiteIsolationKeepsLifecycleOffHostSocket(t *testing.T) {
 
 	listener, err := net.Listen("unix", hostSocket)
 	if err != nil {
-		if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
+		if os.Getenv("CI") == "" && (errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES)) {
 			t.Skipf("cannot bind sentinel Unix socket in this sandbox: %v", err)
 		}
 
@@ -129,6 +129,10 @@ func TestCLISuiteIsolationWorker(t *testing.T) {
 
 	if token := os.Getenv("GRAITH_TOKEN"); token != "" {
 		t.Fatalf("GRAITH_TOKEN = %q, want isolated empty credential", token)
+	}
+
+	if _, present := os.LookupEnv("GRAITH_SESSION_ID"); present {
+		t.Fatal("GRAITH_SESSION_ID survived suite isolation")
 	}
 
 	if err := daemonStopCmd.RunE(daemonStopCmd, nil); err == nil {

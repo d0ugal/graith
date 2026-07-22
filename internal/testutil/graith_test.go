@@ -14,11 +14,13 @@ func TestRunWithIsolatedGraithContainsPathsAndRestoresEnvironment(t *testing.T) 
 	hostRoot := t.TempDir()
 
 	original := map[string]string{
-		"XDG_CONFIG_HOME": filepath.Join(hostRoot, "config"),
-		"XDG_DATA_HOME":   filepath.Join(hostRoot, "data"),
-		"XDG_RUNTIME_DIR": filepath.Join(hostRoot, "runtime"),
-		"GRAITH_PROFILE":  "host-profile",
-		"GRAITH_TOKEN":    "host-token",
+		"XDG_CONFIG_HOME":     filepath.Join(hostRoot, "config"),
+		"XDG_DATA_HOME":       filepath.Join(hostRoot, "data"),
+		"XDG_RUNTIME_DIR":     filepath.Join(hostRoot, "runtime"),
+		"GRAITH_PROFILE":      "host-profile",
+		"GRAITH_TOKEN":        "host-token",
+		"GRAITH_SESSION_ID":   "host-session-id",
+		"GRAITH_SESSION_NAME": "host-session-name",
 	}
 	for name, value := range original {
 		t.Setenv(name, value)
@@ -42,6 +44,10 @@ func TestRunWithIsolatedGraithContainsPathsAndRestoresEnvironment(t *testing.T) 
 			t.Errorf("isolated profile = %q, want a non-host profile", paths.Profile)
 		}
 
+		if len(paths.SocketPath) >= 104 {
+			t.Errorf("isolated socket path is %d bytes, want less than macOS limit 104: %s", len(paths.SocketPath), paths.SocketPath)
+		}
+
 		for name, path := range map[string]string{
 			"config file": paths.ConfigFile,
 			"data dir":    paths.DataDir,
@@ -63,6 +69,12 @@ func TestRunWithIsolatedGraithContainsPathsAndRestoresEnvironment(t *testing.T) 
 
 		if token, present := os.LookupEnv("GRAITH_TOKEN"); !present || token != "" {
 			t.Errorf("GRAITH_TOKEN = %q, present=%t; want explicitly empty", token, present)
+		}
+
+		for _, name := range []string{"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME"} {
+			if value, present := os.LookupEnv(name); present {
+				t.Errorf("%s = %q, want unset", name, value)
+			}
 		}
 
 		if err := os.WriteFile(filepath.Join(isolatedRoot, "canny"), []byte("temporary\n"), 0o600); err != nil {
@@ -93,7 +105,10 @@ func TestRunWithIsolatedGraithRestoresUnsetEnvironment(t *testing.T) {
 		present bool
 	}
 
-	variables := []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR", "GRAITH_PROFILE", "GRAITH_TOKEN"}
+	variables := []string{
+		"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR", "GRAITH_PROFILE", "GRAITH_TOKEN",
+		"GRAITH_SESSION_ID", "GRAITH_SESSION_NAME",
+	}
 
 	original := make(map[string]originalValue, len(variables))
 	for _, name := range variables {
