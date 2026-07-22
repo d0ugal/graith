@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -949,6 +950,7 @@ func TestDevReleaseWorkflowPublishesWithoutCheckout(t *testing.T) {
 			t.Fatalf("create bin: %v", err)
 		}
 
+		//nolint:dupword // The embedded shell fixture necessarily repeats its fi terminator.
 		fakeGH := `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -1039,6 +1041,7 @@ esac
 		}
 
 		events := filepath.Join(work, "events")
+
 		state := filepath.Join(work, "state")
 		if err := os.Mkdir(state, 0o750); err != nil {
 			t.Fatalf("create fake gh state: %v", err)
@@ -1048,8 +1051,8 @@ esac
 		command.Dir = work
 		command.Env = []string{
 			"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
-			"FAKE_EXISTING_RELEASE=" + fmt.Sprintf("%t", existingRelease),
-			"FAKE_EXISTING_TAG=" + fmt.Sprintf("%t", existingTag),
+			"FAKE_EXISTING_RELEASE=" + strconv.FormatBool(existingRelease),
+			"FAKE_EXISTING_TAG=" + strconv.FormatBool(existingTag),
 			"FAKE_GH_EVENTS=" + events,
 			"FAKE_GH_FAIL_AT=" + failAt,
 			"FAKE_GH_STATE=" + state,
@@ -1095,9 +1098,11 @@ esac
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got := run(t, test.existingRelease, test.existingTag, "")
+
 			if got.err != nil {
 				t.Fatalf("run checkout-free publisher: %v\n%s", got.err, got.output)
 			}
+
 			if !slices.Equal(got.events, test.want) {
 				t.Fatalf("publisher events = %v, want %v", got.events, test.want)
 			}
@@ -1107,9 +1112,11 @@ esac
 	for index, failAt := range wantReleaseAndTagReplacement[2:] {
 		t.Run("fails closed at "+failAt, func(t *testing.T) {
 			got := run(t, true, true, failAt)
+
 			if got.err == nil {
 				t.Fatalf("publisher ignored %s failure", failAt)
 			}
+
 			want := wantReleaseAndTagReplacement[:index+3]
 			if !slices.Equal(got.events, want) {
 				t.Fatalf("publisher events after %s failure = %v, want %v", failAt, got.events, want)
