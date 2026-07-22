@@ -68,10 +68,10 @@ Cycle views with `h`/`l` or left/right arrows:
 
 | View | Shows |
 |------|-------|
-| All | Every session, grouped by repo |
-| Starred | Starred sessions only |
-| Labels | Sessions grouped by label across repositories |
-| Scenarios | Every session grouped by scenario, with unassigned sessions kept together |
+| All | Every session, grouped by repo, with parent/child trees inside each repo |
+| Starred | Starred sessions in a parent/child tree |
+| Labels | Sessions grouped by label across repositories, with a tree inside each label |
+| Scenarios | Every session grouped by scenario, with a tree inside each group and unassigned sessions kept together |
 | Deleted | Recently deleted sessions available to restore |
 
 ## Sending prompts

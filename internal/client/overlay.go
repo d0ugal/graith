@@ -919,106 +919,122 @@ func buildGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]boo
 	for _, repo := range repoOrder {
 		g := groups[repo]
 		items = append(items, groupHeader{name: repo, count: len(g)})
+		items = append(items, buildTreeItems(g, collapsed)...)
+	}
 
-		idSet := make(map[string]bool, len(g))
-		for _, s := range g {
-			idSet[s.ID] = true
+	return items
+}
+
+// buildTreeItems renders the hierarchy induced by sessions without adding a
+// group header. Parent links resolve only within the supplied slice, so a child
+// whose parent was removed by a view or search filter becomes a root. The
+// visited sets make malformed cycles safe while still rendering every member.
+func buildTreeItems(sessions []protocol.SessionInfo, collapsed map[string]bool) []list.Item {
+	idSet := make(map[string]bool, len(sessions))
+	for _, s := range sessions {
+		idSet[s.ID] = true
+	}
+
+	children := make(map[string][]protocol.SessionInfo)
+
+	var roots []protocol.SessionInfo
+
+	for _, s := range sessions {
+		if s.ParentID == "" || s.ParentID == s.ID || !idSet[s.ParentID] {
+			roots = append(roots, s)
+		} else {
+			children[s.ParentID] = append(children[s.ParentID], s)
 		}
+	}
 
-		children := make(map[string][]protocol.SessionInfo)
+	SortSessions(roots)
 
-		var roots []protocol.SessionInfo
+	for k := range children {
+		SortSessions(children[k])
+	}
 
-		for _, s := range g {
-			if s.ParentID == "" || s.ParentID == s.ID || !idSet[s.ParentID] {
-				roots = append(roots, s)
-			} else {
-				children[s.ParentID] = append(children[s.ParentID], s)
+	var countDescendants func(id string, seen map[string]bool) int
+
+	countDescendants = func(id string, seen map[string]bool) int {
+		kids := children[id]
+		n := 0
+
+		for _, kid := range kids {
+			if !seen[kid.ID] {
+				seen[kid.ID] = true
+				n++
+				n += countDescendants(kid.ID, seen)
 			}
 		}
 
-		SortSessions(roots)
+		return n
+	}
 
-		for k := range children {
-			SortSessions(children[k])
+	visited := make(map[string]bool)
+
+	var items []list.Item
+
+	var walk func(s protocol.SessionInfo, prefix, childPrefix string)
+
+	walk = func(s protocol.SessionInfo, prefix, childPrefix string) {
+		if visited[s.ID] {
+			return
 		}
 
-		var countDescendants func(id string, seen map[string]bool) int
+		visited[s.ID] = true
+		kids := children[s.ID]
+		hasKids := len(kids) > 0
+		isCollapsed := collapsed[s.ID] && hasKids
 
-		countDescendants = func(id string, seen map[string]bool) int {
-			kids := children[id]
-			n := 0
-
-			for _, kid := range kids {
-				if !seen[kid.ID] {
-					seen[kid.ID] = true
-					n++
-					n += countDescendants(kid.ID, seen)
-				}
-			}
-
-			return n
+		desc := 0
+		if hasKids {
+			desc = countDescendants(s.ID, map[string]bool{s.ID: true})
 		}
 
-		visited := make(map[string]bool)
+		items = append(items, sessionItem{
+			info:            s,
+			treePrefix:      prefix,
+			hasChildren:     hasKids,
+			collapsed:       isCollapsed,
+			descendantCount: desc,
+		})
+		if isCollapsed {
+			var markVisited func(id string)
 
-		var walk func(s protocol.SessionInfo, prefix, childPrefix string)
-
-		walk = func(s protocol.SessionInfo, prefix, childPrefix string) {
-			if visited[s.ID] {
-				return
-			}
-
-			visited[s.ID] = true
-			kids := children[s.ID]
-			hasKids := len(kids) > 0
-			isCollapsed := collapsed[s.ID] && hasKids
-
-			desc := 0
-			if hasKids {
-				desc = countDescendants(s.ID, map[string]bool{s.ID: true})
-			}
-
-			items = append(items, sessionItem{
-				info:            s,
-				treePrefix:      prefix,
-				hasChildren:     hasKids,
-				collapsed:       isCollapsed,
-				descendantCount: desc,
-			})
-			if isCollapsed {
-				var markVisited func(id string)
-
-				markVisited = func(id string) {
-					for _, kid := range children[id] {
-						if !visited[kid.ID] {
-							visited[kid.ID] = true
-							markVisited(kid.ID)
-						}
+			markVisited = func(id string) {
+				for _, kid := range children[id] {
+					if !visited[kid.ID] {
+						visited[kid.ID] = true
+						markVisited(kid.ID)
 					}
 				}
-				markVisited(s.ID)
-
-				return
 			}
+			markVisited(s.ID)
 
-			for i, kid := range kids {
-				if i == len(kids)-1 {
-					walk(kid, childPrefix+"└── ", childPrefix+"    ")
-				} else {
-					walk(kid, childPrefix+"├── ", childPrefix+"│   ")
-				}
-			}
+			return
 		}
 
-		for _, root := range roots {
-			walk(root, "", "")
-		}
-		// Render any cycle members that weren't reachable from roots.
-		for _, s := range g {
-			if !visited[s.ID] {
-				walk(s, "", "")
+		for i, kid := range kids {
+			if i == len(kids)-1 {
+				walk(kid, childPrefix+"└── ", childPrefix+"    ")
+			} else {
+				walk(kid, childPrefix+"├── ", childPrefix+"│   ")
 			}
+		}
+	}
+
+	for _, root := range roots {
+		walk(root, "", "")
+	}
+
+	// A cycle has no natural root. Start its first remaining member as a root;
+	// sorting the fallback candidates keeps the break point stable on refresh.
+	fallbacks := append([]protocol.SessionInfo(nil), sessions...)
+	SortSessions(fallbacks)
+
+	for _, s := range fallbacks {
+		if !visited[s.ID] {
+			walk(s, "", "")
 		}
 	}
 
@@ -1077,8 +1093,6 @@ func buildScenarioGroupedItems(sessions []protocol.SessionInfo, collapsed map[st
 			continue
 		}
 
-		SortSessions(g.sessions)
-
 		running := 0
 		stopped := 0
 		errored := 0
@@ -1108,18 +1122,12 @@ func buildScenarioGroupedItems(sessions []protocol.SessionInfo, collapsed map[st
 		}
 
 		items = append(items, groupHeader{name: g.name + status, count: len(g.sessions)})
-		for _, s := range g.sessions {
-			items = append(items, sessionItem{info: s})
-		}
+		items = append(items, buildTreeItems(g.sessions, collapsed)...)
 	}
 
 	if len(ungrouped) > 0 {
-		SortSessions(ungrouped)
-
 		items = append(items, groupHeader{name: "(no scenario)", count: len(ungrouped)})
-		for _, s := range ungrouped {
-			items = append(items, sessionItem{info: s})
-		}
+		items = append(items, buildTreeItems(ungrouped, collapsed)...)
 	}
 
 	return items
@@ -1128,7 +1136,7 @@ func buildScenarioGroupedItems(sessions []protocol.SessionInfo, collapsed map[st
 // buildLabelGroupedItems groups sessions by case-insensitive label identity.
 // A multi-labelled session deliberately appears once in each label group; each
 // group spans repositories because labels, rather than repos, are the axis.
-func buildLabelGroupedItems(sessions []protocol.SessionInfo) []list.Item {
+func buildLabelGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]bool) []list.Item {
 	type labelGroup struct {
 		name     string
 		sessions []protocol.SessionInfo
@@ -1174,16 +1182,40 @@ func buildLabelGroupedItems(sessions []protocol.SessionInfo) []list.Item {
 	var items []list.Item
 
 	for _, group := range groups {
-		SortSessions(group.sessions)
-
 		items = append(items, groupHeader{name: group.name, count: len(group.sessions)})
 
-		for _, s := range group.sessions {
-			items = append(items, sessionItem{info: s, labelGroup: group.name})
+		groupItems := buildTreeItems(group.sessions, collapsed)
+		for i, item := range groupItems {
+			if item, ok := item.(sessionItem); ok {
+				item.labelGroup = group.name
+				groupItems[i] = item
+			}
 		}
+
+		items = append(items, groupItems...)
 	}
 
 	return items
+}
+
+func buildViewItems(view viewMode, sessions []protocol.SessionInfo, collapsed map[string]bool) []list.Item {
+	switch view {
+	case viewAll:
+		return buildGroupedItems(sessions, collapsed)
+	case viewStarred:
+		return buildTreeItems(sessions, collapsed)
+	case viewLabels:
+		return buildLabelGroupedItems(sessions, collapsed)
+	case viewScenario:
+		return buildScenarioGroupedItems(sessions, collapsed)
+	default:
+		items := make([]list.Item, 0, len(sessions))
+		for _, s := range sessions {
+			items = append(items, sessionItem{info: s})
+		}
+
+		return items
+	}
 }
 
 func maxTreeIndentFromItems(items []list.Item) int {
@@ -1410,29 +1442,14 @@ func (m *overlayModel) rebuildForView() {
 		filtered = filterSessions(filtered, m.filterInput.Value())
 	}
 
-	var items []list.Item
-
-	switch m.view {
-	case viewAll:
-		items = buildGroupedItems(filtered, m.collapsed)
-	case viewLabels:
-		items = buildLabelGroupedItems(filtered)
-	case viewScenario:
-		items = buildScenarioGroupedItems(filtered, m.collapsed)
-	default:
-		for _, s := range filtered {
-			items = append(items, sessionItem{info: s})
-		}
-	}
+	items := buildViewItems(m.view, filtered, m.collapsed)
 
 	assignSessionIndices(items)
 
 	m.cols = computeColumnWidths(filtered, m.currentSessionID)
 	m.cols.name = maxSessionNameWidthFromItems(items, m.cols.name)
 
-	if m.view == viewAll || m.view == viewScenario {
-		m.cols.treeIndent = maxTreeIndentFromItems(items)
-	}
+	m.cols.treeIndent = maxTreeIndentFromItems(items)
 
 	m.contentWidth = m.cols.totalWidth()
 	m.list.SetItems(items)
@@ -1482,6 +1499,15 @@ func (m *overlayModel) selectSessionByIDAndLabel(id, label string) {
 	cur := parentOf[id]
 	for cur != "" && !seen[cur] {
 		seen[cur] = true
+		if label != "" {
+			for i, item := range m.list.Items() {
+				if si, ok := item.(sessionItem); ok && si.info.ID == cur && sessionlabel.Equal(si.labelGroup, label) {
+					m.list.Select(i)
+					return
+				}
+			}
+		}
+
 		for i, item := range m.list.Items() {
 			if si, ok := item.(sessionItem); ok && si.info.ID == cur {
 				m.list.Select(i)
@@ -1498,22 +1524,15 @@ func (m *overlayModel) selectSessionByIDAndLabel(id, label string) {
 }
 
 func (m *overlayModel) parentsWithChildren() []string {
-	childOf := make(map[string]bool)
-
-	idSet := make(map[string]bool)
-	for _, s := range m.allSessions {
-		idSet[s.ID] = true
-	}
-
-	for _, s := range m.allSessions {
-		if s.ParentID != "" && s.ParentID != s.ID && idSet[s.ParentID] {
-			childOf[s.ParentID] = true
-		}
-	}
+	seen := make(map[string]bool)
 
 	var parents []string
-	for id := range childOf {
-		parents = append(parents, id)
+
+	for _, item := range m.list.Items() {
+		if item, ok := item.(sessionItem); ok && item.hasChildren && !seen[item.info.ID] {
+			seen[item.info.ID] = true
+			parents = append(parents, item.info.ID)
+		}
 	}
 
 	return parents
@@ -1810,20 +1829,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				viewFiltered := m.sessionsForView()
 				filtered := filterSessions(viewFiltered, m.filterInput.Value())
 
-				var items []list.Item
-
-				switch m.view {
-				case viewAll:
-					items = buildGroupedItems(filtered, m.collapsed)
-				case viewLabels:
-					items = buildLabelGroupedItems(filtered)
-				case viewScenario:
-					items = buildScenarioGroupedItems(filtered, m.collapsed)
-				default:
-					for _, s := range filtered {
-						items = append(items, sessionItem{info: s})
-					}
-				}
+				items := buildViewItems(m.view, filtered, m.collapsed)
 
 				assignSessionIndices(items)
 				m.list.SetItems(items)
@@ -2050,6 +2056,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case " ", "space":
 				if item, ok := m.list.SelectedItem().(sessionItem); ok && item.hasChildren {
 					sid := item.info.ID
+					label := item.labelGroup
 					if m.collapsed[sid] {
 						delete(m.collapsed, sid)
 					} else {
@@ -2057,7 +2064,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 
 					m.rebuildForView()
-					m.selectSessionByID(sid)
+					m.selectSessionByIDAndLabel(sid, label)
 
 					return m, m.fetchPreviewCmd()
 				}
@@ -2065,7 +2072,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			case "C":
-				if m.view != viewAll {
+				if m.view == viewDeleted {
 					return m, nil
 				}
 
@@ -2083,9 +2090,10 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
-				curSID := ""
+				curSID, curLabel := "", ""
 				if item, ok := m.list.SelectedItem().(sessionItem); ok {
 					curSID = item.info.ID
+					curLabel = item.labelGroup
 				}
 
 				if allCollapsed {
@@ -2101,7 +2109,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.rebuildForView()
 
 				if curSID != "" {
-					m.selectSessionByID(curSID)
+					m.selectSessionByIDAndLabel(curSID, curLabel)
 				}
 
 				return m, m.fetchPreviewCmd()
