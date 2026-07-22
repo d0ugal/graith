@@ -732,6 +732,7 @@ func (sm *SessionManager) autoCleanupStopped(id string) {
 		sm.mu.Unlock()
 		return
 	}
+
 	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
 		sm.mu.Unlock()
 		sm.log.Warn("trigger auto-cleanup deferred while process cleanup is pending", "id", id, "err", err)

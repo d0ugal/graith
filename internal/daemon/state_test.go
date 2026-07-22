@@ -1224,6 +1224,7 @@ func TestMigrateV26ToCurrentDropsToolServerConfigAndPreservesBackup(t *testing.T
 
 func TestMigrateV27ToV28MarksOnlyPolicyEnabledSessionsForCleanRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
+
 	data := []byte(`{
   "version": 27,
   "sessions": {
@@ -1252,6 +1253,7 @@ func TestMigrateV27ToV28MarksOnlyPolicyEnabledSessionsForCleanRestart(t *testing
 	if !policySession.RemovedHookCleanupPending || policySession.Status != StatusErrored {
 		t.Fatalf("policy session = status %q pending %v, want errored pending cleanup", policySession.Status, policySession.RemovedHookCleanupPending)
 	}
+
 	if policySession.PID != 4242 || policySession.PIDStartTime != 84 {
 		t.Fatalf("policy process identity = %d/%d, want retained 4242/84", policySession.PID, policySession.PIDStartTime)
 	}
@@ -1264,10 +1266,12 @@ func TestMigrateV27ToV28MarksOnlyPolicyEnabledSessionsForCleanRestart(t *testing
 	if err := SaveState(path, loaded); err != nil {
 		t.Fatal(err)
 	}
+
 	persisted, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if bytes.Contains(persisted, []byte(`"command_policy"`)) || bytes.Contains(persisted, []byte("croft-secret")) {
 		t.Fatalf("migrated state retained removed creation configuration: %s", persisted)
 	}
@@ -1276,6 +1280,7 @@ func TestMigrateV27ToV28MarksOnlyPolicyEnabledSessionsForCleanRestart(t *testing
 	if err != nil {
 		t.Fatalf("read v27 backup: %v", err)
 	}
+
 	if !bytes.Equal(backup, data) {
 		t.Fatal("pre-migration backup does not contain the exact v27 state")
 	}

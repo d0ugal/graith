@@ -200,6 +200,7 @@ func (sm *SessionManager) resumeTombstones() {
 		removedHookCleanupPending := stateSession != nil && stateSession.RemovedHookCleanupPending
 		processStillRecorded := stateSession == nil ||
 			(stateSession.PID == t.PID && stateSession.PIDStartTime == t.PIDStartTime)
+
 		sm.mu.RUnlock()
 
 		// Removed-hook ownership is reconciled before tombstones during normal
@@ -208,6 +209,7 @@ func (sm *SessionManager) resumeTombstones() {
 		if removedHookCleanupPending {
 			sm.log.Warn("deferring interrupted delete while removed-hook cleanup is pending",
 				"id", t.ID, "pid", t.PID)
+
 			continue
 		}
 

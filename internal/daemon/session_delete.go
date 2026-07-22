@@ -642,6 +642,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 	if excludeRoot {
 		toDelete = filterExcludeRoot(toDelete, id)
 	}
+
 	if err := sm.rejectPendingUpgradeCleanupForIDsLocked(toDelete); err != nil {
 		sm.mu.Unlock()
 
@@ -1262,6 +1263,7 @@ func (sm *SessionManager) reconcileRemovedHookProcesses() error {
 	sm.mu.RLock()
 
 	var candidates []removedHookProcessCandidate
+
 	for id, session := range sm.state.Sessions {
 		if !session.RemovedHookCleanupPending || session.PID <= 0 {
 			continue
@@ -1295,6 +1297,7 @@ func (sm *SessionManager) reconcileRemovedHookProcesses() error {
 		}
 
 		sm.mu.Lock()
+
 		session := sm.state.Sessions[candidate.id]
 		if session != nil && session.PID == candidate.pid &&
 			session.PIDStartTime == candidate.pidStartTime && session.RemovedHookCleanupPending {
@@ -1306,6 +1309,7 @@ func (sm *SessionManager) reconcileRemovedHookProcesses() error {
 				session.PIDStartTime = 0
 				applyLifecycleSummaryLocked(session,
 					"Recorded removed-hook process generation is gone; any replacement PID was left untouched")
+
 				changed = true
 			}
 		}

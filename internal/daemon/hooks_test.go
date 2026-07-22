@@ -185,10 +185,12 @@ func TestCompleteRemovedHookCleanupPreservesUnrelatedArtifacts(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	settingsPath := filepath.Join(dir, "settings.json")
 	if err := os.WriteFile(settingsPath, []byte(`{"hooks":{"PreToolUse":[]}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	unrelatedPath := filepath.Join(dir, "notes.json")
 	if err := os.WriteFile(unrelatedPath, []byte(`{"croft":"canny"}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -201,9 +203,11 @@ func TestCompleteRemovedHookCleanupPreservesUnrelatedArtifacts(t *testing.T) {
 	if _, err := os.Stat(settingsPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("removed generated settings still exist: %v", err)
 	}
+
 	if _, err := os.Stat(unrelatedPath); err != nil {
 		t.Fatalf("unrelated artifact was removed: %v", err)
 	}
+
 	if sm.state.Sessions[sessionID].RemovedHookCleanupPending {
 		t.Fatal("cleanup marker was not cleared")
 	}
@@ -212,6 +216,7 @@ func TestCompleteRemovedHookCleanupPreservesUnrelatedArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if persisted.Sessions[sessionID].RemovedHookCleanupPending {
 		t.Fatal("cleanup marker was not cleared durably")
 	}
@@ -231,10 +236,12 @@ func TestCompleteRemovedHookCleanupRemovesOwnedCursorHook(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(hooksPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	legacy := []byte(`{"version":1,"hooks":{"preToolUse":[{"command":"gr legacy-check"}]}}`)
 	if err := os.WriteFile(hooksPath, legacy, 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := sm.recordCursorHooksOwnership(sessionID, worktree, legacy); err != nil {
 		t.Fatal(err)
 	}
@@ -246,6 +253,7 @@ func TestCompleteRemovedHookCleanupRemovesOwnedCursorHook(t *testing.T) {
 	if _, err := os.Stat(hooksPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("owned legacy cursor hook still exists: %v", err)
 	}
+
 	if sm.state.Sessions[sessionID].RemovedHookCleanupPending {
 		t.Fatal("cleanup marker was not cleared")
 	}
@@ -263,6 +271,7 @@ func TestCompleteRemovedHookCleanupRequiresResolvedProcess(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(settingsPath, []byte(`{"hooks":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -271,9 +280,11 @@ func TestCompleteRemovedHookCleanupRequiresResolvedProcess(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unresolved process identity") {
 		t.Fatalf("cleanup error = %v, want unresolved process refusal", err)
 	}
+
 	if _, err := os.Stat(settingsPath); err != nil {
 		t.Fatalf("artifact was removed before process cleanup: %v", err)
 	}
+
 	if !sm.state.Sessions[sessionID].RemovedHookCleanupPending {
 		t.Fatal("cleanup marker was cleared despite unresolved process")
 	}

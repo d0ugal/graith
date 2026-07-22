@@ -4225,6 +4225,7 @@ func TestReconcileRemovedHookProcessesDoesNotSignalAfterColdRestart(t *testing.T
 	}
 
 	var groupCalls int
+
 	withProcKill(t, func(target int, signal syscall.Signal) error {
 		if target == -pid {
 			groupCalls++
@@ -4242,23 +4243,28 @@ func TestReconcileRemovedHookProcessesDoesNotSignalAfterColdRestart(t *testing.T
 		SummaryText:  "Restart required because Graith command policy was removed",
 		SummarySetAt: &summarySetAt,
 	}
+
 	settingsPath := filepath.Join(sm.hookDir("canny"), "settings.json")
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(settingsPath, []byte(`{"hooks":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	sm.mu.Lock()
 	if err := sm.saveState(); err != nil {
 		sm.mu.Unlock()
 		t.Fatal(err)
 	}
 	sm.mu.Unlock()
+
 	originalStateBytes, err := os.ReadFile(sm.paths.StateFile)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for attempt := 1; attempt <= 2; attempt++ {
 		if err := sm.reconcileRemovedHookProcesses(); err != nil {
 			t.Fatalf("startup attempt %d process reconciliation: %v", attempt, err)
@@ -4266,20 +4272,24 @@ func TestReconcileRemovedHookProcessesDoesNotSignalAfterColdRestart(t *testing.T
 		// Generic orphan cleanup is a later startup phase. Keep its own guard so
 		// reordering cannot bypass removed-hook ownership quarantine.
 		sm.cleanupOrphanedProcesses()
+
 		err := sm.completeRemovedHookCleanup(true)
 		if err == nil || !strings.Contains(err.Error(), "do not signal that PID or process group directly") {
 			t.Fatalf("startup attempt %d cleanup error = %v, want actionable unresolved-process refusal", attempt, err)
 		}
+
 		got, _ := sm.Get("canny")
 		if got.Status != StatusErrored || !got.StatusChangedAt.Equal(statusChangedAt) ||
 			got.SummaryText != "Restart required because Graith command policy was removed" ||
 			got.SummarySetAt == nil || !got.SummarySetAt.Equal(summarySetAt) {
 			t.Fatalf("startup attempt %d changed unresolved lifecycle evidence: %+v", attempt, got)
 		}
+
 		stateBytes, readErr := os.ReadFile(sm.paths.StateFile)
 		if readErr != nil {
 			t.Fatal(readErr)
 		}
+
 		if !bytes.Equal(stateBytes, originalStateBytes) {
 			t.Fatalf("startup attempt %d rewrote unresolved durable state", attempt)
 		}
@@ -4288,6 +4298,7 @@ func TestReconcileRemovedHookProcessesDoesNotSignalAfterColdRestart(t *testing.T
 	if groupCalls != 0 {
 		t.Fatalf("cold-start cleanup made %d process-group calls; want none without a reserved generation", groupCalls)
 	}
+
 	if !isProcessAlive(pid) {
 		t.Fatal("cold-start cleanup killed the unreserved removed-hook process")
 	}
@@ -4301,6 +4312,7 @@ func TestReconcileRemovedHookProcessesDoesNotSignalAfterColdRestart(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	persistedState := persisted.Sessions["canny"]
 	if persistedState.Status != StatusErrored || persistedState.PID != pid ||
 		!persistedState.RemovedHookCleanupPending {
@@ -4364,18 +4376,22 @@ func TestReconcileRemovedHookProcessesDoesNotSignalAfterColdRestart(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	persistedState = persisted.Sessions["canny"]
 	if persistedState.Status != StatusErrored || persistedState.PID != pid ||
 		!persistedState.RemovedHookCleanupPending {
 		t.Fatalf("blocked lifecycle operations changed durable cleanup evidence: %+v", persistedState)
 	}
+
 	persistedBytes, err := os.ReadFile(sm.paths.StateFile)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !bytes.Equal(persistedBytes, originalStateBytes) {
 		t.Fatal("blocked lifecycle operations rewrote unresolved durable state")
 	}
+
 	if _, err := os.Stat(settingsPath); err != nil {
 		t.Fatalf("blocked lifecycle operations removed owned hook evidence: %v", err)
 	}
@@ -4392,6 +4408,7 @@ func TestInstallLoadedStatePreservesPendingDeletingEvidence(t *testing.T) {
 	}
 
 	var groupCalls int
+
 	withProcKill(t, func(target int, signal syscall.Signal) error {
 		if target == -pid {
 			groupCalls++
@@ -4403,6 +4420,7 @@ func TestInstallLoadedStatePreservesPendingDeletingEvidence(t *testing.T) {
 
 	statusChangedAt := time.Date(2026, time.July, 22, 14, 30, 0, 0, time.UTC)
 	summarySetAt := statusChangedAt.Add(time.Minute)
+
 	worktree := filepath.Join(sm.paths.DataDir, "worktrees", "croft", "bothy", "thrawn")
 	if err := os.MkdirAll(worktree, 0o700); err != nil {
 		t.Fatal(err)
@@ -4427,6 +4445,7 @@ func TestInstallLoadedStatePreservesPendingDeletingEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	sm.mu.Unlock()
+
 	before, err := os.ReadFile(sm.paths.StateFile)
 	if err != nil {
 		t.Fatal(err)
@@ -4436,12 +4455,15 @@ func TestInstallLoadedStatePreservesPendingDeletingEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := sm.installLoadedState(loaded); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := sm.reconcileRemovedHookProcesses(); err != nil {
 		t.Fatal(err)
 	}
+
 	cleanupErr := sm.completeRemovedHookCleanup(true)
 	if cleanupErr == nil || !strings.Contains(cleanupErr.Error(), "do not signal that PID or process group directly") {
 		t.Fatalf("cleanup error = %v, want no-signal recovery guidance", cleanupErr)
@@ -4451,17 +4473,21 @@ func TestInstallLoadedStatePreservesPendingDeletingEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !bytes.Equal(after, before) {
 		t.Fatal("load/install reconciliation rewrote pending deleting-state evidence")
 	}
+
 	got, _ := sm.Get("thrawn")
 	if got.Status != StatusDeleting || got.PID != pid || !got.RemovedHookCleanupPending ||
 		!got.StatusChangedAt.Equal(statusChangedAt) || got.SummarySetAt == nil || !got.SummarySetAt.Equal(summarySetAt) {
 		t.Fatalf("pending deleting-state evidence changed during startup: %+v", got)
 	}
+
 	if groupCalls != 0 || !isProcessAlive(pid) {
 		t.Fatalf("startup touched pending deleting process: group calls = %d, alive = %v", groupCalls, isProcessAlive(pid))
 	}
+
 	if _, err := os.Stat(sm.tombstonePath("thrawn")); err != nil {
 		t.Fatalf("startup removed pending delete tombstone: %v", err)
 	}
@@ -4476,12 +4502,14 @@ func TestReconcileRemovedHookProcessesRecoversReusedPIDWithoutSignal(t *testing.
 	if err != nil {
 		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
 	}
+
 	recordedStart := currentStart - 1
 	if recordedStart <= 0 {
 		t.Fatal("process start time is too small for a distinct recorded generation")
 	}
 
 	var groupCalls int
+
 	withProcKill(t, func(target int, signal syscall.Signal) error {
 		if target == -pid {
 			groupCalls++
@@ -4495,10 +4523,12 @@ func TestReconcileRemovedHookProcessesRecoversReusedPIDWithoutSignal(t *testing.
 		ID: "dreich", Agent: "claude", Status: StatusErrored,
 		PID: pid, PIDStartTime: recordedStart, RemovedHookCleanupPending: true,
 	}
+
 	settingsPath := filepath.Join(sm.hookDir("dreich"), "settings.json")
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(settingsPath, []byte(`{"hooks":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -4506,10 +4536,12 @@ func TestReconcileRemovedHookProcessesRecoversReusedPIDWithoutSignal(t *testing.
 	if err := sm.reconcileRemovedHookProcesses(); err != nil {
 		t.Fatal(err)
 	}
+
 	state, _ := sm.Get("dreich")
 	if state.Status != StatusStopped || state.PID != 0 || !state.RemovedHookCleanupPending {
 		t.Fatalf("reused PID generation was not safely resolved before artifact cleanup: %+v", state)
 	}
+
 	if groupCalls != 0 || !isProcessAlive(pid) {
 		t.Fatalf("replacement process was touched: group calls = %d, alive = %v", groupCalls, isProcessAlive(pid))
 	}
@@ -4517,9 +4549,11 @@ func TestReconcileRemovedHookProcessesRecoversReusedPIDWithoutSignal(t *testing.
 	if err := sm.completeRemovedHookCleanup(true); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := os.Stat(settingsPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("owned removed-hook artifact still exists: %v", err)
 	}
+
 	if !isProcessAlive(pid) {
 		t.Fatal("replacement process exited during safe artifact recovery")
 	}
@@ -4528,6 +4562,7 @@ func TestReconcileRemovedHookProcessesRecoversReusedPIDWithoutSignal(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	persistedState := persisted.Sessions["dreich"]
 	if persistedState.PID != 0 || persistedState.RemovedHookCleanupPending {
 		t.Fatalf("safe reused-PID recovery was not persisted: %+v", persistedState)
@@ -4588,6 +4623,7 @@ func TestBulkLifecyclePreflightRejectsPendingRemovedHookDescendant(t *testing.T)
 			}
 
 			var groupCalls int
+
 			withProcKill(t, func(target int, signal syscall.Signal) error {
 				if target == -pid {
 					groupCalls++
@@ -4598,6 +4634,7 @@ func TestBulkLifecyclePreflightRejectsPendingRemovedHookDescendant(t *testing.T)
 			})
 
 			root := &SessionState{ID: "braw", Name: "braw", Status: StatusRunning}
+
 			child := &SessionState{
 				ID: "dreich", Name: "dreich", ParentID: "braw", Status: StatusErrored,
 				PID: pid, PIDStartTime: start, RemovedHookCleanupPending: true,
@@ -4605,6 +4642,7 @@ func TestBulkLifecyclePreflightRejectsPendingRemovedHookDescendant(t *testing.T)
 			if tc.prepare != nil {
 				tc.prepare(root, child)
 			}
+
 			sm.state.Sessions[root.ID] = root
 			sm.state.Sessions[child.ID] = child
 
@@ -4614,6 +4652,7 @@ func TestBulkLifecyclePreflightRejectsPendingRemovedHookDescendant(t *testing.T)
 				t.Fatal(err)
 			}
 			sm.mu.Unlock()
+
 			before, err := os.ReadFile(sm.paths.StateFile)
 			if err != nil {
 				t.Fatal(err)
@@ -4624,6 +4663,7 @@ func TestBulkLifecyclePreflightRejectsPendingRemovedHookDescendant(t *testing.T)
 				!strings.Contains(err.Error(), "removed-hook cleanup is still pending") {
 				t.Fatalf("operation error = %v, want pending descendant refusal", err)
 			}
+
 			if groupCalls != 0 || !isProcessAlive(pid) {
 				t.Fatalf("pending descendant was touched: group calls = %d, alive = %v", groupCalls, isProcessAlive(pid))
 			}
@@ -4632,6 +4672,7 @@ func TestBulkLifecyclePreflightRejectsPendingRemovedHookDescendant(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			if !bytes.Equal(after, before) {
 				t.Fatal("bulk refusal rewrote durable subtree state")
 			}
@@ -4650,6 +4691,7 @@ func TestTriggerAutoCleanupDefersPendingRemovedHookEvidence(t *testing.T) {
 	}
 
 	var groupCalls int
+
 	withProcKill(t, func(target int, signal syscall.Signal) error {
 		if target == -pid {
 			groupCalls++
@@ -4673,6 +4715,7 @@ func TestTriggerAutoCleanupDefersPendingRemovedHookEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	sm.mu.Unlock()
+
 	before, err := os.ReadFile(sm.paths.StateFile)
 	if err != nil {
 		t.Fatal(err)
@@ -4683,13 +4726,16 @@ func TestTriggerAutoCleanupDefersPendingRemovedHookEvidence(t *testing.T) {
 	if groupCalls != 0 || !isProcessAlive(pid) {
 		t.Fatalf("trigger cleanup touched pending process: group calls = %d, alive = %v", groupCalls, isProcessAlive(pid))
 	}
+
 	after, err := os.ReadFile(sm.paths.StateFile)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !bytes.Equal(after, before) {
 		t.Fatal("trigger auto-cleanup rewrote pending durable evidence")
 	}
+
 	state, _ := sm.Get(session.ID)
 	if state.IsSoftDeleted() || !state.RemovedHookCleanupPending || state.PID != pid {
 		t.Fatalf("trigger auto-cleanup changed pending session: %+v", state)
@@ -4707,6 +4753,7 @@ func TestResumeTombstonesDefersRemovedHookProcessWithoutSignal(t *testing.T) {
 	}
 
 	var groupCalls int
+
 	withProcKill(t, func(target int, signal syscall.Signal) error {
 		if target == -pid {
 			groupCalls++
@@ -4738,12 +4785,15 @@ func TestResumeTombstonesDefersRemovedHookProcessWithoutSignal(t *testing.T) {
 	if groupCalls != 0 || !isProcessAlive(pid) {
 		t.Fatalf("pending interrupted-delete process was touched: group calls = %d, alive = %v", groupCalls, isProcessAlive(pid))
 	}
+
 	if _, ok := sm.state.Sessions["thrawn"]; !ok {
 		t.Fatal("pending interrupted-delete evidence was removed")
 	}
+
 	if _, err := os.Stat(worktree); err != nil {
 		t.Fatalf("pending interrupted-delete worktree was removed: %v", err)
 	}
+
 	if _, err := os.Stat(sm.tombstonePath("thrawn")); err != nil {
 		t.Fatalf("pending interrupted-delete tombstone was removed: %v", err)
 	}
@@ -4760,6 +4810,7 @@ func TestReconcileSoftDeletedOrphansDefersRemovedHookProcessWithoutSignal(t *tes
 	}
 
 	var groupCalls int
+
 	withProcKill(t, func(target int, signal syscall.Signal) error {
 		if target == -pid {
 			groupCalls++
@@ -4782,6 +4833,7 @@ func TestReconcileSoftDeletedOrphansDefersRemovedHookProcessWithoutSignal(t *tes
 	if groupCalls != 0 || !isProcessAlive(pid) {
 		t.Fatalf("pending soft-delete process was touched: group calls = %d, alive = %v", groupCalls, isProcessAlive(pid))
 	}
+
 	state, _ := sm.Get("dreich")
 	if state.PID != pid || !state.RemovedHookCleanupPending || !state.IsSoftDeleted() {
 		t.Fatalf("pending soft-delete evidence changed: %+v", state)

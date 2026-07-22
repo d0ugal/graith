@@ -307,6 +307,7 @@ func TestToolServerRemovalUpgradeFromExactMain(t *testing.T) {
 	runBinary(t, env, newBinary, "daemon", "stop")
 
 	downgradeOutput, downgradeErr := runBinaryOutput(env, oldBinary, "daemon", "start")
+
 	wantDowngrade := fmt.Sprintf("state file version %d is newer than this binary supports (26)", daemon.CurrentStateVersion)
 	if downgradeErr == nil || !strings.Contains(downgradeOutput, wantDowngrade) {
 		t.Fatalf("old daemon downgrade result = %v, output %q", downgradeErr, downgradeOutput)

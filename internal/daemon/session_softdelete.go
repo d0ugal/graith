@@ -67,6 +67,7 @@ func (sm *SessionManager) SoftDelete(id string) (SessionState, error) {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session %q not found", id)
 	}
+
 	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
 		sm.mu.Unlock()
 
@@ -236,19 +237,23 @@ func (sm *SessionManager) SoftDeleteWithChildren(rootID string, excludeRoot bool
 	defer sm.endLifecycleOperation()
 
 	sm.mu.RLock()
+
 	if _, ok := sm.state.Sessions[rootID]; !ok {
 		sm.mu.RUnlock()
 		return nil, fmt.Errorf("session %q not found", rootID)
 	}
+
 	initial := sm.collectDescendants(rootID)
 	if excludeRoot {
 		initial = filterExcludeRoot(initial, rootID)
 	}
+
 	if err := sm.rejectPendingUpgradeCleanupForIDsLocked(initial); err != nil {
 		sm.mu.RUnlock()
 
 		return nil, err
 	}
+
 	sm.mu.RUnlock()
 
 	deletedSet := make(map[string]bool)
@@ -336,6 +341,7 @@ func (sm *SessionManager) Restore(id string) (SessionState, error) {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session %q not found", id)
 	}
+
 	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
 		sm.mu.Unlock()
 
@@ -364,6 +370,7 @@ func (sm *SessionManager) restoreLocked(id string) (SessionState, error) {
 	if !ok {
 		return SessionState{}, fmt.Errorf("session %q not found", id)
 	}
+
 	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
 		return SessionState{}, err
 	}

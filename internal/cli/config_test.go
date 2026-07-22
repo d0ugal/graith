@@ -373,7 +373,6 @@ func TestConfigShowCovMissingFileUsesDefaults(t *testing.T) {
 	if got := rendered.Tools.Resolved(""); got != toolDefaults {
 		t.Errorf("config show tools = %+v, want runtime defaults %+v", got, toolDefaults)
 	}
-
 }
 
 func TestConfigDiffCovNoChanges(t *testing.T) {

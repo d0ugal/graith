@@ -42,6 +42,7 @@ func (sm *SessionManager) stopWithReason(id, reason, initiator string) error {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q not found", id)
 	}
+
 	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
 		sm.mu.Unlock()
 
@@ -242,6 +243,7 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 	if excludeRoot {
 		toStop = filterExcludeRoot(toStop, rootID)
 	}
+
 	if err := sm.rejectPendingUpgradeCleanupForIDsLocked(toStop); err != nil {
 		sm.mu.Unlock()
 
@@ -443,6 +445,7 @@ func (sm *SessionManager) restartWithReasonModeContextLocked(ctx context.Context
 	sm.mu.RLock()
 
 	softDeleted := false
+
 	var cleanupErr error
 
 	if s, ok := sm.state.Sessions[id]; ok {
