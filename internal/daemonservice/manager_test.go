@@ -14,6 +14,8 @@ import (
 	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
+func allowDaemonLifecycleMutation(string) error { return nil }
+
 type fakeServiceController struct {
 	mu               sync.Mutex
 	statuses         map[string]ServiceStatus
@@ -152,13 +154,14 @@ func testManager(t *testing.T, controller *fakeServiceController) *Manager {
 	}
 
 	manager := &Manager{
-		UID:         os.Getuid(),
-		Bundle:      ValidatedBundle{AppPath: "/bothy/Graith.app", Generation: Generation{ID: "1-braw", AppPath: "/bothy/Graith.app", Version: "1", Commit: "braw"}},
-		Store:       ReceiptStore{Root: filepath.Join(temp, "receipt"), UID: os.Getuid()},
-		ControlRoot: filepath.Join(services, "control", "bootstrap"),
-		Controller:  controller,
-		Now:         time.Now,
-		SkipCacheGC: true,
+		UID:                    os.Getuid(),
+		Bundle:                 ValidatedBundle{AppPath: "/bothy/Graith.app", Generation: Generation{ID: "1-braw", AppPath: "/bothy/Graith.app", Version: "1", Commit: "braw"}},
+		Store:                  ReceiptStore{Root: filepath.Join(temp, "receipt"), UID: os.Getuid()},
+		ControlRoot:            filepath.Join(services, "control", "bootstrap"),
+		Controller:             controller,
+		Now:                    time.Now,
+		SkipCacheGC:            true,
+		lifecycleMutationGuard: allowDaemonLifecycleMutation,
 	}
 	if err := manager.ensureReceipt(context.Background()); err != nil {
 		t.Fatal(err)
@@ -280,7 +283,7 @@ func TestConcurrentFirstRegistrationKeepsTransactionGenerationIsolated(t *testin
 				return &Manager{
 					UID: os.Geteuid(), Bundle: bundle, Store: store, Controller: controller,
 					TeamID: testTeam, Requirement: testRequirement, Verifier: expectations.VerifySignature,
-					SkipCacheGC: true,
+					SkipCacheGC: true, lifecycleMutationGuard: allowDaemonLifecycleMutation,
 				}
 			}
 
@@ -673,6 +676,45 @@ func TestStopStatePersistsLeaseAndExplicitRemoveReleasesIt(t *testing.T) {
 	}
 }
 
+func TestManagerRemoveRejectsGoTestBeforeStopControllerOrReceiptMutation(t *testing.T) {
+	controller := newFakeServiceController()
+	manager := testManager(t, controller)
+
+	paths := config.Paths{Profile: "canny", SocketPath: "/tmp/canny.sock"}
+	if err := manager.Launch(context.Background(), config.Default(), paths, "", 5*time.Second, []string{"PATH=/usr/bin:/bin"}); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := manager.Receipt()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	manager.lifecycleMutationGuard = nil
+	stopCalled := false
+
+	err = manager.Remove(context.Background(), "canny", false, func(ServiceReport) error {
+		stopCalled = true
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "Go test binary") {
+		t.Fatalf("Manager.Remove() error = %v, want Go-test refusal", err)
+	}
+
+	after, loadErr := manager.Receipt()
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+
+	if stopCalled || len(controller.unregistrations) != 0 {
+		t.Fatalf("Go-test refusal reached service primitives: stop=%t unregister=%v", stopCalled, controller.unregistrations)
+	}
+
+	if after.Transaction != before.Transaction || after.Pending != nil {
+		t.Fatalf("Go-test refusal mutated receipt: before=%#v after=%#v", before, after)
+	}
+}
+
 func TestReportsKeepProfilesIsolated(t *testing.T) {
 	t.Parallel()
 
@@ -732,6 +774,7 @@ func TestRepairRemovesOnlyProvenDownExactOrphan(t *testing.T) {
 		UID: os.Getuid(), Bundle: bundle,
 		Store: ReceiptStore{Root: filepath.Join(temp, "receipt"), UID: os.Getuid()}, Controller: controller,
 		TeamID: testTeam, Requirement: testRequirement, Verifier: expectations.VerifySignature,
+		lifecycleMutationGuard: allowDaemonLifecycleMutation,
 	}
 
 	actions, err := manager.Repair(context.Background())
@@ -762,6 +805,7 @@ func TestRepairQuarantinesDormantUnknownProgram(t *testing.T) {
 		UID: os.Getuid(), Bundle: bundle,
 		Store: ReceiptStore{Root: filepath.Join(temp, "receipt"), UID: os.Getuid()}, Controller: controller,
 		TeamID: testTeam, Requirement: testRequirement, Verifier: expectations.VerifySignature,
+		lifecycleMutationGuard: allowDaemonLifecycleMutation,
 	}
 
 	if _, err := manager.Repair(context.Background()); err != nil {
@@ -853,6 +897,7 @@ func TestRepairQuarantinesUnknownLiveSlotAfterReceiptLoss(t *testing.T) {
 		UID: os.Getuid(), Bundle: bundle,
 		Store: ReceiptStore{Root: filepath.Join(temp, "receipt"), UID: os.Getuid()}, Controller: controller,
 		TeamID: testTeam, Requirement: testRequirement, Verifier: expectations.VerifySignature,
+		lifecycleMutationGuard: allowDaemonLifecycleMutation,
 	}
 
 	actions, err := manager.Repair(context.Background())
@@ -907,6 +952,7 @@ func TestRepairPreservesCorruptReceiptsBeforeQuarantineInitialization(t *testing
 	manager := &Manager{
 		UID: os.Getuid(), Bundle: bundle, Store: store, Controller: controller,
 		TeamID: testTeam, Requirement: testRequirement, Verifier: expectations.VerifySignature,
+		lifecycleMutationGuard: allowDaemonLifecycleMutation,
 	}
 	if _, err := manager.Repair(context.Background()); err != nil {
 		t.Fatal(err)
@@ -1022,6 +1068,7 @@ func TestCacheGCKeepsBackupReferenceThenRemovesUnreferencedGeneration(t *testing
 		UID: os.Getuid(), Bundle: newBundle,
 		Store: ReceiptStore{Root: filepath.Join(temp, "receipt"), UID: os.Getuid()}, Controller: controller,
 		TeamID: testTeam, Requirement: testRequirement, Verifier: expectations.VerifySignature,
+		lifecycleMutationGuard: allowDaemonLifecycleMutation,
 	}
 	if _, err := manager.Store.Update(true, func(receipt *Receipt) error {
 		receipt.Default = &Registration{Slot: DefaultSlot, Label: Definitions()[0].Label, RegisteredGeneration: oldBundle.Generation.ID}
@@ -1144,6 +1191,7 @@ func TestReserveForCleanRestartRejectsUnusableExistingService(t *testing.T) {
 				UID: os.Getuid(), Bundle: bundle,
 				Store: ReceiptStore{Root: filepath.Join(temp, "receipt"), UID: os.Getuid()}, Controller: controller,
 				TeamID: testTeam, Requirement: testRequirement, Verifier: expectations.VerifySignature, SkipCacheGC: true,
+				lifecycleMutationGuard: allowDaemonLifecycleMutation,
 			}
 
 			generation := bundle.Generation.ID
@@ -1351,6 +1399,7 @@ func TestFreshPendingRegistrationWaitsWithinStartupDeadline(t *testing.T) {
 		Store: ReceiptStore{Root: filepath.Join(temp, "receipt"), UID: os.Getuid()}, Controller: controller,
 		TeamID: testTeam, Requirement: testRequirement, Verifier: expectations.VerifySignature,
 		Now: func() time.Time { return now }, SkipCacheGC: true,
+		lifecycleMutationGuard: allowDaemonLifecycleMutation,
 	}
 	if _, err := manager.Store.Update(true, func(receipt *Receipt) error {
 		receipt.Generations[bundle.Generation.ID] = bundle.Generation

@@ -14,6 +14,7 @@ import (
 	"github.com/d0ugal/graith/internal/agent"
 	"github.com/d0ugal/graith/internal/config"
 	grpty "github.com/d0ugal/graith/internal/pty"
+	"github.com/d0ugal/graith/internal/testprocess"
 )
 
 type Mode string
@@ -47,6 +48,20 @@ type Manager struct {
 	Development bool
 	Verifier    func(string) (SignatureInfo, error)
 	SkipCacheGC bool // test-only seam for synthetic managers without real bundles
+
+	// lifecycleMutationGuard is nil in production-created managers, which uses
+	// the fail-closed process guard. Package tests may set it on one synthetic
+	// manager so fake controllers and temporary receipts exercise allowed paths
+	// without weakening unrelated tests or production callers.
+	lifecycleMutationGuard func(string) error
+}
+
+func (manager *Manager) guardLifecycleMutation(operation string) error {
+	if manager.lifecycleMutationGuard != nil {
+		return manager.lifecycleMutationGuard(operation)
+	}
+
+	return testprocess.RefuseDaemonLifecycleMutation(operation)
 }
 
 type ResolveOptions struct {
@@ -62,6 +77,8 @@ type ResolveOptions struct {
 	ControlRoot      string
 	ReceiptRoot      string
 	SkipReceiptCheck bool
+
+	lifecycleMutationGuard func(string) error
 }
 
 func Resolve(executable, version, commit string, uid int) (Resolution, error) {
@@ -130,6 +147,15 @@ func resolveWith(ctx context.Context, options ResolveOptions) (Resolution, error
 
 	if !options.Managed {
 		return Resolution{Mode: ModeUnbundledFallback, Reason: "this source/unbundled build has no signed matching Graith.app"}, nil
+	}
+
+	guard := options.lifecycleMutationGuard
+	if guard == nil {
+		guard = testprocess.RefuseDaemonLifecycleMutation
+	}
+
+	if err := guard("resolve managed daemon service state"); err != nil {
+		return Resolution{}, err
 	}
 
 	bundle, present, err := DiscoverBundle(options.Executable, options.Expectations)
@@ -1029,6 +1055,10 @@ func (manager *Manager) now() time.Time {
 }
 
 func (manager *Manager) Launch(ctx context.Context, cfg *config.Config, paths config.Paths, configFile string, lifetime time.Duration, environ []string) error {
+	if err := manager.guardLifecycleMutation("launch managed daemon service"); err != nil {
+		return err
+	}
+
 	if cfg == nil {
 		return errors.New("daemon service launch requires loaded config")
 	}
@@ -1150,6 +1180,10 @@ func (manager *Manager) CurrentDefinition(profile string) (Definition, bool, err
 // is allocated and registered here so capacity or approval failure cannot turn
 // an intentional restart into avoidable downtime.
 func (manager *Manager) ReserveForCleanRestart(ctx context.Context, profile string) error {
+	if err := manager.guardLifecycleMutation("reserve managed daemon clean restart"); err != nil {
+		return err
+	}
+
 	receipt, err := manager.Store.Load()
 	if err != nil {
 		return err

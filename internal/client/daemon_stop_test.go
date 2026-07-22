@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/d0ugal/graith/internal/processidentity"
 )
 
 const daemonStopHelperEnv = "GRAITH_DAEMON_STOP_HELPER"
@@ -56,7 +58,7 @@ func TestStopDaemonByPIDRefusesForeignProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if stopDaemonByPID(pidFile) {
+	if stopDaemonByPIDWith(pidFile, processidentity.IsGraithDaemon, syscall.Kill) {
 		t.Fatal("stopDaemonByPID reported stopping a foreign process")
 	}
 
@@ -87,7 +89,7 @@ func TestStopDaemonByPIDRefusesStaleProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if stopDaemonByPID(pidFile) {
+	if stopDaemonByPIDWith(pidFile, processidentity.IsGraithDaemon, syscall.Kill) {
 		t.Fatal("stopDaemonByPID reported stopping a stale process")
 	}
 }

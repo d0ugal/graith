@@ -27,6 +27,7 @@ import (
 	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/processidentity"
 	grpty "github.com/d0ugal/graith/internal/pty"
+	"github.com/d0ugal/graith/internal/testprocess"
 	"golang.org/x/sys/unix"
 )
 
@@ -4264,6 +4265,26 @@ func resolveExecutable() (string, error) {
 }
 
 func StopDaemon(pidFile string) error {
+	return stopDaemonWithGuard(
+		pidFile,
+		testprocess.RefuseDaemonLifecycleMutation,
+		processidentity.IsGraithDaemon,
+		os.Remove,
+		stopVerifiedDaemonPID,
+	)
+}
+
+func stopDaemonWithGuard(
+	pidFile string,
+	guard func(string) error,
+	isDaemon func(int) bool,
+	remove func(string) error,
+	stop func(int) error,
+) error {
+	if err := guard("stop daemon from PID file"); err != nil {
+		return err
+	}
+
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -4275,38 +4296,59 @@ func StopDaemon(pidFile string) error {
 
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {
-		_ = os.Remove(pidFile)
+		_ = remove(pidFile)
 		return fmt.Errorf("invalid pid file: %w", err)
 	}
 
 	if pid <= 1 {
-		_ = os.Remove(pidFile)
+		_ = remove(pidFile)
 		return fmt.Errorf("refusing to signal invalid pid %d", pid)
 	}
 
-	if !processidentity.IsGraithDaemon(pid) {
-		_ = os.Remove(pidFile)
+	if !isDaemon(pid) {
+		_ = remove(pidFile)
 		return fmt.Errorf("pid %d is not a graith daemon, removing stale pid file", pid)
 	}
 
-	return stopVerifiedDaemonPID(pid)
+	return stop(pid)
 }
 
 // StopDaemonPID stops one previously authenticated daemon peer identity. The
 // caller obtains pid from Unix peer credentials, not from a mutable PID file.
 func StopDaemonPID(pid int) error {
+	return stopDaemonPIDWithGuard(
+		pid,
+		testprocess.RefuseDaemonLifecycleMutation,
+		processidentity.IsGraithDaemon,
+		stopVerifiedDaemonPID,
+	)
+}
+
+func stopDaemonPIDWithGuard(pid int, guard func(string) error, isDaemon func(int) bool, stop func(int) error) error {
+	if err := guard("stop daemon PID"); err != nil {
+		return err
+	}
+
 	if pid <= 1 {
 		return fmt.Errorf("refusing to signal invalid pid %d", pid)
 	}
 
-	if !processidentity.IsGraithDaemon(pid) {
+	if !isDaemon(pid) {
 		return fmt.Errorf("pid %d is not a graith daemon", pid)
 	}
 
-	return stopVerifiedDaemonPID(pid)
+	return stop(pid)
 }
 
 func stopVerifiedDaemonPID(pid int) error {
+	if err := testprocess.RefuseDaemonLifecycleMutation("signal verified daemon PID"); err != nil {
+		return err
+	}
+
+	return stopVerifiedDaemonPIDWith(pid)
+}
+
+func stopVerifiedDaemonPIDWith(pid int) error {
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
 		return fmt.Errorf("send SIGTERM to pid %d: %w", pid, err)
 	}

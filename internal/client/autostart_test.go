@@ -699,7 +699,7 @@ func TestPrepareDaemonCleanRestartRejectsManagedAgentBeforeResolution(t *testing
 	}
 	cleanRestartSecurityBoundaryDetected = func() bool { return true }
 
-	err := PrepareDaemonCleanRestart(context.Background(), config.Paths{Profile: "canny"})
+	err := prepareDaemonCleanRestartWithGuard(context.Background(), config.Paths{Profile: "canny"}, allowDaemonLifecycleMutation)
 	if err == nil || !strings.Contains(err.Error(), "agent-mode caller") {
 		t.Fatalf("PrepareDaemonCleanRestart() = %v, want preflight trust rejection", err)
 	}
@@ -719,7 +719,7 @@ func TestPrepareDaemonCleanRestartKeepsFallbackAgentBehavior(t *testing.T) {
 	}
 	cleanRestartSecurityBoundaryDetected = func() bool { return true }
 
-	if err := PrepareDaemonCleanRestart(context.Background(), config.Paths{Profile: "canny"}); err != nil {
+	if err := prepareDaemonCleanRestartWithGuard(context.Background(), config.Paths{Profile: "canny"}, allowDaemonLifecycleMutation); err != nil {
 		t.Fatalf("fallback PrepareDaemonCleanRestart() changed behavior: %v", err)
 	}
 }

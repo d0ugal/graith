@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -121,7 +122,10 @@ func TestStopDaemonIdentityRejectsReusedPID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = stopDaemonIdentity(os.Getpid(), start+1)
+	err = stopDaemonIdentityWith(
+		os.Getpid(), start+1, allowDaemonLifecycleMutation,
+		grpty.ProcessStartTime, syscall.Kill, pollDaemonReady,
+	)
 	if err == nil || !strings.Contains(err.Error(), "identity changed") {
 		t.Fatalf("stop identity error = %v, want identity-changed failure", err)
 	}

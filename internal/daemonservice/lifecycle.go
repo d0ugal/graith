@@ -162,6 +162,10 @@ func (manager *Manager) Reports(ctx context.Context, profile string, all bool) (
 }
 
 func (manager *Manager) MarkStopped(profile string, pid int) error {
+	if err := manager.guardLifecycleMutation("record stopped managed daemon service"); err != nil {
+		return err
+	}
+
 	_, err := manager.Store.Update(false, func(receipt *Receipt) error {
 		if profile == "" {
 			if receipt.Default != nil && receipt.Default.RunningPID == pid {
@@ -261,6 +265,10 @@ func generationReferences(receipt Receipt, references map[string]bool) {
 // receipt lock stays held across the decision and removal so another profile
 // cannot acquire a generation between the reference check and deletion.
 func (manager *Manager) GarbageCollectCache() ([]string, error) {
+	if err := manager.guardLifecycleMutation("remove unused managed daemon service cache"); err != nil {
+		return nil, err
+	}
+
 	if manager.SkipCacheGC {
 		return nil, nil
 	}
@@ -346,6 +354,10 @@ func (manager *Manager) GarbageCollectCache() ([]string, error) {
 type StopDaemonFunc func(ServiceReport) error
 
 func (manager *Manager) Remove(ctx context.Context, profile string, all bool, stop StopDaemonFunc) error {
+	if err := manager.guardLifecycleMutation("remove managed daemon service"); err != nil {
+		return err
+	}
+
 	reports, err := manager.Reports(ctx, profile, all)
 	if err != nil {
 		return err
@@ -504,6 +516,10 @@ func (manager *Manager) Remove(ctx context.Context, profile string, all bool, st
 }
 
 func (manager *Manager) Repair(ctx context.Context) ([]string, error) {
+	if err := manager.guardLifecycleMutation("repair managed daemon service registration"); err != nil {
+		return nil, err
+	}
+
 	receipt, loadErr := manager.Store.Load()
 
 	var actions []string

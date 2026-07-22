@@ -19,6 +19,27 @@ import (
 	"github.com/d0ugal/graith/internal/version"
 )
 
+func allowDaemonLifecycleMutation(string) error { return nil }
+
+func TestExecUpgradeRejectsGoTestBeforeDial(t *testing.T) {
+	setupUpgradeTest(t)
+
+	dialed := false
+	dialUpgradeClient = func() (upgradeExchangeConn, error) {
+		dialed = true
+		return nil, errors.New("dreich")
+	}
+
+	err := execUpgrade("done")
+	if err == nil || !strings.Contains(err.Error(), "Go test binary") {
+		t.Fatalf("execUpgrade() error = %v, want Go-test refusal", err)
+	}
+
+	if dialed {
+		t.Fatal("Go-test refusal dialed the daemon upgrade connection")
+	}
+}
+
 // TestUpgradeMsgPopulatesExecAndVersion verifies upgradeMsg captures the running
 // executable path and the client version, which the daemon needs to exec into
 // the correct binary during a preserve-restart.
@@ -316,7 +337,7 @@ func TestExecUpgradeInstallsConfiguredHandshakeDeadline(t *testing.T) {
 	}
 	dialUpgradeClient = func() (upgradeExchangeConn, error) { return fake, nil }
 
-	if err := execUpgrade("done"); err == nil {
+	if err := execUpgradeWithGuard("done", allowDaemonLifecycleMutation); err == nil {
 		t.Fatal("expected an error from a refused upgrade")
 	}
 
@@ -350,7 +371,7 @@ func TestExecUpgradeNegotiationFloorCoversServerAdmission(t *testing.T) {
 	}
 	dialUpgradeClient = func() (upgradeExchangeConn, error) { return fake, nil }
 
-	if err := execUpgrade("done"); err == nil {
+	if err := execUpgradeWithGuard("done", allowDaemonLifecycleMutation); err == nil {
 		t.Fatal("expected injected refusal")
 	}
 
@@ -395,7 +416,7 @@ func TestExecUpgradeClassifiesHandshakeErr(t *testing.T) {
 			}
 			dialUpgradeClient = func() (upgradeExchangeConn, error) { return fake, nil }
 
-			err := execUpgrade("done")
+			err := execUpgradeWithGuard("done", allowDaemonLifecycleMutation)
 			if err == nil {
 				t.Fatal("execUpgrade must fail on a handshake_err reply")
 			}
@@ -454,7 +475,9 @@ func TestRestartPreserveCleanlyCrossesProtocolBoundary(t *testing.T) {
 
 	cleanCalled := false
 
-	err := restartDaemonPreservingSessions(func() error {
+	err := restartDaemonPreservingSessionsWith(func(message string) error {
+		return execUpgradeWithGuard(message, allowDaemonLifecycleMutation)
+	}, func() error {
 		cleanCalled = true
 
 		return nil
@@ -548,7 +571,7 @@ func TestExecUpgradeWaitsForNewGenerationDespiteInheritedListener(t *testing.T) 
 		return version.Version, "new-gen"
 	}
 
-	if err := execUpgrade("upgraded"); err != nil {
+	if err := execUpgradeWithGuard("upgraded", allowDaemonLifecycleMutation); err != nil {
 		t.Fatalf("execUpgrade should succeed once the new generation appears: %v", err)
 	}
 
@@ -599,7 +622,9 @@ func TestRestartPreserveReconcilesGenerationAfterReadinessDeadline(t *testing.T)
 
 	cleanCalled := false
 
-	err := restartDaemonPreservingSessions(func() error {
+	err := restartDaemonPreservingSessionsWith(func(message string) error {
+		return execUpgradeWithGuard(message, allowDaemonLifecycleMutation)
+	}, func() error {
 		cleanCalled = true
 
 		return errors.New("clean start must not run")
@@ -659,7 +684,9 @@ func TestRestartPreserveDoesNotKillWhenReadinessIsUnconfirmed(t *testing.T) {
 	}
 	cleanCalled := false
 
-	err := restartDaemonPreservingSessions(func() error {
+	err := restartDaemonPreservingSessionsWith(func(message string) error {
+		return execUpgradeWithGuard(message, allowDaemonLifecycleMutation)
+	}, func() error {
 		cleanCalled = true
 
 		return nil
@@ -716,7 +743,9 @@ func TestRestartPreserveFallsBackAfterAuthenticatedPeerExit(t *testing.T) {
 		return "", ""
 	}
 
-	err := restartDaemonPreservingSessions(func() error {
+	err := restartDaemonPreservingSessionsWith(func(message string) error {
+		return execUpgradeWithGuard(message, allowDaemonLifecycleMutation)
+	}, func() error {
 		cleanStartCalled = true
 
 		return nil
@@ -751,7 +780,7 @@ func TestExecUpgradeFailsWhenOnlyInheritedListenerResponds(t *testing.T) {
 	// Inherited listener only: right version, unchanged instance ID forever.
 	probeDaemonIdentityFn = func(time.Time) (string, string) { return version.Version, "old-gen" }
 
-	err := execUpgrade("upgraded")
+	err := execUpgradeWithGuard("upgraded", allowDaemonLifecycleMutation)
 	if err == nil {
 		t.Fatal("execUpgrade must fail when only the inherited listener responds (no new generation)")
 	}
@@ -804,7 +833,7 @@ func TestExecUpgradeFailsWhenHandshakeCaptureFails(t *testing.T) {
 				return version.Version, "old-gen-would-be-accepted"
 			}
 
-			err := execUpgrade("done")
+			err := execUpgradeWithGuard("done", allowDaemonLifecycleMutation)
 			if err == nil {
 				t.Fatal("expected execUpgrade to fail when the pre-upgrade handshake can't be captured")
 			}
@@ -844,7 +873,7 @@ func TestExecUpgradeFailsWhenSendUpgradeFails(t *testing.T) {
 		return version.Version, "new-gen"
 	}
 
-	err := execUpgrade("done")
+	err := execUpgradeWithGuard("done", allowDaemonLifecycleMutation)
 	if err == nil {
 		t.Fatal("expected execUpgrade to fail when the upgrade request can't be sent")
 	}
@@ -868,7 +897,7 @@ func TestExecUpgradeRequiresSocketPeerPIDBeforeRequest(t *testing.T) {
 	}
 	dialUpgradeClient = func() (upgradeExchangeConn, error) { return fake, nil }
 
-	err := execUpgrade("done")
+	err := execUpgradeWithGuard("done", allowDaemonLifecycleMutation)
 	if err == nil || !strings.Contains(err.Error(), "identify daemon process") {
 		t.Fatalf("execUpgrade() error = %v, want peer-identity failure", err)
 	}
@@ -897,7 +926,9 @@ func TestRestartPreserveDefiniteRefusalSkipsCleanFallback(t *testing.T) {
 
 	cleanCalled := false
 
-	err := restartDaemonPreservingSessions(func() error {
+	err := restartDaemonPreservingSessionsWith(func(message string) error {
+		return execUpgradeWithGuard(message, allowDaemonLifecycleMutation)
+	}, func() error {
 		cleanCalled = true
 
 		return nil
@@ -926,7 +957,9 @@ func TestRestartPreservePreRequestFailureSkipsCleanFallback(t *testing.T) {
 
 	cleanCalled := false
 
-	err := restartDaemonPreservingSessions(func() error {
+	err := restartDaemonPreservingSessionsWith(func(message string) error {
+		return execUpgradeWithGuard(message, allowDaemonLifecycleMutation)
+	}, func() error {
 		cleanCalled = true
 
 		return nil
@@ -953,7 +986,7 @@ func TestExecUpgradeAlreadyInProgressRemainsUnconfirmed(t *testing.T) {
 	}
 	dialUpgradeClient = func() (upgradeExchangeConn, error) { return fake, nil }
 
-	err := execUpgrade("done")
+	err := execUpgradeWithGuard("done", allowDaemonLifecycleMutation)
 
 	var unconfirmed *preserveRestartUnconfirmedError
 	if !errors.As(err, &unconfirmed) {
