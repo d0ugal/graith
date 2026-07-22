@@ -176,12 +176,10 @@ jobs:
             *) echo "::error::Invalid managed dev release marker: $GRAITH_MANAGED_DEV_RELEASE"; exit 1 ;;
           esac
 
-          darwin_amd64_archive=dist/graith-dev_darwin_amd64.tar.gz
           darwin_arm64_archive=dist/graith-dev_darwin_arm64.tar.gz
           all_archives=(dist/graith-dev_*.tar.gz)
-          if [ "${#all_archives[@]}" -ne 2 ] || \
-             [ ! -f "$darwin_amd64_archive" ] || [ ! -f "$darwin_arm64_archive" ]; then
-            echo "::error::Expected exactly the Intel and native arm64 Darwin dev archives"
+          if [ "${#all_archives[@]}" -ne 1 ] || [ ! -f "$darwin_arm64_archive" ]; then
+            echo "::error::Expected exactly the native arm64 Darwin dev archive"
             exit 1
           fi
           if find dist -maxdepth 1 -name '*_charm*' -print -quit | grep -q .; then
@@ -189,31 +187,25 @@ jobs:
             exit 1
           fi
 
-          for archive in "$darwin_amd64_archive" "$darwin_arm64_archive"; do
-            unpacked="$(mktemp -d)"
-            tar -xzf "$archive" -C "$unpacked"
-            notifier_app="$unpacked/GraithNotifier.app"
-            notifier="$notifier_app/Contents/MacOS/graith-notifier"
-            service_app="$unpacked/Graith.app"
-
-            test -d "$notifier_app"
-            test -x "$notifier"
-            lipo "$notifier" -verify_arch arm64 x86_64
-            codesign --verify --deep --strict "$notifier_app"
-            if [ "$GRAITH_MANAGED_DEV_RELEASE" = true ]; then
-              test -d "$service_app"
-              test -x "$service_app/Contents/MacOS/gr"
-              cmp "$unpacked/gr-dev" "$service_app/Contents/MacOS/gr"
-              macos/service/verify-release-archive.sh \
-                "$archive" "$archive.service-verified.txt" true
-            elif [ -e "$service_app" ]; then
-              echo "::error::Legacy dev archive unexpectedly contains Graith.app: $archive"
-              exit 1
-            fi
-          done
-
           native_unpacked="$(mktemp -d)"
           tar -xzf "$darwin_arm64_archive" -C "$native_unpacked"
+          notifier_app="$native_unpacked/GraithNotifier.app"
+          notifier="$notifier_app/Contents/MacOS/graith-notifier"
+          service_app="$native_unpacked/Graith.app"
+          test -d "$notifier_app"
+          test -x "$notifier"
+          lipo "$notifier" -verify_arch arm64
+          codesign --verify --deep --strict "$notifier_app"
+          if [ "$GRAITH_MANAGED_DEV_RELEASE" = true ]; then
+            test -d "$service_app"
+            test -x "$service_app/Contents/MacOS/gr"
+            cmp "$native_unpacked/gr-dev" "$service_app/Contents/MacOS/gr"
+            macos/service/verify-release-archive.sh \
+              "$darwin_arm64_archive" "$darwin_arm64_archive.service-verified.txt" true
+          elif [ -e "$service_app" ]; then
+            echo "::error::Unmanaged dev archive unexpectedly contains Graith.app"
+            exit 1
+          fi
           scripts/libghostty-native.sh verify-darwin-arm64-candidate \
             "$native_unpacked/gr-dev" "$RELEASE_REVISION"
           scripts/libghostty-native.sh verify-candidate-spdx \
@@ -227,16 +219,6 @@ jobs:
           cmp "$native_unpacked/THIRD_PARTY_NOTICES.libghostty.md" \
             macos/build/libghostty-native-arm64/THIRD_PARTY_NOTICES.libghostty.md
 
-          amd64_unpacked="$(mktemp -d)"
-          tar -xzf "$darwin_amd64_archive" -C "$amd64_unpacked"
-          scripts/libghostty-native.sh verify-default-binary "$amd64_unpacked/gr-dev"
-          if find "$amd64_unpacked" -maxdepth 1 -type f \
-              \( -name libghostty-native.spdx.json -o -name THIRD_PARTY_NOTICES.libghostty.md \) \
-              -print -quit | grep -q .; then
-            echo "::error::Intel Darwin archive unexpectedly contains native metadata"
-            exit 1
-          fi
-
       - name: Record Darwin artifact identity
         run: |
           set -euo pipefail
@@ -245,10 +227,8 @@ jobs:
           jq -n \
             --arg revision "$RELEASE_REVISION" \
             --arg version "$GRAITH_DEV_VERSION" \
-            --arg amd64_sha "$(shasum -a 256 dist/graith-dev_darwin_amd64.tar.gz | awk '{print $1}')" \
             --arg arm64_sha "$(shasum -a 256 dist/graith-dev_darwin_arm64.tar.gz | awk '{print $1}')" \
             '{revision: $revision, version: $version, archives: {
-              "graith-dev_darwin_amd64.tar.gz": $amd64_sha,
               "graith-dev_darwin_arm64.tar.gz": $arm64_sha
             }}' > dist/dev-darwin-manifest.json
 
@@ -259,7 +239,6 @@ jobs:
           # an earlier attempt remain available to a retried downstream job.
           name: dev-darwin-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
           path: |
-            dist/graith-dev_darwin_amd64.tar.gz
             dist/graith-dev_darwin_arm64.tar.gz
             dist/dev-darwin-manifest.json
             dist/metadata.json
@@ -519,7 +498,6 @@ jobs:
           shopt -s nullglob
           test "$(git rev-parse HEAD)" = "$RELEASE_REVISION"
           archives=(
-            graith-dev_darwin_amd64.tar.gz
             graith-dev_darwin_arm64.tar.gz
             graith-dev_linux_amd64.tar.gz
             graith-dev_linux_arm64.tar.gz
@@ -538,10 +516,8 @@ jobs:
           jq -e \
             --arg revision "$RELEASE_REVISION" \
             --arg version "$GRAITH_DEV_VERSION" \
-            --arg amd64_sha "$(sha256sum dist/graith-dev_darwin_amd64.tar.gz | awk '{print $1}')" \
             --arg arm64_sha "$(sha256sum dist/graith-dev_darwin_arm64.tar.gz | awk '{print $1}')" \
             '.revision == $revision and .version == $version and
-             .archives["graith-dev_darwin_amd64.tar.gz"] == $amd64_sha and
              .archives["graith-dev_darwin_arm64.tar.gz"] == $arm64_sha' \
             dist/dev-darwin-manifest.json >/dev/null
 
@@ -572,7 +548,7 @@ jobs:
           (
             cd dist
             sha256sum "${archives[@]}" > checksums.txt
-            test "$(wc -l < checksums.txt)" -eq 4
+            test "$(wc -l < checksums.txt)" -eq 3
             sha256sum --check checksums.txt
           )
 
@@ -581,7 +557,6 @@ jobs:
         with:
           name: dev-release-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
           path: |
-            dist/graith-dev_darwin_amd64.tar.gz
             dist/graith-dev_darwin_arm64.tar.gz
             dist/graith-dev_linux_amd64.tar.gz
             dist/graith-dev_linux_arm64.tar.gz
@@ -614,7 +589,7 @@ jobs:
       - name: Reverify assembled checksums
         run: |
           set -euo pipefail
-          test "$(wc -l < dist/checksums.txt)" -eq 4
+          test "$(wc -l < dist/checksums.txt)" -eq 3
           (
             cd dist
             sha256sum --check checksums.txt
@@ -672,7 +647,6 @@ jobs:
           gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
             -f ref=refs/tags/dev -f sha="$RELEASE_REVISION" --silent
           gh release create dev --repo "$GITHUB_REPOSITORY" \
-            dist/graith-dev_darwin_amd64.tar.gz \
             dist/graith-dev_darwin_arm64.tar.gz \
             dist/graith-dev_linux_amd64.tar.gz \
             dist/graith-dev_linux_arm64.tar.gz \
@@ -683,7 +657,7 @@ jobs:
             --notes "Built from main at ${RELEASE_REVISION:0:7}. Install: \`brew install d0ugal/tap/graith-dev\`"
 
           expected="$(printf '%s\n' checksums.txt \
-            graith-dev_darwin_amd64.tar.gz graith-dev_darwin_arm64.tar.gz \
+            graith-dev_darwin_arm64.tar.gz \
             graith-dev_linux_amd64.tar.gz graith-dev_linux_arm64.tar.gz | sort)"
           actual="$(gh release view dev --repo "$GITHUB_REPOSITORY" \
             --json assets --jq '.assets[].name' | sort)"
@@ -698,7 +672,6 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="$GRAITH_DEV_VERSION"
-          DARWIN_AMD64_SHA="$(sha256sum dist/graith-dev_darwin_amd64.tar.gz | awk '{print $1}')"
           DARWIN_ARM64_SHA="$(sha256sum dist/graith-dev_darwin_arm64.tar.gz | awk '{print $1}')"
           LINUX_AMD64_SHA="$(sha256sum dist/graith-dev_linux_amd64.tar.gz | awk '{print $1}')"
           LINUX_ARM64_SHA="$(sha256sum dist/graith-dev_linux_arm64.tar.gz | awk '{print $1}')"
@@ -717,13 +690,11 @@ jobs:
             license "MIT"
 
             on_macos do
-              if Hardware::CPU.intel?
-                url "https://github.com/${REPO}/releases/download/${TAG}/graith-dev_darwin_amd64.tar.gz"
-                sha256 "${DARWIN_AMD64_SHA}"
-              end
               if Hardware::CPU.arm?
                 url "https://github.com/${REPO}/releases/download/${TAG}/graith-dev_darwin_arm64.tar.gz"
                 sha256 "${DARWIN_ARM64_SHA}"
+              else
+                odie "graith-dev supports only Apple Silicon on macOS"
               end
             end
 

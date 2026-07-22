@@ -143,8 +143,10 @@ unknown live job is intentionally quarantined.
 ### Native stable and `graith-dev` releases
 
 The normal stable release and moving `dev` release use the isolated libghostty
-backend on macOS arm64 and Linux amd64/arm64. The normal Intel macOS artifact
-remains the supported pure-Go Charm build; it is not a rollback artifact.
+backend on macOS arm64 and Linux amd64/arm64. Intel macOS is unsupported: new
+stable and dev releases do not publish a Darwin amd64 archive, and Homebrew
+stops with an unsupported-platform error instead of selecting another backend.
+Assets attached to historical releases remain unchanged.
 
 For stable installations, Homebrew and the package repositories select the
 matching `graith_<version>_darwin_arm64.tar.gz` or Linux tar/deb/rpm/apk asset.
@@ -167,7 +169,7 @@ sha256sum --check archive-checksum.txt
 For a stable download, substitute its exact versioned filename, for example
 `graith_0.70.0_linux_amd64.tar.gz`; the same attestation and checksum commands
 apply. Verify a downloaded deb/rpm/apk by selecting its exact line from the same
-ten-entry stable `checksums.txt`.
+stable `checksums.txt`.
 
 Use `graith-dev_linux_arm64.tar.gz` on arm64. The release workflow builds each
 Linux artifact from the exact pinned Ghostty/Zig dependency unit on Linux,
@@ -186,14 +188,14 @@ gr-dev doctor
 gr-dev doctor --json | jq -r .terminal_backend
 ```
 
-Native stable/dev artifacts report `libghostty-helper`; Intel macOS stable/dev
-artifacts report `charm`. See
+Every supported stable/dev artifact reports `libghostty-helper`. A `charm`
+result means an unsupported or historical binary is running. See
 [Troubleshooting]({{< relref "/docs/troubleshooting.md#verify-the-terminal-backend" >}})
 for the matching startup and failure log records.
 
 The dev and stable releases do not publish separately named rollback archives.
-Persistent scrollback remains backend-neutral, so a fresh native start,
-Charm-to-native upgrade, or native-to-native upgrade needs no state conversion.
+Persistent scrollback remains backend-neutral, so a fresh native start, upgrade
+from a historical Charm release, or native-to-native upgrade needs no state conversion.
 On macOS, remove the relevant service registration before uninstalling its
 package as described above.
 

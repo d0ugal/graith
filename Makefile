@@ -15,7 +15,9 @@ notifier:
 # Local ad-hoc Graith.app for lifecycle/manual verification. Production release
 # packaging invokes the same script with Developer ID + notarization inputs.
 service-app:
-	@commit=$$(git rev-parse --short HEAD); arch=$$(go env GOARCH); \
+	@arch=$$(go env GOARCH); \
+		[ "$$arch" = arm64 ] || { echo "Graith.app supports only Apple Silicon" >&2; exit 1; }; \
+		commit=$$(git rev-parse --short HEAD); \
 		mkdir -p macos/build; \
 		go build -v -trimpath -ldflags="-s -w \
 			-X github.com/d0ugal/graith/internal/version.Version=0.0.0 \

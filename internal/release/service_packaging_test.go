@@ -70,7 +70,7 @@ func TestDarwinReleaseBuildIsManagedAndPackagesMatchingApp(t *testing.T) {
 		builds[config.Builds[index].ID] = &config.Builds[index]
 	}
 
-	if len(builds) != 2 || builds["gr-darwin-amd64"] == nil || builds["gr-darwin-arm64"] == nil {
+	if len(builds) != 1 || builds["gr-darwin-arm64"] == nil {
 		t.Fatalf("stable Darwin builds = %#v", config.Builds)
 	}
 
@@ -117,21 +117,23 @@ func TestDarwinReleaseBuildIsManagedAndPackagesMatchingApp(t *testing.T) {
 		return false
 	}
 
-	for _, id := range []string{"darwin-amd64", "darwin-arm64"} {
-		if !hasServiceApp(archiveFiles[id]) {
-			t.Errorf("Darwin archive %q does not carry its architecture-specific Graith.app", id)
-		}
+	if !hasServiceApp(archiveFiles["darwin-arm64"]) {
+		t.Error("Darwin arm64 archive does not carry its architecture-specific Graith.app")
+	}
+
+	if _, ok := archiveFiles["darwin-amd64"]; ok {
+		t.Error("stable release still declares an unsupported Darwin amd64 archive")
 	}
 }
 
 func TestHomebrewInstallsServiceAppAndDocumentsExplicitUninstall(t *testing.T) {
 	work := t.TempDir()
 	checksums := filepath.Join(work, "checksums.txt")
-	hashes := []string{"a", "b", "c", "d"}
+	hashes := []string{"a", "b", "c"}
 
 	var lines []string
 
-	for index, platform := range []string{"darwin_amd64", "darwin_arm64", "linux_amd64", "linux_arm64"} {
+	for index, platform := range []string{"darwin_arm64", "linux_amd64", "linux_arm64"} {
 		lines = append(lines, strings.Repeat(hashes[index], 64)+"  graith_0.70.0_"+platform+".tar.gz")
 	}
 
@@ -159,6 +161,10 @@ func TestHomebrewInstallsServiceAppAndDocumentsExplicitUninstall(t *testing.T) {
 
 	if !strings.Contains(formula, "gr daemon service remove --all-profiles") || !strings.Contains(strings.ToLower(formula), "before uninstall") {
 		t.Fatal("Homebrew caveats do not require explicit per-user service removal before uninstall")
+	}
+
+	if strings.Contains(formula, "darwin_amd64") || !strings.Contains(formula, `odie "graith supports only Apple Silicon on macOS"`) {
+		t.Fatal("Homebrew formula does not fail closed on unsupported Intel macOS")
 	}
 }
 
@@ -282,6 +288,38 @@ func TestServiceBundleBuildContract(t *testing.T) {
 	}
 }
 
+func TestServiceBundleBuildRejectsUnsupportedArchitectures(t *testing.T) {
+	root := serviceRepoRoot(t)
+
+	makefile, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(string(makefile), `[ "$$arch" = arm64 ]`) {
+		t.Fatal("service-app target does not reject unsupported host architectures before building")
+	}
+
+	work := t.TempDir()
+	payload := filepath.Join(work, "gr")
+	writeTestExecutable(t, payload, []byte("bothy\n"))
+
+	for _, arch := range []string{"amd64", "x86_64"} {
+		t.Run(arch, func(t *testing.T) {
+			command := exec.Command(
+				filepath.Join(root, "macos", "service", "build.sh"),
+				"--development", "--arch", arch, "--version", "0.70.0",
+				"--commit", "canny", "--payload", payload, "--output", filepath.Join(work, "output"),
+			)
+
+			output, runErr := command.CombinedOutput()
+			if runErr == nil || !strings.Contains(string(output), "usage: build.sh --arch arm64 ") {
+				t.Fatalf("unsupported service build error = %v, output = %q", runErr, output)
+			}
+		})
+	}
+}
+
 func TestServiceReleaseHookSeparatesSignedSnapshotsAndBuildIdentities(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(serviceRepoRoot(t), "macos", "service", "release-hook.sh"))
 	if err != nil {
@@ -352,6 +390,37 @@ func TestServiceReleaseHookCanOmitDevServiceBundle(t *testing.T) {
 
 	if string(data) != "canny\n" {
 		t.Fatalf("legacy release changed standalone artifact: %q", data)
+	}
+}
+
+func TestServiceReleaseHookRejectsDarwinAMD64(t *testing.T) {
+	root := serviceRepoRoot(t)
+
+	hook, err := os.ReadFile(filepath.Join(root, "macos", "service", "release-hook.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	work := t.TempDir()
+	hookPath := filepath.Join(work, "release-hook.sh")
+	writeTestExecutable(t, hookPath, hook)
+
+	buildMarker := filepath.Join(work, "build-ran")
+	writeTestExecutable(t, filepath.Join(work, "build.sh"), []byte("#!/bin/sh\ntouch \"$BUILD_MARKER\"\n"))
+	artifact := filepath.Join(work, "gr")
+	writeTestExecutable(t, artifact, []byte("thrawn\n"))
+
+	command := exec.Command(hookPath, artifact, "darwin_amd64", "0.70.0", "canny", "false")
+	command.Dir = work
+	command.Env = []string{"PATH=" + os.Getenv("PATH"), "BUILD_MARKER=" + buildMarker}
+
+	output, runErr := command.CombinedOutput()
+	if runErr == nil || !strings.Contains(string(output), "unsupported daemon service release target: darwin_amd64") {
+		t.Fatalf("unsupported hook target error = %v, output = %q", runErr, output)
+	}
+
+	if _, err := os.Stat(buildMarker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unsupported Darwin amd64 target ran service build: %v", err)
 	}
 }
 

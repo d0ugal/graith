@@ -17,32 +17,6 @@ before:
     - sh -c 'test "$(uname -s)-$(uname -m)" != Darwin-arm64 || { test -n "${GRAITH_LIBGHOSTTY_WORK:-}" && test -f "$GRAITH_LIBGHOSTTY_WORK/pkgconfig/libghostty-vt-static.pc"; }'
 
 builds:
-  # Intel macOS remains the supported pure-Go Charm artifact. It is not a
-  # rollback artifact and deliberately carries no native metadata.
-  - id: gr-darwin-amd64
-    main: ./cmd/graith
-    binary: gr
-    env:
-      - CGO_ENABLED=0
-    flags:
-      - -trimpath
-    mod_timestamp: "{{ .CommitTimestamp }}"
-    ldflags:
-      - -s -w
-      - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
-      - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
-      - -X github.com/d0ugal/graith/internal/daemonservice.ManagedBuild=true
-      - -X github.com/d0ugal/graith/internal/daemonservice.DevelopmentBuild={{ .IsSnapshot }}
-      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedTeamID={{ if not .IsSnapshot }}{{ .Env.GRAITH_SIGNING_TEAM_ID }}{{ end }}
-      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedRequirementBase64={{ if not .IsSnapshot }}{{ .Env.GRAITH_SIGNING_REQUIREMENT_B64 }}{{ end }}
-    hooks:
-      post:
-        - cmd: macos/service/release-hook.sh "{{ .Path }}" "{{ .Target }}" "{{ .Version }}" "{{ .Commit }}" "{{ .IsSnapshot }}"
-          output: true
-    goos:
-      - darwin
-    goarch:
-      - amd64
   - id: gr-darwin-arm64
     main: ./cmd/graith
     binary: gr
@@ -75,24 +49,6 @@ builds:
       - arm64
 
 archives:
-  - id: darwin-amd64
-    ids:
-      - gr-darwin-amd64
-    formats:
-      - tar.gz
-    name_template: "graith_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    files:
-      - LICENSE
-      - README.md
-      - CHANGELOG.md
-      - completions/gr.bash
-      - completions/gr.zsh
-      - completions/gr.fish
-      - man/*.1.gz
-      - src: macos/build/GraithNotifier.app/**/*
-        dst: GraithNotifier.app/Contents
-      - src: macos/build/service-release-{{ .Arch }}/Graith.app/**/*
-        dst: Graith.app/Contents
   - id: darwin-arm64
     ids:
       - gr-darwin-arm64

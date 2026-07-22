@@ -22,7 +22,6 @@ checksum_for() {
     printf '%s' "$matches"
 }
 
-darwin_amd64="$(checksum_for "graith_${version}_darwin_amd64.tar.gz")"
 darwin_arm64="$(checksum_for "graith_${version}_darwin_arm64.tar.gz")"
 linux_amd64="$(checksum_for "graith_${version}_linux_amd64.tar.gz")"
 linux_arm64="$(checksum_for "graith_${version}_linux_arm64.tar.gz")"
@@ -41,8 +40,7 @@ class Graith < Formula
       url "https://github.com/d0ugal/graith/releases/download/v${version}/graith_${version}_darwin_arm64.tar.gz"
       sha256 "${darwin_arm64}"
     else
-      url "https://github.com/d0ugal/graith/releases/download/v${version}/graith_${version}_darwin_amd64.tar.gz"
-      sha256 "${darwin_amd64}"
+      odie "graith supports only Apple Silicon on macOS"
     end
   end
 

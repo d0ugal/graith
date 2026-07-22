@@ -2,7 +2,7 @@
 title: "Design Doc: Native libghostty daemon backend"
 authors: Dougal Matthews
 created: 2026-07-18
-status: Accepted (stable on macOS arm64 and Linux; macOS amd64 retained)
+status: Accepted (stable on macOS arm64 and Linux; macOS amd64 unsupported)
 reviewers: (none yet)
 informed: (TBD)
 issue: https://github.com/d0ugal/graith/issues/1432
@@ -14,10 +14,11 @@ Graith will adopt `libghostty-vt` as its daemon terminal-screen model through
 the public `go-libghostty` API and a restartable helper-process boundary. The
 decision is **GO for staged adoption**. The accepted dev evidence now promotes
 the normal stable macOS arm64 and Linux amd64/arm64 artifacts to the native
-backend. The current Go model remains in source as the normal supported macOS
-amd64 implementation. Issue #1495 retired comparison-only machinery ahead of
-the remaining platform decision; promoted targets publish no separately named
-rollback archive.
+backend. The current Go model remains in source as a compatibility
+implementation while its remaining source and dependency cleanup is handled
+separately. Issue #1495 retired comparison-only machinery. New stable and dev
+releases support macOS arm64 and Linux amd64/arm64 only and publish no separately
+named rollback archive; historical release assets remain unchanged.
 
 ## Background
 
@@ -63,17 +64,17 @@ keep backend transitions independent of terminal state or protocol migrations.
 - Use the same synthetic corpus and operational workloads for both models.
 - Produce exact-pin macOS arm64 and Linux stable artifacts with native licensing
   and executable-bound SBOM data.
-- Preserve compatible persisted state and the retained-platform implementation
-  across native promotion, without parallel rollback assets.
+- Preserve compatible persisted state across native promotion, without parallel
+  rollback assets.
 
 ### Non-Goals
 
-- Removing the retained Charm source or deciding macOS amd64's future. That is
-  owned by #1495 after the stable native promotion.
+- Removing the remaining Charm source and dependency after release-platform
+  withdrawal. That cleanup is separate from this coordinated promotion.
 - Changing the wire protocol, scrollback format, iOS renderer, or macOS app
   renderer.
 - Maintaining a second Graith-specific C binding beside `go-libghostty`.
-- Removing Charm before every retained platform receives its own backend decision.
+- Rewriting historical releases or deleting their existing assets.
 - Committing captured terminal output, native build products, or machine-local
   paths as evidence.
 
@@ -82,7 +83,7 @@ keep backend transitions independent of terminal state or protocol migrations.
 | Surface | Decision | Rationale |
 |---------|----------|-----------|
 | CLI/daemon on macOS arm64 | Stable native | The normal stable and `graith-dev` artifacts use the exact pinned process-isolated native helper. No separately named rollback archive is published. |
-| CLI/daemon on macOS amd64 | Pure-Go retained target | Native libghostty is not a supported target; the ordinary artifact remains supported and is not branded as a rollback. |
+| CLI/daemon on macOS amd64 | Unsupported | New stable and dev releases publish no artifact or Homebrew selection. Tagged native selection and release selectors fail closed. Historical release assets are not mutated. |
 | CLI/daemon on Linux amd64/arm64 | Stable native | Normal stable tar/deb/rpm/apk artifacts and `graith-dev` archives use the exact pinned process-isolated helper and are executed on their actual architectures before publication. |
 | iOS app | No behavior change | It already uses the shared Ghostty pin through its native renderer; daemon selection does not change the app renderer. |
 | macOS app | No behavior change | The app renderer is independent, while a local daemon may use the tagged candidate. |
@@ -327,8 +328,8 @@ CoreFoundation, Security, and `/usr/lib/libSystem.B.dylib`.
 
 The path-scoped native workflow performs these checks:
 
-- ordinary `CGO_ENABLED=0` builds and retained-backend compatibility tests,
-  proving the macOS amd64 target does not select cgo or require a native archive;
+- ordinary `CGO_ENABLED=0` builds and retained-backend compatibility tests for
+  supported source configurations, without treating their outputs as release artifacts;
 - tagged Darwin arm64 execution and linking against the arm64 slice of the
   checksum-pinned Apple archive;
 - fail-closed tagged Darwin amd64 selection without native linkage;
@@ -349,13 +350,14 @@ The path-scoped native workflow performs these checks:
 
 An explicit native tagged build without cgo, on macOS amd64, or on an
 unsupported OS returns a configuration error rather than silently changing
-emulator. Both release channels are split by platform. GoReleaser produces the
-two Darwin archives on Apple Silicon, while Linux jobs build the exact source
+emulator. Both release channels are split by platform. GoReleaser produces one
+Darwin arm64 archive on Apple Silicon, while Linux jobs build the exact source
 dependency unit and package one native artifact set per architecture. Every job
 consumes one revision and version from its release-context job. The stable
-aggregator accepts exactly two Darwin archives plus Linux tar/deb/rpm/apk for
-both architectures, verifies builder manifests, produces one ten-entry checksum
-file, and submits the eleven files for provenance. Pull requests exercise this
+aggregator accepts exactly one Darwin archive plus Linux tar/deb/rpm/apk for
+both architectures, verifies builder manifests, produces a nine-entry checksum
+file, and submits those nine artifacts plus the checksum file for provenance.
+Pull requests exercise this
 unsigned build-only shape without publication. A tag build requires configured
 macOS signing/notarization, verifies the exact release-please-created tag and
 attestations, stages the complete set on the draft, and prepares every configured
@@ -441,12 +443,13 @@ artifacts; changing only `go.mod` is insufficient.
    additional fixed cycle count, elapsed-time soak, or calendar observation
    window gates stable promotion.
 2. Promote the normal macOS arm64 and Linux amd64/arm64 artifacts together via
-   the strict multi-platform stable publisher described above. Keep the normal
-   macOS amd64 artifact pure Go and do not publish an alternate rollback archive.
-3. Comparison-only instrumentation is already retired under #1495. After every
-   retained-platform decision closes, remove Charm, its selector, and
-   backend-specific expectations. Keep the backend-neutral interface and
-   persistent reconstruction path.
+   the strict multi-platform stable publisher described above. Withdraw macOS
+   amd64 from future stable/dev publication and selectors without changing
+   historical release assets, and do not publish an alternate rollback archive.
+3. Comparison-only instrumentation is already retired under #1495. Remove the
+   remaining Charm source, dependency, selector, and backend-specific
+   expectations in its separately owned cleanup. Keep the backend-neutral
+   interface and persistent reconstruction path.
 
 No backend transition converts state. Sessions, PTYs, protocol messages, and
 stored bytes are unchanged, and a newly installed compatible build reconstructs
@@ -496,9 +499,10 @@ benchmark claim.
 - default `go test -race ./...`, `go vet ./...`, repository lint, actionlint,
   shell validation, generated-file checks, and integration tests
 - macOS arm64 final archive linkage, signing structure, private self-test, and
-  lifecycle execution; macOS amd64 default-backend and metadata exclusion;
-  exact-source Linux amd64/arm64 builds; and final tar/deb/rpm/apk verification
-  and lifecycle execution on actual-architecture runners
+  lifecycle execution; macOS amd64 absence from release configs, matrices,
+  assets, and Homebrew selection plus fail-closed tagged selection; exact-source
+  Linux amd64/arm64 builds; and final tar/deb/rpm/apk verification and lifecycle
+  execution on actual-architecture runners
 - full diff scan for binaries, captured output, identifiers, credentials,
   machine paths, and native build directories
 
