@@ -19,13 +19,14 @@
 #     isn't registered/classified fails `TestManifestRegistryComplete`, which this
 #     job cannot and must not auto-fix — so auto-regen can't paper over a real
 #     decision, only mechanical churn (e.g. an added optional field).
-#   - Same-repo PRs only: fork PRs get a read-only GITHUB_TOKEN, so a push would 403
-#     (same guard the docs-preview workflow uses). Forks still get the failing gate
-#     in the Test job, just no auto-fix.
-#   - A push made with GITHUB_TOKEN does not itself re-trigger workflows, so there is
-#     no loop. When this job commits generated output, it explicitly dispatches every
-#     required workflow at that branch head so the final generated SHA—not its stale
-#     predecessor—owns the merge-gate results.
+#   - Same-repo PRs only: the workflow-triggering RELEASE_TOKEN is never exposed to
+#     fork-controlled code. Forks still get the failing gate in the Test job, just
+#     no auto-fix.
+#   - RELEASE_TOKEN is the repository's established credential for pushes that must
+#     trigger CI. Its push emits the normal pull_request synchronize event, so every
+#     PR workflow reports against the generated head. That event starts a new run in
+#     this concurrency group and may cancel this run after its successful push; the
+#     replacement sees clean generated outputs and exits without another commit.
 name: Regenerate
 
 on:
@@ -41,21 +42,33 @@ concurrency:
 jobs:
   regen:
     name: Regenerate generated files
-    # Skip forks: their token is read-only and the push would fail. The Test job
-    # still runs the up-to-date gate for them.
+    # Skip forks before any step can access RELEASE_TOKEN. The Test job still runs
+    # the up-to-date gate for them.
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    permissions:
-      actions: write
-      contents: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Require workflow-triggering token
+        env:
+          # GitHub masks values sourced from the secrets context. Never print it.
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::error::RELEASE_TOKEN is required for same-repository regeneration pushes."
+            exit 1
+          fi
+
+      - name: Check out PR head with workflow-triggering credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # Check out the PR's head branch (not the detached merge ref) so the
-          # commit lands back on the branch, and keep the persisted GITHUB_TOKEN
-          # credentials so `git push` authenticates.
+          # commit lands back on the branch. Persist the established PAT so the
+          # later push emits a normal pull_request synchronize event and CI runs
+          # against the generated head.
           ref: ${{ github.head_ref }}
           fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+          persist-credentials: true
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -91,7 +104,8 @@ jobs:
       - name: Verify regenerated content
         # Prove mechanical projections are consistent before commit. License
         # review bindings deliberately stay pending when evidence changed; the
-        # dispatched native gate below remains red until a reviewer accepts them.
+        # native gate from the normal follow-up PR run remains red until a
+        # reviewer accepts them.
         run: |
           go test ./internal/protocol -run TestManifestUpToDate
           go test ./internal/capabilities -run 'TestDocMatchesManifest|TestManifestLoads'
@@ -103,7 +117,6 @@ jobs:
           fi
 
       - name: Commit back if changed
-        id: commit
         # HEAD_REF is passed via env, never interpolated into the script body:
         # a branch name is attacker-controllable, so `${{ github.head_ref }}`
         # inline in a run block is a template-injection sink (zizmor, medium+).
@@ -124,7 +137,6 @@ jobs:
             THIRD_PARTY_NOTICES.libghostty.md
           if git diff --cached --quiet; then
             echo "Generated files already up to date — nothing to commit."
-            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "Generated files were stale; committing regenerated output."
@@ -132,28 +144,3 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "chore(generated): refresh generated dependency metadata"
           git push origin "HEAD:$HEAD_REF"
-          echo "changed=true" >> "$GITHUB_OUTPUT"
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Run required checks on the generated branch head
-        if: steps.commit.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GENERATED_SHA: ${{ steps.commit.outputs.sha }}
-          HEAD_REF: ${{ github.head_ref }}
-          NATIVE_LOCK_CHANGED: ${{ steps.native-lock.outputs.changed }}
-        run: |
-          set -euo pipefail
-          remote_sha="$(git ls-remote origin "refs/heads/$HEAD_REF" | awk '{print $1}')"
-          if [ "$remote_sha" != "$GENERATED_SHA" ]; then
-            echo "Branch advanced before generated checks were dispatched." >&2
-            echo "generated=$GENERATED_SHA remote=$remote_sha" >&2
-            exit 1
-          fi
-          gh workflow run ci.yml --ref "$HEAD_REF"
-          gh workflow run commits.yml --ref "$HEAD_REF"
-          gh workflow run sandbox.yml --ref "$HEAD_REF"
-          gh workflow run libghostty-native.yml --ref "$HEAD_REF" \
-            -f run_native="$NATIVE_LOCK_CHANGED" \
-            -f dependency_unit="$NATIVE_LOCK_CHANGED" \
-            -f include_linux=false
