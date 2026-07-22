@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -84,7 +85,7 @@ func TestToolServerRemovalUpgradeFromExactMain(t *testing.T) {
 	oldDaemon := exec.Command(oldBinary, "daemon", "start")
 	oldDaemon.Env = env
 
-	var daemonOutput bytes.Buffer
+	var daemonOutput lockedBuffer
 
 	oldDaemon.Stdout = &daemonOutput
 	oldDaemon.Stderr = &daemonOutput
@@ -122,7 +123,7 @@ func TestToolServerRemovalUpgradeFromExactMain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var proxyOutput bytes.Buffer
+	var proxyOutput lockedBuffer
 
 	proxy.Stdout = &proxyOutput
 	proxy.Stderr = &proxyOutput
@@ -155,7 +156,16 @@ func TestToolServerRemovalUpgradeFromExactMain(t *testing.T) {
 
 	runBinary(t, env, newBinary, "daemon", "restart")
 	waitForProcessExit(t, managedPID)
-	waitForCommandExit(t, proxy, &proxyOutput)
+
+	// This wait is the stale-client regression sentinel: if the new daemon ever
+	// accepted the removed connect request, the old proxy would enter its bridge
+	// loop instead of reporting the generic unsupported-message response.
+	waitForCommandOutput(t, &proxyOutput, "unsupported control message: mcp_connect")
+	if err := proxyInput.Close(); err != nil {
+		t.Fatalf("close stale proxy input: %v", err)
+	}
+
+	stopFixtureCommand(t, proxy)
 
 	logAfterDrain, err := os.ReadFile(legacyLogPath)
 	if err != nil {
@@ -206,7 +216,7 @@ func TestToolServerRemovalUpgradeFromExactMain(t *testing.T) {
 
 	// An injected proxy from the adopted process can no longer reconnect: even
 	// the old proxy binary reaches only the new daemon's generic unsupported path.
-	staleProxyOutput, staleProxyErr := runBinaryOutput(env, oldBinary, "mcp-proxy", "graith")
+	staleProxyOutput, staleProxyErr := runBinaryOutputWithin(3*time.Second, env, oldBinary, "mcp-proxy", "graith")
 	if staleProxyErr == nil || !strings.Contains(staleProxyOutput, "unsupported control message") {
 		t.Fatalf("stale proxy result = %v, output %q; want unsupported message", staleProxyErr, staleProxyOutput)
 	}
@@ -481,7 +491,11 @@ func runBinaryError(env []string, binary string, args ...string) error {
 }
 
 func runBinaryOutput(env []string, binary string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	return runBinaryOutputWithin(45*time.Second, env, binary, args...)
+}
+
+func runBinaryOutputWithin(timeout time.Duration, env []string, binary string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, binary, args...)
@@ -538,7 +552,7 @@ func waitForLegacyToolLog(t *testing.T, dir string) string {
 	return ""
 }
 
-func waitForSocket(t *testing.T, path string, done <-chan error, output *bytes.Buffer) {
+func waitForSocket(t *testing.T, path string, done <-chan error, output *lockedBuffer) {
 	t.Helper()
 
 	deadline := time.Now().Add(15 * time.Second)
@@ -575,15 +589,61 @@ func waitForProcessExit(t *testing.T, pid int) {
 	t.Fatalf("managed child PID %d survived the daemon upgrade", pid)
 }
 
-func waitForCommandExit(t *testing.T, cmd *exec.Cmd, output *bytes.Buffer) {
+func waitForCommandOutput(t *testing.T, output *lockedBuffer, want string) {
 	t.Helper()
+
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(output.String(), want) {
+			return
+		}
+
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	t.Fatalf("timed out waiting for command output %q; output: %s", want, output.String())
+}
+
+func stopFixtureCommand(t *testing.T, cmd *exec.Cmd) {
+	t.Helper()
+
+	if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		t.Fatalf("stop fixture command: %v", err)
+	}
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 
+	var err error
 	select {
-	case <-done:
+	case err = <-done:
 	case <-time.After(15 * time.Second):
-		t.Fatalf("old proxy survived daemon upgrade; output: %s", output.String())
+		t.Fatal("timed out reaping fixture command after kill")
 	}
+
+	if err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			t.Fatalf("reap fixture command: %v", err)
+		}
+	}
+}
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.String()
 }
