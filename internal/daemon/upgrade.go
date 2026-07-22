@@ -111,6 +111,7 @@ type UpgradePathDescriptor struct {
 const (
 	upgradeCapacityProbeVersion  = 2
 	upgradeManifestVersion       = 2
+	upgradeAdoptionVersion       = 2
 	upgradeHelperHandoffVersion  = 2
 	upgradeCapacityProbeMaxBytes = 1024
 	upgradeCapacityProbeTimeout  = 5 * time.Second
@@ -174,21 +175,21 @@ func CurrentUpgradeCapacityProbe() UpgradeCapacityProbe {
 			Version: upgradeCapacityProbeVersion, Backend: "unavailable",
 			HelperHandoffVersion: upgradeHelperHandoffVersion,
 			StateVersion:         CurrentStateVersion, ManifestVersion: upgradeManifestVersion,
-			AdoptionVersion: upgradeManifestVersion,
+			AdoptionVersion: upgradeAdoptionVersion,
 		}
 	case maxSessions == 0:
 		return UpgradeCapacityProbe{
 			Version: upgradeCapacityProbeVersion, Backend: "unlimited",
 			HelperHandoffVersion: upgradeHelperHandoffVersion,
 			StateVersion:         CurrentStateVersion, ManifestVersion: upgradeManifestVersion,
-			AdoptionVersion: upgradeManifestVersion,
+			AdoptionVersion: upgradeAdoptionVersion,
 		}
 	default:
 		return UpgradeCapacityProbe{
 			Version: upgradeCapacityProbeVersion, Backend: "limited", MaxSessions: maxSessions,
 			HelperHandoffVersion: upgradeHelperHandoffVersion,
 			StateVersion:         CurrentStateVersion, ManifestVersion: upgradeManifestVersion,
-			AdoptionVersion: upgradeManifestVersion,
+			AdoptionVersion: upgradeAdoptionVersion,
 		}
 	}
 }
@@ -440,9 +441,8 @@ func probeUpgradeTarget(clientExecPath string, expectations ...upgradeProbeExpec
 		return nil, refuseUpgrade("upgrade target capacity probe version is unsupported")
 	}
 
-	if probe.StateVersion != CurrentStateVersion || probe.ManifestVersion != upgradeManifestVersion ||
-		probe.AdoptionVersion != upgradeManifestVersion {
-		return nil, refuseUpgrade("upgrade target state or adoption protocol is incompatible")
+	if err := validateUpgradeTargetCompatibility(probe); err != nil {
+		return nil, err
 	}
 
 	if len(expectations) > 0 && (probe.Profile != expectation.profile || probe.Paths != expectation.paths) {
@@ -486,6 +486,43 @@ func probeUpgradeTarget(clientExecPath string, expectations ...upgradeProbeExpec
 	keepPin = true
 
 	return target, nil
+}
+
+func validateUpgradeTargetCompatibility(probe UpgradeCapacityProbe) error {
+	var mismatches []string
+
+	// The replacement loads and migrates the running daemon's exact state
+	// snapshot before adopting any transferred descriptors. A newer target state
+	// version is therefore a supported forward migration; an older target would
+	// be a downgrade and cannot read the running state safely.
+	if probe.StateVersion < CurrentStateVersion {
+		mismatches = append(mismatches, fmt.Sprintf(
+			"state target=%d running=%d (target is older)",
+			probe.StateVersion, CurrentStateVersion,
+		))
+	}
+
+	// State migration does not make live descriptor or ownership protocols
+	// compatible. Keep both wire boundaries exact and fail closed.
+	if probe.ManifestVersion != upgradeManifestVersion {
+		mismatches = append(mismatches, fmt.Sprintf(
+			"manifest target=%d running=%d",
+			probe.ManifestVersion, upgradeManifestVersion,
+		))
+	}
+
+	if probe.AdoptionVersion != upgradeAdoptionVersion {
+		mismatches = append(mismatches, fmt.Sprintf(
+			"adoption target=%d running=%d",
+			probe.AdoptionVersion, upgradeAdoptionVersion,
+		))
+	}
+
+	if len(mismatches) > 0 {
+		return refuseUpgrade("upgrade target compatibility mismatch: " + strings.Join(mismatches, "; "))
+	}
+
+	return nil
 }
 
 func runUpgradeCapacityProbe(pin *upgradeTargetPin, configFile, profile string) ([]byte, error) {

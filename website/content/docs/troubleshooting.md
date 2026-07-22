@@ -84,6 +84,15 @@ gr daemon start
 gr daemon restart
 ```
 
+A preserve restart accepts a replacement with the same or a newer state schema,
+but rejects a replacement that is too old to read the running state. Manifest
+and adoption protocol versions must match exactly because state migration cannot
+make live terminal descriptors or process ownership compatible. A compatibility
+refusal names the target and running numeric versions and leaves the existing
+daemon and sessions untouched. Install a target at least as new as the running
+state with matching protocols, or use `gr daemon restart --force` only when you
+intend to stop every running session and perform a clean restart.
+
 ### Graith background service requires approval or is disabled
 
 This applies only to a signed packaged install on macOS 13 or newer. Inspect the

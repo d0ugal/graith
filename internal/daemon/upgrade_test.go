@@ -1679,16 +1679,17 @@ func compatibleCapacityProbe(backend string) UpgradeCapacityProbe {
 		HelperHandoffVersion: upgradeHelperHandoffVersion,
 		StateVersion:         CurrentStateVersion,
 		ManifestVersion:      upgradeManifestVersion,
-		AdoptionVersion:      upgradeManifestVersion,
+		AdoptionVersion:      upgradeAdoptionVersion,
 	}
 }
 
 func TestProbeUpgradeTargetContracts(t *testing.T) {
 	tests := []struct {
-		name    string
-		probe   UpgradeCapacityProbe
-		wantCap int
-		wantErr bool
+		name        string
+		probe       UpgradeCapacityProbe
+		wantCap     int
+		wantErr     bool
+		wantMessage string
 	}{
 		{
 			name: "unlimited", probe: compatibleCapacityProbe("unlimited"),
@@ -1705,12 +1706,71 @@ func TestProbeUpgradeTargetContracts(t *testing.T) {
 			name: "unavailable", probe: compatibleCapacityProbe("unavailable"), wantErr: true,
 		},
 		{
-			name: "old version", probe: func() UpgradeCapacityProbe {
+			name: "old probe version", probe: func() UpgradeCapacityProbe {
 				probe := compatibleCapacityProbe("unlimited")
 				probe.Version = 1
 
 				return probe
-			}(), wantErr: true,
+			}(), wantErr: true, wantMessage: "capacity probe version is unsupported",
+		},
+		{
+			name: "future probe version", probe: func() UpgradeCapacityProbe {
+				probe := compatibleCapacityProbe("unlimited")
+				probe.Version = upgradeCapacityProbeVersion + 1
+
+				return probe
+			}(), wantErr: true, wantMessage: "capacity probe version is unsupported",
+		},
+		{
+			name: "newer target state", probe: func() UpgradeCapacityProbe {
+				probe := compatibleCapacityProbe("unlimited")
+				probe.StateVersion = CurrentStateVersion + 1
+
+				return probe
+			}(),
+		},
+		{
+			name: "older target state", probe: func() UpgradeCapacityProbe {
+				probe := compatibleCapacityProbe("unlimited")
+				probe.StateVersion = CurrentStateVersion - 1
+
+				return probe
+			}(), wantErr: true, wantMessage: fmt.Sprintf(
+				"state target=%d running=%d (target is older)",
+				CurrentStateVersion-1, CurrentStateVersion,
+			),
+		},
+		{
+			name: "manifest protocol mismatch", probe: func() UpgradeCapacityProbe {
+				probe := compatibleCapacityProbe("unlimited")
+				probe.ManifestVersion = upgradeManifestVersion + 1
+
+				return probe
+			}(), wantErr: true, wantMessage: fmt.Sprintf(
+				"manifest target=%d running=%d",
+				upgradeManifestVersion+1, upgradeManifestVersion,
+			),
+		},
+		{
+			name: "adoption protocol mismatch", probe: func() UpgradeCapacityProbe {
+				probe := compatibleCapacityProbe("unlimited")
+				probe.AdoptionVersion = upgradeAdoptionVersion - 1
+
+				return probe
+			}(), wantErr: true, wantMessage: fmt.Sprintf(
+				"adoption target=%d running=%d",
+				upgradeAdoptionVersion-1, upgradeAdoptionVersion,
+			),
+		},
+		{
+			name: "all compatibility mismatches", probe: func() UpgradeCapacityProbe {
+				probe := compatibleCapacityProbe("unlimited")
+				probe.StateVersion = CurrentStateVersion - 1
+				probe.ManifestVersion = upgradeManifestVersion - 1
+				probe.AdoptionVersion = upgradeAdoptionVersion + 1
+
+				return probe
+			}(), wantErr: true, wantMessage: "state target=",
 		},
 	}
 	for _, tt := range tests {
@@ -1718,6 +1778,18 @@ func TestProbeUpgradeTargetContracts(t *testing.T) {
 			target, err := probeUpgradeTarget(writeCapacityProbeExecutable(t, tt.probe))
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("probeUpgradeTarget error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if tt.wantMessage != "" && !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("probeUpgradeTarget error = %q, want %q", err, tt.wantMessage)
+			}
+
+			if tt.name == "all compatibility mismatches" {
+				for _, want := range []string{"state target=", "manifest target=", "adoption target="} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("combined compatibility error = %q, want %q", err, want)
+					}
+				}
 			}
 
 			if err == nil && target.capacity != tt.wantCap {
