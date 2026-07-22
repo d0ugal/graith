@@ -164,6 +164,23 @@ may open automatically in the same non-automerge group. It remains
 checksum-pinned, GitHub's release-asset digest is independently checked, and its
 official validation result is still required.
 
+Relevant native changes also run the required Linux source matrix. The amd64
+lane executes the wrapper, PTY, daemon lifecycle, race, and fixed-budget fuzz
+checks on a GitHub-hosted Linux runner; the arm64 lane proves the exact pinned
+source build and archive shape. Both lanes exercise the fail-closed archive
+policy directly:
+
+```bash
+scripts/libghostty-native.sh test-source-archive-policy
+```
+
+The policy accepts only the audited 11-member Ghostty archive closure and
+publishes a deterministic, self-contained regular archive. Injected path,
+stat, hash, format, temporary-directory, copy, Zig archiver, verifier, and
+final-move failures must leave no archive, pkg-config file, snapshot, or private
+temporary behind. Ordinary untagged builds remain pure Go and keep the Charm
+rollback path; this validation does not promote Linux native release packaging.
+
 Before generation can succeed, the checksum-reviewed Apple xcframework for the
 selected Ghostty commit must already be published at the exact URL derived by
 the lock tool. Its release notes must bind the archive to the full Ghostty commit

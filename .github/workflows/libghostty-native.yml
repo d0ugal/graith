@@ -200,10 +200,11 @@ jobs:
 
   linux-adapter:
     name: Adapter source build (${{ matrix.target }})
-    # Native Linux rollout is tracked separately in #1475. Keep the exact
-    # source-build matrix available for explicit Linux-host validation without
-    # making the macOS candidate PR claim or gate on unverified Linux support.
-    if: github.event_name == 'workflow_dispatch' && inputs.include_linux
+    needs: changes
+    if: >-
+      !cancelled() &&
+      (needs.changes.result != 'success' || needs.changes.outputs.native == 'true') &&
+      (github.event_name != 'workflow_dispatch' || inputs.include_linux)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -244,6 +245,11 @@ jobs:
           PKG_CONFIG_PATH: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}/pkgconfig
           TARGET: ${{ matrix.target }}
         run: scripts/libghostty-native.sh source-build "$TARGET" "$LIBRARY"
+      - name: Prove fail-closed archive snapshot and publication
+        env:
+          GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/archive-policy-${{ matrix.goarch }}
+        run: scripts/libghostty-native.sh test-source-archive-policy
       - name: Verify committed headers match the source pin
         env:
           SOURCE: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}/ghostty/include/ghostty
@@ -270,6 +276,7 @@ jobs:
               -run '^TestTerminalBackendCompatibilityCorpus$'
             go test -race -count=1 -tags=libghostty ./internal/daemon \
               -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
+            scripts/libghostty-native.sh daemon-test
             # Fixed budgets avoid the wall-clock deadline path affected by
             # golang/go#75804. Snapshot CI reached 494,054 executions; local
             # request/helper calibration reached 789,507-829,186 and 341-747.
@@ -307,6 +314,7 @@ jobs:
       - changes
       - default-builds
       - apple-adapter
+      - linux-adapter
     runs-on: ubuntu-latest
     steps:
       - name: Require relevant native jobs to pass
@@ -315,6 +323,9 @@ jobs:
           NATIVE_RELEVANT: ${{ needs.changes.outputs.native }}
           DEFAULT_BUILDS_RESULT: ${{ needs.default-builds.result }}
           APPLE_ADAPTER_RESULT: ${{ needs.apple-adapter.result }}
+          LINUX_ADAPTER_RESULT: ${{ needs.linux-adapter.result }}
+          EVENT_NAME: ${{ github.event_name }}
+          INCLUDE_LINUX: ${{ inputs.include_linux }}
         run: |
           set -euo pipefail
           if [ "$CHANGES_RESULT" != "success" ]; then
@@ -325,10 +336,17 @@ jobs:
             echo "No libghostty-relevant files changed; native gate passes."
             exit 0
           fi
-          if [ "$DEFAULT_BUILDS_RESULT" != "success" ] || [ "$APPLE_ADAPTER_RESULT" != "success" ]; then
+          linux_required=true
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$INCLUDE_LINUX" != "true" ]; then
+            linux_required=false
+          fi
+          if [ "$DEFAULT_BUILDS_RESULT" != "success" ] || \
+            [ "$APPLE_ADAPTER_RESULT" != "success" ] || \
+            { [ "$linux_required" = "true" ] && [ "$LINUX_ADAPTER_RESULT" != "success" ]; }; then
             echo "Required native jobs did not pass:" >&2
             echo "  default builds: $DEFAULT_BUILDS_RESULT" >&2
             echo "  macOS arm64 adapter: $APPLE_ADAPTER_RESULT" >&2
+            echo "  Linux adapter matrix: $LINUX_ADAPTER_RESULT" >&2
             exit 1
           fi
           echo "Required native jobs passed."

@@ -58,8 +58,8 @@ keep rollback independent of terminal state or protocol migrations.
 - Make construction, write, resize, snapshot, timeout, protocol, and exit
   failures observable and recoverable.
 - Use the same synthetic corpus and operational workloads for both models.
-- Produce an exact-pin macOS arm64 testing artifact with native licensing and
-  SBOM data. Linux-native validation is deferred to #1475.
+- Produce exact-pin macOS arm64 and Linux validation artifacts with native
+  licensing and SBOM data. Linux release promotion remains tracked in #1475.
 - Retain a simple rollback until native soak and opt-in observation gates pass.
 
 ### Non-Goals
@@ -80,7 +80,7 @@ keep rollback independent of terminal state or protocol migrations.
 |---------|----------|-----------|
 | CLI/daemon on macOS arm64 | Targeted, staged | Explicit `libghostty` builds use the native helper candidate; ordinary releases remain the rollback until promotion. |
 | CLI/daemon on macOS amd64 | Rollback only | Native libghostty is not a supported target; ordinary pure-Go builds remain supported. |
-| CLI/daemon on Linux | Deferred | The selector and source-build tooling remain available, but native validation and promotion are tracked in #1475. |
+| CLI/daemon on Linux | Targeted validation | Exact-source amd64/arm64 builds and native amd64 execution are required for relevant changes; ordinary releases remain pure Go while packaging and promotion stay tracked in #1475. |
 | iOS app | No behavior change | It already uses the shared Ghostty pin through its native renderer; daemon selection does not change the app renderer. |
 | macOS app | No behavior change | The app renderer is independent, while a local daemon may use the tagged candidate. |
 
@@ -324,8 +324,11 @@ The path-scoped native workflow performs these checks:
 - tagged Darwin arm64 execution and linking against the arm64 slice of the
   checksum-pinned Apple archive;
 - fail-closed tagged Darwin amd64 selection without native linkage;
-- an explicit, non-gating exact-source Linux amd64/arm64 matrix for later #1475
-  validation using Zig 0.15.2;
+- a required exact-source Linux amd64/arm64 matrix using Zig 0.15.2, including
+  native amd64 wrapper, PTY, daemon, race, fuzz, and lifecycle execution;
+- a fail-closed Linux build-output snapshot that converts either the current
+  Zig regular archive or its historical thin-archive form into the same
+  deterministic, self-contained 11-member archive before publication;
 - committed-header diff against the exact Ghostty checkout;
 - upstream `go-libghostty` tests against Graith's newer Ghostty pin;
 - tagged PTY, focused race, and candidate executable builds; and
@@ -340,9 +343,10 @@ release packaging; it cannot use the current single-host pure-Go cross-build.
 Local Apple Silicon development uses the arm64 slice of the checksum-pinned
 Apple archive. An exact source rebuild on the current macOS 26 host is blocked
 by Zig linking its build runner against that SDK, while the archive links and
-runs. Linux source builds remain an explicit manual workflow for #1475. This is
-a documented local toolchain limitation, not a claim that the library is
-unsupported on macOS arm64.
+runs. Linux source builds run in the required GitHub workflow, with native
+arm64 execution recorded separately on an actual Linux arm64 VM for #1475.
+This is a documented local toolchain limitation, not a claim that the library
+is unsupported on macOS arm64.
 
 ### Pinning, licensing, security, and SBOM
 
@@ -427,9 +431,12 @@ ran each target for five seconds with four workers and found no crash or saved
 failure: `FuzzGhosttySnapshotDecoder` completed 610,443 executions,
 `FuzzGhosttyRequestDecoder` completed 621,504, and the native
 `FuzzGhosttyHelperWrite` completed 933 isolated helper lifecycles. The
-exact-source Linux workflow runs the same targets for ten seconds and repeats
-the resource-limit tests on that kernel; execution counts are intentionally not
-treated as stable performance claims.
+exact-source Linux workflow runs fixed-budget fuzz targets and repeats the
+resource-limit tests on that kernel; execution counts are intentionally not
+treated as stable performance claims. Its source archive policy regression
+injects path, stat, hash, format, temporary-directory, copy, archiver,
+verifier, and final-publication failures and requires the archive, pkg-config
+file, snapshots, and private temporaries all to be absent afterward.
 
 A final integrated audit on 2026-07-21 found and corrected five narrow edge
 cases: Darwin `/dev/fd` enumeration, inherited-helper group reaping, failed
@@ -449,6 +456,7 @@ benchmark claim.
 - `scripts/libghostty-native.sh bench`
 - `scripts/libghostty-native.sh memory`
 - `scripts/libghostty-native.sh verify-metadata`
+- `scripts/libghostty-native.sh test-source-archive-policy`
 - tagged helper protocol fuzz targets and targeted `-race` tests
 - backend-neutral and tagged >1 MiB hydration, poison-replay, repeated-close,
   close-versus-render/resize, helper RSS polling, limiter prelaunch, and
@@ -460,13 +468,15 @@ benchmark claim.
 - default `go test -race ./...`, `go vet ./...`, repository lint, actionlint,
   shell validation, generated-file checks, and integration tests
 - macOS arm64 candidate linkage and execution, tagged macOS amd64 fail-closed
-  selection, and the deferred manual Linux source-build checks from #1475
+  selection, required Linux amd64 execution, and exact-source Linux arm64
+  cross-build checks from #1475
 - full diff scan for binaries, captured output, identifiers, credentials,
   machine paths, and native build directories
 
 ### References
 
 - [Issue #1432](https://github.com/d0ugal/graith/issues/1432)
+- [Linux-native validation #1475](https://github.com/d0ugal/graith/issues/1475)
 - [Parent PR #1440](https://github.com/d0ugal/graith/pull/1440)
 - [go-libghostty canonical repository](https://tangled.org/mitchellh.com/go-libghostty)
 - [go-libghostty bulk snapshot follow-up #1441](https://github.com/d0ugal/graith/issues/1441)

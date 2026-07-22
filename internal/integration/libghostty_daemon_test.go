@@ -1,4 +1,4 @@
-//go:build integration && libghostty && cgo && darwin && arm64
+//go:build integration && libghostty && cgo && ((darwin && arm64) || linux)
 
 package integration
 
