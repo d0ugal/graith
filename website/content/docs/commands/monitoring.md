@@ -130,17 +130,6 @@ The on-disk size walk is opt-in — it can take tens of seconds on a large insta
 | `--autofix` | Automatically fix issues |
 | `--disk` | Measure on-disk sizes (walks the data dir; can be slow on large installs) |
 
-### `gr sandbox policy`
-
-Inspect the optional shell command restriction layer without launching an agent.
-`check` reads a command from stdin; `validate` checks the configured built-in
-rules.
-
-```bash
-printf '%s\n' 'git status' | gr sandbox policy check
-gr sandbox policy validate
-```
-
 ### `gr sandbox explain`
 
 Predict whether the configured sandbox would allow or deny a filesystem or network access, without launching an agent. Builds the profile graith would generate and queries the backend's policy oracle, which needs the `nono` backend (on a `safehouse` config it errors and points at `gr sandbox watch`).

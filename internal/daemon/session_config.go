@@ -777,8 +777,8 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 	readFiles := expandFilePaths(merged.ReadFiles, sm.log, "read")
 	writeFiles := expandFilePaths(merged.WriteFiles, sm.log, "write")
 
-	// The hook dir holds generated lifecycle and policy settings, so grant it
-	// read whenever those settings were injected.
+	// The hook dir holds generated lifecycle settings, so grant it read whenever
+	// those settings were injected.
 	controlRoot := ""
 
 	if merged.Enabled {
