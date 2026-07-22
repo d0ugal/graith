@@ -39,6 +39,11 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		sm.mu.RUnlock()
 		return SessionState{}, fmt.Errorf("session %q not found", id)
 	}
+	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
+		sm.mu.RUnlock()
+
+		return SessionState{}, err
+	}
 
 	srcAgent := sess.Agent
 	srcAgentSessionID := sess.AgentSessionID

@@ -3668,6 +3668,19 @@ func (sm *SessionManager) rejectPendingUpgradeCleanupLocked(id string) error {
 	return nil
 }
 
+func (sm *SessionManager) rejectPendingUpgradeCleanupForIDsLocked(ids []string) error {
+	ordered := append([]string(nil), ids...)
+	slices.Sort(ordered)
+
+	for _, id := range ordered {
+		if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
+			return fmt.Errorf("session %q: %w", id, err)
+		}
+	}
+
+	return nil
+}
+
 func (sm *SessionManager) reconcileUpgradeCleanup() {
 	sm.upgradeCleanupMu.Lock()
 
