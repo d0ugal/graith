@@ -394,7 +394,7 @@ jobs:
             exit 1
           fi
           printf '%s\n' "$build_info"
-          if grep -Fq $'\tdep\tgithub.com/charmbracelet/x/vt\t' <<<"$build_info"; then
+          if [[ "$build_info" == *$'\tdep\tgithub.com/charmbracelet/x/vt\t'* ]]; then
             echo "tagged Linux binary contains the Charm rollback dependency" >&2
             exit 1
           fi
@@ -409,8 +409,15 @@ jobs:
             echo "could not read the tagged Linux binary section table" >&2
             exit 1
           fi
+          section_grep_status=0
           if grep -E '[[:space:]]\.debug_' <<<"$section_info" >/dev/null; then
             echo "tagged Linux binary retained a debug section after stripping" >&2
+            exit 1
+          else
+            section_grep_status=$?
+          fi
+          if [ "$section_grep_status" -ne 1 ]; then
+            echo "could not verify the tagged Linux binary debug sections" >&2
             exit 1
           fi
           readelf -h "$binary"
@@ -420,9 +427,16 @@ jobs:
             exit 1
           fi
           printf '%s\n' "$dynamic_info"
+          dependency_grep_status=0
           if grep -Ei 'NEEDED.*(ghostty|simdutf|highway)' \
             <<<"$dynamic_info" >/dev/null; then
             echo "tagged Linux binary has an unexpected native shared dependency" >&2
+            exit 1
+          else
+            dependency_grep_status=$?
+          fi
+          if [ "$dependency_grep_status" -ne 1 ]; then
+            echo "could not verify the tagged Linux binary shared dependencies" >&2
             exit 1
           fi
           dynamic_symbols=""
