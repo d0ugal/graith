@@ -399,11 +399,14 @@ func TestDevReleaseWorkflowValidatesNativeArchives(t *testing.T) {
 	var (
 		goreleaserArgs, prepareScript, signingScript, baseTagScript, verifyScript, cleanupScript, cleanupIf string
 		prepareEnv, signingEnv                                                                              map[string]string
+		baseTagStepIndex                                                                                    = -1
+		goreleaserStepIndex                                                                                 = -1
 	)
 
-	for _, step := range job.Steps {
+	for index, step := range job.Steps {
 		if strings.Contains(step.Uses, "goreleaser/goreleaser-action") {
 			goreleaserArgs = step.With["args"]
+			goreleaserStepIndex = index
 		}
 
 		if step.Name == "Verify dev archives" {
@@ -422,6 +425,7 @@ func TestDevReleaseWorkflowValidatesNativeArchives(t *testing.T) {
 
 		if step.Name == "Select the stable release base for the dev snapshot" {
 			baseTagScript = step.Run
+			baseTagStepIndex = index
 		}
 
 		if step.Name == "Remove temporary macOS signing keychain" {
@@ -442,6 +446,10 @@ func TestDevReleaseWorkflowValidatesNativeArchives(t *testing.T) {
 
 	if strings.Contains(baseTagScript, "git tag -d") {
 		t.Error("dev release base-tag selection still deletes operational tags")
+	}
+
+	if baseTagStepIndex < 0 || goreleaserStepIndex < 0 || baseTagStepIndex >= goreleaserStepIndex {
+		t.Errorf("dev release base-tag step must precede GoReleaser: base=%d goreleaser=%d", baseTagStepIndex, goreleaserStepIndex)
 	}
 
 	if verifyScript == "" {
