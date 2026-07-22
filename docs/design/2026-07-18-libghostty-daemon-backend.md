@@ -327,8 +327,8 @@ CoreFoundation, Security, and `/usr/lib/libSystem.B.dylib`.
 
 The path-scoped native workflow performs these checks:
 
-- ordinary `CGO_ENABLED=0` builds and comparison tests, proving the retained
-  macOS amd64 target does not select cgo or require a native archive;
+- ordinary `CGO_ENABLED=0` builds and retained-backend compatibility tests,
+  proving the macOS amd64 target does not select cgo or require a native archive;
 - tagged Darwin arm64 execution and linking against the arm64 slice of the
   checksum-pinned Apple archive;
 - fail-closed tagged Darwin amd64 selection without native linkage;

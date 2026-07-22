@@ -179,7 +179,7 @@ publishes a deterministic, self-contained regular archive. Injected path,
 stat, hash, format, temporary-directory, copy, Zig archiver, verifier, and
 final-move failures must leave no archive, pkg-config file, snapshot, or private
 temporary behind. Ordinary untagged builds remain pure Go and keep the Charm
-implementation available for retained targets and comparison tests.
+implementation available for retained-target compatibility tests.
 
 The `graith-dev` and stable workflows turn that exact source unit into
 release-shaped native Linux amd64 and arm64 artifacts. Platform jobs package and
