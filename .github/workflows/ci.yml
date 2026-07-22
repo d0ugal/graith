@@ -17,9 +17,8 @@ on:
   # without spinning up a macOS runner. Only workflow-level skips strand a
   # required check; job-level skips do not. See issue #1174.
   pull_request:
-  # The regeneration workflow dispatches required gates at the exact SHA of a
-  # bot-generated dependency-unit commit because GITHUB_TOKEN pushes do not
-  # emit another pull_request run.
+  # Retained for ad hoc full-workflow diagnostics on an explicitly selected
+  # branch; generated commits run through the normal pull_request trigger.
   workflow_dispatch:
 
 permissions:
