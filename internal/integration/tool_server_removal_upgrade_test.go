@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/d0ugal/graith/internal/daemon"
 )
 
 const (
@@ -191,8 +193,8 @@ func TestToolServerRemovalUpgradeFromExactMain(t *testing.T) {
 	}
 
 	newState := readRemovalUpgradeState(t, statePath)
-	if newState.Version != 27 {
-		t.Fatalf("migrated state version = %d, want 27", newState.Version)
+	if newState.Version != daemon.CurrentStateVersion {
+		t.Fatalf("migrated state version = %d, want current %d", newState.Version, daemon.CurrentStateVersion)
 	}
 
 	adoptedSessionID, adoptedSession := requireRemovalUpgradeSession(t, newState, "canny")
@@ -240,8 +242,8 @@ func TestToolServerRemovalUpgradeFromExactMain(t *testing.T) {
 	waitForRemovalUpgradeProcessExit(t, oldSessionPID)
 
 	stoppedState, stoppedSessionID, stoppedSession := waitForRemovalUpgradeSessionStop(t, statePath, "canny")
-	if stoppedState.Version != 27 {
-		t.Fatalf("stopped state version = %d, want 27", stoppedState.Version)
+	if stoppedState.Version != daemon.CurrentStateVersion {
+		t.Fatalf("stopped state version = %d, want current %d", stoppedState.Version, daemon.CurrentStateVersion)
 	}
 
 	if stoppedSessionID != oldSessionID {
@@ -280,8 +282,8 @@ func TestToolServerRemovalUpgradeFromExactMain(t *testing.T) {
 	}
 
 	restartedState, restartedSessionID, restartedSession := waitForRemovalUpgradeSessionRelaunch(t, statePath, "canny", oldSessionPID)
-	if restartedState.Version != 27 {
-		t.Fatalf("restarted state version = %d, want 27", restartedState.Version)
+	if restartedState.Version != daemon.CurrentStateVersion {
+		t.Fatalf("restarted state version = %d, want current %d", restartedState.Version, daemon.CurrentStateVersion)
 	}
 
 	if restartedSessionID != oldSessionID {
