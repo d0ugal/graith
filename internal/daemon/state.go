@@ -1254,6 +1254,15 @@ func isStateBackupName(base, name string) bool {
 
 func (s *State) Reconcile() {
 	for id, sess := range s.Sessions {
+		// Removal migration owns every lifecycle field until exact-process
+		// reconciliation has resolved the old hook process. In particular, a
+		// policy-enabled v27 session can already be StatusDeleting; rewriting it
+		// here would destroy the durable evidence before startup reaches the
+		// dedicated fail-closed cleanup boundary.
+		if sess.RemovedHookCleanupPending {
+			continue
+		}
+
 		if sess.Status == StatusCreating {
 			slog.Info("session was mid-creation when daemon stopped, marking errored", "id", id)
 
