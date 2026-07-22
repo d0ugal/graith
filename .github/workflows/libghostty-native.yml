@@ -445,9 +445,9 @@ jobs:
             echo "could not read the tagged Linux binary dynamic symbols" >&2
             exit 1
           fi
-          if ! grep -E '[[:space:]]ghostty_terminal_new$' \
-            <<<"$dynamic_symbols" >/dev/null; then
-            echo "tagged Linux binary does not define ghostty_terminal_new" >&2
+          symbol_pattern='^[[:space:]]*[[:digit:]]+:[[:space:]]+[[:xdigit:]]+[[:space:]]+[[:digit:]]+[[:space:]]+FUNC[[:space:]]+GLOBAL[[:space:]]+[^[:space:]]+[[:space:]]+[[:digit:]]+[[:space:]]+ghostty_terminal_new$'
+          if ! grep -E "$symbol_pattern" <<<"$dynamic_symbols" >/dev/null; then
+            echo "tagged Linux binary does not define global ghostty_terminal_new" >&2
             exit 1
           fi
 
