@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"golang.org/x/sys/unix"
 )
 
 func testCursorHooksPath(worktree string) string {
@@ -183,6 +185,9 @@ func TestCursorHooksRepublicationRacePreservesReplacement(t *testing.T) {
 			worktree := t.TempDir()
 			sessionID := "republish-racer"
 			hooksPath := testCursorHooksPath(worktree)
+			sm.state.Sessions[sessionID] = &SessionState{
+				ID: sessionID, Agent: "cursor", WorktreePath: worktree, Status: StatusRunning,
+			}
 
 			if tc.inPlace {
 				if err := os.WriteFile(filepath.Join(worktree, "README.md"), []byte("strath content\n"), 0o600); err != nil {
@@ -237,6 +242,9 @@ func TestCursorHooksSuccessfulRepublication(t *testing.T) {
 			sm := newTestSessionManagerWithDataDir(t)
 			worktree := t.TempDir()
 			sessionID := "successful-republish"
+			sm.state.Sessions[sessionID] = &SessionState{
+				ID: sessionID, Agent: "cursor", WorktreePath: worktree, Status: StatusRunning,
+			}
 
 			if tc.hardLinkFallback {
 				original := linkCursorHooksFile
@@ -350,29 +358,226 @@ func TestInjectCursorHooksRejectsIncompatibleSharedDefinition(t *testing.T) {
 	}
 }
 
-func TestInjectCursorHooksRecoversStaleStructuredOwner(t *testing.T) {
+func TestInjectCursorHooksReconcilesMissingSharedArtifact(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		policy     bool
+		wantErr    bool
+		wantAbsent bool
+	}{
+		{name: "republish compatible definition"},
+		{name: "reject incompatible definition", policy: true, wantErr: true, wantAbsent: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			sm := newTestSessionManagerWithDataDir(t)
+			worktree := t.TempDir()
+			hooksPath := testCursorHooksPath(worktree)
+
+			for _, id := range []string{"braw-owner", "dreich-owner"} {
+				sm.state.Sessions[id] = &SessionState{
+					ID: id, Agent: "cursor", WorktreePath: worktree, Status: StatusCreating,
+				}
+			}
+
+			if _, _, err := sm.injectCursorHooks("braw-owner", worktree, true, false); err != nil {
+				t.Fatalf("inject first owner: %v", err)
+			}
+
+			if err := os.Remove(hooksPath); err != nil {
+				t.Fatalf("remove generated hooks: %v", err)
+			}
+
+			_, _, err := sm.injectCursorHooks("dreich-owner", worktree, true, tc.policy)
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "braw-owner") || !strings.Contains(err.Error(), "different hook definition") {
+					t.Fatalf("incompatible injection error = %v, want durable-owner refusal", err)
+				}
+			} else if err != nil {
+				t.Fatalf("republish compatible definition: %v", err)
+			}
+
+			_, statErr := os.Stat(hooksPath)
+			if tc.wantAbsent && !os.IsNotExist(statErr) {
+				t.Fatalf("incompatible injection published hooks: %v", statErr)
+			}
+
+			if !tc.wantAbsent && statErr != nil {
+				t.Fatalf("compatible injection did not republish hooks: %v", statErr)
+			}
+
+			_, markerErr := os.Stat(sm.cursorHooksOwnershipPath("dreich-owner"))
+			if tc.wantErr && !os.IsNotExist(markerErr) {
+				t.Fatalf("incompatible injection left ownership marker: %v", markerErr)
+			}
+
+			if !tc.wantErr && markerErr != nil {
+				t.Fatalf("compatible injection did not record ownership: %v", markerErr)
+			}
+		})
+	}
+}
+
+func TestInjectCursorHooksRefusesStaleStructuredOwner(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	sm := newTestSessionManagerWithDataDir(t)
 	worktree := t.TempDir()
+	hooksPath := testCursorHooksPath(worktree)
 
 	if _, _, err := sm.injectCursorHooks("stale-owner", worktree, true, false); err != nil {
 		t.Fatalf("inject stale owner: %v", err)
 	}
 
-	// The direct injection has no matching persisted session, modelling a crash
-	// after state removal but before hook cleanup.
-	if _, _, err := sm.injectCursorHooks("bairn-owner", worktree, true, false); err != nil {
-		t.Fatalf("recover stale ownership: %v", err)
+	generated := readCursorHooks(t, hooksPath)
+	if err := os.Remove(hooksPath); err != nil {
+		t.Fatalf("remove original generated hooks: %v", err)
+	}
+
+	// Model a crash after cleanup made the public pathname's absence durable but
+	// before it removed the marker, followed by a user recreating byte-identical
+	// content. The stale hash must not regain authority over this new file object.
+	if err := os.WriteFile(hooksPath, generated, 0o600); err != nil {
+		t.Fatalf("recreate user hooks: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name      string
+		sessionID string
+		policy    bool
+	}{
+		{name: "identical definition", sessionID: "bairn-owner"},
+		{name: "different definition", sessionID: "thrawn-owner", policy: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := sm.injectCursorHooks(tc.sessionID, worktree, true, tc.policy)
+			if err == nil || !strings.Contains(err.Error(), "not owned by graith") {
+				t.Fatalf("inject with stale owner error = %v, want ownership refusal", err)
+			}
+
+			if _, err := os.Stat(sm.cursorHooksOwnershipPath(tc.sessionID)); !os.IsNotExist(err) {
+				t.Fatalf("refused injection left ownership marker: %v", err)
+			}
+
+			if got := readCursorHooks(t, hooksPath); string(got) != string(generated) {
+				t.Fatalf("refused injection changed user hooks: got %q", got)
+			}
+		})
 	}
 
 	if _, err := os.Stat(sm.cursorHooksOwnershipPath("stale-owner")); !os.IsNotExist(err) {
-		t.Fatalf("stale ownership marker still exists: %v", err)
+		t.Fatalf("refused injection did not retire stale marker: %v", err)
 	}
 
 	sm.cleanupHooks("bairn-owner", "cursor", worktree)
 
-	if _, err := os.Stat(testCursorHooksPath(worktree)); !os.IsNotExist(err) {
-		t.Fatalf("last recovered owner did not remove hooks: %v", err)
+	if got := readCursorHooks(t, hooksPath); string(got) != string(generated) {
+		t.Fatalf("cleanup after refusal changed user hooks: got %q", got)
+	}
+}
+
+func TestInjectCursorHooksRejectsMalformedSharedOwnership(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sm := newTestSessionManagerWithDataDir(t)
+	worktree := t.TempDir()
+	hooksPath := testCursorHooksPath(worktree)
+
+	for _, id := range []string{"braw-owner", "dreich-owner", "canny-owner"} {
+		sm.state.Sessions[id] = &SessionState{
+			ID: id, Agent: "cursor", WorktreePath: worktree, Status: StatusRunning,
+		}
+	}
+
+	if _, _, err := sm.injectCursorHooks("braw-owner", worktree, true, false); err != nil {
+		t.Fatalf("inject valid owner: %v", err)
+	}
+
+	want := readCursorHooks(t, hooksPath)
+
+	malformedPath := sm.cursorHooksOwnershipPath("dreich-owner")
+	if err := os.MkdirAll(filepath.Dir(malformedPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(malformedPath, []byte(`{"version":1,"worktree_path":"blether"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := sm.injectCursorHooks("canny-owner", worktree, true, false)
+	if err == nil || !strings.Contains(err.Error(), "ownership metadata is unreadable") {
+		t.Fatalf("identical join with malformed peer error = %v, want fail-closed refusal", err)
+	}
+
+	if _, err := os.Stat(sm.cursorHooksOwnershipPath("canny-owner")); !os.IsNotExist(err) {
+		t.Fatalf("refused join left ownership marker: %v", err)
+	}
+
+	delete(sm.state.Sessions, "braw-owner")
+	sm.cleanupHooks("braw-owner", "cursor", worktree)
+
+	if got := readCursorHooks(t, hooksPath); string(got) != string(want) {
+		t.Fatalf("cleanup with malformed peer changed hooks: got %q, want %q", got, want)
+	}
+}
+
+func TestInjectCursorHooksRejectsBlockingOwnershipMarker(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		symlink bool
+	}{
+		{name: "fifo"},
+		{name: "symlink to fifo", symlink: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			sm := newTestSessionManagerWithDataDir(t)
+			worktree := t.TempDir()
+
+			for _, id := range []string{"braw-owner", "dreich-owner", "canny-owner"} {
+				sm.state.Sessions[id] = &SessionState{
+					ID: id, Agent: "cursor", WorktreePath: worktree, Status: StatusRunning,
+				}
+			}
+
+			if _, _, err := sm.injectCursorHooks("braw-owner", worktree, true, false); err != nil {
+				t.Fatalf("inject valid owner: %v", err)
+			}
+
+			markerPath := sm.cursorHooksOwnershipPath("dreich-owner")
+			if err := os.MkdirAll(filepath.Dir(markerPath), 0o700); err != nil {
+				t.Fatal(err)
+			}
+
+			fifoPath := markerPath
+			if tc.symlink {
+				fifoPath = filepath.Join(t.TempDir(), "ownership-fifo")
+			}
+
+			if err := unix.Mkfifo(fifoPath, 0o600); err != nil {
+				t.Fatalf("create ownership FIFO: %v", err)
+			}
+
+			if tc.symlink {
+				if err := os.Symlink(fifoPath, markerPath); err != nil {
+					t.Fatalf("symlink ownership FIFO: %v", err)
+				}
+			}
+
+			done := make(chan error, 1)
+
+			go func() {
+				_, _, err := sm.injectCursorHooks("canny-owner", worktree, true, false)
+				done <- err
+			}()
+
+			select {
+			case err := <-done:
+				if err == nil || !strings.Contains(err.Error(), "ownership metadata is unreadable") {
+					t.Fatalf("join with blocking marker error = %v, want fail-closed refusal", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("ownership scan blocked on non-regular marker")
+			}
+		})
 	}
 }
 
@@ -409,6 +614,9 @@ func TestInjectCursorHooksReadsLegacyOwnershipMarker(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	worktree := t.TempDir()
 	sessionID := "legacy-owner"
+	sm.state.Sessions[sessionID] = &SessionState{
+		ID: sessionID, Agent: "cursor", WorktreePath: worktree, Status: StatusRunning,
+	}
 
 	if _, _, err := sm.injectCursorHooks(sessionID, worktree, true, false); err != nil {
 		t.Fatalf("inject owner: %v", err)

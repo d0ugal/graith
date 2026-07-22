@@ -93,12 +93,13 @@ claim/publish I/O never run under the manager state lock. Each operation first
 snapshots the persisted Cursor sessions, then scans marker files.
 
 An existing file is shareable only when its exact hash and canonical worktree
-match a valid marker. Byte equality alone is insufficient, so a pre-existing
-user file remains unowned even when it happens to equal Graith's generated
-definition. A joining session writes its own marker atomically. If another live
-owner requires the existing bytes and the joining session requests different
-bytes, launch fails before process spawn with an incompatibility error. A sole
-owner may continue to republish through the current claim-and-quarantine path.
+match a valid marker belonging to a corresponding persisted Cursor session.
+Byte equality alone is insufficient, so a pre-existing user file remains
+unowned even when it happens to equal Graith's generated definition. A joining
+session writes its own marker atomically. If another live owner requires the
+existing bytes and the joining session requests different bytes, launch fails
+before process spawn with an incompatibility error. A sole owner may continue
+to republish through the current claim-and-quarantine path.
 
 During cleanup, a marker counts as a live reference only if its session remains
 in persisted state as a Cursor session for the same worktree. The session being
@@ -110,10 +111,15 @@ the quarantined artifact. A crash before marker removal leaves no public file;
 a crash after marker removal leaves at most a private quarantine. It never
 leaves a stale public-file marker as authority over a later user replacement.
 
-Stale structured markers can prove provenance for an unchanged artifact during
-a later join. Once a new owner is durable, matching stale markers are retired.
-Unreadable ownership metadata never authorizes replacement or last-owner
-deletion.
+Stale structured markers never prove provenance for the current public
+pathname. The original generated file may have been durably absent before a
+user recreated byte-identical content there. A later launch therefore retires
+only the stale private metadata, preserves an existing public file, and fails
+closed until the user moves that file aside. When the public path is absent, a
+new owner may publish with no-replace semantics, but it may not change the
+definition required by another persisted owner. Unreadable, non-regular, or
+oversized ownership metadata never authorizes sharing, replacement, or
+last-owner deletion.
 
 ### Proposal 2: One Shared Refcount File
 
@@ -148,10 +154,11 @@ unowned generated file at the public path. Restoration remains no-replace.
 
 ### Testing
 
-Focused tests cover identical sharing, incompatible definitions, both
-two-session deletion orders, restart between owners, failed second launch,
-stale-owner recovery, legacy markers, user-owned files, user modification, and
-all existing deterministic publication/cleanup pathname races. Lifecycle tests
-use real `Create` and `Delete` calls with a hermetic shell-backed Cursor agent.
-The daemon package runs under the race detector, followed by the repository unit
+Focused tests cover identical sharing, incompatible definitions (including a
+missing public artifact), both two-session deletion orders, restart between
+owners, failed second launch, fail-closed stale-owner recovery, legacy markers,
+malformed and blocking markers, user-owned files, user modification, and all
+existing deterministic publication/cleanup pathname races. Lifecycle tests use
+real `Create` and `Delete` calls with a hermetic shell-backed Cursor agent. The
+daemon package runs under the race detector, followed by the repository unit
 and integration suites, vet, and lint.
