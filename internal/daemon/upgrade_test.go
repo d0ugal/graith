@@ -4214,7 +4214,7 @@ func TestCleanupOrphanedProcessesRetriesErroredUpgradeOwnership(t *testing.T) {
 	}
 }
 
-func TestCleanupOrphanedProcessesDoesNotSignalRemovedHookProcessAfterColdRestart(t *testing.T) {
+func TestReconcileRemovedHookProcessesDoesNotSignalAfterColdRestart(t *testing.T) {
 	sm := sleeperSM(t)
 	cmd := startSleeperGroup(t)
 	pid := cmd.Process.Pid
@@ -4238,11 +4238,25 @@ func TestCleanupOrphanedProcessesDoesNotSignalRemovedHookProcessAfterColdRestart
 		ID: "canny", Status: StatusErrored, PID: pid, PIDStartTime: start,
 		RemovedHookCleanupPending: true,
 	}
+	var firstReconciliation SessionState
 	for attempt := 1; attempt <= 2; attempt++ {
+		if err := sm.reconcileRemovedHookProcesses(); err != nil {
+			t.Fatalf("startup attempt %d process reconciliation: %v", attempt, err)
+		}
+		// Generic orphan cleanup is a later startup phase. Keep its own guard so
+		// reordering cannot bypass removed-hook ownership quarantine.
 		sm.cleanupOrphanedProcesses()
 		err := sm.completeRemovedHookCleanup(true)
 		if err == nil || !strings.Contains(err.Error(), "verify and stop that exact process externally") {
 			t.Fatalf("startup attempt %d cleanup error = %v, want actionable unresolved-process refusal", attempt, err)
+		}
+		got, _ := sm.Get("canny")
+		if attempt == 1 {
+			firstReconciliation = got
+		} else if !got.StatusChangedAt.Equal(firstReconciliation.StatusChangedAt) ||
+			got.SummarySetAt == nil || firstReconciliation.SummarySetAt == nil ||
+			!got.SummarySetAt.Equal(*firstReconciliation.SummarySetAt) {
+			t.Fatalf("repeat reconciliation changed durable lifecycle timestamps: first=%+v second=%+v", firstReconciliation, got)
 		}
 	}
 
@@ -4304,7 +4318,7 @@ func TestCleanupOrphanedProcessesDoesNotSignalRemovedHookProcessAfterColdRestart
 	}
 }
 
-func TestCleanupOrphanedProcessesRecoversReusedRemovedHookPIDWithoutSignal(t *testing.T) {
+func TestReconcileRemovedHookProcessesRecoversReusedPIDWithoutSignal(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 	cmd := startSleeperGroup(t)
 	pid := cmd.Process.Pid
@@ -4340,7 +4354,9 @@ func TestCleanupOrphanedProcessesRecoversReusedRemovedHookPIDWithoutSignal(t *te
 		t.Fatal(err)
 	}
 
-	sm.cleanupOrphanedProcesses()
+	if err := sm.reconcileRemovedHookProcesses(); err != nil {
+		t.Fatal(err)
+	}
 	state, _ := sm.Get("dreich")
 	if state.Status != StatusStopped || state.PID != 0 || !state.RemovedHookCleanupPending {
 		t.Fatalf("reused PID generation was not safely resolved before artifact cleanup: %+v", state)
@@ -4366,6 +4382,98 @@ func TestCleanupOrphanedProcessesRecoversReusedRemovedHookPIDWithoutSignal(t *te
 	persistedState := persisted.Sessions["dreich"]
 	if persistedState.PID != 0 || persistedState.RemovedHookCleanupPending {
 		t.Fatalf("safe reused-PID recovery was not persisted: %+v", persistedState)
+	}
+}
+
+func TestResumeTombstonesDefersRemovedHookProcessWithoutSignal(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	cmd := startSleeperGroup(t)
+	pid := cmd.Process.Pid
+
+	start, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	var groupCalls int
+	withProcKill(t, func(target int, signal syscall.Signal) error {
+		if target == -pid {
+			groupCalls++
+			return syscall.EPERM
+		}
+
+		return syscall.Kill(target, signal)
+	})
+
+	worktree := filepath.Join(sm.paths.DataDir, "worktrees", "croft", "bothy", "thrawn")
+	if err := os.MkdirAll(worktree, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.state.Sessions["thrawn"] = &SessionState{
+		ID: "thrawn", Name: "thrawn", Agent: "claude", WorktreePath: worktree,
+		Status: StatusDeleting, PID: pid, PIDStartTime: start,
+		RemovedHookCleanupPending: true,
+	}
+	if err := sm.writeTombstone(tombstone{
+		teardownSpec: teardownSpec{ID: "thrawn", WorktreePath: worktree},
+		Name:         "thrawn", PID: pid, PIDStartTime: start, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.resumeTombstones()
+
+	if groupCalls != 0 || !isProcessAlive(pid) {
+		t.Fatalf("pending interrupted-delete process was touched: group calls = %d, alive = %v", groupCalls, isProcessAlive(pid))
+	}
+	if _, ok := sm.state.Sessions["thrawn"]; !ok {
+		t.Fatal("pending interrupted-delete evidence was removed")
+	}
+	if _, err := os.Stat(worktree); err != nil {
+		t.Fatalf("pending interrupted-delete worktree was removed: %v", err)
+	}
+	if _, err := os.Stat(sm.tombstonePath("thrawn")); err != nil {
+		t.Fatalf("pending interrupted-delete tombstone was removed: %v", err)
+	}
+}
+
+func TestReconcileSoftDeletedOrphansDefersRemovedHookProcessWithoutSignal(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	cmd := startSleeperGroup(t)
+	pid := cmd.Process.Pid
+
+	start, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	var groupCalls int
+	withProcKill(t, func(target int, signal syscall.Signal) error {
+		if target == -pid {
+			groupCalls++
+			return syscall.EPERM
+		}
+
+		return syscall.Kill(target, signal)
+	})
+
+	now := time.Now()
+	expires := now.Add(24 * time.Hour)
+	sm.state.Sessions["dreich"] = &SessionState{
+		ID: "dreich", Name: "dreich", Agent: "claude", Status: StatusStopped,
+		PID: pid, PIDStartTime: start, DeletedAt: &now, ExpiresAt: &expires,
+		RemovedHookCleanupPending: true,
+	}
+
+	sm.reconcileSoftDeletedOrphans()
+
+	if groupCalls != 0 || !isProcessAlive(pid) {
+		t.Fatalf("pending soft-delete process was touched: group calls = %d, alive = %v", groupCalls, isProcessAlive(pid))
+	}
+	state, _ := sm.Get("dreich")
+	if state.PID != pid || !state.RemovedHookCleanupPending || !state.IsSoftDeleted() {
+		t.Fatalf("pending soft-delete evidence changed: %+v", state)
 	}
 }
 

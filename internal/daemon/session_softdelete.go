@@ -591,7 +591,7 @@ func (sm *SessionManager) reconcileSoftDeletedOrphans() {
 	var orphans []orphan
 
 	for id, s := range sm.state.Sessions {
-		if s.IsSoftDeleted() && s.PID > 0 {
+		if s.IsSoftDeleted() && s.PID > 0 && !s.RemovedHookCleanupPending {
 			orphans = append(orphans, orphan{id: id, pid: s.PID, startTime: s.PIDStartTime})
 		}
 	}
