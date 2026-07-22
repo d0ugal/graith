@@ -89,6 +89,12 @@ resolved, and leaves the session explicitly resumable. Unaffected sessions keep
 normal adoption. Generic hooks are regenerated only when still configured, so
 policy-only Codex sessions lose `--dangerously-bypass-hook-trust`.
 
+After a cold restart, Graith does not signal a live non-child process group
+whose generation it cannot reserve atomically. Startup stays failed closed with
+cleanup pending until the operator verifies and stops the recorded process, then
+restarts Graith. If the PID was reused, Graith recognizes that the recorded
+generation is gone and leaves the replacement process untouched.
+
 The existing fail-closed migration path writes an exact v26 or v27 backup before
 any mutation. Older binaries refuse v28. Downgrade therefore requires stopping
 the daemon, restoring the matching `state.json.v<oldVersion>.bak`, restoring
