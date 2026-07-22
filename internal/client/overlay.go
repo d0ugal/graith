@@ -2728,7 +2728,7 @@ type RunOverlayOpts struct {
 	RestoreSession func(sessionID string) error
 	// Profile is the active configuration profile name.
 	Profile string
-	// Collapsed is the initial per-repo collapse state.
+	// Collapsed is the initial fold state, keyed by session ID.
 	Collapsed map[string]bool
 	// RepoSuggestions seeds the create-session repo picker.
 	RepoSuggestions []RepoSuggestion
@@ -2742,7 +2742,7 @@ type RunOverlayOpts struct {
 	Keys OverlayKeys
 }
 
-// RunOverlay launches the bubbletea overlay listing sessions grouped by repo.
+// RunOverlay launches the bubbletea session picker.
 func RunOverlay(opts RunOverlayOpts) *OverlayResult {
 	m := newOverlayModel(opts.Sessions, opts.CurrentSessionID, opts.FetchPreview, opts.DeleteSession, opts.Collapsed, []rune(opts.ShortcutKeys))
 	m.refreshSessions = opts.RefreshSessions
