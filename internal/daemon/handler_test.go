@@ -1404,7 +1404,7 @@ func TestUpgradeMutationGateDrainsCommittedResponseAndRejectsLaterAdmission(t *t
 	}
 }
 
-func TestMutatingControlMessageTreatsAckReadsAsMutations(t *testing.T) {
+func TestMutatingControlMessageTreatsAckReadsAsObservational(t *testing.T) {
 	encode := func(msgType string, payload any) protocol.Envelope {
 		t.Helper()
 
@@ -1424,8 +1424,12 @@ func TestMutatingControlMessageTreatsAckReadsAsMutations(t *testing.T) {
 		t.Fatal("read-only inbox request was classified as mutation")
 	}
 
-	if !mutatingControlMessage(encode("msg_inbox", protocol.MsgInboxMsg{Ack: true})) {
-		t.Fatal("acknowledging inbox request was classified as read-only")
+	if mutatingControlMessage(encode("msg_inbox", protocol.MsgInboxMsg{Ack: true})) {
+		t.Fatal("acknowledging inbox request was classified as mutation")
+	}
+
+	if mutatingControlMessage(encode("msg_sub", protocol.MsgSubMsg{Ack: true})) {
+		t.Fatal("acknowledging subscription request was classified as mutation")
 	}
 
 	if !mutatingControlMessage(encode("todo_add", protocol.TodoAddMsg{})) {
@@ -1687,6 +1691,13 @@ func TestMsgSubWithAck(t *testing.T) {
 
 	h.readControlMsg(t) // msg_message
 	h.readControlMsg(t) // msg_done
+	h.sm.mu.RLock()
+	leaseCount, nextLeaseID := len(h.sm.mutationLeases), h.sm.mutationNextID
+	h.sm.mu.RUnlock()
+
+	if leaseCount != 0 || nextLeaseID != 1 {
+		t.Fatalf("immediate ACK leases = active %d, allocated %d; want active 0, allocated 1", leaseCount, nextLeaseID)
+	}
 
 	// Subscribe again with only_unread — should get nothing
 	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
@@ -1786,6 +1797,299 @@ func TestMsgSubWaitForNewMessage(t *testing.T) {
 
 	if env.Type != "msg_done" {
 		t.Fatalf("expected msg_done, got %q", env.Type)
+	}
+}
+
+//nolint:dupl // Wait and follow cover distinct modes with intentionally parallel setup.
+func TestMsgSubAckWaitDoesNotHoldMutationLease(t *testing.T) {
+	h := newTestHarness(t)
+	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
+		Stream: "blether-idle", Subscriber: "braw-reader", Wait: true, Ack: true,
+	})
+	h.expectType(t, "msg_following")
+
+	if err := h.sm.beginUpgradeReservation(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(h.sm.endUpgradeReservation)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if err := h.sm.waitMutationIdle(ctx); err != nil {
+		t.Fatalf("idle wait retained mutation lease: %v", err)
+	}
+}
+
+//nolint:dupl // Wait and follow cover distinct modes with intentionally parallel setup.
+func TestMsgSubAckFollowDoesNotHoldMutationLease(t *testing.T) {
+	h := newTestHarness(t)
+	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
+		Stream: "blether-follow-idle", Subscriber: "braw-reader", Follow: true, Ack: true,
+	})
+	h.expectType(t, "msg_following")
+
+	if err := h.sm.beginUpgradeReservation(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(h.sm.endUpgradeReservation)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if err := h.sm.waitMutationIdle(ctx); err != nil {
+		t.Fatalf("idle follow retained mutation lease: %v", err)
+	}
+}
+
+func TestMsgInboxAckFollowDoesNotHoldMutationLease(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "inbox-follow-idle", "inbox-reader", "tok-inbox-follow")
+	h.sendControlWithToken(t, "msg_inbox", protocol.MsgInboxMsg{Follow: true, Ack: true}, "tok-inbox-follow")
+	h.expectType(t, "msg_following")
+
+	if err := h.sm.beginUpgradeReservation(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(h.sm.endUpgradeReservation)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if err := h.sm.waitMutationIdle(ctx); err != nil {
+		t.Fatalf("idle inbox follow retained mutation lease: %v", err)
+	}
+}
+
+func TestMsgSubAckFollowDeliveryUsesOneScopedLease(t *testing.T) {
+	h := newTestHarness(t)
+	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
+		Stream: "blether-follow-ack", Subscriber: "braw-reader", Follow: true, Ack: true,
+	})
+	h.expectType(t, "msg_following")
+
+	_, err := h.sm.messages.Publish(PublishOpts{Stream: "blether-follow-ack", SenderID: "sender", Body: "live follow blether"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if env, ok := h.readControlMsgTimeout(t, time.Second); !ok || env.Type != "msg_message" {
+		t.Fatalf("delivery = %#v, ok=%v; want msg_message", env, ok)
+	}
+
+	deadline := time.Now().Add(time.Second)
+
+	for {
+		h.sm.mu.RLock()
+		leaseCount, nextLeaseID := len(h.sm.mutationLeases), h.sm.mutationNextID
+		h.sm.mu.RUnlock()
+
+		if leaseCount == 0 && nextLeaseID == 1 {
+			break
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf("live follow ACK leases = active %d, allocated %d; want active 0, allocated 1", leaseCount, nextLeaseID)
+		}
+
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestMsgSubAckRejectedByUpgradeRemainsPending(t *testing.T) {
+	h := newTestHarness(t)
+	h.sendControl(t, "msg_sub", protocol.MsgSubMsg{
+		Stream: "blether-race", Subscriber: "canny-reader", Wait: true, Ack: true,
+	})
+	h.expectType(t, "msg_following")
+
+	if err := h.sm.beginUpgradeReservation(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(h.sm.endUpgradeReservation)
+
+	_, err := h.sm.messages.Publish(PublishOpts{Stream: "blether-race", SenderID: "sender", Body: "pending blether"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if env, ok := h.readControlMsgTimeout(t, time.Second); !ok || env.Type != "msg_message" {
+		t.Fatalf("delivery = %#v, ok=%v; want msg_message", env, ok)
+	}
+
+	env, ok := h.readControlMsgTimeout(t, time.Second)
+	if !ok || env.Type != "error" {
+		t.Fatalf("ack result = %#v, ok=%v; want retryable error", env, ok)
+	}
+
+	var ackErr protocol.ErrorMsg
+	if err := protocol.DecodePayload(env, &ackErr); err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(ackErr.Message, "retry") {
+		t.Fatalf("ack error = %q, want explicit retry guidance", ackErr.Message)
+	}
+
+	messages, err := h.sm.messages.Read("blether-race", "canny-reader", true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(messages) != 1 || messages[0].Body != "pending blether" {
+		t.Fatalf("pending messages = %+v, want delivered message to remain unread", messages)
+	}
+}
+
+func TestMsgInboxAckRejectedByUpgradeRemainsPending(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "inbox-race", "inbox-reader", "tok-inbox-race")
+	h.sendControlWithToken(t, "msg_inbox", protocol.MsgInboxMsg{Wait: true, Ack: true}, "tok-inbox-race")
+	h.expectType(t, "msg_following")
+
+	if err := h.sm.beginUpgradeReservation(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(h.sm.endUpgradeReservation)
+
+	_, err := h.sm.messages.Publish(PublishOpts{Stream: "inbox:inbox-race", SenderID: "sender", Body: "pending inbox blether"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if env, ok := h.readControlMsgTimeout(t, time.Second); !ok || env.Type != "msg_message" {
+		t.Fatalf("delivery = %#v, ok=%v; want msg_message", env, ok)
+	}
+
+	env, ok := h.readControlMsgTimeout(t, time.Second)
+	if !ok || env.Type != "error" {
+		t.Fatalf("ack result = %#v, ok=%v; want retryable error", env, ok)
+	}
+
+	var ackErr protocol.ErrorMsg
+	if err := protocol.DecodePayload(env, &ackErr); err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(ackErr.Message, "retry") {
+		t.Fatalf("ack error = %q, want explicit retry guidance", ackErr.Message)
+	}
+
+	messages, err := h.sm.messages.Read("inbox:inbox-race", "inbox-race", true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(messages) != 1 || messages[0].Body != "pending inbox blether" {
+		t.Fatalf("pending messages = %+v, want delivered message to remain unread", messages)
+	}
+}
+
+func TestMsgInboxAckWaitCancellationReleasesLease(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "idle-inbox", "idle", "tok-idle")
+	h.sendControlWithToken(t, "msg_inbox", protocol.MsgInboxMsg{Wait: true, Ack: true}, "tok-idle")
+	h.expectType(t, "msg_following")
+
+	h.cancel()
+
+	select {
+	case <-h.done:
+	case <-time.After(time.Second):
+		t.Fatal("inbox wait did not stop after cancellation")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if err := h.sm.waitMutationIdle(ctx); err != nil {
+		t.Fatalf("cancelled inbox wait retained mutation lease: %v", err)
+	}
+}
+
+func TestMsgAckDoesNotPersistAfterDeliveryWriteFailure(t *testing.T) {
+	h := newTestHarness(t)
+
+	_, err := h.sm.messages.Publish(PublishOpts{Stream: "blether-write-failure", SenderID: "sender", Body: "pending blether"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sent []string
+
+	writeErr := errors.New("connection closed")
+
+	h.sm.handleMsgStreamRead(
+		context.Background(),
+		func(msgType string, _ any) { sent = append(sent, msgType) },
+		func(string, any) error { return writeErr },
+		nil,
+		"blether-write-failure", "canny-reader", "test", false, "", false, false, true,
+	)
+
+	messages, err := h.sm.messages.Read("blether-write-failure", "canny-reader", true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(messages) != 1 || messages[0].Body != "pending blether" {
+		t.Fatalf("delivery write failure acknowledged message: sent=%v messages=%+v", sent, messages)
+	}
+
+	if len(h.sm.mutationLeases) != 0 {
+		t.Fatalf("delivery write failure leaked mutation lease: %d", len(h.sm.mutationLeases))
+	}
+}
+
+func TestMsgFollowAckDoesNotPersistAfterDeliveryWriteFailure(t *testing.T) {
+	h := newTestHarness(t)
+	clientConn, serverConn := net.Pipe()
+
+	t.Cleanup(func() { _ = clientConn.Close(); _ = serverConn.Close() })
+
+	ready := make(chan struct{})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+
+		h.sm.handleMsgStreamRead(
+			context.Background(),
+			func(msgType string, _ any) {
+				if msgType == "msg_following" {
+					close(ready)
+				}
+			},
+			func(string, any) error { return errors.New("connection closed") },
+			protocol.NewFrameReader(serverConn),
+			"blether-follow-write-failure", "canny-reader", "test", false, "", false, true, true,
+		)
+	}()
+
+	<-ready
+
+	if _, err := h.sm.messages.Publish(PublishOpts{Stream: "blether-follow-write-failure", SenderID: "sender", Body: "pending follow blether"}); err != nil {
+		t.Fatal(err)
+	}
+
+	<-done
+
+	messages, err := h.sm.messages.Read("blether-follow-write-failure", "canny-reader", true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(messages) != 1 || messages[0].Body != "pending follow blether" {
+		t.Fatalf("follow delivery write failure acknowledged message: messages=%+v", messages)
+	}
+
+	if len(h.sm.mutationLeases) != 0 || h.sm.mutationNextID != 0 {
+		t.Fatalf("follow delivery write failure changed mutation leases: leases=%d next=%d", len(h.sm.mutationLeases), h.sm.mutationNextID)
 	}
 }
 
@@ -2912,6 +3216,13 @@ func TestMsgInboxWithAck(t *testing.T) {
 
 	h.readControlMsg(t) // msg_message
 	h.readControlMsg(t) // msg_done
+	h.sm.mu.RLock()
+	leaseCount, nextLeaseID := len(h.sm.mutationLeases), h.sm.mutationNextID
+	h.sm.mu.RUnlock()
+
+	if leaseCount != 0 || nextLeaseID != 1 {
+		t.Fatalf("immediate inbox ACK leases = active %d, allocated %d; want active 0, allocated 1", leaseCount, nextLeaseID)
+	}
 
 	h.sendControlWithToken(t, "msg_inbox", protocol.MsgInboxMsg{
 		OnlyUnread: true,
