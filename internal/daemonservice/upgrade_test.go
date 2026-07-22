@@ -188,9 +188,11 @@ func TestRunningManagedProcessRejectsStaleOrForeignIdentity(t *testing.T) {
 
 	missing := fixture.environment
 
-	missing.receiptRoot = func(int) (string, error) { return filepath.Join(t.TempDir(), "missing"), nil }
+	missing.receiptRoot = func(int) (string, error) {
+		return filepath.Join(t.TempDir(), "croft", "missing"), nil
+	}
 	if _, managed, err := runningManagedProcess("", missing); err != nil || managed {
-		t.Fatalf("missing receipt = (%v, %v), want unmanaged", managed, err)
+		t.Fatalf("missing receipt and ancestors = (%v, %v), want unmanaged", managed, err)
 	}
 
 	foreignExecutable := filepath.Join(t.TempDir(), "gr")
