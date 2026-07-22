@@ -81,9 +81,10 @@ upgrade from a release which supported it:
 
 1. Archive the old policy configuration, then remove its entire table from the
    active config. Configure any direct hook or external policy replacement.
-2. Upgrade Graith. A live session launched with the old policy is stopped at
-   the compatibility boundary; Graith verifies the exact old process identity
-   before removing only its generated policy artifacts.
+2. Upgrade Graith. During a normal daemon exec upgrade, a live session launched
+   with the old policy is stopped at the compatibility boundary while Graith
+   still owns the exact child; it then removes only its generated policy
+   artifacts.
 3. Explicitly resume the session. Graith regenerates any generic lifecycle
    hooks still configured, without the removed policy hook.
 
@@ -93,6 +94,20 @@ cleanup pending and reports the affected session and PID. Inspect that PID and
 stop it externally only after verifying it is the old agent process, then start
 Graith again. If the PID belongs to a newer, unrelated process, Graith detects
 the generation mismatch on retry and leaves that process untouched.
+
+Use the reported PID to inspect both the executable and working directory; do
+not stop it based on the number alone:
+
+```sh
+ps -p <PID> -o pid=,ppid=,lstart=,command=
+lsof -a -p <PID> -d cwd -Fn  # optional, when lsof is installed
+```
+
+They must match the old agent and the session worktree. If the process has
+disappeared, changed, or cannot be identified, do not signal that PID or its
+process group; retry Graith startup so it can re-check the recorded generation.
+Once identity is confirmed, stop that process through the operating system or
+the supervisor which launched it, confirm it has exited, and retry startup.
 
 The state migration writes the usual pre-migration `state.json.v<version>.bak`.
 An older binary refuses the migrated state. A downgrade therefore requires
