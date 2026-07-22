@@ -294,7 +294,7 @@ func (s ReceiptStore) primaryPath() string { return filepath.Join(s.Root, "recei
 func (s ReceiptStore) backupPath() string  { return filepath.Join(s.Root, "receipt.previous.json") }
 func (s ReceiptStore) lockPath() string    { return filepath.Join(s.Root, "receipt.lock") }
 
-func (s ReceiptStore) ensureRoot() error {
+func (s ReceiptStore) ensureRoot(initialize bool) error {
 	if s.UID < 0 {
 		return fmt.Errorf("invalid receipt owner UID %d", s.UID)
 	}
@@ -307,6 +307,10 @@ func (s ReceiptStore) ensureRoot() error {
 	}
 
 	if err := validateSecureAncestors(parent, s.UID); err != nil {
+		if !initialize && errors.Is(err, os.ErrNotExist) {
+			return ErrReceiptMissing
+		}
+
 		return fmt.Errorf("validate daemon service receipt parent: %w", err)
 	}
 
@@ -317,12 +321,18 @@ func (s ReceiptStore) ensureRoot() error {
 
 	defer func() { _ = unix.Close(parentFD) }()
 
-	if err := unix.Mkdirat(parentFD, base, 0o700); err != nil && !errors.Is(err, unix.EEXIST) {
-		return fmt.Errorf("create daemon service receipt root: %w", err)
+	if initialize {
+		if err := unix.Mkdirat(parentFD, base, 0o700); err != nil && !errors.Is(err, unix.EEXIST) {
+			return fmt.Errorf("create daemon service receipt root: %w", err)
+		}
 	}
 
 	rootFD, err := unix.Openat(parentFD, base, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
+		if !initialize && errors.Is(err, unix.ENOENT) {
+			return ErrReceiptMissing
+		}
+
 		return err
 	}
 
@@ -361,8 +371,8 @@ func secureOwnedPath(path string, uid int, directory bool) error {
 	return nil
 }
 
-func (s ReceiptStore) withLock(fn func() error) error {
-	if err := s.ensureRoot(); err != nil {
+func (s ReceiptStore) withLock(initialize bool, fn func() error) error {
+	if err := s.ensureRoot(initialize); err != nil {
 		return err
 	}
 
@@ -393,7 +403,7 @@ func (s ReceiptStore) withLock(fn func() error) error {
 func (s ReceiptStore) Load() (Receipt, error) {
 	var receipt Receipt
 
-	err := s.withLock(func() error {
+	err := s.withLock(false, func() error {
 		var err error
 
 		receipt, err = s.loadLocked()
@@ -449,7 +459,7 @@ func (s ReceiptStore) loadLocked() (Receipt, error) {
 // the caller. Original bytes are retained under explicit .corrupt names for
 // diagnosis; they are never silently overwritten with an empty mapping.
 func (s ReceiptStore) InitializeAfterTotalLoss(receipt Receipt) error {
-	return s.withLock(func() error {
+	return s.withLock(true, func() error {
 		if _, err := s.loadLocked(); err == nil || errors.Is(err, ErrReceiptMissing) {
 			if err == nil {
 				return errors.New("daemon service receipt is still recoverable")
@@ -477,7 +487,7 @@ func (s ReceiptStore) InitializeAfterTotalLoss(receipt Receipt) error {
 func (s ReceiptStore) Update(initialize bool, mutate func(*Receipt) error) (Receipt, error) {
 	var result Receipt
 
-	err := s.withLock(func() error {
+	err := s.withLock(initialize, func() error {
 		receipt, err := s.loadLocked()
 		if errors.Is(err, ErrReceiptMissing) && initialize {
 			receipt = NewReceipt()

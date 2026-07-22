@@ -86,8 +86,37 @@ func TestReceiptStoreMissingRequiresExplicitInitialization(t *testing.T) {
 		t.Fatalf("Load() = %v, want ErrReceiptMissing", err)
 	}
 
+	if _, err := os.Lstat(store.Root); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Load() created missing receipt root: %v", err)
+	}
+
 	if _, err := store.Update(false, func(*Receipt) error { return nil }); !errors.Is(err, ErrReceiptMissing) {
 		t.Fatalf("Update(false) = %v, want ErrReceiptMissing", err)
+	}
+
+	if _, err := os.Lstat(store.Root); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Update(false) created missing receipt root: %v", err)
+	}
+}
+
+func TestReceiptStoreMissingAncestorsAreAnUninitializedStore(t *testing.T) {
+	t.Parallel()
+
+	store := ReceiptStore{
+		Root: filepath.Join(t.TempDir(), "croft", "service-control"),
+		UID:  os.Getuid(),
+	}
+
+	if _, err := store.Load(); !errors.Is(err, ErrReceiptMissing) {
+		t.Fatalf("Load() = %v, want ErrReceiptMissing", err)
+	}
+
+	if _, err := store.Update(false, func(*Receipt) error { return nil }); !errors.Is(err, ErrReceiptMissing) {
+		t.Fatalf("Update(false) = %v, want ErrReceiptMissing", err)
+	}
+
+	if _, err := os.Lstat(filepath.Dir(store.Root)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("read-only receipt operations created missing ancestors: %v", err)
 	}
 }
 

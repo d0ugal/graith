@@ -298,7 +298,7 @@ func (manager *Manager) GarbageCollectCache() ([]string, error) {
 
 	var removed []string
 
-	err := manager.Store.withLock(func() error {
+	err := manager.Store.withLock(false, func() error {
 		primary, err := manager.Store.loadLocked()
 		if err != nil {
 			return err
