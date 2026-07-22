@@ -4694,12 +4694,12 @@ func TestClaudeSessionHooksDisabledSkipsInjection(t *testing.T) {
 
 	t.Cleanup(func() { stopAndClosePTY(sm, id) })
 
-	// The recorder writes argv as soon as the agent launches; "sh" is always
-	// argv[0], so wait on that to know the record is present.
-	argv := waitForRecordedArgv(t, recordPath, "sh")
+	// The recorder writes the configured native arguments as soon as the agent
+	// launches, so wait on one to know the record is complete.
+	argv := waitForRecordedArgv(t, recordPath, "--native-runtime-setting")
 
 	for _, a := range argv {
-		if a == "--settings" || a == "--mcp-config" || strings.Contains(a, "mcp_servers.") {
+		if a == "--settings" || a == "--mcp-config" || strings.Contains(a, "mcp_servers.") || strings.Contains(a, "mcp-proxy") {
 			t.Errorf("hooks-disabled session must not inject %q; argv %v", a, argv)
 		}
 	}
