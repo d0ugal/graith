@@ -140,11 +140,16 @@
     },
     {
       "id": "package_27",
-      "label": "internal/tools",
+      "label": "internal/testprocess",
       "group": "internal"
     },
     {
       "id": "package_28",
+      "label": "internal/tools",
+      "group": "internal"
+    },
+    {
+      "id": "package_29",
       "label": "internal/version",
       "group": "internal"
     }
@@ -231,6 +236,10 @@
       "to": "package_28"
     },
     {
+      "from": "package_4",
+      "to": "package_29"
+    },
+    {
       "from": "package_5",
       "to": "package_1"
     },
@@ -260,7 +269,11 @@
     },
     {
       "from": "package_5",
-      "to": "package_28"
+      "to": "package_27"
+    },
+    {
+      "from": "package_5",
+      "to": "package_29"
     },
     {
       "from": "package_6",
@@ -276,7 +289,7 @@
     },
     {
       "from": "package_8",
-      "to": "package_27"
+      "to": "package_28"
     },
     {
       "from": "package_10",
@@ -359,6 +372,10 @@
       "to": "package_28"
     },
     {
+      "from": "package_10",
+      "to": "package_29"
+    },
+    {
       "from": "package_11",
       "to": "package_1"
     },
@@ -371,8 +388,12 @@
       "to": "package_22"
     },
     {
-      "from": "package_14",
+      "from": "package_11",
       "to": "package_27"
+    },
+    {
+      "from": "package_14",
+      "to": "package_28"
     },
     {
       "from": "package_15",
@@ -392,11 +413,11 @@
     },
     {
       "from": "package_18",
-      "to": "package_28"
+      "to": "package_29"
     },
     {
       "from": "package_20",
-      "to": "package_27"
+      "to": "package_28"
     },
     {
       "from": "package_21",
@@ -404,7 +425,7 @@
     },
     {
       "from": "package_23",
-      "to": "package_27"
+      "to": "package_28"
     },
     {
       "from": "package_24",
@@ -420,7 +441,7 @@
     },
     {
       "from": "package_26",
-      "to": "package_27"
+      "to": "package_28"
     }
   ]
 }
