@@ -644,10 +644,10 @@ jobs:
             echo "::error::Refusing to publish stale revision $RELEASE_REVISION; main is $current_main"
             exit 1
           fi
-          gh release delete dev --yes 2>/dev/null || true
+          gh release delete dev --yes --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
           gh api --method DELETE \
             "repos/$GITHUB_REPOSITORY/git/refs/tags/dev" 2>/dev/null || true
-          gh release create dev \
+          gh release create dev --repo "$GITHUB_REPOSITORY" \
             dist/graith-dev_darwin_amd64.tar.gz \
             dist/graith-dev_darwin_arm64.tar.gz \
             dist/graith-dev_linux_amd64.tar.gz \
@@ -661,7 +661,8 @@ jobs:
           expected="$(printf '%s\n' checksums.txt \
             graith-dev_darwin_amd64.tar.gz graith-dev_darwin_arm64.tar.gz \
             graith-dev_linux_amd64.tar.gz graith-dev_linux_arm64.tar.gz | sort)"
-          actual="$(gh release view dev --json assets --jq '.assets[].name' | sort)"
+          actual="$(gh release view dev --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[].name' | sort)"
           test "$actual" = "$expected"
 
       - name: Update Homebrew tap
