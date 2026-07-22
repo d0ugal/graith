@@ -808,6 +808,16 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 		t.Error("Linux archive execution does not invoke the final binary's native terminal self-test")
 	}
 
+	for _, want := range []string{
+		`host_goos="$(go env GOHOSTOS)"`,
+		`host_goarch="$(go env GOHOSTARCH)"`,
+		`GOOS="$host_goos" GOARCH="$host_goarch" CGO_ENABLED=0`,
+	} {
+		if !strings.Contains(nativeVerifier, want) {
+			t.Errorf("atomic publication helper is not pinned to the build host with %q", want)
+		}
+	}
+
 	nativeSelfTest := string(mustReadReleaseFile(t, "internal/pty/terminal_selftest.go"))
 	for _, want := range []string{"newTerminal", "term.Write", "snapshotTerminal", "term.Resize", "term.Close"} {
 		if !strings.Contains(nativeSelfTest, want) {

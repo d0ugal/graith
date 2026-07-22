@@ -2589,13 +2589,18 @@ publish_directory_exclusive() {
     local source="${1:-}"
     local destination="${2:-}"
     local helper="$NATIVE_WORK/rename-excl"
+    local host_goos
+    local host_goarch
 
     if [[ ! -d "$source" || -z "$destination" ]]; then
         echo "usage: publish_directory_exclusive <source> <destination>" >&2
         return 2
     fi
     if [[ ! -x "$helper" ]]; then
-        go build -buildvcs=false -trimpath -o "$helper" \
+        host_goos="$(go env GOHOSTOS)"
+        host_goarch="$(go env GOHOSTARCH)"
+        GOOS="$host_goos" GOARCH="$host_goarch" CGO_ENABLED=0 \
+            go build -buildvcs=false -trimpath -o "$helper" \
             "$REPO_DIR/internal/pty/testdata/renameexcl"
     fi
     if ! "$helper" "$source" "$destination"; then
