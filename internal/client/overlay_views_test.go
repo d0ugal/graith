@@ -294,3 +294,58 @@ func TestAllRepoViewOrder(t *testing.T) {
 		t.Fatalf("viewAll.prev() = %v, want viewDeleted", got)
 	}
 }
+
+func TestPickerStateRestoresViewAndSelection(t *testing.T) {
+	sessions := append(pickerViewSessions(), protocol.SessionInfo{ID: "labelled", Name: "labelled", Labels: []string{"braw"}, Starred: true})
+
+	for _, view := range []PickerView{PickerViewAll, PickerViewRepo, PickerViewStarred, PickerViewLabels, PickerViewScenario, PickerViewDeleted} {
+		t.Run(viewNames[view], func(t *testing.T) {
+			state := PickerState{View: view}
+			if view != PickerViewDeleted {
+				state.SessionID = "labelled"
+			}
+
+			if view == PickerViewLabels {
+				state.LabelGroup = "braw"
+			}
+
+			m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+			m.restorePickerState(state)
+
+			if m.view != viewMode(view) {
+				t.Fatalf("view = %v, want %v", m.view, view)
+			}
+
+			if view != PickerViewDeleted {
+				item, ok := m.list.SelectedItem().(sessionItem)
+				if !ok || item.info.ID != "labelled" {
+					t.Fatalf("selected item = %#v, want session labelled", m.list.SelectedItem())
+				}
+
+				if view == PickerViewLabels && item.labelGroup != "braw" {
+					t.Fatalf("label group = %q, want braw", item.labelGroup)
+				}
+			}
+		})
+	}
+}
+
+func TestPickerStateFallsBackWhenSelectionDisappears(t *testing.T) {
+	m := newOverlayModel(pickerViewSessions(), "", nil, nil, nil, nil)
+	m.restorePickerState(PickerState{View: PickerViewLabels, SessionID: "dreich", LabelGroup: "missing"})
+
+	if m.view != viewLabels {
+		t.Fatalf("view = %v, want labels", m.view)
+	}
+
+	if _, ok := m.list.SelectedItem().(groupHeader); ok {
+		t.Fatal("fallback selected a label header")
+	}
+}
+
+func TestNewOverlayModelStartsWithDefaultPickerState(t *testing.T) {
+	m := newOverlayModel(pickerViewSessions(), "", nil, nil, nil, nil)
+	if m.view != viewAll {
+		t.Fatalf("initial view = %v, want All", m.view)
+	}
+}

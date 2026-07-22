@@ -98,6 +98,10 @@ the session still belongs to it. An empty Labels view says that there are no
 labelled sessions. Trees contain only sessions matched by the selected view and
 search: when a parent is absent, its visible child is shown as a root.
 
+Reopening the picker during the same attach session remembers the last view and
+selected session when they are still available. A new `gr attach` process starts
+in **All** as usual.
+
 The overlay has no stop, resume, rename, or label-edit action — use `gr stop`,
 `gr restart`, or `gr update` from the CLI.
 

@@ -37,6 +37,10 @@ type attachLoop struct {
 	// collapsed persists the overlay's collapsed-repo state between openings.
 	collapsed map[string]bool
 
+	// pickerState persists only the overlay's navigation state for this attach
+	// client. Search and other transient overlay modes are not retained.
+	pickerState client.PickerState
+
 	// opts is handed (by value) to RunPassthrough each iteration; opts.Info
 	// always points at info, so decoding into &info updates what RunPassthrough
 	// sees on the next pass.
@@ -44,7 +48,7 @@ type attachLoop struct {
 	info protocol.SessionInfo
 }
 
-func runAttachByID(c attachConn, sessionID string, initialCollapsed map[string]bool) error {
+func runAttachByID(c attachConn, sessionID string, initialCollapsed map[string]bool, initialPickerState ...client.PickerState) error {
 	if isInsideGraith() {
 		return errors.New("cannot attach from inside a graith session (nested sessions are not supported)")
 	}
@@ -59,12 +63,18 @@ func runAttachByID(c attachConn, sessionID string, initialCollapsed map[string]b
 		return nil
 	}
 
+	pickerState := client.PickerState{}
+	if len(initialPickerState) > 0 {
+		pickerState = initialPickerState[0]
+	}
+
 	l := &attachLoop{
-		ctx:       context.Background(),
-		c:         c,
-		sessionID: sessionID,
-		collapsed: initialCollapsed,
-		info:      info,
+		ctx:         context.Background(),
+		c:           c,
+		sessionID:   sessionID,
+		collapsed:   initialCollapsed,
+		pickerState: pickerState,
+		info:        info,
 	}
 
 	l.opts = client.PassthroughOpts{
@@ -200,6 +210,7 @@ func (l *attachLoop) onOverlay() (bool, error) {
 		RestoreSession:   restoreSession,
 		Profile:          paths.Profile,
 		Collapsed:        l.collapsed,
+		PickerState:      l.pickerState,
 		RepoSuggestions:  repos,
 		ShortcutKeys:     cfg.Overlay.ShortcutKeys,
 		Agents:           agents,
@@ -208,6 +219,7 @@ func (l *attachLoop) onOverlay() (bool, error) {
 	})
 	if overlayResult != nil {
 		l.collapsed = overlayResult.Collapsed
+		l.pickerState = overlayResult.PickerState
 	}
 
 	if overlayResult != nil && overlayResult.Action == "stopped-current" {
