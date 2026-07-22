@@ -189,8 +189,8 @@ func TestCompleteRemovedHookCleanupPreservesUnrelatedArtifacts(t *testing.T) {
 	if err := os.WriteFile(settingsPath, []byte(`{"hooks":{"PreToolUse":[]}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	mcpPath := filepath.Join(dir, "mcp.json")
-	if err := os.WriteFile(mcpPath, []byte(`{"mcpServers":{"croft":{}}}`), 0o600); err != nil {
+	unrelatedPath := filepath.Join(dir, "notes.json")
+	if err := os.WriteFile(unrelatedPath, []byte(`{"croft":"canny"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -201,8 +201,8 @@ func TestCompleteRemovedHookCleanupPreservesUnrelatedArtifacts(t *testing.T) {
 	if _, err := os.Stat(settingsPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("removed generated settings still exist: %v", err)
 	}
-	if _, err := os.Stat(mcpPath); err != nil {
-		t.Fatalf("unrelated MCP artifact was removed: %v", err)
+	if _, err := os.Stat(unrelatedPath); err != nil {
+		t.Fatalf("unrelated artifact was removed: %v", err)
 	}
 	if sm.state.Sessions[sessionID].RemovedHookCleanupPending {
 		t.Fatal("cleanup marker was not cleared")
