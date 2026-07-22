@@ -45,12 +45,14 @@ class Graith < Formula
   end
 
   on_linux do
-    if Hardware::CPU.arm?
+    if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?
+      url "https://github.com/d0ugal/graith/releases/download/v${version}/graith_${version}_linux_amd64.tar.gz"
+      sha256 "${linux_amd64}"
+    elsif Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
       url "https://github.com/d0ugal/graith/releases/download/v${version}/graith_${version}_linux_arm64.tar.gz"
       sha256 "${linux_arm64}"
     else
-      url "https://github.com/d0ugal/graith/releases/download/v${version}/graith_${version}_linux_amd64.tar.gz"
-      sha256 "${linux_amd64}"
+      odie "graith supports only Linux amd64/arm64"
     end
   end
 

@@ -157,6 +157,7 @@ func TestStablePublisherStagesDraftAndPublishesOnlyCompleteSet(t *testing.T) {
 		"gh attestation verify", "--source-digest", "gh release upload",
 		"render-stable-homebrew.sh", "publish-linux-repositories.sh",
 		"render-stable-aur.sh", "gh release download", "--draft=false",
+		`test "$(find "$remote" -maxdepth 1 -type f | wc -l)" -eq 10`,
 		"if [ \"$draft\" = false ]", "Publish prepared Homebrew formula",
 	} {
 		if !strings.Contains(text, required) {
@@ -166,6 +167,10 @@ func TestStablePublisherStagesDraftAndPublishesOnlyCompleteSet(t *testing.T) {
 
 	if strings.Contains(text, "gh release create") || strings.Contains(text, "--clobber") {
 		t.Fatal("stable publisher can replace or create an uncontrolled release")
+	}
+
+	if strings.Contains(text, `test "$(find "$remote" -maxdepth 1 -type f | wc -l)" -eq 11`) {
+		t.Fatal("stable publisher still expects an unsupported Darwin amd64 release asset")
 	}
 
 	if strings.Index(text, "gh release upload") > strings.LastIndex(text, "gh release download") ||
