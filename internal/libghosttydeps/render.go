@@ -14,7 +14,7 @@ const (
 
 func RenderNoticesInventory(lock Lock) string {
 	return fmt.Sprintf(`This file applies only to Graith testing candidates built with the
-%[1]clibghostty%[1]c build tag. Ordinary pure-Go rollback builds do not contain this
+%[1]clibghostty%[1]c build tag. Ordinary pure-Go builds do not contain this
 native dependency closure. The committed %[1]clibghostty-native.spdx.json%[1]c is the
 machine-readable dependency inventory; candidate packaging materializes from it
 a document with the same filename that is bound to the binary's exact revision,
@@ -49,7 +49,11 @@ The exact verified inputs are:
 - Ghostty LICENSE SHA-256
   %[1]c%[24]s%[1]c and committed-header tree SHA-256
   %[1]c%[25]s%[1]c;
-- Apple testing archive
+- Linux source-build configuration %[1]c-Demit-lib-vt=true%[1]c,
+  %[1]c-Demit-xcframework=false%[1]c, %[1]c-Doptimize=ReleaseFast%[1]c, and the
+  target-specific %[1]c-Dtarget=x86_64-linux-gnu%[1]c or
+  %[1]c-Dtarget=aarch64-linux-gnu%[1]c; no Apple archive is used for Linux;
+- Apple testing archive used by the macOS native candidate
   %[1]c%[26]s%[1]c
   SHA-256
   %[1]c%[27]s%[1]c;

@@ -337,12 +337,13 @@ The path-scoped native workflow performs these checks:
 - testing artifacts that include the native SPDX and notice inventory; and
 - release-shaped Linux amd64/arm64 dev archives whose extracted final binaries
   receive dependency, defined-symbol, linkage, package-shape, privacy, SPDX,
-  checksum, provenance, and actual-architecture execution checks before one
+  checksum, provenance, and actual-architecture terminal lifecycle checks
+  (helper start, native create/write/snapshot/resize/close, and reap) before one
   publisher replaces the moving `dev` release.
 
 An explicit tagged build without cgo, on macOS amd64, or on an unsupported OS,
-returns a configuration error rather than silently changing emulator. Ordinary
-The dev release is split by platform. GoReleaser produces the two Darwin
+returns a configuration error rather than silently changing emulator. The dev
+release is split by platform. GoReleaser produces the two Darwin
 archives on Apple Silicon, while Linux jobs build the exact source dependency
 unit and package one native archive per architecture. Every job consumes one
 revision and snapshot version from the release-context job. A single Linux
@@ -390,12 +391,16 @@ defined Ghostty symbol, rejects Ghostty dylib linkage, and rejects a
 tampered-byte binding; validates the document with checksum-pinned official
 SPDX Java tooling; publishes the package directory with a Darwin atomic
 no-replace rename; and uploads exactly `gr`, the bound SPDX document, and the
-notice file. Linux packaging applies the same executable-bound SPDX model to
-each extracted `gr-dev`, adds the ordinary release metadata, verifies the exact
-archive member allowlist, and rejects local/CI paths in every member. The final
-archive is SHA-256 recorded and provenance-attested before upload; the publisher
-rechecks both that archive digest and the embedded executable digest before
-publishing those exact bytes.
+notice file. Linux packaging rewrites the Ghostty package metadata to the exact
+source-build inputs (`emit-xcframework=false` and the architecture-specific Zig
+target) and removes the unrelated Apple artifact claim. It applies the same
+executable-bound SPDX model to each extracted `gr-dev`, adds the ordinary
+release metadata, verifies the exact archive member allowlist, and rejects
+local/CI paths in every member. The final archive is SHA-256 recorded and
+provenance-attested only after the extracted executable passes its native
+terminal lifecycle self-test. The publisher constrains provenance to the exact
+source digest and refuses to mutate the release unless that digest is still the
+current `main` tip.
 
 A pin rotation is generated and reviewed as one unit:
 

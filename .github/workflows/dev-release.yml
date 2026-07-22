@@ -9,8 +9,9 @@ on:
 permissions:
   contents: read
 
-# Main runs replace one shared release and tap formula, so they must finish in
-# order. Pull-request runs build the same release-shaped archives without
+# Main runs replace one shared release and tap formula, so publication is
+# serialized and the publisher refuses a revision that is no longer main's
+# tip. Pull-request runs build the same release-shaped archives without
 # publishing and may cancel an older run for the same PR.
 concurrency:
   group: dev-release-${{ github.event_name == 'push' && 'publish' || github.event.pull_request.number }}
@@ -254,13 +255,16 @@ jobs:
       - name: Upload verified Darwin archives
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: dev-darwin-${{ needs.release-context.outputs.revision }}-${{ github.run_attempt }}
+          # run_id is stable across job retries, so successful platform jobs from
+          # an earlier attempt remain available to a retried downstream job.
+          name: dev-darwin-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
           path: |
             dist/graith-dev_darwin_amd64.tar.gz
             dist/graith-dev_darwin_arm64.tar.gz
             dist/dev-darwin-manifest.json
             dist/metadata.json
           if-no-files-found: error
+          overwrite: true
           retention-days: 2
 
       - name: Remove temporary macOS signing keychain
@@ -387,9 +391,10 @@ jobs:
       - name: Upload verified Linux archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: dev-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_attempt }}
+          name: dev-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
           path: ${{ runner.temp }}/release-${{ matrix.goarch }}/
           if-no-files-found: error
+          overwrite: true
           retention-days: 2
 
   attest-linux:
@@ -398,6 +403,7 @@ jobs:
     needs:
       - release-context
       - build-linux
+      - execute-linux
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -412,7 +418,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: dev-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_attempt }}
+          name: dev-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
           path: ${{ runner.temp }}/release
 
       - name: Attest the final Linux release archive
@@ -449,7 +455,7 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: dev-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_attempt }}
+          name: dev-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
           path: ${{ runner.temp }}/release
 
       - name: Reverify and execute the published Linux bytes
@@ -503,7 +509,7 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: dev-*-${{ needs.release-context.outputs.revision }}-${{ github.run_attempt }}
+          pattern: dev-*-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
           path: dist
           merge-multiple: true
 
@@ -573,7 +579,7 @@ jobs:
       - name: Upload assembled dev release for verification
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: dev-release-${{ needs.release-context.outputs.revision }}-${{ github.run_attempt }}
+          name: dev-release-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
           path: |
             dist/graith-dev_darwin_amd64.tar.gz
             dist/graith-dev_darwin_arm64.tar.gz
@@ -581,6 +587,7 @@ jobs:
             dist/graith-dev_linux_arm64.tar.gz
             dist/checksums.txt
           if-no-files-found: error
+          overwrite: true
           retention-days: 2
 
   publish-dev:
@@ -601,7 +608,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: dev-release-${{ needs.release-context.outputs.revision }}-${{ github.run_attempt }}
+          name: dev-release-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
           path: dist
 
       - name: Reverify assembled checksums
@@ -622,6 +629,7 @@ jobs:
             gh attestation verify "$archive" \
               --repo "$GITHUB_REPOSITORY" \
               --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/dev-release.yml" \
+              --source-digest "$RELEASE_REVISION" \
               --source-ref refs/heads/main
           done
 
@@ -630,6 +638,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          current_main="$(gh api \
+            "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "$current_main" != "$RELEASE_REVISION" ]]; then
+            echo "::error::Refusing to publish stale revision $RELEASE_REVISION; main is $current_main"
+            exit 1
+          fi
           gh release delete dev --yes 2>/dev/null || true
           gh api --method DELETE \
             "repos/$GITHUB_REPOSITORY/git/refs/tags/dev" 2>/dev/null || true
