@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"image/color"
 	"io"
@@ -23,6 +24,7 @@ import (
 var (
 	listRepo     string
 	listTree     bool
+	listFlat     bool
 	listChildren string
 	listStarred  bool
 	listQuiet    bool
@@ -84,7 +86,18 @@ var listCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls"},
 	Short:   "List all sessions",
-	RunE:    runList,
+	Long: "List all sessions. Human-readable output uses the parent-child hierarchy " +
+		"by default; use --flat for flat repo/name ordering.",
+	Args: validateListArgs,
+	RunE: runList,
+}
+
+func validateListArgs(cmd *cobra.Command, _ []string) error {
+	if cmd.Flags().Changed("tree") && cmd.Flags().Changed("flat") {
+		return errors.New("--tree and --flat are mutually exclusive; use --flat for flat output or omit both for tree output")
+	}
+
+	return nil
 }
 
 func runList(cmd *cobra.Command, _ []string) error {
@@ -132,9 +145,11 @@ func runList(cmd *cobra.Command, _ []string) error {
 	}
 
 	now := time.Now()
+
+	tree := listTree || !listFlat
 	if listTokens {
-		printTokenProjection(cmd, list.Sessions, now, listTree)
-	} else if listTree {
+		printTokenProjection(cmd, list.Sessions, now, tree)
+	} else if tree {
 		printTree(cmd, list.Sessions, now)
 	} else {
 		printFlat(cmd, list.Sessions, now)
@@ -460,18 +475,28 @@ func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 	renderRows(cmd.OutOrStdout(), rows)
 }
 
-func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Time) {
-	byID := make(map[string]protocol.SessionInfo, len(sessions))
+type sessionTreeRow struct {
+	session protocol.SessionInfo
+	prefix  string
+}
+
+// orderSessionTree returns every session exactly once in deterministic
+// parent-child order. Missing parents are roots. If corrupt persisted state
+// contains a cycle, the first unrendered member in canonical order becomes a
+// root and the visited set cuts the back-edge, so tree output never hangs or
+// silently omits sessions.
+func orderSessionTree(sessions []protocol.SessionInfo) []sessionTreeRow {
+	byID := make(map[string]struct{}, len(sessions))
 	children := make(map[string][]protocol.SessionInfo)
 
 	var roots []protocol.SessionInfo
 
 	for _, s := range sessions {
-		byID[s.ID] = s
+		byID[s.ID] = struct{}{}
 	}
 
 	for _, s := range sessions {
-		if s.ParentID == "" || byID[s.ParentID].ID == "" {
+		if _, parentExists := byID[s.ParentID]; s.ParentID == "" || !parentExists {
 			roots = append(roots, s)
 		} else {
 			children[s.ParentID] = append(children[s.ParentID], s)
@@ -489,22 +514,26 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 		sortSessions(children[k])
 	}
 
-	colorOn := listColorEnabled(cmd)
-	cols := visibleColumns(listWide)
-
-	rows := [][]string{headerCells(cols)}
+	ordered := make([]sessionTreeRow, 0, len(sessions))
+	visited := make(map[string]bool, len(sessions))
 
 	var walk func(s protocol.SessionInfo, prefix, childPrefix string)
 
 	walk = func(s protocol.SessionInfo, prefix, childPrefix string) {
-		name := s.Name
-		if s.Starred {
-			name = "★ " + name
+		if visited[s.ID] {
+			return
 		}
 
-		rows = append(rows, dataCells(prefix+name, s, cols, now, colorOn))
+		visited[s.ID] = true
+		ordered = append(ordered, sessionTreeRow{session: s, prefix: prefix})
 
-		kids := children[s.ID]
+		kids := make([]protocol.SessionInfo, 0, len(children[s.ID]))
+		for _, kid := range children[s.ID] {
+			if !visited[kid.ID] {
+				kids = append(kids, kid)
+			}
+		}
+
 		for i, kid := range kids {
 			if i == len(kids)-1 {
 				walk(kid, childPrefix+"`-- ", childPrefix+"    ")
@@ -516,6 +545,34 @@ func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 
 	for _, root := range roots {
 		walk(root, "", "")
+	}
+
+	// A valid hierarchy is exhausted by roots. Any remaining sessions belong
+	// to a cycle; start a deterministic synthetic root for each unvisited
+	// component so no row is lost.
+	remaining := append([]protocol.SessionInfo(nil), sessions...)
+	sortSessions(remaining)
+
+	for _, s := range remaining {
+		walk(s, "", "")
+	}
+
+	return ordered
+}
+
+func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Time) {
+	colorOn := listColorEnabled(cmd)
+	cols := visibleColumns(listWide)
+
+	rows := [][]string{headerCells(cols)}
+
+	for _, item := range orderSessionTree(sessions) {
+		name := item.session.Name
+		if item.session.Starred {
+			name = "★ " + name
+		}
+
+		rows = append(rows, dataCells(item.prefix+name, item.session, cols, now, colorOn))
 	}
 
 	renderRows(cmd.OutOrStdout(), rows)
@@ -578,7 +635,8 @@ func descendantsOf(sessions []protocol.SessionInfo, parentID string) []protocol.
 func registerListCmd() {
 	rootCmd.AddCommand(listCmd)
 	listCmd.Flags().StringVar(&listRepo, "repo", "", "filter by repo path")
-	listCmd.Flags().BoolVar(&listTree, "tree", false, "show parent-child hierarchy")
+	listCmd.Flags().BoolVar(&listTree, "tree", false, "deprecated no-op; parent-child hierarchy is the default")
+	listCmd.Flags().BoolVar(&listFlat, "flat", false, "show sessions in flat repo/name order")
 	listCmd.Flags().StringVar(&listChildren, "children", "", "filter to descendants of a session")
 	listCmd.Flags().BoolVar(&listStarred, "starred", false, "show only starred sessions")
 	listCmd.Flags().BoolVarP(&listQuiet, "quiet", "q", false, "output only session names (or IDs as JSON with --json)")
@@ -589,6 +647,7 @@ func registerListCmd() {
 	listCmd.Flags().StringArrayVar(&listLabels, "label", nil, "filter by session label; repeat for AND matching")
 	listCmd.MarkFlagsMutuallyExclusive("quiet", "tokens")
 	listCmd.MarkFlagsMutuallyExclusive("wide", "tokens")
+	listCmd.MarkFlagsMutuallyExclusive("tree", "flat")
 	_ = listCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	_ = listCmd.RegisterFlagCompletionFunc("children", completeSessionNames)
 }

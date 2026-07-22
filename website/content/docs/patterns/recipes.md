@@ -128,7 +128,7 @@ gr new test-coverage --repo ~/Code/api --prompt "add tests to reach 80% coverage
 gr new docs --repo ~/Code/api --prompt "add godoc comments to all exported functions"
 
 # Monitor progress
-gr list --tree
+gr list
 
 # Coordinate
 gr msg send --children "rebase on main before pushing"

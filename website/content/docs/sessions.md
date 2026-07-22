@@ -168,7 +168,8 @@ With uncommitted changes or unpushed commits, graith prompts for confirmation; `
 When a session spawns children (e.g. an orchestrator and its workers), graith tracks the link via `parent_id`.
 
 ```bash
-gr list --tree                    # show hierarchy
+gr list                           # show hierarchy (the default)
+gr list --flat                    # use flat repo/name ordering
 gr list --children my-session     # show descendants
 gr stop --children                # stop all children (from inside a session)
 gr delete --children              # delete all children

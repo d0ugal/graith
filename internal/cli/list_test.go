@@ -3,12 +3,14 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
@@ -118,6 +120,61 @@ func TestListLabelFlagIsRepeatable(t *testing.T) {
 	}
 }
 
+func TestListDisplayFlagsAndAlias(t *testing.T) {
+	registerCommands()
+
+	for _, name := range []string{"list", "ls"} {
+		cmd, _, err := rootCmd.Find([]string{name})
+		if err != nil {
+			t.Fatalf("find %q: %v", name, err)
+		}
+
+		if cmd != listCmd {
+			t.Errorf("%q resolves to %q, want list command", name, cmd.Name())
+		}
+	}
+
+	flat := listCmd.Flags().Lookup("flat")
+	tree := listCmd.Flags().Lookup("tree")
+
+	if flat == nil || !strings.Contains(flat.Usage, "flat repo/name order") {
+		t.Fatalf("list --flat = %#v, want documented flat ordering", flat)
+	}
+
+	if tree == nil || !strings.Contains(tree.Usage, "deprecated no-op") {
+		t.Fatalf("list --tree = %#v, want deprecated compatibility no-op", tree)
+	}
+
+	if !strings.Contains(listCmd.Long, "hierarchy") || !strings.Contains(listCmd.Long, "--flat") {
+		t.Errorf("list help does not explain the default and migration: %q", listCmd.Long)
+	}
+
+	origFlatChanged := flat.Changed
+	origTreeChanged := tree.Changed
+
+	t.Cleanup(func() {
+		flat.Changed = origFlatChanged
+		tree.Changed = origTreeChanged
+	})
+
+	flat.Changed = true
+	tree.Changed = true
+
+	err := listCmd.Args(listCmd, nil)
+	if err == nil {
+		t.Fatal("--flat and --tree should be mutually exclusive")
+	}
+
+	wantErr := "--tree and --flat are mutually exclusive; use --flat for flat output or omit both for tree output"
+	if err.Error() != wantErr {
+		t.Errorf("conflict error = %q, want %q", err, wantErr)
+	}
+
+	if err := listCmd.ValidateFlagGroups(); err == nil {
+		t.Error("Cobra flag group should also reject --flat with --tree")
+	}
+}
+
 func TestSessionInfoLessBreaksDuplicateNameTiesByID(t *testing.T) {
 	a := protocol.SessionInfo{ID: "braw", Name: "canny", RepoName: "croft"}
 	b := protocol.SessionInfo{ID: "thrawn", Name: "canny", RepoName: "croft"}
@@ -128,6 +185,278 @@ func TestSessionInfoLessBreaksDuplicateNameTiesByID(t *testing.T) {
 
 	if sessionInfoLess(b, a) {
 		t.Errorf("sessionInfoLess(%+v, %+v) = true, want false", b, a)
+	}
+}
+
+type listRunOptions struct {
+	json   bool
+	flat   bool
+	tree   bool
+	tokens bool
+}
+
+func runListFixture(t *testing.T, sessions []protocol.SessionInfo, opts listRunOptions) string {
+	t.Helper()
+
+	origConnect := listConnectFn
+	origOut := out
+	origJSON := jsonOutput
+	origCfg := cfg
+	origPaths := paths
+	origRepo := listRepo
+	origTree := listTree
+	origFlat := listFlat
+	origChildren := listChildren
+	origStarred := listStarred
+	origQuiet := listQuiet
+	origWide := listWide
+	origTokens := listTokens
+	origNoColor := listNoColor
+	origDeleted := listDeleted
+	origLabels := listLabels
+
+	defer func() {
+		listConnectFn = origConnect
+		out = origOut
+		jsonOutput = origJSON
+		cfg = origCfg
+		paths = origPaths
+		listRepo = origRepo
+		listTree = origTree
+		listFlat = origFlat
+		listChildren = origChildren
+		listStarred = origStarred
+		listQuiet = origQuiet
+		listWide = origWide
+		listTokens = origTokens
+		listNoColor = origNoColor
+		listDeleted = origDeleted
+		listLabels = origLabels
+	}()
+
+	fake := &scriptedConn{responses: []scriptedResp{okResp(payloadEnv("session_list", protocol.SessionListMsg{
+		Sessions: sessions,
+	}))}}
+	listConnectFn = func(*config.Config, config.Paths, string) (listConn, error) {
+		return fake, nil
+	}
+
+	jsonOutput = opts.json
+	listRepo = ""
+	listTree = opts.tree
+	listFlat = opts.flat
+	listChildren = ""
+	listStarred = false
+	listQuiet = false
+	listWide = false
+	listTokens = opts.tokens
+	listNoColor = true
+	listDeleted = false
+	listLabels = nil
+	paths = config.Paths{}
+	cfg = config.Default()
+	cfg.Updates.Enabled = false
+
+	var buf bytes.Buffer
+
+	out = output.NewWithWriter(jsonOutput, &buf)
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+
+	if err := runList(cmd, nil); err != nil {
+		t.Fatalf("runList(%+v): %v", opts, err)
+	}
+
+	if fake.closed != 1 {
+		t.Errorf("list connection closed %d times, want once", fake.closed)
+	}
+
+	return buf.String()
+}
+
+func TestRunListHumanDisplayModes(t *testing.T) {
+	created := time.Now().Add(-time.Hour).Format(time.RFC3339)
+	sessions := []protocol.SessionInfo{
+		{ID: "bairn", ParentID: "ben", Name: "bairn", RepoName: "croft", Agent: "codex", Status: "running", CreatedAt: created, Starred: true},
+		{ID: "ben", Name: "hame", RepoName: "croft", Agent: "claude", Status: "running", CreatedAt: created},
+	}
+
+	defaultOutput := runListFixture(t, sessions, listRunOptions{})
+	if !strings.Contains(defaultOutput, "`-- ★ bairn") {
+		t.Fatalf("default human list is not a tree:\n%s", defaultOutput)
+	}
+
+	if strings.Index(defaultOutput, "hame") > strings.Index(defaultOutput, "bairn") {
+		t.Errorf("default tree should place parent before child:\n%s", defaultOutput)
+	}
+
+	compatOutput := runListFixture(t, sessions, listRunOptions{tree: true})
+	if compatOutput != defaultOutput {
+		t.Errorf("deprecated --tree alias changed output:\n--- default ---\n%s--- --tree ---\n%s", defaultOutput, compatOutput)
+	}
+
+	flatOutput := runListFixture(t, sessions, listRunOptions{flat: true})
+	if strings.Contains(flatOutput, "|--") || strings.Contains(flatOutput, "`--") {
+		t.Errorf("--flat output contains tree connectors:\n%s", flatOutput)
+	}
+
+	if strings.Index(flatOutput, "bairn") > strings.Index(flatOutput, "hame") {
+		t.Errorf("--flat should use canonical repo/name order:\n%s", flatOutput)
+	}
+
+	defaultTokens := runListFixture(t, sessions, listRunOptions{tokens: true})
+	if !strings.Contains(defaultTokens, "`-- ★ bairn") {
+		t.Errorf("default token projection is not a tree:\n%s", defaultTokens)
+	}
+
+	flatTokens := runListFixture(t, sessions, listRunOptions{tokens: true, flat: true})
+	if strings.Contains(flatTokens, "|--") || strings.Contains(flatTokens, "`--") {
+		t.Errorf("--tokens --flat contains tree connectors:\n%s", flatTokens)
+	}
+}
+
+func TestRunListJSONIgnoresDisplayFlagsAndPreservesSchema(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{
+			ID: "bairn", ParentID: "ben", Name: "bairn", RepoName: "croft", Agent: "codex",
+			Labels: []string{"urgent"}, Tokens: &protocol.TokenInfo{Input: 2, Output: 3, Total: 5},
+		},
+		{ID: "ben", Name: "hame", RepoName: "croft", Agent: "claude", Labels: []string{}},
+	}
+
+	tests := []struct {
+		name string
+		opts listRunOptions
+	}{
+		{name: "JSON default", opts: listRunOptions{json: true}},
+		{name: "JSON deprecated tree alias", opts: listRunOptions{json: true, tree: true}},
+		{name: "JSON flat", opts: listRunOptions{json: true, flat: true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := runListFixture(t, sessions, tt.opts)
+
+			var decoded protocol.SessionListMsg
+			if err := json.Unmarshal([]byte(got), &decoded); err != nil {
+				t.Fatalf("decode SessionListMsg: %v\n%s", err, got)
+			}
+
+			if !reflect.DeepEqual(decoded.Sessions, sessions) {
+				t.Errorf("sessions changed order or shape:\n got: %+v\nwant: %+v", decoded.Sessions, sessions)
+			}
+
+			var raw map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(got), &raw); err != nil {
+				t.Fatalf("decode raw JSON: %v", err)
+			}
+
+			if len(raw) != 1 || raw["sessions"] == nil {
+				t.Errorf("JSON schema changed, top-level fields = %v", raw)
+			}
+		})
+	}
+}
+
+func TestRunListAgentModeUsesStructuredJSONWithFlat(t *testing.T) {
+	registerCommands()
+
+	origConnect := listConnectFn
+	origOut := out
+	origJSON := jsonOutput
+	origAgentMode := agentMode
+	origCfgFile := cfgFile
+	origListFlat := listFlat
+	origListTree := listTree
+	agentFlag := rootCmd.PersistentFlags().Lookup("agent-mode")
+	flatFlag := listCmd.Flags().Lookup("flat")
+	treeFlag := listCmd.Flags().Lookup("tree")
+	origAgentChanged := agentFlag.Changed
+	origFlatChanged := flatFlag.Changed
+	origTreeChanged := treeFlag.Changed
+
+	t.Cleanup(func() {
+		listConnectFn = origConnect
+		out = origOut
+		jsonOutput = origJSON
+		agentMode = origAgentMode
+		cfgFile = origCfgFile
+		listFlat = origListFlat
+		listTree = origListTree
+		agentFlag.Changed = origAgentChanged
+		flatFlag.Changed = origFlatChanged
+		treeFlag.Changed = origTreeChanged
+	})
+
+	sessions := []protocol.SessionInfo{
+		{ID: "bairn", ParentID: "ben", Name: "bairn", RepoName: "croft", Labels: []string{}},
+		{ID: "ben", Name: "hame", RepoName: "croft", Labels: []string{"release"}},
+	}
+	fake := &scriptedConn{responses: []scriptedResp{okResp(payloadEnv("session_list", protocol.SessionListMsg{
+		Sessions: sessions,
+	}))}}
+	listConnectFn = func(*config.Config, config.Paths, string) (listConn, error) {
+		return fake, nil
+	}
+
+	jsonOutput = false
+	agentMode = false
+	cfgFile = ""
+	listFlat = false
+	listTree = false
+
+	t.Setenv("GR_AGENT_MODE", "0")
+
+	var runErr error
+
+	got := captureStdout(t, func() {
+		runErr = executeWithArgs([]string{"--agent-mode", "list", "--flat"})
+	})
+	if runErr != nil {
+		t.Fatalf("agent-mode list --flat: %v", runErr)
+	}
+
+	var decoded protocol.SessionListMsg
+	if err := json.Unmarshal([]byte(got), &decoded); err != nil {
+		t.Fatalf("agent-mode output is not structured SessionListMsg JSON: %v\n%s", err, got)
+	}
+
+	if !reflect.DeepEqual(decoded.Sessions, sessions) {
+		t.Errorf("agent-mode --flat changed sessions:\n got: %+v\nwant: %+v", decoded.Sessions, sessions)
+	}
+}
+
+func TestOrderSessionTreeIncludesOrphansAndCyclesDeterministically(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "bairn", ParentID: "auld", Name: "bairn", RepoName: "croft"},
+		{ID: "dreich", ParentID: "missing", Name: "dreich", RepoName: "croft"},
+		{ID: "auld", ParentID: "bairn", Name: "auld", RepoName: "croft"},
+		{ID: "canny", Name: "canny", RepoName: "croft"},
+	}
+
+	rows := orderSessionTree(sessions)
+	wantNames := []string{"canny", "dreich", "auld", "bairn"}
+	wantPrefixes := []string{"", "", "", "`-- "}
+
+	if len(rows) != len(wantNames) {
+		t.Fatalf("tree rows = %+v, want %d sessions", rows, len(wantNames))
+	}
+
+	for i := range wantNames {
+		if rows[i].session.Name != wantNames[i] || rows[i].prefix != wantPrefixes[i] {
+			t.Errorf("tree row %d = %q/%q, want %q/%q", i, rows[i].session.Name, rows[i].prefix, wantNames[i], wantPrefixes[i])
+		}
+	}
+
+	tokenRows := orderTokenProjectionSessions(sessions, true)
+	if len(tokenRows) != len(sessions) {
+		t.Fatalf("token tree omitted cycle/orphan sessions: %+v", tokenRows)
+	}
+
+	for i := range wantNames {
+		if tokenRows[i].session.Name != wantNames[i] || tokenRows[i].name != wantPrefixes[i]+wantNames[i] {
+			t.Errorf("token tree row %d = %+v, want name %q", i, tokenRows[i], wantPrefixes[i]+wantNames[i])
+		}
 	}
 }
 

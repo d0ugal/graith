@@ -11,12 +11,14 @@ draft: false
 
 ### `gr list` (alias: `ls`)
 
-List all sessions with status.
+List all sessions with status. Human-readable output shows the parent-child
+hierarchy by default; use `--flat` for the legacy repo/name ordering.
 
 | Flag | Description |
 |------|-------------|
 | `--repo <path>` | Filter by repo path |
-| `--tree` | Show parent-child hierarchy |
+| `--flat` | Show sessions in flat repo/name order |
+| `--tree` | Deprecated no-op retained for compatibility; hierarchy is the default |
 | `--children <name-or-id>` | Filter to descendants of a session |
 | `--starred` | Show only starred sessions |
 | `--label <label>` | Filter by exact label; repeat for AND matching |
@@ -45,8 +47,9 @@ or the attached-session picker (`ctrl+b w`) for an interactive view.
 never consults GitHub or infers labels from session content.
 
 `--tokens` composes with the selection flags (`--repo`, `--children`,
-`--starred`, `--label`, `--deleted`, `--tree`) but is mutually exclusive with `--quiet` and
-`--wide`.
+`--starred`, `--label`, `--deleted`) and the display modes (`--flat`,
+`--tree`), but is mutually exclusive with `--quiet` and `--wide`. `--flat` and
+`--tree` cannot be supplied together.
 
 Counts reflect the **current agent** from a background poll, lagging by up to the
 poll interval (default 30 seconds). **Counted** is the age of the last successful
@@ -80,12 +83,14 @@ $ gr ls --json | jq '.sessions[] | {name, labels, tokens}'
 }
 ```
 
-`--json` and agent mode always use this full `SessionInfo` shape, even with
-`--tokens` — there's no separate flat token schema. Each row's `cwd` is the
-persisted working directory assigned to the agent; `worktree_path` remains the
-Git worktree/source path and can differ for mirrors and system sessions. Its
-`labels` field is always the complete array (including `[]` for an unlabelled
-session). USD cost isn't shown, a planned opt-in via a user-supplied price table.
+`--json` and agent mode always use this full `SessionInfo` shape and daemon
+ordering, even with `--flat`, `--tree`, or `--tokens` — display flags do not
+change its schema or omit sessions, and there's no separate flat token schema.
+Each row's `cwd` is the persisted working directory assigned to the agent;
+`worktree_path` remains the Git worktree/source path and can differ for mirrors
+and system sessions. Its `labels` field is always the complete array (including
+`[]` for an unlabelled session). USD cost isn't shown, a planned opt-in via a
+user-supplied price table.
 
 ### `gr logs <name-or-id>` (alias: `l`)
 
