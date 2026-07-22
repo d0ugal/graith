@@ -2,7 +2,7 @@
 title: "Design Doc: Pluggable Approvals Backends + Built-in localmost-compatible Engine"
 authors: Dougal Matthews
 created: 2026-07-03
-status: Superseded by 2026-07-18-non-interactive-sandbox-policy.md
+status: Superseded by 2026-07-22-command-policy-removal.md
 reviewers: internal technical review (rev1 incorporated)
 informed: (TBD)
 issue: https://github.com/d0ugal/graith/issues/729
@@ -10,11 +10,10 @@ issue: https://github.com/d0ugal/graith/issues/729
 
 # Pluggable Approvals Backends + Built-in localmost-compatible Engine
 
-> This design is retained as historical context. Its interactive workflow and
-> backend model were removed by
-> [Non-interactive agents with sandbox-enforced policy](2026-07-18-non-interactive-sandbox-policy.md).
-> Only the localmost-compatible rule parser survives, as a synchronous deny
-> layer that cannot bypass the OS sandbox.
+> This design is retained as historical context. Its interactive workflow was
+> removed by [Remove Graith interactive approvals](2026-07-18-non-interactive-sandbox-policy.md),
+> and the retained localmost-compatible command-policy layer was subsequently
+> removed by [Remove Command Policy](2026-07-22-command-policy-removal.md).
 
 ## Background
 
