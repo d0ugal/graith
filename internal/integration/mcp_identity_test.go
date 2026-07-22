@@ -28,13 +28,22 @@ const (
 	managedMCPAmbientID     = "dreich-unrelated"
 	managedMCPAmbientToken  = "tok-dreich-unrelated" //nolint:gosec // Deliberately recognizable integration-test credential.
 	managedMCPHelperEnvName = "GRAITH_INTEGRATION_CLI"
+	managedMCPAliasPrefix   = "GRAITH_MCP_00112233445566778899AABBCCDDEEFF_"
 )
+
+var managedMCPAliasNames = []string{
+	managedMCPAliasPrefix + "SESSION_ID",
+	managedMCPAliasPrefix + "TOKEN",
+	managedMCPAliasPrefix + "PROFILE",
+	managedMCPAliasPrefix + "SOCKET_PATH",
+}
 
 type managedMCPTestEnv struct {
 	*testEnv
 
 	mcpManager *daemon.MCPManager
 	messages   *daemon.MsgStore
+	profile    string
 }
 
 func TestManagedGraithMCPPreservesCallerIdentity(t *testing.T) {
@@ -44,11 +53,19 @@ func TestManagedGraithMCPPreservesCallerIdentity(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	cmd := exec.Command(os.Args[0], "mcp-proxy", "graith") //nolint:gosec // Re-executes this fixed integration test binary through the real CLI entrypoint.
+	proxyArgs := append([]string{"mcp-proxy", "graith"}, managedMCPAliasNames...)
+	cmd := exec.Command(os.Args[0], proxyArgs...) //nolint:gosec // Re-executes this fixed integration test binary through the real CLI entrypoint.
 	cmd.Env = replaceProcessEnv(os.Environ(), map[string]string{
 		managedMCPHelperEnvName: "1",
-		"GRAITH_TOKEN":          managedMCPCallerToken,
-		"GRAITH_SOCKET_PATH":    env.socket,
+		managedMCPAliasNames[0]: managedMCPCallerID,
+		managedMCPAliasNames[1]: managedMCPCallerToken,
+		managedMCPAliasNames[2]: env.profile,
+		managedMCPAliasNames[3]: env.socket,
+		// Hostile canonical values must be ignored; only the explicitly named
+		// aliases are authentication and routing inputs.
+		"GRAITH_TOKEN":       managedMCPAmbientToken,
+		"GRAITH_PROFILE":     "wrong",
+		"GRAITH_SOCKET_PATH": filepath.Join(t.TempDir(), "wrong.sock"),
 		// Deliberately make normal XDG discovery point elsewhere. The proxy must
 		// use the daemon-injected exact socket and must never auto-start a second
 		// daemon from this credential-bearing helper.
@@ -165,6 +182,22 @@ func TestManagedGraithMCPPreservesCallerIdentity(t *testing.T) {
 
 	if len(inbox.Messages) != 1 || inbox.Messages[0].Body != "caller inbox context" {
 		t.Fatalf("read_inbox result = %+v, want caller-scoped message", inbox.Messages)
+	}
+
+	wrongProfileCmd := exec.Command(os.Args[0], proxyArgs...) //nolint:gosec // Re-executes this fixed integration test binary through the real CLI entrypoint.
+	wrongProfileCmd.Env = replaceProcessEnv(os.Environ(), map[string]string{
+		managedMCPHelperEnvName: "1",
+		managedMCPAliasNames[0]: managedMCPCallerID,
+		managedMCPAliasNames[1]: managedMCPCallerToken,
+		managedMCPAliasNames[2]: "wrong",
+		managedMCPAliasNames[3]: env.socket,
+	})
+	wrongProfileOutput, wrongProfileErr := wrongProfileCmd.CombinedOutput()
+	if wrongProfileErr == nil {
+		t.Fatal("wrong aliased profile unexpectedly connected")
+	}
+	if bytes.Contains(wrongProfileOutput, []byte(managedMCPCallerToken)) {
+		t.Fatal("wrong-profile diagnostic exposed the token value")
 	}
 }
 
@@ -285,6 +318,7 @@ func setupManagedMCP(t *testing.T) *managedMCPTestEnv {
 		testEnv:    &testEnv{sm: sm, srv: srv, cancel: cancel, socket: paths.SocketPath, tmpDir: root},
 		mcpManager: mcpManager,
 		messages:   msgStore,
+		profile:    paths.Profile,
 	}
 }
 

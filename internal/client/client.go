@@ -128,6 +128,13 @@ func ConnectPassiveContext(ctx context.Context, cfg *config.Config, paths config
 // never starts or upgrades one. Lifecycle controls such as `daemon stop` use it
 // so a down service is not demand-started merely in order to stop it.
 func ConnectExisting(cfg *config.Config, paths config.Paths) (*Client, error) {
+	return ConnectExistingWithToken(cfg, paths, resolveClientToken(paths))
+}
+
+// ConnectExistingWithToken is ConnectExisting with an explicit credential.
+// Credential-forwarding helpers use it so authentication cannot silently fall
+// back to an unrelated process environment or human token.
+func ConnectExistingWithToken(cfg *config.Config, paths config.Paths, token string) (*Client, error) {
 	conn, err := dialLocalDaemon("unix", paths.SocketPath, daemonDialTimeout)
 	if err != nil {
 		return nil, err
@@ -135,7 +142,7 @@ func ConnectExisting(cfg *config.Config, paths config.Paths) (*Client, error) {
 
 	c := &Client{
 		conn: conn, reader: protocol.NewFrameReader(conn), writer: protocol.NewFrameWriter(conn),
-		cfg: cfg, paths: paths, token: resolveClientToken(paths),
+		cfg: cfg, paths: paths, token: token,
 	}
 	_ = conn.SetDeadline(time.Now().Add(daemonHandshakeTimeout))
 

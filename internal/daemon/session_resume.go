@@ -770,7 +770,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	}
 
 	if sessMCPEnabled {
-		mcpArgs, err := sm.injectMCPConfig(sessAgent, id, mcpServers)
+		mcpArgs, err := sm.injectMCPConfig(sessAgent, id, mcpServers, env)
 		if err != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("inject mcp config: %w", err)

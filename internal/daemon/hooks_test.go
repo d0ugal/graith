@@ -1,12 +1,18 @@
 package daemon
 
 import (
+	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +31,26 @@ func newTestSessionManagerWithDataDir(t *testing.T) *SessionManager {
 		StateFile: filepath.Join(dir, "state.json"),
 		DataDir:   dir,
 	}, slog.Default())
+}
+
+func testMCPProxyIdentityEnv() mcpProxyIdentityEnv {
+	const prefix = "GRAITH_MCP_00112233445566778899AABBCCDDEEFF"
+
+	return mcpProxyIdentityEnv{
+		SessionID:  prefix + "_SESSION_ID",
+		Token:      prefix + "_TOKEN",
+		Profile:    prefix + "_PROFILE",
+		SocketPath: prefix + "_SOCKET_PATH",
+	}
+}
+
+func testMCPLaunchEnv() map[string]string {
+	return map[string]string{
+		"GRAITH_SESSION_ID":  "canny-session",
+		"GRAITH_TOKEN":       "dreich-secret-token-value",
+		"GRAITH_PROFILE":     "bothy",
+		"GRAITH_SOCKET_PATH": "/canny/graith.sock",
+	}
 }
 
 func TestCommandPolicyHookCommandBlocksSupervisorSpawnFailure(t *testing.T) {
@@ -678,7 +704,8 @@ func TestTOMLBasicString(t *testing.T) {
 // graith identity/path context. Values are JSON-encoded so they are valid TOML
 // and emitted in stable slice order.
 func TestCodexMCPServerArgs(t *testing.T) {
-	if args, skipped, err := codexMCPServerArgs(nil); err != nil || args != nil || skipped != nil {
+	identityEnv := testMCPProxyIdentityEnv()
+	if args, skipped, err := codexMCPServerArgs(nil, identityEnv); err != nil || args != nil || skipped != nil {
 		t.Fatalf("codexMCPServerArgs(nil) = (%v, %v, %v), want (nil, nil, nil)", args, skipped, err)
 	}
 
@@ -687,7 +714,7 @@ func TestCodexMCPServerArgs(t *testing.T) {
 		{Name: "chrome-devtools", Command: "npx", Args: []string{"chrome-mcp"}, Env: map[string]string{"DISPLAY": ":0"}},
 	}
 
-	args, skipped, err := codexMCPServerArgs(servers)
+	args, skipped, err := codexMCPServerArgs(servers, identityEnv)
 	if err != nil {
 		t.Fatalf("codexMCPServerArgs() error = %v", err)
 	}
@@ -705,14 +732,12 @@ func TestCodexMCPServerArgs(t *testing.T) {
 
 	want := []string{
 		"-c", "mcp_servers.graith.command=" + string(cmdVal),
-		"-c", `mcp_servers.graith.args=["mcp-proxy","graith"]`,
-		"-c", `mcp_servers.graith.env_vars=["GRAITH_SESSION_ID","GRAITH_TOKEN","GRAITH_PROFILE","GRAITH_SOCKET_PATH"]`,
-		"-c", `mcp_servers.graith.env={}`,
+		"-c", `mcp_servers.graith.args=["mcp-proxy","graith","GRAITH_MCP_00112233445566778899AABBCCDDEEFF_SESSION_ID","GRAITH_MCP_00112233445566778899AABBCCDDEEFF_TOKEN","GRAITH_MCP_00112233445566778899AABBCCDDEEFF_PROFILE","GRAITH_MCP_00112233445566778899AABBCCDDEEFF_SOCKET_PATH"]`,
+		"-c", `mcp_servers.graith.env_vars=["GRAITH_MCP_00112233445566778899AABBCCDDEEFF_SESSION_ID","GRAITH_MCP_00112233445566778899AABBCCDDEEFF_TOKEN","GRAITH_MCP_00112233445566778899AABBCCDDEEFF_PROFILE","GRAITH_MCP_00112233445566778899AABBCCDDEEFF_SOCKET_PATH"]`,
 		"-c", `mcp_servers.graith.environment_id="local"`,
 		"-c", "mcp_servers.chrome-devtools.command=" + string(cmdVal),
-		"-c", `mcp_servers.chrome-devtools.args=["mcp-proxy","chrome-devtools"]`,
-		"-c", `mcp_servers.chrome-devtools.env_vars=["GRAITH_SESSION_ID","GRAITH_TOKEN","GRAITH_PROFILE","GRAITH_SOCKET_PATH"]`,
-		"-c", `mcp_servers.chrome-devtools.env={}`,
+		"-c", `mcp_servers.chrome-devtools.args=["mcp-proxy","chrome-devtools","GRAITH_MCP_00112233445566778899AABBCCDDEEFF_SESSION_ID","GRAITH_MCP_00112233445566778899AABBCCDDEEFF_TOKEN","GRAITH_MCP_00112233445566778899AABBCCDDEEFF_PROFILE","GRAITH_MCP_00112233445566778899AABBCCDDEEFF_SOCKET_PATH"]`,
+		"-c", `mcp_servers.chrome-devtools.env_vars=["GRAITH_MCP_00112233445566778899AABBCCDDEEFF_SESSION_ID","GRAITH_MCP_00112233445566778899AABBCCDDEEFF_TOKEN","GRAITH_MCP_00112233445566778899AABBCCDDEEFF_PROFILE","GRAITH_MCP_00112233445566778899AABBCCDDEEFF_SOCKET_PATH"]`,
 		"-c", `mcp_servers.chrome-devtools.environment_id="local"`,
 	}
 
@@ -729,7 +754,7 @@ func TestCodexMCPServerArgs(t *testing.T) {
 	// env_vars contains names only. A live credential must never be copied into
 	// argv, even when the helper runs in an authenticated session environment.
 	t.Setenv("GRAITH_TOKEN", "dreich-secret-token-value")
-	args, _, err = codexMCPServerArgs(servers[:1])
+	args, _, err = codexMCPServerArgs(servers[:1], identityEnv)
 	if err != nil {
 		t.Fatalf("codexMCPServerArgs() with token environment error = %v", err)
 	}
@@ -749,6 +774,206 @@ func TestCodexMCPServerArgs(t *testing.T) {
 	}
 }
 
+func TestMCPProxyIdentityEnvAliasesAreAtomicAndFresh(t *testing.T) {
+	launchEnv := testMCPLaunchEnv()
+	firstEntropy := strings.NewReader("0123456789abcdef")
+	first, aliases, err := newMCPProxyIdentityEnv(launchEnv, firstEntropy)
+	if err != nil {
+		t.Fatalf("newMCPProxyIdentityEnv() error = %v", err)
+	}
+
+	if len(aliases) != 4 {
+		t.Fatalf("aliases = %v, want exactly four", aliases)
+	}
+	for _, name := range first.names() {
+		if _, exists := launchEnv[name]; exists {
+			t.Fatalf("newMCPProxyIdentityEnv mutated launch environment before install: %s", name)
+		}
+	}
+
+	launchEnv["GRAITH_MCP_FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF_TOKEN"] = "old-secret"
+	replaceMCPProxyIdentityEnv(launchEnv, aliases)
+
+	var installed []string
+	for name := range launchEnv {
+		if strings.HasPrefix(name, mcpProxyIdentityEnvPrefix) {
+			installed = append(installed, name)
+		}
+	}
+	if len(installed) != 4 {
+		t.Fatalf("installed reserved aliases = %v, want exactly one four-name set", installed)
+	}
+	if _, exists := launchEnv["GRAITH_MCP_FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF_TOKEN"]; exists {
+		t.Fatal("old MCP identity alias survived replacement")
+	}
+
+	second, _, err := newMCPProxyIdentityEnv(launchEnv, strings.NewReader("fedcba9876543210"))
+	if err != nil {
+		t.Fatalf("second newMCPProxyIdentityEnv() error = %v", err)
+	}
+	if reflect.DeepEqual(first, second) {
+		t.Fatal("two launches reused the same identity alias set")
+	}
+}
+
+func TestMCPProxyIdentityEnvAliasFailuresDoNotMutateOrLeak(t *testing.T) {
+	const secret = "thrawn-token-must-not-leak"
+
+	t.Run("entropy", func(t *testing.T) {
+		env := testMCPLaunchEnv()
+		env["GRAITH_TOKEN"] = secret
+		before := maps.Clone(env)
+
+		_, _, err := newMCPProxyIdentityEnv(env, strings.NewReader("short"))
+		if err == nil {
+			t.Fatal("short entropy should fail")
+		}
+		if strings.Contains(err.Error(), secret) {
+			t.Fatal("entropy error exposed the token value")
+		}
+		if !reflect.DeepEqual(env, before) {
+			t.Fatalf("entropy failure mutated env: got %v, want %v", env, before)
+		}
+	})
+
+	t.Run("collision", func(t *testing.T) {
+		env := testMCPLaunchEnv()
+		env["GRAITH_TOKEN"] = secret
+		identity := testMCPProxyIdentityEnv()
+		env[identity.Token] = "pre-existing-secret"
+		before := maps.Clone(env)
+		entropy, err := hex.DecodeString("00112233445566778899aabbccddeeff")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_, _, err = newMCPProxyIdentityEnv(env, bytes.NewReader(entropy))
+		if err == nil {
+			t.Fatal("pre-existing generated alias should fail")
+		}
+		for _, value := range []string{secret, "pre-existing-secret"} {
+			if strings.Contains(err.Error(), value) {
+				t.Fatalf("collision error exposed environment value %q", value)
+			}
+		}
+		if !reflect.DeepEqual(env, before) {
+			t.Fatalf("collision failure mutated env: got %v, want %v", env, before)
+		}
+	})
+}
+
+func TestInjectMCPConfigFailureDoesNotMutateLaunchEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("dreich"), 0o600); err != nil {
+		t.Fatalf("write hook-directory blocker: %v", err)
+	}
+
+	sm := NewSessionManager(config.Default(), config.Paths{
+		DataDir:   blocker,
+		StateFile: filepath.Join(dir, "state.json"),
+	}, slog.Default())
+	env := testMCPLaunchEnv()
+	env["GRAITH_MCP_FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF_TOKEN"] = "old-secret"
+	before := maps.Clone(env)
+
+	_, err := sm.injectMCPConfig("claude", "canny-config-failure", []config.MCPServerConfig{{Name: "graith"}}, env)
+	if err == nil {
+		t.Fatal("unwritable MCP config path should fail")
+	}
+	if strings.Contains(err.Error(), "dreich-secret-token-value") || strings.Contains(err.Error(), "old-secret") {
+		t.Fatal("MCP config failure exposed an environment value")
+	}
+	if !reflect.DeepEqual(env, before) {
+		t.Fatalf("MCP config failure mutated launch env: got %v, want %v", env, before)
+	}
+}
+
+// TestCodexMCPHostileLowerLayerEffectiveConfig exercises Codex itself when a
+// sufficiently recent binary is available. Codex deep-merges the user's
+// literal env table, so those hostile canonical values deliberately survive;
+// the regression is that the effective child whitelist and proxy argv use one
+// fresh alias set instead and retain unrelated user controls.
+func TestCodexMCPHostileLowerLayerEffectiveConfig(t *testing.T) {
+	codexBin, err := exec.LookPath("codex")
+	if err != nil {
+		t.Skip("codex CLI not installed")
+	}
+
+	versionOutput, err := exec.Command(codexBin, "--version").Output()
+	if err != nil {
+		t.Skipf("read codex version: %v", err)
+	}
+	var major, minor int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(versionOutput)), "codex-cli %d.%d", &major, &minor); err != nil || (major == 0 && minor < 145) {
+		t.Skipf("requires codex-cli 0.145.0 or later, got %q", strings.TrimSpace(string(versionOutput)))
+	}
+
+	codexHome := t.TempDir()
+	baseConfig := `[mcp_servers.graith]
+command = "/bin/false"
+args = ["wrong"]
+startup_timeout_sec = 17
+env = { GRAITH_SESSION_ID = "stale-session", GRAITH_TOKEN = "stale-token", GRAITH_PROFILE = "wrong", GRAITH_SOCKET_PATH = "/wrong.sock", SAFE_CONTROL = "keep" }
+`
+	if err := os.WriteFile(filepath.Join(codexHome, "config.toml"), []byte(baseConfig), 0o600); err != nil {
+		t.Fatalf("write hostile codex config: %v", err)
+	}
+
+	identityEnv := testMCPProxyIdentityEnv()
+	overrides, _, err := codexMCPServerArgs([]config.MCPServerConfig{{Name: "graith"}}, identityEnv)
+	if err != nil {
+		t.Fatalf("codexMCPServerArgs() error = %v", err)
+	}
+	cmdArgs := append(append([]string{}, overrides...), "mcp", "get", "graith", "--json")
+	cmd := exec.Command(codexBin, cmdArgs...)
+	cmd.Env = append(os.Environ(), "CODEX_HOME="+codexHome, "GRAITH_TOKEN=fixture-parent-token")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("codex effective MCP config failed: %v: %s", err, stderr.Bytes())
+	}
+
+	var effective struct {
+		StartupTimeoutSec float64 `json:"startup_timeout_sec"`
+		Transport         struct {
+			Type    string            `json:"type"`
+			Command string            `json:"command"`
+			Args    []string          `json:"args"`
+			Env     map[string]string `json:"env"`
+			EnvVars []string          `json:"env_vars"`
+		} `json:"transport"`
+	}
+	if err := json.Unmarshal(output, &effective); err != nil {
+		t.Fatalf("decode codex effective MCP config: %v", err)
+	}
+
+	if !reflect.DeepEqual(effective.Transport.EnvVars, identityEnv.names()) {
+		var shape map[string]any
+		_ = json.Unmarshal(output, &shape)
+		t.Fatalf("effective env_vars = %v, want alias names %v; top-level keys=%v", effective.Transport.EnvVars, identityEnv.names(), slices.Sorted(maps.Keys(shape)))
+	}
+	if !reflect.DeepEqual(effective.Transport.Args, identityEnv.proxyArgs("graith")) {
+		t.Fatalf("effective args = %v, want alias-only args %v", effective.Transport.Args, identityEnv.proxyArgs("graith"))
+	}
+	if effective.Transport.Type != "stdio" {
+		t.Fatalf("effective transport type = %q, want stdio", effective.Transport.Type)
+	}
+	if effective.StartupTimeoutSec != 17 || effective.Transport.Env["SAFE_CONTROL"] != "keep" {
+		t.Fatalf("unrelated user controls were not preserved: timeout=%v safe=%q", effective.StartupTimeoutSec, effective.Transport.Env["SAFE_CONTROL"])
+	}
+	if effective.Transport.Env["GRAITH_TOKEN"] != "stale-token" {
+		t.Fatal("test did not reproduce Codex's hostile lower-layer literal env merge")
+	}
+	joined := strings.Join(overrides, " ")
+	for _, value := range []string{"fixture-parent-token", "dreich-secret-token-value"} {
+		if strings.Contains(joined, value) {
+			t.Fatalf("Codex overrides exposed credential value %q", value)
+		}
+	}
+}
+
 // TestCodexMCPServerArgsSkipsUnrepresentableNames is a regression test for the
 // tribunal finding (all three judges): a server name containing a `.` (or any
 // non-TOML-bare-key char) breaks Codex's dotted `-c` key path and, unquoted,
@@ -763,7 +988,7 @@ func TestCodexMCPServerArgsSkipsUnrepresentableNames(t *testing.T) {
 		{Name: "under_score-ok", Command: "npx", Args: []string{"fine"}},
 	}
 
-	args, skipped, err := codexMCPServerArgs(servers)
+	args, skipped, err := codexMCPServerArgs(servers, testMCPProxyIdentityEnv())
 	if err != nil {
 		t.Fatalf("codexMCPServerArgs() error = %v", err)
 	}
@@ -779,9 +1004,9 @@ func TestCodexMCPServerArgsSkipsUnrepresentableNames(t *testing.T) {
 		}
 	}
 
-	// Only the two representable names emit overrides: 2 servers × 10 args each.
-	if len(args) != 20 {
-		t.Fatalf("args = %v, want 20 (graith + under_score-ok)", args)
+	// Only the two representable names emit overrides: 2 servers × 8 args each.
+	if len(args) != 16 {
+		t.Fatalf("args = %v, want 16 (graith + under_score-ok)", args)
 	}
 
 	joined := strings.Join(args, " ")
@@ -961,7 +1186,8 @@ func TestGenerateMCPConfig(t *testing.T) {
 		{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}, Env: map[string]string{"DISPLAY": ":0"}},
 	}
 
-	mcpConfigPath, err := sm.generateMCPConfig(sessionID, servers)
+	identityEnv := testMCPProxyIdentityEnv()
+	mcpConfigPath, err := sm.generateMCPConfig(sessionID, servers, identityEnv)
 	if err != nil {
 		t.Fatalf("generateMCPConfig() error = %v", err)
 	}
@@ -996,8 +1222,8 @@ func TestGenerateMCPConfig(t *testing.T) {
 		t.Errorf("graith command = %q, want %q", graith.Command, grBin)
 	}
 
-	if len(graith.Args) != 2 || graith.Args[0] != "mcp-proxy" || graith.Args[1] != "graith" {
-		t.Errorf("graith args = %v, want [mcp-proxy graith]", graith.Args)
+	if !reflect.DeepEqual(graith.Args, identityEnv.proxyArgs("graith")) {
+		t.Errorf("graith args = %v, want %v", graith.Args, identityEnv.proxyArgs("graith"))
 	}
 
 	chrome, ok := parsed.MCPServers["chrome"]
@@ -1009,8 +1235,8 @@ func TestGenerateMCPConfig(t *testing.T) {
 		t.Errorf("chrome command = %q, want %q", chrome.Command, grBin)
 	}
 
-	if len(chrome.Args) != 2 || chrome.Args[0] != "mcp-proxy" || chrome.Args[1] != "chrome" {
-		t.Errorf("chrome args = %v, want [mcp-proxy chrome]", chrome.Args)
+	if !reflect.DeepEqual(chrome.Args, identityEnv.proxyArgs("chrome")) {
+		t.Errorf("chrome args = %v, want %v", chrome.Args, identityEnv.proxyArgs("chrome"))
 	}
 }
 
@@ -1057,7 +1283,8 @@ func TestInjectMCPConfig(t *testing.T) {
 		{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}},
 	}
 
-	args, err := sm.injectMCPConfig("claude", sessionID, servers)
+	env := testMCPLaunchEnv()
+	args, err := sm.injectMCPConfig("claude", sessionID, servers, env)
 	if err != nil {
 		t.Fatalf("injectMCPConfig() error = %v", err)
 	}
@@ -1078,6 +1305,11 @@ func TestInjectMCPConfig(t *testing.T) {
 	if !strings.Contains(string(data), "mcpServers") {
 		t.Error("mcp config file should contain mcpServers")
 	}
+	for _, name := range []string{"GRAITH_SESSION_ID", "GRAITH_TOKEN", "GRAITH_PROFILE", "GRAITH_SOCKET_PATH"} {
+		if value := env[name]; value != "" && strings.Contains(string(data), value) {
+			t.Fatalf("mcp config file exposed the value of %s", name)
+		}
+	}
 }
 
 // TestInjectMCPConfigNoServers verifies that no servers means no args and no
@@ -1085,7 +1317,7 @@ func TestInjectMCPConfig(t *testing.T) {
 func TestInjectMCPConfigNoServers(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 
-	args, err := sm.injectMCPConfig("claude", "kirk-mcp-empty", nil)
+	args, err := sm.injectMCPConfig("claude", "kirk-mcp-empty", nil, testMCPLaunchEnv())
 	if err != nil {
 		t.Fatalf("injectMCPConfig() error = %v", err)
 	}
@@ -1100,13 +1332,16 @@ func TestInjectMCPConfigNoServers(t *testing.T) {
 // the decoupled MCP path — #1135).
 func TestInjectMCPConfigCodex(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
+	var logOutput bytes.Buffer
+	sm.log = slog.New(slog.NewTextHandler(&logOutput, nil))
 
 	servers := []config.MCPServerConfig{
 		{Name: "graith", Command: "/usr/bin/gr", Args: []string{"mcp"}},
 		{Name: "chrome", Command: "npx", Args: []string{"chrome-mcp"}},
 	}
 
-	args, err := sm.injectMCPConfig("codex", "kirk-codex-mcp", servers)
+	env := testMCPLaunchEnv()
+	args, err := sm.injectMCPConfig("codex", "kirk-codex-mcp", servers, env)
 	if err != nil {
 		t.Fatalf("injectMCPConfig(codex) error = %v", err)
 	}
@@ -1117,20 +1352,32 @@ func TestInjectMCPConfigCodex(t *testing.T) {
 			t.Errorf("args missing command override for %q: %v", name, args)
 		}
 
-		if !strings.Contains(joined, `mcp_servers.`+name+`.args=["mcp-proxy","`+name+`"]`) {
+		if !strings.Contains(joined, `mcp_servers.`+name+`.args=["mcp-proxy","`+name+`","GRAITH_MCP_`) {
 			t.Errorf("args missing args override for %q: %v", name, args)
 		}
 
-		if !strings.Contains(joined, `mcp_servers.`+name+`.env_vars=["GRAITH_SESSION_ID","GRAITH_TOKEN","GRAITH_PROFILE","GRAITH_SOCKET_PATH"]`) {
+		if !strings.Contains(joined, `mcp_servers.`+name+`.env_vars=["GRAITH_MCP_`) {
 			t.Errorf("args missing proxy environment whitelist for %q: %v", name, args)
 		}
 
-		if !strings.Contains(joined, `mcp_servers.`+name+`.env={}`) {
-			t.Errorf("args do not clear literal environment overrides for %q: %v", name, args)
+		if strings.Contains(joined, `mcp_servers.`+name+`.env=`) {
+			t.Errorf("args unexpectedly rely on a literal environment table for %q: %v", name, args)
 		}
 
 		if !strings.Contains(joined, `mcp_servers.`+name+`.environment_id="local"`) {
 			t.Errorf("args do not force local proxy execution for %q: %v", name, args)
+		}
+	}
+	for _, name := range []string{"GRAITH_SESSION_ID", "GRAITH_TOKEN", "GRAITH_PROFILE", "GRAITH_SOCKET_PATH"} {
+		value := env[name]
+		if value == "" {
+			continue
+		}
+		if strings.Contains(joined, value) {
+			t.Fatalf("codex argv exposed the value of %s", name)
+		}
+		if strings.Contains(logOutput.String(), value) {
+			t.Fatalf("MCP injection log exposed the value of %s", name)
 		}
 	}
 }
@@ -1146,7 +1393,7 @@ func TestInjectMCPConfigNonClaude(t *testing.T) {
 	}
 
 	for _, agent := range []string{"cursor", "opencode"} {
-		args, err := sm.injectMCPConfig(agent, "haar-"+agent, servers)
+		args, err := sm.injectMCPConfig(agent, "haar-"+agent, servers, testMCPLaunchEnv())
 		if err != nil {
 			t.Errorf("injectMCPConfig(%q) error = %v", agent, err)
 		}

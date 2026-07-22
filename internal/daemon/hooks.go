@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -217,7 +218,7 @@ func (sm *SessionManager) generateClaudeSettingsWithTimeout(sessionID string, li
 // generateMCPConfig writes an MCP config JSON file (compatible with Claude
 // Code's --mcp-config flag) that maps each server to its gr mcp-proxy command.
 // Returns the path to the config file.
-func (sm *SessionManager) generateMCPConfig(sessionID string, mcpServers []config.MCPServerConfig) (string, error) {
+func (sm *SessionManager) generateMCPConfig(sessionID string, mcpServers []config.MCPServerConfig, identityEnv mcpProxyIdentityEnv) (string, error) {
 	dir := sm.hookDir(sessionID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create hook dir: %w", err)
@@ -242,7 +243,7 @@ func (sm *SessionManager) generateMCPConfig(sessionID string, mcpServers []confi
 	for _, s := range mcpServers {
 		cfg.MCPServers[s.Name] = mcpEntry{
 			Command: grBin,
-			Args:    []string{"mcp-proxy", s.Name},
+			Args:    identityEnv.proxyArgs(s.Name),
 		}
 	}
 
@@ -289,26 +290,36 @@ func (sm *SessionManager) injectClaudeHooksWithTimeout(sessionID string, lifecyc
 //
 // Claude consumes a `--mcp-config` file; Codex takes per-session
 // `-c mcp_servers.<name>.…` overrides (issue #1184). Other agents get no args.
-func (sm *SessionManager) injectMCPConfig(agentName, sessionID string, mcpServers []config.MCPServerConfig) (extraArgs []string, err error) {
+func (sm *SessionManager) injectMCPConfig(agentName, sessionID string, mcpServers []config.MCPServerConfig, sessionEnv map[string]string) (extraArgs []string, err error) {
 	if len(mcpServers) == 0 {
 		return nil, nil
+	}
+	if agentName != "claude" && agentName != "codex" {
+		return nil, nil
+	}
+
+	identityEnv, aliases, err := newMCPProxyIdentityEnv(sessionEnv, rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("prepare mcp proxy identity environment: %w", err)
 	}
 
 	switch agentName {
 	case "claude":
-		mcpConfigPath, err := sm.generateMCPConfig(sessionID, mcpServers)
+		mcpConfigPath, err := sm.generateMCPConfig(sessionID, mcpServers, identityEnv)
 		if err != nil {
 			return nil, err
 		}
+		replaceMCPProxyIdentityEnv(sessionEnv, aliases)
 
 		sm.log.Info("injected mcp config", "session_id", sessionID, "mcp_config", mcpConfigPath, "mcp_servers", len(mcpServers))
 
 		return []string{"--mcp-config", mcpConfigPath}, nil
 	case "codex":
-		args, skipped, err := codexMCPServerArgs(mcpServers)
+		args, skipped, err := codexMCPServerArgs(mcpServers, identityEnv)
 		if err != nil {
 			return nil, err
 		}
+		replaceMCPProxyIdentityEnv(sessionEnv, aliases)
 
 		if len(skipped) > 0 {
 			sm.log.Warn("skipped codex mcp servers with names not representable as codex config keys",
@@ -318,9 +329,9 @@ func (sm *SessionManager) injectMCPConfig(agentName, sessionID string, mcpServer
 		sm.log.Info("injected mcp config", "session_id", sessionID, "mcp_servers", len(mcpServers)-len(skipped))
 
 		return args, nil
-	default:
-		return nil, nil
 	}
+
+	return nil, nil
 }
 
 // codexBareKeyRe matches MCP server names that can be represented as a TOML
@@ -338,21 +349,82 @@ func (sm *SessionManager) injectMCPConfig(agentName, sessionID string, mcpServer
 // JSON map key, so this restriction is Codex-specific.)
 var codexBareKeyRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-// codexMCPProxyEnvVars is the minimum parent-process context a Codex-launched
-// gr mcp-proxy needs to reconnect to the same daemon as the owning session.
-// Codex starts stdio MCP servers with a cleared environment and copies only its
-// fixed portable defaults plus names listed in `env_vars`; GRAITH_* variables
-// are not defaults. The values stay in the process environment: only these
-// names are emitted in argv/config, so the session bearer token and daemon
-// socket path are never exposed in a process listing or persisted config.
-// GRAITH_SOCKET_PATH selects the exact owning daemon even when it was started
-// from a custom config/data directory. HOME is already in Codex's fixed stdio
-// environment set.
-var codexMCPProxyEnvVars = []string{
-	"GRAITH_SESSION_ID",
-	"GRAITH_TOKEN",
-	"GRAITH_PROFILE",
-	"GRAITH_SOCKET_PATH",
+const (
+	mcpProxyIdentityEnvPrefix    = "GRAITH_MCP_"
+	mcpProxyIdentityEntropyBytes = 16
+)
+
+type mcpProxyIdentityEnv struct {
+	SessionID  string
+	Token      string
+	Profile    string
+	SocketPath string
+}
+
+func (e mcpProxyIdentityEnv) names() []string {
+	return []string{e.SessionID, e.Token, e.Profile, e.SocketPath}
+}
+
+func (e mcpProxyIdentityEnv) proxyArgs(serverName string) []string {
+	return []string{"mcp-proxy", serverName, e.SessionID, e.Token, e.Profile, e.SocketPath}
+}
+
+// newMCPProxyIdentityEnv creates unpredictable per-launch names for the
+// minimum identity and routing values an MCP proxy needs. Codex recursively
+// deep-merges literal MCP env tables, so a lower configuration layer cannot be
+// cleared with `-c ...env={}`. Fresh aliases avoid every static lower-layer key
+// without putting credential values in argv or generated config. A collision
+// fails the launch rather than silently replacing a pre-existing value.
+func newMCPProxyIdentityEnv(sessionEnv map[string]string, entropy io.Reader) (mcpProxyIdentityEnv, map[string]string, error) {
+	required := []string{"GRAITH_SESSION_ID", "GRAITH_TOKEN", "GRAITH_PROFILE", "GRAITH_SOCKET_PATH"}
+	for _, name := range required {
+		value, ok := sessionEnv[name]
+		if !ok || (name != "GRAITH_PROFILE" && value == "") {
+			return mcpProxyIdentityEnv{}, nil, fmt.Errorf("required %s is missing or empty", name)
+		}
+	}
+
+	var nonce [mcpProxyIdentityEntropyBytes]byte
+	if _, err := io.ReadFull(entropy, nonce[:]); err != nil {
+		return mcpProxyIdentityEnv{}, nil, fmt.Errorf("read alias entropy: %w", err)
+	}
+
+	prefix := mcpProxyIdentityEnvPrefix + strings.ToUpper(hex.EncodeToString(nonce[:]))
+	names := mcpProxyIdentityEnv{
+		SessionID:  prefix + "_SESSION_ID",
+		Token:      prefix + "_TOKEN",
+		Profile:    prefix + "_PROFILE",
+		SocketPath: prefix + "_SOCKET_PATH",
+	}
+	for _, name := range names.names() {
+		if _, exists := sessionEnv[name]; exists {
+			return mcpProxyIdentityEnv{}, nil, fmt.Errorf("refusing pre-existing MCP identity alias %s", name)
+		}
+	}
+
+	aliases := map[string]string{
+		names.SessionID:  sessionEnv["GRAITH_SESSION_ID"],
+		names.Token:      sessionEnv["GRAITH_TOKEN"],
+		names.Profile:    sessionEnv["GRAITH_PROFILE"],
+		names.SocketPath: sessionEnv["GRAITH_SOCKET_PATH"],
+	}
+
+	return names, aliases, nil
+}
+
+// replaceMCPProxyIdentityEnv installs exactly one alias set. Launch maps are
+// normally rebuilt from agent configuration on every create/fork/resume, but
+// clearing the reserved namespace here also prevents a reused map from
+// accumulating credential aliases across launches.
+func replaceMCPProxyIdentityEnv(sessionEnv, aliases map[string]string) {
+	for name := range sessionEnv {
+		if strings.HasPrefix(name, mcpProxyIdentityEnvPrefix) {
+			delete(sessionEnv, name)
+		}
+	}
+	for name, value := range aliases {
+		sessionEnv[name] = value
+	}
 }
 
 // codexMCPServerArgs builds the per-session `-c` config overrides that point
@@ -361,12 +433,12 @@ var codexMCPProxyEnvVars = []string{
 // can't be represented as a Codex override key (see codexBareKeyRe).
 //
 // It deliberately overrides the process-defining fields: `command`, `args`,
-// `env_vars`, literal `env`, and `environment_id`. Codex clears stdio MCP child
-// environments, then applies literal env entries after inherited env_vars; a
-// same-name user token could therefore replace the owning session identity.
-// Clearing literal env makes the inherited values authoritative. Forcing the
-// local environment prevents Codex from forwarding the session bearer token to
-// a configured remote executor. Using `-c` overrides rather than writing a full
+// `env_vars`, and `environment_id`. Codex clears stdio MCP child environments,
+// then applies literal env entries after inherited env_vars. Unpredictable
+// per-launch names keep a lower-layer literal env table from replacing graith's
+// owning identity even though Codex deep-merges that table. Forcing the local
+// environment prevents Codex from forwarding the session bearer token to a
+// configured remote executor. Using `-c` overrides rather than writing a full
 // config file leaves other user-supplied per-server controls —
 // `startup_timeout_sec`, `tool_timeout_sec`, `enabled`, enabled/disabled tools,
 // and per-tool execution mode — intact and merged.
@@ -374,7 +446,7 @@ var codexMCPProxyEnvVars = []string{
 // Values are JSON-encoded, which is also valid TOML for a string
 // (`"…"`) and a string array (`["…","…"]`), the two value kinds Codex's
 // `-c key=value` override parser accepts here.
-func codexMCPServerArgs(mcpServers []config.MCPServerConfig) (args, skipped []string, err error) {
+func codexMCPServerArgs(mcpServers []config.MCPServerConfig, identityEnv mcpProxyIdentityEnv) (args, skipped []string, err error) {
 	if len(mcpServers) == 0 {
 		return nil, nil, nil
 	}
@@ -386,12 +458,12 @@ func codexMCPServerArgs(mcpServers []config.MCPServerConfig) (args, skipped []st
 		return nil, nil, fmt.Errorf("marshal mcp command: %w", err)
 	}
 
-	proxyEnvVars, err := json.Marshal(codexMCPProxyEnvVars)
+	proxyEnvVars, err := json.Marshal(identityEnv.names())
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal mcp proxy env vars: %w", err)
 	}
 
-	args = make([]string, 0, len(mcpServers)*10)
+	args = make([]string, 0, len(mcpServers)*8)
 
 	for _, s := range mcpServers {
 		if !codexBareKeyRe.MatchString(s.Name) {
@@ -399,7 +471,7 @@ func codexMCPServerArgs(mcpServers []config.MCPServerConfig) (args, skipped []st
 			continue
 		}
 
-		proxyArgs, err := json.Marshal([]string{"mcp-proxy", s.Name})
+		proxyArgs, err := json.Marshal(identityEnv.proxyArgs(s.Name))
 		if err != nil {
 			return nil, nil, fmt.Errorf("marshal mcp args for %q: %w", s.Name, err)
 		}
@@ -408,7 +480,6 @@ func codexMCPServerArgs(mcpServers []config.MCPServerConfig) (args, skipped []st
 			"-c", fmt.Sprintf("mcp_servers.%s.command=%s", s.Name, cmdVal),
 			"-c", fmt.Sprintf("mcp_servers.%s.args=%s", s.Name, proxyArgs),
 			"-c", fmt.Sprintf("mcp_servers.%s.env_vars=%s", s.Name, proxyEnvVars),
-			"-c", fmt.Sprintf("mcp_servers.%s.env={}", s.Name),
 			"-c", fmt.Sprintf("mcp_servers.%s.environment_id=\"local\"", s.Name),
 		)
 	}

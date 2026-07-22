@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,17 +18,62 @@ import (
 )
 
 var mcpProxyCmd = &cobra.Command{
-	Use:    "mcp-proxy <server-name>",
+	Use:    "mcp-proxy <server-name> <session-id-env> <token-env> <profile-env> <socket-path-env>",
 	Short:  "Stdio bridge to a daemon-managed MCP server",
 	Hidden: true,
-	Args:   cobra.ExactArgs(1),
+	Args:   cobra.ExactArgs(5),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		serverName := args[0]
-		sessionID := os.Getenv("GRAITH_SESSION_ID")
-		socketPath := os.Getenv("GRAITH_SOCKET_PATH")
+		identity, err := mcpProxyIdentityFromEnv(args[1:], os.LookupEnv)
+		if err != nil {
+			return err
+		}
 
-		return runMCPProxy(serverName, sessionID, socketPath)
+		return runMCPProxy(args[0], identity)
 	},
+}
+
+var mcpProxyIdentityEnvNameRe = regexp.MustCompile(`^(GRAITH_MCP_[A-F0-9]{32})_(SESSION_ID|TOKEN|PROFILE|SOCKET_PATH)$`)
+
+type mcpProxyIdentity struct {
+	sessionID  string
+	token      string
+	profile    string
+	socketPath string
+}
+
+func mcpProxyIdentityFromEnv(names []string, lookup func(string) (string, bool)) (mcpProxyIdentity, error) {
+	if len(names) != 4 {
+		return mcpProxyIdentity{}, fmt.Errorf("mcp proxy requires four identity environment aliases")
+	}
+
+	wantSuffixes := []string{"SESSION_ID", "TOKEN", "PROFILE", "SOCKET_PATH"}
+	values := make([]string, len(names))
+	var prefix string
+
+	for i, name := range names {
+		matches := mcpProxyIdentityEnvNameRe.FindStringSubmatch(name)
+		if len(matches) != 3 || matches[2] != wantSuffixes[i] {
+			return mcpProxyIdentity{}, fmt.Errorf("invalid MCP identity environment alias %q", name)
+		}
+		if i == 0 {
+			prefix = matches[1]
+		} else if matches[1] != prefix {
+			return mcpProxyIdentity{}, fmt.Errorf("MCP identity environment aliases must share one nonce")
+		}
+
+		value, ok := lookup(name)
+		if !ok || (wantSuffixes[i] != "PROFILE" && value == "") {
+			return mcpProxyIdentity{}, fmt.Errorf("required MCP identity environment alias %s is missing or empty", name)
+		}
+		values[i] = value
+	}
+
+	return mcpProxyIdentity{
+		sessionID:  values[0],
+		token:      values[1],
+		profile:    values[2],
+		socketPath: values[3],
+	}, nil
 }
 
 // stdinChunk carries data read from os.Stdin.
@@ -36,10 +82,10 @@ type stdinChunk struct {
 	err  error
 }
 
-func runMCPProxy(serverName, sessionID, socketPath string) error {
+func runMCPProxy(serverName string, identity mcpProxyIdentity) error {
 	const maxBackoff = 30 * time.Second
 
-	proxyPaths, err := mcpProxyConnectionPaths(paths, socketPath)
+	proxyPaths, err := mcpProxyConnectionPaths(paths, identity.profile, identity.socketPath)
 	if err != nil {
 		return err
 	}
@@ -71,7 +117,7 @@ func runMCPProxy(serverName, sessionID, socketPath string) error {
 	for {
 		start := time.Now()
 
-		err := mcpProxySession(serverName, sessionID, proxyPaths, stdinCh)
+		err := mcpProxySession(serverName, identity.sessionID, identity.token, proxyPaths, stdinCh)
 		if err == nil {
 			return nil
 		}
@@ -103,28 +149,30 @@ func isPermanentError(err error) bool {
 	return strings.Contains(msg, "unknown MCP server") ||
 		strings.Contains(msg, "MCP manager not initialized") ||
 		strings.Contains(msg, "is not enabled for agent") ||
-		strings.Contains(msg, "requires an authenticated session identity")
+		strings.Contains(msg, "requires an authenticated session identity") ||
+		strings.Contains(msg, "handshake rejected while connecting to existing daemon")
 }
 
-func mcpProxyConnectionPaths(base config.Paths, socketPath string) (config.Paths, error) {
+func mcpProxyConnectionPaths(base config.Paths, profile, socketPath string) (config.Paths, error) {
 	if socketPath == "" {
-		return base, nil
+		return config.Paths{}, errors.New("MCP proxy socket path is missing")
 	}
 
 	if !filepath.IsAbs(socketPath) {
-		return config.Paths{}, fmt.Errorf("GRAITH_SOCKET_PATH must be absolute")
+		return config.Paths{}, errors.New("MCP proxy socket path must be absolute")
 	}
 
+	base.Profile = profile
 	base.SocketPath = filepath.Clean(socketPath)
 
 	return base, nil
 }
 
-func mcpProxySession(serverName, sessionID string, proxyPaths config.Paths, stdinCh <-chan stdinChunk) error {
+func mcpProxySession(serverName, sessionID, token string, proxyPaths config.Paths, stdinCh <-chan stdinChunk) error {
 	// A proxy is owned by an already-running daemon. Never auto-start a daemon
 	// from this credential-bearing helper: on restart the outer retry loop waits
 	// for the exact socket to return.
-	c, err := client.ConnectExisting(cfg, proxyPaths)
+	c, err := client.ConnectExistingWithToken(cfg, proxyPaths, token)
 	if err != nil {
 		return fmt.Errorf("connect to daemon: %w", err)
 	}

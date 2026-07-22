@@ -79,30 +79,37 @@ At launch graith injects the resolved server set — the auto-injected `graith`
 server plus your global and per-agent servers — pointing each at
 `gr mcp-proxy <name>` so the daemon supervises the real process:
 
-- **Claude** — a generated `--mcp-config` file.
+- **Claude** — a generated `--mcp-config` file. The proxy receives the same
+  per-launch identity aliases described below through Claude's inherited
+  environment.
 - **Codex** — per-session `-c mcp_servers.<name>.*` overrides for the proxy
   command, arguments, environment, and local execution. Codex starts stdio MCP
-  children with a restricted environment, so graith names the minimum variables
-  each proxy may inherit:
-  `GRAITH_SESSION_ID`, `GRAITH_TOKEN`, `GRAITH_PROFILE`, and
-  `GRAITH_SOCKET_PATH`. The exact socket path keeps the proxy on the owning
-  daemon even when it uses a custom config or data directory; an empty profile
-  selects the default daemon profile. Only variable names appear in the launch
-  arguments; credential and socket values remain in the process environment.
+  children with a restricted environment, so graith creates unpredictable
+  per-launch aliases for the session ID, token, profile, and exact daemon socket
+  path, then names only those four aliases in `env_vars`. The exact socket keeps
+  the proxy on the owning daemon even when it uses a custom config or data
+  directory; an empty profile selects the default daemon profile. Alias names
+  appear in launch arguments and generated configuration, but credential and
+  socket values remain only in the inherited process environment.
 
   Named environment inheritance requires Codex 0.47.0 or later. Older Codex
   releases ignore `env_vars` and cannot safely receive this session context.
+  The explicit local-execution selection is understood by Codex 0.134.0 or
+  later; that is also the first release with remote MCP execution to guard
+  against.
 
   Because that child is now the graith proxy rather than the original server,
-  graith replaces both `env_vars` and literal `env`, and forces
-  `environment_id = "local"`. Clearing literal values prevents a stale token
-  from overriding the owning session; forcing local execution prevents Codex
-  from forwarding the session credential to a configured remote executor.
-  Other per-server controls for a matching stdio server in
+  graith replaces `env_vars` and forces `environment_id = "local"`. Codex
+  recursively merges a matching server's literal `env` table and applies those
+  values after `env_vars`; the unpredictable aliases keep static or stale
+  `GRAITH_*` entries from replacing the owning identity. Forcing local execution
+  prevents Codex from forwarding the session credential to a configured remote
+  executor. Other per-server controls for a matching stdio server in
   `~/.codex/config.toml` — including `startup_timeout_sec`, `tool_timeout_sec`,
-  `enabled`, or enabled/disabled tools — are preserved and merged. (If a
-  same-named server in your Codex config is a remote/HTTP transport, the
-  injected stdio fields conflict — pick a distinct name.)
+  `enabled`, enabled/disabled tools, and unrelated literal environment entries —
+  are preserved and merged. (If a same-named server in your Codex config is a
+  remote/HTTP transport, the injected stdio fields conflict — pick a distinct
+  name.)
 
   Codex identifies servers by a dotted config-key path, so a name must be a TOML
   bare key (`A–Z`, `a–z`, `0–9`, `_`, `-`) to be injectable. A name with a `.`,

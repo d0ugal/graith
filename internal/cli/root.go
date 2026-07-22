@@ -70,36 +70,54 @@ var rootCmd = &cobra.Command{
 
 		var err error
 
-		if cfgFile != "" {
-			cfgFile, err = canonicalConfigFile(cfgFile)
+		if cmd == mcpProxyCmd {
+			// The managed proxy's explicitly named aliases are its complete
+			// bootstrap context. Do not load configuration or resolve paths from
+			// canonical GRAITH_* variables: Codex deep-merges lower-layer literal
+			// env values, so even an invalid stale profile must not run before the
+			// proxy can select its authenticated alias set and exact socket.
+			identity, identityErr := mcpProxyIdentityFromEnv(args[1:], os.LookupEnv)
+			if identityErr != nil {
+				return identityErr
+			}
+
+			paths, err = mcpProxyConnectionPaths(config.Paths{}, identity.profile, identity.socketPath)
 			if err != nil {
 				return err
 			}
-		}
-
-		cfg, err = config.LoadOrDefault(cfgFile)
-		if err != nil {
-			if cmd != commandPolicyCheckCmd {
-				return fmt.Errorf("loading config: %w", err)
-			}
-			// A hook must always emit an agent-native deny response. Falling out
-			// through Cobra with a plain exit error has agent-specific semantics
-			// and could be treated as a non-blocking hook failure.
-			commandPolicyStartupError = fmt.Errorf("loading config: %w", err)
 			cfg = config.Default()
-		}
-
-		paths, err = config.ResolvePaths()
-		if err != nil {
-			if cmd != commandPolicyCheckCmd {
-				return err
+		} else {
+			if cfgFile != "" {
+				cfgFile, err = canonicalConfigFile(cfgFile)
+				if err != nil {
+					return err
+				}
 			}
 
-			commandPolicyStartupError = errors.Join(commandPolicyStartupError, fmt.Errorf("resolving paths: %w", err))
-		}
+			cfg, err = config.LoadOrDefault(cfgFile)
+			if err != nil {
+				if cmd != commandPolicyCheckCmd {
+					return fmt.Errorf("loading config: %w", err)
+				}
+				// A hook must always emit an agent-native deny response. Falling out
+				// through Cobra with a plain exit error has agent-specific semantics
+				// and could be treated as a non-blocking hook failure.
+				commandPolicyStartupError = fmt.Errorf("loading config: %w", err)
+				cfg = config.Default()
+			}
 
-		if cfg.DataDir != "" && paths.DataDir != "" {
-			paths = paths.WithDataDir(cfg.DataDir)
+			paths, err = config.ResolvePaths()
+			if err != nil {
+				if cmd != commandPolicyCheckCmd {
+					return err
+				}
+
+				commandPolicyStartupError = errors.Join(commandPolicyStartupError, fmt.Errorf("resolving paths: %w", err))
+			}
+
+			if cfg.DataDir != "" && paths.DataDir != "" {
+				paths = paths.WithDataDir(cfg.DataDir)
+			}
 		}
 
 		if bootstrap, _ := cmd.Context().Value(serviceBootstrapContextKey{}).(*daemonservice.Bootstrap); bootstrap != nil {

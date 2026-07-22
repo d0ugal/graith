@@ -1,10 +1,13 @@
 package daemon
 
 import (
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/d0ugal/graith/internal/config"
@@ -257,12 +260,12 @@ func TestCodexModelPassedOnLaunchAndResume(t *testing.T) {
 	assertContiguousPair(t, argv, "--model", model)
 }
 
-// TestCodexMCPProxyEnvWhitelistAcrossLifecycle is the daemon-level regression
+// TestCodexMCPProxyEnvAliasesAcrossLifecycle is the daemon-level regression
 // for Codex MCP proxies losing the owning session's identity. Codex clears the
 // environment of stdio MCP children unless variable names are listed in the
-// server's env_vars config, so create, fork, and resume must all inject the
-// whitelist alongside the command/args overrides.
-func TestCodexMCPProxyEnvWhitelistAcrossLifecycle(t *testing.T) {
+// server's env_vars config, so create, fork, and resume must each inject one
+// fresh alias set alongside the command/args overrides.
+func TestCodexMCPProxyEnvAliasesAcrossLifecycle(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("/bin/sh not available")
 	}
@@ -280,7 +283,7 @@ func TestCodexMCPProxyEnvWhitelistAcrossLifecycle(t *testing.T) {
 
 	t.Cleanup(func() { stopAndClosePTY(sm, created.ID) })
 
-	waitForCodexMCPProxyEnvOverride(t, sm, created.ID, recordPath)
+	createdAliases := waitForCodexMCPProxyEnvOverride(t, sm, created.ID, recordPath)
 
 	if err := os.Remove(recordPath); err != nil {
 		t.Fatalf("remove record before fork: %v", err)
@@ -293,7 +296,10 @@ func TestCodexMCPProxyEnvWhitelistAcrossLifecycle(t *testing.T) {
 
 	t.Cleanup(func() { stopAndClosePTY(sm, forked.ID) })
 
-	waitForCodexMCPProxyEnvOverride(t, sm, forked.ID, recordPath)
+	forkedAliases := waitForCodexMCPProxyEnvOverride(t, sm, forked.ID, recordPath)
+	if reflect.DeepEqual(createdAliases, forkedAliases) {
+		t.Fatal("fork reused the source launch's MCP identity aliases")
+	}
 
 	if err := os.Remove(recordPath); err != nil {
 		t.Fatalf("remove record before resume: %v", err)
@@ -309,18 +315,41 @@ func TestCodexMCPProxyEnvWhitelistAcrossLifecycle(t *testing.T) {
 		t.Fatalf("Restart() error = %v", err)
 	}
 
-	waitForCodexMCPProxyEnvOverride(t, sm, created.ID, recordPath)
+	resumedAliases := waitForCodexMCPProxyEnvOverride(t, sm, created.ID, recordPath)
+	if reflect.DeepEqual(createdAliases, resumedAliases) {
+		t.Fatal("restart reused the original launch's MCP identity aliases")
+	}
+
+	stateData, err := os.ReadFile(sm.paths.StateFile)
+	if err != nil {
+		t.Fatalf("read persisted state: %v", err)
+	}
+	if strings.Contains(string(stateData), mcpProxyIdentityEnvPrefix) {
+		t.Fatal("persisted session state contains an MCP identity alias")
+	}
 }
 
-func waitForCodexMCPProxyEnvOverride(t *testing.T, sm *SessionManager, sessionID, recordPath string) {
+func waitForCodexMCPProxyEnvOverride(t *testing.T, sm *SessionManager, sessionID, recordPath string) []string {
 	t.Helper()
 
-	// Wait on an override that predated the fix so a regression fails
-	// immediately on the missing env_vars assertion, rather than by timeout.
-	argv := waitForRecordedArgv(t, recordPath, `mcp_servers.graith.args=["mcp-proxy","graith"]`)
-	assertContiguousPair(t, argv, "-c", `mcp_servers.graith.env_vars=["GRAITH_SESSION_ID","GRAITH_TOKEN","GRAITH_PROFILE","GRAITH_SOCKET_PATH"]`)
-	assertContiguousPair(t, argv, "-c", `mcp_servers.graith.env={}`)
+	// Wait on a fixed override emitted after the randomized alias arguments, then
+	// inspect the complete recorded argv for the per-launch names.
+	argv := waitForRecordedArgv(t, recordPath, `mcp_servers.graith.environment_id="local"`)
 	assertContiguousPair(t, argv, "-c", `mcp_servers.graith.environment_id="local"`)
+
+	var aliases []string
+	for _, arg := range argv {
+		const prefix = "mcp_servers.graith.env_vars="
+		if strings.HasPrefix(arg, prefix) {
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(arg, prefix)), &aliases); err != nil {
+				t.Fatalf("decode MCP identity alias names: %v", err)
+			}
+			break
+		}
+	}
+	if len(aliases) != 4 {
+		t.Fatalf("MCP identity aliases = %v, want exactly four", aliases)
+	}
 
 	sm.mu.RLock()
 	driver := sm.sessions[sessionID]
@@ -331,14 +360,35 @@ func waitForCodexMCPProxyEnvOverride(t *testing.T, sm *SessionManager, sessionID
 		t.Fatalf("session %q driver = %T, want *pty.Session", sessionID, driver)
 	}
 
-	wantSocket := "GRAITH_SOCKET_PATH=" + sm.paths.SocketPath
+	env := make(map[string]string, len(ptySession.Cmd.Env))
 	for _, entry := range ptySession.Cmd.Env {
-		if entry == wantSocket {
-			return
+		if name, value, ok := strings.Cut(entry, "="); ok {
+			env[name] = value
 		}
 	}
 
-	t.Fatalf("session %q environment does not contain %q", sessionID, wantSocket)
+	wantValues := []string{sessionID, env["GRAITH_TOKEN"], sm.paths.Profile, sm.paths.SocketPath}
+	aliasNameRe := regexp.MustCompile(`^GRAITH_MCP_[A-F0-9]{32}_(SESSION_ID|TOKEN|PROFILE|SOCKET_PATH)$`)
+	for i, alias := range aliases {
+		if !aliasNameRe.MatchString(alias) {
+			t.Fatalf("invalid MCP identity alias name %q", alias)
+		}
+		if got, ok := env[alias]; !ok || got != wantValues[i] {
+			t.Fatalf("session %q MCP identity alias %q is absent or has the wrong value", sessionID, alias)
+		}
+	}
+
+	var reserved int
+	for name := range env {
+		if strings.HasPrefix(name, mcpProxyIdentityEnvPrefix) {
+			reserved++
+		}
+	}
+	if reserved != 4 {
+		t.Fatalf("session %q has %d reserved MCP aliases, want exactly four", sessionID, reserved)
+	}
+
+	return aliases
 }
 
 // newCodexRecorderManager builds a SessionManager whose "codex" agent is a shell

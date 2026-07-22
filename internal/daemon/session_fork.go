@@ -543,7 +543,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	}
 
 	if sourceMCPEnabled {
-		mcpArgs, err := sm.injectMCPConfig(agentName, id, mcpServers)
+		mcpArgs, err := sm.injectMCPConfig(agentName, id, mcpServers, env)
 		if err != nil {
 			forkCleanup()
 			rollbackState()

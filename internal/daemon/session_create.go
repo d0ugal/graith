@@ -753,7 +753,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	// hooks-disabled or headless session gets MCP) is a deliberate follow-up
 	// (issue #1075).
 	if mcpEnabled && driverKind != DriverHeadless {
-		mcpArgs, err := sm.injectMCPConfig(agentName, id, mcpServers)
+		mcpArgs, err := sm.injectMCPConfig(agentName, id, mcpServers, env)
 		if err != nil {
 			cleanupOnError()
 			rollbackState()
