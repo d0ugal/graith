@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/testprocess"
 )
 
 type ServiceReport struct {
@@ -194,12 +195,34 @@ func (manager *Manager) MarkStopped(profile string, pid int) error {
 }
 
 func clearRunningProcess(profile string, pid int, generation string) error {
-	root, err := ReceiptRoot(os.Geteuid())
+	return clearRunningProcessWith(
+		profile,
+		pid,
+		generation,
+		os.Geteuid(),
+		ReceiptRoot,
+		testprocess.RefuseDaemonLifecycleMutation,
+	)
+}
+
+func clearRunningProcessWith(
+	profile string,
+	pid int,
+	generation string,
+	uid int,
+	receiptRoot func(int) (string, error),
+	guard func(string) error,
+) error {
+	if err := guard("clear managed daemon service running generation"); err != nil {
+		return err
+	}
+
+	root, err := receiptRoot(uid)
 	if err != nil {
 		return err
 	}
 
-	store := ReceiptStore{Root: root, UID: os.Geteuid()}
+	store := ReceiptStore{Root: root, UID: uid}
 
 	_, err = store.Update(false, func(receipt *Receipt) error {
 		if profile == "" {

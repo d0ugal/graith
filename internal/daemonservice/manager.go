@@ -199,6 +199,10 @@ func resolveWith(ctx context.Context, options ResolveOptions) (Resolution, error
 		ControlRoot: controlRoot, Controller: controller, Now: time.Now,
 		TeamID: options.Expectations.TeamID, Requirement: options.Expectations.Requirement,
 		Development: options.Expectations.AllowDevelopmentSig, Verifier: options.Expectations.VerifySignature,
+
+		// Preserve a package-test opt-in only on the one synthetic manager that
+		// the injected resolution produced. Production resolves the real guard.
+		lifecycleMutationGuard: guard,
 	}
 	if !options.SkipReceiptCheck {
 		if err := manager.ensureReceipt(ctx); err != nil {

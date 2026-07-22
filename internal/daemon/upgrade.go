@@ -4345,20 +4345,24 @@ func stopVerifiedDaemonPID(pid int) error {
 		return err
 	}
 
-	return stopVerifiedDaemonPIDWith(pid)
+	return stopVerifiedDaemonPIDWith(pid, syscall.Kill, time.Sleep)
 }
 
-func stopVerifiedDaemonPIDWith(pid int) error {
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+func stopVerifiedDaemonPIDWith(
+	pid int,
+	signal func(int, syscall.Signal) error,
+	wait func(time.Duration),
+) error {
+	if err := signal(pid, syscall.SIGTERM); err != nil {
 		return fmt.Errorf("send SIGTERM to pid %d: %w", pid, err)
 	}
 
 	for range 50 {
-		if syscall.Kill(pid, 0) != nil {
+		if signal(pid, 0) != nil {
 			return nil
 		}
 
-		time.Sleep(100 * time.Millisecond)
+		wait(100 * time.Millisecond)
 	}
 
 	return fmt.Errorf("daemon did not stop within 5s (pid %d)", pid)

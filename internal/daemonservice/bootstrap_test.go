@@ -106,6 +106,8 @@ func newBootstrapFixture(t *testing.T, profile, slot string) bootstrapFixture {
 		},
 		executable:      func() (string, error) { return payload, nil },
 		verifySignature: expectations.VerifySignature,
+
+		lifecycleMutationGuard: allowDaemonLifecycleMutation,
 	}
 
 	return bootstrapFixture{
@@ -211,5 +213,45 @@ func TestBootstrapFreshServiceCleansFailedReceiptAgreement(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(fixture.controlRoot, requestFilename(fixture.definition))); !os.IsNotExist(err) {
 		t.Fatalf("failed bootstrap retained request: %v", err)
+	}
+}
+
+func TestBootstrapFreshServiceRejectsGoTestBeforeHostRootResolution(t *testing.T) {
+	definition := Definitions()[0]
+	resolvedRoot := false
+	environment := bootstrapEnvironment{
+		uid: os.Geteuid(),
+		receiptRoot: func(int) (string, error) {
+			resolvedRoot = true
+			return t.TempDir(), nil
+		},
+	}
+
+	_, err := bootstrapFreshService(definition.Label, definition.Slot, time.Now(), environment)
+	if err == nil || !strings.Contains(err.Error(), "Go test binary") {
+		t.Fatalf("bootstrapFreshService() error = %v, want Go-test refusal", err)
+	}
+
+	if resolvedRoot {
+		t.Fatal("Go-test refusal resolved the managed-service receipt root")
+	}
+}
+
+func TestBootstrapAbortRejectsGoTestBeforeHostRootResolution(t *testing.T) {
+	resolvedRoot := false
+	bootstrap := Bootstrap{
+		receiptRoot: func(int) (string, error) {
+			resolvedRoot = true
+			return t.TempDir(), nil
+		},
+	}
+
+	err := bootstrap.Abort()
+	if err == nil || !strings.Contains(err.Error(), "Go test binary") {
+		t.Fatalf("Bootstrap.Abort() error = %v, want Go-test refusal", err)
+	}
+
+	if resolvedRoot {
+		t.Fatal("Go-test refusal resolved the managed-service receipt root")
 	}
 }

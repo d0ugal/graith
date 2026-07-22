@@ -88,3 +88,27 @@ func TestDarwinControllerRejectsMismatchedResponseEcho(t *testing.T) {
 		t.Fatalf("controller response mismatch = %v", err)
 	}
 }
+
+func TestDarwinControllerInvokeRejectsGoTestBeforeMutatingCommand(t *testing.T) {
+	controllerPath := filepath.Join(t.TempDir(), "dreich-controller")
+	markerPath := controllerPath + ".called"
+
+	script := []byte("#!/bin/sh\nprintf called > \"$0.called\"\n")
+	if err := os.WriteFile(controllerPath, script, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// #nosec G302 -- this test-only controller must be executable and lives in t.TempDir().
+	if err := os.Chmod(controllerPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := (DarwinController{}).invoke(context.Background(), controllerPath, Definitions()[0], "unregister")
+	if err == nil || !strings.Contains(err.Error(), "Go test binary") {
+		t.Fatalf("mutating controller invoke error = %v, want Go-test refusal", err)
+	}
+
+	if _, statErr := os.Stat(markerPath); !os.IsNotExist(statErr) {
+		t.Fatalf("Go-test refusal executed controller command: %v", statErr)
+	}
+}

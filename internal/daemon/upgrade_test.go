@@ -405,11 +405,16 @@ func TestPrepareExecUpgradeUsesRetainedManagedOrigin(t *testing.T) {
 }
 
 func TestStopDaemonPIDRejectsUnauthenticatedIdentity(t *testing.T) {
-	if err := stopDaemonPIDWithGuard(1, allowDaemonLifecycleMutation, processidentity.IsGraithDaemon, stopVerifiedDaemonPIDWith); err == nil || !strings.Contains(err.Error(), "invalid pid") {
+	unexpectedStop := func(int) error {
+		t.Fatal("invalid daemon identity reached stop primitive")
+		return nil
+	}
+
+	if err := stopDaemonPIDWithGuard(1, allowDaemonLifecycleMutation, processidentity.IsGraithDaemon, unexpectedStop); err == nil || !strings.Contains(err.Error(), "invalid pid") {
 		t.Fatalf("StopDaemonPID(1) = %v", err)
 	}
 
-	if err := stopDaemonPIDWithGuard(os.Getpid(), allowDaemonLifecycleMutation, processidentity.IsGraithDaemon, stopVerifiedDaemonPIDWith); err == nil || !strings.Contains(err.Error(), "not a graith daemon") {
+	if err := stopDaemonPIDWithGuard(os.Getpid(), allowDaemonLifecycleMutation, processidentity.IsGraithDaemon, unexpectedStop); err == nil || !strings.Contains(err.Error(), "not a graith daemon") {
 		t.Fatalf("StopDaemonPID(test process) = %v", err)
 	}
 }
@@ -4539,7 +4544,10 @@ func TestReadManifestRejectsSymlinkAndInsecureMode(t *testing.T) {
 func TestStopDaemonNonExistentPidFile(t *testing.T) {
 	err := stopDaemonWithGuard(
 		filepath.Join(t.TempDir(), "nonexistent.pid"), allowDaemonLifecycleMutation,
-		processidentity.IsGraithDaemon, os.Remove, stopVerifiedDaemonPIDWith,
+		processidentity.IsGraithDaemon, os.Remove, func(int) error {
+			t.Fatal("missing PID file reached stop primitive")
+			return nil
+		},
 	)
 	if err == nil {
 		t.Fatal("expected error for nonexistent pid file")
@@ -4574,7 +4582,10 @@ func TestStopDaemonInvalidPID(t *testing.T) {
 
 			err := stopDaemonWithGuard(
 				pidFile, allowDaemonLifecycleMutation,
-				processidentity.IsGraithDaemon, os.Remove, stopVerifiedDaemonPIDWith,
+				processidentity.IsGraithDaemon, os.Remove, func(int) error {
+					t.Fatal("invalid PID file reached stop primitive")
+					return nil
+				},
 			)
 			if err == nil {
 				t.Fatal("expected error")

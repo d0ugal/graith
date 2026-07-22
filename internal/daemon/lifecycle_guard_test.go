@@ -1,10 +1,13 @@
 package daemon
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/d0ugal/graith/internal/testprocess"
 )
@@ -54,6 +57,36 @@ func TestStopDaemonPIDAllowsProductionPathWithFakeStop(t *testing.T) {
 
 	if stoppedPID != 4242 {
 		t.Fatalf("stopped PID = %d, want 4242", stoppedPID)
+	}
+}
+
+func TestStopVerifiedDaemonPIDAllowsProductionPathWithFakeSignals(t *testing.T) {
+	var signals []syscall.Signal
+
+	err := stopVerifiedDaemonPIDWith(
+		4242,
+		func(pid int, signal syscall.Signal) error {
+			if pid != 4242 {
+				t.Fatalf("signal PID = %d, want 4242", pid)
+			}
+
+			signals = append(signals, signal)
+			if signal == 0 {
+				return errors.New("process exited")
+			}
+
+			return nil
+		},
+		func(time.Duration) {
+			t.Fatal("exited process reached wait primitive")
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(signals) != 2 || signals[0] != syscall.SIGTERM || signals[1] != 0 {
+		t.Fatalf("signals = %v, want [SIGTERM 0]", signals)
 	}
 }
 

@@ -41,6 +41,15 @@ type controllerResponse struct {
 }
 
 func (DarwinController) invoke(ctx context.Context, controllerPath string, definition Definition, operation string) (ServiceStatus, error) {
+	// invoke is also used directly by same-package controller tests. Keep the
+	// mutation refusal at this lowest dispatcher so calling it with a mutating
+	// operation cannot bypass the guarded public controller methods.
+	if operation != "status" {
+		if err := testprocess.RefuseDaemonLifecycleMutation("invoke managed daemon service controller " + operation); err != nil {
+			return "", err
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, serviceOperationTimeout)
 	defer cancel()
 
