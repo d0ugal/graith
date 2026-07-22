@@ -4277,6 +4277,10 @@ func TestCleanupOrphanedProcessesDoesNotSignalRemovedHookProcessAfterColdRestart
 			_, err := sm.Restart("canny", 24, 80)
 			return err
 		},
+		"convert": func() error {
+			_, err := sm.ConvertToInteractive("canny", 24, 80)
+			return err
+		},
 		"stop":   func() error { return sm.Stop("canny") },
 		"delete": func() error { return sm.Delete("canny") },
 	} {
