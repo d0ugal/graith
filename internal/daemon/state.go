@@ -593,7 +593,7 @@ func NewState() *State {
 }
 
 func LoadState(path string) (*State, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G703 -- Production callers derive this configurable path at trusted daemon startup; control-message inputs cannot select it.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return NewState(), nil
