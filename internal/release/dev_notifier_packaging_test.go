@@ -869,7 +869,17 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 		t.Fatal("publisher uses an open archive glob or rollback asset")
 	}
 
-	for _, want := range []string{"--target \"$RELEASE_REVISION\"", "checksums.txt", "gh release view dev --json assets", "git/ref/heads/main", `"$current_main" != "$RELEASE_REVISION"`} {
+	for _, want := range []string{
+		`gh release delete dev --yes --repo "$GITHUB_REPOSITORY"`,
+		`gh release create dev --repo "$GITHUB_REPOSITORY"`,
+		`gh release view dev --repo "$GITHUB_REPOSITORY"`,
+	} {
+		if !strings.Contains(publishScript, want) {
+			t.Errorf("checkout-free publisher does not explicitly select its repository with %q", want)
+		}
+	}
+
+	for _, want := range []string{"--target \"$RELEASE_REVISION\"", "checksums.txt", "--json assets", "git/ref/heads/main", `"$current_main" != "$RELEASE_REVISION"`} {
 		if !strings.Contains(publishScript, want) {
 			t.Errorf("publisher final release step missing %q", want)
 		}
