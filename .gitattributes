@@ -1,6 +1,6 @@
-# Go-generated fixtures are committed and byte-compared by their staleness
-# tests (TestGUIFixtureUpToDate, TestManifestUpToDate). A CRLF checkout would
-# fail the byte comparison even when the content is identical, so pin them to
-# LF regardless of platform / core.autocrlf.
+# Go-generated data is committed and byte-compared by staleness checks. A CRLF
+# checkout would fail the comparison even when the content is identical, so
+# pin these files to LF regardless of platform / core.autocrlf.
 gui/shared/Tests/GraithSessionKitTests/Fixtures/capability_manifest.json text eol=lf
 gui/shared/Tests/GraithProtocolTests/Fixtures/protocol_manifest.json text eol=lf
+website/data/package_dependencies.json text eol=lf

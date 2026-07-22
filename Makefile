@@ -58,10 +58,10 @@ clean:
 	rm -rf macos/build
 
 package-graph:
-	cd website && go run ./cmd/packagegraph -repo ..
+	cd website && GOFLAGS=-mod=readonly GOWORK=off go run ./cmd/packagegraph -repo ..
 
 package-graph-check:
-	cd website && go run ./cmd/packagegraph -repo .. -check
+	cd website && GOFLAGS=-mod=readonly GOWORK=off go run ./cmd/packagegraph -repo .. -check
 
 # Documentation builds consume the committed package graph without rewriting it.
 docs:
