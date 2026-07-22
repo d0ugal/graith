@@ -9,7 +9,6 @@ Frames have a one-byte channel followed by a four-byte big-endian length:
 
 - `0x00`: JSON control messages.
 - `0x01`: raw PTY data.
-- `0x02`: MCP proxy traffic.
 
 Control messages use `{"type":"...","payload":{...}}`. Go wire structs live in
 `messages.go`; the remote Swift subset lives in

@@ -435,8 +435,10 @@ func TestRegisterCommandsIdempotent(t *testing.T) {
 	}
 
 	for _, c := range rootCmd.Commands() {
-		if c.Name() == "rename" {
-			t.Fatal("removed rename command is still registered")
+		for _, removed := range []string{"rename", "mcp", "mcp-proxy"} {
+			if c.Name() == removed {
+				t.Fatalf("removed %s command is still registered", removed)
+			}
 		}
 	}
 

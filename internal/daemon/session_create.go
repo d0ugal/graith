@@ -356,16 +356,6 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	policyEnabled := sm.cfg.CommandPolicy.Enabled()
 	hookFilesNeeded := hooksEnabled || policyEnabled
 
-	// MCP config injection is distinct from command-policy hooks. Lifecycle hooks
-	// continue to gate PTY MCP injection; headless MCP uses its own path.
-	mcpEnabled := hooksEnabled
-
-	// Resolve MCP servers under the lock (reads config).
-	var mcpServers []config.MCPServerConfig
-	if mcpEnabled {
-		mcpServers = sm.resolveMCPServers(agentName)
-	}
-
 	// Snapshot config values needed for Phase 2.
 	cfgSnapshot := sm.cfg
 	policyTimeout := cfgSnapshot.CommandPolicy.TimeoutDuration()
@@ -748,24 +738,6 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		}
 	}
 
-	// MCP config is injected by its own block, separate from the hook block above
-	// (issue #1135). The gate (mcpEnabled) still tracks hooksEnabled for PTY, so
-	// today this fires under the same condition as the hook block — the split is a
-	// no-op for PTY. Widening mcpEnabled and dropping the headless guard (so a
-	// hooks-disabled or headless session gets MCP) is a deliberate follow-up
-	// (issue #1075).
-	if mcpEnabled && driverKind != DriverHeadless {
-		mcpArgs, err := sm.injectMCPConfig(agentName, id, mcpServers)
-		if err != nil {
-			cleanupOnError()
-			rollbackState()
-
-			return SessionState{}, fmt.Errorf("inject mcp config: %w", err)
-		}
-
-		expandedArgs = append(expandedArgs, mcpArgs...)
-	}
-
 	if agent.PromptInjectionEnabled() && driverKind != DriverHeadless {
 		promptArgs, err := sm.injectPrompt(agentName, worktreePath)
 		if err != nil {
@@ -818,7 +790,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			envKeys = append(envKeys, k)
 		}
 
-		opts, err := sm.sandboxOptsFromConfig(merged, id, cwd, agent.Command, envKeys, hookFilesNeeded || mcpEnabled)
+		opts, err := sm.sandboxOptsFromConfig(merged, id, cwd, agent.Command, envKeys, hookFilesNeeded)
 		if err != nil {
 			cleanupOnError()
 			rollbackState()

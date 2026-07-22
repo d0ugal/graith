@@ -128,9 +128,9 @@ func defaultWritablePrefixes() []string {
 //     is itself a symlink into /tmp) is not caught here. Grant paths reach this
 //     code via config.ExpandPath (Abs+Clean, no EvalSymlinks).
 //   - $TMPDIR is read from the daemon's environment, not the (possibly
-//     agent/MCP-overridden) TMPDIR handed to the nono child. Normal sessions are
+//     agent-overridden) TMPDIR handed to the nono child. Normal sessions are
 //     unaffected because GRAITH_TMPDIR is added to write_dirs (so reads there are
-//     intentionally writable and exempt); only a custom TMPDIR in agent/MCP env
+//     intentionally writable and exempt); only a custom TMPDIR in agent env
 //     could slip a read-only grant past this check.
 //
 // Resolving these needs symlink evaluation and threading the effective child
@@ -486,7 +486,7 @@ func (opts WrapOpts) profileName() string {
 // for all the sites), and temp-file callers
 // that receive the path back (e.g. `gr sandbox explain`) must remove it themselves.
 // Note that callers reaching writeNonoProfile via sandbox.Wrap with an empty
-// ProfilePath (e.g. sandboxed MCP-server processes) do not get the temp path
+// ProfilePath do not get the temp path
 // back — it lives only inside the generated argv — and so cannot clean it up;
 // give those callers a stable ProfilePath if the temp file must be reclaimed.
 //

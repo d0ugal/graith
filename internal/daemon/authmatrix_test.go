@@ -99,7 +99,8 @@ func TestRemoteAllowed(t *testing.T) {
 		{"human can scenario_stop", roleRemoteHuman, "scenario_stop", true},
 		{"human cannot upgrade", roleRemoteHuman, "upgrade", false},
 		{"human cannot reload", roleRemoteHuman, "reload", false},
-		{"human cannot mcp_connect", roleRemoteHuman, "mcp_connect", false},
+		// Removed message names are absent from the matrix and remain fail-closed.
+		{"human cannot use removed mcp_connect", roleRemoteHuman, "mcp_connect", false},
 		// #904: the GUI config viewer + diagnostics panel — paired human only.
 		{"human can diagnostics", roleRemoteHuman, "diagnostics", true},
 		{"human can config", roleRemoteHuman, "config", true},

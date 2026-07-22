@@ -306,7 +306,7 @@ public actor GraithConnection {
                 bufferedReplies.append(env)
             }
         default:
-            break // never open channel 0x02 (MCP); ignore anything else
+            break // Ignore unknown channels.
         }
     }
 }

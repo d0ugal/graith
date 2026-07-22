@@ -10,6 +10,11 @@ issue: https://github.com/d0ugal/graith/issues/1073
 
 # Wire the missing Claude Code hook events
 
+> **MCP removal amendment (2026-07-22):** References below to MCP tool names are
+> historical agent-runtime observations, not a Graith-managed integration. All
+> Graith MCP lifecycle scope is superseded by
+> [Remove Graith-Owned MCP Support](2026-07-22-mcp-removal.md).
+
 > **Security amendment (2026-07-18):** Approval/Yolo/`approve-request`
 > sections in this historical hook analysis are superseded by
 > [Non-interactive agents with sandbox-enforced policy](2026-07-18-non-interactive-sandbox-policy.md).

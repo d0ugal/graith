@@ -19,7 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 26
+const CurrentStateVersion = 27
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -755,6 +755,7 @@ var migrations = map[int]func(*State) error{
 	23: migrateV23ToV24,
 	24: migrateV24ToV25,
 	25: migrateV25ToV26,
+	26: migrateV26ToV27,
 }
 
 func generateToken() (string, error) {
@@ -1029,6 +1030,13 @@ func migrateV25ToV26(state *State) error {
 
 	return nil
 }
+
+// migrateV26ToV27 removes the former Graith-owned MCP configuration nested in
+// CreationConfig.Agent. JSON decoding into the current typed Agent shape has
+// already projected those legacy fields out, so the migration itself is a
+// no-op. Saving the migrated state makes that removal durable; the pre-v27
+// bytes remain available in the standard v26 backup.
+func migrateV26ToV27(_ *State) error { return nil }
 
 // writeFileAtomic writes state to disk crash-safely (temp + fsync + rename +
 // dir fsync). It delegates to the shared atomicfile helper so every state

@@ -400,8 +400,6 @@ func registerCommands() {
 		registerListCmd()
 		registerLogsCmd()
 		registerManCmd()
-		registerMCPCmd()
-		registerMCPProxyCmd()
 		registerMigrateCmd()
 		registerMsgCmd()
 		registerNewCmd()

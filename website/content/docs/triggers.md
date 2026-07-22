@@ -223,7 +223,7 @@ type = "command"   # command | session | scenario | message | tracker
 
 ### Command sandboxing
 
-`command` actions are sandboxed by default, mirroring MCP-server config:
+`command` actions are sandboxed by default:
 
 ```toml
 [trigger.action]

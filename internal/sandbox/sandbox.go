@@ -90,8 +90,8 @@ type WrapOpts struct {
 	// empty means the backend writes to an os.CreateTemp file. Used whenever any
 	// socket needs a connect grant: opts.UnixSockets (e.g. the daemon socket)
 	// and/or $SSH_AUTH_SOCK when the "ssh" feature is enabled. A caller that
-	// grants a socket but leaves this empty (e.g. a sandboxed MCP server that has
-	// the "ssh" feature but no daemon-socket grant) gets an os.CreateTemp
+	// grants a socket but leaves this empty (e.g. a standalone sandbox caller that
+	// has the "ssh" feature but no daemon-socket grant) gets an os.CreateTemp
 	// fragment, mirroring the nono temp-profile fallback for path-less callers.
 	SafehouseFragmentPath string
 }

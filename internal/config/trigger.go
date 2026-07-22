@@ -129,8 +129,7 @@ type ActionConfig struct {
 	Timeout  string `toml:"timeout"`  // max run time; default 5m
 	Mutating bool   `toml:"mutating"` // may write its execution root; rejected in v1
 	Sandbox  *bool  `toml:"sandbox"`  // nil => default true; false runs unconfined
-	// SandboxConfig is extra sandbox grants merged onto the base command profile,
-	// mirroring the MCP-server pattern (MCPServerConfig.SandboxConfig).
+	// SandboxConfig is extra sandbox grants merged onto the base command profile.
 	SandboxConfig *SandboxConfig `toml:"sandbox_config"`
 
 	// session:

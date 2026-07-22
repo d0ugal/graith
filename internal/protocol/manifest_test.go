@@ -129,6 +129,18 @@ func TestBuildManifestSucceeds(t *testing.T) {
 		t.Errorf("manifest has %d types, registeredTypes has %d", len(m.Types), len(registeredTypes))
 	}
 
+	removedTypes := map[string]bool{
+		"MCPConnectMsg": true, "MCPConnectOKMsg": true,
+		"MCPListMsg": true, "MCPListResponse": true,
+		"MCPRestartMsg": true, "MCPRestartResponse": true,
+		"MCPLogsMsg": true, "MCPLogsResponse": true,
+	}
+	for _, mt := range m.Types {
+		if removedTypes[mt.Name] {
+			t.Errorf("protocol manifest retained removed type %q", mt.Name)
+		}
+	}
+
 	var required, planned, na int
 
 	for _, mt := range m.Types {

@@ -9,6 +9,10 @@ informed: (TBD)
 
 # Focus the native GUIs on interactive session work
 
+> **MCP removal amendment (2026-07-22):** MCP management was removed from every
+> surface by [Remove Graith-Owned MCP Support](2026-07-22-mcp-removal.md), so it
+> is no longer a CLI-only capability.
+
 The native apps should excel at interactive session work: finding sessions,
 attaching to terminals, exchanging direct messages, and reading useful state.
 Operational control planes, agent automation primitives, and
@@ -71,7 +75,6 @@ The following capability scope is intentional:
 | Todo list/progress view | Targeted | Targeted | Targeted | Read-only progress is useful native context and remains planned for both apps. |
 | Todo mutation | Targeted | Excluded | Excluded | Add/claim/assign/transition/remove operations belong to agents and orchestrators; no partial native editor is planned. |
 | Trigger management | Targeted | Excluded | Excluded | Trigger lifecycle is an automation control plane. |
-| MCP server management | Targeted | Excluded | Excluded | Server inspection and restart are developer operations best handled in a terminal. |
 | Document mutation | Targeted | Excluded | Excluded | Put/append/remove are agent and scripting primitives; native read-only browsing remains supported. |
 | Send notifications | Targeted | Excluded | Excluded | Agents and scripts send notifications; native apps are notification recipients and presenters. |
 | Sandbox introspection | Targeted | Excluded | Excluded | Explain/watch output is diagnostic and streaming, making the terminal the natural interface. |

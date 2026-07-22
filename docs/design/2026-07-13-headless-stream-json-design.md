@@ -10,6 +10,11 @@ issue: https://github.com/d0ugal/graith/issues/1075
 
 # Headless stream-json mode for fire-and-forget sessions
 
+> **MCP removal amendment (2026-07-22):** All MCP injection, reconnect, and
+> configuration phases below are historical and superseded by
+> [Remove Graith-Owned MCP Support](2026-07-22-mcp-removal.md). Headless mode no
+> longer receives Graith-generated MCP configuration.
+
 > **Security amendment (2026-07-18):** The permission-control portions of this
 > design are superseded by
 > [Non-interactive agents with sandbox-enforced policy](2026-07-18-non-interactive-sandbox-policy.md).

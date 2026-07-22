@@ -214,58 +214,8 @@ func (sm *SessionManager) generateClaudeSettingsWithTimeout(sessionID string, li
 	return settingsPath, nil
 }
 
-// generateMCPConfig writes an MCP config JSON file (compatible with Claude
-// Code's --mcp-config flag) that maps each server to its gr mcp-proxy command.
-// Returns the path to the config file.
-func (sm *SessionManager) generateMCPConfig(sessionID string, mcpServers []config.MCPServerConfig) (string, error) {
-	dir := sm.hookDir(sessionID)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("create hook dir: %w", err)
-	}
-
-	mcpConfigPath := filepath.Join(dir, "mcp.json")
-
-	grBin := resolveGrBin()
-
-	type mcpEntry struct {
-		Command string   `json:"command"`
-		Args    []string `json:"args"`
-	}
-
-	type mcpConfigFile struct {
-		MCPServers map[string]mcpEntry `json:"mcpServers"`
-	}
-
-	cfg := mcpConfigFile{
-		MCPServers: make(map[string]mcpEntry, len(mcpServers)),
-	}
-	for _, s := range mcpServers {
-		cfg.MCPServers[s.Name] = mcpEntry{
-			Command: grBin,
-			Args:    []string{"mcp-proxy", s.Name},
-		}
-	}
-
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("marshal mcp config: %w", err)
-	}
-
-	if err := os.WriteFile(mcpConfigPath, data, 0o600); err != nil {
-		return "", fmt.Errorf("write mcp config: %w", err)
-	}
-
-	return mcpConfigPath, nil
-}
-
 // injectClaudeHooks generates the Claude Code settings (lifecycle hook) file for
 // a session and returns the extra args to add to the agent launch.
-//
-// MCP `--mcp-config` generation is deliberately NOT bundled here — it lives in
-// injectMCPConfig so MCP availability can be decided independently of whether
-// generated hooks are installed. A headless session skips generated hooks (the
-// typed stream is its status/lifecycle feed) but still needs its MCP servers, so
-// the two concerns must not ride the same branch. See issue #1135.
 func (sm *SessionManager) injectClaudeHooks(sessionID string, lifecycle, policy bool) (extraArgs []string, extraEnv map[string]string, err error) {
 	return sm.injectClaudeHooksWithTimeout(sessionID, lifecycle, policy, sm.Config().CommandPolicy.TimeoutDuration())
 }
@@ -279,112 +229,6 @@ func (sm *SessionManager) injectClaudeHooksWithTimeout(sessionID string, lifecyc
 	sm.log.Info("injected claude hooks", "session_id", sessionID, "settings", settingsPath)
 
 	return []string{"--settings", settingsPath}, nil, nil
-}
-
-// injectMCPConfig wires a session's daemon-managed MCP servers into the agent
-// launch and returns the extra args. It is independent of lifecycle-hook
-// injection (injectHooks): MCP availability must not ride on whether generated
-// hooks are installed, so a headless session — which skips hook generation — can
-// still be given its MCP servers (issue #1135).
-//
-// Claude consumes a `--mcp-config` file; Codex takes per-session
-// `-c mcp_servers.<name>.…` overrides (issue #1184). Other agents get no args.
-func (sm *SessionManager) injectMCPConfig(agentName, sessionID string, mcpServers []config.MCPServerConfig) (extraArgs []string, err error) {
-	if len(mcpServers) == 0 {
-		return nil, nil
-	}
-
-	switch agentName {
-	case "claude":
-		mcpConfigPath, err := sm.generateMCPConfig(sessionID, mcpServers)
-		if err != nil {
-			return nil, err
-		}
-
-		sm.log.Info("injected mcp config", "session_id", sessionID, "mcp_config", mcpConfigPath, "mcp_servers", len(mcpServers))
-
-		return []string{"--mcp-config", mcpConfigPath}, nil
-	case "codex":
-		args, skipped, err := codexMCPServerArgs(mcpServers)
-		if err != nil {
-			return nil, err
-		}
-
-		if len(skipped) > 0 {
-			sm.log.Warn("skipped codex mcp servers with names not representable as codex config keys",
-				"session_id", sessionID, "servers", skipped)
-		}
-
-		sm.log.Info("injected mcp config", "session_id", sessionID, "mcp_servers", len(mcpServers)-len(skipped))
-
-		return args, nil
-	default:
-		return nil, nil
-	}
-}
-
-// codexBareKeyRe matches MCP server names that can be represented as a TOML
-// bare key inside a Codex `-c mcp_servers.<name>.…` override path. Codex's
-// `-c key=value` override parser splits the dotted key path on `.` and does
-// NOT honour quoting or backslash-escaping of a segment (verified against
-// Codex CLI 0.144.5: `mcp_servers."foo.bar".command`, `…'foo.bar'…`, and
-// `…foo\.bar…` all still split at the dot). So a name containing a `.` would
-// nest under the wrong table and, worse, fail Codex config loading outright —
-// preventing the whole session from starting. Any name outside this charset is
-// skipped rather than emitted, so one ill-named server can't break the launch.
-// The auto-injected `graith` server and typical names are always representable;
-// this only affects a user who names a server with a dot or other special
-// character. (The Claude path handles any name because it uses the name as a
-// JSON map key, so this restriction is Codex-specific.)
-var codexBareKeyRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
-
-// codexMCPServerArgs builds the per-session `-c` config overrides that point
-// each daemon-managed MCP server at `gr mcp-proxy <name>` for a Codex session.
-// It returns the args plus the names of any servers skipped because their name
-// can't be represented as a Codex override key (see codexBareKeyRe).
-//
-// It deliberately overrides only `command` and `args` (mirroring the Claude
-// --mcp-config which sets the same two fields). Using `-c` overrides rather
-// than writing a full config file leaves any user-supplied per-server Codex
-// controls — `startup_timeout_sec`, `tool_timeout_sec`, `enabled`,
-// enabled/disabled tools, per-tool execution mode — intact and merged, rather
-// than flattening every server to graith's command/args/env shape.
-//
-// Values are JSON-encoded, which is also valid TOML for a string
-// (`"…"`) and a string array (`["…","…"]`), the two value kinds Codex's
-// `-c key=value` override parser accepts here.
-func codexMCPServerArgs(mcpServers []config.MCPServerConfig) (args, skipped []string, err error) {
-	if len(mcpServers) == 0 {
-		return nil, nil, nil
-	}
-
-	grBin := resolveGrBin()
-
-	cmdVal, err := json.Marshal(grBin)
-	if err != nil {
-		return nil, nil, fmt.Errorf("marshal mcp command: %w", err)
-	}
-
-	args = make([]string, 0, len(mcpServers)*4)
-
-	for _, s := range mcpServers {
-		if !codexBareKeyRe.MatchString(s.Name) {
-			skipped = append(skipped, s.Name)
-			continue
-		}
-
-		proxyArgs, err := json.Marshal([]string{"mcp-proxy", s.Name})
-		if err != nil {
-			return nil, nil, fmt.Errorf("marshal mcp args for %q: %w", s.Name, err)
-		}
-
-		args = append(args,
-			"-c", fmt.Sprintf("mcp_servers.%s.command=%s", s.Name, cmdVal),
-			"-c", fmt.Sprintf("mcp_servers.%s.args=%s", s.Name, proxyArgs),
-		)
-	}
-
-	return args, skipped, nil
 }
 
 // codexHookEvent describes one Codex hook event and its independently matched
@@ -415,8 +259,6 @@ type codexHookGroup struct {
 // skips Codex's hook-trust review because graith generated and vetted these
 // hooks; it does not disable the agent's separate native tool approvals.
 //
-// MCP-server wiring is NOT handled here — it rides the separate injectMCPConfig
-// path (issue #1135), so a headless codex session gets MCP without hooks.
 func (sm *SessionManager) injectCodexHooks(sessionID string, lifecycle, policy bool) (extraArgs []string, extraEnv map[string]string, err error) {
 	return sm.injectCodexHooksWithTimeout(sessionID, lifecycle, policy, sm.Config().CommandPolicy.TimeoutDuration())
 }
@@ -549,35 +391,6 @@ func tomlBasicString(s string) string {
 	b.WriteByte('"')
 
 	return b.String()
-}
-
-// graithMCPServer returns the auto-injected graith MCP server config.
-// The graith server is unsandboxed because it needs to connect to the
-// daemon socket via client.Connect().
-func graithMCPServer() config.MCPServerConfig {
-	sandboxed := false
-
-	return config.MCPServerConfig{
-		Name:    "graith",
-		Command: resolveGrBin(),
-		Args:    []string{"mcp"},
-		Sandbox: &sandboxed,
-	}
-}
-
-func (sm *SessionManager) resolveMCPServers(agentName string) []config.MCPServerConfig {
-	return sm.resolveMCPServersFromConfig(sm.cfg, agentName)
-}
-
-func (sm *SessionManager) resolveMCPServersFromConfig(cfg *config.Config, agentName string) []config.MCPServerConfig {
-	global := append([]config.MCPServerConfig{graithMCPServer()}, cfg.MCPServers...)
-
-	var overrides map[string]config.MCPServerConfig
-	if agent, ok := cfg.Agents[agentName]; ok {
-		overrides = agent.MCPServers
-	}
-
-	return config.MergeMCPServers(global, overrides)
 }
 
 var nonAlnumRe = regexp.MustCompile(`[^a-zA-Z0-9]+`)
@@ -1471,9 +1284,7 @@ func (sm *SessionManager) removeGeneratedCursorHooks(sessionID, worktreePath str
 }
 
 // injectHooks dispatches lifecycle-hook injection to the agent-specific
-// implementation. It does NOT handle MCP config — that is injectMCPConfig's job,
-// kept separate so MCP can be injected without hooks (see issue #1135). Returns
-// nil for agents that don't support hooks.
+// implementation. It returns nil for agents that don't support hooks.
 func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string, lifecycle, policy bool, policyTimeout time.Duration) (extraArgs []string, extraEnv map[string]string, err error) {
 	switch agentName {
 	case "claude":

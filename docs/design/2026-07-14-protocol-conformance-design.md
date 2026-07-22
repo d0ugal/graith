@@ -10,6 +10,11 @@ issue: https://github.com/d0ugal/graith/issues/1129
 
 # Cross-language protocol conformance
 
+> **MCP removal amendment (2026-07-22):** MCP message and transport examples
+> below are historical and superseded by
+> [Remove Graith-Owned MCP Support](2026-07-22-mcp-removal.md). The generated
+> protocol manifest remains the current source of truth.
+
 The wire protocol is defined twice — once in Go (`internal/protocol/messages.go`,
 ~119 structs) and once, by hand, in Swift
 (`gui/shared/Sources/GraithProtocol/Messages.swift`, ~32 structs). Nothing kept
@@ -87,8 +92,8 @@ this, and every new message widens it silently.
 `internal/protocol/manifest.go` holds a `registeredTypes` slice (one zero value
 per wire struct) and a `swiftAnnotations` map classifying each type's Swift
 expectation: `required` (Swift models it), `planned` (a known, acknowledged gap),
-or `na` (a GUI/remote client never needs it — hook-CLI↔daemon internals, MCP
-proxy transport, local-only doctor/diagnostics/upgrade). `BuildManifest()`
+or `na` (a GUI/remote client never needs it — hook-CLI↔daemon internals and
+local-only doctor/diagnostics/upgrade). `BuildManifest()`
 reflects over the registry and emits, per type, its JSON field list (name, a
 language-neutral type descriptor, optional flag), sorted for a stable diff.
 
@@ -161,13 +166,11 @@ would be a new dependency. The bespoke manifest is smaller and purpose-fit.
 
 ### Current gaps (2026-07-14)
 
-Of 119 wire types: **53 required** (all satisfied by `Messages.swift` /
-`ControlEnvelope` today), **53 planned** (client-relevant, not yet modelled —
-messaging, scenarios, triggers, MCP management, jail, notify, tokens, and various
-response types), and **13 n/a** (hook-CLI↔daemon, MCP proxy transport, local-only
-doctor/diagnostics/upgrade). The `planned` set is the reviewable backlog the
-parity effort works through; promoting one to `required` (and modelling it in
-Swift) is the ratchet.
+The generated manifest records the current totals; after the MCP removal it has
+156 wire types: **59 required**, **12 planned**, and **85 n/a**. These counts are
+descriptive, not hand-maintained acceptance criteria. The `planned` set is the
+reviewable backlog the parity effort works through; promoting one to `required`
+(and modelling it in Swift) is the ratchet.
 
 ### References
 

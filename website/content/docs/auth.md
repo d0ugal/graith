@@ -20,11 +20,6 @@ Without auth, any process on the daemon's Unix socket could pose as any session 
 3. The CLI includes `GRAITH_TOKEN` on every control message
 4. The daemon validates it and enforces an authorization matrix
 
-For the auto-injected [graith MCP server]({{< relref "mcp" >}}), the daemon
-also carries the authenticated proxy caller into its private `gr mcp` child
-environment. Each MCP tool connection therefore authenticates as the calling
-session, not as the daemon's ambient process identity or the local human.
-
 No configuration needed. Existing sessions receive tokens when the daemon upgrades to an auth-supporting version (state migration v9 to v10).
 
 ## Authorization rules
@@ -34,7 +29,7 @@ With a valid token, the daemon enforces:
 | Rule | Message types | Effect |
 |------|--------------|--------|
 | Always allowed | `handshake`, `list`, `diagnostics`, `config`, `detach`, `resize` | No restriction |
-| Self only | `set_status`, `status_report`, `command_policy_check`, `mcp_connect` | Agent can only target its own session |
+| Self only | `set_status`, `status_report`, `command_policy_check` | Agent can only target its own session |
 | Self or descendant | `fork`, `attach`, `stop`, `delete`, `type`, `resume`, `restart`, `update`, `logs`, `screen_preview`, `screen_snapshot`, `status` | Agent can target itself or any session it created (including transitive children) |
 | Human only | `reload`, `upgrade` | Rejected when a token is present; reserved for human operators |
 
@@ -44,8 +39,7 @@ For `update --parent`, the session must also have authority over the new parent.
 
 The daemon overrides payload identity fields (`sender_id`, `sender_name`,
 `subscriber`, `session_id`) with identity derived from a valid token, so an
-agent can't spoof a different session. This includes calls arriving through the
-managed graith MCP backend.
+agent can't spoof a different session.
 
 ### Messaging rules
 
@@ -61,11 +55,6 @@ The `gr` CLI handles this transparently:
 
 - **Inside a session**, `GRAITH_TOKEN` takes precedence — the caller is that session.
 - **Outside a session** (human at a terminal), `gr` reads and sends `human.token` — the caller is the human.
-- **Inside the managed graith MCP backend**, the daemon injects the exact token
-  that authenticated the proxy request and disables human-token fallback if
-  that delegation is absent. Concurrent rotation can invalidate the request but
-  never upgrades it to the replacement credential.
-
 The macOS app uses the same credential for its **This Mac** connection,
 resolving `human.token` from the active profile's data directory and re-reading
 it per connection, so an app opened before the daemon recovers without

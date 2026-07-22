@@ -25,7 +25,7 @@ you see an actual agent respond.
 `setup.sh` creates a spread of sessions — some running, one stopped, two agent
 types, one starred, each with a status summary — so the recording looks like a
 real working fleet. It copies only the `[agents.*]` and `[sandbox]` tables from
-your default config (not triggers, repos, or MCP servers); set
+your default config (not triggers or repos); set
 `GRAITH_DEMO_SRC_CONFIG` to copy from a different file. It reports the sandbox
 posture it detected and rejects a copied config that leaves agents unsandboxed.
 If no sandbox config is found, it

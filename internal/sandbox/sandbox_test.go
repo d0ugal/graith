@@ -340,8 +340,8 @@ func TestSafehouseSockets(t *testing.T) {
 		{"ssh feature, no sock", []string{daemon}, []string{"ssh"}, "", []string{daemon}},
 		{"sock, no ssh feature", []string{daemon}, nil, agentSock, []string{daemon}},
 		{"sock equals daemon socket (dedup)", []string{daemon}, []string{"ssh"}, daemon, []string{daemon}},
-		// ssh-only path: a caller with no daemon-socket grant (e.g. a sandboxed
-		// MCP server) still gets the SSH agent socket when the feature is on.
+		// ssh-only path: a caller with no daemon-socket grant still gets the SSH
+		// agent socket when the feature is on.
 		{"ssh-only, no daemon socket", nil, []string{"ssh"}, agentSock, []string{agentSock}},
 		// duplicates already within UnixSockets are collapsed (full dedup).
 		{"dupes within UnixSockets", []string{daemon, daemon}, nil, "", []string{daemon}},

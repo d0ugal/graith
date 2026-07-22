@@ -386,8 +386,7 @@ Every lifecycle transition is logged; a stop is fully diagnosable from the log:
   the agent and tools below a sandbox wrapper; `fds_partial: true` means a
   short-lived or inaccessible process couldn't be counted. Also records
   `last_output_age_ms`, `observed_lifetime_ms`, `sandbox_backend`,
-  `sandbox_diagnostic`, attachment state, unread messages, and session-scoped
-  MCP process health.
+  `sandbox_diagnostic`, attachment state, and unread messages.
 
 The most useful exit fields:
 

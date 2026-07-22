@@ -85,8 +85,6 @@ func nativeRestartErrorClass(value string) string {
 	switch {
 	case strings.Contains(value, "upgrade background drain failed"):
 		return "background-drain"
-	case strings.Contains(value, "upgrade MCP drain failed"):
-		return "mcp-drain"
 	case strings.Contains(value, "upgrade session I/O drain failed"):
 		return "session-io-drain"
 	case strings.Contains(value, "upgrade exec failed"):

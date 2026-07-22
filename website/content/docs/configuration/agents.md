@@ -1,27 +1,11 @@
 ---
 weight: 310
 title: "Agents & repositories"
-description: "Agent definitions, template variables, MCP servers, and per-repo settings."
+description: "Agent definitions, template variables, and per-repo settings."
 icon: "smart_toy"
 toc: true
 draft: false
 ---
-
-## MCP servers
-
-Global MCP servers available to all agent sessions:
-
-```toml
-[[mcp_servers]]
-name    = "my-tools"
-command = "/usr/local/bin/my-mcp-server"
-args    = ["--port", "8080"]
-env     = { API_KEY = "..." }
-disabled = false
-sandbox  = true  # override sandbox for this server
-```
-
-MCP servers can be overridden or disabled per-agent (see agent config below).
 
 ## Agent definitions
 
@@ -114,21 +98,6 @@ features   = ["clipboard"]
 
 Features, directories, and files (`read_files`/`write_files`, for single files that can't be a directory grant without over-sharing — e.g. Claude's `~/.claude.json` login file) merge with the global sandbox config. Per-agent settings can choose a backend, add grants, or explicitly disable Graith's sandbox for that agent. Disabled sessions start with a warning; `gr doctor` reports the missing Graith boundary. See the [Sandbox]({{< relref "/docs/sandbox/how-it-works.md#file-grants" >}}) page for file grants.
 
-### Per-agent MCP overrides
-
-Override or disable global MCP servers for a specific agent:
-
-```toml
-[agents.claude.mcp_servers.my-tools]
-disabled = true  # disable this server for Claude
-
-[agents.codex.mcp_servers.extra-tools]
-command = "/path/to/extra-tools"
-args    = ["--codex-mode"]
-```
-
-A per-agent MCP entry with `disabled = true` removes the global server for that agent. Entries that override `command`, `args`, or `env` merge with the global definition.
-
 ### Custom agents
 
 Define additional agents beyond the built-in five:
@@ -148,6 +117,20 @@ write_dirs = ["~/.my-agent"]
 ```
 
 Use with `gr new my-task --agent my-agent`. Since a custom agent's name matches none of the built-ins, set `prompt_injection` if you want it to receive `agent_prompt` — otherwise the name-based default is `none` and no prompt is injected.
+
+### Agent-owned native integrations
+
+Graith does not configure, inject, supervise, proxy, or inspect MCP servers.
+Delete former Graith keys (`[[mcp_servers]]`,
+`[agents.<name>.mcp_servers.*]`, and `limits.mcp_log_read_bytes`) before
+upgrading; startup and reload reject them with migration guidance so obsolete
+security or lifecycle settings cannot become inert accidentally.
+
+An agent runtime may still support MCP through its own configuration. Keep that
+configuration in the runtime's native files or flags, outside Graith's schema;
+Graith preserves ordinary configured agent arguments but does not interpret or
+secure native MCP integrations. For browser automation in a sandboxed session,
+use [`agent-browser`]({{< relref "/docs/sandbox/configuration.md#browser-automation" >}}).
 
 ## Repository configuration
 

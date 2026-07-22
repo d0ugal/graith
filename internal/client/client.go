@@ -112,7 +112,7 @@ func Connect(cfg *config.Config, paths config.Paths, configFile string) (*Client
 
 // ConnectPassive creates a new client and performs the handshake, but never
 // triggers daemon auto-upgrade on version mismatch. Use this for long-lived
-// helper processes (e.g. MCP proxies) that may outlive a binary upgrade and
+// helper processes that may outlive a binary upgrade and
 // should not race with the user's explicit daemon restart.
 func ConnectPassive(cfg *config.Config, paths config.Paths, configFile string) (*Client, error) {
 	return ConnectPassiveContext(context.Background(), cfg, paths, configFile)

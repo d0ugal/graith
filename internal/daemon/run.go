@@ -205,7 +205,7 @@ func runAdoptBootstrap(configFile, adoptFrom string, serviceIdentity AdoptedServ
 	defer func() { returnErr = errors.Join(returnErr, ownership.Cleanup()) }()
 	// The immutable capsule is the first trustworthy enumeration of every
 	// transferred resource. Restore CLOEXEC before reading the manifest or
-	// touching config, paths, MCP, or any other subsystem that could fork.
+	// touching config, paths, or any other subsystem that could fork.
 	if err := secureUpgradeManifestDescriptors(owned); err != nil {
 		return err
 	}
@@ -445,11 +445,6 @@ func run(
 	defer func() { _ = todoStore.Close() }()
 
 	sm.todos = todoStore
-
-	mcpMgr := NewManagedMCPManager(cfg, paths.LogDir, log)
-
-	sm.mcpManager = mcpMgr
-	defer mcpMgr.Shutdown()
 
 	var l net.Listener
 	defer func() {
@@ -1137,32 +1132,8 @@ func run(
 
 		backgroundCancel()
 
-		// Defers do not run across syscall.Exec. Stop lazy MCP children only
-		// after every reversible preflight; if Exec returns the manager remains
-		// usable and proxy clients can reconnect on demand.
-		mcpCtx, mcpCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		mcpDone := make(chan struct{})
-
-		go func() {
-			select {
-			case <-request.canceled:
-				mcpCancel()
-			case <-mcpDone:
-			}
-		}()
-
-		err = mcpMgr.FreezeAndDrain(mcpCtx)
-
-		close(mcpDone)
-		mcpCancel()
-
-		if err != nil {
-			mcpMgr.Thaw()
-			return fmt.Errorf("upgrade MCP drain failed: %w", err)
-		}
-
 		// Stop PTY reads and input only at the last reversible moment, after
-		// acknowledgement and every potentially slow child drain. This keeps
+		// acknowledgement and every potentially slow background drain. This keeps
 		// terminal I/O flowing throughout preflight and bounds the final gap.
 		ioCtx, ioCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		ioComplete := make(chan struct{})
@@ -1181,7 +1152,6 @@ func run(
 		ioCancel()
 
 		if err != nil {
-			mcpMgr.Thaw()
 			return fmt.Errorf("upgrade session I/O drain failed: %w", err)
 		}
 
@@ -1191,10 +1161,6 @@ func run(
 		// upgrade safe point. The manager reservation remains closed and every
 		// child-creating surface stays frozen on the unsafe path.
 		releaseSessionIO()
-
-		if !hasUnsafeUpgradeDescriptor(execErr) {
-			mcpMgr.Thaw()
-		}
 
 		if execErr != nil {
 			return fmt.Errorf("upgrade exec failed: %w", execErr)

@@ -1131,8 +1131,8 @@ func TestMigrateV25ToV26InitializesSessionLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if state.Version != 26 {
-		t.Fatalf("migrated version = %d, want 26", state.Version)
+	if state.Version != CurrentStateVersion {
+		t.Fatalf("migrated version = %d, want %d", state.Version, CurrentStateVersion)
 	}
 
 	if state.Sessions["braw"].Labels == nil || len(state.Sessions["braw"].Labels) != 0 {
@@ -1141,6 +1141,80 @@ func TestMigrateV25ToV26InitializesSessionLabels(t *testing.T) {
 
 	if !reflect.DeepEqual(state.Sessions["canny"].Labels, []string{"release"}) {
 		t.Fatalf("populated labels changed: %#v", state.Sessions["canny"].Labels)
+	}
+}
+
+func TestMigrateV26ToV27DropsMCPConfigAndPreservesBackup(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	secret := "dreich-secret-token"
+	before := []byte(`{
+  "version": 26,
+  "sessions": {
+    "braw": {
+      "id": "braw",
+      "name": "auld-croft",
+      "status": "stopped",
+      "creation_config": {
+        "agent": {
+          "command": "claude",
+          "args": ["--native-runtime-setting", "canny"],
+          "mcp_servers": {
+            "croft": {
+              "command": "legacy-server",
+              "env": {"SECRET_TOKEN": "` + secret + `"}
+            }
+          }
+        }
+      }
+    }
+  }
+}`)
+
+	if err := writeFileAtomic(path, before); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if state.Version != 27 {
+		t.Fatalf("migrated version = %d, want 27", state.Version)
+	}
+
+	if state.Sessions["braw"].CreationCfg == nil {
+		t.Fatal("creation config was dropped")
+	}
+	agent := state.Sessions["braw"].CreationCfg.Agent
+	if !reflect.DeepEqual(agent.Args, []string{"--native-runtime-setting", "canny"}) {
+		t.Fatalf("native agent args changed: %#v", agent.Args)
+	}
+
+	backup, err := os.ReadFile(StateBackupPath(path, 26))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(backup, before) {
+		t.Fatal("v26 backup does not contain the exact pre-migration bytes")
+	}
+
+	if err := SaveState(path, state); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, obsolete := range []string{"mcp_servers", "legacy-server", secret} {
+		if bytes.Contains(after, []byte(obsolete)) {
+			t.Errorf("migrated state retained obsolete value %q", obsolete)
+		}
+	}
+	if !bytes.Contains(after, []byte("--native-runtime-setting")) {
+		t.Fatal("migrated state dropped native agent configuration")
 	}
 }
 
@@ -1173,8 +1247,8 @@ func TestMigrateV22ToCurrentAppliesAllMigrations(t *testing.T) {
 }
 
 func TestStateMigrationsRegisteredSequentially(t *testing.T) {
-	if CurrentStateVersion != 26 {
-		t.Fatalf("CurrentStateVersion = %d, want 26", CurrentStateVersion)
+	if CurrentStateVersion != 27 {
+		t.Fatalf("CurrentStateVersion = %d, want 27", CurrentStateVersion)
 	}
 
 	if len(migrations) != CurrentStateVersion {

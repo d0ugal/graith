@@ -1,5 +1,10 @@
 # Inbox Messaging Improvements
 
+> **MCP removal amendment (2026-07-22):** MCP tool work described below is
+> historical and superseded by
+> [Remove Graith-Owned MCP Support](2026-07-22-mcp-removal.md); inbox CLI and
+> daemon behavior remain current.
+
 **Author:** Dougal Matthews
 **Date:** 2026-06-23
 **Status:** Draft (revised after two independent reviews)

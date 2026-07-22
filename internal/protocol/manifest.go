@@ -47,7 +47,7 @@ const (
 	// visible and reviewable.
 	SwiftPlanned SwiftExpectation = "planned"
 	// SwiftNA: a type a GUI/remote client never needs — hook-CLI↔daemon
-	// internals, MCP proxy transport, or local-only (doctor orphan-GC / upgrade)
+	// internals or local-only (doctor orphan-GC / upgrade)
 	// messages. Not modelled by Swift, and never expected to be.
 	SwiftNA SwiftExpectation = "na"
 )
@@ -173,17 +173,6 @@ var registeredTypes = []any{
 	CommandPolicyDecisionMsg{},
 	ScreenSnapshotMsg{},
 	ScreenSnapshotResponseMsg{},
-	MCPConnectMsg{},
-	MCPConnectOkMsg{},
-	MCPListMsg{},
-	MCPConnectionInfo{},
-	MCPServerStatus{},
-	MCPListResponse{},
-	MCPRestartMsg{},
-	MCPRestartResponse{},
-	MCPLogsMsg{},
-	MCPLogFile{},
-	MCPLogsResponse{},
 	StatusRequestMsg{},
 	ConfigMsg{},
 	ConfigResponseMsg{},
@@ -340,7 +329,6 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"ListMsg":         {SwiftRequired, "EmptyMsg"},
 	"ConfigMsg":       {SwiftRequired, "EmptyMsg"}, // config viewer request (#904)
 	"AgentCatalogMsg": {SwiftRequired, "EmptyMsg"}, // agent catalog request (#1234)
-	"MCPListMsg":      {SwiftNA, ""},               // MCP management is CLI-only
 	"TriggerListMsg":  {SwiftNA, ""},               // trigger management is CLI-only
 	"PairListMsg":     {SwiftNA, ""},               // paired-device management is CLI-only
 
@@ -413,14 +401,6 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"AgentCatalogEntry":       {SwiftRequired, "AgentCatalogEntry"},       // GUI agent catalog (#1234)
 	"AgentCatalogResponseMsg": {SwiftRequired, "AgentCatalogResponseMsg"}, // GUI agent catalog (#1234)
 	"StatusResponseMsg":       {SwiftPlanned, ""},
-	"MCPConnectionInfo":       {SwiftNA, ""},
-	"MCPServerStatus":         {SwiftNA, ""},
-	"MCPListResponse":         {SwiftNA, ""},
-	"MCPRestartMsg":           {SwiftNA, ""},
-	"MCPRestartResponse":      {SwiftNA, ""},
-	"MCPLogsMsg":              {SwiftNA, ""},
-	"MCPLogFile":              {SwiftNA, ""},
-	"MCPLogsResponse":         {SwiftNA, ""},
 	// Read-only task-list types remain planned for the GUIs. Mutation types are
 	// intentionally not applicable to the native apps.
 	"TodoItemInfo":          {SwiftPlanned, ""},
@@ -448,8 +428,6 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"StatusReportMsg":          {SwiftNA, ""},                           // hook CLI -> daemon
 	"CommandPolicyCheckMsg":    {SwiftNA, ""},                           // hook CLI -> daemon
 	"CommandPolicyDecisionMsg": {SwiftNA, ""},                           // daemon -> hook CLI
-	"MCPConnectMsg":            {SwiftNA, ""},                           // MCP proxy transport
-	"MCPConnectOkMsg":          {SwiftNA, ""},                           // MCP proxy transport
 	"UpgradeMsg":               {SwiftNA, ""},                           // local-only
 	"GCMsg":                    {SwiftNA, ""},                           // local-only (doctor)
 	"GCOrphanInfo":             {SwiftNA, ""},                           // local-only (doctor)

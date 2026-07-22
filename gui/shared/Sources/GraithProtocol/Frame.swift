@@ -9,9 +9,6 @@ public enum Channel {
     public static let control: UInt8 = 0x00
     /// Raw PTY bytes, both directions (terminal output and keystrokes).
     public static let data: UInt8 = 0x01
-    /// MCP proxy channel — dynamically assigned by `mcp_connect`. The apps
-    /// never open this; it is documented here only for completeness.
-    public static let mcp: UInt8 = 0x02
 }
 
 /// Maximum payload size for a single frame (4 MiB), matching

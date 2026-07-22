@@ -115,7 +115,6 @@ type SessionManager struct {
 	persistUpgradeBeforeLock     func()
 	messages                     *MsgStore
 	todos                        *TodoStore
-	mcpManager                   *MCPManager
 	startedAt                    time.Time
 	// instanceID is a nonce generated once per daemon process start (including
 	// after an exec upgrade, which re-runs main and constructs a fresh
@@ -326,10 +325,6 @@ func (sm *SessionManager) SetMsgStore(ms *MsgStore) {
 
 func (sm *SessionManager) SetTodoStore(ts *TodoStore) {
 	sm.todos = ts
-}
-
-func (sm *SessionManager) SetMCPManager(mm *MCPManager) {
-	sm.mcpManager = mm
 }
 
 // HandleHookReport processes a status report from an agent hook, updating the

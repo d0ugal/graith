@@ -4518,7 +4518,7 @@ func assertAddDirLayout(t *testing.T, argv []string, prompt string, worktrees []
 }
 
 // newClaudeRecorderManager sets up a SessionManager whose "claude" agent records
-// the argv it is launched with, for asserting hook/MCP arg injection end-to-end.
+// the argv it is launched with, for asserting launch arguments end-to-end.
 func newClaudeRecorderManager(t *testing.T, repoDir string) (*SessionManager, string) {
 	t.Helper()
 
@@ -4530,15 +4530,15 @@ func newClaudeRecorderManager(t *testing.T, repoDir string) (*SessionManager, st
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
-	// Drop the default agent prompt so the recorded argv is just the injected
-	// hook/MCP flags — no --append-system-prompt noise to reason about.
+	// Drop the default agent prompt so the recorded argv has no
+	// --append-system-prompt noise to reason about.
 	cfg.AgentPrompt = ""
 	cfg.Agents["claude"] = config.Agent{
 		NonInteractiveArgs: []string{},
 		Command:            "sh",
-		Args:               []string{"-c", script},
-		ResumeArgs:         []string{"-c", script},
-		ForkArgs:           []string{"-c", script},
+		Args:               []string{"-c", script, "--native-runtime-setting", "canny"},
+		ResumeArgs:         []string{"-c", script, "--native-runtime-setting", "canny"},
+		ForkArgs:           []string{"-c", script, "--native-runtime-setting", "canny"},
 		Env:                map[string]string{"GRAITH_ARGS_RECORD": recordPath},
 	}
 	cfg.Repos = []config.RepoConfig{{Path: repoDir}}
@@ -4568,77 +4568,23 @@ func assertArgvContains(t *testing.T, argv []string, want string) {
 	t.Errorf("argv missing %q; got %v", want, argv)
 }
 
-// assertArgvOrder fails unless before appears at an earlier index than after.
-func assertArgvOrder(t *testing.T, argv []string, before, after string) {
-	t.Helper()
-
-	bi, ai := -1, -1
-
-	for i, a := range argv {
-		if a == before && bi == -1 {
-			bi = i
-		}
-
-		if a == after && ai == -1 {
-			ai = i
-		}
-	}
-
-	if bi == -1 || ai == -1 {
-		t.Errorf("argv missing %q (%d) or %q (%d); got %v", before, bi, after, ai, argv)
-		return
-	}
-
-	if bi > ai {
-		t.Errorf("expected %q (index %d) before %q (index %d); argv %v", before, bi, after, ai, argv)
-	}
-}
-
-// assertSettingsAndMCP asserts the recorded argv carries both the --settings
-// (hook) arg and the --mcp-config arg, in that order, with --mcp-config pointing
-// at a config file that contains the auto-injected graith server.
-func assertSettingsAndMCP(t *testing.T, argv []string) {
+// assertLaunchHasHooksWithoutMCP asserts that lifecycle hooks and arbitrary
+// agent-native arguments survive while Graith contributes no MCP settings.
+func assertLaunchHasHooksWithoutMCP(t *testing.T, argv []string) {
 	t.Helper()
 
 	assertArgvContains(t, argv, "--settings")
-	assertArgvContains(t, argv, "--mcp-config")
-	// Order matters: the pre-refactor code emitted --settings before --mcp-config
-	// as one slice; the decoupled blocks must preserve that order.
-	assertArgvOrder(t, argv, "--settings", "--mcp-config")
+	assertArgvContains(t, argv, "--native-runtime-setting")
+	assertArgvContains(t, argv, "canny")
 
-	mcpPath := valueAfter(t, argv, "--mcp-config")
-
-	data, err := os.ReadFile(mcpPath)
-	if err != nil {
-		t.Fatalf("read mcp config %q: %v", mcpPath, err)
-	}
-
-	if !strings.Contains(string(data), "graith") {
-		t.Errorf("mcp config should contain the auto-injected graith server; got:\n%s", data)
-	}
-}
-
-// valueAfter returns the argv element immediately following flag.
-func valueAfter(t *testing.T, argv []string, flag string) string {
-	t.Helper()
-
-	for i := 0; i < len(argv)-1; i++ {
-		if argv[i] == flag {
-			return argv[i+1]
+	for _, arg := range argv {
+		if arg == "--mcp-config" || strings.Contains(arg, "mcp_servers.") || strings.Contains(arg, "mcp-proxy") {
+			t.Errorf("Graith injected obsolete MCP argument %q; argv %v", arg, argv)
 		}
 	}
-
-	t.Fatalf("argv missing %q with a following value; got %v", flag, argv)
-
-	return ""
 }
 
-// TestClaudeSessionInjectsSettingsAndMCP is the #1135 regression at the daemon
-// level: a hooks-enabled Claude session must launch with BOTH the --settings
-// (lifecycle-hook) arg and the --mcp-config arg, now that the two are produced by
-// separate, decoupled code paths (injectHooks vs injectMCPConfig). It guards
-// against the split accidentally dropping MCP injection from the launch path.
-func TestClaudeSessionInjectsSettingsAndMCP(t *testing.T) {
+func TestClaudeSessionPreservesNativeArgsWithoutMCPInjection(t *testing.T) {
 	repoDir := initTempGitRepo(t)
 	sm, recordPath := newClaudeRecorderManager(t, repoDir)
 
@@ -4654,16 +4600,12 @@ func TestClaudeSessionInjectsSettingsAndMCP(t *testing.T) {
 
 	t.Cleanup(func() { stopAndClosePTY(sm, id) })
 
-	argv := waitForRecordedArgv(t, recordPath, "--mcp-config")
+	argv := waitForRecordedArgv(t, recordPath, "--settings")
 
-	assertSettingsAndMCP(t, argv)
+	assertLaunchHasHooksWithoutMCP(t, argv)
 }
 
-// TestForkInjectsSettingsAndMCP proves the decoupled hook/MCP injection blocks
-// both fire on the Fork launch path too (the second of three copy-pasted sites):
-// a fork of a hooks-enabled Claude session launches with both --settings and
-// --mcp-config, in order (#1135).
-func TestForkInjectsSettingsAndMCP(t *testing.T) {
+func TestForkPreservesNativeArgsWithoutMCPInjection(t *testing.T) {
 	repoDir := initTempGitRepo(t)
 	sm, recordPath := newClaudeRecorderManager(t, repoDir)
 
@@ -4678,7 +4620,7 @@ func TestForkInjectsSettingsAndMCP(t *testing.T) {
 	t.Cleanup(func() { stopAndClosePTY(sm, source.ID) })
 
 	// Wait for the source's first record, then clear it so the fork owns the next.
-	waitForRecordedArgv(t, recordPath, "--mcp-config")
+	waitForRecordedArgv(t, recordPath, "--settings")
 
 	if err := os.Remove(recordPath); err != nil {
 		t.Fatalf("remove record before fork: %v", err)
@@ -4691,16 +4633,12 @@ func TestForkInjectsSettingsAndMCP(t *testing.T) {
 
 	t.Cleanup(func() { stopAndClosePTY(sm, forked.ID) })
 
-	argv := waitForRecordedArgv(t, recordPath, "--mcp-config")
+	argv := waitForRecordedArgv(t, recordPath, "--settings")
 
-	assertSettingsAndMCP(t, argv)
+	assertLaunchHasHooksWithoutMCP(t, argv)
 }
 
-// TestResumeInjectsSettingsAndMCP proves the decoupled hook/MCP injection blocks
-// both fire on the Resume (Restart) launch path — the third copy-pasted site —
-// re-adding both --settings and --mcp-config, in order, even though the flags
-// aren't carried in resume_args (#1135).
-func TestResumeInjectsSettingsAndMCP(t *testing.T) {
+func TestResumePreservesNativeArgsWithoutMCPInjection(t *testing.T) {
 	repoDir := initTempGitRepo(t)
 	sm, recordPath := newClaudeRecorderManager(t, repoDir)
 
@@ -4716,7 +4654,7 @@ func TestResumeInjectsSettingsAndMCP(t *testing.T) {
 
 	t.Cleanup(func() { stopAndClosePTY(sm, id) })
 
-	waitForRecordedArgv(t, recordPath, "--mcp-config")
+	waitForRecordedArgv(t, recordPath, "--settings")
 
 	if err := os.Remove(recordPath); err != nil {
 		t.Fatalf("remove record before resume: %v", err)
@@ -4732,15 +4670,14 @@ func TestResumeInjectsSettingsAndMCP(t *testing.T) {
 		t.Fatalf("Restart() error = %v", err)
 	}
 
-	argv := waitForRecordedArgv(t, recordPath, "--mcp-config")
+	argv := waitForRecordedArgv(t, recordPath, "--settings")
 
-	assertSettingsAndMCP(t, argv)
+	assertLaunchHasHooksWithoutMCP(t, argv)
 }
 
 // TestClaudeSessionHooksDisabledSkipsInjection verifies the other side of the
-// gate: with hooks disabled (with no command policy), a PTY Claude session gets neither
-// --settings nor --mcp-config — MCP still tracks the hook gate for PTY, so this
-// stays a pure refactor of the pre-#1135 behaviour.
+// gate: with hooks disabled (with no command policy), a PTY Claude session gets
+// no Graith-generated settings.
 func TestClaudeSessionHooksDisabledSkipsInjection(t *testing.T) {
 	repoDir := initTempGitRepo(t)
 	sm, recordPath := newClaudeRecorderManager(t, repoDir)
@@ -4762,7 +4699,7 @@ func TestClaudeSessionHooksDisabledSkipsInjection(t *testing.T) {
 	argv := waitForRecordedArgv(t, recordPath, "sh")
 
 	for _, a := range argv {
-		if a == "--settings" || a == "--mcp-config" {
+		if a == "--settings" || a == "--mcp-config" || strings.Contains(a, "mcp_servers.") {
 			t.Errorf("hooks-disabled session must not inject %q; argv %v", a, argv)
 		}
 	}
@@ -6889,11 +6826,9 @@ func TestCovSetStores(t *testing.T) {
 	// setter would fail (the fields default to nil after NewSessionManager).
 	ms := &MsgStore{}
 	ts := &TodoStore{}
-	mm := &MCPManager{}
 
 	sm.SetMsgStore(ms)
 	sm.SetTodoStore(ts)
-	sm.SetMCPManager(mm)
 
 	if sm.messages != ms {
 		t.Error("SetMsgStore did not assign the given pointer")
@@ -6901,10 +6836,6 @@ func TestCovSetStores(t *testing.T) {
 
 	if sm.todos != ts {
 		t.Error("SetTodoStore did not assign the given pointer")
-	}
-
-	if sm.mcpManager != mm {
-		t.Error("SetMCPManager did not assign the given pointer")
 	}
 }
 

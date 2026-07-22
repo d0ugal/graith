@@ -82,8 +82,8 @@ singletn = true
 
 func TestUnknownKeysAcceptsValidConfig(t *testing.T) {
 	// Exercises the false-positive-prone shapes: dynamic-key maps (agents.<name>,
-	// env, per-agent mcp_servers.<name>), pointer-struct tables (sandbox.network),
-	// arrays of tables ([[repos]], [[mcp_servers]]), and a case-variant key
+	// env), pointer-struct tables (sandbox.network), arrays of tables ([[repos]]),
+	// and a case-variant key
 	// (READ_DIRS) that go-toml accepts and so must not be flagged.
 	toml := `
 default_agent = "claude"
@@ -106,19 +106,6 @@ write_files = ["/home/braw/.claude.json"]
 [agents.claude.env]
 FOO = "bar"
 ANY_USER_KEY = "value"
-
-[agents.claude.mcp_servers.braw]
-command = "npx"
-
-[agents.claude.mcp_servers.braw.env]
-PORT = "9222"
-
-[[mcp_servers]]
-name = "chrome-devtools"
-command = "npx"
-
-[mcp_servers.env]
-WHATEVER = "ok"
 
 [[repos]]
 path = "~/Code/croft"

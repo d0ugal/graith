@@ -10,6 +10,11 @@ issue: https://github.com/d0ugal/graith/issues/592, https://github.com/d0ugal/gr
 
 # Unified Triggers
 
+> **MCP removal amendment (2026-07-22):** Comparisons with MCP-server sandbox
+> configuration below are historical and superseded by
+> [Remove Graith-Owned MCP Support](2026-07-22-mcp-removal.md); trigger sandbox
+> configuration remains supported independently.
+
 > **Note on code references.** `file:line` citations are anchored to symbol
 > names as of writing; if a line has drifted, search for the named function.
 

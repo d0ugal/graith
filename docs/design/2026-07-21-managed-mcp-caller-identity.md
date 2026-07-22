@@ -2,7 +2,7 @@
 title: "Design Doc: Preserve Caller Identity in Managed Graith MCP"
 authors: Dougal Matthews
 created: 2026-07-21
-status: Implemented
+status: Superseded by 2026-07-22-mcp-removal.md
 reviewers: (none yet)
 informed: issue-1377
 issue: https://github.com/d0ugal/graith/issues/1377

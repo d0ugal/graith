@@ -55,7 +55,7 @@ func mutatingControlMessage(msg protocol.Envelope) bool {
 	case "handshake", "auth_proof", "repo_list", "store_list", "store_get", "list",
 		"logs", "wait", "msg_topics", "msg_conversation", "msg_jail_list",
 		"msg_jail_show", "screen_preview", "screen_snapshot", "status",
-		"diagnostics", "config", "agent_catalog", "mcp_connect", "mcp_list", "mcp_logs", "scenario_status", "trigger_list",
+		"diagnostics", "config", "agent_catalog", "scenario_status", "trigger_list",
 		"trigger_status", "todo_list", "scenario_list", "upgrade_preflight", "upgrade":
 		return false
 	default:
@@ -74,8 +74,8 @@ func mutatingControlMessage(msg protocol.Envelope) bool {
 // handler_messaging.go / handler_scenario.go / handler_trigger.go /
 // handler_todo.go / handler_query.go. Cases that mutate connection-local state
 // (attach/detach/resize/handshake), block the read loop, or return from the
-// loop (logs --follow, wait, msg_inbox/sub, mcp_connect,
-// upgrade, pair_request) stay inline here because they are coupled to this
+// loop (logs --follow, wait, msg_inbox/sub, upgrade, pair_request) stay inline
+// here because they are coupled to this
 // connection's lifecycle.
 func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm *SessionManager, log *slog.Logger) {
 	reader := protocol.NewFrameReader(conn)
@@ -807,148 +807,6 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 			case "gc":
 				handleGC(sm, sendControl, msg)
-
-			case "mcp_connect":
-				mc, ok := decodePayload[protocol.MCPConnectMsg](msg, sendControl, "invalid mcp_connect")
-				if !ok {
-					continue
-				}
-
-				if auth.authenticated {
-					mc.SessionID = auth.sessionID
-				}
-
-				if !auth.authorizeTarget(sm, mc.SessionID, authSelfOnly, sendControl) {
-					continue
-				}
-
-				if sm.mcpManager == nil {
-					sendControl("error", protocol.ErrorMsg{Message: "MCP manager not initialized"})
-					return
-				}
-
-				// Verify the requesting session's agent is allowed to use this
-				// server, and gather its template vars for per-session isolation.
-				mcpVars := config.TemplateVars{SessionID: mc.SessionID}
-				callerIdentity := mcpCallerIdentity{}
-
-				if mc.SessionID != "" {
-					sess, ok := sm.Get(mc.SessionID)
-					if !ok {
-						// A non-empty session ID that doesn't resolve is an
-						// error — don't spawn a process with partially populated
-						// (empty {session_name}/{worktree_path}) template vars.
-						sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("session %q not found", mc.SessionID)})
-						return
-					}
-
-					mcpVars.SessionName = sess.Name
-					mcpVars.WorktreePath = sess.WorktreePath
-
-					callerIdentity = auth.managedMCPCallerIdentity()
-
-					allowed := sm.resolveMCPServersFromConfig(sm.Config(), sess.Agent)
-					found := false
-
-					for _, s := range allowed {
-						if s.Name == mc.Server {
-							found = true
-							break
-						}
-					}
-
-					if !found {
-						sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("MCP server %q is not enabled for agent %q", mc.Server, sess.Agent)})
-						return
-					}
-				}
-
-				if !sm.mcpManager.HasServer(mc.Server) {
-					sendControl("error", protocol.ErrorMsg{Message: fmt.Sprintf("unknown MCP server %q", mc.Server)})
-					return
-				}
-
-				proxyID := fmt.Sprintf("%s-%s", mc.SessionID, mc.Server)
-
-				proc, err := sm.mcpManager.connect(mc.Server, proxyID, mcpVars, callerIdentity) //nolint:contextcheck // The manager owns bounded process cleanup across client disconnects.
-				if err != nil {
-					sendControl("error", protocol.ErrorMsg{Message: err.Error()})
-					return
-				}
-
-				channelID := protocol.ChannelMCP
-				sendControl("mcp_connect_ok", protocol.MCPConnectOkMsg{
-					Server:  mc.Server,
-					Channel: channelID,
-				})
-
-				// Bridge: proxy stdin (from frames) → MCP server stdin,
-				//         MCP server stdout → proxy (as frames).
-				bridgeDone := make(chan struct{})
-				go func() {
-					defer close(bridgeDone)
-
-					buf := make([]byte, 32*1024)
-					for {
-						n, err := proc.stdout.Read(buf)
-						if n > 0 {
-							if werr := writer.WriteFrame(channelID, buf[:n]); werr != nil {
-								return
-							}
-						}
-
-						if err != nil {
-							return
-						}
-					}
-				}()
-
-				// If the MCP server dies, force the connection closed so the
-				// read loop unblocks and the proxy can reconnect.
-				go func() {
-					select {
-					case <-bridgeDone:
-					case <-proc.done:
-					}
-
-					_ = conn.Close()
-				}()
-
-				// Read frames from proxy and write to MCP server stdin.
-				func() { //nolint:contextcheck // Disconnect must finish bounded manager-owned cleanup after the connection context ends.
-					defer sm.mcpManager.Disconnect(proxyID, proc)
-
-					for {
-						f, err := reader.ReadFrame()
-						if err != nil {
-							return
-						}
-
-						switch f.Channel {
-						case channelID:
-							if _, err := proc.stdin.Write(f.Payload); err != nil {
-								return
-							}
-						case protocol.ChannelControl:
-							ctrl, _ := protocol.DecodeControl(f.Payload)
-							if ctrl.Type == "detach" {
-								return
-							}
-						}
-					}
-				}()
-				<-bridgeDone
-
-				return
-
-			case "mcp_list":
-				handleMCPList(sm, sendControl)
-
-			case "mcp_restart":
-				handleMCPRestart(sm, auth, sendControl, msg) //nolint:contextcheck // An accepted restart owns bounded daemon process cleanup independent of the requester.
-
-			case "mcp_logs":
-				handleMCPLogs(sm, sendControl, msg)
 
 			case "scenario_start":
 				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.

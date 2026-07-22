@@ -9,7 +9,6 @@ import (
 const (
 	ChannelControl = byte(0x00)
 	ChannelData    = byte(0x01)
-	ChannelMCP     = byte(0x02)
 	MaxPayload     = 4 * 1024 * 1024
 	// MaxStoreDocumentBytes leaves room for the JSON control envelope and
 	// escaping below MaxPayload. Store reads and scenario result publication use

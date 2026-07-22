@@ -1,7 +1,7 @@
 ---
 weight: 450
 title: "Daemon & other commands"
-description: "Daemon lifecycle, config, MCP, completion, and internal commands."
+description: "Daemon lifecycle, config, completion, and internal commands."
 icon: "dns"
 toc: true
 draft: false
@@ -47,6 +47,15 @@ needed to load the running daemon's exact snapshot. A replacement with an older
 state schema is rejected as a downgrade, while manifest and adoption protocol
 versions must still match exactly. Compatibility errors report the bounded
 numeric target and running versions for each mismatched boundary.
+
+When upgrading from a release with Graith-owned MCP support, first remove
+`[[mcp_servers]]`, `[agents.<name>.mcp_servers.*]`, and
+`limits.mcp_log_read_bytes` from `config.toml`; the new daemon rejects these
+obsolete lifecycle and security keys instead of silently ignoring them. The old
+daemon drains its managed MCP children, sockets, stderr pipes, and reconnect
+loops before exec. A live PTY can still be adopted, but any proxy injected into
+that already-running agent is permanently unavailable. Restart or resume the
+session to relaunch it without Graith-generated MCP arguments or files.
 
 Live adoption requires persisted state and the handoff manifest to prove the
 exact process identity; the manifest records every live process, not just
@@ -165,21 +174,6 @@ Write built-in defaults to the config file.
 |------|-------------|
 | `--force` | Overwrite without confirmation |
 
-### `gr mcp`
-
-Run graith as an MCP (Model Context Protocol) server over stdio. See [MCP Server]({{< relref "/docs/mcp.md" >}}).
-
-Subcommands manage the daemon's MCP servers declared under `[[mcp_servers]]`:
-
-| Command | Description |
-|---------|-------------|
-| `gr mcp list` | List configured MCP servers with sandbox state, source (config/auto), live connection count, and uptime |
-| `gr mcp restart <name>` | Stop the running processes for a server; agent proxies reconnect and the daemon starts fresh processes with the current config |
-| `gr mcp logs <name>` | Show the captured stderr for a server (one section per proxy connection). Use `-n/--lines` to cap the lines shown |
-
-`gr mcp list` and `gr mcp logs` are read-only; `gr mcp restart` requires the
-caller to be the human, the orchestrator, or one of its descendants.
-
 ### `gr completion <shell>`
 
 Generate a shell completion script. Supported shells: `bash`, `zsh`, `fish`, `powershell`.
@@ -197,4 +191,3 @@ Used by graith internally, not intended for direct use:
 | `gr report-status` | Report agent status (used by hooks) |
 | `gr check-inbox` | Check unread inbox messages (used by hooks) |
 | `gr command-policy-check` | Perform a bounded synchronous shell-policy check |
-| `gr mcp-proxy` | MCP proxy for session-scoped MCP connections |
