@@ -91,10 +91,10 @@ The sandbox is off by default and ships no backend. Install a backend and set
 `[sandbox] enabled = true` with a `backend` before creating or resuming
 sandboxed sessions.
 
-## Command policy is subtractive
+## Semantic command filtering
 
-The optional `[command_policy]` layer can synchronously deny shell commands
-before execution, whether Graith's sandbox is enabled or disabled. An allow just
-continues normal agent execution; it never grants a capability or bypasses an
-enabled Graith sandbox, agent-native policy, or external isolation. With no
-command policy configured, Graith adds no shell-command restriction.
+Graith no longer provides a centralized shell-command policy. In particular,
+the OS sandbox cannot generally express semantic rules such as allowing `gh`
+while denying only `gh api`; it constrains OS capabilities instead. Configure
+an agent-native hook or an external policy tool directly when you need that
+kind of filtering. Agent-native approvals and sandboxes remain unchanged.

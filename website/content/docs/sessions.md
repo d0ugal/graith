@@ -70,8 +70,9 @@ converting, use `gr logs -f`.
 **Interrupts and permission errors.** Over Claude Code's stdin control protocol,
 graith cleanly `interrupt`s an in-flight turn instead of firing terminal signals.
 Native tool-permission requests are denied immediately and mark the driver
-degraded — no native TUI or human-response channel. The optional synchronous
-`[command_policy]` applies the same shell restrictions as PTY sessions.
+degraded — no native TUI or human-response channel. Graith does not add a
+semantic shell-command policy to headless or PTY sessions; configure an
+agent-native hook or external policy tool directly when one is required.
 
 ## Attachment
 

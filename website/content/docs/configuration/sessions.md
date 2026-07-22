@@ -32,7 +32,7 @@ skip confirmation. Use `gr logs -f` to inspect one read-only without converting
 
 The remaining keys rarely need tuning; `max_line_bytes` covers large tool outputs and base64 images past the 64 KiB scanner default. A zero or non-positive value falls back to the default shown.
 
-Headless drives Claude Code over the stdin control protocol, giving graith a clean interrupt. Native permission requests are denied immediately and mark the driver degraded — there's no human-response path. Optional `[command_policy]` rules synchronously restrict shell commands before agent execution, whether or not Graith's sandbox is enabled.
+Headless drives Claude Code over the stdin control protocol, giving graith a clean interrupt. Native permission requests are denied immediately and mark the driver degraded — there's no human-response path. Graith does not add a semantic shell-command filter; use an agent-native hook or external policy tool directly if headless work needs one. The independently configured Graith OS sandbox still applies as it does to a PTY session.
 
 ## Delete retention
 
