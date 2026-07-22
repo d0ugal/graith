@@ -206,11 +206,6 @@ func TestCommandPolicyRemovalUpgradeFromExactBaseline(t *testing.T) {
 	writeCommandPolicyFixtureConfig(t, configPath, dataDir, agentScript, false)
 	runFixtureCLI(t, env, oldBinary, "--config", configPath, "daemon", "reload")
 
-	preUpgradeState, err := os.ReadFile(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	requestFixtureUpgrade(t, configPath, dataDir, currentBinary)
 	waitFor(t, 20*time.Second, func() bool {
 		state := readCommandPolicyUpgradeState(t, statePath)
@@ -232,8 +227,28 @@ func TestCommandPolicyRemovalUpgradeFromExactBaseline(t *testing.T) {
 		t.Fatalf("read exact v26 backup: %v", err)
 	}
 
-	if !bytes.Equal(backup, preUpgradeState) {
-		t.Fatal("upgrade backup is not the exact pre-upgrade v26 state")
+	// The old daemon writes a final frozen v26 snapshot at its exec boundary, so
+	// an earlier read of state.json is not a valid byte-for-byte oracle: a
+	// legitimate late lifecycle update may be included in the frozen snapshot.
+	// LoadState's unit coverage proves the backup preserves those input bytes
+	// exactly. Here, verify that the real upgrade backed up the exact-baseline
+	// version and its live policy-enabled session rather than a migrated or
+	// unrelated snapshot.
+	var backupState commandPolicyUpgradeState
+	if err := json.Unmarshal(backup, &backupState); err != nil {
+		t.Fatalf("decode exact v26 backup: %v", err)
+	}
+
+	backupSession, ok := backupState.Sessions[oldSession.ID]
+	if backupState.Version != 26 || !ok || backupSession.ID != oldSession.ID ||
+		backupSession.Name != oldSession.Name || backupSession.Token != oldSession.Token ||
+		backupSession.Status != oldSession.Status || backupSession.PID != oldSession.PID ||
+		backupSession.PIDStartTime != oldSession.PIDStartTime {
+		t.Fatalf("v26 backup = version %d session %+v, want exact-baseline live session %+v", backupState.Version, backupSession, oldSession)
+	}
+
+	if !bytes.Contains(backup, []byte(`"command_policy"`)) {
+		t.Fatal("v26 backup lost the policy-enabled creation snapshot")
 	}
 
 	migrated, err := os.ReadFile(statePath)
