@@ -4237,10 +4237,17 @@ func TestReconcileRemovedHookProcessesDoesNotSignalAfterColdRestart(t *testing.T
 	statusChangedAt := time.Date(2026, time.July, 22, 12, 30, 0, 0, time.UTC)
 	summarySetAt := statusChangedAt.Add(time.Minute)
 	sm.state.Sessions["canny"] = &SessionState{
-		ID: "canny", Status: StatusErrored, PID: pid, PIDStartTime: start,
+		ID: "canny", Agent: "claude", Status: StatusErrored, PID: pid, PIDStartTime: start,
 		RemovedHookCleanupPending: true, StatusChangedAt: statusChangedAt,
 		SummaryText:  "Restart required because Graith command policy was removed",
 		SummarySetAt: &summarySetAt,
+	}
+	settingsPath := filepath.Join(sm.hookDir("canny"), "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, []byte(`{"hooks":{}}`), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	sm.mu.Lock()
 	if err := sm.saveState(); err != nil {
@@ -4368,6 +4375,9 @@ func TestReconcileRemovedHookProcessesDoesNotSignalAfterColdRestart(t *testing.T
 	}
 	if !bytes.Equal(persistedBytes, originalStateBytes) {
 		t.Fatal("blocked lifecycle operations rewrote unresolved durable state")
+	}
+	if _, err := os.Stat(settingsPath); err != nil {
+		t.Fatalf("blocked lifecycle operations removed owned hook evidence: %v", err)
 	}
 }
 
@@ -4540,6 +4550,63 @@ func TestBulkLifecyclePreflightRejectsPendingRemovedHookDescendant(t *testing.T)
 				t.Fatal("bulk refusal rewrote durable subtree state")
 			}
 		})
+	}
+}
+
+func TestTriggerAutoCleanupDefersPendingRemovedHookEvidence(t *testing.T) {
+	sm := newTriggerTestSM(t)
+	cmd := startSleeperGroup(t)
+	pid := cmd.Process.Pid
+
+	start, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	var groupCalls int
+	withProcKill(t, func(target int, signal syscall.Signal) error {
+		if target == -pid {
+			groupCalls++
+			return syscall.EPERM
+		}
+
+		return syscall.Kill(target, signal)
+	})
+
+	session := stoppedTriggerSession(config.CleanupAlways, 0)
+	session.PID = pid
+	session.PIDStartTime = start
+	session.RemovedHookCleanupPending = true
+	session.StatusChangedAt = time.Date(2026, time.July, 22, 13, 30, 0, 0, time.UTC)
+	session.SummaryText = "Restart required because Graith command policy was removed"
+	sm.state.Sessions[session.ID] = session
+
+	sm.mu.Lock()
+	if err := sm.saveState(); err != nil {
+		sm.mu.Unlock()
+		t.Fatal(err)
+	}
+	sm.mu.Unlock()
+	before, err := os.ReadFile(sm.paths.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sm.autoCleanupStopped(session.ID)
+
+	if groupCalls != 0 || !isProcessAlive(pid) {
+		t.Fatalf("trigger cleanup touched pending process: group calls = %d, alive = %v", groupCalls, isProcessAlive(pid))
+	}
+	after, err := os.ReadFile(sm.paths.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("trigger auto-cleanup rewrote pending durable evidence")
+	}
+	state, _ := sm.Get(session.ID)
+	if state.IsSoftDeleted() || !state.RemovedHookCleanupPending || state.PID != pid {
+		t.Fatalf("trigger auto-cleanup changed pending session: %+v", state)
 	}
 }
 
