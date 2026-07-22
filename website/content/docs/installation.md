@@ -140,13 +140,33 @@ and run `gr daemon service repair`, then `remove --all-profiles`. Do not use a
 wildcard `launchctl` command: named profiles are independent exact jobs and an
 unknown live job is intentionally quarantined.
 
-### macOS arm64 `graith-dev` canary and rollback
+### Native `graith-dev` canary
 
-The moving `dev` release uses the isolated libghostty backend only in
-`graith-dev_darwin_arm64.tar.gz`. Stable `graith`, Intel macOS dev builds, and
-both Linux dev builds remain on the pure-Go Charm backend. The native archive
-includes its binary-bound `libghostty-native.spdx.json` and
-`THIRD_PARTY_NOTICES.libghostty.md` inventories.
+The moving `dev` release uses the isolated libghostty backend in the macOS
+arm64, Linux amd64, and Linux arm64 archives. Intel macOS `graith-dev` remains
+pure Go. Stable artifacts are unchanged and remain pure Go until each native
+platform completes its observation gate and receives a separate reviewed
+promotion.
+
+Homebrew selects `graith-dev_darwin_arm64.tar.gz`,
+`graith-dev_linux_amd64.tar.gz`, or `graith-dev_linux_arm64.tar.gz` for those
+native targets. Each archive contains the final `gr-dev` executable, normal
+release metadata, its executable-bound `libghostty-native.spdx.json`, and
+`THIRD_PARTY_NOTICES.libghostty.md`. The published `checksums.txt` binds the
+archive bytes, and Linux archives also have GitHub build provenance that can be
+verified after download:
+
+```bash
+gh attestation verify graith-dev_linux_amd64.tar.gz --repo d0ugal/graith
+grep '  graith-dev_linux_amd64.tar.gz$' checksums.txt > archive-checksum.txt
+test "$(wc -l < archive-checksum.txt)" -eq 1
+sha256sum --check archive-checksum.txt
+```
+
+Use `graith-dev_linux_arm64.tar.gz` on arm64. The release workflow builds each
+Linux archive from the exact pinned Ghostty/Zig dependency unit on Linux,
+re-verifies its final package, and executes those same archive bytes on the
+target architecture before publication.
 
 After restarting the `dev` daemon, verify the selected canary without relying
 on a live helper process:
@@ -156,45 +176,17 @@ gr-dev doctor
 gr-dev doctor --json | jq -r .terminal_backend
 ```
 
-The native archive reports `libghostty-helper`; the rollback archive reports
-`charm`. See [Troubleshooting]({{< relref "/docs/troubleshooting.md#verify-the-terminal-backend" >}})
+Native archives report `libghostty-helper`; Intel macOS dev and current stable
+artifacts report `charm`. See
+[Troubleshooting]({{< relref "/docs/troubleshooting.md#verify-the-terminal-backend" >}})
 for the matching startup and failure log records.
 
-Each dev release also publishes a verified pure-Go Apple Silicon rollback as
-`graith-dev_darwin_arm64_charm.tar.gz`. To leave the managed canary and restart
-the existing `dev` profile with that exact asset:
-
-```bash
-gr-dev daemon service remove
-rollback_dir="${XDG_DATA_HOME:-$HOME/.local/share}/graith-dev/rollback"
-mkdir -p "$rollback_dir"
-curl -fsSL -o "$rollback_dir/graith-dev_darwin_arm64_charm.tar.gz" \
-  https://github.com/d0ugal/graith/releases/download/dev/graith-dev_darwin_arm64_charm.tar.gz
-curl -fsSL -o "$rollback_dir/checksums.txt" \
-  https://github.com/d0ugal/graith/releases/download/dev/checksums.txt
-(
-  cd "$rollback_dir"
-  grep '  graith-dev_darwin_arm64_charm.tar.gz$' checksums.txt > rollback-checksum.txt
-  test "$(wc -l < rollback-checksum.txt)" -eq 1
-  shasum -a 256 -c rollback-checksum.txt
-  tar -xzf graith-dev_darwin_arm64_charm.tar.gz
-)
-GRAITH_PROFILE=dev "$rollback_dir/gr-dev" daemon restart
-```
-
-Keep the extracted `GraithNotifier.app` beside `gr-dev`. The `dev` tag moves on
-every successful main build, so retain the tarball and its published checksum
-for a fixed observation window. Rollback needs no state conversion: the
-pure-Go daemon reconstructs screens from the same persistent scrollback.
-
-To return to the Homebrew canary, stop the direct-spawn rollback first, then
-reinstall and restart the managed package:
-
-```bash
-GRAITH_PROFILE=dev "$rollback_dir/gr-dev" daemon stop
-brew reinstall d0ugal/tap/graith-dev
-gr-dev daemon restart
-```
+The dev and stable releases do not publish separately named rollback archives.
+A stable native artifact will be published only after its canary is accepted;
+until then, use the ordinary stable channel if you need to leave the moving dev
+channel. Persistent scrollback remains backend-neutral, so switching compatible
+channels does not require a state conversion. On macOS, remove the `dev` service
+registration before uninstalling its package as described above.
 
 ## Shell completion
 

@@ -3,8 +3,7 @@ version: 2
 before:
   hooks:
     # Build the same universal, signed native notifier shipped by production.
-    # macos/notifier/build.sh removes stale output and exits successfully on
-    # non-Darwin hosts, so Linux snapshot builds need no Swift/macOS tooling.
+    # macos/notifier/build.sh produces the shared macOS release bundle.
     - sh -c 'make notifier'
     # GoReleaser accepts an empty archive glob. Fail closed on the real macOS
     # dev-release runner if the bundle build did not produce its executable.
@@ -14,26 +13,10 @@ before:
     # by scripts/libghostty-native.sh, which owns the exact pin and checksum.
     - sh -c 'test "$(uname -s)-$(uname -m)" != Darwin-arm64 || { test -n "${GRAITH_LIBGHOSTTY_WORK:-}" && test -f "$GRAITH_LIBGHOSTTY_WORK/pkgconfig/libghostty-vt-static.pc"; }'
 
-# Keep Linux and Intel macOS on the pure-Go rollback backend. Apple Silicon gets
-# the native canary plus a separately named pure-Go rollback artifact. Every
-# build retains the gr-dev binary name used by the dev formula.
+# This config is deliberately Darwin-only. Linux native archives are built from
+# the exact pinned source unit on Linux and joined by the dev-release publisher.
+# Every build retains the gr-dev binary name used by the dev formula.
 builds:
-  - id: gr-dev-linux
-    main: ./cmd/graith
-    binary: gr-dev
-    env:
-      - CGO_ENABLED=0
-    flags:
-      - -trimpath
-    ldflags:
-      - -s -w
-      - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
-      - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
-    goos:
-      - linux
-    goarch:
-      - amd64
-      - arm64
   - id: gr-dev-darwin-amd64
     main: ./cmd/graith
     binary: gr-dev
@@ -90,39 +73,12 @@ builds:
       - darwin
     goarch:
       - arm64
-  # This is an explicit emergency rollback payload, not the Homebrew-selected
-  # canary. It remains unmanaged so it cannot overwrite the native build's
-  # architecture-specific service-app staging directory.
-  - id: gr-dev-darwin-arm64-charm
-    main: ./cmd/graith
-    binary: gr-dev
-    env:
-      - CGO_ENABLED=0
-    flags:
-      - -trimpath
-    ldflags:
-      - -s -w
-      - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
-      - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
-    goos:
-      - darwin
-    goarch:
-      - arm64
-
 archives:
-  - id: linux
-    ids:
-      - gr-dev-linux
-    format: tar.gz
-    name_template: "graith-dev_{{ .Os }}_{{ .Arch }}"
-    files:
-      - LICENSE
-      - README.md
-      - CHANGELOG.md
   - id: darwin-amd64
     ids:
       - gr-dev-darwin-amd64
-    format: tar.gz
+    formats:
+      - tar.gz
     name_template: "graith-dev_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
@@ -138,7 +94,8 @@ archives:
   - id: darwin-arm64
     ids:
       - gr-dev-darwin-arm64
-    format: tar.gz
+    formats:
+      - tar.gz
     name_template: "graith-dev_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
@@ -154,18 +111,6 @@ archives:
         dst: libghostty-native.spdx.json
       - src: macos/build/libghostty-native-arm64/THIRD_PARTY_NOTICES.libghostty.md
         dst: THIRD_PARTY_NOTICES.libghostty.md
-  - id: darwin-arm64-charm
-    ids:
-      - gr-dev-darwin-arm64-charm
-    format: tar.gz
-    name_template: "graith-dev_{{ .Os }}_{{ .Arch }}_charm"
-    files:
-      - LICENSE
-      - README.md
-      - CHANGELOG.md
-      - src: macos/build/GraithNotifier.app/**/*
-        dst: GraithNotifier.app/Contents
-
 checksum:
   name_template: checksums.txt
 
@@ -173,12 +118,8 @@ changelog:
   disable: true
 
 # The version must be monotonically increasing so `brew upgrade` recognises each
-# main push as newer than the last. A git short-SHA suffix sorts arbitrarily
-# (Homebrew tokenises and compares versions), so we use `.Timestamp` — the Unix
-# time of the build itself. Unlike `.CommitTimestamp` (a caller-controlled commit
-# date that can repeat or move backwards), the build time always advances between
-# runs, and the workflow's concurrency group serialises them so no two dev builds
-# share a timestamp. The commit SHA is still embedded in the binary via ldflags
-# and printed in the GitHub release notes.
+# main push as newer than the last. The context job computes one timestamp-based
+# version for every platform job; requiring it here prevents independent runner
+# clocks from creating mixed-version archives.
 snapshot:
-  version_template: "{{ incpatch .Version }}-dev.{{ .Timestamp }}"
+  version_template: '{{ index .Env "GRAITH_DEV_VERSION" }}'

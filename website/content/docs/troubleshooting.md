@@ -333,6 +333,14 @@ implementation. The supported machine-readable check is:
 gr doctor --json | jq -r .terminal_backend
 ```
 
+The moving `graith-dev` channel should report `libghostty-helper` on macOS
+arm64 and Linux amd64/arm64; its Intel macOS archive reports `charm`. Current
+stable artifacts remain pure Go until their separately reviewed native
+promotions. There is no separately named Charm rollback archive, so an
+unexpected `charm` result on a native dev target means the wrong platform asset
+or executable is running. Check `gr-dev version`, the downloaded archive name,
+and the daemon executable path reported by `gr-dev doctor`.
+
 Each daemon generation also emits exactly one `terminal backend selected` JSON
 record with the same `terminal_backend` value. That record deliberately has no
 session ID, filesystem path, or captured terminal output; it proves build-time

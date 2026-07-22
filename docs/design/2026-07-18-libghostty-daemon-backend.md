@@ -2,7 +2,7 @@
 title: "Design Doc: Native libghostty daemon backend"
 authors: Dougal Matthews
 created: 2026-07-18
-status: Accepted (native rollout candidate implemented; promotion pending soak)
+status: Accepted (native dev rollout; stable promotion pending observation)
 reviewers: (none yet)
 informed: (TBD)
 issue: https://github.com/d0ugal/graith/issues/1432
@@ -12,9 +12,10 @@ issue: https://github.com/d0ugal/graith/issues/1432
 
 Graith will adopt `libghostty-vt` as its daemon terminal-screen model through
 the public `go-libghostty` API and a restartable helper-process boundary. The
-decision is **GO for staged adoption**: this change supplies a non-default
-native candidate for extensive testing, while the current Go model remains
-available only as rollback until the observation window is complete.
+decision is **GO for staged adoption**: the native candidate is promoted through
+platform-specific dev artifacts before any stable release changes. The current
+Go model remains in source for platforms without a native-backend decision, but
+promoted targets do not publish separately named rollback archives.
 
 ## Background
 
@@ -60,7 +61,8 @@ keep rollback independent of terminal state or protocol migrations.
 - Use the same synthetic corpus and operational workloads for both models.
 - Produce exact-pin macOS arm64 and Linux validation artifacts with native
   licensing and SBOM data. Linux release promotion remains tracked in #1475.
-- Retain a simple rollback until native soak and opt-in observation gates pass.
+- Preserve compatible persisted state and the retained-platform implementation
+  while native soak and observation gates pass, without parallel rollback assets.
 
 ### Non-Goals
 
@@ -70,7 +72,7 @@ keep rollback independent of terminal state or protocol migrations.
 - Changing the wire protocol, scrollback format, iOS renderer, or macOS app
   renderer.
 - Maintaining a second Graith-specific C binding beside `go-libghostty`.
-- Removing the rollback implementation before the rollout window closes.
+- Removing Charm before every retained platform receives its own backend decision.
 - Committing captured terminal output, native build products, or machine-local
   paths as evidence.
 
@@ -78,9 +80,9 @@ keep rollback independent of terminal state or protocol migrations.
 
 | Surface | Decision | Rationale |
 |---------|----------|-----------|
-| CLI/daemon on macOS arm64 | Targeted, staged | Explicit `libghostty` builds use the native helper candidate; ordinary releases remain the rollback until promotion. |
-| CLI/daemon on macOS amd64 | Rollback only | Native libghostty is not a supported target; ordinary pure-Go builds remain supported. |
-| CLI/daemon on Linux | Targeted validation | Exact-source amd64/arm64 builds and native amd64 execution are required for relevant changes; ordinary releases remain pure Go while packaging and promotion stay tracked in #1475. |
+| CLI/daemon on macOS arm64 | Dev canary | `graith-dev` uses the native helper; stable remains pure Go until #1494 is explicitly promoted. No separately named dev or stable rollback archive is published. |
+| CLI/daemon on macOS amd64 | Pure-Go retained target | Native libghostty is not a supported target; the ordinary artifact remains supported and is not branded as a rollback. |
+| CLI/daemon on Linux amd64/arm64 | Dev canary | Release-shaped native `graith-dev` archives are built and verified on Linux, then executed on their actual architectures. Stable remains pure Go until the #1475 observation gate and a separate reviewed promotion. |
 | iOS app | No behavior change | It already uses the shared Ghostty pin through its native renderer; daemon selection does not change the app renderer. |
 | macOS app | No behavior change | The app renderer is independent, while a local daemon may use the tagged candidate. |
 
@@ -219,10 +221,10 @@ improvement. The local shim has been removed.
 ### Explicit decision
 
 The result is **GO** for `libghostty-vt` through the isolated architecture. The
-build tag is a rollout gate, not uncertainty about the chosen backend. This PR
-should merge as the testing candidate; production promotion follows the gates
-below. Charm is retained only because a rollback that has already compiled and
-passed the same corpus is more useful than a theoretical rollback.
+build tag is a rollout gate, not uncertainty about the chosen backend.
+Production promotion follows the gates below. Charm remains available in source
+for targets without a native-backend decision and for shared comparison tests;
+it is not shipped as a separately named rollback artifact for promoted targets.
 
 ### API fit
 
@@ -319,8 +321,8 @@ CoreFoundation, Security, and `/usr/lib/libSystem.B.dylib`.
 
 The path-scoped native workflow performs these checks:
 
-- ordinary `CGO_ENABLED=0` builds for Darwin/Linux amd64/arm64, proving the
-  rollback build does not select cgo or require a native archive;
+- ordinary `CGO_ENABLED=0` builds for Darwin/Linux amd64/arm64, proving retained
+  pure-Go targets do not select cgo or require a native archive;
 - tagged Darwin arm64 execution and linking against the arm64 slice of the
   checksum-pinned Apple archive;
 - fail-closed tagged Darwin amd64 selection without native linkage;
@@ -332,13 +334,22 @@ The path-scoped native workflow performs these checks:
 - committed-header diff against the exact Ghostty checkout;
 - upstream `go-libghostty` tests against Graith's newer Ghostty pin;
 - tagged PTY, focused race, and candidate executable builds; and
-- testing artifacts that include the native SPDX and notice inventory.
+- testing artifacts that include the native SPDX and notice inventory; and
+- release-shaped Linux amd64/arm64 dev archives whose extracted final binaries
+  receive dependency, defined-symbol, linkage, package-shape, privacy, SPDX,
+  checksum, provenance, and actual-architecture execution checks before one
+  publisher replaces the moving `dev` release.
 
 An explicit tagged build without cgo, on macOS amd64, or on an unsupported OS,
 returns a configuration error rather than silently changing emulator. Ordinary
-GoReleaser remains pure Go during soak. Production promotion therefore needs a
-native build matrix or promotion of the already-proven candidate workflow into
-release packaging; it cannot use the current single-host pure-Go cross-build.
+The dev release is split by platform. GoReleaser produces the two Darwin
+archives on Apple Silicon, while Linux jobs build the exact source dependency
+unit and package one native archive per architecture. Every job consumes one
+revision and snapshot version from the release-context job. A single Linux
+publisher accepts only the four expected archives, verifies builder SHA-256
+manifests and Linux build attestations, creates the complete checksum file, and
+then updates the moving release and tap. Pull requests run the same build and
+aggregation path without mutating the release or tap.
 
 Local Apple Silicon development uses the arm64 slice of the checksum-pinned
 Apple archive. An exact source rebuild on the current macOS 26 host is blocked
@@ -379,7 +390,12 @@ defined Ghostty symbol, rejects Ghostty dylib linkage, and rejects a
 tampered-byte binding; validates the document with checksum-pinned official
 SPDX Java tooling; publishes the package directory with a Darwin atomic
 no-replace rename; and uploads exactly `gr`, the bound SPDX document, and the
-notice file.
+notice file. Linux packaging applies the same executable-bound SPDX model to
+each extracted `gr-dev`, adds the ordinary release metadata, verifies the exact
+archive member allowlist, and rejects local/CI paths in every member. The final
+archive is SHA-256 recorded and provenance-attested before upload; the publisher
+rechecks both that archive digest and the embedded executable digest before
+publishing those exact bytes.
 
 A pin rotation is generated and reviewed as one unit:
 
@@ -407,22 +423,23 @@ artifacts; changing only `go.mod` is insufficient.
    one-hour concurrent synthetic soak on supported native runners. Require no
    daemon exit, helper/FD leak, unbounded RSS growth, or unreconstructed final
    marker.
-3. Offer an opt-in native cohort. Observe for seven consecutive days with zero
+3. Offer the native `graith-dev` cohort. Observe for seven consecutive days with zero
    native-attributed daemon crashes, successful bounded recovery for every
    injected helper failure, and resource/latency metrics within the documented
    benchmark envelope.
-4. Make native the supported default for macOS arm64 and keep one tested
-   pure-Go rollback release available. macOS amd64 remains pure Go; Linux
-   promotion requires #1475.
-5. After that rollback window closes, remove Charm, its selector, and
+4. Make native the supported stable default for each accepted platform only in
+   a separate reviewed release change. Do not publish an alternate rollback
+   archive; stable native artifacts ship only after the preceding gates pass.
+   macOS amd64 remains pure Go, and Linux stable promotion remains observation-gated.
+5. After every retained-platform decision closes, remove Charm, its selector, and
    backend-specific expectations. Keep the backend-neutral interface and
    persistent reconstruction path.
 
-Rollback never converts state. Deploy the pure-Go build, stop creating native
-helpers, and reconstruct each screen from its existing on-disk scrollback.
-Sessions, PTYs, protocol messages, and stored bytes are unchanged. If a helper
-fails during the candidate phase, the daemon performs the same replacement for
-that one screen automatically.
+No backend transition converts state. Sessions, PTYs, protocol messages, and
+stored bytes are unchanged, and a newly installed compatible build reconstructs
+each screen from existing on-disk scrollback. If a helper fails, the daemon
+replaces that one derived screen automatically. Operational recovery uses the
+normal stable or dev channel rather than a separately named rollback download.
 
 ### Testing
 
@@ -468,8 +485,8 @@ benchmark claim.
 - default `go test -race ./...`, `go vet ./...`, repository lint, actionlint,
   shell validation, generated-file checks, and integration tests
 - macOS arm64 candidate linkage and execution, tagged macOS amd64 fail-closed
-  selection, required Linux amd64 execution, and exact-source Linux arm64
-  cross-build checks from #1475
+  selection, required exact-source Linux amd64/arm64 builds, and execution of
+  both release-shaped Linux dev archives on actual-architecture runners
 - full diff scan for binaries, captured output, identifiers, credentials,
   machine paths, and native build directories
 
