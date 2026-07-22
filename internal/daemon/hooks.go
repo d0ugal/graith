@@ -1244,6 +1244,7 @@ func (sm *SessionManager) completeRemovedHookCleanup(persist bool) error {
 	sm.mu.RLock()
 
 	var candidates []removedHookCleanupCandidate
+
 	for id, session := range sm.state.Sessions {
 		if !session.RemovedHookCleanupPending {
 			continue
@@ -1275,6 +1276,7 @@ func (sm *SessionManager) completeRemovedHookCleanup(persist bool) error {
 
 		if candidate.agent == "cursor" {
 			sm.removeGeneratedCursorHooks(candidate.id, candidate.worktreePath)
+
 			if _, err := os.Lstat(sm.cursorHooksOwnershipPath(candidate.id)); err == nil {
 				errs = append(errs, fmt.Errorf("session %s cursor hook ownership cleanup remains unresolved", candidate.id))
 				continue
@@ -1309,6 +1311,7 @@ func (sm *SessionManager) completeRemovedHookCleanup(persist bool) error {
 				session.RemovedHookCleanupPending = false
 			}
 		}
+
 		if persist {
 			if err := sm.saveState(); err != nil {
 				errs = append(errs, fmt.Errorf("persist removed-hook cleanup: %w", err))

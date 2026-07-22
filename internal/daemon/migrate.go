@@ -39,6 +39,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		sm.mu.RUnlock()
 		return SessionState{}, fmt.Errorf("session %q not found", id)
 	}
+
 	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
 		sm.mu.RUnlock()
 
@@ -168,6 +169,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	sm.mu.RLock()
 	pendingErr := sm.rejectPendingUpgradeCleanupLocked(id)
 	sm.mu.RUnlock()
+
 	if pendingErr != nil {
 		_ = os.RemoveAll(contextDir)
 
@@ -185,8 +187,10 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session %q deleted during migrate", id)
 	}
+
 	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
 		sm.mu.Unlock()
+
 		_ = os.RemoveAll(contextDir)
 
 		return SessionState{}, err

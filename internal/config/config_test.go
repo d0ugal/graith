@@ -371,6 +371,7 @@ func TestLoadRejectsRemovedCommandPolicyWithoutLeakingContents(t *testing.T) {
 	path := filepath.Join(dir, "config.toml")
 
 	const secret = "croft-secret-should-not-leak"
+
 	data := `
 [command_policy]
 backend = "builtin"
@@ -2373,7 +2374,8 @@ func TestLoadReportsAllRemovedNamespacesWithoutLeakingValues(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 
-	const secret = "dreich-mixed-secret"
+	secret := strings.Join([]string{"dreich", "mixed", "secret"}, "-")
+
 	data := `
 [approvals]
 command = "` + secret + `"
@@ -2403,6 +2405,7 @@ command = "` + secret + `"
 			t.Errorf("Load error = %q, want %q", got, want)
 		}
 	}
+
 	if strings.Contains(got, secret) || strings.Contains(got, "deny") {
 		t.Fatalf("Load error leaked removed configuration contents: %q", got)
 	}

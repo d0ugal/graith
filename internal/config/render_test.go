@@ -112,6 +112,7 @@ func TestDiffFromDefaultsIgnoresExplicitRuntimeDefaults(t *testing.T) {
 		PS:    toolDefaults.PS,
 		Lsof:  toolDefaults.Lsof,
 	}
+
 	diff, err := DiffFromDefaults(cfg, "effective")
 	if err != nil {
 		t.Fatal(err)

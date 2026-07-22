@@ -580,6 +580,7 @@ func run(
 		if err := sm.completeRemovedHookCleanup(false); err != nil {
 			return fmt.Errorf("complete removed command policy cleanup: %w", err)
 		}
+
 		if err := sm.saveState(); err != nil {
 			return fmt.Errorf("persist adopted upgrade state: %w", err)
 		}
@@ -687,6 +688,7 @@ func run(
 
 			return fmt.Errorf("reconcile removed-hook processes: %w", err)
 		}
+
 		if err := sm.completeRemovedHookCleanup(true); err != nil {
 			_ = l.Close()
 
