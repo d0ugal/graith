@@ -258,6 +258,7 @@ jobs:
           zig ld.lld --version
           cc --version
           ld --version
+          objcopy --version
           ldd --version
           if ! /usr/bin/time -v -o "$evidence" \
             scripts/libghostty-native.sh source-build "$TARGET" "$LIBRARY"; then
@@ -379,11 +380,19 @@ jobs:
           fi
           package_dir="${RUNNER_TEMP}/native-binaries"
           binary="$package_dir/gr-linux-${GOARCH}"
+          unstripped_binary="${binary}.unstripped"
           mkdir -p "$package_dir"
           run_timed binary-build env CGO_ENABLED=1 GOOS=linux \
             CC="zig cc -target $TARGET" \
             go build -trimpath -tags=libghostty \
-              -o "$binary" ./cmd/graith
+              -o "$unstripped_binary" ./cmd/graith
+          run_timed binary-strip objcopy --strip-debug \
+            "$unstripped_binary" "$binary"
+          if ! rm -- "$unstripped_binary" ||
+            [[ -e "$unstripped_binary" || -L "$unstripped_binary" ]]; then
+            echo "could not remove the unstripped Linux testing binary" >&2
+            exit 1
+          fi
           cp THIRD_PARTY_NOTICES.libghostty.md libghostty-native.spdx.json \
             "$package_dir/"
 
@@ -402,10 +411,25 @@ jobs:
             "$package_dir/libghostty-native.spdx.json"
           stat --printf='binary_size=%s binary_mode=%a binary_uid=%u\n' "$binary"
           file "$binary"
+          section_info=""
+          if ! section_info="$(readelf --sections --wide "$binary")" ||
+            [[ -z "$section_info" ]]; then
+            echo "could not read the tagged Linux binary section table" >&2
+            exit 1
+          fi
+          if grep -E '[[:space:]]\.debug_' <<<"$section_info" >/dev/null; then
+            echo "tagged Linux binary retained a debug section after stripping" >&2
+            exit 1
+          fi
           readelf -h "$binary"
-          readelf -d "$binary"
-          if readelf -d "$binary" | \
-            grep -Ei 'NEEDED.*(ghostty|simdutf|highway)' >/dev/null; then
+          dynamic_info=""
+          if ! dynamic_info="$(readelf -d "$binary")" || [[ -z "$dynamic_info" ]]; then
+            echo "could not read the tagged Linux binary dynamic dependencies" >&2
+            exit 1
+          fi
+          printf '%s\n' "$dynamic_info"
+          if grep -Ei 'NEEDED.*(ghostty|simdutf|highway)' \
+            <<<"$dynamic_info" >/dev/null; then
             echo "tagged Linux binary has an unexpected native shared dependency" >&2
             exit 1
           fi
@@ -429,12 +453,23 @@ jobs:
             exit 1
           fi
           printf 'package_files=%s\n' "$package_files"
-          if grep -aEq '/home/runner|/Users/|/private/var/folders/|/runner/work/' \
-            "$binary" "$package_dir/THIRD_PARTY_NOTICES.libghostty.md" \
-            "$package_dir/libghostty-native.spdx.json"; then
-            echo "Linux testing artifact contains a local or CI path" >&2
-            exit 1
-          fi
+          for artifact in \
+            "$binary" \
+            "$package_dir/THIRD_PARTY_NOTICES.libghostty.md" \
+            "$package_dir/libghostty-native.spdx.json"; do
+            privacy_status=0
+            if grep -aEq '/home/runner|/Users/|/private/var/folders/|/runner/work/' \
+              "$artifact"; then
+              echo "Linux testing artifact ${artifact##*/} contains a local or CI path" >&2
+              exit 1
+            else
+              privacy_status=$?
+            fi
+            if [ "$privacy_status" -ne 1 ]; then
+              echo "could not privacy-scan Linux testing artifact ${artifact##*/}" >&2
+              exit 1
+            fi
+          done
           echo "package_privacy_scan=pass"
 
           if [ "$RUN_TESTS" = "true" ]; then
