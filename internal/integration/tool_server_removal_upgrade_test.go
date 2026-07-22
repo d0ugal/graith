@@ -161,6 +161,7 @@ func TestToolServerRemovalUpgradeFromExactMain(t *testing.T) {
 	// accepted the removed connect request, the old proxy would enter its bridge
 	// loop instead of reporting the generic unsupported-message response.
 	waitForCommandOutput(t, &proxyOutput, "unsupported control message: mcp_connect")
+
 	if err := proxyInput.Close(); err != nil {
 		t.Fatalf("close stale proxy input: %v", err)
 	}
@@ -256,6 +257,7 @@ func TestEnsureGitRevisionFromShallowRepository(t *testing.T) {
 
 	cloneParent := t.TempDir()
 	shallow := filepath.Join(cloneParent, "shallow")
+
 	clone := exec.Command("git", "clone", "--depth=1", "file://"+remote, shallow)
 	if out, err := clone.CombinedOutput(); err != nil {
 		t.Fatalf("create shallow fixture repository: %v\n%s", err, out)
@@ -287,6 +289,7 @@ func TestEnsureGitRevisionFromShallowRepository(t *testing.T) {
 
 	t.Run("missing object", func(t *testing.T) {
 		missing := strings.Repeat("0", 40)
+
 		err := ensureGitRevision(shallow, "file://"+remote, missing)
 		if err == nil || !strings.Contains(err.Error(), "fetch exact revision "+missing) {
 			t.Fatalf("missing object error = %v", err)
@@ -377,6 +380,7 @@ func integrationRepoRoot(t *testing.T) string {
 
 func buildRevisionBinary(t *testing.T, repoRoot, revision, name string) string {
 	t.Helper()
+
 	if err := ensureGitRevision(repoRoot, exactRevisionFetchURL, revision); err != nil {
 		t.Fatal(err)
 	}
@@ -413,6 +417,7 @@ func ensureGitRevision(repoRoot, fetchURL, revision string) error {
 	// may not be present. Fetch that exact object without changing the user's
 	// configured remotes or accepting a moving branch as the fixture source.
 	fetch := exec.Command("git", "fetch", "--no-tags", "--depth=1", fetchURL, revision)
+
 	fetch.Dir = repoRoot
 	if out, err := fetch.CombinedOutput(); err != nil {
 		return fmt.Errorf("fetch exact revision %s: %w\n%s", revision, err, out)
@@ -612,9 +617,11 @@ func stopFixtureCommand(t *testing.T, cmd *exec.Cmd) {
 	}
 
 	done := make(chan error, 1)
+
 	go func() { done <- cmd.Wait() }()
 
 	var err error
+
 	select {
 	case err = <-done:
 	case <-time.After(15 * time.Second):
