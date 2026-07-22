@@ -121,18 +121,26 @@ func TestStableReleaseWorkflowVerifiesFinalPackagesOnActualArchitectures(t *test
 
 func TestStablePublisherStagesDraftAndPublishesOnlyCompleteSet(t *testing.T) {
 	workflow := loadStableReleaseWorkflow(t)
+	if strings.Contains(string(mustReadReleaseFile(t, ".github/workflows/goreleaser.yml")), "darwin_amd64") {
+		t.Fatal("stable workflow still contains an unsupported Darwin amd64 path")
+	}
+
 	assemble := workflowStep(workflow.Jobs["assemble-stable"], "Verify same-revision manifests and exact output set").Run
 
 	for _, required := range []string{
-		"darwin_amd64.tar.gz", "darwin_arm64.tar.gz",
+		"darwin_arm64.tar.gz",
 		"linux_amd64.tar.gz", "linux_arm64.tar.gz",
 		"linux_amd64.deb", "linux_amd64.rpm", "linux_amd64.apk",
 		"linux_arm64.deb", "linux_arm64.rpm", "linux_arm64.apk",
-		`test "$(wc -l <checksums.txt)" -eq 10`,
+		`test "$(wc -l <checksums.txt)" -eq 9`,
 	} {
 		if !strings.Contains(assemble, required) {
 			t.Errorf("stable aggregation missing %q", required)
 		}
+	}
+
+	if strings.Contains(assemble, "darwin_amd64") {
+		t.Fatal("stable aggregation still accepts an unsupported Darwin amd64 artifact")
 	}
 
 	publisher := workflow.Jobs["publish-stable"]

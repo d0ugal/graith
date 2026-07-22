@@ -3,7 +3,7 @@
 set -euo pipefail
 
 usage() {
-	echo "usage: build.sh --arch arm64|amd64 --version VERSION --commit SHA --payload GR --output DIR [--build-number N] [--identity ID --notary-profile PROFILE --expected-team TEAM --expected-requirement REQUIREMENT | --development]" >&2
+	echo "usage: build.sh --arch arm64 --version VERSION --commit SHA --payload GR --output DIR [--build-number N] [--identity ID --notary-profile PROFILE --expected-team TEAM --expected-requirement REQUIREMENT | --development]" >&2
 	exit 2
 }
 
@@ -36,15 +36,14 @@ while [ "$#" -gt 0 ]; do
 	esac
 done
 
-[ "$(uname -s)" = Darwin ] || { echo "Graith.app must be built on macOS" >&2; exit 1; }
 [ -n "$arch" ] && [ -n "$version" ] && [ -n "$commit" ] && [ -n "$payload" ] && [ -n "$output" ] || usage
-[ -x "$payload" ] || { echo "payload is not executable: $payload" >&2; exit 1; }
-[[ "$build_number" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo "build number must contain one to three numeric components" >&2; exit 1; }
 case "$arch" in
 	arm64) swift_arch=arm64 ;;
-	amd64|x86_64) arch=amd64; swift_arch=x86_64 ;;
 	*) usage ;;
 esac
+[ "$(uname -s)" = Darwin ] || { echo "Graith.app must be built on macOS" >&2; exit 1; }
+[ -x "$payload" ] || { echo "payload is not executable: $payload" >&2; exit 1; }
+[[ "$build_number" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo "build number must contain one to three numeric components" >&2; exit 1; }
 
 if [ "$development" = true ]; then
 	[ -z "$notary_profile" ] || { echo "development build cannot use notarization" >&2; exit 1; }

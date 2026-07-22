@@ -185,9 +185,11 @@ The `graith-dev` and stable workflows turn that exact source unit into
 release-shaped native Linux amd64 and arm64 artifacts. Platform jobs package and
 validate final executables, and actual-architecture jobs execute the uploaded
 bytes. Stable additionally compares the executable in tar/deb/rpm/apk and joins
-those eight Linux outputs with native macOS arm64 and retained-Charm macOS amd64
-archives. One aggregator accepts only same-revision manifests and creates the
-complete checksum set. Provenance is attested and reverified before publication.
+those eight Linux outputs with the native macOS arm64 archive. One aggregator
+accepts only same-revision manifests and creates the complete checksum set.
+Darwin amd64 is absent from both release configurations and selectors; its
+tagged native selection remains an explicit fail-closed test. Provenance is
+attested and reverified before publication.
 Pull requests exercise the unsigned build/aggregation topology without changing
 a release or downstream repository. A real tag requires configured macOS
 signing/notarization. The publisher prepares and validates every configured

@@ -161,12 +161,11 @@ jobs:
         run: |
           set -euo pipefail
           version="$GRAITH_RELEASE_VERSION"
-          amd64="dist/graith_${version}_darwin_amd64.tar.gz"
           arm64="dist/graith_${version}_darwin_arm64.tar.gz"
           shopt -s nullglob
           archives=(dist/graith_*_darwin_*.tar.gz)
-          test "${#archives[@]}" -eq 2
-          test -f "$amd64" && test -f "$arm64"
+          test "${#archives[@]}" -eq 1
+          test -f "$arm64"
           if find dist -maxdepth 1 -name '*_charm*' -print -quit | grep -q .; then
             echo "::error::Stable release produced a separately named rollback archive"
             exit 1
@@ -174,23 +173,11 @@ jobs:
 
           snapshot=false
           [ "$GITHUB_EVENT_NAME" = pull_request ] && snapshot=true
-          for archive in "$amd64" "$arm64"; do
-            macos/service/verify-release-archive.sh \
-              "$archive" "$archive.service-verified.txt" "$snapshot"
-          done
+          macos/service/verify-release-archive.sh \
+            "$arm64" "$arm64.service-verified.txt" "$snapshot"
 
-          amd64_root="$(mktemp -d)"
           arm64_root="$(mktemp -d)"
-          tar -xzf "$amd64" -C "$amd64_root"
           tar -xzf "$arm64" -C "$arm64_root"
-          lipo "$amd64_root/gr" -verify_arch x86_64
-          scripts/libghostty-native.sh verify-default-binary "$amd64_root/gr"
-          if find "$amd64_root" -type f \
-              \( -name libghostty-native.spdx.json -o \
-                 -name THIRD_PARTY_NOTICES.libghostty.md \) -print -quit | grep -q .; then
-            echo "::error::Intel Darwin archive contains native-only metadata"
-            exit 1
-          fi
           lipo "$arm64_root/gr" -verify_arch arm64
           scripts/libghostty-native.sh verify-darwin-arm64-candidate \
             "$arm64_root/gr" "$RELEASE_REVISION"
@@ -213,10 +200,8 @@ jobs:
               ./internal/integration
 
           jq -n --arg revision "$RELEASE_REVISION" --arg version "$version" \
-            --arg amd64 "$(shasum -a 256 "$amd64" | awk '{print $1}')" \
             --arg arm64 "$(shasum -a 256 "$arm64" | awk '{print $1}')" \
             '{revision:$revision,version:$version,artifacts:{
-              ("graith_"+$version+"_darwin_amd64.tar.gz"):$amd64,
               ("graith_"+$version+"_darwin_arm64.tar.gz"):$arm64}}' \
             >dist/stable-darwin-manifest.json
 
@@ -225,7 +210,6 @@ jobs:
         with:
           name: stable-darwin-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
           path: |
-            dist/graith_${{ needs.release-context.outputs.version }}_darwin_amd64.tar.gz
             dist/graith_${{ needs.release-context.outputs.version }}_darwin_arm64.tar.gz
             dist/stable-darwin-manifest.json
           if-no-files-found: error
@@ -464,7 +448,6 @@ jobs:
           set -euo pipefail
           version="$GRAITH_RELEASE_VERSION"
           expected="$(printf '%s\n' \
-            "graith_${version}_darwin_amd64.tar.gz" \
             "graith_${version}_darwin_arm64.tar.gz" \
             "graith_${version}_linux_amd64.apk" \
             "graith_${version}_linux_amd64.deb" \
@@ -501,7 +484,7 @@ jobs:
             cd dist
             mapfile -t artifacts <<<"$expected"
             sha256sum "${artifacts[@]}" >checksums.txt
-            test "$(wc -l <checksums.txt)" -eq 10
+            test "$(wc -l <checksums.txt)" -eq 9
             sha256sum --check checksums.txt
           )
 
@@ -606,7 +589,7 @@ jobs:
           fi
           mapfile -t artifacts < <(find dist -maxdepth 1 -type f -name 'graith_*' \
             -printf '%f\n' | sort)
-          test "${#artifacts[@]}" -eq 10
+          test "${#artifacts[@]}" -eq 9
           (cd dist && sha256sum "${artifacts[@]}" >checksums.txt && \
             sha256sum --check checksums.txt)
 
@@ -713,7 +696,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$RELEASE_REVISION"
-          test "$(wc -l <dist/checksums.txt)" -eq 10
+          test "$(wc -l <dist/checksums.txt)" -eq 9
           (cd dist && sha256sum --check checksums.txt)
 
           tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG")"

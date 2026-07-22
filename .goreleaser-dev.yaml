@@ -17,33 +17,6 @@ before:
 # the exact pinned source unit on Linux and joined by the dev-release publisher.
 # Every build retains the gr-dev binary name used by the dev formula.
 builds:
-  - id: gr-dev-darwin-amd64
-    main: ./cmd/graith
-    binary: gr-dev
-    env:
-      - CGO_ENABLED=0
-    flags:
-      - -trimpath
-    ldflags:
-      - -s -w
-      - -X github.com/d0ugal/graith/internal/version.Version={{.Version}}
-      - -X github.com/d0ugal/graith/internal/version.CommitSHA={{.Commit}}
-      - -X github.com/d0ugal/graith/internal/daemonservice.ManagedBuild={{ if eq (index .Env "GRAITH_MANAGED_DEV_RELEASE") "true" }}true{{ else }}false{{ end }}
-      - -X github.com/d0ugal/graith/internal/daemonservice.DevelopmentBuild=false
-      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedTeamID={{ if eq (index .Env "GRAITH_MANAGED_DEV_RELEASE") "true" }}{{ index .Env "GRAITH_SIGNING_TEAM_ID" }}{{ end }}
-      - -X github.com/d0ugal/graith/internal/daemonservice.ExpectedRequirementBase64={{ if eq (index .Env "GRAITH_MANAGED_DEV_RELEASE") "true" }}{{ index .Env "GRAITH_SIGNING_REQUIREMENT_B64" }}{{ end }}
-    # Provisioned dev artifacts use the same Developer ID requirement as stable
-    # Graith so their isolated `dev` profile can safely share the global service
-    # registry. Without the complete credential set, the workflow stamps this
-    # binary as unmanaged and the hook omits Graith.app entirely.
-    hooks:
-      post:
-        - cmd: macos/service/release-hook.sh "{{ .Path }}" "{{ .Target }}" "{{ .Version }}" "{{ .Commit }}" "{{ .IsSnapshot }}" "{{ if eq (index .Env "GRAITH_MANAGED_DEV_RELEASE") "true" }}true{{ else }}false{{ end }}"
-          output: true
-    goos:
-      - darwin
-    goarch:
-      - amd64
   - id: gr-dev-darwin-arm64
     main: ./cmd/graith
     binary: gr-dev
@@ -74,23 +47,6 @@ builds:
     goarch:
       - arm64
 archives:
-  - id: darwin-amd64
-    ids:
-      - gr-dev-darwin-amd64
-    formats:
-      - tar.gz
-    name_template: "graith-dev_{{ .Os }}_{{ .Arch }}"
-    files:
-      - LICENSE
-      - README.md
-      - CHANGELOG.md
-      # Keep the managed bundle layout identical to production. GoReleaser
-      # accepts this empty glob when signing is not yet provisioned and the
-      # release hook deliberately omits the service app.
-      - src: macos/build/GraithNotifier.app/**/*
-        dst: GraithNotifier.app/Contents
-      - src: macos/build/service-release-{{ .Arch }}/Graith.app/**/*
-        dst: Graith.app/Contents
   - id: darwin-arm64
     ids:
       - gr-dev-darwin-arm64

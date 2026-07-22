@@ -229,9 +229,9 @@ not additional samples and are not universal performance claims:
 
 The results supported the completed staged adoption for parsing and recovery
 workloads while showing why helper lifetime and dirty-frame frequency matter
-operationally. Residual Charm compilation is now limited to the supported macOS
-amd64 artifact and its separate platform decision, not comparison coverage or
-a separately published rollback artifact.
+operationally. Residual Charm compilation remains only for source compatibility
+and historical upgrade evidence pending separate dependency cleanup; no current
+stable or dev release artifact uses it.
 
 ## Restart/adoption validation, not benchmark results
 

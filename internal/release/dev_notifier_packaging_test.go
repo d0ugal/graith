@@ -98,7 +98,6 @@ func TestDevGoReleaserBuildsOnlyDarwinWithoutRollbackArchives(t *testing.T) {
 		serviceHook       bool
 		nativePackageHook bool
 	}{
-		"gr-dev-darwin-amd64": {goos: []string{"darwin"}, goarch: []string{"amd64"}, cgo: "CGO_ENABLED=0", managed: true, serviceHook: true},
 		"gr-dev-darwin-arm64": {goos: []string{"darwin"}, goarch: []string{"arm64"}, cgo: "CGO_ENABLED=1", tags: []string{"libghostty"}, managed: true, serviceHook: true, nativePackageHook: true},
 	}
 
@@ -191,7 +190,6 @@ func TestDevGoReleaserBuildsOnlyDarwinWithoutRollbackArchives(t *testing.T) {
 		wantNativeMeta bool
 		wantSuffix     string
 	}{
-		{archiveID: "darwin-amd64", buildID: "gr-dev-darwin-amd64", wantNotifier: true, wantService: true},
 		{archiveID: "darwin-arm64", buildID: "gr-dev-darwin-arm64", wantNotifier: true, wantService: true, wantNativeMeta: true},
 	} {
 		t.Run(tc.archiveID, func(t *testing.T) {
@@ -565,6 +563,10 @@ func workflowStep(job devReleaseWorkflowJob, name string) devReleaseWorkflowStep
 
 func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 	workflow := loadDevReleaseWorkflow(t)
+	if strings.Contains(string(mustReadReleaseFile(t, ".github/workflows/dev-release.yml")), "darwin_amd64") {
+		t.Fatal("dev workflow still contains an unsupported Darwin amd64 path")
+	}
+
 	if len(workflow.Events) != 2 {
 		t.Errorf("dev release events = %#v, want only push and pull_request", workflow.Events)
 	}
@@ -697,8 +699,8 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 
 	darwinVerify := workflowStep(darwinJob, "Verify Darwin dev archives").Run
 	for _, want := range []string{
-		`[ "${#all_archives[@]}" -ne 2 ]`, "separately named rollback archive",
-		"verify-darwin-arm64-candidate", "verify-candidate-spdx", "verify-default-binary",
+		`[ "${#all_archives[@]}" -ne 1 ]`, "separately named rollback archive",
+		"verify-darwin-arm64-candidate", "verify-candidate-spdx", `lipo "$notifier" -verify_arch arm64`,
 		"macos/service/verify-release-archive.sh", "GRAITH_SPDX_VALIDATOR_JAR",
 	} {
 		if !strings.Contains(darwinVerify, want) {
@@ -840,7 +842,7 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 		`test "$(git rev-parse HEAD)" = "$RELEASE_REVISION"`,
 		"graith-dev_linux_amd64.tar.gz", "graith-dev_linux_arm64.tar.gz",
 		"dev-darwin-manifest.json", "dev-linux-${goarch}-manifest.json",
-		"sha256sum --check", "tar -xOzf", "checksums.txt", `-eq 4`,
+		"sha256sum --check", "tar -xOzf", "checksums.txt", `-eq 3`,
 	} {
 		if !strings.Contains(aggregateScript, want) {
 			t.Errorf("controlled publisher aggregation missing %q", want)
@@ -1021,7 +1023,7 @@ case "$args" in
     [[ -f "$FAKE_GH_STATE/release-created" ]] || exit 94
     record view-release
     printf '%s\n' checksums.txt \
-      graith-dev_darwin_amd64.tar.gz graith-dev_darwin_arm64.tar.gz \
+      graith-dev_darwin_arm64.tar.gz \
       graith-dev_linux_amd64.tar.gz graith-dev_linux_arm64.tar.gz
     ;;
   *"git/ref/tags/dev"*)
@@ -1170,6 +1172,10 @@ func TestDevHomebrewFormulaInstallsMacAppsOnlyOnMacOS(t *testing.T) {
 		t.Fatal("generated Homebrew formula refers to a separately named rollback archive")
 	}
 
+	if strings.Contains(formula, "darwin_amd64") || !strings.Contains(formula, `odie "graith-dev supports only Apple Silicon on macOS"`) {
+		t.Fatal("generated Homebrew formula does not fail closed on unsupported Intel macOS")
+	}
+
 	installAt := strings.Index(formula, "def install")
 	if installAt < 0 {
 		t.Fatalf("generated formula is missing the macOS notifier install:\n%s", formula)
@@ -1213,6 +1219,21 @@ func TestDevHomebrewFormulaInstallsMacAppsOnlyOnMacOS(t *testing.T) {
 	}
 }
 
+func TestNotifierBuildSupportsOnlyAppleSilicon(t *testing.T) {
+	build := string(mustReadReleaseFile(t, "macos/notifier/build.sh"))
+	for _, required := range []string{"-target arm64-apple-macosx11.0", `-o "$bin"`} {
+		if !strings.Contains(build, required) {
+			t.Errorf("notifier build missing %q", required)
+		}
+	}
+
+	for _, unsupported := range []string{"x86_64", "lipo -create"} {
+		if strings.Contains(build, unsupported) {
+			t.Errorf("notifier build still contains unsupported Intel path %q", unsupported)
+		}
+	}
+}
+
 func TestProductionNotifierPackagingRemainsSeparated(t *testing.T) {
 	linuxCfg := loadGoreleaserConfig(t)
 	linuxFiles := archiveByID(t, linuxCfg, "linux")
@@ -1240,7 +1261,7 @@ func TestProductionNotifierPackagingRemainsSeparated(t *testing.T) {
 	t.Fatal("production Darwin archive no longer carries GraithNotifier.app in the expected layout")
 }
 
-func TestStableReleaseSelectsNativeBackendsAndRetainsIntelCharm(t *testing.T) {
+func TestStableReleaseSelectsOnlySupportedNativeBackends(t *testing.T) {
 	type configShape struct {
 		Builds []struct {
 			ID     string   `yaml:"id"`
@@ -1267,7 +1288,6 @@ func TestStableReleaseSelectsNativeBackendsAndRetainsIntelCharm(t *testing.T) {
 		cgo    string
 		native bool
 	}{
-		"gr-darwin-amd64": {arch: "amd64", cgo: "CGO_ENABLED=0"},
 		"gr-darwin-arm64": {arch: "arm64", cgo: "CGO_ENABLED=1", native: true},
 		"gr-linux-amd64":  {arch: "amd64", cgo: "CGO_ENABLED=1", native: true},
 		"gr-linux-arm64":  {arch: "arm64", cgo: "CGO_ENABLED=1", native: true},
@@ -1294,6 +1314,10 @@ func TestStableReleaseSelectsNativeBackendsAndRetainsIntelCharm(t *testing.T) {
 	if len(want) != 0 {
 		t.Errorf("missing stable builds: %#v", want)
 	}
+
+	if strings.Contains(string(mustReadReleaseFile(t, ".github/workflows/libghostty-native.yml")), "goos: darwin\n            goarch: amd64") {
+		t.Error("native verification policy still treats Darwin amd64 as a default build target")
+	}
 }
 
 func TestReleaseConfigsDoNotPublishSeparatelyNamedRollbackArchives(t *testing.T) {
@@ -1304,13 +1328,13 @@ func TestReleaseConfigsDoNotPublishSeparatelyNamedRollbackArchives(t *testing.T)
 	}{
 		{
 			name:         ".goreleaser-dev.yaml",
-			wantBuilds:   []string{"gr-dev-darwin-amd64", "gr-dev-darwin-arm64"},
-			wantArchives: []string{"darwin-amd64", "darwin-arm64"},
+			wantBuilds:   []string{"gr-dev-darwin-arm64"},
+			wantArchives: []string{"darwin-arm64"},
 		},
 		{
 			name:         ".goreleaser.yaml",
-			wantBuilds:   []string{"gr-darwin-amd64", "gr-darwin-arm64"},
-			wantArchives: []string{"darwin-amd64", "darwin-arm64"},
+			wantBuilds:   []string{"gr-darwin-arm64"},
+			wantArchives: []string{"darwin-arm64"},
 		},
 		{
 			name:         ".goreleaser-linux.yaml",

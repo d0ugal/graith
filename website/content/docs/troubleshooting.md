@@ -334,10 +334,10 @@ gr doctor --json | jq -r .terminal_backend
 ```
 
 Stable `graith` and moving `graith-dev` should report `libghostty-helper` on
-macOS arm64 and Linux amd64/arm64. Their Intel macOS archives report `charm` as
-the supported backend for that platform. There is no separately named Charm
-rollback archive, so an unexpected `charm` result on a native target means the
-wrong platform asset or executable is running. Check `gr version` (or
+macOS arm64 and Linux amd64/arm64. Intel macOS is unsupported and current
+releases publish no Darwin amd64 archive. There is no separately named Charm
+rollback archive, so any `charm` result means an unsupported or historical
+executable is running. Check `gr version` (or
 `gr-dev version`), the downloaded archive/package architecture, and the daemon
 executable path reported by `doctor`.
 

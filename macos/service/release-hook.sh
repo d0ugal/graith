@@ -23,7 +23,6 @@ esac
 
 case "$target" in
 	darwin_arm64*) arch=arm64 ;;
-	darwin_amd64*) arch=amd64 ;;
 	*) echo "unsupported daemon service release target: $target" >&2; exit 1 ;;
 esac
 
