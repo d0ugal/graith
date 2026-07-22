@@ -842,7 +842,7 @@ jobs:
           set -euo pipefail
           remote="$(mktemp -d)"
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$remote"
-          test "$(find "$remote" -maxdepth 1 -type f | wc -l)" -eq 11
+          test "$(find "$remote" -maxdepth 1 -type f | wc -l)" -eq 10
           cmp "$remote/checksums.txt" dist/checksums.txt
           (cd "$remote" && sha256sum --check checksums.txt)
           draft="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \

@@ -1176,9 +1176,25 @@ func TestDevHomebrewFormulaInstallsMacAppsOnlyOnMacOS(t *testing.T) {
 		t.Fatal("generated Homebrew formula does not fail closed on unsupported Intel macOS")
 	}
 
+	linuxAt := strings.Index(formula, "on_linux do")
+
 	installAt := strings.Index(formula, "def install")
-	if installAt < 0 {
-		t.Fatalf("generated formula is missing the macOS notifier install:\n%s", formula)
+	if linuxAt < 0 || installAt <= linuxAt {
+		t.Fatalf("generated formula has no isolated Linux selector:\n%s", formula)
+	}
+
+	linuxFormula := formula[linuxAt:installAt]
+
+	for _, required := range []string{
+		"if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?",
+		"graith-dev_linux_amd64.tar.gz",
+		"elsif Hardware::CPU.arm? && Hardware::CPU.is_64_bit?",
+		"graith-dev_linux_arm64.tar.gz",
+		"else", `odie "graith-dev supports only Linux amd64/arm64"`,
+	} {
+		if !strings.Contains(linuxFormula, required) {
+			t.Errorf("generated Homebrew formula does not fail closed on unsupported Linux CPUs: missing %q", required)
+		}
 	}
 
 	installScript := formula[installAt:]

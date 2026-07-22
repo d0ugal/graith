@@ -166,6 +166,27 @@ func TestHomebrewInstallsServiceAppAndDocumentsExplicitUninstall(t *testing.T) {
 	if strings.Contains(formula, "darwin_amd64") || !strings.Contains(formula, `odie "graith supports only Apple Silicon on macOS"`) {
 		t.Fatal("Homebrew formula does not fail closed on unsupported Intel macOS")
 	}
+
+	linuxAt := strings.Index(formula, "on_linux do")
+
+	installAt := strings.Index(formula, "def install")
+	if linuxAt < 0 || installAt <= linuxAt {
+		t.Fatalf("Homebrew formula has no isolated Linux selector:\n%s", formula)
+	}
+
+	linuxFormula := formula[linuxAt:installAt]
+
+	for _, required := range []string{
+		"if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?",
+		`graith_0.70.0_linux_amd64.tar.gz`,
+		"elsif Hardware::CPU.arm? && Hardware::CPU.is_64_bit?",
+		`graith_0.70.0_linux_arm64.tar.gz`,
+		"else", `odie "graith supports only Linux amd64/arm64"`,
+	} {
+		if !strings.Contains(linuxFormula, required) {
+			t.Errorf("Homebrew formula does not fail closed on unsupported Linux CPUs: missing %q", required)
+		}
+	}
 }
 
 func TestStableWorkflowFailsClosedWithoutSigningAndNotaryInputs(t *testing.T) {

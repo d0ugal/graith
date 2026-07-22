@@ -702,10 +702,11 @@ jobs:
               if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?
                 url "https://github.com/${REPO}/releases/download/${TAG}/graith-dev_linux_amd64.tar.gz"
                 sha256 "${LINUX_AMD64_SHA}"
-              end
-              if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
+              elsif Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
                 url "https://github.com/${REPO}/releases/download/${TAG}/graith-dev_linux_arm64.tar.gz"
                 sha256 "${LINUX_ARM64_SHA}"
+              else
+                odie "graith-dev supports only Linux amd64/arm64"
               end
             end
 
