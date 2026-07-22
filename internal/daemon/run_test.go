@@ -17,6 +17,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemonservice"
 	grpty "github.com/d0ugal/graith/internal/pty"
+	"github.com/d0ugal/graith/internal/testprocess"
 )
 
 func TestResolvedUpgradeSnapshotPathsDoesNotRetainRemovedDataDir(t *testing.T) {
@@ -408,6 +409,38 @@ func TestCleanupLegacyDaemonRemovesStaleFiles(t *testing.T) {
 	}, func(int) bool { return false }, func(int, syscall.Signal) error { return nil })
 	assertNotExist(t, socketPath)
 	assertNotExist(t, pidPath)
+}
+
+func TestCleanupLegacyDaemonRejectsGoTestBeforeResolvingHostPaths(t *testing.T) {
+	resolvedPaths := false
+
+	err := cleanupLegacyDaemonWith(
+		discardLogger(),
+		testprocess.RefuseDaemonLifecycleMutation,
+		func() []string {
+			resolvedPaths = true
+			return []string{t.TempDir()}
+		},
+		func(_, _ string, _ time.Duration) (net.Conn, error) {
+			t.Fatal("Go-test refusal reached the legacy socket dialer")
+			return nil, nil
+		},
+		func(int) bool {
+			t.Fatal("Go-test refusal reached legacy process identification")
+			return false
+		},
+		func(int, syscall.Signal) error {
+			t.Fatal("Go-test refusal reached the legacy signal primitive")
+			return nil
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "Go test binary") {
+		t.Fatalf("cleanupLegacyDaemonWith() error = %v, want Go-test refusal", err)
+	}
+
+	if resolvedPaths {
+		t.Fatal("Go-test refusal resolved legacy host paths")
+	}
 }
 
 func TestCleanupLegacyDaemonRemovesReachableSocket(t *testing.T) {

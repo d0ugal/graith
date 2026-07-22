@@ -1,4 +1,6 @@
 // Package testprocess identifies Go test binaries at host-mutation boundaries.
+// It deliberately links testing.Testing into production code because the Go
+// runtime signal is what detects custom-named test executables reliably.
 package testprocess
 
 import (

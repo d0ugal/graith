@@ -8,12 +8,17 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/testprocess"
 )
 
 type Bootstrap struct {
 	Definition Definition
 	Request    StartupRequest
 	Generation Generation
+
+	uid                    int
+	receiptRoot            func(int) (string, error)
+	lifecycleMutationGuard func(string) error
 }
 
 type bootstrapEnvironment struct {
@@ -22,6 +27,8 @@ type bootstrapEnvironment struct {
 	controlRoot     func(int) (string, error)
 	executable      func() (string, error)
 	verifySignature func(string) (SignatureInfo, error)
+
+	lifecycleMutationGuard func(string) error
 }
 
 // BootstrapFreshService is the only fresh managed-service entry point. It
@@ -39,6 +46,18 @@ func BootstrapFreshService(label, slot string, now time.Time) (_ Bootstrap, retu
 }
 
 func bootstrapFreshService(label, slot string, now time.Time, environment bootstrapEnvironment) (_ Bootstrap, returnErr error) {
+	guard := environment.lifecycleMutationGuard
+	if guard == nil {
+		guard = testprocess.RefuseDaemonLifecycleMutation
+	}
+
+	// Bootstrap consumes a start request and records a running generation. Keep
+	// the guard ahead of marker validation and account-root resolution so a test
+	// binary cannot clean a real pending intent through the failure defer below.
+	if err := guard("bootstrap managed daemon service"); err != nil {
+		return Bootstrap{}, err
+	}
+
 	definition, err := ValidateMarker(label, slot)
 	if err != nil {
 		return Bootstrap{}, err
@@ -206,7 +225,15 @@ func bootstrapFreshService(label, slot string, now time.Time, environment bootst
 
 	bootstrapComplete = true
 
-	return Bootstrap{Definition: definition, Request: request, Generation: generation}, nil
+	return Bootstrap{
+		Definition: definition,
+		Request:    request,
+		Generation: generation,
+
+		uid:                    uid,
+		receiptRoot:            environment.receiptRoot,
+		lifecycleMutationGuard: guard,
+	}, nil
 }
 
 func (bootstrap Bootstrap) ValidateResolvedConfig(configFile string, paths config.Paths) error {
@@ -225,5 +252,25 @@ func (bootstrap Bootstrap) ValidateResolvedConfig(configFile string, paths confi
 // request was already consumed, so later config/path/bootstrap failure must not
 // leave the failed PID recorded as a live generation.
 func (bootstrap Bootstrap) Abort() error {
-	return clearRunningProcess(bootstrap.Request.Profile, os.Getpid(), bootstrap.Generation.ID)
+	guard := bootstrap.lifecycleMutationGuard
+	if guard == nil {
+		guard = testprocess.RefuseDaemonLifecycleMutation
+	}
+
+	receiptRoot := bootstrap.receiptRoot
+	uid := bootstrap.uid
+
+	if receiptRoot == nil {
+		receiptRoot = ReceiptRoot
+		uid = os.Geteuid()
+	}
+
+	return clearRunningProcessWith(
+		bootstrap.Request.Profile,
+		os.Getpid(),
+		bootstrap.Generation.ID,
+		uid,
+		receiptRoot,
+		guard,
+	)
 }

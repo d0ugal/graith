@@ -17,6 +17,7 @@ import (
 	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/processidentity"
 	grpty "github.com/d0ugal/graith/internal/pty"
+	"github.com/d0ugal/graith/internal/testprocess"
 	"github.com/d0ugal/graith/internal/tools"
 )
 
@@ -27,8 +28,35 @@ var validateRetainedAdoptedService = daemonservice.ValidateRetainedAdoptedServic
 // cleanupLegacyDaemon stops an old daemon that may be listening on the
 // pre-v0.11 socket path ($TMPDIR or /tmp). Without this, upgrading would
 // leave an orphaned daemon since the new CLI can't reach the old socket.
-func cleanupLegacyDaemon(log *slog.Logger) {
-	cleanupLegacyDaemonDirs(config.LegacyRuntimeDirs(), log, net.DialTimeout, processidentity.IsGraithDaemon, syscall.Kill)
+func cleanupLegacyDaemon(log *slog.Logger) error {
+	return cleanupLegacyDaemonWith(
+		log,
+		testprocess.RefuseDaemonLifecycleMutation,
+		config.LegacyRuntimeDirs,
+		net.DialTimeout,
+		processidentity.IsGraithDaemon,
+		syscall.Kill,
+	)
+}
+
+func cleanupLegacyDaemonWith(
+	log *slog.Logger,
+	guard func(string) error,
+	legacyRuntimeDirs func() []string,
+	dial legacyDialer,
+	isDaemon legacyProcessChecker,
+	kill legacyKiller,
+) error {
+	// This wrapper is the production boundary around the injected cleanup
+	// primitive below. Refuse before resolving host paths: cleanup can both
+	// signal a verified legacy daemon and delete its socket/PID files.
+	if err := guard("clean up legacy daemon"); err != nil {
+		return err
+	}
+
+	cleanupLegacyDaemonDirs(legacyRuntimeDirs(), log, dial, isDaemon, kill)
+
+	return nil
 }
 
 // logTerminalBackendSelection emits one path-free, session-free record for
@@ -551,7 +579,9 @@ func run(
 		log.Info("daemon upgraded", "adopted_sessions", len(manifest.Sessions), "pid", os.Getpid())
 	} else {
 		if paths.Profile == "" {
-			cleanupLegacyDaemon(log)
+			if err := cleanupLegacyDaemon(log); err != nil {
+				return err
+			}
 		}
 
 		if err := AcquirePIDFile(paths.PIDFile); err != nil {
