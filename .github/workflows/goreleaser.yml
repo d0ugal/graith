@@ -1,51 +1,100 @@
-name: GoReleaser
+name: Stable Release
 
 on:
   push:
     tags:
       - "v*"
+  pull_request:
 
 permissions:
   contents: read
 
+concurrency:
+  group: stable-release-${{ github.event_name == 'push' && 'publish' || github.event.pull_request.number }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
-  # How many distinct releases (per format + arch) to keep in the apt/yum repo.
-  # Older versions are pruned before metadata is regenerated so the published
-  # tree stays well under GitHub Pages' 1 GB site cap. Each release adds ~4
-  # packages (deb+rpm x amd64+arm64); bump this if you want a longer tail.
   RETAIN_RELEASES: "5"
 
 jobs:
-  goreleaser:
-    # Runs on macOS so the release can build the Swift notification helper
-    # (GraithNotifier.app) with swiftc and bundle it into the Darwin archive
-    # (issue #1101). A macOS runner still cross-compiles the Linux Go binaries
-    # (CGO_ENABLED=0) and builds the deb/rpm/apk (nfpm is pure Go), so the whole
-    # `goreleaser release` — Linux packages included — happens here; only the
-    # apt/yum repo publishing (which needs apt-only tooling) stays on Linux in
-    # the publish-repo job below.
-    runs-on: macos-latest
-    # Creates the GitHub Release + uploads artifacts to this repo.
-    permissions:
-      contents: write
+  release-context:
+    name: Bind stable release context
+    runs-on: ubuntu-24.04
     outputs:
-      # Whether the publish-repo job can run. Secrets cannot be used directly in
-      # a job-level `if:`, so we surface a boolean output derived from the secrets
-      # (mapped into env vars first) and gate the publish job on it. The publish
-      # job needs ALL THREE of GPG_PRIVATE_KEY, GPG_PASSPHRASE (rpm/apt/metadata
-      # signing) and RELEASE_TOKEN (checkout + cross-repo push to graith-repo), so
-      # this output is only true when all three are present. That keeps releases
-      # green before the Phase 2 infra exists — the publish job is simply skipped
-      # when nothing is configured (issue #768).
-      has_gpg_key: ${{ steps.gpg_check.outputs.has_key }}
+      revision: ${{ steps.release.outputs.revision }}
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - id: release
+        name: Select one immutable revision and version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          revision="$(git rev-parse HEAD)"
+          test "$revision" = "$GITHUB_SHA"
+          if [ "$EVENT_NAME" = push ]; then
+            tag="$GITHUB_REF_NAME"
+            version="${tag#v}"
+            [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+            test "$(git rev-list -n 1 "$tag")" = "$revision"
+          else
+            version="0.0.0-pr.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+            tag="v${version}"
+          fi
+          {
+            echo "revision=$revision"
+            echo "version=$version"
+            echo "tag=$tag"
+          } >>"$GITHUB_OUTPUT"
+
+  build-darwin:
+    name: Build and verify stable Darwin archives
+    needs: release-context
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      GORELEASER_CURRENT_TAG: ${{ needs.release-context.outputs.tag }}
+      GRAITH_RELEASE_VERSION: ${{ needs.release-context.outputs.version }}
+      RELEASE_REVISION: ${{ needs.release-context.outputs.revision }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - name: Configure fail-closed macOS service signing
+
+      - name: Prepare the exact pinned Apple Silicon backend
+        env:
+          GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/libghostty-native
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_REVISION"
+          test "$(uname -s)-$(uname -m)" = Darwin-arm64
+          scripts/libghostty-native.sh test
+          scripts/libghostty-native.sh test-metadata-policy
+          scripts/libghostty-native.sh test-darwin-linkage-policy
+          scripts/libghostty-native.sh test-exclusive-publish
+          spdx_jar="$(scripts/libghostty-native.sh install-spdx-validator \
+            "${RUNNER_TEMP}/spdx-validator")"
+          scripts/libghostty-native.sh validate-spdx "$spdx_jar"
+          {
+            echo "GRAITH_LIBGHOSTTY_WORK=$GRAITH_LIBGHOSTTY_WORK"
+            echo "PKG_CONFIG_PATH=$GRAITH_LIBGHOSTTY_WORK/pkgconfig"
+            echo "GRAITH_SPDX_VALIDATOR_JAR=$spdx_jar"
+          } >>"$GITHUB_ENV"
+
+      - name: Configure fail-closed stable signing and notarization
+        if: github.event_name == 'push'
         env:
           MACOS_SIGNING_CERTIFICATE: ${{ secrets.MACOS_SIGNING_CERTIFICATE }}
           MACOS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGNING_CERTIFICATE_PASSWORD }}
@@ -72,10 +121,9 @@ jobs:
           certificate="$RUNNER_TEMP/graith-release.p12"
           notary_key="$RUNNER_TEMP/AuthKey.p8"
           keychain_password="$(openssl rand -hex 24)"
-          printf '%s' "$MACOS_SIGNING_CERTIFICATE" | base64 --decode > "$certificate"
-          printf '%s' "$APPLE_NOTARY_PRIVATE_KEY" > "$notary_key"
+          printf '%s' "$MACOS_SIGNING_CERTIFICATE" | base64 --decode >"$certificate"
+          printf '%s' "$APPLE_NOTARY_PRIVATE_KEY" >"$notary_key"
           chmod 600 "$certificate" "$notary_key"
-
           security create-keychain -p "$keychain_password" "$keychain"
           security set-keychain-settings -lut 21600 "$keychain"
           security unlock-keychain -p "$keychain_password" "$keychain"
@@ -85,12 +133,9 @@ jobs:
             -k "$keychain_password" "$keychain"
           security list-keychains -d user -s "$keychain"
           security default-keychain -d user -s "$keychain"
-
           xcrun notarytool store-credentials graith-release \
-            --key "$notary_key" \
-            --key-id "$APPLE_NOTARY_KEY_ID" \
+            --key "$notary_key" --key-id "$APPLE_NOTARY_KEY_ID" \
             --issuer "$APPLE_NOTARY_ISSUER_ID"
-
           requirement_b64="$(printf '%s' "$MACOS_SIGNING_REQUIREMENT" | base64 | tr -d '\n')"
           {
             echo "GRAITH_RELEASE_KEYCHAIN=$keychain"
@@ -99,352 +144,745 @@ jobs:
             echo "GRAITH_SIGNING_REQUIREMENT=$MACOS_SIGNING_REQUIREMENT"
             echo "GRAITH_SIGNING_REQUIREMENT_B64=$requirement_b64"
             echo "GRAITH_NOTARY_PROFILE=graith-release"
-          } >> "$GITHUB_ENV"
-      - id: gpg_check
-        name: Detect release publishing secrets
-        env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-        run: |
-          set -euo pipefail
-          # publish-repo needs all three secrets. Gating on only GPG_PRIVATE_KEY
-          # (the old behaviour) meant a half-provisioned setup — key present but
-          # GPG_PASSPHRASE or RELEASE_TOKEN missing — passed the gate and then
-          # failed mid-publish, *after* GoReleaser had already cut the GitHub
-          # release. Detect the exact missing secrets and either skip cleanly
-          # (nothing configured) or fail fast here, before the release is cut
-          # (issue #768).
-          missing=""
-          [ -n "${GPG_PRIVATE_KEY}" ] || missing="${missing:+${missing} }GPG_PRIVATE_KEY"
-          [ -n "${GPG_PASSPHRASE}" ] || missing="${missing:+${missing} }GPG_PASSPHRASE"
-          [ -n "${RELEASE_TOKEN}" ] || missing="${missing:+${missing} }RELEASE_TOKEN"
-          if [ -z "${missing}" ]; then
-            echo "has_key=true" >> "$GITHUB_OUTPUT"
-          elif [ -n "${GPG_PRIVATE_KEY}" ]; then
-            # GPG_PRIVATE_KEY is set but at least one companion secret is not:
-            # partial provisioning. Fail now (before GoReleaser runs) with a
-            # clear message rather than after the release has been published.
-            # NB: don't advise unsetting RELEASE_TOKEN to "skip" — GoReleaser
-            # also uses it for the Homebrew tap push, so dropping it would just
-            # move the failure into the goreleaser step. To skip apt/yum repo
-            # publishing, unset GPG_PRIVATE_KEY.
-            echo "has_key=false" >> "$GITHUB_OUTPUT"
-            echo "::error::Release publishing is half-configured (missing: ${missing}). Set all of GPG_PRIVATE_KEY, GPG_PASSPHRASE and RELEASE_TOKEN; to skip apt/yum repo publishing, unset GPG_PRIVATE_KEY."
-            exit 1
-          else
-            echo "has_key=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::apt/yum repo publishing not configured (missing: ${missing}); the publish job will be skipped."
-          fi
-      # The archive-signing pipe in .goreleaser.yaml extracts and verifies each
-      # completed Darwin archive immediately before GoReleaser's publishers.
-      # One invocation therefore publishes the exact bytes that passed the gate.
-      - name: Build, verify, and publish stable release
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+            echo "GRAITH_SIGNED_SNAPSHOT=false"
+          } >>"$GITHUB_ENV"
+
+      - name: Configure deterministic unsigned PR service bundles
+        if: github.event_name == 'pull_request'
+        run: echo "GRAITH_SIGNED_SNAPSHOT=false" >>"$GITHUB_ENV"
+
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
           version: "~> v2"
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          # AUR publishing is guarded in .goreleaser.yaml: the aurs block disables
-          # itself when AUR_KEY is empty. Pass the secret through unconditionally
-          # (empty when unset) so `.Env.AUR_KEY` always resolves and releases stay
-          # green before the AUR infra (account + package + AUR_KEY secret) exists.
-          AUR_KEY: ${{ secrets.AUR_KEY }}
+          args: ${{ github.event_name == 'pull_request' && 'release --snapshot --skip=publish --clean -f .goreleaser.yaml' || 'release --skip=publish --clean -f .goreleaser.yaml' }}
+
+      - name: Verify final Darwin archive bytes and lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$GRAITH_RELEASE_VERSION"
+          amd64="dist/graith_${version}_darwin_amd64.tar.gz"
+          arm64="dist/graith_${version}_darwin_arm64.tar.gz"
+          shopt -s nullglob
+          archives=(dist/graith_*_darwin_*.tar.gz)
+          test "${#archives[@]}" -eq 2
+          test -f "$amd64" && test -f "$arm64"
+          if find dist -maxdepth 1 -name '*_charm*' -print -quit | grep -q .; then
+            echo "::error::Stable release produced a separately named rollback archive"
+            exit 1
+          fi
+
+          snapshot=false
+          [ "$GITHUB_EVENT_NAME" = pull_request ] && snapshot=true
+          for archive in "$amd64" "$arm64"; do
+            macos/service/verify-release-archive.sh \
+              "$archive" "$archive.service-verified.txt" "$snapshot"
+          done
+
+          amd64_root="$(mktemp -d)"
+          arm64_root="$(mktemp -d)"
+          tar -xzf "$amd64" -C "$amd64_root"
+          tar -xzf "$arm64" -C "$arm64_root"
+          lipo "$amd64_root/gr" -verify_arch x86_64
+          scripts/libghostty-native.sh verify-default-binary "$amd64_root/gr"
+          if find "$amd64_root" -type f \
+              \( -name libghostty-native.spdx.json -o \
+                 -name THIRD_PARTY_NOTICES.libghostty.md \) -print -quit | grep -q .; then
+            echo "::error::Intel Darwin archive contains native-only metadata"
+            exit 1
+          fi
+          lipo "$arm64_root/gr" -verify_arch arm64
+          scripts/libghostty-native.sh verify-darwin-arm64-candidate \
+            "$arm64_root/gr" "$RELEASE_REVISION"
+          scripts/libghostty-native.sh verify-candidate-spdx \
+            "$arm64_root/gr" "$RELEASE_REVISION" \
+            "$arm64_root/libghostty-native.spdx.json" gr
+          scripts/libghostty-native.sh validate-spdx "$GRAITH_SPDX_VALIDATOR_JAR" \
+            "$arm64_root/libghostty-native.spdx.json"
+          cmp "$arm64_root/gr" "$arm64_root/Graith.app/Contents/MacOS/gr"
+          "$arm64_root/gr" --graith-internal-libghostty-self-test
+
+          charm="${RUNNER_TEMP}/gr-charm"
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags="-s -w -X github.com/d0ugal/graith/internal/version.Version=$version -X github.com/d0ugal/graith/internal/version.CommitSHA=$RELEASE_REVISION" \
+            -o "$charm" ./cmd/graith
+          GRAITH_LIBGHOSTTY_DAEMON_BINARY="$arm64_root/gr" \
+            GRAITH_LIBGHOSTTY_UPGRADE_FROM_BINARY="$charm" \
+            go test -v -race -count=1 -tags='integration releaseartifact' -timeout=15m \
+              -run '^(TestLibghosttyDaemonLifecycle|TestLibghosttyCharmToNativeUpgrade)$' \
+              ./internal/integration
+
+          jq -n --arg revision "$RELEASE_REVISION" --arg version "$version" \
+            --arg amd64 "$(shasum -a 256 "$amd64" | awk '{print $1}')" \
+            --arg arm64 "$(shasum -a 256 "$arm64" | awk '{print $1}')" \
+            '{revision:$revision,version:$version,artifacts:{
+              ("graith_"+$version+"_darwin_amd64.tar.gz"):$amd64,
+              ("graith_"+$version+"_darwin_arm64.tar.gz"):$arm64}}' \
+            >dist/stable-darwin-manifest.json
+
+      - name: Upload verified Darwin artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: stable-darwin-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
+          path: |
+            dist/graith_${{ needs.release-context.outputs.version }}_darwin_amd64.tar.gz
+            dist/graith_${{ needs.release-context.outputs.version }}_darwin_arm64.tar.gz
+            dist/stable-darwin-manifest.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 2
+
       - name: Remove temporary macOS signing keychain
         if: always()
         run: |
           if [ -n "${GRAITH_RELEASE_KEYCHAIN:-}" ]; then
             security delete-keychain "$GRAITH_RELEASE_KEYCHAIN" || true
           fi
-      - name: Upload packages for publish job
-        # Only bother stashing artifacts when we're going to publish them.
-        if: steps.gpg_check.outputs.has_key == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: linux-packages
-          path: |
-            dist/*.deb
-            dist/*.rpm
-          if-no-files-found: error
-          retention-days: 1
 
-  publish-repo:
-    needs: goreleaser
-    # Skipped cleanly when no signing key is configured, so a release with no
-    # Phase 2 infra provisioned still succeeds (it just doesn't publish a repo).
-    if: needs.goreleaser.outputs.has_gpg_key == 'true'
-    runs-on: ubuntu-latest
-    # Serialize publish jobs. Two release tags pushed close together (or a
-    # rerun) would otherwise each check out graith-repo@main from an independent
-    # tip, regenerate the tree, and race on the push; the loser fails
-    # non-fast-forward and its packages are silently lost (issue #769).
-    # cancel-in-progress:false lets an in-flight publish finish rather than being
-    # dropped. This fully covers the two-release case in #769. Note: GitHub keeps
-    # at most one *pending* run per group, so in the rare event 3+ releases queue
-    # at once a superseded pending run must be re-run manually (GitHub Actions has
-    # no queue-depth knob — `queue:` is not a valid concurrency key).
-    concurrency:
-      group: publish-repo
-      cancel-in-progress: false
+  build-linux:
+    name: Build and verify stable Linux artifacts (${{ matrix.goarch }})
+    needs: release-context
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+            target: x86_64-linux-gnu
+          - goarch: arm64
+            target: aarch64-linux-gnu
+    env:
+      GORELEASER_CURRENT_TAG: ${{ needs.release-context.outputs.tag }}
+      GRAITH_RELEASE_GOARCH: ${{ matrix.goarch }}
+      GRAITH_RELEASE_VERSION: ${{ needs.release-context.outputs.version }}
+      RELEASE_REVISION: ${{ needs.release-context.outputs.revision }}
     steps:
-      - name: Check out graith (for the publish-push helper)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          # Only the scripts/ helper is needed here; no push, so drop creds.
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Install repo tooling
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install package inspection tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            aptly createrepo-c gnupg rpm
+          sudo apt-get install -y --no-install-recommends cpio rpm2cpio
 
-      - name: Check out graith (for the signing helper script)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install checksum-verified Zig
+        run: |
+          set -euo pipefail
+          zig_version="$(jq -er '.zig.version' libghostty-native.lock.json)"
+          zig_url="$(jq -er '.zig.linuxX8664URL' libghostty-native.lock.json)"
+          zig_sha256="$(jq -er '.zig.linuxX8664SHA256' libghostty-native.lock.json)"
+          mkdir -p "${RUNNER_TEMP}/zig"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            "$zig_url" --output "${RUNNER_TEMP}/zig.tar.xz"
+          printf '%s  %s\n' "$zig_sha256" "${RUNNER_TEMP}/zig.tar.xz" | \
+            sha256sum --check --status
+          tar -xf "${RUNNER_TEMP}/zig.tar.xz" -C "${RUNNER_TEMP}/zig" \
+            --strip-components=1
+          echo "${RUNNER_TEMP}/zig" >>"$GITHUB_PATH"
+          test "$("${RUNNER_TEMP}/zig/zig" version)" = "$zig_version"
+
+      - name: Build the exact pinned native dependency unit
+        env:
+          GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}
+          LIBRARY: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}.a
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_REVISION"
+          scripts/libghostty-native.sh source-build "$TARGET" "$LIBRARY"
+          scripts/libghostty-native.sh verify-static-archive "$LIBRARY"
+          GRAITH_LIBGHOSTTY_WORK="${RUNNER_TEMP}/archive-policy-${GRAITH_RELEASE_GOARCH}" \
+            scripts/libghostty-native.sh test-source-archive-policy
+          scripts/libghostty-native.sh verify-dependency-unit
+          scripts/libghostty-native.sh verify-generated-dependency-unit
+          spdx_jar="$(scripts/libghostty-native.sh install-spdx-validator \
+            "${RUNNER_TEMP}/spdx-validator-${GRAITH_RELEASE_GOARCH}")"
+          {
+            echo "GRAITH_LIBGHOSTTY_WORK=$GRAITH_LIBGHOSTTY_WORK"
+            echo "PKG_CONFIG_PATH=$GRAITH_LIBGHOSTTY_WORK/pkgconfig"
+            echo "GRAITH_SPDX_VALIDATOR_JAR=$spdx_jar"
+            echo "CC=zig cc -target $TARGET"
+          } >>"$GITHUB_ENV"
+
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+        with:
+          version: "~> v2"
+          args: ${{ github.event_name == 'pull_request' && 'release --snapshot --skip=publish --clean -f .goreleaser-linux.yaml' || 'release --skip=publish --clean -f .goreleaser-linux.yaml' }}
+
+      - name: Verify archive and every package final byte
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          version="$GRAITH_RELEASE_VERSION"
+          arch="$GRAITH_RELEASE_GOARCH"
+          archive="dist/graith_${version}_linux_${arch}.tar.gz"
+          debs=(dist/graith_*_linux_"${arch}".deb)
+          rpms=(dist/graith_*_linux_"${arch}".rpm)
+          apks=(dist/graith_*_linux_"${arch}".apk)
+          test -f "$archive"
+          test "${#debs[@]}" -eq 1 && test "${#rpms[@]}" -eq 1 && test "${#apks[@]}" -eq 1
+          if find dist -maxdepth 1 -name '*_charm*' -print -quit | grep -q .; then
+            echo "::error::Stable Linux build produced a rollback artifact"
+            exit 1
+          fi
+          scripts/libghostty-native.sh verify-linux-release-bundle \
+            "$archive" "${debs[0]}" "${rpms[0]}" "${apks[0]}" \
+            "$RELEASE_REVISION" "$arch" "$version" \
+            "$GRAITH_SPDX_VALIDATOR_JAR" false
+
+          jq -n --arg revision "$RELEASE_REVISION" --arg version "$version" \
+            --arg goarch "$arch" \
+            --arg archive_name "$(basename "$archive")" \
+            --arg archive_sha "$(sha256sum "$archive" | awk '{print $1}')" \
+            --arg deb_name "$(basename "${debs[0]}")" \
+            --arg deb_sha "$(sha256sum "${debs[0]}" | awk '{print $1}')" \
+            --arg rpm_name "$(basename "${rpms[0]}")" \
+            --arg rpm_sha "$(sha256sum "${rpms[0]}" | awk '{print $1}')" \
+            --arg apk_name "$(basename "${apks[0]}")" \
+            --arg apk_sha "$(sha256sum "${apks[0]}" | awk '{print $1}')" \
+            '{revision:$revision,version:$version,goarch:$goarch,artifacts:{
+              ($archive_name):$archive_sha,($deb_name):$deb_sha,
+              ($rpm_name):$rpm_sha,($apk_name):$apk_sha}}' \
+            >"dist/stable-linux-${arch}-manifest.json"
+
+      - name: Upload verified Linux artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: stable-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
+          path: |
+            dist/graith_${{ needs.release-context.outputs.version }}_linux_${{ matrix.goarch }}.tar.gz
+            dist/graith_*_linux_${{ matrix.goarch }}.deb
+            dist/graith_*_linux_${{ matrix.goarch }}.rpm
+            dist/graith_*_linux_${{ matrix.goarch }}.apk
+            dist/stable-linux-${{ matrix.goarch }}-manifest.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 2
+
+  execute-linux:
+    name: Execute stable Linux artifacts (${{ matrix.goarch }})
+    needs:
+      - release-context
+      - build-linux
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+            runner: ubuntu-24.04
+          - goarch: arm64
+            runner: ubuntu-24.04-arm
+    env:
+      GRAITH_RELEASE_VERSION: ${{ needs.release-context.outputs.version }}
+      RELEASE_REVISION: ${{ needs.release-context.outputs.revision }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-          path: graith
 
-      - name: Download built packages
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          name: linux-packages
-          path: packages
+          go-version-file: go.mod
 
-      - name: Check out the Pages repo (graith-repo)
+      - name: Install package inspection tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cpio rpm2cpio
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: stable-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
+          path: dist
+
+      - name: Reverify and exercise release-shaped bytes
+        shell: bash
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/linux-execution-${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          version="$GRAITH_RELEASE_VERSION"
+          archive="dist/graith_${version}_linux_${GOARCH}.tar.gz"
+          debs=(dist/graith_*_linux_"${GOARCH}".deb)
+          rpms=(dist/graith_*_linux_"${GOARCH}".rpm)
+          apks=(dist/graith_*_linux_"${GOARCH}".apk)
+          spdx_jar="$(scripts/libghostty-native.sh install-spdx-validator \
+            "${RUNNER_TEMP}/spdx-validator-${GOARCH}")"
+          scripts/libghostty-native.sh verify-linux-release-bundle \
+            "$archive" "${debs[0]}" "${rpms[0]}" "${apks[0]}" \
+            "$RELEASE_REVISION" "$GOARCH" "$version" "$spdx_jar" true
+
+          release_root="$(mktemp -d)"
+          tar -xzf "$archive" -C "$release_root"
+          charm="${RUNNER_TEMP}/gr-charm"
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags="-s -w -X github.com/d0ugal/graith/internal/version.Version=$version -X github.com/d0ugal/graith/internal/version.CommitSHA=$RELEASE_REVISION" \
+            -o "$charm" ./cmd/graith
+          GRAITH_LIBGHOSTTY_DAEMON_BINARY="$release_root/gr" \
+            GRAITH_LIBGHOSTTY_UPGRADE_FROM_BINARY="$charm" \
+            go test -v -race -count=1 -tags='integration releaseartifact' -timeout=15m \
+              -run '^(TestLibghosttyDaemonLifecycle|TestLibghosttyCharmToNativeUpgrade)$' \
+              ./internal/integration
+
+  assemble-stable:
+    name: Aggregate complete stable release
+    needs:
+      - release-context
+      - build-darwin
+      - build-linux
+      - execute-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GRAITH_RELEASE_VERSION: ${{ needs.release-context.outputs.version }}
+      RELEASE_REVISION: ${{ needs.release-context.outputs.revision }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: stable-*-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
+          path: dist
+          merge-multiple: true
+
+      - name: Verify same-revision manifests and exact output set
+        run: |
+          set -euo pipefail
+          version="$GRAITH_RELEASE_VERSION"
+          expected="$(printf '%s\n' \
+            "graith_${version}_darwin_amd64.tar.gz" \
+            "graith_${version}_darwin_arm64.tar.gz" \
+            "graith_${version}_linux_amd64.apk" \
+            "graith_${version}_linux_amd64.deb" \
+            "graith_${version}_linux_amd64.rpm" \
+            "graith_${version}_linux_amd64.tar.gz" \
+            "graith_${version}_linux_arm64.apk" \
+            "graith_${version}_linux_arm64.deb" \
+            "graith_${version}_linux_arm64.rpm" \
+            "graith_${version}_linux_arm64.tar.gz" | sort)"
+          actual="$(find dist -maxdepth 1 -type f -name 'graith_*' \
+            -exec basename {} \; | sort)"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::Stable artifact set is incomplete or unexpected"
+            diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") || true
+            exit 1
+          fi
+          if find dist -maxdepth 1 -name '*_charm*' -print -quit | grep -q .; then
+            echo "::error::Assembled stable release contains a rollback artifact"
+            exit 1
+          fi
+
+          for manifest in dist/stable-*-manifest.json; do
+            jq -e --arg revision "$RELEASE_REVISION" --arg version "$version" \
+              '.revision == $revision and .version == $version' "$manifest" >/dev/null
+          done
+          while IFS= read -r name; do
+            sha="$(sha256sum "dist/$name" | awk '{print $1}')"
+            matches="$(jq -r --arg name "$name" --arg sha "$sha" \
+              'select(.artifacts[$name] == $sha) | .revision' \
+              dist/stable-*-manifest.json | wc -l)"
+            test "$matches" -eq 1
+          done <<<"$expected"
+          (
+            cd dist
+            mapfile -t artifacts <<<"$expected"
+            sha256sum "${artifacts[@]}" >checksums.txt
+            test "$(wc -l <checksums.txt)" -eq 10
+            sha256sum --check checksums.txt
+          )
+
+      - name: Validate downstream metadata without publishing
+        run: |
+          set -euo pipefail
+          metadata="$(mktemp -d)"
+          mkdir -p "$metadata/aur"
+          scripts/render-stable-homebrew.sh "$GRAITH_RELEASE_VERSION" \
+            dist/checksums.txt "$metadata/graith.rb"
+          scripts/render-stable-aur.sh "$GRAITH_RELEASE_VERSION" \
+            dist/checksums.txt "$metadata/aur"
+          ruby -c "$metadata/graith.rb"
+          bash -n "$metadata/aur/PKGBUILD"
+          test -s "$metadata/aur/.SRCINFO"
+
+      - name: Upload assembled stable release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: stable-release-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
+          path: |
+            dist/graith_*
+            dist/checksums.txt
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 2
+
+  attest-stable:
+    name: Finalize and attest stable release
+    if: github.event_name == 'push'
+    needs:
+      - release-context
+      - assemble-stable
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
+    env:
+      GRAITH_RELEASE_VERSION: ${{ needs.release-context.outputs.version }}
+      RELEASE_REVISION: ${{ needs.release-context.outputs.revision }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.release-context.outputs.revision }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: stable-release-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
+          path: dist
+
+      - name: Install release signing tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cpio gnupg rpm rpm2cpio
+
+      - name: Apply configured RPM signatures before checksums and provenance
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GPG_PRIVATE_KEY" ]; then
+            echo "::notice::apt/yum signing is not configured; retaining unsigned GitHub RPMs"
+          else
+            if [ -z "$GPG_PASSPHRASE" ]; then
+              echo "::error::GPG_PRIVATE_KEY is set but GPG_PASSPHRASE is missing"
+              exit 1
+            fi
+            GNUPGHOME="$(mktemp -d)"
+            chmod 700 "$GNUPGHOME"
+            export GNUPGHOME
+            {
+              echo allow-loopback-pinentry
+              echo allow-preset-passphrase
+              echo "max-cache-ttl 3600"
+            } >"$GNUPGHOME/gpg-agent.conf"
+            printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+            key_id="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')"
+            test -n "$key_id"
+            signing_epoch="$(git show -s --format=%ct "$RELEASE_REVISION")"
+            [[ "$signing_epoch" =~ ^[1-9][0-9]*$ ]]
+            preset=/usr/lib/gnupg/gpg-preset-passphrase
+            [ -x "$preset" ] || preset=/usr/libexec/gpg-preset-passphrase
+            gpg --with-keygrip --list-secret-keys --with-colons "$key_id" | \
+              GPG_PASSPHRASE="$GPG_PASSPHRASE" \
+                scripts/rpm-preset-keygrips.sh "$preset"
+            {
+              echo '%_signature gpg'
+              printf '%%_gpg_name %s\n' "$key_id"
+              echo '%__gpg /usr/bin/gpg'
+              printf '%%_gpg_sign_cmd %%{__gpg} gpg --no-verbose --no-armor --batch --pinentry-mode loopback --no-secmem-warning --faked-system-time %s! -u "%%{_gpg_name}" -sbo %%{__signature_filename} --digest-algo sha256 %%{__plaintext_filename}\n' "$signing_epoch"
+            } >"$HOME/.rpmmacros"
+            gpg --armor --export "$key_id" >"${RUNNER_TEMP}/graith.asc"
+            sudo rpm --import "${RUNNER_TEMP}/graith.asc"
+            for package in dist/*.rpm; do
+              rpm --addsign "$package"
+              signature="$(rpm --checksig "$package")"
+              [[ "$signature" == *"signatures OK"* ]]
+            done
+          fi
+          mapfile -t artifacts < <(find dist -maxdepth 1 -type f -name 'graith_*' \
+            -printf '%f\n' | sort)
+          test "${#artifacts[@]}" -eq 10
+          (cd dist && sha256sum "${artifacts[@]}" >checksums.txt && \
+            sha256sum --check checksums.txt)
+
+      - name: Reverify finalized Linux package contents
+        shell: bash
+        env:
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/final-package-verification
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          spdx_jar="$(scripts/libghostty-native.sh install-spdx-validator \
+            "${RUNNER_TEMP}/spdx-validator-final")"
+          for arch in amd64 arm64; do
+            archive="dist/graith_${GRAITH_RELEASE_VERSION}_linux_${arch}.tar.gz"
+            debs=(dist/graith_*_linux_"${arch}".deb)
+            rpms=(dist/graith_*_linux_"${arch}".rpm)
+            apks=(dist/graith_*_linux_"${arch}".apk)
+            test "${#debs[@]}" -eq 1 && test "${#rpms[@]}" -eq 1 && test "${#apks[@]}" -eq 1
+            scripts/libghostty-native.sh verify-linux-release-bundle \
+              "$archive" "${debs[0]}" "${rpms[0]}" "${apks[0]}" \
+              "$RELEASE_REVISION" "$arch" "$GRAITH_RELEASE_VERSION" \
+              "$spdx_jar" false
+          done
+
+      - uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-path: dist/*
+
+      - name: Upload final signed/checksummed stable release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: stable-final-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
+          path: dist/*
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 2
+
+  publish-stable:
+    name: Publish verified stable release
+    if: github.event_name == 'push'
+    needs:
+      - release-context
+      - assemble-stable
+      - attest-stable
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: stable-publisher
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      attestations: read
+    env:
+      RELEASE_REVISION: ${{ needs.release-context.outputs.revision }}
+      RELEASE_TAG: ${{ needs.release-context.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.release-context.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.release-context.outputs.revision }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: stable-final-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
+          path: dist
+
+      - id: publishing_secrets
+        name: Validate publishing credentials before mutation
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          AUR_KEY: ${{ secrets.AUR_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::error::Stable publication requires RELEASE_TOKEN for Homebrew"
+            exit 1
+          fi
+          if [ -n "$GPG_PRIVATE_KEY" ]; then
+            missing=""
+            [ -n "$GPG_PASSPHRASE" ] || missing=GPG_PASSPHRASE
+            [ -n "$RELEASE_TOKEN" ] || missing="${missing:+$missing }RELEASE_TOKEN"
+            if [ -n "$missing" ]; then
+              echo "::error::Release repository signing is half-configured; missing: $missing"
+              exit 1
+            fi
+            echo "has_gpg=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "has_gpg=false" >>"$GITHUB_OUTPUT"
+          fi
+          if [ -n "$AUR_KEY" ]; then
+            echo "has_aur=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "has_aur=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify release, tag, checksums, and provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_REVISION"
+          test "$(wc -l <dist/checksums.txt)" -eq 10
+          (cd dist && sha256sum --check checksums.txt)
+
+          tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG")"
+          tag_sha="$(jq -er '.object.sha' <<<"$tag_object")"
+          tag_type="$(jq -er '.object.type' <<<"$tag_object")"
+          if [ "$tag_type" = tag ]; then
+            tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_sha" --jq '.object.sha')"
+          fi
+          test "$tag_sha" = "$RELEASE_REVISION"
+
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
+          draft="$(jq -er '.draft' <<<"$release")"
+          case "$draft" in true|false) ;; *) exit 1 ;; esac
+          expected_assets="$(find dist -maxdepth 1 -type f -exec basename {} \; | sort)"
+          existing_assets="$(jq -r '.assets[].name' <<<"$release" | sort)"
+          unexpected="$(comm -23 \
+            <(printf '%s\n' "$existing_assets") \
+            <(printf '%s\n' "$expected_assets"))"
+          test -z "$unexpected"
+          if [ -n "$existing_assets" ]; then
+            existing="$(mktemp -d)"
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$existing"
+            while IFS= read -r name; do
+              test -n "$name"
+              cmp "$existing/$name" "dist/$name"
+            done <<<"$existing_assets"
+          fi
+          for artifact in dist/*; do
+            gh attestation verify "$artifact" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/goreleaser.yml" \
+              --source-digest "$RELEASE_REVISION" --source-ref "refs/tags/$RELEASE_TAG"
+          done
+
+      - name: Stage or confirm the exact verified assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          expected="$(find dist -maxdepth 1 -type f -exec basename {} \; | sort)"
+          actual="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            --jq '.assets[].name' | sort)"
+          draft="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            --jq '.draft')"
+          if [ "$draft" = false ]; then
+            test "$actual" = "$expected"
+            exit 0
+          fi
+          test "$draft" = true
+          while IFS= read -r name; do
+            if ! grep -Fxq "$name" <<<"$actual"; then
+              gh release upload "$RELEASE_TAG" "dist/$name" --repo "$GITHUB_REPOSITORY"
+            fi
+          done <<<"$expected"
+          actual="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            --jq '.assets[].name' | sort)"
+          test "$actual" = "$expected"
+
+      - name: Check out Homebrew tap
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: d0ugal/homebrew-tap
+          token: ${{ secrets.RELEASE_TOKEN }}
+          ref: main
+          path: homebrew-tap
+          fetch-depth: 0
+
+      - name: Prepare Homebrew formula from assembled checksums
+        run: |
+          set -euo pipefail
+          scripts/render-stable-homebrew.sh "$RELEASE_VERSION" dist/checksums.txt \
+            homebrew-tap/Formula/graith.rb
+          ruby -c homebrew-tap/Formula/graith.rb
+
+      - name: Check out apt/yum repository
+        if: steps.publishing_secrets.outputs.has_gpg == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: d0ugal/graith-repo
-          # graith-repo is a separate repo; the default GITHUB_TOKEN can't push
-          # to it, so use a PAT with contents:write on graith-repo (same
-          # cross-repo pattern as the Homebrew tap).
           token: ${{ secrets.RELEASE_TOKEN }}
           ref: main
-          path: repo
-          # Full history so `git pull --rebase` in publish-push.sh has a real
-          # merge base to rebase onto (shallow clones can misbehave on rebase).
+          path: graith-repo
           fetch-depth: 0
 
-      - name: Import GPG signing key into a throwaway keyring
+      - name: Install apt/yum repository tooling
+        if: steps.publishing_secrets.outputs.has_gpg == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends aptly createrepo-c gnupg rpm
+
+      - name: Prepare signed apt/yum repository inputs
+        if: steps.publishing_secrets.outputs.has_gpg == 'true'
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
           set -euo pipefail
-          # Throwaway keyring in a scratch dir. The runner is ephemeral, so
-          # nothing persists after the job; keep it isolated regardless.
           GNUPGHOME="$(mktemp -d)"
           chmod 700 "$GNUPGHOME"
-          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
-          export GNUPGHOME
-
-          # Allow non-interactive signing: loopback pinentry for gpg, and
-          # allow-preset-passphrase so rpm --addsign (which can't be fed a
-          # passphrase on a pipe) can sign via a preloaded agent cache.
+          export GNUPGHOME GPG_PASSPHRASE
           {
-            echo "allow-loopback-pinentry"
-            echo "allow-preset-passphrase"
+            echo allow-loopback-pinentry
+            echo allow-preset-passphrase
             echo "max-cache-ttl 3600"
-          } >> "$GNUPGHOME/gpg-agent.conf"
-          gpgconf --kill gpg-agent || true
-
+          } >"$GNUPGHOME/gpg-agent.conf"
           printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          GPG_KEY_ID="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')"
+          test -n "$GPG_KEY_ID"
+          export GPG_KEY_ID
+          scripts/publish-linux-repositories.sh dist graith-repo "$RETAIN_RELEASES"
 
-          # Discover the key id and export it for later steps.
-          KEY_ID="$(gpg --list-secret-keys --with-colons \
-            | awk -F: '/^sec:/ {print $5; exit}')"
-          if [ -z "$KEY_ID" ]; then
-            echo "Failed to import GPG key" >&2
-            exit 1
+      - name: Prepare optional AUR package
+        if: steps.publishing_secrets.outputs.has_aur == 'true'
+        env:
+          AUR_KEY: ${{ secrets.AUR_KEY }}
+        run: |
+          set -euo pipefail
+          key="$(mktemp)"
+          known_hosts="$(mktemp)"
+          printf '%s' "$AUR_KEY" >"$key"
+          chmod 600 "$key"
+          printf '%s\n' \
+            'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' \
+            >"$known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts"
+          echo "GIT_SSH_COMMAND=$GIT_SSH_COMMAND" >>"$GITHUB_ENV"
+          git clone ssh://aur@aur.archlinux.org/graith-bin.git aur-package
+          scripts/render-stable-aur.sh "$RELEASE_VERSION" dist/checksums.txt aur-package
+          bash -n aur-package/PKGBUILD
+          (
+            cd aur-package
+            git config user.name graith-bot
+            git config user.email graith-bot@users.noreply.github.com
+            git add PKGBUILD .SRCINFO
+            if ! git diff --cached --quiet; then
+              git commit -m "Update to ${RELEASE_VERSION}"
+            fi
+          )
+
+      - name: Reverify and expose the complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          remote="$(mktemp -d)"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$remote"
+          test "$(find "$remote" -maxdepth 1 -type f | wc -l)" -eq 11
+          cmp "$remote/checksums.txt" dist/checksums.txt
+          (cd "$remote" && sha256sum --check checksums.txt)
+          draft="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            --jq '.draft')"
+          if [ "$draft" = true ]; then
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+          else
+            test "$draft" = false
           fi
-          echo "GPG_KEY_ID=$KEY_ID" >> "$GITHUB_ENV"
 
-      - name: Export public signing key (armored + dearmored) to /gpg
+      # Public URLs become available before any downstream repository points at
+      # them. A retry accepts the already-public exact asset set and converges
+      # any channel push that was interrupted after exposure.
+      - name: Publish prepared Homebrew formula
         run: |
-          set -euo pipefail
-          mkdir -p repo/gpg
-          # ASCII-armored key (used by dnf's gpgkey= and for humans).
-          gpg --armor --export "$GPG_KEY_ID" > repo/gpg/graith.asc
-          # Dearmored binary keyring so apt's signed-by= can read it directly.
-          gpg --export "$GPG_KEY_ID" > repo/gpg/graith.gpg
-          # Conventionally-named keyring copy for /usr/share/keyrings.
-          cp repo/gpg/graith.gpg repo/gpg/graith-archive-keyring.gpg
+          scripts/publish-push.sh homebrew-tap \
+            "chore: update graith to ${RELEASE_VERSION}"
 
-      - name: Sign the .rpm packages
-        env:
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+      - name: Publish prepared apt/yum repositories
+        if: steps.publishing_secrets.outputs.has_gpg == 'true'
         run: |
-          set -euo pipefail
+          scripts/publish-push.sh graith-repo \
+            "chore: publish graith ${RELEASE_TAG} apt/yum packages"
 
-          # Preload the passphrase into gpg-agent so rpm --addsign (which offers
-          # no passphrase channel of its own) can sign non-interactively.
-          gpg --batch --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
-            --detach-sign -o /dev/null <<<"warmup" 2>/dev/null || true
-          gpgconf --launch gpg-agent
-          PRESET=/usr/lib/gnupg/gpg-preset-passphrase
-          [ -x "$PRESET" ] || PRESET=/usr/libexec/gpg-preset-passphrase
-          # Preset the passphrase for EVERY keygrip (primary key + any signing
-          # subkey), not just the primary's. rpm --addsign may drive gpg to a
-          # dedicated signing subkey whose keygrip differs from the primary's,
-          # and the agent must already hold the passphrase for it. See #767.
-          gpg --with-keygrip --list-secret-keys --with-colons "$GPG_KEY_ID" \
-            | GPG_PASSPHRASE="$GPG_PASSPHRASE" \
-              bash graith/scripts/rpm-preset-keygrips.sh "$PRESET"
-
-          # rpm --addsign selects the key via %_gpg_name and drives gpg (which
-          # gets the passphrase from the primed agent, not from a pipe).
-          cat > "$HOME/.rpmmacros" <<EOF
-          %_signature gpg
-          %_gpg_name ${GPG_KEY_ID}
-          %__gpg /usr/bin/gpg
-          %_gpg_sign_cmd %{__gpg} gpg --no-verbose --no-armor --batch --pinentry-mode loopback --no-secmem-warning -u "%{_gpg_name}" -sbo %{__signature_filename} --digest-algo sha256 %{__plaintext_filename}
-          EOF
-
-          # Import our public key so rpm --checksig can verify the signature.
-          rpm --import repo/gpg/graith.asc
-          for rpm in packages/*.rpm; do
-            [ -e "$rpm" ] || continue
-            echo "Signing $rpm"
-            rpm --addsign "$rpm"
-            rpm --checksig "$rpm"
-          done
-
-      - name: Write the retention/prune helper
-        run: |
-          set -euo pipefail
-          # A tiny, self-contained pruner sourced by the rpm and apt build steps.
-          # It keeps only the newest RETAIN_RELEASES distinct semver versions of
-          # graith per architecture in a directory, deleting older packages.
-          # Package filenames follow nfpm's convention:
-          #   graith_<semver>_linux_<arch>.<ext>   (arch is amd64 / arm64)
-          cat > /tmp/prune.sh <<'PRUNE'
-          # prune_dir <dir> <ext> <keep_n>
-          prune_dir() {
-            dir="$1"; ext="$2"; keep="$3"
-
-            # No-op safely when the dir is missing or holds no matching packages.
-            [ -d "$dir" ] || { echo "prune: $dir does not exist, nothing to do"; return 0; }
-
-            # Discover the set of architectures present from the filenames.
-            archs="$(
-              for f in "$dir"/graith_*_linux_*."$ext"; do
-                [ -e "$f" ] || continue
-                base="${f##*/}"
-                arch="${base##*_linux_}"; arch="${arch%.$ext}"
-                printf '%s\n' "$arch"
-              done | sort -u
-            )"
-            [ -n "$archs" ] || { echo "prune: no graith_*_linux_*.$ext in $dir, nothing to do"; return 0; }
-
-            for arch in $archs; do
-              # Distinct versions for this arch, newest first (semver-aware sort).
-              versions="$(
-                for f in "$dir"/graith_*_linux_"$arch"."$ext"; do
-                  [ -e "$f" ] || continue
-                  base="${f##*/}"
-                  ver="${base#graith_}"; ver="${ver%%_linux_*}"
-                  printf '%s\n' "$ver"
-                done | sort -u -V -r
-              )"
-
-              total="$(printf '%s\n' "$versions" | grep -c .)"
-              echo "prune: $arch/$ext has $total version(s); keeping newest $keep"
-              [ "$total" -le "$keep" ] && continue
-
-              # Everything past the first <keep> distinct versions gets dropped.
-              drop="$(printf '%s\n' "$versions" | tail -n +"$((keep + 1))")"
-              for ver in $drop; do
-                victim="$dir/graith_${ver}_linux_${arch}.$ext"
-                if [ -e "$victim" ]; then
-                  echo "prune: removing $victim"
-                  rm -f "$victim"
-                fi
-              done
-            done
-          }
-          PRUNE
-          echo "Wrote /tmp/prune.sh (RETAIN_RELEASES=${RETAIN_RELEASES})"
-
-      - name: Build yum/dnf repo (createrepo_c) and sign metadata
-        env:
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-        run: |
-          set -euo pipefail
-          # shellcheck source=/dev/null
-          . /tmp/prune.sh
-          RPM_ROOT=repo/rpm
-          mkdir -p "$RPM_ROOT"
-          # Add the freshly built rpms alongside the ones already published, then
-          # prune to the newest RETAIN_RELEASES versions per arch BEFORE building
-          # metadata, so repomd.xml only references the versions we keep.
-          cp packages/*.rpm "$RPM_ROOT"/
-          prune_dir "$RPM_ROOT" rpm "$RETAIN_RELEASES"
-          # --update alone leaves stale entries for deleted rpms in place; a full
-          # (non-incremental) createrepo_c regen guarantees the metadata reflects
-          # exactly the surviving packages.
-          createrepo_c "$RPM_ROOT"
-          # Detached, armored signature over repomd.xml so dnf can verify the
-          # repo metadata (repo_gpgcheck).
-          printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
-            --passphrase-fd 0 --local-user "$GPG_KEY_ID" \
-            --detach-sign --armor --output "$RPM_ROOT/repodata/repomd.xml.asc" \
-            "$RPM_ROOT/repodata/repomd.xml"
-
-      - name: Build apt repo (aptly) and sign Release
-        env:
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-        run: |
-          set -euo pipefail
-          # shellcheck source=/dev/null
-          . /tmp/prune.sh
-
-          # aptly keeps its own working DB + pool under a rootDir. Point it at a
-          # scratch dir, then publish into the checked-out Pages tree.
-          APTLY_ROOT="$(mktemp -d)"
-          cat > "$HOME/.aptly.conf" <<EOF
-          {
-            "rootDir": "${APTLY_ROOT}",
-            "architectures": ["amd64", "arm64"]
-          }
-          EOF
-
-          # aptly builds each publish from scratch, so we must re-add the debs we
-          # want to keep. Stage the already-published pool alongside the freshly
-          # built debs, prune to the newest RETAIN_RELEASES versions per arch, and
-          # feed only the survivors to aptly. Without seeding from the existing
-          # pool, apt would silently drop every prior release each run.
-          STAGE="$(mktemp -d)"
-          OLD_POOL="repo/deb/pool/main/g/graith"
-          if [ -d "$OLD_POOL" ]; then
-            find "$OLD_POOL" -maxdepth 1 -name 'graith_*_linux_*.deb' -exec cp -n {} "$STAGE"/ \;
-          fi
-          cp packages/*.deb "$STAGE"/
-          prune_dir "$STAGE" deb "$RETAIN_RELEASES"
-
-          # A single "stable" suite for all Debian/Ubuntu releases (the binary is
-          # statically linked Go, so per-codename suites add no value).
-          aptly repo create -distribution=stable -component=main graith
-          aptly repo add graith "$STAGE"/
-
-          # Publish, signing Release -> Release.gpg + InRelease with our key.
-          aptly publish repo \
-            -gpg-key="$GPG_KEY_ID" \
-            -passphrase="$GPG_PASSPHRASE" \
-            -batch \
-            graith
-
-          # aptly writes the published tree under <rootDir>/public. Mirror it into
-          # repo/deb (dists/ + pool/).
-          DEB_ROOT=repo/deb
-          rm -rf "$DEB_ROOT"
-          mkdir -p "$DEB_ROOT"
-          cp -a "${APTLY_ROOT}/public/." "$DEB_ROOT"/
-
-      - name: Commit and push the static repo tree
-        # The helper commits the regenerated tree and pushes with a bounded
-        # rebase+retry, so a manual/external commit to graith-repo between
-        # checkout and push doesn't lose this release to a rejected push.
-        run: |
-          ./scripts/publish-push.sh repo \
-            "chore: publish graith ${GITHUB_REF_NAME} apt/yum packages"
+      - name: Publish prepared optional AUR package
+        if: steps.publishing_secrets.outputs.has_aur == 'true'
+        run: git -C aur-package push origin HEAD:master

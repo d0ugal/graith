@@ -2,6 +2,8 @@
 /gr
 /graith
 /dist/
+/completions/
+/man/
 
 # Built macOS notifier .app bundle (issue #1094)
 /macos/build/

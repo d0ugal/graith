@@ -1,4 +1,4 @@
-//go:build integration && libghostty && cgo && linux
+//go:build integration && releaseartifact && linux
 
 package integration
 

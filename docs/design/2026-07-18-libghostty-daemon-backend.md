@@ -2,7 +2,7 @@
 title: "Design Doc: Native libghostty daemon backend"
 authors: Dougal Matthews
 created: 2026-07-18
-status: Accepted (native dev rollout; staged removal in progress)
+status: Accepted (stable on macOS arm64 and Linux; macOS amd64 retained)
 reviewers: (none yet)
 informed: (TBD)
 issue: https://github.com/d0ugal/graith/issues/1432
@@ -12,11 +12,12 @@ issue: https://github.com/d0ugal/graith/issues/1432
 
 Graith will adopt `libghostty-vt` as its daemon terminal-screen model through
 the public `go-libghostty` API and a restartable helper-process boundary. The
-decision is **GO for staged adoption**: the native candidate is promoted through
-platform-specific dev artifacts before any stable release changes. The current
-Go model remains in source for platforms without a native-backend decision.
-Issue #1495 has retired comparison-only machinery ahead of final Charm deletion,
-and promoted targets do not publish separately named rollback archives.
+decision is **GO for staged adoption**. The accepted dev evidence now promotes
+the normal stable macOS arm64 and Linux amd64/arm64 artifacts to the native
+backend. The current Go model remains in source as the normal supported macOS
+amd64 implementation. Issue #1495 retired comparison-only machinery ahead of
+the remaining platform decision; promoted targets publish no separately named
+rollback archive.
 
 ## Background
 
@@ -59,18 +60,16 @@ keep backend transitions independent of terminal state or protocol migrations.
   resize, alternate screen, and bounded scrollback reconstruction.
 - Make construction, write, resize, snapshot, timeout, protocol, and exit
   failures observable and recoverable.
-- Evaluate both models against the same synthetic corpus and operational
-  workloads before promotion.
-- Produce exact-pin macOS arm64 and Linux validation artifacts with native
-  licensing and SBOM data. Linux release promotion remains tracked in #1475.
+- Use the same synthetic corpus and operational workloads for both models.
+- Produce exact-pin macOS arm64 and Linux stable artifacts with native licensing
+  and executable-bound SBOM data.
 - Preserve compatible persisted state and the retained-platform implementation
-  while native soak and observation gates pass, without parallel rollback assets.
+  across native promotion, without parallel rollback assets.
 
 ### Non-Goals
 
-- Making the native backend the production default before this branch is soak
-  tested. Issue #1432 authorizes the decision package and candidate, not that
-  final release flip.
+- Removing the retained Charm source or deciding macOS amd64's future. That is
+  owned by #1495 after the stable native promotion.
 - Changing the wire protocol, scrollback format, iOS renderer, or macOS app
   renderer.
 - Maintaining a second Graith-specific C binding beside `go-libghostty`.
@@ -82,9 +81,9 @@ keep backend transitions independent of terminal state or protocol migrations.
 
 | Surface | Decision | Rationale |
 |---------|----------|-----------|
-| CLI/daemon on macOS arm64 | Dev canary | `graith-dev` uses the native helper; stable remains pure Go until #1494 is explicitly promoted. No separately named dev or stable rollback archive is published. |
+| CLI/daemon on macOS arm64 | Stable native | The normal stable and `graith-dev` artifacts use the exact pinned process-isolated native helper. No separately named rollback archive is published. |
 | CLI/daemon on macOS amd64 | Pure-Go retained target | Native libghostty is not a supported target; the ordinary artifact remains supported and is not branded as a rollback. |
-| CLI/daemon on Linux amd64/arm64 | Dev canary | Release-shaped native `graith-dev` archives are built and verified on Linux, then executed on their actual architectures. Stable remains pure Go until the #1475 observation gate and a separate reviewed promotion. |
+| CLI/daemon on Linux amd64/arm64 | Stable native | Normal stable tar/deb/rpm/apk artifacts and `graith-dev` archives use the exact pinned process-isolated helper and are executed on their actual architectures before publication. |
 | iOS app | No behavior change | It already uses the shared Ghostty pin through its native renderer; daemon selection does not change the app renderer. |
 | macOS app | No behavior change | The app renderer is independent, while a local daemon may use the tagged candidate. |
 
@@ -255,8 +254,8 @@ queries, and the reduced #1430 sequence. #1446 expanded fragmented control
 strings, margins, erase/wrap, ZWJ/variation sequences, and background-only
 cells before handoff.
 
-Ordinary builds compile and test the pure-Go Charm backend. Production
-`libghostty` builds compile only the native backend and exclude x/vt and
+Ordinary builds compile and test the retained pure-Go Charm implementation.
+Production `libghostty` builds compile only the native backend and exclude x/vt and
 Ultraviolet from the `internal/pty` terminal-screen dependency graph and its
 isolated binary. The full `gr` binary legitimately retains Ultraviolet through
 its Bubble Tea/Lip Gloss UI, but no longer retains x/vt. Default graphs and
@@ -279,7 +278,7 @@ request limit.
 Current intentional differences are explicit assertions rather than hidden
 normalization:
 
-| Behavior | Pure-Go Charm | Native candidate | Decision |
+| Behavior | Retained pure-Go Charm implementation | Native implementation | Decision |
 |----------|----------------|------------------|----------|
 | `e` plus combining acute | Drops the combining mark | Returns one `é` grapheme | Ghostty matches the interface and is preferred. |
 | Repeated grow/shrink after `canny brae bide` | First `4x2` shrink leaves `cann`; later grows keep that truncated viewport | First `4x2` shrink reflows to `ae b` / `ide`; later resizes retain only that visible subset because native scrollback is zero | Accept measured Ghostty reflow while reconstructing history only from raw Graith scrollback. |
@@ -328,8 +327,8 @@ CoreFoundation, Security, and `/usr/lib/libSystem.B.dylib`.
 
 The path-scoped native workflow performs these checks:
 
-- ordinary `CGO_ENABLED=0` builds for Darwin/Linux amd64/arm64, proving retained
-  pure-Go targets do not select cgo or require a native archive;
+- ordinary `CGO_ENABLED=0` builds and comparison tests, proving the retained
+  macOS amd64 target does not select cgo or require a native archive;
 - tagged Darwin arm64 execution and linking against the arm64 slice of the
   checksum-pinned Apple archive;
 - fail-closed tagged Darwin amd64 selection without native linkage;
@@ -342,22 +341,29 @@ The path-scoped native workflow performs these checks:
 - upstream `go-libghostty` tests against Graith's newer Ghostty pin;
 - tagged PTY, focused race, and candidate executable builds; and
 - testing artifacts that include the native SPDX and notice inventory; and
-- release-shaped Linux amd64/arm64 dev archives whose extracted final binaries
+- release-shaped Linux amd64/arm64 dev and stable artifacts whose extracted final binaries
   receive dependency, defined-symbol, linkage, package-shape, privacy, SPDX,
   checksum, provenance, and actual-architecture terminal lifecycle checks
   (helper start, native create/write/snapshot/resize/close, and reap) before one
-  publisher replaces the moving `dev` release.
+  publisher replaces the moving `dev` release or exposes the prepared stable draft.
 
-An explicit tagged build without cgo, on macOS amd64, or on an unsupported OS,
-returns a configuration error rather than silently changing emulator. The dev
-release is split by platform. GoReleaser produces the two Darwin
-archives on Apple Silicon, while Linux jobs build the exact source dependency
-unit and package one native archive per architecture. Every job consumes one
-revision and snapshot version from the release-context job. A single Linux
-publisher accepts only the four expected archives, verifies builder SHA-256
-manifests and Linux build attestations, creates the complete checksum file, and
-then updates the moving release and tap. Pull requests run the same build and
-aggregation path without mutating the release or tap.
+An explicit native tagged build without cgo, on macOS amd64, or on an
+unsupported OS returns a configuration error rather than silently changing
+emulator. Both release channels are split by platform. GoReleaser produces the
+two Darwin archives on Apple Silicon, while Linux jobs build the exact source
+dependency unit and package one native artifact set per architecture. Every job
+consumes one revision and version from its release-context job. The stable
+aggregator accepts exactly two Darwin archives plus Linux tar/deb/rpm/apk for
+both architectures, verifies builder manifests, produces one ten-entry checksum
+file, and submits the eleven files for provenance. Pull requests exercise this
+unsigned build-only shape without publication. A tag build requires configured
+macOS signing/notarization, verifies the exact release-please-created tag and
+attestations, stages the complete set on the draft, and prepares every configured
+Homebrew, AUR, apt, and yum update without publishing it. It then re-downloads
+the complete draft, makes those GitHub bytes public, and pushes the already
+validated downstream updates. A retry accepts an already-public exact asset set
+so an interrupted downstream push can converge; no package metadata is
+published while its download URL is still private.
 
 Local Apple Silicon development uses the arm64 slice of the checksum-pinned
 Apple archive. An exact source rebuild on the current macOS 26 host is blocked
@@ -401,13 +407,14 @@ no-replace rename; and uploads exactly `gr`, the bound SPDX document, and the
 notice file. Linux packaging rewrites the Ghostty package metadata to the exact
 source-build inputs (`emit-xcframework=false` and the architecture-specific Zig
 target) and removes the unrelated Apple artifact claim. It applies the same
-executable-bound SPDX model to each extracted `gr-dev`, adds the ordinary
-release metadata, verifies the exact archive member allowlist, and rejects
-local/CI paths in every member. The final archive is SHA-256 recorded and
-provenance-attested only after the extracted executable passes its native
-terminal lifecycle self-test. The publisher constrains provenance to the exact
-source digest and refuses to mutate the release unless that digest is still the
-current `main` tip.
+executable-bound SPDX model to each extracted `gr-dev` or stable `gr`, adds the ordinary
+release metadata, verifies exact archive and package member allowlists, compares
+the executable bytes across tar/deb/rpm/apk, and rejects local/CI paths in every
+member. Final artifacts are SHA-256 recorded and provenance-attested only after
+the extracted executable passes its private native self-test and supported
+fresh-start, Charm-to-native, and native-to-native daemon lifecycle paths on the
+actual architecture. The publisher constrains provenance to the exact tag source
+digest and refuses to expose a mixed or incomplete draft.
 
 A pin rotation is generated and reviewed as one unit:
 
@@ -429,24 +436,16 @@ artifacts; changing only `go.mod` is insufficient.
 
 ### Rollout and removal plan
 
-1. Merge this non-default candidate and all issue #1444-#1448 evidence into the
-   feature branch. Require default/native tests, race/fuzz, workflow matrix,
-   privacy scan, and independent review to pass.
-2. Run at least 1,000 tagged create/write/snapshot/resize/close cycles and a
-   one-hour concurrent synthetic soak on supported native runners. Require no
-   daemon exit, helper/FD leak, unbounded RSS growth, or unreconstructed final
-   marker.
-3. Offer the native `graith-dev` cohort. Observe for seven consecutive days with zero
-   native-attributed daemon crashes, successful bounded recovery for every
-   injected helper failure, and resource/latency metrics within the documented
-   benchmark envelope.
-4. Make native the supported stable default for each accepted platform only in
-   a separate reviewed release change. Do not publish an alternate rollback
-   archive; stable native artifacts ship only after the preceding gates pass.
-   macOS amd64 remains pure Go until its explicit backend or support decision,
-   and Linux stable promotion remains observation-gated under #1475.
-5. After every retained-platform decision closes, remove Charm, its selector,
-   and backend-specific expectations. Keep the backend-neutral interface and
+1. The candidate, compatibility, isolation, benchmark, dependency, dev-release,
+   and final-byte evidence from #1444-#1448, #1494, and #1475 is accepted. No
+   additional fixed cycle count, elapsed-time soak, or calendar observation
+   window gates stable promotion.
+2. Promote the normal macOS arm64 and Linux amd64/arm64 artifacts together via
+   the strict multi-platform stable publisher described above. Keep the normal
+   macOS amd64 artifact pure Go and do not publish an alternate rollback archive.
+3. Comparison-only instrumentation is already retired under #1495. After every
+   retained-platform decision closes, remove Charm, its selector, and
+   backend-specific expectations. Keep the backend-neutral interface and
    persistent reconstruction path.
 
 No backend transition converts state. Sessions, PTYs, protocol messages, and
@@ -496,9 +495,10 @@ benchmark claim.
   reaping tests
 - default `go test -race ./...`, `go vet ./...`, repository lint, actionlint,
   shell validation, generated-file checks, and integration tests
-- macOS arm64 candidate linkage and execution, tagged macOS amd64 fail-closed
-  selection, required exact-source Linux amd64/arm64 builds, and execution of
-  both release-shaped Linux dev archives on actual-architecture runners
+- macOS arm64 final archive linkage, signing structure, private self-test, and
+  lifecycle execution; macOS amd64 default-backend and metadata exclusion;
+  exact-source Linux amd64/arm64 builds; and final tar/deb/rpm/apk verification
+  and lifecycle execution on actual-architecture runners
 - full diff scan for binaries, captured output, identifiers, credentials,
   machine paths, and native build directories
 
@@ -506,6 +506,7 @@ benchmark claim.
 
 - [Issue #1432](https://github.com/d0ugal/graith/issues/1432)
 - [Linux-native validation #1475](https://github.com/d0ugal/graith/issues/1475)
+- [macOS arm64 stable promotion #1494](https://github.com/d0ugal/graith/issues/1494)
 - [Parent PR #1440](https://github.com/d0ugal/graith/pull/1440)
 - [go-libghostty canonical repository](https://tangled.org/mitchellh.com/go-libghostty)
 - [go-libghostty bulk snapshot follow-up #1441](https://github.com/d0ugal/graith/issues/1441)

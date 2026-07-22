@@ -1,5 +1,5 @@
 // Package release holds regression tests for the release pipeline defined in
-// .github/workflows/goreleaser.yml. The workflow's publish-repo gate is pure
+// .github/workflows/goreleaser.yml. The workflow's stable publisher gate is pure
 // shell embedded in YAML, so we extract that shell and execute it here under
 // every combination of the three required secrets to lock in its behaviour.
 package release
@@ -26,7 +26,7 @@ func goreleaserWorkflowPath() string {
 	return filepath.Join("..", "..", ".github", "workflows", "goreleaser.yml")
 }
 
-// gpgCheckStep locates the `gpg_check` step in the goreleaser job and returns
+// gpgCheckStep locates the publishing secret gate and returns
 // its `run:` script plus the env map it declares. This is the gate that decides
 // whether the apt/yum publish job runs (issue #768).
 func gpgCheckStep(t *testing.T) (script string, env map[string]string) {
@@ -39,26 +39,26 @@ func gpgCheckStep(t *testing.T) (script string, env map[string]string) {
 
 	var wf struct {
 		Jobs struct {
-			Goreleaser struct {
+			PublishStable struct {
 				Steps []struct {
 					ID  string            `yaml:"id"`
 					Run string            `yaml:"run"`
 					Env map[string]string `yaml:"env"`
 				} `yaml:"steps"`
-			} `yaml:"goreleaser"`
+			} `yaml:"publish-stable"`
 		} `yaml:"jobs"`
 	}
 	if err := yaml.Unmarshal(data, &wf); err != nil {
 		t.Fatalf("parsing goreleaser.yml: %v", err)
 	}
 
-	for _, s := range wf.Jobs.Goreleaser.Steps {
-		if s.ID == "gpg_check" {
+	for _, s := range wf.Jobs.PublishStable.Steps {
+		if s.ID == "publishing_secrets" {
 			return s.Run, s.Env
 		}
 	}
 
-	t.Fatal("could not find the gpg_check step in the goreleaser job")
+	t.Fatal("could not find the publishing_secrets step in publish-stable")
 
 	return "", nil
 }
@@ -76,7 +76,7 @@ func runGate(t *testing.T, script string, secrets map[string]string) (hasKey str
 
 	// Inherit the real environment (so bash and any external command resolve
 	// via PATH), then layer GITHUB_OUTPUT and the three secrets on top.
-	env := append(os.Environ(), "GITHUB_OUTPUT="+outFile)
+	env := append(os.Environ(), "GITHUB_OUTPUT="+outFile, "AUR_KEY=")
 	for _, name := range requiredSecrets {
 		env = append(env, name+"="+secrets[name])
 	}
@@ -93,13 +93,13 @@ func runGate(t *testing.T, script string, secrets map[string]string) (hasKey str
 	}
 
 	for line := range strings.SplitSeq(string(data), "\n") {
-		if v, ok := strings.CutPrefix(line, "has_key="); ok {
+		if v, ok := strings.CutPrefix(line, "has_gpg="); ok {
 			hasKey = v
 		}
 	}
 
-	if hasKey == "" {
-		t.Fatalf("gate wrote no has_key output; combined output:\n%s", out)
+	if hasKey == "" && !failed {
+		t.Fatalf("gate wrote no has_gpg output; combined output:\n%s", out)
 	}
 
 	return hasKey, failed
@@ -123,8 +123,8 @@ func TestPublishGateMapsAllThreeSecrets(t *testing.T) {
 // TestPublishGateBehaviour exercises the extracted gate shell across all eight
 // combinations of the three secrets. The bug in #768 was that a half-provisioned
 // setup (key present, a companion secret missing) passed the gate and failed
-// mid-publish. The gate must now publish only when all three are present, skip
-// cleanly when GPG_PRIVATE_KEY is absent, and fail fast on partial provisioning.
+// mid-publish. The gate now requires the Homebrew token, enables repositories
+// only for a complete signing pair, and fails before mutation when partial.
 func TestPublishGateBehaviour(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available; skipping gate execution test")
@@ -147,16 +147,16 @@ func TestPublishGateBehaviour(t *testing.T) {
 			wantFailed: false,
 		},
 		{
-			name:       "nothing configured skips cleanly",
+			name:       "nothing configured fails before publication",
 			secrets:    map[string]string{},
-			wantHasKey: "false",
-			wantFailed: false,
+			wantHasKey: "",
+			wantFailed: true,
 		},
 		{
-			name:       "passphrase only skips cleanly",
+			name:       "passphrase only fails without release token",
 			secrets:    map[string]string{"GPG_PASSPHRASE": set},
-			wantHasKey: "false",
-			wantFailed: false,
+			wantHasKey: "",
+			wantFailed: true,
 		},
 		{
 			name:       "release token only skips cleanly",
@@ -173,19 +173,19 @@ func TestPublishGateBehaviour(t *testing.T) {
 		{
 			name:       "key alone fails fast",
 			secrets:    map[string]string{"GPG_PRIVATE_KEY": set},
-			wantHasKey: "false",
+			wantHasKey: "",
 			wantFailed: true,
 		},
 		{
 			name:       "key without passphrase fails fast",
 			secrets:    map[string]string{"GPG_PRIVATE_KEY": set, "RELEASE_TOKEN": set},
-			wantHasKey: "false",
+			wantHasKey: "",
 			wantFailed: true,
 		},
 		{
 			name:       "key without release token fails fast",
 			secrets:    map[string]string{"GPG_PRIVATE_KEY": set, "GPG_PASSPHRASE": set},
-			wantHasKey: "false",
+			wantHasKey: "",
 			wantFailed: true,
 		},
 	}

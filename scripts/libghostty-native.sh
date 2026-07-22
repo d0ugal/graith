@@ -538,7 +538,7 @@ run_daemon_validation() {
         GRAITH_LIBGHOSTTY_SOAK_TIMEOUT="$workload_timeout" \
         GRAITH_LIBGHOSTTY_LONG_SOAK="$long_soak" \
         GOCACHE="$daemon_gocache" \
-        CGO_ENABLED=1 go test -v -race -count=1 -tags='integration libghostty' \
+        CGO_ENABLED=1 go test -v -race -count=1 -tags='integration libghostty releaseartifact' \
             -timeout="$go_timeout" -run "$test_pattern" ./internal/integration; then
         return 1
     fi
@@ -2816,6 +2816,185 @@ verify_linux_dev_archive() (
     fi
 )
 
+verify_linux_release_bundle() (
+    local archive="${1:-}"
+    local deb="${2:-}"
+    local rpm="${3:-}"
+    local apk="${4:-}"
+    local revision="${5:-}"
+    local goarch="${6:-}"
+    local version="${7:-}"
+    local spdx_jar="${8:-}"
+    local execute="${9:-false}"
+    local staging=""
+    local archive_root deb_root rpm_root apk_root
+    local archive_files expected_archive_files man_files package_man_files
+    local tree tree_files expected_tree_files artifact runtime_identity
+    local package_listing package_kind package_path
+
+    trap 'cleanup_candidate_staging "$staging"' EXIT
+
+    if [[ "$(uname -s)" != Linux || ! -f "$archive" || ! -f "$deb" ||
+        ! -f "$rpm" || ! -f "$apk" || ! "$revision" =~ ^[0-9a-f]{40}$ ||
+        ! "$goarch" =~ ^(amd64|arm64)$ || -z "$version" || ! -f "$spdx_jar" ]]; then
+        echo "usage: $0 verify-linux-release-bundle <archive> <deb> <rpm> <apk> <revision> <amd64|arm64> <version> <spdx-jar> [true|false]" >&2
+        return 2
+    fi
+    case "$execute" in
+        true|false) ;;
+        *)
+            echo "error: Linux release execution marker must be true or false" >&2
+            return 2
+            ;;
+    esac
+    for command in tar dpkg-deb rpm2cpio cpio; do
+        require_command "$command"
+    done
+
+    if ! archive_files="$(tar -tzf "$archive" | LC_ALL=C sort)"; then
+        echo "error: could not enumerate the stable Linux archive" >&2
+        return 1
+    fi
+    if grep -Eq '(^/|(^|/)\.\.(/|$)|/$)' <<<"$archive_files"; then
+        echo "error: stable Linux archive contains an unsafe or non-regular member" >&2
+        return 1
+    fi
+    if [[ "$(printf '%s\n' "$archive_files" | uniq -d)" != "" ]]; then
+        echo "error: stable Linux archive contains duplicate members" >&2
+        return 1
+    fi
+    man_files="$(grep -E '^man/gr(-[a-z0-9-]+)?\.1\.gz$' <<<"$archive_files" || true)"
+    if ! grep -qx 'man/gr.1.gz' <<<"$man_files"; then
+        echo "error: stable Linux archive is missing the root manual page" >&2
+        return 1
+    fi
+    expected_archive_files="$(
+        printf '%s\n' CHANGELOG.md LICENSE README.md \
+            THIRD_PARTY_NOTICES.libghostty.md completions/gr.bash \
+            completions/gr.fish completions/gr.zsh gr \
+            libghostty-native.spdx.json
+        printf '%s\n' "$man_files"
+    )"
+    expected_archive_files="$(LC_ALL=C sort <<<"$expected_archive_files")"
+    if [[ "$archive_files" != "$expected_archive_files" ]]; then
+        echo "error: stable Linux archive contents are incomplete or unexpected" >&2
+        return 1
+    fi
+
+    staging="$(mktemp -d "$NATIVE_WORK/linux-release-bundle.XXXXXX")"
+    chmod 700 "$staging"
+    if ! private_directory_is_safe "$staging" "$NATIVE_WORK" \
+        "linux-release-bundle."; then
+        echo "error: Linux release verifier directory failed private ownership/path validation" >&2
+        return 1
+    fi
+    archive_root="$staging/archive"
+    deb_root="$staging/deb"
+    rpm_root="$staging/rpm"
+    apk_root="$staging/apk"
+    mkdir -p "$archive_root" "$deb_root" "$rpm_root" "$apk_root"
+    for package_kind in deb rpm apk; do
+        case "$package_kind" in
+            deb)
+                package_path="$deb"
+                package_listing="$(dpkg-deb --fsys-tarfile "$package_path" | tar -tf -)"
+                ;;
+            rpm)
+                package_path="$rpm"
+                package_listing="$(rpm2cpio "$package_path" | cpio -it --quiet)"
+                ;;
+            apk)
+                package_path="$apk"
+                package_listing="$(tar -tzf "$package_path")"
+                ;;
+        esac
+        if grep -Eq '(^/|(^|/)\.\.(/|$))' <<<"$package_listing" ||
+            [[ -n "$(LC_ALL=C sort <<<"$package_listing" | uniq -d)" ]]; then
+            echo "error: stable Linux $package_kind contains an unsafe or duplicate member" >&2
+            return 1
+        fi
+    done
+    tar -xzf "$archive" --no-same-owner --no-same-permissions -C "$archive_root"
+    dpkg-deb -x "$deb" "$deb_root"
+    (cd "$rpm_root" && rpm2cpio "$rpm" | cpio -idm --quiet --no-absolute-filenames)
+    tar -xzf "$apk" --no-same-owner --no-same-permissions -C "$apk_root"
+
+    package_man_files="$(sed 's#^man/#usr/share/man/man1/#' <<<"$man_files")"
+    expected_tree_files="$(
+        printf '%s\n' usr/bin/gr \
+            usr/share/bash-completion/completions/gr \
+            usr/share/fish/vendor_completions.d/gr.fish \
+            usr/share/zsh/vendor-completions/_gr \
+            usr/share/doc/graith/README.md \
+            usr/share/doc/graith/THIRD_PARTY_NOTICES.libghostty.md \
+            usr/share/doc/graith/copyright \
+            usr/share/doc/graith/libghostty-native.spdx.json
+        printf '%s\n' "$package_man_files"
+    )"
+    expected_tree_files="$(LC_ALL=C sort <<<"$expected_tree_files")"
+
+    for tree in "$archive_root" "$deb_root" "$rpm_root" "$apk_root"; do
+        if find "$tree" -type l -print -quit | grep -q .; then
+            echo "error: Linux release payload contains a symbolic link" >&2
+            return 1
+        fi
+        tree_files="$(find "$tree" -type f -printf '%P\n' | LC_ALL=C sort)"
+        if [[ "$tree" == "$archive_root" ]]; then
+            if [[ "$tree_files" != "$expected_archive_files" ]]; then
+                echo "error: extracted Linux archive differs from its validated member list" >&2
+                return 1
+            fi
+            continue
+        fi
+        # APK control metadata is outside the installed filesystem payload.
+        tree_files="$(grep -Ev '^\.(PKGINFO|BUILDINFO|MTREE)$' <<<"$tree_files" || true)"
+        if [[ "$tree_files" != "$expected_tree_files" ]]; then
+            echo "error: Linux package payload is incomplete or outside its allowlist: $tree" >&2
+            return 1
+        fi
+    done
+
+    for tree in "$archive_root" "$deb_root" "$rpm_root" "$apk_root"; do
+        local binary_path="$tree/gr"
+        local metadata_path="$tree/libghostty-native.spdx.json"
+        local notices_path="$tree/THIRD_PARTY_NOTICES.libghostty.md"
+        if [[ "$tree" != "$archive_root" ]]; then
+            binary_path="$tree/usr/bin/gr"
+            metadata_path="$tree/usr/share/doc/graith/libghostty-native.spdx.json"
+            notices_path="$tree/usr/share/doc/graith/THIRD_PARTY_NOTICES.libghostty.md"
+            cmp "$tree/usr/share/doc/graith/copyright" "$REPO_DIR/LICENSE"
+            cmp "$tree/usr/share/doc/graith/README.md" "$REPO_DIR/README.md"
+        else
+            for artifact in CHANGELOG.md LICENSE README.md; do
+                cmp "$tree/$artifact" "$REPO_DIR/$artifact"
+            done
+        fi
+        [[ -x "$binary_path" ]] || {
+            echo "error: stable Linux package binary is not executable" >&2
+            return 1
+        }
+        verify_linux_candidate "$binary_path" "$revision" "$goarch" "$execute"
+        verify_candidate_spdx "$binary_path" "$revision" linux "$goarch" \
+            "$metadata_path" gr
+        validate_spdx "$spdx_jar" "$metadata_path"
+        cmp "$notices_path" "$REPO_DIR/THIRD_PARTY_NOTICES.libghostty.md"
+        cmp "$archive_root/gr" "$binary_path"
+        while IFS= read -r artifact; do
+            verify_candidate_privacy "$artifact"
+        done < <(find "$tree" -type f)
+    done
+
+    if [[ "$execute" == true ]]; then
+        if ! runtime_identity="$("$archive_root/gr" --json version)" ||
+            ! jq -e --arg revision "$revision" --arg version "$version" \
+                '.commit == $revision and .version == $version' \
+                <<<"$runtime_identity" >/dev/null; then
+            echo "error: stable Linux runtime version or revision is incorrect" >&2
+            return 1
+        fi
+    fi
+)
+
 usage() {
     cat <<EOF
 usage: $0 test|race|fuzz|daemon-test|soak [cycles [timeout]]|all
@@ -2836,6 +3015,7 @@ usage: $0 test|race|fuzz|daemon-test|soak [cycles [timeout]]|all
        $0 verify-linux-candidate <binary> <revision> <amd64|arm64> [true|false]
        $0 verify-linux-native-linkage <binary> <amd64|arm64>
        $0 verify-linux-dev-archive <archive> <revision> <amd64|arm64> <version> <spdx-jar> [true|false]
+       $0 verify-linux-release-bundle <archive> <deb> <rpm> <apk> <revision> <amd64|arm64> <version> <spdx-jar> [true|false]
        $0 test-darwin-linkage-policy
        $0 test-metadata-policy
        $0 install-spdx-validator <empty-directory>
@@ -2927,6 +3107,11 @@ case "${1:-}" in
     verify-linux-dev-archive)
         verify_linux_dev_archive \
             "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-false}"
+        ;;
+    verify-linux-release-bundle)
+        verify_linux_release_bundle \
+            "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}" \
+            "${7:-}" "${8:-}" "${9:-}" "${10:-false}"
         ;;
     test-darwin-linkage-policy)
         test_darwin_linkage_policy

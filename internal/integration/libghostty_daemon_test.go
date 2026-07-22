@@ -1,4 +1,4 @@
-//go:build integration && libghostty && cgo && ((darwin && arm64) || linux)
+//go:build integration && releaseartifact && (linux || (darwin && arm64 && cgo))
 
 package integration
 
@@ -28,6 +28,7 @@ import (
 
 const (
 	nativeBinaryEnv      = "GRAITH_LIBGHOSTTY_DAEMON_BINARY"
+	nativeUpgradeFromEnv = "GRAITH_LIBGHOSTTY_UPGRADE_FROM_BINARY"
 	nativeSoakCyclesEnv  = "GRAITH_LIBGHOSTTY_SOAK_CYCLES"
 	nativeSoakTimeoutEnv = "GRAITH_LIBGHOSTTY_SOAK_TIMEOUT"
 	nativeLongSoakEnv    = "GRAITH_LIBGHOSTTY_LONG_SOAK"
@@ -384,6 +385,60 @@ func TestLibghosttyDaemonLifecycle(t *testing.T) {
 	}
 }
 
+func TestLibghosttyCharmToNativeUpgrade(t *testing.T) {
+	charmBinary := os.Getenv(nativeUpgradeFromEnv)
+	if charmBinary == "" {
+		t.Skip("external Charm upgrade source is not configured")
+	}
+
+	nativeBinary := requiredNativeBinary(t)
+	h := startNativeDaemonFrom(t, charmBinary, nativeBinary)
+	defer h.cleanup()
+
+	if helpers := h.helperProcesses(); len(helpers) != 0 {
+		t.Fatalf("Charm daemon started with %d unexpected native helpers", len(helpers))
+	}
+
+	client := h.connect()
+	initialInstance := client.instance
+	info := createNativeSession(t, client, "canny-charm-upgrade")
+	waitForPreview(t, client, info.ID, nativeReadyText)
+
+	const beforeUpgrade = "croft-before-native"
+	if err := typeNativeInput(client, info.ID, beforeUpgrade); err != nil {
+		t.Fatal("type before Charm-to-native upgrade failed")
+	}
+	waitForPreview(t, client, info.ID, beforeUpgrade)
+
+	upgradeMsg := protocol.UpgradeMsg{ExecPath: nativeBinary, ClientVersion: version.Version}
+	mustControl(t, client, "upgrade_preflight", upgradeMsg, "upgrade_preflight_ok")
+	if err := client.send("upgrade", upgradeMsg); err != nil {
+		t.Fatal("request Charm-to-native preserving upgrade failed")
+	}
+	response, err := client.readControl()
+	if err != nil {
+		t.Fatal("read Charm-to-native upgrade response failed")
+	}
+	if response.Type != "upgrading" {
+		t.Fatalf("Charm daemon rejected native upgrade: %s", h.redactedControlResponse(response))
+	}
+	client.close()
+
+	client = h.connectNewGeneration(initialInstance)
+	waitForPreview(t, client, info.ID, beforeUpgrade)
+	helpers := waitForHelperCount(t, h, 1)
+
+	const afterUpgrade = "strath-after-native"
+	if err := typeNativeInput(client, info.ID, afterUpgrade); err != nil {
+		t.Fatal("type after Charm-to-native upgrade failed")
+	}
+	waitForPreview(t, client, info.ID, afterUpgrade)
+
+	purgeNativeSession(t, client, info.ID)
+	waitForProcessExit(t, helpers[0])
+	waitForHelperCount(t, h, 0)
+}
+
 func TestLibghosttyDaemonSoak(t *testing.T) {
 	cycles := nativeSoakCycles(t)
 	h := startNativeDaemon(t)
@@ -534,14 +589,30 @@ func TestLibghosttyDaemonSoak(t *testing.T) {
 func startNativeDaemon(t *testing.T) *nativeDaemonHarness {
 	t.Helper()
 
+	binary := requiredNativeBinary(t)
+
+	return startNativeDaemonFrom(t, binary, binary)
+}
+
+func requiredNativeBinary(t *testing.T) string {
+	t.Helper()
+
 	binary := os.Getenv(nativeBinaryEnv)
 	if binary == "" {
 		t.Skip("external tagged Graith binary is not configured; run scripts/libghostty-native.sh daemon-test")
 	}
 
-	info, err := os.Stat(binary) //nolint:gosec // Exact external test binary selected by the caller.
-	if err != nil || !info.Mode().IsRegular() {
-		t.Fatal("configured tagged Graith binary is unavailable")
+	return binary
+}
+
+func startNativeDaemonFrom(t *testing.T, startBinary, targetBinary string) *nativeDaemonHarness {
+	t.Helper()
+
+	for _, binary := range []string{startBinary, targetBinary} {
+		info, err := os.Stat(binary) //nolint:gosec // Exact external test binary selected by the caller.
+		if err != nil || !info.Mode().IsRegular() {
+			t.Fatal("configured tagged Graith binary is unavailable")
+		}
 	}
 
 	// Keep the isolated runtime root below Darwin's Unix-domain path limit.
@@ -592,14 +663,14 @@ func startNativeDaemon(t *testing.T) *nativeDaemonHarness {
 	integrationSocket := filepath.Join(runtimeHome, appName, "graith.sock")
 	env := isolatedNativeEnvironment(configHome, dataHome, runtimeHome)
 	// The caller-selected binary was verified as a regular file above.
-	cmd := exec.Command(binary, "--config", configFile, "daemon", "start") //nolint:gosec
+	cmd := exec.Command(startBinary, "--config", configFile, "daemon", "start") //nolint:gosec
 	cmd.Env = env
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 
 	h := &nativeDaemonHarness{
 		t:          t,
-		binary:     binary,
+		binary:     targetBinary,
 		configFile: configFile,
 		env:        env,
 		socket:     integrationSocket,
@@ -607,7 +678,7 @@ func startNativeDaemon(t *testing.T) *nativeDaemonHarness {
 		pidFile:    filepath.Join(runtimeHome, appName, "graith.pid"),
 		cmd:        cmd,
 		done:       make(chan struct{}),
-		private:    []string{root, binary},
+		private:    []string{root, startBinary, targetBinary},
 	}
 
 	cmd.Stderr = &h.stderr

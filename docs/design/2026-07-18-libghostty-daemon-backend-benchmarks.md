@@ -227,10 +227,11 @@ not additional samples and are not universal performance claims:
   This supports the claim that `WithMaxScrollback(0)` removes retained helper
   scrollback growth; Graith's separately bounded raw log remains authoritative.
 
-The results support staged adoption for parsing and recovery workloads but show
-why helper lifetime and dirty-frame frequency matter operationally. Residual
-Charm compilation is now limited by retained-platform promotion and support
-decisions, not by a separately published rollback artifact.
+The results supported the completed staged adoption for parsing and recovery
+workloads while showing why helper lifetime and dirty-frame frequency matter
+operationally. Residual Charm compilation is now limited to the supported macOS
+amd64 artifact and its separate platform decision, not comparison coverage or
+a separately published rollback artifact.
 
 ## Restart/adoption validation, not benchmark results
 

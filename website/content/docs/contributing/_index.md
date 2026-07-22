@@ -181,16 +181,21 @@ final-move failures must leave no archive, pkg-config file, snapshot, or private
 temporary behind. Ordinary untagged builds remain pure Go and keep the Charm
 implementation available for retained targets and comparison tests.
 
-The `graith-dev` workflow then turns that exact source unit into release-shaped
-native Linux amd64 and arm64 archives. Platform jobs package and validate their
-final executables, an actual-architecture job executes the same uploaded archive
-bytes, and one publisher accepts only same-revision manifests before creating
-the four-archive dev release and checksum file. Linux archive provenance is
-attested and reverified before publication. Pull requests exercise the complete
-build and aggregation path without changing the moving release or Homebrew tap.
-Stable Linux remains pure Go until the dev observation gate passes and a
-separate reviewed change promotes it. Dev and stable configuration must not add
-separately named Charm or other rollback archives.
+The `graith-dev` and stable workflows turn that exact source unit into
+release-shaped native Linux amd64 and arm64 artifacts. Platform jobs package and
+validate final executables, and actual-architecture jobs execute the uploaded
+bytes. Stable additionally compares the executable in tar/deb/rpm/apk and joins
+those eight Linux outputs with native macOS arm64 and retained-Charm macOS amd64
+archives. One aggregator accepts only same-revision manifests and creates the
+complete checksum set. Provenance is attested and reverified before publication.
+Pull requests exercise the unsigned build/aggregation topology without changing
+a release or downstream repository. A real tag requires configured macOS
+signing/notarization. The publisher prepares and validates every configured
+downstream update while the GitHub release remains a draft, then exposes the
+complete release before pushing package metadata that refers to its public URLs.
+Retries accept the already-public exact asset set and converge an interrupted
+downstream push. Dev and stable configuration must not add separately named
+Charm or other rollback archives.
 
 Before generation can succeed, the checksum-reviewed Apple xcframework for the
 selected Ghostty commit must already be published at the exact URL derived by
