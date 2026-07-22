@@ -927,6 +927,197 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 	}
 }
 
+func TestDevReleaseWorkflowPublishesWithoutCheckout(t *testing.T) {
+	publishScript := workflowStep(loadDevReleaseWorkflow(t).Jobs["publish-dev"], "Upload dev release").Run
+
+	type result struct {
+		events []string
+		output string
+		err    error
+	}
+
+	run := func(t *testing.T, existingRelease, existingTag bool, failAt string) result {
+		t.Helper()
+
+		work := t.TempDir()
+		if err := os.Mkdir(filepath.Join(work, "dist"), 0o750); err != nil {
+			t.Fatalf("create dist: %v", err)
+		}
+
+		bin := filepath.Join(work, "bin")
+		if err := os.Mkdir(bin, 0o750); err != nil {
+			t.Fatalf("create bin: %v", err)
+		}
+
+		fakeGH := `#!/usr/bin/env bash
+set -euo pipefail
+
+record() {
+  printf '%s\n' "$1" >> "$FAKE_GH_EVENTS"
+  if [[ "$FAKE_GH_FAIL_AT" == "$1" ]]; then
+    exit 55
+  fi
+}
+
+if [[ -e .git ]]; then
+  echo "publisher unexpectedly has a checkout" >&2
+  exit 90
+fi
+
+args="$*"
+if [[ "$1" == release ]]; then
+  repo=""
+  for ((i = 1; i <= $#; i++)); do
+    if [[ "${!i}" == --repo ]]; then
+      next=$((i + 1))
+      repo="${!next}"
+    fi
+  done
+  if [[ "$repo" != "$GITHUB_REPOSITORY" ]]; then
+    echo "failed to run git: fatal: not a git repository (or any of the parent directories): .git" >&2
+    exit 1
+  fi
+fi
+
+case "$args" in
+  *"git/ref/heads/main"*)
+    record get-main
+    printf '%s\n' "$RELEASE_REVISION"
+    ;;
+  *"releases?per_page=100"*)
+    record list-releases
+    if [[ "$FAKE_EXISTING_RELEASE" == true ]]; then
+      printf '[[{"id":2718,"tag_name":"dev"}]]\n'
+    else
+      printf '[[]]\n'
+    fi
+    ;;
+  *"--method DELETE"*"/releases/2718"*)
+    [[ "$FAKE_EXISTING_RELEASE" == true ]] || exit 91
+    record delete-release
+    ;;
+  *"git/matching-refs/tags/dev"*)
+    record list-tags
+    if [[ "$FAKE_EXISTING_TAG" == true ]]; then
+      printf '%s\n' "$RELEASE_REVISION"
+    fi
+    ;;
+  *"--method DELETE"*"git/refs/tags/dev"*)
+    [[ "$FAKE_EXISTING_TAG" == true ]] || exit 92
+    record delete-tag
+    ;;
+  *"--method POST"*"git/refs"*)
+    record create-tag
+    : > "$FAKE_GH_STATE/tag-created"
+    ;;
+  "release create dev"*)
+    [[ -f "$FAKE_GH_STATE/tag-created" ]] || exit 93
+    record create-release
+    : > "$FAKE_GH_STATE/release-created"
+    ;;
+  "release view dev"*)
+    [[ -f "$FAKE_GH_STATE/release-created" ]] || exit 94
+    record view-release
+    printf '%s\n' checksums.txt \
+      graith-dev_darwin_amd64.tar.gz graith-dev_darwin_arm64.tar.gz \
+      graith-dev_linux_amd64.tar.gz graith-dev_linux_arm64.tar.gz
+    ;;
+  *"git/ref/tags/dev"*)
+    [[ -f "$FAKE_GH_STATE/tag-created" ]] || exit 95
+    record verify-tag
+    printf '%s\n' "$RELEASE_REVISION"
+    ;;
+  *)
+    echo "unexpected gh invocation: $args" >&2
+    exit 96
+    ;;
+esac
+`
+		// #nosec G306 -- the executable is a test-only fake confined to t.TempDir.
+		if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(fakeGH), 0o700); err != nil {
+			t.Fatalf("write fake gh: %v", err)
+		}
+
+		events := filepath.Join(work, "events")
+		state := filepath.Join(work, "state")
+		if err := os.Mkdir(state, 0o750); err != nil {
+			t.Fatalf("create fake gh state: %v", err)
+		}
+
+		command := exec.Command("bash", "-c", publishScript)
+		command.Dir = work
+		command.Env = []string{
+			"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
+			"FAKE_EXISTING_RELEASE=" + fmt.Sprintf("%t", existingRelease),
+			"FAKE_EXISTING_TAG=" + fmt.Sprintf("%t", existingTag),
+			"FAKE_GH_EVENTS=" + events,
+			"FAKE_GH_FAIL_AT=" + failAt,
+			"FAKE_GH_STATE=" + state,
+			"GITHUB_REPOSITORY=d0ugal/bothy",
+			"RELEASE_REVISION=3fdb037103f6f32ef9d35210a7d920d44d2d18b7",
+		}
+		output, commandErr := command.CombinedOutput()
+
+		eventData, err := os.ReadFile(events)
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatalf("read fake gh events: %v", err)
+		}
+
+		return result{
+			events: strings.Fields(string(eventData)),
+			output: string(output),
+			err:    commandErr,
+		}
+	}
+
+	wantFirstPublish := []string{
+		"get-main", "list-releases", "list-tags", "create-tag",
+		"create-release", "view-release", "verify-tag",
+	}
+	wantOrphanReplacement := []string{
+		"get-main", "list-releases", "delete-release", "list-tags", "create-tag",
+		"create-release", "view-release", "verify-tag",
+	}
+	wantReleaseAndTagReplacement := []string{
+		"get-main", "list-releases", "delete-release", "list-tags", "delete-tag", "create-tag",
+		"create-release", "view-release", "verify-tag",
+	}
+
+	for _, test := range []struct {
+		name            string
+		existingRelease bool
+		existingTag     bool
+		want            []string
+	}{
+		{name: "first publish", want: wantFirstPublish},
+		{name: "orphaned draft", existingRelease: true, want: wantOrphanReplacement},
+		{name: "replace release and tag", existingRelease: true, existingTag: true, want: wantReleaseAndTagReplacement},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := run(t, test.existingRelease, test.existingTag, "")
+			if got.err != nil {
+				t.Fatalf("run checkout-free publisher: %v\n%s", got.err, got.output)
+			}
+			if !slices.Equal(got.events, test.want) {
+				t.Fatalf("publisher events = %v, want %v", got.events, test.want)
+			}
+		})
+	}
+
+	for index, failAt := range wantReleaseAndTagReplacement[2:] {
+		t.Run("fails closed at "+failAt, func(t *testing.T) {
+			got := run(t, true, true, failAt)
+			if got.err == nil {
+				t.Fatalf("publisher ignored %s failure", failAt)
+			}
+			want := wantReleaseAndTagReplacement[:index+3]
+			if !slices.Equal(got.events, want) {
+				t.Fatalf("publisher events after %s failure = %v, want %v", failAt, got.events, want)
+			}
+		})
+	}
+}
+
 func TestDevHomebrewFormulaInstallsMacAppsOnlyOnMacOS(t *testing.T) {
 	workflow := loadDevReleaseWorkflow(t)
 	job := workflow.Jobs["publish-dev"]
