@@ -1300,9 +1300,11 @@ func TestLoadStateBackupFailureFailsClosed(t *testing.T) {
 	if !errors.As(err, &backupErr) {
 		t.Fatalf("error %v is not a *StateMigrationBackupError", err)
 	}
+
 	if backupErr.Version != oldVersion {
 		t.Errorf("backup error version = %d, want %d", backupErr.Version, oldVersion)
 	}
+
 	if strings.Contains(err.Error(), "auld-kirk") {
 		t.Fatalf("backup error leaked state contents: %v", err)
 	}
