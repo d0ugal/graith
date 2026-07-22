@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: stable-release-${{ github.event_name == 'push' && 'publish' || github.event.pull_request.number }}
+  group: stable-release-${{ github.event_name == 'push' && github.ref || github.event.pull_request.number }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
