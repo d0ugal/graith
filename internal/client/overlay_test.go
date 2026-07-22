@@ -121,6 +121,7 @@ func sessionItemsForGroup(t *testing.T, items []list.Item, headerPrefix string) 
 	t.Helper()
 
 	var result []sessionItem
+
 	inGroup := false
 
 	for _, item := range items {
@@ -147,6 +148,7 @@ func sessionItemsForGroup(t *testing.T, items []list.Item, headerPrefix string) 
 
 func sessionItemsByID(items []list.Item) map[string]sessionItem {
 	result := make(map[string]sessionItem)
+
 	for _, item := range items {
 		if item, ok := item.(sessionItem); ok {
 			result[item.info.ID] = item
@@ -405,6 +407,7 @@ func TestBuildTreeItems_CycleOrderingStable(t *testing.T) {
 
 	order := func(items []list.Item) string {
 		var rows []string
+
 		for _, item := range items {
 			if item, ok := item.(sessionItem); ok {
 				rows = append(rows, item.info.ID+":"+item.treePrefix)
@@ -415,6 +418,7 @@ func TestBuildTreeItems_CycleOrderingStable(t *testing.T) {
 	}
 
 	forward := order(buildTreeItems(sessions, nil))
+
 	reversed := order(buildTreeItems([]protocol.SessionInfo{sessions[1], sessions[0]}, nil))
 	if forward != reversed {
 		t.Fatalf("cycle order changed with input order: %q vs %q", forward, reversed)
@@ -422,6 +426,36 @@ func TestBuildTreeItems_CycleOrderingStable(t *testing.T) {
 
 	if forward != "b:,a:└── " {
 		t.Fatalf("cycle order = %q, want stable name order with one connector", forward)
+	}
+
+	sameName := []protocol.SessionInfo{
+		{ID: "a", Name: "braw", ParentID: "b", Status: "running"},
+		{ID: "b", Name: "braw", ParentID: "a", Status: "running"},
+	}
+	forward = order(buildTreeItems(sameName, nil))
+
+	reversed = order(buildTreeItems([]protocol.SessionInfo{sameName[1], sameName[0]}, nil))
+	if forward != reversed || forward != "a:,b:└── " {
+		t.Fatalf("same-name cycle order = %q vs %q, want ID-stable order", forward, reversed)
+	}
+}
+
+func TestBuildTreeItems_CycleChildDoesNotAdvertiseAncestor(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "a", Name: "braw", ParentID: "b", Status: "running"},
+		{ID: "b", Name: "canny", ParentID: "a", Status: "running"},
+	}
+
+	items := buildTreeItems(sessions, nil)
+	root := items[0].(sessionItem)
+	child := items[1].(sessionItem)
+
+	if !root.hasChildren || root.descendantCount != 1 {
+		t.Fatalf("cycle root = %+v, want one rendered descendant", root)
+	}
+
+	if child.hasChildren || child.descendantCount != 0 {
+		t.Fatalf("cycle child = %+v, want ancestor edge excluded", child)
 	}
 }
 
@@ -641,6 +675,7 @@ func TestOverlay_CollapseAllExpandAll(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{ID: "root1", Name: "ben-one", RepoName: "repo", Status: "running", CreatedAt: now},
 		{ID: "c1", Name: "bairn-one", ParentID: "root1", RepoName: "repo", Status: "running", CreatedAt: now},
+		{ID: "gc1", Name: "wee-bairn", ParentID: "c1", RepoName: "repo", Status: "running", CreatedAt: now},
 		{ID: "root2", Name: "ben-two", RepoName: "repo", Status: "running", CreatedAt: now},
 		{ID: "c2", Name: "bairn-two", ParentID: "root2", RepoName: "repo", Status: "running", CreatedAt: now},
 		{ID: "leaf", Name: "neep", RepoName: "repo", Status: "running", CreatedAt: now},
@@ -651,7 +686,7 @@ func TestOverlay_CollapseAllExpandAll(t *testing.T) {
 	updated, _ := sendKey(m, "C")
 	m = updated.(*overlayModel)
 
-	if !m.collapsed["root1"] || !m.collapsed["root2"] {
+	if !m.collapsed["root1"] || !m.collapsed["c1"] || !m.collapsed["root2"] {
 		t.Fatal("all parents should be collapsed")
 	}
 	// header + root1 + root2 + leaf = 4
@@ -663,12 +698,12 @@ func TestOverlay_CollapseAllExpandAll(t *testing.T) {
 	updated, _ = sendKey(m, "C")
 	m = updated.(*overlayModel)
 
-	if m.collapsed["root1"] || m.collapsed["root2"] {
+	if m.collapsed["root1"] || m.collapsed["c1"] || m.collapsed["root2"] {
 		t.Fatal("all parents should be expanded")
 	}
-	// header + 5 sessions = 6
-	if len(m.list.Items()) != 6 {
-		t.Errorf("expected 6 items after expand all, got %d", len(m.list.Items()))
+	// header + 6 sessions = 7
+	if len(m.list.Items()) != 7 {
+		t.Errorf("expected 7 items after expand all, got %d", len(m.list.Items()))
 	}
 }
 
@@ -1103,12 +1138,14 @@ func TestBuildLabelGroupedItemsPreservesNestedCrossRepoTrees(t *testing.T) {
 	}
 
 	items := buildLabelGroupedItems(sessions, nil)
+
 	urgent := sessionItemsForGroup(t, items, "Urgent")
 	if len(urgent) != 3 {
 		t.Fatalf("Urgent group has %d sessions, want 3", len(urgent))
 	}
 
 	wantIDs := []string{"root", "child", "grandchild"}
+
 	wantPrefixes := []string{"", "└── ", "    └── "}
 	for i := range urgent {
 		if urgent[i].info.ID != wantIDs[i] || urgent[i].treePrefix != wantPrefixes[i] {
@@ -1139,6 +1176,7 @@ func TestLabelViewCollapseRetainsGroupSelection(t *testing.T) {
 
 	updated, _ := sendKey(m, " ")
 	m = asOverlay(updated)
+
 	selected, ok := m.list.SelectedItem().(sessionItem)
 	if !ok || selected.info.ID != "root" || selected.labelGroup != "beta" {
 		t.Fatalf("selection after collapse = %+v, ok=%t; want root in beta", selected, ok)
@@ -1203,6 +1241,7 @@ func TestFilteredTreeViewsHandleOrphansAndCycles(t *testing.T) {
 			m := sizedModel(t, base, "")
 			m.view = tc.view
 			m.rebuildForView()
+
 			byID := sessionItemsByID(m.list.Items())
 			if len(byID) != 3 {
 				t.Fatalf("rendered %d distinct sessions, want 3", len(byID))
@@ -1218,6 +1257,7 @@ func TestFilteredTreeViewsHandleOrphansAndCycles(t *testing.T) {
 
 			m.collapsed["a"] = true
 			m.rebuildForView()
+
 			if got := countSessionItems(m); got != 2 {
 				t.Errorf("collapsed cycle rendered %d sessions, want orphan plus one cycle member", got)
 			}
@@ -1238,6 +1278,7 @@ func TestFilteredTreeSearchDoesNotExpandBulkActionTargets(t *testing.T) {
 	m.filterInput.SetValue("bairn")
 	m.restartSession = func(string) error { return nil }
 	m.rebuildForView()
+
 	items := sessionItemsByID(m.list.Items())
 	if len(items) != 1 || items["child"].treePrefix != "" {
 		t.Fatalf("filtered items = %+v, want matching child promoted to root", items)
@@ -1250,6 +1291,7 @@ func TestFilteredTreeSearchDoesNotExpandBulkActionTargets(t *testing.T) {
 
 	updated, _ := sendKey(m, "R")
 	updated, _ = sendKey(updated, "a")
+
 	m = asOverlay(updated)
 	if len(m.restartQueue) != 1 || m.restartQueue[0] != "child" {
 		t.Fatalf("restart queue = %v, want only matching child", m.restartQueue)
@@ -1260,6 +1302,7 @@ func TestFilteredTreeViewsCollapseAll(t *testing.T) {
 	base := []protocol.SessionInfo{
 		{ID: "root", Name: "ben", Status: "running", Starred: true, Labels: []string{"braw"}, ScenarioID: "strath", ScenarioName: "strath"},
 		{ID: "child", Name: "bairn", ParentID: "root", Status: "running", Starred: true, Labels: []string{"braw"}, ScenarioID: "strath", ScenarioName: "strath"},
+		{ID: "grandchild", Name: "wee-bairn", ParentID: "child", Status: "running", Starred: true, Labels: []string{"braw"}, ScenarioID: "strath", ScenarioName: "strath"},
 	}
 
 	for _, tc := range []struct {
@@ -1276,15 +1319,17 @@ func TestFilteredTreeViewsCollapseAll(t *testing.T) {
 			m.rebuildForView()
 
 			updated, _ := sendKey(m, "C")
+
 			m = asOverlay(updated)
-			if !m.collapsed["root"] || countSessionItems(m) != 1 {
-				t.Fatalf("collapse-all state=%v sessions=%d, want root collapsed and one row", m.collapsed, countSessionItems(m))
+			if !m.collapsed["root"] || !m.collapsed["child"] || countSessionItems(m) != 1 {
+				t.Fatalf("collapse-all state=%v sessions=%d, want nested parents collapsed and one row", m.collapsed, countSessionItems(m))
 			}
 
 			updated, _ = sendKey(m, "C")
+
 			m = asOverlay(updated)
-			if m.collapsed["root"] || countSessionItems(m) != 2 {
-				t.Fatalf("expand-all state=%v sessions=%d, want expanded two-row tree", m.collapsed, countSessionItems(m))
+			if m.collapsed["root"] || m.collapsed["child"] || countSessionItems(m) != 3 {
+				t.Fatalf("expand-all state=%v sessions=%d, want fully expanded three-row tree", m.collapsed, countSessionItems(m))
 			}
 		})
 	}
@@ -1311,6 +1356,7 @@ func TestFilteredTreeViewsRefreshRetainsNestedSelection(t *testing.T) {
 
 			updated, _ := m.Update(refreshSessionsMsg{sessions: []protocol.SessionInfo{base[1], base[0]}})
 			m = asOverlay(updated)
+
 			selected, ok := m.list.SelectedItem().(sessionItem)
 			if !ok || selected.info.ID != "child" || selected.treePrefix != "└── " {
 				t.Fatalf("selection after refresh = %+v, ok=%t; want nested child", selected, ok)
@@ -4676,12 +4722,14 @@ func TestBuildScenarioGroupedItemsPreservesNestedCrossRepoTree(t *testing.T) {
 	}
 
 	items := buildScenarioGroupedItems(sessions, nil)
+
 	group := sessionItemsForGroup(t, items, "strath")
 	if len(group) != 3 {
 		t.Fatalf("scenario group has %d sessions, want 3", len(group))
 	}
 
 	wantIDs := []string{"root", "child", "grandchild"}
+
 	wantPrefixes := []string{"", "└── ", "    └── "}
 	for i := range group {
 		if group[i].info.ID != wantIDs[i] || group[i].treePrefix != wantPrefixes[i] {
@@ -4690,6 +4738,7 @@ func TestBuildScenarioGroupedItemsPreservesNestedCrossRepoTree(t *testing.T) {
 	}
 
 	collapsed := buildScenarioGroupedItems(sessions, map[string]bool{"root": true})
+
 	collapsedGroup := sessionItemsForGroup(t, collapsed, "strath")
 	if len(collapsedGroup) != 1 || !collapsedGroup[0].collapsed || collapsedGroup[0].descendantCount != 2 {
 		t.Fatalf("collapsed scenario group = %+v, want root with two descendants", collapsedGroup)
