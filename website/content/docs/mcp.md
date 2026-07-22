@@ -81,12 +81,15 @@ server plus your global and per-agent servers — pointing each at
 
 - **Claude** — a generated `--mcp-config` file.
 - **Codex** — per-session `-c mcp_servers.<name>.command=…`, `.args=…`, and
-  `.env_vars=…` overrides. Codex starts stdio MCP children with a clean
+  `.env_vars=…` overrides. Codex starts stdio MCP children with a restricted
   environment, so graith names the minimum variables each proxy may inherit:
   `GRAITH_SESSION_ID`, `GRAITH_TOKEN`, `GRAITH_PROFILE`, `XDG_CONFIG_HOME`,
   `XDG_DATA_HOME`, and `XDG_RUNTIME_DIR`. Missing optional profile/XDG variables
   stay absent. Only variable names appear in the launch arguments; credential
   values remain in the process environment.
+
+  Named environment inheritance requires Codex 0.47.0 or later. Older Codex
+  releases ignore `env_vars` and cannot safely receive this session context.
 
   The injected `env_vars` list replaces a same-named Codex server's own
   environment-variable whitelist because that child is now the graith proxy,
