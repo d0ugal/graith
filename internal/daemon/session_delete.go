@@ -1241,9 +1241,10 @@ func (sm *SessionManager) killVerifiedProcess(pid int, startTime int64) (killed 
 }
 
 type orphanCandidate struct {
-	id           string
-	pid          int
-	pidStartTime int64
+	id                        string
+	pid                       int
+	pidStartTime              int64
+	removedHookCleanupPending bool
 }
 
 func (sm *SessionManager) cleanupOrphanedProcesses() {
@@ -1262,6 +1263,7 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 
 		candidates = append(candidates, orphanCandidate{
 			id: id, pid: sess.PID, pidStartTime: sess.PIDStartTime,
+			removedHookCleanupPending: sess.RemovedHookCleanupPending,
 		})
 	}
 	sm.mu.Unlock()
@@ -1280,6 +1282,32 @@ func (sm *SessionManager) cleanupOrphanedProcesses() {
 				sess.PIDStartTime = 0
 				sm.setStopReasonLocked(c.id, sess, StopReasonCrash)
 				applyLifecycleSummaryLocked(sess, "Orphaned process had already exited")
+			}
+			sm.mu.Unlock()
+
+			continue
+		}
+
+		// A cold restart has no child handle that reserves this PID/PGID
+		// generation. Even after a matching start-time check, the leader could
+		// exit and its numeric process group could be reused before either the
+		// first signal or a later escalation. Removed-hook cleanup must therefore
+		// stay unresolved for a live non-child instead of risking a signal to an
+		// unrelated process group. The exec-upgrade path owns the child and
+		// resolves it before clearing this durable marker.
+		if c.removedHookCleanupPending {
+			sm.log.Warn("cannot safely signal removed-hook process after cold restart",
+				"id", c.id, "pid", c.pid,
+				"recorded_start_time", c.pidStartTime)
+			sm.mu.Lock()
+			if sess := sm.state.Sessions[c.id]; sess != nil && sess.PID == c.pid &&
+				sess.PIDStartTime == c.pidStartTime && sess.RemovedHookCleanupPending {
+				sess.Status = StatusErrored
+				sess.StatusChangedAt = time.Now()
+				sm.setStopReasonLocked(c.id, sess, StopReasonCrash)
+				applyLifecycleSummaryLocked(sess, fmt.Sprintf(
+					"Removed-hook process (PID %d) — cold-start identity cannot be reserved; manual cleanup needed",
+					c.pid))
 			}
 			sm.mu.Unlock()
 

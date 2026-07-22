@@ -4214,6 +4214,45 @@ func TestCleanupOrphanedProcessesRetriesErroredUpgradeOwnership(t *testing.T) {
 	}
 }
 
+func TestCleanupOrphanedProcessesDoesNotSignalRemovedHookProcessAfterColdRestart(t *testing.T) {
+	sm := sleeperSM(t)
+	cmd := startSleeperGroup(t)
+	pid := cmd.Process.Pid
+
+	start, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	var groupCalls int
+	withProcKill(t, func(target int, signal syscall.Signal) error {
+		if target == -pid {
+			groupCalls++
+			return syscall.EPERM
+		}
+
+		return syscall.Kill(target, signal)
+	})
+
+	sm.state.Sessions["canny"] = &SessionState{
+		ID: "canny", Status: StatusErrored, PID: pid, PIDStartTime: start,
+		RemovedHookCleanupPending: true,
+	}
+	sm.cleanupOrphanedProcesses()
+
+	if groupCalls != 0 {
+		t.Fatalf("cold-start cleanup made %d process-group calls; want none without a reserved generation", groupCalls)
+	}
+	if !isProcessAlive(pid) {
+		t.Fatal("cold-start cleanup killed the unreserved removed-hook process")
+	}
+
+	state, _ := sm.Get("canny")
+	if state.Status != StatusErrored || state.PID != pid || !state.RemovedHookCleanupPending {
+		t.Fatalf("unresolved removed-hook ownership was not retained: %+v", state)
+	}
+}
+
 func TestCleanupOrphanedProcessesPersistsAlreadyDeadOwnership(t *testing.T) {
 	sm := sleeperSM(t)
 	sm.state.Sessions["canny"] = &SessionState{
