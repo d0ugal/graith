@@ -294,6 +294,7 @@ func (sm *SessionManager) injectMCPConfig(agentName, sessionID string, mcpServer
 	if len(mcpServers) == 0 {
 		return nil, nil
 	}
+
 	if agentName != "claude" && agentName != "codex" {
 		return nil, nil
 	}
@@ -309,6 +310,7 @@ func (sm *SessionManager) injectMCPConfig(agentName, sessionID string, mcpServer
 		if err != nil {
 			return nil, err
 		}
+
 		replaceMCPProxyIdentityEnv(sessionEnv, aliases)
 
 		sm.log.Info("injected mcp config", "session_id", sessionID, "mcp_config", mcpConfigPath, "mcp_servers", len(mcpServers))
@@ -319,6 +321,7 @@ func (sm *SessionManager) injectMCPConfig(agentName, sessionID string, mcpServer
 		if err != nil {
 			return nil, err
 		}
+
 		replaceMCPProxyIdentityEnv(sessionEnv, aliases)
 
 		if len(skipped) > 0 {
@@ -394,6 +397,7 @@ func newMCPProxyIdentityEnv(sessionEnv map[string]string, entropy io.Reader) (mc
 	}
 
 	prefix := mcpProxyIdentityEnvPrefix + strings.ToUpper(hex.EncodeToString(nonce[:]))
+
 	names := mcpProxyIdentityEnv{
 		SessionID:  prefix + "_SESSION_ID",
 		Token:      prefix + "_TOKEN",
@@ -426,6 +430,7 @@ func replaceMCPProxyIdentityEnv(sessionEnv, aliases map[string]string) {
 			delete(sessionEnv, name)
 		}
 	}
+
 	for name, value := range aliases {
 		sessionEnv[name] = value
 	}
@@ -602,6 +607,7 @@ func appendInjectedHookArgs(launchArgs, hookArgs []string) []string {
 			if bypassPresent {
 				continue
 			}
+
 			bypassPresent = true
 		}
 

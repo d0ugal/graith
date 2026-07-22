@@ -275,6 +275,7 @@ func TestBuildEnvNoDuplicateKeys(t *testing.T) {
 func TestBuildEnvFiltersDeniedInheritedPrefixes(t *testing.T) {
 	t.Setenv("GRAITH_MCP_AULD_TOKEN", "parent-secret")
 	t.Setenv("GRAITH_PASSTHROUGH", "bide-wi-me")
+
 	if got := envMap(buildEnv(nil, nil))["GRAITH_MCP_AULD_TOKEN"]; got != "parent-secret" {
 		t.Fatalf("raw PTY inheritance changed: MCP alias = %q, want parent-secret", got)
 	}
@@ -286,9 +287,11 @@ func TestBuildEnvFiltersDeniedInheritedPrefixes(t *testing.T) {
 	if _, ok := env["GRAITH_MCP_AULD_TOKEN"]; ok {
 		t.Error("denied inherited MCP alias survived")
 	}
+
 	if got := env["GRAITH_MCP_BRAW_TOKEN"]; got != "launch-secret" {
 		t.Errorf("explicit MCP alias = %q, want launch-secret", got)
 	}
+
 	if got := env["GRAITH_PASSTHROUGH"]; got != "bide-wi-me" {
 		t.Errorf("unrelated inherited variable = %q, want bide-wi-me", got)
 	}

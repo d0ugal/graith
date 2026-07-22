@@ -44,11 +44,12 @@ type mcpProxyIdentity struct {
 
 func mcpProxyIdentityFromEnv(names []string, lookup func(string) (string, bool)) (mcpProxyIdentity, error) {
 	if len(names) != 4 {
-		return mcpProxyIdentity{}, fmt.Errorf("mcp proxy requires four identity environment aliases")
+		return mcpProxyIdentity{}, errors.New("mcp proxy requires four identity environment aliases")
 	}
 
 	wantSuffixes := []string{"SESSION_ID", "TOKEN", "PROFILE", "SOCKET_PATH"}
 	values := make([]string, len(names))
+
 	var prefix string
 
 	for i, name := range names {
@@ -56,16 +57,18 @@ func mcpProxyIdentityFromEnv(names []string, lookup func(string) (string, bool))
 		if len(matches) != 3 || matches[2] != wantSuffixes[i] {
 			return mcpProxyIdentity{}, fmt.Errorf("invalid MCP identity environment alias %q", name)
 		}
+
 		if i == 0 {
 			prefix = matches[1]
 		} else if matches[1] != prefix {
-			return mcpProxyIdentity{}, fmt.Errorf("MCP identity environment aliases must share one nonce")
+			return mcpProxyIdentity{}, errors.New("MCP identity environment aliases must share one nonce")
 		}
 
 		value, ok := lookup(name)
 		if !ok || (wantSuffixes[i] != "PROFILE" && value == "") {
 			return mcpProxyIdentity{}, fmt.Errorf("required MCP identity environment alias %s is missing or empty", name)
 		}
+
 		values[i] = value
 	}
 
@@ -129,6 +132,7 @@ func runMCPProxy(serverName string, identity mcpProxyIdentity) error {
 
 		// Emit JSON-RPC error so agents don't hang waiting for a response.
 		writeJSONRPCError(os.Stdout, nil, -32603, fmt.Sprintf("MCP server %q temporarily unavailable", serverName))
+
 		safeDiagnostic := redactMCPProxyDiagnostic(err.Error(), identity)
 		fmt.Fprintf(os.Stderr, "mcp-proxy: connection lost: %s, reconnecting in %s\n", safeDiagnostic, backoff)
 
@@ -161,6 +165,7 @@ func redactMCPProxyDiagnostic(message string, identity mcpProxyIdentity) string 
 
 	boundedValues := []string{identity.sessionID, identity.profile}
 	sort.Slice(boundedValues, func(i, j int) bool { return len(boundedValues[i]) > len(boundedValues[j]) })
+
 	for _, value := range boundedValues {
 		message = redactDelimitedMCPProxyValue(message, value)
 	}
@@ -174,6 +179,7 @@ func redactDelimitedMCPProxyValue(message, value string) string {
 	}
 
 	var redacted strings.Builder
+
 	for offset := 0; offset < len(message); {
 		relative := strings.Index(message[offset:], value)
 		if relative < 0 {
@@ -182,11 +188,14 @@ func redactDelimitedMCPProxyValue(message, value string) string {
 		}
 
 		start := offset + relative
+
 		end := start + len(value)
 		if mcpProxyValueBoundary(message, start-1) && mcpProxyValueBoundary(message, end) {
 			redacted.WriteString(message[offset:start])
 			redacted.WriteString("[redacted]")
+
 			offset = end
+
 			continue
 		}
 
@@ -205,7 +214,8 @@ func mcpProxyValueBoundary(message string, index int) bool {
 	}
 
 	b := message[index]
-	return !((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9'))
+
+	return (b < 'a' || b > 'z') && (b < 'A' || b > 'Z') && (b < '0' || b > '9')
 }
 
 func isPermanentError(err error) bool {

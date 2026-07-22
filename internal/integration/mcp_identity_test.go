@@ -192,10 +192,12 @@ func TestManagedGraithMCPPreservesCallerIdentity(t *testing.T) {
 		managedMCPAliasNames[2]: "wrong",
 		managedMCPAliasNames[3]: env.socket,
 	})
+
 	wrongProfileOutput, wrongProfileErr := wrongProfileCmd.CombinedOutput()
 	if wrongProfileErr == nil {
 		t.Fatal("wrong aliased profile unexpectedly connected")
 	}
+
 	if bytes.Contains(wrongProfileOutput, []byte(managedMCPCallerToken)) {
 		t.Fatal("wrong-profile diagnostic exposed the token value")
 	}

@@ -840,6 +840,7 @@ func (s *Session) waitLoop() {
 // buildEnv mirrors pty.buildEnv: overlay the extra vars on the parent env.
 func buildEnv(extra map[string]string, inheritedEnvDenyPrefixes []string) []string {
 	parent := os.Environ()
+
 	env := make([]string, 0, len(parent)+len(extra))
 	for _, entry := range parent {
 		name, _, ok := strings.Cut(entry, "=")
@@ -847,12 +848,15 @@ func buildEnv(extra map[string]string, inheritedEnvDenyPrefixes []string) []stri
 			if _, overridden := extra[name]; overridden {
 				continue
 			}
+
 			if hasAnyPrefix(name, inheritedEnvDenyPrefixes) {
 				continue
 			}
 		}
+
 		env = append(env, entry)
 	}
+
 	for k, v := range extra {
 		env = append(env, k+"="+v)
 	}

@@ -71,13 +71,16 @@ func waitDone(t *testing.T, s *Session, d time.Duration) {
 func TestBuildEnvFiltersDeniedInheritedPrefixes(t *testing.T) {
 	t.Setenv("GRAITH_MCP_AULD_TOKEN", "parent-secret")
 	t.Setenv("GRAITH_PASSTHROUGH", "bide-wi-me")
+
 	rawInherited := false
+
 	for _, entry := range buildEnv(nil, nil) {
 		if entry == "GRAITH_MCP_AULD_TOKEN=parent-secret" {
 			rawInherited = true
 			break
 		}
 	}
+
 	if !rawInherited {
 		t.Fatal("raw headless inheritance dropped MCP alias")
 	}
@@ -96,9 +99,11 @@ func TestBuildEnvFiltersDeniedInheritedPrefixes(t *testing.T) {
 	if _, ok := values["GRAITH_MCP_AULD_TOKEN"]; ok {
 		t.Error("denied inherited MCP alias survived")
 	}
+
 	if got := values["GRAITH_MCP_BRAW_TOKEN"]; got != "launch-secret" {
 		t.Errorf("explicit MCP alias = %q, want launch-secret", got)
 	}
+
 	if got := values["GRAITH_PASSTHROUGH"]; got != "bide-wi-me" {
 		t.Errorf("unrelated inherited variable = %q, want bide-wi-me", got)
 	}
@@ -114,6 +119,7 @@ func TestBuildEnvExplicitValuesReplaceInheritedWithoutDuplicates(t *testing.T) {
 
 	counts := make(map[string]int)
 	values := make(map[string]string)
+
 	for _, entry := range env {
 		if name, value, ok := strings.Cut(entry, "="); ok {
 			counts[name]++
@@ -124,9 +130,11 @@ func TestBuildEnvExplicitValuesReplaceInheritedWithoutDuplicates(t *testing.T) {
 	if got := counts["GRAITH_SESSION_ID"]; got != 1 {
 		t.Fatalf("GRAITH_SESSION_ID entries = %d, want exactly one", got)
 	}
+
 	if got := values["GRAITH_SESSION_ID"]; got != "braw-id" {
 		t.Errorf("GRAITH_SESSION_ID = %q, want explicit braw-id", got)
 	}
+
 	if got := values["GRAITH_PASSTHROUGH"]; got != "bide-wi-me" {
 		t.Errorf("unrelated inherited variable = %q, want bide-wi-me", got)
 	}
@@ -140,6 +148,7 @@ func TestBuildEnvIgnoresEmptyDenyPrefix(t *testing.T) {
 			return
 		}
 	}
+
 	t.Fatal("empty deny prefix filtered parent environment")
 }
 

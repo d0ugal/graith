@@ -279,37 +279,46 @@ func TestCodexHookTrustFlagAcrossLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
+
 	t.Cleanup(func() { stopAndClosePTY(sm, created.ID) })
 	assertArgCount(t, waitForRecordedArgv(t, recordPath, codexHookTrustBypassArg), codexHookTrustBypassArg, 1)
 
 	if err := os.Remove(recordPath); err != nil {
 		t.Fatalf("remove record before fork: %v", err)
 	}
+
 	forked, err := sm.Fork("bairn", created.ID, 24, 80)
 	if err != nil {
 		t.Fatalf("Fork() error = %v", err)
 	}
+
 	t.Cleanup(func() { stopAndClosePTY(sm, forked.ID) })
 	assertArgCount(t, waitForRecordedArgv(t, recordPath, codexHookTrustBypassArg), codexHookTrustBypassArg, 1)
 
 	if err := os.Remove(recordPath); err != nil {
 		t.Fatalf("remove record before resume: %v", err)
 	}
+
 	if err := sm.Stop(created.ID); err != nil {
 		t.Fatalf("Stop() before Resume error = %v", err)
 	}
+
 	waitForStatus(t, sm, created.ID, StatusStopped)
+
 	if _, err := sm.Resume(created.ID, 24, 80); err != nil {
 		t.Fatalf("Resume() error = %v", err)
 	}
+
 	assertArgCount(t, waitForRecordedArgv(t, recordPath, codexHookTrustBypassArg), codexHookTrustBypassArg, 1)
 
 	if err := os.Remove(recordPath); err != nil {
 		t.Fatalf("remove record before restart: %v", err)
 	}
+
 	if _, err := sm.Restart(created.ID, 24, 80); err != nil {
 		t.Fatalf("Restart() error = %v", err)
 	}
+
 	assertArgCount(t, waitForRecordedArgv(t, recordPath, codexHookTrustBypassArg), codexHookTrustBypassArg, 1)
 }
 
@@ -317,11 +326,13 @@ func assertArgCount(t *testing.T, argv []string, arg string, want int) {
 	t.Helper()
 
 	var got int
+
 	for _, candidate := range argv {
 		if candidate == arg {
 			got++
 		}
 	}
+
 	if got != want {
 		t.Fatalf("argv contains %d copies of %q, want %d: %v", got, arg, want, argv)
 	}
@@ -336,6 +347,7 @@ func TestCodexMCPProxyEnvAliasesAcrossLifecycle(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("/bin/sh not available")
 	}
+
 	t.Setenv("GRAITH_MCP_FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF_TOKEN", "stale-parent-token")
 	t.Setenv("GRAITH_MCP_FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF_PROFILE", "stale-parent-profile")
 	t.Setenv("GRAITH_MCP_UNRELATED", "stale-parent-context")
@@ -395,6 +407,7 @@ func TestCodexMCPProxyEnvAliasesAcrossLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read persisted state: %v", err)
 	}
+
 	if strings.Contains(string(stateData), mcpProxyIdentityEnvPrefix) {
 		t.Fatal("persisted session state contains an MCP identity alias")
 	}
@@ -409,15 +422,18 @@ func waitForCodexMCPProxyEnvOverride(t *testing.T, sm *SessionManager, sessionID
 	assertContiguousPair(t, argv, "-c", `mcp_servers.graith.environment_id="local"`)
 
 	var aliases []string
+
 	for _, arg := range argv {
 		const prefix = "mcp_servers.graith.env_vars="
 		if strings.HasPrefix(arg, prefix) {
 			if err := json.Unmarshal([]byte(strings.TrimPrefix(arg, prefix)), &aliases); err != nil {
 				t.Fatalf("decode MCP identity alias names: %v", err)
 			}
+
 			break
 		}
 	}
+
 	if len(aliases) != 4 {
 		t.Fatalf("MCP identity aliases = %v, want exactly four", aliases)
 	}
@@ -437,30 +453,36 @@ func waitForCodexMCPProxyEnvOverride(t *testing.T, sm *SessionManager, sessionID
 			if _, duplicate := env[name]; duplicate {
 				t.Fatalf("session %q environment contains duplicate key %q", sessionID, name)
 			}
+
 			env[name] = value
 		}
 	}
+
 	if got := env["GRAITH_INHERITED_CONTEXT"]; got != "bide-wi-me" {
 		t.Fatalf("session %q unrelated inherited context = %q, want bide-wi-me", sessionID, got)
 	}
 
 	wantValues := []string{sessionID, env["GRAITH_TOKEN"], sm.paths.Profile, sm.paths.SocketPath}
+
 	aliasNameRe := regexp.MustCompile(`^GRAITH_MCP_[A-F0-9]{32}_(SESSION_ID|TOKEN|PROFILE|SOCKET_PATH)$`)
 	for i, alias := range aliases {
 		if !aliasNameRe.MatchString(alias) {
 			t.Fatalf("invalid MCP identity alias name %q", alias)
 		}
+
 		if got, ok := env[alias]; !ok || got != wantValues[i] {
 			t.Fatalf("session %q MCP identity alias %q is absent or has the wrong value", sessionID, alias)
 		}
 	}
 
 	var reserved int
+
 	for name := range env {
 		if strings.HasPrefix(name, mcpProxyIdentityEnvPrefix) {
 			reserved++
 		}
 	}
+
 	if reserved != 4 {
 		t.Fatalf("session %q has %d reserved MCP aliases, want exactly four", sessionID, reserved)
 	}
@@ -487,6 +509,7 @@ func newCodexRecorderManager(t *testing.T, repoDir string, configuredArgs ...str
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
+
 	recorderArgs := append([]string{"-c", script}, configuredArgs...)
 	cfg.Agents["codex"] = config.Agent{
 		NonInteractiveArgs: []string{},

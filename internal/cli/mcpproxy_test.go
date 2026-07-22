@@ -135,13 +135,15 @@ func TestMCPProxyIdentityFromEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mcpProxyIdentityFromEnv() error = %v", err)
 	}
+
 	if identity.sessionID != "canny-session" || identity.token != "dreich-secret-token" || identity.profile != "" || identity.socketPath != "/canny/graith.sock" {
 		t.Fatal("resolved MCP proxy identity does not match aliased values")
 	}
 }
 
 func TestMCPProxyIdentityFromEnvFailsClosed(t *testing.T) {
-	const secret = "thrawn-token-must-not-leak"
+	const secret = "thrawn-token-must-not-leak" //nolint:gosec // Deliberately recognizable test credential for leak assertions.
+
 	names := testMCPProxyIdentityEnvNames()
 
 	tests := []struct {
@@ -183,10 +185,12 @@ func TestMCPProxyIdentityFromEnvFailsClosed(t *testing.T) {
 				value, ok := tt.values[name]
 				return value, ok
 			}
+
 			_, err := mcpProxyIdentityFromEnv(tt.names, lookup)
 			if err == nil {
 				t.Fatal("invalid identity aliases should fail")
 			}
+
 			if strings.Contains(err.Error(), secret) {
 				t.Fatal("identity alias error exposed a token value")
 			}
@@ -209,6 +213,7 @@ func TestRedactMCPProxyDiagnosticPreservesOnlyNonIdentityContext(t *testing.T) {
 			t.Fatalf("redacted diagnostic exposed identity value %q: %q", value, got)
 		}
 	}
+
 	for _, want := range []string{"dial unix", "connection refused"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("redaction removed useful diagnostic context %q: %q", want, got)
@@ -226,6 +231,7 @@ func TestRedactMCPProxyDiagnosticPreservesWordsContainingShortProfile(t *testing
 	message := "profile e at /private/e/graith.sock using dreich-secret-token: connection refused"
 
 	got := redactMCPProxyDiagnostic(message, identity)
+
 	want := "profile [redacted] at [redacted] using [redacted]: connection refused"
 	if got != want {
 		t.Fatalf("redacted diagnostic = %q, want %q", got, want)
@@ -234,6 +240,7 @@ func TestRedactMCPProxyDiagnosticPreservesWordsContainingShortProfile(t *testing
 
 func TestMCPProxyPreRunUsesOnlyAliasedBootstrapContext(t *testing.T) {
 	names := testMCPProxyIdentityEnvNames()
+
 	socketPath := filepath.Join(t.TempDir(), "graith.sock")
 	for name, value := range map[string]string{
 		names[0]: "canny-session",
@@ -253,9 +260,11 @@ func TestMCPProxyPreRunUsesOnlyAliasedBootstrapContext(t *testing.T) {
 	oldCfg, oldPaths, oldOut := cfg, paths, out
 	oldCfgFile, oldJSONOutput, oldAgentMode := cfgFile, jsonOutput, agentMode
 	oldContext := mcpProxyCmd.Context()
+
 	t.Cleanup(func() {
 		cfg, paths, out = oldCfg, oldPaths, oldOut
 		cfgFile, jsonOutput, agentMode = oldCfgFile, oldJSONOutput, oldAgentMode
+
 		mcpProxyCmd.SetContext(oldContext)
 	})
 	mcpProxyCmd.SetContext(context.Background())
@@ -264,6 +273,7 @@ func TestMCPProxyPreRunUsesOnlyAliasedBootstrapContext(t *testing.T) {
 	if err := rootCmd.PersistentPreRunE(mcpProxyCmd, args); err != nil {
 		t.Fatalf("mcp proxy pre-run bootstrap error = %v", err)
 	}
+
 	if paths.Profile != "bothy" || paths.SocketPath != socketPath {
 		t.Fatalf("proxy paths = %+v, want aliased profile/socket", paths)
 	}
@@ -281,6 +291,7 @@ func TestMCPProxyConnectionPaths(t *testing.T) {
 	}
 
 	override := filepath.Join(t.TempDir(), "custom", "..", "graith.sock")
+
 	got, err := mcpProxyConnectionPaths(base, "bothy", override)
 	if err != nil {
 		t.Fatalf("absolute socket override: %v", err)

@@ -627,32 +627,39 @@ func TestCreateOrchestratorFiltersInheritedMCPAliases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("createOrchestrator() error = %v", err)
 	}
+
 	t.Cleanup(func() { stopAndClosePTY(sm, created.ID) })
 
 	sm.mu.RLock()
 	driver := sm.sessions[created.ID]
 	sm.mu.RUnlock()
+
 	ptySession, ok := driver.(*grpty.Session)
 	if !ok {
 		t.Fatalf("orchestrator driver = %T, want *pty.Session", driver)
 	}
 
 	contextFound := false
+
 	for _, entry := range ptySession.Cmd.Env {
 		name, value, ok := strings.Cut(entry, "=")
 		if !ok {
 			continue
 		}
+
 		if strings.HasPrefix(name, mcpProxyIdentityEnvPrefix) {
 			t.Fatalf("orchestrator inherited reserved MCP alias %q", name)
 		}
+
 		if name == "GRAITH_INHERITED_CONTEXT" && value != "bide-wi-me" {
 			t.Fatalf("unrelated inherited context = %q, want bide-wi-me", value)
 		}
+
 		if name == "GRAITH_INHERITED_CONTEXT" {
 			contextFound = true
 		}
 	}
+
 	if !contextFound {
 		t.Fatal("orchestrator dropped unrelated inherited context")
 	}
@@ -660,10 +667,16 @@ func TestCreateOrchestratorFiltersInheritedMCPAliases(t *testing.T) {
 
 func TestCreateOrchestratorDoesNotDuplicateCodexHookTrustFlag(t *testing.T) {
 	dir := t.TempDir()
+
 	codexPath := filepath.Join(dir, "codex")
-	if err := os.WriteFile(codexPath, []byte("#!/bin/sh\nexec cat\n"), 0o700); err != nil {
+	if err := os.WriteFile(codexPath, []byte("#!/bin/sh\nexec cat\n"), 0o600); err != nil {
 		t.Fatalf("write codex recorder: %v", err)
 	}
+
+	if err := os.Chmod(codexPath, 0o700); err != nil { //nolint:gosec // The test fixture must be executable.
+		t.Fatalf("make codex recorder executable: %v", err)
+	}
+
 	cfg := config.Default()
 	cfg.Orchestrator.Enabled = true
 	cfg.Orchestrator.Agent = "codex"
@@ -691,11 +704,13 @@ func TestCreateOrchestratorDoesNotDuplicateCodexHookTrustFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("createOrchestrator() error = %v", err)
 	}
+
 	t.Cleanup(func() { stopAndClosePTY(sm, created.ID) })
 
 	sm.mu.RLock()
 	driver := sm.sessions[created.ID]
 	sm.mu.RUnlock()
+
 	ptySession, ok := driver.(*grpty.Session)
 	if !ok {
 		t.Fatalf("orchestrator driver = %T, want *pty.Session", driver)

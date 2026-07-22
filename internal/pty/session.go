@@ -1812,6 +1812,7 @@ func buildEnv(extra map[string]string, inheritedEnvDenyPrefixes []string) []stri
 			if _, overridden := overrides[k]; overridden {
 				continue
 			}
+
 			if hasAnyPrefix(k, inheritedEnvDenyPrefixes) {
 				continue
 			}

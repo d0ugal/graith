@@ -90,6 +90,7 @@ var rootCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
+
 			cfg = config.Default()
 		} else {
 			if cfgFile != "" {
