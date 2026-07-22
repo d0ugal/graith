@@ -239,7 +239,7 @@ jobs:
           test "$("${RUNNER_TEMP}/zig/zig" version)" = "$zig_version"
       - name: Build the exact Ghostty source pin
         env:
-          GOARCH: ${{ matrix.goarch }}
+          EVIDENCE_ARCH: ${{ matrix.goarch }}
           GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}
           LIBRARY: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}.a
@@ -247,7 +247,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          evidence="${RUNNER_TEMP}/source-build-${GOARCH}.time"
+          evidence="${RUNNER_TEMP}/source-build-${EVIDENCE_ARCH}.time"
           uname -a
           cat /etc/os-release
           lscpu
@@ -281,12 +281,12 @@ jobs:
           zig ar t "$LIBRARY"
       - name: Prove fail-closed archive snapshot and publication
         env:
-          GOARCH: ${{ matrix.goarch }}
+          EVIDENCE_ARCH: ${{ matrix.goarch }}
           GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/archive-policy-${{ matrix.goarch }}
         run: |
           set -euo pipefail
-          evidence="${RUNNER_TEMP}/archive-policy-${GOARCH}.time"
+          evidence="${RUNNER_TEMP}/archive-policy-${EVIDENCE_ARCH}.time"
           if ! /usr/bin/time -v -o "$evidence" \
             scripts/libghostty-native.sh test-source-archive-policy; then
             cat "$evidence"
