@@ -146,16 +146,66 @@ func runMCPProxy(serverName string, identity mcpProxyIdentity) error {
 }
 
 func redactMCPProxyDiagnostic(message string, identity mcpProxyIdentity) string {
-	values := []string{identity.sessionID, identity.token, identity.profile, identity.socketPath}
-	sort.Slice(values, func(i, j int) bool { return len(values[i]) > len(values[j]) })
+	// Tokens and socket paths are sufficiently specific to replace everywhere.
+	// Session IDs and profile names can be short ordinary words (a one-character
+	// profile is valid), so redact those only as delimited values rather than
+	// destroying unrelated diagnostics such as "connection refused".
+	exactValues := []string{identity.token, identity.socketPath}
+	sort.Slice(exactValues, func(i, j int) bool { return len(exactValues[i]) > len(exactValues[j]) })
 
-	for _, value := range values {
+	for _, value := range exactValues {
 		if value != "" {
 			message = strings.ReplaceAll(message, value, "[redacted]")
 		}
 	}
 
+	boundedValues := []string{identity.sessionID, identity.profile}
+	sort.Slice(boundedValues, func(i, j int) bool { return len(boundedValues[i]) > len(boundedValues[j]) })
+	for _, value := range boundedValues {
+		message = redactDelimitedMCPProxyValue(message, value)
+	}
+
 	return message
+}
+
+func redactDelimitedMCPProxyValue(message, value string) string {
+	if value == "" {
+		return message
+	}
+
+	var redacted strings.Builder
+	for offset := 0; offset < len(message); {
+		relative := strings.Index(message[offset:], value)
+		if relative < 0 {
+			redacted.WriteString(message[offset:])
+			break
+		}
+
+		start := offset + relative
+		end := start + len(value)
+		if mcpProxyValueBoundary(message, start-1) && mcpProxyValueBoundary(message, end) {
+			redacted.WriteString(message[offset:start])
+			redacted.WriteString("[redacted]")
+			offset = end
+			continue
+		}
+
+		// Keep a non-delimited match and advance past it so overlapping ordinary
+		// words cannot loop forever.
+		redacted.WriteString(message[offset:end])
+		offset = end
+	}
+
+	return redacted.String()
+}
+
+func mcpProxyValueBoundary(message string, index int) bool {
+	if index < 0 || index >= len(message) {
+		return true
+	}
+
+	b := message[index]
+	return !((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9'))
 }
 
 func isPermanentError(err error) bool {

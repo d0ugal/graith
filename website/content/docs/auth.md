@@ -24,12 +24,13 @@ For the auto-injected [graith MCP server]({{< relref "mcp" >}}), the daemon
 also carries the authenticated proxy caller into its private `gr mcp` child
 environment. Each MCP tool connection therefore authenticates as the calling
 session, not as the daemon's ambient process identity or the local human.
-For each proxy launch, graith creates unpredictable environment aliases for the
-session ID and token, plus the profile and exact daemon socket path. Only alias
-names are written into launch arguments or generated agent configuration; their
-values remain in the inherited process environment. Codex launches stdio MCP
-children with a restricted environment, so graith's per-session overrides name
-these aliases explicitly in `env_vars`. The proxy accepts only that explicit
+For each managed agent launch, graith creates one unpredictable environment
+alias set for the session ID and token, plus the profile and exact daemon socket
+path. All graith proxy entries for that launch share the set. Only alias names
+are written into launch arguments or generated agent configuration; their values
+remain in the inherited process environment. Codex launches stdio MCP children
+with a restricted environment, so graith's per-session overrides name these
+aliases explicitly in `env_vars`. The proxy accepts only that explicit
 four-alias set and never falls back to canonical `GRAITH_*` variables or a human
 token. Graith also forces this credential-bearing proxy to execute in Codex's
 local environment.

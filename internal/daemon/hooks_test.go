@@ -549,6 +549,36 @@ func TestInjectCodexHooks(t *testing.T) {
 	}
 }
 
+func TestAppendInjectedHookArgsAddsAtMostOneGraithTrustFlag(t *testing.T) {
+	hookArgs := []string{"-c", "hooks.Stop=[]", codexHookTrustBypassArg, codexHookTrustBypassArg}
+
+	tests := []struct {
+		name       string
+		launchArgs []string
+		want       []string
+	}{
+		{
+			name:       "graith adds one when absent",
+			launchArgs: []string{"--model", "braw"},
+			want:       []string{"--model", "braw", "-c", "hooks.Stop=[]", codexHookTrustBypassArg},
+		},
+		{
+			name:       "configured flag suppresses graith copy",
+			launchArgs: []string{codexHookTrustBypassArg, "--model", "braw"},
+			want:       []string{codexHookTrustBypassArg, "--model", "braw", "-c", "hooks.Stop=[]"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := appendInjectedHookArgs(slices.Clone(tt.launchArgs), hookArgs)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("appendInjectedHookArgs() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCodexHookOverrideContent(t *testing.T) {
 	sm := newTestSessionManagerWithDataDir(t)
 

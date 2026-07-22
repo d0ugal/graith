@@ -212,7 +212,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 			return SessionState{}, fmt.Errorf("inject orchestrator command-policy hook: %w", err)
 		}
 
-		expandedArgs = append(expandedArgs, hookArgs...)
+		expandedArgs = appendInjectedHookArgs(expandedArgs, hookArgs)
 
 		for key, value := range hookEnv {
 			env[key] = value

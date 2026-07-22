@@ -260,6 +260,73 @@ func TestCodexModelPassedOnLaunchAndResume(t *testing.T) {
 	assertContiguousPair(t, argv, "--model", model)
 }
 
+// TestCodexHookTrustFlagAcrossLifecycle locks the final-argv contract for a
+// user who already configured Codex's accepted hook-trust flag. Graith still
+// injects its hooks, but must not append a second flag: Codex 0.145 rejects
+// repeated copies with exit status 2 before hooks or MCP can start.
+func TestCodexHookTrustFlagAcrossLifecycle(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh not available")
+	}
+
+	repoDir := initTempGitRepo(t)
+	sm, recordPath := newCodexRecorderManager(t, repoDir, codexHookTrustBypassArg)
+
+	created, err := sm.Create(CreateOpts{
+		Name: "canny", AgentName: "codex", RepoPath: repoDir, BaseBranch: "main",
+		AgentHooks: true, SkipModelValidation: true, Rows: 24, Cols: 80,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	t.Cleanup(func() { stopAndClosePTY(sm, created.ID) })
+	assertArgCount(t, waitForRecordedArgv(t, recordPath, codexHookTrustBypassArg), codexHookTrustBypassArg, 1)
+
+	if err := os.Remove(recordPath); err != nil {
+		t.Fatalf("remove record before fork: %v", err)
+	}
+	forked, err := sm.Fork("bairn", created.ID, 24, 80)
+	if err != nil {
+		t.Fatalf("Fork() error = %v", err)
+	}
+	t.Cleanup(func() { stopAndClosePTY(sm, forked.ID) })
+	assertArgCount(t, waitForRecordedArgv(t, recordPath, codexHookTrustBypassArg), codexHookTrustBypassArg, 1)
+
+	if err := os.Remove(recordPath); err != nil {
+		t.Fatalf("remove record before resume: %v", err)
+	}
+	if err := sm.Stop(created.ID); err != nil {
+		t.Fatalf("Stop() before Resume error = %v", err)
+	}
+	waitForStatus(t, sm, created.ID, StatusStopped)
+	if _, err := sm.Resume(created.ID, 24, 80); err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	assertArgCount(t, waitForRecordedArgv(t, recordPath, codexHookTrustBypassArg), codexHookTrustBypassArg, 1)
+
+	if err := os.Remove(recordPath); err != nil {
+		t.Fatalf("remove record before restart: %v", err)
+	}
+	if _, err := sm.Restart(created.ID, 24, 80); err != nil {
+		t.Fatalf("Restart() error = %v", err)
+	}
+	assertArgCount(t, waitForRecordedArgv(t, recordPath, codexHookTrustBypassArg), codexHookTrustBypassArg, 1)
+}
+
+func assertArgCount(t *testing.T, argv []string, arg string, want int) {
+	t.Helper()
+
+	var got int
+	for _, candidate := range argv {
+		if candidate == arg {
+			got++
+		}
+	}
+	if got != want {
+		t.Fatalf("argv contains %d copies of %q, want %d: %v", got, arg, want, argv)
+	}
+}
+
 // TestCodexMCPProxyEnvAliasesAcrossLifecycle is the daemon-level regression
 // for Codex MCP proxies losing the owning session's identity. Codex clears the
 // environment of stdio MCP children unless variable names are listed in the
@@ -406,7 +473,7 @@ func waitForCodexMCPProxyEnvOverride(t *testing.T, sm *SessionManager, sessionID
 // but keyed on codex). The option_args groups carry over from the embedded
 // default so the model/typed-option adapter still fires (issue #1236); only the
 // launch command is swapped for the recorder script.
-func newCodexRecorderManager(t *testing.T, repoDir string) (*SessionManager, string) {
+func newCodexRecorderManager(t *testing.T, repoDir string, configuredArgs ...string) (*SessionManager, string) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -420,12 +487,13 @@ func newCodexRecorderManager(t *testing.T, repoDir string) (*SessionManager, str
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
+	recorderArgs := append([]string{"-c", script}, configuredArgs...)
 	cfg.Agents["codex"] = config.Agent{
 		NonInteractiveArgs: []string{},
 		Command:            "sh",
-		Args:               []string{"-c", script},
-		ResumeArgs:         []string{"-c", script},
-		ForkArgs:           []string{"-c", script},
+		Args:               append([]string(nil), recorderArgs...),
+		ResumeArgs:         append([]string(nil), recorderArgs...),
+		ForkArgs:           append([]string(nil), recorderArgs...),
 		Env:                map[string]string{"GRAITH_ARGS_RECORD": recordPath},
 		OptionArgs:         cfg.Agents["codex"].OptionArgs,
 		AddDirArgs:         cfg.Agents["codex"].AddDirArgs,

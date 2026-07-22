@@ -506,6 +506,8 @@ type codexHookGroup struct {
 	timeout  int
 }
 
+const codexHookTrustBypassArg = "--dangerously-bypass-hook-trust"
+
 // injectCodexHooks builds the Codex session-config overrides that register
 // graith's lifecycle hooks and returns them as extra launch args.
 //
@@ -581,11 +583,32 @@ func (sm *SessionManager) injectCodexHooksWithTimeout(sessionID string, lifecycl
 	// else those sources might do is the graith sandbox (see [sandbox]), the same
 	// boundary that already confines the agent itself. Codex has no way today to
 	// trust only the session-config hooks without bypassing trust globally.
-	extraArgs = append(extraArgs, "--dangerously-bypass-hook-trust")
+	extraArgs = append(extraArgs, codexHookTrustBypassArg)
 
 	sm.log.Info("injected codex hooks", "session_id", sessionID, "events", len(events))
 
 	return extraArgs, nil, nil
+}
+
+// appendInjectedHookArgs adds generated hook arguments without adding a second
+// copy of Codex's process-wide hook-trust flag when the configured launch argv
+// already contains it. Codex rejects repeated copies before startup. Other
+// configured arguments, including any duplicates supplied by the user, remain
+// untouched.
+func appendInjectedHookArgs(launchArgs, hookArgs []string) []string {
+	bypassPresent := slices.Contains(launchArgs, codexHookTrustBypassArg)
+	for _, arg := range hookArgs {
+		if arg == codexHookTrustBypassArg {
+			if bypassPresent {
+				continue
+			}
+			bypassPresent = true
+		}
+
+		launchArgs = append(launchArgs, arg)
+	}
+
+	return launchArgs
 }
 
 // codexHookOverrideValue builds the inline-TOML value for a `hooks.<Event>`

@@ -216,6 +216,22 @@ func TestRedactMCPProxyDiagnosticPreservesOnlyNonIdentityContext(t *testing.T) {
 	}
 }
 
+func TestRedactMCPProxyDiagnosticPreservesWordsContainingShortProfile(t *testing.T) {
+	identity := mcpProxyIdentity{
+		sessionID:  "canny-session",
+		token:      "dreich-secret-token",
+		profile:    "e",
+		socketPath: "/private/e/graith.sock",
+	}
+	message := "profile e at /private/e/graith.sock using dreich-secret-token: connection refused"
+
+	got := redactMCPProxyDiagnostic(message, identity)
+	want := "profile [redacted] at [redacted] using [redacted]: connection refused"
+	if got != want {
+		t.Fatalf("redacted diagnostic = %q, want %q", got, want)
+	}
+}
+
 func TestMCPProxyPreRunUsesOnlyAliasedBootstrapContext(t *testing.T) {
 	names := testMCPProxyIdentityEnvNames()
 	socketPath := filepath.Join(t.TempDir(), "graith.sock")

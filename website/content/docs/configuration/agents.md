@@ -238,6 +238,13 @@ args = ["--model", "{model}"]
 # … profile, reasoning_effort, service_tier, web_search …
 ```
 
+When graith injects Codex lifecycle or command-policy hooks, it also enables
+Codex's process-wide `--dangerously-bypass-hook-trust` option so those generated
+hooks can run unattended. If that exact option is already present in the
+configured launch arguments, graith preserves it and does not add another copy.
+This does not silence Codex's trust warning and does not change arbitrary
+duplicates in user configuration.
+
 ### OpenCode
 
 ```toml

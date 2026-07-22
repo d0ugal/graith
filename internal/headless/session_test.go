@@ -104,6 +104,34 @@ func TestBuildEnvFiltersDeniedInheritedPrefixes(t *testing.T) {
 	}
 }
 
+func TestBuildEnvExplicitValuesReplaceInheritedWithoutDuplicates(t *testing.T) {
+	t.Setenv("GRAITH_SESSION_ID", "auld-id")
+	t.Setenv("GRAITH_PASSTHROUGH", "bide-wi-me")
+
+	env := buildEnv(map[string]string{
+		"GRAITH_SESSION_ID": "braw-id",
+	}, nil)
+
+	counts := make(map[string]int)
+	values := make(map[string]string)
+	for _, entry := range env {
+		if name, value, ok := strings.Cut(entry, "="); ok {
+			counts[name]++
+			values[name] = value
+		}
+	}
+
+	if got := counts["GRAITH_SESSION_ID"]; got != 1 {
+		t.Fatalf("GRAITH_SESSION_ID entries = %d, want exactly one", got)
+	}
+	if got := values["GRAITH_SESSION_ID"]; got != "braw-id" {
+		t.Errorf("GRAITH_SESSION_ID = %q, want explicit braw-id", got)
+	}
+	if got := values["GRAITH_PASSTHROUGH"]; got != "bide-wi-me" {
+		t.Errorf("unrelated inherited variable = %q, want bide-wi-me", got)
+	}
+}
+
 func TestBuildEnvIgnoresEmptyDenyPrefix(t *testing.T) {
 	t.Setenv("GRAITH_PASSTHROUGH", "bide-wi-me")
 

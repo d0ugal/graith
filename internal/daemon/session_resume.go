@@ -762,7 +762,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 			return SessionState{}, fmt.Errorf("inject agent hooks: %w", err)
 		}
 
-		expandedArgs = append(expandedArgs, hookArgs...)
+		expandedArgs = appendInjectedHookArgs(expandedArgs, hookArgs)
 
 		for k, v := range hookEnv {
 			env[k] = v

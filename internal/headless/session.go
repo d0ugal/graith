@@ -843,8 +843,13 @@ func buildEnv(extra map[string]string, inheritedEnvDenyPrefixes []string) []stri
 	env := make([]string, 0, len(parent)+len(extra))
 	for _, entry := range parent {
 		name, _, ok := strings.Cut(entry, "=")
-		if ok && hasAnyPrefix(name, inheritedEnvDenyPrefixes) {
-			continue
+		if ok {
+			if _, overridden := extra[name]; overridden {
+				continue
+			}
+			if hasAnyPrefix(name, inheritedEnvDenyPrefixes) {
+				continue
+			}
 		}
 		env = append(env, entry)
 	}

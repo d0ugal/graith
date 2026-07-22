@@ -658,6 +658,52 @@ func TestCreateOrchestratorFiltersInheritedMCPAliases(t *testing.T) {
 	}
 }
 
+func TestCreateOrchestratorDoesNotDuplicateCodexHookTrustFlag(t *testing.T) {
+	dir := t.TempDir()
+	codexPath := filepath.Join(dir, "codex")
+	if err := os.WriteFile(codexPath, []byte("#!/bin/sh\nexec cat\n"), 0o700); err != nil {
+		t.Fatalf("write codex recorder: %v", err)
+	}
+	cfg := config.Default()
+	cfg.Orchestrator.Enabled = true
+	cfg.Orchestrator.Agent = "codex"
+	cfg.Sandbox.Enabled = false
+	cfg.CommandPolicy = config.CommandPolicy{
+		Backend: "builtin",
+		Builtin: config.CommandPolicyBuiltin{Allow: []any{"echo @*"}},
+	}
+	agent := cfg.Agents["codex"]
+	agent.Command = codexPath
+	agent.Args = []string{codexHookTrustBypassArg}
+	agent.NonInteractiveArgs = nil
+	cfg.Agents["codex"] = agent
+
+	sm := NewSessionManager(cfg, config.Paths{
+		StateFile:  filepath.Join(dir, "state.json"),
+		DataDir:    dir,
+		LogDir:     dir,
+		RuntimeDir: dir,
+		SocketPath: filepath.Join(dir, "graith.sock"),
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sm.sandboxResolver = func(string) (bool, error) { return false, nil }
+
+	created, err := sm.createOrchestrator(context.Background())
+	if err != nil {
+		t.Fatalf("createOrchestrator() error = %v", err)
+	}
+	t.Cleanup(func() { stopAndClosePTY(sm, created.ID) })
+
+	sm.mu.RLock()
+	driver := sm.sessions[created.ID]
+	sm.mu.RUnlock()
+	ptySession, ok := driver.(*grpty.Session)
+	if !ok {
+		t.Fatalf("orchestrator driver = %T, want *pty.Session", driver)
+	}
+
+	assertArgCount(t, ptySession.Cmd.Args, codexHookTrustBypassArg, 1)
+}
+
 func TestCreateOrchestratorRejectsUnavailableCommandPolicy(t *testing.T) {
 	sm := newOrchTestSM(t)
 	cfg := config.Default()
