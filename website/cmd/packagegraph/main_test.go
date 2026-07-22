@@ -198,8 +198,22 @@ func TestRunRejectsUnexpectedArguments(t *testing.T) {
 }
 
 func TestCanonicalGoEnvReplacesTarget(t *testing.T) {
-	got := canonicalGoEnv([]string{"PATH=/bin", "GOOS=darwin", "GOARCH=arm64", "CGO_ENABLED=1"})
-	want := []string{"PATH=/bin", "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0"}
+	got := canonicalGoEnv([]string{
+		"PATH=/bin",
+		"GOOS=darwin",
+		"GOARCH=arm64",
+		"CGO_ENABLED=1",
+		"GOFLAGS=-tags=thrawn -mod=mod",
+		"GOWORK=/tmp/dreich.work",
+	})
+	want := []string{
+		"PATH=/bin",
+		"GOOS=linux",
+		"GOARCH=amd64",
+		"CGO_ENABLED=0",
+		"GOFLAGS=-mod=readonly",
+		"GOWORK=off",
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("environment = %#v, want %#v", got, want)
 	}

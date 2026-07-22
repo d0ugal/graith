@@ -130,14 +130,24 @@ func runGo(ctx context.Context, repo string, args ...string) ([]byte, error) {
 }
 
 func canonicalGoEnv(environ []string) []string {
-	result := make([]string, 0, len(environ)+3)
+	result := make([]string, 0, len(environ)+5)
 	for _, value := range environ {
-		if strings.HasPrefix(value, "GOOS=") || strings.HasPrefix(value, "GOARCH=") || strings.HasPrefix(value, "CGO_ENABLED=") {
+		if strings.HasPrefix(value, "GOOS=") ||
+			strings.HasPrefix(value, "GOARCH=") ||
+			strings.HasPrefix(value, "CGO_ENABLED=") ||
+			strings.HasPrefix(value, "GOFLAGS=") ||
+			strings.HasPrefix(value, "GOWORK=") {
 			continue
 		}
 		result = append(result, value)
 	}
-	return append(result, "GOOS="+graphGOOS, "GOARCH="+graphGOARCH, "CGO_ENABLED=0")
+	return append(result,
+		"GOOS="+graphGOOS,
+		"GOARCH="+graphGOARCH,
+		"CGO_ENABLED=0",
+		"GOFLAGS=-mod=readonly",
+		"GOWORK=off",
+	)
 }
 
 func decodePackages(reader io.Reader) ([]listedPackage, error) {

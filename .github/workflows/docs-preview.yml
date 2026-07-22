@@ -119,6 +119,11 @@ jobs:
                   emit "$f" true
                 fi
               done
+              # The committed graph data renders on one specific nested page.
+              # Include it when regeneration is the only website change.
+              if grep -qx 'website/data/package_dependencies.json' <<<"$changed"; then
+                emit "website/content/docs/contributing/package-dependencies.md" false
+              fi
             fi
           } | jq -s '
             group_by(.url) |
