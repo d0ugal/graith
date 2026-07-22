@@ -3515,6 +3515,10 @@ func validPersistedUpgradeCleanup(key string, session UpgradeSession) bool {
 }
 
 func (sm *SessionManager) rejectPendingUpgradeCleanupLocked(id string) error {
+	if session := sm.state.Sessions[id]; session != nil && session.RemovedHookCleanupPending {
+		return errors.New("session removed-hook cleanup is still pending; verify and stop the recorded process externally, then restart Graith")
+	}
+
 	for _, entry := range sm.state.UpgradeCleanup {
 		if entry.ID == id {
 			return errors.New("session process cleanup from daemon upgrade is still pending")

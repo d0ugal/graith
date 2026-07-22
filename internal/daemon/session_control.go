@@ -42,6 +42,11 @@ func (sm *SessionManager) stopWithReason(id, reason, initiator string) error {
 		sm.mu.Unlock()
 		return fmt.Errorf("session %q not found", id)
 	}
+	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
+		sm.mu.Unlock()
+
+		return err
+	}
 
 	hasLiveProcess := sm.sessions[id] != nil || sessState.PID > 0
 	if status != StatusRunning && (status != StatusErrored || !hasLiveProcess) {
@@ -433,11 +438,11 @@ func (sm *SessionManager) restartWithReasonModeContextLocked(ctx context.Context
 	sm.mu.RLock()
 
 	softDeleted := false
-	cleanupPending := false
+	var cleanupErr error
 
 	if s, ok := sm.state.Sessions[id]; ok {
 		softDeleted = s.IsSoftDeleted()
-		cleanupPending = sm.rejectPendingUpgradeCleanupLocked(id) != nil
+		cleanupErr = sm.rejectPendingUpgradeCleanupLocked(id)
 	}
 
 	sm.mu.RUnlock()
@@ -446,8 +451,8 @@ func (sm *SessionManager) restartWithReasonModeContextLocked(ctx context.Context
 		return SessionState{}, errSoftDeleted(sm.sessionName(id))
 	}
 
-	if cleanupPending {
-		return SessionState{}, errors.New("session process cleanup from daemon upgrade is still pending")
+	if cleanupErr != nil {
+		return SessionState{}, cleanupErr
 	}
 
 	ptySess, hasPTY := sm.GetPTY(id)

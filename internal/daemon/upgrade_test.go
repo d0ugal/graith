@@ -4238,7 +4238,13 @@ func TestCleanupOrphanedProcessesDoesNotSignalRemovedHookProcessAfterColdRestart
 		ID: "canny", Status: StatusErrored, PID: pid, PIDStartTime: start,
 		RemovedHookCleanupPending: true,
 	}
-	sm.cleanupOrphanedProcesses()
+	for attempt := 1; attempt <= 2; attempt++ {
+		sm.cleanupOrphanedProcesses()
+		err := sm.completeRemovedHookCleanup(true)
+		if err == nil || !strings.Contains(err.Error(), "verify and stop that exact process externally") {
+			t.Fatalf("startup attempt %d cleanup error = %v, want actionable unresolved-process refusal", attempt, err)
+		}
+	}
 
 	if groupCalls != 0 {
 		t.Fatalf("cold-start cleanup made %d process-group calls; want none without a reserved generation", groupCalls)
@@ -4250,6 +4256,112 @@ func TestCleanupOrphanedProcessesDoesNotSignalRemovedHookProcessAfterColdRestart
 	state, _ := sm.Get("canny")
 	if state.Status != StatusErrored || state.PID != pid || !state.RemovedHookCleanupPending {
 		t.Fatalf("unresolved removed-hook ownership was not retained: %+v", state)
+	}
+
+	persisted, err := LoadState(sm.paths.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistedState := persisted.Sessions["canny"]
+	if persistedState.Status != StatusErrored || persistedState.PID != pid ||
+		!persistedState.RemovedHookCleanupPending {
+		t.Fatalf("unresolved removed-hook ownership was not retained durably: %+v", persistedState)
+	}
+
+	for operation, run := range map[string]func() error{
+		"resume": func() error {
+			_, err := sm.Resume("canny", 24, 80)
+			return err
+		},
+		"restart": func() error {
+			_, err := sm.Restart("canny", 24, 80)
+			return err
+		},
+		"stop":   func() error { return sm.Stop("canny") },
+		"delete": func() error { return sm.Delete("canny") },
+	} {
+		if err := run(); err == nil || !strings.Contains(err.Error(), "removed-hook cleanup is still pending") {
+			t.Errorf("%s error = %v, want pending-cleanup refusal", operation, err)
+		}
+	}
+
+	if groupCalls != 0 {
+		t.Fatalf("blocked lifecycle operations made %d process-group calls; want none", groupCalls)
+	}
+
+	persisted, err = LoadState(sm.paths.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistedState = persisted.Sessions["canny"]
+	if persistedState.Status != StatusErrored || persistedState.PID != pid ||
+		!persistedState.RemovedHookCleanupPending {
+		t.Fatalf("blocked lifecycle operations changed durable cleanup evidence: %+v", persistedState)
+	}
+}
+
+func TestCleanupOrphanedProcessesRecoversReusedRemovedHookPIDWithoutSignal(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	cmd := startSleeperGroup(t)
+	pid := cmd.Process.Pid
+
+	currentStart, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+	recordedStart := currentStart - 1
+	if recordedStart <= 0 {
+		t.Fatal("process start time is too small for a distinct recorded generation")
+	}
+
+	var groupCalls int
+	withProcKill(t, func(target int, signal syscall.Signal) error {
+		if target == -pid {
+			groupCalls++
+			return syscall.EPERM
+		}
+
+		return syscall.Kill(target, signal)
+	})
+
+	sm.state.Sessions["dreich"] = &SessionState{
+		ID: "dreich", Agent: "claude", Status: StatusErrored,
+		PID: pid, PIDStartTime: recordedStart, RemovedHookCleanupPending: true,
+	}
+	settingsPath := filepath.Join(sm.hookDir("dreich"), "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, []byte(`{"hooks":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.cleanupOrphanedProcesses()
+	state, _ := sm.Get("dreich")
+	if state.Status != StatusStopped || state.PID != 0 || !state.RemovedHookCleanupPending {
+		t.Fatalf("reused PID generation was not safely resolved before artifact cleanup: %+v", state)
+	}
+	if groupCalls != 0 || !isProcessAlive(pid) {
+		t.Fatalf("replacement process was touched: group calls = %d, alive = %v", groupCalls, isProcessAlive(pid))
+	}
+
+	if err := sm.completeRemovedHookCleanup(true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(settingsPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("owned removed-hook artifact still exists: %v", err)
+	}
+	if !isProcessAlive(pid) {
+		t.Fatal("replacement process exited during safe artifact recovery")
+	}
+
+	persisted, err := LoadState(sm.paths.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistedState := persisted.Sessions["dreich"]
+	if persistedState.PID != 0 || persistedState.RemovedHookCleanupPending {
+		t.Fatalf("safe reused-PID recovery was not persisted: %+v", persistedState)
 	}
 }
 

@@ -1269,7 +1269,7 @@ func (sm *SessionManager) completeRemovedHookCleanup(persist bool) error {
 
 	for _, candidate := range candidates {
 		if candidate.pid != 0 {
-			errs = append(errs, fmt.Errorf("session %s still has unresolved process identity PID %d", candidate.id, candidate.pid))
+			errs = append(errs, fmt.Errorf("session %s still has unresolved process identity PID %d; verify and stop that exact process externally, then restart Graith", candidate.id, candidate.pid))
 			continue
 		}
 
