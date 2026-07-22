@@ -4,34 +4,64 @@ on:
   push:
     branches:
       - main
+  pull_request:
 
 permissions:
   contents: read
 
-# Serialise runs. This workflow destructively replaces a single shared `dev`
-# release and rewrites one tap formula, so two overlapping runs (from two close
-# pushes to main) could interleave — e.g. publish assets from one build while
-# pushing a formula whose checksums describe another, leaving the tap referring
-# to bytes that fail Homebrew's SHA-256 verification. We queue rather than
-# cancel-in-progress: cancelling could interrupt the delete→recreate→push
-# sequence after the old release is already gone. GitHub keeps only the newest
-# pending run, so a burst of pushes still converges on the latest commit.
+# Main runs replace one shared release and tap formula, so they must finish in
+# order. Pull-request runs build the same release-shaped archives without
+# publishing and may cancel an older run for the same PR.
 concurrency:
-  group: dev-release
-  cancel-in-progress: false
+  group: dev-release-${{ github.event_name == 'push' && 'publish' || github.event.pull_request.number }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  dev-release:
-    # The native notification helper needs swiftc, lipo, and codesign. The Go
-    # release matrix also needs an Apple Silicon host to link and execute the
-    # pinned libghostty canary. Linux and Intel macOS remain pure-Go builds.
-    runs-on: macos-26
-    permissions:
-      contents: write
+  release-context:
+    name: Select dev release context
+    runs-on: ubuntu-24.04
+    outputs:
+      base_tag: ${{ steps.release.outputs.base_tag }}
+      build_epoch: ${{ steps.release.outputs.build_epoch }}
+      revision: ${{ steps.release.outputs.revision }}
+      version: ${{ steps.release.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - id: release
+        name: Bind one version and revision to every platform job
+        run: |
+          set -euo pipefail
+          revision="$(git rev-parse HEAD)"
+          test "$revision" = "$GITHUB_SHA"
+          base_tag="$(scripts/dev-release-base-tag.sh)"
+          build_epoch="$(date -u +%s)"
+          version="$(scripts/dev-release-version.sh "$base_tag" "$build_epoch")"
+          {
+            echo "base_tag=$base_tag"
+            echo "build_epoch=$build_epoch"
+            echo "revision=$revision"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+          printf 'revision=%s\nversion=%s\n' "$revision" "$version"
+
+  build-darwin:
+    name: Build and verify Darwin dev archives
+    needs: release-context
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      GORELEASER_CURRENT_TAG: ${{ needs.release-context.outputs.base_tag }}
+      GRAITH_DEV_VERSION: ${{ needs.release-context.outputs.version }}
+      RELEASE_REVISION: ${{ needs.release-context.outputs.revision }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -43,6 +73,7 @@ jobs:
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/libghostty-native
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_REVISION"
           test "$(uname -s)-$(uname -m)" = Darwin-arm64
           scripts/libghostty-native.sh test
           scripts/libghostty-native.sh test-metadata-policy
@@ -63,6 +94,7 @@ jobs:
       # requirement. Until then, an entirely absent credential set preserves
       # the legacy direct-spawn dev package. A partial set fails closed.
       - name: Configure optional macOS service signing
+        if: github.event_name == 'push'
         env:
           MACOS_SIGNING_CERTIFICATE: ${{ secrets.MACOS_SIGNING_CERTIFICATE }}
           MACOS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGNING_CERTIFICATE_PASSWORD }}
@@ -119,20 +151,20 @@ jobs:
             echo "GRAITH_SIGNED_SNAPSHOT=true"
           } >> "$GITHUB_ENV"
 
-      - name: Select the stable release base for the dev snapshot
-        shell: bash
+      - name: Configure unsigned pull-request packaging
+        if: github.event_name == 'pull_request'
         run: |
-          set -euo pipefail
-          base_tag="$(scripts/dev-release-base-tag.sh)"
-          echo "GORELEASER_CURRENT_TAG=$base_tag" >> "$GITHUB_ENV"
-          echo "Using $base_tag as the dev snapshot base."
+          {
+            echo "GRAITH_MANAGED_DEV_RELEASE=false"
+            echo "GRAITH_SIGNED_SNAPSHOT=false"
+          } >> "$GITHUB_ENV"
 
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
           version: "~> v2"
           args: release --snapshot --skip=publish --clean -f .goreleaser-dev.yaml
 
-      - name: Verify dev archives
+      - name: Verify Darwin dev archives
         shell: bash
         run: |
           set -euo pipefail
@@ -145,17 +177,18 @@ jobs:
 
           darwin_amd64_archive=dist/graith-dev_darwin_amd64.tar.gz
           darwin_arm64_archive=dist/graith-dev_darwin_arm64.tar.gz
-          darwin_arm64_charm_archive=dist/graith-dev_darwin_arm64_charm.tar.gz
-          linux_archives=(dist/graith-dev_linux_*.tar.gz)
           all_archives=(dist/graith-dev_*.tar.gz)
-          if [ "${#all_archives[@]}" -ne 5 ] || [ "${#linux_archives[@]}" -ne 2 ] || \
-             [ ! -f "$darwin_amd64_archive" ] || [ ! -f "$darwin_arm64_archive" ] || \
-             [ ! -f "$darwin_arm64_charm_archive" ]; then
-            echo "::error::Expected native arm64, Charm arm64 rollback, Intel macOS, and two Linux dev archives"
+          if [ "${#all_archives[@]}" -ne 2 ] || \
+             [ ! -f "$darwin_amd64_archive" ] || [ ! -f "$darwin_arm64_archive" ]; then
+            echo "::error::Expected exactly the Intel and native arm64 Darwin dev archives"
+            exit 1
+          fi
+          if find dist -maxdepth 1 -name '*_charm*' -print -quit | grep -q .; then
+            echo "::error::Dev release produced a separately named rollback archive"
             exit 1
           fi
 
-          for archive in "$darwin_amd64_archive" "$darwin_arm64_archive" "$darwin_arm64_charm_archive"; do
+          for archive in "$darwin_amd64_archive" "$darwin_arm64_archive"; do
             unpacked="$(mktemp -d)"
             tar -xzf "$archive" -C "$unpacked"
             notifier_app="$unpacked/GraithNotifier.app"
@@ -166,12 +199,7 @@ jobs:
             test -x "$notifier"
             lipo "$notifier" -verify_arch arm64 x86_64
             codesign --verify --deep --strict "$notifier_app"
-            if [ "$archive" = "$darwin_arm64_charm_archive" ]; then
-              if [ -e "$service_app" ]; then
-                echo "::error::Charm rollback archive unexpectedly contains Graith.app: $archive"
-                exit 1
-              fi
-            elif [ "$GRAITH_MANAGED_DEV_RELEASE" = true ]; then
+            if [ "$GRAITH_MANAGED_DEV_RELEASE" = true ]; then
               test -d "$service_app"
               test -x "$service_app/Contents/MacOS/gr"
               cmp "$unpacked/gr-dev" "$service_app/Contents/MacOS/gr"
@@ -183,13 +211,12 @@ jobs:
             fi
           done
 
-          revision="$(git rev-parse HEAD)"
           native_unpacked="$(mktemp -d)"
           tar -xzf "$darwin_arm64_archive" -C "$native_unpacked"
           scripts/libghostty-native.sh verify-darwin-arm64-candidate \
-            "$native_unpacked/gr-dev" "$revision"
+            "$native_unpacked/gr-dev" "$RELEASE_REVISION"
           scripts/libghostty-native.sh verify-candidate-spdx \
-            "$native_unpacked/gr-dev" "$revision" \
+            "$native_unpacked/gr-dev" "$RELEASE_REVISION" \
             "$native_unpacked/libghostty-native.spdx.json" gr-dev
           scripts/libghostty-native.sh validate-spdx \
             "$GRAITH_SPDX_VALIDATOR_JAR" \
@@ -199,62 +226,440 @@ jobs:
           cmp "$native_unpacked/THIRD_PARTY_NOTICES.libghostty.md" \
             macos/build/libghostty-native-arm64/THIRD_PARTY_NOTICES.libghostty.md
 
-          rollback_archives=("$darwin_amd64_archive" "$darwin_arm64_charm_archive" "${linux_archives[@]}")
-          for archive in "${rollback_archives[@]}"; do
-            rollback_unpacked="$(mktemp -d)"
-            tar -xzf "$archive" -C "$rollback_unpacked"
-            scripts/libghostty-native.sh verify-default-binary "$rollback_unpacked/gr-dev"
-            if find "$rollback_unpacked" -maxdepth 1 -type f \
-                \( -name libghostty-native.spdx.json -o -name THIRD_PARTY_NOTICES.libghostty.md \) \
-                -print -quit | grep -q .; then
-              echo "::error::Rollback archive unexpectedly contains native metadata: $archive"
-              exit 1
-            fi
+          amd64_unpacked="$(mktemp -d)"
+          tar -xzf "$darwin_amd64_archive" -C "$amd64_unpacked"
+          scripts/libghostty-native.sh verify-default-binary "$amd64_unpacked/gr-dev"
+          if find "$amd64_unpacked" -maxdepth 1 -type f \
+              \( -name libghostty-native.spdx.json -o -name THIRD_PARTY_NOTICES.libghostty.md \) \
+              -print -quit | grep -q .; then
+            echo "::error::Intel Darwin archive unexpectedly contains native metadata"
+            exit 1
+          fi
+
+      - name: Record Darwin artifact identity
+        run: |
+          set -euo pipefail
+          metadata_version="$(jq -er '.version | select(type == "string" and length > 0)' dist/metadata.json)"
+          test "$metadata_version" = "$GRAITH_DEV_VERSION"
+          jq -n \
+            --arg revision "$RELEASE_REVISION" \
+            --arg version "$GRAITH_DEV_VERSION" \
+            --arg amd64_sha "$(shasum -a 256 dist/graith-dev_darwin_amd64.tar.gz | awk '{print $1}')" \
+            --arg arm64_sha "$(shasum -a 256 dist/graith-dev_darwin_arm64.tar.gz | awk '{print $1}')" \
+            '{revision: $revision, version: $version, archives: {
+              "graith-dev_darwin_amd64.tar.gz": $amd64_sha,
+              "graith-dev_darwin_arm64.tar.gz": $arm64_sha
+            }}' > dist/dev-darwin-manifest.json
+
+      - name: Upload verified Darwin archives
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: dev-darwin-${{ needs.release-context.outputs.revision }}-${{ github.run_attempt }}
+          path: |
+            dist/graith-dev_darwin_amd64.tar.gz
+            dist/graith-dev_darwin_arm64.tar.gz
+            dist/dev-darwin-manifest.json
+            dist/metadata.json
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Remove temporary macOS signing keychain
+        if: always()
+        run: |
+          if [ -n "${GRAITH_RELEASE_KEYCHAIN:-}" ]; then
+            security delete-keychain "$GRAITH_RELEASE_KEYCHAIN" || true
+          fi
+
+  build-linux:
+    name: Build and verify Linux dev archive (${{ matrix.goarch }})
+    needs: release-context
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+            target: x86_64-linux-gnu
+          - goarch: arm64
+            target: aarch64-linux-gnu
+    env:
+      GRAITH_DEV_VERSION: ${{ needs.release-context.outputs.version }}
+      RELEASE_REVISION: ${{ needs.release-context.outputs.revision }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install checksum-verified Zig from the native dependency lock
+        run: |
+          set -euo pipefail
+          zig_version="$(jq -er '.zig.version' libghostty-native.lock.json)"
+          zig_url="$(jq -er '.zig.linuxX8664URL' libghostty-native.lock.json)"
+          zig_sha256="$(jq -er '.zig.linuxX8664SHA256' libghostty-native.lock.json)"
+          mkdir -p "${RUNNER_TEMP}/zig"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            "$zig_url" --output "${RUNNER_TEMP}/zig.tar.xz"
+          printf '%s  %s\n' "$zig_sha256" "${RUNNER_TEMP}/zig.tar.xz" | \
+            sha256sum --check --status
+          tar -xf "${RUNNER_TEMP}/zig.tar.xz" -C "${RUNNER_TEMP}/zig" \
+            --strip-components=1
+          echo "${RUNNER_TEMP}/zig" >> "$GITHUB_PATH"
+          test "$("${RUNNER_TEMP}/zig/zig" version)" = "$zig_version"
+
+      - name: Build the exact pinned Linux dependency unit
+        env:
+          GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}
+          LIBRARY: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}.a
+          PKG_CONFIG_PATH: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}/pkgconfig
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_REVISION"
+          scripts/libghostty-native.sh source-build "$TARGET" "$LIBRARY"
+          scripts/libghostty-native.sh verify-static-archive "$LIBRARY"
+          GRAITH_LIBGHOSTTY_WORK="${RUNNER_TEMP}/archive-policy-${{ matrix.goarch }}" \
+            scripts/libghostty-native.sh test-source-archive-policy
+          scripts/libghostty-native.sh verify-dependency-unit
+          scripts/libghostty-native.sh verify-generated-dependency-unit
+
+      - name: Build and verify the final Linux release archive
+        env:
+          GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}
+          GOARCH: ${{ matrix.goarch }}
+          PKG_CONFIG_PATH: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}/pkgconfig
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          binary="${RUNNER_TEMP}/gr-dev-${GOARCH}"
+          package_dir="${RUNNER_TEMP}/package-${GOARCH}"
+          release_dir="${RUNNER_TEMP}/release-${GOARCH}"
+          archive_name="graith-dev_linux_${GOARCH}.tar.gz"
+          archive="$release_dir/$archive_name"
+          mkdir -p "$release_dir"
+
+          CGO_ENABLED=1 GOOS=linux CC="zig cc -target $TARGET" \
+            go build -buildvcs=false -trimpath -tags=libghostty \
+              -ldflags="-extldflags=-Wl,--strip-debug -X github.com/d0ugal/graith/internal/version.Version=$GRAITH_DEV_VERSION -X github.com/d0ugal/graith/internal/version.CommitSHA=$RELEASE_REVISION" \
+              -o "$binary" ./cmd/graith
+
+          java -version
+          spdx_jar="$(scripts/libghostty-native.sh install-spdx-validator \
+            "${RUNNER_TEMP}/spdx-validator-${GOARCH}")"
+          scripts/libghostty-native.sh package-linux \
+            "$binary" "$package_dir" "$spdx_jar" "$GOARCH" gr-dev
+
+          source_date_epoch="$(git show -s --format=%ct "$RELEASE_REVISION")"
+          tar --sort=name --mtime="@$source_date_epoch" --owner=0 --group=0 \
+            --numeric-owner -C "$package_dir" -cf - \
+            CHANGELOG.md LICENSE README.md THIRD_PARTY_NOTICES.libghostty.md \
+            gr-dev libghostty-native.spdx.json | gzip --no-name > "$archive"
+          scripts/libghostty-native.sh verify-linux-dev-archive \
+            "$archive" "$RELEASE_REVISION" "$GOARCH" "$GRAITH_DEV_VERSION" \
+            "$spdx_jar" false
+
+          archive_sha="$(sha256sum "$archive" | awk '{print $1}')"
+          binary_sha="$(jq -er '.packages[] | select(.SPDXID == "SPDXRef-Package-GraithNativeCandidate") | .checksums[] | select(.algorithm == "SHA256") | .checksumValue' \
+            "$package_dir/libghostty-native.spdx.json")"
+          printf '%s  %s\n' "$archive_sha" "$archive_name" > \
+            "$release_dir/$archive_name.sha256"
+          jq -n \
+            --arg revision "$RELEASE_REVISION" \
+            --arg version "$GRAITH_DEV_VERSION" \
+            --arg goarch "$GOARCH" \
+            --arg archive_name "$archive_name" \
+            --arg archive_sha "$archive_sha" \
+            --arg binary_sha "$binary_sha" \
+            '{revision: $revision, version: $version, goos: "linux", goarch: $goarch,
+              archive: {name: $archive_name, sha256: $archive_sha},
+              binary: {name: "gr-dev", sha256: $binary_sha}}' > \
+            "$release_dir/dev-linux-${GOARCH}-manifest.json"
+
+      - name: Upload verified Linux archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: dev-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-${{ matrix.goarch }}/
+          if-no-files-found: error
+          retention-days: 2
+
+  attest-linux:
+    name: Attest Linux dev archive (${{ matrix.goarch }})
+    if: github.event_name == 'push'
+    needs:
+      - release-context
+      - build-linux
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch:
+          - amd64
+          - arm64
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dev-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release
+
+      - name: Attest the final Linux release archive
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-path: ${{ runner.temp }}/release/graith-dev_linux_${{ matrix.goarch }}.tar.gz
+
+  execute-linux:
+    name: Execute Linux dev archive (${{ matrix.goarch }})
+    needs:
+      - release-context
+      - build-linux
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+            runner: ubuntu-24.04
+          - goarch: arm64
+            runner: ubuntu-24.04-arm
+    env:
+      GRAITH_DEV_VERSION: ${{ needs.release-context.outputs.version }}
+      RELEASE_REVISION: ${{ needs.release-context.outputs.revision }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dev-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release
+
+      - name: Reverify and execute the published Linux bytes
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/linux-execution-${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          archive_name="graith-dev_linux_${GOARCH}.tar.gz"
+          archive="${RUNNER_TEMP}/release/$archive_name"
+          manifest="${RUNNER_TEMP}/release/dev-linux-${GOARCH}-manifest.json"
+          (
+            cd "${RUNNER_TEMP}/release"
+            sha256sum --check "$archive_name.sha256"
+          )
+          jq -e \
+            --arg revision "$RELEASE_REVISION" \
+            --arg version "$GRAITH_DEV_VERSION" \
+            --arg goarch "$GOARCH" \
+            --arg archive_name "$archive_name" \
+            --arg archive_sha "$(sha256sum "$archive" | awk '{print $1}')" \
+            '.revision == $revision and .version == $version and
+             .goos == "linux" and .goarch == $goarch and
+             .archive.name == $archive_name and .archive.sha256 == $archive_sha' \
+            "$manifest" >/dev/null
+          spdx_jar="$(scripts/libghostty-native.sh install-spdx-validator \
+            "${RUNNER_TEMP}/spdx-validator-${GOARCH}")"
+          scripts/libghostty-native.sh verify-linux-dev-archive \
+            "$archive" "$RELEASE_REVISION" "$GOARCH" "$GRAITH_DEV_VERSION" \
+            "$spdx_jar" true
+
+  assemble-dev:
+    name: Aggregate dev release
+    needs:
+      - release-context
+      - build-darwin
+      - build-linux
+      - execute-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      GRAITH_DEV_VERSION: ${{ needs.release-context.outputs.version }}
+      RELEASE_REVISION: ${{ needs.release-context.outputs.revision }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: dev-*-${{ needs.release-context.outputs.revision }}-${{ github.run_attempt }}
+          path: dist
+          merge-multiple: true
+
+      - name: Verify the complete same-commit release set
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          test "$(git rev-parse HEAD)" = "$RELEASE_REVISION"
+          archives=(
+            graith-dev_darwin_amd64.tar.gz
+            graith-dev_darwin_arm64.tar.gz
+            graith-dev_linux_amd64.tar.gz
+            graith-dev_linux_arm64.tar.gz
+          )
+          actual_archives=(dist/graith-dev_*.tar.gz)
+          if [ "${#actual_archives[@]}" -ne "${#archives[@]}" ] || \
+             find dist -maxdepth 1 -name '*_charm*' -print -quit | grep -q .; then
+            echo "::error::Release set is incomplete or contains a separately named rollback archive"
+            exit 1
+          fi
+          for archive in "${archives[@]}"; do
+            test -f "dist/$archive"
           done
 
-          for archive in "${linux_archives[@]}"; do
-            contents="$(tar -tzf "$archive")"
-            if grep -Eq 'Graith(Notifier)?\.app' <<< "$contents"; then
-              echo "::error::Linux dev archive unexpectedly contains a macOS app: $archive"
-              exit 1
-            fi
+          test "$(jq -er '.version' dist/metadata.json)" = "$GRAITH_DEV_VERSION"
+          jq -e \
+            --arg revision "$RELEASE_REVISION" \
+            --arg version "$GRAITH_DEV_VERSION" \
+            --arg amd64_sha "$(sha256sum dist/graith-dev_darwin_amd64.tar.gz | awk '{print $1}')" \
+            --arg arm64_sha "$(sha256sum dist/graith-dev_darwin_arm64.tar.gz | awk '{print $1}')" \
+            '.revision == $revision and .version == $version and
+             .archives["graith-dev_darwin_amd64.tar.gz"] == $amd64_sha and
+             .archives["graith-dev_darwin_arm64.tar.gz"] == $arm64_sha' \
+            dist/dev-darwin-manifest.json >/dev/null
+
+          for goarch in amd64 arm64; do
+            archive_name="graith-dev_linux_${goarch}.tar.gz"
+            archive="dist/$archive_name"
+            manifest="dist/dev-linux-${goarch}-manifest.json"
+            (
+              cd dist
+              sha256sum --check "$archive_name.sha256"
+            )
+            archive_sha="$(sha256sum "$archive" | awk '{print $1}')"
+            binary_sha="$(tar -xOzf "$archive" gr-dev | sha256sum | awk '{print $1}')"
+            jq -e \
+              --arg revision "$RELEASE_REVISION" \
+              --arg version "$GRAITH_DEV_VERSION" \
+              --arg goarch "$goarch" \
+              --arg archive_name "$archive_name" \
+              --arg archive_sha "$archive_sha" \
+              --arg binary_sha "$binary_sha" \
+              '.revision == $revision and .version == $version and
+               .goos == "linux" and .goarch == $goarch and
+               .archive.name == $archive_name and .archive.sha256 == $archive_sha and
+               .binary.name == "gr-dev" and .binary.sha256 == $binary_sha' \
+              "$manifest" >/dev/null
+          done
+
+          (
+            cd dist
+            sha256sum "${archives[@]}" > checksums.txt
+            test "$(wc -l < checksums.txt)" -eq 4
+            sha256sum --check checksums.txt
+          )
+
+      - name: Upload assembled dev release for verification
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: dev-release-${{ needs.release-context.outputs.revision }}-${{ github.run_attempt }}
+          path: |
+            dist/graith-dev_darwin_amd64.tar.gz
+            dist/graith-dev_darwin_arm64.tar.gz
+            dist/graith-dev_linux_amd64.tar.gz
+            dist/graith-dev_linux_arm64.tar.gz
+            dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 2
+
+  publish-dev:
+    name: Publish dev release
+    if: github.event_name == 'push'
+    needs:
+      - release-context
+      - assemble-dev
+      - attest-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      attestations: read
+    env:
+      GRAITH_DEV_VERSION: ${{ needs.release-context.outputs.version }}
+      RELEASE_REVISION: ${{ needs.release-context.outputs.revision }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dev-release-${{ needs.release-context.outputs.revision }}-${{ github.run_attempt }}
+          path: dist
+
+      - name: Reverify assembled checksums
+        run: |
+          set -euo pipefail
+          test "$(wc -l < dist/checksums.txt)" -eq 4
+          (
+            cd dist
+            sha256sum --check checksums.txt
+          )
+
+      - name: Verify Linux build provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for archive in dist/graith-dev_linux_amd64.tar.gz dist/graith-dev_linux_arm64.tar.gz; do
+            gh attestation verify "$archive" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/dev-release.yml" \
+              --source-ref refs/heads/main
           done
 
       - name: Upload dev release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # Delete existing dev release if present
+          set -euo pipefail
           gh release delete dev --yes 2>/dev/null || true
-          git tag -d dev 2>/dev/null || true
-          git push origin :refs/tags/dev 2>/dev/null || true
-
-          # Create new dev release from snapshot artifacts
-          gh release create dev dist/*.tar.gz dist/checksums.txt \
+          gh api --method DELETE \
+            "repos/$GITHUB_REPOSITORY/git/refs/tags/dev" 2>/dev/null || true
+          gh release create dev \
+            dist/graith-dev_darwin_amd64.tar.gz \
+            dist/graith-dev_darwin_arm64.tar.gz \
+            dist/graith-dev_linux_amd64.tar.gz \
+            dist/graith-dev_linux_arm64.tar.gz \
+            dist/checksums.txt \
+            --target "$RELEASE_REVISION" \
             --prerelease \
             --title "Dev Build ($(date -u +%Y-%m-%d))" \
-            --notes "Built from main at $(git rev-parse --short HEAD). Install: \`brew install d0ugal/tap/graith-dev\`"
+            --notes "Built from main at ${RELEASE_REVISION:0:7}. Install: \`brew install d0ugal/tap/graith-dev\`"
+
+          expected="$(printf '%s\n' checksums.txt \
+            graith-dev_darwin_amd64.tar.gz graith-dev_darwin_arm64.tar.gz \
+            graith-dev_linux_amd64.tar.gz graith-dev_linux_arm64.tar.gz | sort)"
+          actual="$(gh release view dev --json assets --jq '.assets[].name' | sort)"
+          test "$actual" = "$expected"
 
       - name: Update Homebrew tap
-        # Explicit bash so the step runs with `-o pipefail`; GitHub's implicit
-        # shell is `bash -e {0}` (no pipefail), under which a failed
-        # `sha256sum | cut` would still exit 0 and silently emit an empty sha.
-        shell: bash
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          # metadata.json is a flat object, and its `.version` field carries the
-          # snapshot version (e.g. 0.68.3-dev.<build-timestamp>) — unique and
-          # monotonic per build. The old `.[0].tag` both failed to index the
-          # object and pinned every dev build to the last released semver, so
-          # `brew upgrade` never saw a newer graith-dev. `-e` with the string
-          # filter fails the step closed on missing/empty/non-string version
-          # rather than writing `version "null"` into the formula.
-          VERSION=$(jq -er '.version | select(type == "string" and length > 0)' dist/metadata.json)
-          DARWIN_AMD64_SHA=$(shasum -a 256 dist/graith-dev_darwin_amd64.tar.gz | awk '{print $1}')
-          DARWIN_ARM64_SHA=$(shasum -a 256 dist/graith-dev_darwin_arm64.tar.gz | awk '{print $1}')
-          LINUX_AMD64_SHA=$(shasum -a 256 dist/graith-dev_linux_amd64.tar.gz | awk '{print $1}')
-          LINUX_ARM64_SHA=$(shasum -a 256 dist/graith-dev_linux_arm64.tar.gz | awk '{print $1}')
+          set -euo pipefail
+          VERSION="$GRAITH_DEV_VERSION"
+          DARWIN_AMD64_SHA="$(sha256sum dist/graith-dev_darwin_amd64.tar.gz | awk '{print $1}')"
+          DARWIN_ARM64_SHA="$(sha256sum dist/graith-dev_darwin_arm64.tar.gz | awk '{print $1}')"
+          LINUX_AMD64_SHA="$(sha256sum dist/graith-dev_linux_amd64.tar.gz | awk '{print $1}')"
+          LINUX_ARM64_SHA="$(sha256sum dist/graith-dev_linux_arm64.tar.gz | awk '{print $1}')"
           TAG="dev"
           REPO="d0ugal/graith"
 
@@ -315,8 +720,8 @@ jobs:
           end
           FORMULA
 
-          # Push to tap repo
-          cd "$(mktemp -d)"
+          tap_dir="$(mktemp -d)"
+          cd "$tap_dir"
           git clone "https://x-access-token:${RELEASE_TOKEN}@github.com/d0ugal/homebrew-tap.git" .
           cp /tmp/graith-dev.rb graith-dev.rb
           git config user.name "github-actions[bot]"
@@ -324,10 +729,3 @@ jobs:
           git add graith-dev.rb
           git diff --cached --quiet || git commit -m "chore: update graith-dev to ${VERSION}"
           git push
-
-      - name: Remove temporary macOS signing keychain
-        if: always()
-        run: |
-          if [ -n "${GRAITH_RELEASE_KEYCHAIN:-}" ]; then
-            security delete-keychain "$GRAITH_RELEASE_KEYCHAIN" || true
-          fi

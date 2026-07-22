@@ -2158,71 +2158,225 @@ test_metadata_policy() {
     rm -rf "$root"
 }
 
-candidate_identity() {
+verify_candidate_build_metadata() {
     local binary="${1:-}"
     local expected_revision="${2:-}"
+    local expected_goos="${3:-}"
+    local expected_goarch="${4:-}"
     local build_info
-    local runtime_revision
 
-    if [[ ! -f "$binary" || ! "$expected_revision" =~ ^[0-9a-f]{40}$ ]]; then
-        echo "usage: $0 verify-darwin-arm64-candidate <binary> <revision>" >&2
+    if [[ ! -f "$binary" || ! "$expected_revision" =~ ^[0-9a-f]{40}$ ||
+        ! "$expected_goos" =~ ^(darwin|linux)$ ||
+        ! "$expected_goarch" =~ ^(amd64|arm64)$ ]]; then
+        echo "error: candidate build metadata requires a binary, revision, OS, and architecture" >&2
         return 2
     fi
-
-    build_info="$(go version -m "$binary")"
+    if ! build_info="$(go version -m "$binary")" || [[ -z "$build_info" ]]; then
+        echo "error: could not read candidate Go build metadata" >&2
+        return 1
+    fi
     for required in \
         $'\tdep\tgo.mitchellh.com/libghostty\t'"$GO_LIBGHOSTTY_VERSION"$'\t'"$GO_LIBGHOSTTY_SUM" \
         $'\tbuild\t-tags=libghostty' \
         $'\tbuild\tCGO_ENABLED=1' \
-        $'\tbuild\tGOARCH=arm64' \
-        $'\tbuild\tGOOS=darwin'; do
+        $'\tbuild\tGOARCH='"$expected_goarch" \
+        $'\tbuild\tGOOS='"$expected_goos"; do
         if ! grep -Fq "$required" <<<"$build_info"; then
             echo "error: candidate build metadata is missing $required" >&2
             return 1
         fi
     done
     if grep -Fq $'\tdep\tgithub.com/charmbracelet/x/vt\t' <<<"$build_info"; then
-        echo "error: native candidate contains the rollback terminal dependency" >&2
+        echo "error: native candidate contains the Charm terminal dependency" >&2
         return 1
     fi
-    if ! verify_darwin_native_linkage "$binary"; then
+}
+
+verify_candidate_privacy() {
+    local artifact="${1:-}"
+    local privacy_status=0
+
+    [[ -f "$artifact" && ! -L "$artifact" ]] || {
+        echo "error: candidate privacy scan requires a regular file" >&2
+        return 2
+    }
+    if grep -aEq '/home/runner|/Users/|/private/var/folders/|/runner/work/' \
+        "$artifact"; then
+        echo "error: candidate ${artifact##*/} contains a local or CI build path" >&2
+        return 1
+    else
+        privacy_status=$?
+    fi
+    if [[ "$privacy_status" -ne 1 ]]; then
+        echo "error: could not privacy-scan candidate ${artifact##*/}" >&2
+        return 1
+    fi
+}
+
+candidate_identity() {
+    local binary="${1:-}"
+    local expected_revision="${2:-}"
+    local runtime_revision
+
+    if ! verify_candidate_build_metadata "$binary" "$expected_revision" darwin arm64 ||
+        ! verify_darwin_native_linkage "$binary"; then
+        return 1
+    fi
+    if ! runtime_revision="$("$binary" --json version | jq -er '.commit')" ||
+        [[ "$runtime_revision" != "$expected_revision" ]]; then
+        echo "error: candidate runtime revision is ${runtime_revision:-unreadable}; want $expected_revision" >&2
+        return 1
+    fi
+    verify_candidate_privacy "$binary"
+}
+
+verify_linux_native_linkage() {
+    local binary="${1:-}"
+    local expected_goarch="${2:-}"
+    local expected_machine
+    local header_info
+    local section_info
+    local dynamic_info
+    local dynamic_symbols
+    local grep_status=0
+    local symbol_pattern
+
+    if [[ "$(uname -s)" != Linux || ! -f "$binary" ||
+        ! "$expected_goarch" =~ ^(amd64|arm64)$ ]]; then
+        echo "usage: $0 verify-linux-native-linkage <binary> <amd64|arm64>" >&2
+        return 2
+    fi
+    for command in readelf file; do
+        if ! require_command "$command"; then return 1; fi
+    done
+    case "$expected_goarch" in
+        amd64) expected_machine="Advanced Micro Devices X86-64" ;;
+        arm64) expected_machine="AArch64" ;;
+    esac
+    if ! header_info="$(readelf --file-header --wide "$binary")" ||
+        [[ -z "$header_info" ]] ||
+        ! grep -Fq "Machine:                           $expected_machine" \
+            <<<"$header_info"; then
+        echo "error: candidate is not the expected Linux $expected_goarch ELF" >&2
+        return 1
+    fi
+    file "$binary"
+
+    if ! section_info="$(readelf --sections --wide "$binary")" ||
+        [[ -z "$section_info" ]]; then
+        echo "error: could not read candidate ELF sections" >&2
+        return 1
+    fi
+    if grep -E '[[:space:]]\.debug_' <<<"$section_info" >/dev/null; then
+        echo "error: candidate retained a debug section after stripping" >&2
+        return 1
+    else
+        grep_status=$?
+    fi
+    if [[ "$grep_status" -ne 1 ]]; then
+        echo "error: could not verify candidate ELF debug sections" >&2
         return 1
     fi
 
-    runtime_revision="$("$binary" --json version | jq -r .commit)"
-    if [[ "$runtime_revision" != "$expected_revision" ]]; then
-        echo "error: candidate runtime revision is $runtime_revision; want $expected_revision" >&2
+    if ! dynamic_info="$(readelf --dynamic --wide "$binary")" ||
+        [[ -z "$dynamic_info" ]]; then
+        echo "error: could not read candidate ELF dynamic dependencies" >&2
         return 1
     fi
-    if grep -Eq '/home/runner|/Users/|/private/var/folders/|/runner/work/' \
-        < <(strings "$binary"); then
-        echo "error: candidate contains a local or CI build path" >&2
+    grep_status=0
+    if grep -Ei 'NEEDED.*(ghostty|simdutf|highway)' <<<"$dynamic_info" >/dev/null; then
+        echo "error: candidate has an unexpected native shared dependency" >&2
+        return 1
+    else
+        grep_status=$?
+    fi
+    if [[ "$grep_status" -ne 1 ]]; then
+        echo "error: could not verify candidate ELF shared dependencies" >&2
         return 1
     fi
+
+    if ! dynamic_symbols="$(readelf --dyn-syms --wide "$binary")" ||
+        [[ -z "$dynamic_symbols" ]]; then
+        echo "error: could not read candidate ELF dynamic symbols" >&2
+        return 1
+    fi
+    symbol_pattern='^[[:space:]]*[[:digit:]]+:[[:space:]]+[[:xdigit:]]+[[:space:]]+[[:digit:]]+[[:space:]]+FUNC[[:space:]]+GLOBAL[[:space:]]+[^[:space:]]+[[:space:]]+[[:digit:]]+[[:space:]]+ghostty_terminal_new$'
+    if ! grep -E "$symbol_pattern" <<<"$dynamic_symbols" >/dev/null; then
+        echo "error: candidate does not define global ghostty_terminal_new" >&2
+        return 1
+    fi
+}
+
+verify_linux_candidate() {
+    local binary="${1:-}"
+    local expected_revision="${2:-}"
+    local expected_goarch="${3:-}"
+    local execute="${4:-false}"
+    local host_arch
+    local runtime_revision
+
+    case "$execute" in
+        true|false) ;;
+        *)
+            echo "error: Linux candidate execution marker must be true or false" >&2
+            return 2
+            ;;
+    esac
+    if ! verify_candidate_build_metadata \
+        "$binary" "$expected_revision" linux "$expected_goarch" ||
+        ! verify_linux_native_linkage "$binary" "$expected_goarch"; then
+        return 1
+    fi
+    if [[ "$execute" == true ]]; then
+        case "$(uname -m)" in
+            x86_64) host_arch=amd64 ;;
+            aarch64|arm64) host_arch=arm64 ;;
+            *) host_arch=unsupported ;;
+        esac
+        if [[ "$host_arch" != "$expected_goarch" ]]; then
+            echo "error: cannot execute Linux $expected_goarch candidate on $(uname -m)" >&2
+            return 1
+        fi
+        if ! runtime_revision="$("$binary" --json version | jq -er '.commit')" ||
+            [[ "$runtime_revision" != "$expected_revision" ]]; then
+            echo "error: candidate runtime revision is ${runtime_revision:-unreadable}; want $expected_revision" >&2
+            return 1
+        fi
+        ldd "$binary"
+    fi
+    verify_candidate_privacy "$binary"
 }
 
 materialize_candidate_spdx() {
     local binary="${1:-}"
     local revision="${2:-}"
-    local output="${3:-}"
-    local package_filename="${4:-gr}"
+    local goos="${3:-}"
+    local goarch="${4:-}"
+    local output="${5:-}"
+    local package_filename="${6:-gr}"
     local binary_sha
     local namespace
+    local package_name
 
     if [[ ! -f "$binary" || ! "$revision" =~ ^[0-9a-f]{40}$ || -z "$output" ||
+        ! "$goos" =~ ^(darwin|linux)$ || ! "$goarch" =~ ^(amd64|arm64)$ ||
         ! "$package_filename" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
-        echo "usage: $0 materialize-spdx <binary> <revision> <output> [package-filename]" >&2
+        echo "usage: $0 materialize-candidate-spdx <binary> <revision> <goos> <goarch> <output> [package-filename]" >&2
         return 2
     fi
 
     binary_sha="$(sha256_value "$binary")"
-    namespace="$SPDX_NAMESPACE/candidate/$revision/darwin/arm64/$binary_sha"
+    namespace="$SPDX_NAMESPACE/candidate/$revision/$goos/$goarch/$binary_sha"
+    package_name="graith-libghostty-$goos-$goarch"
     jq \
         --arg binary_sha "$binary_sha" \
+        --arg goarch "$goarch" \
+        --arg goos "$goos" \
         --arg namespace "$namespace" \
+        --arg package_name "$package_name" \
         --arg package_filename "$package_filename" \
         --arg revision "$revision" '
-        .name = ("graith-libghostty-darwin-arm64-" + $revision) |
+        .name = ($package_name + "-" + $revision) |
         .documentNamespace = $namespace |
         .packages = ([.packages[] | select(.SPDXID != "SPDXRef-Package-GraithNativeCandidate")] + [{
             "SPDXID": "SPDXRef-Package-GraithNativeCandidate",
@@ -2237,9 +2391,9 @@ materialize_candidate_spdx() {
             "filesAnalyzed": false,
             "licenseConcluded": "MIT",
             "licenseDeclared": "MIT",
-            "name": "graith-libghostty-darwin-arm64",
+            "name": $package_name,
             "packageFileName": $package_filename,
-            "sourceInfo": ("Graith revision " + $revision + "; target GOOS=darwin GOARCH=arm64; packaged binary " + $package_filename + " SHA-256 " + $binary_sha + "."),
+            "sourceInfo": ("Graith revision " + $revision + "; target GOOS=" + $goos + " GOARCH=" + $goarch + "; packaged binary " + $package_filename + " SHA-256 " + $binary_sha + "."),
             "supplier": "Person: Dougal Matthews",
             "versionInfo": $revision
         }]) |
@@ -2269,32 +2423,44 @@ materialize_candidate_spdx() {
 verify_candidate_spdx() {
     local binary="${1:-}"
     local revision="${2:-}"
-    local document="${3:-}"
-    local package_filename="${4:-gr}"
+    local goos="${3:-}"
+    local goarch="${4:-}"
+    local document="${5:-}"
+    local package_filename="${6:-gr}"
     local binary_sha
     local namespace
+    local package_name
+    local source_info
 
     if [[ ! -f "$binary" || ! -f "$document" || ! "$revision" =~ ^[0-9a-f]{40}$ ||
+        ! "$goos" =~ ^(darwin|linux)$ || ! "$goarch" =~ ^(amd64|arm64)$ ||
         ! "$package_filename" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
-        echo "usage: $0 verify-candidate-spdx <binary> <revision> <document> [package-filename]" >&2
+        echo "usage: verify_candidate_spdx <binary> <revision> <goos> <goarch> <document> [package-filename]" >&2
         return 2
     fi
 
     binary_sha="$(sha256_value "$binary")"
-    namespace="$SPDX_NAMESPACE/candidate/$revision/darwin/arm64/$binary_sha"
+    namespace="$SPDX_NAMESPACE/candidate/$revision/$goos/$goarch/$binary_sha"
+    package_name="graith-libghostty-$goos-$goarch"
+    source_info="Graith revision $revision; target GOOS=$goos GOARCH=$goarch; packaged binary $package_filename SHA-256 $binary_sha."
     jq -e \
         --arg binary_sha "$binary_sha" \
         --arg namespace "$namespace" \
+        --arg package_name "$package_name" \
         --arg package_filename "$package_filename" \
-        --arg revision "$revision" '
+        --arg revision "$revision" \
+        --arg source_info "$source_info" '
         def package($id): first(.packages[] | select(.SPDXID == $id));
         def relates($from; $type; $to): any(.relationships[];
             .spdxElementId == $from and .relationshipType == $type and .relatedSpdxElement == $to);
         .spdxVersion == "SPDX-2.3" and
+        .name == ($package_name + "-" + $revision) and
         .documentNamespace == $namespace and
         ([.packages[] | select(.SPDXID == "SPDXRef-Package-GraithNativeCandidate")] | length) == 1 and
+        package("SPDXRef-Package-GraithNativeCandidate").name == $package_name and
         package("SPDXRef-Package-GraithNativeCandidate").versionInfo == $revision and
         package("SPDXRef-Package-GraithNativeCandidate").packageFileName == $package_filename and
+        package("SPDXRef-Package-GraithNativeCandidate").sourceInfo == $source_info and
         package("SPDXRef-Package-GraithNativeCandidate").checksums ==
             [{"algorithm": "SHA256", "checksumValue": $binary_sha}] and
         relates("SPDXRef-DOCUMENT"; "DESCRIBES"; "SPDXRef-Package-GraithNativeCandidate") and
@@ -2435,10 +2601,10 @@ package_darwin_arm64_candidate() (
     cp "$REPO_DIR/THIRD_PARTY_NOTICES.libghostty.md" "$staging/"
     candidate_identity "$staging/$package_filename" "$revision"
     materialize_candidate_spdx \
-        "$staging/$package_filename" "$revision" \
+        "$staging/$package_filename" "$revision" darwin arm64 \
         "$staging/libghostty-native.spdx.json" "$package_filename"
     verify_candidate_spdx \
-        "$staging/$package_filename" "$revision" \
+        "$staging/$package_filename" "$revision" darwin arm64 \
         "$staging/libghostty-native.spdx.json" "$package_filename"
     validate_spdx "$spdx_jar" "$staging/libghostty-native.spdx.json"
 
@@ -2446,7 +2612,8 @@ package_darwin_arm64_candidate() (
     cp "$staging/$package_filename" "$tampered"
     printf '\0' >>"$tampered"
     if verify_candidate_spdx \
-        "$tampered" "$revision" "$staging/libghostty-native.spdx.json" \
+        "$tampered" "$revision" darwin arm64 \
+        "$staging/libghostty-native.spdx.json" \
         "$package_filename"; then
         echo "error: candidate SPDX accepted changed binary bytes" >&2
         return 1
@@ -2471,6 +2638,161 @@ package_darwin_arm64_candidate() (
     staging=""
 )
 
+package_linux_candidate() (
+    local binary="${1:-}"
+    local destination="${2:-}"
+    local spdx_jar="${3:-}"
+    local goarch="${4:-}"
+    local package_filename="${5:-gr-dev}"
+    local destination_parent
+    local revision
+    local staging=""
+    local tampered
+    local artifact
+    local package_files
+    local expected_package_files
+
+    trap 'cleanup_candidate_staging "$staging"' EXIT
+
+    if [[ "$(uname -s)" != Linux || ! -f "$binary" || -z "$destination" ||
+        ! -f "$spdx_jar" || ! "$goarch" =~ ^(amd64|arm64)$ ||
+        ! "$package_filename" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+        echo "usage: $0 package-linux <binary> <destination> <spdx-jar> <amd64|arm64> [package-filename]" >&2
+        return 2
+    fi
+    if [[ -e "$destination" || -L "$destination" ]]; then
+        echo "error: candidate destination already exists" >&2
+        return 1
+    fi
+
+    revision="$(candidate_revision)"
+    verify_linux_candidate "$binary" "$revision" "$goarch" false
+    destination_parent="$(dirname "$destination")"
+    mkdir -p "$destination_parent"
+    staging="$(mktemp -d "$destination_parent/.graith-native-candidate.XXXXXX")"
+    chmod 700 "$staging"
+
+    cp "$binary" "$staging/$package_filename"
+    cp "$REPO_DIR/LICENSE" "$REPO_DIR/README.md" "$REPO_DIR/CHANGELOG.md" \
+        "$REPO_DIR/THIRD_PARTY_NOTICES.libghostty.md" "$staging/"
+    verify_linux_candidate "$staging/$package_filename" "$revision" "$goarch" false
+    materialize_candidate_spdx \
+        "$staging/$package_filename" "$revision" linux "$goarch" \
+        "$staging/libghostty-native.spdx.json" "$package_filename"
+    verify_candidate_spdx \
+        "$staging/$package_filename" "$revision" linux "$goarch" \
+        "$staging/libghostty-native.spdx.json" "$package_filename"
+    validate_spdx "$spdx_jar" "$staging/libghostty-native.spdx.json"
+
+    tampered="$staging/$package_filename.tampered"
+    cp "$staging/$package_filename" "$tampered"
+    printf '\0' >>"$tampered"
+    if verify_candidate_spdx \
+        "$tampered" "$revision" linux "$goarch" \
+        "$staging/libghostty-native.spdx.json" "$package_filename"; then
+        echo "error: candidate SPDX accepted changed binary bytes" >&2
+        return 1
+    fi
+    rm "$tampered"
+
+    if ! package_files="$(find "$staging" -mindepth 1 -maxdepth 1 -type f \
+        -exec basename {} \; | LC_ALL=C sort)" ||
+        ! expected_package_files="$(printf '%s\n' CHANGELOG.md LICENSE README.md \
+            THIRD_PARTY_NOTICES.libghostty.md "$package_filename" \
+            libghostty-native.spdx.json | LC_ALL=C sort)" ||
+        [[ "$package_files" != "$expected_package_files" ]]; then
+        echo "error: Linux candidate contents are incomplete or unexpected" >&2
+        return 1
+    fi
+    while IFS= read -r artifact; do
+        verify_candidate_privacy "$staging/$artifact"
+    done <<<"$package_files"
+
+    if ! publish_directory_exclusive "$staging" "$destination"; then
+        return 1
+    fi
+    staging=""
+)
+
+verify_linux_dev_archive() (
+    local archive="${1:-}"
+    local revision="${2:-}"
+    local goarch="${3:-}"
+    local version="${4:-}"
+    local spdx_jar="${5:-}"
+    local execute="${6:-false}"
+    local archive_files
+    local expected_archive_files
+    local staging=""
+    local artifact
+    local runtime_identity
+
+    trap 'cleanup_candidate_staging "$staging"' EXIT
+
+    if [[ "$(uname -s)" != Linux || ! -f "$archive" ||
+        ! "$revision" =~ ^[0-9a-f]{40}$ || ! "$goarch" =~ ^(amd64|arm64)$ ||
+        -z "$version" || ! -f "$spdx_jar" ]]; then
+        echo "usage: $0 verify-linux-dev-archive <archive> <revision> <amd64|arm64> <version> <spdx-jar> [true|false]" >&2
+        return 2
+    fi
+    case "$execute" in
+        true|false) ;;
+        *)
+            echo "error: Linux archive execution marker must be true or false" >&2
+            return 2
+            ;;
+    esac
+
+    if ! archive_files="$(tar -tzf "$archive" | LC_ALL=C sort)" ||
+        ! expected_archive_files="$(printf '%s\n' CHANGELOG.md LICENSE README.md \
+            THIRD_PARTY_NOTICES.libghostty.md gr-dev \
+            libghostty-native.spdx.json | LC_ALL=C sort)" ||
+        [[ "$archive_files" != "$expected_archive_files" ]]; then
+        echo "error: Linux dev archive contents are incomplete or unexpected" >&2
+        return 1
+    fi
+
+    staging="$(mktemp -d "$NATIVE_WORK/linux-dev-archive.XXXXXX")"
+    chmod 700 "$staging"
+    if ! private_directory_is_safe "$staging" "$NATIVE_WORK" \
+        "linux-dev-archive."; then
+        echo "error: Linux archive verifier directory failed private ownership/path validation" >&2
+        return 1
+    fi
+    tar -xzf "$archive" --no-same-owner --no-same-permissions -C "$staging"
+    while IFS= read -r artifact; do
+        if [[ ! -f "$staging/$artifact" || -L "$staging/$artifact" ]]; then
+            echo "error: Linux dev archive member is not a regular file: $artifact" >&2
+            return 1
+        fi
+        verify_candidate_privacy "$staging/$artifact"
+    done <<<"$expected_archive_files"
+    if [[ ! -x "$staging/gr-dev" ]]; then
+        echo "error: Linux dev archive binary is not executable" >&2
+        return 1
+    fi
+
+    verify_linux_candidate "$staging/gr-dev" "$revision" "$goarch" "$execute"
+    verify_candidate_spdx "$staging/gr-dev" "$revision" linux "$goarch" \
+        "$staging/libghostty-native.spdx.json" gr-dev
+    validate_spdx "$spdx_jar" "$staging/libghostty-native.spdx.json"
+    cmp "$staging/THIRD_PARTY_NOTICES.libghostty.md" \
+        "$REPO_DIR/THIRD_PARTY_NOTICES.libghostty.md"
+    for artifact in CHANGELOG.md LICENSE README.md; do
+        cmp "$staging/$artifact" "$REPO_DIR/$artifact"
+    done
+
+    if [[ "$execute" == true ]]; then
+        if ! runtime_identity="$("$staging/gr-dev" --json version)" ||
+            ! jq -e --arg revision "$revision" --arg version "$version" \
+                '.commit == $revision and .version == $version' \
+                <<<"$runtime_identity" >/dev/null; then
+            echo "error: Linux dev archive runtime version or revision is incorrect" >&2
+            return 1
+        fi
+    fi
+)
+
 usage() {
     cat <<EOF
 usage: $0 test|race|fuzz|bench|memory|daemon-test|soak [cycles [timeout]]|all
@@ -2486,12 +2808,18 @@ usage: $0 test|race|fuzz|bench|memory|daemon-test|soak [cycles [timeout]]|all
        $0 verify-default-binary <binary>
        $0 verify-darwin-arm64-candidate <binary> <revision>
        $0 verify-candidate-spdx <binary> <revision> <document> [package-filename]
+       $0 materialize-candidate-spdx <binary> <revision> <goos> <goarch> <output> [package-filename]
+       $0 verify-target-candidate-spdx <binary> <revision> <goos> <goarch> <document> [package-filename]
+       $0 verify-linux-candidate <binary> <revision> <amd64|arm64> [true|false]
+       $0 verify-linux-native-linkage <binary> <amd64|arm64>
+       $0 verify-linux-dev-archive <archive> <revision> <amd64|arm64> <version> <spdx-jar> [true|false]
        $0 test-darwin-linkage-policy
        $0 test-metadata-policy
        $0 install-spdx-validator <empty-directory>
        $0 validate-spdx <tools-java-jar> [document]
        $0 test-exclusive-publish
        $0 package-darwin-arm64 <binary> <destination> <tools-java-jar> [package-filename]
+       $0 package-linux <binary> <destination> <tools-java-jar> <amd64|arm64> [package-filename]
 
 test/bench/memory use the checksum-pinned Apple artifact on macOS arm64.
 daemon-test runs the external daemon lifecycle and bounded 12-cycle soak.
@@ -2558,7 +2886,26 @@ case "${1:-}" in
         candidate_identity "${2:-}" "${3:-}"
         ;;
     verify-candidate-spdx)
-        verify_candidate_spdx "${2:-}" "${3:-}" "${4:-}" "${5:-gr}"
+        verify_candidate_spdx \
+            "${2:-}" "${3:-}" darwin arm64 "${4:-}" "${5:-gr}"
+        ;;
+    materialize-candidate-spdx)
+        materialize_candidate_spdx \
+            "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-gr}"
+        ;;
+    verify-target-candidate-spdx)
+        verify_candidate_spdx \
+            "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-gr}"
+        ;;
+    verify-linux-candidate)
+        verify_linux_candidate "${2:-}" "${3:-}" "${4:-}" "${5:-false}"
+        ;;
+    verify-linux-native-linkage)
+        verify_linux_native_linkage "${2:-}" "${3:-}"
+        ;;
+    verify-linux-dev-archive)
+        verify_linux_dev_archive \
+            "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-false}"
         ;;
     test-darwin-linkage-policy)
         test_darwin_linkage_policy
@@ -2577,6 +2924,10 @@ case "${1:-}" in
         ;;
     package-darwin-arm64)
         package_darwin_arm64_candidate "${2:-}" "${3:-}" "${4:-}" "${5:-gr}"
+        ;;
+    package-linux)
+        package_linux_candidate \
+            "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-gr-dev}"
         ;;
     *)
         usage >&2

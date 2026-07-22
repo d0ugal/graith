@@ -58,7 +58,7 @@ func loadDevReleaseConfig(t *testing.T) devReleaseConfig {
 	return cfg
 }
 
-func TestDevGoReleaserSelectsNativeOnlyForDarwinArm64Canary(t *testing.T) {
+func TestDevGoReleaserBuildsOnlyDarwinWithoutRollbackArchives(t *testing.T) {
 	cfg := loadDevReleaseConfig(t)
 
 	hasBuildHook := false
@@ -96,10 +96,8 @@ func TestDevGoReleaserSelectsNativeOnlyForDarwinArm64Canary(t *testing.T) {
 		serviceHook       bool
 		nativePackageHook bool
 	}{
-		"gr-dev-linux":              {goos: []string{"linux"}, goarch: []string{"amd64", "arm64"}, cgo: "CGO_ENABLED=0"},
-		"gr-dev-darwin-amd64":       {goos: []string{"darwin"}, goarch: []string{"amd64"}, cgo: "CGO_ENABLED=0", managed: true, serviceHook: true},
-		"gr-dev-darwin-arm64":       {goos: []string{"darwin"}, goarch: []string{"arm64"}, cgo: "CGO_ENABLED=1", tags: []string{"libghostty"}, managed: true, serviceHook: true, nativePackageHook: true},
-		"gr-dev-darwin-arm64-charm": {goos: []string{"darwin"}, goarch: []string{"arm64"}, cgo: "CGO_ENABLED=0"},
+		"gr-dev-darwin-amd64": {goos: []string{"darwin"}, goarch: []string{"amd64"}, cgo: "CGO_ENABLED=0", managed: true, serviceHook: true},
+		"gr-dev-darwin-arm64": {goos: []string{"darwin"}, goarch: []string{"arm64"}, cgo: "CGO_ENABLED=1", tags: []string{"libghostty"}, managed: true, serviceHook: true, nativePackageHook: true},
 	}
 
 	if len(cfg.Builds) != len(wantBuilds) {
@@ -141,6 +139,7 @@ func TestDevGoReleaserSelectsNativeOnlyForDarwinArm64Canary(t *testing.T) {
 			}
 
 			flags := strings.Join(build.Ldflags, "\n")
+
 			if want.managed {
 				for _, required := range []string{
 					"daemonservice.ManagedBuild={{ if eq (index .Env \"GRAITH_MANAGED_DEV_RELEASE\") \"true\" }}true{{ else }}false{{ end }}",
@@ -152,8 +151,6 @@ func TestDevGoReleaserSelectsNativeOnlyForDarwinArm64Canary(t *testing.T) {
 						t.Errorf("Darwin dev ldflags missing %q", required)
 					}
 				}
-			} else if strings.Contains(flags, "daemonservice.ManagedBuild=") {
-				t.Errorf("Linux dev build unexpectedly enables the macOS service: flags=%q hooks=%#v", flags, build.Hooks.Post)
 			}
 
 			hookCommands := make([]string, 0, len(build.Hooks.Post))
@@ -192,10 +189,8 @@ func TestDevGoReleaserSelectsNativeOnlyForDarwinArm64Canary(t *testing.T) {
 		wantNativeMeta bool
 		wantSuffix     string
 	}{
-		{archiveID: "linux", buildID: "gr-dev-linux"},
 		{archiveID: "darwin-amd64", buildID: "gr-dev-darwin-amd64", wantNotifier: true, wantService: true},
 		{archiveID: "darwin-arm64", buildID: "gr-dev-darwin-arm64", wantNotifier: true, wantService: true, wantNativeMeta: true},
-		{archiveID: "darwin-arm64-charm", buildID: "gr-dev-darwin-arm64-charm", wantNotifier: true, wantSuffix: "_charm"},
 	} {
 		t.Run(tc.archiveID, func(t *testing.T) {
 			for _, archive := range cfg.Archives {
@@ -267,6 +262,21 @@ func TestDevGoReleaserSelectsNativeOnlyForDarwinArm64Canary(t *testing.T) {
 			t.Fatalf("dev GoReleaser config has no %q archive", tc.archiveID)
 		})
 	}
+
+	if strings.Contains(string(mustReadReleaseFile(t, ".goreleaser-dev.yaml")), "_charm") {
+		t.Fatal("dev GoReleaser config still declares a separately named Charm archive")
+	}
+}
+
+func mustReadReleaseFile(t *testing.T, name string) []byte {
+	t.Helper()
+
+	data, err := os.ReadFile(releaseRootPath(name))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return data
 }
 
 func TestDevReleaseSigningModeRequiresAllOrNoCredentials(t *testing.T) {
@@ -354,18 +364,110 @@ func TestNativeCandidatePackagingRejectsUnsafeDevBinaryName(t *testing.T) {
 	}
 }
 
+func TestCandidateSPDXBindsLinuxTargetAndExactBytes(t *testing.T) {
+	work := t.TempDir()
+	binary := filepath.Join(work, "gr-dev")
+	document := filepath.Join(work, "candidate.spdx.json")
+	revision := strings.Repeat("a", 40)
+
+	if err := os.WriteFile(binary, []byte("dreich\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// #nosec G302 -- this test-only candidate must be owner-executable.
+	if err := os.Chmod(binary, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	script := releaseRootPath("scripts", "libghostty-native.sh")
+
+	command := exec.Command(script, "materialize-candidate-spdx", binary, revision, "linux", "arm64", document, "gr-dev")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("materialize Linux candidate SPDX: %v: %s", err, output)
+	}
+
+	command = exec.Command(script, "verify-target-candidate-spdx", binary, revision, "linux", "arm64", document, "gr-dev")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("verify Linux candidate SPDX: %v: %s", err, output)
+	}
+
+	file, err := os.OpenFile(binary, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := file.WriteString("thrawn\n"); err != nil {
+		if closeErr := file.Close(); closeErr != nil {
+			t.Errorf("close changed candidate after write failure: %v", closeErr)
+		}
+
+		t.Fatal(err)
+	}
+
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	command = exec.Command(script, "verify-target-candidate-spdx", binary, revision, "linux", "arm64", document, "gr-dev")
+	if output, err := command.CombinedOutput(); err == nil {
+		t.Fatalf("candidate SPDX accepted changed binary bytes: %s", output)
+	}
+}
+
+func TestDevReleaseVersionIsSharedMonotonicSnapshot(t *testing.T) {
+	script := releaseRootPath("scripts", "dev-release-version.sh")
+
+	for _, test := range []struct {
+		name    string
+		base    string
+		epoch   string
+		want    string
+		wantErr string
+	}{
+		{name: "increments patch", base: "v0.69.6", epoch: "1784712345", want: "0.69.7-dev.1784712345\n"},
+		{name: "rejects prerelease base", base: "v0.70.0-rc.1", epoch: "1784712345", wantErr: "vMAJOR.MINOR.PATCH"},
+		{name: "rejects nonpositive epoch", base: "v0.69.6", epoch: "0", wantErr: "positive integer"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			output, err := exec.Command(script, test.base, test.epoch).CombinedOutput()
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(string(output), test.wantErr) {
+					t.Fatalf("version error = %v, output = %q, want %q", err, output, test.wantErr)
+				}
+
+				return
+			}
+
+			if err != nil || string(output) != test.want {
+				t.Fatalf("version error = %v, output = %q, want %q", err, output, test.want)
+			}
+		})
+	}
+}
+
+type devReleaseWorkflowStep struct {
+	Name string            `yaml:"name"`
+	Uses string            `yaml:"uses"`
+	If   string            `yaml:"if"`
+	Run  string            `yaml:"run"`
+	Env  map[string]string `yaml:"env"`
+	With map[string]string `yaml:"with"`
+}
+
+type devReleaseWorkflowJob struct {
+	RunsOn      string            `yaml:"runs-on"`
+	If          string            `yaml:"if"`
+	Permissions map[string]string `yaml:"permissions"`
+	Strategy    struct {
+		Matrix struct {
+			Include []map[string]string `yaml:"include"`
+		} `yaml:"matrix"`
+	} `yaml:"strategy"`
+	Steps []devReleaseWorkflowStep `yaml:"steps"`
+}
+
 type devReleaseWorkflow struct {
-	Jobs map[string]struct {
-		RunsOn string `yaml:"runs-on"`
-		Steps  []struct {
-			Name string            `yaml:"name"`
-			Uses string            `yaml:"uses"`
-			If   string            `yaml:"if"`
-			Run  string            `yaml:"run"`
-			Env  map[string]string `yaml:"env"`
-			With map[string]string `yaml:"with"`
-		} `yaml:"steps"`
-	} `yaml:"jobs"`
+	Jobs map[string]devReleaseWorkflowJob `yaml:"jobs"`
 }
 
 func loadDevReleaseWorkflow(t *testing.T) devReleaseWorkflow {
@@ -384,95 +486,76 @@ func loadDevReleaseWorkflow(t *testing.T) devReleaseWorkflow {
 	return workflow
 }
 
-func TestDevReleaseWorkflowValidatesNativeArchives(t *testing.T) {
+func workflowStep(job devReleaseWorkflowJob, name string) devReleaseWorkflowStep {
+	for _, step := range job.Steps {
+		if step.Name == name {
+			return step
+		}
+	}
+
+	return devReleaseWorkflowStep{}
+}
+
+func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 	workflow := loadDevReleaseWorkflow(t)
-
-	job, ok := workflow.Jobs["dev-release"]
-	if !ok {
-		t.Fatal("dev-release workflow has no dev-release job")
-	}
-
-	if job.RunsOn != "macos-26" {
-		t.Fatalf("dev-release runner = %q, want macos-26 for native arm64 execution", job.RunsOn)
-	}
-
-	var (
-		goreleaserArgs, prepareScript, signingScript, baseTagScript, verifyScript, cleanupScript, cleanupIf string
-		prepareEnv, signingEnv                                                                              map[string]string
-		baseTagStepIndex                                                                                    = -1
-		goreleaserStepIndex                                                                                 = -1
-	)
-
-	for index, step := range job.Steps {
-		if strings.Contains(step.Uses, "goreleaser/goreleaser-action") {
-			goreleaserArgs = step.With["args"]
-			goreleaserStepIndex = index
-		}
-
-		if step.Name == "Verify dev archives" {
-			verifyScript = step.Run
-		}
-
-		if step.Name == "Prepare and validate the pinned macOS arm64 backend" {
-			prepareScript = step.Run
-			prepareEnv = step.Env
-		}
-
-		if step.Name == "Configure optional macOS service signing" {
-			signingScript = step.Run
-			signingEnv = step.Env
-		}
-
-		if step.Name == "Select the stable release base for the dev snapshot" {
-			baseTagScript = step.Run
-			baseTagStepIndex = index
-		}
-
-		if step.Name == "Remove temporary macOS signing keychain" {
-			cleanupScript = step.Run
-			cleanupIf = step.If
+	for _, name := range []string{"release-context", "build-darwin", "build-linux", "attest-linux", "execute-linux", "assemble-dev", "publish-dev"} {
+		if _, ok := workflow.Jobs[name]; !ok {
+			t.Errorf("dev-release workflow has no %q job", name)
 		}
 	}
 
-	if !strings.Contains(goreleaserArgs, "-f .goreleaser-dev.yaml") {
-		t.Fatalf("GoReleaser action does not use the dev config: %q", goreleaserArgs)
-	}
+	contextJob := workflow.Jobs["release-context"]
 
-	for _, want := range []string{"scripts/dev-release-base-tag.sh", "GORELEASER_CURRENT_TAG=", `>> "$GITHUB_ENV"`} {
-		if !strings.Contains(baseTagScript, want) {
-			t.Errorf("dev release base-tag selection missing %q", want)
+	contextScript := workflowStep(contextJob, "Bind one version and revision to every platform job").Run
+	for _, want := range []string{"scripts/dev-release-base-tag.sh", "scripts/dev-release-version.sh", `test "$revision" = "$GITHUB_SHA"`, `>> "$GITHUB_OUTPUT"`} {
+		if !strings.Contains(contextScript, want) {
+			t.Errorf("release context step missing %q", want)
 		}
 	}
 
-	if strings.Contains(baseTagScript, "git tag -d") {
-		t.Error("dev release base-tag selection still deletes operational tags")
+	darwinJob := workflow.Jobs["build-darwin"]
+	if darwinJob.RunsOn != "macos-26" {
+		t.Fatalf("Darwin release runner = %q, want macos-26", darwinJob.RunsOn)
 	}
 
-	if baseTagStepIndex < 0 || goreleaserStepIndex < 0 || baseTagStepIndex >= goreleaserStepIndex {
-		t.Errorf("dev release base-tag step must precede GoReleaser: base=%d goreleaser=%d", baseTagStepIndex, goreleaserStepIndex)
-	}
-
-	if verifyScript == "" {
-		t.Fatal("dev-release workflow has no archive verification step")
-	}
-
+	prepareStep := workflowStep(darwinJob, "Prepare and validate the pinned macOS arm64 backend")
 	for _, want := range []string{
 		`test "$(uname -s)-$(uname -m)" = Darwin-arm64`,
-		"scripts/libghostty-native.sh test",
-		"scripts/libghostty-native.sh test-metadata-policy",
-		"scripts/libghostty-native.sh test-darwin-linkage-policy",
-		"scripts/libghostty-native.sh test-exclusive-publish",
-		"scripts/libghostty-native.sh install-spdx-validator",
-		"scripts/libghostty-native.sh validate-spdx",
-		"GRAITH_LIBGHOSTTY_WORK=", "PKG_CONFIG_PATH=", "GRAITH_SPDX_VALIDATOR_JAR=",
+		"scripts/libghostty-native.sh test", "test-metadata-policy",
+		"test-darwin-linkage-policy", "test-exclusive-publish",
+		"install-spdx-validator", "validate-spdx", "GRAITH_SPDX_VALIDATOR_JAR=",
 	} {
-		if !strings.Contains(prepareScript, want) {
-			t.Errorf("native preparation step missing %q", want)
+		if !strings.Contains(prepareStep.Run, want) {
+			t.Errorf("Darwin native preparation missing %q", want)
 		}
 	}
 
-	if !strings.Contains(prepareEnv["GRAITH_LIBGHOSTTY_WORK"], "runner.temp") || prepareEnv["GRAITH_LIBGHOSTTY_KEEP_WORK"] != "1" {
-		t.Errorf("native preparation does not retain one runner-local canonical work directory: %#v", prepareEnv)
+	if !strings.Contains(prepareStep.Env["GRAITH_LIBGHOSTTY_WORK"], "runner.temp") || prepareStep.Env["GRAITH_LIBGHOSTTY_KEEP_WORK"] != "1" {
+		t.Errorf("Darwin preparation does not retain one canonical work directory: %#v", prepareStep.Env)
+	}
+
+	signingStep := workflowStep(darwinJob, "Configure optional macOS service signing")
+	unsignedScript := workflowStep(darwinJob, "Configure unsigned pull-request packaging").Run
+
+	var signingIf, unsignedIf string
+
+	for _, step := range darwinJob.Steps {
+		switch step.Name {
+		case "Configure optional macOS service signing":
+			signingIf = step.If
+		case "Configure unsigned pull-request packaging":
+			unsignedIf = step.If
+		}
+	}
+
+	if signingIf != "github.event_name == 'push'" || unsignedIf != "github.event_name == 'pull_request'" {
+		t.Errorf("signing secrets are not isolated from pull requests: signing=%q unsigned=%q", signingIf, unsignedIf)
+	}
+
+	for _, want := range []string{"GRAITH_MANAGED_DEV_RELEASE=false", "GRAITH_SIGNED_SNAPSHOT=false"} {
+		if !strings.Contains(unsignedScript, want) {
+			t.Errorf("unsigned pull-request setup missing %q", want)
+		}
 	}
 
 	for _, secret := range []string{
@@ -480,53 +563,191 @@ func TestDevReleaseWorkflowValidatesNativeArchives(t *testing.T) {
 		"MACOS_SIGNING_TEAM_ID", "MACOS_SIGNING_REQUIREMENT", "APPLE_NOTARY_PRIVATE_KEY",
 		"APPLE_NOTARY_KEY_ID", "APPLE_NOTARY_ISSUER_ID",
 	} {
-		if !strings.Contains(signingEnv[secret], "secrets."+secret) {
+		if !strings.Contains(signingStep.Env[secret], "secrets."+secret) {
 			t.Errorf("dev signing step does not map %s from its repository secret", secret)
 		}
 	}
 
 	for _, want := range []string{
-		"release-signing-mode.sh", "publishing the legacy direct-spawn dev package",
-		"GRAITH_MANAGED_DEV_RELEASE=false", "security import", "notarytool store-credentials",
-		"GRAITH_SIGNING_REQUIREMENT_B64", "GRAITH_MANAGED_DEV_RELEASE=true", "GRAITH_SIGNED_SNAPSHOT=true",
+		"release-signing-mode.sh", "GRAITH_MANAGED_DEV_RELEASE=false", "security import",
+		"notarytool store-credentials", "GRAITH_SIGNING_REQUIREMENT_B64",
+		"GRAITH_MANAGED_DEV_RELEASE=true", "GRAITH_SIGNED_SNAPSHOT=true",
 	} {
-		if !strings.Contains(signingScript, want) {
+		if !strings.Contains(signingStep.Run, want) {
 			t.Errorf("dev signing setup missing %q", want)
 		}
 	}
 
+	var (
+		goreleaserUses string
+		goreleaserWith map[string]string
+	)
+
+	for _, step := range darwinJob.Steps {
+		if strings.Contains(step.Uses, "goreleaser/goreleaser-action") {
+			goreleaserUses = step.Uses
+			goreleaserWith = step.With
+		}
+	}
+
+	if goreleaserUses == "" || !strings.Contains(goreleaserWith["args"], "-f .goreleaser-dev.yaml") {
+		t.Fatalf("Darwin job does not run the dev GoReleaser config: %q %#v", goreleaserUses, goreleaserWith)
+	}
+
+	darwinVerify := workflowStep(darwinJob, "Verify Darwin dev archives").Run
 	for _, want := range []string{
-		`case "${GRAITH_MANAGED_DEV_RELEASE:-false}"`,
-		"test -x \"$notifier\"",
-		"lipo \"$notifier\" -verify_arch arm64 x86_64",
-		"codesign --verify --deep --strict \"$notifier_app\"",
-		"GraithNotifier.app",
-		"Graith.app",
-		"cmp \"$unpacked/gr-dev\" \"$service_app/Contents/MacOS/gr\"",
-		"macos/service/verify-release-archive.sh",
-		"Legacy dev archive unexpectedly contains Graith.app",
-		"Charm rollback archive unexpectedly contains Graith.app",
-		"graith-dev_darwin_arm64_charm.tar.gz",
-		"verify-darwin-arm64-candidate",
-		"verify-candidate-spdx",
-		"verify-default-binary",
-		"GRAITH_SPDX_VALIDATOR_JAR",
-		"Rollback archive unexpectedly contains native metadata",
-		"Linux dev archive unexpectedly contains a macOS app",
+		`[ "${#all_archives[@]}" -ne 2 ]`, "separately named rollback archive",
+		"verify-darwin-arm64-candidate", "verify-candidate-spdx", "verify-default-binary",
+		"macos/service/verify-release-archive.sh", "GRAITH_SPDX_VALIDATOR_JAR",
 	} {
-		if !strings.Contains(verifyScript, want) {
-			t.Errorf("archive verification step missing %q", want)
+		if !strings.Contains(darwinVerify, want) {
+			t.Errorf("Darwin archive verification missing %q", want)
+		}
+	}
+
+	if strings.Contains(darwinVerify, "darwin_arm64_charm") {
+		t.Fatal("Darwin verification still expects the removed rollback archive")
+	}
+
+	cleanupScript := workflowStep(darwinJob, "Remove temporary macOS signing keychain").Run
+
+	var cleanupIf string
+
+	for _, step := range darwinJob.Steps {
+		if step.Name == "Remove temporary macOS signing keychain" {
+			cleanupIf = step.If
 		}
 	}
 
 	if cleanupIf != "always()" || !strings.Contains(cleanupScript, `security delete-keychain "$GRAITH_RELEASE_KEYCHAIN"`) {
-		t.Errorf("dev signing keychain cleanup is not fail-safe: if=%q run=%q", cleanupIf, cleanupScript)
+		t.Errorf("Darwin signing keychain cleanup is not fail-safe: if=%q run=%q", cleanupIf, cleanupScript)
+	}
+
+	linuxJob := workflow.Jobs["build-linux"]
+	if linuxJob.RunsOn != "ubuntu-24.04" {
+		t.Fatalf("Linux build runner = %q, want ubuntu-24.04", linuxJob.RunsOn)
+	}
+
+	wantTargets := map[string]string{"amd64": "x86_64-linux-gnu", "arm64": "aarch64-linux-gnu"}
+	for _, entry := range linuxJob.Strategy.Matrix.Include {
+		if wantTargets[entry["goarch"]] != entry["target"] {
+			t.Errorf("unexpected Linux build matrix entry: %#v", entry)
+		}
+
+		delete(wantTargets, entry["goarch"])
+	}
+
+	if len(wantTargets) != 0 {
+		t.Fatalf("Linux build matrix missing targets: %#v", wantTargets)
+	}
+
+	linuxBuild := workflowStep(linuxJob, "Build the exact pinned Linux dependency unit").Run
+	for _, want := range []string{"source-build", "verify-static-archive", "test-source-archive-policy", "verify-dependency-unit", "verify-generated-dependency-unit"} {
+		if !strings.Contains(linuxBuild, want) {
+			t.Errorf("Linux dependency build missing %q", want)
+		}
+	}
+
+	linuxPackage := workflowStep(linuxJob, "Build and verify the final Linux release archive").Run
+	for _, want := range []string{
+		"CGO_ENABLED=1", "-tags=libghostty", "--strip-debug", "package-linux",
+		"libghostty-native.spdx.json", "THIRD_PARTY_NOTICES.libghostty.md",
+		"tar --sort=name", "gzip --no-name", "verify-linux-dev-archive",
+		"archive_sha", "binary_sha", "dev-linux-${GOARCH}-manifest.json",
+	} {
+		if !strings.Contains(linuxPackage, want) {
+			t.Errorf("Linux final archive build missing %q", want)
+		}
+	}
+
+	if linuxJob.Permissions["contents"] != "read" || linuxJob.Permissions["attestations"] != "" || linuxJob.Permissions["id-token"] != "" {
+		t.Errorf("pull-request Linux builder has mutation permissions: %#v", linuxJob.Permissions)
+	}
+
+	attestJob := workflow.Jobs["attest-linux"]
+
+	attestStep := workflowStep(attestJob, "Attest the final Linux release archive")
+	if !strings.Contains(attestStep.Uses, "actions/attest@") || !strings.Contains(attestStep.With["subject-path"], "graith-dev_linux_") {
+		t.Errorf("Linux final archive is not provenance-attested: uses=%q with=%#v", attestStep.Uses, attestStep.With)
+	}
+
+	if attestJob.If != "github.event_name == 'push'" || attestJob.Permissions["attestations"] != "write" || attestJob.Permissions["id-token"] != "write" {
+		t.Errorf("Linux attestation is not isolated to push with required permissions: if=%q permissions=%#v", attestJob.If, attestJob.Permissions)
+	}
+
+	executeJob := workflow.Jobs["execute-linux"]
+
+	wantRunners := map[string]string{"amd64": "ubuntu-24.04", "arm64": "ubuntu-24.04-arm"}
+	for _, entry := range executeJob.Strategy.Matrix.Include {
+		if wantRunners[entry["goarch"]] != entry["runner"] {
+			t.Errorf("unexpected Linux execution matrix entry: %#v", entry)
+		}
+
+		delete(wantRunners, entry["goarch"])
+	}
+
+	if len(wantRunners) != 0 {
+		t.Fatalf("Linux execution matrix missing actual-architecture runners: %#v", wantRunners)
+	}
+
+	executeScript := workflowStep(executeJob, "Reverify and execute the published Linux bytes").Run
+	for _, want := range []string{"sha256sum --check", "install-spdx-validator", "verify-linux-dev-archive", `"$spdx_jar" true`} {
+		if !strings.Contains(executeScript, want) {
+			t.Errorf("Linux actual-architecture execution missing %q", want)
+		}
+	}
+
+	assembleJob := workflow.Jobs["assemble-dev"]
+	if assembleJob.Permissions["contents"] != "read" {
+		t.Errorf("pull-request aggregation has mutation permissions: %#v", assembleJob.Permissions)
+	}
+
+	aggregateScript := workflowStep(assembleJob, "Verify the complete same-commit release set").Run
+	for _, want := range []string{
+		`test "$(git rev-parse HEAD)" = "$RELEASE_REVISION"`,
+		"graith-dev_linux_amd64.tar.gz", "graith-dev_linux_arm64.tar.gz",
+		"dev-darwin-manifest.json", "dev-linux-${goarch}-manifest.json",
+		"sha256sum --check", "tar -xOzf", "checksums.txt", `-eq 4`,
+	} {
+		if !strings.Contains(aggregateScript, want) {
+			t.Errorf("controlled publisher aggregation missing %q", want)
+		}
+	}
+
+	publishJob := workflow.Jobs["publish-dev"]
+	if publishJob.If != "github.event_name == 'push'" || publishJob.Permissions["contents"] != "write" {
+		t.Errorf("publisher is not isolated to push with write permission: if=%q permissions=%#v", publishJob.If, publishJob.Permissions)
+	}
+
+	provenanceScript := workflowStep(publishJob, "Verify Linux build provenance").Run
+	for _, want := range []string{"gh attestation verify", "--signer-workflow", "--source-ref refs/heads/main"} {
+		if !strings.Contains(provenanceScript, want) {
+			t.Errorf("publisher provenance verification missing %q", want)
+		}
+	}
+
+	publishScript := workflowStep(publishJob, "Upload dev release").Run
+	if strings.Contains(publishScript, "dist/*.tar.gz") || strings.Contains(publishScript, "_charm") {
+		t.Fatal("publisher uses an open archive glob or rollback asset")
+	}
+
+	for _, want := range []string{"--target \"$RELEASE_REVISION\"", "checksums.txt", "gh release view dev --json assets"} {
+		if !strings.Contains(publishScript, want) {
+			t.Errorf("publisher final release step missing %q", want)
+		}
+	}
+
+	workflowText := string(mustReadReleaseFile(t, ".github/workflows/dev-release.yml"))
+	for _, want := range []string{"pull_request:", "cancel-in-progress: ${{ github.event_name == 'pull_request' }}"} {
+		if !strings.Contains(workflowText, want) {
+			t.Errorf("dev release workflow policy missing %q", want)
+		}
 	}
 }
 
 func TestDevHomebrewFormulaInstallsMacAppsOnlyOnMacOS(t *testing.T) {
 	workflow := loadDevReleaseWorkflow(t)
-	job := workflow.Jobs["dev-release"]
+	job := workflow.Jobs["publish-dev"]
 
 	var script string
 
@@ -541,12 +762,8 @@ func TestDevHomebrewFormulaInstallsMacAppsOnlyOnMacOS(t *testing.T) {
 		t.Fatal("dev-release workflow has no Homebrew formula generation step")
 	}
 
-	if strings.Contains(script, "sha256sum") {
-		t.Error("macOS dev-release workflow still uses Linux-only sha256sum")
-	}
-
-	if !strings.Contains(script, "shasum -a 256") {
-		t.Error("macOS dev-release workflow does not calculate SHA-256 with shasum")
+	if !strings.Contains(script, "sha256sum") {
+		t.Error("Linux publisher does not calculate final archive SHA-256 values")
 	}
 
 	if strings.Contains(script, "sed -i") {
@@ -570,7 +787,7 @@ func TestDevHomebrewFormulaInstallsMacAppsOnlyOnMacOS(t *testing.T) {
 	}
 
 	if strings.Contains(formula, "_charm") {
-		t.Fatal("generated Homebrew formula selects the emergency Charm rollback instead of the native arm64 canary")
+		t.Fatal("generated Homebrew formula refers to a separately named rollback archive")
 	}
 
 	installAt := strings.Index(formula, "def install")
@@ -672,6 +889,37 @@ func TestStableReleaseRemainsPureGoDuringDevCanary(t *testing.T) {
 	for id, found := range want {
 		if !found {
 			t.Errorf("stable GoReleaser config has no %q build", id)
+		}
+	}
+}
+
+func TestReleaseConfigsDoNotPublishSeparatelyNamedRollbackArchives(t *testing.T) {
+	for _, name := range []string{".goreleaser-dev.yaml", ".goreleaser.yaml"} {
+		var config struct {
+			Builds []struct {
+				ID string `yaml:"id"`
+			} `yaml:"builds"`
+			Archives []struct {
+				ID           string `yaml:"id"`
+				NameTemplate string `yaml:"name_template"`
+			} `yaml:"archives"`
+		}
+		if err := yaml.Unmarshal(mustReadReleaseFile(t, name), &config); err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+
+		for _, build := range config.Builds {
+			lower := strings.ToLower(build.ID)
+			if strings.Contains(lower, "charm") || strings.Contains(lower, "rollback") {
+				t.Errorf("%s declares separately named rollback build %q", name, build.ID)
+			}
+		}
+
+		for _, archive := range config.Archives {
+			identity := strings.ToLower(archive.ID + " " + archive.NameTemplate)
+			if strings.Contains(identity, "charm") || strings.Contains(identity, "rollback") {
+				t.Errorf("%s declares separately named rollback archive %q (%q)", name, archive.ID, archive.NameTemplate)
+			}
 		}
 	}
 }

@@ -69,7 +69,7 @@ jobs:
           else
             echo "dependency-unit=false" >> "$GITHUB_OUTPUT"
           fi
-          if grep -Eq '^\.github/workflows/libghostty-native\.yml$|^docs/design/2026-07-18-libghostty-daemon-backend.*\.md$|^gui/shared/Package\.swift$|^gui/shared/Sources/CGhosttyVT/include/|^go\.(mod|sum)$|^internal/(cli|daemon|integration|libghosttydeps|pty)/|^libghostty-native\.(lock|spdx)\.json$|^scripts/libghostty-native\.sh$|^THIRD_PARTY_NOTICES\.libghostty\.md$' <<<"$files"; then
+          if grep -Eq '^\.goreleaser-dev\.yaml$|^\.github/workflows/(dev-release|libghostty-native)\.yml$|^docs/design/2026-07-18-libghostty-daemon-backend.*\.md$|^gui/shared/Package\.swift$|^gui/shared/Sources/CGhosttyVT/include/|^go\.(mod|sum)$|^internal/(cli|daemon|integration|libghosttydeps|pty|release)/|^libghostty-native\.(lock|spdx)\.json$|^scripts/(dev-release-version|libghostty-native)\.sh$|^THIRD_PARTY_NOTICES\.libghostty\.md$|^website/content/docs/(commands/daemon|contributing/_index|installation|troubleshooting)\.md$' <<<"$files"; then
             echo "native=true" >> "$GITHUB_OUTPUT"
             echo "libghostty-relevant files changed: running native jobs."
           else

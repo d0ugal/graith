@@ -103,8 +103,10 @@ retains the previous direct-spawn behavior rather than installing an unsigned
 service app. After upgrading a managed dev package, run `gr-dev daemon restart`;
 before uninstalling it, run `gr-dev daemon service remove`. macOS 11/12, source
 builds, `go install`, and Linux keep the direct-spawn behavior. `gr doctor`
-reports which mode is active. Apple Silicon dev releases provide an explicit
-[pure-Go rollback procedure]({{< relref "/docs/installation.md#macos-arm64-graith-dev-canary-and-rollback" >}}).
+reports which mode is active. The dev and stable channels do not publish
+separately named rollback archives; see the
+[native dev canary guidance]({{< relref "/docs/installation.md#native-graith-dev-canary" >}})
+for supported platform artifacts and channel changes.
 
 ### `gr daemon service status`
 
