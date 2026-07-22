@@ -54,7 +54,9 @@ Switch with `ctrl+b n` (next) / `ctrl+b p` (previous), or `ctrl+b w` for the pic
 
 ## Session picker
 
-The picker shows all sessions grouped by repo:
+The picker shows all sessions as one parent/child tree by default. Repository
+names stay visible on each row, including when a parent and child belong to
+different repositories:
 
 - Session name and status (running, stopped, errored)
 - Agent type
@@ -68,7 +70,8 @@ Cycle views with `h`/`l` or left/right arrows:
 
 | View | Shows |
 |------|-------|
-| All | Every session, grouped by repo, with parent/child trees inside each repo |
+| All | Every session in one global parent/child tree, with repository names on each row |
+| Repo | Every session grouped by repository, with a separate tree inside each group |
 | Starred | Starred sessions in a parent/child tree |
 | Labels | Sessions grouped by label across repositories, with a tree inside each label |
 | Scenarios | Every session grouped by scenario, with a tree inside each group and unassigned sessions kept together |
