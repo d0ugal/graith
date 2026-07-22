@@ -44,6 +44,18 @@ var protectedDaemonServiceControlRoot = func() (string, error) {
 	return daemonservice.ReceiptRoot(os.Geteuid())
 }
 
+// addDaemonConnectionEnv gives session-owned helpers enough non-secret context
+// to reconnect to this exact daemon. GRAITH_SOCKET_PATH matters when the daemon
+// was selected through a custom config or data directory that profile/XDG
+// discovery alone cannot reproduce. Callers add session identity and tokens
+// separately; these values are connection routing, not authority.
+func (sm *SessionManager) addDaemonConnectionEnv(env map[string]string) {
+	// Assign even empty values so agent.Env or the daemon's parent environment
+	// cannot leave a stale profile/socket on a default-profile session.
+	env["GRAITH_PROFILE"] = sm.paths.Profile
+	env["GRAITH_SOCKET_PATH"] = sm.paths.SocketPath
+}
+
 type orchestratorRuntimeSnapshot struct {
 	id              string
 	status          SessionStatus

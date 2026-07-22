@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"testing"
+
+	"github.com/d0ugal/graith/internal/config"
 )
 
 // TestIsPermanentErrorClassification verifies which daemon errors are treated as
@@ -102,5 +105,40 @@ func TestMCPProxyCmdArgs(t *testing.T) {
 
 	if err := mcpProxyCmd.Args(mcpProxyCmd, []string{"blether", "loch"}); err == nil {
 		t.Errorf("two args should be rejected")
+	}
+}
+
+func TestMCPProxyConnectionPaths(t *testing.T) {
+	base := config.Paths{
+		Profile:    "canny",
+		SocketPath: filepath.Join(t.TempDir(), "default.sock"),
+		DataDir:    filepath.Join(t.TempDir(), "data"),
+	}
+
+	unchanged, err := mcpProxyConnectionPaths(base, "")
+	if err != nil {
+		t.Fatalf("empty socket override: %v", err)
+	}
+
+	if unchanged != base {
+		t.Fatalf("empty socket override changed paths: got %+v, want %+v", unchanged, base)
+	}
+
+	override := filepath.Join(t.TempDir(), "custom", "..", "graith.sock")
+	got, err := mcpProxyConnectionPaths(base, override)
+	if err != nil {
+		t.Fatalf("absolute socket override: %v", err)
+	}
+
+	if got.SocketPath != filepath.Clean(override) {
+		t.Errorf("SocketPath = %q, want %q", got.SocketPath, filepath.Clean(override))
+	}
+
+	if got.Profile != base.Profile || got.DataDir != base.DataDir {
+		t.Errorf("socket override changed unrelated connection paths: got %+v, base %+v", got, base)
+	}
+
+	if _, err := mcpProxyConnectionPaths(base, filepath.Join("relative", "graith.sock")); err == nil {
+		t.Fatal("relative GRAITH_SOCKET_PATH should fail closed")
 	}
 }

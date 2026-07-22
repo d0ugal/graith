@@ -677,9 +677,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		env["GRAITH_REPO_PATH"] = sessRepoPath
 	}
 
-	if sm.paths.Profile != "" {
-		env["GRAITH_PROFILE"] = sm.paths.Profile
-	}
+	sm.addDaemonConnectionEnv(env)
 
 	if sessInPlace {
 		env["GRAITH_IN_PLACE"] = "true"

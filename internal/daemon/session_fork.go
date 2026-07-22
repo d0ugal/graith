@@ -495,9 +495,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		env["GRAITH_REPO_PATH"] = repoRoot
 	}
 
-	if sm.paths.Profile != "" {
-		env["GRAITH_PROFILE"] = sm.paths.Profile
-	}
+	sm.addDaemonConnectionEnv(env)
 
 	var forkStoreDir string
 

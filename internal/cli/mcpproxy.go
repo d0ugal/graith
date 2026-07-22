@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
@@ -22,8 +24,9 @@ var mcpProxyCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		serverName := args[0]
 		sessionID := os.Getenv("GRAITH_SESSION_ID")
+		socketPath := os.Getenv("GRAITH_SOCKET_PATH")
 
-		return runMCPProxy(serverName, sessionID)
+		return runMCPProxy(serverName, sessionID, socketPath)
 	},
 }
 
@@ -33,8 +36,13 @@ type stdinChunk struct {
 	err  error
 }
 
-func runMCPProxy(serverName, sessionID string) error {
+func runMCPProxy(serverName, sessionID, socketPath string) error {
 	const maxBackoff = 30 * time.Second
+
+	proxyPaths, err := mcpProxyConnectionPaths(paths, socketPath)
+	if err != nil {
+		return err
+	}
 
 	backoff := time.Second
 
@@ -63,7 +71,7 @@ func runMCPProxy(serverName, sessionID string) error {
 	for {
 		start := time.Now()
 
-		err := mcpProxySession(serverName, sessionID, stdinCh)
+		err := mcpProxySession(serverName, sessionID, proxyPaths, stdinCh)
 		if err == nil {
 			return nil
 		}
@@ -98,8 +106,25 @@ func isPermanentError(err error) bool {
 		strings.Contains(msg, "requires an authenticated session identity")
 }
 
-func mcpProxySession(serverName, sessionID string, stdinCh <-chan stdinChunk) error {
-	c, err := client.ConnectPassive(cfg, paths, cfgFile)
+func mcpProxyConnectionPaths(base config.Paths, socketPath string) (config.Paths, error) {
+	if socketPath == "" {
+		return base, nil
+	}
+
+	if !filepath.IsAbs(socketPath) {
+		return config.Paths{}, fmt.Errorf("GRAITH_SOCKET_PATH must be absolute")
+	}
+
+	base.SocketPath = filepath.Clean(socketPath)
+
+	return base, nil
+}
+
+func mcpProxySession(serverName, sessionID string, proxyPaths config.Paths, stdinCh <-chan stdinChunk) error {
+	// A proxy is owned by an already-running daemon. Never auto-start a daemon
+	// from this credential-bearing helper: on restart the outer retry loop waits
+	// for the exact socket to return.
+	c, err := client.ConnectExisting(cfg, proxyPaths)
 	if err != nil {
 		return fmt.Errorf("connect to daemon: %w", err)
 	}

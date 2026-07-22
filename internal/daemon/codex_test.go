@@ -9,6 +9,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
+	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
 // TestOptionArgs locks the #1186 fix as re-expressed through config-driven
@@ -279,7 +280,7 @@ func TestCodexMCPProxyEnvWhitelistAcrossLifecycle(t *testing.T) {
 
 	t.Cleanup(func() { stopAndClosePTY(sm, created.ID) })
 
-	waitForCodexMCPProxyEnvOverride(t, recordPath)
+	waitForCodexMCPProxyEnvOverride(t, sm, created.ID, recordPath)
 
 	if err := os.Remove(recordPath); err != nil {
 		t.Fatalf("remove record before fork: %v", err)
@@ -292,7 +293,7 @@ func TestCodexMCPProxyEnvWhitelistAcrossLifecycle(t *testing.T) {
 
 	t.Cleanup(func() { stopAndClosePTY(sm, forked.ID) })
 
-	waitForCodexMCPProxyEnvOverride(t, recordPath)
+	waitForCodexMCPProxyEnvOverride(t, sm, forked.ID, recordPath)
 
 	if err := os.Remove(recordPath); err != nil {
 		t.Fatalf("remove record before resume: %v", err)
@@ -308,16 +309,36 @@ func TestCodexMCPProxyEnvWhitelistAcrossLifecycle(t *testing.T) {
 		t.Fatalf("Restart() error = %v", err)
 	}
 
-	waitForCodexMCPProxyEnvOverride(t, recordPath)
+	waitForCodexMCPProxyEnvOverride(t, sm, created.ID, recordPath)
 }
 
-func waitForCodexMCPProxyEnvOverride(t *testing.T, recordPath string) {
+func waitForCodexMCPProxyEnvOverride(t *testing.T, sm *SessionManager, sessionID, recordPath string) {
 	t.Helper()
 
 	// Wait on an override that predated the fix so a regression fails
 	// immediately on the missing env_vars assertion, rather than by timeout.
 	argv := waitForRecordedArgv(t, recordPath, `mcp_servers.graith.args=["mcp-proxy","graith"]`)
-	assertContiguousPair(t, argv, "-c", `mcp_servers.graith.env_vars=["GRAITH_SESSION_ID","GRAITH_TOKEN","GRAITH_PROFILE","XDG_CONFIG_HOME","XDG_DATA_HOME","XDG_RUNTIME_DIR"]`)
+	assertContiguousPair(t, argv, "-c", `mcp_servers.graith.env_vars=["GRAITH_SESSION_ID","GRAITH_TOKEN","GRAITH_PROFILE","GRAITH_SOCKET_PATH"]`)
+	assertContiguousPair(t, argv, "-c", `mcp_servers.graith.env={}`)
+	assertContiguousPair(t, argv, "-c", `mcp_servers.graith.environment_id="local"`)
+
+	sm.mu.RLock()
+	driver := sm.sessions[sessionID]
+	sm.mu.RUnlock()
+
+	ptySession, ok := driver.(*grpty.Session)
+	if !ok {
+		t.Fatalf("session %q driver = %T, want *pty.Session", sessionID, driver)
+	}
+
+	wantSocket := "GRAITH_SOCKET_PATH=" + sm.paths.SocketPath
+	for _, entry := range ptySession.Cmd.Env {
+		if entry == wantSocket {
+			return
+		}
+	}
+
+	t.Fatalf("session %q environment does not contain %q", sessionID, wantSocket)
 }
 
 // newCodexRecorderManager builds a SessionManager whose "codex" agent is a shell
@@ -356,6 +377,7 @@ func newCodexRecorderManager(t *testing.T, repoDir string) (*SessionManager, str
 		DataDir:    dir,
 		LogDir:     dir,
 		RuntimeDir: dir,
+		SocketPath: filepath.Join(dir, "graith.sock"),
 		TmpDir:     filepath.Join(dir, "tmp"),
 	}, slog.Default())
 	sm.sandboxResolver = func(string) (bool, error) { return false, nil }

@@ -706,10 +706,14 @@ func TestCodexMCPServerArgs(t *testing.T) {
 	want := []string{
 		"-c", "mcp_servers.graith.command=" + string(cmdVal),
 		"-c", `mcp_servers.graith.args=["mcp-proxy","graith"]`,
-		"-c", `mcp_servers.graith.env_vars=["GRAITH_SESSION_ID","GRAITH_TOKEN","GRAITH_PROFILE","XDG_CONFIG_HOME","XDG_DATA_HOME","XDG_RUNTIME_DIR"]`,
+		"-c", `mcp_servers.graith.env_vars=["GRAITH_SESSION_ID","GRAITH_TOKEN","GRAITH_PROFILE","GRAITH_SOCKET_PATH"]`,
+		"-c", `mcp_servers.graith.env={}`,
+		"-c", `mcp_servers.graith.environment_id="local"`,
 		"-c", "mcp_servers.chrome-devtools.command=" + string(cmdVal),
 		"-c", `mcp_servers.chrome-devtools.args=["mcp-proxy","chrome-devtools"]`,
-		"-c", `mcp_servers.chrome-devtools.env_vars=["GRAITH_SESSION_ID","GRAITH_TOKEN","GRAITH_PROFILE","XDG_CONFIG_HOME","XDG_DATA_HOME","XDG_RUNTIME_DIR"]`,
+		"-c", `mcp_servers.chrome-devtools.env_vars=["GRAITH_SESSION_ID","GRAITH_TOKEN","GRAITH_PROFILE","GRAITH_SOCKET_PATH"]`,
+		"-c", `mcp_servers.chrome-devtools.env={}`,
+		"-c", `mcp_servers.chrome-devtools.environment_id="local"`,
 	}
 
 	if len(args) != len(want) {
@@ -735,7 +739,10 @@ func TestCodexMCPServerArgs(t *testing.T) {
 		t.Fatal("codex MCP args exposed the GRAITH_TOKEN value")
 	}
 
-	for _, unexpected := range []string{"GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "DISPLAY"} {
+	for _, unexpected := range []string{
+		"GRAITH_SESSION_NAME", "GRAITH_WORKTREE_PATH", "DISPLAY",
+		"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR",
+	} {
 		if strings.Contains(joined, unexpected) {
 			t.Errorf("codex MCP args inherit unnecessary or configured server variable %q: %v", unexpected, args)
 		}
@@ -772,9 +779,9 @@ func TestCodexMCPServerArgsSkipsUnrepresentableNames(t *testing.T) {
 		}
 	}
 
-	// Only the two representable names emit overrides: 2 servers × 6 args each.
-	if len(args) != 12 {
-		t.Fatalf("args = %v, want 12 (graith + under_score-ok)", args)
+	// Only the two representable names emit overrides: 2 servers × 10 args each.
+	if len(args) != 20 {
+		t.Fatalf("args = %v, want 20 (graith + under_score-ok)", args)
 	}
 
 	joined := strings.Join(args, " ")
@@ -1114,8 +1121,16 @@ func TestInjectMCPConfigCodex(t *testing.T) {
 			t.Errorf("args missing args override for %q: %v", name, args)
 		}
 
-		if !strings.Contains(joined, `mcp_servers.`+name+`.env_vars=["GRAITH_SESSION_ID","GRAITH_TOKEN","GRAITH_PROFILE","XDG_CONFIG_HOME","XDG_DATA_HOME","XDG_RUNTIME_DIR"]`) {
+		if !strings.Contains(joined, `mcp_servers.`+name+`.env_vars=["GRAITH_SESSION_ID","GRAITH_TOKEN","GRAITH_PROFILE","GRAITH_SOCKET_PATH"]`) {
 			t.Errorf("args missing proxy environment whitelist for %q: %v", name, args)
+		}
+
+		if !strings.Contains(joined, `mcp_servers.`+name+`.env={}`) {
+			t.Errorf("args do not clear literal environment overrides for %q: %v", name, args)
+		}
+
+		if !strings.Contains(joined, `mcp_servers.`+name+`.environment_id="local"`) {
+			t.Errorf("args do not force local proxy execution for %q: %v", name, args)
 		}
 	}
 }

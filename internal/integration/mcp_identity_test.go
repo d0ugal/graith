@@ -48,6 +48,11 @@ func TestManagedGraithMCPPreservesCallerIdentity(t *testing.T) {
 	cmd.Env = replaceProcessEnv(os.Environ(), map[string]string{
 		managedMCPHelperEnvName: "1",
 		"GRAITH_TOKEN":          managedMCPCallerToken,
+		"GRAITH_SOCKET_PATH":    env.socket,
+		// Deliberately make normal XDG discovery point elsewhere. The proxy must
+		// use the daemon-injected exact socket and must never auto-start a second
+		// daemon from this credential-bearing helper.
+		"XDG_RUNTIME_DIR": filepath.Join(t.TempDir(), "wrong-runtime"),
 		// The outer request payload claims an unrelated session; the daemon
 		// must overwrite it from the authenticated envelope token.
 		"GRAITH_SESSION_ID": "spoofed-session",

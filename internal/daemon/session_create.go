@@ -675,9 +675,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		env["GRAITH_REPO_PATH"] = repoRoot
 	}
 
-	if sm.paths.Profile != "" {
-		env["GRAITH_PROFILE"] = sm.paths.Profile
-	}
+	sm.addDaemonConnectionEnv(env)
 
 	if inPlace {
 		env["GRAITH_IN_PLACE"] = "true"

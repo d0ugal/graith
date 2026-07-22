@@ -50,6 +50,43 @@ func TestOrchestratorDirs_Cov(t *testing.T) {
 	}
 }
 
+func TestAddDaemonConnectionEnv(t *testing.T) {
+	sm := newOrchTestSM(t)
+	sm.paths.Profile = "canny"
+	sm.paths.SocketPath = filepath.Join(t.TempDir(), "graith.sock")
+
+	env := map[string]string{
+		"GRAITH_PROFILE":     "stale-profile",
+		"GRAITH_SOCKET_PATH": "stale.sock",
+		"BLETHER":            "preserved",
+	}
+	sm.addDaemonConnectionEnv(env)
+
+	if got := env["GRAITH_PROFILE"]; got != sm.paths.Profile {
+		t.Errorf("GRAITH_PROFILE = %q, want %q", got, sm.paths.Profile)
+	}
+
+	if got := env["GRAITH_SOCKET_PATH"]; got != sm.paths.SocketPath {
+		t.Errorf("GRAITH_SOCKET_PATH = %q, want %q", got, sm.paths.SocketPath)
+	}
+
+	if got := env["BLETHER"]; got != "preserved" {
+		t.Errorf("unrelated environment = %q, want preserved", got)
+	}
+
+	sm.paths.Profile = ""
+	sm.paths.SocketPath = ""
+	sm.addDaemonConnectionEnv(env)
+
+	if got := env["GRAITH_PROFILE"]; got != "" {
+		t.Errorf("default profile retained stale value %q", got)
+	}
+
+	if got := env["GRAITH_SOCKET_PATH"]; got != "" {
+		t.Errorf("empty socket path retained stale value %q", got)
+	}
+}
+
 func TestFindOrchestratorID_Cov(t *testing.T) {
 	sm := newOrchTestSM(t)
 

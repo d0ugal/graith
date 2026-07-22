@@ -203,9 +203,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	env["GRAITH_TMPDIR"] = tmpDir
 
 	env["TMPDIR"] = tmpDir
-	if sm.paths.Profile != "" {
-		env["GRAITH_PROFILE"] = sm.paths.Profile
-	}
+	sm.addDaemonConnectionEnv(env)
 
 	if policyEnabled {
 		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, scratchDir, false, true, cfgSnap.CommandPolicy.TimeoutDuration())
