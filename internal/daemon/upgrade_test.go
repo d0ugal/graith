@@ -4267,7 +4267,7 @@ func TestReconcileRemovedHookProcessesDoesNotSignalAfterColdRestart(t *testing.T
 		// reordering cannot bypass removed-hook ownership quarantine.
 		sm.cleanupOrphanedProcesses()
 		err := sm.completeRemovedHookCleanup(true)
-		if err == nil || !strings.Contains(err.Error(), "verify and stop that exact process externally") {
+		if err == nil || !strings.Contains(err.Error(), "do not signal that PID or process group directly") {
 			t.Fatalf("startup attempt %d cleanup error = %v, want actionable unresolved-process refusal", attempt, err)
 		}
 		got, _ := sm.Get("canny")
@@ -4378,6 +4378,92 @@ func TestReconcileRemovedHookProcessesDoesNotSignalAfterColdRestart(t *testing.T
 	}
 	if _, err := os.Stat(settingsPath); err != nil {
 		t.Fatalf("blocked lifecycle operations removed owned hook evidence: %v", err)
+	}
+}
+
+func TestInstallLoadedStatePreservesPendingDeletingEvidence(t *testing.T) {
+	sm := newTestSessionManagerWithDataDir(t)
+	cmd := startSleeperGroup(t)
+	pid := cmd.Process.Pid
+
+	start, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	var groupCalls int
+	withProcKill(t, func(target int, signal syscall.Signal) error {
+		if target == -pid {
+			groupCalls++
+			return syscall.EPERM
+		}
+
+		return syscall.Kill(target, signal)
+	})
+
+	statusChangedAt := time.Date(2026, time.July, 22, 14, 30, 0, 0, time.UTC)
+	summarySetAt := statusChangedAt.Add(time.Minute)
+	worktree := filepath.Join(sm.paths.DataDir, "worktrees", "croft", "bothy", "thrawn")
+	if err := os.MkdirAll(worktree, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.state.Sessions["thrawn"] = &SessionState{
+		ID: "thrawn", Name: "thrawn", Agent: "claude", WorktreePath: worktree, CWD: worktree,
+		Status: StatusDeleting, PID: pid, PIDStartTime: start,
+		RemovedHookCleanupPending: true, StatusChangedAt: statusChangedAt,
+		SummaryText: "Restart required because Graith command policy was removed", SummarySetAt: &summarySetAt,
+	}
+	if err := sm.writeTombstone(tombstone{
+		teardownSpec: teardownSpec{ID: "thrawn", WorktreePath: worktree},
+		Name:         "thrawn", PID: pid, PIDStartTime: start, CreatedAt: statusChangedAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.mu.Lock()
+	if err := sm.saveState(); err != nil {
+		sm.mu.Unlock()
+		t.Fatal(err)
+	}
+	sm.mu.Unlock()
+	before, err := os.ReadFile(sm.paths.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadState(sm.paths.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sm.installLoadedState(loaded); err != nil {
+		t.Fatal(err)
+	}
+	if err := sm.reconcileRemovedHookProcesses(); err != nil {
+		t.Fatal(err)
+	}
+	cleanupErr := sm.completeRemovedHookCleanup(true)
+	if cleanupErr == nil || !strings.Contains(cleanupErr.Error(), "do not signal that PID or process group directly") {
+		t.Fatalf("cleanup error = %v, want no-signal recovery guidance", cleanupErr)
+	}
+
+	after, err := os.ReadFile(sm.paths.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("load/install reconciliation rewrote pending deleting-state evidence")
+	}
+	got, _ := sm.Get("thrawn")
+	if got.Status != StatusDeleting || got.PID != pid || !got.RemovedHookCleanupPending ||
+		!got.StatusChangedAt.Equal(statusChangedAt) || got.SummarySetAt == nil || !got.SummarySetAt.Equal(summarySetAt) {
+		t.Fatalf("pending deleting-state evidence changed during startup: %+v", got)
+	}
+	if groupCalls != 0 || !isProcessAlive(pid) {
+		t.Fatalf("startup touched pending deleting process: group calls = %d, alive = %v", groupCalls, isProcessAlive(pid))
+	}
+	if _, err := os.Stat(sm.tombstonePath("thrawn")); err != nil {
+		t.Fatalf("startup removed pending delete tombstone: %v", err)
 	}
 }
 

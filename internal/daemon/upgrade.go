@@ -3514,9 +3514,11 @@ func validPersistedUpgradeCleanup(key string, session UpgradeSession) bool {
 	return key == upgradeCleanupKey(session)
 }
 
+const removedHookCleanupRecovery = "do not signal that PID or process group directly; stop the exact old job through its owning supervisor, wait for it to exit, or restart its host, VM, or container, then restart Graith"
+
 func (sm *SessionManager) rejectPendingUpgradeCleanupLocked(id string) error {
 	if session := sm.state.Sessions[id]; session != nil && session.RemovedHookCleanupPending {
-		return errors.New("session removed-hook cleanup is still pending; verify and stop the recorded process externally, then restart Graith")
+		return fmt.Errorf("session removed-hook cleanup is still pending for recorded PID %d; %s", session.PID, removedHookCleanupRecovery)
 	}
 
 	for _, entry := range sm.state.UpgradeCleanup {

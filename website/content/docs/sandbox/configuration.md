@@ -113,11 +113,11 @@ than Graith's stored kernel identity. Do not send a signal to the PID or PGID
 from these observations. Stop the old job through the terminal, service
 manager, or other supervisor which still owns that exact job and its process
 group, then confirm it has exited and retry startup. If no such ownership
-channel is available, leave the process untouched and use a platform
-administrator's identity-safe recovery procedure. On every retry Graith
-compares the current kernel start identity with its stored value; a disappeared
-process or reused PID clears the pending migration without signalling the
-replacement.
+channel is available, leave the process untouched: wait for the old job to
+exit, or restart the host, VM, or container which runs it, then retry Graith.
+On every retry Graith compares the current kernel start identity with its
+stored value; a disappeared process or reused PID clears the pending migration
+without signalling the replacement.
 
 The state migration writes the usual pre-migration `state.json.v<version>.bak`.
 An older binary refuses the migrated state. A downgrade therefore requires
