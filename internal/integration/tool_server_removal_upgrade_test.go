@@ -110,7 +110,9 @@ func TestToolServerRemovalUpgradeFromExactMain(t *testing.T) {
 
 	oldState := readRemovalUpgradeState(t, statePath)
 
-	oldSessionPID := removalUpgradeSessionPID(t, oldState, "canny")
+	oldSessionID, oldSession := requireRemovalUpgradeSession(t, oldState, "canny")
+
+	oldSessionPID := oldSession.PID
 	if oldSessionPID <= 0 {
 		t.Fatalf("pre-removal session PID = %d", oldSessionPID)
 	}
@@ -155,7 +157,7 @@ func TestToolServerRemovalUpgradeFromExactMain(t *testing.T) {
 	}
 
 	runBinary(t, env, newBinary, "daemon", "restart")
-	waitForProcessExit(t, managedPID)
+	waitForRemovalUpgradeProcessExit(t, managedPID)
 
 	// This wait is the stale-client regression sentinel: if the new daemon ever
 	// accepted the removed connect request, the old proxy would enter its bridge
@@ -193,8 +195,18 @@ func TestToolServerRemovalUpgradeFromExactMain(t *testing.T) {
 		t.Fatalf("migrated state version = %d, want 27", newState.Version)
 	}
 
-	if got := removalUpgradeSessionPID(t, newState, "canny"); got != oldSessionPID {
-		t.Fatalf("adopted session PID = %d, want unchanged %d", got, oldSessionPID)
+	adoptedSessionID, adoptedSession := requireRemovalUpgradeSession(t, newState, "canny")
+	if adoptedSessionID != oldSessionID {
+		t.Fatalf("adopted session ID = %q, want unchanged %q", adoptedSessionID, oldSessionID)
+	}
+
+	if adoptedSession.PID != oldSessionPID {
+		t.Fatalf("adopted session PID = %d, want unchanged %d", adoptedSession.PID, oldSessionPID)
+	}
+
+	if adoptedSession.CWD != oldSession.CWD || adoptedSession.WorktreePath != oldSession.WorktreePath {
+		t.Fatalf("adopted session paths changed: cwd %q -> %q, worktree %q -> %q",
+			oldSession.CWD, adoptedSession.CWD, oldSession.WorktreePath, adoptedSession.WorktreePath)
 	}
 
 	backup, err := os.ReadFile(statePath + ".v26.bak")
@@ -222,6 +234,34 @@ func TestToolServerRemovalUpgradeFromExactMain(t *testing.T) {
 		t.Fatalf("stale proxy result = %v, output %q; want unsupported message", staleProxyErr, staleProxyOutput)
 	}
 
+	// Adoption preserves the running PTY. Stop it explicitly before exercising
+	// the documented stopped-session restart path with the new agent arguments.
+	runBinary(t, env, newBinary, "--json", "stop", "canny")
+	waitForRemovalUpgradeProcessExit(t, oldSessionPID)
+
+	stoppedState, stoppedSessionID, stoppedSession := waitForRemovalUpgradeSessionStop(t, statePath, "canny")
+	if stoppedState.Version != 27 {
+		t.Fatalf("stopped state version = %d, want 27", stoppedState.Version)
+	}
+
+	if stoppedSessionID != oldSessionID {
+		t.Fatalf("stopped session ID = %q, want preserved %q", stoppedSessionID, oldSessionID)
+	}
+
+	if stoppedSession.CWD != oldSession.CWD || stoppedSession.WorktreePath != oldSession.WorktreePath {
+		t.Fatalf("stopped session paths changed: cwd %q -> %q, worktree %q -> %q",
+			oldSession.CWD, stoppedSession.CWD, oldSession.WorktreePath, stoppedSession.WorktreePath)
+	}
+
+	logAfterStop, err := os.ReadFile(legacyLogPath)
+	if err != nil {
+		t.Fatalf("read legacy tool-server log after adopted session stop: %v", err)
+	}
+
+	if !bytes.Equal(logAfterStop, logAfterDrain) {
+		t.Fatal("legacy tool-server log changed after adopted session stop")
+	}
+
 	if err := os.Remove(recordPath); err != nil {
 		t.Fatal(err)
 	}
@@ -237,6 +277,29 @@ func TestToolServerRemovalUpgradeFromExactMain(t *testing.T) {
 
 	if !strings.Contains(newArgs, "--native-runtime-setting") {
 		t.Fatalf("relaunched process lost unrelated native agent config:\n%s", newArgs)
+	}
+
+	restartedState, restartedSessionID, restartedSession := waitForRemovalUpgradeSessionRelaunch(t, statePath, "canny", oldSessionPID)
+	if restartedState.Version != 27 {
+		t.Fatalf("restarted state version = %d, want 27", restartedState.Version)
+	}
+
+	if restartedSessionID != oldSessionID {
+		t.Fatalf("restarted session ID = %q, want preserved %q", restartedSessionID, oldSessionID)
+	}
+
+	if restartedSession.CWD != oldSession.CWD || restartedSession.WorktreePath != oldSession.WorktreePath {
+		t.Fatalf("restarted session paths changed: cwd %q -> %q, worktree %q -> %q",
+			oldSession.CWD, restartedSession.CWD, oldSession.WorktreePath, restartedSession.WorktreePath)
+	}
+
+	logAfterRelaunch, err := os.ReadFile(legacyLogPath)
+	if err != nil {
+		t.Fatalf("read legacy tool-server log after session relaunch: %v", err)
+	}
+
+	if !bytes.Equal(logAfterRelaunch, logAfterStop) {
+		t.Fatal("legacy tool-server log changed after adopted session stop and relaunch")
 	}
 
 	runBinary(t, env, newBinary, "daemon", "stop")
@@ -331,15 +394,21 @@ args = ["-c", %s, "sh", %s]
 }
 
 type removalUpgradeState struct {
-	Version  int `json:"version"`
-	Sessions map[string]struct {
-		Name string `json:"name"`
-		PID  int    `json:"pid"`
-	} `json:"sessions"`
+	Version  int                              `json:"version"`
+	Sessions map[string]removalUpgradeSession `json:"sessions"`
+}
+
+type removalUpgradeSession struct {
+	Name         string `json:"name"`
+	PID          int    `json:"pid"`
+	Status       string `json:"status"`
+	CWD          string `json:"cwd"`
+	WorktreePath string `json:"worktree_path"`
 }
 
 func readRemovalUpgradeState(t *testing.T, path string) removalUpgradeState {
 	t.Helper()
+
 	data := []byte(waitForFile(t, path))
 
 	var state removalUpgradeState
@@ -351,18 +420,87 @@ func readRemovalUpgradeState(t *testing.T, path string) removalUpgradeState {
 	return state
 }
 
-func removalUpgradeSessionPID(t *testing.T, state removalUpgradeState, name string) int {
+func requireRemovalUpgradeSession(t *testing.T, state removalUpgradeState, name string) (string, removalUpgradeSession) {
 	t.Helper()
 
-	for _, session := range state.Sessions {
-		if session.Name == name {
-			return session.PID
-		}
+	if id, session, ok := lookupRemovalUpgradeSession(state, name); ok {
+		return id, session
 	}
 
 	t.Fatalf("state has no session named %q", name)
 
-	return 0
+	return "", removalUpgradeSession{}
+}
+
+func lookupRemovalUpgradeSession(state removalUpgradeState, name string) (string, removalUpgradeSession, bool) {
+	for id, session := range state.Sessions {
+		if session.Name == name {
+			return id, session, true
+		}
+	}
+
+	return "", removalUpgradeSession{}, false
+}
+
+func waitForRemovalUpgradeSessionRelaunch(
+	t *testing.T,
+	path string,
+	name string,
+	previousPID int,
+) (removalUpgradeState, string, removalUpgradeSession) {
+	t.Helper()
+
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			var state removalUpgradeState
+
+			if json.Unmarshal(data, &state) == nil {
+				id, session, ok := lookupRemovalUpgradeSession(state, name)
+
+				if ok && session.PID > 0 && session.PID != previousPID {
+					return state, id, session
+				}
+			}
+		}
+
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	t.Fatalf("timed out waiting for session %q to relaunch with a new PID after %d", name, previousPID)
+
+	return removalUpgradeState{}, "", removalUpgradeSession{}
+}
+
+func waitForRemovalUpgradeSessionStop(
+	t *testing.T,
+	path string,
+	name string,
+) (removalUpgradeState, string, removalUpgradeSession) {
+	t.Helper()
+
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			var state removalUpgradeState
+
+			if json.Unmarshal(data, &state) == nil {
+				id, session, ok := lookupRemovalUpgradeSession(state, name)
+
+				if ok && session.PID == 0 && session.Status == "stopped" {
+					return state, id, session
+				}
+			}
+		}
+
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	t.Fatalf("timed out waiting for session %q to persist its stopped state", name)
+
+	return removalUpgradeState{}, "", removalUpgradeSession{}
 }
 
 func integrationRepoRoot(t *testing.T) string {
@@ -578,7 +716,7 @@ func waitForSocket(t *testing.T, path string, done <-chan error, output *lockedB
 	t.Fatalf("timed out waiting for daemon socket %s; output:\n%s", path, output.String())
 }
 
-func waitForProcessExit(t *testing.T, pid int) {
+func waitForRemovalUpgradeProcessExit(t *testing.T, pid int) {
 	t.Helper()
 
 	deadline := time.Now().Add(15 * time.Second)
