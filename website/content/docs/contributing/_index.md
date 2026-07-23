@@ -144,6 +144,12 @@ deliberately stale update fixture locally with:
 scripts/verify-renovate-libghostty.sh
 ```
 
+The configuration temporarily suppresses only the unsupported Ghostty
+`d4ac93a` -> `15484b6` and Highway `1.2.0` -> `1.4.0` proposal. Remove that
+rule after `generate-dependency-unit` succeeds for the full Ghostty commit,
+the Zig license URL is valid, and the matching `libghostty-vt-15484b6` Apple
+release is published with notes and an asset digest binding that commit.
+
 go-libghostty is commit-pinned from its canonical Tangled repository. Its
 `CMakeLists.txt` exact `GIT_TAG` is the default tested Ghostty revision. Ghostty
 is also commit-pinned because its C API is not released independently. A newer

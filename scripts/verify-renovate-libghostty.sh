@@ -103,10 +103,20 @@ if ! jq -se '
     ] as $deps |
     ($deps | length) == 7 and
     all($deps[];
-        (.updates | length) > 0 and
         all(.updates[]; .branchName | test("^renovate/(major-)?libghostty-native$")))
     ' "$log" >/dev/null; then
-    echo "error: one or more native fixtures were not updated in the libghostty group" >&2
+    echo "error: one or more native fixture updates escaped the libghostty group" >&2
+    exit 1
+fi
+
+if ! jq -se '
+    any(.[] | select(.msg == "packageFiles with updates") |
+        .config.regex[]?.deps[]?;
+        .depType == "libghostty-native" and
+        .depName != "Ghostty" and .depName != "Highway" and
+        (.updates | length) > 0)
+    ' "$log" >/dev/null; then
+    echo "error: unrelated native dependency updates disappeared" >&2
     exit 1
 fi
 
@@ -122,6 +132,10 @@ if ! jq -se '
         .matchDepNames == ["Ghostty", "Zig", "uucode", "Highway", "simdutf"] and
         .dependencyDashboardApproval == true) and
     any($config.packageRules[];
+        .matchDepTypes == ["libghostty-native"] and
+        .enabled == false and
+        (.matchJsonata // [] | length) > 0) and
+    any($config.packageRules[];
         .matchManagers == ["gomod"] and
         .matchPackageNames == ["go.mitchellh.com/libghostty"] and
         .enabled == false and
@@ -131,4 +145,16 @@ if ! jq -se '
     exit 1
 fi
 
-echo "Renovate detected and grouped all seven native dependency fixtures."
+if jq -se '
+    any(.[] | select(.msg == "packageFiles with updates") |
+        .config.regex[]?.deps[]?;
+        .depType == "libghostty-native" and
+        (.updates | length) > 0 and
+        ((.depName == "Ghostty" and .currentDigest == "d4ac93a0395d321b043ee0116dc8a1a384f0fb83") or
+         (.depName == "Highway" and .currentValue == "1.2.0")))
+    ' "$log" >/dev/null; then
+    echo "error: deferred unsupported Ghostty/Highway proposal is still offered" >&2
+    exit 1
+fi
+
+echo "Renovate suppressed the unsupported Ghostty/Highway proposal and retained unrelated native dependency updates."
