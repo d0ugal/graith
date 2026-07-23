@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
-	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/headless"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/sandbox"
@@ -26,6 +25,11 @@ import (
 //  2. Git setup and PTY spawn (no lock held)
 //  3. Lock: commit to StatusRunning, unlock
 func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
+	worktreePort := sm.worktreePort
+	if worktreePort == nil {
+		worktreePort = defaultWorktreePort()
+	}
+
 	if err := sm.beginLifecycleOperation(); err != nil {
 		return SessionState{}, err
 	}
@@ -104,7 +108,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	var preRepoRoot string
 
 	if !noRepo && !hasMirror && repoPath != "" {
-		if !git.IsInsideGitRepo(repoPath) {
+		if !worktreePort.IsInsideRepo(repoPath) {
 			if inPlace {
 				return SessionState{}, fmt.Errorf("not inside a git repository: %s", repoPath)
 			}
@@ -114,7 +118,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 		var err error
 
-		preRepoRoot, err = git.RepoRootPath(repoPath)
+		preRepoRoot, err = worktreePort.RepoRoot(repoPath)
 		if err != nil {
 			return SessionState{}, fmt.Errorf("find repo root: %w", err)
 		}
@@ -123,13 +127,43 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	preUsername := preLockCfg.GitHubUsername
 	if preUsername == "" && preRepoRoot != "" && !inPlace {
 		ctx, cancel := context.WithTimeout(context.Background(), preLockCfg.Git.UsernameTimeoutDuration())
-		preUsername, _ = git.DiscoverGitHubUsername(ctx, preRepoRoot)
+		preUsername, _ = worktreePort.DiscoverGitHubUsername(ctx, preRepoRoot)
 
 		cancel()
 	}
 
 	if preUsername == "" {
 		preUsername = "user"
+	}
+
+	// Preserve authorization and singleton validation before invoking the
+	// provider, while keeping the provider call outside the manager lock.
+	if baseBranch == "" && preRepoRoot != "" && !inPlace && !hasMirror {
+		if !preLockCfg.RepoPathAllowed(repoPath) {
+			return SessionState{}, fmt.Errorf("repo path %q is not under any allowed_repo_paths", repoPath)
+		}
+
+		if rc, ok := preLockCfg.FindRepo(preRepoRoot); ok && rc.Singleton {
+			canonicalRoot := config.ResolvePath(preRepoRoot)
+
+			sm.mu.RLock()
+
+			for _, s := range sm.state.Sessions {
+				if config.ResolvePath(s.RepoPath) == canonicalRoot && (s.Status == StatusRunning || s.Status == StatusCreating) {
+					sm.mu.RUnlock()
+					return SessionState{}, fmt.Errorf("repo %q has singleton = true and session %q is already running — stop it first", preRepoRoot, s.Name)
+				}
+			}
+
+			sm.mu.RUnlock()
+		}
+
+		// This provider call must remain outside sm.mu. The locked preflight
+		// above is repeated after discovery in the reservation phase below.
+		baseBranch, err = worktreePort.DiscoverDefaultBranch(preRepoRoot)
+		if err != nil {
+			return SessionState{}, err
+		}
 	}
 
 	// Validate a caller-supplied ID before taking the lock; uniqueness is
@@ -280,16 +314,6 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			}
 		}
 
-		if baseBranch == "" {
-			var err error
-
-			baseBranch, err = git.DiscoverDefaultBranch(repoRoot)
-			if err != nil {
-				sm.mu.Unlock()
-				return SessionState{}, err
-			}
-		}
-
 		repoName = filepath.Base(repoRoot)
 
 		branchPrefix, _ := config.Expand(sm.cfg.BranchPrefix, config.TemplateVars{Username: preUsername})
@@ -421,9 +445,9 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		case noRepo:
 			_ = os.RemoveAll(worktreePath)
 		case len(includes) > 0:
-			_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+			sm.teardownWorktreePort(worktreePort, repoRoot, worktreePath, branchName, includes)
 		case repoRoot != "":
-			_ = git.TeardownSession(repoRoot, worktreePath, branchName)
+			_ = worktreePort.Teardown(repoRoot, worktreePath, branchName)
 		}
 	}
 	rollbackState := func() {
@@ -474,7 +498,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		branchPrefix, _ := config.Expand(cfgSnapshot.BranchPrefix, config.TemplateVars{Username: preUsername})
 
 		if len(rcIncludes) > 0 {
-			if err := git.SetupSession(gitCtx, repoRoot, worktreePath, branchName, baseBranch, fetchOnCreate); err != nil {
+			if err := worktreePort.Setup(gitCtx, repoRoot, worktreePath, branchName, baseBranch, fetchOnCreate); err != nil {
 				rollbackState()
 				return SessionState{}, fmt.Errorf("setup main repo git session: %w", err)
 			}
@@ -482,24 +506,24 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			for _, incPath := range rcIncludes {
 				resolved := config.ResolvePath(incPath)
 				if !cfgSnapshot.RepoPathAllowed(resolved) {
-					_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+					sm.teardownWorktreePort(worktreePort, repoRoot, worktreePath, branchName, includes)
 
 					rollbackState()
 
 					return SessionState{}, fmt.Errorf("included repo %q is not under any allowed_repo_paths", incPath)
 				}
 
-				if !git.IsInsideGitRepo(resolved) {
-					_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+				if !worktreePort.IsInsideRepo(resolved) {
+					sm.teardownWorktreePort(worktreePort, repoRoot, worktreePath, branchName, includes)
 
 					rollbackState()
 
 					return SessionState{}, fmt.Errorf("included repo %q is not a git repository", incPath)
 				}
 
-				incRoot, err := git.RepoRootPath(resolved)
+				incRoot, err := worktreePort.RepoRoot(resolved)
 				if err != nil {
-					_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+					sm.teardownWorktreePort(worktreePort, repoRoot, worktreePath, branchName, includes)
 
 					rollbackState()
 
@@ -508,9 +532,9 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 				incName := filepath.Base(incRoot)
 
-				incBaseBranch, err := git.DiscoverDefaultBranchOrHEAD(incRoot)
+				incBaseBranch, err := worktreePort.DiscoverDefaultBranchOrHEAD(incRoot)
 				if err != nil {
-					_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+					sm.teardownWorktreePort(worktreePort, repoRoot, worktreePath, branchName, includes)
 
 					rollbackState()
 
@@ -521,8 +545,8 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 				sessionDir := filepath.Dir(worktreePath)
 				incWorktreePath := filepath.Join(sessionDir, incName)
 
-				if err := git.SetupSession(gitCtx, incRoot, incWorktreePath, incBranch, incBaseBranch, fetchOnCreate); err != nil {
-					_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, includes)
+				if err := worktreePort.Setup(gitCtx, incRoot, incWorktreePath, incBranch, incBaseBranch, fetchOnCreate); err != nil {
+					sm.teardownWorktreePort(worktreePort, repoRoot, worktreePath, branchName, includes)
 
 					rollbackState()
 
@@ -538,7 +562,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 				})
 			}
 		} else {
-			if err := git.SetupSession(gitCtx, repoRoot, worktreePath, branchName, baseBranch, fetchOnCreate); err != nil {
+			if err := worktreePort.Setup(gitCtx, repoRoot, worktreePath, branchName, baseBranch, fetchOnCreate); err != nil {
 				rollbackState()
 				return SessionState{}, fmt.Errorf("setup git session: %w", err)
 			}
