@@ -134,6 +134,12 @@ var rootCmd = &cobra.Command{
 		}
 
 		out = output.New(jsonOutput)
+		cmd.SetContext(withCommandDependencies(cmd.Context(), commandDependencies{
+			cfg:         cfg,
+			paths:       paths,
+			out:         out,
+			listSession: newClientSessionListUseCase(cfg, paths, cfgFile),
+		}))
 
 		// Surface non-fatal config problems (e.g. conflicting keybindings)
 		// without refusing to start (issue #1233). Skip in JSON mode so the
