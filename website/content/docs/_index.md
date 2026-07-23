@@ -7,6 +7,8 @@ toc: true
 draft: false
 ---
 
+{{< agent-marty >}}
+
 **Run a fleet of AI coding agents in parallel — each in a session that outlives your terminal.**
 
 graith is a terminal multiplexer for AI coding agents (Claude, Codex, OpenCode, Cursor, Agy). Spin up an agent per task and switch between them with a tmux-style prefix key. The binary's called `gr`.
