@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 // authRole is the resolved privilege class of a connection (design §B.3). It
@@ -97,6 +99,14 @@ func (ac authContext) mutationCaller() string {
 	default:
 		return "unknown"
 	}
+}
+
+// denyDaemonLifecycle records the trusted authorization decision for operations
+// that can replace or terminate the daemon. The caller description is bounded
+// and never contains the bearer credential.
+func denyDaemonLifecycle(sm *SessionManager, auth authContext, operation string, send func(string, any)) {
+	sm.log.Warn("daemon lifecycle mutation denied", "operation", operation, "caller", auth.describe(), "reason", "human-only authorization")
+	send("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
 }
 
 // resolveAuth resolves the connection's role from its token, origin, and — for

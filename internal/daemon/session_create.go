@@ -829,6 +829,11 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			return SessionState{}, fmt.Errorf("configure sandbox: %w", err)
 		}
 
+		// Session management remains available through the daemon protocol;
+		// direct process signalling is not. Enforce this after config resolution
+		// so an agent cannot opt back into signalling the host daemon.
+		opts = sandbox.EnforceSignalIsolation(opts)
+
 		if tmpDir := env["GRAITH_TMPDIR"]; tmpDir != "" {
 			opts.WriteDirs = append(opts.WriteDirs, tmpDir)
 		}

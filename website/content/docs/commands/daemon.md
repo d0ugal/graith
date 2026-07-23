@@ -19,6 +19,12 @@ Stop the daemon gracefully. On a supported packaged macOS installation this
 leaves the Graith user service registered but dormant. It does not restart at
 login or after a crash; the next ordinary `gr` command starts it on demand.
 Stopping a daemon is not the same as removing its background-item registration.
+Daemon stop, restart, service removal, and replacement are human-only controls;
+commands run from an agent session are refused. Session agents can still use
+ordinary commands such as `gr stop <session>`.
+Managed nono sandboxes restrict signalling to the sandbox, so clearing session
+environment markers cannot grant direct host-process signalling authority.
+Safehouse cannot enforce this signal boundary; use nono when it is required.
 
 ### `gr daemon restart`
 
