@@ -118,6 +118,7 @@ func TestStableReleaseWorkflowVerifiesFinalPackagesOnActualArchitectures(t *test
 			t.Errorf("actual-architecture lifecycle validation missing %q", required)
 		}
 	}
+
 	if strings.Contains(execution, "TestLibghosttyCharmToNativeUpgrade") ||
 		strings.Contains(execution, "GRAITH_LIBGHOSTTY_UPGRADE_FROM_BINARY") {
 		t.Fatal("release execution still references the removed Charm upgrade fixture")
