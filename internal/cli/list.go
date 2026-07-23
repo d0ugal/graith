@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/sessionlabel"
 	"github.com/d0ugal/graith/internal/version"
@@ -36,17 +37,6 @@ var (
 	listSummaryWidth int
 	listFullSummary  bool
 )
-
-type listConn interface {
-	controlConn
-	Close()
-}
-
-// listConnectFn lets command-validation and rendering tests run without daemon
-// auto-start.
-var listConnectFn = func(cfg *config.Config, paths config.Paths, cfgFile string) (listConn, error) {
-	return client.Connect(cfg, paths, cfgFile)
-}
 
 // colorize wraps text in the given foreground color for terminal output. When
 // coloring is disabled (or the text is empty) it returns the text unchanged.
@@ -108,17 +98,18 @@ func validateListArgs(cmd *cobra.Command, _ []string) error {
 }
 
 func runList(cmd *cobra.Command, _ []string) error {
+	deps := commandDeps(cmd.Context())
 	updateCh := make(chan *version.UpdateResult, 1)
 	// Snapshot the data dir before the goroutine so it doesn't read the
 	// mutable package-global `paths` after RunE returns (data race under -race).
-	updateDataDir := paths.DataDir
-	updateCfg := updateSettings(cfg)
+	updateDataDir := deps.paths.DataDir
+	updateCfg := updateSettings(deps.cfg)
 
 	go func() {
 		updateCh <- version.CheckForUpdate(updateDataDir, updateCfg)
 	}()
 
-	sessions, err := fetchListSessions(listDeleted)
+	sessions, err := deps.listSession.ListSessions(listDeleted)
 	if err != nil {
 		return err
 	}
@@ -130,22 +121,22 @@ func runList(cmd *cobra.Command, _ []string) error {
 
 	list := protocol.SessionListMsg{Sessions: sessions}
 	if listQuiet {
-		return printQuiet(cmd, list.Sessions)
+		return printQuietWithOutput(cmd, deps.out, list.Sessions)
 	}
 
 	if jsonOutput {
-		return out.JSON(list)
+		return deps.out.JSON(list)
 	}
 
-	if paths.Profile != "" {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Profile: %s\n\n", paths.Profile)
+	if deps.paths.Profile != "" {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Profile: %s\n\n", deps.paths.Profile)
 	}
 
 	if len(list.Sessions) == 0 {
 		if listDeleted {
-			out.Printf("No deleted sessions.\n")
+			deps.out.Printf("No deleted sessions.\n")
 		} else {
-			out.Printf("No sessions. Create one with: gr new <name>\n")
+			deps.out.Printf("No sessions. Create one with: gr new <name>\n")
 		}
 
 		return nil
@@ -172,30 +163,6 @@ func runList(cmd *cobra.Command, _ []string) error {
 	}
 
 	return nil
-}
-
-func fetchListSessions(deleted bool) ([]protocol.SessionInfo, error) {
-	c, err := listConnectFn(cfg, paths, cfgFile)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close()
-
-	if err := c.SendControl("list", protocol.ListMsg{Deleted: deleted}); err != nil {
-		return nil, err
-	}
-
-	resp, err := c.ReadControlResponse()
-	if err != nil {
-		return nil, err
-	}
-
-	var list protocol.SessionListMsg
-	if err := protocol.DecodePayload(resp, &list); err != nil {
-		return nil, err
-	}
-
-	return list.Sessions, nil
 }
 
 // applyListFilters applies the normal session-list filters in command order.
@@ -257,6 +224,10 @@ func applyListFilters(sessions []protocol.SessionInfo, children, repo string, st
 // printQuiet emits bare session names, one per line (or a JSON array of session
 // IDs when --json is set), for scripting.
 func printQuiet(cmd *cobra.Command, sessions []protocol.SessionInfo) error {
+	return printQuietWithOutput(cmd, out, sessions)
+}
+
+func printQuietWithOutput(cmd *cobra.Command, writer *output.Writer, sessions []protocol.SessionInfo) error {
 	sorted := make([]protocol.SessionInfo, len(sessions))
 	copy(sorted, sessions)
 	sort.Slice(sorted, func(i, j int) bool {
@@ -269,7 +240,7 @@ func printQuiet(cmd *cobra.Command, sessions []protocol.SessionInfo) error {
 			ids = append(ids, s.ID)
 		}
 
-		return out.JSON(ids)
+		return writer.JSON(ids)
 	}
 
 	for _, s := range sorted {
