@@ -20,6 +20,7 @@ const goreleaser = fs.readFileSync(
   path.join(REPO_ROOT, '.github', 'workflows', 'goreleaser.yml'),
   'utf8',
 );
+const nativeScript = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'libghostty-native.sh'), 'utf8');
 
 function nativePathMatcher() {
   const match = native.match(/if grep -Eq '([^']+)' <<<"\$files"/);
@@ -76,4 +77,13 @@ test('historical upgrade fixture uses an immutable fetched source and stays out 
   assert.match(executeLinux, /uses: actions\/checkout@[\da-f]+[\s\S]*?fetch-depth: 0/);
   assert.match(goreleaser, /test ! -e "dist\/graith-historical-pre-removal"/);
   assert.doesNotMatch(goreleaser, /TestLibghosttyCharmToNativeUpgrade|gr-charm/);
+});
+
+test('local native builds isolate the Go cache from ambient pkg-config state', () => {
+  const buildLocal = nativeScript.match(/build_local\(\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(buildLocal, 'build-local command must remain present');
+  assert.match(buildLocal, /pkgconfig="\$\(write_pkg_config/);
+  assert.match(buildLocal, /gocache="\$NATIVE_WORK\/go-cache"/);
+  assert.match(buildLocal, /GOCACHE="\$gocache"[\s\S]*?PKG_CONFIG_PATH="\$pkgconfig/);
+  assert.doesNotMatch(buildLocal, /go clean -cache/);
 });

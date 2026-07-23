@@ -346,7 +346,7 @@ apple_library() {
 }
 
 build_local() {
-    local library pkgconfig output target
+    local library pkgconfig output target gocache
     if [[ "$(uname -s)" == "Darwin" ]]; then
         library="$(apple_library)" || return 1
     elif [[ "$(uname -s)" == "Linux" ]]; then
@@ -363,13 +363,15 @@ build_local() {
     fi
     pkgconfig="$(write_pkg_config "$library")" || return 1
     output="${GRAITH_LIBGHOSTTY_OUTPUT:-$REPO_DIR/gr}"
+    gocache="$NATIVE_WORK/go-cache"
+    mkdir -p "$gocache" || return 1
     cd "$REPO_DIR" || return 1
     if [[ -n "${GRAITH_LIBGHOSTTY_LDFLAGS:-}" ]]; then
-        CGO_ENABLED=1 PKG_CONFIG_PATH="$pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
+        GOCACHE="$gocache" CGO_ENABLED=1 PKG_CONFIG_PATH="$pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
             go build -v -tags=libghostty -trimpath -ldflags="$GRAITH_LIBGHOSTTY_LDFLAGS" \
             -o "$output" ./cmd/graith
     else
-        CGO_ENABLED=1 PKG_CONFIG_PATH="$pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
+        GOCACHE="$gocache" CGO_ENABLED=1 PKG_CONFIG_PATH="$pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
             go build -v -tags=libghostty -trimpath -o "$output" ./cmd/graith
     fi
 }
