@@ -19,6 +19,7 @@ type Manifest struct {
 	Module             string            `json:"module"`
 	Categories         []string          `json:"categories"`
 	Packages           map[string]string `json:"packages"`
+	Owners             map[string]string `json:"owners"`
 	Rules              []Rule            `json:"rules"`
 	Exceptions         []Exception       `json:"exceptions"`
 	DefaultRemediation string            `json:"default_remediation"`
@@ -334,6 +335,23 @@ func validateManifest(m Manifest, now time.Time) error {
 		category := m.Packages[path]
 		if !categories[category] {
 			return fmt.Errorf("package %s uses unknown category %s", path, category)
+		}
+
+		if strings.TrimSpace(m.Owners[path]) == "" {
+			return fmt.Errorf("package %s has no owner; add it to architecture manifest", path)
+		}
+	}
+
+	ownerPaths := make([]string, 0, len(m.Owners))
+	for path := range m.Owners {
+		ownerPaths = append(ownerPaths, path)
+	}
+
+	sort.Strings(ownerPaths)
+
+	for _, path := range ownerPaths {
+		if _, ok := m.Packages[path]; !ok {
+			return fmt.Errorf("owner %s is not a manifest package", path)
 		}
 	}
 

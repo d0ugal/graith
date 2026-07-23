@@ -284,6 +284,14 @@ is generated from the current source tree and committed for review. Run
 `make package-graph` after changing packages or their import relationships;
 CI rejects stale graph data.
 
+Boundary changes also require `make architecture-check`. Add every new Go
+package to `internal/architecture/manifest.json` with its category and
+accountable owner, and add a narrowly scoped rule when the dependency is part
+of the contract. Forbidden edges fail CI. Exceptions are migration-only,
+owned, justified, and expiring; an expired exception is a hard failure. The
+manifest/analyzer enforce these rules, while the committed package graph is a
+checked visualization artifact and must be regenerated rather than edited.
+
 ```
 cmd/graith/              Entry point (main.go)
 internal/
