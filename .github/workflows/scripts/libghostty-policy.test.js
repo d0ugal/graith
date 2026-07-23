@@ -16,6 +16,10 @@ const native = fs.readFileSync(
   path.join(REPO_ROOT, '.github', 'workflows', 'libghostty-native.yml'),
   'utf8',
 );
+const goreleaser = fs.readFileSync(
+  path.join(REPO_ROOT, '.github', 'workflows', 'goreleaser.yml'),
+  'utf8',
+);
 
 function nativePathMatcher() {
   const match = native.match(/if grep -Eq '([^']+)' <<<"\$files"/);
@@ -59,4 +63,15 @@ test('native detector is fail-safe when the authoritative file list is unavailab
 test('lock routing explicitly enables dependency validation', () => {
   const lock = native.match(/if grep -Fxq 'libghostty-native\.lock\.json'[\s\S]*?\n\s+fi/)[0];
   assert.match(lock, /echo "dependency-unit=true" >> "\$GITHUB_OUTPUT"/);
+});
+
+test('historical upgrade fixture uses an immutable fetched source and stays out of artifacts', () => {
+  assert.equal(
+    (goreleaser.match(/historical_revision=00a8dc8e5806850b857b291b9a5f19088e80c580/g) || []).length,
+    2,
+  );
+  assert.equal((goreleaser.match(/GRAITH_LIBGHOSTTY_HISTORICAL_UPGRADE_BINARY/g) || []).length, 2);
+  assert.match(goreleaser, /historical_worktree[\s\S]*?fetch-depth: 0/);
+  assert.match(goreleaser, /test ! -e "dist\/graith-historical-pre-removal"/);
+  assert.doesNotMatch(goreleaser, /TestLibghosttyCharmToNativeUpgrade|gr-charm/);
 });
