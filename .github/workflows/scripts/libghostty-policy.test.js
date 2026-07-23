@@ -30,8 +30,9 @@ test('generic integration jobs are compile-only without deleting runtime coverag
   assert.ok(linux, 'Linux native adapter must remain present');
   assert.match(linux, /goarch: amd64\n\s+run_tests: true/);
   assert.match(linux, /goarch: arm64\n\s+run_tests: false/);
-  const integration = linux.match(/run_timed integration[\s\S]*?(?=\n\s+run_timed )/)?.[0];
-  assert.ok(integration, 'Linux amd64 test branch must run full integration');
+  const runtime = linux.match(/if \[ "\$RUN_TESTS" = "true" \]; then([\s\S]*?)\n\s+else/)[1];
+  const integration = runtime.match(/run_timed integration[\s\S]*?(?=\n\s+run_timed )/)?.[0];
+  assert.ok(integration, 'Linux amd64 RUN_TESTS=true branch must run full integration');
   assert.match(integration, /go test -v -race -count=1 \\\s*\n\s+-tags='libghostty integration' \.\/internal\/integration\/\.\.\./);
   assert.doesNotMatch(integration, /-run/);
   assert.equal((native.match(/-tags='libghostty integration' \.\/internal\/integration\/\.\.\./g) || []).length, 1);
