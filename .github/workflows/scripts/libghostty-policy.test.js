@@ -108,6 +108,7 @@ test('release workflows gate only pull-request release work and fail safe', () =
   assert.equal(stableMatcher.test('CHANGELOG.md'), true);
   assert.equal(stableMatcher.test('scripts/render-stable-aur.sh'), true);
   assert.equal(stableMatcher.test('scripts/rpm-preset-keygrips.sh'), true);
+  assert.equal(stableMatcher.test('scripts/publish-linux-repositories.sh'), true);
   for (const workflow of [devRelease, goreleaser]) {
     assert.match(workflow, /if \[ "\$EVENT" != "pull_request" \]; then[\s\S]*?echo "release=true"/);
     assert.match(workflow, /if ! files="\$\(gh api "repos\/\$REPO\/pulls\/\$PR\/files"[\s\S]*?echo "release=true"/);
