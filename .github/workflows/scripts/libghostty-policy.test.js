@@ -26,15 +26,15 @@ function nativePathMatcher() {
 test('generic integration jobs are compile-only without deleting runtime coverage', () => {
   const commands = [...ci.matchAll(/go test -v -race -count=1 -run '\^\$' -tags=integration \.\/internal\/integration\/\.\.\./g)];
   assert.equal(commands.length, 2, 'Linux and macOS generic jobs must compile integration tests');
-  assert.match(
-    native,
-    /run_timed integration go test -v -race -count=1 \\\s*\n\s+-tags='libghostty integration' \.\/internal\/integration\/\.\.\./,
-  );
-  assert.equal(
-    (native.match(/-tags='libghostty integration' \.\/internal\/integration\/\.\.\./g) || []).length,
-    1,
-    'the native Linux amd64 lane must own the single full integration execution',
-  );
+  const linux = native.match(/  linux-adapter:[\s\S]*?(?=\n  [a-z][\w-]+:\n)/)?.[0];
+  assert.ok(linux, 'Linux native adapter must remain present');
+  assert.match(linux, /goarch: amd64\n\s+run_tests: true/);
+  assert.match(linux, /goarch: arm64\n\s+run_tests: false/);
+  const integration = linux.match(/run_timed integration[\s\S]*?(?=\n\s+run_timed )/)?.[0];
+  assert.ok(integration, 'Linux amd64 test branch must run full integration');
+  assert.match(integration, /go test -v -race -count=1 \\\s*\n\s+-tags='libghostty integration' \.\/internal\/integration\/\.\.\./);
+  assert.doesNotMatch(integration, /-run/);
+  assert.equal((native.match(/-tags='libghostty integration' \.\/internal\/integration\/\.\.\./g) || []).length, 1);
   assert.doesNotMatch(native, /default-builds:/);
 });
 
@@ -49,7 +49,13 @@ test('native path routing excludes docs but covers causal and dependency inputs'
 });
 
 test('native detector is fail-safe when the authoritative file list is unavailable', () => {
-  assert.match(native, /if ! files="\$\(gh api "repos\/\$REPO\/pulls\/\$PR\/files" --paginate --jq '\.\[\]\.filename'\)"; then/);
-  assert.match(native, /echo "native=true" >> "\$GITHUB_OUTPUT"/);
-  assert.match(native, /echo "dependency-unit=true" >> "\$GITHUB_OUTPUT"/);
+  const failure = native.match(/if ! files="\$\(gh api[\s\S]*?\n\s+fi/)[0];
+  assert.match(failure, /pulls\/\$PR\/files/);
+  assert.match(failure, /echo "native=true" >> "\$GITHUB_OUTPUT"/);
+  assert.match(failure, /echo "dependency-unit=true" >> "\$GITHUB_OUTPUT"/);
+});
+
+test('lock routing explicitly enables dependency validation', () => {
+  const lock = native.match(/if grep -Fxq 'libghostty-native\.lock\.json'[\s\S]*?\n\s+fi/)[0];
+  assert.match(lock, /echo "dependency-unit=true" >> "\$GITHUB_OUTPUT"/);
 });
