@@ -225,6 +225,14 @@ CI (`ci.yml`) runs on every push to `main` and every PR:
 
 The separate `coverage.yml` workflow (PRs only) posts that summary comment — informational, not required.
 
+The `libghostty-native` workflow owns per-PR native runtime and supported-
+platform validation; its cheap, always-reporting `Native backend gate` is the
+single required aggregate. Dev Release runs its full matrix on `main` pushes or
+dev-release-input pull requests. Stable Release runs fully on version tags or
+stable-release-input pull requests. Other pull requests run only each release
+workflow's fail-safe detector, which preserves publication safety without
+duplicating release execution.
+
 ## Profiles (`GRAITH_PROFILE`)
 
 Set `GRAITH_PROFILE` to run multiple independent graith instances on one machine. Each gets its own:
