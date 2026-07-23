@@ -1,11 +1,27 @@
 package daemon
 
 import (
+	"bytes"
+	"errors"
 	"sync"
 	"testing"
 
 	grpty "github.com/d0ugal/graith/internal/pty"
 )
+
+type hydrationTerminal struct {
+	*daemonTestTerminal
+
+	panicMarker []byte
+}
+
+func (t *hydrationTerminal) Write(p []byte) (int, error) {
+	if bytes.Contains(p, t.panicMarker) {
+		return 0, errors.New("terminal parser panic")
+	}
+
+	return t.daemonTestTerminal.Write(p)
+}
 
 // daemonTestTerminal keeps daemon lifecycle tests independent of the selected
 // production terminal backend. Native parser and rendering behavior is tested

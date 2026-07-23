@@ -453,6 +453,19 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 	return s, nil
 }
 
+// AdoptSessionWithTerminalFactory adopts a PTY with an explicitly supplied
+// terminal factory. Production callers should use AdoptSession; this narrow
+// seam lets package-level tests exercise adoption and recovery independently of
+// the selected production backend.
+func AdoptSessionWithTerminalFactory(
+	opts AdoptOpts,
+	factory func(cols, rows int) (Terminal, error),
+) (*Session, error) {
+	opts.screenFactory = factory
+
+	return AdoptSession(opts)
+}
+
 // StartAdoptedWaiter starts the adopted process waiter exactly once.
 func (s *Session) StartAdoptedWaiter() {
 	s.adoptedWaitOnce.Do(func() { go s.adoptedWaitLoop() })

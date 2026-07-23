@@ -41,6 +41,16 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 	sm.log = slog.New(slog.NewJSONHandler(&logBuf, nil))
 
 	badScrollback := append(terminalParserPanicFixture(t), []byte("dreich-payload-must-not-be-logged")...)
+	panicMarker := []byte("dreich-payload-must-not-be-logged")
+	sm.adoptSession = func(opts grpty.AdoptOpts) (*grpty.Session, error) {
+		return grpty.AdoptSessionWithTerminalFactory(opts, func(cols, rows int) (grpty.Terminal, error) {
+			return &hydrationTerminal{
+				daemonTestTerminal: newDaemonTestTerminal(cols, rows),
+				panicMarker:        panicMarker,
+			}, nil
+		})
+	}
+
 	if err := os.WriteFile(filepath.Join(sm.paths.LogDir, "thrawn-fash.log"), badScrollback, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +163,10 @@ func TestAdoptSessionsContinuesAfterTerminalHydrationPanic(t *testing.T) {
 	}
 	// Run normally schedules derived-screen reconstruction in its owned
 	// post-commit background generation. Exercise that phase explicitly here.
-	sm.recoverTerminalScreensAfterUpgrade(context.Background())
+	recoveryCtx, cancelRecovery := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelRecovery()
+
+	sm.recoverTerminalScreensAfterUpgrade(recoveryCtx)
 
 	bad, _ := sm.Get("thrawn-fash")
 	if bad.Status != StatusRunning {
