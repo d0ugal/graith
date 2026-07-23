@@ -40,6 +40,13 @@ func TestLoadRejectsTrailingData(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsUnknownFields(t *testing.T) {
+	input := `{"version":1,"module":"example.com/braw","categories":["value"],"packages":{"example.com/braw/a":"value"},"default_remediation":"fix it","default_remediaton":"misspelled"}`
+	if _, err := Load(strings.NewReader(input)); !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestLoadReportsManifestShapeErrors(t *testing.T) {
 	base := `{"version":1,"module":"example.com/braw","categories":["value"],"packages":{"example.com/braw/a":"value"},"default_remediation":"fix it"}`
 	for _, tc := range []struct {

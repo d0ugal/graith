@@ -53,11 +53,10 @@ type Violation struct {
 	Rule, Remediation, Exception string
 }
 
-var ErrViolations = errors.New("architecture dependency violations")
-
 func Load(r io.Reader) (Manifest, error) {
 	var m Manifest
 	decoder := json.NewDecoder(r)
+	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&m); err != nil {
 		return m, fmt.Errorf("decode manifest: %w", err)
 	}
