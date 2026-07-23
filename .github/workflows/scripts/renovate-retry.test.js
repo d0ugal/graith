@@ -42,18 +42,32 @@ const TRANSIENT_WITH_WARNING_LOG = `${WARNING_LOG}\n${TRANSIENT_LOG}`;
 const MIXED_ERROR_LOG = `${TRANSIENT_LOG}\n${DETERMINISTIC_LOG}`;
 
 const nativeDeps = [
-  'Ghostty',
-  'Highway',
+  {
+    depName: 'Ghostty',
+    depType: 'libghostty-native',
+    currentDigest: 'd4ac93a0395d321b043ee0116dc8a1a384f0fb83',
+    updates: [],
+  },
+  {
+    depName: 'Highway',
+    depType: 'libghostty-native',
+    currentValue: '1.2.0',
+    updates: [],
+  },
   'SPDX tools-java',
   'Zig',
   'go-libghostty',
   'simdutf',
   'uucode',
-].map((depName) => ({
-  depName,
-  depType: 'libghostty-native',
-  updates: [{ branchName: 'renovate/libghostty-native' }],
-}));
+].map((dep) =>
+  typeof dep === 'string'
+    ? {
+        depName: dep,
+        depType: 'libghostty-native',
+        updates: [{ branchName: 'renovate/libghostty-native' }],
+      }
+    : dep,
+);
 
 const SUCCESS_LOG = [
   {
@@ -76,6 +90,13 @@ const SUCCESS_LOG = [
           matchDepTypes: ['libghostty-native'],
           matchDepNames: ['Ghostty', 'Zig', 'uucode', 'Highway', 'simdutf'],
           dependencyDashboardApproval: true,
+        },
+        {
+          matchDepTypes: ['libghostty-native'],
+          matchJsonata: [
+            "(depName = 'Ghostty' and currentDigest = 'd4ac93a0395d321b043ee0116dc8a1a384f0fb83') or (depName = 'Highway' and currentValue = '1.2.0')",
+          ],
+          enabled: false,
         },
         {
           matchManagers: ['gomod'],
@@ -150,7 +171,10 @@ test('retries the tangled.org GnuTLS termination and accepts a later success', (
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.count, 2);
   assert.match(result.stderr, /retrying Renovate lookup \(attempt 2 of 3\)/);
-  assert.match(result.stdout, /detected and grouped all seven native dependency fixtures/);
+  assert.match(
+    result.stdout,
+    /suppressed the unsupported Ghostty\/Highway proposal/,
+  );
 });
 
 test('ignores warning-level noise when classifying the transient failure', () => {

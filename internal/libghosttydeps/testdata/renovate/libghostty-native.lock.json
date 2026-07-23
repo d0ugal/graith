@@ -7,7 +7,7 @@
   "ghostty": {
     "repository": "https://github.com/ghostty-org/ghostty.git",
     "renovateRef": "main",
-    "commit": "facda0c3fb1310c7698fc77ba193165ef38cd58e"
+    "commit": "d4ac93a0395d321b043ee0116dc8a1a384f0fb83"
   },
   "zig": {
     "repository": "ziglang/zig",
@@ -19,7 +19,7 @@
   },
   "highway": {
     "repository": "google/highway",
-    "version": "1.1.0"
+    "version": "1.2.0"
   },
   "simdutf": {
     "repository": "simdutf/simdutf",
