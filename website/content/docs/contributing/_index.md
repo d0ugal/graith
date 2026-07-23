@@ -10,13 +10,13 @@ draft: false
 ## Build
 
 ```bash
-make build    # produces ./gr
+make build    # produces ./gr from native libghostty inputs
 ```
 
 Or directly:
 
 ```bash
-go build -v -ldflags="-s -w" -o gr ./cmd/graith
+CGO_ENABLED=1 go build -v -tags=libghostty -ldflags="-s -w" -o gr ./cmd/graith
 ```
 
 Entry point `cmd/graith/main.go`; the binary's named `gr` but the module path is `cmd/graith`.
@@ -38,10 +38,10 @@ Unit tests live next to the code as `<file>_test.go`. Use `t.TempDir()` for fixt
 These spawn a real daemon, exercising the full client-daemon-PTY pipeline:
 
 ```bash
-go test -v -race -tags=integration ./internal/integration/...
+CGO_ENABLED=1 go test -v -race -tags='integration libghostty' ./internal/integration/...
 ```
 
-The `integration` build tag keeps them out of `go test ./...`; CI runs them separately on Ubuntu and macOS. The harness (`internal/integration/integration_test.go`) makes a temp git repo, starts a `SessionManager` with `config.Paths` in temp dirs, and connects over a real Unix socket.
+The `integration` build tag keeps them out of `go test ./...`; generic CI compiles these tests without native inputs, while the native Linux amd64 lane executes the full package with the pinned helper. The harness (`internal/integration/integration_test.go`) makes a temp git repo, starts a `SessionManager` with `config.Paths` in temp dirs, and connects over a real Unix socket.
 
 ### Fuzz tests
 
@@ -178,8 +178,8 @@ The policy accepts only the audited 11-member Ghostty archive closure and
 publishes a deterministic, self-contained regular archive. Injected path,
 stat, hash, format, temporary-directory, copy, Zig archiver, verifier, and
 final-move failures must leave no archive, pkg-config file, snapshot, or private
-temporary behind. Ordinary untagged builds remain pure Go and keep the Charm
-implementation available for retained-target compatibility tests.
+temporary behind. Untagged or missing-input builds fail closed; they do not
+select a terminal fallback.
 
 The `graith-dev` and stable workflows turn that exact source unit into
 release-shaped native Linux amd64 and arm64 artifacts. Platform jobs package and
@@ -197,7 +197,7 @@ downstream update while the GitHub release remains a draft, then exposes the
 complete release before pushing package metadata that refers to its public URLs.
 Retries accept the already-public exact asset set and converge an interrupted
 downstream push. Dev and stable configuration must not add separately named
-Charm or other rollback archives.
+rollback archives.
 
 Before generation can succeed, the checksum-reviewed Apple xcframework for the
 selected Ghostty commit must already be published at the exact URL derived by
@@ -216,9 +216,9 @@ CI (`ci.yml`) runs on every push to `main` and every PR:
 
 | Job | What it does |
 |-----|-------------|
-| Build | `go build` on Ubuntu and macOS |
+| Build | native `go build -tags=libghostty` on Ubuntu and macOS |
 | Test | `go test -race` on Ubuntu and macOS |
-| Integration | `go test -tags=integration` on Ubuntu and macOS |
+| Integration | compile-only generic tests; full runtime package executes in native Linux lane |
 | Lint | `golangci-lint run` on Ubuntu |
 | Vulnerability Check | `govulncheck ./...` on Ubuntu |
 | Conventional Commits | Validates PR commit messages |

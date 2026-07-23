@@ -3,7 +3,7 @@ GOLANGCI_LINT_VERSION := v2.12.2
 .PHONY: build test architecture-check lint lint-only lint-darwin shellcheck fmt clean notifier service-app package-graph package-graph-check docs docs-serve demo demo-clean demo-test
 
 build:
-	go build -v -ldflags="-s -w" -o gr ./cmd/graith
+	CGO_ENABLED=1 go build -v -tags=libghostty -ldflags="-s -w" -o gr ./cmd/graith
 
 # Build the macOS notification helper .app bundle (issue #1094). macOS only —
 # the build script skips itself on non-Darwin hosts, so this is safe to run on
@@ -19,7 +19,7 @@ service-app:
 		[ "$$arch" = arm64 ] || { echo "Graith.app supports only Apple Silicon" >&2; exit 1; }; \
 		commit=$$(git rev-parse --short HEAD); \
 		mkdir -p macos/build; \
-		go build -v -trimpath -ldflags="-s -w \
+		CGO_ENABLED=1 go build -v -trimpath -tags=libghostty -ldflags="-s -w \
 			-X github.com/d0ugal/graith/internal/version.Version=0.0.0 \
 			-X github.com/d0ugal/graith/internal/version.CommitSHA=$$commit \
 			-X github.com/d0ugal/graith/internal/daemonservice.ManagedBuild=true \
