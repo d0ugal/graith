@@ -40,6 +40,12 @@ the tracked file. Documentation builds consume the committed data as-is:
 make docs
 ```
 
+The component dependency contract is checked separately because it includes
+test-only imports and ownership metadata that the visualization omits. Run
+`make architecture-check` after changing package boundaries. The checked-in
+policy is `internal/architecture/manifest.json`; historical exceptions must
+name an owner, reason, and future expiry date.
+
 For a live preview:
 
 ```bash
