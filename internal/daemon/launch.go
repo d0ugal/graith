@@ -14,13 +14,15 @@ import (
 // first output or a settle timeout elapses — so a burst of launches starts in a
 // bounded, staggered fashion instead of stampeding.
 //
-// The capacity can change on config reload: resize swaps in a fresh channel.
-// A slot acquired against the old channel captures that channel in its release
-// closure, so it releases harmlessly against it even after a resize.
+// The capacity can change on config reload. Occupancy is kept separately from
+// the limit so resizing cannot forget holders that acquired under an earlier
+// config generation.
 type launchThrottle struct {
-	mu      sync.Mutex
-	sem     chan struct{}
-	waiting int // launches currently blocked in acquire (for log context)
+	mu       sync.Mutex
+	limit    int
+	occupied int
+	waiting  int           // launches currently blocked in acquire (for log context)
+	changed  chan struct{} // closed whenever limit or occupied changes
 }
 
 func newLaunchThrottle(maxConcurrent int) *launchThrottle {
@@ -28,7 +30,7 @@ func newLaunchThrottle(maxConcurrent int) *launchThrottle {
 		maxConcurrent = 1
 	}
 
-	return &launchThrottle{sem: make(chan struct{}, maxConcurrent)}
+	return &launchThrottle{limit: maxConcurrent, changed: make(chan struct{})}
 }
 
 // resize changes the concurrency limit. A no-op when the capacity is unchanged.
@@ -40,11 +42,13 @@ func (lt *launchThrottle) resize(maxConcurrent int) {
 	lt.mu.Lock()
 	defer lt.mu.Unlock()
 
-	if cap(lt.sem) == maxConcurrent {
+	if lt.limit == maxConcurrent {
 		return
 	}
 
-	lt.sem = make(chan struct{}, maxConcurrent)
+	lt.limit = maxConcurrent
+	close(lt.changed)
+	lt.changed = make(chan struct{})
 }
 
 // launchSlot is a held throttle slot. Callers must eventually call release
@@ -61,46 +65,68 @@ type launchSlot struct {
 }
 
 // acquire blocks until a slot is free (or ctx is cancelled), returning a
-// launchSlot whose release frees it. The returned release is bound to the
-// channel that was current at acquire time, so a concurrent resize is safe.
+// launchSlot whose release frees it. Waiters always re-check the current limit
+// after waking, so a resize cannot leave them attached to an obsolete limit.
 func (lt *launchThrottle) acquire(ctx context.Context) (launchSlot, error) {
-	lt.mu.Lock()
-	sem := lt.sem
-	lt.waiting++
-	queued := lt.waiting // how many are waiting for a slot right now (incl. us)
-	lt.mu.Unlock()
-
 	start := time.Now()
 
-	select {
-	case sem <- struct{}{}:
-	case <-ctx.Done():
-		lt.mu.Lock()
-		lt.waiting--
+	lt.mu.Lock()
+	lt.waiting++
+	queued := lt.waiting // how many are waiting for a slot right now (incl. us)
+
+	for {
+		if err := ctx.Err(); err != nil {
+			lt.waiting--
+			lt.mu.Unlock()
+
+			return launchSlot{}, err
+		}
+
+		if lt.occupied < lt.limit {
+			lt.occupied++
+			lt.waiting--
+			inflight := lt.occupied
+			capacity := lt.limit
+			lt.mu.Unlock()
+
+			waited := time.Since(start)
+
+			var once sync.Once
+
+			return launchSlot{
+				release: func() {
+					once.Do(func() { lt.release() })
+				},
+				inflight: inflight,
+				capacity: capacity,
+				queued:   queued,
+				waited:   waited,
+			}, nil
+		}
+
+		changed := lt.changed
 		lt.mu.Unlock()
 
-		return launchSlot{}, ctx.Err()
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			lt.mu.Lock()
+			lt.waiting--
+			lt.mu.Unlock()
+
+			return launchSlot{}, ctx.Err()
+		}
+
+		lt.mu.Lock()
 	}
+}
 
-	waited := time.Since(start)
-
+func (lt *launchThrottle) release() {
 	lt.mu.Lock()
-	lt.waiting--
-	inflight := len(sem)
-	capacity := cap(sem)
+	lt.occupied--
+	close(lt.changed)
+	lt.changed = make(chan struct{})
 	lt.mu.Unlock()
-
-	var once sync.Once
-
-	return launchSlot{
-		release: func() {
-			once.Do(func() { <-sem })
-		},
-		inflight: inflight,
-		capacity: capacity,
-		queued:   queued,
-		waited:   waited,
-	}, nil
 }
 
 // acquireLaunchSlot blocks until a launch slot is free, logging the queue

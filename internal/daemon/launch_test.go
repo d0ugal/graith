@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -153,14 +154,13 @@ func TestLaunchThrottleAcquireContextCancel(t *testing.T) {
 func TestLaunchThrottleResize(t *testing.T) {
 	lt := newLaunchThrottle(1)
 
-	// Hold the only slot against the old (cap-1) channel.
+	// Hold the only slot, then grow. The existing holder remains part of the
+	// shared occupancy count, so only one additional launch can proceed.
 	old, err := lt.acquire(context.Background())
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
 
-	// Grow to 2: a fresh channel is swapped in, so two new acquires succeed
-	// even while the old slot is still held.
 	lt.resize(2)
 
 	a, err := lt.acquire(context.Background())
@@ -168,19 +168,159 @@ func TestLaunchThrottleResize(t *testing.T) {
 		t.Fatalf("acquire after resize: %v", err)
 	}
 
-	b, err := lt.acquire(context.Background())
-	if err != nil {
-		t.Fatalf("second acquire after resize: %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	third := make(chan launchSlot, 1)
+
+	go func() {
+		slot, err := lt.acquire(ctx)
+		if err == nil {
+			third <- slot
+		}
+	}()
+
+	waitForLaunchWaiters(t, lt, 1)
+
+	select {
+	case slot := <-third:
+		slot.release()
+		t.Fatal("third holder exceeded grown limit")
+	default:
 	}
 
-	if b.capacity != 2 {
-		t.Fatalf("post-resize capacity = %d, want 2", b.capacity)
-	}
-
-	// Releasing the old slot against the old channel must not panic.
 	old.release()
 	a.release()
-	b.release()
+
+	select {
+	case slot := <-third:
+		slot.release()
+	case <-time.After(time.Second):
+		t.Fatal("third waiter did not proceed after a holder released")
+	}
+}
+
+func TestLaunchThrottleShrinkCreatesCapacityDebt(t *testing.T) {
+	lt := newLaunchThrottle(3)
+
+	holders := make([]launchSlot, 3)
+	for i := range holders {
+		slot, err := lt.acquire(context.Background())
+		if err != nil {
+			t.Fatalf("acquire %d: %v", i, err)
+		}
+
+		holders[i] = slot
+	}
+
+	lt.resize(1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	acquired := make(chan launchSlot, 1)
+
+	go func() {
+		slot, err := lt.acquire(ctx)
+		if err == nil {
+			acquired <- slot
+		}
+	}()
+
+	waitForLaunchWaiters(t, lt, 1)
+
+	for i := 0; i < len(holders); i++ {
+		holders[i].release()
+
+		if i < len(holders)-1 {
+			lt.mu.Lock()
+			occupied := lt.occupied
+			lt.mu.Unlock()
+
+			if occupied != len(holders)-i-1 {
+				t.Fatalf("occupied=%d after releasing holder %d, want %d while debt remains", occupied, i, len(holders)-i-1)
+			}
+
+			select {
+			case slot := <-acquired:
+				slot.release()
+				t.Fatalf("acquired while shrink debt remained after releasing holder %d", i)
+			default:
+			}
+		}
+	}
+
+	select {
+	case slot := <-acquired:
+		if slot.inflight != 1 || slot.capacity != 1 {
+			t.Fatalf("post-shrink slot inflight=%d capacity=%d, want 1/1", slot.inflight, slot.capacity)
+		}
+
+		slot.release()
+	case <-time.After(time.Second):
+		t.Fatal("waiter did not acquire after capacity debt was repaid")
+	}
+}
+
+func TestLaunchThrottleWaiterUsesCurrentLimitAfterResize(t *testing.T) {
+	lt := newLaunchThrottle(1)
+
+	held, err := lt.acquire(context.Background())
+	if err != nil {
+		t.Fatalf("held acquire: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	waiter := make(chan launchSlot, 1)
+
+	go func() {
+		slot, err := lt.acquire(ctx)
+		if err == nil {
+			waiter <- slot
+		}
+	}()
+
+	waitForLaunchWaiters(t, lt, 1)
+
+	// Wake the already-queued waiter by growing the live policy. It must use
+	// the new limit rather than acquiring against the old generation.
+	lt.resize(2)
+
+	queued := <-waiter
+
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel2()
+
+	if _, err := lt.acquire(ctx2); err == nil {
+		t.Fatal("acquired beyond current limit with old waiter still held")
+	}
+
+	held.release()
+	queued.release()
+}
+
+func waitForLaunchWaiters(t *testing.T, lt *launchThrottle, want int) {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		lt.mu.Lock()
+		waiting := lt.waiting
+		lt.mu.Unlock()
+
+		if waiting == want {
+			return
+		}
+
+		runtime.Gosched()
+	}
+
+	lt.mu.Lock()
+	waiting := lt.waiting
+	lt.mu.Unlock()
+	t.Fatalf("launch waiters = %d, want %d", waiting, want)
 }
 
 // --- releaseLaunchSlotWhenSettled tests ---
@@ -298,7 +438,7 @@ func slotFree(lt *launchThrottle) bool {
 	lt.mu.Lock()
 	defer lt.mu.Unlock()
 
-	return len(lt.sem) == 0
+	return lt.occupied == 0
 }
 
 func waitSlotFree(t *testing.T, lt *launchThrottle, within time.Duration) {
