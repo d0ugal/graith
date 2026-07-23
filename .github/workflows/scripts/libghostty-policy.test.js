@@ -21,6 +21,7 @@ const goreleaser = fs.readFileSync(
   'utf8',
 );
 const nativeScript = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'libghostty-native.sh'), 'utf8');
+const devRelease = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'dev-release.yml'), 'utf8');
 
 function nativePathMatcher() {
   const match = native.match(/if grep -Eq '([^']+)' <<<"\$files"/);
@@ -86,4 +87,15 @@ test('local native builds isolate the Go cache from ambient pkg-config state', (
   assert.match(buildLocal, /gocache="\$NATIVE_WORK\/go-cache"/);
   assert.match(buildLocal, /GOCACHE="\$gocache"[\s\S]*?PKG_CONFIG_PATH="\$pkgconfig/);
   assert.doesNotMatch(buildLocal, /go clean -cache/);
+});
+
+test('release workflows gate only pull-request release work and fail safe', () => {
+  for (const workflow of [devRelease, goreleaser]) {
+    assert.match(workflow, /if \[ "\$EVENT" != "pull_request" \]; then[\s\S]*?echo "release=true"/);
+    assert.match(workflow, /if ! files="\$\(gh api "repos\/\$REPO\/pulls\/\$PR\/files"[\s\S]*?echo "release=true"/);
+    assert.match(workflow, /release-context:[\s\S]*?needs: changes/);
+    assert.match(workflow, /release-context:[\s\S]*?needs\.changes\.outputs\.release == 'true'/);
+  }
+  assert.match(devRelease, /branches:\n      - main/);
+  assert.match(goreleaser, /tags:\n      - "v\*"/);
 });

@@ -17,8 +17,44 @@ env:
   RETAIN_RELEASES: "5"
 
 jobs:
+  changes:
+    name: Detect stable-release-relevant changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      release: ${{ steps.filter.outputs.release }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! files="$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')"; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Could not list PR files; running stable release to be safe."
+            exit 0
+          fi
+          if grep -Eq '^\.goreleaser|^\.github/workflows/(dev-release|goreleaser|release-please)\.yml$|^release-please-(manifest|config)\.json$|^go\.(mod|sum)$|^internal/release/|^internal/pty/|^scripts/.*(release|publish)|^scripts/libghostty-native\.sh$|^macos/(service|notifier)/|^libghostty-native\.(lock|spdx)\.json$|^THIRD_PARTY_NOTICES\.libghostty\.md$|^package|^aur|^homebrew' <<<"$files"; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
   release-context:
     name: Bind stable release context
+    needs: changes
+    if: >-
+      !cancelled() &&
+      (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')
     runs-on: ubuntu-24.04
     outputs:
       revision: ${{ steps.release.outputs.revision }}
