@@ -14,7 +14,7 @@
   "ghostty": {
     "repository": "https://github.com/ghostty-org/ghostty.git",
     "renovateRef": "main",
-    "commit": "d4ac93a0395d321b043ee0116dc8a1a384f0fb83",
+    "commit": "15484b607eb5a518dedf1548247c923b8abaae7c",
     "version": "1.3.2-dev",
     "headersSHA256": "b694feb2b7526875a356c4d6c7b5c07d09030d1cd4507f86a37b2d1d49c42fe7",
     "licenseSHA256": "386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1",
@@ -50,7 +50,7 @@
   },
   "highway": {
     "repository": "google/highway",
-    "version": "1.2.0",
+    "version": "1.4.0",
     "commit": "66486a10623fa0d72fe91260f96c892e41aceb06",
     "sourceURL": "https://deps.files.ghostty.org/highway-66486a10623fa0d72fe91260f96c892e41aceb06.tar.gz",
     "zigHash": "N-V-__8AAGmZhABbsPJLfbqrh6JTHsXhY6qCaLAQyx25e0XE",
