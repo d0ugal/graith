@@ -71,7 +71,9 @@ test('historical upgrade fixture uses an immutable fetched source and stays out 
     2,
   );
   assert.equal((goreleaser.match(/GRAITH_LIBGHOSTTY_HISTORICAL_UPGRADE_BINARY/g) || []).length, 2);
-  assert.match(goreleaser, /historical_worktree[\s\S]*?fetch-depth: 0/);
+  const executeLinux = goreleaser.match(/  execute-linux:[\s\S]*?(?=\n  [a-z][\w-]+:\n)/)?.[0];
+  assert.ok(executeLinux, 'stable execute-linux job must remain present');
+  assert.match(executeLinux, /uses: actions\/checkout@[\da-f]+[\s\S]*?fetch-depth: 0/);
   assert.match(goreleaser, /test ! -e "dist\/graith-historical-pre-removal"/);
   assert.doesNotMatch(goreleaser, /TestLibghosttyCharmToNativeUpgrade|gr-charm/);
 });
