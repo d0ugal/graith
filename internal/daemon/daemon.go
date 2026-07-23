@@ -141,6 +141,7 @@ type SessionManager struct {
 	silentWarned map[string]bool
 	prWatch      *prWatchState
 	prRefWatch   *prRefWatchState
+	prPush       *prPushState
 	triggers     *triggerState
 	completion   *scenarioCompletionRuntime
 	tokens       *tokenCache
@@ -275,6 +276,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		mutationLeases:     make(map[string]mutationLeaseRecord),
 		prWatch:            newPRWatchState(cfg.PRWatch.KickChannelSize()),
 		prRefWatch:         newPRRefWatchState(),
+		prPush:             newPRPushState(cfg.PRWatch.Push),
 		triggers:           newTriggerState(),
 		completion:         newScenarioCompletionRuntime(),
 		tokens:             newTokenCache(),

@@ -160,7 +160,10 @@ func TestDiffFromDefaultsShowsCustomisation(t *testing.T) {
 func TestRedactSecretsMasksEnvValues(t *testing.T) {
 	const envVal = "braw-fixture-val-42"
 
+	const pushSecret = "braw-webhook-secret-which-is-long-enough" // #nosec G101 -- fixture exercises secret redaction.
+
 	cfg := Default()
+	cfg.PRWatch.Push.Secret = pushSecret
 	cfg.Agents = map[string]Agent{
 		"canny": {
 			Command: "claude",
@@ -185,8 +188,16 @@ func TestRedactSecretsMasksEnvValues(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if strings.Contains(string(data), envVal) {
+	if strings.Contains(string(data), envVal) || strings.Contains(string(data), pushSecret) {
 		t.Errorf("redacted TOML still leaked the value:\n%s", data)
+	}
+
+	if !strings.Contains(string(data), RedactedMask) {
+		t.Errorf("redacted TOML did not contain the redaction marker:\n%s", data)
+	}
+
+	if cfg.PRWatch.Push.Secret != pushSecret {
+		t.Fatalf("original push secret mutated")
 	}
 }
 

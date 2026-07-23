@@ -14,16 +14,17 @@ import (
 // a config is rendered for a caller that must not see raw secrets.
 const RedactedMask = "***"
 
-// RedactSecrets returns a copy of cfg with secret-bearing per-agent `env` map
-// values masked. Map keys are preserved (so the shape stays visible); only the
-// values are replaced with RedactedMask. cfg is not mutated.
+// RedactSecrets returns a copy of cfg with secret-bearing values masked. Map
+// keys are preserved (so the shape stays visible); only values are replaced
+// with RedactedMask. cfg is not mutated.
 //
 // The daemon renders this — not the raw config — over the control protocol, so
 // a remote paired human, or a local session reading via the socket, sees the
-// configuration structure without its secrets. `gr config show`/`diff` read the
-// file directly (not through the daemon) and are deliberately unaffected.
+// configuration structure without its secrets. `gr config show`/`diff` also use
+// the same redacted rendering.
 func RedactSecrets(cfg *Config) *Config {
 	c := *cfg
+	c.PRWatch.Push.Secret = redactSecret(c.PRWatch.Push.Secret)
 
 	if len(cfg.Agents) > 0 {
 		c.Agents = make(map[string]Agent, len(cfg.Agents))
@@ -63,6 +64,14 @@ func EffectiveTOML(cfg *Config) ([]byte, error) {
 	return data, nil
 }
 
+func redactSecret(secret string) string {
+	if secret == "" {
+		return ""
+	}
+
+	return RedactedMask
+}
+
 // resolveRenderedDefaults materializes accessor-backed sentinel defaults on a
 // copy so effective output describes the values runtime callers actually use.
 // The defensive accessor fallbacks remain authoritative for runtime behavior;
@@ -70,6 +79,7 @@ func EffectiveTOML(cfg *Config) ([]byte, error) {
 // GUI config viewer.
 func resolveRenderedDefaults(cfg *Config) *Config {
 	c := *cfg
+	c.PRWatch.Push.Secret = redactSecret(c.PRWatch.Push.Secret)
 
 	if c.Remote.MaxPendingPairings == 0 {
 		c.Remote.MaxPendingPairings = c.Remote.MaxPendingPairingsOrDefault()

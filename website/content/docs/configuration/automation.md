@@ -52,6 +52,47 @@ gh_timeout                     = "5s"     # per-command timeout for the daemon's
 the daemon starts. Kicks are best-effort at any capacity; timer polling is the
 fallback.
 
+### Experimental GitHub push hints
+
+Push hints are disabled by default. The opt-in transport is a loopback receiver
+for an explicitly allowlisted repository, normally fed by the
+[`cli/gh-webhook` extension](https://github.com/cli/gh-webhook) via `gh webhook
+forward`. Install and authenticate that extension yourself when you opt in
+(for example, `gh extension install cli/gh-webhook`). Enabling push causes
+graith to launch `gh webhook forward` for each allowlisted repository; it does
+not install extensions or request permissions. GitHub creates an ephemeral
+repository webhook while that forwarder is running, subject to the extension's
+webhook-administration permission and one-forwarder-per-repository limit.
+GitHub documents that command as testing/development-only (with webhook-admin
+permission and one active forwarder per repository or organization); it is not a
+production relay. No public listener or hook is created by default.
+
+```toml
+[pr_watch.push]
+enabled        = false
+repositories   = ["d0ugal/graith"] # explicit allowlist required
+bind_address   = "127.0.0.1:0"
+body_max_bytes = 1048576
+queue_size     = 256
+dedupe_size    = 2048
+dedupe_ttl     = "24h"
+debounce       = "750ms" # coalesce same repo/PR/head bursts
+# External-tool argv is configuration-driven; these placeholders are expanded.
+forward_args   = ["webhook", "forward", "--repo", "{repository}", "--events", "{events}", "--url", "{url}", "--secret", "{secret}"]
+# secret must be at least 32 bytes; omit it to generate one per daemon run
+```
+
+Accepted deliveries only wake matching sessions; the existing `gh` refresh then
+authoritatively fetches CI and comments, so payload check conclusions are not
+trusted and payload comment bodies never reach agents. Invalid signatures,
+unknown events, repository mismatches, replayed IDs, and oversized bodies are
+rejected. If the receiver or forwarder is unavailable, slower polling continues
+and reconciles later. `gr doctor` reports push degradation separately from
+polling health when the experimental transport is enabled.
+The push configuration is read when the daemon starts; restart the daemon after
+changing its repository allowlist, bind address, route, or secret so the old
+listener and forwarders are replaced.
+
 ### Near-instant detection
 
 The poll runs on a timer, catching a pushed PR only on the next tick. For near-instant detection the daemon also file-watches Git refs (`HEAD`, `refs/`, and the reflogs — never the object store): same-repo sessions share one recursive watch of the common refs and reflogs, each linked worktree adding only its local `HEAD` and reflog. A `git push`, commit, or checkout re-checks affected sessions immediately. The poll stays the always-on fallback, catching next cycle a push from outside the worktree — or one where the watch degrades or hits a watch limit. Nothing to configure: it follows `[pr_watch] enabled` and needs no extra permissions.
