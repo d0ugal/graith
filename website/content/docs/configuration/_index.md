@@ -29,12 +29,12 @@ reload_debounce = "200ms"  # quiet period after the last write before reloading
 reload. Read at daemon start, so changing it takes effect only after a
 `gr daemon restart` (every other setting re-reads on reload).
 
-A reload is applied as one config generation. If a runtime change can't be
-applied, the command or watcher logs an error and keeps the previous generation
-visible. Remote listener replacement is stricter and fail-closed: graith closes
-the old listener before the new bind, so a failed remote-transport reload keeps
-the previous config but leaves remote access closed until a corrected reload or
-restart succeeds. See
+A reload publishes one config generation. If an optional runtime cannot be
+prepared, the command or watcher reports the affected subsystem as degraded
+while unrelated settings still take effect. Remote listener replacement remains
+fail-closed: graith closes the old listener before the new bind, so a failed
+remote-transport reload publishes the other settings with remote access closed
+until a corrected reload succeeds. See
 [Orchestrator & remote access]({{< relref "access.md#hot-reload-and-revocation" >}}).
 
 > **Full default config.** The complete, annotated defaults live in

@@ -328,7 +328,8 @@ func TestRemoteRuntimeReloadRetainsConsumedAuthKeyUntilReplacement(t *testing.T)
 	}
 
 	// A real transport replacement still needs the key. It closes the old
-	// generation first and leaves the successfully-applied config visible.
+	// generation first, publishes the candidate config, and leaves remote
+	// access closed until a later retry.
 	replacement := changed
 	replacement.Remote = cloneRemoteConfig(changed.Remote)
 	replacement.Remote.Hostname = "croft"
@@ -345,8 +346,8 @@ func TestRemoteRuntimeReloadRetainsConsumedAuthKeyUntilReplacement(t *testing.T)
 		t.Fatalf("failed replacement left generation=%d pin=%q", sm.remoteGeneration, sm.remoteTLSPin)
 	}
 
-	if sm.cfg != appliedConfig || factory.listener(0).closeCount() == 0 {
-		t.Fatal("failed replacement did not preserve config and close the old listener")
+	if sm.cfg != &replacement || factory.listener(0).closeCount() == 0 {
+		t.Fatal("failed replacement did not publish candidate config and close the old listener")
 	}
 }
 
@@ -426,7 +427,13 @@ func TestRemoteRuntimeReplacementFailureClosesOldAndRollsBackConfig(t *testing.T
 	factory := &fakeRemoteFactory{failPort: 4924}
 	initial := remoteRuntimeTestConfig(true)
 	sm := newRemoteRuntimeTestSM(t, initial, factory)
+
+	var logs bytes.Buffer
+
+	sm.log = slog.New(slog.NewTextHandler(&logs, nil))
+
 	applyRemoteTestConfig(t, sm, initial)
+
 	oldGeneration := sm.remote.runtime.generation
 
 	client, err := tls.Dial("tcp", sm.remote.runtime.listener.Addr().String(), &tls.Config{
@@ -442,10 +449,15 @@ func TestRemoteRuntimeReplacementFailureClosesOldAndRollsBackConfig(t *testing.T
 	broken.Remote = cloneRemoteConfig(initial.Remote)
 
 	broken.Remote.Port = factory.failPort
+	broken.BranchPrefix = "braw/"
 
 	err = sm.applyConfig(&broken)
-	if err == nil || !strings.Contains(err.Error(), "previous config remains active") {
-		t.Fatalf("replacement error = %v, want explicit rollback error", err)
+	if err == nil || !strings.Contains(err.Error(), "configuration applied with remote access degraded and closed") {
+		t.Fatalf("replacement error = %v, want explicit degraded-application error", err)
+	}
+
+	if !strings.Contains(logs.String(), "remote runtime degraded") {
+		t.Fatalf("degraded remote failure was not logged: %q", logs.String())
 	}
 
 	if factory.listener(0).closeCount() == 0 {
@@ -463,15 +475,40 @@ func TestRemoteRuntimeReplacementFailureClosesOldAndRollsBackConfig(t *testing.T
 
 	sm.mu.RLock()
 
-	if sm.cfg.Remote.Port != initial.Remote.Port || sm.remoteGeneration != 0 || sm.remoteTLSPin != "" {
+	if sm.cfg.Remote.Port != factory.failPort || sm.remoteGeneration != 0 || sm.remoteTLSPin != "" {
 		t.Errorf("after failure config port=%d generation=%d pin=%q", sm.cfg.Remote.Port, sm.remoteGeneration, sm.remoteTLSPin)
 	}
 
 	sm.mu.RUnlock()
 
-	// The published config still equals initial, but the actual runtime is gone.
-	// Re-applying it must recover rather than treating it as a no-op.
-	applyRemoteTestConfig(t, sm, initial)
+	// An unchanged broken remote runtime must not block an unrelated setting.
+	// The failed remote config remains the file generation while access stays
+	// closed and the retry is reported as degraded.
+	logs.Reset()
+
+	unrelated := broken
+
+	unrelated.BranchPrefix = "canny/"
+
+	err = sm.applyConfig(&unrelated)
+
+	if err == nil || !strings.Contains(err.Error(), "remote access degraded") {
+		t.Fatalf("unchanged broken remote reload error = %v, want degraded error", err)
+	}
+
+	sm.mu.RLock()
+
+	if sm.cfg.BranchPrefix != "canny/" || sm.remoteGeneration != 0 {
+		t.Fatalf("unrelated config was not applied: branch_prefix=%q generation=%d", sm.cfg.BranchPrefix, sm.remoteGeneration)
+	}
+
+	sm.mu.RUnlock()
+
+	// Once the optional integration is available, a later reload converges to
+	// the file configuration and starts a fresh generation.
+	factory.failPort = 0
+
+	applyRemoteTestConfig(t, sm, &unrelated)
 
 	if sm.remote.runtime == nil || sm.remote.runtime.generation <= oldGeneration {
 		t.Fatalf("retry runtime = %+v, want a newer active generation", sm.remote.runtime)
