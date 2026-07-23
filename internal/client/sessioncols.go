@@ -67,7 +67,7 @@ type SessionColumn struct {
 // The order is chosen so that the two filtered subsets each match their
 // historical layout:
 //
-//	CLI: Repo Agent Status Activity [Model Branch] Git PR Review Age [Attached]
+//	CLI: Repo Agent Status Activity Summary [Model Branch] Git PR Review Age [Attached]
 //	TUI: Status Summary Git PR Review Output
 func SessionColumns() []SessionColumn {
 	return []SessionColumn{
@@ -92,7 +92,15 @@ func SessionColumns() []SessionColumn {
 			CLIColor: func(s protocol.SessionInfo) color.Color { return AgentStatusColor(s.AgentStatus) },
 		},
 		{
-			Key: "summary", Header: "Summary", ShowTUI: true, MinWidth: 7, MaxWidth: summaryWidth,
+			Key: "summary", Header: "Summary", ShowCLI: true, ShowTUI: true, MinWidth: 7, MaxWidth: summaryWidth,
+			CLIValue: func(s protocol.SessionInfo, _ time.Time) string { return s.SummaryText },
+			CLIColor: func(s protocol.SessionInfo) color.Color {
+				if s.SummaryFaded {
+					return colorDim
+				}
+
+				return nil
+			},
 			TUIValue: displaySummary,
 			TUIStyle: summaryStyle,
 		},

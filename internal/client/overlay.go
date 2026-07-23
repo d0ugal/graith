@@ -416,18 +416,18 @@ func displayLastOutput(s protocol.SessionInfo) string {
 const maxSummaryWidth = 40
 
 func displaySummary(s protocol.SessionInfo) string {
-	text := s.SummaryText
-	if text == "" {
-		return ""
+	return TruncateSummary(s.SummaryText, summaryWidth)
+}
+
+// TruncateSummary limits text to a display-cell budget, preserving ANSI
+// styling and UTF-8/grapheme boundaries. A non-positive width means unlimited.
+// The ellipsis counts toward the budget.
+func TruncateSummary(text string, width int) string {
+	if text == "" || width <= 0 || ansi.StringWidth(text) <= width {
+		return text
 	}
 
-	// summaryWidth is a display-cell budget, so truncate by cell width rather
-	// than byte index: ansi.Truncate accounts for wide (CJK/emoji), combining,
-	// and zero-width runes and preserves ANSI styling, and never splits a
-	// multi-byte rune (unlike the old text[:summaryWidth-1] byte slice, which
-	// produced invalid UTF-8/mojibake — issue #1313). The ellipsis counts
-	// toward the budget, so the result is at most summaryWidth cells wide.
-	return ansi.Truncate(text, summaryWidth, "…")
+	return ansi.Truncate(text, width, "…")
 }
 
 func shortenPath(p string) string {

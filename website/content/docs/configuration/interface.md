@@ -89,7 +89,13 @@ The `[terminal]` block holds the interactive client's presentation preferences t
 
 **`refresh_interval`** is the cadence at which the session picker (`ctrl+b w`), an attached status bar, and the in-picker message viewer (`m`) re-poll the daemon for session state. A shorter interval feels more live but polls more; a non-positive value falls back to the default (zero would busy-loop).
 
-**`summary_width`** is the widest a `gr status` summary renders in the picker before an ellipsis truncates it. It's a **display-cell** budget, not bytes or runes: wide characters (CJK, emoji) count as two cells, zero-width and combining marks as none, and ANSI styling is ignored. Truncation never splits a multi-byte character, so the summary is always valid UTF-8. (This differs from `[limits]` byte caps such as `inbox_preview_bytes`, measured in bytes.)
+**`summary_width`** is the widest a `gr status` summary renders in the picker
+and human-readable `gr list` output before an ellipsis truncates it. It's a
+**display-cell** budget, not bytes or runes: wide characters (CJK, emoji) count
+as two cells, zero-width and combining marks as none, and ANSI styling is
+ignored. Truncation never splits a multi-byte character, so the summary is
+always valid UTF-8. (This differs from `[limits]` byte caps such as
+`inbox_preview_bytes`, measured in bytes.)
 
 The fallback terminal geometry (used when graith can't read the real size, e.g. piped output) and the per-session scrollback cap are session-lifecycle settings — see [`[lifecycle]`]({{< relref "/docs/configuration/sessions.md" >}}) (`default_cols`, `default_rows`, `max_log_bytes`). The client's not-a-TTY fallback follows the same `[lifecycle]` defaults, for a single source of truth.
 

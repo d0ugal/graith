@@ -11,8 +11,10 @@ draft: false
 
 ### `gr list` (alias: `ls`)
 
-List all sessions with status. Human-readable output shows the parent-child
-hierarchy by default; use `--flat` for the legacy repo/name ordering.
+List all sessions with status, current activity, and the summary set by
+`gr status`. Human-readable output shows the parent-child hierarchy by default;
+use `--flat` for the legacy repo/name ordering. Summaries are truncated to the
+configured `[terminal].summary_width` display-cell budget (40 by default).
 
 | Flag | Description |
 |------|-------------|
@@ -24,6 +26,8 @@ hierarchy by default; use `--flat` for the legacy repo/name ordering.
 | `--label <label>` | Filter by exact label; repeat for AND matching |
 | `-q`, `--quiet` | Output session names only (or IDs with `--json`) |
 | `--wide` | Show all columns, including per-session token usage |
+| `--summary-width <cells>` | Override the SUMMARY display-cell limit for this invocation (must be positive) |
+| `--full-summary` | Show the complete SUMMARY without a display-cell limit; mutually exclusive with `--summary-width` |
 | `--tokens` | Show the detailed token-usage projection and aggregate totals |
 | `--no-color` | Disable coloured status output |
 | `--deleted` | Show recoverably deleted sessions and their expiry |
@@ -50,6 +54,11 @@ never consults GitHub or infers labels from session content.
 `--starred`, `--label`, `--deleted`) and the display modes (`--flat`,
 `--tree`), but is mutually exclusive with `--quiet` and `--wide`. `--flat` and
 `--tree` cannot be supplied together.
+
+`--wide` does not change the SUMMARY limit. Use `--summary-width` or
+`--full-summary` when more context is needed. JSON output remains the complete,
+untruncated session shape; `--quiet` and `--tokens` retain their focused
+projections and do not add the SUMMARY table column.
 
 Counts reflect the **current agent** from a background poll, lagging by up to the
 poll interval (default 30 seconds). **Counted** is the age of the last successful
