@@ -593,7 +593,8 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 	}
 
 	wantNeeds := map[string]workflowNeeds{
-		"release-context": nil,
+		"changes":         nil,
+		"release-context": {"changes"},
 		"build-darwin":    {"release-context"},
 		"build-linux":     {"release-context"},
 		"execute-linux":   {"release-context", "build-linux"},
