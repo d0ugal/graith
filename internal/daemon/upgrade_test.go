@@ -3747,7 +3747,9 @@ func TestAdoptSessionsUsesRawFirstDeadlineAndOwnsScreenRecovery(t *testing.T) {
 	)
 
 	sm.adoptSession = func(opts grpty.AdoptOpts) (*grpty.Session, error) {
-		session, err := grpty.AdoptSession(opts)
+		session, err := grpty.AdoptSessionWithTerminalFactory(opts, func(cols, rows int) (grpty.Terminal, error) {
+			return newDaemonTestTerminal(cols, rows), nil
+		})
 
 		seamMu.Lock()
 
