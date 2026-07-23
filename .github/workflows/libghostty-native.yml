@@ -318,6 +318,11 @@ jobs:
               -run '^TestTerminalBackendCompatibilityCorpus$'
             run_timed daemon-race go test -race -count=1 -tags=libghostty ./internal/daemon \
               -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
+            # This is the authoritative full integration execution for the
+            # native graph. Generic CI only compiles integration tests because
+            # it intentionally has no native helper inputs.
+            run_timed integration go test -v -race -count=1 \
+              -tags='libghostty integration' ./internal/integration/...
             run_timed daemon-lifecycle scripts/libghostty-native.sh daemon-test
             # Fixed budgets avoid the wall-clock deadline path affected by
             # golang/go#75804. Snapshot CI reached 494,054 executions; local
