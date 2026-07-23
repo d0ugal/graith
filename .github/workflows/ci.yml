@@ -106,6 +106,16 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go build -v ./cmd/graith
+      - name: Verify untagged fail-closed binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in darwin/arm64 linux/amd64 linux/arm64; do
+            IFS=/ read -r goos goarch <<< "$target"
+            binary="$RUNNER_TEMP/graith-${goos}-${goarch}"
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -o "$binary" ./cmd/graith
+            scripts/libghostty-native.sh verify-default-binary "$binary"
+          done
 
   build-macos:
     name: Build (macos-latest)

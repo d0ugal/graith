@@ -326,8 +326,9 @@ If it grows large, `gr doctor --autofix` truncates it to ~1 MB.
 #### Verify the terminal backend
 
 `gr doctor` reports `Terminal backend: libghostty-helper` for the
-process-isolated native implementation. An untagged or misconfigured build
-reports `unavailable`; this is fail-closed and cannot create PTY sessions.
+process-isolated native implementation. An untagged build reports `unavailable`;
+tagged builds with unsupported inputs report their explicit unsupported backend.
+These are fail-closed and cannot create PTY sessions.
 Unsupported builds fail closed. The
 supported machine-readable check is:
 

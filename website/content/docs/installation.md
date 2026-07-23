@@ -98,13 +98,6 @@ go install github.com/d0ugal/graith/cmd/graith@latest
 backend; it is not a supported daemon installation and cannot create PTY
 sessions. Use the prebuilt native artifact or the source flow instead.
 
-If the native inputs are already provisioned, `make build` names the binary
-`gr`:
-
-```bash
-mv "$(go env GOPATH)/bin/graith" "$(go env GOPATH)/bin/gr"
-```
-
 {{% /tab %}}
 {{% tab tabName="From source" %}}
 
@@ -114,10 +107,10 @@ cd graith
 make build    # produces ./gr
 ```
 
-Source builds materialize and checksum-verify the pinned native macOS artifact
-through `scripts/libghostty-native.sh`; Linux source builds require the pinned
-native library and pkg-config inputs explicitly. Neither flow manufactures or
-registers an unsigned app.
+Source builds materialize and checksum-verify the pinned native inputs through
+`scripts/libghostty-native.sh`; the Linux flow builds the pinned Ghostty source
+itself. The first source build requires network access plus the pinned Zig and
+Ghostty inputs. Neither flow manufactures or registers an unsigned app.
 
 {{% /tab %}}
 {{< /tabs >}}
@@ -194,8 +187,7 @@ gr-dev doctor
 gr-dev doctor --json | jq -r .terminal_backend
 ```
 
-Every supported stable/dev artifact reports `libghostty-helper`. A `charm`
-result means an unsupported or historical binary is running. See
+Every supported stable/dev artifact reports `libghostty-helper`. See
 [Troubleshooting]({{< relref "/docs/troubleshooting.md#verify-the-terminal-backend" >}})
 for the matching startup and failure log records.
 

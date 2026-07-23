@@ -51,6 +51,18 @@ test('generic integration jobs are compile-only without deleting runtime coverag
   assert.doesNotMatch(native, /default-builds:/);
 });
 
+test('Ubuntu build verifies every supported untagged target remains native-free', () => {
+  const build = ci.match(/  build:\n[\s\S]*?(?=\n  [a-z][\w-]+:)/)?.[0];
+  assert.ok(build, 'Ubuntu build job must remain present');
+  assert.match(build, /Verify untagged fail-closed binaries/);
+  for (const target of ['darwin\/arm64', 'linux\/amd64', 'linux\/arm64']) {
+    assert.match(build, new RegExp(target));
+  }
+  assert.match(build, /CGO_ENABLED=0 go build/);
+  assert.match(build, /verify-default-binary/);
+  assert.doesNotMatch(native, /default-builds:/);
+});
+
 test('native path routing excludes docs but covers causal and dependency inputs', () => {
   const matcher = nativePathMatcher();
   assert.equal(matcher.test('website/content/docs/troubleshooting.md'), false);
