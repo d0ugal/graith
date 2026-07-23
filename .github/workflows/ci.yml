@@ -143,6 +143,9 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go test -v -race -count=1 ./...
+
+      - name: Check component dependency direction
+        run: make architecture-check
       - name: Test and verify package dependency graph
         run: |
           (cd website && go test -v -race -count=1 ./...)

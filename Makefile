@@ -1,6 +1,6 @@
 GOLANGCI_LINT_VERSION := v2.12.2
 
-.PHONY: build test lint lint-only lint-darwin shellcheck fmt clean notifier service-app package-graph package-graph-check docs docs-serve demo demo-clean demo-test
+.PHONY: build test architecture-check lint lint-only lint-darwin shellcheck fmt clean notifier service-app package-graph package-graph-check docs docs-serve demo demo-clean demo-test
 
 build:
 	go build -v -ldflags="-s -w" -o gr ./cmd/graith
@@ -32,6 +32,9 @@ service-app:
 
 test:
 	go test -v -race ./...
+
+architecture-check:
+	GOFLAGS=-mod=readonly GOWORK=off go run ./cmd/architecturecheck
 
 lint:
 	docker run --rm -v $(CURDIR):/app -w /app golangci/golangci-lint:$(GOLANGCI_LINT_VERSION) golangci-lint run --fix
