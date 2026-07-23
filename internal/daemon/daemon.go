@@ -69,6 +69,7 @@ type SessionManager struct {
 	// leaving artifact content and metadata describing different attempts.
 	scenarioResultMu  sync.Mutex
 	state             *State
+	worktreePort      WorktreePort
 	sessions          map[string]sessionDriver
 	stopAttempts      map[string]*stopAttempt
 	attachedClients   map[string]*attachedClient
@@ -259,6 +260,7 @@ func (r *upgradeRequest) cancel() { r.cancelOnce.Do(func() { close(r.canceled) }
 func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger) *SessionManager {
 	sm := &SessionManager{
 		state:              NewState(),
+		worktreePort:       defaultWorktreePort(),
 		sessions:           make(map[string]sessionDriver),
 		stopAttempts:       make(map[string]*stopAttempt),
 		attachedClients:    make(map[string]*attachedClient),
