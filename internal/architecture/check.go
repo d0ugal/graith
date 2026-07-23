@@ -25,11 +25,10 @@ type Manifest struct {
 }
 
 type Rule struct {
-	From        string `json:"from"`
-	To          string `json:"to"`
-	Kind        string `json:"kind"`
-	ID          string `json:"id"`
-	Remediation string `json:"remediation"`
+	From string `json:"from"`
+	To   string `json:"to"`
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
 }
 type Exception struct {
 	ID      string `json:"id"`
@@ -65,8 +64,14 @@ func Load(r io.Reader) (Manifest, error) {
 	if m.Version != 1 || strings.TrimSpace(m.Module) == "" {
 		return m, errors.New("manifest requires version 1 and module")
 	}
-	if len(m.Packages) == 0 || len(m.Categories) == 0 || strings.TrimSpace(m.DefaultRemediation) == "" {
+	if len(m.Packages) == 0 {
 		return m, errors.New("manifest has no packages")
+	}
+	if len(m.Categories) == 0 {
+		return m, errors.New("manifest has no categories")
+	}
+	if strings.TrimSpace(m.DefaultRemediation) == "" {
+		return m, errors.New("manifest has no default remediation")
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
@@ -106,13 +111,20 @@ type discoveryVariant struct {
 }
 
 func discoveryVariants() []discoveryVariant {
-	variants := make([]discoveryVariant, 0, 6)
+	variants := make([]discoveryVariant, 0, 18)
 	for _, platform := range []struct{ goos, goarch string }{{"linux", "amd64"}, {"linux", "arm64"}, {"darwin", "arm64"}} {
+		variants = append(variants,
+			discoveryVariant{goos: platform.goos, goarch: platform.goarch},
+		)
 		variants = append(variants,
 			discoveryVariant{goos: platform.goos, goarch: platform.goarch, tags: []string{"integration"}},
 			discoveryVariant{goos: platform.goos, goarch: platform.goarch, cgo: true, tags: []string{"integration", "releaseartifact"}},
 			discoveryVariant{goos: platform.goos, goarch: platform.goarch, cgo: true, tags: []string{"libghostty"}},
+			discoveryVariant{goos: platform.goos, goarch: platform.goarch, tags: []string{"safehouse_enforce"}},
 		)
+		if platform.goos == "linux" {
+			variants = append(variants, discoveryVariant{goos: platform.goos, goarch: platform.goarch, tags: []string{"nono_enforce"}})
+		}
 	}
 	return variants
 }
@@ -220,10 +232,7 @@ func Check(m Manifest, packages []Package, now time.Time) ([]Violation, error) {
 			imports []string
 		}{{"production", p.Imports}, {"test", mergeStrings(p.TestImports, p.XTestImports)}} {
 			for _, to := range group.imports {
-				fromCat, ok := m.Packages[p.ImportPath]
-				if !ok {
-					continue
-				}
+				fromCat := m.Packages[p.ImportPath]
 				toCat, ok := m.Packages[to]
 				if !ok {
 					if strings.HasPrefix(to, m.Module+"/") {
@@ -236,7 +245,7 @@ func Check(m Manifest, packages []Package, now time.Time) ([]Violation, error) {
 					continue
 				}
 				id := exceptionID(p.ImportPath, to, group.name)
-				if e, exists := exceptions[exceptionID(p.ImportPath, to, group.name)]; exists {
+				if e, exists := exceptions[id]; exists {
 					violations = append(violations, Violation{Edge: Edge{p.ImportPath, to, group.name}, Rule: id, Exception: e.ID})
 					continue
 				}

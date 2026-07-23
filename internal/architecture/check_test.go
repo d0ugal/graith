@@ -40,6 +40,25 @@ func TestLoadRejectsTrailingData(t *testing.T) {
 	}
 }
 
+func TestLoadReportsManifestShapeErrors(t *testing.T) {
+	base := `{"version":1,"module":"example.com/braw","categories":["value"],"packages":{"example.com/braw/a":"value"},"default_remediation":"fix it"}`
+	for _, tc := range []struct {
+		name string
+		json string
+		want string
+	}{
+		{"categories", strings.Replace(base, `"categories":["value"]`, `"categories":[]`, 1), "no categories"},
+		{"packages", strings.Replace(base, `"packages":{"example.com/braw/a":"value"}`, `"packages":{}`, 1), "no packages"},
+		{"remediation", strings.Replace(base, `"default_remediation":"fix it"`, `"default_remediation":""`, 1), "default remediation"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Load(strings.NewReader(tc.json)); !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+}
+
 func TestCheckUnknownAndExpiredManifestData(t *testing.T) {
 	m := testManifest()
 	m.Exceptions = []Exception{{ID: "old", From: "example.com/braw/a", To: "example.com/braw/b", Kind: "production", Owner: "croft", Reason: "migration", Expires: "2026-07-22"}}
@@ -142,7 +161,7 @@ func TestRealManifestScopesTestOnlyRules(t *testing.T) {
 
 func TestDiscoveryVariantsCoverSupportedBuilds(t *testing.T) {
 	variants := discoveryVariants()
-	if len(variants) != 9 {
+	if len(variants) != 17 {
 		t.Fatalf("variants=%#v", variants)
 	}
 	seen := make(map[string]bool)
@@ -152,6 +171,15 @@ func TestDiscoveryVariantsCoverSupportedBuilds(t *testing.T) {
 	}
 	if len(seen) != len(variants) {
 		t.Fatalf("duplicate variants=%#v", variants)
+	}
+	for _, want := range []string{
+		"linux/amd64::false", "linux/arm64::false", "darwin/arm64::false",
+		"linux/amd64:safehouse_enforce:false", "darwin/arm64:safehouse_enforce:false",
+		"linux/amd64:nono_enforce:false", "linux/arm64:nono_enforce:false",
+	} {
+		if !seen[want] {
+			t.Fatalf("missing discovery variant %q in %#v", want, variants)
+		}
 	}
 }
 
