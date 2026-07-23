@@ -10,6 +10,38 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
+// capabilityCore is deliberately composed from the consumer contracts rather
+// than the legacy aggregate SessionDriver. This guards the migration seam from
+// accidentally growing another PTY-only method.
+type capabilityCore struct {
+	sessionLifecycle
+	sessionInput
+	sessionOutput
+}
+
+type capabilityLifecycleOnly struct{ sessionLifecycle }
+type capabilityInputOnly struct{ sessionInput }
+
+func TestDriverCapabilitiesAreOptional(t *testing.T) {
+	core := capabilityCore{}
+
+	if output, ok := outputCapability(core); !ok || output == nil {
+		t.Fatal("core driver should expose its output capability")
+	}
+
+	if interactive, ok := interactiveCapability(core); ok || interactive != nil {
+		t.Fatal("core driver must not imply the interactive capability")
+	}
+
+	if input, ok := inputCapability(capabilityLifecycleOnly{}); ok || input != nil {
+		t.Fatal("lifecycle-only driver must not imply the input capability")
+	}
+
+	if output, ok := outputCapability(capabilityInputOnly{}); ok || output != nil {
+		t.Fatal("input-only driver must not imply the output capability")
+	}
+}
+
 // TestResumeRefusesHeadless locks in that a one-shot headless session cannot be
 // resumed (issue #1075): resuming it would silently relaunch an interactive PTY
 // while leaving DriverKind=headless, which the attach guard would then lock out.

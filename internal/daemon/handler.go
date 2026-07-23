@@ -518,16 +518,24 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 				sm.mu.Unlock()
 
-				_ = ptySess.Resize(clientRows, clientCols)
+				if interactive, ok := interactiveCapability(ptySess); ok {
+					_ = interactive.Resize(clientRows, clientCols)
+				}
 
 				sess, _ := sm.Get(a.SessionID)
 				sendControl("attached", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
 
-				if tail, err := ptySess.ScrollbackFile().Tail(sm.Config().Limits.LogLinesOrDefault()); err == nil && len(tail) > 0 {
+				output, ok := outputCapability(ptySess)
+				if !ok {
+					sendControl("error", protocol.ErrorMsg{Message: "session does not provide attach output"})
+					continue
+				}
+
+				if tail, err := output.ScrollbackFile().Tail(sm.Config().Limits.LogLinesOrDefault()); err == nil && len(tail) > 0 {
 					_ = writer.WriteFrame(protocol.ChannelData, tail)
 				}
 
-				ptySess.Attach(attachedDataWriter)
+				output.Attach(attachedDataWriter)
 
 			case "attach_convert":
 				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
@@ -757,7 +765,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 				if attachedSessionID != "" {
 					if pty, ok := sm.GetPTY(attachedSessionID); ok {
-						_ = pty.Resize(r.Rows, r.Cols)
+						if interactive, ok := interactiveCapability(pty); ok {
+							_ = interactive.Resize(r.Rows, r.Cols)
+						}
 					}
 				}
 
@@ -973,7 +983,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 						return
 					}
 
-					pty.NotifyUserInput()
+					if interactive, ok := interactiveCapability(pty); ok {
+						interactive.NotifyUserInput()
+					}
 				}
 			}
 		}

@@ -261,7 +261,7 @@ func (sm *SessionManager) takeResourceSamples(id string, pid int) []ResourceSamp
 // provenance; without one, attribution deliberately says external-or-unknown.
 func (sm *SessionManager) logAbnormalExitReport(
 	id, name, stopReason string,
-	sess SessionDriver,
+	sess sessionDriver,
 	signalRequest *signalRequest,
 ) {
 	samples := sm.takeResourceSamples(id, sess.ProcessPID())

@@ -364,12 +364,13 @@ func handleType(sm *SessionManager, auth authContext, send func(string, any), ms
 		return
 	}
 
-	if sm.HasAttachedClient(t.SessionID) {
+	interactive, hasInteractive := interactiveCapability(pty)
+	if sm.HasAttachedClient(t.SessionID) && hasInteractive {
 		// gr type deliberately shares the inbox-injection idle policy. Copy the
 		// timing value from one config snapshot so a concurrent reload cannot mix
 		// values; the reloaded policy applies to the next operation instead.
 		timing := sm.Config().Notifications.Timing
-		if !pty.WaitForUserIdle(timing.InboxIdleTimeoutDuration(), timing.InboxMaxWaitDuration()) {
+		if !interactive.WaitForUserIdle(timing.InboxIdleTimeoutDuration(), timing.InboxMaxWaitDuration()) {
 			log.Warn("gr type: max wait expired, injecting while user may still be active",
 				"session", t.SessionID)
 		}
@@ -388,7 +389,10 @@ func handleType(sm *SessionManager, auth authContext, send func(string, any), ms
 		return
 	}
 
-	pty.Poke()
+	if hasInteractive {
+		interactive.Poke()
+	}
+
 	send("typed", struct {
 		SessionID string `json:"session_id"`
 	}{t.SessionID})

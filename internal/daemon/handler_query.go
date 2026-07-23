@@ -229,9 +229,15 @@ func handleScreenPreview(sm *SessionManager, auth authContext, send func(string,
 		return
 	}
 
+	output, ok := outputCapability(ptySess)
+	if !ok {
+		send("error", protocol.ErrorMsg{Message: "session does not provide output preview"})
+		return
+	}
+
 	send("screen_preview_response", protocol.ScreenPreviewResponseMsg{
 		SessionID: sp.SessionID,
-		Preview:   ptySess.ScreenPreview(),
+		Preview:   output.ScreenPreview(),
 	})
 }
 
@@ -254,7 +260,13 @@ func handleScreenSnapshot(sm *SessionManager, auth authContext, send func(string
 		return
 	}
 
-	snap := ptySess.ScreenSnapshot()
+	output, ok := outputCapability(ptySess)
+	if !ok {
+		send("error", protocol.ErrorMsg{Message: "session does not provide an output snapshot"})
+		return
+	}
+
+	snap := output.ScreenSnapshot()
 	send("screen_snapshot_response", protocol.ScreenSnapshotResponseMsg{
 		SessionID:     ss.SessionID,
 		Frame:         snap.Frame,

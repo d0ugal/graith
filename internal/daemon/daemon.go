@@ -69,7 +69,7 @@ type SessionManager struct {
 	// leaving artifact content and metadata describing different attempts.
 	scenarioResultMu  sync.Mutex
 	state             *State
-	sessions          map[string]SessionDriver
+	sessions          map[string]sessionDriver
 	stopAttempts      map[string]*stopAttempt
 	attachedClients   map[string]*attachedClient
 	hookReports       map[string]hookReport
@@ -258,7 +258,7 @@ func (r *upgradeRequest) cancel() { r.cancelOnce.Do(func() { close(r.canceled) }
 func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger) *SessionManager {
 	sm := &SessionManager{
 		state:              NewState(),
-		sessions:           make(map[string]SessionDriver),
+		sessions:           make(map[string]sessionDriver),
 		stopAttempts:       make(map[string]*stopAttempt),
 		attachedClients:    make(map[string]*attachedClient),
 		hookReports:        make(map[string]hookReport),
@@ -889,7 +889,7 @@ func (sm *SessionManager) adoptSessions(
 		return UpgradeAdoptionResult{}, descriptorValidationErr
 	}
 
-	adoptedDrivers := make(map[string]SessionDriver)
+	adoptedDrivers := make(map[string]sessionDriver)
 
 	var (
 		result      UpgradeAdoptionResult

@@ -11,7 +11,7 @@ import (
 // startWatcher launches watchSession in a tracked goroutine. The watcher is
 // registered with sm.watchers so StopAll can wait for its post-exit work
 // (state writes, status publish) to finish during shutdown.
-func (sm *SessionManager) startWatcher(id string, sess SessionDriver) {
+func (sm *SessionManager) startWatcher(id string, sess sessionDriver) {
 	sm.watchers.Add(1)
 	// Ask the monitor for a baseline promptly; the buffered kick coalesces a
 	// burst of launches into one process-table scan.
@@ -30,7 +30,7 @@ func (sm *SessionManager) startWatcher(id string, sess SessionDriver) {
 // watchSession waits for a PTY session to exit and updates state accordingly.
 // If the session has been replaced (e.g. by Resume) or removed (e.g. by Delete),
 // the watcher is stale and skips the state update and status event.
-func (sm *SessionManager) watchSession(id string, sess SessionDriver) {
+func (sm *SessionManager) watchSession(id string, sess sessionDriver) {
 	<-sess.Done()
 
 	sm.mu.Lock()

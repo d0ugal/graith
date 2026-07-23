@@ -23,7 +23,7 @@ func newOrchTestSM(t *testing.T) *SessionManager {
 
 	return &SessionManager{
 		state:    NewState(),
-		sessions: make(map[string]SessionDriver),
+		sessions: make(map[string]sessionDriver),
 		cfg:      &config.Config{},
 		paths: config.Paths{
 			DataDir:   dir,

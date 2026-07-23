@@ -125,7 +125,9 @@ func (sm *SessionManager) notifyInboxContext(ctx context.Context, targetID, send
 		sm.log.Debug("inbox notification write failed", "target", targetID, "err", err)
 	}
 
-	ptySess.Poke()
+	if interactive, ok := interactiveCapability(ptySess); ok {
+		interactive.Poke()
+	}
 }
 
 // inboxNotificationHint renders the immediate PTY hint for one inbox message.
@@ -269,17 +271,23 @@ func (sm *SessionManager) notifyUnreadInboxContext(ctx context.Context, sessionI
 		sm.log.Debug("unread inbox notification write failed", "session", sessionID, "err", err)
 	}
 
-	ptySess.Poke()
+	if interactive, ok := interactiveCapability(ptySess); ok {
+		interactive.Poke()
+	}
 }
 
-func waitForUserIdleContext(ctx context.Context, session SessionDriver, idleTimeout, maxWait time.Duration) bool {
+func waitForUserIdleContext(ctx context.Context, session sessionDriver, idleTimeout, maxWait time.Duration) bool {
 	if waiter, ok := session.(interface {
 		WaitForUserIdleContext(ctx context.Context, idleTimeout, maxWait time.Duration) bool
 	}); ok {
 		return waiter.WaitForUserIdleContext(ctx, idleTimeout, maxWait)
 	}
 
-	return session.WaitForUserIdle(idleTimeout, maxWait)
+	if interactive, ok := interactiveCapability(session); ok {
+		return interactive.WaitForUserIdle(idleTimeout, maxWait)
+	}
+
+	return true
 }
 
 // InterruptSession delivers an interrupt (Ctrl-C) to a session's live PTY using
@@ -313,7 +321,9 @@ func (sm *SessionManager) InterruptSession(sessionID string) error {
 		return err
 	}
 
-	ptySess.Poke()
+	if interactive, ok := interactiveCapability(ptySess); ok {
+		interactive.Poke()
+	}
 
 	return nil
 }

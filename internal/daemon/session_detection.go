@@ -114,7 +114,7 @@ func (sm *SessionManager) fetchRemotes(ctx context.Context) {
 // Interactive agents (Claude, Codex, …) render their UI within a second or two
 // of starting, so a session still at zero bytes well past this window is almost
 // certainly stuck — blocked on a pre-render prompt, or not writing to its PTY.
-func (sm *SessionManager) checkSilentSession(id, name, agent string, pty SessionDriver) {
+func (sm *SessionManager) checkSilentSession(id, name, agent string, pty sessionDriver) {
 	sm.mu.RLock()
 	threshold := sm.cfg.Detection.SilentThresholdDuration()
 	sm.mu.RUnlock()
@@ -124,7 +124,7 @@ func (sm *SessionManager) checkSilentSession(id, name, agent string, pty Session
 
 // checkSilentSessionWithThreshold is checkSilentSession with an injectable
 // threshold so tests don't have to wait out the production window.
-func (sm *SessionManager) checkSilentSessionWithThreshold(id, name, agent string, pty SessionDriver, threshold time.Duration) {
+func (sm *SessionManager) checkSilentSessionWithThreshold(id, name, agent string, pty sessionDriver, threshold time.Duration) {
 	if pty.BytesRead() > 0 {
 		return
 	}
@@ -178,7 +178,7 @@ func (sm *SessionManager) detectAgentStatuses() {
 		name         string
 		agent        string
 		prevStatus   string
-		pty          SessionDriver
+		pty          sessionDriver
 		worktreePath string
 		baseBranch   string
 		repoPath     string

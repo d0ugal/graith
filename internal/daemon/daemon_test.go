@@ -85,7 +85,7 @@ func assertCreateMirrorRejected(t *testing.T, sm *SessionManager) {
 
 // waitExit blocks until the PTY session's process has exited (its Done channel
 // closes) or fails the test after a timeout.
-func waitExit(t *testing.T, sess SessionDriver) {
+func waitExit(t *testing.T, sess sessionDriver) {
 	t.Helper()
 
 	select {

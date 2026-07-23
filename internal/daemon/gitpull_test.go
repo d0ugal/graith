@@ -64,7 +64,7 @@ func newTestSM(t *testing.T) *SessionManager {
 
 	return &SessionManager{
 		state:    NewState(),
-		sessions: make(map[string]SessionDriver),
+		sessions: make(map[string]sessionDriver),
 		cfg: &config.Config{
 			GitPull: config.GitPullConfig{
 				Enabled:  true,
