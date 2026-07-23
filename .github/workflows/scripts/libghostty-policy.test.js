@@ -29,6 +29,12 @@ function nativePathMatcher() {
   return new RegExp(match[1]);
 }
 
+function releasePathMatcher(workflow) {
+  const match = workflow.match(/if grep -Eq '([^']+)' <<<"\$files"/);
+  assert.ok(match, 'release path matcher must remain discoverable');
+  return new RegExp(match[1]);
+}
+
 test('generic integration jobs are compile-only without deleting runtime coverage', () => {
   const commands = [...ci.matchAll(/go test -v -race -count=1 -run '\^\$' -tags=integration \.\/internal\/integration\/\.\.\./g)];
   assert.equal(commands.length, 2, 'Linux and macOS generic jobs must compile integration tests');
@@ -90,14 +96,23 @@ test('local native builds isolate the Go cache from ambient pkg-config state', (
 });
 
 test('release workflows gate only pull-request release work and fail safe', () => {
+  const devMatcher = releasePathMatcher(devRelease);
+  const stableMatcher = releasePathMatcher(goreleaser);
+  for (const path of ['internal/pty/terminal_backend_ghostty.go', 'go.mod', 'website/content/docs/installation.md']) {
+    assert.equal(devMatcher.test(path), false);
+    assert.equal(stableMatcher.test(path), false);
+  }
+  assert.equal(devMatcher.test('scripts/dev-release-version.sh'), true);
+  assert.equal(devMatcher.test('macos/notifier/build.sh'), true);
+  assert.equal(stableMatcher.test('.release-please-config.json'), true);
+  assert.equal(stableMatcher.test('CHANGELOG.md'), true);
+  assert.equal(stableMatcher.test('scripts/render-stable-aur.sh'), true);
+  assert.equal(stableMatcher.test('scripts/rpm-preset-keygrips.sh'), true);
   for (const workflow of [devRelease, goreleaser]) {
     assert.match(workflow, /if \[ "\$EVENT" != "pull_request" \]; then[\s\S]*?echo "release=true"/);
     assert.match(workflow, /if ! files="\$\(gh api "repos\/\$REPO\/pulls\/\$PR\/files"[\s\S]*?echo "release=true"/);
     assert.match(workflow, /release-context:[\s\S]*?needs: changes/);
     assert.match(workflow, /release-context:[\s\S]*?needs\.changes\.outputs\.release == 'true'/);
-    assert.match(workflow, /\.release-please-\(manifest\|config\)/);
-    assert.match(workflow, /render-stable-\(homebrew\|aur\)/);
-    assert.match(workflow, /internal\/\(release\|daemonservice\)/);
   }
   assert.match(devRelease, /branches:\n      - main/);
   assert.match(goreleaser, /tags:\n      - "v\*"/);
