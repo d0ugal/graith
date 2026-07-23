@@ -9,13 +9,29 @@
 // closed when the sandbox is enabled but cannot be enforced.
 package sandbox
 
-import "fmt"
+import (
+	"fmt"
+	"log/slog"
+	"slices"
+)
 
 // Backend identifiers used in config (`[sandbox] backend = "..."`).
 const (
 	BackendSafehouse = "safehouse"
 	BackendNono      = "nono"
 )
+
+// SignalModeSameSandbox prevents sandboxed processes from signalling outside
+// their sandbox while retaining ordinary child-process management.
+const SignalModeSameSandbox = "allow_same_sandbox"
+
+// EnforceSignalIsolation applies Graith's non-bypassable signal policy to a
+// managed agent. User-configured signal permissions cannot grant host process
+// signalling authority.
+func EnforceSignalIsolation(opts WrapOpts) WrapOpts {
+	opts.SignalMode = SignalModeSameSandbox
+	return opts
+}
 
 // WrapOpts is the resolved, expanded sandbox policy for a single process.
 // Paths are already `~`- and glob-expanded and made absolute by the daemon
@@ -164,6 +180,23 @@ func backendByName(name string) (Backend, error) {
 // Wrap dispatches to the configured backend and returns the command+args to
 // exec. An empty opts.Backend defaults to safehouse for backward compatibility.
 func Wrap(command string, args []string, opts WrapOpts) (string, []string, error) {
+	opts = EnforceSignalIsolation(opts)
+	backend := opts.Backend
+
+	if backend == "" {
+		backend = BackendSafehouse
+	}
+
+	if backend == BackendSafehouse && slices.Contains(opts.Features, "process-control") {
+		// Seatbelt has no equivalent signal isolation control. Keep sessions
+		// startable, but never pass the signal-granting feature through.
+		slog.Default().Warn("safehouse cannot enforce sandbox signal isolation; ignoring process-control feature")
+
+		opts.Features = slices.DeleteFunc(slices.Clone(opts.Features), func(feature string) bool {
+			return feature == "process-control"
+		})
+	}
+
 	be, err := backendByName(opts.Backend)
 	if err != nil {
 		return "", nil, err
