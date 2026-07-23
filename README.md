@@ -6,6 +6,12 @@
   <img src="demo/graith.gif" alt="graith demo — attach to a running agent, view the fleet, and drive them from the session picker" width="900">
 </p>
 
+<p align="center">
+  <img src="website/assets/images/agent-marty.png" alt="Agent Marty, graith's pine marten mascot" width="300">
+</p>
+
+> Meet Marty, Graith’s resident coding-agent pine marten. 🐾
+
 graith is a terminal multiplexer built for AI coding agents (Claude, Codex, OpenCode, Cursor, Agy). Spin up an agent per task, let them work isolated and unattended, and jump between them with a tmux-style prefix key. A long-lived daemon owns the sessions, so closing your terminal — or losing your SSH connection — doesn't stop the work.
 
 **graith** (Scots) — *noun:* equipment, tools, gear for a specific trade. *verb:* to make ready, prepare, equip. Your agents, graithed and ready to work.
