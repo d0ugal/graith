@@ -1,16 +1,16 @@
-# graith
-
-**Run a fleet of AI coding agents in parallel — each in its own git worktree, each in a session that outlives your terminal.**
-
-<p align="center">
-  <img src="demo/graith.gif" alt="graith demo — attach to a running agent, view the fleet, and drive them from the session picker" width="900">
-</p>
+# Graith
 
 <p align="center">
   <img src="website/assets/images/agent-marty.png" alt="Agent Marty, graith's pine marten mascot" width="300">
 </p>
 
 > Meet Marty, Graith’s resident coding-agent pine marten. 🐾
+
+**Run a fleet of AI coding agents in parallel — each in its own git worktree, each in a session that outlives your terminal.**
+
+<p align="center">
+  <img src="demo/graith.gif" alt="graith demo — attach to a running agent, view the fleet, and drive them from the session picker" width="900">
+</p>
 
 graith is a terminal multiplexer built for AI coding agents (Claude, Codex, OpenCode, Cursor, Agy). Spin up an agent per task, let them work isolated and unattended, and jump between them with a tmux-style prefix key. A long-lived daemon owns the sessions, so closing your terminal — or losing your SSH connection — doesn't stop the work.
 
