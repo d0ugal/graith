@@ -24,8 +24,6 @@ func newDaemonPTYSession(t *testing.T, opts grpty.SessionOpts) (*grpty.Session, 
 	return newDaemonPTYSessionWithFactory(opts)
 }
 
-func init() { newPTYSession = newDaemonPTYSessionWithFactory }
-
 func newDaemonPTYSessionWithFactory(opts grpty.SessionOpts) (*grpty.Session, error) {
 	return grpty.NewSessionWithTerminalFactory(opts, func(cols, rows int) (grpty.Terminal, error) {
 		return newDaemonTestTerminal(cols, rows), nil

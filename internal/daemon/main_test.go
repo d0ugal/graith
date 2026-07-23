@@ -8,5 +8,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	configureDaemonTestPTYFactory()
+
 	os.Exit(testutil.RunWithIsolatedGit(m))
 }
