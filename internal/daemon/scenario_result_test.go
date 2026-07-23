@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -12,6 +14,35 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/store"
 )
+
+type scenarioResultPersistenceFake struct {
+	initErr      error
+	putErr       error
+	initCalls    int
+	putCalls     int
+	callOrder    []string
+	initStarted  chan struct{}
+	initContinue chan struct{}
+}
+
+func (f *scenarioResultPersistenceFake) Init() error {
+	f.initCalls++
+
+	f.callOrder = append(f.callOrder, "init")
+	if f.initStarted != nil {
+		close(f.initStarted)
+		<-f.initContinue
+	}
+
+	return f.initErr
+}
+
+func (f *scenarioResultPersistenceFake) Put(string, string) error {
+	f.putCalls++
+	f.callOrder = append(f.callOrder, "put")
+
+	return f.putErr
+}
 
 func resultSpec(name, format, destination string, required bool) protocol.ScenarioResultSpec {
 	return protocol.ScenarioResultSpec{Name: name, Format: format, Store: destination, Required: required}
@@ -426,6 +457,100 @@ func TestPublishScenarioResultOversizeAndStoreFailure(t *testing.T) {
 
 	if got := resultForMember(t, sm, "canny", "review"); got.Status != ScenarioResultFailed || got.Error != "result storage failed" {
 		t.Fatalf("store failure result = %+v, want failed with sanitized error", got)
+	}
+}
+
+func TestPublishScenarioResultPersistencePortOrdersAndRollsBack(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		initErr    error
+		putErr     error
+		wantCalls  []string
+		wantStatus ScenarioResultStatus
+	}{
+		{name: "initialization failure", initErr: errors.New("dreich init"), wantCalls: []string{"init"}, wantStatus: ScenarioResultFailed},
+		{name: "write failure", putErr: errors.New("dreich write"), wantCalls: []string{"init", "put"}, wantStatus: ScenarioResultFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sm := newTestSessionManager(t)
+			sm.mu.Lock()
+			seedScenarioResults(t, sm, map[string][]protocol.ScenarioResultSpec{
+				"canny": {resultSpec("review", "text", "review.txt", true)},
+			})
+			sm.mu.Unlock()
+
+			persistence := &scenarioResultPersistenceFake{initErr: tc.initErr, putErr: tc.putErr}
+			sm.scenarioResults = persistence
+
+			_, err := sm.PublishScenarioResult(
+				authContext{authenticated: true, role: roleSession, sessionID: "canny-id"},
+				protocol.ScenarioResultPublishMsg{Scenario: "braw-fanout", Name: "review", Body: "complete"},
+			)
+			if err == nil {
+				t.Fatal("publish succeeded despite persistence failure")
+			}
+
+			if !reflect.DeepEqual(persistence.callOrder, tc.wantCalls) {
+				t.Fatalf("call order = %v, want %v", persistence.callOrder, tc.wantCalls)
+			}
+
+			if got := resultForMember(t, sm, "canny", "review").Status; got != tc.wantStatus {
+				t.Fatalf("result status = %q, want %q", got, tc.wantStatus)
+			}
+		})
+	}
+}
+
+func TestPublishScenarioResultPersistenceRunsOutsideManagerLock(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.mu.Lock()
+	seedScenarioResults(t, sm, map[string][]protocol.ScenarioResultSpec{
+		"canny": {resultSpec("review", "text", "review.txt", true)},
+	})
+	sm.mu.Unlock()
+
+	persistence := &scenarioResultPersistenceFake{
+		initStarted:  make(chan struct{}),
+		initContinue: make(chan struct{}),
+	}
+	sm.scenarioResults = persistence
+
+	publishDone := make(chan error, 1)
+
+	// Publish in the background so the test can probe the manager lock.
+	go func() {
+		_, err := sm.PublishScenarioResult(
+			authContext{authenticated: true, role: roleSession, sessionID: "canny-id"},
+			protocol.ScenarioResultPublishMsg{Scenario: "braw-fanout", Name: "review", Body: "complete"},
+		)
+		publishDone <- err
+	}()
+
+	<-persistence.initStarted
+
+	managerLockDone := make(chan struct{})
+
+	// A successful lock acquisition proves persistence does not hold sm.mu.
+	go func() {
+		sm.mu.Lock()
+		if sm.state == nil {
+			panic("session manager state unexpectedly nil")
+		}
+
+		sm.mu.Unlock()
+		close(managerLockDone)
+	}()
+
+	select {
+	case <-managerLockDone:
+	case <-time.After(time.Second):
+		t.Fatal("manager lock remained held during persistence I/O")
+	}
+
+	close(persistence.initContinue)
+
+	if err := <-publishDone; err != nil {
+		t.Fatalf("publish: %v", err)
 	}
 }
 

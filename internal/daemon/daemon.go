@@ -124,6 +124,7 @@ type SessionManager struct {
 	persistUpgradeBeforeLock     func()
 	messages                     *MsgStore
 	todos                        *TodoStore
+	scenarioResults              scenarioResultPersistence
 	startedAt                    time.Time
 	// instanceID is a nonce generated once per daemon process start (including
 	// after an exec upgrade, which re-runs main and constructs a fresh
@@ -294,6 +295,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		startedAt:          time.Now(),
 		instanceID:         newDaemonInstanceID(),
 	}
+	sm.scenarioResults = gitScenarioResultPersistence{dataDir: func() string { return sm.paths.DataDir }}
 	sm.pushDispatch = sm.newPushDispatch()
 
 	// Install the transcript scanner buffer caps process-globally (mirrors

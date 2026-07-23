@@ -365,13 +365,17 @@ func (sm *SessionManager) PublishScenarioResult(auth authContext, msg protocol.S
 		return protocol.ScenarioResultPublishResponse{}, sm.recordScenarioResultFailure(ref, ScenarioResultInvalid, err)
 	}
 
-	storeDir := store.SharedStorePath(sm.paths.DataDir)
-	if err := store.Init(storeDir); err != nil {
+	if sm.scenarioResults == nil {
+		publicationErr := errors.New("initialize shared result store: no persistence configured")
+		return protocol.ScenarioResultPublishResponse{}, sm.recordScenarioResultFailure(ref, ScenarioResultFailed, publicationErr)
+	}
+
+	if err := sm.scenarioResults.Init(); err != nil {
 		publicationErr := fmt.Errorf("initialize shared result store: %w", err)
 		return protocol.ScenarioResultPublishResponse{}, sm.recordScenarioResultFailure(ref, ScenarioResultFailed, publicationErr)
 	}
 
-	if err := store.Put(storeDir, ref.result.Destination, msg.Body); err != nil {
+	if err := sm.scenarioResults.Put(ref.result.Destination, msg.Body); err != nil {
 		publicationErr := fmt.Errorf("store result %q: %w", ref.result.Name, err)
 		return protocol.ScenarioResultPublishResponse{}, sm.recordScenarioResultFailure(ref, ScenarioResultFailed, publicationErr)
 	}
