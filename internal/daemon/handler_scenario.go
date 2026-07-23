@@ -167,11 +167,23 @@ func handleScenarioResultPublish(sm *SessionManager, auth authContext, send func
 		return
 	}
 
-	result, err := sm.PublishScenarioResult(auth, publish)
+	result, err := sm.PublishScenarioResult(auth, scenarioResultPublishRequest(publish))
 	if err != nil {
 		send("error", protocol.ErrorMsg{Message: err.Error()})
 		return
 	}
 
-	send("scenario_result_published", result)
+	send("scenario_result_published", scenarioResultPublishResponse(result))
+}
+
+func scenarioResultPublishRequest(msg protocol.ScenarioResultPublishMsg) ScenarioResultPublishRequest {
+	return ScenarioResultPublishRequest{Scenario: msg.Scenario, Name: msg.Name, Body: msg.Body}
+}
+
+func scenarioResultPublishResponse(publication ScenarioResultPublication) protocol.ScenarioResultPublishResponse {
+	return protocol.ScenarioResultPublishResponse{
+		Scenario: publication.Scenario,
+		Member:   publication.Member,
+		Result:   scenarioResultInfo(publication.Result),
+	}
 }

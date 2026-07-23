@@ -180,7 +180,7 @@ func TestPublishScenarioResultJSONPersistsAndStores(t *testing.T) {
 
 	response, err := sm.PublishScenarioResult(
 		authContext{authenticated: true, role: roleSession, sessionID: "canny-id"},
-		protocol.ScenarioResultPublishMsg{Scenario: "braw-fanout", Name: "facts", Body: `{"braw":true}`},
+		ScenarioResultPublishRequest{Scenario: "braw-fanout", Name: "facts", Body: `{"braw":true}`},
 	)
 	if err != nil {
 		t.Fatalf("publish: %v", err)
@@ -246,7 +246,7 @@ func TestPublishRequiredMarkdownAndJSONFromMultipleMembers(t *testing.T) {
 	for _, publication := range publications {
 		response, err := sm.PublishScenarioResult(
 			authContext{authenticated: true, role: roleSession, sessionID: publication.sessionID},
-			protocol.ScenarioResultPublishMsg{Scenario: "braw-fanout", Name: publication.name, Body: publication.body},
+			ScenarioResultPublishRequest{Scenario: "braw-fanout", Name: publication.name, Body: publication.body},
 		)
 		if err != nil {
 			t.Fatalf("publish %s: %v", publication.name, err)
@@ -318,7 +318,7 @@ func TestPublishScenarioResultMalformedThenRetry(t *testing.T) {
 
 	auth := authContext{authenticated: true, role: roleSession, sessionID: "canny-id"}
 
-	if _, err := sm.PublishScenarioResult(auth, protocol.ScenarioResultPublishMsg{
+	if _, err := sm.PublishScenarioResult(auth, ScenarioResultPublishRequest{
 		Scenario: "braw-fanout", Name: "facts", Body: `{"truncated":`,
 	}); err == nil || !strings.Contains(err.Error(), "not valid JSON") {
 		t.Fatalf("malformed error = %v", err)
@@ -329,7 +329,7 @@ func TestPublishScenarioResultMalformedThenRetry(t *testing.T) {
 		t.Fatalf("invalid metadata = %+v", invalid)
 	}
 
-	if _, err := sm.PublishScenarioResult(auth, protocol.ScenarioResultPublishMsg{
+	if _, err := sm.PublishScenarioResult(auth, ScenarioResultPublishRequest{
 		Scenario: "braw-fanout", Name: "facts", Body: `{"complete":true}`,
 	}); err != nil {
 		t.Fatalf("retry: %v", err)
@@ -353,14 +353,14 @@ func TestPublishScenarioResultErrorsDoNotForgeSuccess(t *testing.T) {
 	tests := []struct {
 		name    string
 		auth    authContext
-		msg     protocol.ScenarioResultPublishMsg
+		msg     ScenarioResultPublishRequest
 		wantErr string
 	}{
-		{"human unauthorized", authContext{role: roleLocalHuman}, protocol.ScenarioResultPublishMsg{Name: "review", Body: "braw"}, "authenticated session"},
-		{"peer cannot publish other declaration", authContext{authenticated: true, role: roleSession, sessionID: "dreich-id"}, protocol.ScenarioResultPublishMsg{Scenario: "braw-fanout", Name: "review", Body: "braw"}, "not declared for this member"},
-		{"misnamed", authContext{authenticated: true, role: roleSession, sessionID: "canny-id"}, protocol.ScenarioResultPublishMsg{Scenario: "braw-fanout", Name: "reivew", Body: "braw"}, "not declared"},
-		{"misrouted scenario", authContext{authenticated: true, role: roleSession, sessionID: "canny-id"}, protocol.ScenarioResultPublishMsg{Scenario: "other", Name: "review", Body: "braw"}, "not found"},
-		{"empty", authContext{authenticated: true, role: roleSession, sessionID: "canny-id"}, protocol.ScenarioResultPublishMsg{Scenario: "braw-fanout", Name: "review", Body: "  \n"}, "must not be empty"},
+		{"human unauthorized", authContext{role: roleLocalHuman}, ScenarioResultPublishRequest{Name: "review", Body: "braw"}, "authenticated session"},
+		{"peer cannot publish other declaration", authContext{authenticated: true, role: roleSession, sessionID: "dreich-id"}, ScenarioResultPublishRequest{Scenario: "braw-fanout", Name: "review", Body: "braw"}, "not declared for this member"},
+		{"misnamed", authContext{authenticated: true, role: roleSession, sessionID: "canny-id"}, ScenarioResultPublishRequest{Scenario: "braw-fanout", Name: "reivew", Body: "braw"}, "not declared"},
+		{"misrouted scenario", authContext{authenticated: true, role: roleSession, sessionID: "canny-id"}, ScenarioResultPublishRequest{Scenario: "other", Name: "review", Body: "braw"}, "not found"},
+		{"empty", authContext{authenticated: true, role: roleSession, sessionID: "canny-id"}, ScenarioResultPublishRequest{Scenario: "braw-fanout", Name: "review", Body: "  \n"}, "must not be empty"},
 	}
 
 	for _, test := range tests {
@@ -403,13 +403,13 @@ func TestPublishScenarioResultRequiresSelectorForSharedMemberAmbiguity(t *testin
 	sm.mu.Unlock()
 
 	auth := authContext{authenticated: true, role: roleSession, sessionID: "canny-id"}
-	if _, err := sm.PublishScenarioResult(auth, protocol.ScenarioResultPublishMsg{
+	if _, err := sm.PublishScenarioResult(auth, ScenarioResultPublishRequest{
 		Name: "review", Body: "# Ambiguous",
 	}); err == nil || !strings.Contains(err.Error(), "multiple scenarios") {
 		t.Fatalf("ambiguous publication error = %v", err)
 	}
 
-	response, err := sm.PublishScenarioResult(auth, protocol.ScenarioResultPublishMsg{
+	response, err := sm.PublishScenarioResult(auth, ScenarioResultPublishRequest{
 		Scenario: "dreich-fanout", Name: "review", Body: "# Selected",
 	})
 	if err != nil {
@@ -432,7 +432,7 @@ func TestPublishScenarioResultOversizeAndStoreFailure(t *testing.T) {
 	auth := authContext{authenticated: true, role: roleSession, sessionID: "canny-id"}
 
 	oversized := strings.Repeat("x", protocol.MaxScenarioResultBodyBytes+1)
-	if _, err := sm.PublishScenarioResult(auth, protocol.ScenarioResultPublishMsg{
+	if _, err := sm.PublishScenarioResult(auth, ScenarioResultPublishRequest{
 		Scenario: "braw-fanout", Name: "review", Body: oversized,
 	}); err == nil || !strings.Contains(err.Error(), "too large") {
 		t.Fatalf("oversize error = %v", err)
@@ -449,7 +449,7 @@ func TestPublishScenarioResultOversizeAndStoreFailure(t *testing.T) {
 
 	sm.paths.DataDir = blockedDataDir
 
-	if _, err := sm.PublishScenarioResult(auth, protocol.ScenarioResultPublishMsg{
+	if _, err := sm.PublishScenarioResult(auth, ScenarioResultPublishRequest{
 		Scenario: "braw-fanout", Name: "review", Body: "complete",
 	}); err == nil || !strings.Contains(err.Error(), "initialize shared result store") {
 		t.Fatalf("store failure error = %v", err)
@@ -484,7 +484,7 @@ func TestPublishScenarioResultPersistencePortOrdersAndRollsBack(t *testing.T) {
 
 			_, err := sm.PublishScenarioResult(
 				authContext{authenticated: true, role: roleSession, sessionID: "canny-id"},
-				protocol.ScenarioResultPublishMsg{Scenario: "braw-fanout", Name: "review", Body: "complete"},
+				ScenarioResultPublishRequest{Scenario: "braw-fanout", Name: "review", Body: "complete"},
 			)
 			if err == nil {
 				t.Fatal("publish succeeded despite persistence failure")
@@ -521,7 +521,7 @@ func TestPublishScenarioResultPersistenceRunsOutsideManagerLock(t *testing.T) {
 	go func() {
 		_, err := sm.PublishScenarioResult(
 			authContext{authenticated: true, role: roleSession, sessionID: "canny-id"},
-			protocol.ScenarioResultPublishMsg{Scenario: "braw-fanout", Name: "review", Body: "complete"},
+			ScenarioResultPublishRequest{Scenario: "braw-fanout", Name: "review", Body: "complete"},
 		)
 		publishDone <- err
 	}()
@@ -665,7 +665,7 @@ func TestConcurrentScenarioResultPublicationKeepsMetadataWithContent(t *testing.
 		go func() {
 			defer wg.Done()
 
-			if _, err := sm.PublishScenarioResult(auth, protocol.ScenarioResultPublishMsg{
+			if _, err := sm.PublishScenarioResult(auth, ScenarioResultPublishRequest{
 				Scenario: "braw-fanout", Name: "review", Body: body,
 			}); err != nil {
 				t.Errorf("publish: %v", err)
@@ -724,6 +724,39 @@ func TestScenarioResultPublishHandlerRejectsMalformedPayload(t *testing.T) {
 	h.expectError(t, "invalid scenario_result_publish")
 }
 
+func TestScenarioResultPublishWireMapping(t *testing.T) {
+	request := scenarioResultPublishRequest(protocol.ScenarioResultPublishMsg{
+		Scenario: "braw-fanout", Name: "review", Body: "# Canny review",
+	})
+	if request != (ScenarioResultPublishRequest{Scenario: "braw-fanout", Name: "review", Body: "# Canny review"}) {
+		t.Fatalf("request mapping = %+v", request)
+	}
+
+	publishedAt := time.Date(2026, time.July, 23, 10, 11, 12, 123456789, time.UTC)
+	response := scenarioResultPublishResponse(ScenarioResultPublication{
+		Scenario: "braw-fanout", Member: "canny",
+		Result: ScenarioResultState{
+			Name: "review", Format: "markdown", StoreTemplate: "review.md",
+			Destination: "scenarios/sc-braw/results/review.md", Required: true,
+			Status: ScenarioResultAvailable, SizeBytes: 14, PublishedAt: publishedAt,
+		},
+	})
+
+	wantResult := protocol.ScenarioResultInfo{
+		Name: "review", Format: "markdown", Destination: "scenarios/sc-braw/results/review.md",
+		Required: true, Status: "available", SizeBytes: 14,
+		PublishedAt: publishedAt.Format(time.RFC3339Nano),
+	}
+
+	if response.Scenario != "braw-fanout" || response.Member != "canny" || !reflect.DeepEqual(response.Result, wantResult) {
+		t.Fatalf("response mapping = %+v", response)
+	}
+
+	if got := scenarioResultPublishResponse(ScenarioResultPublication{}).Result.PublishedAt; got != "" {
+		t.Errorf("zero published_at = %q, want empty", got)
+	}
+}
+
 func TestScenarioResultSurvivesMemberStopResume(t *testing.T) {
 	sm, orchestratorID := newScenarioOrchestrator(t)
 	repo := initScenarioGitRepo(t)
@@ -744,7 +777,7 @@ func TestScenarioResultSurvivesMemberStopResume(t *testing.T) {
 
 	if _, err := sm.PublishScenarioResult(
 		authContext{authenticated: true, role: roleSession, sessionID: memberID},
-		protocol.ScenarioResultPublishMsg{Scenario: "braw-resume", Name: "review", Body: "# Complete"},
+		ScenarioResultPublishRequest{Scenario: "braw-resume", Name: "review", Body: "# Complete"},
 	); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
