@@ -882,7 +882,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	// transcript files this start creates (race-safe against stale rollouts).
 	startedAt := time.Now()
 
-	var ptySess SessionDriver
+	var ptySess sessionDriver
 
 	lc := sm.Config().Lifecycle
 

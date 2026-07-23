@@ -440,7 +440,7 @@ func (sm *SessionManager) scrollbackLogPath(id string) string {
 
 // GetPTY returns the live session driver by ID. Named for its historic
 // PTY-only past; today it may return any SessionDriver implementation.
-func (sm *SessionManager) GetPTY(id string) (SessionDriver, bool) {
+func (sm *SessionManager) GetPTY(id string) (sessionDriver, bool) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -486,7 +486,7 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 	type snapshot struct {
 		id   string
 		name string
-		sess SessionDriver
+		sess sessionDriver
 	}
 
 	sessions := make([]snapshot, 0, len(sm.sessions))
@@ -510,7 +510,7 @@ func (sm *SessionManager) StopAll(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, s := range sessions {
 		wg.Add(1)
-		go func(id string, sess SessionDriver) {
+		go func(id string, sess sessionDriver) {
 			defer wg.Done()
 
 			select {

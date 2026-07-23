@@ -163,7 +163,7 @@ func (sm *SessionManager) ConvertToInteractive(id string, rows, cols uint16) (Se
 // grandchild that keeps an inherited pipe open past a group SIGKILL) can't stall
 // the convert forever. The exit watcher still reaps and closes the driver if it
 // ever exits.
-func (sm *SessionManager) stopDriverForConvert(driver SessionDriver) {
+func (sm *SessionManager) stopDriverForConvert(driver sessionDriver) {
 	// The escalation ORDER (interrupt → SIGTERM → SIGKILL) is fixed; only the
 	// waits between steps come from the [lifecycle] policy.
 	lc := sm.Config().Lifecycle
@@ -185,7 +185,7 @@ func (sm *SessionManager) stopDriverForConvert(driver SessionDriver) {
 }
 
 // waitDriverDone reports whether driver.Done() closed within d.
-func waitDriverDone(driver SessionDriver, d time.Duration) bool {
+func waitDriverDone(driver sessionDriver, d time.Duration) bool {
 	select {
 	case <-driver.Done():
 		return true

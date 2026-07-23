@@ -378,17 +378,13 @@ func TestWriteInputAfterExitErrors(t *testing.T) {
 	}
 }
 
-func TestNoOpAndConstantSurfaces(t *testing.T) {
+func TestCoreAndConstantSurfaces(t *testing.T) {
 	t.Parallel()
 
 	s := &Session{}
 
 	if s.ProcessPID() != 0 {
 		t.Fatalf("ProcessPID = %d, want 0", s.ProcessPID())
-	}
-
-	if s.Fd() != 0 {
-		t.Fatalf("Fd = %d, want 0", s.Fd())
 	}
 
 	if s.PeakRSSBytes() != 0 {
@@ -398,19 +394,6 @@ func TestNoOpAndConstantSurfaces(t *testing.T) {
 	if s.RecentlyAdopted(time.Minute) {
 		t.Fatal("RecentlyAdopted should be false")
 	}
-
-	if err := s.Resize(80, 24); err != nil {
-		t.Fatalf("Resize should be a no-op, got %v", err)
-	}
-
-	if !s.WaitForUserIdle(time.Second, time.Second) {
-		t.Fatal("WaitForUserIdle should return true")
-	}
-
-	// Poke and NotifyUserInput are pure no-ops; call them for coverage and to
-	// prove they don't panic.
-	s.Poke()
-	s.NotifyUserInput()
 }
 
 // --- end-to-end tests with a fake agent -------------------------------------

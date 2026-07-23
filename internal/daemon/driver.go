@@ -7,34 +7,22 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/headless"
 	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
-// SessionDriver is the transport-agnostic surface the daemon uses to drive a
-// running agent process. Today the only implementation is *grpty.Session (an
-// interactive PTY); the headless stream-json driver (issue #1075) will be a
-// second implementation. The daemon holds sessions as SessionDriver values
-// (sessions map, GetPTY) so a second driver can slot in without the lifecycle
-// code caring which transport backs a session.
-//
-// This is deliberately the *full* current call surface of *grpty.Session, so
-// introducing the interface is a pure, no-behaviour-change refactor. Some
-// members (Fd, Resize, Poke, ScreenSnapshot, NotifyUserInput, WaitForUserIdle)
-// are PTY-shaped; when the headless driver lands, the design splits these into
-// an optional interactiveDriver so headless doesn't have to no-op them
-// (see docs/design/2026-07-13-headless-stream-json-design.md). Keeping one
-// interface here means zero call-site churn in this first slice.
-type SessionDriver interface { //nolint:interfacebloat // deliberately the full current *pty.Session call surface, so introducing the interface is a no-behaviour-change refactor; the capability split lands with the headless-driver phase.
-	// Lifecycle / identity.
+// sessionLifecycle is the daemon's consumer-owned lifecycle contract. It does
+// not describe how a driver transports input or renders output, and therefore
+// can be implemented by both PTY and headless sessions without PTY-shaped
+// methods.
+type sessionLifecycle interface { //nolint:interfacebloat // lifecycle is the consumer-owned process contract.
 	ProcessPID() int
 	Pgid() int
-	Fd() uintptr
 	Done() <-chan struct{}
 	Exited() bool
 	ExitCode() int
 	ExitSignal() syscall.Signal
 	PeakRSSBytes() int64
-	LastOutputAt() time.Time
 	RecentlyAdopted(grace time.Duration) bool
 	BytesRead() int64
 	WasAdopted() bool
@@ -42,25 +30,82 @@ type SessionDriver interface { //nolint:interfacebloat // deliberately the full 
 	Kill() error
 	ForceKill() error
 	Close()
+}
 
-	// Input the daemon issues on the session's behalf.
+// sessionInput contains input operations issued by daemon lifecycle and
+// control consumers.
+type sessionInput interface {
 	WriteInput(data []byte) error
 	WriteInputAndSubmit(data []byte) error
 	Interrupt(count int, delay time.Duration) error
-	NotifyUserInput()
-	WaitForUserIdle(idleTimeout, maxWait time.Duration) bool
+}
 
-	// PTY-shaped controls (no-ops or best-effort for non-PTY drivers).
-	Resize(rows, cols uint16) error
-	Poke()
-
-	// Output surfaces: attach fan-out, scrollback, preview/snapshot.
+// sessionOutput contains the shared output and scrollback surface. Scrollback
+// is intentionally shared by PTY and headless drivers so logs and previews do
+// not depend on the transport.
+type sessionOutput interface {
 	Attach(w io.Writer)
 	Detach()
 	DetachWriter(w io.Writer)
 	ScreenPreview() string
 	ScreenSnapshot() grpty.ScreenCapture
 	ScrollbackFile() *grpty.Scrollback
+	LastOutputAt() time.Time
+}
+
+// sessionDriver is the minimal contract needed by the daemon's common
+// lifecycle, input, and output consumers.
+type sessionDriver interface {
+	sessionLifecycle
+	sessionInput
+	sessionOutput
+}
+
+// interactiveDriver is optional. Only a PTY-backed driver should implement it;
+// callers must check for this capability before requesting terminal-specific
+// behavior instead of treating a headless no-op as success.
+type interactiveDriver interface {
+	Fd() uintptr
+	Resize(rows, cols uint16) error
+	Poke()
+	NotifyUserInput()
+	WaitForUserIdle(idleTimeout, maxWait time.Duration) bool
+}
+
+// SessionDriver is the temporary compatibility contract for call sites that
+// have not yet migrated to capability-specific interfaces. New consumers
+// should depend on sessionDriver, sessionOutput, or interactiveDriver instead.
+// Keeping this seam for one migration slice lets PTY and headless call sites be
+// converted independently without changing runtime behavior.
+type SessionDriver interface {
+	sessionDriver
+	interactiveDriver
+}
+
+// inputCapability returns the input surface without exposing the legacy
+// aggregate contract to a consumer.
+func inputCapability(driver any) (sessionInput, bool) {
+	input, ok := driver.(sessionInput)
+
+	return input, ok
+}
+
+// outputCapability returns the output surface without exposing the legacy
+// aggregate contract to a consumer. It is intentionally a type assertion so a
+// future driver can omit output when it only supports lifecycle operations.
+func outputCapability(driver any) (sessionOutput, bool) {
+	output, ok := driver.(sessionOutput)
+
+	return output, ok
+}
+
+// interactiveCapability reports whether a driver supports terminal-only
+// operations. Unsupported operations must be handled by the caller rather than
+// represented as successful no-ops.
+func interactiveCapability(driver any) (interactiveDriver, bool) {
+	interactive, ok := driver.(interactiveDriver)
+
+	return interactive, ok
 }
 
 // inputDelaySetter is the optional capability a driver exposes when its
@@ -137,5 +182,8 @@ func headlessArgs(agent config.Agent, vars config.TemplateVars, agentArgs []stri
 	return append(prefix, agentArgs...), nil
 }
 
-// Compile-time assertion that the PTY session satisfies the driver interface.
+// Compile-time assertions keep provider capabilities explicit. Headless is a
+// core driver but deliberately does not satisfy interactiveDriver.
+var _ sessionDriver = (*headless.Session)(nil)
 var _ SessionDriver = (*grpty.Session)(nil)
+var _ interactiveDriver = (*grpty.Session)(nil)

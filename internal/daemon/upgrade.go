@@ -48,7 +48,7 @@ type UpgradeManifest struct {
 	descriptorFlags  map[int]int
 	ownedDescriptors map[int]struct{}
 	planSessions     map[string]*grpty.Session
-	planDrivers      map[string]SessionDriver
+	planDrivers      map[string]sessionDriver
 	ownershipFD      int
 	ownershipCapsule string
 	adoptionDeadline time.Time
@@ -73,7 +73,7 @@ func upgradeSessionHasPTY(session UpgradeSession) bool {
 	return session.HasPTY || session.Fd > 2
 }
 
-func plannedUpgradeDriver(manifest *UpgradeManifest, id string) SessionDriver {
+func plannedUpgradeDriver(manifest *UpgradeManifest, id string) sessionDriver {
 	if manifest.planDrivers != nil {
 		if driver := manifest.planDrivers[id]; driver != nil {
 			return driver
@@ -815,7 +815,7 @@ func (sm *SessionManager) prepareUpgrade(
 
 	type candidate struct {
 		id        string
-		driver    SessionDriver
+		driver    sessionDriver
 		session   *grpty.Session
 		statePID  int
 		startTime int64
@@ -851,7 +851,7 @@ func (sm *SessionManager) prepareUpgrade(
 		descriptorFlags:  make(map[int]int, len(candidates)+1),
 		ownedDescriptors: make(map[int]struct{}, len(candidates)),
 		planSessions:     make(map[string]*grpty.Session, len(candidates)),
-		planDrivers:      make(map[string]SessionDriver, len(candidates)),
+		planDrivers:      make(map[string]sessionDriver, len(candidates)),
 	}
 	// The caller retains the *os.File returned by net.UnixListener.File. Keep
 	// that wrapper as the listener duplicate's sole closer: a raw close here
@@ -1055,7 +1055,7 @@ func (sm *SessionManager) upgradePTYSessionIDsLocked() []string {
 func (sm *SessionManager) preflightUpgradeSessions(maxSessions int) error {
 	type candidate struct {
 		id        string
-		driver    SessionDriver
+		driver    sessionDriver
 		hasPTY    bool
 		statePID  int
 		startTime int64
@@ -1632,7 +1632,7 @@ func (sm *SessionManager) persistFrozenUpgradeState(manifest *UpgradeManifest) e
 func (sm *SessionManager) validateUpgradePlan(manifest *UpgradeManifest) error {
 	type candidate struct {
 		id        string
-		driver    SessionDriver
+		driver    sessionDriver
 		statePID  int
 		startTime int64
 	}

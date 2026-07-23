@@ -613,7 +613,7 @@ func run(
 		sm.reconcileUpgradeCleanup()
 		sm.mu.RLock()
 
-		adoptedDrivers := make(map[string]SessionDriver, len(manifest.Sessions))
+		adoptedDrivers := make(map[string]sessionDriver, len(manifest.Sessions))
 		for _, session := range manifest.Sessions {
 			if driver := sm.sessions[session.ID]; driver != nil {
 				adoptedDrivers[session.ID] = driver

@@ -420,7 +420,7 @@ type bulkDeleteSnapshot struct {
 	inPlace      bool
 	prevStatus   SessionStatus
 	includes     []IncludedRepoState
-	ptySess      SessionDriver
+	ptySess      sessionDriver
 	client       *attachedClient
 	pid          int
 	pidStartTime int64
@@ -520,7 +520,7 @@ func (sm *SessionManager) revertBulkDeleteForRetry(s bulkDeleteSnapshot) error {
 // retry-state could not be durably saved: the on-disk state may still show the
 // cleared PID, so the recovery marker MUST be retained for the crash-reap path.
 // err then carries both the teardown and the persistence failure.
-func (sm *SessionManager) teardownBulkDeleteDriver(id, name string, driver SessionDriver, pid int, pidStartTime int64, initiator string) (liveFailed, killFailed, keepTombstone bool, err error) {
+func (sm *SessionManager) teardownBulkDeleteDriver(id, name string, driver sessionDriver, pid int, pidStartTime int64, initiator string) (liveFailed, killFailed, keepTombstone bool, err error) {
 	if driver != nil {
 		driver.Detach()
 
@@ -595,7 +595,7 @@ func (sm *SessionManager) killBulkDeleteOrphan(id, name string, pid int, pidStar
 // session is marked errored with an explanatory summary. It returns the saveState
 // error: a non-nil result means the restored PID is not durable, so the caller
 // MUST keep the recovery marker (issue #1326).
-func (sm *SessionManager) restoreLiveDriverForRetry(id string, driver SessionDriver, pid int, pidStartTime int64, cause error) error {
+func (sm *SessionManager) restoreLiveDriverForRetry(id string, driver sessionDriver, pid int, pidStartTime int64, cause error) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -1185,7 +1185,7 @@ func processGroupGone(pgid int, window time.Duration) bool {
 //
 // The caller is responsible for Detach and the "stopping session" audit line;
 // teardownLiveDriver only owns the kill → confirm → close sequence.
-func (sm *SessionManager) teardownLiveDriver(driver SessionDriver) error {
+func (sm *SessionManager) teardownLiveDriver(driver sessionDriver) error {
 	if driver.Exited() {
 		driver.Close()
 		return nil
@@ -1448,7 +1448,7 @@ func peakRSSProcLabel(sandboxed bool) string {
 // restart, shutdown, …). pid/pgid come from the live PTY (nil-safe) and enable
 // OS-level signal forensics. Paired with the "session exited" line, this closes
 // the "which subsystem killed this session, and when?" gap.
-func (sm *SessionManager) logStopping(id, name, reason, initiator string, sess SessionDriver) {
+func (sm *SessionManager) logStopping(id, name, reason, initiator string, sess sessionDriver) {
 	pid, pgid := 0, 0
 	if sess != nil {
 		pid = sess.ProcessPID()

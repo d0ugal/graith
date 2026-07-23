@@ -569,10 +569,6 @@ func (s *Session) Pgid() int {
 	return s.ProcessPID()
 }
 
-// Fd has no meaning for a pipe-backed session (there is no ptmx). It returns 0;
-// the daemon's upgrade FD-handoff skips sessions it can't hand off.
-func (s *Session) Fd() uintptr { return 0 }
-
 func (s *Session) Done() <-chan struct{} { return s.done }
 
 func (s *Session) Exited() bool {
@@ -640,21 +636,7 @@ func (s *Session) Close() {
 	_ = s.scrollback.Close()
 }
 
-// --- SessionDriver: PTY-shaped no-ops ---------------------------------------
-
-// Resize is a no-op: a headless session has no terminal to resize.
-func (s *Session) Resize(uint16, uint16) error { return nil }
-
-// Poke is a no-op: there is no TUI to nudge.
-func (s *Session) Poke() {}
-
-// NotifyUserInput is a no-op: headless sessions have no attached human typing.
-func (s *Session) NotifyUserInput() {}
-
-// WaitForUserIdle returns immediately true: no interactive user to wait on.
-func (s *Session) WaitForUserIdle(time.Duration, time.Duration) bool { return true }
-
-// --- SessionDriver: output surfaces -----------------------------------------
+// --- output surfaces ---------------------------------------------------------
 
 func (s *Session) Attach(w io.Writer) {
 	s.mu.Lock()

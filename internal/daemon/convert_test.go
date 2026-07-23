@@ -20,7 +20,7 @@ func convertTestManager(t *testing.T) *SessionManager {
 
 	return &SessionManager{
 		state:    NewState(),
-		sessions: make(map[string]SessionDriver),
+		sessions: make(map[string]sessionDriver),
 		cfg:      &config.Config{GitHubUsername: "ken"}, // non-empty: skip git discovery
 		log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 		paths:    config.Paths{StateFile: filepath.Join(t.TempDir(), "state.json")},
