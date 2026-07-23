@@ -3,7 +3,7 @@
 <p align="center">
   <img src="website/assets/images/agent-marty.png" alt="Agent Marty, graith's pine marten mascot" width="220">
   <br>
-  <em>Meet Marty, Graith’s resident coding-agent pine marten. 🐾</em>
+  <em>Meet Agent Marty, Graith’s resident coding-agent pine marten. 🐾</em>
 </p>
 
 **Run a fleet of AI coding agents in parallel — each in its own git worktree, each in a session that outlives your terminal.**
