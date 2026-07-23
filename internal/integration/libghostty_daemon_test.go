@@ -28,7 +28,7 @@ import (
 
 const (
 	nativeBinaryEnv      = "GRAITH_LIBGHOSTTY_DAEMON_BINARY"
-	nativeUpgradeFromEnv = "GRAITH_LIBGHOSTTY_UPGRADE_FROM_BINARY"
+	nativeUpgradeFromEnv = "GRAITH_LIBGHOSTTY_HISTORICAL_UPGRADE_BINARY"
 	nativeSoakCyclesEnv  = "GRAITH_LIBGHOSTTY_SOAK_CYCLES"
 	nativeSoakTimeoutEnv = "GRAITH_LIBGHOSTTY_SOAK_TIMEOUT"
 	nativeLongSoakEnv    = "GRAITH_LIBGHOSTTY_LONG_SOAK"
@@ -385,10 +385,10 @@ func TestLibghosttyDaemonLifecycle(t *testing.T) {
 	}
 }
 
-func TestLibghosttyCharmToNativeUpgrade(t *testing.T) {
+func TestLibghosttyHistoricalPreRemovalUpgrade(t *testing.T) {
 	charmBinary := os.Getenv(nativeUpgradeFromEnv)
 	if charmBinary == "" {
-		t.Skip("external Charm upgrade source is not configured")
+		t.Skip("historical pre-removal upgrade fixture is not configured")
 	}
 
 	nativeBinary := requiredNativeBinary(t)
@@ -396,31 +396,31 @@ func TestLibghosttyCharmToNativeUpgrade(t *testing.T) {
 	defer h.cleanup()
 
 	if helpers := h.helperProcesses(); len(helpers) != 0 {
-		t.Fatalf("Charm daemon started with %d unexpected native helpers", len(helpers))
+		t.Fatalf("historical daemon started with %d unexpected native helpers", len(helpers))
 	}
 
 	client := h.connect()
 	initialInstance := client.instance
-	info := createNativeSession(t, client, "canny-charm-upgrade")
+	info := createNativeSession(t, client, "canny-historical-upgrade")
 	waitForPreview(t, client, info.ID, nativeReadyText)
 
 	const beforeUpgrade = "croft-before-native"
 	if err := typeNativeInput(client, info.ID, beforeUpgrade); err != nil {
-		t.Fatal("type before Charm-to-native upgrade failed")
+		t.Fatal("type before historical-to-native upgrade failed")
 	}
 	waitForPreview(t, client, info.ID, beforeUpgrade)
 
 	upgradeMsg := protocol.UpgradeMsg{ExecPath: nativeBinary, ClientVersion: version.Version}
 	mustControl(t, client, "upgrade_preflight", upgradeMsg, "upgrade_preflight_ok")
 	if err := client.send("upgrade", upgradeMsg); err != nil {
-		t.Fatal("request Charm-to-native preserving upgrade failed")
+		t.Fatal("request historical-to-native preserving upgrade failed")
 	}
 	response, err := client.readControl()
 	if err != nil {
-		t.Fatal("read Charm-to-native upgrade response failed")
+		t.Fatal("read historical-to-native upgrade response failed")
 	}
 	if response.Type != "upgrading" {
-		t.Fatalf("Charm daemon rejected native upgrade: %s", h.redactedControlResponse(response))
+		t.Fatalf("historical daemon rejected native upgrade: %s", h.redactedControlResponse(response))
 	}
 	client.close()
 
@@ -430,7 +430,7 @@ func TestLibghosttyCharmToNativeUpgrade(t *testing.T) {
 
 	const afterUpgrade = "strath-after-native"
 	if err := typeNativeInput(client, info.ID, afterUpgrade); err != nil {
-		t.Fatal("type after Charm-to-native upgrade failed")
+		t.Fatal("type after historical-to-native upgrade failed")
 	}
 	waitForPreview(t, client, info.ID, afterUpgrade)
 

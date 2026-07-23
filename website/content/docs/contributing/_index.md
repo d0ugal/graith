@@ -16,7 +16,7 @@ make build    # produces ./gr from native libghostty inputs
 Or directly:
 
 ```bash
-CGO_ENABLED=1 go build -v -tags=libghostty -ldflags="-s -w" -o gr ./cmd/graith
+scripts/libghostty-native.sh build-local
 ```
 
 Entry point `cmd/graith/main.go`; the binary's named `gr` but the module path is `cmd/graith`.

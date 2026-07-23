@@ -189,18 +189,20 @@ jobs:
           cmp "$arm64_root/gr" "$arm64_root/Graith.app/Contents/MacOS/gr"
           "$arm64_root/gr" --graith-internal-libghostty-self-test
 
-          historical_worktree="${RUNNER_TEMP}/graith-charm-history"
-          git worktree add --detach "$historical_worktree" 00a8dc8
-          test "$(git -C "$historical_worktree" rev-parse HEAD)" = 00a8dc8
-          historical_charm="${RUNNER_TEMP}/graith-historical-charm"
+          historical_worktree="${RUNNER_TEMP}/graith-pre-removal-history"
+          historical_revision=00a8dc8e5806850b857b291b9a5f19088e80c580
+          git worktree add --detach "$historical_worktree" "$historical_revision"
+          test "$(git -C "$historical_worktree" rev-parse HEAD)" = "$historical_revision"
+          historical_binary="${RUNNER_TEMP}/graith-historical-pre-removal"
           CGO_ENABLED=0 go build -C "$historical_worktree" -trimpath \
-            -ldflags="-s -w -X github.com/d0ugal/graith/internal/version.Version=$version -X github.com/d0ugal/graith/internal/version.CommitSHA=$RELEASE_REVISION" \
-            -o "$historical_charm" ./cmd/graith
-          test "$(go version -m "$historical_charm" | grep -c 'github.com/charmbracelet/x/vt')" -gt 0
+            -ldflags="-s -w -X github.com/d0ugal/graith/internal/version.Version=historical-pre-removal -X github.com/d0ugal/graith/internal/version.CommitSHA=$historical_revision" \
+            -o "$historical_binary" ./cmd/graith
+          test "$(go version -m "$historical_binary" | grep -c 'github.com/charmbracelet/x/vt')" -gt 0
+          test ! -e "dist/graith-historical-pre-removal"
           GRAITH_LIBGHOSTTY_DAEMON_BINARY="$arm64_root/gr" \
-            GRAITH_LIBGHOSTTY_UPGRADE_FROM_BINARY="$historical_charm" \
+            GRAITH_LIBGHOSTTY_HISTORICAL_UPGRADE_BINARY="$historical_binary" \
             go test -v -race -count=1 -tags='integration releaseartifact' -timeout=15m \
-              -run '^(TestLibghosttyDaemonLifecycle|TestLibghosttyCharmToNativeUpgrade)$' \
+              -run '^(TestLibghosttyDaemonLifecycle|TestLibghosttyHistoricalPreRemovalUpgrade)$' \
               ./internal/integration
 
           jq -n --arg revision "$RELEASE_REVISION" --arg version "$version" \
@@ -414,18 +416,20 @@ jobs:
 
           release_root="$(mktemp -d)"
           tar -xzf "$archive" -C "$release_root"
-          historical_worktree="${RUNNER_TEMP}/graith-charm-history"
-          git worktree add --detach "$historical_worktree" 00a8dc8
-          test "$(git -C "$historical_worktree" rev-parse HEAD)" = 00a8dc8
-          historical_charm="${RUNNER_TEMP}/graith-historical-charm"
+          historical_worktree="${RUNNER_TEMP}/graith-pre-removal-history"
+          historical_revision=00a8dc8e5806850b857b291b9a5f19088e80c580
+          git worktree add --detach "$historical_worktree" "$historical_revision"
+          test "$(git -C "$historical_worktree" rev-parse HEAD)" = "$historical_revision"
+          historical_binary="${RUNNER_TEMP}/graith-historical-pre-removal"
           CGO_ENABLED=0 go build -C "$historical_worktree" -trimpath \
-            -ldflags="-s -w -X github.com/d0ugal/graith/internal/version.Version=$version -X github.com/d0ugal/graith/internal/version.CommitSHA=$RELEASE_REVISION" \
-            -o "$historical_charm" ./cmd/graith
-          test "$(go version -m "$historical_charm" | grep -c 'github.com/charmbracelet/x/vt')" -gt 0
+            -ldflags="-s -w -X github.com/d0ugal/graith/internal/version.Version=historical-pre-removal -X github.com/d0ugal/graith/internal/version.CommitSHA=$historical_revision" \
+            -o "$historical_binary" ./cmd/graith
+          test "$(go version -m "$historical_binary" | grep -c 'github.com/charmbracelet/x/vt')" -gt 0
+          test ! -e "dist/graith-historical-pre-removal"
           GRAITH_LIBGHOSTTY_DAEMON_BINARY="$release_root/gr" \
-            GRAITH_LIBGHOSTTY_UPGRADE_FROM_BINARY="$historical_charm" \
+            GRAITH_LIBGHOSTTY_HISTORICAL_UPGRADE_BINARY="$historical_binary" \
             go test -v -race -count=1 -tags='integration releaseartifact' -timeout=15m \
-              -run '^(TestLibghosttyDaemonLifecycle|TestLibghosttyCharmToNativeUpgrade)$' \
+              -run '^(TestLibghosttyDaemonLifecycle|TestLibghosttyHistoricalPreRemovalUpgrade)$' \
               ./internal/integration
 
   assemble-stable:

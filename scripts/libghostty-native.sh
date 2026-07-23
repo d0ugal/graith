@@ -346,10 +346,24 @@ apple_library() {
 }
 
 build_local() {
-    local library pkgconfig output
-    library="$(apple_library)" || return 1
+    local library pkgconfig output target
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        library="$(apple_library)" || return 1
+    elif [[ "$(uname -s)" == "Linux" ]]; then
+        case "$(uname -m)" in
+            x86_64) target=x86_64-linux-gnu ;;
+            aarch64|arm64) target=aarch64-linux-gnu ;;
+            *) die "native local builds support Linux amd64/arm64 only"; return 1 ;;
+        esac
+        library="$NATIVE_WORK/libghostty-vt.a"
+        source_build "$target" "$library" || return 1
+    else
+        die "native local builds support macOS arm64 and Linux amd64/arm64 only"
+        return 1
+    fi
     pkgconfig="$(write_pkg_config "$library")" || return 1
     output="${GRAITH_LIBGHOSTTY_OUTPUT:-$REPO_DIR/gr}"
+    cd "$REPO_DIR" || return 1
     if [[ -n "${GRAITH_LIBGHOSTTY_LDFLAGS:-}" ]]; then
         CGO_ENABLED=1 PKG_CONFIG_PATH="$pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
             go build -v -tags=libghostty -trimpath -ldflags="$GRAITH_LIBGHOSTTY_LDFLAGS" \
