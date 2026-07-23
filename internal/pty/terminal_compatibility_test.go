@@ -1,4 +1,4 @@
-//go:build !libghostty || (libghostty && cgo && ((darwin && arm64) || linux))
+//go:build libghostty && cgo && ((darwin && arm64) || (linux && (amd64 || arm64)))
 
 package pty
 
@@ -52,9 +52,8 @@ func commonTerminalBackendExpectations() terminalBackendExpectations {
 	}
 }
 
-// TestTerminalBackendCompatibilityCorpus drives the build's selected backend
-// with the same reduced synthetic inputs. Default and tagged test runs cover
-// Charm and the process-isolated helper without linking them into one binary.
+// TestTerminalBackendCompatibilityCorpus drives the process-isolated native
+// backend with the reduced compatibility corpus.
 // No captured output, paths, or identifiers belong in this corpus.
 func TestTerminalBackendCompatibilityCorpus(t *testing.T) {
 	factory := selectedTerminalBackendFactory()

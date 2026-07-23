@@ -13,9 +13,9 @@ const (
 )
 
 func RenderNoticesInventory(lock Lock) string {
-	return fmt.Sprintf(`This file applies only to Graith testing candidates built with the
-%[1]clibghostty%[1]c build tag. Ordinary pure-Go builds do not contain this
-native dependency closure. The committed %[1]clibghostty-native.spdx.json%[1]c is the
+	return fmt.Sprintf(`This file applies to Graith candidates built with the
+%[1]clibghostty%[1]c build tag.
+The committed %[1]clibghostty-native.spdx.json%[1]c is the
 machine-readable dependency inventory; candidate packaging materializes from it
 a document with the same filename that is bound to the binary's exact revision,
 target, and SHA-256. %[1]clibghostty-native.lock.json%[1]c is the canonical update

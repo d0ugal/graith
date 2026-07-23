@@ -66,6 +66,8 @@ func (s *Session) ScreenPreview() string {
 // emitted only when a cell's style differs from the previous cell's — the
 // initial "previous" style is the zero CellStyle (terminal default), so a
 // leading run of default-styled cells emits no SGR at all.
+//
+//nolint:unused // used by native terminal tests and runtime overlay paths.
 func renderFrame(vt Terminal) ScreenCapture {
 	frame, _ := renderFrameErr(vt)
 
@@ -203,6 +205,8 @@ func writeIndexedColor(buf *strings.Builder, v uint32, bg bool) {
 // renderPreview produces a plain-text (no ANSI) snapshot of the screen. Rows are
 // separated by "\n" with trailing spaces trimmed, for the session-picker
 // preview.
+//
+//nolint:unused // used by native terminal tests and runtime overlay paths.
 func renderPreview(vt Terminal) string {
 	preview, _ := renderPreviewErr(vt)
 

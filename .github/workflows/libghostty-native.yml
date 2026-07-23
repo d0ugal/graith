@@ -392,10 +392,6 @@ jobs:
             exit 1
           fi
           printf '%s\n' "$build_info"
-          if [[ "$build_info" == *$'\tdep\tgithub.com/charmbracelet/x/vt\t'* ]]; then
-            echo "tagged Linux binary contains the pure-Go terminal dependency" >&2
-            exit 1
-          fi
           sha256sum "$binary" "$LIBRARY" \
             "$package_dir/THIRD_PARTY_NOTICES.libghostty.md" \
             "$package_dir/libghostty-native.spdx.json"

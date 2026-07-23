@@ -1,3 +1,5 @@
+//go:build libghostty && cgo && ((darwin && arm64) || (linux && (amd64 || arm64)))
+
 package pty
 
 import (
@@ -17,14 +19,6 @@ import (
 
 	creackpty "github.com/creack/pty"
 )
-
-func closePTYTestResource(t *testing.T, closer io.Closer) {
-	t.Helper()
-
-	if err := closer.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
-		t.Errorf("close test resource: %v", err)
-	}
-}
 
 func TestNewSessionTerminalFailureDoesNotStartCommand(t *testing.T) {
 	shell, err := exec.LookPath("sh")

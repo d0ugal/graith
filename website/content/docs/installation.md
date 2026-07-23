@@ -195,7 +195,7 @@ for the matching startup and failure log records.
 
 The dev and stable releases do not publish separately named rollback archives.
 Persistent scrollback remains backend-neutral, so a fresh native start, upgrade
-from a historical Charm release, or native-to-native upgrade needs no state conversion.
+from an older release, or native-to-native upgrade needs no state conversion.
 On macOS, remove the relevant service registration before uninstalling its
 package as described above.
 

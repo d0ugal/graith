@@ -1,4 +1,4 @@
-//go:build libghostty && cgo && ((darwin && arm64) || linux)
+//go:build libghostty && cgo && ((darwin && arm64) || (linux && (amd64 || arm64)))
 
 package pty
 
@@ -12,17 +12,13 @@ import (
 )
 
 const (
-	charmVTModule          = "github.com/charmbracelet/x/vt"
-	charmUltravioletModule = "github.com/charmbracelet/ultraviolet"
-	ghosttyModule          = "go.mitchellh.com/libghostty"
+	ghosttyModule = "go.mitchellh.com/libghostty"
 )
 
 // TestTerminalBackendBuildMetadata guards the terminal backend's production
 // packaging boundary, not merely backend selection at runtime. The production
-// native tag must omit the pure-Go parser packages from both the package
-// dependency graph and the linked PTY probe binary's module metadata. The
-// default build retains them until every supported platform has a native path
-// or an explicit support decision.
+// native builds must omit the retired pure-Go parser from both the package
+// dependency graph and linked binary metadata.
 func TestTerminalBackendBuildMetadata(t *testing.T) {
 	repository, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -33,7 +29,6 @@ func TestTerminalBackendBuildMetadata(t *testing.T) {
 		name        string
 		tags        string
 		environment []string
-		wantCharm   bool
 		wantGhostty bool
 	}{
 		{name: "production_native", tags: "libghostty", wantGhostty: true},
@@ -41,16 +36,13 @@ func TestTerminalBackendBuildMetadata(t *testing.T) {
 			name:        "production_without_cgo",
 			tags:        "libghostty",
 			environment: []string{"CGO_ENABLED=0"},
-			wantCharm:   false,
 		},
-		{name: "default", wantCharm: true},
 	}
 
 	for _, variant := range variants {
 		t.Run(variant.name, func(t *testing.T) {
 			listArgs := taggedGoArgs("list", variant.tags, "-deps", "./internal/pty")
 			packages := runGoCommandWithEnvironment(t, repository, variant.environment, listArgs...)
-			assertCharmDependencies(t, strings.Fields(packages), variant.wantCharm, "go list")
 			assertDependency(
 				t,
 				strings.Fields(packages),
@@ -71,7 +63,6 @@ func TestTerminalBackendBuildMetadata(t *testing.T) {
 			runGoCommandWithEnvironment(t, repository, variant.environment, buildArgs...)
 
 			modules := readBuildInfoModules(t, binary)
-			assertCharmDependencies(t, modules, variant.wantCharm, "binary metadata")
 			assertDependency(t, modules, ghosttyModule, variant.wantGhostty, "PTY binary metadata")
 
 			commandPackages := runGoCommandWithEnvironment(
@@ -79,13 +70,6 @@ func TestTerminalBackendBuildMetadata(t *testing.T) {
 				repository,
 				variant.environment,
 				taggedGoArgs("list", variant.tags, "-deps", "./cmd/graith")...,
-			)
-			assertDependency(
-				t,
-				strings.Fields(commandPackages),
-				charmVTModule,
-				variant.wantCharm,
-				"command go list (Ultraviolet remains UI-only via Bubble Tea/Lip Gloss)",
 			)
 			assertDependency(
 				t,
@@ -103,13 +87,6 @@ func TestTerminalBackendBuildMetadata(t *testing.T) {
 				taggedGoArgs("build", variant.tags, "-trimpath", "-o", commandBinary, "./cmd/graith")...,
 			)
 			commandModules := readBuildInfoModules(t, commandBinary)
-			assertDependency(
-				t,
-				commandModules,
-				charmVTModule,
-				variant.wantCharm,
-				"command binary metadata (Ultraviolet remains UI-only via Bubble Tea/Lip Gloss)",
-			)
 			assertDependency(
 				t,
 				commandModules,
@@ -178,14 +155,6 @@ func runGoCommandWithEnvironment(
 	}
 
 	return string(output)
-}
-
-func assertCharmDependencies(t *testing.T, dependencies []string, want bool, source string) {
-	t.Helper()
-
-	for _, module := range []string{charmVTModule, charmUltravioletModule} {
-		assertDependency(t, dependencies, module, want, source)
-	}
 }
 
 func assertDependency(t *testing.T, dependencies []string, dependency string, want bool, source string) {

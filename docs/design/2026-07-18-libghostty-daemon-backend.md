@@ -27,8 +27,8 @@ to a small terminal-screen model for previews and coherent screen captures.
 Callers depend on the backend-neutral `Terminal` interface in
 `internal/pty/terminal.go`, not on emulator-specific types.
 
-The existing model wraps `github.com/charmbracelet/x/vt`. Graith also already
-ships `libghostty-vt` to its native clients. The shared build pins Ghostty
+The daemon now uses the isolated native helper. Graith also ships
+`libghostty-vt` to its native clients. The shared build pins Ghostty
 commit `91f66da24527fa02d92b5fd0b41cd020f553a64c`, Zig 0.15.2, committed public
 headers, and the arm64 slice of a checksum-verified Apple XCFramework.
 
@@ -255,12 +255,9 @@ queries, and the reduced #1430 sequence. #1446 expanded fragmented control
 strings, margins, erase/wrap, ZWJ/variation sequences, and background-only
 cells before handoff.
 
-Ordinary builds compile and test the retained pure-Go Charm implementation.
-Production `libghostty` builds compile only the native backend and exclude x/vt and
-Ultraviolet from the `internal/pty` terminal-screen dependency graph and its
-isolated binary. The full `gr` binary legitimately retains Ultraviolet through
-its Bubble Tea/Lip Gloss UI, but no longer retains x/vt. Default graphs and
-binaries contain no go-libghostty module; native variants contain it. The
+Untagged builds fail closed when native inputs are absent; supported tagged builds
+use only the isolated native helper. Production builds compile only the native
+backend and keep UI dependencies separate from the terminal-screen graph. The
 temporary dual-backend tag, comparative benchmarks, RSS harness, and associated
 current-RSS probe were retired once the rollout decision had accepted their
 recorded evidence.

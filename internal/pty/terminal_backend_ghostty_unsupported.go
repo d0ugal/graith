@@ -1,10 +1,10 @@
-//go:build libghostty && cgo && !linux && (!darwin || !arm64)
+//go:build libghostty && cgo && !((darwin && arm64) || (linux && (amd64 || arm64)))
 
 package pty
 
 import "errors"
 
-var errLibghosttyUnsupportedPlatform = errors.New("libghostty backend is supported only on macOS arm64 and Linux")
+var errLibghosttyUnsupportedPlatform = errors.New("libghostty backend is supported only on macOS arm64 and Linux amd64/arm64")
 
 func newTerminal(_, _ int) (Terminal, error) {
 	return nil, errLibghosttyUnsupportedPlatform

@@ -1990,15 +1990,15 @@ verify_default_binary() {
 
     build_info="$(go version -m "$binary")"
     if grep -Fq 'go.mitchellh.com/libghostty' <<<"$build_info"; then
-        echo "error: ordinary pure-Go binary contains go-libghostty" >&2
+        echo "error: untagged binary contains go-libghostty" >&2
         return 1
     fi
     if grep -Fq 'tags=libghostty' <<<"$build_info"; then
-        echo "error: ordinary pure-Go binary contains the libghostty build tag" >&2
+        echo "error: untagged binary contains the libghostty build tag" >&2
         return 1
     fi
     if grep -Fq 'ghostty_terminal_new' < <(strings "$binary"); then
-        echo "error: ordinary pure-Go binary contains a native Ghostty symbol" >&2
+        echo "error: untagged binary contains a native Ghostty symbol" >&2
         return 1
     fi
 }
@@ -2139,10 +2139,6 @@ verify_candidate_build_metadata() {
             return 1
         fi
     done
-    if grep -Fq $'\tdep\tgithub.com/charmbracelet/x/vt\t' <<<"$build_info"; then
-        echo "error: native candidate contains the x/vt terminal dependency" >&2
-        return 1
-    fi
 }
 
 verify_candidate_privacy() {

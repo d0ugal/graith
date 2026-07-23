@@ -325,9 +325,9 @@ If it grows large, `gr doctor --autofix` truncates it to ~1 MB.
 
 #### Verify the terminal backend
 
-`gr doctor` reports `Terminal backend: charm` for the pure-Go implementation or
-`Terminal backend: libghostty-helper` for the process-isolated native
-implementation. The supported machine-readable check is:
+`gr doctor` reports `Terminal backend: libghostty-helper` for the
+process-isolated native implementation. Unsupported builds fail closed. The
+supported machine-readable check is:
 
 ```bash
 gr doctor --json | jq -r .terminal_backend
@@ -335,9 +335,7 @@ gr doctor --json | jq -r .terminal_backend
 
 Stable `graith` and moving `graith-dev` should report `libghostty-helper` on
 macOS arm64 and Linux amd64/arm64. Intel macOS is unsupported and current
-releases publish no Darwin amd64 archive. There is no separately named Charm
-rollback archive, so any `charm` result means an unsupported or historical
-executable is running. Check `gr version` (or
+releases publish no Darwin amd64 archive. Check `gr version` (or
 `gr-dev version`), the downloaded archive/package architecture, and the daemon
 executable path reported by `doctor`.
 
