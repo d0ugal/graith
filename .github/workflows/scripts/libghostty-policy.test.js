@@ -95,6 +95,9 @@ test('release workflows gate only pull-request release work and fail safe', () =
     assert.match(workflow, /if ! files="\$\(gh api "repos\/\$REPO\/pulls\/\$PR\/files"[\s\S]*?echo "release=true"/);
     assert.match(workflow, /release-context:[\s\S]*?needs: changes/);
     assert.match(workflow, /release-context:[\s\S]*?needs\.changes\.outputs\.release == 'true'/);
+    assert.match(workflow, /\.release-please-\(manifest\|config\)/);
+    assert.match(workflow, /render-stable-\(homebrew\|aur\)/);
+    assert.match(workflow, /internal\/\(release\|daemonservice\)/);
   }
   assert.match(devRelease, /branches:\n      - main/);
   assert.match(goreleaser, /tags:\n      - "v\*"/);

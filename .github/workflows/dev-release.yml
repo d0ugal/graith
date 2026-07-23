@@ -44,7 +44,7 @@ jobs:
             echo "Could not list PR files; running dev release to be safe."
             exit 0
           fi
-          if grep -Eq '^\.goreleaser|^\.github/workflows/(dev-release|goreleaser|release-please)\.yml$|^release-please-(manifest|config)\.json$|^go\.(mod|sum)$|^internal/release/|^internal/pty/|^scripts/.*(release|publish)|^scripts/libghostty-native\.sh$|^macos/(service|notifier)/|^libghostty-native\.(lock|spdx)\.json$|^THIRD_PARTY_NOTICES\.libghostty\.md$|^package|^aur|^homebrew' <<<"$files"; then
+          if grep -Eq '^\.goreleaser|^\.github/workflows/(dev-release|goreleaser|release-please)\.yml$|^\.release-please-(manifest|config)\.json$|^go\.(mod|sum)$|^internal/(release|daemonservice)/|^internal/pty/|^scripts/.*(release|publish)|^scripts/render-stable-(homebrew|aur)\.sh$|^scripts/libghostty-native\.sh$|^macos/(service|notifier)/|^libghostty-native\.(lock|spdx)\.json$|^THIRD_PARTY_NOTICES\.libghostty\.md$|^package|^aur|^homebrew' <<<"$files"; then
             echo "release=true" >> "$GITHUB_OUTPUT"
           else
             echo "release=false" >> "$GITHUB_OUTPUT"
