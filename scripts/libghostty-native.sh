@@ -345,6 +345,21 @@ apple_library() {
     printf '%s\n' "$library"
 }
 
+build_local() {
+    local library pkgconfig output
+    library="$(apple_library)" || return 1
+    pkgconfig="$(write_pkg_config "$library")" || return 1
+    output="${GRAITH_LIBGHOSTTY_OUTPUT:-$REPO_DIR/gr}"
+    if [[ -n "${GRAITH_LIBGHOSTTY_LDFLAGS:-}" ]]; then
+        CGO_ENABLED=1 PKG_CONFIG_PATH="$pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
+            go build -v -tags=libghostty -trimpath -ldflags="$GRAITH_LIBGHOSTTY_LDFLAGS" \
+            -o "$output" ./cmd/graith
+    else
+        CGO_ENABLED=1 PKG_CONFIG_PATH="$pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
+            go build -v -tags=libghostty -trimpath -o "$output" ./cmd/graith
+    fi
+}
+
 verify_metadata() {
     local source="${1:-}"
     local document="${2:-$REPO_DIR/libghostty-native.spdx.json}"
@@ -2098,6 +2113,11 @@ test_metadata_policy() {
 
     root="$(mktemp -d "$NATIVE_WORK/metadata-policy.XXXXXX")"
     invalid="$root/invalid.spdx.json"
+    if go list -tags=libghostty -deps ./cmd/graith | grep -Fxq github.com/charmbracelet/x/vt; then
+        echo "error: current Graith dependency graph contains retired Charm x/vt" >&2
+        rm -rf "$root"
+        return 1
+    fi
     verify_metadata
     jq '
         (.packages[] | select(.SPDXID == "SPDXRef-Package-Ghostty") | .sourceInfo) |=
@@ -2139,6 +2159,10 @@ verify_candidate_build_metadata() {
             return 1
         fi
     done
+    if grep -Fq 'github.com/charmbracelet/x/vt' <<<"$build_info"; then
+        echo "error: candidate metadata contains retired Charm x/vt" >&2
+        return 1
+    fi
 }
 
 verify_candidate_privacy() {
@@ -3050,6 +3074,7 @@ usage: $0 test|race|fuzz|daemon-test|soak [cycles [timeout]]|all
 test/race/fuzz use the checksum-pinned Apple artifact on macOS arm64.
 daemon-test runs the external daemon lifecycle and bounded 12-cycle soak.
 soak defaults to 1,000 cycles bounded by one hour.
+build-local materializes and verifies the pinned Apple artifact before building.
 source-build checks out Ghostty $GHOSTTY_SHA and requires Zig $REQUIRED_ZIG.
 generate-dependency-unit rotates the complete lock, Go module, headers, SPDX,
 notice inventory, and Apple artifact metadata; verify-dependency-unit is offline.
@@ -3059,6 +3084,9 @@ EOF
 }
 
 case "${1:-}" in
+    build-local)
+        build_local
+        ;;
     test|race|fuzz)
         run_go "$1"
         ;;

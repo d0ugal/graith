@@ -94,7 +94,12 @@ sudo apk add --allow-untrusted graith_*_linux_amd64.apk
 go install github.com/d0ugal/graith/cmd/graith@latest
 ```
 
-`go install` names the binary `graith`; rename or symlink it to `gr`:
+`go install` produces an untagged binary with an `unavailable` terminal
+backend; it is not a supported daemon installation and cannot create PTY
+sessions. Use the prebuilt native artifact or the source flow instead.
+
+If the native inputs are already provisioned, `make build` names the binary
+`gr`:
 
 ```bash
 mv "$(go env GOPATH)/bin/graith" "$(go env GOPATH)/bin/gr"
@@ -109,20 +114,21 @@ cd graith
 make build    # produces ./gr
 ```
 
-Source and `go install` builds do not manufacture or register an unsigned app;
-on macOS they explicitly use the existing direct-spawn fallback.
+Source builds materialize and checksum-verify the pinned native macOS artifact
+through `scripts/libghostty-native.sh`; Linux source builds require the pinned
+native library and pkg-config inputs explicitly. Neither flow manufactures or
+registers an unsigned app.
 
 {{% /tab %}}
 {{< /tabs >}}
 
-## macOS upgrade, rollback, and uninstall
+## macOS upgrade and uninstall
 
 Normal Homebrew and tarball upgrades preserve service registrations. The new
 CLI validates and caches its matching signed app before a preserved restart;
-registration moves to that generation only while the job is down. The previous
-registered generation remains cached for rollback. If an older release cannot
-read newer persisted state, the existing state-version guard stops the
-downgrade and `gr doctor` lists the state backup to restore.
+registration moves to that generation only while the job is down. If an older
+release cannot read newer persisted state, the existing state-version guard
+stops the downgrade and `gr doctor` lists the state backup to restore.
 
 Before uninstalling, remove all per-user registrations while the signed package
 is still available:

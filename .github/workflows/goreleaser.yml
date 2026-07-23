@@ -189,12 +189,16 @@ jobs:
           cmp "$arm64_root/gr" "$arm64_root/Graith.app/Contents/MacOS/gr"
           "$arm64_root/gr" --graith-internal-libghostty-self-test
 
-          charm="${RUNNER_TEMP}/gr-charm"
-          CGO_ENABLED=0 go build -trimpath \
+          historical_worktree="${RUNNER_TEMP}/graith-charm-history"
+          git worktree add --detach "$historical_worktree" 00a8dc8
+          test "$(git -C "$historical_worktree" rev-parse HEAD)" = 00a8dc8
+          historical_charm="${RUNNER_TEMP}/graith-historical-charm"
+          CGO_ENABLED=0 go build -C "$historical_worktree" -trimpath \
             -ldflags="-s -w -X github.com/d0ugal/graith/internal/version.Version=$version -X github.com/d0ugal/graith/internal/version.CommitSHA=$RELEASE_REVISION" \
-            -o "$charm" ./cmd/graith
+            -o "$historical_charm" ./cmd/graith
+          test "$(go version -m "$historical_charm" | grep -c 'github.com/charmbracelet/x/vt')" -gt 0
           GRAITH_LIBGHOSTTY_DAEMON_BINARY="$arm64_root/gr" \
-            GRAITH_LIBGHOSTTY_UPGRADE_FROM_BINARY="$charm" \
+            GRAITH_LIBGHOSTTY_UPGRADE_FROM_BINARY="$historical_charm" \
             go test -v -race -count=1 -tags='integration releaseartifact' -timeout=15m \
               -run '^(TestLibghosttyDaemonLifecycle|TestLibghosttyCharmToNativeUpgrade)$' \
               ./internal/integration
@@ -410,12 +414,16 @@ jobs:
 
           release_root="$(mktemp -d)"
           tar -xzf "$archive" -C "$release_root"
-          charm="${RUNNER_TEMP}/gr-charm"
-          CGO_ENABLED=0 go build -trimpath \
+          historical_worktree="${RUNNER_TEMP}/graith-charm-history"
+          git worktree add --detach "$historical_worktree" 00a8dc8
+          test "$(git -C "$historical_worktree" rev-parse HEAD)" = 00a8dc8
+          historical_charm="${RUNNER_TEMP}/graith-historical-charm"
+          CGO_ENABLED=0 go build -C "$historical_worktree" -trimpath \
             -ldflags="-s -w -X github.com/d0ugal/graith/internal/version.Version=$version -X github.com/d0ugal/graith/internal/version.CommitSHA=$RELEASE_REVISION" \
-            -o "$charm" ./cmd/graith
+            -o "$historical_charm" ./cmd/graith
+          test "$(go version -m "$historical_charm" | grep -c 'github.com/charmbracelet/x/vt')" -gt 0
           GRAITH_LIBGHOSTTY_DAEMON_BINARY="$release_root/gr" \
-            GRAITH_LIBGHOSTTY_UPGRADE_FROM_BINARY="$charm" \
+            GRAITH_LIBGHOSTTY_UPGRADE_FROM_BINARY="$historical_charm" \
             go test -v -race -count=1 -tags='integration releaseartifact' -timeout=15m \
               -run '^(TestLibghosttyDaemonLifecycle|TestLibghosttyCharmToNativeUpgrade)$' \
               ./internal/integration

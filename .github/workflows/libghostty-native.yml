@@ -363,6 +363,10 @@ jobs:
             exit 1
           fi
           printf '%s\n' "$build_info"
+          if grep -Fq 'github.com/charmbracelet/x/vt' <<<"$build_info"; then
+            echo "retired Charm x/vt is present in the tagged binary metadata" >&2
+            exit 1
+          fi
           sha256sum "$binary" "$LIBRARY" \
             "$package_dir/THIRD_PARTY_NOTICES.libghostty.md" \
             "$package_dir/libghostty-native.spdx.json"

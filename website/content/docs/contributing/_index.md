@@ -216,7 +216,7 @@ CI (`ci.yml`) runs on every push to `main` and every PR:
 
 | Job | What it does |
 |-----|-------------|
-| Build | native `go build -tags=libghostty` on Ubuntu and macOS |
+| Build | untagged compile gate on Ubuntu and macOS; native build runs in the native workflow |
 | Test | `go test -race` on Ubuntu and macOS |
 | Integration | compile-only generic tests; full runtime package executes in native Linux lane |
 | Lint | `golangci-lint run` on Ubuntu |
