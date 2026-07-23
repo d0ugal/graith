@@ -249,7 +249,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 
 	lc := sm.Config().Lifecycle
 
-	ptySess, err := grpty.NewSession(grpty.SessionOpts{
+	ptySess, err := newPTYSession(grpty.SessionOpts{
 		ID:         id,
 		Command:    command,
 		Args:       finalArgs,

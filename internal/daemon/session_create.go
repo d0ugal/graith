@@ -903,7 +903,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			PreviewBytes:     cfgSnapshot.Headless.PreviewBytesOrDefault(),
 		})
 	} else {
-		ptySess, err = grpty.NewSession(grpty.SessionOpts{
+		ptySess, err = newPTYSession(grpty.SessionOpts{
 			ID:         id,
 			Command:    command,
 			Args:       finalArgs,
