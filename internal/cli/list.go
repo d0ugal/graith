@@ -22,17 +22,19 @@ import (
 )
 
 var (
-	listRepo     string
-	listTree     bool
-	listFlat     bool
-	listChildren string
-	listStarred  bool
-	listQuiet    bool
-	listWide     bool
-	listTokens   bool
-	listNoColor  bool
-	listDeleted  bool
-	listLabels   []string
+	listRepo         string
+	listTree         bool
+	listFlat         bool
+	listChildren     string
+	listStarred      bool
+	listQuiet        bool
+	listWide         bool
+	listTokens       bool
+	listNoColor      bool
+	listDeleted      bool
+	listLabels       []string
+	listSummaryWidth int
+	listFullSummary  bool
 )
 
 type listConn interface {
@@ -87,7 +89,8 @@ var listCmd = &cobra.Command{
 	Aliases: []string{"ls"},
 	Short:   "List all sessions",
 	Long: "List all sessions. Human-readable output uses the parent-child hierarchy " +
-		"by default; use --flat for flat repo/name ordering.",
+		"by default and includes status summaries; use --flat for flat repo/name ordering. " +
+		"Summaries use [terminal].summary_width unless --summary-width or --full-summary is set.",
 	Args: validateListArgs,
 	RunE: runList,
 }
@@ -95,6 +98,10 @@ var listCmd = &cobra.Command{
 func validateListArgs(cmd *cobra.Command, _ []string) error {
 	if cmd.Flags().Changed("tree") && cmd.Flags().Changed("flat") {
 		return errors.New("--tree and --flat are mutually exclusive; use --flat for flat output or omit both for tree output")
+	}
+
+	if cmd.Flags().Changed("summary-width") && listSummaryWidth <= 0 {
+		return errors.New("--summary-width must be positive")
 	}
 
 	return nil
@@ -286,7 +293,25 @@ type sessionColumn struct {
 // default hides the wide columns (model, branch, attached) and --wide shows
 // all. Cells with a CLIColor are colourised via colorize; renderRows keeps the
 // coloured cells aligned by measuring visible width.
-func trailingColumns() []sessionColumn {
+type listSummaryMode struct {
+	width int
+	full  bool
+}
+
+func effectiveListSummaryMode() listSummaryMode {
+	width := config.TerminalSummaryWidth
+	if cfg != nil {
+		width = cfg.Terminal.SummaryWidthValue()
+	}
+
+	if listSummaryWidth > 0 {
+		width = listSummaryWidth
+	}
+
+	return listSummaryMode{width: width, full: listFullSummary}
+}
+
+func trailingColumnsFor(summaryMode listSummaryMode) []sessionColumn {
 	var cols []sessionColumn
 
 	for _, c := range client.SessionColumns() {
@@ -299,6 +324,10 @@ func trailingColumns() []sessionColumn {
 			wide:   c.Wide,
 			value: func(s protocol.SessionInfo, now time.Time, colorOn bool) string {
 				v := c.CLIValue(s, now)
+				if c.Key == "summary" && !summaryMode.full {
+					v = client.TruncateSummary(v, summaryMode.width)
+				}
+
 				if c.CLIColor != nil {
 					v = colorize(v, c.CLIColor(s), colorOn)
 				}
@@ -362,7 +391,11 @@ func formatDeleteExpiry(s protocol.SessionInfo, now time.Time, colorOn bool) str
 
 // visibleColumns filters trailingColumns by the wide flag.
 func visibleColumns(wide bool) []sessionColumn {
-	all := trailingColumns()
+	return visibleColumnsFor(wide, effectiveListSummaryMode())
+}
+
+func visibleColumnsFor(wide bool, summaryMode listSummaryMode) []sessionColumn {
+	all := trailingColumnsFor(summaryMode)
 	if wide {
 		return all
 	}
@@ -458,7 +491,7 @@ func printFlat(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Tim
 	})
 
 	colorOn := listColorEnabled(cmd)
-	cols := visibleColumns(listWide)
+	cols := visibleColumnsFor(listWide, effectiveListSummaryMode())
 
 	rows := make([][]string, 0, len(sessions)+1)
 	rows = append(rows, headerCells(cols))
@@ -562,7 +595,7 @@ func orderSessionTree(sessions []protocol.SessionInfo) []sessionTreeRow {
 
 func printTree(cmd *cobra.Command, sessions []protocol.SessionInfo, now time.Time) {
 	colorOn := listColorEnabled(cmd)
-	cols := visibleColumns(listWide)
+	cols := visibleColumnsFor(listWide, effectiveListSummaryMode())
 
 	rows := [][]string{headerCells(cols)}
 
@@ -645,9 +678,12 @@ func registerListCmd() {
 	listCmd.Flags().BoolVar(&listNoColor, "no-color", false, "disable colored status output")
 	listCmd.Flags().BoolVar(&listDeleted, "deleted", false, "show soft-deleted sessions with their expiry time")
 	listCmd.Flags().StringArrayVar(&listLabels, "label", nil, "filter by session label; repeat for AND matching")
+	listCmd.Flags().IntVar(&listSummaryWidth, "summary-width", 0, "limit SUMMARY to this many display cells (mutually exclusive with --full-summary)")
+	listCmd.Flags().BoolVar(&listFullSummary, "full-summary", false, "show the complete SUMMARY (mutually exclusive with --summary-width)")
 	listCmd.MarkFlagsMutuallyExclusive("quiet", "tokens")
 	listCmd.MarkFlagsMutuallyExclusive("wide", "tokens")
 	listCmd.MarkFlagsMutuallyExclusive("tree", "flat")
+	listCmd.MarkFlagsMutuallyExclusive("summary-width", "full-summary")
 	_ = listCmd.RegisterFlagCompletionFunc("repo", completeRepoPaths)
 	_ = listCmd.RegisterFlagCompletionFunc("children", completeSessionNames)
 }

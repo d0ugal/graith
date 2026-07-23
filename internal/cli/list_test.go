@@ -786,6 +786,107 @@ func TestVisibleColumns(t *testing.T) {
 	}
 }
 
+//nolint:wsl_v5 // table-driven rendering assertions are intentionally grouped.
+func TestListSummaryModesUseDisplayCellsAndWideDoesNotExpand(t *testing.T) {
+	info := protocol.SessionInfo{SummaryText: "🎉世界e\u0301" + strings.Repeat("x", 40)}
+
+	for _, wide := range []bool{false, true} {
+		cols := visibleColumnsFor(wide, listSummaryMode{width: 10})
+		var summary sessionColumn
+		for _, col := range cols {
+			if col.header == "SUMMARY" {
+				summary = col
+			}
+		}
+
+		got := summary.value(info, time.Time{}, false)
+		if width := ansi.StringWidth(got); width > 10 {
+			t.Errorf("wide=%v summary width = %d, want <= 10: %q", wide, width, got)
+		}
+		if !strings.HasSuffix(got, "…") {
+			t.Errorf("wide=%v truncated summary = %q, want ellipsis", wide, got)
+		}
+	}
+
+	cols := visibleColumnsFor(false, listSummaryMode{width: 10, full: true})
+	for _, col := range cols {
+		if col.header == "SUMMARY" {
+			if got := col.value(info, time.Time{}, false); got != info.SummaryText {
+				t.Errorf("full summary = %q, want %q", got, info.SummaryText)
+			}
+		}
+	}
+}
+
+//nolint:wsl_v5 // this test verifies the precedence of config, override, and full modes.
+func TestListSummaryUsesConfiguredWidthAndPerInvocationOverrides(t *testing.T) {
+	origCfg, origWidth, origFull := cfg, listSummaryWidth, listFullSummary
+	t.Cleanup(func() { cfg, listSummaryWidth, listFullSummary = origCfg, origWidth, origFull })
+
+	cfg = config.Default()
+	cfg.Terminal.SummaryWidth = 8
+	listSummaryWidth = 0
+	listFullSummary = false
+	info := protocol.SessionInfo{SummaryText: strings.Repeat("braw ", 20)}
+
+	findSummary := func() sessionColumn {
+		for _, col := range visibleColumns(false) {
+			if col.header == "SUMMARY" {
+				return col
+			}
+		}
+		t.Fatal("SUMMARY column missing")
+		return sessionColumn{}
+	}
+
+	if got := findSummary().value(info, time.Time{}, false); ansi.StringWidth(got) > 8 {
+		t.Fatalf("configured summary width = %d, want <= 8: %q", ansi.StringWidth(got), got)
+	}
+
+	listSummaryWidth = 5
+	if got := findSummary().value(info, time.Time{}, false); ansi.StringWidth(got) > 5 {
+		t.Fatalf("override summary width = %d, want <= 5: %q", ansi.StringWidth(got), got)
+	}
+
+	listFullSummary = true
+	if got := findSummary().value(info, time.Time{}, false); got != info.SummaryText {
+		t.Errorf("full summary = %q, want complete %q", got, info.SummaryText)
+	}
+}
+
+//nolint:wsl_v5 // validation cases share flag setup and restoration.
+func TestListSummaryFlagsValidate(t *testing.T) {
+	registerCommands()
+	widthFlag := listCmd.Flags().Lookup("summary-width")
+	fullFlag := listCmd.Flags().Lookup("full-summary")
+	if widthFlag == nil || fullFlag == nil {
+		t.Fatal("summary flags are not registered")
+	}
+
+	origWidth, origFull := listSummaryWidth, listFullSummary
+	origWidthChanged, origFullChanged := widthFlag.Changed, fullFlag.Changed
+	t.Cleanup(func() {
+		listSummaryWidth, listFullSummary = origWidth, origFull
+		widthFlag.Changed, fullFlag.Changed = origWidthChanged, origFullChanged
+	})
+
+	listSummaryWidth = 0
+	widthFlag.Changed = true
+	if err := validateListArgs(listCmd, nil); err == nil {
+		t.Fatal("zero summary width should be rejected")
+	}
+	listSummaryWidth = -1
+	if err := validateListArgs(listCmd, nil); err == nil {
+		t.Fatal("negative summary width should be rejected")
+	}
+
+	listSummaryWidth = 8
+	fullFlag.Changed = true
+	if err := listCmd.ValidateFlagGroups(); err == nil {
+		t.Fatal("summary width and full summary should be mutually exclusive")
+	}
+}
+
 func TestPrintFlatWideColumns(t *testing.T) {
 	orig := listWide
 	defer func() { listWide = orig }()
@@ -897,7 +998,7 @@ func TestTrailingColumnsFromRegistry(t *testing.T) {
 		gotWide = append(gotWide, c.header)
 	}
 
-	wantWide := []string{"REPO", "AGENT", "STATUS", "ACTIVITY", "MODEL", "BRANCH", "GIT", "PR", "REVIEW", "TOKENS", "TODO", "AGE", "ATTACHED"}
+	wantWide := []string{"REPO", "AGENT", "STATUS", "ACTIVITY", "SUMMARY", "MODEL", "BRANCH", "GIT", "PR", "REVIEW", "TOKENS", "TODO", "AGE", "ATTACHED"}
 	if len(gotWide) != len(wantWide) {
 		t.Fatalf("wide columns = %v, want %v", gotWide, wantWide)
 	}
@@ -914,7 +1015,7 @@ func TestTrailingColumnsFromRegistry(t *testing.T) {
 		gotCompact = append(gotCompact, c.header)
 	}
 
-	wantCompact := []string{"REPO", "AGENT", "STATUS", "ACTIVITY", "GIT", "PR", "REVIEW", "AGE"}
+	wantCompact := []string{"REPO", "AGENT", "STATUS", "ACTIVITY", "SUMMARY", "GIT", "PR", "REVIEW", "AGE"}
 	if strings.Join(gotCompact, ",") != strings.Join(wantCompact, ",") {
 		t.Errorf("compact columns = %v, want %v", gotCompact, wantCompact)
 	}
@@ -928,6 +1029,7 @@ func TestTrailingColumnsValues(t *testing.T) {
 		RepoName:      "croft",
 		Agent:         "claude",
 		Status:        "running",
+		SummaryText:   "blethering",
 		Dirty:         true,
 		UnpushedCount: 2,
 		PullRequest:   &protocol.PRInfo{Number: 42, State: "open"},
@@ -940,11 +1042,12 @@ func TestTrailingColumnsValues(t *testing.T) {
 	}
 
 	checks := map[string]string{
-		"REPO":   "croft",
-		"AGENT":  "claude",
-		"STATUS": "running",
-		"GIT":    "dirty, 2 ahead",
-		"PR":     "#42 open",
+		"REPO":    "croft",
+		"AGENT":   "claude",
+		"STATUS":  "running",
+		"SUMMARY": "blethering",
+		"GIT":     "dirty, 2 ahead",
+		"PR":      "#42 open",
 	}
 	for header, want := range checks {
 		if cells[header] != want {
@@ -999,7 +1102,8 @@ func goldenFlatSessions(now time.Time) []protocol.SessionInfo {
 		{
 			Name: "braw", RepoName: "croft", Agent: "claude",
 			Status: "running", AgentStatus: "active", ToolName: "Bash",
-			Dirty: true, UnpushedCount: 2,
+			SummaryText: "blethering",
+			Dirty:       true, UnpushedCount: 2,
 			PullRequest: &protocol.PRInfo{Number: 42, State: "open", ReviewDecision: "approved"},
 			CI:          &protocol.CIInfo{State: "passing"},
 			TodoDone:    1, TodoTotal: 3,
@@ -1029,9 +1133,9 @@ func TestPrintFlatGoldenCompact(t *testing.T) {
 	printFlat(cmd, goldenFlatSessions(now), now)
 
 	want := "" +
-		"NAME    REPO   AGENT   STATUS   ACTIVITY       GIT             PR              REVIEW    AGE\n" +
-		"braw    croft  claude  running  active (Bash)  dirty, 2 ahead  #42 open CI:ok  approved  1h30m\n" +
-		"thrawn  croft  codex   stopped                                                           1h30m\n"
+		"NAME    REPO   AGENT   STATUS   ACTIVITY       SUMMARY     GIT             PR              REVIEW    AGE\n" +
+		"braw    croft  claude  running  active (Bash)  blethering  dirty, 2 ahead  #42 open CI:ok  approved  1h30m\n" +
+		"thrawn  croft  codex   stopped                                                                       1h30m\n"
 
 	if got := buf.String(); got != want {
 		t.Errorf("compact table mismatch:\n--- got ---\n%q\n--- want ---\n%q", got, want)
@@ -1056,9 +1160,9 @@ func TestPrintFlatGoldenWide(t *testing.T) {
 	printFlat(cmd, goldenFlatSessions(now), now)
 
 	want := "" +
-		"NAME    REPO   AGENT   STATUS   ACTIVITY       MODEL  BRANCH  GIT             PR              REVIEW    TOKENS  TODO  AGE    ATTACHED\n" +
-		"braw    croft  claude  running  active (Bash)                 dirty, 2 ahead  #42 open CI:ok  approved          1/3   1h30m  \n" +
-		"thrawn  croft  codex   stopped                                                                                        1h30m  \n"
+		"NAME    REPO   AGENT   STATUS   ACTIVITY       SUMMARY     MODEL  BRANCH  GIT             PR              REVIEW    TOKENS  TODO  AGE    ATTACHED\n" +
+		"braw    croft  claude  running  active (Bash)  blethering                 dirty, 2 ahead  #42 open CI:ok  approved          1/3   1h30m  \n" +
+		"thrawn  croft  codex   stopped                                                                                                    1h30m  \n"
 
 	if got := buf.String(); got != want {
 		t.Errorf("wide table mismatch:\n--- got ---\n%q\n--- want ---\n%q", got, want)
