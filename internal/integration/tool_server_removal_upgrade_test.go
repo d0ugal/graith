@@ -605,7 +605,7 @@ func runFixtureGit(t *testing.T, dir string, args ...string) string {
 
 func buildCurrentBinary(t *testing.T, repoRoot, name string) string {
 	t.Helper()
-	return buildGoBinary(t, repoRoot, filepath.Join(t.TempDir(), name))
+	return buildNativeGoBinary(t, repoRoot, filepath.Join(t.TempDir(), name))
 }
 
 func buildGoBinary(t *testing.T, source, output string) string {
@@ -616,6 +616,19 @@ func buildGoBinary(t *testing.T, source, output string) string {
 	cmd.Dir = source
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build %s: %v\n%s", source, err, out)
+	}
+
+	return output
+}
+
+func buildNativeGoBinary(t *testing.T, source, output string) string {
+	t.Helper()
+
+	cmd := exec.Command("go", "build", "-tags=libghostty", "-o", output, "./cmd/graith")
+	cmd.Dir = source
+	cmd.Env = append(os.Environ(), "GOWORK=off", "CGO_ENABLED=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build native %s: %v\n%s", source, err, out)
 	}
 
 	return output
