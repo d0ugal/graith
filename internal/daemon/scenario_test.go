@@ -2306,7 +2306,7 @@ func TestStartScenarioPromptOnlyRequiredResultCompletesWithoutTodo(t *testing.T)
 
 	if _, err := sm.PublishScenarioResult(
 		authContext{authenticated: true, role: roleSession, sessionID: scenario.SessionIDs[0]},
-		protocol.ScenarioResultPublishMsg{Scenario: scenario.Name, Name: "report", Body: "# Canny report\n"},
+		ScenarioResultPublishRequest{Scenario: scenario.Name, Name: "report", Body: "# Canny report\n"},
 	); err != nil {
 		t.Fatal(err)
 	}

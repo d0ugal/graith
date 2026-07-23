@@ -205,6 +205,22 @@ type scenarioResultRef struct {
 	result       ScenarioResultState
 }
 
+// ScenarioResultPublishRequest is the application-level request to publish a
+// result. Wire envelopes are translated to this value by the handler adapter.
+type ScenarioResultPublishRequest struct {
+	Scenario string
+	Name     string
+	Body     string
+}
+
+// ScenarioResultPublication is the application-level result of publishing a
+// result. Its time value remains a time.Time until the wire adapter formats it.
+type ScenarioResultPublication struct {
+	Scenario string
+	Member   string
+	Result   ScenarioResultState
+}
+
 // findScenarioResultLocked resolves only the authenticated member's own result.
 // The wire request contains no target member, which is the anti-forgery boundary.
 func (sm *SessionManager) findScenarioResultLocked(sessionID, scenarioName, resultName string) (scenarioResultRef, error) {
@@ -278,28 +294,28 @@ func validateScenarioResultBody(result ScenarioResultState, body string) error {
 	return nil
 }
 
-func (sm *SessionManager) updateScenarioResult(ref scenarioResultRef, update ScenarioResultState) (protocol.ScenarioResultInfo, error) {
+func (sm *SessionManager) updateScenarioResult(ref scenarioResultRef, update ScenarioResultState) (ScenarioResultState, error) {
 	sm.mu.Lock()
 
 	scenario := sm.state.Scenarios[ref.scenarioID]
 	if scenario == nil || ref.memberIndex >= len(scenario.Sessions) || ref.memberIndex >= len(scenario.SessionIDs) {
 		sm.mu.Unlock()
 
-		return protocol.ScenarioResultInfo{}, errors.New("scenario was deleted during result publication")
+		return ScenarioResultState{}, errors.New("scenario was deleted during result publication")
 	}
 
 	member := &scenario.Sessions[ref.memberIndex]
 	if scenario.SessionIDs[ref.memberIndex] == "" || ref.resultIndex >= len(member.Results) {
 		sm.mu.Unlock()
 
-		return protocol.ScenarioResultInfo{}, errors.New("result declaration changed during publication")
+		return ScenarioResultState{}, errors.New("result declaration changed during publication")
 	}
 
 	current := &member.Results[ref.resultIndex]
 	if current.Name != ref.result.Name || current.Destination != ref.result.Destination {
 		sm.mu.Unlock()
 
-		return protocol.ScenarioResultInfo{}, errors.New("result declaration changed during publication")
+		return ScenarioResultState{}, errors.New("result declaration changed during publication")
 	}
 
 	previous := *current
@@ -309,10 +325,10 @@ func (sm *SessionManager) updateScenarioResult(ref scenarioResultRef, update Sce
 		*current = previous
 		sm.mu.Unlock()
 
-		return protocol.ScenarioResultInfo{}, fmt.Errorf("persist result metadata: %w", err)
+		return ScenarioResultState{}, fmt.Errorf("persist result metadata: %w", err)
 	}
 
-	info := scenarioResultInfo(*current)
+	info := *current
 	sm.mu.Unlock()
 
 	sm.hintScenarioCompletion("scenario:" + ref.scenarioID)
@@ -345,53 +361,53 @@ func (sm *SessionManager) recordScenarioResultFailure(ref scenarioResultRef, sta
 // PublishScenarioResult validates and stores one authenticated member result.
 // Store I/O runs without sm.mu; scenarioResultMu serializes the write+metadata
 // commit pair so concurrent attempts cannot leave mismatched content/status.
-func (sm *SessionManager) PublishScenarioResult(auth authContext, msg protocol.ScenarioResultPublishMsg) (protocol.ScenarioResultPublishResponse, error) {
+func (sm *SessionManager) PublishScenarioResult(auth authContext, request ScenarioResultPublishRequest) (ScenarioResultPublication, error) {
 	if !auth.authenticated || (auth.role != roleSession && auth.role != roleOrchestrator) {
-		return protocol.ScenarioResultPublishResponse{}, errors.New("scenario result publication requires an authenticated session")
+		return ScenarioResultPublication{}, errors.New("scenario result publication requires an authenticated session")
 	}
 
 	sm.scenarioResultMu.Lock()
 	defer sm.scenarioResultMu.Unlock()
 
 	sm.mu.RLock()
-	ref, err := sm.findScenarioResultLocked(auth.sessionID, msg.Scenario, msg.Name)
+	ref, err := sm.findScenarioResultLocked(auth.sessionID, request.Scenario, request.Name)
 	sm.mu.RUnlock()
 
 	if err != nil {
-		return protocol.ScenarioResultPublishResponse{}, err
+		return ScenarioResultPublication{}, err
 	}
 
-	if err := validateScenarioResultBody(ref.result, msg.Body); err != nil {
-		return protocol.ScenarioResultPublishResponse{}, sm.recordScenarioResultFailure(ref, ScenarioResultInvalid, err)
+	if err := validateScenarioResultBody(ref.result, request.Body); err != nil {
+		return ScenarioResultPublication{}, sm.recordScenarioResultFailure(ref, ScenarioResultInvalid, err)
 	}
 
 	if sm.scenarioResults == nil {
 		publicationErr := errors.New("initialize shared result store: no persistence configured")
-		return protocol.ScenarioResultPublishResponse{}, sm.recordScenarioResultFailure(ref, ScenarioResultFailed, publicationErr)
+		return ScenarioResultPublication{}, sm.recordScenarioResultFailure(ref, ScenarioResultFailed, publicationErr)
 	}
 
 	if err := sm.scenarioResults.Init(); err != nil {
 		publicationErr := fmt.Errorf("initialize shared result store: %w", err)
-		return protocol.ScenarioResultPublishResponse{}, sm.recordScenarioResultFailure(ref, ScenarioResultFailed, publicationErr)
+		return ScenarioResultPublication{}, sm.recordScenarioResultFailure(ref, ScenarioResultFailed, publicationErr)
 	}
 
-	if err := sm.scenarioResults.Put(ref.result.Destination, msg.Body); err != nil {
+	if err := sm.scenarioResults.Put(ref.result.Destination, request.Body); err != nil {
 		publicationErr := fmt.Errorf("store result %q: %w", ref.result.Name, err)
-		return protocol.ScenarioResultPublishResponse{}, sm.recordScenarioResultFailure(ref, ScenarioResultFailed, publicationErr)
+		return ScenarioResultPublication{}, sm.recordScenarioResultFailure(ref, ScenarioResultFailed, publicationErr)
 	}
 
 	available := ref.result
 	available.Status = ScenarioResultAvailable
-	available.SizeBytes = len(msg.Body)
+	available.SizeBytes = len(request.Body)
 	available.PublishedAt = time.Now().UTC()
 	available.Error = ""
 
 	info, err := sm.updateScenarioResult(ref, available)
 	if err != nil {
-		return protocol.ScenarioResultPublishResponse{}, err
+		return ScenarioResultPublication{}, err
 	}
 
-	return protocol.ScenarioResultPublishResponse{
+	return ScenarioResultPublication{
 		Scenario: ref.scenarioName,
 		Member:   ref.memberName,
 		Result:   info,

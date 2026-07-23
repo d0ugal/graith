@@ -227,7 +227,7 @@ drainHints:
 	}
 
 	auth := authContext{authenticated: true, role: roleSession, sessionID: "ben-id"}
-	if _, err := sm.PublishScenarioResult(auth, protocol.ScenarioResultPublishMsg{
+	if _, err := sm.PublishScenarioResult(auth, ScenarioResultPublishRequest{
 		Scenario: "braw", Name: "facts", Body: `{"croft":"ready"}`,
 	}); err != nil {
 		t.Fatal(err)
@@ -254,7 +254,7 @@ drainHints:
 
 	sm.mu.RUnlock()
 
-	if _, err := sm.PublishScenarioResult(auth, protocol.ScenarioResultPublishMsg{
+	if _, err := sm.PublishScenarioResult(auth, ScenarioResultPublishRequest{
 		Scenario: "braw", Name: "facts", Body: `{"croft":`,
 	}); err == nil {
 		t.Fatal("expected malformed replacement to fail")
