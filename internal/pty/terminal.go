@@ -9,7 +9,7 @@ import (
 // diagnostics and lifecycle logs. Keep these values independent of concrete
 // implementation type names so operators can rely on them across releases.
 const (
-	TerminalBackendCharm            = "charm"
+	TerminalBackendUnavailable      = "unavailable"
 	TerminalBackendLibghosttyHelper = "libghostty-helper"
 )
 
@@ -201,6 +201,7 @@ func snapshotTerminal(term Terminal) (TerminalSnapshot, error) {
 	}, nil
 }
 
+//nolint:unused // used by native terminal implementations.
 func clampSize(cols, rows int) (int, int) {
 	if cols < 1 {
 		cols = 1

@@ -119,8 +119,8 @@ Show info for the current session, auto-detected by matching the working directo
 Run health checks and diagnostics: daemon status, safehouse availability, orphaned worktrees, oversized scrollback files, and stale PID files.
 
 The **Daemon** section reports the active terminal-screen backend. The stable
-values are `charm` for the pure-Go backend and `libghostty-helper` for the
-process-isolated native backend. For scripts, use the top-level
+values are `libghostty-helper` for the
+process-isolated native backend. Unsupported builds fail closed. For scripts, use the top-level
 `terminal_backend` field:
 
 ```bash

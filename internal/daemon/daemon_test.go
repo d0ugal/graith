@@ -2288,7 +2288,7 @@ func TestDetectAgentStatuses_MirrorSkipsGit(t *testing.T) {
 
 	logDir := t.TempDir()
 
-	sharedPty, err := grpty.NewSession(grpty.SessionOpts{
+	sharedPty, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID: "shared1", Command: "sleep", Args: []string{"60"},
 		Dir: repoDir, Rows: 24, Cols: 80,
 		LogPath: filepath.Join(logDir, "shared.log"),
@@ -2298,7 +2298,7 @@ func TestDetectAgentStatuses_MirrorSkipsGit(t *testing.T) {
 	}
 	defer func() { _ = sharedPty.Kill() }()
 
-	normalPty, err := grpty.NewSession(grpty.SessionOpts{
+	normalPty, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID: "normal1", Command: "sleep", Args: []string{"60"},
 		Dir: repoDir, Rows: 24, Cols: 80,
 		LogPath: filepath.Join(logDir, "normal.log"),
@@ -2417,7 +2417,7 @@ func TestApplyConfigUpdatesLiveInputDelay(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	// A live session launched with a tiny submit delay.
-	sess, err := grpty.NewSession(grpty.SessionOpts{
+	sess, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID: "braw", Command: "sh", Args: []string{"-c", "sleep 30"},
 		Dir: t.TempDir(), Rows: 24, Cols: 80,
 		LogPath:    filepath.Join(t.TempDir(), "pty.log"),
@@ -3309,7 +3309,7 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 func newTestPTYSession(t *testing.T, command string, args ...string) *grpty.Session {
 	t.Helper()
 
-	sess, err := grpty.NewSession(grpty.SessionOpts{
+	sess, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID: "test", Command: command, Args: args,
 		Dir: t.TempDir(), Rows: 24, Cols: 80,
 		LogPath:    filepath.Join(t.TempDir(), "pty.log"),
@@ -6301,7 +6301,7 @@ func TestWatchSessionRecordsExitSignal(t *testing.T) {
 
 	cmd := exec.Command("sh", "-c", "kill -TERM $$")
 
-	sess, err := grpty.NewSession(grpty.SessionOpts{
+	sess, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID:      id,
 		Command: cmd.Path,
 		Args:    cmd.Args[1:],
@@ -7388,7 +7388,7 @@ func TestDetectAgentStatusesGitBranchesCov2(t *testing.T) {
 
 	logDir := t.TempDir()
 
-	pty, err := grpty.NewSession(grpty.SessionOpts{
+	pty, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID: "glen1", Command: "sleep", Args: []string{"60"},
 		Dir: repoDir, Rows: 24, Cols: 80,
 		LogPath: filepath.Join(logDir, "glen.log"),

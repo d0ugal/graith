@@ -106,6 +106,16 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go build -v ./cmd/graith
+      - name: Verify untagged fail-closed binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in darwin/arm64 linux/amd64 linux/arm64; do
+            IFS=/ read -r goos goarch <<< "$target"
+            binary="$RUNNER_TEMP/graith-${goos}-${goarch}"
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -o "$binary" ./cmd/graith
+            scripts/libghostty-native.sh verify-default-binary "$binary"
+          done
 
   build-macos:
     name: Build (macos-latest)
@@ -188,7 +198,10 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: go test -v -race -count=1 -tags=integration ./internal/integration/...
+      # PTY lifecycle execution requires the pinned native helper and runs in
+      # the libghostty-native workflow; keep this job as a fast integration
+      # compile gate for the ordinary (fail-closed) graph.
+      - run: go test -v -race -count=1 -run '^$' -tags=integration ./internal/integration/...
 
   integration-macos:
     name: Integration (macos-latest)
@@ -213,7 +226,10 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: go test -v -race -count=1 -tags=integration ./internal/integration/...
+      # PTY lifecycle execution requires the pinned native helper and runs in
+      # the libghostty-native workflow; keep this job as a fast integration
+      # compile gate for the ordinary (fail-closed) graph.
+      - run: go test -v -race -count=1 -run '^$' -tags=integration ./internal/integration/...
 
   lint:
     name: Lint

@@ -14,9 +14,8 @@ Graith will adopt `libghostty-vt` as its daemon terminal-screen model through
 the public `go-libghostty` API and a restartable helper-process boundary. The
 decision is **GO for staged adoption**. The accepted dev evidence now promotes
 the normal stable macOS arm64 and Linux amd64/arm64 artifacts to the native
-backend. The current Go model remains in source as a compatibility
-implementation while its remaining source and dependency cleanup is handled
-separately. Issue #1495 retired comparison-only machinery. New stable and dev
+backend. Issue #1495 retired comparison-only machinery and the Charm terminal
+implementation. New stable and dev
 releases support macOS arm64 and Linux amd64/arm64 only and publish no separately
 named rollback archive; historical release assets remain unchanged.
 
@@ -27,8 +26,8 @@ to a small terminal-screen model for previews and coherent screen captures.
 Callers depend on the backend-neutral `Terminal` interface in
 `internal/pty/terminal.go`, not on emulator-specific types.
 
-The existing model wraps `github.com/charmbracelet/x/vt`. Graith also already
-ships `libghostty-vt` to its native clients. The shared build pins Ghostty
+The daemon now uses the isolated native helper. Graith also ships
+`libghostty-vt` to its native clients. The shared build pins Ghostty
 commit `91f66da24527fa02d92b5fd0b41cd020f553a64c`, Zig 0.15.2, committed public
 headers, and the arm64 slice of a checksum-verified Apple XCFramework.
 
@@ -69,8 +68,6 @@ keep backend transitions independent of terminal state or protocol migrations.
 
 ### Non-Goals
 
-- Removing the remaining Charm source and dependency after release-platform
-  withdrawal. That cleanup is separate from this coordinated promotion.
 - Changing the wire protocol, scrollback format, iOS renderer, or macOS app
   renderer.
 - Maintaining a second Graith-specific C binding beside `go-libghostty`.
@@ -224,9 +221,9 @@ improvement. The local shim has been removed.
 
 The result is **GO** for `libghostty-vt` through the isolated architecture. The
 build tag is a rollout gate, not uncertainty about the chosen backend.
-Production promotion follows the gates below. Charm remains in source only
-while a retained supported target still depends on the pure-Go backend; it is
-not shipped as a separately named rollback artifact for promoted targets.
+Production promotion follows the gates below. The native backend is the only
+current terminal implementation and is not shipped with a separately named
+rollback artifact.
 
 ### API fit
 
@@ -245,22 +242,19 @@ available to untrusted terminal input.
 
 ### Compatibility evidence
 
-`TestTerminalBackendCompatibilityCorpus` drives each build's selected backend
-with identical generic data. Default and tagged jobs cover the pure-Go model
-and isolated native helper separately, so production-like binaries never link
-both emulators. The corpus covers the default 128 KiB hydration size,
+`TestTerminalBackendCompatibilityCorpus` drives the native helper with the
+historical compatibility corpus. Historical Charm output remains evidence only;
+production-like binaries select only the isolated native helper. The corpus
+covers the default 128 KiB hydration size,
 grow/shrink resize, cursor visibility, wide characters, emoji, combining
 graphemes, represented styles, palette/RGB colors, alternate screen, device
 queries, and the reduced #1430 sequence. #1446 expanded fragmented control
 strings, margins, erase/wrap, ZWJ/variation sequences, and background-only
 cells before handoff.
 
-Ordinary builds compile and test the retained pure-Go Charm implementation.
-Production `libghostty` builds compile only the native backend and exclude x/vt and
-Ultraviolet from the `internal/pty` terminal-screen dependency graph and its
-isolated binary. The full `gr` binary legitimately retains Ultraviolet through
-its Bubble Tea/Lip Gloss UI, but no longer retains x/vt. Default graphs and
-binaries contain no go-libghostty module; native variants contain it. The
+Untagged builds fail closed when native inputs are absent; supported tagged builds
+use only the isolated native helper. Production builds compile only the native
+backend and keep UI dependencies separate from the terminal-screen graph. The
 temporary dual-backend tag, comparative benchmarks, RSS harness, and associated
 current-RSS probe were retired once the rollout decision had accepted their
 recorded evidence.
@@ -328,8 +322,8 @@ CoreFoundation, Security, and `/usr/lib/libSystem.B.dylib`.
 
 The path-scoped native workflow performs these checks:
 
-- ordinary `CGO_ENABLED=0` builds and retained-backend compatibility tests for
-  supported source configurations, without treating their outputs as release artifacts;
+- explicit fail-closed checks for `CGO_ENABLED=0` and unsupported architectures,
+  without treating their outputs as release artifacts;
 - tagged Darwin arm64 execution and linking against the arm64 slice of the
   checksum-pinned Apple archive;
 - fail-closed tagged Darwin amd64 selection without native linkage;
@@ -446,10 +440,9 @@ artifacts; changing only `go.mod` is insufficient.
    the strict multi-platform stable publisher described above. Withdraw macOS
    amd64 from future stable/dev publication and selectors without changing
    historical release assets, and do not publish an alternate rollback archive.
-3. Comparison-only instrumentation is already retired under #1495. Remove the
-   remaining Charm source, dependency, selector, and backend-specific
-   expectations in its separately owned cleanup. Keep the backend-neutral
-   interface and persistent reconstruction path.
+3. Comparison-only instrumentation and the Charm terminal implementation are
+   retired under #1495. Keep the backend-neutral interface and persistent
+   reconstruction path.
 
 No backend transition converts state. Sessions, PTYs, protocol messages, and
 stored bytes are unchanged, and a newly installed compatible build reconstructs

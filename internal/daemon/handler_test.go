@@ -169,7 +169,7 @@ func (h *testHarness) addPTYSession(t *testing.T, id, name string) {
 
 	logPath := filepath.Join(h.sm.paths.LogDir, id+".log")
 
-	sess, err := grpty.NewSession(grpty.SessionOpts{
+	sess, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID:      id,
 		Command: "sleep",
 		Args:    []string{"300"},

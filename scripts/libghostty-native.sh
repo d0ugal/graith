@@ -345,6 +345,37 @@ apple_library() {
     printf '%s\n' "$library"
 }
 
+build_local() {
+    local library pkgconfig output target gocache
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        library="$(apple_library)" || return 1
+    elif [[ "$(uname -s)" == "Linux" ]]; then
+        case "$(uname -m)" in
+            x86_64) target=x86_64-linux-gnu ;;
+            aarch64|arm64) target=aarch64-linux-gnu ;;
+            *) die "native local builds support Linux amd64/arm64 only"; return 1 ;;
+        esac
+        library="$NATIVE_WORK/libghostty-vt.a"
+        source_build "$target" "$library" || return 1
+    else
+        die "native local builds support macOS arm64 and Linux amd64/arm64 only"
+        return 1
+    fi
+    pkgconfig="$(write_pkg_config "$library")" || return 1
+    output="${GRAITH_LIBGHOSTTY_OUTPUT:-$REPO_DIR/gr}"
+    gocache="$NATIVE_WORK/go-cache"
+    mkdir -p "$gocache" || return 1
+    cd "$REPO_DIR" || return 1
+    if [[ -n "${GRAITH_LIBGHOSTTY_LDFLAGS:-}" ]]; then
+        GOCACHE="$gocache" CGO_ENABLED=1 PKG_CONFIG_PATH="$pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
+            go build -v -tags=libghostty -trimpath -ldflags="$GRAITH_LIBGHOSTTY_LDFLAGS" \
+            -o "$output" ./cmd/graith
+    else
+        GOCACHE="$gocache" CGO_ENABLED=1 PKG_CONFIG_PATH="$pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
+            go build -v -tags=libghostty -trimpath -o "$output" ./cmd/graith
+    fi
+}
+
 verify_metadata() {
     local source="${1:-}"
     local document="${2:-$REPO_DIR/libghostty-native.spdx.json}"
@@ -1990,15 +2021,15 @@ verify_default_binary() {
 
     build_info="$(go version -m "$binary")"
     if grep -Fq 'go.mitchellh.com/libghostty' <<<"$build_info"; then
-        echo "error: ordinary pure-Go binary contains go-libghostty" >&2
+        echo "error: untagged binary contains go-libghostty" >&2
         return 1
     fi
     if grep -Fq 'tags=libghostty' <<<"$build_info"; then
-        echo "error: ordinary pure-Go binary contains the libghostty build tag" >&2
+        echo "error: untagged binary contains the libghostty build tag" >&2
         return 1
     fi
     if grep -Fq 'ghostty_terminal_new' < <(strings "$binary"); then
-        echo "error: ordinary pure-Go binary contains a native Ghostty symbol" >&2
+        echo "error: untagged binary contains a native Ghostty symbol" >&2
         return 1
     fi
 }
@@ -2098,6 +2129,11 @@ test_metadata_policy() {
 
     root="$(mktemp -d "$NATIVE_WORK/metadata-policy.XXXXXX")"
     invalid="$root/invalid.spdx.json"
+    if go list -tags=libghostty -deps ./cmd/graith | grep -Fxq github.com/charmbracelet/x/vt; then
+        echo "error: current Graith dependency graph contains retired Charm x/vt" >&2
+        rm -rf "$root"
+        return 1
+    fi
     verify_metadata
     jq '
         (.packages[] | select(.SPDXID == "SPDXRef-Package-Ghostty") | .sourceInfo) |=
@@ -2139,8 +2175,8 @@ verify_candidate_build_metadata() {
             return 1
         fi
     done
-    if grep -Fq $'\tdep\tgithub.com/charmbracelet/x/vt\t' <<<"$build_info"; then
-        echo "error: native candidate contains the x/vt terminal dependency" >&2
+    if grep -Fq 'github.com/charmbracelet/x/vt' <<<"$build_info"; then
+        echo "error: candidate metadata contains retired Charm x/vt" >&2
         return 1
     fi
 }
@@ -3054,6 +3090,7 @@ usage: $0 test|race|fuzz|daemon-test|soak [cycles [timeout]]|all
 test/race/fuzz use the checksum-pinned Apple artifact on macOS arm64.
 daemon-test runs the external daemon lifecycle and bounded 12-cycle soak.
 soak defaults to 1,000 cycles bounded by one hour.
+build-local materializes and verifies the pinned Apple artifact before building.
 source-build checks out Ghostty $GHOSTTY_SHA and requires Zig $REQUIRED_ZIG.
 generate-dependency-unit rotates the complete lock, Go module, headers, SPDX,
 notice inventory, and Apple artifact metadata; verify-dependency-unit is offline.
@@ -3063,6 +3100,9 @@ EOF
 }
 
 case "${1:-}" in
+    build-local)
+        build_local
+        ;;
     test|race|fuzz)
         run_go "$1"
         ;;

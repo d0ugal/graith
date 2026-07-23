@@ -1,9 +1,9 @@
 # Third-party notices for Graith native libghostty builds
 
 <!-- BEGIN GENERATED LIBGHOSTTY DEPENDENCY INVENTORY -->
-This file applies only to Graith testing candidates built with the
-`libghostty` build tag. Ordinary pure-Go builds do not contain this
-native dependency closure. The committed `libghostty-native.spdx.json` is the
+This file applies to Graith candidates built with the
+`libghostty` build tag.
+The committed `libghostty-native.spdx.json` is the
 machine-readable dependency inventory; candidate packaging materializes from it
 a document with the same filename that is bound to the binary's exact revision,
 target, and SHA-256. `libghostty-native.lock.json` is the canonical update

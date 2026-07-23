@@ -35,6 +35,11 @@ import (
 // var, not a const, so tests can shrink it.
 var gitPullStartupDelay = 15 * time.Second
 
+// newPTYSession is replaced only by daemon package tests so untagged lifecycle
+// coverage can supply an in-memory terminal. Production always retains the
+// native-only grpty.NewSession implementation.
+var newPTYSession = grpty.NewSession
+
 type attachedClient struct {
 	conn        net.Conn
 	kick        func()

@@ -17,8 +17,44 @@ env:
   RETAIN_RELEASES: "5"
 
 jobs:
+  changes:
+    name: Detect stable-release-relevant changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      release: ${{ steps.filter.outputs.release }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! files="$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')"; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Could not list PR files; running stable release to be safe."
+            exit 0
+          fi
+          if grep -Eq '^\.github/workflows/(goreleaser|release-please)\.yml$|^\.goreleaser(-linux)?\.yaml$|^\.release-please-(manifest|config)\.json$|^CHANGELOG\.md$|^scripts/(render-stable-(homebrew|aur)|rpm-preset-keygrips|publish-(push|linux-repositories))\.sh$|^scripts/libghostty-native\.sh$|^libghostty-native\.(lock|spdx)\.json$|^THIRD_PARTY_NOTICES\.libghostty\.md$|^macos/(service|notifier)/|^internal/release/(stable|goreleaser)|^internal/daemonservice/|^internal/integration/libghostty_daemon_test\.go$' <<<"$files"; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
   release-context:
     name: Bind stable release context
+    needs: changes
+    if: >-
+      !cancelled() &&
+      (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')
     runs-on: ubuntu-24.04
     outputs:
       revision: ${{ steps.release.outputs.revision }}
@@ -189,14 +225,23 @@ jobs:
           cmp "$arm64_root/gr" "$arm64_root/Graith.app/Contents/MacOS/gr"
           "$arm64_root/gr" --graith-internal-libghostty-self-test
 
-          charm="${RUNNER_TEMP}/gr-charm"
-          CGO_ENABLED=0 go build -trimpath \
-            -ldflags="-s -w -X github.com/d0ugal/graith/internal/version.Version=$version -X github.com/d0ugal/graith/internal/version.CommitSHA=$RELEASE_REVISION" \
-            -o "$charm" ./cmd/graith
+          historical_worktree="${RUNNER_TEMP}/graith-pre-removal-history"
+          historical_revision=00a8dc8e5806850b857b291b9a5f19088e80c580
+          git worktree add --detach "$historical_worktree" "$historical_revision"
+          test "$(git -C "$historical_worktree" rev-parse HEAD)" = "$historical_revision"
+          historical_binary="${RUNNER_TEMP}/graith-historical-pre-removal"
+          CGO_ENABLED=0 go build -C "$historical_worktree" -trimpath \
+            -ldflags="-s -w -X github.com/d0ugal/graith/internal/version.Version=historical-pre-removal -X github.com/d0ugal/graith/internal/version.CommitSHA=$historical_revision" \
+            -o "$historical_binary" ./cmd/graith
+          historical_info="$(go version -m "$historical_binary")"
+          grep -Fq 'GOARCH=arm64' <<<"$historical_info"
+          grep -Fq 'CGO_ENABLED=0' <<<"$historical_info"
+          grep -Fq 'github.com/charmbracelet/x/vt' <<<"$historical_info"
+          test ! -e "dist/graith-historical-pre-removal"
           GRAITH_LIBGHOSTTY_DAEMON_BINARY="$arm64_root/gr" \
-            GRAITH_LIBGHOSTTY_UPGRADE_FROM_BINARY="$charm" \
+            GRAITH_LIBGHOSTTY_HISTORICAL_UPGRADE_BINARY="$historical_binary" \
             go test -v -race -count=1 -tags='integration releaseartifact' -timeout=15m \
-              -run '^(TestLibghosttyDaemonLifecycle|TestLibghosttyCharmToNativeUpgrade)$' \
+              -run '^(TestLibghosttyDaemonLifecycle|TestLibghosttyHistoricalPreRemovalUpgrade)$' \
               ./internal/integration
 
           jq -n --arg revision "$RELEASE_REVISION" --arg version "$version" \
@@ -374,6 +419,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -410,14 +456,23 @@ jobs:
 
           release_root="$(mktemp -d)"
           tar -xzf "$archive" -C "$release_root"
-          charm="${RUNNER_TEMP}/gr-charm"
-          CGO_ENABLED=0 go build -trimpath \
-            -ldflags="-s -w -X github.com/d0ugal/graith/internal/version.Version=$version -X github.com/d0ugal/graith/internal/version.CommitSHA=$RELEASE_REVISION" \
-            -o "$charm" ./cmd/graith
+          historical_worktree="${RUNNER_TEMP}/graith-pre-removal-history"
+          historical_revision=00a8dc8e5806850b857b291b9a5f19088e80c580
+          git worktree add --detach "$historical_worktree" "$historical_revision"
+          test "$(git -C "$historical_worktree" rev-parse HEAD)" = "$historical_revision"
+          historical_binary="${RUNNER_TEMP}/graith-historical-pre-removal"
+          CGO_ENABLED=0 go build -C "$historical_worktree" -trimpath \
+            -ldflags="-s -w -X github.com/d0ugal/graith/internal/version.Version=historical-pre-removal -X github.com/d0ugal/graith/internal/version.CommitSHA=$historical_revision" \
+            -o "$historical_binary" ./cmd/graith
+          historical_info="$(go version -m "$historical_binary")"
+          grep -Fq "GOARCH=$GOARCH" <<<"$historical_info"
+          grep -Fq 'CGO_ENABLED=0' <<<"$historical_info"
+          grep -Fq 'github.com/charmbracelet/x/vt' <<<"$historical_info"
+          test ! -e "dist/graith-historical-pre-removal"
           GRAITH_LIBGHOSTTY_DAEMON_BINARY="$release_root/gr" \
-            GRAITH_LIBGHOSTTY_UPGRADE_FROM_BINARY="$charm" \
+            GRAITH_LIBGHOSTTY_HISTORICAL_UPGRADE_BINARY="$historical_binary" \
             go test -v -race -count=1 -tags='integration releaseartifact' -timeout=15m \
-              -run '^(TestLibghosttyDaemonLifecycle|TestLibghosttyCharmToNativeUpgrade)$' \
+              -run '^(TestLibghosttyDaemonLifecycle|TestLibghosttyHistoricalPreRemovalUpgrade)$' \
               ./internal/integration
 
   assemble-stable:

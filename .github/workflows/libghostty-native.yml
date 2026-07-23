@@ -69,47 +69,13 @@ jobs:
           else
             echo "dependency-unit=false" >> "$GITHUB_OUTPUT"
           fi
-          if grep -Eq '^\.goreleaser-dev\.yaml$|^\.github/workflows/(dev-release|libghostty-native)\.yml$|^docs/design/2026-07-18-libghostty-daemon-backend.*\.md$|^gui/shared/Package\.swift$|^gui/shared/Sources/CGhosttyVT/include/|^go\.(mod|sum)$|^internal/(cli|daemon|integration|libghosttydeps|pty|release)/|^libghostty-native\.(lock|spdx)\.json$|^scripts/(dev-release-version|libghostty-native)\.sh$|^THIRD_PARTY_NOTICES\.libghostty\.md$|^website/content/docs/(commands/daemon|contributing/_index|installation|troubleshooting)\.md$' <<<"$files"; then
+          if grep -Eq '^\.goreleaser-dev\.yaml$|^\.github/workflows/(dev-release|libghostty-native)\.yml$|^gui/shared/Package\.swift$|^gui/shared/Sources/CGhosttyVT/include/|^go\.(mod|sum)$|^internal/(cli|daemon|integration|libghosttydeps|pty|release)/|^libghostty-native\.(lock|spdx)\.json$|^scripts/(dev-release-version|libghostty-native)\.sh$|^THIRD_PARTY_NOTICES\.libghostty\.md$' <<<"$files"; then
             echo "native=true" >> "$GITHUB_OUTPUT"
             echo "libghostty-relevant files changed: running native jobs."
           else
             echo "native=false" >> "$GITHUB_OUTPUT"
             echo "No libghostty-relevant files changed: skipping native jobs."
           fi
-
-  default-builds:
-    name: Default build (${{ matrix.goos }}/${{ matrix.goarch }}, no cgo)
-    needs: changes
-    if: >-
-      !cancelled() &&
-      (needs.changes.result != 'success' || needs.changes.outputs.native == 'true')
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - goos: darwin
-            goarch: arm64
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: Build the pure-Go compatibility binary without native code or cgo
-        env:
-          CGO_ENABLED: "0"
-          GOARCH: ${{ matrix.goarch }}
-          GOOS: ${{ matrix.goos }}
-        run: |
-          go build -trimpath -o "${RUNNER_TEMP}/gr" ./cmd/graith
-          scripts/libghostty-native.sh verify-default-binary "${RUNNER_TEMP}/gr"
 
   apple-adapter:
     name: Adapter and pinned artifact (macOS arm64)
@@ -352,6 +318,11 @@ jobs:
               -run '^TestTerminalBackendCompatibilityCorpus$'
             run_timed daemon-race go test -race -count=1 -tags=libghostty ./internal/daemon \
               -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff'
+            # This is the authoritative full integration execution for the
+            # native graph. Generic CI only compiles integration tests because
+            # it intentionally has no native helper inputs.
+            run_timed integration go test -v -race -count=1 \
+              -tags='libghostty integration' ./internal/integration/...
             run_timed daemon-lifecycle scripts/libghostty-native.sh daemon-test
             # Fixed budgets avoid the wall-clock deadline path affected by
             # golang/go#75804. Snapshot CI reached 494,054 executions; local
@@ -392,8 +363,8 @@ jobs:
             exit 1
           fi
           printf '%s\n' "$build_info"
-          if [[ "$build_info" == *$'\tdep\tgithub.com/charmbracelet/x/vt\t'* ]]; then
-            echo "tagged Linux binary contains the pure-Go terminal dependency" >&2
+          if grep -Fq 'github.com/charmbracelet/x/vt' <<<"$build_info"; then
+            echo "retired Charm x/vt is present in the tagged binary metadata" >&2
             exit 1
           fi
           sha256sum "$binary" "$LIBRARY" \
@@ -524,7 +495,6 @@ jobs:
     if: always()
     needs:
       - changes
-      - default-builds
       - apple-adapter
       - linux-adapter
     runs-on: ubuntu-latest
@@ -533,7 +503,6 @@ jobs:
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
           NATIVE_RELEVANT: ${{ needs.changes.outputs.native }}
-          DEFAULT_BUILDS_RESULT: ${{ needs.default-builds.result }}
           APPLE_ADAPTER_RESULT: ${{ needs.apple-adapter.result }}
           LINUX_ADAPTER_RESULT: ${{ needs.linux-adapter.result }}
           EVENT_NAME: ${{ github.event_name }}
@@ -552,11 +521,9 @@ jobs:
           if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$INCLUDE_LINUX" != "true" ]; then
             linux_required=false
           fi
-          if [ "$DEFAULT_BUILDS_RESULT" != "success" ] || \
-            [ "$APPLE_ADAPTER_RESULT" != "success" ] || \
+          if [ "$APPLE_ADAPTER_RESULT" != "success" ] || \
             { [ "$linux_required" = "true" ] && [ "$LINUX_ADAPTER_RESULT" != "success" ]; }; then
             echo "Required native jobs did not pass:" >&2
-            echo "  default builds: $DEFAULT_BUILDS_RESULT" >&2
             echo "  macOS arm64 adapter: $APPLE_ADAPTER_RESULT" >&2
             echo "  Linux adapter matrix: $LINUX_ADAPTER_RESULT" >&2
             exit 1

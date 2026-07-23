@@ -195,7 +195,7 @@ func startSleeper(t *testing.T, sm *SessionManager, id string) *grpty.Session {
 		t.Fatal(err)
 	}
 
-	sess, err := grpty.NewSession(grpty.SessionOpts{
+	sess, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID: id, Command: "sleep", Args: []string{"60"},
 		Dir: t.TempDir(), Rows: 24, Cols: 80,
 		LogPath: filepath.Join(logDir, id+".log"),
@@ -219,7 +219,7 @@ func startTalker(t *testing.T, id string) *grpty.Session {
 		t.Fatal(err)
 	}
 
-	sess, err := grpty.NewSession(grpty.SessionOpts{
+	sess, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID: id, Command: "sh", Args: []string{"-c", "echo bonnie; sleep 60"},
 		Dir: t.TempDir(), Rows: 24, Cols: 80,
 		LogPath: filepath.Join(logDir, id+".log"),

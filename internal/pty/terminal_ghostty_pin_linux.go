@@ -1,4 +1,4 @@
-//go:build libghostty && cgo && linux
+//go:build libghostty && cgo && linux && (amd64 || arm64)
 
 package pty
 

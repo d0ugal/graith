@@ -80,7 +80,7 @@ func TestCommandPolicyRemovalUpgradeFromExactBaseline(t *testing.T) {
 	currentBinary := filepath.Join(root, "gr-current")
 
 	buildGraithBinary(t, oldSource, oldBinary)
-	buildGraithBinary(t, repoRoot, currentBinary)
+	buildNativeGraithBinary(t, repoRoot, currentBinary)
 
 	configHome := filepath.Join(root, "config")
 	configDir := filepath.Join(configHome, "graith")
@@ -349,6 +349,18 @@ func buildGraithBinary(t *testing.T, sourceDir, output string) {
 	cmd.Env = append(os.Environ(), "GOWORK=off")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build Graith from %s: %v\n%s", sourceDir, err, output)
+	}
+}
+
+func buildNativeGraithBinary(t *testing.T, sourceDir, output string) {
+	t.Helper()
+
+	cmd := exec.Command("go", "build", "-tags=libghostty", "-o", output, "./cmd/graith")
+	cmd.Dir = sourceDir
+
+	cmd.Env = append(os.Environ(), "GOWORK=off", "CGO_ENABLED=1")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build native Graith from %s: %v\n%s", sourceDir, err, output)
 	}
 }
 

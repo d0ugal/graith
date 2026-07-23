@@ -94,11 +94,9 @@ sudo apk add --allow-untrusted graith_*_linux_amd64.apk
 go install github.com/d0ugal/graith/cmd/graith@latest
 ```
 
-`go install` names the binary `graith`; rename or symlink it to `gr`:
-
-```bash
-mv "$(go env GOPATH)/bin/graith" "$(go env GOPATH)/bin/gr"
-```
+`go install` produces an untagged binary with an `unavailable` terminal
+backend; it is not a supported daemon installation and cannot create PTY
+sessions. Use the prebuilt native artifact or the source flow instead.
 
 {{% /tab %}}
 {{% tab tabName="From source" %}}
@@ -109,20 +107,21 @@ cd graith
 make build    # produces ./gr
 ```
 
-Source and `go install` builds do not manufacture or register an unsigned app;
-on macOS they explicitly use the existing direct-spawn fallback.
+Source builds materialize and checksum-verify the pinned native inputs through
+`scripts/libghostty-native.sh`; the Linux flow builds the pinned Ghostty source
+itself. The first source build requires network access plus the pinned Zig and
+Ghostty inputs. Neither flow manufactures or registers an unsigned app.
 
 {{% /tab %}}
 {{< /tabs >}}
 
-## macOS upgrade, rollback, and uninstall
+## macOS upgrade and uninstall
 
 Normal Homebrew and tarball upgrades preserve service registrations. The new
 CLI validates and caches its matching signed app before a preserved restart;
-registration moves to that generation only while the job is down. The previous
-registered generation remains cached for rollback. If an older release cannot
-read newer persisted state, the existing state-version guard stops the
-downgrade and `gr doctor` lists the state backup to restore.
+registration moves to that generation only while the job is down. If an older
+release cannot read newer persisted state, the existing state-version guard
+stops the downgrade and `gr doctor` lists the state backup to restore.
 
 Before uninstalling, remove all per-user registrations while the signed package
 is still available:
@@ -188,14 +187,13 @@ gr-dev doctor
 gr-dev doctor --json | jq -r .terminal_backend
 ```
 
-Every supported stable/dev artifact reports `libghostty-helper`. A `charm`
-result means an unsupported or historical binary is running. See
+Every supported stable/dev artifact reports `libghostty-helper`. See
 [Troubleshooting]({{< relref "/docs/troubleshooting.md#verify-the-terminal-backend" >}})
 for the matching startup and failure log records.
 
 The dev and stable releases do not publish separately named rollback archives.
 Persistent scrollback remains backend-neutral, so a fresh native start, upgrade
-from a historical Charm release, or native-to-native upgrade needs no state conversion.
+from an older release, or native-to-native upgrade needs no state conversion.
 On macOS, remove the relevant service registration before uninstalling its
 package as described above.
 

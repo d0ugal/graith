@@ -37,7 +37,7 @@ func TestInterruptSession_UsesAgentConfig(t *testing.T) {
 
 	// Ignore SIGINT so the process survives every press; this lets us observe
 	// that the configured count/delay were applied rather than a single 0x03.
-	ptySess, err := grpty.NewSession(grpty.SessionOpts{
+	ptySess, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID: "braw", Command: "sh", Args: []string{"-c", "trap '' INT; sleep 30"},
 		Dir: t.TempDir(), Rows: 24, Cols: 80,
 		LogPath: logPath, MaxLogSize: 1024 * 1024,
@@ -78,7 +78,7 @@ func TestInterruptSession_DefaultAgentSinglePress(t *testing.T) {
 
 	logPath := filepath.Join(t.TempDir(), "canny.log")
 
-	ptySess, err := grpty.NewSession(grpty.SessionOpts{
+	ptySess, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID: "canny", Command: "sh", Args: []string{"-c", "sleep 30"},
 		Dir: t.TempDir(), Rows: 24, Cols: 80,
 		LogPath: logPath, MaxLogSize: 1024 * 1024,

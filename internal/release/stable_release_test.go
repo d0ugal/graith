@@ -38,7 +38,8 @@ func TestStableReleaseWorkflowBuildsBeforeOneControlledPublisher(t *testing.T) {
 	}
 
 	wantNeeds := map[string]workflowNeeds{
-		"release-context": nil,
+		"changes":         nil,
+		"release-context": {"changes"},
 		"build-darwin":    {"release-context"},
 		"build-linux":     {"release-context"},
 		"execute-linux":   {"release-context", "build-linux"},
@@ -110,12 +111,17 @@ func TestStableReleaseWorkflowVerifiesFinalPackagesOnActualArchitectures(t *test
 	}
 
 	for _, required := range []string{
-		"TestLibghosttyDaemonLifecycle", "TestLibghosttyCharmToNativeUpgrade",
-		"GRAITH_LIBGHOSTTY_UPGRADE_FROM_BINARY", "-race", "releaseartifact",
+		"TestLibghosttyDaemonLifecycle", "TestLibghosttyHistoricalPreRemovalUpgrade",
+		"GRAITH_LIBGHOSTTY_HISTORICAL_UPGRADE_BINARY", "-race", "releaseartifact",
 	} {
 		if !strings.Contains(execution, required) {
 			t.Errorf("actual-architecture lifecycle validation missing %q", required)
 		}
+	}
+
+	if strings.Contains(execution, "TestLibghosttyCharmToNativeUpgrade") ||
+		strings.Contains(execution, "GRAITH_LIBGHOSTTY_UPGRADE_FROM_BINARY") {
+		t.Fatal("release execution still references the removed Charm upgrade fixture")
 	}
 }
 
