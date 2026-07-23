@@ -5370,7 +5370,7 @@ func TestDeleteWithChildrenRemovesNonoProfiles(t *testing.T) {
 	}
 }
 
-func TestDeleteReparentsChildren(t *testing.T) {
+func TestDeleteRejectsChildrenWithoutReparenting(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	sm.state.Sessions["grandparent"] = &SessionState{
@@ -5412,23 +5412,23 @@ func TestDeleteReparentsChildren(t *testing.T) {
 	}
 
 	err := sm.Delete("ben")
-	if err != nil {
-		t.Fatalf("Delete failed: %v", err)
+	if err == nil {
+		t.Fatal("Delete should reject a session with children")
 	}
 
-	if _, ok := sm.state.Sessions["ben"]; ok {
-		t.Error("deleted session should be removed from state")
+	if _, ok := sm.state.Sessions["ben"]; !ok {
+		t.Error("rejected session should remain in state")
 	}
 
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
-	if sm.state.Sessions["bairn-one"].ParentID != "grandparent" {
-		t.Errorf("bairn-one.ParentID = %q, want %q", sm.state.Sessions["bairn-one"].ParentID, "grandparent")
+	if sm.state.Sessions["bairn-one"].ParentID != "ben" {
+		t.Errorf("bairn-one.ParentID = %q, want %q", sm.state.Sessions["bairn-one"].ParentID, "ben")
 	}
 
-	if sm.state.Sessions["bairn-two"].ParentID != "grandparent" {
-		t.Errorf("bairn-two.ParentID = %q, want %q", sm.state.Sessions["bairn-two"].ParentID, "grandparent")
+	if sm.state.Sessions["bairn-two"].ParentID != "ben" {
+		t.Errorf("bairn-two.ParentID = %q, want %q", sm.state.Sessions["bairn-two"].ParentID, "ben")
 	}
 
 	if sm.state.Sessions["thrawn-session"].ParentID != "grandparent" {
@@ -5436,7 +5436,7 @@ func TestDeleteReparentsChildren(t *testing.T) {
 	}
 }
 
-func TestDeleteReparentsChildrenToRoot(t *testing.T) {
+func TestDeleteRejectsChildrenWithoutReparentingToRoot(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	sm.state.Sessions["ben"] = &SessionState{
@@ -5457,15 +5457,15 @@ func TestDeleteReparentsChildrenToRoot(t *testing.T) {
 	}
 
 	err := sm.Delete("ben")
-	if err != nil {
-		t.Fatalf("Delete failed: %v", err)
+	if err == nil {
+		t.Fatal("Delete should reject a session with children")
 	}
 
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
-	if sm.state.Sessions["bairn"].ParentID != "" {
-		t.Errorf("bairn.ParentID = %q, want empty (top-level)", sm.state.Sessions["bairn"].ParentID)
+	if sm.state.Sessions["bairn"].ParentID != "ben" {
+		t.Errorf("bairn.ParentID = %q, want %q", sm.state.Sessions["bairn"].ParentID, "ben")
 	}
 }
 
@@ -5510,16 +5510,14 @@ func TestDeleteWithChildrenKeepsFailedSessions(t *testing.T) {
 		t.Errorf("child status = %q, want %q (reverted from deleting)", s.Status, StatusStopped)
 	}
 
-	found := false
+	if _, ok := sm.state.Sessions["parent1"]; !ok {
+		t.Error("parent should be kept while its failed child remains")
+	}
 
 	for _, id := range deleted {
 		if id == "parent1" {
-			found = true
+			t.Error("parent with a surviving child must not be reported deleted")
 		}
-	}
-
-	if !found {
-		t.Error("parent (no repo) should be in the deleted list")
 	}
 }
 
@@ -5828,20 +5826,16 @@ func TestDeleteClearsChildParentID(t *testing.T) {
 		Status:   StatusStopped,
 	}
 
-	if err := sm.Delete("ben"); err != nil {
-		t.Fatalf("Delete failed: %v", err)
+	if err := sm.Delete("ben"); err == nil {
+		t.Fatal("Delete succeeded despite surviving children")
 	}
 
-	if _, ok := sm.state.Sessions["ben"]; ok {
-		t.Error("ben should be removed from state")
+	if _, ok := sm.state.Sessions["ben"]; !ok {
+		t.Error("rejected delete must leave ben in state")
 	}
 
-	if sm.state.Sessions["bairn-one"].ParentID != "" {
-		t.Errorf("bairn-one ParentID = %q, want empty", sm.state.Sessions["bairn-one"].ParentID)
-	}
-
-	if sm.state.Sessions["bairn-two"].ParentID != "" {
-		t.Errorf("bairn-two ParentID = %q, want empty", sm.state.Sessions["bairn-two"].ParentID)
+	if sm.state.Sessions["bairn-one"].ParentID != "ben" || sm.state.Sessions["bairn-two"].ParentID != "ben" {
+		t.Error("rejected delete must preserve child ownership")
 	}
 
 	if sm.state.Sessions["wee-bairn"].ParentID != "bairn-one" {
@@ -5866,20 +5860,16 @@ func TestDeleteClearsChildParentIDWhenCreating(t *testing.T) {
 		Status:   StatusRunning,
 	}
 
-	if err := sm.Delete("creating-ben"); err != nil {
-		t.Fatalf("Delete failed: %v", err)
+	if err := sm.Delete("creating-ben"); err == nil {
+		t.Fatal("Delete succeeded despite surviving child")
 	}
 
-	if _, ok := sm.state.Sessions["creating-ben"]; ok {
-		t.Error("creating-ben should be removed from state")
-	}
-
-	if sm.state.Sessions["bairn"].ParentID != "" {
-		t.Errorf("bairn ParentID = %q, want empty", sm.state.Sessions["bairn"].ParentID)
+	if _, ok := sm.state.Sessions["creating-ben"]; !ok || sm.state.Sessions["bairn"].ParentID != "creating-ben" {
+		t.Error("rejected delete must preserve creating parent and child ownership")
 	}
 }
 
-func TestDeleteWithChildrenClearsOrphanedParentIDs(t *testing.T) {
+func TestDeleteWithChildrenRejectsProtectedDescendants(t *testing.T) {
 	sm := newTestSessionManager(t)
 
 	sm.state.Sessions["root"] = &SessionState{
@@ -5903,18 +5893,23 @@ func TestDeleteWithChildrenClearsOrphanedParentIDs(t *testing.T) {
 		Starred:  true,
 		Status:   StatusStopped,
 	}
-
-	deleted, err := sm.DeleteWithChildren("root", false)
-	if err != nil {
-		t.Fatalf("DeleteWithChildren failed: %v", err)
+	deletedAt := time.Now().Add(-time.Hour)
+	expiresAt := time.Now().Add(time.Hour)
+	sm.state.Sessions["deleting-child"] = &SessionState{
+		ID: "deleting-child", Name: "deleting-child", Agent: "claude", ParentID: "root",
+		Status: StatusDeleting, DeletedAt: &deletedAt, ExpiresAt: &expiresAt,
 	}
 
-	if _, ok := sm.state.Sessions["root"]; ok {
-		t.Error("root should be removed")
+	if _, err := sm.DeleteWithChildren("root", false); err == nil {
+		t.Fatal("DeleteWithChildren succeeded despite a protected descendant")
 	}
 
-	if _, ok := sm.state.Sessions["bairn"]; ok {
-		t.Error("child should be removed")
+	if _, ok := sm.state.Sessions["root"]; !ok {
+		t.Error("rejected subtree delete must leave root intact")
+	}
+
+	if _, ok := sm.state.Sessions["bairn"]; !ok {
+		t.Error("rejected subtree delete must leave ordinary child intact")
 	}
 
 	starredChild := sm.state.Sessions["starred-child"]
@@ -5922,11 +5917,9 @@ func TestDeleteWithChildrenClearsOrphanedParentIDs(t *testing.T) {
 		t.Fatal("starred-child should survive (starred)")
 	}
 
-	if starredChild.ParentID != "" {
-		t.Errorf("starred-child ParentID = %q, want empty (parent was deleted)", starredChild.ParentID)
+	if starredChild.ParentID != "root" {
+		t.Errorf("starred-child ParentID = %q, want root after rejection", starredChild.ParentID)
 	}
-
-	_ = deleted
 }
 
 func createTestSession(sm *SessionManager, name string) string {
@@ -7340,6 +7333,17 @@ func TestForkErrorsCov2(t *testing.T) {
 
 	if _, err := sm.Fork("bonnie", "src1", 24, 80); err == nil {
 		t.Error("expected unknown-agent error forking session with missing agent")
+	}
+
+	putSession(sm, &SessionState{
+		ID: "deleting-source", Name: "deleting-source", RepoPath: "/tmp/croft",
+		Agent: "ghaist-agent", Status: StatusDeleting,
+	})
+
+	if _, err := sm.Fork("bonnie", "deleting-source", 24, 80); err == nil {
+		t.Error("expected error forking a session being deleted")
+	} else {
+		assertErrContains(t, err, "being deleted")
 	}
 }
 

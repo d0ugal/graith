@@ -287,6 +287,17 @@ func TestReconcileTracker(t *testing.T) {
 		}
 	})
 
+	t.Run("reap=delete keeps a parent with children occupied", func(t *testing.T) {
+		obsolete := map[string]time.Time{"gh:croft#9": now.Add(-11 * time.Minute)}
+		parent := stopped("napping", "gh:croft#9")
+		parent.hasChildren = true
+
+		plan, _, _ := reconcileTracker(nil, []trackerSession{parent}, obsolete, grace, 0, config.TrackerReapDelete, now)
+		if len(plan.reap) != 0 {
+			t.Fatalf("delete mode must not reap a parent with children, got %+v", plan.reap)
+		}
+	})
+
 	t.Run("reap=none never reaps and keeps the slot occupied", func(t *testing.T) {
 		obsolete := map[string]time.Time{"gh:croft#1": now.Add(-11 * time.Minute)}
 		// One past-grace obsolete running session under reap=none + a new active

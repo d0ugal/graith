@@ -37,9 +37,10 @@ type issueRef struct {
 // stopped/errored all count as "exists") without acting incorrectly on a
 // half-created or already-finished session.
 type trackerSession struct {
-	id       string
-	issueKey string
-	status   SessionStatus
+	id          string
+	issueKey    string
+	status      SessionStatus
+	hasChildren bool
 	// completedCleanly marks a session that self-exited with code 0 — its work is
 	// done, so it is not auto-resumed even while its issue stays active (avoids
 	// resurrecting a one-shot agent every poll).
@@ -138,7 +139,7 @@ func reconcileTracker(
 			continue
 		}
 
-		if now.Sub(firstSeen) >= grace && trackerReapWillAct(reapMode, s) {
+		if now.Sub(firstSeen) >= grace && trackerReapWillAct(reapMode, s) && !s.hasChildren {
 			plan.reap = append(plan.reap, s.id)
 			reaped[s.id] = true
 		}
@@ -402,11 +403,22 @@ func (sm *SessionManager) trackerSessions(triggerName string) []trackerSession {
 			id:               id,
 			issueKey:         s.TrackerIssue,
 			status:           s.Status,
+			hasChildren:      sm.hasChildrenLocked(id),
 			completedCleanly: trackerCompletedCleanly(s),
 		})
 	}
 
 	return out
+}
+
+func (sm *SessionManager) hasChildrenLocked(id string) bool {
+	for _, s := range sm.state.Sessions {
+		if s.ParentID == id {
+			return true
+		}
+	}
+
+	return false
 }
 
 // trackerCompletedCleanly reports whether a stopped session finished its work on

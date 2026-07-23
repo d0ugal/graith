@@ -210,8 +210,8 @@ func TestBulkDeletePropagatesLiveDriverTeardownFailureThenRetries(t *testing.T) 
 	_, childPTY := sm.sessions["bairn"]
 	sm.mu.RUnlock()
 
-	if rootThere {
-		t.Error("root whose teardown succeeded was not removed")
+	if !rootThere {
+		t.Error("root must be kept while its child teardown is retryable")
 	}
 
 	if !childThere || !childPTY {

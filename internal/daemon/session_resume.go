@@ -315,6 +315,11 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		return SessionState{}, fmt.Errorf("session %q is being deleted", id)
 	}
 
+	if sm.subtreeDeleteOverlapsLocked(id) {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("session %q is in an ownership subtree being deleted", sessState.Name)
+	}
+
 	// A soft-deleted session is stopped-and-hidden; resuming it would relaunch a
 	// running agent that gr list won't show and the purge loop would later kill.
 	// Require an explicit restore first.
@@ -945,6 +950,15 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		ptySess.Close()
 
 		return SessionState{}, errors.New("session was deleted during resume")
+	}
+
+	if sm.subtreeDeleteOverlapsLocked(id) {
+		sm.mu.Unlock()
+		sm.logStopping(id, sm.sessionName(id), "rollback", "resume-rollback", ptySess)
+		_ = ptySess.Kill()
+		ptySess.Close()
+
+		return SessionState{}, errors.New("session subtree was deleted during resume")
 	}
 
 	sessState = sm.state.Sessions[id]

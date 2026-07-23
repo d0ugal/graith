@@ -85,6 +85,57 @@ func TestHandleDeleteSoftDefault(t *testing.T) {
 	}
 }
 
+func TestHandleDeleteRejectsChildrenBeforeMutation(t *testing.T) {
+	h := newTestHarness(t)
+	h.addStoppedSession(t, "ben-root", "ben-root", 0, "")
+	h.addStoppedSession(t, "bairn-child", "bairn-child", 0, "")
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["bairn-child"].ParentID = "ben-root"
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "delete", protocol.DeleteMsg{SessionID: "ben-root"})
+	h.expectError(t, "has child")
+
+	if s, ok := h.sm.Get("ben-root"); !ok || s.IsSoftDeleted() {
+		t.Fatal("rejected delete must not mutate the parent")
+	}
+}
+
+func TestHandleDeleteRejectsRunningChildBeforeMutation(t *testing.T) {
+	h := newTestHarness(t)
+	h.addStoppedSession(t, "ben-root", "ben-root", 0, "")
+	h.addStoppedSession(t, "bairn-child", "bairn-child", 0, "")
+	h.sm.mu.Lock()
+	child := h.sm.state.Sessions["bairn-child"]
+	child.ParentID = "ben-root"
+	child.Status = StatusRunning
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "delete", protocol.DeleteMsg{SessionID: "ben-root", Purge: true})
+	h.expectError(t, "has child")
+
+	if _, ok := h.sm.Get("bairn-child"); !ok {
+		t.Fatal("rejected purge must leave running child intact")
+	}
+}
+
+func TestHandlePurgeRejectsSoftDeletedChildren(t *testing.T) {
+	h := newTestHarness(t)
+	h.addStoppedSession(t, "ben-root", "ben-root", 0, "")
+	h.addStoppedSession(t, "bairn-child", "bairn-child", 0, "")
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["bairn-child"].ParentID = "ben-root"
+	h.sm.mu.Unlock()
+	softDeleteViaHandler(t, h, "bairn-child")
+
+	h.sendControl(t, "delete", protocol.DeleteMsg{SessionID: "ben-root", Purge: true})
+	h.expectError(t, "has child")
+
+	if _, ok := h.sm.Get("ben-root"); !ok {
+		t.Fatal("rejected purge must leave the parent intact")
+	}
+}
+
 func TestHandleDeleteOrchestratorIsFreshReset(t *testing.T) {
 	cfg := config.Default()
 	cfg.Orchestrator.Enabled = true
@@ -93,6 +144,9 @@ func TestHandleDeleteOrchestratorIsFreshReset(t *testing.T) {
 
 	h.sm.mu.Lock()
 	h.sm.state.Sessions["auld-orch"].SystemKind = SystemKindOrchestrator
+	h.sm.state.Sessions["auld-child"] = &SessionState{
+		ID: "auld-child", Name: "auld-child", Status: StatusStopped, ParentID: "auld-orch",
+	}
 	h.sm.mu.Unlock()
 
 	h.sendControl(t, "delete", protocol.DeleteMsg{SessionID: "auld-orch"})
@@ -113,6 +167,10 @@ func TestHandleDeleteOrchestratorIsFreshReset(t *testing.T) {
 
 	if _, ok := h.sm.Get("auld-orch"); ok {
 		t.Error("old orchestrator should be removed so reconciliation can replace it")
+	}
+
+	if _, ok := h.sm.Get("auld-child"); ok {
+		t.Error("orchestrator reset should remove its owned child subtree")
 	}
 }
 

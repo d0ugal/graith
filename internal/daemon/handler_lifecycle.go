@@ -466,6 +466,25 @@ func handleDelete(sm *SessionManager, auth authContext, sendControl func(string,
 		return
 	}
 
+	if orchestratorReset {
+		affected, err := sm.deleteWithChildrenIncludingSystemRoot(d.SessionID)
+		if err != nil {
+			sendControl("error", protocol.ErrorMsg{Message: err.Error()})
+			return
+		}
+
+		result := protocol.DeleteResultMsg{SessionID: d.SessionID, Name: target.Name, Soft: false}
+		for _, id := range affected {
+			result.Affected = append(result.Affected, protocol.DeleteResultMsg{SessionID: id, Soft: false})
+		}
+
+		sm.notifyOrchestratorReconcile()
+
+		sendControl("deleted", result)
+
+		return
+	}
+
 	if soft {
 		snap, err := sm.SoftDelete(d.SessionID)
 		if err != nil {

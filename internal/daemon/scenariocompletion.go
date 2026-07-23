@@ -917,6 +917,11 @@ func (sm *SessionManager) runScenarioCleanup(ctx context.Context, scenarioID str
 
 	sm.mu.RUnlock()
 
+	ownedIDs := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		ownedIDs[id] = struct{}{}
+	}
+
 	deleted := 0
 	skipped := 0
 
@@ -928,7 +933,19 @@ func (sm *SessionManager) runScenarioCleanup(ctx context.Context, scenarioID str
 		sm.mu.RLock()
 		s := sm.state.Sessions[id]
 		owned := s != nil && s.ScenarioID == scenarioID
+
 		protected := s == nil || s.IsSoftDeleted() || s.Starred || IsSystemSession(s)
+		if !protected {
+			for _, descendantID := range sm.collectDescendants(id) {
+				descendant := sm.state.Sessions[descendantID]
+				if _, ownedByScenario := ownedIDs[descendantID]; !ownedByScenario ||
+					descendant == nil || descendant.ScenarioID != scenarioID || descendant.Starred || IsSystemSession(descendant) ||
+					descendant.Status == StatusCreating || descendant.Status == StatusDeleting {
+					protected = true
+					break
+				}
+			}
+		}
 
 		sm.mu.RUnlock()
 
@@ -937,7 +954,10 @@ func (sm *SessionManager) runScenarioCleanup(ctx context.Context, scenarioID str
 			continue
 		}
 
-		if _, err := sm.SoftDelete(id); err != nil {
+		if _, err := sm.softDeleteWithChildrenOwned(id, false, func(descendantID string, descendant *SessionState) bool {
+			_, ok := ownedIDs[descendantID]
+			return descendant != nil && descendant.ScenarioID == scenarioID && ok
+		}); err != nil {
 			sm.finishScenarioCleanup(scenarioID, epoch, "", fmt.Errorf("soft delete %s: %w", id, err))
 			return
 		}

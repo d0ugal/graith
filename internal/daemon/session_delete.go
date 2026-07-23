@@ -29,6 +29,16 @@ func (sm *SessionManager) Delete(id string) error {
 		return fmt.Errorf("session %q not found", id)
 	}
 
+	if sm.subtreeDeleteActiveLocked(id) {
+		sm.mu.Unlock()
+		return fmt.Errorf("session %q is undergoing subtree deletion", id)
+	}
+
+	if err := sm.rejectDeleteWithChildrenLocked(id); err != nil {
+		sm.mu.Unlock()
+		return err
+	}
+
 	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
 		sm.mu.Unlock()
 
@@ -79,22 +89,14 @@ func (sm *SessionManager) Delete(id string) error {
 	sessSystemKind := sessState.SystemKind
 	prevStatus := sessState.Status
 	sessToken := sessState.Token
-	parentID := sessState.ParentID
 	sessionIncludes := make([]IncludedRepoState, len(sessState.Includes))
 	copy(sessionIncludes, sessState.Includes)
 
 	if sessState.Status == StatusCreating {
 		// Session is mid-creation (Phase 2). Remove from state so Phase 3 detects
 		// the deletion and handles cleanup (worktree, PTY).
-		sm.reparentChildrenLocked(id, parentID)
 		delete(sm.state.Sessions, id)
 		delete(sm.hookReports, id)
-
-		for _, s := range sm.state.Sessions {
-			if s.ParentID == id {
-				s.ParentID = ""
-			}
-		}
 
 		_ = sm.saveState()
 		sm.mu.Unlock()
@@ -113,7 +115,6 @@ func (sm *SessionManager) Delete(id string) error {
 	// The PID stays in state until the tombstone (which carries it) is durably
 	// written, so a crash before the tombstone lands still leaves a reap-able
 	// PID rather than a silently-orphaned process.
-	_ = sm.saveState()
 	sm.mu.Unlock()
 
 	// Write a tombstone before any teardown so a crash mid-delete is resumed on
@@ -343,27 +344,12 @@ func (sm *SessionManager) Delete(id string) error {
 	}
 
 	sm.mu.Lock()
-	// Re-read parentID under the lock: a concurrent Delete of our parent may
-	// have updated sessState.ParentID while we were doing teardown without the
-	// lock held. Using the stale captured value would reparent children to a
-	// session that no longer exists.
-	if s, ok := sm.state.Sessions[id]; ok {
-		parentID = s.ParentID
-	}
-
-	sm.reparentChildrenLocked(id, parentID)
 	delete(sm.state.Sessions, id)
 	delete(sm.hookReports, id)
 	delete(sm.silentWarned, id)
 
 	if sessToken != "" {
 		delete(sm.tokenIndex, sessToken)
-	}
-
-	for _, s := range sm.state.Sessions {
-		if s.ParentID == id {
-			s.ParentID = ""
-		}
 	}
 
 	err := sm.saveState()
@@ -397,14 +383,98 @@ func (sm *SessionManager) Delete(id string) error {
 	return err
 }
 
-// reparentChildrenLocked reassigns all direct children of the deleted session
-// to its parent. Must be called with sm.mu held.
-func (sm *SessionManager) reparentChildrenLocked(deletedID, newParentID string) {
-	for _, s := range sm.state.Sessions {
-		if s.ParentID == deletedID {
-			s.ParentID = newParentID
+// rejectDeleteWithChildrenLocked prevents a single-session delete from hiding
+// or removing an ownership node while descendants remain. The caller holds
+// sm.mu. Soft-deleted descendants count too: they are still state and still
+// part of the ownership tree until an explicit subtree operation handles them.
+func (sm *SessionManager) rejectDeleteWithChildrenLocked(id string) error {
+	parentName := id
+	if parent, ok := sm.state.Sessions[id]; ok && parent.Name != "" {
+		parentName = parent.Name
+	}
+
+	for childID, child := range sm.state.Sessions {
+		if child.ParentID != id {
+			continue
+		}
+
+		return fmt.Errorf("session %q has child %q; use `gr delete %s --children`, delete/purge the child first, or explicitly reparent it with `gr update %s --parent <parent>`", parentName, child.Name, id, childID)
+	}
+
+	return nil
+}
+
+// subtreeDeleteActiveLocked reports whether id is in a reserved soft-delete
+// subtree. The caller holds sm.mu.
+func (sm *SessionManager) subtreeDeleteActiveLocked(id string) bool {
+	seen := make(map[string]struct{})
+
+	for id != "" {
+		if _, active := sm.subtreeDeleteRoots[id]; active {
+			return true
+		}
+
+		if _, ok := seen[id]; ok {
+			return false
+		}
+
+		seen[id] = struct{}{}
+
+		sess := sm.state.Sessions[id]
+
+		if sess == nil {
+			return false
+		}
+
+		id = sess.ParentID
+	}
+
+	return false
+}
+
+func (sm *SessionManager) subtreeDeleteOverlapsLocked(id string) bool {
+	if sm.subtreeDeleteActiveLocked(id) {
+		return true
+	}
+
+	for _, descendantID := range sm.collectDescendants(id) {
+		if _, active := sm.subtreeDeleteRoots[descendantID]; active {
+			return true
 		}
 	}
+
+	return false
+}
+
+// rejectUnsafeDeleteDescendantsLocked ensures --children cannot partially
+// delete a subtree and leave protected descendants attached to a removed
+// parent. Already-soft-deleted descendants are included in a soft subtree as
+// an already-completed operation and are therefore safe to retain.
+func (sm *SessionManager) rejectUnsafeDeleteDescendantsLocked(id string, excludeRoot, allowSystemRoot bool) error {
+	for _, did := range sm.collectDescendants(id) {
+		if (excludeRoot || allowSystemRoot) && did == id {
+			continue
+		}
+
+		sess := sm.state.Sessions[did]
+		if sess == nil {
+			continue
+		}
+
+		if sess.Status == StatusDeleting {
+			return fmt.Errorf("cannot delete subtree: descendant %q must be handled explicitly first (wait for lifecycle completion or reparent it with `gr update %s --parent <parent>`)", sess.Name, did)
+		}
+
+		if sess.IsSoftDeleted() {
+			continue
+		}
+
+		if sess.Starred || IsSystemSession(sess) || sess.Status == StatusCreating {
+			return fmt.Errorf("cannot delete subtree: descendant %q must be handled explicitly first (unstar it, wait for lifecycle completion, or reparent it with `gr update %s --parent <parent>`)", sess.Name, did)
+		}
+	}
+
+	return nil
 }
 
 // bulkDeleteSnapshot captures the per-session data DeleteWithChildren needs to
@@ -620,6 +690,17 @@ func (sm *SessionManager) restoreLiveDriverForRetry(id string, driver sessionDri
 // whose teardown fails are kept for retry. Returns the list of deleted session
 // IDs and an error if any teardowns failed.
 func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]string, error) {
+	return sm.deleteWithChildren(id, excludeRoot, false)
+}
+
+// deleteWithChildrenIncludingSystemRoot is used only for the enabled
+// orchestrator reset, whose documented scope includes replacing the complete
+// config-owned subtree. Descendant system sessions remain protected.
+func (sm *SessionManager) deleteWithChildrenIncludingSystemRoot(id string) ([]string, error) {
+	return sm.deleteWithChildren(id, false, true)
+}
+
+func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystemRoot bool) ([]string, error) {
 	if err := sm.beginLifecycleOperation(); err != nil {
 		return nil, err
 	}
@@ -633,9 +714,19 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 		return nil, fmt.Errorf("session %q not found", id)
 	}
 
+	if sm.subtreeDeleteOverlapsLocked(id) {
+		sm.mu.Unlock()
+		return nil, fmt.Errorf("session %q is undergoing subtree deletion", id)
+	}
+
 	if !excludeRoot && sess.Starred {
 		sm.mu.Unlock()
 		return nil, fmt.Errorf("session %q is starred; unstar it first to delete", id)
+	}
+
+	if err := sm.rejectUnsafeDeleteDescendantsLocked(id, excludeRoot, allowSystemRoot); err != nil {
+		sm.mu.Unlock()
+		return nil, err
 	}
 
 	toDelete := sm.collectDescendants(id)
@@ -655,7 +746,7 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 
 	for _, did := range toDelete {
 		sess := sm.state.Sessions[did]
-		if IsSystemSession(sess) {
+		if IsSystemSession(sess) && (!allowSystemRoot || did != id) {
 			sm.log.Info("skipping system session in bulk delete", "session_id", did, "name", sess.Name)
 			continue
 		}
@@ -722,6 +813,20 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 		// (issue #1326). Mirrors the single-delete ordering.
 	}
 
+	if sm.subtreeDeleteRoots == nil {
+		sm.subtreeDeleteRoots = make(map[string]struct{})
+	}
+
+	sm.subtreeDeleteRoots[id] = struct{}{}
+	sm.mu.Unlock()
+
+	defer func() {
+		sm.mu.Lock()
+		delete(sm.subtreeDeleteRoots, id)
+		sm.mu.Unlock()
+	}()
+
+	sm.mu.Lock()
 	_ = sm.saveState()
 	sm.mu.Unlock()
 
@@ -957,6 +1062,24 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 
 	// Remove successfully torn-down sessions; revert failed ones to their prior status.
 	sm.mu.Lock()
+	for _, s := range snaps {
+		if !succeeded[s.id] {
+			continue
+		}
+
+		for _, descendantID := range sm.collectDescendants(s.id) {
+			if !succeeded[descendantID] {
+				// Keep an ancestor whenever any descendant remains. Removing it
+				// would leave a dangling ownership reference; retry the complete
+				// subtree after the descendant failure is resolved.
+				succeeded[s.id] = false
+				teardownFailed[s.id] = true
+				teardownErrs = append(teardownErrs, fmt.Errorf("session %s retained because descendant %s was not deleted", s.id, descendantID))
+
+				break
+			}
+		}
+	}
 
 	deletedIDs := append([]string{}, creatingIDs...)
 
@@ -990,12 +1113,6 @@ func (sm *SessionManager) DeleteWithChildren(id string, excludeRoot bool) ([]str
 			} else {
 				sess.Status = s.prevStatus
 			}
-		}
-	}
-
-	for _, s := range sm.state.Sessions {
-		if s.ParentID != "" && removedSet[s.ParentID] {
-			s.ParentID = ""
 		}
 	}
 
