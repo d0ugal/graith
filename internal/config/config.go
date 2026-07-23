@@ -1856,6 +1856,103 @@ type PRWatchConfig struct {
 	// these only for operators who need to trade off load, latency, retention, and
 	// prompt-injection surface — the defaults suit ordinary use.
 	Advanced PRWatchAdvancedConfig `toml:"advanced"`
+	Push     PRWatchPushConfig     `toml:"push"`
+}
+
+// PRWatchPushConfig controls the experimental, loopback-only GitHub webhook
+// accelerator. It is deliberately disabled unless an explicit repository
+// allowlist is supplied; polling remains authoritative and always available.
+type PRWatchPushConfig struct {
+	Enabled      bool     `toml:"enabled"`
+	Repositories []string `toml:"repositories"`
+	BindAddress  string   `toml:"bind_address"`
+	Route        string   `toml:"route"`
+	Secret       string   `toml:"secret"`
+	BodyMaxBytes int      `toml:"body_max_bytes"`
+	QueueSize    int      `toml:"queue_size"`
+	DedupeSize   int      `toml:"dedupe_size"`
+	DedupeTTL    string   `toml:"dedupe_ttl"`
+	Debounce     string   `toml:"debounce"`
+	// ForwardArgs configures the gh webhook-forward subcommand and its
+	// placeholders: {repository}, {events}, {url}, and {secret}.
+	ForwardArgs []string `toml:"forward_args"`
+}
+
+const (
+	PRWatchPushBodyMaxBytes = 1 << 20
+	PRWatchPushQueueMax     = 4096
+	PRWatchPushDedupeMax    = 10000
+	PRWatchPushSecretMinLen = 32
+)
+
+//nolint:wsl_v5 // compact bounds accessors keep each policy together.
+func (p PRWatchPushConfig) BodyLimit() int {
+	if p.BodyMaxBytes <= 0 || p.BodyMaxBytes > PRWatchPushBodyMaxBytes {
+		return PRWatchPushBodyMaxBytes
+	}
+	return p.BodyMaxBytes
+}
+
+//nolint:wsl_v5 // compact bounds accessor.
+func (p PRWatchPushConfig) QueueLimit() int {
+	if p.QueueSize <= 0 {
+		return 256
+	}
+	if p.QueueSize > PRWatchPushQueueMax {
+		return PRWatchPushQueueMax
+	}
+	return p.QueueSize
+}
+
+//nolint:wsl_v5 // compact bounds accessor.
+func (p PRWatchPushConfig) DedupeLimit() int {
+	if p.DedupeSize <= 0 {
+		return 2048
+	}
+	if p.DedupeSize > PRWatchPushDedupeMax {
+		return PRWatchPushDedupeMax
+	}
+	return p.DedupeSize
+}
+
+func (p PRWatchPushConfig) DedupeDuration() time.Duration {
+	return positiveDurationOrDefault(p.DedupeTTL, 24*time.Hour)
+}
+
+func (p PRWatchPushConfig) DebounceDuration() time.Duration {
+	return positiveDurationOrDefault(p.Debounce, 750*time.Millisecond)
+}
+
+//nolint:wsl_v5 // compact loopback validation accessor.
+func (p PRWatchPushConfig) LoopbackAddress() string {
+	if p.BindAddress == "" {
+		return "127.0.0.1:0"
+	}
+	if strings.HasPrefix(p.BindAddress, "127.0.0.1:") || strings.HasPrefix(p.BindAddress, "[::1]:") {
+		return p.BindAddress
+	}
+	return "127.0.0.1:0"
+}
+
+// ExpandedForwardArgs substitutes the values supplied by the managed
+// forwarder into the operator-configured external-tool argument vector.
+//
+//nolint:wsl_v5 // compact template expansion keeps the configured argv path together.
+func (p PRWatchPushConfig) ExpandedForwardArgs(repository, events, endpoint, secret string) []string {
+	values := map[string]string{
+		"repository": repository,
+		"events":     events,
+		"url":        endpoint,
+		"secret":     secret,
+	}
+	args := make([]string, len(p.ForwardArgs))
+	for i, arg := range p.ForwardArgs {
+		for name, value := range values {
+			arg = strings.ReplaceAll(arg, "{"+name+"}", value)
+		}
+		args[i] = arg
+	}
+	return args
 }
 
 // PRWatchAdvancedConfig carries the advanced tuning for the PR/CI watch loop and
@@ -3836,6 +3933,10 @@ func (c *Config) Validate() error {
 			size,
 			PRWatchKickChannelSizeMax,
 		))
+	}
+
+	if secret := c.PRWatch.Push.Secret; secret != "" && len([]byte(secret)) < PRWatchPushSecretMinLen {
+		errs = append(errs, fmt.Errorf("pr_watch.push.secret: must be at least %d bytes", PRWatchPushSecretMinLen))
 	}
 
 	// default_agent is resolved when a caller omits --agent and is also inherited

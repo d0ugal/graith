@@ -405,6 +405,21 @@ ref_reconcile_interval         = "2s"     # how often the git-ref watcher set is
 ref_debounce                   = "750ms"  # coalesce a burst of ref writes from one push/commit into one kick
 gh_timeout                     = "5s"     # per-command timeout for the daemon's gh invocations
 
+# Experimental GitHub webhook accelerator. Disabled unless explicitly enabled
+# with an allowlist. `gh webhook forward` is testing/development-only; polling
+# remains authoritative and is never disabled by push failures.
+[pr_watch.push]
+enabled       = false
+repositories  = []
+bind_address  = "127.0.0.1:0"
+body_max_bytes = 1048576
+queue_size    = 256
+dedupe_size   = 2048
+dedupe_ttl    = "24h"
+# Coalesce repeated hints for the same repository/PR/head before queueing.
+debounce      = "750ms"
+forward_args  = ["webhook", "forward", "--repo", "{repository}", "--events", "{events}", "--url", "{url}", "--secret", "{secret}"]
+
 [status_bar]
 enabled = true       # show the status bar in attached sessions
 position = "bottom"  # where to render it: "top" or "bottom"

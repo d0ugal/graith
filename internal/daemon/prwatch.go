@@ -105,8 +105,15 @@ type prWatchTarget struct {
 
 // RunPRWatchLoop is the daemon-owned PR/CI watcher. Modeled on RunGitPullLoop:
 // config-gated, tolerant of errors, off the request path.
+//
+//nolint:wsl_v5 // the watcher setup and loop are intentionally kept together.
 func (sm *SessionManager) RunPRWatchLoop(ctx context.Context) {
+	var pushHints <-chan prPushHint
+	if sm.prPush != nil {
+		pushHints = sm.prPush.hints
+	}
 	ghOK := ghAvailable()
+
 	if !ghOK {
 		sm.log.Info("pr-watch: gh not found on PATH, PR/CI awareness disabled")
 	}
@@ -119,6 +126,16 @@ func (sm *SessionManager) RunPRWatchLoop(ctx context.Context) {
 	// unit tests) still runs the poll loop.
 	if ghOK && sm.prRefWatch != nil {
 		sm.startBackgroundTask(ctx, sm.RunPRRefWatchLoop)
+	}
+
+	if ghOK && sm.prPush != nil {
+		if err := sm.prPush.start(ctx, sm); err != nil {
+			sm.prPush.stats.mu.Lock()
+			sm.prPush.stats.state = "degraded"
+			sm.prPush.stats.lastError = err.Error()
+			sm.prPush.stats.mu.Unlock()
+		}
+		defer sm.prPush.stop()
 	}
 
 	// Cadence is read once at loop start; changing base_tick takes effect on the
@@ -144,7 +161,43 @@ func (sm *SessionManager) RunPRWatchLoop(ctx context.Context) {
 			}
 
 			sm.pollKicked(ctx, &cfg.PRWatch, id)
+		case hint := <-pushHints:
+			cfg := sm.Config()
+			if cfg.PRWatch.Enabled && ghOK {
+				sm.pollPushHint(ctx, &cfg.PRWatch, hint)
+			}
 		}
+	}
+}
+
+// pollPushHint turns a validated webhook hint into ordinary targeted polls.
+// A missing cursor or known cursor mismatch is rejected before any expensive
+// GitHub refresh; ordinary polling discovers newly-associated PRs.
+//
+//nolint:wsl_v5 // hint filtering intentionally follows the fail-closed sequence.
+func (sm *SessionManager) pollPushHint(ctx context.Context, cfg *configPRWatch, hint prPushHint) {
+	for _, target := range sm.prWatchTargets() {
+		slug, ok := repoSlug(target.worktreePath)
+		if !ok || !strings.EqualFold(slug, hint.Repository) {
+			continue
+		}
+		sm.prWatch.mu.Lock()
+		cur := sm.prWatch.cursors[target.id]
+		match := cur != nil && cur.number == hint.Number && (hint.HeadSHA == "" || cur.headRefOid == hint.HeadSHA)
+		sm.prWatch.mu.Unlock()
+		if !match {
+			continue
+		}
+		if !sm.allowKick(cfg, target.id) {
+			sm.prPush.stats.mu.Lock()
+			sm.prPush.stats.coalesced++
+			sm.prPush.stats.mu.Unlock()
+			continue
+		}
+		sm.prPush.stats.mu.Lock()
+		sm.prPush.stats.kicks++
+		sm.prPush.stats.mu.Unlock()
+		sm.pollSession(ctx, cfg, target, true)
 	}
 }
 

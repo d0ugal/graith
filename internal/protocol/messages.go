@@ -758,7 +758,21 @@ type DiagnosticsMsg struct {
 	// configured cadence). Current daemons populate cadence before the first
 	// sweep; LastSweep and NextSweep are empty until it runs. Purge is nil when
 	// an older daemon omits these diagnostics.
-	Purge *PurgeDiagnostic `json:"purge,omitempty"`
+	Purge  *PurgeDiagnostic  `json:"purge,omitempty"`
+	PRPush *PRPushDiagnostic `json:"pr_push,omitempty"`
+}
+
+// PRPushDiagnostic is local daemon health data surfaced through gr doctor.
+type PRPushDiagnostic struct {
+	State        string `json:"state"`
+	LastError    string `json:"last_error,omitempty"`
+	LastDelivery string `json:"last_delivery,omitempty"`
+	Accepted     uint64 `json:"accepted"`
+	Rejected     uint64 `json:"rejected"`
+	Duplicate    uint64 `json:"duplicate"`
+	Coalesced    uint64 `json:"coalesced"`
+	Dropped      uint64 `json:"dropped"`
+	Kicks        uint64 `json:"kicks"`
 }
 
 // PurgeDiagnostic reports the soft-delete purge sweep schedule for gr doctor.

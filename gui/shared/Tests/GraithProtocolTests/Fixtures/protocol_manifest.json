@@ -877,6 +877,14 @@
             "ref": "PurgeDiagnostic"
           },
           "optional": true
+        },
+        {
+          "name": "pr_push",
+          "type": {
+            "kind": "object",
+            "ref": "PRPushDiagnostic"
+          },
+          "optional": true
         }
       ]
     },
@@ -1985,6 +1993,75 @@
             "kind": "bool"
           },
           "optional": true
+        }
+      ]
+    },
+    {
+      "name": "PRPushDiagnostic",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "state",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "last_error",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "last_delivery",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "accepted",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "rejected",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "duplicate",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "coalesced",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "dropped",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "kicks",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
         }
       ]
     },

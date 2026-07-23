@@ -47,6 +47,20 @@ func TestPRWatchDefaults(t *testing.T) {
 	}
 }
 
+func TestPRWatchPushSecretMinimum(t *testing.T) {
+	cfg := Default()
+	cfg.PRWatch.Push.Secret = "dreich"
+
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "pr_watch.push.secret") {
+		t.Fatalf("short push secret validation error = %v", err)
+	}
+
+	cfg.PRWatch.Push.Secret = strings.Repeat("b", PRWatchPushSecretMinLen)
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("minimum-length push secret rejected: %v", err)
+	}
+}
+
 // TestPRWatchCommentCompat covers the backward-compatibility bridge: an older
 // config that enabled notify_review_comments (which used to gate BOTH comment
 // surfaces) but predates notify_pr_comments must keep receiving conversation

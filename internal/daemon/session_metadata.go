@@ -237,6 +237,8 @@ func (sm *SessionManager) fleetSummary() protocol.FleetSummary {
 }
 
 // Diagnostics collects runtime health data for gr doctor.
+//
+//nolint:wsl_v5 // diagnostics assembly keeps related snapshots together.
 func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 	sm.mu.RLock()
 	cfg := sm.cfg
@@ -340,7 +342,7 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 		}
 	}
 
-	return protocol.DiagnosticsMsg{
+	msg := protocol.DiagnosticsMsg{
 		DaemonPID:         os.Getpid(),
 		DaemonUptime:      now.Sub(sm.startedAt).Truncate(time.Second).String(),
 		TerminalBackend:   grpty.TerminalBackend(),
@@ -352,6 +354,17 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 		Triggers:          sm.degradedTriggerDiagnostics(),
 		Purge:             sm.purgeDiagnostic(),
 	}
+	if sm.prPush != nil {
+		stats := sm.prPush.stats.snapshot()
+
+		push := &protocol.PRPushDiagnostic{State: stats.State, LastError: stats.LastError, Accepted: stats.Accepted, Rejected: stats.Rejected, Duplicate: stats.Duplicate, Coalesced: stats.Coalesced, Dropped: stats.Dropped, Kicks: stats.Kicks}
+		if !stats.LastDelivery.IsZero() {
+			push.LastDelivery = stats.LastDelivery.UTC().Format(time.RFC3339)
+		}
+
+		msg.PRPush = push
+	}
+	return msg
 }
 
 // purgeDiagnostic builds the soft-delete purge schedule consumed by gr doctor:

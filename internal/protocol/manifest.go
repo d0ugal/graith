@@ -181,6 +181,7 @@ var registeredTypes = []any{
 	SessionDiagnostic{},
 	TriggerDiagnostic{},
 	PurgeDiagnostic{},
+	PRPushDiagnostic{},
 	ScrollbackDiagnostic{},
 	MessagesDiagnostic{},
 	FleetSummary{},
@@ -432,6 +433,7 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"SessionDiagnostic":    {SwiftRequired, "SessionDiagnostic"},    // GUI diagnostics panel (#904)
 	"TriggerDiagnostic":    {SwiftNA, ""},                           // local-only (doctor)
 	"PurgeDiagnostic":      {SwiftNA, ""},                           // local-only (doctor)
+	"PRPushDiagnostic":     {SwiftNA, ""},                           // local-only (doctor)
 	"ScrollbackDiagnostic": {SwiftRequired, "ScrollbackDiagnostic"}, // GUI diagnostics panel (#904)
 	"MessagesDiagnostic":   {SwiftRequired, "MessagesDiagnostic"},   // GUI diagnostics panel (#904)
 
