@@ -197,7 +197,10 @@ jobs:
           CGO_ENABLED=0 go build -C "$historical_worktree" -trimpath \
             -ldflags="-s -w -X github.com/d0ugal/graith/internal/version.Version=historical-pre-removal -X github.com/d0ugal/graith/internal/version.CommitSHA=$historical_revision" \
             -o "$historical_binary" ./cmd/graith
-          test "$(go version -m "$historical_binary" | grep -c 'github.com/charmbracelet/x/vt')" -gt 0
+          historical_info="$(go version -m "$historical_binary")"
+          grep -Fq 'GOARCH=arm64' <<<"$historical_info"
+          grep -Fq 'CGO_ENABLED=0' <<<"$historical_info"
+          grep -Fq 'github.com/charmbracelet/x/vt' <<<"$historical_info"
           test ! -e "dist/graith-historical-pre-removal"
           GRAITH_LIBGHOSTTY_DAEMON_BINARY="$arm64_root/gr" \
             GRAITH_LIBGHOSTTY_HISTORICAL_UPGRADE_BINARY="$historical_binary" \
@@ -424,7 +427,10 @@ jobs:
           CGO_ENABLED=0 go build -C "$historical_worktree" -trimpath \
             -ldflags="-s -w -X github.com/d0ugal/graith/internal/version.Version=historical-pre-removal -X github.com/d0ugal/graith/internal/version.CommitSHA=$historical_revision" \
             -o "$historical_binary" ./cmd/graith
-          test "$(go version -m "$historical_binary" | grep -c 'github.com/charmbracelet/x/vt')" -gt 0
+          historical_info="$(go version -m "$historical_binary")"
+          grep -Fq "GOARCH=$GOARCH" <<<"$historical_info"
+          grep -Fq 'CGO_ENABLED=0' <<<"$historical_info"
+          grep -Fq 'github.com/charmbracelet/x/vt' <<<"$historical_info"
           test ! -e "dist/graith-historical-pre-removal"
           GRAITH_LIBGHOSTTY_DAEMON_BINARY="$release_root/gr" \
             GRAITH_LIBGHOSTTY_HISTORICAL_UPGRADE_BINARY="$historical_binary" \
