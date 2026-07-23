@@ -183,6 +183,7 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 	var (
 		remoteRuntimeChanged bool
 		runtime              *remoteRuntime
+		remotePrepareErr     error
 	)
 
 	if sm.remote != nil {
@@ -190,7 +191,11 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 
 		runtime, remoteRuntimeChanged, err = sm.remote.prepare(newCfg.Remote)
 		if err != nil {
-			return fmt.Errorf("remote runtime replacement failed; remote access is closed and the previous config remains active: %w", err)
+			// Remote access is optional. prepare has already invalidated and
+			// closed the old generation, so publish the rest of this generation
+			// with remote access closed and report the degraded subsystem below.
+			remotePrepareErr = err
+			sm.log.Warn("remote runtime degraded; configuration applied without remote access", "err", err)
 		}
 	}
 
@@ -454,6 +459,10 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 		if newCfg.Orchestrator.Enabled {
 			sm.startBackgroundTask(context.Background(), sm.ensureOrchestrator)
 		}
+	}
+
+	if remotePrepareErr != nil {
+		return fmt.Errorf("configuration applied with remote access degraded and closed: %w", remotePrepareErr)
 	}
 
 	return nil

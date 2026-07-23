@@ -88,10 +88,11 @@ retry; use `--force` only when intentionally interrupting it.
 ### `gr daemon reload`
 
 Reload configuration without restarting the daemon. Invalid settings or a
-runtime apply failure return an error and leave the previous config generation in
-place. Remote transport replacement closes the old listener first and stays
-closed if the replacement fails — fix the setting and reload again through the
-local socket. See [remote hot reload]({{< relref "/docs/configuration/access.md#hot-reload-and-revocation" >}}).
+non-optional runtime apply failure return an error and leave the previous config
+generation in place. Remote transport replacement closes the old listener first
+and stays closed if the replacement fails; the reload reports that degraded
+remote state while unrelated settings still apply. Fix the setting and reload
+again through the local socket. See [remote hot reload]({{< relref "/docs/configuration/access.md#hot-reload-and-revocation" >}}).
 
 ## macOS user service
 
