@@ -626,6 +626,7 @@ func buildNativeGoBinary(t *testing.T, source, output string) string {
 
 	cmd := exec.Command("go", "build", "-tags=libghostty", "-o", output, "./cmd/graith")
 	cmd.Dir = source
+
 	cmd.Env = append(os.Environ(), "GOWORK=off", "CGO_ENABLED=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build native %s: %v\n%s", source, err, out)

@@ -357,6 +357,7 @@ func buildNativeGraithBinary(t *testing.T, sourceDir, output string) {
 
 	cmd := exec.Command("go", "build", "-tags=libghostty", "-o", output, "./cmd/graith")
 	cmd.Dir = sourceDir
+
 	cmd.Env = append(os.Environ(), "GOWORK=off", "CGO_ENABLED=1")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build native Graith from %s: %v\n%s", sourceDir, err, output)
