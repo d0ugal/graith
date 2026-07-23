@@ -147,6 +147,9 @@ status only as review and implementation occur.
 
 ## Architecture and safety invariants
 
+- Package boundaries are enforced by `make architecture-check`; every package
+  needs category/owner metadata in `internal/architecture/manifest.json`.
+  The committed package graph is visualization only and is checked separately.
 - Control messages use JSON envelopes on the framed protocol. The Go and Swift
   implementations must remain conformant.
 - Persistent mutations must survive daemon restart. Use the established state

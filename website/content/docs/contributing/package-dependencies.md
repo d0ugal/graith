@@ -43,8 +43,21 @@ make docs
 The component dependency contract is checked separately because it includes
 test-only imports and ownership metadata that the visualization omits. Run
 `make architecture-check` after changing package boundaries. The checked-in
-policy is `internal/architecture/manifest.json`; historical exceptions must
-name an owner, reason, and future expiry date.
+policy is `internal/architecture/manifest.json`, and every package must have a
+category and accountable owner. A new package is not complete until it is
+classified there. The current ratchet is zero forbidden edges and zero active
+exceptions; an import that crosses a forbidden boundary fails CI. Exceptions
+are temporary migration records only: they must name an owner, explain the
+contract being migrated, and have a future expiry date. Expired exceptions
+fail the check rather than silently becoming baseline debt.
+
+The manifest and analyzer are the enforcement source. The generated graph is
+only a canonical, production-import visualization: it intentionally omits
+test-only and platform-specific relationships and must never be edited by
+hand. Update it with `make package-graph` when its inputs change, then run
+`make package-graph-check` to verify drift. For boundary changes, run both
+checks plus the affected package tests; protocol, integration, and Swift
+changes require their corresponding checks as well.
 
 For a live preview:
 

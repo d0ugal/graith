@@ -32,20 +32,23 @@ func main() {
 	}
 
 	failed := false
+	exceptions := 0
 
 	for _, violation := range violations {
 		fmt.Println(architecture.Format(violation))
 
 		if violation.Exception == "" {
 			failed = true
+		} else {
+			exceptions++
 		}
 	}
+
+	fmt.Printf("architecture: %d packages checked, %d forbidden edges, %d active exceptions\n", len(packages), len(violations)-exceptions, exceptions)
 
 	if failed {
 		os.Exit(1)
 	}
-
-	fmt.Printf("architecture: %d packages checked, %d baseline exceptions\n", len(packages), len(violations))
 }
 
 func fatal(err error) { fmt.Fprintf(os.Stderr, "architecturecheck: %v\n", err); os.Exit(1) }

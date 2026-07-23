@@ -9,7 +9,7 @@ import (
 )
 
 func testManifest() Manifest {
-	return Manifest{Version: 1, Module: "example.com/braw", Categories: []string{"composition", "provider"}, Packages: map[string]string{"example.com/braw/a": "composition", "example.com/braw/b": "provider"}, DefaultRemediation: "add an explicit allowed rule or a narrowly scoped expiring exception"}
+	return Manifest{Version: 1, Module: "example.com/braw", Categories: []string{"composition", "provider"}, Packages: map[string]string{"example.com/braw/a": "composition", "example.com/braw/b": "provider"}, Owners: map[string]string{"example.com/braw/a": "croft", "example.com/braw/b": "bairn"}, DefaultRemediation: "add an explicit allowed rule or a narrowly scoped expiring exception"}
 }
 
 func TestCheckAllowedAndForbiddenEdges(t *testing.T) {
@@ -51,7 +51,7 @@ func TestLoadRejectsUnknownFields(t *testing.T) {
 }
 
 func TestLoadReportsManifestShapeErrors(t *testing.T) {
-	base := `{"version":1,"module":"example.com/braw","categories":["value"],"packages":{"example.com/braw/a":"value"},"default_remediation":"fix it"}`
+	base := `{"version":1,"module":"example.com/braw","categories":["value"],"packages":{"example.com/braw/a":"value"},"owners":{"example.com/braw/a":"croft"},"default_remediation":"fix it"}`
 	for _, tc := range []struct {
 		name string
 		json string
@@ -66,6 +66,37 @@ func TestLoadReportsManifestShapeErrors(t *testing.T) {
 				t.Fatalf("err=%v", err)
 			}
 		})
+	}
+}
+
+func TestCheckRequiresPackageOwners(t *testing.T) {
+	m := testManifest()
+	delete(m.Owners, "example.com/braw/b")
+
+	if _, err := Check(m, []Package{{ImportPath: "example.com/braw/a"}, {ImportPath: "example.com/braw/b"}}, time.Now()); !strings.Contains(err.Error(), "has no owner") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestCheckRejectsWhitespaceOwner(t *testing.T) {
+	m := testManifest()
+	m.Owners["example.com/braw/b"] = "  "
+
+	if _, err := Check(m, []Package{{ImportPath: "example.com/braw/a"}, {ImportPath: "example.com/braw/b"}}, time.Now()); !strings.Contains(err.Error(), "has no owner") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestCheckRejectsOwnerForUnknownPackage(t *testing.T) {
+	input := `{"version":1,"module":"example.com/braw","categories":["value"],"packages":{"example.com/braw/a":"value"},"owners":{"example.com/braw/a":"croft","example.com/braw/missing":"croft"},"default_remediation":"fix it"}`
+
+	m, err := Load(strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Check(m, []Package{{ImportPath: "example.com/braw/a"}}, time.Now()); !strings.Contains(err.Error(), "not a manifest package") {
+		t.Fatalf("err=%v", err)
 	}
 }
 
