@@ -2096,7 +2096,7 @@ func TestUpgradeHelperHandoffRequiresExactTargetSupport(t *testing.T) {
 func TestPrepareUpgradeDescriptorTransactionAndOrdering(t *testing.T) {
 	sm := sleeperSM(t)
 
-	session, err := grpty.NewSession(grpty.SessionOpts{
+	session, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID: "canny", Command: "sleep", Args: []string{"30"},
 		Rows: 24, Cols: 80, LogPath: filepath.Join(sm.paths.LogDir, "canny.log"),
 	})
@@ -2357,7 +2357,7 @@ func TestUnsafeRollbackForkLockPreventsListenerPTMAndLogInheritance(t *testing.T
 
 	sm := sleeperSM(t)
 
-	session, err := grpty.NewSession(grpty.SessionOpts{
+	session, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID: "thrawn-forklock", Command: "sleep", Args: []string{"30"}, Rows: 24, Cols: 80,
 		LogPath: filepath.Join(sm.paths.LogDir, "thrawn-forklock.log"),
 	})
@@ -2578,7 +2578,7 @@ func TestRollbackUpgradeDescriptorsRetainsOwnedGetFlagsFailure(t *testing.T) {
 func TestPrepareUpgradePartialFailureClosesOwnedDuplicates(t *testing.T) {
 	sm := sleeperSM(t)
 
-	valid, err := grpty.NewSession(grpty.SessionOpts{
+	valid, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID: "canny", Command: "sleep", Args: []string{"30"}, Rows: 24, Cols: 80,
 		LogPath: filepath.Join(sm.paths.LogDir, "canny-partial.log"),
 	})
@@ -2667,7 +2667,7 @@ func TestUpgradeCapacityIgnoresExitedPTY(t *testing.T) {
 	newSession := func(id, command string, args ...string) *grpty.Session {
 		t.Helper()
 
-		session, err := grpty.NewSession(grpty.SessionOpts{
+		session, err := newDaemonPTYSession(t, grpty.SessionOpts{
 			ID: id, Command: command, Args: args, Rows: 24, Cols: 80,
 			LogPath: filepath.Join(sm.paths.LogDir, id+".log"),
 		})
@@ -2774,7 +2774,7 @@ func TestPersistFrozenUpgradeStateFailurePrecedesDescriptorMutation(t *testing.T
 func TestPersistFrozenUpgradeStateRefusesExitedPlannedSession(t *testing.T) {
 	sm := sleeperSM(t)
 
-	session, err := grpty.NewSession(grpty.SessionOpts{
+	session, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID: "canny", Command: "sleep", Args: []string{"30"}, Rows: 24, Cols: 80,
 		LogPath: filepath.Join(sm.paths.LogDir, "canny-exit-plan.log"),
 	})

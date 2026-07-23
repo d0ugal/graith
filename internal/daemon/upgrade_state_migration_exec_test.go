@@ -62,7 +62,7 @@ func runOldExecStateMigrationStage(t *testing.T) {
 	dir := os.Getenv(execStateMigrationDirEnv)
 	logPath := filepath.Join(dir, sessionID+".log")
 
-	session, err := grpty.NewSession(grpty.SessionOpts{
+	session, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID:      sessionID,
 		Command: "sh",
 		Args:    []string{"-c", "printf 'canny-before-exec\\n'; while IFS= read -r line; do printf 'seen:%s\\n' \"$line\"; done"},

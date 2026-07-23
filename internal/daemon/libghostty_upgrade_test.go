@@ -83,7 +83,7 @@ func (w *boundedUpgradeTestOutput) Len() int { return w.buffer.Len() }
 
 func runOldLibghosttyUpgradeStage(t *testing.T) {
 	dir := os.Getenv(libghosttyUpgradeDirEnv)
-	session, err := grpty.NewSession(grpty.SessionOpts{
+	session, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID: "canny-exec", Command: "sh", Args: []string{"-c", "printf 'canny-upgrade\\n'; sleep 30"},
 		Rows: 8, Cols: 40, LogPath: filepath.Join(dir, "canny-exec.log"),
 	})

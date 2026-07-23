@@ -243,7 +243,7 @@ func TestRestartRunningSessionCapturesScrollback(t *testing.T) {
 func newSilentPTY(t *testing.T, dir, id string) *grpty.Session {
 	t.Helper()
 
-	ptySess, err := grpty.NewSession(grpty.SessionOpts{
+	ptySess, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID:         id,
 		Command:    "sh",
 		Args:       []string{"-c", "exec cat"},

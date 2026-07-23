@@ -758,7 +758,7 @@ func TestEnsureOrchestratorAlreadyRunning_Cov2(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pty, err := grpty.NewSession(grpty.SessionOpts{
+	pty, err := newDaemonPTYSession(t, grpty.SessionOpts{
 		ID: "ben-orch", Command: "sleep", Args: []string{"60"},
 		Dir: sm.paths.DataDir, Rows: 24, Cols: 80,
 		LogPath: filepath.Join(logDir, "orch.log"),

@@ -143,6 +143,17 @@ func NewSession(opts SessionOpts) (*Session, error) {
 	return newSessionWithTerminalFactory(opts, newTerminal)
 }
 
+// NewSessionWithTerminalFactory creates a PTY session with an explicitly
+// supplied terminal factory. Production callers should use NewSession; this
+// narrow seam lets package-level tests exercise PTY and daemon lifecycle
+// behavior without selecting a production terminal backend.
+func NewSessionWithTerminalFactory(
+	opts SessionOpts,
+	factory func(cols, rows int) (Terminal, error),
+) (*Session, error) {
+	return newSessionWithTerminalFactory(opts, factory)
+}
+
 func newSessionWithTerminalFactory(
 	opts SessionOpts,
 	factory func(cols, rows int) (Terminal, error),
