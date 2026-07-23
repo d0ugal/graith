@@ -32,6 +32,7 @@ func newDaemonPTYSessionWithFactory(opts grpty.SessionOpts) (*grpty.Session, err
 
 func newDaemonTestTerminal(cols, rows int) *daemonTestTerminal {
 	t := &daemonTestTerminal{cols: cols, rows: rows}
+
 	t.lines = make([][]grpty.Cell, rows)
 	for row := range t.lines {
 		t.lines[row] = make([]grpty.Cell, cols)
@@ -73,6 +74,7 @@ func (t *daemonTestTerminal) Resize(cols, rows int) error {
 
 	t.cols, t.rows = cols, rows
 	t.cursor = min(t.cursor, cols*rows)
+
 	t.lines = make([][]grpty.Cell, rows)
 	for row := range t.lines {
 		t.lines[row] = make([]grpty.Cell, cols)
