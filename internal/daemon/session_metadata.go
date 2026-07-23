@@ -122,6 +122,10 @@ func (sm *SessionManager) UpdateMetadata(id string, update SessionUpdate) (Sessi
 		return SessionState{}, errSoftDeleted(s.Name)
 	}
 
+	if sm.subtreeDeleteActiveLocked(id) {
+		return SessionState{}, fmt.Errorf("session %q is undergoing subtree deletion", id)
+	}
+
 	if update.Name != nil {
 		if err := ValidateSessionName(*update.Name); err != nil {
 			return SessionState{}, err
@@ -146,12 +150,25 @@ func (sm *SessionManager) UpdateMetadata(id string, update SessionUpdate) (Sessi
 		if newParent == "" {
 			newParentValue = ""
 		} else {
+			if sm.subtreeDeleteActiveLocked(newParent) {
+				return SessionState{}, errors.New("parent session is undergoing subtree deletion")
+			}
+
 			if newParent == id {
 				return SessionState{}, errors.New("cannot set session as its own parent")
 			}
 
-			if _, ok := sm.state.Sessions[newParent]; !ok {
+			parent, ok := sm.state.Sessions[newParent]
+			if !ok {
 				return SessionState{}, fmt.Errorf("parent session %q not found", newParent)
+			}
+
+			if parent.Status == StatusCreating {
+				return SessionState{}, fmt.Errorf("parent session %q is being created", parent.Name)
+			}
+
+			if parent.Status == StatusDeleting || parent.IsSoftDeleted() {
+				return SessionState{}, fmt.Errorf("parent session %q is being deleted", parent.Name)
 			}
 
 			descendants := sm.collectDescendants(id)

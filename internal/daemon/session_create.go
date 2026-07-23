@@ -182,6 +182,25 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, err
 	}
 
+	if parentID != "" {
+		if sm.subtreeDeleteActiveLocked(parentID) {
+			sm.mu.Unlock()
+			return SessionState{}, errors.New("parent session is undergoing subtree deletion")
+		}
+
+		if parent, ok := sm.state.Sessions[parentID]; ok {
+			if parent.Status == StatusCreating {
+				sm.mu.Unlock()
+				return SessionState{}, fmt.Errorf("parent session %q is being created", parent.Name)
+			}
+
+			if parent.Status == StatusDeleting || parent.IsSoftDeleted() {
+				sm.mu.Unlock()
+				return SessionState{}, fmt.Errorf("parent session %q is being deleted", parent.Name)
+			}
+		}
+	}
+
 	id := opts.ID
 	if id == "" {
 		id = sm.uniqueSessionIDLocked()

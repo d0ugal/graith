@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -55,6 +57,13 @@ func (sm *SessionManager) fallbackExpiryLocked(s *SessionState, now time.Time) (
 // elapses. System and starred sessions are protected, matching Delete. Returns
 // a snapshot of the soft-deleted session so the caller can report the expiry.
 func (sm *SessionManager) SoftDelete(id string) (SessionState, error) {
+	return sm.softDelete(id, true)
+}
+
+// softDelete performs a single soft delete. Subtree operations already hold
+// the ownership invariant at their preflight boundary and may disable the
+// per-node child check while walking leaves-first.
+func (sm *SessionManager) softDelete(id string, rejectChildren bool) (SessionState, error) {
 	if err := sm.beginLifecycleOperation(); err != nil {
 		return SessionState{}, err
 	}
@@ -66,6 +75,18 @@ func (sm *SessionManager) SoftDelete(id string) (SessionState, error) {
 	if !ok {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("session %q not found", id)
+	}
+
+	if rejectChildren && sm.subtreeDeleteOverlapsLocked(id) {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("session %q is undergoing subtree deletion", id)
+	}
+
+	if rejectChildren {
+		if err := sm.rejectDeleteWithChildrenLocked(id); err != nil {
+			sm.mu.Unlock()
+			return SessionState{}, err
+		}
 	}
 
 	if err := sm.rejectPendingUpgradeCleanupLocked(id); err != nil {
@@ -231,6 +252,17 @@ func softDeletableLocked(sess *SessionState) bool {
 // only re-marks, never tears down, since deferring teardown is the whole point.
 // Returns the list of session IDs that were soft-deleted.
 func (sm *SessionManager) SoftDeleteWithChildren(rootID string, excludeRoot bool) ([]string, error) {
+	return sm.softDeleteWithChildren(rootID, excludeRoot, nil)
+}
+
+// softDeleteWithChildrenOwned applies an additional ownership predicate while
+// reserving the subtree, so callers such as scenario cleanup cannot validate
+// ownership and then race with a concurrent reparent before deletion starts.
+func (sm *SessionManager) softDeleteWithChildrenOwned(rootID string, excludeRoot bool, owned func(string, *SessionState) bool) ([]string, error) {
+	return sm.softDeleteWithChildren(rootID, excludeRoot, owned)
+}
+
+func (sm *SessionManager) softDeleteWithChildren(rootID string, excludeRoot bool, owned func(string, *SessionState) bool) ([]string, error) {
 	if err := sm.beginLifecycleOperation(); err != nil {
 		return nil, err
 	}
@@ -241,6 +273,16 @@ func (sm *SessionManager) SoftDeleteWithChildren(rootID string, excludeRoot bool
 	if _, ok := sm.state.Sessions[rootID]; !ok {
 		sm.mu.RUnlock()
 		return nil, fmt.Errorf("session %q not found", rootID)
+	}
+
+	if sm.subtreeDeleteOverlapsLocked(rootID) {
+		sm.mu.RUnlock()
+		return nil, fmt.Errorf("session %q is undergoing subtree deletion", rootID)
+	}
+
+	if err := sm.rejectUnsafeDeleteDescendantsLocked(rootID, excludeRoot, false); err != nil {
+		sm.mu.RUnlock()
+		return nil, err
 	}
 
 	initial := sm.collectDescendants(rootID)
@@ -256,9 +298,48 @@ func (sm *SessionManager) SoftDeleteWithChildren(rootID string, excludeRoot bool
 
 	sm.mu.RUnlock()
 
+	// Reserve the root under the exclusive lock. The preflight above is kept
+	// outside this short critical section because the actual soft-delete work
+	// may tear down drivers; recheck overlap after acquiring the lock so two
+	// concurrent subtree operations cannot both reserve overlapping roots.
+	sm.mu.Lock()
+	if sm.subtreeDeleteOverlapsLocked(rootID) {
+		sm.mu.Unlock()
+		return nil, fmt.Errorf("session %q is undergoing subtree deletion", rootID)
+	}
+
+	if owned != nil {
+		if root := sm.state.Sessions[rootID]; !owned(rootID, root) {
+			sm.mu.Unlock()
+			return nil, fmt.Errorf("session %q is no longer owned by the cleanup scope", rootID)
+		}
+
+		for _, descendantID := range sm.collectDescendants(rootID) {
+			if !owned(descendantID, sm.state.Sessions[descendantID]) {
+				sm.mu.Unlock()
+				return nil, fmt.Errorf("session %q has a descendant outside the cleanup scope", rootID)
+			}
+		}
+	}
+
+	if sm.subtreeDeleteRoots == nil {
+		sm.subtreeDeleteRoots = make(map[string]struct{})
+	}
+
+	sm.subtreeDeleteRoots[rootID] = struct{}{}
+	sm.mu.Unlock()
+
+	defer func() {
+		sm.mu.Lock()
+		delete(sm.subtreeDeleteRoots, rootID)
+		sm.mu.Unlock()
+	}()
+
 	deletedSet := make(map[string]bool)
 
 	var deleted []string
+
+	var deleteErrors []error
 
 	softDeleteOne := func(id string) {
 		if deletedSet[id] {
@@ -276,8 +357,10 @@ func (sm *SessionManager) SoftDeleteWithChildren(rootID string, excludeRoot bool
 			return
 		}
 
-		if _, err := sm.SoftDelete(id); err != nil {
+		if _, err := sm.softDelete(id, false); err != nil {
 			sm.log.Warn("soft delete of descendant failed", "id", id, "err", err)
+			deleteErrors = append(deleteErrors, fmt.Errorf("session %s: %w", id, err))
+
 			return
 		}
 
@@ -318,6 +401,10 @@ func (sm *SessionManager) SoftDeleteWithChildren(rootID string, excludeRoot bool
 		for _, id := range late {
 			softDeleteOne(id)
 		}
+	}
+
+	if len(deleteErrors) > 0 {
+		return deleted, fmt.Errorf("soft delete subtree incomplete: %w", errors.Join(deleteErrors...))
 	}
 
 	return deleted, nil
@@ -379,6 +466,10 @@ func (sm *SessionManager) restoreLocked(id string) (SessionState, error) {
 		return SessionState{}, fmt.Errorf("session %q is not deleted", sessState.Name)
 	}
 
+	if sm.subtreeDeleteOverlapsLocked(id) {
+		return SessionState{}, fmt.Errorf("cannot restore session %q while its ownership subtree is being deleted; wait for deletion to finish", sessState.Name)
+	}
+
 	// Use the same predicate purge uses: never resurrect a session past its
 	// advertised deadline, even if the coarse purge cadence hasn't reaped it yet.
 	now := time.Now()
@@ -390,6 +481,13 @@ func (sm *SessionManager) restoreLocked(id string) (SessionState, error) {
 
 	if shouldPurge(sessState, now, fallback) {
 		return SessionState{}, fmt.Errorf("session %q has expired its recovery window and is scheduled for purge", sessState.Name)
+	}
+
+	if sessState.ParentID != "" {
+		if parent, ok := sm.state.Sessions[sessState.ParentID]; ok &&
+			(parent.IsSoftDeleted() || parent.Status == StatusDeleting) {
+			return SessionState{}, fmt.Errorf("cannot restore session %q while parent %q is hidden or being deleted; restore the parent first or use `gr restore %s --children`", sessState.Name, parent.Name, parent.ID)
+		}
 	}
 
 	sessState.DeletedAt = nil
@@ -428,7 +526,9 @@ func (sm *SessionManager) RestoreWithChildren(rootID string) ([]SessionState, er
 
 	originals := make(map[string]SessionState)
 
-	for _, id := range ids {
+	for i := len(ids) - 1; i >= 0; i-- {
+		id := ids[i]
+
 		sess, ok := sm.state.Sessions[id]
 		if !ok || !sess.IsSoftDeleted() {
 			continue
@@ -543,15 +643,35 @@ func (sm *SessionManager) sessionSnapshot(id string) SessionState {
 // (a new ExpiresAt won't Equal the snapshot). This invariant is load-bearing:
 // any future change that lets Restore succeed on an expired session must also
 // make this delete atomic.
+type expiredPurgeCandidate struct {
+	id        string
+	expiresAt time.Time
+	depth     int
+	cycleRoot string
+}
+
+func sortExpiredPurgeCandidates(candidates []expiredPurgeCandidate) {
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].depth != candidates[j].depth {
+			return candidates[i].depth > candidates[j].depth
+		}
+
+		if candidates[i].cycleRoot != candidates[j].cycleRoot {
+			return candidates[i].cycleRoot < candidates[j].cycleRoot
+		}
+
+		if !candidates[i].expiresAt.Equal(candidates[j].expiresAt) {
+			return candidates[i].expiresAt.Before(candidates[j].expiresAt)
+		}
+
+		return candidates[i].id < candidates[j].id
+	})
+}
+
 func (sm *SessionManager) purgeExpired(now time.Time) {
 	sm.mu.RLock()
 
-	type candidate struct {
-		id        string
-		expiresAt time.Time
-	}
-
-	var expired []candidate
+	var expired []expiredPurgeCandidate
 
 	for id, s := range sm.state.Sessions {
 		if s.DeletedAt == nil {
@@ -564,13 +684,57 @@ func (sm *SessionManager) purgeExpired(now time.Time) {
 		}
 
 		if shouldPurge(s, now, expiry) {
-			expired = append(expired, candidate{id: id, expiresAt: expiry})
+			depth := 0
+			cycleRoot := sm.expiredOwnershipCycleRootLocked(id)
+
+			seenParents := map[string]struct{}{id: {}}
+			for parentID := s.ParentID; parentID != ""; {
+				if _, seen := seenParents[parentID]; seen {
+					break
+				}
+
+				seenParents[parentID] = struct{}{}
+
+				parent, ok := sm.state.Sessions[parentID]
+				if !ok {
+					break
+				}
+
+				depth++
+				parentID = parent.ParentID
+			}
+
+			expired = append(expired, expiredPurgeCandidate{id: id, expiresAt: expiry, depth: depth, cycleRoot: cycleRoot})
 		}
 	}
 
 	sm.mu.RUnlock()
+	sortExpiredPurgeCandidates(expired)
+
+	processedCycles := make(map[string]bool)
 
 	for _, c := range expired {
+		if c.cycleRoot != "" {
+			if processedCycles[c.cycleRoot] {
+				continue
+			}
+
+			processedCycles[c.cycleRoot] = true
+
+			if !sm.expiredCycleSubtreeEligible(c.cycleRoot, now) {
+				sm.log.Warn("skipping expired ownership cycle with ineligible member", "root", c.cycleRoot)
+				continue
+			}
+
+			sm.log.Info("purging expired ownership cycle", "root", c.cycleRoot)
+
+			if _, err := sm.DeleteWithChildren(c.cycleRoot, false); err != nil {
+				sm.log.Warn("purge of expired ownership cycle failed, will retry", "root", c.cycleRoot, "err", err)
+			}
+
+			continue
+		}
+
 		// Compare-and-delete: verify the session is still soft-deleted and its
 		// deadline is unchanged before purging, so a concurrent restore (or
 		// delete/restore/re-delete, which mints a new ExpiresAt) is not clobbered.
@@ -596,6 +760,58 @@ func (sm *SessionManager) purgeExpired(now time.Time) {
 			sm.log.Warn("purge of expired session failed, will retry", "id", c.id, "err", err)
 		}
 	}
+}
+
+// expiredOwnershipCycleRootLocked returns the lexicographically smallest ID in
+// a parent cycle containing id, or empty when the ancestor chain is acyclic.
+// The caller holds sm.mu.RLock or sm.mu.Lock.
+func (sm *SessionManager) expiredOwnershipCycleRootLocked(id string) string {
+	seen := make(map[string]int)
+	chain := make([]string, 0)
+
+	for current := id; current != ""; {
+		if start, ok := seen[current]; ok {
+			root := chain[start]
+			for _, member := range chain[start:] {
+				if member < root {
+					root = member
+				}
+			}
+
+			return root
+		}
+
+		seen[current] = len(chain)
+		chain = append(chain, current)
+
+		sess, ok := sm.state.Sessions[current]
+		if !ok {
+			return ""
+		}
+
+		current = sess.ParentID
+	}
+
+	return ""
+}
+
+func (sm *SessionManager) expiredCycleSubtreeEligible(rootID string, now time.Time) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	for _, id := range sm.collectDescendants(rootID) {
+		sess, ok := sm.state.Sessions[id]
+		if !ok || sess.Status == StatusCreating || sess.Status == StatusDeleting || sess.Starred || IsSystemSession(sess) || !sess.IsSoftDeleted() {
+			return false
+		}
+
+		expiry, _ := sm.fallbackExpiryLocked(sess, now)
+		if !shouldPurge(sess, now, expiry) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // reconcileSoftDeletedOrphans kills any agent process still alive on a

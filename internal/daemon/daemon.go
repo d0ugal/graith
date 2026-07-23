@@ -95,8 +95,11 @@ type SessionManager struct {
 	upgradePending    bool
 	shutdownPending   bool
 	lifecycleInFlight int
-	mutationLeases    map[string]mutationLeaseRecord
-	mutationNextID    uint64
+	// subtreeDeleteRoots reserves ownership subtrees during slow soft-delete
+	// teardown; all entries are guarded by mu.
+	subtreeDeleteRoots map[string]struct{}
+	mutationLeases     map[string]mutationLeaseRecord
+	mutationNextID     uint64
 	// mutationNow is a test seam for deterministic lease-age assertions.
 	mutationNow func() time.Time
 	// beforeLifecycleSpawn is a deterministic test seam for the final shared

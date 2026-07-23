@@ -129,6 +129,16 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		return SessionState{}, errSoftDeleted(source.Name)
 	}
 
+	if source.Status == StatusDeleting {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("cannot fork session %q: session is being deleted", source.Name)
+	}
+
+	if sm.subtreeDeleteOverlapsLocked(sourceSessionID) {
+		sm.mu.Unlock()
+		return SessionState{}, fmt.Errorf("cannot fork session %q while its ownership subtree is being deleted", source.Name)
+	}
+
 	if source.RepoPath == "" {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("cannot fork session %q: source has no repo (fork requires a git repository)", source.Name)
@@ -694,6 +704,18 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		_ = os.Remove(logPath)
 
 		return SessionState{}, errors.New("session was deleted during creation")
+	}
+
+	if sm.subtreeDeleteOverlapsLocked(sourceSessionID) {
+		sm.mu.Unlock()
+		sm.logStopping(id, name, "rollback", "fork-rollback", ptySess)
+		_ = ptySess.Kill()
+		ptySess.Close()
+		forkCleanup()
+
+		_ = os.Remove(logPath)
+
+		return SessionState{}, errors.New("source subtree was deleted during creation")
 	}
 
 	sessState := sm.state.Sessions[id]

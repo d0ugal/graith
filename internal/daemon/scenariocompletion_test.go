@@ -945,14 +945,16 @@ func TestScenarioCleanupOwnershipProtections(t *testing.T) {
 
 	sm.mu.Lock()
 	sm.state.Scenarios["sc-croft"] = &ScenarioState{
-		ID: "sc-croft", Name: "croft", SessionIDs: []string{"owned", "shared", "starred", "replaced"},
-		Sessions: []ScenarioSession{{Name: "owned"}, {Name: "shared", Shared: true}, {Name: "starred"}, {Name: "replaced"}},
+		ID: "sc-croft", Name: "croft", SessionIDs: []string{"owned", "nested-parent", "nested-child", "shared", "starred", "replaced"},
+		Sessions: []ScenarioSession{{Name: "owned"}, {Name: "nested-parent"}, {Name: "nested-child"}, {Name: "shared", Shared: true}, {Name: "starred"}, {Name: "replaced"}},
 		Completion: ScenarioCompletionState{
 			Complete: true, Epoch: 1,
 			Cleanup: &ScenarioCleanupState{Policy: config.ScenarioCleanupAlways, State: ScenarioCleanupRunning, ScheduledAt: &now},
 		},
 	}
 	sm.state.Sessions["owned"] = &SessionState{ID: "owned", Name: "owned", Status: StatusStopped, ScenarioID: "sc-croft"}
+	sm.state.Sessions["nested-parent"] = &SessionState{ID: "nested-parent", Name: "nested-parent", Status: StatusStopped, ScenarioID: "sc-croft"}
+	sm.state.Sessions["nested-child"] = &SessionState{ID: "nested-child", Name: "nested-child", ParentID: "nested-parent", Status: StatusStopped, ScenarioID: "sc-croft"}
 	sm.state.Sessions["shared"] = &SessionState{
 		ID: "shared", Name: "shared", Status: StatusStopped, WorktreePath: sharedWorktree,
 	}
@@ -967,8 +969,14 @@ func TestScenarioCleanupOwnershipProtections(t *testing.T) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
-	if !sm.state.Sessions["owned"].IsSoftDeleted() {
-		t.Fatal("owned member was not soft-deleted")
+	if sm.state.Sessions["owned"].IsSoftDeleted() {
+		t.Fatal("owned member with a surviving child was soft-deleted")
+	}
+
+	for _, id := range []string{"nested-parent", "nested-child"} {
+		if !sm.state.Sessions[id].IsSoftDeleted() {
+			t.Errorf("owned subtree member %q was not soft-deleted", id)
+		}
 	}
 
 	for _, id := range []string{"shared", "starred", "replaced", "trigger-child"} {

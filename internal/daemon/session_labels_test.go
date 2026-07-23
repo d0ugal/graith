@@ -104,6 +104,31 @@ func TestUpdateMetadataLabelsAreAtomicAndPreserveDisplaySpelling(t *testing.T) {
 	}
 }
 
+func TestUpdateMetadataRejectsCreatingParent(t *testing.T) {
+	sm := newTestSessionManager(t)
+	putSession(sm, &SessionState{ID: "braw-id", Name: "braw", Status: StatusStopped})
+	putSession(sm, &SessionState{ID: "canny-id", Name: "canny", Status: StatusCreating})
+
+	parentID := "canny-id"
+	if _, err := sm.UpdateMetadata("braw-id", SessionUpdate{ParentID: &parentID}); err == nil {
+		t.Fatal("UpdateMetadata unexpectedly attached a session to a creating parent")
+	}
+}
+
+func TestUpdateMetadataRejectsActiveSubtree(t *testing.T) {
+	sm := newTestSessionManager(t)
+	putSession(sm, &SessionState{ID: "braw-id", Name: "braw", Status: StatusStopped})
+
+	sm.mu.Lock()
+	sm.subtreeDeleteRoots = map[string]struct{}{"braw-id": {}}
+	sm.mu.Unlock()
+
+	name := "canny"
+	if _, err := sm.UpdateMetadata("braw-id", SessionUpdate{Name: &name}); err == nil {
+		t.Fatal("UpdateMetadata unexpectedly mutated an active subtree delete")
+	}
+}
+
 func TestUpdateMetadataSaveFailureRollsBackEveryField(t *testing.T) {
 	sm := newTestSessionManager(t)
 	putSession(sm, &SessionState{

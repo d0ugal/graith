@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -53,6 +55,28 @@ func TestShouldPurge(t *testing.T) {
 				t.Errorf("shouldPurge = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSortExpiredPurgeCandidatesDeterministic(t *testing.T) {
+	expires := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	candidates := []expiredPurgeCandidate{
+		{id: "bairn", expiresAt: expires, depth: 2, cycleRoot: "croft"},
+		{id: "dreich", expiresAt: expires.Add(-time.Hour), depth: 1, cycleRoot: ""},
+		{id: "canny", expiresAt: expires, depth: 2, cycleRoot: "bothy"},
+		{id: "braw", expiresAt: expires, depth: 2, cycleRoot: "croft"},
+	}
+
+	sortExpiredPurgeCandidates(candidates)
+
+	got := make([]string, len(candidates))
+	for i, candidate := range candidates {
+		got[i] = candidate.id
+	}
+
+	want := []string{"canny", "bairn", "braw", "dreich"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("candidate order = %v, want %v", got, want)
 	}
 }
 
@@ -156,6 +180,21 @@ func TestRestoreClearsMarker(t *testing.T) {
 }
 
 func TestRestoreRejections(t *testing.T) {
+	t.Run("hidden parent", func(t *testing.T) {
+		sm := newTestSessionManager(t)
+		parent := addStoppedSession(t, sm, "hidden-parent", "hidden-parent")
+		child := addStoppedSession(t, sm, "hidden-child", "hidden-child")
+		child.ParentID = parent.ID
+		deletedAt := time.Now().Add(-time.Hour)
+		expiresAt := time.Now().Add(time.Hour)
+		parent.DeletedAt, parent.ExpiresAt = &deletedAt, &expiresAt
+		child.DeletedAt, child.ExpiresAt = &deletedAt, &expiresAt
+
+		if _, err := sm.Restore(child.ID); err == nil || !strings.Contains(err.Error(), "restore the parent first") {
+			t.Fatalf("Restore hidden child error = %v", err)
+		}
+	})
+
 	t.Run("not deleted", func(t *testing.T) {
 		sm := newTestSessionManager(t)
 		addStoppedSession(t, sm, "bonnie-id", "bonnie")
@@ -187,6 +226,27 @@ func TestRestoreRejections(t *testing.T) {
 			t.Error("expected error restoring a session past its recovery window")
 		}
 	})
+}
+
+func TestRestoreRejectsActiveSubtreeDelete(t *testing.T) {
+	sm := newTestSessionManager(t)
+	addStoppedSession(t, sm, "braw-id", "braw")
+
+	if _, err := sm.SoftDelete("braw-id"); err != nil {
+		t.Fatalf("SoftDelete() error = %v", err)
+	}
+
+	sm.mu.Lock()
+	sm.subtreeDeleteRoots = map[string]struct{}{"braw-id": {}}
+	sm.mu.Unlock()
+
+	if _, err := sm.Restore("braw-id"); err == nil || !strings.Contains(err.Error(), "subtree is being deleted") {
+		t.Fatalf("Restore() error = %v, want active subtree deletion rejection", err)
+	}
+
+	if state, ok := sm.Get("braw-id"); !ok || !state.IsSoftDeleted() {
+		t.Fatal("Restore() mutated the session despite active subtree deletion")
+	}
 }
 
 func TestSoftDeleteWithChildren(t *testing.T) {
@@ -292,6 +352,64 @@ func TestPurgeExpired(t *testing.T) {
 
 	if _, ok := sm.Get("braw-id"); !ok {
 		t.Error("live session should never be purged")
+	}
+}
+
+func TestPurgeExpiredStopsOnParentCycle(t *testing.T) {
+	sm := newTestSessionManager(t)
+	now := time.Now()
+
+	a := addStoppedSession(t, sm, "cycle-a", "cycle-a")
+	b := addStoppedSession(t, sm, "cycle-b", "cycle-b")
+	a.ParentID = b.ID
+	b.ParentID = a.ID
+	deletedAt := now.Add(-48 * time.Hour)
+	expiresAt := now.Add(-time.Hour)
+	a.DeletedAt, a.ExpiresAt = &deletedAt, &expiresAt
+	b.DeletedAt, b.ExpiresAt = &deletedAt, &expiresAt
+
+	done := make(chan struct{})
+
+	go func() {
+		sm.purgeExpired(now)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("purgeExpired hung while walking a parent cycle")
+	}
+
+	if _, ok := sm.Get("cycle-a"); ok {
+		t.Error("expired cycle member cycle-a was not purged")
+	}
+
+	if _, ok := sm.Get("cycle-b"); ok {
+		t.Error("expired cycle member cycle-b was not purged")
+	}
+}
+
+func TestPurgeExpiredRetainsIneligibleOwnershipCycle(t *testing.T) {
+	sm := newTestSessionManager(t)
+	now := time.Now()
+	a := addStoppedSession(t, sm, "cycle-live-a", "cycle-live-a")
+	b := addStoppedSession(t, sm, "cycle-live-b", "cycle-live-b")
+	a.ParentID, b.ParentID = b.ID, a.ID
+	deletedAt := now.Add(-48 * time.Hour)
+	expired := now.Add(-time.Hour)
+	future := now.Add(time.Hour)
+	a.DeletedAt, a.ExpiresAt = &deletedAt, &expired
+	b.DeletedAt, b.ExpiresAt = &deletedAt, &future
+
+	sm.purgeExpired(now)
+
+	if _, ok := sm.Get(a.ID); !ok {
+		t.Error("expired cycle member was purged despite an unexpired cycle member")
+	}
+
+	if _, ok := sm.Get(b.ID); !ok {
+		t.Error("unexpired cycle member was purged")
 	}
 }
 

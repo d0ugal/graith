@@ -179,10 +179,20 @@ it takes no positional argument, can't combine with `--children` or the batch
 filters, and errors outside a graith session. `gr purge --self` does the same for
 an immediate, irrecoverable purge.
 
+A delete or purge is rejected when the target has children, including children
+already in the deleted view. This protects the ownership tree: use
+`gr delete <parent> --children` (or `gr purge <parent> --children`) to handle
+the complete subtree, delete or purge the children first, or explicitly move
+each child with `gr update <child> --parent <parent>` before deleting the old
+parent. Batch operations report the same daemon error for unsafe parents and
+never reparent children implicitly.
+
 The config-managed orchestrator is an exception to recoverable deletion:
 `gr delete orchestrator` discards its current context, then the daemon creates a
 fresh replacement when `[orchestrator] enabled = true`. Use `gr stop orchestrator`
 to keep it stopped; to purge it permanently, disable it in config first.
+When resetting an enabled orchestrator, the reset includes its complete owned
+subtree; protected descendants must be handled explicitly first.
 
 ## `gr fork <source-session> <new-name>`
 

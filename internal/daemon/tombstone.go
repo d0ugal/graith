@@ -174,89 +174,160 @@ func (sm *SessionManager) resumeTombstones() {
 		return
 	}
 
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
-			continue
-		}
+	for pass := 0; pass < len(entries); pass++ {
+		madeProgress := false
 
-		path := filepath.Join(sm.tombstoneDir(), e.Name())
+		for _, e := range entries {
+			if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+				continue
+			}
 
-		data, err := os.ReadFile(path)
-		if err != nil {
-			sm.log.Warn("failed to read tombstone", "path", path, "err", err)
-			continue
-		}
+			path := filepath.Join(sm.tombstoneDir(), e.Name())
 
-		var t tombstone
-		if err := json.Unmarshal(data, &t); err != nil {
-			sm.log.Warn("corrupt tombstone, removing", "path", path, "err", err)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				sm.log.Warn("failed to read tombstone", "path", path, "err", err)
+				continue
+			}
+
+			var t tombstone
+			if err := json.Unmarshal(data, &t); err != nil {
+				sm.log.Warn("corrupt tombstone, removing", "path", path, "err", err)
+				_ = os.Remove(path)
+
+				continue
+			}
+
+			sm.mu.RLock()
+			stateSession := sm.state.Sessions[t.ID]
+			removedHookCleanupPending := stateSession != nil && stateSession.RemovedHookCleanupPending
+			processStillRecorded := stateSession == nil ||
+				(stateSession.PID == t.PID && stateSession.PIDStartTime == t.PIDStartTime)
+
+			sm.mu.RUnlock()
+
+			// Removed-hook ownership is reconciled before tombstones during normal
+			// cold startup. Keep this defense at the destructive boundary so a direct
+			// or reordered call cannot signal or erase a still-pending generation.
+			if removedHookCleanupPending {
+				sm.log.Warn("deferring interrupted delete while removed-hook cleanup is pending",
+					"id", t.ID, "pid", t.PID)
+
+				continue
+			}
+
+			sm.log.Info("resuming interrupted delete", "id", t.ID, "name", t.Name)
+
+			sm.mu.RLock()
+
+			blockedByChild := false
+
+			type missingChildTombstone struct {
+				name         string
+				spec         teardownSpec
+				pid          int
+				pidStartTime int64
+			}
+
+			var missing []missingChildTombstone
+
+			for _, child := range sm.state.Sessions {
+				if child.ParentID == t.ID && !hasTombstoneFile(sm.tombstoneDir(), child.ID) {
+					blockedByChild = true
+
+					if child.Status == StatusDeleting {
+						missing = append(missing, missingChildTombstone{
+							name: child.Name,
+							spec: teardownSpec{
+								ID:           child.ID,
+								RepoPath:     child.RepoPath,
+								WorktreePath: child.WorktreePath,
+								Branch:       child.Branch,
+								Shared:       child.Mirror,
+								InPlace:      child.InPlace,
+								SystemKind:   child.SystemKind,
+								Includes:     child.Includes,
+							},
+							pid:          child.PID,
+							pidStartTime: child.PIDStartTime,
+						})
+					}
+				}
+			}
+
+			sm.mu.RUnlock()
+
+			for _, child := range missing {
+				if err := sm.tombstoneBeforeBulkTeardown(child.spec, child.name, child.pid, child.pidStartTime); err != nil {
+					sm.log.Warn("failed to synthesize child delete tombstone during recovery", "name", child.name, "err", err)
+				} else {
+					sm.log.Info("synthesized missing child delete tombstone during recovery", "name", child.name)
+
+					madeProgress = true
+				}
+			}
+
+			if blockedByChild {
+				sm.log.Warn("deferring delete tombstone with surviving child", "id", t.ID)
+				continue
+			}
+
+			// Reap a leftover orphan process (verified by start time) before removing
+			// the worktree it may still be running in.
+			if t.PID > 0 && processStillRecorded {
+				if _, err := sm.killVerifiedProcess(t.PID, t.PIDStartTime); err != nil {
+					sm.log.Warn("could not reap orphan during delete-resume",
+						"id", t.ID, "pid", t.PID, "err", err)
+				}
+			}
+
+			if err := sm.teardownArtifacts(t.teardownSpec); err != nil {
+				sm.log.Error("teardown failed during delete-resume (leaving for gr gc)",
+					"id", t.ID, "err", err)
+			}
+
+			// Persist the state removal BEFORE unlinking the tombstone: the state
+			// save is the durable commit point. If it fails, keep the tombstone so a
+			// later startup retries — unlinking first could leave state.json still
+			// listing a torn-down session with no marker to finish it.
+			sm.mu.Lock()
+			if sess, ok := sm.state.Sessions[t.ID]; ok {
+				if sess.Token != "" {
+					delete(sm.tokenIndex, sess.Token)
+				}
+
+				delete(sm.state.Sessions, t.ID)
+				delete(sm.hookReports, t.ID)
+			}
+
+			saveErr := sm.saveState()
+			sm.mu.Unlock()
+
+			if saveErr != nil {
+				sm.log.Error("failed to persist state during delete-resume; keeping tombstone",
+					"id", t.ID, "err", saveErr)
+
+				continue
+			}
+
+			_ = os.Remove(filepath.Join(sm.paths.LogDir, t.ID+".log"))
+			_ = os.Remove(sm.nonoProfilePath(t.ID))
+			_ = os.Remove(sm.safehouseFragmentPath(t.ID))
 			_ = os.Remove(path)
-
-			continue
+			madeProgress = true
 		}
 
-		sm.mu.RLock()
-		stateSession := sm.state.Sessions[t.ID]
-		removedHookCleanupPending := stateSession != nil && stateSession.RemovedHookCleanupPending
-		processStillRecorded := stateSession == nil ||
-			(stateSession.PID == t.PID && stateSession.PIDStartTime == t.PIDStartTime)
-
-		sm.mu.RUnlock()
-
-		// Removed-hook ownership is reconciled before tombstones during normal
-		// cold startup. Keep this defense at the destructive boundary so a direct
-		// or reordered call cannot signal or erase a still-pending generation.
-		if removedHookCleanupPending {
-			sm.log.Warn("deferring interrupted delete while removed-hook cleanup is pending",
-				"id", t.ID, "pid", t.PID)
-
-			continue
+		if !madeProgress {
+			break
 		}
 
-		sm.log.Info("resuming interrupted delete", "id", t.ID, "name", t.Name)
-
-		// Reap a leftover orphan process (verified by start time) before removing
-		// the worktree it may still be running in.
-		if t.PID > 0 && processStillRecorded {
-			if _, err := sm.killVerifiedProcess(t.PID, t.PIDStartTime); err != nil {
-				sm.log.Warn("could not reap orphan during delete-resume",
-					"id", t.ID, "pid", t.PID, "err", err)
-			}
+		if refreshed, err := os.ReadDir(sm.tombstoneDir()); err == nil {
+			entries = refreshed
 		}
-
-		if err := sm.teardownArtifacts(t.teardownSpec); err != nil {
-			sm.log.Error("teardown failed during delete-resume (leaving for gr gc)",
-				"id", t.ID, "err", err)
-		}
-
-		// Persist the state removal BEFORE unlinking the tombstone: the state
-		// save is the durable commit point. If it fails, keep the tombstone so a
-		// later startup retries — unlinking first could leave state.json still
-		// listing a torn-down session with no marker to finish it.
-		sm.mu.Lock()
-		if sess, ok := sm.state.Sessions[t.ID]; ok {
-			if sess.Token != "" {
-				delete(sm.tokenIndex, sess.Token)
-			}
-
-			sm.reparentChildrenLocked(t.ID, sess.ParentID)
-			delete(sm.state.Sessions, t.ID)
-			delete(sm.hookReports, t.ID)
-		}
-
-		saveErr := sm.saveState()
-		sm.mu.Unlock()
-
-		if saveErr != nil {
-			sm.log.Error("failed to persist state during delete-resume; keeping tombstone",
-				"id", t.ID, "err", saveErr)
-
-			continue
-		}
-
-		_ = os.Remove(filepath.Join(sm.paths.LogDir, t.ID+".log"))
-		_ = os.Remove(sm.nonoProfilePath(t.ID))
-		_ = os.Remove(sm.safehouseFragmentPath(t.ID))
-		_ = os.Remove(path)
 	}
+}
+
+func hasTombstoneFile(dir, id string) bool {
+	_, err := os.Stat(filepath.Join(dir, id+".json"))
+	return err == nil
 }

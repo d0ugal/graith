@@ -46,12 +46,26 @@ func ValidateScenarioName(name string) error {
 // starred member as an orphan and leave a partial scenario record.
 func (sm *SessionManager) unstarAndDelete(id string) error {
 	sm.mu.Lock()
+
+	var scenarioID string
+
 	if s, ok := sm.state.Sessions[id]; ok {
 		s.Starred = false
+		scenarioID = s.ScenarioID
+
+		for _, descendantID := range sm.collectDescendants(id) {
+			descendant := sm.state.Sessions[descendantID]
+			if descendant == nil || descendant.ScenarioID != scenarioID {
+				sm.mu.Unlock()
+				return fmt.Errorf("cannot delete scenario session %q with a descendant outside its scenario ownership", s.Name)
+			}
+		}
 	}
 	sm.mu.Unlock()
 
-	return sm.Delete(id)
+	_, err := sm.DeleteWithChildren(id, false)
+
+	return err
 }
 
 type scenarioSharedSource struct {
