@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.70.1](https://github.com/d0ugal/graith/compare/v0.70.0...v0.70.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* protect session ownership on delete ([5f465b9](https://github.com/d0ugal/graith/commit/5f465b9ba4aefb5b5cc16822857ec957a9fef859))
+* update module github.com/mattn/go-isatty to v0.0.24 ([#1615](https://github.com/d0ugal/graith/issues/1615)) ([b8e02e0](https://github.com/d0ugal/graith/commit/b8e02e0bdf915385dbd309788706902b931e7c7a))
+* update module tailscale.com to v1.102.0 ([#1618](https://github.com/d0ugal/graith/issues/1618)) ([de0f7fa](https://github.com/d0ugal/graith/commit/de0f7faad9b80556159e726b883a717142cc9509))
+
 ## [0.70.0](https://github.com/d0ugal/graith/compare/v0.69.6...v0.70.0) (2026-07-23)
 
 
