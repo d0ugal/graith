@@ -142,13 +142,22 @@ test('Linux artifacts are lock-complete and published only by trusted immutable 
     const artifact = lock.ghostty.linuxArtifacts[arch];
     assert.match(artifact.url, new RegExp(`libghostty-vt-linux-${arch}\\.tar\\.gz$`));
     assert.match(artifact.sha256, /^[0-9a-f]{64}$/);
+    assert.notEqual(new Set(artifact.sha256).size, 1, `${arch} artifact digest must not be a repeated-character placeholder`);
   }
   assert.match(nativeScript, /sha256_check "\$expected" "\$archive"/);
   assert.match(nativeScript, /sha256_check[\s\S]*?tar -xzf/);
   assert.match(nativeScript, /unexpected or incomplete archive members/);
   assert.match(nativePublish, /contents: write/);
   assert.match(nativePublish, /github\.event_name == 'workflow_dispatch' \|\| github\.ref == 'refs\/heads\/main'/);
-  assert.match(nativePublish, /refusing to overwrite existing release asset/);
+  assert.match(nativePublish, /verified immutable asset already published/);
+  assert.match(nativePublish, /remote_asset_sha[\s\S]*expected_asset_sha/);
+  assert.match(nativePublish, /export PATH=\"\$RUNNER_TEMP\/zig:\$PATH\"/);
+  assert.match(nativePublish, /test \"\$\(zig version\)\" = \"\$\(jq -er '\.zig\.version' libghostty-native\.lock\.json\)\"/);
+  assert.match(nativePublish, /env GOARCH=amd64 scripts\/libghostty-native\.sh source-build/);
+  assert.match(nativePublish, /Cflags: -DGHOSTTY_STATIC/);
+  assert.match(nativePublish, /Libs: -L\\\$\{libdir\} -lghostty-vt/);
+  assert.match(nativePublish, /tag=\"libghostty-vt-\$\(jq -er '\.ghostty\.commit' libghostty-native\.lock\.json \| cut -c1-7\)-linux\"/);
+  assert.match(nativePublish, /gh release create[\s\S]*?gh release view/);
   assert.match(nativePublish, /actions\/checkout@[0-9a-f]{40}/);
 });
 
