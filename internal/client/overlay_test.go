@@ -2764,7 +2764,7 @@ func TestOverlayConfigurableKeys(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newOverlayModel(overlayTestSessions(), "", nil, func(string) error { return nil }, nil, nil)
+			m := newOverlayModel(overlayTestSessions(), "", nil, func(string, bool) error { return nil }, nil, nil)
 			m.restartSession = func(string) error { return nil }
 			m.applyKeys(tc.keys)
 
@@ -2791,7 +2791,7 @@ func TestOverlayOldLiteralIgnoredAfterRemap(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newOverlayModel(overlayTestSessions(), "", nil, func(string) error { return nil }, nil, nil)
+			m := newOverlayModel(overlayTestSessions(), "", nil, func(string, bool) error { return nil }, nil, nil)
 			m.restartSession = func(string) error { return nil }
 			m.applyKeys(tc.keys)
 
@@ -2806,7 +2806,7 @@ func TestOverlayOldLiteralIgnoredAfterRemap(t *testing.T) {
 // TestOverlayDefaultKeysWhenUnset confirms the built-in defaults still apply
 // when no keybindings are configured (empty OverlayKeys).
 func TestOverlayDefaultKeysWhenUnset(t *testing.T) {
-	m := newOverlayModel(overlayTestSessions(), "", nil, func(string) error { return nil }, nil, nil)
+	m := newOverlayModel(overlayTestSessions(), "", nil, func(string, bool) error { return nil }, nil, nil)
 	m.applyKeys(OverlayKeys{})
 
 	updated, _ := sendKey(m, "x")
@@ -2819,7 +2819,7 @@ func TestOverlayDefaultKeysWhenUnset(t *testing.T) {
 
 func TestUpdate_ConfirmDeleteY(t *testing.T) {
 	deletedID := ""
-	deleteFn := func(sid string) error { deletedID = sid; return nil }
+	deleteFn := func(sid string, children bool) error { deletedID = sid; return nil }
 	m := newOverlayModel(overlayTestSessions(), "", nil, deleteFn, nil, nil)
 	selected := m.list.SelectedItem().(sessionItem)
 
@@ -2848,7 +2848,7 @@ func TestUpdate_ConfirmDeleteY(t *testing.T) {
 }
 
 func TestUpdate_ConfirmDeleteUpperY(t *testing.T) {
-	deleteFn := func(sid string) error { return nil }
+	deleteFn := func(sid string, children bool) error { return nil }
 	m := newOverlayModel(overlayTestSessions(), "", nil, deleteFn, nil, nil)
 
 	updated, _ := sendKey(m, "x")
@@ -2856,6 +2856,73 @@ func TestUpdate_ConfirmDeleteUpperY(t *testing.T) {
 	_, cmd := sendKey(asOverlay(updated), "Y")
 	if cmd == nil {
 		t.Fatal("Y should also produce a delete command")
+	}
+}
+
+func TestOverlayDeleteSubtreeUsesCompleteHierarchy(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "root", Name: "orchestrator", Status: "running"},
+		{ID: "child", Name: "bairn", ParentID: "root", Status: "running"},
+		{ID: "grandchild", Name: "wee-bairn", ParentID: "child", Status: "running"},
+	}
+
+	var gotChildren bool
+
+	m := newOverlayModel(sessions, "", nil, func(_ string, children bool) error {
+		gotChildren = children
+		return nil
+	}, nil, nil)
+	m.collapsed["root"] = true
+	m.filterInput.SetValue("orchestrator")
+	m.rebuildForView()
+	m.width, m.height = 120, 40
+
+	updated, _ := sendKey(m, "x")
+
+	om := asOverlay(updated)
+
+	if !strings.Contains(om.View().Content, "has 2 descendants") {
+		t.Fatalf("subtree confirmation missing complete descendant count:\n%s", om.View().Content)
+	}
+
+	updated, cmd := sendKey(om, "y")
+	if cmd == nil {
+		t.Fatal("confirming subtree delete should return a command")
+	}
+
+	_ = updated
+
+	if _, ok := cmd().(deleteResultMsg); !ok {
+		t.Fatal("subtree delete should produce deleteResultMsg")
+	}
+
+	if !gotChildren {
+		t.Error("subtree delete should pass children=true")
+	}
+}
+
+func TestOverlayDeleteSubtreeCancellationDoesNothing(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "root", Name: "orchestrator"},
+		{ID: "child", Name: "bairn", ParentID: "root"},
+	}
+
+	called := false
+
+	m := newOverlayModel(sessions, "", nil, func(_ string, _ bool) error {
+		called = true
+		return nil
+	}, nil, nil)
+	updated, _ := sendKey(m, "x")
+
+	updated, cmd := sendKey(updated, "n")
+
+	if cmd != nil || called {
+		t.Fatalf("cancelling subtree delete called=%v cmd=%v, want no mutation", called, cmd)
+	}
+
+	if asOverlay(updated).state != stateList {
+		t.Fatal("cancelling subtree delete should return to list")
 	}
 }
 
@@ -3374,7 +3441,7 @@ func TestOverlayResult_Attach(t *testing.T) {
 
 func TestOverlayResult_Delete_StaysOpen(t *testing.T) {
 	deletedID := ""
-	deleteFn := func(sid string) error {
+	deleteFn := func(sid string, children bool) error {
 		deletedID = sid
 		return nil
 	}
@@ -3418,14 +3485,12 @@ func TestOverlayResult_Delete_StaysOpen(t *testing.T) {
 		t.Errorf("state after delete = %d, want stateList", om.state)
 	}
 
-	if len(om.allSessions) != len(sessions)-1 {
-		t.Errorf("sessions after delete = %d, want %d", len(om.allSessions), len(sessions)-1)
+	if len(om.allSessions) != len(sessions) {
+		t.Errorf("sessions before authoritative refresh = %d, want %d", len(om.allSessions), len(sessions))
 	}
 
-	for _, s := range om.allSessions {
-		if s.ID == selected.info.ID {
-			t.Error("deleted session should not remain in allSessions")
-		}
+	if _, ok := om.list.SelectedItem().(sessionItem); !ok {
+		t.Error("selection should remain usable while refresh is pending")
 	}
 }
 
@@ -5011,7 +5076,7 @@ func TestUpdate_RestartSingleConfirm(t *testing.T) {
 
 // --- Update: delete removes session and rebuilds ---
 
-func TestUpdate_DeleteResultRemovesSession(t *testing.T) {
+func TestUpdate_DeleteResultRefreshesAuthoritativeState(t *testing.T) {
 	sessions := overlayTestSessions()
 	m := newOverlayModel(sessions, "", noopFetchPreview, nil, nil, nil)
 	m.width, m.height = 120, 40
@@ -5019,47 +5084,54 @@ func TestUpdate_DeleteResultRemovesSession(t *testing.T) {
 	updated, _ := m.Update(deleteResultMsg{sessionID: "s1"})
 	om := asOverlay(updated)
 
-	for _, s := range om.allSessions {
-		if s.ID == "s1" {
-			t.Fatal("s1 should be removed after deleteResultMsg")
-		}
+	if len(om.allSessions) != len(sessions) {
+		t.Errorf("allSessions before refresh = %d, want %d", len(om.allSessions), len(sessions))
 	}
 
-	if len(om.allSessions) != len(sessions)-1 {
-		t.Errorf("allSessions = %d, want %d", len(om.allSessions), len(sessions)-1)
+	updated, _ = om.Update(refreshSessionsMsg{sessions: sessions[1:]})
+	if got := len(asOverlay(updated).allSessions); got != len(sessions)-1 {
+		t.Errorf("allSessions after refresh = %d, want %d", got, len(sessions)-1)
 	}
 }
 
-func TestUpdate_DeleteResultLastSessionQuits(t *testing.T) {
+func TestUpdate_DeleteResultLastSessionRefreshesToEmpty(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{ID: "only", Name: "neep", RepoName: "repo", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
 	}
 	m := newOverlayModel(sessions, "", noopFetchPreview, nil, nil, nil)
 	m.width, m.height = 120, 40
 
-	_, cmd := m.Update(deleteResultMsg{sessionID: "only"})
+	updated, cmd := m.Update(deleteResultMsg{sessionID: "only"})
 	if cmd == nil {
 		t.Fatal("deleting the last session should return a command")
 	}
 
-	if _, ok := cmd().(tea.QuitMsg); !ok {
-		t.Errorf("deleting the last session should quit the overlay, got %T", cmd())
+	_ = cmd
+
+	updated, _ = asOverlay(updated).Update(refreshSessionsMsg{sessions: []protocol.SessionInfo{}})
+
+	if got := countSessionItems(asOverlay(updated)); got != 0 {
+		t.Errorf("sessions after refresh = %d, want 0", got)
 	}
 }
 
-func TestUpdate_DeleteResultErrorReturnsToList(t *testing.T) {
+func TestUpdate_DeleteResultErrorStaysActionable(t *testing.T) {
 	m := sizedModel(t, overlayTestSessions(), "")
 	m.state = stateConfirmDelete
 
 	updated, _ := m.Update(deleteResultMsg{sessionID: "s1", err: errFake})
 	om := asOverlay(updated)
 
-	if om.state != stateList {
-		t.Errorf("delete error should return to list, got %v", om.state)
+	if om.state != stateConfirmDelete {
+		t.Errorf("delete error should keep confirmation visible, got %v", om.state)
 	}
 
 	if len(om.allSessions) != 3 {
 		t.Errorf("delete error should not remove the session, got %d", len(om.allSessions))
+	}
+
+	if !strings.Contains(om.View().Content, errFake.Error()) {
+		t.Errorf("delete error should be visible: %q", om.View().Content)
 	}
 }
 
