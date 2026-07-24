@@ -3111,12 +3111,70 @@ func TestAddToScenarioRejectsPolicyOptInWithoutLegacyContract(t *testing.T) {
 		Name: "canny-new", Repo: repo, Task: "review new croft",
 		Policy: &protocol.ScenarioMemberPolicyInput{Required: boolPtr(true)},
 	}, 24, 80)
-	if err == nil || !strings.Contains(err.Error(), "no durable seeded todo contract") {
+	if err == nil || !strings.Contains(err.Error(), "no currently assigned durable seeded todo contract") {
 		t.Fatalf("error = %v, want legacy contract verification failure", err)
 	}
 
 	if sm.state.Scenarios["sc-croft-old"].Policy != nil || sm.state.Sessions["canny-new"] != nil {
 		t.Fatal("failed policy opt-in mutated legacy scenario")
+	}
+}
+
+func TestAddToScenarioPolicyOptInRequiresCurrentLegacyContractAssignment(t *testing.T) {
+	tests := []struct {
+		name       string
+		assignee   string
+		wantErr    string
+		wantMember bool
+	}{
+		{name: "reassigned", assignee: "canny-owner", wantErr: "no currently assigned durable seeded todo contract"},
+		{name: "unassigned", assignee: "", wantErr: "no currently assigned durable seeded todo contract"},
+		{name: "correctly assigned", assignee: "braw-old", wantMember: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sm, _ := newScenarioOrchestrator(t)
+			sm.todos = newTestTodoStore(t)
+			repo := initScenarioGitRepo(t)
+
+			sm.mu.Lock()
+			sm.state.Sessions["braw-old"] = &SessionState{ID: "braw-old", Name: "braw-old", Status: StatusStopped, RepoPath: repo}
+			sm.state.Scenarios["sc-croft-old"] = &ScenarioState{
+				ID: "sc-croft-old", Name: "croft-old", OrchestratorID: "ben-orch",
+				SessionIDs: []string{"braw-old"}, Sessions: []ScenarioSession{{Name: "braw-old", Task: "review old croft"}},
+			}
+			sm.mu.Unlock()
+
+			seed, err := sm.todos.Add(TodoAdd{Scope: "scenario:sc-croft-old", Title: "review old croft", Assignee: "braw-old", CreatedBy: "scenario:sc-croft-old"})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := sm.todos.Assign(seed.ID, tt.assignee); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err = sm.AddToScenario("croft-old", protocol.ScenarioSessionInput{
+				Name: "canny-new", Repo: repo, Task: "review new croft",
+				Policy: &protocol.ScenarioMemberPolicyInput{Required: boolPtr(true)},
+			}, 24, 80)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want %q", err, tt.wantErr)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("AddToScenario: %v", err)
+			}
+
+			if !tt.wantMember {
+				t.Fatal("expected no member assertion")
+			}
+		})
 	}
 }
 

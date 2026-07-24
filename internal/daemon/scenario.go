@@ -2070,14 +2070,14 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 			return nil, errors.New("cannot enable runtime policy: todo store is required to verify existing member contracts")
 		}
 
-		seedIDs, seedErr := sm.todos.ScenarioSeedItemIDs("scenario:" + scenarioID)
+		seedIDs, seedErr := sm.todos.ScenarioCurrentSeedItemIDs("scenario:" + scenarioID)
 		if seedErr != nil {
 			return nil, fmt.Errorf("verify existing scenario contracts: %w", seedErr)
 		}
 
 		for _, contract := range legacyPolicyContracts {
 			if seedIDs[contract.sessionID] == "" {
-				return nil, fmt.Errorf("cannot enable runtime policy: existing member %q has no durable seeded todo contract", contract.memberName)
+				return nil, fmt.Errorf("cannot enable runtime policy: existing member %q has no currently assigned durable seeded todo contract", contract.memberName)
 			}
 		}
 	}
