@@ -32,19 +32,41 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
           GOARCH: ${{ matrix.goarch }}
+          GH_TOKEN: ${{ github.token }}
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty
           GRAITH_LIBGHOSTTY_SOURCE_BUILD: '1'
         run: |
           set -euo pipefail
+          tag="libghostty-vt-$(jq -er '.ghostty.commit' libghostty-native.lock.json | cut -c1-7)-linux"
+          asset="libghostty-vt-linux-$GOARCH.tar.gz"
+          expected_asset_sha="$(jq -er ".ghostty.linuxArtifacts.${GOARCH}.sha256" libghostty-native.lock.json)"
+          if remote_asset_sha="$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest" 2>/dev/null)" &&
+            [[ -n "$remote_asset_sha" ]]; then
+            test "$remote_asset_sha" = "sha256:$expected_asset_sha"
+            echo "verified immutable asset already published: $asset"
+            exit 0
+          fi
           curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
             "$(jq -er '.zig.linuxX8664URL' libghostty-native.lock.json)" -o "$RUNNER_TEMP/zig.tar.xz"
           printf '%s  %s\n' "$(jq -er '.zig.linuxX8664SHA256' libghostty-native.lock.json)" "$RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/zig"; tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          # GITHUB_PATH is applied only to later workflow steps. Export the
+          # path here as well because the build runs in this step.
+          export PATH="$RUNNER_TEMP/zig:$PATH"
           echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
-          scripts/libghostty-native.sh source-build "$TARGET" "$RUNNER_TEMP/libghostty-vt.a"
+          test "$(zig version)" = "$(jq -er '.zig.version' libghostty-native.lock.json)"
+          # The script runs host Go helpers while cross-building the library;
+          # do not let the target artifact GOARCH select an unexecutable
+          # helper binary on the amd64 runner.
+          env GOARCH=amd64 scripts/libghostty-native.sh source-build "$TARGET" "$RUNNER_TEMP/libghostty-vt.a"
           mkdir -p "$RUNNER_TEMP/bundle/pkgconfig"
           cp "$RUNNER_TEMP/libghostty-vt.a" "$RUNNER_TEMP/bundle/"
-          cp "$GRAITH_LIBGHOSTTY_WORK/pkgconfig/libghostty-vt-static.pc" "$RUNNER_TEMP/bundle/pkgconfig/"
+          # The source-build helper writes paths for the runner workspace.
+          # Release bundles must be relocatable for consumers.
+          sed -e 's#^Cflags:.*#Cflags: -DGHOSTTY_STATIC#' \
+            -e "s#^Libs:.*#Libs: -L\${libdir} -lghostty-vt#" \
+            "$GRAITH_LIBGHOSTTY_WORK/pkgconfig/libghostty-vt-static.pc" \
+            > "$RUNNER_TEMP/bundle/pkgconfig/libghostty-vt-static.pc"
           cp libghostty-native.spdx.json THIRD_PARTY_NOTICES.libghostty.md "$RUNNER_TEMP/bundle/"
           jq -n --arg target "$TARGET" --arg arch "$GOARCH" --arg commit "$(jq -er '.ghostty.commit' libghostty-native.lock.json)" \
             '{schemaVersion:1,target:$target,architecture:$arch,ghosttyCommit:$commit}' > "$RUNNER_TEMP/bundle/manifest.json"
@@ -57,10 +79,20 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           set -euo pipefail
-          tag="libghostty-vt-$(jq -er '.ghostty.commit' libghostty-native.lock.json | cut -c1-7)"
+          tag="libghostty-vt-$(jq -er '.ghostty.commit' libghostty-native.lock.json | cut -c1-7)-linux"
           asset="libghostty-vt-linux-$GOARCH.tar.gz"
-          if ! gh release view "$tag" >/dev/null 2>&1; then gh release create "$tag" --title "$tag" --notes "Pinned libghostty native artifacts"; fi
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            # Both matrix jobs may observe an absent release concurrently.
+            # Re-check after a failed create so only the asset upload remains
+            # the race, and that upload is guarded below.
+            gh release create "$tag" --title "$tag" --notes "Pinned libghostty native artifacts" ||
+              gh release view "$tag" >/dev/null
+          fi
           if gh release view "$tag" --json assets --jq '.assets[].name' | grep -Fxq "$asset"; then
-            echo "error: refusing to overwrite existing release asset $asset" >&2; exit 1
+            remote_asset_sha="$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
+            expected_asset_sha="$(jq -er ".ghostty.linuxArtifacts.${GOARCH}.sha256" libghostty-native.lock.json)"
+            test "$remote_asset_sha" = "sha256:$expected_asset_sha"
+            echo "verified immutable asset already published: $asset"
+            exit 0
           fi
           gh release upload "$tag" "$RUNNER_TEMP/$asset" --clobber=false
