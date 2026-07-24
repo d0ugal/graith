@@ -756,6 +756,7 @@ type previewMsg struct {
 
 type deleteResultMsg struct {
 	sessionID string
+	children  bool
 	err       error
 }
 
@@ -807,7 +808,8 @@ type overlayModel struct {
 	fetchPreview     func(sessionID string) string
 	refreshSessions  func() []protocol.SessionInfo
 	refreshDeleted   func() []protocol.SessionInfo
-	deleteSession    func(sessionID string) error
+	deleteSession    func(sessionID string, children bool) error
+	deleteError      string
 	restartSession   func(sessionID string) error
 	stopSession      func(sessionID string) error
 	toggleStar       func(sessionID string, star bool) error
@@ -1321,7 +1323,7 @@ func maxSessionNameWidthFromItems(items []list.Item, minimum int) int {
 	return maxWidth
 }
 
-func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string) error, collapsed map[string]bool, shortcutKeys []rune) *overlayModel {
+func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string, children bool) error, collapsed map[string]bool, shortcutKeys []rune) *overlayModel {
 	if collapsed == nil {
 		collapsed = make(map[string]bool)
 	}
@@ -1415,6 +1417,39 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 		keyResume:        "R",
 		keySearch:        "/",
 	}
+}
+
+// descendantCount returns the complete live subtree below sessionID. It uses
+// allSessions rather than the current view so filtering and folded ancestors
+// cannot hide descendants from the delete guard.
+func descendantCount(sessions []protocol.SessionInfo, sessionID string) int {
+	children := make(map[string][]string)
+
+	for _, s := range sessions {
+		if s.ParentID != "" && s.ParentID != s.ID {
+			children[s.ParentID] = append(children[s.ParentID], s.ID)
+		}
+	}
+
+	seen := map[string]bool{sessionID: true}
+	queue := append([]string(nil), children[sessionID]...)
+	count := 0
+
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+
+		if seen[id] {
+			continue
+		}
+
+		seen[id] = true
+		count++
+
+		queue = append(queue, children[id]...)
+	}
+
+	return count
 }
 
 func (m *overlayModel) Init() tea.Cmd {
@@ -1740,48 +1775,17 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case deleteResultMsg:
 		if msg.err != nil {
-			m.state = stateList
+			m.deleteError = msg.err.Error()
 			m.resizeList()
 
 			return m, nil
 		}
 
-		var newSessions []protocol.SessionInfo
-
-		for _, s := range m.allSessions {
-			if s.ID != msg.sessionID {
-				newSessions = append(newSessions, s)
-			}
-		}
-
-		m.allSessions = newSessions
-		if len(newSessions) == 0 {
-			return m, tea.Quit
-		}
-
-		curIdx := m.list.Index()
-		m.rebuildForView()
-
-		if curIdx >= len(m.list.Items()) {
-			curIdx = len(m.list.Items()) - 1
-		}
-
-		if curIdx >= 0 {
-			m.list.Select(curIdx)
-		}
-
-		if _, ok := m.list.SelectedItem().(groupHeader); ok {
-			m.list.CursorDown()
-
-			if _, ok := m.list.SelectedItem().(groupHeader); ok {
-				m.list.CursorUp()
-			}
-		}
-
+		m.deleteError = ""
 		m.state = stateList
 		m.resizeList()
 
-		return m, m.fetchPreviewCmd()
+		return m, tea.Batch(m.fetchPreviewCmd(), m.refreshSessionsCmd())
 
 	case restartResultMsg:
 		m.state = stateList
@@ -1965,10 +1969,11 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "y", "Y":
 				if item, ok := m.list.SelectedItem().(sessionItem); ok && m.deleteSession != nil {
 					sid := item.info.ID
+					children := descendantCount(m.allSessions, sid) > 0
 					deleteFn := m.deleteSession
 
 					return m, func() tea.Msg {
-						return deleteResultMsg{sessionID: sid, err: deleteFn(sid)}
+						return deleteResultMsg{sessionID: sid, children: children, err: deleteFn(sid, children)}
 					}
 				}
 
@@ -2105,6 +2110,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				if _, ok := m.list.SelectedItem().(sessionItem); ok {
+					m.deleteError = ""
 					m.state = stateConfirmDelete
 					m.resizeList()
 				}
@@ -2561,6 +2567,8 @@ func (m *overlayModel) View() tea.View {
 	case stateConfirmDelete:
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			s := item.info
+
+			descendants := descendantCount(m.allSessions, s.ID)
 			if !s.Mirror && (s.Dirty || s.UnpushedCount > 0) {
 				warnStyle := lipgloss.NewStyle().Foreground(colorRed).Bold(true)
 
@@ -2585,9 +2593,20 @@ func (m *overlayModel) View() tea.View {
 			}
 
 			panelContent.WriteString("\n")
+
+			if m.deleteError != "" {
+				panelContent.WriteString("\n")
+				panelContent.WriteString(lipgloss.NewStyle().Foreground(colorRed).Render("⚠ Delete failed: " + m.deleteError))
+			}
+
+			prompt := fmt.Sprintf("Delete '%s'? [y/N]", s.Name)
+			if descendants > 0 {
+				prompt = fmt.Sprintf("'%s' has %d descendants. Delete the entire subtree? [y/N]", s.Name, descendants)
+			}
+
 			panelContent.WriteString(lipgloss.NewStyle().
 				Foreground(colorRed).
-				Render(fmt.Sprintf("Delete '%s'? [y/N]", s.Name)))
+				Render(prompt))
 		}
 	case stateConfirmStop:
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
@@ -2764,8 +2783,9 @@ type RunOverlayOpts struct {
 	RefreshSessions func() []protocol.SessionInfo
 	// RefreshDeleted re-fetches the soft-deleted session list.
 	RefreshDeleted func() []protocol.SessionInfo
-	// DeleteSession soft-deletes a session by ID.
-	DeleteSession func(sessionID string) error
+	// DeleteSession soft-deletes a session by ID, optionally including all
+	// descendants.
+	DeleteSession func(sessionID string, children bool) error
 	// RestartSession restarts a stopped session by ID.
 	RestartSession func(sessionID string) error
 	// StopSession stops a running session by ID.

@@ -83,7 +83,7 @@ Cycle with `h`/`l` or arrows:
 | Key | Action |
 |-----|--------|
 | `n` | Create a new session (opens a form with name, repo, agent, and optional comma-separated labels) |
-| `x` | Delete session (prompts for confirmation with `y`) |
+| `x` | Delete session (prompts for confirmation with `y`); sessions with descendants offer to soft-delete the entire subtree |
 | `s` | Toggle starred state |
 | `r` | Restart session (prompts for confirmation) |
 | `R` | Restart all sessions in current view (prompts for confirmation) |

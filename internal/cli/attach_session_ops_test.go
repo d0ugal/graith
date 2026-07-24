@@ -96,7 +96,7 @@ func TestSimpleSessionOps(t *testing.T) {
 	}{
 		{"restart", func() error { return restartSession("braw") }, "restart"},
 		{"stop", func() error { return stopSession("braw") }, "stop"},
-		{"delete", func() error { return deleteSession("braw") }, "delete"},
+		{"delete", func() error { return deleteSession("braw", false) }, "delete"},
 		{"restore", func() error { return restoreSession("braw") }, "restore"},
 	}
 
@@ -120,6 +120,19 @@ func TestSimpleSessionOps(t *testing.T) {
 				t.Fatalf("err = %v, want \"fashed\"", err)
 			}
 		})
+	}
+}
+
+func TestDeleteSessionRecursivePayload(t *testing.T) {
+	c := withScriptedControl(t, okResp(typeEnv("ok")))
+
+	if err := deleteSession("orchestrator", true); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	msg, ok := c.sends[0].Payload.(protocol.DeleteMsg)
+	if !ok || msg.SessionID != "orchestrator" || !msg.Children {
+		t.Fatalf("payload = %#v, want recursive delete", c.sends[0].Payload)
 	}
 }
 
