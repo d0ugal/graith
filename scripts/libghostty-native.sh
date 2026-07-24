@@ -399,11 +399,42 @@ THIRD_PARTY_NOTICES.libghostty.md" ]] || {
     library="$staging/libghostty-vt.a"
     verify_static_archive "$library" || { die "Linux artifact static archive failed validation"; return 1; }
     pc="$staging/pkgconfig/libghostty-vt-static.pc"
-    grep -Fqx 'Libs: -L${libdir} -lghostty-vt' "$pc" || { die "Linux artifact pkg-config metadata mismatch"; return 1; }
+    grep -Fqx 'prefix=${pcfiledir}/..' "$pc" || { die "Linux artifact pkg-config prefix mismatch"; return 1; }
+    grep -Fqx 'Libs: -L${prefix} -lghostty-vt' "$pc" || { die "Linux artifact pkg-config metadata mismatch"; return 1; }
     mkdir -p "$NATIVE_WORK/pkgconfig"
     cp -- "$library" "$NATIVE_WORK/libghostty-vt.a"
     cp -- "$pc" "$NATIVE_WORK/pkgconfig/libghostty-vt-static.pc"
     printf '%s\n' "$NATIVE_WORK/libghostty-vt.a"
+}
+
+test_linux_artifact() {
+    local goarch="${1:-}"
+    local target pkgconfig libs
+    case "$goarch" in
+        amd64) target=x86_64-linux-gnu ;;
+        arm64) target=aarch64-linux-gnu ;;
+        *) die "unsupported Linux artifact architecture: $goarch"; return 1 ;;
+    esac
+
+    linux_artifact "$goarch" >/dev/null || return 1
+    pkgconfig="$NATIVE_WORK/pkgconfig"
+    libs="$(PKG_CONFIG_PATH="$pkgconfig" pkg-config --libs libghostty-vt-static)" || {
+        die "Linux artifact pkg-config query failed"
+        return 1
+    }
+    [[ "$libs" =~ (^|[[:space:]])-L[^[:space:]]+($|[[:space:]]) ]] || {
+        die "Linux artifact pkg-config output contains an empty -L flag: $libs"
+        return 1
+    }
+    if [[ "$goarch" == amd64 ]]; then
+        PKG_CONFIG_PATH="$pkgconfig" CGO_ENABLED=1 \
+            go test -count=1 go.mitchellh.com/libghostty
+    else
+        PKG_CONFIG_PATH="$pkgconfig" CGO_ENABLED=1 GOARCH=arm64 \
+            GOOS=linux CC="zig cc -target $target" \
+            go test -c -o "$NATIVE_WORK/libghostty-wrapper-$goarch.test" \
+            go.mitchellh.com/libghostty
+    fi
 }
 
 build_local() {
@@ -3128,6 +3159,8 @@ usage() {
 usage: $0 test|race|fuzz|daemon-test|soak [cycles [timeout]]|all
        $0 source-build <zig-target> <output-library>
        $0 source-test <zig-target>
+       $0 prepare-linux-artifact <amd64|arm64>
+       $0 test-linux-artifact <amd64|arm64>
        $0 test-source-archive-policy
        $0 verify-static-archive <library>
        $0 verify-dependency-unit
@@ -3190,6 +3223,9 @@ case "${1:-}" in
         ;;
     prepare-linux-artifact)
         linux_artifact "${2:-}"
+        ;;
+    test-linux-artifact)
+        test_linux_artifact "${2:-}"
         ;;
     source-test)
         source_test "${2:-}"

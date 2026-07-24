@@ -287,6 +287,12 @@ jobs:
         env:
           SOURCE: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}/ghostty/include/ghostty
         run: diff -ru "$SOURCE" gui/shared/Sources/CGhosttyVT/include/ghostty
+      - name: Contract-test the published Linux artifact
+        if: needs.changes.outputs.dependency-unit != 'true'
+        env:
+          GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}-contract
+        run: scripts/libghostty-native.sh test-linux-artifact "${{ matrix.goarch }}"
       - name: Compile and optionally run the isolated backend
         env:
           GOARCH: ${{ matrix.goarch }}
