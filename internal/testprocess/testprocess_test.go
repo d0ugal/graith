@@ -80,7 +80,6 @@ func TestEstablishHumanLifecycleAuthorityRejectsSymlink(t *testing.T) {
 	if err := os.WriteFile(target, []byte("secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
