@@ -6741,6 +6741,11 @@ func TestCovTeardownIncludes(t *testing.T) {
 	sessionDir := filepath.Join(t.TempDir(), "session")
 	mainWorktree := filepath.Join(sessionDir, "croft")
 
+	sibling := filepath.Join(filepath.Dir(sessionDir), "sibling")
+	if err := os.Mkdir(sibling, 0o750); err != nil {
+		t.Fatalf("mkdir sibling: %v", err)
+	}
+
 	if err := git.SetupSession(context.Background(), clone, mainWorktree, "graith/skelf-main", "main", false); err != nil {
 		t.Fatalf("SetupSession main: %v", err)
 	}
@@ -6773,6 +6778,10 @@ func TestCovTeardownIncludes(t *testing.T) {
 		t.Errorf("expected session dir removed, stat err = %v", err)
 	}
 
+	if _, err := os.Stat(sibling); err != nil {
+		t.Errorf("unrelated sibling was removed: %v", err)
+	}
+
 	// The branches and worktree registrations in the source repo must also be
 	// gone — removing only the session dir would leave git metadata behind.
 	if git.RefExists(clone, "graith/skelf-main") {
@@ -6789,6 +6798,35 @@ func TestCovTeardownIncludes(t *testing.T) {
 
 	if git.IsRegisteredWorktree(clone, incWorktree) {
 		t.Error("include worktree still registered after teardown")
+	}
+}
+
+func TestCovTeardownIncludesRemovesSessionDirWithNoCompletedIncludes(t *testing.T) {
+	sm := newTestSessionManager(t)
+	_, clone := setupTestRepo(t)
+
+	sessionDir := filepath.Join(t.TempDir(), "session")
+	mainWorktree := filepath.Join(sessionDir, "croft")
+
+	sibling := filepath.Join(filepath.Dir(sessionDir), "sibling")
+	if err := os.Mkdir(sibling, 0o750); err != nil {
+		t.Fatalf("mkdir sibling: %v", err)
+	}
+
+	if err := git.SetupSession(context.Background(), clone, mainWorktree, "graith/skelf-main", "main", false); err != nil {
+		t.Fatalf("SetupSession main: %v", err)
+	}
+
+	if err := sm.teardownIncludes(clone, mainWorktree, "graith/skelf-main", nil); err != nil {
+		t.Fatalf("teardownIncludes: %v", err)
+	}
+
+	if _, err := os.Stat(sessionDir); !os.IsNotExist(err) {
+		t.Errorf("expected session dir removed, stat err = %v", err)
+	}
+
+	if _, err := os.Stat(sibling); err != nil {
+		t.Errorf("unrelated sibling was removed: %v", err)
 	}
 }
 
