@@ -266,8 +266,8 @@ func truncateOutput(s string, maxBytes int) string {
 }
 
 // actionSession spawns (or, with ensure, reuses) a session parented to the
-// orchestrator. For a watch source with ensure=true this is the ensure-reviewer
-// behaviour with per-binding reservation.
+// orchestrator. Ensured watch and GCX actions use the same owned-reactor
+// lifecycle; GCX reactors have no mirror source and receive queued inbox work.
 func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerConfig, fc fireContext) (string, error) {
 	orchestratorID := sm.orchestratorID()
 	if fc.scenarioID != "" {
@@ -318,11 +318,18 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 		return "", err
 	}
 
-	// ensure-reviewer (watch): reuse the binding's existing reactor if alive.
-	if t.Action.Ensure && t.IsWatch() {
-		if existing := sm.reuseReactor(t.Name, fc.sessionID); existing != "" {
+	if t.Action.Ensure {
+		sourceID := ""
+		if t.IsWatch() {
+			sourceID = fc.sessionID
+		}
+
+		if existing := sm.reuseOwnedReactor(t.Name, sourceID, triggerFingerprint(t), t.IsWatch()); existing != "" {
 			//nolint:contextcheck // notifyFromDaemon detaches its auto-resume; it must outlive this call.
-			_ = sm.notifyFromDaemon(existing, prompt)
+			if err := sm.notifyFromDaemon(existing, prompt); err != nil {
+				return "", fmt.Errorf("deliver to reactor %s: %w", existing, err)
+			}
+
 			return "messaged " + existing, nil
 		}
 	}
@@ -361,7 +368,8 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 		parentID:             orchestratorID,
 		mirror:               mirror,
 		triggerName:          t.Name,
-		reactor:              t.Action.Ensure && t.IsWatch(),
+		reactor:              t.Action.Ensure,
+		triggerFingerprint:   triggerFingerprint(t),
 		autoCleanup:          cleanup,
 		idleTimeoutSecs:      idleSeconds(idle),
 		completionScenarioID: fc.scenarioID,
@@ -378,6 +386,31 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 	}
 
 	return "spawned " + sess.ID, nil
+}
+
+// reuseOwnedReactor finds an ensured reactor by its durable ownership tag.
+// Legacy watch reactors have no fingerprint and remain reusable; new reactors
+// require an exact definition match. GCX reactors use an empty source ID.
+func (sm *SessionManager) reuseOwnedReactor(triggerName, sourceSessionID, fingerprint string, legacyFingerprintOK bool) string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	for id, s := range sm.state.Sessions {
+		if !s.TriggerReactor || s.TriggerID != triggerName || s.MirrorSourceID != sourceSessionID || s.IsSoftDeleted() {
+			continue
+		}
+		fingerprintMatches := s.TriggerFingerprint == fingerprint ||
+			(legacyFingerprintOK && s.TriggerFingerprint == "")
+		if !fingerprintMatches {
+			continue
+		}
+
+		if s.Status == StatusRunning || s.Status == StatusStopped {
+			return id
+		}
+	}
+
+	return ""
 }
 
 // notifyOnComplete fires a proactive push notification after a trigger action
@@ -673,6 +706,7 @@ type createTriggerReq struct {
 	parentID             string
 	mirror               string
 	triggerName          string
+	triggerFingerprint   string
 	trackerIssue         string
 	reactor              bool
 	autoCleanup          string
@@ -706,6 +740,7 @@ func (sm *SessionManager) createTriggerSession(req createTriggerReq) (SessionSta
 		AgentHooks:           true,
 		TriggerID:            req.triggerName,
 		TriggerReactor:       req.reactor,
+		TriggerFingerprint:   req.triggerFingerprint,
 		TrackerIssue:         req.trackerIssue,
 		AutoCleanup:          req.autoCleanup,
 		IdleTimeoutSecs:      req.idleTimeoutSecs,

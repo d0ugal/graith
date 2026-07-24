@@ -56,6 +56,21 @@ func TestTriggerFingerprint(t *testing.T) {
 	}
 }
 
+func TestReuseOwnedReactorRequiresDefinitionForGCX(t *testing.T) {
+	trig := config.TriggerConfig{Name: "oncall", GCX: &config.GCXConfig{Context: "croft"}, Action: config.ActionConfig{Type: config.ActionSession, Ensure: true, Prompt: "inspect"}}
+	sm := newTriggerTestSM(t, trig)
+	fp := triggerFingerprint(&trig)
+	sm.state.Sessions["braw"] = &SessionState{ID: "braw", Status: StatusStopped, TriggerID: trig.Name, TriggerReactor: true, TriggerFingerprint: fp}
+
+	if got := sm.reuseOwnedReactor(trig.Name, "", fp, false); got != "braw" {
+		t.Fatalf("reactor = %q, want braw", got)
+	}
+
+	if got := sm.reuseOwnedReactor(trig.Name, "", "changed", false); got != "" {
+		t.Fatalf("changed definition reused reactor %q", got)
+	}
+}
+
 func TestTriggerFingerprintPreservesLegacySources(t *testing.T) {
 	tests := []config.TriggerConfig{
 		{Schedule: &config.ScheduleConfig{Every: "10m"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "braw"}},
