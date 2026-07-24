@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 )
 
@@ -29,7 +30,7 @@ func markHumanLifecycleAuthority() { humanLifecycleAuthority.Store(true) }
 // sessions do not have reachability to this file; unsandboxed same-UID agents
 // remain outside this guarantee and lifecycle operations fail closed there.
 func EstablishHumanLifecycleAuthorityFromFile(path string) error {
-	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return err
 	}

@@ -66,7 +66,7 @@ func TestWrapWithFeatures(t *testing.T) {
 	opts := WrapOpts{
 		Backend:     BackendSafehouse,
 		WorktreeDir: "/tmp/bothy",
-		Features:    []string{"ssh", "process-control"},
+		Features:    []string{"ssh"},
 		EnvKeys:     []string{"TERM"},
 	}
 
@@ -83,8 +83,8 @@ func TestWrapWithFeatures(t *testing.T) {
 
 	for i, a := range args {
 		if a == "--enable" && i+1 < len(args) {
-			if args[i+1] != "ssh,process-control" {
-				t.Errorf("--enable value = %q, want %q", args[i+1], "ssh,process-control")
+			if args[i+1] != "ssh" {
+				t.Errorf("--enable value = %q, want %q", args[i+1], "ssh")
 			}
 
 			found = true
@@ -1335,14 +1335,10 @@ func TestEnforceSignalIsolationOverridesConfiguredMode(t *testing.T) {
 	}
 }
 
-func TestWrapPreservesSafehouseProcessControl(t *testing.T) {
-	_, args, err := Wrap("claude", nil, WrapOpts{Features: []string{"process-control"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !slices.Contains(args, "process-control") {
-		t.Fatalf("safehouse args dropped process-control: %v", args)
+func TestWrapFailsClosedForSafehouseProcessControl(t *testing.T) {
+	_, _, err := Wrap("claude", nil, WrapOpts{Features: []string{"process-control"}})
+	if err == nil || !strings.Contains(err.Error(), "cannot enforce process-control") {
+		t.Fatalf("Wrap() = %v, want explicit Safehouse compatibility refusal", err)
 	}
 }
 
