@@ -75,6 +75,10 @@ The daemon protocol continues to resolve the protected human token as
 `roleLocalHuman` and explicitly denies session tokens for host lifecycle
 messages; the CLI establishes the local capability only after reading that
 credential. Service bootstrap establishes it from the protected receipt.
+The client never creates this credential: a missing credential is a
+fail-closed installation/bootstrap error, so a session cannot mint authority
+by clearing its environment. Package/service installation or an already
+running daemon is responsible for the initial protected bootstrap.
 
 This requires no wire change and covers direct lower-level calls, Linux direct
 spawn, and macOS service-manager mutations. Private test seams can inject an
