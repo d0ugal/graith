@@ -1,6 +1,8 @@
 package testprocess
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -42,14 +44,49 @@ func TestRefuseDaemonLifecycleMutationRejectsCurrentTestProcess(t *testing.T) {
 }
 
 func TestRefuseDaemonLifecycleMutationRejectsSessionContext(t *testing.T) {
-	err := refuseDaemonLifecycleMutation("stop daemon", "/usr/local/bin/gr", false, []string{"GR_AGENT_MODE=0", "GRAITH_SESSION_ID=braw-session"})
-	if err == nil || !strings.Contains(err.Error(), "agent execution context") {
-		t.Fatalf("RefuseDaemonLifecycleMutation() error = %v, want agent-context refusal", err)
+	resetHumanLifecycleAuthority()
+
+	err := refuseDaemonLifecycleMutation("stop daemon", "/usr/local/bin/gr", false)
+	if err == nil || !strings.Contains(err.Error(), "positive human lifecycle authority") {
+		t.Fatalf("RefuseDaemonLifecycleMutation() error = %v, want missing-authority refusal", err)
 	}
 }
 
 func TestRefuseDaemonLifecycleMutationAllowsHumanContext(t *testing.T) {
-	if err := refuseDaemonLifecycleMutation("stop daemon", "/usr/local/bin/gr", false, []string{"GR_AGENT_MODE=0"}); err != nil {
+	resetHumanLifecycleAuthority()
+	markHumanLifecycleAuthority()
+
+	defer resetHumanLifecycleAuthority()
+
+	if err := refuseDaemonLifecycleMutation("stop daemon", "/usr/local/bin/gr", false); err != nil {
 		t.Fatalf("human lifecycle mutation refused: %v", err)
+	}
+}
+
+func TestRefuseDaemonLifecycleMutationCleanEnvironmentStillDenied(t *testing.T) {
+	resetHumanLifecycleAuthority()
+
+	defer resetHumanLifecycleAuthority()
+
+	if err := refuseDaemonLifecycleMutation("remove service", "/usr/local/bin/gr", false); err == nil {
+		t.Fatal("clean environment lifecycle mutation was allowed without positive authority")
+	}
+}
+
+func TestEstablishHumanLifecycleAuthorityRejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	link := filepath.Join(dir, "human.token")
+
+	if err := os.WriteFile(target, []byte("secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := EstablishHumanLifecycleAuthorityFromFile(link); err == nil {
+		t.Fatal("EstablishHumanLifecycleAuthorityFromFile() followed a symlink")
 	}
 }

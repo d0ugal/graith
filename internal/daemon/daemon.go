@@ -24,6 +24,7 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/store"
+	"github.com/d0ugal/graith/internal/testprocess"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -735,6 +736,7 @@ func (sm *SessionManager) loadOrCreateHumanToken() error {
 		}
 
 		sm.setHumanToken(token)
+		_ = testprocess.EstablishHumanLifecycleAuthorityFromFile(sm.paths.HumanTokenFile)
 
 		return nil
 	}
@@ -767,6 +769,7 @@ func (sm *SessionManager) loadOrCreateHumanToken() error {
 	}
 
 	sm.setHumanToken(token)
+	_ = testprocess.EstablishHumanLifecycleAuthorityFromFile(sm.paths.HumanTokenFile)
 
 	return nil
 }

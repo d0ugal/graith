@@ -54,7 +54,7 @@ write_files = ["~/.claude.json", "~/.claude.json.lock", "~/.claude.lock"]  # log
 |---------|-----------|------|
 | `ssh` | grants `SSH_AUTH_SOCK` access | grants the `$SSH_AUTH_SOCK` Unix socket (agent socket only; raw `~/.ssh` key access isn't granted). Warns if `SSH_AUTH_SOCK` is unset. |
 | `ssh-keys` | (n/a — use safehouse's own key handling) | grants **read-only** `~/.ssh` access for agents that use raw key files instead of the agent socket (via `filesystem.read` + `filesystem.bypass_protection`, since `~/.ssh` is denied by nono's `deny_credentials` group). Opt-in companion to `ssh`, which stays agent-socket-only. Warns and grants nothing if the home directory can't be resolved. |
-| `process-control` | allows signal sending | **no-op on its own** — nono's default already permits same-sandbox signals. Set `signal_mode = "isolated"` (below) to actually gate signalling under nono. Documented cross-backend divergence. |
+| `process-control` | allows signal sending | nono only; Safehouse rejects this request because it cannot enforce signal isolation. Under nono, set `signal_mode = "isolated"` to gate signalling outside the sandbox. |
 | anything else (e.g. `clipboard`) | passed to safehouse | **not mapped** — nono has no equivalent, so graith warns and ignores it rather than silently dropping it. |
 
 ### `signal_mode` (nono only)

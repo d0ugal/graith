@@ -314,6 +314,10 @@ var daemonServiceRepairCmd = &cobra.Command{
 }
 
 func currentServiceManager(repair bool) (*daemonservice.Manager, error) {
+	if err := testprocess.EstablishHumanLifecycleAuthorityFromFile(paths.HumanTokenFile); err != nil {
+		return nil, fmt.Errorf("establish human lifecycle authority: %w", err)
+	}
+
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -576,7 +580,17 @@ func execUpgrade(successMsg string) error {
 }
 
 func execUpgradeWithGuard(successMsg string, guard func(string) error) error {
+	c, err := dialUpgradeClient()
+	if err != nil {
+		return fmt.Errorf("connect to daemon: %w", err)
+	}
+
+	// Constructing the client resolves the protected human credential and
+	// establishes the process-local capability. Session-token callers do not
+	// read that credential and therefore remain denied by the guard below.
 	if err := guard("initiate preserved daemon restart"); err != nil {
+		c.Close()
+
 		return err
 	}
 
@@ -585,12 +599,9 @@ func execUpgradeWithGuard(successMsg string, guard func(string) error) error {
 	// single handshake exchange.
 	msg, err := managedUpgradeMsg()
 	if err != nil {
-		return fmt.Errorf("prepare managed upgrade candidate: %w", err)
-	}
+		c.Close()
 
-	c, err := dialUpgradeClient()
-	if err != nil {
-		return fmt.Errorf("connect to daemon: %w", err)
+		return fmt.Errorf("prepare managed upgrade candidate: %w", err)
 	}
 
 	// client.New leaves the connection deadline-free, so the raw handshake and

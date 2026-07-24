@@ -21,13 +21,12 @@ import (
 
 func allowDaemonLifecycleMutation(string) error { return nil }
 
-func TestExecUpgradeRejectsGoTestBeforeDial(t *testing.T) {
+func TestExecUpgradeRejectsGoTestAfterAuthenticatedDial(t *testing.T) {
 	setupUpgradeTest(t)
 
-	dialed := false
+	fake := &fakeUpgradeConn{}
 	dialUpgradeClient = func() (upgradeExchangeConn, error) {
-		dialed = true
-		return nil, errors.New("dreich")
+		return fake, nil
 	}
 
 	err := execUpgrade("done")
@@ -35,8 +34,12 @@ func TestExecUpgradeRejectsGoTestBeforeDial(t *testing.T) {
 		t.Fatalf("execUpgrade() error = %v, want Go-test refusal", err)
 	}
 
-	if dialed {
-		t.Fatal("Go-test refusal dialed the daemon upgrade connection")
+	if !fake.closed {
+		t.Fatal("Go-test refusal did not close the authenticated daemon connection")
+	}
+
+	if len(fake.sent) != 0 {
+		t.Fatalf("Go-test refusal sent upgrade controls: %v", fake.sent)
 	}
 }
 

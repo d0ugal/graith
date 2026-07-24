@@ -11,7 +11,6 @@ package sandbox
 
 import (
 	"fmt"
-	"log/slog"
 	"slices"
 )
 
@@ -188,16 +187,12 @@ func Wrap(command string, args []string, opts WrapOpts) (string, []string, error
 	}
 
 	if backend == BackendSafehouse && slices.Contains(opts.Features, "process-control") {
-		// Seatbelt has no equivalent signal isolation control. Keep sessions
-		// startable, but never pass the signal-granting feature through.
-		slog.Default().Warn("safehouse cannot enforce sandbox signal isolation; ignoring process-control feature")
-
-		opts.Features = slices.DeleteFunc(slices.Clone(opts.Features), func(feature string) bool {
-			return feature == "process-control"
-		})
+		return "", nil, fmt.Errorf("safehouse cannot enforce process-control signal isolation; use backend %q", BackendNono)
 	}
 
-	be, err := backendByName(opts.Backend)
+	opts.Backend = backend
+
+	be, err := backendByName(backend)
 	if err != nil {
 		return "", nil, err
 	}
