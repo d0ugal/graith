@@ -17,10 +17,10 @@ gr doctor
 
 It checks:
 
-- **Version:** CLI and daemon version match, update availability
+- **Version:** CLI and daemon version/commit match, plus update availability
 - **Environment:** config file, data dir, daemon log size, state file, messages DB, sandbox availability, agent prompt
 - **macOS daemon service:** managed/fallback mode, projected variable names, receipt health, and named-profile slot usage
-- **Daemon:** connectivity, PID file freshness, uptime, active terminal-screen backend
+- **Daemon:** connectivity, PID/socket ownership, uptime, active terminal-screen backend
 - **Sessions:** zombie processes (PID not alive but status running), missing worktrees, config drift, scrollback saturation
 - **Storage:** scrollback files, orphaned scrollback logs, orphaned worktree directories, tmp dir size, legacy share dir
 
@@ -70,15 +70,15 @@ ls ${XDG_RUNTIME_DIR:-~/.local/share/graith/run}/graith/graith.sock
 # Check if the PID file is stale
 gr doctor --autofix
 
-# Manual cleanup if doctor can't connect
-rm -f ${XDG_RUNTIME_DIR:-~/.local/share/graith/run}/graith/graith.sock \
-      ${XDG_RUNTIME_DIR:-~/.local/share/graith/run}/graith/graith.pid
+# Retry the command; Graith verifies the PID identity and reconciles a live
+# daemon whose socket disappeared during an interrupted upgrade.
 gr daemon start
 ```
 
 ### Version mismatch
 
-`gr doctor` reports "Version mismatch: CLI=X, daemon=Y" when CLI and daemon differ. Fix:
+`gr doctor` reports "Version mismatch: CLI=X, daemon=Y" when CLI and daemon differ;
+both versions include their commit when available. Fix:
 
 ```bash
 gr daemon restart
