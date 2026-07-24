@@ -49,7 +49,7 @@ agent can't spoof a different session.
 
 ### The human token and the fail-closed default
 
-Local auth is **fail-closed**: the human role requires a valid session token or the human token; anything else is rejected. On startup the daemon writes the **human token** to `human.token` (mode `0600`, alongside `state.json`, excluded from each enabled Graith agent sandbox), reused across restarts.
+Local auth is **fail-closed**: the human role requires a valid session token or the human token; anything else is rejected. The installer/bootstrap daemon writes the **human token** to `human.token` (mode `0600`, alongside `state.json`, excluded from each enabled Graith agent sandbox), reused across restarts. The client never creates this credential; if it is missing, startup fails closed until a human installation/bootstrap repairs it.
 
 The `gr` CLI handles this transparently:
 
@@ -73,7 +73,7 @@ once an agent reads the human token, as the startup warning and `gr doctor` note
 | `gr new` | Token generated, stored in state, injected as `GRAITH_TOKEN` |
 | `gr fork` | New token for the forked session (source's token unchanged) |
 | Session resume/restart | Token **rotated**: fresh token generated, old one invalidated, new one injected into the new process (bounds a leaked token to one agent lifetime) |
-| Daemon startup | Human token loaded from `human.token`, or created (`0600`) on first run |
+| Daemon startup | Human token loaded from the protected `human.token` |
 | Session delete | Token removed from the daemon's reverse lookup index |
 | Daemon restart | Token index rebuilt from persisted state |
 | State migration (v9 to v10) | Tokens backfilled for existing sessions |

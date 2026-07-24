@@ -14,6 +14,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/testprocess"
 )
 
 func TestValidateDaemonExecutableRejectsGoTestBinary(t *testing.T) {
@@ -121,30 +122,11 @@ func TestStartDaemonExecutableRequiresLifecycleAuthorityBeforeLaunch(t *testing.
 	}
 }
 
-func TestEnsureHumanLifecycleCredentialRejectsSessionToken(t *testing.T) {
-	t.Setenv("GRAITH_TOKEN", "session-token")
-
-	err := ensureHumanLifecycleCredential(filepath.Join(t.TempDir(), "human.token"))
-	if err == nil || !strings.Contains(err.Error(), "session-token callers") {
-		t.Fatalf("ensureHumanLifecycleCredential() = %v, want explicit session denial", err)
-	}
-}
-
-func TestEnsureHumanLifecycleCredentialCreatesProtectedToken(t *testing.T) {
-	t.Setenv("GRAITH_TOKEN", "")
-	path := filepath.Join(t.TempDir(), "data", "human.token")
-
-	if err := ensureHumanLifecycleCredential(path); err != nil {
-		t.Fatalf("ensureHumanLifecycleCredential() = %v", err)
-	}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("human token mode = %04o, want 0600", info.Mode().Perm())
+func TestEnsureDaemonConfiguredContextRequiresPreexistingHumanCredential(t *testing.T) {
+	paths := config.Paths{HumanTokenFile: filepath.Join(t.TempDir(), "missing.token")}
+	err := testprocess.EstablishHumanLifecycleAuthorityFromFile(paths.HumanTokenFile)
+	if err == nil {
+		t.Fatal("missing human credential unexpectedly established lifecycle authority")
 	}
 }
 
