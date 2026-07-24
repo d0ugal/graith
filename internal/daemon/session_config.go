@@ -458,6 +458,11 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 
 		if newCfg.Orchestrator.Enabled {
 			sm.startBackgroundTask(context.Background(), sm.ensureOrchestrator)
+		} else if sm.orchestratorRetryCancelCh != nil {
+			select {
+			case sm.orchestratorRetryCancelCh <- struct{}{}:
+			default:
+			}
 		}
 	}
 
