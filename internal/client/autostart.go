@@ -2,11 +2,14 @@ package client
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -73,6 +76,10 @@ func EnsureDaemonConfiguredContext(parent context.Context, cfg *config.Config, p
 	startupContext, cancel := context.WithDeadline(parent, startupDeadline)
 	defer cancel()
 
+	if err := ensureHumanLifecycleCredential(paths.HumanTokenFile); err != nil {
+		return nil, err
+	}
+
 	sockPath := paths.SocketPath
 	// Present the caller's credential (session token or human token) in the
 	// probe, matching the real handshake and the other probes (probeDaemonIdentity,
@@ -125,6 +132,64 @@ func EnsureDaemonConfiguredContext(parent context.Context, cfg *config.Config, p
 	}
 
 	return readyConn, nil
+}
+
+// ensureHumanLifecycleCredential provisions the protected local-human
+// credential before a human client starts a daemon. A session token is an
+// explicit denial and can never mint lifecycle authority. On a sandboxed
+// session, the protected data path is unreachable; same-UID unsandboxed use is
+// an explicit enforcement precondition documented by the lifecycle design.
+func ensureHumanLifecycleCredential(path string) error {
+	if os.Getenv("GRAITH_TOKEN") != "" {
+		return errors.New("session-token callers cannot establish daemon lifecycle authority")
+	}
+
+	if err := testprocess.EstablishHumanLifecycleAuthorityFromFile(path); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("validate human lifecycle credential: %w", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create human credential directory: %w", err)
+	}
+
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return fmt.Errorf("generate human lifecycle credential: %w", err)
+	}
+
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			if validateErr := testprocess.EstablishHumanLifecycleAuthorityFromFile(path); validateErr == nil {
+				return nil
+			} else {
+				return fmt.Errorf("validate concurrent human lifecycle credential: %w", validateErr)
+			}
+		}
+
+		return fmt.Errorf("create human lifecycle credential: %w", err)
+	}
+
+	if _, err := f.WriteString(hex.EncodeToString(raw) + "\n"); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+
+		return fmt.Errorf("write human lifecycle credential: %w", err)
+	}
+
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+
+		return fmt.Errorf("close human lifecycle credential: %w", err)
+	}
+
+	if err := testprocess.EstablishHumanLifecycleAuthorityFromFile(path); err != nil {
+		return fmt.Errorf("validate created human lifecycle credential: %w", err)
+	}
+
+	return nil
 }
 
 func initialDaemonProbeDeadline(startupDeadline time.Time) time.Time {

@@ -736,6 +736,7 @@ func (sm *SessionManager) loadOrCreateHumanToken() error {
 		}
 
 		sm.setHumanToken(token)
+		_ = testprocess.EstablishHumanLifecycleAuthorityFromFile(sm.paths.HumanTokenFile)
 
 		return nil
 	}
