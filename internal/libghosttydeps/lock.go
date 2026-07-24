@@ -49,18 +49,29 @@ type GoDependency struct {
 }
 
 type Ghostty struct {
-	Repository        string        `json:"repository"`
-	RenovateRef       string        `json:"renovateRef"`
-	Commit            string        `json:"commit"`
-	Version           string        `json:"version"`
-	HeadersSHA256     string        `json:"headersSHA256"`
-	LicenseSHA256     string        `json:"licenseSHA256"`
-	LicenseConclusion string        `json:"licenseConclusion"`
-	LicenseReview     string        `json:"licenseReview"`
-	AppleArtifact     AppleArtifact `json:"appleArtifact"`
+	Repository        string         `json:"repository"`
+	RenovateRef       string         `json:"renovateRef"`
+	Commit            string         `json:"commit"`
+	Version           string         `json:"version"`
+	HeadersSHA256     string         `json:"headersSHA256"`
+	LicenseSHA256     string         `json:"licenseSHA256"`
+	LicenseConclusion string         `json:"licenseConclusion"`
+	LicenseReview     string         `json:"licenseReview"`
+	AppleArtifact     AppleArtifact  `json:"appleArtifact"`
+	LinuxArtifacts    LinuxArtifacts `json:"linuxArtifacts"`
 }
 
 type AppleArtifact struct {
+	URL    string `json:"url"`
+	SHA256 string `json:"sha256"`
+}
+
+type LinuxArtifacts struct {
+	AMD64 LinuxArtifact `json:"amd64"`
+	ARM64 LinuxArtifact `json:"arm64"`
+}
+
+type LinuxArtifact struct {
 	URL    string `json:"url"`
 	SHA256 string `json:"sha256"`
 }
@@ -233,6 +244,11 @@ func (lock Lock) validate(requireProjectionConsistency bool) error {
 		check(sha256Pattern.MatchString(value), "invalid %s SHA-256", name)
 	}
 
+	if requireProjectionConsistency {
+		check(sha256Pattern.MatchString(lock.Ghostty.LinuxArtifacts.AMD64.SHA256), "invalid Linux amd64 artifact SHA-256")
+		check(sha256Pattern.MatchString(lock.Ghostty.LinuxArtifacts.ARM64.SHA256), "invalid Linux arm64 artifact SHA-256")
+	}
+
 	for name, value := range map[string]string{
 		"go-libghostty repository": lock.GoLibghostty.Repository,
 		"go-libghostty version":    lock.GoLibghostty.Version,
@@ -247,6 +263,11 @@ func (lock Lock) validate(requireProjectionConsistency bool) error {
 		"SPDX tools version":       lock.SPDXTools.Version,
 	} {
 		check(value != "", "missing %s", name)
+	}
+
+	if requireProjectionConsistency {
+		check(lock.Ghostty.LinuxArtifacts.AMD64.URL != "", "missing Linux amd64 artifact URL")
+		check(lock.Ghostty.LinuxArtifacts.ARM64.URL != "", "missing Linux arm64 artifact URL")
 	}
 
 	if requireProjectionConsistency && len(lock.Ghostty.Commit) >= 7 {

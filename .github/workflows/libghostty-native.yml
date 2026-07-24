@@ -211,6 +211,12 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
+          if [ "${{ needs.changes.outputs.dependency-unit }}" != "true" ]; then
+            export GRAITH_LIBGHOSTTY_WORK="${RUNNER_TEMP}/ghostty-${EVIDENCE_ARCH}"
+            scripts/libghostty-native.sh prepare-linux-artifact "$EVIDENCE_ARCH"
+            echo "Using the checksum-verified immutable Linux artifact"
+            exit 0
+          fi
           evidence="${RUNNER_TEMP}/source-build-${EVIDENCE_ARCH}.time"
           uname -a
           cat /etc/os-release
@@ -277,6 +283,7 @@ jobs:
           fi
           echo "archive_policy_residue=none"
       - name: Verify committed headers match the source pin
+        if: needs.changes.outputs.dependency-unit == 'true'
         env:
           SOURCE: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}/ghostty/include/ghostty
         run: diff -ru "$SOURCE" gui/shared/Sources/CGhosttyVT/include/ghostty
@@ -306,7 +313,9 @@ jobs:
             cat "$evidence"
           }
           if [ "$RUN_TESTS" = "true" ]; then
-            run_timed source-test scripts/libghostty-native.sh source-test "$TARGET"
+            if [ "${{ needs.changes.outputs.dependency-unit }}" = "true" ]; then
+              run_timed source-test scripts/libghostty-native.sh source-test "$TARGET"
+            fi
             run_timed wrapper go test -count=1 go.mitchellh.com/libghostty
             run_timed pty go test -count=1 -tags=libghostty ./internal/pty
             run_timed daemon go test -count=1 -tags=libghostty ./internal/daemon \

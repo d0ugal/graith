@@ -16,6 +16,10 @@ GHOSTTY_SHA="$(jq -er '.ghostty.commit' "$DEPENDENCY_LOCK")"
 GHOSTTY_REPO="$(jq -er '.ghostty.repository' "$DEPENDENCY_LOCK")"
 GHOSTTY_ARTIFACT_URL="$(jq -er '.ghostty.appleArtifact.url' "$DEPENDENCY_LOCK")"
 GHOSTTY_ARTIFACT_SHA256="$(jq -er '.ghostty.appleArtifact.sha256' "$DEPENDENCY_LOCK")"
+LINUX_AMD64_ARTIFACT_URL="$(jq -er '.ghostty.linuxArtifacts.amd64.url // empty' "$DEPENDENCY_LOCK")"
+LINUX_AMD64_ARTIFACT_SHA256="$(jq -er '.ghostty.linuxArtifacts.amd64.sha256 // empty' "$DEPENDENCY_LOCK")"
+LINUX_ARM64_ARTIFACT_URL="$(jq -er '.ghostty.linuxArtifacts.arm64.url // empty' "$DEPENDENCY_LOCK")"
+LINUX_ARM64_ARTIFACT_SHA256="$(jq -er '.ghostty.linuxArtifacts.arm64.sha256 // empty' "$DEPENDENCY_LOCK")"
 GHOSTTY_HEADERS_SHA256="$(jq -er '.ghostty.headersSHA256' "$DEPENDENCY_LOCK")"
 GHOSTTY_LICENSE_SHA256="$(jq -er '.ghostty.licenseSHA256' "$DEPENDENCY_LOCK")"
 REQUIRED_ZIG="$(jq -er '.zig.version' "$DEPENDENCY_LOCK")"
@@ -36,6 +40,8 @@ SPDX_TOOLS_VERSION="$(jq -er '.spdxTools.version' "$DEPENDENCY_LOCK")"
 SPDX_TOOLS_URL="$(jq -er '.spdxTools.url' "$DEPENDENCY_LOCK")"
 SPDX_TOOLS_SHA256="$(jq -er '.spdxTools.sha256' "$DEPENDENCY_LOCK")"
 readonly GHOSTTY_SHA GHOSTTY_REPO GHOSTTY_ARTIFACT_URL GHOSTTY_ARTIFACT_SHA256
+readonly LINUX_AMD64_ARTIFACT_URL LINUX_AMD64_ARTIFACT_SHA256
+readonly LINUX_ARM64_ARTIFACT_URL LINUX_ARM64_ARTIFACT_SHA256
 readonly GHOSTTY_HEADERS_SHA256 GHOSTTY_LICENSE_SHA256
 readonly REQUIRED_ZIG GO_LIBGHOSTTY_SHA GO_LIBGHOSTTY_VERSION GO_LIBGHOSTTY_SUM
 readonly UUCODE_VERSION UUCODE_HASH HIGHWAY_VERSION HIGHWAY_SHA
@@ -345,6 +351,61 @@ apple_library() {
     printf '%s\n' "$library"
 }
 
+# Download one immutable Linux native bundle.  The digest is checked while the
+# file is still an opaque download; no archive tool sees untrusted bytes.
+linux_artifact() {
+    local goarch="${1:-}" target url expected archive staging library pc
+    case "$goarch" in
+        amd64) target=x86_64-linux-gnu; url="$LINUX_AMD64_ARTIFACT_URL"; expected="$LINUX_AMD64_ARTIFACT_SHA256" ;;
+        arm64) target=aarch64-linux-gnu; url="$LINUX_ARM64_ARTIFACT_URL"; expected="$LINUX_ARM64_ARTIFACT_SHA256" ;;
+        *) die "unsupported Linux artifact architecture: $goarch"; return 1 ;;
+    esac
+    archive="$NATIVE_WORK/libghostty-vt-linux-$goarch.tar.gz"
+    staging="$NATIVE_WORK/linux-artifact-$goarch"
+    curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+        "$url" --output "$archive" || { die "could not download Linux artifact"; return 1; }
+    sha256_check "$expected" "$archive" || { die "Linux artifact checksum mismatch"; return 1; }
+
+    # Validate names, types, and exact cardinality before extraction.  GNU tar
+    # reports symlinks and links explicitly; neither is permitted in bundles.
+    local listing
+    listing="$(tar -tzf "$archive")" || { die "invalid Linux artifact archive"; return 1; }
+    [[ "$listing" == "libghostty-vt.a
+pkgconfig/libghostty-vt-static.pc
+manifest.json
+libghostty-native.spdx.json
+THIRD_PARTY_NOTICES.libghostty.md" ]] || {
+        die "Linux artifact has unexpected or incomplete archive members"; return 1;
+    }
+    if tar -tvzf "$archive" | awk '$1 ~ /^[lh]/ { found = 1 } END { exit !found }'; then
+        die "Linux artifact contains a link"; return 1
+    fi
+    rm -rf -- "$staging"
+    mkdir -m 700 "$staging"
+    tar -xzf "$archive" -C "$staging" --no-same-owner --no-same-permissions
+    for path in libghostty-vt.a pkgconfig/libghostty-vt-static.pc manifest.json \
+        libghostty-native.spdx.json THIRD_PARTY_NOTICES.libghostty.md; do
+        [[ -f "$staging/$path" && ! -L "$staging/$path" ]] || {
+            die "Linux artifact member is not a regular file: $path"; return 1;
+        }
+    done
+    if ! jq -e --arg target "$target" --arg arch "$goarch" \
+        --arg ghostty "$GHOSTTY_SHA" \
+        '.schemaVersion == 1 and .target == $target and .architecture == $arch and .ghosttyCommit == $ghostty' \
+        "$staging/manifest.json" >/dev/null; then
+        die "Linux artifact manifest mismatch"
+        return 1
+    fi
+    library="$staging/libghostty-vt.a"
+    verify_static_archive "$library" || { die "Linux artifact static archive failed validation"; return 1; }
+    pc="$staging/pkgconfig/libghostty-vt-static.pc"
+    grep -Fqx 'Libs: -L${libdir} -lghostty-vt' "$pc" || { die "Linux artifact pkg-config metadata mismatch"; return 1; }
+    mkdir -p "$NATIVE_WORK/pkgconfig"
+    cp -- "$library" "$NATIVE_WORK/libghostty-vt.a"
+    cp -- "$pc" "$NATIVE_WORK/pkgconfig/libghostty-vt-static.pc"
+    printf '%s\n' "$NATIVE_WORK/libghostty-vt.a"
+}
+
 build_local() {
     local library pkgconfig output target gocache
     if [[ "$(uname -s)" == "Darwin" ]]; then
@@ -356,7 +417,11 @@ build_local() {
             *) die "native local builds support Linux amd64/arm64 only"; return 1 ;;
         esac
         library="$NATIVE_WORK/libghostty-vt.a"
-        source_build "$target" "$library" || return 1
+        if [[ "${GRAITH_LIBGHOSTTY_SOURCE_BUILD:-0}" == "1" ]]; then
+            source_build "$target" "$library" || return 1
+        else
+            linux_artifact "$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" >/dev/null || return 1
+        fi
     else
         die "native local builds support macOS arm64 and Linux amd64/arm64 only"
         return 1
@@ -3120,8 +3185,11 @@ case "${1:-}" in
         run_go race
         run_go fuzz
         ;;
-    source-build)
+       source-build)
         source_build "${2:-}" "${3:-}"
+        ;;
+    prepare-linux-artifact)
+        linux_artifact "${2:-}"
         ;;
     source-test)
         source_test "${2:-}"

@@ -22,6 +22,10 @@ const goreleaser = fs.readFileSync(
 );
 const nativeScript = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'libghostty-native.sh'), 'utf8');
 const devRelease = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'dev-release.yml'), 'utf8');
+const nativePublish = fs.readFileSync(
+  path.join(REPO_ROOT, '.github', 'workflows', 'libghostty-native-publish.yml'),
+  'utf8',
+);
 
 function nativePathMatcher() {
   const match = native.match(/if grep -Eq '([^']+)' <<<"\$files"/);
@@ -129,4 +133,20 @@ test('release workflows gate only pull-request release work and fail safe', () =
   }
   assert.match(devRelease, /branches:\n      - main/);
   assert.match(goreleaser, /tags:\n      - "v\*"/);
+});
+
+test('Linux artifacts are lock-complete and published only by trusted immutable workflow', () => {
+  const lock = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'libghostty-native.lock.json'), 'utf8'));
+  for (const arch of ['amd64', 'arm64']) {
+    const artifact = lock.ghostty.linuxArtifacts[arch];
+    assert.match(artifact.url, new RegExp(`libghostty-vt-linux-${arch}\\.tar\\.gz$`));
+    assert.match(artifact.sha256, /^[0-9a-f]{64}$/);
+  }
+  assert.match(nativeScript, /sha256_check "\$expected" "\$archive"/);
+  assert.match(nativeScript, /sha256_check[\s\S]*?tar -xzf/);
+  assert.match(nativeScript, /unexpected or incomplete archive members/);
+  assert.match(nativePublish, /contents: write/);
+  assert.match(nativePublish, /github\.event_name == 'workflow_dispatch' \|\| github\.ref == 'refs\/heads\/main'/);
+  assert.match(nativePublish, /refusing to overwrite existing release asset/);
+  assert.match(nativePublish, /actions\/checkout@[0-9a-f]{40}/);
 });
