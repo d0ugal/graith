@@ -11,6 +11,7 @@ package sandbox
 
 import (
 	"fmt"
+	"slices"
 )
 
 // Backend identifiers used in config (`[sandbox] backend = "..."`).
@@ -183,6 +184,10 @@ func Wrap(command string, args []string, opts WrapOpts) (string, []string, error
 
 	if backend == "" {
 		backend = BackendSafehouse
+	}
+
+	if backend == BackendSafehouse && slices.Contains(opts.Features, "process-control") {
+		return "", nil, fmt.Errorf("safehouse cannot enforce process-control signal isolation; use backend %q", BackendNono)
 	}
 
 	opts.Backend = backend
