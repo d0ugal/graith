@@ -452,7 +452,7 @@ func primaryDependencyChanged(ctx context.Context, root string, current Lock) (b
 		return false, nil
 	}
 
-	previous, err := DecodeLock(output)
+	previous, err := decodeLock(output, false)
 	if err != nil {
 		return false, fmt.Errorf("decode native dependency base %s: %w", ref, err)
 	}

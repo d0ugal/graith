@@ -1,0 +1,66 @@
+name: Publish pinned Linux libghostty artifacts
+
+on:
+  push:
+    branches: [main]
+    paths: [libghostty-native.lock.json, scripts/libghostty-native.sh, .github/workflows/libghostty-native-publish.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    # This workflow never runs in the context of a pull request.  The source
+    # checkout and lock are therefore reviewed main-branch content.
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+            target: x86_64-linux-gnu
+          - goarch: arm64
+            target: aarch64-linux-gnu
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: {persist-credentials: false}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with: {go-version-file: go.mod}
+      - name: Build from the pinned source revision
+        env:
+          TARGET: ${{ matrix.target }}
+          GOARCH: ${{ matrix.goarch }}
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty
+          GRAITH_LIBGHOSTTY_SOURCE_BUILD: '1'
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            "$(jq -er '.zig.linuxX8664URL' libghostty-native.lock.json)" -o "$RUNNER_TEMP/zig.tar.xz"
+          printf '%s  %s\n' "$(jq -er '.zig.linuxX8664SHA256' libghostty-native.lock.json)" "$RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/zig"; tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+          scripts/libghostty-native.sh source-build "$TARGET" "$RUNNER_TEMP/libghostty-vt.a"
+          mkdir -p "$RUNNER_TEMP/bundle/pkgconfig"
+          cp "$RUNNER_TEMP/libghostty-vt.a" "$RUNNER_TEMP/bundle/"
+          cp "$GRAITH_LIBGHOSTTY_WORK/pkgconfig/libghostty-vt-static.pc" "$RUNNER_TEMP/bundle/pkgconfig/"
+          cp libghostty-native.spdx.json THIRD_PARTY_NOTICES.libghostty.md "$RUNNER_TEMP/bundle/"
+          jq -n --arg target "$TARGET" --arg arch "$GOARCH" --arg commit "$(jq -er '.ghostty.commit' libghostty-native.lock.json)" \
+            '{schemaVersion:1,target:$target,architecture:$arch,ghosttyCommit:$commit}' > "$RUNNER_TEMP/bundle/manifest.json"
+          tar -czf "$RUNNER_TEMP/libghostty-vt-linux-$GOARCH.tar.gz" -C "$RUNNER_TEMP/bundle" \
+            libghostty-vt.a pkgconfig/libghostty-vt-static.pc manifest.json libghostty-native.spdx.json THIRD_PARTY_NOTICES.libghostty.md
+          sha256sum "$RUNNER_TEMP/libghostty-vt-linux-$GOARCH.tar.gz"
+      - name: Publish only an absent immutable asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          tag="libghostty-vt-$(jq -er '.ghostty.commit' libghostty-native.lock.json | cut -c1-7)"
+          asset="libghostty-vt-linux-$GOARCH.tar.gz"
+          if ! gh release view "$tag" >/dev/null 2>&1; then gh release create "$tag" --title "$tag" --notes "Pinned libghostty native artifacts"; fi
+          if gh release view "$tag" --json assets --jq '.assets[].name' | grep -Fxq "$asset"; then
+            echo "error: refusing to overwrite existing release asset $asset" >&2; exit 1
+          fi
+          gh release upload "$tag" "$RUNNER_TEMP/$asset" --clobber=false
