@@ -1,6 +1,8 @@
 package testprocess
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -68,5 +70,21 @@ func TestRefuseDaemonLifecycleMutationCleanEnvironmentStillDenied(t *testing.T) 
 
 	if err := refuseDaemonLifecycleMutation("remove service", "/usr/local/bin/gr", false); err == nil {
 		t.Fatal("clean environment lifecycle mutation was allowed without positive authority")
+	}
+}
+
+func TestEstablishHumanLifecycleAuthorityRejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	link := filepath.Join(dir, "human.token")
+	if err := os.WriteFile(target, []byte("secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := EstablishHumanLifecycleAuthorityFromFile(link); err == nil {
+		t.Fatal("EstablishHumanLifecycleAuthorityFromFile() followed a symlink")
 	}
 }

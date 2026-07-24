@@ -121,6 +121,33 @@ func TestStartDaemonExecutableRequiresLifecycleAuthorityBeforeLaunch(t *testing.
 	}
 }
 
+func TestEnsureHumanLifecycleCredentialRejectsSessionToken(t *testing.T) {
+	t.Setenv("GRAITH_TOKEN", "session-token")
+
+	err := ensureHumanLifecycleCredential(filepath.Join(t.TempDir(), "human.token"))
+	if err == nil || !strings.Contains(err.Error(), "session-token callers") {
+		t.Fatalf("ensureHumanLifecycleCredential() = %v, want explicit session denial", err)
+	}
+}
+
+func TestEnsureHumanLifecycleCredentialCreatesProtectedToken(t *testing.T) {
+	t.Setenv("GRAITH_TOKEN", "")
+	path := filepath.Join(t.TempDir(), "data", "human.token")
+
+	if err := ensureHumanLifecycleCredential(path); err != nil {
+		t.Fatalf("ensureHumanLifecycleCredential() = %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("human token mode = %04o, want 0600", info.Mode().Perm())
+	}
+}
+
 func TestDaemonStartArgsStripsConfigInsideSession(t *testing.T) {
 	t.Setenv("GRAITH_SESSION_ID", "braw-session-123")
 
