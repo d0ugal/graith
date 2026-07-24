@@ -337,7 +337,6 @@ func launchDaemon(executable string, args []string) error {
 	defer func() { _ = devNull.Close() }()
 
 	cmd := exec.Command(executable, args...)
-	cmd.Env = agent.ScrubSecurityBoundaryEnvironment(os.Environ())
 	cmd.Stdin = devNull
 	cmd.Stdout = devNull
 	cmd.Stderr = devNull

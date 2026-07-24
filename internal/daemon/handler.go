@@ -867,7 +867,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 			case "upgrade_preflight":
 				if auth.authenticated {
-					denyDaemonLifecycle(sm, auth, "upgrade_preflight", sendControl)
+					sendControl("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
 					continue
 				}
 
@@ -889,7 +889,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 			case "upgrade":
 				if auth.authenticated {
-					denyDaemonLifecycle(sm, auth, "upgrade", sendControl)
+					sendControl("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
 					continue
 				}
 

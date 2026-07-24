@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"slices"
 	"sync"
 	"testing"
 )
@@ -137,22 +136,6 @@ func TestSecurityBoundaryDetectionIgnoresNegativePresentationOverride(t *testing
 
 	if SecurityBoundaryDetectedEnviron([]string{"PATH=/usr/bin:/bin", "GR_AGENT_MODE=0"}) {
 		t.Fatal("negative presentation override alone was treated as an agent marker")
-	}
-}
-
-func TestScrubSecurityBoundaryEnvironment(t *testing.T) {
-	got := ScrubSecurityBoundaryEnvironment([]string{
-		"PATH=/usr/bin",
-		"GRAITH_SESSION_ID=braw",
-		"GRAITH_TOKEN=secret",
-		"CURSOR_AGENT=1",
-		"GR_AGENT_MODE=1",
-		"TERM=xterm",
-	})
-
-	want := []string{"PATH=/usr/bin", "TERM=xterm"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("ScrubSecurityBoundaryEnvironment() = %v, want %v", got, want)
 	}
 }
 

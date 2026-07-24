@@ -199,7 +199,7 @@ func handleStoreGet(sm *SessionManager, auth authContext, send func(string, any)
 // sessions.
 func handleReload(sm *SessionManager, auth authContext, send func(string, any)) {
 	if auth.authenticated {
-		denyDaemonLifecycle(sm, auth, "reload", send)
+		send("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
 
 		return
 	}

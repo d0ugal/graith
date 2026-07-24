@@ -2,7 +2,6 @@ package agent
 
 import (
 	"os"
-	"slices"
 	"strings"
 	"sync"
 )
@@ -64,24 +63,6 @@ func SecurityBoundaryDetectedEnviron(environ []string) bool {
 	}
 
 	return detectMarkers(lookup)
-}
-
-// ScrubSecurityBoundaryEnvironment removes caller-owned agent/session markers
-// before starting a long-lived Graith daemon. The daemon must not inherit a
-// session identity and then classify its own startup housekeeping as an agent
-// lifecycle mutation.
-func ScrubSecurityBoundaryEnvironment(environ []string) []string {
-	result := make([]string, 0, len(environ))
-	for _, entry := range environ {
-		name, _, found := strings.Cut(entry, "=")
-		if found && (name == "GR_AGENT_MODE" || slices.Contains(agentEnvVars, name)) {
-			continue
-		}
-
-		result = append(result, entry)
-	}
-
-	return result
 }
 
 func environValues(environ []string) map[string]string {

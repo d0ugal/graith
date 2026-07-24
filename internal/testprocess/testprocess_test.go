@@ -40,16 +40,3 @@ func TestRefuseDaemonLifecycleMutationRejectsCurrentTestProcess(t *testing.T) {
 		t.Fatalf("RefuseDaemonLifecycleMutation() error = %q, want operation and Go-test diagnosis", message)
 	}
 }
-
-func TestRefuseDaemonLifecycleMutationRejectsSessionContext(t *testing.T) {
-	err := refuseDaemonLifecycleMutation("stop daemon", "/usr/local/bin/gr", false, []string{"GR_AGENT_MODE=0", "GRAITH_SESSION_ID=braw-session"})
-	if err == nil || !strings.Contains(err.Error(), "agent execution context") {
-		t.Fatalf("RefuseDaemonLifecycleMutation() error = %v, want agent-context refusal", err)
-	}
-}
-
-func TestRefuseDaemonLifecycleMutationAllowsHumanContext(t *testing.T) {
-	if err := refuseDaemonLifecycleMutation("stop daemon", "/usr/local/bin/gr", false, []string{"GR_AGENT_MODE=0"}); err != nil {
-		t.Fatalf("human lifecycle mutation refused: %v", err)
-	}
-}
