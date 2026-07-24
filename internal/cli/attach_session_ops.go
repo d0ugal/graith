@@ -127,9 +127,9 @@ func updateSessionName(sessionID, newName string) error {
 	})
 }
 
-func deleteSession(sessionID string) error {
+func deleteSession(sessionID string, children bool) error {
 	return withFreshClient(func(c controlConn) error {
-		return controlOp(c, "delete", protocol.DeleteMsg{SessionID: sessionID})
+		return controlOp(c, "delete", protocol.DeleteMsg{SessionID: sessionID, Children: children})
 	})
 }
 
