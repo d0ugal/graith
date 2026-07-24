@@ -211,12 +211,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          if [ "${{ needs.changes.outputs.dependency-unit }}" != "true" ]; then
-            export GRAITH_LIBGHOSTTY_WORK="${RUNNER_TEMP}/ghostty-${EVIDENCE_ARCH}"
-            scripts/libghostty-native.sh prepare-linux-artifact "$EVIDENCE_ARCH"
-            echo "Using the checksum-verified immutable Linux artifact"
-            exit 0
-          fi
+          unset CGO_CFLAGS CGO_CPPFLAGS CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH
           evidence="${RUNNER_TEMP}/source-build-${EVIDENCE_ARCH}.time"
           uname -a
           cat /etc/os-release
@@ -256,6 +251,7 @@ jobs:
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/archive-policy-${{ matrix.goarch }}
         run: |
           set -euo pipefail
+          unset CGO_CFLAGS CGO_CPPFLAGS CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH
           evidence="${RUNNER_TEMP}/archive-policy-${EVIDENCE_ARCH}.time"
           if ! /usr/bin/time -v -o "$evidence" \
             scripts/libghostty-native.sh test-source-archive-policy; then
@@ -293,19 +289,22 @@ jobs:
         env:
           GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}-contract
-          CGO_CFLAGS: -I${{ github.workspace }}/gui/shared/Sources/CGhosttyVT/include
-        run: scripts/libghostty-native.sh test-linux-artifact "${{ matrix.goarch }}"
+        run: |
+          set -euo pipefail
+          unset CGO_CFLAGS CGO_CPPFLAGS CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH
+          scripts/libghostty-native.sh test-linux-artifact "${{ matrix.goarch }}"
       - name: Compile and optionally run the isolated backend
         env:
           GOARCH: ${{ matrix.goarch }}
           GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}
-          LIBRARY: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}.a
-          PKG_CONFIG_PATH: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}/pkgconfig
+          LIBRARY: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}-contract/libghostty-vt.a
+          PKG_CONFIG_PATH: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}-contract/pkgconfig
           RUN_TESTS: ${{ matrix.run_tests }}
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
+          unset CGO_CFLAGS CGO_CPPFLAGS CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH
           run_timed() {
             if [[ "$#" -lt 2 || ! "$1" =~ ^[a-z0-9-]+$ ]]; then
               echo "run_timed requires a safe label and command" >&2
