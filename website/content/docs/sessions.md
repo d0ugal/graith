@@ -54,11 +54,11 @@ requires Git 2.42 or newer.
 
 **In-place:** `gr new quick --in-place` runs the agent directly in the repo, no worktree or branch. `--allow-concurrent` permits multiple in-place sessions on one repo.
 
-**Mirror:** `gr new observer --mirror my-session` mounts another session's worktree read-only, for observation or review. Requires Graith's enforceable sandbox for the read-only guarantee.
+**Mirror:** `gr new observer --mirror my-session` mounts another session's worktree read-only, for observation or review. Add `--headless -p "…"` to opt into a one-shot stream-json session. Requires Graith's enforceable sandbox for the read-only guarantee.
 
 ### Headless sessions
 
-**Experimental.** `gr new watcher --headless -p "…"` runs the agent in Claude Code's stream-json mode instead of a PTY — **non-interactive**, for fire-and-forget work like review judges and one-shot helpers. graith parses the typed event stream, so `gr logs -f` renders it and cost/token usage comes from the result envelope. v1 is Claude-only, one-shot (one prompt, run to completion, exit), requires a prompt, uses the same optional Graith sandbox setting as PTY sessions, and implies `--background`. It's inert unless `[headless] experimental = true`, and can't be resumed as headless once it exits. See [Configuration → Headless sessions]({{< relref "configuration/sessions.md#headless-sessions" >}}).
+**Experimental.** `gr new watcher --headless -p "…"` runs the agent in Claude Code's stream-json mode instead of a PTY — **non-interactive**, for fire-and-forget work like review judges, one-shot helpers, and trigger actions. graith parses the typed event stream, so `gr logs -f` renders it and cost/token usage comes from the result envelope. v1 is Claude-only, one-shot (one prompt, run to completion, exit), requires a prompt, uses the same optional Graith sandbox setting as PTY sessions, and implies `--background`. It's inert unless `[headless] experimental = true`, and can't be resumed as headless once it exits. See [Configuration → Headless sessions]({{< relref "configuration/sessions.md#headless-sessions" >}}).
 
 With no PTY to stream, `gr attach` **converts a headless session to
 interactive**: it stops the headless process and relaunches via

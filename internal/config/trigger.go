@@ -136,7 +136,11 @@ type ActionConfig struct {
 	Prompt string `toml:"prompt"`
 	Agent  string `toml:"agent"`
 	Model  string `toml:"model"`
-	Ensure bool   `toml:"ensure"` // idempotent ensure-reviewer (watch source only)
+	// Headless runs the spawned session through the one-shot stream-json
+	// driver. It is opt-in because headless sessions cannot be resumed or
+	// serviced interactively.
+	Headless bool `toml:"headless"`
+	Ensure   bool `toml:"ensure"` // idempotent ensure-reviewer (watch source only)
 	// AutoCleanup soft-deletes a trigger-spawned session once it stops, so a
 	// finished briefing/report session doesn't clutter `gr list`. It is a union
 	// of bool and string: absent/false/"" disables it; true (or "always")
@@ -890,6 +894,10 @@ func validateActionStructure(where string, t *TriggerConfig) []error {
 	case ActionCommand:
 		errs = append(errs, validateCommandActionStructure(where, t)...)
 	case ActionSession:
+		if a.Headless && a.Ensure {
+			errs = append(errs, fmt.Errorf("%s: action.headless is incompatible with ensure=true (headless sessions are one-shot)", where))
+		}
+
 		if a.Ensure && !t.IsWatch() {
 			errs = append(errs, fmt.Errorf("%s: action ensure=true is only valid for a [watch] source", where))
 		}

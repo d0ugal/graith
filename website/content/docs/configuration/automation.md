@@ -228,9 +228,19 @@ needed.
 to apply); other settings apply on the next reconcile or fire. Both fall back to
 the default shown for a `"0"`, `"0s"`, negative, or unparseable value.
 
-### Headless session actions (planned)
+### Headless session actions
 
 Spawning a `session`-type action in [headless mode]({{< relref "sessions.md#headless-sessions" >}})
-via `[trigger.action] headless = true` — a natural fit for fire-and-forget
-briefings and cleanup reactors — is planned (issue #1075). For now, create
-headless sessions with `gr new --headless`.
+via `[trigger.action] headless = true` is supported for fire-and-forget
+briefings and cleanup work:
+
+```toml
+[trigger.action]
+type     = "session"
+headless = true
+prompt   = "Summarise the latest changes and report the result."
+```
+
+The action uses the same `[headless] experimental` gate and agent capability
+checks as `gr new --headless`. Headless actions are one-shot and cannot be
+combined with `ensure = true`.
