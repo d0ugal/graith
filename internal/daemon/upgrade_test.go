@@ -1809,6 +1809,74 @@ func TestProbeUpgradeTargetContracts(t *testing.T) {
 	}
 }
 
+func TestUpgradeCapacityProbePreservesLegacyStrictSchema(t *testing.T) {
+	data, err := json.Marshal(CurrentUpgradeCapacityProbe())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(data) > upgradeCapacityProbeMaxBytes {
+		t.Fatalf("capacity probe is %d bytes, want <= %d", len(data), upgradeCapacityProbeMaxBytes)
+	}
+
+	var decoded struct {
+		Version              int                   `json:"version"`
+		Backend              string                `json:"backend"`
+		MaxSessions          int                   `json:"max_sessions"`
+		HelperHandoffVersion int                   `json:"helper_handoff_version"`
+		StateVersion         int                   `json:"state_version"`
+		ManifestVersion      int                   `json:"manifest_version"`
+		AdoptionVersion      int                   `json:"adoption_version"`
+		Profile              string                `json:"profile,omitempty"`
+		Paths                UpgradePathDescriptor `json:"paths,omitempty"`
+		ConfigSource         UpgradeConfigSource   `json:"config_source"`
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&decoded); err != nil {
+		t.Fatalf("legacy strict decoder rejected current probe: %v", err)
+	}
+}
+
+func TestProbeUpgradeTargetVersionBestEffort(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		exit   string
+		wantV  string
+		wantC  string
+	}{
+		{name: "success", output: `{"version":"0.70.3-dev","commit":"1486436"}`, wantV: "0.70.3-dev", wantC: "1486436"},
+		{name: "malformed", output: "not-json", wantV: "", wantC: ""},
+		{name: "failure", output: `{"version":"ignored","commit":"ignored"}`, exit: "exit 1", wantV: "", wantC: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "gr-version-probe")
+
+			script := fmt.Sprintf("#!/bin/sh\nprintf '%%s' '%s'\n%s\n", tt.output, tt.exit)
+			if err := os.WriteFile(path, []byte(script), 0o700); err != nil { //nolint:gosec // test-owned executable
+				t.Fatal(err)
+			}
+
+			pin, err := pinUpgradeTarget(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			t.Cleanup(func() { _ = pin.close() })
+
+			version, commit := probeUpgradeTargetVersion(pin)
+			if version != tt.wantV || commit != tt.wantC {
+				t.Fatalf("identity = %q/%q, want %q/%q", version, commit, tt.wantV, tt.wantC)
+			}
+		})
+	}
+}
+
 func TestCurrentUpgradeCapacityProbeBindsLegacyEffectiveConfigSource(t *testing.T) {
 	oldConfigHome := xdg.ConfigHome
 

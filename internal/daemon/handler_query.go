@@ -39,6 +39,7 @@ func handleList(sm *SessionManager, send func(string, any), msg protocol.Envelop
 func handleDiagnostics(sm *SessionManager, send func(string, any)) {
 	diag := sm.Diagnostics()
 	diag.DaemonVersion = version.Version
+	diag.DaemonCommit = version.CommitSHA
 	send("diagnostics", diag)
 }
 

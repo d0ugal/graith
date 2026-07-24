@@ -801,6 +801,13 @@
           "optional": true
         },
         {
+          "name": "daemon_commit",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
           "name": "daemon_uptime",
           "type": {
             "kind": "string"

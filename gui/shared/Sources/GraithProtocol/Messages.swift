@@ -858,6 +858,7 @@ public struct FleetSummary: Codable, Hashable, Sendable {
 public struct DiagnosticsMsg: Codable, Sendable {
     public var daemonPID: Int
     public var daemonVersion: String?
+    public var daemonCommit: String?
     public var daemonUptime: String
     public var terminalBackend: String?
     public var fleet: FleetSummary
@@ -866,13 +867,14 @@ public struct DiagnosticsMsg: Codable, Sendable {
     public var scrollback: ScrollbackDiagnostic
     public var messages: MessagesDiagnostic
 
-    public init(daemonPID: Int, daemonVersion: String? = nil, daemonUptime: String,
+    public init(daemonPID: Int, daemonVersion: String? = nil, daemonCommit: String? = nil, daemonUptime: String,
                 terminalBackend: String? = nil,
                 fleet: FleetSummary, sessions: [SessionDiagnostic],
                 deletedSessionIDs: [String]? = nil,
                 scrollback: ScrollbackDiagnostic, messages: MessagesDiagnostic) {
         self.daemonPID = daemonPID
         self.daemonVersion = daemonVersion
+        self.daemonCommit = daemonCommit
         self.daemonUptime = daemonUptime
         self.terminalBackend = terminalBackend
         self.fleet = fleet
@@ -885,6 +887,7 @@ public struct DiagnosticsMsg: Codable, Sendable {
     enum CodingKeys: String, CodingKey {
         case daemonPID = "daemon_pid"
         case daemonVersion = "daemon_version"
+        case daemonCommit = "daemon_commit"
         case daemonUptime = "daemon_uptime"
         case terminalBackend = "terminal_backend"
         case fleet

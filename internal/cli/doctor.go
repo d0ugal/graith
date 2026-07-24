@@ -48,6 +48,7 @@ type doctorCheck struct {
 type doctorReport struct {
 	CLIVersion      string `json:"cli_version"`
 	DaemonVersion   string `json:"daemon_version,omitempty"`
+	DaemonCommit    string `json:"daemon_commit,omitempty"`
 	TerminalBackend string `json:"terminal_backend,omitempty"`
 	OK              bool   `json:"ok"`
 	// DiskMeasured reports whether on-disk sizes were computed (the --disk
@@ -119,6 +120,7 @@ var doctorCmd = &cobra.Command{
 		// false failures across sections (issue #945).
 		probe := doctorDaemonProbe(dc)
 		report.DaemonVersion = probe.daemonVersion
+		report.DaemonCommit = probe.daemonCommit
 
 		dc.checkVersion(probe)
 		dc.checkEnvironment()
@@ -197,6 +199,7 @@ type daemonProbe struct {
 	reach           daemonReachability
 	dialErr         error
 	daemonVersion   string
+	daemonCommit    string
 	diag            *protocol.DiagnosticsMsg
 	diagUnsupported bool // handshake ok but the daemon didn't return diagnostics
 }
@@ -295,6 +298,8 @@ func (dc *doctorContext) probeDaemon() daemonProbe {
 		probe.daemonVersion = diag.DaemonVersion
 	}
 
+	probe.daemonCommit = diag.DaemonCommit
+
 	probe.diag = &diag
 
 	return probe
@@ -331,10 +336,10 @@ func (dc *doctorContext) checkVersion(probe daemonProbe) {
 		case probe.daemonVersion == "":
 			// Reachable but version unknown (very old daemon) — nothing to compare.
 		case probe.daemonVersion != version.Version:
-			dc.failf("version", "Version mismatch: CLI=%s, daemon=%s", version.Version, probe.daemonVersion)
+			dc.failf("version", "Version mismatch: CLI=%s, daemon=%s (%s)", version.Version, probe.daemonVersion, probe.daemonCommit)
 			dc.hintf("Run: gr daemon restart")
 		default:
-			dc.passf("version", "Daemon version: %s", probe.daemonVersion)
+			dc.passf("version", "Daemon version: %s (%s)", probe.daemonVersion, probe.daemonCommit)
 		}
 	case daemonReachSandboxed:
 		// A sandboxed session can't read the daemon's version, but it's running.
@@ -826,6 +831,11 @@ func (dc *doctorContext) checkDaemon(probe daemonProbe) *protocol.DiagnosticsMsg
 	switch probe.reach {
 	case daemonReachNoSocket:
 		dc.warnf("daemon", "Not running (will auto-start on first command)")
+		// A failed preserve upgrade can remove the socket before its old
+		// generation exits. Inspect the PID marker as well so doctor reports the
+		// contradictory ownership state instead of claiming a clean stop.
+		dc.checkStalePID()
+
 		return nil
 
 	case daemonReachSandboxed:
@@ -888,7 +898,17 @@ func (dc *doctorContext) checkStalePID() {
 		} else {
 			dc.hintf("Use --autofix to remove stale PID file")
 		}
+
+		return
 	}
+
+	if _, err := os.Stat(paths.SocketPath); errors.Is(err, os.ErrNotExist) {
+		dc.failf("daemon", "PID file names live daemon PID %d, but socket is missing: %s", pid, paths.SocketPath)
+	} else {
+		dc.warnf("daemon", "PID file names live daemon PID %d, but socket is not responding: %s", pid, paths.SocketPath)
+	}
+
+	dc.hintf("Retry the command to reconcile this verified daemon generation")
 }
 
 func (dc *doctorContext) checkSessions(diag *protocol.DiagnosticsMsg) {

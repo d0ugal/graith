@@ -93,6 +93,8 @@ type UpgradeHelper struct {
 }
 
 type UpgradeTargetDescriptor struct {
+	Version      string `json:"version,omitempty"`
+	CommitSHA    string `json:"commit_sha,omitempty"`
 	ResolvedPath string `json:"resolved_path"`
 	ExecPath     string `json:"exec_path,omitempty"`
 	Size         int64  `json:"size"`
@@ -249,6 +251,8 @@ type upgradeTarget struct {
 	fileModNanos         int64
 	sha256               string
 	helperHandoffVersion int
+	targetVersion        string
+	targetCommit         string
 }
 
 // preparedExecUpgrade records the managed-service generation staged before
@@ -484,6 +488,7 @@ func probeUpgradeTarget(clientExecPath string, expectations ...upgradeProbeExpec
 		sha256:               pin.digest,
 		helperHandoffVersion: probe.HelperHandoffVersion,
 	}
+	target.targetVersion, target.targetCommit = probeUpgradeTargetVersion(pin)
 	keepPin = true
 
 	return target, nil
@@ -576,6 +581,37 @@ func runUpgradeCapacityProbe(pin *upgradeTargetPin, configFile, profile string) 
 	return stdout.data, nil
 }
 
+type upgradeTargetVersionInfo struct {
+	Version string `json:"version"`
+	Commit  string `json:"commit"`
+}
+
+func probeUpgradeTargetVersion(pin *upgradeTargetPin) (string, string) {
+	ctx, cancel := context.WithTimeout(context.Background(), upgradeCapacityProbeTimeout)
+	defer cancel()
+
+	var stdout boundedProbeOutput
+
+	cmd := pin.probeCommand(ctx, "--json", "version")
+	cmd.Env = upgradeProbeEnvironment("")
+	cmd.Stdout = &stdout
+	cmd.Stderr = io.Discard
+	cmd.Stdin = nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+
+	cmd.WaitDelay = 100 * time.Millisecond
+	if err := cmd.Run(); err != nil || len(stdout.data) > upgradeCapacityProbeMaxBytes {
+		return "", ""
+	}
+
+	var info upgradeTargetVersionInfo
+	if err := json.Unmarshal(stdout.data, &info); err != nil {
+		return "", ""
+	}
+
+	return info.Version, info.Commit
+}
+
 func upgradeProbeEnvironment(profile string) []string {
 	const pathEnvironment = "HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_RUNTIME_DIR XDG_STATE_HOME"
 
@@ -625,6 +661,8 @@ func (t *upgradeTarget) validateFinalFileIdentity() error {
 
 func (t *upgradeTarget) descriptor() UpgradeTargetDescriptor {
 	return UpgradeTargetDescriptor{
+		Version:      t.targetVersion,
+		CommitSHA:    t.targetCommit,
 		ResolvedPath: t.path,
 		ExecPath: func() string {
 			if t.pin != nil && t.pin.retainedDir != "" {

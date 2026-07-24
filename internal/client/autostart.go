@@ -7,6 +7,8 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -14,7 +16,9 @@ import (
 	"github.com/d0ugal/graith/internal/agent"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/daemonservice"
+	"github.com/d0ugal/graith/internal/processidentity"
 	"github.com/d0ugal/graith/internal/protocol"
+	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/testprocess"
 	"github.com/d0ugal/graith/internal/version"
 )
@@ -26,6 +30,13 @@ import (
 // startDaemonFn spawns a fresh daemon. It's a package var so tests can
 // substitute a stub instead of exec'ing a real daemon process.
 var startDaemonFn = startDaemon
+
+var (
+	recoveryIsDaemon     = processidentity.IsGraithDaemon
+	recoveryStartTime    = grpty.ProcessStartTime
+	recoveryStopIdentity = stopDaemonIdentity
+	recoverySocketGone   = waitForSocketGone
+)
 
 var (
 	detectDaemonServiceModeForCleanRestart = daemonservice.DetectMode
@@ -85,6 +96,8 @@ func EnsureDaemonConfiguredContext(parent context.Context, cfg *config.Config, p
 	// diverges from the real handshake).
 	token := resolveClientToken(paths)
 	probeDeadline := initialDaemonProbeDeadline(startupDeadline)
+	priorDaemon := daemonIdentityFromPIDFile(paths)
+	expectedDaemon := priorDaemon
 
 	if daemonRespondsUntil(sockPath, token, paths.Profile, probeDeadline) {
 		if conn, err := dialLocalDaemonBefore("unix", sockPath, daemonDialTimeout, probeDeadline); err == nil {
@@ -96,8 +109,49 @@ func EnsureDaemonConfiguredContext(parent context.Context, cfg *config.Config, p
 		return nil, err
 	}
 
+	// An interrupted preserve upgrade can leave its old process alive after
+	// the inherited listener was closed. Reconcile after any failed launch;
+	// the reconciliation itself proves the socket is unresponsive, the PID
+	// marker names a graith daemon, and the process generation is stable. This
+	// avoids relying on a child-process error that fire-and-forget launchers
+	// cannot report to the client.
+	recoverAndRestart := func(startErr error) (context.CancelFunc, error) {
+		recovered, recoveryErr := reconcileUnresponsiveDaemonGeneration(paths, expectedDaemon)
+		if !recovered {
+			return nil, fmt.Errorf("start daemon: %w", startErr)
+		}
+
+		if recoveryErr != nil {
+			return nil, fmt.Errorf("start daemon: %w (reconcile wedged daemon: %w)", startErr, recoveryErr)
+		}
+
+		retryDeadline := time.Now().Add(daemonStartTimeout)
+		if parentDeadline, ok := parent.Deadline(); ok && parentDeadline.Before(retryDeadline) {
+			retryDeadline = parentDeadline
+		}
+
+		retryContext, retryCancel := context.WithDeadline(parent, retryDeadline)
+		if retryErr := startDaemonFn(retryContext, cfg, paths, configFile); retryErr != nil {
+			retryCancel()
+			return nil, fmt.Errorf("start daemon after recovery: %w", retryErr)
+		}
+
+		startupDeadline = retryDeadline
+
+		return retryCancel, nil
+	}
+
 	if err := startDaemonFn(startupContext, cfg, paths, configFile); err != nil {
-		return nil, fmt.Errorf("start daemon: %w", err)
+		retryCancel, recoveryErr := recoverAndRestart(err)
+		if recoveryErr != nil {
+			return nil, recoveryErr
+		}
+		defer retryCancel()
+	} else if expectedDaemon == nil {
+		// A cold start has no prior generation to reconcile. Capture the
+		// generation we just launched so a later timeout cannot kill a daemon
+		// started concurrently by another client.
+		expectedDaemon = daemonIdentityFromPIDFile(paths)
 	}
 
 	// Wait for the freshly spawned daemon, bounded by the effective [connection]
@@ -121,10 +175,93 @@ func EnsureDaemonConfiguredContext(parent context.Context, cfg *config.Config, p
 		return true
 	})
 	if !ready {
-		return nil, errors.New("daemon did not start in time")
+		retryCancel, recoveryErr := recoverAndRestart(errors.New("daemon did not start in time"))
+		if recoveryErr != nil {
+			return nil, recoveryErr
+		}
+		defer retryCancel()
+
+		readyConn = nil
+
+		ready = pollDaemonReadyBefore(startupDeadline, func(deadline time.Time) bool {
+			if !daemonRespondsUntil(sockPath, token, paths.Profile, deadline) {
+				return false
+			}
+
+			conn, err := dialLocalDaemonBefore("unix", sockPath, daemonDialTimeout, deadline)
+			if err != nil {
+				return false
+			}
+
+			readyConn = conn
+
+			return true
+		})
+		if !ready {
+			return nil, errors.New("daemon did not start in time")
+		}
 	}
 
 	return readyConn, nil
+}
+
+// reconcileUnresponsiveDaemon stops a daemon process which owns the PID marker
+// but no longer serves the configured socket. The bool reports whether the
+// marker identified a candidate; a false result means callers must preserve the
+// original startup error. The process identity and start-time checks prevent a
+// stale or recycled PID from being signalled.
+func reconcileUnresponsiveDaemon(paths config.Paths) (bool, error) {
+	return reconcileUnresponsiveDaemonGeneration(paths, nil)
+}
+
+func daemonIdentityFromPIDFile(paths config.Paths) *DaemonIdentity {
+	data, err := os.ReadFile(paths.PIDFile)
+	if err != nil {
+		return nil
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 1 || !recoveryIsDaemon(pid) {
+		return nil
+	}
+
+	start, err := recoveryStartTime(pid)
+	if err != nil {
+		return nil
+	}
+
+	return &DaemonIdentity{PID: pid, StartTime: start}
+}
+
+func reconcileUnresponsiveDaemonGeneration(paths config.Paths, expected *DaemonIdentity) (bool, error) {
+	data, err := os.ReadFile(paths.PIDFile)
+	if err != nil {
+		return false, nil
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 1 || !recoveryIsDaemon(pid) {
+		return false, nil
+	}
+
+	start, err := recoveryStartTime(pid)
+	if err != nil {
+		return true, fmt.Errorf("verify daemon PID %d start time: %w", pid, err)
+	}
+
+	if expected != nil && *expected != (DaemonIdentity{PID: pid, StartTime: start}) {
+		return false, nil
+	}
+
+	if err := recoveryStopIdentity(pid, start); err != nil {
+		return true, err
+	}
+
+	if !recoverySocketGone(paths.SocketPath) {
+		return true, fmt.Errorf("daemon socket %s remained after PID %d exited", paths.SocketPath, pid)
+	}
+
+	return true, nil
 }
 
 func initialDaemonProbeDeadline(startupDeadline time.Time) time.Time {

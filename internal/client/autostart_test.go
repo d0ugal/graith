@@ -29,6 +29,156 @@ func TestValidateDaemonExecutableRejectsGoTestBinary(t *testing.T) {
 	}
 }
 
+func TestReconcileUnresponsiveDaemonVerifiesOwnedGeneration(t *testing.T) {
+	oldIsDaemon := recoveryIsDaemon
+	oldStartTime := recoveryStartTime
+	oldStop := recoveryStopIdentity
+	oldSocketGone := recoverySocketGone
+
+	t.Cleanup(func() {
+		recoveryIsDaemon, recoveryStartTime = oldIsDaemon, oldStartTime
+		recoveryStopIdentity, recoverySocketGone = oldStop, oldSocketGone
+	})
+
+	pidFile := filepath.Join(t.TempDir(), "braw.pid")
+	if err := os.WriteFile(pidFile, []byte("4242\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	paths := config.Paths{PIDFile: pidFile, SocketPath: filepath.Join(t.TempDir(), "braw.sock")}
+
+	var stopped DaemonIdentity
+
+	recoveryIsDaemon = func(pid int) bool { return pid == 4242 }
+
+	recoveryStartTime = func(pid int) (int64, error) { return int64(pid), nil }
+	recoveryStopIdentity = func(pid int, start int64) error {
+		stopped = DaemonIdentity{PID: pid, StartTime: start}
+		return nil
+	}
+
+	recoverySocketGone = func(string) bool { return true }
+
+	recovered, err := reconcileUnresponsiveDaemon(paths)
+
+	if err != nil || !recovered {
+		t.Fatalf("reconcileUnresponsiveDaemon() = (%t, %v)", recovered, err)
+	}
+
+	if stopped != (DaemonIdentity{PID: 4242, StartTime: 4242}) {
+		t.Fatalf("stopped identity = %#v", stopped)
+	}
+}
+
+func TestEnsureDaemonRecoversLivePIDAfterLaunchFailure(t *testing.T) {
+	shortenStartTimeout(t, 100*time.Millisecond)
+
+	pidFile := filepath.Join(t.TempDir(), "braw.pid")
+	if err := os.WriteFile(pidFile, []byte("4242\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	paths := config.Paths{PIDFile: pidFile, SocketPath: filepath.Join(t.TempDir(), "braw.sock")}
+	origIsDaemon := recoveryIsDaemon
+	origStartTime := recoveryStartTime
+	origStop := recoveryStopIdentity
+	origSocketGone := recoverySocketGone
+	origStart := startDaemonFn
+
+	t.Cleanup(func() {
+		recoveryIsDaemon, recoveryStartTime = origIsDaemon, origStartTime
+		recoveryStopIdentity, recoverySocketGone, startDaemonFn = origStop, origSocketGone, origStart
+	})
+
+	recoveryIsDaemon = func(pid int) bool { return pid == 4242 }
+	recoveryStartTime = func(int) (int64, error) { return 17, nil }
+	recoveryStopIdentity = func(int, int64) error { return nil }
+	recoverySocketGone = func(string) bool { return true }
+
+	launches := 0
+	startDaemonFn = func(context.Context, *config.Config, config.Paths, string) error {
+		launches++
+		if launches == 1 {
+			return errors.New("launcher failed")
+		}
+
+		return errors.New("replacement launcher failed")
+	}
+
+	_, err := EnsureDaemon(paths, "")
+	if err == nil || !strings.Contains(err.Error(), "replacement launcher failed") {
+		t.Fatalf("EnsureDaemon() error = %v, want replacement launch failure", err)
+	}
+
+	if launches != 2 {
+		t.Fatalf("launch attempts = %d, want initial launch plus recovery retry", launches)
+	}
+}
+
+func TestEnsureDaemonRecoversAfterReadinessTimeout(t *testing.T) {
+	shortenStartTimeout(t, 60*time.Millisecond)
+
+	pidFile := filepath.Join(t.TempDir(), "braw.pid")
+	if err := os.WriteFile(pidFile, []byte("4242\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	paths := config.Paths{PIDFile: pidFile, SocketPath: filepath.Join(t.TempDir(), "braw.sock")}
+	origIsDaemon, origStartTime, origStop, origSocketGone, origStart := recoveryIsDaemon, recoveryStartTime, recoveryStopIdentity, recoverySocketGone, startDaemonFn
+
+	t.Cleanup(func() {
+		recoveryIsDaemon, recoveryStartTime = origIsDaemon, origStartTime
+		recoveryStopIdentity, recoverySocketGone, startDaemonFn = origStop, origSocketGone, origStart
+	})
+
+	recoveryIsDaemon = func(int) bool { return true }
+	recoveryStartTime = func(int) (int64, error) { return 17, nil }
+	recoveryStopIdentity = func(int, int64) error {
+		return os.Remove(pidFile)
+	}
+	recoverySocketGone = func(string) bool { return true }
+
+	launches := 0
+	startDaemonFn = func(context.Context, *config.Config, config.Paths, string) error {
+		launches++
+		return nil
+	}
+
+	_, err := EnsureDaemon(paths, "")
+	if err == nil || !strings.Contains(err.Error(), "daemon did not start in time") {
+		t.Fatalf("EnsureDaemon() error = %v, want readiness timeout", err)
+	}
+
+	if launches != 2 {
+		t.Fatalf("launch attempts = %d, want initial launch plus recovery retry", launches)
+	}
+}
+
+func TestReconcileUnresponsiveDaemonDoesNotKillNewGeneration(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "braw.pid")
+	if err := os.WriteFile(pidFile, []byte("4242\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	paths := config.Paths{PIDFile: pidFile, SocketPath: filepath.Join(t.TempDir(), "braw.sock")}
+	origIsDaemon, origStartTime, origStop, origSocketGone := recoveryIsDaemon, recoveryStartTime, recoveryStopIdentity, recoverySocketGone
+
+	t.Cleanup(func() {
+		recoveryIsDaemon, recoveryStartTime = origIsDaemon, origStartTime
+		recoveryStopIdentity, recoverySocketGone = origStop, origSocketGone
+	})
+
+	recoveryIsDaemon = func(int) bool { return true }
+	recoveryStartTime = func(int) (int64, error) { return 18, nil }
+	recoveryStopIdentity = func(int, int64) error { t.Fatal("new daemon generation was stopped"); return nil }
+	recoverySocketGone = func(string) bool { return true }
+
+	recovered, err := reconcileUnresponsiveDaemonGeneration(paths, &DaemonIdentity{PID: 4242, StartTime: 17})
+	if err != nil || recovered {
+		t.Fatalf("reconcileUnresponsiveDaemonGeneration() = (%t, %v), want (false, nil)", recovered, err)
+	}
+}
+
 func TestValidateDaemonExecutableRejectsCustomNamedGoTestBinary(t *testing.T) {
 	testBinary := filepath.Join(t.TempDir(), "canny")
 

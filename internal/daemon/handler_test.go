@@ -2875,6 +2875,10 @@ func TestDiagnostics(t *testing.T) {
 		t.Error("expected non-empty daemon version")
 	}
 
+	if diag.DaemonCommit == "" {
+		t.Error("expected non-empty daemon commit")
+	}
+
 	if diag.TerminalBackend != grpty.TerminalBackend() {
 		t.Errorf("terminal backend = %q, want %q", diag.TerminalBackend, grpty.TerminalBackend())
 	}
