@@ -154,7 +154,8 @@ test('Linux artifacts are lock-complete and published only by trusted immutable 
   assert.match(nativePublish, /export PATH=\"\$RUNNER_TEMP\/zig:\$PATH\"/);
   assert.match(nativePublish, /test \"\$\(zig version\)\" = \"\$\(jq -er '\.zig\.version' libghostty-native\.lock\.json\)\"/);
   assert.match(nativePublish, /env GOARCH=amd64 scripts\/libghostty-native\.sh source-build/);
-  assert.match(nativePublish, /Cflags: -DGHOSTTY_STATIC/);
+  assert.match(nativePublish, /Cflags: -I\\\$\{prefix\}\/include -DGHOSTTY_STATIC/);
+  assert.match(nativePublish, /cp -R gui\/shared\/Sources\/CGhosttyVT\/include/);
   assert.match(nativePublish, /libghostty-linux-archive\.py pack/);
   assert.match(nativeScript, /libghostty-linux-archive\.py.*inspect/);
   assert.match(nativeScript, /test-linux-archive-policy/);
@@ -162,6 +163,12 @@ test('Linux artifacts are lock-complete and published only by trusted immutable 
   assert.match(nativePublish, /Libs: -L\\\$\{prefix\} -lghostty-vt/);
   assert.match(nativePublish, /linuxArtifacts\.amd64\.url/);
   assert.ok(nativePublish.includes('capture('));
+  assert.match(native, /test-linux-artifact/);
+  assert.doesNotMatch(native, /CGO_CFLAGS: -I\$\{\{ github\.workspace \}\}\/gui\/shared/);
+  assert.match(nativeScript, /pkg-config --cflags libghostty-vt-static/);
+  assert.match(nativeScript, /unexpected include path/);
+  assert.match(native, /unset CGO_CFLAGS CGO_CPPFLAGS CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH/);
+  assert.match(native, /source-build "\$TARGET" "\$LIBRARY"/);
   assert.match(native, /test-linux-artifact/);
   assert.doesNotMatch(native.match(/name: Contract-test the published Linux artifact[\s\S]*?(?=\n      - name:)/)?.[0] || '', /if: needs\.changes\.outputs\.dependency-unit/);
   assert.match(nativePublish, /gh release create[\s\S]*?gh release view/);

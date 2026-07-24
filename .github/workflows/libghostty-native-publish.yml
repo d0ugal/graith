@@ -60,10 +60,12 @@ jobs:
           # helper binary on the amd64 runner.
           env GOARCH=amd64 scripts/libghostty-native.sh source-build "$TARGET" "$RUNNER_TEMP/libghostty-vt.a"
           mkdir -p "$RUNNER_TEMP/bundle/pkgconfig"
+          mkdir -p "$RUNNER_TEMP/bundle/include"
           cp "$RUNNER_TEMP/libghostty-vt.a" "$RUNNER_TEMP/bundle/"
+          cp -R gui/shared/Sources/CGhosttyVT/include/. "$RUNNER_TEMP/bundle/include/"
           # The source-build helper writes paths for the runner workspace.
           # Release bundles must be relocatable for consumers.
-          sed -e "s#^Cflags:.*#Cflags: -DGHOSTTY_STATIC#" \
+          sed -e "s#^Cflags:.*#Cflags: -I\${prefix}/include -DGHOSTTY_STATIC#" \
             -e "s#^Libs:.*#prefix=\${pcfiledir}/..#" \
             "$GRAITH_LIBGHOSTTY_WORK/pkgconfig/libghostty-vt-static.pc" \
             | sed "/^prefix=/a Libs: -L\${prefix} -lghostty-vt" \
