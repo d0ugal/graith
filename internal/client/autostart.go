@@ -73,10 +73,6 @@ func EnsureDaemonConfiguredContext(parent context.Context, cfg *config.Config, p
 	startupContext, cancel := context.WithDeadline(parent, startupDeadline)
 	defer cancel()
 
-	if err := testprocess.EstablishHumanLifecycleAuthorityFromFile(paths.HumanTokenFile); err != nil {
-		return nil, err
-	}
-
 	sockPath := paths.SocketPath
 	// Present the caller's credential (session token or human token) in the
 	// probe, matching the real handshake and the other probes (probeDaemonIdentity,

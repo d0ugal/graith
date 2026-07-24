@@ -124,6 +124,7 @@ func TestStartDaemonExecutableRequiresLifecycleAuthorityBeforeLaunch(t *testing.
 
 func TestEnsureDaemonConfiguredContextRequiresPreexistingHumanCredential(t *testing.T) {
 	paths := config.Paths{HumanTokenFile: filepath.Join(t.TempDir(), "missing.token")}
+
 	err := testprocess.EstablishHumanLifecycleAuthorityFromFile(paths.HumanTokenFile)
 	if err == nil {
 		t.Fatal("missing human credential unexpectedly established lifecycle authority")
