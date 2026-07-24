@@ -56,6 +56,35 @@ func TestTriggerFingerprint(t *testing.T) {
 	}
 }
 
+func TestReuseOwnedReactorRequiresDefinitionForGCX(t *testing.T) {
+	trig := config.TriggerConfig{Name: "oncall", GCX: &config.GCXConfig{Context: "croft"}, Action: config.ActionConfig{Type: config.ActionSession, Ensure: true, Prompt: "inspect"}}
+	sm := newTriggerTestSM(t, trig)
+	fp := triggerFingerprint(&trig)
+	sm.state.Sessions["braw"] = &SessionState{ID: "braw", Status: StatusStopped, TriggerID: trig.Name, TriggerReactor: true, TriggerFingerprint: fp}
+
+	if got := sm.reuseOwnedReactor(trig.Name, "", fp, false); got != "braw" {
+		t.Fatalf("reactor = %q, want braw", got)
+	}
+
+	if got := sm.reuseOwnedReactor(trig.Name, "", "changed", false); got != "" {
+		t.Fatalf("changed definition reused reactor %q", got)
+	}
+
+	if !sm.state.Sessions["braw"].IsSoftDeleted() {
+		t.Fatal("changed definition left the old reactor live")
+	}
+}
+
+func TestReuseOwnedReactorAdoptsLegacyWatchReactor(t *testing.T) {
+	trig := config.TriggerConfig{Name: "rev", Watch: &config.WatchConfig{Repo: "/tmp/croft"}, Action: config.ActionConfig{Type: config.ActionSession, Ensure: true, Prompt: "inspect"}}
+	sm := newTriggerTestSM(t, trig)
+	sm.state.Sessions["braw"] = &SessionState{ID: "braw", Status: StatusStopped, TriggerID: trig.Name, TriggerReactor: true, MirrorSourceID: "src"}
+
+	if got := sm.reuseOwnedReactor(trig.Name, "src", triggerFingerprint(&trig), true); got != "braw" {
+		t.Fatalf("legacy reactor = %q, want braw", got)
+	}
+}
+
 func TestTriggerFingerprintPreservesLegacySources(t *testing.T) {
 	tests := []config.TriggerConfig{
 		{Schedule: &config.ScheduleConfig{Every: "10m"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "braw"}},
@@ -395,24 +424,6 @@ func TestMatchingWatchSessions(t *testing.T) {
 	byRole := sm.matchingWatchSessions(&config.WatchConfig{Role: "implementer"}, "")
 	if len(byRole) != 1 || byRole[0].id != "s2" {
 		t.Errorf("byRole = %+v", byRole)
-	}
-}
-
-func TestReuseReactor(t *testing.T) {
-	sm := newTriggerTestSM(t)
-	sm.state.Sessions["r1"] = &SessionState{ID: "r1", Status: StatusStopped, TriggerReactor: true}
-	key := bindingKey("rev", "src")
-	sm.triggers.bindings[key] = &watchBinding{triggerName: "rev", sessionID: "src", reactorID: "r1"}
-
-	if got := sm.reuseReactor("rev", "src"); got != "r1" {
-		t.Errorf("stopped reactor should be reused, got %q", got)
-	}
-	// Soft-deleted reactor is not reused.
-	now := time.Now()
-
-	sm.state.Sessions["r1"].DeletedAt = &now
-	if got := sm.reuseReactor("rev", "src"); got != "" {
-		t.Errorf("soft-deleted reactor should not be reused, got %q", got)
 	}
 }
 
@@ -772,19 +783,6 @@ func TestSessionDeliveryInstruction(t *testing.T) {
 	}
 }
 
-func TestFindReactor(t *testing.T) {
-	sm := newTriggerTestSM(t)
-
-	sm.state.Sessions["r"] = &SessionState{ID: "r", TriggerReactor: true, TriggerID: "rev", MirrorSourceID: "src"}
-	if got := sm.findReactor("rev", "src"); got != "r" {
-		t.Errorf("findReactor = %q, want r", got)
-	}
-
-	if got := sm.findReactor("rev", "other"); got != "" {
-		t.Errorf("findReactor for wrong source = %q, want empty", got)
-	}
-}
-
 func TestActionCommand_FailClosed(t *testing.T) {
 	repo := t.TempDir()
 	trig := config.TriggerConfig{
@@ -966,7 +964,7 @@ func TestFireWatch_RateLimited(t *testing.T) {
 	}
 }
 
-func TestOrchestratorIDAndBindingReactor(t *testing.T) {
+func TestOrchestratorID(t *testing.T) {
 	sm := newTriggerTestSM(t)
 	if sm.orchestratorID() != "" {
 		t.Error("no orchestrator expected")
@@ -975,13 +973,6 @@ func TestOrchestratorIDAndBindingReactor(t *testing.T) {
 	sm.state.Sessions["o"] = &SessionState{ID: "o", SystemKind: SystemKindOrchestrator}
 	if sm.orchestratorID() != "o" {
 		t.Error("orchestrator not found")
-	}
-
-	sm.triggers.bindings[bindingKey("rev", "src")] = &watchBinding{triggerName: "rev", sessionID: "src"}
-	sm.setBindingReactor("rev", "src", "r1")
-
-	if sm.triggers.bindings[bindingKey("rev", "src")].reactorID != "r1" {
-		t.Error("reactor not set")
 	}
 }
 

@@ -415,6 +415,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		AgentHooks:           hooksEnabled,
 		TriggerID:            opts.TriggerID,
 		TriggerReactor:       opts.TriggerReactor,
+		TriggerFingerprint:   opts.TriggerFingerprint,
 		TrackerIssue:         opts.TrackerIssue,
 		CompletionScenarioID: opts.CompletionScenarioID,
 		CompletionEpoch:      opts.CompletionEpoch,

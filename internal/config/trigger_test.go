@@ -64,6 +64,7 @@ func TestValidateTriggers_Valid(t *testing.T) {
 		trig         TriggerConfig
 		orchestrator bool
 	}{
+		{"gcx ensured session", gcxTrigger("canny-oncall", GCXConfig{Context: "croft"}, ActionConfig{Type: ActionSession, Ensure: true, Prompt: "Investigate {gcx_event_id}"}), true},
 		{
 			name: "schedule cron message",
 			trig: schedTrigger("braw-report", ScheduleConfig{Cron: "0 9 * * *"},
@@ -168,7 +169,7 @@ func TestValidateTriggers_Invalid(t *testing.T) {
 		{"schedule command no repo", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionCommand, Command: "x"}), false, "requires action.repo"},
 		{"watch command with repo", watchTrigger("scunner", WatchConfig{Repo: "/r"}, ActionConfig{Type: ActionCommand, Command: "x", Repo: "/r"}), false, "must not set action.repo"},
 		{"session needs orchestrator", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Prompt: "hi"}), false, "requires [orchestrator] enabled"},
-		{"ensure on schedule", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Ensure: true}), true, "ensure=true is only valid for a [watch]"},
+		{"ensure on schedule", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Ensure: true}), true, "ensure=true is only valid for a [watch] or [gcx]"},
 		{"headless ensure", watchTrigger("scunner", WatchConfig{Role: "implementer"}, ActionConfig{Type: ActionSession, Ensure: true, Headless: true}), true, "headless is incompatible with ensure=true"},
 		{"scenario needs name", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionScenario}), true, "requires action.scenario"},
 		{"message needs body", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionMessage, Deliver: DeliverConfig{Topic: "t"}}), false, "requires action.body"},

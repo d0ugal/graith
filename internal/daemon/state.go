@@ -230,6 +230,9 @@ type SessionState struct {
 	// (mirroring the ScenarioID markers).
 	TriggerID      string `json:"trigger_id,omitempty"`
 	TriggerReactor bool   `json:"trigger_reactor,omitempty"`
+	// TriggerFingerprint prevents a changed trigger definition from adopting an
+	// incompatible old reactor. Empty for legacy watch reactors.
+	TriggerFingerprint string `json:"trigger_fingerprint,omitempty"`
 	// TrackerIssue is the stable key of the tracker issue a tracker action spawned
 	// this session for (e.g. "gh:owner/repo#643"). It is the reconcile dedup key:
 	// a tracker action never respawns a session while a live (running/stopped)

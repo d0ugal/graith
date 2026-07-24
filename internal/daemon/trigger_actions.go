@@ -266,8 +266,8 @@ func truncateOutput(s string, maxBytes int) string {
 }
 
 // actionSession spawns (or, with ensure, reuses) a session parented to the
-// orchestrator. For a watch source with ensure=true this is the ensure-reviewer
-// behaviour with per-binding reservation.
+// orchestrator. Ensured watch and GCX actions use the same owned-reactor
+// lifecycle; GCX reactors have no mirror source and receive queued inbox work.
 func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerConfig, fc fireContext) (string, error) {
 	orchestratorID := sm.orchestratorID()
 	if fc.scenarioID != "" {
@@ -318,11 +318,18 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 		return "", err
 	}
 
-	// ensure-reviewer (watch): reuse the binding's existing reactor if alive.
-	if t.Action.Ensure && t.IsWatch() {
-		if existing := sm.reuseReactor(t.Name, fc.sessionID); existing != "" {
+	if t.Action.Ensure {
+		sourceID := ""
+		if t.IsWatch() {
+			sourceID = fc.sessionID
+		}
+
+		if existing := sm.reuseOwnedReactor(t.Name, sourceID, triggerFingerprint(t), t.IsWatch()); existing != "" {
 			//nolint:contextcheck // notifyFromDaemon detaches its auto-resume; it must outlive this call.
-			_ = sm.notifyFromDaemon(existing, prompt)
+			if err := sm.notifyFromDaemon(existing, prompt); err != nil {
+				return "", fmt.Errorf("deliver to reactor %s: %w", existing, err)
+			}
+
 			return "messaged " + existing, nil
 		}
 	}
@@ -361,7 +368,8 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 		parentID:             orchestratorID,
 		mirror:               mirror,
 		triggerName:          t.Name,
-		reactor:              t.Action.Ensure && t.IsWatch(),
+		reactor:              t.Action.Ensure,
+		triggerFingerprint:   triggerFingerprint(t),
 		autoCleanup:          cleanup,
 		idleTimeoutSecs:      idleSeconds(idle),
 		completionScenarioID: fc.scenarioID,
@@ -373,11 +381,63 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 		return "", err
 	}
 
-	if t.Action.Ensure && t.IsWatch() {
-		sm.setBindingReactor(t.Name, fc.sessionID, sess.ID)
+	return "spawned " + sess.ID, nil
+}
+
+// reuseOwnedReactor finds an ensured reactor by its durable ownership tag.
+// Legacy watch reactors have no fingerprint and remain reusable; new reactors
+// require an exact definition match. GCX reactors use an empty source ID.
+func (sm *SessionManager) reuseOwnedReactor(triggerName, sourceSessionID, fingerprint string, legacyFingerprintOK bool) string {
+	sm.mu.RLock()
+
+	stale := make([]string, 0)
+	match := ""
+
+	for id, s := range sm.state.Sessions {
+		if !s.TriggerReactor || s.TriggerID != triggerName || s.IsSoftDeleted() {
+			continue
+		}
+
+		fingerprintMatches := s.TriggerFingerprint == fingerprint ||
+			(legacyFingerprintOK && s.TriggerFingerprint == "")
+		if !fingerprintMatches {
+			stale = append(stale, id)
+			continue
+		}
+
+		if s.MirrorSourceID != sourceSessionID {
+			continue
+		}
+
+		switch s.Status {
+		case StatusRunning, StatusStopped:
+			if match == "" {
+				match = id
+			}
+		case StatusErrored:
+			stale = append(stale, id)
+		}
 	}
 
-	return "spawned " + sess.ID, nil
+	sm.mu.RUnlock()
+	sm.retireMismatchedReactors(triggerName, stale)
+
+	return match
+}
+
+// retireMismatchedReactors stops and soft-deletes reactors that can no longer
+// be owned by the current trigger definition. This keeps a changed trigger
+// from leaving an otherwise live agent orphaned when fingerprint matching
+// deliberately refuses to adopt it.
+func (sm *SessionManager) retireMismatchedReactors(triggerName string, ids []string) {
+	for _, id := range ids {
+		if _, err := sm.SoftDelete(id); err != nil {
+			sm.log.Warn("trigger reactor definition changed; could not retire old reactor", "trigger", triggerName, "reactor", id, "err", err)
+			continue
+		}
+
+		sm.log.Info("trigger reactor definition changed; retired old reactor", "trigger", triggerName, "reactor", id)
+	}
 }
 
 // notifyOnComplete fires a proactive push notification after a trigger action
@@ -556,37 +616,6 @@ func (sm *SessionManager) orchestratorID() string {
 	return sm.findOrchestratorID()
 }
 
-// reuseReactor returns the binding's reactor session ID if it exists and is not
-// soft-deleted (running or stopped — messaging auto-resumes a stopped one).
-func (sm *SessionManager) reuseReactor(triggerName, sessionID string) string {
-	sm.triggers.mu.Lock()
-	b := sm.triggers.bindings[bindingKey(triggerName, sessionID)]
-
-	reactorID := ""
-	if b != nil {
-		reactorID = b.reactorID
-	}
-	sm.triggers.mu.Unlock()
-
-	if reactorID == "" {
-		return ""
-	}
-
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-
-	s, ok := sm.state.Sessions[reactorID]
-	if !ok || s.IsSoftDeleted() {
-		return ""
-	}
-
-	if s.Status == StatusRunning || s.Status == StatusStopped {
-		return reactorID
-	}
-
-	return ""
-}
-
 // sessionDeliveryInstruction builds the prompt suffix that tells a spawned
 // session how to deliver its result (best-effort, since the daemon can't capture
 // it). Empty when no deliver block is set. Templated keys are pre-expanded.
@@ -637,32 +666,6 @@ func (sm *SessionManager) sessionDeliveryInstruction(d config.DeliverConfig, var
 	return b.String(), nil
 }
 
-// findReactor locates an existing ensure-reviewer reactor for a (trigger, source)
-// binding by its persisted TriggerID/TriggerReactor tags, so reuse survives a
-// daemon restart or binding recreation (not just the in-memory binding lifetime).
-func (sm *SessionManager) findReactor(triggerName, sourceSessionID string) string {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-
-	for id, s := range sm.state.Sessions {
-		if s.TriggerReactor && s.TriggerID == triggerName &&
-			s.MirrorSourceID == sourceSessionID && !s.IsSoftDeleted() {
-			return id
-		}
-	}
-
-	return ""
-}
-
-func (sm *SessionManager) setBindingReactor(triggerName, sessionID, reactorID string) {
-	sm.triggers.mu.Lock()
-	defer sm.triggers.mu.Unlock()
-
-	if b := sm.triggers.bindings[bindingKey(triggerName, sessionID)]; b != nil {
-		b.reactorID = reactorID
-	}
-}
-
 type createTriggerReq struct {
 	name                 string
 	agent                string
@@ -673,6 +676,7 @@ type createTriggerReq struct {
 	parentID             string
 	mirror               string
 	triggerName          string
+	triggerFingerprint   string
 	trackerIssue         string
 	reactor              bool
 	autoCleanup          string
@@ -706,6 +710,7 @@ func (sm *SessionManager) createTriggerSession(req createTriggerReq) (SessionSta
 		AgentHooks:           true,
 		TriggerID:            req.triggerName,
 		TriggerReactor:       req.reactor,
+		TriggerFingerprint:   req.triggerFingerprint,
 		TrackerIssue:         req.trackerIssue,
 		AutoCleanup:          req.autoCleanup,
 		IdleTimeoutSecs:      req.idleTimeoutSecs,

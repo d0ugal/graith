@@ -59,7 +59,6 @@ type watchBinding struct {
 	debounce           *time.Timer
 	changed            map[string]bool // coalesced changed paths since last fire
 	inFlight           bool            // command action in flight for this binding
-	reactorID          string          // ensure-reviewer session owned by this binding
 	degraded           string          // watcher failure/limit reason ("" once healthy)
 	retryCount         int             // consecutive degraded (re)creation attempts (drives backoff)
 	nextRetryAt        time.Time       // when a degraded binding is next retried (zero when healthy)
