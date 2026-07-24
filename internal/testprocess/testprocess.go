@@ -4,15 +4,55 @@
 package testprocess
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
-
-	"github.com/d0ugal/graith/internal/agent"
 )
+
+// humanLifecycleAuthority is process-local capability state. It is set only
+// by code that has successfully read a protected human/service credential;
+// it is deliberately not represented in argv, environment, config, or logs.
+// A process that did not establish this capability fails closed, including a
+// caller that clears all agent markers before invoking a lower-level helper.
+var humanLifecycleAuthority atomic.Bool
+
+func markHumanLifecycleAuthority() { humanLifecycleAuthority.Store(true) }
+
+// EstablishHumanLifecycleAuthorityFromFile establishes authority only after a
+// protected regular credential file has been opened and validated. Sandboxed
+// sessions do not have reachability to this file; unsandboxed same-UID agents
+// remain outside this guarantee and lifecycle operations fail closed there.
+func EstablishHumanLifecycleAuthorityFromFile(path string) error {
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
+		return errors.New("protected lifecycle credential is invalid")
+	}
+
+	data, err := io.ReadAll(f)
+
+	if err != nil || strings.TrimSpace(string(data)) == "" {
+		return errors.New("protected lifecycle credential is invalid")
+	}
+
+	humanLifecycleAuthority.Store(true)
+
+	return nil
+}
+
+func resetHumanLifecycleAuthority() { humanLifecycleAuthority.Store(false) }
 
 // IsGoTestBinary combines the Go runtime's authoritative test-mode signal with
 // the conventional executable suffix. The runtime signal covers custom-named
@@ -22,30 +62,27 @@ func IsGoTestBinary(executable string, reportedByTesting bool) bool {
 	return reportedByTesting || strings.HasSuffix(filepath.Base(executable), ".test")
 }
 
-// RefuseDaemonLifecycleMutation rejects host daemon/service mutations from a
-// Go test process or an agent execution context. Callers use this both before
-// orchestration can mutate files or receipts and at the lowest process/service
-// primitive available. Tests that exercise the allowed path inject a no-op
-// guard only into a private seam; there is deliberately no environment-variable
-// or process-global bypass.
+// RefuseDaemonLifecycleMutation rejects host daemon/service mutations unless
+// this process established positive human lifecycle authority. Environment
+// markers are intentionally irrelevant: they are mutable by a session.
 func RefuseDaemonLifecycleMutation(operation string) error {
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("refusing daemon lifecycle mutation %q: identify current executable: %w", operation, err)
 	}
 
-	return refuseDaemonLifecycleMutation(operation, executable, testing.Testing(), os.Environ())
+	return refuseDaemonLifecycleMutation(operation, executable, testing.Testing())
 }
 
-func refuseDaemonLifecycleMutation(operation, executable string, reportedByTesting bool, environ []string) error {
+func refuseDaemonLifecycleMutation(operation, executable string, reportedByTesting bool) error {
 	if IsGoTestBinary(executable, reportedByTesting) {
 		return fmt.Errorf("refusing daemon lifecycle mutation %q from Go test binary %q", operation, executable)
 	}
 
-	if agent.SecurityBoundaryDetectedEnviron(environ) {
-		slog.Default().Warn("daemon lifecycle mutation denied", "operation", operation, "reason", "agent execution context")
+	if !humanLifecycleAuthority.Load() {
+		slog.Default().Warn("daemon lifecycle mutation denied", "operation", operation, "reason", "missing positive human authority")
 
-		return fmt.Errorf("refusing daemon lifecycle mutation %q from an agent execution context", operation)
+		return fmt.Errorf("refusing daemon lifecycle mutation %q: positive human lifecycle authority is required", operation)
 	}
 
 	return nil

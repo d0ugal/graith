@@ -11,8 +11,6 @@ package sandbox
 
 import (
 	"fmt"
-	"log/slog"
-	"slices"
 )
 
 // Backend identifiers used in config (`[sandbox] backend = "..."`).
@@ -187,17 +185,9 @@ func Wrap(command string, args []string, opts WrapOpts) (string, []string, error
 		backend = BackendSafehouse
 	}
 
-	if backend == BackendSafehouse && slices.Contains(opts.Features, "process-control") {
-		// Seatbelt has no equivalent signal isolation control. Keep sessions
-		// startable, but never pass the signal-granting feature through.
-		slog.Default().Warn("safehouse cannot enforce sandbox signal isolation; ignoring process-control feature")
+	opts.Backend = backend
 
-		opts.Features = slices.DeleteFunc(slices.Clone(opts.Features), func(feature string) bool {
-			return feature == "process-control"
-		})
-	}
-
-	be, err := backendByName(opts.Backend)
+	be, err := backendByName(backend)
 	if err != nil {
 		return "", nil, err
 	}

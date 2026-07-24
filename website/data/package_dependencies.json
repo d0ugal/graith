@@ -391,10 +391,6 @@
     {
       "from": "package_23",
       "to": "package_25"
-    },
-    {
-      "from": "package_24",
-      "to": "package_1"
     }
   ]
 }
