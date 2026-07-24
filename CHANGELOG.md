@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.70.2](https://github.com/d0ugal/graith/compare/v0.70.1...v0.70.2) (2026-07-24)
+
+
+### Bug Fixes
+
+* defer unavailable libghostty native update ([dc13053](https://github.com/d0ugal/graith/commit/dc13053fd7177ca92e45458e9bd0ffe322d416c1))
+* restrict daemon lifecycle to human callers ([527c321](https://github.com/d0ugal/graith/commit/527c321f3bb4bd17ef49be1f0c2d67d16b81e713))
+
+
+### Documentation
+
+* improve Agent Marty README presentation ([#1624](https://github.com/d0ugal/graith/issues/1624)) ([ea8d99c](https://github.com/d0ugal/graith/commit/ea8d99c887d8749f3e5ab9897e2247c500c6b83e))
+* introduce Agent Marty on docs homepage ([8db5ebf](https://github.com/d0ugal/graith/commit/8db5ebff2702388d7b0c0e95297d9a19c6a58ad1))
+
+
+### Code Refactoring
+
+* ratchet architecture policy metadata ([9d03ea5](https://github.com/d0ugal/graith/commit/9d03ea53110c58a6e530821aa3c0ba09ac4384c7))
+
+
+### Dependencies
+
+* **deps:** update ossf/scorecard-action action to v2.4.4 ([#1627](https://github.com/d0ugal/graith/issues/1627)) ([01880d0](https://github.com/d0ugal/graith/commit/01880d02fae1d66291285af9416ca3b8e60edcf8))
+
 ## [0.70.1](https://github.com/d0ugal/graith/compare/v0.70.0...v0.70.1) (2026-07-23)
 
 
