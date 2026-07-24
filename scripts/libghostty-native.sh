@@ -374,7 +374,18 @@ linux_artifact() {
     rm -rf -- "$staging"
     mkdir -m 700 "$staging"
     tar -xzf "$archive" -C "$staging" --no-same-owner --no-same-permissions
-    for path in libghostty-vt.a pkgconfig/libghostty-vt-static.pc manifest.json \
+    for path in libghostty-vt.a pkgconfig/libghostty-vt-static.pc include/module.modulemap \
+        include/ghostty/vt.h include/ghostty/vt/allocator.h include/ghostty/vt/build_info.h \
+        include/ghostty/vt/color.h include/ghostty/vt/color_scheme.h include/ghostty/vt/device.h \
+        include/ghostty/vt/focus.h include/ghostty/vt/formatter.h include/ghostty/vt/grid_ref.h \
+        include/ghostty/vt/grid_ref_tracked.h include/ghostty/vt/key.h include/ghostty/vt/key/encoder.h \
+        include/ghostty/vt/key/event.h include/ghostty/vt/kitty_graphics.h include/ghostty/vt/modes.h \
+        include/ghostty/vt/mouse.h include/ghostty/vt/mouse/encoder.h include/ghostty/vt/mouse/event.h \
+        include/ghostty/vt/osc.h include/ghostty/vt/paste.h include/ghostty/vt/point.h \
+        include/ghostty/vt/render.h include/ghostty/vt/screen.h include/ghostty/vt/selection.h \
+        include/ghostty/vt/sgr.h include/ghostty/vt/size_report.h include/ghostty/vt/style.h \
+        include/ghostty/vt/sys.h include/ghostty/vt/terminal.h include/ghostty/vt/types.h \
+        include/ghostty/vt/unicode.h include/ghostty/vt/wasm.h manifest.json \
         libghostty-native.spdx.json THIRD_PARTY_NOTICES.libghostty.md; do
         [[ -f "$staging/$path" && ! -L "$staging/$path" ]] || {
             die "Linux artifact member is not a regular file: $path"; return 1;
@@ -390,17 +401,20 @@ linux_artifact() {
     library="$staging/libghostty-vt.a"
     verify_static_archive "$library" || { die "Linux artifact static archive failed validation"; return 1; }
     pc="$staging/pkgconfig/libghostty-vt-static.pc"
-    grep -Fqx 'prefix=${pcfiledir}/..' "$pc" || { die "Linux artifact pkg-config prefix mismatch"; return 1; }
-    grep -Fqx 'Libs: -L${prefix} -lghostty-vt' "$pc" || { die "Linux artifact pkg-config metadata mismatch"; return 1; }
+    grep -Fqx "prefix=\${pcfiledir}/.." "$pc" || { die "Linux artifact pkg-config prefix mismatch"; return 1; }
+    grep -Fqx "Cflags: -I\${prefix}/include -DGHOSTTY_STATIC" "$pc" || { die "Linux artifact pkg-config cflags mismatch"; return 1; }
+    grep -Fqx "Libs: -L\${prefix} -lghostty-vt" "$pc" || { die "Linux artifact pkg-config metadata mismatch"; return 1; }
     mkdir -p "$NATIVE_WORK/pkgconfig"
     cp -- "$library" "$NATIVE_WORK/libghostty-vt.a"
     cp -- "$pc" "$NATIVE_WORK/pkgconfig/libghostty-vt-static.pc"
+    rm -rf -- "$NATIVE_WORK/include"
+    cp -R -- "$staging/include" "$NATIVE_WORK/include"
     printf '%s\n' "$NATIVE_WORK/libghostty-vt.a"
 }
 
 test_linux_artifact() {
     local goarch="${1:-}"
-    local target pkgconfig libs
+    local target pkgconfig cflags libs
     case "$goarch" in
         amd64) target=x86_64-linux-gnu ;;
         arm64) target=aarch64-linux-gnu ;;
@@ -409,7 +423,27 @@ test_linux_artifact() {
 
     linux_artifact "$goarch" >/dev/null || return 1
     pkgconfig="$NATIVE_WORK/pkgconfig"
-    libs="$(PKG_CONFIG_PATH="$pkgconfig" pkg-config --libs libghostty-vt-static)" || {
+    cflags="$(env -u CGO_CFLAGS -u CGO_CPPFLAGS -u CPATH -u C_INCLUDE_PATH \
+        -u CPLUS_INCLUDE_PATH PKG_CONFIG_PATH="$pkgconfig" pkg-config --cflags libghostty-vt-static)" || {
+        die "Linux artifact pkg-config cflags query failed"
+        return 1
+    }
+    local -a cflag_tokens
+    read -r -a cflag_tokens <<< "$cflags"
+    local include_flag include_path expected_include
+    include_flag="${cflag_tokens[0]:-}"
+    include_path="${include_flag#-I}"
+    expected_include="$NATIVE_WORK/include"
+    if [[ "${#cflag_tokens[@]}" -ne 2 || "$include_flag" != -I* || \
+        "${cflag_tokens[1]:-}" != "-DGHOSTTY_STATIC" ]] || \
+        ! include_path="$(realpath "$include_path")" || \
+        ! expected_include="$(realpath "$expected_include")" || \
+        [[ "$include_path" != "$expected_include" ]]; then
+        die "Linux artifact pkg-config output contains an unexpected include path: $cflags"
+        return 1
+    fi
+    libs="$(env -u CGO_CFLAGS -u CGO_CPPFLAGS -u CPATH -u C_INCLUDE_PATH \
+        -u CPLUS_INCLUDE_PATH PKG_CONFIG_PATH="$pkgconfig" pkg-config --libs libghostty-vt-static)" || {
         die "Linux artifact pkg-config query failed"
         return 1
     }
@@ -418,11 +452,13 @@ test_linux_artifact() {
         return 1
     }
     if [[ "$goarch" == amd64 ]]; then
-        PKG_CONFIG_PATH="$pkgconfig" CGO_ENABLED=1 \
+        env -u CGO_CFLAGS -u CGO_CPPFLAGS -u CPATH -u C_INCLUDE_PATH \
+            -u CPLUS_INCLUDE_PATH PKG_CONFIG_PATH="$pkgconfig" CGO_ENABLED=1 \
             go test -count=1 go.mitchellh.com/libghostty
     else
-        PKG_CONFIG_PATH="$pkgconfig" CGO_ENABLED=1 GOARCH=arm64 \
-            GOOS=linux CC="zig cc -target $target" \
+        env -u CGO_CFLAGS -u CGO_CPPFLAGS -u CPATH -u C_INCLUDE_PATH \
+            -u CPLUS_INCLUDE_PATH PKG_CONFIG_PATH="$pkgconfig" CGO_ENABLED=1 \
+            GOARCH=arm64 GOOS=linux CC="zig cc -target $target" \
             go test -c -o "$NATIVE_WORK/libghostty-wrapper-$goarch.test" \
             go.mitchellh.com/libghostty
     fi

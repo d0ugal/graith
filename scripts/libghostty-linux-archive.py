@@ -15,6 +15,39 @@ from pathlib import Path
 ALLOWED = (
     "libghostty-vt.a",
     "pkgconfig/libghostty-vt-static.pc",
+    "include/module.modulemap",
+    "include/ghostty/vt.h",
+    "include/ghostty/vt/allocator.h",
+    "include/ghostty/vt/build_info.h",
+    "include/ghostty/vt/color.h",
+    "include/ghostty/vt/color_scheme.h",
+    "include/ghostty/vt/device.h",
+    "include/ghostty/vt/focus.h",
+    "include/ghostty/vt/formatter.h",
+    "include/ghostty/vt/grid_ref.h",
+    "include/ghostty/vt/grid_ref_tracked.h",
+    "include/ghostty/vt/key.h",
+    "include/ghostty/vt/key/encoder.h",
+    "include/ghostty/vt/key/event.h",
+    "include/ghostty/vt/kitty_graphics.h",
+    "include/ghostty/vt/modes.h",
+    "include/ghostty/vt/mouse.h",
+    "include/ghostty/vt/mouse/encoder.h",
+    "include/ghostty/vt/mouse/event.h",
+    "include/ghostty/vt/osc.h",
+    "include/ghostty/vt/paste.h",
+    "include/ghostty/vt/point.h",
+    "include/ghostty/vt/render.h",
+    "include/ghostty/vt/screen.h",
+    "include/ghostty/vt/selection.h",
+    "include/ghostty/vt/sgr.h",
+    "include/ghostty/vt/size_report.h",
+    "include/ghostty/vt/style.h",
+    "include/ghostty/vt/sys.h",
+    "include/ghostty/vt/terminal.h",
+    "include/ghostty/vt/types.h",
+    "include/ghostty/vt/unicode.h",
+    "include/ghostty/vt/wasm.h",
     "manifest.json",
     "libghostty-native.spdx.json",
     "THIRD_PARTY_NOTICES.libghostty.md",
@@ -36,6 +69,8 @@ def inspect_archive(archive: Path) -> None:
             + json.dumps(names)
         )
     for member in members:
+        if member.name.startswith("/") or ".." in Path(member.name).parts:
+            raise SystemExit(f"Linux artifact member has unsafe path: {member.name}")
         if member.pax_headers:
             raise SystemExit(f"Linux artifact member contains metadata: {member.name}")
         if not member.isreg() or member.islnk() or member.issym():
