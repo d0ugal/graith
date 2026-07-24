@@ -21,7 +21,7 @@ interrupt_timeout = "5s"    # interrupt round-trip before falling through to SIG
 preview_bytes = 16384       # scrollback tail rendered by the overlay / screen_preview (16 KiB)
 ```
 
-Headless is gated because the control protocol is undocumented and may change between Claude Code releases; while `experimental` is off, sessions use the PTY driver. Trigger-spawned headless sessions aren't implemented yet; see [Automation → Headless session actions]({{< relref "automation.md#headless-session-actions-planned" >}}).
+Headless is gated because the control protocol is undocumented and may change between Claude Code releases; while `experimental` is off, sessions use the PTY driver. Trigger-spawned headless sessions can opt in with [Automation → Headless session actions]({{< relref "automation.md#headless-session-actions" >}}).
 
 v1 is **Claude-only**, **one-shot** (one prompt, run to completion, exit), and needs a prompt. Only agents marked `headless_capable = true` can run headless — see [Agent definitions]({{< relref "agents.md#agent-definitions" >}}); requesting it for an agent that can't is an error, not a silent PTY fallback.
 

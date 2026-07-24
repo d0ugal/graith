@@ -348,6 +348,7 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 		repo:                 repo,
 		prompt:               prompt,
 		model:                model,
+		headless:             t.Action.Headless,
 		parentID:             orchestratorID,
 		mirror:               mirror,
 		triggerName:          t.Name,
@@ -655,6 +656,7 @@ type createTriggerReq struct {
 	repo                 string
 	prompt               string
 	model                string
+	headless             bool
 	parentID             string
 	mirror               string
 	triggerName          string
@@ -685,6 +687,7 @@ func (sm *SessionManager) createTriggerSession(req createTriggerReq) (SessionSta
 		RepoPath:             req.repo,
 		Prompt:               req.prompt,
 		Model:                req.model,
+		Headless:             req.headless,
 		ParentID:             req.parentID,
 		Mirror:               req.mirror,
 		AgentHooks:           true,

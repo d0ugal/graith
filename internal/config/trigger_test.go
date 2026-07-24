@@ -105,6 +105,11 @@ func TestValidateTriggers_Valid(t *testing.T) {
 			orchestrator: true,
 		},
 		{
+			name:         "headless session",
+			trig:         schedTrigger("braw-headless", ScheduleConfig{Cron: "0 8 * * *"}, ActionConfig{Type: ActionSession, Prompt: "brief", Headless: true}),
+			orchestrator: true,
+		},
+		{
 			name:         "session idle_timeout",
 			trig:         schedTrigger("skelf-briefing", ScheduleConfig{Cron: "0 8 * * *"}, ActionConfig{Type: ActionSession, Prompt: "brief", AutoCleanup: true, IdleTimeout: "2m"}),
 			orchestrator: true,
@@ -164,6 +169,7 @@ func TestValidateTriggers_Invalid(t *testing.T) {
 		{"watch command with repo", watchTrigger("scunner", WatchConfig{Repo: "/r"}, ActionConfig{Type: ActionCommand, Command: "x", Repo: "/r"}), false, "must not set action.repo"},
 		{"session needs orchestrator", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Prompt: "hi"}), false, "requires [orchestrator] enabled"},
 		{"ensure on schedule", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionSession, Ensure: true}), true, "ensure=true is only valid for a [watch]"},
+		{"headless ensure", watchTrigger("scunner", WatchConfig{Role: "implementer"}, ActionConfig{Type: ActionSession, Ensure: true, Headless: true}), true, "headless is incompatible with ensure=true"},
 		{"scenario needs name", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionScenario}), true, "requires action.scenario"},
 		{"message needs body", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionMessage, Deliver: DeliverConfig{Topic: "t"}}), false, "requires action.body"},
 		{"message needs destination", schedTrigger("scunner", ScheduleConfig{Cron: "@daily"}, ActionConfig{Type: ActionMessage, Body: "x"}), false, "requires action.deliver.inbox or action.deliver.topic"},
