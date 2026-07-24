@@ -428,6 +428,21 @@ func (sm *SessionManager) dispatchPendingCompletionActions(ctx context.Context, 
 
 	epoch := sc.Completion.Epoch
 
+	sm.mu.RUnlock()
+
+	if err := sm.ensureScenarioResultIndex(scenarioID, epoch); err != nil {
+		sm.log.Warn("scenario result index unavailable", "scenario", scenarioID, "epoch", epoch, "err", err)
+		return
+	}
+
+	sm.mu.RLock()
+
+	sc = sm.state.Scenarios[scenarioID]
+	if sc == nil || !sc.Completion.Complete || sc.Completion.Epoch != epoch {
+		sm.mu.RUnlock()
+		return
+	}
+
 	var names []string
 
 	for _, action := range sc.Completion.Actions {

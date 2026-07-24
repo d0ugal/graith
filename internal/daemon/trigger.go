@@ -439,6 +439,7 @@ func (sm *SessionManager) triggerVars(t *config.TriggerConfig, fc fireContext) c
 		ScenarioID:      fc.scenarioID,
 		ScenarioName:    fc.scenarioName,
 		CompletionEpoch: strconv.Itoa(fc.completionEpoch),
+		ResultIndex:     scenarioResultIndexDestination(fc.scenarioID, fc.completionEpoch),
 	}
 
 	if fc.gcxEvent != nil {

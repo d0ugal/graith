@@ -5,12 +5,96 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/store"
 )
+
+const maxScenarioResultIndexBytes = 256 * 1024
+
+// scenarioResultIndexDestination is epoch-specific so a reopened scenario can
+// never make an older completion's metadata look current.
+func scenarioResultIndexDestination(scenarioID string, epoch int) string {
+	return fmt.Sprintf("scenarios/%s/result-index-%d.json", scenarioID, epoch)
+}
+
+type scenarioResultIndex struct {
+	Version         int                        `json:"version"`
+	ScenarioID      string                     `json:"scenario_id"`
+	ScenarioName    string                     `json:"scenario_name"`
+	CompletionEpoch int                        `json:"completion_epoch"`
+	Results         []scenarioResultIndexEntry `json:"results"`
+}
+
+type scenarioResultIndexEntry struct {
+	Member      string `json:"member"`
+	Name        string `json:"name"`
+	Format      string `json:"format"`
+	Required    bool   `json:"required"`
+	Status      string `json:"status"`
+	Destination string `json:"destination"`
+	SizeBytes   int    `json:"size_bytes,omitempty"`
+	PublishedAt string `json:"published_at,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
+// ensureScenarioResultIndex publishes metadata only; result bodies remain in
+// their declared documents. The snapshot is taken under the manager lock and
+// written before completion actions are dispatched.
+func (sm *SessionManager) ensureScenarioResultIndex(scenarioID string, epoch int) error {
+	sm.mu.RLock()
+
+	sc := sm.state.Scenarios[scenarioID]
+	if sc == nil || !sc.Completion.Complete || sc.Completion.Epoch != epoch {
+		sm.mu.RUnlock()
+		return errors.New("completion epoch is no longer current")
+	}
+
+	index := scenarioResultIndex{Version: 1, ScenarioID: sc.ID, ScenarioName: sc.Name, CompletionEpoch: epoch}
+	for _, member := range sc.Sessions {
+		for _, result := range member.Results {
+			info := scenarioResultInfo(result)
+			index.Results = append(index.Results, scenarioResultIndexEntry{
+				Member: member.Name, Name: info.Name, Format: info.Format, Required: info.Required,
+				Status: info.Status, Destination: info.Destination, SizeBytes: info.SizeBytes,
+				PublishedAt: info.PublishedAt, Error: info.Error,
+			})
+		}
+	}
+
+	sm.mu.RUnlock()
+
+	sort.SliceStable(index.Results, func(i, j int) bool {
+		if index.Results[i].Member != index.Results[j].Member {
+			return index.Results[i].Member < index.Results[j].Member
+		}
+
+		return index.Results[i].Name < index.Results[j].Name
+	})
+
+	body, err := json.MarshalIndent(index, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal scenario result index: %w", err)
+	}
+
+	if len(body) > maxScenarioResultIndexBytes {
+		return fmt.Errorf("scenario result index exceeds %d bytes", maxScenarioResultIndexBytes)
+	}
+
+	dir := store.SharedStorePath(sm.paths.DataDir)
+	if err := store.Init(dir); err != nil {
+		return fmt.Errorf("init shared store for scenario result index: %w", err)
+	}
+
+	if err := store.Put(dir, scenarioResultIndexDestination(scenarioID, epoch), string(body)); err != nil {
+		return fmt.Errorf("publish scenario result index: %w", err)
+	}
+
+	return nil
+}
 
 const maxScenarioResultStoreTemplateBytes = 512
 

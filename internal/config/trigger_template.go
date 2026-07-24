@@ -19,6 +19,7 @@ type TriggerVars struct {
 	ScenarioID      string // completion source: owning scenario ID
 	ScenarioName    string // completion source: owning scenario name
 	CompletionEpoch string // completion source: monotonically increasing epoch
+	ResultIndex     string // completion source: shared-store metadata index key
 	// Tracker action: the issue a spawned session is seeded from. These are known
 	// template tokens (they live in this shared struct), so they expand to the
 	// empty string — not an error — outside a tracker prompt; a genuinely unknown
@@ -53,6 +54,7 @@ func (v TriggerVars) toMap() map[string]string {
 		"scenario_id":        v.ScenarioID,
 		"scenario_name":      v.ScenarioName,
 		"completion_epoch":   v.CompletionEpoch,
+		"result_index":       v.ResultIndex,
 		"issue_number":       v.IssueNumber,
 		"issue_title":        v.IssueTitle,
 		"issue_body":         v.IssueBody,
