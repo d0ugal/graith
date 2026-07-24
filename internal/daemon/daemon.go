@@ -245,11 +245,13 @@ type SessionManager struct {
 }
 
 type upgradeRequest struct {
-	execPath   string
-	ready      chan error
-	proceed    chan struct{}
-	canceled   chan struct{}
-	cancelOnce sync.Once
+	execPath      string
+	targetVersion string
+	targetCommit  string
+	ready         chan error
+	proceed       chan struct{}
+	canceled      chan struct{}
+	cancelOnce    sync.Once
 }
 
 func newUpgradeRequest(execPath string) *upgradeRequest {

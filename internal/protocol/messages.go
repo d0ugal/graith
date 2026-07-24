@@ -738,6 +738,7 @@ type AgentCatalogResponseMsg struct {
 type DiagnosticsMsg struct {
 	DaemonPID     int    `json:"daemon_pid"`
 	DaemonVersion string `json:"daemon_version,omitempty"`
+	DaemonCommit  string `json:"daemon_commit,omitempty"`
 	DaemonUptime  string `json:"daemon_uptime"`
 	// TerminalBackend is the stable identifier for the daemon binary's selected
 	// terminal-screen implementation. It is omitted only by older daemons.

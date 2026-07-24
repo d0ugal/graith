@@ -19,6 +19,7 @@ import (
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/testprocess"
 	"github.com/d0ugal/graith/internal/tools"
+	"github.com/d0ugal/graith/internal/version"
 )
 
 var errUpgradeRejected = errors.New("upgrade rejected before daemon state mutation")
@@ -641,7 +642,7 @@ func run(
 			log.Warn("failed to remove committed upgrade marker", "err", err)
 		}
 
-		log.Info("daemon upgraded", "adopted_sessions", len(manifest.Sessions), "pid", os.Getpid())
+		log.Info("daemon upgraded", "adopted_sessions", len(manifest.Sessions), "pid", os.Getpid(), "version", version.Version, "commit", version.CommitSHA)
 	} else {
 		if coldStateErr != nil {
 			log.Warn("failed to load state", "err", coldStateErr)
@@ -719,6 +720,7 @@ func run(
 			logAttrs = append(logAttrs, "profile", paths.Profile)
 		}
 
+		logAttrs = append(logAttrs, "version", version.Version, "commit", version.CommitSHA)
 		log.Info("daemon started", logAttrs...)
 	}
 
@@ -986,7 +988,7 @@ func run(
 
 		clientExecPath := request.execPath
 
-		log.Info("preparing upgrade")
+		log.Info("preparing upgrade", "active_version", version.Version, "active_commit", version.CommitSHA)
 
 		fail := func(public string, err error) error {
 			request.ready <- publicUpgradeFailure(public, err)
@@ -1009,6 +1011,10 @@ func run(
 		if err != nil {
 			return fail(err.Error(), err)
 		}
+
+		request.targetVersion = target.targetVersion
+		request.targetCommit = target.targetCommit
+
 		defer func() {
 			returnErr = errors.Join(returnErr, target.pin.close())
 		}()
@@ -1201,7 +1207,7 @@ func run(
 			return refuseUpgrade("upgrade requester disconnected before acknowledgement")
 		}
 
-		log.Info("exec-ing new binary", "sessions", len(manifest.Sessions))
+		log.Info("exec-ing new binary", "sessions", len(manifest.Sessions), "active_version", version.Version, "active_commit", version.CommitSHA, "target_version", target.targetVersion, "target_commit", target.targetCommit)
 
 		backgroundCtx, backgroundCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		backgroundDrainAttempted = true
@@ -1302,7 +1308,16 @@ func runControlLoop(
 					return err
 				}
 
-				log.Error("upgrade attempt failed; old daemon remains active", "err", err)
+				attrs := []any{"err", err, "active_version", version.Version, "active_commit", version.CommitSHA, "old_daemon_remains_active", true}
+				if request.targetVersion != "" {
+					attrs = append(attrs, "target_version", request.targetVersion)
+				}
+
+				if request.targetCommit != "" {
+					attrs = append(attrs, "target_commit", request.targetCommit)
+				}
+
+				log.Error("upgrade attempt failed; old daemon remains active", attrs...)
 			}
 		}
 	}
