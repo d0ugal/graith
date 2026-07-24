@@ -50,6 +50,12 @@ process signalling.
 | macOS | Targeted | Managed service registration and controller are protected. |
 | Linux | Targeted | Direct daemon process signalling is protected. |
 
+Safehouse receives configured `process-control` as a backend feature; Graith
+does not silently remove it. If the installed Safehouse version cannot accept
+or enforce that feature, session launch must fail closed and report the
+compatibility problem. Operators who need Graith's same-sandbox signal
+guarantee should select nono with `signal_mode = "allow_same_sandbox"`.
+
 ## Proposals
 
 ### Proposal 0: Do Nothing
