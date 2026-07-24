@@ -1445,8 +1445,9 @@ type CreateOpts struct {
 	// TriggerID / TriggerReactor tag a session spawned by a trigger, applied in
 	// the same durable reservation as creation so reactor ownership survives a
 	// crash between Create and a separate tag-and-save.
-	TriggerID      string
-	TriggerReactor bool
+	TriggerID          string
+	TriggerReactor     bool
+	TriggerFingerprint string
 	// TrackerIssue tags a session spawned by a tracker action with its issue key
 	// (see SessionState.TrackerIssue), applied in the same durable reservation as
 	// creation so the reconcile dedup key survives a crash between Create and a
