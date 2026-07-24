@@ -507,11 +507,9 @@ func (sm *SessionManager) teardownIncludes(mainRepoPath, mainWorktreePath, mainB
 		errs = append(errs, err)
 	}
 
-	if len(includes) > 0 {
-		if err := os.RemoveAll(filepath.Dir(mainWorktreePath)); err != nil {
-			sm.log.Warn("failed to remove session directory", "path", filepath.Dir(mainWorktreePath), "err", err)
-			errs = append(errs, err)
-		}
+	if err := os.RemoveAll(filepath.Dir(mainWorktreePath)); err != nil {
+		sm.log.Warn("failed to remove session directory", "path", filepath.Dir(mainWorktreePath), "err", err)
+		errs = append(errs, err)
 	}
 
 	return errors.Join(errs...)
