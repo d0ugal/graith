@@ -161,6 +161,10 @@ write_owned_profile() {
 	printf 'data_dir = "%s"\n' "$data_dir" >> "$config_dir/config.toml"
 	printf '%s\n' "$owner" > "$config_dir/.graith-demo-owner"
 	printf '%s\n' "$owner" > "$data_dir/.graith-demo-owner"
+	# Simulate installer/bootstrap human authority; a clean session must not
+	# mint lifecycle authority merely by clearing its environment.
+	printf 'demo-human-token-%s\n' "$owner" > "$data_dir/human.token"
+	chmod 0600 "$data_dir/human.token"
 	[ "$runtime" != "present" ] || printf '%s\n' "$owner" > "$runtime_dir/.graith-demo-owner"
 	printf '%s %s\n' "$owner" "$(LC_ALL=C cksum < "$config_dir/config.toml")" > "$config_dir/.graith-demo-config-proof"
 }
