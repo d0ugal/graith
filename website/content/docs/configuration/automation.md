@@ -67,6 +67,35 @@ GitHub documents that command as testing/development-only (with webhook-admin
 permission and one active forwarder per repository or organization); it is not a
 production relay. No public listener or hook is created by default.
 
+#### GitHub push prerequisites and troubleshooting
+
+These are two independent requirements for every repository in
+`pr_watch.push.repositories`:
+
+- Install `cli/gh-webhook` and authenticate `gh` (`gh auth status`). The
+  authenticated GitHub user must own each repository or have the repository
+  `admin` permission. A `push` or `maintain` role is not sufficient.
+- The token used by `gh` must authorize repository webhook writes. For OAuth
+  tokens and classic PATs, `write:repo_hook` is the narrow scope; `repo`
+  includes repository hooks, and `public_repo` covers hooks for public
+  repositories. For fine-grained PATs, grant `Webhooks: write` for each
+  selected repository.
+
+Token scopes only limit the authenticated identity's existing access; they
+cannot grant repository admin rights. Check both prerequisites with:
+
+```console
+gh auth status
+gh api repos/OWNER/REPO --jq .permissions.admin
+gh webhook forward --repo=OWNER/REPO --events=pull_request
+```
+
+The last command creates a live development forwarder and remains active until
+interrupted. Only one forwarder may be active per repository. A 403, or the
+extension's `you do not have access to this feature` error, normally means to
+check the repository role, token permission, organization policy or SSO
+authorization, or a combination of these.
+
 ```toml
 [pr_watch.push]
 enabled        = false
