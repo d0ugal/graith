@@ -28,6 +28,7 @@ import (
 	"github.com/d0ugal/graith/internal/processidentity"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/testprocess"
+	"github.com/d0ugal/graith/internal/version"
 	"golang.org/x/sys/unix"
 )
 
@@ -93,6 +94,8 @@ type UpgradeHelper struct {
 }
 
 type UpgradeTargetDescriptor struct {
+	Version      string `json:"version,omitempty"`
+	CommitSHA    string `json:"commit_sha,omitempty"`
 	ResolvedPath string `json:"resolved_path"`
 	ExecPath     string `json:"exec_path,omitempty"`
 	Size         int64  `json:"size"`
@@ -145,6 +148,8 @@ type upgradeOwnershipHeader struct {
 
 type UpgradeCapacityProbe struct {
 	Version              int                   `json:"version"`
+	DaemonVersion        string                `json:"daemon_version,omitempty"`
+	DaemonCommit         string                `json:"daemon_commit,omitempty"`
 	Backend              string                `json:"backend"`
 	MaxSessions          int                   `json:"max_sessions"`
 	HelperHandoffVersion int                   `json:"helper_handoff_version"`
@@ -174,6 +179,7 @@ func CurrentUpgradeCapacityProbe() UpgradeCapacityProbe {
 	case !available:
 		return UpgradeCapacityProbe{
 			Version: upgradeCapacityProbeVersion, Backend: "unavailable",
+			DaemonVersion: version.Version, DaemonCommit: version.CommitSHA,
 			HelperHandoffVersion: upgradeHelperHandoffVersion,
 			StateVersion:         CurrentStateVersion, ManifestVersion: upgradeManifestVersion,
 			AdoptionVersion: upgradeAdoptionVersion,
@@ -181,6 +187,7 @@ func CurrentUpgradeCapacityProbe() UpgradeCapacityProbe {
 	case maxSessions == 0:
 		return UpgradeCapacityProbe{
 			Version: upgradeCapacityProbeVersion, Backend: "unlimited",
+			DaemonVersion: version.Version, DaemonCommit: version.CommitSHA,
 			HelperHandoffVersion: upgradeHelperHandoffVersion,
 			StateVersion:         CurrentStateVersion, ManifestVersion: upgradeManifestVersion,
 			AdoptionVersion: upgradeAdoptionVersion,
@@ -188,6 +195,7 @@ func CurrentUpgradeCapacityProbe() UpgradeCapacityProbe {
 	default:
 		return UpgradeCapacityProbe{
 			Version: upgradeCapacityProbeVersion, Backend: "limited", MaxSessions: maxSessions,
+			DaemonVersion: version.Version, DaemonCommit: version.CommitSHA,
 			HelperHandoffVersion: upgradeHelperHandoffVersion,
 			StateVersion:         CurrentStateVersion, ManifestVersion: upgradeManifestVersion,
 			AdoptionVersion: upgradeAdoptionVersion,
@@ -249,6 +257,8 @@ type upgradeTarget struct {
 	fileModNanos         int64
 	sha256               string
 	helperHandoffVersion int
+	targetVersion        string
+	targetCommit         string
 }
 
 // preparedExecUpgrade records the managed-service generation staged before
@@ -483,6 +493,8 @@ func probeUpgradeTarget(clientExecPath string, expectations ...upgradeProbeExpec
 		fileModNanos:         pin.info.ModTime().UnixNano(),
 		sha256:               pin.digest,
 		helperHandoffVersion: probe.HelperHandoffVersion,
+		targetVersion:        probe.DaemonVersion,
+		targetCommit:         probe.DaemonCommit,
 	}
 	keepPin = true
 
@@ -625,6 +637,8 @@ func (t *upgradeTarget) validateFinalFileIdentity() error {
 
 func (t *upgradeTarget) descriptor() UpgradeTargetDescriptor {
 	return UpgradeTargetDescriptor{
+		Version:      t.targetVersion,
+		CommitSHA:    t.targetCommit,
 		ResolvedPath: t.path,
 		ExecPath: func() string {
 			if t.pin != nil && t.pin.retainedDir != "" {
