@@ -26,12 +26,12 @@
     },
     "linuxArtifacts": {
       "amd64": {
-        "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-d4ac93a-linux/libghostty-vt-linux-amd64.tar.gz",
-        "sha256": "2e62232e34dd6acbdf3349eec859501bf6d7fed0edb917b73e572c9b3271be98"
+        "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-d4ac93a-pkgconfig1-linux/libghostty-vt-linux-amd64.tar.gz",
+        "sha256": "e5d7231e90f1ba0a994b357e0b1dd87c1c752f383bbfcbfcf03f47bc6eaf9266"
       },
       "arm64": {
-        "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-d4ac93a-linux/libghostty-vt-linux-arm64.tar.gz",
-        "sha256": "42c709e835666be747d6b3f6713d23b1c1563175271e0ab30ab021098f6c497f"
+        "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-d4ac93a-pkgconfig1-linux/libghostty-vt-linux-arm64.tar.gz",
+        "sha256": "be234199129524a975b8e57369e0fe2441f2b771c8d1c26272b60284d648f593"
       }
     }
   },

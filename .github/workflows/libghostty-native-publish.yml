@@ -37,7 +37,7 @@ jobs:
           GRAITH_LIBGHOSTTY_SOURCE_BUILD: '1'
         run: |
           set -euo pipefail
-          tag="libghostty-vt-$(jq -er '.ghostty.commit' libghostty-native.lock.json | cut -c1-7)-linux"
+          tag="$(jq -er ".ghostty.linuxArtifacts.amd64.url | capture(\"/download/(?<tag>[^/]+)/\").tag" libghostty-native.lock.json)"
           asset="libghostty-vt-linux-$GOARCH.tar.gz"
           expected_asset_sha="$(jq -er ".ghostty.linuxArtifacts.${GOARCH}.sha256" libghostty-native.lock.json)"
           if remote_asset_sha="$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest" 2>/dev/null)" &&
@@ -63,10 +63,13 @@ jobs:
           cp "$RUNNER_TEMP/libghostty-vt.a" "$RUNNER_TEMP/bundle/"
           # The source-build helper writes paths for the runner workspace.
           # Release bundles must be relocatable for consumers.
-          sed -e 's#^Cflags:.*#Cflags: -DGHOSTTY_STATIC#' \
-            -e "s#^Libs:.*#Libs: -L\${libdir} -lghostty-vt#" \
+          sed -e "s#^Cflags:.*#Cflags: -DGHOSTTY_STATIC#" \
+            -e "s#^Libs:.*#prefix=\${pcfiledir}/..#" \
             "$GRAITH_LIBGHOSTTY_WORK/pkgconfig/libghostty-vt-static.pc" \
+            | sed "/^prefix=/a Libs: -L\${prefix} -lghostty-vt" \
             > "$RUNNER_TEMP/bundle/pkgconfig/libghostty-vt-static.pc"
+          test "$(PKG_CONFIG_PATH="$RUNNER_TEMP/bundle/pkgconfig" pkg-config --libs libghostty-vt-static)" = \
+            "-L$RUNNER_TEMP/bundle/pkgconfig/.. -lghostty-vt"
           cp libghostty-native.spdx.json THIRD_PARTY_NOTICES.libghostty.md "$RUNNER_TEMP/bundle/"
           jq -n --arg target "$TARGET" --arg arch "$GOARCH" --arg commit "$(jq -er '.ghostty.commit' libghostty-native.lock.json)" \
             '{schemaVersion:1,target:$target,architecture:$arch,ghosttyCommit:$commit}' > "$RUNNER_TEMP/bundle/manifest.json"
@@ -79,7 +82,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           set -euo pipefail
-          tag="libghostty-vt-$(jq -er '.ghostty.commit' libghostty-native.lock.json | cut -c1-7)-linux"
+          tag="$(jq -er ".ghostty.linuxArtifacts.amd64.url | capture(\"/download/(?<tag>[^/]+)/\").tag" libghostty-native.lock.json)"
           asset="libghostty-vt-linux-$GOARCH.tar.gz"
           if ! gh release view "$tag" >/dev/null 2>&1; then
             # Both matrix jobs may observe an absent release concurrently.
