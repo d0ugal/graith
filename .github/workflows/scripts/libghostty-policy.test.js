@@ -155,11 +155,15 @@ test('Linux artifacts are lock-complete and published only by trusted immutable 
   assert.match(nativePublish, /test \"\$\(zig version\)\" = \"\$\(jq -er '\.zig\.version' libghostty-native\.lock\.json\)\"/);
   assert.match(nativePublish, /env GOARCH=amd64 scripts\/libghostty-native\.sh source-build/);
   assert.match(nativePublish, /Cflags: -DGHOSTTY_STATIC/);
+  assert.match(nativePublish, /libghostty-linux-archive\.py pack/);
+  assert.match(nativeScript, /libghostty-linux-archive\.py.*inspect/);
+  assert.match(nativeScript, /test-linux-archive-policy/);
   assert.match(nativePublish, /prefix=\\\$\{pcfiledir\}\/\.\./);
   assert.match(nativePublish, /Libs: -L\\\$\{prefix\} -lghostty-vt/);
   assert.match(nativePublish, /linuxArtifacts\.amd64\.url/);
   assert.ok(nativePublish.includes('capture('));
   assert.match(native, /test-linux-artifact/);
+  assert.doesNotMatch(native.match(/name: Contract-test the published Linux artifact[\s\S]*?(?=\n      - name:)/)?.[0] || '', /if: needs\.changes\.outputs\.dependency-unit/);
   assert.match(nativePublish, /gh release create[\s\S]*?gh release view/);
   assert.match(nativePublish, /actions\/checkout@[0-9a-f]{40}/);
 });
