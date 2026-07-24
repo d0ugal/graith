@@ -55,6 +55,15 @@ func (sm *SessionManager) actionCommand(ctx context.Context, t *config.TriggerCo
 	}
 
 	cmdStr := t.Action.Command
+	if t.IsCompletion() {
+		var err error
+
+		cmdStr, err = config.ExpandTrigger(cmdStr, sm.triggerVars(t, fc))
+		if err != nil {
+			return "", err
+		}
+	}
+
 	name, args := tools.Shell(), []string{"-c", cmdStr}
 
 	// For a read-only watch command, writes go to a per-run scratch dir; the
@@ -582,13 +591,17 @@ func (sm *SessionManager) reuseReactor(triggerName, sessionID string) string {
 // session how to deliver its result (best-effort, since the daemon can't capture
 // it). Empty when no deliver block is set. Templated keys are pre-expanded.
 func (sm *SessionManager) sessionDeliveryInstruction(d config.DeliverConfig, vars config.TriggerVars) (string, error) {
-	if d == (config.DeliverConfig{}) {
+	if d == (config.DeliverConfig{}) && vars.ResultIndex == "" {
 		return "", nil
 	}
 
 	var b strings.Builder
 
 	b.WriteString("\n\nWhen you finish, deliver your result:")
+
+	if vars.ResultIndex != "" {
+		fmt.Fprintf(&b, "\n- read the scenario result index with `gr store get --shared %s`; it contains metadata only and is ordered by member then result name", vars.ResultIndex)
+	}
 
 	if d.Required {
 		b.WriteString(" Every delivery below is required: do not exit until each succeeds, and exit non-zero if any delivery fails.")

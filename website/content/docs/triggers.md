@@ -383,7 +383,15 @@ author-trust gate is a possible follow-up.
 time (`{name}`, `{date}`, `{datetime}`, `{fire_time}`, and for watch triggers
 `{session_name}`, `{worktree_path}`, `{changed_files}`, `{change_count}`).
 Completion triggers also provide `{scenario_id}`, `{scenario_name}`, and
-`{completion_epoch}`.
+`{completion_epoch}`. They provide `{result_index}`, the shared-store key of a
+small JSON metadata document for the current completion epoch. It lists every
+declared result in deterministic member-name/result-name order, with member,
+name, format, required flag, publication status, resolved destination, and
+available size/publication/error metadata. It never contains result bodies.
+The key is epoch-scoped, so a reopened scenario cannot make an earlier index
+look current. For example, a completion command can read it with
+`gr store get --shared {result_index}`; session-action prompts include the same
+instruction automatically.
 
 ```toml
 [trigger.action.deliver]

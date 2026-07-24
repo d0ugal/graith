@@ -276,6 +276,42 @@ func TestPublishRequiredMarkdownAndJSONFromMultipleMembers(t *testing.T) {
 	}
 }
 
+func TestScenarioResultIndexIsDeterministicMetadataAndEpochScoped(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.mu.Lock()
+	seedScenarioResults(t, sm, map[string][]protocol.ScenarioResultSpec{
+		"zulu":  {resultSpec("notes", "text", "zulu.txt", false)},
+		"alpha": {resultSpec("facts", "json", "alpha.json", true)},
+	})
+	sm.state.Scenarios["sc-braw"].Completion.Complete = true
+	sm.state.Scenarios["sc-braw"].Completion.Epoch = 3
+	sm.mu.Unlock()
+
+	if err := sm.ensureScenarioResultIndex("sc-braw", 3); err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := store.Get(store.SharedStorePath(sm.paths.DataDir), scenarioResultIndexDestination("sc-braw", 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(body, "result body") || !strings.Contains(body, `"completion_epoch": 3`) {
+		t.Fatalf("index should contain bounded metadata only: %s", body)
+	}
+
+	alpha := strings.Index(body, `"member": "alpha"`)
+
+	zulu := strings.Index(body, `"member": "zulu"`)
+	if alpha < 0 || zulu < 0 || alpha > zulu {
+		t.Fatalf("index ordering is not deterministic: %s", body)
+	}
+
+	if got := scenarioResultIndexDestination("sc-braw", 4); got == scenarioResultIndexDestination("sc-braw", 3) {
+		t.Fatal("recompletion epochs must use distinct index destinations")
+	}
+}
+
 func TestScenarioStatusExposesEveryResultState(t *testing.T) {
 	sm := newTestSessionManager(t)
 	sm.mu.Lock()

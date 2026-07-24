@@ -554,6 +554,25 @@ func TestScenarioCompletionRequiredDeliveryFailureAndRetry(t *testing.T) {
 	t.Fatal("required delivery did not fail the action")
 }
 
+func TestCompletionResultIndexTemplateExpandsForCommandAndSession(t *testing.T) {
+	sm, _ := newScenarioCompletionTestSM(t, completionCommandTrigger("archive"), config.ScenarioLifecycleConfig{})
+
+	vars := sm.triggerVars(&config.TriggerConfig{Name: "archive"}, fireContext{scenarioID: "sc-braw", completionEpoch: 7})
+	if vars.ResultIndex != "scenarios/sc-braw/result-index-7.json" {
+		t.Fatalf("result index = %q", vars.ResultIndex)
+	}
+
+	command, err := config.ExpandTrigger("cat {result_index}", vars)
+	if err != nil || command != "cat scenarios/sc-braw/result-index-7.json" {
+		t.Fatalf("command expansion = %q, %v", command, err)
+	}
+
+	instruction, err := sm.sessionDeliveryInstruction(config.DeliverConfig{}, vars)
+	if err != nil || !strings.Contains(instruction, vars.ResultIndex) {
+		t.Fatalf("session instruction = %q, %v", instruction, err)
+	}
+}
+
 func TestScenarioCompletionRestartTransitions(t *testing.T) {
 	t.Run("running command becomes diagnosable failure", func(t *testing.T) {
 		sm, _ := newScenarioCompletionTestSM(t, completionCommandTrigger("archive"), config.ScenarioLifecycleConfig{Cleanup: config.ScenarioCleanupOnSuccess})

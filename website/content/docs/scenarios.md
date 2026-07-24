@@ -582,6 +582,15 @@ gr store get --shared scenarios/sc-abc12345/results/research-data/facts.json
 
 Those keys include the stable scenario ID and declared member destinations, so two runs of the same scenario name can't overwrite or consume each other's results.
 
+Completion actions also receive a `{result_index}` trigger template variable. It
+resolves to a shared-store JSON document for the current completion epoch,
+containing metadata for every declared result (member, name, format, required
+flag, status, destination, and available publication metadata) in deterministic
+member-name/result-name order. The index is bounded and contains no result
+bodies. Commands may read it with `gr store get --shared {result_index}`;
+completion session prompts include that instruction. Each recompletion gets a
+new epoch-specific key, so an old index is never exposed as current.
+
 ## Runtime policy semantics
 
 An initial attempt starts only after atomic startup commits; an added member starts when its add commits. A retry starts when the daemon durably claims its one retry path, before waiting for a launch slot, so the frozen deadline includes launch queue time. Daemon downtime, process stops, and user activity all consume wall-clock time; output, messages, hooks, todo claims, and other activity never extend a deadline.
