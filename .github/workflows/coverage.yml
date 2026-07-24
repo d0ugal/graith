@@ -88,14 +88,32 @@ jobs:
           # `[[:space:]]` (not a literal space) so a tab- or multi-space-
           # separated module directive still matches.
           MODULE="$(awk '/^module[[:space:]]/ {print $2; exit}' go.mod)"
-          # Run tests into a coverage profile, then extract the aggregate %.
+          # Run the production native graph into a coverage profile, then
+          # extract the aggregate %. The default build intentionally remains a
+          # small fail-closed compile check in CI; libghostty is the backend
+          # used on every supported runtime, so coverage must exercise its
+          # tagged session tests rather than report an unrepresentative 0%.
           # Split into two helpers so the *test exit status* is observable: it's
           # lost inside a `$(...)` substitution, and the threshold gate must know
           # whether HEAD's tests actually passed before failing the build on a
           # drop. A flaky/failing package must not abort the report itself
           # (ci.yml is the authoritative test gate) — hence the empty-profile →
           # 0.0 fallback stays.
-          run_cover() { go test -coverprofile="$1" ./... >/dev/null 2>&1; }
+          run_cover() {
+            local profile="$1"
+            local slot="$2"
+            local native_work="$RUNNER_TEMP/graith-libghostty-$slot"
+            # The immutable Linux archive is published by the trusted native
+            # dependency workflow. Re-run preparation after each checkout so
+            # HEAD and BASE use the lock and setup script from the profile they
+            # actually measure.
+            GRAITH_LIBGHOSTTY_WORK="$native_work" \
+              scripts/libghostty-native.sh prepare-linux-artifact amd64 >/dev/null
+            GRAITH_LIBGHOSTTY_WORK="$native_work" \
+              PKG_CONFIG_PATH="$native_work/pkgconfig" CGO_ENABLED=1 \
+              go test -tags=libghostty -coverprofile="$profile" ./... \
+              >/dev/null 2>&1
+          }
           pct_of() {
             if [ -s "$1" ]; then
               go tool cover -func="$1" | awk '/^total:/ {gsub(/%/,"",$3); print $3}'
@@ -104,14 +122,14 @@ jobs:
             fi
           }
           HEAD_OK=1
-          run_cover cover.head.out || HEAD_OK=0
+          run_cover cover.head.out head || HEAD_OK=0
           HEAD_PCT="$(pct_of cover.head.out)"
           # Measure the base commit the same way, then diff. Go's build cache
           # makes the second pass much cheaper than the first. A base test
           # failure is folded into the "unavailable" handling below, so its exit
           # status is intentionally ignored here.
           git checkout --quiet --force "$BASE_SHA"
-          run_cover cover.base.out || true
+          run_cover cover.base.out base || true
           BASE_PCT="$(pct_of cover.base.out)"
           # If the base failed to build/test (empty profile → 0.0) while HEAD
           # measured fine, a raw diff would report a nonsense delta (e.g.
