@@ -851,7 +851,12 @@ func resolveClientToken(paths config.Paths) string {
 		return t
 	}
 
-	return readHumanToken(paths)
+	token := readHumanToken(paths)
+	if token != "" {
+		_ = testprocess.EstablishHumanLifecycleAuthorityFromFile(paths.HumanTokenFile)
+	}
+
+	return token
 }
 
 func (c *Client) Close() {

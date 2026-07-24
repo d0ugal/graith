@@ -57,23 +57,18 @@ process signalling.
 Keep command validation and sandbox signal policy as the boundary. This leaves
 direct helper calls able to terminate the host daemon.
 
-### Proposal 1: Shared trusted lifecycle guard (Recommended)
+### Proposal 1: Process-local positive lifecycle capability (Recommended)
 
 Use the existing guard installed at every host daemon/service mutation entry
-point. Extend it to reject concrete agent/session execution markers even when a
-caller sets `GR_AGENT_MODE=0`. The guard logs operation plus a fixed reason and
-returns a credential-free error. Protocol reload and upgrade denials use the
-same bounded caller description and audit event. Human CLI calls continue using
-the protected human token and exact peer identity. Managed nono sandboxes use
-`signal_mode = allow_same_sandbox`, preserving child-process management while
-preventing an agent that clears its environment markers from signalling the
-host daemon directly. Safehouse cannot provide this OS-level guarantee and
-ignores `process-control` with a warning.
-
-The fallback daemon launcher scrubs these caller markers from the child daemon
-environment so daemon startup housekeeping does not misclassify itself. This
-does not weaken the caller-side guard: the process invoking a lifecycle helper
-still carries its markers and is refused.
+point, but require a positive capability established after the process has
+opened and validated the protected human credential or launchd receipt. The
+capability is an in-memory, process-local bit: it is not in argv, ordinary
+environment, config, logs, or inherited child state. Direct helper calls from
+an agent therefore fail closed even when every environment marker is removed.
+The daemon protocol continues to resolve the protected human token as
+`roleLocalHuman` and explicitly denies session tokens for host lifecycle
+messages; the CLI establishes the local capability only after reading that
+credential. Service bootstrap establishes it from the protected receipt.
 
 This requires no wire change and covers direct lower-level calls, Linux direct
 spawn, and macOS service-manager mutations. Private test seams can inject an
@@ -81,12 +76,22 @@ allow guard for hermetic tests without creating a production bypass.
 
 ### Proposal 2: New daemon lifecycle capability protocol
 
-Add a separate capability exchange before the CLI signals the daemon. This could
-make the daemon the sole issuer of lifecycle authority, but adds wire and
+Add a separate capability exchange before the CLI signals the daemon. This
+could make the daemon the sole issuer of lifecycle authority, but adds wire and
 compatibility surface while still requiring local helper guards against direct
-process signalling. It is not justified for this boundary.
+process signalling. The protected-token capability is smaller and preserves
+the existing protocol.
 
 ## Other Notes
+
+### Trust-model precondition
+
+The boundary assumes the configured sandbox prevents an agent from reading the
+human credential and service receipt. Same-UID unsandboxed execution can read
+those files and is not distinguishable from a human by user-space Go code; on
+that surface lifecycle helpers fail closed unless the process itself has
+positively established the capability. `gr doctor` and sandbox configuration
+remain the enforcement precondition and warning path.
 
 ### References
 
@@ -97,7 +102,8 @@ process signalling. It is not justified for this boundary.
 
 ### Testing
 
-Regression coverage exercises session-marker refusal, explicit human-context
-allowance, direct host-mutation guard callers, and authenticated protocol
-denials. Focused daemon, client, and daemon-service tests run with race coverage
-before the full repository checks.
+Regression coverage exercises clean-environment refusal, explicit human
+authority, direct host-mutation guard callers, session-token denial, capability
+non-inheritance and reset across restart, and authenticated protocol denials.
+Focused daemon, client, and daemon-service tests run with race coverage before
+the full repository checks.

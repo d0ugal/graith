@@ -36,6 +36,10 @@ type bootstrapEnvironment struct {
 // and receipt/lease agreement, consumes the request once, installs its minimal
 // environment, and clears the durable nonce.
 func BootstrapFreshService(label, slot string, now time.Time) (_ Bootstrap, returnErr error) {
+	if root, err := ReceiptRoot(os.Geteuid()); err == nil {
+		_ = testprocess.EstablishHumanLifecycleAuthorityFromFile(filepath.Join(root, "receipt.json"))
+	}
+
 	return bootstrapFreshService(label, slot, now, bootstrapEnvironment{
 		uid:             os.Geteuid(),
 		receiptRoot:     ReceiptRoot,
