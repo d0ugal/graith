@@ -134,9 +134,12 @@ type SessionManager struct {
 	// SessionManager). It is returned in handshake_ok/auth_ok so an upgrade
 	// readiness wait can prove the new daemon generation is serving rather than
 	// the inherited listener (issue #1319).
-	instanceID         string
-	orchestratorExitCh chan string
-	orchestratorKickCh chan struct{}
+	instanceID                string
+	orchestratorExitCh        chan string
+	orchestratorKickCh        chan struct{}
+	orchestratorRetryCancelCh chan struct{}
+	// orchestratorResume is a test seam for deterministic restart failures.
+	orchestratorResume func(string, uint16, uint16) (SessionState, error)
 	recentExits        []time.Time
 	lastInboxNotifyAt  map[string]time.Time
 	// silentWarned tracks session IDs already flagged by the silent-session
@@ -263,40 +266,41 @@ func (r *upgradeRequest) cancel() { r.cancelOnce.Do(func() { close(r.canceled) }
 // NewSessionManager creates a SessionManager with the given config and paths.
 func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger) *SessionManager {
 	sm := &SessionManager{
-		state:              NewState(),
-		worktreePort:       defaultWorktreePort(),
-		sessions:           make(map[string]sessionDriver),
-		stopAttempts:       make(map[string]*stopAttempt),
-		attachedClients:    make(map[string]*attachedClient),
-		hookReports:        make(map[string]hookReport),
-		tokenIndex:         make(map[string]string),
-		pendingPairings:    make(map[string]*pendingPairing),
-		pairWaiters:        make(map[string]chan pairApproval),
-		deviceTokenIndex:   make(map[string]string),
-		connsByDevice:      make(map[string][]net.Conn),
-		orchestratorExitCh: make(chan string, 4),
-		orchestratorKickCh: make(chan struct{}, 1),
-		lastInboxNotifyAt:  make(map[string]time.Time),
-		silentWarned:       make(map[string]bool),
-		upgradeCleanup:     make(map[string]upgradeCleanupEntry),
-		mutationLeases:     make(map[string]mutationLeaseRecord),
-		prWatch:            newPRWatchState(cfg.PRWatch.KickChannelSize()),
-		prRefWatch:         newPRRefWatchState(),
-		prPush:             newPRPushState(cfg.PRWatch.Push),
-		triggers:           newTriggerState(),
-		completion:         newScenarioCompletionRuntime(),
-		tokens:             newTokenCache(),
-		launch:             newLaunchThrottle(cfg.Launch.MaxConcurrentOrDefault()),
-		resourceSamples:    make(map[string][]ResourceSample),
-		resourceKick:       make(chan struct{}, 1),
-		signalRequests:     make(map[string]signalRequest),
-		newLoopTicker:      newRealLoopTicker,
-		newLoopTimer:       newRealLoopTimer,
-		cfg:                cfg,
-		paths:              paths,
-		log:                log,
-		startedAt:          time.Now(),
-		instanceID:         newDaemonInstanceID(),
+		state:                     NewState(),
+		worktreePort:              defaultWorktreePort(),
+		sessions:                  make(map[string]sessionDriver),
+		stopAttempts:              make(map[string]*stopAttempt),
+		attachedClients:           make(map[string]*attachedClient),
+		hookReports:               make(map[string]hookReport),
+		tokenIndex:                make(map[string]string),
+		pendingPairings:           make(map[string]*pendingPairing),
+		pairWaiters:               make(map[string]chan pairApproval),
+		deviceTokenIndex:          make(map[string]string),
+		connsByDevice:             make(map[string][]net.Conn),
+		orchestratorExitCh:        make(chan string, 4),
+		orchestratorKickCh:        make(chan struct{}, 1),
+		orchestratorRetryCancelCh: make(chan struct{}, 1),
+		lastInboxNotifyAt:         make(map[string]time.Time),
+		silentWarned:              make(map[string]bool),
+		upgradeCleanup:            make(map[string]upgradeCleanupEntry),
+		mutationLeases:            make(map[string]mutationLeaseRecord),
+		prWatch:                   newPRWatchState(cfg.PRWatch.KickChannelSize()),
+		prRefWatch:                newPRRefWatchState(),
+		prPush:                    newPRPushState(cfg.PRWatch.Push),
+		triggers:                  newTriggerState(),
+		completion:                newScenarioCompletionRuntime(),
+		tokens:                    newTokenCache(),
+		launch:                    newLaunchThrottle(cfg.Launch.MaxConcurrentOrDefault()),
+		resourceSamples:           make(map[string][]ResourceSample),
+		resourceKick:              make(chan struct{}, 1),
+		signalRequests:            make(map[string]signalRequest),
+		newLoopTicker:             newRealLoopTicker,
+		newLoopTimer:              newRealLoopTimer,
+		cfg:                       cfg,
+		paths:                     paths,
+		log:                       log,
+		startedAt:                 time.Now(),
+		instanceID:                newDaemonInstanceID(),
 	}
 	sm.scenarioResults = gitScenarioResultPersistence{dataDir: func() string { return sm.paths.DataDir }}
 	sm.pushDispatch = sm.newPushDispatch()

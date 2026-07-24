@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,9 +31,10 @@ func newOrchTestSM(t *testing.T) *SessionManager {
 			LogDir:    filepath.Join(dir, "logs"),
 			StateFile: filepath.Join(dir, "state.json"),
 		},
-		orchestratorExitCh: make(chan string, 4),
-		orchestratorKickCh: make(chan struct{}, 1),
-		log:                slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+		orchestratorExitCh:        make(chan string, 4),
+		orchestratorKickCh:        make(chan struct{}, 1),
+		orchestratorRetryCancelCh: make(chan struct{}, 1),
+		log:                       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
 }
 
@@ -424,6 +426,81 @@ func TestHandleOrchestratorExit_BackoffScheduling_Cov(t *testing.T) {
 
 	if got := sm.state.Sessions["ben"].BackoffLevel; got != 1 {
 		t.Errorf("stable-threshold reset then increment should yield 1, got %d", got)
+	}
+}
+
+func TestRestartOrchestratorRetriesFailedResume(t *testing.T) {
+	sm := newOrchTestSM(t)
+	sm.cfg.Orchestrator.Enabled = true
+	sm.cfg.Orchestrator.Restart.Schedule = []string{"1ms", "1ms"}
+
+	sm.state.Sessions["ben"] = &SessionState{
+		ID: "ben", SystemKind: SystemKindOrchestrator, StopReason: StopReasonCrash,
+		BackoffLevel: 1, LastStartedAt: time.Now(),
+	}
+	sm.orchestratorRetryCancelCh <- struct{}{}
+
+	attempts := 0
+	sm.orchestratorResume = func(id string, rows, cols uint16) (SessionState, error) {
+		attempts++
+		if attempts == 1 {
+			return SessionState{}, errors.New("transient resume failure")
+		}
+
+		return *sm.state.Sessions[id], nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	sm.restartOrchestratorUntilRunning(ctx, "ben", 1, sm.cfg.Orchestrator.Restart)
+
+	if attempts != 2 {
+		t.Fatalf("resume attempts = %d, want first failure followed by retry", attempts)
+	}
+}
+
+func TestRestartOrchestratorRetryCancelledWhenDisabled(t *testing.T) {
+	sm := newOrchTestSM(t)
+	sm.cfg.Orchestrator.Enabled = true
+	sm.cfg.Orchestrator.Restart.Schedule = []string{"1h"}
+	sm.state.Sessions["ben"] = &SessionState{ID: "ben", SystemKind: SystemKindOrchestrator, StopReason: StopReasonCrash}
+
+	var attempts atomic.Int32
+
+	sm.orchestratorResume = func(string, uint16, uint16) (SessionState, error) {
+		attempts.Add(1)
+		return SessionState{}, errors.New("resume unavailable")
+	}
+
+	done := make(chan struct{})
+
+	go func() {
+		sm.restartOrchestratorUntilRunning(context.Background(), "ben", 0, sm.cfg.Orchestrator.Restart)
+		close(done)
+	}()
+
+	deadline := time.After(time.Second)
+
+	for attempts.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("initial resume was not attempted")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	sm.orchestratorRetryCancelCh <- struct{}{}
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("disabled retry did not cancel promptly")
+	}
+
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("resume attempts after cancellation = %d, want 1", got)
 	}
 }
 
