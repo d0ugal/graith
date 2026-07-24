@@ -341,7 +341,7 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 		// Re-adopt an existing reactor (tagged TriggerID/TriggerReactor) so
 		// ensure-reviewer reuse survives a daemon restart or binding recreation
 		// instead of spawning a duplicate.
-		reactorID: sm.findReactor(t.Name, sess.id),
+		reactorID: sm.reuseOwnedReactor(t.Name, sess.id, triggerFingerprint(t), false),
 	}
 
 	sm.triggers.mu.Lock()
@@ -418,7 +418,7 @@ func (sm *SessionManager) recordDegradedBinding(key string, t *config.TriggerCon
 		builtinFingerprint: builtinFP,
 		// Stash carried changes here; the recovery createBinding absorbs them.
 		changed:     changed,
-		reactorID:   sm.findReactor(t.Name, sess.id),
+		reactorID:   sm.reuseOwnedReactor(t.Name, sess.id, triggerFingerprint(t), false),
 		degraded:    reason,
 		retryCount:  attempt,
 		nextRetryAt: now.Add(sm.watchRetryBackoff(attempt)),
