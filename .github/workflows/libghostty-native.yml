@@ -282,16 +282,18 @@ jobs:
             exit 1
           fi
           echo "archive_policy_residue=none"
+      - name: Verify archive member policy independently of BSD tar
+        run: scripts/libghostty-native.sh test-linux-archive-policy
       - name: Verify committed headers match the source pin
         if: needs.changes.outputs.dependency-unit == 'true'
         env:
           SOURCE: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}/ghostty/include/ghostty
         run: diff -ru "$SOURCE" gui/shared/Sources/CGhosttyVT/include/ghostty
       - name: Contract-test the published Linux artifact
-        if: needs.changes.outputs.dependency-unit != 'true'
         env:
           GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}-contract
+          CGO_CFLAGS: -I${{ github.workspace }}/gui/shared/Sources/CGhosttyVT/include
         run: scripts/libghostty-native.sh test-linux-artifact "${{ matrix.goarch }}"
       - name: Compile and optionally run the isolated backend
         env:

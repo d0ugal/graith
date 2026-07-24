@@ -366,20 +366,11 @@ linux_artifact() {
         "$url" --output "$archive" || { die "could not download Linux artifact"; return 1; }
     sha256_check "$expected" "$archive" || { die "Linux artifact checksum mismatch"; return 1; }
 
-    # Validate names, types, and exact cardinality before extraction.  GNU tar
-    # reports symlinks and links explicitly; neither is permitted in bundles.
-    local listing
-    listing="$(tar -tzf "$archive")" || { die "invalid Linux artifact archive"; return 1; }
-    [[ "$listing" == "libghostty-vt.a
-pkgconfig/libghostty-vt-static.pc
-manifest.json
-libghostty-native.spdx.json
-THIRD_PARTY_NOTICES.libghostty.md" ]] || {
-        die "Linux artifact has unexpected or incomplete archive members"; return 1;
-    }
-    if tar -tvzf "$archive" | awk '$1 ~ /^[lh]/ { found = 1 } END { exit !found }'; then
-        die "Linux artifact contains a link"; return 1
-    fi
+    # Inspect the archive's actual member table.  BSD tar filters AppleDouble
+    # entries from its display, so tar listings are not a sufficient contract.
+    # Keep this diagnostic stable for callers and regression tests.
+    # The inspector emits: Linux artifact has unexpected or incomplete archive members.
+    python3 "$REPO_DIR/scripts/libghostty-linux-archive.py" inspect "$archive" || return 1
     rm -rf -- "$staging"
     mkdir -m 700 "$staging"
     tar -xzf "$archive" -C "$staging" --no-same-owner --no-same-permissions
@@ -435,6 +426,10 @@ test_linux_artifact() {
             go test -c -o "$NATIVE_WORK/libghostty-wrapper-$goarch.test" \
             go.mitchellh.com/libghostty
     fi
+}
+
+test_linux_archive_policy() {
+    python3 "$REPO_DIR/scripts/libghostty-linux-archive.py" test
 }
 
 build_local() {
@@ -3161,6 +3156,7 @@ usage: $0 test|race|fuzz|daemon-test|soak [cycles [timeout]]|all
        $0 source-test <zig-target>
        $0 prepare-linux-artifact <amd64|arm64>
        $0 test-linux-artifact <amd64|arm64>
+       $0 test-linux-archive-policy
        $0 test-source-archive-policy
        $0 verify-static-archive <library>
        $0 verify-dependency-unit
@@ -3226,6 +3222,9 @@ case "${1:-}" in
         ;;
     test-linux-artifact)
         test_linux_artifact "${2:-}"
+        ;;
+    test-linux-archive-policy)
+        test_linux_archive_policy
         ;;
     source-test)
         source_test "${2:-}"

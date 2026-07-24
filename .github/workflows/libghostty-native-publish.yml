@@ -73,8 +73,10 @@ jobs:
           cp libghostty-native.spdx.json THIRD_PARTY_NOTICES.libghostty.md "$RUNNER_TEMP/bundle/"
           jq -n --arg target "$TARGET" --arg arch "$GOARCH" --arg commit "$(jq -er '.ghostty.commit' libghostty-native.lock.json)" \
             '{schemaVersion:1,target:$target,architecture:$arch,ghosttyCommit:$commit}' > "$RUNNER_TEMP/bundle/manifest.json"
-          tar -czf "$RUNNER_TEMP/libghostty-vt-linux-$GOARCH.tar.gz" -C "$RUNNER_TEMP/bundle" \
-            libghostty-vt.a pkgconfig/libghostty-vt-static.pc manifest.json libghostty-native.spdx.json THIRD_PARTY_NOTICES.libghostty.md
+          python3 scripts/libghostty-linux-archive.py pack "$RUNNER_TEMP/bundle" \
+            "$RUNNER_TEMP/libghostty-vt-linux-$GOARCH.tar.gz"
+          python3 scripts/libghostty-linux-archive.py inspect \
+            "$RUNNER_TEMP/libghostty-vt-linux-$GOARCH.tar.gz"
           sha256sum "$RUNNER_TEMP/libghostty-vt-linux-$GOARCH.tar.gz"
       - name: Publish only an absent immutable asset
         env:
