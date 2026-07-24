@@ -26,6 +26,7 @@ const nativePublish = fs.readFileSync(
   path.join(REPO_ROOT, '.github', 'workflows', 'libghostty-native-publish.yml'),
   'utf8',
 );
+const coverage = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'coverage.yml'), 'utf8');
 
 function nativePathMatcher() {
   const match = native.match(/if grep -Eq '([^']+)' <<<"\$files"/);
@@ -149,4 +150,13 @@ test('Linux artifacts are lock-complete and published only by trusted immutable 
   assert.match(nativePublish, /github\.event_name == 'workflow_dispatch' \|\| github\.ref == 'refs\/heads\/main'/);
   assert.match(nativePublish, /refusing to overwrite existing release asset/);
   assert.match(nativePublish, /actions\/checkout@[0-9a-f]{40}/);
+});
+
+test('coverage measures the tagged production graph for both HEAD and base', () => {
+  assert.match(coverage, /prepare-linux-artifact amd64/);
+  assert.equal((coverage.match(/prepare-linux-artifact amd64/g) || []).length, 1);
+  assert.match(coverage, /go test -tags=libghostty -coverprofile="\$profile" \.\/\.\.\./);
+  assert.match(coverage, /run_cover cover\.head\.out head/);
+  assert.match(coverage, /run_cover cover\.base\.out base/);
+  assert.match(coverage, /HEAD and BASE use the lock and setup script/);
 });
