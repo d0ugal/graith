@@ -1165,6 +1165,51 @@ func TestScenarioSeedIdentitySurvivesAssigneeChanges(t *testing.T) {
 	}
 }
 
+func TestScenarioCurrentSeedItemIDsTracksCurrentAssignee(t *testing.T) {
+	s := newTestTodoStore(t)
+	scope := "scenario:strath-current"
+
+	seed, err := s.Add(TodoAdd{Scope: scope, Title: "build", Assignee: "braw-id", CreatedBy: scope})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := s.ScenarioCurrentSeedItemIDs(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if ids["braw-id"] != seed.ID {
+		t.Fatalf("current seed mapping = %+v", ids)
+	}
+
+	if _, err := s.Assign(seed.ID, "canny-id"); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err = s.ScenarioCurrentSeedItemIDs(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if ids["braw-id"] != "" || ids["canny-id"] != seed.ID {
+		t.Fatalf("reassigned current seed mapping = %+v", ids)
+	}
+
+	if _, err := s.Assign(seed.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err = s.ScenarioCurrentSeedItemIDs(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(ids) != 0 {
+		t.Fatalf("unassigned current seed mapping = %+v", ids)
+	}
+}
+
 func TestTodoDependencyUpdateReportsTransactionalReadiness(t *testing.T) {
 	s := newTestTodoStore(t)
 	dependency := mustAdd(t, s, "session:glen", "lay stones")

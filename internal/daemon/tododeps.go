@@ -347,6 +347,47 @@ func (s *TodoStore) ScenarioSeedItemIDs(scope string) (map[string]string, error)
 	return out, nil
 }
 
+// ScenarioCurrentSeedItemIDs returns the scenario-seeded top-level todo ID
+// for each member's current assignee. Unlike ScenarioSeedItemIDs, this uses
+// mutable assignment because it is used to validate contracts whose progress
+// is tracked by AssigneeProgress.
+func (s *TodoStore) ScenarioCurrentSeedItemIDs(scope string) (map[string]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(
+		`SELECT todo.assignee, todo.id
+		 FROM todo_scenario_seeds seed
+		 JOIN todos todo ON todo.id = seed.todo_id
+		 WHERE seed.scope = ? AND todo.scope = ? AND todo.assignee <> ''
+		 ORDER BY todo.assignee, todo.position, todo.id`, scope, scope)
+	if err != nil {
+		return nil, fmt.Errorf("query currently assigned scenario seed todos: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	ids := make(map[string]string)
+
+	for rows.Next() {
+		var assignee, id string
+		if err := rows.Scan(&assignee, &id); err != nil {
+			return nil, fmt.Errorf("scan currently assigned scenario seed todo: %w", err)
+		}
+
+		if previous := ids[assignee]; previous != "" {
+			return nil, fmt.Errorf("scenario assignee %q has multiple currently assigned seeded todo items (%s, %s)", assignee, previous, id)
+		}
+
+		ids[assignee] = id
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate currently assigned scenario seed todos: %w", err)
+	}
+
+	return ids, nil
+}
+
 // ScenarioSeedItems returns the original scenario-seeded top-level todo for
 // each member session, including its effective dependency state. The immutable
 // seed association is independent of the item's mutable current assignee.
