@@ -79,7 +79,7 @@ func TestStartDaemonExecutableLaunchesGraithBinary(t *testing.T) {
 	executable := filepath.Join(t.TempDir(), "gr")
 	launched := false
 
-	err := startDaemonExecutable("", executable, false, func(gotExecutable string, args []string) error {
+	err := startDaemonExecutableWithGuard("", executable, false, func(gotExecutable string, args []string) error {
 		launched = true
 
 		if gotExecutable != executable {
@@ -91,13 +91,33 @@ func TestStartDaemonExecutableLaunchesGraithBinary(t *testing.T) {
 		}
 
 		return nil
-	})
+	}, allowDaemonLifecycleMutation)
 	if err != nil {
 		t.Fatalf("startDaemonExecutable returned error: %v", err)
 	}
 
 	if !launched {
 		t.Fatal("expected regular graith binary to be launched")
+	}
+}
+
+func TestStartDaemonExecutableRequiresLifecycleAuthorityBeforeLaunch(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "gr")
+	launched := false
+
+	err := startDaemonExecutableWithGuard("", executable, false, func(string, []string) error {
+		launched = true
+
+		return nil
+	}, func(string) error {
+		return errors.New("positive human lifecycle authority is required")
+	})
+	if err == nil || !strings.Contains(err.Error(), "positive human lifecycle authority") {
+		t.Fatalf("startDaemonExecutableWithGuard() = %v, want authority refusal", err)
+	}
+
+	if launched {
+		t.Fatal("direct daemon launcher ran without lifecycle authority")
 	}
 }
 

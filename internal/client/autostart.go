@@ -322,7 +322,20 @@ func startDaemonWithLauncher(configFile string, launch func(string, []string) er
 }
 
 func startDaemonExecutable(configFile, executable string, runningUnderGoTest bool, launch func(string, []string) error) error {
+	return startDaemonExecutableWithGuard(configFile, executable, runningUnderGoTest, launch, testprocess.RefuseDaemonLifecycleMutation)
+}
+
+func startDaemonExecutableWithGuard(
+	configFile, executable string,
+	runningUnderGoTest bool,
+	launch func(string, []string) error,
+	guard func(string) error,
+) error {
 	if err := validateDaemonExecutable(executable, runningUnderGoTest); err != nil {
+		return err
+	}
+
+	if err := guard("start direct daemon"); err != nil {
 		return err
 	}
 
