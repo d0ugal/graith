@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.70.3](https://github.com/d0ugal/graith/compare/v0.70.2...v0.70.3) (2026-07-24)
+
+
+### Features
+
+* add graith mascot and app icon assets ([#1655](https://github.com/d0ugal/graith/issues/1655)) ([8a9df40](https://github.com/d0ugal/graith/commit/8a9df402dc1fad75d7d948f877c3239e82d13e3d))
+* expose scenario result index to completion actions ([b6e20ed](https://github.com/d0ugal/graith/commit/b6e20ed7a4328302d53ee3f596646f6f010ec9ad))
+* reuse verified Linux libghostty artifacts ([e1aa86d](https://github.com/d0ugal/graith/commit/e1aa86d23f608d8afdeeae29e2d34e23e7e24623))
+* wire headless trigger sessions ([447e274](https://github.com/d0ugal/graith/commit/447e274dbcfce5c39b3b23cf936242d991775776))
+
+
+### Bug Fixes
+
+* clean up fork session directory on rollback ([2aa8435](https://github.com/d0ugal/graith/commit/2aa8435aa5e6baacf28e469ab4f4d61574bf21b5))
+* measure native backend coverage ([a61eac2](https://github.com/d0ugal/graith/commit/a61eac2fc70d936a50055df596c4664a4bb2d8a0))
+* publish clean libghostty Linux bundles ([19dca9b](https://github.com/d0ugal/graith/commit/19dca9b5fbbb131e7986d096c8c1207597d5a470))
+* reject reassigned legacy policy contracts ([1d5cdba](https://github.com/d0ugal/graith/commit/1d5cdba2d36cb549581d3b0e3459adc17900b1d9))
+* repair libghostty artifact publisher bootstrap ([9a69682](https://github.com/d0ugal/graith/commit/9a6968203c56fbbe40a6481eb616f1e72e738294))
+* repair relocatable libghostty pkg-config metadata ([3dccc41](https://github.com/d0ugal/graith/commit/3dccc413a72e5f146925162980b6f67143257e36))
+* retry failed orchestrator resumes ([e770379](https://github.com/d0ugal/graith/commit/e770379b51a5e3eb878a61f328b04a583929e88b))
+* update module github.com/mattn/go-runewidth to v0.0.27 ([#1628](https://github.com/d0ugal/graith/issues/1628)) ([1486436](https://github.com/d0ugal/graith/commit/1486436fdbc4c2341cb488216cf4fd2ad4f0ae90))
+
+
+### Documentation
+
+* clarify GitHub push webhook permissions ([8ff7fac](https://github.com/d0ugal/graith/commit/8ff7fac993f229a46a0121bd09dcf95d272fc29d))
+
+
+### Dependencies
+
+* **deps:** update renovate/renovate docker tag to v43.279.1 ([#1638](https://github.com/d0ugal/graith/issues/1638)) ([0203843](https://github.com/d0ugal/graith/commit/02038434dfe058f084b8dae22dad111939555b5f))
+* **deps:** update renovate/renovate docker tag to v43.280.0 ([#1653](https://github.com/d0ugal/graith/issues/1653)) ([cc5b216](https://github.com/d0ugal/graith/commit/cc5b216d6f250e464b10a80a7bee9ba7b7496a60))
+* **deps:** update renovate/renovate docker tag to v43.280.1 ([#1658](https://github.com/d0ugal/graith/issues/1658)) ([f3f123b](https://github.com/d0ugal/graith/commit/f3f123b5de93177745c6ca77aa18eb38f5662c5a))
+* **deps:** update renovate/renovate docker tag to v43.280.2 ([#1659](https://github.com/d0ugal/graith/issues/1659)) ([b81264f](https://github.com/d0ugal/graith/commit/b81264f3a16314a78a26f7a265402bc1ad7d4502))
+
 ## [0.70.2](https://github.com/d0ugal/graith/compare/v0.70.1...v0.70.2) (2026-07-24)
 
 
