@@ -46,8 +46,8 @@ func TestGitHubCollectorFetchesReadOnlyEvidence(t *testing.T) {
 			t.Errorf("method = %s, want GET", request.Method)
 		}
 
-		if request.URL.Path == "/repos/d0ugal/graith/actions/runs" && request.URL.Query().Get("status") != "completed" {
-			t.Errorf("run status filter = %q, want completed", request.URL.Query().Get("status"))
+		if request.URL.Path == "/repos/d0ugal/graith/actions/runs" && request.URL.Query().Has("status") {
+			t.Errorf("run query unexpectedly filters status: %q", request.URL.Query().Get("status"))
 		}
 
 		if got := request.Header.Get("Authorization"); got != "Bearer canny-token" {
@@ -210,7 +210,7 @@ func TestGitHubCollectorFetchesAttemptScopedRunMetadata(t *testing.T) {
 	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
 	collector := GitHubCollector{Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now }}
 
-	snapshot, err := collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-time.Hour), loadInventory(t))
+	snapshot, err := collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-2*time.Hour), loadInventory(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestGitHubCollectorFetchesAttemptScopedRunMetadata(t *testing.T) {
 
 	mismatchedAttemptPath = true
 
-	if _, err := collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-time.Hour), loadInventory(t)); err == nil ||
+	if _, err := collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-2*time.Hour), loadInventory(t)); err == nil ||
 		!strings.Contains(err.Error(), "mismatched metadata") {
 		t.Fatalf("Fetch() error = %v, want mismatched attempt identity rejection", err)
 	}
@@ -231,7 +231,7 @@ func TestGitHubCollectorFetchesAttemptScopedRunMetadata(t *testing.T) {
 	mismatchedAttemptPath = false
 	omittedAttemptIdentity = true
 
-	if _, err := collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-time.Hour), loadInventory(t)); err == nil ||
+	if _, err := collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-2*time.Hour), loadInventory(t)); err == nil ||
 		!strings.Contains(err.Error(), "missing required field") {
 		t.Fatalf("Fetch(omitted identity) error = %v, want fail-closed rejection", err)
 	}
@@ -349,10 +349,402 @@ func TestGitHubCollectorRejectsIncompleteCount(t *testing.T) {
 	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
 
 	collector := GitHubCollector{Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now }}
-	if _, err := collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-time.Hour), loadInventory(t)); err == nil ||
+	if _, err := collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-2*time.Hour), loadInventory(t)); err == nil ||
 		!strings.Contains(err.Error(), "count mismatch") {
 		t.Fatalf("Fetch() error = %v, want count mismatch", err)
 	}
+}
+
+func TestGitHubCollectorUsesStableMaturedRunCutoff(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	since := now.Add(-2 * time.Hour)
+	cutoff := now.Add(-time.Hour)
+	stable := matureGitHubRun(81, since.Add(10*time.Minute), cutoff.Add(-10*time.Minute))
+
+	tests := map[string]struct {
+		first  githubRun
+		second githubRun
+		want   string
+	}{
+		"stable mature terminal set": {
+			first: stable, second: stable,
+		},
+		"completion during first observation": {
+			first: func() githubRun {
+				run := stable
+				run.Status, run.Conclusion = "in_progress", ""
+				run.UpdatedAt = cutoff.Add(-time.Minute)
+
+				return run
+			}(),
+			second: stable,
+			want:   "is unsettled",
+		},
+		"completion during final consistency pass": {
+			first: stable,
+			second: func() githubRun {
+				run := stable
+				run.Status, run.Conclusion = "in_progress", ""
+				run.UpdatedAt = cutoff.Add(time.Minute)
+
+				return run
+			}(),
+			want: "identities or states changed",
+		},
+		"rerun transition during collection": {
+			first: stable,
+			second: func() githubRun {
+				run := stable
+				run.Attempt = 2
+				run.UpdatedAt = cutoff.Add(time.Minute)
+
+				return run
+			}(),
+			want: "identities or states changed",
+		},
+		"conclusion churn during collection": {
+			first: stable,
+			second: func() githubRun {
+				run := stable
+				run.Conclusion = "cancelled"
+
+				return run
+			}(),
+			want: "identities or states changed",
+		},
+		"identity churn during collection": {
+			first: stable,
+			second: func() githubRun {
+				run := stable
+				run.ID = 82
+
+				return run
+			}(),
+			want: "identities or states changed",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			server := newRunCollectionServer(t, []githubRunsPage{
+				{TotalCount: 1, Runs: []githubRun{test.first}},
+				{TotalCount: 1, Runs: []githubRun{test.second}},
+			})
+			defer server.Close()
+
+			collector := GitHubCollector{
+				Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+				MaturationDelay: time.Hour,
+			}
+
+			snapshot, err := collector.Fetch(context.Background(), "d0ugal/graith", since, loadInventory(t))
+			if test.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if !snapshot.RequestedUntil.Equal(cutoff) || !snapshot.CollectedAt.Equal(now) ||
+					snapshot.ExpectedWorkflowRuns != 1 {
+					t.Fatalf("snapshot cutoff/count = %s/%d, collected %s", snapshot.RequestedUntil, snapshot.ExpectedWorkflowRuns, snapshot.CollectedAt)
+				}
+
+				return
+			}
+
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Fetch() error = %v, want containing %q", err, test.want)
+			}
+
+			if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) {
+				t.Fatalf("Fetch() returned partial snapshot %#v", snapshot)
+			}
+		})
+	}
+}
+
+func TestGitHubCollectorHandlesNullConclusionForUnsettledRuns(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	since := now.Add(-2 * time.Hour)
+	stable := `{"total_count":1,"workflow_runs":[{"id":81,"run_attempt":1,"path":".github/workflows/ci.yml","event":"push","head_sha":"braw","head_branch":"main","pull_requests":[],"created_at":"2026-07-25T10:10:00Z","run_started_at":"2026-07-25T10:10:01Z","updated_at":"2026-07-25T10:50:00Z","status":"completed","conclusion":"startup_failure"}]}`
+	unsettled := `{"total_count":1,"workflow_runs":[{"id":81,"run_attempt":1,"path":".github/workflows/ci.yml","event":"push","head_sha":"braw","head_branch":"main","pull_requests":[],"created_at":"2026-07-25T10:10:00Z","run_started_at":null,"updated_at":"2026-07-25T10:50:00Z","status":"queued","conclusion":null}]}`
+
+	tests := map[string]struct {
+		pages []string
+		want  string
+	}{
+		"first observation": {
+			pages: []string{unsettled},
+			want:  "is unsettled",
+		},
+		"final consistency pass": {
+			pages: []string{stable, unsettled},
+			want:  "identities or states changed",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			server := newRawRunCollectionServer(t, test.pages)
+			defer server.Close()
+
+			collector := GitHubCollector{
+				Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+				MaturationDelay: time.Hour,
+			}
+
+			snapshot, err := collector.Fetch(context.Background(), "d0ugal/graith", since, loadInventory(t))
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Fetch() error = %v, want containing %q", err, test.want)
+			}
+
+			if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) {
+				t.Fatalf("Fetch() returned partial snapshot %#v", snapshot)
+			}
+		})
+	}
+}
+
+func TestGitHubCollectorAcceptsStableRunReordering(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	since := now.Add(-2 * time.Hour)
+	first := matureGitHubRun(81, since.Add(10*time.Minute), now.Add(-70*time.Minute))
+	second := matureGitHubRun(82, since.Add(10*time.Minute), now.Add(-70*time.Minute))
+
+	server := newRunCollectionServer(t, []githubRunsPage{
+		{TotalCount: 2, Runs: []githubRun{first, second}},
+		{TotalCount: 2, Runs: []githubRun{second, first}},
+	})
+	defer server.Close()
+
+	collector := GitHubCollector{
+		Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+		MaturationDelay: time.Hour,
+	}
+
+	snapshot, err := collector.Fetch(context.Background(), "d0ugal/graith", since, loadInventory(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if snapshot.ExpectedWorkflowRuns != 2 {
+		t.Fatalf("ExpectedWorkflowRuns = %d, want 2", snapshot.ExpectedWorkflowRuns)
+	}
+}
+
+func TestGitHubRunStateNormalizesEquivalentTimestamps(t *testing.T) {
+	utc := time.Date(2026, 7, 25, 10, 0, 0, 123, time.UTC)
+	fixedUTC := time.Date(2026, 7, 25, 10, 0, 0, 123, time.FixedZone("", 0))
+	first := matureGitHubRun(81, utc, utc)
+	second := matureGitHubRun(81, fixedUTC, fixedUTC)
+
+	if githubRunStateOf(first) != githubRunStateOf(second) {
+		t.Fatal("githubRunStateOf() distinguished equivalent timestamp instants")
+	}
+}
+
+func TestGitHubCollectorRejectsRunCountChurnInFinalPass(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	since := now.Add(-2 * time.Hour)
+	stable := matureGitHubRun(81, since.Add(10*time.Minute), now.Add(-70*time.Minute))
+
+	server := newRunCollectionServer(t, []githubRunsPage{
+		{TotalCount: 1, Runs: []githubRun{stable}},
+		{TotalCount: 0, Runs: []githubRun{}},
+	})
+	defer server.Close()
+
+	collector := GitHubCollector{
+		Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+		MaturationDelay: time.Hour,
+	}
+
+	snapshot, err := collector.Fetch(context.Background(), "d0ugal/graith", since, loadInventory(t))
+	if err == nil || !strings.Contains(err.Error(), "count changed during pagination consistency pass") {
+		t.Fatalf("Fetch() error = %v, want final count-churn rejection", err)
+	}
+
+	if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) {
+		t.Fatalf("Fetch() returned partial snapshot %#v", snapshot)
+	}
+}
+
+func TestMatureGitHubRunWindowBoundariesAndFailures(t *testing.T) {
+	since := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
+	cutoff := since.Add(time.Hour)
+
+	tests := map[string]struct {
+		run  githubRun
+		want string
+	}{
+		"created at since": {
+			run: matureGitHubRun(1, since, cutoff),
+		},
+		"created at cutoff": {
+			run: matureGitHubRun(1, cutoff, cutoff),
+		},
+		"created before since": {
+			run:  matureGitHubRun(1, since.Add(-time.Second), cutoff),
+			want: "outside requested window",
+		},
+		"created after cutoff": {
+			run:  matureGitHubRun(1, cutoff.Add(time.Second), cutoff.Add(time.Second)),
+			want: "outside requested window",
+		},
+		"updated after cutoff": {
+			run:  matureGitHubRun(1, since, cutoff.Add(time.Second)),
+			want: "insufficiently mature",
+		},
+		"nonterminal before cutoff": {
+			run: func() githubRun {
+				run := matureGitHubRun(1, since, cutoff.Add(-time.Second))
+				run.Status, run.Conclusion = "queued", ""
+
+				return run
+			}(),
+			want: "is unsettled",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := validateMatureGitHubRun(test.run, since, cutoff)
+			if test.want == "" && err != nil {
+				t.Fatal(err)
+			}
+
+			if test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)) {
+				t.Fatalf("validateMatureGitHubRun() error = %v, want containing %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestGitHubCollectorMaturationConfigurationAndCutoffValidation(t *testing.T) {
+	configured, err := (GitHubCollector{}).configured()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if configured.MaturationDelay != DefaultRunMaturationDelay {
+		t.Fatalf("default maturation = %s, want %s", configured.MaturationDelay, DefaultRunMaturationDelay)
+	}
+
+	if _, err := (GitHubCollector{MaturationDelay: -time.Second}).configured(); err == nil {
+		t.Fatal("configured() accepted a negative maturation delay")
+	}
+
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	for name, since := range map[string]time.Time{
+		"equal":   now.Add(-time.Hour),
+		"earlier": now.Add(-30 * time.Minute),
+	} {
+		t.Run(name, func(t *testing.T) {
+			collector := GitHubCollector{Now: func() time.Time { return now }, MaturationDelay: time.Hour}
+			if _, err := collector.Fetch(context.Background(), "d0ugal/graith", since, loadInventory(t)); err == nil ||
+				!strings.Contains(err.Error(), "must be after since") {
+				t.Fatalf("Fetch() error = %v, want invalid cutoff rejection", err)
+			}
+		})
+	}
+}
+
+func TestGitHubCollectorRetainsThousandResultCeiling(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writeResponse(t, writer, `{"total_count":1001,"workflow_runs":[]}`)
+	}))
+	defer server.Close()
+
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	collector := GitHubCollector{
+		Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+		MaturationDelay: time.Hour,
+	}
+
+	snapshot, err := collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-2*time.Hour), loadInventory(t))
+	if err == nil || !strings.Contains(err.Error(), "1000-result API ceiling") {
+		t.Fatalf("Fetch() error = %v, want 1,000-result ceiling rejection", err)
+	}
+
+	if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) {
+		t.Fatalf("Fetch() returned partial snapshot %#v", snapshot)
+	}
+}
+
+func matureGitHubRun(id int64, createdAt, updatedAt time.Time) githubRun {
+	return githubRun{
+		ID: id, Attempt: 1, Path: ".github/workflows/ci.yml", Event: "push",
+		HeadSHA: "braw", HeadBranch: "main", PullRequests: []githubPullRequest{},
+		CreatedAt: createdAt, UpdatedAt: updatedAt, Status: "completed", Conclusion: "startup_failure",
+	}
+}
+
+func newRunCollectionServer(t *testing.T, runPages []githubRunsPage) *httptest.Server {
+	t.Helper()
+
+	runRequest := 0
+
+	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+
+		switch request.URL.Path {
+		case "/repos/d0ugal/graith/actions/runs":
+			index := runRequest
+			if index >= len(runPages) {
+				index = len(runPages) - 1
+			}
+
+			runRequest++
+
+			if err := json.NewEncoder(writer).Encode(runPages[index]); err != nil {
+				t.Errorf("encode runs: %v", err)
+			}
+		case "/repos/d0ugal/graith/actions/caches":
+			writeResponse(t, writer, `{"total_count":0,"actions_caches":[]}`)
+		case "/repos/d0ugal/graith/actions/runs/81/artifacts",
+			"/repos/d0ugal/graith/actions/runs/82/artifacts":
+			writeResponse(t, writer, `{"total_count":0,"artifacts":[]}`)
+		case "/repos/d0ugal/graith/actions/runs/81/timing",
+			"/repos/d0ugal/graith/actions/runs/82/timing":
+			http.Error(writer, "gone", http.StatusGone)
+		case "/repos/d0ugal/graith/actions/runs/81/attempts/1/jobs",
+			"/repos/d0ugal/graith/actions/runs/82/attempts/1/jobs":
+			writeResponse(t, writer, `{"total_count":0,"jobs":[]}`)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+}
+
+func newRawRunCollectionServer(t *testing.T, runPages []string) *httptest.Server {
+	t.Helper()
+
+	runRequest := 0
+
+	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+
+		switch request.URL.Path {
+		case "/repos/d0ugal/graith/actions/runs":
+			index := runRequest
+			if index >= len(runPages) {
+				index = len(runPages) - 1
+			}
+
+			runRequest++
+
+			writeResponse(t, writer, runPages[index])
+		case "/repos/d0ugal/graith/actions/caches":
+			writeResponse(t, writer, `{"total_count":0,"actions_caches":[]}`)
+		case "/repos/d0ugal/graith/actions/runs/81/artifacts":
+			writeResponse(t, writer, `{"total_count":0,"artifacts":[]}`)
+		case "/repos/d0ugal/graith/actions/runs/81/timing":
+			http.Error(writer, "gone", http.StatusGone)
+		case "/repos/d0ugal/graith/actions/runs/81/attempts/1/jobs":
+			writeResponse(t, writer, `{"total_count":0,"jobs":[]}`)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
 }
 
 func TestFetchCachesPaginates(t *testing.T) {
@@ -1253,7 +1645,7 @@ func TestGitHubCollectorReturnsNoPartialSnapshotAfterRateLimitExhaustion(t *test
 		},
 	}
 
-	snapshot, err := collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-time.Hour), loadInventory(t))
+	snapshot, err := collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-2*time.Hour), loadInventory(t))
 	if !errors.Is(err, ErrGitHubRateLimited) {
 		t.Fatalf("Fetch() error = %v, want exhausted rate limit", err)
 	}
@@ -1394,11 +1786,18 @@ func TestGitHubCollectorRejectsDuplicateRunIDsAcrossStablePagination(t *testing.
 		case "1":
 			page.Runs = make([]githubRun, 100)
 			for index := range page.Runs {
-				page.Runs[index].ID = int64(index + 1)
-				page.Runs[index].PullRequests = []githubPullRequest{}
+				page.Runs[index] = matureGitHubRun(
+					int64(index+1),
+					time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC),
+					time.Date(2026, 7, 25, 10, 1, 0, 0, time.UTC),
+				)
 			}
 		case "2":
-			page.Runs = []githubRun{{ID: 100, PullRequests: []githubPullRequest{}}}
+			page.Runs = []githubRun{matureGitHubRun(
+				100,
+				time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC),
+				time.Date(2026, 7, 25, 10, 1, 0, 0, time.UTC),
+			)}
 		default:
 			t.Fatalf("unexpected request %s", request.URL.String())
 		}
@@ -1415,7 +1814,7 @@ func TestGitHubCollectorRejectsDuplicateRunIDsAcrossStablePagination(t *testing.
 		MaxElapsed: time.Minute, MaxRequests: 2, MaxRetries: 1,
 	}
 
-	snapshot, err := collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-time.Hour), loadInventory(t))
+	snapshot, err := collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-2*time.Hour), loadInventory(t))
 	if err == nil || !strings.Contains(err.Error(), "duplicate raw workflow run ID 100") {
 		t.Fatalf("Fetch() error = %v, want stable-count duplicate rejection", err)
 	}
@@ -1432,19 +1831,6 @@ type githubPaginationTestCase struct {
 
 func githubPaginationTestCases(now time.Time) map[string]githubPaginationTestCase {
 	return map[string]githubPaginationTestCase{
-		"workflow runs": {
-			path: "/repos/d0ugal/graith/actions/runs",
-			call: func(t *testing.T, collector GitHubCollector) error {
-				snapshot, err := collector.Fetch(
-					context.Background(), "d0ugal/graith", now.Add(-time.Hour), loadInventory(t),
-				)
-				if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) {
-					t.Fatalf("Fetch() returned partial snapshot %#v", snapshot)
-				}
-
-				return err
-			},
-		},
 		"caches": {
 			path: "/repos/d0ugal/graith/actions/caches",
 			call: func(t *testing.T, collector GitHubCollector) error {
@@ -1566,7 +1952,7 @@ func TestGitHubPaginationConsistencyPassRejectsReplacementChurn(t *testing.T) {
 			}
 
 			err := test.call(t, collector)
-			if err == nil || !strings.Contains(err.Error(), "identities changed during pagination consistency pass") {
+			if err == nil || !strings.Contains(err.Error(), "identities or states changed during pagination consistency pass") {
 				t.Fatalf("%s error = %v, want replacement-churn rejection", name, err)
 			}
 
@@ -1578,44 +1964,29 @@ func TestGitHubPaginationConsistencyPassRejectsReplacementChurn(t *testing.T) {
 }
 
 func TestGitHubPaginationConsistencyPassUsesSharedRequestBudget(t *testing.T) {
-	requests := 0
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	since := now.Add(-2 * time.Hour)
+	stable := matureGitHubRun(81, since.Add(10*time.Minute), now.Add(-70*time.Minute))
 
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		requests++
-
-		var ids []int64
-		if request.URL.Query().Get("page") == "1" {
-			ids = make([]int64, 100)
-			for index := range ids {
-				ids[index] = int64(index + 1)
-			}
-		} else {
-			ids = []int64{101}
-		}
-
-		writeGitHubIdentityPage(t, writer, "workflow runs", 101, ids)
-	}))
+	server := newRunCollectionServer(t, []githubRunsPage{
+		{TotalCount: 1, Runs: []githubRun{stable}},
+		{TotalCount: 1, Runs: []githubRun{stable}},
+	})
 	defer server.Close()
 
-	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
 	collector := GitHubCollector{
 		Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
-		MaxElapsed: time.Hour, MaxRequests: 3, MaxRetries: 1,
+		MaxElapsed: time.Hour, MaxRequests: 5, MaxRetries: 1,
+		MaturationDelay: time.Hour,
 	}
 
-	snapshot, err := collector.Fetch(
-		context.Background(), "d0ugal/graith", now.Add(-time.Hour), loadInventory(t),
-	)
-	if !errors.Is(err, ErrCollectionBudgetExhausted) || !strings.Contains(err.Error(), "request limit 3 reached") {
-		t.Fatalf("Fetch() error = %v, want consistency-pass request-budget exhaustion", err)
+	snapshot, err := collector.Fetch(context.Background(), "d0ugal/graith", since, loadInventory(t))
+	if !errors.Is(err, ErrCollectionBudgetExhausted) || !strings.Contains(err.Error(), "request limit 5 reached") {
+		t.Fatalf("Fetch() error = %v, want final consistency-pass request-budget exhaustion", err)
 	}
 
 	if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) {
 		t.Fatalf("Fetch() returned partial snapshot %#v", snapshot)
-	}
-
-	if requests != 3 {
-		t.Fatalf("requests = %d, want shared request budget to stop before fourth request", requests)
 	}
 }
 

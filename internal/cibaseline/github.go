@@ -11,6 +11,7 @@ import (
 	"path"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,10 @@ const (
 	DefaultCollectionMaxRequests = 10_000
 	// DefaultCollectionMaxRetries bounds rate-limit retries across one fetch.
 	DefaultCollectionMaxRetries = 3
+	// DefaultRunMaturationDelay keeps the observation cutoff behind live run
+	// creation. Every run in the fixed created-time set must also have reached
+	// a terminal state no later than that cutoff.
+	DefaultRunMaturationDelay = time.Hour
 )
 
 var (
@@ -37,14 +42,15 @@ var (
 // GitHubCollector reads Actions metadata only. The supplied token needs
 // Actions and repository metadata read access; collection never mutates state.
 type GitHubCollector struct {
-	Client      *http.Client
-	BaseURL     string
-	Token       string
-	Now         func() time.Time
-	Wait        func(context.Context, time.Duration) error
-	MaxElapsed  time.Duration
-	MaxRequests int
-	MaxRetries  int
+	Client          *http.Client
+	BaseURL         string
+	Token           string
+	Now             func() time.Time
+	Wait            func(context.Context, time.Duration) error
+	MaxElapsed      time.Duration
+	MaxRequests     int
+	MaxRetries      int
+	MaturationDelay time.Duration
 
 	budget *collectionBudget
 }
@@ -107,7 +113,7 @@ func (run *githubRun) UnmarshalJSON(data []byte) error {
 		data,
 		"workflow run",
 		&decoded,
-		[]string{"head_branch", "run_started_at"},
+		[]string{"head_branch", "run_started_at", "conclusion"},
 		"id", "run_attempt", "path", "event", "head_sha", "head_branch", "pull_requests",
 		"created_at", "run_started_at", "updated_at", "status", "conclusion",
 	)
@@ -358,7 +364,17 @@ func (collector GitHubCollector) Fetch(ctx context.Context, repository string, s
 	}
 
 	startedAt := collector.Now()
-	until := startedAt.UTC().Truncate(time.Second)
+	collectedAt := startedAt.UTC().Truncate(time.Second)
+	until := startedAt.UTC().Add(-collector.MaturationDelay).Truncate(time.Second)
+
+	since = since.UTC().Truncate(time.Second)
+	if !until.After(since) {
+		return GitHubSnapshot{}, fmt.Errorf(
+			"GitHub collection cutoff %s must be after since %s; reduce the maturation delay or move since earlier",
+			until.Format(time.RFC3339), since.Format(time.RFC3339),
+		)
+	}
+
 	collectionCtx, cancel := context.WithTimeout(ctx, collector.MaxElapsed)
 
 	defer cancel()
@@ -369,20 +385,17 @@ func (collector GitHubCollector) Fetch(ctx context.Context, repository string, s
 	}
 
 	snapshot := GitHubSnapshot{
-		SchemaVersion: SnapshotSchemaVersion, Repository: repository, CollectedAt: until,
-		RequestedSince: since.UTC(), RequestedUntil: until,
+		SchemaVersion: SnapshotSchemaVersion, Repository: repository, CollectedAt: collectedAt,
+		RequestedSince: since, RequestedUntil: until,
 	}
 
-	var (
-		allRuns  githubRunsPage
-		runPages int
-	)
+	var allRuns githubRunsPage
 
 	runPageEndpoint := func(pageNumber int) string {
 		return fmt.Sprintf(
-			"/repos/%s/actions/runs?per_page=100&page=%d&status=completed&created=%s",
+			"/repos/%s/actions/runs?per_page=100&page=%d&created=%s",
 			repository, pageNumber,
-			url.QueryEscape(since.UTC().Format(time.RFC3339)+".."+until.Format(time.RFC3339)),
+			url.QueryEscape(since.Format(time.RFC3339)+".."+until.Format(time.RFC3339)),
 		)
 	}
 
@@ -392,8 +405,6 @@ func (collector GitHubCollector) Fetch(ctx context.Context, repository string, s
 		if err := collector.get(collectionCtx, runPageEndpoint(pageNumber), &page); err != nil {
 			return GitHubSnapshot{}, err
 		}
-
-		runPages = pageNumber
 
 		if page.TotalCount > 1000 {
 			return GitHubSnapshot{}, fmt.Errorf("GitHub run query is incomplete: %d results exceeds the 1000-result API ceiling", page.TotalCount)
@@ -428,31 +439,19 @@ func (collector GitHubCollector) Fetch(ctx context.Context, repository string, s
 	}
 
 	seenRawRuns := make(map[int64]bool, len(allRuns.Runs))
-	runIDs := make([]int64, 0, len(allRuns.Runs))
+	runStates := make([]githubRunState, 0, len(allRuns.Runs))
 
 	for _, raw := range allRuns.Runs {
 		if seenRawRuns[raw.ID] {
 			return GitHubSnapshot{}, fmt.Errorf("GitHub returned duplicate raw workflow run ID %d", raw.ID)
 		}
 
-		seenRawRuns[raw.ID] = true
-		runIDs = append(runIDs, raw.ID)
-	}
-
-	if runPages > 1 {
-		err := verifyGitHubPagination(
-			collector,
-			collectionCtx,
-			"workflow runs",
-			runIDs,
-			runPageEndpoint,
-			func(page githubRunsPage) (int, []int64) {
-				return page.TotalCount, githubRunIDs(page.Runs)
-			},
-		)
-		if err != nil {
+		if err := validateMatureGitHubRun(raw, since, until); err != nil {
 			return GitHubSnapshot{}, err
 		}
+
+		seenRawRuns[raw.ID] = true
+		runStates = append(runStates, githubRunStateOf(raw))
 	}
 
 	caches, expectedCaches, err := collector.fetchCaches(collectionCtx, repository)
@@ -594,6 +593,29 @@ func (collector GitHubCollector) Fetch(ctx context.Context, repository string, s
 	inferSuperseded(snapshot.Runs)
 	snapshot.ExpectedRunAttempts = len(snapshot.Runs)
 
+	// Re-read the complete run set after all dependent metadata. This detects a
+	// completion, rerun, status/conclusion change, or other run update anywhere
+	// in collection, including a single-page query.
+	err = verifyGitHubPagination(
+		collector,
+		collectionCtx,
+		"workflow runs",
+		runStates,
+		runPageEndpoint,
+		func(page githubRunsPage) (int, []githubRunState) {
+			states := make([]githubRunState, 0, len(page.Runs))
+			for _, run := range page.Runs {
+				states = append(states, githubRunStateOf(run))
+			}
+
+			return page.TotalCount, states
+		},
+		sortGitHubRunStates,
+	)
+	if err != nil {
+		return GitHubSnapshot{}, err
+	}
+
 	return snapshot, nil
 }
 
@@ -684,6 +706,35 @@ func validateRawGitHubRun(run githubRun) error {
 	return nil
 }
 
+func validateMatureGitHubRun(run githubRun, since, cutoff time.Time) error {
+	if err := validateRawGitHubRun(run); err != nil {
+		if run.ID > 0 && run.Status != "completed" {
+			return fmt.Errorf(
+				"GitHub workflow run %d is unsettled at cutoff %s (status %q, attempt %d, updated_at %s); retry after it is terminal and mature",
+				run.ID, cutoff.Format(time.RFC3339), run.Status, run.Attempt, run.UpdatedAt.Format(time.RFC3339),
+			)
+		}
+
+		return err
+	}
+
+	if run.CreatedAt.Before(since) || run.CreatedAt.After(cutoff) {
+		return fmt.Errorf(
+			"GitHub workflow run %d created_at %s is outside requested window %s..%s",
+			run.ID, run.CreatedAt.Format(time.RFC3339), since.Format(time.RFC3339), cutoff.Format(time.RFC3339),
+		)
+	}
+
+	if run.UpdatedAt.After(cutoff) {
+		return fmt.Errorf(
+			"GitHub workflow run %d is insufficiently mature at cutoff %s (attempt %d, conclusion %q, updated_at %s); retry with a later cutoff",
+			run.ID, cutoff.Format(time.RFC3339), run.Attempt, run.Conclusion, run.UpdatedAt.Format(time.RFC3339),
+		)
+	}
+
+	return nil
+}
+
 func validateRawGitHubJob(job githubJob) error {
 	outcome, err := normalizeOutcome(job.Status, job.Conclusion)
 	if job.ID <= 0 || strings.TrimSpace(job.Name) == "" || job.Status != "completed" || err != nil {
@@ -755,7 +806,8 @@ func inferSuperseded(runs []GitHubRun) {
 }
 
 func (collector GitHubCollector) configured() (GitHubCollector, error) {
-	if collector.MaxElapsed < 0 || collector.MaxRequests < 0 || collector.MaxRetries < 0 {
+	if collector.MaxElapsed < 0 || collector.MaxRequests < 0 || collector.MaxRetries < 0 ||
+		collector.MaturationDelay < 0 {
 		return GitHubCollector{}, errors.New("GitHub collection limits must not be negative")
 	}
 
@@ -785,6 +837,10 @@ func (collector GitHubCollector) configured() (GitHubCollector, error) {
 
 	if collector.MaxRetries == 0 {
 		collector.MaxRetries = DefaultCollectionMaxRetries
+	}
+
+	if collector.MaturationDelay == 0 {
+		collector.MaturationDelay = DefaultRunMaturationDelay
 	}
 
 	return collector, nil
@@ -1158,15 +1214,16 @@ func (err githubRateLimitError) Unwrap() error {
 	return ErrGitHubRateLimited
 }
 
-func verifyGitHubPagination[Page any](
+func verifyGitHubPagination[Page any, Identity comparable](
 	collector GitHubCollector,
 	ctx context.Context,
 	kind string,
-	expectedIDs []int64,
+	expectedIdentities []Identity,
 	endpoint func(int) string,
-	pageIdentity func(Page) (int, []int64),
+	pageIdentity func(Page) (int, []Identity),
+	normalizeIdentities func([]Identity),
 ) error {
-	verifiedIDs := make([]int64, 0, len(expectedIDs))
+	verifiedIdentities := make([]Identity, 0, len(expectedIdentities))
 
 	for pageNumber := 1; ; pageNumber++ {
 		var page Page
@@ -1175,15 +1232,15 @@ func verifyGitHubPagination[Page any](
 		}
 
 		total, pageIDs := pageIdentity(page)
-		if total != len(expectedIDs) {
+		if total != len(expectedIdentities) {
 			return fmt.Errorf("GitHub %s count changed during pagination consistency pass", kind)
 		}
 
-		verifiedIDs = append(verifiedIDs, pageIDs...)
-		if len(verifiedIDs) > len(expectedIDs) {
+		verifiedIdentities = append(verifiedIdentities, pageIDs...)
+		if len(verifiedIdentities) > len(expectedIdentities) {
 			return fmt.Errorf(
 				"GitHub returned more %s than the reported count during pagination consistency pass: fetched %d, API reported %d",
-				kind, len(verifiedIDs), len(expectedIDs),
+				kind, len(verifiedIdentities), len(expectedIdentities),
 			)
 		}
 
@@ -1192,27 +1249,66 @@ func verifyGitHubPagination[Page any](
 		}
 	}
 
-	if len(verifiedIDs) != len(expectedIDs) {
+	if len(verifiedIdentities) != len(expectedIdentities) {
 		return fmt.Errorf(
 			"GitHub %s count mismatch during pagination consistency pass: API reported %d, fetched %d",
-			kind, len(expectedIDs), len(verifiedIDs),
+			kind, len(expectedIdentities), len(verifiedIdentities),
 		)
 	}
 
-	if !slices.Equal(verifiedIDs, expectedIDs) {
-		return fmt.Errorf("GitHub %s identities changed during pagination consistency pass", kind)
+	if normalizeIdentities != nil {
+		normalizeIdentities(expectedIdentities)
+		normalizeIdentities(verifiedIdentities)
+	}
+
+	if !slices.Equal(verifiedIdentities, expectedIdentities) {
+		return fmt.Errorf("GitHub %s identities or states changed during pagination consistency pass", kind)
 	}
 
 	return nil
 }
 
-func githubRunIDs(runs []githubRun) []int64 {
-	ids := make([]int64, 0, len(runs))
-	for _, run := range runs {
-		ids = append(ids, run.ID)
+type githubRunState struct {
+	ID          int64
+	Attempt     int
+	Path        string
+	Event       string
+	HeadSHA     string
+	HeadBranch  string
+	PullRequest int64
+	CreatedAt   int64
+	StartedAt   int64
+	UpdatedAt   int64
+	Status      string
+	Conclusion  string
+}
+
+func githubRunStateOf(run githubRun) githubRunState {
+	return githubRunState{
+		ID: run.ID, Attempt: run.Attempt, Path: normalizeWorkflowPathReference(run.Path),
+		Event: run.Event, HeadSHA: run.HeadSHA, HeadBranch: run.HeadBranch,
+		PullRequest: pullRequestNumber(run), CreatedAt: githubTimestampState(run.CreatedAt),
+		StartedAt: githubTimestampState(run.StartedAt), UpdatedAt: githubTimestampState(run.UpdatedAt),
+		Status: run.Status, Conclusion: run.Conclusion,
+	}
+}
+
+func githubTimestampState(value time.Time) int64 {
+	if value.IsZero() {
+		return 0
 	}
 
-	return ids
+	return value.UnixNano()
+}
+
+func sortGitHubRunStates(states []githubRunState) {
+	sort.Slice(states, func(first, second int) bool {
+		if states[first].ID != states[second].ID {
+			return states[first].ID < states[second].ID
+		}
+
+		return states[first].Attempt < states[second].Attempt
+	})
 }
 
 func (collector GitHubCollector) fetchCaches(ctx context.Context, repository string) ([]Cache, int, error) {
@@ -1284,6 +1380,7 @@ func (collector GitHubCollector) fetchCaches(ctx context.Context, repository str
 
 				return page.TotalCount, ids
 			},
+			nil,
 		)
 		if err != nil {
 			return nil, 0, err
@@ -1371,6 +1468,7 @@ func (collector GitHubCollector) fetchJobs(
 
 				return page.TotalCount, ids
 			},
+			nil,
 		)
 		if err != nil {
 			return nil, 0, err
@@ -1457,6 +1555,7 @@ func (collector GitHubCollector) fetchArtifacts(
 
 				return page.TotalCount, ids
 			},
+			nil,
 		)
 		if err != nil {
 			return nil, 0, err
