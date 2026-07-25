@@ -243,6 +243,11 @@ create_owned_directory "$CONFIG_DIR" "$OWNERSHIP_ID"
 create_owned_directory "$DEMO_DATA_DIR" "$OWNERSHIP_ID"
 [ -z "$RUNTIME_DIR" ] || create_owned_directory "$RUNTIME_DIR" "$OWNERSHIP_ID"
 
+# The harness is the trusted installer/bootstrap actor for this isolated
+# profile. Persist the protected human credential before the first normal CLI
+# command; a clean session must never mint lifecycle authority by itself.
+(umask 077 && printf 'demo-human-token-%s\n' "$OWNERSHIP_ID" > "$DEMO_DATA_DIR/human.token")
+
 echo "==> writing demo config to $CONFIG_FILE"
 (umask 077 && cat > "$CONFIG_FILE" <<EOF
 $CONFIG_MARKER$OWNERSHIP_ID — safe to delete. Isolated GRAITH_PROFILE=demo.
