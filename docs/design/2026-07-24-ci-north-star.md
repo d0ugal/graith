@@ -2,8 +2,8 @@
 title: "Design Doc: CI North Star"
 authors: graith maintainers
 created: 2026-07-24
-status: Draft (revised after independent review — see Consensus)
-reviewers: eight-model review tribunal
+status: Draft (revised after post-merge tribunal — see Consensus)
+reviewers: independent post-merge tribunal
 informed: maintainers, release owners, GUI owners
 ---
 
@@ -93,6 +93,10 @@ turning the latter into an unreviewable red wall.
   reducing proof coverage; dual-run migration cost is budgeted separately. Keep
   cache restore success above 85% as a trend target (not a correctness SLO),
   with zero cross-commit cache poisoning.
+- Measure reliability in a fixed rolling 28-day UTC window. Report attempt
+  failure (failed attempts / all attempts) separately from change failure
+  (changes with an eventual product failure / changes with a terminal run);
+  retries remain in the attempt denominator and never erase the first result.
 - Make every result diagnosable from immutable metadata: commit, mode,
   platform, toolchain, input digest, artifact digests, policy revision, and
   owner.
@@ -161,7 +165,7 @@ source + event
       |                              |
   deterministic required fan-in  scheduled/main/release fan-in
       |------------------------------+
-       signed result bundle + diagnostic classification
+       signed result bundle + App-evaluated gate
                          |
                  protected publish (release only)
 ```
@@ -189,7 +193,7 @@ alter the plan.
 | Event | Fast and required | Deferred or deep | Terminal evidence |
 |-------|-------------------|------------------|-------------------|
 | PR from fork or branch | Intake, plan, format/lint, Go compile/unit shard, protocol/generated checks, changed-capability required platform proofs, dependency/security policy | Full race/integration, exhaustive GUI/device, long fuzz/benchmark, broad supply-chain audit | Merge gate requires plan completeness plus every selected proof; deep results annotate the PR and can block according to policy. |
-| Merge to main | The PR proof is re-verified against the merge commit; smoke and startup checks | Full race/integration, all supported GUI/native/sandbox legs, coverage, package install/consumer checks | Main confidence bundle is complete, retained, and dashboarded; failures page the owning area. |
+| Merge to main | The PR proof is re-verified against the merge commit; smoke and startup checks, required exact-SHA coverage | Full race/integration, all supported GUI/native/sandbox legs, package install/consumer checks | Main confidence bundle is complete, retained, and dashboarded; failures page the owning area. |
 | Scheduled | A rotating full matrix, long race/fuzz/soak, toolchain and runner compatibility, dependency freshness, security scans | N/A; expensive suites are intentionally scheduled and budgeted | Trend and drift report; no scheduled green is allowed to mask a main regression. |
 | Dependency update | Plan plus focused affected modes, lockfile/provenance review, license/security policy | Full matrix if toolchain, native, GUI, protocol, or runtime dependency changes | Update may merge only with the same proof contract as an equivalent source change. |
 | Release candidate/tag | Rebuild from immutable source; all release platforms; consumer install/smoke; checksum, SBOM, provenance, signature and attestation verification | Extended upgrade/rollback and external mirror verification | Protected publication gate requires a complete candidate bundle, independent verification, and human approval. |
@@ -199,6 +203,17 @@ capability. Deep checks are not silently converted into optional checks: their
 policy status is recorded as `deferred`, `passed`, `failed`, or `not-applicable`
 with a reason and expiry. Main and release paths promote deferred modes to
 required where their risk warrants it.
+
+Coverage has a bounded contract. PR coverage is an informational/deep mode,
+never a required proof row; missing, malformed, or stale PR coverage is
+`unknown`, not `deferred` or `passed`. Main coverage is required and must
+publish signed evidence for the exact merge SHA, source/tree digest, toolchain
+digest, profile digest, totals, threshold policy revision, and producer run.
+The main fan-in rejects missing, malformed, superseded, or older-than-24-hour
+evidence, or any SHA/policy mismatch, and pages the owner. It never falls back
+to the last successful report. Thus a PR can defer coverage without claiming
+coverage proof, while the post-merge required gate is fail-closed and never
+metric-blind.
 
 #### Correctness model and contracts
 
@@ -272,12 +287,31 @@ of failure: a defect may create a false-red wall, which is preferable to a
 false green but still requires a tested fallback diagnostic and owner. These
 costs are part of the design rather than hidden cleanup work.
 
-For GitHub required-check integration, one synthetic gate is always scheduled
-and always reports. It has no path filter or job-level skip condition. Branch
-protection requires this gate, not a dynamic collection of matrix names; an
-absent report, zero-job plan, missing fan-in, or stale run is a hard block. A
-contract test must prove that a plan selecting no jobs produces a red gate,
-not an absent status that GitHub could treat as satisfied.
+For GitHub required-check integration, the trust root is a dedicated,
+repository-independent GitHub App evaluator (`graith-ci-gate`) with only
+metadata read, contents read, actions read, pull-request read, and checks/status
+write permission, deployed from a
+reviewed, digest-pinned release outside the pull-request repository. It reads
+the base-branch policy and GitHub run metadata, verifies every evidence bundle
+against the intended head or merge-group SHA, workflow/run identity, producer
+commit, artifact digest, and policy digest, and publishes the sole required
+check. The default-branch ruleset requires that check from this App
+specifically; the ruleset is the enforcement boundary, while the App is the
+trusted evaluator. No PR-controlled workflow can create an acceptable check
+with the same name.
+
+This App is an implementation prerequisite, not an open choice. P4 must
+install it, pin its release digest, document key rotation and audit retention,
+and pass a live GitHub conformance fixture for fork PRs, same-repository agent
+branches, and `merge_group`: changing PR YAML to emit success, omitting
+evidence, changing the head SHA, or replaying an old bundle must leave the App
+check failing. Until that evidence exists, current required checks remain
+authoritative and no new synthetic check is required. The App always evaluates
+(no path filter or conditional skip); on PRs, an absent report, zero-job plan,
+missing fan-in, stale run, or unknown required mode is a hard block while
+non-required coverage `unknown` is recorded without blocking. On main and
+release, unknown coverage is a hard block.
+Rulesets alone are not the trust mechanism.
 
 Fan-out is deterministic: coordinates are sorted, each coordinate has a stable
 ID, and retries append attempts under that ID. Fan-in waits for all expected
@@ -286,6 +320,13 @@ cancelled for resource control, but its partial result is retained as
 `superseded`; only the newest run for a commit may satisfy a required check.
 Concurrency groups cancel stale PRs, never an in-progress protected release
 publication, and cancellation is tested as a first-class state.
+
+The evaluator also has a deterministic local replay command accepting an event
+fixture, exact changed-file list, base/head/tree digests, policy digest, and
+recorded producer results. It runs without credentials or network and must
+produce the same plan and gate decision for identical signed evidence. Local
+replay is diagnostic only; live App conformance remains required for
+enforcement.
 
 #### Security and trust
 
@@ -310,6 +351,19 @@ signature, provenance, SBOM, dependency integrity, and checksums. Dependency
 updates use a restricted bot identity and receive the same untrusted-input
 handling as a fork until promoted by the trusted pipeline.
 
+Evidence provenance is a chain, not a filename convention. The App records the
+event delivery ID, intended head/merge SHA, base SHA, trusted workflow blob
+SHA, policy release digest, producer run ID and attempt, producer workflow
+identity, artifact ID/digest, and evaluator release digest. It accepts only a
+producer run whose event/ref and checked-out SHA match the plan; an artifact
+from another run, fork, trust tier, or commit is rejected. Same-repository
+agent-authored branches are a distinct untrusted tier from both fork PRs and
+maintainer-controlled default-branch runs. Credentialed regeneration and docs
+publication must move to a trusted-base workflow or protected environment that
+PR YAML cannot edit; until that P8 prerequisite and its live fixture pass,
+cutover is blocked. Repository location never upgrades their token, artifact,
+cache, or publication trust.
+
 #### Testing CI itself
 
 The repository has executable contracts for the policy schema, plan closure,
@@ -330,8 +384,13 @@ tests must reject:
 - an unsupported platform that is silently treated as passed.
 
 Fault injection runs on every policy change and periodically against the
-fixture. A canary policy change must demonstrate that the expected gate fails
-closed before it is allowed to affect required checks. CI tests are versioned
+fixture. Same-repository agent trust tests use a local fixture with synthetic
+tokens and filesystem boundaries; live GitHub behavior is tested separately by
+a disposable maintainer-owned repository. The live fixture proves App source
+restriction, fork/agent permissions, merge-queue triggering, check freshness,
+and artifact/run provenance—properties local emulation cannot prove. A canary
+policy change must demonstrate that the expected gate fails closed before it
+is allowed to affect required checks. CI tests are versioned
 alongside the policy and are themselves required for policy changes.
 
 #### Observability and operations
@@ -381,6 +440,14 @@ adding a matrix row. A cache is omitted when upload/restore costs exceed the
 saved work, inputs are too volatile, provenance cannot be established, or a
 small job is faster and safer without it.
 
+During migration, full dual-run comparison is capped at twice measured baseline
+runner minutes plus 20% queue overhead and 14 calendar days per wave. After
+that cap, old checks may remain observational-only for one 30-day evidence
+window at a fixed 10% sampling budget; exceeding either cap aborts and rolls
+back to the old gate. The same rollback applies after three consecutive UTC
+days over budget, three days with p95 required latency 25% over target, any
+provenance mismatch, or any fixture false-green escape.
+
 ## Consensus
 
 The first draft received one complete accepted review from Claude/Opus. Codex
@@ -395,10 +462,12 @@ segmented provisional SLOs, migration cost accounting, and an honest
 complexity-budget trade-off. Those revisions are incorporated above.
 
 The review supported the fail-closed mode set, artifact identity, source versus
-package proof, and self-testing approach. Open design choices remain runner
-capacity, exact attestation service, and baseline-calibrated thresholds; these
-may change through policy review, but the trust-root, closed-world gate, and
-protected release invariants do not.
+package proof, and self-testing approach. Runner capacity and baseline
+thresholds remain measurable inputs to P0. The enforcement choice is resolved:
+the `graith-ci-gate` GitHub App is the trust root, and its deployment,
+attestation-key rotation, and retention controls are bounded P4 prerequisites;
+failure to demonstrate them blocks cutover. The trust-root, closed-world gate,
+and protected-release invariants are not open questions.
 
 The follow-up current-state audit attempted direct Claude and Codex judges and
 the mandated Cursor catalog helper. The Cursor helper failed with the provider
