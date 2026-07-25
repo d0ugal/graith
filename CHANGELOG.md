@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.70.4](https://github.com/d0ugal/graith/compare/v0.70.3...v0.70.4) (2026-07-25)
+
+
+### Documentation
+
+* close CI north star review gaps ([#1668](https://github.com/d0ugal/graith/issues/1668)) ([1c46cc7](https://github.com/d0ugal/graith/commit/1c46cc796302f709365e636460fdb65c755f8a02))
+* design CI north star architecture ([fbbd90f](https://github.com/d0ugal/graith/commit/fbbd90fae109f9b989b278d40fed78d469f19859))
+* refine CI north-star implementation plan ([325f2aa](https://github.com/d0ugal/graith/commit/325f2aa63f7512647a97d4fee233239602736ed8))
+
 ## [0.70.3](https://github.com/d0ugal/graith/compare/v0.70.2...v0.70.3) (2026-07-25)
 
 
