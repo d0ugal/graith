@@ -1,0 +1,3429 @@
+{
+  "schema_version": 2,
+  "observation_state": "p0-observation-in-progress",
+  "workflows": [
+    {
+      "id": "ci",
+      "path": ".github/workflows/ci.yml",
+      "name": "CI",
+      "owner": "graith-maintainers",
+      "file_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+      "events": {
+        "pull_request": null,
+        "push": {
+          "branches": [
+            "main",
+            "release-please--branches--main"
+          ]
+        },
+        "workflow_dispatch": null
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "environment": null,
+      "jobs": [
+        {
+          "id": "build",
+          "name": "Build (ubuntu-latest)",
+          "capability": "legacy-proof/ci/build",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "compile-only",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "ci/build"
+          ],
+          "github_names": [
+            "Build (ubuntu-latest)"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ]
+        },
+        {
+          "id": "build-macos",
+          "name": "Build (macos-latest)",
+          "capability": "legacy-proof/ci/build-macos",
+          "owner": "graith-maintainers",
+          "runner": "macos-latest",
+          "condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "compile-only",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "ci/build-macos"
+          ],
+          "github_names": [
+            "Build (macos-latest)"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ]
+        },
+        {
+          "id": "changes",
+          "name": "Detect macOS-relevant changes",
+          "capability": "legacy-proof/ci/changes",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": {
+            "contents": "read",
+            "pull-requests": "read"
+          },
+          "environment": null,
+          "coordinates": [
+            "ci/changes"
+          ],
+          "github_names": [
+            "Detect macOS-relevant changes"
+          ]
+        },
+        {
+          "id": "govulncheck",
+          "name": "Vulnerability Check",
+          "capability": "legacy-proof/ci/govulncheck",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "ci/govulncheck"
+          ],
+          "github_names": [
+            "Vulnerability Check"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ]
+        },
+        {
+          "id": "integration",
+          "name": "Integration (ubuntu-latest)",
+          "capability": "legacy-proof/ci/integration",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "runtime",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "ci/integration"
+          ],
+          "github_names": [
+            "Integration (ubuntu-latest)"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ]
+        },
+        {
+          "id": "integration-macos",
+          "name": "Integration (macos-latest)",
+          "capability": "legacy-proof/ci/integration-macos",
+          "owner": "graith-maintainers",
+          "runner": "macos-latest",
+          "condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "runtime",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "ci/integration-macos"
+          ],
+          "github_names": [
+            "Integration (macos-latest)"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ]
+        },
+        {
+          "id": "lint",
+          "name": "Lint",
+          "capability": "legacy-proof/ci/lint",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "compile-only",
+          "requiredness": "required",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "ci/lint"
+          ],
+          "github_names": [
+            "Lint"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+          ]
+        },
+        {
+          "id": "test",
+          "name": "Test (ubuntu-latest)",
+          "capability": "legacy-proof/ci/test",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "runtime",
+          "requiredness": "required",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "ci/test"
+          ],
+          "github_names": [
+            "Test (ubuntu-latest)"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ]
+        },
+        {
+          "id": "test-macos",
+          "name": "Test (macos-latest)",
+          "capability": "legacy-proof/ci/test-macos",
+          "owner": "graith-maintainers",
+          "runner": "macos-latest",
+          "condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "runtime",
+          "requiredness": "required",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "ci/test-macos"
+          ],
+          "github_names": [
+            "Test (macos-latest)"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "coverage",
+      "path": ".github/workflows/coverage.yml",
+      "name": "Coverage",
+      "owner": "graith-maintainers",
+      "file_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+      "events": {
+        "pull_request": null
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "environment": null,
+      "jobs": [
+        {
+          "id": "changes",
+          "name": "Detect gui changes",
+          "capability": "legacy-proof/coverage/changes",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "soft",
+          "requiredness": "soft",
+          "permissions": {
+            "contents": "read",
+            "pull-requests": "read"
+          },
+          "environment": null,
+          "coordinates": [
+            "coverage/changes"
+          ],
+          "github_names": [
+            "Detect gui changes"
+          ]
+        },
+        {
+          "id": "comment",
+          "name": "Coverage comment",
+          "capability": "legacy-proof/coverage/comment",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "condition": "always() \u0026\u0026 github.event.pull_request.head.repo.full_name == github.repository",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "soft",
+          "requiredness": "soft",
+          "permissions": {
+            "contents": "read",
+            "pull-requests": "write"
+          },
+          "environment": null,
+          "coordinates": [
+            "coverage/comment"
+          ],
+          "github_names": [
+            "Coverage comment"
+          ]
+        },
+        {
+          "id": "go-coverage",
+          "name": "Go coverage",
+          "capability": "legacy-proof/coverage/go-coverage",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "soft",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "coverage/go-coverage"
+          ],
+          "github_names": [
+            "Go coverage"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ]
+        },
+        {
+          "id": "swift-coverage",
+          "name": "Swift coverage",
+          "capability": "legacy-proof/coverage/swift-coverage",
+          "owner": "graith-maintainers",
+          "runner": "macos-latest",
+          "condition": "needs.changes.outputs.gui == 'true'",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "soft",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "coverage/swift-coverage"
+          ],
+          "github_names": [
+            "Swift coverage"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gui-ci",
+      "path": ".github/workflows/gui-ci.yml",
+      "name": "GUI CI",
+      "owner": "gui-owners",
+      "file_sha256": "2b24102c66e4733a369298b2477d1ee3d41fe770e4cb50d102227d8e03303c84",
+      "events": {
+        "pull_request": {
+          "paths": [
+            "gui/**"
+          ]
+        },
+        "push": {
+          "branches": [
+            "main"
+          ],
+          "paths": [
+            "gui/**"
+          ]
+        },
+        "workflow_dispatch": null
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "environment": null,
+      "jobs": [
+        {
+          "id": "build",
+          "name": "Build \u0026 Test (macOS)",
+          "capability": "legacy-proof/gui-ci/build",
+          "owner": "gui-owners",
+          "runner": "macos-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "compile-only",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "gui-ci/build"
+          ],
+          "github_names": [
+            "Build \u0026 Test (macOS)"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "libghostty-native",
+      "path": ".github/workflows/libghostty-native.yml",
+      "name": "libghostty-vt native backend",
+      "owner": "native-owners",
+      "file_sha256": "6ae05e35535c0ae1d5c0e1132691a8870dccc57833f2d1d163c7f6d190c00bc2",
+      "events": {
+        "pull_request": null,
+        "workflow_dispatch": {
+          "inputs": {
+            "dependency_unit": {
+              "default": true,
+              "description": "Include update-only race and fuzz gates",
+              "required": false,
+              "type": "boolean"
+            },
+            "include_linux": {
+              "default": true,
+              "description": "Run the source-build Linux validation matrix",
+              "required": false,
+              "type": "boolean"
+            },
+            "run_native": {
+              "default": true,
+              "description": "Run the required supported-platform native jobs",
+              "required": false,
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "environment": null,
+      "jobs": [
+        {
+          "id": "apple-adapter",
+          "name": "Adapter and pinned artifact (macOS arm64)",
+          "capability": "legacy-proof/libghostty-native/apple-adapter",
+          "owner": "native-owners",
+          "runner": "macos-26",
+          "condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.native == 'true')",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "runtime",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "libghostty-native/apple-adapter"
+          ],
+          "github_names": [
+            "Adapter and pinned artifact (macOS arm64)"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+            "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+              "name": "gr-libghostty-darwin-arm64",
+              "with": {
+                "if-no-files-found": "error",
+                "name": "gr-libghostty-darwin-arm64",
+                "path": "${{ runner.temp }}/native-candidate/"
+              }
+            }
+          ]
+        },
+        {
+          "id": "changes",
+          "name": "Detect libghostty-relevant changes",
+          "capability": "legacy-proof/libghostty-native/changes",
+          "owner": "native-owners",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": {
+            "contents": "read",
+            "pull-requests": "read"
+          },
+          "environment": null,
+          "coordinates": [
+            "libghostty-native/changes"
+          ],
+          "github_names": [
+            "Detect libghostty-relevant changes"
+          ]
+        },
+        {
+          "id": "linux-adapter",
+          "name": "Adapter source build (${{ matrix.target }})",
+          "capability": "legacy-proof/libghostty-native/linux-adapter",
+          "owner": "native-owners",
+          "runner": "ubuntu-latest",
+          "condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.native == 'true') \u0026\u0026 (github.event_name != 'workflow_dispatch' || inputs.include_linux)",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "compile-only",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "matrix": {
+            "include": [
+              {
+                "goarch": "amd64",
+                "run_tests": true,
+                "target": "x86_64-linux-gnu"
+              },
+              {
+                "goarch": "arm64",
+                "run_tests": false,
+                "target": "aarch64-linux-gnu"
+              }
+            ]
+          },
+          "coordinates": [
+            "libghostty-native/linux-adapter[goarch=amd64,run_tests=true,target=x86_64-linux-gnu]",
+            "libghostty-native/linux-adapter[goarch=arm64,run_tests=false,target=aarch64-linux-gnu]"
+          ],
+          "github_names": [
+            "Adapter source build (x86_64-linux-gnu)",
+            "Adapter source build (aarch64-linux-gnu)"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+            "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+              "name": "gr-libghostty-linux-${{ matrix.goarch }}",
+              "with": {
+                "if-no-files-found": "error",
+                "name": "gr-libghostty-linux-${{ matrix.goarch }}",
+                "path": "${{ runner.temp }}/native-binaries/"
+              }
+            }
+          ]
+        },
+        {
+          "id": "native-gate",
+          "name": "Native backend gate",
+          "capability": "legacy-proof/libghostty-native/native-gate",
+          "owner": "native-owners",
+          "runner": "ubuntu-latest",
+          "condition": "always()",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "runtime",
+          "requiredness": "required",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "libghostty-native/native-gate"
+          ],
+          "github_names": [
+            "Native backend gate"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "libghostty-native-publish",
+      "path": ".github/workflows/libghostty-native-publish.yml",
+      "name": "Publish pinned Linux libghostty artifacts",
+      "owner": "native-owners",
+      "file_sha256": "135c5bea295b4dfcd2e2a6d48c21054fa7f74134d9735bbda35d80b686b4c892",
+      "events": {
+        "push": {
+          "branches": [
+            "main"
+          ],
+          "paths": [
+            "libghostty-native.lock.json",
+            "scripts/libghostty-native.sh",
+            ".github/workflows/libghostty-native-publish.yml"
+          ]
+        },
+        "workflow_dispatch": null
+      },
+      "permissions": {
+        "contents": "write"
+      },
+      "environment": null,
+      "jobs": [
+        {
+          "id": "publish",
+          "name": "publish",
+          "capability": "legacy-proof/libghostty-native-publish/publish",
+          "owner": "native-owners",
+          "runner": "ubuntu-latest",
+          "condition": "github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "scheduled",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "matrix": {
+            "include": [
+              {
+                "goarch": "amd64",
+                "target": "x86_64-linux-gnu"
+              },
+              {
+                "goarch": "arm64",
+                "target": "aarch64-linux-gnu"
+              }
+            ]
+          },
+          "coordinates": [
+            "libghostty-native-publish/publish[goarch=amd64,target=x86_64-linux-gnu]",
+            "libghostty-native-publish/publish[goarch=arm64,target=aarch64-linux-gnu]"
+          ],
+          "github_names": [
+            "publish (amd64, x86_64-linux-gnu)",
+            "publish (arm64, aarch64-linux-gnu)"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "regen",
+      "path": ".github/workflows/regen.yml",
+      "name": "Regenerate",
+      "owner": "graith-maintainers",
+      "file_sha256": "19db911850527a8d91a53c39748a087c16711fcb96b42cd2bc74f21756672734",
+      "events": {
+        "pull_request": null
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "environment": null,
+      "jobs": [
+        {
+          "id": "prepare",
+          "name": "Prepare regenerated files",
+          "capability": "legacy-proof/regen/prepare",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "condition": "github.event.pull_request.head.repo.full_name == github.repository",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "regen/prepare"
+          ],
+          "github_names": [
+            "Prepare regenerated files"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+            "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+              "name": "regen-${{ github.run_id }}",
+              "with": {
+                "if-no-files-found": "error",
+                "name": "regen-${{ github.run_id }}",
+                "path": "${{ runner.temp }}/generated.bundle",
+                "retention-days": 1
+              }
+            }
+          ]
+        },
+        {
+          "id": "regen",
+          "name": "Regenerate generated files",
+          "capability": "legacy-proof/regen/regen",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "condition": "always() \u0026\u0026 github.event.pull_request.head.repo.full_name == github.repository",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "runtime",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "regen/regen"
+          ],
+          "github_names": [
+            "Regenerate generated files"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+              "name": "regen-${{ github.run_id }}",
+              "with": {
+                "name": "regen-${{ github.run_id }}",
+                "path": "${{ runner.temp }}/regen-output"
+              }
+            }
+          ]
+        },
+        {
+          "id": "validate",
+          "name": "Validate regeneration credentials",
+          "capability": "legacy-proof/regen/validate",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "condition": "github.event.pull_request.head.repo.full_name == github.repository",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "regen/validate"
+          ],
+          "github_names": [
+            "Validate regeneration credentials"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "docs-preview",
+      "path": ".github/workflows/docs-preview.yml",
+      "name": "Docs Preview",
+      "owner": "docs-owners",
+      "file_sha256": "69608d40c3fa8b16fd37d04e4e4284017120dcadcfddcef14eee0e9c510bc9fe",
+      "events": {
+        "pull_request": {
+          "paths": [
+            "website/**",
+            ".github/workflows/docs-preview.yml"
+          ],
+          "types": [
+            "opened",
+            "synchronize",
+            "reopened",
+            "closed"
+          ]
+        },
+        "schedule": [
+          {
+            "cron": "17 4 * * *"
+          }
+        ]
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "environment": null,
+      "jobs": [
+        {
+          "id": "cleanup",
+          "name": "Clean up screenshots",
+          "capability": "legacy-proof/docs-preview/cleanup",
+          "owner": "docs-owners",
+          "runner": "ubuntu-latest",
+          "condition": "github.event.action == 'closed'",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "scheduled",
+          "requiredness": "soft",
+          "permissions": {
+            "contents": "write",
+            "pull-requests": "write"
+          },
+          "environment": null,
+          "coordinates": [
+            "docs-preview/cleanup"
+          ],
+          "github_names": [
+            "Clean up screenshots"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3"
+          ]
+        },
+        {
+          "id": "preview",
+          "name": "Screenshot changed pages",
+          "capability": "legacy-proof/docs-preview/preview",
+          "owner": "docs-owners",
+          "runner": "ubuntu-latest",
+          "condition": "github.event_name == 'pull_request' \u0026\u0026 github.event.action != 'closed'",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "compile-only",
+          "requiredness": "soft",
+          "permissions": {
+            "contents": "write",
+            "pull-requests": "write"
+          },
+          "environment": {
+            "BASE_URL": "http://localhost:8080",
+            "HUGO_VERSION": "0.154.5",
+            "K6_IMAGE": "grafana/k6:1.8.0-with-browser"
+          },
+          "coordinates": [
+            "docs-preview/preview"
+          ],
+          "github_names": [
+            "Screenshot changed pages"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ]
+        },
+        {
+          "id": "prune",
+          "name": "Prune stale screenshots",
+          "capability": "legacy-proof/docs-preview/prune",
+          "owner": "docs-owners",
+          "runner": "ubuntu-latest",
+          "condition": "github.event_name == 'schedule'",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "scheduled",
+          "requiredness": "soft",
+          "permissions": {
+            "contents": "write"
+          },
+          "environment": null,
+          "coordinates": [
+            "docs-preview/prune"
+          ],
+          "github_names": [
+            "Prune stale screenshots"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dev-release",
+      "path": ".github/workflows/dev-release.yml",
+      "name": "Dev Release",
+      "owner": "release-owners",
+      "file_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+      "events": {
+        "pull_request": null,
+        "push": {
+          "branches": [
+            "main"
+          ]
+        }
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "environment": null,
+      "jobs": [
+        {
+          "id": "assemble-dev",
+          "name": "Aggregate dev release",
+          "capability": "legacy-proof/dev-release/assemble-dev",
+          "owner": "release-owners",
+          "runner": "ubuntu-24.04",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "package-consumer",
+          "requiredness": "soft",
+          "permissions": {
+            "contents": "read"
+          },
+          "environment": {
+            "GRAITH_DEV_VERSION": "${{ needs.release-context.outputs.version }}",
+            "RELEASE_REVISION": "${{ needs.release-context.outputs.revision }}"
+          },
+          "coordinates": [
+            "dev-release/assemble-dev"
+          ],
+          "github_names": [
+            "Aggregate dev release"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+            "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+              "name": null,
+              "with": {
+                "merge-multiple": true,
+                "path": "dist",
+                "pattern": "dev-*-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}"
+              }
+            },
+            {
+              "action": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+              "name": "dev-release-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+              "with": {
+                "if-no-files-found": "error",
+                "name": "dev-release-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+                "overwrite": true,
+                "path": "dist/graith-dev_darwin_arm64.tar.gz\ndist/graith-dev_linux_amd64.tar.gz\ndist/graith-dev_linux_arm64.tar.gz\ndist/checksums.txt\n",
+                "retention-days": 2
+              }
+            }
+          ]
+        },
+        {
+          "id": "attest-linux",
+          "name": "Attest Linux dev archive (${{ matrix.goarch }})",
+          "capability": "legacy-proof/dev-release/attest-linux",
+          "owner": "release-owners",
+          "runner": "ubuntu-24.04",
+          "condition": "github.event_name == 'push'",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "package-consumer",
+          "requiredness": "soft",
+          "permissions": {
+            "attestations": "write",
+            "contents": "read",
+            "id-token": "write"
+          },
+          "environment": null,
+          "matrix": {
+            "goarch": [
+              "amd64",
+              "arm64"
+            ]
+          },
+          "coordinates": [
+            "dev-release/attest-linux[goarch=amd64]",
+            "dev-release/attest-linux[goarch=arm64]"
+          ],
+          "github_names": [
+            "Attest Linux dev archive (amd64)",
+            "Attest Linux dev archive (arm64)"
+          ],
+          "action_pins": [
+            "actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6",
+            "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+              "name": "dev-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+              "with": {
+                "name": "dev-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+                "path": "${{ runner.temp }}/release"
+              }
+            }
+          ]
+        },
+        {
+          "id": "build-darwin",
+          "name": "Build and verify Darwin dev archives",
+          "capability": "legacy-proof/dev-release/build-darwin",
+          "owner": "release-owners",
+          "runner": "macos-26",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "package-consumer",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": {
+            "GORELEASER_CURRENT_TAG": "${{ needs.release-context.outputs.base_tag }}",
+            "GRAITH_DEV_VERSION": "${{ needs.release-context.outputs.version }}",
+            "RELEASE_REVISION": "${{ needs.release-context.outputs.revision }}"
+          },
+          "coordinates": [
+            "dev-release/build-darwin"
+          ],
+          "github_names": [
+            "Build and verify Darwin dev archives"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+            "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+            "goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+              "name": "dev-darwin-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+              "with": {
+                "if-no-files-found": "error",
+                "name": "dev-darwin-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+                "overwrite": true,
+                "path": "dist/graith-dev_darwin_arm64.tar.gz\ndist/dev-darwin-manifest.json\ndist/metadata.json\n",
+                "retention-days": 2
+              }
+            }
+          ]
+        },
+        {
+          "id": "build-linux",
+          "name": "Build and verify Linux dev archive (${{ matrix.goarch }})",
+          "capability": "legacy-proof/dev-release/build-linux",
+          "owner": "release-owners",
+          "runner": "ubuntu-24.04",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "package-consumer",
+          "requiredness": "soft",
+          "permissions": {
+            "contents": "read"
+          },
+          "environment": {
+            "GRAITH_DEV_VERSION": "${{ needs.release-context.outputs.version }}",
+            "RELEASE_REVISION": "${{ needs.release-context.outputs.revision }}"
+          },
+          "matrix": {
+            "include": [
+              {
+                "goarch": "amd64",
+                "target": "x86_64-linux-gnu"
+              },
+              {
+                "goarch": "arm64",
+                "target": "aarch64-linux-gnu"
+              }
+            ]
+          },
+          "coordinates": [
+            "dev-release/build-linux[goarch=amd64,target=x86_64-linux-gnu]",
+            "dev-release/build-linux[goarch=arm64,target=aarch64-linux-gnu]"
+          ],
+          "github_names": [
+            "Build and verify Linux dev archive (amd64)",
+            "Build and verify Linux dev archive (arm64)"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+            "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+              "name": "dev-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+              "with": {
+                "if-no-files-found": "error",
+                "name": "dev-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+                "overwrite": true,
+                "path": "${{ runner.temp }}/release-${{ matrix.goarch }}/",
+                "retention-days": 2
+              }
+            }
+          ]
+        },
+        {
+          "id": "changes",
+          "name": "Detect dev-release-relevant changes",
+          "capability": "legacy-proof/dev-release/changes",
+          "owner": "release-owners",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": {
+            "contents": "read",
+            "pull-requests": "read"
+          },
+          "environment": null,
+          "coordinates": [
+            "dev-release/changes"
+          ],
+          "github_names": [
+            "Detect dev-release-relevant changes"
+          ]
+        },
+        {
+          "id": "execute-linux",
+          "name": "Execute Linux dev archive (${{ matrix.goarch }})",
+          "capability": "legacy-proof/dev-release/execute-linux",
+          "owner": "release-owners",
+          "runner": "${{ matrix.runner }}",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "runtime",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": {
+            "GRAITH_DEV_VERSION": "${{ needs.release-context.outputs.version }}",
+            "RELEASE_REVISION": "${{ needs.release-context.outputs.revision }}"
+          },
+          "matrix": {
+            "include": [
+              {
+                "goarch": "amd64",
+                "runner": "ubuntu-24.04"
+              },
+              {
+                "goarch": "arm64",
+                "runner": "ubuntu-24.04-arm"
+              }
+            ]
+          },
+          "coordinates": [
+            "dev-release/execute-linux[goarch=amd64,runner=ubuntu-24.04]",
+            "dev-release/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]"
+          ],
+          "github_names": [
+            "Execute Linux dev archive (amd64)",
+            "Execute Linux dev archive (arm64)"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+              "name": "dev-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+              "with": {
+                "name": "dev-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+                "path": "${{ runner.temp }}/release"
+              }
+            }
+          ]
+        },
+        {
+          "id": "publish-dev",
+          "name": "Publish dev release",
+          "capability": "legacy-proof/dev-release/publish-dev",
+          "owner": "release-owners",
+          "runner": "ubuntu-24.04",
+          "condition": "github.event_name == 'push'",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "scheduled",
+          "requiredness": "soft",
+          "permissions": {
+            "attestations": "read",
+            "contents": "write"
+          },
+          "environment": {
+            "GRAITH_DEV_VERSION": "${{ needs.release-context.outputs.version }}",
+            "RELEASE_REVISION": "${{ needs.release-context.outputs.revision }}"
+          },
+          "coordinates": [
+            "dev-release/publish-dev"
+          ],
+          "github_names": [
+            "Publish dev release"
+          ],
+          "action_pins": [
+            "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+              "name": "dev-release-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+              "with": {
+                "name": "dev-release-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+                "path": "dist"
+              }
+            }
+          ]
+        },
+        {
+          "id": "release-context",
+          "name": "Select dev release context",
+          "capability": "legacy-proof/dev-release/release-context",
+          "owner": "release-owners",
+          "runner": "ubuntu-24.04",
+          "condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "dev-release/release-context"
+          ],
+          "github_names": [
+            "Select dev release context"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release-please",
+      "path": ".github/workflows/release-please.yml",
+      "name": "Release Please",
+      "owner": "release-owners",
+      "file_sha256": "971e443986932f9e1c6272a482ec6762070eef27c3723e278d5103aeffbc896d",
+      "events": {
+        "push": {
+          "branches": [
+            "main"
+          ]
+        }
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "environment": null,
+      "jobs": [
+        {
+          "id": "release-please",
+          "name": "release-please",
+          "capability": "legacy-proof/release-please/release-please",
+          "owner": "release-owners",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "scheduled",
+          "requiredness": "soft",
+          "permissions": {
+            "contents": "write",
+            "pull-requests": "write"
+          },
+          "environment": null,
+          "coordinates": [
+            "release-please/release-please"
+          ],
+          "github_names": [
+            "release-please"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "goreleaser",
+      "path": ".github/workflows/goreleaser.yml",
+      "name": "Stable Release",
+      "owner": "release-owners",
+      "file_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+      "events": {
+        "pull_request": null,
+        "push": {
+          "tags": [
+            "v*"
+          ]
+        }
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "environment": {
+        "RETAIN_RELEASES": "5"
+      },
+      "jobs": [
+        {
+          "id": "assemble-stable",
+          "name": "Aggregate complete stable release",
+          "capability": "legacy-proof/goreleaser/assemble-stable",
+          "owner": "release-owners",
+          "runner": "ubuntu-24.04",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "package-consumer",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": {
+            "GRAITH_RELEASE_VERSION": "${{ needs.release-context.outputs.version }}",
+            "RELEASE_REVISION": "${{ needs.release-context.outputs.revision }}"
+          },
+          "coordinates": [
+            "goreleaser/assemble-stable"
+          ],
+          "github_names": [
+            "Aggregate complete stable release"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+            "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+              "name": null,
+              "with": {
+                "merge-multiple": true,
+                "path": "dist",
+                "pattern": "stable-*-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}"
+              }
+            },
+            {
+              "action": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+              "name": "stable-release-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+              "with": {
+                "if-no-files-found": "error",
+                "name": "stable-release-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+                "overwrite": true,
+                "path": "dist/graith_*\ndist/checksums.txt\n",
+                "retention-days": 2
+              }
+            }
+          ]
+        },
+        {
+          "id": "attest-stable",
+          "name": "Finalize and attest stable release",
+          "capability": "legacy-proof/goreleaser/attest-stable",
+          "owner": "release-owners",
+          "runner": "ubuntu-24.04",
+          "condition": "github.event_name == 'push'",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "package-consumer",
+          "requiredness": "soft",
+          "permissions": {
+            "attestations": "write",
+            "contents": "read",
+            "id-token": "write"
+          },
+          "environment": {
+            "GRAITH_RELEASE_VERSION": "${{ needs.release-context.outputs.version }}",
+            "RELEASE_REVISION": "${{ needs.release-context.outputs.revision }}"
+          },
+          "coordinates": [
+            "goreleaser/attest-stable"
+          ],
+          "github_names": [
+            "Finalize and attest stable release"
+          ],
+          "action_pins": [
+            "actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6",
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+            "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+              "name": "stable-release-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+              "with": {
+                "name": "stable-release-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+                "path": "dist"
+              }
+            },
+            {
+              "action": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+              "name": "stable-final-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+              "with": {
+                "if-no-files-found": "error",
+                "name": "stable-final-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+                "overwrite": true,
+                "path": "dist/*",
+                "retention-days": 2
+              }
+            }
+          ]
+        },
+        {
+          "id": "build-darwin",
+          "name": "Build and verify stable Darwin archives",
+          "capability": "legacy-proof/goreleaser/build-darwin",
+          "owner": "release-owners",
+          "runner": "macos-26",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "package-consumer",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": {
+            "GORELEASER_CURRENT_TAG": "${{ needs.release-context.outputs.tag }}",
+            "GRAITH_RELEASE_VERSION": "${{ needs.release-context.outputs.version }}",
+            "RELEASE_REVISION": "${{ needs.release-context.outputs.revision }}"
+          },
+          "coordinates": [
+            "goreleaser/build-darwin"
+          ],
+          "github_names": [
+            "Build and verify stable Darwin archives"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+            "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+            "goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+              "name": "stable-darwin-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+              "with": {
+                "if-no-files-found": "error",
+                "name": "stable-darwin-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+                "overwrite": true,
+                "path": "dist/graith_${{ needs.release-context.outputs.version }}_darwin_arm64.tar.gz\ndist/stable-darwin-manifest.json\n",
+                "retention-days": 2
+              }
+            }
+          ]
+        },
+        {
+          "id": "build-linux",
+          "name": "Build and verify stable Linux artifacts (${{ matrix.goarch }})",
+          "capability": "legacy-proof/goreleaser/build-linux",
+          "owner": "release-owners",
+          "runner": "ubuntu-24.04",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "package-consumer",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": {
+            "GORELEASER_CURRENT_TAG": "${{ needs.release-context.outputs.tag }}",
+            "GRAITH_RELEASE_GOARCH": "${{ matrix.goarch }}",
+            "GRAITH_RELEASE_VERSION": "${{ needs.release-context.outputs.version }}",
+            "RELEASE_REVISION": "${{ needs.release-context.outputs.revision }}"
+          },
+          "matrix": {
+            "include": [
+              {
+                "goarch": "amd64",
+                "target": "x86_64-linux-gnu"
+              },
+              {
+                "goarch": "arm64",
+                "target": "aarch64-linux-gnu"
+              }
+            ]
+          },
+          "coordinates": [
+            "goreleaser/build-linux[goarch=amd64,target=x86_64-linux-gnu]",
+            "goreleaser/build-linux[goarch=arm64,target=aarch64-linux-gnu]"
+          ],
+          "github_names": [
+            "Build and verify stable Linux artifacts (amd64)",
+            "Build and verify stable Linux artifacts (arm64)"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+            "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+            "goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+              "name": "stable-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+              "with": {
+                "if-no-files-found": "error",
+                "name": "stable-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+                "overwrite": true,
+                "path": "dist/graith_${{ needs.release-context.outputs.version }}_linux_${{ matrix.goarch }}.tar.gz\ndist/graith_*_linux_${{ matrix.goarch }}.deb\ndist/graith_*_linux_${{ matrix.goarch }}.rpm\ndist/graith_*_linux_${{ matrix.goarch }}.apk\ndist/stable-linux-${{ matrix.goarch }}-manifest.json\n",
+                "retention-days": 2
+              }
+            }
+          ]
+        },
+        {
+          "id": "changes",
+          "name": "Detect stable-release-relevant changes",
+          "capability": "legacy-proof/goreleaser/changes",
+          "owner": "release-owners",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": {
+            "contents": "read",
+            "pull-requests": "read"
+          },
+          "environment": null,
+          "coordinates": [
+            "goreleaser/changes"
+          ],
+          "github_names": [
+            "Detect stable-release-relevant changes"
+          ]
+        },
+        {
+          "id": "execute-linux",
+          "name": "Execute stable Linux artifacts (${{ matrix.goarch }})",
+          "capability": "legacy-proof/goreleaser/execute-linux",
+          "owner": "release-owners",
+          "runner": "${{ matrix.runner }}",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "runtime",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": {
+            "GRAITH_RELEASE_VERSION": "${{ needs.release-context.outputs.version }}",
+            "RELEASE_REVISION": "${{ needs.release-context.outputs.revision }}"
+          },
+          "matrix": {
+            "include": [
+              {
+                "goarch": "amd64",
+                "runner": "ubuntu-24.04"
+              },
+              {
+                "goarch": "arm64",
+                "runner": "ubuntu-24.04-arm"
+              }
+            ]
+          },
+          "coordinates": [
+            "goreleaser/execute-linux[goarch=amd64,runner=ubuntu-24.04]",
+            "goreleaser/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]"
+          ],
+          "github_names": [
+            "Execute stable Linux artifacts (amd64)",
+            "Execute stable Linux artifacts (arm64)"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+              "name": "stable-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+              "with": {
+                "name": "stable-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+                "path": "dist"
+              }
+            }
+          ]
+        },
+        {
+          "id": "publish-stable",
+          "name": "Publish verified stable release",
+          "capability": "legacy-proof/goreleaser/publish-stable",
+          "owner": "release-owners",
+          "runner": "ubuntu-24.04",
+          "condition": "github.event_name == 'push'",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "scheduled",
+          "requiredness": "soft",
+          "permissions": {
+            "attestations": "read",
+            "contents": "write"
+          },
+          "environment": {
+            "RELEASE_REVISION": "${{ needs.release-context.outputs.revision }}",
+            "RELEASE_TAG": "${{ needs.release-context.outputs.tag }}",
+            "RELEASE_VERSION": "${{ needs.release-context.outputs.version }}"
+          },
+          "coordinates": [
+            "goreleaser/publish-stable"
+          ],
+          "github_names": [
+            "Publish verified stable release"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+              "name": "stable-final-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+              "with": {
+                "name": "stable-final-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}",
+                "path": "dist"
+              }
+            }
+          ]
+        },
+        {
+          "id": "release-context",
+          "name": "Bind stable release context",
+          "capability": "legacy-proof/goreleaser/release-context",
+          "owner": "release-owners",
+          "runner": "ubuntu-24.04",
+          "condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "goreleaser/release-context"
+          ],
+          "github_names": [
+            "Bind stable release context"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sandbox",
+      "path": ".github/workflows/sandbox.yml",
+      "name": "Sandbox",
+      "owner": "graith-maintainers",
+      "file_sha256": "e27934aec704000f6bdcb2f1b0bdd10e8464679a449f39afa36b09ea3cc286f9",
+      "events": {
+        "pull_request": null,
+        "workflow_dispatch": null
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "environment": null,
+      "jobs": [
+        {
+          "id": "changes",
+          "name": "Detect sandbox-relevant changes",
+          "capability": "legacy-proof/sandbox/changes",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": {
+            "contents": "read",
+            "pull-requests": "read"
+          },
+          "environment": null,
+          "coordinates": [
+            "sandbox/changes"
+          ],
+          "github_names": [
+            "Detect sandbox-relevant changes"
+          ]
+        },
+        {
+          "id": "linux-nono",
+          "name": "Linux (nono / Landlock)",
+          "capability": "legacy-proof/sandbox/linux-nono",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "runtime",
+          "requiredness": "required",
+          "permissions": {
+            "attestations": "read",
+            "contents": "read"
+          },
+          "environment": null,
+          "coordinates": [
+            "sandbox/linux-nono"
+          ],
+          "github_names": [
+            "Linux (nono / Landlock)"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ]
+        },
+        {
+          "id": "macos-safehouse",
+          "name": "macOS (safehouse / Seatbelt)",
+          "capability": "legacy-proof/sandbox/macos-safehouse",
+          "owner": "graith-maintainers",
+          "runner": "macos-latest",
+          "condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "runtime",
+          "requiredness": "required",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "sandbox/macos-safehouse"
+          ],
+          "github_names": [
+            "macOS (safehouse / Seatbelt)"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dependency-review",
+      "path": ".github/workflows/dependency-review.yml",
+      "name": "Dependency Review",
+      "owner": "security-owners",
+      "file_sha256": "99e716c4891e084c15be79f13cb966887ee7197ff9d3013370b2dbfb9f1b042e",
+      "events": {
+        "pull_request": null
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "environment": null,
+      "jobs": [
+        {
+          "id": "dependency-review",
+          "name": "Dependency Review",
+          "capability": "legacy-proof/dependency-review/dependency-review",
+          "owner": "security-owners",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "dependency-review/dependency-review"
+          ],
+          "github_names": [
+            "Dependency Review"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "codeql",
+      "path": ".github/workflows/codeql.yml",
+      "name": "CodeQL",
+      "owner": "security-owners",
+      "file_sha256": "160972df5072a1160eb70e946ff2aecd8efb992608253f1474e0f5612de0c0fb",
+      "events": {
+        "pull_request": {
+          "branches": [
+            "main"
+          ]
+        },
+        "push": {
+          "branches": [
+            "main"
+          ]
+        },
+        "schedule": [
+          {
+            "cron": "41 6 * * 1"
+          }
+        ]
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "environment": null,
+      "jobs": [
+        {
+          "id": "analyze",
+          "name": "Analyze (Go)",
+          "capability": "legacy-proof/codeql/analyze",
+          "owner": "security-owners",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": {
+            "actions": "read",
+            "contents": "read",
+            "security-events": "write"
+          },
+          "environment": null,
+          "coordinates": [
+            "codeql/analyze"
+          ],
+          "github_names": [
+            "Analyze (Go)"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+            "github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81",
+            "github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scorecard",
+      "path": ".github/workflows/scorecard.yml",
+      "name": "Scorecard",
+      "owner": "security-owners",
+      "file_sha256": "b0bf3254af3989e72690c51568c262f0bc421ea868229692557419baedae595f",
+      "events": {
+        "push": {
+          "branches": [
+            "main"
+          ]
+        },
+        "schedule": [
+          {
+            "cron": "19 7 * * 2"
+          }
+        ],
+        "workflow_dispatch": null
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "environment": null,
+      "jobs": [
+        {
+          "id": "analysis",
+          "name": "Scorecard analysis",
+          "capability": "legacy-proof/scorecard/analysis",
+          "owner": "security-owners",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": {
+            "id-token": "write",
+            "security-events": "write"
+          },
+          "environment": null,
+          "coordinates": [
+            "scorecard/analysis"
+          ],
+          "github_names": [
+            "Scorecard analysis"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+            "github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81",
+            "ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc"
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+              "name": "SARIF file",
+              "with": {
+                "name": "SARIF file",
+                "path": "results.sarif",
+                "retention-days": 5
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "secret-scan",
+      "path": ".github/workflows/secret-scan.yml",
+      "name": "Secret Scan",
+      "owner": "security-owners",
+      "file_sha256": "9f5236a3c5607ce95136d26931971e9a8f6207aaa98950a5c7ed09b3ba986e43",
+      "events": {
+        "pull_request": null,
+        "push": {
+          "branches": [
+            "main"
+          ]
+        },
+        "schedule": [
+          {
+            "cron": "23 5 * * *"
+          }
+        ],
+        "workflow_dispatch": null
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "environment": null,
+      "jobs": [
+        {
+          "id": "gitleaks",
+          "name": "Gitleaks",
+          "capability": "legacy-proof/secret-scan/gitleaks",
+          "owner": "security-owners",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "secret-scan/gitleaks"
+          ],
+          "github_names": [
+            "Gitleaks"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e"
+          ]
+        },
+        {
+          "id": "trufflehog",
+          "name": "TruffleHog",
+          "capability": "legacy-proof/secret-scan/trufflehog",
+          "owner": "security-owners",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "secret-scan/trufflehog"
+          ],
+          "github_names": [
+            "TruffleHog"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "trufflesecurity/trufflehog@6f3c981e7b77f235fd2702dd74af25fc4b72bf11"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "workflow-lint",
+      "path": ".github/workflows/workflow-lint.yml",
+      "name": "Workflow Lint",
+      "owner": "graith-maintainers",
+      "file_sha256": "aaeb98350f56e5c713fcc1177387f15dc1e14214b7ca9c3b076f79a83b776a5e",
+      "events": {
+        "pull_request": {
+          "paths": [
+            ".github/workflows/**",
+            ".github/zizmor.yml",
+            "internal/libghosttydeps/testdata/renovate/**",
+            "libghostty-native.lock.json",
+            "renovate.json5",
+            "**/*.sh",
+            "*.sh",
+            "Makefile",
+            "scripts/verify-renovate-libghostty.sh"
+          ]
+        },
+        "push": {
+          "branches": [
+            "main"
+          ],
+          "paths": [
+            ".github/workflows/**",
+            ".github/zizmor.yml",
+            "internal/libghosttydeps/testdata/renovate/**",
+            "libghostty-native.lock.json",
+            "renovate.json5",
+            "**/*.sh",
+            "*.sh",
+            "Makefile",
+            "scripts/verify-renovate-libghostty.sh"
+          ]
+        }
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "environment": null,
+      "jobs": [
+        {
+          "id": "actionlint",
+          "name": "actionlint",
+          "capability": "legacy-proof/workflow-lint/actionlint",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": {
+            "attestations": "read",
+            "contents": "read"
+          },
+          "environment": {
+            "ACTIONLINT_VERSION": "1.7.12"
+          },
+          "coordinates": [
+            "workflow-lint/actionlint"
+          ],
+          "github_names": [
+            "actionlint"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+          ]
+        },
+        {
+          "id": "renovate",
+          "name": "Renovate native dependency fixtures",
+          "capability": "legacy-proof/workflow-lint/renovate",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": {
+            "contents": "read"
+          },
+          "environment": null,
+          "coordinates": [
+            "workflow-lint/renovate"
+          ],
+          "github_names": [
+            "Renovate native dependency fixtures"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+          ]
+        },
+        {
+          "id": "scripts",
+          "name": "workflow scripts",
+          "capability": "legacy-proof/workflow-lint/scripts",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "runtime",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "workflow-lint/scripts"
+          ],
+          "github_names": [
+            "workflow scripts"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+          ]
+        },
+        {
+          "id": "shellcheck",
+          "name": "shellcheck",
+          "capability": "legacy-proof/workflow-lint/shellcheck",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "workflow-lint/shellcheck"
+          ],
+          "github_names": [
+            "shellcheck"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+          ]
+        },
+        {
+          "id": "zizmor",
+          "name": "zizmor",
+          "capability": "legacy-proof/workflow-lint/zizmor",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "soft",
+          "permissions": {
+            "attestations": "read",
+            "contents": "read"
+          },
+          "environment": {
+            "ZIZMOR_VERSION": "1.28.0"
+          },
+          "coordinates": [
+            "workflow-lint/zizmor"
+          ],
+          "github_names": [
+            "zizmor"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "docs",
+      "path": ".github/workflows/docs.yml",
+      "name": "Docs",
+      "owner": "docs-owners",
+      "file_sha256": "51acc03fa6fcbe389baa2f6afb6191077d2cf6727d27bcd05eaa7de2c4102b4c",
+      "events": {
+        "push": {
+          "branches": [
+            "main"
+          ],
+          "paths": [
+            "website/**",
+            "cmd/**/*.go",
+            "internal/**/*.go",
+            "go.mod",
+            "go.sum",
+            ".github/workflows/docs.yml"
+          ]
+        },
+        "workflow_dispatch": null
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "environment": null,
+      "jobs": [
+        {
+          "id": "build",
+          "name": "Build",
+          "capability": "legacy-proof/docs/build",
+          "owner": "docs-owners",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "compile-only",
+          "requiredness": "soft",
+          "permissions": {
+            "contents": "read",
+            "pages": "read"
+          },
+          "environment": {
+            "HUGO_ENVIRONMENT": "production",
+            "HUGO_VERSION": "0.154.5"
+          },
+          "coordinates": [
+            "docs/build"
+          ],
+          "github_names": [
+            "Build"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+            "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "artifact_actions": [
+            {
+              "action": "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9",
+              "name": null,
+              "with": {
+                "path": "website/public"
+              }
+            }
+          ]
+        },
+        {
+          "id": "deploy",
+          "name": "Deploy",
+          "capability": "legacy-proof/docs/deploy",
+          "owner": "docs-owners",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "scheduled",
+          "requiredness": "soft",
+          "permissions": {
+            "id-token": "write",
+            "pages": "write"
+          },
+          "environment": null,
+          "coordinates": [
+            "docs/deploy"
+          ],
+          "github_names": [
+            "Deploy"
+          ],
+          "action_pins": [
+            "actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "commits",
+      "path": ".github/workflows/commits.yml",
+      "name": "Commits",
+      "owner": "graith-maintainers",
+      "file_sha256": "30c068d6f10fde86c2e9e954c2362718ea8a73657c4cb23228b686c7273b3acb",
+      "events": {
+        "pull_request": null,
+        "workflow_dispatch": null
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "environment": null,
+      "jobs": [
+        {
+          "id": "commitsar",
+          "name": "Conventional commits",
+          "capability": "legacy-proof/commits/commitsar",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "source-level",
+          "requiredness": "required",
+          "permissions": null,
+          "environment": null,
+          "coordinates": [
+            "commits/commitsar"
+          ],
+          "github_names": [
+            "Conventional commits"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "aevea/commitsar@909c3ab676c9af63cb84f2e38f395c7e89829b04"
+          ]
+        }
+      ]
+    }
+  ],
+  "policy_surfaces": [
+    {
+      "path": ".github/actionlint.yaml",
+      "owner": "graith-maintainers",
+      "kind": "ci-configuration",
+      "git_mode": "100644",
+      "sha256": "a645ae28f9e1d747e1319bfc58d20fc967ab3859ce004342baa4be2ed09adbbb",
+      "executable_contract": "preserve the checked-in CI tool or release configuration consumed by current workflow proof",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".github/workflows/scripts/docs-diff-run.js",
+      "owner": "graith-maintainers",
+      "kind": "workflow-helper",
+      "git_mode": "100644",
+      "sha256": "ffe5d089ea1bdefcf9192e23d26a49d38b0cf856669c3db432a4e94be3f58cee",
+      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".github/workflows/scripts/docs-diff.js",
+      "owner": "graith-maintainers",
+      "kind": "workflow-helper",
+      "git_mode": "100644",
+      "sha256": "51fe8a351533e0701891edc3a2957b5c5095a668b410423ab410fed554293d17",
+      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".github/workflows/scripts/docs-diff.test.js",
+      "owner": "graith-maintainers",
+      "kind": "workflow-contract-test",
+      "git_mode": "100644",
+      "sha256": "c6de54292646dd4f319e679f1b9cd8a8053b65b3890d2ddde389f6ec57c7540c",
+      "executable_contract": "preserve the current workflow trust and behavior assertions until replaced by semantic Go contracts",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".github/workflows/scripts/docs-preview.js",
+      "owner": "graith-maintainers",
+      "kind": "workflow-helper",
+      "git_mode": "100644",
+      "sha256": "be731bb7a2d82342fbabb4b2a53825937e5a42de1374aa69114fb71e25600566",
+      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".github/workflows/scripts/docs-preview.test.js",
+      "owner": "graith-maintainers",
+      "kind": "workflow-contract-test",
+      "git_mode": "100644",
+      "sha256": "2f11cb4d6592e981bb1617beffb36fa91400e229cee53f0961170fd43b360df0",
+      "executable_contract": "preserve the current workflow trust and behavior assertions until replaced by semantic Go contracts",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".github/workflows/scripts/libghostty-policy.test.js",
+      "owner": "graith-maintainers",
+      "kind": "workflow-contract-test",
+      "git_mode": "100644",
+      "sha256": "54365a17cdfa82450e44611b8fbcb94710b947912321fc21a93e7c9ee7df9ccb",
+      "executable_contract": "preserve the current workflow trust and behavior assertions until replaced by semantic Go contracts",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".github/workflows/scripts/package-lock.json",
+      "owner": "graith-maintainers",
+      "kind": "workflow-helper",
+      "git_mode": "100644",
+      "sha256": "63bab3046c6ef84bbbd439d41a1be768bab7f0a2dfeea391ee5bd994c65fca49",
+      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".github/workflows/scripts/package.json",
+      "owner": "graith-maintainers",
+      "kind": "workflow-helper",
+      "git_mode": "100644",
+      "sha256": "487ab50e334bac57b3ed8faab83270dd25006569606f868ad20a388c94661d39",
+      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".github/workflows/scripts/regen-auth.test.js",
+      "owner": "graith-maintainers",
+      "kind": "workflow-contract-test",
+      "git_mode": "100644",
+      "sha256": "31c2ee166b3373c50f75e5405765b33e92812d4d6743d45fc9c788e61e92302a",
+      "executable_contract": "preserve the current workflow trust and behavior assertions until replaced by semantic Go contracts",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".github/workflows/scripts/renovate-retry.test.js",
+      "owner": "graith-maintainers",
+      "kind": "workflow-contract-test",
+      "git_mode": "100644",
+      "sha256": "4d5aa6adf0cf5ae872a2c8bb82cca62a1715b2adf762db484a04c2e4c634d1a7",
+      "executable_contract": "preserve the current workflow trust and behavior assertions until replaced by semantic Go contracts",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".github/workflows/scripts/shellcheck-policy.test.js",
+      "owner": "graith-maintainers",
+      "kind": "workflow-contract-test",
+      "git_mode": "100644",
+      "sha256": "ca5c5203c4a0d823a4b4ffa099255e97fe0f8e162e126526bf780e1092f67c6f",
+      "executable_contract": "preserve the current workflow trust and behavior assertions until replaced by semantic Go contracts",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".github/workflows/scripts/workflow-lint-supply-chain.test.js",
+      "owner": "graith-maintainers",
+      "kind": "workflow-contract-test",
+      "git_mode": "100644",
+      "sha256": "e1e5cc55ab72af0734f119304ab8044a04925166871835f2cb0a46bfdb9ed1d8",
+      "executable_contract": "preserve the current workflow trust and behavior assertions until replaced by semantic Go contracts",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".golangci.yml",
+      "owner": "graith-maintainers",
+      "kind": "ci-configuration",
+      "git_mode": "100644",
+      "sha256": "531c939b35e1651987acec9a3c760fcdc67d5127f322556a7dbe1872c7059d80",
+      "executable_contract": "preserve the checked-in CI tool or release configuration consumed by current workflow proof",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".goreleaser-dev.yaml",
+      "owner": "graith-maintainers",
+      "kind": "ci-configuration",
+      "git_mode": "100644",
+      "sha256": "c9372cafc3c5302509b00cf65317a2c6c4bb1b3d04adf56554041b7bb0acdd31",
+      "executable_contract": "preserve the checked-in CI tool or release configuration consumed by current workflow proof",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".goreleaser-linux.yaml",
+      "owner": "graith-maintainers",
+      "kind": "ci-configuration",
+      "git_mode": "100644",
+      "sha256": "0b5bea4a6e7b67b2fc8c5c76f0f2429502f926c0cc051bbb2658a424ccbcee04",
+      "executable_contract": "preserve the checked-in CI tool or release configuration consumed by current workflow proof",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".goreleaser.yaml",
+      "owner": "graith-maintainers",
+      "kind": "ci-configuration",
+      "git_mode": "100644",
+      "sha256": "e3fbcc413eaee5f4cc802db6f8b2fb937ef7b9a862e8e8f3c0133ab1919e0b3b",
+      "executable_contract": "preserve the checked-in CI tool or release configuration consumed by current workflow proof",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".release-please-config.json",
+      "owner": "graith-maintainers",
+      "kind": "ci-configuration",
+      "git_mode": "100644",
+      "sha256": "930da454417dfaa0791391f125a9bbe04e9e02073987cc9ea78c1e8bebb037d8",
+      "executable_contract": "preserve the checked-in CI tool or release configuration consumed by current workflow proof",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".release-please-manifest.json",
+      "owner": "graith-maintainers",
+      "kind": "ci-configuration",
+      "git_mode": "100644",
+      "sha256": "c8a3373ea0061ae9ca67c1d6d0e25c2dfeb2324fde7db9cdd6742990028008df",
+      "executable_contract": "preserve the checked-in CI tool or release configuration consumed by current workflow proof",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "Makefile",
+      "owner": "graith-maintainers",
+      "kind": "ci-entrypoint",
+      "git_mode": "100644",
+      "sha256": "5e73ab72b853251ddcd27c599c4524961e723aa426409130ead7847360906384",
+      "executable_contract": "preserve the checked-in make targets invoked directly by current workflow proof",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "gui/ios/Makefile",
+      "owner": "gui-owners",
+      "kind": "ci-entrypoint",
+      "git_mode": "100644",
+      "sha256": "c0dfefcdb29c61412c60fdc173b8f34731f16c4107f8367c92ada20d0d8bad03",
+      "executable_contract": "preserve the checked-in make targets invoked directly by current workflow proof",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "libghostty-native.lock.json",
+      "owner": "native-owners",
+      "kind": "ci-configuration",
+      "git_mode": "100644",
+      "sha256": "f84c632385b11bf45667f53dec8de40882ad9b513597963682e07e5dad6a71a6",
+      "executable_contract": "preserve pinned native dependency commits, URLs, and SHA-256 values consumed by current producer and package proof",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "renovate.json5",
+      "owner": "graith-maintainers",
+      "kind": "ci-configuration",
+      "git_mode": "100644",
+      "sha256": "b9ad166bf35280b04da3861e37bbb14250c261131a61647f5922be4927d1fb2a",
+      "executable_contract": "preserve the checked-in CI tool or release configuration consumed by current workflow proof",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "scripts/dev-release-base-tag.sh",
+      "owner": "graith-maintainers",
+      "kind": "root-script-policy",
+      "git_mode": "100755",
+      "sha256": "b38683978f2a718da62b40f09616fb9f5b6374f48517c7a12eab10a65ea7e70c",
+      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "scripts/dev-release-version.sh",
+      "owner": "graith-maintainers",
+      "kind": "root-script-policy",
+      "git_mode": "100755",
+      "sha256": "ec99774b302730c254420d6163618a2f4aee47aa464de214cfd65e891a414345",
+      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "scripts/libghostty-linux-archive.py",
+      "owner": "graith-maintainers",
+      "kind": "root-script-policy",
+      "git_mode": "100644",
+      "sha256": "cb86feb6175679f6efbb54ce1ab595a365583660e27c4dcec755abf095238007",
+      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "scripts/libghostty-native.sh",
+      "owner": "graith-maintainers",
+      "kind": "root-script-policy",
+      "git_mode": "100755",
+      "sha256": "099c5bd5db5d839eb5fda18dee37f1f6e27b894b5f4c4010316eea726d183a58",
+      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "scripts/publish-linux-repositories.sh",
+      "owner": "graith-maintainers",
+      "kind": "root-script-policy",
+      "git_mode": "100755",
+      "sha256": "b22fbcf088e0ad063b5a40e3cb5a42ff8fa4a20c94bee2e56713c0582b9b47c3",
+      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "scripts/publish-push.sh",
+      "owner": "graith-maintainers",
+      "kind": "root-script-policy",
+      "git_mode": "100755",
+      "sha256": "760e531209e57ef86124d7ea3b0f937e4e81e8472d5e0bdfb3554c454ded26a7",
+      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "scripts/render-stable-aur.sh",
+      "owner": "graith-maintainers",
+      "kind": "root-script-policy",
+      "git_mode": "100755",
+      "sha256": "c7461c46af2df6c8891367e2c194b06025f25dcc359e5b1406135881b2ffb4be",
+      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "scripts/render-stable-homebrew.sh",
+      "owner": "graith-maintainers",
+      "kind": "root-script-policy",
+      "git_mode": "100755",
+      "sha256": "04dfc05639fd693e015aa7173a77b1f1fc8144a545a413fa596ecfe72d43af83",
+      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "scripts/rpm-preset-keygrips.sh",
+      "owner": "graith-maintainers",
+      "kind": "root-script-policy",
+      "git_mode": "100755",
+      "sha256": "421500c76228f601970e2436e6eda306a31182b90817f1bbdedd1312c2745041",
+      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "scripts/rpm_preset_keygrips_test.go",
+      "owner": "graith-maintainers",
+      "kind": "root-script-policy",
+      "git_mode": "100644",
+      "sha256": "410d147bb76b76d92122f69485905972de18068487ad1b8394fcb7540f0350f9",
+      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "scripts/verify-renovate-libghostty.sh",
+      "owner": "graith-maintainers",
+      "kind": "root-script-policy",
+      "git_mode": "100755",
+      "sha256": "03acdbd53b6cc7c5d1d2edea309df6904a973c12e1b5f19042f14c023fbdeecd",
+      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    }
+  ],
+  "legacy_mappings": [
+    {
+      "legacy_coordinate": "ci/build",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/ci/build",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "ci/build-macos",
+      "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/ci/build-macos",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "ci/changes",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/ci/changes",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "ci/govulncheck",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/ci/govulncheck",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "ci/integration",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/ci/integration",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "ci/integration-macos",
+      "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/ci/integration-macos",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "ci/lint",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/ci/lint",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "ci/test",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/ci/test",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "ci/test-macos",
+      "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/ci/test-macos",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "coverage/changes",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/coverage/changes",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "coverage/comment",
+      "legacy_condition": "always() \u0026\u0026 github.event.pull_request.head.repo.full_name == github.repository",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/coverage/comment",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "coverage/go-coverage",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/coverage/go-coverage",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "coverage/swift-coverage",
+      "legacy_condition": "needs.changes.outputs.gui == 'true'",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/coverage/swift-coverage",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "gui-ci/build",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/gui-ci/build",
+      "owner": "gui-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "libghostty-native/apple-adapter",
+      "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.native == 'true')",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/libghostty-native/apple-adapter",
+      "owner": "native-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "libghostty-native/changes",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/libghostty-native/changes",
+      "owner": "native-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "libghostty-native/linux-adapter[goarch=amd64,run_tests=true,target=x86_64-linux-gnu]",
+      "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.native == 'true') \u0026\u0026 (github.event_name != 'workflow_dispatch' || inputs.include_linux)",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/libghostty-native/linux-adapter[goarch=amd64,run_tests=true,target=x86_64-linux-gnu]",
+      "owner": "native-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "libghostty-native/linux-adapter[goarch=arm64,run_tests=false,target=aarch64-linux-gnu]",
+      "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.native == 'true') \u0026\u0026 (github.event_name != 'workflow_dispatch' || inputs.include_linux)",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/libghostty-native/linux-adapter[goarch=arm64,run_tests=false,target=aarch64-linux-gnu]",
+      "owner": "native-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "libghostty-native/native-gate",
+      "legacy_condition": "always()",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/libghostty-native/native-gate",
+      "owner": "native-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "libghostty-native-publish/publish[goarch=amd64,target=x86_64-linux-gnu]",
+      "legacy_condition": "github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/libghostty-native-publish/publish[goarch=amd64,target=x86_64-linux-gnu]",
+      "owner": "native-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "libghostty-native-publish/publish[goarch=arm64,target=aarch64-linux-gnu]",
+      "legacy_condition": "github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/libghostty-native-publish/publish[goarch=arm64,target=aarch64-linux-gnu]",
+      "owner": "native-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "regen/prepare",
+      "legacy_condition": "github.event.pull_request.head.repo.full_name == github.repository",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/regen/prepare",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "regen/regen",
+      "legacy_condition": "always() \u0026\u0026 github.event.pull_request.head.repo.full_name == github.repository",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/regen/regen",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "regen/validate",
+      "legacy_condition": "github.event.pull_request.head.repo.full_name == github.repository",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/regen/validate",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "docs-preview/cleanup",
+      "legacy_condition": "github.event.action == 'closed'",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/docs-preview/cleanup",
+      "owner": "docs-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "docs-preview/preview",
+      "legacy_condition": "github.event_name == 'pull_request' \u0026\u0026 github.event.action != 'closed'",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/docs-preview/preview",
+      "owner": "docs-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "docs-preview/prune",
+      "legacy_condition": "github.event_name == 'schedule'",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/docs-preview/prune",
+      "owner": "docs-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "dev-release/assemble-dev",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/dev-release/assemble-dev",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "dev-release/attest-linux[goarch=amd64]",
+      "legacy_condition": "github.event_name == 'push'",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/dev-release/attest-linux[goarch=amd64]",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "dev-release/attest-linux[goarch=arm64]",
+      "legacy_condition": "github.event_name == 'push'",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/dev-release/attest-linux[goarch=arm64]",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "dev-release/build-darwin",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/dev-release/build-darwin",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "dev-release/build-linux[goarch=amd64,target=x86_64-linux-gnu]",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/dev-release/build-linux[goarch=amd64,target=x86_64-linux-gnu]",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "dev-release/build-linux[goarch=arm64,target=aarch64-linux-gnu]",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/dev-release/build-linux[goarch=arm64,target=aarch64-linux-gnu]",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "dev-release/changes",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/dev-release/changes",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "dev-release/execute-linux[goarch=amd64,runner=ubuntu-24.04]",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/dev-release/execute-linux[goarch=amd64,runner=ubuntu-24.04]",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "dev-release/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/dev-release/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "dev-release/publish-dev",
+      "legacy_condition": "github.event_name == 'push'",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/dev-release/publish-dev",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "dev-release/release-context",
+      "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/dev-release/release-context",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "release-please/release-please",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/release-please/release-please",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "goreleaser/assemble-stable",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/goreleaser/assemble-stable",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "goreleaser/attest-stable",
+      "legacy_condition": "github.event_name == 'push'",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/goreleaser/attest-stable",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "goreleaser/build-darwin",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/goreleaser/build-darwin",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "goreleaser/build-linux[goarch=amd64,target=x86_64-linux-gnu]",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/goreleaser/build-linux[goarch=amd64,target=x86_64-linux-gnu]",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "goreleaser/build-linux[goarch=arm64,target=aarch64-linux-gnu]",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/goreleaser/build-linux[goarch=arm64,target=aarch64-linux-gnu]",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "goreleaser/changes",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/goreleaser/changes",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "goreleaser/execute-linux[goarch=amd64,runner=ubuntu-24.04]",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/goreleaser/execute-linux[goarch=amd64,runner=ubuntu-24.04]",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "goreleaser/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/goreleaser/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "goreleaser/publish-stable",
+      "legacy_condition": "github.event_name == 'push'",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/goreleaser/publish-stable",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "goreleaser/release-context",
+      "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/goreleaser/release-context",
+      "owner": "release-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "sandbox/changes",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/sandbox/changes",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "sandbox/linux-nono",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/sandbox/linux-nono",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "sandbox/macos-safehouse",
+      "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/sandbox/macos-safehouse",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "dependency-review/dependency-review",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/dependency-review/dependency-review",
+      "owner": "security-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "codeql/analyze",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/codeql/analyze",
+      "owner": "security-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "scorecard/analysis",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/scorecard/analysis",
+      "owner": "security-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "secret-scan/gitleaks",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/secret-scan/gitleaks",
+      "owner": "security-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "secret-scan/trufflehog",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/secret-scan/trufflehog",
+      "owner": "security-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "workflow-lint/actionlint",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/workflow-lint/actionlint",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "workflow-lint/renovate",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/workflow-lint/renovate",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "workflow-lint/scripts",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/workflow-lint/scripts",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "workflow-lint/shellcheck",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/workflow-lint/shellcheck",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "workflow-lint/zizmor",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/workflow-lint/zizmor",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "docs/build",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/docs/build",
+      "owner": "docs-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "docs/deploy",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/docs/deploy",
+      "owner": "docs-owners",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "commits/commitsar",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/commits/commitsar",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    }
+  ],
+  "required_contexts": [
+    "Conventional commits",
+    "Lint",
+    "Linux (nono / Landlock)",
+    "Native backend gate",
+    "Test (macos-latest)",
+    "Test (ubuntu-latest)",
+    "macOS (safehouse / Seatbelt)"
+  ],
+  "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
+  "required_contexts_observed_at": "2026-07-25T16:54:00Z",
+  "digest": "dbb9c2b288414531a45ca72143f5123096dae4237316448960836e0482241275"
+}

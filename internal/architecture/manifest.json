@@ -5,6 +5,7 @@
   "categories": ["composition", "adapter", "application", "provider", "contract", "value", "utility"],
   "packages": {
     "github.com/d0ugal/graith/cmd/architecturecheck": "composition",
+    "github.com/d0ugal/graith/cmd/cibaseline": "composition",
     "github.com/d0ugal/graith/cmd/covreport": "composition",
     "github.com/d0ugal/graith/cmd/graith": "composition",
     "github.com/d0ugal/graith/internal/agent": "provider",
@@ -12,6 +13,7 @@
     "github.com/d0ugal/graith/internal/architecture": "utility",
     "github.com/d0ugal/graith/internal/atomicfile": "utility",
     "github.com/d0ugal/graith/internal/capabilities": "contract",
+    "github.com/d0ugal/graith/internal/cibaseline": "provider",
     "github.com/d0ugal/graith/internal/cli": "composition",
     "github.com/d0ugal/graith/internal/client": "application",
     "github.com/d0ugal/graith/internal/config": "value",
@@ -47,6 +49,7 @@
   },
   "owners": {
     "github.com/d0ugal/graith/cmd/architecturecheck": "graith-maintainers",
+    "github.com/d0ugal/graith/cmd/cibaseline": "graith-maintainers",
     "github.com/d0ugal/graith/cmd/covreport": "graith-maintainers",
     "github.com/d0ugal/graith/cmd/graith": "graith-maintainers",
     "github.com/d0ugal/graith/internal/agent": "graith-maintainers",
@@ -54,6 +57,7 @@
     "github.com/d0ugal/graith/internal/architecture": "graith-maintainers",
     "github.com/d0ugal/graith/internal/atomicfile": "graith-maintainers",
     "github.com/d0ugal/graith/internal/capabilities": "graith-maintainers",
+    "github.com/d0ugal/graith/internal/cibaseline": "graith-maintainers",
     "github.com/d0ugal/graith/internal/cli": "graith-maintainers",
     "github.com/d0ugal/graith/internal/client": "graith-maintainers",
     "github.com/d0ugal/graith/internal/config": "graith-maintainers",
