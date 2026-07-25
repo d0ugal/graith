@@ -73,7 +73,20 @@ var daemonStartCmd = &cobra.Command{
 			return nil
 		}
 
-		return rootCmd.PersistentPreRunE(cmd, args)
+		if err := rootCmd.PersistentPreRunE(cmd, args); err != nil {
+			return err
+		}
+
+		// Direct daemon launch is performed in a scrubbed child process, so the
+		// parent's process-local capability is intentionally not inherited. The
+		// child must establish its own authority from the protected credential
+		// before entering daemon.Run; an agent with only a session token cannot
+		// satisfy this check.
+		if err := testprocess.EstablishHumanLifecycleAuthorityFromFile(paths.HumanTokenFile); err != nil {
+			return fmt.Errorf("establish human lifecycle authority for daemon bootstrap: %w", err)
+		}
+
+		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if adoptFrom != "" {
