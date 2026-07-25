@@ -83,14 +83,42 @@ metadata and Actions read access:
 ```bash
 GITHUB_TOKEN=... go run ./cmd/cibaseline \
   -repository d0ugal/graith -since 28 \
+  -max-elapsed 10m -max-requests 10000 -max-retries 3 \
   -output /tmp/graith-ci-evidence.json fetch
 ```
+
+Every live fetch has three finite collection limits. The defaults shown above
+allow 10 minutes elapsed time, 10,000 HTTP requests including retry attempts,
+and three rate-limit retries across the whole fetch. A future scheduler can
+lower these with `-max-elapsed`, `-max-requests`, and `-max-retries`; negative
+values are rejected. Explicit zero flag values and zero-valued
+collector-library fields select the same finite defaults. Disabling retries is
+not supported; the minimum explicit retry bound is one.
+
+GitHub primary and secondary limits are retried only within all three budgets.
+The adapter recognizes `429` and `403` responses carrying primary/secondary
+rate-limit signals. `Retry-After` is honored for either kind. A primary limit
+with `X-RateLimit-Remaining: 0` also honors the later
+`X-RateLimit-Reset` boundary with a one-second cushion; a secondary limit does
+not substitute that primary-quota reset for its `Retry-After`. A rate-limit
+response without usable timing metadata, including a zero or already elapsed
+`Retry-After`, receives a conservative 60-second delay, doubled once per prior
+rate-limit retry in the same fetch. Waiting is cancellation-aware. Malformed
+timing metadata, structurally incomplete success responses, exhausted retries,
+a required wait that cannot fit in the remaining elapsed budget,
+request-budget exhaustion, elapsed-budget exhaustion, caller cancellation, and
+request transport failures produce distinct errors.
 
 The adapter requests completed runs only, paginates run, job, artifact, and
 cache lists, records authoritative workflow-run, attempt, per-attempt job,
 per-run artifact, and repository-cache counts, and requires exact cardinality
-at each scope. It fails closed on an incomplete response or the GitHub
-1,000-result search ceiling. Evidence
+at each scope. Each list requiring more than one page is fetched a second time
+and must return the same ordered identity sequence and authoritative count.
+Both passes and any retries consume the same request, retry, and elapsed
+budgets. Over-delivery beyond an authoritative count stops immediately rather
+than accumulating until the request budget expires. The adapter fails closed
+on an incomplete or changing paginated response or the GitHub 1,000-result
+search ceiling. Evidence
 records queue and execution durations separately; every run attempt, including
 startup failures and concurrency cancellations with zero jobs; every job
 attempt and the first outcome; raw passed, failed, skipped, and cancelled
@@ -140,14 +168,16 @@ artifacts do not by themselves establish the requested four-week durable
 baseline. That credential, settings, and retention choice must be approved
 before wiring collection rather than inferred in workflow YAML.
 
-The retained 28-day collection also requires an approved request budget and
-bounded, tested handling for GitHub primary and secondary rate limits. The
-current adapter fails closed on a rate-limit response rather than silently
-writing a partial baseline, and its shorter-window fetch is suitable for
-diagnostics and offline replay validation. Rate-limit resilience and the
-collection time budget are therefore clock-start prerequisites alongside the
-durable destination and token owner; the example `-since 28` command does not
-start or certify the retained window by itself.
+The adapter now supplies bounded, tested primary and secondary rate-limit
+handling and finite collection defaults, but the retained 28-day collection
+still requires maintainers to approve the request/time values for the
+operational environment. Any exhausted budget, exhausted retry allowance,
+cancellation, malformed or incomplete response, changing pagination count, or
+cardinality mismatch fails the entire fetch and returns no snapshot for
+evidence writing. Shorter-window fetches remain suitable for diagnostics and
+offline replay validation. The approved operational budget, durable
+destination, and token owner are all clock-start prerequisites; the example
+`-since 28` command does not start or certify the retained window by itself.
 
 Consequently, the retained live measurement window has **not started**. Record
 its exact UTC start and immutable evidence location when that decision is made.

@@ -30,6 +30,21 @@ func run(args []string) error {
 	input := flags.String("input", "", "offline snapshot/evidence JSON")
 	output := flags.String("output", "", "output path (stdout when empty)")
 	repository := flags.String("repository", "d0ugal/graith", "GitHub owner/repository")
+	maxElapsed := flags.Duration(
+		"max-elapsed",
+		cibaseline.DefaultCollectionMaxElapsed,
+		"maximum elapsed time for a GitHub fetch",
+	)
+	maxRequests := flags.Int(
+		"max-requests",
+		cibaseline.DefaultCollectionMaxRequests,
+		"maximum GitHub HTTP requests including retries",
+	)
+	maxRetries := flags.Int(
+		"max-retries",
+		cibaseline.DefaultCollectionMaxRetries,
+		"maximum rate-limit retries across a GitHub fetch",
+	)
 
 	since := flags.String("since", "1", "RFC3339 start or day lookback (1-28)")
 	if err := flags.Parse(args); err != nil {
@@ -87,15 +102,15 @@ func run(args []string) error {
 			return err
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer cancel()
-
 		collector := cibaseline.GitHubCollector{
-			Token:  os.Getenv("GITHUB_TOKEN"),
-			Client: &http.Client{Timeout: 30 * time.Second},
+			Token:       os.Getenv("GITHUB_TOKEN"),
+			Client:      &http.Client{Timeout: 30 * time.Second},
+			MaxElapsed:  *maxElapsed,
+			MaxRequests: *maxRequests,
+			MaxRetries:  *maxRetries,
 		}
 
-		snapshot, err := collector.Fetch(ctx, *repository, start, inventory)
+		snapshot, err := collector.Fetch(context.Background(), *repository, start, inventory)
 		if err != nil {
 			return err
 		}

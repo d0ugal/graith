@@ -3,13 +3,37 @@ package cibaseline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (function roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
+
+type cancelingReadCloser struct {
+	cancel func()
+	err    error
+}
+
+func (body *cancelingReadCloser) Read([]byte) (int, error) {
+	body.cancel()
+
+	return 0, body.err
+}
+
+func (*cancelingReadCloser) Close() error {
+	return nil
+}
 
 func TestGitHubCollectorFetchesReadOnlyEvidence(t *testing.T) {
 	requests := make([]string, 0)
@@ -34,7 +58,7 @@ func TestGitHubCollectorFetchesReadOnlyEvidence(t *testing.T) {
 
 		switch request.URL.Path {
 		case "/repos/d0ugal/graith/actions/runs":
-			writeResponse(t, writer, `{"total_count":1,"workflow_runs":[{"id":81,"run_attempt":1,"path":".github/workflows/ci.yml@refs/heads/canny/braw","event":"pull_request","head_sha":"braw","pull_requests":[{"number":1}],"created_at":"2026-07-25T10:00:00Z","run_started_at":"2026-07-25T10:00:10Z","updated_at":"2026-07-25T10:01:00Z","status":"completed","conclusion":"success"}]}`)
+			writeResponse(t, writer, `{"total_count":1,"workflow_runs":[{"id":81,"run_attempt":1,"path":".github/workflows/ci.yml@refs/heads/canny/braw","event":"pull_request","head_sha":"braw","head_branch":"canny","pull_requests":[{"number":1}],"created_at":"2026-07-25T10:00:00Z","run_started_at":"2026-07-25T10:00:10Z","updated_at":"2026-07-25T10:01:00Z","status":"completed","conclusion":"success"}]}`)
 		case "/repos/d0ugal/graith/actions/caches":
 			writeResponse(t, writer, `{"total_count":1,"actions_caches":[{"id":91,"key":"croft","ref":"refs/pull/1/merge","size_in_bytes":42,"created_at":"2026-07-25T10:00:00Z","last_accessed_at":"2026-07-25T10:00:30Z","version":"dreich"}]}`)
 		case "/repos/d0ugal/graith/actions/runs/81/attempts/1/jobs":
@@ -136,7 +160,7 @@ func TestGitHubArtifactWireAllowsAdditionsButRequiresNullableTimestamps(t *testi
 		"expired": false,
 		"created_at": null,
 		"updated_at": null
-	}`), &artifact); err == nil || !strings.Contains(err.Error(), "missing required nullable field") {
+	}`), &artifact); err == nil || !strings.Contains(err.Error(), "missing required field") {
 		t.Fatalf("UnmarshalJSON(missing API timestamp) error = %v, want rejection", err)
 	}
 }
@@ -168,9 +192,9 @@ func TestGitHubCollectorFetchesAttemptScopedRunMetadata(t *testing.T) {
 				attemptPath,
 			))
 		case "/repos/d0ugal/graith/actions/runs/81/attempts/1/jobs":
-			writeResponse(t, writer, `{"total_count":1,"jobs":[{"id":82,"name":"Lint","status":"completed","conclusion":"failure","created_at":"2026-07-25T10:00:00Z","started_at":"2026-07-25T10:00:10Z","completed_at":"2026-07-25T10:01:00Z"}]}`)
+			writeResponse(t, writer, `{"total_count":1,"jobs":[{"id":82,"name":"Lint","status":"completed","conclusion":"failure","created_at":"2026-07-25T10:00:00Z","started_at":"2026-07-25T10:00:10Z","completed_at":"2026-07-25T10:01:00Z","runner_name":null,"runner_group_name":null,"labels":[]}]}`)
 		case "/repos/d0ugal/graith/actions/runs/81/attempts/2/jobs":
-			writeResponse(t, writer, `{"total_count":1,"jobs":[{"id":83,"name":"Lint","status":"completed","conclusion":"cancelled","created_at":"2026-07-25T10:05:00Z","started_at":"2026-07-25T10:05:10Z","completed_at":"2026-07-25T10:06:00Z"}]}`)
+			writeResponse(t, writer, `{"total_count":1,"jobs":[{"id":83,"name":"Lint","status":"completed","conclusion":"cancelled","created_at":"2026-07-25T10:05:00Z","started_at":"2026-07-25T10:05:10Z","completed_at":"2026-07-25T10:06:00Z","runner_name":null,"runner_group_name":null,"labels":[]}]}`)
 		case "/repos/d0ugal/graith/actions/caches":
 			writeResponse(t, writer, `{"total_count":0,"actions_caches":[]}`)
 		case "/repos/d0ugal/graith/actions/runs/81/artifacts":
@@ -208,7 +232,7 @@ func TestGitHubCollectorFetchesAttemptScopedRunMetadata(t *testing.T) {
 	omittedAttemptIdentity = true
 
 	if _, err := collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-time.Hour), loadInventory(t)); err == nil ||
-		!strings.Contains(err.Error(), "mismatched metadata") {
+		!strings.Contains(err.Error(), "missing required field") {
 		t.Fatalf("Fetch(omitted identity) error = %v, want fail-closed rejection", err)
 	}
 }
@@ -283,9 +307,7 @@ func TestGitHubRunIdentityIncludesWorkflowRefAndChangeCoordinate(t *testing.T) {
 		Path: ".github/workflows/ci.yml@refs/pull/7/merge", Event: "pull_request",
 		HeadSHA: "braw", HeadBranch: "canny",
 	}
-	base.PullRequests = append(base.PullRequests, struct {
-		Number int64 `json:"number"`
-	}{Number: 7})
+	base.PullRequests = append(base.PullRequests, githubPullRequest{Number: 7})
 
 	tests := []struct {
 		name string
@@ -300,9 +322,7 @@ func TestGitHubRunIdentityIncludesWorkflowRefAndChangeCoordinate(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			next := base
-			next.PullRequests = append([]struct {
-				Number int64 `json:"number"`
-			}(nil), base.PullRequests...)
+			next.PullRequests = append([]githubPullRequest(nil), base.PullRequests...)
 			test.edit(&next)
 
 			if sameGitHubRunIdentity(base, next) {
@@ -383,10 +403,12 @@ func TestFetchJobsAndArtifactsPaginate(t *testing.T) {
 
 			if page == "1" {
 				for index := 1; index <= 100; index++ {
-					response.Jobs = append(response.Jobs, githubJob{ID: int64(index), Name: fmt.Sprintf("braw-%d", index)})
+					response.Jobs = append(response.Jobs, githubJob{
+						ID: int64(index), Name: fmt.Sprintf("braw-%d", index), Labels: []string{},
+					})
 				}
 			} else {
-				response.Jobs = []githubJob{{ID: 101, Name: "canny"}}
+				response.Jobs = []githubJob{{ID: 101, Name: "canny", Labels: []string{}}}
 			}
 
 			if err := json.NewEncoder(writer).Encode(response); err != nil {
@@ -480,7 +502,7 @@ func TestPaginationTotalsFailClosed(t *testing.T) {
 
 				switch test.name {
 				case "caches":
-					page := githubCachesPage{TotalCount: total}
+					page := githubCachesPage{TotalCount: total, Caches: []githubCache{}}
 					for index := 0; index < count; index++ {
 						page.Caches = append(page.Caches, githubCache{ID: int64(index + 1)})
 					}
@@ -489,16 +511,16 @@ func TestPaginationTotalsFailClosed(t *testing.T) {
 						t.Errorf("encode caches: %v", err)
 					}
 				case "jobs":
-					page := githubJobsPage{TotalCount: total}
+					page := githubJobsPage{TotalCount: total, Jobs: []githubJob{}}
 					for index := 0; index < count; index++ {
-						page.Jobs = append(page.Jobs, githubJob{ID: int64(index + 1)})
+						page.Jobs = append(page.Jobs, githubJob{ID: int64(index + 1), Labels: []string{}})
 					}
 
 					if err := json.NewEncoder(writer).Encode(page); err != nil {
 						t.Errorf("encode jobs: %v", err)
 					}
 				case "artifacts":
-					page := githubArtifactsPage{TotalCount: total}
+					page := githubArtifactsPage{TotalCount: total, Artifacts: []githubArtifact{}}
 					for index := 0; index < count; index++ {
 						page.Artifacts = append(page.Artifacts, githubArtifact{ID: int64(index + 1)})
 					}
@@ -709,5 +731,937 @@ func TestCostFieldsFailClosed(t *testing.T) {
 				t.Fatalf("validateCost() accepted %s", test.name)
 			}
 		})
+	}
+}
+
+func TestGitHubCollectorRateLimitWaitMetadata(t *testing.T) {
+	baseTime := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	tests := map[string]struct {
+		status  int
+		headers map[string]string
+		body    string
+		want    time.Duration
+	}{
+		"primary reset with boundary cushion": {
+			status: http.StatusForbidden,
+			headers: map[string]string{
+				"X-RateLimit-Remaining": "0",
+				"X-RateLimit-Reset":     strconv.FormatInt(baseTime.Add(5*time.Second).Unix(), 10),
+			},
+			body: `{"message":"API rate limit exceeded"}`,
+			want: 6 * time.Second,
+		},
+		"secondary conservative fallback": {
+			status: http.StatusForbidden,
+			body:   `{"message":"You have exceeded a secondary rate limit"}`,
+			want:   time.Minute,
+		},
+		"retry after seconds": {
+			status:  http.StatusTooManyRequests,
+			headers: map[string]string{"Retry-After": "7"},
+			body:    `{"message":"slow down"}`,
+			want:    7 * time.Second,
+		},
+		"secondary ignores primary reset window": {
+			status: http.StatusForbidden,
+			headers: map[string]string{
+				"Retry-After":           "7",
+				"X-RateLimit-Remaining": "42",
+				"X-RateLimit-Reset":     strconv.FormatInt(baseTime.Add(time.Hour).Unix(), 10),
+			},
+			body: `{"message":"secondary rate limit"}`,
+			want: 7 * time.Second,
+		},
+		"retry after HTTP date": {
+			status: http.StatusTooManyRequests,
+			headers: map[string]string{
+				"Retry-After": baseTime.Add(9 * time.Second).Format(http.TimeFormat),
+			},
+			body: `{"message":"slow down"}`,
+			want: 9 * time.Second,
+		},
+		"zero retry after uses conservative fallback": {
+			status:  http.StatusTooManyRequests,
+			headers: map[string]string{"Retry-After": "0"},
+			body:    `{"message":"slow down"}`,
+			want:    time.Minute,
+		},
+		"past retry after date uses conservative fallback": {
+			status: http.StatusTooManyRequests,
+			headers: map[string]string{
+				"Retry-After": baseTime.Add(-time.Second).Format(http.TimeFormat),
+			},
+			body: `{"message":"slow down"}`,
+			want: time.Minute,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			requests := 0
+
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				requests++
+
+				writer.Header().Set("Content-Type", "application/json")
+
+				if requests == 1 {
+					for key, value := range test.headers {
+						writer.Header().Set(key, value)
+					}
+
+					writer.WriteHeader(test.status)
+					writeResponse(t, writer, test.body)
+
+					return
+				}
+
+				writeResponse(t, writer, `{"croft":"bothy"}`)
+			}))
+			defer server.Close()
+
+			var (
+				now   = baseTime
+				waits []time.Duration
+			)
+
+			collector := GitHubCollector{
+				Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+				Wait: func(_ context.Context, delay time.Duration) error {
+					waits = append(waits, delay)
+					now = now.Add(delay)
+
+					return nil
+				},
+				MaxElapsed: time.Hour, MaxRequests: 10, MaxRetries: 2,
+			}
+
+			var target map[string]string
+			if err := collector.get(context.Background(), "/braw", &target); err != nil {
+				t.Fatal(err)
+			}
+
+			if requests != 2 || len(waits) != 1 || waits[0] != test.want || target["croft"] != "bothy" {
+				t.Fatalf("requests = %d, waits = %v, target = %#v; want one %s wait and complete retry", requests, waits, target, test.want)
+			}
+		})
+	}
+}
+
+func TestGitHubRateLimitClassificationAndMalformedMetadata(t *testing.T) {
+	classifications := map[string]struct {
+		headers map[string]string
+		want    string
+	}{
+		"primary": {
+			headers: map[string]string{"X-RateLimit-Remaining": "0"},
+			want:    "primary",
+		},
+		"secondary": {
+			headers: map[string]string{"X-RateLimit-Remaining": "42"},
+			want:    "secondary",
+		},
+	}
+
+	for name, test := range classifications {
+		t.Run(name, func(t *testing.T) {
+			response := &http.Response{StatusCode: http.StatusTooManyRequests, Header: make(http.Header)}
+			for key, value := range test.headers {
+				response.Header.Set(key, value)
+			}
+
+			limit, limited, err := parseRateLimit(response, nil, time.Now())
+			if err != nil || !limited || limit.kind != test.want {
+				t.Fatalf("parseRateLimit() = %#v, %t, %v; want %s classification", limit, limited, err, test.want)
+			}
+		})
+	}
+
+	malformed := map[string]map[string]string{
+		"remaining":   {"X-RateLimit-Remaining": "dreich"},
+		"reset":       {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "thrawn"},
+		"reset range": {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "9223372036854775807"},
+		"retry after": {"Retry-After": "-1"},
+		"overflow":    {"Retry-After": "9223372036854775807"},
+	}
+
+	for name, headers := range malformed {
+		t.Run("malformed "+name, func(t *testing.T) {
+			response := &http.Response{StatusCode: http.StatusTooManyRequests, Header: make(http.Header)}
+			for key, value := range headers {
+				response.Header.Set(key, value)
+			}
+
+			if _, _, err := parseRateLimit(response, nil, time.Now()); err == nil {
+				t.Fatalf("parseRateLimit() accepted malformed %s metadata", name)
+			}
+		})
+	}
+}
+
+func TestGitHubCollectorDefaultsAreFinite(t *testing.T) {
+	collector, err := (GitHubCollector{}).configured()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if collector.MaxElapsed != DefaultCollectionMaxElapsed ||
+		collector.MaxRequests != DefaultCollectionMaxRequests ||
+		collector.MaxRetries != DefaultCollectionMaxRetries ||
+		collector.MaxElapsed <= 0 || collector.MaxRequests <= 0 || collector.MaxRetries <= 0 {
+		t.Fatalf(
+			"configured limits = %s, %d, %d; want finite defaults %s, %d, %d",
+			collector.MaxElapsed, collector.MaxRequests, collector.MaxRetries,
+			DefaultCollectionMaxElapsed, DefaultCollectionMaxRequests, DefaultCollectionMaxRetries,
+		)
+	}
+}
+
+func TestGitHubCollectorRateLimitRetryExhaustion(t *testing.T) {
+	requests := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		requests++
+
+		writer.Header().Set("Retry-After", "1")
+		http.Error(writer, "secondary rate limit", http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	collector := GitHubCollector{
+		Client: server.Client(), BaseURL: server.URL, MaxElapsed: time.Minute, MaxRequests: 10, MaxRetries: 1,
+		Wait: func(context.Context, time.Duration) error {
+			return nil
+		},
+	}
+
+	var target map[string]string
+
+	err := collector.get(context.Background(), "/canny", &target)
+	if !errors.Is(err, ErrGitHubRateLimited) || !strings.Contains(err.Error(), "retry limit 1 exhausted") {
+		t.Fatalf("get() error = %v, want rate-limit retry exhaustion", err)
+	}
+
+	if requests != 2 {
+		t.Fatalf("requests = %d, want initial request plus one retry", requests)
+	}
+}
+
+func TestGitHubCollectorBoundsMetadataFreeRateLimitBackoff(t *testing.T) {
+	requests := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		requests++
+		if requests <= 2 {
+			http.Error(writer, "secondary rate limit", http.StatusForbidden)
+
+			return
+		}
+
+		writeResponse(t, writer, `{}`)
+	}))
+	defer server.Close()
+
+	var (
+		now   = time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+		waits []time.Duration
+	)
+
+	collector := GitHubCollector{
+		Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+		MaxElapsed: 5 * time.Minute, MaxRequests: 3, MaxRetries: 2,
+		Wait: func(_ context.Context, delay time.Duration) error {
+			waits = append(waits, delay)
+			now = now.Add(delay)
+
+			return nil
+		},
+	}
+
+	var target map[string]any
+	if err := collector.get(context.Background(), "/bairn", &target); err != nil {
+		t.Fatal(err)
+	}
+
+	if requests != 3 || !reflect.DeepEqual(waits, []time.Duration{time.Minute, 2 * time.Minute}) {
+		t.Fatalf("requests = %d, waits = %v; want bounded exponential waits", requests, waits)
+	}
+}
+
+func TestGitHubCollectorBudgets(t *testing.T) {
+	t.Run("request budget", func(t *testing.T) {
+		requests := 0
+
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			requests++
+
+			writer.Header().Set("Retry-After", "1")
+			http.Error(writer, "secondary rate limit", http.StatusTooManyRequests)
+		}))
+		defer server.Close()
+
+		collector := GitHubCollector{
+			Client: server.Client(), BaseURL: server.URL, MaxElapsed: time.Minute, MaxRequests: 1, MaxRetries: 1,
+		}
+
+		var target map[string]any
+		if err := collector.get(context.Background(), "/canny", &target); !errors.Is(err, ErrCollectionBudgetExhausted) ||
+			!strings.Contains(err.Error(), "request limit 1 reached") {
+			t.Fatalf("get() error = %v, want request-budget exhaustion", err)
+		}
+
+		if requests != 1 {
+			t.Fatalf("requests = %d, want retry blocked by request budget", requests)
+		}
+	})
+
+	t.Run("elapsed budget", func(t *testing.T) {
+		now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			now = now.Add(2 * time.Minute)
+
+			writeResponse(t, writer, `{}`)
+		}))
+		defer server.Close()
+
+		collector := GitHubCollector{
+			Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+			MaxElapsed: time.Minute, MaxRequests: 2, MaxRetries: 1,
+		}
+
+		var target map[string]any
+		if err := collector.get(context.Background(), "/dreich", &target); !errors.Is(err, ErrCollectionBudgetExhausted) ||
+			!strings.Contains(err.Error(), "elapsed limit") {
+			t.Fatalf("get() error = %v, want elapsed-budget exhaustion", err)
+		}
+	})
+
+	t.Run("rate-limit wait exceeds elapsed budget", func(t *testing.T) {
+		waitCalled := false
+
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			writer.Header().Set("Retry-After", "120")
+			http.Error(writer, "secondary rate limit", http.StatusTooManyRequests)
+		}))
+		defer server.Close()
+
+		collector := GitHubCollector{
+			Client: server.Client(), BaseURL: server.URL, MaxElapsed: time.Minute, MaxRequests: 2, MaxRetries: 1,
+			Wait: func(context.Context, time.Duration) error {
+				waitCalled = true
+
+				return nil
+			},
+		}
+
+		var target map[string]any
+		if err := collector.get(context.Background(), "/strath", &target); !errors.Is(err, ErrCollectionBudgetExhausted) ||
+			!strings.Contains(err.Error(), "required wait 2m0s exceeds remaining time") {
+			t.Fatalf("get() error = %v, want rate-limit wait budget exhaustion", err)
+		}
+
+		if waitCalled {
+			t.Fatal("collector waited after proving the delay could not fit in the elapsed budget")
+		}
+	})
+}
+
+func TestGitHubCollectorCancellationDuringRateLimitWait(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Retry-After", "30")
+		http.Error(writer, "secondary rate limit", http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	collector := GitHubCollector{
+		Client: server.Client(), BaseURL: server.URL, MaxElapsed: time.Minute, MaxRequests: 2, MaxRetries: 1,
+		Wait: func(waitCtx context.Context, _ time.Duration) error {
+			cancel()
+			<-waitCtx.Done()
+
+			return waitCtx.Err()
+		},
+	}
+
+	var target map[string]any
+
+	err := collector.get(ctx, "/blether", &target)
+	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "collection cancelled") {
+		t.Fatalf("get() error = %v, want cancellation during wait", err)
+	}
+}
+
+func TestGitHubCollectorDoesNotMisclassifyTransportTimeoutAsCancellation(t *testing.T) {
+	transportErr := fmt.Errorf("transport timeout: %w", context.DeadlineExceeded)
+	collector := GitHubCollector{
+		Client: &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			return nil, transportErr
+		})},
+		BaseURL: "https://api.github.test", MaxElapsed: time.Minute, MaxRequests: 1, MaxRetries: 1,
+	}
+
+	var target map[string]any
+
+	err := collector.get(context.Background(), "/timeout", &target)
+	if !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "collection cancelled") {
+		t.Fatalf("get() error = %v, want distinct transport timeout", err)
+	}
+}
+
+func TestGitHubCollectorClassifiesCancellationDuringResponseBodyRead(t *testing.T) {
+	tests := map[string]struct {
+		callerCancellation bool
+		statusCode         int
+		want               string
+		wantBudget         bool
+	}{
+		"caller cancellation": {
+			callerCancellation: true,
+			statusCode:         http.StatusOK,
+			want:               "GitHub collection cancelled",
+		},
+		"elapsed context cancellation reading error body": {
+			statusCode: http.StatusInternalServerError,
+			want:       "elapsed limit",
+			wantBudget: true,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			parent := context.Background()
+			requestContext, cancel := context.WithCancel(context.Background())
+
+			if test.callerCancellation {
+				parent = requestContext
+			}
+
+			collector := GitHubCollector{
+				Client: &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: test.statusCode,
+						Status:     http.StatusText(test.statusCode),
+						Header:     make(http.Header),
+						Body:       &cancelingReadCloser{cancel: cancel, err: context.Canceled},
+					}, nil
+				})},
+				BaseURL: "https://api.github.test",
+				budget: &collectionBudget{
+					parent: parent, now: time.Now, wait: waitForContext, startedAt: time.Now(),
+					maxElapsed: time.Minute, maxRequests: 1, maxRetries: 1,
+				},
+			}
+
+			var target map[string]any
+
+			err := collector.get(requestContext, "/body-cancellation", &target)
+			if err == nil || !strings.Contains(err.Error(), test.want) ||
+				errors.Is(err, ErrCollectionBudgetExhausted) != test.wantBudget {
+				t.Fatalf("get() error = %v, want %q with budget=%t", err, test.want, test.wantBudget)
+			}
+		})
+	}
+}
+
+func TestFetchCachesPaginatesAcrossRateLimitRetry(t *testing.T) {
+	pageOneRequests := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+
+		page := request.URL.Query().Get("page")
+		if page == "1" {
+			pageOneRequests++
+			if pageOneRequests == 1 {
+				writer.Header().Set("Retry-After", "1")
+				http.Error(writer, "secondary rate limit", http.StatusTooManyRequests)
+
+				return
+			}
+		}
+
+		response := githubCachesPage{TotalCount: 101}
+
+		switch page {
+		case "1":
+			for index := 1; index <= 100; index++ {
+				response.Caches = append(response.Caches, githubCache{ID: int64(index), Key: fmt.Sprintf("croft-%d", index)})
+			}
+		case "2":
+			response.Caches = []githubCache{{ID: 101, Key: "bothy"}}
+		default:
+			t.Errorf("unexpected page %q", page)
+		}
+
+		if err := json.NewEncoder(writer).Encode(response); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	collector := GitHubCollector{
+		Client: server.Client(), BaseURL: server.URL, MaxElapsed: time.Minute, MaxRequests: 4, MaxRetries: 1,
+		Wait: func(context.Context, time.Duration) error {
+			return nil
+		},
+	}
+
+	caches, expected, err := collector.fetchCaches(context.Background(), "d0ugal/graith")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if pageOneRequests != 3 || expected != 101 || len(caches) != 101 || caches[100].Key != "bothy" {
+		t.Fatalf("page one requests = %d, expected = %d, caches = %d; pagination lost data across retry", pageOneRequests, expected, len(caches))
+	}
+}
+
+func TestGitHubCollectorReturnsNoPartialSnapshotAfterRateLimitExhaustion(t *testing.T) {
+	pageTwoRequests := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+
+		if request.URL.Query().Get("page") == "2" {
+			pageTwoRequests++
+
+			writer.Header().Set("Retry-After", "1")
+			http.Error(writer, "secondary rate limit", http.StatusTooManyRequests)
+
+			return
+		}
+
+		page := githubRunsPage{TotalCount: 101, Runs: make([]githubRun, 100)}
+		for index := range page.Runs {
+			page.Runs[index].PullRequests = []githubPullRequest{}
+		}
+
+		if err := json.NewEncoder(writer).Encode(page); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	collector := GitHubCollector{
+		Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+		MaxElapsed: time.Minute, MaxRequests: 3, MaxRetries: 1,
+		Wait: func(context.Context, time.Duration) error {
+			return nil
+		},
+	}
+
+	snapshot, err := collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-time.Hour), loadInventory(t))
+	if !errors.Is(err, ErrGitHubRateLimited) {
+		t.Fatalf("Fetch() error = %v, want exhausted rate limit", err)
+	}
+
+	if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) || pageTwoRequests != 2 {
+		t.Fatalf("Fetch() returned partial snapshot %#v after %d page-two requests", snapshot, pageTwoRequests)
+	}
+}
+
+func TestGitHubCollectorRejectsMalformedOrIncompleteResponses(t *testing.T) {
+	tests := map[string]string{
+		"incomplete JSON": `{"croft":`,
+		"trailing JSON":   `{} {}`,
+	}
+
+	for name, body := range tests {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				writeResponse(t, writer, body)
+			}))
+			defer server.Close()
+
+			collector := GitHubCollector{
+				Client: server.Client(), BaseURL: server.URL, MaxElapsed: time.Minute, MaxRequests: 1, MaxRetries: 1,
+			}
+
+			var target map[string]any
+			if err := collector.get(context.Background(), "/thrawn", &target); err == nil ||
+				!strings.Contains(err.Error(), "malformed") {
+				t.Fatalf("get() error = %v, want malformed/incomplete response rejection", err)
+			}
+		})
+	}
+}
+
+func TestGitHubResponseObjectsRequireAuthoritativeFields(t *testing.T) {
+	tests := map[string]struct {
+		body   string
+		target func() any
+	}{
+		"null runs page": {
+			body:   `null`,
+			target: func() any { return &githubRunsPage{} },
+		},
+		"empty runs page": {
+			body:   `{}`,
+			target: func() any { return &githubRunsPage{} },
+		},
+		"runs missing count": {
+			body:   `{"workflow_runs":[]}`,
+			target: func() any { return &githubRunsPage{} },
+		},
+		"runs missing collection": {
+			body:   `{"total_count":0}`,
+			target: func() any { return &githubRunsPage{} },
+		},
+		"null jobs collection": {
+			body:   `{"total_count":0,"jobs":null}`,
+			target: func() any { return &githubJobsPage{} },
+		},
+		"artifacts missing collection": {
+			body:   `{"total_count":0}`,
+			target: func() any { return &githubArtifactsPage{} },
+		},
+		"caches missing collection": {
+			body:   `{"total_count":0}`,
+			target: func() any { return &githubCachesPage{} },
+		},
+		"timing missing billable": {
+			body:   `{}`,
+			target: func() any { return &githubTiming{} },
+		},
+		"timing null billable": {
+			body:   `{"billable":null}`,
+			target: func() any { return &githubTiming{} },
+		},
+		"billable usage missing total": {
+			body:   `{"billable":{"UBUNTU":{}}}`,
+			target: func() any { return &githubTiming{} },
+		},
+		"artifact missing size": {
+			body: `{
+				"id":1,"name":"braw","expired":false,
+				"created_at":null,"updated_at":null,"expires_at":null
+			}`,
+			target: func() any { return &githubArtifact{} },
+		},
+		"artifact missing expired": {
+			body: `{
+				"id":1,"name":"braw","size_in_bytes":0,
+				"created_at":null,"updated_at":null,"expires_at":null
+			}`,
+			target: func() any { return &githubArtifact{} },
+		},
+		"cache missing size": {
+			body: `{
+				"id":1,"key":"braw","ref":"refs/heads/main",
+				"created_at":"2026-07-25T12:00:00Z","last_accessed_at":"2026-07-25T12:00:00Z"
+			}`,
+			target: func() any { return &githubCache{} },
+		},
+		"run missing pull requests": {
+			body: `{
+				"id":1,"run_attempt":1,"path":".github/workflows/ci.yml","event":"push",
+				"head_sha":"0123456789012345678901234567890123456789","head_branch":"main",
+				"created_at":"2026-07-25T12:00:00Z","run_started_at":null,
+				"updated_at":"2026-07-25T12:00:01Z","status":"completed","conclusion":"success"
+			}`,
+			target: func() any { return &githubRun{} },
+		},
+		"job missing labels": {
+			body: `{
+				"id":1,"name":"braw","status":"completed","conclusion":"success",
+				"created_at":"2026-07-25T12:00:00Z","started_at":"2026-07-25T12:00:00Z",
+				"completed_at":"2026-07-25T12:00:01Z","runner_name":"canny",
+				"runner_group_name":"bothy"
+			}`,
+			target: func() any { return &githubJob{} },
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if err := json.Unmarshal([]byte(test.body), test.target()); err == nil {
+				t.Fatalf("json.Unmarshal(%s) accepted structurally incomplete response", test.body)
+			}
+		})
+	}
+}
+
+func TestGitHubCollectorRejectsDuplicateRunIDsAcrossStablePagination(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+
+		page := githubRunsPage{TotalCount: 101}
+
+		switch request.URL.Query().Get("page") {
+		case "1":
+			page.Runs = make([]githubRun, 100)
+			for index := range page.Runs {
+				page.Runs[index].ID = int64(index + 1)
+				page.Runs[index].PullRequests = []githubPullRequest{}
+			}
+		case "2":
+			page.Runs = []githubRun{{ID: 100, PullRequests: []githubPullRequest{}}}
+		default:
+			t.Fatalf("unexpected request %s", request.URL.String())
+		}
+
+		if err := json.NewEncoder(writer).Encode(page); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	collector := GitHubCollector{
+		Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+		MaxElapsed: time.Minute, MaxRequests: 2, MaxRetries: 1,
+	}
+
+	snapshot, err := collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-time.Hour), loadInventory(t))
+	if err == nil || !strings.Contains(err.Error(), "duplicate raw workflow run ID 100") {
+		t.Fatalf("Fetch() error = %v, want stable-count duplicate rejection", err)
+	}
+
+	if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) {
+		t.Fatalf("Fetch() returned partial snapshot %#v", snapshot)
+	}
+}
+
+type githubPaginationTestCase struct {
+	path string
+	call func(*testing.T, GitHubCollector) error
+}
+
+func githubPaginationTestCases(now time.Time) map[string]githubPaginationTestCase {
+	return map[string]githubPaginationTestCase{
+		"workflow runs": {
+			path: "/repos/d0ugal/graith/actions/runs",
+			call: func(t *testing.T, collector GitHubCollector) error {
+				snapshot, err := collector.Fetch(
+					context.Background(), "d0ugal/graith", now.Add(-time.Hour), loadInventory(t),
+				)
+				if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) {
+					t.Fatalf("Fetch() returned partial snapshot %#v", snapshot)
+				}
+
+				return err
+			},
+		},
+		"caches": {
+			path: "/repos/d0ugal/graith/actions/caches",
+			call: func(t *testing.T, collector GitHubCollector) error {
+				caches, _, err := collector.fetchCaches(context.Background(), "d0ugal/graith")
+				if err != nil && caches != nil {
+					t.Fatalf("fetchCaches() returned partial caches %#v", caches)
+				}
+
+				return err
+			},
+		},
+		"jobs": {
+			path: "/repos/d0ugal/graith/actions/runs/81/attempts/1/jobs",
+			call: func(t *testing.T, collector GitHubCollector) error {
+				jobs, _, err := collector.fetchJobs(context.Background(), "d0ugal/graith", 81, 1)
+				if err != nil && jobs != nil {
+					t.Fatalf("fetchJobs() returned partial jobs %#v", jobs)
+				}
+
+				return err
+			},
+		},
+		"artifacts": {
+			path: "/repos/d0ugal/graith/actions/runs/81/artifacts",
+			call: func(t *testing.T, collector GitHubCollector) error {
+				artifacts, _, err := collector.fetchArtifacts(context.Background(), "d0ugal/graith", 81)
+				if err != nil && artifacts != nil {
+					t.Fatalf("fetchArtifacts() returned partial artifacts %#v", artifacts)
+				}
+
+				return err
+			},
+		},
+	}
+}
+
+func TestGitHubPaginationStopsAtAuthoritativeCount(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	tests := githubPaginationTestCases(now)
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			requests := 0
+
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				requests++
+
+				if request.URL.Path != test.path {
+					t.Fatalf("request path = %q, want %q", request.URL.Path, test.path)
+				}
+
+				ids := make([]int64, 100)
+				for index := range ids {
+					ids[index] = int64(index + 1)
+				}
+
+				writeGitHubIdentityPage(t, writer, name, 100, ids)
+			}))
+			defer server.Close()
+
+			collector := GitHubCollector{
+				Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+				MaxElapsed: time.Hour, MaxRequests: 10, MaxRetries: 1,
+			}
+
+			err := test.call(t, collector)
+			if err == nil || !strings.Contains(err.Error(), "returned more") {
+				t.Fatalf("%s error = %v, want authoritative-count over-delivery rejection", name, err)
+			}
+
+			if requests != 2 {
+				t.Fatalf("%s requests = %d, want rejection on page 2", name, requests)
+			}
+		})
+	}
+}
+
+func TestGitHubPaginationConsistencyPassRejectsReplacementChurn(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	tests := githubPaginationTestCases(now)
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			requests := 0
+
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				requests++
+
+				if request.URL.Path != test.path {
+					t.Fatalf("request path = %q, want %q", request.URL.Path, test.path)
+				}
+
+				offset := int64(0)
+				if requests > 2 {
+					offset = 1
+				}
+
+				var ids []int64
+
+				switch request.URL.Query().Get("page") {
+				case "1":
+					ids = make([]int64, 100)
+					for index := range ids {
+						ids[index] = int64(index+1) + offset
+					}
+				case "2":
+					ids = []int64{101 + offset}
+				default:
+					t.Fatalf("unexpected request %s", request.URL.String())
+				}
+
+				writeGitHubIdentityPage(t, writer, name, 101, ids)
+			}))
+			defer server.Close()
+
+			collector := GitHubCollector{
+				Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+				MaxElapsed: time.Hour, MaxRequests: 10, MaxRetries: 1,
+			}
+
+			err := test.call(t, collector)
+			if err == nil || !strings.Contains(err.Error(), "identities changed during pagination consistency pass") {
+				t.Fatalf("%s error = %v, want replacement-churn rejection", name, err)
+			}
+
+			if requests != 4 {
+				t.Fatalf("%s requests = %d, want two complete bounded passes", name, requests)
+			}
+		})
+	}
+}
+
+func TestGitHubPaginationConsistencyPassUsesSharedRequestBudget(t *testing.T) {
+	requests := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+
+		var ids []int64
+		if request.URL.Query().Get("page") == "1" {
+			ids = make([]int64, 100)
+			for index := range ids {
+				ids[index] = int64(index + 1)
+			}
+		} else {
+			ids = []int64{101}
+		}
+
+		writeGitHubIdentityPage(t, writer, "workflow runs", 101, ids)
+	}))
+	defer server.Close()
+
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	collector := GitHubCollector{
+		Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+		MaxElapsed: time.Hour, MaxRequests: 3, MaxRetries: 1,
+	}
+
+	snapshot, err := collector.Fetch(
+		context.Background(), "d0ugal/graith", now.Add(-time.Hour), loadInventory(t),
+	)
+	if !errors.Is(err, ErrCollectionBudgetExhausted) || !strings.Contains(err.Error(), "request limit 3 reached") {
+		t.Fatalf("Fetch() error = %v, want consistency-pass request-budget exhaustion", err)
+	}
+
+	if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) {
+		t.Fatalf("Fetch() returned partial snapshot %#v", snapshot)
+	}
+
+	if requests != 3 {
+		t.Fatalf("requests = %d, want shared request budget to stop before fourth request", requests)
+	}
+}
+
+func writeGitHubIdentityPage(t *testing.T, writer http.ResponseWriter, kind string, total int, ids []int64) {
+	t.Helper()
+
+	writer.Header().Set("Content-Type", "application/json")
+
+	switch kind {
+	case "workflow runs":
+		page := githubRunsPage{TotalCount: total, Runs: make([]githubRun, 0, len(ids))}
+		for _, id := range ids {
+			page.Runs = append(page.Runs, githubRun{ID: id, PullRequests: []githubPullRequest{}})
+		}
+
+		if err := json.NewEncoder(writer).Encode(page); err != nil {
+			t.Errorf("encode workflow runs: %v", err)
+		}
+	case "caches":
+		page := githubCachesPage{TotalCount: total, Caches: make([]githubCache, 0, len(ids))}
+		for _, id := range ids {
+			page.Caches = append(page.Caches, githubCache{ID: id})
+		}
+
+		if err := json.NewEncoder(writer).Encode(page); err != nil {
+			t.Errorf("encode caches: %v", err)
+		}
+	case "jobs":
+		page := githubJobsPage{TotalCount: total, Jobs: make([]githubJob, 0, len(ids))}
+		for _, id := range ids {
+			page.Jobs = append(page.Jobs, githubJob{ID: id, Labels: []string{}})
+		}
+
+		if err := json.NewEncoder(writer).Encode(page); err != nil {
+			t.Errorf("encode jobs: %v", err)
+		}
+	case "artifacts":
+		page := githubArtifactsPage{TotalCount: total, Artifacts: make([]githubArtifact, 0, len(ids))}
+		for _, id := range ids {
+			page.Artifacts = append(page.Artifacts, githubArtifact{ID: id})
+		}
+
+		if err := json.NewEncoder(writer).Encode(page); err != nil {
+			t.Errorf("encode artifacts: %v", err)
+		}
+	default:
+		t.Fatalf("unknown identity page kind %q", kind)
 	}
 }
