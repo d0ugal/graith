@@ -44,7 +44,12 @@ func refreshSessions(msg any) []protocol.SessionInfo {
 		return nil
 	}
 
-	return list.Sessions
+	// Nil is the overlay refresh path's failure sentinel, so represent a
+	// successful empty response with a non-nil empty slice.
+	sessions := make([]protocol.SessionInfo, len(list.Sessions))
+	copy(sessions, list.Sessions)
+
+	return sessions
 }
 
 func sessionRefresher() func() []protocol.SessionInfo {
