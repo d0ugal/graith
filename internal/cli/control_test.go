@@ -252,6 +252,14 @@ func TestFetchSessionList(t *testing.T) {
 		}
 	})
 
+	t.Run("daemon error propagates", func(t *testing.T) {
+		c := &scriptedConn{responses: []scriptedResp{okResp(errEnv("dreich list"))}}
+
+		if _, err := fetchSessionList(c, struct{}{}); err == nil || err.Error() != "dreich list" {
+			t.Fatalf("err = %v, want dreich list", err)
+		}
+	})
+
 	t.Run("decode error propagates", func(t *testing.T) {
 		// An envelope with no payload can't decode into SessionListMsg.
 		c := &scriptedConn{responses: []scriptedResp{okResp(typeEnv("session_list"))}}

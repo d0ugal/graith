@@ -189,6 +189,19 @@ func TestSessionRefreshers(t *testing.T) {
 		}
 	})
 
+	t.Run("successful empty response is non-nil", func(t *testing.T) {
+		withScriptedControl(t, okResp(payloadEnv("session_list", protocol.SessionListMsg{})))
+
+		got := deletedRefresher()()
+		if got == nil {
+			t.Fatal("successful empty response must differ from the nil failure sentinel")
+		}
+
+		if len(got) != 0 {
+			t.Fatalf("got %d deleted sessions, want 0", len(got))
+		}
+	})
+
 	t.Run("sessionRefresher read error yields nil", func(t *testing.T) {
 		withScriptedControl(t, errResp(errors.New("boom")))
 

@@ -793,6 +793,10 @@ type refreshSessionsMsg struct {
 	deleted  []protocol.SessionInfo
 }
 
+type refreshDeletedMsg struct {
+	sessions []protocol.SessionInfo
+}
+
 type overlayModel struct {
 	list             list.Model
 	filterInput      textinput.Model
@@ -815,6 +819,7 @@ type overlayModel struct {
 	toggleStar       func(sessionID string, star bool) error
 	restoreSession   func(sessionID string) error
 	deletedSessions  []protocol.SessionInfo
+	deletedReady     bool
 	previewContent   string
 	previewSessionID string
 	profile          string
@@ -1452,6 +1457,34 @@ func descendantCount(sessions []protocol.SessionInfo, sessionID string) int {
 	return count
 }
 
+// knownDescendantCount includes both live and soft-deleted sessions. Deleted
+// sessions are hidden from the normal picker views, but the daemon still keeps
+// them in the ownership tree and requires a subtree delete for their parent.
+func (m *overlayModel) knownDescendantCount(sessionID string) int {
+	sessions := make([]protocol.SessionInfo, 0, len(m.allSessions)+len(m.deletedSessions))
+	sessions = append(sessions, m.allSessions...)
+	sessions = append(sessions, m.deletedSessions...)
+
+	return descendantCount(sessions, sessionID)
+}
+
+// refreshDeletedNow loads ownership nodes hidden from live picker views. Nil
+// remains the failure sentinel, so a transient error never erases the last
+// successful ownership snapshot.
+func (m *overlayModel) refreshDeletedNow() {
+	if m.refreshDeleted == nil {
+		return
+	}
+
+	deleted := m.refreshDeleted()
+	if deleted == nil {
+		return
+	}
+
+	m.deletedSessions = deleted
+	m.deletedReady = true
+}
+
 func (m *overlayModel) Init() tea.Cmd {
 	return tea.Batch(m.fetchPreviewCmd(), m.refreshTickCmd())
 }
@@ -1477,6 +1510,18 @@ func (m *overlayModel) refreshSessionsCmd() tea.Cmd {
 		}
 
 		return msg
+	}
+}
+
+func (m *overlayModel) refreshDeletedCmd() tea.Cmd {
+	if m.refreshDeleted == nil {
+		return nil
+	}
+
+	fetch := m.refreshDeleted
+
+	return func() tea.Msg {
+		return refreshDeletedMsg{sessions: fetch()}
 	}
 }
 
@@ -1864,7 +1909,11 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.allSessions = msg.sessions
-		m.deletedSessions = msg.deleted
+		if msg.deleted != nil {
+			m.deletedSessions = msg.deleted
+			m.deletedReady = true
+		}
+
 		m.rebuildForView()
 		m.resizeList()
 
@@ -1873,6 +1922,14 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		return m, tea.Batch(m.fetchPreviewCmd(), m.refreshTickCmd())
+
+	case refreshDeletedMsg:
+		if msg.sessions != nil {
+			m.deletedSessions = msg.sessions
+			m.deletedReady = true
+		}
+
+		return m, nil
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -1967,9 +2024,13 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case stateConfirmDelete:
 			switch msg.String() {
 			case "y", "Y":
+				if m.refreshDeleted != nil && !m.deletedReady {
+					return m, nil
+				}
+
 				if item, ok := m.list.SelectedItem().(sessionItem); ok && m.deleteSession != nil {
 					sid := item.info.ID
-					children := descendantCount(m.allSessions, sid) > 0
+					children := m.knownDescendantCount(sid) > 0
 					deleteFn := m.deleteSession
 
 					return m, func() tea.Msg {
@@ -2113,6 +2174,10 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.deleteError = ""
 					m.state = stateConfirmDelete
 					m.resizeList()
+
+					if m.refreshDeleted != nil && !m.deletedReady {
+						return m, m.refreshDeletedCmd()
+					}
 				}
 
 				return m, nil
@@ -2568,7 +2633,7 @@ func (m *overlayModel) View() tea.View {
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			s := item.info
 
-			descendants := descendantCount(m.allSessions, s.ID)
+			descendants := m.knownDescendantCount(s.ID)
 			if !s.Mirror && (s.Dirty || s.UnpushedCount > 0) {
 				warnStyle := lipgloss.NewStyle().Foreground(colorRed).Bold(true)
 
@@ -2600,8 +2665,15 @@ func (m *overlayModel) View() tea.View {
 			}
 
 			prompt := fmt.Sprintf("Delete '%s'? [y/N]", s.Name)
-			if descendants > 0 {
-				prompt = fmt.Sprintf("'%s' has %d descendants. Delete the entire subtree? [y/N]", s.Name, descendants)
+			if m.refreshDeleted != nil && !m.deletedReady {
+				prompt = "Delete unavailable: waiting for session ownership data"
+			} else if descendants > 0 {
+				noun := "descendant"
+				if descendants != 1 {
+					noun = "descendants"
+				}
+
+				prompt = fmt.Sprintf("'%s' has %d %s. Delete the entire subtree? [y/N]", s.Name, descendants, noun)
 			}
 
 			panelContent.WriteString(lipgloss.NewStyle().
@@ -2816,9 +2888,10 @@ type RunOverlayOpts struct {
 // RunOverlay launches the bubbletea session picker.
 func RunOverlay(opts RunOverlayOpts) *OverlayResult {
 	m := newOverlayModel(opts.Sessions, opts.CurrentSessionID, opts.FetchPreview, opts.DeleteSession, opts.Collapsed, []rune(opts.ShortcutKeys))
-	m.restorePickerState(opts.PickerState)
 	m.refreshSessions = opts.RefreshSessions
 	m.refreshDeleted = opts.RefreshDeleted
+	m.refreshDeletedNow()
+	m.restorePickerState(opts.PickerState)
 	m.restartSession = opts.RestartSession
 	m.stopSession = opts.StopSession
 	m.toggleStar = opts.ToggleStar

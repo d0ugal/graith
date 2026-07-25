@@ -78,6 +78,10 @@ func fetchSessionList(c controlConn, msg any) (protocol.SessionListMsg, error) {
 		return protocol.SessionListMsg{}, err
 	}
 
+	if resp.Type == "error" {
+		return protocol.SessionListMsg{}, fmt.Errorf("%s", errorMessage(resp))
+	}
+
 	var list protocol.SessionListMsg
 	if err := protocol.DecodePayload(resp, &list); err != nil {
 		return protocol.SessionListMsg{}, err

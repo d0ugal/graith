@@ -1526,6 +1526,47 @@ func TestInit_WithoutFetchPreview(t *testing.T) {
 	}
 }
 
+func TestRefreshDeletedNowLoadsOwnershipBeforeInput(t *testing.T) {
+	sessions := overlayTestSessions()
+	deleted := []protocol.SessionInfo{
+		{ID: "bairn", Name: "bairn", ParentID: sessions[0].ID, DeletedAt: time.Now().Format(time.RFC3339)},
+	}
+	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m.refreshDeleted = func() []protocol.SessionInfo { return deleted }
+
+	m.refreshDeletedNow()
+
+	if !m.deletedReady {
+		t.Fatal("deleted ownership data should be ready before picker input")
+	}
+
+	if len(m.deletedSessions) != 1 || m.deletedSessions[0].ID != "bairn" {
+		t.Fatalf("initial deleted sessions = %+v, want bairn", m.deletedSessions)
+	}
+}
+
+func TestRestoreDeletedPickerStateAfterOwnershipLoad(t *testing.T) {
+	deleted := protocol.SessionInfo{
+		ID:        "bairn",
+		Name:      "bairn",
+		DeletedAt: time.Now().Format(time.RFC3339),
+	}
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m.refreshDeleted = func() []protocol.SessionInfo { return []protocol.SessionInfo{deleted} }
+
+	m.refreshDeletedNow()
+	m.restorePickerState(PickerState{View: PickerViewDeleted, SessionID: deleted.ID})
+
+	if m.view != viewDeleted {
+		t.Fatalf("restored view = %v, want Deleted", m.view)
+	}
+
+	item, ok := m.list.SelectedItem().(sessionItem)
+	if !ok || item.info.ID != deleted.ID {
+		t.Fatalf("restored deleted selection = %+v, ok=%t; want bairn", item, ok)
+	}
+}
+
 // --- Update: refreshSessionsMsg ---
 
 func TestUpdate_RefreshSessions_PreservesCursor(t *testing.T) {
@@ -1568,6 +1609,30 @@ func TestUpdate_RefreshSessions_NilPreservesState(t *testing.T) {
 
 	if len(om.allSessions) != len(sessions) {
 		t.Errorf("allSessions length = %d, want %d (should preserve on nil)", len(om.allSessions), len(sessions))
+	}
+}
+
+func TestUpdate_RefreshSessions_DeletedFailurePreservesOwnership(t *testing.T) {
+	sessions := overlayTestSessions()
+	m := sizedModel(t, sessions, "")
+	m.deletedSessions = []protocol.SessionInfo{
+		{ID: "bairn", Name: "bairn", ParentID: sessions[0].ID, DeletedAt: time.Now().Format(time.RFC3339)},
+	}
+	m.deletedReady = true
+
+	updated, _ := m.Update(refreshSessionsMsg{sessions: sessions, deleted: nil})
+	om := asOverlay(updated)
+
+	if !om.deletedReady {
+		t.Fatal("failed deleted refresh should preserve readiness")
+	}
+
+	if len(om.deletedSessions) != 1 || om.deletedSessions[0].ID != "bairn" {
+		t.Fatalf("deleted sessions after failed refresh = %+v, want preserved bairn", om.deletedSessions)
+	}
+
+	if got := om.knownDescendantCount(sessions[0].ID); got != 1 {
+		t.Fatalf("known descendants after failed refresh = %d, want 1", got)
 	}
 }
 
@@ -2898,6 +2963,115 @@ func TestOverlayDeleteSubtreeUsesCompleteHierarchy(t *testing.T) {
 
 	if !gotChildren {
 		t.Error("subtree delete should pass children=true")
+	}
+}
+
+func TestOverlayDeleteSubtreeIncludesSoftDeletedDescendants(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "root", Name: "croft", Status: "running"},
+	}
+
+	var gotChildren bool
+
+	m := newOverlayModel(sessions, "", nil, func(_ string, children bool) error {
+		gotChildren = children
+		return nil
+	}, nil, nil)
+	m.deletedSessions = []protocol.SessionInfo{
+		{ID: "hidden-child", Name: "bairn", ParentID: "root", DeletedAt: time.Now().Format(time.RFC3339)},
+		{ID: "hidden-grandchild", Name: "wee-bairn", ParentID: "hidden-child", DeletedAt: time.Now().Format(time.RFC3339)},
+	}
+	m.width, m.height = 120, 40
+
+	updated, _ := sendKey(m, "x")
+	om := asOverlay(updated)
+
+	if !strings.Contains(om.View().Content, "has 2 descendants") {
+		t.Fatalf("subtree confirmation omitted soft-deleted descendants:\n%s", om.View().Content)
+	}
+
+	_, cmd := sendKey(om, "y")
+	if cmd == nil {
+		t.Fatal("confirming subtree delete should return a command")
+	}
+
+	if _, ok := cmd().(deleteResultMsg); !ok {
+		t.Fatal("subtree delete should produce deleteResultMsg")
+	}
+
+	if !gotChildren {
+		t.Error("soft-deleted descendants should pass children=true")
+	}
+}
+
+func TestOverlayDeleteWaitsForInitialOwnershipData(t *testing.T) {
+	called := false
+	m := newOverlayModel(
+		[]protocol.SessionInfo{{ID: "root", Name: "croft", Status: "running"}},
+		"",
+		nil,
+		func(_ string, _ bool) error {
+			called = true
+			return nil
+		},
+		nil,
+		nil,
+	)
+	m.refreshDeleted = func() []protocol.SessionInfo { return nil }
+	m.width, m.height = 120, 40
+
+	updated, _ := sendKey(m, "x")
+	om := asOverlay(updated)
+
+	if !strings.Contains(om.View().Content, "Delete unavailable: waiting for session ownership data") {
+		t.Fatalf("missing unavailable state while ownership is unknown:\n%s", om.View().Content)
+	}
+
+	_, cmd := sendKey(om, "y")
+	if cmd != nil || called {
+		t.Fatalf("delete before ownership load called=%v cmd=%v, want no mutation", called, cmd)
+	}
+}
+
+func TestOverlayDeleteRecoversWhenOwnershipRetrySucceeds(t *testing.T) {
+	called := false
+	m := newOverlayModel(
+		[]protocol.SessionInfo{{ID: "root", Name: "croft", Status: "running"}},
+		"",
+		nil,
+		func(_ string, children bool) error {
+			called = children
+			return nil
+		},
+		nil,
+		nil,
+	)
+	m.refreshDeleted = func() []protocol.SessionInfo {
+		return []protocol.SessionInfo{{ID: "bairn", Name: "bairn", ParentID: "root"}}
+	}
+	m.width, m.height = 120, 40
+
+	updated, cmd := sendKey(m, "x")
+	if cmd == nil {
+		t.Fatal("opening delete while ownership is unknown should retry the deleted-session fetch")
+	}
+
+	updated, _ = asOverlay(updated).Update(cmd())
+	om := asOverlay(updated)
+
+	if !om.deletedReady || !strings.Contains(om.View().Content, "has 1 descendant") {
+		t.Fatalf("ownership retry did not update delete confirmation:\n%s", om.View().Content)
+	}
+
+	_, cmd = sendKey(om, "y")
+	if cmd == nil {
+		t.Fatal("delete should become actionable after ownership retry")
+	}
+
+	_ = cmd()
+
+	if !called {
+		t.Fatal("recovered delete should include the hidden child")
 	}
 }
 
