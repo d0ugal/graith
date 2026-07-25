@@ -346,6 +346,9 @@ type TriggersAdvancedConfig struct {
 	// WatchRetryMaxBackoff caps the exponential degraded-binding backoff so a
 	// persistently degraded binding keeps retrying periodically. Default 5m.
 	WatchRetryMaxBackoff string `toml:"watch_retry_max_backoff"`
+	// WatchMaxDirectories caps the total number of directories registered by
+	// all file-watch bindings. Default 8192.
+	WatchMaxDirectories int `toml:"watch_max_directories"`
 	// WatchBuiltinIgnores is the daemon-wide set of directories/patterns never
 	// watched by any file-watch trigger (on top of git ignore rules and per-trigger
 	// watch.ignore). Omitting the key uses DefaultWatchBuiltinIgnores; an explicit
@@ -408,6 +411,7 @@ const (
 	defaultWatchReconcile   = 2 * time.Second
 	defaultWatchRetryBase   = 5 * time.Second
 	defaultWatchRetryMax    = 5 * time.Minute
+	defaultWatchMaxDirs     = 8192
 	defaultCommandOutputCap = 4096
 )
 
@@ -612,6 +616,16 @@ func (r TriggersRuntime) WatchRetryBaseBackoffDuration() time.Duration {
 // An unset, unparseable, or non-positive value uses the 5m default.
 func (r TriggersRuntime) WatchRetryMaxBackoffDuration() time.Duration {
 	return positiveDurationOrDefault(r.Advanced.WatchRetryMaxBackoff, defaultWatchRetryMax)
+}
+
+// WatchMaxDirectories is the daemon-wide file-watch directory budget.
+// Non-positive values use the safe default.
+func (r TriggersRuntime) WatchMaxDirectories() int {
+	if r.Advanced.WatchMaxDirectories <= 0 {
+		return defaultWatchMaxDirs
+	}
+
+	return r.Advanced.WatchMaxDirectories
 }
 
 // WatchBuiltinIgnores returns the daemon-wide watch ignore list. An omitted key

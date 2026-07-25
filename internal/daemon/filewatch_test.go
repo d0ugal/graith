@@ -249,6 +249,69 @@ func TestAddWatchRecursive(t *testing.T) {
 	// within the matcher's fires() filter anyway — just assert no crash above.
 }
 
+func TestAddWatchRecursive_IncludePrunesUnreachableDirs(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"cmd", "cmd/nested", "pkg", "pkg/deep"} {
+		mustMkdir(t, filepath.Join(root, filepath.FromSlash(dir)))
+	}
+
+	m := newWatchMatcher(root, &config.WatchConfig{Paths: []string{"cmd/*.go"}}, nil)
+
+	var watched []string
+
+	if degraded := addWatchRecursiveFiltered(func(path string) error {
+		watched = append(watched, filepath.ToSlash(filepath.Join(".", mustRel(t, root, path))))
+		return nil
+	}, root, m); degraded != "" {
+		t.Fatalf("unexpected degraded: %s", degraded)
+	}
+
+	joined := strings.Join(watched, " ")
+	if strings.Contains(joined, "pkg") || strings.Contains(joined, "nested") {
+		t.Fatalf("include registered unrelated descendants: %v", watched)
+	}
+}
+
+func TestFileWatchBudgetDegradesAndReleases(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "src"))
+	mustMkdir(t, filepath.Join(root, "docs"))
+
+	trig := config.TriggerConfig{Name: "dreich", Watch: &config.WatchConfig{Role: "implementer"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "x"}}
+	sm := newTriggerTestSM(t, trig)
+	sm.cfg.TriggersRuntime.Advanced.WatchMaxDirectories = 2
+	sm.watchAdd = func(_ *fsnotify.Watcher, _ string) error { return nil }
+	sess := watchSession{id: "src", name: "braw", worktree: root}
+	ctx := context.Background()
+	sm.createBinding(ctx, &trig, sess, time.Now(), nil, "", nil)
+
+	b := sm.triggers.bindings[bindingKey(trig.Name, sess.id)]
+	if b == nil || b.degraded == "" {
+		t.Fatalf("expected budget degradation, got %+v", b)
+	}
+
+	if !strings.Contains(b.degraded, "budget") {
+		t.Fatalf("degradation reason = %q, want budget diagnostic", b.degraded)
+	}
+
+	if sm.triggers.watchDirs != 0 {
+		t.Fatalf("failed binding leaked %d reserved directories", sm.triggers.watchDirs)
+	}
+
+	sm.teardownAllBindings()
+}
+
+func mustRel(t *testing.T, root, path string) string {
+	t.Helper()
+
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return rel
+}
+
 func TestFileWatch_EndToEnd(t *testing.T) {
 	worktree := t.TempDir()
 	trig := config.TriggerConfig{
@@ -317,7 +380,36 @@ func TestReconcileBindings_Lifecycle(t *testing.T) {
 		t.Fatalf("expected binding torn down, got %d", len(sm.triggers.bindings))
 	}
 
+	if sm.triggers.watchDirs != 0 {
+		t.Fatalf("expected teardown to release watch registrations, got %d", sm.triggers.watchDirs)
+	}
+
 	sm.teardownAllBindings()
+}
+
+func TestWatchMatcherIncludeDirectoryScope(t *testing.T) {
+	root := t.TempDir()
+	cases := []struct {
+		pattern string
+		rel     string
+		want    bool
+	}{
+		{"cmd/*.go", "cmd", true},
+		{"cmd/*.go", "cmd/nested", false},
+		{"cmd/**/*.go", "cmd/nested", true},
+		{"cmd/**/*.go", "pkg", false},
+		{"internal/daemon", "internal/daemon/sub", true},
+		{"go.mod", "internal/daemon", true},
+		{"pkg-*/main.go", "pkg-api", true},
+		{"pkg-*/main.go", "other", false},
+	}
+
+	for _, tc := range cases {
+		m := newWatchMatcher(root, &config.WatchConfig{Paths: []string{tc.pattern}}, nil)
+		if got := m.shouldWatchDir(tc.rel); got != tc.want {
+			t.Errorf("shouldWatchDir(%q, %q) = %v, want %v", tc.pattern, tc.rel, got, tc.want)
+		}
+	}
 }
 
 // TestReconcileBindings_HotReload asserts that editing a watch trigger's

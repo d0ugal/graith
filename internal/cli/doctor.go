@@ -1190,7 +1190,7 @@ func (dc *doctorContext) checkTriggers(diag *protocol.DiagnosticsMsg) {
 		}
 	}
 
-	dc.hintf("If this persists, raise fs.inotify.max_user_watches (Linux) or reduce the watched tree with [trigger.watch] ignore/paths")
+	dc.hintf("If this persists, raise fs.inotify.max_user_watches (Linux), increase triggers.advanced.watch_max_directories, or reduce the watched tree with [trigger.watch] ignore/paths")
 }
 
 // renderPurgeDiagnostic writes the human-readable view of diagnostics.purge.
