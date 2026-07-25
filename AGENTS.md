@@ -76,6 +76,11 @@ before assuming behavior from documentation.
 
 ## Tests
 
+- Prefer map-based table-driven tests with descriptive case names:
+  `tests := map[string]struct { ... }{ ... }`.
+- Iterate with `for name, test := range tests`, run each case with
+  `t.Run(name, func(t *testing.T) { ... })`, and call `t.Parallel()` when cases
+  are independent. Use a slice instead when execution order is significant.
 - Every behavior change needs tests. Every bug fix needs a regression test that
   fails on the old behavior and passes with the fix.
 - Test behavior and failure modes, not line coverage: invalid input, rollback,
