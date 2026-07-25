@@ -2,8 +2,11 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -319,7 +322,8 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 	// recreate for an ignore-policy change re-walks the whole tree here, so an
 	// add-failure on a previously-pruned directory is surfaced exactly like any
 	// other creation-time degradation (issue #1309, building on #1029).
-	if degraded := addWatchRecursive(sm.watchAddFunc(watcher), sess.worktree, matcher); degraded != "" {
+	watchPaths := make(map[string]int)
+	if degraded := sm.addWatchRecursiveBudgeted(watcher, sess.worktree, matcher, watchPaths); degraded != "" {
 		_ = watcher.Close()
 
 		sm.recordDegradedBinding(key, t, sess, degraded, prevRetries+1, now, builtinFP, carry)
@@ -339,6 +343,7 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 		fingerprint:        triggerFingerprint(t),
 		builtinFingerprint: builtinFP,
 		watcher:            watcher,
+		watchPaths:         watchPaths,
 		changed:            make(map[string]bool),
 		cancel:             cancel,
 	}
@@ -359,6 +364,7 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 			delete(sm.triggers.bindings, key)
 		}
 		sm.triggers.mu.Unlock()
+		sm.releaseWatchCount(watchPathCostSum(watchPaths))
 
 		return
 	}
@@ -368,7 +374,16 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 	// stranded; changes the new policy now suppresses are dropped (issue #1309).
 	sm.recarryChanges(bctx, t.Name, b, matcher, carry)
 
-	sm.log.Info("trigger: watching", "trigger", t.Name, "session", sess.name, "worktree", sess.worktree)
+	watchBudget := sm.Config().TriggersRuntime.WatchMaxDirectories()
+
+	b.bmu.Lock()
+	watchDirs := len(b.watchPaths)
+	b.bmu.Unlock()
+
+	sm.triggers.mu.Lock()
+	watchUsed := sm.triggers.watchDirs
+	sm.triggers.mu.Unlock()
+	sm.log.Info("trigger: watching", "trigger", t.Name, "session", sess.name, "worktree", sess.worktree, "watch_dirs", watchDirs, "watch_budget_used", watchUsed, "watch_budget", watchBudget)
 }
 
 // recarryChanges re-notes changes carried across a binding recreate, filtered by
@@ -484,12 +499,15 @@ func (sm *SessionManager) handleWatchEvent(ctx context.Context, triggerName stri
 	if ev.Op&fsnotify.Create != 0 {
 		if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
 			rel := matcher.rel(ev.Name)
-			if !matcher.ignoredDir(rel) {
+			if matcher.shouldWatchDir(rel) && !matcher.ignoredDir(rel) {
 				// Best-effort: a post-creation Add failure (e.g. the watch limit
 				// exhausted only after a healthy start) is not routed through the
 				// degraded/retry path — that covers creation-time degradation only
 				// (#1029). Runtime subtree-add recovery is a separate follow-up.
-				_ = b.watcher.Add(ev.Name)
+				if err := sm.registerWatchPath(b, ev.Name); err != nil {
+					sm.log.Warn("trigger: new directory watch skipped", "trigger", triggerName, "path", ev.Name, "err", err)
+				}
+
 				sm.scanNewDir(ctx, b, matcher, ev.Name, debounce, triggerName)
 			}
 
@@ -502,6 +520,9 @@ func (sm *SessionManager) handleWatchEvent(ctx context.Context, triggerName stri
 	}
 
 	rel := matcher.rel(ev.Name)
+	if ev.Op&(fsnotify.Remove|fsnotify.Rename) != 0 && sm.bindingHasWatchPath(b, ev.Name) {
+		sm.reapMissingWatchPaths(b)
+	}
 
 	// A change to any .gitignore (added, edited, or removed) alters which paths
 	// and directories are ignored. Rebuild the git matcher and reconcile the
@@ -548,13 +569,19 @@ func (sm *SessionManager) reconcileWatchDirs(b *watchBinding, matcher *watchMatc
 			return nil
 		}
 
+		if !matcher.shouldWatchDir(matcher.rel(path)) {
+			return filepath.SkipDir
+		}
+
 		rel := matcher.rel(path)
 		if rel != "." && matcher.ignoredDir(rel) {
 			return filepath.SkipDir
 		}
 
 		desired[path] = true
-		_ = b.watcher.Add(path) // idempotent; picks up newly-un-ignored subtrees
+		if err := sm.registerWatchPath(b, path); err != nil {
+			sm.log.Warn("trigger: directory watch skipped", "trigger", b.triggerName, "path", path, "err", err)
+		}
 
 		return nil
 	})
@@ -568,7 +595,7 @@ func (sm *SessionManager) reconcileWatchDirs(b *watchBinding, matcher *watchMatc
 		}
 
 		if rel, err := filepath.Rel(b.worktree, w); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			_ = b.watcher.Remove(w)
+			sm.unregisterWatchPath(b, w)
 		}
 	}
 }
@@ -583,13 +610,22 @@ func (sm *SessionManager) scanNewDir(ctx context.Context, b *watchBinding, match
 		}
 
 		rel := matcher.rel(path)
+		if !matcher.shouldWatchDir(rel) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+
+			return nil
+		}
 
 		if d.IsDir() {
 			if rel != "." && matcher.ignoredDir(rel) {
 				return filepath.SkipDir
 			}
 
-			_ = b.watcher.Add(path)
+			if err := sm.registerWatchPath(b, path); err != nil {
+				sm.log.Warn("trigger: new subtree watch skipped", "trigger", triggerName, "path", path, "err", err)
+			}
 
 			return nil
 		}
@@ -720,7 +756,7 @@ func (sm *SessionManager) watchFire(ctx context.Context, triggerName string, b *
 // cancel and watcher are read by the caller before the lock (matching the
 // original code), while canceled/debounce are touched under bmu (both are
 // goroutine-mutated).
-func stopWatcherResources(cancel func(), watcher *fsnotify.Watcher, bmu *sync.Mutex, canceled *bool, debounce **time.Timer) {
+func stopWatcherResources(cancel func(), watcher *fsnotify.Watcher, bmu *sync.Mutex, canceled *bool, debounce **time.Timer, release func()) {
 	if cancel != nil {
 		cancel()
 	}
@@ -738,6 +774,183 @@ func stopWatcherResources(cancel func(), watcher *fsnotify.Watcher, bmu *sync.Mu
 	}
 
 	bmu.Unlock()
+
+	if release != nil {
+		release()
+	}
+}
+
+// addWatchRecursiveBudgeted registers only directories that can contain a
+// configured include and reserves them against the daemon-wide budget. A
+// failed reservation or Add leaves no resources owned by the caller.
+func (sm *SessionManager) addWatchRecursiveBudgeted(w *fsnotify.Watcher, root string, matcher *watchMatcher, paths map[string]int) string {
+	add := func(path string) error {
+		if _, ok := paths[path]; ok {
+			return nil
+		}
+
+		cost := watchPathCost(path)
+		if err := sm.reserveWatchPath(path, cost); err != nil {
+			return err
+		}
+
+		if err := sm.watchAddFunc(w)(path); err != nil {
+			sm.releaseWatchCount(cost)
+			return err
+		}
+
+		paths[path] = cost
+
+		return nil
+	}
+
+	degraded := addWatchRecursiveFiltered(add, root, matcher)
+	if degraded != "" {
+		sm.releaseWatchCount(watchPathCostSum(paths))
+		clear(paths)
+	}
+
+	return degraded
+}
+
+func (sm *SessionManager) reserveWatchPath(path string, cost int) error {
+	budget := sm.Config().TriggersRuntime.WatchMaxDirectories()
+	sm.triggers.mu.Lock()
+	defer sm.triggers.mu.Unlock()
+
+	if sm.triggers.watchDirs+cost > budget {
+		return fmt.Errorf("watch descriptor budget exhausted (used %d/%d; cost %d; path %q)", sm.triggers.watchDirs, budget, cost, path)
+	}
+
+	sm.triggers.watchDirs += cost
+
+	return nil
+}
+
+// macOS's kqueue backend uses one descriptor for the directory and, in
+// practice, another for each entry in that directory. Keep the daemon-wide
+// budget conservative on that platform so a dense worktree cannot exhaust the
+// process descriptor limit even when its directory count is modest.
+func watchPathCost(path string) int {
+	if runtime.GOOS != "darwin" {
+		return 1
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return 1
+	}
+
+	return 1 + len(entries)
+}
+
+func watchPathCostSum(paths map[string]int) int {
+	total := 0
+	for _, cost := range paths {
+		total += cost
+	}
+
+	return total
+}
+
+func (sm *SessionManager) releaseWatchCount(n int) {
+	if n <= 0 {
+		return
+	}
+
+	sm.triggers.mu.Lock()
+
+	sm.triggers.watchDirs -= n
+	if sm.triggers.watchDirs < 0 {
+		sm.triggers.watchDirs = 0
+	}
+	sm.triggers.mu.Unlock()
+}
+
+func (sm *SessionManager) registerWatchPath(b *watchBinding, path string) error {
+	b.bmu.Lock()
+	if b.canceled {
+		b.bmu.Unlock()
+		return context.Canceled
+	}
+
+	if _, ok := b.watchPaths[path]; ok {
+		b.bmu.Unlock()
+		return nil
+	}
+	b.bmu.Unlock()
+
+	cost := watchPathCost(path)
+	if err := sm.reserveWatchPath(path, cost); err != nil {
+		return err
+	}
+
+	if err := sm.watchAddFunc(b.watcher)(path); err != nil {
+		sm.releaseWatchCount(cost)
+		return err
+	}
+
+	b.bmu.Lock()
+	if b.canceled {
+		b.bmu.Unlock()
+		_ = b.watcher.Remove(path)
+
+		sm.releaseWatchCount(cost)
+
+		return context.Canceled
+	}
+
+	if b.watchPaths == nil {
+		b.watchPaths = make(map[string]int)
+	}
+
+	b.watchPaths[path] = cost
+
+	b.bmu.Unlock()
+
+	return nil
+}
+
+func (sm *SessionManager) unregisterWatchPath(b *watchBinding, path string) {
+	_ = b.watcher.Remove(path)
+
+	b.bmu.Lock()
+
+	var cost int
+	if registeredCost, ok := b.watchPaths[path]; ok {
+		cost = registeredCost
+
+		delete(b.watchPaths, path)
+	}
+	b.bmu.Unlock()
+
+	if cost > 0 {
+		sm.releaseWatchCount(cost)
+	}
+}
+
+func (sm *SessionManager) reapMissingWatchPaths(b *watchBinding) {
+	b.bmu.Lock()
+
+	paths := make([]string, 0, len(b.watchPaths))
+	for p := range b.watchPaths {
+		paths = append(paths, p)
+	}
+	b.bmu.Unlock()
+
+	for _, p := range paths {
+		if _, err := os.Stat(p); os.IsNotExist(err) {
+			sm.unregisterWatchPath(b, p)
+		}
+	}
+}
+
+func (sm *SessionManager) bindingHasWatchPath(b *watchBinding, path string) bool {
+	b.bmu.Lock()
+	_, ok := b.watchPaths[path]
+	b.bmu.Unlock()
+
+	return ok
 }
 
 func (sm *SessionManager) teardownBinding(key string) {
@@ -750,7 +963,13 @@ func (sm *SessionManager) teardownBinding(key string) {
 		return
 	}
 
-	stopWatcherResources(b.cancel, b.watcher, &b.bmu, &b.canceled, &b.debounce)
+	stopWatcherResources(b.cancel, b.watcher, &b.bmu, &b.canceled, &b.debounce, func() {
+		b.bmu.Lock()
+		cost := watchPathCostSum(b.watchPaths)
+		b.watchPaths = nil
+		b.bmu.Unlock()
+		sm.releaseWatchCount(cost)
+	})
 }
 
 func (sm *SessionManager) teardownAllBindings() {
@@ -772,6 +991,10 @@ func (sm *SessionManager) teardownAllBindings() {
 // limit. add is a seam (normally the fsnotify watcher's Add) so the degraded
 // path is testable without exhausting fs.inotify.max_user_watches for real.
 func addWatchRecursive(add func(string) error, root string, matcher *watchMatcher) string {
+	return addWatchRecursiveFiltered(add, root, matcher)
+}
+
+func addWatchRecursiveFiltered(add func(string) error, root string, matcher *watchMatcher) string {
 	var degraded string
 
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -781,6 +1004,10 @@ func addWatchRecursive(add func(string) error, root string, matcher *watchMatche
 
 		if !d.IsDir() {
 			return nil
+		}
+
+		if !matcher.shouldWatchDir(matcher.rel(path)) {
+			return filepath.SkipDir
 		}
 
 		rel := matcher.rel(path)
@@ -802,11 +1029,80 @@ func addWatchRecursive(add func(string) error, root string, matcher *watchMatche
 // --- matching ---
 
 type watchMatcher struct {
-	root    string
-	git     ignore.Matcher // .git/info/exclude + .gitignore files under root
-	builtin ignore.Matcher // always-applied, non-overridable ignores
-	userIgn ignore.Matcher // config watch.ignore; nil unless set
-	include ignore.Matcher // config watch.paths; nil unless set
+	root         string
+	git          ignore.Matcher // .git/info/exclude + .gitignore files under root
+	builtin      ignore.Matcher // always-applied, non-overridable ignores
+	userIgn      ignore.Matcher // config watch.ignore; nil unless set
+	include      ignore.Matcher // config watch.paths; nil unless set
+	includeGlobs []string
+}
+
+// shouldWatchDir reports whether a directory can contain a path selected by
+// the include globs. It intentionally errs toward watching more: a glob with a
+// wildcard in its directory prefix (or ** below that prefix) keeps recursion,
+// while a literal file suffix watches only the literal ancestry. This is the
+// key distinction between filtering events and reducing kqueue/inotify
+// registrations.
+func (m *watchMatcher) shouldWatchDir(rel string) bool {
+	if m.include == nil || rel == "" || rel == "." {
+		return true
+	}
+
+	rel = strings.Trim(filepath.ToSlash(rel), "/")
+
+	for _, raw := range m.includePatterns() {
+		pattern := strings.Trim(filepath.ToSlash(strings.TrimSpace(raw)), "/")
+		if pattern == "" || strings.HasPrefix(pattern, "!") {
+			return true
+		}
+
+		if !strings.Contains(pattern, "/") {
+			return true
+		}
+
+		parts := strings.Split(pattern, "/")
+		relParts := strings.Split(rel, "/")
+
+		for i, component := range parts {
+			if component == "**" {
+				return true
+			}
+
+			if i >= len(relParts) {
+				return true
+			}
+
+			if strings.ContainsAny(component, "*?[") {
+				matched, err := path.Match(component, relParts[i])
+				if err != nil || !matched {
+					break
+				}
+
+				return true
+			}
+
+			if component != relParts[i] {
+				break
+			}
+
+			if i == len(relParts)-1 {
+				return true
+			}
+
+			if i == len(parts)-1 {
+				// A literal directory include also selects descendants below it.
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func (m *watchMatcher) includePatterns() []string {
+	// ignore.Lines intentionally hides its patterns; retaining the original
+	// globs gives registration pruning the same source config as event matching.
+	return m.includeGlobs
 }
 
 // newWatchMatcher builds a matcher for root. builtinIgnores is the daemon-wide
@@ -830,6 +1126,7 @@ func newWatchMatcher(root string, w *config.WatchConfig, builtinIgnores []string
 
 	if len(w.Paths) > 0 {
 		m.include = ignore.Lines(w.Paths...)
+		m.includeGlobs = append([]string(nil), w.Paths...)
 	}
 
 	return m

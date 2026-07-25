@@ -609,6 +609,10 @@ func TestTriggersAdvancedDefaults(t *testing.T) {
 		t.Errorf("watch_retry_max_backoff = %v, want 5m", got)
 	}
 
+	if got := r.WatchMaxDirectories(); got != 8192 {
+		t.Errorf("watch_max_directories = %d, want 8192", got)
+	}
+
 	if got := r.CommandOutputCap(); got != 4096 {
 		t.Errorf("command_output_cap = %d, want 4096", got)
 	}
@@ -627,6 +631,7 @@ func TestTriggersAdvancedOverrides(t *testing.T) {
 		WatchReconcileInterval: "10s",
 		WatchRetryBaseBackoff:  "1s",
 		WatchRetryMaxBackoff:   "1m",
+		WatchMaxDirectories:    123,
 		WatchBuiltinIgnores:    []string{"node_modules/"},
 		CommandOutputCap:       128,
 	}}
@@ -649,6 +654,10 @@ func TestTriggersAdvancedOverrides(t *testing.T) {
 
 	if got := r.WatchRetryMaxBackoffDuration(); got != time.Minute {
 		t.Errorf("watch_retry_max_backoff = %v, want 1m", got)
+	}
+
+	if got := r.WatchMaxDirectories(); got != 123 {
+		t.Errorf("watch_max_directories = %d, want 123", got)
 	}
 
 	if got := r.CommandOutputCap(); got != 128 {
@@ -805,6 +814,10 @@ func TestTriggersAdvancedEmbeddedDefaults(t *testing.T) {
 
 	if a.RunHistoryMax != 20 {
 		t.Errorf("Default() run_history_max = %d, want 20 (missing from default_config.toml?)", a.RunHistoryMax)
+	}
+
+	if a.WatchMaxDirectories != 8192 {
+		t.Errorf("Default() watch_max_directories = %d, want 8192 (missing from default_config.toml?)", a.WatchMaxDirectories)
 	}
 
 	if a.CommandOutputCap != 4096 {

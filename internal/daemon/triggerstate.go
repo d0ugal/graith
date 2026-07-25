@@ -32,7 +32,8 @@ type triggerState struct {
 	running int
 
 	// watch source: bindings keyed by bindingKey(name, sessionID)
-	bindings map[string]*watchBinding
+	bindings  map[string]*watchBinding
+	watchDirs int // estimated watcher descriptors currently reserved
 
 	// gcx source: one poll binding per trigger definition. The durable seen-ID
 	// cursor lives in TriggerRuntimeState; these process-local fields deliberately
@@ -62,6 +63,7 @@ type watchBinding struct {
 	degraded           string          // watcher failure/limit reason ("" once healthy)
 	retryCount         int             // consecutive degraded (re)creation attempts (drives backoff)
 	nextRetryAt        time.Time       // when a degraded binding is next retried (zero when healthy)
+	watchPaths         map[string]int  // path -> estimated descriptor cost
 	canceled           bool            // set on teardown; a pending debounce callback checks it
 	cancel             func()          // stops the binding's event goroutine
 }
