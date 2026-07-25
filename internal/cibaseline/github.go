@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,13 +18,47 @@ import (
 
 var repositoryPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
+const (
+	// DefaultCollectionMaxElapsed bounds the wall-clock duration of one fetch.
+	DefaultCollectionMaxElapsed = 10 * time.Minute
+	// DefaultCollectionMaxRequests bounds all HTTP attempts, including retries.
+	DefaultCollectionMaxRequests = 10_000
+	// DefaultCollectionMaxRetries bounds rate-limit retries across one fetch.
+	DefaultCollectionMaxRetries = 3
+)
+
+var (
+	// ErrCollectionBudgetExhausted identifies request or elapsed-limit failures.
+	ErrCollectionBudgetExhausted = errors.New("GitHub collection budget exhausted")
+	// ErrGitHubRateLimited identifies a rate limit whose retry allowance was exhausted.
+	ErrGitHubRateLimited = errors.New("GitHub rate limited")
+)
+
 // GitHubCollector reads Actions metadata only. The supplied token needs
 // Actions and repository metadata read access; collection never mutates state.
 type GitHubCollector struct {
-	Client  *http.Client
-	BaseURL string
-	Token   string
-	Now     func() time.Time
+	Client      *http.Client
+	BaseURL     string
+	Token       string
+	Now         func() time.Time
+	Wait        func(context.Context, time.Duration) error
+	MaxElapsed  time.Duration
+	MaxRequests int
+	MaxRetries  int
+
+	budget *collectionBudget
+}
+
+type collectionBudget struct {
+	parent      context.Context
+	now         func() time.Time
+	wait        func(context.Context, time.Duration) error
+	startedAt   time.Time
+	maxElapsed  time.Duration
+	maxRequests int
+	maxRetries  int
+	requests    int
+	retries     int
 }
 
 type githubRunsPage struct {
@@ -31,26 +66,76 @@ type githubRunsPage struct {
 	Runs       []githubRun `json:"workflow_runs"`
 }
 
+func (page *githubRunsPage) UnmarshalJSON(data []byte) error {
+	type githubRunsPageJSON githubRunsPage
+
+	var decoded githubRunsPageJSON
+	if err := unmarshalRequiredGitHubObject(data, "workflow runs page", &decoded, "total_count", "workflow_runs"); err != nil {
+		return err
+	}
+
+	*page = githubRunsPage(decoded)
+
+	return nil
+}
+
 type githubRun struct {
-	ID           int64  `json:"id"`
-	Attempt      int    `json:"run_attempt"`
-	Path         string `json:"path"`
-	Event        string `json:"event"`
-	HeadSHA      string `json:"head_sha"`
-	HeadBranch   string `json:"head_branch"`
-	PullRequests []struct {
-		Number int64 `json:"number"`
-	} `json:"pull_requests"`
-	CreatedAt  time.Time `json:"created_at"`
-	StartedAt  time.Time `json:"run_started_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	Status     string    `json:"status"`
-	Conclusion string    `json:"conclusion"`
+	ID           int64               `json:"id"`
+	Attempt      int                 `json:"run_attempt"`
+	Path         string              `json:"path"`
+	Event        string              `json:"event"`
+	HeadSHA      string              `json:"head_sha"`
+	HeadBranch   string              `json:"head_branch"`
+	PullRequests []githubPullRequest `json:"pull_requests"`
+	CreatedAt    time.Time           `json:"created_at"`
+	StartedAt    time.Time           `json:"run_started_at"`
+	UpdatedAt    time.Time           `json:"updated_at"`
+	Status       string              `json:"status"`
+	Conclusion   string              `json:"conclusion"`
+}
+
+type githubPullRequest struct {
+	Number int64 `json:"number"`
+}
+
+func (run *githubRun) UnmarshalJSON(data []byte) error {
+	type githubRunJSON githubRun
+
+	var decoded githubRunJSON
+
+	err := unmarshalGitHubObject(
+		data,
+		"workflow run",
+		&decoded,
+		[]string{"head_branch", "run_started_at"},
+		"id", "run_attempt", "path", "event", "head_sha", "head_branch", "pull_requests",
+		"created_at", "run_started_at", "updated_at", "status", "conclusion",
+	)
+	if err != nil {
+		return err
+	}
+
+	*run = githubRun(decoded)
+
+	return nil
 }
 
 type githubJobsPage struct {
 	TotalCount int         `json:"total_count"`
 	Jobs       []githubJob `json:"jobs"`
+}
+
+func (page *githubJobsPage) UnmarshalJSON(data []byte) error {
+	type githubJobsPageJSON githubJobsPage
+
+	var decoded githubJobsPageJSON
+	if err := unmarshalRequiredGitHubObject(data, "jobs page", &decoded, "total_count", "jobs"); err != nil {
+		return err
+	}
+
+	*page = githubJobsPage(decoded)
+
+	return nil
 }
 
 type githubJob struct {
@@ -66,14 +151,62 @@ type githubJob struct {
 	Labels      []string  `json:"labels"`
 }
 
+func (job *githubJob) UnmarshalJSON(data []byte) error {
+	type githubJobJSON githubJob
+
+	var decoded githubJobJSON
+
+	err := unmarshalGitHubObject(
+		data,
+		"job",
+		&decoded,
+		[]string{"started_at", "completed_at", "runner_name", "runner_group_name"},
+		"id", "name", "status", "conclusion", "created_at", "started_at", "completed_at",
+		"runner_name", "runner_group_name", "labels",
+	)
+	if err != nil {
+		return err
+	}
+
+	*job = githubJob(decoded)
+
+	return nil
+}
+
 type githubArtifactsPage struct {
 	TotalCount int              `json:"total_count"`
 	Artifacts  []githubArtifact `json:"artifacts"`
 }
 
+func (page *githubArtifactsPage) UnmarshalJSON(data []byte) error {
+	type githubArtifactsPageJSON githubArtifactsPage
+
+	var decoded githubArtifactsPageJSON
+	if err := unmarshalRequiredGitHubObject(data, "artifacts page", &decoded, "total_count", "artifacts"); err != nil {
+		return err
+	}
+
+	*page = githubArtifactsPage(decoded)
+
+	return nil
+}
+
 type githubCachesPage struct {
 	TotalCount int           `json:"total_count"`
 	Caches     []githubCache `json:"actions_caches"`
+}
+
+func (page *githubCachesPage) UnmarshalJSON(data []byte) error {
+	type githubCachesPageJSON githubCachesPage
+
+	var decoded githubCachesPageJSON
+	if err := unmarshalRequiredGitHubObject(data, "caches page", &decoded, "total_count", "actions_caches"); err != nil {
+		return err
+	}
+
+	*page = githubCachesPage(decoded)
+
+	return nil
 }
 
 type githubArtifact struct {
@@ -90,19 +223,16 @@ type githubArtifact struct {
 func (artifact *githubArtifact) UnmarshalJSON(data []byte) error {
 	type githubArtifactJSON githubArtifact
 
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return err
-	}
-
-	for _, required := range []string{"created_at", "updated_at", "expires_at"} {
-		if _, exists := fields[required]; !exists {
-			return fmt.Errorf("GitHub artifact is missing required nullable field %s", required)
-		}
-	}
-
 	var decoded githubArtifactJSON
-	if err := json.Unmarshal(data, &decoded); err != nil {
+
+	err := unmarshalGitHubObject(
+		data,
+		"artifact",
+		&decoded,
+		[]string{"created_at", "updated_at", "expires_at"},
+		"id", "name", "size_in_bytes", "expired", "created_at", "updated_at", "expires_at",
+	)
+	if err != nil {
 		return err
 	}
 
@@ -120,24 +250,104 @@ type githubCache struct {
 	LastAccessedAt time.Time `json:"last_accessed_at"`
 }
 
+func (cache *githubCache) UnmarshalJSON(data []byte) error {
+	type githubCacheJSON githubCache
+
+	var decoded githubCacheJSON
+	if err := unmarshalRequiredGitHubObject(
+		data,
+		"cache",
+		&decoded,
+		"id", "key", "ref", "size_in_bytes", "created_at", "last_accessed_at",
+	); err != nil {
+		return err
+	}
+
+	*cache = githubCache(decoded)
+
+	return nil
+}
+
+type githubBillable struct {
+	TotalMS int64 `json:"total_ms"`
+}
+
+func (billable *githubBillable) UnmarshalJSON(data []byte) error {
+	type githubBillableJSON githubBillable
+
+	var decoded githubBillableJSON
+	if err := unmarshalRequiredGitHubObject(data, "billable usage", &decoded, "total_ms"); err != nil {
+		return err
+	}
+
+	*billable = githubBillable(decoded)
+
+	return nil
+}
+
 type githubTiming struct {
-	Billable map[string]struct {
-		TotalMS int64 `json:"total_ms"`
-	} `json:"billable"`
+	Billable map[string]githubBillable `json:"billable"`
+}
+
+func (timing *githubTiming) UnmarshalJSON(data []byte) error {
+	type githubTimingJSON githubTiming
+
+	var decoded githubTimingJSON
+	if err := unmarshalRequiredGitHubObject(data, "run timing", &decoded, "billable"); err != nil {
+		return err
+	}
+
+	*timing = githubTiming(decoded)
+
+	return nil
+}
+
+func unmarshalRequiredGitHubObject(data []byte, kind string, target any, required ...string) error {
+	return unmarshalGitHubObject(data, kind, target, nil, required...)
+}
+
+func unmarshalGitHubObject(
+	data []byte,
+	kind string,
+	target any,
+	nullable []string,
+	required ...string,
+) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+
+	if fields == nil {
+		return fmt.Errorf("GitHub %s must be an object", kind)
+	}
+
+	nullableFields := make(map[string]bool, len(nullable))
+	for _, name := range nullable {
+		nullableFields[name] = true
+	}
+
+	for _, name := range required {
+		value, exists := fields[name]
+		if !exists {
+			return fmt.Errorf("GitHub %s is missing required field %s", kind, name)
+		}
+
+		if strings.TrimSpace(string(value)) == "null" && !nullableFields[name] {
+			return fmt.Errorf("GitHub %s field %s must not be null", kind, name)
+		}
+	}
+
+	return json.Unmarshal(data, target)
 }
 
 func (collector GitHubCollector) Fetch(ctx context.Context, repository string, since time.Time, inventory Inventory) (GitHubSnapshot, error) {
-	if collector.Client == nil {
-		collector.Client = http.DefaultClient
+	configured, err := collector.configured()
+	if err != nil {
+		return GitHubSnapshot{}, err
 	}
 
-	if collector.BaseURL == "" {
-		collector.BaseURL = "https://api.github.com"
-	}
-
-	if collector.Now == nil {
-		collector.Now = time.Now
-	}
+	collector = configured
 
 	if !repositoryPattern.MatchString(repository) || since.IsZero() {
 		return GitHubSnapshot{}, errors.New("repository and since are required")
@@ -147,25 +357,43 @@ func (collector GitHubCollector) Fetch(ctx context.Context, repository string, s
 		return GitHubSnapshot{}, fmt.Errorf("validate collection inventory: %w", err)
 	}
 
-	until := collector.Now().UTC().Truncate(time.Second)
+	startedAt := collector.Now()
+	until := startedAt.UTC().Truncate(time.Second)
+	collectionCtx, cancel := context.WithTimeout(ctx, collector.MaxElapsed)
+
+	defer cancel()
+
+	collector.budget = &collectionBudget{
+		parent: ctx, now: collector.Now, wait: collector.Wait, startedAt: startedAt,
+		maxElapsed: collector.MaxElapsed, maxRequests: collector.MaxRequests, maxRetries: collector.MaxRetries,
+	}
+
 	snapshot := GitHubSnapshot{
 		SchemaVersion: SnapshotSchemaVersion, Repository: repository, CollectedAt: until,
 		RequestedSince: since.UTC(), RequestedUntil: until,
 	}
 
-	var allRuns githubRunsPage
+	var (
+		allRuns  githubRunsPage
+		runPages int
+	)
 
-	for pageNumber := 1; ; pageNumber++ {
-		var page githubRunsPage
-
-		endpoint := fmt.Sprintf(
+	runPageEndpoint := func(pageNumber int) string {
+		return fmt.Sprintf(
 			"/repos/%s/actions/runs?per_page=100&page=%d&status=completed&created=%s",
 			repository, pageNumber,
 			url.QueryEscape(since.UTC().Format(time.RFC3339)+".."+until.Format(time.RFC3339)),
 		)
-		if err := collector.get(ctx, endpoint, &page); err != nil {
+	}
+
+	for pageNumber := 1; ; pageNumber++ {
+		var page githubRunsPage
+
+		if err := collector.get(collectionCtx, runPageEndpoint(pageNumber), &page); err != nil {
 			return GitHubSnapshot{}, err
 		}
+
+		runPages = pageNumber
 
 		if page.TotalCount > 1000 {
 			return GitHubSnapshot{}, fmt.Errorf("GitHub run query is incomplete: %d results exceeds the 1000-result API ceiling", page.TotalCount)
@@ -182,6 +410,13 @@ func (collector GitHubCollector) Fetch(ctx context.Context, repository string, s
 		}
 
 		allRuns.Runs = append(allRuns.Runs, page.Runs...)
+		if len(allRuns.Runs) > allRuns.TotalCount {
+			return GitHubSnapshot{}, fmt.Errorf(
+				"GitHub returned more workflow runs than the reported count: fetched %d, API reported %d",
+				len(allRuns.Runs), allRuns.TotalCount,
+			)
+		}
+
 		if len(page.Runs) < 100 {
 			break
 		}
@@ -192,7 +427,35 @@ func (collector GitHubCollector) Fetch(ctx context.Context, repository string, s
 		return GitHubSnapshot{}, fmt.Errorf("GitHub run count mismatch: API reported %d, fetched %d", allRuns.TotalCount, len(allRuns.Runs))
 	}
 
-	caches, expectedCaches, err := collector.fetchCaches(ctx, repository)
+	seenRawRuns := make(map[int64]bool, len(allRuns.Runs))
+	runIDs := make([]int64, 0, len(allRuns.Runs))
+
+	for _, raw := range allRuns.Runs {
+		if seenRawRuns[raw.ID] {
+			return GitHubSnapshot{}, fmt.Errorf("GitHub returned duplicate raw workflow run ID %d", raw.ID)
+		}
+
+		seenRawRuns[raw.ID] = true
+		runIDs = append(runIDs, raw.ID)
+	}
+
+	if runPages > 1 {
+		err := verifyGitHubPagination(
+			collector,
+			collectionCtx,
+			"workflow runs",
+			runIDs,
+			runPageEndpoint,
+			func(page githubRunsPage) (int, []int64) {
+				return page.TotalCount, githubRunIDs(page.Runs)
+			},
+		)
+		if err != nil {
+			return GitHubSnapshot{}, err
+		}
+	}
+
+	caches, expectedCaches, err := collector.fetchCaches(collectionCtx, repository)
 	if err != nil {
 		return GitHubSnapshot{}, err
 	}
@@ -219,7 +482,7 @@ func (collector GitHubCollector) Fetch(ctx context.Context, repository string, s
 
 		workflowID := workflow.ID
 
-		artifacts, expectedArtifacts, err := collector.fetchArtifacts(ctx, repository, raw.ID)
+		artifacts, expectedArtifacts, err := collector.fetchArtifacts(collectionCtx, repository, raw.ID)
 		if err != nil {
 			return GitHubSnapshot{}, err
 		}
@@ -231,7 +494,7 @@ func (collector GitHubCollector) Fetch(ctx context.Context, repository string, s
 		cost := CostInput{Source: "github-actions-run-usage"}
 
 		var timing githubTiming
-		if err := collector.get(ctx, fmt.Sprintf("/repos/%s/actions/runs/%d/timing", repository, raw.ID), &timing); err != nil {
+		if err := collector.get(collectionCtx, fmt.Sprintf("/repos/%s/actions/runs/%d/timing", repository, raw.ID), &timing); err != nil {
 			var statusError githubHTTPError
 			if !errors.As(err, &statusError) || (statusError.StatusCode != http.StatusNotFound && statusError.StatusCode != http.StatusGone) {
 				return GitHubSnapshot{}, err
@@ -260,7 +523,7 @@ func (collector GitHubCollector) Fetch(ctx context.Context, repository string, s
 
 			if attempt < raw.Attempt {
 				endpoint := fmt.Sprintf("/repos/%s/actions/runs/%d/attempts/%d", repository, raw.ID, attempt)
-				if err := collector.get(ctx, endpoint, &attemptRaw); err != nil {
+				if err := collector.get(collectionCtx, endpoint, &attemptRaw); err != nil {
 					return GitHubSnapshot{}, err
 				}
 
@@ -288,7 +551,7 @@ func (collector GitHubCollector) Fetch(ctx context.Context, repository string, s
 				run.ExpectedArtifacts = expectedArtifacts
 			}
 
-			jobs, expectedJobs, err := collector.fetchJobs(ctx, repository, raw.ID, attempt)
+			jobs, expectedJobs, err := collector.fetchJobs(collectionCtx, repository, raw.ID, attempt)
 			if err != nil {
 				return GitHubSnapshot{}, err
 			}
@@ -491,41 +754,381 @@ func inferSuperseded(runs []GitHubRun) {
 	}
 }
 
+func (collector GitHubCollector) configured() (GitHubCollector, error) {
+	if collector.MaxElapsed < 0 || collector.MaxRequests < 0 || collector.MaxRetries < 0 {
+		return GitHubCollector{}, errors.New("GitHub collection limits must not be negative")
+	}
+
+	if collector.Client == nil {
+		collector.Client = http.DefaultClient
+	}
+
+	if collector.BaseURL == "" {
+		collector.BaseURL = "https://api.github.com"
+	}
+
+	if collector.Now == nil {
+		collector.Now = time.Now
+	}
+
+	if collector.Wait == nil {
+		collector.Wait = waitForContext
+	}
+
+	if collector.MaxElapsed == 0 {
+		collector.MaxElapsed = DefaultCollectionMaxElapsed
+	}
+
+	if collector.MaxRequests == 0 {
+		collector.MaxRequests = DefaultCollectionMaxRequests
+	}
+
+	if collector.MaxRetries == 0 {
+		collector.MaxRetries = DefaultCollectionMaxRetries
+	}
+
+	return collector, nil
+}
+
+func waitForContext(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 func (collector GitHubCollector) get(ctx context.Context, endpoint string, target any) error {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(collector.BaseURL, "/")+endpoint, nil)
-	if err != nil {
-		return err
-	}
+	if collector.budget == nil {
+		configured, err := collector.configured()
+		if err != nil {
+			return err
+		}
 
-	request.Header.Set("Accept", "application/vnd.github+json")
-	request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-
-	if collector.Token != "" {
-		request.Header.Set("Authorization", "Bearer "+collector.Token)
-	}
-
-	response, err := collector.Client.Do(request)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = response.Body.Close()
-	}()
-
-	if response.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-
-		return githubHTTPError{
-			StatusCode: response.StatusCode,
-			Message:    fmt.Sprintf("GitHub GET %s: %s: %s", endpoint, response.Status, strings.TrimSpace(string(body))),
+		collector = configured
+		collector.budget = &collectionBudget{
+			parent: ctx, now: collector.Now, wait: collector.Wait, startedAt: collector.Now(),
+			maxElapsed: collector.MaxElapsed, maxRequests: collector.MaxRequests, maxRetries: collector.MaxRetries,
 		}
 	}
 
-	if err := json.NewDecoder(response.Body).Decode(target); err != nil {
-		return fmt.Errorf("decode GitHub GET %s: %w", endpoint, err)
+	for {
+		if err := collector.budget.beforeRequest(ctx); err != nil {
+			return err
+		}
+
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(collector.BaseURL, "/")+endpoint, nil)
+		if err != nil {
+			return err
+		}
+
+		request.Header.Set("Accept", "application/vnd.github+json")
+		request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+		if collector.Token != "" {
+			request.Header.Set("Authorization", "Bearer "+collector.Token)
+		}
+
+		response, err := collector.Client.Do(request)
+		if err != nil {
+			return collector.budget.classifyContextError(ctx, err)
+		}
+
+		if response.StatusCode != http.StatusOK {
+			body, readErr := io.ReadAll(io.LimitReader(response.Body, 4096))
+			_ = response.Body.Close()
+
+			if readErr != nil {
+				if contextErr := collector.budget.contextError(ctx); contextErr != nil {
+					return contextErr
+				}
+
+				return fmt.Errorf("read GitHub GET %s error response: %w", endpoint, readErr)
+			}
+
+			limit, limited, limitErr := parseRateLimit(response, body, collector.budget.now())
+			if limitErr != nil {
+				return fmt.Errorf("malformed GitHub rate-limit response for GET %s: %w", endpoint, limitErr)
+			}
+
+			if limited {
+				if err := collector.budget.retryRateLimit(ctx, endpoint, response.StatusCode, limit); err != nil {
+					return err
+				}
+
+				continue
+			}
+
+			return githubHTTPError{
+				StatusCode: response.StatusCode,
+				Message:    fmt.Sprintf("GitHub GET %s: %s: %s", endpoint, response.Status, strings.TrimSpace(string(body))),
+			}
+		}
+
+		decoder := json.NewDecoder(response.Body)
+		if err := decoder.Decode(target); err != nil {
+			_ = response.Body.Close()
+
+			if contextErr := collector.budget.contextError(ctx); contextErr != nil {
+				return contextErr
+			}
+
+			return fmt.Errorf("decode GitHub GET %s: malformed or incomplete response: %w", endpoint, err)
+		}
+
+		var trailing any
+		if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+			_ = response.Body.Close()
+
+			if contextErr := collector.budget.contextError(ctx); contextErr != nil {
+				return contextErr
+			}
+
+			if err == nil {
+				return fmt.Errorf("decode GitHub GET %s: malformed response has a trailing JSON value", endpoint)
+			}
+
+			return fmt.Errorf("decode GitHub GET %s: malformed or incomplete response: %w", endpoint, err)
+		}
+
+		if err := response.Body.Close(); err != nil {
+			return fmt.Errorf("close GitHub GET %s response: %w", endpoint, err)
+		}
+
+		if err := collector.budget.afterResponse(ctx); err != nil {
+			return err
+		}
+
+		return nil
+	}
+}
+
+type rateLimit struct {
+	kind           string
+	delay          time.Duration
+	defaultBackoff bool
+}
+
+func parseRateLimit(response *http.Response, body []byte, now time.Time) (rateLimit, bool, error) {
+	remaining := strings.TrimSpace(response.Header.Get("X-RateLimit-Remaining"))
+	retryAfter := strings.TrimSpace(response.Header.Get("Retry-After"))
+	message := strings.ToLower(string(body))
+
+	limited := response.StatusCode == http.StatusTooManyRequests ||
+		(response.StatusCode == http.StatusForbidden &&
+			(remaining == "0" || retryAfter != "" || strings.Contains(message, "rate limit") ||
+				strings.Contains(message, "abuse detection")))
+	if !limited {
+		return rateLimit{}, false, nil
+	}
+
+	kind := "secondary"
+
+	if remaining != "" {
+		remainingCount, err := strconv.ParseInt(remaining, 10, 64)
+		if err != nil || remainingCount < 0 {
+			return rateLimit{}, false, fmt.Errorf("invalid X-RateLimit-Remaining %q", remaining)
+		}
+
+		if remainingCount == 0 {
+			kind = "primary"
+		}
+	}
+
+	var (
+		delay     time.Duration
+		hasTiming bool
+	)
+
+	if retryAfter != "" {
+		parsed, err := parseRetryAfter(retryAfter, now)
+		if err != nil {
+			return rateLimit{}, false, err
+		}
+
+		if parsed > 0 {
+			delay = parsed
+			hasTiming = true
+		}
+	}
+
+	resetValue := strings.TrimSpace(response.Header.Get("X-RateLimit-Reset"))
+	if resetValue != "" && kind == "primary" {
+		resetUnix, err := strconv.ParseInt(resetValue, 10, 64)
+		if err != nil {
+			return rateLimit{}, false, fmt.Errorf("invalid X-RateLimit-Reset %q", resetValue)
+		}
+
+		const (
+			maxDuration     = time.Duration(1<<63 - 1)
+			maxResetSeconds = int64((maxDuration - time.Second) / time.Second)
+		)
+
+		nowUnix := now.Unix()
+		if resetUnix < 0 || nowUnix < 0 ||
+			(resetUnix > nowUnix && resetUnix-nowUnix > maxResetSeconds) {
+			return rateLimit{}, false, fmt.Errorf("invalid X-RateLimit-Reset %q", resetValue)
+		}
+
+		resetDelay := time.Second
+		if resetUnix > nowUnix {
+			resetDelay += time.Duration(resetUnix-nowUnix) * time.Second
+		}
+
+		if resetDelay > delay {
+			delay = resetDelay
+		}
+
+		hasTiming = true
+	}
+
+	if !hasTiming {
+		delay = time.Minute
+	}
+
+	return rateLimit{kind: kind, delay: delay, defaultBackoff: !hasTiming}, true, nil
+}
+
+func parseRetryAfter(value string, now time.Time) (time.Duration, error) {
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		const maxSeconds = int64(time.Duration(1<<63-1) / time.Second)
+
+		if seconds < 0 || seconds > maxSeconds {
+			return 0, fmt.Errorf("invalid Retry-After %q", value)
+		}
+
+		return time.Duration(seconds) * time.Second, nil
+	}
+
+	retryAt, err := http.ParseTime(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid Retry-After %q", value)
+	}
+
+	delay := retryAt.Sub(now)
+	if delay < 0 {
+		delay = 0
+	}
+
+	return delay, nil
+}
+
+func (budget *collectionBudget) beforeRequest(ctx context.Context) error {
+	if err := budget.contextError(ctx); err != nil {
+		return err
+	}
+
+	if err := budget.elapsedError(); err != nil {
+		return err
+	}
+
+	if budget.requests >= budget.maxRequests {
+		return fmt.Errorf("%w: request limit %d reached", ErrCollectionBudgetExhausted, budget.maxRequests)
+	}
+
+	budget.requests++
+
+	return nil
+}
+
+func (budget *collectionBudget) afterResponse(ctx context.Context) error {
+	if err := budget.contextError(ctx); err != nil {
+		return err
+	}
+
+	return budget.elapsedError()
+}
+
+func (budget *collectionBudget) retryRateLimit(
+	ctx context.Context,
+	endpoint string,
+	statusCode int,
+	limit rateLimit,
+) error {
+	if budget.retries >= budget.maxRetries {
+		return githubRateLimitError{
+			Kind: limit.kind, Endpoint: endpoint, StatusCode: statusCode,
+			Message: fmt.Sprintf("retry limit %d exhausted", budget.maxRetries),
+		}
+	}
+
+	if budget.requests >= budget.maxRequests {
+		return fmt.Errorf(
+			"%w while handling GitHub %s rate limit for GET %s: request limit %d reached",
+			ErrCollectionBudgetExhausted, limit.kind, endpoint, budget.maxRequests,
+		)
+	}
+
+	delay := limit.delay
+	if limit.defaultBackoff {
+		for retry := 0; retry < budget.retries; retry++ {
+			const maxDuration = time.Duration(1<<63 - 1)
+
+			if delay > maxDuration/2 {
+				delay = maxDuration
+
+				break
+			}
+
+			delay *= 2
+		}
+	}
+
+	elapsed := budget.now().Sub(budget.startedAt)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+
+	remaining := budget.maxElapsed - elapsed
+	if delay >= remaining {
+		return fmt.Errorf(
+			"%w while handling GitHub %s rate limit for GET %s: required wait %s exceeds remaining time %s",
+			ErrCollectionBudgetExhausted, limit.kind, endpoint, delay, remaining,
+		)
+	}
+
+	budget.retries++
+	if err := budget.wait(ctx, delay); err != nil {
+		return budget.classifyContextError(ctx, err)
+	}
+
+	return budget.afterResponse(ctx)
+}
+
+func (budget *collectionBudget) elapsedError() error {
+	elapsed := budget.now().Sub(budget.startedAt)
+	if elapsed >= budget.maxElapsed {
+		return fmt.Errorf(
+			"%w: elapsed limit %s reached after %s",
+			ErrCollectionBudgetExhausted, budget.maxElapsed, elapsed,
+		)
 	}
 
 	return nil
+}
+
+func (budget *collectionBudget) contextError(ctx context.Context) error {
+	if err := budget.parent.Err(); err != nil {
+		return fmt.Errorf("GitHub collection cancelled: %w", err)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: elapsed limit %s reached: %w", ErrCollectionBudgetExhausted, budget.maxElapsed, err)
+	}
+
+	return nil
+}
+
+func (budget *collectionBudget) classifyContextError(ctx context.Context, err error) error {
+	if contextErr := budget.contextError(ctx); contextErr != nil {
+		return contextErr
+	}
+
+	return err
 }
 
 type githubHTTPError struct {
@@ -537,17 +1140,99 @@ func (err githubHTTPError) Error() string {
 	return err.Message
 }
 
+type githubRateLimitError struct {
+	Kind       string
+	Endpoint   string
+	StatusCode int
+	Message    string
+}
+
+func (err githubRateLimitError) Error() string {
+	return fmt.Sprintf(
+		"GitHub %s rate limit for GET %s (HTTP %d): %s",
+		err.Kind, err.Endpoint, err.StatusCode, err.Message,
+	)
+}
+
+func (err githubRateLimitError) Unwrap() error {
+	return ErrGitHubRateLimited
+}
+
+func verifyGitHubPagination[Page any](
+	collector GitHubCollector,
+	ctx context.Context,
+	kind string,
+	expectedIDs []int64,
+	endpoint func(int) string,
+	pageIdentity func(Page) (int, []int64),
+) error {
+	verifiedIDs := make([]int64, 0, len(expectedIDs))
+
+	for pageNumber := 1; ; pageNumber++ {
+		var page Page
+		if err := collector.get(ctx, endpoint(pageNumber), &page); err != nil {
+			return err
+		}
+
+		total, pageIDs := pageIdentity(page)
+		if total != len(expectedIDs) {
+			return fmt.Errorf("GitHub %s count changed during pagination consistency pass", kind)
+		}
+
+		verifiedIDs = append(verifiedIDs, pageIDs...)
+		if len(verifiedIDs) > len(expectedIDs) {
+			return fmt.Errorf(
+				"GitHub returned more %s than the reported count during pagination consistency pass: fetched %d, API reported %d",
+				kind, len(verifiedIDs), len(expectedIDs),
+			)
+		}
+
+		if len(pageIDs) < 100 {
+			break
+		}
+	}
+
+	if len(verifiedIDs) != len(expectedIDs) {
+		return fmt.Errorf(
+			"GitHub %s count mismatch during pagination consistency pass: API reported %d, fetched %d",
+			kind, len(expectedIDs), len(verifiedIDs),
+		)
+	}
+
+	if !slices.Equal(verifiedIDs, expectedIDs) {
+		return fmt.Errorf("GitHub %s identities changed during pagination consistency pass", kind)
+	}
+
+	return nil
+}
+
+func githubRunIDs(runs []githubRun) []int64 {
+	ids := make([]int64, 0, len(runs))
+	for _, run := range runs {
+		ids = append(ids, run.ID)
+	}
+
+	return ids
+}
+
 func (collector GitHubCollector) fetchCaches(ctx context.Context, repository string) ([]Cache, int, error) {
 	var (
 		result   []Cache
 		expected int
+		pages    int
 	)
+
+	endpoint := func(pageNumber int) string {
+		return fmt.Sprintf("/repos/%s/actions/caches?per_page=100&page=%d", repository, pageNumber)
+	}
 
 	for pageNumber := 1; ; pageNumber++ {
 		var page githubCachesPage
-		if err := collector.get(ctx, fmt.Sprintf("/repos/%s/actions/caches?per_page=100&page=%d", repository, pageNumber), &page); err != nil {
+		if err := collector.get(ctx, endpoint(pageNumber), &page); err != nil {
 			return nil, 0, err
 		}
+
+		pages = pageNumber
 
 		if pageNumber == 1 {
 			if page.TotalCount < 0 {
@@ -563,6 +1248,13 @@ func (collector GitHubCollector) fetchCaches(ctx context.Context, repository str
 			result = append(result, Cache(cache))
 		}
 
+		if len(result) > expected {
+			return nil, 0, fmt.Errorf(
+				"GitHub returned more caches than the reported count: fetched %d, API reported %d",
+				len(result), expected,
+			)
+		}
+
 		if len(page.Caches) < 100 {
 			break
 		}
@@ -570,6 +1262,32 @@ func (collector GitHubCollector) fetchCaches(ctx context.Context, repository str
 
 	if expected != len(result) {
 		return nil, 0, fmt.Errorf("GitHub cache count mismatch: API reported %d, fetched %d", expected, len(result))
+	}
+
+	if pages > 1 {
+		expectedIDs := make([]int64, 0, len(result))
+		for _, cache := range result {
+			expectedIDs = append(expectedIDs, cache.ID)
+		}
+
+		err := verifyGitHubPagination(
+			collector,
+			ctx,
+			"caches",
+			expectedIDs,
+			endpoint,
+			func(page githubCachesPage) (int, []int64) {
+				ids := make([]int64, 0, len(page.Caches))
+				for _, cache := range page.Caches {
+					ids = append(ids, cache.ID)
+				}
+
+				return page.TotalCount, ids
+			},
+		)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 
 	return result, expected, nil
@@ -584,15 +1302,24 @@ func (collector GitHubCollector) fetchJobs(
 	var (
 		result   = githubJobsPage{}
 		expected int
+		pages    int
 	)
+
+	endpoint := func(pageNumber int) string {
+		return fmt.Sprintf(
+			"/repos/%s/actions/runs/%d/attempts/%d/jobs?per_page=100&page=%d",
+			repository, runID, attempt, pageNumber,
+		)
+	}
 
 	for pageNumber := 1; ; pageNumber++ {
 		var page githubJobsPage
 
-		endpoint := fmt.Sprintf("/repos/%s/actions/runs/%d/attempts/%d/jobs?per_page=100&page=%d", repository, runID, attempt, pageNumber)
-		if err := collector.get(ctx, endpoint, &page); err != nil {
+		if err := collector.get(ctx, endpoint(pageNumber), &page); err != nil {
 			return nil, 0, err
 		}
+
+		pages = pageNumber
 
 		if pageNumber == 1 {
 			if page.TotalCount < 0 {
@@ -605,6 +1332,13 @@ func (collector GitHubCollector) fetchJobs(
 		}
 
 		result.Jobs = append(result.Jobs, page.Jobs...)
+		if len(result.Jobs) > expected {
+			return nil, 0, fmt.Errorf(
+				"GitHub returned more jobs than the reported count for run %d attempt %d: fetched %d, API reported %d",
+				runID, attempt, len(result.Jobs), expected,
+			)
+		}
+
 		if len(page.Jobs) < 100 {
 			break
 		}
@@ -615,6 +1349,32 @@ func (collector GitHubCollector) fetchJobs(
 			"GitHub job count mismatch for run %d attempt %d: API reported %d, fetched %d",
 			runID, attempt, expected, len(result.Jobs),
 		)
+	}
+
+	if pages > 1 {
+		expectedIDs := make([]int64, 0, len(result.Jobs))
+		for _, job := range result.Jobs {
+			expectedIDs = append(expectedIDs, job.ID)
+		}
+
+		err := verifyGitHubPagination(
+			collector,
+			ctx,
+			fmt.Sprintf("jobs for run %d attempt %d", runID, attempt),
+			expectedIDs,
+			endpoint,
+			func(page githubJobsPage) (int, []int64) {
+				ids := make([]int64, 0, len(page.Jobs))
+				for _, job := range page.Jobs {
+					ids = append(ids, job.ID)
+				}
+
+				return page.TotalCount, ids
+			},
+		)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 
 	return result.Jobs, expected, nil
@@ -628,15 +1388,21 @@ func (collector GitHubCollector) fetchArtifacts(
 	var (
 		result   []Artifact
 		expected int
+		pages    int
 	)
+
+	endpoint := func(pageNumber int) string {
+		return fmt.Sprintf("/repos/%s/actions/runs/%d/artifacts?per_page=100&page=%d", repository, runID, pageNumber)
+	}
 
 	for pageNumber := 1; ; pageNumber++ {
 		var page githubArtifactsPage
 
-		endpoint := fmt.Sprintf("/repos/%s/actions/runs/%d/artifacts?per_page=100&page=%d", repository, runID, pageNumber)
-		if err := collector.get(ctx, endpoint, &page); err != nil {
+		if err := collector.get(ctx, endpoint(pageNumber), &page); err != nil {
 			return nil, 0, err
 		}
+
+		pages = pageNumber
 
 		if pageNumber == 1 {
 			if page.TotalCount < 0 {
@@ -652,6 +1418,13 @@ func (collector GitHubCollector) fetchArtifacts(
 			result = append(result, Artifact(artifact))
 		}
 
+		if len(result) > expected {
+			return nil, 0, fmt.Errorf(
+				"GitHub returned more artifacts than the reported count for run %d: fetched %d, API reported %d",
+				runID, len(result), expected,
+			)
+		}
+
 		if len(page.Artifacts) < 100 {
 			break
 		}
@@ -662,6 +1435,32 @@ func (collector GitHubCollector) fetchArtifacts(
 			"GitHub artifact count mismatch for run %d: API reported %d, fetched %d",
 			runID, expected, len(result),
 		)
+	}
+
+	if pages > 1 {
+		expectedIDs := make([]int64, 0, len(result))
+		for _, artifact := range result {
+			expectedIDs = append(expectedIDs, artifact.ID)
+		}
+
+		err := verifyGitHubPagination(
+			collector,
+			ctx,
+			fmt.Sprintf("artifacts for run %d", runID),
+			expectedIDs,
+			endpoint,
+			func(page githubArtifactsPage) (int, []int64) {
+				ids := make([]int64, 0, len(page.Artifacts))
+				for _, artifact := range page.Artifacts {
+					ids = append(ids, artifact.ID)
+				}
+
+				return page.TotalCount, ids
+			},
+		)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 
 	return result, expected, nil

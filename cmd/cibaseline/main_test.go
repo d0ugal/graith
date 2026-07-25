@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -73,5 +74,25 @@ func TestReadSnapshotRejectsOldSchemaBeforeOldFields(t *testing.T) {
 
 	if _, err := readSnapshot(path); err == nil || err.Error() != "unsupported snapshot schema 1" {
 		t.Fatalf("readSnapshot(old schema) error = %v, want version rejection", err)
+	}
+}
+
+func TestFetchRejectsNegativeCollectionLimits(t *testing.T) {
+	inventory := filepath.Join("..", "..", "internal", "cibaseline", "inventory.json")
+	tests := map[string][]string{
+		"elapsed":  {"-max-elapsed=-1s"},
+		"requests": {"-max-requests=-1"},
+		"retries":  {"-max-retries=-1"},
+	}
+
+	for name, limit := range tests {
+		t.Run(name, func(t *testing.T) {
+			args := append([]string{"-inventory", inventory}, limit...)
+			args = append(args, "fetch")
+
+			if err := run(args); err == nil || !strings.Contains(err.Error(), "limits must not be negative") {
+				t.Fatalf("run() error = %v, want negative collection limit rejection", err)
+			}
+		})
 	}
 }
