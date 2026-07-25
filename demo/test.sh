@@ -513,8 +513,11 @@ assert_real_unowned_daemon_is_never_contacted() {
 	build_real_gr
 	new_real_fixture "real-unowned"
 	write_unowned_config "$fixture"
-	run_real_gr "$fixture" list -q >/dev/null 2>&1 || fail "could not start unowned real demo daemon"
-	daemon_pid="$(cat "$fixture/runtime/graith-demo/graith.pid")"
+	if run_real_gr "$fixture" list -q >/dev/null 2>&1; then
+		fail "unowned real demo daemon started without a protected human credential"
+	fi
+	[ ! -e "$fixture/runtime/graith-demo/graith.sock" ] ||
+		fail "unowned real demo daemon left a socket after refusing bootstrap"
 	add_sentinels "$fixture"
 	: > "$fixture/gr.log"
 

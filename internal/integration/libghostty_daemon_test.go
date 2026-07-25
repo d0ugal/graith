@@ -658,6 +658,14 @@ func startNativeDaemonFrom(t *testing.T, startBinary, targetBinary string) *nati
 	if err := os.WriteFile(configFile, configData, 0o600); err != nil {
 		t.Fatal("write native validation config failed")
 	}
+	// The hermetic harness is the trusted installer for this isolated profile.
+	// Seed the protected human credential before invoking the direct daemon
+	// bootstrap; production startup must never mint lifecycle authority in a
+	// clean child process.
+	tokenFile := filepath.Join(dataHome, "human.token")
+	if err := os.WriteFile(tokenFile, []byte("native-human-token\n"), 0o600); err != nil {
+		t.Fatal("write native lifecycle credential failed")
+	}
 
 	appName := "graith-" + nativeProfile
 	integrationSocket := filepath.Join(runtimeHome, appName, "graith.sock")
@@ -674,7 +682,7 @@ func startNativeDaemonFrom(t *testing.T, startBinary, targetBinary string) *nati
 		configFile: configFile,
 		env:        env,
 		socket:     integrationSocket,
-		tokenFile:  filepath.Join(dataHome, "human.token"),
+		tokenFile:  tokenFile,
 		pidFile:    filepath.Join(runtimeHome, appName, "graith.pid"),
 		cmd:        cmd,
 		done:       make(chan struct{}),
