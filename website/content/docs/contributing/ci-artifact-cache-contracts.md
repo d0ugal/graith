@@ -15,9 +15,10 @@ plus the P2 run-plan and result identities.
 Manifest readers use strict JSON decoding, so unknown fields, duplicate object
 keys, and trailing JSON values are rejected instead of being ignored.
 
-This is a local contract library and fixture suite. Production workflow wiring,
-publication credentials, live signing, and the GitHub App evaluator are owned
-by later migration packages.
+This is a local contract library and fixture suite. Repository CI validates the
+library through tests, but no current workflow consumes these manifests as a
+production artifact gate. Real artifact publication and publication credentials
+remain with the existing release and docs workflows.
 
 ## Artifact manifests
 

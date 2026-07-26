@@ -61,8 +61,9 @@ and present in the evaluated plan.
 
 This fixture is local emulation. Cache writer proof is a deterministic binding
 to the evaluated plan and job coordinate, not a live GitHub identity proof. The
-fixture does not claim to prove GitHub App source restriction, fork token
+fixture does not claim to prove check-creator source restriction, fork token
 behavior, merge queue or `merge_group` triggering, check freshness, live
-artifact provenance, live cache provenance, or repository ruleset binding. Those
-claims require the separate disposable live GitHub fixture owned by the later
-App-evaluator package.
+artifact provenance, live cache provenance, or repository ruleset binding.
+Current CI evidence comes from repository-owned workflows plus the retained
+[CI baseline]({{< relref "/docs/contributing/ci-baseline.md" >}}) and
+[CI policy]({{< relref "/docs/contributing/ci-policy.md" >}}) fixtures.
