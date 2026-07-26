@@ -1,7 +1,7 @@
 ---
 weight: 36
 title: CI policy manifest
-description: Validate the P1 CI north-star policy manifest and digest
+description: Validate and replay the CI north-star policy manifest
 icon: shield-check
 toc: true
 ---
@@ -40,6 +40,43 @@ To print the checked-in digest without comparing against the P0 inventory:
 go run ./cmd/cipolicy digest
 ```
 
+## Replay a run plan
+
+Use `cmd/cipolicy plan` to replay the Go policy evaluator locally from a GitHub
+event identity and an exact newline-delimited changed-file list:
+
+```bash
+go run ./cmd/cipolicy \
+  -changed-files /tmp/changed-files.txt \
+  -event pull_request \
+  -ref refs/pull/17/merge \
+  -base-ref refs/heads/main \
+  -head-ref refs/heads/canny \
+  -head-repository d0ugal/graith \
+  -same-repository-agent \
+  -commit 1111111111111111111111111111111111111111 \
+  -tree 2222222222222222222222222222222222222222 \
+  plan
+```
+
+The command emits canonical JSON with a `plan_digest`, source commit and tree,
+policy digest, detector version and digest, event and trust tier, detected
+capabilities, `exact_file_list`, `changed_files_digest`, required mode
+coordinates, unsupported decisions, and an expiry. Omitting `-changed-files` is
+treated as an unknown file list and selects the safe superset. Passing an empty
+changed-file file is also fail-closed: the plan records an empty exact-list
+digest and expands to the safe superset instead of treating the run as
+unchanged.
+
+For pull requests, choose exactly one trust context flag for the PR code being
+proved: `-fork`, `-same-repository-agent`, or `-trusted-base`, and pass the PR
+head repository explicitly. Pushes to `refs/heads/main` use `trusted-base`
+unless `-publication` is set; version tag pushes classify as
+`trusted-publication`. The current P1 manifest has no required publication,
+tag, schedule, or dynamic-service coordinates, so those event identities
+currently fail the zero-job plan check until policy adds required modes for
+them.
+
 ## Regenerate from P0
 
 Regenerate only after reviewing the matching P0 inventory change:
@@ -70,6 +107,38 @@ environment publication context whose credentials are unavailable to
 pull-request-controlled code. Write-scoped `GITHUB_TOKEN` permissions,
 repository location, check/comment publication, and `proof_type` do not upgrade
 a mode to publication trust.
+
+Plan narrowing is allowed only when the changed-file list is exact and every
+path is known to the detector. Unknown paths, CI policy or evaluator changes,
+generated inputs, lockfiles, release metadata, and detector errors all expand
+to the safe superset. Blank changed-file rows and leading or trailing path
+whitespace are treated as invalid changed paths and also expand to the safe
+superset. A plan with no required jobs is rejected instead of passing silently.
+Plan expiry is bounded to the policy TTL, and plans whose creation time is too
+far in the future are rejected as invalid.
+
+Ref classification is driven by the manifest's event ref patterns. Push events
+must match an explicit protected branch or tag pattern; missing push ref
+patterns and bare wildcard patterns fail closed. Pull-request and
+workflow-dispatch narrow plans include the current required native and sandbox
+gates even when the changed path detector narrows other capabilities, because
+the P1 manifest traces those legacy gates as required for those events. Any
+required mode for an event must be covered by that event's universal capability
+floor, so an omitted or tampered detected-capability list cannot drop required
+coordinates.
+
+For fork pull requests and pull requests that change policy code or workflow
+metadata, run plan and gate evaluation from the trusted base ref or from a
+pinned released policy tool. Pull-request-controlled policy code is input to be
+proved, not authority for narrowing itself.
+
+Each required plan coordinate must publish one digest-bound result record. The
+fan-in gate validates the expected mode and coordinate set from the plan, not a
+count of successful jobs. Missing, duplicate, unknown, extra, stale, skipped,
+cancelled, failed, superseded, or malformed result rows are not green. Result
+records preserve attempt history, first outcome, final status, timestamps,
+evidence digest, artifact digest, cache digest, and a 64-hex superseding result
+identity when applicable.
 
 ## External observed modes
 
