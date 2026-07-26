@@ -90,11 +90,11 @@ accepted.
 | P3 | Hermetic fixture and fault injector | P2 | Fixture fails closed for missing files, polluted environment, stale/corrupt cache/artifact, archive differences, cancellation, misleading names, and unsupported platforms. |
 | P4 | `graith-ci-gate` GitHub App evaluator | P2/P3 | App is installed from a digest-pinned release with metadata/contents/actions/pull-request read and checks write; the default-branch ruleset binds the required check to its App ID with no bypass actors; live fork/agent/merge-group fixture proves rewrite, replay, stale, missing, and zero-job failures. |
 | P5 | Artifact and cache contracts | P1/P2 | Manifest, digest, provenance, trust tier, and consumer verifier; untrusted cache cannot be consumed by trusted jobs; native and release-shaped artifacts have independent verification. |
-| P6 | Fast PR lane dual-run | P3/P4/P5 | Owner-approved bounded sample matrix covers representative Go, protocol, docs, generated, GUI, native, sandbox, workflow, and dependency changes across trusted/untrusted event shapes, required modes, retry/cancellation/failure classes, and the matching mode-set, latency, and classification criteria; every required cell has retained samples or an owner-approved retirement row; each target segment declares and exercises explicit per-segment sample counts; the owner-approved bounded sample request declares a sample runner-minute ceiling; event shapes without provisional SLOs have owner-approved latency-target or no-latency-target policy rows before collection; cells without matched current-baseline runner-minute measurements are excluded from evidence; zero unexplained disagreement, artifact identity mismatch, false-green escape, stale/missing proof, dual-run cost-budget overrun, or sample runner-minute ceiling exhaustion. |
+| P6 | Fast PR lane dual-run | P3/P4/P5 | Owner-approved bounded sample matrix covers representative Go, protocol, docs, generated, GUI, native, sandbox, workflow, and dependency changes across trusted/untrusted event shapes, required modes, retry/cancellation/failure classes, and the matching mode-set, latency, and classification criteria; every required cell has retained samples or an owner-approved retirement row; each target segment declares and exercises explicit per-segment sample counts; the owner-approved bounded sample request declares a sample runner-minute ceiling; event shapes without provisional SLOs have owner-approved latency-target or no-latency-target policy rows before collection; cells without matched current-baseline runner-minute measurements are excluded from evidence; zero unexplained disagreement, artifact identity mismatch, false-green escape, stale/missing proof, dual-run cost budget exhaustion, or sample runner-minute ceiling exhaustion. |
 | P7 | Main/deep/scheduled lanes | P6 | Main complete bundle, race/integration, full platform, coverage, security, fuzz/soak, and dependency freshness modes have stable fan-in and dashboards. |
 | P8 | Dependency and generated-file promotion | P5/P6 | Dependency updates use the same policy; credentialed regeneration/docs publication moves behind a trusted-base workflow or protected environment that PR YAML cannot edit; stale outputs fail for forks and trusted branches; live same-repository-agent fixture passes before cutover. |
 | P9 | Release candidate verification | P5/P7 | Reproducible Linux/Darwin candidate, package consumer, checksum/SBOM/provenance, signature, independent verification, rollback dry run, and protected publication rehearsal. |
-| P10 | Required-check cutover and deletion | P6/P7/P8/P9 | Branch protection requires only the App-owned `graith-ci-gate`; old contexts remain observational until an owner-approved bounded sample of real merged changes/events covers the required change/event/mode matrix with no unexplained disagreement, false-green escape, stale/missing proof, or artifact identity mismatch. Required cells need retained real samples, owner-approved retirement rows, or owner-approved retained live fixture substitutes for event shapes real merged traffic cannot produce; fixture substitutes satisfy coverage only and do not count toward latency evidence. The observation sample uses the owner-approved sample runner-minute ceiling and fail-closed abort conditions; any observation-gate failure restores the previous required proof and blocks deletion until a new owner-approved bounded sample passes. Obsolete required contexts and workflows are then removed in separate reversible changes. |
+| P10 | Required-check cutover and deletion | P6/P7/P8/P9 | Branch protection requires only the App-owned `graith-ci-gate`; old contexts remain observational until an owner-approved bounded sample of real merged changes/events covers the required change/event/mode matrix with no unexplained disagreement, false-green escape, stale/missing proof, or artifact identity mismatch. Required cells need retained real samples, owner-approved retirement rows, or owner-approved retained live fixture substitutes for event shapes real merged traffic cannot produce; fixture substitutes satisfy coverage only and do not count toward latency evidence. The observation sample uses its own owner-approved sample runner-minute ceiling and fail-closed abort conditions; any observation-gate failure restores the previous required proof and blocks deletion until a new owner-approved bounded sample passes. Obsolete required contexts and workflows are then removed in separate reversible changes. |
 | P11 | JS policy surface retirement | P0/P2/P3 | Repo-owned JS helpers have owners and grandfathered contracts; each is wrapped, ported to Go, or explicitly retained with deletion criteria; YAML-regex trust tests are replaced by semantic contract tests before workflow reshaping. |
 
 #### P0 — Baseline and inventory
@@ -226,26 +226,29 @@ named change class, trusted and untrusted event shape, required mode,
 retry/cancellation/failure class, matching mode-set criterion, latency
 criterion, and classification criterion; every required cell has explicit
 retained samples or an owner-approved retirement row; each latency-target
-segment declares and exercises an explicit per-segment sample count; the P10-only
-substitute rule below applies only to observation cells whose event shape real
-merged traffic cannot produce. Full dual-run comparison is capped by the
-dual-run cost budget for the owner-approved bounded sample request: summed
+segment declares and exercises an explicit per-segment sample count; the
+P10-only substitute rule below applies only to observation cells whose event
+shape real merged traffic cannot produce. Full dual-run comparison is capped by
+the dual-run cost budget for the owner-approved bounded sample request: summed
 new-graph runner minutes across retained sample cells must stay within 2x the
 summed matched current-baseline runner minutes for the same change/event/mode
-cells, plus 20% of that matched baseline as queue overhead. The same
-owner-approved request must declare a sample runner-minute ceiling for all
-migration collection work. A sample cell with no retained matched
-current-baseline runner-minute measurement is incomplete evidence: it cannot
-enter the approved dual-run sample or cost denominator, and it cannot produce
-acceptance evidence through an inferred or zero baseline. Baseline-less runs
-count against the sample runner-minute ceiling and may inform owners but do not
-count toward acceptance evidence or dual-run cost-budget proof, except
-owner-approved P10 fixture-substitute observation cells, which satisfy coverage
-only. A matrix
-segment means retained real-traffic sample cells grouped under an assigned
-provisional latency target: Go-only PR, GUI/native-touching PR, main, release
-candidate, or another owner-approved target added to the bounded matrix. A
-segment is complete only when every required real-traffic cell in that target
+cells, plus 20% of that matched baseline as queue overhead. The owner-approved
+bounded sample request must declare a sample runner-minute ceiling for that
+request's migration collection work. Each owner-approved bounded sample request
+declares its own ceiling under this rule; a P10 request does not inherit or
+reuse P6's remaining balance. Runner minutes spent by observational old contexts
+during a P10 request count against that P10 ceiling. A sample cell with no
+retained matched current-baseline runner-minute measurement is incomplete
+evidence: it cannot enter the approved dual-run sample or cost denominator, and
+it cannot produce acceptance evidence through an inferred or zero baseline.
+Baseline-less runs count against the sample runner-minute ceiling, may inform
+owners, and never count toward dual-run cost-budget proof or the cost
+denominator. They do not count toward acceptance evidence either, except that
+owner-approved P10 fixture-substitute observation cells satisfy coverage only.
+A matrix segment means retained real-traffic sample cells grouped under an
+assigned provisional latency target: Go-only PR, GUI/native-touching PR, main,
+release candidate, or another owner-approved target added to the bounded matrix.
+A segment is complete only when every required real-traffic cell in that target
 group has retained samples or an owner-approved retirement row and the
 owner-approved matrix declares its explicit per-segment sample count exercised.
 Event shapes with no provisional SLO need either an owner-approved latency
@@ -264,13 +267,13 @@ attempt produces no acceptance evidence, stops the shadow migration, and
 restores the old gate. A smaller replacement sample request must be separately
 owner-approved before new evidence can be produced; it is never an automatic
 resize of the failed request and never promotes by elapsed time. After the
-App-owned gate becomes the required decision, old
-workflows may run observationally only until the P10 real-change/event sample
-passes; they are not required and cannot affect the App gate. Sampling is
-allowed only when it fills explicit matrix cells. A missing required P10 cell
-fails the observation gate unless it has an owner-approved retirement row or an
-owner-approved retained live fixture substitute for an event shape that real
-merged traffic cannot produce; fixture substitutes must exercise the same trust
+App-owned gate becomes the required decision, old workflows may run
+observationally only until the P10 real-change/event sample passes; they are
+not required and cannot affect the App gate. Sampling is allowed only when it
+fills explicit matrix cells. A missing required P10 cell fails the observation
+gate unless it has an owner-approved retirement row or an owner-approved
+retained live fixture substitute for an event shape that real merged traffic
+cannot produce; fixture substitutes must exercise the same trust
 and provenance contracts as the App gate and are excluded from segment p95
 latency evidence. Abort shadow migration and restore the old gate if the
 bounded sample exceeds the dual-run cost budget or sample runner-minute ceiling,
@@ -317,12 +320,13 @@ decision while old contexts run observationally, complete the owner-approved
 bounded observation sample of real merged changes/events plus any
 owner-approved retirement rows or owner-approved retained live fixture
 substitutes for event shapes real merged traffic cannot produce. The observation
-sample uses the owner-approved sample runner-minute ceiling and fail-closed
-abort conditions from P6. Remove obsolete contexts in a separate reversible
-settings change. Any P10 observation-gate failure restores the previous required
-proof and blocks deletion until a new owner-approved bounded sample request
-passes. Retain historical result bundles and a documented rollback; do not
-delete old contexts while the trust-root proof or observation matrix is open.
+sample uses its own owner-approved sample runner-minute ceiling and the
+fail-closed abort conditions from P6. Remove obsolete contexts in a separate
+reversible settings change. Any P10 observation-gate failure restores the
+previous required proof and blocks deletion until a new owner-approved bounded
+sample request passes. Retain historical result bundles and a documented
+rollback; do not delete old contexts while the trust-root proof or observation
+matrix is open.
 
 ## Consensus
 
@@ -392,8 +396,8 @@ evidence; broad product suites remain owned by the eventual CI lanes.
   fixed-window evidence is an owner-approved collection request with explicit
   bounds chosen for coverage completeness rather than elapsed-time acceptance.
   Until that evidence is complete and calibration is owner-reviewed, the
-  provisional 20/35/45/90-minute targets and the 2x-plus-20% dual-run cost budget
-  are binding ceilings, not goals that may be exceeded.
+  provisional 20/35/45/90-minute targets and the 2x-plus-20% dual-run cost
+  budget are binding ceilings, not goals that may be exceeded.
 - The App check remains the single required decision while individual mode
   diagnostics stay visible as separate checks/evidence. No diagnostic check may
   be substituted into branch protection without the same App source binding.
