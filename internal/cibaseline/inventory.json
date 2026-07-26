@@ -2772,16 +2772,6 @@
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
     },
     {
-      "path": ".release-please-manifest.json",
-      "owner": "graith-maintainers",
-      "kind": "ci-configuration",
-      "git_mode": "100644",
-      "sha256": "c8a3373ea0061ae9ca67c1d6d0e25c2dfeb2324fde7db9cdd6742990028008df",
-      "executable_contract": "preserve the checked-in CI tool or release configuration consumed by current workflow proof",
-      "disposition": "grandfathered",
-      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
-    },
-    {
       "path": "Makefile",
       "owner": "graith-maintainers",
       "kind": "ci-entrypoint",
@@ -3425,5 +3415,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "dbb9c2b288414531a45ca72143f5123096dae4237316448960836e0482241275"
+  "digest": "5b03df0aa114f60b8e6d0883886fe609440bb20c1cc7ca3681a19d28f64cd9cd"
 }
