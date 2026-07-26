@@ -2,405 +2,608 @@
 title: "Design Doc: CI North Star Implementation Plan"
 authors: graith maintainers
 created: 2026-07-25
-status: Draft (revised after post-merge tribunal)
-reviewers: independent post-merge tribunal
+status: Draft (corrected for issue #1715)
+reviewers: d0ugal
 informed: maintainers, release owners, GUI owners, security owners
 ---
 
 # CI North Star Implementation Plan
 
-This plan turns the [CI North Star](2026-07-24-ci-north-star.md) into
-independently reviewable implementation issues. It sequences evidence,
-contracts, policy, execution, and cutover so no migration step weakens the
-fail-closed target or interferes with native/libghostty repair work.
+This plan implements the corrected [CI North Star](2026-07-24-ci-north-star.md)
+with existing repository infrastructure only. It is deliberately smaller than
+the previous P0-P11 rollout: no external gate, no new identity, no settings
+change, no merge queue, no live fixture repository, and no required-check
+cutover.
+
+The near-term objective is faster, more reliable CI with fewer duplicated
+policy surfaces. The first implementation signal is a non-required shadow
+summary inside existing GitHub Actions. Current checks remain authoritative
+until a later in-repository change has direct evidence and a reversible reason
+to simplify them.
 
 ## Background
 
-The north star defines a capability-driven DAG, typed run-plan and result
-contracts, immutable artifacts, trusted publication, and explicit operational
-evidence. The repository already contains useful proofs—fail-safe changed-file
-detectors, pinned native artifacts, generated-file checks, sandbox probes,
-release-shaped consumers, and macOS/GUI validation—but these are distributed
-across workflow concerns. The plan consolidates their semantics before moving
+The current workflows already protect important boundaries:
+
+- untrusted PR code does not receive release or branch-mutation credentials;
+- privileged publication paths do not execute untrusted PR code while
+  credentials are present;
+- checkout credential persistence and job token permissions are explicit;
+- fail-safe detectors, where already present, escalate macOS, sandbox,
+  native/libghostty, release, docs-preview, generated-file, and
+  branch-mutation-sensitive paths rather than silently skipping;
+- native/libghostty source, artifact, manifest, archive, and consumer checks
+  protect the terminal runtime;
+- docs-preview and regen branch mutation paths have same-repository and
+  fresh-runner separation;
+- release-shaped PR builds do not publish.
+
+The libghostty migration is complete enough that libghostty should be treated
+as the core runtime validation surface, not an optional add-on. Cleanup should
+remove obsolete add-on framing and duplicated helper logic, while preserving the
+native protections that now guard the main runtime.
+
+### Existing-Infrastructure Ceiling
+
+Every package in this plan must stay within the current repository setup:
+
+| Area | Allowed |
+| --- | --- |
+| Repository | The existing `d0ugal/graith` repository only. |
+| Automation | Current GitHub Actions workflows and repository-owned scripts. |
+| Runners | GitHub-hosted Ubuntu and macOS runners already used by current workflows. |
+| Tokens | Existing `GITHUB_TOKEN` behavior only. |
+| Secrets | Existing publication secrets only where current workflows already use them: `GPG_PASSPHRASE`, `GPG_PRIVATE_KEY`, and `RELEASE_TOKEN`. |
+| Environments | The existing `github-pages` environment only. |
+| Settings | Current repository settings; no rulesets, repository variables, external CI service, or extra environment are assumed. Current classic branch protection on `main` has `enforce_admins` enabled, non-strict required status checks, and seven required GitHub Actions contexts. |
+
+The seven current required contexts are `Test (macos-latest)`, `Lint`,
+`Conventional commits`, `Test (ubuntu-latest)`,
+`macOS (safehouse / Seatbelt)`, `Linux (nono / Landlock)`, and
+`Native backend gate`. This plan does not add, remove, rename, or reconfigure
 required checks.
+
+If a work package needs anything outside this table, it is not part of this
+rollout.
 
 ## Problem
 
-A migration can make CI look simpler while introducing a skipped mode, a
-trusted job consuming an untrusted cache, a PR-controlled detector deciding its
-own scope, or a release artifact that was never independently consumed. Work
-must therefore produce machine-checkable evidence at each boundary and retain
-the old required proof until equivalence is demonstrated.
+The previous implementation plan required infrastructure that does not exist
+and is not approved for this rollout. It also made later phases depend on a
+GitHub App, external deployment, live fixture repository, replay store,
+protected settings, and calendar-style burn-in before delivering everyday CI
+improvements.
+
+The corrected work should instead answer practical questions:
+
+- Which current checks are expected for a PR and why did they run or skip?
+- Which jobs dominate feedback time for common change classes?
+- Which helper scripts duplicate policy across Go, shell, JavaScript, Python,
+  and YAML?
+- Which libghostty/native checks are core runtime coverage and which are stale
+  migration scaffolding?
+- Which landed north-star packages should be kept, simplified, or deleted when
+  they lack a real caller?
 
 ## Goals
 
-- Create one typed, locally replayable policy/result implementation with thin
-  runner adapters.
-- Enumerate every supported capability, mode, coordinate, platform, owner, and
-  event in a versioned policy manifest.
-- Prove current behavior before changing gates; preserve fail-safe detectors,
-  native producer/consumer validation, generated-file trust separation, and
-  platform-specific execution.
-- Provide deterministic dual-run comparison, safe cutover, and rollback.
-- Make each work package small enough to become one focused implementation
-  issue with a falsifiable acceptance test.
+- Ship a visible, non-required CI shadow summary quickly inside existing
+  GitHub Actions.
+- Keep current required checks authoritative throughout this plan.
+- Use deterministic fixtures and explicit sample change classes for evidence.
+- Improve speed by deleting stale migration scaffolding, avoiding unnecessary
+  duplicate work, and making slow paths visible before changing routing.
+- Improve reliability by keeping fail-safe routing and native/release artifact
+  protections intact.
+- Reduce language sprawl only where it removes duplicated CI policy or brittle
+  parsing.
+- Delete or retire landed external-gate code that cannot be used under the
+  existing-infrastructure ceiling.
+- Keep implementation packages PR-sized, independently reviewable, and
+  reversible.
 
 ### Non-Goals
 
-- Rewriting workflows, production code, release assets, or repository settings
-  in this design task.
-- Porting every ecosystem-mandated JavaScript helper immediately.
-- Changing the supported platform matrix without a separate design decision.
-- Making coverage, GUI, native, or security checks required merely because the
-  plan names them; requiredness changes only through evidence-backed policy.
+- Do not provision a GitHub App, bot, machine identity, cloud service, webhook
+  receiver, external evaluator, replay service, KMS, signing service, database,
+  bucket, new repository, live fixture repository, new secret, self-hosted
+  runner, merge queue, `merge_group`, ruleset, branch protection, environment,
+  required-check setting, paid account, or new scheduled job.
+- Do not edit workflow YAML, Go code, generated metadata, GitHub settings, or
+  issue hierarchy in the corrective design PR.
+- Do not weaken existing publication, credential, sandbox, artifact, native,
+  release, docs-preview, or regen boundaries.
+- Do not claim GitHub Actions source isolation that it does not provide.
+- Do not port working JavaScript helpers merely to change language.
+- Do not use elapsed calendar time as an acceptance gate.
 
 ## Platform support
 
-| Surface | Plan obligation |
-|---------|-----------------|
-| CLI/server | Go policy tool, Linux build/test/race/integration, package consumer, protocol and generated-file contracts. |
-| macOS GUI | SwiftPM/macOS build and tests, Xcode/toolchain recording, native adapter consumer, and protected signing-shaped checks. |
-| iOS GUI | iOS cross-compilation and simulator proof; device signing/submission remains release-only. |
-| Linux | Go, sandbox enforcement, native artifact producer/consumer, security, reproducible package and release verification. |
-| macOS runners | Swift, simulator, macOS runtime behavior, Darwin native adapter, archive and signing verification. |
-| Release platforms | Closed-world artifact coordinates, checksums, SBOM/provenance, install/smoke, independent verification, and protected publication. |
+| Surface | Plan |
+| --- | --- |
+| CLI and daemon | Covered by current Go jobs and any local validation packages retained after simplification. |
+| Linux | Existing GitHub-hosted Ubuntu runners only. |
+| macOS | Existing GitHub-hosted macOS runners only. |
+| GUI/iOS package surface | Existing GUI workflow coverage only. |
+| Libghostty runtime | Treated as core runtime CI, not an optional add-on. Existing native checks remain until a PR proves an equivalent simpler shape. |
+| Documentation | Existing docs preview and Pages workflows only. |
+| Releases | Existing PR release-shaped builds and trusted publication workflows only. |
+| External CI control plane | Not supported. |
 
 ## Proposals
 
 ### Proposal 0: Do Nothing
 
-Continue adding isolated workflow fixes. This avoids migration work but leaves
-the current proof surface difficult to enumerate and makes equivalence,
-required-check changes, and artifact trust hard to demonstrate. Rejected.
+Keeping the previous implementation plan would leave future work blocked on a
+GitHub App, external deployment, live fixture repository, replay store, and
+required-check cutover that this rollout cannot use. It would also delay the
+first visible CI improvement behind infrastructure and cleanup that do not
+directly address speed, reliability, or helper sprawl.
 
-### Proposal 1: Contract-first capability migration (Recommended)
+Doing nothing avoids churn, but it leaves the landed gate-era code looking like
+an expected destination and keeps libghostty cleanup mixed with migration-era
+framing. The current required checks would still protect the repository, but
+maintainers would not get the clearer diagnostic signal needed to simplify CI
+safely.
 
-Implement the work packages below in dependency order. Every package has a
-local replay path, a fixture or contract test, an owner, and a rollback point.
-No package changes required branch protection until the cutover package is
-accepted.
+### Proposal 1: Existing-Actions Rollout (Recommended)
 
-### Work packages
+Ship a short sequence inside the existing repository and existing GitHub
+Actions setup. The sequence starts with this design correction, deletes the
+external gate, adds the smallest useful shadow summary against current static
+inventory, prunes baseline/policy helpers from the actual caller graph, then
+uses deterministic fixtures to justify libghostty and workflow simplifications.
 
-| ID | Deliverable | Depends on | Exit evidence |
-|----|-------------|------------|---------------|
-| P0 | Baseline and inventory | None | Bounded collector and replay path are operational; retained complete fixed-window evidence from an owner-approved collection request covers representative current activity and the enumerated workflow/mode inventory; matched current-baseline runner-minute measurements exist for every retained current change/event/mode cell in the closed-world inventory; event shapes with no provisional latency SLO have owner-approved latency-target or no-latency-target rows before fixed-window collection begins; unobserved collection-request cells have owner-approved gap rows with rationale, owner, and expiry and cannot enter later dual-run sampling until matched measurements are retained; retained cells without matched measurements or pre-collection target/no-target rows fail the gate; representative merged changes replay successfully; capability-to-current-proof matrix is closed-world and owner-reviewed; unexplained modes or incomplete evidence fail the gate. |
-| P1 | Policy schema and capability manifest | P0 | Schema validation rejects unknown modes, duplicate coordinates, missing owners, unsupported silent passes, and ambiguous requiredness; deterministic manifest digest. |
-| P2 | Go policy/result library | P1 | Local plan replay from event + file list; stable JSON results; policy tests cover fork/base trust, expiry, cancellation, stale output, and zero-job plans. |
-| P3 | Hermetic fixture and fault injector | P2 | Fixture fails closed for missing files, polluted environment, stale/corrupt cache/artifact, archive differences, cancellation, misleading names, and unsupported platforms. |
-| P4 | `graith-ci-gate` GitHub App evaluator | P2/P3 | App is installed from a digest-pinned release with metadata/contents/actions/pull-request read and checks write; the default-branch ruleset binds the required check to its App ID with no bypass actors; live fork/agent/merge-group fixture proves rewrite, replay, stale, missing, and zero-job failures. |
-| P5 | Artifact and cache contracts | P1/P2 | Manifest, digest, provenance, trust tier, and consumer verifier; untrusted cache cannot be consumed by trusted jobs; native and release-shaped artifacts have independent verification. |
-| P6 | Fast PR lane dual-run | P3/P4/P5 | Owner-approved bounded sample matrix covers representative Go, protocol, docs, generated, GUI, native, sandbox, workflow, and dependency changes across trusted/untrusted event shapes, required modes, retry/cancellation/failure classes, and the matching mode-set, latency, and classification criteria; every required cell has retained samples or an owner-approved retirement row; each target segment declares and exercises explicit per-segment sample counts; the owner-approved bounded sample request declares a sample runner-minute ceiling; event shapes without provisional SLOs have owner-approved latency-target or no-latency-target policy rows before collection; cells without matched current-baseline runner-minute measurements are excluded from evidence; zero unexplained disagreement, artifact identity mismatch, false-green escape, stale/missing proof, dual-run cost budget exhaustion, or sample runner-minute ceiling exhaustion. |
-| P7 | Main/deep/scheduled lanes | P6 | Main complete bundle, race/integration, full platform, coverage, security, fuzz/soak, and dependency freshness modes have stable fan-in and dashboards. |
-| P8 | Dependency and generated-file promotion | P5/P6 | Dependency updates use the same policy; credentialed regeneration/docs publication moves behind a trusted-base workflow or protected environment that PR YAML cannot edit; stale outputs fail for forks and trusted branches; live same-repository-agent fixture passes before cutover. |
-| P9 | Release candidate verification | P5/P7 | Reproducible Linux/Darwin candidate, package consumer, checksum/SBOM/provenance, signature, independent verification, rollback dry run, and protected publication rehearsal. |
-| P10 | Required-check cutover and deletion | P6/P7/P8/P9 | Branch protection requires only the App-owned `graith-ci-gate`; old contexts remain observational until an owner-approved bounded sample of real merged changes/events covers the required change/event/mode matrix with no unexplained disagreement, false-green escape, stale/missing proof, or artifact identity mismatch. Required cells need retained real samples, owner-approved retirement rows, or owner-approved retained live fixture substitutes for event shapes real merged traffic cannot produce; fixture substitutes satisfy coverage only and do not count toward latency evidence. The observation sample uses its own owner-approved sample runner-minute ceiling and fail-closed abort conditions; any observation-gate failure restores the previous required proof and blocks deletion until a new owner-approved bounded sample passes. Obsolete required contexts and workflows are then removed in separate reversible changes. |
-| P11 | JS policy surface retirement | P0/P2/P3 | Repo-owned JS helpers have owners and grandfathered contracts; each is wrapped, ported to Go, or explicitly retained with deletion criteria; YAML-regex trust tests are replaced by semantic contract tests before workflow reshaping. |
+This is recommended because it produces a visible signal before broad cleanup,
+keeps current required checks authoritative, and avoids introducing a CI control
+plane.
 
-#### P0 — Baseline and inventory
+#### Work Package C0: Corrective Design PR
 
-Record the current workflow events, permissions, runner labels, toolchain
-versions, action pins, cache scopes, artifact names/digests, static required
-contexts, skip behavior, and all current capability proofs. For each capability,
-record whether proof is source-level, package-consumer, compile-only, runtime,
-scheduled, soft, or required. Measure queue and execution separately. Do not
-change workflow behavior while collecting this baseline.
+Purpose: replace the external-gate north-star and implementation plan with this
+existing-infrastructure design.
 
-The inventory is closed-world: enumerate all 18 workflows
-(`ci`, `coverage`, `gui-ci`, `libghostty-native`,
-`libghostty-native-publish`, `regen`, `docs-preview`, `dev-release`,
-`release-please`, `goreleaser`, `sandbox`, `dependency-review`, `codeql`,
-`scorecard`, `secret-scan`, `workflow-lint`, `docs`, and `commits`) plus
-their event and permission shapes. Include push/PR dual-triggered development
-release, scheduled docs-preview cleanup, and main-only native publication with
-`contents:write`. Inventory `docs-preview.js`, `regen-auth.test.js`,
-`libghostty-policy.test.js`, `renovate-retry.test.js`,
-`shellcheck-policy.test.js`, `workflow-lint-supply-chain.test.js`, and the
-other repo-owned scripts under `.github/workflows/scripts/`; record the
-YAML-regex trust assertions as contracts to replace semantically. Gitleaks is a
-secret-scan job (not a separate workflow), while `docs.yml` is a main-only
-Pages build/deploy workflow and must be inventoried separately from PR
-`docs-preview.yml`. The GUI coverage detector failure path and current
-exit-zero “delta not measurable” path are explicit defects: PR coverage is
-informational and missing/stale evidence is `unknown`; main coverage is
-required and must have signed evidence for the exact merge SHA, source/tree,
-toolchain, profile, totals, policy revision, and producer run, no older than
-24 hours. Main fan-in fails closed if it is absent, malformed, superseded, or
-mismatched; it never falls back to the last report.
+Expected files:
 
-P0 also inventories root `scripts/**` shell policy with owners and contracts,
-and produces an old-to-new relation: every legacy proof obligation (job leg or
-check coordinate, including skip conditions) maps to one or more new mode
-coordinates or an owned retirement row; every new required mode traces to a
-legacy obligation or an explicitly approved new obligation. The validator
-rejects missing, duplicate, orphaned, or unjustified mappings before dual-run
-and again before cutover. Actual skipped jobs are recorded separately from
-successful jobs because GitHub treats a conditionally skipped job as success.
+- `docs/design/2026-07-24-ci-north-star.md`
+- `docs/design/2026-07-25-ci-north-star-implementation-plan.md`
 
-Acceptance requires the bounded collector and replay path to be operational,
-retained complete fixed-window evidence covering representative current
-activity, the enumerated workflow/mode inventory, and matched current-baseline
-runner-minute measurements for every retained current change/event/mode cell in
-the closed-world inventory. A collection request cell that cannot be observed is
-an inventory gap: it requires an owner-approved gap row with rationale, owner,
-and expiry, and cannot enter later dual-run sampling until a matched measurement
-is retained. A retained cell without a matched runner-minute measurement is
-incomplete evidence and fails the gate. Event shapes with no provisional
-latency SLO need an owner-approved latency-target or no-latency-target policy
-row before the fixed-window collection request begins; cells collected without
-that row are incomplete latency evidence and cannot calibrate targets.
-Acceptance also requires owner sign-off on the closed-world matrix and a
-representative sample of merged changes replayed against the observed mode set.
-The fixed window is a retained, contiguous, owner-approved collection request
-with explicit bounds chosen for coverage of the workflow/mode inventory, not an
-elapsed-time acceptance clock. P1 may begin as soon as those evidence-quality
-conditions are satisfied; it does not wait for a calendar minimum. Ongoing
-baseline collection continues in parallel with P1 and later packages and
-calibrates final latency and cost targets before dual-run enforcement or
-cutover. Until calibration is retained, the provisional 20/35/45/90-minute
-targets and the 2x-plus-20% dual-run cost budget are binding ceilings, not goals
-that may be exceeded. Any unexplained mode or incomplete evidence is an
-inventory failure, not an assumption to resolve during cutover.
+Dependencies: none beyond starting from current `origin/main`.
 
-#### P1–P3 — Contracts, implementation, and fixture
+Acceptance:
 
-The policy manifest is data; evaluation, plan expansion, result validation, and
-fan-in are Go code. The schema includes policy digest, source/event identity,
-trust tier, capability, mode, platform, cost class, requiredness, owner,
-unsupported rationale, expiry, and evidence references. The result schema
-includes attempts, status, failure class, timestamps, artifact/cache digests,
-and supersession identity.
+- Frontmatter and section order match the design-doc template.
+- The existing-infrastructure ceiling is prominent in both documents.
+- Prohibited external requirements appear only as rejected alternatives or
+  non-goals.
+- The component audit classifies landed P0-P5, P11, and P4 work.
+- Issue disposition for #1700, #1705, and #1707-#1712 is explicit.
+- `git diff --check` is clean.
+- One applicable review is clean.
+- Exact-head CI is green before the PR is undrafted.
 
-The fixture runs without secrets or external network. Fault injection must be
-deterministic and run on every policy change. Generated workflow data is
-compared with the same manifest consumed by the evaluator so fixture drift
-cannot hide live-graph drift.
+Rollback: revert the corrective docs PR. No production code or workflow state is
+changed.
 
-The fixture includes a third trust tier for same-repository agent-authored
-branches. Local tests use synthetic tokens and filesystem boundaries to prove
-that docs-preview writes, regeneration pushes, and coverage/comment publication
-cannot obtain maintainer credentials merely from repository location. A
-separate disposable live GitHub fixture proves App source restriction, fork and
-agent permissions, `merge_group` triggering (which requires enabling the merge
-queue and adding the event trigger), check freshness, and artifact/run
-provenance; local emulation cannot satisfy those claims. It also replaces raw
-YAML regex tests with semantic assertions over permissions, event trust, safe
-checkout, and publication boundaries.
+#### Work Package C1: Delete External-Gate Dead End
 
-#### P4–P5 — Trust and proof boundaries
+Purpose: remove code and docs that exist only for prohibited external
+infrastructure.
 
-The trusted evaluator is a repository-independent `graith-ci-gate` GitHub App,
-deployed from a reviewed digest-pinned release with metadata/contents/actions/
-pull-request read and checks write (statuses write only if used). It reads trusted-base policy and GitHub run
-metadata, then publishes the sole required check. The default-branch ruleset
-requires this check from the App specifically; rulesets enforce the result but
-are not the trust root. The App records event delivery ID, intended SHA, base
-SHA, trusted workflow blob SHA, policy/evaluator digests, producer run/attempt,
-workflow identity, and artifact digest, and rejects any mismatch or replay.
-P4 must install it and pass the live fixture proving that changing PR YAML to
-emit success, omitting evidence, changing the head SHA, or replaying an old
-bundle cannot satisfy the check. P10 is blocked until this evidence is retained
-in the dual-run bundle; until then current required checks remain authoritative.
+Expected files:
 
-Artifacts are addressed by digest, verified before extraction, and rejected for
-extra/missing members. Cache keys include source/dependency/toolchain/platform
-identity, but trust tier is an independent boundary: untrusted writes cannot
-enter trusted reads. Native/libghostty producers, release builders, and package
-consumers adopt the same manifest and provenance contract without changing
-their supported coordinates.
+- delete `cmd/cigate/**`;
+- delete `internal/cigate/**`;
+- remove `cigate` package metadata from `internal/architecture/manifest.json`;
+- delete or rewrite `website/content/docs/contributing/ci-gate.md`;
+- prune references to the external gate from contributing docs.
 
-#### P6–P8 — Dual-run lanes
+Dependencies: C0.
 
-Run the new planner and gate in shadow mode beside current required checks. The
-shadow result must be visible but cannot publish, mutate branches, or override
-existing gates. Compare expected coordinates, status, evidence, duration,
-queue, retries, and classifications. Include changes that affect only docs,
-generated files, Go runtime branches, protocol, GUI/iOS, native dependencies,
-sandbox backends, release metadata, workflow policy, and fork trust.
+Acceptance commands:
 
-Promote only after an owner-approved bounded representative sample matrix is
-complete with zero unexplained mode disagreement, zero artifact identity
-mismatch, zero false-green escape, zero stale/missing proof, and
-capability-specific latency within provisional budgets. The matrix covers every
-named change class, trusted and untrusted event shape, required mode,
-retry/cancellation/failure class, matching mode-set criterion, latency
-criterion, and classification criterion; every required cell has explicit
-retained samples or an owner-approved retirement row; each latency-target
-segment declares and exercises an explicit per-segment sample count; the
-P10-only substitute rule below applies only to observation cells whose event
-shape real merged traffic cannot produce. Full dual-run comparison is capped by
-the dual-run cost budget for the owner-approved bounded sample request: summed
-new-graph runner minutes across retained sample cells must stay within 2x the
-summed matched current-baseline runner minutes for the same change/event/mode
-cells, plus 20% of that matched baseline as queue overhead. The owner-approved
-bounded sample request must declare a sample runner-minute ceiling for that
-request's migration collection work. Each owner-approved bounded sample request
-declares its own ceiling under this rule; a P10 request does not inherit or
-reuse P6's remaining balance. Runner minutes spent by observational old contexts
-during a P10 request count against that P10 ceiling. A sample cell with no
-retained matched current-baseline runner-minute measurement is incomplete
-evidence: it cannot enter the approved dual-run sample or cost denominator, and
-it cannot produce acceptance evidence through an inferred or zero baseline.
-Baseline-less runs count against the sample runner-minute ceiling, may inform
-owners, and never count toward dual-run cost-budget proof or the cost
-denominator. They do not count toward acceptance evidence either, except that
-owner-approved P10 fixture-substitute observation cells satisfy coverage only.
-A matrix segment means retained real-traffic sample cells grouped under an
-assigned provisional latency target: Go-only PR, GUI/native-touching PR, main,
-release candidate, or another owner-approved target added to the bounded matrix.
-A segment is complete only when every required real-traffic cell in that target
-group has retained samples or an owner-approved retirement row and the
-owner-approved matrix declares its explicit per-segment sample count exercised.
-Event shapes with no provisional SLO need either an owner-approved latency
-target or an owner-approved no-latency-target policy row before collection
-begins. A real-traffic cell with no assigned latency target or
-no-latency-target policy row is incomplete latency evidence and cannot satisfy
-promotion or cutover until owners assign one or approve a retirement row.
-Retirement rows, no-latency-target policy rows, and owner-added latency targets
-are versioned policy rows with rationale, owner, and expiry; a cell's assigned
-latency target is fixed at collection time, and reassignment invalidates its
-retained latency samples and requires a new owner-approved sample.
-Fixture-substitute cells satisfy coverage only and are excluded from segment p95
-latency evidence. Exhausting the dual-run cost budget or the sample
-runner-minute ceiling before the sample matrix is complete fails closed: the
-attempt produces no acceptance evidence, stops the shadow migration, and
-restores the old gate. A smaller replacement sample request must be separately
-owner-approved before new evidence can be produced; it is never an automatic
-resize of the failed request and never promotes by elapsed time. After the
-App-owned gate becomes the required decision, old workflows may run
-observationally only until the P10 real-change/event sample passes; they are
-not required and cannot affect the App gate. Sampling is allowed only when it
-fills explicit matrix cells. A missing required P10 cell fails the observation
-gate unless it has an owner-approved retirement row or an owner-approved
-retained live fixture substitute for an event shape that real merged traffic
-cannot produce; fixture substitutes must exercise the same trust
-and provenance contracts as the App gate and are excluded from segment p95
-latency evidence. Abort shadow migration and restore the old gate if the
-bounded sample exceeds the dual-run cost budget or sample runner-minute ceiling,
-p95 required latency for any completed matrix segment exceeds its target by 25%,
-any trust/provenance mismatch occurs, or any false-green escape occurs. After
-App cutover, any P10 observation-gate failure restores the previous required
-proof and blocks deletion until a new owner-approved bounded sample request
-passes. Main promotion expands deferred PR modes according to policy; it does
-not infer that a skipped PR mode passed.
+```bash
+go test ./...
+go vet ./...
+make architecture-check
+git diff --check
+```
 
-Operational reliability reports use a fixed rolling 28-day UTC window and separate
-attempt and change denominators. Attempt failure is failed attempts divided by
-all attempts; change failure is changes with an eventual product failure
-divided by changes with a terminal run. Retries count in the attempt measure
-and preserve the first failure. Cancelled and superseded runs are separate
-outcomes, not omitted observations. Policy revisions are pinned per run; a
-base-branch policy change starts a new evaluation epoch and cannot reuse an
-older plan or evidence bundle.
+Acceptance evidence:
 
-#### P11 — JS policy surface retirement
+- No current workflow imports or invokes `cmd/cigate` or `internal/cigate`.
+- User docs no longer describe an external App, webhook, replay service, live
+  fixture repository, deployment digest, or App-owned check as part of graith
+  CI.
+- Deletion is a package/docs removal with no behavior change to current
+  workflows.
 
-Treat the roughly 2,100 lines under `.github/workflows/scripts/` as a named
-repo-owned policy surface, not an incidental dependency. Assign an owner and
-grandfather each helper with an executable contract. Port or wrap one helper at
-a time, compare its output with the Go policy/result library across a
-documented compatibility sample matrix, and delete it only after that matrix
-has zero unexplained disagreement.
-The `pngjs` dependency remains an explicit exception where image decoding is
-ecosystem-specific. Before YAML reshaping, convert regex-based trust tests such
-as `regen-auth.test.js` into semantic fixture tests so a formatting change
-cannot silently erase a security assertion.
+Rollback: revert C1. Because no workflow should call the deleted package, the
+rollback boundary is isolated.
 
-#### P9–P10 — Release and cutover
+Parallelism: C1 can run in parallel with C2 because C2 must not reuse `cigate`.
 
-Rehearse release publication with non-publishing credentials and an independent
-consumer. Verify the candidate from a clean checkout, then test rollback to the
-last known-good artifact set. Cut over protected publication only after two
-successful candidates and a security/release-owner audit.
+#### Work Package C2: Add Minimal Existing-Actions Shadow Summary
 
-Change required checks in this order: deploy the tamper-resistant
-always-reporting gate, verify it blocks a missing/zero-job result and a
-PR-rewritten unconditional-success gate, make the App-owned gate the required
-decision while old contexts run observationally, complete the owner-approved
-bounded observation sample of real merged changes/events plus any
-owner-approved retirement rows or owner-approved retained live fixture
-substitutes for event shapes real merged traffic cannot produce. The observation
-sample uses its own owner-approved sample runner-minute ceiling and the
-fail-closed abort conditions from P6. Remove obsolete contexts in a separate
-reversible settings change. Any P10 observation-gate failure restores the
-previous required proof and blocks deletion until a new owner-approved bounded
-sample request passes. Retain historical result bundles and a documented
-rollback; do not delete old contexts while the trust-root proof or observation
-matrix is open.
+Purpose: show maintainers the expected CI shape, local detector decisions, and
+helper surfaces quickly, without changing merge authority or depending on a
+large helper cleanup first.
 
-## Consensus
+Expected files:
 
-The exact-head reviews identified and this revision fixes the inventory,
-coverage, evaluator permission, mapping, and bounded migration contracts. The
-same-repository credentialed publication boundary remains an explicit P8
-prerequisite and blocks cutover until its live fixture passes.
+- update one existing workflow, preferably `.github/workflows/ci.yml`, to add a
+  non-required `CI shadow summary` job;
+- reuse existing static inventory code from `internal/cibaseline` or
+  `internal/cipolicy` only where it is simpler than shell/YAML;
+- add a small helper command only if the summary would otherwise duplicate
+  parsing logic;
+- add focused tests for any helper behavior used by the summary;
+- update contributing docs only if a new user-facing command is introduced.
+
+Dependencies: C0. C2 does not depend on C3 helper pruning.
+
+Required workflow properties:
+
+- `permissions: contents: read`;
+- no secrets;
+- `persist-credentials: false` for checkout;
+- no branch mutation;
+- no publication credentials;
+- no claim that the job is source-isolated on PRs;
+- diagnostic output to `GITHUB_STEP_SUMMARY`;
+- normal job success unless summary generation itself fails.
+
+V1 scope:
+
+- summarize PR change classes from checked-in path rules and existing detector
+  outputs;
+- list expected current workflows/jobs and the seven current required contexts;
+- show skip/escalation reasons the current workflow can compute locally;
+- identify repository-owned workflow helper scripts and language surfaces;
+- link maintainers to the normal Actions UI for durations rather than
+  synthesizing repository-wide job timing.
+
+V1 must not query or aggregate independent workflow jobs, cross-workflow
+durations, retained GitHub history, or live check-run completion state. If a
+later PR adds live check-run data, it must state the exact existing
+`GITHUB_TOKEN` permission, scope, and completion semantics, and the result must
+remain non-required.
+
+Acceptance commands:
+
+```bash
+go test ./internal/cibaseline ./cmd/cibaseline ./internal/cipolicy ./cmd/cipolicy
+node --test .github/workflows/scripts/*.test.js
+git diff --check
+```
+
+Acceptance evidence:
+
+- The summary appears on the exact PR head.
+- Current required checks still decide mergeability.
+- A workflow change PR cannot use the summary job to obtain credentials or
+  publish a check that becomes authoritative.
+- The summary identifies libghostty/native coverage as core runtime validation.
+- The summary does not claim repository-wide observed job results or durations.
+
+Rollback: remove the new job and helper in one PR. Current required checks keep
+working.
+
+Parallelism: C2 can run while C1 is in review if it does not touch `cigate`.
+
+#### Work Package C3: Prune Baseline and Policy Helpers to Actual Callers
+
+Purpose: keep useful static inventory and validation revealed by C2, while
+deleting retained live evidence, historical-window acceptance, and gate-oriented
+policy shape that has no concrete caller.
+
+Expected files:
+
+- keep or simplify `internal/cibaseline/inventory.go`,
+  `internal/cibaseline/inventory_test.go`, and `internal/cibaseline/inventory.json`
+  only as needed by C2/C4;
+- simplify or delete `cmd/cibaseline/**` based on the C2 caller shape;
+- delete `internal/cibaseline/github.go`,
+  `internal/cibaseline/evidence.go`, `internal/cibaseline/acceptance.go`, and
+  retained evidence fixtures;
+- simplify or delete `internal/cipolicy/manifest.go`, `build.go`,
+  `validate.go`, `io.go`, and `manifest.json` based on the C2/C4 caller shape;
+- simplify or delete `cmd/cipolicy/**` based on the retained local caller;
+- delete `internal/cipolicy/plan.go`, `result.go`, and `fixture.go` unless C2
+  or C4 already imports them directly;
+- delete `internal/cipolicy/cache.go` unless a current native/release validation
+  caller already imports it directly;
+- keep `internal/cipolicy/artifact.go` only for native or release validation.
+
+Dependencies: C0 and C2. Coordinate with C1 to avoid conflicts in architecture
+or docs.
+
+Acceptance commands:
+
+```bash
+go test ./internal/cibaseline ./cmd/cibaseline ./internal/cipolicy ./cmd/cipolicy
+go test ./...
+git diff --check
+```
+
+Acceptance evidence:
+
+- Every remaining command or package has a concrete C2/C4/native/release caller.
+- No retained-evidence acceptance depends on fixed dates, mature run windows,
+  or GitHub history collection.
+- No speculative plan/result/fixture/cache code remains without an accepted
+  caller.
+- Static inventory drift tests still catch workflow/job rename mistakes when
+  the summary relies on them.
+
+Rollback: revert C3 or restore the deleted helper package in one PR.
+
+Parallelism: C3 can be split into `cibaseline` and `cipolicy` pruning PRs after
+C2 identifies the real imports.
+
+#### Work Package C4: Deterministic Change-Class Fixtures
+
+Purpose: replace calendar burn-in with explicit examples that prove routing and
+summary behavior for common changes.
+
+Expected files:
+
+- fixture or table tests in the retained inventory/policy package;
+- optional testdata files for path sets and expected check classes;
+- documentation of the sample classes in contributing docs if maintainers need
+  to run the checks manually.
+
+Dependencies: C2. C3 is useful before C4 when it removes unused fixture code,
+but C4 may also justify keeping a small fixture surface.
+
+Required sample classes:
+
+| Class | Expected evidence |
+| --- | --- |
+| Go-only | Go build/test/coverage paths remain covered; unrelated libghostty/release paths are not newly required beyond current authoritative checks. |
+| Docs-only | Docs preview behavior is visible; same-repository write guard remains explicit. |
+| GUI-only | Existing macOS/GUI routing and required-check satisfaction semantics remain visible. |
+| Sandbox | Sandbox fail-safe escalation remains visible. |
+| Libghostty runtime | Native source-build, artifact, manifest, archive, and consumer checks are treated as core runtime coverage. |
+| Generated metadata | Existing drift tests remain visible. |
+| Release path | Release-shaped PR builds run without publication credentials. |
+| Workflow/script | Workflow-lint and helper tests cover policy changes. |
+| Fork PR | Publication credentials, docs-preview writes, and regen mutation remain unavailable. |
+| Same-repository mutation | Docs-preview and regen same-repository guards remain explicit. |
+
+Acceptance commands:
+
+```bash
+go test ./internal/cibaseline ./internal/cipolicy
+node --test .github/workflows/scripts/*.test.js
+git diff --check
+```
+
+Acceptance evidence:
+
+- Each fixture is deterministic and runs locally.
+- Fail-safe detector failure remains an explicit expected output.
+- No sample class depends on elapsed time, live GitHub history, or a separate
+  repository.
+
+Rollback: revert fixture/test additions. The shadow summary remains diagnostic.
+
+Parallelism: C4 can be split by sample class once C2's summary output is
+visible.
+
+#### Work Package C5: Libghostty CI Cleanup
+
+Purpose: clean up stale migration-era shape now that libghostty is the core
+runtime, while preserving the native protections that matter.
+
+Expected files may include:
+
+- `.github/workflows/ci.yml`;
+- `.github/workflows/libghostty-native.yml`;
+- `.github/workflows/dev-release.yml`;
+- `.github/workflows/goreleaser.yml`;
+- `.github/workflows/scripts/libghostty-policy.test.js`;
+- `scripts/libghostty-native.sh`;
+- `scripts/libghostty-linux-archive.py`;
+- release and macOS service helper docs/tests when touched.
+
+Dependencies: C2 and the libghostty sample class from C4.
+
+Allowed simplifications:
+
+- rename or regroup summary labels so libghostty is described as core runtime
+  coverage;
+- remove stale fallback/add-on wording from docs and helper output;
+- factor repeated artifact/manifest/archive checks into one tested helper if it
+  reduces duplication;
+- make slow native jobs easier to inspect by separating setup, source-build,
+  artifact, and consumer timings;
+- remove redundant checks only when a fixture and exact-head PR evidence show
+  equivalent coverage.
+
+Prohibited simplifications:
+
+- treating libghostty as optional coverage;
+- silently skipping native/source/artifact/consumer checks after detector
+  failure;
+- moving release credentials into PR-controlled code;
+- weakening archive shape, digest, manifest, source-build, candidate privacy,
+  or consumer checks.
+
+Acceptance commands:
+
+```bash
+go test ./...
+node --test .github/workflows/scripts/*.test.js
+scripts/libghostty-native.sh test-archive-cleanup
+scripts/libghostty-native.sh test-linux-archive
+git diff --check
+```
+
+Acceptance evidence:
+
+- The PR's shadow summary and current checks agree for the libghostty runtime
+  sample class.
+- Exact-head CI shows either lower observed duration for the affected path or a
+  clear reliability simplification without duration regression.
+- Rollback restores the previous workflow/helper shape.
+
+Rollback: workflow/helper revert. Current required checks remain authoritative.
+
+Parallelism: Split Ubuntu artifact cleanup, macOS source-build cleanup, and
+release consumer cleanup into separate PRs if they touch different files.
+
+#### Work Package C6: Targeted Helper Surface Retirement
+
+Purpose: reduce language sprawl where it improves reliability or deletes
+duplicated policy.
+
+Expected files:
+
+- one helper or helper family per PR under `.github/workflows/scripts/`;
+- matching tests in Go, JS, shell, or Python depending on the retained caller;
+- workflow YAML only when the caller changes;
+- contributing docs only when user-facing commands change.
+
+Dependencies: C2. For YAML-regex trust tests, depend on C4 fixtures first.
+
+Acceptance:
+
+- Each PR names the concrete deleted or simplified caller.
+- Semantic tests exist before the old helper is removed.
+- JavaScript helpers remain when they are the smallest reliable surface, such
+  as `docs-diff*` with `pngjs`.
+- No helper retirement changes credential boundaries unless the PR is explicitly
+  about preserving that boundary and has focused tests.
+
+Acceptance commands:
+
+```bash
+node --test .github/workflows/scripts/*.test.js
+go test ./...
+git diff --check
+```
+
+Rollback: restore the previous helper and workflow caller in one revert.
+
+Parallelism: independent helpers can be handled in parallel after their shared
+semantic fixtures exist.
+
+#### Work Package C7: Demonstrated Workflow Simplifications
+
+Purpose: make only the workflow simplifications that C2-C6 evidence supports.
+
+Expected files vary by simplification. Each PR must list its affected workflows
+and helper packages explicitly.
+
+Dependencies: relevant C4 fixture plus exact-head evidence from C2.
+
+Allowed examples:
+
+- remove duplicated path predicates after a shared tested detector covers them;
+- collapse redundant job setup after the same commands are covered elsewhere;
+- make slow jobs conditional only when fail-safe escalation and required-check
+  satisfaction are preserved;
+- improve job names and summaries so core runtime, release, docs, GUI, sandbox,
+  and generated-file coverage are readable.
+
+Acceptance:
+
+- Current required checks still pass on the exact head.
+- Sample-class fixtures prove intended routing.
+- Shadow summary explains the change.
+- Rollback is a workflow/helper revert.
+
+Rollback: revert the single workflow/helper PR.
+
+Parallelism: run workflow-specific simplifications in parallel only when their
+sample classes and files do not overlap.
+
+## Issue Disposition After C0 Merges
+
+Do not update issue hierarchy in the corrective design PR. After C0 merges:
+
+| Issue | Disposition |
+| --- | --- |
+| #1700 `Epic: implement the CI north-star rollout` | Close as superseded or rewrite into a smaller epic for existing-Actions CI speed, reliability, libghostty cleanup, and helper consolidation. The old P0-P11 checklist should no longer be the source of truth. |
+| #1705 `P4: repository-independent trusted CI gate App` | Close as superseded/rejected. The merged `cmd/cigate/**` and `internal/cigate/**` code should be removed by C1. |
+| #1707 `P6: shadow planner and gate dual-run` | Close as superseded. Replace with C2: existing-Actions shadow summary, not planner/gate dual-run. |
+| #1708 `P7: promote bounded dual-run lanes` | Close as superseded. Replace with C4 deterministic sample classes and C7 demonstrated simplifications. |
+| #1709 `P8: trusted publication and credential boundary` | Close as superseded by current-workflow preservation unless a specific existing release workflow cleanup is needed. Any replacement issue must avoid new settings or credentials. |
+| #1710 `P9: native and release producer-consumer adoption` | Rewrite or replace as C5 libghostty core-runtime CI cleanup. It should start from the fact that libghostty is core, not optional. |
+| #1711 `P10: required-check cutover and rollback proof` | Close as rejected for this rollout. Required-check changes are not part of the plan. |
+| #1712 `P11: retire repository-owned JS policy surfaces` | Rewrite as C6 targeted helper surface retirement. Keep inventory and semantic-parity work; remove broad language-porting acceptance. |
+
+New issues should be C1-C7 sized. They should include exact expected files,
+commands, rollback boundary, and whether they can run in parallel.
+
+## Merge Order and Parallelism
+
+1. C0 merges first.
+2. C1 and C2 can proceed in parallel because the shadow summary must not reuse
+   `cigate`.
+3. C3 follows C2 so pruning is based on the actual summary/helper imports.
+4. C4 depends on C2's summary output. It may run before or beside C3 when a
+   fixture proves a helper should be retained.
+5. C5 depends on C4's libghostty runtime sample class.
+6. C6 can start after C2, but helpers that protect trust boundaries should wait
+   for their C4 semantic fixtures.
+7. C7 follows the relevant sample-class evidence and should stay split by
+   workflow or helper family.
+
+No package depends on an external deployment. No package depends on a repository
+settings change. No package depends on a fixed elapsed time window.
+
+## Old-To-New Phase Mapping
+
+| Old phase | New package |
+| --- | --- |
+| P0 baseline evidence | C2 local inventory signal first; C3 deletes retained live evidence. |
+| P1 policy manifest | C2 uses only the static inventory/manifest it needs; C3 prunes the rest. |
+| P2 plan/result policy | C3 deletes unless C2/C4 already proved a direct local caller. |
+| P3 hermetic policy fixture | C4 deterministic sample classes. |
+| P4 trusted CI gate App | C1 delete/reject. |
+| P5 artifact/cache contracts | C5 keeps artifact validation where it strengthens core libghostty/release checks; C3 deletes cache authority unless a direct caller exists. |
+| P6 shadow planner and gate dual-run | C2 existing-Actions shadow summary. |
+| P7 bounded dual-run lanes | C4 fixtures plus C7 PR-sized simplifications. |
+| P8 trusted publication boundary | Preserve current release workflows; make only specific in-repository cleanup PRs. |
+| P9 native/release adoption | C5 libghostty core-runtime cleanup. |
+| P10 required-check cutover | Rejected for this rollout. |
+| P11 JS policy retirement | C6 targeted helper retirement. |
 
 ## Other Notes
 
-### Acceptance and rollback
+### References
 
-The migration is accepted only when all work-package exit evidence is linked
-from an immutable result bundle. A failure uses the canonical enum `product`,
-`test-flake`, `runner`, `queue`, `toolchain`, `external-dependency`, `policy`,
-or `security`; retries preserve the
-first result. A disagreement, missing evidence, stale policy, or unexpected
-unsupported row blocks cutover.
-
-Rollback disables only the new shadow/gate path and restores the previous
-required proof. It does not delete artifacts, alter source, loosen permissions,
-or bypass the native/libghostty repair. If the old path is unavailable, the
-release remains blocked rather than falling through to an unverified publish.
-
-### Risks and mitigations
-
-| Risk | Mitigation |
-|------|------------|
-| Policy tool becomes a false-red single point of failure | Small pinned bootstrap, local replay, fixture tests, owner rota, explicit diagnostics, and no direct publication authority. |
-| Existing JS adapters drift during Go migration | Grandfather with contract tests; port one adapter at a time and compare outputs before deletion. |
-| Dynamic checks interact badly with branch protection | One tamper-resistant synthetic gate; zero-job, absent-report, and PR-rewrite tests; staged settings cutover. |
-| macOS queue/cost misses PR SLO | Capability-specific budgets, bounded matrix, shadow measurement, and main/scheduled deferral recorded as policy. |
-| Native artifact substitution or stale headers | Digest/provenance manifests and independent producer/consumer verification. |
-| Fork or same-repository agent code reaches secrets or push credentials | Explicit fork/agent/trusted tiers, trusted-base evaluator, no secrets in untrusted jobs, unprivileged generation, protected publication environment. |
-| Current and new graphs disagree during migration | Immutable coordinate comparison; before App cutover the old gate remains authoritative, and after App cutover old contexts remain observational until the P10 owner-approved bounded sample passes. Any observation-gate failure restores the previous required proof and blocks deletion; any remaining required cells need owner-approved retirement rows or owner-approved retained live fixture substitutes for event shapes real merged traffic cannot produce. |
-
-### Review history
-
-The requested second all-model tribunal was attempted after drafting this plan.
-The mandated Cursor catalog helper could not provide a live model list, so
-unverified Cursor judges were not substituted. Direct Claude and Codex judges
-were launched in read-only mirrors; the completed Claude review identified and
-the plan now addresses the PR-head gate trust-root hole, pre/post-retry SLO
-denominators, zero-incident false-green target, provisional cost funding,
-coverage fail-closed defects, the same-repository agent trust tier, workflow/JS
-inventory, and semantic replacement of YAML-regex tests. The incomplete judge
-attempts and cleanup are recorded in shared tribunal history. The plan retains
-trusted-base evaluation, one tamper-resistant gate, trust-tiered caches,
-immutable artifact contracts, explicit compile-only/runtime distinctions, and
-reversible required-check cutover.
+- Corrected north-star design:
+  `docs/design/2026-07-24-ci-north-star.md`.
+- P11 helper-retirement design:
+  `docs/design/2026-07-26-p11-js-policy-surface-retirement.md`.
+- Current workflows under `.github/workflows/`.
+- Current workflow helpers under `.github/workflows/scripts/`.
+- Current native/release helpers under `scripts/` and `macos/service/`.
+- Corrective issue #1715 and superseded rollout issues #1700, #1705, and
+  #1707-#1712.
 
 ### Testing
 
-Each package adds unit/contract tests before workflow wiring. The fixture is the
-minimum end-to-end test. Targeted tests cover policy edits, archive portability,
-trust tiers, cancellation, stale outputs, retries, generated files, and release
-rollback. Weekly scheduled fault injection and release dry runs provide drift
-evidence; broad product suites remain owned by the eventual CI lanes.
+For C0:
+
+```bash
+git diff --check
+```
+
+Also inspect the corrected docs for prohibited legacy requirements and confirm
+any remaining mentions are in non-goals, rejected alternatives, or issue
+disposition.
+
+For implementation PRs, use the acceptance commands listed in each work package
+and widen to `go test ./...`, `go vet ./...`, race tests, integration tests, or
+workflow-script tests in proportion to the files touched.
 
 ### Open questions
 
-- The `graith-ci-gate` App is the selected enforcement mechanism. P4 must
-  choose its hosted deployment and attestation key service, record rotation,
-  retention, and incident-revocation procedures, and stop with no cutover if
-  those controls cannot be demonstrated in the live fixture.
-- P0 supplies the baseline for final latency and cost budgets. The retained
-  fixed-window evidence is an owner-approved collection request with explicit
-  bounds chosen for coverage completeness rather than elapsed-time acceptance.
-  Until that evidence is complete and calibration is owner-reviewed, the
-  provisional 20/35/45/90-minute targets and the 2x-plus-20% dual-run cost
-  budget are binding ceilings, not goals that may be exceeded.
-- The App check remains the single required decision while individual mode
-  diagnostics stay visible as separate checks/evidence. No diagnostic check may
-  be substituted into branch protection without the same App source binding.
-- In-flight PRs are evaluated against the policy digest recorded at intake;
-  when the base changes, the App starts a new epoch and rejects evidence from
-  the prior digest. There is no compatibility grace period for required proof.
+- Which libghostty cleanup in C5 produces the largest speed or reliability
+  improvement without weakening core runtime coverage.
+- Whether any JavaScript helper beyond the regen/native trust-boundary tests is
+  worth replacing once C2 makes helper ownership visible.
