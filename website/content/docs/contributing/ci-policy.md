@@ -21,23 +21,24 @@ language.
 
 ## Validate the policy
 
-From the repository root:
+The checked-in manifest is validated by the Go package tests:
 
 ```bash
-go run ./cmd/cipolicy validate
+go test ./internal/cipolicy ./cmd/cipolicy
 ```
 
-Validation prints the deterministic policy digest on success. It fails closed
-for stale generated data, unknown references, duplicate mode IDs or
-coordinates, missing owners, ambiguous requiredness, unsupported silent
-passes, invalid trust tiers, invalid platforms, invalid cost classes, invalid
-source/event identity, malformed evidence references, and P0 evidence that is
-not bound to the manifest's baseline inventory digest.
+The manifest drift tests fail closed for stale generated data, unknown
+references, duplicate mode IDs or coordinates, missing owners, ambiguous
+requiredness, unsupported silent passes, invalid trust tiers, invalid
+platforms, invalid cost classes, invalid source/event identity, malformed
+evidence references, and P0 evidence that is not bound to the manifest's
+baseline inventory digest.
 
-To print the checked-in digest without comparing against the P0 inventory:
+Regenerate the committed manifest from the current P0 inventory through the
+package-owned update gate:
 
 ```bash
-go run ./cmd/cipolicy digest
+go test ./internal/cipolicy -run TestCommittedManifestMatchesInventory -update
 ```
 
 ## Replay a run plan
@@ -77,23 +78,49 @@ tag, schedule, or dynamic-service coordinates, so those event identities
 currently fail the zero-job plan check until policy adds required modes for
 them.
 
-## Regenerate from P0
+## Render the shadow summary
 
-Regenerate only after reviewing the matching P0 inventory change:
+The `summary` command renders the diagnostic CI shadow summary used by the
+`ci-shadow-summary` job. It consumes the P0 inventory plus the optional plan
+and plan-error files produced by the same workflow:
 
 ```bash
-go run ./cmd/cipolicy -output internal/cipolicy/manifest.json generate
-go run ./cmd/cipolicy validate
-go test ./internal/cipolicy ./cmd/cipolicy
+go run ./cmd/cipolicy \
+  -inventory internal/cibaseline/inventory.json \
+  -manifest internal/cipolicy/manifest.json \
+  -plan-input /tmp/cipolicy-plan.json \
+  -plan-error /tmp/cipolicy-plan.err \
+  -changed-files /tmp/changed-files.txt \
+  -event pull_request \
+  -ref refs/pull/17/merge \
+  -head-sha 1111111111111111111111111111111111111111 \
+  -run-url https://github.com/d0ugal/graith/actions/runs/17 \
+  -macos-detector-result success \
+  -macos-detector-output true \
+  summary
 ```
 
-The generator canonicalizes ordering and serialization, so the same semantic
-policy has one digest. Manual edits that do not match the P0-derived manifest
-fail validation as stale drift.
+The summary is diagnostic only. It records source identity, visible change
+classes, local detector decisions, skip and escalation reasons, required
+contexts, expected workflows and jobs, helper surfaces, and native runtime
+notes. Current required checks still decide mergeability.
 
-The digest covers the canonical semantic policy. The `validate` command also
-compares the checked-in canonical semantic manifest with a fresh P0-derived
-manifest so equivalent-looking but stale generated data cannot hide drift.
+## Regenerate from P0
+
+Regenerate the manifest only as part of a reviewed policy change that also
+updates the matching P0 inventory. The package generator canonicalizes ordering
+and serialization, so the same semantic policy has one digest. Manual edits
+that do not match the P0-derived manifest fail validation as stale drift.
+
+After regeneration, run:
+
+```bash
+go test ./internal/cibaseline ./cmd/cibaseline ./internal/cipolicy ./cmd/cipolicy
+```
+
+The local `cmd/cipolicy` command intentionally exposes only the workflow-called
+`plan` and `summary` modes. Manifest generation and validation remain package
+owned so unused command modes do not become a second public policy surface.
 
 ## Downstream use
 
@@ -132,13 +159,10 @@ metadata, run plan and gate evaluation from the trusted base ref or from a
 pinned released policy tool. Pull-request-controlled policy code is input to be
 proved, not authority for narrowing itself.
 
-Each required plan coordinate must publish one digest-bound result record. The
-fan-in gate validates the expected mode and coordinate set from the plan, not a
-count of successful jobs. Missing, duplicate, unknown, extra, stale, skipped,
-cancelled, failed, superseded, or malformed result rows are not green. Result
-records preserve attempt history, first outcome, final status, timestamps,
-evidence digest, artifact digest, cache digest, and a 64-hex superseding result
-identity when applicable.
+Artifact-producing native and release validation uses artifact-specific
+producer results. Those results bind attempt history, first outcome, final
+status, timestamps, evidence digest, artifact digest, and a 64-hex superseding
+result identity when applicable before an artifact manifest can be accepted.
 
 ## External observed modes
 

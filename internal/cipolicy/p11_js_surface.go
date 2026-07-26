@@ -1,8 +1,6 @@
 package cipolicy
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -54,6 +52,12 @@ type P11CompatibilitySample struct {
 	CredentialExpectations     []P11CredentialExpectation
 }
 
+type P11KnownFile struct {
+	Path    string
+	SHA256  string
+	Content []byte
+}
+
 type P11ManifestModeExpectation struct {
 	ID           string
 	Capability   string
@@ -84,8 +88,6 @@ type P11CompatibilityComparison struct {
 	Coordinates     []string
 	Superset        bool
 	SupersetReasons []string
-	FanInStatus     string
-	AcceptedCount   int
 }
 
 type P11WorkflowSummary struct {
@@ -329,7 +331,7 @@ func ValidateP11JSSurfaceInventory(repoRoot string, inventory cibaseline.Invento
 	return nil
 }
 
-func CompareP11CompatibilitySamples(manifest Manifest, knownFiles []FixtureFile, samples []P11CompatibilitySample, now time.Time) ([]P11CompatibilityComparison, error) {
+func CompareP11CompatibilitySamples(manifest Manifest, knownFiles []P11KnownFile, samples []P11CompatibilitySample, now time.Time) ([]P11CompatibilityComparison, error) {
 	if now.IsZero() {
 		return nil, errors.New("P11 compatibility comparison requires a deterministic time")
 	}
@@ -357,16 +359,9 @@ func CompareP11CompatibilitySamples(manifest Manifest, knownFiles []FixtureFile,
 			options.CreatedAt = now.Add(-10 * time.Minute)
 		}
 
-		plan, err := BuildHermeticPlan(manifest, knownFiles, options)
+		plan, err := BuildP11CompatibilityPlan(manifest, knownFiles, options)
 		if err != nil {
-			return nil, fmt.Errorf("%s: build hermetic plan: %w", sample.ID, err)
-		}
-
-		workflowData := GenerateWorkflowData(plan)
-
-		report, err := FanInFixture(manifest, plan, workflowData, p11SuccessfulObservations(plan, now), now)
-		if err != nil {
-			return nil, fmt.Errorf("%s: fan in fixture: %w", sample.ID, err)
+			return nil, fmt.Errorf("%s: build P11 compatibility plan: %w", sample.ID, err)
 		}
 
 		comparison := P11CompatibilityComparison{
@@ -379,8 +374,6 @@ func CompareP11CompatibilitySamples(manifest Manifest, knownFiles []FixtureFile,
 			Coordinates:     p11PlanCoordinates(plan),
 			Superset:        plan.Superset,
 			SupersetReasons: append([]string(nil), plan.SupersetReasons...),
-			FanInStatus:     report.Status,
-			AcceptedCount:   len(report.Accepted),
 		}
 
 		if sample.ExpectedTrustTier != "" && plan.TrustTier != sample.ExpectedTrustTier {
@@ -405,12 +398,12 @@ func CompareP11CompatibilitySamples(manifest Manifest, knownFiles []FixtureFile,
 			}
 
 			if expectation.Requiredness != "required" && containsString(plan.RequiredModes, expectation.ID) {
-				return nil, fmt.Errorf("%s: soft manifest mode %s unexpectedly entered required fan-in", sample.ID, expectation.ID)
+				return nil, fmt.Errorf("%s: soft manifest mode %s unexpectedly entered the required plan", sample.ID, expectation.ID)
 			}
 
 			for _, coordinate := range expectation.Coordinates {
 				if coordinate.Requiredness != "required" && containsString(comparison.Coordinates, coordinate.ID) {
-					return nil, fmt.Errorf("%s: soft manifest coordinate %s unexpectedly entered required fan-in", sample.ID, coordinate.ID)
+					return nil, fmt.Errorf("%s: soft manifest coordinate %s unexpectedly entered the required plan", sample.ID, coordinate.ID)
 				}
 			}
 		}
@@ -511,7 +504,104 @@ func validateP11CredentialTrustAllowance(sampleID string, expectation P11Credent
 	return fmt.Errorf("%s: credential operation %s credential trust tier %s is not allowed for plan trust tier %s", sampleID, expectation.Operation.Operation, expectation.Operation.TrustTier, plan.TrustTier)
 }
 
-func P11KnownFilesFromRepository(repoRoot string, manifest Manifest, extraPaths []string) ([]FixtureFile, error) {
+func BuildP11CompatibilityPlan(manifest Manifest, knownFiles []P11KnownFile, options PlanOptions) (RunPlan, error) {
+	now := options.Now
+	if now.IsZero() {
+		return RunPlan{}, errors.New("P11 compatibility plan requires a deterministic validation time")
+	}
+
+	if err := manifest.ValidateAt(now); err != nil {
+		return RunPlan{}, err
+	}
+
+	if err := ValidateP11ChangedFiles(knownFiles, options.ChangedFiles, options.ExactFileList); err != nil {
+		return RunPlan{}, err
+	}
+
+	if err := ValidateP11ManifestWorkflowBindings(manifest, knownFiles); err != nil {
+		return RunPlan{}, err
+	}
+
+	return BuildPlan(manifest, options)
+}
+
+func ValidateP11ChangedFiles(knownFiles []P11KnownFile, changedFiles []string, exact bool) error {
+	if !exact {
+		return errors.New("P11 compatibility plan requires an exact changed-file list")
+	}
+
+	known := map[string]bool{}
+
+	for _, file := range knownFiles {
+		path, err := validateP11KnownFile(file)
+		if err != nil {
+			return err
+		}
+
+		if known[path] {
+			return fmt.Errorf("P11 compatibility fixture contains duplicate known path %s", path)
+		}
+
+		known[path] = true
+	}
+
+	for _, path := range canonicalChangedFiles(changedFiles) {
+		if path == "" || invalidChangedPath(path) {
+			return fmt.Errorf("changed file %q is not a valid P11 fixture path", path)
+		}
+
+		if !known[path] {
+			return fmt.Errorf("changed file %q is missing from the P11 compatibility fixture", path)
+		}
+
+		if !p11DetectorKnowsPath(path) {
+			return fmt.Errorf("changed file %q is unknown to the P11 compatibility detector", path)
+		}
+	}
+
+	return nil
+}
+
+func ValidateP11ManifestWorkflowBindings(manifest Manifest, knownFiles []P11KnownFile) error {
+	known := map[string]P11KnownFile{}
+
+	for _, file := range knownFiles {
+		path, err := validateP11KnownFile(file)
+		if err != nil {
+			return err
+		}
+
+		if _, exists := known[path]; exists {
+			return fmt.Errorf("P11 compatibility fixture contains duplicate known path %s", path)
+		}
+
+		known[path] = file
+	}
+
+	bindings, err := p11ManifestWorkflowBindings(manifest)
+	if err != nil {
+		return err
+	}
+
+	for path, digest := range bindings {
+		file, ok := known[path]
+		if !ok {
+			return fmt.Errorf("manifest workflow %s is missing from the P11 compatibility fixture", path)
+		}
+
+		if file.Content == nil {
+			return fmt.Errorf("manifest workflow %s requires P11 fixture file content", path)
+		}
+
+		if file.SHA256 != digest {
+			return fmt.Errorf("manifest workflow %s digest mismatch: fixture has %s manifest has %s", path, file.SHA256, digest)
+		}
+	}
+
+	return nil
+}
+
+func P11KnownFilesFromRepository(repoRoot string, manifest Manifest, extraPaths []string) ([]P11KnownFile, error) {
 	paths := map[string]bool{}
 
 	for _, mode := range manifest.Modes {
@@ -552,22 +642,87 @@ func P11KnownFilesFromRepository(repoRoot string, manifest Manifest, extraPaths 
 
 	sort.Strings(ordered)
 
-	files := make([]FixtureFile, 0, len(ordered))
+	files := make([]P11KnownFile, 0, len(ordered))
 	for _, path := range ordered {
 		data, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(path)))
 		if err != nil {
 			return nil, fmt.Errorf("read fixture file %s: %w", path, err)
 		}
 
-		sum := sha256.Sum256(data)
-		files = append(files, FixtureFile{
+		files = append(files, P11KnownFile{
 			Path:    path,
-			SHA256:  hex.EncodeToString(sum[:]),
+			SHA256:  sha256Hex(data),
 			Content: append([]byte(nil), data...),
 		})
 	}
 
 	return files, nil
+}
+
+func validateP11KnownFile(file P11KnownFile) (string, error) {
+	path := normalizeChangedPath(file.Path)
+	if path == "" || invalidChangedPath(path) {
+		return "", fmt.Errorf("P11 compatibility fixture contains invalid known path %q", file.Path)
+	}
+
+	if !digestPattern.MatchString(file.SHA256) {
+		return "", fmt.Errorf("P11 compatibility fixture known path %s has invalid digest", path)
+	}
+
+	if file.Content != nil && sha256Hex(file.Content) != file.SHA256 {
+		return "", fmt.Errorf("P11 compatibility fixture known path %s content digest does not match declared digest", path)
+	}
+
+	return path, nil
+}
+
+func p11DetectorKnowsPath(path string) bool {
+	return isCIPolicyPath(path) ||
+		isGeneratedInputPath(path) ||
+		isLockfilePath(path) ||
+		isReleaseMetadataPath(path) ||
+		len(capabilitiesForPath(path)) > 0
+}
+
+func p11ManifestWorkflowBindings(manifest Manifest) (map[string]string, error) {
+	bindings := map[string]string{}
+
+	for _, mode := range manifest.Modes {
+		if err := addP11ManifestWorkflowBinding(bindings, mode.Trace); err != nil {
+			return nil, err
+		}
+
+		for _, coordinate := range mode.Coordinates {
+			if err := addP11ManifestWorkflowBinding(bindings, coordinate.Trace); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return bindings, nil
+}
+
+func addP11ManifestWorkflowBinding(bindings map[string]string, trace LegacyTrace) error {
+	path := normalizeChangedPath(trace.WorkflowPath)
+	if path == "" {
+		return nil
+	}
+
+	if invalidChangedPath(path) {
+		return fmt.Errorf("manifest trace contains invalid workflow path %q", trace.WorkflowPath)
+	}
+
+	if !digestPattern.MatchString(trace.WorkflowSHA256) {
+		return fmt.Errorf("manifest trace for workflow %s has invalid digest", path)
+	}
+
+	if existing, ok := bindings[path]; ok && existing != trace.WorkflowSHA256 {
+		return fmt.Errorf("manifest trace has conflicting digests for workflow %s", path)
+	}
+
+	bindings[path] = trace.WorkflowSHA256
+
+	return nil
 }
 
 func ReadP11WorkflowSummary(path string) (P11WorkflowSummary, error) {
@@ -818,48 +973,6 @@ func p11EqualStringSets(left, right []string) bool {
 	}
 
 	return true
-}
-
-func p11SuccessfulObservations(plan RunPlan, now time.Time) []JobObservation {
-	started := now.Add(-5 * time.Minute)
-	completed := now.Add(-4 * time.Minute)
-	observations := make([]JobObservation, 0, len(plan.Jobs))
-
-	for _, job := range plan.Jobs {
-		evidence := sha256.Sum256([]byte(strings.Join([]string{
-			plan.PlanDigest,
-			job.Mode,
-			job.Coordinate,
-			"p11-compatibility",
-		}, "\x00")))
-		artifact := sha256.Sum256([]byte(strings.Join([]string{
-			plan.PlanDigest,
-			job.Mode,
-			job.Coordinate,
-			"p11-artifact",
-		}, "\x00")))
-		cache := sha256.Sum256([]byte(strings.Join([]string{
-			plan.PlanDigest,
-			job.Mode,
-			job.Coordinate,
-			"p11-cache",
-		}, "\x00")))
-
-		observations = append(observations, JobObservation{
-			Mode:           job.Mode,
-			Coordinate:     job.Coordinate,
-			Display:        job.GitHubName,
-			Status:         "success",
-			StartedAt:      started,
-			CompletedAt:    completed,
-			EvidenceDigest: hex.EncodeToString(evidence[:]),
-			ArtifactDigest: hex.EncodeToString(artifact[:]),
-			CacheDigest:    hex.EncodeToString(cache[:]),
-			UploadComplete: true,
-		})
-	}
-
-	return observations
 }
 
 func p11PlanCoordinates(plan RunPlan) []string {

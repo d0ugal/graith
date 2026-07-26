@@ -266,10 +266,10 @@ Required chain for this epoch:
    policy-surface checksum delta. The validator admits only the exact retired
    JS path/checksum to Go path/checksum mapping for this epoch.
 5. Regenerate P1 manifest from the rebound inventory:
-   `go run ./cmd/cipolicy -output internal/cipolicy/manifest.json generate`.
-6. Run `go test ./internal/cibaseline ./internal/cipolicy`, JS workflow-script
-   tests, actionlint/shellcheck where relevant, and the wider validation
-   required by the changed baseline epoch.
+   `go test ./internal/cipolicy -run TestCommittedManifestMatchesInventory -update`.
+6. Run `go test ./internal/cibaseline ./cmd/cibaseline ./internal/cipolicy ./cmd/cipolicy`,
+   JS workflow-script tests, actionlint/shellcheck where relevant, and the
+   wider validation required by the changed baseline epoch.
 
 Pre-deletion hardening satisfied by the `regen-auth.test.js` replacement:
 

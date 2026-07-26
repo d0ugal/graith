@@ -2779,7 +2779,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-helper",
       "git_mode": "100644",
-      "sha256": "bbbeedcf722048f65bd8f3898f6aa36790751c1474511349032cc3719d92ec61",
+      "sha256": "3cffb5ee0183a5c9e16260191b464c056ef9717ec2ef319b3e1dfbaf6aaf40bc",
       "executable_contract": "preserve the checked-in cipolicy CLI behavior invoked by workflow policy detection and the CI shadow summary",
       "disposition": "grandfathered",
       "retirement_criterion": "remove only with the cipolicy workflow caller or an owner-approved replacement command"
@@ -2789,7 +2789,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "d387a51bc8da351562a8d01ee34796c9d8707b25e37bd46c6aa201e909b15cb9",
+      "sha256": "9aff1a1765d541559f461a297b850a01ee53ca17d26708242e9081c72adada41",
       "executable_contract": "preserve CLI coverage for policy plan and diagnostic summary command behavior",
       "disposition": "grandfathered",
       "retirement_criterion": "remove only after equivalent cipolicy command coverage is added"
@@ -2829,7 +2829,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract",
       "git_mode": "100644",
-      "sha256": "b3ed3b3f38774fb279c091c6d7818d56b6d0b173918ab8a22d79200867c9ace2",
+      "sha256": "b081aa042fec51c2eaaff46ed08c0f000fa2b6ecffcf88f721032b016aef93bf",
       "executable_contract": "preserve current retained-JS surface contracts and semantic replacement metadata for retired workflow-script tests",
       "disposition": "grandfathered",
       "retirement_criterion": "remove only after all P11 JS surfaces are retired or represented by a newer owner-approved contract"
@@ -2839,7 +2839,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "209aa2d61d147623ef9a01cd007110d3ab7afc715d28a60998a8da32568573db",
+      "sha256": "475993e46669d1ae70add3b367b62fb2917ceed3619d3c5276c9ef956d009c87",
       "executable_contract": "preserve regen credential, trust, scalar sweep, git-index enumeration, and repository-command detection assertions formerly held by regen-auth.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent regen-auth coverage and zero unexplained replay disagreement"
@@ -3516,5 +3516,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "d9112c011e018c4cf89ddc9c97b0a1c6e93b9d424d0916fc2da6ff0c6131a0f1"
+  "digest": "32f19fbbeefec1b281a04bba9df4c6ef16f15caa2bdded9c27c5f2ef5d5349b2"
 }

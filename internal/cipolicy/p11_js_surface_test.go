@@ -78,7 +78,7 @@ func TestP11RegenAuthReplacementSamplesCoverHardeningMatrix(t *testing.T) {
 	p11AssertSampleMatrixMatchesRequirements(t, replacement, declaredSamples)
 }
 
-func TestP11RegenAuthCompatibilitySamplesUsePolicyFixture(t *testing.T) {
+func TestP11RegenAuthCompatibilitySamplesUseClosedWorldPlanFixture(t *testing.T) {
 	repoRoot := p11RepoRoot()
 
 	manifest, err := ReadManifest(filepath.Join(repoRoot, DefaultManifestPath))
@@ -103,8 +103,8 @@ func TestP11RegenAuthCompatibilitySamplesUsePolicyFixture(t *testing.T) {
 	}
 
 	for _, comparison := range comparisons {
-		if comparison.PlanDigest == "" || comparison.FanInStatus != "passed" || comparison.AcceptedCount == 0 {
-			t.Fatalf("comparison %#v did not exercise a successful Go policy/result fixture", comparison)
+		if comparison.PlanDigest == "" || len(comparison.RequiredModes) == 0 || len(comparison.Coordinates) == 0 {
+			t.Fatalf("comparison %#v did not exercise a successful Go policy compatibility plan", comparison)
 		}
 
 		if !comparison.Superset || !p11HasString(comparison.SupersetReasons, "generated-input") {
@@ -138,7 +138,7 @@ func TestP11RegenAuthNonSupersetNegativeSampleRejectsCredentialPlanBinding(t *te
 			options.Now = p11TestNow
 			options.CreatedAt = p11TestNow.Add(-10 * time.Minute)
 
-			plan, err := BuildHermeticPlan(manifest, knownFiles, options)
+			plan, err := BuildP11CompatibilityPlan(manifest, knownFiles, options)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -940,7 +940,7 @@ func p11RegenAuthSamples() []P11CompatibilitySample {
 		{
 			ID:                      "regen-same-repository-agent",
 			HelperPath:              P11RegenAuthReplacementPath,
-			Description:             "same-repository generated-file PR selects generated-metadata while soft regen jobs stay outside required fan-in and maintainer credentials stay unavailable",
+			Description:             "same-repository generated-file PR selects generated-metadata while soft regen jobs stay outside the required plan and maintainer credentials stay unavailable",
 			PlanOptions:             p11PlanOptions(p11SameRepoEvent()),
 			ExpectedTrustTier:       "same-repository-agent",
 			ExpectedCapabilities:    []string{"generated-metadata"},
