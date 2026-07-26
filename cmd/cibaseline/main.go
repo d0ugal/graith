@@ -24,6 +24,10 @@ func main() {
 }
 
 func run(args []string) error {
+	return runWithNow(args, time.Now)
+}
+
+func runWithNow(args []string, now func() time.Time) error {
 	flags := flag.NewFlagSet("cibaseline", flag.ContinueOnError)
 	repo := flags.String("repo", ".", "repository root")
 	inventoryPath := flags.String("inventory", "internal/cibaseline/inventory.json", "inventory path")
@@ -51,7 +55,9 @@ func run(args []string) error {
 		"delay between collection start and the workflow-run observation cutoff",
 	)
 
-	since := flags.String("since", "1", "RFC3339 start or day lookback (1-28)")
+	since := flags.String("since", "1", "RFC3339 start or day lookback (1-28; relative to -until when supplied)")
+	until := flags.String("until", "", "optional whole-second RFC3339 end of the workflow-run created-time window")
+
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -97,12 +103,12 @@ func run(args []string) error {
 
 		return writeJSON(*output, evidence)
 	case "fetch":
-		inventory, err := readInventory(*inventoryPath)
+		window, err := cibaseline.ParseWindow(*since, *until, now())
 		if err != nil {
 			return err
 		}
 
-		start, err := cibaseline.ParseSince(*since, time.Now())
+		inventory, err := readInventory(*inventoryPath)
 		if err != nil {
 			return err
 		}
@@ -110,13 +116,20 @@ func run(args []string) error {
 		collector := cibaseline.GitHubCollector{
 			Token:           os.Getenv("GITHUB_TOKEN"),
 			Client:          &http.Client{Timeout: 30 * time.Second},
+			Now:             now,
 			MaxElapsed:      *maxElapsed,
 			MaxRequests:     *maxRequests,
 			MaxRetries:      *maxRetries,
 			MaturationDelay: *maturationDelay,
 		}
 
-		snapshot, err := collector.Fetch(context.Background(), *repository, start, inventory)
+		var snapshot cibaseline.GitHubSnapshot
+		if window.ExplicitUntil {
+			snapshot, err = collector.FetchWindow(context.Background(), *repository, window.Since, window.Until, inventory)
+		} else {
+			snapshot, err = collector.Fetch(context.Background(), *repository, window.Since, inventory)
+		}
+
 		if err != nil {
 			return err
 		}

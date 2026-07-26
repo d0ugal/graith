@@ -84,22 +84,34 @@ when needed for a private or rate-limited repository, requires only repository
 metadata and Actions read access:
 
 ```bash
-SINCE='<RFC3339 start six hours before the intended cutoff>'
+SINCE='2026-07-25T00:00:00Z'
+UNTIL='2026-07-25T06:00:00Z'
 GITHUB_TOKEN=... go run ./cmd/cibaseline \
   -repository d0ugal/graith \
-  -since "$SINCE" -maturation-delay 24h \
+  -since "$SINCE" -until "$UNTIL" \
   -max-elapsed 10m -max-requests 10000 -max-retries 3 \
   -output /tmp/graith-ci-evidence.json fetch
 ```
 
-`fetch` observes an explicit as-of cutoff rather than collection start. The
-cutoff is collection start minus `-maturation-delay` (`--maturation-delay` is
-also accepted), defaults to one hour, and is recorded honestly as
-`requested_until`; `collected_at` remains the actual collection start. Zero
-selects the same finite default and negative values are rejected. `since` must
-be strictly earlier than the resulting cutoff. The example deliberately uses
-an older 24-hour maturation delay and an explicit RFC3339 start; choose the
-start so the requested interval is bounded to the intended slice.
+`fetch` records the exact run-created query window as `requested_since` and
+`requested_until`; `collected_at` remains the actual collection start. `-since`
+accepts either an RFC3339 start or a numeric day lookback from 1 through 28.
+When `-until` (`--until` is also accepted) is omitted, `requested_until` is
+collection start minus `-maturation-delay` (`--maturation-delay` is also
+accepted), preserving the original diagnostic mode. When `-until` is supplied,
+it must be a whole-second RFC3339 end instant and `requested_until` is that
+instant normalized to UTC. An RFC3339 `-since` used with `-until` must also be
+whole-second precision. A numeric `-since` combined with `-until` is relative
+to the explicit end, not to retry wall-clock time. `requested_since` must be
+strictly earlier than `requested_until`. Because `-since` defaults to a one-day
+lookback, supplying `-until` without an explicit six-hour `-since` requests the
+daily interval that current volume observations have already shown is unsafe.
+
+The maturation guard is still mandatory for explicit windows. The requested
+end must be no newer than collection start minus `-maturation-delay`; otherwise
+the command fails before GitHub collection begins. The delay defaults to one
+hour. An explicit zero selects the same finite default and negative values are
+rejected, so `-until` cannot bypass immature-run protection.
 
 The one-hour default was selected from a 2026-07-25 sample of 498 completed
 runs: created-to-last-update was 728 seconds at p95, 1,045 seconds at p99, and
@@ -134,12 +146,28 @@ request transport failures produce distinct errors.
 The adapter enumerates the fixed created-time run set without a status filter,
 then requires every member to be terminal and to have `updated_at` no later
 than the cutoff. Queued, in-progress, startup-unsettled, cancelled-in-flight,
-or otherwise nonterminal members are never silently dropped. A run created
-before the cutoff but completed or rerun after it makes the slice fail closed
-until a later retry can observe a mature terminal state. A genuinely stuck
-nonterminal run blocks every slice containing it; it must settle or the
-operator must choose a window that does not contain it. It must never be
-excluded with a status filter.
+or otherwise nonterminal members are never silently dropped. In derived-cutoff
+diagnostics, a run created before the cutoff but completed or rerun after it
+can become collectable when a later retry derives a later mature cutoff. In an
+explicit fixed window, the cutoff is intentionally pinned: a run in that
+created-time window with an `updated_at` after `requested_until` will continue
+to fail the same exact interval. That is an inventory or operator-decision
+case, not a reason to add a status filter, accept partial output, or pretend a
+same-bounds retry can self-heal. A genuinely stuck nonterminal run blocks
+every slice containing it; it must settle or the operator must choose a window
+that does not contain it.
+
+GitHub's
+[workflow-runs API](https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-repository)
+documents `created` as a date-time range filter and uses
+[GitHub search range syntax](https://docs.github.com/en/search-github/getting-started-with-searching-on-github/understanding-the-search-syntax#query-for-values-greater-or-less-than-another-value),
+where `..` ranges are inclusive. Therefore each slice is a closed interval: a
+run created exactly at `requested_since` or `requested_until` belongs to that
+query. Adjacent six-hour slices such as `00:00:00Z..06:00:00Z` and
+`06:00:00Z..12:00:00Z`, or deliberately overlapping slices, are expressible
+but can return the same boundary or overlap run. Retained evidence must
+deduplicate by workflow run ID and attempt; do not claim uniqueness across
+slices.
 
 The adapter paginates run, job, artifact, and cache lists, records authoritative
 workflow-run, attempt, per-attempt job, per-run artifact, and repository-cache
@@ -185,6 +213,8 @@ foundation does not claim cache-hit coverage.
 Repository caches are a repository-wide observation made during collection,
 not a historical set at the run cutoff. A cache `created_at` may therefore be
 later than `requested_until`; interpret cache state as of `collected_at`.
+Retrying the same `-since`/`-until` pair preserves the run-created interval
+but can legitimately observe a newer repository cache set.
 
 Inventory, offline snapshot, and retained evidence formats declare schema
 version 2. Collection and replay reject other snapshot or evidence versions
@@ -202,12 +232,18 @@ files with mode `0600`; omitting it continues to write JSON to standard output.
 
 The cutoff is an observation boundary, not a claim that future manual reruns
 are knowable. A rerun that begins during collection changes the final run-state
-fingerprint and rejects that fetch. A later rerun is captured by a future
-overlapping slice; operators should overlap slices by at least the maturation
-delay and deduplicate by run ID and attempt when the retained baseline is
-eventually designed.
+fingerprint and rejects that fetch. A later rerun can be captured only by a
+future fixed window whose created-time range intentionally includes that run
+and whose `requested_until` is no earlier than the rerun's `updated_at`; a
+previous exact fixed window containing the run remains uncollectable. Operators
+should overlap retained slices only under the eventual retention design and
+deduplicate by run ID and attempt. To retry an identical run-created interval,
+reuse the same RFC3339 `-since` and `-until` values and verify both evidence
+files record the same normalized UTC bounds; if the retry fails because a
+member was updated after the fixed cutoff, escalate the window choice instead
+of treating the retry as evidence.
 
-## Four-week window and retention decision
+## Retained evidence and schedule decision
 
 No scheduled collector is added in P0 foundation. A repository workflow would
 need a durable retention destination and an explicit owner for the read-only
@@ -218,22 +254,21 @@ baseline. That credential, settings, and retention choice must be approved
 before wiring collection rather than inferred in workflow YAML.
 
 The adapter now supplies bounded, tested primary and secondary rate-limit
-handling and finite collection defaults, but the retained 28-day collection
+handling and finite collection defaults, but retained fixed-window evidence
 still requires maintainers to approve the request/time values for the
 operational environment. Recent volume observations showed that a matured
 24-hour interval exceeded the GitHub 1,000-result ceiling and a 12-hour
 interval left too little margin. The initial operational recommendation is
 therefore four matured six-hour slices per day. Daily slices are not safe.
-This is volume guidance, not a schedule: the current diagnostic CLI accepts an
-explicit RFC3339 start, but derives its end from collection start minus the
-maturation delay. Record and verify the resulting `requested_until`; this
-command does not yet provide an explicit end or deterministic scheduled
-boundaries. A burst that puts even a six-hour slice over 1,000 must fail
-closed. For current manual diagnostics, retry with smaller fresh adjacent or
-overlapping slices and verify each recorded interval. Exact same-interval
-retry and scheduled boundary control remain part of the later operational
-schedule decision. Never recover by adding a status filter or accepting
-truncated results.
+This is volume guidance, not a schedule: use explicit whole-second RFC3339
+`-since` and `-until` values for manual six-hour slices, record the normalized
+`requested_since` and `requested_until`, and verify the replayed evidence
+claims those exact bounds. A burst that puts even a six-hour slice over 1,000
+must fail closed. Retry with the same bounds for the same interval, or choose
+smaller fresh adjacent or overlapping slices and deduplicate retained evidence
+by run ID and attempt. Deterministic scheduled boundary control remains part
+of the later operational schedule decision. Never recover by adding a status
+filter or accepting truncated results.
 
 Any exhausted budget, exhausted retry allowance, cancellation, malformed or
 incomplete response, changing pagination count or run state, unsettled member,
@@ -242,12 +277,11 @@ evidence writing. Shorter-window fetches remain suitable for diagnostics and
 offline replay validation. The approved operational budget, durable
 destination, token owner, schedule, credentials, and retention policy are all
 clock-start prerequisites. This cutoff fix chooses none of them and does not
-start or certify the retained window.
+start or certify the retained evidence set.
 
-Consequently, the retained live measurement window has **not started**. Record
-its exact UTC start and immutable evidence location when that decision is made.
-The earliest P0 acceptance is 28 full days after that timestamp, and only after
-all owner sign-offs and replay review below are complete. P1 release remains
+There is no calendar waiting gate for P0 acceptance. Acceptance still requires
+the retained fixed-window evidence set, replay validation, closed-world
+coverage of observed modes, and owner sign-off below. P1 release remains
 blocked on that P0 acceptance; this foundation does not claim the exit
 criterion.
 
