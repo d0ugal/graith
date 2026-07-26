@@ -195,8 +195,10 @@ coordinates. Retry attempts must retain the same workflow path/ref, event, head,
 branch, and pull-request identity. An unexpanded matrix row may fan out to its
 known coordinates only when GitHub reports the synthetic row as completed and
 skipped; replay retains that synthetic marker and requires the exact complete
-coordinate set for the one raw job ID. Artifact and cache identities, sizes,
-timestamps, duplicates, and any
+coordinate set for the one raw job ID. A completed and cancelled synthetic
+fanout marker is retained for reliability and timing accounting, but it is not
+coverage-eligible and cannot satisfy mode coverage or latency calibration.
+Artifact and cache identities, sizes, timestamps, duplicates, and any
 reported artifact digest are validated before evidence is accepted. Skipped
 jobs remain skipped when GitHub omits or returns non-monotonic execution
 timestamps. Their measured queue and execution durations are zero rather than
@@ -225,10 +227,81 @@ evidence digest, and rejects cross-workflow, unknown, or duplicate coordinates
 and inconsistent retry/timestamp/outcome or supersession data. It also rejects
 a skipped result represented as passed. Evidence schema version 2 is the first
 format that carries authoritative counts and raw run/job identities; replay
-rejects other versions before strict field decoding. The digests detect accidental
-corruption and bind replay to the reviewed inventory revision; they are not
-signatures or proof of authenticity. `-output` creates or overwrites evidence
-files with mode `0600`; omitting it continues to write JSON to standard output.
+rejects other versions before strict field decoding. The digests detect
+accidental corruption and bind replay to the reviewed inventory revision; they
+are not signatures or proof of authenticity. `-output` creates or overwrites
+evidence files with mode `0600`; omitting it continues to write JSON to
+standard output.
+
+## Validate the P0 acceptance package
+
+The retained P0 package is repository-owned under
+`internal/cibaseline/retained/`. It is the retention boundary; ordinary
+GitHub Actions artifacts are not. Validate the accepted replacement request
+and replay the normalized repo-owned evidence from the repository root:
+
+```bash
+go run ./cmd/cibaseline \
+  -input internal/cibaseline/retained/p0-20260725T084200Z-20260725T144200Z/acceptance.json \
+  acceptance
+go run ./cmd/cibaseline \
+  -input internal/cibaseline/retained/p0-20260725T084200Z-20260725T144200Z/repo-owned-evidence-552b0e007cc1cc861d93773b72588fb46350f2a7549fc8787ba22eccfa4aa82c.json \
+  replay
+```
+
+The replacement request covers the fixed window
+`2026-07-25T08:42:00Z` through `2026-07-25T14:42:00Z`. Its bundle digest is
+`31be4f9025fca43eb338ad675a0e4d5c8b16a2f24380c6d301e251cf2cc1c167`; the
+normalized repo-owned evidence digest is
+`552b0e007cc1cc861d93773b72588fb46350f2a7549fc8787ba22eccfa4aa82c`; the
+acceptance manifest digest is
+`66f2063599d660db0b1d7702cd9c8f94ceab2e476db3374e00512b035ff9390f`.
+The package records an explicit inventory rebind from
+`5b03df0aa114f60b8e6d0883886fe609440bb20c1cc7ca3681a19d28f64cd9cd` to
+`90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21`.
+That rebind is limited to the root `Makefile` policy-surface checksum changed
+by `origin/main` commit `549b13e`; it records no workflow, event, permission,
+coordinate, required-context, legacy-mapping, or mode-matrix change and does
+not create new observations or dual-run sampling eligibility.
+It retains 98 repo-owned workflow runs, 446 normalized job observations, one
+approved external Dependabot dependency-graph run, and 117 cache observations.
+The 1,000-minute ceiling is checked against the conservative repo-owned
+per-cell runner-minute sum, currently 802 minutes. The raw repo-owned execution
+duration is 36,569,000 ms, whose aggregate-duration diagnostic rounds to 610
+minutes. The approved external gap records its one derived runner minute
+separately and is dual-run-ineligible. Seven owner-approved
+`mode-not-exercised` gap rows cover matrix coordinates not exercised in the
+fixed window: the two native publication gaps are owned by `native-owners`,
+and the five workflow-lint gaps are owned by `graith-maintainers`. Those rows
+explain inventory coverage only and cannot calibrate latency or enter later
+dual-run sampling until matched runner-minute evidence is retained.
+
+The original approved request remains retained as incomplete diagnostic
+evidence:
+
+```bash
+go run ./cmd/cibaseline \
+  -input internal/cibaseline/retained/p0-20260725T060500Z-20260725T120500Z/incomplete-acceptance.json \
+  -allow-incomplete-acceptance \
+  acceptance
+```
+
+Without `-allow-incomplete-acceptance`, that manifest fails the gate because
+GitHub returned a provider timestamp anomaly for
+`goreleaser/release-context` on run `30151461867`, job `89662641145`, and no
+matched runner-minute observation exists for that exact cell. The raw
+timestamps are retained and are not normalized.
+
+P0 acceptance authorizes only the closed-world inventory and retained
+baseline evidence package. It does not change workflow behavior, required
+checks, scheduler behavior, branch protection, release publication,
+credentials, P1 schemas, dual-run enforcement, cutover, or final latency and
+cost calibration. The provisional latency ceilings and cost budget remain
+ceilings until later calibration evidence is retained. The approved external
+Dependabot run is retained as a no-latency-target, dual-run-ineligible gap and
+cannot be promoted into later sampling without matched repo-owned evidence.
+Mode-not-exercised gap rows are also dual-run-ineligible and do not authorize
+latency promotion.
 
 The cutoff is an observation boundary, not a claim that future manual reruns
 are knowable. A rerun that begins during collection changes the final run-state
@@ -281,9 +354,8 @@ start or certify the retained evidence set.
 
 There is no calendar waiting gate for P0 acceptance. Acceptance still requires
 the retained fixed-window evidence set, replay validation, closed-world
-coverage of observed modes, and owner sign-off below. P1 release remains
-blocked on that P0 acceptance; this foundation does not claim the exit
-criterion.
+coverage of every mode by retained evidence or an owner-approved expiring gap
+row, and owner sign-off below.
 
 ## Owner sign-off and merged-change replay
 
@@ -297,8 +369,13 @@ Owners review the rows for their workflows and policy surfaces:
 - `docs-owners`: Pages publication and pull-request previews
 
 Record sign-off in the P0 tracking issue or pull request with the inventory
-digest, reviewed rows, reviewer, and UTC timestamp. A sign-off becomes stale
-when the digest changes.
+digest, reviewed rows, reviewer, and UTC timestamp. The retained acceptance
+manifest also records the reviewed pre-signoff manifest digest and binds that
+approval to the inventory, inventory rebind endpoints, mode-matrix digest,
+retained bundle digest, repo-evidence digest, external-run digests, observed
+cell count, and gap count. Validation recomputes the pending pre-signoff
+digest, so a sign-off becomes stale when any bound digest, row, or count
+changes.
 
 For the acceptance replay, select merged changes spanning Go-only, protocol,
 GUI, native, docs, generated, sandbox, release, dependency, and workflow-policy

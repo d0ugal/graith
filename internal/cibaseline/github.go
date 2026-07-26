@@ -52,7 +52,9 @@ type GitHubCollector struct {
 	MaxRetries      int
 	MaturationDelay time.Duration
 
-	budget *collectionBudget
+	approvedExternalRunGaps []ApprovedExternalRunGap
+	externalRunSink         *[]GitHubExternalRunEvidence
+	budget                  *collectionBudget
 }
 
 type collectionBudget struct {
@@ -65,6 +67,47 @@ type collectionBudget struct {
 	maxRetries  int
 	requests    int
 	retries     int
+}
+
+type ApprovedExternalRunGap struct {
+	RunID        int64
+	WorkflowPath string
+	Event        string
+	JobID        int64
+}
+
+type GitHubExternalRunEvidence struct {
+	RunID                int64                     `json:"run_id"`
+	Attempt              int                       `json:"run_attempt"`
+	WorkflowPath         string                    `json:"workflow_path"`
+	Event                string                    `json:"event"`
+	HeadSHA              string                    `json:"head_sha"`
+	HeadBranch           string                    `json:"head_branch,omitempty"`
+	CreatedAt            time.Time                 `json:"created_at"`
+	StartedAt            time.Time                 `json:"run_started_at"`
+	UpdatedAt            time.Time                 `json:"updated_at"`
+	Status               string                    `json:"status"`
+	Conclusion           string                    `json:"conclusion"`
+	ExpectedJobs         int                       `json:"expected_jobs"`
+	Job                  GitHubExternalJobEvidence `json:"job"`
+	ExpectedArtifacts    int                       `json:"expected_artifacts"`
+	Artifacts            []Artifact                `json:"artifacts,omitempty"`
+	Cost                 CostInput                 `json:"cost_input"`
+	TimingBillableMillis map[string]int64          `json:"timing_billable_millis,omitempty"`
+}
+
+type GitHubExternalJobEvidence struct {
+	ID              int64     `json:"id"`
+	Name            string    `json:"name"`
+	Status          string    `json:"status"`
+	Conclusion      string    `json:"conclusion"`
+	CreatedAt       time.Time `json:"created_at"`
+	StartedAt       time.Time `json:"started_at"`
+	CompletedAt     time.Time `json:"completed_at"`
+	RunnerName      string    `json:"runner_name,omitempty"`
+	RunnerGroup     string    `json:"runner_group_name,omitempty"`
+	Labels          []string  `json:"labels,omitempty"`
+	ExecutionMillis int64     `json:"execution_millis"`
 }
 
 type githubRunsPage struct {
@@ -365,6 +408,27 @@ func (collector GitHubCollector) FetchWindow(
 	return collector.fetch(ctx, repository, since, until, true, inventory)
 }
 
+func (collector GitHubCollector) FetchWindowWithApprovedExternalRunGaps(
+	ctx context.Context,
+	repository string,
+	since time.Time,
+	until time.Time,
+	inventory Inventory,
+	gaps []ApprovedExternalRunGap,
+) (GitHubSnapshot, []GitHubExternalRunEvidence, error) {
+	externalRuns := []GitHubExternalRunEvidence{}
+
+	collector.approvedExternalRunGaps = append([]ApprovedExternalRunGap(nil), gaps...)
+	collector.externalRunSink = &externalRuns
+
+	snapshot, err := collector.fetch(ctx, repository, since, until, true, inventory)
+	if err != nil {
+		return GitHubSnapshot{}, nil, err
+	}
+
+	return snapshot, externalRuns, nil
+}
+
 func (collector GitHubCollector) fetch(
 	ctx context.Context,
 	repository string,
@@ -508,11 +572,13 @@ func (collector GitHubCollector) fetch(
 
 	snapshot.Caches = caches
 	snapshot.ExpectedCaches = expectedCaches
-	snapshot.ExpectedWorkflowRuns = allRuns.TotalCount
 
 	if err := validateCaches(snapshot.Caches); err != nil {
 		return GitHubSnapshot{}, fmt.Errorf("validate GitHub caches: %w", err)
 	}
+
+	repoOwnedWorkflowRuns := 0
+	accountedExternalRuns := map[int64]bool{}
 
 	for _, raw := range allRuns.Runs {
 		if err := validateRawGitHubRun(raw); err != nil {
@@ -523,9 +589,25 @@ func (collector GitHubCollector) fetch(
 		workflow, known := inventoryWorkflowForPath(inventory, workflowPath)
 
 		if !known {
+			external, accounted, err := collector.collectApprovedExternalRunGap(collectionCtx, repository, raw)
+			if err != nil {
+				return GitHubSnapshot{}, err
+			}
+
+			if accounted {
+				if collector.externalRunSink != nil {
+					*collector.externalRunSink = append(*collector.externalRunSink, external)
+				}
+
+				accountedExternalRuns[raw.ID] = true
+
+				continue
+			}
+
 			return GitHubSnapshot{}, fmt.Errorf("GitHub returned unknown workflow path %q", workflowPath)
 		}
 
+		repoOwnedWorkflowRuns++
 		workflowID := workflow.ID
 
 		artifacts, expectedArtifacts, err := collector.fetchArtifacts(collectionCtx, repository, raw.ID)
@@ -637,7 +719,14 @@ func (collector GitHubCollector) fetch(
 		}
 	}
 
+	for _, gap := range collector.approvedExternalRunGaps {
+		if !accountedExternalRuns[gap.RunID] {
+			return GitHubSnapshot{}, fmt.Errorf("approved external workflow gap run %d was not observed in the requested window", gap.RunID)
+		}
+	}
+
 	inferSuperseded(snapshot.Runs)
+	snapshot.ExpectedWorkflowRuns = repoOwnedWorkflowRuns
 	snapshot.ExpectedRunAttempts = len(snapshot.Runs)
 
 	// Re-read the complete run set after all dependent metadata. This detects a
@@ -818,6 +907,116 @@ func validateRawGitHubJob(job githubJob) error {
 	}
 
 	return nil
+}
+
+func (collector GitHubCollector) collectApprovedExternalRunGap(
+	ctx context.Context,
+	repository string,
+	raw githubRun,
+) (GitHubExternalRunEvidence, bool, error) {
+	var approved ApprovedExternalRunGap
+
+	for _, gap := range collector.approvedExternalRunGaps {
+		if gap.RunID == raw.ID {
+			approved = gap
+
+			break
+		}
+	}
+
+	if approved.RunID == 0 {
+		return GitHubExternalRunEvidence{}, false, nil
+	}
+
+	workflowPath := normalizeWorkflowPathReference(raw.Path)
+	if approved.WorkflowPath == "" || approved.Event == "" || approved.JobID <= 0 ||
+		workflowPath != approved.WorkflowPath || raw.Event != approved.Event {
+		return GitHubExternalRunEvidence{}, false, fmt.Errorf("GitHub external run %d does not match its approved gap identity", raw.ID)
+	}
+
+	artifacts, expectedArtifacts, err := collector.fetchArtifacts(ctx, repository, raw.ID)
+	if err != nil {
+		return GitHubExternalRunEvidence{}, false, err
+	}
+
+	if err := validateArtifacts(artifacts, nil); err != nil {
+		return GitHubExternalRunEvidence{}, false, fmt.Errorf("validate GitHub artifacts for external run %d: %w", raw.ID, err)
+	}
+
+	cost := CostInput{Source: "github-actions-run-usage"}
+	timingMillis := map[string]int64{}
+
+	var timing githubTiming
+	if err := collector.get(ctx, fmt.Sprintf("/repos/%s/actions/runs/%d/timing", repository, raw.ID), &timing); err != nil {
+		var statusError githubHTTPError
+		if !errors.As(err, &statusError) || (statusError.StatusCode != http.StatusNotFound && statusError.StatusCode != http.StatusGone) {
+			return GitHubExternalRunEvidence{}, false, err
+		}
+
+		cost.UnavailableReason = fmt.Sprintf("GitHub run usage endpoint returned HTTP %d", statusError.StatusCode)
+	} else {
+		cost.Available = true
+		cost.BillableMinutes = make(map[string]int64, len(timing.Billable))
+
+		for platform, bill := range timing.Billable {
+			if bill.TotalMS < 0 {
+				return GitHubExternalRunEvidence{}, false, fmt.Errorf("GitHub returned negative run usage for %s", platform)
+			}
+
+			cost.BillableMinutes[platform] = (bill.TotalMS + 59_999) / 60_000
+			timingMillis[platform] = bill.TotalMS
+		}
+	}
+
+	if err := validateCost(cost); err != nil {
+		return GitHubExternalRunEvidence{}, false, fmt.Errorf("validate GitHub cost for external run %d: %w", raw.ID, err)
+	}
+
+	jobs, expectedJobs, err := collector.fetchJobs(ctx, repository, raw.ID, raw.Attempt)
+	if err != nil {
+		return GitHubExternalRunEvidence{}, false, err
+	}
+
+	if expectedJobs != 1 {
+		return GitHubExternalRunEvidence{}, false, fmt.Errorf("external run %d returned %d jobs; approved gap covers exactly one job", raw.ID, expectedJobs)
+	}
+
+	var retainedJob GitHubExternalJobEvidence
+
+	for _, rawJob := range jobs {
+		if err := validateRawGitHubJob(rawJob); err != nil {
+			return GitHubExternalRunEvidence{}, false, fmt.Errorf("run %d attempt %d: %w", raw.ID, raw.Attempt, err)
+		}
+
+		if rawJob.ID != approved.JobID {
+			continue
+		}
+
+		if retainedJob.ID != 0 {
+			return GitHubExternalRunEvidence{}, false, fmt.Errorf("external run %d has duplicate approved job %d", raw.ID, approved.JobID)
+		}
+
+		retainedJob = GitHubExternalJobEvidence{
+			ID: rawJob.ID, Name: rawJob.Name, Status: rawJob.Status, Conclusion: rawJob.Conclusion,
+			CreatedAt: rawJob.CreatedAt, StartedAt: rawJob.StartedAt, CompletedAt: rawJob.CompletedAt,
+			RunnerName: rawJob.RunnerName, RunnerGroup: rawJob.RunnerGroup, Labels: rawJob.Labels,
+			ExecutionMillis: rawJob.CompletedAt.Sub(rawJob.StartedAt).Milliseconds(),
+		}
+	}
+
+	if retainedJob.ID == 0 {
+		return GitHubExternalRunEvidence{}, false, fmt.Errorf("external run %d is missing approved job %d", raw.ID, approved.JobID)
+	}
+
+	external := GitHubExternalRunEvidence{
+		RunID: raw.ID, Attempt: raw.Attempt, WorkflowPath: workflowPath, Event: raw.Event,
+		HeadSHA: raw.HeadSHA, HeadBranch: raw.HeadBranch, CreatedAt: raw.CreatedAt, StartedAt: raw.StartedAt,
+		UpdatedAt: raw.UpdatedAt, Status: raw.Status, Conclusion: raw.Conclusion, ExpectedJobs: expectedJobs,
+		Job: retainedJob, ExpectedArtifacts: expectedArtifacts, Artifacts: artifacts, Cost: cost,
+		TimingBillableMillis: timingMillis,
+	}
+
+	return external, true, nil
 }
 
 func sameGitHubRunIdentity(first, next githubRun) bool {
@@ -1665,8 +1864,8 @@ func resolveGitHubJobCoordinates(
 		return nil, fmt.Errorf("unknown GitHub job %q in %s", job.Name, workflowID)
 	}
 
-	if len(coordinates) > 1 && (job.Status != "completed" || job.Conclusion != "skipped") {
-		return nil, fmt.Errorf("unexpanded matrix job %q in %s is not completed/skipped", job.Name, workflowID)
+	if len(coordinates) > 1 && (job.Status != "completed" || !oneOf(job.Conclusion, "cancelled", "skipped")) {
+		return nil, fmt.Errorf("unexpanded matrix job %q in %s is not completed/skipped-or-cancelled", job.Name, workflowID)
 	}
 
 	return coordinates, nil

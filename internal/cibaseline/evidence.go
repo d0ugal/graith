@@ -134,21 +134,22 @@ type CostInput struct {
 }
 
 type Evidence struct {
-	SchemaVersion        int                   `json:"schema_version"`
-	InventoryDigest      string                `json:"inventory_digest"`
-	Repository           string                `json:"repository"`
-	CollectedAt          time.Time             `json:"collected_at"`
-	RequestedSince       time.Time             `json:"requested_since"`
-	RequestedUntil       time.Time             `json:"requested_until"`
-	Complete             bool                  `json:"complete"`
-	ExpectedWorkflowRuns int                   `json:"expected_workflow_runs"`
-	ExpectedRunAttempts  int                   `json:"expected_run_attempts"`
-	ExpectedCaches       int                   `json:"expected_caches"`
-	RunAttempts          []RunAttemptEvidence  `json:"run_attempts"`
-	Observations         []RunEvidence         `json:"observations"`
-	RunResources         []RunResourceEvidence `json:"run_resources,omitempty"`
-	Caches               []Cache               `json:"cache_observations,omitempty"`
-	Digest               string                `json:"digest"`
+	SchemaVersion        int                      `json:"schema_version"`
+	InventoryDigest      string                   `json:"inventory_digest"`
+	InventoryRebind      *InventoryRebindManifest `json:"inventory_rebind,omitempty"`
+	Repository           string                   `json:"repository"`
+	CollectedAt          time.Time                `json:"collected_at"`
+	RequestedSince       time.Time                `json:"requested_since"`
+	RequestedUntil       time.Time                `json:"requested_until"`
+	Complete             bool                     `json:"complete"`
+	ExpectedWorkflowRuns int                      `json:"expected_workflow_runs"`
+	ExpectedRunAttempts  int                      `json:"expected_run_attempts"`
+	ExpectedCaches       int                      `json:"expected_caches"`
+	RunAttempts          []RunAttemptEvidence     `json:"run_attempts"`
+	Observations         []RunEvidence            `json:"observations"`
+	RunResources         []RunResourceEvidence    `json:"run_resources,omitempty"`
+	Caches               []Cache                  `json:"cache_observations,omitempty"`
+	Digest               string                   `json:"digest"`
 }
 
 type RunAttemptEvidence struct {
@@ -672,8 +673,9 @@ func (e Evidence) Replay(inventory Inventory) error {
 		for _, observation := range group {
 			if observation.WorkflowID != firstObservation.WorkflowID ||
 				!observation.SyntheticFanout ||
-				observation.JobStatus != "completed" || observation.JobConclusion != "skipped" ||
-				observation.Outcome != "skipped" {
+				observation.JobStatus != "completed" ||
+				!oneOf(observation.JobConclusion, "cancelled", "skipped") ||
+				!oneOf(observation.Outcome, "cancelled", "skipped") {
 				return fmt.Errorf("job %s has invalid synthetic matrix fan-out", jobKey)
 			}
 
