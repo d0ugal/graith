@@ -80,6 +80,7 @@ func TestReadSnapshotRejectsOldSchemaBeforeOldFields(t *testing.T) {
 
 func TestFetchRejectsNegativeCollectionLimits(t *testing.T) {
 	inventory := filepath.Join("..", "..", "internal", "cibaseline", "inventory.json")
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
 	tests := map[string][]string{
 		"elapsed":    {"-max-elapsed=-1s"},
 		"requests":   {"-max-requests=-1"},
@@ -92,7 +93,8 @@ func TestFetchRejectsNegativeCollectionLimits(t *testing.T) {
 			args := append([]string{"-inventory", inventory}, limit...)
 			args = append(args, "fetch")
 
-			if err := run(args); err == nil || !strings.Contains(err.Error(), "limits must not be negative") {
+			if err := runWithNow(args, func() time.Time { return now }); err == nil ||
+				!strings.Contains(err.Error(), "limits must not be negative") {
 				t.Fatalf("run() error = %v, want negative collection limit rejection", err)
 			}
 		})
@@ -102,20 +104,64 @@ func TestFetchRejectsNegativeCollectionLimits(t *testing.T) {
 func TestFetchDoesNotWriteOutputForInvalidMaturedWindow(t *testing.T) {
 	inventory := filepath.Join("..", "..", "internal", "cibaseline", "inventory.json")
 	output := filepath.Join(t.TempDir(), "braw-evidence.json")
-	future := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	future := now.Add(time.Hour).Format(time.RFC3339)
 
-	err := run([]string{
+	err := runWithNow([]string{
 		"-inventory", inventory,
 		"-since", future,
 		"-maturation-delay", time.Hour.String(),
 		"-output", output,
 		"fetch",
-	})
+	}, func() time.Time { return now })
 	if err == nil || !strings.Contains(err.Error(), "must be after since") {
 		t.Fatalf("run() error = %v, want invalid cutoff rejection", err)
 	}
 
 	if _, statErr := os.Stat(output); !os.IsNotExist(statErr) {
 		t.Fatalf("output exists after failed fetch: %v", statErr)
+	}
+}
+
+func TestFetchUntilDoesNotWriteOutputForImmatureFixedWindow(t *testing.T) {
+	inventory := filepath.Join("..", "..", "internal", "cibaseline", "inventory.json")
+	output := filepath.Join(t.TempDir(), "canny-evidence.json")
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+
+	err := runWithNow([]string{
+		"-inventory", inventory,
+		"-since", "2026-07-25T09:00:00Z",
+		"--until", "2026-07-25T11:30:00Z",
+		"-maturation-delay", time.Hour.String(),
+		"-output", output,
+		"fetch",
+	}, func() time.Time { return now })
+	if err == nil || !strings.Contains(err.Error(), "newer than mature cutoff") {
+		t.Fatalf("run() error = %v, want explicit until maturation rejection", err)
+	}
+
+	if _, statErr := os.Stat(output); !os.IsNotExist(statErr) {
+		t.Fatalf("output exists after failed fixed-window fetch: %v", statErr)
+	}
+}
+
+func TestFetchUntilRejectsAmbiguousOrEmptyWindowBeforeOutput(t *testing.T) {
+	inventory := filepath.Join("..", "..", "internal", "cibaseline", "inventory.json")
+	output := filepath.Join(t.TempDir(), "bothy-evidence.json")
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+
+	err := runWithNow([]string{
+		"-inventory", inventory,
+		"-since", "2026-07-25T10:00:00Z",
+		"-until", "2026-07-25T10:00:00Z",
+		"-output", output,
+		"fetch",
+	}, func() time.Time { return now })
+	if err == nil || !strings.Contains(err.Error(), "must be after since") {
+		t.Fatalf("run() error = %v, want empty-window rejection", err)
+	}
+
+	if _, statErr := os.Stat(output); !os.IsNotExist(statErr) {
+		t.Fatalf("output exists after empty fixed-window fetch: %v", statErr)
 	}
 }

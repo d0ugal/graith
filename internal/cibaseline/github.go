@@ -347,7 +347,32 @@ func unmarshalGitHubObject(
 	return json.Unmarshal(data, target)
 }
 
+// Fetch collects a diagnostic window whose end is derived from collection time
+// minus the configured maturation delay.
 func (collector GitHubCollector) Fetch(ctx context.Context, repository string, since time.Time, inventory Inventory) (GitHubSnapshot, error) {
+	return collector.fetch(ctx, repository, since, time.Time{}, false, inventory)
+}
+
+// FetchWindow collects an explicit fixed window with caller-supplied start and
+// end boundaries.
+func (collector GitHubCollector) FetchWindow(
+	ctx context.Context,
+	repository string,
+	since time.Time,
+	until time.Time,
+	inventory Inventory,
+) (GitHubSnapshot, error) {
+	return collector.fetch(ctx, repository, since, until, true, inventory)
+}
+
+func (collector GitHubCollector) fetch(
+	ctx context.Context,
+	repository string,
+	since time.Time,
+	requestedUntil time.Time,
+	explicitUntil bool,
+	inventory Inventory,
+) (GitHubSnapshot, error) {
 	configured, err := collector.configured()
 	if err != nil {
 		return GitHubSnapshot{}, err
@@ -359,19 +384,41 @@ func (collector GitHubCollector) Fetch(ctx context.Context, repository string, s
 		return GitHubSnapshot{}, errors.New("repository and since are required")
 	}
 
+	if explicitUntil && requestedUntil.IsZero() {
+		return GitHubSnapshot{}, errors.New("until is required")
+	}
+
+	if explicitUntil && (!isWholeSecondInstant(since) || !isWholeSecondInstant(requestedUntil)) {
+		return GitHubSnapshot{}, errors.New("explicit GitHub collection windows require whole-second boundaries")
+	}
+
 	if err := inventory.Validate(); err != nil {
 		return GitHubSnapshot{}, fmt.Errorf("validate collection inventory: %w", err)
 	}
 
 	startedAt := collector.Now()
 	collectedAt := startedAt.UTC().Truncate(time.Second)
-	until := startedAt.UTC().Add(-collector.MaturationDelay).Truncate(time.Second)
+	matureUntil := startedAt.UTC().Add(-collector.MaturationDelay).Truncate(time.Second)
 
 	since = since.UTC().Truncate(time.Second)
+
+	until := matureUntil
+	if explicitUntil {
+		until = requestedUntil.UTC().Truncate(time.Second)
+	}
+
 	if !until.After(since) {
 		return GitHubSnapshot{}, fmt.Errorf(
 			"GitHub collection cutoff %s must be after since %s; reduce the maturation delay or move since earlier",
 			until.Format(time.RFC3339), since.Format(time.RFC3339),
+		)
+	}
+
+	if explicitUntil && until.After(matureUntil) {
+		return GitHubSnapshot{}, fmt.Errorf(
+			"GitHub collection cutoff %s is newer than mature cutoff %s at collection start %s with maturation delay %s",
+			until.Format(time.RFC3339), matureUntil.Format(time.RFC3339),
+			collectedAt.Format(time.RFC3339), collector.MaturationDelay,
 		)
 	}
 
@@ -446,7 +493,7 @@ func (collector GitHubCollector) Fetch(ctx context.Context, repository string, s
 			return GitHubSnapshot{}, fmt.Errorf("GitHub returned duplicate raw workflow run ID %d", raw.ID)
 		}
 
-		if err := validateMatureGitHubRun(raw, since, until); err != nil {
+		if err := validateMatureGitHubRun(raw, since, until, explicitUntil); err != nil {
 			return GitHubSnapshot{}, err
 		}
 
@@ -619,6 +666,10 @@ func (collector GitHubCollector) Fetch(ctx context.Context, repository string, s
 	return snapshot, nil
 }
 
+func isWholeSecondInstant(value time.Time) bool {
+	return value.Equal(value.UTC().Truncate(time.Second))
+}
+
 func workflowIDFromPath(workflowPath string) string {
 	filePath, _, _ := strings.Cut(workflowPath, "@")
 
@@ -706,7 +757,7 @@ func validateRawGitHubRun(run githubRun) error {
 	return nil
 }
 
-func validateMatureGitHubRun(run githubRun, since, cutoff time.Time) error {
+func validateMatureGitHubRun(run githubRun, since, cutoff time.Time, explicitCutoff bool) error {
 	if err := validateRawGitHubRun(run); err != nil {
 		if run.ID > 0 && run.Status != "completed" {
 			return fmt.Errorf(
@@ -726,6 +777,13 @@ func validateMatureGitHubRun(run githubRun, since, cutoff time.Time) error {
 	}
 
 	if run.UpdatedAt.After(cutoff) {
+		if explicitCutoff {
+			return fmt.Errorf(
+				"GitHub workflow run %d was updated after explicit fixed-window cutoff %s (attempt %d, conclusion %q, updated_at %s); retrying the same fixed bounds will continue to fail for this run-created interval",
+				run.ID, cutoff.Format(time.RFC3339), run.Attempt, run.Conclusion, run.UpdatedAt.Format(time.RFC3339),
+			)
+		}
+
 		return fmt.Errorf(
 			"GitHub workflow run %d is insufficiently mature at cutoff %s (attempt %d, conclusion %q, updated_at %s); retry with a later cutoff",
 			run.ID, cutoff.Format(time.RFC3339), run.Attempt, run.Conclusion, run.UpdatedAt.Format(time.RFC3339),
@@ -1615,13 +1673,80 @@ func resolveGitHubJobCoordinates(
 }
 
 func ParseSince(value string, now time.Time) (time.Time, error) {
+	return parseSinceFrom(value, now)
+}
+
+type RequestedWindow struct {
+	Since         time.Time
+	Until         time.Time
+	ExplicitUntil bool
+}
+
+func ParseWindow(sinceValue, untilValue string, now time.Time) (RequestedWindow, error) {
+	if untilValue == "" {
+		since, err := ParseSince(sinceValue, now)
+		if err != nil {
+			return RequestedWindow{}, err
+		}
+
+		return RequestedWindow{Since: since}, nil
+	}
+
+	until, err := time.Parse(time.RFC3339, untilValue)
+	if err != nil {
+		return RequestedWindow{}, fmt.Errorf("parse until: %w", err)
+	}
+
+	if !isWholeSecondInstant(until) {
+		return RequestedWindow{}, errors.New("until must be a whole-second RFC3339 instant")
+	}
+
+	since, err := parseExplicitWindowSince(sinceValue, until)
+	if err != nil {
+		return RequestedWindow{}, fmt.Errorf("parse since: %w", err)
+	}
+
+	until = until.UTC().Truncate(time.Second)
+	if !until.After(since) {
+		return RequestedWindow{}, fmt.Errorf(
+			"until %s must be after since %s",
+			until.Format(time.RFC3339), since.Format(time.RFC3339),
+		)
+	}
+
+	return RequestedWindow{Since: since, Until: until, ExplicitUntil: true}, nil
+}
+
+func parseExplicitWindowSince(value string, until time.Time) (time.Time, error) {
+	if _, err := strconv.Atoi(value); err == nil {
+		return parseSinceFrom(value, until)
+	}
+
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	if !isWholeSecondInstant(parsed) {
+		return time.Time{}, errors.New("since must be a whole-second RFC3339 instant")
+	}
+
+	return parsed.UTC(), nil
+}
+
+func parseSinceFrom(value string, reference time.Time) (time.Time, error) {
 	if days, err := strconv.Atoi(value); err == nil {
 		if days < 1 || days > 28 {
 			return time.Time{}, errors.New("day lookback must be between 1 and 28")
 		}
 
-		return now.UTC().Add(-time.Duration(days) * 24 * time.Hour), nil
+		return reference.UTC().Add(-time.Duration(days) * 24 * time.Hour).Truncate(time.Second), nil
 	}
 
-	return time.Parse(time.RFC3339, value)
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	return parsed.UTC().Truncate(time.Second), nil
 }

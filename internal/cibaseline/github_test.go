@@ -462,6 +462,303 @@ func TestGitHubCollectorUsesStableMaturedRunCutoff(t *testing.T) {
 	}
 }
 
+func TestGitHubCollectorFetchWindowUsesExplicitUTCInterval(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	since := time.Date(2026, 7, 25, 4, 0, 0, 0, time.FixedZone("braw", -2*60*60))
+	until := time.Date(2026, 7, 25, 12, 0, 0, 0, time.FixedZone("canny", 2*60*60))
+	normalizedSince := time.Date(2026, 7, 25, 6, 0, 0, 0, time.UTC)
+	normalizedUntil := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
+	stable := matureGitHubRun(81, normalizedSince.Add(time.Hour), normalizedUntil.Add(-time.Minute))
+
+	queries := make([]string, 0, 2)
+
+	server := newRunCollectionServerWithHook(t, []githubRunsPage{
+		{TotalCount: 1, Runs: []githubRun{stable}},
+		{TotalCount: 1, Runs: []githubRun{stable}},
+	}, func(request *http.Request) {
+		queries = append(queries, request.URL.Query().Get("created"))
+	})
+	defer server.Close()
+
+	collector := GitHubCollector{
+		Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+		MaturationDelay: time.Hour,
+	}
+
+	snapshot, err := collector.FetchWindow(context.Background(), "d0ugal/graith", since, until, loadInventory(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !snapshot.RequestedSince.Equal(normalizedSince) || !snapshot.RequestedUntil.Equal(normalizedUntil) {
+		t.Fatalf("window = %s..%s, want %s..%s", snapshot.RequestedSince, snapshot.RequestedUntil, normalizedSince, normalizedUntil)
+	}
+
+	wantQuery := normalizedSince.Format(time.RFC3339) + ".." + normalizedUntil.Format(time.RFC3339)
+	if !reflect.DeepEqual(queries, []string{wantQuery, wantQuery}) {
+		t.Fatalf("created queries = %v, want two exact %q queries", queries, wantQuery)
+	}
+}
+
+func TestGitHubCollectorFetchWindowPreservesExactRetryInterval(t *testing.T) {
+	startedAt := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	since := time.Date(2026, 7, 25, 0, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 7, 25, 6, 0, 0, 0, time.UTC)
+
+	var queries []string
+
+	collector := GitHubCollector{MaturationDelay: time.Hour}
+
+	for attempt := 0; attempt < 2; attempt++ {
+		server := newRunCollectionServerWithHook(t, []githubRunsPage{
+			{TotalCount: 0, Runs: []githubRun{}},
+			{TotalCount: 0, Runs: []githubRun{}},
+		}, func(request *http.Request) {
+			queries = append(queries, request.URL.Query().Get("created"))
+		})
+
+		collector.Client = server.Client()
+		collector.BaseURL = server.URL
+		collectionStart := startedAt.Add(time.Duration(attempt) * time.Hour)
+		collector.Now = func() time.Time { return collectionStart }
+
+		snapshot, err := collector.FetchWindow(context.Background(), "d0ugal/graith", since, until, loadInventory(t))
+
+		server.Close()
+
+		if err != nil {
+			t.Fatalf("attempt %d: %v", attempt+1, err)
+		}
+
+		if !snapshot.RequestedSince.Equal(since) || !snapshot.RequestedUntil.Equal(until) {
+			t.Fatalf("attempt %d window = %s..%s, want %s..%s", attempt+1, snapshot.RequestedSince, snapshot.RequestedUntil, since, until)
+		}
+	}
+
+	wantQuery := since.Format(time.RFC3339) + ".." + until.Format(time.RFC3339)
+	if !reflect.DeepEqual(queries, []string{wantQuery, wantQuery, wantQuery, wantQuery}) {
+		t.Fatalf("retry created queries = %v, want stable %q interval", queries, wantQuery)
+	}
+}
+
+func TestGitHubCollectorFetchWindowRejectsInvalidBoundsBeforeNetwork(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	since := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
+	requests := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests++
+	}))
+	defer server.Close()
+
+	tests := map[string]struct {
+		since time.Time
+		until time.Time
+		want  string
+	}{
+		"zero until": {
+			since: since,
+			until: time.Time{},
+			want:  "until is required",
+		},
+		"equal": {
+			since: since,
+			until: since,
+			want:  "must be after since",
+		},
+		"before": {
+			since: since,
+			until: since.Add(-time.Second),
+			want:  "must be after since",
+		},
+		"inside maturation guard": {
+			since: since,
+			until: now.Add(-30 * time.Minute),
+			want:  "newer than mature cutoff",
+		},
+		"future": {
+			since: since,
+			until: now.Add(time.Hour),
+			want:  "newer than mature cutoff",
+		},
+		"fractional since": {
+			since: since.Add(time.Nanosecond),
+			until: now.Add(-time.Hour),
+			want:  "whole-second boundaries",
+		},
+		"fractional until": {
+			since: since,
+			until: now.Add(-time.Hour).Add(time.Nanosecond),
+			want:  "whole-second boundaries",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			collector := GitHubCollector{
+				Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+				MaturationDelay: time.Hour,
+			}
+
+			snapshot, err := collector.FetchWindow(context.Background(), "d0ugal/graith", test.since, test.until, loadInventory(t))
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("FetchWindow() error = %v, want containing %q", err, test.want)
+			}
+
+			if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) {
+				t.Fatalf("FetchWindow() returned partial snapshot %#v", snapshot)
+			}
+		})
+	}
+
+	if requests != 0 {
+		t.Fatalf("invalid windows made %d network requests", requests)
+	}
+}
+
+func TestGitHubCollectorFetchWindowRejectsRunUpdatedAfterExplicitCutoff(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	since := time.Date(2026, 7, 25, 0, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 7, 25, 6, 0, 0, 0, time.UTC)
+	rerun := matureGitHubRun(81, since.Add(time.Hour), until.Add(time.Hour))
+
+	server := newRunCollectionServer(t, []githubRunsPage{
+		{TotalCount: 1, Runs: []githubRun{rerun}},
+	})
+	defer server.Close()
+
+	collector := GitHubCollector{
+		Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+		MaturationDelay: time.Hour,
+	}
+
+	snapshot, err := collector.FetchWindow(context.Background(), "d0ugal/graith", since, until, loadInventory(t))
+	if err == nil ||
+		!strings.Contains(err.Error(), "updated after explicit fixed-window cutoff") ||
+		!strings.Contains(err.Error(), "retrying the same fixed bounds will continue to fail") {
+		t.Fatalf("FetchWindow() error = %v, want fixed-window rerun diagnostic", err)
+	}
+
+	if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) {
+		t.Fatalf("FetchWindow() returned partial snapshot %#v", snapshot)
+	}
+}
+
+func TestGitHubCollectorFetchWindowMaturationConfiguration(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	since := time.Date(2026, 7, 25, 9, 0, 0, 0, time.UTC)
+	defaultMatureUntil := now.Add(-DefaultRunMaturationDelay)
+
+	server := newRunCollectionServer(t, []githubRunsPage{
+		{TotalCount: 0, Runs: []githubRun{}},
+		{TotalCount: 0, Runs: []githubRun{}},
+	})
+	defer server.Close()
+
+	collector := GitHubCollector{
+		Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+		MaturationDelay: 0,
+	}
+
+	snapshot, err := collector.FetchWindow(context.Background(), "d0ugal/graith", since, defaultMatureUntil, loadInventory(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !snapshot.RequestedUntil.Equal(defaultMatureUntil) {
+		t.Fatalf("requested_until = %s, want default mature cutoff %s", snapshot.RequestedUntil, defaultMatureUntil)
+	}
+
+	_, err = collector.FetchWindow(context.Background(), "d0ugal/graith", since, defaultMatureUntil.Add(time.Second), loadInventory(t))
+	if err == nil || !strings.Contains(err.Error(), "newer than mature cutoff") {
+		t.Fatalf("FetchWindow(zero maturation newer end) error = %v, want default guard rejection", err)
+	}
+
+	_, err = (GitHubCollector{MaturationDelay: -time.Second}).FetchWindow(
+		context.Background(),
+		"d0ugal/graith",
+		since,
+		defaultMatureUntil,
+		loadInventory(t),
+	)
+	if err == nil || !strings.Contains(err.Error(), "limits must not be negative") {
+		t.Fatalf("FetchWindow(negative maturation) error = %v, want rejection", err)
+	}
+}
+
+func TestGitHubCollectorFetchWindowExpressesAdjacentAndOverlappingBoundaries(t *testing.T) {
+	now := time.Date(2026, 7, 25, 18, 0, 0, 0, time.UTC)
+	windows := []struct {
+		since time.Time
+		until time.Time
+	}{
+		{
+			since: time.Date(2026, 7, 25, 0, 0, 0, 0, time.UTC),
+			until: time.Date(2026, 7, 25, 6, 0, 0, 0, time.UTC),
+		},
+		{
+			since: time.Date(2026, 7, 25, 6, 0, 0, 0, time.UTC),
+			until: time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			since: time.Date(2026, 7, 25, 5, 0, 0, 0, time.UTC),
+			until: time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC),
+		},
+	}
+
+	var (
+		queries   []string
+		snapshots = make([]GitHubSnapshot, 0, len(windows))
+	)
+
+	boundaryRun := matureGitHubRun(
+		81,
+		time.Date(2026, 7, 25, 6, 0, 0, 0, time.UTC),
+		time.Date(2026, 7, 25, 6, 0, 0, 0, time.UTC),
+	)
+
+	for _, window := range windows {
+		server := newRunCollectionServerWithHook(t, []githubRunsPage{
+			{TotalCount: 1, Runs: []githubRun{boundaryRun}},
+			{TotalCount: 1, Runs: []githubRun{boundaryRun}},
+		}, func(request *http.Request) {
+			queries = append(queries, request.URL.Query().Get("created"))
+		})
+
+		collector := GitHubCollector{
+			Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+			MaturationDelay: time.Hour,
+		}
+
+		snapshot, err := collector.FetchWindow(context.Background(), "d0ugal/graith", window.since, window.until, loadInventory(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		snapshots = append(snapshots, snapshot)
+
+		server.Close()
+	}
+
+	want := []string{
+		"2026-07-25T00:00:00Z..2026-07-25T06:00:00Z",
+		"2026-07-25T00:00:00Z..2026-07-25T06:00:00Z",
+		"2026-07-25T06:00:00Z..2026-07-25T12:00:00Z",
+		"2026-07-25T06:00:00Z..2026-07-25T12:00:00Z",
+		"2026-07-25T05:00:00Z..2026-07-25T11:00:00Z",
+		"2026-07-25T05:00:00Z..2026-07-25T11:00:00Z",
+	}
+	if !reflect.DeepEqual(queries, want) {
+		t.Fatalf("created queries = %v, want adjacent and overlapping windows %v", queries, want)
+	}
+
+	for index, snapshot := range snapshots {
+		if len(snapshot.Runs) != 1 || snapshot.Runs[0].ID != boundaryRun.ID || !snapshot.Runs[0].CreatedAt.Equal(boundaryRun.CreatedAt) {
+			t.Fatalf("snapshot %d runs = %#v, want boundary run %d at %s", index, snapshot.Runs, boundaryRun.ID, boundaryRun.CreatedAt)
+		}
+	}
+}
+
 func TestGitHubCollectorHandlesNullConclusionForUnsettledRuns(t *testing.T) {
 	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
 	since := now.Add(-2 * time.Hour)
@@ -573,8 +870,9 @@ func TestMatureGitHubRunWindowBoundariesAndFailures(t *testing.T) {
 	cutoff := since.Add(time.Hour)
 
 	tests := map[string]struct {
-		run  githubRun
-		want string
+		run      githubRun
+		explicit bool
+		want     string
 	}{
 		"created at since": {
 			run: matureGitHubRun(1, since, cutoff),
@@ -594,6 +892,11 @@ func TestMatureGitHubRunWindowBoundariesAndFailures(t *testing.T) {
 			run:  matureGitHubRun(1, since, cutoff.Add(time.Second)),
 			want: "insufficiently mature",
 		},
+		"updated after explicit cutoff": {
+			run:      matureGitHubRun(1, since, cutoff.Add(time.Second)),
+			explicit: true,
+			want:     "retrying the same fixed bounds",
+		},
 		"nonterminal before cutoff": {
 			run: func() githubRun {
 				run := matureGitHubRun(1, since, cutoff.Add(-time.Second))
@@ -607,7 +910,7 @@ func TestMatureGitHubRunWindowBoundariesAndFailures(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			err := validateMatureGitHubRun(test.run, since, cutoff)
+			err := validateMatureGitHubRun(test.run, since, cutoff, test.explicit)
 			if test.want == "" && err != nil {
 				t.Fatal(err)
 			}
@@ -660,13 +963,24 @@ func TestGitHubCollectorRetainsThousandResultCeiling(t *testing.T) {
 		MaturationDelay: time.Hour,
 	}
 
-	snapshot, err := collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-2*time.Hour), loadInventory(t))
-	if err == nil || !strings.Contains(err.Error(), "1000-result API ceiling") {
-		t.Fatalf("Fetch() error = %v, want 1,000-result ceiling rejection", err)
-	}
+	for name, fetch := range map[string]func() (GitHubSnapshot, error){
+		"derived cutoff": func() (GitHubSnapshot, error) {
+			return collector.Fetch(context.Background(), "d0ugal/graith", now.Add(-2*time.Hour), loadInventory(t))
+		},
+		"explicit cutoff": func() (GitHubSnapshot, error) {
+			return collector.FetchWindow(context.Background(), "d0ugal/graith", now.Add(-2*time.Hour), now.Add(-time.Hour), loadInventory(t))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			snapshot, err := fetch()
+			if err == nil || !strings.Contains(err.Error(), "1000-result API ceiling") {
+				t.Fatalf("fetch error = %v, want 1,000-result ceiling rejection", err)
+			}
 
-	if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) {
-		t.Fatalf("Fetch() returned partial snapshot %#v", snapshot)
+			if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) {
+				t.Fatalf("fetch returned partial snapshot %#v", snapshot)
+			}
+		})
 	}
 }
 
@@ -679,6 +993,14 @@ func matureGitHubRun(id int64, createdAt, updatedAt time.Time) githubRun {
 }
 
 func newRunCollectionServer(t *testing.T, runPages []githubRunsPage) *httptest.Server {
+	return newRunCollectionServerWithHook(t, runPages, nil)
+}
+
+func newRunCollectionServerWithHook(
+	t *testing.T,
+	runPages []githubRunsPage,
+	onRunRequest func(*http.Request),
+) *httptest.Server {
 	t.Helper()
 
 	runRequest := 0
@@ -688,6 +1010,10 @@ func newRunCollectionServer(t *testing.T, runPages []githubRunsPage) *httptest.S
 
 		switch request.URL.Path {
 		case "/repos/d0ugal/graith/actions/runs":
+			if onRunRequest != nil {
+				onRunRequest(request)
+			}
+
 			index := runRequest
 			if index >= len(runPages) {
 				index = len(runPages) - 1
@@ -960,6 +1286,106 @@ func TestParseSince(t *testing.T) {
 
 	if _, err := ParseSince("29", now); err == nil {
 		t.Fatal("ParseSince accepted more than the four-week collection window")
+	}
+}
+
+func TestParseWindow(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+
+	tests := map[string]struct {
+		since string
+		until string
+		want  RequestedWindow
+	}{
+		"unset until preserves wall-clock lookback": {
+			since: "1",
+			want: RequestedWindow{
+				Since: time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC),
+			},
+		},
+		"explicit start and end normalize to UTC": {
+			since: "2026-07-25T00:00:00-05:00",
+			until: "2026-07-25T12:00:00+02:00",
+			want: RequestedWindow{
+				Since: time.Date(2026, 7, 25, 5, 0, 0, 0, time.UTC),
+				Until: time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC), ExplicitUntil: true,
+			},
+		},
+		"numeric lookback derives from explicit end": {
+			since: "1",
+			until: "2026-07-25T12:00:00+02:00",
+			want: RequestedWindow{
+				Since: time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC),
+				Until: time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC), ExplicitUntil: true,
+			},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := ParseWindow(test.since, test.until, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if got != test.want {
+				t.Fatalf("ParseWindow() = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+
+	for name, test := range map[string]struct {
+		since string
+		until string
+		want  string
+	}{
+		"equal": {
+			since: "2026-07-25T10:00:00Z",
+			until: "2026-07-25T10:00:00Z",
+			want:  "until 2026-07-25T10:00:00Z must be after since 2026-07-25T10:00:00Z",
+		},
+		"before": {
+			since: "2026-07-25T10:00:00Z",
+			until: "2026-07-25T09:59:59Z",
+			want:  "must be after since",
+		},
+		"numeric outside range": {
+			since: "29",
+			until: "2026-07-25T10:00:00Z",
+			want:  "day lookback",
+		},
+		"fractional since": {
+			since: "2026-07-25T09:00:00.001Z",
+			until: "2026-07-25T10:00:00Z",
+			want:  "since must be a whole-second RFC3339 instant",
+		},
+		"fractional until": {
+			since: "2026-07-25T09:00:00Z",
+			until: "2026-07-25T10:00:00.001Z",
+			want:  "until must be a whole-second RFC3339 instant",
+		},
+		"malformed since": {
+			since: "dreich",
+			until: "2026-07-25T10:00:00Z",
+			want:  "parse since",
+		},
+		"malformed until": {
+			since: "1",
+			until: "dreich",
+			want:  "parse until",
+		},
+		"whitespace until": {
+			since: "1",
+			until: "   ",
+			want:  "parse until",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseWindow(test.since, test.until, now); err == nil ||
+				!strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ParseWindow() error = %v, want containing %q", err, test.want)
+			}
+		})
 	}
 }
 
@@ -1653,6 +2079,71 @@ func TestGitHubCollectorReturnsNoPartialSnapshotAfterRateLimitExhaustion(t *test
 	if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) || pageTwoRequests != 2 {
 		t.Fatalf("Fetch() returned partial snapshot %#v after %d page-two requests", snapshot, pageTwoRequests)
 	}
+}
+
+func TestGitHubCollectorFetchWindowReturnsNoPartialSnapshotDuringCollectionFailures(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	since := now.Add(-2 * time.Hour)
+	until := now.Add(-time.Hour)
+
+	t.Run("request budget", func(t *testing.T) {
+		server := newRunCollectionServer(t, []githubRunsPage{
+			{TotalCount: 1, Runs: []githubRun{matureGitHubRun(81, since.Add(10*time.Minute), until.Add(-time.Minute))}},
+			{TotalCount: 1, Runs: []githubRun{matureGitHubRun(81, since.Add(10*time.Minute), until.Add(-time.Minute))}},
+		})
+		defer server.Close()
+
+		collector := GitHubCollector{
+			Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+			MaxElapsed: time.Hour, MaxRequests: 1, MaxRetries: 1, MaturationDelay: time.Hour,
+		}
+
+		snapshot, err := collector.FetchWindow(context.Background(), "d0ugal/graith", since, until, loadInventory(t))
+		if !errors.Is(err, ErrCollectionBudgetExhausted) || !strings.Contains(err.Error(), "request limit 1 reached") {
+			t.Fatalf("FetchWindow() error = %v, want request-budget exhaustion", err)
+		}
+
+		if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) {
+			t.Fatalf("FetchWindow() returned partial snapshot %#v", snapshot)
+		}
+	})
+
+	t.Run("caller cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		stable := matureGitHubRun(81, since.Add(10*time.Minute), until.Add(-time.Minute))
+
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			writer.Header().Set("Content-Type", "application/json")
+
+			switch request.URL.Path {
+			case "/repos/d0ugal/graith/actions/runs":
+				page := githubRunsPage{TotalCount: 1, Runs: []githubRun{stable}}
+				if err := json.NewEncoder(writer).Encode(page); err != nil {
+					t.Errorf("encode runs: %v", err)
+				}
+			case "/repos/d0ugal/graith/actions/caches":
+				cancel()
+				writeResponse(t, writer, `{"total_count":0,"actions_caches":[]}`)
+			default:
+				http.NotFound(writer, request)
+			}
+		}))
+		defer server.Close()
+
+		collector := GitHubCollector{
+			Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+			MaxElapsed: time.Hour, MaxRequests: 10, MaxRetries: 1, MaturationDelay: time.Hour,
+		}
+
+		snapshot, err := collector.FetchWindow(ctx, "d0ugal/graith", since, until, loadInventory(t))
+		if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "collection cancelled") {
+			t.Fatalf("FetchWindow() error = %v, want caller cancellation", err)
+		}
+
+		if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) {
+			t.Fatalf("FetchWindow() returned partial snapshot %#v", snapshot)
+		}
+	})
 }
 
 func TestGitHubCollectorRejectsMalformedOrIncompleteResponses(t *testing.T) {
