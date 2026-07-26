@@ -84,7 +84,7 @@ accepted.
 
 | ID | Deliverable | Depends on | Exit evidence |
 |----|-------------|------------|---------------|
-| P0 | Baseline and inventory | None | Bounded collector and replay path are operational; retained complete fixed-window evidence covers representative current activity and the enumerated workflow/mode inventory; representative merged changes replay successfully; capability-to-current-proof matrix is closed-world and owner-reviewed; unexplained modes or incomplete evidence fail the gate. |
+| P0 | Baseline and inventory | None | Bounded collector and replay path are operational; retained complete fixed-window evidence from an owner-approved collection request covers representative current activity and the enumerated workflow/mode inventory; representative merged changes replay successfully; capability-to-current-proof matrix is closed-world and owner-reviewed; unexplained modes or incomplete evidence fail the gate. |
 | P1 | Policy schema and capability manifest | P0 | Schema validation rejects unknown modes, duplicate coordinates, missing owners, unsupported silent passes, and ambiguous requiredness; deterministic manifest digest. |
 | P2 | Go policy/result library | P1 | Local plan replay from event + file list; stable JSON results; policy tests cover fork/base trust, expiry, cancellation, stale output, and zero-job plans. |
 | P3 | Hermetic fixture and fault injector | P2 | Fixture fails closed for missing files, polluted environment, stale/corrupt cache/artifact, archive differences, cancellation, misleading names, and unsupported platforms. |
@@ -94,7 +94,7 @@ accepted.
 | P7 | Main/deep/scheduled lanes | P6 | Main complete bundle, race/integration, full platform, coverage, security, fuzz/soak, and dependency freshness modes have stable fan-in and dashboards. |
 | P8 | Dependency and generated-file promotion | P5/P6 | Dependency updates use the same policy; credentialed regeneration/docs publication moves behind a trusted-base workflow or protected environment that PR YAML cannot edit; stale outputs fail for forks and trusted branches; live same-repository-agent fixture passes before cutover. |
 | P9 | Release candidate verification | P5/P7 | Reproducible Linux/Darwin candidate, package consumer, checksum/SBOM/provenance, signature, independent verification, rollback dry run, and protected publication rehearsal. |
-| P10 | Required-check cutover and deletion | P6/P7/P8/P9 | Branch protection requires only the App-owned `graith-ci-gate`; old contexts remain observational until an owner-approved bounded sample of real merged changes/events covers the required change/event/mode matrix with no unexplained disagreement, false-green escape, stale/missing proof, or artifact identity mismatch, then obsolete required contexts and workflows are removed in separate reversible changes. |
+| P10 | Required-check cutover and deletion | P6/P7/P8/P9 | Branch protection requires only the App-owned `graith-ci-gate`; old contexts remain observational until an owner-approved bounded sample of real merged changes/events covers the required change/event/mode matrix with no unexplained disagreement, false-green escape, stale/missing proof, or artifact identity mismatch. Required cells need retained real samples, owner-approved retirement rows, or retained live fixture substitutes for event shapes real merged traffic cannot produce, then obsolete required contexts and workflows are removed in separate reversible changes. |
 | P11 | JS policy surface retirement | P0/P2/P3 | Repo-owned JS helpers have owners and grandfathered contracts; each is wrapped, ported to Go, or explicitly retained with deletion criteria; YAML-regex trust tests are replaced by semantic contract tests before workflow reshaping. |
 
 #### P0 — Baseline and inventory
@@ -141,14 +141,17 @@ Acceptance requires the bounded collector and replay path to be operational,
 retained complete fixed-window evidence covering representative current
 activity and the enumerated workflow/mode inventory, owner sign-off on the
 closed-world matrix, and a representative sample of merged changes replayed
-against the observed mode set. P1 may begin as soon as those evidence-quality
-conditions are satisfied; it does not wait for a calendar minimum. Ongoing
-baseline collection continues in parallel with P1 and later packages and
-calibrates final latency and cost targets before dual-run enforcement or
-cutover. Until calibration is retained, the provisional 20/35/45/90-minute
-targets and the dual-run 2x-plus-20% budget are binding ceilings, not goals
-that may be exceeded. Any unexplained mode or incomplete evidence is an
-inventory failure, not an assumption to resolve during cutover.
+against the observed mode set. The fixed window is a retained, contiguous,
+owner-approved collection request with explicit bounds chosen for coverage of
+the workflow/mode inventory, not an elapsed-time acceptance clock. P1 may begin
+as soon as those evidence-quality conditions are satisfied; it does not wait
+for a calendar minimum. Ongoing baseline collection continues in parallel with
+P1 and later packages and calibrates final latency and cost targets before
+dual-run enforcement or cutover. Until calibration is retained, the
+provisional 20/35/45/90-minute targets and the dual-run 2x-plus-20% budget are
+binding ceilings, not goals that may be exceeded. Any unexplained mode or
+incomplete evidence is an inventory failure, not an assumption to resolve
+during cutover.
 
 #### P1–P3 — Contracts, implementation, and fixture
 
@@ -213,19 +216,27 @@ budgets. The matrix covers every named change class, trusted and untrusted
 event shape, required mode, retry/cancellation/failure class, matching mode-set
 criterion, latency criterion, and classification criterion; every required
 cell has explicit retained samples or an owner-approved retirement row. Full
-dual-run comparison is capped at 2x the matched baseline runner minutes plus
-20% of that baseline as queue overhead for the bounded matrix. Exhausting that
-budget before the sample matrix is complete aborts or resizes the shadow
-migration; it never promotes by elapsed time. After the App-owned gate becomes
+dual-run comparison is capped for the bounded sample request: summed new-graph
+runner minutes across retained sample cells must stay within 2x the summed
+matched current-baseline runner minutes for the same change/event/mode cells,
+plus 20% of that matched baseline as queue overhead. Exhausting that approved
+budget before the sample matrix is complete fails closed: the attempt produces
+no acceptance evidence, stops the shadow migration, and restores the old gate.
+A smaller replacement sample request must be separately owner-approved before
+new evidence can be produced; it is never an automatic resize of the failed
+request and never promotes by elapsed time. After the App-owned gate becomes
 the required decision, old workflows may run observationally only until the P10
 real-change/event sample passes; they are not required and cannot affect the
-App gate. Sampling is allowed only when it fills explicit matrix cells, and a
-missing required cell fails the observation gate. Abort shadow migration and
-restore the old gate if the bounded sample exceeds the migration budget, p95
-required latency for the completed matrix exceeds its target by 25%, any
-trust/provenance mismatch occurs, or any false-green fixture escapes. Main
-promotion expands deferred PR modes according to policy; it does not infer
-that a skipped PR mode passed.
+App gate. Sampling is allowed only when it fills explicit matrix cells. A
+missing required P10 cell fails the observation gate unless it has an
+owner-approved retirement row or a retained live fixture substitute for an
+event shape that real merged traffic cannot produce; fixture substitutes must
+exercise the same trust and provenance contracts as the App gate. Abort shadow
+migration and restore the old gate if the bounded sample exceeds the migration
+budget, p95 required latency for any completed matrix segment exceeds its
+target by 25%, any trust/provenance mismatch occurs, or any false-green fixture
+escapes. Main promotion expands deferred PR modes according to policy; it does
+not infer that a skipped PR mode passed.
 
 Operational reliability reports use a fixed rolling 28-day UTC window and separate
 attempt and change denominators. Attempt failure is failed attempts divided by
@@ -260,10 +271,11 @@ Change required checks in this order: deploy the tamper-resistant
 always-reporting gate, verify it blocks a missing/zero-job result and a
 PR-rewritten unconditional-success gate, make the App-owned gate the required
 decision while old contexts run observationally, complete the owner-approved
-bounded observation sample of real merged changes/events, then remove obsolete
-contexts in a separate reversible settings change. Retain historical result
-bundles and a documented rollback; do not delete old contexts while the
-trust-root proof or observation matrix is open.
+bounded observation sample of real merged changes/events plus any
+owner-approved retirement rows or retained live fixture substitutes, then
+remove obsolete contexts in a separate reversible settings change. Retain
+historical result bundles and a documented rollback; do not delete old contexts
+while the trust-root proof or observation matrix is open.
 
 ## Consensus
 
@@ -329,10 +341,12 @@ evidence; broad product suites remain owned by the eventual CI lanes.
   choose its hosted deployment and attestation key service, record rotation,
   retention, and incident-revocation procedures, and stop with no cutover if
   those controls cannot be demonstrated in the live fixture.
-- P0 supplies the baseline for final latency and cost budgets. Until the
-  retained fixed-window evidence is complete and calibration is owner-reviewed,
-  the provisional 20/35/45/90-minute targets and the dual-run 2x-plus-20%
-  budget are binding ceilings, not goals that may be exceeded.
+- P0 supplies the baseline for final latency and cost budgets. The retained
+  fixed-window evidence is an owner-approved collection request with explicit
+  bounds chosen for coverage completeness rather than elapsed-time acceptance.
+  Until that evidence is complete and calibration is owner-reviewed, the
+  provisional 20/35/45/90-minute targets and the dual-run 2x-plus-20% budget
+  are binding ceilings, not goals that may be exceeded.
 - The App check remains the single required decision while individual mode
   diagnostics stay visible as separate checks/evidence. No diagnostic check may
   be substituted into branch protection without the same App source binding.

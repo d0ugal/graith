@@ -440,15 +440,21 @@ adding a matrix row. A cache is omitted when upload/restore costs exceed the
 saved work, inputs are too volatile, provenance cannot be established, or a
 small job is faster and safer without it.
 
-During migration, full dual-run comparison is capped at twice measured baseline
-runner minutes plus 20% queue overhead for the owner-approved bounded sample
-matrix. After the App-owned gate becomes the required decision, old checks may
-remain observational-only at a fixed sampling budget only until the P10
-real-change/event matrix passes; sampling fills explicit matrix cells and does
-not replace required evidence. Exceeding the migration budget before the
-matrix is complete, p95 required latency for the completed matrix exceeding
-its target by 25%, any provenance mismatch, or any fixture false-green escape
-aborts and rolls back to the old gate.
+During migration, full dual-run comparison is capped for the owner-approved
+bounded sample request: summed new-graph runner minutes across retained sample
+cells must stay within twice the summed matched current-baseline runner minutes
+for the same change/event/mode cells, plus 20% of that matched baseline as
+queue overhead. After the App-owned gate becomes the required decision, old
+checks may remain observational-only until the P10 real-change/event matrix
+passes; sampling fills explicit matrix cells and does not replace required
+evidence. Exhausting the approved migration budget before the matrix is
+complete fails closed: the attempt produces no acceptance evidence, stops the
+shadow migration, and rolls back to the old gate. A smaller replacement sample
+request must be separately owner-approved before new evidence can be produced;
+it is never an automatic resize of the failed request. The same rollback
+applies when p95 required latency for any completed matrix segment exceeds its
+target by 25%, any provenance mismatch occurs, or any fixture false-green
+escapes.
 
 ## Consensus
 
@@ -506,10 +512,12 @@ the target's fail-closed semantics.
 
 1. **Evidence baseline.** Instrument current runs without changing gates;
    measure queue, duration, retries, flakes, cost, cache behavior, and the
-   actual mode coverage with the bounded collector and replay path. Retained
-   complete fixed-window evidence must cover representative current activity
-   and the enumerated workflow/mode inventory, a representative sample of
-   merged changes must replay successfully, and the closed-world
+   actual mode coverage with the bounded collector and replay path. The
+   fixed-window evidence set is a retained, contiguous, owner-approved
+   collection request with explicit bounds chosen for workflow/mode coverage,
+   not an elapsed-time acceptance clock. It must cover representative current
+   activity and the enumerated workflow/mode inventory, a representative sample
+   of merged changes must replay successfully, and the closed-world
    capability-to-current-proof matrix must be owner-reviewed. P1 may begin
    once those evidence-quality conditions are satisfied; unexplained modes or
    incomplete evidence fail the gate. Baseline collection continues in parallel
@@ -545,10 +553,14 @@ required proof remains authoritative; if it is unsafe, disable only the new
 path and return to the last known-good gate. Delete duplicate workflows and
 obsolete required checks only after the owner-approved P10 sample of real
 merged changes/events has no unexplained disagreement, false-green escape,
-stale/missing proof, or artifact identity mismatch; perform deletion in a
-separate, reversible settings change and retain result history and rollback
-instructions. Migration convenience must never justify `continue-on-error`,
-silent skips, unpinned dependencies, or unprotected publication.
+stale/missing proof, or artifact identity mismatch. Required P10 cells need
+retained real samples, an owner-approved retirement row, or a retained live
+fixture substitute for event shapes that real merged traffic cannot produce;
+fixture substitutes must exercise the same trust and provenance contracts as
+the App gate. Perform deletion in a separate, reversible settings change and
+retain result history and rollback instructions. Migration convenience must
+never justify `continue-on-error`, silent skips, unpinned dependencies, or
+unprotected publication.
 
 The first implementation issue in this sequence should establish the
 repo-owned Go policy/result library and its complexity budget before any gate
