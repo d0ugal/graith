@@ -226,10 +226,14 @@ equivalent but differently encoded text remains distinct. Duplicate input is
 deduplicated in order.
 
 Labels persist through daemon restart, in-place agent migration, and soft
-delete/restore. Existing state is migrated to an empty set. Forks inherit a
-snapshot of the source labels; ordinary parented creation does not. Labels never
-grant access: creation and update use the same local-human, remote-human,
-session/descendant, and system-session boundaries as the rest of session metadata.
+delete/restore. Existing state is migrated to an empty set. Child sessions
+inherit a snapshot of the parent's labels by default, including scenario,
+trigger, and mirror-created children. Supplying labels during creation replaces
+the inherited set instead of merging with it. Forks inherit a snapshot of the
+source labels. Later label changes on parent, child, source, or fork are
+independent. Labels never grant access: creation and update use the same
+local-human, remote-human, session/descendant, and system-session boundaries as
+the rest of session metadata.
 
 The CLI picker has a **Labels** view, grouping matching sessions across repository
 boundaries and displaying each match as `repo/session`. Each label group preserves

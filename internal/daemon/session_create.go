@@ -58,6 +58,12 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, err
 	}
 
+	// Labels are a complete creation-time set when explicitly supplied. If the
+	// caller omits them and supplies a live ParentID, inherit a by-value snapshot
+	// of the parent's labels during reservation below; an explicit empty slice is
+	// therefore an opt-out for in-process callers and JSON array protocol clients.
+	explicitLabels := opts.Labels != nil
+
 	labels, err := sessionlabel.Normalize(opts.Labels)
 	if err != nil {
 		return SessionState{}, err
@@ -197,6 +203,10 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			if parent.Status == StatusDeleting || parent.IsSoftDeleted() {
 				sm.mu.Unlock()
 				return SessionState{}, fmt.Errorf("parent session %q is being deleted", parent.Name)
+			}
+
+			if !explicitLabels {
+				labels = append([]string{}, parent.Labels...)
 			}
 		}
 	}

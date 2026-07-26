@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -686,6 +687,33 @@ func TestAddToScenarioValidation(t *testing.T) {
 	}, 24, 80)
 	if err == nil || !strings.Contains(err.Error(), "does not support mirror") {
 		t.Fatalf("error = %v, want scenario-add mirror rejection", err)
+	}
+}
+
+func TestAddToScenarioInheritsCurrentOrchestratorLabels(t *testing.T) {
+	sm, orchID := newScenarioOrchestrator(t)
+	repo := initTempGitRepo(t)
+
+	sm.mu.Lock()
+	sm.state.Sessions[orchID].Labels = []string{"strath", "braw"}
+	sm.state.Scenarios["sc-braw"] = &ScenarioState{
+		ID:             "sc-braw",
+		Name:           "strath-neep",
+		OrchestratorID: orchID,
+	}
+	sm.mu.Unlock()
+
+	sess, err := sm.AddToScenario("strath-neep", protocol.ScenarioSessionInput{
+		Name: "canny-new",
+		Repo: repo,
+	}, 24, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"strath", "braw"}
+	if !reflect.DeepEqual(sess.Labels, want) {
+		t.Fatalf("added session labels = %#v, want %#v", sess.Labels, want)
 	}
 }
 
@@ -2822,6 +2850,10 @@ func TestStartScenarioMirrorsScenarioOwnedSource(t *testing.T) {
 	sm, orchID := newMirroredScenarioOrchestrator(t)
 	repo := initScenarioGitRepo(t)
 
+	sm.mu.Lock()
+	sm.state.Sessions[orchID].Labels = []string{"strath", "bothy"}
+	sm.mu.Unlock()
+
 	scenario, err := sm.StartScenario(protocol.ScenarioStartMsg{
 		CallerSessionID: orchID, Name: "strath-owned-source",
 		Sessions: []protocol.ScenarioSessionInput{
@@ -2848,6 +2880,14 @@ func TestStartScenarioMirrorsScenarioOwnedSource(t *testing.T) {
 
 	if !reader.Mirror || reader.MirrorSourceID != source.ID || reader.WorktreePath != source.WorktreePath {
 		t.Fatalf("reader = %+v, want mirror of scenario-owned source %+v", reader, source)
+	}
+
+	if strings.Join(source.Labels, ",") != "strath,bothy" {
+		t.Fatalf("scenario source labels = %#v, want inherited orchestrator labels", source.Labels)
+	}
+
+	if strings.Join(reader.Labels, ",") != "strath,bothy" {
+		t.Fatalf("scenario mirror labels = %#v, want inherited orchestrator labels", reader.Labels)
 	}
 
 	deleted, err := sm.DeleteScenario("strath-owned-source")

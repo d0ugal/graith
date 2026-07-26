@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -47,6 +48,49 @@ func TestNewRejectsInvalidLabelBeforeConnecting(t *testing.T) {
 
 	if err := newCmd.RunE(newCmd, []string{"braw"}); err == nil || !strings.Contains(err.Error(), "must not be empty") {
 		t.Fatalf("new with empty label error = %v", err)
+	}
+}
+
+func TestCreateLabelsFromRawPreservesOmittedVsExplicit(t *testing.T) {
+	tests := map[string]struct {
+		raw         []string
+		flagChanged bool
+		want        []string
+		wantNil     bool
+	}{
+		"unset flag omits labels": {
+			wantNil: true,
+		},
+		"changed flag with values is explicit": {
+			raw:         []string{" Urgent ", "release"},
+			flagChanged: true,
+			want:        []string{"Urgent", "release"},
+		},
+		"programmatic values are explicit": {
+			raw:  []string{"braw"},
+			want: []string{"braw"},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := createLabelsFromRaw(test.raw, test.flagChanged)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if test.wantNil {
+				if got != nil {
+					t.Fatalf("labels = %#v, want nil", got)
+				}
+
+				return
+			}
+
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("labels = %#v, want %#v", got, test.want)
+			}
+		})
 	}
 }
 

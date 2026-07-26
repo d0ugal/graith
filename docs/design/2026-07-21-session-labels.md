@@ -138,11 +138,13 @@ cross repository and host boundaries on both iOS and macOS.
 
 #### Forks and lifecycle
 
-A fork inherits a deep copy of the source's complete label set. This keeps the
-new session in the same workstreams while allowing later independent edits.
-Cross-agent and same-agent forks behave identically. Create does not inherit
-labels merely because a parent is assigned; only the explicit fork operation
-does. In-place agent migration, soft delete, and restore do not rewrite labels.
+A child creation with omitted labels inherits a deep copy of the existing
+parent's complete label set. Explicit creation labels are the child's complete
+set rather than a merge; an explicit empty set opts out. A fork inherits a deep
+copy of the source's complete label set. This keeps child and forked sessions in
+the same workstreams while allowing later independent edits. Cross-agent and
+same-agent forks behave identically. In-place agent migration, soft delete, and
+restore do not rewrite labels.
 
 #### Atomicity and concurrency
 

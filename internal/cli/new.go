@@ -48,7 +48,7 @@ var newCmd = &cobra.Command{
 			return err
 		}
 
-		labels, err := sessionlabel.Normalize(newLabels)
+		labels, err := createLabelsFromRaw(newLabels, cmd.Flags().Changed("label"))
 		if err != nil {
 			return err
 		}
@@ -113,7 +113,7 @@ var newCmd = &cobra.Command{
 
 		_ = c.SendControl("create", protocol.CreateMsg{
 			Name:                name,
-			Labels:              labels,
+			Labels:              createMsgLabels(labels),
 			ParentID:            os.Getenv("GRAITH_SESSION_ID"),
 			Agent:               agent,
 			RepoPath:            repoPath,
@@ -172,6 +172,24 @@ var newCmd = &cobra.Command{
 
 		return runAttachByID(c, info.ID, nil)
 	},
+}
+
+func createLabelsFromRaw(labels []string, flagChanged bool) ([]string, error) {
+	if !flagChanged && len(labels) == 0 {
+		return nil, nil
+	}
+
+	return sessionlabel.Normalize(labels)
+}
+
+func createMsgLabels(labels []string) *[]string {
+	if labels == nil {
+		return nil
+	}
+
+	copied := append([]string{}, labels...)
+
+	return &copied
 }
 
 // codexOptionsToProtocol converts the CLI/config model to the protocol-owned

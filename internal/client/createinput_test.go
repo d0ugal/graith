@@ -611,6 +611,14 @@ func TestCreateSessionModel_LabelsAreOptionalAndSubmitted(t *testing.T) {
 	}
 }
 
+func TestCreateSessionModel_BlankLabelsAreOmitted(t *testing.T) {
+	m := newCreateSessionModel("/tmp/repo", nil, nil, "")
+
+	if got := m.selectedLabels(); got != nil {
+		t.Fatalf("selected labels = %#v, want nil", got)
+	}
+}
+
 func TestCreateSessionModel_LabelsFollowAgentAndShiftTabReturns(t *testing.T) {
 	m := newCreateSessionModel("/tmp/repo", nil, []string{"claude", "codex"}, "claude")
 	m = updateModel(m, keyPress("tab")) // name -> repo

@@ -9,14 +9,22 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-func TestCreatePersistsNormalizedLabelsAcrossReload(t *testing.T) {
+func newLabelTestSessionManager(t *testing.T) *SessionManager {
+	t.Helper()
+
 	cfg := config.Default()
 	cfg.Agents["sleeper"] = config.Agent{
 		NonInteractiveArgs: []string{},
 		Command:            "sleep",
 		Args:               []string{"60"},
 	}
-	sm := newSMWithConfig(t, cfg)
+
+	return newSMWithConfig(t, cfg)
+}
+
+func TestCreatePersistsNormalizedLabelsAcrossReload(t *testing.T) {
+	sm := newLabelTestSessionManager(t)
+	cfg := sm.Config()
 
 	created, err := sm.Create(CreateOpts{
 		Name: "braw-labels", Labels: []string{"  Urgent ", "urgent", "release"},
@@ -43,17 +51,11 @@ func TestCreatePersistsNormalizedLabelsAcrossReload(t *testing.T) {
 	}
 }
 
-func TestParentedCreateDoesNotInheritLabels(t *testing.T) {
-	cfg := config.Default()
-	cfg.Agents["sleeper"] = config.Agent{
-		NonInteractiveArgs: []string{},
-		Command:            "sleep",
-		Args:               []string{"60"},
-	}
-	sm := newSMWithConfig(t, cfg)
+func TestParentedCreateInheritsLabelsByDefault(t *testing.T) {
+	sm := newLabelTestSessionManager(t)
 
 	parent, err := sm.Create(CreateOpts{
-		Name: "ben-labels", Labels: []string{"urgent"}, AgentName: "sleeper", NoRepo: true,
+		Name: "ben-labels", Labels: []string{"strath", "braw"}, AgentName: "sleeper", NoRepo: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -70,8 +72,176 @@ func TestParentedCreateDoesNotInheritLabels(t *testing.T) {
 
 	t.Cleanup(func() { stopAndClosePTY(sm, child.ID) })
 
+	want := []string{"strath", "braw"}
+	if !reflect.DeepEqual(child.Labels, want) {
+		t.Fatalf("parented create labels = %#v, want %#v", child.Labels, want)
+	}
+
+	sm.mu.RLock()
+	parentLabels := sm.state.Sessions[parent.ID].Labels
+	childLabels := sm.state.Sessions[child.ID].Labels
+	labelsAlias := len(parentLabels) > 0 && len(childLabels) > 0 && &parentLabels[0] == &childLabels[0]
+
+	sm.mu.RUnlock()
+
+	if len(parentLabels) == 0 || len(childLabels) == 0 {
+		t.Fatalf("stored labels unexpectedly empty: parent=%#v child=%#v", parentLabels, childLabels)
+	}
+
+	if labelsAlias {
+		t.Fatal("parented create labels alias parent labels")
+	}
+
+	if _, err := sm.UpdateMetadata(parent.ID, SessionUpdate{AddLabels: []string{"ben-only"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := sm.UpdateMetadata(child.ID, SessionUpdate{AddLabels: []string{"bairn-only"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	parentAfter, _ := sm.Get(parent.ID)
+	childAfter, _ := sm.Get(child.ID)
+
+	if !reflect.DeepEqual(parentAfter.Labels, []string{"strath", "braw", "ben-only"}) {
+		t.Fatalf("parent labels after independent update = %#v", parentAfter.Labels)
+	}
+
+	if !reflect.DeepEqual(childAfter.Labels, []string{"strath", "braw", "bairn-only"}) {
+		t.Fatalf("child labels after independent update = %#v", childAfter.Labels)
+	}
+}
+
+func TestParentedCreateFromUnlabelledParentStaysUnlabelled(t *testing.T) {
+	sm := newLabelTestSessionManager(t)
+
+	parent, err := sm.Create(CreateOpts{
+		Name: "ben-empty-labels", AgentName: "sleeper", NoRepo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, parent.ID) })
+
+	child, err := sm.Create(CreateOpts{
+		Name: "bairn-empty-labels", ParentID: parent.ID, AgentName: "sleeper", NoRepo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, child.ID) })
+
 	if child.Labels == nil || len(child.Labels) != 0 {
 		t.Fatalf("parented create labels = %#v, want explicit empty set", child.Labels)
+	}
+}
+
+func TestParentedCreateExplicitLabelsOverrideInheritance(t *testing.T) {
+	sm := newLabelTestSessionManager(t)
+
+	parent, err := sm.Create(CreateOpts{
+		Name: "ben-override-labels", Labels: []string{"strath"}, AgentName: "sleeper", NoRepo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, parent.ID) })
+
+	child, err := sm.Create(CreateOpts{
+		Name: "bairn-override-labels", ParentID: parent.ID,
+		Labels: []string{"bothy"}, AgentName: "sleeper", NoRepo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, child.ID) })
+
+	if !reflect.DeepEqual(child.Labels, []string{"bothy"}) {
+		t.Fatalf("explicit child labels = %#v, want override set", child.Labels)
+	}
+}
+
+func TestParentedCreateExplicitEmptyLabelsOptOutOfInheritance(t *testing.T) {
+	sm := newLabelTestSessionManager(t)
+
+	parent, err := sm.Create(CreateOpts{
+		Name: "ben-optout-labels", Labels: []string{"strath"}, AgentName: "sleeper", NoRepo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, parent.ID) })
+
+	child, err := sm.Create(CreateOpts{
+		Name: "bairn-optout-labels", ParentID: parent.ID,
+		Labels: []string{}, AgentName: "sleeper", NoRepo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, child.ID) })
+
+	if child.Labels == nil || len(child.Labels) != 0 {
+		t.Fatalf("explicit empty child labels = %#v, want explicit empty set", child.Labels)
+	}
+}
+
+func TestCreateWithoutParentDefaultsToEmptyLabels(t *testing.T) {
+	sm := newLabelTestSessionManager(t)
+
+	created, err := sm.Create(CreateOpts{
+		Name: "braw-empty-labels", AgentName: "sleeper", NoRepo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, created.ID) })
+
+	if created.Labels == nil || len(created.Labels) != 0 {
+		t.Fatalf("unparented create labels = %#v, want explicit empty set", created.Labels)
+	}
+}
+
+func TestTriggerCreatedSessionInheritsParentLabels(t *testing.T) {
+	repo := initTempGitRepo(t)
+
+	cfg := config.Default()
+	cfg.FetchOnCreate = false
+	cfg.DefaultAgent = "sleeper"
+	cfg.Agents["sleeper"] = config.Agent{
+		NonInteractiveArgs: []string{},
+		Command:            "sleep",
+		Args:               []string{"60"},
+	}
+	sm := newSMWithConfig(t, cfg)
+
+	sm.mu.Lock()
+	sm.state.Sessions["orch-id"] = &SessionState{
+		ID: "orch-id", Name: OrchestratorSessionName,
+		SystemKind: SystemKindOrchestrator, Status: StatusRunning,
+		Labels: []string{"strath", "thrawn"},
+	}
+	sm.mu.Unlock()
+
+	created, err := sm.createTriggerSession(createTriggerReq{
+		name: "trigger-bairn", agent: "sleeper", repo: repo,
+		parentID: "orch-id", triggerName: "thrawn",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, created.ID) })
+
+	if !reflect.DeepEqual(created.Labels, []string{"strath", "thrawn"}) {
+		t.Fatalf("trigger-created labels = %#v, want inherited parent labels", created.Labels)
 	}
 }
 

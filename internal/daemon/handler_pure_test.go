@@ -15,9 +15,10 @@ import (
 // Every non-Codex CreateMsg field is set to a distinctive value and asserted to
 // land on the right CreateOpts field, with agentName/rows/cols passed through.
 func TestCreateOptsFromMsgMapsEveryField(t *testing.T) {
+	labels := []string{"urgent", "release"}
 	c := protocol.CreateMsg{
 		Name:                "braw",
-		Labels:              []string{"urgent", "release"},
+		Labels:              &labels,
 		ParentID:            "ben-id",
 		Agent:               "ignored-here", // agentName is resolved by the caller
 		RepoPath:            "/croft/graith",
@@ -76,6 +77,20 @@ func TestCreateOptsFromMsgNilCodex(t *testing.T) {
 
 	if got.Codex != (config.CodexOptions{}) {
 		t.Errorf("nil Codex should map to zero CodexOptions, got %+v", got.Codex)
+	}
+}
+
+func TestCreateOptsFromMsgPreservesLabelPresence(t *testing.T) {
+	omitted := createOptsFromMsg(protocol.CreateMsg{Name: "braw"}, "claude", 24, 80)
+	if omitted.Labels != nil {
+		t.Fatalf("omitted labels = %#v, want nil so Create can inherit", omitted.Labels)
+	}
+
+	labels := []string{}
+	explicitEmpty := createOptsFromMsg(protocol.CreateMsg{Name: "bairn", Labels: &labels}, "claude", 24, 80)
+
+	if explicitEmpty.Labels == nil || len(explicitEmpty.Labels) != 0 {
+		t.Fatalf("explicit empty labels = %#v, want non-nil empty override", explicitEmpty.Labels)
 	}
 }
 

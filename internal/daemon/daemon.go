@@ -1405,8 +1405,12 @@ type CreateOpts struct {
 	// returns (e.g. scenario reservation, where a placeholder ID would
 	// otherwise differ from the final session ID) supply it here. When empty,
 	// Create generates the ID as before.
-	ID         string
-	Name       string
+	ID   string
+	Name string
+	// Labels is the complete creation-time label set when non-nil. When nil and
+	// ParentID names an existing live parent, Create inherits a by-value snapshot
+	// of the parent's labels. Pass an explicit empty slice to create an
+	// unlabelled child under a labelled parent.
 	Labels     []string
 	AgentName  string
 	RepoPath   string

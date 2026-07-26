@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -38,6 +39,79 @@ func TestEncodeDecodeControl(t *testing.T) {
 
 	if got.Cwd != "/home/user/croft" {
 		t.Errorf("Cwd = %q", got.Cwd)
+	}
+}
+
+func TestCreateMsgLabelsWirePresence(t *testing.T) {
+	tests := map[string]struct {
+		input     CreateMsg
+		wantJSON  string
+		wantOmit  string
+		wantNil   bool
+		wantLabel []string
+	}{
+		"nil labels are omitted and decode nil": {
+			input:    CreateMsg{Name: "bairn", Agent: "codex", RepoPath: "/croft"},
+			wantOmit: `"labels"`,
+			wantNil:  true,
+		},
+		"empty labels encode explicit empty array": {
+			input:     CreateMsg{Name: "bairn", Labels: &[]string{}, Agent: "codex", RepoPath: "/croft"},
+			wantJSON:  `"labels":[]`,
+			wantLabel: []string{},
+		},
+		"non-empty labels encode explicit set": {
+			input:     CreateMsg{Name: "bairn", Labels: &[]string{"strath"}, Agent: "codex", RepoPath: "/croft"},
+			wantJSON:  `"labels":["strath"]`,
+			wantLabel: []string{"strath"},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			data, err := json.Marshal(test.input)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+
+			if test.wantJSON != "" && !strings.Contains(string(data), test.wantJSON) {
+				t.Fatalf("CreateMsg JSON = %s, want it to contain %s", data, test.wantJSON)
+			}
+
+			if test.wantOmit != "" && strings.Contains(string(data), test.wantOmit) {
+				t.Fatalf("CreateMsg JSON = %s, want it to omit %s", data, test.wantOmit)
+			}
+
+			var got CreateMsg
+			if err := json.Unmarshal(data, &got); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+
+			if test.wantNil {
+				if got.Labels != nil {
+					t.Fatalf("Labels = %#v, want nil", got.Labels)
+				}
+
+				return
+			}
+
+			if got.Labels == nil {
+				t.Fatalf("Labels = nil, want %#v", test.wantLabel)
+			}
+
+			if !reflect.DeepEqual(*got.Labels, test.wantLabel) {
+				t.Fatalf("Labels = %#v, want %#v", *got.Labels, test.wantLabel)
+			}
+		})
+	}
+
+	var omitted CreateMsg
+	if err := json.Unmarshal([]byte(`{"name":"bairn","agent":"codex","repo_path":"/croft"}`), &omitted); err != nil {
+		t.Fatalf("Unmarshal omitted labels: %v", err)
+	}
+
+	if omitted.Labels != nil {
+		t.Fatalf("omitted labels decode to %#v, want nil", omitted.Labels)
 	}
 }
 

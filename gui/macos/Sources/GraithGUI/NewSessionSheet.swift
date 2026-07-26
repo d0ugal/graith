@@ -345,7 +345,7 @@ struct NewSessionSheet: View {
             repoPath: repoPath,
             model: model,
             prompt: prompt,
-            labels: FleetModel.parseLabels(labels),
+            labels: FleetModel.parseCreateLabels(labels),
             base: base,
             inPlace: inPlace,
             agentHooks: agentHooks,

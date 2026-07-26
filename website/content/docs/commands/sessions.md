@@ -36,6 +36,10 @@ Create a new agent session.
 is unavailable (e.g. a biometric agent that can't sign non-interactively) or when
 you're offline.
 
+When an existing session creates a child session, omitted labels inherit from
+the parent by default. Supplying `--label` sets the child's complete label set
+instead of merging with the inherited labels.
+
 In a repository with no commits, the default base is its unborn `HEAD` branch.
 Graith creates an empty orphan worktree on the generated session branch, leaving
 the source checkout and its unborn branch unchanged. An explicit `--base` must
@@ -196,7 +200,7 @@ subtree; protected descendants must be handled explicitly first.
 
 ## `gr fork <source-session> <new-name>`
 
-Fork a session. Creates a new worktree, branch, and agent process while the original keeps running. If the agent has `fork_args` configured, the new agent inherits the source's conversation history. A fork also inherits a snapshot of every source label; later label changes on either session are independent. Creating a session with `--parent` does not inherit labels.
+Fork a session. Creates a new worktree, branch, and agent process while the original keeps running. If the agent has `fork_args` configured, the new agent inherits the source's conversation history. A fork also inherits a snapshot of every source label; later label changes on either session are independent.
 
 With `--agent <target>` this becomes a **cross-agent fork**: the source's
 conversation is rendered to a neutral context file to seed a *different* agent

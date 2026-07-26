@@ -165,6 +165,11 @@ struct FleetConnectedTests {
         #expect(FleetModel.parseLabels("braw,,canny") == ["braw", "", "canny"])
     }
 
+    @Test func parseCreateLabelsOmitsBlankFieldForInheritance() {
+        #expect(FleetModel.parseCreateLabels("  ") == nil)
+        #expect(FleetModel.parseCreateLabels(" Urgent, release ") == ["Urgent", "release"])
+    }
+
     @Test func createSessionUnknownHostFails() async {
         let (fleet, _) = makeFleetWithRemote()
         await fleet.connectAll()

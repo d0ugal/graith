@@ -148,7 +148,7 @@ struct NewSessionView: View {
         defer { submitting = false }
         let req = CreateRequest(
             name: name.trimmingCharacters(in: .whitespaces),
-            labels: FleetModel.parseLabels(labels),
+            labels: FleetModel.parseCreateLabels(labels),
             agent: agent,
             repoPath: selectedRepo,
             base: trimmedBase.isEmpty ? nil : trimmedBase,

@@ -250,7 +250,7 @@ func (l *attachLoop) overlayCreate(nc attachConn, overlayResult *client.OverlayR
 		Name:     overlayResult.CreateName,
 		RepoPath: overlayResult.CreateRepoPath,
 		Agent:    overlayResult.CreateAgent,
-		Labels:   overlayResult.CreateLabels,
+		Labels:   createMsgLabels(overlayResult.CreateLabels),
 	})
 
 	createResp, err := nc.ReadControlResponse()
@@ -475,7 +475,7 @@ func (l *attachLoop) onNewSession() (bool, error) {
 		Name:     name,
 		RepoPath: repoPath,
 		Agent:    agent,
-		Labels:   labels,
+		Labels:   createMsgLabels(labels),
 	})
 
 	createResp, err := nc.ReadControlResponse()

@@ -87,21 +87,24 @@ type CodexOptions struct {
 }
 
 type CreateMsg struct {
-	Name                string   `json:"name"`
-	Labels              []string `json:"labels,omitempty"`
-	ParentID            string   `json:"parent_id,omitempty"`
-	Agent               string   `json:"agent"`
-	RepoPath            string   `json:"repo_path"`
-	Base                string   `json:"base,omitempty"`
-	Prompt              string   `json:"prompt,omitempty"`
-	Model               string   `json:"model,omitempty"`
-	NoRepo              bool     `json:"no_repo,omitempty"`
-	Mirror              string   `json:"mirror,omitempty"`
-	AgentHooks          bool     `json:"agent_hooks,omitempty"`
-	InPlace             bool     `json:"in_place,omitempty"`
-	AllowConcurrent     bool     `json:"allow_concurrent,omitempty"`
-	SkipModelValidation bool     `json:"skip_model_validation,omitempty"`
-	Headless            bool     `json:"headless,omitempty"`
+	Name string `json:"name"`
+	// Labels is the complete child label set when present. When omitted, the
+	// daemon may inherit labels from ParentID/the authenticated parent; an
+	// explicit empty JSON array requests an unlabelled child.
+	Labels              *[]string `json:"labels,omitempty"`
+	ParentID            string    `json:"parent_id,omitempty"`
+	Agent               string    `json:"agent"`
+	RepoPath            string    `json:"repo_path"`
+	Base                string    `json:"base,omitempty"`
+	Prompt              string    `json:"prompt,omitempty"`
+	Model               string    `json:"model,omitempty"`
+	NoRepo              bool      `json:"no_repo,omitempty"`
+	Mirror              string    `json:"mirror,omitempty"`
+	AgentHooks          bool      `json:"agent_hooks,omitempty"`
+	InPlace             bool      `json:"in_place,omitempty"`
+	AllowConcurrent     bool      `json:"allow_concurrent,omitempty"`
+	SkipModelValidation bool      `json:"skip_model_validation,omitempty"`
+	Headless            bool      `json:"headless,omitempty"`
 	// NoFetch skips the `git fetch origin` that normally runs before the
 	// worktree is created (issue #1012). Lets sessions be created from local
 	// repo state when SSH auth is unavailable (Secretive/biometric, offline).
