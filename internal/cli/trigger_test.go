@@ -69,10 +69,36 @@ func TestRenderTriggerStatus(t *testing.T) {
 		Name: "canny", Source: "watch", Action: "command", WatchScope: "repo:/croft",
 		Enabled: true, Bindings: 2, Degraded: "watcher.Add failed",
 		DegradedRetryCount: 2, DegradedRetryAt: "2026-07-15T10:00:00Z", LastError: "boom",
+		BindingsDetail: []protocol.TriggerBindingDetail{
+			{
+				SessionID:      "braw",
+				SessionName:    "braw-runner",
+				WorktreePath:   "/work/croft-a",
+				State:          "debouncing",
+				PendingChanges: 3,
+				DebounceUntil:  "2026-07-15T09:59:00Z",
+			},
+			{
+				SessionID:          "dreich",
+				SessionName:        "dreich-runner",
+				WorktreePath:       "/work/croft-a",
+				State:              "degraded",
+				LastResult:         "skipped",
+				LastError:          "action already\nin flight",
+				Degraded:           "watcher.Add failed",
+				DegradedRetryCount: 2,
+				DegradedRetryAt:    "2026-07-15T10:00:00Z",
+			},
+		},
 	})
 	out = buf.String()
 
-	for _, want := range []string{"Watch: repo:/croft", "2 live binding", "Degraded:", "Next retry: 2026-07-15T10:00:00Z", "2 attempt", "Last error: boom"} {
+	for _, want := range []string{
+		"Watch: repo:/croft", "2 live binding", "SESSION", "WORKTREE",
+		"braw-runner (braw)", "/work/croft-a", "debouncing", "3", "2026-07-15T09:59:00Z",
+		"dreich-runner (dreich)", "skipped: action already in flight", "degraded: watcher.Add failed", "2026-07-15T10:00:00Z (2)",
+		"Degraded:", "Next retry: 2026-07-15T10:00:00Z", "2 attempt", "Last error: boom",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("watch status output missing %q:\n%s", want, out)
 		}

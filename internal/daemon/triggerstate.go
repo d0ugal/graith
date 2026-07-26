@@ -50,7 +50,7 @@ type triggerState struct {
 // watchBinding is one (watch trigger, bound source session) pair. Not persisted:
 // rebuilt from live sessions on reconcile.
 type watchBinding struct {
-	bmu                sync.Mutex // guards changed/debounce/inFlight (per-binding)
+	bmu                sync.Mutex // guards changed/debounce/inFlight/status fields (per-binding)
 	triggerName        string
 	sessionID          string
 	worktree           string
@@ -59,10 +59,15 @@ type watchBinding struct {
 	watcher            *fsnotify.Watcher
 	debounce           *time.Timer
 	changed            map[string]bool // coalesced changed paths since last fire
-	inFlight           bool            // command action in flight for this binding
+	inFlight           bool            // broad serialisation guard for this binding
+	activeRuns         int             // actions executing after slot/rate-limit checks, for status reporting
 	degraded           string          // watcher failure/limit reason ("" once healthy)
 	retryCount         int             // consecutive degraded (re)creation attempts (drives backoff)
 	nextRetryAt        time.Time       // when a degraded binding is next retried (zero when healthy)
+	debounceUntil      time.Time       // deadline for the currently armed debounce timer
+	lastRun            time.Time       // last per-binding fire attempt/result time
+	lastResult         string          // concise last result: exit 0, published, skipped, rate-limited, etc.
+	lastError          string          // concise last error, never captured command output
 	watchPaths         map[string]int  // path -> estimated descriptor cost
 	canceled           bool            // set on teardown; a pending debounce callback checks it
 	cancel             func()          // stops the binding's event goroutine
@@ -77,14 +82,14 @@ type gcxBinding struct {
 	onCall      bool
 }
 
-// actionInFlight reports whether a serialised action (command or
-// ensure-reviewer) is currently executing for this binding. Reconcile consults
-// it to avoid recreating a binding out from under an in-flight reserve→create.
+// actionInFlight reports whether an action is currently executing or reserved
+// for this binding. Reconcile consults it to avoid recreating a binding out
+// from under a running action before the binding's visible result is recorded.
 func (b *watchBinding) actionInFlight() bool {
 	b.bmu.Lock()
 	defer b.bmu.Unlock()
 
-	return b.inFlight
+	return b.inFlight || b.activeRuns > 0
 }
 
 func newTriggerState() *triggerState {

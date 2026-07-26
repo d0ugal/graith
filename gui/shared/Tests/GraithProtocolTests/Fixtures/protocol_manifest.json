@@ -5334,6 +5334,103 @@
       ]
     },
     {
+      "name": "TriggerBindingDetail",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "session_name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "worktree_path",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "state",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "pending_changes",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "debounce_until",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "action_in_flight",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "last_run",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "last_result",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "last_error",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "degraded",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "degraded_retry_count",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "degraded_retry_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
       "name": "TriggerConfig",
       "swift": "na",
       "fields": [
@@ -5645,6 +5742,17 @@
           "name": "degraded_retry_at",
           "type": {
             "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "bindings_detail",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "TriggerBindingDetail"
+            }
           },
           "optional": true
         }

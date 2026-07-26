@@ -283,7 +283,7 @@ func TestFileWatchBudgetDegradesAndReleases(t *testing.T) {
 	sm.watchAdd = func(_ *fsnotify.Watcher, _ string) error { return nil }
 	sess := watchSession{id: "src", name: "braw", worktree: root}
 	ctx := context.Background()
-	sm.createBinding(ctx, &trig, sess, time.Now(), nil, "", nil)
+	sm.createBinding(ctx, &trig, sess, time.Now(), nil, "", nil, watchBindingHistory{})
 
 	b := sm.triggers.bindings[bindingKey(trig.Name, sess.id)]
 	if b == nil || b.degraded == "" {
@@ -504,6 +504,13 @@ func TestReconcileBindings_HotReload(t *testing.T) {
 	// A real config reload swaps sm.cfg for a fresh *config.Config under the
 	// lock (a new WatchConfig), so mimic that rather than mutating the shared
 	// struct in place (which would race the running binding goroutine).
+	wantLastRun := time.Date(2026, 7, 26, 10, 0, 0, 0, time.UTC)
+
+	first.bmu.Lock()
+	first.lastRun = wantLastRun
+	first.lastResult = "exit 0"
+	first.bmu.Unlock()
+
 	reloaded := config.TriggerConfig{
 		Name:   "bide",
 		Watch:  &config.WatchConfig{Role: "implementer", Paths: []string{"**/*.md"}, Debounce: "200ms"},
@@ -533,6 +540,15 @@ func TestReconcileBindings_HotReload(t *testing.T) {
 
 	if want := triggerFingerprint(&reloaded); second.fingerprint != want {
 		t.Fatalf("binding fingerprint = %q, want %q", second.fingerprint, want)
+	}
+
+	second.bmu.Lock()
+	lastRun := second.lastRun
+	lastResult := second.lastResult
+	second.bmu.Unlock()
+
+	if lastRun != wantLastRun || lastResult != "exit 0" {
+		t.Fatalf("recreated binding history = %s/%q, want %s/exit 0", lastRun.Format(time.RFC3339), lastResult, wantLastRun.Format(time.RFC3339))
 	}
 
 	sm.teardownAllBindings()
@@ -1247,7 +1263,12 @@ func TestRecordDegradedBinding_Recovers(t *testing.T) {
 
 	t0 := time.Now()
 	builtinFP := watchBuiltinFingerprint(sm.cfg.TriggersRuntime.WatchBuiltinIgnores())
-	sm.recordDegradedBinding(key, &sm.cfg.Triggers[0], sess, "fsnotify.NewWatcher failed: too many open files", 1, t0, builtinFP, nil)
+	history := watchBindingHistory{
+		lastRun:    t0.Add(-time.Minute),
+		lastResult: "exit 1",
+		lastError:  "command exited 1",
+	}
+	sm.recordDegradedBinding(key, &sm.cfg.Triggers[0], sess, "fsnotify.NewWatcher failed: too many open files", 1, t0, builtinFP, nil, history)
 
 	b := sm.triggers.bindings[key]
 	if b == nil || b.degraded == "" || b.watcher != nil || b.cancel != nil {
@@ -1256,6 +1277,12 @@ func TestRecordDegradedBinding_Recovers(t *testing.T) {
 
 	if b.retryCount != 1 || !b.nextRetryAt.After(t0) {
 		t.Fatalf("expected backoff scheduled, got count=%d next=%v", b.retryCount, b.nextRetryAt)
+	}
+
+	if b.lastRun != history.lastRun || b.lastResult != history.lastResult || b.lastError != history.lastError {
+		t.Fatalf("degraded binding history = %s/%q/%q, want %s/%q/%q",
+			b.lastRun.Format(time.RFC3339), b.lastResult, b.lastError,
+			history.lastRun.Format(time.RFC3339), history.lastResult, history.lastError)
 	}
 
 	// Before the backoff, reconcile must not thrash.
@@ -1271,6 +1298,12 @@ func TestRecordDegradedBinding_Recovers(t *testing.T) {
 	healthy := sm.triggers.bindings[key]
 	if healthy == nil || healthy.degraded != "" || healthy.watcher == nil || healthy.cancel == nil {
 		t.Fatalf("expected recovered live binding, got %+v", healthy)
+	}
+
+	if healthy.lastRun != history.lastRun || healthy.lastResult != history.lastResult || healthy.lastError != history.lastError {
+		t.Fatalf("recovered binding history = %s/%q/%q, want %s/%q/%q",
+			healthy.lastRun.Format(time.RFC3339), healthy.lastResult, healthy.lastError,
+			history.lastRun.Format(time.RFC3339), history.lastResult, history.lastError)
 	}
 
 	sm.teardownAllBindings()

@@ -879,28 +879,119 @@ func idleSeconds(d time.Duration) int {
 
 // triggerNow is a small helper so watch fires share the schedule fire path's
 // run recording.
-func (sm *SessionManager) fireWatch(ctx context.Context, t *config.TriggerConfig, fc fireContext) {
+func (sm *SessionManager) fireWatch(ctx context.Context, t *config.TriggerConfig, fc fireContext, b *watchBinding) {
 	// Per-binding rate-limit backstop.
 	n, win := t.Policy.RateLimitParsed()
 	if sm.rateLimited(bindingKey(t.Name, fc.sessionID), n, win, time.Now()) {
+		recordBindingResult(b, time.Now(), "rate-limited", "")
 		sm.log.Info("trigger: watch fire rate-limited", "trigger", t.Name, "session", fc.sessionID)
+
 		return
 	}
 
 	// Daemon-wide concurrency cap.
 	if !sm.acquireSlot() {
+		recordBindingResult(b, time.Now(), "skipped", "max_concurrent reached")
 		sm.log.Info("trigger: max_concurrent reached, skipping watch fire", "trigger", t.Name)
+
 		return
 	}
 	defer sm.releaseSlot()
 
+	markBindingActionStart(b)
+
+	actionFinished := false
+	defer func() {
+		if !actionFinished {
+			markBindingActionDone(b)
+		}
+	}()
+
 	result, err := sm.fireAction(ctx, t, fc)
-	sm.recordTriggerRun(t.Name, TriggerRun{ScheduledAt: time.Now(), SourceSessionID: fc.sessionID, Cause: causeFile, Result: result})
+	lastRun := time.Now()
+	sm.recordTriggerRun(t.Name, TriggerRun{ScheduledAt: lastRun, SourceSessionID: fc.sessionID, Cause: causeFile, Result: result})
 
 	if err != nil {
+		finishBindingAction(b, lastRun, result, err.Error())
+
+		actionFinished = true
+
 		sm.recordTriggerError(t.Name, err.Error())
 		sm.log.Warn("trigger: watch action failed", "trigger", t.Name, "err", err)
+	} else {
+		finishBindingAction(b, lastRun, result, "")
+
+		actionFinished = true
 	}
 
 	sm.notifyOnComplete(t, fc, err)
+}
+
+func markBindingActionStart(b *watchBinding) {
+	if b == nil {
+		return
+	}
+
+	b.bmu.Lock()
+	b.activeRuns++
+	b.bmu.Unlock()
+}
+
+func markBindingActionDone(b *watchBinding) {
+	if b == nil {
+		return
+	}
+
+	b.bmu.Lock()
+	if b.activeRuns > 0 {
+		b.activeRuns--
+	}
+	b.bmu.Unlock()
+}
+
+func finishBindingAction(b *watchBinding, at time.Time, result, errMsg string) {
+	if b == nil {
+		return
+	}
+
+	result = defaultBindingResult(result, errMsg)
+
+	b.bmu.Lock()
+	if b.activeRuns > 0 {
+		b.activeRuns--
+	}
+
+	recordBindingResultLocked(b, at, result, errMsg)
+	b.bmu.Unlock()
+}
+
+func recordBindingResult(b *watchBinding, at time.Time, result, errMsg string) {
+	if b == nil {
+		return
+	}
+
+	result = defaultBindingResult(result, errMsg)
+
+	b.bmu.Lock()
+	defer b.bmu.Unlock()
+
+	recordBindingResultLocked(b, at, result, errMsg)
+}
+
+func recordBindingResultLocked(b *watchBinding, at time.Time, result, errMsg string) {
+	b.lastRun = at
+	b.lastResult = result
+	b.lastError = errMsg
+}
+
+func defaultBindingResult(result, errMsg string) string {
+	if result != "" {
+		return result
+	}
+
+	if errMsg != "" {
+		return "failed"
+	}
+
+	return "skipped"
 }

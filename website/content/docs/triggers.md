@@ -79,6 +79,10 @@ debounce = "30s"             # quiet-window; lower for fast commands
   session name — binding to matching running writable sessions and watching
   their worktrees. Mirror sessions are read-only and share another session's
   worktree, so they are not bound directly.
+- A `repo` selector binds to every running writable session for that repository.
+  If multiple writable sessions share a worktree, `gr trigger status <name>`
+  shows multiple binding rows with the same worktree path, so duplicate activity
+  is explicit.
 - A `role` selector matches any running writable session with that scenario
   role. Select the role of the writable source, not a mirror that shares its
   worktree. This is how a scenario ships its own automation: a
@@ -101,6 +105,43 @@ debounce = "30s"             # quiet-window; lower for fast commands
   20s, … capped at 5m), recovering on its own once the limit clears — no restart
   needed. `gr trigger status <name>` and `gr doctor` surface the degraded state and
   next retry time.
+- `gr trigger status <name>` keeps the aggregate live binding count and, for
+  watch triggers, prints each live binding with session ID/name, worktree, state
+  (`idle`, `debouncing`, `running`, `rate-limited`, `skipped`, `failed`, or
+  `degraded`), pending matching change count, debounce deadline, in-flight flag,
+  last per-binding result/error, and degraded retry details. `--json` exposes the
+  same rows as `trigger.bindings_detail`. These per-binding rows are live daemon
+  state and are rebuilt on daemon restart; the trigger-wide run history/result
+  remains persisted.
+
+Repository selector with multiple sessions:
+
+```toml
+[[trigger]]
+name = "graith-tests"
+
+[trigger.watch]
+repo     = "~/Code/graith"
+paths    = ["**/*.go"]
+debounce = "10s"
+
+[trigger.action]
+type    = "command"
+command = "go test ./..."
+
+[trigger.action.deliver]
+topic = "ci-reports"
+```
+
+If `review-a` and `review-b` are both running in `~/Code/graith`, status shows
+one binding per session, for example:
+
+```text
+Watch: repo:/Users/alice/Code/graith (2 live binding(s))
+SESSION              WORKTREE                                  STATE       PENDING  DEBOUNCE              IN-FLIGHT  LAST RUN              RESULT  RETRY
+review-a (a1b2c3d4)  /Users/alice/.graith/worktrees/.../a1b2c3  debouncing  4        2026-07-26T09:30:10Z  -          -                     -       -
+review-b (b2c3d4e5)  /Users/alice/.graith/worktrees/.../b2c3d4  idle        0        -                     -          2026-07-26T09:25:00Z  exit 0  -
+```
 
 ### GCX (Grafana Cloud events)
 
@@ -482,7 +523,7 @@ Triggers are defined in config; `gr trigger` observes and controls them.
 
 ```bash
 gr trigger list                 # all triggers: source, action, cadence/scope, state
-gr trigger status <name>        # next fire/poll, last result/error, live bindings
+gr trigger status <name>        # next fire/poll, last result/error, watch binding details
 gr trigger run <name>           # fire a schedule now, or retry a failed completion action
 gr trigger pause <name>         # pause (persists across restart)
 gr trigger resume <name>

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/d0ugal/graith/internal/store"
 )
 
@@ -386,6 +387,12 @@ func TestTriggerListAndStatus(t *testing.T) {
 		t.Fatalf("list = %d", len(list))
 	}
 
+	for _, rec := range list {
+		if rec.BindingsDetail != nil {
+			t.Fatalf("TriggerList included binding details for %s: %+v", rec.Name, rec.BindingsDetail)
+		}
+	}
+
 	rec, err := sm.TriggerStatus("braw")
 	if err != nil {
 		t.Fatal(err)
@@ -407,6 +414,176 @@ func TestTriggerListAndStatus(t *testing.T) {
 
 	if _, err := sm.TriggerStatus("ghost"); err == nil {
 		t.Error("expected error for unknown trigger")
+	}
+}
+
+func TestTriggerStatusWatchBindingDetails(t *testing.T) {
+	trig := config.TriggerConfig{
+		Name:   "watch-croft",
+		Watch:  &config.WatchConfig{Repo: "/repo/croft"},
+		Action: config.ActionConfig{Type: config.ActionCommand, Command: "go test ./...", Deliver: config.DeliverConfig{Topic: "t"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	now := time.Date(2026, 7, 26, 9, 0, 0, 0, time.UTC)
+
+	sessions := map[string]struct {
+		name     string
+		worktree string
+	}{
+		"braw":    {name: "braw", worktree: "/work/croft-a"},
+		"canny":   {name: "canny", worktree: "/work/croft-b"},
+		"dreich":  {name: "dreich", worktree: "/work/shared"},
+		"blether": {name: "blether", worktree: "/work/shared"},
+		"bothy":   {name: "bothy", worktree: "/work/croft-e"},
+		"bairn":   {name: "bairn", worktree: "/work/croft-f"},
+		"thrawn":  {name: "thrawn", worktree: "/work/croft-g"},
+		"strath":  {name: "strath", worktree: "/work/removed"},
+		"glaikit": {name: "glaikit", worktree: "/work/croft-h"},
+	}
+	for id, sess := range sessions {
+		sm.state.Sessions[id] = &SessionState{ID: id, Name: sess.name, Status: StatusRunning, RepoPath: "/repo/croft", WorktreePath: sess.worktree}
+	}
+
+	bindings := map[string]*watchBinding{
+		"braw": {
+			triggerName: trig.Name,
+			sessionID:   "braw",
+			worktree:    sessions["braw"].worktree,
+			changed:     make(map[string]bool),
+		},
+		"canny": {
+			triggerName:   trig.Name,
+			sessionID:     "canny",
+			worktree:      sessions["canny"].worktree,
+			changed:       map[string]bool{"main.go": true, "cli.go": true},
+			debounceUntil: now.Add(30 * time.Second),
+		},
+		"dreich": {
+			triggerName: trig.Name,
+			sessionID:   "dreich",
+			worktree:    sessions["dreich"].worktree,
+			changed:     make(map[string]bool),
+			activeRuns:  1,
+		},
+		"blether": {
+			triggerName: trig.Name,
+			sessionID:   "blether",
+			worktree:    sessions["blether"].worktree,
+			changed:     make(map[string]bool),
+			lastRun:     now.Add(-2 * time.Minute),
+			lastResult:  "exit 0",
+		},
+		"bothy": {
+			triggerName: trig.Name,
+			sessionID:   "bothy",
+			worktree:    sessions["bothy"].worktree,
+			changed:     make(map[string]bool),
+			lastRun:     now.Add(-time.Minute),
+			lastResult:  "exit 1",
+			lastError:   "command exited 1",
+		},
+		"bairn": {
+			triggerName: trig.Name,
+			sessionID:   "bairn",
+			worktree:    sessions["bairn"].worktree,
+			changed:     make(map[string]bool),
+			lastRun:     now.Add(-45 * time.Second),
+			lastResult:  "rate-limited",
+		},
+		"thrawn": {
+			triggerName: trig.Name,
+			sessionID:   "thrawn",
+			worktree:    sessions["thrawn"].worktree,
+			changed:     map[string]bool{"pkg/new.go": true},
+			degraded:    "watcher.Add failed: too many open files",
+			retryCount:  3,
+			nextRetryAt: now.Add(5 * time.Minute),
+			lastRun:     now.Add(-30 * time.Second),
+			lastResult:  "skipped",
+			lastError:   "action already in flight",
+		},
+		"glaikit": {
+			triggerName: trig.Name,
+			sessionID:   "glaikit",
+			worktree:    sessions["glaikit"].worktree,
+			changed:     make(map[string]bool),
+			lastRun:     now.Add(-15 * time.Second),
+			lastResult:  "skipped",
+			lastError:   "max_concurrent reached",
+		},
+		"strath": {
+			triggerName: trig.Name,
+			sessionID:   "strath",
+			worktree:    sessions["strath"].worktree,
+			changed:     make(map[string]bool),
+		},
+	}
+
+	sm.triggers.mu.Lock()
+	for id, binding := range bindings {
+		sm.triggers.bindings[bindingKey(trig.Name, id)] = binding
+	}
+	sm.triggers.mu.Unlock()
+	sm.teardownBinding(bindingKey(trig.Name, "strath"))
+
+	rec, err := sm.TriggerStatus(trig.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if rec.Bindings != 8 || len(rec.BindingsDetail) != 8 {
+		t.Fatalf("bindings = %d details = %d, want 8 each: %+v", rec.Bindings, len(rec.BindingsDetail), rec.BindingsDetail)
+	}
+
+	byID := make(map[string]protocol.TriggerBindingDetail, len(rec.BindingsDetail))
+	for _, detail := range rec.BindingsDetail {
+		byID[detail.SessionID] = detail
+	}
+
+	if _, ok := byID["strath"]; ok {
+		t.Fatalf("removed binding still reported: %+v", byID["strath"])
+	}
+
+	tests := map[string]struct {
+		wantState   string
+		wantPending int
+		wantResult  string
+		wantError   string
+	}{
+		"braw":    {wantState: "idle"},
+		"canny":   {wantState: "debouncing", wantPending: 2},
+		"dreich":  {wantState: "running"},
+		"blether": {wantState: "idle", wantResult: "exit 0"},
+		"bothy":   {wantState: "failed", wantResult: "exit 1", wantError: "command exited 1"},
+		"bairn":   {wantState: "rate-limited", wantResult: "rate-limited"},
+		"thrawn":  {wantState: "degraded", wantPending: 1, wantResult: "skipped", wantError: "action already in flight"},
+		"glaikit": {wantState: "skipped", wantResult: "skipped", wantError: "max_concurrent reached"},
+	}
+	for id, test := range tests {
+		got, ok := byID[id]
+		if !ok {
+			t.Fatalf("missing detail for %s", id)
+		}
+
+		if got.State != test.wantState || got.PendingChanges != test.wantPending || got.LastResult != test.wantResult || got.LastError != test.wantError {
+			t.Errorf("%s detail = %+v, want state %q pending %d result %q error %q", id, got, test.wantState, test.wantPending, test.wantResult, test.wantError)
+		}
+	}
+
+	if byID["canny"].DebounceUntil != now.Add(30*time.Second).Format(time.RFC3339) {
+		t.Errorf("debounce deadline = %q", byID["canny"].DebounceUntil)
+	}
+
+	if !byID["dreich"].ActionInFlight {
+		t.Error("running binding did not expose action_in_flight")
+	}
+
+	if byID["blether"].WorktreePath != byID["dreich"].WorktreePath {
+		t.Errorf("shared worktree not apparent: blether=%q dreich=%q", byID["blether"].WorktreePath, byID["dreich"].WorktreePath)
+	}
+
+	if rec.Degraded == "" || rec.DegradedRetryCount != 3 || rec.DegradedRetryAt != now.Add(5*time.Minute).Format(time.RFC3339) {
+		t.Errorf("top-level degraded summary = %+v", rec)
 	}
 }
 
@@ -957,12 +1134,21 @@ func TestFireWatch_RateLimited(t *testing.T) {
 	withMsgStore(t, sm)
 
 	fc := fireContext{now: time.Now(), sessionID: "src"}
-	sm.fireWatch(t.Context(), &trig, fc) // first fires
-	sm.fireWatch(t.Context(), &trig, fc) // second rate-limited
+	binding := &watchBinding{sessionID: "src", changed: make(map[string]bool)}
+	sm.fireWatch(t.Context(), &trig, fc, binding) // first fires
+	sm.fireWatch(t.Context(), &trig, fc, binding) // second rate-limited
 
 	rt := sm.getTriggerRuntime("haar")
 	if rt == nil || rt.RunCount != 1 {
 		t.Fatalf("expected 1 run (2nd rate-limited), got %+v", rt)
+	}
+
+	binding.bmu.Lock()
+	lastResult := binding.lastResult
+	binding.bmu.Unlock()
+
+	if lastResult != "rate-limited" {
+		t.Fatalf("binding last result = %q, want rate-limited", lastResult)
 	}
 }
 

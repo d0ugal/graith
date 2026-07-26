@@ -147,7 +147,10 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, triggers []conf
 		retryDue := exists && existing.degraded != "" && !existing.nextRetryAt.IsZero() && !now.Before(existing.nextRetryAt)
 		sm.triggers.mu.Unlock()
 
-		var carry map[string]bool
+		var (
+			carry   map[string]bool
+			history watchBindingHistory
+		)
 
 		if exists && !retryDue {
 			defChanged := existing.fingerprint != fp
@@ -174,6 +177,8 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, triggers []conf
 				continue
 			}
 
+			history = snapshotWatchBindingHistory(existing)
+
 			// Tear down first (cancels the goroutine and marks the binding canceled
 			// under bmu), THEN drain. Draining before teardown would race the event
 			// goroutine, which could note a change between the drain and the
@@ -197,7 +202,11 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, triggers []conf
 			continue
 		}
 
-		sm.createBinding(ctx, t, sess, now, builtinIgnores, builtinFP, carry)
+		if exists && retryDue {
+			history = snapshotWatchBindingHistory(existing)
+		}
+
+		sm.createBinding(ctx, t, sess, now, builtinIgnores, builtinFP, carry, history)
 	}
 }
 
@@ -217,6 +226,31 @@ func drainBindingChanges(b *watchBinding) map[string]bool {
 	b.changed = make(map[string]bool)
 
 	return out
+}
+
+type watchBindingHistory struct {
+	lastRun    time.Time
+	lastResult string
+	lastError  string
+}
+
+func (h watchBindingHistory) empty() bool {
+	return h.lastRun.IsZero() && h.lastResult == "" && h.lastError == ""
+}
+
+func snapshotWatchBindingHistory(b *watchBinding) watchBindingHistory {
+	if b == nil {
+		return watchBindingHistory{}
+	}
+
+	b.bmu.Lock()
+	defer b.bmu.Unlock()
+
+	return watchBindingHistory{
+		lastRun:    b.lastRun,
+		lastResult: b.lastResult,
+		lastError:  b.lastError,
+	}
 }
 
 type watchSession struct {
@@ -280,7 +314,7 @@ func (sm *SessionManager) sessionForBindingKey(key string) watchSession {
 // exhausted) the binding is recorded as degraded with a backoff-scheduled retry
 // rather than running; the reconcile loop recreates it once nextRetryAt passes.
 // now is injected so the retry schedule is testable.
-func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerConfig, sess watchSession, now time.Time, builtinIgnores []string, builtinFP string, carry map[string]bool) {
+func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerConfig, sess watchSession, now time.Time, builtinIgnores []string, builtinFP string, carry map[string]bool, history watchBindingHistory) {
 	key := bindingKey(t.Name, sess.id)
 	matcher := newWatchMatcher(sess.worktree, t.Watch, builtinIgnores)
 
@@ -294,7 +328,10 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 	sm.triggers.mu.Lock()
 
 	prevRetries := 0
-	if prev, ok := sm.triggers.bindings[key]; ok {
+
+	var prev *watchBinding
+	if p, ok := sm.triggers.bindings[key]; ok {
+		prev = p
 		prevRetries = prev.retryCount
 
 		if len(prev.changed) > 0 {
@@ -309,12 +346,16 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 	}
 	sm.triggers.mu.Unlock()
 
+	if history.empty() {
+		history = snapshotWatchBindingHistory(prev)
+	}
+
 	// A watcher we can't even allocate (e.g. the inotify *instance* limit) is a
 	// degraded outcome like a failed Add — record it with a backoff so a retry
 	// doesn't busy-loop on every reconcile tick.
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		sm.recordDegradedBinding(key, t, sess, "fsnotify.NewWatcher failed: "+err.Error(), prevRetries+1, now, builtinFP, carry)
+		sm.recordDegradedBinding(key, t, sess, "fsnotify.NewWatcher failed: "+err.Error(), prevRetries+1, now, builtinFP, carry, history)
 		return
 	}
 
@@ -328,7 +369,7 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 	if degraded := sm.addWatchRecursiveBudgeted(watcher, sess.worktree, matcher, watchPaths); degraded != "" {
 		_ = watcher.Close()
 
-		sm.recordDegradedBinding(key, t, sess, degraded, prevRetries+1, now, builtinFP, carry)
+		sm.recordDegradedBinding(key, t, sess, degraded, prevRetries+1, now, builtinFP, carry, history)
 
 		return
 	}
@@ -347,6 +388,9 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 		watcher:            watcher,
 		watchPaths:         watchPaths,
 		changed:            make(map[string]bool),
+		lastRun:            history.lastRun,
+		lastResult:         history.lastResult,
+		lastError:          history.lastError,
 		cancel:             cancel,
 	}
 
@@ -413,7 +457,7 @@ func (sm *SessionManager) recarryChanges(ctx context.Context, triggerName string
 // the reconcile loop simply recreates this entry once nextRetryAt passes. Any
 // carried pending changes are stashed on the degraded binding so a later recovery
 // recreate can re-note the still-valid ones instead of losing them (issue #1309).
-func (sm *SessionManager) recordDegradedBinding(key string, t *config.TriggerConfig, sess watchSession, reason string, attempt int, now time.Time, builtinFP string, carry map[string]bool) {
+func (sm *SessionManager) recordDegradedBinding(key string, t *config.TriggerConfig, sess watchSession, reason string, attempt int, now time.Time, builtinFP string, carry map[string]bool, history watchBindingHistory) {
 	changed := carry
 	if changed == nil {
 		changed = make(map[string]bool)
@@ -440,6 +484,9 @@ func (sm *SessionManager) recordDegradedBinding(key string, t *config.TriggerCon
 		degraded:    reason,
 		retryCount:  attempt,
 		nextRetryAt: now.Add(sm.watchRetryBackoff(attempt)),
+		lastRun:     history.lastRun,
+		lastResult:  history.lastResult,
+		lastError:   history.lastError,
 	}
 
 	sm.log.Warn("trigger: watcher degraded, will retry",
@@ -658,7 +705,16 @@ func (sm *SessionManager) noteChange(ctx context.Context, triggerName string, b 
 		b.debounce.Stop()
 	}
 
+	deadline := time.Now().Add(debounce)
+	b.debounceUntil = deadline
 	b.debounce = time.AfterFunc(debounce, func() {
+		b.bmu.Lock()
+		if b.debounceUntil.Equal(deadline) {
+			b.debounce = nil
+			b.debounceUntil = time.Time{}
+		}
+		b.bmu.Unlock()
+
 		sm.watchFire(ctx, triggerName, b)
 	})
 }
@@ -710,6 +766,10 @@ func (sm *SessionManager) watchFire(ctx context.Context, triggerName string, b *
 	}
 
 	if serialise && b.inFlight {
+		if b.activeRuns > 0 {
+			recordBindingResultLocked(b, time.Now(), "skipped", "action already in flight")
+		}
+
 		b.bmu.Unlock()
 		sm.log.Info("trigger: watch skipped (in flight)", "trigger", triggerName)
 
@@ -750,7 +810,7 @@ func (sm *SessionManager) watchFire(ctx context.Context, triggerName string, b *
 		worktree:     b.worktree,
 		changedFiles: changed,
 	}
-	sm.fireWatch(ctx, t, fc)
+	sm.fireWatch(ctx, t, fc, b)
 }
 
 // stopWatcherResources shuts down a file watcher's goroutine and fsnotify
@@ -758,7 +818,7 @@ func (sm *SessionManager) watchFire(ctx context.Context, triggerName string, b *
 // cancel and watcher are read by the caller before the lock (matching the
 // original code), while canceled/debounce are touched under bmu (both are
 // goroutine-mutated).
-func stopWatcherResources(cancel func(), watcher *fsnotify.Watcher, bmu *sync.Mutex, canceled *bool, debounce **time.Timer, release func()) {
+func stopWatcherResources(cancel func(), watcher *fsnotify.Watcher, bmu *sync.Mutex, canceled *bool, debounce **time.Timer, debounceUntil *time.Time, release func()) {
 	if cancel != nil {
 		cancel()
 	}
@@ -773,8 +833,10 @@ func stopWatcherResources(cancel func(), watcher *fsnotify.Watcher, bmu *sync.Mu
 
 	if *debounce != nil {
 		(*debounce).Stop()
+		*debounce = nil
 	}
 
+	*debounceUntil = time.Time{}
 	bmu.Unlock()
 
 	if release != nil {
@@ -965,7 +1027,7 @@ func (sm *SessionManager) teardownBinding(key string) {
 		return
 	}
 
-	stopWatcherResources(b.cancel, b.watcher, &b.bmu, &b.canceled, &b.debounce, func() {
+	stopWatcherResources(b.cancel, b.watcher, &b.bmu, &b.canceled, &b.debounce, &b.debounceUntil, func() {
 		b.bmu.Lock()
 		cost := watchPathCostSum(b.watchPaths)
 		b.watchPaths = nil
