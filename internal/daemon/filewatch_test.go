@@ -387,6 +387,62 @@ func TestReconcileBindings_Lifecycle(t *testing.T) {
 	sm.teardownAllBindings()
 }
 
+func TestReconcileBindings_SkipsMirrorSessions(t *testing.T) {
+	worktree := t.TempDir()
+	repoTrig := config.TriggerConfig{
+		Name:   "repo-watch",
+		Watch:  &config.WatchConfig{Repo: "/repo/croft"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "t"}},
+	}
+	roleTrig := config.TriggerConfig{
+		Name:   "role-watch",
+		Watch:  &config.WatchConfig{Role: "implementer"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "t"}},
+	}
+	sm := newTriggerTestSM(t, repoTrig, roleTrig)
+	sm.state.Sessions["src"] = &SessionState{
+		ID: "src", Name: "braw", Status: StatusRunning, RepoPath: "/repo/croft",
+		ScenarioRole: "implementer", WorktreePath: worktree,
+	}
+	sm.state.Sessions["reader"] = &SessionState{
+		ID: "reader", Name: "canny", Status: StatusRunning, RepoPath: "/repo/croft",
+		ScenarioRole: "implementer", WorktreePath: worktree, Mirror: true, MirrorSourceID: "src",
+	}
+	sm.state.Sessions["reactor"] = &SessionState{
+		ID: "reactor", Name: "dreich", Status: StatusRunning, RepoPath: "/repo/croft",
+		WorktreePath: worktree, Mirror: true, MirrorSourceID: "src",
+		TriggerID: "repo-watch", TriggerReactor: true,
+	}
+
+	sm.reconcileBindings(context.Background(), sm.allTriggers(), time.Now())
+
+	if _, ok := sm.triggers.bindings[bindingKey("repo-watch", "src")]; !ok {
+		t.Fatalf("missing repo binding for writable source")
+	}
+
+	if _, ok := sm.triggers.bindings[bindingKey("role-watch", "src")]; !ok {
+		t.Fatalf("missing role binding for writable source")
+	}
+
+	if _, ok := sm.triggers.bindings[bindingKey("repo-watch", "reader")]; ok {
+		t.Fatalf("created repo binding for mirror session")
+	}
+
+	if _, ok := sm.triggers.bindings[bindingKey("role-watch", "reader")]; ok {
+		t.Fatalf("created role binding for mirror session")
+	}
+
+	if _, ok := sm.triggers.bindings[bindingKey("repo-watch", "reactor")]; ok {
+		t.Fatalf("created repo binding for mirror reactor")
+	}
+
+	if got := len(sm.triggers.bindings); got != 2 {
+		t.Fatalf("bindings = %d, want one per trigger for the writable source", got)
+	}
+
+	sm.teardownAllBindings()
+}
+
 func TestWatchMatcherIncludeDirectoryScope(t *testing.T) {
 	root := t.TempDir()
 	cases := []struct {

@@ -415,6 +415,8 @@ func TestMatchingWatchSessions(t *testing.T) {
 	sm.state.Sessions["s1"] = &SessionState{ID: "s1", Name: "one", Status: StatusRunning, RepoPath: "/repo/a", WorktreePath: "/wt/1"}
 	sm.state.Sessions["s2"] = &SessionState{ID: "s2", Name: "two", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: "/wt/2"}
 	sm.state.Sessions["s3"] = &SessionState{ID: "s3", Name: "gone", Status: StatusStopped, RepoPath: "/repo/a", WorktreePath: "/wt/3"}
+	sm.state.Sessions["s4"] = &SessionState{ID: "s4", Name: "reader-one", Status: StatusRunning, RepoPath: "/repo/a", WorktreePath: "/wt/1", Mirror: true, MirrorSourceID: "s1"}
+	sm.state.Sessions["s5"] = &SessionState{ID: "s5", Name: "reader-two", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: "/wt/2", Mirror: true, MirrorSourceID: "s2"}
 
 	byRepo := sm.matchingWatchSessions(&config.WatchConfig{Repo: "/repo/a"}, "")
 	if len(byRepo) != 1 || byRepo[0].id != "s1" {

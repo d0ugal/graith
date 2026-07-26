@@ -889,7 +889,7 @@ genuinely want commit granularity.
 ### The daemon watch loop details
 
 `RunFileWatchLoop` reconciles the set of **watch bindings** — one per (active
-watch trigger, matching live session) — against live `fsnotify` watchers.
+watch trigger, matching live writable session) — against live `fsnotify` watchers.
 Reconcile — don't poll — on startup, config reload (new wiring in `applyConfig`,
 which today doesn't manage triggers), session create/stop/delete, scenario
 membership changes, and `gr trigger` mutations. A `repo`/`role` policy that
@@ -898,13 +898,14 @@ state (§State model).
 
 **Binding lifecycle vs. session state.** A binding is created when a matching
 session starts and torn down when it stops or is soft-deleted (v1: **watch
-bindings are active only while their source session is running** — unlike PR-watch,
-which also polls stopped sessions, because a stopped agent isn't producing the
-work-in-progress a reviewer reacts to). Pending debounce events are dropped on
-stop; resuming the source rebuilds the binding and does a reconciliation scan
-(below). The owned `ensure` reactor is **not** torn down with the binding (it may
-still be delivering a final review); it is re-adopted by `TriggerID` when the
-source resumes.
+bindings are active only while their writable source session is running** —
+unlike PR-watch, which also polls stopped sessions, because a stopped agent isn't
+producing the work-in-progress a reviewer reacts to). Mirror sessions are
+read-only and share another session's worktree, so they are not bound directly.
+Pending debounce events are dropped on stop; resuming the source rebuilds the
+binding and does a reconciliation scan (below). The owned `ensure` reactor is
+**not** torn down with the binding (it may still be delivering a final review);
+it is re-adopted by `TriggerID` when the source resumes.
 
 Recursion has races this must handle:
 
