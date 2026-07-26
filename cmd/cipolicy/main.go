@@ -26,6 +26,12 @@ func run(args []string) error {
 	manifestPath := flags.String("manifest", cipolicy.DefaultManifestPath, "policy manifest path")
 	outputPath := flags.String("output", "", "output path for generate (stdout when empty)")
 	changedFilesPath := flags.String("changed-files", "", "newline-delimited changed file list for plan replay")
+	planInputPath := flags.String("plan-input", "", "run plan JSON path for summary")
+	planErrorPath := flags.String("plan-error", "", "run plan error path for summary")
+	headSHA := flags.String("head-sha", "", "reported source head SHA for summary")
+	runURL := flags.String("run-url", "", "Actions run URL for summary")
+	macOSDetectorResult := flags.String("macos-detector-result", "", "macOS detector job result for summary")
+	macOSDetectorOutput := flags.String("macos-detector-output", "", "macOS detector output value for summary")
 	eventName := flags.String("event", "", "GitHub event name for plan replay")
 	ref := flags.String("ref", "", "Git ref for plan replay")
 	baseRef := flags.String("base-ref", "", "base ref for plan replay")
@@ -40,14 +46,16 @@ func run(args []string) error {
 	publication := flags.Bool("publication", false, "classify a push as trusted-publication")
 	createdAt := flags.String("created-at", "", "RFC3339 plan creation time")
 	expiresAt := flags.String("expires-at", "", "RFC3339 plan expiry time")
-	detectorError := flags.String("detector-error", "", "detector error to bind into a safe-superset plan")
+
+	var detectorErrors stringListFlag
+	flags.Var(&detectorErrors, "detector-error", "detector error to bind into a safe-superset plan; may be repeated")
 
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 
 	if flags.NArg() != 1 {
-		return errors.New("usage: cipolicy [flags] generate|validate|digest|plan")
+		return errors.New("usage: cipolicy [flags] generate|validate|digest|plan|summary")
 	}
 
 	command := flags.Arg(0)
@@ -128,11 +136,6 @@ func run(args []string) error {
 			return err
 		}
 
-		var detectorErrors []string
-		if strings.TrimSpace(*detectorError) != "" {
-			detectorErrors = append(detectorErrors, *detectorError)
-		}
-
 		plan, err := cipolicy.BuildPlan(manifest, cipolicy.PlanOptions{
 			Event: cipolicy.EventInput{
 				GitHubEvent:         *eventName,
@@ -150,7 +153,7 @@ func run(args []string) error {
 			},
 			ChangedFiles:   changedFiles,
 			ExactFileList:  exactFileList,
-			DetectorErrors: detectorErrors,
+			DetectorErrors: nonEmptyStrings([]string(detectorErrors)),
 			CreatedAt:      created,
 			ExpiresAt:      expires,
 		})
@@ -164,6 +167,52 @@ func run(args []string) error {
 		}
 
 		return writeOutput(*outputPath, data)
+	case "summary":
+		inventory, err := cipolicy.ReadInventory(*inventoryPath)
+		if err != nil {
+			return err
+		}
+
+		plan, err := readOptionalRunPlan(*planInputPath)
+		if err != nil {
+			return err
+		}
+
+		if plan != nil {
+			manifest, err := cipolicy.ReadManifest(*manifestPath)
+			if err != nil {
+				return err
+			}
+
+			if err := plan.Validate(manifest); err != nil {
+				return fmt.Errorf("validate summary plan: %w", err)
+			}
+		}
+
+		changedFiles, _, err := readChangedFiles(*changedFilesPath)
+		if err != nil {
+			return err
+		}
+
+		summary, err := cipolicy.RenderShadowSummary(cipolicy.ShadowSummaryInput{
+			Inventory:           inventory,
+			Plan:                plan,
+			PlanError:           readOptionalFile(*planErrorPath),
+			ChangedFiles:        nonEmptyStrings(changedFiles),
+			EventName:           *eventName,
+			Ref:                 *ref,
+			HeadSHA:             *headSHA,
+			RunURL:              *runURL,
+			MacOSDetectorResult: *macOSDetectorResult,
+			MacOSDetectorOutput: *macOSDetectorOutput,
+		})
+		if err != nil {
+			return err
+		}
+
+		_, err = os.Stdout.WriteString(summary)
+
+		return err
 	default:
 		return fmt.Errorf("unknown command %q", flags.Arg(0))
 	}
@@ -205,6 +254,65 @@ func readChangedFiles(path string) (files []string, exact bool, err error) {
 	}
 
 	return files, true, nil
+}
+
+func readOptionalRunPlan(path string) (*cipolicy.RunPlan, error) {
+	if path == "" {
+		return nil, nil
+	}
+
+	loaded, err := cipolicy.ReadRunPlan(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &loaded, nil
+}
+
+func readOptionalFile(path string) string {
+	if path == "" {
+		return ""
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+
+	return string(data)
+}
+
+type stringListFlag []string
+
+func (flag *stringListFlag) String() string {
+	if flag == nil {
+		return ""
+	}
+
+	return strings.Join(*flag, "\n")
+}
+
+func (flag *stringListFlag) Set(value string) error {
+	*flag = append(*flag, value)
+
+	return nil
+}
+
+func nonEmptyStrings(values []string) []string {
+	filtered := values[:0]
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+
+		filtered = append(filtered, value)
+	}
+
+	return filtered
 }
 
 func parseOptionalTime(value, name string) (time.Time, error) {

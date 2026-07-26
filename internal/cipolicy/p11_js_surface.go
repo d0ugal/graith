@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	P11JSSurfaceDirectory = ".github/workflows/scripts"
-	P11NextTrancheHelper  = ".github/workflows/scripts/regen-auth.test.js"
+	P11JSSurfaceDirectory       = ".github/workflows/scripts"
+	P11RegenAuthReplacementPath = "internal/cipolicy/p11_js_surface_test.go"
 )
 
 type P11JSHelperContract struct {
@@ -213,24 +213,6 @@ func P11JSSurfaceContracts() []P11JSHelperContract {
 			Tranche: "paired with docs-preview.js wrap",
 		},
 		{
-			Path:               ".github/workflows/scripts/libghostty-policy.test.js",
-			Owner:              "graith-maintainers",
-			Kind:               "workflow-contract-test",
-			Callers:            []string{".github/workflows/workflow-lint.yml: workflow scripts job"},
-			PolicyInputs:       []string{".github/workflows/ci.yml", ".github/workflows/libghostty-native.yml", ".github/workflows/goreleaser.yml", ".github/workflows/dev-release.yml", ".github/workflows/libghostty-native-publish.yml", ".github/workflows/coverage.yml", "scripts/libghostty-native.sh", "libghostty-native.lock.json"},
-			PolicyOutputs:      []string{"Node test pass/fail for native/release/coverage routing and artifact trust policy"},
-			Disposition:        "port",
-			ExecutableContract: "preserve native path routing, fail-safe detector, release gating, artifact lock, and coverage graph assertions",
-			DeletionCriterion:  "Go semantic tests compare workflow YAML, lock data, and shell policy with P2/P3 capability and artifact contracts after P5 merges",
-			CompatibilitySamples: []P11CompatibilitySampleRequirement{
-				{ID: "native-path-routing", Description: "docs excluded while native and dependency inputs trigger native proof"},
-				{ID: "release-routing", Description: "release workflows fail safe on non-PR or unavailable file list"},
-				{ID: "linux-artifact-lock", Description: "lock digests and trusted publish workflow remain complete"},
-				{ID: "coverage-tagged-graph", Description: "coverage measures libghostty-tagged head and base graphs"},
-			},
-			Tranche: "after P5 artifact/cache contracts merge because it depends on native artifact semantics",
-		},
-		{
 			Path:               ".github/workflows/scripts/package-lock.json",
 			Owner:              "graith-maintainers",
 			Kind:               "workflow-script-dependency-lock",
@@ -259,71 +241,6 @@ func P11JSSurfaceContracts() []P11JSHelperContract {
 				{ID: "pngjs-only-dependency", Description: "package manifest keeps pngjs as the sole dependency"},
 			},
 			Tranche: "explicit P11 retained exception for pngjs",
-		},
-		{
-			Path:                 ".github/workflows/scripts/regen-auth.test.js",
-			Owner:                "graith-maintainers",
-			Kind:                 "workflow-contract-test",
-			Callers:              []string{".github/workflows/workflow-lint.yml: workflow scripts job"},
-			PolicyInputs:         []string{".github/workflows/regen.yml", "pull_request trust context", "RELEASE_TOKEN exposure sites", "checkout credential persistence", "generated commit bundle and push script"},
-			PolicyOutputs:        []string{"Node test pass/fail for regeneration credential and publication boundaries"},
-			Disposition:          "port",
-			ExecutableContract:   "preserve same-repository guard, read-only workflow permissions, safe checkout, credential isolation, and generated-commit push boundary",
-			DeletionCriterion:    "replace only after Go semantic assertions over regen.yml and P2/P3 trust fixture pass, P0 inventory is rebound, P1 manifest is regenerated, and workflow-lint scripts parity has zero unexplained disagreement",
-			CompatibilitySamples: P11RegenAuthCompatibilityRequirements(),
-			Tranche:              "next serialized tranche after P4/P5 merge because it changes a signed P0/P1 policy surface checksum",
-		},
-		{
-			Path:               ".github/workflows/scripts/renovate-retry.test.js",
-			Owner:              "graith-maintainers",
-			Kind:               "workflow-contract-test",
-			Callers:            []string{".github/workflows/workflow-lint.yml: workflow scripts job"},
-			PolicyInputs:       []string{"scripts/verify-renovate-libghostty.sh", "fake renovate binaries", "Renovate JSON logs"},
-			PolicyOutputs:      []string{"Node test pass/fail for bounded transient retry behavior"},
-			Disposition:        "port",
-			ExecutableContract: "preserve retry-only-for-tangled.org GnuTLS transient failures with a three-attempt ceiling",
-			DeletionCriterion:  "Go tests drive the shell verifier through fake binaries and match retry count/stdout/stderr/status for transient, deterministic, mixed, and repeated failures",
-			CompatibilitySamples: []P11CompatibilitySampleRequirement{
-				{ID: "renovate-transient-success", Description: "one transient GnuTLS failure retries and later success passes"},
-				{ID: "renovate-deterministic-failure", Description: "403 failure is not retried"},
-				{ID: "renovate-mixed-errors", Description: "mixed transient and deterministic log is not retried"},
-				{ID: "renovate-three-transients", Description: "three transient failures stop after attempt 3"},
-			},
-			Tranche: "after regen-auth because it is test-only and has no workflow YAML reshaping dependency",
-		},
-		{
-			Path:               ".github/workflows/scripts/shellcheck-policy.test.js",
-			Owner:              "graith-maintainers",
-			Kind:               "workflow-contract-test",
-			Callers:            []string{".github/workflows/workflow-lint.yml: workflow scripts job"},
-			PolicyInputs:       []string{"Makefile", ".github/workflows/workflow-lint.yml"},
-			PolicyOutputs:      []string{"Node test pass/fail for ShellCheck coverage and strictness"},
-			Disposition:        "port",
-			ExecutableContract: "preserve repository-wide shellcheck target and workflow path trigger assertions",
-			DeletionCriterion:  "Go semantic test proves tracked shell scripts and nested/root shell path filters remain covered",
-			CompatibilitySamples: []P11CompatibilitySampleRequirement{
-				{ID: "shellcheck-target", Description: "make shellcheck runs git ls-files with shellcheck --enable=all --severity=warning"},
-				{ID: "shellcheck-paths", Description: "workflow path filters include root and nested shell scripts"},
-			},
-			Tranche: "after renovate retry because it is small and text-only",
-		},
-		{
-			Path:               ".github/workflows/scripts/workflow-lint-supply-chain.test.js",
-			Owner:              "graith-maintainers",
-			Kind:               "workflow-contract-test",
-			Callers:            []string{".github/workflows/workflow-lint.yml: workflow scripts job"},
-			PolicyInputs:       []string{".github/workflows/workflow-lint.yml", "actionlint and zizmor install steps"},
-			PolicyOutputs:      []string{"Node test pass/fail for provenance-verified workflow-lint tool installs"},
-			Disposition:        "port",
-			ExecutableContract: "preserve provenance verification before extraction, fail-closed shell flags, token scoping, and no unpinned uvx path",
-			DeletionCriterion:  "Go semantic test proves actionlint and zizmor install steps verify attestations before extract/install and cannot swallow verification failures",
-			CompatibilitySamples: []P11CompatibilitySampleRequirement{
-				{ID: "actionlint-attestation", Description: "actionlint tarball is verified against rhysd/actionlint before install"},
-				{ID: "zizmor-attestation", Description: "zizmor tarball is verified against zizmorcore/zizmor before extract"},
-				{ID: "fail-closed-install", Description: "set -euo pipefail is present and verification is not guarded"},
-				{ID: "no-uvx", Description: "zizmor is not installed through uvx or setup-uv"},
-			},
-			Tranche: "after shellcheck policy because it remains a workflow-lint-only contract",
 		},
 	}
 

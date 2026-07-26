@@ -36,30 +36,6 @@ func TestP11JSSurfaceContractsCoverCurrentInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	regen := p11ContractByPath(t, contracts, P11NextTrancheHelper)
-	if regen.Disposition != "port" {
-		t.Fatalf("%s disposition = %s, want port", regen.Path, regen.Disposition)
-	}
-
-	for _, want := range []string{
-		"regen-same-repository-agent",
-		"regen-fork-untrusted",
-		"regen-trusted-base",
-		"regen-push-boundary",
-		"regen-non-superset-negative",
-	} {
-		if !p11HasSampleRequirement(regen, want) {
-			t.Fatalf("%s is missing compatibility sample %s", regen.Path, want)
-		}
-	}
-
-	declaredSamples := append([]P11CompatibilitySample{}, p11RegenAuthSamples()...)
-	for _, negative := range p11RegenAuthNegativeSamples() {
-		declaredSamples = append(declaredSamples, negative.Sample)
-	}
-
-	p11AssertSampleMatrixMatchesRequirements(t, regen, declaredSamples)
-
 	for _, path := range []string{
 		".github/workflows/scripts/package.json",
 		".github/workflows/scripts/package-lock.json",
@@ -74,6 +50,32 @@ func TestP11JSSurfaceContractsCoverCurrentInventory(t *testing.T) {
 			t.Fatalf("%s does not document the pngjs retained exception", path)
 		}
 	}
+}
+
+func TestP11RegenAuthReplacementSamplesCoverHardeningMatrix(t *testing.T) {
+	replacement := P11JSHelperContract{
+		Path:                 P11RegenAuthReplacementPath,
+		CompatibilitySamples: P11RegenAuthCompatibilityRequirements(),
+	}
+
+	for _, want := range []string{
+		"regen-same-repository-agent",
+		"regen-fork-untrusted",
+		"regen-trusted-base",
+		"regen-push-boundary",
+		"regen-non-superset-negative",
+	} {
+		if !p11HasSampleRequirement(replacement, want) {
+			t.Fatalf("%s is missing compatibility sample %s", replacement.Path, want)
+		}
+	}
+
+	declaredSamples := append([]P11CompatibilitySample{}, p11RegenAuthSamples()...)
+	for _, negative := range p11RegenAuthNegativeSamples() {
+		declaredSamples = append(declaredSamples, negative.Sample)
+	}
+
+	p11AssertSampleMatrixMatchesRequirements(t, replacement, declaredSamples)
 }
 
 func TestP11RegenAuthCompatibilitySamplesUsePolicyFixture(t *testing.T) {
@@ -524,7 +526,7 @@ func TestP11RegenWorkflowTrustSemanticsRejectsCredentialedScriptExecution(t *tes
 	}
 
 	needle := "\n          set -euo pipefail\n          remote_sha=\"$(git ls-remote origin \"refs/heads/$HEAD_REF\" | awk '{print $1}')\"\n"
-	replacement := "\n          set -euo pipefail\n          node .github/workflows/scripts/regen-auth.test.js\n          remote_sha=\"$(git ls-remote origin \"refs/heads/$HEAD_REF\" | awk '{print $1}')\"\n"
+	replacement := "\n          set -euo pipefail\n          node .github/workflows/scripts/docs-preview.test.js\n          remote_sha=\"$(git ls-remote origin \"refs/heads/$HEAD_REF\" | awk '{print $1}')\"\n"
 	workflowSource := string(data)
 
 	if !strings.Contains(workflowSource, needle) {
@@ -566,7 +568,7 @@ func TestP11CurrentScriptPathsUseGitIndex(t *testing.T) {
 
 	for path, data := range map[string]string{
 		filepath.Join(repoRoot, ".gitignore"):                                 ".github/workflows/scripts/node_modules/\n",
-		filepath.Join(scriptsDir, "regen-auth.test.js"):                       "'use strict';\n",
+		filepath.Join(scriptsDir, "docs-diff.test.js"):                        "'use strict';\n",
 		filepath.Join(scriptsDir, "untracked-helper.test.js"):                 "'use strict';\n",
 		filepath.Join(scriptsDir, "node_modules", "ignored-helper.test.js"):   "'use strict';\n",
 		filepath.Join(repoRoot, "internal", "cipolicy", "unrelated.testdata"): "braw\n",
@@ -582,7 +584,7 @@ func TestP11CurrentScriptPathsUseGitIndex(t *testing.T) {
 	}
 
 	p11RunGit(t, repoRoot, "init")
-	p11RunGit(t, repoRoot, "add", ".gitignore", ".github/workflows/scripts/regen-auth.test.js")
+	p11RunGit(t, repoRoot, "add", ".gitignore", ".github/workflows/scripts/docs-diff.test.js")
 
 	foreignHelper := filepath.Join(foreignScriptsDir, "foreign-helper.test.js")
 	// #nosec G703 -- foreignHelper is rooted in t.TempDir.
@@ -605,7 +607,7 @@ func TestP11CurrentScriptPathsUseGitIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !reflect.DeepEqual(paths, []string{".github/workflows/scripts/regen-auth.test.js"}) {
+	if !reflect.DeepEqual(paths, []string{".github/workflows/scripts/docs-diff.test.js"}) {
 		t.Fatalf("currentP11ScriptPaths() = %#v, want only git-index tracked helper", paths)
 	}
 }
@@ -652,7 +654,7 @@ func TestP11RepositoryControlledCommandDetectionMatchesRetainedJSEmbeddedCommand
 		"embedded go test":                  "if go test ./internal/protocol -run TestManifestUpToDate; then",
 		"embedded make package graph":       "env GRAITH_CHECK=braw make package-graph",
 		"embedded native helper":            "cd /tmp && scripts/libghostty-native.sh verify-dependency-unit",
-		"embedded node helper":              "env GRAITH_CHECK=braw node .github/workflows/scripts/regen-auth.test.js",
+		"embedded node helper":              "env GRAITH_CHECK=braw node .github/workflows/scripts/docs-preview.test.js",
 		"embedded python helper":            "changed=$(python3 scripts/braw.py)",
 		"embedded shell helper":             "if sh scripts/braw.sh; then",
 		"backtick package graph":            "GENERATED=`make package-graph`",
@@ -848,7 +850,7 @@ func TestP11CredentialTrustAllowlistRejectsCredentialTrustNotAllowedForPlan(t *t
 
 	sample := P11CompatibilitySample{
 		ID:                "docs-preview-trusted-base-credential-negative",
-		HelperPath:        P11NextTrancheHelper,
+		HelperPath:        P11RegenAuthReplacementPath,
 		Description:       "trusted-base plan must not borrow same-repository docs-preview write credentials",
 		PlanOptions:       p11PlanOptionsWithChangedFiles(p11TrustedBaseEvent(), []string{"docs/design/2026-07-24-ci-north-star.md"}),
 		ExpectedTrustTier: "trusted-base",
@@ -937,7 +939,7 @@ func p11RegenAuthSamples() []P11CompatibilitySample {
 	return []P11CompatibilitySample{
 		{
 			ID:                      "regen-same-repository-agent",
-			HelperPath:              P11NextTrancheHelper,
+			HelperPath:              P11RegenAuthReplacementPath,
 			Description:             "same-repository generated-file PR selects generated-metadata while soft regen jobs stay outside required fan-in and maintainer credentials stay unavailable",
 			PlanOptions:             p11PlanOptions(p11SameRepoEvent()),
 			ExpectedTrustTier:       "same-repository-agent",
@@ -972,7 +974,7 @@ func p11RegenAuthSamples() []P11CompatibilitySample {
 		},
 		{
 			ID:                      "regen-fork-untrusted",
-			HelperPath:              P11NextTrancheHelper,
+			HelperPath:              P11RegenAuthReplacementPath,
 			Description:             "fork generated-file PR is fork-untrusted while same-repository workflow guards keep credentialed regen jobs unreachable",
 			PlanOptions:             p11PlanOptions(p11ForkEvent()),
 			ExpectedTrustTier:       "fork-untrusted",
@@ -1007,7 +1009,7 @@ func p11RegenAuthSamples() []P11CompatibilitySample {
 		},
 		{
 			ID:                      "regen-trusted-base",
-			HelperPath:              P11NextTrancheHelper,
+			HelperPath:              P11RegenAuthReplacementPath,
 			Description:             "trusted-base PR replay keeps soft regen modes tied to generated-metadata policy",
 			PlanOptions:             p11PlanOptions(p11TrustedBaseEvent()),
 			ExpectedTrustTier:       "trusted-base",
@@ -1022,7 +1024,7 @@ func p11RegenAuthSamples() []P11CompatibilitySample {
 		},
 		{
 			ID:                      "regen-push-boundary",
-			HelperPath:              P11NextTrancheHelper,
+			HelperPath:              P11RegenAuthReplacementPath,
 			Description:             "trusted-publication regeneration credential is valid only for generated metadata while workflow push semantics verify the generated commit",
 			PlanOptions:             p11PlanOptions(p11TrustedBaseEvent()),
 			ExpectedTrustTier:       "trusted-base",
@@ -1073,7 +1075,7 @@ func p11RegenAuthNegativeSamples() []p11NegativeCompatibilitySample {
 func p11RegenAuthNonSupersetNegativeSample() P11CompatibilitySample {
 	return P11CompatibilitySample{
 		ID:                "regen-non-superset-negative",
-		HelperPath:        P11NextTrancheHelper,
+		HelperPath:        P11RegenAuthReplacementPath,
 		Description:       "docs-only PR plan is not a safe superset and cannot bind regeneration credentials to absent generated-metadata capability",
 		PlanOptions:       p11PlanOptionsWithChangedFiles(p11TrustedBaseEvent(), []string{"docs/design/2026-07-24-ci-north-star.md"}),
 		ExpectedTrustTier: "trusted-base",

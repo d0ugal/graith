@@ -7,7 +7,7 @@
       "path": ".github/workflows/ci.yml",
       "name": "CI",
       "owner": "graith-maintainers",
-      "file_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+      "file_sha256": "79377ba8a56ae2c666a92c95c3015d7a2872aaeea2e9a7970c931be1451e8b62",
       "events": {
         "pull_request": null,
         "push": {
@@ -123,6 +123,49 @@
           ],
           "github_names": [
             "Detect macOS-relevant changes"
+          ]
+        },
+        {
+          "id": "ci-shadow-summary",
+          "name": "CI shadow summary",
+          "capability": "legacy-proof/ci/ci-shadow-summary",
+          "owner": "graith-maintainers",
+          "runner": "ubuntu-latest",
+          "condition": "${{ always() \u0026\u0026 !cancelled() }}",
+          "skip_semantics": "github-skipped-is-distinct-from-passed",
+          "proof_type": "soft",
+          "requiredness": "soft",
+          "permissions": {
+            "contents": "read"
+          },
+          "environment": null,
+          "coordinates": [
+            "ci/ci-shadow-summary"
+          ],
+          "github_names": [
+            "CI shadow summary"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
           ]
         },
         {
@@ -2652,16 +2695,6 @@
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
     },
     {
-      "path": ".github/workflows/scripts/libghostty-policy.test.js",
-      "owner": "graith-maintainers",
-      "kind": "workflow-contract-test",
-      "git_mode": "100644",
-      "sha256": "54365a17cdfa82450e44611b8fbcb94710b947912321fc21a93e7c9ee7df9ccb",
-      "executable_contract": "preserve the current workflow trust and behavior assertions until replaced by semantic Go contracts",
-      "disposition": "grandfathered",
-      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
-    },
-    {
       "path": ".github/workflows/scripts/package-lock.json",
       "owner": "graith-maintainers",
       "kind": "workflow-helper",
@@ -2678,46 +2711,6 @@
       "git_mode": "100644",
       "sha256": "487ab50e334bac57b3ed8faab83270dd25006569606f868ad20a388c94661d39",
       "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
-      "disposition": "grandfathered",
-      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
-    },
-    {
-      "path": ".github/workflows/scripts/regen-auth.test.js",
-      "owner": "graith-maintainers",
-      "kind": "workflow-contract-test",
-      "git_mode": "100644",
-      "sha256": "31c2ee166b3373c50f75e5405765b33e92812d4d6743d45fc9c788e61e92302a",
-      "executable_contract": "preserve the current workflow trust and behavior assertions until replaced by semantic Go contracts",
-      "disposition": "grandfathered",
-      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
-    },
-    {
-      "path": ".github/workflows/scripts/renovate-retry.test.js",
-      "owner": "graith-maintainers",
-      "kind": "workflow-contract-test",
-      "git_mode": "100644",
-      "sha256": "4d5aa6adf0cf5ae872a2c8bb82cca62a1715b2adf762db484a04c2e4c634d1a7",
-      "executable_contract": "preserve the current workflow trust and behavior assertions until replaced by semantic Go contracts",
-      "disposition": "grandfathered",
-      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
-    },
-    {
-      "path": ".github/workflows/scripts/shellcheck-policy.test.js",
-      "owner": "graith-maintainers",
-      "kind": "workflow-contract-test",
-      "git_mode": "100644",
-      "sha256": "ca5c5203c4a0d823a4b4ffa099255e97fe0f8e162e126526bf780e1092f67c6f",
-      "executable_contract": "preserve the current workflow trust and behavior assertions until replaced by semantic Go contracts",
-      "disposition": "grandfathered",
-      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
-    },
-    {
-      "path": ".github/workflows/scripts/workflow-lint-supply-chain.test.js",
-      "owner": "graith-maintainers",
-      "kind": "workflow-contract-test",
-      "git_mode": "100644",
-      "sha256": "e1e5cc55ab72af0734f119304ab8044a04925166871835f2cb0a46bfdb9ed1d8",
-      "executable_contract": "preserve the current workflow trust and behavior assertions until replaced by semantic Go contracts",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
     },
@@ -2782,6 +2775,26 @@
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
     },
     {
+      "path": "cmd/cipolicy/main.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-helper",
+      "git_mode": "100644",
+      "sha256": "bbbeedcf722048f65bd8f3898f6aa36790751c1474511349032cc3719d92ec61",
+      "executable_contract": "preserve the checked-in cipolicy CLI behavior invoked by workflow policy detection and the CI shadow summary",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only with the cipolicy workflow caller or an owner-approved replacement command"
+    },
+    {
+      "path": "cmd/cipolicy/main_test.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-contract-test",
+      "git_mode": "100644",
+      "sha256": "d387a51bc8da351562a8d01ee34796c9d8707b25e37bd46c6aa201e909b15cb9",
+      "executable_contract": "preserve CLI coverage for policy plan and diagnostic summary command behavior",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only after equivalent cipolicy command coverage is added"
+    },
+    {
       "path": "gui/ios/Makefile",
       "owner": "gui-owners",
       "kind": "ci-entrypoint",
@@ -2790,6 +2803,86 @@
       "executable_contract": "preserve the checked-in make targets invoked directly by current workflow proof",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "internal/cipolicy/io.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-helper",
+      "git_mode": "100644",
+      "sha256": "1ec99757945aba0e52d46796a07fdcbfdac0a2e7dc306547d85e5e58ad26e719",
+      "executable_contract": "preserve strict JSON decoding for inventory, manifest, and run-plan inputs consumed by policy tooling",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only with equivalent checked-in structured input decoding"
+    },
+    {
+      "path": "internal/cipolicy/libghostty_policy_test.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-contract-test",
+      "git_mode": "100644",
+      "sha256": "a9996e0020535d53bf657c7fe23f419040db703efcbffc6496a4847f8902e609",
+      "executable_contract": "preserve native/release/coverage routing and libghostty artifact trust assertions formerly held by libghostty-policy.test.js",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent native policy coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "internal/cipolicy/p11_js_surface.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-contract",
+      "git_mode": "100644",
+      "sha256": "b3ed3b3f38774fb279c091c6d7818d56b6d0b173918ab8a22d79200867c9ace2",
+      "executable_contract": "preserve current retained-JS surface contracts and semantic replacement metadata for retired workflow-script tests",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only after all P11 JS surfaces are retired or represented by a newer owner-approved contract"
+    },
+    {
+      "path": "internal/cipolicy/p11_js_surface_test.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-contract-test",
+      "git_mode": "100644",
+      "sha256": "209aa2d61d147623ef9a01cd007110d3ab7afc715d28a60998a8da32568573db",
+      "executable_contract": "preserve regen credential, trust, scalar sweep, git-index enumeration, and repository-command detection assertions formerly held by regen-auth.test.js",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent regen-auth coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "internal/cipolicy/renovate_retry_test.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-contract-test",
+      "git_mode": "100644",
+      "sha256": "efb8ecb70a985a2e5fc55f5281bf909a47d1a267374fb22a3112ced5f80da21e",
+      "executable_contract": "preserve bounded transient Renovate retry behavior formerly held by renovate-retry.test.js",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent retry fixture coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "internal/cipolicy/shadow_summary.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-helper",
+      "git_mode": "100644",
+      "sha256": "95a67539b44e9b4a158a27246253a8669728a1bb503f904bd4cd45f88e774fc2",
+      "executable_contract": "preserve non-authoritative CI shadow summary rendering, required-context inventory listing, native coverage note, and no-live-aggregation boundary",
+      "disposition": "grandfathered",
+      "retirement_criterion": "delete with the CI shadow summary job or replace only after equivalent diagnostic summary tests cover the same authority boundary"
+    },
+    {
+      "path": "internal/cipolicy/shadow_summary_test.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-contract-test",
+      "git_mode": "100644",
+      "sha256": "a8b018258cf1d674c74304ba44192b84c8be2111253981e877705ce22efb5a5a",
+      "executable_contract": "preserve diagnostic wording, detector fallback, helper language, and no-live-aggregation assertions for the CI shadow summary",
+      "disposition": "grandfathered",
+      "retirement_criterion": "delete with the CI shadow summary helper or replace only after equivalent summary contract coverage exists"
+    },
+    {
+      "path": "internal/cipolicy/workflow_lint_policy_test.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-contract-test",
+      "git_mode": "100644",
+      "sha256": "6acf0a14aef1141810ff05a3822956c1dbfc89227be3c1a7f22abc1f197766fa",
+      "executable_contract": "preserve ShellCheck coverage and provenance-verified workflow-lint install assertions formerly held by shellcheck-policy.test.js and workflow-lint-supply-chain.test.js",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent workflow-lint policy coverage and zero unexplained replay disagreement"
     },
     {
       "path": "libghostty-native.lock.json",
@@ -2942,6 +3035,14 @@
       "legacy_coordinate": "ci/changes",
       "skip_semantics": "github-skipped-is-distinct-from-passed",
       "new_mode": "legacy/ci/changes",
+      "owner": "graith-maintainers",
+      "new_obligation": false
+    },
+    {
+      "legacy_coordinate": "ci/ci-shadow-summary",
+      "legacy_condition": "${{ always() \u0026\u0026 !cancelled() }}",
+      "skip_semantics": "github-skipped-is-distinct-from-passed",
+      "new_mode": "legacy/ci/ci-shadow-summary",
       "owner": "graith-maintainers",
       "new_obligation": false
     },
@@ -3415,5 +3516,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21"
+  "digest": "d9112c011e018c4cf89ddc9c97b0a1c6e93b9d424d0916fc2da6ff0c6131a0f1"
 }

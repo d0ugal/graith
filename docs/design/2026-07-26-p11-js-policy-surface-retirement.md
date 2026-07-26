@@ -2,7 +2,7 @@
 title: "Design Doc: P11 JS Policy Surface Retirement"
 authors: graith maintainers
 created: 2026-07-26
-status: Draft (foundation tranche)
+status: Draft (serialized deletion tranche)
 reviewers: (none yet)
 informed: ci-north-star rollout owners
 ---
@@ -10,11 +10,11 @@ informed: ci-north-star rollout owners
 # P11 JS Policy Surface Retirement
 
 P11 retires the repository-owned JavaScript helpers under
-`.github/workflows/scripts/` one compatibility tranche at a time. This first
-foundation tranche does not edit those helpers: it names the surface, records
-owner contracts and deletion criteria, adds a Go comparison harness beside the
-P2/P3 policy/result fixture, and shadows the `regen.yml` trust assertions
-semantically without moving the signed P0/P1 checksums.
+`.github/workflows/scripts/` one compatibility tranche at a time. This
+serialized deletion tranche removes the small test-only policy scripts whose
+claims now have semantic Go coverage, keeps the docs-preview/docs-diff runtime
+helpers and `pngjs` lock surface, and regenerates the P0/P1 metadata in the
+same owned epoch.
 
 ## Background
 
@@ -27,40 +27,44 @@ inside GitHub Actions YAML and shell blocks.
 
 P0 already inventories the files as policy surfaces, while P2/P3 provide the
 Go manifest, plan, result, fan-in, credential-operation, and hermetic fixture
-APIs. P11 consumes those APIs. It must not bulk-port scripts, delete paths, or
-reshape workflow YAML before compatibility evidence exists.
+APIs. P11 consumes those APIs. A helper deletion is allowed only when the
+replacement is named, checksum-bound, covered by tests, and represented in the
+acceptance projection as a closed-world rebind from the exact retired JS path.
 
 ## Problem
 
 Replacing JavaScript tests with Go tests looks mechanically simple, but each
-edit changes signed P0 inventory checksums and the P1 manifest digest. Doing
-that while P4/P5 are active would invalidate the current accepted baseline
-binding. The raw `regen-auth.test.js` regex assertions also cannot be deleted
-until a serialized epoch updates that baseline and proves the semantic Go
-assertions cover the same security claims.
+edit changes signed P0 inventory checksums and the P1 manifest digest. The
+serialized epoch therefore has to update generated metadata and acceptance
+together. The acceptance projection must not generically ignore helper churn:
+unlisted helper removals, unknown additions, replacement checksum drift, and
+authoritative job/context changes remain failures.
 
 ## Goals
 
-- Inventory every current file under `.github/workflows/scripts/` with owner,
+- Inventory every retained file under `.github/workflows/scripts/` with owner,
   callers, policy inputs/outputs, disposition, deletion criterion, and sample
   requirements.
-- Add deterministic Go foundation code that validates the P11 inventory against
-  the current P0 inventory and script directory.
-- Add a comparison harness that uses `BuildHermeticPlan`,
-  `GenerateWorkflowData`, `FanInFixture`, and credential-operation validation.
-- Shadow `regen.yml` trust assertions semantically in Go without editing
-  `regen-auth.test.js`.
-- Record the ordered remaining P11 tranches and the P0/P1 regeneration chain
-  required before the next baseline-bound helper edit.
+- Retire the approved test-only JS files with explicit Go replacements:
+  `libghostty_policy_test.go`, `p11_js_surface_test.go`,
+  `renovate_retry_test.go`, and `workflow_lint_policy_test.go`.
+- Keep the regen trust assertions semantic in Go, including whole-document
+  credential scalar sweep, explicit plan-to-credential trust allowlist,
+  non-superset negative sample, git-index helper enumeration, and strict
+  repository-command detection.
+- Regenerate P0 inventory and P1 manifest after deletion.
+- Add an acceptance rebind that maps each retired JS path/checksum to named Go
+  replacement path/checksum identities and fails closed for anything else.
 
 ### Non-Goals
 
-- Replacing `regen-auth.test.js` in this PR.
-- Retiring, deleting, or modifying any existing JavaScript helper in this PR.
-- Editing workflow YAML, generated metadata, `internal/cibaseline/inventory.json`,
-  or `internal/cipolicy/manifest.json` in this PR.
+- Retiring the docs-preview/docs-diff runtime helpers or their JS tests.
 - Replacing `pngjs`; it remains the explicit retained exception for PNG
   decoding and encoding.
+- Aggregating live Actions history, cross-workflow durations, or check-run
+  completion state through C2.
+- Loosening acceptance to ignore helper-surface changes outside the named
+  retired-JS-to-Go rebinds.
 
 ## Platform support
 
@@ -69,7 +73,7 @@ assertions cover the same security claims.
 | CLI/server | Targeted | P11 contracts and comparisons live in Go under `internal/cipolicy`. |
 | macOS | Excluded | This tranche changes policy metadata and tests only. |
 | iOS | Excluded | This tranche has no GUI runtime behavior. |
-| GitHub Actions | Observed | Existing workflow behavior is parsed and asserted, but not changed. |
+| GitHub Actions | Targeted | Workflow policy behavior is parsed and asserted; C2 also moves its diagnostic summary renderer into `cmd/cipolicy`. |
 
 ## Proposals
 
@@ -80,13 +84,13 @@ the current signed inventory stable but fails the P11 exit criteria: there is
 no helper-by-helper owner contract, no deletion criterion, and no semantic
 replacement path for regex-based security assertions.
 
-### Proposal 1: Foundation Before Edits (Recommended)
+### Proposal 1: Serialized Go Replacement (Recommended)
 
-Add a Go-owned P11 surface inventory and comparison harness first, without
-touching existing helpers. The harness records compatibility samples as data,
-loads current P0/P1 inputs, builds hermetic Go plans, fans in synthetic
-successful observations, and validates credential operations against the P3
-fixture policy.
+Add or reuse Go-owned P11 surface inventory, comparison, and workflow parsing
+contracts, then delete only the named test-only JS files in the same baseline
+epoch. The harness records compatibility samples as data, loads current P0/P1
+inputs, builds hermetic Go plans, fans in synthetic successful observations,
+and validates credential operations against the P3 fixture policy.
 
 The `regen.yml` shadow test parses YAML into structured jobs, steps, `env`, and
 `with` maps. Comments and formatting cannot satisfy it. It asserts:
@@ -105,14 +109,17 @@ The `regen.yml` shadow test parses YAML into structured jobs, steps, `env`, and
 - P3 credential validation rejects same-repository maintainer-token access while
   allowing trusted-publication regeneration within its boundary.
 
-This creates executable evidence without invalidating baseline-bound files.
+This creates executable evidence and updates the baseline-bound files together.
+The acceptance projection admits only the exact deleted JS path/checksum to Go
+replacement path/checksum mapping approved for this tranche.
 
-### Proposal 2: Replace `regen-auth.test.js` Immediately
+### Proposal 2: Generic Helper Churn Exemption
 
-Delete or rewrite the JS test now and regenerate P0/P1 in the same PR. Rejected
-for this tranche because it would change signed baseline checksums while P4/P5
-are active. That update needs a serialized epoch with owner-approved inventory
-rebind and manifest regeneration.
+Allow acceptance to ignore any workflow-helper test deletion once Go tests
+exist. Rejected because it is not closed-world: an unrelated helper removal,
+missing replacement, mismatched checksum, or authoritative workflow change
+could be masked as test migration. C2/P11 instead uses exact path and checksum
+rebinds.
 
 ## Helper Inventory
 
@@ -176,9 +183,11 @@ Every entry below is owned by `graith-maintainers`.
 - Inputs: native, release, coverage workflows; `scripts/libghostty-native.sh`;
   `libghostty-native.lock.json`.
 - Outputs: Node test pass/fail for native/release/coverage policy.
-- Disposition: port after P5 artifact/cache contracts merge.
-- Deletion criterion: Go semantic tests compare workflow YAML, lock data, and
-  shell policy with P2/P3 capability and artifact contracts.
+- Disposition: retired in this tranche.
+- Replacement: `internal/cipolicy/libghostty_policy_test.go`.
+- Deletion criterion: the Go test preserves native routing, fail-safe
+  detector, release gating, artifact lock/publish trust, local build isolation,
+  and tagged coverage graph assertions.
 
 ### `package.json` and `package-lock.json`
 
@@ -197,10 +206,12 @@ Every entry below is owned by `graith-maintainers`.
   checkout persistence, generated commit bundle, push script.
 - Outputs: Node test pass/fail for regeneration credential and publication
   boundaries.
-- Disposition: port in the next serialized tranche.
+- Disposition: retired in this tranche.
+- Replacement: `internal/cipolicy/p11_js_surface.go` and
+  `internal/cipolicy/p11_js_surface_test.go`.
 - Deletion criterion: Go semantic assertions and P2/P3 trust fixture pass,
-  old-vs-new comparison has zero unexplained disagreement, P0 inventory is
-  rebound, and P1 manifest is regenerated.
+  including the pre-deletion hardening matrix below; P0 inventory is rebound
+  and P1 manifest is regenerated.
 
 ### `renovate-retry.test.js`
 
@@ -208,7 +219,8 @@ Every entry below is owned by `graith-maintainers`.
 - Inputs: `scripts/verify-renovate-libghostty.sh`, fake Renovate binaries,
   Renovate JSON logs.
 - Outputs: Node test pass/fail for bounded transient retry behavior.
-- Disposition: port.
+- Disposition: retired in this tranche.
+- Replacement: `internal/cipolicy/renovate_retry_test.go`.
 - Deletion criterion: Go tests drive the shell verifier through fake binaries
   and match retry count/stdout/stderr/status for transient, deterministic,
   mixed, and repeated failures.
@@ -218,7 +230,8 @@ Every entry below is owned by `graith-maintainers`.
 - Callers: `workflow-lint.yml` scripts job.
 - Inputs: `Makefile`, `workflow-lint.yml`.
 - Outputs: Node test pass/fail for ShellCheck coverage and strictness.
-- Disposition: port.
+- Disposition: retired in this tranche.
+- Replacement: `internal/cipolicy/workflow_lint_policy_test.go`.
 - Deletion criterion: Go semantic tests prove tracked shell scripts and
   nested/root shell path filters remain covered.
 
@@ -227,16 +240,12 @@ Every entry below is owned by `graith-maintainers`.
 - Callers: `workflow-lint.yml` scripts job.
 - Inputs: `workflow-lint.yml`, actionlint and zizmor install steps.
 - Outputs: Node test pass/fail for provenance-verified workflow-lint installs.
-- Disposition: port.
+- Disposition: retired in this tranche.
+- Replacement: `internal/cipolicy/workflow_lint_policy_test.go`.
 - Deletion criterion: Go semantic tests prove attestation verification happens
   before extraction/install and cannot be swallowed.
 
-## Next Serialized Tranche
-
-The proposed next helper is `regen-auth.test.js`. It is low runtime risk
-because it is test-only, but high trust importance because it guards credential
-publication boundaries and is a prerequisite to any later workflow YAML
-reshaping.
+## Serialized Rebind
 
 Compatibility sample matrix:
 
@@ -247,27 +256,22 @@ Compatibility sample matrix:
 | trusted-base PR replay | Event classifies as `trusted-base`; generated-metadata policy remains selected for replay while soft regen rows stay outside required fan-in. |
 | push boundary | Credentialed checkout is isolated to the fresh runner; generated commit parent, identity, allowlisted paths, and non-force push are verified. |
 
-Required chain before editing that helper:
+Required chain for this epoch:
 
-1. Wait for P4/P5 active branches to merge or for rollout owners to approve a
-   new serialized baseline epoch.
-2. Replace the JS regex/slicing assertions with the semantic Go contract, or
-   retain both temporarily until parity is proven.
-3. Run the old and new assertions over the documented sample matrix; zero
-   unexplained disagreement is required.
-4. Regenerate P0 inventory:
+1. Delete only the named retired JS paths.
+2. Add or update the named Go semantic replacements and their focused tests.
+3. Regenerate P0 inventory:
    `go run ./cmd/cibaseline -output internal/cibaseline/inventory.json generate`.
-5. Add the owner-approved P0 inventory rebind/acceptance metadata for the new
-   policy-surface checksum delta. The current acceptance validator only admits
-   the earlier Makefile rebind, so this is an explicit epoch update, not a
-   mechanical checksum refresh.
-6. Regenerate P1 manifest from the rebound inventory:
+4. Add the owner-approved P0 inventory rebind/acceptance metadata for the new
+   policy-surface checksum delta. The validator admits only the exact retired
+   JS path/checksum to Go path/checksum mapping for this epoch.
+5. Regenerate P1 manifest from the rebound inventory:
    `go run ./cmd/cipolicy -output internal/cipolicy/manifest.json generate`.
-7. Run `go test ./internal/cibaseline ./internal/cipolicy`, JS workflow-script
+6. Run `go test ./internal/cibaseline ./internal/cipolicy`, JS workflow-script
    tests, actionlint/shellcheck where relevant, and the wider validation
    required by the changed baseline epoch.
 
-Pre-deletion hardening required by the `regen-auth.test.js` tranche:
+Pre-deletion hardening satisfied by the `regen-auth.test.js` replacement:
 
 - Add a whole-document scalar sweep, or equivalent parsed coverage, so
   `secrets.RELEASE_TOKEN`, `github.token`, and `GITHUB_TOKEN` cannot hide in
@@ -286,38 +290,28 @@ Pre-deletion hardening required by the `regen-auth.test.js` tranche:
 
 ## Remaining Tranche Order
 
-1. `regen-auth.test.js`: semantic replacement and P0/P1 serialized rebind.
-2. `renovate-retry.test.js`: port shell-verifier retry contract using fake
-   binaries and log fixtures.
-3. `shellcheck-policy.test.js`: port text-only ShellCheck coverage contract.
-4. `workflow-lint-supply-chain.test.js`: port actionlint/zizmor provenance
-   install contract.
-5. `docs-diff.test.js` and pure `docs-diff.js` row logic: port or wrap pure
+1. `docs-diff.test.js` and pure `docs-diff.js` row logic: port or wrap pure
    row operations while retaining `pngjs`.
-6. `docs-preview.test.js` and `docs-preview.js`: wrap GitHub API branch/comment
+2. `docs-preview.test.js` and `docs-preview.js`: wrap GitHub API branch/comment
    mutation paths after credential-boundary tests are semantic.
-7. `libghostty-policy.test.js`: port native/release/coverage policy after P5
-   artifact/cache contracts are merged and available to compare against.
-8. `package.json` and `package-lock.json`: retain as the explicit `pngjs`
+3. `package.json` and `package-lock.json`: retain as the explicit `pngjs`
    exception until docs-preview no longer needs that dependency.
 
 ## Other Notes
 
 ### Testing
 
-The foundation tests live in `internal/cipolicy/p11_js_surface_test.go`.
-They validate the hardcoded P11 inventory against the current script directory
-and P0 inventory, run the P11 compatibility matrix through the P2/P3 plan and
-fan-in APIs, and parse `regen.yml` structurally so YAML formatting cannot erase
-the trust assertions.
-
-The safe prerequisite tranche for `regen-auth.test.js` adds semantic parity
-coverage and pre-deletion hardening while retaining the helper. Helper deletion,
-P0 inventory acceptance rebind, and P1 manifest regeneration remain the next
-owner-approved serialized action.
+The replacement tests live in `internal/cipolicy/p11_js_surface_test.go`,
+`internal/cipolicy/renovate_retry_test.go`,
+`internal/cipolicy/workflow_lint_policy_test.go`, and
+`internal/cipolicy/libghostty_policy_test.go`. They validate the retained JS
+inventory against the current script directory and P0 inventory, run the P11
+compatibility matrix through the P2/P3 plan and fan-in APIs, parse `regen.yml`
+structurally, execute the Renovate verifier through fake binaries, and keep the
+workflow-lint/native assertions executable in Go.
 
 ### Open questions
 
-- The next epoch needs owner approval for the exact P0 acceptance rebind shape.
+- Any later epoch needs owner approval for the exact P0 acceptance rebind shape.
 - The docs-preview tranche needs a retained live or high-fidelity fake GitHub
   API sample before deleting the JS branch-mutation helper.

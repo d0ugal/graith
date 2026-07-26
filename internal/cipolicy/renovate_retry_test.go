@@ -1,0 +1,356 @@
+package cipolicy
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+)
+
+const (
+	renovateTransientLog = `{"level":50,"msg":"lookupUpdates error","err":{"message":"fatal: unable to access 'https://tangled.org/mitchellh.com/go-libghostty/': gnutls_handshake() failed: The TLS connection was non-properly terminated."}}`
+	renovateForbiddenLog = `{"level":50,"msg":"lookupUpdates error","err":{"message":"fatal: unable to access 'https://tangled.org/mitchellh.com/go-libghostty/': The requested URL returned error: 403"}}`
+	renovateWarningLog   = `{"level":40,"msg":"dreich warning unrelated to the failed lookup"}`
+)
+
+type renovateFakeResponse struct {
+	log    string
+	status int
+}
+
+type renovateVerifierResult struct {
+	status int
+	count  int
+	stdout string
+	stderr string
+}
+
+func TestRenovateRetryPolicy(t *testing.T) {
+	tests := map[string]struct {
+		responses []renovateFakeResponse
+		want      renovateVerifierResult
+	}{
+		"transient success": {
+			responses: []renovateFakeResponse{
+				{log: renovateTransientLog, status: 1},
+				{log: renovateSuccessLog(t), status: 0},
+			},
+			want: renovateVerifierResult{
+				status: 0,
+				count:  2,
+				stderr: "retrying Renovate lookup (attempt 2 of 3)",
+				stdout: "suppressed the unsupported Ghostty/Highway proposal",
+			},
+		},
+		"warning noise before transient success": {
+			responses: []renovateFakeResponse{
+				{log: renovateWarningLog + "\n" + renovateTransientLog, status: 1},
+				{log: renovateSuccessLog(t), status: 0},
+			},
+			want: renovateVerifierResult{
+				status: 0,
+				count:  2,
+				stderr: "retrying Renovate lookup (attempt 2 of 3)",
+			},
+		},
+		"deterministic failure": {
+			responses: []renovateFakeResponse{
+				{log: renovateForbiddenLog, status: 1},
+			},
+			want: renovateVerifierResult{
+				status: 1,
+				count:  1,
+				stderr: "requested URL returned error: 403",
+			},
+		},
+		"deterministic second attempt": {
+			responses: []renovateFakeResponse{
+				{log: renovateTransientLog, status: 1},
+				{log: renovateForbiddenLog, status: 1},
+			},
+			want: renovateVerifierResult{
+				status: 1,
+				count:  2,
+				stderr: "requested URL returned error: 403",
+			},
+		},
+		"mixed transient and deterministic log": {
+			responses: []renovateFakeResponse{
+				{log: renovateTransientLog + "\n" + renovateForbiddenLog, status: 1},
+			},
+			want: renovateVerifierResult{
+				status: 1,
+				count:  1,
+				stderr: "requested URL returned error: 403",
+			},
+		},
+		"three transient failures": {
+			responses: []renovateFakeResponse{
+				{log: renovateTransientLog, status: 1},
+				{log: renovateTransientLog, status: 1},
+				{log: renovateTransientLog, status: 1},
+			},
+			want: renovateVerifierResult{
+				status: 1,
+				count:  3,
+				stderr: "Renovate lookup dry run failed",
+			},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			result := runRenovateVerifier(t, test.responses)
+			if result.status != test.want.status {
+				t.Fatalf("status = %d, want %d\nstderr:\n%s", result.status, test.want.status, result.stderr)
+			}
+
+			if result.count != test.want.count {
+				t.Fatalf("attempt count = %d, want %d", result.count, test.want.count)
+			}
+
+			if test.want.stdout != "" && !strings.Contains(result.stdout, test.want.stdout) {
+				t.Fatalf("stdout missing %q:\n%s", test.want.stdout, result.stdout)
+			}
+
+			if test.want.stderr != "" && !strings.Contains(result.stderr, test.want.stderr) {
+				t.Fatalf("stderr missing %q:\n%s", test.want.stderr, result.stderr)
+			}
+
+			if name == "deterministic second attempt" && strings.Contains(result.stderr, "attempt 3 of 3") {
+				t.Fatalf("deterministic second attempt retried again:\n%s", result.stderr)
+			}
+
+			if (name == "deterministic failure" || name == "mixed transient and deterministic log") &&
+				strings.Contains(result.stderr, "retrying Renovate lookup") {
+				t.Fatalf("non-transient failure retried:\n%s", result.stderr)
+			}
+
+			if name == "three transient failures" &&
+				!strings.Contains(result.stderr, "retrying Renovate lookup (attempt 3 of 3)") {
+				t.Fatalf("third transient attempt was not reported:\n%s", result.stderr)
+			}
+		})
+	}
+}
+
+func runRenovateVerifier(t *testing.T, responses []renovateFakeResponse) renovateVerifierResult {
+	t.Helper()
+
+	repoRoot, err := filepath.Abs(p11RepoRoot())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tempDir := t.TempDir()
+	binDir := filepath.Join(tempDir, "bin")
+	responseDir := filepath.Join(tempDir, "responses")
+	countFile := filepath.Join(tempDir, "count")
+
+	for _, dir := range []string{binDir, responseDir} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := os.WriteFile(countFile, []byte("0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for index, response := range responses {
+		base := filepath.Join(responseDir, strconv.Itoa(index+1))
+		if err := os.WriteFile(base+".log", []byte(response.log+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(base+".status", []byte(strconv.Itoa(response.status)+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeTestExecutable(t, filepath.Join(binDir, "renovate-config-validator"), "#!/bin/sh\nexit 0\n")
+	writeTestExecutable(t, filepath.Join(binDir, "sleep"), "#!/bin/sh\nexit 0\n")
+	writeTestExecutable(t, filepath.Join(binDir, "renovate"), `#!/bin/sh
+count="$(cat "$FAKE_RENOVATE_COUNT")"
+count=$((count + 1))
+printf '%s\n' "$count" >"$FAKE_RENOVATE_COUNT"
+cat "$FAKE_RENOVATE_RESPONSES/$count.log"
+exit "$(cat "$FAKE_RENOVATE_RESPONSES/$count.status")"
+`)
+
+	cmd := exec.Command(filepath.Join(repoRoot, "scripts/verify-renovate-libghostty.sh"))
+	cmd.Dir = repoRoot
+
+	cmd.Env = append(filteredRenovateVerifierEnv(os.Environ()),
+		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"RENOVATE_BIN=renovate",
+		"RENOVATE_CONFIG_VALIDATOR_BIN=renovate-config-validator",
+		"FAKE_RENOVATE_COUNT="+countFile,
+		"FAKE_RENOVATE_RESPONSES="+responseDir,
+		"HOME="+tempDir,
+		"XDG_CONFIG_HOME="+tempDir,
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_CONFIG_NOSYSTEM=1",
+	)
+
+	var stdout, stderr bytes.Buffer
+
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+
+	status := 0
+
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			status = exitErr.ExitCode()
+		} else {
+			t.Fatal(err)
+		}
+	}
+
+	countData, err := os.ReadFile(countFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	count, err := strconv.Atoi(strings.TrimSpace(string(countData)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return renovateVerifierResult{
+		status: status,
+		count:  count,
+		stdout: stdout.String(),
+		stderr: stderr.String(),
+	}
+}
+
+func renovateSuccessLog(t *testing.T) string {
+	t.Helper()
+
+	nativeDeps := []any{
+		map[string]any{
+			"depName":       "Ghostty",
+			"depType":       "libghostty-native",
+			"currentDigest": "d4ac93a0395d321b043ee0116dc8a1a384f0fb83",
+			"updates":       []any{},
+		},
+		map[string]any{
+			"depName":      "Highway",
+			"depType":      "libghostty-native",
+			"currentValue": "1.2.0",
+			"updates":      []any{},
+		},
+	}
+	for _, name := range []string{"SPDX tools-java", "Zig", "go-libghostty", "simdutf", "uucode"} {
+		nativeDeps = append(nativeDeps, map[string]any{
+			"depName": name,
+			"depType": "libghostty-native",
+			"updates": []any{
+				map[string]any{"branchName": "renovate/libghostty-native"},
+			},
+		})
+	}
+
+	lines := []string{
+		renovateJSONLine(t, map[string]any{
+			"level": 20,
+			"msg":   "packageFiles with updates",
+			"config": map[string]any{
+				"regex": []any{map[string]any{"deps": nativeDeps}},
+			},
+		}),
+		renovateJSONLine(t, map[string]any{
+			"level": 20,
+			"msg":   "Repository config",
+			"config": map[string]any{
+				"packageRules": []any{
+					map[string]any{
+						"matchDepTypes":    []string{"libghostty-native"},
+						"groupSlug":        "libghostty-native",
+						"automerge":        false,
+						"postUpgradeTasks": nil,
+					},
+					map[string]any{
+						"matchDepTypes":               []string{"libghostty-native"},
+						"matchDepNames":               []string{"Ghostty", "Zig", "uucode", "Highway", "simdutf"},
+						"dependencyDashboardApproval": true,
+					},
+					map[string]any{
+						"matchDepTypes": []string{"libghostty-native"},
+						"matchJsonata": []string{
+							"(depName = 'Ghostty' and currentDigest = 'd4ac93a0395d321b043ee0116dc8a1a384f0fb83') or (depName = 'Highway' and currentValue = '1.2.0')",
+						},
+						"enabled": false,
+					},
+					map[string]any{
+						"matchManagers":     []string{"gomod"},
+						"matchPackageNames": []string{"go.mitchellh.com/libghostty"},
+						"enabled":           false,
+						"automerge":         false,
+					},
+				},
+			},
+		}),
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func renovateJSONLine(t *testing.T, value any) string {
+	t.Helper()
+
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return string(data)
+}
+
+func filteredRenovateVerifierEnv(environ []string) []string {
+	omit := map[string]bool{
+		"GIT_CONFIG_COUNT":    true,
+		"GIT_CONFIG_GLOBAL":   true,
+		"GIT_CONFIG_NOSYSTEM": true,
+		"HOME":                true,
+		"XDG_CONFIG_HOME":     true,
+	}
+
+	filtered := make([]string, 0, len(environ))
+	for _, entry := range environ {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok {
+			filtered = append(filtered, entry)
+			continue
+		}
+
+		if omit[key] || strings.HasPrefix(key, "GIT_CONFIG_KEY_") || strings.HasPrefix(key, "GIT_CONFIG_VALUE_") {
+			continue
+		}
+
+		filtered = append(filtered, entry)
+	}
+
+	return filtered
+}
+
+func writeTestExecutable(t *testing.T, path, contents string) {
+	t.Helper()
+
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chmod(path, 0o755); err != nil { //nolint:gosec // G302: fake command must be executable for script policy coverage.
+		t.Fatal(err)
+	}
+}
