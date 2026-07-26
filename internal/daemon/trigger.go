@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -817,7 +818,7 @@ func (sm *SessionManager) deliverInboxScoped(ctx context.Context, target, body s
 
 // --- status / control API (used by handler & CLI) ---
 
-func (sm *SessionManager) triggerRecord(t *config.TriggerConfig) protocol.TriggerRecord {
+func (sm *SessionManager) triggerRecord(t *config.TriggerConfig, includeBindingDetails bool) protocol.TriggerRecord {
 	rt := sm.getTriggerRuntime(t.Name)
 
 	rec := protocol.TriggerRecord{
@@ -846,21 +847,24 @@ func (sm *SessionManager) triggerRecord(t *config.TriggerConfig) protocol.Trigge
 			rec.WatchScope = "role:" + t.Watch.Role
 		}
 
-		sm.triggers.mu.Lock()
-		for _, b := range sm.triggers.bindings {
-			if b.triggerName == t.Name {
-				rec.Bindings++
-				if b.degraded != "" {
-					rec.Degraded = b.degraded
-					rec.DegradedRetryCount = b.retryCount
+		details := sm.watchBindingDetails(t.Name)
+		rec.Bindings = len(details)
 
-					if !b.nextRetryAt.IsZero() {
-						rec.DegradedRetryAt = b.nextRetryAt.Format(time.RFC3339)
-					}
-				}
+		for _, detail := range details {
+			if detail.Degraded == "" {
+				continue
 			}
+
+			rec.Degraded = detail.Degraded
+			rec.DegradedRetryCount = detail.DegradedRetryCount
+			rec.DegradedRetryAt = detail.DegradedRetryAt
+
+			break
 		}
-		sm.triggers.mu.Unlock()
+
+		if includeBindingDetails {
+			rec.BindingsDetail = details
+		}
 	} else if t.IsGCX() {
 		rec.Source = "gcx"
 
@@ -903,13 +907,102 @@ func (sm *SessionManager) triggerRecord(t *config.TriggerConfig) protocol.Trigge
 	return rec
 }
 
+func (sm *SessionManager) watchBindingDetails(triggerName string) []protocol.TriggerBindingDetail {
+	sm.triggers.mu.Lock()
+
+	bindings := make([]*watchBinding, 0)
+	for _, b := range sm.triggers.bindings {
+		if b.triggerName == triggerName {
+			bindings = append(bindings, b)
+		}
+	}
+
+	sm.triggers.mu.Unlock()
+
+	out := make([]protocol.TriggerBindingDetail, 0, len(bindings))
+	for _, b := range bindings {
+		out = append(out, sm.watchBindingDetail(b))
+	}
+
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].SessionName != out[j].SessionName {
+			return out[i].SessionName < out[j].SessionName
+		}
+
+		return out[i].SessionID < out[j].SessionID
+	})
+
+	return out
+}
+
+func (sm *SessionManager) watchBindingDetail(b *watchBinding) protocol.TriggerBindingDetail {
+	b.bmu.Lock()
+
+	pending := len(b.changed)
+	debounceUntil := b.debounceUntil
+	inFlight := b.activeRuns > 0
+	lastRun := b.lastRun
+	lastResult := b.lastResult
+	lastError := b.lastError
+	degraded := b.degraded
+	retryCount := b.retryCount
+	retryAt := b.nextRetryAt
+
+	b.bmu.Unlock()
+
+	detail := protocol.TriggerBindingDetail{
+		SessionID:      b.sessionID,
+		SessionName:    sm.sessionName(b.sessionID),
+		WorktreePath:   b.worktree,
+		PendingChanges: pending,
+		ActionInFlight: inFlight,
+		LastResult:     lastResult,
+		LastError:      lastError,
+		Degraded:       degraded,
+	}
+
+	switch {
+	case degraded != "":
+		detail.State = "degraded"
+	case inFlight:
+		detail.State = "running"
+	case pending > 0 && !debounceUntil.IsZero():
+		detail.State = "debouncing"
+	case lastResult == "rate-limited":
+		detail.State = "rate-limited"
+	case lastResult == "skipped":
+		detail.State = "skipped"
+	case lastError != "":
+		detail.State = "failed"
+	default:
+		detail.State = "idle"
+	}
+
+	if !debounceUntil.IsZero() {
+		detail.DebounceUntil = debounceUntil.Format(time.RFC3339)
+	}
+
+	if !lastRun.IsZero() {
+		detail.LastRun = lastRun.Format(time.RFC3339)
+	}
+
+	if degraded != "" {
+		detail.DegradedRetryCount = retryCount
+		if !retryAt.IsZero() {
+			detail.DegradedRetryAt = retryAt.Format(time.RFC3339)
+		}
+	}
+
+	return detail
+}
+
 // TriggerList returns records for all configured triggers.
 func (sm *SessionManager) TriggerList() []protocol.TriggerRecord {
 	triggers := sm.allTriggers()
 
 	out := make([]protocol.TriggerRecord, 0, len(triggers))
 	for i := range triggers {
-		out = append(out, sm.triggerRecord(&triggers[i]))
+		out = append(out, sm.triggerRecord(&triggers[i], false))
 	}
 
 	return out
@@ -922,7 +1015,7 @@ func (sm *SessionManager) TriggerStatus(name string) (protocol.TriggerRecord, er
 		return protocol.TriggerRecord{}, fmt.Errorf("trigger %q not found", name)
 	}
 
-	return sm.triggerRecord(t), nil
+	return sm.triggerRecord(t, true), nil
 }
 
 // TriggerRunNow fires a trigger out-of-band (cause "manual"), respecting the

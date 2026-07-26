@@ -119,7 +119,7 @@ func TestAllTriggers_CompletionRemainsAddressableWhenStopped(t *testing.T) {
 	full := scenarioTriggerName("sc-1", "archive")
 	if got := sm.triggerByName(full); got == nil || !got.IsCompletion() {
 		t.Fatalf("stopped scenario completion trigger = %+v", got)
-	} else if record := sm.triggerRecord(got); record.Source != "completion" {
+	} else if record := sm.triggerRecord(got, false); record.Source != "completion" {
 		t.Fatalf("completion trigger source = %q", record.Source)
 	}
 

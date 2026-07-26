@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/d0ugal/graith/internal/protocol"
@@ -169,6 +170,7 @@ func renderTriggerStatus(w io.Writer, t protocol.TriggerRecord) {
 		}
 	case "watch":
 		_, _ = fmt.Fprintf(w, "Watch: %s (%d live binding(s))\n", t.WatchScope, t.Bindings)
+		renderTriggerBindingDetails(w, t.BindingsDetail)
 
 		if t.Degraded != "" {
 			_, _ = fmt.Fprintf(w, "Degraded: %s\n", t.Degraded)
@@ -198,6 +200,93 @@ func renderTriggerStatus(w io.Writer, t protocol.TriggerRecord) {
 	if t.LastError != "" {
 		_, _ = fmt.Fprintf(w, "Last error: %s\n", t.LastError)
 	}
+}
+
+func renderTriggerBindingDetails(w io.Writer, bindings []protocol.TriggerBindingDetail) {
+	if len(bindings) == 0 {
+		return
+	}
+
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "SESSION\tWORKTREE\tSTATE\tPENDING\tDEBOUNCE\tIN-FLIGHT\tLAST RUN\tRESULT\tRETRY")
+
+	for _, b := range bindings {
+		session := b.SessionName
+		if session == "" {
+			session = b.SessionID
+		} else if b.SessionID != "" {
+			session = fmt.Sprintf("%s (%s)", b.SessionName, b.SessionID)
+		}
+
+		debounce := b.DebounceUntil
+		if debounce == "" {
+			debounce = "-"
+		}
+
+		inFlight := "-"
+		if b.ActionInFlight {
+			inFlight = "yes"
+		}
+
+		lastRun := b.LastRun
+		if lastRun == "" {
+			lastRun = "-"
+		}
+
+		result := b.LastResult
+		if b.LastError != "" {
+			if result == "" {
+				result = "failed"
+			}
+
+			result += ": " + b.LastError
+		}
+
+		if b.Degraded != "" {
+			degraded := "degraded: " + b.Degraded
+			if result == "" {
+				result = degraded
+			} else {
+				result += "; " + degraded
+			}
+		}
+
+		if result == "" {
+			result = "-"
+		}
+
+		result = triggerBindingTableCell(result)
+
+		retry := "-"
+		if b.DegradedRetryAt != "" {
+			retry = fmt.Sprintf("%s (%d)", b.DegradedRetryAt, b.DegradedRetryCount)
+		}
+
+		worktree := b.WorktreePath
+		if worktree == "" {
+			worktree = "-"
+		}
+
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\n",
+			triggerBindingTableCell(session), triggerBindingTableCell(worktree), b.State, b.PendingChanges, debounce, inFlight, lastRun, result, retry)
+	}
+
+	_ = tw.Flush()
+}
+
+func triggerBindingTableCell(s string) string {
+	const maxLen = 160
+
+	s = strings.ReplaceAll(s, "\t", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.Join(strings.Fields(s), " ")
+
+	if len(s) > maxLen {
+		return s[:maxLen-3] + "..."
+	}
+
+	return s
 }
 
 func registerTriggerCmd() {

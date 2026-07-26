@@ -1270,6 +1270,25 @@ type TriggerPauseMsg struct {
 	Pause bool   `json:"pause"`
 }
 
+// TriggerBindingDetail is the live per-binding watch state returned with a
+// watch trigger's status. Bindings are daemon-runtime state and are rebuilt on
+// daemon restart; the aggregate TriggerRecord history remains durable.
+type TriggerBindingDetail struct {
+	SessionID          string `json:"session_id"`
+	SessionName        string `json:"session_name,omitempty"`
+	WorktreePath       string `json:"worktree_path,omitempty"`
+	State              string `json:"state"`
+	PendingChanges     int    `json:"pending_changes"`
+	DebounceUntil      string `json:"debounce_until,omitempty"` // RFC3339 while armed
+	ActionInFlight     bool   `json:"action_in_flight,omitempty"`
+	LastRun            string `json:"last_run,omitempty"` // RFC3339 or ""
+	LastResult         string `json:"last_result,omitempty"`
+	LastError          string `json:"last_error,omitempty"`
+	Degraded           string `json:"degraded,omitempty"`
+	DegradedRetryCount int    `json:"degraded_retry_count,omitempty"`
+	DegradedRetryAt    string `json:"degraded_retry_at,omitempty"`
+}
+
 // TriggerRecord is the per-trigger info returned to the client.
 type TriggerRecord struct {
 	Name       string `json:"name"`
@@ -1291,8 +1310,9 @@ type TriggerRecord struct {
 	// DegradedRetryCount/DegradedRetryAt describe the automatic recovery of the
 	// degraded binding reported in Degraded: how many recreation attempts have
 	// been made and when the next one is due (RFC3339). Zero/empty when healthy.
-	DegradedRetryCount int    `json:"degraded_retry_count,omitempty"`
-	DegradedRetryAt    string `json:"degraded_retry_at,omitempty"`
+	DegradedRetryCount int                    `json:"degraded_retry_count,omitempty"`
+	DegradedRetryAt    string                 `json:"degraded_retry_at,omitempty"`
+	BindingsDetail     []TriggerBindingDetail `json:"bindings_detail,omitempty"` // watch: per-binding live state
 }
 
 type TriggerListResponse struct {

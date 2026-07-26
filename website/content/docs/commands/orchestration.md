@@ -85,7 +85,11 @@ List triggers with their source, action, next fire / watch scope, and state.
 ### `gr trigger status <name>`
 
 Detail for one trigger: next fire, last run/result/error, and (for watch
-triggers) live bindings.
+triggers) live binding details. Watch status keeps the aggregate binding count
+and prints one row per live binding with session identity, worktree, state,
+pending change count, debounce deadline, action in-flight marker, last
+per-binding result/error, and degraded retry details. `--json` includes the same
+rows under `trigger.bindings_detail`.
 
 ### `gr trigger run <name>`
 
