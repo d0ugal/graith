@@ -38,8 +38,9 @@ var ciConfigurationPaths = []string{
 	".goreleaser-dev.yaml",
 	".goreleaser-linux.yaml",
 	".goreleaser.yaml",
+	// .release-please-manifest.json is release state rewritten on each release PR.
+	// Keep Release Please policy pinned through .release-please-config.json.
 	".release-please-config.json",
-	".release-please-manifest.json",
 	"libghostty-native.lock.json",
 	"renovate.json5",
 }

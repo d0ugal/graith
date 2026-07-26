@@ -266,6 +266,68 @@ func TestInventorySurfacesIncludeOnlyTrackedRepositoryInputs(t *testing.T) {
 	}
 }
 
+func TestInventorySurfacesIgnoreReleasePleaseManifestContent(t *testing.T) {
+	repo := t.TempDir()
+
+	tracked := append([]string{}, ciConfigurationPaths...)
+	tracked = append(tracked, ciEntrypointPaths...)
+	tracked = append(tracked, ".release-please-manifest.json")
+
+	for _, path := range tracked {
+		fullPath := filepath.Join(repo, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o750); err != nil {
+			t.Fatal(err)
+		}
+
+		content := "braw\n"
+		if path == ".release-please-manifest.json" {
+			content = `{".":"braw"}` + "\n"
+		}
+
+		if err := os.WriteFile(fullPath, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	runGit(t, repo, "init")
+	runGit(t, repo, "add", "--", ".")
+
+	before, err := inventorySurfaces(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	manifestPath := filepath.Join(repo, ".release-please-manifest.json")
+	if err := os.WriteFile(manifestPath, []byte(`{".":"canny"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := inventorySurfaces(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, surface := range after {
+		if surface.Path == ".release-please-manifest.json" {
+			t.Fatal("release-please manifest was inventoried as a CI policy surface")
+		}
+	}
+
+	beforeData, err := json.Marshal(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	afterData, err := json.Marshal(after)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(beforeData) != string(afterData) {
+		t.Fatalf("release-please manifest content changed inventory surfaces:\nbefore=%s\nafter=%s", beforeData, afterData)
+	}
+}
+
 func TestInventorySurfaceIndexedModeParticipatesInIdentity(t *testing.T) {
 	repo := t.TempDir()
 

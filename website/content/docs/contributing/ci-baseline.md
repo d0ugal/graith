@@ -21,9 +21,12 @@ owners. File digests make unmodelled workflow changes visible. It also
 inventories every repo-owned helper and contract test under
 `.github/workflows/scripts/` and every file under root `scripts/`, with an
 owner, executable compatibility contract, and retirement criterion. The
-checked-in actionlint, golangci-lint, GoReleaser, Release Please, and Renovate
-configuration inputs consumed by current workflow proof are inventoried with
-the same metadata and file digests. The native dependency lock is an explicit
+checked-in actionlint, golangci-lint, GoReleaser, Release Please
+configuration, and Renovate configuration inputs consumed by current workflow
+proof are inventoried with the same metadata and file digests. The Release
+Please manifest is deliberately excluded because release-please rewrites it as
+release state on every release PR; `.release-please-config.json` remains the
+pinned policy surface. The native dependency lock is an explicit
 `native-owners` supply-chain surface because current producer and package
 workflows consume its pinned commit, URLs, and SHA-256 values. Each policy
 surface also records its
