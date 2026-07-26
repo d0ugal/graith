@@ -2,12 +2,14 @@ package cipolicy
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 var p11TestNow = p2TestNow
@@ -15,8 +17,10 @@ var p11TestNow = p2TestNow
 const p11SameRepositoryGuard = "github.event.pull_request.head.repo.full_name == github.repository"
 
 var (
-	p11ReleaseTokenExpression = regexp.MustCompile(`\$\{\{\s*secrets\s*(?:\.\s*RELEASE_TOKEN|\[\s*['"]RELEASE_TOKEN['"]\s*\])\s*\}\}`)
-	p11GitHubTokenExpression  = regexp.MustCompile(`\$\{\{\s*github\s*(?:\.\s*token|\[\s*['"]token['"]\s*\])\s*\}\}`)
+	p11ReleaseTokenExpression             = regexp.MustCompile(`\$\{\{\s*secrets\s*(?:\.\s*RELEASE_TOKEN|\[\s*['"]RELEASE_TOKEN['"]\s*\])\s*\}\}`)
+	p11GitHubTokenExpression              = regexp.MustCompile(`\$\{\{\s*github\s*(?:\.\s*token|\[\s*['"]token['"]\s*\])\s*\}\}`)
+	p11RepositoryControlledCommandPattern = regexp.MustCompile(`(?:^|[[:space:];|&({"']|` + "`" + `)(?:(?:go|make|node|npm|npx|pnpm|python3?|sh|bash)(?:[[:space:]]|$)|(?:\./|\.\./)[^[:space:];|&)]*)`)
+	p11RepositoryControlledScriptPattern  = regexp.MustCompile(`scripts/libghostty-native\.sh|\.github/workflows/scripts/`)
 )
 
 func TestP11JSSurfaceContractsCoverCurrentInventory(t *testing.T) {
@@ -42,13 +46,19 @@ func TestP11JSSurfaceContractsCoverCurrentInventory(t *testing.T) {
 		"regen-fork-untrusted",
 		"regen-trusted-base",
 		"regen-push-boundary",
+		"regen-non-superset-negative",
 	} {
 		if !p11HasSampleRequirement(regen, want) {
 			t.Fatalf("%s is missing compatibility sample %s", regen.Path, want)
 		}
 	}
 
-	p11AssertSampleMatrixMatchesRequirements(t, regen, p11RegenAuthSamples())
+	declaredSamples := append([]P11CompatibilitySample{}, p11RegenAuthSamples()...)
+	for _, negative := range p11RegenAuthNegativeSamples() {
+		declaredSamples = append(declaredSamples, negative.Sample)
+	}
+
+	p11AssertSampleMatrixMatchesRequirements(t, regen, declaredSamples)
 
 	for _, path := range []string{
 		".github/workflows/scripts/package.json",
@@ -98,6 +108,52 @@ func TestP11RegenAuthCompatibilitySamplesUsePolicyFixture(t *testing.T) {
 		if !comparison.Superset || !p11HasString(comparison.SupersetReasons, "generated-input") {
 			t.Fatalf("comparison %#v did not bind generated-input superset semantics", comparison)
 		}
+	}
+}
+
+func TestP11RegenAuthNonSupersetNegativeSampleRejectsCredentialPlanBinding(t *testing.T) {
+	repoRoot := p11RepoRoot()
+
+	manifest, err := ReadManifest(filepath.Join(repoRoot, DefaultManifestPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, negative := range p11RegenAuthNegativeSamples() {
+		sample := negative.Sample
+
+		t.Run(sample.ID, func(t *testing.T) {
+			if negative.ExpectedErrorSubstr == "" {
+				t.Fatal("negative sample must declare its expected failure")
+			}
+
+			knownFiles, err := P11KnownFilesFromRepository(repoRoot, manifest, sample.PlanOptions.ChangedFiles)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			options := sample.PlanOptions
+			options.Now = p11TestNow
+			options.CreatedAt = p11TestNow.Add(-10 * time.Minute)
+
+			plan, err := BuildHermeticPlan(manifest, knownFiles, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if plan.Superset {
+				t.Fatalf("negative sample plan unexpectedly selected safe superset: %#v", plan.SupersetReasons)
+			}
+
+			if p11HasString(plan.Capabilities, "generated-metadata") {
+				t.Fatalf("negative sample plan capabilities = %#v, want generated-metadata absent", plan.Capabilities)
+			}
+
+			_, err = CompareP11CompatibilitySamples(manifest, knownFiles, []P11CompatibilitySample{sample}, p11TestNow)
+			if err == nil || !strings.Contains(err.Error(), negative.ExpectedErrorSubstr) {
+				t.Fatalf("CompareP11CompatibilitySamples() error = %v, want %q", err, negative.ExpectedErrorSubstr)
+			}
+		})
 	}
 }
 
@@ -253,7 +309,7 @@ func TestP11RegenWorkflowTrustSemantics(t *testing.T) {
 
 	if p11WorkflowHasGitHubTokenExpression(workflow) ||
 		p11WorkflowReferences(workflow, "GITHUB_TOKEN") ||
-		p11WorkflowRunContains(workflow, "gh workflow run") ||
+		p11WorkflowReferences(workflow, "gh workflow run") ||
 		p11WorkflowRunLineContainsAll(workflow, "https://", "RELEASE_TOKEN") ||
 		p11WorkflowRunLineContainsReleaseTokenExpression(workflow, "https://") {
 		t.Fatal("regen workflow must not fall back to the default token or manual workflow dispatch")
@@ -344,6 +400,80 @@ func TestP11RegenWorkflowTrustSemantics(t *testing.T) {
 	}
 }
 
+func TestP11RegenWorkflowTrustSemanticsRejectsUnprojectedTokenScalars(t *testing.T) {
+	tests := map[string]struct {
+		needle      string
+		replacement string
+		detected    func(P11WorkflowSummary) bool
+	}{
+		"hidden release token expression": {
+			needle:      "name: Regenerate\n\non:\n",
+			replacement: "name: Regenerate\nrun-name: ${{ secrets.RELEASE_TOKEN }}\n\non:\n",
+			detected: func(workflow P11WorkflowSummary) bool {
+				return p11WorkflowReleaseTokenExpressionCount(workflow) > 2
+			},
+		},
+		"hidden github token expression": {
+			needle:      "  group: regen-${{ github.event.pull_request.number }}\n",
+			replacement: "  group: ${{ github.token }}\n",
+			detected:    p11WorkflowHasGitHubTokenExpression,
+		},
+		"hidden default token name": {
+			needle:      "  group: regen-${{ github.event.pull_request.number }}\n",
+			replacement: "  group: GITHUB_TOKEN\n",
+			detected: func(workflow P11WorkflowSummary) bool {
+				return p11WorkflowReferences(workflow, "GITHUB_TOKEN")
+			},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			workflow := p11ReadMutatedRegenWorkflow(t, test.needle, test.replacement)
+			if !test.detected(workflow) {
+				t.Fatal("whole-document scalar token sweep did not surface hidden token reference")
+			}
+		})
+	}
+}
+
+func TestP11RegenWorkflowScalarSweepCountsAliasedTokenScalars(t *testing.T) {
+	workflowSource := `name: Braw
+run-name: ${{ secrets.RELEASE_TOKEN }}
+on:
+  - pull_request
+permissions:
+  contents: read
+env:
+  SAFE_TOKEN: &release ${{ secrets.RELEASE_TOKEN }}
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo braw
+  hidden:
+    if: *release
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo canny
+`
+	workflowPath := filepath.Join(t.TempDir(), "regen.yml")
+
+	// #nosec G703 -- workflowPath is rooted in t.TempDir and not user-controlled.
+	if err := os.WriteFile(workflowPath, []byte(workflowSource), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	workflow, err := ReadP11WorkflowSummary(workflowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := p11WorkflowReleaseTokenExpressionCount(workflow); got != 3 {
+		t.Fatalf("aliased RELEASE_TOKEN scalar count = %d, want original scalar plus alias reference", got)
+	}
+}
+
 func TestP11RegenWorkflowTrustSemanticsRejectsScalarJobPermissions(t *testing.T) {
 	repoRoot := p11RepoRoot()
 	path := filepath.Join(repoRoot, ".github/workflows/regen.yml")
@@ -420,6 +550,73 @@ func TestP11RegenWorkflowTrustSemanticsRejectsCredentialedScriptExecution(t *tes
 	}
 }
 
+func TestP11CurrentScriptPathsUseGitIndex(t *testing.T) {
+	repoRoot := t.TempDir()
+	foreignRepoRoot := t.TempDir()
+
+	scriptsDir := filepath.Join(repoRoot, ".github", "workflows", "scripts")
+	if err := os.MkdirAll(filepath.Join(scriptsDir, "node_modules"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	foreignScriptsDir := filepath.Join(foreignRepoRoot, ".github", "workflows", "scripts")
+	if err := os.MkdirAll(foreignScriptsDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	for path, data := range map[string]string{
+		filepath.Join(repoRoot, ".gitignore"):                                 ".github/workflows/scripts/node_modules/\n",
+		filepath.Join(scriptsDir, "regen-auth.test.js"):                       "'use strict';\n",
+		filepath.Join(scriptsDir, "untracked-helper.test.js"):                 "'use strict';\n",
+		filepath.Join(scriptsDir, "node_modules", "ignored-helper.test.js"):   "'use strict';\n",
+		filepath.Join(repoRoot, "internal", "cipolicy", "unrelated.testdata"): "braw\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatal(err)
+		}
+
+		// #nosec G703 -- test paths are rooted in t.TempDir.
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	p11RunGit(t, repoRoot, "init")
+	p11RunGit(t, repoRoot, "add", ".gitignore", ".github/workflows/scripts/regen-auth.test.js")
+
+	foreignHelper := filepath.Join(foreignScriptsDir, "foreign-helper.test.js")
+	// #nosec G703 -- foreignHelper is rooted in t.TempDir.
+	if err := os.WriteFile(foreignHelper, []byte("'use strict';\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p11RunGit(t, foreignRepoRoot, "init")
+	p11RunGit(t, foreignRepoRoot, "add", ".github/workflows/scripts/foreign-helper.test.js")
+
+	t.Setenv("GIT_DIR", filepath.Join(foreignRepoRoot, ".git"))
+	t.Setenv("GIT_WORK_TREE", foreignRepoRoot)
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(foreignRepoRoot, ".git", "index"))
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.bare")
+	t.Setenv("GIT_CONFIG_VALUE_0", "true")
+
+	paths, err := currentP11ScriptPaths(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(paths, []string{".github/workflows/scripts/regen-auth.test.js"}) {
+		t.Fatalf("currentP11ScriptPaths() = %#v, want only git-index tracked helper", paths)
+	}
+}
+
+func TestP11CurrentScriptPathsReportsGitIndexFailureDetails(t *testing.T) {
+	_, err := currentP11ScriptPaths(t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "not a git repository") {
+		t.Fatalf("currentP11ScriptPaths() error = %v, want git stderr details", err)
+	}
+}
+
 func TestP11RegenWorkflowTrustSemanticsRejectsDefaultTokenVariants(t *testing.T) {
 	tests := map[string]struct {
 		needle      string
@@ -450,6 +647,52 @@ func TestP11RegenWorkflowTrustSemanticsRejectsDefaultTokenVariants(t *testing.T)
 	}
 }
 
+func TestP11RepositoryControlledCommandDetectionMatchesRetainedJSEmbeddedCommands(t *testing.T) {
+	tests := map[string]string{
+		"embedded go test":                  "if go test ./internal/protocol -run TestManifestUpToDate; then",
+		"embedded make package graph":       "env GRAITH_CHECK=braw make package-graph",
+		"embedded native helper":            "cd /tmp && scripts/libghostty-native.sh verify-dependency-unit",
+		"embedded node helper":              "env GRAITH_CHECK=braw node .github/workflows/scripts/regen-auth.test.js",
+		"embedded python helper":            "changed=$(python3 scripts/braw.py)",
+		"embedded shell helper":             "if sh scripts/braw.sh; then",
+		"backtick package graph":            "GENERATED=`make package-graph`",
+		"eval quoted native helper":         `eval "scripts/libghostty-native.sh verify"`,
+		"quoted native helper":              `"scripts/libghostty-native.sh" verify`,
+		"repo variable native helper":       `${REPO_ROOT}/scripts/libghostty-native.sh verify`,
+		"absolute native helper":            `/home/runner/work/graith/graith/scripts/libghostty-native.sh verify`,
+		"absolute workflow script helper":   `/tmp/graith/.github/workflows/scripts/publish.sh`,
+		"subshell package graph check":      "( make package-graph-check )",
+		"relative native helper invocation": "./scripts/libghostty-native.sh generate-dependency-unit",
+	}
+
+	for name, line := range tests {
+		t.Run(name, func(t *testing.T) {
+			if !p11RunLineExecutesRepositoryControlledCode(line) {
+				t.Fatalf("line %q was not detected as repository-controlled code", line)
+			}
+		})
+	}
+}
+
+func TestP11RepositoryControlledCommandDetectionAllowsDataOnlyGitLines(t *testing.T) {
+	tests := map[string]string{
+		"comment":            "# go test ./internal/protocol",
+		"git show":           `parent_count="$(git show -s --format=%P "$GENERATED_SHA" | wc -w)"`,
+		"git ls remote":      `remote_sha="$(git ls-remote origin "refs/heads/$HEAD_REF" | awk '{print $1}')"`,
+		"word containing go": "if cargo test; then",
+		"make as suffix":     "echo brawmake package-graph",
+		"node as suffix":     "echo cannynode helper.js",
+	}
+
+	for name, line := range tests {
+		t.Run(name, func(t *testing.T) {
+			if p11RunLineExecutesRepositoryControlledCode(line) {
+				t.Fatalf("line %q was incorrectly detected as repository-controlled code", line)
+			}
+		})
+	}
+}
+
 func TestP11RegenWorkflowTrustSemanticsRejectsCredentialedLocalAction(t *testing.T) {
 	workflow := p11ReadMutatedRegenWorkflow(
 		t,
@@ -463,7 +706,7 @@ func TestP11RegenWorkflowTrustSemanticsRejectsCredentialedLocalAction(t *testing
 	}
 }
 
-func TestP11RegenAuthCompatibilitySamplesBindAllowedCredentialsToPlan(t *testing.T) {
+func TestP11RegenAuthCompatibilitySamplesBindCredentialsToPlan(t *testing.T) {
 	repoRoot := p11RepoRoot()
 
 	manifest, err := ReadManifest(filepath.Join(repoRoot, DefaultManifestPath))
@@ -477,51 +720,166 @@ func TestP11RegenAuthCompatibilitySamplesBindAllowedCredentialsToPlan(t *testing
 	}
 
 	tests := map[string]struct {
-		mutate func(*P11CredentialExpectation)
+		mutate func([]P11CompatibilitySample)
 		want   string
 	}{
 		"missing capability": {
-			mutate: func(expectation *P11CredentialExpectation) {
-				expectation.Operation.Capability = ""
+			mutate: func(samples []P11CompatibilitySample) {
+				p11MutateCredentialExpectation(samples, "regen-push-boundary", func(expectation *P11CredentialExpectation) {
+					expectation.Operation.Capability = ""
+				})
 			},
 			want: "requires plan capability identity",
 		},
 		"missing plan trust tier binding": {
-			mutate: func(expectation *P11CredentialExpectation) {
-				expectation.PlanTrustTier = ""
+			mutate: func(samples []P11CompatibilitySample) {
+				for index := range samples {
+					if samples[index].ID == "regen-push-boundary" {
+						samples[index].ExpectedTrustTier = ""
+					}
+				}
 			},
 			want: "requires explicit plan trust tier binding",
 		},
+		"wrong sample trust tier binding": {
+			mutate: func(samples []P11CompatibilitySample) {
+				for index := range samples {
+					if samples[index].ID == "regen-push-boundary" {
+						samples[index].ExpectedTrustTier = "same-repository-agent"
+					}
+				}
+			},
+			want: "trust tier = trusted-base, want same-repository-agent",
+		},
 		"missing credential trust tier binding": {
-			mutate: func(expectation *P11CredentialExpectation) {
-				expectation.CredentialTrustTier = ""
+			mutate: func(samples []P11CompatibilitySample) {
+				p11MutateCredentialExpectation(samples, "regen-push-boundary", func(expectation *P11CredentialExpectation) {
+					expectation.Operation.TrustTier = ""
+				})
 			},
 			want: "requires explicit credential trust tier binding",
 		},
-		"wrong plan trust tier binding": {
-			mutate: func(expectation *P11CredentialExpectation) {
-				expectation.PlanTrustTier = "same-repository-agent"
+		"denied credential still requires plan binding": {
+			mutate: func(samples []P11CompatibilitySample) {
+				for index := range samples {
+					if samples[index].ID == "regen-same-repository-agent" {
+						samples[index].ExpectedTrustTier = ""
+					}
+				}
 			},
-			want: "plan trust tier = trusted-base, want same-repository-agent",
+			want: "requires explicit plan trust tier binding",
+		},
+		"denied credential requires exact error binding": {
+			mutate: func(samples []P11CompatibilitySample) {
+				p11MutateCredentialExpectation(samples, "regen-same-repository-agent", func(expectation *P11CredentialExpectation) {
+					expectation.WantErrorSubstr = ""
+				})
+			},
+			want: "requires an expected error binding",
 		},
 	}
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			samples := p11RegenAuthSamples()
-			for index := range samples {
-				if samples[index].ID != "regen-push-boundary" {
-					continue
-				}
-
-				test.mutate(&samples[index].CredentialExpectations[0])
-			}
+			test.mutate(samples)
 
 			_, err := CompareP11CompatibilitySamples(manifest, knownFiles, samples, p11TestNow)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("CompareP11CompatibilitySamples() error = %v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestP11CredentialTrustAllowlistMatchesCredentialOperations(t *testing.T) {
+	validPlanTiers := map[string]bool{
+		"same-repository-agent": true,
+		"trusted-base":          true,
+	}
+
+	for operation, policy := range credentialOperationPolicies {
+		allowances, ok := p11CredentialTrustAllowlist[operation]
+		if !ok {
+			t.Fatalf("credential operation %s is missing from P11 plan-to-credential trust allowlist", operation)
+		}
+
+		if len(allowances) == 0 {
+			t.Fatalf("credential operation %s has no P11 plan-to-credential trust allowances", operation)
+		}
+
+		seen := map[p11CredentialTrustAllowance]bool{}
+
+		for _, allowance := range allowances {
+			if allowance.PlanTrustTier == "" || allowance.CredentialTrustTier == "" {
+				t.Fatalf("credential operation %s has incomplete allowance %#v", operation, allowance)
+			}
+
+			if !validPlanTiers[allowance.PlanTrustTier] {
+				t.Fatalf("credential operation %s allows invalid plan trust tier %s", operation, allowance.PlanTrustTier)
+			}
+
+			if !containsString(policy.TrustTiers, allowance.CredentialTrustTier) {
+				t.Fatalf("credential operation %s allows credential trust tier %s outside policy trust tiers %#v", operation, allowance.CredentialTrustTier, policy.TrustTiers)
+			}
+
+			if seen[allowance] {
+				t.Fatalf("credential operation %s has duplicate P11 trust allowance %#v", operation, allowance)
+			}
+
+			seen[allowance] = true
+		}
+	}
+
+	for operation := range p11CredentialTrustAllowlist {
+		if _, ok := credentialOperationPolicies[operation]; !ok {
+			t.Fatalf("P11 plan-to-credential trust allowlist references unknown credential operation %s", operation)
+		}
+	}
+}
+
+func TestP11CredentialTrustAllowlistRejectsCredentialTrustNotAllowedForPlan(t *testing.T) {
+	repoRoot := p11RepoRoot()
+
+	manifest, err := ReadManifest(filepath.Join(repoRoot, DefaultManifestPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sample := P11CompatibilitySample{
+		ID:                "docs-preview-trusted-base-credential-negative",
+		HelperPath:        P11NextTrancheHelper,
+		Description:       "trusted-base plan must not borrow same-repository docs-preview write credentials",
+		PlanOptions:       p11PlanOptionsWithChangedFiles(p11TrustedBaseEvent(), []string{"docs/design/2026-07-24-ci-north-star.md"}),
+		ExpectedTrustTier: "trusted-base",
+		CredentialExpectations: []P11CredentialExpectation{
+			{
+				Operation: CredentialOperation{
+					Operation:  "docs-preview-write",
+					TrustTier:  "same-repository-agent",
+					Capability: "docs-preview",
+					Token: SyntheticToken{
+						Name:         "repository-write",
+						TrustTier:    "same-repository-agent",
+						Class:        syntheticRepositoryWriteToken,
+						Scopes:       []string{"contents:write", "pull-requests:write"},
+						AllowedRoots: []string{"screenshots"},
+					},
+					Target: "screenshots/braw.png",
+				},
+				Allowed: true,
+			},
+		},
+	}
+
+	knownFiles, err := P11KnownFilesFromRepository(repoRoot, manifest, sample.PlanOptions.ChangedFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = CompareP11CompatibilitySamples(manifest, knownFiles, []P11CompatibilitySample{sample}, p11TestNow)
+	if err == nil || !strings.Contains(err.Error(), "credential trust tier same-repository-agent is not allowed for plan trust tier trusted-base") {
+		t.Fatalf("CompareP11CompatibilitySamples() error = %v, want explicit plan-to-credential trust allowlist rejection", err)
 	}
 }
 
@@ -555,6 +913,20 @@ func p11ReadMutatedRegenWorkflow(t *testing.T, needle, replacement string) P11Wo
 	}
 
 	return workflow
+}
+
+func p11RunGit(t *testing.T, repoRoot string, args ...string) {
+	t.Helper()
+
+	commandArgs := append([]string{"-C", repoRoot}, args...)
+	// #nosec G204 -- test-only git invocation with explicit arguments and no shell.
+	cmd := exec.Command("git", commandArgs...)
+	cmd.Env = p11IsolatedGitEnv()
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(commandArgs, " "), err, output)
+	}
 }
 
 func p11RepoRoot() string {
@@ -593,6 +965,7 @@ func p11RegenAuthSamples() []P11CompatibilitySample {
 						Target: "generated/braw.bundle",
 					},
 					Allowed:         false,
+					BindToPlan:      true,
 					WantErrorSubstr: "same-repository agent branches cannot obtain maintainer credentials",
 				},
 			},
@@ -610,6 +983,26 @@ func p11RegenAuthSamples() []P11CompatibilitySample {
 				"regen/prepare",
 				"regen/regen",
 				"regen/validate",
+			},
+			CredentialExpectations: []P11CredentialExpectation{
+				{
+					Operation: CredentialOperation{
+						Operation:  "regeneration-push",
+						TrustTier:  "fork-untrusted",
+						Capability: "generated-metadata",
+						Token: SyntheticToken{
+							Name:         "release",
+							TrustTier:    "fork-untrusted",
+							Class:        syntheticMaintainerToken,
+							Scopes:       []string{"contents:write"},
+							AllowedRoots: []string{"generated"},
+						},
+						Target: "generated/braw.bundle",
+					},
+					Allowed:         false,
+					BindToPlan:      true,
+					WantErrorSubstr: "fork pull requests may use only synthetic read tokens",
+				},
 			},
 		},
 		{
@@ -656,12 +1049,64 @@ func p11RegenAuthSamples() []P11CompatibilitySample {
 						},
 						Target: "generated/braw.bundle",
 					},
-					Allowed:             true,
-					PlanTrustTier:       "trusted-base",
-					CredentialTrustTier: "trusted-publication",
+					Allowed: true,
 				},
 			},
 		},
+	}
+}
+
+type p11NegativeCompatibilitySample struct {
+	Sample              P11CompatibilitySample
+	ExpectedErrorSubstr string
+}
+
+func p11RegenAuthNegativeSamples() []p11NegativeCompatibilitySample {
+	return []p11NegativeCompatibilitySample{
+		{
+			Sample:              p11RegenAuthNonSupersetNegativeSample(),
+			ExpectedErrorSubstr: "requires plan capability generated-metadata",
+		},
+	}
+}
+
+func p11RegenAuthNonSupersetNegativeSample() P11CompatibilitySample {
+	return P11CompatibilitySample{
+		ID:                "regen-non-superset-negative",
+		HelperPath:        P11NextTrancheHelper,
+		Description:       "docs-only PR plan is not a safe superset and cannot bind regeneration credentials to absent generated-metadata capability",
+		PlanOptions:       p11PlanOptionsWithChangedFiles(p11TrustedBaseEvent(), []string{"docs/design/2026-07-24-ci-north-star.md"}),
+		ExpectedTrustTier: "trusted-base",
+		CredentialExpectations: []P11CredentialExpectation{
+			{
+				Operation: CredentialOperation{
+					Operation:  "regeneration-push",
+					TrustTier:  "trusted-publication",
+					Capability: "generated-metadata",
+					Token: SyntheticToken{
+						Name:         "release",
+						TrustTier:    "trusted-publication",
+						Class:        syntheticMaintainerToken,
+						Scopes:       []string{"contents:write"},
+						AllowedRoots: []string{"generated"},
+					},
+					Target: "generated/braw.bundle",
+				},
+				Allowed: true,
+			},
+		},
+	}
+}
+
+func p11MutateCredentialExpectation(samples []P11CompatibilitySample, sampleID string, mutate func(*P11CredentialExpectation)) {
+	for sampleIndex := range samples {
+		if samples[sampleIndex].ID != sampleID {
+			continue
+		}
+
+		for expectationIndex := range samples[sampleIndex].CredentialExpectations {
+			mutate(&samples[sampleIndex].CredentialExpectations[expectationIndex])
+		}
 	}
 }
 
@@ -686,9 +1131,13 @@ func p11RegenModeExpectation(modeID, coordinateID string) P11ManifestModeExpecta
 }
 
 func p11PlanOptions(event EventInput) PlanOptions {
+	return p11PlanOptionsWithChangedFiles(event, []string{"internal/protocol/messages.go"})
+}
+
+func p11PlanOptionsWithChangedFiles(event EventInput, changedFiles []string) PlanOptions {
 	return PlanOptions{
 		Event:          event,
-		ChangedFiles:   []string{"internal/protocol/messages.go"},
+		ChangedFiles:   append([]string(nil), changedFiles...),
 		ExactFileList:  true,
 		DetectorErrors: nil,
 	}
@@ -908,18 +1357,6 @@ func p11AssertJobUsesOnlyAllowedActions(t *testing.T, jobID string, job P11Workf
 	}
 }
 
-func p11JobRunContains(job P11WorkflowJob, needles ...string) bool {
-	for _, step := range job.Steps {
-		for _, needle := range needles {
-			if strings.Contains(step.Run, needle) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
 func p11JobRunsRepositoryControlledCode(job P11WorkflowJob) bool {
 	for _, step := range job.Steps {
 		if p11UsesRepositoryControlledAction(step.Uses) {
@@ -948,26 +1385,8 @@ func p11RunLineExecutesRepositoryControlledCode(line string) bool {
 		return false
 	}
 
-	for _, prefix := range []string{
-		"go ",
-		"make ",
-		"node ",
-		"npm ",
-		"npx ",
-		"pnpm ",
-		"python ",
-		"python3 ",
-		"sh ",
-		"bash ",
-		"./",
-	} {
-		if strings.HasPrefix(line, prefix) {
-			return true
-		}
-	}
-
-	return strings.Contains(line, ".github/workflows/scripts/") ||
-		strings.Contains(line, "scripts/libghostty-native.sh")
+	return p11RepositoryControlledCommandPattern.MatchString(line) ||
+		p11RepositoryControlledScriptPattern.MatchString(line)
 }
 
 func p11RunLineContainsAll(run string, needles ...string) bool {
@@ -983,16 +1402,6 @@ func p11RunLineContainsAll(run string, needles ...string) bool {
 		}
 
 		if matched {
-			return true
-		}
-	}
-
-	return false
-}
-
-func p11WorkflowRunContains(workflow P11WorkflowSummary, needle string) bool {
-	for _, job := range workflow.Jobs {
-		if p11JobRunContains(job, needle) {
 			return true
 		}
 	}
@@ -1112,6 +1521,10 @@ func p11JobReferences(job P11WorkflowJob, needle string) bool {
 }
 
 func p11WorkflowHasGitHubTokenExpression(workflow P11WorkflowSummary) bool {
+	if p11ScalarsMatch(workflow.Scalars, p11GitHubTokenExpression) {
+		return true
+	}
+
 	if p11GitHubTokenExpression.MatchString(workflow.PermissionsExpression) ||
 		p11MapHasGitHubTokenExpression(workflow.Permissions) ||
 		p11MapHasGitHubTokenExpression(workflow.Env) {
@@ -1166,6 +1579,10 @@ func p11JobHasReleaseTokenExpression(job P11WorkflowJob) bool {
 }
 
 func p11WorkflowReferences(workflow P11WorkflowSummary, needle string) bool {
+	if p11ScalarsContain(workflow.Scalars, needle) {
+		return true
+	}
+
 	if strings.Contains(workflow.PermissionsExpression, needle) ||
 		p11MapReferences(workflow.Permissions, needle) ||
 		p11MapReferences(workflow.Env, needle) {
@@ -1212,33 +1629,33 @@ func p11MapReferences(values map[string]string, needle string) bool {
 }
 
 func p11WorkflowReleaseTokenExpressionCount(workflow P11WorkflowSummary) int {
-	count := p11MapReleaseTokenExpressionCount(workflow.Permissions)
-	count += len(p11ReleaseTokenExpression.FindAllString(workflow.PermissionsExpression, -1))
-	count += p11MapReleaseTokenExpressionCount(workflow.Env)
+	return p11ScalarExpressionCount(workflow.Scalars, p11ReleaseTokenExpression)
+}
 
-	for _, job := range workflow.Jobs {
-		count += len(p11ReleaseTokenExpression.FindAllString(job.If, -1))
-		count += p11MapReleaseTokenExpressionCount(job.Permissions)
-		count += len(p11ReleaseTokenExpression.FindAllString(job.PermissionsExpression, -1))
-		count += p11MapReleaseTokenExpressionCount(job.Env)
-
-		for _, step := range job.Steps {
-			count += len(p11ReleaseTokenExpression.FindAllString(step.If, -1))
-			count += len(p11ReleaseTokenExpression.FindAllString(step.Uses, -1))
-			count += len(p11ReleaseTokenExpression.FindAllString(step.Run, -1))
-			count += p11MapReleaseTokenExpressionCount(step.Env)
-			count += p11MapReleaseTokenExpressionCount(step.With)
+func p11ScalarsMatch(values []string, pattern *regexp.Regexp) bool {
+	for _, value := range values {
+		if pattern.MatchString(value) {
+			return true
 		}
 	}
 
-	return count
+	return false
 }
 
-func p11MapReleaseTokenExpressionCount(values map[string]string) int {
-	count := 0
-
+func p11ScalarsContain(values []string, needle string) bool {
 	for _, value := range values {
-		count += len(p11ReleaseTokenExpression.FindAllString(value, -1))
+		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func p11ScalarExpressionCount(values []string, pattern *regexp.Regexp) int {
+	count := 0
+	for _, value := range values {
+		count += len(pattern.FindAllString(value, -1))
 	}
 
 	return count

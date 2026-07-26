@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -67,12 +68,10 @@ type P11ManifestCoordinateExpectation struct {
 }
 
 type P11CredentialExpectation struct {
-	Operation           CredentialOperation
-	Allowed             bool
-	BindToPlan          bool
-	PlanTrustTier       string
-	CredentialTrustTier string
-	WantErrorSubstr     string
+	Operation       CredentialOperation
+	Allowed         bool
+	BindToPlan      bool
+	WantErrorSubstr string
 }
 
 type P11CompatibilityComparison struct {
@@ -96,6 +95,7 @@ type P11WorkflowSummary struct {
 	PermissionsExpression string
 	Env                   map[string]string
 	Jobs                  map[string]P11WorkflowJob
+	Scalars               []string
 }
 
 type P11WorkflowJob struct {
@@ -338,6 +338,7 @@ func P11RegenAuthCompatibilityRequirements() []P11CompatibilitySampleRequirement
 		{ID: "regen-fork-untrusted", Description: "fork PR selects fork-untrusted trust and never runs the credentialed regen jobs"},
 		{ID: "regen-trusted-base", Description: "trusted-base PR replay keeps regen jobs behind the same generated-metadata capability"},
 		{ID: "regen-push-boundary", Description: "fresh-runner push uses only the verified generated commit and a non-force branch update"},
+		{ID: "regen-non-superset-negative", Description: "non-superset docs-only plan rejects regeneration credential binding because generated-metadata is absent"},
 	}
 }
 
@@ -510,15 +511,25 @@ func CompareP11CompatibilitySamples(manifest Manifest, knownFiles []FixtureFile,
 		}
 
 		for _, expectation := range sample.CredentialExpectations {
+			if !expectation.Allowed && expectation.WantErrorSubstr == "" {
+				return nil, fmt.Errorf("%s: denied credential operation %s requires an expected error binding", sample.ID, expectation.Operation.Operation)
+			}
+
 			err := ValidateCredentialOperation(expectation.Operation)
 
 			bindToPlan := expectation.BindToPlan || expectation.Allowed
+			if bindToPlan {
+				if planErr := validateP11CredentialPlanExpectation(sample.ID, sample.ExpectedTrustTier, expectation, plan); planErr != nil {
+					return nil, planErr
+				}
+			}
+
 			if err == nil && bindToPlan {
 				policy := credentialOperationPolicies[expectation.Operation.Operation]
 
 				err = validateCredentialOperationPlanBinding(expectation.Operation, policy, plan)
 				if err == nil {
-					err = validateP11CredentialTrustBinding(sample.ID, expectation, plan)
+					err = validateP11CredentialTrustAllowance(sample.ID, expectation, plan)
 				}
 			}
 
@@ -538,24 +549,49 @@ func CompareP11CompatibilitySamples(manifest Manifest, knownFiles []FixtureFile,
 	return comparisons, nil
 }
 
-func validateP11CredentialTrustBinding(sampleID string, expectation P11CredentialExpectation, plan RunPlan) error {
-	if strings.TrimSpace(expectation.PlanTrustTier) == "" {
+func validateP11CredentialPlanExpectation(sampleID, expectedPlanTrust string, expectation P11CredentialExpectation, plan RunPlan) error {
+	if strings.TrimSpace(expectedPlanTrust) == "" {
 		return fmt.Errorf("%s: credential operation %s requires explicit plan trust tier binding", sampleID, expectation.Operation.Operation)
 	}
 
-	if plan.TrustTier != expectation.PlanTrustTier {
-		return fmt.Errorf("%s: credential operation %s plan trust tier = %s, want %s", sampleID, expectation.Operation.Operation, plan.TrustTier, expectation.PlanTrustTier)
-	}
-
-	if strings.TrimSpace(expectation.CredentialTrustTier) == "" {
+	if strings.TrimSpace(expectation.Operation.TrustTier) == "" {
 		return fmt.Errorf("%s: credential operation %s requires explicit credential trust tier binding", sampleID, expectation.Operation.Operation)
 	}
 
-	if expectation.Operation.TrustTier != expectation.CredentialTrustTier {
-		return fmt.Errorf("%s: credential operation %s trust tier = %s, want %s", sampleID, expectation.Operation.Operation, expectation.Operation.TrustTier, expectation.CredentialTrustTier)
+	return nil
+}
+
+type p11CredentialTrustAllowance struct {
+	PlanTrustTier       string
+	CredentialTrustTier string
+}
+
+var p11CredentialTrustAllowlist = map[string][]p11CredentialTrustAllowance{
+	"coverage-comment": {
+		{PlanTrustTier: "same-repository-agent", CredentialTrustTier: "same-repository-agent"},
+	},
+	"docs-preview-write": {
+		{PlanTrustTier: "same-repository-agent", CredentialTrustTier: "same-repository-agent"},
+	},
+	"regeneration-push": {
+		{PlanTrustTier: "trusted-base", CredentialTrustTier: "trusted-publication"},
+	},
+	"dev-release-publish": {
+		{PlanTrustTier: "trusted-base", CredentialTrustTier: "trusted-publication"},
+	},
+	"stable-release-publish": {
+		{PlanTrustTier: "trusted-base", CredentialTrustTier: "trusted-publication"},
+	},
+}
+
+func validateP11CredentialTrustAllowance(sampleID string, expectation P11CredentialExpectation, plan RunPlan) error {
+	for _, allowance := range p11CredentialTrustAllowlist[expectation.Operation.Operation] {
+		if allowance.PlanTrustTier == plan.TrustTier && allowance.CredentialTrustTier == expectation.Operation.TrustTier {
+			return nil
+		}
 	}
 
-	return nil
+	return fmt.Errorf("%s: credential operation %s credential trust tier %s is not allowed for plan trust tier %s", sampleID, expectation.Operation.Operation, expectation.Operation.TrustTier, plan.TrustTier)
 }
 
 func P11KnownFilesFromRepository(repoRoot string, manifest Manifest, extraPaths []string) ([]FixtureFile, error) {
@@ -641,6 +677,7 @@ func ReadP11WorkflowSummary(path string) (P11WorkflowSummary, error) {
 		PermissionsExpression: permissionsExpression,
 		Env:                   p11StringMap(p11MappingValue(node, "env")),
 		Jobs:                  map[string]P11WorkflowJob{},
+		Scalars:               p11ScalarValues(node),
 	}
 
 	jobs := p11MappingValue(node, "jobs")
@@ -711,39 +748,74 @@ func validateP11Contract(contract P11JSHelperContract) error {
 }
 
 func currentP11ScriptPaths(repoRoot string) ([]string, error) {
+	// #nosec G204 -- repoRoot is a local repository path and arguments are passed without a shell.
+	cmd := exec.Command("git", "-C", repoRoot, "ls-files", "-z", "--", P11JSSurfaceDirectory)
+	cmd.Env = p11IsolatedGitEnv()
+
+	output, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+
+		details := ""
+		if errors.As(err, &exitErr) {
+			details = strings.TrimSpace(string(exitErr.Stderr))
+		}
+
+		if details != "" {
+			return nil, fmt.Errorf("list P11 JS helpers from git index: %w: %s", err, details)
+		}
+
+		return nil, fmt.Errorf("list P11 JS helpers from git index: %w", err)
+	}
+
 	var paths []string
 
-	root := filepath.Join(repoRoot, filepath.FromSlash(P11JSSurfaceDirectory))
-
-	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
+	for _, path := range strings.Split(string(output), "\x00") {
+		if path == "" {
+			continue
 		}
 
-		if entry.IsDir() {
-			return nil
+		normalized, err := normalizeP11RepoPath(path)
+		if err != nil {
+			return nil, err
 		}
 
-		relative, err := filepath.Rel(filepath.Join(repoRoot), path)
-		if err != nil {
-			return err
-		}
-
-		normalized, err := normalizeP11RepoPath(relative)
-		if err != nil {
-			return err
+		if !strings.HasPrefix(normalized, P11JSSurfaceDirectory+"/") {
+			return nil, fmt.Errorf("git index returned path outside P11 JS surface: %s", normalized)
 		}
 
 		paths = append(paths, normalized)
-
-		return nil
-	}); err != nil {
-		return nil, err
 	}
 
 	sort.Strings(paths)
 
 	return paths, nil
+}
+
+func p11IsolatedGitEnv() []string {
+	env := make([]string, 0, len(os.Environ())+2)
+
+	for _, item := range os.Environ() {
+		if strings.HasPrefix(item, "GIT_DIR=") ||
+			strings.HasPrefix(item, "GIT_WORK_TREE=") ||
+			strings.HasPrefix(item, "GIT_INDEX_FILE=") ||
+			strings.HasPrefix(item, "GIT_CONFIG_GLOBAL=") ||
+			strings.HasPrefix(item, "GIT_CONFIG_SYSTEM=") ||
+			strings.HasPrefix(item, "GIT_CONFIG_COUNT=") ||
+			strings.HasPrefix(item, "GIT_CONFIG_KEY_") ||
+			strings.HasPrefix(item, "GIT_CONFIG_VALUE_") {
+			continue
+		}
+
+		env = append(env, item)
+	}
+
+	env = append(env,
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+	)
+
+	return env
 }
 
 func normalizeP11RepoPath(path string) (string, error) {
@@ -904,6 +976,42 @@ func p11Scalar(node *yaml.Node) string {
 	}
 
 	return node.Value
+}
+
+func p11ScalarValues(node *yaml.Node) []string {
+	var values []string
+
+	var walk func(*yaml.Node, map[*yaml.Node]bool)
+
+	walk = func(current *yaml.Node, resolvingAliases map[*yaml.Node]bool) {
+		if current == nil {
+			return
+		}
+
+		if current.Kind == yaml.AliasNode {
+			if current.Alias == nil || resolvingAliases[current.Alias] {
+				return
+			}
+
+			resolvingAliases[current.Alias] = true
+			walk(current.Alias, resolvingAliases)
+			delete(resolvingAliases, current.Alias)
+
+			return
+		}
+
+		if current.Kind == yaml.ScalarNode {
+			values = append(values, current.Value)
+		}
+
+		for _, child := range current.Content {
+			walk(child, resolvingAliases)
+		}
+	}
+
+	walk(node, map[*yaml.Node]bool{})
+
+	return values
 }
 
 func p11StringMap(node *yaml.Node) map[string]string {

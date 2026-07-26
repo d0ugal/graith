@@ -311,6 +311,11 @@ and P0 inventory, run the P11 compatibility matrix through the P2/P3 plan and
 fan-in APIs, and parse `regen.yml` structurally so YAML formatting cannot erase
 the trust assertions.
 
+The safe prerequisite tranche for `regen-auth.test.js` adds semantic parity
+coverage and pre-deletion hardening while retaining the helper. Helper deletion,
+P0 inventory acceptance rebind, and P1 manifest regeneration remain the next
+owner-approved serialized action.
+
 ### Open questions
 
 - The next epoch needs owner approval for the exact P0 acceptance rebind shape.
