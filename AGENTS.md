@@ -73,6 +73,7 @@ before assuming behavior from documentation.
 - If `GRAITH_SESSION_ID` is set, update `gr status` at meaningful milestones.
   The injected graith prompt documents messaging, store, todo, and orchestration
   commands; do not duplicate their manuals here.
+- Prefer Go, followed by Python. Avoid other languages.
 
 ## Tests
 
