@@ -1,5 +1,5 @@
-// Package cibaseline inventories the current GitHub Actions proof surface and
-// normalizes read-only run evidence for the CI north-star baseline.
+// Package cibaseline inventories the current GitHub Actions proof surface for
+// the CI north-star static baseline.
 package cibaseline
 
 import (
