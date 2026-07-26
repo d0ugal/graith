@@ -441,12 +441,14 @@ saved work, inputs are too volatile, provenance cannot be established, or a
 small job is faster and safer without it.
 
 During migration, full dual-run comparison is capped at twice measured baseline
-runner minutes plus 20% queue overhead and 14 calendar days per wave. After
-that cap, old checks may remain observational-only for one 30-day evidence
-window at a fixed 10% sampling budget; exceeding either cap aborts and rolls
-back to the old gate. The same rollback applies after three consecutive UTC
-days over budget, three days with p95 required latency 25% over target, any
-provenance mismatch, or any fixture false-green escape.
+runner minutes plus 20% queue overhead for the owner-approved bounded sample
+matrix. After the App-owned gate becomes the required decision, old checks may
+remain observational-only at a fixed sampling budget only until the P10
+real-change/event matrix passes; sampling fills explicit matrix cells and does
+not replace required evidence. Exceeding the migration budget before the
+matrix is complete, p95 required latency for the completed matrix exceeding
+its target by 25%, any provenance mismatch, or any fixture false-green escape
+aborts and rolls back to the old gate.
 
 ## Consensus
 
@@ -504,28 +506,47 @@ the target's fail-closed semantics.
 
 1. **Evidence baseline.** Instrument current runs without changing gates;
    measure queue, duration, retries, flakes, cost, cache behavior, and the
-   actual mode coverage for four weeks. Publish owners and failure classes.
+   actual mode coverage with the bounded collector and replay path. Retained
+   complete fixed-window evidence must cover representative current activity
+   and the enumerated workflow/mode inventory, a representative sample of
+   merged changes must replay successfully, and the closed-world
+   capability-to-current-proof matrix must be owner-reviewed. P1 may begin
+   once those evidence-quality conditions are satisfied; unexplained modes or
+   incomplete evidence fail the gate. Baseline collection continues in parallel
+   with later waves to calibrate final latency and cost targets, and the
+   provisional latency and dual-run cost ceilings remain binding until
+   calibrated.
 2. **Contracts and fixture.** Implement policy/run-plan/result schemas,
    deterministic fan-in, artifact manifests, and hermetic fault-injection
    tests. Prove the fixture catches every listed false-green case.
 3. **Fast proof pilot.** Dual-run the new PR fast lane beside existing checks
-   for representative Go, protocol, GUI, native, docs, and workflow changes.
-   Require matching mode sets, latency, and classification for two weeks.
+   across an owner-approved bounded sample matrix covering representative Go,
+   protocol, docs, generated, GUI, native, sandbox, workflow, and dependency
+   changes, trusted and untrusted event shapes, required modes,
+   retry/cancellation/failure classes, and explicit matching mode-set, latency,
+   and classification criteria. Every required cell needs retained samples or
+   an owner-approved retirement row, with zero unexplained disagreement.
 4. **Deep and platform promotion.** Add main, scheduled, dependency, and
    package-consumer proof; dual-run full Linux/macOS matrices and compare
-   artifacts and coverage. Keep old checks informative, not a second source of
-   truth, until evidence meets the SLOs.
+   artifacts and coverage across the owner-approved evidence matrix. Keep old
+   checks informative, not a second source of truth, until the matrix has no
+   unexplained disagreement, false-green escape, stale/missing proof, or
+   artifact identity mismatch and its retained latency/cost evidence is within
+   the binding ceilings.
 5. **Protected release cutover.** Dry-run signing, attestation, independent
    verification, and rollback on non-publication candidates. Cut publication
    over only after two successful candidates and an owner-approved audit.
 
 Dual-run acceptance requires no unexplained mode disagreement, zero artifact
 identity mismatch, no false-green fixture escape, p95 latency within budget,
-and classified failures for every non-pass. If the new graph is incomplete,
-the old required proof remains authoritative; if it is unsafe, disable only
-the new path and return to the last known-good gate. After 30 days of stable
-coverage, delete duplicate workflows and obsolete required checks in a
-separate, reversible settings change; retain result history and rollback
+classified failures for every non-pass, and retained samples covering the
+approved change/event/mode matrix. If the new graph is incomplete, the old
+required proof remains authoritative; if it is unsafe, disable only the new
+path and return to the last known-good gate. Delete duplicate workflows and
+obsolete required checks only after the owner-approved P10 sample of real
+merged changes/events has no unexplained disagreement, false-green escape,
+stale/missing proof, or artifact identity mismatch; perform deletion in a
+separate, reversible settings change and retain result history and rollback
 instructions. Migration convenience must never justify `continue-on-error`,
 silent skips, unpinned dependencies, or unprotected publication.
 

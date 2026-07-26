@@ -84,17 +84,17 @@ accepted.
 
 | ID | Deliverable | Depends on | Exit evidence |
 |----|-------------|------------|---------------|
-| P0 | Baseline and inventory | None | Four weeks of queue, duration, retry, flake, cost, cache, artifact, and actual-mode coverage data; capability-to-current-proof matrix reviewed by owners; all current workflows, events, permissions, JS policy helpers, and YAML-regex trust tests enumerated. |
+| P0 | Baseline and inventory | None | Bounded collector and replay path are operational; retained complete fixed-window evidence covers representative current activity and the enumerated workflow/mode inventory; representative merged changes replay successfully; capability-to-current-proof matrix is closed-world and owner-reviewed; unexplained modes or incomplete evidence fail the gate. |
 | P1 | Policy schema and capability manifest | P0 | Schema validation rejects unknown modes, duplicate coordinates, missing owners, unsupported silent passes, and ambiguous requiredness; deterministic manifest digest. |
 | P2 | Go policy/result library | P1 | Local plan replay from event + file list; stable JSON results; policy tests cover fork/base trust, expiry, cancellation, stale output, and zero-job plans. |
 | P3 | Hermetic fixture and fault injector | P2 | Fixture fails closed for missing files, polluted environment, stale/corrupt cache/artifact, archive differences, cancellation, misleading names, and unsupported platforms. |
 | P4 | `graith-ci-gate` GitHub App evaluator | P2/P3 | App is installed from a digest-pinned release with metadata/contents/actions/pull-request read and checks write; the default-branch ruleset binds the required check to its App ID with no bypass actors; live fork/agent/merge-group fixture proves rewrite, replay, stale, missing, and zero-job failures. |
 | P5 | Artifact and cache contracts | P1/P2 | Manifest, digest, provenance, trust tier, and consumer verifier; untrusted cache cannot be consumed by trusted jobs; native and release-shaped artifacts have independent verification. |
-| P6 | Fast PR lane dual-run | P3/P4/P5 | Representative Go, protocol, docs, generated, GUI, native, sandbox, workflow, and dependency changes have matching mode sets and classified outcomes for two weeks. |
+| P6 | Fast PR lane dual-run | P3/P4/P5 | Owner-approved bounded sample matrix covers representative Go, protocol, docs, generated, GUI, native, sandbox, workflow, and dependency changes across trusted/untrusted event shapes, required modes, retry/cancellation/failure classes, and the matching mode-set, latency, and classification criteria, with zero unexplained disagreement. |
 | P7 | Main/deep/scheduled lanes | P6 | Main complete bundle, race/integration, full platform, coverage, security, fuzz/soak, and dependency freshness modes have stable fan-in and dashboards. |
 | P8 | Dependency and generated-file promotion | P5/P6 | Dependency updates use the same policy; credentialed regeneration/docs publication moves behind a trusted-base workflow or protected environment that PR YAML cannot edit; stale outputs fail for forks and trusted branches; live same-repository-agent fixture passes before cutover. |
 | P9 | Release candidate verification | P5/P7 | Reproducible Linux/Darwin candidate, package consumer, checksum/SBOM/provenance, signature, independent verification, rollback dry run, and protected publication rehearsal. |
-| P10 | Required-check cutover and deletion | P6/P7/P8/P9 | Branch protection requires only the App-owned `graith-ci-gate`; old contexts remain observational through one 30-day sampled evidence window, then obsolete required contexts and workflows are removed in separate reversible changes. |
+| P10 | Required-check cutover and deletion | P6/P7/P8/P9 | Branch protection requires only the App-owned `graith-ci-gate`; old contexts remain observational until an owner-approved bounded sample of real merged changes/events covers the required change/event/mode matrix with no unexplained disagreement, false-green escape, stale/missing proof, or artifact identity mismatch, then obsolete required contexts and workflows are removed in separate reversible changes. |
 | P11 | JS policy surface retirement | P0/P2/P3 | Repo-owned JS helpers have owners and grandfathered contracts; each is wrapped, ported to Go, or explicitly retained with deletion criteria; YAML-regex trust tests are replaced by semantic contract tests before workflow reshaping. |
 
 #### P0 — Baseline and inventory
@@ -137,8 +137,17 @@ rejects missing, duplicate, orphaned, or unjustified mappings before dual-run
 and again before cutover. Actual skipped jobs are recorded separately from
 successful jobs because GitHub treats a conditionally skipped job as success.
 
-Acceptance requires owner sign-off on the matrix and a sample of merged
-changes replayed against the observed mode set. Any unexplained mode is an
+Acceptance requires the bounded collector and replay path to be operational,
+retained complete fixed-window evidence covering representative current
+activity and the enumerated workflow/mode inventory, owner sign-off on the
+closed-world matrix, and a representative sample of merged changes replayed
+against the observed mode set. P1 may begin as soon as those evidence-quality
+conditions are satisfied; it does not wait for a calendar minimum. Ongoing
+baseline collection continues in parallel with P1 and later packages and
+calibrates final latency and cost targets before dual-run enforcement or
+cutover. Until calibration is retained, the provisional 20/35/45/90-minute
+targets and the dual-run 2x-plus-20% budget are binding ceilings, not goals
+that may be exceeded. Any unexplained mode or incomplete evidence is an
 inventory failure, not an assumption to resolve during cutover.
 
 #### P1–P3 — Contracts, implementation, and fixture
@@ -197,17 +206,26 @@ queue, retries, and classifications. Include changes that affect only docs,
 generated files, Go runtime branches, protocol, GUI/iOS, native dependencies,
 sandbox backends, release metadata, workflow policy, and fork trust.
 
-Promote only after two weeks with zero unexplained mode disagreement, zero
-artifact identity mismatch, no fixture escape, and capability-specific latency
-within provisional budgets. Each UTC day of full comparison is capped at 2x the
-matched baseline runner minutes plus 20% of that baseline as queue overhead,
-for at most 14 calendar days. Old workflows then run observationally at 10%
-sampling for 30 days; they are not required and cannot affect the App gate.
-Abort shadow migration and restore the old gate if cost exceeds that budget for
-three consecutive UTC days, p95 required latency exceeds its target by 25% for
-three days, any trust/provenance mismatch occurs, or any false-green fixture
-escapes. Main promotion expands deferred PR modes according to policy; it does
-not infer that a skipped PR mode passed.
+Promote only after an owner-approved bounded representative sample matrix is
+complete with zero unexplained mode disagreement, zero artifact identity
+mismatch, no fixture escape, and capability-specific latency within provisional
+budgets. The matrix covers every named change class, trusted and untrusted
+event shape, required mode, retry/cancellation/failure class, matching mode-set
+criterion, latency criterion, and classification criterion; every required
+cell has explicit retained samples or an owner-approved retirement row. Full
+dual-run comparison is capped at 2x the matched baseline runner minutes plus
+20% of that baseline as queue overhead for the bounded matrix. Exhausting that
+budget before the sample matrix is complete aborts or resizes the shadow
+migration; it never promotes by elapsed time. After the App-owned gate becomes
+the required decision, old workflows may run observationally only until the P10
+real-change/event sample passes; they are not required and cannot affect the
+App gate. Sampling is allowed only when it fills explicit matrix cells, and a
+missing required cell fails the observation gate. Abort shadow migration and
+restore the old gate if the bounded sample exceeds the migration budget, p95
+required latency for the completed matrix exceeds its target by 25%, any
+trust/provenance mismatch occurs, or any false-green fixture escapes. Main
+promotion expands deferred PR modes according to policy; it does not infer
+that a skipped PR mode passed.
 
 Operational reliability reports use a fixed rolling 28-day UTC window and separate
 attempt and change denominators. Attempt failure is failed attempts divided by
@@ -223,8 +241,9 @@ older plan or evidence bundle.
 Treat the roughly 2,100 lines under `.github/workflows/scripts/` as a named
 repo-owned policy surface, not an incidental dependency. Assign an owner and
 grandfather each helper with an executable contract. Port or wrap one helper at
-a time, compare its output with the Go policy/result library, and delete it
-only after a documented compatibility window and zero unexplained disagreement.
+a time, compare its output with the Go policy/result library across a
+documented compatibility sample matrix, and delete it only after that matrix
+has zero unexplained disagreement.
 The `pngjs` dependency remains an explicit exception where image decoding is
 ecosystem-specific. Before YAML reshaping, convert regex-based trust tests such
 as `regen-auth.test.js` into semantic fixture tests so a formatting change
@@ -239,10 +258,12 @@ successful candidates and a security/release-owner audit.
 
 Change required checks in this order: deploy the tamper-resistant
 always-reporting gate, verify it blocks a missing/zero-job result and a
-PR-rewritten unconditional-success gate, require it alongside old contexts,
-observe one full evidence window, then remove obsolete contexts in a separate
-reversible settings change. Retain historical result bundles and a documented
-rollback; do not delete old contexts while the trust-root proof is open.
+PR-rewritten unconditional-success gate, make the App-owned gate the required
+decision while old contexts run observationally, complete the owner-approved
+bounded observation sample of real merged changes/events, then remove obsolete
+contexts in a separate reversible settings change. Retain historical result
+bundles and a documented rollback; do not delete old contexts while the
+trust-root proof or observation matrix is open.
 
 ## Consensus
 
@@ -277,7 +298,7 @@ release remains blocked rather than falling through to an unverified publish.
 | macOS queue/cost misses PR SLO | Capability-specific budgets, bounded matrix, shadow measurement, and main/scheduled deferral recorded as policy. |
 | Native artifact substitution or stale headers | Digest/provenance manifests and independent producer/consumer verification. |
 | Fork or same-repository agent code reaches secrets or push credentials | Explicit fork/agent/trusted tiers, trusted-base evaluator, no secrets in untrusted jobs, unprivileged generation, protected publication environment. |
-| Current and new graphs disagree during migration | Immutable coordinate comparison and old gate remains authoritative until evidence window closes. |
+| Current and new graphs disagree during migration | Immutable coordinate comparison; before App cutover the old gate remains authoritative, and after App cutover old contexts remain observational until the owner-approved bounded sample passes. |
 
 ### Review history
 
@@ -308,9 +329,10 @@ evidence; broad product suites remain owned by the eventual CI lanes.
   choose its hosted deployment and attestation key service, record rotation,
   retention, and incident-revocation procedures, and stop with no cutover if
   those controls cannot be demonstrated in the live fixture.
-- P0 supplies the baseline for final latency and cost budgets; until four weeks
-  of data exist, the provisional 20/35/45/90-minute targets and the dual-run
-  2x-plus-20% budget are binding ceilings, not goals that may be exceeded.
+- P0 supplies the baseline for final latency and cost budgets. Until the
+  retained fixed-window evidence is complete and calibration is owner-reviewed,
+  the provisional 20/35/45/90-minute targets and the dual-run 2x-plus-20%
+  budget are binding ceilings, not goals that may be exceeded.
 - The App check remains the single required decision while individual mode
   diagnostics stay visible as separate checks/evidence. No diagnostic check may
   be substituted into branch protection without the same App source binding.
