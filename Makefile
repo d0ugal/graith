@@ -1,6 +1,17 @@
 GOLANGCI_LINT_VERSION := v2.12.2
+GOLANGCI_LINT_IMAGE := golangci/golangci-lint:$(GOLANGCI_LINT_VERSION)
+GOLANGCI_LINT_RUN_ARGS ?=
+GOLANGCI_LINT_CACHE_ARGS := \
+	-v graith-golangci-go-mod:/go/pkg/mod \
+	-v graith-golangci-go-build:/root/.cache/go-build \
+	-v graith-golangci-cache:/root/.cache/golangci-lint \
+	-e GOMODCACHE=/go/pkg/mod \
+	-e GOCACHE=/root/.cache/go-build \
+	-e GOLANGCI_LINT_CACHE=/root/.cache/golangci-lint
+GOLANGCI_LINT_DOCKER_BASE := docker run --rm $(GOLANGCI_LINT_CACHE_ARGS) -v $(CURDIR):/app -w /app
+GOLANGCI_LINT_DOCKER := $(GOLANGCI_LINT_DOCKER_BASE) $(GOLANGCI_LINT_IMAGE)
 
-.PHONY: build test architecture-check lint lint-only lint-darwin shellcheck fmt clean notifier service-app package-graph package-graph-check docs docs-serve demo demo-clean demo-test
+.PHONY: build test architecture-check lint lint-only lint-darwin lint-profile lint-cache-clean shellcheck fmt clean notifier service-app package-graph package-graph-check docs docs-serve demo demo-clean demo-test
 
 build:
 	GRAITH_LIBGHOSTTY_LDFLAGS="-s -w" scripts/libghostty-native.sh build-local
@@ -38,15 +49,21 @@ architecture-check:
 	GOFLAGS=-mod=readonly GOWORK=off go run ./cmd/architecturecheck
 
 lint:
-	docker run --rm -v $(CURDIR):/app -w /app golangci/golangci-lint:$(GOLANGCI_LINT_VERSION) golangci-lint run --fix
+	$(GOLANGCI_LINT_DOCKER) golangci-lint run --fix $(GOLANGCI_LINT_RUN_ARGS)
 
 lint-only:
-	docker run --rm -v $(CURDIR):/app -w /app golangci/golangci-lint:$(GOLANGCI_LINT_VERSION) golangci-lint run
+	$(GOLANGCI_LINT_DOCKER) golangci-lint run $(GOLANGCI_LINT_RUN_ARGS)
 
 # Lint with GOOS=darwin so Darwin-only files (e.g. *_darwin.go) are compiled and
 # checked. CI lints on Linux, which never sees these files (issue #784).
 lint-darwin:
-	docker run --rm -e GOOS=darwin -v $(CURDIR):/app -w /app golangci/golangci-lint:$(GOLANGCI_LINT_VERSION) golangci-lint run
+	$(GOLANGCI_LINT_DOCKER_BASE) -e GOOS=darwin $(GOLANGCI_LINT_IMAGE) golangci-lint run $(GOLANGCI_LINT_RUN_ARGS)
+
+lint-profile:
+	$(GOLANGCI_LINT_DOCKER) golangci-lint run -v $(GOLANGCI_LINT_RUN_ARGS)
+
+lint-cache-clean:
+	-docker volume rm graith-golangci-go-mod graith-golangci-go-build graith-golangci-cache
 
 # Lint every tracked shell script, including ShellCheck's opt-in checks. Keep
 # warnings and errors as the enforced baseline so correctness findings fail CI
@@ -57,7 +74,7 @@ shellcheck:
 	git ls-files -z -- '*.sh' | xargs -0 shellcheck --enable=all --severity=warning
 
 fmt:
-	docker run --rm -v $(CURDIR):/app -w /app golangci/golangci-lint:$(GOLANGCI_LINT_VERSION) golangci-lint fmt
+	$(GOLANGCI_LINT_DOCKER) golangci-lint fmt
 
 clean:
 	rm -f gr
