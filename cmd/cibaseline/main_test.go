@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestWriteJSONCreatesPrivateEvidenceFile(t *testing.T) {
@@ -80,9 +81,10 @@ func TestReadSnapshotRejectsOldSchemaBeforeOldFields(t *testing.T) {
 func TestFetchRejectsNegativeCollectionLimits(t *testing.T) {
 	inventory := filepath.Join("..", "..", "internal", "cibaseline", "inventory.json")
 	tests := map[string][]string{
-		"elapsed":  {"-max-elapsed=-1s"},
-		"requests": {"-max-requests=-1"},
-		"retries":  {"-max-retries=-1"},
+		"elapsed":    {"-max-elapsed=-1s"},
+		"requests":   {"-max-requests=-1"},
+		"retries":    {"-max-retries=-1"},
+		"maturation": {"-maturation-delay=-1s"},
 	}
 
 	for name, limit := range tests {
@@ -94,5 +96,26 @@ func TestFetchRejectsNegativeCollectionLimits(t *testing.T) {
 				t.Fatalf("run() error = %v, want negative collection limit rejection", err)
 			}
 		})
+	}
+}
+
+func TestFetchDoesNotWriteOutputForInvalidMaturedWindow(t *testing.T) {
+	inventory := filepath.Join("..", "..", "internal", "cibaseline", "inventory.json")
+	output := filepath.Join(t.TempDir(), "braw-evidence.json")
+	future := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+
+	err := run([]string{
+		"-inventory", inventory,
+		"-since", future,
+		"-maturation-delay", time.Hour.String(),
+		"-output", output,
+		"fetch",
+	})
+	if err == nil || !strings.Contains(err.Error(), "must be after since") {
+		t.Fatalf("run() error = %v, want invalid cutoff rejection", err)
+	}
+
+	if _, statErr := os.Stat(output); !os.IsNotExist(statErr) {
+		t.Fatalf("output exists after failed fetch: %v", statErr)
 	}
 }
