@@ -66,14 +66,14 @@ func deletedRefresher() func() []protocol.SessionInfo {
 	}
 }
 
-func conversationFetcher(sessionID string) func() ([]protocol.ConversationMessage, bool) {
-	return func() ([]protocol.ConversationMessage, bool) {
-		msgs, err := client.FetchConversation(cfg, paths, cfgFile, sessionID)
+func messageBrowserFetcher(sessionID string) client.MessageBrowserFetch {
+	return func(req client.MessageFetchRequest) (client.MessageFetchResult, bool) {
+		result, err := client.FetchMessageBrowser(cfg, paths, cfgFile, sessionID, req)
 		if err != nil {
-			return nil, false
+			return client.MessageFetchResult{}, false
 		}
 
-		return msgs, true
+		return result, true
 	}
 }
 

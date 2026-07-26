@@ -58,6 +58,8 @@ type MessageKeys struct {
 	CollapseAll []string
 	NextConv    []string
 	PrevConv    []string
+	Topics      []string
+	Direct      []string
 	Cancel      []string
 }
 
@@ -75,6 +77,8 @@ func DefaultMessageKeys() MessageKeys {
 		CollapseAll: []string{"C"},
 		NextConv:    []string{"l", "right", "tab"},
 		PrevConv:    []string{"h", "left", "shift+tab"},
+		Topics:      []string{"t"},
+		Direct:      []string{"d"},
 		Cancel:      []string{"q", "esc", "ctrl+c"},
 	}
 }

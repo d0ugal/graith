@@ -130,7 +130,7 @@ configurable navigation vocabulary and add their own action keys.
 
 | Overlay | Keys | Config keys |
 |---------|------|-------------|
-| Message viewer | `j`/`k` move · `pgdn`/`pgup` scroll · `g`/`G` first/last · `h`/`l` conversation · `enter` pin · `O`/`C` expand/collapse all · `q` close | `overlay.up`/`down`, `overlay.page_down`/`page_up`, `overlay.top`/`bottom`, `overlay.message_prev_conversation`/`message_next_conversation`, `overlay.message_pin`, `overlay.message_expand_all`/`message_collapse_all`, `overlay.cancel` |
+| Message viewer | `j`/`k` older/newer message · `pgdn`/`pgup` scroll a long message · `g`/`G` first/latest · `h`/`l` conversation/topic · `t` topics · `d` direct messages · `enter` pin · `O`/`C` expand/collapse all · `q` close | `overlay.up`/`down`, `overlay.page_down`/`page_up`, `overlay.top`/`bottom`, `overlay.message_prev_conversation`/`message_next_conversation`, `overlay.message_topics`/`message_direct`, `overlay.message_pin`, `overlay.message_expand_all`/`message_collapse_all`, `overlay.cancel` |
 | Scroll pager | `g`/`G` top/bottom · `q` quit (up/down/page keys are handled by the pager) | `overlay.top`/`bottom`, `overlay.cancel` |
 
 ## Configuring overlay keys

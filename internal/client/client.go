@@ -1094,3 +1094,158 @@ func FetchConversation(cfg *config.Config, paths config.Paths, configFile string
 
 	return list.Messages, nil
 }
+
+// FetchMessageBrowser retrieves the direct-message conversation, visible topic
+// list, and (when requested) the full selected topic stream for the message
+// browser overlay. It uses one passive connection so a refresh is a consistent
+// bounded control exchange rather than several independent dials.
+func FetchMessageBrowser(cfg *config.Config, paths config.Paths, configFile string, sessionID string, req MessageFetchRequest) (MessageFetchResult, error) {
+	c, err := ConnectPassive(cfg, paths, configFile)
+	if err != nil {
+		return MessageFetchResult{}, err
+	}
+	defer c.Close()
+
+	direct, err := fetchConversationOn(c, sessionID)
+	if err != nil {
+		return MessageFetchResult{}, err
+	}
+
+	topics, err := fetchTopicsOn(c, sessionID)
+	if err != nil {
+		return MessageFetchResult{}, err
+	}
+
+	result := MessageFetchResult{DirectMessages: direct, Topics: topics}
+
+	if req.Topic != "" {
+		topicMessages, err := fetchTopicMessagesOn(c, req.Topic, sessionID)
+		if err != nil {
+			return MessageFetchResult{}, err
+		}
+
+		result.TopicMessages = topicMessages
+	}
+
+	return result, nil
+}
+
+func fetchConversationOn(c *Client, sessionID string) ([]protocol.ConversationMessage, error) {
+	if err := c.SendControl("msg_conversation", protocol.MsgConversationMsg{SessionID: sessionID}); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Type == "error" {
+		var e protocol.ErrorMsg
+
+		_ = protocol.DecodePayload(resp, &e)
+
+		return nil, fmt.Errorf("%s", e.Message)
+	}
+
+	if resp.Type != "msg_conversation_list" {
+		return nil, fmt.Errorf("unexpected response %q", resp.Type)
+	}
+
+	var list protocol.MsgConversationListMsg
+	if err := protocol.DecodePayload(resp, &list); err != nil {
+		return nil, err
+	}
+
+	return list.Messages, nil
+}
+
+func fetchTopicsOn(c *Client, subscriber string) ([]MsgTopicInfo, error) {
+	if err := c.SendControl("msg_topics", protocol.MsgTopicsMsg{Subscriber: subscriber}); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Type == "error" {
+		var e protocol.ErrorMsg
+
+		_ = protocol.DecodePayload(resp, &e)
+
+		return nil, fmt.Errorf("%s", e.Message)
+	}
+
+	if resp.Type != "msg_topics_list" {
+		return nil, fmt.Errorf("unexpected response %q", resp.Type)
+	}
+
+	var list struct {
+		Streams []MsgTopicInfo `json:"streams"`
+	}
+	if err := protocol.DecodePayload(resp, &list); err != nil {
+		return nil, err
+	}
+
+	topics := list.Streams[:0]
+	for _, stream := range list.Streams {
+		if strings.HasPrefix(stream.Name, "inbox:") {
+			continue
+		}
+
+		topics = append(topics, stream)
+	}
+
+	return topics, nil
+}
+
+func fetchTopicMessagesOn(c *Client, topic, subscriber string) ([]protocol.ConversationMessage, error) {
+	if err := c.SendControl("msg_sub", protocol.MsgSubMsg{
+		Stream:     topic,
+		Subscriber: subscriber,
+		OnlyUnread: false,
+		Wait:       false,
+		Follow:     false,
+		Ack:        false,
+	}); err != nil {
+		return nil, err
+	}
+
+	var messages []protocol.ConversationMessage
+
+	for {
+		frame, err := c.ReadFrame()
+		if err != nil {
+			return nil, err
+		}
+
+		if frame.Channel != protocol.ChannelControl {
+			continue
+		}
+
+		msg, err := protocol.DecodeControl(frame.Payload)
+		if err != nil {
+			return nil, err
+		}
+
+		switch msg.Type {
+		case "msg_message":
+			var m protocol.ConversationMessage
+			if err := protocol.DecodePayload(msg, &m); err != nil {
+				return nil, err
+			}
+
+			messages = append(messages, m)
+		case "msg_done":
+			return messages, nil
+		case "error":
+			var e protocol.ErrorMsg
+
+			_ = protocol.DecodePayload(msg, &e)
+
+			return nil, fmt.Errorf("%s", e.Message)
+		}
+	}
+}

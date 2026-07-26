@@ -929,6 +929,150 @@ func TestFetchConversation_ErrorWhenDaemonUnreachable(t *testing.T) {
 	}
 }
 
+func TestFetchTopicMessagesOnReadsUntilDone(t *testing.T) {
+	c, serverConn := setupTestClient(t)
+	serverReader := protocol.NewFrameReader(serverConn)
+	serverWriter := protocol.NewFrameWriter(serverConn)
+
+	type result struct {
+		messages []protocol.ConversationMessage
+		err      error
+	}
+
+	resultCh := make(chan result, 1)
+
+	go func() {
+		messages, err := fetchTopicMessagesOn(c, "blether", "ben")
+		resultCh <- result{messages: messages, err: err}
+	}()
+
+	frame, err := serverReader.ReadFrame()
+	if err != nil {
+		t.Fatalf("server read request: %v", err)
+	}
+
+	if frame.Channel != protocol.ChannelControl {
+		t.Fatalf("request channel = %d, want control", frame.Channel)
+	}
+
+	env, err := protocol.DecodeControl(frame.Payload)
+	if err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+
+	if env.Type != "msg_sub" {
+		t.Fatalf("request type = %q, want msg_sub", env.Type)
+	}
+
+	var sub protocol.MsgSubMsg
+	if err := protocol.DecodePayload(env, &sub); err != nil {
+		t.Fatalf("decode msg_sub: %v", err)
+	}
+
+	if sub.Stream != "blether" || sub.Subscriber != "ben" || sub.OnlyUnread || sub.Ack || sub.Wait || sub.Follow {
+		t.Fatalf("msg_sub payload = %+v, want all messages from blether for ben without ack/wait/follow", sub)
+	}
+
+	msgBytes, err := protocol.EncodeControl("msg_message", protocol.ConversationMessage{
+		ID:        "msg-braw",
+		Stream:    "blether",
+		SenderID:  "bairn",
+		Body:      "canny work",
+		CreatedAt: "2026-06-25T10:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("encode msg_message: %v", err)
+	}
+
+	doneBytes, err := protocol.EncodeControl("msg_done", struct{}{})
+	if err != nil {
+		t.Fatalf("encode msg_done: %v", err)
+	}
+
+	if err := serverWriter.WriteFrame(protocol.ChannelControl, msgBytes); err != nil {
+		t.Fatalf("write msg_message: %v", err)
+	}
+
+	if err := serverWriter.WriteFrame(protocol.ChannelControl, doneBytes); err != nil {
+		t.Fatalf("write msg_done: %v", err)
+	}
+
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			t.Fatalf("fetchTopicMessagesOn error: %v", result.err)
+		}
+
+		if len(result.messages) != 1 || result.messages[0].ID != "msg-braw" || result.messages[0].Stream != "blether" {
+			t.Fatalf("messages = %+v, want one blether message", result.messages)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("fetchTopicMessagesOn did not return after msg_done")
+	}
+}
+
+func TestFetchTopicsOnFiltersInboxStreams(t *testing.T) {
+	c, serverConn := setupTestClient(t)
+	serverReader := protocol.NewFrameReader(serverConn)
+	serverWriter := protocol.NewFrameWriter(serverConn)
+
+	resultCh := make(chan struct {
+		topics []MsgTopicInfo
+		err    error
+	}, 1)
+
+	go func() {
+		topics, err := fetchTopicsOn(c, "ben")
+		resultCh <- struct {
+			topics []MsgTopicInfo
+			err    error
+		}{topics: topics, err: err}
+	}()
+
+	frame, err := serverReader.ReadFrame()
+	if err != nil {
+		t.Fatalf("server read request: %v", err)
+	}
+
+	env, err := protocol.DecodeControl(frame.Payload)
+	if err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+
+	if env.Type != "msg_topics" {
+		t.Fatalf("request type = %q, want msg_topics", env.Type)
+	}
+
+	respBytes, err := protocol.EncodeControl("msg_topics_list", struct {
+		Streams []MsgTopicInfo `json:"streams"`
+	}{
+		Streams: []MsgTopicInfo{
+			{Name: "inbox:ben", Total: 2},
+			{Name: "blether", Total: 3, Unread: 1},
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode topics response: %v", err)
+	}
+
+	if err := serverWriter.WriteFrame(protocol.ChannelControl, respBytes); err != nil {
+		t.Fatalf("write topics response: %v", err)
+	}
+
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			t.Fatalf("fetchTopicsOn error: %v", result.err)
+		}
+
+		if len(result.topics) != 1 || result.topics[0].Name != "blether" {
+			t.Fatalf("topics = %+v, want only blether", result.topics)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("fetchTopicsOn did not return after msg_topics_list")
+	}
+}
+
 func TestUpgradeMessageUsesResolvedManagedCandidate(t *testing.T) {
 	originalResolver := resolveUpgradeCandidateForClient
 	originalVersion := version.Version

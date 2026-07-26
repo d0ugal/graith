@@ -328,7 +328,7 @@ func (l *attachLoop) onMessageOverlay() (bool, error) {
 		names[s.ID] = s.Name
 	}
 
-	client.RunMessageOverlay(l.sessionID, messageKeysFromConfig(), conversationFetcher(l.sessionID), names)
+	client.RunMessageBrowserOverlay(l.sessionID, messageKeysFromConfig(), messageBrowserFetcher(l.sessionID), names)
 
 	l.restoreAndAdopt(nc)
 

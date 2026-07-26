@@ -20,6 +20,13 @@ func cm(stream, senderID, senderName, body, createdAt string) protocol.Conversat
 	}
 }
 
+func cmID(id, stream, senderID, senderName, body, createdAt string) protocol.ConversationMessage {
+	msg := cm(stream, senderID, senderName, body, createdAt)
+	msg.ID = id
+
+	return msg
+}
+
 func findConv(convs []msgConversation, peerID string) *msgConversation {
 	for i := range convs {
 		if convs[i].peerID == peerID {
@@ -635,6 +642,32 @@ func TestMsgOverlay_FetchCmdTransientError(t *testing.T) {
 	}
 }
 
+func TestMsgOverlay_FetchCmdDirectModeDoesNotRequestTopicBody(t *testing.T) {
+	var requested []string
+
+	fetch := func(req MessageFetchRequest) (MessageFetchResult, bool) {
+		requested = append(requested, req.Topic)
+
+		return MessageFetchResult{
+			Topics: []MsgTopicInfo{{Name: "blether", Total: 9, LatestAt: "2026-06-25T10:00:00Z"}},
+		}, true
+	}
+
+	m := newMessageBrowserModel("ben", fetch, nil)
+	m.mode = msgModeDirect
+	m.loaded = true
+	m.topics = []MsgTopicInfo{{Name: "blether", Total: 9, LatestAt: "2026-06-25T10:00:00Z"}}
+
+	fetched := m.fetchCmd()().(msgFetchedMsg)
+	if !fetched.ok {
+		t.Fatal("fetch should succeed")
+	}
+
+	if len(requested) != 1 || requested[0] != "" {
+		t.Fatalf("direct-mode fetch requested topics = %v, want empty topic request", requested)
+	}
+}
+
 // Note: tickCmd's timer behavior is covered structurally via the msgTickMsg
 // handler tests below (TickStartsFetch / TickSkipsWhenFetching) rather than by
 // executing the real 2-second tea.Tick, which would add a wall-clock delay to
@@ -692,6 +725,155 @@ func TestMsgOverlay_FetchErrorKeepsSnapshot(t *testing.T) {
 	}
 }
 
+func TestMsgOverlay_FetchedDirectStartsAtLatest(t *testing.T) {
+	m := newMessageOverlayModel("ben", nil, nil)
+	fetched := groupConversations("ben", []protocol.ConversationMessage{
+		cmID("m0", "inbox:ben", "bairn", "bairn", "auld", "2026-06-25T10:00:00Z"),
+		cmID("m1", "inbox:ben", "bairn", "bairn", "canny", "2026-06-25T10:00:01Z"),
+		cmID("m2", "inbox:ben", "bairn", "bairn", "braw", "2026-06-25T10:00:02Z"),
+	}, nil)
+
+	updated, _ := m.Update(msgFetchedMsg{conversations: fetched, ok: true})
+	mm := updated.(messageOverlayModel)
+
+	if mm.msgCursor != 2 {
+		t.Fatalf("initial fetched msgCursor = %d, want latest index 2", mm.msgCursor)
+	}
+}
+
+func TestMsgOverlay_NewArrivalPreservesOlderDirectPosition(t *testing.T) {
+	m := testModel(3)
+	m.msgCursor = 0
+
+	refreshed := groupConversations("ben", []protocol.ConversationMessage{
+		cmID("m0", "inbox:ben", "bairn", "bairn", "auld", "2026-06-25T10:00:00Z"),
+		cmID("m1", "inbox:ben", "bairn", "bairn", "canny", "2026-06-25T10:00:01Z"),
+		cmID("m2", "inbox:ben", "bairn", "bairn", "braw", "2026-06-25T10:00:02Z"),
+		cmID("m3", "inbox:ben", "bairn", "bairn", "new", "2026-06-25T10:00:03Z"),
+	}, nil)
+
+	updated, _ := m.Update(msgFetchedMsg{conversations: refreshed, ok: true})
+	mm := updated.(messageOverlayModel)
+
+	if got := mm.currentEntry(); got == nil || got.id != "m0" {
+		t.Fatalf("refresh should preserve older focused m0, got %+v", got)
+	}
+}
+
+func TestMsgOverlay_TopicSwitchFetchesSelectedTopic(t *testing.T) {
+	var requested []string
+
+	fetch := func(req MessageFetchRequest) (MessageFetchResult, bool) {
+		requested = append(requested, req.Topic)
+
+		result := MessageFetchResult{
+			Topics: []MsgTopicInfo{{Name: "blether", Total: 2}},
+		}
+		if req.Topic == "blether" {
+			result.TopicMessages = []protocol.ConversationMessage{
+				cmID("t0", "blether", "bairn", "bairn", "first", "2026-06-25T10:00:00Z"),
+				cmID("t1", "blether", "croft", "croft", "second", "2026-06-25T10:00:01Z"),
+			}
+		}
+
+		return result, true
+	}
+
+	m := newMessageBrowserModel("ben", fetch, nil)
+	m.loaded = true
+	m.topics = []MsgTopicInfo{{Name: "blether", Total: 2}}
+	m.width, m.height = 100, 24
+
+	updated, cmd := m.Update(keyPress("t"))
+
+	mm := updated.(messageOverlayModel)
+	if mm.mode != msgModeTopics {
+		t.Fatalf("mode = %v, want topics", mm.mode)
+	}
+
+	if cmd == nil {
+		t.Fatal("switching to an unloaded topic should fetch it")
+	}
+
+	gotMsg := cmd()
+
+	fetched, ok := gotMsg.(msgFetchedMsg)
+	if !ok {
+		t.Fatalf("topic fetch command returned %T, want msgFetchedMsg", gotMsg)
+	}
+
+	updated, _ = mm.Update(fetched)
+	mm = updated.(messageOverlayModel)
+
+	if len(requested) != 1 || requested[0] != "blether" {
+		t.Fatalf("requested topics = %v, want [blether]", requested)
+	}
+
+	if mm.topicLoaded != "blether" || mm.msgCount() != 2 || mm.msgCursor != 1 {
+		t.Fatalf("topic state = loaded %q count %d cursor %d, want blether/2/latest", mm.topicLoaded, mm.msgCount(), mm.msgCursor)
+	}
+}
+
+func TestMsgOverlay_TopicRefreshPreservesOlderPosition(t *testing.T) {
+	m := newMessageBrowserModel("ben", nil, nil)
+	m.mode = msgModeTopics
+	m.loaded = true
+	m.topics = []MsgTopicInfo{{Name: "blether", Total: 3}}
+	m.topicLoaded = "blether"
+	m.topicMessages = topicEntries("ben", []protocol.ConversationMessage{
+		cmID("t0", "blether", "bairn", "bairn", "auld", "2026-06-25T10:00:00Z"),
+		cmID("t1", "blether", "croft", "croft", "canny", "2026-06-25T10:00:01Z"),
+		cmID("t2", "blether", "dreich", "dreich", "braw", "2026-06-25T10:00:02Z"),
+	})
+	m.msgCursor = 0
+
+	updated, _ := m.Update(msgFetchedMsg{
+		topics:    []MsgTopicInfo{{Name: "blether", Total: 4}},
+		topicName: "blether",
+		topicMessages: topicEntries("ben", []protocol.ConversationMessage{
+			cmID("t0", "blether", "bairn", "bairn", "auld", "2026-06-25T10:00:00Z"),
+			cmID("t1", "blether", "croft", "croft", "canny", "2026-06-25T10:00:01Z"),
+			cmID("t2", "blether", "dreich", "dreich", "braw", "2026-06-25T10:00:02Z"),
+			cmID("t3", "blether", "fash", "fash", "new", "2026-06-25T10:00:03Z"),
+		}),
+		ok: true,
+	})
+	mm := updated.(messageOverlayModel)
+
+	if got := mm.currentEntry(); got == nil || got.id != "t0" {
+		t.Fatalf("topic refresh should preserve older focused t0, got %+v", got)
+	}
+}
+
+func TestMsgOverlay_TopicRefreshFollowsLatestWhenAtTail(t *testing.T) {
+	m := newMessageBrowserModel("ben", nil, nil)
+	m.mode = msgModeTopics
+	m.loaded = true
+	m.topics = []MsgTopicInfo{{Name: "blether", Total: 2}}
+	m.topicLoaded = "blether"
+	m.topicMessages = topicEntries("ben", []protocol.ConversationMessage{
+		cmID("t0", "blether", "bairn", "bairn", "auld", "2026-06-25T10:00:00Z"),
+		cmID("t1", "blether", "croft", "croft", "tail", "2026-06-25T10:00:01Z"),
+	})
+	m.msgCursor = 1
+
+	updated, _ := m.Update(msgFetchedMsg{
+		topics:    []MsgTopicInfo{{Name: "blether", Total: 3}},
+		topicName: "blether",
+		topicMessages: topicEntries("ben", []protocol.ConversationMessage{
+			cmID("t0", "blether", "bairn", "bairn", "auld", "2026-06-25T10:00:00Z"),
+			cmID("t1", "blether", "croft", "croft", "tail", "2026-06-25T10:00:01Z"),
+			cmID("t2", "blether", "dreich", "dreich", "new", "2026-06-25T10:00:02Z"),
+		}),
+		ok: true,
+	})
+	mm := updated.(messageOverlayModel)
+
+	if got := mm.currentEntry(); got == nil || got.id != "t2" {
+		t.Fatalf("topic refresh at tail should follow latest t2, got %+v", got)
+	}
+}
+
 // --- Update: conversation navigation (h/l) ---
 
 func TestMsgOverlay_ConversationSwitch(t *testing.T) {
@@ -737,6 +919,151 @@ func TestMsgOverlay_ConversationSwitch(t *testing.T) {
 
 	if mm.cursor != 0 {
 		t.Errorf("cursor should clamp at 0, got %d", mm.cursor)
+	}
+}
+
+func TestMsgOverlay_TopicAndDirectModeSwitch(t *testing.T) {
+	m := testModel(2)
+	m.topics = []MsgTopicInfo{{Name: "blether", Total: 1}}
+	m.topicLoaded = "blether"
+	m.topicMessages = topicEntries("ben", []protocol.ConversationMessage{
+		cmID("t0", "blether", "bairn", "bairn", "topic body", "2026-06-25T10:00:00Z"),
+	})
+
+	updated, _ := m.Update(keyPress("t"))
+
+	mm := updated.(messageOverlayModel)
+	if mm.mode != msgModeTopics {
+		t.Fatalf("mode after t = %v, want topics", mm.mode)
+	}
+
+	if got := mm.currentEntry(); got == nil || got.id != "t0" {
+		t.Fatalf("topic current entry = %+v, want t0", got)
+	}
+
+	updated, _ = mm.Update(keyPress("d"))
+
+	mm = updated.(messageOverlayModel)
+	if mm.mode != msgModeDirect {
+		t.Fatalf("mode after d = %v, want direct", mm.mode)
+	}
+
+	if got := mm.currentEntry(); got == nil || got.id != "m1" {
+		t.Fatalf("direct current entry after returning = %+v, want latest direct m1", got)
+	}
+}
+
+func TestMsgOverlay_ReturnToTopicsUsesCurrentCache(t *testing.T) {
+	var requested []string
+
+	fetch := func(req MessageFetchRequest) (MessageFetchResult, bool) {
+		requested = append(requested, req.Topic)
+
+		return MessageFetchResult{}, true
+	}
+
+	m := newMessageBrowserModel("ben", fetch, nil)
+	m.loaded = true
+	m.topics = []MsgTopicInfo{{Name: "blether", Total: 1, LatestAt: "2026-06-25T10:00:00Z"}}
+	m.topicLoaded = "blether"
+	m.topicTotal = 1
+	m.topicLatestAt = "2026-06-25T10:00:00Z"
+	m.topicMessages = topicEntries("ben", []protocol.ConversationMessage{
+		cmID("t0", "blether", "bairn", "bairn", "cached", "2026-06-25T10:00:00Z"),
+	})
+
+	updated, cmd := m.Update(keyPress("t"))
+	mm := updated.(messageOverlayModel)
+
+	if cmd != nil {
+		t.Fatal("returning to a current cached topic should not re-fetch its body")
+	}
+
+	if len(requested) != 0 {
+		t.Fatalf("requested topics = %v, want no fetch", requested)
+	}
+
+	if mm.mode != msgModeTopics || mm.topicLoaded != "blether" || mm.msgCount() != 1 {
+		t.Fatalf("topic state = mode %v loaded %q count %d, want cached blether", mm.mode, mm.topicLoaded, mm.msgCount())
+	}
+}
+
+func TestMsgOverlay_ReturnToTopicsFetchesWhenMetadataChanged(t *testing.T) {
+	var requested []string
+
+	fetch := func(req MessageFetchRequest) (MessageFetchResult, bool) {
+		requested = append(requested, req.Topic)
+
+		return MessageFetchResult{
+			Topics: []MsgTopicInfo{{Name: "blether", Total: 2, LatestAt: "2026-06-25T10:00:01Z"}},
+			TopicMessages: []protocol.ConversationMessage{
+				cmID("t0", "blether", "bairn", "bairn", "cached", "2026-06-25T10:00:00Z"),
+				cmID("t1", "blether", "croft", "croft", "fresh", "2026-06-25T10:00:01Z"),
+			},
+		}, true
+	}
+
+	m := newMessageBrowserModel("ben", fetch, nil)
+	m.loaded = true
+	m.topics = []MsgTopicInfo{{Name: "blether", Total: 2, LatestAt: "2026-06-25T10:00:01Z"}}
+	m.topicLoaded = "blether"
+	m.topicTotal = 1
+	m.topicLatestAt = "2026-06-25T10:00:00Z"
+	m.topicMessages = topicEntries("ben", []protocol.ConversationMessage{
+		cmID("t0", "blether", "bairn", "bairn", "cached", "2026-06-25T10:00:00Z"),
+	})
+
+	updated, cmd := m.Update(keyPress("t"))
+	mm := updated.(messageOverlayModel)
+
+	if cmd == nil {
+		t.Fatal("returning to a cached topic should refresh it explicitly")
+	}
+
+	gotMsg := cmd()
+
+	fetched, ok := gotMsg.(msgFetchedMsg)
+	if !ok {
+		t.Fatalf("topic refresh command returned %T, want msgFetchedMsg", gotMsg)
+	}
+
+	updated, _ = mm.Update(fetched)
+	mm = updated.(messageOverlayModel)
+
+	if len(requested) != 1 || requested[0] != "blether" {
+		t.Fatalf("requested topics = %v, want [blether]", requested)
+	}
+
+	if mm.topicLoaded != "blether" || mm.msgCount() != 2 || mm.msgCursor != 1 {
+		t.Fatalf("topic state = loaded %q count %d cursor %d, want blether/2/latest", mm.topicLoaded, mm.msgCount(), mm.msgCursor)
+	}
+}
+
+func TestMsgOverlay_TopicNavigationDoesNotStackFetch(t *testing.T) {
+	m := newMessageBrowserModel("ben", nil, nil)
+	m.mode = msgModeTopics
+	m.loaded = true
+	m.fetching = true
+	m.topics = []MsgTopicInfo{
+		{Name: "blether", Total: 1, LatestAt: "2026-06-25T10:00:00Z"},
+		{Name: "strath", Total: 1, LatestAt: "2026-06-25T10:00:01Z"},
+	}
+	m.topicLoaded = "blether"
+	m.topicTotal = 1
+	m.topicLatestAt = "2026-06-25T10:00:00Z"
+	m.topicMessages = topicEntries("ben", []protocol.ConversationMessage{
+		cmID("t0", "blether", "bairn", "bairn", "cached", "2026-06-25T10:00:00Z"),
+	})
+
+	updated, cmd := m.Update(keyPress("l"))
+	mm := updated.(messageOverlayModel)
+
+	if cmd != nil {
+		t.Fatal("topic navigation should not start another fetch while one is already in flight")
+	}
+
+	if !mm.fetching || mm.topicCursor != 1 {
+		t.Fatalf("state after navigation = fetching %v cursor %d, want fetching true cursor 1", mm.fetching, mm.topicCursor)
 	}
 }
 
@@ -919,14 +1246,32 @@ func TestMsgOverlay_ViewLoadingIndicator(t *testing.T) {
 	}
 }
 
+func TestMsgOverlay_ViewNarrowHeightBoundedWithLongContext(t *testing.T) {
+	m := newMessageOverlayModel("ben", nil, map[string]string{
+		"bairn": "very-long-session-name-that-would-wrap-without-truncation",
+	})
+	m.conversations = groupConversations("ben", []protocol.ConversationMessage{
+		cmID("m0", "inbox:ben", "bairn", "very-long-session-name-that-would-wrap-without-truncation", "auld", "2026-06-25T10:00:00Z"),
+		cmID("m1", "inbox:ben", "bairn", "very-long-session-name-that-would-wrap-without-truncation", "canny", "2026-06-25T10:00:01Z"),
+	}, m.names)
+	m.loaded = true
+	m.msgCursor = 1
+	m.width, m.height = 30, 8
+
+	out := m.View().Content
+	if lines := strings.Split(out, "\n"); len(lines) > m.height {
+		t.Fatalf("view should stay within height %d, got %d lines:\n%s", m.height, len(lines), out)
+	}
+}
+
 // --- renderRail: empty state and scrolling ---
 
 func TestRenderRail_EmptyLoaded(t *testing.T) {
 	m := newMessageOverlayModel("ben", nil, nil)
 	m.loaded = true
 
-	if got := m.renderRail(26, 10); !strings.Contains(got, "No messages") {
-		t.Errorf("empty loaded rail should say No messages, got %q", got)
+	if got := m.renderRail(26, 10); !strings.Contains(got, "No direct messages") {
+		t.Errorf("empty loaded rail should say No direct messages, got %q", got)
 	}
 }
 
@@ -961,10 +1306,23 @@ func TestRenderRail_ScrollsToSelected(t *testing.T) {
 	}
 }
 
+func TestRenderTopicRail_EmptyLoaded(t *testing.T) {
+	m := newMessageBrowserModel("ben", nil, nil)
+	m.mode = msgModeTopics
+	m.loaded = true
+
+	if got := m.renderRail(26, 10); !strings.Contains(got, "No available topics") {
+		t.Errorf("empty topic rail should say No available topics, got %q", got)
+	}
+}
+
 // --- renderThread: no-conversation states ---
 
 func TestRenderThread_NoConversationLoaded(t *testing.T) {
 	m := newMessageOverlayModel("ben", nil, nil)
+	m.conversations = groupConversations("ben", []protocol.ConversationMessage{
+		cm("inbox:ben", "bairn", "bairn", "braw", "2026-06-25T10:00:00Z"),
+	}, nil)
 	m.loaded = true
 	m.cursor = -1
 
@@ -979,6 +1337,38 @@ func TestRenderThread_NoConversationNotLoaded(t *testing.T) {
 
 	if got := m.renderThread(80, 20); got != "" {
 		t.Errorf("unloaded with no selection should render empty, got %q", got)
+	}
+}
+
+func TestRenderThread_EmptyTopicLoaded(t *testing.T) {
+	m := newMessageBrowserModel("ben", nil, nil)
+	m.mode = msgModeTopics
+	m.loaded = true
+	m.topics = []MsgTopicInfo{{Name: "blether"}}
+	m.topicLoaded = "blether"
+
+	if got := m.renderThread(80, 20); !strings.Contains(got, "No messages in blether") {
+		t.Errorf("empty topic should render a useful state, got %q", got)
+	}
+}
+
+func TestRenderThread_TopicViewportBounded(t *testing.T) {
+	msgs := make([]protocol.ConversationMessage, 0, 20)
+	for i := 0; i < 20; i++ {
+		msgs = append(msgs, cmID("t"+strconv.Itoa(i), "blether", "bairn", "bairn", "line "+strconv.Itoa(i), "2026-06-25T10:00:00Z"))
+	}
+
+	m := newMessageBrowserModel("ben", nil, nil)
+	m.mode = msgModeTopics
+	m.loaded = true
+	m.topics = []MsgTopicInfo{{Name: "blether", Total: 20}}
+	m.topicLoaded = "blether"
+	m.topicMessages = topicEntries("ben", msgs)
+	m.msgCursor = len(msgs) - 1
+
+	out := m.renderThread(80, 5)
+	if lines := strings.Split(out, "\n"); len(lines) > 5 {
+		t.Fatalf("topic render should be bounded to height 5, got %d lines:\n%s", len(lines), out)
 	}
 }
 
@@ -1018,6 +1408,11 @@ func TestRenderThread_SystemAndOutbound(t *testing.T) {
 
 	if outbound := m.renderThread(80, 20); !strings.Contains(outbound, "me →") {
 		t.Errorf("outbound messages should carry the 'me →' header:\n%s", outbound)
+	}
+
+	inbound := testModel(1).renderThread(80, 20)
+	if !strings.Contains(inbound, "bairn → me") {
+		t.Errorf("inbound direct messages should carry the 'sender → me' header:\n%s", inbound)
 	}
 }
 
