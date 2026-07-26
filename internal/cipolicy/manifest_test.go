@@ -2,6 +2,7 @@ package cipolicy
 
 import (
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,10 +10,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/d0ugal/graith/internal/atomicfile"
 	"github.com/d0ugal/graith/internal/cibaseline"
 )
 
+var updateManifest = flag.Bool("update", false, "regenerate the committed cipolicy manifest")
+
 func TestCommittedManifestMatchesInventory(t *testing.T) {
+	if *updateManifest {
+		updateCommittedManifest(t)
+	}
+
 	manifest := loadManifest(t)
 
 	if err := ValidateCurrent(manifest, filepath.Join("..", "cibaseline", "inventory.json")); err != nil {
@@ -44,6 +52,35 @@ func TestCommittedManifestMatchesInventory(t *testing.T) {
 		manifest.Unsupported[0].Expires != "2026-08-31" ||
 		!slices.Contains(manifest.Unsupported[0].EvidenceRefs, "p0-acceptance:gap-external-dependabot-update-graph-30152132020") {
 		t.Fatalf("external observed mode row = %#v, want owned expiring unsupported decision", manifest.Unsupported)
+	}
+}
+
+func updateCommittedManifest(t *testing.T) {
+	t.Helper()
+
+	inventoryPath := filepath.Join("..", "cibaseline", "inventory.json")
+
+	manifest, err := GenerateFromInventoryPath(inventoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := manifest.MarshalCanonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	decoded, err := DecodeManifest("generated policy manifest", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ValidateCurrent(decoded, inventoryPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := atomicfile.Write("manifest.json", data, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -13,32 +13,27 @@ import (
 	"github.com/d0ugal/graith/internal/cipolicy"
 )
 
-func TestGenerateWritesPrivateValidManifestFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "braw-policy.json")
-	inventory := filepath.Join("..", "..", "internal", "cibaseline", "inventory.json")
-
-	if err := run([]string{"-inventory", inventory, "-output", path, "generate"}); err != nil {
-		t.Fatal(err)
-	}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("manifest mode = %#o, want 0600", got)
-	}
-
-	if err := run([]string{"-inventory", inventory, "-manifest", path, "validate"}); err != nil {
-		t.Fatal(err)
+func TestOutputFlagIsOnlyValidForPlan(t *testing.T) {
+	err := run([]string{"-output", filepath.Join(t.TempDir(), "canny.json"), "summary"})
+	if err == nil || !strings.Contains(err.Error(), "-output is only valid with plan") {
+		t.Fatalf("run() error = %v, want output flag rejection", err)
 	}
 }
 
-func TestOutputFlagIsOnlyValidForGenerate(t *testing.T) {
-	err := run([]string{"-output", filepath.Join(t.TempDir(), "canny.json"), "digest"})
-	if err == nil || !strings.Contains(err.Error(), "-output is only valid with generate or plan") {
-		t.Fatalf("run() error = %v, want output flag rejection", err)
+func TestRemovedPolicyModesAreUnavailable(t *testing.T) {
+	tests := map[string]string{
+		"digest":   "unknown command",
+		"generate": "unknown command",
+		"validate": "unknown command",
+	}
+
+	for command, want := range tests {
+		t.Run(command, func(t *testing.T) {
+			err := run([]string{command})
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("run(%q) error = %v, want %q", command, err, want)
+			}
+		})
 	}
 }
 
@@ -78,6 +73,15 @@ func TestPlanWritesDigestBoundRunPlan(t *testing.T) {
 	data, err := os.ReadFile(output)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	info, err := os.Stat(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("output mode = %v, want 0600", got)
 	}
 
 	var plan cipolicy.RunPlan

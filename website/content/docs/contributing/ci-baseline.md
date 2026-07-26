@@ -63,9 +63,8 @@ before regenerating.
 Then rerun validation and the policy checks that consume the inventory:
 
 ```bash
-go test ./internal/cibaseline ./internal/cipolicy ./cmd/cipolicy
 go run ./cmd/cibaseline validate
-go run ./cmd/cipolicy validate
+go test ./internal/cibaseline ./cmd/cibaseline ./internal/cipolicy ./cmd/cipolicy
 ```
 
 If a workflow or job is renamed intentionally, update the inventory in the same

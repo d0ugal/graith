@@ -115,7 +115,7 @@ func TestArtifactConsumerAcceptsExpiredProducerPlanForCurrentConsumer(t *testing
 	attempt := resultAttempt(1, "success", "", producerTime.Add(15*time.Minute))
 	attempt.ArtifactDigest = archiveDigest
 
-	result, err := NewResultRecord(producerPlan, producerJob, []ResultAttempt{attempt})
+	result, err := NewArtifactProducerResult(producerPlan, producerJob, []ArtifactProducerAttempt{attempt})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestArtifactConsumerZeroNowUsesCurrentTime(t *testing.T) {
 	attempt := resultAttempt(1, "success", "", createdAt.Add(time.Minute))
 	attempt.ArtifactDigest = archiveDigest
 
-	result, err := NewResultRecord(plan, job, []ResultAttempt{attempt})
+	result, err := NewArtifactProducerResult(plan, job, []ArtifactProducerAttempt{attempt})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,6 +357,127 @@ func TestArtifactProducerEntryPointsValidateManifestArchiveAndFileRead(t *testin
 
 	if read.ManifestDigest != artifact.ManifestDigest {
 		t.Fatalf("ReadArtifactManifest() digest = %s, want %s", read.ManifestDigest, artifact.ManifestDigest)
+	}
+}
+
+func TestArtifactProducerResultValidationRejectsTampering(t *testing.T) {
+	manifest := loadManifest(t)
+	files := releaseArtifactFiles()
+	members := releaseArchiveMembers()
+	plan, result, artifact, _ := artifactFixture(t, manifest, ArtifactTypeRelease, "graith-dev-linux-amd64", ArtifactFormatTar, testProducerWorkflow, files, members)
+
+	tests := map[string]struct {
+		edit   func(*ArtifactProducerResult)
+		resign bool
+		want   string
+	}{
+		"unsupported schema version": {
+			edit: func(result *ArtifactProducerResult) {
+				result.SchemaVersion = 0
+			},
+			resign: true,
+			want:   "unsupported artifact producer result schema version",
+		},
+		"result digest mismatch": {
+			edit: func(result *ArtifactProducerResult) {
+				result.ResultDigest = strings.Repeat("c", 64)
+			},
+			want: "artifact producer result digest mismatch",
+		},
+		"stale plan identity": {
+			edit: func(result *ArtifactProducerResult) {
+				result.PlanDigest = strings.Repeat("c", 64)
+			},
+			resign: true,
+			want:   "stale artifact producer result binding",
+		},
+		"coordinate identity mismatch": {
+			edit: func(result *ArtifactProducerResult) {
+				result.Capability = "docs-preview"
+			},
+			resign: true,
+			want:   "does not match plan coordinate identity",
+		},
+		"no attempts": {
+			edit: func(result *ArtifactProducerResult) {
+				result.Attempts = nil
+			},
+			resign: true,
+			want:   "has no attempts",
+		},
+		"attempt history is not contiguous": {
+			edit: func(result *ArtifactProducerResult) {
+				result.Attempts[0].Attempt = 2
+			},
+			resign: true,
+			want:   "attempt history is not contiguous",
+		},
+		"invalid attempt timestamp": {
+			edit: func(result *ArtifactProducerResult) {
+				result.Attempts[0].StartedAt = result.Attempts[0].CompletedAt.Add(time.Minute)
+			},
+			resign: true,
+			want:   "attempt 1 has invalid timestamps",
+		},
+		"commit-shaped evidence digest": {
+			edit: func(result *ArtifactProducerResult) {
+				result.Attempts[0].EvidenceDigest = strings.Repeat("a", 40)
+			},
+			resign: true,
+			want:   "evidence digest",
+		},
+		"first outcome drift": {
+			edit: func(result *ArtifactProducerResult) {
+				result.FirstStatus = "failed"
+				result.FirstFailureClass = "runner"
+			},
+			resign: true,
+			want:   "does not preserve first attempt outcome",
+		},
+		"final outcome drift": {
+			edit: func(result *ArtifactProducerResult) {
+				result.Status = "failed"
+				result.FailureClass = "runner"
+			},
+			resign: true,
+			want:   "final outcome does not match final attempt",
+		},
+		"aggregate timestamp drift": {
+			edit: func(result *ArtifactProducerResult) {
+				result.StartedAt = result.StartedAt.Add(time.Second)
+			},
+			resign: true,
+			want:   "does not bind aggregate timestamps to attempts",
+		},
+		"aggregate digest drift": {
+			edit: func(result *ArtifactProducerResult) {
+				result.EvidenceDigest = strings.Repeat("c", 64)
+			},
+			resign: true,
+			want:   "aggregate digests do not match final attempt",
+		},
+		"supersession identity must be a result digest": {
+			edit: func(result *ArtifactProducerResult) {
+				setFinalOutcome(t, result, "superseded", "stale", strings.Repeat("1", 40))
+			},
+			want: "superseded artifact producer result requires a supersession identity",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			mutated := result.copy()
+			test.edit(&mutated)
+
+			if test.resign {
+				signResult(t, &mutated)
+			}
+
+			err := ValidateArtifactManifest(manifest, plan, mutated, artifact, p2TestNow)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ValidateArtifactManifest() error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 
@@ -772,7 +893,7 @@ func TestArtifactManifestRejectsUnsafeStaleAndIncompleteBindings(t *testing.T) {
 
 	tests := map[string]struct {
 		editArtifact func(*ArtifactContractManifest)
-		editResult   func(*ResultRecord)
+		editResult   func(*ArtifactProducerResult)
 		want         string
 	}{
 		"absolute manifest path": {
@@ -836,19 +957,19 @@ func TestArtifactManifestRejectsUnsafeStaleAndIncompleteBindings(t *testing.T) {
 			want: "run attempt",
 		},
 		"cancelled result": {
-			editResult: func(result *ResultRecord) {
+			editResult: func(result *ArtifactProducerResult) {
 				setFinalOutcome(t, result, "cancelled", "cancelled", "")
 			},
 			want: "not success",
 		},
 		"stale result": {
-			editResult: func(result *ResultRecord) {
+			editResult: func(result *ArtifactProducerResult) {
 				setFinalOutcome(t, result, "stale", "stale", "")
 			},
 			want: "not success",
 		},
 		"superseded result": {
-			editResult: func(result *ResultRecord) {
+			editResult: func(result *ArtifactProducerResult) {
 				setFinalOutcome(t, result, "superseded", "superseded", strings.Repeat("5", 64))
 			},
 			want: "not success",
@@ -921,6 +1042,16 @@ func TestArtifactConsumerRejectsMissingCrossTierAndAbsentJobBinding(t *testing.T
 		err := VerifyArtifactConsumer(manifest, plan, result, artifact, archive, options, p2TestNow)
 		if err == nil || !strings.Contains(err.Error(), "not in the consumer plan") {
 			t.Fatalf("VerifyArtifactConsumer() error = %v, want missing consumer job rejection", err)
+		}
+	})
+
+	t.Run("consumer job evidence refs must match plan", func(t *testing.T) {
+		options := artifactConsumerOptions(plan, artifact, ArtifactTypeRelease, "graith-dev-linux-amd64")
+		options.ConsumerJob.EvidenceRefs = []string{"p0-inventory:" + strings.Repeat("a", 64) + "#ci/braw"}
+
+		err := VerifyArtifactConsumer(manifest, plan, result, artifact, archive, options, p2TestNow)
+		if err == nil || !strings.Contains(err.Error(), "not in the consumer plan") {
+			t.Fatalf("VerifyArtifactConsumer() error = %v, want consumer evidence ref binding rejection", err)
 		}
 	})
 
@@ -1469,7 +1600,7 @@ func artifactFixture(
 	workflow string,
 	files []ArtifactFile,
 	members []archiveMember,
-) (RunPlan, ResultRecord, ArtifactContractManifest, []byte) {
+) (RunPlan, ArtifactProducerResult, ArtifactContractManifest, []byte) {
 	t.Helper()
 
 	archive := buildArtifactArchive(t, format, members)
@@ -1479,7 +1610,7 @@ func artifactFixture(
 	attempt := resultAttempt(1, "success", "", p2TestNow)
 	attempt.ArtifactDigest = archiveDigest
 
-	result, err := NewResultRecord(plan, job, []ResultAttempt{attempt})
+	result, err := NewArtifactProducerResult(plan, job, []ArtifactProducerAttempt{attempt})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1636,6 +1767,48 @@ func artifactBuildFlags() []BuildFlag {
 	}
 }
 
+func resultAttempt(attempt int, status, failureClass string, started time.Time) ArtifactProducerAttempt {
+	return ArtifactProducerAttempt{
+		Attempt:        attempt,
+		Status:         status,
+		FailureClass:   failureClass,
+		StartedAt:      started,
+		CompletedAt:    started.Add(time.Minute),
+		EvidenceDigest: strings.Repeat("a", 64),
+		ArtifactDigest: strings.Repeat("b", 64),
+	}
+}
+
+func setFinalOutcome(t *testing.T, result *ArtifactProducerResult, status, failureClass, supersededBy string) {
+	t.Helper()
+
+	final := result.Attempts[len(result.Attempts)-1]
+	final.Status = status
+	final.FailureClass = failureClass
+
+	result.Attempts[len(result.Attempts)-1] = final
+	if len(result.Attempts) == 1 {
+		result.FirstStatus = status
+		result.FirstFailureClass = failureClass
+	}
+
+	result.Status = status
+	result.FailureClass = failureClass
+	result.SupersededBy = supersededBy
+	signResult(t, result)
+}
+
+func signResult(t *testing.T, result *ArtifactProducerResult) {
+	t.Helper()
+
+	digest, err := result.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result.ResultDigest = digest
+}
+
 func planJobByMode(t *testing.T, plan RunPlan, mode string) PlanJob {
 	t.Helper()
 
@@ -1767,7 +1940,7 @@ func (nopWriteCloser) Close() error {
 	return nil
 }
 
-func setArtifactArchiveDigest(t *testing.T, artifact *ArtifactContractManifest, result *ResultRecord, archive []byte) {
+func setArtifactArchiveDigest(t *testing.T, artifact *ArtifactContractManifest, result *ArtifactProducerResult, archive []byte) {
 	t.Helper()
 
 	digest := sha256Hex(archive)
@@ -1780,7 +1953,7 @@ func setArtifactArchiveDigest(t *testing.T, artifact *ArtifactContractManifest, 
 	signArtifact(t, artifact)
 }
 
-func setArtifactResultCompletedAt(t *testing.T, artifact *ArtifactContractManifest, result *ResultRecord, completedAt time.Time) {
+func setArtifactResultCompletedAt(t *testing.T, artifact *ArtifactContractManifest, result *ArtifactProducerResult, completedAt time.Time) {
 	t.Helper()
 
 	setResultCompletedAt(t, result, completedAt)
@@ -1788,7 +1961,7 @@ func setArtifactResultCompletedAt(t *testing.T, artifact *ArtifactContractManife
 	signArtifact(t, artifact)
 }
 
-func setResultCompletedAt(t *testing.T, result *ResultRecord, completedAt time.Time) {
+func setResultCompletedAt(t *testing.T, result *ArtifactProducerResult, completedAt time.Time) {
 	t.Helper()
 
 	final := result.Attempts[len(result.Attempts)-1]

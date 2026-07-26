@@ -20,7 +20,10 @@ import (
 	"time"
 )
 
-const ArtifactSchemaVersion = 1
+const (
+	ArtifactSchemaVersion = 1
+	ArtifactResultVersion = 1
+)
 
 const (
 	ArtifactTypeNativeLibghostty = "native-libghostty"
@@ -71,6 +74,47 @@ type ArtifactProvenance struct {
 	UploadComplete bool   `json:"upload_complete"`
 	ArtifactID     string `json:"artifact_id"`
 	ArtifactDigest string `json:"artifact_digest"`
+}
+
+type ArtifactProducerResult struct {
+	SchemaVersion     int                       `json:"schema_version"`
+	ResultDigest      string                    `json:"result_digest"`
+	PlanDigest        string                    `json:"plan_digest"`
+	PolicyVersion     string                    `json:"policy_version"`
+	PolicyDigest      string                    `json:"policy_digest"`
+	DetectorVersion   string                    `json:"detector_version"`
+	DetectorDigest    string                    `json:"detector_digest"`
+	Source            SourceRevision            `json:"source"`
+	Event             EventSelection            `json:"event"`
+	TrustTier         string                    `json:"trust_tier"`
+	Mode              string                    `json:"mode"`
+	Coordinate        string                    `json:"coordinate"`
+	Capability        string                    `json:"capability"`
+	Platform          string                    `json:"platform"`
+	CostClass         string                    `json:"cost_class"`
+	Requiredness      string                    `json:"requiredness"`
+	Owner             string                    `json:"owner"`
+	Matrix            map[string]string         `json:"matrix"`
+	Attempts          []ArtifactProducerAttempt `json:"attempts"`
+	FirstStatus       string                    `json:"first_status"`
+	FirstFailureClass string                    `json:"first_failure_class"`
+	Status            string                    `json:"status"`
+	FailureClass      string                    `json:"failure_class"`
+	StartedAt         time.Time                 `json:"started_at"`
+	CompletedAt       time.Time                 `json:"completed_at"`
+	EvidenceDigest    string                    `json:"evidence_digest"`
+	ArtifactDigest    string                    `json:"artifact_digest"`
+	SupersededBy      string                    `json:"superseded_by"`
+}
+
+type ArtifactProducerAttempt struct {
+	Attempt        int       `json:"attempt"`
+	Status         string    `json:"status"`
+	FailureClass   string    `json:"failure_class"`
+	StartedAt      time.Time `json:"started_at"`
+	CompletedAt    time.Time `json:"completed_at"`
+	EvidenceDigest string    `json:"evidence_digest"`
+	ArtifactDigest string    `json:"artifact_digest"`
 }
 
 type ArtifactContractManifest struct {
@@ -180,7 +224,58 @@ func DecodeArtifactManifest(name string, data []byte) (ArtifactContractManifest,
 	return artifact, nil
 }
 
-func NewArtifactManifest(policy Manifest, plan RunPlan, result ResultRecord, input ArtifactManifestInput) (ArtifactContractManifest, error) {
+func NewArtifactProducerResult(plan RunPlan, job PlanJob, attempts []ArtifactProducerAttempt) (ArtifactProducerResult, error) {
+	if len(attempts) == 0 {
+		return ArtifactProducerResult{}, errors.New("artifact producer result requires at least one attempt")
+	}
+
+	first := attempts[0]
+	final := attempts[len(attempts)-1]
+
+	result := ArtifactProducerResult{
+		SchemaVersion:     ArtifactResultVersion,
+		PlanDigest:        plan.PlanDigest,
+		PolicyVersion:     plan.PolicyVersion,
+		PolicyDigest:      plan.PolicyDigest,
+		DetectorVersion:   plan.DetectorVersion,
+		DetectorDigest:    plan.DetectorDigest,
+		Source:            plan.Source,
+		Event:             plan.Event,
+		TrustTier:         plan.TrustTier,
+		Mode:              job.Mode,
+		Coordinate:        job.Coordinate,
+		Capability:        job.Capability,
+		Platform:          job.Platform,
+		CostClass:         job.CostClass,
+		Requiredness:      job.Requiredness,
+		Owner:             job.Owner,
+		Matrix:            cloneStringMap(job.Matrix),
+		Attempts:          append([]ArtifactProducerAttempt(nil), attempts...),
+		FirstStatus:       first.Status,
+		FirstFailureClass: first.FailureClass,
+		Status:            final.Status,
+		FailureClass:      final.FailureClass,
+		StartedAt:         first.StartedAt,
+		CompletedAt:       final.CompletedAt,
+		EvidenceDigest:    final.EvidenceDigest,
+		ArtifactDigest:    final.ArtifactDigest,
+	}
+
+	if err := validateArtifactProducerOutcome(result.Status, result.FailureClass, result.SupersededBy); err != nil {
+		return ArtifactProducerResult{}, err
+	}
+
+	digest, err := result.Digest()
+	if err != nil {
+		return ArtifactProducerResult{}, err
+	}
+
+	result.ResultDigest = digest
+
+	return result, nil
+}
+
+func NewArtifactManifest(policy Manifest, plan RunPlan, result ArtifactProducerResult, input ArtifactManifestInput) (ArtifactContractManifest, error) {
 	format := input.ArtifactFormat
 	if format == "" {
 		format = ArtifactFormatTar
@@ -237,7 +332,7 @@ func NewArtifactManifest(policy Manifest, plan RunPlan, result ResultRecord, inp
 	return artifact, nil
 }
 
-func ValidateArtifactManifest(policy Manifest, plan RunPlan, result ResultRecord, artifact ArtifactContractManifest, now time.Time) error {
+func ValidateArtifactManifest(policy Manifest, plan RunPlan, result ArtifactProducerResult, artifact ArtifactContractManifest, now time.Time) error {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
@@ -249,8 +344,8 @@ func ValidateArtifactManifest(policy Manifest, plan RunPlan, result ResultRecord
 	return validateProducerNotInFuture("artifact", result, now)
 }
 
-func validateArtifactManifestAt(policy Manifest, plan RunPlan, result ResultRecord, artifact ArtifactContractManifest, now time.Time) error {
-	if err := ValidateResultRecord(policy, plan, result, now); err != nil {
+func validateArtifactManifestAt(policy Manifest, plan RunPlan, result ArtifactProducerResult, artifact ArtifactContractManifest, now time.Time) error {
+	if err := validateArtifactProducerResult(policy, plan, result, now); err != nil {
 		return err
 	}
 
@@ -295,7 +390,7 @@ func validateArtifactManifestAt(policy Manifest, plan RunPlan, result ResultReco
 		return err
 	}
 
-	if err := validateArtifactProducerAttempt(result, artifact); err != nil {
+	if err := validateArtifactProvenanceAttempt(result, artifact); err != nil {
 		return err
 	}
 
@@ -305,7 +400,7 @@ func validateArtifactManifestAt(policy Manifest, plan RunPlan, result ResultReco
 func VerifyArtifactConsumer(
 	policy Manifest,
 	plan RunPlan,
-	result ResultRecord,
+	result ArtifactProducerResult,
 	artifact ArtifactContractManifest,
 	archive []byte,
 	options ArtifactVerificationOptions,
@@ -338,7 +433,7 @@ func VerifyArtifactArchive(artifact ArtifactContractManifest, archive []byte) er
 func ExtractVerifiedArtifact(
 	policy Manifest,
 	plan RunPlan,
-	result ResultRecord,
+	result ArtifactProducerResult,
 	artifact ArtifactContractManifest,
 	archive []byte,
 	destination string,
@@ -369,7 +464,7 @@ func ExtractVerifiedArtifact(
 	return extractVerifiedEntries(destination, entries)
 }
 
-func producerValidationTime(result ResultRecord, fallback time.Time) time.Time {
+func producerValidationTime(result ArtifactProducerResult, fallback time.Time) time.Time {
 	if !result.CompletedAt.IsZero() {
 		return result.CompletedAt.UTC()
 	}
@@ -377,12 +472,240 @@ func producerValidationTime(result ResultRecord, fallback time.Time) time.Time {
 	return fallback.UTC()
 }
 
-func validateProducerNotInFuture(kind string, result ResultRecord, now time.Time) error {
+func validateProducerNotInFuture(kind string, result ArtifactProducerResult, now time.Time) error {
 	if result.CompletedAt.IsZero() || !result.CompletedAt.After(now.Add(maxPlanClockSkew)) {
 		return nil
 	}
 
 	return fmt.Errorf("%s producer result completed_at %s is after verification time %s", kind, result.CompletedAt.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
+}
+
+func validateArtifactProducerResult(policy Manifest, plan RunPlan, result ArtifactProducerResult, now time.Time) error {
+	if err := plan.ValidateAt(policy, now); err != nil {
+		return err
+	}
+
+	job, ok := planJobByArtifactResult(plan, result)
+	if !ok {
+		return fmt.Errorf("artifact producer result references unknown mode/coordinate %s %s", result.Mode, result.Coordinate)
+	}
+
+	return validateArtifactProducerResultForJob(plan, job, result)
+}
+
+func (result ArtifactProducerResult) Canonical() ArtifactProducerResult {
+	clone := result.copy()
+	clone.StartedAt = clone.StartedAt.UTC()
+	clone.CompletedAt = clone.CompletedAt.UTC()
+
+	if clone.Matrix == nil {
+		clone.Matrix = map[string]string{}
+	}
+
+	for index := range clone.Attempts {
+		clone.Attempts[index].StartedAt = clone.Attempts[index].StartedAt.UTC()
+		clone.Attempts[index].CompletedAt = clone.Attempts[index].CompletedAt.UTC()
+	}
+
+	return clone
+}
+
+func (result ArtifactProducerResult) Digest() (string, error) {
+	canonical := result.Canonical()
+	canonical.ResultDigest = ""
+
+	data, err := json.Marshal(canonical)
+	if err != nil {
+		return "", err
+	}
+
+	return sha256Hex(data), nil
+}
+
+func (result ArtifactProducerResult) copy() ArtifactProducerResult {
+	clone := result
+	clone.Matrix = cloneStringMap(result.Matrix)
+	clone.Attempts = append([]ArtifactProducerAttempt(nil), result.Attempts...)
+
+	return clone
+}
+
+func validateArtifactProducerResultForJob(plan RunPlan, job PlanJob, result ArtifactProducerResult) error {
+	if result.SchemaVersion != ArtifactResultVersion {
+		return fmt.Errorf("unsupported artifact producer result schema version %d", result.SchemaVersion)
+	}
+
+	canonicalResult := result.Canonical()
+
+	digest, err := result.Digest()
+	if err != nil {
+		return err
+	}
+
+	if result.ResultDigest != digest {
+		return fmt.Errorf("artifact producer result digest mismatch: got %s want %s", result.ResultDigest, digest)
+	}
+
+	if result.PlanDigest != plan.PlanDigest ||
+		result.PolicyVersion != plan.PolicyVersion ||
+		result.PolicyDigest != plan.PolicyDigest ||
+		result.DetectorVersion != plan.DetectorVersion ||
+		result.DetectorDigest != plan.DetectorDigest ||
+		!reflect.DeepEqual(result.Source, plan.Source) ||
+		!reflect.DeepEqual(result.Event, plan.Event) ||
+		result.TrustTier != plan.TrustTier {
+		return errors.New("stale artifact producer result binding does not match plan identity")
+	}
+
+	if result.Mode != job.Mode ||
+		result.Coordinate != job.Coordinate ||
+		result.Capability != job.Capability ||
+		result.Platform != job.Platform ||
+		result.CostClass != job.CostClass ||
+		result.Requiredness != job.Requiredness ||
+		result.Owner != job.Owner ||
+		!reflect.DeepEqual(canonicalResult.Matrix, job.Matrix) {
+		return fmt.Errorf("artifact producer result row %s/%s does not match plan coordinate identity", result.Mode, result.Coordinate)
+	}
+
+	if len(result.Attempts) == 0 {
+		return fmt.Errorf("artifact producer result %s/%s has no attempts", result.Mode, result.Coordinate)
+	}
+
+	if result.StartedAt.IsZero() || result.CompletedAt.IsZero() || result.StartedAt.After(result.CompletedAt) {
+		return fmt.Errorf("artifact producer result %s/%s has invalid timestamps", result.Mode, result.Coordinate)
+	}
+
+	for index, attempt := range result.Attempts {
+		if attempt.Attempt != index+1 {
+			return fmt.Errorf("artifact producer result %s/%s attempt history is not contiguous", result.Mode, result.Coordinate)
+		}
+
+		if err := validateArtifactProducerAttempt(result.Mode, result.Coordinate, attempt); err != nil {
+			return err
+		}
+	}
+
+	first := result.Attempts[0]
+	final := result.Attempts[len(result.Attempts)-1]
+
+	if result.FirstStatus != first.Status || result.FirstFailureClass != first.FailureClass {
+		return fmt.Errorf("artifact producer result %s/%s does not preserve first attempt outcome", result.Mode, result.Coordinate)
+	}
+
+	if result.Status != final.Status || result.FailureClass != final.FailureClass {
+		return fmt.Errorf("artifact producer result %s/%s final outcome does not match final attempt", result.Mode, result.Coordinate)
+	}
+
+	if !result.StartedAt.Equal(first.StartedAt) || !result.CompletedAt.Equal(final.CompletedAt) {
+		return fmt.Errorf("artifact producer result %s/%s does not bind aggregate timestamps to attempts", result.Mode, result.Coordinate)
+	}
+
+	if result.EvidenceDigest != final.EvidenceDigest ||
+		result.ArtifactDigest != final.ArtifactDigest {
+		return fmt.Errorf("artifact producer result %s/%s aggregate digests do not match final attempt", result.Mode, result.Coordinate)
+	}
+
+	if err := validateArtifactProducerOutcome(result.Status, result.FailureClass, result.SupersededBy); err != nil {
+		return fmt.Errorf("artifact producer result %s/%s: %w", result.Mode, result.Coordinate, err)
+	}
+
+	return nil
+}
+
+func validateArtifactProducerAttempt(mode, coordinate string, attempt ArtifactProducerAttempt) error {
+	if !validArtifactProducerStatus(attempt.Status) {
+		return fmt.Errorf("artifact producer result %s/%s has unrecognized attempt status %q", mode, coordinate, attempt.Status)
+	}
+
+	if attempt.StartedAt.IsZero() || attempt.CompletedAt.IsZero() || attempt.StartedAt.After(attempt.CompletedAt) {
+		return fmt.Errorf("artifact producer result %s/%s attempt %d has invalid timestamps", mode, coordinate, attempt.Attempt)
+	}
+
+	if err := validateDigest("evidence", attempt.EvidenceDigest); err != nil {
+		return fmt.Errorf("artifact producer result %s/%s attempt %d: %w", mode, coordinate, attempt.Attempt, err)
+	}
+
+	if err := validateDigest("artifact", attempt.ArtifactDigest); err != nil {
+		return fmt.Errorf("artifact producer result %s/%s attempt %d: %w", mode, coordinate, attempt.Attempt, err)
+	}
+
+	if err := validateArtifactProducerAttemptOutcome(attempt.Status, attempt.FailureClass); err != nil {
+		return fmt.Errorf("artifact producer result %s/%s attempt %d: %w", mode, coordinate, attempt.Attempt, err)
+	}
+
+	return nil
+}
+
+func validateArtifactProducerOutcome(status, failureClass, supersededBy string) error {
+	if !validArtifactProducerStatus(status) {
+		return fmt.Errorf("unrecognized status %q", status)
+	}
+
+	if status == "success" {
+		if failureClass != "" {
+			return errors.New("successful artifact producer result cannot have a failure class")
+		}
+
+		if supersededBy != "" {
+			return errors.New("successful artifact producer result cannot be superseded")
+		}
+
+		return nil
+	}
+
+	if failureClass == "" {
+		return fmt.Errorf("status %s requires a failure class", status)
+	}
+
+	if status == "superseded" && !digestPattern.MatchString(supersededBy) {
+		return errors.New("superseded artifact producer result requires a supersession identity")
+	}
+
+	if status != "superseded" && supersededBy != "" {
+		return fmt.Errorf("status %s cannot carry a supersession identity", status)
+	}
+
+	return nil
+}
+
+func validateArtifactProducerAttemptOutcome(status, failureClass string) error {
+	if !validArtifactProducerStatus(status) {
+		return fmt.Errorf("unrecognized status %q", status)
+	}
+
+	if status == "success" {
+		if failureClass != "" {
+			return errors.New("successful artifact producer attempt cannot have a failure class")
+		}
+
+		return nil
+	}
+
+	if failureClass == "" {
+		return fmt.Errorf("status %s requires a failure class", status)
+	}
+
+	return nil
+}
+
+func validArtifactProducerStatus(status string) bool {
+	switch status {
+	case "success", "failed", "skipped", "cancelled", "stale", "superseded":
+		return true
+	default:
+		return false
+	}
+}
+
+func planJobByArtifactResult(plan RunPlan, result ArtifactProducerResult) (PlanJob, bool) {
+	for _, job := range plan.Jobs {
+		if job.Mode == result.Mode && job.Coordinate == result.Coordinate {
+			return job, true
+		}
+	}
+
+	return PlanJob{}, false
 }
 
 func (artifact ArtifactContractManifest) Canonical() ArtifactContractManifest {
@@ -650,7 +973,7 @@ func validateArtifactProvenance(policy Manifest, artifact ArtifactContractManife
 	return nil
 }
 
-func validateArtifactProducerAttempt(result ResultRecord, artifact ArtifactContractManifest) error {
+func validateArtifactProvenanceAttempt(result ArtifactProducerResult, artifact ArtifactContractManifest) error {
 	attempt := result.Attempts[len(result.Attempts)-1]
 	if artifact.Provenance.RunAttempt != attempt.Attempt {
 		return fmt.Errorf("artifact provenance run attempt %d does not match result attempt %d", artifact.Provenance.RunAttempt, attempt.Attempt)
@@ -2073,6 +2396,36 @@ func platformByID(manifest Manifest, id string) (Platform, bool) {
 	}
 
 	return Platform{}, false
+}
+
+func planContainsJob(plan RunPlan, job PlanJob) bool {
+	for _, candidate := range plan.Jobs {
+		if candidate.Source == job.Source &&
+			candidate.Event == job.Event &&
+			candidate.TrustTier == job.TrustTier &&
+			candidate.Mode == job.Mode &&
+			candidate.Coordinate == job.Coordinate &&
+			candidate.Capability == job.Capability &&
+			candidate.Platform == job.Platform &&
+			candidate.CostClass == job.CostClass &&
+			candidate.Requiredness == job.Requiredness &&
+			candidate.Owner == job.Owner &&
+			candidate.GitHubName == job.GitHubName &&
+			reflect.DeepEqual(candidate.Matrix, job.Matrix) &&
+			reflect.DeepEqual(candidate.EvidenceRefs, job.EvidenceRefs) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func validateDigest(kind, digest string) error {
+	if !digestPattern.MatchString(digest) {
+		return fmt.Errorf("%s digest %q is invalid", kind, digest)
+	}
+
+	return nil
 }
 
 func sha256Hex(data []byte) string {
