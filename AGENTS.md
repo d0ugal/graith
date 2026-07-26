@@ -81,6 +81,9 @@ before assuming behavior from documentation.
 - Iterate with `for name, test := range tests`, run each case with
   `t.Run(name, func(t *testing.T) { ... })`, and call `t.Parallel()` when cases
   are independent. Use a slice instead when execution order is significant.
+- Prefer small test helpers for repeated setup and assertions. Helpers should
+  call `t.Helper()` and report clear, behavior-level failures rather than
+  duplicating low-level comparison code across test cases.
 - Every behavior change needs tests. Every bug fix needs a regression test that
   fails on the old behavior and passes with the fix.
 - Test behavior and failure modes, not line coverage: invalid input, rollback,

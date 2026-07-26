@@ -79,8 +79,23 @@ CI runs `golangci-lint` via Docker:
 ```bash
 make lint       # lint and autofix
 make lint-only  # lint without fixing
+make lint-profile # lint with verbose timing output
+make lint-cache-clean # remove Docker lint cache volumes
 make shellcheck # lint every tracked shell script (all optional warning/error checks)
 make fmt        # format only
+```
+
+The Docker lint targets keep the Go module cache, Go build cache, and
+`golangci-lint` cache in named Docker volumes so repeated local runs do not
+start cold. Use `make lint-cache-clean` to discard those volumes if a cache gets
+stale or too large.
+
+To profile slow linters without leaving Docker, run `make lint-profile`. Extra
+`golangci-lint run` arguments can be passed with `GOLANGCI_LINT_RUN_ARGS`, for
+example:
+
+```bash
+GOLANGCI_LINT_RUN_ARGS="--enable-only gosec" make lint-profile
 ```
 
 Locally:
@@ -90,7 +105,7 @@ gofmt -w path/to/modified.go  # format modified Go files
 go vet ./...    # static analysis
 ```
 
-`.golangci.yml` enables `govet`, `staticcheck`, `ineffassign`, `unused`, `gocritic`, `misspell`, and `gofmt`. CI fails on violations.
+`.golangci.yml` controls the enforced linter set. CI fails on violations.
 
 ## Commit messages
 

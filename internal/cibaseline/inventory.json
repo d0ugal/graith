@@ -2776,7 +2776,7 @@
       "owner": "graith-maintainers",
       "kind": "ci-entrypoint",
       "git_mode": "100644",
-      "sha256": "5e73ab72b853251ddcd27c599c4524961e723aa426409130ead7847360906384",
+      "sha256": "fad6702e29ec45d0031da82ead1234ca7b17e567637451fc086d4e25688add86",
       "executable_contract": "preserve the checked-in make targets invoked directly by current workflow proof",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
@@ -3415,5 +3415,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "5b03df0aa114f60b8e6d0883886fe609440bb20c1cc7ca3681a19d28f64cd9cd"
+  "digest": "90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21"
 }
