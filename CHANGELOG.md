@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.70.4](https://github.com/d0ugal/graith/compare/v0.70.3...v0.70.4) (2026-07-26)
+
+
+### Features
+
+* add topic-aware message browser ([35d8d0e](https://github.com/d0ugal/graith/commit/35d8d0e862dc18ffc055d881efa57ff3aff4174a))
+* **ci:** add artifact cache contracts ([#1697](https://github.com/d0ugal/graith/issues/1697)) ([fbbdc99](https://github.com/d0ugal/graith/commit/fbbdc99b5e22916e537eb99ed3050f4df2e4b061))
+* **ci:** add CI plan result policy library ([609bbe8](https://github.com/d0ugal/graith/commit/609bbe87a4eaca86c1e2ed5c45add5495e599170))
+* **ci:** add CI policy manifest ([acad0f8](https://github.com/d0ugal/graith/commit/acad0f85a78c89a41ba2015529a63cb537173ecc))
+* **ci:** add fixed CI baseline fetch windows ([af86c47](https://github.com/d0ugal/graith/commit/af86c47915586d32de2910fef2bcbbe311261b05))
+* **ci:** add hermetic policy fixture ([64de5a9](https://github.com/d0ugal/graith/commit/64de5a9f9db187e598e9c1c2a3fb501f1892b4d8))
+* **ci:** add P11 JS policy surface foundation ([#1698](https://github.com/d0ugal/graith/issues/1698)) ([08a70d0](https://github.com/d0ugal/graith/commit/08a70d0615cff6db50f60b302b346e9090c4f853))
+* **ci:** retain P0 baseline evidence package ([630b827](https://github.com/d0ugal/graith/commit/630b82787bd3cd68df63fad4f623e860eab36aad))
+* establish CI P0 baseline inventory ([af2fc6e](https://github.com/d0ugal/graith/commit/af2fc6e9156ae3677bdf30f42fa00461b125df6c))
+* inherit labels for child sessions ([65faf29](https://github.com/d0ugal/graith/commit/65faf29ac7cc87651ef5dd56935e4994a0879262))
+* show per-binding watch trigger status ([a1b59b7](https://github.com/d0ugal/graith/commit/a1b59b7d1dd0c9cbf627b583bdcec7484e1aeeef))
+
+
+### Bug Fixes
+
+* bound CI baseline GitHub collection ([#1676](https://github.com/d0ugal/graith/issues/1676)) ([e5f4029](https://github.com/d0ugal/graith/commit/e5f402985841f58a3a0da080e93b24e4e646e82a))
+* bound file-watch registrations ([0b7078b](https://github.com/d0ugal/graith/commit/0b7078b714096a1e61779621390a0470cf2f33a4))
+* **ci:** ignore release manifest in baseline inventory ([#1679](https://github.com/d0ugal/graith/issues/1679)) ([65ce1c8](https://github.com/d0ugal/graith/commit/65ce1c8be2107a2899f5d6b9c4b1f823defdb7cb))
+* **ci:** stabilize baseline collection cutoff ([#1677](https://github.com/d0ugal/graith/issues/1677)) ([121613c](https://github.com/d0ugal/graith/commit/121613ca71f067f0a30bc12a2736f06aa4fe1459))
+* include hidden descendants in picker deletion ([4851a5e](https://github.com/d0ugal/graith/commit/4851a5e0903945554fdc40f50cac2f06435e31c1))
+* skip mirror sessions for file watches ([2ac7843](https://github.com/d0ugal/graith/commit/2ac784333b6b71171419ba9b8533349490f52ab4))
+
+
+### Documentation
+
+* **ci:** clarify rollout evidence budgets ([#1681](https://github.com/d0ugal/graith/issues/1681)) ([e002db5](https://github.com/d0ugal/graith/commit/e002db54e8a2c08b3a4cb8ca08d1b90303739fde))
+* **ci:** clarify rollout sample budget gates ([c4de12e](https://github.com/d0ugal/graith/commit/c4de12ef89347203e9edcf2830cbb484065fd838))
+* **ci:** remove rollout time gates ([#1680](https://github.com/d0ugal/graith/issues/1680)) ([8d59e64](https://github.com/d0ugal/graith/commit/8d59e64cbc5922e08574b8af7ca42070f224dc6f))
+* **ci:** tighten rollout evidence gates ([b7d3245](https://github.com/d0ugal/graith/commit/b7d3245f1a5a2f1a35a9cb1d82475ceb45442ff7))
+* close CI north star review gaps ([#1668](https://github.com/d0ugal/graith/issues/1668)) ([1c46cc7](https://github.com/d0ugal/graith/commit/1c46cc796302f709365e636460fdb65c755f8a02))
+* design CI north star architecture ([fbbd90f](https://github.com/d0ugal/graith/commit/fbbd90fae109f9b989b278d40fed78d469f19859))
+* prefer map-based table tests ([80e9fd0](https://github.com/d0ugal/graith/commit/80e9fd02a2fed059c968c4500ae11751bfe192ec))
+* refine CI north-star implementation plan ([325f2aa](https://github.com/d0ugal/graith/commit/325f2aa63f7512647a97d4fee233239602736ed8))
+
+
+### Dependencies
+
+* cache docker lint runs ([549b13e](https://github.com/d0ugal/graith/commit/549b13efc5315a2f6e84c0cc516d94f6f0c46f09))
+
 ## [0.70.3](https://github.com/d0ugal/graith/compare/v0.70.2...v0.70.3) (2026-07-25)
 
 
