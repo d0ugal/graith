@@ -440,21 +440,47 @@ adding a matrix row. A cache is omitted when upload/restore costs exceed the
 saved work, inputs are too volatile, provenance cannot be established, or a
 small job is faster and safer without it.
 
-During migration, full dual-run comparison is capped for the owner-approved
-bounded sample request: summed new-graph runner minutes across retained sample
-cells must stay within twice the summed matched current-baseline runner minutes
-for the same change/event/mode cells, plus 20% of that matched baseline as
-queue overhead. After the App-owned gate becomes the required decision, old
-checks may remain observational-only until the P10 real-change/event matrix
-passes; sampling fills explicit matrix cells and does not replace required
-evidence. Exhausting the approved migration budget before the matrix is
-complete fails closed: the attempt produces no acceptance evidence, stops the
-shadow migration, and rolls back to the old gate. A smaller replacement sample
-request must be separately owner-approved before new evidence can be produced;
-it is never an automatic resize of the failed request. The same rollback
-applies when p95 required latency for any completed matrix segment exceeds its
-target by 25%, any provenance mismatch occurs, or any fixture false-green
-escapes.
+During migration, full dual-run comparison is capped by the dual-run cost budget
+for the owner-approved bounded sample request: summed new-graph runner minutes
+across retained sample cells must stay within 2x the summed matched
+current-baseline runner minutes for the same change/event/mode cells, plus 20%
+of that matched baseline as queue overhead. The same owner-approved request must
+declare a sample runner-minute ceiling for all migration collection work. A
+sample cell with no retained matched current-baseline runner-minute measurement
+is incomplete evidence: it cannot enter the approved dual-run sample or cost
+denominator, and it cannot produce acceptance evidence through an inferred or
+zero baseline. Baseline-less runs count against the sample runner-minute ceiling
+and may inform owners but do not count toward acceptance evidence or dual-run
+cost-budget proof, except owner-approved P10 fixture-substitute observation
+cells, which satisfy coverage only. A matrix segment means retained real-traffic
+sample cells grouped under an assigned provisional latency target: Go-only PR,
+GUI/native-touching PR, main, release candidate, or another owner-approved
+target added to the bounded matrix. A segment is complete only when every
+required real-traffic cell in that target group has retained samples or an
+owner-approved retirement row and the owner-approved matrix declares its
+explicit per-segment sample count exercised. Event shapes with no provisional
+SLO need either an owner-approved latency target or an owner-approved
+no-latency-target policy row before collection begins. A real-traffic cell with
+no assigned latency target or no-latency-target policy row is incomplete latency
+evidence and cannot satisfy promotion or cutover until owners assign one or
+approve a retirement row. Retirement rows, no-latency-target policy rows, and
+owner-added latency targets are versioned policy rows with rationale, owner, and
+expiry; a cell's assigned latency target is fixed at collection time, and
+reassignment invalidates its retained latency samples and requires a new
+owner-approved sample. Fixture-substitute cells satisfy coverage only and are
+excluded from segment p95 latency evidence. After the App-owned gate becomes
+the required decision, old checks may remain observational-only until the P10
+real-change/event matrix passes; sampling fills explicit matrix cells and does
+not replace required evidence. Exhausting the dual-run cost budget or the sample
+runner-minute ceiling before the matrix is complete fails closed: the attempt
+produces no acceptance evidence, stops the shadow migration, and restores the
+old gate. A smaller replacement sample request must be separately
+owner-approved before new evidence can be produced; it is never an automatic
+resize of the failed request. The same rollback applies when p95 required
+latency for any completed matrix segment exceeds its target by 25%, any
+provenance mismatch occurs, or any false-green escape occurs. After App cutover,
+any P10 observation-gate failure restores the previous required proof and blocks
+deletion until a new owner-approved bounded sample request passes.
 
 ## Consensus
 
@@ -516,14 +542,24 @@ the target's fail-closed semantics.
    fixed-window evidence set is a retained, contiguous, owner-approved
    collection request with explicit bounds chosen for workflow/mode coverage,
    not an elapsed-time acceptance clock. It must cover representative current
-   activity and the enumerated workflow/mode inventory, a representative sample
-   of merged changes must replay successfully, and the closed-world
-   capability-to-current-proof matrix must be owner-reviewed. P1 may begin
-   once those evidence-quality conditions are satisfied; unexplained modes or
+   activity, the enumerated workflow/mode inventory, and matched
+   current-baseline runner-minute measurements for every retained current
+   change/event/mode cell in the closed-world inventory. A collection request
+   cell that cannot be observed is an inventory gap: it requires an
+   owner-approved gap row with rationale, owner, and expiry, and cannot enter
+   later dual-run sampling until a matched measurement is retained. A retained
+   cell without a matched runner-minute measurement is incomplete evidence and
+   fails the gate. Event shapes with no provisional latency SLO need an
+   owner-approved latency-target or no-latency-target policy row before the
+   fixed-window collection request begins; cells collected without that row are
+   incomplete latency evidence and cannot calibrate targets. A representative
+   sample of merged changes must replay successfully, and the closed-world
+   capability-to-current-proof matrix must be owner-reviewed. P1 may begin once
+   those evidence-quality conditions are satisfied; unexplained modes or
    incomplete evidence fail the gate. Baseline collection continues in parallel
    with later waves to calibrate final latency and cost targets, and the
-   provisional latency and dual-run cost ceilings remain binding until
-   calibrated.
+   provisional latency ceilings and 2x-plus-20% dual-run cost budget remain
+   binding until calibrated.
 2. **Contracts and fixture.** Implement policy/run-plan/result schemas,
    deterministic fan-in, artifact manifests, and hermetic fault-injection
    tests. Prove the fixture catches every listed false-green case.
@@ -533,7 +569,9 @@ the target's fail-closed semantics.
    changes, trusted and untrusted event shapes, required modes,
    retry/cancellation/failure classes, and explicit matching mode-set, latency,
    and classification criteria. Every required cell needs retained samples or
-   an owner-approved retirement row, with zero unexplained disagreement.
+   an owner-approved retirement row, with zero unexplained disagreement. The
+   later P10 fixture-substitute path applies only to observation cells whose
+   event shape real merged traffic cannot produce.
 4. **Deep and platform promotion.** Add main, scheduled, dependency, and
    package-consumer proof; dual-run full Linux/macOS matrices and compare
    artifacts and coverage across the owner-approved evidence matrix. Keep old
@@ -546,7 +584,7 @@ the target's fail-closed semantics.
    over only after two successful candidates and an owner-approved audit.
 
 Dual-run acceptance requires no unexplained mode disagreement, zero artifact
-identity mismatch, no false-green fixture escape, p95 latency within budget,
+identity mismatch, zero false-green escape, p95 latency within budget,
 classified failures for every non-pass, and retained samples covering the
 approved change/event/mode matrix. If the new graph is incomplete, the old
 required proof remains authoritative; if it is unsafe, disable only the new
@@ -554,13 +592,18 @@ path and return to the last known-good gate. Delete duplicate workflows and
 obsolete required checks only after the owner-approved P10 sample of real
 merged changes/events has no unexplained disagreement, false-green escape,
 stale/missing proof, or artifact identity mismatch. Required P10 cells need
-retained real samples, an owner-approved retirement row, or a retained live
-fixture substitute for event shapes that real merged traffic cannot produce;
-fixture substitutes must exercise the same trust and provenance contracts as
-the App gate. Perform deletion in a separate, reversible settings change and
-retain result history and rollback instructions. Migration convenience must
-never justify `continue-on-error`, silent skips, unpinned dependencies, or
-unprotected publication.
+retained real samples, an owner-approved retirement row, or an owner-approved
+retained live fixture substitute for event shapes that real merged traffic
+cannot produce; fixture substitutes must exercise the same trust and provenance
+contracts as the App gate and are excluded from segment p95 latency evidence.
+The P10 observation sample uses the owner-approved sample runner-minute ceiling
+and fail-closed abort conditions from the migration cost rules. Any P10
+observation-gate failure restores the previous required proof and blocks
+deletion until a new owner-approved bounded sample request passes. Perform
+deletion in a separate, reversible settings change and retain result history and
+rollback instructions. Migration convenience must never justify
+`continue-on-error`, silent skips, unpinned dependencies, or unprotected
+publication.
 
 The first implementation issue in this sequence should establish the
 repo-owned Go policy/result library and its complexity budget before any gate
