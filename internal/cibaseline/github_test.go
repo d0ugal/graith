@@ -300,6 +300,13 @@ func TestResolveJobCoordinateCoversNamedAndUnnamedMatrixJobs(t *testing.T) {
 	if got, err := resolveGitHubJobCoordinates(inventory, "goreleaser", skipped); err != nil || len(got) != 2 {
 		t.Fatalf("resolveGitHubJobCoordinates(skipped) = %#v, %v; want two coordinates", got, err)
 	}
+
+	cancelled := skipped
+	cancelled.Conclusion = "cancelled"
+
+	if got, err := resolveGitHubJobCoordinates(inventory, "goreleaser", cancelled); err != nil || len(got) != 2 {
+		t.Fatalf("resolveGitHubJobCoordinates(cancelled) = %#v, %v; want two coordinates", got, err)
+	}
 }
 
 func TestGitHubRunIdentityIncludesWorkflowRefAndChangeCoordinate(t *testing.T) {
@@ -497,6 +504,105 @@ func TestGitHubCollectorFetchWindowUsesExplicitUTCInterval(t *testing.T) {
 	wantQuery := normalizedSince.Format(time.RFC3339) + ".." + normalizedUntil.Format(time.RFC3339)
 	if !reflect.DeepEqual(queries, []string{wantQuery, wantQuery}) {
 		t.Fatalf("created queries = %v, want two exact %q queries", queries, wantQuery)
+	}
+}
+
+func TestGitHubCollectorRejectsExternalWorkflowPath(t *testing.T) {
+	now := time.Date(2026, 7, 25, 13, 30, 0, 0, time.UTC)
+	since := time.Date(2026, 7, 25, 6, 5, 0, 0, time.UTC)
+	until := time.Date(2026, 7, 25, 12, 5, 0, 0, time.UTC)
+	external := matureGitHubRun(81, since.Add(time.Hour), since.Add(2*time.Hour))
+	external.Path = "dynamic/dependabot/update-graph"
+	external.Event = "dynamic"
+	external.Conclusion = "success"
+
+	server := newRunCollectionServer(t, []githubRunsPage{
+		{TotalCount: 1, Runs: []githubRun{external}},
+	})
+	defer server.Close()
+
+	collector := GitHubCollector{
+		Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+		MaturationDelay: time.Hour,
+	}
+
+	snapshot, err := collector.FetchWindow(context.Background(), "d0ugal/graith", since, until, loadInventory(t))
+	if err == nil || !strings.Contains(err.Error(), "unknown workflow path") {
+		t.Fatalf("FetchWindow() error = %v, want external workflow rejection", err)
+	}
+
+	if !reflect.DeepEqual(snapshot, GitHubSnapshot{}) {
+		t.Fatalf("FetchWindow() returned partial snapshot %#v", snapshot)
+	}
+}
+
+func TestGitHubCollectorAccountsApprovedExternalWorkflowGap(t *testing.T) {
+	now := time.Date(2026, 7, 25, 13, 30, 0, 0, time.UTC)
+	since := time.Date(2026, 7, 25, 6, 5, 0, 0, time.UTC)
+	until := time.Date(2026, 7, 25, 12, 5, 0, 0, time.UTC)
+	external := matureGitHubRun(81, since.Add(time.Hour), since.Add(2*time.Hour))
+	external.Path = "dynamic/dependabot/update-graph"
+	external.Event = "dynamic"
+	external.Status = "completed"
+	external.Conclusion = "success"
+	external.StartedAt = external.CreatedAt
+
+	runRequests := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+
+		switch request.URL.Path {
+		case "/repos/d0ugal/graith/actions/runs":
+			runRequests++
+
+			if err := json.NewEncoder(writer).Encode(githubRunsPage{TotalCount: 1, Runs: []githubRun{external}}); err != nil {
+				t.Errorf("encode runs: %v", err)
+			}
+		case "/repos/d0ugal/graith/actions/caches":
+			writeResponse(t, writer, `{"total_count":0,"actions_caches":[]}`)
+		case "/repos/d0ugal/graith/actions/runs/81/artifacts":
+			writeResponse(t, writer, `{"total_count":0,"artifacts":[]}`)
+		case "/repos/d0ugal/graith/actions/runs/81/timing":
+			writeResponse(t, writer, `{"billable":{"UBUNTU":{"total_ms":0}}}`)
+		case "/repos/d0ugal/graith/actions/runs/81/attempts/1/jobs":
+			writeResponse(t, writer, `{"total_count":1,"jobs":[{"id":82,"name":"update-go_modules-graph","status":"completed","conclusion":"success","created_at":"2026-07-25T07:05:00Z","started_at":"2026-07-25T07:05:10Z","completed_at":"2026-07-25T07:05:34Z","runner_name":"GitHub Actions 1000308528","runner_group_name":"GitHub Actions","labels":["ubuntu-latest"]}]}`)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	collector := GitHubCollector{
+		Client: server.Client(), BaseURL: server.URL, Now: func() time.Time { return now },
+		MaturationDelay: time.Hour,
+	}
+
+	snapshot, externalRuns, err := collector.FetchWindowWithApprovedExternalRunGaps(
+		context.Background(),
+		"d0ugal/graith",
+		since,
+		until,
+		loadInventory(t),
+		[]ApprovedExternalRunGap{{
+			RunID: 81, WorkflowPath: "dynamic/dependabot/update-graph", Event: "dynamic", JobID: 82,
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if runRequests != 2 {
+		t.Fatalf("run list requests = %d, want initial and verification pass", runRequests)
+	}
+
+	if snapshot.ExpectedWorkflowRuns != 0 || snapshot.ExpectedRunAttempts != 0 || len(snapshot.Runs) != 0 {
+		t.Fatalf("repo-owned snapshot retained external run: %#v", snapshot)
+	}
+
+	if len(externalRuns) != 1 || externalRuns[0].RunID != 81 || externalRuns[0].Job.ID != 82 ||
+		externalRuns[0].Job.ExecutionMillis != 24_000 || externalRuns[0].TimingBillableMillis["UBUNTU"] != 0 {
+		t.Fatalf("external evidence = %#v, want exact approved run/job with timing", externalRuns)
 	}
 }
 
@@ -1517,6 +1623,14 @@ func TestRawGitHubJobFieldsFailClosed(t *testing.T) {
 
 	if err := validateRawGitHubJob(skipped); err != nil {
 		t.Fatalf("validateRawGitHubJob(skipped with GitHub non-monotonic timestamps): %v", err)
+	}
+
+	cancelled := base
+	cancelled.Conclusion = "cancelled"
+	cancelled.CompletedAt = cancelled.StartedAt.Add(-time.Second)
+
+	if err := validateRawGitHubJob(cancelled); err == nil {
+		t.Fatal("validateRawGitHubJob accepted cancelled non-monotonic timestamps")
 	}
 }
 

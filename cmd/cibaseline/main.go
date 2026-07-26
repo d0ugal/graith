@@ -34,6 +34,11 @@ func runWithNow(args []string, now func() time.Time) error {
 	input := flags.String("input", "", "offline snapshot/evidence JSON")
 	output := flags.String("output", "", "output path (stdout when empty)")
 	repository := flags.String("repository", "d0ugal/graith", "GitHub owner/repository")
+	allowIncompleteAcceptance := flags.Bool(
+		"allow-incomplete-acceptance",
+		false,
+		"validate acceptance manifest structure without treating an unsatisfied P0 result as command failure",
+	)
 	maxElapsed := flags.Duration(
 		"max-elapsed",
 		cibaseline.DefaultCollectionMaxElapsed,
@@ -63,7 +68,7 @@ func runWithNow(args []string, now func() time.Time) error {
 	}
 
 	if flags.NArg() != 1 {
-		return errors.New("usage: cibaseline [flags] generate|validate|fetch|collect|replay")
+		return errors.New("usage: cibaseline [flags] generate|validate|fetch|collect|replay|acceptance")
 	}
 
 	switch flags.Arg(0) {
@@ -156,9 +161,36 @@ func runWithNow(args []string, now func() time.Time) error {
 		}
 
 		return evidence.Replay(inventory)
+	case "acceptance":
+		if *input == "" {
+			return errors.New("-input is required")
+		}
+
+		manifest, err := readAcceptanceManifest(*input)
+		if err != nil {
+			return err
+		}
+
+		inventory, err := readInventory(*inventoryPath)
+		if err != nil {
+			return err
+		}
+
+		return cibaseline.ValidateAcceptanceManifest(
+			manifest,
+			inventory,
+			cibaseline.AcceptanceValidationOptions{
+				AllowIncomplete: *allowIncompleteAcceptance,
+				ManifestPath:    *input,
+			},
+		)
 	default:
 		return fmt.Errorf("unknown command %q", flags.Arg(0))
 	}
+}
+
+func readAcceptanceManifest(path string) (cibaseline.AcceptanceManifest, error) {
+	return readVersionedJSON[cibaseline.AcceptanceManifest](path, "acceptance manifest", cibaseline.AcceptanceSchemaVersion)
 }
 
 func readEvidence(path string) (cibaseline.Evidence, error) {
