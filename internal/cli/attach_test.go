@@ -201,7 +201,8 @@ func TestOverlayKeysFromConfigOverrideAndDefault(t *testing.T) {
 	cfg = &config.Config{
 		Keybindings: config.Keybindings{
 			Overlay: config.OverlayKeybindings{
-				MessagePin: "P",
+				MessagePin:    "P",
+				MessageTopics: "T",
 			},
 		},
 	}
@@ -210,6 +211,11 @@ func TestOverlayKeysFromConfigOverrideAndDefault(t *testing.T) {
 	if len(msg.Pin) != 1 || msg.Pin[0] != "P" {
 		t.Errorf("message pin = %v, want [P]", msg.Pin)
 	}
+
+	if len(msg.Topics) != 1 || msg.Topics[0] != "T" {
+		t.Errorf("message topics = %v, want [T]", msg.Topics)
+	}
+
 	// Unset message_next_conversation keeps the default multi-key list.
 	if want := client.DefaultMessageKeys().NextConv; len(msg.NextConv) != len(want) {
 		t.Errorf("message next-conv = %v, want default %v", msg.NextConv, want)

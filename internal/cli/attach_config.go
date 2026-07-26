@@ -99,6 +99,8 @@ func messageKeysFromConfig() client.MessageKeys {
 	k.CollapseAll = overrideKeys(ov.MessageCollapseAll, k.CollapseAll)
 	k.NextConv = overrideKeys(ov.MessageNextConv, k.NextConv)
 	k.PrevConv = overrideKeys(ov.MessagePrevConv, k.PrevConv)
+	k.Topics = overrideKeys(ov.MessageTopics, k.Topics)
+	k.Direct = overrideKeys(ov.MessageDirect, k.Direct)
 	k.Cancel = overrideKeys(ov.Cancel, k.Cancel)
 
 	return k

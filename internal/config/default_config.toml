@@ -507,6 +507,8 @@ message_expand_all = "O"                 # expand (pin) every message in the thr
 message_collapse_all = "C"               # collapse (unpin) every message
 message_next_conversation = "l right tab"       # switch to the next conversation
 message_prev_conversation = "h left shift+tab"  # switch to the previous conversation
+message_topics = "t"                     # switch the message viewer to topics
+message_direct = "d"                     # switch the message viewer to direct messages
 
 # Terminal input gestures for the attach passthrough loop.
 [input]

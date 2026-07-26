@@ -2829,6 +2829,8 @@ type OverlayKeybindings struct {
 	MessageCollapseAll string `toml:"message_collapse_all"`
 	MessageNextConv    string `toml:"message_next_conversation"`
 	MessagePrevConv    string `toml:"message_prev_conversation"`
+	MessageTopics      string `toml:"message_topics"`
+	MessageDirect      string `toml:"message_direct"`
 }
 
 type Notifications struct {

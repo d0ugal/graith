@@ -38,6 +38,8 @@ func TestDefaultOverlayKeybindings(t *testing.T) {
 		"down":              ov.Down,
 		"message_pin":       ov.MessagePin,
 		"message_next_conv": ov.MessageNextConv,
+		"message_topics":    ov.MessageTopics,
+		"message_direct":    ov.MessageDirect,
 	}
 	for name, got := range cases {
 		if got == "" {

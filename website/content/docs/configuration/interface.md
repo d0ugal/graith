@@ -54,6 +54,8 @@ message_expand_all        = "O"
 message_collapse_all      = "C"
 message_next_conversation = "l right tab"
 message_prev_conversation = "h left shift+tab"
+message_topics            = "t"
+message_direct            = "d"
 ```
 
 See [Keybindings]({{< relref "/docs/keybindings.md" >}}) for the complete keybinding reference.

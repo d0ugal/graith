@@ -13,8 +13,43 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
-// msgConversation is one peer's thread: every message exchanged between self
-// and that peer, in chronological order.
+type msgBrowserMode int
+
+const (
+	msgModeDirect msgBrowserMode = iota
+	msgModeTopics
+)
+
+// MsgTopicInfo is the client-side shape for a message topic listed by
+// msg_topics. It mirrors the daemon response without importing daemon types into
+// the client package.
+type MsgTopicInfo struct {
+	Name     string `json:"name"`
+	Total    int64  `json:"total"`
+	Unread   int64  `json:"unread"`
+	LatestAt string `json:"latest_at,omitempty"`
+}
+
+// MessageFetchRequest describes the optional topic payload requested by a
+// message-browser refresh.
+type MessageFetchRequest struct {
+	Topic string
+}
+
+// MessageFetchResult is one snapshot of direct messages, topic metadata, and
+// the selected topic's messages.
+type MessageFetchResult struct {
+	DirectMessages []protocol.ConversationMessage
+	Topics         []MsgTopicInfo
+	TopicMessages  []protocol.ConversationMessage
+}
+
+// MessageBrowserFetch loads one message-browser snapshot. ok=false means the
+// caller should keep its previous snapshot.
+type MessageBrowserFetch func(MessageFetchRequest) (MessageFetchResult, bool)
+
+// msgConversation is one direct peer's thread: every message exchanged between
+// self and that peer, in chronological order.
 type msgConversation struct {
 	peerID   string
 	peerName string
@@ -58,6 +93,9 @@ type msgEntry struct {
 
 type msgFetchedMsg struct {
 	conversations []msgConversation
+	topics        []MsgTopicInfo
+	topicName     string
+	topicMessages []msgEntry
 	ok            bool // false if the fetch failed (keep the last good snapshot)
 }
 
@@ -65,14 +103,21 @@ type msgTickMsg struct{}
 
 type messageOverlayModel struct {
 	selfID string
-	// fetch returns the conversation messages and ok=false on a transient
+	// fetch returns the browser snapshot and ok=false on a transient
 	// fetch error (so the model can keep the last good snapshot).
-	fetch func() ([]protocol.ConversationMessage, bool)
+	fetch MessageBrowserFetch
 	names map[string]string
 
+	mode          msgBrowserMode
 	conversations []msgConversation
-	cursor        int // selected conversation in the left rail
-	msgCursor     int // selected message within the current thread
+	cursor        int // selected direct conversation in the left rail
+	topics        []MsgTopicInfo
+	topicCursor   int
+	topicMessages []msgEntry
+	topicLoaded   string
+	topicTotal    int64
+	topicLatestAt string
+	msgCursor     int // selected message within the current direct thread/topic
 	// lineScroll pages within the focused message when it's taller than the
 	// viewport; reset to 0 whenever the message cursor moves.
 	lineScroll int
@@ -94,6 +139,24 @@ type messageOverlayModel struct {
 }
 
 func newMessageOverlayModel(selfID string, fetch func() ([]protocol.ConversationMessage, bool), names map[string]string) messageOverlayModel {
+	// Keep the original direct-message constructor as a compatibility shim for
+	// tests and any external callers using the package-level overlay API.
+	var browserFetch MessageBrowserFetch
+	if fetch != nil {
+		browserFetch = func(MessageFetchRequest) (MessageFetchResult, bool) {
+			msgs, ok := fetch()
+			if !ok {
+				return MessageFetchResult{}, false
+			}
+
+			return MessageFetchResult{DirectMessages: msgs}, true
+		}
+	}
+
+	return newMessageBrowserModel(selfID, browserFetch, names)
+}
+
+func newMessageBrowserModel(selfID string, fetch MessageBrowserFetch, names map[string]string) messageOverlayModel {
 	return messageOverlayModel{
 		selfID:  selfID,
 		fetch:   fetch,
@@ -132,17 +195,28 @@ func (m messageOverlayModel) fetchCmd() tea.Cmd {
 	selfID := m.selfID
 	names := m.names
 
+	topic := ""
+	if m.needsTopicFetch() {
+		topic = m.selectedTopicName()
+	}
+
 	return func() tea.Msg {
 		if fetch == nil {
 			return msgFetchedMsg{ok: true}
 		}
 
-		msgs, ok := fetch()
+		result, ok := fetch(MessageFetchRequest{Topic: topic})
 		if !ok {
 			return msgFetchedMsg{ok: false}
 		}
 
-		return msgFetchedMsg{conversations: groupConversations(selfID, msgs, names), ok: true}
+		return msgFetchedMsg{
+			conversations: groupConversations(selfID, result.DirectMessages, names),
+			topics:        result.Topics,
+			topicName:     topic,
+			topicMessages: topicEntries(selfID, result.TopicMessages),
+			ok:            true,
+		}
 	}
 }
 
@@ -216,6 +290,27 @@ func groupConversations(selfID string, msgs []protocol.ConversationMessage, name
 	return convs
 }
 
+func topicEntries(selfID string, msgs []protocol.ConversationMessage) []msgEntry {
+	entries := make([]msgEntry, 0, len(msgs))
+	for _, cm := range msgs {
+		sender := cm.SenderName
+		if sender == "" {
+			sender = shortID(cm.SenderID)
+		}
+
+		entries = append(entries, msgEntry{
+			id:        cm.ID,
+			sender:    sender,
+			body:      cm.Body,
+			createdAt: parseMsgTime(cm.CreatedAt),
+			outbound:  cm.SenderID == selfID,
+			system:    isSystemMessage(cm),
+		})
+	}
+
+	return entries
+}
+
 // resolvePeerName resolves a peer's display name, preferring the live session
 // list, then the sender name carried on a received message, then a short id.
 func resolvePeerName(peerID string, cm protocol.ConversationMessage, names map[string]string) string {
@@ -261,6 +356,98 @@ func parseMsgTime(s string) time.Time {
 	return time.Time{}
 }
 
+func (m messageOverlayModel) selectedTopicName() string {
+	topic, ok := m.selectedTopicInfo()
+	if !ok {
+		return ""
+	}
+
+	return topic.Name
+}
+
+func (m messageOverlayModel) selectedTopicInfo() (MsgTopicInfo, bool) {
+	if m.topicCursor < 0 || m.topicCursor >= len(m.topics) {
+		return MsgTopicInfo{}, false
+	}
+
+	return m.topics[m.topicCursor], true
+}
+
+func (m messageOverlayModel) needsTopicFetch() bool {
+	if m.mode != msgModeTopics {
+		return false
+	}
+
+	topic, ok := m.selectedTopicInfo()
+	if !ok || topic.Name == "" {
+		return false
+	}
+
+	return topic.Name != m.topicLoaded || topic.Total != m.topicTotal || topic.LatestAt != m.topicLatestAt
+}
+
+func (m messageOverlayModel) currentEntries() []msgEntry {
+	if m.mode == msgModeTopics {
+		if m.selectedTopicName() == "" || m.selectedTopicName() != m.topicLoaded {
+			return nil
+		}
+
+		return m.topicMessages
+	}
+
+	if m.cursor < 0 || m.cursor >= len(m.conversations) {
+		return nil
+	}
+
+	return m.conversations[m.cursor].messages
+}
+
+func restoreDirectCursor(conversations []msgConversation, selectedPeer string) (int, bool) {
+	for i, c := range conversations {
+		if c.peerID == selectedPeer {
+			return i, true
+		}
+	}
+
+	return 0, false
+}
+
+func restoreTopicCursor(topics []MsgTopicInfo, selectedTopic string) (int, bool) {
+	for i, t := range topics {
+		if t.Name == selectedTopic {
+			return i, true
+		}
+	}
+
+	return 0, false
+}
+
+func restoreMessageCursor(m messageOverlayModel, sourceFound bool, focusedMsgID string, prevAtLast bool) int {
+	count := m.msgCount()
+
+	switch {
+	case sourceFound && prevAtLast:
+		// Reader was at the tail: follow the newest message.
+		return max(0, count-1)
+	case sourceFound && focusedMsgID != "":
+		// Re-find the focused message by id so inserts/removals before it don't
+		// shift the cursor onto a different message; fall back to clamping if it
+		// vanished.
+		cursor := max(0, min(m.msgCursor, count-1))
+		for i, e := range m.currentEntries() {
+			if e.id == focusedMsgID {
+				cursor = i
+				break
+			}
+		}
+
+		return cursor
+	default:
+		// Source vanished (or no prior focus): land on the newest message.
+		return max(0, count-1)
+	}
+}
+
 func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -290,53 +477,56 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !msg.ok {
 			return m, nil
 		}
-		// Preserve the selected peer and focused message across refreshes.
-		var selectedPeer, focusedMsgID string
+		// Preserve the selected source and focused message across refreshes.
+		var selectedPeer, selectedTopic, focusedMsgID string
 		if m.cursor >= 0 && m.cursor < len(m.conversations) {
 			selectedPeer = m.conversations[m.cursor].peerID
 		}
 
+		selectedTopic = m.selectedTopicName()
 		if e := m.currentEntry(); e != nil {
 			focusedMsgID = e.id
 		}
 
 		prevAtLast := m.msgCursor >= m.msgCount()-1
-		peerFound := false
+
 		m.conversations = msg.conversations
+		m.topics = msg.topics
 
-		m.cursor = 0
-		for i, c := range m.conversations {
-			if c.peerID == selectedPeer {
-				m.cursor = i
-				peerFound = true
+		if msg.topicName != "" {
+			m.topicMessages = msg.topicMessages
+			m.topicLoaded = msg.topicName
+			m.topicTotal = 0
+			m.topicLatestAt = ""
 
-				break
-			}
-		}
+			for _, topic := range m.topics {
+				if topic.Name == msg.topicName {
+					m.topicTotal = topic.Total
+					m.topicLatestAt = topic.LatestAt
 
-		if m.cursor >= len(m.conversations) {
-			m.cursor = max(0, len(m.conversations)-1)
-		}
-
-		switch {
-		case peerFound && prevAtLast:
-			// Reader was at the tail: follow the newest message.
-			m.msgCursor = max(0, m.msgCount()-1)
-		case peerFound && focusedMsgID != "":
-			// Re-find the focused message by id so inserts/removals before it
-			// don't shift the cursor onto a different message; fall back to
-			// clamping if it vanished.
-			m.msgCursor = max(0, min(m.msgCursor, m.msgCount()-1))
-			for i, e := range m.conversations[m.cursor].messages {
-				if e.id == focusedMsgID {
-					m.msgCursor = i
 					break
 				}
 			}
-		default:
-			// Peer vanished (or no prior focus): land on the newest message.
-			m.msgCursor = max(0, m.msgCount()-1)
 		}
+
+		var peerFound, topicFound bool
+
+		m.cursor, peerFound = restoreDirectCursor(m.conversations, selectedPeer)
+
+		m.topicCursor, topicFound = restoreTopicCursor(m.topics, selectedTopic)
+		if currentTopic := m.selectedTopicName(); currentTopic != m.topicLoaded {
+			m.topicMessages = nil
+			m.topicLoaded = ""
+			m.topicTotal = 0
+			m.topicLatestAt = ""
+		}
+
+		sourceFound := peerFound
+		if m.mode == msgModeTopics {
+			sourceFound = topicFound
+		}
+
+		m.msgCursor = restoreMessageCursor(m, sourceFound, focusedMsgID, prevAtLast)
 
 		// If the refresh moved focus to a different message, reset the
 		// intra-message scroll so the new message opens at its header. Key-driven
@@ -344,6 +534,12 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// leaving lineScroll pointing partway down an unrelated message.
 		if e := m.currentEntry(); e == nil || e.id != focusedMsgID {
 			m.lineScroll = 0
+		}
+
+		if m.needsTopicFetch() {
+			m.fetching = true
+
+			return m, m.fetchCmd()
 		}
 
 		return m, nil
@@ -385,8 +581,24 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// pgdown accumulation).
 			m.lineScroll = max(0, min(m.lineScroll, m.maxLineScroll())-m.pageStep())
 			return m, nil
-		// Horizontal: switch conversation in the rail.
+		// Horizontal: switch conversation/topic in the rail.
 		case matchKey(m.keys.NextConv, s):
+			if m.mode == msgModeTopics {
+				if m.topicCursor < len(m.topics)-1 {
+					m.topicCursor++
+					m.msgCursor = max(0, m.msgCount()-1)
+					m.lineScroll = 0
+
+					if m.needsTopicFetch() && !m.fetching {
+						m.fetching = true
+
+						return m, m.fetchCmd()
+					}
+				}
+
+				return m, nil
+			}
+
 			if m.cursor < len(m.conversations)-1 {
 				m.cursor++
 				m.msgCursor = max(0, m.msgCountAt(m.cursor)-1)
@@ -395,9 +607,47 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			return m, nil
 		case matchKey(m.keys.PrevConv, s):
+			if m.mode == msgModeTopics {
+				if m.topicCursor > 0 {
+					m.topicCursor--
+					m.msgCursor = max(0, m.msgCount()-1)
+					m.lineScroll = 0
+
+					if m.needsTopicFetch() && !m.fetching {
+						m.fetching = true
+
+						return m, m.fetchCmd()
+					}
+				}
+
+				return m, nil
+			}
+
 			if m.cursor > 0 {
 				m.cursor--
 				m.msgCursor = max(0, m.msgCountAt(m.cursor)-1)
+				m.lineScroll = 0
+			}
+
+			return m, nil
+		case matchKey(m.keys.Topics, s):
+			if m.mode != msgModeTopics {
+				m.mode = msgModeTopics
+				m.msgCursor = max(0, m.msgCount()-1)
+				m.lineScroll = 0
+
+				if m.needsTopicFetch() && !m.fetching {
+					m.fetching = true
+
+					return m, m.fetchCmd()
+				}
+			}
+
+			return m, nil
+		case matchKey(m.keys.Direct, s):
+			if m.mode != msgModeDirect {
+				m.mode = msgModeDirect
+				m.msgCursor = max(0, m.msgCount()-1)
 				m.lineScroll = 0
 			}
 
@@ -473,8 +723,14 @@ func (m messageOverlayModel) maxLineScroll() int {
 	return max(0, blockH-height)
 }
 
-// msgCount returns the number of messages in the selected conversation.
-func (m messageOverlayModel) msgCount() int { return m.msgCountAt(m.cursor) }
+// msgCount returns the number of messages in the selected conversation or topic.
+func (m messageOverlayModel) msgCount() int {
+	if m.mode == msgModeTopics {
+		return len(m.currentEntries())
+	}
+
+	return m.msgCountAt(m.cursor)
+}
 
 func (m messageOverlayModel) msgCountAt(conv int) int {
 	if conv < 0 || conv >= len(m.conversations) {
@@ -486,11 +742,7 @@ func (m messageOverlayModel) msgCountAt(conv int) int {
 
 // currentEntry returns the message under the cursor, or nil.
 func (m messageOverlayModel) currentEntry() *msgEntry {
-	if m.cursor < 0 || m.cursor >= len(m.conversations) {
-		return nil
-	}
-
-	msgs := m.conversations[m.cursor].messages
+	msgs := m.currentEntries()
 	if m.msgCursor < 0 || m.msgCursor >= len(msgs) {
 		return nil
 	}
@@ -499,15 +751,41 @@ func (m messageOverlayModel) currentEntry() *msgEntry {
 }
 
 func (m messageOverlayModel) setAllPinned(v bool) {
-	if m.cursor < 0 || m.cursor >= len(m.conversations) {
-		return
-	}
-
-	for _, e := range m.conversations[m.cursor].messages {
+	for _, e := range m.currentEntries() {
 		if e.id != "" {
 			m.pinned[e.id] = v
 		}
 	}
+}
+
+func (m messageOverlayModel) contextLabel() string {
+	source := "Direct"
+	if m.mode == msgModeTopics {
+		source = "Topics"
+		if topic := m.selectedTopicName(); topic != "" {
+			source = "Topic " + topic
+		}
+	} else if m.cursor >= 0 && m.cursor < len(m.conversations) {
+		source = "Direct " + m.conversations[m.cursor].peerName
+	}
+
+	count := m.msgCount()
+	if count <= 0 {
+		return source
+	}
+
+	pos := min(max(0, m.msgCursor)+1, count)
+
+	label := fmt.Sprintf("%s  %d/%d", source, pos, count)
+	if pos < count {
+		if key := primaryKey(m.keys.Bottom); key != "" {
+			label += "  " + key + " latest"
+		} else {
+			label += "  latest"
+		}
+	}
+
+	return label
 }
 
 func (m messageOverlayModel) View() tea.View {
@@ -521,6 +799,15 @@ func (m messageOverlayModel) View() tea.View {
 	help := lipgloss.NewStyle().Foreground(colorFaint)
 
 	title := titleStyle.Render("Messages")
+	if context := m.contextLabel(); context != "" {
+		title += "  " + dim.Render(context)
+	}
+
+	if !m.loaded {
+		title += "  " + dim.Render("loading…")
+	}
+
+	title = ansi.Truncate(title, w, "…")
 
 	// Body area between title (1 line + blank) and help (blank + 1 line).
 	bodyH := max(1, h-4)
@@ -533,17 +820,20 @@ func (m messageOverlayModel) View() tea.View {
 			primaryKey(m.keys.Up), primaryKey(m.keys.Down),
 			primaryKey(m.keys.PageDown), primaryKey(m.keys.PageUp),
 			primaryKey(m.keys.Pin), primaryKey(m.keys.Cancel)))
+		helpLine = ansi.Truncate(helpLine, w, "…")
 		body = m.renderThread(max(1, w-1), bodyH)
 	} else {
 		helpLine = help.Render(fmt.Sprintf(
-			"%s/%s message (auto-expands)  %s/%s scroll long msg  %s pin  %s/%s all  %s/%s first/last  %s/%s conversation  %s close",
+			"%s/%s older/newer  %s/%s scroll long msg  %s latest  %s/%s source  %s topics  %s direct  %s pin  %s/%s all  %s close",
 			primaryKey(m.keys.Up), primaryKey(m.keys.Down),
 			primaryKey(m.keys.PageUp), primaryKey(m.keys.PageDown),
+			primaryKey(m.keys.Bottom),
+			primaryKey(m.keys.PrevConv), primaryKey(m.keys.NextConv),
+			primaryKey(m.keys.Topics), primaryKey(m.keys.Direct),
 			primaryKey(m.keys.Pin),
 			primaryKey(m.keys.ExpandAll), primaryKey(m.keys.CollapseAll),
-			primaryKey(m.keys.Top), primaryKey(m.keys.Bottom),
-			primaryKey(m.keys.PrevConv), primaryKey(m.keys.NextConv),
 			primaryKey(m.keys.Cancel)))
+		helpLine = ansi.Truncate(helpLine, w, "…")
 
 		railW := 26
 		if w < 70 {
@@ -566,11 +856,6 @@ func (m messageOverlayModel) View() tea.View {
 	var b strings.Builder
 	b.WriteString(title)
 
-	if !m.loaded {
-		b.WriteString("  ")
-		b.WriteString(dim.Render("loading…"))
-	}
-
 	b.WriteString("\n\n")
 	b.WriteString(body)
 	b.WriteString("\n")
@@ -583,9 +868,13 @@ func (m messageOverlayModel) View() tea.View {
 }
 
 func (m messageOverlayModel) renderRail(width, height int) string {
+	if m.mode == msgModeTopics {
+		return m.renderTopicRail(width, height)
+	}
+
 	dim := lipgloss.NewStyle().Foreground(colorDim)
 	if m.loaded && len(m.conversations) == 0 {
-		return dim.Render("No messages")
+		return dim.Render("No direct messages")
 	}
 
 	// Scroll the rail so the selected conversation stays visible when there
@@ -628,18 +917,113 @@ func (m messageOverlayModel) renderRail(width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
+func (m messageOverlayModel) renderTopicRail(width, height int) string {
+	dim := lipgloss.NewStyle().Foreground(colorDim)
+	if m.loaded && len(m.topics) == 0 {
+		return dim.Render("No available topics")
+	}
+
+	start := 0
+
+	if len(m.topics) > height {
+		if m.topicCursor >= height {
+			start = m.topicCursor - height + 1
+		}
+
+		if start > len(m.topics)-height {
+			start = len(m.topics) - height
+		}
+
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	end := min(len(m.topics), start+height)
+
+	var lines []string
+
+	for i := start; i < end; i++ {
+		topic := m.topics[i]
+		prefix := "  "
+		style := lipgloss.NewStyle()
+
+		if i == m.topicCursor {
+			prefix = "> "
+			style = style.Bold(true).Foreground(colorPurple)
+		}
+
+		countStr := " (" + strconv.FormatInt(topic.Total, 10) + ")"
+		if topic.Unread > 0 {
+			countStr = " (" + strconv.FormatInt(topic.Total, 10) + "/" + strconv.FormatInt(topic.Unread, 10) + " new)"
+		}
+
+		label := truncate(topic.Name, max(1, width-len(prefix)-lipgloss.Width(countStr)))
+		lines = append(lines, prefix+style.Render(label)+dim.Render(countStr))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
 func (m messageOverlayModel) renderThread(width, height int) string {
 	dim := lipgloss.NewStyle().Foreground(colorDim)
 
-	if m.cursor < 0 || m.cursor >= len(m.conversations) {
+	var (
+		entries    []msgEntry
+		directPeer string
+		topicName  string
+	)
+
+	if m.mode == msgModeTopics {
+		if m.loaded && len(m.topics) == 0 {
+			return dim.Render("No available topics")
+		}
+
+		topicName = m.selectedTopicName()
+		if topicName == "" {
+			if m.loaded {
+				return dim.Render("Select a topic")
+			}
+
+			return ""
+		}
+
+		if topicName != m.topicLoaded {
+			return dim.Render("Loading topic messages…")
+		}
+
+		entries = m.topicMessages
+		if m.loaded && len(entries) == 0 {
+			return dim.Render("No messages in " + topicName)
+		}
+	} else {
+		if m.cursor < 0 || m.cursor >= len(m.conversations) {
+			if m.loaded {
+				if len(m.conversations) == 0 {
+					return dim.Render("No direct messages")
+				}
+
+				return dim.Render("Select a conversation")
+			}
+
+			return ""
+		}
+
+		directPeer = m.conversations[m.cursor].peerName
+		entries = m.currentEntries()
+	}
+
+	if len(entries) == 0 {
 		if m.loaded {
-			return dim.Render("Select a conversation")
+			if m.mode == msgModeDirect {
+				return dim.Render("No direct messages")
+			}
+
+			return dim.Render("Select a topic")
 		}
 
 		return ""
 	}
-
-	conv := m.conversations[m.cursor]
 
 	meStyle := lipgloss.NewStyle().Foreground(colorGreen).Bold(true)
 	peerStyle := lipgloss.NewStyle().Foreground(colorBlue).Bold(true)
@@ -654,7 +1038,7 @@ func (m messageOverlayModel) renderThread(width, height int) string {
 
 	selStart, selEnd := 0, 0
 
-	for i, e := range conv.messages {
+	for i, e := range entries {
 		// The focused message is always expanded; others only if pinned (or if
 		// they have no id to track collapse state).
 		expanded := i == m.msgCursor || e.id == "" || m.pinned[e.id]
@@ -665,8 +1049,15 @@ func (m messageOverlayModel) renderThread(width, height int) string {
 		}
 
 		who := e.sender
-		if e.outbound {
-			who = "me → " + conv.peerName
+		if m.mode == msgModeTopics {
+			who = "#" + topicName + "  " + who
+			if e.outbound {
+				who = "me → #" + topicName
+			}
+		} else if e.outbound {
+			who = "me → " + directPeer
+		} else {
+			who = who + " → me"
 		}
 
 		hs := peerStyle
@@ -804,6 +1195,16 @@ func sanitizeMessageBody(s string) string {
 // Returns when the user closes the overlay; the caller then reattaches.
 func RunMessageOverlay(sessionID string, keys MessageKeys, fetch func() ([]protocol.ConversationMessage, bool), names map[string]string) {
 	m := newMessageOverlayModel(sessionID, fetch, names)
+	m.keys = keys
+	p := tea.NewProgram(m)
+	_, _ = p.Run()
+}
+
+// RunMessageBrowserOverlay displays the bounded direct/topic message browser
+// for sessionID. It opens on the newest direct message and lets the user switch
+// to visible topics with the configured message source keys.
+func RunMessageBrowserOverlay(sessionID string, keys MessageKeys, fetch MessageBrowserFetch, names map[string]string) {
+	m := newMessageBrowserModel(sessionID, fetch, names)
 	m.keys = keys
 	p := tea.NewProgram(m)
 	_, _ = p.Run()
