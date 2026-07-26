@@ -97,6 +97,17 @@ func TestForkWithAgentCrossAgent(t *testing.T) {
 		t.Fatalf("cross-agent fork labels = %#v", forked.Labels)
 	}
 
+	sm.mu.RLock()
+	sourceLabels := sm.state.Sessions["src1"].Labels
+	persistedForkLabels := sm.state.Sessions[forked.ID].Labels
+	labelsAlias := len(sourceLabels) > 0 && len(persistedForkLabels) > 0 && &sourceLabels[0] == &persistedForkLabels[0]
+
+	sm.mu.RUnlock()
+
+	if labelsAlias {
+		t.Fatal("persisted cross-agent fork labels alias source labels")
+	}
+
 	forked.Labels[0] = "changed"
 	if sm.state.Sessions["src1"].Labels[0] != "incident:7" {
 		t.Fatal("fork labels alias source labels")

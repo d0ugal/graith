@@ -476,6 +476,13 @@ open class FleetModel: ObservableObject {
         }
     }
 
+    /// Parse labels for create requests. A blank field is omitted so daemon-side
+    /// child creation can inherit parent labels; non-empty input is explicit.
+    public static func parseCreateLabels(_ value: String) -> [String]? {
+        let labels = parseLabels(value)
+        return labels.isEmpty ? nil : labels
+    }
+
     /// Create a session on `hostID` and report the created session (found by
     /// name after the connection refreshes) so the caller can select it.
     ///
@@ -487,7 +494,7 @@ open class FleetModel: ObservableObject {
         repoPath: String,
         model: String,
         prompt: String,
-        labels: [String] = [],
+        labels: [String]? = nil,
         base: String = "",
         inPlace: Bool = false,
         agentHooks: Bool = true,

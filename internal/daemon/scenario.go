@@ -818,6 +818,13 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	}
 
 	now := renderState.RenderedAt
+	// Scenario start is a batch operation: every owned member uses the same
+	// orchestrator-label snapshot, and placeholders expose that same metadata
+	// before the real Create calls replace them.
+	parentLabels := []string{}
+	if parent := sm.state.Sessions[msg.ParentSessionID]; parent != nil {
+		parentLabels = append(parentLabels, parent.Labels...)
+	}
 
 	scenarioSessions := make([]ScenarioSession, len(msg.Sessions))
 	sessionIDs := make([]string, len(msg.Sessions))
@@ -912,6 +919,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 			ID:              id,
 			ParentID:        msg.ParentSessionID,
 			Name:            s.Name,
+			Labels:          append([]string{}, parentLabels...),
 			RepoPath:        repoRoots[i],
 			RepoName:        repoName,
 			Agent:           agentName,
@@ -1034,6 +1042,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 					ID: sessionIDs[idx], Name: s.Name, AgentName: agentName,
 					RepoPath: repoRoots[idx], MirrorSourceID: mirrorSourceID,
 					BaseBranch: s.Base, Prompt: s.StartupPrompt(), Model: s.Model,
+					Labels:   append([]string{}, parentLabels...),
 					ParentID: msg.ParentSessionID, AgentHooks: s.AgentHooks,
 					Includes: s.Includes, Starred: s.Star,
 					ForcePTY: normalizedPolicy != nil && normalizedPolicy.Members[idx].Retries > 0,
@@ -2124,6 +2133,8 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		BaseBranch: input.Base,
 		Prompt:     input.StartupPrompt(),
 		Model:      input.Model,
+		// Scenario additions are fresh child creations: they inherit the
+		// orchestrator's current labels, not StartScenario's initial snapshot.
 		ParentID:   orchestratorID,
 		AgentHooks: agentHooks,
 		Includes:   input.Includes,

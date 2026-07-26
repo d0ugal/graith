@@ -2923,7 +2923,10 @@ func RunOverlay(opts RunOverlayOpts) *OverlayResult {
 		overlayResult.CreateName = result.createName
 		overlayResult.CreateRepoPath = result.createRepoPath
 		overlayResult.CreateAgent = result.createAgent
-		overlayResult.CreateLabels = append([]string{}, result.createLabels...)
+
+		if result.createLabels != nil {
+			overlayResult.CreateLabels = append([]string{}, result.createLabels...)
+		}
 
 		return overlayResult
 	}

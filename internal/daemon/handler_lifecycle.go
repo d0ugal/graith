@@ -14,9 +14,14 @@ import (
 // so the field-for-field mapping — easy to silently drop a field in — is unit
 // testable without launching an agent.
 func createOptsFromMsg(c protocol.CreateMsg, agentName string, rows, cols uint16) CreateOpts {
+	var labels []string
+	if c.Labels != nil {
+		labels = append([]string{}, (*c.Labels)...)
+	}
+
 	return CreateOpts{
 		Name:                c.Name,
-		Labels:              c.Labels,
+		Labels:              labels,
 		AgentName:           agentName,
 		RepoPath:            c.RepoPath,
 		BaseBranch:          c.Base,

@@ -640,9 +640,10 @@ func TestLabelsCreateUpdateListAndRestore(t *testing.T) {
 	r, w := env.connect(t)
 	handshake(t, r, w)
 
+	labels := []string{" Urgent ", "urgent", "release"}
 	sendControl(t, w, "create", protocol.CreateMsg{
 		Name: "canny", Agent: "echo", NoRepo: true,
-		Labels: []string{" Urgent ", "urgent", "release"},
+		Labels: &labels,
 	})
 
 	var created protocol.SessionInfo

@@ -231,7 +231,7 @@ func (m *createSessionModel) selectedAgent() string {
 func (m *createSessionModel) selectedLabels() []string {
 	value := strings.TrimSpace(m.labelsInput.Value())
 	if value == "" {
-		return []string{}
+		return nil
 	}
 
 	parts := strings.Split(value, ",")

@@ -66,6 +66,14 @@ struct ControlAndMessageTests {
         let encoded = try JSONEncoder().encode(create)
         let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         #expect(object["labels"] as? [String] == ["ios", "urgent"])
+
+        let omitted = CreateMsg(name: "bairn", agent: "codex", repoPath: "/croft")
+        let omittedObject = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(omitted)) as? [String: Any])
+        #expect(omittedObject["labels"] == nil)
+
+        let explicitEmpty = CreateMsg(name: "bairn", labels: [], agent: "codex", repoPath: "/croft")
+        let emptyObject = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(explicitEmpty)) as? [String: Any])
+        #expect(emptyObject["labels"] as? [String] == [])
     }
 
     @Test func pairRequestSnakeCase() throws {
