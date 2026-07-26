@@ -624,6 +624,10 @@ name = "strath"
 name = "ben"
 repo = "/r"
 role = "implementer"
+[[sessions]]
+name = "canny"
+mirror = "ben"
+role = "reviewer"
 `
 	cases := []struct {
 		name string
@@ -637,6 +641,11 @@ role = "implementer"
 		},
 		{
 			name: "undefined role rejected",
+			trig: "[[trigger]]\nname=\"t\"\n[trigger.watch]\nrole=\"auditor\"\n[trigger.action]\ntype=\"message\"\nbody=\"x\"\n[trigger.action.deliver]\ntopic=\"blether\"\n",
+			want: "not defined by any scenario session",
+		},
+		{
+			name: "mirror-only role rejected",
 			trig: "[[trigger]]\nname=\"t\"\n[trigger.watch]\nrole=\"reviewer\"\n[trigger.action]\ntype=\"message\"\nbody=\"x\"\n[trigger.action.deliver]\ntopic=\"blether\"\n",
 			want: "not defined by any scenario session",
 		},
@@ -697,18 +706,19 @@ func TestDefinedRoles(t *testing.T) {
 	sf := &File{Sessions: []Session{
 		{Name: "ben", Role: "implementer"},
 		{Name: "canny", Role: "reviewer"},
-		{Name: "bairn"},                               // no role
-		{Name: "auld", Role: "watcher", Shared: true}, // shared → role not selectable
+		{Name: "bairn"},                                  // no role
+		{Name: "auld", Role: "watcher", Shared: true},    // shared → role not selectable
+		{Name: "reader", Role: "auditor", Mirror: "ben"}, // mirror → role not selectable
 	}}
 
 	roles := sf.DefinedRoles()
 	if len(roles) != 2 || !roles["implementer"] || !roles["reviewer"] {
-		t.Fatalf("roles = %v (shared role should be excluded)", roles)
+		t.Fatalf("roles = %v (shared and mirror roles should be excluded)", roles)
 	}
 
 	members := sf.DefinedMembers()
-	if len(members) != 4 || !members["auld"] {
-		t.Fatalf("members = %v (shared session should still be a member)", members)
+	if len(members) != 5 || !members["auld"] || !members["reader"] {
+		t.Fatalf("members = %v (shared and mirror sessions should still be members)", members)
 	}
 }
 

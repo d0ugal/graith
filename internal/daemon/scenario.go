@@ -640,9 +640,10 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 	for _, s := range msg.Sessions {
 		// Shared members keep their original scenario identity, so a watch trigger
-		// can never bind to them — exclude their role from the selectable set (a
-		// shared member is still a valid delivery target by name).
-		if s.Role != "" && !s.Shared {
+		// can never bind to them. Mirror members are read-only and share another
+		// session's worktree, so they are also excluded from the selectable set. A
+		// shared or mirror member is still a valid delivery target by name.
+		if s.Role != "" && !s.Shared && s.Mirror == "" {
 			definedRoles[s.Role] = true
 		}
 

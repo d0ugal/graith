@@ -339,32 +339,51 @@ func TestTeardownScenarioTriggerBindings(t *testing.T) {
 }
 
 func TestStartScenario_RejectsBadTrigger(t *testing.T) {
-	sm := newTestSessionManager(t)
-
-	sm.mu.Lock()
-	sm.state.Sessions["ben-orch"] = &SessionState{
-		ID:         "ben-orch",
-		Name:       "ben-session",
-		Status:     StatusRunning,
-		SystemKind: SystemKindOrchestrator,
-	}
-	sm.mu.Unlock()
-
-	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
-		CallerSessionID: "ben-orch",
-		Name:            "strath",
-		Sessions:        []protocol.ScenarioSessionInput{{Name: "braw-a", Repo: "/glen", Role: "implementer"}},
-		// Role "reviewer" is not defined by any session → rejected before any
-		// filesystem work.
-		Triggers: []protocol.TriggerConfig{{
-			Name: "t", Watch: &protocol.WatchConfig{Role: "reviewer"},
-			Action: protocol.ActionConfig{
-				Type: config.ActionMessage, Body: "x", Deliver: protocol.DeliverConfig{Topic: "blether"},
+	tests := map[string]struct {
+		sessions []protocol.ScenarioSessionInput
+		role     string
+	}{
+		"undefined role": {
+			sessions: []protocol.ScenarioSessionInput{{Name: "braw-a", Repo: "/glen", Role: "implementer"}},
+			role:     "reviewer",
+		},
+		"mirror-only role": {
+			sessions: []protocol.ScenarioSessionInput{
+				{Name: "braw-a", Repo: "/glen", Role: "implementer"},
+				{Name: "canny-reader", Mirror: "braw-a", Role: "reviewer"},
 			},
-		}},
-	}, 24, 80)
-	if err == nil || !strings.Contains(err.Error(), "not defined by any scenario session") {
-		t.Fatalf("want undefined-role error, got %v", err)
+			role: "reviewer",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			sm := newTestSessionManager(t)
+
+			sm.mu.Lock()
+			sm.state.Sessions["ben-orch"] = &SessionState{
+				ID:         "ben-orch",
+				Name:       "ben-session",
+				Status:     StatusRunning,
+				SystemKind: SystemKindOrchestrator,
+			}
+			sm.mu.Unlock()
+
+			_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+				CallerSessionID: "ben-orch",
+				Name:            "strath",
+				Sessions:        test.sessions,
+				Triggers: []protocol.TriggerConfig{{
+					Name: "t", Watch: &protocol.WatchConfig{Role: test.role},
+					Action: protocol.ActionConfig{
+						Type: config.ActionMessage, Body: "x", Deliver: protocol.DeliverConfig{Topic: "blether"},
+					},
+				}},
+			}, 24, 80)
+			if err == nil || !strings.Contains(err.Error(), "not defined by any scenario session") {
+				t.Fatalf("want undefined-role error, got %v", err)
+			}
+		})
 	}
 }
 

@@ -64,9 +64,9 @@ const gitignoreFilename = ".gitignore"
 var mandatoryWatchIgnores = []string{".git/", ".git"}
 
 // RunFileWatchLoop is the daemon-owned file-watch (#593) trigger source. It
-// reconciles bindings (watch trigger × matching live session) against live
-// fsnotify watchers each tick, and feeds debounced, filtered events into the
-// shared trigger action executor.
+// reconciles bindings (watch trigger × matching live writable session) against
+// live fsnotify watchers each tick, and feeds debounced, filtered events into
+// the shared trigger action executor.
 func (sm *SessionManager) RunFileWatchLoop(ctx context.Context) {
 	// The reconcile cadence is read once at loop start from [triggers.advanced]
 	// watch_reconcile_interval, so changing it needs a daemon restart.
@@ -85,7 +85,8 @@ func (sm *SessionManager) RunFileWatchLoop(ctx context.Context) {
 }
 
 // reconcileBindings ensures one binding per (enabled watch trigger, matching
-// running session) and tears down bindings whose session is gone/stopped.
+// running writable session) and tears down bindings whose session is
+// gone/stopped.
 func (sm *SessionManager) reconcileBindings(ctx context.Context, triggers []config.TriggerConfig, now time.Time) {
 	desired := make(map[string]*config.TriggerConfig) // bindingKey -> trigger
 
@@ -222,10 +223,11 @@ type watchSession struct {
 	id, name, worktree string
 }
 
-// matchingWatchSessions returns running, non-soft-deleted sessions matching the
-// watch selector (repo or role). A non-empty scenarioID additionally scopes a
-// role match to that scenario's members, so a scenario-embedded role trigger
-// only binds inside its own scenario (config-origin triggers pass "").
+// matchingWatchSessions returns running, writable, non-soft-deleted sessions
+// matching the watch selector (repo or role). A non-empty scenarioID
+// additionally scopes a role match to that scenario's members, so a
+// scenario-embedded role trigger only binds inside its own scenario
+// (config-origin triggers pass "").
 func (sm *SessionManager) matchingWatchSessions(w *config.WatchConfig, scenarioID string) []watchSession {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -233,7 +235,7 @@ func (sm *SessionManager) matchingWatchSessions(w *config.WatchConfig, scenarioI
 	var out []watchSession
 
 	for id, s := range sm.state.Sessions {
-		if s.Status != StatusRunning || s.IsSoftDeleted() || s.WorktreePath == "" {
+		if s.Status != StatusRunning || s.IsSoftDeleted() || s.WorktreePath == "" || s.Mirror {
 			continue
 		}
 

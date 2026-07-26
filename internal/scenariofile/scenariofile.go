@@ -273,15 +273,14 @@ func (sf *File) DefinedOwnedMembers() map[string]bool {
 	return members
 }
 
-// DefinedRoles returns the set of non-empty roles the scenario's own
-// (non-shared) sessions declare. A scenario [[trigger]] watch may only select by
-// one of these — a shared session keeps its original scenario identity, so a
-// watch trigger could never bind to it, and allowing its role would validate a
-// trigger that can never fire.
+// DefinedRoles returns the set of non-empty roles the scenario's own writable
+// sessions declare. A scenario [[trigger]] watch may only select by one of
+// these — shared members keep their original scenario identity and mirror
+// members are read-only, so watch triggers could never bind to either one.
 func (sf *File) DefinedRoles() map[string]bool {
 	roles := make(map[string]bool, len(sf.Sessions))
 	for _, s := range sf.Sessions {
-		if s.Role != "" && !s.Shared {
+		if s.Role != "" && !s.Shared && s.Mirror == "" {
 			roles[s.Role] = true
 		}
 	}
