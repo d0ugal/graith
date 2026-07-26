@@ -38,6 +38,181 @@ func TestAcceptanceManifestValidation(t *testing.T) {
 	}
 }
 
+func TestAcceptanceAllowsOnlyDiagnosticShadowSummaryAndRetiredJSSurfaceRebind(t *testing.T) {
+	inventory := loadInventory(t)
+	manifestPath := "retained/p0-20260725T084200Z-20260725T144200Z/acceptance.json"
+	manifest := readAcceptanceManifestForTest(t, manifestPath)
+
+	projected, ok, err := p0DiagnosticShadowSummaryCompatibleInventory(inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !ok {
+		t.Fatal("current inventory did not contain the diagnostic shadow summary projection")
+	}
+
+	if projected.Digest != p0ReboundInventoryDigest {
+		t.Fatalf("projected digest = %s, want %s", projected.Digest, p0ReboundInventoryDigest)
+	}
+
+	if err := ValidateAcceptanceManifest(manifest, inventory, AcceptanceValidationOptions{
+		AllowIncomplete: true,
+		ManifestPath:    manifestPath,
+	}); err != nil {
+		t.Fatalf("ValidateAcceptanceManifest() = %v, want approved diagnostic/replacement drift ignored", err)
+	}
+
+	diagnosticOnly := cloneInventory(t, inventory)
+	mutateSurface(t, &diagnosticOnly, "internal/cipolicy/shadow_summary.go", func(surface *Surface) {
+		surface.SHA256 = strings.Repeat("a", 64)
+	})
+	resign(t, &diagnosticOnly)
+
+	if err := ValidateAcceptanceManifest(manifest, diagnosticOnly, AcceptanceValidationOptions{
+		AllowIncomplete: true,
+		ManifestPath:    manifestPath,
+	}); err != nil {
+		t.Fatalf("ValidateAcceptanceManifest(diagnostic-only drift) = %v, want diagnostic helper drift ignored", err)
+	}
+}
+
+func TestAcceptanceProjectionFailsClosedForUnauthorizedSurfaceRebindChanges(t *testing.T) {
+	manifestPath := "retained/p0-20260725T084200Z-20260725T144200Z/acceptance.json"
+	manifest := readAcceptanceManifestForTest(t, manifestPath)
+
+	tests := map[string]struct {
+		mutate func(*Inventory)
+		want   string
+	}{
+		"unlisted helper removal": {
+			mutate: func(inventory *Inventory) {
+				removeSurface(inventory, ".github/workflows/scripts/docs-diff.test.js")
+			},
+			want: "acceptance inventory digest mismatch",
+		},
+		"missing Go replacement": {
+			mutate: func(inventory *Inventory) {
+				removeSurface(inventory, "internal/cipolicy/renovate_retry_test.go")
+			},
+			want: "replacement internal/cipolicy/renovate_retry_test.go is missing",
+		},
+		"mismatched Go replacement": {
+			mutate: func(inventory *Inventory) {
+				mutateSurface(t, inventory, "internal/cipolicy/libghostty_policy_test.go", func(surface *Surface) {
+					surface.SHA256 = strings.Repeat("b", 64)
+				})
+			},
+			want: "replacement internal/cipolicy/libghostty_policy_test.go does not match approved identity",
+		},
+		"retired JS helper reappears": {
+			mutate: func(inventory *Inventory) {
+				inventory.Surfaces = append(inventory.Surfaces, p0RetiredWorkflowContractSurface(
+					".github/workflows/scripts/renovate-retry.test.js",
+					"4d5aa6adf0cf5ae872a2c8bb82cca62a1715b2adf762db484a04c2e4c634d1a7",
+				))
+			},
+			want: "retired JS policy surface .github/workflows/scripts/renovate-retry.test.js is still present",
+		},
+		"ci workflow file drift": {
+			mutate: func(inventory *Inventory) {
+				for index := range inventory.Workflows {
+					if inventory.Workflows[index].ID == "ci" {
+						inventory.Workflows[index].FileSHA256 = strings.Repeat("c", 64)
+						return
+					}
+				}
+
+				t.Fatal("ci workflow not found")
+			},
+			want: "diagnostic shadow summary workflow file .github/workflows/ci.yml does not match approved identity",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			inventory := cloneInventory(t, loadInventory(t))
+			test.mutate(&inventory)
+			resign(t, &inventory)
+
+			err := ValidateAcceptanceManifest(manifest, inventory, AcceptanceValidationOptions{
+				AllowIncomplete: true,
+				ManifestPath:    manifestPath,
+			})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ValidateAcceptanceManifest() = %v, want containing %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestAcceptanceProjectionFailsClosedForAuthoritativeInventoryChanges(t *testing.T) {
+	manifestPath := "retained/p0-20260725T084200Z-20260725T144200Z/acceptance.json"
+	manifest := readAcceptanceManifestForTest(t, manifestPath)
+
+	tests := map[string]struct {
+		mutate func(*Inventory)
+		want   string
+	}{
+		"shadow summary cannot become required": {
+			mutate: func(inventory *Inventory) {
+				for workflowIndex := range inventory.Workflows {
+					if inventory.Workflows[workflowIndex].ID != "ci" {
+						continue
+					}
+
+					for jobIndex := range inventory.Workflows[workflowIndex].Jobs {
+						if inventory.Workflows[workflowIndex].Jobs[jobIndex].ID == "ci-shadow-summary" {
+							inventory.Workflows[workflowIndex].Jobs[jobIndex].Requiredness = "required"
+							return
+						}
+					}
+				}
+			},
+			want: "required context/job count mismatch",
+		},
+		"required contexts still invalidate historical acceptance": {
+			mutate: func(inventory *Inventory) {
+				inventory.RequiredContexts = append(inventory.RequiredContexts, "CI shadow summary")
+			},
+			want: "required context/job count mismatch",
+		},
+		"authoritative job changes still invalidate historical acceptance": {
+			mutate: func(inventory *Inventory) {
+				for workflowIndex := range inventory.Workflows {
+					if inventory.Workflows[workflowIndex].ID != "ci" {
+						continue
+					}
+
+					for jobIndex := range inventory.Workflows[workflowIndex].Jobs {
+						if inventory.Workflows[workflowIndex].Jobs[jobIndex].ID == "test" {
+							inventory.Workflows[workflowIndex].Jobs[jobIndex].ProofType = "soft"
+							return
+						}
+					}
+				}
+			},
+			want: "acceptance inventory digest mismatch",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			inventory := cloneInventory(t, loadInventory(t))
+			test.mutate(&inventory)
+			resign(t, &inventory)
+
+			err := ValidateAcceptanceManifest(manifest, inventory, AcceptanceValidationOptions{
+				AllowIncomplete: true,
+				ManifestPath:    manifestPath,
+			})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ValidateAcceptanceManifest() = %v, want containing %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestAcceptanceManifestRejectsClosedWorldFailures(t *testing.T) {
 	const manifestPath = "retained/p0-20260725T084200Z-20260725T144200Z/acceptance.json"
 
@@ -360,14 +535,20 @@ func TestCommittedP0AcceptanceManifests(t *testing.T) {
 		t.Fatalf("original incomplete manifest structure = %v", err)
 	}
 
-	if err := ValidateAcceptanceManifest(original, inventory, AcceptanceValidationOptions{
+	err := ValidateAcceptanceManifest(original, inventory, AcceptanceValidationOptions{
 		ManifestPath: "retained/p0-20260725T060500Z-20260725T120500Z/incomplete-acceptance.json",
-	}); err == nil ||
-		!strings.Contains(err.Error(), "provider timestamp anomaly") {
+	})
+	if err == nil || !strings.Contains(err.Error(), "provider timestamp anomaly") {
 		t.Fatalf("original strict acceptance = %v, want timestamp-anomaly rejection", err)
 	}
 
 	replacement := readAcceptanceManifestForTest(t, "retained/p0-20260725T084200Z-20260725T144200Z/acceptance.json")
+
+	replacementInventory, err := acceptanceInventoryForManifest(replacement, inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if err := ValidateAcceptanceManifest(replacement, inventory, AcceptanceValidationOptions{
 		AllowIncomplete: true,
 		ManifestPath:    "retained/p0-20260725T084200Z-20260725T144200Z/acceptance.json",
@@ -375,7 +556,7 @@ func TestCommittedP0AcceptanceManifests(t *testing.T) {
 		t.Fatalf("replacement pending manifest structure = %v", err)
 	}
 
-	err := ValidateAcceptanceManifest(replacement, inventory, AcceptanceValidationOptions{
+	err = ValidateAcceptanceManifest(replacement, inventory, AcceptanceValidationOptions{
 		ManifestPath: "retained/p0-20260725T084200Z-20260725T144200Z/acceptance.json",
 	})
 	if replacement.Result.P0ExitSatisfied {
@@ -396,7 +577,7 @@ func TestCommittedP0AcceptanceManifests(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := evidence.Replay(inventory); err != nil {
+	if err := evidence.Replay(replacementInventory); err != nil {
 		t.Fatalf("replacement repo-owned evidence replay = %v", err)
 	}
 }
@@ -531,6 +712,35 @@ func readAcceptanceManifestForTest(t *testing.T, path string) AcceptanceManifest
 	return manifest
 }
 
+func mutateSurface(t *testing.T, inventory *Inventory, path string, mutate func(*Surface)) {
+	t.Helper()
+
+	for index := range inventory.Surfaces {
+		if inventory.Surfaces[index].Path != path {
+			continue
+		}
+
+		mutate(&inventory.Surfaces[index])
+
+		return
+	}
+
+	t.Fatalf("surface %s not found", path)
+}
+
+func removeSurface(inventory *Inventory, path string) {
+	filtered := inventory.Surfaces[:0]
+	for _, surface := range inventory.Surfaces {
+		if surface.Path == path {
+			continue
+		}
+
+		filtered = append(filtered, surface)
+	}
+
+	inventory.Surfaces = filtered
+}
+
 func readCommittedReplacementPackage(t *testing.T) (AcceptanceManifest, P0WindowEvidenceBundle, Evidence) {
 	t.Helper()
 
@@ -628,6 +838,12 @@ func writeJSONForTest(t *testing.T, path string, value any) {
 
 func signedIncompleteAcceptanceManifest(t *testing.T, inventory Inventory) AcceptanceManifest {
 	t.Helper()
+
+	if projected, ok, err := p0DiagnosticShadowSummaryCompatibleInventory(inventory); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		inventory = projected
+	}
 
 	modeMatrix, err := BuildModeMatrix(inventory)
 	if err != nil {

@@ -402,7 +402,7 @@ Expected files may include:
 - `.github/workflows/libghostty-native.yml`;
 - `.github/workflows/dev-release.yml`;
 - `.github/workflows/goreleaser.yml`;
-- `.github/workflows/scripts/libghostty-policy.test.js`;
+- `internal/cipolicy/libghostty_policy_test.go`;
 - `scripts/libghostty-native.sh`;
 - `scripts/libghostty-linux-archive.py`;
 - release and macOS service helper docs/tests when touched.

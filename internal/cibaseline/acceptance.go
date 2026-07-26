@@ -19,6 +19,9 @@ const AcceptanceSchemaVersion = 1
 const p0CollectedInventoryDigest = "5b03df0aa114f60b8e6d0883886fe609440bb20c1cc7ca3681a19d28f64cd9cd"
 const p0ReboundInventoryDigest = "90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21"
 const p0ModeMatrixDigest = "ad551fcf9d7a5fe1f96a88fd25644ca687b88e67a82cc3b4a1ef73f8399ac63e"
+const p0ReboundCIWorkflowSHA256 = "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9"
+const p0CurrentCIWorkflowSHA256 = "79377ba8a56ae2c666a92c95c3015d7a2872aaeea2e9a7970c931be1451e8b62"
+const diagnosticShadowSummaryCoordinate = "ci/ci-shadow-summary"
 const p0InventoryRebindSource = "origin/main 549b13e chore: cache docker lint runs"
 const p0InventoryRebindDerivation = "canonical inventory JSON is identical after deleting digest and replacing policy_surfaces[path=Makefile].sha256 with <ignored>"
 const p0OldMakefileSHA256 = "5e73ab72b853251ddcd27c599c4524961e723aa426409130ead7847360906384"
@@ -27,7 +30,74 @@ const p0SignOffApprovalSource = "graith message msg_e9c209629cb97781"
 
 var hexDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
+type p0ReplacementSurface struct {
+	Path   string
+	SHA256 string
+}
+
+type p0RetiredJSSurfaceRebind struct {
+	retired      Surface
+	replacements []p0ReplacementSurface
+}
+
 var (
+	diagnosticShadowSummarySurfaces = map[string]bool{
+		"cmd/cipolicy/main.go":                     true,
+		"cmd/cipolicy/main_test.go":                true,
+		"internal/cipolicy/io.go":                  true,
+		"internal/cipolicy/shadow_summary.go":      true,
+		"internal/cipolicy/shadow_summary_test.go": true,
+	}
+
+	p0RetiredJSSurfaceRebinds = []p0RetiredJSSurfaceRebind{
+		{
+			retired: p0RetiredWorkflowContractSurface(
+				".github/workflows/scripts/libghostty-policy.test.js",
+				"54365a17cdfa82450e44611b8fbcb94710b947912321fc21a93e7c9ee7df9ccb",
+			),
+			replacements: []p0ReplacementSurface{
+				{Path: "internal/cipolicy/libghostty_policy_test.go", SHA256: "a9996e0020535d53bf657c7fe23f419040db703efcbffc6496a4847f8902e609"},
+			},
+		},
+		{
+			retired: p0RetiredWorkflowContractSurface(
+				".github/workflows/scripts/regen-auth.test.js",
+				"31c2ee166b3373c50f75e5405765b33e92812d4d6743d45fc9c788e61e92302a",
+			),
+			replacements: []p0ReplacementSurface{
+				{Path: "internal/cipolicy/p11_js_surface.go", SHA256: "b3ed3b3f38774fb279c091c6d7818d56b6d0b173918ab8a22d79200867c9ace2"},
+				{Path: "internal/cipolicy/p11_js_surface_test.go", SHA256: "209aa2d61d147623ef9a01cd007110d3ab7afc715d28a60998a8da32568573db"},
+			},
+		},
+		{
+			retired: p0RetiredWorkflowContractSurface(
+				".github/workflows/scripts/renovate-retry.test.js",
+				"4d5aa6adf0cf5ae872a2c8bb82cca62a1715b2adf762db484a04c2e4c634d1a7",
+			),
+			replacements: []p0ReplacementSurface{
+				{Path: "internal/cipolicy/renovate_retry_test.go", SHA256: "efb8ecb70a985a2e5fc55f5281bf909a47d1a267374fb22a3112ced5f80da21e"},
+			},
+		},
+		{
+			retired: p0RetiredWorkflowContractSurface(
+				".github/workflows/scripts/shellcheck-policy.test.js",
+				"ca5c5203c4a0d823a4b4ffa099255e97fe0f8e162e126526bf780e1092f67c6f",
+			),
+			replacements: []p0ReplacementSurface{
+				{Path: "internal/cipolicy/workflow_lint_policy_test.go", SHA256: "6acf0a14aef1141810ff05a3822956c1dbfc89227be3c1a7f22abc1f197766fa"},
+			},
+		},
+		{
+			retired: p0RetiredWorkflowContractSurface(
+				".github/workflows/scripts/workflow-lint-supply-chain.test.js",
+				"e1e5cc55ab72af0734f119304ab8044a04925166871835f2cb0a46bfdb9ed1d8",
+			),
+			replacements: []p0ReplacementSurface{
+				{Path: "internal/cipolicy/workflow_lint_policy_test.go", SHA256: "6acf0a14aef1141810ff05a3822956c1dbfc89227be3c1a7f22abc1f197766fa"},
+			},
+		},
+	}
+
 	approvedP0Requests = map[string]struct {
 		since time.Time
 		until time.Time
@@ -42,6 +112,19 @@ var (
 		},
 	}
 )
+
+func p0RetiredWorkflowContractSurface(path, sha256 string) Surface {
+	return Surface{
+		Path:        path,
+		Owner:       "graith-maintainers",
+		Kind:        "workflow-contract-test",
+		GitMode:     "100644",
+		SHA256:      sha256,
+		Contract:    "preserve the current workflow trust and behavior assertions until replaced by semantic Go contracts",
+		Disposition: "grandfathered",
+		Retirement:  "owned replacement has equivalent executable coverage and zero unexplained replay disagreement",
+	}
+}
 
 type AcceptanceValidationOptions struct {
 	AllowIncomplete bool
@@ -314,6 +397,11 @@ func ValidateAcceptanceManifest(manifest AcceptanceManifest, inventory Inventory
 		return fmt.Errorf("validate inventory for acceptance: %w", err)
 	}
 
+	acceptanceInventory, err := acceptanceInventoryForManifest(manifest, inventory)
+	if err != nil {
+		return err
+	}
+
 	signed, err := FinalizeAcceptanceManifest(manifest)
 	if err != nil {
 		return err
@@ -327,21 +415,21 @@ func ValidateAcceptanceManifest(manifest AcceptanceManifest, inventory Inventory
 		return err
 	}
 
-	if manifest.InventoryDigest == "" || manifest.InventoryDigest != inventory.Digest {
-		return fmt.Errorf("acceptance inventory digest mismatch: got %s want %s", manifest.InventoryDigest, inventory.Digest)
+	if manifest.InventoryDigest == "" || manifest.InventoryDigest != acceptanceInventory.Digest {
+		return fmt.Errorf("acceptance inventory digest mismatch: got %s want %s", manifest.InventoryDigest, acceptanceInventory.Digest)
 	}
 
-	latencyPolicies, err := validateLatencyPolicies(manifest.LatencyPolicies, inventory, manifest.CollectionRequest.RequestedUntil)
+	latencyPolicies, err := validateLatencyPolicies(manifest.LatencyPolicies, acceptanceInventory, manifest.CollectionRequest.RequestedUntil)
 	if err != nil {
 		return err
 	}
 
-	modeRows, matrixDigest, err := validateModeMatrix(manifest.ModeMatrix, inventory)
+	modeRows, matrixDigest, err := validateModeMatrix(manifest.ModeMatrix, acceptanceInventory)
 	if err != nil {
 		return err
 	}
 
-	if err := validateInventoryRebind(manifest.InventoryRebind, inventory, matrixDigest, manifest.CollectionRequest.ID); err != nil {
+	if err := validateInventoryRebind(manifest.InventoryRebind, acceptanceInventory, matrixDigest, manifest.CollectionRequest.ID); err != nil {
 		return err
 	}
 
@@ -384,7 +472,7 @@ func ValidateAcceptanceManifest(manifest AcceptanceManifest, inventory Inventory
 	}
 
 	if opts.ManifestPath != "" {
-		if err := validateRetainedEvidencePackage(manifest, inventory, opts.ManifestPath); err != nil {
+		if err := validateRetainedEvidencePackage(manifest, acceptanceInventory, opts.ManifestPath); err != nil {
 			return err
 		}
 	}
@@ -394,6 +482,263 @@ func ValidateAcceptanceManifest(manifest AcceptanceManifest, inventory Inventory
 	}
 
 	return nil
+}
+
+func acceptanceInventoryForManifest(manifest AcceptanceManifest, inventory Inventory) (Inventory, error) {
+	if manifest.InventoryDigest == "" || manifest.InventoryDigest == inventory.Digest {
+		return inventory, nil
+	}
+
+	projected, ok, err := p0DiagnosticShadowSummaryCompatibleInventory(inventory)
+	if err != nil {
+		return Inventory{}, err
+	}
+
+	if ok && manifest.InventoryDigest == projected.Digest {
+		return projected, nil
+	}
+
+	return inventory, nil
+}
+
+func p0DiagnosticShadowSummaryCompatibleInventory(inventory Inventory) (Inventory, bool, error) {
+	projected, err := cloneAcceptanceInventory(inventory)
+	if err != nil {
+		return Inventory{}, false, err
+	}
+
+	removedJob := false
+
+	for workflowIndex := range projected.Workflows {
+		workflow := &projected.Workflows[workflowIndex]
+		if workflow.ID != "ci" {
+			continue
+		}
+
+		filtered := workflow.Jobs[:0]
+		for _, job := range workflow.Jobs {
+			if job.ID != "ci-shadow-summary" {
+				filtered = append(filtered, job)
+				continue
+			}
+
+			if !isDiagnosticShadowSummaryJob(job) {
+				return Inventory{}, false, errors.New("diagnostic shadow summary job is no longer a soft read-only diagnostic")
+			}
+
+			removedJob = true
+		}
+
+		if workflow.FileSHA256 != p0CurrentCIWorkflowSHA256 {
+			return Inventory{}, false, fmt.Errorf("diagnostic shadow summary workflow file %s does not match approved identity", workflow.Path)
+		}
+
+		workflow.Jobs = filtered
+		workflow.FileSHA256 = p0ReboundCIWorkflowSHA256
+	}
+
+	if !removedJob {
+		return Inventory{}, false, nil
+	}
+
+	removedMapping := false
+	filteredMappings := projected.Mappings[:0]
+
+	for _, mapping := range projected.Mappings {
+		if mapping.LegacyCoordinate != diagnosticShadowSummaryCoordinate {
+			filteredMappings = append(filteredMappings, mapping)
+			continue
+		}
+
+		if mapping.NewMode != "legacy/ci/ci-shadow-summary" ||
+			mapping.Owner != "graith-maintainers" ||
+			mapping.SkipSemantics != "github-skipped-is-distinct-from-passed" ||
+			mapping.NewObligation {
+			return Inventory{}, false, errors.New("diagnostic shadow summary mapping is no longer diagnostic")
+		}
+
+		removedMapping = true
+	}
+
+	if !removedMapping {
+		return Inventory{}, false, errors.New("diagnostic shadow summary mapping is missing")
+	}
+
+	projected.Mappings = filteredMappings
+
+	if err := applyP0RetiredJSSurfaceRebind(&projected); err != nil {
+		return Inventory{}, false, err
+	}
+
+	removeDiagnosticShadowSummarySurfaces(&projected)
+
+	if err := projected.setDigest(); err != nil {
+		return Inventory{}, false, err
+	}
+
+	if err := projected.Validate(); err != nil {
+		return Inventory{}, false, fmt.Errorf("validate diagnostic-shadow projection: %w", err)
+	}
+
+	return projected, true, nil
+}
+
+func applyP0RetiredJSSurfaceRebind(inventory *Inventory) error {
+	surfaces := make(map[string]Surface, len(inventory.Surfaces))
+	for _, surface := range inventory.Surfaces {
+		surfaces[surface.Path] = surface
+	}
+
+	replacementPaths := map[string]bool{}
+
+	var retired []Surface
+
+	for _, rebind := range p0RetiredJSSurfaceRebinds {
+		if _, exists := surfaces[rebind.retired.Path]; exists {
+			return fmt.Errorf("retired JS policy surface %s is still present", rebind.retired.Path)
+		}
+
+		retired = append(retired, rebind.retired)
+
+		for _, replacement := range rebind.replacements {
+			current, exists := surfaces[replacement.Path]
+			if !exists {
+				return fmt.Errorf("retired JS policy surface %s replacement %s is missing", rebind.retired.Path, replacement.Path)
+			}
+
+			expected, err := expectedP0ReplacementSurface(replacement)
+			if err != nil {
+				return err
+			}
+
+			if current != expected {
+				return fmt.Errorf("retired JS policy surface %s replacement %s does not match approved identity", rebind.retired.Path, replacement.Path)
+			}
+
+			replacementPaths[replacement.Path] = true
+		}
+	}
+
+	filtered := inventory.Surfaces[:0]
+	for _, surface := range inventory.Surfaces {
+		if replacementPaths[surface.Path] {
+			continue
+		}
+
+		filtered = append(filtered, surface)
+	}
+
+	inventory.Surfaces = append(filtered, retired...)
+	sort.Slice(inventory.Surfaces, func(i, j int) bool { return inventory.Surfaces[i].Path < inventory.Surfaces[j].Path })
+
+	return nil
+}
+
+func expectedP0ReplacementSurface(replacement p0ReplacementSurface) (Surface, error) {
+	if !hexDigestPattern.MatchString(replacement.SHA256) {
+		return Surface{}, fmt.Errorf("retired JS replacement %s has invalid approved SHA-256 %q", replacement.Path, replacement.SHA256)
+	}
+
+	metadata, exists := ciGoPolicySurfaces[replacement.Path]
+	if !exists {
+		return Surface{}, fmt.Errorf("retired JS replacement %s is not an inventoried Go policy surface", replacement.Path)
+	}
+
+	return Surface{
+		Path:        replacement.Path,
+		Owner:       "graith-maintainers",
+		Kind:        metadata.kind,
+		GitMode:     "100644",
+		SHA256:      replacement.SHA256,
+		Contract:    metadata.contract,
+		Disposition: "grandfathered",
+		Retirement:  metadata.retirement,
+	}, nil
+}
+
+func removeDiagnosticShadowSummarySurfaces(inventory *Inventory) {
+	filtered := inventory.Surfaces[:0]
+	for _, surface := range inventory.Surfaces {
+		if diagnosticShadowSummarySurfaces[surface.Path] {
+			continue
+		}
+
+		filtered = append(filtered, surface)
+	}
+
+	inventory.Surfaces = filtered
+}
+
+func cloneAcceptanceInventory(inventory Inventory) (Inventory, error) {
+	data, err := json.Marshal(inventory)
+	if err != nil {
+		return Inventory{}, err
+	}
+
+	var clone Inventory
+	if err := json.Unmarshal(data, &clone); err != nil {
+		return Inventory{}, err
+	}
+
+	return clone, nil
+}
+
+func isDiagnosticShadowSummaryJob(job Job) bool {
+	if job.ID != "ci-shadow-summary" ||
+		job.Name != "CI shadow summary" ||
+		job.Capability != "legacy-proof/ci/ci-shadow-summary" ||
+		job.Owner != "graith-maintainers" ||
+		job.ProofType != "soft" ||
+		job.Requiredness != "soft" ||
+		job.SkipSemantics != "github-skipped-is-distinct-from-passed" ||
+		job.Condition != "${{ always() && !cancelled() }}" ||
+		!reflect.DeepEqual(job.Coordinates, []string{diagnosticShadowSummaryCoordinate}) ||
+		!reflect.DeepEqual(job.GitHubNames, []string{"CI shadow summary"}) ||
+		!reflect.DeepEqual(job.ActionPins, []string{
+			"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+			"actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+		}) ||
+		len(job.Matrix) != 0 ||
+		len(job.ArtifactActions) != 0 {
+		return false
+	}
+
+	var runner string
+	if err := json.Unmarshal(job.Runner, &runner); err != nil || runner != "ubuntu-latest" {
+		return false
+	}
+
+	var permissions map[string]string
+	if err := json.Unmarshal(job.Permissions, &permissions); err != nil ||
+		!reflect.DeepEqual(permissions, map[string]string{"contents": "read"}) {
+		return false
+	}
+
+	if string(job.Environment) != "null" {
+		return false
+	}
+
+	return isDiagnosticShadowSetupGoObservation(job.Toolchains) &&
+		isDiagnosticShadowSetupGoObservation(job.CacheActions)
+}
+
+func isDiagnosticShadowSetupGoObservation(observations []Observation) bool {
+	if len(observations) != 1 {
+		return false
+	}
+
+	observation := observations[0]
+	if observation.Action != "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e" ||
+		string(observation.Name) != "null" {
+		return false
+	}
+
+	var with map[string]string
+	if err := json.Unmarshal(observation.With, &with); err != nil {
+		return false
+	}
+
+	return reflect.DeepEqual(with, map[string]string{"go-version-file": "go.mod"})
 }
 
 func validateCollectionRequest(request CollectionRequestManifest) error {

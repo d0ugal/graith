@@ -37,6 +37,32 @@ func ReadInventory(path string) (cibaseline.Inventory, error) {
 	return inventory, nil
 }
 
+func ReadRunPlan(path string) (RunPlan, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return RunPlan{}, err
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+
+	var plan RunPlan
+	if err := decoder.Decode(&plan); err != nil {
+		return RunPlan{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return RunPlan{}, fmt.Errorf("decode %s: trailing JSON value", path)
+		}
+
+		return RunPlan{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+
+	return plan, nil
+}
+
 func GenerateFromInventoryPath(path string) (Manifest, error) {
 	inventory, err := ReadInventory(path)
 	if err != nil {
